@@ -1,0 +1,11 @@
+[package]
+name = "hernees-server"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "hernees-server"
+path = "src/main.rs"
+
+[dependencies]
+hn-proto.workspace = true

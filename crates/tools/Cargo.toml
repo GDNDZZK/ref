@@ -1,0 +1,26 @@
+[package]
+name = "hn-tools"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+hn-proto.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+regex.workspace = true
+ignore.workspace = true
+globset.workspace = true
+xxhash-rust.workspace = true
+base64.workspace = true
+similar.workspace = true
+libc.workspace = true
+tracing.workspace = true
+grep-regex = "0.1"
+grep-searcher = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
