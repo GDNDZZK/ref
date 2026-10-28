@@ -1,0 +1,20 @@
+[package]
+name = "ref-tools"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ref-proto.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+regex.workspace = true
+ignore.workspace = true
+globset.workspace = true
+similar.workspace = true
+xxhash-rust.workspace = true
+base64.workspace = true
+libc.workspace = true
+tracing.workspace = true

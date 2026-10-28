@@ -1,0 +1,15 @@
+[package]
+name = "ref-mcp"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ref-proto.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures-util.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true

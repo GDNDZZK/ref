@@ -1,0 +1,23 @@
+[package]
+name = "ref-tui"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "ref"
+path = "src/main.rs"
+
+[dependencies]
+ref-proto.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+futures-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+chrono.workspace = true
+dirs.workspace = true
+libc.workspace = true
+unicode-width.workspace = true
+base64.workspace = true

@@ -1,0 +1,31 @@
+[package]
+name = "ref-server"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "ref-server"
+path = "src/main.rs"
+
+[dependencies]
+ref-proto.workspace = true
+ref-llm.workspace = true
+ref-tools.workspace = true
+ref-mcp.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tokio-tungstenite.workspace = true
+futures-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+chrono.workspace = true
+rand.workspace = true
+regex.workspace = true
+dirs.workspace = true
+globset.workspace = true
+libc.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+reqwest.workspace = true

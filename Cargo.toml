@@ -1,0 +1,44 @@
+[workspace]
+resolver = "3"
+members = ["crates/proto", "crates/config", "crates/llm", "crates/tools", "crates/mcp", "crates/server", "crates/tui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0"
+
+[workspace.dependencies]
+ref-proto = { path = "crates/proto" }
+ref-llm = { path = "crates/llm" }
+ref-config = { path = "crates/config" }
+ref-tools = { path = "crates/tools" }
+ref-mcp = { path = "crates/mcp" }
+tokio = { version = "1.54", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+tokio-tungstenite = "0.30"
+futures-util = "0.3"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream", "json", "http2"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+anyhow = "1"
+thiserror = "2"
+clap = { version = "4.6", features = ["derive"] }
+chrono = "0.4"
+base64 = "0.22"
+rand = "0.9"
+regex = "1"
+dirs = "6"
+ignore = "0.4"
+globset = "0.4"
+similar = "2"
+xxhash-rust = { version = "0.8", features = ["xxh32"] }
+unicode-width = "0.2"
+libc = "0.2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+strip = true
