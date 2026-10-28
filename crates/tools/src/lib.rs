@@ -17,6 +17,8 @@ mod grep;
 mod find;
 mod bash;
 pub mod util;
+#[cfg(test)]
+mod test_support;
 
 pub use hashline::EditStore;
 

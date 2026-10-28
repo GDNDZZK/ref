@@ -6,9 +6,15 @@
 //!   3. `$OPENCODE_CONFIG`, `$HERNEES_CONFIG` (explicit files)
 //!   4. project walk from git root (or `/`-most ancestor) down to cwd: `opencode.json(c)`,
 //!      `.opencode/opencode.json(c)`, `hernees.json(c)`, `.hernees/hernees.json(c)` — nearest wins.
+//!
 //! JSONC (comments + trailing commas) supported. `{env:VAR}` and `{file:path}` substituted.
 //! Agents also load from `{agent,agents}/*.md` in `~/.config/{opencode,hernees}/` and project
-//! `.opencode/`, `.hernees/` dirs (frontmatter fields + body prompt).
+//! `.opencode/`, `.hernees/` dirs (frontmatter fields + body prompt); `{mode,modes}/*.md` are
+//! primary agents; `{command,commands}/**/*.md` are commands (body = template).
+//!
+//! hernees-only keys: top-level `delay: {tool-glob: seconds}`, `compaction: {ratio, auto}`,
+//! `retry: {max_delay, initial_delay}`; agent `spawnable`, `manage_sessions`, `delay`;
+//! model `limit.compact` (absolute compaction threshold in tokens).
 
 use hn_llm::ModelSpec;
 use hn_proto::{AgentInfo, CommandInfo, ModelInfo, ModelRef};
@@ -18,14 +24,19 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+mod instructions;
+pub mod jsonc;
 mod load;
+pub mod markdown;
 mod model;
 mod permission;
-mod instructions;
 mod skills;
+#[cfg(test)]
+mod tests_load;
 
-pub use permission::{Action, PermissionRules};
-pub use skills::Skill;
+pub use model::Catalog;
+pub use permission::{wildcard, Action, PermissionRules};
+pub use skills::{skill_content, skills_prompt, Skill};
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ProviderConfig {
@@ -284,6 +295,11 @@ pub struct Config {
     pub warnings: Vec<String>,
     /// Project root used for discovery (git root or cwd).
     pub root: PathBuf,
+    /// models.dev catalog used to fill model metadata (empty if unavailable).
+    pub catalog: std::sync::Arc<Catalog>,
+    /// Pre-computed per-agent permission rules (`tools` + `permission`).
+    pub agent_permission: IndexMap<String, PermissionRules>,
+    pub(crate) dirs: load::Dirs,
 }
 
 impl Config {
@@ -310,6 +326,19 @@ impl Config {
 
     pub fn agent(&self, name: &str) -> Option<&AgentConfig> {
         self.agents.get(name)
+    }
+
+    pub fn skill(&self, name: &str) -> Option<&Skill> {
+        self.skills.iter().find(|s| s.name == name)
+    }
+
+    /// Agent names that may be spawned via `create_session`.
+    pub fn spawnable_agents(&self) -> Vec<&str> {
+        self.agents
+            .iter()
+            .filter(|(_, a)| !a.disable.unwrap_or(false) && agent_spawnable(a))
+            .map(|(n, _)| n.as_str())
+            .collect()
     }
 
     pub fn agent_infos(&self) -> Vec<AgentInfo> {
@@ -393,4 +422,34 @@ fn xdg_config() -> PathBuf {
         .map(PathBuf::from)
         .or_else(|| dirs::home_dir().map(|h| h.join(".config")))
         .unwrap_or_else(|| PathBuf::from("/tmp"))
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use std::path::{Path, PathBuf};
+
+    /// Unique temp dir removed on drop.
+    pub struct TempDir(PathBuf);
+    impl TempDir {
+        pub fn new(tag: &str) -> TempDir {
+            use std::sync::atomic::{AtomicU32, Ordering};
+            static N: AtomicU32 = AtomicU32::new(0);
+            let p = std::env::temp_dir().join(format!(
+                "hn-config-{tag}-{}-{}",
+                std::process::id(),
+                N.fetch_add(1, Ordering::Relaxed)
+            ));
+            let _ = std::fs::remove_dir_all(&p);
+            std::fs::create_dir_all(&p).unwrap();
+            TempDir(std::fs::canonicalize(&p).unwrap())
+        }
+        pub fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
 }
