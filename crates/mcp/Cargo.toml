@@ -14,3 +14,10 @@ serde_json.workspace = true
 reqwest.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
+indexmap = { version = "2", features = ["serde"] }
+libc.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+json5.workspace = true
+dirs.workspace = true

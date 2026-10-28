@@ -6,10 +6,12 @@ use serde_json::Value;
 use std::sync::Arc;
 
 mod client;
-mod stdio;
 mod http;
+mod rpc;
+mod sse;
+mod stdio;
 
-pub use client::McpClient;
+pub use client::{McpClient, DEFAULT_TIMEOUT_MS, PROTOCOL_VERSION};
 
 #[derive(Debug, Clone)]
 pub struct McpTool {
@@ -40,7 +42,9 @@ pub struct McpCallResult {
     pub is_error: bool,
 }
 
-/// Connect to one server (initialize + tools/list). `timeout` default 30s.
+/// Connect to one server (spawn/connect + initialize + tools/list), bounded by
+/// `cfg.timeout()` ms (default 30s). Remote servers use Streamable HTTP, falling back to
+/// legacy HTTP+SSE when the POST is rejected with a 4xx (other than 401/403/429).
 pub async fn connect(name: &str, cfg: &McpConfig, cwd: &std::path::Path) -> anyhow::Result<Arc<McpClient>> {
     client::connect(name, cfg, cwd).await
 }
