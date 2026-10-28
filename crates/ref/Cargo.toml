@@ -1,0 +1,7 @@
+[package]
+name = "ref"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ref-proto.workspace = true
