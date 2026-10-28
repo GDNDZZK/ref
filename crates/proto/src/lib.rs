@@ -9,6 +9,46 @@ use serde_json::Value;
 
 pub const PROTOCOL_VERSION: u32 = 1;
 
+fn home() -> std::path::PathBuf {
+    std::env::var_os("HOME").map(Into::into).unwrap_or_else(|| "/tmp".into())
+}
+
+/// Runtime state dir: `$REF_STATE_DIR` | `$XDG_STATE_HOME/ref` | `~/.local/state/ref`.
+/// Instance files live in `<state_dir>/instances/<pid>.json`.
+pub fn state_dir() -> std::path::PathBuf {
+    if let Some(d) = std::env::var_os("REF_STATE_DIR") {
+        return d.into();
+    }
+    match std::env::var_os("XDG_STATE_HOME") {
+        Some(x) if !x.is_empty() => std::path::PathBuf::from(x).join("ref"),
+        _ => home().join(".local/state/ref"),
+    }
+}
+
+/// Persistent data dir: `$REF_DATA_DIR` | `$XDG_DATA_HOME/ref` | `~/.local/share/ref`.
+/// Sessions live in `<data_dir>/sessions/<id>.json`.
+pub fn data_dir() -> std::path::PathBuf {
+    if let Some(d) = std::env::var_os("REF_DATA_DIR") {
+        return d.into();
+    }
+    match std::env::var_os("XDG_DATA_HOME") {
+        Some(x) if !x.is_empty() => std::path::PathBuf::from(x).join("ref"),
+        _ => home().join(".local/share/ref"),
+    }
+}
+
+pub fn instances_dir() -> std::path::PathBuf {
+    state_dir().join("instances")
+}
+
+/// Epoch milliseconds now.
+pub fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 // ---------------------------------------------------------------------------
 // Instance discovery
 // ---------------------------------------------------------------------------
@@ -461,6 +501,23 @@ pub enum Request {
     Delete { session_id: String },
     /// Expand a user-defined command into prompt text. -> `{text}`
     ExpandCommand { name: String, args: String, cwd: String },
+    /// Fuzzy file search for `@` mentions (gitignore-aware). -> `{files: [String]}` (relative paths, dirs end with `/`)
+    ListFiles {
+        cwd: String,
+        query: String,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    /// Rotate the session to the next variant of its model (or a given one). -> `{session: SessionInfo}`
+    SetVariant {
+        session_id: String,
+        #[serde(default)]
+        variant: Option<String>,
+    },
+    /// Write the transcript as markdown to `path` (server side). -> `{path}`
+    Export { session_id: String, path: String },
+    /// Shut the backend down (used by `ref-server --stop`).
+    Shutdown,
     Ping,
 }
 
