@@ -1,0 +1,16 @@
+[package]
+name = "hn-mcp"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+hn-proto.workspace = true
+hn-config.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+anyhow.workspace = true
+tracing.workspace = true

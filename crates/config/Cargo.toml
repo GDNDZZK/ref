@@ -1,0 +1,19 @@
+[package]
+name = "hn-config"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+hn-proto.workspace = true
+hn-llm.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+json5.workspace = true
+anyhow.workspace = true
+regex.workspace = true
+globset.workspace = true
+ignore.workspace = true
+dirs.workspace = true
+tracing.workspace = true
+indexmap = { version = "2", features = ["serde"] }
