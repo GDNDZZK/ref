@@ -1,0 +1,27 @@
+[package]
+name = "ref-tools"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ref-proto.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+parking_lot.workspace = true
+xxhash-rust.workspace = true
+ignore.workspace = true
+globset.workspace = true
+grep-regex.workspace = true
+grep-searcher.workspace = true
+grep-matcher.workspace = true
+regex.workspace = true
+base64.workspace = true
+similar.workspace = true
+libc.workspace = true
+dirs.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

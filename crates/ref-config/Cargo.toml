@@ -1,0 +1,18 @@
+[package]
+name = "ref-config"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ref-proto.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+dirs.workspace = true
+regex.workspace = true
+globset.workspace = true
+serde_yaml.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
