@@ -491,7 +491,8 @@ pub enum ClientMsg {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMsg {
-    Welcome { instance: InstanceInfo, catalog: Catalog, protocol: u32 },
+    /// Reply to Hello. `catalog` is computed for the client's cwd.
+    Welcome { instance: InstanceInfo, catalog: Catalog, protocol: u32, client_id: String },
     Catalog { catalog: Catalog },
     /// Reply to ListSessions and pushed on every change afterwards.
     SessionList { req: u64, sessions: Vec<SessionInfo> },
@@ -509,8 +510,12 @@ pub enum ServerMsg {
     MessageUpsert { session_id: SessionId, message: Message },
     /// Insert or replace a whole part.
     PartUpsert { session_id: SessionId, message_id: MessageId, part: Part },
-    /// Append text to a text/reasoning part (or to a tool part's `input_raw`).
+    /// Append text to a text/reasoning part (or to a tool part's `input_raw` while streaming).
     PartDelta { session_id: SessionId, message_id: MessageId, part_id: PartId, delta: String },
+    /// Live output chunk of a running tool (e.g. bash stdout). Display only; the final
+    /// `PartUpsert` carries the authoritative output.
+    ToolOutputDelta { session_id: SessionId, message_id: MessageId, part_id: PartId, delta: String },
+    MessageRemoved { session_id: SessionId, message_id: MessageId },
     PermissionAsk { request: PermissionRequest },
     PermissionResolved { session_id: SessionId, call_id: String },
     Undone { session_id: SessionId, text: String },

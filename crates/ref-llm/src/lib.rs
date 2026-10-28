@@ -7,11 +7,25 @@
 use std::pin::Pin;
 use std::time::Duration;
 
-use futures::Stream;
+use futures::{Stream, StreamExt};
 pub use ref_proto::spec::{ApiKind, Cost, ModelSpec, ToolDef};
-use ref_proto::{Message, Usage};
+use ref_proto::{Message, MessageOrigin, Part, Role, TextPart, Usage};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+mod anthropic;
+mod convert;
+mod error;
+mod openai_chat;
+mod openai_responses;
+pub mod sse;
+mod transport;
+
+#[cfg(test)]
+mod tests;
+
+pub use convert::parse_tool_input;
+pub use error::text_is_context_overflow;
 
 #[derive(Debug, Clone)]
 pub struct Request {
@@ -81,7 +95,7 @@ impl LlmError {
 
     /// True when the error says the prompt exceeds the context window.
     pub fn is_context_overflow(&self) -> bool {
-        todo!()
+        self.overflow()
     }
 }
 
@@ -91,8 +105,57 @@ pub type EventStream = Pin<Box<dyn Stream<Item = Result<StreamEvent, LlmError>> 
 /// directly; errors mid-stream are yielded as `Err` items (after which the stream ends).
 /// A stream that ends without a terminal event yields `Err(LlmError::Stream(..))`.
 pub async fn stream(http: &reqwest::Client, model: &ModelSpec, req: &Request) -> Result<EventStream, LlmError> {
-    let _ = (http, model, req);
-    todo!()
+    match model.api {
+        ApiKind::Anthropic => anthropic::stream(http, model, req).await,
+        ApiKind::OpenAIChat => openai_chat::stream(http, model, req).await,
+        ApiKind::OpenAIResponses => openai_responses::stream(http, model, req).await,
+    }
+}
+
+/// The JSON request body that [`stream`] would send (for debugging / logging).
+pub fn request_body(model: &ModelSpec, req: &Request) -> Value {
+    match model.api {
+        ApiKind::Anthropic => anthropic::build_body(model, req).body,
+        ApiKind::OpenAIChat => openai_chat::build_body(model, req),
+        ApiKind::OpenAIResponses => openai_responses::build_body(model, req),
+    }
+}
+
+/// One-shot, tool-less completion that returns the concatenated response text (e.g. for
+/// generating session titles). Reasoning is discarded.
+pub async fn complete_text(
+    http: &reqwest::Client,
+    model: &ModelSpec,
+    system: &str,
+    prompt: &str,
+) -> Result<String, LlmError> {
+    let mut msg = Message::new(Role::User, MessageOrigin::User);
+    msg.parts.push(Part::Text(TextPart { id: ref_proto::new_id("prt"), text: prompt.to_string(), time: msg.time, meta: None }));
+    let req = Request {
+        system: if system.is_empty() { vec![] } else { vec![system.to_string()] },
+        messages: vec![msg],
+        tools: vec![],
+        session_id: String::new(),
+        tool_choice_none: false,
+    };
+    let mut events = stream(http, model, &req).await?;
+    let mut text = String::new();
+    while let Some(ev) = events.next().await {
+        match ev? {
+            StreamEvent::TextDelta { text: t, .. } => text.push_str(&t),
+            StreamEvent::Finish { reason: FinishReason::Error } => {
+                return Err(LlmError::Stream("provider stopped with an error finish reason".into()))
+            }
+            _ => {}
+        }
+    }
+    Ok(text.trim().to_string())
+}
+
+/// Fill in `usage.cost` from the model's pricing.
+pub(crate) fn with_cost(model: &ModelSpec, mut usage: Usage) -> Usage {
+    usage.cost = cost_of(&model.cost, &usage);
+    usage
 }
 
 /// Compute USD cost of a usage record.
