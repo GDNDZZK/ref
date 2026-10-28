@@ -3,5 +3,27 @@ name = "ref"
 version.workspace = true
 edition.workspace = true
 
+[[bin]]
+name = "ref"
+path = "src/main.rs"
+
 [dependencies]
 ref-proto.workspace = true
+tokio.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+chrono.workspace = true
+clap.workspace = true
+base64.workspace = true
+dirs.workspace = true
+rand.workspace = true
+libc.workspace = true
+unicode-width.workspace = true
+tokio-tungstenite.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+pulldown-cmark.workspace = true
+syntect = { version = "5.3.0", default-features = false, features = ["default-fancy"] }
+unicode-segmentation = "1.13.3"
