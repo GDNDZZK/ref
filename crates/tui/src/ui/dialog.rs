@@ -284,6 +284,7 @@ pub fn frame(buf: &mut Buffer, screen: Rect, w: u16, h: u16, title: &str, t: f32
     let r = Rect::new(x, y, w, h);
     // Dim the background a little.
     dim(buf, screen, 0.35 * t);
+    clear_wide_edges(buf, r);
     let bg = theme::PANEL;
     let bc = theme::blend(bg, theme::BORDER_ACTIVE, t);
     for yy in r.y..r.y + r.height {
@@ -314,6 +315,23 @@ pub fn frame(buf: &mut Buffer, screen: Rect, w: u16, h: u16, title: &str, t: f32
         buf.set_string(r.x + r.width - 2 - esc.len() as u16, r.y, esc, Style::new().fg(theme::blend(bg, theme::DIM, t)).bg(bg));
     }
     r
+}
+
+/// Before drawing an overlay over `r`: replace wide glyphs (CJK, emoji) that start just left
+/// of the overlay and would spill into its first column. Without this the terminal diff skips
+/// the overlay's left border cell (it is "covered" by the wide glyph) and background text
+/// bleeds through.
+pub fn clear_wide_edges(buf: &mut Buffer, r: Rect) {
+    if r.x == 0 {
+        return;
+    }
+    for yy in r.y..r.y.saturating_add(r.height) {
+        if let Some(c) = buf.cell_mut((r.x - 1, yy)) {
+            if unicode_width::UnicodeWidthStr::width(c.symbol()) > 1 {
+                c.set_symbol(" ");
+            }
+        }
+    }
 }
 
 /// Darkens every cell's colours by `amount` (0..1).

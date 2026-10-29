@@ -150,7 +150,7 @@ async fn connect(server: Arc<McpServer>, conf: ServerConfig) {
                 st.client = Some(client.clone());
                 st.tools = tools;
             }
-            let _ = server.ready.send(true);
+            server.ready.send_replace(true);
             tracing::info!(server = %server.name, "MCP server connected");
             let weak = Arc::downgrade(&client);
             drop(client);
@@ -165,7 +165,7 @@ async fn connect(server: Arc<McpServer>, conf: ServerConfig) {
         Err(e) => {
             tracing::warn!(server = %server.name, "MCP connect failed: {e:#}");
             server.lock().status = McpStatus::Failed(format!("{e:#}"));
-            let _ = server.ready.send(true);
+            server.ready.send_replace(true);
         }
     }
 }

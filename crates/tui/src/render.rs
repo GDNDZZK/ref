@@ -272,6 +272,7 @@ fn draw_autocomplete(buf: &mut Buffer, lay: &Layout, app: &mut App) {
     let y = lay.prompt.y.saturating_sub(h);
     let r = Rect::new(x, y, w, h);
     ac.rect = r;
+    crate::ui::dialog::clear_wide_edges(buf, r);
     let bg = theme::PANEL;
     fill(buf, r, Style::new().bg(bg));
     let bst = Style::new().fg(theme::BORDER).bg(bg);

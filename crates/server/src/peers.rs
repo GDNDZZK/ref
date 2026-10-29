@@ -311,9 +311,9 @@ async fn create_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Resu
         return Err("Error: prompt must not be empty.".into());
     }
     let must_report = input.get("must_report").and_then(Value::as_bool).unwrap_or(true);
-    let (cfg, my_cwd, my_name) = {
+    let (cfg, my_cwd, my_name, my_model) = {
         let st = s.lock();
-        (st.cfg.clone(), st.info.cwd.clone(), st.info.name.clone())
+        (st.cfg.clone(), st.info.cwd.clone(), st.info.name.clone(), st.info.model.clone())
     };
     match cfg.agents.get(&agent) {
         Some(a) if a.creatable => {}
@@ -339,7 +339,12 @@ async fn create_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Resu
     let opts = crate::ops::CreateOpts {
         cwd: cwd.clone(),
         agent: Some(agent.clone()),
-        model: None,
+        // Agent's own model wins; otherwise inherit the creator's model (never a random fallback).
+        model: if cfg.agents.get(&agent).is_some_and(|a| a.model.is_some()) || cfg.model.is_some() {
+            None
+        } else {
+            Some(my_model)
+        },
         name: Some(base),
         unique_suffix: true,
         parent: Some(s.id.clone()),

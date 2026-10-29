@@ -105,6 +105,7 @@ impl Toasts {
             for (i, l) in lines.iter().enumerate() {
                 let yy = y + i as u16;
                 let row = Rect::new(x, yy, w.min(area.x + area.width - x), 1);
+                crate::ui::dialog::clear_wide_edges(buf, row);
                 buf.set_style(row, Style::new().bg(bg));
                 for xx in row.x..row.x + row.width {
                     if let Some(c) = buf.cell_mut((xx, yy)) {

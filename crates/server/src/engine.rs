@@ -732,9 +732,13 @@ fn update_tool(hub: &Hub, s: &Session, msg_id: &str, index: usize, f: impl FnOnc
 
 fn set_state(hub: &Hub, s: &Session, msg_id: &str, index: usize, new: ToolState, run_at: Option<i64>) {
     update_tool(hub, s, msg_id, index, |p| {
-        if let Part::Tool { state, run_at: ra, .. } = p {
+        if let Part::Tool { state, run_at: ra, time, .. } = p {
             *state = new;
             *ra = run_at;
+            // Durations shown to the user measure execution only, not approval/delay waits.
+            if new == ToolState::Running {
+                *time = now_ms();
+            }
         }
     });
 }

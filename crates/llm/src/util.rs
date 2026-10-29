@@ -394,6 +394,12 @@ pub(crate) async fn run_sse(
     let payload = serde_json::to_vec(body)
         .map_err(|e| LlmError::fatal(format!("failed to encode request: {e}")))?;
     let idle = chunk_timeout(provider);
+    if let Some(dir) = std::env::var_os("REF_DUMP_REQUESTS") {
+        // Debug aid: dump request bodies (never headers, which hold credentials).
+        let path = std::path::Path::new(&dir).join(format!("req-{}.json", chrono::Utc::now().timestamp_millis()));
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::write(path, &payload);
+    }
     let request = crate::http_client()
         .post(url)
         .headers(headers)
