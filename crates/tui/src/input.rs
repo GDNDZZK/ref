@@ -128,6 +128,10 @@ fn leader(app: &mut App, k: KeyEvent) {
     let KeyCode::Char(c) = k.code else {
         return;
     };
+    if c.eq_ignore_ascii_case(&'k') {
+        app.close_key();
+        return;
+    }
     let cmd = match c.to_ascii_lowercase() {
         'n' => "new",
         'l' => "sessions",
@@ -175,7 +179,7 @@ fn dialog_key(app: &mut App, k: KeyEvent) {
                 KeyCode::PageDown => d.page(1),
                 KeyCode::Enter => app.dialog_submit(),
                 KeyCode::Char('d') if k.modifiers == CTRL => {
-                    if d.kind == Kind::Sessions {
+                    if matches!(d.kind, Kind::Sessions | Kind::CloseSessions) {
                         app.dialog_delete();
                     }
                 }
@@ -696,6 +700,12 @@ fn mouse(app: &mut App, me: MouseEvent) {
                 let inside = x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
                 if !inside {
                     app.dialog = None;
+                } else if d.kind == Kind::CloseSessions {
+                    // Destructive: a click only selects; enter closes.
+                    if d.item_at(x, y).is_some_and(|i| i != d.sel) {
+                        d.click(x, y);
+                        d.confirm = None;
+                    }
                 } else if d.click(x, y) {
                     app.dialog_submit();
                 }
@@ -793,7 +803,10 @@ fn mouse(app: &mut App, me: MouseEvent) {
                 return;
             }
             if c.contains(x, y) {
+                // Repeated clicks on a button (e.g. confirming undo) are clicks, not word selection.
+                let on_button = c.hit_at(x, y).is_some_and(|h| h.is_button());
                 let n = click_count(app, x, y);
+                let n = if on_button { 1 } else { n };
                 let Some(v) = app.views.get_mut(&sid) else { return };
                 v.chat.mouse_down(x, y, n);
                 if v.chat.has_selection() {
@@ -831,6 +844,7 @@ fn mouse(app: &mut App, me: MouseEvent) {
                     }
                 }
                 Some(Hit::Copy { msg }) => app.copy_message(&sid, &msg),
+                Some(Hit::Undo { msg }) => app.undo_message(&sid, &msg),
                 None => {}
             }
         }

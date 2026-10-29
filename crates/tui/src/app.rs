@@ -44,7 +44,10 @@ pub enum Pending {
     Attach { sid: String, fg: bool },
     HistoryDialog,
     Continue,
-    Undo,
+    /// `count`: messages removed (known when undoing from a given message).
+    Undo { count: Option<usize> },
+    /// A session was closed; refresh dialogs / history afterwards.
+    Closed { name: String },
     Expand { sid: Option<String> },
     Files { query: String },
     /// Generic: toast `ok` on success (if non-empty); errors always toast.
@@ -105,7 +108,8 @@ pub const COMMANDS: &[Cmd] = &[
     Cmd { name: "compact", aliases: &["summarize"], desc: "Compact the conversation", key: "ctrl+x c", args: false },
     Cmd { name: "undo", aliases: &[], desc: "Undo last prompt", key: "ctrl+x u", args: false },
     Cmd { name: "rename", aliases: &[], desc: "Rename the session", key: "", args: true },
-    Cmd { name: "close", aliases: &[], desc: "Close this session and open a new one", key: "", args: false },
+    Cmd { name: "close", aliases: &[], desc: "Close this session and open a new one", key: "ctrl+x k", args: false },
+    Cmd { name: "close-session", aliases: &["kill"], desc: "Close live sessions (picker, or by name / id)", key: "", args: true },
     Cmd { name: "peers", aliases: &["list-agents"], desc: "List other live sessions you can message", key: "", args: false },
     Cmd { name: "peers-name", aliases: &[], desc: "Show or set this session's peer name", key: "", args: true },
     Cmd { name: "peers-inbox", aliases: &[], desc: "Messages received from other sessions", key: "", args: false },
@@ -147,7 +151,14 @@ pub struct App {
     pub leader: Option<Instant>,
     pub esc_armed: Option<Instant>,
     pub ctrlc_armed: Option<Instant>,
+    /// Status-line hint: (text, colour, expires at).
     pub hint: Option<(String, Color, Instant)>,
+    /// Pending "press again" confirmation to close a session: (session id, armed at).
+    pub close_armed: Option<(String, Instant)>,
+    /// Pending "click again" confirmation to undo from a message of a busy session.
+    pub undo_armed: Option<(String, Instant)>,
+    /// Terminal title last sent (main loop only sends changes).
+    pub last_title: Option<String>,
     pub connected: bool,
     pub ever_connected: bool,
     pub net_status: Option<String>,
@@ -207,6 +218,9 @@ impl App {
             esc_armed: None,
             ctrlc_armed: None,
             hint: None,
+            close_armed: None,
+            undo_armed: None,
+            last_title: None,
             connected: false,
             ever_connected: false,
             net_status: None,
@@ -259,7 +273,12 @@ impl App {
     }
 
     pub fn set_hint(&mut self, s: impl Into<String>, c: Color) {
-        self.hint = Some((s.into(), c, Instant::now()));
+        self.set_hint_for(s, c, Duration::from_millis(1500));
+    }
+
+    /// Hint shown in the status line until `dur` has passed.
+    pub fn set_hint_for(&mut self, s: impl Into<String>, c: Color, dur: Duration) {
+        self.hint = Some((s.into(), c, Instant::now() + dur));
     }
 
     pub fn cur(&self) -> Option<&SessionView> {
@@ -488,10 +507,31 @@ impl App {
                     }
                 }
             }
-            Pending::Undo => {
-                if let Some(t) = result.get("text").and_then(Value::as_str) {
+            Pending::Undo { count } => {
+                let t = result.get("text").and_then(Value::as_str).unwrap_or_default();
+                let what = match count {
+                    Some(1) => "Undid 1 message".to_string(),
+                    Some(n) => format!("Undid {n} messages"),
+                    None => "Undid last prompt".to_string(),
+                };
+                if t.trim().is_empty() {
+                    self.toasts.info(what);
+                } else if self.editor.is_empty() && self.mode == Mode::Chat {
                     self.editor.set_text(t);
-                    self.toasts.info("Undid last prompt");
+                    self.toasts.info(what);
+                } else {
+                    // Don't clobber what the user is typing; the prompt stays reachable with ↑.
+                    self.history.push(t);
+                    self.toasts.info(format!("{what} · prompt saved to history (↑)"));
+                }
+            }
+            Pending::Closed { name } => {
+                if !name.is_empty() {
+                    self.toasts.info(format!("Closed \"{name}\""));
+                }
+                if matches!(&self.dialog, Some(Dialog::List(d)) if d.kind == Kind::Sessions) {
+                    // The closed session moves to History.
+                    self.req(Request::ListHistory { cwd: None, limit: Some(200) }, Pending::HistoryDialog);
                 }
             }
             Pending::Expand { sid } => {
@@ -869,7 +909,7 @@ impl App {
     }
 
     pub fn open_sessions(&mut self) {
-        let d = ListDialog::new(Kind::Sessions, "Sessions", Vec::new()).with_hint("enter open · ctrl+d close/delete · esc close");
+        let d = ListDialog::new(Kind::Sessions, "Sessions", Vec::new()).with_hint("enter open · ctrl+d close live / delete history (press twice) · esc");
         self.dialog = Some(Dialog::List(d));
         self.refresh_session_dialog();
         if let Some(c) = &self.current
@@ -882,10 +922,12 @@ impl App {
     }
 
     fn refresh_session_dialog(&mut self) {
+        let elsewhere: HashSet<String> = self.live.iter().filter(|s| self.attached_elsewhere(&s.id)).map(|s| s.id.clone()).collect();
         let Some(Dialog::List(d)) = self.dialog.as_mut() else { return };
-        if d.kind != Kind::Sessions {
+        if d.kind != Kind::Sessions && d.kind != Kind::CloseSessions {
             return;
         }
+        let close_only = d.kind == Kind::CloseSessions;
         let now = ref_proto::now_ms();
         let models = self.config.as_ref().map(|c| c.models.as_slice()).unwrap_or(&[]);
         let agents = self.config.as_ref().map(|c| c.agents.as_slice()).unwrap_or(&[]);
@@ -895,11 +937,18 @@ impl App {
         for s in &live {
             let current = self.current.as_deref() == Some(s.id.as_str());
             let model = models.iter().find(|m| m.provider == s.model.provider && m.id == s.model.model).map(|m| m.name.clone()).unwrap_or_else(|| s.model.model.clone());
-            let (badge, bc) = if s.attached > 0 { ("fg", theme::SUCCESS) } else { ("bg", theme::SECONDARY) };
+            let (badge, bc) = if elsewhere.contains(&s.id) {
+                ("fg elsewhere", theme::WARNING)
+            } else if s.attached > 0 {
+                ("fg", theme::SUCCESS)
+            } else {
+                ("bg", theme::SECONDARY)
+            };
+            let desc = if current && close_only { "(current)".to_string() } else { text::truncate(&text::one_line(&s.title), 40) };
             items.push(Item {
                 key: format!("live:{}", s.id),
                 title: s.name.clone(),
-                desc: text::truncate(&text::one_line(&s.title), 40),
+                desc,
                 right: format!("{} · {} · {}", s.agent, model, text::tilde(&s.cwd)),
                 section: "Live".into(),
                 badge: Some((badge.into(), bc)),
@@ -910,7 +959,8 @@ impl App {
             });
         }
         let live_ids: HashSet<&str> = live.iter().map(|s| s.id.as_str()).collect();
-        for s in self.history_list.iter().filter(|s| !live_ids.contains(s.id.as_str())) {
+        let history: &[SessionInfo] = if close_only { &[] } else { &self.history_list };
+        for s in history.iter().filter(|s| !live_ids.contains(s.id.as_str())) {
             let title = if s.title.trim().is_empty() { s.name.clone() } else { text::one_line(&s.title) };
             items.push(Item {
                 key: format!("hist:{}", s.id),
@@ -1017,6 +1067,10 @@ impl App {
     pub fn dialog_submit(&mut self) {
         let Some(Dialog::List(d)) = self.dialog.as_ref() else { return };
         let kind = d.kind.clone();
+        if kind == Kind::CloseSessions {
+            self.close_from_picker();
+            return;
+        }
         let Some(key) = d.selected().map(|i| i.key.clone()) else { return };
         self.dialog = None;
         match kind {
@@ -1031,6 +1085,7 @@ impl App {
                     }
                 }
             }
+            Kind::CloseSessions => {}
             Kind::Sessions => {
                 let sid = key.split_once(':').map(|x| x.1).unwrap_or(&key).to_string();
                 if self.current.as_deref() != Some(sid.as_str()) {
@@ -1073,30 +1128,200 @@ impl App {
 
     /// ctrl+d in the sessions dialog: confirm, then close (live) / delete (history).
     pub fn dialog_delete(&mut self) {
-        let Some(Dialog::List(d)) = self.dialog.as_mut() else { return };
+        let Some(Dialog::List(d)) = self.dialog.as_ref() else { return };
+        if d.kind == Kind::CloseSessions {
+            self.close_from_picker();
+            return;
+        }
         if d.kind != Kind::Sessions {
             return;
         }
         let Some(key) = d.selected().map(|i| i.key.clone()) else { return };
+        let elsewhere = key.strip_prefix("live:").is_some_and(|s| self.attached_elsewhere(s));
+        let Some(Dialog::List(d)) = self.dialog.as_mut() else { return };
         if d.confirm.as_deref() != Some(key.as_str()) {
+            d.confirm_text = if key.starts_with("live:") {
+                if elsewhere { "open in another frontend · ctrl+d again to close " } else { "ctrl+d again to close " }
+            } else {
+                "ctrl+d again to delete permanently "
+            }
+            .into();
             d.confirm = Some(key);
             return;
         }
         d.confirm = None;
         if let Some(sid) = key.strip_prefix("live:") {
             let sid = sid.to_string();
-            self.req(Request::Close { session_id: sid.clone() }, Pending::Simple { ok: "Session closed".into() });
-            if self.current.as_deref() == Some(sid.as_str()) {
-                self.views.remove(&sid);
-                self.current = None;
-                self.create_session(None);
-            }
+            self.close_session(&sid);
         } else if let Some(sid) = key.strip_prefix("hist:") {
             let sid = sid.to_string();
             self.history_list.retain(|s| s.id != sid);
             self.req(Request::Delete { session_id: sid }, Pending::Simple { ok: "Session deleted".into() });
             self.refresh_session_dialog();
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Closing sessions / undo
+    // -----------------------------------------------------------------------
+
+    /// Display name of a session we know about (view, live list or history).
+    pub fn session_name(&self, sid: &str) -> String {
+        self.views
+            .get(sid)
+            .map(|v| v.info.name.clone())
+            .filter(|n| !n.is_empty())
+            .or_else(|| self.live.iter().chain(self.history_list.iter()).find(|s| s.id == sid).map(|s| s.name.clone()))
+            .unwrap_or_else(|| sid.to_string())
+    }
+
+    /// Whether `sid` is foreground in a frontend other than this one.
+    pub fn attached_elsewhere(&self, sid: &str) -> bool {
+        let Some(info) = self.live.iter().find(|s| s.id == sid) else { return false };
+        let ours = u32::from(self.current.as_deref() == Some(sid) && self.views.get(sid).is_some_and(|v| v.foreground));
+        info.attached.saturating_sub(ours) > 0
+    }
+
+    /// Unloads `sid` now (no confirmation). Closing the current session opens a new one (chat mode).
+    pub fn close_session(&mut self, sid: &str) {
+        if self.close_armed.take().is_some() {
+            // Drop the "press again to close" hint.
+            self.hint = None;
+        }
+        if !self.connected {
+            self.toasts.warn("Not connected to the backend");
+            return;
+        }
+        let name = self.session_name(sid);
+        self.req(Request::Close { session_id: sid.to_string() }, Pending::Closed { name });
+        // Optimistic: the server's session broadcast follows, but lists update right away.
+        self.live.retain(|s| s.id != sid);
+        if self.current.as_deref() == Some(sid) {
+            self.views.remove(sid);
+            self.current = None;
+            self.perm = None;
+            if self.mode == Mode::Chat {
+                self.create_session(None);
+            }
+        } else if self.views.get(sid).is_some_and(|v| !v.foreground) {
+            self.views.remove(sid);
+            self.watch.inputs.remove(sid);
+            self.attaching.remove(sid);
+        }
+        self.sync_watch();
+        self.refresh_session_dialog();
+    }
+
+    /// Closes `sid`, asking for a second confirmation when it is open in another frontend.
+    /// `again` describes how to confirm (e.g. "run the command again").
+    pub fn close_confirmed(&mut self, sid: &str, again: &str) {
+        if self.attached_elsewhere(sid) && !self.close_is_armed(sid) {
+            self.arm_close(sid, &format!("\"{}\" is open in another frontend — {again} to close it", self.session_name(sid)));
+            return;
+        }
+        self.close_session(sid);
+    }
+
+    fn close_is_armed(&self, sid: &str) -> bool {
+        self.close_armed.as_ref().is_some_and(|(s, t)| s == sid && t.elapsed() < Duration::from_secs(4))
+    }
+
+    fn arm_close(&mut self, sid: &str, hint: &str) {
+        self.close_armed = Some((sid.to_string(), Instant::now()));
+        self.set_hint_for(hint, theme::WARNING, Duration::from_secs(4));
+    }
+
+    /// `ctrl+x k`: close the current session (chat) or the focused tile (split view); press twice.
+    pub fn close_key(&mut self) {
+        let target = match self.mode {
+            Mode::Chat => self.current.clone(),
+            Mode::Watch => self.watch.focus.clone(),
+        };
+        let Some(sid) = target else {
+            self.toasts.info("No session to close");
+            return;
+        };
+        if self.mode == Mode::Chat && self.views.get(&sid).is_some_and(|v| v.closed) {
+            // Already gone on the server: just move on to a fresh session.
+            self.run_command("close", "");
+            return;
+        }
+        if self.close_is_armed(&sid) {
+            self.close_session(&sid);
+            return;
+        }
+        let name = self.session_name(&sid);
+        let extra = if self.attached_elsewhere(&sid) { " (open in another frontend)" } else { "" };
+        self.arm_close(&sid, &format!("press ctrl+x k again to close \"{name}\"{extra}"));
+    }
+
+    /// `/close-session` without args: picker of live sessions that stays open after each close.
+    pub fn open_close_picker(&mut self) {
+        let d = ListDialog::new(Kind::CloseSessions, "Close sessions", Vec::new()).with_hint("enter close · stays open to close more · esc done");
+        self.dialog = Some(Dialog::List(d));
+        self.refresh_session_dialog();
+        self.req(Request::ListSessions, Pending::LiveList);
+    }
+
+    /// Enter / ctrl+d in the close picker.
+    fn close_from_picker(&mut self) {
+        let Some(Dialog::List(d)) = self.dialog.as_mut() else { return };
+        let Some(key) = d.selected().map(|i| i.key.clone()) else { return };
+        let Some(sid) = key.strip_prefix("live:").map(str::to_string) else { return };
+        let elsewhere = self.attached_elsewhere(&sid);
+        let Some(Dialog::List(d)) = self.dialog.as_mut() else { return };
+        if elsewhere && d.confirm.as_deref() != Some(key.as_str()) {
+            d.confirm = Some(key);
+            d.confirm_text = "open in another frontend · enter again to close ".into();
+            return;
+        }
+        d.confirm = None;
+        self.close_session(&sid);
+    }
+
+    /// Undo button on a human prompt: removes it and everything after it (confirm while busy).
+    pub fn undo_message(&mut self, sid: &str, msg: &str) {
+        let Some(v) = self.views.get(sid) else { return };
+        let Some(i) = v.find(msg) else { return };
+        let count = v.messages.len() - i;
+        let busy = v.is_busy();
+        let armed = self.undo_armed.as_ref().is_some_and(|(m, t)| m == msg && t.elapsed() < Duration::from_secs(4));
+        if busy && !armed {
+            self.undo_armed = Some((msg.to_string(), Instant::now()));
+            self.set_hint_for("click ↶ undo again to undo (aborts the running turn)", theme::WARNING, Duration::from_secs(4));
+            return;
+        }
+        self.undo_armed = None;
+        self.hint = None;
+        self.clear_selection();
+        self.req(Request::Undo { session_id: sid.to_string(), message_id: Some(msg.to_string()) }, Pending::Undo { count: Some(count) });
+    }
+
+    // -----------------------------------------------------------------------
+    // Terminal title / exit screen
+    // -----------------------------------------------------------------------
+
+    /// Terminal window title: `R|<session title>` (name when untitled), `R|watch (N)` in split view.
+    pub fn terminal_title(&self) -> String {
+        if self.mode == Mode::Watch {
+            return format!("R|watch ({})", self.tile_ids().len());
+        }
+        let label = self
+            .cur()
+            .map(|v| {
+                let t = text::one_line(&v.info.title);
+                if t.is_empty() { v.info.name.clone() } else { t }
+            })
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "ref".into());
+        format!("R|{}", text::truncate(&label, 80))
+    }
+
+    /// Text printed to stdout after the TUI exits (logo + resume hint), if any.
+    pub fn epilogue(&self) -> Option<String> {
+        let v = self.cur()?;
+        let resumable = !v.messages.is_empty();
+        Some(epilogue_text(&v.info, resumable))
     }
 
     pub fn model_display(&self, m: &ModelRef) -> String {
@@ -1154,7 +1379,7 @@ impl App {
             }
             "undo" => {
                 if let Some(sid) = cur {
-                    self.req(Request::Undo { session_id: sid, message_id: None }, Pending::Undo);
+                    self.req(Request::Undo { session_id: sid, message_id: None }, Pending::Undo { count: None });
                 }
             }
             "rename" => {
@@ -1178,13 +1403,26 @@ impl App {
                     );
                 }
             }
-            "close" => {
-                if let Some(sid) = cur {
-                    self.req(Request::Close { session_id: sid.clone() }, Pending::Simple { ok: "Session closed".into() });
-                    self.views.remove(&sid);
+            "close" => match cur {
+                Some(sid) if self.views.get(&sid).is_some_and(|v| !v.closed) => self.close_session(&sid),
+                _ => {
+                    self.views.retain(|_, v| !(v.foreground && v.closed));
                     self.current = None;
+                    self.create_session(None);
                 }
-                self.create_session(None);
+            },
+            "close-session" => {
+                if args.is_empty() {
+                    self.open_close_picker();
+                } else {
+                    match match_session(&self.live, args) {
+                        Ok(s) => {
+                            let sid = s.id.clone();
+                            self.close_confirmed(&sid, "run the command again");
+                        }
+                        Err(e) => self.toasts.warn(e),
+                    }
+                }
             }
             "export" => {
                 if let Some(sid) = cur {
@@ -1401,8 +1639,13 @@ impl App {
         if let Some((at, _)) = &self.files_due {
             return Some(at.saturating_duration_since(Instant::now()).max(Duration::from_millis(5)));
         }
+        // Spinners for sessions we don't hold a view of: the sidebar's live list, split tiles that
+        // are still loading and the session dialogs all draw from `self.live`.
+        let live_list_shown = self.mode == Mode::Watch
+            || self.sidebar_shown()
+            || matches!(&self.dialog, Some(Dialog::List(d)) if matches!(d.kind, Kind::Sessions | Kind::CloseSessions));
         let anim = self.views.values().any(|v| v.animating() || matches!(v.info.status, SessionStatus::Retrying { .. }))
-            || self.dialog.as_ref().is_some_and(|_| self.live.iter().any(|s| !s.status.is_idle()))
+            || (live_list_shown && self.live.iter().any(|s| s.live && !s.status.is_idle()))
             || !self.connected;
         if anim {
             return Some(Duration::from_millis(80));
@@ -1416,6 +1659,11 @@ impl App {
         None
     }
 
+    /// Whether the chat-mode sidebar is drawn at the current screen size.
+    pub fn sidebar_shown(&self) -> bool {
+        self.mode == Mode::Chat && self.sidebar && self.screen.width >= crate::render::SIDEBAR_MIN_SCREEN && self.current.is_some()
+    }
+
     /// Expires timers (hints, leader, armed keys).
     pub fn housekeeping(&mut self) {
         if let Some((name, args, at)) = self.deferred.take() {
@@ -1427,7 +1675,7 @@ impl App {
                 self.deferred = Some((name, args, at));
             }
         }
-        if self.hint.as_ref().is_some_and(|h| h.2.elapsed() > Duration::from_millis(1500)) {
+        if self.hint.as_ref().is_some_and(|h| Instant::now() >= h.2) {
             self.hint = None;
             self.dirty = true;
         }
@@ -1454,6 +1702,56 @@ impl App {
             }
         }
     }
+}
+
+/// Finds a live session by exact name / id, else a unique case-insensitive name / id match.
+pub fn match_session<'a>(live: &'a [SessionInfo], q: &str) -> Result<&'a SessionInfo, String> {
+    let q = q.trim().trim_matches('"');
+    let live: Vec<&SessionInfo> = live.iter().filter(|s| s.live).collect();
+    if let Some(s) = live.iter().find(|s| s.id == q || s.name == q) {
+        return Ok(s);
+    }
+    let lq = q.to_lowercase();
+    let m: Vec<&&SessionInfo> = live.iter().filter(|s| s.name.to_lowercase() == lq || s.id.to_lowercase() == lq).collect();
+    match m.as_slice() {
+        [s] => Ok(s),
+        [] => Err(format!("No live session named \"{q}\"")),
+        _ => Err(format!("\"{q}\" matches {} sessions — use the exact name or id", m.len())),
+    }
+}
+
+/// Block-letter logo shared by the welcome screen and the exit screen.
+pub const LOGO: [&str; 3] = ["█▀▀▄ █▀▀▀ █▀▀▀", "█▄▄▀ █▀▀  █▀▀ ", "█  █ █▄▄▄ █   "];
+
+/// Exit screen (opencode style): logo, session line, resume command. ANSI truecolor.
+pub fn epilogue_text(info: &SessionInfo, resumable: bool) -> String {
+    let ansi = |c: Color| match c {
+        Color::Rgb(r, g, b) => format!("\x1b[38;2;{r};{g};{b}m"),
+        _ => String::new(),
+    };
+    let (reset, bold) = ("\x1b[0m", "\x1b[1m");
+    let (primary, muted) = (ansi(theme::PRIMARY), ansi(theme::MUTED));
+    let mut out = String::new();
+    for l in LOGO {
+        // Left two letters in primary, the last one muted (like opencode's two-tone wordmark).
+        let (a, b) = l.split_at(l.char_indices().nth(10).map(|x| x.0).unwrap_or(l.len()));
+        out.push_str(&format!("  {primary}{a}{reset}{muted}{}{reset}\n", b.trim_end()));
+    }
+    out.push('\n');
+    let row = |label: &str, value: &str| format!("  {muted}{label:<10}{reset}{bold}{value}{reset}");
+    if resumable {
+        let title = text::one_line(&info.title);
+        let session = match (title.is_empty(), info.name.is_empty()) {
+            (false, false) => format!("{title}{reset}{muted}  ({}){reset}", info.name),
+            (false, true) => title,
+            (true, _) => info.name.clone(),
+        };
+        out.push_str(&row("Session", &session));
+        out.push('\n');
+        out.push_str(&row("Continue", &format!("ref -s {}", info.id)));
+        out.push_str("\n\n");
+    }
+    out
 }
 
 fn sessions_of(v: &Value) -> Option<Vec<SessionInfo>> {

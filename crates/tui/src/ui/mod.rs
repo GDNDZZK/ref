@@ -11,6 +11,7 @@ pub mod split;
 pub mod text;
 pub mod theme;
 pub mod toast;
+pub mod todo;
 
 use ratatui::text::{Line, Span};
 
@@ -48,11 +49,13 @@ pub enum Hit {
     ShowAll { msg: String, part: usize },
     /// Copy raw text of a message.
     Copy { msg: String },
+    /// Undo a human prompt (remove it and everything after it).
+    Undo { msg: String },
 }
 
 impl Hit {
     pub fn is_button(&self) -> bool {
-        matches!(self, Hit::Copy { .. } | Hit::ShowAll { .. })
+        matches!(self, Hit::Copy { .. } | Hit::ShowAll { .. } | Hit::Undo { .. })
     }
 }
 

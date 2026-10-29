@@ -89,7 +89,7 @@ pub fn draw_status(buf: &mut Buffer, area: Rect, cx: &StatusCtx<'_>) {
     // Hint section.
     if cx.leader {
         left.push(Span::styled("   ctrl+x ", theme::bold(theme::PRIMARY)));
-        left.push(Span::styled("n new · l sessions · m models · a agents · w watch · h help", theme::muted()));
+        left.push(Span::styled("n new · l sessions · k close · m models · a agents · w watch · h help", theme::muted()));
     } else if let Some((h, c)) = &cx.hint {
         left.push(Span::styled(format!("   {h}"), theme::fg(*c).add_modifier(Modifier::BOLD)));
     } else if cx.shell_mode {

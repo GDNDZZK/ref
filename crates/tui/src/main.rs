@@ -135,7 +135,13 @@ fn main() -> anyhow::Result<()> {
     let res = rt.block_on(run(cli.mock, target, cwd, plan));
     restore_terminal();
     rt.shutdown_timeout(Duration::from_millis(200));
-    res
+    // Exit screen (logo + how to resume), printed to the normal screen like opencode does.
+    if let Ok(Some(text)) = &res {
+        let mut out = std::io::stdout();
+        let _ = out.write_all(text.as_bytes());
+        let _ = out.flush();
+    }
+    res.map(|_| ())
 }
 
 /// Clears the screen and forces a full repaint (without the cursor-position query that
@@ -145,7 +151,8 @@ fn full_clear(t: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> std::io::R
     t.resize(ratatui::layout::Rect::new(0, 0, w, h))
 }
 
-async fn run(mock: bool, target: Target, cwd: String, plan: InitPlan) -> anyhow::Result<()> {
+/// Runs the TUI; returns the exit-screen text to print after the terminal is restored.
+async fn run(mock: bool, target: Target, cwd: String, plan: InitPlan) -> anyhow::Result<Option<String>> {
     let (out_tx, out_rx) = mpsc::unbounded_channel();
     let (ev_tx, mut ev_rx) = mpsc::unbounded_channel();
     if mock {
@@ -180,6 +187,13 @@ async fn run(mock: bool, target: Target, cwd: String, plan: InitPlan) -> anyhow:
             break;
         }
         let interval = app.frame_interval();
+        // Animation frames are due relative to the last draw, so a stream of input / network
+        // events (each re-creating the sleep below) can never starve the spinners.
+        if let Some(iv) = interval
+            && last_draw.elapsed() >= iv
+        {
+            app.dirty = true;
+        }
         if app.dirty {
             // Cap at ~60fps.
             let since = last_draw.elapsed();
@@ -191,9 +205,18 @@ async fn run(mock: bool, target: Target, cwd: String, plan: InitPlan) -> anyhow:
                 terminal.draw(|f| render::draw(f, &mut app))?;
                 last_draw = std::time::Instant::now();
                 app.dirty = false;
+                let title = app.terminal_title();
+                if app.last_title.as_deref() != Some(title.as_str()) {
+                    let _ = execute!(std::io::stdout(), crossterm::terminal::SetTitle(&title));
+                    app.last_title = Some(title);
+                }
             }
         }
-        let wait = if app.dirty { Duration::from_millis(14).saturating_sub(last_draw.elapsed()) } else { interval.unwrap_or(Duration::from_secs(3600)) };
+        let wait = if app.dirty {
+            Duration::from_millis(14).saturating_sub(last_draw.elapsed())
+        } else {
+            interval.map(|iv| iv.saturating_sub(last_draw.elapsed()).max(Duration::from_millis(1))).unwrap_or(Duration::from_secs(3600))
+        };
         tokio::select! {
             ev = events.next() => {
                 match ev {
@@ -231,5 +254,8 @@ async fn run(mock: bool, target: Target, cwd: String, plan: InitPlan) -> anyhow:
         app.client.send(None, ref_proto::Request::Detach { session_id: sid });
         tokio::time::sleep(Duration::from_millis(30)).await;
     }
-    Ok(())
+    if app.last_title.is_some() {
+        let _ = execute!(std::io::stdout(), crossterm::terminal::SetTitle(""));
+    }
+    Ok(app.epilogue())
 }

@@ -392,14 +392,12 @@ fn tail_rows(view: &SessionView, env: &Env<'_>, w: usize) -> Vec<Row> {
     rows
 }
 
-const LOGO: [&str; 4] = ["█▀▀▄ █▀▀▀ █▀▀▀", "█▄▄▀ █▀▀  █▀▀ ", "█  █ █▄▄▄ █   ", "            "];
-
 fn draw_welcome(buf: &mut Buffer, area: Rect, view: &SessionView, loaded: bool) {
     if area.height < 6 || area.width < 20 {
         return;
     }
     let mut lines: Vec<Line<'static>> = Vec::new();
-    for l in LOGO.iter().take(3) {
+    for l in crate::app::LOGO.iter() {
         lines.push(Line::from(Span::styled(l.to_string(), theme::bold(theme::PRIMARY))));
     }
     lines.push(Line::default());

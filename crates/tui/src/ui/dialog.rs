@@ -15,6 +15,8 @@ use super::theme;
 pub enum Kind {
     Palette,
     Sessions,
+    /// Live sessions only; enter closes the selected one and the dialog stays open.
+    CloseSessions,
     Models,
     Agents,
     Variants,
@@ -54,6 +56,8 @@ pub struct ListDialog {
     pub opened: Instant,
     /// Pending destructive confirmation (item key).
     pub confirm: Option<String>,
+    /// Text shown on the confirming row (default: "press ctrl+d again to confirm").
+    pub confirm_text: String,
     /// Screen rows of items at last draw: (y, visible index).
     rows: Vec<(u16, usize)>,
     pub rect: Rect,
@@ -72,6 +76,7 @@ impl ListDialog {
             hint: String::new(),
             opened: Instant::now(),
             confirm: None,
+            confirm_text: String::new(),
             rows: Vec::new(),
             rect: Rect::default(),
         };
@@ -87,12 +92,18 @@ impl ListDialog {
     /// Replaces items, keeping the selected key if possible.
     pub fn set_items(&mut self, items: Vec<Item>) {
         let key = self.selected().map(|i| i.key.clone());
+        let old_sel = self.sel;
+        let confirm = self.confirm.take();
         self.items = items;
         self.refilter();
-        if let Some(k) = key
-            && let Some(p) = self.visible.iter().position(|&i| self.items[i].key == k)
-        {
-            self.sel = p;
+        match key.and_then(|k| self.visible.iter().position(|&i| self.items[i].key == k)) {
+            Some(p) => {
+                self.sel = p;
+                // A pending confirmation survives live refreshes while its item is still selected.
+                self.confirm = confirm.filter(|c| self.items[self.visible[p]].key == *c);
+            }
+            // Selected item vanished (e.g. just closed): stay at the same position.
+            None => self.sel = old_sel.min(self.visible.len().saturating_sub(1)),
         }
     }
 
@@ -251,7 +262,8 @@ impl ListDialog {
                     }
                     let mut right: Vec<Span<'static>> = Vec::new();
                     if self.confirm.as_deref() == Some(it.key.as_str()) && selected {
-                        right.push(Span::styled("press ctrl+d again to confirm ", Style::new().fg(theme::PANEL).add_modifier(Modifier::BOLD)));
+                        let t = if self.confirm_text.is_empty() { "press ctrl+d again to confirm " } else { self.confirm_text.as_str() };
+                        right.push(Span::styled(t.to_string(), Style::new().fg(theme::PANEL).add_modifier(Modifier::BOLD)));
                     } else {
                         if let Some((b, c)) = &it.badge {
                             right.push(Span::styled(format!(" {b} "), Style::new().fg(if selected { *c } else { theme::PANEL }).bg(if selected { theme::PANEL } else { fade(*c) })));
@@ -427,10 +439,11 @@ pub const KEYBINDS: &[(&str, &[(&str, &str)])] = &[
         "Leader (ctrl+x …)",
         &[
             ("n", "new session"),
-            ("l", "session list (live + history)"),
+            ("l", "session list (live + history; ctrl+d closes / deletes)"),
             ("m / a", "models / agents"),
             ("t / d", "toggle thinking / tool details"),
             ("c / u", "compact / undo last prompt"),
+            ("k (twice)", "close this session (split view: focused tile)"),
             ("e", "compose in $EDITOR"),
             ("x", "export transcript"),
             ("y", "copy last assistant message"),
@@ -452,6 +465,7 @@ pub const KEYBINDS: &[(&str, &[(&str, &str)])] = &[
             ("right click", "copy selection"),
             ("click ▸ line", "expand / collapse tool or thinking"),
             ("click ⧉ copy", "copy raw markdown of a message"),
+            ("click ↶ undo", "remove a prompt and everything after it"),
         ],
     ),
     (
@@ -479,6 +493,7 @@ pub const KEYBINDS: &[(&str, &[(&str, &str)])] = &[
             ("esc esc", "abort focused session"),
             ("enter on empty, ctrl+o", "zoom (attach as foreground)"),
             ("ctrl+n / ctrl+b", "next / previous page"),
+            ("ctrl+x k (twice)", "close the focused session"),
             ("ctrl+x w", "back to chat"),
         ],
     ),

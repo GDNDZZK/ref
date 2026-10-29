@@ -156,6 +156,14 @@ pub fn draw_frame(buf: &mut Buffer, r: Rect, v: &SessionView, focused: bool, tic
     if let Some(p) = v.context_pct() {
         put(&format!(" · {p}%"), theme::muted(), &mut x);
     }
+    // Current todo item, compactly: ` · ◐ Fix bug · 2/5`.
+    let avail = (maxx.saturating_sub(x) as usize).saturating_sub(4);
+    if let Some(spans) = super::todo::progress_spans(&v.info.todos, avail) {
+        put(" · ", theme::muted(), &mut x);
+        for s in spans {
+            put(&s.content, s.style, &mut x);
+        }
+    }
     put(" ", bst, &mut x);
     // Title of the conversation on the bottom border.
     if !v.info.title.is_empty() && r.width > 12 {

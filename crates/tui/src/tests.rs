@@ -236,9 +236,9 @@ fn expanded_tool_shows_raw_io() {
     }
     let (_, s) = render(&mut app, 100, 40);
     println!("{s}");
-    assert!(s.contains("╭─input"));
+    assert!(s.contains("╭─ input"));
     assert!(s.contains("\"command\": \"cargo test -p parser\""));
-    assert!(s.contains("├─output"));
+    assert!(s.contains("├─ output"));
     assert!(s.contains("test result: ok"));
 }
 
@@ -262,7 +262,8 @@ fn click_copy_and_toggle_hits() {
         ux += 1;
     }
     assert_eq!(v.chat.hit_at(ux + 3, uy), Some(crate::ui::Hit::Copy { msg: "m1".into() }));
-    assert_eq!(v.chat.hit_at(ux.saturating_sub(4), uy), None);
+    assert_eq!(v.chat.hit_at(ux.saturating_sub(1), uy), None, "gap before copy");
+    assert_eq!(v.chat.hit_at(ux.saturating_sub(4), uy), Some(crate::ui::Hit::Undo { msg: "m1".into() }));
     // Tool line toggles.
     let ty = lines.iter().position(|l| l.contains("bash  Run the unit tests")).unwrap() as u16;
     assert_eq!(v.chat.hit_at(10, ty), Some(crate::ui::Hit::Toggle { msg: "m2".into(), part: 2 }));
@@ -556,7 +557,7 @@ fn drag_select_does_not_copy_until_ctrl_c() {
     crate::input::handle(&mut app, me(MouseEventKind::Down(MouseButton::Left), 20, ty));
     crate::input::handle(&mut app, me(MouseEventKind::Up(MouseButton::Left), 20, ty));
     let (_, s) = render(&mut app, 100, 30);
-    assert!(s.contains("╭─input"));
+    assert!(s.contains("╭─ input"));
 }
 
 #[test]
@@ -844,4 +845,426 @@ fn model_filter_shows_provider() {
     let (_, s) = render(&mut app, 100, 30);
     assert!(s.contains("claude-opus-5.5  OtherCo"), "{s}");
     assert!(s.contains("claude-opus-5.5  dgn"), "{s}");
+}
+
+// ---------------------------------------------------------------------------
+// Tool box alignment, undo button, closing sessions, animation, title, exit, todos
+// ---------------------------------------------------------------------------
+
+fn ctx<'a>(details: bool) -> crate::ui::message::Ctx<'a> {
+    crate::ui::message::Ctx {
+        agents: &[],
+        models: &[],
+        toggled: None,
+        show_all: None,
+        details,
+        thinking: false,
+        now: ref_proto::now_ms(),
+        tick: 0,
+        compact: false,
+        session_agent: "build",
+    }
+}
+
+/// Draws rows into a buffer (like the chat view does) and returns, per row, (symbols, right border column).
+fn box_rows(rows: &[crate::ui::Row], w: u16) -> Vec<(String, Option<u16>)> {
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+    let mut buf = Buffer::empty(Rect::new(0, 0, w, rows.len() as u16));
+    for (y, r) in rows.iter().enumerate() {
+        buf.set_line(0, y as u16, &r.line, w);
+    }
+    (0..rows.len() as u16)
+        .map(|y| {
+            let syms: String = (0..w).map(|x| buf[(x, y)].symbol().to_string()).collect();
+            let col = (0..w).rev().find(|&x| matches!(buf[(x, y)].symbol(), "│" | "╮" | "┤" | "╯"));
+            (syms, col)
+        })
+        .collect()
+}
+
+#[test]
+fn expanded_tool_box_right_borders_align() {
+    let cjk_out = "测试结果：全部通过。中文输出行很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长\nplain ascii line\n😀 emoji 宽字符 mixed 中a文b字c符d";
+    let mut part = tool("c1", "bash", "运行测试 Run the unit tests", json!({"command": "cargo test -p 解析器 && echo 完成完成完成完成完成完成完成完成完成完成完成完成完成完成"}), ToolState::Done, Some(cjk_out), ts(14, 2, 15), Some(ts(14, 2, 16)));
+    if let Part::Tool { meta, .. } = &mut part {
+        *meta = Some(json!({"exit_code": 0, "diff": "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-旧的一行中文内容旧的一行中文内容旧的一行中文内容\n+新的一行中文内容新的一行中文内容新的一行中文内容新的", "note": "备注 note"}));
+    }
+    let msg = Message { id: "m".into(), role: Role::Assistant, time: 0, time_end: Some(1), source: MessageSource::Human, parts: vec![part], model: None, agent: None, usage: None, error: None };
+    for w in [40usize, 41, 80, 117] {
+        let rows = crate::ui::message::render(&msg, &ctx(true), w);
+        let top = rows.iter().position(|r| text::line_text(&r.line).contains('╭')).expect("box top");
+        let bot = rows.iter().position(|r| text::line_text(&r.line).contains('╯')).expect("box bottom");
+        let blk = &rows[top..=bot];
+        let drawn = box_rows(blk, w as u16 + 4);
+        let width0 = text::line_width(&blk[0].line);
+        let col0 = drawn[0].1.expect("border");
+        for (r, (syms, col)) in blk.iter().zip(&drawn) {
+            assert_eq!(text::line_width(&r.line), width0, "w={w}: row width differs: {syms:?}");
+            assert_eq!(*col, Some(col0), "w={w}: right border column differs: {syms:?}");
+        }
+        // Sections and the bottom edge use the matching corner glyphs.
+        let texts: Vec<String> = blk.iter().map(|r| text::line_text(&r.line)).collect();
+        assert!(texts[0].trim_end().ends_with('╮') && texts.iter().any(|t| t.contains("├─ output") && t.trim_end().ends_with('┤')));
+        assert!(texts.iter().any(|t| t.contains("├─ diff")) && texts.iter().any(|t| t.contains("├─ meta")));
+        assert!(texts.last().unwrap().trim_end().ends_with('╯'));
+        // The box (with its indent) fits the content width.
+        assert!(width0 <= w, "w={w} width={width0}");
+    }
+}
+
+#[test]
+fn box_section_with_cjk_label_matches_body_width() {
+    let msg = Message { id: "m".into(), role: Role::Assistant, time: 0, time_end: Some(1), source: MessageSource::Human, parts: vec![tool("c", "x", "", json!({"标签": "值"}), ToolState::Done, Some("ok"), 0, Some(1))], model: None, agent: None, usage: None, error: None };
+    let rows = crate::ui::message::render(&msg, &ctx(true), 60);
+    let ws: Vec<usize> = rows.iter().filter(|r| text::line_text(&r.line).contains(['│', '╮', '┤', '╯'])).map(|r| text::line_width(&r.line)).collect();
+    assert!(ws.len() >= 4 && ws.iter().all(|&w| w == ws[0]), "{ws:?}");
+}
+
+#[test]
+fn undo_button_hit_zone_and_flow() {
+    use crate::app::Pending;
+    use crate::ui::Hit;
+    let mut app = test_app(false);
+    let (term, s) = render(&mut app, 100, 30);
+    let lines: Vec<&str> = s.lines().collect();
+    let uy = lines.iter().position(|l| l.contains("14:02:11") && l.contains("↶ undo") && l.contains("⧉ copy")).expect("user meta row") as u16;
+    let ux = find_col(&term, uy, "↶").unwrap();
+    let cx = find_col(&term, uy, "⧉").unwrap();
+    assert_eq!(cx, ux + 8, "undo then two spaces then copy");
+    // Only the human prompt has an undo button.
+    assert_eq!(s.matches("↶ undo").count(), 1);
+    let v = app.views.get_mut("ses_test").unwrap();
+    for dx in 0..6 {
+        assert_eq!(v.chat.hit_at(ux + dx, uy), Some(Hit::Undo { msg: "m1".into() }), "dx={dx}");
+    }
+    assert_eq!(v.chat.hit_at(ux + 6, uy), None, "gap between buttons");
+    assert_eq!(v.chat.hit_at(ux.saturating_sub(1), uy), None);
+    assert_eq!(v.chat.hit_at(cx, uy), Some(Hit::Copy { msg: "m1".into() }));
+    assert_eq!(v.chat.hit_at(cx + 5, uy), Some(Hit::Copy { msg: "m1".into() }));
+    // Click (idle): request sent right away, removing 2 messages.
+    app.screen = ratatui::layout::Rect::new(0, 0, 100, 30);
+    let click = |app: &mut App| {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        crate::input::handle(app, mouse(MouseEventKind::Down(MouseButton::Left), ux + 2, uy));
+        crate::input::handle(app, mouse(MouseEventKind::Up(MouseButton::Left), ux + 2, uy));
+    };
+    click(&mut app);
+    let id = *app.pending.iter().find(|(_, p)| matches!(p, Pending::Undo { count: Some(2) })).map(|(k, _)| k).expect("undo request");
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response { id, ok: true, result: json!({"text": "Please fix it"}), error: None }));
+    assert_eq!(app.editor.text, "Please fix it");
+    assert!(app.toasts.items.iter().any(|t| t.text == "Undid 2 messages"));
+    // Non-empty editor is kept; the prompt goes to history instead.
+    let mut app = test_app(false);
+    render(&mut app, 100, 30);
+    app.screen = ratatui::layout::Rect::new(0, 0, 100, 30);
+    type_str(&mut app, "draft");
+    click(&mut app);
+    let id = *app.pending.iter().find(|(_, p)| matches!(p, Pending::Undo { .. })).map(|(k, _)| k).unwrap();
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response { id, ok: true, result: json!({"text": "old prompt"}), error: None }));
+    assert_eq!(app.editor.text, "draft");
+    assert_eq!(app.history.items.last().map(String::as_str), Some("old prompt"));
+    // Busy session: the first click only arms a confirmation.
+    let mut app = test_app(true);
+    render(&mut app, 100, 30);
+    app.screen = ratatui::layout::Rect::new(0, 0, 100, 30);
+    let (term, s) = render(&mut app, 100, 30);
+    let uy2 = s.lines().position(|l| l.contains("↶ undo")).unwrap() as u16;
+    let ux2 = find_col(&term, uy2, "↶").unwrap();
+    let click2 = |app: &mut App| {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        crate::input::handle(app, mouse(MouseEventKind::Down(MouseButton::Left), ux2, uy2));
+        crate::input::handle(app, mouse(MouseEventKind::Up(MouseButton::Left), ux2, uy2));
+    };
+    click2(&mut app);
+    assert!(!app.pending.values().any(|p| matches!(p, Pending::Undo { .. })));
+    assert!(app.hint.as_ref().is_some_and(|h| h.0.contains("aborts the running turn")));
+    click2(&mut app);
+    assert!(app.pending.values().any(|p| matches!(p, Pending::Undo { .. })));
+}
+
+fn bg_session(id: &str, name: &str, status: SessionStatus, attached: u32) -> SessionInfo {
+    let mut i = info();
+    i.id = id.into();
+    i.name = name.into();
+    i.status = status;
+    i.attached = attached;
+    i.created_at = 5;
+    i
+}
+
+#[test]
+fn close_session_matching() {
+    use crate::app::match_session;
+    let live = vec![bg_session("ses_1", "Worker", SessionStatus::Idle, 0), bg_session("ses_2", "worker", SessionStatus::Idle, 0), bg_session("ses_3", "Docs", SessionStatus::Idle, 0)];
+    assert_eq!(match_session(&live, "Worker").unwrap().id, "ses_1", "exact wins");
+    assert_eq!(match_session(&live, "ses_2").unwrap().id, "ses_2");
+    assert_eq!(match_session(&live, "docs").unwrap().id, "ses_3", "case-insensitive unique");
+    assert_eq!(match_session(&live, "\"Docs\"").unwrap().id, "ses_3", "quotes stripped");
+    assert!(match_session(&live, "WORKER").unwrap_err().contains("matches 2"));
+    assert!(match_session(&live, "nope").unwrap_err().contains("No live session"));
+    let mut gone = live.clone();
+    gone[2].live = false;
+    assert!(match_session(&gone, "Docs").is_err(), "only live sessions");
+    // Command parsing: alias and argument.
+    assert_eq!(crate::app::find_cmd("kill").map(|c| c.name), Some("close-session"));
+}
+
+#[test]
+fn close_session_command_and_confirmation() {
+    use crate::app::Pending;
+    use crate::ui::dialog::{Dialog, Kind};
+    let mut app = test_app(false);
+    let cur = app.views["ses_test"].info.clone();
+    app.live = vec![cur, bg_session("ses_bg", "worker-1", SessionStatus::Busy, 0), bg_session("ses_fg2", "other-fe", SessionStatus::Idle, 1)];
+    // By name: background session closes at once.
+    type_str(&mut app, "/kill worker-1");
+    crate::input::handle(&mut app, key(crossterm::event::KeyCode::Enter, crossterm::event::KeyModifiers::NONE));
+    assert!(app.pending.values().any(|p| matches!(p, Pending::Closed { name } if name == "worker-1")));
+    assert!(!app.live.iter().any(|s| s.id == "ses_bg"), "list updated right away");
+    assert_eq!(app.current.as_deref(), Some("ses_test"));
+    // Foreground in another frontend: confirm first.
+    app.pending.clear();
+    app.run_command("close-session", "OTHER-FE");
+    assert!(app.pending.is_empty());
+    assert!(app.hint.as_ref().is_some_and(|h| h.0.contains("another frontend")));
+    app.run_command("close-session", "other-fe");
+    assert!(app.pending.values().any(|p| matches!(p, Pending::Closed { .. })));
+    // Picker: live sessions only, stays open after closing, list refreshes.
+    app.live.push(bg_session("ses_x", "x1", SessionStatus::Idle, 0));
+    app.live.push(bg_session("ses_y", "y1", SessionStatus::Idle, 0));
+    app.history_list = vec![bg_session("ses_h", "old-history", SessionStatus::Idle, 0)];
+    app.run_command("close-session", "");
+    let (_, s) = render(&mut app, 120, 34);
+    assert!(s.contains("Close sessions") && s.contains("x1") && s.contains("y1") && !s.contains("old-history"), "{s}");
+    if let Some(Dialog::List(d)) = app.dialog.as_mut() {
+        d.select_key("live:ses_x");
+    }
+    app.pending.clear();
+    crate::input::handle(&mut app, key(crossterm::event::KeyCode::Enter, crossterm::event::KeyModifiers::NONE));
+    assert!(app.pending.values().any(|p| matches!(p, Pending::Closed { name } if name == "x1")));
+    assert!(matches!(&app.dialog, Some(Dialog::List(d)) if d.kind == Kind::CloseSessions), "dialog stays open");
+    let (_, s) = render(&mut app, 120, 34);
+    assert!(!s.contains("x1") && s.contains("y1"), "{s}");
+    // Closing the current session from the picker starts a new one.
+    if let Some(Dialog::List(d)) = app.dialog.as_mut() {
+        d.select_key("live:ses_test");
+    }
+    crate::input::handle(&mut app, key(crossterm::event::KeyCode::Enter, crossterm::event::KeyModifiers::NONE));
+    assert!(app.current.is_none());
+    assert!(app.pending.values().any(|p| matches!(p, Pending::Created { .. })));
+}
+
+#[test]
+fn sessions_dialog_ctrl_d_closes_with_confirm() {
+    use crate::app::Pending;
+    use crossterm::event::{KeyCode, KeyModifiers};
+    let mut app = test_app(false);
+    let cur = app.views["ses_test"].info.clone();
+    app.live = vec![cur, bg_session("ses_bg", "worker-1", SessionStatus::Idle, 0)];
+    app.open_sessions();
+    let (_, s) = render(&mut app, 120, 34);
+    assert!(s.contains("ctrl+d close live / delete history"), "{s}");
+    if let Some(crate::ui::dialog::Dialog::List(d)) = app.dialog.as_mut() {
+        d.select_key("live:ses_bg");
+    }
+    app.pending.clear();
+    crate::input::handle(&mut app, key(KeyCode::Char('d'), KeyModifiers::CONTROL));
+    let (_, s) = render(&mut app, 120, 34);
+    assert!(s.contains("ctrl+d again to close"), "{s}");
+    assert!(!app.pending.values().any(|p| matches!(p, Pending::Closed { .. })));
+    crate::input::handle(&mut app, key(KeyCode::Char('d'), KeyModifiers::CONTROL));
+    assert!(app.pending.values().any(|p| matches!(p, Pending::Closed { .. })));
+    let (_, s) = render(&mut app, 120, 34);
+    assert!(!s.contains("worker-1"), "refreshed immediately: {s}");
+    assert!(app.dialog.is_some());
+}
+
+#[test]
+fn leader_k_closes_current_and_focused_tile() {
+    use crate::app::Pending;
+    use crossterm::event::{KeyCode, KeyModifiers};
+    let lk = |app: &mut App| {
+        crate::input::handle(app, key(KeyCode::Char('x'), KeyModifiers::CONTROL));
+        crate::input::handle(app, key(KeyCode::Char('k'), KeyModifiers::NONE));
+    };
+    let mut app = test_app(false);
+    lk(&mut app);
+    assert!(app.pending.is_empty());
+    assert!(app.hint.as_ref().is_some_and(|h| h.0.contains("press ctrl+x k again to close \"ref-a1b2\"")));
+    lk(&mut app);
+    assert!(app.pending.values().any(|p| matches!(p, Pending::Closed { .. })));
+    assert!(app.pending.values().any(|p| matches!(p, Pending::Created { .. })), "new session like /close");
+    assert!(app.hint.is_none(), "confirmation hint cleared");
+    // Watch mode: closes the focused tile.
+    let mut app = test_app(false);
+    app.mode = Mode::Watch;
+    let bg = bg_session("ses_bg", "worker-1", SessionStatus::Idle, 0);
+    app.views.insert("ses_bg".into(), SessionView::new(bg.clone(), false));
+    app.live = vec![app.views["ses_test"].info.clone(), bg];
+    app.watch.focus = Some("ses_bg".into());
+    app.pending.clear();
+    lk(&mut app);
+    lk(&mut app);
+    assert!(app.pending.values().any(|p| matches!(p, Pending::Closed { name } if name == "worker-1")));
+    assert!(!app.views.contains_key("ses_bg"));
+    assert_eq!(app.current.as_deref(), Some("ses_test"), "current untouched");
+    assert_eq!(app.mode, Mode::Watch);
+}
+
+#[test]
+fn frame_interval_animates_background_sessions_in_sidebar() {
+    let mut app = test_app(false);
+    let cur = app.views["ses_test"].info.clone();
+    app.live = vec![cur, bg_session("ses_bg", "worker-1", SessionStatus::Busy, 0)];
+    let (_, s) = render(&mut app, 150, 40);
+    assert!(s.contains("Live sessions") && s.contains("worker-1"), "{s}");
+    app.toasts.items.clear();
+    assert_eq!(app.frame_interval(), Some(std::time::Duration::from_millis(80)), "sidebar spinner of an unattached busy session");
+    // Spinner advances between ticks.
+    let line_at = |app: &mut App| render(app, 150, 40).1.lines().find(|l| l.contains("worker-1")).unwrap().to_string();
+    let a = line_at(&mut app);
+    app.start -= std::time::Duration::from_millis(80);
+    let b = line_at(&mut app);
+    assert_ne!(a, b, "spinner frame changes");
+    // Sidebar hidden (narrow screen) and nothing else animating: idle, no wakeups.
+    render(&mut app, 100, 40);
+    assert_eq!(app.frame_interval(), None);
+    // Session dialog lists it too.
+    app.open_sessions();
+    app.dialog.as_mut().map(|d| if let crate::ui::dialog::Dialog::List(l) = d { l.opened -= std::time::Duration::from_secs(1) });
+    assert!(app.frame_interval().is_some());
+    app.dialog = None;
+    // Split view: an unattached busy tile animates.
+    app.mode = Mode::Watch;
+    assert!(app.frame_interval().is_some());
+}
+
+#[test]
+fn running_tool_spinner_animates_in_tiles() {
+    let mut app = test_app(false);
+    app.mode = Mode::Watch;
+    let mut inf = bg_session("ses_bg", "worker-1", SessionStatus::Running, 0);
+    inf.created_at = 1;
+    let mut v = SessionView::new(inf.clone(), false);
+    v.load_snapshot(SessionSnapshot { info: inf.clone(), messages: transcript(true), pending_permissions: vec![] });
+    app.views.insert("ses_bg".into(), v);
+    app.live = vec![inf];
+    let row = |app: &mut App| render(app, 120, 30).1.lines().find(|l| l.contains("grep")).unwrap().to_string();
+    let a = row(&mut app);
+    app.start -= std::time::Duration::from_millis(80);
+    let b = row(&mut app);
+    assert_ne!(a, b, "tool spinner in tile advances:\n{a}\n{b}");
+}
+
+#[test]
+fn terminal_title_text() {
+    let mut app = test_app(false);
+    assert_eq!(app.terminal_title(), "R|Fix the parser");
+    app.views.get_mut("ses_test").unwrap().info.title = "  ".into();
+    assert_eq!(app.terminal_title(), "R|ref-a1b2");
+    app.mode = Mode::Watch;
+    app.live = vec![bg_session("a", "a", SessionStatus::Idle, 0), bg_session("b", "b", SessionStatus::Idle, 0)];
+    assert_eq!(app.terminal_title(), "R|watch (2)");
+    app.mode = Mode::Chat;
+    app.current = None;
+    assert_eq!(app.terminal_title(), "R|ref");
+}
+
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::new();
+    let mut it = s.chars();
+    while let Some(c) = it.next() {
+        if c == '\x1b' {
+            for d in it.by_ref() {
+                if d == 'm' {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+#[test]
+fn exit_screen_text() {
+    let app = test_app(false);
+    let raw = app.epilogue().unwrap();
+    assert!(raw.contains("\x1b[38;2;250;178;131m"), "primary truecolor");
+    let t = strip_ansi(&raw);
+    let lines: Vec<&str> = t.lines().collect();
+    assert_eq!(lines[0], "  █▀▀▄ █▀▀▀ █▀▀▀");
+    assert_eq!(lines[1], "  █▄▄▀ █▀▀  █▀▀");
+    assert_eq!(lines[2], "  █  █ █▄▄▄ █");
+    assert_eq!(lines[3], "");
+    assert_eq!(lines[4], "  Session   Fix the parser  (ref-a1b2)");
+    assert_eq!(lines[5], "  Continue  ref -s ses_test");
+    // Empty session: logo only, no resume line.
+    let mut app = test_app(false);
+    app.views.get_mut("ses_test").unwrap().apply(SessionEvent::Reset { messages: vec![] });
+    let t = strip_ansi(&app.epilogue().unwrap());
+    assert!(t.contains("█▀▀▄") && !t.contains("Continue") && !t.contains("Session"));
+    // No session at all (e.g. --watch): nothing printed.
+    let mut app = test_app(false);
+    app.current = None;
+    assert!(app.epilogue().is_none());
+}
+
+fn todo_input() -> serde_json::Value {
+    json!({"todos": [
+        {"content": "Read the parser", "status": "completed"},
+        {"content": "Fix the off-by-one", "status": "in_progress"},
+        {"content": "Run the tests", "status": "pending"}
+    ]})
+}
+
+#[test]
+fn todo_rendering_everywhere() {
+    let mut app = test_app(false);
+    {
+        let v = app.views.get_mut("ses_test").unwrap();
+        v.messages[1].parts.push(tool("c9", "todo", "Plan the work", todo_input(), ToolState::Done, Some("ok"), ts(14, 2, 19), Some(ts(14, 2, 19))));
+        v.versions[1] += 1000;
+        v.info.todos = crate::ui::todo::parse_todos(&todo_input());
+    }
+    let (term, s) = render(&mut app, 150, 50);
+    println!("{s}");
+    // Transcript: collapsed todo row shows the list inline.
+    let i = s.lines().position(|l| l.contains("todo  Plan the work")).expect("todo row");
+    let lines: Vec<&str> = s.lines().collect();
+    assert!(lines[i].contains("1/3 done"));
+    assert!(lines[i + 1].contains("☑ Read the parser"));
+    assert!(lines[i + 2].contains("◐ Fix the off-by-one"));
+    assert!(lines[i + 3].contains("☐ Run the tests"));
+    // Styles: in-progress bold primary, completed struck through.
+    let y = (i + 2) as u16;
+    let x = find_col(&term, y, "F").unwrap();
+    let c = &term.backend().buffer()[(x, y)];
+    assert_eq!(c.fg, crate::ui::theme::PRIMARY);
+    assert!(c.modifier.contains(ratatui::style::Modifier::BOLD));
+    let y = (i + 1) as u16;
+    let x = find_col(&term, y, "R").unwrap();
+    assert!(term.backend().buffer()[(x, y)].modifier.contains(ratatui::style::Modifier::CROSSED_OUT));
+    // Sidebar section with progress.
+    assert!(s.contains("Todo  1/3"), "{s}");
+    // Prompt indicator.
+    assert!(s.contains("◐ Fix the off-by-one · 1/3"), "{s}");
+    // All done: indicator disappears.
+    app.views.get_mut("ses_test").unwrap().info.todos.iter_mut().for_each(|t| t.status = TodoStatus::Completed);
+    let (_, s) = render(&mut app, 150, 50);
+    assert!(!s.contains("· 3/3"), "{s}");
+    // Split tile: in-progress item in the title.
+    let mut app = test_app(false);
+    app.mode = Mode::Watch;
+    let mut inf = bg_session("ses_bg", "worker-1", SessionStatus::Busy, 0);
+    inf.todos = crate::ui::todo::parse_todos(&todo_input());
+    let mut v = SessionView::new(inf.clone(), false);
+    v.load_snapshot(SessionSnapshot { info: inf.clone(), messages: transcript(false), pending_permissions: vec![] });
+    app.views.insert("ses_bg".into(), v);
+    app.live = vec![inf];
+    let (_, s) = render(&mut app, 120, 30);
+    let title = s.lines().find(|l| l.contains("worker-1")).unwrap();
+    assert!(title.contains("◐ Fix the off-by-one · 1/3"), "{title}");
 }

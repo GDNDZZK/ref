@@ -7,7 +7,10 @@ use ratatui::text::{Line, Span};
 use ref_proto::{AgentInfo, Message, MessageSource, ModelInfo, Part, Role, ToolState};
 use serde_json::Value;
 
+use ref_proto::TodoStatus;
+
 use super::text::{self, width};
+use super::todo::{parse_todos, todo_rows};
 use super::{Hit, Row, markdown, theme};
 
 /// Max output lines shown in an expanded tool block before "show all".
@@ -114,6 +117,12 @@ fn titlecase(s: &str) -> String {
 fn copy_button(hover: bool) -> Span<'static> {
     let _ = hover;
     Span::styled("⧉ copy", theme::fg(theme::DIM))
+}
+
+pub const UNDO_LABEL: &str = "↶ undo";
+
+fn undo_button() -> Span<'static> {
+    Span::styled(UNDO_LABEL, theme::fg(theme::DIM))
 }
 
 /// Shimmer: a soft highlight sweeping over `label`.
@@ -259,12 +268,25 @@ fn render_user(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
         }
         rows.push(pad(Row::new(Line::from(truncate_spans(spans, inner))).decor()));
     }
-    // Meta row: time + copy, right aligned.
-    let right = vec![Span::styled(time.clone(), theme::muted().bg(bg)), Span::styled("  ", Style::new().bg(bg)), copy_button(false)];
+    // Meta row: time + [undo] + copy, right aligned.
+    let gap = || Span::styled("  ", Style::new().bg(bg));
+    let human = m.source == MessageSource::Human;
+    let mut right = vec![Span::styled(time.clone(), theme::muted().bg(bg)), gap()];
+    if human {
+        right.push(undo_button());
+        right.push(gap());
+    }
+    right.push(copy_button(false));
     // One column wider than the body so the button lines up with assistant footers / tool rows.
     let (line, rx) = compose(vec![], right, inner + 1);
-    let x0 = (rx + width(&time) + 2) as u16;
-    let mut meta = pad(Row::new(line).zone(x0, x0 + 6, Hit::Copy { msg: m.id.clone() })).decor();
+    let mut x0 = (rx + width(&time) + 2) as u16;
+    let mut row = Row::new(line);
+    if human {
+        let uw = width(UNDO_LABEL) as u16;
+        row = row.zone(x0, x0 + uw, Hit::Undo { msg: m.id.clone() });
+        x0 += uw + 2;
+    }
+    let mut meta = pad(row.zone(x0, x0 + 6, Hit::Copy { msg: m.id.clone() })).decor();
     for s in &mut meta.line.spans {
         if s.style.bg.is_none() {
             s.style = s.style.bg(bg);
@@ -310,6 +332,8 @@ fn render_user_compact(m: &Message, _cx: &Ctx<'_>, w: usize, color: Color) -> Ve
 
 fn is_single_line(p: &Part, idx: usize, cx: &Ctx<'_>) -> bool {
     match p {
+        // Todo rows carry their list inline: keep them visually separated from neighbours.
+        Part::Tool { name, input, .. } if name == "todo" && !parse_todos(input).is_empty() => false,
         Part::Tool { .. } => !cx.expanded(idx, cx.details),
         Part::Reasoning { .. } => !cx.expanded(idx, cx.thinking),
         _ => false,
@@ -528,6 +552,10 @@ pub fn tool_detail(name: &str, input: &Value) -> String {
         "send_message" => s("to").map(|t| format!("→ {t}")),
         "create_session" => s("name").map(|n| format!("{n} ({})", s("agent").unwrap_or_default())),
         "read_session" | "close_session" | "context_window" => s("session"),
+        "todo" => {
+            let t = parse_todos(input);
+            (!t.is_empty()).then(|| format!("{}/{} done", t.iter().filter(|x| x.status == TodoStatus::Completed).count(), t.len()))
+        }
         _ => None,
     };
     if let Some(d) = d {
@@ -551,6 +579,39 @@ pub fn tool_detail(name: &str, input: &Value) -> String {
         }
     }
     parts.join(" ")
+}
+
+/// Display width as the terminal buffer will lay it out (per grapheme, zero-width dropped).
+fn cells_width(spans: &[Span<'_>]) -> usize {
+    use unicode_segmentation::UnicodeSegmentation;
+    spans.iter().flat_map(|s| s.content.graphemes(true)).map(text::gwidth).sum()
+}
+
+/// `╭─ label ───╮` / `├─ label ───┤`, exactly `bw` columns.
+fn box_section(label: &str, first: bool, bw: usize) -> Row {
+    let bst = theme::fg(theme::BORDER);
+    let (l, r) = if first { ("╭", "╮") } else { ("├", "┤") };
+    // l + "─ " + label + " " + fill + r
+    let label = text::truncate(label, bw.saturating_sub(6));
+    let lw = cells_width(&[Span::raw(label.as_str())]);
+    let fill = bw.saturating_sub(5 + lw);
+    Row::new(Line::from(vec![
+        Span::styled(format!("{l}─ "), bst),
+        Span::styled(label, theme::bold(theme::MUTED)),
+        Span::styled(format!(" {}{r}", "─".repeat(fill)), bst),
+    ]))
+    .decor()
+}
+
+/// `│ text … │`: content padded to `iw` columns (box width = iw + 4).
+fn box_body(spans: Vec<Span<'static>>, iw: usize, soft: bool) -> Row {
+    let bst = theme::fg(theme::BORDER);
+    let lw = cells_width(&spans);
+    let mut s = vec![Span::styled("│ ", bst)];
+    s.extend(spans);
+    s.push(Span::raw(" ".repeat(iw.saturating_sub(lw))));
+    s.push(Span::styled(" │", bst));
+    Row::new(Line::from(s)).skip(2).end((2 + iw) as u16).soft(soft)
 }
 
 fn render_tool(m: &Message, idx: usize, part: &Part, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
@@ -621,7 +682,15 @@ fn render_tool(m: &Message, idx: usize, part: &Part, cx: &Ctx<'_>, w: usize) -> 
     }
     let (line, _) = compose(left, right, w);
     let hit = Hit::Toggle { msg: m.id.clone(), part: idx };
-    let mut rows = vec![Row::new(line).hit(hit).decor()];
+    let mut rows = vec![Row::new(line).hit(hit.clone()).decor()];
+    // Todo lists are always shown inline (like opencode's todo block).
+    if name == "todo" {
+        let todos = parse_todos(input);
+        let max = if cx.compact { 8 } else { usize::MAX };
+        for r in todo_rows(&todos, w.saturating_sub(2), max) {
+            rows.push(r.hit(hit.clone()).indent(vec![Span::raw("  ")]));
+        }
+    }
 
     let out_text = output.as_deref().map(text::sanitize).unwrap_or_default();
     if !exp || cx.compact {
@@ -642,25 +711,9 @@ fn render_tool(m: &Message, idx: usize, part: &Part, cx: &Ctx<'_>, w: usize) -> 
     let bw = w.saturating_sub(2).max(10); // box total width
     let iw = bw.saturating_sub(4).max(4); // inner text width
     let bst = theme::fg(theme::BORDER);
-    let section = |label: &str, first: bool| -> Row {
-        let (l, r) = if first { ("╭", "╮") } else { ("├", "┤") };
-        let lab = format!("─ {label} ");
-        let fill = bw.saturating_sub(2 + width(&lab));
-        Row::new(Line::from(vec![
-            Span::styled(format!("{l}{}", "─"), bst),
-            Span::styled(label.to_string(), theme::bold(theme::MUTED)),
-            Span::styled(format!(" {}{r}", "─".repeat(fill.saturating_sub(0))), bst),
-        ]))
-        .decor()
-    };
-    let body = |spans: Vec<Span<'static>>, soft: bool| -> Row {
-        let lw = spans_width(&spans);
-        let mut s = vec![Span::styled("│ ", bst)];
-        s.extend(spans);
-        s.push(Span::raw(" ".repeat(iw.saturating_sub(lw))));
-        s.push(Span::styled(" │", bst));
-        Row::new(Line::from(s)).skip(2).end((2 + iw) as u16).soft(soft)
-    };
+    // Every row is exactly `bw` columns wide so the right borders line up.
+    let section = |label: &str, first: bool| -> Row { box_section(label, first, bw) };
+    let body = |spans: Vec<Span<'static>>, soft: bool| -> Row { box_body(spans, iw, soft) };
     let push_text = |rows: &mut Vec<Row>, t: &str, style: Style, limit: Option<usize>| -> usize {
         let lines: Vec<&str> = t.split('\n').collect();
         let n = lines.len();

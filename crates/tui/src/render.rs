@@ -14,9 +14,11 @@ use crate::ui::footer::{self, StatusCtx};
 use crate::ui::message::{self, Ctx};
 use crate::ui::permission::PermissionView;
 use crate::ui::text::{self, width};
-use crate::ui::{Row, split, theme};
+use crate::ui::{Row, split, theme, todo};
 
 pub const SIDEBAR_W: u16 = 32;
+/// Minimum terminal width at which the sidebar is shown.
+pub const SIDEBAR_MIN_SCREEN: u16 = 140;
 const EDITOR_MAX: usize = 10;
 
 pub struct Layout {
@@ -28,7 +30,7 @@ pub struct Layout {
 }
 
 pub fn chat_layout(app: &App, area: Rect) -> Layout {
-    let sidebar = (app.sidebar && area.width >= 140 && app.current.is_some()).then(|| Rect::new(area.x + area.width - SIDEBAR_W, area.y, SIDEBAR_W, area.height));
+    let sidebar = (app.sidebar && area.width >= SIDEBAR_MIN_SCREEN && app.current.is_some()).then(|| Rect::new(area.x + area.width - SIDEBAR_W, area.y, SIDEBAR_W, area.height));
     let main_w = area.width - sidebar.map(|s| s.width + 1).unwrap_or(0);
     let main = Rect::new(area.x, area.y, main_w, area.height);
     // Prompt box: 1 col margin each side; inner: bar(1) + pad(2) + text + pad(2).
@@ -198,6 +200,7 @@ fn draw_prompt(buf: &mut Buffer, lay: &Layout, app: &mut App, focused: bool) -> 
     let busy = view.is_some_and(|v| v.is_busy());
     let view_model = view.map(|v| v.info.model.clone()).filter(|m| !m.model.is_empty());
     let queued = view.map(|v| v.queued.len()).unwrap_or(0);
+    let todos = view.map(|v| v.info.todos.clone()).unwrap_or_default();
     let bar_color = if app.shell_mode { theme::WARNING } else { app.agent_color(&agent) };
     // Body (all rows but the bottom edge).
     let body = Rect::new(p.x, p.y, p.width, p.height - 1);
@@ -242,6 +245,17 @@ fn draw_prompt(buf: &mut Buffer, lay: &Layout, app: &mut App, focused: bool) -> 
             right.push(Span::styled(" · ", Style::new().fg(theme::MUTED).bg(bg)));
         }
         right.push(Span::styled(format!("{q} queued"), Style::new().fg(theme::MUTED).bg(bg)));
+    }
+    // Todo progress (current item · done/total), at most ~half the row so the model stays visible.
+    let used: usize = right.iter().map(|s| width(&s.content)).sum();
+    let room = (mw / 2).saturating_sub(used + if used > 0 { 3 } else { 0 });
+    if let Some(spans) = todo::progress_spans(&todos, room) {
+        if !right.is_empty() {
+            right.insert(0, Span::styled(" · ", Style::new().fg(theme::MUTED).bg(bg)));
+        }
+        for s in spans.into_iter().rev() {
+            right.insert(0, s);
+        }
     }
     if !right.is_empty() {
         let (l, _) = message::compose(meta.spans.clone(), right, mw);
@@ -355,6 +369,17 @@ fn draw_sidebar(buf: &mut Buffer, r: Rect, app: &mut App, tick: u64) {
             spans.push(Span::styled(ch, st));
         }
         put(buf, &mut y, spans);
+    }
+    if !v.info.todos.is_empty() {
+        y += 1;
+        let (done, total) = todo::counts(&v.info.todos);
+        put(buf, &mut y, vec![Span::styled("Todo", theme::bold(theme::ACCENT)), Span::styled(format!("  {done}/{total}"), theme::muted())]);
+        // Leave room for the live session list below.
+        let room = (r.y + r.height).saturating_sub(y + 4) as usize;
+        let rows = todo::todo_rows(&v.info.todos, w, room.clamp(1, 12));
+        for row in rows.into_iter().take(room.max(1)) {
+            put(buf, &mut y, row.line.spans);
+        }
     }
     y += 1;
     put(buf, &mut y, vec![Span::styled("Live sessions", theme::bold(theme::ACCENT))]);
