@@ -224,7 +224,8 @@ pub enum MessageSource {
     Spawn { from_id: String, from_name: String },
     /// Automatic reminder injected by the harness (e.g. must_report).
     Reminder,
-    /// Summary that replaced older context (compaction).
+    /// Summary that replaced older context (compaction). Messages BEFORE the last Compaction
+    /// message stay in the transcript (visible to users) but are no longer sent to the model.
     Compaction,
     /// Output of a `!command` shell invocation by the user.
     Shell,
@@ -416,6 +417,18 @@ pub struct CommandInfo {
     pub source: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct McpServerStatus {
+    pub name: String,
+    /// "connected" | "connecting" | "failed" | "disabled"
+    pub status: String,
+    #[serde(default)]
+    pub error: Option<String>,
+    /// Tool names as exposed to the model (`<server>_<tool>`).
+    #[serde(default)]
+    pub tools: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfigInfo {
     pub agents: Vec<AgentInfo>,
@@ -548,6 +561,11 @@ pub enum Request {
         command: String,
         #[serde(default)]
         args: String,
+    },
+    /// MCP servers for the connection's cwd config (or `cwd`). -> `{servers: [McpServerStatus]}`
+    McpStatus {
+        #[serde(default)]
+        cwd: Option<String>,
     },
     /// Shut the backend down (used by `ref-server --stop`).
     Shutdown,
