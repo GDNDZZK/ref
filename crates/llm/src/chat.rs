@@ -31,12 +31,26 @@ const IGNORED_OPTIONS: &[&str] = &[
     "strictJsonSchema",
     "setCacheKey",
     "include",
+    // Responses-only (`reasoning.summary`); opencode configs often share option blocks between
+    // Responses and Chat models, and strict OpenAI-style hosts 400 on unknown fields.
+    "reasoningSummary",
 ];
 
 /// Reasoning text fields in delta priority order.
 const REASONING_FIELDS: &[&str] = &["reasoning_content", "reasoning", "reasoning_text"];
 
 const MAX_ID_LEN: usize = 40;
+
+/// Wire tool-call id. OpenAI enforces 40 chars; Responses-style `call|item` ids are reduced to
+/// a safe form everywhere. Other hosts get their own ids back untouched (OpenRouter/NIM emit
+/// 41-char `call-<uuid>` ids, and rewriting them is pointless at best).
+fn wire_id(spec: &ModelSpec, id: &str) -> String {
+    if is_openai(spec) || id.contains('|') || id.is_empty() {
+        sanitize_id(id, MAX_ID_LEN)
+    } else {
+        id.to_string()
+    }
+}
 
 pub(crate) async fn stream(
     client: &reqwest::Client,
@@ -53,6 +67,18 @@ pub(crate) async fn stream(
 
 fn is_openai(spec: &ModelSpec) -> bool {
     host_has(spec, "api.openai.com")
+}
+
+/// OpenAI reasoning models (gpt-5*, o1/o3/o4*) reject `max_tokens` with a 400 and require
+/// `max_completion_tokens`, also behind OpenAI-compatible proxies (opencode defaults to
+/// `max_completion_tokens` for unknown hosts for the same reason).
+fn wants_max_completion_tokens(spec: &ModelSpec) -> bool {
+    if is_openai(spec) {
+        return true;
+    }
+    let m = spec.api_model.to_ascii_lowercase();
+    let m = m.strip_prefix("openai/").unwrap_or(&m);
+    m.starts_with("gpt-5") || ["o1", "o3", "o4"].iter().any(|p| m == *p || m.starts_with(&format!("{p}-")))
 }
 
 fn is_deepseek(spec: &ModelSpec) -> bool {
@@ -117,7 +143,7 @@ pub(crate) fn build_body(spec: &ModelSpec, req: &ChatRequest) -> Value {
     body.insert("stream".into(), Value::Bool(true));
     body.insert("stream_options".into(), serde_json::json!({"include_usage": true}));
     if let Some(max) = max_tokens(spec, req) {
-        let field = if is_openai(spec) { "max_completion_tokens" } else { "max_tokens" };
+        let field = if wants_max_completion_tokens(spec) { "max_completion_tokens" } else { "max_tokens" };
         body.insert(field.into(), Value::from(max));
     }
 
@@ -226,7 +252,7 @@ fn build_messages(spec: &ModelSpec, req: &ChatRequest) -> Vec<Value> {
                             }
                         }
                         AssistantPart::ToolCall { id, name, arguments } => calls.push(serde_json::json!({
-                            "id": sanitize_id(id, MAX_ID_LEN),
+                            "id": wire_id(spec, id),
                             "type": "function",
                             "function": {"name": name, "arguments": if arguments.trim().is_empty() { "{}" } else { arguments.as_str() }},
                         })),
@@ -266,7 +292,7 @@ fn build_messages(spec: &ModelSpec, req: &ChatRequest) -> Vec<Value> {
             LlmMessage::ToolResult { call_id, content, images, .. } => {
                 out.push(serde_json::json!({
                     "role": "tool",
-                    "tool_call_id": sanitize_id(&call_id, MAX_ID_LEN),
+                    "tool_call_id": wire_id(spec, &call_id),
                     "content": tool_output_text(&content),
                 }));
                 for img in &images {
@@ -723,5 +749,123 @@ data: [DONE]
         };
         let b = build_body(&s, &req2);
         assert!(b["messages"][1].get("reasoning_content").is_none());
+    }
+
+    /// Captured from OpenRouter (nvidia/nemotron via Chat, sanitized): reasoning arrives in both
+    /// `reasoning` and `reasoning_details`, `content:""` rides along every reasoning delta, the
+    /// tool call id is a 41-char `call-<uuid>`, and finish_reason is repeated on the usage chunk.
+    const OPENROUTER_TOOL: &str = r#"data: {"id":"gen-1","object":"chat.completion.chunk","model":"nvidia/nemotron-3.5-lightning:free","provider":"Nvidia","choices":[{"index":0,"delta":{"content":"","role":"assistant","reasoning":"We","reasoning_details":[{"type":"reasoning.text","text":"We","format":"unknown","index":0}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1","object":"chat.completion.chunk","model":"nvidia/nemotron-3.5-lightning:free","provider":"Nvidia","choices":[{"index":0,"delta":{"content":"","role":"assistant","reasoning":" call it.","reasoning_details":[{"type":"reasoning.text","text":" call it.","format":"unknown","index":0}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1","object":"chat.completion.chunk","model":"nvidia/nemotron-3.5-lightning:free","provider":"Nvidia","choices":[{"index":0,"delta":{"content":null,"role":"assistant","tool_calls":[{"index":0,"id":"call-87e5d71a-b3eb-43e4-a1bd-2dc81ae91b9c","type":"function","function":{"name":"get_weather","arguments":""}}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1","object":"chat.completion.chunk","model":"nvidia/nemotron-3.5-lightning:free","provider":"Nvidia","choices":[{"index":0,"delta":{"content":null,"role":"assistant","tool_calls":[{"index":0,"function":{"arguments":"{\"city\":\"Paris\"}"}}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1","object":"chat.completion.chunk","model":"nvidia/nemotron-3.5-lightning:free","provider":"Nvidia","choices":[{"index":0,"delta":{"content":"","role":"assistant","reasoning":null},"finish_reason":"tool_calls","native_finish_reason":"tool_calls"}]}
+
+data: {"id":"gen-1","object":"chat.completion.chunk","model":"nvidia/nemotron-3.5-lightning:free","provider":"Nvidia","service_tier":null,"choices":[{"index":0,"delta":{"content":"","role":"assistant"},"finish_reason":"tool_calls","native_finish_reason":"tool_calls"}],"usage":{"prompt_tokens":305,"completion_tokens":57,"total_tokens":362,"cost":0,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"cache_write_tokens":0,"audio_tokens":0,"video_tokens":0},"completion_tokens_details":{"reasoning_tokens":31,"image_tokens":0,"audio_tokens":0}}}
+
+data: [DONE]
+
+"#;
+
+    #[test]
+    fn openrouter_capture_and_long_call_id_round_trip() {
+        let (events, reason) = run_parser(&mut ChatParser::default(), OPENROUTER_TOOL).unwrap();
+        assert_eq!(reason, FinishReason::ToolUse);
+        let id = "call-87e5d71a-b3eb-43e4-a1bd-2dc81ae91b9c";
+        assert_eq!(id.len(), 41);
+        assert!(events.iter().any(|e| matches!(e, StreamEvent::ToolCallEnd { id: i, arguments } if i == id && arguments == r#"{"city":"Paris"}"#)));
+        let replay = events.iter().find_map(|e| if let StreamEvent::ReasoningEnd { replay } = e { Some(replay.clone()) } else { None }).unwrap();
+        assert_eq!(replay["field"], "reasoning");
+        assert_eq!(replay["details"][0]["text"], "We call it.");
+        let u = events.iter().find_map(|e| if let StreamEvent::Usage(u) = e { Some(u.clone()) } else { None }).unwrap();
+        assert_eq!((u.input, u.output, u.reasoning), (305, 57, 31));
+
+        // Bug: the 41-char id used to be rewritten to `call-87e5..._<hash>` on replay. The host's
+        // own id must go back unchanged (only OpenAI itself enforces 40 chars).
+        let history = vec![
+            LlmMessage::User(vec![Content::Text("weather?".into())]),
+            LlmMessage::Assistant {
+                parts: vec![AssistantPart::ToolCall { id: id.into(), name: "get_weather".into(), arguments: "{}".into() }],
+                replay: true,
+            },
+            LlmMessage::ToolResult { call_id: id.into(), name: "get_weather".into(), content: "sunny".into(), images: vec![], is_error: false },
+        ];
+        let req = ChatRequest { messages: history, ..Default::default() };
+        let b = build_body(&spec("https://openrouter.ai/api/v1", "nvidia/nemotron-3.5-lightning:free"), &req);
+        assert_eq!(b["messages"][1]["tool_calls"][0]["id"], id);
+        assert_eq!(b["messages"][2]["tool_call_id"], id);
+        // OpenAI proper still gets the 40-char limit, consistently on call and result.
+        let b = build_body(&spec("https://api.openai.com/v1", "gpt-5"), &req);
+        let wire = b["messages"][1]["tool_calls"][0]["id"].as_str().unwrap().to_string();
+        assert_eq!(wire.len(), 40);
+        assert_eq!(b["messages"][2]["tool_call_id"], wire);
+        // Responses-style `call|item` ids are always reduced.
+        assert_eq!(wire_id(&spec("https://x.example/v1", "m"), "call_1|fc_1"), "call_1_fc_1");
+    }
+
+    /// Captured from Zhipu GLM-5.3 (coding plan): two parallel calls keyed by index, GLM's
+    /// `tool_stream` fragments, usage with `cached_tokens` on the finish chunk.
+    #[test]
+    fn glm_parallel_tool_calls_capture() {
+        let raw = r#"data: {"id":"1","created":1,"object":"chat.completion.chunk","model":"glm-5.3","choices":[{"index":0,"delta":{"tool_calls":[{"id":"call_b183b4919efb46499ce1efb6","index":0,"type":"function","function":{"name":"get_weather","arguments":"{\""}}]}}]}
+
+data: {"id":"1","created":1,"object":"chat.completion.chunk","model":"glm-5.3","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"type":"function","function":{"arguments":"city\":\"Paris\"}"}}]}}]}
+
+data: {"id":"1","created":1,"object":"chat.completion.chunk","model":"glm-5.3","choices":[{"index":0,"delta":{"tool_calls":[{"id":"call_f480bc12b5c44691b37e12ab","index":1,"type":"function","function":{"name":"get_weather","arguments":"{\""}}]}}]}
+
+data: {"id":"1","created":1,"object":"chat.completion.chunk","model":"glm-5.3","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"type":"function","function":{"arguments":"city\":\"L"}}]}}]}
+
+data: {"id":"1","created":1,"object":"chat.completion.chunk","model":"glm-5.3","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"type":"function","function":{"arguments":"yon\"}"}}]}}]}
+
+data: {"id":"1","created":1,"object":"chat.completion.chunk","model":"glm-5.3","choices":[{"index":0,"finish_reason":"tool_calls","delta":{"role":"assistant","content":""}}],"usage":{"prompt_tokens":198,"completion_tokens":53,"total_tokens":251,"prompt_tokens_details":{"cached_tokens":128},"completion_tokens_details":{"reasoning_tokens":30}}}
+
+data: [DONE]
+
+"#;
+        let (events, reason) = run_parser(&mut ChatParser::default(), raw).unwrap();
+        assert_eq!(reason, FinishReason::ToolUse);
+        let ends: Vec<(String, String)> = events
+            .iter()
+            .filter_map(|e| if let StreamEvent::ToolCallEnd { id, arguments } = e { Some((id.clone(), arguments.clone())) } else { None })
+            .collect();
+        assert_eq!(
+            ends,
+            [
+                ("call_b183b4919efb46499ce1efb6".to_string(), r#"{"city":"Paris"}"#.to_string()),
+                ("call_f480bc12b5c44691b37e12ab".to_string(), r#"{"city":"Lyon"}"#.to_string()),
+            ]
+        );
+        let u = events.iter().find_map(|e| if let StreamEvent::Usage(u) = e { Some(u.clone()) } else { None }).unwrap();
+        assert_eq!((u.input, u.cache_read, u.output, u.reasoning), (70, 128, 53, 30));
+    }
+
+    /// opencode configs for gpt-5 behind OpenAI-compatible proxies (e.g. hcai) carry Responses
+    /// variants: `reasoningSummary` must not leak into a Chat body, and OpenAI reasoning models
+    /// need `max_completion_tokens` (they 400 on `max_tokens`) even on third-party hosts.
+    #[test]
+    fn gpt5_on_compatible_proxy() {
+        let mut s = spec("https://ai.hctopup.com/v1", "gpt-5.5");
+        s.options = serde_json::from_value(json!({
+            "include": ["reasoning.encrypted_content"], "store": false,
+            "reasoningEffort": "high", "textVerbosity": "medium", "reasoningSummary": "auto"
+        }))
+        .unwrap();
+        let req = ChatRequest { messages: vec![LlmMessage::User(vec![Content::Text("hi".into())])], ..Default::default() };
+        let b = build_body(&s, &req);
+        assert_eq!(b["reasoning_effort"], "high");
+        assert_eq!(b["verbosity"], "medium");
+        assert_eq!(b["max_completion_tokens"], 8000);
+        for k in ["reasoningSummary", "include", "store", "max_tokens"] {
+            assert!(b.get(k).is_none(), "{k}");
+        }
+        for m in ["o3-mini", "openai/gpt-5.1", "o4"] {
+            assert!(build_body(&spec("https://x.example/v1", m), &req).get("max_completion_tokens").is_some(), "{m}");
+        }
+        for m in ["glm-5.3", "deepseek-chat", "gpt-4o", "o1x"] {
+            assert!(build_body(&spec("https://x.example/v1", m), &req).get("max_tokens").is_some(), "{m}");
+        }
     }
 }

@@ -172,7 +172,8 @@ fn thinking_config(spec: &ModelSpec) -> (Option<Value>, Option<String>) {
                 thinking = Some(serde_json::json!({"type": "enabled", "budget_tokens": effort_budget(re)}));
             }
         } else if spec.reasoning && supports_adaptive(&spec.api_model) {
-            thinking = Some(serde_json::json!({"type": "adaptive"}));
+            // Newer models default to `display: omitted` (empty thinking text); ask for summaries.
+            thinking = Some(serde_json::json!({"type": "adaptive", "display": "summarized"}));
         }
     }
     // Normalize budgetTokens → budget_tokens.
@@ -807,7 +808,7 @@ data: {"type":"message_stop"}
 
         let mut s = spec("claude-opus-4-6");
         s.reasoning = true;
-        assert_eq!(build_body(&s, &req)["thinking"], json!({"type":"adaptive"}));
+        assert_eq!(build_body(&s, &req)["thinking"], json!({"type":"adaptive","display":"summarized"}));
         s.api_model = "claude-sonnet-4-5".into();
         assert!(build_body(&s, &req).get("thinking").is_none());
     }
@@ -828,5 +829,62 @@ data: {"type":"message_stop"}
         assert!(h.get("x-api-key").is_none());
         assert_eq!(h["authorization"], "Bearer sk-ant-oat01-abc");
         assert_eq!(build_body(&s, &req)["system"][0]["text"], CLAUDE_CODE_IDENTITY);
+    }
+
+    /// Captured from claude-haiku-5.5 via coding.dgnai.cn (signature shortened): an adaptive
+    /// thinking block with NO thinking text, only a signature, plus the gateway's extra
+    /// `contextUsagePercentage` usage field and the cache usage split.
+    #[test]
+    fn dgn_signature_only_thinking_capture() {
+        let raw = r#"event: message_start
+data: {"message":{"content":[],"id":"msg_716a","model":"claude-haiku-5.5","role":"assistant","stop_reason":null,"stop_sequence":null,"type":"message","usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":67,"input_tokens":15,"output_tokens":1}},"type":"message_start"}
+
+event: content_block_start
+data: {"content_block":{"thinking":"","type":"thinking"},"index":0,"type":"content_block_start"}
+
+event: content_block_delta
+data: {"delta":{"signature":"CAQShAcKEggTEAEYAjgB","type":"signature_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_stop
+data: {"index":0,"type":"content_block_stop"}
+
+event: content_block_start
+data: {"content_block":{"text":"","type":"text"},"index":1,"type":"content_block_start"}
+
+event: content_block_delta
+data: {"delta":{"text":"It is sunny.","type":"text_delta"},"index":1,"type":"content_block_delta"}
+
+event: content_block_stop
+data: {"index":1,"type":"content_block_stop"}
+
+event: message_delta
+data: {"delta":{"stop_reason":"end_turn","stop_sequence":null},"type":"message_delta","usage":{"cache_creation":{"ephemeral_1h_input_tokens":0,"ephemeral_5m_input_tokens":0},"cache_creation_input_tokens":0,"cache_read_input_tokens":67,"contextUsagePercentage":0.2556999921798706,"input_tokens":15,"output_tokens":16}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+"#;
+        let (events, reason) = run_parser(&mut AnthropicParser::default(), raw).unwrap();
+        assert_eq!(reason, FinishReason::Stop);
+        assert!(matches!(&events[0], StreamEvent::ReasoningEnd { replay } if replay["signature"] == "CAQShAcKEggTEAEYAjgB"));
+        let StreamEvent::Usage(u) = events.last().unwrap() else { panic!() };
+        assert_eq!((u.input, u.cache_read, u.cache_write, u.output), (15, 67, 0, 16));
+        // The empty-text signed block must still be replayed before the tool_use.
+        let req = ChatRequest {
+            messages: vec![
+                LlmMessage::User(vec![Content::Text("q".into())]),
+                LlmMessage::Assistant {
+                    parts: vec![
+                        AssistantPart::Reasoning { text: String::new(), replay: json!({"signature": "CAQS"}) },
+                        AssistantPart::ToolCall { id: "toolu_bdrk_01PzUrkrVxVbWocYTYb5tSAm".into(), name: "w".into(), arguments: "{}".into() },
+                    ],
+                    replay: true,
+                },
+            ],
+            ..Default::default()
+        };
+        let b = build_body(&spec("claude-haiku-5.5"), &req);
+        assert_eq!(b["messages"][1]["content"][0], json!({"type":"thinking","thinking":"","signature":"CAQS"}));
+        assert_eq!(b["messages"][1]["content"][1]["id"], "toolu_bdrk_01PzUrkrVxVbWocYTYb5tSAm");
     }
 }

@@ -9,3 +9,28 @@ path = "src/main.rs"
 
 [dependencies]
 hn-proto.workspace = true
+hn-llm.workspace = true
+hn-tools.workspace = true
+hn-config.workspace = true
+hn-mcp.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
+axum.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+chrono.workspace = true
+ulid.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+libc.workspace = true
+regex.workspace = true
+async-trait.workspace = true
+reqwest.workspace = true
+rand.workspace = true
+tokio-tungstenite.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

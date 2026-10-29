@@ -633,4 +633,55 @@ mod tests {
         assert!(input[2].get("id").is_none());
         assert_eq!(input[2]["call_id"], "call_1");
     }
+
+    /// Captured from OpenRouter's Responses endpoint (nemotron, trimmed): raw `reasoning_text`
+    /// deltas (no summary, no encrypted_content), `rs_tmp_`/`fc_tmp_` ids, `call-<uuid>` call ids.
+    #[test]
+    fn openrouter_responses_capture_and_replay() {
+        let raw = sse(&[
+            json!({"type":"response.created","response":{"id":"gen-1","status":"in_progress","output":[]}}),
+            json!({"type":"response.output_item.added","output_index":0,"item":{"id":"rs_tmp_8vzb","type":"reasoning","status":"in_progress","summary":[]},"sequence_number":2}),
+            json!({"type":"response.content_part.added","output_index":0,"item_id":"rs_tmp_8vzb","content_index":0,"part":{"type":"reasoning_text","text":""}}),
+            json!({"type":"response.reasoning_text.delta","output_index":0,"item_id":"rs_tmp_8vzb","content_index":0,"delta":"Call the"}),
+            json!({"type":"response.reasoning_text.delta","output_index":0,"item_id":"rs_tmp_8vzb","content_index":0,"delta":" tool."}),
+            json!({"type":"response.reasoning_text.done","output_index":0,"item_id":"rs_tmp_8vzb","content_index":0,"text":"Call the tool."}),
+            json!({"type":"response.output_item.done","output_index":0,"item":{"id":"rs_tmp_8vzb","type":"reasoning","status":"completed","content":[{"type":"reasoning_text","text":"Call the tool."}],"summary":[],"format":"unknown"}}),
+            json!({"type":"response.output_item.added","output_index":1,"item":{"id":"fc_tmp_uz0e","type":"function_call","status":"in_progress","call_id":"call-697e7d10-f945-41c6-8e09-0c62f233b101","name":"get_weather","arguments":""}}),
+            json!({"type":"response.function_call_arguments.delta","output_index":1,"item_id":"fc_tmp_uz0e","delta":"{\"city\":\"Paris\"}"}),
+            json!({"type":"response.function_call_arguments.done","output_index":1,"item_id":"fc_tmp_uz0e","name":"get_weather","arguments":"{\"city\":\"Paris\"}"}),
+            json!({"type":"response.output_item.done","output_index":1,"item":{"id":"fc_tmp_uz0e","type":"function_call","status":"completed","call_id":"call-697e7d10-f945-41c6-8e09-0c62f233b101","name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}),
+            json!({"type":"response.completed","response":{"id":"gen-1","status":"completed","output":[],"usage":{"input_tokens":311,"input_tokens_details":{"cached_tokens":0},"output_tokens":49,"output_tokens_details":{"reasoning_tokens":23},"total_tokens":360,"cost":0}}}),
+        ]);
+        let (events, reason) = run_parser(&mut ResponsesParser::default(), &raw).unwrap();
+        assert_eq!(reason, FinishReason::ToolUse);
+        let reasoning: String = events.iter().filter_map(|e| if let StreamEvent::ReasoningDelta(d) = e { Some(d.as_str()) } else { None }).collect();
+        assert_eq!(reasoning, "Call the tool.");
+        let id = "call-697e7d10-f945-41c6-8e09-0c62f233b101|fc_tmp_uz0e";
+        assert!(events.iter().any(|e| matches!(e, StreamEvent::ToolCallEnd { id: i, arguments } if i == id && arguments == "{\"city\":\"Paris\"}")));
+        let item = events.iter().find_map(|e| if let StreamEvent::ReasoningEnd { replay } = e { Some(replay.clone()) } else { None }).unwrap();
+        // store:false + no encrypted_content: the reasoning item is not replayable and is skipped;
+        // the call/result pair is replayed with the original ids (this round trip passed live).
+        let req = ChatRequest {
+            messages: vec![
+                LlmMessage::User(vec![Content::Text("q".into())]),
+                LlmMessage::Assistant {
+                    parts: vec![
+                        AssistantPart::Reasoning { text: reasoning.clone(), replay: item },
+                        AssistantPart::ToolCall { id: id.into(), name: "get_weather".into(), arguments: "{\"city\":\"Paris\"}".into() },
+                    ],
+                    replay: true,
+                },
+                LlmMessage::ToolResult { call_id: id.into(), name: "get_weather".into(), content: "sunny".into(), images: vec![], is_error: false },
+            ],
+            ..Default::default()
+        };
+        let mut s = spec();
+        s.base_url = "https://openrouter.ai/api/v1".into();
+        let b = build_body(&s, &req);
+        let input = b["input"].as_array().unwrap();
+        assert_eq!(input.len(), 3);
+        assert_eq!(input[1]["id"], "fc_tmp_uz0e");
+        assert_eq!(input[1]["call_id"], "call-697e7d10-f945-41c6-8e09-0c62f233b101");
+        assert_eq!(input[2]["call_id"], "call-697e7d10-f945-41c6-8e09-0c62f233b101");
+    }
 }

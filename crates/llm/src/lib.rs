@@ -219,3 +219,22 @@ pub fn estimate_tokens(text: &str) -> u64 {
     }
     ascii / 4 + other * 2 / 3 + 1
 }
+
+#[cfg(test)]
+mod send_tests {
+    use super::*;
+
+    fn assert_send<T: Send>(_: &T) {}
+
+    /// The stream future must be `Send` so callers can `tokio::spawn` turns.
+    #[test]
+    fn stream_future_is_send() {
+        let client = http_client();
+        let spec = ModelSpec::default();
+        let req = ChatRequest::default();
+        let cancel = CancellationToken::new();
+        let mut cb = |_: StreamEvent| {};
+        let fut = stream(&client, &spec, &req, &cancel, &mut cb);
+        assert_send(&fut);
+    }
+}

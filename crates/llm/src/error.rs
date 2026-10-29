@@ -204,7 +204,7 @@ static RATE_LIMIT_TEXT: LazyLock<Regex> = LazyLock::new(|| {
 /// Explicit, non-transient billing / account signals (fatal even on 429).
 static BILLING_TEXT: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?i)insufficient[-_\s]?(?:quota|balance|credits?|funds)|billing[-_\s]?(?:error|details|hard limit)|out of (?:budget|credits)|package has expired|plan does not yet include|subscription_sharing_\w*usage_limit_exceeded|account (?:is |has been )?(?:suspended|deactivated|disabled)",
+        r"(?i)insufficient[-_\s]?(?:quota|balance|credits?|funds)|billing[-_\s]?(?:error|details|hard limit)|out of (?:budget|credits)|package has expired|package is disabled|plan does not yet include|subscription_sharing_\w*usage_limit_exceeded|account (?:is |has been )?(?:suspended|deactivated|disabled)|余额不足|已欠费|无可用资源包|套餐已到期|套餐已失效|套餐暂未开放|套餐包被禁用",
     )
     .expect("billing regex")
 });
@@ -214,7 +214,7 @@ static AUTH_TEXT: LazyLock<Regex> =
 
 static CONTENT_POLICY_TEXT: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?i)violating our usage policy|blocked by content filtering policy|content[-_\s]?policy|rejected (?:as a result of our|by the) safety system|detected potentially unsafe or sensitive content",
+        r"(?i)violating our usage policy|blocked by content filtering policy|content[-_\s]?policy|rejected (?:as a result of our|by the) safety system|detected potentially unsafe or sensitive content|不安全或敏感内容",
     )
     .expect("policy regex")
 });
@@ -360,7 +360,12 @@ pub fn classify(status: Option<u16>, body: &str) -> ErrorKind {
     {
         return ErrorKind::Retryable;
     }
-    // 6. Server-side / transient.
+    // 6. Unknown model: new-api / one-api gateways answer 503 `model_not_found` ("No available
+    //    channel for model X") for models the account cannot use; retrying never helps.
+    if codes.iter().any(|c| c == "model_not_found") {
+        return ErrorKind::Fatal;
+    }
+    // 7. Server-side / transient.
     match status {
         Some(408 | 409 | 425) => return ErrorKind::Retryable,
         Some(s) if s >= 500 => return ErrorKind::Retryable,
@@ -372,11 +377,11 @@ pub fn classify(status: Option<u16>, body: &str) -> ErrorKind {
     if TRANSIENT_TEXT.is_match(&text) && !has(INVALID_CODES) {
         return ErrorKind::Retryable;
     }
-    // 7. Deterministic request rejections.
+    // 8. Deterministic request rejections.
     if has(INVALID_CODES) || (client_scoped && status.is_some()) {
         return ErrorKind::Fatal;
     }
-    // 8. Unknown → retry.
+    // 9. Unknown → retry.
     ErrorKind::Retryable
 }
 
@@ -425,6 +430,47 @@ mod tests {
         assert_eq!(classify(None, "something weird"), ErrorKind::Retryable);
         assert_eq!(classify(Some(400), "model is overloaded, try again later"), ErrorKind::Retryable);
         assert_eq!(classify(Some(408), ""), ErrorKind::Retryable);
+    }
+
+    /// Real error bodies captured from Zhipu/Z.ai (codes per docs.bigmodel.cn/cn/faq/api-code),
+    /// Tencent TokenHub and a new-api gateway.
+    #[test]
+    fn real_provider_bodies() {
+        // Zhipu billing / plan signals arrive as HTTP 429 with Chinese messages: fatal.
+        for body in [
+            r#"{"error":{"code":"1113","message":"余额不足或无可用资源包,请充值。"}}"#,
+            r#"{"error":{"code":"1113","message":"您的账户已欠费，请充值后重试"}}"#,
+            r#"{"error":{"code":"1309","message":"您的 GLM Coding Plan 套餐已到期，暂无法使用，前往官方续订后即可恢复"}}"#,
+            r#"{"error":{"code":"1311","message":"当前订阅套餐暂未开放glm-9权限"}}"#,
+        ] {
+            assert_eq!(classify(Some(429), body), ErrorKind::Fatal, "{body}");
+        }
+        // Zhipu throttles and resetting usage windows stay retryable.
+        for body in [
+            r#"{"error":{"code":"1302","message":"您的账户已达到速率限制，请您控制请求频率"}}"#,
+            r#"{"error":{"code":"1305","message":"该模型当前访问量过大，请您稍后再试"}}"#,
+            r#"{"error":{"code":"1308","message":"已达到 5 小时 的使用上限。您的限额将在 2026-10-29 10:00:00 重置"}}"#,
+        ] {
+            assert_eq!(classify(Some(429), body), ErrorKind::Retryable, "{body}");
+        }
+        assert_eq!(classify(Some(400), r#"{"error":{"code":"1211","message":"模型不存在，请检查模型代码。"}}"#), ErrorKind::Fatal);
+        assert_eq!(
+            classify(None, r#"{"error":{"code":"1301","message":"系统检测到输入或生成内容可能包含不安全或敏感内容，请您避免输入易产生敏感内容的提示语，感谢您的配合"}}"#),
+            ErrorKind::Fatal
+        );
+        assert_eq!(classify(Some(400), r#"{"error":{"code":"1210","message":"max_tokens参数非法：限制数值范围[1,131072]"}}"#), ErrorKind::Fatal);
+        assert_eq!(classify(Some(401), r#"{"error":{"code":"401","message":"令牌已过期或验证不正确"}}"#), ErrorKind::Fatal);
+        // Tencent TokenHub.
+        let tencent = r#"{"error":{"type":"permission_error","code":"403001","message":"The package is disabled or you do not have invocation permission. Please check the package status in the console.","message_zh":"套餐包被禁用或无调用权限，请前往控制台查看套餐包状态。","source":"gateway"}}"#;
+        assert_eq!(classify(Some(403), tencent), ErrorKind::Fatal);
+        assert_eq!(classify(None, tencent), ErrorKind::Fatal);
+        // new-api gateway: unknown model is a 503 with code model_not_found.
+        let newapi = r#"{"error":{"code":"model_not_found","message":"No available channel for model gpt-5.4 under group pro (distributor) (request id: 20261029)","type":"new_api_error"}}"#;
+        assert_eq!(classify(Some(503), newapi), ErrorKind::Fatal);
+        // ...while its upstream failures stay retryable.
+        let upstream = r#"{"error":{"message":"openai_error","type":"bad_response_status_code","param":"","code":"bad_response_status_code"}}"#;
+        assert_eq!(classify(Some(502), upstream), ErrorKind::Retryable);
+        assert_eq!(classify(Some(403), r#"{"error":{"message":"This group does not allow /v1/messages dispatch (request id: x)"}}"#), ErrorKind::Fatal);
     }
 
     #[test]

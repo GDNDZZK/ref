@@ -17,7 +17,8 @@ const MAX_JSON_BODY: usize = 8 * 1024 * 1024;
 pub(crate) const SYNTHETIC_TOOL_RESULT: &str = "No result provided";
 
 /// Protocol-specific SSE parser. Kept free of I/O so it can be unit-tested with canned events.
-pub(crate) trait Parser {
+/// `Send` so the future returned by [`crate::stream`] is `Send` (servers spawn turns on tokio).
+pub(crate) trait Parser: Send {
     /// Handle one SSE event, returning the stream events it produces.
     fn feed(&mut self, ev: &SseEvent) -> Result<Vec<StreamEvent>, LlmError>;
     /// True once the terminal event was seen; the driver stops reading.
@@ -257,6 +258,8 @@ pub(crate) async fn run(
 ) -> Result<FinishReason, LlmError> {
     let idle = idle_timeout(spec);
     tracing::debug!(url, model = %spec.api_model, "llm request");
+    // Body only (never headers: they carry the API key).
+    tracing::trace!(target: "hn_llm::wire", body = %body, "request body");
     let send = client.post(url).headers(headers).json(body).send();
     let resp = tokio::select! {
         biased;
@@ -275,6 +278,7 @@ pub(crate) async fn run(
     if !status.is_success() {
         let headers = resp.headers().clone();
         let body = read_capped(resp, MAX_ERROR_BODY, idle, cancel).await?;
+        tracing::trace!(target: "hn_llm::wire", status = status.as_u16(), data = %body, "error body");
         return Err(LlmError::from_http(status.as_u16(), &headers, &body));
     }
 
@@ -294,6 +298,7 @@ pub(crate) async fn run(
         .is_some_and(|ct| ct.contains("json") && !ct.contains("event-stream"));
     if is_json {
         let text = read_capped(resp, MAX_JSON_BODY, idle, cancel).await?;
+        tracing::trace!(target: "hn_llm::wire", data = %text, "json body");
         if let Ok(v) = serde_json::from_str::<Value>(&text) {
             if v.get("error").is_some_and(|e| !e.is_null()) {
                 return Err(LlmError::from_stream_payload(&text));
@@ -327,6 +332,7 @@ pub(crate) async fn run(
             Ok(Some(Ok(chunk))) => chunk,
         };
         for ev in decoder.push(&chunk) {
+            tracing::trace!(target: "hn_llm::wire", event = ?ev.event, data = %ev.data, "sse");
             let evs = parser.feed(&ev).map_err(|e| e.with_partial(emitted))?;
             emit(evs, &mut emitted);
             if parser.done() {
