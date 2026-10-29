@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ref_proto::{
-    ImageData, ModelRef, Request, ServerConfigInfo, ServerFrame, SessionEvent, SessionInfo, SessionSnapshot, SessionStatus,
+    ImageData, Message, MessageSource, ModelRef, Part, Request, Role, ServerConfigInfo, ServerFrame, SessionEvent, SessionInfo, SessionSnapshot, SessionStatus,
 };
 use serde_json::Value;
 
@@ -44,8 +44,9 @@ pub enum Pending {
     Attach { sid: String, fg: bool },
     HistoryDialog,
     Continue,
-    /// `count`: messages removed (known when undoing from a given message).
-    Undo { count: Option<usize> },
+    /// `count`: messages removed (known when undoing from a given message). `images`: those of
+    /// the undone prompt (the response only carries its text).
+    Undo { sid: String, count: Option<usize>, images: Vec<(ImageData, Option<String>)> },
     /// A session was closed; refresh dialogs / history afterwards.
     Closed { name: String },
     Expand { sid: Option<String> },
@@ -574,23 +575,22 @@ impl App {
                     }
                 }
             }
-            Pending::Undo { count } => {
+            Pending::Undo { sid, count, images } => {
                 let t = result.get("text").and_then(Value::as_str).unwrap_or_default();
                 let what = match count {
                     Some(1) => "Undid 1 message".to_string(),
                     Some(n) => format!("Undid {n} messages"),
                     None => "Undid last prompt".to_string(),
                 };
-                if t.trim().is_empty() {
-                    self.toasts.info(what);
-                } else if self.editor.is_empty() && self.mode == Mode::Chat {
-                    self.editor.set_text(t);
-                    self.toasts.info(what);
-                } else {
-                    // Don't clobber what the user is typing; the prompt stays reachable with ↑.
-                    self.history.push(t);
-                    self.toasts.info(format!("{what} · prompt saved to history (↑)"));
+                // Undo also clears the server queue.
+                if let Some(v) = self.views.get_mut(&sid) {
+                    v.queued.clear();
                 }
+                // Only human prompts come back (the text is empty otherwise).
+                if !t.trim().is_empty() {
+                    self.restore_prompt(&sid, t, images);
+                }
+                self.toasts.info(what);
             }
             Pending::Closed { name } => {
                 if !name.is_empty() {
@@ -1485,6 +1485,7 @@ impl App {
         let Some(v) = self.views.get(sid) else { return };
         let Some(i) = v.find(msg) else { return };
         let count = v.messages.len() - i;
+        let images = prompt_images(&v.messages[i]);
         let busy = v.is_busy();
         let armed = self.undo_armed.as_ref().is_some_and(|(m, t)| m == msg && t.elapsed() < Duration::from_secs(4));
         if busy && !armed {
@@ -1495,7 +1496,8 @@ impl App {
         self.undo_armed = None;
         self.hint = None;
         self.clear_selection();
-        self.req(Request::Undo { session_id: sid.to_string(), message_id: Some(msg.to_string()) }, Pending::Undo { count: Some(count) });
+        let p = Pending::Undo { sid: sid.to_string(), count: Some(count), images };
+        self.req(Request::Undo { session_id: sid.to_string(), message_id: Some(msg.to_string()) }, p);
     }
 
     // -----------------------------------------------------------------------
@@ -1580,7 +1582,15 @@ impl App {
             }
             "undo" => {
                 if let Some(sid) = cur {
-                    self.req(Request::Undo { session_id: sid, message_id: None }, Pending::Undo { count: None });
+                    // Same choice as the server: the last human prompt.
+                    let images = self
+                        .views
+                        .get(&sid)
+                        .and_then(|v| v.messages.iter().rfind(|m| m.role == Role::User && m.source == MessageSource::Human))
+                        .map(prompt_images)
+                        .unwrap_or_default();
+                    let p = Pending::Undo { sid: sid.clone(), count: None, images };
+                    self.req(Request::Undo { session_id: sid, message_id: None }, p);
                 }
             }
             "rename" => {
@@ -1973,6 +1983,17 @@ pub fn epilogue_text(info: &SessionInfo, resumable: bool) -> String {
         out.push_str("\n\n");
     }
     out
+}
+
+/// Images attached to a prompt (to put back into the editor with its text).
+fn prompt_images(m: &Message) -> Vec<(ImageData, Option<String>)> {
+    m.parts
+        .iter()
+        .filter_map(|p| match p {
+            Part::Image { image, name } => Some((image.clone(), name.clone())),
+            _ => None,
+        })
+        .collect()
 }
 
 fn sessions_of(v: &Value) -> Option<Vec<SessionInfo>> {

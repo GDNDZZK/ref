@@ -979,11 +979,11 @@ fn undo_button_hit_zone_and_flow() {
         crate::input::handle(app, mouse(MouseEventKind::Up(MouseButton::Left), ux + 2, uy));
     };
     click(&mut app);
-    let id = *app.pending.iter().find(|(_, p)| matches!(p, Pending::Undo { count: Some(2) })).map(|(k, _)| k).expect("undo request");
+    let id = *app.pending.iter().find(|(_, p)| matches!(p, Pending::Undo { count: Some(2), .. })).map(|(k, _)| k).expect("undo request");
     app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response { id, ok: true, result: json!({"text": "Please fix it"}), error: None }));
     assert_eq!(app.editor.text, "Please fix it");
     assert!(app.toasts.items.iter().any(|t| t.text == "Undid 2 messages"));
-    // Non-empty editor is kept; the prompt goes to history instead.
+    // Non-empty editor is kept; the prompt is appended after a blank line.
     let mut app = test_app(false);
     render(&mut app, 100, 30);
     app.screen = ratatui::layout::Rect::new(0, 0, 100, 30);
@@ -991,8 +991,8 @@ fn undo_button_hit_zone_and_flow() {
     click(&mut app);
     let id = *app.pending.iter().find(|(_, p)| matches!(p, Pending::Undo { .. })).map(|(k, _)| k).unwrap();
     app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response { id, ok: true, result: json!({"text": "old prompt"}), error: None }));
-    assert_eq!(app.editor.text, "draft");
-    assert_eq!(app.history.items.last().map(String::as_str), Some("old prompt"));
+    assert_eq!(app.editor.text, "draft\n\nold prompt");
+    assert_eq!(app.editor.cursor, app.editor.text.len());
     // Busy session: the first click only arms a confirmation.
     let mut app = test_app(true);
     render(&mut app, 100, 30);
@@ -1010,6 +1010,38 @@ fn undo_button_hit_zone_and_flow() {
     assert!(app.hint.as_ref().is_some_and(|h| h.0.contains("aborts the running turn")));
     click2(&mut app);
     assert!(app.pending.values().any(|p| matches!(p, Pending::Undo { .. })));
+}
+
+#[test]
+fn undo_puts_prompt_and_images_back_into_editor() {
+    use crate::app::Pending;
+    let mut app = test_app(false);
+    let png = ImageData { mime: "image/png".into(), data: "iVBO".into() };
+    let mut m3 = msg("m3", Role::User, MessageSource::Human, 0, "look at [Image 1]");
+    m3.parts.push(Part::Image { image: png, name: Some("shot.png".into()) });
+    let v = app.views.get_mut("ses_test").unwrap();
+    v.apply(SessionEvent::Message { message: m3 });
+    v.apply(SessionEvent::Message { message: msg("m4", Role::Assistant, MessageSource::Human, 0, "ok") });
+    v.queued.push(crate::state::Queued::new("stale".into(), vec![]));
+    let respond = |app: &mut App, text: &str| {
+        let id = *app.pending.iter().find(|(_, p)| matches!(p, Pending::Undo { .. })).map(|(k, _)| k).expect("undo request");
+        app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response { id, ok: true, result: json!({ "text": text }), error: None }));
+    };
+    // /undo (= ctrl+x u): the last human prompt, with its image.
+    type_str(&mut app, "/undo");
+    crate::input::handle(&mut app, key(crossterm::event::KeyCode::Enter, crossterm::event::KeyModifiers::NONE));
+    respond(&mut app, "look at [Image 1]");
+    assert_eq!(app.editor.text, "look at [Image 1]");
+    let imgs: Vec<(&str, Option<&str>)> = app.editor.images.iter().map(|a| (a.image.data.as_str(), a.name.as_deref())).collect();
+    assert_eq!(imgs, [("iVBO", Some("shot.png"))]);
+    assert!(app.toasts.items.iter().any(|t| t.text == "Undid last prompt"));
+    assert!(app.views["ses_test"].queued.is_empty(), "undo clears the server queue");
+    // Undo from an earlier message: that prompt comes back (appended), not the last one.
+    app.undo_message("ses_test", "m1");
+    assert!(app.pending.values().any(|p| matches!(p, Pending::Undo { count: Some(4), images, .. } if images.is_empty())));
+    respond(&mut app, "Please fix the off-by-one");
+    assert_eq!(app.editor.text, "look at [Image 1]\n\nPlease fix the off-by-one");
+    assert_eq!(app.editor.images.len(), 1);
 }
 
 #[test]
@@ -1696,7 +1728,7 @@ fn compaction_divider_keeps_old_messages_interactive() {
     use crossterm::event::{MouseButton, MouseEventKind};
     crate::input::handle(&mut app, mouse(MouseEventKind::Down(MouseButton::Left), ux + 1, uy));
     crate::input::handle(&mut app, mouse(MouseEventKind::Up(MouseButton::Left), ux + 1, uy));
-    assert!(app.pending.values().any(|p| matches!(p, crate::app::Pending::Undo { count: Some(5) })));
+    assert!(app.pending.values().any(|p| matches!(p, crate::app::Pending::Undo { count: Some(5), .. })));
     // Old tool still expands; the summary expands on click.
     let v = app.views.get_mut("ses_test").unwrap();
     v.chat.toggle("m2", 2);

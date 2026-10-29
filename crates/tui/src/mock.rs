@@ -810,10 +810,13 @@ impl Mock {
                     m.set_status(&session_id, SessionStatus::Idle);
                 });
             }
-            Request::Undo { session_id, .. } => {
+            Request::Undo { session_id, message_id } => {
                 let r = self.with_session(&session_id, |s| {
-                    let pos = s.messages.iter().rposition(|m| m.role == Role::User && m.source == MessageSource::Human)?;
-                    let text = s.messages[pos].raw_text();
+                    let pos = match &message_id {
+                        Some(mid) => s.messages.iter().position(|m| m.id == *mid)?,
+                        None => s.messages.iter().rposition(|m| m.role == Role::User && m.source == MessageSource::Human)?,
+                    };
+                    let text = if s.messages[pos].source == MessageSource::Human { s.messages[pos].raw_text() } else { String::new() };
                     s.messages.truncate(pos);
                     Some((text, s.messages.clone()))
                 });
