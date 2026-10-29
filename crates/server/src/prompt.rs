@@ -1,18 +1,9 @@
-//! System prompt assembly: base, agent prompt, spawnable agents, environment, instructions,
+//! System prompt assembly: agent prompt, spawnable agents, environment, instructions,
 //! skills, MCP instructions. Built once per session and cached (stable bytes => prompt cache hits).
 
 use ref_config::Config;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-
-pub const BASE_PROMPT: &str = "You are ref, an autonomous coding agent working in the user's terminal through tools.
-
-- Tool results are the source of truth about files and commands; never guess file contents. Use `read` before `edit`.
-- Every tool has a `purpose` parameter: one short sentence describing why you call it (shown to the user; match the language of the user's messages).
-- You may call many tools in one response; batch independent calls together.
-- Keep going until the task is done; report blockers clearly instead of stopping silently.
-- Responses are rendered as Markdown in a terminal; be concise and use clear file paths.
-- Other sessions (other agents) may run in parallel. Use `list_sessions` and `send_message` to coordinate; messages from other sessions arrive as user messages starting with `[Message from session`.";
 
 pub struct PromptInput<'a> {
     pub cfg: &'a Config,
@@ -25,7 +16,8 @@ pub struct PromptInput<'a> {
 }
 
 pub fn build(inp: &PromptInput) -> Vec<String> {
-    let mut parts = vec![BASE_PROMPT.to_string()];
+    // No built-in base prompt: tool descriptions carry everything the model needs.
+    let mut parts = Vec::new();
     let agent = inp.cfg.agents.get(inp.agent);
     if let Some(a) = agent
         && !a.prompt.trim().is_empty()
@@ -41,10 +33,7 @@ pub fn build(inp: &PromptInput) -> Vec<String> {
             .map(|a| format!("- {}: {}", a.name, one_line(&a.description)))
             .collect();
         if !list.is_empty() {
-            parts.push(format!(
-                "Agents available for create_session:\n{}\nUse create_session to delegate independent work to a background session; it reports back with send_message.",
-                list.join("\n")
-            ));
+            parts.push(format!("Agents available for create_session:\n{}", list.join("\n")));
         }
     }
     let git = git_root(inp.cwd).is_some();
