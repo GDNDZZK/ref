@@ -360,8 +360,8 @@ fn tail_rows(view: &SessionView, env: &Env<'_>, w: usize) -> Vec<Row> {
         rows.push(Row::blank());
         let secs = ((next_at - env.now).max(0) + 999) / 1000;
         let msg = format!("{} Retrying in {secs}s (attempt {attempt}): {}", theme::spinner(env.tick), text::one_line(error));
-        for (i, l) in text::wrap_spans(&[Span::styled(msg, theme::fg(theme::WARNING))], w.saturating_sub(4)).into_iter().enumerate() {
-            rows.push(Row::new(l).soft(i > 0).indent(vec![Span::raw("  "), Span::styled("┃ ", theme::fg(theme::WARNING))]));
+        for (i, (l, sp)) in text::wrap_spans_flags(&[Span::styled(msg, theme::fg(theme::WARNING))], w.saturating_sub(4)).into_iter().enumerate() {
+            rows.push(Row::new(l).soft_sp(i > 0, sp).indent(vec![Span::raw("  "), Span::styled("┃ ", theme::fg(theme::WARNING))]));
         }
     }
     if let SessionStatus::Compacting = view.info.status {
@@ -374,8 +374,8 @@ fn tail_rows(view: &SessionView, env: &Env<'_>, w: usize) -> Vec<Row> {
         && !view.messages.last().is_some_and(|m| m.error.as_deref() == Some(e.as_str()))
     {
         rows.push(Row::blank());
-        for (i, l) in text::wrap_spans(&[Span::styled(text::one_line(e), theme::fg(theme::ERROR))], w.saturating_sub(4)).into_iter().enumerate() {
-            rows.push(Row::new(l).soft(i > 0).indent(vec![Span::raw("  "), Span::styled("┃ ", theme::fg(theme::ERROR))]));
+        for (i, (l, sp)) in text::wrap_spans_flags(&[Span::styled(text::one_line(e), theme::fg(theme::ERROR))], w.saturating_sub(4)).into_iter().enumerate() {
+            rows.push(Row::new(l).soft_sp(i > 0, sp).indent(vec![Span::raw("  "), Span::styled("┃ ", theme::fg(theme::ERROR))]));
         }
     }
     if !view.queued.is_empty() {

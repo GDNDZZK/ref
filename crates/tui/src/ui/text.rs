@@ -139,6 +139,11 @@ pub fn tail_fit(s: &str, max: usize) -> String {
     out
 }
 
+/// Punctuation that must not begin a wrapped row (simplified kinsoku shori).
+fn no_line_start(g: &str) -> bool {
+    g.chars().next().is_some_and(|c| ",.:;!?)]}%、。，．：；！？）】》」』〉〕”’…·ー々".contains(c))
+}
+
 fn is_wide(g: &str) -> bool {
     gwidth(g) >= 2
 }
@@ -147,6 +152,12 @@ fn is_wide(g: &str) -> bool {
 /// Breaks at spaces and around wide (CJK) characters; hard-breaks words that don't fit.
 /// Returns at least one (possibly empty) line.
 pub fn wrap_spans(spans: &[Span<'_>], width: usize) -> Vec<Line<'static>> {
+    wrap_spans_flags(spans, width).into_iter().map(|(l, _)| l).collect()
+}
+
+/// Like [`wrap_spans`], also reporting for each row whether the break before it swallowed
+/// whitespace (so copying can restore exactly one space when joining soft-wrapped rows).
+pub fn wrap_spans_flags(spans: &[Span<'_>], width: usize) -> Vec<(Line<'static>, bool)> {
     let width = width.max(1);
     // Flatten to graphemes.
     let mut gs: Vec<(&str, usize, Style)> = Vec::new();
@@ -159,8 +170,11 @@ pub fn wrap_spans(spans: &[Span<'_>], width: usize) -> Vec<Line<'static>> {
             gs.push((g, w, sp.style));
         }
     }
-    let mut rows: Vec<Vec<(&str, usize, Style)>> = Vec::new();
-    let mut cur: Vec<(&str, usize, Style)> = Vec::new();
+    type Cell<'a> = (&'a str, usize, Style);
+    let mut rows: Vec<(Vec<Cell<'_>>, bool)> = Vec::new();
+    let mut cur: Vec<Cell<'_>> = Vec::new();
+    // Whether the break that started `cur` consumed whitespace.
+    let mut cur_sp = false;
     let mut cur_w = 0usize;
     // Index in `cur` where the line could be broken (start of next row).
     let mut brk: Option<usize> = None;
@@ -168,27 +182,38 @@ pub fn wrap_spans(spans: &[Span<'_>], width: usize) -> Vec<Line<'static>> {
         let space = g == " ";
         if cur_w + w > width {
             if space {
-                rows.push(std::mem::take(&mut cur));
+                rows.push((std::mem::take(&mut cur), cur_sp));
+                cur_sp = true;
                 cur_w = 0;
                 brk = None;
                 continue;
             }
+            // Never start a row with closing punctuation: carry the preceding wide glyph along.
+            if no_line_start(g) && brk == Some(cur.len()) && cur.len() > 1 && cur.last().is_some_and(|x| is_wide(x.0)) {
+                brk = Some(cur.len() - 1);
+            }
             if let Some(b) = brk.filter(|&b| b > 0) {
                 let tail: Vec<_> = cur.split_off(b);
                 let mut head = std::mem::take(&mut cur);
+                let mut ate = false;
                 while head.last().is_some_and(|x| x.0 == " ") {
                     head.pop();
+                    ate = true;
                 }
-                rows.push(head);
+                rows.push((head, cur_sp));
+                let n = tail.len();
                 cur = tail.into_iter().skip_while(|x| x.0 == " ").collect();
+                cur_sp = ate || cur.len() < n;
                 cur_w = cur.iter().map(|x| x.1).sum();
             } else {
-                rows.push(std::mem::take(&mut cur));
+                rows.push((std::mem::take(&mut cur), cur_sp));
+                cur_sp = false;
                 cur_w = 0;
             }
             brk = None;
             if cur_w + w > width && !cur.is_empty() {
-                rows.push(std::mem::take(&mut cur));
+                rows.push((std::mem::take(&mut cur), cur_sp));
+                cur_sp = false;
                 cur_w = 0;
             }
         }
@@ -201,8 +226,8 @@ pub fn wrap_spans(spans: &[Span<'_>], width: usize) -> Vec<Line<'static>> {
             brk = Some(cur.len());
         }
     }
-    rows.push(cur);
-    rows.into_iter().map(merge_row).collect()
+    rows.push((cur, cur_sp));
+    rows.into_iter().map(|(r, sp)| (merge_row(r), sp)).collect()
 }
 
 fn merge_row(row: Vec<(&str, usize, Style)>) -> Line<'static> {
@@ -423,6 +448,16 @@ mod tests {
     }
 
     #[test]
+    fn wrap_flags_record_swallowed_spaces() {
+        let f = |s: &str, w: usize| wrap_spans_flags(&[Span::raw(s.to_string())], w).into_iter().map(|(l, sp)| (line_text(&l), sp)).collect::<Vec<_>>();
+        assert_eq!(f("hello world", 5), vec![("hello".into(), false), ("world".into(), true)]);
+        assert_eq!(f("abcdefgh", 4), vec![("abcd".into(), false), ("efgh".into(), false)]);
+        // Break after a CJK run at a space keeps the space; between CJK glyphs it doesn't.
+        assert_eq!(f("中文 abc", 5), vec![("中文".into(), false), ("abc".into(), true)]);
+        assert_eq!(f("中文中文", 4), vec![("中文".into(), false), ("中文".into(), false)]);
+    }
+
+    #[test]
     fn wrap_cjk() {
         let r = rows("你好世界你好", 5);
         assert_eq!(r, vec!["你好", "世界", "你好"]);
@@ -433,6 +468,13 @@ mod tests {
         for row in &r {
             assert!(width(row) <= 8, "{row:?}");
         }
+    }
+
+    #[test]
+    fn wrap_never_starts_with_punctuation() {
+        assert_eq!(rows("中文中文，好", 8), vec!["中文中", "文，好"]);
+        assert_eq!(rows("你好世界,abc", 8), vec!["你好世", "界,abc"]);
+        assert_eq!(rows("abc def,", 7), vec!["abc", "def,"]);
     }
 
     #[test]

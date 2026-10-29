@@ -221,7 +221,13 @@ fn convert_messages(provider: &Provider, model: &Model, req: &Request) -> Vec<Va
                 ..
             } => {
                 let mut text = content.clone();
-                if text.trim().is_empty() {
+                if !model.images && !images.is_empty() {
+                    // No follow-up user message for models that cannot see images; just note it.
+                    if !text.trim().is_empty() {
+                        text.push_str("\n\n");
+                    }
+                    text.push_str(IMAGE_OMITTED);
+                } else if text.trim().is_empty() {
                     text = if images.is_empty() {
                         "(no tool output)".into()
                     } else {
@@ -233,12 +239,10 @@ fn convert_messages(provider: &Provider, model: &Model, req: &Request) -> Vec<Va
                     "tool_call_id": normalize_call_id(call_id, MAX_CALL_ID),
                     "content": text,
                 }));
-                for img in images {
-                    tool_images.push(if model.images {
-                        json!({"type": "image_url", "image_url": {"url": data_url(img)}})
-                    } else {
-                        json!({"type": "text", "text": IMAGE_OMITTED})
-                    });
+                if model.images {
+                    for img in images {
+                        tool_images.push(json!({"type": "image_url", "image_url": {"url": data_url(img)}}));
+                    }
                 }
                 let run_ends = !matches!(history.get(i + 1), Some(ChatMessage::ToolResult { .. }));
                 if run_ends && !tool_images.is_empty() {

@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 pub const PURPOSE_DESC: &str =
-    "One short sentence saying why you are calling this tool, written in the same language as the user's messages; shown to the user.";
+    "One short sentence saying why you are calling this tool; shown to the user. Use the language of the user's messages.";
 
 /// Max MCP text output returned to the model.
 const MCP_MAX_BYTES: usize = 50 * 1024;

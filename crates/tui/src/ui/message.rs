@@ -166,17 +166,19 @@ fn render_user(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
             Span::styled(if exp { "" } else { "  · click to view summary" }, theme::muted()),
         ];
         let right = vec![Span::styled(time.clone(), theme::muted()), Span::raw("  "), copy_button(false)];
-        let (line, rx) = compose(left, right, w);
+        // Same geometry as assistant rows (2-col indent, right edge at w-1).
+        let (line, rx) = compose(left, right, w.saturating_sub(PAD + 1));
         let x0 = (rx + width(&time) + 2) as u16;
         let mut rows = vec![
             Row::new(line)
                 .decor()
                 .zone(x0, x0 + 6, Hit::Copy { msg: m.id.clone() })
-                .hit(Hit::Toggle { msg: m.id.clone(), part: 0 }),
+                .hit(Hit::Toggle { msg: m.id.clone(), part: 0 })
+                .indent(vec![Span::raw(" ".repeat(PAD))]),
         ];
         if exp {
-            for r in markdown::render(&raw, w.saturating_sub(4), theme::muted()) {
-                rows.push(r.indent(vec![Span::styled("│ ", theme::fg(theme::ACCENT)), Span::raw(" ")]));
+            for r in markdown::render(&raw, w.saturating_sub(PAD + 4), theme::muted()) {
+                rows.push(r.indent(vec![Span::raw(" ".repeat(PAD)), Span::styled("│ ", theme::fg(theme::ACCENT)), Span::raw(" ")]));
             }
         }
         return rows;
@@ -230,9 +232,9 @@ fn render_user(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
         }
         if !clean.is_empty() {
             for logical in clean.split('\n') {
-                let wrapped = text::wrap_spans(&[Span::styled(logical.to_string(), body_style)], inner);
-                for (i, l) in wrapped.into_iter().enumerate() {
-                    rows.push(pad(Row::new(l).soft(i > 0)));
+                let wrapped = text::wrap_spans_flags(&[Span::styled(logical.to_string(), body_style)], inner);
+                for (i, (l, sp)) in wrapped.into_iter().enumerate() {
+                    rows.push(pad(Row::new(l).soft_sp(i > 0, sp)));
                 }
             }
         }
@@ -259,7 +261,8 @@ fn render_user(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
     }
     // Meta row: time + copy, right aligned.
     let right = vec![Span::styled(time.clone(), theme::muted().bg(bg)), Span::styled("  ", Style::new().bg(bg)), copy_button(false)];
-    let (line, rx) = compose(vec![], right, inner);
+    // One column wider than the body so the button lines up with assistant footers / tool rows.
+    let (line, rx) = compose(vec![], right, inner + 1);
     let x0 = (rx + width(&time) + 2) as u16;
     let mut meta = pad(Row::new(line).zone(x0, x0 + 6, Hit::Copy { msg: m.id.clone() })).decor();
     for s in &mut meta.line.spans {
@@ -291,8 +294,8 @@ fn render_user_compact(m: &Message, _cx: &Ctx<'_>, w: usize, color: Color) -> Ve
     let lines: Vec<&str> = raw.trim().lines().collect();
     let max = if m.source == MessageSource::Compaction { 1 } else { 6 };
     for l in lines.iter().take(max) {
-        for (i, wl) in text::wrap_spans(&[Span::styled(l.to_string(), theme::text())], w.saturating_sub(2)).into_iter().enumerate() {
-            rows.push(Row::new(wl).indent(vec![Span::styled("┃ ", theme::fg(color))]).soft(i > 0));
+        for (i, (wl, sp)) in text::wrap_spans_flags(&[Span::styled(l.to_string(), theme::text())], w.saturating_sub(2)).into_iter().enumerate() {
+            rows.push(Row::new(wl).indent(vec![Span::styled("┃ ", theme::fg(color))]).soft_sp(i > 0, sp));
         }
     }
     if lines.len() > max {
@@ -391,10 +394,10 @@ fn render_assistant(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
         let clean = text::sanitize(err);
         for (li, logical) in clean.trim().split('\n').enumerate() {
             let content = if li == 0 { format!("Error: {logical}") } else { logical.to_string() };
-            for (i, l) in text::wrap_spans(&[Span::styled(content, theme::fg(theme::ERROR))], inner.saturating_sub(2)).into_iter().enumerate() {
+            for (i, (l, sp)) in text::wrap_spans_flags(&[Span::styled(content, theme::fg(theme::ERROR))], inner.saturating_sub(2)).into_iter().enumerate() {
                 rows.push(
                     Row::new(l)
-                        .soft(i > 0)
+                        .soft_sp(i > 0, sp)
                         .indent(vec![Span::raw(" ".repeat(pad)), Span::styled("┃ ", theme::fg(theme::ERROR))]),
                 );
             }

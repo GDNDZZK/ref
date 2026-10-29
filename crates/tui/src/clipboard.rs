@@ -1,12 +1,12 @@
 //! Clipboard: arboard first, then wl-copy/xclip/xsel; always also OSC 52 for copy.
 //! Image paste: arboard image → PNG, else wl-paste / xclip.
 
-use std::io::Write;
 use std::process::{Command, Stdio};
 
 use base64::Engine;
 use ref_proto::ImageData;
 
+#[cfg(not(test))]
 fn osc52(text: &str) {
     let b64 = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
     let seq = if std::env::var_os("TMUX").is_some() {
@@ -14,16 +14,19 @@ fn osc52(text: &str) {
     } else {
         format!("\x1b]52;c;{b64}\x07")
     };
+    use std::io::Write;
     let mut out = std::io::stdout();
     let _ = out.write_all(seq.as_bytes());
     let _ = out.flush();
 }
 
+#[cfg(not(test))]
 fn pipe_to(cmd: &str, args: &[&str], text: &str) -> bool {
     let Ok(mut child) = Command::new(cmd).args(args).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() else {
         return false;
     };
     if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
         let _ = stdin.write_all(text.as_bytes());
     }
     // wl-copy forks and stays alive to serve the selection; don't block on it for long.
@@ -40,9 +43,29 @@ fn pipe_to(cmd: &str, args: &[&str], text: &str) -> bool {
 /// Copies text to the system clipboard. Returns true if a native clipboard accepted it
 /// (OSC 52 is always emitted as well).
 pub fn copy(text: &str) -> bool {
-    if cfg!(test) {
-        return true;
+    #[cfg(test)]
+    {
+        LAST_COPY.with(|c| *c.borrow_mut() = Some(text.to_string()));
+        true
     }
+    #[cfg(not(test))]
+    copy_native(text)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Last text passed to `copy` (tests only; nothing touches the real clipboard).
+    pub static LAST_COPY: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Takes the last copied text (tests only).
+#[cfg(test)]
+pub fn take_last_copy() -> Option<String> {
+    LAST_COPY.with(|c| c.borrow_mut().take())
+}
+
+#[cfg(not(test))]
+fn copy_native(text: &str) -> bool {
     osc52(text);
     let mut ok = false;
     if let Ok(mut cb) = arboard::Clipboard::new() {

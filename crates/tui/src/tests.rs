@@ -390,13 +390,7 @@ async fn mock_end_to_end() {
     crate::input::handle(&mut app, key(KeyCode::Enter, KeyModifiers::NONE));
     assert_eq!(app.views[&sid].queued.len(), 1);
     // Let the turn finish.
-    for _ in 0..80 {
-        pump(&mut app, &mut ev_rx, 250).await;
-        if !app.views[&sid].is_busy() && app.views[&sid].queued.is_empty() && app.views[&sid].messages.len() >= 5 {
-            break;
-        }
-    }
-    for _ in 0..40 {
+    for _ in 0..120 {
         if app.views[&sid].messages.iter().any(|m| m.raw_text().contains("Got it")) && !app.views[&sid].is_busy() {
             break;
         }
@@ -671,4 +665,182 @@ fn shell_mode_and_image_token() {
     let (_, s) = render(&mut app, 100, 30);
     assert!(s.contains("[Image 1] what is this?"));
     assert!(s.contains("1 image"));
+}
+
+fn mouse(kind: crossterm::event::MouseEventKind, x: u16, y: u16) -> crossterm::event::Event {
+    crossterm::event::Event::Mouse(crossterm::event::MouseEvent { kind, column: x, row: y, modifiers: crossterm::event::KeyModifiers::NONE })
+}
+
+/// Column of the first cell on row `y` whose symbol is `sym`.
+fn find_col(term: &Terminal<TestBackend>, y: u16, sym: &str) -> Option<u16> {
+    let buf = term.backend().buffer();
+    (0..buf.area.width).find(|&x| buf[(x, y)].symbol() == sym)
+}
+
+#[test]
+fn drag_selection_across_wrapped_cjk_lines() {
+    use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEventKind};
+    let mut app = test_app(false);
+    {
+        let v = app.views.get_mut("ses_test").unwrap();
+        if let Part::Text { text, .. } = &mut v.messages[0].parts[0] {
+            *text = "alpha beta gamma delta 中文字符测试中文字符测试中文字符测试 epsilon zeta".into();
+        }
+        v.versions[0] += 1000;
+    }
+    let (w, h) = (40u16, 30u16);
+    let (_, s) = render(&mut app, w, h);
+    app.screen = ratatui::layout::Rect::new(0, 0, w, h);
+    let lines: Vec<&str> = s.lines().collect();
+    let y0 = lines.iter().position(|l| l.contains("alpha beta")).expect("first row") as u16;
+    let y1 = lines.iter().position(|l| l.contains("zeta")).expect("last row") as u16;
+    assert!(y1 >= y0 + 2, "text must wrap over several rows:\n{s}");
+    for l in &lines {
+        assert!(text::width(l) <= w as usize, "row overflows: {l:?}");
+    }
+    let row = lines[y0 as usize];
+    let x0 = text::width(&row[..row.find("alpha").unwrap()]) as u16;
+    crate::input::handle(&mut app, mouse(MouseEventKind::Down(MouseButton::Left), x0, y0));
+    crate::input::handle(&mut app, mouse(MouseEventKind::Drag(MouseButton::Left), 20, y0 + 1));
+    crate::input::handle(&mut app, mouse(MouseEventKind::Drag(MouseButton::Left), w - 2, y1));
+    crate::input::handle(&mut app, mouse(MouseEventKind::Up(MouseButton::Left), w - 2, y1));
+    // Mouse up never copies.
+    assert_eq!(crate::clipboard::take_last_copy(), None);
+    assert!(app.has_selection());
+    // `y` copies (empty prompt); soft-wrapped rows are joined without inserted breaks.
+    crate::input::handle(&mut app, key(KeyCode::Char('y'), KeyModifiers::NONE));
+    let got = crate::clipboard::take_last_copy().expect("copied");
+    assert_eq!(got, "alpha beta gamma delta 中文字符测试中文字符测试中文字符测试 epsilon zeta");
+    assert!(!app.has_selection());
+    assert!(app.editor.is_empty(), "y must not be typed into the prompt when copying");
+}
+
+#[test]
+fn selection_starting_mid_cjk_glyph() {
+    use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEventKind};
+    let mut app = test_app(false);
+    let (term, s) = render(&mut app, 100, 30);
+    app.screen = ratatui::layout::Rect::new(0, 0, 100, 30);
+    let y = s.lines().position(|l| l.contains("顺便检查中文")).unwrap() as u16;
+    let x = find_col(&term, y, "顺").unwrap();
+    // Press on the right half of a wide glyph, drag to the right half of another.
+    crate::input::handle(&mut app, mouse(MouseEventKind::Down(MouseButton::Left), x + 1, y));
+    let x2 = find_col(&term, y, "查").unwrap();
+    crate::input::handle(&mut app, mouse(MouseEventKind::Drag(MouseButton::Left), x2 + 1, y));
+    crate::input::handle(&mut app, mouse(MouseEventKind::Up(MouseButton::Left), x2 + 1, y));
+    crate::input::handle(&mut app, key(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    assert_eq!(crate::clipboard::take_last_copy().as_deref(), Some("顺便检查"));
+}
+
+#[test]
+fn copy_button_copies_raw_markdown() {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let mut app = test_app(false);
+    let (term, s) = render(&mut app, 100, 30);
+    app.screen = ratatui::layout::Rect::new(0, 0, 100, 30);
+    let y = s.lines().position(|l| l.contains("Build · claude") && l.contains("⧉ copy")).unwrap() as u16;
+    let x = find_col(&term, y, "⧉").unwrap();
+    crate::input::handle(&mut app, mouse(MouseEventKind::Down(MouseButton::Left), x + 2, y));
+    crate::input::handle(&mut app, mouse(MouseEventKind::Up(MouseButton::Left), x + 2, y));
+    let raw = app.views["ses_test"].messages[1].raw_text();
+    assert!(raw.contains("```rust"), "raw markdown, not rendered text");
+    assert_eq!(crate::clipboard::take_last_copy(), Some(raw));
+    assert!(!app.has_selection());
+}
+
+#[test]
+fn click_without_drag_does_not_select_or_copy() {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let mut app = test_app(false);
+    let (_, s) = render(&mut app, 100, 30);
+    app.screen = ratatui::layout::Rect::new(0, 0, 100, 30);
+    let y = s.lines().position(|l| l.contains("I'll look at the parser.")).unwrap() as u16;
+    crate::input::handle(&mut app, mouse(MouseEventKind::Down(MouseButton::Left), 5, y));
+    crate::input::handle(&mut app, mouse(MouseEventKind::Up(MouseButton::Left), 5, y));
+    assert!(!app.has_selection());
+    assert_eq!(crate::clipboard::take_last_copy(), None);
+    // Double click selects a word; still nothing copied.
+    crate::input::handle(&mut app, mouse(MouseEventKind::Down(MouseButton::Left), 5, y));
+    crate::input::handle(&mut app, mouse(MouseEventKind::Up(MouseButton::Left), 5, y));
+    assert!(app.has_selection());
+    assert_eq!(crate::clipboard::take_last_copy(), None);
+}
+
+fn fail_pending(app: &mut App, pred: impl Fn(&crate::app::Pending) -> bool, err: &str) {
+    let id = *app.pending.iter().find(|(_, p)| pred(p)).map(|(k, _)| k).expect("pending request");
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response { id, ok: false, result: serde_json::Value::Null, error: Some(err.into()) }));
+}
+
+#[test]
+fn reattach_failure_of_empty_session_starts_new_one() {
+    use crate::app::Pending;
+    let mut app = test_app(false);
+    app.views.get_mut("ses_test").unwrap().apply(SessionEvent::Reset { messages: vec![] });
+    app.on_net(crate::net::NetEvent::Disconnected("connection closed".into()));
+    app.on_net(crate::net::NetEvent::Connected);
+    fail_pending(&mut app, |p| matches!(p, Pending::Attach { fg: true, .. }), "session not found");
+    assert!(app.current.is_none());
+    assert!(app.pending.values().any(|p| matches!(p, Pending::Created { .. })), "a fresh session is requested");
+}
+
+#[test]
+fn failed_prompt_text_returns_to_editor() {
+    use crate::app::Pending;
+    let mut app = test_app(false);
+    type_str(&mut app, "do the thing");
+    crate::input::handle(&mut app, key(crossterm::event::KeyCode::Enter, crossterm::event::KeyModifiers::NONE));
+    assert!(app.editor.is_empty());
+    fail_pending(&mut app, |p| matches!(p, Pending::Prompt { .. }), "Session ses_test is not live");
+    assert_eq!(app.editor.text, "do the thing");
+    assert!(app.toasts.items.iter().any(|t| t.text.contains("Prompt not sent")));
+}
+
+#[test]
+fn keys_typed_as_permission_opens_go_to_editor() {
+    use crossterm::event::{KeyCode, KeyModifiers};
+    let mut app = test_app(false);
+    let req = PermissionRequest {
+        session_id: "ses_test".into(),
+        message_id: "m2".into(),
+        call_id: "c9".into(),
+        tool: "bash".into(),
+        purpose: "List files".into(),
+        input: json!({"command": "ls -la"}),
+        time: 0,
+    };
+    app.views.get_mut("ses_test").unwrap().apply(SessionEvent::Permission { request: req });
+    let (_, s) = render(&mut app, 100, 30);
+    assert!(s.contains("Permission required") && s.contains("$ ls -la"), "{s}");
+    // Within the grace period: 'a' / 'd' must not answer the modal; they are typed text.
+    type_str(&mut app, "ad");
+    crate::input::handle(&mut app, key(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(app.active_permission().is_some(), "modal not answered by early keys");
+    assert_eq!(app.editor.text, "ad");
+    // After the grace period the modal reacts.
+    app.perm.as_mut().unwrap().opened -= std::time::Duration::from_millis(500);
+    crate::input::handle(&mut app, key(KeyCode::Char('a'), KeyModifiers::NONE));
+    assert!(app.active_permission().is_none());
+    assert_eq!(app.editor.text, "ad");
+    // The modal is sized to its content, not the full screen height.
+    let mut app = test_app(false);
+    let req = PermissionRequest { session_id: "ses_test".into(), message_id: "m2".into(), call_id: "c10".into(), tool: "bash".into(), purpose: "x".into(), input: json!({"command": "ls"}), time: 0 };
+    app.views.get_mut("ses_test").unwrap().apply(SessionEvent::Permission { request: req });
+    render(&mut app, 100, 40);
+    assert!(app.perm.as_ref().unwrap().rect.height <= 14, "{:?}", app.perm.as_ref().unwrap().rect);
+}
+
+#[test]
+fn model_filter_shows_provider() {
+    let mut app = test_app(false);
+    if let Some(c) = app.config.as_mut() {
+        let mut m = c.models[0].clone();
+        m.provider = "other".into();
+        m.provider_name = "OtherCo".into();
+        c.models.push(m);
+    }
+    app.open_models();
+    type_str(&mut app, "opus");
+    let (_, s) = render(&mut app, 100, 30);
+    assert!(s.contains("claude-opus-5.5  OtherCo"), "{s}");
+    assert!(s.contains("claude-opus-5.5  dgn"), "{s}");
 }

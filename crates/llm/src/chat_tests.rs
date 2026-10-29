@@ -66,6 +66,21 @@ fn body_with_tools_images_and_reasoning_replay() {
 }
 
 #[test]
+fn tool_images_without_vision_are_noted_inline() {
+    let p = deepseek();
+    let mut m = model("deepseek-v4-pro", json!({}));
+    m.images = false;
+    let req = conversation(("deepseek", "deepseek-v4-pro"), None, None);
+    let body = build_body(&p, &m, &req);
+    let msgs = body["messages"].as_array().unwrap();
+    // No synthetic "Attached image(s)" user message; the note goes into the tool result.
+    assert_eq!(msgs[3]["role"], "tool");
+    assert_eq!(msgs[3]["content"], format!("fn main() {{}}\n\n{IMAGE_OMITTED}"));
+    assert_eq!(msgs[4], json!({"role": "user", "content": "thanks"}));
+    assert_eq!(msgs.len(), 5);
+}
+
+#[test]
 fn reasoning_dropped_for_foreign_model_but_deepseek_field_kept_empty() {
     let p = deepseek();
     let m = model("deepseek-v4-pro", json!({}));

@@ -20,6 +20,8 @@ pub struct Row {
     pub line: Line<'static>,
     /// Continuation of the previous row (soft wrap) — joined without a newline when copying.
     pub soft: bool,
+    /// For soft rows: the wrap swallowed whitespace here (copy re-inserts one space).
+    pub soft_space: bool,
     /// Leading decorative columns (padding, bars) excluded from copied text.
     pub skip: u16,
     /// Columns at/after this are decorative (labels, buttons) and excluded from copied text.
@@ -63,6 +65,12 @@ impl Row {
     }
     pub fn soft(mut self, s: bool) -> Self {
         self.soft = s;
+        self
+    }
+    /// Soft continuation that replaced a space (word wrap).
+    pub fn soft_sp(mut self, soft: bool, space: bool) -> Self {
+        self.soft = soft;
+        self.soft_space = soft && space;
         self
     }
     pub fn skip(mut self, n: u16) -> Self {

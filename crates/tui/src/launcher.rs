@@ -112,6 +112,33 @@ pub fn spawn_server(port: u16) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Exclusive advisory lock serialising backend spawns across frontends (released on drop).
+/// Without it, every frontend that loses its backend at the same moment spawns its own.
+pub struct SpawnLock {
+    _file: std::fs::File,
+}
+
+impl SpawnLock {
+    /// Acquires `<dir>/.spawn.lock`, polling until `timeout`. `None` on timeout / IO error
+    /// (callers then proceed unlocked rather than hanging).
+    pub async fn acquire(dir: &Path, timeout: Duration) -> Option<SpawnLock> {
+        use std::os::fd::AsRawFd;
+        std::fs::create_dir_all(dir).ok()?;
+        let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(dir.join(".spawn.lock")).ok()?;
+        let start = std::time::Instant::now();
+        loop {
+            // SAFETY: flock on a valid fd we own; non-blocking.
+            if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+                return Some(SpawnLock { _file: file });
+            }
+            if start.elapsed() > timeout {
+                return None;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+}
+
 /// Waits for an instance file announcing `port` (up to `timeout`).
 pub async fn wait_for_instance(dir: &Path, port: u16, timeout: Duration) -> Option<InstanceInfo> {
     let start = std::time::Instant::now();
@@ -151,6 +178,18 @@ mod tests {
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].port, 1);
         assert!(!dir.join("b.json").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn spawn_lock_is_exclusive() {
+        let dir = std::env::temp_dir().join(format!("ref-tui-lock-{}", std::process::id()));
+        let a = SpawnLock::acquire(&dir, Duration::from_millis(100)).await;
+        assert!(a.is_some());
+        // flock is per open file description: a second open in the same process conflicts too.
+        assert!(SpawnLock::acquire(&dir, Duration::from_millis(120)).await.is_none());
+        drop(a);
+        assert!(SpawnLock::acquire(&dir, Duration::from_millis(100)).await.is_some());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

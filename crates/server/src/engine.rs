@@ -204,7 +204,10 @@ fn finish_run(hub: &Arc<Hub>, s: &Arc<Session>, id: u64) {
         hub.set_status(&mut st, SessionStatus::Idle);
         let mut restart = false;
         if !st.queue.is_empty() {
-            if st.user_aborted || st.closed {
+            // After a user abort, a prompt the user typed while busy is the redirect they want
+            // answered ("type a correction, then interrupt"); peer messages alone do not restart.
+            let has_human = st.queue.iter().any(|m| m.source == MessageSource::Human);
+            if st.closed || (st.user_aborted && !has_human) {
                 while let Some(m) = st.queue.pop_front() {
                     hub.emit(&s.id, SessionEvent::Message { message: m.clone() });
                     st.push_message(m);

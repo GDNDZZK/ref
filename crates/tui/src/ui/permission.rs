@@ -39,45 +39,20 @@ impl PermissionView {
     pub fn draw(&mut self, buf: &mut Buffer, screen: Rect, req: &PermissionRequest, session_name: Option<&str>, queued: usize) {
         let t = (self.opened.elapsed().as_secs_f32() / 0.12).min(1.0);
         let w = screen.width.saturating_sub(4).clamp(30, 96);
-        let h = screen.height.saturating_sub(2).clamp(10, 36);
         let title = match session_name {
             Some(n) => format!("△ Permission required · {n}"),
             None => "△ Permission required".to_string(),
         };
+        // Content is laid out for the final (fully opened) width; the frame only grows in.
+        let iw = w.min(screen.width).saturating_sub(4) as usize;
+        let lines = content(req, iw);
+        // Height fits the content (borders + top pad + gap + scroll hint + buttons), capped.
+        let max_h = screen.height.saturating_sub(2).clamp(10, 36);
+        let h = (lines.len() as u16 + 5).clamp(10, max_h);
         let r = frame(buf, screen, w, h, &title, t);
         self.rect = r;
         let bg = theme::PANEL;
         let inner = Rect::new(r.x + 2, r.y + 1, r.width.saturating_sub(4), r.height.saturating_sub(2));
-        let iw = inner.width as usize;
-        let mut lines: Vec<Line<'static>> = Vec::new();
-        // Headline.
-        lines.push(Line::from(vec![
-            Span::styled(req.tool.clone(), theme::bold(theme::WARNING)),
-            Span::styled(format!("  {}", text::one_line(&req.purpose)), theme::text()),
-        ]));
-        lines.push(Line::default());
-        // Prominent fields.
-        let s = |k: &str| req.input.get(k).and_then(Value::as_str).map(str::to_string);
-        if let Some(cmd) = s("command") {
-            lines.push(Line::from(Span::styled("command", theme::muted())));
-            for l in text::sanitize(&cmd).lines() {
-                for wl in text::wrap_hard(&[Span::styled(format!("$ {l}"), theme::bold(theme::TEXT))], iw) {
-                    lines.push(wl);
-                }
-            }
-            lines.push(Line::default());
-        }
-        if let Some(p) = s("path") {
-            lines.push(Line::from(vec![Span::styled("path  ", theme::muted()), Span::styled(p, theme::bold(theme::INFO))]));
-            lines.push(Line::default());
-        }
-        lines.push(Line::from(Span::styled("input", theme::muted())));
-        let pretty = serde_json::to_string_pretty(&req.input).unwrap_or_default();
-        for l in text::sanitize(&pretty).lines() {
-            for wl in text::wrap_hard(&[Span::styled(l.to_string(), theme::fg(theme::INFO))], iw) {
-                lines.push(wl);
-            }
-        }
         let body_h = (inner.height as usize).saturating_sub(3);
         self.max_scroll = lines.len().saturating_sub(body_h);
         self.scroll = self.scroll.min(self.max_scroll);
@@ -111,4 +86,38 @@ impl PermissionView {
             buf.set_string(inner.x + inner.width.saturating_sub(width(&q) as u16), by, q, Style::new().fg(theme::MUTED).bg(bg));
         }
     }
+}
+
+/// Modal body: headline, prominent fields (command / path) and the full pretty-printed input.
+fn content(req: &PermissionRequest, iw: usize) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    // Headline.
+    lines.push(Line::from(vec![
+        Span::styled(req.tool.clone(), theme::bold(theme::WARNING)),
+        Span::styled(format!("  {}", text::one_line(&req.purpose)), theme::text()),
+    ]));
+    lines.push(Line::default());
+    // Prominent fields.
+    let s = |k: &str| req.input.get(k).and_then(Value::as_str).map(str::to_string);
+    if let Some(cmd) = s("command") {
+        lines.push(Line::from(Span::styled("command", theme::muted())));
+        for l in text::sanitize(&cmd).lines() {
+            for wl in text::wrap_hard(&[Span::styled(format!("$ {l}"), theme::bold(theme::TEXT))], iw) {
+                lines.push(wl);
+            }
+        }
+        lines.push(Line::default());
+    }
+    if let Some(p) = s("path") {
+        lines.push(Line::from(vec![Span::styled("path  ", theme::muted()), Span::styled(p, theme::bold(theme::INFO))]));
+        lines.push(Line::default());
+    }
+    lines.push(Line::from(Span::styled("input", theme::muted())));
+    let pretty = serde_json::to_string_pretty(&req.input).unwrap_or_default();
+    for l in text::sanitize(&pretty).lines() {
+        for wl in text::wrap_hard(&[Span::styled(l.to_string(), theme::fg(theme::INFO))], iw) {
+            lines.push(wl);
+        }
+    }
+    lines
 }

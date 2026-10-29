@@ -52,6 +52,8 @@ pub enum Pending {
     Export,
     /// Toast the resulting variant.
     Variant,
+    /// A prompt; on failure its text goes back into the (empty) editor so it isn't lost.
+    Prompt { sid: String, text: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -356,11 +358,38 @@ impl App {
         match p {
             Pending::Attach { sid, fg } => {
                 self.attaching.remove(&sid);
-                if fg {
+                if fg && self.current.as_deref() == Some(sid.as_str()) {
+                    // E.g. an empty session that didn't survive a backend restart.
+                    let empty = self.views.get(&sid).is_none_or(|v| v.messages.is_empty());
+                    if let Some(v) = self.views.get_mut(&sid) {
+                        v.closed = true;
+                        v.info.live = false;
+                        v.info.status = SessionStatus::Idle;
+                    }
+                    if empty {
+                        self.views.remove(&sid);
+                        self.current = None;
+                        self.toasts.warn("Session is gone (backend restarted) — started a new one");
+                        self.create_session(None);
+                    } else {
+                        self.toasts.error(format!("Cannot open session: {err} — your next prompt starts a new session"));
+                    }
+                } else if fg {
                     self.toasts.error(format!("Cannot open session: {err}"));
                 } else {
                     self.views.remove(&sid);
                 }
+            }
+            Pending::Prompt { sid, text } => {
+                if let Some(v) = self.views.get_mut(&sid)
+                    && let Some(i) = v.queued.iter().position(|q| *q == text)
+                {
+                    v.queued.remove(i);
+                }
+                if self.editor.is_empty() && !text.is_empty() && self.mode == Mode::Chat {
+                    self.editor.set_text(&text);
+                }
+                self.toasts.error(format!("Prompt not sent: {err}"));
             }
             Pending::Files { .. } => {
                 self.files_inflight = false;
@@ -517,6 +546,7 @@ impl App {
                 let p = result.get("path").and_then(Value::as_str).unwrap_or("file");
                 self.toasts.info(format!("Exported to {p}"));
             }
+            Pending::Prompt { .. } => {}
         }
     }
 
@@ -644,7 +674,8 @@ impl App {
             v.error = None;
             v.chat.scroll_to_bottom(true);
         }
-        self.send(Request::Prompt { session_id: sid.to_string(), text, images });
+        let p = Pending::Prompt { sid: sid.to_string(), text: text.clone() };
+        self.req(Request::Prompt { session_id: sid.to_string(), text, images }, p);
     }
 
     /// Sends to the current session, creating one if needed.
@@ -892,7 +923,10 @@ impl App {
             .iter()
             .map(|m| {
                 let is_cur = cur.as_ref().is_some_and(|c| c.provider == m.provider && c.model == m.id);
-                let mut caps = vec![format!("{} ctx", text::fmt_tokens(m.context))];
+                let mut caps = Vec::new();
+                if m.context > 0 {
+                    caps.push(format!("{} ctx", text::fmt_tokens(m.context)));
+                }
                 if m.images {
                     caps.push("images".into());
                 }
@@ -1301,6 +1335,14 @@ impl App {
             AcKind::Slash => {
                 let name = value.trim().trim_start_matches('/').to_string();
                 let takes_args = find_cmd(&name).map(|c| c.args).unwrap_or(true);
+                // Enter on a fully typed command runs it (args are optional for most).
+                let typed = self.editor.text.trim().trim_start_matches('/');
+                let exact = find_cmd(typed).map(|c| c.name.to_string()).unwrap_or_else(|| typed.to_string()) == name;
+                if run && takes_args && exact {
+                    self.editor.set_text(&format!("/{name}"));
+                    self.submit();
+                    return true;
+                }
                 if run && !takes_args {
                     self.editor.clear();
                     self.history.push(&format!("/{name}"));

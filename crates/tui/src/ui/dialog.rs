@@ -188,6 +188,7 @@ impl ListDialog {
         let list_h = (inner.y + inner.height).saturating_sub(list_top + 1) as usize;
         // Build display rows: section headers + items.
         enum Disp {
+            Gap,
             Section(String),
             Item(usize),
         }
@@ -197,6 +198,9 @@ impl ListDialog {
         for (vi, &ii) in self.visible.iter().enumerate() {
             let it = &self.items[ii];
             if !filtering && !it.section.is_empty() && last_section != Some(it.section.as_str()) {
+                if last_section.is_some() {
+                    disp.push(Disp::Gap);
+                }
                 disp.push(Disp::Section(it.section.clone()));
                 last_section = Some(it.section.as_str());
             }
@@ -218,6 +222,7 @@ impl ListDialog {
         for (k, d) in disp.iter().enumerate().skip(self.scroll).take(list_h) {
             let y = list_top + (k - self.scroll) as u16;
             match d {
+                Disp::Gap => {}
                 Disp::Section(s) => {
                     buf.set_string(inner.x, y, text::truncate(s, iw), Style::new().fg(fade(theme::ACCENT)).bg(bg).add_modifier(Modifier::BOLD));
                 }
@@ -236,6 +241,11 @@ impl ListDialog {
                     }
                     let tstyle = Style::new().fg(fgc(it.title_color.unwrap_or(theme::TEXT)));
                     left.push(Span::styled(it.title.clone(), if selected { tstyle.add_modifier(Modifier::BOLD) } else { tstyle }));
+                    // Section headers are hidden while filtering; keep the provider visible for
+                    // models (the same model id often exists under several providers).
+                    if filtering && self.kind == Kind::Models && !it.section.is_empty() {
+                        left.push(Span::styled(format!("  {}", it.section), Style::new().fg(fgc(theme::ACCENT))));
+                    }
                     if !it.desc.is_empty() {
                         left.push(Span::styled(format!("  {}", it.desc), Style::new().fg(fgc(theme::MUTED))));
                     }
@@ -251,6 +261,14 @@ impl ListDialog {
                             right.push(Span::styled(it.right.clone(), Style::new().fg(fgc(theme::MUTED))));
                         }
                         right.push(Span::raw(" "));
+                    }
+                    // Keep the title readable: shrink the right column first (to at most ~half).
+                    let lw: usize = left.iter().map(|s| width(&s.content)).sum();
+                    let rw: usize = right.iter().map(|s| width(&s.content)).sum();
+                    let room = (iw + 2).saturating_sub(lw + 1);
+                    let cap = room.max((iw + 2) / 2);
+                    if rw > cap {
+                        right = shrink_right(right, cap);
                     }
                     let (line, _) = super::message::compose(left, right, iw + 2);
                     buf.set_line(inner.x.saturating_sub(1), y, &line, inner.width + 2);
@@ -271,6 +289,27 @@ impl ListDialog {
         let x = self.rect.x + 4 + width(&self.filter.text[..self.filter.cursor]) as u16;
         (x.min(self.rect.x + self.rect.width.saturating_sub(3)), self.rect.y + 2)
     }
+}
+
+/// Truncates the last (longest, free-text) span of a right-aligned group so it fits `max`.
+fn shrink_right(mut spans: Vec<Span<'static>>, max: usize) -> Vec<Span<'static>> {
+    let total: usize = spans.iter().map(|s| width(&s.content)).sum();
+    if total <= max {
+        return spans;
+    }
+    // Trailing pad span (" ") stays; truncate the text span before it.
+    let idx = spans.iter().rposition(|s| width(&s.content) > 1);
+    if let Some(i) = idx {
+        let w = width(&spans[i].content);
+        let keep = w.saturating_sub(total - max);
+        if keep >= 2 {
+            let st = spans[i].style;
+            spans[i] = Span::styled(text::truncate(&spans[i].content, keep), st);
+            return spans;
+        }
+        spans.remove(i);
+    }
+    spans
 }
 
 /// Draws a centered rounded panel (with open animation `t` 0→1); returns its rect.
@@ -326,10 +365,10 @@ pub fn clear_wide_edges(buf: &mut Buffer, r: Rect) {
         return;
     }
     for yy in r.y..r.y.saturating_add(r.height) {
-        if let Some(c) = buf.cell_mut((r.x - 1, yy)) {
-            if unicode_width::UnicodeWidthStr::width(c.symbol()) > 1 {
-                c.set_symbol(" ");
-            }
+        if let Some(c) = buf.cell_mut((r.x - 1, yy))
+            && unicode_width::UnicodeWidthStr::width(c.symbol()) > 1
+        {
+            c.set_symbol(" ");
         }
     }
 }

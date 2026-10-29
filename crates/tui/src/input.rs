@@ -73,7 +73,14 @@ fn key(app: &mut App, k: KeyEvent) {
             return;
         }
         // Ignore keys right after the modal appears (they were meant for the prompt).
+        // Plain typing still lands in the editor instead of being lost (or answering the modal).
         if app.perm.as_ref().is_none_or(|p| p.opened.elapsed() < Duration::from_millis(350)) {
+            if matches!(k.code, KeyCode::Char(_) | KeyCode::Backspace) && k.modifiers.difference(SHIFT).is_empty() {
+                let ed = target_editor(app);
+                if edit_key(ed, &k, false) {
+                    app.history.reset();
+                }
+            }
             return;
         }
         match k.code {

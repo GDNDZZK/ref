@@ -62,17 +62,29 @@ async fn try_connect(ep: &Endpoint, timeout: Duration) -> Option<Ws> {
     }
 }
 
+async fn connect_existing(dir: &std::path::Path) -> Option<(Ws, Endpoint)> {
+    for inst in launcher::instances(dir) {
+        let ep = launcher::endpoint_for(&inst);
+        if let Some(ws) = try_connect(&ep, Duration::from_millis(1500)).await {
+            return Some((ws, ep));
+        }
+    }
+    None
+}
+
 /// Discovers a running backend, or launches one.
 async fn discover(events: &mpsc::UnboundedSender<NetEvent>, allow_spawn: bool) -> Result<(Ws, Endpoint), String> {
     let dir = ref_proto::instances_dir();
-    for inst in launcher::instances(&dir) {
-        let ep = launcher::endpoint_for(&inst);
-        if let Some(ws) = try_connect(&ep, Duration::from_millis(1500)).await {
-            return Ok((ws, ep));
-        }
+    if let Some(c) = connect_existing(&dir).await {
+        return Ok(c);
     }
     if !allow_spawn {
         return Err("no backend running".into());
+    }
+    // Only one frontend spawns; the others wait for the lock and then find its instance.
+    let _lock = launcher::SpawnLock::acquire(&dir, Duration::from_secs(15)).await;
+    if let Some(c) = connect_existing(&dir).await {
+        return Ok(c);
     }
     let port = launcher::pick_port().ok_or("no free port")?;
     let started = std::time::Instant::now();

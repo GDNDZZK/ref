@@ -175,14 +175,15 @@ impl R {
     fn emit_wrapped(&mut self, lines: Vec<Vec<Span<'static>>>, hard: bool) {
         let avail = self.width.saturating_sub(self.prefix_width()).max(1);
         for logical in lines {
-            let wrapped = if hard { text::wrap_hard(&logical, avail) } else { text::wrap_spans(&logical, avail) };
-            for (i, l) in wrapped.into_iter().enumerate() {
+            let wrapped: Vec<(Line<'static>, bool)> =
+                if hard { text::wrap_hard(&logical, avail).into_iter().map(|l| (l, false)).collect() } else { text::wrap_spans_flags(&logical, avail) };
+            for (i, (l, sp)) in wrapped.into_iter().enumerate() {
                 let first = i == 0;
                 let p = self.prefix(true);
                 let pw: usize = p.iter().map(|s| width(&s.content)).sum();
                 let mut spans = p;
                 spans.extend(l.spans);
-                let mut row = Row::new(Line::from(spans)).soft(!first);
+                let mut row = Row::new(Line::from(spans)).soft_sp(!first, sp);
                 if !first {
                     row = row.skip(pw as u16);
                 }
@@ -560,7 +561,7 @@ impl R {
                     spans.push(Span::raw(" ".repeat(rp)));
                 }
                 spans.push(Span::styled(" │", bst));
-                self.rows.push(Row::new(Line::from(spans)).soft(li > 0));
+                self.rows.push(Row::new(Line::from(spans)).soft_sp(li > 0, true));
             }
             if head && ri + 1 == t.head_rows {
                 let mut p = self.prefix(false);

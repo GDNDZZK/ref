@@ -54,7 +54,9 @@ fn row_text(row: &Row, from: u16, to: u16) -> String {
     };
     let mut s = String::new();
     for (x, g) in cells(row) {
-        if x >= lo && x <= hi {
+        // A wide glyph is included when any of its columns is inside the range.
+        let last = x + (gwidth(g) as u16).max(1) - 1;
+        if last >= lo && x <= hi {
             s.push_str(g);
         }
     }
@@ -77,7 +79,7 @@ pub fn extract<'a>(sel: &Selection, get: impl Fn(usize) -> Option<&'a Row>) -> S
         if !first {
             if row.soft {
                 // Soft-wrapped continuation: join; restore the space consumed by wrapping.
-                if !out.ends_with(' ') && !t.is_empty() && needs_space(&out, &t) {
+                if row.soft_space && !out.ends_with(' ') && !t.is_empty() {
                     out.push(' ');
                 }
             } else {
@@ -89,15 +91,6 @@ pub fn extract<'a>(sel: &Selection, get: impl Fn(usize) -> Option<&'a Row>) -> S
     }
     // Collapse leading/trailing blank lines.
     out.trim_matches('\n').to_string()
-}
-
-fn needs_space(prev: &str, next: &str) -> bool {
-    let a = prev.chars().last();
-    let b = next.chars().next();
-    match (a, b) {
-        (Some(a), Some(b)) => !(is_cjk(a) || is_cjk(b)),
-        _ => false,
-    }
 }
 
 fn is_cjk(c: char) -> bool {
@@ -142,7 +135,7 @@ mod tests {
 
     #[test]
     fn extract_multi_row() {
-        let rows = vec![row("  hello world"), row("  wrapped").soft(true).skip(2), row("  next para")];
+        let rows = vec![row("  hello world"), row("  wrapped").soft_sp(true, true).skip(2), row("  next para")];
         let rows: Vec<Row> = rows.into_iter().map(|r| if r.skip == 0 { r.skip(2) } else { r }).collect();
         let sel = Selection { anchor: (0, 8), head: (2, 5), dragging: false, active: true };
         let t = extract(&sel, |i| rows.get(i));
