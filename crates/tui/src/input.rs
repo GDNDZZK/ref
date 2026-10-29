@@ -900,6 +900,7 @@ fn mouse(app: &mut App, me: MouseEvent) {
                 return;
             }
             if c.contains(x, y) {
+                app.editor.anchor = None;
                 // Repeated clicks on a button (e.g. confirming undo) are clicks, not word selection.
                 let on_button = c.hit_at(x, y).is_some_and(|h| h.is_button());
                 let n = click_count(app, x, y);
@@ -911,13 +912,20 @@ fn mouse(app: &mut App, me: MouseEvent) {
                 }
             } else if y >= lay.prompt.y && y < lay.prompt.y + lay.prompt.height {
                 app.clear_selection();
-                // Click in the editor: move the cursor.
+                // Click in the editor: move the cursor; drag / double / triple click select.
                 let e = lay.editor;
                 if y >= e.y && y < e.y + e.height {
-                    place_cursor(&mut app.editor, e, x, y);
+                    let off = app.editor.offset_at(e, x, y);
+                    let n = click_count(app, x, y);
+                    app.editor.mouse_down(off, n);
                 }
             }
         }
+        MouseEventKind::Drag(MouseButton::Left) if app.editor.dragging => {
+            let off = app.editor.offset_at(lay.editor, x, y);
+            app.editor.mouse_drag(off);
+        }
+        MouseEventKind::Up(MouseButton::Left) if app.editor.dragging => app.editor.mouse_up(),
         MouseEventKind::Drag(MouseButton::Left) => {
             c.mouse_drag(x, y);
             if c.has_selection() {
@@ -999,26 +1007,6 @@ fn watch_mouse(app: &mut App, me: MouseEvent) {
         }
         _ => app.dirty = false,
     }
-}
-
-fn place_cursor(e: &mut Editor, area: ratatui::layout::Rect, x: u16, y: u16) {
-    use unicode_segmentation::UnicodeSegmentation;
-    let rows = e.layout(area.width as usize);
-    let ri = e.scroll + (y - area.y) as usize;
-    let Some(r) = rows.get(ri.min(rows.len().saturating_sub(1))).copied() else { return };
-    let want = x.saturating_sub(area.x) as usize;
-    let mut col = 0;
-    let mut pos = r.start;
-    for (i, g) in e.text[r.start..r.end].grapheme_indices(true) {
-        let w = crate::ui::text::gwidth(g);
-        if g == "\n" || col + w > want {
-            break;
-        }
-        col += w;
-        pos = r.start + i + g.len();
-    }
-    e.anchor = None;
-    e.cursor = pos;
 }
 
 impl App {

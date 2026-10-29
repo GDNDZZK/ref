@@ -1094,6 +1094,11 @@ impl App {
             self.sel_owner = None;
             return true;
         }
+        if let Some(t) = self.editor.selected_text() {
+            self.copy_text(&t, "selection");
+            self.editor.select_mode(false);
+            return true;
+        }
         false
     }
 

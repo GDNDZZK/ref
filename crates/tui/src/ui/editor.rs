@@ -42,6 +42,8 @@ pub struct Editor {
     pub last_width: usize,
     /// Scroll offset of visible rows.
     pub scroll: usize,
+    /// A single-click press is being dragged (mouse selection).
+    pub dragging: bool,
 }
 
 /// A visual row: byte range `[start, end)` of `text`.
@@ -524,6 +526,104 @@ impl Editor {
         out
     }
 
+    // -- mouse ----------------------------------------------------------------
+
+    /// Byte offset under screen cell (x, y) for the editor drawn at `area`. Rows above or below
+    /// the area map to the row just outside the view, so dragging there scrolls.
+    pub fn offset_at(&self, area: Rect, x: u16, y: u16) -> usize {
+        let rows = self.layout(area.width.max(1) as usize);
+        let ri = if y < area.y {
+            self.scroll.saturating_sub(1)
+        } else if y >= area.y + area.height {
+            self.scroll + area.height as usize
+        } else {
+            self.scroll + (y - area.y) as usize
+        };
+        let Some(r) = rows.get(ri.min(rows.len().saturating_sub(1))).copied() else { return 0 };
+        let want = x.saturating_sub(area.x) as usize;
+        let mut col = 0;
+        let mut pos = r.start;
+        for (i, g) in self.text[r.start..r.end].grapheme_indices(true) {
+            let w = gwidth(g);
+            if g == "\n" || col + w > want {
+                break;
+            }
+            col += w;
+            pos = r.start + i + g.len();
+        }
+        pos
+    }
+
+    /// Left press at byte offset `off`: 1 click places the cursor (dragging then selects),
+    /// 2 select the word, 3 the line.
+    pub fn mouse_down(&mut self, off: usize, clicks: u8) {
+        let off = off.min(self.text.len());
+        self.pref_col = None;
+        self.dragging = clicks <= 1;
+        match clicks {
+            2 => {
+                let (a, b) = self
+                    .text
+                    .split_word_bound_indices()
+                    .map(|(i, w)| (i, i + w.len()))
+                    .find(|&(a, b)| off >= a && off < b)
+                    .unwrap_or((off, off));
+                self.anchor = Some(a);
+                self.cursor = b;
+            }
+            3 => {
+                self.anchor = Some(self.text[..off].rfind('\n').map_or(0, |i| i + 1));
+                self.cursor = self.text[off..].find('\n').map_or(self.text.len(), |i| off + i);
+            }
+            _ => {
+                self.anchor = None;
+                self.cursor = off;
+            }
+        }
+        self.snap_selection();
+    }
+
+    /// Drag to byte offset `off` after a single-click press: selects from the press point.
+    pub fn mouse_drag(&mut self, off: usize) {
+        if !self.dragging {
+            return;
+        }
+        if self.anchor.is_none() {
+            self.anchor = Some(self.cursor);
+        }
+        self.cursor = off.min(self.text.len());
+        self.snap_selection();
+    }
+
+    pub fn mouse_up(&mut self) {
+        self.dragging = false;
+        if self.anchor == Some(self.cursor) {
+            self.anchor = None;
+        }
+    }
+
+    /// Paste / image tokens are selected whole: ends inside one move outward.
+    fn snap_selection(&mut self) {
+        let Some(anchor) = self.anchor else { return };
+        let fwd = anchor <= self.cursor;
+        let (mut a, mut b) = if fwd { (anchor, self.cursor) } else { (self.cursor, anchor) };
+        for (s, e) in self.token_ranges() {
+            if a > s && a < e {
+                a = s;
+            }
+            if b > s && b < e {
+                b = e;
+            }
+        }
+        if fwd {
+            self.anchor = Some(a);
+            self.cursor = b;
+        } else {
+            self.anchor = Some(b);
+            self.cursor = a;
+        }
+    }
+
     // -- layout & drawing --------------------------------------------------------
 
     /// Soft-wrapped visual rows for `w` columns (word wrap, CJK aware).
@@ -866,6 +966,32 @@ mod tests {
         e.backspace(); // token
         assert_eq!(e.text, "");
         assert!(e.images.is_empty());
+    }
+
+    #[test]
+    fn mouse_selection_takes_tokens_whole() {
+        let mut e = Editor::default();
+        e.insert("see ");
+        e.attach_image(ImageData::new("image/png", "AA"), None);
+        e.insert("now");
+        let tok = e.images[0].token.clone();
+        let start = e.text.find(&tok).unwrap();
+        // From inside the token to the end: the whole token is included.
+        e.mouse_down(start + 2, 1);
+        e.mouse_drag(e.text.len());
+        e.mouse_up();
+        assert_eq!(e.selection(), Some((start, e.text.len())));
+        // Backwards from the start into the token: up to its end.
+        e.mouse_down(0, 1);
+        e.mouse_up();
+        e.mouse_down(start + 1, 1);
+        e.mouse_drag(1);
+        assert_eq!(e.selection(), Some((1, start + tok.len())));
+        e.mouse_up();
+        // A click without a drag leaves no selection.
+        e.mouse_down(2, 1);
+        e.mouse_up();
+        assert_eq!(e.selection(), None);
     }
 
     #[test]
