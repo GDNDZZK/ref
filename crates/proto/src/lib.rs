@@ -456,6 +456,10 @@ pub struct SessionSnapshot {
     pub info: SessionInfo,
     pub messages: Vec<Message>,
     pub pending_permissions: Vec<PermissionRequest>,
+    /// Human prompts waiting in the session's queue (not yet in `messages`); removable with
+    /// `RemoveQueued`.
+    #[serde(default)]
+    pub queued: Vec<Message>,
 }
 
 // ---------------------------------------------------------------------------

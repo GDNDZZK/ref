@@ -586,10 +586,16 @@ async fn remove_queued_message_before_delivery() {
     let id = r["message_id"].as_str().unwrap().to_string();
     assert_eq!(s.lock().queue.front().map(|m| m.id.clone()), Some(id.clone()));
     assert!(hub.store.load(&s.id).unwrap().messages.iter().any(|m| m.id == id), "queued prompt saved");
+    // Attach snapshots list it (frontends rebuild their queued rows from this).
+    let attach = ref_proto::Request::Attach { session_id: s.id.clone(), foreground: false };
+    let snap = ref_server::api::handle(&hub, &conn, attach.clone()).await.unwrap();
+    assert_eq!(snap["snapshot"]["queued"][0]["id"], id.as_str());
     let remove = |id: &str| ref_proto::Request::RemoveQueued { session_id: s.id.clone(), message_id: id.into() };
     let r = ref_server::api::handle(&hub, &conn, remove(&id)).await.unwrap();
     assert_eq!(r["removed"], true);
     assert!(s.lock().queue.is_empty());
+    let snap = ref_server::api::handle(&hub, &conn, attach).await.unwrap();
+    assert_eq!(snap["snapshot"]["queued"], json!([]));
     // Not persisted either (saves include the queue).
     assert!(!s.persisted().messages.iter().any(|m| m.id == id));
     assert!(!hub.store.load(&s.id).unwrap().messages.iter().any(|m| m.id == id));

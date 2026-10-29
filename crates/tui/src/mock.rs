@@ -17,8 +17,8 @@ struct MSession {
     messages: Vec<Message>,
     perms: Vec<PermissionRequest>,
     abort: Arc<AtomicBool>,
-    /// Ids of prompts waiting for the session to become idle.
-    queue: Vec<String>,
+    /// Prompts waiting for the session to become idle.
+    queue: Vec<Message>,
 }
 
 #[derive(Default)]
@@ -210,11 +210,7 @@ impl Mock {
     }
 
     fn user_message_id(&self, sid: &str, mid: String, text: &str, source: MessageSource, images: Vec<ImageData>) {
-        let mut parts = vec![Part::Text { text: text.to_string(), time: now_ms() }];
-        for (i, img) in images.into_iter().enumerate() {
-            parts.push(Part::Image { image: img, name: Some(format!("image-{}", i + 1)) });
-        }
-        let m = Message { id: mid, role: Role::User, time: now_ms(), time_end: None, source, parts, model: None, agent: None, usage: None, error: None };
+        let m = user_msg(mid, text, source, images);
         {
             let mut w = self.w.lock().unwrap();
             if let Some(s) = w.sessions.get_mut(sid)
@@ -633,7 +629,7 @@ impl Mock {
                             if foreground {
                                 s.info.attached += 1;
                             }
-                            Some(SessionSnapshot { info: s.info.clone(), messages: s.messages.clone(), pending_permissions: s.perms.clone() })
+                            Some(SessionSnapshot { info: s.info.clone(), messages: s.messages.clone(), pending_permissions: s.perms.clone(), queued: s.queue.clone() })
                         }
                         None => None,
                     }
@@ -667,7 +663,7 @@ impl Mock {
                     s.abort.store(false, Ordering::Relaxed);
                     let busy = !s.info.status.is_idle();
                     if busy {
-                        s.queue.push(mid.clone());
+                        s.queue.push(user_msg(mid.clone(), &text, MessageSource::Human, images.clone()));
                     }
                     busy
                 });
@@ -686,7 +682,7 @@ impl Mock {
                     if busy == Some(true) {
                         // Withdrawn with `RemoveQueued` meanwhile: never delivered.
                         let queued = m.with_session(&session_id, |s| {
-                            let i = s.queue.iter().position(|q| *q == mid);
+                            let i = s.queue.iter().position(|q| q.id == mid);
                             i.map(|i| s.queue.remove(i)).is_some()
                         });
                         if queued != Some(true) {
@@ -704,7 +700,7 @@ impl Mock {
             }
             Request::RemoveQueued { session_id, message_id } => {
                 let removed = self.with_session(&session_id, |s| {
-                    let i = s.queue.iter().position(|q| *q == message_id);
+                    let i = s.queue.iter().position(|q| q.id == message_id);
                     i.map(|i| s.queue.remove(i)).is_some()
                 });
                 match removed {
@@ -940,6 +936,14 @@ impl Mock {
             m.set_status(&cid, SessionStatus::Idle);
         });
     }
+}
+
+fn user_msg(mid: String, text: &str, source: MessageSource, images: Vec<ImageData>) -> Message {
+    let mut parts = vec![Part::Text { text: text.to_string(), time: now_ms() }];
+    for (i, img) in images.into_iter().enumerate() {
+        parts.push(Part::Image { image: img, name: Some(format!("image-{}", i + 1)) });
+    }
+    Message { id: mid, role: Role::User, time: now_ms(), time_end: None, source, parts, model: None, agent: None, usage: None, error: None }
 }
 
 fn id_s(p: &str) -> String {

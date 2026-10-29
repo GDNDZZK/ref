@@ -151,7 +151,7 @@ pub fn test_app(streaming: bool) -> App {
         i.status = SessionStatus::Running;
     }
     let mut v = SessionView::new(i.clone(), true);
-    v.load_snapshot(SessionSnapshot { info: i, messages: transcript(streaming), pending_permissions: vec![] });
+    v.load_snapshot(SessionSnapshot { info: i, messages: transcript(streaming), pending_permissions: vec![], queued: vec![] });
     app.views.insert("ses_test".into(), v);
     app.current = Some("ses_test".into());
     app
@@ -294,7 +294,7 @@ fn split_view_snapshot() {
         inf.attached = 0;
         inf.status = if i == 0 { SessionStatus::Busy } else { SessionStatus::Idle };
         let mut v = SessionView::new(inf.clone(), false);
-        v.load_snapshot(SessionSnapshot { info: inf.clone(), messages: transcript(i == 0), pending_permissions: vec![] });
+        v.load_snapshot(SessionSnapshot { info: inf.clone(), messages: transcript(i == 0), pending_permissions: vec![], queued: vec![] });
         app.views.insert(inf.id.clone(), v);
         live.push(inf);
     }
@@ -398,6 +398,15 @@ async fn mock_end_to_end() {
     pump(&mut app, &mut ev_rx, 200).await;
     assert!(app.views[&sid].queued.iter().all(|q| q.id.is_some()), "queued rows bound to server ids");
     assert!(app.views[&sid].is_busy());
+    // Switch to another session and back: the rows come back from the snapshot (still removable).
+    let other = app.live.iter().find(|s| s.id != sid).map(|s| s.id.clone()).expect("another live session");
+    app.attach_fg(&other);
+    pump(&mut app, &mut ev_rx, 200).await;
+    app.attach_fg(&sid);
+    pump(&mut app, &mut ev_rx, 200).await;
+    let q: Vec<&str> = app.views[&sid].queued.iter().map(|q| q.text.as_str()).collect();
+    assert_eq!(q, ["queued question", "never send this"], "queued rows survive re-attach");
+    assert!(app.views[&sid].queued.iter().all(|q| q.id.is_some()));
     let (term, s) = render(&mut app, 100, 30);
     let qy = s.lines().position(|l| l.contains("never send this") && l.contains("✕ remove")).expect("queued row with remove button") as u16;
     let qx = find_col(&term, qy, "✕").unwrap();
@@ -1337,7 +1346,7 @@ fn running_tool_spinner_animates_in_tiles() {
     let mut inf = bg_session("ses_bg", "worker-1", SessionStatus::Running, 0);
     inf.created_at = 1;
     let mut v = SessionView::new(inf.clone(), false);
-    v.load_snapshot(SessionSnapshot { info: inf.clone(), messages: transcript(true), pending_permissions: vec![] });
+    v.load_snapshot(SessionSnapshot { info: inf.clone(), messages: transcript(true), pending_permissions: vec![], queued: vec![] });
     app.views.insert("ses_bg".into(), v);
     app.live = vec![inf];
     let row = |app: &mut App| render(app, 120, 30).1.lines().find(|l| l.contains("grep")).unwrap().to_string();
@@ -1451,7 +1460,7 @@ fn todo_rendering_everywhere() {
     let mut inf = bg_session("ses_bg", "worker-1", SessionStatus::Busy, 0);
     inf.todos = crate::ui::todo::parse_todos(&todo_input());
     let mut v = SessionView::new(inf.clone(), false);
-    v.load_snapshot(SessionSnapshot { info: inf.clone(), messages: transcript(false), pending_permissions: vec![] });
+    v.load_snapshot(SessionSnapshot { info: inf.clone(), messages: transcript(false), pending_permissions: vec![], queued: vec![] });
     app.views.insert("ses_bg".into(), v);
     app.live = vec![inf];
     let (_, s) = render(&mut app, 120, 30);
@@ -1735,7 +1744,7 @@ fn compacted_app() -> App {
     msgs.push(msg("m4", Role::Assistant, MessageSource::Human, ts(14, 6, 1), "Changelog updated."));
     let v = app.views.get_mut("ses_test").unwrap();
     let info = v.info.clone();
-    v.load_snapshot(SessionSnapshot { info, messages: msgs, pending_permissions: vec![] });
+    v.load_snapshot(SessionSnapshot { info, messages: msgs, pending_permissions: vec![], queued: vec![] });
     app
 }
 
@@ -1801,7 +1810,7 @@ fn compaction_divider_keeps_old_messages_interactive() {
     let mut app = test_app(false);
     let v = app.views.get_mut("ses_test").unwrap();
     let info = v.info.clone();
-    v.load_snapshot(SessionSnapshot { info, messages: vec![msg("c1", Role::User, MessageSource::Compaction, ts(14, 5, 0), "sum")], pending_permissions: vec![] });
+    v.load_snapshot(SessionSnapshot { info, messages: vec![msg("c1", Role::User, MessageSource::Compaction, ts(14, 5, 0), "sum")], pending_permissions: vec![], queued: vec![] });
     let (_, s) = render(&mut app, 100, 30);
     assert!(s.contains("◇ Context compacted") && !s.contains(crate::ui::message::CONTEXT_HINT));
 }
@@ -1814,7 +1823,7 @@ fn compaction_divider_in_split_tile() {
     let mut v = SessionView::new(inf.clone(), false);
     let src = compacted_app();
     let msgs = src.views["ses_test"].messages.clone();
-    v.load_snapshot(SessionSnapshot { info: inf.clone(), messages: msgs, pending_permissions: vec![] });
+    v.load_snapshot(SessionSnapshot { info: inf.clone(), messages: msgs, pending_permissions: vec![], queued: vec![] });
     app.views.insert("ses_bg".into(), v);
     app.live = vec![inf];
     let (_, s) = render(&mut app, 120, 40);
@@ -1876,7 +1885,7 @@ fn watch_app() -> App {
         let mut inf = bg_session(id, name, SessionStatus::Idle, 0);
         inf.created_at = 10 + i as i64;
         let mut v = SessionView::new(inf.clone(), false);
-        v.load_snapshot(SessionSnapshot { info: inf.clone(), messages: long_transcript(name, 30), pending_permissions: vec![] });
+        v.load_snapshot(SessionSnapshot { info: inf.clone(), messages: long_transcript(name, 30), pending_permissions: vec![], queued: vec![] });
         app.views.insert(id.into(), v);
         live.push(inf);
     }

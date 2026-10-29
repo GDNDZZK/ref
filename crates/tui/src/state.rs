@@ -94,6 +94,7 @@ impl SessionView {
 
     pub fn load_snapshot(&mut self, snap: SessionSnapshot) {
         self.set_info(snap.info);
+        self.set_queued(snap.queued);
         self.set_messages(snap.messages);
         self.permissions = snap.pending_permissions;
         self.loaded = true;
@@ -212,6 +213,26 @@ impl SessionView {
             Some(id) => !index.contains_key(id),
             None => !tail.iter().any(|t| t == q.text.trim()),
         });
+    }
+
+    /// Queued rows from the server's queue (snapshot), in queue order. Existing rows keep their
+    /// key / pending delete; rows still waiting for their id stay; other id-bound rows are gone
+    /// from the server queue (delivered, withdrawn elsewhere or undone).
+    fn set_queued(&mut self, queue: Vec<Message>) {
+        let mut old = std::mem::take(&mut self.queued);
+        for m in queue {
+            let q = match old.iter().position(|q| q.id.as_deref() == Some(m.id.as_str())) {
+                Some(i) => old.remove(i),
+                None => {
+                    let images = m.parts.iter().filter_map(|p| if let Part::Image { image, .. } = p { Some(image.clone()) } else { None }).collect();
+                    let mut q = Queued::new(m.raw_text(), images);
+                    q.id = Some(m.id.clone());
+                    q
+                }
+            };
+            self.queued.push(q);
+        }
+        self.queued.extend(old.into_iter().filter(|q| q.id.is_none()));
     }
 
     pub fn queued_mut(&mut self, key: u64) -> Option<&mut Queued> {
@@ -399,6 +420,28 @@ mod tests {
         m.parts.push(Part::Text { text: "again".into(), time: 0 });
         v.apply(SessionEvent::Message { message: m });
         assert!(v.queued.is_empty());
+    }
+
+    #[test]
+    fn snapshot_restores_queued_rows() {
+        let mut v = SessionView::new(info(), true);
+        let mut pending = Queued::new("waiting for id".into(), vec![]);
+        pending.key = 1;
+        let mut kept = Queued::new("kept".into(), vec![]);
+        kept.id = Some("q1".into());
+        kept.removing = true;
+        let mut gone = Queued::new("gone".into(), vec![]);
+        gone.id = Some("q0".into());
+        v.queued = vec![gone, pending, kept.clone()];
+        let mut q2 = msg("q2", Role::User);
+        q2.parts.push(Part::Text { text: "from snapshot".into(), time: 0 });
+        q2.parts.push(Part::Image { image: ImageData { mime: "image/png".into(), data: "x".into() }, name: None });
+        let mut q1 = msg("q1", Role::User);
+        q1.parts.push(Part::Text { text: "kept".into(), time: 0 });
+        v.load_snapshot(SessionSnapshot { info: info(), messages: vec![], pending_permissions: vec![], queued: vec![q2, q1] });
+        let rows: Vec<(Option<&str>, &str, usize)> = v.queued.iter().map(|q| (q.id.as_deref(), q.text.as_str(), q.images.len())).collect();
+        assert_eq!(rows, [(Some("q2"), "from snapshot", 1), (Some("q1"), "kept", 0), (None, "waiting for id", 0)]);
+        assert!(v.queued[1].removing && v.queued[1].key == kept.key, "existing row state kept");
     }
 
     #[test]

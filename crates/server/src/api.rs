@@ -94,6 +94,7 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
                     info: st.info.clone(),
                     messages: st.messages.clone(),
                     pending_permissions: st.perms.iter().map(|p| p.request.clone()).collect(),
+                    queued: st.queue.iter().filter(|m| m.source == MessageSource::Human).cloned().collect(),
                 }
             };
             Ok(json!({ "snapshot": snapshot }))

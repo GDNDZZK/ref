@@ -890,6 +890,18 @@ impl App {
             v.queued.retain(|q| Some(q.key) != key);
             return;
         }
+        // Already listed from a snapshot (re-attached before this response): keep that row.
+        if v.queued.iter().any(|q| q.id.as_deref() == Some(id.as_str())) {
+            let mut removing = false;
+            if let Some(i) = key.and_then(|k| v.queued.iter().position(|q| q.key == k)) {
+                removing = v.queued.remove(i).removing;
+            }
+            let listed = v.queued.iter().find(|q| q.id.as_deref() == Some(id.as_str())).map(|q| q.key);
+            if removing && let Some(k) = listed {
+                self.unqueue(sid, k);
+            }
+            return;
+        }
         let q = match key.and_then(|k| v.queued.iter().position(|q| q.key == k)) {
             Some(i) => &mut v.queued[i],
             None => {
