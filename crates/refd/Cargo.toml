@@ -3,5 +3,32 @@ name = "refd"
 version.workspace = true
 edition.workspace = true
 
+[[bin]]
+name = "refd"
+path = "src/main.rs"
+
 [dependencies]
 ref-proto.workspace = true
+ref-config.workspace = true
+ref-llm.workspace = true
+ref-tools.workspace = true
+ref-mcp.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+chrono.workspace = true
+clap.workspace = true
+reqwest.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+parking_lot.workspace = true
+rand.workspace = true
+libc.workspace = true
+axum.workspace = true
+
+[dev-dependencies]
+tokio-tungstenite.workspace = true
+tempfile = "3"
