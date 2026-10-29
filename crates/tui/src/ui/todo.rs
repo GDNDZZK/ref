@@ -97,6 +97,22 @@ pub fn progress_spans(todos: &[Todo], w: usize) -> Option<Vec<Span<'static>>> {
     ])
 }
 
+/// Count for a Live sessions row: `2/5` (primary while an item is in progress, muted when only
+/// pending ones are left), `✓3/3` in green once everything is done. None without countable items.
+pub fn badge(todos: &[Todo]) -> Option<Span<'static>> {
+    let (done, total) = counts(todos);
+    if total == 0 {
+        return None;
+    }
+    Some(if !active(todos) {
+        Span::styled(format!("✓{done}/{total}"), theme::fg(theme::SUCCESS))
+    } else if todos.iter().any(|t| t.status == TodoStatus::InProgress) {
+        Span::styled(format!("{done}/{total}"), theme::fg(theme::PRIMARY))
+    } else {
+        Span::styled(format!("{done}/{total}"), theme::fg(theme::MUTED))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,5 +165,18 @@ mod tests {
         for r in todo_rows(&cjk, 16, 10) {
             assert!(text::line_width(&r.line) <= 16);
         }
+    }
+
+    #[test]
+    fn badge_states() {
+        let t = |items: &[(&str, &str)]| parse_todos(&json!({"todos": items.iter().map(|(c, s)| json!({"content": c, "status": s})).collect::<Vec<_>>()}));
+        let b = badge(&t(&[("a", "completed"), ("b", "in_progress"), ("c", "pending"), ("d", "cancelled")])).unwrap();
+        assert_eq!((b.content.as_ref(), b.style.fg), ("1/3", Some(theme::PRIMARY)));
+        let b = badge(&t(&[("a", "completed"), ("b", "pending")])).unwrap();
+        assert_eq!((b.content.as_ref(), b.style.fg), ("1/2", Some(theme::MUTED)));
+        let b = badge(&t(&[("a", "completed"), ("b", "completed"), ("c", "cancelled")])).unwrap();
+        assert_eq!((b.content.as_ref(), b.style.fg), ("✓2/2", Some(theme::SUCCESS)));
+        assert!(badge(&[]).is_none());
+        assert!(badge(&t(&[("a", "cancelled")])).is_none());
     }
 }

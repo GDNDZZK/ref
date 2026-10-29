@@ -459,8 +459,16 @@ fn draw_sidebar(buf: &mut Buffer, r: Rect, app: &mut App, now: i64, tick: u64) {
                 let fgbg = if s.attached > 0 { "fg" } else { "bg" };
                 let name_st = if me { theme::bold(theme::PRIMARY) } else { theme::text() };
                 let left = vec![Span::styled(format!("{dot} "), theme::fg(dc)), Span::styled(s.name.clone(), name_st), Span::styled(format!(" {fgbg}"), theme::fg(theme::DIM))];
-                // Working time of the current run, right-aligned (same source as the status line).
-                let right = crate::state::busy_ms(s, now).map(|ms| vec![Span::styled(text::fmt_elapsed(ms), theme::fg(theme::MUTED))]).unwrap_or_default();
+                // Right-aligned: todo count, then the working time of the current run (same source
+                // as the status line). `compose` truncates the name first, these stay whole.
+                let todos = if me { &v.info.todos } else { &s.todos };
+                let mut right: Vec<Span<'static>> = crate::ui::todo::badge(todos).into_iter().collect();
+                if let Some(ms) = crate::state::busy_ms(s, now) {
+                    if !right.is_empty() {
+                        right.push(Span::raw(" "));
+                    }
+                    right.push(Span::styled(text::fmt_elapsed(ms), theme::fg(theme::MUTED)));
+                }
                 SbRow { spans: message::compose(left, right, w).0.spans, click: Some(SbClick::Session(s.id.clone())) }
             })
             .collect();

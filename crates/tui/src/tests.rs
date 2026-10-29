@@ -2202,3 +2202,41 @@ fn split_tile_commands_act_on_that_session() {
     assert_eq!(app.mode, Mode::Watch);
     assert!(!app.quit_after_close);
 }
+
+#[test]
+fn sidebar_live_sessions_show_todo_count() {
+    let todo = |c: &str, st: TodoStatus| Todo { content: c.into(), status: st };
+    let mut app = test_app(false);
+    let mut cur = app.views["ses_test"].info.clone();
+    cur.todos = vec![todo("a", TodoStatus::Completed), todo("b", TodoStatus::InProgress), todo("c", TodoStatus::Pending), todo("x", TodoStatus::Pending), todo("y", TodoStatus::Pending)];
+    app.views.get_mut("ses_test").unwrap().info.todos = cur.todos.clone();
+    let mut busy = bg_session("ses_busy", "worker-1", SessionStatus::Running, 0);
+    busy.busy_since = Some(ref_proto::now_ms() - 65_000);
+    busy.todos = vec![todo("a", TodoStatus::Completed), todo("b", TodoStatus::Completed), todo("c", TodoStatus::Completed)];
+    let mut pending = bg_session("ses_pend", "pender", SessionStatus::Idle, 0);
+    pending.todos = vec![todo("a", TodoStatus::Pending), todo("b", TodoStatus::Pending), todo("c", TodoStatus::Cancelled)];
+    let mut done = bg_session("ses_done", "reviewer", SessionStatus::Idle, 0);
+    done.todos = vec![todo("a", TodoStatus::Completed), todo("b", TodoStatus::Cancelled)];
+    let mut gone = bg_session("ses_cxl", "cancelled-only", SessionStatus::Idle, 0);
+    gone.todos = vec![todo("a", TodoStatus::Cancelled)];
+    let mut long = bg_session("ses_long", "解析器重构和一个很长很长的名字", SessionStatus::Running, 0);
+    long.busy_since = Some(ref_proto::now_ms() - 723_000);
+    long.todos = vec![todo("a", TodoStatus::Completed), todo("b", TodoStatus::InProgress), todo("c", TodoStatus::Pending), todo("d", TodoStatus::Pending)];
+    app.live = vec![cur, busy, pending, done, gone, bg_session("ses_none", "scratch", SessionStatus::Idle, 0), long];
+    let (term, _) = render(&mut app, 150, 50);
+    let all = sidebar_text(&term, 150);
+    let rows: Vec<String> = all.iter().skip_while(|l| !l.contains("Live sessions")).cloned().collect();
+    let row = |name: &str| rows.iter().find(|l| l.contains(name)).unwrap_or_else(|| panic!("{name}: {rows:#?}")).trim_end().to_string();
+    assert!(row("ref-a1b2").ends_with("1/5"), "current session too: {:?}", row("ref-a1b2"));
+    let w = row("worker-1");
+    assert!(w.ends_with("✓3/3 1m 05s") || w.ends_with("✓3/3 1m 06s"), "{w:?}");
+    assert!(row("pender").ends_with(" 0/2"), "cancelled not counted");
+    assert!(row("reviewer").ends_with("✓1/1"));
+    assert!(row("cancelled-only").ends_with("bg"), "no countable items: no badge");
+    assert!(row("scratch").ends_with("bg"));
+    let l = rows.iter().find(|l| l.contains("解析器")).unwrap().trim_end().to_string();
+    assert!(l.contains('…') && (l.ends_with("1/4 12m 03s") || l.ends_with("1/4 12m 04s")), "name truncated, count and time whole: {l:?}");
+    for r in &all {
+        assert!(crate::ui::text::width(r.trim_end()) <= crate::render::SIDEBAR_W as usize, "{r:?}");
+    }
+}

@@ -51,6 +51,7 @@ A session is **foreground** while a frontend is directly attached to it, and **b
 
 ## TUI
 
+- The sidebar's Live sessions list shows, right-aligned per session, its todo count (`2/5`; `✓3/3` in green when all are done; cancelled items are not counted) and, while busy, the working time.
 - Every message shows its time: your prompts, each assistant reply (start → end, duration, tokens), and each tool call (start, duration).
 - Collapsed tool calls show the tool name and the model's `purpose`. Click one to see the raw input and output.
 - Collapsed thinking shows, on a single line, the latest characters of the reasoning, updated live.
