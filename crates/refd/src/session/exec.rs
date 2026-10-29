@@ -44,7 +44,29 @@ pub(crate) async fn run_tools(core: &Arc<SessionCore>, tok: &CancellationToken, 
             })
             .collect()
     };
-    futures::future::join_all(calls.into_iter().map(|c| run_one(core, tok, env, msg_id, c))).await;
+    // Consecutive read-only calls run concurrently; any other call runs alone, in the order the
+    // model issued them, so e.g. `edit` then `bash cat` observes the edit.
+    let mut batch: Vec<ToolPart> = Vec::new();
+    for c in calls {
+        if is_read_only(&c.name) {
+            batch.push(c);
+            continue;
+        }
+        if !batch.is_empty() {
+            futures::future::join_all(batch.drain(..).map(|c| run_one(core, tok, env, msg_id, c))).await;
+        }
+        run_one(core, tok, env, msg_id, c).await;
+    }
+    if !batch.is_empty() {
+        futures::future::join_all(batch.into_iter().map(|c| run_one(core, tok, env, msg_id, c))).await;
+    }
+}
+
+fn is_read_only(name: &str) -> bool {
+    matches!(
+        name,
+        "read" | "grep" | "find" | "context_info" | "list_sessions" | "read_messages" | "session_context" | "skill"
+    )
 }
 
 /// Subject for pattern permissions: bash command / file path.
