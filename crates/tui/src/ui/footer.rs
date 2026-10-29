@@ -21,6 +21,8 @@ pub struct StatusCtx<'a> {
     pub connected: bool,
     pub watch_mode: bool,
     pub watch_count: usize,
+    /// Split view: a tile is focused.
+    pub watch_focused: bool,
     pub page: Option<(usize, usize)>,
 }
 
@@ -94,8 +96,10 @@ pub fn draw_status(buf: &mut Buffer, area: Rect, cx: &StatusCtx<'_>) {
         left.push(Span::styled(format!("   {h}"), theme::fg(*c).add_modifier(Modifier::BOLD)));
     } else if cx.shell_mode {
         left.push(Span::styled("   esc exit shell mode", theme::muted()));
-    } else if cx.watch_mode {
-        left.push(Span::styled("   tab focus · enter send · esc esc abort · ctrl+o zoom", theme::fg(theme::DIM)));
+    } else if cx.watch_mode && cx.watch_count > 0 && !cx.watch_focused {
+        left.push(Span::styled("   click or tab to focus a session · wheel scrolls a tile", theme::fg(theme::DIM)));
+    } else if cx.watch_mode && cx.watch_count > 0 {
+        left.push(Span::styled("   enter send · pgup/pgdn scroll · esc unfocus · esc esc abort · ctrl+o zoom", theme::fg(theme::DIM)));
     } else if cx.view.is_some_and(|v| v.is_busy()) {
         left.push(Span::styled("   esc ", theme::text()));
         left.push(Span::styled("interrupt", theme::muted()));

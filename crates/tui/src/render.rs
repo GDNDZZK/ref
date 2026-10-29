@@ -11,11 +11,10 @@ use crate::state::SessionView;
 use crate::ui::chat::{self, Env};
 use crate::ui::dialog::Dialog;
 use crate::ui::footer::{self, StatusCtx};
-use crate::ui::message::{self, Ctx};
+use crate::ui::message;
 use crate::ui::permission::PermissionView;
 use crate::ui::text::{self, width};
-use crate::ui::{Row, split, theme, todo};
-use ref_proto::TodoStatus;
+use crate::ui::{split, theme, todo};
 
 pub const SIDEBAR_W: u16 = 32;
 /// Minimum terminal width at which the sidebar is shown.
@@ -157,6 +156,7 @@ fn draw_chat_mode(buf: &mut Buffer, area: Rect, app: &mut App, now: i64, tick: u
         connected: app.connected || !app.ever_connected,
         watch_mode: false,
         watch_count: 0,
+        watch_focused: false,
         page: None,
     };
     footer::draw_status(buf, lay.status, &sc);
@@ -342,71 +342,22 @@ fn sb_blank() -> SbRow {
     sb(Vec::new())
 }
 
-/// A sidebar section below the session info: a full form (gap + header + items) and a
-/// one-row summary form used when space is short.
+/// A sidebar section below the session info: gap + header + items.
 struct SbSection {
     header: Vec<Span<'static>>,
-    /// Header shown when the items are hidden (counts / current item).
-    summary: Vec<Span<'static>>,
     header_click: Option<SbClick>,
-    /// Item rows; `fit` produces at most `k` of them (with a "… N more" row when cut).
     items: Vec<SbRow>,
-    fit: Option<Box<dyn Fn(usize) -> Vec<SbRow>>>,
 }
 
 impl SbSection {
-    fn min(&self) -> usize {
-        2
-    }
-    fn desired(&self) -> usize {
+    fn len(&self) -> usize {
         2 + self.items.len()
     }
-    /// Rows for a budget of `k` (≥ 2): gap, header, items.
-    fn render(self, k: usize) -> Vec<SbRow> {
-        let mut out = vec![sb_blank()];
-        if k >= self.desired() {
-            out.push(SbRow { spans: self.header, click: self.header_click });
-            out.extend(self.items);
-            return out;
-        }
-        let room = k.saturating_sub(2);
-        if room >= 2 {
-            out.push(SbRow { spans: self.header, click: self.header_click });
-            match &self.fit {
-                Some(f) => out.extend(f(room)),
-                None => {
-                    let n = self.items.len();
-                    out.extend(self.items.into_iter().take(room - 1));
-                    out.push(sb(vec![Span::styled(format!("… {} more", n - (room - 1)), theme::muted())]));
-                }
-            }
-        } else {
-            out.push(SbRow { spans: self.summary, click: self.header_click });
-        }
+    fn render(self) -> Vec<SbRow> {
+        let mut out = vec![sb_blank(), SbRow { spans: self.header, click: self.header_click }];
+        out.extend(self.items);
         out
     }
-}
-
-/// Todo rows within `k` rows: when not everything fits, finished items are dropped first and the
-/// rest is cut with a `… N more` row.
-fn fit_todo_rows(todos: &[ref_proto::Todo], w: usize, k: usize) -> Vec<SbRow> {
-    let all = todo::todo_rows(todos, w, usize::MAX);
-    if all.len() <= k {
-        return all.into_iter().map(|r| sb(r.line.spans)).collect();
-    }
-    let list: Vec<&ref_proto::Todo> = if todo::active(todos) { todos.iter().filter(|t| matches!(t.status, TodoStatus::Pending | TodoStatus::InProgress)).collect() } else { todos.iter().collect() };
-    let mut out = Vec::new();
-    let mut shown = 0;
-    for t in list {
-        let rows = todo::todo_rows(std::slice::from_ref(t), w, 1);
-        if out.len() + rows.len() > k.saturating_sub(1) {
-            break;
-        }
-        out.extend(rows.into_iter().map(|r| sb(r.line.spans)));
-        shown += 1;
-    }
-    out.push(sb(vec![Span::styled(format!("… {} more", todos.len() - shown), theme::muted())]));
-    out
 }
 
 fn context_bar(c: ref_proto::ContextUsage, bw: usize) -> Vec<Span<'static>> {
@@ -485,36 +436,19 @@ fn draw_sidebar(buf: &mut Buffer, r: Rect, app: &mut App, tick: u64) {
     let todo_sec = (!todos.is_empty()).then(|| {
         let (done, total) = todo::counts(&todos);
         let header = vec![Span::styled("Todo", theme::bold(theme::ACCENT)), Span::styled(format!("  {done}/{total}"), theme::muted())];
-        let mut summary = vec![Span::styled("Todo ", theme::bold(theme::ACCENT))];
-        match todo::progress_spans(&todos, w.saturating_sub(5)) {
-            Some(p) => summary.extend(p),
-            None => summary.push(Span::styled(format!(" {done}/{total}"), theme::muted())),
-        }
         let items = todo::todo_rows(&todos, w, usize::MAX).into_iter().map(|r| sb(r.line.spans)).collect();
-        let t2 = todos.clone();
-        SbSection { header, summary, header_click: None, items, fit: Some(Box::new(move |k| fit_todo_rows(&t2, w, k))) }
+        SbSection { header, header_click: None, items }
     });
     let mcp_sec = (!app.mcp.is_empty()).then(|| {
         let sum = crate::ui::mcp::summary(&app.mcp);
         let header = vec![Span::styled("MCP", theme::bold(theme::ACCENT)), Span::styled(format!("  {sum}"), theme::muted())];
-        let mut summary = header.clone();
-        summary.push(Span::raw(" "));
-        for e in &app.mcp {
-            summary.push(Span::raw(" "));
-            summary.push(crate::ui::mcp::dot(&e.state, tick));
-        }
         let items = app.mcp.iter().map(|e| SbRow { spans: crate::ui::mcp::sidebar_line(e, w, tick).spans, click: Some(SbClick::Mcp(e.name.clone())) }).collect();
-        SbSection { header, summary, header_click: Some(SbClick::Mcp(String::new())), items, fit: None }
+        SbSection { header, header_click: Some(SbClick::Mcp(String::new())), items }
     });
     let mut live: Vec<_> = app.live.iter().filter(|s| s.live).cloned().collect();
     live.sort_by_key(|s| s.created_at);
     let live_sec = (!live.is_empty()).then(|| {
         let header = vec![Span::styled("Live sessions", theme::bold(theme::ACCENT)), Span::styled(format!("  {}", live.len()), theme::muted())];
-        let busy = live.iter().filter(|s| !s.status.is_idle()).count();
-        let mut summary = header.clone();
-        if busy > 0 {
-            summary.push(Span::styled(format!(" · {} {busy} busy", theme::spinner(tick)), theme::fg(theme::PRIMARY)));
-        }
         let cur_id = v.info.id.clone();
         let items = live
             .iter()
@@ -530,37 +464,22 @@ fn draw_sidebar(buf: &mut Buffer, r: Rect, app: &mut App, tick: u64) {
                 }
             })
             .collect();
-        SbSection { header, summary, header_click: None, items, fit: None }
+        SbSection { header, header_click: None, items }
     });
 
-    // --- Height allocation by priority.
-    let mut secs: [Option<SbSection>; 3] = [todo_sec, mcp_sec, live_sec]; // priority order
-    let mins: Vec<usize> = secs.iter().map(|s| s.as_ref().map(SbSection::min).unwrap_or(0)).collect();
-    let min_total: usize = mins.iter().sum();
-    // The full session block only when it doesn't squeeze the todo list (up to 6 items).
-    let todo_extra = secs[0].as_ref().map(|s| (s.desired() - s.min()).min(6)).unwrap_or(0);
-    let info = if h >= full.len() + min_total + todo_extra { full } else { compact };
-    let mut remaining = h.saturating_sub(info.len());
-    let mut alloc = [0usize; 3];
-    for i in 0..3 {
-        let Some(s) = &secs[i] else { continue };
-        let reserve: usize = mins[i + 1..].iter().sum();
-        let avail = remaining.saturating_sub(reserve);
-        if avail >= s.min() {
-            alloc[i] = s.desired().min(avail);
-            remaining -= alloc[i];
-        }
+    // --- Layout: full session info when everything fits; otherwise the compact form, and the
+    // whole list scrolls (wheel over the sidebar) with a thumb on the separator.
+    let secs: Vec<SbSection> = [mcp_sec, todo_sec, live_sec].into_iter().flatten().collect(); // display order
+    let sec_len: usize = secs.iter().map(SbSection::len).sum();
+    let mut rows = if full.len() + sec_len <= h { full } else { compact };
+    for s in secs {
+        rows.extend(s.render());
     }
-    let mut rows = info;
-    // Display order: MCP (1), Todo (0), Live (2).
-    for i in [1usize, 0, 2] {
-        if let Some(s) = secs[i].take()
-            && alloc[i] >= 2
-        {
-            rows.extend(s.render(alloc[i]));
-        }
-    }
-    for (y, row) in (r.y + 1..r.y + r.height).zip(rows) {
+    let max_scroll = rows.len().saturating_sub(h);
+    app.sidebar_max_scroll = max_scroll;
+    app.sidebar_scroll = app.sidebar_scroll.min(max_scroll);
+    let scroll = app.sidebar_scroll;
+    for (y, row) in (r.y + 1..r.y + r.height).zip(rows.into_iter().skip(scroll)) {
         let line = Line::from(message::truncate_spans(row.spans, w));
         buf.set_line(x, y, &line, w as u16);
         match row.click {
@@ -569,51 +488,16 @@ fn draw_sidebar(buf: &mut Buffer, r: Rect, app: &mut App, tick: u64) {
             None => {}
         }
     }
+    // Scrollbar in the (otherwise empty) rightmost column.
+    if max_scroll > 0 {
+        let bar = Rect::new(r.x + r.width - 1, r.y + 1, 1, h as u16);
+        chat::draw_scrollbar(buf, bar, h + max_scroll, scroll as f64, max_scroll as f64, ("┃", theme::BORDER_ACTIVE), Some(("│", theme::BORDER_SUBTLE)));
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Watch (split) mode
 // ---------------------------------------------------------------------------
-
-/// Compact rows for a tile body (cached per message in the view's chat state).
-fn tile_rows(v: &mut SessionView, e: &Env<'_>, w: usize, h: usize) -> Vec<Row> {
-    let mut out: Vec<Row> = Vec::new();
-    let n = v.messages.len();
-    let busy = v.is_busy();
-    let mut i = n;
-    let last_c = chat::last_compaction(&v.messages);
-    while i > 0 && out.len() < h + 4 {
-        i -= 1;
-        let SessionView { messages, versions, chat, info, .. } = &mut *v;
-        let m = &messages[i];
-        let live = busy && crate::state::message_live(m);
-        let ver = versions.get(i).copied().unwrap_or(0);
-        let stale = last_c.is_some_and(|c| i < c);
-        let key = chat::hash_key(&[ver, w as u64, if live { e.tick } else { 0 }, if live { (e.now / 1000) as u64 } else { 0 }, stale as u64, 11]);
-        let cx = Ctx {
-            agents: e.agents,
-            models: e.models,
-            toggled: None,
-            show_all: None,
-            details: false,
-            thinking: false,
-            now: e.now,
-            tick: e.tick,
-            compact: true,
-            session_agent: &info.agent,
-            stale,
-            context_start: false,
-        };
-        let mut rows = chat.tile_rows(&m.id, key, || message::render(m, &cx, w)).to_vec();
-        if i > 0 {
-            rows.insert(0, Row::blank());
-        }
-        rows.append(&mut out);
-        out = rows;
-    }
-    let skip = out.len().saturating_sub(h);
-    out.into_iter().skip(skip).collect()
-}
 
 fn draw_watch_mode(buf: &mut Buffer, area: Rect, app: &mut App, now: i64, tick: u64) -> Option<(u16, u16)> {
     let status = Rect::new(area.x, area.y + area.height.saturating_sub(1), area.width, 1);
@@ -659,13 +543,12 @@ fn draw_watch_mode(buf: &mut Buffer, area: Rect, app: &mut App, now: i64, tick: 
         if inner.width > 2 && inner.height > 0 {
             let content = Rect::new(inner.x + 1, inner.y, inner.width - 2, inner.height);
             let e = env(app, now, tick);
-            let rows = tile_rows(&mut v, &e, content.width as usize, content.height as usize);
-            if rows.is_empty() {
+            chat::draw_tile(buf, content, r.x + r.width - 1, &mut v, &e);
+            if v.messages.is_empty() {
                 draw_center(buf, content, &[Line::from(Span::styled(if v.loaded { "empty" } else { "loading…" }, theme::muted()))]);
             }
-            for (i, row) in rows.iter().enumerate() {
-                buf.set_line(content.x, content.y + i as u16, &row.line, content.width);
-            }
+        } else {
+            v.chat.area = Rect::default();
         }
         if focused && r.height >= 5 {
             let ir = split::draw_input_sep(buf, r);
@@ -686,6 +569,7 @@ fn draw_watch_mode(buf: &mut Buffer, area: Rect, app: &mut App, now: i64, tick: 
         connected: app.connected || !app.ever_connected,
         watch_mode: true,
         watch_count: ids.len(),
+        watch_focused: app.watch.focus.is_some(),
         page: Some((app.watch.page, pages)),
     };
     footer::draw_status(buf, status, &sc);

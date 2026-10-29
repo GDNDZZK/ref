@@ -434,7 +434,13 @@ async fn mock_end_to_end() {
         crate::input::handle(&mut app, key(KeyCode::Char('d'), KeyModifiers::NONE));
         assert!(app.active_permission().is_none());
     }
-    // Message the focused tile directly.
+    // Nothing is focused on entering the split view; typing only shows a hint.
+    assert!(app.watch.focus.is_none(), "no auto-focus");
+    type_str(&mut app, "x");
+    assert!(app.watch.inputs.values().all(|e| e.is_empty()));
+    assert!(app.hint.as_ref().is_some_and(|h| h.0.contains("click or tab to focus")));
+    // Tab focuses a tile; message it directly.
+    crate::input::handle(&mut app, key(KeyCode::Tab, KeyModifiers::NONE));
     let focus = app.watch.focus.clone().expect("focus");
     type_str(&mut app, "ping");
     crate::input::handle(&mut app, key(KeyCode::Enter, KeyModifiers::NONE));
@@ -1515,6 +1521,10 @@ fn mcp_dialog_render_wrap_cjk_and_tools() {
     // Empty / not loaded.
     let mut app = test_app(false);
     app.open_mcp(None);
+    // Past the grow-in animation (a 6-row dialog has no content rows while it grows).
+    if let Some(crate::ui::dialog::Dialog::Mcp(d)) = app.dialog.as_mut() {
+        d.opened -= std::time::Duration::from_secs(1);
+    }
     let (_, s) = render(&mut app, 100, 30);
     assert!(s.contains("Loading MCP servers"), "{s}");
 }
@@ -1659,4 +1669,234 @@ async fn mock_compact_keeps_history() {
     assert_eq!(v.messages.last().unwrap().source, MessageSource::Compaction);
     let (_, s) = render(&mut app, 100, 40);
     assert!(s.contains("◇ Context compacted") && s.contains(crate::ui::message::CONTEXT_HINT), "{s}");
+}
+
+// ---------------------------------------------------------------------------
+// Split view scrolling / focus, sidebar scrolling, expand without layout shift
+// ---------------------------------------------------------------------------
+
+/// A long transcript: `n` user/assistant exchanges.
+fn long_transcript(tag: &str, n: usize) -> Vec<Message> {
+    let mut out = Vec::new();
+    for i in 0..n {
+        out.push(msg(&format!("{tag}u{i}"), Role::User, MessageSource::Human, ts(10, 0, 0) + i as i64 * 1000, &format!("{tag} question {i}")));
+        out.push(msg(&format!("{tag}a{i}"), Role::Assistant, MessageSource::Human, ts(10, 0, 0) + i as i64 * 1000 + 500, &format!("{tag} answer {i}\nsecond line of answer {i}")));
+    }
+    out
+}
+
+/// Split view with two idle background sessions holding long transcripts.
+fn watch_app() -> App {
+    let mut app = test_app(false);
+    app.toggle_watch();
+    let mut live = vec![app.views["ses_test"].info.clone()];
+    for (i, (id, name)) in [("ses_w1", "alpha"), ("ses_w2", "beta")].into_iter().enumerate() {
+        let mut inf = bg_session(id, name, SessionStatus::Idle, 0);
+        inf.created_at = 10 + i as i64;
+        let mut v = SessionView::new(inf.clone(), false);
+        v.load_snapshot(SessionSnapshot { info: inf.clone(), messages: long_transcript(name, 30), pending_permissions: vec![] });
+        app.views.insert(id.into(), v);
+        live.push(inf);
+    }
+    app.live = live;
+    app.screen = ratatui::layout::Rect::new(0, 0, 120, 30);
+    app
+}
+
+fn tile_rect(app: &App, sid: &str) -> ratatui::layout::Rect {
+    app.watch.tiles.iter().find(|t| t.0 == sid).map(|t| t.1).expect("tile")
+}
+
+#[test]
+fn split_tile_wheel_scrolls_tile_under_pointer() {
+    use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEventKind};
+    let mut app = watch_app();
+    let (_, s) = render(&mut app, 120, 30);
+    assert!(app.watch.focus.is_none());
+    assert!(s.contains("alpha answer 29") && s.contains("beta answer 29"), "tiles start at the bottom:\n{s}");
+    let (r1, r2) = (tile_rect(&app, "ses_w1"), tile_rect(&app, "ses_w2"));
+    let top2 = app.views["ses_w2"].chat.top();
+    let top1 = app.views["ses_w1"].chat.top();
+    // Wheel over the unfocused second tile scrolls only that tile, and doesn't focus it.
+    for _ in 0..4 {
+        crate::input::handle(&mut app, mouse(MouseEventKind::ScrollUp, r2.x + 5, r2.y + 3));
+    }
+    assert!(app.watch.focus.is_none());
+    assert_eq!(app.views["ses_w2"].chat.top(), top2 - 12);
+    assert!(!app.views["ses_w2"].chat.follow);
+    assert_eq!(app.views["ses_w1"].chat.top(), top1, "other tile untouched");
+    let (term, s) = render(&mut app, 120, 30);
+    assert!(s.contains("alpha answer 29") && !s.contains("beta answer 29"), "{s}");
+    // Scroll thumb drawn on the scrolled tile's right border only.
+    let buf = term.backend().buffer();
+    let thumb = |r: ratatui::layout::Rect| (r.y + 1..r.y + r.height - 1).any(|y| buf[(r.x + r.width - 1, y)].symbol() == "┃");
+    assert!(thumb(r2) && !thumb(r1));
+    // New content while scrolled up: position kept, "↓ N new lines" pill appears.
+    let top = app.views["ses_w2"].chat.top();
+    let v = app.views.get_mut("ses_w2").unwrap();
+    v.apply(SessionEvent::Message { message: msg("late", Role::Assistant, MessageSource::Human, ts(11, 0, 0), "late arrival") });
+    let (_, s) = render(&mut app, 120, 30);
+    assert_eq!(app.views["ses_w2"].chat.top(), top, "position kept");
+    assert!(s.contains("new lines"), "{s}");
+    assert!(!s.contains("late arrival"));
+    // Click on the pill: back to the bottom (follow again); click doesn't need focus first.
+    let p = app.views["ses_w2"].chat.pill.expect("pill rect");
+    crate::input::handle(&mut app, mouse(MouseEventKind::Down(MouseButton::Left), p.x + 1, p.y));
+    let (_, s) = render(&mut app, 120, 30);
+    assert!(app.views["ses_w2"].chat.follow);
+    assert!(s.contains("late arrival") && !s.contains("new lines"), "{s}");
+    // Streaming at the bottom keeps following.
+    let v = app.views.get_mut("ses_w2").unwrap();
+    v.apply(SessionEvent::Message { message: msg("later", Role::Assistant, MessageSource::Human, ts(11, 1, 0), "even later") });
+    let (_, s) = render(&mut app, 120, 30);
+    assert!(s.contains("even later"));
+    // Focused tile: PgUp / shift+↑ scroll it, End returns to the bottom.
+    app.watch.focus = Some("ses_w1".into());
+    render(&mut app, 120, 30);
+    let bottom = app.views["ses_w1"].chat.top();
+    crate::input::handle(&mut app, key(KeyCode::PageUp, KeyModifiers::NONE));
+    render(&mut app, 120, 30);
+    assert!(app.views["ses_w1"].chat.top() < bottom);
+    let t = app.views["ses_w1"].chat.top();
+    crate::input::handle(&mut app, key(KeyCode::Up, KeyModifiers::SHIFT));
+    assert_eq!(app.views["ses_w1"].chat.top(), t - 1);
+    crate::input::handle(&mut app, key(KeyCode::End, KeyModifiers::NONE));
+    render(&mut app, 120, 30);
+    assert_eq!(app.views["ses_w1"].chat.top(), bottom);
+    assert!(app.views["ses_w1"].chat.follow);
+    // Scrolled to the very top: the first message of the session is reachable.
+    crate::input::handle(&mut app, key(KeyCode::Home, KeyModifiers::NONE));
+    let (_, s) = render(&mut app, 120, 30);
+    assert!(s.contains("alpha question 0"), "{s}");
+}
+
+#[test]
+fn split_view_no_default_focus_and_esc_unfocus() {
+    use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEventKind};
+    let mut app = watch_app();
+    app.sync_watch();
+    let (term, s) = render(&mut app, 120, 30);
+    assert!(app.watch.focus.is_none(), "no focus by default");
+    assert!(s.contains("click or tab to focus a session"), "{s}");
+    // No tile border in the focus colour.
+    let buf = term.backend().buffer();
+    let r = tile_rect(&app, "ses_w1");
+    assert_ne!(buf[(r.x, r.y)].fg, crate::ui::theme::PRIMARY);
+    // Typing / enter with nothing focused: no input, no prompt sent.
+    app.pending.clear();
+    type_str(&mut app, "hi");
+    crate::input::handle(&mut app, key(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(app.watch.inputs.values().all(|e| e.is_empty()) && app.pending.is_empty());
+    // Sessions appearing/disappearing don't auto-focus.
+    app.sync_watch();
+    assert!(app.watch.focus.is_none());
+    // Tab focuses the first tile; esc with text clears it, the next esc unfocuses.
+    crate::input::handle(&mut app, key(KeyCode::Tab, KeyModifiers::NONE));
+    assert_eq!(app.watch.focus.as_deref(), Some("ses_w1"));
+    type_str(&mut app, "hi");
+    crate::input::handle(&mut app, key(KeyCode::Esc, KeyModifiers::NONE));
+    assert_eq!(app.watch.focus.as_deref(), Some("ses_w1"));
+    assert!(app.watch.inputs["ses_w1"].is_empty());
+    crate::input::handle(&mut app, key(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(app.watch.focus.is_none(), "esc on idle empty tile unfocuses");
+    // Shift+tab from nothing: last tile. Busy tile: esc arms, esc aborts, focus kept.
+    crate::input::handle(&mut app, key(KeyCode::BackTab, KeyModifiers::SHIFT));
+    assert_eq!(app.watch.focus.as_deref(), Some("ses_w2"));
+    app.views.get_mut("ses_w2").unwrap().info.status = SessionStatus::Busy;
+    app.pending.clear();
+    crate::input::handle(&mut app, key(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(app.esc_armed.is_some() && app.watch.focus.is_some());
+    crate::input::handle(&mut app, key(KeyCode::Esc, KeyModifiers::NONE));
+    assert_eq!(app.watch.focus.as_deref(), Some("ses_w2"), "abort keeps focus");
+    assert!(app.toasts.items.iter().any(|t| t.text.contains("Interrupted")));
+    // Click focuses; click on the footer unfocuses.
+    render(&mut app, 120, 30);
+    let r = tile_rect(&app, "ses_w1");
+    crate::input::handle(&mut app, mouse(MouseEventKind::Down(MouseButton::Left), r.x + 3, r.y + 3));
+    assert_eq!(app.watch.focus.as_deref(), Some("ses_w1"));
+    let (_, s) = render(&mut app, 120, 30);
+    assert!(s.contains("esc unfocus"), "{s}");
+    crate::input::handle(&mut app, mouse(MouseEventKind::Down(MouseButton::Left), 10, 29));
+    assert!(app.watch.focus.is_none());
+    // The focused session leaving the split view clears the focus.
+    app.watch.focus = Some("ses_w1".into());
+    app.live.retain(|s| s.id != "ses_w1");
+    app.sync_watch();
+    assert!(app.watch.focus.is_none());
+}
+
+#[test]
+fn sidebar_scrolls_and_clicks_map_after_scroll() {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let mut app = sidebar_app();
+    for i in 0..12 {
+        let mut s = bg_session(&format!("ses_x{i}"), &format!("extra-{i}"), SessionStatus::Idle, 0);
+        s.created_at = 100 + i;
+        app.live.push(s);
+    }
+    app.screen = ratatui::layout::Rect::new(0, 0, 160, 24);
+    let (_, _) = render(&mut app, 160, 24);
+    assert!(app.sidebar_max_scroll > 0, "content taller than the sidebar");
+    let chat_top = app.views["ses_test"].chat.top();
+    // Wheel over the sidebar scrolls the sidebar, not the chat (also on the separator column).
+    for _ in 0..50 {
+        crate::input::handle(&mut app, mouse(MouseEventKind::ScrollDown, 150, 10));
+    }
+    assert_eq!(app.sidebar_scroll, app.sidebar_max_scroll, "clamped at the end");
+    crate::input::handle(&mut app, mouse(MouseEventKind::ScrollUp, 160 - crate::render::SIDEBAR_W - 1, 10));
+    crate::input::handle(&mut app, mouse(MouseEventKind::ScrollDown, 160 - crate::render::SIDEBAR_W - 1, 10));
+    assert_eq!(app.views["ses_test"].chat.top(), chat_top, "chat not scrolled");
+    let (term, s) = render(&mut app, 160, 24);
+    println!("{s}");
+    let sb = sidebar_text(&term, 160);
+    // The end of the list (last live session) is reachable.
+    let y = pos(&sb, "extra-11").expect("last session visible after scrolling") as u16;
+    assert!(app.sidebar_rows.iter().any(|(ry, id)| *ry == y && id == "ses_x11"));
+    // Scrollbar thumb in the rightmost column.
+    let buf = term.backend().buffer();
+    assert!((0..24).any(|y| buf[(159, y)].symbol() == "┃"));
+    // Click on the row as drawn after scrolling: switches to that session.
+    app.pending.clear();
+    crate::input::handle(&mut app, mouse(MouseEventKind::Down(MouseButton::Left), 150, y));
+    assert_eq!(app.current.as_deref(), Some("ses_x11"));
+    // Back at the top: session info first again.
+    let mut app = sidebar_app();
+    app.screen = ratatui::layout::Rect::new(0, 0, 160, 24);
+    render(&mut app, 160, 24);
+    crate::input::handle(&mut app, mouse(MouseEventKind::ScrollDown, 150, 10));
+    crate::input::handle(&mut app, mouse(MouseEventKind::ScrollUp, 150, 10));
+    let (term, _) = render(&mut app, 160, 24);
+    assert!(sidebar_text(&term, 160)[1].contains("Fix the parser"));
+}
+
+#[test]
+fn expanding_tool_keeps_header_row() {
+    // Like the screenshot: `▸ Thought` directly followed by tool rows.
+    let mut m = transcript(false)[1].clone();
+    m.parts.remove(1); // text part between reasoning and tools
+    let row_text = |r: &crate::ui::Row| r.line.spans.iter().map(|s| s.content.to_string()).collect::<String>();
+    let find = |rows: &[crate::ui::Row], pat: &str| rows.iter().position(|r| row_text(r).contains(pat)).expect(pat);
+    let render_with = |toggled: &[usize], details: bool| {
+        let set: std::collections::BTreeSet<usize> = toggled.iter().copied().collect();
+        let mut cx = ctx(details);
+        cx.toggled = Some(&set);
+        crate::ui::message::render(&m, &cx, 100)
+    };
+    let collapsed = render_with(&[], false);
+    let bash = find(&collapsed, "bash  Run the unit tests");
+    assert!(row_text(&collapsed[bash - 1]).contains("Thought"), "collapsed rows stack");
+    // Expand the bash tool (part 1): its header row doesn't move; no blank line above it.
+    let expanded = render_with(&[1], false);
+    assert!(expanded.len() > collapsed.len());
+    assert_eq!(find(&expanded, "bash  Run the unit tests"), bash, "header row index unchanged");
+    assert!(row_text(&expanded[bash - 1]).contains("Thought"));
+    assert!(row_text(&expanded[bash + 1]).contains("╭─ input"), "box right under the header");
+    // The next tool row is separated from the box by one blank line.
+    let edit = find(&expanded, "edit  Fix the off-by-one");
+    assert!(row_text(&expanded[edit - 1]).trim().is_empty() && row_text(&expanded[edit - 2]).contains('╰'));
+    // Expanding the reasoning keeps its header (row 0) and pushes only what follows.
+    let r_exp = render_with(&[0], false);
+    assert!(row_text(&r_exp[0]).contains("Thought") && row_text(&collapsed[0]).contains("Thought"));
+    // All tools expanded by default (/details): the first tool header is still in the same row.
+    assert_eq!(find(&render_with(&[], true), "bash  Run the unit tests"), bash);
 }

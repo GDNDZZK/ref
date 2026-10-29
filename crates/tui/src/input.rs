@@ -592,6 +592,8 @@ fn watch_key(app: &mut App, k: KeyEvent) {
             app.watch.focus = Some(tiles[i].clone());
         } else if focus_idx.is_none() && !tiles.is_empty() {
             app.watch.focus = Some(tiles[0].clone());
+        } else {
+            app.dirty = false;
         }
         return;
     }
@@ -620,7 +622,10 @@ fn watch_key(app: &mut App, k: KeyEvent) {
         let per = split::per_page(app.screen.width, app.screen.height.saturating_sub(1)).max(1);
         let p = if ctrl_char(&k, 'n') { (app.watch.page + 1) % pages } else { (app.watch.page + pages - 1) % pages };
         app.watch.page = p;
-        app.watch.focus = all.get(p * per).cloned();
+        // The focused tile pins its page: move focus along (if any) instead of clearing it.
+        if app.watch.focus.is_some() {
+            app.watch.focus = all.get(p * per).cloned();
+        }
         return;
     }
     if ctrl_char(&k, 'o') {
@@ -634,15 +639,35 @@ fn watch_key(app: &mut App, k: KeyEvent) {
             if all.is_empty() {
                 return;
             }
-            let d = if k.code == KeyCode::BackTab { -1 } else { 1 };
-            let i = app.watch.focus.as_ref().and_then(|f| all.iter().position(|t| t == f)).map(|i| i as i32).unwrap_or(-1);
+            let back = k.code == KeyCode::BackTab;
             let n = all.len() as i32;
-            app.watch.focus = Some(all[((i + d).rem_euclid(n)) as usize].clone());
+            let i = match app.watch.focus.as_ref().and_then(|f| all.iter().position(|t| t == f)) {
+                Some(i) => (i as i32 + if back { -1 } else { 1 }).rem_euclid(n),
+                // Nothing focused: start with the first (shift+tab: last) tile of this page.
+                None => {
+                    let page: Vec<usize> = tiles.iter().filter_map(|t| all.iter().position(|a| a == t)).collect();
+                    let pick = if back { page.last() } else { page.first() };
+                    pick.map(|&p| p as i32).unwrap_or(if back { n - 1 } else { 0 })
+                }
+            };
+            app.watch.focus = Some(all[i as usize].clone());
         }
+        // Scroll the focused tile's transcript.
+        KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End if app.watch.focus.is_some() && tile_scroll_key(app, &k) => {}
+        KeyCode::Up | KeyCode::Down if m == SHIFT && app.watch.focus.is_some() && tile_scroll_key(app, &k) => {}
         KeyCode::Esc => {
-            let Some(f) = app.watch.focus.clone() else { return };
+            let Some(f) = app.watch.focus.clone() else {
+                app.dirty = false;
+                return;
+            };
             let busy = app.views.get(&f).is_some_and(|v| v.is_busy());
-            if busy {
+            let has_text = app.watch.inputs.get(&f).is_some_and(|e| !e.is_empty());
+            if has_text {
+                // First esc clears the input; the next one unfocuses (or arms the abort).
+                if let Some(e) = app.watch.inputs.get_mut(&f) {
+                    e.clear();
+                }
+            } else if busy {
                 if app.esc_armed.is_some_and(|t| t.elapsed() < Duration::from_millis(1500)) {
                     app.esc_armed = None;
                     app.hint = None;
@@ -654,11 +679,11 @@ fn watch_key(app: &mut App, k: KeyEvent) {
                     let name = app.views.get(&f).map(|v| v.info.name.clone()).unwrap_or_default();
                     app.set_hint(format!("esc again to interrupt \"{name}\""), theme::WARNING);
                 }
-            } else if let Some(e) = app.watch.inputs.get_mut(&f) {
-                e.clear();
+            } else {
+                app.watch.focus = None;
             }
         }
-        KeyCode::Enter if m.is_empty() => {
+        KeyCode::Enter if m.is_empty() && app.watch.focus.is_some() => {
             let Some(f) = app.watch.focus.clone() else { return };
             let ed = app.watch.inputs.entry(f.clone()).or_default();
             if ed.is_empty() {
@@ -669,13 +694,38 @@ fn watch_key(app: &mut App, k: KeyEvent) {
             let images = sub.images.into_iter().map(|(i, _)| i).collect();
             app.send_prompt(&f, sub.text, images);
         }
-        _ => {
-            if let Some(f) = app.watch.focus.clone() {
+        _ => match app.watch.focus.clone() {
+            Some(f) => {
                 let ed = app.watch.inputs.entry(f).or_default();
                 edit_key(ed, &k, false);
             }
-        }
+            None => {
+                if matches!(k.code, KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Enter) && !app.watch.tiles.is_empty() {
+                    app.set_hint("click or tab to focus a session", theme::MUTED);
+                } else {
+                    app.dirty = false;
+                }
+            }
+        },
     }
+}
+
+/// PgUp/PgDn/Home/End/shift+↑↓ on the focused tile. Home/End only while its input is empty.
+fn tile_scroll_key(app: &mut App, k: &KeyEvent) -> bool {
+    let Some(f) = app.watch.focus.clone() else { return false };
+    let empty = app.watch.inputs.get(&f).is_none_or(|e| e.is_empty());
+    let Some(v) = app.views.get_mut(&f) else { return false };
+    let c = &mut v.chat;
+    match k.code {
+        KeyCode::PageUp => c.page(-1, false),
+        KeyCode::PageDown => c.page(1, false),
+        KeyCode::Up => c.scroll_by(-1, false),
+        KeyCode::Down => c.scroll_by(1, false),
+        KeyCode::Home if empty => c.scroll_to_top(),
+        KeyCode::End if empty => c.scroll_to_bottom(true),
+        _ => return false,
+    }
+    true
 }
 
 // ---------------------------------------------------------------------------
@@ -755,19 +805,7 @@ fn mouse(app: &mut App, me: MouseEvent) {
         return;
     }
     if app.mode == Mode::Watch {
-        if let MouseEventKind::Down(MouseButton::Left) = me.kind {
-            if let Some((sid, _)) = app.watch.tiles.iter().find(|(_, r)| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height) {
-                let sid = sid.clone();
-                if app.watch.focus.as_deref() == Some(sid.as_str()) && click_count(app, x, y) == 2 {
-                    app.zoom(&sid);
-                } else {
-                    app.watch.focus = Some(sid);
-                    let _ = click_count(app, x, y);
-                }
-            }
-        } else {
-            app.dirty = false;
-        }
+        watch_mouse(app, me);
         return;
     }
     // Chat mode.
@@ -799,6 +837,16 @@ fn mouse(app: &mut App, me: MouseEvent) {
             }
             return;
         }
+    }
+    // Wheel over the sidebar scrolls the sidebar (never the chat).
+    if let MouseEventKind::ScrollUp | MouseEventKind::ScrollDown = me.kind
+        && let Some(sb) = lay.sidebar
+        && x + 1 >= sb.x
+    {
+        let before = app.sidebar_scroll;
+        app.sidebar_scroll = if me.kind == MouseEventKind::ScrollUp { before.saturating_sub(3) } else { (before + 3).min(app.sidebar_max_scroll) };
+        app.dirty = app.sidebar_scroll != before;
+        return;
     }
     // Sidebar clicks: switch session.
     if let MouseEventKind::Down(MouseButton::Left) = me.kind
@@ -891,6 +939,42 @@ fn mouse(app: &mut App, me: MouseEvent) {
             let after = c.hit_at(x, y);
             if before == after {
                 app.dirty = false;
+            }
+        }
+        _ => app.dirty = false,
+    }
+}
+
+fn watch_mouse(app: &mut App, me: MouseEvent) {
+    let (x, y) = (me.column, me.row);
+    let inside = |r: &ratatui::layout::Rect| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
+    let tile = app.watch.tiles.iter().find(|(_, r)| inside(r)).map(|(s, _)| s.clone());
+    match me.kind {
+        // The wheel scrolls the tile under the pointer, focused or not.
+        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+            let d = if me.kind == MouseEventKind::ScrollUp { -3 } else { 3 };
+            match tile.and_then(|sid| app.views.get_mut(&sid)) {
+                Some(v) => v.chat.scroll_by(d, false),
+                None => app.dirty = false,
+            }
+        }
+        MouseEventKind::Down(MouseButton::Left) => {
+            let Some(sid) = tile else {
+                // Empty space / footer: unfocus.
+                app.watch.focus = None;
+                return;
+            };
+            if let Some(v) = app.views.get_mut(&sid)
+                && chat::pill_hit(&v.chat, x, y)
+            {
+                v.chat.scroll_to_bottom(true);
+                return;
+            }
+            if app.watch.focus.as_deref() == Some(sid.as_str()) && click_count(app, x, y) == 2 {
+                app.zoom(&sid);
+            } else {
+                app.watch.focus = Some(sid);
+                let _ = click_count(app, x, y);
             }
         }
         _ => app.dirty = false,

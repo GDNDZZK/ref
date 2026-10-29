@@ -60,6 +60,14 @@ pub struct ChatState {
     pub animating: bool,
     /// Compact (split tile) render cache.
     tile_cache: HashMap<String, Cached>,
+    /// The last layout was the compact (split tile) one: rows come from `tile_cache`.
+    compact: bool,
+    /// Rows added while scrolled away from the bottom (shown in the tile pill).
+    pub new_rows: usize,
+    /// Screen rect of the "new messages" pill at last draw.
+    pub pill: Option<Rect>,
+    /// Content width of the last layout (re-wrapping is not "new content").
+    last_w: usize,
 }
 
 pub fn hash_key(parts: &[u64]) -> u64 {
@@ -95,6 +103,7 @@ impl ChatState {
         self.follow = t >= max - 0.01;
         if self.follow {
             self.new_below = false;
+            self.new_rows = 0;
         }
     }
 
@@ -107,6 +116,7 @@ impl ChatState {
     pub fn scroll_to_bottom(&mut self, animate: bool) {
         self.follow = true;
         self.new_below = false;
+        self.new_rows = 0;
         self.target = self.max_scroll();
         if !animate {
             self.pos = self.target;
@@ -140,19 +150,6 @@ impl ChatState {
         self.tile_cache.clear();
     }
 
-    /// Cached compact rows for a split tile.
-    pub fn tile_rows(&mut self, id: &str, key: u64, f: impl FnOnce() -> Vec<Row>) -> &[Row] {
-        let hit = self.tile_cache.get(id).is_some_and(|c| c.key == key);
-        if !hit {
-            if self.tile_cache.len() >= 64 {
-                // Keep it bounded; entries are cheap to rebuild.
-                self.tile_cache.clear();
-            }
-            self.tile_cache.insert(id.to_string(), Cached { key, rows: f() });
-        }
-        self.tile_cache.get(id).map(|c| c.rows.as_slice()).unwrap_or(&[])
-    }
-
     /// Global row accessor.
     pub fn row(&self, i: usize) -> Option<&Row> {
         let tail_start = *self.offsets.last()?;
@@ -164,7 +161,8 @@ impl ChatState {
             Err(k) => k.checked_sub(1)?,
         };
         let id = self.ids.get(k)?;
-        self.cache.get(id)?.rows.get(i - self.offsets[k])
+        let cache = if self.compact { &self.tile_cache } else { &self.cache };
+        cache.get(id)?.rows.get(i - self.offsets[k])
     }
 
     fn screen_to_content(&self, x: u16, y: u16) -> Option<(usize, u16)> {
@@ -290,11 +288,14 @@ impl ChatState {
             set.insert(part);
         }
         self.sel = None;
+        // The re-layout isn't new content: no "new messages" pill.
+        self.last_total = 0;
     }
 
     pub fn show_all(&mut self, msg: &str, part: usize) {
         self.show_all.entry(msg.to_string()).or_default().insert(part);
         self.sel = None;
+        self.last_total = 0;
     }
 }
 
@@ -304,15 +305,16 @@ pub fn last_compaction(messages: &[ref_proto::Message]) -> Option<usize> {
 }
 
 /// Builds (or reuses) cached rows for all messages and the tail, for content width `w`.
-fn layout(view: &mut SessionView, env: &Env<'_>, w: usize) {
+/// `compact` selects the split-tile rendering (own cache; tools / reasoning one-line).
+fn layout(view: &mut SessionView, env: &Env<'_>, w: usize, compact: bool) {
     let busy = !view.info.status.is_idle();
     let SessionView { messages, versions, chat, info, .. } = view;
     let mut offsets = Vec::with_capacity(messages.len() + 1);
     let mut ids = Vec::with_capacity(messages.len());
     let mut total = 0usize;
     let mut animating = false;
-    let n = messages.len();
     let last_compaction = last_compaction(messages);
+    chat.compact = compact;
     for (i, m) in messages.iter().enumerate() {
         let stale = last_compaction.is_some_and(|c| i < c);
         let context_start = i > 0 && last_compaction == Some(i);
@@ -320,40 +322,46 @@ fn layout(view: &mut SessionView, env: &Env<'_>, w: usize) {
         let live = busy && crate::state::message_live(m);
         animating |= live;
         let ver = versions.get(i).copied().unwrap_or(0);
-        let tog = chat.toggled.get(&m.id);
-        let all = chat.show_all.get(&m.id);
         let anim = if live { env.tick } else { 0 };
         let secs = if live { (env.now / 1000) as u64 } else { 0 };
-        let key = hash_key(&[ver, w as u64, set_hash(tog), set_hash(all), env.details as u64, env.thinking as u64, anim, secs, stale as u64, context_start as u64, 7]);
-        let hit = chat.cache.get(&m.id).is_some_and(|c| c.key == key);
-        if !hit {
+        let (tog, all) = if compact { (None, None) } else { (chat.toggled.get(&m.id), chat.show_all.get(&m.id)) };
+        let key = if compact {
+            hash_key(&[ver, w as u64, anim, secs, stale as u64, (i > 0) as u64, 11])
+        } else {
+            hash_key(&[ver, w as u64, set_hash(tog), set_hash(all), env.details as u64, env.thinking as u64, anim, secs, stale as u64, context_start as u64, 7])
+        };
+        let cache = if compact { &chat.tile_cache } else { &chat.cache };
+        if !cache.get(&m.id).is_some_and(|c| c.key == key) {
             let cx = Ctx {
                 agents: env.agents,
                 models: env.models,
                 toggled: tog,
                 show_all: all,
-                details: env.details,
-                thinking: env.thinking,
+                details: env.details && !compact,
+                thinking: env.thinking && !compact,
                 now: env.now,
                 tick: env.tick,
-                compact: false,
+                compact,
                 session_agent: &info.agent,
                 stale,
-                context_start,
+                context_start: context_start && !compact,
             };
-            let mut rows = vec![Row::blank()];
+            // Blank separator above each message (tiles: not above the first one).
+            let mut rows = if compact && i == 0 { Vec::new() } else { vec![Row::blank()] };
             rows.extend(message::render(m, &cx, w));
-            chat.cache.insert(m.id.clone(), Cached { key, rows });
+            let cache = if compact { &mut chat.tile_cache } else { &mut chat.cache };
+            cache.insert(m.id.clone(), Cached { key, rows });
         }
+        let cache = if compact { &chat.tile_cache } else { &chat.cache };
         offsets.push(total);
         ids.push(m.id.clone());
-        total += chat.cache.get(&m.id).map(|c| c.rows.len()).unwrap_or(0);
-        let _ = n;
+        total += cache.get(&m.id).map(|c| c.rows.len()).unwrap_or(0);
     }
     // Evict cache entries for removed messages.
-    if chat.cache.len() > ids.len() + 8 {
+    let cache = if compact { &mut chat.tile_cache } else { &mut chat.cache };
+    if cache.len() > ids.len() + 8 {
         let keep: std::collections::HashSet<&String> = ids.iter().collect();
-        chat.cache.retain(|k, _| keep.contains(k));
+        cache.retain(|k, _| keep.contains(k));
     }
     offsets.push(total);
     chat.offsets = offsets;
@@ -361,6 +369,35 @@ fn layout(view: &mut SessionView, env: &Env<'_>, w: usize) {
     chat.animating = animating;
     total += chat.tail.len();
     chat.total = total;
+}
+
+/// Follow / clamp bookkeeping after a layout pass for a viewport of `area`.
+fn settle(chat: &mut ChatState, area: Rect, width_changed: bool) {
+    chat.area = area;
+    let max = chat.max_scroll();
+    if !chat.initialized {
+        chat.initialized = true;
+        chat.follow = true;
+        chat.pos = max;
+        chat.target = max;
+    }
+    // Content grew while scrolled up (re-wrapping after a resize doesn't count).
+    if chat.total > chat.last_total && !chat.follow && chat.last_total > 0 && !width_changed {
+        chat.new_below = true;
+        chat.new_rows += chat.total - chat.last_total;
+    }
+    chat.last_total = chat.total;
+    if chat.follow {
+        // Stick to bottom: jump directly when content grows (streaming must not lag behind).
+        if (chat.target - max).abs() > 0.01 {
+            chat.target = max;
+            if !chat.scrolling() || chat.pos > max {
+                chat.pos = max;
+            }
+        }
+    }
+    chat.target = chat.target.clamp(0.0, max);
+    chat.pos = chat.pos.clamp(0.0, max.max(0.0));
 }
 
 /// Rows shown after the transcript: retry status, error, queued prompts.
@@ -446,33 +483,14 @@ pub fn draw(buf: &mut Buffer, area: Rect, view: &mut SessionView, env: &Env<'_>)
     let cw = area.width.saturating_sub(3).max(1) as usize;
     let tail = tail_rows(view, env, cw);
     view.chat.tail = tail;
-    layout(view, env, cw);
+    let reflow = view.chat.last_w != cw || view.chat.compact;
+    layout(view, env, cw, false);
+    view.chat.last_w = cw;
     let loaded = view.loaded;
     let chat = &mut view.chat;
-    chat.area = area;
     chat.content_x = area.x + 1;
-    let max = chat.max_scroll();
-    if !chat.initialized {
-        chat.initialized = true;
-        chat.follow = true;
-        chat.pos = max;
-        chat.target = max;
-    }
-    if chat.total > chat.last_total && !chat.follow && chat.last_total > 0 {
-        chat.new_below = true;
-    }
-    chat.last_total = chat.total;
-    if chat.follow {
-        // Stick to bottom: jump directly when content grows (streaming must not lag behind).
-        if (chat.target - max).abs() > 0.01 {
-            chat.target = max;
-            if !chat.scrolling() || chat.pos > max {
-                chat.pos = max;
-            }
-        }
-    }
-    chat.target = chat.target.clamp(0.0, max);
-    chat.pos = chat.pos.clamp(0.0, max.max(0.0));
+    settle(chat, area, reflow);
+    chat.pill = None;
 
     if view.messages.is_empty() && !view.is_busy() {
         draw_welcome(buf, area, view, loaded);
@@ -529,36 +547,87 @@ pub fn draw(buf: &mut Buffer, area: Rect, view: &mut SessionView, env: &Env<'_>)
         }
     }
     // Scrollbar.
-    let h = area.height as usize;
-    if chat.total > h {
-        let sx = area.x + area.width - 1;
-        let thumb = ((h * h) as f64 / chat.total as f64).ceil().max(1.0) as usize;
-        let maxs = chat.max_scroll().max(1.0);
-        let start = ((chat.pos / maxs) * (h - thumb) as f64).round() as usize;
-        for i in 0..h {
-            let (sym, c) = if i >= start && i < start + thumb { ("┃", theme::BORDER_ACTIVE) } else { ("│", theme::BORDER_SUBTLE) };
-            if let Some(cell) = buf.cell_mut((sx, area.y + i as u16)) {
-                cell.set_symbol(sym).set_style(Style::new().fg(c));
-            }
-        }
+    if chat.total > area.height as usize {
+        draw_scrollbar(buf, Rect::new(area.x + area.width - 1, area.y, 1, area.height), chat.total, chat.pos, chat.max_scroll(), ("┃", theme::BORDER_ACTIVE), Some(("│", theme::BORDER_SUBTLE)));
     }
     // "new messages" pill.
     if chat.new_below && !chat.follow {
-        let label = " ↓ new messages ";
-        let lw = width(label) as u16;
-        let x = area.x + area.width.saturating_sub(lw) / 2;
-        let y = area.y + area.height - 1;
-        buf.set_string(x, y, label, Style::new().fg(theme::PANEL).bg(theme::PRIMARY).add_modifier(Modifier::BOLD));
+        let pill = draw_pill(buf, area, " ↓ new messages ");
+        view.chat.pill = pill;
     }
 }
 
-/// Whether the pill at the bottom was clicked.
-pub fn pill_hit(chat: &ChatState, x: u16, y: u16) -> bool {
-    if !(chat.new_below && !chat.follow) {
-        return false;
+/// Draws a vertical scrollbar into the one-column rect `r` for `total` rows scrolled to `pos`.
+/// `track: None` keeps whatever is drawn under the track (e.g. a tile border).
+pub fn draw_scrollbar(buf: &mut Buffer, r: Rect, total: usize, pos: f64, max: f64, thumb_sym: (&str, ratatui::style::Color), track: Option<(&str, ratatui::style::Color)>) {
+    let h = r.height as usize;
+    if h == 0 || total <= h {
+        return;
     }
-    let lw = 16u16;
-    let a = chat.area;
-    let x0 = a.x + a.width.saturating_sub(lw) / 2;
-    y == a.y + a.height.saturating_sub(1) && x >= x0 && x < x0 + lw
+    let thumb = ((h * h) as f64 / total as f64).ceil().clamp(1.0, h as f64) as usize;
+    let start = ((pos / max.max(1.0)) * (h - thumb) as f64).round() as usize;
+    for i in 0..h {
+        let Some((sym, c)) = (if i >= start && i < start + thumb { Some(thumb_sym) } else { track }) else { continue };
+        if let Some(cell) = buf.cell_mut((r.x, r.y + i as u16)) {
+            cell.set_symbol(sym).set_style(Style::new().fg(c));
+        }
+    }
+}
+
+/// Bottom-centred pill in `area`; returns its rect.
+fn draw_pill(buf: &mut Buffer, area: Rect, label: &str) -> Option<Rect> {
+    let label = text::truncate(label, area.width as usize);
+    let lw = width(&label) as u16;
+    if lw == 0 || area.height == 0 {
+        return None;
+    }
+    let x = area.x + area.width.saturating_sub(lw) / 2;
+    let y = area.y + area.height - 1;
+    // Clear the row first so wide glyphs cut by the pill don't leave half cells behind.
+    for xx in x..x + lw {
+        if let Some(c) = buf.cell_mut((xx, y)) {
+            c.reset();
+        }
+    }
+    buf.set_string(x, y, &label, Style::new().fg(theme::PANEL).bg(theme::PRIMARY).add_modifier(Modifier::BOLD));
+    Some(Rect::new(x, y, lw, 1))
+}
+
+/// Draws the compact transcript of a split tile into `area` (content columns), with the scroll
+/// position shown on the tile's right border column `bar_x` while scrolled up. Uses the same
+/// scroll state as the main view (wheel / PgUp / PgDn / End, follow at bottom).
+pub fn draw_tile(buf: &mut Buffer, area: Rect, bar_x: u16, view: &mut SessionView, env: &Env<'_>) {
+    if area.width == 0 || area.height == 0 {
+        view.chat.area = area;
+        return;
+    }
+    let cw = area.width as usize;
+    view.chat.tail.clear();
+    let reflow = view.chat.last_w != cw || !view.chat.compact;
+    layout(view, env, cw, true);
+    view.chat.last_w = cw;
+    let chat = &mut view.chat;
+    chat.content_x = area.x;
+    settle(chat, area, reflow);
+    chat.pill = None;
+    let top = chat.top();
+    for dy in 0..area.height {
+        let Some(row) = chat.row(top + dy as usize) else { break };
+        buf.set_line(area.x, area.y + dy, &row.line, area.width);
+    }
+    if chat.follow || chat.total <= area.height as usize {
+        return;
+    }
+    // Scrolled up: thumb on the right border; "↓ N new lines" once more content arrives.
+    draw_scrollbar(buf, Rect::new(bar_x, area.y, 1, area.height), chat.total, chat.pos, chat.max_scroll(), ("┃", theme::MUTED), None);
+    if chat.new_rows > 0 {
+        let n = chat.new_rows;
+        let pill = draw_pill(buf, area, &format!(" ↓ {n} new line{} ", if n == 1 { "" } else { "s" }));
+        view.chat.pill = pill;
+    }
+}
+
+/// Whether the "new messages" pill (or a tile's "↓" marker) was clicked.
+pub fn pill_hit(chat: &ChatState, x: u16, y: u16) -> bool {
+    chat.pill.is_some_and(|r| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height)
 }

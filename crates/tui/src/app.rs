@@ -188,6 +188,9 @@ pub struct App {
     /// Sidebar live-session rows at last draw: (y, session id).
     pub sidebar_rows: Vec<(u16, String)>,
     pub sidebar_rect: Rect,
+    /// Sidebar scroll offset (rows) and its maximum at last draw.
+    pub sidebar_scroll: usize,
+    pub sidebar_max_scroll: usize,
     /// Full terminal repaint requested (ctrl+l).
     pub force_clear: bool,
     /// Command waiting for config / session snapshot: (name, args, requested at).
@@ -262,6 +265,8 @@ impl App {
             screen: Rect::default(),
             sidebar_rows: Vec::new(),
             sidebar_rect: Rect::default(),
+            sidebar_scroll: 0,
+            sidebar_max_scroll: 0,
             force_clear: false,
             suppress_ac: false,
             deferred: None,
@@ -787,13 +792,11 @@ impl App {
                 self.client.send(None, Request::Detach { session_id: sid });
             }
         }
+        // No automatic focus: only drop it when the focused session left the split view.
         if let Some(f) = &self.watch.focus
             && !tiles.contains(f)
         {
             self.watch.focus = None;
-        }
-        if self.watch.focus.is_none() {
-            self.watch.focus = self.tile_ids().into_iter().find(|t| tiles.contains(t));
         }
     }
 
@@ -811,6 +814,9 @@ impl App {
             }
             self.views.remove(&old);
             self.client.send(None, Request::Detach { session_id: old });
+        }
+        if self.current.as_deref() != Some(sid) {
+            self.sidebar_scroll = 0;
         }
         self.current = Some(sid.to_string());
         self.mode = Mode::Chat;
@@ -1576,6 +1582,7 @@ impl App {
         match self.mode {
             Mode::Chat => {
                 self.mode = Mode::Watch;
+                self.watch.focus = None;
                 self.clear_selection();
                 self.sync_watch();
             }

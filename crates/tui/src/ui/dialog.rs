@@ -490,7 +490,9 @@ pub const KEYBINDS: &[(&str, &[(&str, &str)])] = &[
         &[
             ("click / tab / alt+arrows", "focus a tile"),
             ("enter", "send to focused session"),
-            ("esc esc", "abort focused session"),
+            ("esc", "clear input / unfocus the tile"),
+            ("esc esc", "abort focused session (busy)"),
+            ("wheel, pgup / pgdn, shift+↑↓", "scroll a tile (end: back to bottom)"),
             ("enter on empty, ctrl+o", "zoom (attach as foreground)"),
             ("ctrl+n / ctrl+b", "next / previous page"),
             ("ctrl+x k (twice)", "close the focused session"),

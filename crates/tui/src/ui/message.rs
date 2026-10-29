@@ -398,13 +398,16 @@ fn render_user_compact(m: &Message, _cx: &Ctx<'_>, w: usize, color: Color) -> Ve
 // assistant messages
 // ---------------------------------------------------------------------------
 
-fn is_single_line(p: &Part, idx: usize, cx: &Ctx<'_>) -> bool {
+/// Whether a part starts / ends with a one-line row (header rows of tools and reasoning), as
+/// `(top, bottom)`. One-line edges of neighbouring parts stack without a blank separator.
+/// Expanding a tool or reasoning block only changes its bottom edge, so its header row never moves.
+fn single_edges(p: &Part, idx: usize, cx: &Ctx<'_>) -> (bool, bool) {
     match p {
         // Todo rows carry their list inline: keep them visually separated from neighbours.
-        Part::Tool { name, input, .. } if name == "todo" && !parse_todos(input).is_empty() => false,
-        Part::Tool { .. } => !cx.expanded(idx, cx.details),
-        Part::Reasoning { .. } => !cx.expanded(idx, cx.thinking),
-        _ => false,
+        Part::Tool { name, input, .. } if name == "todo" && !parse_todos(input).is_empty() => (false, false),
+        Part::Tool { .. } => (true, cx.compact || !cx.expanded(idx, cx.details)),
+        Part::Reasoning { .. } => (true, cx.compact || !cx.expanded(idx, cx.thinking)),
+        _ => (false, false),
     }
 }
 
@@ -430,13 +433,13 @@ fn render_assistant(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
         {
             continue;
         }
-        let single = is_single_line(part, idx, cx);
+        let (top, bottom) = single_edges(part, idx, cx);
         if let Some(ps) = prev_single
-            && !(ps && single)
+            && !(ps && top)
         {
             rows.push(Row::blank());
         }
-        prev_single = Some(single);
+        prev_single = Some(bottom);
         let part_rows = match part {
             Part::Text { text: t, .. } => {
                 let mut r = markdown::render(t, inner, theme::text());
