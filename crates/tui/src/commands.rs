@@ -115,6 +115,40 @@ impl App {
         self.client.request(ClientMsg::SetAgent { session: id.into(), agent: agent.into() }, Tag::Quiet);
     }
 
+    /// Switch the session's model (optimistic update + toast on success).
+    pub fn set_model(&mut self, id: &str, m: ModelRef) {
+        let mut label = self.catalog.model_name(&m);
+        if let Some(v) = &m.variant {
+            label.push_str(&format!(" · {v}"));
+        }
+        if let Some(s) = self.sessions.get_mut(id) {
+            s.info.model = m.clone();
+        }
+        self.client.request(ClientMsg::SetModel { session: id.into(), model: m }, Tag::Ack(format!("Model: {label}")));
+    }
+
+    /// ctrl+t: cycle the current model's variants (default → v1 → v2 → … → default).
+    pub fn cycle_variant(&mut self) {
+        let Some(id) = self.active() else { return };
+        let Some(cur) = self.session_info(&id).map(|i| i.model.clone()) else { return };
+        let Some(info) = self.catalog.model(&cur) else {
+            self.toast(ToastLevel::Info, "Model list not loaded yet");
+            return;
+        };
+        if info.variants.is_empty() {
+            self.toast(ToastLevel::Info, format!("{} has no variants", info.name));
+            return;
+        }
+        let pos = cur.variant.as_ref().and_then(|v| info.variants.iter().position(|x| x == v));
+        let next = match pos {
+            None => Some(info.variants[0].clone()),
+            Some(i) if i + 1 < info.variants.len() => Some(info.variants[i + 1].clone()),
+            Some(_) => None,
+        };
+        let m = ModelRef { variant: next, ..cur };
+        self.set_model(&id, m);
+    }
+
     fn rename(&mut self, id: &str, name: &str) {
         if let Some(s) = self.sessions.get_mut(id) {
             s.info.name = name.to_string();
@@ -163,8 +197,21 @@ impl App {
             let right = [ctx, caps.join(" ")].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
             let is_cur = cur.as_ref().is_some_and(|c| c.provider == m.provider && c.model == m.model && c.variant.is_none());
             let mr = ModelRef { provider: m.provider.clone(), model: m.model.clone(), variant: None };
+            let key = format!("{}/{}", m.provider, m.model);
+            // Show the id only when it adds information beyond the display name.
+            let desc = if m.name.eq_ignore_ascii_case(&m.model) { String::new() } else { m.model.clone() };
+            let right = if m.variants.is_empty() {
+                right
+            } else {
+                let n = m.variants.len();
+                format!("{n} variant{} · {right}", if n == 1 { "" } else { "s" })
+            };
             items.push(
-                ListItem::new(&m.provider_name, &m.name, DValue::Model(mr)).desc(&m.model).right(right).current(is_cur),
+                ListItem::new(&m.provider_name, &m.name, DValue::Model(mr))
+                    .desc(desc)
+                    .right(right)
+                    .keys(format!("{key} {}", m.provider))
+                    .current(is_cur),
             );
             for v in &m.variants {
                 let is_cur = cur.as_ref().is_some_and(|c| {
@@ -172,14 +219,16 @@ impl App {
                 });
                 let mr = ModelRef { provider: m.provider.clone(), model: m.model.clone(), variant: Some(v.clone()) };
                 items.push(
-                    ListItem::new(&m.provider_name, format!("{} #{v}", m.name), DValue::Model(mr))
-                        .desc("variant")
+                    ListItem::new(&m.provider_name, v, DValue::Model(mr))
+                        .parent(&m.name)
+                        .keys(format!("{key}#{v} {}", m.provider))
                         .current(is_cur),
                 );
             }
         }
         let mut d = Dialog::list(DKind::Models, "Select model", items);
-        d.placeholder = "Search models".into();
+        d.placeholder = "Search models (e.g. \"dgn sonnet high\")".into();
+        d.hints = vec![("↑↓", "select"), ("enter", "use for this session")];
         if self.catalog.models.is_empty() {
             d.loading = true;
             self.client.request(ClientMsg::ListModels, Tag::Models);
@@ -305,6 +354,7 @@ impl App {
             ("ctrl+c", "clear input · twice to exit"),
             ("ctrl+p", "command palette"),
             ("tab / shift+tab", "cycle agents"),
+            ("ctrl+t", "cycle model variant (e.g. high / medium / default)"),
             ("↑ / ↓", "prompt history (single-line input)"),
             ("pgup / pgdn / wheel", "scroll messages"),
             ("ctrl+g / ctrl+alt+g", "jump to top / bottom"),
@@ -327,8 +377,15 @@ impl App {
             ("monitor: alt+z / ctrl+x z", "zoom pane"),
             ("monitor: ctrl+x [ / ]", "previous / next page"),
         ];
-        let mut items: Vec<ListItem> =
-            keys.iter().map(|(k, d)| ListItem::new("Keybinds", *k, DValue::None).desc(*d)).collect();
+        // Align descriptions into a column.
+        let kw = keys.iter().map(|(k, _)| crate::text::width(k)).max().unwrap_or(0);
+        let mut items: Vec<ListItem> = keys
+            .iter()
+            .map(|(k, d)| {
+                let pad = " ".repeat(kw.saturating_sub(crate::text::width(k)));
+                ListItem::new("Keybinds", format!("{k}{pad}"), DValue::None).desc(*d)
+            })
+            .collect();
         for (name, aliases, desc, _) in BUILTINS {
             let al = if aliases.is_empty() { String::new() } else { format!("(/{})", aliases.join(", /")) };
             items.push(ListItem::new("Commands", format!("/{name}"), DValue::Command(name.to_string())).desc(*desc).right(al));
@@ -390,11 +447,7 @@ impl App {
                     }
                     DValue::Model(m) => {
                         if let Some(id) = self.active() {
-                            let label = self.catalog.model_name(&m);
-                            if let Some(s) = self.sessions.get_mut(&id) {
-                                s.info.model = m.clone();
-                            }
-                            self.client.request(ClientMsg::SetModel { session: id, model: m }, Tag::Ack(format!("Model: {label}")));
+                            self.set_model(&id, m);
                         }
                     }
                     DValue::Agent(a) => {

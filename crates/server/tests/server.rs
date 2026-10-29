@@ -166,7 +166,7 @@ async fn permission_ask_once_reject_and_deny() {
             })
             .await;
         let ServerMsg::Event { event: Event::Part { part: Part::Tool(tp), .. }, .. } = m else { unreachable!() };
-        assert_eq!(tp.input["command"].as_str().is_some(), true);
+        assert!(tp.input["command"].as_str().is_some());
         c.wait_for("permission status", T, |m| {
             matches!(m, ServerMsg::Event { event: Event::Info { info }, .. } if info.status == SessionStatus::Permission)
         })
@@ -264,10 +264,14 @@ async fn manual_compact_uses_llm_summary() {
     let (_, msgs) = c.snapshot(&info.id).await;
     let cp = msgs.iter().find(|m| m.origin == Origin::Compaction).unwrap();
     assert!(cp.raw_text().contains("## Objective\n- summarized"));
-    // Summary request had no tools.
+    // The summary request extends the previous request (same system + tools) so it is
+    // served from the prompt cache.
     let reqs = mock.requests();
-    let sum = reqs.iter().find(|b| b.to_string().contains("You MUST summarize")).unwrap();
-    assert!(sum.get("tools").is_none() || sum["tools"].as_array().is_some_and(|a| a.is_empty()));
+    let i = reqs.iter().position(|b| b.to_string().contains("You MUST summarize")).unwrap();
+    let (prev, sum) = (&reqs[i - 1], &reqs[i]);
+    assert_eq!(prev["tools"], sum["tools"]);
+    let (pm, sm) = (prev["messages"].as_array().unwrap(), sum["messages"].as_array().unwrap());
+    assert_eq!(&sm[..pm.len()], &pm[..]);
 }
 
 #[tokio::test]

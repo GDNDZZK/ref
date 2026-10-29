@@ -27,6 +27,8 @@ pub enum Incoming<T> {
     Reply(T, Result<Value, String>),
     /// Connection state change. `Connected` is sent after Hello succeeded.
     Conn(ConnState),
+    /// Switched to another backend instance (the old one is gone). Sent before `Connected`.
+    Backend { url: String, spawned: bool },
 }
 
 struct Outgoing<T> {
@@ -113,21 +115,25 @@ pub async fn connect_hello(base: &str, cwd: &str, timeout: Duration) -> Result<(
 }
 
 /// Spawn the connection task. `first` is an already-established stream (optional).
+/// `discover`: when the backend becomes unreachable, look for another live instance
+/// (or spawn a new one) instead of retrying the same URL forever.
 pub fn spawn<T: Send + 'static>(
     base: String,
     cwd: String,
     first: Option<Ws>,
+    discover: bool,
     app: mpsc::UnboundedSender<Incoming<T>>,
 ) -> Client<T> {
     let (tx, rx) = mpsc::unbounded_channel::<Outgoing<T>>();
-    tokio::spawn(run(base, cwd, first, rx, app));
+    tokio::spawn(run(base, cwd, first, discover, rx, app));
     Client { tx }
 }
 
 async fn run<T: Send + 'static>(
-    base: String,
+    mut base: String,
     cwd: String,
     mut first: Option<Ws>,
+    discover: bool,
     mut rx: mpsc::UnboundedReceiver<Outgoing<T>>,
     app: mpsc::UnboundedSender<Incoming<T>>,
 ) {
@@ -136,7 +142,23 @@ async fn run<T: Send + 'static>(
     loop {
         let ws = match first.take() {
             Some(ws) => Ok(ws),
-            None => connect_hello(&base, &cwd, Duration::from_secs(5)).await.map(|(ws, _)| ws),
+            None => match connect_hello(&base, &cwd, Duration::from_secs(5)).await {
+                Ok((ws, _)) => Ok(ws),
+                // The instance may have exited (crash, idle shutdown): after a couple of
+                // failed attempts find/spawn another backend; sessions are persisted so
+                // the app simply re-attaches.
+                Err(e) if discover && attempt >= 1 && !e.starts_with("hello rejected") => {
+                    match crate::backend::connect(None, &cwd).await {
+                        Ok(b) => {
+                            base = b.url.clone();
+                            let _ = app.send(Incoming::Backend { url: b.url, spawned: b.spawned });
+                            Ok(b.ws)
+                        }
+                        Err(e2) => Err(format!("{e}; {e2:#}")),
+                    }
+                }
+                Err(e) => Err(e),
+            },
         };
         let ws = match ws {
             Ok(ws) => ws,

@@ -85,6 +85,9 @@ impl Stdio {
                     .await;
                     if let Err(e) = r {
                         tracing::debug!(server = %label, "stdin write failed: {e}");
+                        // Usually the process died: let the stdout reader report that first
+                        // (it includes the exit + stderr tail, the first reason wins).
+                        tokio::time::sleep(Duration::from_millis(800)).await;
                         let _ = in_tx.send(Incoming::Closed(format!("write to server stdin failed: {e}")));
                         return;
                     }

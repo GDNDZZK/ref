@@ -46,6 +46,7 @@ pub fn draw_messages(app: &mut App, sid: &str, r: Rect, buf: &mut Buffer, compac
     let Some(s) = app.sessions.get(sid) else { return };
     let view = app.views.entry(sid.to_string()).or_default();
     let doc = message::build(s, view, &app.catalog, o, width);
+    view.apply_anchor(&doc, r.height as usize);
     view.clamp(doc.height, r.height as usize);
     let area = Rect { width: r.width - 1, ..r };
     message::draw(&doc, view, area, buf);
@@ -57,8 +58,9 @@ pub fn draw_messages(app: &mut App, sid: &str, r: Rect, buf: &mut Buffer, compac
         ]);
         put(buf, r.x + 3, r.y + 1, &l, r.width.saturating_sub(4));
     }
-    // Scrollbar
-    if doc.height > r.height as usize {
+    // Scrollbar: only while scrolled away from the bottom (at the bottom it's just noise,
+    // and a static bar next to the sidebar reads like a broken border).
+    if doc.height > r.height as usize && !view.stick_bottom {
         let h = r.height as usize;
         let th = ((h * h) / doc.height).max(1);
         let max = doc.height - h;
@@ -66,11 +68,13 @@ pub fn draw_messages(app: &mut App, sid: &str, r: Rect, buf: &mut Buffer, compac
         for i in 0..h {
             let on = i >= ty && i < ty + th;
             if let Some(c) = buf.cell_mut((r.right() - 1, r.y + i as u16)) {
-                c.set_symbol(if on { "┃" } else { " " });
-                c.set_fg(if on { theme::BORDER } else { theme::BG });
+                c.set_symbol(if on { "┃" } else { "│" });
+                c.set_fg(if on { theme::BORDER_ACTIVE } else { theme::ELEMENT });
             }
         }
     }
+    // Pushed before overlays (badge) so those win in reverse hit-testing.
+    app.hits.push((area, UiHit::Messages(sid.to_string())));
     // "↓ new messages" badge
     if !view.stick_bottom && view.unseen {
         let label = " ↓ new messages ";
@@ -85,7 +89,6 @@ pub fn draw_messages(app: &mut App, sid: &str, r: Rect, buf: &mut Buffer, compac
         let l = Line::from(Span::styled("↓", theme::fg(theme::PRIMARY)));
         put(buf, r.right() - 1, r.bottom() - 1, &l, 1);
     }
-    app.hits.push((area, UiHit::Messages(sid.to_string())));
     app.docs.insert(sid.to_string(), doc);
 }
 

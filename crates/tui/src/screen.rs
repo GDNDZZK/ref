@@ -100,7 +100,9 @@ fn draw_normal(app: &mut App, area: Rect, buf: &mut ratatui::buffer::Buffer) -> 
         }
         bottom = status_y;
     }
-    let msgs_r = Rect { x: col.x, y: col.y, width: col.width + 1, height: bottom.saturating_sub(col.y + 1) };
+    // The last column of the message area is the scrollbar; keep one blank column before the sidebar.
+    let msgs_w = if side { col.width } else { col.width + 1 };
+    let msgs_r = Rect { x: col.x, y: col.y, width: msgs_w, height: bottom.saturating_sub(col.y + 1) };
     match &sid {
         Some(id) if app.sessions.contains_key(id) => ui::draw_messages(app, id, msgs_r, buf, false),
         _ => draw_welcome(app, msgs_r, buf),
@@ -137,10 +139,13 @@ fn draw_welcome(app: &App, r: Rect, buf: &mut ratatui::buffer::Buffer) {
         let color = if i == 0 { theme::TEXT } else { theme::MUTED };
         put(buf, x, y0 + i as u16, &Line::from(Span::styled(*l, theme::fg(color))), w);
     }
+    let wait = app.creating_since.filter(|_| app.creating).map(|t| t.elapsed().as_secs()).unwrap_or(0);
     let msg = match &app.conn {
-        crate::client::ConnState::Connected => "Starting session…",
-        _ => "Connecting to backend…",
+        crate::client::ConnState::Connected if wait >= 3 => format!("Starting session… {wait}s (backend is still loading)"),
+        crate::client::ConnState::Connected => "Starting session…".to_string(),
+        _ => "Connecting to backend…".to_string(),
     };
+    let msg = msg.as_str();
     let w = text::width(msg) as u16;
     put(buf, r.x + r.width.saturating_sub(w) / 2, y0 + 4, &Line::from(Span::styled(msg, theme::muted())), w);
 }
@@ -276,7 +281,10 @@ fn draw_sidebar(app: &mut App, r: Rect, buf: &mut ratatui::buffer::Buffer) {
     }
     // Open sessions
     let mut others: Vec<SessionInfo> = app.open.iter().filter(|s| s.open).cloned().collect();
-    others.sort_by_key(|s| (s.parent.is_some(), std::cmp::Reverse(s.updated_at)));
+    let cur = app.current.clone();
+    others.sort_by_key(|s| {
+        (cur.as_deref() != Some(s.id.as_str()), !s.is_foreground(), s.parent.is_some(), std::cmp::Reverse(s.created_at))
+    });
     if !others.is_empty() && y + 2 < r.bottom() {
         line(
             buf,

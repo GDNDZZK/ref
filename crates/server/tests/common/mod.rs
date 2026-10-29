@@ -51,12 +51,12 @@ impl Req {
         self.body["messages"].as_array().map(|v| v.as_slice()).unwrap_or(&[])
     }
     pub fn system(&self) -> String {
-        self.messages()
-            .iter()
-            .filter(|m| m["role"] == "system")
-            .map(content_text)
-            .collect::<Vec<_>>()
-            .join("\n")
+        let mut parts: Vec<String> = self.messages().iter().filter(|m| m["role"] == "system").map(content_text).collect();
+        // Anthropic bodies: top-level `system` blocks.
+        if let Some(a) = self.body["system"].as_array() {
+            parts.extend(a.iter().filter_map(|b| b["text"].as_str().map(String::from)));
+        }
+        parts.join("\n")
     }
     pub fn last(&self) -> &Value {
         self.messages().last().unwrap_or(&Value::Null)
@@ -107,7 +107,10 @@ impl Mock {
     pub async fn start(script: Script) -> Mock {
         let log = Arc::new(Mutex::new(Vec::new()));
         let st = MockState { script, log: log.clone() };
-        let app = Router::new().route("/v1/chat/completions", post(chat)).with_state(st);
+        let app = Router::new()
+            .route("/v1/chat/completions", post(chat))
+            .route("/v1/messages", post(anthropic))
+            .with_state(st);
         let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = l.local_addr().unwrap().port();
         tokio::spawn(async move {
@@ -173,6 +176,87 @@ async fn chat(State(st): State<MockState>, body: String) -> Response {
     }
     sse.push_str("data: [DONE]\n\n");
     Response::builder().header("content-type", "text/event-stream").body(Body::from(sse)).unwrap()
+}
+
+/// Anthropic Messages mock: every reply starts with a signed thinking block
+/// (`thinking-{n}` / `sig-{n}`), then text or tool_use blocks.
+async fn anthropic(State(st): State<MockState>, body: String) -> Response {
+    let body: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+    let n = {
+        let mut l = st.log.lock().unwrap();
+        l.push(body.clone());
+        l.len() - 1
+    };
+    // Adapt to the chat-shaped helpers: system text as a system message, user text as last user.
+    let sys: String = body["system"].as_array().map(|a| a.iter().filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("\n")).unwrap_or_default();
+    let mut msgs = vec![json!({"role": "system", "content": sys})];
+    for m in body["messages"].as_array().cloned().unwrap_or_default() {
+        let text: String = m["content"].as_array().map(|a| a.iter().filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("\n")).unwrap_or_default();
+        let only_results = m["content"].as_array().is_some_and(|a| a.iter().all(|b| b["type"] == "tool_result"));
+        let role = if only_results { "tool" } else { m["role"].as_str().unwrap_or("") };
+        msgs.push(json!({"role": role, "content": text}));
+    }
+    let req = Req { body: json!({"messages": msgs}), n };
+    let reply = if req.is_title() { text("Mock title") } else { (st.script)(&req) };
+    let mut ev: Vec<(&str, Value)> = vec![(
+        "message_start",
+        json!({"type":"message_start","message":{"id":format!("msg_{n}"),"type":"message","role":"assistant","content":[],"usage":{"input_tokens":100,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":1}}}),
+    )];
+    let mut idx = 0;
+    let mut block = |ev: &mut Vec<(&str, Value)>, start: Value, deltas: Vec<Value>| {
+        ev.push(("content_block_start", json!({"type":"content_block_start","index":idx,"content_block":start})));
+        for d in deltas {
+            ev.push(("content_block_delta", json!({"type":"content_block_delta","index":idx,"delta":d})));
+        }
+        ev.push(("content_block_stop", json!({"type":"content_block_stop","index":idx})));
+        idx += 1;
+    };
+    if let Reply::Status(code, msg) = &reply {
+        return (StatusCode::from_u16(*code).unwrap(), json!({"type":"error","error":{"type":"api_error","message":msg}}).to_string()).into_response();
+    }
+    block(
+        &mut ev,
+        json!({"type":"thinking","thinking":"","signature":""}),
+        vec![json!({"type":"thinking_delta","thinking":format!("thinking-{n}")}), json!({"type":"signature_delta","signature":format!("sig-{n}")})],
+    );
+    let stop = match reply {
+        Reply::Text(t) => {
+            block(&mut ev, json!({"type":"text","text":""}), vec![json!({"type":"text_delta","text":t})]);
+            "end_turn"
+        }
+        Reply::Tools(calls) => {
+            for (i, (name, args)) in calls.iter().enumerate() {
+                let mid = (0..=args.len() / 2).rev().find(|m| args.is_char_boundary(*m)).unwrap_or(0);
+                block(
+                    &mut ev,
+                    json!({"type":"tool_use","id":format!("toolu_{n}_{i}"),"name":name,"input":{}}),
+                    vec![
+                        json!({"type":"input_json_delta","partial_json":&args[..mid]}),
+                        json!({"type":"input_json_delta","partial_json":&args[mid..]}),
+                    ],
+                );
+            }
+            "tool_use"
+        }
+        Reply::Status(..) => unreachable!(),
+    };
+    ev.push(("message_delta", json!({"type":"message_delta","delta":{"stop_reason":stop},"usage":{"output_tokens":20}})));
+    ev.push(("message_stop", json!({"type":"message_stop"})));
+    let mut sse = String::new();
+    for (name, data) in ev {
+        sse.push_str(&format!("event: {name}\ndata: {data}\n\n"));
+    }
+    Response::builder().header("content-type", "text/event-stream").body(Body::from(sse)).unwrap()
+}
+
+/// Provider config for the Anthropic endpoint of the mock (`mocka/claude-sonnet-5-5`).
+pub fn anthropic_provider(mock_port: u16) -> Value {
+    json!({
+        "npm": "@ai-sdk/anthropic",
+        "options": {"baseURL": format!("http://127.0.0.1:{mock_port}/v1"), "apiKey": "test-key"},
+        "models": {"claude-sonnet-5-5": {"reasoning": true, "limit": {"context": 200000, "output": 8000},
+            "variants": {"high": {"reasoningEffort": "high"}}}}
+    })
 }
 
 // ---------------------------------------------------------------------------

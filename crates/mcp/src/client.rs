@@ -292,7 +292,7 @@ pub(crate) fn parse_call_result(r: &Value) -> McpCallResult {
     for c in r.get("content").and_then(Value::as_array).into_iter().flatten() {
         let s = |k: &str| c.get(k).and_then(Value::as_str);
         match s("type").unwrap_or("") {
-            "text" => texts.push(s("text").unwrap_or("").to_string()),
+            "text" => texts.push(unwrap_json_string(s("text").unwrap_or(""))),
             "image" => match (s("data"), s("mimeType")) {
                 (Some(data), mime) => images.push(hn_proto::ImageData {
                     mime: mime.unwrap_or("image/png").to_string(),
@@ -331,6 +331,19 @@ pub(crate) fn parse_call_result(r: &Value) -> McpCallResult {
         }
     }
     McpCallResult { text, images, is_error: r.get("isError").and_then(Value::as_bool).unwrap_or(false) }
+}
+
+/// Some servers (e.g. bigmodel's zread / web-reader) double-encode: the text block is itself a
+/// JSON string literal (`"line\nline"`). Decode it so the model sees real newlines instead of
+/// escapes (fewer tokens, readable). Anything else is returned unchanged.
+fn unwrap_json_string(t: &str) -> String {
+    let trimmed = t.trim();
+    if trimmed.len() >= 2 && trimmed.starts_with('"') && trimmed.ends_with('"') {
+        if let Ok(Value::String(s)) = serde_json::from_str::<Value>(trimmed) {
+            return s;
+        }
+    }
+    t.to_string()
 }
 
 fn strip_data_url(s: &str) -> &str {
@@ -396,5 +409,16 @@ mod tests {
         assert!(!r.is_error);
         let r = parse_call_result(&json!("garbage"));
         assert_eq!(r.text, "");
+    }
+
+    /// bigmodel's zread / web-reader return the text as a JSON string literal.
+    #[test]
+    fn double_encoded_text_is_unwrapped() {
+        let r = parse_call_result(&json!({"content": [{"type": "text", "text": "\"Directory of x:\\n├── a\\n\\\"q\\\"\""}]}));
+        assert_eq!(r.text, "Directory of x:\n├── a\n\"q\"");
+        // Not a lone JSON string: unchanged.
+        for t in ["\"a\" and \"b\"", "{\"k\": 1}", "\"unterminated", "plain"] {
+            assert_eq!(parse_call_result(&json!({"content": [{"type": "text", "text": t}]})).text, t);
+        }
     }
 }

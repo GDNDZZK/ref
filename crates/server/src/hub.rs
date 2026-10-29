@@ -17,7 +17,19 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, watch, Notify};
 
-pub type ClientTx = mpsc::UnboundedSender<ServerMsg>;
+/// Outgoing frames, already serialized: a fanned-out event is encoded once, not per client.
+pub type Frame = Arc<str>;
+pub type ClientTx = mpsc::UnboundedSender<Frame>;
+
+pub fn encode(msg: &ServerMsg) -> Frame {
+    match serde_json::to_string(msg) {
+        Ok(s) => Arc::from(s),
+        Err(e) => {
+            tracing::error!("cannot serialize server message: {e}");
+            Arc::from(r#"{"type":"toast","level":"error","message":"internal serialization error"}"#)
+        }
+    }
+}
 
 pub struct ClientEntry {
     pub tx: ClientTx,
@@ -194,13 +206,14 @@ impl Hub {
 
     pub fn send_to(&self, cid: u64, msg: ServerMsg) {
         if let Some(c) = lock(&self.clients).get(&cid) {
-            let _ = c.tx.send(msg);
+            let _ = c.tx.send(encode(&msg));
         }
     }
 
     pub fn broadcast(&self, msg: ServerMsg) {
+        let frame = encode(&msg);
         for c in lock(&self.clients).values() {
-            let _ = c.tx.send(msg.clone());
+            let _ = c.tx.send(frame.clone());
         }
     }
 
@@ -212,18 +225,21 @@ impl Hub {
     /// Called with the session state locked so events and snapshots stay ordered.
     pub(crate) fn emit(&self, sid: &str, background: bool, event: &Event) {
         let clients = lock(&self.clients);
+        let mut frame: Option<Frame> = None;
         for c in clients.values() {
             if c.attached.contains_key(sid) || (background && c.watch_bg) {
-                let _ = c.tx.send(ServerMsg::Event { session: sid.to_string(), event: event.clone() });
+                let f = frame.get_or_insert_with(|| encode(&ServerMsg::Event { session: sid.to_string(), event: event.clone() }));
+                let _ = c.tx.send(f.clone());
             }
         }
     }
 
     pub(crate) fn toast_attached(&self, sid: &str, level: ToastLevel, message: &str) {
         let clients = lock(&self.clients);
+        let frame = encode(&ServerMsg::Toast { level, message: message.to_string() });
         for c in clients.values() {
             if c.attached.contains_key(sid) {
-                let _ = c.tx.send(ServerMsg::Toast { level, message: message.to_string() });
+                let _ = c.tx.send(frame.clone());
             }
         }
     }
@@ -291,7 +307,7 @@ impl Hub {
                 v.push(i.clone());
             }
         }
-        v.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        v.sort_by_key(|i| std::cmp::Reverse(i.updated_at));
         v
     }
 

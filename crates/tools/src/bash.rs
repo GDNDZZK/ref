@@ -97,12 +97,26 @@ struct OutputBuf {
     spill: Option<(PathBuf, std::fs::File)>,
     spill_path: PathBuf,
     spill_failed: bool,
+    spilled: usize,
 }
 
+/// The full-output log is capped (it lives in the temp dir, often a small tmpfs).
+const MAX_SPILL_BYTES: usize = 16 << 20;
+/// Spill logs older than this are deleted when a new one is created.
+const SPILL_MAX_AGE: Duration = Duration::from_secs(24 * 3600);
+static SPILL_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 impl OutputBuf {
-    fn new(call_id: &str) -> Self {
-        let safe: String = call_id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
-        let name = if safe.is_empty() { format!("bash-{}", std::process::id()) } else { safe };
+    fn new(session_id: &str, call_id: &str) -> Self {
+        let clean = |s: &str| -> String { s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect() };
+        // Call ids are not unique across sessions (some providers reuse `call_0`), so the
+        // session id is part of the name.
+        let (sid, cid) = (clean(session_id), clean(call_id));
+        let name = match (sid.is_empty(), cid.is_empty()) {
+            (_, true) => format!("bash-{}-{}", std::process::id(), SPILL_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)),
+            (true, false) => cid,
+            (false, false) => format!("{sid}-{cid}"),
+        };
         OutputBuf {
             mem: String::new(),
             total_bytes: 0,
@@ -110,6 +124,7 @@ impl OutputBuf {
             spill: None,
             spill_path: std::env::temp_dir().join("hernees-output").join(format!("{name}.log")),
             spill_failed: false,
+            spilled: 0,
         }
     }
 
@@ -119,6 +134,9 @@ impl OutputBuf {
         self.mem.push_str(s);
         let over = self.mem.len() > MAX_OUTPUT_BYTES || self.total_lines > MAX_OUTPUT_LINES;
         if over && self.spill.is_none() && !self.spill_failed {
+            if let Some(dir) = self.spill_path.parent() {
+                prune_spills(dir);
+            }
             let opened = std::fs::create_dir_all(self.spill_path.parent().unwrap_or(&self.spill_path))
                 .and_then(|_| std::fs::File::create(&self.spill_path))
                 .and_then(|mut f| f.write_all(self.mem.as_bytes()).map(|_| f));
@@ -127,7 +145,13 @@ impl OutputBuf {
                 Err(_) => self.spill_failed = true,
             }
         } else if let Some((_, f)) = self.spill.as_mut() {
-            let _ = f.write_all(s.as_bytes());
+            if self.spilled < MAX_SPILL_BYTES {
+                let _ = f.write_all(s.as_bytes());
+                self.spilled += s.len();
+                if self.spilled >= MAX_SPILL_BYTES {
+                    let _ = f.write_all(b"\n[log truncated: size limit reached]\n");
+                }
+            }
         }
         // Keep at most ~2× the budget in memory.
         if self.mem.len() > MAX_OUTPUT_BYTES * 2 {
@@ -165,6 +189,17 @@ impl OutputBuf {
             None => String::new(),
         };
         format!("[output truncated: showing last {} lines of {total_lines}{where_}]\n{}", kept.len(), kept.join("\n"))
+    }
+}
+
+/// Delete spill logs older than [`SPILL_MAX_AGE`] (best effort).
+fn prune_spills(dir: &std::path::Path) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        let old = e.metadata().ok().and_then(|m| m.modified().ok()).and_then(|t| t.elapsed().ok()).is_some_and(|age| age > SPILL_MAX_AGE);
+        if old && e.path().extension().is_some_and(|x| x == "log") {
+            let _ = std::fs::remove_file(e.path());
+        }
     }
 }
 
@@ -276,7 +311,7 @@ impl Tool for BashTool {
         let pgid = child.id().map(|p| p as i32).unwrap_or(0);
         let mut reader = tokio::net::unix::pipe::Receiver::from_owned_fd(read_fd)?;
 
-        let mut out = OutputBuf::new(&ctx.call_id);
+        let mut out = OutputBuf::new(&ctx.session_id, &ctx.call_id);
         let mut dec = Utf8Carry::default();
         let mut chunk = vec![0u8; 16 * 1024];
         let deadline = tokio::time::sleep(Duration::from_secs(timeout_secs));

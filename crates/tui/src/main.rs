@@ -131,7 +131,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     eprint!("\x1b[2K\r");
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let base = be.url.clone();
-    let client = client::spawn(base.clone(), cwd.clone(), Some(be.ws), tx);
+    let client = client::spawn(base.clone(), cwd.clone(), Some(be.ws), cli.server.is_none(), tx);
     let mode = if cli.background { Mode::Monitor } else { Mode::Normal };
     let start = StartOpts { prompt: cli.prompt, session: cli.session, cont: cli.cont, agent: cli.agent, model };
     let mut app = App::new(client, cwd, base, mode, start);

@@ -36,7 +36,8 @@ struct Cli {
     #[arg(long = "allow-host", value_name = "HOST")]
     allow_host: Vec<String>,
     /// Seconds without any frontend before exiting: 0 = exit when the last frontend
-    /// disconnects, -1 = never.
+    /// disconnects, -1 = never. Counts only after the first frontend connected (with 0, the
+    /// server also exits if no frontend connects within 120s of startup).
     #[arg(long, default_value_t = -1, allow_negative_numbers = true)]
     idle_timeout: i64,
     /// Show running instances and exit (exit code 0 if any is running).
@@ -47,7 +48,7 @@ struct Cli {
     json: bool,
 }
 
-/// Grace period before the first frontend connects (for idle-timeout >= 0).
+/// Grace period before the first frontend connects (for idle-timeout 0 only).
 const STARTUP_GRACE: Duration = Duration::from_secs(120);
 
 fn main() {
@@ -177,16 +178,22 @@ async fn idle_watch(hub: Arc<hub::Hub>, timeout: i64) -> &'static str {
     if timeout < 0 {
         return std::future::pending().await;
     }
-    let timeout = Duration::from_secs(timeout as u64);
     let mut rx = hub.subscribe_clients();
-    // Startup grace: wait for the first frontend.
-    let grace = STARTUP_GRACE.max(timeout);
+    // The timeout only applies once a frontend has connected. Exception: `0` (the mode the
+    // TUI auto-spawns with) gives up after a grace period so a server whose spawning frontend
+    // died before connecting does not linger forever.
     if *rx.borrow() == 0 {
-        match tokio::time::timeout(grace, rx.wait_for(|n| *n > 0)).await {
-            Ok(Ok(_)) => {}
-            _ => return "no frontend connected during the startup grace period",
+        if timeout == 0 {
+            match tokio::time::timeout(STARTUP_GRACE, rx.wait_for(|n| *n > 0)).await {
+                Ok(Ok(_)) => {}
+                Ok(Err(_)) => return "client registry closed",
+                Err(_) => return "no frontend connected during the startup grace period",
+            }
+        } else if rx.wait_for(|n| *n > 0).await.is_err() {
+            return "client registry closed";
         }
     }
+    let timeout = Duration::from_secs(timeout as u64);
     loop {
         if rx.wait_for(|n| *n == 0).await.is_err() {
             return "client registry closed";

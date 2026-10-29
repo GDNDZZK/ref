@@ -93,10 +93,13 @@ impl Turn {
         }
         self.hub.toast_attached(&self.s.id, ToastLevel::Info, "Compacting context…");
         messages.push(LlmMessage::User(vec![Content::Text(summary_prompt(update))]));
+        // Same system prompt and tool list as normal steps: the summary request then reads the
+        // whole conversation from the prompt cache (tools lead the cached prefix). The prompt
+        // forbids tool calls; any that happen are ignored (only the text is used).
         let req = hn_llm::ChatRequest {
             system: env.system.clone(),
             messages,
-            tools: Vec::new(),
+            tools: env.defs.clone(),
             session_id: self.s.id.clone(),
             max_tokens: None,
         };

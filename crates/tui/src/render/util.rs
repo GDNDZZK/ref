@@ -57,6 +57,8 @@ pub fn left_right(
 ) -> (Line<'static>, usize) {
     let rw = spans_width(&right);
     let room = width.saturating_sub(rw + if rw > 0 { 1 } else { 0 });
+    // Keep at least two columns between a truncated left side and the right side.
+    let room = if rw > 0 && spans_width(&left) > room { room.saturating_sub(1) } else { room };
     let left = fit_spans(left, room);
     let lw = spans_width(&left);
     let mut spans = left;

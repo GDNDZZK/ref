@@ -134,6 +134,8 @@ pub struct App {
     pub queued_prompt: Option<String>,
     /// A CreateSession is in flight: accept events for the (still unknown) new session.
     pub creating: bool,
+    /// When the in-flight CreateSession was sent (welcome screen shows a wait timer).
+    pub creating_since: Option<Instant>,
 }
 
 pub const ESC_WINDOW: Duration = Duration::from_millis(1500);
@@ -223,6 +225,7 @@ impl App {
             started: false,
             queued_prompt: None,
             creating: false,
+            creating_since: None,
         }
     }
 
@@ -235,7 +238,9 @@ impl App {
             _ => 2500,
         };
         let msg = msg.into();
-        self.toasts.retain(|t| t.msg != msg);
+        // Same message, or a newer status of the same kind ("Model: …"), replaces the old toast.
+        let kind = msg.split_once(": ").map(|(k, _)| format!("{k}: ")).filter(|k| k.len() <= 12);
+        self.toasts.retain(|t| t.msg != msg && !kind.as_ref().is_some_and(|k| t.msg.starts_with(k.as_str())));
         self.toasts.push(Toast { level, msg, until: Instant::now() + Duration::from_millis(ms) });
         if self.toasts.len() > 4 {
             self.toasts.remove(0);
@@ -279,6 +284,7 @@ impl App {
             return Some(Duration::from_millis(33));
         }
         let spinners = matches!(self.conn, ConnState::Reconnecting { .. } | ConnState::Connecting)
+            || (self.creating && self.current.is_none())
             || (self.mode == Mode::Normal && self.sidebar_shown && self.open.iter().any(|s| s.status.is_active()))
             || self.dialog.as_ref().is_some_and(|d| matches!(d.kind, DKind::Sessions | DKind::Open { .. }));
         spinners.then(|| Duration::from_millis(80))
@@ -363,6 +369,7 @@ impl App {
         let agent = self.start.agent.clone();
         let model = self.start.model.clone();
         self.creating = true;
+        self.creating_since = Some(Instant::now());
         self.req(ClientMsg::CreateSession { cwd: self.cwd.clone(), agent, model, name: None }, Tag::Created);
     }
 
@@ -406,6 +413,12 @@ impl App {
                     }
                     ConnState::Failed(e) => self.toast(ToastLevel::Error, e),
                     _ => {}
+                }
+            }
+            Incoming::Backend { url, spawned } => {
+                self.url = url;
+                if spawned {
+                    self.toast(ToastLevel::Warning, "Backend was gone · started a new one and resumed");
                 }
             }
             Incoming::Server(msg) => self.on_server(msg),
@@ -494,6 +507,20 @@ impl App {
             Err(e) => {
                 if matches!(tag, Tag::Created) {
                     self.creating = false;
+                }
+                // The session we tried to open doesn't exist (bad --session id, deleted):
+                // don't leave the user on an endless "Loading session…".
+                if let Tag::Attached(id) = &tag {
+                    let unloaded = self.sessions.get(id).is_some_and(|s| !s.loaded);
+                    if self.mode == Mode::Normal && self.current.as_deref() == Some(id.as_str()) && unloaded
+                        && e != "disconnected" && e != "not connected"
+                    {
+                        self.toast(ToastLevel::Error, format!("Cannot open session: {e}"));
+                        self.sessions.remove(id);
+                        self.current = None;
+                        self.create_session();
+                        return;
+                    }
                 }
                 let what = match &tag {
                     Tag::Created => "Create session failed",

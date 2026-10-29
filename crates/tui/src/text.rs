@@ -237,7 +237,30 @@ pub fn wrap_segments(segs: &[(String, Style)], width: usize) -> Vec<Wrapped> {
             continue;
         }
         if tok.w <= width && w > 0 {
+            // Kinsoku: never start a line with closing punctuation; carry the previous
+            // wide character down with it.
+            let carry = if no_line_start(&tok) { pop_last_wide(&mut spans) } else { None };
+            if let Some((_, _, gw)) = &carry {
+                w -= gw;
+            }
+            if spans.is_empty() {
+                // Nothing left to keep on this line: put it back and overflow-split instead.
+                if let Some((g, st, gw)) = carry {
+                    push_g(&mut spans, &g, st);
+                    w += gw;
+                }
+                for (g, s) in &tok.gs {
+                    push_g(&mut spans, g, *s);
+                }
+                w += tok.w;
+                flush(&mut out, &mut spans, &mut w, &mut cont);
+                continue;
+            }
             flush(&mut out, &mut spans, &mut w, &mut cont);
+            if let Some((g, st, gw)) = carry {
+                push_g(&mut spans, &g, st);
+                w += gw;
+            }
             for (g, s) in &tok.gs {
                 push_g(&mut spans, g, *s);
             }
@@ -258,6 +281,33 @@ pub fn wrap_segments(segs: &[(String, Style)], width: usize) -> Vec<Wrapped> {
         flush(&mut out, &mut spans, &mut w, &mut cont);
     }
     out
+}
+
+/// Closing punctuation that must not begin a line (CJK line-breaking rules).
+fn no_line_start(tok: &Tok) -> bool {
+    tok.gs.first().is_some_and(|(g, _)| {
+        matches!(
+            g.as_str(),
+            "，" | "。" | "、" | "；" | "：" | "！" | "？" | "）" | "」" | "』" | "》" | "〉" | "】" | "”" | "’" | "…" | "～" | "·" | "," | "." | ";" | ":" | "!" | "?" | ")"
+        )
+    })
+}
+
+/// Remove the last grapheme of the line if it is a wide (CJK) character.
+fn pop_last_wide(spans: &mut Vec<Span<'static>>) -> Option<(String, Style, usize)> {
+    let last = spans.last_mut()?;
+    let (i, g) = last.content.grapheme_indices(true).next_back()?;
+    let gw = gwidth(g);
+    if gw < 2 {
+        return None;
+    }
+    let g = g.to_string();
+    let st = last.style;
+    last.content.to_mut().truncate(i);
+    if last.content.is_empty() {
+        spans.pop();
+    }
+    Some((g, st, gw))
 }
 
 fn width_of(s: &str) -> usize {
@@ -388,6 +438,17 @@ mod tests {
         assert_eq!(plain(&w), vec!["中文字", "符测试", "换行"]);
         for l in &w {
             assert!(l.width <= 7);
+        }
+    }
+
+    #[test]
+    fn wrap_kinsoku_no_leading_punct() {
+        let segs = vec![("中文中文，好的".to_string(), Style::default())];
+        // 4 CJK fill 8 cols; "，" would start line 2 → "文" moves down with it.
+        let w = wrap_segments(&segs, 8);
+        assert_eq!(plain(&w), vec!["中文中", "文，好的"]);
+        for l in &w {
+            assert!(l.width <= 8);
         }
     }
 
