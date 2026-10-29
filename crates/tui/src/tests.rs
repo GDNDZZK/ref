@@ -1301,6 +1301,36 @@ fn frame_interval_animates_background_sessions_in_sidebar() {
 }
 
 #[test]
+fn sidebar_live_sessions_show_working_time() {
+    let mut app = test_app(false);
+    let cur = app.views["ses_test"].info.clone();
+    let mut busy = bg_session("ses_bg", "worker-1", SessionStatus::Running, 0);
+    busy.busy_since = Some(ref_proto::now_ms() - 125_000);
+    // Busy without busy_since (older backend): spinner only.
+    let legacy = bg_session("ses_old", "legacy", SessionStatus::Busy, 0);
+    app.live = vec![cur, busy, legacy, bg_session("ses_idle", "idler", SessionStatus::Idle, 0)];
+    let rows = |app: &mut App| {
+        let (term, _) = render(app, 150, 40);
+        sidebar_text(&term, 150)
+    };
+    let row = |rows: &[String], name: &str| rows.iter().find(|l| l.contains(name)).unwrap().trim_end().to_string();
+    let r = rows(&mut app);
+    let w1 = row(&r, "worker-1");
+    assert!(w1.ends_with("2m 05s") || w1.ends_with("2m 06s"), "{w1:?}");
+    assert!(w1.contains("bg  "), "right-aligned: {w1:?}");
+    assert!(row(&r, "idler").ends_with("bg"), "idle: no time");
+    assert!(row(&r, "legacy").ends_with("bg"));
+    // Ticks with the clock.
+    app.live[1].busy_since = app.live[1].busy_since.map(|t| t - 60_000);
+    let r = rows(&mut app);
+    assert!(row(&r, "worker-1").contains("3m 0"));
+    // Idle again: the time disappears.
+    app.live[1].status = SessionStatus::Idle;
+    let r = rows(&mut app);
+    assert!(row(&r, "worker-1").ends_with("bg"));
+}
+
+#[test]
 fn running_tool_spinner_animates_in_tiles() {
     let mut app = test_app(false);
     app.mode = Mode::Watch;

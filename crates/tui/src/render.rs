@@ -132,7 +132,7 @@ fn draw_chat_mode(buf: &mut Buffer, area: Rect, app: &mut App, now: i64, tick: u
     }
     // Sidebar.
     if let Some(sb) = lay.sidebar {
-        draw_sidebar(buf, sb, app, tick);
+        draw_sidebar(buf, sb, app, now, tick);
     } else {
         app.sidebar_rows.clear();
         app.sidebar_mcp_rows.clear();
@@ -379,7 +379,7 @@ fn context_bar(c: ref_proto::ContextUsage, bw: usize) -> Vec<Span<'static>> {
         .collect()
 }
 
-fn draw_sidebar(buf: &mut Buffer, r: Rect, app: &mut App, tick: u64) {
+fn draw_sidebar(buf: &mut Buffer, r: Rect, app: &mut App, now: i64, tick: u64) {
     app.sidebar_rows.clear();
     app.sidebar_mcp_rows.clear();
     app.sidebar_rect = r;
@@ -458,10 +458,10 @@ fn draw_sidebar(buf: &mut Buffer, r: Rect, app: &mut App, tick: u64) {
                 let dc = if !s.status.is_idle() { theme::PRIMARY } else { theme::MUTED };
                 let fgbg = if s.attached > 0 { "fg" } else { "bg" };
                 let name_st = if me { theme::bold(theme::PRIMARY) } else { theme::text() };
-                SbRow {
-                    spans: vec![Span::styled(format!("{dot} "), theme::fg(dc)), Span::styled(s.name.clone(), name_st), Span::styled(format!(" {fgbg}"), theme::fg(theme::DIM))],
-                    click: Some(SbClick::Session(s.id.clone())),
-                }
+                let left = vec![Span::styled(format!("{dot} "), theme::fg(dc)), Span::styled(s.name.clone(), name_st), Span::styled(format!(" {fgbg}"), theme::fg(theme::DIM))];
+                // Working time of the current run, right-aligned (same source as the status line).
+                let right = crate::state::busy_ms(s, now).map(|ms| vec![Span::styled(text::fmt_elapsed(ms), theme::fg(theme::MUTED))]).unwrap_or_default();
+                SbRow { spans: message::compose(left, right, w).0.spans, click: Some(SbClick::Session(s.id.clone())) }
             })
             .collect();
         SbSection { header, header_click: None, items }
