@@ -18,6 +18,19 @@ ref 是一个用 Rust 编写的终端编码 agent。它由两个程序组成：
 - **三种 API 格式**：Anthropic Messages、OpenAI Chat Completions、OpenAI Responses。
 - **每次工具调用都带 `purpose`**：refd 给所有工具 schema 注入必填参数 `purpose`，模型用它简要说明调用原因，TUI 会显示出来。
 - **权限与延迟**：opencode 风格的 `allow`/`ask`/`deny` 通配规则，另外支持按工具配置执行前延迟（`delay`）。
+- **长任务不中断**：模型请求失败（网络、5xx、429、流中断等）按指数退避无限重试，最大间隔 600 秒，`esc esc` 可随时中止；上下文溢出时先自动压缩再继续。工具报错作为结果返回给模型，不会终止循环。
+- **精简内置提示**：基础系统提示只有几行，加上环境信息、agent prompt、AGENTS.md 和 skills 列表；系统提示和工具列表在会话内逐字节稳定，以保持 prompt 缓存命中。
+
+## 可靠性与缓存
+
+- **重试**：每次失败后等待 1s、2s、4s……（±10% 抖动），上限为 `retry_max_delay`（默认 600 秒）；服务端给出 `Retry-After` 时取两者中较大值（同样受上限约束）。失败的半截助手消息会被丢弃，然后重做这一步。重试期间标题栏显示 `retry #N in Ns`，完整错误显示在输入框上方。401/403/配额耗尽这类错误也会一直重试，需要手动 `esc esc` 停止。
+- **上下文压缩**：模型可以调用 `compact` 工具，传入自己整理的摘要来丢弃旧上下文；当“已用 + 预留输出”达到上下文窗口时也会自动压缩。压缩后旧消息仍在 TUI 中可见，但发给模型的上下文从摘要开始。
+- **prompt 缓存**：
+  - Anthropic：`cache_control` 打在最后一个 system 块、最后一个工具和最近两轮用户消息上（共不超过 4 个）。
+  - Responses：发送 `prompt_cache_key`（会话 id）、`store: false`，并通过 `include: ["reasoning.encrypted_content"]` 回放加密推理。
+  - Chat Completions：OpenAI/OpenRouter 自动发送 `prompt_cache_key`，其他兼容服务依赖其前缀缓存。
+  - 系统提示中的日期取会话创建日期，生成标题不会改动系统提示，工具顺序固定。
+- **推理回放**：Anthropic thinking 签名、Responses 加密推理项、Chat 的 `reasoning_content`/`reasoning_details` 都会在同一模型的后续请求中原样回放。DeepSeek/Kimi 模型的助手消息总会带上 `reasoning_content`。
 
 ## 构建与安装
 
@@ -296,6 +309,14 @@ CUT 14.=15
 
 ## TUI 使用
 
+**消息显示**：
+
+- 每条消息都显示时间：用户消息、每条助手消息、每个工具调用（开始时间，结束后加耗时）。不是今天的消息会带上日期。
+- 工具调用默认折叠为一行：状态图标、工具名和 `purpose`。点击或在选择模式下按 `enter` 展开，显示原始输入参数（JSON）和原始输出；运行中的 `bash` 展开后能看到实时输出。
+- 推理过程折叠时也只占一行，行尾实时显示推理文本最新的部分，长度按剩余宽度计算（兼容中日韩宽字符）。结束后显示用时。
+- 助手消息渲染 markdown（代码块高亮、表格、列表等）；每条消息都有 `⧉ copy` 按钮，复制的是未经渲染的原始文本。
+- 来自其他会话的消息、子会话的初始任务、自动提醒、压缩摘要各有不同的标签。
+
 **布局**：顶部是标题栏，中间是对话记录，下方是输入框（随内容增高，最多 10 行）和提示栏。终端宽度不小于 140 列时，右侧默认显示侧边栏，内容包括会话名、上下文进度条（带建议压缩点标记）、花费、模型/variant、MCP 状态和其他会话。权限确认面板和重试状态显示在输入框上方。粘贴超过 5 行或 1000 字符的文本时，会折叠成一个整体块；`ctrl+v` 粘贴剪贴板图片。
 
 ### 快捷键
@@ -416,16 +437,26 @@ cargo clippy --all-targets
 `examples/` 中的程序需要真实模型和用户自己的配置，不在 `cargo test` 中运行，也不会打印 API key：
 
 ```sh
-# 直接调用某个模型，测试流式输出、工具往返、图片、缓存等
-cargo run -p ref-llm --example probe -- anthropic/claude-sonnet-4-5 [--variant high] [--api chat] [--image a.png]
+# 直接调用某个模型，测试流式输出、工具往返、图片、缓存等（打印请求体，密钥已脱敏）
+cargo run -p ref-llm --example probe -- anthropic/claude-sonnet-4-5#high [--steps 2] [--image a.png] [--tool-image b.png] \
+    [--api anthropic|chat|responses] [--base URL] [--body] [--long N]
 
-# 让真实模型用内置工具完成一个多文件编辑任务，统计 edit 失败率
-cargo run -p ref-tools --example model_trial -- --model zai/glm-5.3 --runs 3 [--steps 25] [--log DIR] [--keep]
+# 让真实模型用内置工具完成多文件编辑任务，统计 edit 失败率（--model list 列出可用模型）
+cargo run -p ref-tools --example model_trial -- --model zai/glm-5.3 [--task 1|2] [--runs 3] [--steps 25] [--log DIR] [--keep]
 
 # 对运行中的 refd 做端到端冒烟测试（多步工具调用 + must_report 子会话）
 REF_DATA_DIR=/tmp/x target/debug/refd --port 0 --idle-timeout -1 &
 REF_DATA_DIR=/tmp/x cargo run -p refd --example smoke -- [provider/model] [cwd]
 ```
+
+## 已知限制
+
+- 只有 TUI 前端；只支持 Linux/类 Unix（`bash` 工具依赖进程组和信号）。
+- 不实现子任务（subagent）、联网搜索、网页读取、LSP、浏览器等内置工具，需要时通过 MCP 接入。
+- MCP 只支持 tools 能力，不支持 OAuth 登录；skills 和 instructions 中的 URL 不会被下载。
+- 不支持 ChatGPT/Codex OAuth、Bedrock、Vertex 等需要专门认证的 provider。
+- 没有按 provider 限制并发请求数；同时启动多个子会话时可能触发 429，会按重试逻辑自动恢复。
+- 给不支持图片的模型发送图片时，图片会被替换成一段说明文字，TUI 不会额外提示。
 
 ## 许可证
 
