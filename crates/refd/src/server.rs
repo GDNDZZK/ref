@@ -291,9 +291,10 @@ async fn idle_watch(hub: Arc<Hub>, timeout: i64) {
             let idle = hub.since_last_client_change().min(last_activity.elapsed());
             idle >= limit
         } else {
-            // Nobody connected yet: with 0, allow a grace period for the first frontend.
-            let first = if timeout == 0 { FIRST_CONNECT_GRACE } else { limit };
-            started.elapsed() >= first && last_activity.elapsed() >= limit
+            // The timeout only takes effect after the first frontend connected. With 0 (the
+            // mode used when a frontend spawns refd) give up if nobody connects within a grace
+            // period so a failed frontend start does not leave an orphan daemon.
+            timeout == 0 && started.elapsed() >= FIRST_CONNECT_GRACE
         };
         if expired {
             tracing::info!("no frontend connected (idle timeout {timeout}s); shutting down");
