@@ -295,6 +295,7 @@ mod tests {
             parent: None,
             must_report: false,
             context: Default::default(),
+            todos: Vec::new(),
         }
     }
 

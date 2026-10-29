@@ -6,6 +6,7 @@ use crate::mcp::McpServer;
 use crate::session::Session;
 use ref_config::Config;
 use ref_llm::ToolDef;
+use ref_proto::{Todo, TodoStatus};
 use ref_tools::ToolOutput;
 use serde_json::{Map, Value, json};
 use std::sync::Arc;
@@ -83,6 +84,20 @@ pub fn harness_defs() -> Vec<ToolDef> {
             json!({"type": "object", "properties": {
                 "session": {"type": "string", "description": "Name or id of another live session (default: this session)."}
             }}),
+        ),
+        def(
+            "todo",
+            "Maintain a todo list for multi-step work; the user sees it live. Each call REPLACES the whole list, so always send every item. Keep exactly one item in_progress while working, mark items completed as soon as they are done, and add follow-ups when discovered. Skip it for trivial single-step tasks.",
+            json!({"type": "object", "properties": {
+                "todos": {"type": "array", "description": "The complete, updated list.", "items": {
+                    "type": "object",
+                    "properties": {
+                        "content": {"type": "string", "description": "Short imperative description."},
+                        "status": {"type": "string", "enum": ["pending", "in_progress", "completed", "cancelled"]}
+                    },
+                    "required": ["content", "status"]
+                }}
+            }, "required": ["todos"]}),
         ),
         def(
             "compact_context",
@@ -208,6 +223,37 @@ fn harness(hub: &Arc<Hub>, s: &Arc<Session>, name: &str, input: &Value) -> ToolO
                 c.auto
             ))
         }
+        "todo" => {
+            let Some(items) = input.get("todos").and_then(Value::as_array) else {
+                return ToolOutput::err("Error: `todos` must be an array of {content, status}.");
+            };
+            let mut todos = Vec::with_capacity(items.len());
+            for (i, it) in items.iter().enumerate() {
+                let content = it.get("content").and_then(Value::as_str).map(str::trim).unwrap_or("");
+                if content.is_empty() {
+                    return ToolOutput::err(format!("Error: todos[{i}].content must be a non-empty string."));
+                }
+                let status = match it.get("status").and_then(Value::as_str).unwrap_or("pending") {
+                    "pending" => TodoStatus::Pending,
+                    "in_progress" => TodoStatus::InProgress,
+                    "completed" => TodoStatus::Completed,
+                    "cancelled" => TodoStatus::Cancelled,
+                    other => {
+                        return ToolOutput::err(format!(
+                            "Error: todos[{i}].status {other:?} is invalid; use pending, in_progress, completed or cancelled."
+                        ))
+                    }
+                };
+                todos.push(Todo { content: content.to_string(), status });
+            }
+            let text = format_todos(&todos);
+            {
+                let mut st = s.lock();
+                st.info.todos = todos;
+                hub.emit_info(&st);
+            }
+            ToolOutput::ok(text)
+        }
         "compact_context" => {
             let summary = input.get("summary").and_then(Value::as_str).unwrap_or("").trim().to_string();
             if summary.is_empty() {
@@ -218,6 +264,25 @@ fn harness(hub: &Arc<Hub>, s: &Arc<Session>, name: &str, input: &Value) -> ToolO
         }
         _ => ToolOutput::err(format!("Unknown tool: {name}")),
     }
+}
+
+/// Text echoed to the model after a `todo` update.
+pub fn format_todos(todos: &[Todo]) -> String {
+    if todos.is_empty() {
+        return "Todo list cleared.".into();
+    }
+    let done = todos.iter().filter(|t| t.status == TodoStatus::Completed).count();
+    let mut out = format!("Todo list updated ({done}/{} completed):\n", todos.len());
+    for t in todos {
+        let mark = match t.status {
+            TodoStatus::Pending => "[ ]",
+            TodoStatus::InProgress => "[~]",
+            TodoStatus::Completed => "[x]",
+            TodoStatus::Cancelled => "[-]",
+        };
+        out.push_str(&format!("{mark} {}\n", t.content));
+    }
+    out.trim_end().to_string()
 }
 
 #[cfg(test)]

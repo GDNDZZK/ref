@@ -111,6 +111,7 @@ mod tests {
             parent: None,
             must_report: true,
             context: ContextUsage::default(),
+            todos: Vec::new(),
         };
         let msg = Message {
             id: "msg_1".into(),

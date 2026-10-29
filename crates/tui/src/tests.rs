@@ -57,6 +57,7 @@ fn info() -> SessionInfo {
         parent: None,
         must_report: false,
         context: ContextUsage { used: 42_100, max: 1_000_000, recommend: 600_000, auto: 850_000 },
+        todos: Vec::new(),
     }
 }
 

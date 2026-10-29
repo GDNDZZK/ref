@@ -214,7 +214,7 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             let text = crate::peers::user_command(hub, &s, &command, &args)?;
             Ok(json!({ "text": text }))
         }
-        Request::Undo { session_id } => {
+        Request::Undo { session_id, message_id } => {
             let s = live(hub, &session_id)?;
             if s.lock().run.is_some() {
                 crate::engine::abort(hub, &s, true);
@@ -224,11 +224,16 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             }
             let text = {
                 let mut st = s.lock();
-                let Some(i) = st.messages.iter().rposition(|m| m.role == Role::User && m.source == MessageSource::Human)
-                else {
-                    return Err("Nothing to undo.".into());
+                let i = match &message_id {
+                    Some(id) => st.find_message(id).ok_or_else(|| "That message is no longer in the conversation.".to_string())?,
+                    None => st
+                        .messages
+                        .iter()
+                        .rposition(|m| m.role == Role::User && m.source == MessageSource::Human)
+                        .ok_or_else(|| "Nothing to undo.".to_string())?,
                 };
-                let text = st.messages[i].raw_text();
+                // Only human prompts go back into the editor.
+                let text = if st.messages[i].source == MessageSource::Human { st.messages[i].raw_text() } else { String::new() };
                 st.messages.truncate(i);
                 st.queue.clear();
                 st.info.updated_at = ref_proto::now_ms();

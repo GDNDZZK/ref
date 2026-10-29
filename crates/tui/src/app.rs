@@ -1154,7 +1154,7 @@ impl App {
             }
             "undo" => {
                 if let Some(sid) = cur {
-                    self.req(Request::Undo { session_id: sid }, Pending::Undo);
+                    self.req(Request::Undo { session_id: sid, message_id: None }, Pending::Undo);
                 }
             }
             "rename" => {
@@ -1476,5 +1476,6 @@ pub fn placeholder_info(sid: &str, cwd: &str) -> SessionInfo {
         parent: None,
         must_report: false,
         context: Default::default(),
+        todos: Vec::new(),
     }
 }

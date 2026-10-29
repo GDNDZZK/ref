@@ -63,6 +63,7 @@ fn info(name: &str, agent: &str, cwd: &str) -> SessionInfo {
         parent: None,
         must_report: false,
         context: ContextUsage { used: 0, max: 1_000_000, recommend: 600_000, auto: 850_000 },
+        todos: Vec::new(),
     }
 }
 
@@ -775,7 +776,7 @@ impl Mock {
                     m.set_status(&session_id, SessionStatus::Idle);
                 });
             }
-            Request::Undo { session_id } => {
+            Request::Undo { session_id, .. } => {
                 let r = self.with_session(&session_id, |s| {
                     let pos = s.messages.iter().rposition(|m| m.role == Role::User && m.source == MessageSource::Human)?;
                     let text = s.messages[pos].raw_text();

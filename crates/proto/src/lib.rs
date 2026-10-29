@@ -147,6 +147,26 @@ pub struct SessionInfo {
     pub must_report: bool,
     #[serde(default)]
     pub context: ContextUsage,
+    /// Current todo list (set by the `todo` tool).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub todos: Vec<Todo>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TodoStatus {
+    #[default]
+    Pending,
+    InProgress,
+    Completed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Todo {
+    pub content: String,
+    #[serde(default)]
+    pub status: TodoStatus,
 }
 
 impl SessionInfo {
@@ -493,8 +513,13 @@ pub enum Request {
     Rename { session_id: String, name: String },
     /// Manual compaction (/compact).
     Compact { session_id: String },
-    /// Remove the last user turn; -> `{text}` of the removed prompt.
-    Undo { session_id: String },
+    /// Remove the last human prompt and everything after it — or, with `message_id`, that
+    /// message and everything after it. Files are not restored. -> `{text}` of the removed prompt.
+    Undo {
+        session_id: String,
+        #[serde(default)]
+        message_id: Option<String>,
+    },
     /// Unload a live session (it remains in history). Allowed for any session from a frontend.
     Close { session_id: String },
     /// Delete a session from history permanently.

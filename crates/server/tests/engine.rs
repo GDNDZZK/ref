@@ -571,3 +571,64 @@ async fn auto_compaction_when_threshold_reached() {
     assert!(b[1].to_string().contains("Summarize the conversation above"));
     assert!(!b[1].to_string().contains("\"two\""));
 }
+
+#[tokio::test]
+async fn undo_last_prompt_or_from_given_message() {
+    let m = mock(Arc::new(|_, _| Reply::Text("reply".into()))).await;
+    let (hub, work) = hub(config(&m.url), "undo");
+    let s = session(&hub, &work, "main", "build").await;
+    for p in ["one", "two", "three"] {
+        prompt(&hub, &s, p);
+        wait_idle(&s).await;
+    }
+    assert_eq!(messages(&s).len(), 6);
+    let conn = hub.add_conn();
+    conn.lock().hello = true;
+    // Default: the last human prompt and everything after it.
+    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::Undo { session_id: s.id.clone(), message_id: None }).await.unwrap();
+    assert_eq!(r["text"], "three");
+    assert_eq!(messages(&s).len(), 4);
+    // From a specific message: removes it and everything after.
+    let first = messages(&s)[0].id.clone();
+    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::Undo { session_id: s.id.clone(), message_id: Some(first.clone()) }).await.unwrap();
+    assert_eq!(r["text"], "one");
+    assert!(messages(&s).is_empty());
+    assert!(hub.store.load(&s.id).unwrap().messages.is_empty());
+    let e = ref_server::api::handle(&hub, &conn, ref_proto::Request::Undo { session_id: s.id.clone(), message_id: Some(first) }).await;
+    assert!(e.is_err());
+}
+
+#[tokio::test]
+async fn todo_tool_replaces_list_and_validates() {
+    let m = mock(Arc::new(|n, _| match n {
+        0 => Reply::Tools(vec![tool("t1", "todo", json!({"purpose": "p", "todos": [
+            {"content": "Read code", "status": "completed"},
+            {"content": "Fix bug", "status": "in_progress"},
+            {"content": "Run tests", "status": "pending"}
+        ]}))]),
+        1 => Reply::Tools(vec![tool("t2", "todo", json!({"purpose": "p", "todos": [{"content": "x", "status": "bogus"}]}))]),
+        _ => Reply::Text("done".into()),
+    }))
+    .await;
+    let (hub, work) = hub(config(&m.url), "todo");
+    let s = session(&hub, &work, "main", "build").await;
+    prompt(&hub, &s, "go");
+    wait_idle(&s).await;
+    let todos = s.info().todos;
+    assert_eq!(todos.len(), 3, "invalid update must not replace the list");
+    assert_eq!(todos[1].content, "Fix bug");
+    assert_eq!(todos[1].status, ref_proto::TodoStatus::InProgress);
+    let parts = tool_parts(&s);
+    match (&parts[0], &parts[1]) {
+        (Part::Tool { output: Some(a), state: sa, .. }, Part::Tool { output: Some(b), state: sb, .. }) => {
+            assert_eq!(*sa, ToolState::Done);
+            assert!(a.starts_with("Todo list updated (1/3 completed):") && a.contains("[~] Fix bug"), "{a}");
+            assert_eq!(*sb, ToolState::Error);
+            assert!(b.contains("invalid"), "{b}");
+        }
+        _ => panic!(),
+    }
+    assert_eq!(last_text(&s), "done");
+    // Persisted with the session info.
+    assert_eq!(hub.store.load(&s.id).unwrap().info.todos.len(), 3);
+}
