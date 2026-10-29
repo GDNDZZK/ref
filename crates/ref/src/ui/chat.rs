@@ -380,7 +380,8 @@ impl ChatView {
         for p in &m.parts {
             match p {
                 Part::Text(t) => {
-                    for l in wrap_text(t.text.trim_end(), inner, text_style, &[], &[]) {
+                    let shown = display_body(&m.origin, &t.text);
+                    for l in wrap_text(shown.trim_end(), inner, text_style, &[], &[]) {
                         out.push(RLine::plain(row(l.spans)));
                     }
                 }
@@ -831,4 +832,45 @@ pub fn draw_ex(buf: &mut Buffer, area: Rect, view: &mut ChatView, selected_msg: 
 /// Column within the content area (excludes gutter) for a screen x.
 pub fn content_col(view: &ChatView, x: u16) -> usize {
     x.saturating_sub(view.area.x + 1) as usize
+}
+
+/// Strip the backend's routing wrapper (`[Message from session …]` / `[Task from session …]`
+/// header and the trailing reply hint) from peer/spawn messages; the origin label already says it.
+/// The raw text (copy) keeps everything.
+pub fn display_body<'a>(origin: &MessageOrigin, text: &'a str) -> std::borrow::Cow<'a, str> {
+    if !matches!(origin, MessageOrigin::Peer { .. } | MessageOrigin::Spawn { .. }) {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let mut body = text;
+    if body.starts_with("[Message from session ") || body.starts_with("[Task from session ") {
+        if let Some((first, rest)) = body.split_once('\n') {
+            if first.ends_with(']') {
+                body = rest;
+            }
+        }
+    }
+    let trimmed = body.trim_end();
+    if let Some(pos) = trimmed.rfind("\n\n(") {
+        let tail = &trimmed[pos + 2..];
+        if tail.ends_with(')') && tail.contains("send_message") && !tail[1..].contains('\n') {
+            body = &trimmed[..pos];
+        }
+    }
+    std::borrow::Cow::Borrowed(body)
+}
+
+#[cfg(test)]
+mod display_body_tests {
+    use super::*;
+
+    #[test]
+    fn strips_wrapper() {
+        let o = MessageOrigin::Peer { from_session: "s".into(), from_name: "甲".into() };
+        let t = "[Message from session \"甲\" (id: s, cwd: /w)]\nhello\n\nworld\n\n(Reply with send_message to \"s\" if a response is needed.)";
+        assert_eq!(display_body(&o, t), "hello\n\nworld");
+        let sp = MessageOrigin::Spawn { from_session: "s".into(), from_name: "甲".into() };
+        let t = "[Task from session \"甲\" (id: s, cwd: /w)]\ndo it\n\n(When done, report back with send_message to \"s\".)";
+        assert_eq!(display_body(&sp, t), "do it");
+        assert_eq!(display_body(&MessageOrigin::User, "[Task from x]\ny"), "[Task from x]\ny");
+    }
 }

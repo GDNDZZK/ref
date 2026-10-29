@@ -60,7 +60,7 @@ pub fn start(target: Target) -> (Conn, mpsc::UnboundedReceiver<ConnEvent>) {
                     }
                 },
             };
-            match tokio_tungstenite::connect_async(url.as_str()).await {
+            match tokio_tungstenite::connect_async_with_config(url.as_str(), Some(ws_config()), false).await {
                 Ok((ws, _)) => {
                     backoff = Duration::from_millis(300);
                     let (mut sink, mut stream) = ws.split();
@@ -129,4 +129,10 @@ fn redact(url: &str) -> String {
         Some((a, _)) => format!("{a}token=…"),
         None => url.to_string(),
     }
+}
+
+fn ws_config() -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
+    tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
+        .max_message_size(Some(256 << 20))
+        .max_frame_size(Some(256 << 20))
 }

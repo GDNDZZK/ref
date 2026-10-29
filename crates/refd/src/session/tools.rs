@@ -385,6 +385,7 @@ fn create_session(core: &Arc<SessionCore>, env: &StepEnv, args: &Value) -> ToolR
         name: Some(if name.is_empty() { agent.to_string() } else { name.to_string() }),
         parent: Some(me.id.clone()),
         must_report,
+        fallback_model: Some((me.model.clone(), me.variant.clone())),
         ..Default::default()
     }) {
         Ok(c) => c,
