@@ -17,3 +17,6 @@ regex.workspace = true
 tracing.workspace = true
 rand.workspace = true
 chrono.workspace = true
+
+[dev-dependencies]
+tracing-subscriber.workspace = true
