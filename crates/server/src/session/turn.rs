@@ -111,7 +111,14 @@ impl Turn {
             }
             match self.step(&env).await {
                 Step::Tools(calls) => {
+                    let msg_id = calls[0].msg_id.clone();
                     self.run_tools(&env, calls).await;
+                    if self.cancel.is_cancelled() {
+                        // Aborted during a tool's delay / permission prompt / run: the step
+                        // ends here, not with the `tool_use` it streamed.
+                        self.mark_aborted(&msg_id);
+                        return;
+                    }
                     self.apply_checkpoint(&env.agent);
                 }
                 Step::Again => {}
@@ -173,11 +180,14 @@ impl Turn {
                 return None;
             }
         };
-        let retry_mcp = {
+        // The first step of a session retries failed MCP servers and waits (bounded) for
+        // connections in progress; later steps take what is connected.
+        let first = {
             let mut st = self.s.lock();
             !std::mem::replace(&mut st.mcp_tried, true)
         };
-        let mcp = self.hub.mcp.session_tools(&self.s, &self.hub, &config, &info.cwd, retry_mcp).await;
+        let wait = if first { crate::mcp::FIRST_STEP_WAIT } else { Duration::ZERO };
+        let mcp = self.hub.mcp.session_tools(&self.hub, &config, &info.cwd, first, wait).await;
         let tools = crate::peer::session_tools(&self.hub, &config, &info.agent, mcp.tools);
         let defs = stools::tool_defs(&tools);
         let system = crate::prompt::system(&config, &info, &mcp.instructions, &tools);
@@ -360,6 +370,21 @@ impl Turn {
         self.s.msgs_changed(&mut st);
         self.s.info_changed(&mut st);
         calls
+    }
+
+    /// The turn was aborted after this step's message was finalized: mark it `aborted` and
+    /// cancel tool calls that did not finish.
+    fn mark_aborted(&self, msg_id: &str) {
+        let mut st = self.s.lock();
+        let Some(i) = st.msgs.iter().rposition(|m| m.id == msg_id) else { return };
+        let now = now_ms();
+        let m = &mut st.msgs[i];
+        m.finish = Some("aborted".into());
+        m.completed.get_or_insert(now);
+        cancel_open_tools(m, now);
+        let m = m.clone();
+        self.s.emit(&st, Event::Message { message: m });
+        self.s.msgs_changed(&mut st);
     }
 
     /// Remove a failed partial assistant message before retrying.

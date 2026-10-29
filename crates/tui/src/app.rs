@@ -360,6 +360,14 @@ impl App {
                     }
                 } else if let Some(id) = self.current.clone() {
                     self.attach(&id, true);
+                } else if !self.creating {
+                    // The connection died before the initial session was opened (e.g. the
+                    // backend was shutting down): redo the startup step on the new connection.
+                    if self.start.cont {
+                        self.req(ClientMsg::ListSessions { scope: ListScope::History }, Tag::Continue);
+                    } else {
+                        self.create_session();
+                    }
                 }
             }
         }

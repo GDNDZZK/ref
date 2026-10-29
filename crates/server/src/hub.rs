@@ -2,7 +2,14 @@
 //!
 //! Lock order (never acquire in the opposite direction):
 //!   session state (`Session::st`) -> `Hub::clients`
+//!   `Hub::accepting` -> `Hub::clients`
 //! `Hub::sessions` and `Hub::configs` are only held to clone/insert entries.
+//!
+//! Idle shutdown: `accepting` makes "register a new connection" and "commit to shutting
+//! down" mutually exclusive. A connection is registered before the WebSocket upgrade
+//! response is sent, and the shutdown is only committed when no frontend and no
+//! connection that has not said Hello yet is registered. Once committed, new connections
+//! are refused (HTTP 503) so clients look for (or spawn) another backend.
 
 use crate::mcp::McpManager;
 use crate::persist::SessionMeta;
@@ -39,6 +46,20 @@ pub struct ClientEntry {
     pub frontend: bool,
     /// session id -> foreground
     pub attached: HashMap<String, bool>,
+    /// Hello received (frontend or probe).
+    pub helloed: bool,
+    pub connected_at: Instant,
+}
+
+/// A connection that has not sent Hello within this time no longer keeps the server alive.
+const HELLO_GRACE: Duration = Duration::from_secs(10);
+
+impl ClientEntry {
+    /// Keeps an idle server from committing its shutdown: a frontend, or a fresh connection
+    /// that may still turn out to be one.
+    fn keeps_alive(&self) -> bool {
+        self.frontend || (!self.helloed && self.connected_at.elapsed() < HELLO_GRACE)
+    }
 }
 
 pub struct Hub {
@@ -49,11 +70,16 @@ pub struct Hub {
     clients: Mutex<HashMap<u64, ClientEntry>>,
     next_client: AtomicU64,
     configs: Mutex<HashMap<PathBuf, (Instant, Arc<Config>)>>,
+    /// In-flight config loads (single-flight per directory).
+    config_loads: Mutex<HashMap<PathBuf, ConfigLoad>>,
     sessions_changed: Arc<Notify>,
     client_count: watch::Sender<usize>,
+    /// False once the shutdown is committed: new connections are refused.
+    accepting: Mutex<bool>,
     shutting_down: AtomicBool,
-    /// Serializes session opening (load from disk) so a session is never loaded twice.
-    open_lock: tokio::sync::Mutex<()>,
+    /// Per-session open locks: a session is never loaded twice, and loading one session
+    /// does not delay opening another.
+    opening: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 pub fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -67,6 +93,34 @@ fn fallback_config() -> Arc<Config> {
 }
 
 const CONFIG_TTL: Duration = Duration::from_secs(3);
+/// How long a caller waits for a config reload when a previous config is available.
+const STALE_WAIT: Duration = Duration::from_secs(1);
+
+type ConfigLoad = watch::Receiver<Option<Arc<Config>>>;
+
+fn load_config_blocking(key: &Path) -> Arc<Config> {
+    let start = Instant::now();
+    let cwd = key.display();
+    let cfg = match std::panic::catch_unwind(|| Config::load(key)) {
+        Ok(Ok(c)) => Arc::new(c),
+        Ok(Err(e)) => {
+            tracing::warn!("config load for {cwd} failed: {e:#}");
+            fallback_config()
+        }
+        Err(_) => {
+            tracing::error!("config load for {cwd} panicked");
+            fallback_config()
+        }
+    };
+    for w in &cfg.warnings {
+        tracing::debug!("config warning ({cwd}): {w}");
+    }
+    let took = start.elapsed();
+    if took >= Duration::from_secs(1) {
+        tracing::debug!("config load for {cwd} took {:.1}s", took.as_secs_f64());
+    }
+    cfg
+}
 
 impl Hub {
     pub fn new() -> Arc<Hub> {
@@ -79,10 +133,12 @@ impl Hub {
             clients: Mutex::new(HashMap::new()),
             next_client: AtomicU64::new(1),
             configs: Mutex::new(HashMap::new()),
+            config_loads: Mutex::new(HashMap::new()),
             sessions_changed: Arc::new(Notify::new()),
             client_count: count_tx,
+            accepting: Mutex::new(true),
             shutting_down: AtomicBool::new(false),
-            open_lock: tokio::sync::Mutex::new(()),
+            opening: Mutex::new(HashMap::new()),
         });
         // Coalesced `Sessions` pushes (at most every ~100ms).
         let weak = Arc::downgrade(&hub);
@@ -105,22 +161,44 @@ impl Hub {
 
     // --- clients -------------------------------------------------------------
 
-    pub fn add_client(&self, tx: ClientTx) -> u64 {
+    /// Register a new connection. Returns None once the shutdown is committed.
+    pub fn add_client(&self, tx: ClientTx) -> Option<u64> {
+        let accepting = lock(&self.accepting);
+        if !*accepting {
+            return None;
+        }
         let id = self.next_client.fetch_add(1, Ordering::Relaxed);
-        lock(&self.clients)
-            .insert(id, ClientEntry { tx, cwd: String::new(), watch_bg: false, frontend: false, attached: HashMap::new() });
-        id
+        let mut c = lock(&self.clients);
+        c.insert(
+            id,
+            ClientEntry {
+                tx,
+                cwd: String::new(),
+                watch_bg: false,
+                frontend: false,
+                attached: HashMap::new(),
+                helloed: false,
+                connected_at: Instant::now(),
+            },
+        );
+        self.publish_counts(&c);
+        Some(id)
     }
 
     fn frontends(c: &HashMap<u64, ClientEntry>) -> usize {
         c.values().filter(|e| e.frontend).count()
     }
 
+    fn publish_counts(&self, c: &HashMap<u64, ClientEntry>) {
+        self.client_count.send_replace(Self::frontends(c));
+    }
+
     pub fn remove_client(&self, id: u64) {
-        let (entry, n) = {
+        let entry = {
             let mut c = lock(&self.clients);
             let e = c.remove(&id);
-            (e, Self::frontends(&c))
+            self.publish_counts(&c);
+            e
         };
         if let Some(e) = entry {
             for (sid, _) in e.attached {
@@ -129,7 +207,6 @@ impl Hub {
                 }
             }
         }
-        self.client_count.send_replace(n);
         self.touch();
     }
 
@@ -143,15 +220,39 @@ impl Hub {
     }
 
     pub fn hello(&self, id: u64, cwd: &str, frontend: bool) {
-        let n = {
-            let mut c = lock(&self.clients);
-            if let Some(e) = c.get_mut(&id) {
-                e.cwd = cwd.to_string();
-                e.frontend = frontend;
+        let mut c = lock(&self.clients);
+        if let Some(e) = c.get_mut(&id) {
+            e.cwd = cwd.to_string();
+            e.frontend = frontend;
+            e.helloed = true;
+        }
+        self.publish_counts(&c);
+    }
+
+    /// Commit to shutting down: from now on new connections are refused. Unless `force`,
+    /// this fails (and the server keeps running) while a frontend, or a connection that has
+    /// not said Hello yet, is registered.
+    pub fn commit_shutdown(&self, force: bool) -> bool {
+        let mut accepting = lock(&self.accepting);
+        if !*accepting {
+            return true;
+        }
+        if !force && lock(&self.clients).values().any(|e| e.keeps_alive()) {
+            return false;
+        }
+        *accepting = false;
+        true
+    }
+
+    /// Write every session's pending changes to disk (non-destructive: turns keep running).
+    pub async fn flush_all(&self) {
+        let sessions = self.all_sessions();
+        let _ = tokio::task::spawn_blocking(move || {
+            for s in sessions {
+                s.flush_now();
             }
-            Self::frontends(&c)
-        };
-        self.client_count.send_replace(n);
+        })
+        .await;
     }
 
     pub fn client_cwd(&self, id: u64) -> String {
@@ -205,8 +306,10 @@ impl Hub {
     }
 
     pub fn send_to(&self, cid: u64, msg: ServerMsg) {
+        // Encode outside the lock: snapshots can be large.
+        let frame = encode(&msg);
         if let Some(c) = lock(&self.clients).get(&cid) {
-            let _ = c.tx.send(encode(&msg));
+            let _ = c.tx.send(frame);
         }
     }
 
@@ -252,31 +355,60 @@ impl Hub {
     // --- config --------------------------------------------------------------
 
     /// Merged config for a directory (cached for a few seconds, then reloaded).
-    pub async fn config(&self, cwd: &str) -> Arc<Config> {
+    ///
+    /// Loads run on the blocking pool, one at a time per directory; the load task stores the
+    /// result in the cache itself. When a cached config exists, a reload that takes longer
+    /// than [`STALE_WAIT`] does not hold the caller up: it gets the previous config.
+    pub async fn config(self: &Arc<Self>, cwd: &str) -> Arc<Config> {
         let key = PathBuf::from(cwd);
-        if let Some((at, c)) = lock(&self.configs).get(&key) {
-            if at.elapsed() < CONFIG_TTL {
-                return c.clone();
-            }
-        }
-        let k2 = key.clone();
-        let loaded = tokio::task::spawn_blocking(move || Config::load(&k2)).await;
-        let cfg = match loaded {
-            Ok(Ok(c)) => Arc::new(c),
-            Ok(Err(e)) => {
-                tracing::warn!("config load for {cwd} failed: {e:#}");
-                fallback_config()
-            }
-            Err(e) => {
-                tracing::error!("config load panicked: {e}");
-                fallback_config()
-            }
+        let stale = match lock(&self.configs).get(&key) {
+            Some((at, c)) if at.elapsed() < CONFIG_TTL => return c.clone(),
+            Some((_, c)) => Some(c.clone()),
+            None => None,
         };
-        for w in &cfg.warnings {
-            tracing::debug!("config warning ({cwd}): {w}");
+        let mut rx = {
+            let mut loading = lock(&self.config_loads);
+            loading.entry(key.clone()).or_insert_with(|| self.spawn_config_load(key.clone())).clone()
+        };
+        let wait = async {
+            let _ = rx.wait_for(|c| c.is_some()).await;
+            rx.borrow().clone()
+        };
+        let loaded = match &stale {
+            Some(_) => tokio::time::timeout(STALE_WAIT, wait).await.ok().flatten(),
+            None => wait.await,
+        };
+        match (loaded, stale) {
+            (Some(cfg), _) => cfg,
+            (None, Some(old)) => {
+                tracing::debug!("config reload for {cwd} is slow; using the previous config");
+                old
+            }
+            (None, None) => fallback_config(),
         }
-        lock(&self.configs).insert(key, (Instant::now(), cfg.clone()));
-        cfg
+    }
+
+    fn spawn_config_load(self: &Arc<Self>, key: PathBuf) -> ConfigLoad {
+        let (tx, rx) = watch::channel(None);
+        let hub = Arc::downgrade(self);
+        tokio::spawn(async move {
+            let k2 = key.clone();
+            let mut task = tokio::task::spawn_blocking(move || load_config_blocking(&k2));
+            let cfg = tokio::select! {
+                r = &mut task => r,
+                _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                    tracing::warn!("config load for {} is taking more than 5s", key.display());
+                    task.await
+                }
+            }
+            .unwrap_or_else(|_| fallback_config());
+            if let Some(h) = hub.upgrade() {
+                lock(&h.configs).insert(key.clone(), (Instant::now(), cfg.clone()));
+                lock(&h.config_loads).remove(&key);
+            }
+            let _ = tx.send(Some(cfg));
+        });
+        rx
     }
 
     // --- sessions ------------------------------------------------------------
@@ -320,18 +452,38 @@ impl Hub {
         if let Some(s) = self.get(id) {
             return Ok(s);
         }
-        let _g = self.open_lock.lock().await;
-        if let Some(s) = self.get(id) {
-            return Ok(s);
-        }
         anyhow::ensure!(crate::persist::valid_id(id), "unknown session {id:?}");
-        let id2 = id.to_string();
-        let (info, msgs, meta) = tokio::task::spawn_blocking(move || crate::persist::load_full(&id2)).await??;
-        let s = Session::new(self, info, msgs, meta);
-        s.repair_after_load();
-        lock(&self.sessions).insert(id.to_string(), s.clone());
-        self.touch();
-        Ok(s)
+        let m = lock(&self.opening).entry(id.to_string()).or_default().clone();
+        let r = async {
+            let _g = m.lock().await;
+            if let Some(s) = self.get(id) {
+                return Ok(s);
+            }
+            let id2 = id.to_string();
+            let (info, msgs, meta) = tokio::task::spawn_blocking(move || crate::persist::load_full(&id2)).await??;
+            let s = Session::new(self, info, msgs, meta);
+            s.repair_after_load();
+            lock(&self.sessions).insert(id.to_string(), s.clone());
+            self.touch();
+            self.warm_up(&s.info().cwd);
+            Ok(s)
+        }
+        .await;
+        let mut opening = lock(&self.opening);
+        if opening.get(id).is_some_and(|x| Arc::ptr_eq(x, &m) && Arc::strong_count(x) <= 2) {
+            opening.remove(id);
+        }
+        r
+    }
+
+    /// Start background work a session in `cwd` will need soon (MCP connections). Never waits.
+    pub fn warm_up(self: &Arc<Self>, cwd: &str) {
+        let hub = self.clone();
+        let cwd = cwd.to_string();
+        tokio::spawn(async move {
+            let config = hub.config(&cwd).await;
+            hub.mcp.start(&hub, &config, &cwd, false);
+        });
     }
 
     /// Unique display name among open sessions: "x", "x (2)", "x (3)"...
@@ -408,6 +560,7 @@ impl Hub {
         lock(&self.sessions).insert(s.id.clone(), s.clone());
         s.mark_dirty();
         self.touch();
+        self.mcp.start(self, &config, &s.info().cwd, false);
         Ok(s)
     }
 
@@ -446,5 +599,38 @@ impl Hub {
             s.shutdown_flush();
         }
         let _ = tokio::time::timeout(Duration::from_secs(5), self.mcp.shutdown_all()).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn commit_shutdown_is_exclusive_with_new_connections() {
+        let hub = Hub::new();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let a = hub.add_client(tx.clone()).unwrap();
+        // A connection that has not said Hello yet blocks the commit.
+        assert!(!hub.commit_shutdown(false));
+        hub.hello(a, "/", true);
+        assert!(!hub.commit_shutdown(false), "a frontend blocks the commit");
+        let probe = hub.add_client(tx.clone()).unwrap();
+        hub.hello(probe, "/", false);
+        hub.remove_client(a);
+        // Only a status probe is left: it does not keep the server alive.
+        assert!(hub.commit_shutdown(false));
+        assert!(hub.add_client(tx.clone()).is_none(), "refused after the commit");
+        assert!(hub.commit_shutdown(false), "idempotent");
+    }
+
+    #[tokio::test]
+    async fn forced_commit_refuses_even_with_frontends() {
+        let hub = Hub::new();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let a = hub.add_client(tx.clone()).unwrap();
+        hub.hello(a, "/", true);
+        assert!(hub.commit_shutdown(true));
+        assert!(hub.add_client(tx).is_none());
     }
 }

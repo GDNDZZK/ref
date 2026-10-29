@@ -163,3 +163,92 @@ async fn watch_only_monitor_keeps_server_alive_but_is_not_foreground() {
     mon.close();
     assert!(srv.wait_exit(Duration::from_secs(10)).await.is_some());
 }
+
+#[tokio::test]
+async fn idle_timeout_zero_rapid_reconnect_never_drops_a_client() {
+    // A frontend that reconnects right after the previous one left must either get a working
+    // connection (the shutdown is cancelled) or a clean refusal (HTTP 503 / connection
+    // refused, after which the server exits and another one is started). An accepted client
+    // must never be dropped.
+    let mock = Mock::start(Arc::new(|_r: &Req| text("x"))).await;
+    let env = Env::new(mock.port, json!({}));
+    let mut srv = env.spawn(&["--idle-timeout", "0"]);
+    let mut c = Client::connect(&srv.url(), &env.work()).await;
+    let (mut kept, mut refused) = (0, 0);
+    for i in 0..20u64 {
+        // Odd iterations: disconnect, then reconnect after a varying gap so the reconnect
+        // lands at different points of the shutdown path. Even iterations: the new socket
+        // opens just before the old frontend leaves (a restarting TUI), so it must be kept.
+        let attempt = if i % 2 == 0 {
+            let url = srv.url();
+            let work = env.work();
+            let pending = tokio::spawn(async move { Client::try_connect(&url, &work).await });
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            c.close();
+            pending.await.unwrap()
+        } else {
+            c.close();
+            tokio::time::sleep(Duration::from_millis(i % 5 * 4)).await;
+            Client::try_connect(&srv.url(), &env.work()).await
+        };
+        match attempt {
+            Ok(mut n) => {
+                kept += 1;
+                let r = n.try_req(ClientMsg::Ping, Duration::from_secs(5)).await;
+                assert!(matches!(r, Ok(Ok(_))), "iteration {i}: accepted client got {r:?}\n{}", srv.log_text());
+                tokio::time::sleep(Duration::from_millis(150)).await;
+                let r = n.try_req(ClientMsg::ListSessions { scope: ListScope::Open }, Duration::from_secs(5)).await;
+                assert!(matches!(r, Ok(Ok(_))), "iteration {i}: client dropped after connecting: {r:?}\n{}", srv.log_text());
+                assert!(srv.child.try_wait().unwrap().is_none(), "iteration {i}: server exited with a frontend connected");
+                c = n;
+            }
+            Err(e) => {
+                refused += 1;
+                assert!(e == "http 503" || e.starts_with("connect:"), "iteration {i}: unclean refusal: {e}\n{}", srv.log_text());
+                let st = srv.wait_exit(Duration::from_secs(10)).await.expect("refusing server exits");
+                assert!(st.success(), "{st:?}");
+                srv = env.spawn(&["--idle-timeout", "0"]);
+                c = Client::connect(&srv.url(), &env.work()).await;
+            }
+        }
+    }
+    eprintln!("rapid reconnect: {kept} kept, {refused} refused");
+    assert!(kept >= 10, "overlapping reconnects must be kept ({kept} kept)");
+    c.close();
+    assert!(srv.wait_exit(Duration::from_secs(10)).await.is_some(), "exits after the last frontend");
+}
+
+#[tokio::test]
+async fn idle_timeout_zero_pending_connection_cancels_shutdown() {
+    // A WebSocket that is open but has not sent Hello yet when the last frontend leaves must
+    // not be dropped: the shutdown waits for it, and its Hello makes it a frontend.
+    use futures::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message as WsMsg;
+    let mock = Mock::start(Arc::new(|_r: &Req| text("x"))).await;
+    let env = Env::new(mock.port, json!({}));
+    let mut srv = env.spawn(&["--idle-timeout", "0"]);
+    let c = Client::connect(&srv.url(), &env.work()).await;
+    let (mut raw, _) = tokio_tungstenite::connect_async(srv.url().as_str()).await.unwrap();
+    c.close();
+    assert!(srv.wait_exit(Duration::from_millis(1500)).await.is_none(), "exited with a connection pending\n{}", srv.log_text());
+    let hello = json!({"id": 1, "type": "hello", "client": "late", "cwd": env.work(), "protocol": PROTOCOL_VERSION});
+    raw.send(WsMsg::text(hello.to_string())).await.unwrap();
+    let ok = loop {
+        match tokio::time::timeout(Duration::from_secs(5), raw.next()).await {
+            Ok(Some(Ok(WsMsg::Text(t)))) => {
+                let v: serde_json::Value = serde_json::from_str(t.as_str()).unwrap();
+                if v["type"] == "response" && v["id"] == 1 {
+                    break v["error"].is_null();
+                }
+            }
+            other => panic!("late client dropped: {other:?}\n{}", srv.log_text()),
+        }
+    };
+    assert!(ok);
+    assert!(srv.wait_exit(Duration::from_millis(500)).await.is_none());
+    let _ = raw.close(None).await;
+    drop(raw);
+    let st = srv.wait_exit(Duration::from_secs(10)).await.expect("exits after the late frontend left");
+    assert!(st.success());
+    assert!(srv.log_text().contains("last frontend disconnected"), "{}", srv.log_text());
+}

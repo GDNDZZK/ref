@@ -467,7 +467,10 @@ impl Session {
                         m.completed = Some(now);
                         m.finish = Some("aborted".into());
                     }
-                    cancel_open_tools(m, now);
+                    if cancel_open_tools(m, now) {
+                        // Stopped while its tool calls were pending / running.
+                        m.finish = Some("aborted".into());
+                    }
                 }
             }
             st.info_dirty = true;
@@ -487,7 +490,10 @@ impl Session {
                 m.finish.get_or_insert_with(|| "aborted".into());
                 changed = true;
             }
-            changed |= cancel_open_tools(m, now);
+            if cancel_open_tools(m, now) {
+                m.finish = Some("aborted".into());
+                changed = true;
+            }
         }
         if changed {
             st.msgs_dirty = true;

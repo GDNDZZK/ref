@@ -1171,6 +1171,7 @@ dependencies = [
  "dirs",
  "futures",
  "hn-config",
+ "hn-llm",
  "hn-proto",
  "indexmap",
  "json5",

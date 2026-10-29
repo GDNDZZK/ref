@@ -16,6 +16,7 @@ mod chat;
 mod responses;
 mod anthropic;
 pub mod error;
+pub mod proxy;
 
 pub use error::{classify, ErrorKind, LlmError};
 pub use hn_proto::{ImageData, Usage};
@@ -196,9 +197,11 @@ pub async fn stream(
     }
 }
 
-/// Shared HTTP client builder (rustls, http2, sane timeouts).
+/// Shared HTTP client builder (rustls, http2, sane timeouts). Proxies come from the
+/// environment with local hosts and shell-style `NO_PROXY` patterns bypassed (see [`proxy`]).
 pub fn http_client() -> reqwest::Client {
     reqwest::Client::builder()
+        .proxy(proxy::reqwest_proxy())
         .connect_timeout(Duration::from_secs(30))
         .pool_idle_timeout(Duration::from_secs(90))
         .user_agent(concat!("hernees/", env!("CARGO_PKG_VERSION")))

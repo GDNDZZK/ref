@@ -53,6 +53,13 @@ impl<T: Send + 'static> Client<T> {
     }
 }
 
+/// A client not connected to anything (requests are dropped). For tests.
+#[cfg(test)]
+pub fn detached<T>() -> Client<T> {
+    let (tx, _rx) = mpsc::unbounded_channel();
+    Client { tx }
+}
+
 /// Candidate URLs for a ws endpoint (`/` then `/ws`) unless a path was given.
 pub fn candidates(base: &str) -> Vec<String> {
     let b = base.trim_end_matches('/');
@@ -139,9 +146,20 @@ async fn run<T: Send + 'static>(
 ) {
     let mut next_id: u64 = 1;
     let mut attempt: u32 = 0;
+    // The previous connection died right after it was established (e.g. the backend was
+    // shutting down): look for / spawn another backend without retrying this one.
+    let mut rediscover = false;
     loop {
         let ws = match first.take() {
             Some(ws) => Ok(ws),
+            None if discover && std::mem::take(&mut rediscover) => match crate::backend::connect(None, &cwd).await {
+                Ok(b) => {
+                    base = b.url.clone();
+                    let _ = app.send(Incoming::Backend { url: b.url, spawned: b.spawned });
+                    Ok(b.ws)
+                }
+                Err(e) => Err(format!("{e:#}")),
+            },
             None => match connect_hello(&base, &cwd, Duration::from_secs(5)).await {
                 Ok((ws, _)) => Ok(ws),
                 // The instance may have exited (crash, idle shutdown): after a couple of
@@ -178,6 +196,7 @@ async fn run<T: Send + 'static>(
             }
         };
         attempt = 0;
+        let connected_at = std::time::Instant::now();
         let _ = app.send(Incoming::Conn(ConnState::Connected));
         let (mut sink, mut stream) = ws.split();
         let mut pending: HashMap<u64, T> = HashMap::new();
@@ -233,8 +252,11 @@ async fn run<T: Send + 'static>(
         for (_, tag) in pending.drain() {
             let _ = app.send(Incoming::Reply(tag, Err("disconnected".into())));
         }
+        if discover && connected_at.elapsed() < SHORT_LIVED {
+            rediscover = true;
+        }
         attempt += 1;
-        let delay = backoff(attempt);
+        let delay = if rediscover { Duration::from_millis(50) } else { backoff(attempt) };
         let next_at = hn_proto::now_ms() + delay.as_millis() as i64;
         let _ = app.send(Incoming::Conn(ConnState::Reconnecting { attempt, next_at, error: err }));
         if !wait_dropping(&mut rx, &app, delay).await {
@@ -242,6 +264,9 @@ async fn run<T: Send + 'static>(
         }
     }
 }
+
+/// A connection that ends sooner than this counts as a failed connect.
+const SHORT_LIVED: Duration = Duration::from_secs(1);
 
 fn backoff(attempt: u32) -> Duration {
     let ms = (250u64 << attempt.min(5)).min(5000);

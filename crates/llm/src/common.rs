@@ -279,7 +279,15 @@ pub(crate) async fn run(
         let headers = resp.headers().clone();
         let body = read_capped(resp, MAX_ERROR_BODY, idle, cancel).await?;
         tracing::trace!(target: "hn_llm::wire", status = status.as_u16(), data = %body, "error body");
-        return Err(LlmError::from_http(status.as_u16(), &headers, &body));
+        let mut e = LlmError::from_http(status.as_u16(), &headers, &body);
+        if body.trim().is_empty() {
+            // Empty error bodies usually come from an intermediary, not the provider.
+            e.message = match crate::proxy::describe_proxy_for(url) {
+                Some(p) => format!("HTTP {} (empty body; possibly from proxy {p})", status.as_u16()),
+                None => format!("HTTP {} (empty body)", status.as_u16()),
+            };
+        }
+        return Err(e);
     }
 
     let mut emitted = false;

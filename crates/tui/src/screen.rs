@@ -44,8 +44,10 @@ fn sidebar_visible(app: &App, w: u16) -> bool {
     }
 }
 
+/// The session is running a turn (per the backend's status; a tool delay or permission
+/// prompt only exists while it is Busy / Permission). Drives the "interrupt" hints.
 fn busy(app: &App, sid: &str) -> bool {
-    app.sessions.get(sid).is_some_and(|s| s.info.status.is_active() || s.delayed_tool().is_some())
+    app.session_info(sid).is_some_and(|i| i.status.is_active())
 }
 
 // ---------------------------------------------------------------------------
@@ -403,10 +405,11 @@ fn draw_monitor(app: &mut App, area: Rect, buf: &mut ratatui::buffer::Buffer) ->
     } else if app.ctrlc_armed.is_some() {
         left.push(Span::styled("ctrl+c again to exit", theme::fg(theme::WARNING)));
     } else if let Some(id) = &sid {
-        let armed = app.esc_armed.as_ref().is_some_and(|(s, _)| s == id);
-        if armed {
+        let is_busy = busy(app, id);
+        let armed = app.esc_armed.as_ref().is_some_and(|(s, at)| s == id && at.elapsed() < ESC_WINDOW);
+        if armed && is_busy {
             left.push(Span::styled("esc again to interrupt", theme::fg(theme::WARNING)));
-        } else if busy(app, id) {
+        } else if is_busy {
             left.push(Span::styled("esc esc", theme::text()));
             left.push(Span::styled(" interrupt focused", theme::muted()));
         } else {
@@ -582,3 +585,67 @@ pub fn pane_capacity(area: Rect) -> usize {
     grid::capacity(body).max(1)
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::StartOpts;
+    use crate::store::SessionState;
+    use hn_proto::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn monitor_app(status: SessionStatus, stale_delayed_tool: bool) -> App {
+        let client = crate::client::detached();
+        let mut app = App::new(client, "/tmp".into(), "ws://x".into(), Mode::Monitor, StartOpts::default());
+        let info = SessionInfo { id: "ses_a".into(), name: "a".into(), open: true, status, ..Default::default() };
+        app.open = vec![info.clone()];
+        let mut st = SessionState::new(info.clone());
+        let mut msgs = Vec::new();
+        if stale_delayed_tool {
+            msgs.push(Message {
+                id: "m1".into(),
+                role: Role::Assistant,
+                origin: Origin::Human,
+                time: 1,
+                completed: Some(2),
+                parts: vec![Part::Tool(ToolPart { call_id: "c".into(), name: "bash".into(), state: ToolState::Delayed, ..Default::default() })],
+                model: None,
+                agent: None,
+                usage: None,
+                finish: Some("tool_use".into()),
+                error: None,
+                replay_key: None,
+            });
+        }
+        st.apply(Event::Snapshot { info, messages: msgs });
+        app.sessions.insert("ses_a".into(), st);
+        app.focus_pane = Some("ses_a".into());
+        app
+    }
+
+    fn footer(app: &mut App) -> String {
+        let mut t = Terminal::new(TestBackend::new(120, 20)).unwrap();
+        t.draw(|f| draw(app, f)).unwrap();
+        let buf = t.backend().buffer();
+        (0..buf.area.width).map(|x| buf[(x, buf.area.height - 1)].symbol().to_string()).collect()
+    }
+
+    #[test]
+    fn monitor_footer_interrupt_hint_only_when_busy() {
+        let mut idle = monitor_app(SessionStatus::Idle, true);
+        let f = footer(&mut idle);
+        assert!(!f.contains("interrupt"), "{f}");
+        assert!(f.contains("send to focused pane"), "{f}");
+        // A stale armed esc on an idle session shows nothing either.
+        idle.esc_armed = Some(("ses_a".into(), std::time::Instant::now()));
+        assert!(!footer(&mut idle).contains("interrupt"));
+
+        let mut busy = monitor_app(SessionStatus::Busy, false);
+        assert!(footer(&mut busy).contains("esc esc interrupt focused"));
+        busy.esc_armed = Some(("ses_a".into(), std::time::Instant::now()));
+        assert!(footer(&mut busy).contains("esc again to interrupt"));
+        let mut perm = monitor_app(SessionStatus::Permission, false);
+        assert!(footer(&mut perm).contains("esc esc interrupt focused"));
+    }
+}
