@@ -266,27 +266,22 @@ async fn wait_signal() {
     }
 }
 
-/// Exit when no frontend is connected for long enough (see `--idle-timeout`). Busy sessions
-/// keep the daemon alive (background work is never killed by the idle timeout).
+/// Exit when no frontend is connected for long enough (see `--idle-timeout`).
+/// Strict semantics: open sessions do not keep the daemon alive (they are persisted and can be
+/// resumed later).
 async fn idle_watch(hub: Arc<Hub>, timeout: i64) {
     if timeout < 0 {
         return;
     }
     let started = Instant::now();
     let mut last_activity = Instant::now();
-    let mut tick = tokio::time::interval(Duration::from_millis(500));
+    let mut tick = tokio::time::interval(Duration::from_millis(200));
     loop {
         tokio::select! {
             _ = tick.tick() => {}
             _ = hub.shutdown.cancelled() => return,
         }
-        // Sessions doing work keep the daemon alive; ones only waiting for a permission
-        // decision (that nobody can give) don't.
-        let busy = hub.open_sessions().iter().any(|s| {
-            let st = s.st.lock();
-            st.turn.is_some() && st.permissions.is_empty()
-        });
-        if hub.client_count() > 0 || busy {
+        if hub.client_count() > 0 {
             last_activity = Instant::now();
             continue;
         }

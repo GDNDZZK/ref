@@ -170,9 +170,6 @@ fn draw_normal(buf: &mut Buffer, area: Rect, app: &mut App) {
     let mut chat_bottom = input_rect.y;
     // Permission panel above input.
     if let Some((req, n)) = app.pending_permission() {
-        if app.perm_since.as_ref().map(|(id, _)| *id != req.call_id).unwrap_or(true) {
-            app.perm_since = Some((req.call_id.clone(), std::time::Instant::now()));
-        }
         let max_h = ((chat_bottom.saturating_sub(y)) * 2 / 3).max(6);
         let r = perm_panel(buf, Rect { x: main.x, y, width: main.width, height: chat_bottom - y }, &req, n, max_h, app, false);
         chat_bottom = r.y;
@@ -221,6 +218,9 @@ fn draw_empty(buf: &mut Buffer, area: Rect, sv: &crate::state::SessionView) {
 
 /// Draw the permission panel at the bottom of `area` (max height `max_h`). Returns the rect used.
 pub fn perm_panel(buf: &mut Buffer, area: Rect, req: &PermissionRequest, n: usize, max_h: u16, app: &mut App, compact: bool) -> Rect {
+    if app.perm_since.as_ref().map(|(id, _)| *id != req.call_id).unwrap_or(true) {
+        app.perm_since = Some((req.call_id.clone(), std::time::Instant::now()));
+    }
     let w = area.width as usize;
     let inner_w = w.saturating_sub(4);
     let json = serde_json::to_string_pretty(&req.input).unwrap_or_default();
