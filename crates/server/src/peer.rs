@@ -182,7 +182,7 @@ impl Tool for ListSessions {
         if input.get("include_closed").and_then(|v| v.as_bool()).unwrap_or(false) {
             let closed: Vec<SessionInfo> = tokio::task::spawn_blocking(crate::persist::list_infos).await.unwrap_or_default();
             let mut closed: Vec<SessionInfo> = closed.into_iter().filter(|i| !open.iter().any(|o| o.id == i.id)).collect();
-            closed.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+            closed.sort_by_key(|i| std::cmp::Reverse(i.updated_at));
             if !closed.is_empty() {
                 lines.push(format!("Closed sessions (most recent {} of {}):", closed.len().min(30), closed.len()));
                 for i in closed.iter().take(30) {

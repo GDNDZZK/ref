@@ -69,7 +69,7 @@ pub fn render(src: &str, width: usize, base: Style) -> Vec<Line<'static>> {
         r.emit_code(&lang, &code);
     }
     // Trim trailing blank lines.
-    while r.out.last().is_some_and(|l| text::line_text(l).trim().is_empty()) {
+    while r.out.last().is_some_and(|l| text::line_text(l).trim().is_empty() && l.spans.iter().all(|s| s.style.bg.is_none())) {
         r.out.pop();
     }
     r.out
@@ -197,10 +197,18 @@ impl Renderer {
             }
             v
         };
-        let label = lang.split([',', ' ']).next().unwrap_or("").trim();
-        if !label.is_empty() {
-            let l = text::truncate(label, inner);
-            self.emit_line(pad(vec![Span::styled(l, Style::new().fg(theme::MUTED).bg(bg))]));
+        let label = lang.split([',', ' ', '{']).next().unwrap_or("").trim();
+        // Top padding row of the panel carries the language label, right-aligned and faint.
+        {
+            let l = text::truncate(label, inner.saturating_sub(1));
+            let lw = text::width(&l);
+            let lead = if lw > 0 { avail.saturating_sub(lw + 1) } else { avail };
+            let mut v = vec![Span::styled(" ".repeat(lead), base)];
+            if lw > 0 {
+                v.push(Span::styled(l, Style::new().fg(theme::FAINT).bg(bg)));
+                v.push(Span::styled(" ", base));
+            }
+            self.emit_line(v);
         }
         let mut hl = Highlighter::new(label);
         let code = code.strip_suffix('\n').unwrap_or(code);
@@ -227,6 +235,7 @@ impl Renderer {
                 self.emit_line(pad(row));
             }
         }
+        self.emit_line(vec![Span::styled(" ".repeat(avail), base)]);
         self.pending_gap = true;
     }
 
@@ -618,7 +627,8 @@ mod tests {
     #[test]
     fn code_block_has_panel_bg_and_full_width() {
         let lines = render("```rust\nfn main() {}\n```", 30, Style::default());
-        assert_eq!(lines.len(), 2); // label + code
+        assert_eq!(lines.len(), 3); // label/padding row + code + bottom padding
+        assert!(text::line_text(&lines[0]).trim_end().ends_with("rust"));
         for l in &lines {
             assert_eq!(l.width(), 30);
             assert!(l.spans.iter().all(|s| s.style.bg == Some(theme::PANEL)));

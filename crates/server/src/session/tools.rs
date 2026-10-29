@@ -92,6 +92,16 @@ impl Session {
         self.msgs_changed(&mut st);
     }
 
+    /// Like [`update_tool`](Self::update_tool) for transient state (live output): emitted but
+    /// not persisted on its own (the final result is).
+    pub(crate) fn update_tool_quiet(&self, msg_id: &str, index: usize, f: impl FnOnce(&mut ToolPart)) {
+        let st = &mut *self.lock();
+        let Some(mi) = st.msgs.iter().rposition(|m| m.id == msg_id) else { return };
+        let Some(Part::Tool(tp)) = st.msgs[mi].parts.get_mut(index) else { return };
+        f(tp);
+        let part = Part::Tool(tp.clone());
+        self.emit(st, Event::Part { message: msg_id.to_string(), index, part });
+    }
 }
 
 fn finish(ctx: &StepCtx, c: &CallSpec, state: ToolState, out: ToolOutput) {
@@ -190,7 +200,7 @@ pub async fn execute(ctx: Arc<StepCtx>, c: CallSpec) {
         tp.run_at = None;
         tp.output.clear();
     });
-    let live = Arc::new(Mutex::new(String::new()));
+    let live = Arc::new(Mutex::new(LiveBuf::default()));
     let live2 = live.clone();
     let tool_ctx = ToolCtx {
         cwd: ctx.cwd.clone(),
@@ -198,21 +208,21 @@ pub async fn execute(ctx: Arc<StepCtx>, c: CallSpec) {
         call_id: c.call_id.clone(),
         cancel: ctx.cancel.child_token(),
         store: ctx.session.store.clone(),
-        on_output: Arc::new(move |s: &str| {
-            crate::hub::lock(&live2).push_str(s);
-        }),
+        on_output: Arc::new(move |s: &str| crate::hub::lock(&live2).push(s)),
         image_input: ctx.image_input,
     };
     let name = c.name.clone();
     let mut handle = tokio::spawn(async move { tool.run(input, &tool_ctx).await });
-    let mut tick = tokio::time::interval(Duration::from_millis(50));
+    let mut tick = tokio::time::interval(LIVE_TICK);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut flusher = LiveFlusher::default();
     let result = loop {
         tokio::select! {
             r = &mut handle => break r,
-            _ = tick.tick() => flush_live(&ctx, &c, &live),
+            _ = tick.tick() => flusher.flush(&ctx, &c, &live, false),
         }
     };
-    flush_live(&ctx, &c, &live);
+    flusher.flush(&ctx, &c, &live, true);
     let (state, out) = match result {
         Ok(Ok(out)) => {
             if out.is_error {
@@ -237,22 +247,105 @@ pub async fn execute(ctx: Arc<StepCtx>, c: CallSpec) {
     finish(&ctx, &c, state, out);
 }
 
-/// Emit buffered live output as one Delta (and keep it in the part for snapshots).
-fn flush_live(ctx: &StepCtx, c: &CallSpec, live: &Mutex<String>) {
-    let chunk = std::mem::take(&mut *crate::hub::lock(live));
-    if chunk.is_empty() {
-        return;
-    }
-    let s = &ctx.session;
-    let mut st = s.lock();
-    let Some(mi) = st.msgs.iter().rposition(|m| m.id == c.msg_id) else { return };
-    if let Some(Part::Tool(tp)) = st.msgs[mi].parts.get_mut(c.index) {
-        // Bound memory for chatty commands; the final output replaces this anyway.
-        if tp.output.len() < 1_000_000 {
-            tp.output.push_str(&chunk);
+/// Live output flush interval (at most this many Delta events per second per tool, x20).
+const LIVE_TICK: Duration = Duration::from_millis(50);
+/// Live output streamed as Deltas, per call. Beyond this, the part shows a refreshed tail.
+pub const LIVE_STREAM_CAP: usize = 256 * 1024;
+/// Size of the tail shown once the stream cap is exceeded.
+pub const LIVE_TAIL: usize = 16 * 1024;
+/// Tail refresh interval in tail mode.
+const LIVE_TAIL_EVERY: Duration = Duration::from_secs(1);
+
+/// Output reported by a running tool, not yet flushed to clients. Bounded: once the total
+/// exceeds the stream cap only a tail is kept (`dropped` tells the flusher).
+#[derive(Default)]
+pub struct LiveBuf {
+    buf: String,
+    total: usize,
+    dropped: bool,
+}
+
+impl LiveBuf {
+    pub fn push(&mut self, s: &str) {
+        self.total += s.len();
+        self.buf.push_str(s);
+        if self.total > LIVE_STREAM_CAP && self.buf.len() > 4 * LIVE_TAIL {
+            keep_tail(&mut self.buf, LIVE_TAIL);
+            self.dropped = true;
         }
     }
-    s.emit(&st, Event::Delta { message: c.msg_id.clone(), index: c.index, field: DeltaField::ToolOutput, text: chunk });
+}
+
+/// Keep the last ~`n` bytes of `s` (on a char boundary).
+fn keep_tail(s: &mut String, n: usize) {
+    if s.len() > n {
+        let mut cut = s.len() - n;
+        while !s.is_char_boundary(cut) {
+            cut += 1;
+        }
+        s.drain(..cut);
+    }
+}
+
+/// Moves live output into the tool part: Deltas up to [`LIVE_STREAM_CAP`], then a tail that
+/// replaces the part output at most every [`LIVE_TAIL_EVERY`] (the final output replaces it).
+#[derive(Default)]
+struct LiveFlusher {
+    streamed: usize,
+    total: usize,
+    tail: Option<String>,
+    last_tail: Option<std::time::Instant>,
+}
+
+impl LiveFlusher {
+    fn flush(&mut self, ctx: &StepCtx, c: &CallSpec, live: &Mutex<LiveBuf>, last: bool) {
+        let (chunk, dropped, total) = {
+            let mut l = crate::hub::lock(live);
+            let d = std::mem::take(&mut l.dropped);
+            (std::mem::take(&mut l.buf), d, l.total)
+        };
+        self.total = total;
+        if self.tail.is_none() && !dropped && self.streamed + chunk.len() <= LIVE_STREAM_CAP {
+            if chunk.is_empty() {
+                return;
+            }
+            self.streamed += chunk.len();
+            let s = &ctx.session;
+            let mut st = s.lock();
+            let Some(mi) = st.msgs.iter().rposition(|m| m.id == c.msg_id) else { return };
+            if let Some(Part::Tool(tp)) = st.msgs[mi].parts.get_mut(c.index) {
+                tp.output.push_str(&chunk);
+            }
+            s.emit(&st, Event::Delta { message: c.msg_id.clone(), index: c.index, field: DeltaField::ToolOutput, text: chunk });
+            return;
+        }
+        // Tail mode.
+        let tail = self.tail.get_or_insert_with(String::new);
+        tail.push_str(&chunk);
+        keep_tail(tail, LIVE_TAIL);
+        let due = self.last_tail.is_none_or(|t| t.elapsed() >= LIVE_TAIL_EVERY);
+        if (chunk.is_empty() && !last) || (!due && !last) {
+            return;
+        }
+        self.last_tail = Some(std::time::Instant::now());
+        let text = format!(
+            "[live output: {} so far, showing the last {}]\n{}",
+            human_bytes(self.total),
+            human_bytes(tail.len()),
+            tail
+        );
+        ctx.session.update_tool_quiet(&c.msg_id, c.index, |tp| tp.output = text);
+    }
+}
+
+fn human_bytes(n: usize) -> String {
+    if n >= 1 << 20 {
+        format!("{:.1} MB", n as f64 / (1 << 20) as f64)
+    } else if n >= 1 << 10 {
+        format!("{:.1} KB", n as f64 / 1024.0)
+    } else {
+        format!("{n} B")
+    }
 }
 
 async fn ask_permission(ctx: &StepCtx, c: &CallSpec) -> Option<PermissionDecision> {

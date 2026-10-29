@@ -22,7 +22,7 @@ pub fn system(config: &Config, info: &SessionInfo, mcp_instructions: &[(String, 
     }
     parts.push(base);
 
-    // 2. Project context: MCP instructions, skills, instruction files, identity, agents.
+    // 2. Project context: MCP instructions, skills, instruction files, spawnable agents.
     let mut ctx: Vec<String> = Vec::new();
     for (server, text) in mcp_instructions {
         if !text.trim().is_empty() {
@@ -38,10 +38,6 @@ pub fn system(config: &Config, info: &SessionInfo, mcp_instructions: &[(String, 
     for (path, content) in config.instruction_files(Path::new(&info.cwd)) {
         ctx.push(format!("Instructions from: {}\n{}", path.display(), content));
     }
-    ctx.push(format!(
-        "You are session id {} in this Hernees instance. Other sessions can message you; use list_sessions / send_message to communicate with them.",
-        info.id
-    ));
     if has("create_session") {
         let agents: Vec<String> = config
             .agent_infos()
@@ -61,12 +57,14 @@ pub fn system(config: &Config, info: &SessionInfo, mcp_instructions: &[(String, 
     }
     parts.push(ctx.join("\n\n"));
 
-    // 3. Environment (date: day granularity).
+    // 3. Per-session part, last so parts 1-2 form a prefix shared by every session of the
+    // project (cacheable across sessions): session identity + environment (day-granular date).
     let root = config.root.to_string_lossy().into_owned();
     let root = if root.is_empty() { info.cwd.clone() } else { root };
     let git = Path::new(&root).join(".git").exists();
     parts.push(format!(
-        "Here is some useful information about the environment you are running in:\n<env>\n  Working directory: {}\n  Workspace root folder: {}\n  Is directory a git repo: {}\n  Platform: {}\n  Today's date: {}\n</env>",
+        "You are session id {} in this Hernees instance. Other sessions can message you; use list_sessions / send_message to communicate with them.\n\nHere is some useful information about the environment you are running in:\n<env>\n  Working directory: {}\n  Workspace root folder: {}\n  Is directory a git repo: {}\n  Platform: {}\n  Today's date: {}\n</env>",
+        info.id,
         info.cwd,
         root,
         if git { "yes" } else { "no" },

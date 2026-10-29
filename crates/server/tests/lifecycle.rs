@@ -123,3 +123,43 @@ async fn background_watch_and_reattach_after_restart() {
     fg.req(ClientMsg::Delete { session: s.id.clone() }).await.unwrap();
     assert!(!env.path("data/sessions").join(&s.id).exists());
 }
+
+#[tokio::test]
+async fn positive_idle_timeout_starts_after_first_frontend() {
+    let mock = Mock::start(Arc::new(|_r: &Req| text("x"))).await;
+    let env = Env::new(mock.port, json!({}));
+    let mut srv = env.spawn(&["--idle-timeout", "1"]);
+    // No frontend yet: the timer has not started.
+    assert!(srv.wait_exit(Duration::from_millis(2500)).await.is_none(), "exited before any frontend connected");
+    // A --status probe is not a frontend and does not start or stop the timer.
+    let out = env.command().arg("--status").output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert!(srv.wait_exit(Duration::from_millis(1500)).await.is_none());
+    let c = Client::connect(&srv.url(), &env.work()).await;
+    assert!(srv.wait_exit(Duration::from_millis(1500)).await.is_none(), "exited while a frontend is connected");
+    c.close();
+    let st = srv.wait_exit(Duration::from_secs(10)).await.expect("exit ~1s after the last frontend left");
+    assert!(st.success());
+}
+
+#[tokio::test]
+async fn watch_only_monitor_keeps_server_alive_but_is_not_foreground() {
+    // A watch-only monitor is still a frontend for the idle timer (it is connected), but
+    // does not make the session foreground.
+    let mock = Mock::start(Arc::new(|_r: &Req| text("x"))).await;
+    let env = Env::new(mock.port, json!({}));
+    let mut srv = env.spawn(&["--idle-timeout", "0"]);
+    let mut a = Client::connect(&srv.url(), &env.work()).await;
+    let s = a.create(&env.work(), None).await;
+    let mut mon = Client::connect(&srv.url(), &env.work()).await;
+    mon.req(ClientMsg::WatchBackground { enabled: true }).await.unwrap();
+    let (i, _) = mon.snapshot(&s.id).await;
+    assert_eq!(i.attached, 1);
+    a.close();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let (i, _) = mon.snapshot(&s.id).await;
+    assert_eq!(i.attached, 0, "watch-only attachment is not foreground");
+    assert!(srv.wait_exit(Duration::from_millis(300)).await.is_none());
+    mon.close();
+    assert!(srv.wait_exit(Duration::from_secs(10)).await.is_some());
+}

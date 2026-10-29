@@ -12,6 +12,7 @@ use axum::Router;
 use futures::{SinkExt, StreamExt};
 use hn_proto::*;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -90,18 +91,22 @@ async fn ws_handler(
 
 async fn client_loop(socket: WebSocket, hub: Arc<Hub>) {
     let (mut sink, mut stream) = socket.split();
-    let (tx, mut rx) = mpsc::unbounded_channel::<ServerMsg>();
+    let (tx, mut rx) = mpsc::unbounded_channel::<crate::hub::Frame>();
     let cid = hub.add_client(tx);
     tracing::info!("client {cid} connected");
     let writer = tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await {
-            let Ok(text) = serde_json::to_string(&msg) else { continue };
-            if sink.send(WsMessage::Text(text.into())).await.is_err() {
+        while let Some(frame) = rx.recv().await {
+            if sink.send(WsMessage::Text((*frame).into())).await.is_err() {
                 break;
             }
         }
         let _ = sink.close().await;
     });
+    // Requests are handled concurrently, but those of one connection that target the same
+    // session (or no session) run in arrival order: prompt-then-abort, undo-then-prompt and
+    // consecutive prompts must keep their order. A slow request (undo waiting for an abort)
+    // only delays later requests for the same session. The reader never blocks.
+    let mut chains: HashMap<String, tokio::task::JoinHandle<()>> = HashMap::new();
     while let Some(frame) = stream.next().await {
         let text = match frame {
             Ok(WsMessage::Text(t)) => t.to_string(),
@@ -111,13 +116,19 @@ async fn client_loop(socket: WebSocket, hub: Arc<Hub>) {
         };
         match serde_json::from_str::<Request>(&text) {
             Ok(req) => {
-                // Handle concurrently so slow requests (attach from disk, undo) don't block.
+                chains.retain(|_, h| !h.is_finished());
+                let key = order_key(&req.msg);
+                let prev = chains.remove(&key);
                 let hub = hub.clone();
-                tokio::spawn(async move {
+                let h = tokio::spawn(async move {
+                    if let Some(p) = prev {
+                        let _ = p.await;
+                    }
                     if let Some(resp) = handle(&hub, cid, req).await {
                         hub.send_to(cid, resp);
                     }
                 });
+                chains.insert(key, h);
             }
             Err(e) => {
                 let id = serde_json::from_str::<Value>(&text).ok().and_then(|v| v.get("id").and_then(|i| i.as_u64())).unwrap_or(0);
@@ -125,9 +136,32 @@ async fn client_loop(socket: WebSocket, hub: Arc<Hub>) {
             }
         }
     }
+    // Requests already received still run (their effects are wanted); responses are dropped.
     hub.remove_client(cid);
     writer.abort();
     tracing::info!("client {cid} disconnected ({} frontend(s) left)", hub.client_count());
+}
+
+/// Ordering domain of a request: its session id, or "" for connection-level requests.
+fn order_key(msg: &ClientMsg) -> String {
+    match msg {
+        ClientMsg::Attach { session, .. }
+        | ClientMsg::Detach { session }
+        | ClientMsg::Prompt { session, .. }
+        | ClientMsg::Command { session, .. }
+        | ClientMsg::Abort { session }
+        | ClientMsg::Permission { session, .. }
+        | ClientMsg::SetModel { session, .. }
+        | ClientMsg::SetAgent { session, .. }
+        | ClientMsg::Rename { session, .. }
+        | ClientMsg::Compact { session }
+        | ClientMsg::Undo { session }
+        | ClientMsg::Close { session }
+        | ClientMsg::Delete { session }
+        | ClientMsg::ListCommands { session }
+        | ClientMsg::Export { session } => format!("s:{session}"),
+        _ => String::new(),
+    }
 }
 
 fn ok(id: u64, v: impl serde::Serialize) -> Option<ServerMsg> {

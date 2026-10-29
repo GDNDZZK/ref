@@ -46,6 +46,10 @@ impl App {
                 self.open_palette();
                 return;
             }
+            KeyCode::Char('t') if ctrl(&k) => {
+                self.cycle_variant();
+                return;
+            }
             KeyCode::F(2) => {
                 self.toggle_mouse();
                 return;
@@ -128,8 +132,15 @@ impl App {
             match k.code {
                 KeyCode::Enter | KeyCode::Char(' ') if k.modifiers.is_empty() || k.modifiers == KeyModifiers::SHIFT => {
                     let id = self.active().unwrap();
+                    let top = self.docs.get(&id).and_then(|d| d.target_rows(&t)).map(|x| x.0);
                     let v = self.views.entry(id).or_default();
-                    v.toggle(&t);
+                    match top {
+                        Some(a) if a >= v.scroll && a < v.scroll + v.viewport => {
+                            let r = a - v.scroll;
+                            v.toggle_anchored(&t, r)
+                        }
+                        _ => v.toggle(&t),
+                    }
                     return;
                 }
                 KeyCode::Esc => {
@@ -721,7 +732,8 @@ impl App {
                 match h {
                     Some(Hit::Toggle(t)) => {
                         let v = self.views.entry(sid.clone()).or_default();
-                        v.toggle(&t);
+                        let top = self.docs.get(&sid).and_then(|d| d.target_rows(&t)).map(|x| x.0).unwrap_or(row);
+                        v.toggle_anchored(&t, top.saturating_sub(v.scroll));
                         v.focus = Some(t);
                         v.selection = None;
                     }

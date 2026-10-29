@@ -83,7 +83,9 @@ fn spawn_server(exe: &Path, port: u16) -> anyhow::Result<PathBuf> {
     let log_path = logs.join(format!("server-{}.log", chrono::Local::now().format("%Y%m%d-%H%M%S")));
     let log = std::fs::OpenOptions::new().create(true).append(true).open(&log_path)?;
     let mut cmd = Command::new(exe);
-    cmd.args(["--port", &port.to_string(), "--idle-timeout", "0"])
+    // Exit shortly after the last frontend leaves; the few seconds of grace avoid a
+    // restarting TUI connecting to a backend that is already shutting down.
+    cmd.args(["--port", &port.to_string(), "--idle-timeout", "5"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::from(log));

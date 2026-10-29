@@ -93,6 +93,8 @@ pub struct State {
     pub closed: bool,
     /// MCP connections were (re)tried for this session already.
     pub mcp_tried: bool,
+    /// Persistence snapshot counter.
+    snap_seq: u64,
 }
 
 pub struct Session {
@@ -103,6 +105,8 @@ pub struct Session {
     persist_kick: Arc<Notify>,
     busy_tx: watch::Sender<bool>,
     pub store: Arc<hn_tools::EditStore>,
+    /// Serializes disk writes; see [`Session::write_snapshot`].
+    disk: Mutex<DiskSeq>,
 }
 
 impl Session {
@@ -132,11 +136,13 @@ impl Session {
                 msgs_dirty: false,
                 closed: false,
                 mcp_tried: false,
+                snap_seq: 0,
             }),
             kick: Notify::new(),
             persist_kick: Arc::new(Notify::new()),
             busy_tx,
             store: Arc::new(hn_tools::EditStore::new()),
+            disk: Mutex::new(DiskSeq::default()),
         });
         tokio::spawn(runtime(s.clone()));
         tokio::spawn(persister(Arc::downgrade(&s), s.persist_kick.clone()));
@@ -406,22 +412,45 @@ impl Session {
         self.flush_now();
         hub.remove_session(&self.id);
         for tx in hub.detach_all(&self.id) {
-            let _ = tx.send(ServerMsg::Event { session: self.id.clone(), event: Event::Closed });
+            let _ = tx.send(crate::hub::encode(&ServerMsg::Event { session: self.id.clone(), event: Event::Closed }));
         }
         hub.touch();
     }
 
+    /// Take the dirty state for writing (clears the dirty flags).
+    fn take_dirty(&self) -> Snapshot {
+        let mut st = self.lock();
+        st.snap_seq += 1;
+        let snap = Snapshot {
+            seq: st.snap_seq,
+            info: st.info_dirty.then(|| st.info.clone()),
+            msgs: st.msgs_dirty.then(|| st.msgs.clone()),
+            meta: st.meta.clone(),
+        };
+        st.info_dirty = false;
+        st.msgs_dirty = false;
+        snap
+    }
+
+    /// Write a snapshot unless a newer one was already written (writes from the debounced
+    /// persister and from close/shutdown may race; the newest state must win on disk).
+    fn write_snapshot(&self, snap: Snapshot) {
+        let mut disk = lock(&self.disk);
+        let msgs = snap.msgs.filter(|_| snap.seq > disk.msgs);
+        let info = snap.info.filter(|_| snap.seq > disk.info);
+        if msgs.is_some() {
+            disk.msgs = snap.seq;
+        }
+        if info.is_some() {
+            disk.info = snap.seq;
+        }
+        write_out(&self.id, info.as_ref(), msgs.as_deref(), &snap.meta);
+    }
+
     /// Synchronous flush (used on close / shutdown).
     pub fn flush_now(&self) {
-        let (info, msgs, meta) = {
-            let mut st = self.lock();
-            let info = st.info_dirty.then(|| st.info.clone());
-            let msgs = st.msgs_dirty.then(|| st.msgs.clone());
-            st.info_dirty = false;
-            st.msgs_dirty = false;
-            (info, msgs, st.meta.clone())
-        };
-        write_out(&self.id, info.as_ref(), msgs.as_deref(), &meta);
+        let snap = self.take_dirty();
+        self.write_snapshot(snap);
     }
 
     /// Called on server exit: in-flight work is marked aborted and everything is written.
@@ -503,24 +532,30 @@ fn write_out(id: &str, info: Option<&SessionInfo>, msgs: Option<&[Message]>, met
     }
 }
 
+struct Snapshot {
+    seq: u64,
+    info: Option<SessionInfo>,
+    msgs: Option<Vec<Message>>,
+    meta: SessionMeta,
+}
+
+/// Sequence numbers of the snapshots last written to disk.
+#[derive(Default)]
+struct DiskSeq {
+    info: u64,
+    msgs: u64,
+}
+
 /// Debounced persistence (~300ms after the last change).
 async fn persister(s: Weak<Session>, kick: Arc<Notify>) {
     loop {
         kick.notified().await;
         tokio::time::sleep(Duration::from_millis(300)).await;
         let Some(sess) = s.upgrade() else { return };
-        let (info, msgs, meta, closed) = {
-            let mut st = sess.lock();
-            let info = st.info_dirty.then(|| st.info.clone());
-            let msgs = st.msgs_dirty.then(|| st.msgs.clone());
-            st.info_dirty = false;
-            st.msgs_dirty = false;
-            (info, msgs, st.meta.clone(), st.closed)
-        };
-        let id = sess.id.clone();
-        drop(sess);
-        if info.is_some() || msgs.is_some() {
-            let _ = tokio::task::spawn_blocking(move || write_out(&id, info.as_ref(), msgs.as_deref(), &meta)).await;
+        let snap = sess.take_dirty();
+        let closed = sess.lock().closed;
+        if snap.info.is_some() || snap.msgs.is_some() {
+            let _ = tokio::task::spawn_blocking(move || sess.write_snapshot(snap)).await;
         }
         if closed {
             return;

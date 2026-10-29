@@ -352,15 +352,22 @@ fn build_messages(req: &ChatRequest) -> Vec<Value> {
     out.into_iter().map(|(role, content)| serde_json::json!({"role": role, "content": content})).collect()
 }
 
-/// Place up to 4 ephemeral cache breakpoints: last tool, last system block, and the last block
-/// of the last two user messages.
+/// Place up to 4 ephemeral cache breakpoints (cache order is tools → system → messages):
+/// - the second-to-last system block: callers put per-conversation data (session id, env)
+///   in the last block, so this prefix (tools + shared instructions) is reusable by other
+///   conversations; with a single system block, the last tool instead;
+/// - the last system block;
+/// - the last block of the last two user messages.
 fn apply_cache_control(tools: &mut [Value], system: &mut [Value], messages: &mut [Value]) {
     let mark = |v: &mut Value| {
         if let Value::Object(o) = v {
             o.insert("cache_control".into(), serde_json::json!({"type": "ephemeral"}));
         }
     };
-    if let Some(t) = tools.last_mut() {
+    let n = system.len();
+    if n >= 2 {
+        mark(&mut system[n - 2]);
+    } else if let Some(t) = tools.last_mut() {
         mark(t);
     }
     if let Some(s) = system.last_mut() {
@@ -764,8 +771,15 @@ data: {"type":"message_stop"}
         // Cache breakpoints.
         let count = b.to_string().matches("cache_control").count();
         assert_eq!(count, 4);
-        assert!(b["tools"][1].get("cache_control").is_some() && b["tools"][0].get("cache_control").is_none());
-        assert!(b["system"][1].get("cache_control").is_some() && b["system"][0].get("cache_control").is_none());
+        // Two system blocks: both marked (shared prefix + per-conversation tail); the system
+        // breakpoint already covers the tools.
+        assert!(b["tools"][1].get("cache_control").is_none() && b["tools"][0].get("cache_control").is_none());
+        assert!(b["system"][1].get("cache_control").is_some() && b["system"][0].get("cache_control").is_some());
+        // A single system block: the last tool gets the extra breakpoint.
+        let one = ChatRequest { system: vec!["only".into()], ..req.clone() };
+        let b1 = build_body(&s, &one);
+        assert!(b1["tools"][1].get("cache_control").is_some());
+        assert_eq!(b1.to_string().matches("cache_control").count(), 4);
         assert!(u[2].get("cache_control").is_some());
         assert!(msgs[4]["content"][0].get("cache_control").is_some());
         assert!(msgs[0]["content"][0].get("cache_control").is_none());

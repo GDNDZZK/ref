@@ -30,6 +30,11 @@ pub struct ListItem {
     pub dot: Option<(String, Color)>,
     pub current: bool,
     pub value: DValue,
+    /// Extra searchable text (ids etc.), not displayed.
+    pub keys: String,
+    /// Sub-row of a parent item (e.g. a model variant): drawn indented under it,
+    /// or as `parent · label` when the list is filtered.
+    pub parent: Option<String>,
 }
 
 impl ListItem {
@@ -42,7 +47,17 @@ impl ListItem {
             dot: None,
             current: false,
             value,
+            keys: String::new(),
+            parent: None,
         }
+    }
+    pub fn keys(mut self, k: impl Into<String>) -> Self {
+        self.keys = k.into();
+        self
+    }
+    pub fn parent(mut self, p: impl Into<String>) -> Self {
+        self.parent = Some(p.into());
+        self
     }
     pub fn desc(mut self, d: impl Into<String>) -> Self {
         self.desc = d.into();
@@ -105,6 +120,10 @@ pub struct Dialog {
 enum DRow {
     Header(String),
     Item(usize),
+}
+
+fn text_contains(hay: &str, needle: &str) -> bool {
+    hay.to_lowercase().contains(&needle.to_lowercase())
 }
 
 /// Case-insensitive fuzzy subsequence score (higher is better).
@@ -203,14 +222,38 @@ impl Dialog {
         if q.is_empty() {
             self.filtered = (0..self.items.len()).collect();
         } else {
+            let terms: Vec<&str> = q.split_whitespace().collect();
             let mut scored: Vec<(i32, usize)> = self
                 .items
                 .iter()
                 .enumerate()
                 .filter_map(|(i, it)| {
-                    let a = fuzzy(&q, &it.label).map(|s| s + 20);
-                    let b = fuzzy(&q, &format!("{} {} {}", it.label, it.group, it.desc));
-                    a.max(b).map(|s| (s, i))
+                    let label = match &it.parent {
+                        Some(p) => format!("{p} {}", it.label),
+                        None => it.label.clone(),
+                    };
+                    let hay = format!("{label} {} {} {}", it.group, it.desc, it.keys);
+                    // Whole query against the label first (keeps "cop" → "claude-opus" style matches).
+                    let whole = fuzzy(&q, &label).map(|s| s + 20);
+                    // Every whitespace-separated term must match somewhere.
+                    let mut sum = 0;
+                    let mut all = true;
+                    for t in &terms {
+                        let best = [&label, &it.group, &it.desc, &it.keys]
+                            .iter()
+                            .filter_map(|h| fuzzy(t, h).map(|s| if text_contains(h, t) { s + 30 } else { s }))
+                            .max()
+                            .or_else(|| fuzzy(t, &hay));
+                        match best {
+                            Some(s) => sum += s,
+                            None => {
+                                all = false;
+                                break;
+                            }
+                        }
+                    }
+                    let multi = all.then_some(sum);
+                    whole.max(multi).map(|s| (s, i))
                 })
                 .collect();
             scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
@@ -470,7 +513,18 @@ fn draw_item(it: &ListItem, selected: bool, confirm: bool, flat: bool, x: u16, y
     if it.current {
         label_style = label_style.add_modifier(Modifier::BOLD);
     }
-    left.push(Span::styled(it.label.clone(), label_style));
+    match &it.parent {
+        Some(p) if flat => {
+            left.push(Span::styled(p.clone(), Style::new().fg(fg)));
+            left.push(Span::styled(" · ", Style::new().fg(sub)));
+            left.push(Span::styled(it.label.clone(), label_style));
+        }
+        Some(_) => {
+            left.push(Span::styled("  · ", Style::new().fg(sub)));
+            left.push(Span::styled(it.label.clone(), label_style));
+        }
+        None => left.push(Span::styled(it.label.clone(), label_style)),
+    }
     if it.current {
         left.push(Span::styled(" ●", Style::new().fg(if selected { fg } else { theme::PRIMARY })));
     }
@@ -518,6 +572,23 @@ mod tests {
         assert!(fuzzy("cop", "claude-opus").is_some());
         assert!(fuzzy("xyz", "claude").is_none());
         assert!(fuzzy("new", "new").unwrap() > fuzzy("new", "rename window").unwrap_or(-100));
+    }
+
+    #[test]
+    fn multi_term_filter() {
+        let items = vec![
+            ListItem::new("DGN", "Claude Sonnet 5.5", DValue::None).keys("dgn/claude-sonnet-5.5"),
+            ListItem::new("DGN", "high", DValue::Command("x".into())).parent("Claude Sonnet 5.5").keys("dgn/claude-sonnet-5.5#high"),
+            ListItem::new("DGN", "high", DValue::None).parent("Claude Opus 5.5").keys("dgn/claude-opus-5.5#high"),
+            ListItem::new("Zai", "glm-5.3", DValue::None).keys("zai/glm-5.3"),
+        ];
+        let mut d = Dialog::list(DKind::Models, "Models", items);
+        d.paste("dgn sonnet high");
+        assert_eq!(d.filtered.len(), 1);
+        assert_eq!(d.selected().unwrap().value, DValue::Command("x".into()));
+        d.query.clear();
+        d.paste("glm");
+        assert_eq!(d.selected().unwrap().label, "glm-5.3");
     }
 
     #[test]
