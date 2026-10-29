@@ -59,10 +59,20 @@ pub async fn create_session(hub: &Arc<Hub>, o: CreateOpts) -> Result<Arc<Session
         tracing::warn!("config: {w}");
     }
     let agent = match o.agent.filter(|a| !a.trim().is_empty()) {
+        Some(a) if a == ref_config::COMPACTION_AGENT => {
+            return Err(format!("Agent {a} is internal and cannot run a session."));
+        }
         Some(a) if cfg.agents.contains_key(&a) => a,
         Some(a) => return Err(format!("Unknown agent: {a}")),
-        None if cfg.agents.contains_key(&cfg.default_agent) => cfg.default_agent.clone(),
-        None => cfg.agents.keys().next().cloned().unwrap_or_else(|| "build".into()),
+        None if cfg.default_agent != ref_config::COMPACTION_AGENT && cfg.agents.contains_key(&cfg.default_agent) => {
+            cfg.default_agent.clone()
+        }
+        None => cfg
+            .agents
+            .values()
+            .find(|a| !a.hidden && a.name != ref_config::COMPACTION_AGENT)
+            .map(|a| a.name.clone())
+            .unwrap_or_else(|| "build".into()),
     };
     let model = match o.model {
         Some(m) => {
@@ -123,7 +133,7 @@ pub async fn create_session(hub: &Arc<Hub>, o: CreateOpts) -> Result<Arc<Session
     let cfg = Arc::new(cfg);
     // Start connecting MCP servers in the background.
     let _ = hub.mcp.servers_for(&cfg);
-    let s = Session::new(info, Vec::new(), cfg, false);
+    let s = Session::new(info, Vec::new(), cfg, false, false);
     hub.insert_session(s.clone());
     tracing::info!(session = %s.id, "session created");
     Ok(s)
@@ -159,20 +169,14 @@ pub async fn get_or_load(hub: &Arc<Hub>, id: &str) -> Result<Arc<Session>, Strin
     p.info.context = ctx;
     let cfg = Arc::new(cfg);
     let _ = hub.mcp.servers_for(&cfg);
-    let s = Session::new(p.info, p.messages, cfg, p.reported);
+    let s = Session::new(p.info, p.messages, cfg, p.reported, p.context_notice);
     hub.insert_session(s.clone());
     Ok(s)
 }
 
-/// Write the session to disk (skips sessions that never had a message).
+/// Queue an (incremental) save of the session; sessions that never had a message are skipped.
 pub fn persist(hub: &Hub, s: &Session) {
-    let p = s.persisted();
-    if p.messages.is_empty() && !hub.store.exists(&p.info.id) {
-        return;
-    }
-    if let Err(e) = hub.store.save(&p) {
-        tracing::warn!(session = %s.id, "persisting session failed: {e}");
-    }
+    hub.store.save(s.persisted());
 }
 
 /// Abort, persist and unload a live session.
@@ -195,6 +199,10 @@ pub async fn shutdown_all(hub: &Arc<Hub>) {
     for s in &all {
         crate::engine::wait_idle(s, Duration::from_secs(5)).await;
         persist(hub, s);
+    }
+    let store = hub.store.clone();
+    if let Ok(Err(e)) = tokio::task::spawn_blocking(move || store.flush()).await {
+        tracing::warn!("flushing the session store failed: {e}");
     }
     hub.mcp.close_all().await;
 }

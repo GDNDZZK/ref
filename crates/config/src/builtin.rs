@@ -23,6 +23,34 @@ Guidelines:
 
 Complete the user's search request efficiently and report your findings clearly.";
 
+/// Default system prompt of the hidden `compaction` agent.
+pub const COMPACTION_PROMPT: &str = "You compact conversations between a user and a coding agent. When asked, summarize the conversation so far into a structured summary that will be given to another agent (with no other memory) to continue the work.
+
+Use this format (omit sections that do not apply):
+
+## Goal
+- What the user is trying to accomplish.
+
+## Instructions and constraints
+- Requirements, preferences and scope boundaries stated by the user.
+
+## Discoveries
+- Facts learned that are needed to continue (exact paths, symbols, commands, error strings).
+
+## Accomplished
+- What has been completed.
+
+## In progress
+- What was being worked on when the summary was made, and its exact state.
+
+## Next steps
+1. Ordered list of next actions.
+
+## Relevant files
+- `path`: why it matters (at most 15, most important first).
+
+Rules: be concise (terse single-line bullets), preserve exact identifiers, carry forward unanswered user requests verbatim, mention whether changes are uncommitted/committed. Do not continue the task and do not call tools. Reply with the summary only.";
+
 /// Built-in agents (before user definitions are merged in).
 pub fn agents() -> Vec<AgentConfig> {
     vec![
@@ -62,6 +90,16 @@ pub fn agents() -> Vec<AgentConfig> {
             creatable: true,
             can_spawn: false,
             mode: "subagent".into(),
+            ..Default::default()
+        },
+        AgentConfig {
+            name: "compaction".into(),
+            description: "Summarizes the conversation when the context is compacted (/compact, automatic).".into(),
+            prompt: COMPACTION_PROMPT.into(),
+            creatable: false,
+            can_spawn: false,
+            mode: "primary".into(),
+            hidden: true,
             ..Default::default()
         },
     ]

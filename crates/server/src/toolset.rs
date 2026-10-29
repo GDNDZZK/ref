@@ -101,9 +101,9 @@ pub fn harness_defs() -> Vec<ToolDef> {
         ),
         def(
             "compact_context",
-            "Discard the conversation history and continue with only the given summary. Use when the context is large (see context_window) or the history is no longer relevant. The summary must contain everything needed to continue: the user's goals and constraints, decisions made, current state, files touched, and next steps.",
+            "Drop the conversation history from your context and continue with only the given summary (the user still sees the full transcript). Use when the context is large (see context_window) or the history is no longer relevant. The summary must contain everything needed to continue: the user's goals and constraints, decisions made, current state, files touched, and next steps.",
             json!({"type": "object", "properties": {
-                "summary": {"type": "string", "description": "Complete summary that replaces the conversation history."}
+                "summary": {"type": "string", "description": "Complete summary that replaces the conversation history in your context."}
             }, "required": ["summary"]}),
         ),
     ]
@@ -260,7 +260,7 @@ fn harness(hub: &Arc<Hub>, s: &Arc<Session>, name: &str, input: &Value) -> ToolO
                 return ToolOutput::err("Error: summary must not be empty.");
             }
             s.lock().pending_compact = Some(summary);
-            ToolOutput::ok("The conversation history will be replaced by your summary after this batch of tool calls.")
+            ToolOutput::ok("After this batch of tool calls your context will be replaced by your summary.")
         }
         _ => ToolOutput::err(format!("Unknown tool: {name}")),
     }

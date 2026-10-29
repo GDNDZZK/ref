@@ -32,6 +32,11 @@ pub struct Ctx<'a> {
     pub compact: bool,
     /// Agent of the session (user bar colour).
     pub session_agent: &'a str,
+    /// Message precedes the last compaction: still shown, but no longer sent to the model.
+    pub stale: bool,
+    /// This is the last compaction message and older messages precede it (the model's context
+    /// starts here).
+    pub context_start: bool,
 }
 
 impl Ctx<'_> {
@@ -48,10 +53,68 @@ const PAD: usize = 2;
 
 pub fn render(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
     let w = w.max(20);
-    match m.role {
+    let mut rows = match m.role {
         Role::User => render_user(m, cx, w),
         Role::Assistant => render_assistant(m, cx, w),
+    };
+    if cx.stale {
+        dim_rows(&mut rows);
     }
+    rows
+}
+
+/// How much text before the last compaction is faded towards the background.
+pub const STALE_DIM: f32 = 0.3;
+
+/// Fades foreground colours (backgrounds and click zones are kept).
+pub fn dim_rows(rows: &mut [Row]) {
+    let dark = Color::Rgb(0, 0, 0);
+    for r in rows {
+        for s in &mut r.line.spans {
+            let fg = match s.style.fg {
+                None | Some(Color::Reset) => theme::TEXT,
+                Some(c) => c,
+            };
+            s.style.fg = Some(theme::blend(fg, dark, STALE_DIM));
+        }
+    }
+}
+
+/// Text of the hint under the divider where the model's context starts.
+pub const CONTEXT_HINT: &str = "messages above stay visible but are no longer sent to the model";
+
+/// Full-width `──── ◇ Context compacted · 14:02:11 · click to view summary ──── ⧉ copy` row.
+fn compaction_divider(m: &Message, exp: bool, w: usize) -> Row {
+    let total = w.saturating_sub(1).max(20);
+    let bst = theme::fg(theme::BORDER);
+    let time = text::fmt_time(m.time);
+    let right = vec![Span::raw(" "), copy_button(false)];
+    let rw = spans_width(&right);
+    let head = |hint: bool| {
+        let mut v = vec![
+            Span::styled(if exp { "▾ " } else { "▸ " }, theme::fg(theme::DIM)),
+            Span::styled("──── ", bst),
+            Span::styled("◇ ", theme::fg(theme::ACCENT)),
+            Span::styled("Context compacted", theme::bold(theme::ACCENT)),
+            Span::styled(format!(" · {time}"), theme::muted()),
+        ];
+        if hint {
+            v.push(Span::styled(if exp { " · click to hide summary" } else { " · click to view summary" }, theme::muted()));
+        }
+        v.push(Span::raw(" "));
+        v
+    };
+    let mut left = head(true);
+    if spans_width(&left) + rw + 4 > total {
+        left = head(false);
+    }
+    let left = truncate_spans(left, total.saturating_sub(rw));
+    let fill = total.saturating_sub(spans_width(&left) + rw);
+    let mut spans = left;
+    spans.push(Span::styled("─".repeat(fill), bst));
+    spans.extend(right);
+    let x0 = (total - 6) as u16;
+    Row::new(Line::from(spans)).decor().zone(x0, x0 + 6, Hit::Copy { msg: m.id.clone() }).hit(Hit::Toggle { msg: m.id.clone(), part: 0 })
 }
 
 // ---------------------------------------------------------------------------
@@ -164,27 +227,15 @@ fn render_user(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
         return render_user_compact(m, cx, w, bar_color);
     }
 
-    // Compaction: collapsed block.
+    // Compaction: full-width divider (expandable summary below it).
     if m.source == MessageSource::Compaction {
         let exp = cx.expanded(0, false);
-        let icon = if exp { "▾ " } else { "▸ " };
-        let left = vec![
-            Span::styled(icon, theme::fg(theme::DIM)),
-            Span::styled("◇ ", theme::fg(theme::ACCENT)),
-            Span::styled("Context compacted", theme::bold(theme::ACCENT)),
-            Span::styled(if exp { "" } else { "  · click to view summary" }, theme::muted()),
-        ];
-        let right = vec![Span::styled(time.clone(), theme::muted()), Span::raw("  "), copy_button(false)];
-        // Same geometry as assistant rows (2-col indent, right edge at w-1).
-        let (line, rx) = compose(left, right, w.saturating_sub(PAD + 1));
-        let x0 = (rx + width(&time) + 2) as u16;
-        let mut rows = vec![
-            Row::new(line)
-                .decor()
-                .zone(x0, x0 + 6, Hit::Copy { msg: m.id.clone() })
-                .hit(Hit::Toggle { msg: m.id.clone(), part: 0 })
-                .indent(vec![Span::raw(" ".repeat(PAD))]),
-        ];
+        let mut rows = vec![compaction_divider(m, exp, w)];
+        if cx.context_start {
+            let hint = text::truncate(CONTEXT_HINT, w.saturating_sub(4));
+            let pad = w.saturating_sub(1 + width(&hint)) / 2;
+            rows.push(Row::new(Line::from(vec![Span::raw(" ".repeat(pad)), Span::styled(hint, theme::fg(theme::DIM).add_modifier(Modifier::ITALIC))])).decor());
+        }
         if exp {
             for r in markdown::render(&raw, w.saturating_sub(PAD + 4), theme::muted()) {
                 rows.push(r.indent(vec![Span::raw(" ".repeat(PAD)), Span::styled("│ ", theme::fg(theme::ACCENT)), Span::raw(" ")]));
@@ -297,6 +348,23 @@ fn render_user(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
 }
 
 fn render_user_compact(m: &Message, _cx: &Ctx<'_>, w: usize, color: Color) -> Vec<Row> {
+    if m.source == MessageSource::Compaction {
+        // Compact divider: `── ◇ compacted 14:02:11 ─────`.
+        let bst = theme::fg(theme::BORDER);
+        let left = truncate_spans(
+            vec![
+                Span::styled("── ", bst),
+                Span::styled("◇ ", theme::fg(theme::ACCENT)),
+                Span::styled("compacted", theme::bold(theme::ACCENT)),
+                Span::styled(format!(" {} ", text::fmt_clock(m.time)), theme::muted()),
+            ],
+            w,
+        );
+        let fill = w.saturating_sub(spans_width(&left));
+        let mut spans = left;
+        spans.push(Span::styled("─".repeat(fill), bst));
+        return vec![Row::new(Line::from(spans)).decor()];
+    }
     let label = match &m.source {
         MessageSource::Human => "you".to_string(),
         MessageSource::Peer { from_name, .. } => format!("from {from_name}"),

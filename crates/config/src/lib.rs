@@ -34,7 +34,12 @@ mod permission;
 #[cfg(test)]
 mod tests;
 
+pub use builtin::COMPACTION_PROMPT;
 pub use jsonc::parse_jsonc;
+
+/// Name of the hidden built-in agent that writes compaction summaries. It is not a
+/// session agent: it cannot be selected for sessions and is not listed to frontends.
+pub const COMPACTION_AGENT: &str = "compaction";
 pub use load::load_with;
 pub use markdown::split_frontmatter;
 pub use permission::{Action, PermissionRules, Rule};

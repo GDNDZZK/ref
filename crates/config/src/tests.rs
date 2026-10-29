@@ -76,7 +76,7 @@ fn empty_config_has_builtins() {
     assert!(c.warnings.is_empty(), "{:?}", c.warnings);
     assert_eq!(c.default_agent, "build");
     let names: Vec<_> = c.agents.keys().cloned().collect();
-    assert_eq!(names, ["build", "explore", "general", "plan"]);
+    assert_eq!(names, ["build", "compaction", "explore", "general", "plan"]);
     let build = &c.agents["build"];
     assert!(build.can_spawn && build.creatable);
     assert!(!c.agents["plan"].can_spawn);
@@ -304,6 +304,38 @@ fn parse_errors_become_warnings() {
     assert!(c.warnings[0].contains("home/.config/opencode/opencode.json"));
     assert!(c.warnings.iter().any(|w| w.contains("JSON object")));
     assert!(c.warnings.iter().any(|w| w.contains("maybe")));
+}
+
+#[test]
+fn compaction_agent_builtin_and_overrides() {
+    let fx = Fx::new();
+    let c = fx.load();
+    let a = &c.agents[COMPACTION_AGENT];
+    assert!(a.hidden && !a.creatable && !a.can_spawn);
+    assert_eq!(a.prompt, COMPACTION_PROMPT);
+    assert!(a.model.is_none() && a.variant.is_none());
+
+    // JSON override of model / variant / options keeps the built-in prompt and flags.
+    fx.write(
+        "home/.config/opencode/opencode.json",
+        r#"{"agent": {"compaction": {"model": "p/small", "variant": "low", "options": {"k": 1}}}}"#,
+    );
+    let c = fx.load();
+    let a = &c.agents[COMPACTION_AGENT];
+    assert_eq!(a.model.as_ref().unwrap().key(), "p/small");
+    assert_eq!(a.variant.as_deref(), Some("low"));
+    assert_eq!(a.options["k"], 1);
+    assert_eq!(a.prompt, COMPACTION_PROMPT);
+    assert!(a.hidden && !a.creatable);
+
+    // Markdown agent file replaces the prompt.
+    fx.write("proj/.opencode/agent/compaction.md", "---\ntemperature: 0.1\n---\nSummarize tersely.\n");
+    let c = fx.load();
+    let a = &c.agents[COMPACTION_AGENT];
+    assert_eq!(a.prompt.trim(), "Summarize tersely.");
+    assert_eq!(a.temperature, Some(0.1));
+    assert_eq!(a.model.as_ref().unwrap().key(), "p/small");
+    assert_eq!(c.default_agent, "build");
 }
 
 #[test]

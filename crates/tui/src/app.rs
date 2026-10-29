@@ -59,6 +59,10 @@ pub enum Pending {
     Text { title: String },
     /// A prompt; on failure its text goes back into the (empty) editor so it isn't lost.
     Prompt { sid: String, text: String },
+    /// `McpStatus`; errors (older backend) fall back to the `GetConfig` status lines.
+    Mcp,
+    /// `GetConfig` used only to refresh MCP status lines (fallback polling).
+    ConfigMcp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,6 +124,7 @@ pub const COMMANDS: &[Cmd] = &[
     Cmd { name: "details", aliases: &[], desc: "Toggle expanded tool details", key: "ctrl+x d", args: false },
     Cmd { name: "watch", aliases: &["split"], desc: "Split view of background sessions", key: "ctrl+x w", args: false },
     Cmd { name: "sidebar", aliases: &[], desc: "Toggle sidebar", key: "ctrl+x b", args: false },
+    Cmd { name: "mcp", aliases: &["mcps"], desc: "MCP servers: status, errors and tools", key: "", args: false },
     Cmd { name: "editor", aliases: &[], desc: "Compose prompt in $EDITOR", key: "ctrl+x e", args: false },
     Cmd { name: "help", aliases: &[], desc: "Keybindings and commands", key: "ctrl+x h", args: false },
     Cmd { name: "exit", aliases: &["quit", "q"], desc: "Exit", key: "ctrl+x q", args: false },
@@ -189,7 +194,23 @@ pub struct App {
     pub deferred: Option<(String, String, Instant)>,
     /// Autocomplete dismissed with esc until the next edit.
     pub suppress_ac: bool,
+    /// MCP servers (sorted by name).
+    pub mcp: Vec<crate::ui::mcp::McpEntry>,
+    /// An MCP status answer (or fallback) has arrived since connecting.
+    pub mcp_loaded: bool,
+    /// The backend answered `McpStatus` with an error: use `GetConfig` status lines instead.
+    pub mcp_fallback: bool,
+    pub mcp_inflight: bool,
+    /// Next status poll while some server is still connecting.
+    pub mcp_poll_at: Option<Instant>,
+    /// Sidebar MCP rows at last draw: (y, server name).
+    pub sidebar_mcp_rows: Vec<(u16, String)>,
+    /// Sidebar visibility at the last housekeeping pass (refresh MCP when it appears).
+    sidebar_was_shown: bool,
 }
+
+/// Poll interval for MCP status while any server is connecting.
+pub const MCP_POLL: Duration = Duration::from_secs(5);
 
 impl App {
     pub fn new(client: Client, cwd: String, init: InitPlan) -> Self {
@@ -244,6 +265,13 @@ impl App {
             force_clear: false,
             suppress_ac: false,
             deferred: None,
+            mcp: Vec::new(),
+            mcp_loaded: false,
+            mcp_fallback: false,
+            mcp_inflight: false,
+            mcp_poll_at: None,
+            sidebar_mcp_rows: Vec::new(),
+            sidebar_was_shown: false,
         }
     }
 
@@ -312,8 +340,13 @@ impl App {
                 self.ever_connected = true;
                 self.net_status = None;
                 self.watch.subscribed = false;
+                // A restarted backend may support McpStatus now.
+                self.mcp_fallback = false;
+                self.mcp_inflight = false;
+                self.mcp_poll_at = None;
                 self.req(Request::GetConfig, Pending::Config);
                 self.req(Request::ListSessions, Pending::LiveList);
+                self.refresh_mcp();
                 self.update_autocomplete();
                 if reconnect {
                     self.toasts.info("Reconnected");
@@ -338,6 +371,8 @@ impl App {
                 self.pending.clear();
                 self.attaching.clear();
                 self.files_inflight = false;
+                self.mcp_inflight = false;
+                self.mcp_poll_at = None;
             }
             NetEvent::Frame(f) => self.on_frame(f),
         }
@@ -424,6 +459,18 @@ impl App {
                 self.create_session(None);
             }
             Pending::Created { .. } => self.toasts.error(format!("Cannot create session: {err}")),
+            Pending::Mcp => {
+                // Older backend ("unknown op" / deserialize error): use the GetConfig lines.
+                self.mcp_inflight = false;
+                self.mcp_fallback = true;
+                if let Some(c) = &self.config {
+                    let lines = c.mcp.clone();
+                    self.set_mcp_lines(&lines);
+                } else {
+                    self.mcp_poll_at = Some(Instant::now());
+                }
+            }
+            Pending::ConfigMcp => self.mcp_inflight = false,
             _ => self.toasts.error(err),
         }
     }
@@ -446,7 +493,15 @@ impl App {
                     if let Some(t) = c.tui.get("sidebar").and_then(Value::as_bool) {
                         self.sidebar = t;
                     }
+                    if self.mcp_fallback || !self.mcp_loaded {
+                        // Shown until (or instead of) the richer McpStatus answer.
+                        let lines = c.mcp.clone();
+                        self.set_mcp_lines(&lines);
+                    }
                     self.config = Some(c);
+                    if !self.mcp_fallback {
+                        self.refresh_mcp();
+                    }
                     for v in self.views.values_mut() {
                         v.chat.invalidate();
                     }
@@ -597,7 +652,69 @@ impl App {
                 self.dialog = Some(Dialog::Help(HelpDialog::text(&title, text)));
             }
             Pending::Prompt { .. } => {}
+            Pending::Mcp => {
+                self.mcp_inflight = false;
+                let servers = result.get("servers").map(|s| serde_json::from_value::<Vec<ref_proto::McpServerStatus>>(s.clone()));
+                match servers {
+                    Some(Ok(list)) => {
+                        let entries = list.iter().map(crate::ui::mcp::McpEntry::from_status).collect();
+                        self.set_mcp(entries);
+                    }
+                    _ => self.on_error(Pending::Mcp, "malformed mcp_status response".into()),
+                }
+            }
+            Pending::ConfigMcp => {
+                self.mcp_inflight = false;
+                if let Some(Ok(c)) = result.get("config").map(|c| serde_json::from_value::<ServerConfigInfo>(c.clone())) {
+                    self.set_mcp_lines(&c.mcp);
+                }
+            }
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // MCP status
+    // -----------------------------------------------------------------------
+
+    /// Requests fresh MCP status (McpStatus, or GetConfig on older backends). No-op while a
+    /// request is in flight.
+    pub fn refresh_mcp(&mut self) {
+        if !self.connected {
+            // Re-requested on reconnect; don't keep a poll deadline that can't be served.
+            self.mcp_poll_at = None;
+            return;
+        }
+        if self.mcp_inflight {
+            return;
+        }
+        self.mcp_inflight = true;
+        self.mcp_poll_at = None;
+        if self.mcp_fallback {
+            self.req(Request::GetConfig, Pending::ConfigMcp);
+        } else {
+            let cwd = self.cur().map(|v| v.info.cwd.clone()).filter(|c| !c.is_empty()).unwrap_or_else(|| self.cwd.clone());
+            self.req(Request::McpStatus { cwd: Some(cwd) }, Pending::Mcp);
+        }
+        // The send can fail (connection just dropped): don't stay "in flight" forever.
+        self.mcp_inflight = self.pending.values().any(|p| matches!(p, Pending::Mcp | Pending::ConfigMcp));
+    }
+
+    fn set_mcp_lines(&mut self, lines: &[(String, String)]) {
+        let entries = lines.iter().map(|(n, l)| crate::ui::mcp::McpEntry::from_line(n, l)).collect();
+        self.set_mcp(entries);
+    }
+
+    fn set_mcp(&mut self, entries: Vec<crate::ui::mcp::McpEntry>) {
+        self.mcp = crate::ui::mcp::sorted(entries);
+        self.mcp_loaded = true;
+        // Poll only while something is still connecting.
+        self.mcp_poll_at = self.mcp.iter().any(|e| e.connecting()).then(|| Instant::now() + MCP_POLL);
+    }
+
+    /// `/mcp`: read-only dialog of servers, errors and tools.
+    pub fn open_mcp(&mut self, select: Option<&str>) {
+        self.dialog = Some(Dialog::Mcp(crate::ui::mcp::McpDialog::new(select)));
+        self.refresh_mcp();
     }
 
     fn on_event(&mut self, sid: String, ev: SessionEvent) {
@@ -1441,9 +1558,15 @@ impl App {
             "thinking" => self.toggle_thinking(),
             "details" => self.toggle_details(),
             "watch" => self.toggle_watch(),
-            "sidebar" => self.sidebar = !self.sidebar,
+            "sidebar" => {
+                self.sidebar = !self.sidebar;
+                if self.sidebar {
+                    self.refresh_mcp();
+                }
+            }
             "editor" => self.run_editor = true,
             "help" => self.open_help(),
+            "mcp" => self.open_mcp(None),
             "exit" => self.quit = true,
             _ => {}
         }
@@ -1647,8 +1770,13 @@ impl App {
         let anim = self.views.values().any(|v| v.animating() || matches!(v.info.status, SessionStatus::Retrying { .. }))
             || (live_list_shown && self.live.iter().any(|s| s.live && !s.status.is_idle()))
             || !self.connected;
-        if anim {
+        // Pulsing "connecting" dot of MCP servers (sidebar / dialog).
+        let mcp_shown = self.sidebar_shown() || matches!(self.dialog, Some(Dialog::Mcp(_)));
+        if anim || (mcp_shown && self.mcp.iter().any(|e| e.connecting())) {
             return Some(Duration::from_millis(80));
+        }
+        if let Some(at) = self.mcp_poll_at {
+            return Some(at.saturating_duration_since(Instant::now()).max(Duration::from_millis(5)));
         }
         if let Some(d) = self.toasts.next_deadline() {
             return Some(d.max(Duration::from_millis(16)));
@@ -1695,6 +1823,14 @@ impl App {
         {
             self.request_files(q);
         }
+        if self.mcp_poll_at.is_some_and(|at| Instant::now() >= at) {
+            self.refresh_mcp();
+        }
+        let shown = self.sidebar_shown();
+        if shown && !self.sidebar_was_shown {
+            self.refresh_mcp();
+        }
+        self.sidebar_was_shown = shown;
         self.toasts.gc();
         for v in self.views.values_mut() {
             if v.chat.drag_tick() {

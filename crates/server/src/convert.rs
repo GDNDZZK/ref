@@ -2,12 +2,22 @@
 //! Tool call arguments are replayed byte-identically (raw JSON incl. `purpose`) for cache hits.
 
 use ref_llm::{AssistantBlock, ChatMessage, UserContent};
-use ref_proto::{Message, Part, Role, ToolState};
+use ref_proto::{Message, MessageSource, Part, Role, ToolState};
 use serde_json::{Map, Value};
 
 pub const IMAGE_OMITTED: &str = "[image omitted: model does not support image input]";
 
+/// Index of the last compaction summary (0 if the session was never compacted). Messages
+/// before it stay in the transcript (visible to users) but are not sent to the model.
+pub fn effective_start(messages: &[Message]) -> usize {
+    messages.iter().rposition(|m| m.role == Role::User && m.source == MessageSource::Compaction).unwrap_or(0)
+}
+
+/// Chat messages for a request: the effective context, i.e. the transcript from the last
+/// compaction summary (inclusive) onward. The slice only grows between compactions, so the
+/// request prefix stays byte-stable for prompt caching.
 pub fn to_chat(messages: &[Message], images: bool) -> Vec<ChatMessage> {
+    let messages = &messages[effective_start(messages)..];
     let mut out = Vec::with_capacity(messages.len() * 2);
     for m in messages {
         match m.role {

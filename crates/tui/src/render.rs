@@ -15,6 +15,7 @@ use crate::ui::message::{self, Ctx};
 use crate::ui::permission::PermissionView;
 use crate::ui::text::{self, width};
 use crate::ui::{Row, split, theme, todo};
+use ref_proto::TodoStatus;
 
 pub const SIDEBAR_W: u16 = 32;
 /// Minimum terminal width at which the sidebar is shown.
@@ -83,6 +84,10 @@ pub fn draw(f: &mut Frame<'_>, app: &mut App) {
                 h.draw(buf, area);
                 cursor = None;
             }
+            Some(Dialog::Mcp(d)) => {
+                d.draw(buf, area, &app.mcp, tick, app.mcp_loaded);
+                cursor = None;
+            }
             None => {}
         }
     }
@@ -131,6 +136,7 @@ fn draw_chat_mode(buf: &mut Buffer, area: Rect, app: &mut App, now: i64, tick: u
         draw_sidebar(buf, sb, app, tick);
     } else {
         app.sidebar_rows.clear();
+        app.sidebar_mcp_rows.clear();
         app.sidebar_rect = Rect::default();
     }
     // Prompt box.
@@ -315,7 +321,117 @@ fn draw_autocomplete(buf: &mut Buffer, lay: &Layout, app: &mut App) {
     }
 }
 
+/// Click target of a sidebar row.
+#[derive(Clone)]
+enum SbClick {
+    Session(String),
+    /// MCP server (empty = header: open the dialog without a selection).
+    Mcp(String),
+}
+
+struct SbRow {
+    spans: Vec<Span<'static>>,
+    click: Option<SbClick>,
+}
+
+fn sb(spans: Vec<Span<'static>>) -> SbRow {
+    SbRow { spans, click: None }
+}
+
+fn sb_blank() -> SbRow {
+    sb(Vec::new())
+}
+
+/// A sidebar section below the session info: a full form (gap + header + items) and a
+/// one-row summary form used when space is short.
+struct SbSection {
+    header: Vec<Span<'static>>,
+    /// Header shown when the items are hidden (counts / current item).
+    summary: Vec<Span<'static>>,
+    header_click: Option<SbClick>,
+    /// Item rows; `fit` produces at most `k` of them (with a "… N more" row when cut).
+    items: Vec<SbRow>,
+    fit: Option<Box<dyn Fn(usize) -> Vec<SbRow>>>,
+}
+
+impl SbSection {
+    fn min(&self) -> usize {
+        2
+    }
+    fn desired(&self) -> usize {
+        2 + self.items.len()
+    }
+    /// Rows for a budget of `k` (≥ 2): gap, header, items.
+    fn render(self, k: usize) -> Vec<SbRow> {
+        let mut out = vec![sb_blank()];
+        if k >= self.desired() {
+            out.push(SbRow { spans: self.header, click: self.header_click });
+            out.extend(self.items);
+            return out;
+        }
+        let room = k.saturating_sub(2);
+        if room >= 2 {
+            out.push(SbRow { spans: self.header, click: self.header_click });
+            match &self.fit {
+                Some(f) => out.extend(f(room)),
+                None => {
+                    let n = self.items.len();
+                    out.extend(self.items.into_iter().take(room - 1));
+                    out.push(sb(vec![Span::styled(format!("… {} more", n - (room - 1)), theme::muted())]));
+                }
+            }
+        } else {
+            out.push(SbRow { spans: self.summary, click: self.header_click });
+        }
+        out
+    }
+}
+
+/// Todo rows within `k` rows: when not everything fits, finished items are dropped first and the
+/// rest is cut with a `… N more` row.
+fn fit_todo_rows(todos: &[ref_proto::Todo], w: usize, k: usize) -> Vec<SbRow> {
+    let all = todo::todo_rows(todos, w, usize::MAX);
+    if all.len() <= k {
+        return all.into_iter().map(|r| sb(r.line.spans)).collect();
+    }
+    let list: Vec<&ref_proto::Todo> = if todo::active(todos) { todos.iter().filter(|t| matches!(t.status, TodoStatus::Pending | TodoStatus::InProgress)).collect() } else { todos.iter().collect() };
+    let mut out = Vec::new();
+    let mut shown = 0;
+    for t in list {
+        let rows = todo::todo_rows(std::slice::from_ref(t), w, 1);
+        if out.len() + rows.len() > k.saturating_sub(1) {
+            break;
+        }
+        out.extend(rows.into_iter().map(|r| sb(r.line.spans)));
+        shown += 1;
+    }
+    out.push(sb(vec![Span::styled(format!("… {} more", todos.len() - shown), theme::muted())]));
+    out
+}
+
+fn context_bar(c: ref_proto::ContextUsage, bw: usize) -> Vec<Span<'static>> {
+    let fillw = ((c.used as f64 / c.max as f64).min(1.0) * bw as f64).round() as usize;
+    let mark = |t: u64| -> Option<usize> { (t > 0).then(|| ((t as f64 / c.max as f64) * bw as f64) as usize) };
+    let (rm, am) = (mark(c.recommend), mark(c.auto));
+    let col = if c.auto > 0 && c.used >= c.auto {
+        theme::ERROR
+    } else if c.recommend > 0 && c.used >= c.recommend {
+        theme::WARNING
+    } else {
+        theme::PRIMARY
+    };
+    (0..bw)
+        .map(|i| {
+            let ch = if i < fillw { "━" } else if Some(i) == rm || Some(i) == am { "┊" } else { "─" };
+            Span::styled(ch, if i < fillw { theme::fg(col) } else { theme::fg(theme::BORDER) })
+        })
+        .collect()
+}
+
 fn draw_sidebar(buf: &mut Buffer, r: Rect, app: &mut App, tick: u64) {
+    app.sidebar_rows.clear();
+    app.sidebar_mcp_rows.clear();
+    app.sidebar_rect = r;
     let Some(v) = app.cur() else { return };
     // Separator.
     for y in r.y..r.y + r.height {
@@ -323,92 +439,136 @@ fn draw_sidebar(buf: &mut Buffer, r: Rect, app: &mut App, tick: u64) {
     }
     let x = r.x + 1;
     let w = r.width.saturating_sub(2) as usize;
-    let mut y = r.y + 1;
-    let put = |buf: &mut Buffer, y: &mut u16, spans: Vec<Span<'static>>| {
-        if *y >= r.y + r.height {
-            return;
-        }
-        let line = Line::from(message::truncate_spans(spans, w));
-        buf.set_line(x, *y, &line, w as u16);
-        *y += 1;
-    };
+    if w < 4 || r.height < 2 {
+        return;
+    }
+    let h = (r.height - 1) as usize; // top margin
+
+    // --- Session info (full and compact forms).
     let title = if v.info.title.trim().is_empty() { "New session".to_string() } else { text::one_line(&v.info.title) };
-    for l in text::wrap_spans(&[Span::styled(title, theme::bold(theme::TEXT))], w).into_iter().take(3) {
-        put(buf, &mut y, l.spans);
-    }
-    y += 1;
-    put(buf, &mut y, vec![Span::styled("name  ", theme::muted()), Span::styled(v.info.name.clone(), theme::text())]);
-    put(buf, &mut y, vec![Span::styled("id    ", theme::muted()), Span::styled(v.info.id.clone(), theme::fg(theme::DIM))]);
+    let title_rows: Vec<SbRow> = text::wrap_spans(&[Span::styled(title.clone(), theme::bold(theme::TEXT))], w).into_iter().take(3).map(|l| sb(l.spans)).collect();
     let ac = theme::agent_color(app.agents(), &v.info.agent);
-    put(buf, &mut y, vec![Span::styled("agent ", theme::muted()), Span::styled(v.info.agent.clone(), theme::fg(ac))]);
-    put(buf, &mut y, vec![Span::styled("model ", theme::muted()), Span::styled(app.model_display(&v.info.model), theme::text())]);
-    y += 1;
-    put(buf, &mut y, vec![Span::styled("Context", theme::bold(theme::ACCENT))]);
+    let model = app.model_display(&v.info.model);
     let c = v.info.context;
-    let mut spans = footer::context_spans(v);
-    if spans.is_empty() {
-        spans.push(Span::styled("—", theme::muted()));
+    let mut ctx_spans = footer::context_spans(v);
+    if ctx_spans.is_empty() {
+        ctx_spans.push(Span::styled("—", theme::muted()));
     }
-    put(buf, &mut y, spans);
-    if c.max > 0 {
-        let bw = w;
-        let fillw = ((c.used as f64 / c.max as f64).min(1.0) * bw as f64).round() as usize;
-        let mark = |t: u64| -> Option<usize> { (t > 0).then(|| ((t as f64 / c.max as f64) * bw as f64) as usize) };
-        let (rm, am) = (mark(c.recommend), mark(c.auto));
-        let mut spans = Vec::new();
-        for i in 0..bw {
-            let col = if c.auto > 0 && c.used >= c.auto {
-                theme::ERROR
-            } else if c.recommend > 0 && c.used >= c.recommend {
-                theme::WARNING
-            } else {
-                theme::PRIMARY
-            };
-            let ch = if i < fillw { "━" } else if Some(i) == rm || Some(i) == am { "┊" } else { "─" };
-            let st = if i < fillw { theme::fg(col) } else { theme::fg(theme::BORDER) };
-            spans.push(Span::styled(ch, st));
+    let bar = (c.max > 0).then(|| context_bar(c, w));
+    let mut full = title_rows;
+    full.push(sb_blank());
+    full.push(sb(vec![Span::styled("name  ", theme::muted()), Span::styled(v.info.name.clone(), theme::text())]));
+    full.push(sb(vec![Span::styled("id    ", theme::muted()), Span::styled(v.info.id.clone(), theme::fg(theme::DIM))]));
+    full.push(sb(vec![Span::styled("agent ", theme::muted()), Span::styled(v.info.agent.clone(), theme::fg(ac))]));
+    let mut mspans = vec![Span::styled("model ", theme::muted()), Span::styled(model.clone(), theme::text())];
+    if let Some(var) = &v.info.model.variant {
+        mspans.push(Span::styled(format!(" {var}"), theme::fg(theme::WARNING)));
+    }
+    full.push(sb(mspans));
+    full.push(sb_blank());
+    full.push(sb(vec![Span::styled("Context", theme::bold(theme::ACCENT))]));
+    full.push(sb(ctx_spans.clone()));
+    if let Some(b) = &bar {
+        full.push(sb(b.clone()));
+    }
+    let mut compact = vec![
+        sb(vec![Span::styled(title, theme::bold(theme::TEXT))]),
+        sb(vec![Span::styled(v.info.agent.clone(), theme::fg(ac)), Span::styled(" · ", theme::muted()), Span::styled(model, theme::text())]),
+        sb(ctx_spans),
+    ];
+    if let Some(b) = bar {
+        compact.push(sb(b));
+    }
+
+    // --- Sections (display order: MCP, Todo, Live; priority: Todo, MCP, Live).
+    let todos = v.info.todos.clone();
+    let todo_sec = (!todos.is_empty()).then(|| {
+        let (done, total) = todo::counts(&todos);
+        let header = vec![Span::styled("Todo", theme::bold(theme::ACCENT)), Span::styled(format!("  {done}/{total}"), theme::muted())];
+        let mut summary = vec![Span::styled("Todo ", theme::bold(theme::ACCENT))];
+        match todo::progress_spans(&todos, w.saturating_sub(5)) {
+            Some(p) => summary.extend(p),
+            None => summary.push(Span::styled(format!(" {done}/{total}"), theme::muted())),
         }
-        put(buf, &mut y, spans);
-    }
-    if !v.info.todos.is_empty() {
-        y += 1;
-        let (done, total) = todo::counts(&v.info.todos);
-        put(buf, &mut y, vec![Span::styled("Todo", theme::bold(theme::ACCENT)), Span::styled(format!("  {done}/{total}"), theme::muted())]);
-        // Leave room for the live session list below.
-        let room = (r.y + r.height).saturating_sub(y + 4) as usize;
-        let rows = todo::todo_rows(&v.info.todos, w, room.clamp(1, 12));
-        for row in rows.into_iter().take(room.max(1)) {
-            put(buf, &mut y, row.line.spans);
+        let items = todo::todo_rows(&todos, w, usize::MAX).into_iter().map(|r| sb(r.line.spans)).collect();
+        let t2 = todos.clone();
+        SbSection { header, summary, header_click: None, items, fit: Some(Box::new(move |k| fit_todo_rows(&t2, w, k))) }
+    });
+    let mcp_sec = (!app.mcp.is_empty()).then(|| {
+        let sum = crate::ui::mcp::summary(&app.mcp);
+        let header = vec![Span::styled("MCP", theme::bold(theme::ACCENT)), Span::styled(format!("  {sum}"), theme::muted())];
+        let mut summary = header.clone();
+        summary.push(Span::raw(" "));
+        for e in &app.mcp {
+            summary.push(Span::raw(" "));
+            summary.push(crate::ui::mcp::dot(&e.state, tick));
         }
-    }
-    y += 1;
-    put(buf, &mut y, vec![Span::styled("Live sessions", theme::bold(theme::ACCENT))]);
+        let items = app.mcp.iter().map(|e| SbRow { spans: crate::ui::mcp::sidebar_line(e, w, tick).spans, click: Some(SbClick::Mcp(e.name.clone())) }).collect();
+        SbSection { header, summary, header_click: Some(SbClick::Mcp(String::new())), items, fit: None }
+    });
     let mut live: Vec<_> = app.live.iter().filter(|s| s.live).cloned().collect();
     live.sort_by_key(|s| s.created_at);
-    let cur_id = v.info.id.clone();
-    let mut rows = Vec::new();
-    for s in live {
-        if y >= r.y + r.height {
-            break;
+    let live_sec = (!live.is_empty()).then(|| {
+        let header = vec![Span::styled("Live sessions", theme::bold(theme::ACCENT)), Span::styled(format!("  {}", live.len()), theme::muted())];
+        let busy = live.iter().filter(|s| !s.status.is_idle()).count();
+        let mut summary = header.clone();
+        if busy > 0 {
+            summary.push(Span::styled(format!(" · {} {busy} busy", theme::spinner(tick)), theme::fg(theme::PRIMARY)));
         }
-        let me = s.id == cur_id;
-        let dot = if !s.status.is_idle() { theme::spinner(tick).to_string() } else { "○".to_string() };
-        let dc = if !s.status.is_idle() { theme::PRIMARY } else { theme::MUTED };
-        let fgbg = if s.attached > 0 { "fg" } else { "bg" };
-        let name_st = if me { theme::bold(theme::PRIMARY) } else { theme::text() };
-        rows.push((y, s.id.clone()));
-        put(
-            buf,
-            &mut y,
-            vec![
-                Span::styled(format!("{dot} "), theme::fg(dc)),
-                Span::styled(s.name.clone(), name_st),
-                Span::styled(format!(" {fgbg}"), theme::fg(theme::DIM)),
-            ],
-        );
+        let cur_id = v.info.id.clone();
+        let items = live
+            .iter()
+            .map(|s| {
+                let me = s.id == cur_id;
+                let dot = if !s.status.is_idle() { theme::spinner(tick).to_string() } else { "○".to_string() };
+                let dc = if !s.status.is_idle() { theme::PRIMARY } else { theme::MUTED };
+                let fgbg = if s.attached > 0 { "fg" } else { "bg" };
+                let name_st = if me { theme::bold(theme::PRIMARY) } else { theme::text() };
+                SbRow {
+                    spans: vec![Span::styled(format!("{dot} "), theme::fg(dc)), Span::styled(s.name.clone(), name_st), Span::styled(format!(" {fgbg}"), theme::fg(theme::DIM))],
+                    click: Some(SbClick::Session(s.id.clone())),
+                }
+            })
+            .collect();
+        SbSection { header, summary, header_click: None, items, fit: None }
+    });
+
+    // --- Height allocation by priority.
+    let mut secs: [Option<SbSection>; 3] = [todo_sec, mcp_sec, live_sec]; // priority order
+    let mins: Vec<usize> = secs.iter().map(|s| s.as_ref().map(SbSection::min).unwrap_or(0)).collect();
+    let min_total: usize = mins.iter().sum();
+    // The full session block only when it doesn't squeeze the todo list (up to 6 items).
+    let todo_extra = secs[0].as_ref().map(|s| (s.desired() - s.min()).min(6)).unwrap_or(0);
+    let info = if h >= full.len() + min_total + todo_extra { full } else { compact };
+    let mut remaining = h.saturating_sub(info.len());
+    let mut alloc = [0usize; 3];
+    for i in 0..3 {
+        let Some(s) = &secs[i] else { continue };
+        let reserve: usize = mins[i + 1..].iter().sum();
+        let avail = remaining.saturating_sub(reserve);
+        if avail >= s.min() {
+            alloc[i] = s.desired().min(avail);
+            remaining -= alloc[i];
+        }
     }
-    app.sidebar_rows = rows;
-    app.sidebar_rect = r;
+    let mut rows = info;
+    // Display order: MCP (1), Todo (0), Live (2).
+    for i in [1usize, 0, 2] {
+        if let Some(s) = secs[i].take()
+            && alloc[i] >= 2
+        {
+            rows.extend(s.render(alloc[i]));
+        }
+    }
+    for (y, row) in (r.y + 1..r.y + r.height).zip(rows) {
+        let line = Line::from(message::truncate_spans(row.spans, w));
+        buf.set_line(x, y, &line, w as u16);
+        match row.click {
+            Some(SbClick::Session(id)) => app.sidebar_rows.push((y, id)),
+            Some(SbClick::Mcp(name)) => app.sidebar_mcp_rows.push((y, name)),
+            None => {}
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -421,13 +581,15 @@ fn tile_rows(v: &mut SessionView, e: &Env<'_>, w: usize, h: usize) -> Vec<Row> {
     let n = v.messages.len();
     let busy = v.is_busy();
     let mut i = n;
+    let last_c = chat::last_compaction(&v.messages);
     while i > 0 && out.len() < h + 4 {
         i -= 1;
         let SessionView { messages, versions, chat, info, .. } = &mut *v;
         let m = &messages[i];
         let live = busy && crate::state::message_live(m);
         let ver = versions.get(i).copied().unwrap_or(0);
-        let key = chat::hash_key(&[ver, w as u64, if live { e.tick } else { 0 }, if live { (e.now / 1000) as u64 } else { 0 }, 11]);
+        let stale = last_c.is_some_and(|c| i < c);
+        let key = chat::hash_key(&[ver, w as u64, if live { e.tick } else { 0 }, if live { (e.now / 1000) as u64 } else { 0 }, stale as u64, 11]);
         let cx = Ctx {
             agents: e.agents,
             models: e.models,
@@ -439,6 +601,8 @@ fn tile_rows(v: &mut SessionView, e: &Env<'_>, w: usize, h: usize) -> Vec<Row> {
             tick: e.tick,
             compact: true,
             session_agent: &info.agent,
+            stale,
+            context_start: false,
         };
         let mut rows = chat.tile_rows(&m.id, key, || message::render(m, &cx, w)).to_vec();
         if i > 0 {

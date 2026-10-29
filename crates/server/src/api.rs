@@ -37,9 +37,17 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             Ok(json!({ "config": config_info(hub, &cwd).await? }))
         }
         Request::ListSessions => Ok(json!({ "sessions": hub.infos() })),
+        Request::McpStatus { cwd } => {
+            let cwd = cwd.filter(|c| !c.trim().is_empty()).unwrap_or_else(|| conn.lock().cwd.clone());
+            let cfg = load_cfg(hub, &cwd).await?;
+            Ok(json!({ "servers": hub.mcp.status(&cfg) }))
+        }
         Request::ListHistory { cwd, limit } => {
             let store = hub.store.clone();
-            let mut list = tokio::task::spawn_blocking(move || store.list()).await.map_err(|e| e.to_string())?;
+            let cwd = cwd.filter(|c| !c.is_empty());
+            let (c2, limit) = (cwd.clone(), limit.unwrap_or(100));
+            let mut list =
+                tokio::task::spawn_blocking(move || store.list_for(c2, Some(limit))).await.map_err(|e| e.to_string())?;
             let live: Vec<SessionInfo> = hub.infos();
             for i in &mut list {
                 if let Some(l) = live.iter().find(|l| l.id == i.id) {
@@ -51,11 +59,11 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
                     list.push(l);
                 }
             }
-            if let Some(c) = cwd.filter(|c| !c.is_empty()) {
+            if let Some(c) = cwd {
                 list.retain(|i| i.cwd == c);
             }
             list.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-            list.truncate(limit.unwrap_or(100));
+            list.truncate(limit);
             Ok(json!({ "sessions": list }))
         }
         Request::CreateSession { cwd, agent, model, name } => {
@@ -160,6 +168,9 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
         Request::SetAgent { session_id, agent } => {
             let s = live(hub, &session_id)?;
             let mut st = s.lock();
+            if agent == ref_config::COMPACTION_AGENT {
+                return Err(format!("Agent {agent} is internal and cannot run a session."));
+            }
             let Some(a) = st.cfg.agents.get(&agent) else { return Err(format!("Unknown agent: {agent}")) };
             if a.model.is_some()
                 && let Some(m) = st.cfg.default_model_for(&agent)
@@ -253,7 +264,8 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             if let Some(s) = hub.session(&session_id) {
                 crate::ops::close_session(hub, &s).await;
             }
-            hub.store.delete(&session_id)?;
+            let store = hub.store.clone();
+            tokio::task::spawn_blocking(move || store.delete(&session_id)).await.map_err(|e| e.to_string())??;
             Ok(json!({}))
         }
         Request::ExpandCommand { name, args, cwd } => {

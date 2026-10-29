@@ -298,6 +298,11 @@ impl ChatState {
     }
 }
 
+/// Index of the last compaction message: the model's context starts there.
+pub fn last_compaction(messages: &[ref_proto::Message]) -> Option<usize> {
+    messages.iter().rposition(|m| m.role == ref_proto::Role::User && m.source == ref_proto::MessageSource::Compaction)
+}
+
 /// Builds (or reuses) cached rows for all messages and the tail, for content width `w`.
 fn layout(view: &mut SessionView, env: &Env<'_>, w: usize) {
     let busy = !view.info.status.is_idle();
@@ -307,7 +312,10 @@ fn layout(view: &mut SessionView, env: &Env<'_>, w: usize) {
     let mut total = 0usize;
     let mut animating = false;
     let n = messages.len();
+    let last_compaction = last_compaction(messages);
     for (i, m) in messages.iter().enumerate() {
+        let stale = last_compaction.is_some_and(|c| i < c);
+        let context_start = i > 0 && last_compaction == Some(i);
         // Only the tail of a busy session animates (stale unfinished messages render statically).
         let live = busy && crate::state::message_live(m);
         animating |= live;
@@ -316,7 +324,7 @@ fn layout(view: &mut SessionView, env: &Env<'_>, w: usize) {
         let all = chat.show_all.get(&m.id);
         let anim = if live { env.tick } else { 0 };
         let secs = if live { (env.now / 1000) as u64 } else { 0 };
-        let key = hash_key(&[ver, w as u64, set_hash(tog), set_hash(all), env.details as u64, env.thinking as u64, anim, secs, 7]);
+        let key = hash_key(&[ver, w as u64, set_hash(tog), set_hash(all), env.details as u64, env.thinking as u64, anim, secs, stale as u64, context_start as u64, 7]);
         let hit = chat.cache.get(&m.id).is_some_and(|c| c.key == key);
         if !hit {
             let cx = Ctx {
@@ -330,6 +338,8 @@ fn layout(view: &mut SessionView, env: &Env<'_>, w: usize) {
                 tick: env.tick,
                 compact: false,
                 session_agent: &info.agent,
+                stale,
+                context_start,
             };
             let mut rows = vec![Row::blank()];
             rows.extend(message::render(m, &cx, w));

@@ -254,8 +254,12 @@ fn backoff_math() {
     assert!((j.as_secs_f64() - 3.2).abs() < 1e-9);
 }
 
+fn non_system(body: &serde_json::Value) -> Vec<serde_json::Value> {
+    body["messages"].as_array().unwrap().iter().filter(|x| x["role"] != "system").cloned().collect()
+}
+
 #[tokio::test]
-async fn compact_context_tool_replaces_history() {
+async fn compact_context_tool_keeps_history_but_sends_summary_only() {
     let m = mock(Arc::new(|n, _| match n {
         0 => Reply::Tools(vec![tool("c1", "compact_context", json!({"purpose": "p", "summary": "The user wants X. Done Y."}))]),
         _ => Reply::Text("continuing".into()),
@@ -266,20 +270,34 @@ async fn compact_context_tool_replaces_history() {
     prompt(&hub, &s, "start");
     wait_idle(&s).await;
     let msgs = messages(&s);
-    assert_eq!(msgs.len(), 2, "{msgs:#?}");
-    assert_eq!(msgs[0].source, MessageSource::Compaction);
-    assert!(msgs[0].raw_text().contains("The user wants X. Done Y."));
+    // History retained: [start, assistant(tool), summary, continuing].
+    assert_eq!(msgs.len(), 4, "{msgs:#?}");
+    assert_eq!(msgs[0].raw_text(), "start");
+    assert_eq!(msgs[2].source, MessageSource::Compaction);
+    assert!(msgs[2].raw_text().contains("The user wants X. Done Y."));
+    assert_eq!(last_text(&s), "continuing");
     let bodies = m.bodies();
-    let second: Vec<_> = bodies[1]["messages"].as_array().unwrap().iter().filter(|x| x["role"] != "system").cloned().collect();
-    assert_eq!(second.len(), 1);
+    let second = non_system(&bodies[1]);
+    assert_eq!(second.len(), 1, "{second:#?}");
     assert!(second[0]["content"].as_str().unwrap().starts_with("[Context compacted."));
+    // The next request extends the same effective prefix (prompt caching).
+    prompt(&hub, &s, "more");
+    wait_idle(&s).await;
+    let third = non_system(&m.bodies()[2]);
+    // [summary, continuing, more]
+    assert_eq!(third.len(), 3, "{third:#?}");
+    assert_eq!(third[0], second[0]);
+    assert!(third.iter().all(|x| x["content"] != "start"));
+    // Persisted with the full transcript.
+    assert_eq!(hub.store.load(&s.id).unwrap().messages.len(), 6);
 }
 
 #[tokio::test]
-async fn manual_compaction_uses_model_summary() {
+async fn manual_compaction_uses_model_summary_and_undo_restores_context() {
     let m = mock(Arc::new(|n, _| match n {
         0 => Reply::Text("first answer".into()),
-        _ => Reply::Text("## Goal\n- summary text".into()),
+        1 => Reply::Text("## Goal\n- summary text".into()),
+        _ => Reply::Text("later".into()),
     }))
     .await;
     let (hub, work) = hub(config(&m.url), "manualcompact");
@@ -289,9 +307,148 @@ async fn manual_compaction_uses_model_summary() {
     ref_server::engine::start_custom_run(&hub, &s, ref_server::compaction::manual).unwrap();
     wait_idle(&s).await;
     let msgs = messages(&s);
-    assert_eq!(msgs.len(), 1);
-    assert!(msgs[0].raw_text().contains("summary text"));
-    assert!(m.bodies()[1].get("tools").is_none());
+    assert_eq!(msgs.len(), 3, "{msgs:#?}");
+    assert_eq!(msgs[0].raw_text(), "q");
+    assert_eq!(msgs[2].source, MessageSource::Compaction);
+    assert!(msgs[2].raw_text().contains("summary text"));
+    let b = m.bodies();
+    assert!(b[1].get("tools").is_none());
+    // Default compaction prompt (no compaction agent configured) as the system prompt.
+    assert_eq!(b[1]["messages"][0]["content"], ref_config::COMPACTION_PROMPT);
+    // Context usage estimated from the new effective context (system + tools + summary),
+    // not the last reported usage.
+    let used = s.info().context.used;
+    assert!(used > 0 && used != 1020, "{used}");
+    // Compacting again without new assistant output is refused.
+    ref_server::engine::start_custom_run(&hub, &s, ref_server::compaction::manual).unwrap();
+    wait_idle(&s).await;
+    assert_eq!(m.count(), 2);
+
+    prompt(&hub, &s, "next");
+    wait_idle(&s).await;
+    let after = non_system(&m.bodies()[2]);
+    assert_eq!(after.len(), 1, "{after:#?}");
+    let c = after[0]["content"].as_str().unwrap();
+    assert!(c.contains("summary text") && c.ends_with("next") && !c.contains("first answer"), "{c}");
+
+    // Undo from the compaction message: the old context becomes effective again.
+    let conn = hub.add_conn();
+    conn.lock().hello = true;
+    let cid = msgs[2].id.clone();
+    ref_server::api::handle(&hub, &conn, ref_proto::Request::Undo { session_id: s.id.clone(), message_id: Some(cid) }).await.unwrap();
+    assert_eq!(messages(&s).len(), 2);
+    prompt(&hub, &s, "again");
+    wait_idle(&s).await;
+    let restored = non_system(&m.bodies()[3]);
+    assert_eq!(restored.len(), 3);
+    assert_eq!(restored[0]["content"], "q");
+}
+
+#[tokio::test]
+async fn compaction_agent_prompt_and_model_from_config() {
+    let m = mock(Arc::new(|n, _| match n {
+        0 => Reply::Text("first answer".into()),
+        _ => Reply::Text("custom summary".into()),
+    }))
+    .await;
+    let mut cfg = config(&m.url);
+    cfg.providers.get_mut("mock").unwrap().models.insert(
+        "small".into(),
+        ref_config::ModelConfig { key: "small".into(), id: "small-wire".into(), name: "Small".into(), context: 10_000, ..Default::default() },
+    );
+    cfg.agents.insert(
+        "compaction".into(),
+        ref_config::AgentConfig {
+            name: "compaction".into(),
+            prompt: "CUSTOM COMPACTION PROMPT".into(),
+            model: Some(ref_proto::ModelRef { provider: "mock".into(), model: "small".into(), variant: None }),
+            hidden: true,
+            ..Default::default()
+        },
+    );
+    let (hub, work) = hub(cfg, "compactagent");
+    let s = session(&hub, &work, "main", "build").await;
+    prompt(&hub, &s, "q");
+    wait_idle(&s).await;
+    ref_server::engine::start_custom_run(&hub, &s, ref_server::compaction::manual).unwrap();
+    wait_idle(&s).await;
+    let b = m.bodies();
+    assert_eq!(b[0]["model"], "m");
+    assert_eq!(b[1]["model"], "small-wire");
+    assert_eq!(b[1]["messages"][0]["content"], "CUSTOM COMPACTION PROMPT");
+    let tail = non_system(&b[1]);
+    assert_eq!(tail.len(), 3);
+    assert_eq!(tail[2]["content"], ref_server::compaction::SUMMARY_REQUEST);
+    assert!(messages(&s)[2].raw_text().contains("custom summary"));
+    // Hidden agents are not offered to frontends and cannot run sessions.
+    let conn = hub.add_conn();
+    conn.lock().hello = true;
+    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::GetConfig).await.unwrap();
+    let names: Vec<&str> = r["config"]["agents"].as_array().unwrap().iter().map(|a| a["name"].as_str().unwrap()).collect();
+    assert!(!names.contains(&"compaction"), "{names:?}");
+    let e = ref_server::api::handle(&hub, &conn, ref_proto::Request::SetAgent { session_id: s.id.clone(), agent: "compaction".into() }).await;
+    assert!(e.is_err());
+}
+
+#[tokio::test]
+async fn recommend_compaction_notice_once_per_epoch() {
+    let m = mock(Arc::new(|n, _| match n {
+        0 => Reply::Tools(vec![tool("c1", "bash", json!({"purpose": "p", "command": "echo hi"}))]),
+        1 => Reply::Text("done".into()),
+        2 => Reply::Text("second".into()),
+        3 => Reply::Tools(vec![tool("c2", "compact_context", json!({"purpose": "p", "summary": "S"}))]),
+        _ => Reply::Text("fresh".into()),
+    }))
+    .await;
+    let mut cfg = config(&m.url);
+    cfg.compaction.recommend = 1000.0;
+    let (hub, work) = hub(cfg, "notice");
+    let s = session(&hub, &work, "main", "build").await;
+    prompt(&hub, &s, "go");
+    wait_idle(&s).await;
+    // Injected after the tool batch, before the next request of the same run.
+    let msgs = messages(&s);
+    assert_eq!(msgs.len(), 4, "{msgs:#?}");
+    assert_eq!(msgs[2].source, MessageSource::Reminder);
+    let text = msgs[2].raw_text();
+    assert!(text.starts_with("[Context notice] This conversation has used 1020 of 10000 tokens (10%), past the recommended compaction point (1000 tokens)."), "{text}");
+    let b1 = non_system(&m.bodies()[1]);
+    assert_eq!(b1[b1.len() - 2]["role"], "tool");
+    assert_eq!(b1[b1.len() - 1]["role"], "user");
+    assert!(b1[b1.len() - 1]["content"].as_str().unwrap().starts_with("[Context notice]"));
+    assert!(s.lock().context_notice);
+    assert!(hub.store.load(&s.id).unwrap().context_notice, "flag persisted");
+    // Only once per context epoch.
+    prompt(&hub, &s, "two");
+    wait_idle(&s).await;
+    let count = |s: &Arc<ref_server::session::Session>| messages(s).iter().filter(|m| m.source == MessageSource::Reminder).count();
+    assert_eq!(count(&s), 1);
+    // After a compaction it can fire again; with no further request in the run it is
+    // appended at the end (and goes out with the next prompt).
+    prompt(&hub, &s, "three");
+    wait_idle(&s).await;
+    assert_eq!(count(&s), 2);
+    let last = messages(&s).last().unwrap().clone();
+    assert_eq!(last.source, MessageSource::Reminder);
+    assert_eq!(s.info().status, SessionStatus::Idle);
+    assert_eq!(m.count(), 5, "no extra run for the notice");
+}
+
+#[tokio::test]
+async fn mcp_status_request() {
+    let m = mock(Arc::new(|_, _| Reply::Text("x".into()))).await;
+    let mut cfg = config(&m.url);
+    cfg.mcp.insert(
+        "off".into(),
+        ref_config::McpConfig::Local { command: vec!["true".into()], environment: Default::default(), cwd: None, enabled: false, timeout_ms: None },
+    );
+    let (hub, _work) = hub(cfg, "mcpstatus");
+    let conn = hub.add_conn();
+    conn.lock().hello = true;
+    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::McpStatus { cwd: Some("/".into()) }).await.unwrap();
+    assert_eq!(r["servers"], json!([{"name": "off", "status": "disabled", "error": null, "tools": []}]));
+    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::GetConfig).await.unwrap();
+    assert_eq!(r["config"]["mcp"], json!([["off", "disabled"]]));
 }
 
 #[tokio::test]
@@ -562,14 +719,20 @@ async fn auto_compaction_when_threshold_reached() {
     prompt(&hub, &s, "two");
     wait_idle(&s).await;
     let msgs = messages(&s);
-    assert_eq!(msgs.len(), 3, "{msgs:#?}");
-    assert_eq!(msgs[0].source, MessageSource::Compaction);
-    assert!(msgs[0].raw_text().contains("auto summary"));
-    assert_eq!(msgs[1].raw_text(), "two");
+    // [one, first, summary, two, second]: the summary goes before the prompt being answered.
+    assert_eq!(msgs.len(), 5, "{msgs:#?}");
+    assert_eq!(msgs[2].source, MessageSource::Compaction);
+    assert!(msgs[2].raw_text().contains("auto summary"));
+    assert_eq!(msgs[3].raw_text(), "two");
     assert_eq!(last_text(&s), "second");
     let b = m.bodies();
     assert!(b[1].to_string().contains("Summarize the conversation above"));
     assert!(!b[1].to_string().contains("\"two\""));
+    // Consecutive user messages are merged by the chat converter: summary + "two".
+    let third = non_system(&b[2]);
+    assert_eq!(third.len(), 1, "{third:#?}");
+    let c = third[0]["content"].as_str().unwrap();
+    assert!(c.starts_with("[Context compacted.") && c.contains("auto summary") && c.ends_with("two"), "{c}");
 }
 
 #[tokio::test]

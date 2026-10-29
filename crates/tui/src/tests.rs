@@ -863,6 +863,8 @@ fn ctx<'a>(details: bool) -> crate::ui::message::Ctx<'a> {
         tick: 0,
         compact: false,
         session_agent: "build",
+        stale: false,
+        context_start: false,
     }
 }
 
@@ -1267,4 +1269,394 @@ fn todo_rendering_everywhere() {
     let (_, s) = render(&mut app, 120, 30);
     let title = s.lines().find(|l| l.contains("worker-1")).unwrap();
     assert!(title.contains("◐ Fix the off-by-one · 1/3"), "{title}");
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar MCP / todo / live sections, /mcp dialog, compaction divider
+// ---------------------------------------------------------------------------
+
+fn mcp_servers() -> Vec<McpServerStatus> {
+    vec![
+        McpServerStatus { name: "context7".into(), status: "connected".into(), error: None, tools: vec!["context7_resolve-library-id".into(), "context7_get-library-docs".into()] },
+        McpServerStatus { name: "github".into(), status: "failed".into(), error: Some("HTTP 401 Unauthorized: missing or invalid bearer token; set GITHUB_TOKEN in the environment and restart the backend".into()), tools: vec![] },
+        McpServerStatus { name: "docs-搜索".into(), status: "connecting".into(), error: None, tools: vec![] },
+        McpServerStatus { name: "sqlite".into(), status: "disabled".into(), error: None, tools: vec![] },
+    ]
+}
+
+/// Answers the pending McpStatus request with `servers`.
+fn answer_mcp(app: &mut App, servers: &[McpServerStatus]) {
+    let id = *app.pending.iter().find(|(_, p)| matches!(p, crate::app::Pending::Mcp)).map(|(k, _)| k).expect("mcp_status request");
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response { id, ok: true, result: json!({ "servers": servers }), error: None }));
+}
+
+fn sidebar_app() -> App {
+    let mut app = test_app(false);
+    app.refresh_mcp();
+    answer_mcp(&mut app, &mcp_servers());
+    let v = app.views.get_mut("ses_test").unwrap();
+    v.info.todos = crate::ui::todo::parse_todos(&json!({"todos": [
+        {"content": "Read the parser", "status": "completed"},
+        {"content": "Fix the off-by-one", "status": "in_progress"},
+        {"content": "Run the tests", "status": "pending"},
+        {"content": "Update the changelog", "status": "pending"},
+        {"content": "检查中文输出的宽度", "status": "pending"}
+    ]}));
+    let cur = v.info.clone();
+    app.live = vec![cur, bg_session("ses_b1", "worker-1", SessionStatus::Busy, 0), bg_session("ses_b2", "docs-writer", SessionStatus::Idle, 0), bg_session("ses_b3", "reviewer", SessionStatus::Idle, 1)];
+    app
+}
+
+/// Sidebar text (columns right of the separator) per screen row.
+fn sidebar_text(term: &Terminal<TestBackend>, w: u16) -> Vec<String> {
+    let buf = term.backend().buffer();
+    let x0 = w - crate::render::SIDEBAR_W;
+    (0..buf.area.height)
+        .map(|y| {
+            let mut s = String::new();
+            let mut skip = 0;
+            for x in x0..w {
+                if skip > 0 {
+                    skip -= 1;
+                    continue;
+                }
+                let sym = buf[(x, y)].symbol();
+                s.push_str(sym);
+                skip = text::width(sym).saturating_sub(1);
+            }
+            s.trim().to_string()
+        })
+        .collect()
+}
+
+fn pos(lines: &[String], pat: &str) -> Option<usize> {
+    lines.iter().position(|l| l.contains(pat))
+}
+
+#[test]
+fn sidebar_mcp_todo_live_tall() {
+    let mut app = sidebar_app();
+    let (term, s) = render(&mut app, 160, 40);
+    println!("{s}");
+    let sb = sidebar_text(&term, 160);
+    // Session info.
+    assert!(pos(&sb, "Fix the parser").is_some() && pos(&sb, "ref-a1b2").is_some() && pos(&sb, "ses_test").is_some());
+    assert!(pos(&sb, "agent build").is_some() && pos(&sb, "model claude-opus-5.5 high").is_some(), "{sb:#?}");
+    assert!(sb.iter().any(|l| l.contains("━")), "context bar");
+    // MCP section: summary, each server with a status dot and detail.
+    let m = pos(&sb, "MCP  1/3").expect("mcp header");
+    let ctx7 = &sb[pos(&sb, "context7").unwrap()];
+    assert!(ctx7.starts_with("● context7") && ctx7.ends_with("2 tools"), "{ctx7}");
+    assert!(sb[pos(&sb, "github").unwrap()].contains("HTTP 401"), "short error");
+    assert!(sb[pos(&sb, "docs-搜索").unwrap()].starts_with("◌ docs-搜索") && sb[pos(&sb, "docs-搜索").unwrap()].contains("connecting"));
+    assert!(sb[pos(&sb, "sqlite").unwrap()].starts_with("○ sqlite") && sb[pos(&sb, "sqlite").unwrap()].ends_with("disabled"));
+    // Dot colours.
+    let buf = term.backend().buffer();
+    let x0 = 160 - crate::render::SIDEBAR_W + 1;
+    let dot_fg = |name: &str| buf[(x0, pos(&sb, name).unwrap() as u16)].fg;
+    assert_eq!(dot_fg("context7"), crate::ui::theme::SUCCESS);
+    assert_eq!(dot_fg("github"), crate::ui::theme::ERROR);
+    // Todo (all items) and live sessions (all), in display order MCP, Todo, Live.
+    let t = pos(&sb, "Todo  1/5").expect("todo header");
+    for item in ["☑ Read the parser", "◐ Fix the off-by-one", "☐ Run the tests", "☐ Update the changelog", "☐ 检查中文输出的宽度"] {
+        assert!(pos(&sb, item).is_some(), "{item}: {sb:#?}");
+    }
+    let l = pos(&sb, "Live sessions  4").expect("live header");
+    assert!(m < t && t < l, "order: {sb:#?}");
+    for n in ["worker-1", "docs-writer", "reviewer"] {
+        assert!(pos(&sb, n).is_some(), "{n}");
+    }
+    // Nothing spills past the screen edge / into the separator column.
+    for (y, line) in sb.iter().enumerate() {
+        assert!(text::width(line) <= crate::render::SIDEBAR_W as usize, "row {y}: {line}");
+    }
+    // Click targets: MCP row opens the dialog on that server, session row switches.
+    let gy = pos(&sb, "github").unwrap() as u16;
+    assert!(app.sidebar_mcp_rows.iter().any(|(y, n)| *y == gy && n == "github"));
+    let wy = pos(&sb, "worker-1").unwrap() as u16;
+    assert!(app.sidebar_rows.iter().any(|(y, id)| *y == wy && id == "ses_b1"));
+    app.screen = ratatui::layout::Rect::new(0, 0, 160, 40);
+    use crossterm::event::{MouseButton, MouseEventKind};
+    crate::input::handle(&mut app, mouse(MouseEventKind::Down(MouseButton::Left), 150, gy));
+    match &app.dialog {
+        Some(crate::ui::dialog::Dialog::Mcp(d)) => assert!(d.expanded.contains("github")),
+        _ => panic!("mcp dialog not opened"),
+    }
+}
+
+#[test]
+fn sidebar_short_screen_priority() {
+    let mut app = sidebar_app();
+    let (term, s) = render(&mut app, 160, 20);
+    println!("{s}");
+    let sb = sidebar_text(&term, 160);
+    // Compact session info (title + agent/model + context) still on top.
+    assert!(pos(&sb, "Fix the parser").is_some());
+    assert!(pos(&sb, "build · claude-opus-5.5").is_some(), "{sb:#?}");
+    // Todo has priority over MCP, MCP over live sessions; all sections still present in some form.
+    let t = pos(&sb, "Todo").expect("todo");
+    assert!(pos(&sb, "◐ Fix the off-by-one").is_some(), "in-progress item kept: {sb:#?}");
+    assert!(pos(&sb, "MCP").is_some(), "mcp header/summary: {sb:#?}");
+    let todo_rows = sb.iter().filter(|l| l.starts_with('☐') || l.starts_with('◐') || l.starts_with('☑')).count();
+    let mcp_rows = ["context7", "github", "sqlite"].iter().filter(|n| pos(&sb, n).is_some()).count();
+    let live_rows = ["worker-1", "docs-writer", "reviewer"].iter().filter(|n| pos(&sb, n).is_some()).count();
+    assert!(todo_rows >= mcp_rows && mcp_rows >= live_rows, "priority: todo {todo_rows} mcp {mcp_rows} live {live_rows}\n{sb:#?}");
+    assert!(t > 0);
+    // Nothing drawn beyond the screen; sidebar rows within width.
+    assert_eq!(sb.len(), 20);
+    for line in &sb {
+        assert!(text::width(line) <= crate::render::SIDEBAR_W as usize, "{line}");
+    }
+    // Very short: no panic, session title first.
+    for h in [6u16, 10, 14] {
+        let (term, _) = render(&mut app, 160, h);
+        let sb = sidebar_text(&term, 160);
+        assert!(sb[1].contains("Fix the parser"), "h={h}: {sb:#?}");
+    }
+}
+
+#[test]
+fn mcp_status_fallback_and_polling() {
+    use crate::app::Pending;
+    let mut app = test_app(false);
+    app.config.as_mut().unwrap().mcp = vec![("ctx".into(), "connected (3 tools)".into()), ("gh".into(), "failed: HTTP 401".into()), ("slow".into(), "connecting".into())];
+    app.refresh_mcp();
+    // Older backend: McpStatus fails -> GetConfig lines are used.
+    let id = *app.pending.iter().find(|(_, p)| matches!(p, Pending::Mcp)).map(|(k, _)| k).unwrap();
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response { id, ok: false, result: json!(null), error: Some("unknown op".into()) }));
+    assert!(app.mcp_fallback && app.toasts.items.is_empty(), "no error toast");
+    assert_eq!(app.mcp.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["ctx", "gh", "slow"]);
+    assert_eq!(app.mcp[0].n_tools, 3);
+    assert_eq!(app.mcp[1].error.as_deref(), Some("HTTP 401"));
+    // Something is connecting: a poll is scheduled (via GetConfig in fallback mode).
+    assert!(app.mcp_poll_at.is_some());
+    app.mcp_poll_at = Some(std::time::Instant::now());
+    app.housekeeping();
+    let id = *app.pending.iter().find(|(_, p)| matches!(p, Pending::ConfigMcp)).map(|(k, _)| k).expect("fallback poll");
+    let mut cfg = app.config.clone().unwrap();
+    cfg.mcp[2].1 = "connected (1 tools)".into();
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response { id, ok: true, result: json!({ "config": cfg }), error: None }));
+    assert!(app.mcp_poll_at.is_none(), "all settled: no more polling");
+    assert_eq!(app.mcp[2].state, crate::ui::mcp::McpState::Connected);
+    // New backend: McpStatus answered; polls while connecting, stops when settled.
+    let mut app = test_app(false);
+    app.refresh_mcp();
+    answer_mcp(&mut app, &mcp_servers());
+    assert!(app.mcp_poll_at.is_some());
+    assert_eq!(app.mcp[0].tools, ["resolve-library-id", "get-library-docs"], "prefix stripped");
+    app.refresh_mcp();
+    let settled: Vec<McpServerStatus> = mcp_servers().into_iter().map(|mut s| {
+        if s.status == "connecting" {
+            s.status = "connected".into();
+        }
+        s
+    }).collect();
+    answer_mcp(&mut app, &settled);
+    assert!(app.mcp_poll_at.is_none());
+    app.toasts.items.clear();
+    render(&mut app, 100, 30);
+    assert_eq!(app.frame_interval(), None, "idle: no wakeups once settled");
+}
+
+#[test]
+fn mcp_dialog_render_wrap_cjk_and_tools() {
+    use crossterm::event::{KeyCode, KeyModifiers};
+    let mut app = sidebar_app();
+    type_str(&mut app, "/mcp");
+    crate::input::handle(&mut app, key(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(matches!(app.dialog, Some(crate::ui::dialog::Dialog::Mcp(_))), "/mcp opens the dialog");
+    assert!(app.pending.values().any(|p| matches!(p, crate::app::Pending::Mcp)), "refreshed on open");
+    if let Some(crate::ui::dialog::Dialog::Mcp(d)) = app.dialog.as_mut() {
+        d.opened -= std::time::Duration::from_secs(1);
+    }
+    for (w, h) in [(100u16, 30u16), (60, 30)] {
+        let (_, s) = render(&mut app, w, h);
+        println!("{s}");
+        assert!(s.contains("MCP servers"));
+        assert!(s.contains("context7") && s.contains("connected · 2 tools"), "{s}");
+        assert!(s.contains("docs-搜索") && s.contains("connecting"));
+        assert!(s.contains("sqlite") && s.contains("disabled"));
+        // The long error wraps inside the dialog (both the start and the end are shown).
+        assert!(s.contains("error: HTTP 401 Unauthorized"), "{s}");
+        assert!(s.contains("restart the backend") || s.contains("more lines"), "{s}");
+        for l in s.lines() {
+            assert!(text::width(l) <= w as usize);
+        }
+        // Frame borders line up on CJK rows.
+        let row = s.lines().find(|l| l.contains("docs-搜索")).unwrap();
+        assert!(row.contains("connecting… │"), "{row}");
+    }
+    // Enter expands the selected (first) server's tools.
+    let (_, s) = render(&mut app, 100, 30);
+    assert!(!s.contains("resolve-library-id"));
+    crate::input::handle(&mut app, key(KeyCode::Enter, KeyModifiers::NONE));
+    let (_, s) = render(&mut app, 100, 30);
+    assert!(s.contains("resolve-library-id") && s.contains("get-library-docs"), "{s}");
+    assert!(s.contains("▾") && s.contains("1/3 connected · 2 tools"), "{s}");
+    // ← collapses, ↓ moves, esc closes. Read-only: no requests besides refreshes.
+    crate::input::handle(&mut app, key(KeyCode::Left, KeyModifiers::NONE));
+    let (_, s) = render(&mut app, 100, 30);
+    assert!(!s.contains("resolve-library-id"));
+    crate::input::handle(&mut app, key(KeyCode::Down, KeyModifiers::NONE));
+    crate::input::handle(&mut app, key(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(app.dialog.is_none());
+    // Autocomplete + palette + help list it.
+    type_str(&mut app, "/mc");
+    assert!(app.ac.as_ref().is_some_and(|a| a.items.iter().any(|i| i.1 == "/mcp")));
+    app.editor.clear();
+    app.ac = None;
+    app.open_help();
+    render(&mut app, 120, 80);
+    if let Some(crate::ui::dialog::Dialog::Help(h)) = app.dialog.as_mut() {
+        h.scroll_by(1000);
+    }
+    let (_, s) = render(&mut app, 120, 80);
+    assert!(s.contains("/mcp") && s.contains("MCP servers: status"), "{s}");
+    // Empty / not loaded.
+    let mut app = test_app(false);
+    app.open_mcp(None);
+    let (_, s) = render(&mut app, 100, 30);
+    assert!(s.contains("Loading MCP servers"), "{s}");
+}
+
+fn msg(id: &str, role: Role, source: MessageSource, t: i64, text: &str) -> Message {
+    Message {
+        id: id.into(),
+        role,
+        time: t,
+        time_end: (role == Role::Assistant).then_some(t + 1000),
+        source,
+        parts: vec![Part::Text { text: text.into(), time: t }],
+        model: None,
+        agent: Some("build".into()),
+        usage: None,
+        error: None,
+    }
+}
+
+/// Old conversation, compaction, new conversation.
+fn compacted_app() -> App {
+    let mut app = test_app(false);
+    let mut msgs = transcript(false);
+    msgs.push(msg("c1", Role::User, MessageSource::Compaction, ts(14, 5, 0), "## Goal\nFix the parser off-by-one.\n\n## Done\n- Fixed loop bound"));
+    msgs.push(msg("m3", Role::User, MessageSource::Human, ts(14, 6, 0), "Now update the changelog"));
+    msgs.push(msg("m4", Role::Assistant, MessageSource::Human, ts(14, 6, 1), "Changelog updated."));
+    let v = app.views.get_mut("ses_test").unwrap();
+    let info = v.info.clone();
+    v.load_snapshot(SessionSnapshot { info, messages: msgs, pending_permissions: vec![] });
+    app
+}
+
+#[test]
+fn compaction_divider_keeps_old_messages_interactive() {
+    use crate::ui::Hit;
+    let mut app = compacted_app();
+    let (term, s) = render(&mut app, 100, 60);
+    println!("{s}");
+    let lines: Vec<&str> = s.lines().collect();
+    // Old messages are all still there.
+    assert!(s.contains("Please fix the off-by-one") && s.contains("bash  Run the unit tests") && s.contains("Now update the changelog") && s.contains("Changelog updated."));
+    // Divider row across the width.
+    let dy = lines.iter().position(|l| l.contains("◇ Context compacted")).expect("divider");
+    let dl = lines[dy];
+    assert!(dl.contains("──── ◇ Context compacted · 14:05:00 · click to view summary"), "{dl}");
+    assert!(dl.contains("──────") && dl.trim_end().ends_with("⧉ copy"), "{dl}");
+    assert!(text::width(dl.trim_end()) >= 95, "spans the width: {dl}");
+    assert!(lines[dy + 1].contains(crate::ui::message::CONTEXT_HINT), "hint row");
+    let old_user = lines.iter().position(|l| l.contains("Please fix")).unwrap();
+    let new_user = lines.iter().position(|l| l.contains("Now update")).unwrap();
+    assert!(old_user < dy && dy < new_user);
+    // Old messages are dimmed, new ones are not.
+    let buf = term.backend().buffer();
+    let fg_at = |y: usize, sym: &str| buf[(find_col(&term, y as u16, sym).unwrap(), y as u16)].fg;
+    assert_ne!(fg_at(old_user, "P"), crate::ui::theme::TEXT, "old prompt dimmed");
+    assert_eq!(fg_at(new_user, "N"), crate::ui::theme::TEXT, "new prompt normal");
+    let _ = buf;
+    // Copy/undo on old messages still work (hit zones unchanged).
+    let uy = lines.iter().position(|l| l.contains("14:02:11") && l.contains("↶ undo")).expect("old user meta") as u16;
+    let ux = find_col(&term, uy, "↶").unwrap();
+    let cx = find_col(&term, uy, "⧉").unwrap();
+    let ay = lines.iter().position(|l| l.contains("Build · claude") && l.contains("14:02:13")).expect("old assistant footer") as u16;
+    let ax = find_col(&term, ay, "⧉").unwrap();
+    let cdx = find_col(&term, dy as u16, "⧉").unwrap();
+    {
+        let v = app.views.get_mut("ses_test").unwrap();
+        assert_eq!(v.chat.hit_at(ux, uy), Some(Hit::Undo { msg: "m1".into() }));
+        assert_eq!(v.chat.hit_at(cx, uy), Some(Hit::Copy { msg: "m1".into() }));
+        assert_eq!(v.chat.hit_at(ax, ay), Some(Hit::Copy { msg: "m2".into() }));
+        assert_eq!(v.chat.hit_at(cdx, dy as u16), Some(Hit::Copy { msg: "c1".into() }));
+        assert_eq!(v.chat.hit_at(10, dy as u16), Some(Hit::Toggle { msg: "c1".into(), part: 0 }));
+    }
+    // Undo before the divider removes 5 messages (incl. the compaction; the server handles it).
+    app.screen = ratatui::layout::Rect::new(0, 0, 100, 60);
+    use crossterm::event::{MouseButton, MouseEventKind};
+    crate::input::handle(&mut app, mouse(MouseEventKind::Down(MouseButton::Left), ux + 1, uy));
+    crate::input::handle(&mut app, mouse(MouseEventKind::Up(MouseButton::Left), ux + 1, uy));
+    assert!(app.pending.values().any(|p| matches!(p, crate::app::Pending::Undo { count: Some(5) })));
+    // Old tool still expands; the summary expands on click.
+    let v = app.views.get_mut("ses_test").unwrap();
+    v.chat.toggle("m2", 2);
+    v.chat.toggle("c1", 0);
+    let (_, s) = render(&mut app, 100, 80);
+    assert!(s.contains("╭─ input") && s.contains("test result: ok"), "old tool expanded: {s}");
+    assert!(s.contains("click to hide summary") && s.contains("Fix the parser off-by-one."), "{s}");
+    // Narrow: the divider fits.
+    let (_, s) = render(&mut app, 40, 30);
+    for l in s.lines() {
+        assert!(text::width(l) <= 40);
+    }
+    // A transcript that STARTS with a compaction (old backend) has no "older messages" hint.
+    let mut app = test_app(false);
+    let v = app.views.get_mut("ses_test").unwrap();
+    let info = v.info.clone();
+    v.load_snapshot(SessionSnapshot { info, messages: vec![msg("c1", Role::User, MessageSource::Compaction, ts(14, 5, 0), "sum")], pending_permissions: vec![] });
+    let (_, s) = render(&mut app, 100, 30);
+    assert!(s.contains("◇ Context compacted") && !s.contains(crate::ui::message::CONTEXT_HINT));
+}
+
+#[test]
+fn compaction_divider_in_split_tile() {
+    let mut app = test_app(false);
+    app.mode = Mode::Watch;
+    let inf = bg_session("ses_bg", "worker-1", SessionStatus::Idle, 0);
+    let mut v = SessionView::new(inf.clone(), false);
+    let src = compacted_app();
+    let msgs = src.views["ses_test"].messages.clone();
+    v.load_snapshot(SessionSnapshot { info: inf.clone(), messages: msgs, pending_permissions: vec![] });
+    app.views.insert("ses_bg".into(), v);
+    app.live = vec![inf];
+    let (_, s) = render(&mut app, 120, 40);
+    println!("{s}");
+    let l = s.lines().find(|l| l.contains("◇ compacted")).expect("compact divider");
+    assert!(l.contains("── ◇ compacted 14:05:00 ───"), "{l}");
+    assert!(s.contains("Changelog updated."));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mock_compact_keeps_history() {
+    let (out_tx, out_rx) = mpsc::unbounded_channel();
+    let (ev_tx, mut ev_rx) = mpsc::unbounded_channel();
+    tokio::spawn(crate::mock::run("/home/u/proj".into(), out_rx, ev_tx));
+    let plan = InitPlan { prompt: Some("hello".into()), ..Default::default() };
+    let mut app = App::new(Client::new(out_tx), "/home/u/proj".into(), plan);
+    pump(&mut app, &mut ev_rx, 1500).await;
+    assert!(app.mcp.iter().any(|e| e.name == "github" && e.error.is_some()), "mcp status fetched on connect");
+    for _ in 0..60 {
+        if let Some((sid, req, _)) = app.active_permission() {
+            app.reply_permission(&sid, &req.call_id, true, false);
+        }
+        if app.cur().is_some_and(|v| v.loaded && !v.is_busy() && v.messages.len() >= 2) {
+            break;
+        }
+        pump(&mut app, &mut ev_rx, 250).await;
+    }
+    let before = app.cur().unwrap().messages.len();
+    assert!(before >= 2);
+    app.run_command("compact", "");
+    pump(&mut app, &mut ev_rx, 2500).await;
+    let v = app.cur().unwrap();
+    assert_eq!(v.messages.len(), before + 1, "old messages kept, compaction appended");
+    assert_eq!(v.messages.last().unwrap().source, MessageSource::Compaction);
+    let (_, s) = render(&mut app, 100, 40);
+    assert!(s.contains("◇ Context compacted") && s.contains(crate::ui::message::CONTEXT_HINT), "{s}");
 }

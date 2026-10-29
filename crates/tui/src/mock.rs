@@ -28,6 +28,8 @@ struct World {
     watch_all: bool,
     perm_waiters: HashMap<String, oneshot::Sender<bool>>,
     history: Vec<SessionInfo>,
+    /// When the first MCP status was asked for (simulates a slow-connecting server).
+    mcp_started: i64,
 }
 
 #[derive(Clone)]
@@ -771,7 +773,8 @@ impl Mock {
                         usage: None,
                         error: None,
                     };
-                    m.emit(&session_id, SessionEvent::Reset { messages: vec![summary] });
+                    // Append-only: older messages stay visible; the model context starts here.
+                    m.emit(&session_id, SessionEvent::Message { message: summary });
                     m.with_session(&session_id, |s| s.info.context.used = 4_000);
                     m.set_status(&session_id, SessionStatus::Idle);
                 });
@@ -822,6 +825,28 @@ impl Mock {
             }
             Request::Export { path, .. } => self.ok(id, json!({ "path": path })),
             Request::Shutdown => self.ok(id, json!({})),
+            Request::McpStatus { .. } => {
+                let started = {
+                    let mut w = self.w.lock().unwrap();
+                    if w.mcp_started == 0 {
+                        w.mcp_started = now_ms();
+                    }
+                    w.mcp_started
+                };
+                let docs_ready = now_ms() - started > 8_000;
+                let servers = vec![
+                    McpServerStatus { name: "context7".into(), status: "connected".into(), error: None, tools: vec!["context7_resolve-library-id".into(), "context7_get-library-docs".into()] },
+                    McpServerStatus {
+                        name: "docs".into(),
+                        status: if docs_ready { "connected" } else { "connecting" }.into(),
+                        error: None,
+                        tools: if docs_ready { vec!["docs_search".into()] } else { vec![] },
+                    },
+                    McpServerStatus { name: "github".into(), status: "failed".into(), error: Some("HTTP 401 Unauthorized: missing or invalid bearer token (set GITHUB_TOKEN)".into()), tools: vec![] },
+                    McpServerStatus { name: "sqlite".into(), status: "disabled".into(), error: None, tools: vec![] },
+                ];
+                self.ok(id, json!({ "servers": servers }));
+            }
         }
     }
 

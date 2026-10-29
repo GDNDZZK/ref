@@ -564,6 +564,7 @@ impl HelpDialog {
 pub enum Dialog {
     List(ListDialog),
     Help(HelpDialog),
+    Mcp(super::mcp::McpDialog),
 }
 
 impl Dialog {
@@ -571,6 +572,7 @@ impl Dialog {
         let o = match self {
             Dialog::List(d) => d.opened,
             Dialog::Help(d) => d.opened,
+            Dialog::Mcp(d) => d.opened,
         };
         o.elapsed().as_secs_f32() < 0.15
     }

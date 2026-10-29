@@ -201,6 +201,10 @@ fn finish_run(hub: &Arc<Hub>, s: &Arc<Session>, id: u64) {
             hub.emit(&s.id, SessionEvent::PermissionResolved { call_id: p.request.call_id });
         }
         st.pending_compact = None;
+        if std::mem::take(&mut st.notice_pending) {
+            // Aborted / failed before the notice was delivered: allow it again later.
+            st.context_notice = false;
+        }
         hub.set_status(&mut st, SessionStatus::Idle);
         let mut restart = false;
         if !st.queue.is_empty() {
@@ -243,7 +247,8 @@ async fn run_loop(hub: &Arc<Hub>, s: &Arc<Session>, cancel: &CancellationToken) 
             let st = s.lock();
             (st.info.context.used, st.info.context.auto)
         };
-        if prep.cfg.compaction.auto && auto > 0 && used >= auto {
+        let compactable = crate::compaction::compactable_upto(&s.lock().messages).is_some();
+        if prep.cfg.compaction.auto && auto > 0 && used >= auto && compactable {
             if let Err(e) = crate::compaction::compact(hub, s, &prep, cancel).await {
                 if cancel.is_cancelled() {
                     return Outcome::Aborted;
@@ -275,9 +280,12 @@ async fn run_loop(hub: &Arc<Hub>, s: &Arc<Session>, cancel: &CancellationToken) 
             if cancel.is_cancelled() {
                 return Outcome::Aborted;
             }
-            apply_pending_compact(hub, s);
+            apply_pending_compact(hub, s, &prep);
+            context_notice(hub, s, &prep);
             continue;
         }
+        // Without another request in this run the notice goes out with the next prompt.
+        context_notice(hub, s, &prep);
         if !s.lock().queue.is_empty() {
             continue;
         }
@@ -301,12 +309,39 @@ fn drain_queue(hub: &Arc<Hub>, s: &Arc<Session>) {
     }
 }
 
-fn apply_pending_compact(hub: &Arc<Hub>, s: &Arc<Session>) {
+fn apply_pending_compact(hub: &Arc<Hub>, s: &Arc<Session>, prep: &Prep) {
     let summary = s.lock().pending_compact.take();
     if let Some(summary) = summary {
-        crate::compaction::replace_history(hub, s, &summary);
+        crate::compaction::insert_summary(hub, s, prep, &summary, None);
         crate::ops::persist(hub, s);
     }
+}
+
+/// Text of the one-time recommend-compaction notice.
+pub fn context_notice_text(c: &ref_proto::ContextUsage) -> String {
+    let pct = if c.max > 0 { c.used as f64 * 100.0 / c.max as f64 } else { 0.0 };
+    format!(
+        "[Context notice] This conversation has used {} of {} tokens ({pct:.0}%), past the recommended compaction point ({} tokens). At a good moment (e.g. after finishing the current step), call compact_context with a thorough summary to continue with a fresh context.",
+        c.used, c.max, c.recommend
+    )
+}
+
+/// Appends the recommend-compaction notice if it became due (see `finalize_message`).
+fn context_notice(hub: &Arc<Hub>, s: &Arc<Session>, prep: &Prep) {
+    {
+        let mut st = s.lock();
+        if !std::mem::take(&mut st.notice_pending) {
+            return;
+        }
+        if !prep.tools.iter().any(|e| e.def.name == "compact_context") {
+            return;
+        }
+        let msg = user_message(MessageSource::Reminder, context_notice_text(&st.info.context), vec![]);
+        hub.emit(&s.id, SessionEvent::Message { message: msg.clone() });
+        st.push_message(msg);
+        hub.emit_info(&st);
+    }
+    crate::ops::persist(hub, s);
 }
 
 /// Appends a must_report reminder when needed. Returns true if one was added.
@@ -594,6 +629,14 @@ fn finalize_message(hub: &Arc<Hub>, s: &Arc<Session>, p: &Prep, id: &str, resp: 
     let mut ctx = crate::models::context_for(&p.cfg, &p.model_ref);
     ctx.used = resp.usage.total_context();
     st.info.context = ctx;
+    // First time per context epoch past the recommended point: notify the model at the next
+    // safe point (after the current tool batch).
+    // Skipped when automatic compaction is about to run anyway.
+    let auto_due = p.cfg.compaction.auto && ctx.auto > 0 && ctx.used >= ctx.auto;
+    if !st.context_notice && !auto_due && ctx.recommend > 0 && ctx.used >= ctx.recommend {
+        st.context_notice = true;
+        st.notice_pending = true;
+    }
     st.info.updated_at = now;
     hub.emit_info(&st);
 }

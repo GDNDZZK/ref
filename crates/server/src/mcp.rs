@@ -102,24 +102,55 @@ impl McpManager {
         out
     }
 
-    /// Status lines for GetConfig.
-    pub fn status_lines(&self, cfg: &Config) -> Vec<(String, String)> {
+    /// Detailed status of every configured server (sorted by name), with tool names as
+    /// exposed to the model.
+    pub fn status(&self, cfg: &Config) -> Vec<ref_proto::McpServerStatus> {
         let servers = self.servers_for(cfg);
         let mut out = Vec::new();
         for (name, sc) in &cfg.mcp {
-            if !sc.enabled() {
-                out.push((name.clone(), "disabled".into()));
-                continue;
-            }
-            let st = servers.iter().find(|s| &s.name == name).map(|s| (s.status(), s.tools().len()));
-            let text = match st {
-                Some((McpStatus::Connected, n)) => format!("connected ({n} tools)"),
-                Some((McpStatus::Connecting, _)) | None => "connecting".into(),
-                Some((McpStatus::Failed(e), _)) => format!("failed: {e}"),
+            let mut st = ref_proto::McpServerStatus {
+                name: name.clone(),
+                status: "disabled".into(),
+                error: None,
+                tools: Vec::new(),
             };
-            out.push((name.clone(), text));
+            if sc.enabled() {
+                match servers.iter().find(|s| &s.name == name) {
+                    Some(s) => match s.status() {
+                        McpStatus::Connected => {
+                            st.status = "connected".into();
+                            let mut tools: Vec<String> =
+                                s.tools().iter().map(|t| crate::toolset::mcp_tool_name(name, &t.name)).collect();
+                            tools.sort();
+                            st.tools = tools;
+                        }
+                        McpStatus::Connecting => st.status = "connecting".into(),
+                        McpStatus::Failed(e) => {
+                            st.status = "failed".into();
+                            st.error = Some(e);
+                        }
+                    },
+                    None => st.status = "connecting".into(),
+                }
+            }
+            out.push(st);
         }
         out
+    }
+
+    /// Status lines for GetConfig: (name, status text).
+    pub fn status_lines(&self, cfg: &Config) -> Vec<(String, String)> {
+        self.status(cfg)
+            .into_iter()
+            .map(|s| {
+                let text = match (s.status.as_str(), &s.error) {
+                    ("connected", _) => format!("connected ({} tools)", s.tools.len()),
+                    ("failed", Some(e)) => format!("failed: {e}"),
+                    (other, _) => other.to_string(),
+                };
+                (s.name, text)
+            })
+            .collect()
     }
 
     pub async fn close_all(&self) {

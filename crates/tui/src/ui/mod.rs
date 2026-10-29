@@ -4,6 +4,7 @@ pub mod editor;
 pub mod footer;
 pub mod highlight;
 pub mod markdown;
+pub mod mcp;
 pub mod message;
 pub mod permission;
 pub mod selection;

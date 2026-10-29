@@ -162,6 +162,24 @@ fn dialog_key(app: &mut App, k: KeyEvent) {
             KeyCode::PageDown | KeyCode::Char(' ') => h.scroll_by(10),
             _ => app.dialog = None,
         },
+        Some(Dialog::Mcp(d)) => {
+            let n = app.mcp.len();
+            match k.code {
+                KeyCode::Up | KeyCode::Char('k') => d.move_sel(-1, n),
+                KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab => d.move_sel(1, n),
+                KeyCode::Char('p') if k.modifiers == CTRL => d.move_sel(-1, n),
+                KeyCode::Char('n') if k.modifiers == CTRL => d.move_sel(1, n),
+                KeyCode::Enter | KeyCode::Char(' ') => d.set_expanded(&app.mcp, None),
+                KeyCode::Right | KeyCode::Char('l') => d.set_expanded(&app.mcp, Some(true)),
+                KeyCode::Left | KeyCode::Char('h') => d.set_expanded(&app.mcp, Some(false)),
+                KeyCode::PageUp => d.scroll_by(-10),
+                KeyCode::PageDown => d.scroll_by(10),
+                KeyCode::Char('r') if k.modifiers.is_empty() => app.refresh_mcp(),
+                KeyCode::Esc | KeyCode::Char('q') => app.dialog = None,
+                KeyCode::Char('c') if k.modifiers == CTRL => app.dialog = None,
+                _ => app.dirty = false,
+            }
+        }
         Some(Dialog::List(d)) => {
             match k.code {
                 KeyCode::Esc => {
@@ -722,6 +740,16 @@ fn mouse(app: &mut App, me: MouseEvent) {
             (Dialog::Help(h), MouseEventKind::ScrollUp) => h.scroll_by(-3),
             (Dialog::Help(h), MouseEventKind::ScrollDown) => h.scroll_by(3),
             (Dialog::Help(_), MouseEventKind::Down(_)) => app.dialog = None,
+            (Dialog::Mcp(d), MouseEventKind::Down(MouseButton::Left)) => {
+                if !d.contains(x, y) {
+                    app.dialog = None;
+                } else if let Some(i) = d.server_at(x, y) {
+                    d.sel = i;
+                    d.set_expanded(&app.mcp, None);
+                }
+            }
+            (Dialog::Mcp(d), MouseEventKind::ScrollUp) => d.scroll_by(-3),
+            (Dialog::Mcp(d), MouseEventKind::ScrollDown) => d.scroll_by(3),
             _ => app.dirty = false,
         }
         return;
@@ -781,6 +809,8 @@ fn mouse(app: &mut App, me: MouseEvent) {
             && id != sid
         {
             app.attach_fg(&id);
+        } else if let Some((_, name)) = app.sidebar_mcp_rows.iter().find(|(ry, _)| *ry == y).cloned() {
+            app.open_mcp(Some(&name));
         }
         return;
     }

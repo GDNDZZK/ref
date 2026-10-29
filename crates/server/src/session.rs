@@ -38,6 +38,11 @@ pub struct SessionState {
     pub reported: bool,
     /// Consecutive must_report reminders.
     pub reminders: u32,
+    /// The recommend-compaction notice was issued in the current context epoch (persisted;
+    /// reset by compaction).
+    pub context_notice: bool,
+    /// The notice is due and will be appended at the next safe point.
+    pub notice_pending: bool,
     /// Summary requested by the `compact_context` tool, applied after the current tool batch.
     pub pending_compact: Option<String>,
     /// Abort requested by a user (do not auto-start a new run for queued messages).
@@ -53,7 +58,7 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn new(info: SessionInfo, messages: Vec<Message>, cfg: Arc<Config>, reported: bool) -> Arc<Session> {
+    pub fn new(info: SessionInfo, messages: Vec<Message>, cfg: Arc<Config>, reported: bool, context_notice: bool) -> Arc<Session> {
         Arc::new(Session {
             id: info.id.clone(),
             hashes: Arc::new(HashStore::new()),
@@ -70,6 +75,8 @@ impl Session {
                 system: None,
                 reported,
                 reminders: 0,
+                context_notice,
+                notice_pending: false,
                 pending_compact: None,
                 user_aborted: false,
                 closed: false,
@@ -94,7 +101,7 @@ impl Session {
         let mut messages = st.messages.clone();
         // Queued messages were accepted from the user; keep them.
         messages.extend(st.queue.iter().cloned());
-        Persisted { info, messages, reported: st.reported }
+        Persisted { info, messages, reported: st.reported, context_notice: st.context_notice }
     }
 }
 

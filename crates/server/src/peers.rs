@@ -262,6 +262,8 @@ fn read_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Result<Strin
     let st = target.lock();
     let n = st.messages.len();
     let pages = n.div_ceil(size).max(1);
+    let cstart = crate::convert::effective_start(&st.messages);
+    let compacted = st.messages.get(cstart).is_some_and(|m| m.source == MessageSource::Compaction);
     if n == 0 {
         return Ok(format!("Session \"{}\" has no messages.", st.info.name));
     }
@@ -280,9 +282,16 @@ fn read_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Result<Strin
         page,
         pages
     );
+    if compacted {
+        out.push_str(&format!(
+            "Context was compacted at #{}: messages before it are no longer in the model's context.\n",
+            cstart + 1
+        ));
+    }
     for i in (lo..hi).rev() {
         let m = &st.messages[i];
-        out.push_str(&format!("\n#{} [{}] {}:\n", i + 1, crate::util::fmt_time(m.time), role_label(m)));
+        let mark = if compacted && i < cstart { " (before compaction)" } else { "" };
+        out.push_str(&format!("\n#{} [{}] {}{mark}:\n", i + 1, crate::util::fmt_time(m.time), role_label(m)));
         for p in &m.parts {
             match p {
                 Part::Text { text, .. } if !text.trim().is_empty() => {
