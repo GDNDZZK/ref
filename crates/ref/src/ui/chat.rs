@@ -106,6 +106,7 @@ pub struct ChatView {
     pub area: Rect,
     pub height: usize,
     last_rev: u64,
+    layout_width: usize,
 }
 
 impl Default for ChatView {
@@ -125,6 +126,7 @@ impl Default for ChatView {
             area: Rect::default(),
             height: 0,
             last_rev: 0,
+            layout_width: 0,
         }
     }
 }
@@ -213,6 +215,14 @@ impl ChatView {
 
     /// Build (or fetch from cache) the lines of all messages.
     pub fn layout(&mut self, sv: &SessionView, o: &Opts) {
+        // When the width changes while scrolled up, keep the same message line at the top.
+        let anchor = if !self.follow && self.layout_width != o.width && !self.blocks.is_empty() {
+            let i = self.blocks.partition_point(|(s, _)| *s <= self.scroll_top).saturating_sub(1);
+            self.block_msgs.get(i).map(|id| (id.clone(), self.scroll_top - self.blocks[i].0))
+        } else {
+            None
+        };
+        self.layout_width = o.width;
         let mut blocks = Vec::with_capacity(sv.messages.len());
         let mut ids = Vec::with_capacity(sv.messages.len());
         let mut start = 0usize;
@@ -259,6 +269,12 @@ impl ChatView {
         self.total = start;
         self.blocks = blocks;
         self.block_msgs = ids;
+        if let Some((id, off)) = anchor {
+            if let Some(i) = self.block_msgs.iter().position(|m| *m == id) {
+                let (s, b) = &self.blocks[i];
+                self.scroll_top = s + off.min(b.len().saturating_sub(1));
+            }
+        }
     }
 
     fn md(&mut self, id: &str, text: &str, width: usize, style: Style, highlight: bool) -> Arc<Vec<Line<'static>>> {
@@ -300,7 +316,7 @@ impl ChatView {
             let expanded = self.is_expanded(&m.id, false);
             let label = format!(" {} context compacted ", if expanded { "▾" } else { "▸" });
             let right = format!(" {time}  ");
-            let fill = w.saturating_sub(width(&label) + width(&right) + 4);
+            let fill = w.saturating_sub(2 + width(&label) + width(&right) + width(copy));
             let line = Line::from(vec![
                 Span::styled("──", fg(BORDER)),
                 Span::styled(label, bold(INFO)),
@@ -399,7 +415,8 @@ impl ChatView {
                     if pi > 0 && !out.is_empty() {
                         out.push(RLine::plain(Line::default()));
                     }
-                    let md = self.md(&t.id, &t.text, inner, fg(TEXT), o.highlight);
+                    let src = if msg_live { markdown::close_partial(&t.text) } else { t.text.as_str().into() };
+                    let md = self.md(&t.id, &src, inner, fg(TEXT), o.highlight);
                     for l in md.iter() {
                         let mut spans = vec![Span::raw(ind.clone())];
                         spans.extend(l.spans.iter().cloned());
@@ -507,7 +524,8 @@ impl ChatView {
             Some("length") => left.push(Span::styled(" · max tokens", fg(WARNING))),
             _ => {}
         }
-        let has_text = !m.raw_text().is_empty();
+        // Copy is offered on every message with content (raw text, else the raw tool calls).
+        let has_text = !m.parts.is_empty() || m.error.is_some();
         let mut right = vec![Span::styled(fmt_time(m.time), muted())];
         if has_text {
             right.push(Span::styled("  ⧉ copy", fg(MUTED)));
@@ -531,10 +549,7 @@ impl ChatView {
             ToolState::Streaming => (spinner(o.tick).to_string(), MUTED),
             ToolState::Running => (spinner(o.tick).to_string(), PRIMARY),
             ToolState::AwaitingPermission => ("⏸".to_string(), WARNING),
-            ToolState::Delayed => {
-                let secs = t.run_at.map(|r| ((r - o.now).max(0) + 999) / 1000).unwrap_or(0);
-                (format!("⏳ {secs}s"), INFO)
-            }
+            ToolState::Delayed => ("◷".to_string(), INFO),
             ToolState::Done => ("✓".to_string(), SUCCESS),
             ToolState::Error => ("✗".to_string(), ERROR),
             ToolState::Denied | ToolState::Cancelled => ("⊘".to_string(), WARNING),
@@ -543,16 +558,34 @@ impl ChatView {
         let name_style = match t.state {
             ToolState::AwaitingPermission => bold(WARNING),
             ToolState::Error => bold(ERROR),
+            ToolState::Denied | ToolState::Cancelled => Style::new().fg(MUTED).add_modifier(Modifier::BOLD),
             _ => Style::new().fg(TEXT).add_modifier(Modifier::BOLD),
         };
         let start = t.time_start.unwrap_or(t.time);
-        let mut right = fmt_time(start);
-        if let Some(e) = t.time_end {
-            right.push_str(&format!(" · {}", fmt_dur(e - start)));
-        } else if t.state == ToolState::Running {
-            right.push_str(&format!(" · {}", fmt_dur(o.now - start)));
-        } else if t.state == ToolState::Denied {
-            right.push_str(" · denied");
+        let mut right = vec![Span::styled(fmt_time(start), Style::new().fg(BORDER_ACTIVE))];
+        let status = match t.state {
+            ToolState::Done => t.time_end.map(|e| (fmt_dur(e - start), BORDER_ACTIVE)),
+            ToolState::Error => Some((format!("failed{}", t.time_end.map(|e| format!(" · {}", fmt_dur(e - start))).unwrap_or_default()), ERROR)),
+            ToolState::Running => Some((fmt_dur(o.now - start), BORDER_ACTIVE)),
+            ToolState::Denied => Some(("denied".to_string(), WARNING)),
+            ToolState::Cancelled => Some(("cancelled".to_string(), WARNING)),
+            ToolState::AwaitingPermission => Some(("awaiting permission".to_string(), WARNING)),
+            ToolState::Delayed => {
+                let secs = t.run_at.map(|r| ((r - o.now).max(0) + 999) / 1000).unwrap_or(0);
+                let hint = if w >= 90 { " · esc esc cancels" } else { "" };
+                Some((format!("runs in {secs}s{hint}"), INFO))
+            }
+            ToolState::Streaming => None,
+        };
+        if let Some((s, c)) = status {
+            right.push(Span::styled(" · ", fg(BORDER_SUBTLE)));
+            right.push(Span::styled(s, fg(c)));
+        }
+        let rw: usize = right.iter().map(|s| width(&s.content)).sum();
+        let lw_nat = indent + 2 + width(&t.name) + 2 + width(&t.purpose);
+        // Narrow: keep the purpose readable; drop the start time first (the status stays).
+        if lw_nat + rw + 1 > w && right.len() > 1 && w < 100 {
+            right.drain(..2);
         }
         let purpose = if t.purpose.is_empty() {
             match t.state {
@@ -569,7 +602,6 @@ impl ChatView {
             Span::raw("  "),
             Span::styled(purpose.replace('\n', " "), muted()),
         ];
-        let right = vec![Span::styled(right, Style::new().fg(BORDER_ACTIVE))];
         let (line, _) = lr(left, right, w);
         out.push(RLine::with(line, Action::TogglePart(t.id.clone())));
         if !expanded {
@@ -629,7 +661,9 @@ impl ChatView {
 }
 
 fn fmt_dur_s(ms: i64) -> String {
-    if ms < 60_000 {
+    if ms < 1000 {
+        "<1s".to_string()
+    } else if ms < 60_000 {
         format!("{}s", (ms.max(0) + 500) / 1000)
     } else {
         fmt_dur(ms)
@@ -712,6 +746,11 @@ pub fn slice_cols(s: &str, from: usize, to: usize) -> String {
 
 /// Draw the chat into `area` (virtualized). Call `view.layout` first.
 pub fn draw(buf: &mut Buffer, area: Rect, view: &mut ChatView, selected_msg: Option<usize>) {
+    draw_ex(buf, area, view, selected_msg, true)
+}
+
+/// Like `draw`; with `track == false` only the scrollbar thumb is drawn (over a pane border).
+pub fn draw_ex(buf: &mut Buffer, area: Rect, view: &mut ChatView, selected_msg: Option<usize>, track: bool) {
     view.area = area;
     view.height = area.height as usize;
     let h = area.height as usize;
@@ -767,13 +806,16 @@ pub fn draw(buf: &mut Buffer, area: Rect, view: &mut ChatView, selected_msg: Opt
     }
     // Scrollbar.
     if view.total > h && h > 2 {
-        let track = h;
         let thumb = ((h * h) / view.total).max(1);
-        let pos = (top * (track - thumb)).checked_div(max_top).unwrap_or(0);
+        let pos = (top * (h - thumb)).checked_div(max_top).unwrap_or(0);
         let sx = area.x + area.width - 1;
-        for i in 0..track {
-            let (ch, c) = if i >= pos && i < pos + thumb { ("┃", BORDER_ACTIVE) } else { ("│", BORDER_SUBTLE) };
-            buf.set_string(sx, area.y + i as u16, ch, fg(c));
+        for i in 0..h {
+            let on = i >= pos && i < pos + thumb;
+            if on {
+                buf.set_string(sx, area.y + i as u16, "┃", fg(BORDER_ACTIVE));
+            } else if track {
+                buf.set_string(sx, area.y + i as u16, "│", fg(BORDER_SUBTLE));
+            }
         }
     }
     if view.unseen && !view.follow {

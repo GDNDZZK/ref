@@ -6,33 +6,37 @@ use serde_json::json;
 
 use crate::{builtin_defs, execute, file_hash, ToolCtx, ToolOutput, BUILTIN_TOOLS};
 
-fn setup() -> (tempfile::TempDir, ToolCtx) {
+pub(crate) fn setup() -> (tempfile::TempDir, ToolCtx) {
     let dir = tempfile::tempdir().unwrap();
     let ctx = ToolCtx::new(dir.path().canonicalize().unwrap());
     (dir, ctx)
 }
 
-fn rt() -> tokio::runtime::Runtime {
-    tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap()
+pub(crate) fn rt() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap()
 }
 
-fn call(ctx: &ToolCtx, name: &str, input: serde_json::Value) -> ToolOutput {
+pub(crate) fn call(ctx: &ToolCtx, name: &str, input: serde_json::Value) -> ToolOutput {
     rt().block_on(execute(name, input, ctx))
 }
 
-fn ok(ctx: &ToolCtx, name: &str, input: serde_json::Value) -> String {
+pub(crate) fn ok(ctx: &ToolCtx, name: &str, input: serde_json::Value) -> String {
     let o = call(ctx, name, input);
     assert!(!o.is_error, "{name} failed: {}", o.text);
     o.text
 }
 
-fn err(ctx: &ToolCtx, name: &str, input: serde_json::Value) -> String {
+pub(crate) fn err(ctx: &ToolCtx, name: &str, input: serde_json::Value) -> String {
     let o = call(ctx, name, input);
     assert!(o.is_error, "{name} unexpectedly succeeded: {}", o.text);
     o.text
 }
 
-fn put(dir: &Path, name: &str, content: &str) {
+pub(crate) fn put(dir: &Path, name: &str, content: &str) {
     let p = dir.join(name);
     if let Some(parent) = p.parent() {
         std::fs::create_dir_all(parent).unwrap();
@@ -40,22 +44,25 @@ fn put(dir: &Path, name: &str, content: &str) {
     std::fs::write(p, content).unwrap();
 }
 
-fn get(dir: &Path, name: &str) -> String {
+pub(crate) fn get(dir: &Path, name: &str) -> String {
     std::fs::read_to_string(dir.join(name)).unwrap()
 }
 
 /// Tag from the first `[path#TAG]` header in `out`.
-fn tag_of(out: &str) -> String {
-    let l = out.lines().find(|l| l.starts_with('[') || l.starts_with("## ")).unwrap();
+pub(crate) fn tag_of(out: &str) -> String {
+    let l = out
+        .lines()
+        .find(|l| l.starts_with('[') || l.starts_with("## "))
+        .unwrap();
     let i = l.rfind('#').unwrap();
     l[i + 1..i + 5].to_string()
 }
 
-fn edit(ctx: &ToolCtx, patch: &str) -> ToolOutput {
+pub(crate) fn edit(ctx: &ToolCtx, patch: &str) -> ToolOutput {
     call(ctx, "edit", json!({ "input": patch }))
 }
 
-const ABC: &str = "alpha\nbravo\ncharlie\ndelta\necho\nfoxtrot\ngolf\n";
+pub(crate) const ABC: &str = "alpha\nbravo\ncharlie\ndelta\necho\nfoxtrot\ngolf\n";
 
 #[test]
 fn defs_order_and_schema() {
@@ -68,13 +75,19 @@ fn defs_order_and_schema() {
         assert!(d.parameters.get("additionalProperties").is_none());
     }
     assert_eq!(defs[1].parameters["required"], json!(["input"]));
-    assert_eq!(serde_json::to_string(&builtin_defs()).unwrap(), serde_json::to_string(&defs).unwrap());
+    assert_eq!(
+        serde_json::to_string(&builtin_defs()).unwrap(),
+        serde_json::to_string(&defs).unwrap()
+    );
 }
 
 #[test]
 fn params_validation() {
     let (_d, ctx) = setup();
-    assert_eq!(err(&ctx, "read", json!({})), "missing required parameter `path`");
+    assert_eq!(
+        err(&ctx, "read", json!({})),
+        "missing required parameter `path`"
+    );
     assert!(err(&ctx, "read", json!({"path": 3})).contains("must be a string"));
     assert!(err(&ctx, "nope", json!({})).contains("unknown tool"));
     assert!(err(&ctx, "edit", json!({})).contains("missing required parameter `input`"));
@@ -87,18 +100,37 @@ fn read_format_offset_limit() {
     put(d.path(), "src/a.txt", ABC);
     let out = ok(&ctx, "read", json!({"path": "src/a.txt"}));
     let tag = file_hash(ABC);
-    assert_eq!(out, format!("[src/a.txt#{tag}]\n1:alpha\n2:bravo\n3:charlie\n4:delta\n5:echo\n6:foxtrot\n7:golf"));
-    let out = ok(&ctx, "read", json!({"path": "src/a.txt", "offset": 2, "limit": 2}));
-    assert_eq!(out, format!("[src/a.txt#{tag}]\n2:bravo\n3:charlie\n[4 more lines. Use offset=4 to continue]"));
+    assert_eq!(
+        out,
+        format!(
+            "[src/a.txt#{tag}]\n1:alpha\n2:bravo\n3:charlie\n4:delta\n5:echo\n6:foxtrot\n7:golf"
+        )
+    );
+    let out = ok(
+        &ctx,
+        "read",
+        json!({"path": "src/a.txt", "offset": 2, "limit": 2}),
+    );
+    assert_eq!(
+        out,
+        format!("[src/a.txt#{tag}]\n2:bravo\n3:charlie\n[4 more lines. Use offset=4 to continue]")
+    );
     // omp-style suffix
     let out = ok(&ctx, "read", json!({"path": "src/a.txt:6-7"}));
     assert_eq!(out, format!("[src/a.txt#{tag}]\n6:foxtrot\n7:golf"));
     // absolute path inside cwd displays relative
     let abs = d.path().canonicalize().unwrap().join("src/a.txt");
-    let out = ok(&ctx, "read", json!({"path": abs.to_string_lossy(), "limit": 1}));
+    let out = ok(
+        &ctx,
+        "read",
+        json!({"path": abs.to_string_lossy(), "limit": 1}),
+    );
     assert!(out.starts_with("[src/a.txt#"));
     put(d.path(), "empty.txt", "");
-    assert_eq!(ok(&ctx, "read", json!({"path": "empty.txt"})), "[empty.txt#5D05]\n(empty file)");
+    assert_eq!(
+        ok(&ctx, "read", json!({"path": "empty.txt"})),
+        "[empty.txt#5D05]\n(empty file)"
+    );
 }
 
 #[test]
@@ -110,7 +142,11 @@ fn read_long_line_not_seen() {
     assert!(out.contains("2:xxx") && out.contains('…') && out.contains("cut"));
     let tag = tag_of(&out);
     let e = edit(&ctx, &format!("[l.txt#{tag}]\nPUT 2:\n+y\n"));
-    assert!(e.is_error && e.text.contains("never displayed"), "{}", e.text);
+    assert!(
+        e.is_error && e.text.contains("never displayed"),
+        "{}",
+        e.text
+    );
     // line 1 editable
     let e = edit(&ctx, &format!("[l.txt#{tag}]\nPUT 1:\n+S\n"));
     assert!(!e.is_error, "{}", e.text);
@@ -130,7 +166,10 @@ fn read_dir_binary_missing() {
     assert!(err(&ctx, "read", json!({"path": "bad.txt"})).contains("UTF-8"));
     put(d.path(), "config.toml", "x");
     let e = err(&ctx, "read", json!({"path": "confg.toml"}));
-    assert!(e.contains("File not found: confg.toml") && e.contains("config.toml"), "{e}");
+    assert!(
+        e.contains("File not found: confg.toml") && e.contains("config.toml"),
+        "{e}"
+    );
 }
 
 #[test]
@@ -156,14 +195,26 @@ fn edit_ops_non_shifting() {
     );
     let o = edit(&ctx, &patch);
     assert!(!o.is_error, "{}", o.text);
-    assert_eq!(get(d.path(), "a.txt"), "ALPHA\nALPHA2\nbravo\ndelta\npre-echo\necho\npost-echo\nFG\n\nend\n");
+    assert_eq!(
+        get(d.path(), "a.txt"),
+        "ALPHA\nALPHA2\nbravo\ndelta\npre-echo\necho\npost-echo\nFG\n\nend\n"
+    );
     let new_tag = tag_of(&o.text);
     assert_eq!(new_tag, file_hash(&get(d.path(), "a.txt")));
-    assert!(o.text.starts_with(&format!("[a.txt#{new_tag}]\n1:ALPHA\n2:ALPHA2\n")), "{}", o.text);
+    assert!(
+        o.text.starts_with(&format!(
+            "[a.txt#{new_tag}]\n-alpha\n1:ALPHA\n2:ALPHA2\n3:bravo\n-charlie\n4:delta"
+        )),
+        "{}",
+        o.text
+    );
     // follow-up edit with the new tag, lines shown in the preview
     let o = edit(&ctx, &format!("[a.txt#{new_tag}]\nCUT 9.=10\n"));
     assert!(!o.is_error, "{}", o.text);
-    assert_eq!(get(d.path(), "a.txt"), "ALPHA\nALPHA2\nbravo\ndelta\npre-echo\necho\npost-echo\nFG\n");
+    assert_eq!(
+        get(d.path(), "a.txt"),
+        "ALPHA\nALPHA2\nbravo\ndelta\npre-echo\necho\npost-echo\nFG\n"
+    );
 }
 
 #[test]
@@ -172,16 +223,36 @@ fn edit_errors() {
     put(d.path(), "a.txt", ABC);
     let tag = tag_of(&ok(&ctx, "read", json!({"path": "a.txt"})));
     let o = edit(&ctx, &format!("[a.txt#{tag}]\nPUT 2.=4:\n+x\nCUT 4\n"));
-    assert!(o.is_error && o.text.contains("anchor line 4 is already targeted"), "{}", o.text);
+    assert!(
+        o.is_error && o.text.contains("anchor line 4 is already targeted"),
+        "{}",
+        o.text
+    );
     let o = edit(&ctx, &format!("[a.txt#{tag}]\nPUT 9:\n+x\n"));
-    assert!(o.is_error && o.text.contains("Line 9 does not exist (file has 7 lines)"), "{}", o.text);
+    assert!(
+        o.is_error && o.text.contains("Line 9 does not exist (file has 7 lines)"),
+        "{}",
+        o.text
+    );
     let o = edit(&ctx, &format!("[a.txt#{tag}]\nPUT 2:\n+bravo\n"));
-    assert!(o.is_error && o.text.contains("produced no change"), "{}", o.text);
+    assert!(
+        o.is_error && o.text.contains("produced no change"),
+        "{}",
+        o.text
+    );
     let o = edit(&ctx, &format!("[new.txt#{tag}]\nPUT >$:\n+x\n"));
     assert!(o.is_error && o.text.contains("use `write`"), "{}", o.text);
     let o = edit(&ctx, "[a.txt#BEEF]\nPUT 2:\n+x\n");
-    assert!(o.is_error && o.text.contains("hash #BEEF is not from this session"), "{}", o.text);
-    assert!(o.text.contains(&format!("#{tag}")) && o.text.contains("*2:bravo"), "{}", o.text);
+    assert!(
+        o.is_error && o.text.contains("hash #BEEF is not from this session"),
+        "{}",
+        o.text
+    );
+    assert!(
+        o.text.contains(&format!("#{tag}")) && o.text.contains("*2:bravo"),
+        "{}",
+        o.text
+    );
     assert_eq!(get(d.path(), "a.txt"), ABC);
 }
 
@@ -213,7 +284,10 @@ fn edit_rebase_after_external_change() {
     let old_tag = tag_of(&ok(&ctx, "read", json!({"path": "a.txt"})));
     // Insert two lines at the top externally.
     put(d.path(), "a.txt", &format!("new1\nnew2\n{ABC}"));
-    let o = edit(&ctx, &format!("[a.txt#{old_tag}]\nPUT 6:\n+FOXTROT\nCUT 1\n"));
+    let o = edit(
+        &ctx,
+        &format!("[a.txt#{old_tag}]\nPUT 6:\n+FOXTROT\nCUT 1\n"),
+    );
     assert!(!o.is_error, "{}", o.text);
     assert!(o.text.contains("Recovered by remapping"), "{}", o.text);
     assert_eq!(
@@ -231,7 +305,10 @@ fn edit_chain_with_old_tag_rebases() {
     assert!(!edit(&ctx, &format!("[a.txt#{tag}]\nPUT <1:\n+top\n")).is_error);
     let o = edit(&ctx, &format!("[a.txt#{tag}]\nPUT 7:\n+GOLF\n"));
     assert!(!o.is_error, "{}", o.text);
-    assert_eq!(get(d.path(), "a.txt"), format!("top\n{}", ABC.replace("golf", "GOLF")));
+    assert_eq!(
+        get(d.path(), "a.txt"),
+        format!("top\n{}", ABC.replace("golf", "GOLF"))
+    );
 }
 
 #[test]
@@ -241,24 +318,38 @@ fn edit_unseen_guard() {
     let tag = tag_of(&ok(&ctx, "read", json!({"path": "a.txt", "limit": 2})));
     let o = edit(&ctx, &format!("[a.txt#{tag}]\nPUT 5.=6:\n+x\n"));
     assert!(o.is_error);
-    assert!(o.text.contains("lines 5-6 of a.txt") && o.text.contains("5:echo\n6:foxtrot\n"), "{}", o.text);
-    assert!(o.text.contains("straight retry now succeeds"));
+    assert!(
+        o.text.contains("lines 5-6 of a.txt") && o.text.contains("5:echo\n6:foxtrot\n"),
+        "{}",
+        o.text
+    );
+    assert!(o.text.contains("re-send the SAME edit unchanged"));
     let o = edit(&ctx, &format!("[a.txt#{tag}]\nPUT 5.=6:\n+x\n"));
     assert!(!o.is_error, "{}", o.text);
-    assert_eq!(get(d.path(), "a.txt"), "alpha\nbravo\ncharlie\ndelta\nx\ngolf\n");
+    assert_eq!(
+        get(d.path(), "a.txt"),
+        "alpha\nbravo\ncharlie\ndelta\nx\ngolf\n"
+    );
 }
 
 #[test]
 fn edit_crlf_bom_preserved() {
     let (d, ctx) = setup();
-    std::fs::write(d.path().join("w.txt"), b"\xef\xbb\xbfone\r\ntwo\r\nthree\r\n").unwrap();
+    std::fs::write(
+        d.path().join("w.txt"),
+        b"\xef\xbb\xbfone\r\ntwo\r\nthree\r\n",
+    )
+    .unwrap();
     let out = ok(&ctx, "read", json!({"path": "w.txt"}));
     assert!(out.contains("1:one\n2:two"));
     let tag = tag_of(&out);
     assert_eq!(tag, file_hash("one\ntwo\nthree\n"));
     let o = edit(&ctx, &format!("[w.txt#{tag}]\nPUT 2:\n+TWO\n+2b\n"));
     assert!(!o.is_error, "{}", o.text);
-    assert_eq!(std::fs::read(d.path().join("w.txt")).unwrap(), b"\xef\xbb\xbfone\r\nTWO\r\n2b\r\nthree\r\n");
+    assert_eq!(
+        std::fs::read(d.path().join("w.txt")).unwrap(),
+        b"\xef\xbb\xbfone\r\nTWO\r\n2b\r\nthree\r\n"
+    );
 }
 
 #[test]
@@ -266,10 +357,16 @@ fn edit_repairs() {
     let (d, ctx) = setup();
     put(d.path(), "a.txt", ABC);
     let tag = tag_of(&ok(&ctx, "read", json!({"path": "a.txt"})));
-    let o = edit(&ctx, &format!("[a.txt#{tag}]\nPUT 2.=3:\n2:B\n3:C\nPUT 5:\nE\n"));
+    let o = edit(
+        &ctx,
+        &format!("[a.txt#{tag}]\nPUT 2.=3:\n2:B\n3:C\nPUT 5:\nE\n"),
+    );
     assert!(!o.is_error, "{}", o.text);
     assert!(o.text.contains("Warnings:"));
-    assert_eq!(get(d.path(), "a.txt"), "alpha\nB\nC\ndelta\nE\nfoxtrot\ngolf\n");
+    assert_eq!(
+        get(d.path(), "a.txt"),
+        "alpha\nB\nC\ndelta\nE\nfoxtrot\ngolf\n"
+    );
 }
 
 #[test]
@@ -280,10 +377,16 @@ fn edit_multi_file_atomic_and_rem() {
     let ta = tag_of(&ok(&ctx, "read", json!({"path": "a.txt"})));
     let tb = tag_of(&ok(&ctx, "read", json!({"path": "b.txt"})));
     // second section invalid → nothing written
-    let o = edit(&ctx, &format!("[a.txt#{ta}]\nPUT 1:\n+A\n[b.txt#{tb}]\nPUT 5:\n+B\n"));
+    let o = edit(
+        &ctx,
+        &format!("[a.txt#{ta}]\nPUT 1:\n+A\n[b.txt#{tb}]\nPUT 5:\n+B\n"),
+    );
     assert!(o.is_error);
     assert_eq!(get(d.path(), "a.txt"), "a\n");
-    let o = edit(&ctx, &format!("[a.txt#{ta}]\nPUT 1:\n+A\n[b.txt#{tb}]\nREM\n"));
+    let o = edit(
+        &ctx,
+        &format!("[a.txt#{ta}]\nPUT 1:\n+A\n[b.txt#{tb}]\nREM\n"),
+    );
     assert!(!o.is_error, "{}", o.text);
     assert_eq!(get(d.path(), "a.txt"), "A\n");
     assert!(!d.path().join("b.txt").exists());
@@ -302,40 +405,85 @@ fn edit_large_insert_collapsed() {
     // collapsed lines are not seen
     let t2 = tag_of(&o.text);
     let o = edit(&ctx, &format!("[a.txt#{t2}]\nPUT 10:\n+x\n"));
-    assert!(o.is_error && o.text.contains("never displayed"), "{}", o.text);
+    assert!(
+        o.is_error && o.text.contains("never displayed"),
+        "{}",
+        o.text
+    );
 }
 
 #[test]
 fn str_replace_fallback() {
     let (d, ctx) = setup();
-    put(d.path(), "f.rs", "fn a() {\n    let x = 1;\n    let x = 1;\n}\n");
-    let e = err(&ctx, "edit", json!({"path": "f.rs", "old_string": "let x = 1;", "new_string": "let y = 2;"}));
+    put(
+        d.path(),
+        "f.rs",
+        "fn a() {\n    let x = 1;\n    let x = 1;\n}\n",
+    );
+    let e = err(
+        &ctx,
+        "edit",
+        json!({"path": "f.rs", "old_string": "let x = 1;", "new_string": "let y = 2;"}),
+    );
     assert!(e.contains("matches 2 times"), "{e}");
-    let o = ok(&ctx, "edit", json!({"path": "f.rs", "old_string": "let x = 1;", "new_string": "let y = 2;", "replace_all": true}));
+    let o = ok(
+        &ctx,
+        "edit",
+        json!({"path": "f.rs", "old_string": "let x = 1;", "new_string": "let y = 2;", "replace_all": true}),
+    );
     assert!(o.starts_with("[f.rs#"));
-    assert_eq!(get(d.path(), "f.rs"), "fn a() {\n    let y = 2;\n    let y = 2;\n}\n");
-    let o = ok(&ctx, "edit", json!({"path": "f.rs", "old_string": "  let y = 2;   \n  let y = 2;", "new_string": "  z();"}));
+    assert_eq!(
+        get(d.path(), "f.rs"),
+        "fn a() {\n    let y = 2;\n    let y = 2;\n}\n"
+    );
+    let o = ok(
+        &ctx,
+        "edit",
+        json!({"path": "f.rs", "old_string": "  let y = 2;   \n  let y = 2;", "new_string": "  z();"}),
+    );
     assert!(o.contains("ignoring trailing whitespace"), "{o}");
     assert_eq!(get(d.path(), "f.rs"), "fn a() {\n    z();\n}\n");
-    let e = err(&ctx, "edit", json!({"path": "f.rs", "old_string": "nothing", "new_string": "x"}));
+    let e = err(
+        &ctx,
+        "edit",
+        json!({"path": "f.rs", "old_string": "nothing", "new_string": "x"}),
+    );
     assert!(e.contains("not found"));
 }
 
 #[test]
 fn write_and_delete() {
     let (d, ctx) = setup();
-    let o = ok(&ctx, "write", json!({"path": "deep/x/new.txt", "content": "hello\n"}));
-    assert_eq!(o, "[deep/x/new.txt#5BF9]\nCreated: wrote 1 line (6 bytes) to deep/x/new.txt");
+    let o = ok(
+        &ctx,
+        "write",
+        json!({"path": "deep/x/new.txt", "content": "hello\n"}),
+    );
+    assert_eq!(
+        o,
+        "[deep/x/new.txt#5BF9]\nCreated: wrote 1 line (6 bytes) to deep/x/new.txt"
+    );
     // editable immediately (all lines seen)
     let e = edit(&ctx, "[deep/x/new.txt#5BF9]\nPUT 1:\n+bye\n");
     assert!(!e.is_error, "{}", e.text);
-    let o = ok(&ctx, "write", json!({"path": "deep/x/new.txt", "content": "1:a\n2:b\n"}));
+    let o = ok(
+        &ctx,
+        "write",
+        json!({"path": "deep/x/new.txt", "content": "1:a\n2:b\n"}),
+    );
     assert!(o.contains("Overwrote") && o.contains("stripped"), "{o}");
     assert_eq!(get(d.path(), "deep/x/new.txt"), "a\nb\n");
     // CRLF kept
     std::fs::write(d.path().join("crlf.txt"), b"x\r\ny\r\n").unwrap();
-    ok(&ctx, "write", json!({"path": "crlf.txt", "content": "p\nq\n"}));
-    assert_eq!(std::fs::read(d.path().join("crlf.txt")).unwrap(), b"p\r\nq\r\n");
+    ok(
+        &ctx,
+        "write",
+        json!({"path": "crlf.txt", "content": "p\nq\n"}),
+    );
+    assert_eq!(
+        std::fs::read(d.path().join("crlf.txt")).unwrap(),
+        b"p\r\nq\r\n"
+    );
 
     assert!(err(&ctx, "delete", json!({"path": "deep"})).contains("recursive"));
     assert!(err(&ctx, "delete", json!({"path": ".", "recursive": true})).contains("Refusing"));
@@ -343,14 +491,21 @@ fn write_and_delete() {
     assert!(err(&ctx, "delete", json!({"path": "/", "recursive": true})).contains("Refusing"));
     let o = ok(&ctx, "delete", json!({"path": "deep", "recursive": true}));
     assert_eq!(o, "Deleted directory deep (1 file)");
-    assert_eq!(ok(&ctx, "delete", json!({"path": "crlf.txt"})), "Deleted crlf.txt");
+    assert_eq!(
+        ok(&ctx, "delete", json!({"path": "crlf.txt"})),
+        "Deleted crlf.txt"
+    );
     assert!(err(&ctx, "delete", json!({"path": "crlf.txt"})).contains("not found"));
 }
 
 #[test]
 fn grep_output_and_edit_from_grep() {
     let (d, ctx) = setup();
-    put(d.path(), "src/a.rs", "fn main() {\n    needle();\n    other();\n    needle();\n}\n");
+    put(
+        d.path(),
+        "src/a.rs",
+        "fn main() {\n    needle();\n    other();\n    needle();\n}\n",
+    );
     put(d.path(), "src/b.rs", "// needle here\n");
     put(d.path(), "ignored/c.rs", "needle\n");
     put(d.path(), ".gitignore", "ignored/\n");
@@ -361,10 +516,17 @@ fn grep_output_and_edit_from_grep() {
     let tb = file_hash(&get(d.path(), "src/b.rs"));
     assert_eq!(
         out,
-        format!("## src/a.rs#{ta}\n*2:    needle();\n...\n*4:    needle();\n\n## src/b.rs#{tb}\n*1:// needle here\n\n[3 matches in 2 files]")
+        format!("[src/a.rs#{ta}]\n*2:    needle();\n...\n*4:    needle();\n\n[src/b.rs#{tb}]\n*1:// needle here\n\n[3 matches in 2 files]")
     );
-    let out = ok(&ctx, "grep", json!({"pattern": "NEEDLE", "path": "src/a.rs", "ignore_case": true, "context": 1}));
-    assert!(out.contains(" 1:fn main() {\n*2:    needle();\n 3:    other();\n*4:    needle();\n 5:}"), "{out}");
+    let out = ok(
+        &ctx,
+        "grep",
+        json!({"pattern": "NEEDLE", "path": "src/a.rs", "ignore_case": true, "context": 1}),
+    );
+    assert!(
+        out.contains(" 1:fn main() {\n*2:    needle();\n 3:    other();\n*4:    needle();\n 5:}"),
+        "{out}"
+    );
     // Edit straight from the grep tag.
     let o = edit(&ctx, &format!("[src/a.rs#{ta}]\nPUT 4:\n+    found();\n"));
     assert!(!o.is_error, "{}", o.text);
@@ -386,8 +548,15 @@ fn grep_limits() {
     put(d.path(), "b.txt", &many);
     let out = ok(&ctx, "grep", json!({"pattern": "hit"}));
     assert!(out.contains("[30 more matches in this file"), "{out}");
-    assert!(out.contains("[100 matches in 2 files; showing 40]"), "{out}");
-    let out = ok(&ctx, "grep", json!({"pattern": "hit", "path": "a.txt", "limit": 5}));
+    assert!(
+        out.contains("[100 matches in 2 files; showing 40]"),
+        "{out}"
+    );
+    let out = ok(
+        &ctx,
+        "grep",
+        json!({"pattern": "hit", "path": "a.txt", "limit": 5}),
+    );
     assert!(out.contains("*5:hit 4") && !out.contains("*6:"), "{out}");
     assert!(out.contains("Match limit 5"), "{out}");
 }
@@ -416,21 +585,36 @@ fn find_files() {
     lines.sort();
     assert_eq!(lines, vec!["src/", "src/deep/"]);
     let out = ok(&ctx, "find", json!({"path": "src"}));
-    assert!(out.contains("src/a.rs") && out.contains("src/deep/b.rs") && !out.contains("src/deep/\n"));
+    assert!(
+        out.contains("src/a.rs") && out.contains("src/deep/b.rs") && !out.contains("src/deep/\n")
+    );
     assert!(ok(&ctx, "find", json!({"pattern": "*.zig"})).starts_with("No files found"));
 }
 
 #[test]
 fn bash_basic() {
     let (d, ctx) = setup();
-    let out = ok(&ctx, "bash", json!({"command": "echo hi; echo err >&2; printf '\\033[31mred\\033[0m'"}));
+    let out = ok(
+        &ctx,
+        "bash",
+        json!({"command": "echo hi; echo err >&2; printf '\\033[31mred\\033[0m'"}),
+    );
     assert_eq!(out, "hi\nerr\nred");
     let o = call(&ctx, "bash", json!({"command": "echo x; exit 3"}));
     assert!(o.is_error && o.text == "x\n\n[exit code 3]", "{}", o.text);
     assert_eq!(ok(&ctx, "bash", json!({"command": "true"})), "(no output)");
     std::fs::create_dir(d.path().join("sub")).unwrap();
-    assert!(ok(&ctx, "bash", json!({"command": "pwd", "cwd": "sub"})).trim_end().ends_with("/sub"));
-    assert_eq!(ok(&ctx, "bash", json!({"command": "echo $TERM $NO_COLOR $PAGER"})), "dumb 1 cat\n");
+    assert!(ok(&ctx, "bash", json!({"command": "pwd", "cwd": "sub"}))
+        .trim_end()
+        .ends_with("/sub"));
+    assert_eq!(
+        ok(
+            &ctx,
+            "bash",
+            json!({"command": "echo $TERM $NO_COLOR $PAGER"})
+        ),
+        "dumb 1 cat\n"
+    );
 }
 
 #[test]
@@ -453,15 +637,27 @@ fn bash_timeout_kills_group() {
     let (d, ctx) = setup();
     let marker = d.path().join("pid");
     let start = std::time::Instant::now();
-    let o = call(&ctx, "bash", json!({"command": format!("sleep 100 & echo $! > {}; sleep 100", marker.display()), "timeout": 1}));
-    assert!(o.is_error && o.text.contains("[timed out after 1 s"), "{}", o.text);
+    let o = call(
+        &ctx,
+        "bash",
+        json!({"command": format!("sleep 100 & echo $! > {}; sleep 100", marker.display()), "timeout": 1}),
+    );
+    assert!(
+        o.is_error && o.text.contains("[timed out after 1 s"),
+        "{}",
+        o.text
+    );
     assert!(start.elapsed() < std::time::Duration::from_secs(8));
-    let pid: i32 = std::fs::read_to_string(&marker).unwrap().trim().parse().unwrap();
+    let pid: i32 = std::fs::read_to_string(&marker)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
     std::thread::sleep(std::time::Duration::from_millis(200));
     assert!(!alive(pid), "background sleep survived");
 }
 
-fn alive(pid: i32) -> bool {
+pub(crate) fn alive(pid: i32) -> bool {
     // Zombies count as dead.
     match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
         Ok(s) => !s.split_whitespace().nth(2).is_some_and(|st| st == "Z"),
@@ -475,7 +671,10 @@ fn bash_abort_kills_grandchild() {
     let marker = d.path().join("pid");
     let abort = ctx.abort.clone();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let ctx = ToolCtx { progress: Some(tx), ..ctx };
+    let ctx = ToolCtx {
+        progress: Some(tx),
+        ..ctx
+    };
     let rt = rt();
     let start = std::time::Instant::now();
     let o = rt.block_on(async {
@@ -485,10 +684,18 @@ fn bash_abort_kills_grandchild() {
         });
         execute("bash", json!({"command": format!("echo started; sleep 100 & echo $! > {}; sleep 100", marker.display())}), &ctx).await
     });
-    assert!(o.is_error && o.text.contains("started") && o.text.ends_with("[aborted]"), "{}", o.text);
+    assert!(
+        o.is_error && o.text.contains("started") && o.text.ends_with("[aborted]"),
+        "{}",
+        o.text
+    );
     assert!(start.elapsed() < std::time::Duration::from_secs(8));
     assert_eq!(rx.try_recv().unwrap(), "started\n");
-    let pid: i32 = std::fs::read_to_string(&marker).unwrap().trim().parse().unwrap();
+    let pid: i32 = std::fs::read_to_string(&marker)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
     std::thread::sleep(std::time::Duration::from_millis(200));
     assert!(!alive(pid), "background sleep survived");
 }

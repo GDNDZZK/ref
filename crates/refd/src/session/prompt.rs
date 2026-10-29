@@ -156,10 +156,15 @@ Use exactly this template:
 Rules: terse bullets; preserve exact paths, identifiers, commands and error messages; carry forward unanswered user requests and the current workflow state; do not mention the summarization itself.
 Do not continue the task or call tools. Return only the structured summary.";
 
-pub const TITLE_SYSTEM: &str = "You generate short titles for coding-assistant conversations. Reply with the title only: at most 6 words, no quotes, no trailing punctuation, in the language of the user's message.";
+pub const TITLE_SYSTEM: &str = "Generate a short title (max 6 words) for this conversation in the same language as the user's message. Reply with the title only.";
 
 /// Clean up a generated title.
 pub fn clean_title(raw: &str) -> Option<String> {
+    // Drop an inline reasoning block (`<think>…</think>`) some models put into the text.
+    let raw = match raw.find("</think>") {
+        Some(i) if raw.trim_start().starts_with("<think") => &raw[i + "</think>".len()..],
+        _ => raw,
+    };
     let line = raw
         .lines()
         .map(str::trim)
@@ -230,5 +235,7 @@ mod tests {
         assert_eq!(clean_title("\"Fix the parser.\"\n").as_deref(), Some("Fix the parser"));
         assert_eq!(clean_title("Title: 修复登录问题。").as_deref(), Some("修复登录问题"));
         assert_eq!(clean_title("  \n"), None);
+        assert_eq!(clean_title("<think>hmm\nmore</think>\n\nRefactor parser").as_deref(), Some("Refactor parser"));
+        assert_eq!(clean_title("<think>x</think>修复 bug").as_deref(), Some("修复 bug"));
     }
 }

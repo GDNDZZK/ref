@@ -20,7 +20,7 @@ const BETA_OAUTH: &str = "oauth-2025-04-20";
 
 pub(crate) async fn stream(http: &reqwest::Client, model: &ModelSpec, req: &Request) -> Result<EventStream, LlmError> {
     let built = build_body(model, req);
-    let headers = build_headers(model, &built)?;
+    let headers = build_headers(model, &built, &req.session_id)?;
     let url = transport::endpoint(model, "messages")?;
     transport::post_sse(http, model, &url, headers, &built.body, AnthropicDecoder::new(model)).await
 }
@@ -88,6 +88,18 @@ pub(crate) fn supports_adaptive(model_id: &str) -> bool {
 
 fn supports_xhigh(model_id: &str) -> bool {
     claude_version(model_id).is_some_and(|v| v.major >= 5 || (v.family == "opus" && v.major == 4 && v.minor >= 7))
+}
+
+/// Claude models that reject `temperature` / `top_p` (Opus 4.7+, Sonnet/Haiku 5.5+, Fable/Mythos).
+pub(crate) fn supports_temperature(model_id: &str) -> bool {
+    match claude_version(model_id) {
+        Some(v) => match v.family {
+            "opus" => v.major < 4 || (v.major == 4 && v.minor < 7),
+            "sonnet" | "haiku" => v.major < 5 || (v.major == 5 && v.minor < 5),
+            _ => false,
+        },
+        None => true,
+    }
 }
 
 fn effort_budget(effort: &str) -> u64 {
@@ -162,7 +174,8 @@ pub(crate) fn build_body(model: &ModelSpec, req: &Request) -> Built {
     let mut body = Map::new();
     body.insert("model".into(), json!(model.api_model));
 
-    let mut max_tokens = if model.max_output > 0 { model.max_output } else { DEFAULT_MAX_TOKENS };
+    let fitted = transport::fit_max_tokens(model, req);
+    let mut max_tokens = if fitted > 0 { fitted } else { DEFAULT_MAX_TOKENS };
     let mut thinking = thinking_config(model);
     if let Thinking::Budget(b) = &mut thinking {
         let budget = (*b).min(max_tokens.saturating_sub(MIN_BUDGET)).max(MIN_BUDGET);
@@ -226,7 +239,7 @@ pub(crate) fn build_body(model: &ModelSpec, req: &Request) -> Built {
             }
         }
     }
-    if !thinking_on {
+    if !thinking_on && supports_temperature(&model.api_model) {
         if let Some(t) = model.temperature {
             body.insert("temperature".into(), json!(t));
         }
@@ -295,9 +308,11 @@ fn build_messages(model: &ModelSpec, req: &Request, ids: &mut IdMap) -> Vec<Valu
             Turn::User(blocks) => {
                 let blocks = blocks
                     .iter()
-                    .map(|u| match u {
-                        UserBlock::Text(t) => json!({"type": "text", "text": t}),
-                        UserBlock::Image(img) => image_block(img),
+                    .filter_map(|u| match u {
+                        // Anthropic rejects whitespace-only text blocks.
+                        UserBlock::Text(t) if t.trim().is_empty() => None,
+                        UserBlock::Text(t) => Some(json!({"type": "text", "text": t})),
+                        UserBlock::Image(img) => Some(image_block(img)),
                     })
                     .collect();
                 b.push("user", blocks);
@@ -369,9 +384,13 @@ fn tool_result_block(r: &ToolResult, ids: &mut IdMap, trailing: &mut Vec<Value>)
 
 // ───────────────────────────── headers ─────────────────────────────
 
-pub(crate) fn build_headers(model: &ModelSpec, built: &Built) -> Result<Headers, LlmError> {
+pub(crate) fn build_headers(model: &ModelSpec, built: &Built, session_id: &str) -> Result<Headers, LlmError> {
     let mut h = Headers::new();
     h.set("anthropic-version", "2023-06-01");
+    if !session_id.is_empty() {
+        // Session affinity for gateways / load balancers (keeps the prompt cache warm).
+        h.set("x-session-affinity", session_id);
+    }
     let mut betas: Vec<String> = Vec::new();
     if let Some(key) = model.api_key.as_deref().filter(|k| !k.is_empty()) {
         if key.starts_with("sk-ant-oat") {

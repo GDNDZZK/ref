@@ -11,7 +11,8 @@ use tokio::process::Command;
 use tokio::sync::mpsc;
 
 use crate::util::{
-    ceil_boundary, floor_boundary, opt_str, opt_u64, req_str, resolve_path, strip_ansi, MAX_OUTPUT_BYTES,
+    ceil_boundary, floor_boundary, opt_str, opt_u64, req_str, resolve_path, strip_ansi,
+    MAX_OUTPUT_BYTES,
 };
 use crate::{ToolCtx, ToolOutput};
 
@@ -36,7 +37,14 @@ struct Collector {
 
 impl Collector {
     fn new() -> Self {
-        Collector { full: String::new(), spilled: None, head: String::new(), tail: String::new(), total: 0, carry: vec![] }
+        Collector {
+            full: String::new(),
+            spilled: None,
+            head: String::new(),
+            tail: String::new(),
+            total: 0,
+            carry: vec![],
+        }
     }
 
     /// Decode a raw chunk (lossy, carrying split UTF-8 sequences) and return the cleaned text.
@@ -102,7 +110,7 @@ impl Collector {
         let rest = self.decode(&[], true);
         self.push(&rest);
         match self.spilled.take() {
-            None => self.full,
+            None => collapse_cr(&self.full),
             Some((path, file)) => {
                 if self.tail.len() > TAIL_BYTES {
                     let cut = ceil_boundary(&self.tail, self.tail.len() - TAIL_BYTES);
@@ -120,17 +128,33 @@ impl Collector {
                 } else {
                     "full output could not be saved".to_string()
                 };
-                let mut head = self.head;
+                let mut head = collapse_cr(&self.head);
                 if !head.ends_with('\n') {
                     head.push('\n');
                 }
                 format!(
                     "{head}\n[... {omitted} bytes omitted; {saved}; use `read` with offset or `grep` on it to see more ...]\n\n{}",
-                    self.tail
+                    collapse_cr(&self.tail)
                 )
             }
         }
     }
+}
+
+/// Terminal-style carriage-return redraws (`10%\r50%\r100%`): keep only the last non-empty
+/// segment of each line.
+fn collapse_cr(s: &str) -> String {
+    if !s.contains('\r') {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    for (i, line) in s.split('\n').enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        out.push_str(line.rsplit('\r').find(|seg| !seg.is_empty()).unwrap_or(""));
+    }
+    out
 }
 
 /// Create a pipe: async read end + blocking write end (both close-on-exec; Stdio dups them).
@@ -176,7 +200,9 @@ pub async fn run(input: &Value, ctx: &ToolCtx) -> ToolOutput {
         if command.trim().is_empty() {
             return Err("parameter `command` must not be empty".into());
         }
-        let timeout = opt_u64(input, "timeout")?.unwrap_or(DEFAULT_TIMEOUT).min(MAX_TIMEOUT);
+        let timeout = opt_u64(input, "timeout")?
+            .unwrap_or(DEFAULT_TIMEOUT)
+            .min(MAX_TIMEOUT);
         let cwd = match opt_str(input, "cwd")? {
             Some(c) if !c.trim().is_empty() => resolve_path(&ctx.cwd, c),
             _ => ctx.cwd.clone(),
@@ -188,7 +214,10 @@ pub async fn run(input: &Value, ctx: &ToolCtx) -> ToolOutput {
         Err(e) => return ToolOutput::err(e),
     };
     if !cwd.is_dir() {
-        return ToolOutput::err(format!("working directory does not exist: {}", cwd.display()));
+        return ToolOutput::err(format!(
+            "working directory does not exist: {}",
+            cwd.display()
+        ));
     }
 
     // One pipe shared by stdout and stderr keeps their relative order.
@@ -253,7 +282,8 @@ pub async fn run(input: &Value, ctx: &ToolCtx) -> ToolOutput {
         }
     };
 
-    let deadline = (timeout > 0).then(|| tokio::time::Instant::now() + Duration::from_secs(timeout));
+    let deadline =
+        (timeout > 0).then(|| tokio::time::Instant::now() + Duration::from_secs(timeout));
     let sleep_until = async {
         match deadline {
             Some(d) => tokio::time::sleep_until(d).await,
@@ -279,7 +309,10 @@ pub async fn run(input: &Value, ctx: &ToolCtx) -> ToolOutput {
 
     if matches!(end, End::Timeout | End::Aborted) {
         kill_group(pgid, libc::SIGTERM);
-        if tokio::time::timeout(KILL_GRACE, child.wait()).await.is_err() {
+        if tokio::time::timeout(KILL_GRACE, child.wait())
+            .await
+            .is_err()
+        {
             kill_group(pgid, libc::SIGKILL);
             let _ = tokio::time::timeout(KILL_GRACE, child.wait()).await;
         }
@@ -321,7 +354,7 @@ pub async fn run(input: &Value, ctx: &ToolCtx) -> ToolOutput {
                 text.push_str(&format!("\n[killed by signal {sig}]"));
             }
             if pipes_hung {
-                text.push_str("\n[background processes still hold the output pipes; their further output is not captured]");
+                text.push_str("\n[background processes are still running and hold the output pipe; their later output is not captured. Redirect it (`cmd > file 2>&1 &`) to avoid this]");
             }
         }
         End::Timeout => {
@@ -339,5 +372,9 @@ pub async fn run(input: &Value, ctx: &ToolCtx) -> ToolOutput {
             text.push_str(&format!("\n[failed waiting for process: {e}]"));
         }
     }
-    ToolOutput { text, images: vec![], is_error }
+    ToolOutput {
+        text,
+        images: vec![],
+        is_error,
+    }
 }

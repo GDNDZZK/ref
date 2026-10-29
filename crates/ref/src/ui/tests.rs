@@ -205,6 +205,49 @@ async fn click_expands_tool_and_copies() {
     assert!(a.toasts.items.iter().any(|t| t.text.starts_with("Copied")), "{:?}", a.toasts.items.iter().map(|t| &t.text).collect::<Vec<_>>());
     let raw = a.store.get("s1").unwrap().message("m2").unwrap().raw_text();
     assert!(a.toasts.items.iter().any(|t| t.text == format!("Copied {} chars", raw.chars().count())));
+    assert_eq!(last_copy().as_deref(), Some(raw.as_str()));
+    // Copy on the user message header.
+    let lines = render(&mut a, 100, 40);
+    let (ux, uy) = find(&lines, "⧉ copy").unwrap();
+    click(&mut a, ux + 2, uy);
+    assert_eq!(last_copy().as_deref(), Some("列出文件 please"));
+}
+
+fn last_copy() -> Option<String> {
+    crate::clipboard::LAST_COPY.with(|c| c.borrow_mut().take())
+}
+
+#[tokio::test]
+async fn copy_button_on_every_message() {
+    let (mut a, _rx) = app();
+    load_transcript(&mut a);
+    // Tool-only assistant message.
+    let mut m = msg("m3", Role::Assistant, "", now_ms());
+    m.parts.push(tool("t3", "bash", "Show date", ToolState::Done, now_ms()));
+    m.time_end = Some(now_ms());
+    m.finish = Some("tool_use".into());
+    a.on_server(ServerMsg::MessageUpsert { session_id: "s1".into(), message: m });
+    // Error-only assistant message.
+    let mut e = msg("m4", Role::Assistant, "", now_ms() + 1);
+    e.error = Some("provider exploded".into());
+    e.time_end = Some(now_ms());
+    e.finish = Some("error".into());
+    a.on_server(ServerMsg::MessageUpsert { session_id: "s1".into(), message: e });
+    let lines = render(&mut a, 100, 50);
+    let copies: Vec<(u16, u16)> = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(y, l)| l.find("⧉ copy").map(|bi| (unicode_width::UnicodeWidthStr::width(&l[..bi]) as u16, y as u16)))
+        .collect();
+    assert_eq!(copies.len(), 4, "{}", screen(&lines));
+    let (x, y) = copies[2];
+    click(&mut a, x + 1, y);
+    let c = last_copy().unwrap();
+    assert!(c.starts_with("bash {"), "{c}");
+    assert!(c.contains("\"command\": \"ls -la\""));
+    let (x, y) = copies[3];
+    click(&mut a, x + 1, y);
+    assert_eq!(last_copy().as_deref(), Some("provider exploded"));
 }
 
 #[test]
@@ -317,14 +360,72 @@ fn esc_twice_interrupts() {
 }
 
 #[test]
-fn retry_status_in_header() {
+fn retry_status_header_and_bar() {
     let (mut a, _rx) = app();
     load_transcript(&mut a);
     let mut i = info("s1");
-    i.status = SessionStatus::Retrying { attempt: 3, at: now_ms() + 4000, error: "429 rate limited".into() };
+    let err = "HTTP 429 Too Many Requests: {\"error\":{\"message\":\"Rate limit reached for requests per minute. Please try again later.\",\"type\":\"rate_limit\"}}";
+    i.status = SessionStatus::Retrying { attempt: 3, at: now_ms() + 4000, error: err.into() };
     a.on_server(ServerMsg::SessionUpdated { info: i });
-    let lines = render(&mut a, 130, 30);
-    assert!(lines[0].contains("retrying in 4s (attempt 3): 429 rate limited"), "{}", lines[0]);
+    for w in [60u16, 80, 130] {
+        let lines = render(&mut a, w, 30);
+        let s = screen(&lines);
+        // Header keeps the short status readable at every width.
+        assert!(lines[0].contains("retry #3 in 4s"), "w={w}: {}", lines[0]);
+        assert!(lines[0].contains("name-s1"), "w={w}: {}", lines[0]);
+        // The full error is shown in the status bar above the input.
+        assert!(s.contains("Retrying in 4s (attempt 3)"), "{s}");
+        assert!(s.contains("HTTP 429 Too Many Requests"), "{s}");
+        for l in &lines {
+            assert!(unicode_width::UnicodeWidthStr::width(l.as_str()) <= w as usize);
+        }
+    }
+}
+
+#[test]
+fn header_fits_long_and_cjk_names() {
+    let (mut a, _rx) = app();
+    load_transcript(&mut a);
+    let mut i = info("s1");
+    i.name = "一个非常非常长的中文会话名称用于测试标题栏溢出的情况以及截断是否正确".into();
+    i.variant = Some("high".into());
+    i.status = SessionStatus::Busy;
+    a.on_server(ServerMsg::SessionUpdated { info: i });
+    for w in [40u16, 80, 120, 200] {
+        let lines = render(&mut a, w, 24);
+        assert!(unicode_width::UnicodeWidthStr::width(lines[0].as_str()) <= w as usize, "{}", lines[0]);
+        assert!(lines[0].contains("working"), "w={w}: {}", lines[0]);
+        assert!(lines[0].contains("一个非常"), "w={w}: {}", lines[0]);
+    }
+    let lines = render(&mut a, 200, 24);
+    assert!(lines[0].contains("claude high"), "{}", lines[0]);
+}
+
+#[test]
+fn empty_state_logo() {
+    let (mut a, _rx) = app();
+    a.on_server(ServerMsg::Welcome {
+        instance: InstanceInfo { pid: 1, version: "0".into(), bind: "127.0.0.1".into(), port: 1, allow_hosts: vec![], idle_timeout: 0, started: 0, data_dir: String::new() },
+        catalog: catalog(),
+        protocol: 1,
+        client_id: "c".into(),
+    });
+    let r = a.req(crate::app::Req::Create);
+    a.on_server(ServerMsg::SessionSnapshot { req: r, info: info("s1"), messages: vec![], permissions: vec![] });
+    for (w, h) in [(80u16, 24u16), (120, 40), (60, 16), (30, 10)] {
+        let lines = render(&mut a, w, h);
+        let s = screen(&lines);
+        if std::env::var("SHOW").is_ok() {
+            println!("{s}");
+        }
+        for l in &lines {
+            assert!(unicode_width::UnicodeWidthStr::width(l.as_str()) <= w as usize);
+        }
+        if h >= 24 {
+            assert!(s.contains("█▀▀█"), "{s}");
+            assert!(s.contains("commands"), "{s}");
+        }
+    }
 }
 
 #[tokio::test]
@@ -338,11 +439,14 @@ async fn selection_copy() {
     a.on_event(m(MouseEventKind::Drag(MouseButton::Left), x + 8, y));
     a.on_event(m(MouseEventKind::Up(MouseButton::Left), x + 8, y));
     assert_eq!(a.views.get("s1").unwrap().selected_text(), "Here are");
+    // No auto-copy on mouse up.
+    assert_eq!(last_copy(), None);
     // Typing text in the input then ctrl+c copies instead of clearing.
     typ(&mut a, "draft");
     a.on_event(Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)));
     assert_eq!(a.editor.text(), "draft");
     assert!(a.toasts.items.iter().any(|t| t.text == "Copied 8 chars"));
+    assert_eq!(last_copy().as_deref(), Some("Here are"));
     // Without selection ctrl+c clears input.
     a.on_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
     a.on_event(Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)));
@@ -462,4 +566,206 @@ fn sidebar_shows_context_and_mcp() {
     assert!(s.contains("Context"), "{s}");
     assert!(s.contains("github"));
     assert!(s.contains("Connected · 12 tools"));
+}
+
+/// Rendering cost with a long transcript: the first frame builds caches, later frames (typing, spinner
+/// ticks, streaming into the last message) must be cheap. Run with `--ignored --nocapture` for timings.
+#[test]
+fn perf_long_transcript() {
+    let (mut a, _rx) = app();
+    load_transcript(&mut a);
+    let mut msgs = vec![];
+    let md = "## Section\n\nSome **bold** text with `code` and a [link](https://example.com).\n\n- item one\n- item two\n  - nested\n\n```rust\nfn main() {\n    println!(\"hi\");\n}\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n";
+    for k in 0..2000 {
+        let role = if k % 2 == 0 { Role::User } else { Role::Assistant };
+        let mut m = msg(&format!("p{k}"), role, if k % 2 == 0 { "question about the code base" } else { md }, 1000 + k as i64);
+        if role == Role::Assistant {
+            m.time_end = Some(2000 + k as i64);
+            m.finish = Some("stop".into());
+            m.parts.push(tool(&format!("pt{k}"), "bash", "Run tests", ToolState::Done, 1000 + k as i64));
+        }
+        msgs.push(m);
+    }
+    let r = a.req(crate::app::Req::Attach);
+    a.on_server(ServerMsg::SessionSnapshot { req: r, info: info("s1"), messages: msgs, permissions: vec![] });
+    let mut t = Terminal::new(TestBackend::new(140, 50)).unwrap();
+    let t0 = std::time::Instant::now();
+    t.draw(|f| super::draw(f, &mut a)).unwrap();
+    let first = t0.elapsed();
+    let t1 = std::time::Instant::now();
+    for _ in 0..20 {
+        a.editor.insert_char('x');
+        t.draw(|f| super::draw(f, &mut a)).unwrap();
+    }
+    let typing = t1.elapsed() / 20;
+    // Streaming: a live assistant message growing to a long markdown document.
+    let mut live = msg("live", Role::Assistant, "", now_ms());
+    live.parts.push(Part::Text(TextPart { id: "lt".into(), text: String::new(), time: now_ms(), meta: None }));
+    a.on_server(ServerMsg::MessageUpsert { session_id: "s1".into(), message: live });
+    let t2 = std::time::Instant::now();
+    let mut n = 0;
+    for _ in 0..40 {
+        a.on_server(ServerMsg::PartDelta { session_id: "s1".into(), message_id: "live".into(), part_id: "lt".into(), delta: md.repeat(3) });
+        t.draw(|f| super::draw(f, &mut a)).unwrap();
+        n += 1;
+    }
+    let streaming = t2.elapsed() / n;
+    let total = a.views.get("s1").unwrap().total;
+    eprintln!("lines={total} first={first:?} typing/frame={typing:?} streaming/frame={streaming:?}");
+    // Generous bounds (debug build, shared CI machines).
+    assert!(typing < std::time::Duration::from_millis(40), "typing frame {typing:?}");
+    assert!(streaming < std::time::Duration::from_millis(150), "streaming frame {streaming:?}");
+}
+
+/// Every rendered line of a rich transcript fits the terminal width at common sizes.
+#[test]
+fn no_overflow_at_common_sizes() {
+    let (mut a, _rx) = app();
+    load_transcript(&mut a);
+    let mut c = msg("mc", Role::User, "summary of everything so far", now_ms());
+    c.origin = MessageOrigin::Compaction;
+    a.on_server(ServerMsg::MessageUpsert { session_id: "s1".into(), message: c });
+    let mut p = msg("mp", Role::User, "hello from a peer", now_ms() + 1);
+    p.origin = MessageOrigin::Peer { from_session: "x".into(), from_name: "工作者-1".into() };
+    a.on_server(ServerMsg::MessageUpsert { session_id: "s1".into(), message: p });
+    let mut d = msg("md", Role::Assistant, "", now_ms() + 2);
+    let mut tp = tool("td", "bash", "Run the full test-suite with coverage enabled and upload results", ToolState::Delayed, now_ms());
+    if let Part::Tool(t) = &mut tp {
+        t.run_at = Some(now_ms() + 3000);
+    }
+    d.parts.push(tp);
+    a.on_server(ServerMsg::MessageUpsert { session_id: "s1".into(), message: d });
+    for (w, h) in [(80u16, 20u16), (80, 40), (120, 30), (200, 60), (60, 24), (140, 40)] {
+        let lines = render(&mut a, w, h);
+        for l in &lines {
+            assert!(unicode_width::UnicodeWidthStr::width(l.as_str()) <= w as usize, "w={w}: {l}");
+        }
+        let s = screen(&lines);
+        if h >= 40 {
+            assert!(s.contains("context compacted"), "{s}");
+            assert!(s.contains("runs in 3s"), "w={w}\n{s}");
+            // The compaction line keeps its copy button fully visible.
+            let cl = lines.iter().find(|l| l.contains("context compacted")).unwrap();
+            assert!(cl.contains("⧉ copy"), "{cl}");
+        }
+    }
+}
+
+#[test]
+fn scrolling_follow_and_new_messages_indicator() {
+    let (mut a, _rx) = app();
+    load_transcript(&mut a);
+    for k in 0..30 {
+        a.on_server(ServerMsg::MessageUpsert { session_id: "s1".into(), message: msg(&format!("f{k}"), Role::User, &format!("filler {k}"), now_ms() + k) });
+    }
+    let lines = render(&mut a, 100, 30);
+    assert!(screen(&lines).contains("filler 29"));
+    let wheel = |a: &mut App, kind| a.on_event(Event::Mouse(MouseEvent { kind, column: 10, row: 10, modifiers: KeyModifiers::NONE }));
+    wheel(&mut a, MouseEventKind::ScrollUp);
+    wheel(&mut a, MouseEventKind::ScrollUp);
+    let v = a.views.get("s1").unwrap();
+    assert!(!v.follow);
+    let top = v.scroll_top;
+    // New content while scrolled up: position kept, indicator shown.
+    a.on_server(ServerMsg::MessageUpsert { session_id: "s1".into(), message: msg("new", Role::User, "brand new", now_ms() + 100) });
+    let lines = render(&mut a, 100, 30);
+    let s = screen(&lines);
+    assert_eq!(a.views.get("s1").unwrap().scroll_top, top);
+    assert!(s.contains("↓ new messages"), "{s}");
+    assert!(!s.contains("brand new"));
+    // PageUp / PageDown.
+    a.on_event(Event::Key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE)));
+    assert!(a.views.get("s1").unwrap().scroll_top < top);
+    // Clicking the indicator jumps to the bottom and follows again.
+    let (x, y) = find(&lines, "↓ new messages").unwrap();
+    let _ = render(&mut a, 100, 30);
+    click(&mut a, x + 3, y);
+    let lines = render(&mut a, 100, 30);
+    assert!(a.views.get("s1").unwrap().follow);
+    assert!(screen(&lines).contains("brand new"));
+    // Resize keeps follow at the bottom.
+    let lines = render(&mut a, 70, 22);
+    assert!(screen(&lines).contains("brand new"));
+}
+
+/// No panics / overflow at any size with every overlay active.
+#[test]
+fn size_sweep_no_panic() {
+    let (mut a, _rx) = app();
+    load_transcript(&mut a);
+    let mut i = info("s1");
+    i.status = SessionStatus::Retrying { attempt: 2, at: now_ms() + 3000, error: "overloaded ".repeat(20) };
+    a.on_server(ServerMsg::SessionUpdated { info: i });
+    a.on_server(ServerMsg::PermissionAsk {
+        request: PermissionRequest {
+            session_id: "s1".into(),
+            message_id: "m2".into(),
+            part_id: "t9".into(),
+            call_id: "c9".into(),
+            tool: "bash".into(),
+            purpose: "Do a thing".into(),
+            input: json!({"command": "echo 1\n".repeat(40)}),
+            time: now_ms(),
+        },
+    });
+    a.toast(NoticeLevel::Error, "something failed ".repeat(10));
+    for pass in 0..3 {
+        match pass {
+            1 => a.open_sessions(false),
+            2 => {
+                a.dialog = None;
+                a.editor.set_text("/");
+                a.update_popup();
+            }
+            _ => {}
+        }
+        for w in (1u16..=200).step_by(7) {
+            for h in (1u16..=60).step_by(4) {
+                let lines = render(&mut a, w, h);
+                for l in &lines {
+                    assert!(unicode_width::UnicodeWidthStr::width(l.as_str()) <= w as usize, "w={w} h={h}: {l}");
+                }
+            }
+        }
+    }
+    // Watch mode too.
+    a.dialog = None;
+    a.popup = None;
+    a.mode = Mode::Watch;
+    a.watched.insert("s1".into());
+    for w in (1u16..=200).step_by(9) {
+        for h in (1u16..=60).step_by(5) {
+            let _ = render(&mut a, w, h);
+        }
+    }
+}
+
+#[test]
+fn watch_pane_esc_esc_aborts_focused() {
+    let (mut a, mut rx) = app();
+    a.opts.watch = true;
+    a.mode = Mode::Watch;
+    a.on_conn(ConnEvent::Connected);
+    let mut sessions = vec![];
+    for k in 0..2 {
+        let mut i = info(&format!("b{k}"));
+        i.attached = 0;
+        i.created = k;
+        i.status = SessionStatus::Busy;
+        sessions.push(i);
+    }
+    a.on_server(ServerMsg::SessionList { req: 0, sessions: sessions.clone() });
+    for s in &sessions {
+        a.on_server(ServerMsg::SessionSnapshot { req: 0, info: s.clone(), messages: vec![], permissions: vec![] });
+    }
+    let _ = render(&mut a, 160, 40);
+    a.on_event(Event::Key(KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL)));
+    while rx.try_recv().is_ok() {}
+    a.on_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+    a.on_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+    assert!(matches!(rx.try_recv(), Ok(ClientMsg::Abort { session_id }) if session_id == "b1"));
+    // 0 background sessions: friendly empty state.
+    a.on_server(ServerMsg::SessionList { req: 0, sessions: vec![] });
+    let s = screen(&render(&mut a, 100, 30));
+    assert!(s.contains("No background sessions"), "{s}");
 }

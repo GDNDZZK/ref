@@ -221,6 +221,10 @@ impl SessionCore {
         if name.is_empty() {
             return Err("Name must not be empty".into());
         }
+        if self.closed.is_cancelled() {
+            // E.g. a late title for a session that was closed (and maybe reopened as a new core).
+            return Err("Session is closed".into());
+        }
         let _names = self.hub.names.lock();
         let taken = taken_names(&self.hub, &self.id);
         let final_name = if exact {
@@ -290,6 +294,8 @@ impl SessionCore {
             st.system = None;
             st.allowed.clear();
             st.touch();
+            // Broadcast even if the model can't be resolved (refresh_context_max bails out).
+            st.info_changed(&self.hub);
         }
         self.refresh_context_max();
         self.persist();

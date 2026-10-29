@@ -45,9 +45,14 @@ pub fn run(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput, String> {
         } else {
             match fuzzy_spans(text, &old) {
                 spans if spans.is_empty() => {
+                    let hint = if old.lines().all(|l| l.is_empty() || crate::util::parse_num_prefix(l).is_some()) {
+                        " It starts with `N:` line-number prefixes from read output; those are not part of the file. Copy the text after `N:`."
+                    } else {
+                        " Re-read the file and copy the exact text."
+                    };
                     return Err(format!(
-                        "`old_string` was not found in {shown} (also tried ignoring trailing whitespace and indentation). Re-read the file and copy the exact text."
-                    ))
+                        "`old_string` was not found in {shown} (also tried ignoring trailing whitespace and indentation).{hint}"
+                    ));
                 }
                 spans if spans.len() > 1 && !replace_all => {
                     return Err(format!(
@@ -73,7 +78,8 @@ pub fn run(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput, String> {
             }
         }
     };
-    std::fs::write(&path, file.encode(&new_text)).map_err(|e| format!("Failed to write {shown}: {e}"))?;
+    std::fs::write(&path, file.encode(&new_text))
+        .map_err(|e| format!("Failed to write {shown}: {e}"))?;
     let key = canonical_key(&path);
     let mut out = super::finish_file(ctx, &key, &shown, text, &new_text);
     if let Some(w) = warning {
@@ -175,7 +181,12 @@ mod tests {
         assert_eq!(spans.len(), 1);
         let (s, e, ind) = &spans[0];
         assert_eq!(ind, "    ");
-        let out = format!("{}{}{}", &text[..*s], reindent("let x = 1;\nlet y = 2;", "let z = 3;", ind), &text[*e..]);
+        let out = format!(
+            "{}{}{}",
+            &text[..*s],
+            reindent("let x = 1;\nlet y = 2;", "let z = 3;", ind),
+            &text[*e..]
+        );
         assert_eq!(out, "fn a() {\n    let z = 3;\n}\n");
     }
 }

@@ -72,6 +72,7 @@ fn main() -> anyhow::Result<()> {
         let (conn, conn_rx) = conn::start(conn::Target { url: cli.url, token: cli.token, cwd });
         let (app_tx, app_rx) = tokio::sync::mpsc::unbounded_channel();
         term::install_panic_hook();
+        ui::markdown::prewarm();
         let mut terminal = term::setup()?;
         let app = app::App::new(conn, opts, app_tx);
         let r = app::run(&mut terminal, app, conn_rx, app_rx).await;

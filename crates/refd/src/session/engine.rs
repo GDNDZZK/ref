@@ -258,11 +258,23 @@ fn step_boundary(core: &Arc<SessionCore>) {
     }
 }
 
+/// Update `context.used` with the projected size of the next request (last reported usage +
+/// estimate of what was added since, e.g. tool outputs). Returns the new value.
+fn refresh_projected_context(core: &SessionCore) -> u64 {
+    let mut st = core.st.lock();
+    let used = st.projected_context();
+    if used != st.info.context.used {
+        st.info.context.used = used;
+        st.info_changed(&core.hub);
+    }
+    used
+}
+
 fn needs_auto_compaction(core: &SessionCore, env: &StepEnv) -> bool {
+    let used = refresh_projected_context(core);
     if !env.cfg.compaction.auto || env.request.messages.len() < 3 {
         return false;
     }
-    let used = core.st.lock().info.context.used;
     let max = env.spec.context;
     max > 0 && used > 0 && used + env.cfg.reserved_tokens(&env.spec) >= max
 }
@@ -276,7 +288,12 @@ async fn run_turn(core: &Arc<SessionCore>, tok: &CancellationToken) {
         }
         step_boundary(core);
         let manual = std::mem::take(&mut core.st.lock().compact_requested);
-        let env = match prepare(core).await {
+        // `prepare` may wait for MCP servers to connect: keep it abortable.
+        let prepared = tokio::select! {
+            r = prepare(core) => r,
+            _ = tok.cancelled() => return,
+        };
+        let env = match prepared {
             Ok(env) => env,
             Err(e) => {
                 attempt += 1;
@@ -296,6 +313,9 @@ async fn run_turn(core: &Arc<SessionCore>, tok: &CancellationToken) {
         match stream_step(core, tok, &env).await {
             StepResult::Aborted => return,
             StepResult::Failed(e) => {
+                // The partial assistant message was removed; record that on disk now (it may
+                // have been persisted while streaming) instead of after a long backoff.
+                core.persist();
                 if e.is_context_overflow() && !overflow_compacted && env.request.messages.len() > 1 {
                     overflow_compacted = true;
                     tracing::info!("session {}: context overflow; compacting", core.id);
@@ -419,6 +439,8 @@ async fn stream_step(core: &Arc<SessionCore>, tok: &CancellationToken, env: &Ste
     msg.variant = core.st.lock().info.variant.clone();
     msg.agent = Some(env.agent.clone());
     let msg_id = msg.id.clone();
+    // Inserted before the request so inputs queued meanwhile are displayed after it (where
+    // they will be inserted at the next step boundary). Removed again if the attempt fails.
     core.st.lock().upsert_message(hub, msg);
 
     let started = tokio::select! {
@@ -737,8 +759,12 @@ pub(crate) async fn compact_context(
             Err(None) => return Err(Aborted),
             Err(Some(e)) => {
                 if e.is_context_overflow() && history.len() - drop_front > 2 {
-                    // Summarize less: drop the oldest quarter.
+                    // Summarize less: drop the oldest quarter, then up to the next user message
+                    // so the request still starts with a user turn (required by some APIs).
                     drop_front += ((history.len() - drop_front) / 4).max(1);
+                    while drop_front < history.len() - 1 && history[drop_front].role != Role::User {
+                        drop_front += 1;
+                    }
                     continue;
                 }
                 attempt += 1;
@@ -782,11 +808,16 @@ async fn manual_compaction(core: &Arc<SessionCore>, tok: &CancellationToken) {
     }
     let mut attempt = 0;
     let env = loop {
-        match prepare(core).await {
+        let prepared = tokio::select! {
+            r = prepare(core) => r,
+            _ = tok.cancelled() => return,
+        };
+        match prepared {
             Ok(env) => break env,
             Err(e) => {
                 attempt += 1;
-                if wait_retry(core, tok, attempt, None, e, Duration::from_secs(600)).await.is_err() {
+                let max = core.hub.config(&core.cwd()).map(|c| c.retry_max_delay).unwrap_or(Duration::from_secs(600));
+                if wait_retry(core, tok, attempt, None, e, max).await.is_err() {
                     return;
                 }
             }
@@ -808,7 +839,9 @@ pub(crate) async fn generate_title(core: Arc<SessionCore>, first: String) {
         .and_then(|m| cfg.resolve_model(m, None).ok())
         .or_else(|| cfg.resolve_for_agent(&agent, &model, variant.as_deref()).ok());
     let Some(spec) = spec else { return };
-    let text = util::ellipsize(&first, 4000);
+    // The instruction is repeated after the message: some models otherwise answer the
+    // message instead of titling it.
+    let text = format!("<message>\n{}\n</message>\n\n{}", util::ellipsize(&first, 4000), prompt::TITLE_SYSTEM);
     let res = tokio::select! {
         r = tokio::time::timeout(TITLE_TIMEOUT, ref_llm::complete_text(&core.hub.http, &spec, prompt::TITLE_SYSTEM, &text)) => r,
         _ = core.closed.cancelled() => return,

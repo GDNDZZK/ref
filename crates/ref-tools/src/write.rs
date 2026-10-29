@@ -38,6 +38,32 @@ fn unwrap_header(raw: &str) -> &str {
     t
 }
 
+/// If `text` is pasted `read` output (optional `[path#TAG]` header, then `N:text` rows with
+/// consecutive numbers), return the file content without those decorations. YAML-like
+/// `1: one` maps (every row `N: value`) are left alone.
+fn strip_read_output(text: &str) -> Option<String> {
+    let mut lines: Vec<&str> = text.split('\n').collect();
+    let header = lines.first().is_some_and(|l| {
+        let t = l.trim();
+        t.starts_with('[') && t.ends_with(']') && unwrap_header(t) != t
+    });
+    if header {
+        lines.remove(0);
+    }
+    let rows: Vec<&str> = lines.iter().copied().filter(|l| !l.is_empty()).collect();
+    if rows.is_empty() {
+        return None;
+    }
+    let yaml_like = rows.iter().all(|r| {
+        crate::util::parse_num_prefix(r)
+            .is_some_and(|(_, rest)| rest.starts_with(' ') && !rest.starts_with("  "))
+    });
+    if yaml_like && !header {
+        return None;
+    }
+    strip_numbered_prefixes(&lines).map(|v| v.join("\n"))
+}
+
 fn write_inner(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput, String> {
     let raw = unwrap_header(req_str(input, "path")?);
     if raw.is_empty() {
@@ -49,9 +75,20 @@ fn write_inner(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput, String> {
     if path.is_dir() {
         return Err(format!("{shown} is a directory; give a file path"));
     }
+    if let Ok(meta) = std::fs::metadata(&path) {
+        if !meta.is_file() {
+            return Err(format!(
+                "{shown} is not a regular file (FIFO, socket or device); refusing to write it"
+            ));
+        }
+    }
     let existed = path.exists();
     // Keep the existing file's BOM / line ending convention.
-    let mut file = TextFile { text: String::new(), bom: false, eol: Eol::Lf };
+    let mut file = TextFile {
+        text: String::new(),
+        bom: false,
+        eol: Eol::Lf,
+    };
     if existed {
         if let Ok(bytes) = std::fs::read(&path) {
             if let Ok(f) = decode_text(bytes) {
@@ -66,22 +103,20 @@ fn write_inner(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput, String> {
         file.bom = true;
     }
     let mut warnings = vec![];
-    {
-        let lines: Vec<&str> = text.split('\n').collect();
-        let nonempty = lines.iter().filter(|l| !l.is_empty()).count();
-        if nonempty >= 1 {
-            if let Some(stripped) = strip_numbered_prefixes(&lines) {
-                text = stripped.join("\n");
-                warnings.push(
-                    "Note: every line started with an `N:` line-number prefix copied from read output; the prefixes were stripped before writing.",
-                );
-            }
-        }
+    if let Some(stripped) = strip_read_output(&text) {
+        text = stripped;
+        warnings.push(
+            "Note: the content was copied from `read` output (`[path#TAG]` header / `N:` line prefixes); those were stripped before writing.",
+        );
     }
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() && !parent.exists() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create directory {}: {e}", display_path(&ctx.cwd, parent)))?;
+            std::fs::create_dir_all(parent).map_err(|e| {
+                format!(
+                    "Failed to create directory {}: {e}",
+                    display_path(&ctx.cwd, parent)
+                )
+            })?;
         }
     }
     let bytes = file.encode(&text);
@@ -162,7 +197,9 @@ fn count_files(dir: &Path) -> usize {
     let mut n = 0;
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
-        let Ok(rd) = std::fs::read_dir(&d) else { continue };
+        let Ok(rd) = std::fs::read_dir(&d) else {
+            continue;
+        };
         for e in rd.flatten() {
             match e.file_type() {
                 Ok(t) if t.is_dir() => stack.push(e.path()),

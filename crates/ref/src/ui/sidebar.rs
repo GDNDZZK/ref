@@ -78,7 +78,8 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App) {
             y += 1;
         }
     }
-    let others: Vec<_> = app.store.list.iter().filter(|s| s.open && Some(&s.id) != app.current.as_ref()).collect();
+    let mut others: Vec<_> = app.store.list.iter().filter(|s| s.open && Some(&s.id) != app.current.as_ref()).collect();
+    others.sort_by(|a, b| a.created.cmp(&b.created).then(a.id.cmp(&b.id)));
     if !others.is_empty() {
         put(&mut y, Line::from(Span::styled("Sessions", bold(TEXT))));
         for s in others {

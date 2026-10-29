@@ -26,16 +26,22 @@ const KNOWN_OPTIONS: &[&str] = &[
 
 pub(crate) async fn stream(http: &reqwest::Client, model: &ModelSpec, req: &Request) -> Result<EventStream, LlmError> {
     let body = build_body(model, req);
+    let h = build_headers(model, req)?;
+    let url = transport::endpoint(model, "responses")?;
+    transport::post_sse(http, model, &url, h, &body, ResponsesDecoder::new(model)).await
+}
+
+pub(crate) fn build_headers(model: &ModelSpec, req: &Request) -> Result<Headers, LlmError> {
     let mut h = Headers::new();
     if let Some(key) = model.api_key.as_deref().filter(|k| !k.is_empty()) {
         h.set("authorization", &format!("Bearer {key}"));
     }
     if !req.session_id.is_empty() {
         h.set("session_id", &req.session_id);
+        h.set("x-session-affinity", &req.session_id);
     }
     h.apply_user(model, &[])?;
-    let url = transport::endpoint(model, "responses")?;
-    transport::post_sse(http, model, &url, h, &body, ResponsesDecoder::new(model)).await
+    Ok(h)
 }
 
 fn store_enabled(model: &ModelSpec) -> bool {
@@ -100,13 +106,16 @@ pub(crate) fn build_body(model: &ModelSpec, req: &Request) -> Value {
     if let Some(v) = opt_str(model, "textVerbosity") {
         body.insert("text".into(), json!({"verbosity": v}));
     }
-    if model.max_output > 0 {
-        body.insert("max_output_tokens".into(), json!(model.max_output.max(16)));
+    let max = transport::fit_max_tokens(model, req);
+    if max > 0 {
+        body.insert("max_output_tokens".into(), json!(max.max(16)));
     }
-    if let Some(t) = model.temperature {
+    // Reasoning models (gpt-5.x, o-series) reject sampling parameters unless reasoning is off.
+    let sampling_ok = !model.reasoning || effort == Some("none");
+    if let Some(t) = model.temperature.filter(|_| sampling_ok) {
         body.insert("temperature".into(), json!(t));
     }
-    if let Some(p) = model.top_p {
+    if let Some(p) = model.top_p.filter(|_| sampling_ok) {
         body.insert("top_p".into(), json!(p));
     }
     if let Some(t) = model.options.get("serviceTier") {
@@ -160,7 +169,27 @@ fn build_input(model: &ModelSpec, req: &Request, store: bool) -> Vec<Value> {
                 items.push(json!({"role": "user", "content": content}));
             }
             Turn::Assistant(blocks) => {
+                let had_reasoning = blocks.iter().any(|b| matches!(b, AsstBlock::Reasoning { meta: Some(_), .. }));
                 let mut out: Vec<Value> = blocks.into_iter().filter_map(|b| assistant_item(b, store, &mut ids)).collect();
+                // Output items that were produced together with a reasoning item must not be
+                // replayed with their ids when that reasoning item is gone (the API rejects a
+                // `fc_`/`msg_` item "provided without its required reasoning item").
+                let has_reasoning = out.iter().any(|i| i.get("type").and_then(Value::as_str) == Some("reasoning"));
+                if had_reasoning && !has_reasoning {
+                    for item in &mut out {
+                        match item.get("type").and_then(Value::as_str) {
+                            Some("message") => {
+                                let text = item.pointer("/content/0/text").cloned().unwrap_or(json!(""));
+                                *item = json!({"role": "assistant", "content": text});
+                            }
+                            _ => {
+                                if let Some(o) = item.as_object_mut() {
+                                    o.remove("id");
+                                }
+                            }
+                        }
+                    }
+                }
                 // A reasoning item must be followed by the item it produced (e.g. aborted after
                 // thinking); a dangling one is rejected by the API.
                 while out.last().is_some_and(|i| i.get("type").and_then(Value::as_str) == Some("reasoning")) {

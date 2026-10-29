@@ -27,6 +27,8 @@ use crate::util;
 const PING_EVERY: Duration = Duration::from_secs(20);
 const CLIENT_DEAD_AFTER: Duration = Duration::from_secs(90);
 const HELLO_TIMEOUT: Duration = Duration::from_secs(30);
+/// Max time spent flushing queued messages to a disconnecting client.
+const FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 /// With idle-timeout 0: exit if nobody connects within this time after startup.
 const FIRST_CONNECT_GRACE: Duration = Duration::from_secs(30);
 
@@ -121,7 +123,10 @@ async fn ws_handler(
         return r;
     }
     let hub = state.hub.clone();
-    ws.max_message_size(256 * 1024 * 1024).on_upgrade(move |socket| async move {
+    // Clients send a whole message as one frame (e.g. a prompt with large images), so the
+    // frame limit must match the message limit (axum's default frame limit is 16 MiB).
+    const MAX_WS_MESSAGE: usize = 256 * 1024 * 1024;
+    ws.max_message_size(MAX_WS_MESSAGE).max_frame_size(MAX_WS_MESSAGE).on_upgrade(move |socket| async move {
         handle_socket(hub, socket, addr).await;
     })
 }
@@ -145,11 +150,23 @@ impl Server {
     }
 }
 
+/// 127.0.0.1, or 0.0.0.0 when some allow-host is not a loopback address.
+fn default_bind(allow_hosts: &[String]) -> &'static str {
+    let loopback = |h: &str| {
+        let h = h.trim().trim_matches(['[', ']']);
+        h.eq_ignore_ascii_case("localhost") || h.parse::<IpAddr>().is_ok_and(|ip| canonical_ip(ip).is_loopback())
+    };
+    if allow_hosts.iter().all(|h| loopback(h)) {
+        "127.0.0.1"
+    } else {
+        "0.0.0.0"
+    }
+}
+
 async fn bind(opts: &ServeOpts) -> anyhow::Result<(tokio::net::TcpListener, String)> {
     let bind = match &opts.bind {
         Some(b) => b.trim_matches(['[', ']']).to_string(),
-        None if !opts.allow_hosts.is_empty() => "0.0.0.0".to_string(),
-        None => "127.0.0.1".to_string(),
+        None => default_bind(&opts.allow_hosts).to_string(),
     };
     let ip: IpAddr = match bind.parse() {
         Ok(ip) => ip,
@@ -285,23 +302,30 @@ async fn idle_watch(hub: Arc<Hub>, timeout: i64) {
             last_activity = Instant::now();
             continue;
         }
-        let limit = Duration::from_secs(timeout as u64);
         let ever = hub.ever_connected.load(std::sync::atomic::Ordering::Relaxed);
-        let expired = if ever {
-            let idle = hub.since_last_client_change().min(last_activity.elapsed());
-            idle >= limit
-        } else {
-            // The timeout only takes effect after the first frontend connected. With 0 (the
-            // mode used when a frontend spawns refd) give up if nobody connects within a grace
-            // period so a failed frontend start does not leave an orphan daemon.
-            timeout == 0 && started.elapsed() >= FIRST_CONNECT_GRACE
-        };
-        if expired {
+        let idle = hub.since_last_client_change().min(last_activity.elapsed());
+        if idle_expired(timeout, ever, idle, started.elapsed()) {
             tracing::info!("no frontend connected (idle timeout {timeout}s); shutting down");
             hub.shutdown.cancel();
             return;
         }
     }
+}
+
+/// Idle-timeout decision while no frontend is connected. `timeout` < 0 never expires.
+/// `ever`: a frontend has connected at least once; `idle`: time since the last one left;
+/// `uptime`: time since start.
+fn idle_expired(timeout: i64, ever: bool, idle: Duration, uptime: Duration) -> bool {
+    if timeout < 0 {
+        return false;
+    }
+    if ever {
+        return idle >= Duration::from_secs(timeout as u64);
+    }
+    // The timeout only takes effect after the first frontend connected. With 0 (the mode
+    // used when a frontend spawns refd) give up if nobody connects within a grace period so
+    // a failed frontend start does not leave an orphan daemon.
+    timeout == 0 && uptime >= FIRST_CONNECT_GRACE
 }
 
 async fn handle_socket(hub: Arc<Hub>, socket: WebSocket, addr: SocketAddr) {
@@ -345,31 +369,35 @@ async fn handle_socket(hub: Arc<Hub>, socket: WebSocket, addr: SocketAddr) {
         let mut ping = tokio::time::interval(PING_EVERY);
         ping.tick().await;
         loop {
-            tokio::select! {
+            // Every send races the kill token: a client that stops reading (full TCP
+            // buffer) must not block this task forever.
+            let msg = tokio::select! {
                 m = rx.recv() => match m {
-                    Some(p) => {
-                        if sink.send(WsMessage::Text(p.as_ref().into())).await.is_err() {
-                            break;
-                        }
-                    }
+                    Some(p) => WsMessage::Text(p.as_ref().into()),
                     None => break,
                 },
-                _ = ping.tick() => {
-                    if sink.send(WsMessage::Ping(Default::default())).await.is_err() {
-                        break;
-                    }
-                }
+                _ = ping.tick() => WsMessage::Ping(Default::default()),
                 _ = writer_kill.cancelled() => break,
                 _ = shutdown.cancelled() => break,
-            }
-        }
-        // Flush whatever is queued (best effort) before closing.
-        while let Ok(p) = rx.try_recv() {
-            if sink.send(WsMessage::Text(p.as_ref().into())).await.is_err() {
+            };
+            let ok = tokio::select! {
+                r = sink.send(msg) => r.is_ok(),
+                _ = writer_kill.cancelled() => false,
+            };
+            if !ok {
                 break;
             }
         }
-        let _ = sink.close().await;
+        // Flush whatever is queued (best effort, bounded) before closing.
+        let _ = tokio::time::timeout(FLUSH_TIMEOUT, async {
+            while let Ok(p) = rx.try_recv() {
+                if sink.send(WsMessage::Text(p.as_ref().into())).await.is_err() {
+                    break;
+                }
+            }
+            let _ = sink.close().await;
+        })
+        .await;
         writer_kill.cancel();
     });
 
@@ -382,6 +410,10 @@ async fn handle_socket(hub: Arc<Hub>, socket: WebSocket, addr: SocketAddr) {
                 last_seen = Instant::now();
                 match m {
                     WsMessage::Text(t) => match serde_json::from_str::<ClientMsg>(t.as_str()) {
+                        Ok(msg) => dispatch(&hub, &cid, msg).await,
+                        Err(e) => hub.send(&cid, &ServerMsg::Error { req: 0, text: format!("invalid message: {e}") }),
+                    },
+                    WsMessage::Binary(b) => match serde_json::from_slice::<ClientMsg>(&b) {
                         Ok(msg) => dispatch(&hub, &cid, msg).await,
                         Err(e) => hub.send(&cid, &ServerMsg::Error { req: 0, text: format!("invalid message: {e}") }),
                     },
@@ -401,7 +433,10 @@ async fn handle_socket(hub: Arc<Hub>, socket: WebSocket, addr: SocketAddr) {
     }
     hub.unregister_client(&cid);
     kill.cancel();
-    let _ = writer.await;
+    let mut writer = writer;
+    if tokio::time::timeout(FLUSH_TIMEOUT + Duration::from_secs(1), &mut writer).await.is_err() {
+        writer.abort();
+    }
     tracing::info!("client {cid} disconnected");
 }
 
@@ -550,4 +585,50 @@ fn run_command(hub: &Arc<Hub>, session_id: &str, name: &str, arguments: &str) ->
     }
     core.prompt(text, vec![]);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn idle_timeout_semantics() {
+        let s = Duration::from_secs;
+        // -1: never.
+        assert!(!idle_expired(-1, true, s(100_000), s(100_000)));
+        assert!(!idle_expired(-1, false, s(100_000), s(100_000)));
+        // 0: right after the last frontend left; before any connection only after the grace.
+        assert!(idle_expired(0, true, Duration::ZERO, s(1)));
+        assert!(!idle_expired(0, false, s(5), s(5)));
+        assert!(idle_expired(0, false, s(31), FIRST_CONNECT_GRACE));
+        // N: N seconds after the last frontend left; never before the first connection.
+        assert!(!idle_expired(10, true, s(9), s(100)));
+        assert!(idle_expired(10, true, s(10), s(100)));
+        assert!(!idle_expired(10, false, s(1000), s(1000)));
+    }
+
+    #[tokio::test]
+    async fn host_access() {
+        let none = resolve_hosts(&[]).await;
+        assert!(none.allows("127.0.0.1".parse().unwrap()));
+        assert!(none.allows("::1".parse().unwrap()));
+        assert!(none.allows("::ffff:127.0.0.1".parse().unwrap()));
+        assert!(!none.allows("192.168.1.5".parse().unwrap()));
+        let some = resolve_hosts(&["192.168.1.5".into(), "[fe80::1]".into()]).await;
+        assert!(some.allows("192.168.1.5".parse().unwrap()));
+        assert!(some.allows("::ffff:192.168.1.5".parse().unwrap()));
+        assert!(some.allows("fe80::1".parse().unwrap()));
+        assert!(!some.allows("192.168.1.6".parse().unwrap()));
+        let all = resolve_hosts(&["*".into()]).await;
+        assert!(all.allows("8.8.8.8".parse().unwrap()));
+    }
+
+    #[test]
+    fn bind_defaults() {
+        assert_eq!(default_bind(&[]), "127.0.0.1");
+        assert_eq!(default_bind(&["localhost".into(), "127.0.0.1".into(), "[::1]".into()]), "127.0.0.1");
+        assert_eq!(default_bind(&["192.168.1.2".into()]), "0.0.0.0");
+        assert_eq!(default_bind(&["*".into()]), "0.0.0.0");
+        assert_eq!(default_bind(&["myhost".into()]), "0.0.0.0");
+    }
 }

@@ -79,28 +79,45 @@ pub struct StatusReply {
 
 /// GET `/status?token=` with a short timeout.
 pub async fn probe(entry: &RegistryEntry) -> Option<StatusReply> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .no_proxy()
-        .build()
-        .ok()?;
-    let url = format!(
-        "http://{}:{}/status?token={}",
-        entry.connect_host(),
-        entry.instance.port,
-        entry.token
-    );
-    let resp = client.get(url).send().await.ok()?;
-    if !resp.status().is_success() {
-        return None;
+    match probe_detailed(entry).await {
+        Probe::Alive(s) => Some(s),
+        _ => None,
     }
-    resp.json::<StatusReply>().await.ok()
+}
+
+pub enum Probe {
+    Alive(StatusReply),
+    /// Nothing listens there / wrong token / another process: the entry is stale.
+    Stale,
+    /// Timed out or similar: the instance may just be busy; keep its entry.
+    Unknown,
+}
+
+pub async fn probe_detailed(entry: &RegistryEntry) -> Probe {
+    let Ok(client) = reqwest::Client::builder().timeout(Duration::from_secs(2)).no_proxy().build() else {
+        return Probe::Unknown;
+    };
+    let url = format!("http://{}:{}/status?token={}", entry.connect_host(), entry.instance.port, entry.token);
+    let resp = match client.get(url).send().await {
+        Ok(r) => r,
+        Err(e) if e.is_connect() => return Probe::Stale,
+        Err(_) => return Probe::Unknown,
+    };
+    if !resp.status().is_success() {
+        return Probe::Stale;
+    }
+    match resp.json::<StatusReply>().await {
+        Ok(s) if s.instance.pid == entry.instance.pid => Probe::Alive(s),
+        Ok(_) => Probe::Stale,
+        Err(_) => Probe::Unknown,
+    }
 }
 
 /// Live instances (stale registry files are removed). Sorted by start time.
 pub async fn live_instances(data_dir: &Path) -> Vec<(RegistryEntry, StatusReply)> {
     let mut out = Vec::new();
     let entries = read_entries(data_dir);
+    // Ok(Some) = live, Ok(None) = unreachable right now (kept), Err(path) = stale (removed).
     let probes = futures::future::join_all(entries.into_iter().map(|e| async move {
         match e {
             Err(path) => Err(path),
@@ -108,9 +125,10 @@ pub async fn live_instances(data_dir: &Path) -> Vec<(RegistryEntry, StatusReply)
                 if !util::pid_alive(e.instance.pid) {
                     return Err(entry_path(data_dir, e.instance.pid));
                 }
-                match probe(&e).await {
-                    Some(s) if s.instance.pid == e.instance.pid => Ok((e, s)),
-                    _ => Err(entry_path(data_dir, e.instance.pid)),
+                match probe_detailed(&e).await {
+                    Probe::Alive(s) => Ok(Some((e, s))),
+                    Probe::Unknown => Ok(None),
+                    Probe::Stale => Err(entry_path(data_dir, e.instance.pid)),
                 }
             }
         }
@@ -118,7 +136,8 @@ pub async fn live_instances(data_dir: &Path) -> Vec<(RegistryEntry, StatusReply)
     .await;
     for p in probes {
         match p {
-            Ok(x) => out.push(x),
+            Ok(Some(x)) => out.push(x),
+            Ok(None) => {}
             Err(path) => {
                 tracing::debug!("removing stale registry file {}", path.display());
                 let _ = std::fs::remove_file(path);
@@ -151,9 +170,17 @@ fn fmt_time(ms: i64) -> String {
 
 /// `refd --status [--json]`. Exit code 0 if at least one instance is alive.
 pub async fn status_cmd(json: bool) -> i32 {
-    let data_dir = ref_config::data_dir();
-    let live = live_instances(&data_dir).await;
+    let (text, code) = status_report(&ref_config::data_dir(), json).await;
+    println!("{text}");
+    code
+}
+
+/// Text printed by `--status` for the instances registered in `data_dir`, and the exit code.
+pub async fn status_report(data_dir: &Path, json: bool) -> (String, i32) {
+    use std::fmt::Write as _;
+    let live = live_instances(data_dir).await;
     let now = ref_proto::now_ms();
+    let mut out = String::new();
     if json {
         let arr: Vec<serde_json::Value> = live
             .iter()
@@ -168,38 +195,40 @@ pub async fn status_cmd(json: bool) -> i32 {
                 v
             })
             .collect();
-        println!("{}", serde_json::to_string_pretty(&arr).unwrap_or_else(|_| "[]".into()));
+        out = serde_json::to_string_pretty(&arr).unwrap_or_else(|_| "[]".into());
     } else if live.is_empty() {
-        println!("No running refd instance.");
+        out.push_str("No running refd instance.");
     } else {
         for (i, (e, s)) in live.iter().enumerate() {
             if i > 0 {
-                println!();
+                out.push('\n');
             }
             let inst = &e.instance;
             let idle = match inst.idle_timeout {
-                t if t < 0 => "never".to_string(),
-                0 => "0 (exit when no frontend is connected)".to_string(),
+                t if t < 0 => "-1 (never exit)".to_string(),
+                0 => "0 (exit when the last frontend disconnects)".to_string(),
                 t => format!("{t}s"),
             };
-            println!("refd pid {} (version {})", inst.pid, inst.version);
-            println!("  url:           ws://{}:{}", inst.bind, inst.port);
-            println!(
+            let _ = writeln!(out, "refd pid {} (version {})", inst.pid, inst.version);
+            let _ = writeln!(out, "  bind:          {}", inst.bind);
+            let _ = writeln!(out, "  port:          {}", inst.port);
+            let _ = writeln!(out, "  url:           {}", e.url());
+            let _ = writeln!(out, "  token:         {}", e.token);
+            let _ = writeln!(
+                out,
                 "  allow-hosts:   {}",
                 if inst.allow_hosts.is_empty() { "(loopback only)".to_string() } else { inst.allow_hosts.join(", ") }
             );
-            println!("  idle-timeout:  {idle}");
-            println!("  started:       {}", fmt_time(inst.started));
-            println!("  uptime:        {}", fmt_duration(now - inst.started));
-            println!("  open sessions: {}", s.sessions);
-            println!("  data dir:      {}", inst.data_dir);
+            let _ = writeln!(out, "  idle-timeout:  {idle}");
+            let _ = writeln!(out, "  started:       {} (uptime {})", fmt_time(inst.started), fmt_duration(now - inst.started));
+            let _ = writeln!(out, "  open sessions: {}", s.sessions);
+            let _ = writeln!(out, "  data dir:      {}", inst.data_dir);
+        }
+        while out.ends_with('\n') {
+            out.pop();
         }
     }
-    if live.is_empty() {
-        1
-    } else {
-        0
-    }
+    (out, if live.is_empty() { 1 } else { 0 })
 }
 
 /// `refd --stop [PID]`: SIGTERM the given instance (or all live instances).

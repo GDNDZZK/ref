@@ -372,6 +372,16 @@ impl Config {
         let mut filter = provider::CatalogFilter::default();
         if let Some(Value::Object(p)) = raw.get("provider") {
             filter.keep.extend(p.keys().cloned());
+            for prov in p.values() {
+                if let Some(Value::Object(models)) = prov.get("models") {
+                    for (key, m) in models {
+                        filter.ids.insert(key.to_lowercase());
+                        if let Some(id) = m.get("id").and_then(|v| v.as_str()) {
+                            filter.ids.insert(id.to_lowercase());
+                        }
+                    }
+                }
+            }
         }
         filter.keep.extend(auth.keys().cloned());
         filter.env.extend(

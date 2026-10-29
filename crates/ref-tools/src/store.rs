@@ -90,7 +90,11 @@ impl SnapshotStore {
             }
         } else {
             self.total_bytes += text.len();
-            entry.versions.push_front(Snapshot { text: Arc::from(text), hash: hash.clone(), seen });
+            entry.versions.push_front(Snapshot {
+                text: Arc::from(text),
+                hash: hash.clone(),
+                seen,
+            });
             while entry.versions.len() > MAX_VERSIONS_PER_PATH {
                 if let Some(old) = entry.versions.pop_back() {
                     self.total_bytes = self.total_bytes.saturating_sub(old.text.len());
@@ -104,7 +108,11 @@ impl SnapshotStore {
     /// Mark additional lines of the snapshot with `hash` as seen.
     pub fn mark_seen(&mut self, path: &Path, hash: &str, lines: impl IntoIterator<Item = usize>) {
         if let Some(e) = self.entries.get_mut(path) {
-            if let Some(s) = e.versions.iter_mut().find(|s| s.hash.eq_ignore_ascii_case(hash)) {
+            if let Some(s) = e
+                .versions
+                .iter_mut()
+                .find(|s| s.hash.eq_ignore_ascii_case(hash))
+            {
                 s.seen.union(&Seen::Lines(lines.into_iter().collect()));
             }
         }
@@ -117,6 +125,11 @@ impl SnapshotStore {
             .versions
             .iter()
             .find(|s| s.hash.eq_ignore_ascii_case(hash))
+    }
+
+    /// Number of retained snapshots of `path`.
+    pub fn version_count(&self, path: &Path) -> usize {
+        self.entries.get(path).map_or(0, |e| e.versions.len())
     }
 
     /// Newest snapshot of `path`.
@@ -135,8 +148,12 @@ impl SnapshotStore {
 
     /// Forget a path and everything below it (when deleted).
     pub fn remove(&mut self, path: &Path) {
-        let keys: Vec<PathBuf> =
-            self.entries.keys().filter(|k| k.starts_with(path)).cloned().collect();
+        let keys: Vec<PathBuf> = self
+            .entries
+            .keys()
+            .filter(|k| k.starts_with(path))
+            .cloned()
+            .collect();
         for k in keys {
             if let Some(e) = self.entries.remove(&k) {
                 let bytes: usize = e.versions.iter().map(|s| s.text.len()).sum();
@@ -164,7 +181,9 @@ impl SnapshotStore {
         while self.total_bytes > MAX_TOTAL_BYTES {
             if !self.evict_oldest_path(keep) {
                 // Only `keep` left: trim its older versions.
-                let Some(e) = self.entries.get_mut(keep) else { break };
+                let Some(e) = self.entries.get_mut(keep) else {
+                    break;
+                };
                 if e.versions.len() <= 1 {
                     break;
                 }

@@ -521,6 +521,7 @@ impl Hub {
         }
         for s in &sessions {
             s.invalidate_system_prompt();
+            s.refresh_context_max();
             s.wake();
         }
         self.refresh_catalogs();

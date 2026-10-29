@@ -243,12 +243,20 @@ pub struct Popup {
     pub items: Vec<Item>,
     pub selected: usize,
     pub rect: Rect,
+    pub max_rows: usize,
 }
 
 impl Popup {
+    /// Rows of items shown (limited by the space above the input).
+    fn shown(&self) -> usize {
+        self.items.len().min(10).min(self.max_rows.max(1))
+    }
+
     pub fn draw(&mut self, buf: &mut Buffer, input_area: Rect) {
-        let n = self.items.len().min(10);
-        if n == 0 {
+        self.max_rows = input_area.y.saturating_sub(2) as usize;
+        let n = self.shown();
+        if n == 0 || input_area.y < 3 {
+            self.rect = Rect::default();
             return;
         }
         let h = n as u16 + 2;
@@ -279,7 +287,7 @@ impl Popup {
         if !super::layout::contains(self.rect, x, y) || y < inner_y || y >= self.rect.y + self.rect.height - 1 {
             return None;
         }
-        let n = self.items.len().min(10);
+        let n = self.shown();
         let start = self.selected.saturating_sub(n - 1);
         Some(start + (y - inner_y) as usize)
     }

@@ -29,7 +29,10 @@ impl Hunk {
     /// Lines deleted by this hunk (original numbering).
     pub fn deleted(&self) -> Option<(usize, usize)> {
         match self.kind {
-            HunkKind::Put { loc: Loc::Range(a, b), .. } => Some((a, b)),
+            HunkKind::Put {
+                loc: Loc::Range(a, b),
+                ..
+            } => Some((a, b)),
             HunkKind::Cut { start, end } => Some((start, end)),
             _ => None,
         }
@@ -69,9 +72,11 @@ fn parse_header(l: &str) -> Option<(String, Option<String>, bool)> {
         return None;
     }
     match inner.rsplit_once('#') {
-        Some((p, t)) if is_tag(t.trim()) => {
-            Some((unquote(p.trim()), Some(t.trim().to_ascii_uppercase()), from_grep))
-        }
+        Some((p, t)) if is_tag(t.trim()) => Some((
+            unquote(p.trim()),
+            Some(t.trim().to_ascii_uppercase()),
+            from_grep,
+        )),
         Some((p, t)) if t.trim().is_empty() => Some((unquote(p.trim()), None, from_grep)),
         _ => Some((unquote(inner), None, from_grep)),
     }
@@ -95,11 +100,17 @@ fn is_tag(t: &str) -> bool {
 fn parse_lid(s: &str, src: usize) -> Result<usize, String> {
     let s = s.trim();
     if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(format!("line {src}: expected a line number, got `{s}`"));
+        return Err(format!(
+            "line {src}: expected a line number, got `{s}`. Ranges are written `N.=M` (e.g. `PUT 5.=7:`, `CUT 5.=7`)."
+        ));
     }
-    let n: usize = s.parse().map_err(|_| format!("line {src}: line number `{s}` is too large"))?;
+    let n: usize = s
+        .parse()
+        .map_err(|_| format!("line {src}: line number `{s}` is too large"))?;
     if n == 0 {
-        return Err(format!("line {src}: Line 0 does not exist; lines are 1-indexed."));
+        return Err(format!(
+            "line {src}: Line 0 does not exist; lines are 1-indexed."
+        ));
     }
     Ok(n)
 }
@@ -111,7 +122,11 @@ fn range_err(src: usize, a: usize, b: usize) -> String {
     )
 }
 
-/// Parse a range `N.=M` / `N` (also tolerates `N-M`). Returns (start, end, used_dash).
+/// Range separators other than the canonical `.=` that are accepted (with a warning).
+const ALT_RANGE_SEPS: &[&str] = &[".:=", "..=", ":=", "=.", "..", "-", "–", "—", "=", ":", "."];
+
+/// Parse a range `N.=M` / `N` (also tolerates `N-M`, `N..M`, `N..=M`, `N:=M`). Returns
+/// (start, end, used_alternative_separator).
 fn parse_range(s: &str, src: usize) -> Result<(usize, usize, bool), String> {
     let s = s.trim();
     if s.ends_with('*') {
@@ -124,26 +139,47 @@ fn parse_range(s: &str, src: usize) -> Result<(usize, usize, bool), String> {
             "line {src}: registers (`@name`) are not supported; write the content as `+` body rows instead."
         ));
     }
-    let (a, b, dash) = if let Some((a, b)) = s.split_once(".=") {
+    let canonical = s
+        .split_once(".=")
+        .filter(|(a, b)| !a.ends_with('.') && !b.starts_with('='));
+    let (a, b, alt) = if let Some((a, b)) = canonical {
         (a, Some(b), false)
-    } else if let Some((a, b)) = s.split_once('-') {
+    } else if let Some((a, b)) = ALT_RANGE_SEPS.iter().find_map(|sep| s.split_once(sep)) {
         (a, Some(b), true)
     } else {
         (s, None, false)
     };
     let a = parse_lid(a, src)?;
     let b = match b {
+        Some(b) if b.trim().is_empty() => {
+            return Err(format!(
+                "line {src}: range `{s}` has no end line. Write `N.=M` with M the last line to replace (inclusive), e.g. `PUT {a}.={a}:` for one line."
+            ))
+        }
         Some(b) => parse_lid(b, src)?,
         None => a,
     };
     if b < a {
         return Err(range_err(src, a, b));
     }
-    Ok((a, b, dash))
+    Ok((a, b, alt))
 }
 
 fn parse_put_loc(s: &str, src: usize) -> Result<(Loc, bool), String> {
     let s = s.trim();
+    // `N>` / `N<` (operator after the number) mean the same as `>N` / `<N`.
+    if let Some(n) = s
+        .strip_suffix('>')
+        .filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+    {
+        return parse_put_loc(&format!(">{n}"), src).map(|(l, _)| (l, true));
+    }
+    if let Some(n) = s
+        .strip_suffix('<')
+        .filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+    {
+        return parse_put_loc(&format!("<{n}"), src).map(|(l, _)| (l, true));
+    }
     if s == ">$" || s == "$" {
         return Ok((Loc::Eof, false));
     }
@@ -160,6 +196,9 @@ fn parse_put_loc(s: &str, src: usize) -> Result<(Loc, bool), String> {
         if r.trim_end().ends_with('*') {
             return parse_range(r, src).map(|_| unreachable_loc());
         }
+        if r.trim() == "0" {
+            return Ok((Loc::Before(1), false));
+        }
         return Ok((Loc::After(parse_lid(r, src)?), false));
     }
     let (a, b, dash) = parse_range(s, src)?;
@@ -173,6 +212,8 @@ fn unreachable_loc() -> (Loc, bool) {
 
 struct Builder {
     put: Option<(Loc, usize, Vec<String>, Vec<usize>)>,
+    /// The current PUT header lacked its trailing `:` (accepted only with a body).
+    put_no_colon: bool,
     pending_blank: usize,
     repaired_bare: bool,
     dropped_minus: bool,
@@ -182,14 +223,23 @@ pub fn parse(input: &str) -> Result<Parsed, String> {
     let input = crate::util::normalize_eol(input);
     let mut out = Parsed::default();
     let mut cur: Option<Section> = None;
-    let mut b = Builder { put: None, pending_blank: 0, repaired_bare: false, dropped_minus: false };
+    let mut b = Builder {
+        put: None,
+        put_no_colon: false,
+        pending_blank: 0,
+        repaired_bare: false,
+        dropped_minus: false,
+    };
     let mut dash_warned = false;
 
     for (i, raw) in input.split('\n').enumerate() {
         let src = i + 1;
         let line = raw;
         let trimmed = line.trim_end();
-        if trimmed == "*** Begin Patch" || trimmed == "*** End Patch" || trimmed.starts_with("*** End of File") {
+        if trimmed == "*** Begin Patch"
+            || trimmed == "*** End Patch"
+            || trimmed.starts_with("*** End of File")
+        {
             flush_put(&mut b, &mut cur, &mut out)?;
             continue;
         }
@@ -223,17 +273,20 @@ pub fn parse(input: &str) -> Result<Parsed, String> {
             }
             continue;
         }
-        if let Some((path, tag, from_grep)) = parse_header(trimmed) {
+        // Inside a PUT body a tagless `[name]` line is content (e.g. an INI section), not a header.
+        let header = parse_header(trimmed).filter(|(_, tag, _)| tag.is_some() || b.put.is_none());
+        if let Some((path, tag, from_grep)) = header {
             flush_put(&mut b, &mut cur, &mut out)?;
             if let Some(s) = cur.take() {
                 out.sections.push(s);
             }
-            if from_grep {
-                out.warnings.push(format!(
-                    "Section header `{trimmed}` was copied from grep output; use `[path#TAG]` headers."
-                ));
-            }
-            cur = Some(Section { path, tag, hunks: vec![], src_line: src });
+            let _ = from_grep; // `## path#TAG` (older grep output) is accepted as-is.
+            cur = Some(Section {
+                path,
+                tag,
+                hunks: vec![],
+                src_line: src,
+            });
             continue;
         }
         if is_hunk_line(trimmed) {
@@ -245,29 +298,40 @@ pub fn parse(input: &str) -> Result<Parsed, String> {
                 ));
             };
             if trimmed == "REM" {
-                sec.hunks.push(Hunk { kind: HunkKind::Rem, src_line: src });
+                sec.hunks.push(Hunk {
+                    kind: HunkKind::Rem,
+                    src_line: src,
+                });
             } else if let Some(rest) = trimmed.strip_prefix("CUT") {
                 let rest = rest.trim().trim_end_matches(':');
                 let (a, e, dash) = parse_range(rest, src)?;
                 if dash && !dash_warned {
                     dash_warned = true;
-                    out.warnings.push("Ranges are written `N.=M`, not `N-M`; interpreted as inclusive.".into());
+                    out.warnings.push("Non-canonical locator accepted; write `N.=M` for ranges (inclusive end line) and `>N` / `<N` for insertions.".into());
                 }
-                sec.hunks.push(Hunk { kind: HunkKind::Cut { start: a, end: e }, src_line: src });
+                sec.hunks.push(Hunk {
+                    kind: HunkKind::Cut { start: a, end: e },
+                    src_line: src,
+                });
             } else {
                 let rest = trimmed.strip_prefix("PUT").unwrap_or("").trim();
-                let Some(locs) = rest.strip_suffix(':') else {
-                    return Err(format!(
-                        "line {src}: `{}` must end with `:` and be followed by `+` body rows (e.g. `PUT 5:` then `+new text`). To delete lines use `CUT N.=M`.",
-                        clip(trimmed)
-                    ));
+                let (locs, no_colon) = match rest.strip_suffix(':') {
+                    Some(l) => (l, false),
+                    None => (rest, true),
                 };
-                let (loc, dash) = parse_put_loc(locs, src)?;
+                let (loc, dash) = parse_put_loc(locs, src).map_err(|e| {
+                    if no_colon {
+                        format!("{e} A PUT header is `PUT N:`, `PUT N.=M:`, `PUT <N:`, `PUT >N:` or `PUT >$:`, followed by `+` body rows.")
+                    } else {
+                        e
+                    }
+                })?;
                 if dash && !dash_warned {
                     dash_warned = true;
-                    out.warnings.push("Ranges are written `N.=M`, not `N-M`; interpreted as inclusive.".into());
+                    out.warnings.push("Non-canonical locator accepted; write `N.=M` for ranges (inclusive end line) and `>N` / `<N` for insertions.".into());
                 }
                 b.put = Some((loc, src, vec![], vec![]));
+                b.put_no_colon = no_colon;
             }
             continue;
         }
@@ -307,17 +371,21 @@ pub fn parse(input: &str) -> Result<Parsed, String> {
         out.warnings.push("Some body rows were missing the `+` prefix and were treated as body rows; prefix every body row with `+`.".into());
     }
     if b.dropped_minus {
-        out.warnings.push("Dropped diff-style `-old` rows; bodies contain only the new content as `+` rows.".into());
+        out.warnings.push(
+            "Dropped diff-style `-old` rows; bodies contain only the new content as `+` rows."
+                .into(),
+        );
     }
     if out.sections.is_empty() {
-        return Err("empty patch: expected at least one `[PATH#TAG]` section followed by hunks.".into());
+        return Err(
+            "empty patch: expected at least one `[PATH#TAG]` section followed by hunks.".into(),
+        );
     }
     for s in &out.sections {
         if s.hunks.is_empty() {
             return Err(format!(
                 "line {}: section `[{}]` has no hunks.",
-                s.src_line,
-                s.path
+                s.src_line, s.path
             ));
         }
     }
@@ -331,8 +399,23 @@ fn clip(s: &str) -> String {
 /// kinds: 0 = blank between rows, 1 = `+` row, 2 = bare `-` row, 3 = bare row.
 fn flush_put(b: &mut Builder, cur: &mut Option<Section>, out: &mut Parsed) -> Result<(), String> {
     b.pending_blank = 0;
-    let Some((loc, src, mut body, mut kinds)) = b.put.take() else { return Ok(()) };
-    let Some(sec) = cur.as_mut() else { return Ok(()) };
+    let no_colon = std::mem::take(&mut b.put_no_colon);
+    let Some((loc, src, mut body, mut kinds)) = b.put.take() else {
+        return Ok(());
+    };
+    if no_colon {
+        if body.is_empty() {
+            return Err(format!(
+                "line {src}: a PUT header must end with `:` and be followed by `+` body rows (e.g. `PUT 5:` then `+new text`). To delete lines use `CUT N.=M`."
+            ));
+        }
+        out.warnings.push(format!(
+            "line {src}: PUT header was missing its trailing `:`; accepted."
+        ));
+    }
+    let Some(sec) = cur.as_mut() else {
+        return Ok(());
+    };
     let has_plus = kinds.contains(&1);
     if kinds.contains(&2) {
         if has_plus {
@@ -357,13 +440,15 @@ fn flush_put(b: &mut Builder, cur: &mut Option<Section>, out: &mut Parsed) -> Re
         let all_numbered = refs.iter().all(|r| parse_num_prefix(r).is_some());
         if all_numbered {
             if let Some(stripped) = strip_numbered_prefixes(&refs) {
-                let first = parse_num_prefix(refs[0]).map(|(n, _)| n as usize).unwrap_or(0);
-                let plausible = refs.len() >= 2
-                    || match loc {
-                        Loc::Range(a, e) => first + 1 >= a && first <= e + 1,
-                        Loc::Before(n) | Loc::After(n) => first + 1 >= n && first <= n + 1,
-                        Loc::Eof => false,
-                    };
+                let first = parse_num_prefix(refs[0])
+                    .map(|(n, _)| n as usize)
+                    .unwrap_or(0);
+                // The numbers must match where the hunk lands (avoid stripping `10:00`-like content).
+                let plausible = match loc {
+                    Loc::Range(a, e) => first + 1 >= a && first <= e + 1,
+                    Loc::Before(n) | Loc::After(n) => first + 1 >= n && first <= n + 1,
+                    Loc::Eof => false,
+                };
                 if plausible {
                     body = stripped;
                     out.warnings.push(format!(
@@ -390,7 +475,10 @@ fn flush_put(b: &mut Builder, cur: &mut Option<Section>, out: &mut Parsed) -> Re
             }
         }
     }
-    sec.hunks.push(Hunk { kind: HunkKind::Put { loc, body }, src_line: src });
+    sec.hunks.push(Hunk {
+        kind: HunkKind::Put { loc, body },
+        src_line: src,
+    });
     Ok(())
 }
 
@@ -407,10 +495,19 @@ mod tests {
         assert_eq!(s.hunks.len(), 3);
         assert_eq!(
             s.hunks[0].kind,
-            HunkKind::Put { loc: Loc::Range(2, 3), body: vec!["x".into(), "".into()] }
+            HunkKind::Put {
+                loc: Loc::Range(2, 3),
+                body: vec!["x".into(), "".into()]
+            }
         );
         assert_eq!(s.hunks[1].kind, HunkKind::Cut { start: 5, end: 5 });
-        assert_eq!(s.hunks[2].kind, HunkKind::Put { loc: Loc::Eof, body: vec!["end".into()] });
+        assert_eq!(
+            s.hunks[2].kind,
+            HunkKind::Put {
+                loc: Loc::Eof,
+                body: vec!["end".into()]
+            }
+        );
     }
 
     #[test]
@@ -418,27 +515,44 @@ mod tests {
         let p = parse("[a#ABCD]\nPUT 3:\n  bare\n+ok\n").unwrap();
         assert_eq!(
             p.sections[0].hunks[0].kind,
-            HunkKind::Put { loc: Loc::Range(3, 3), body: vec!["  bare".into(), "ok".into()] }
+            HunkKind::Put {
+                loc: Loc::Range(3, 3),
+                body: vec!["  bare".into(), "ok".into()]
+            }
         );
         assert!(!p.warnings.is_empty());
         let p = parse("[a#ABCD]\nPUT 3.=4:\n3:x\n4:y\n").unwrap();
         assert_eq!(
             p.sections[0].hunks[0].kind,
-            HunkKind::Put { loc: Loc::Range(3, 4), body: vec!["x".into(), "y".into()] }
+            HunkKind::Put {
+                loc: Loc::Range(3, 4),
+                body: vec!["x".into(), "y".into()]
+            }
         );
         let p = parse("[a#ABCD]\nPUT 3:\n+3:x\n+5:y\n").unwrap();
         assert_eq!(
             p.sections[0].hunks[0].kind,
-            HunkKind::Put { loc: Loc::Range(3, 3), body: vec!["3:x".into(), "5:y".into()] }
+            HunkKind::Put {
+                loc: Loc::Range(3, 3),
+                body: vec!["3:x".into(), "5:y".into()]
+            }
         );
     }
 
     #[test]
     fn errors() {
         assert!(parse("PUT 1:\n+x").unwrap_err().contains("before any"));
-        assert!(parse("[a#ABCD]\nPUT 5.=3:\n+x").unwrap_err().contains("Invalid absolute range"));
-        assert!(parse("[a#ABCD]\nPUT 5*:\n+x").unwrap_err().contains("not supported"));
-        assert!(parse("[a#ABCD]\nPUT 0:\n+x").unwrap_err().contains("1-indexed"));
-        assert!(parse("[a#ABCD]\nPUT >2:\n").unwrap_err().contains("no body"));
+        assert!(parse("[a#ABCD]\nPUT 5.=3:\n+x")
+            .unwrap_err()
+            .contains("Invalid absolute range"));
+        assert!(parse("[a#ABCD]\nPUT 5*:\n+x")
+            .unwrap_err()
+            .contains("not supported"));
+        assert!(parse("[a#ABCD]\nPUT 0:\n+x")
+            .unwrap_err()
+            .contains("1-indexed"));
+        assert!(parse("[a#ABCD]\nPUT >2:\n")
+            .unwrap_err()
+            .contains("no body"));
     }
 }
