@@ -3,12 +3,17 @@ name = "ref-server"
 version.workspace = true
 edition.workspace = true
 
+[lib]
+name = "ref_server"
+path = "src/lib.rs"
+
 [[bin]]
 name = "ref-server"
 path = "src/main.rs"
 
 [dependencies]
 ref-proto.workspace = true
+ref-config.workspace = true
 ref-llm.workspace = true
 ref-tools.workspace = true
 ref-mcp.workspace = true
@@ -25,6 +30,7 @@ rand.workspace = true
 regex.workspace = true
 dirs.workspace = true
 globset.workspace = true
+ignore.workspace = true
 libc.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

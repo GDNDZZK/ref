@@ -1,1 +1,153 @@
-fn main() {}
+use clap::Parser;
+use ref_proto::InstanceInfo;
+use ref_server::{HubOptions, instance, ops, ws};
+use std::path::PathBuf;
+use std::time::Duration;
+
+#[derive(Parser, Debug)]
+#[command(name = "ref-server", version, about = "Backend of the ref coding agent (WebSocket server)")]
+struct Cli {
+    /// Port to listen on (0 or absent: random free port in 10000..=65535).
+    #[arg(long)]
+    port: Option<u16>,
+    /// Bind address (default 127.0.0.1, or 0.0.0.0 when a non-loopback host is allowed).
+    #[arg(long)]
+    host: Option<String>,
+    /// Hosts allowed to connect (repeatable / comma separated; `*` = any).
+    /// Default: 127.0.0.1, ::1, localhost.
+    #[arg(long = "allow-host", value_delimiter = ',')]
+    allow_host: Vec<String>,
+    /// Seconds to keep running after the last frontend disconnects
+    /// (0 = exit immediately, -1 = never). Only effective after the first connection.
+    #[arg(long, default_value_t = -1, allow_negative_numbers = true)]
+    idle_timeout: i64,
+    /// Shared secret clients must present (default: random).
+    #[arg(long)]
+    token: Option<String>,
+    /// Log file (default: <state_dir>/logs/server-<pid>.log).
+    #[arg(long)]
+    log: Option<PathBuf>,
+    /// List running instances and their configuration.
+    #[arg(long)]
+    status: bool,
+    /// With --status: print JSON.
+    #[arg(long)]
+    json: bool,
+    /// Stop running instance(s) (all, or the one with PID).
+    #[arg(long, value_name = "PID", num_args = 0..=1)]
+    stop: Option<Option<u32>>,
+}
+
+fn is_loopback(h: &str) -> bool {
+    let h = h.trim().trim_start_matches('[').trim_end_matches(']');
+    h == "localhost" || h.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
+}
+
+fn init_logging(path: &PathBuf) -> anyhow::Result<()> {
+    if let Some(d) = path.parent() {
+        std::fs::create_dir_all(d)?;
+    }
+    let file = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
+    let filter = tracing_subscriber::EnvFilter::try_from_env("REF_LOG").unwrap_or_else(|_| "info".into());
+    tracing_subscriber::fmt().with_writer(std::sync::Mutex::new(file)).with_ansi(false).with_env_filter(filter).init();
+    Ok(())
+}
+
+fn main() {
+    let cli = Cli::parse();
+    if cli.status || cli.stop.is_some() {
+        // Behave like a normal CLI when piped into `head` etc. (exit quietly on EPIPE).
+        // SAFETY: setting a signal disposition before any threads are started.
+        unsafe {
+            libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+        }
+    }
+    let rt = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+        Ok(rt) => rt,
+        Err(e) => {
+            eprintln!("ref-server: cannot start runtime: {e}");
+            std::process::exit(1);
+        }
+    };
+    let code = rt.block_on(async move {
+        if cli.status {
+            return instance::status(cli.json).await;
+        }
+        if let Some(pid) = cli.stop {
+            return instance::stop(pid).await;
+        }
+        match serve(cli).await {
+            Ok(()) => 0,
+            Err(e) => {
+                eprintln!("ref-server: {e:#}");
+                tracing::error!("fatal: {e:#}");
+                1
+            }
+        }
+    });
+    rt.shutdown_timeout(Duration::from_secs(2));
+    std::process::exit(code);
+}
+
+async fn serve(cli: Cli) -> anyhow::Result<()> {
+    let pid = std::process::id();
+    let log = cli.log.clone().unwrap_or_else(|| ref_proto::state_dir().join("logs").join(format!("server-{pid}.log")));
+    if let Err(e) = init_logging(&log) {
+        eprintln!("ref-server: cannot open log file {}: {e}", log.display());
+    }
+    let allow: Vec<String> = if cli.allow_host.is_empty() {
+        vec!["127.0.0.1".into(), "::1".into(), "localhost".into()]
+    } else {
+        cli.allow_host.iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+    };
+    let bind = match &cli.host {
+        Some(h) => h.trim().trim_start_matches('[').trim_end_matches(']').to_string(),
+        None if allow.iter().any(|h| !is_loopback(h)) => "0.0.0.0".into(),
+        None => "127.0.0.1".into(),
+    };
+    let port = match cli.port {
+        Some(p) if p != 0 => p,
+        _ => instance::pick_port(&bind).ok_or_else(|| anyhow::anyhow!("no free port found"))?,
+    };
+    let token = cli.token.clone().filter(|t| !t.is_empty()).unwrap_or_else(|| ref_server::util::random_hex(32));
+    let (auth, warnings) = ws::resolve_hosts(&allow, token.clone());
+    for w in warnings {
+        tracing::warn!("{w}");
+        eprintln!("ref-server: warning: {w}");
+    }
+    let mut opts = HubOptions::new(ref_proto::data_dir());
+    opts.idle_timeout = cli.idle_timeout;
+    let running = ref_server::start(opts, &bind, port, auth).await?;
+    let info = InstanceInfo {
+        pid,
+        port: running.addr.port(),
+        bind: bind.clone(),
+        allow_hosts: allow.clone(),
+        idle_timeout: cli.idle_timeout,
+        started_at: ref_proto::now_ms(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        token,
+    };
+    *running.hub.instance.lock().unwrap_or_else(|e| e.into_inner()) = Some(info.clone());
+    let dir = ref_proto::instances_dir();
+    let inst_file = instance::write_instance(&dir, &info)?;
+    tracing::info!(port = info.port, %bind, idle_timeout = cli.idle_timeout, "ref-server listening");
+    eprintln!("ref-server listening on ws://{}:{} (pid {pid})", bind, info.port);
+
+    let hub = running.hub.clone();
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    let mut sighup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())?;
+    tokio::select! {
+        _ = hub.shutdown.cancelled() => {}
+        _ = tokio::signal::ctrl_c() => tracing::info!("SIGINT"),
+        _ = sigterm.recv() => tracing::info!("SIGTERM"),
+        _ = sighup.recv() => tracing::info!("SIGHUP"),
+    }
+    hub.shutdown.cancel();
+    tracing::info!("shutting down");
+    let _ = tokio::time::timeout(Duration::from_secs(15), ops::shutdown_all(&hub)).await;
+    let _ = std::fs::remove_file(&inst_file);
+    running.task.abort();
+    tracing::info!("bye");
+    Ok(())
+}

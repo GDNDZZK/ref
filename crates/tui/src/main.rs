@@ -1,1 +1,235 @@
-fn main() {}
+//! `ref` — TUI frontend for ref-server.
+
+mod app;
+mod clipboard;
+mod input;
+mod launcher;
+mod mock;
+mod net;
+mod render;
+mod state;
+mod ui;
+
+#[cfg(test)]
+mod tests;
+
+use std::io::Write;
+use std::time::Duration;
+
+use clap::Parser;
+use crossterm::event::{
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, EventStream, KeyboardEnhancementFlags,
+    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+};
+use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode};
+use crossterm::{cursor, execute};
+use futures_util::StreamExt;
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
+use ref_proto::ModelRef;
+use tokio::sync::mpsc;
+
+use crate::app::{App, InitPlan};
+use crate::launcher::Target;
+use crate::net::Client;
+
+#[derive(Parser, Debug)]
+#[command(name = "ref", version, about = "ref — coding agent TUI")]
+struct Cli {
+    /// Directory to open a new session in (default: current directory).
+    path: Option<String>,
+    /// Attach to an existing session (live or history) by id.
+    #[arg(short, long)]
+    session: Option<String>,
+    /// Continue the most recent session for this directory.
+    #[arg(short = 'c', long = "continue")]
+    continue_last: bool,
+    /// Split view of all live background sessions (does not create a session).
+    #[arg(short, long)]
+    watch: bool,
+    /// Agent for the new session.
+    #[arg(long)]
+    agent: Option<String>,
+    /// Model for the new session (`provider/model[#variant]`).
+    #[arg(long)]
+    model: Option<String>,
+    /// Explicit backend URL (ws://host:port); disables auto-spawn.
+    #[arg(long)]
+    server: Option<String>,
+    /// Token for --server.
+    #[arg(long)]
+    token: Option<String>,
+    /// Initial prompt to send.
+    #[arg(short, long)]
+    prompt: Option<String>,
+    /// Run against a built-in fake backend (development).
+    #[arg(long)]
+    mock: bool,
+}
+
+fn setup_terminal() -> std::io::Result<()> {
+    enable_raw_mode()?;
+    let mut out = std::io::stdout();
+    execute!(out, EnterAlternateScreen, EnableMouseCapture, EnableBracketedPaste, cursor::SetCursorStyle::SteadyBar)?;
+    if crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false) {
+        let _ = execute!(
+            out,
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS)
+        );
+    }
+    Ok(())
+}
+
+fn restore_terminal() {
+    let mut out = std::io::stdout();
+    let _ = execute!(out, PopKeyboardEnhancementFlags);
+    let _ = execute!(out, DisableBracketedPaste, DisableMouseCapture, LeaveAlternateScreen, cursor::SetCursorStyle::DefaultUserShape, cursor::Show);
+    let _ = disable_raw_mode();
+    let _ = out.flush();
+}
+
+/// Suspends the TUI, runs $VISUAL/$EDITOR on the prompt text, returns the edited text.
+fn run_external_editor(initial: &str) -> Option<String> {
+    let editor = std::env::var("VISUAL").or_else(|_| std::env::var("EDITOR")).unwrap_or_else(|_| "vi".into());
+    let path = std::env::temp_dir().join(format!("ref-prompt-{}-{}.md", std::process::id(), ref_proto::now_ms()));
+    std::fs::write(&path, initial).ok()?;
+    restore_terminal();
+    let status = std::process::Command::new("sh").arg("-c").arg(format!("{editor} \"$1\"")).arg("sh").arg(&path).status();
+    let _ = setup_terminal();
+    let out = std::fs::read_to_string(&path).ok();
+    let _ = std::fs::remove_file(&path);
+    match status {
+        Ok(s) if s.success() => out.map(|s| s.trim_end_matches('\n').to_string()),
+        _ => None,
+    }
+}
+
+fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    let cwd = match &cli.path {
+        Some(p) => std::fs::canonicalize(p).map_err(|e| anyhow::anyhow!("{p}: {e}"))?,
+        None => std::env::current_dir()?,
+    };
+    if !cwd.is_dir() {
+        anyhow::bail!("{} is not a directory", cwd.display());
+    }
+    let cwd = cwd.to_string_lossy().into_owned();
+    let model = match &cli.model {
+        Some(m) => Some(ModelRef::parse(m).ok_or_else(|| anyhow::anyhow!("invalid --model {m:?}; expected provider/model"))?),
+        None => None,
+    };
+    let plan = InitPlan { session: cli.session.clone(), continue_last: cli.continue_last, watch: cli.watch, agent: cli.agent.clone(), model, prompt: cli.prompt.clone() };
+    let target = match cli.server.clone() {
+        Some(url) => Target::Explicit { url, token: cli.token.clone() },
+        None => Target::Auto,
+    };
+
+    let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build()?;
+    // Panic hook: restore the terminal before printing.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        restore_terminal();
+        default_hook(info);
+    }));
+    setup_terminal()?;
+    let res = rt.block_on(run(cli.mock, target, cwd, plan));
+    restore_terminal();
+    rt.shutdown_timeout(Duration::from_millis(200));
+    res
+}
+
+/// Clears the screen and forces a full repaint (without the cursor-position query that
+/// `Terminal::clear` performs, which some PTYs never answer).
+fn full_clear(t: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> std::io::Result<()> {
+    let (w, h) = crossterm::terminal::size()?;
+    t.resize(ratatui::layout::Rect::new(0, 0, w, h))
+}
+
+async fn run(mock: bool, target: Target, cwd: String, plan: InitPlan) -> anyhow::Result<()> {
+    let (out_tx, out_rx) = mpsc::unbounded_channel();
+    let (ev_tx, mut ev_rx) = mpsc::unbounded_channel();
+    if mock {
+        tokio::spawn(mock::run(cwd.clone(), out_rx, ev_tx));
+    } else {
+        tokio::spawn(net::run(target, cwd.clone(), out_rx, ev_tx));
+    }
+    let mut app = App::new(Client::new(out_tx), cwd, plan);
+    let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
+    full_clear(&mut terminal)?;
+    let mut events = EventStream::new();
+    let mut last_draw = std::time::Instant::now() - Duration::from_secs(1);
+    loop {
+        if app.run_editor {
+            app.run_editor = false;
+            // Stop the terminal reader thread so it doesn't steal the editor's input.
+            drop(events);
+            let initial = app.editor.text.clone();
+            if let Some(t) = run_external_editor(&initial) {
+                app.editor.set_text(&t);
+            }
+            events = EventStream::new();
+            full_clear(&mut terminal)?;
+            app.dirty = true;
+        }
+        if app.force_clear {
+            app.force_clear = false;
+            full_clear(&mut terminal)?;
+            app.dirty = true;
+        }
+        if app.quit {
+            break;
+        }
+        let interval = app.frame_interval();
+        if app.dirty {
+            // Cap at ~60fps.
+            let since = last_draw.elapsed();
+            if since >= Duration::from_millis(14) {
+                // Advance scroll easing once per drawn frame.
+                for v in app.views.values_mut() {
+                    v.chat.step_anim();
+                }
+                terminal.draw(|f| render::draw(f, &mut app))?;
+                last_draw = std::time::Instant::now();
+                app.dirty = false;
+            }
+        }
+        let wait = if app.dirty { Duration::from_millis(14).saturating_sub(last_draw.elapsed()) } else { interval.unwrap_or(Duration::from_secs(3600)) };
+        tokio::select! {
+            ev = events.next() => {
+                match ev {
+                    Some(Ok(e)) => input::handle(&mut app, e),
+                    Some(Err(_)) | None => break,
+                }
+                // Drain any further pending terminal events without redrawing in between.
+            }
+            ev = ev_rx.recv() => {
+                match ev {
+                    Some(e) => {
+                        app.on_net(e);
+                        // Coalesce bursts of frames into one render.
+                        let mut n = 0;
+                        while n < 512 {
+                            match ev_rx.try_recv() {
+                                Ok(e) => { app.on_net(e); n += 1; }
+                                Err(_) => break,
+                            }
+                        }
+                    }
+                    None => break,
+                }
+            }
+            _ = tokio::time::sleep(wait) => {
+                if interval.is_some() {
+                    app.dirty = true;
+                }
+            }
+        }
+        app.housekeeping();
+    }
+    // Detach politely (server counts frontends; idle-timeout handles the rest).
+    if let Some(sid) = app.current.clone() {
+        app.client.send(None, ref_proto::Request::Detach { session_id: sid });
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    }
+    Ok(())
+}
