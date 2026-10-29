@@ -27,6 +27,8 @@ pub enum Reply {
     /// (tool name, arguments JSON text)
     Tools(Vec<(String, String)>),
     Status(u16, String),
+    /// Stream this text, then keep the response open forever (never finishes).
+    Stall(String),
 }
 
 pub fn text(t: &str) -> Reply {
@@ -142,6 +144,11 @@ async fn chat(State(st): State<MockState>, body: String) -> Response {
     let reply = if req.is_title() { text("Mock title") } else { (st.script)(&req) };
     let mut events: Vec<Value> = Vec::new();
     match reply {
+        Reply::Stall(t) => {
+            let first = format!("data: {}\n\n", json!({"choices":[{"index":0,"delta":{"content":t}}]}));
+            let body = futures::stream::once(async move { Ok::<_, std::io::Error>(first) }).chain(futures::stream::pending());
+            return Response::builder().header("content-type", "text/event-stream").body(Body::from_stream(body)).unwrap();
+        }
         Reply::Status(code, msg) => {
             return (StatusCode::from_u16(code).unwrap(), json!({"error": {"message": msg}}).to_string()).into_response();
         }
@@ -214,6 +221,7 @@ async fn anthropic(State(st): State<MockState>, body: String) -> Response {
     if let Reply::Status(code, msg) = &reply {
         return (StatusCode::from_u16(*code).unwrap(), json!({"type":"error","error":{"type":"api_error","message":msg}}).to_string()).into_response();
     }
+    assert!(!matches!(reply, Reply::Stall(_)), "Stall is only implemented for the chat mock");
     block(
         &mut ev,
         json!({"type":"thinking","thinking":"","signature":""}),
@@ -238,7 +246,7 @@ async fn anthropic(State(st): State<MockState>, body: String) -> Response {
             }
             "tool_use"
         }
-        Reply::Status(..) => unreachable!(),
+        Reply::Status(..) | Reply::Stall(..) => unreachable!(),
     };
     ev.push(("message_delta", json!({"type":"message_delta","delta":{"stop_reason":stop},"usage":{"output_tokens":20}})));
     ev.push(("message_stop", json!({"type":"message_stop"})));
@@ -388,38 +396,79 @@ impl Client {
     pub async fn connect(url: &str, cwd: &str) -> Client {
         let mut last = String::new();
         for _ in 0..100 {
-            match tokio_tungstenite::connect_async(url).await {
-                Ok((ws, _)) => {
-                    let (mut sink, mut stream) = ws.split();
-                    let (tx, mut orx) = mpsc::unbounded_channel::<String>();
-                    let (itx, rx) = mpsc::unbounded_channel::<ServerMsg>();
-                    tokio::spawn(async move {
-                        while let Some(s) = orx.recv().await {
-                            if sink.send(WsMsg::text(s)).await.is_err() {
-                                break;
-                            }
-                        }
-                        let _ = sink.close().await;
-                    });
-                    tokio::spawn(async move {
-                        while let Some(Ok(m)) = stream.next().await {
-                            if let WsMsg::Text(t) = m {
-                                if let Ok(sm) = serde_json::from_str::<ServerMsg>(t.as_str()) {
-                                    let _ = itx.send(sm);
-                                }
-                            }
-                        }
-                    });
-                    let mut c = Client { tx, rx, next: 1, seen: Vec::new(), pending: Vec::new() };
-                    let r = c.req_id(0, ClientMsg::Hello { client: "test".into(), cwd: cwd.into(), protocol: PROTOCOL_VERSION }).await;
-                    r.expect("hello");
-                    return c;
-                }
-                Err(e) => last = e.to_string(),
+            match Client::try_connect(url, cwd).await {
+                Ok(c) => return c,
+                Err(e) => last = e,
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         panic!("cannot connect to {url}: {last}");
+    }
+
+    /// One connection attempt + Hello. Errors: "http <status>", "connect: ...", "hello: ...".
+    pub async fn try_connect(url: &str, cwd: &str) -> Result<Client, String> {
+        let ws = match tokio_tungstenite::connect_async(url).await {
+            Ok((ws, _)) => ws,
+            Err(tokio_tungstenite::tungstenite::Error::Http(resp)) => return Err(format!("http {}", resp.status().as_u16())),
+            Err(e) => return Err(format!("connect: {e}")),
+        };
+        let (mut sink, mut stream) = ws.split();
+        let (tx, mut orx) = mpsc::unbounded_channel::<String>();
+        let (itx, rx) = mpsc::unbounded_channel::<ServerMsg>();
+        tokio::spawn(async move {
+            while let Some(s) = orx.recv().await {
+                if sink.send(WsMsg::text(s)).await.is_err() {
+                    break;
+                }
+            }
+            let _ = sink.close().await;
+        });
+        tokio::spawn(async move {
+            while let Some(Ok(m)) = stream.next().await {
+                if let WsMsg::Text(t) = m {
+                    if let Ok(sm) = serde_json::from_str::<ServerMsg>(t.as_str()) {
+                        let _ = itx.send(sm);
+                    }
+                }
+            }
+        });
+        let mut c = Client { tx, rx, next: 1, seen: Vec::new(), pending: Vec::new() };
+        let hello = ClientMsg::Hello { client: "test".into(), cwd: cwd.into(), protocol: PROTOCOL_VERSION };
+        match c.try_req_id(0, hello, Duration::from_secs(10)).await {
+            Ok(Ok(_)) => Ok(c),
+            Ok(Err(e)) => Err(format!("hello: {e}")),
+            Err(e) => Err(format!("hello: {e}")),
+        }
+    }
+
+    /// Like `req` but reports a dropped connection / timeout instead of panicking.
+    pub async fn try_req(&mut self, msg: ClientMsg, t: Duration) -> Result<Result<Value, String>, String> {
+        let id = self.next;
+        self.next += 1;
+        self.try_req_id(id, msg, t).await
+    }
+
+    async fn try_req_id(&mut self, id: u64, msg: ClientMsg, t: Duration) -> Result<Result<Value, String>, String> {
+        let s = serde_json::to_string(&Request { id, msg }).unwrap();
+        self.tx.send(s).map_err(|_| "writer gone".to_string())?;
+        let deadline = tokio::time::Instant::now() + t;
+        loop {
+            let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+            match tokio::time::timeout(left, self.rx.recv()).await {
+                Err(_) => return Err("response timeout".into()),
+                Ok(None) => return Err("connection closed".into()),
+                Ok(Some(ServerMsg::Response { id: rid, ok, error })) if rid == id => {
+                    return Ok(match error {
+                        Some(e) => Err(e),
+                        None => Ok(ok.unwrap_or(Value::Null)),
+                    })
+                }
+                Ok(Some(other)) => {
+                    self.seen.push(other.clone());
+                    self.pending.push(other);
+                }
+            }
+        }
     }
 
     pub fn close(self) {

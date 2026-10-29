@@ -72,7 +72,7 @@ pub async fn generate(s: Arc<Session>, hub: Arc<Hub>, prompt: String) {
     s.set_auto_title(&title);
 }
 
-async fn ask(s: &Session, hub: &Hub, prompt: &str) -> anyhow::Result<Option<String>> {
+async fn ask(s: &Session, hub: &Arc<Hub>, prompt: &str) -> anyhow::Result<Option<String>> {
     let info = s.info();
     let config = hub.config(&info.cwd).await;
     let spec = match config.small_model.as_ref().and_then(|m| config.resolve_model(m).ok()) {

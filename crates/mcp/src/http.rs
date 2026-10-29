@@ -45,16 +45,12 @@ impl HttpStatusError {
     }
 }
 
-pub(crate) fn build_client(url: &Url) -> Result<reqwest::Client> {
-    let mut b = reqwest::Client::builder();
-    let host = url.host_str().unwrap_or("").trim_start_matches('[').trim_end_matches(']');
-    let loopback = host.eq_ignore_ascii_case("localhost")
-        || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback());
-    if loopback {
-        // Never route local servers through an HTTP proxy.
-        b = b.no_proxy();
-    }
-    b.connect_timeout(Duration::from_secs(30))
+pub(crate) fn build_client() -> Result<reqwest::Client> {
+    // Env proxies, but never for local / private hosts or hosts matched by NO_PROXY
+    // (including shell-style patterns such as `127.*` that reqwest itself ignores).
+    reqwest::Client::builder()
+        .proxy(hn_llm::proxy::reqwest_proxy())
+        .connect_timeout(Duration::from_secs(30))
         .user_agent(concat!("hernees/", env!("CARGO_PKG_VERSION")))
         .build()
         .context("failed to build HTTP client")
@@ -123,7 +119,7 @@ impl Streamable {
         let url = Url::parse(url).with_context(|| format!("invalid MCP url `{url}`"))?;
         Ok(Streamable {
             label: label.to_string(),
-            client: build_client(&url)?,
+            client: build_client()?,
             url,
             headers: build_headers(headers)?,
             session: Mutex::new(None),
@@ -440,7 +436,7 @@ impl LegacySse {
     /// Open the GET event stream and wait for the `endpoint` event.
     pub async fn connect(label: &str, url: &str, headers: &IndexMap<String, String>, in_tx: InTx) -> Result<LegacySse> {
         let base = Url::parse(url).with_context(|| format!("invalid MCP url `{url}`"))?;
-        let client = build_client(&base)?;
+        let client = build_client()?;
         let headers = build_headers(headers)?;
         let resp = client
             .get(base.clone())

@@ -32,26 +32,38 @@ use std::io::Write;
 use std::time::{Duration, Instant};
 
 #[derive(Parser, Debug)]
-#[command(name = "hernees", version, about = "hernees coding agent (terminal UI)")]
+#[command(
+    name = "hernees",
+    version,
+    about = "hernees coding agent (terminal UI)",
+    after_help = "Without --server, hernees connects to a running backend found in the instance \
+registry ($XDG_STATE_HOME/hernees/instances) or starts `hernees-server` (next to this binary, \
+in PATH, or $HERNEES_SERVER) with --idle-timeout 0, so the backend exits when the last frontend \
+closes. Sessions are persisted and can be resumed with --session / --continue.\n\n\
+Press ctrl+p for commands and ctrl+x h for key bindings."
+)]
 struct Cli {
-    /// Initial prompt to send.
+    /// Prompt to send as soon as the session is ready
     prompt: Option<String>,
-    /// Resume (attach to) a session by id.
-    #[arg(short, long)]
+    /// Resume (attach to) a session by id
+    #[arg(short, long, value_name = "ID", conflicts_with = "background")]
     session: Option<String>,
-    /// Continue the most recent session in this directory.
-    #[arg(short = 'c', long = "continue")]
+    /// Continue the most recently updated session of the current directory
+    #[arg(short = 'c', long = "continue", conflicts_with_all = ["session", "background"])]
     cont: bool,
-    /// Agent for the new session.
-    #[arg(long)]
+    /// Agent for a new session [default: `default_agent` from the config, else "build"]
+    #[arg(long, value_name = "NAME")]
     agent: Option<String>,
-    /// Model for the new session (`provider/model[#variant]`). Default: the agent's model.
-    #[arg(short, long)]
+    /// Model for a new session, as provider/model[#variant] (e.g. openai/gpt-5#high)
+    /// [default: the agent's model, else `model` from the config]
+    #[arg(short, long, value_name = "MODEL")]
     model: Option<String>,
-    /// Connect to an explicit backend (ws://host:port).
-    #[arg(long)]
+    /// Connect to this backend (ws://host:port or host:port) instead of discovering or
+    /// starting one; reconnects to the same URL if the connection drops
+    #[arg(long, value_name = "URL")]
     server: Option<String>,
-    /// Background monitor: show all open background sessions tiled, without creating a session.
+    /// Background monitor: tile every open background session (sessions no frontend has in
+    /// the foreground) without creating one; panes appear and disappear automatically
     #[arg(short, long)]
     background: bool,
 }

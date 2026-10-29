@@ -83,9 +83,9 @@ fn spawn_server(exe: &Path, port: u16) -> anyhow::Result<PathBuf> {
     let log_path = logs.join(format!("server-{}.log", chrono::Local::now().format("%Y%m%d-%H%M%S")));
     let log = std::fs::OpenOptions::new().create(true).append(true).open(&log_path)?;
     let mut cmd = Command::new(exe);
-    // Exit shortly after the last frontend leaves; the few seconds of grace avoid a
-    // restarting TUI connecting to a backend that is already shutting down.
-    cmd.args(["--port", &port.to_string(), "--idle-timeout", "5"])
+    // Exit as soon as the last frontend leaves. A frontend connecting while it shuts down
+    // gets HTTP 503 (or a closed socket) and spawns a new backend (see `connect`).
+    cmd.args(["--port", &port.to_string(), "--idle-timeout", "0"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::from(log));
@@ -106,8 +106,12 @@ fn spawn_server(exe: &Path, port: u16) -> anyhow::Result<PathBuf> {
 }
 
 /// Connect to an explicit URL, or discover/spawn a local backend.
+///
+/// Discovery tries every live instance (newest first); an instance that refuses (HTTP 503
+/// while shutting down), resets, or closes the socket during Hello is skipped. If none
+/// works, a new backend is spawned. The whole scan is retried a few times because an
+/// instance can disappear between being listed and being connected to.
 pub async fn connect(explicit: Option<&str>, cwd: &str) -> anyhow::Result<Backend> {
-    let t = Duration::from_secs(3);
     if let Some(u) = explicit {
         let u = if u.contains("://") { u.to_string() } else { format!("ws://{u}") };
         let (ws, url) = client::connect_hello(&u, cwd, Duration::from_secs(8))
@@ -115,6 +119,19 @@ pub async fn connect(explicit: Option<&str>, cwd: &str) -> anyhow::Result<Backen
             .map_err(|e| anyhow::anyhow!("cannot connect to {u}: {e}"))?;
         return Ok(Backend { url, ws, spawned: false });
     }
+    let mut last = anyhow::anyhow!("no backend");
+    for _ in 0..3 {
+        match discover(cwd).await {
+            Ok(b) => return Ok(b),
+            Err(e) => last = e,
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    Err(last)
+}
+
+async fn discover(cwd: &str) -> anyhow::Result<Backend> {
+    let t = Duration::from_secs(3);
     for inst in instances() {
         let base = format!("ws://{}:{}", host_for(&inst), inst.port);
         if let Ok((ws, url)) = client::connect_hello(&base, cwd, t).await {

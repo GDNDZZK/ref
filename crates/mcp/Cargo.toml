@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 hn-proto.workspace = true
 hn-config.workspace = true
+hn-llm.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 futures.workspace = true

@@ -24,27 +24,41 @@ use std::sync::Arc;
 use std::time::Duration;
 
 #[derive(Parser, Debug)]
-#[command(name = "hernees-server", version, about = "hernees backend (WebSocket server)")]
+#[command(
+    name = "hernees-server",
+    version,
+    about = "hernees backend: sessions, agent loop, LLM calls, tools, MCP and persistence, served over WebSocket",
+    long_about = None,
+    after_help = "Frontends (`hernees`) find running backends through the instance files in \
+$XDG_STATE_HOME/hernees/instances and start one themselves (with --idle-timeout 0) when none is \
+running, so starting the server by hand is optional. Logs go to stderr (filter: HERNEES_LOG, \
+e.g. HERNEES_LOG=debug)."
+)]
 struct Cli {
-    /// Port to listen on (default: a random free port >= 10000).
+    /// Port to listen on [default: a random free port between 10000 and 60000]
     #[arg(long)]
     port: Option<u16>,
-    /// Address to bind.
+    /// Address to bind (use 0.0.0.0 or :: to accept remote frontends, together with --allow-host)
     #[arg(long, default_value = "127.0.0.1")]
     host: String,
-    /// Allowed client address (repeatable). Default: 127.0.0.1, ::1. "*" allows any.
+    /// Client address allowed to connect; repeatable. Accepts IPs, host names (resolved at
+    /// startup), "localhost" and "*" (any address). Other clients get HTTP 403.
+    /// [default: 127.0.0.1 and ::1]
     #[arg(long = "allow-host", value_name = "HOST")]
     allow_host: Vec<String>,
-    /// Seconds without any frontend before exiting: 0 = exit when the last frontend
-    /// disconnects, -1 = never. Counts only after the first frontend connected (with 0, the
-    /// server also exits if no frontend connects within 120s of startup).
-    #[arg(long, default_value_t = -1, allow_negative_numbers = true)]
+    /// When to exit for lack of frontends, in seconds without any connected frontend.
+    /// 0 = exit as soon as the last frontend disconnects; -1 = never; N = after N seconds.
+    /// The timer starts only after the first frontend has connected (with 0, the server also
+    /// exits if no frontend connects within 120s of startup). `--status` probes do not count
+    /// as frontends. Once shutting down, new connections are refused with HTTP 503.
+    #[arg(long, default_value_t = -1, allow_negative_numbers = true, value_name = "SECONDS")]
     idle_timeout: i64,
-    /// Show running instances and exit (exit code 0 if any is running).
+    /// List running instances (pid, URL, idle timeout, open/busy sessions, connected
+    /// frontends) and exit. Exit code 0 if at least one instance is running, 1 otherwise.
     #[arg(long, alias = "list")]
     status: bool,
-    /// Machine-readable output for --status.
-    #[arg(long)]
+    /// With --status: print JSON instead of text
+    #[arg(long, requires = "status")]
     json: bool,
 }
 
@@ -148,9 +162,13 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         r = shutdown_signal() => r,
         r = idle_watch(hub.clone(), cli.idle_timeout) => r,
     };
+    // Committed: new connections get HTTP 503 from here on. The instance file goes first so
+    // frontends looking for a backend stop finding this one, then sessions are flushed and
+    // the listener is closed.
+    hub.commit_shutdown(true);
+    registry::unregister(pid);
     tracing::info!("shutting down: {reason}");
     hub.shutdown().await;
-    registry::unregister(pid);
     stop.cancel();
     let _ = tokio::time::timeout(Duration::from_secs(2), server).await;
     Ok(())
@@ -173,7 +191,9 @@ async fn shutdown_signal() -> &'static str {
     }
 }
 
-/// Resolves when the server should exit because no frontend is connected.
+/// Resolves when the server should exit because no frontend is connected. When it resolves,
+/// the shutdown has been committed ([`hub::Hub::commit_shutdown`]): no frontend is connected
+/// and new connections are refused.
 async fn idle_watch(hub: Arc<hub::Hub>, timeout: i64) -> &'static str {
     if timeout < 0 {
         return std::future::pending().await;
@@ -187,7 +207,11 @@ async fn idle_watch(hub: Arc<hub::Hub>, timeout: i64) -> &'static str {
             match tokio::time::timeout(STARTUP_GRACE, rx.wait_for(|n| *n > 0)).await {
                 Ok(Ok(_)) => {}
                 Ok(Err(_)) => return "client registry closed",
-                Err(_) => return "no frontend connected during the startup grace period",
+                Err(_) => {
+                    if hub.commit_shutdown(false) {
+                        return "no frontend connected during the startup grace period";
+                    }
+                }
             }
         } else if rx.wait_for(|n| *n > 0).await.is_err() {
             return "client registry closed";
@@ -198,10 +222,26 @@ async fn idle_watch(hub: Arc<hub::Hub>, timeout: i64) -> &'static str {
         if rx.wait_for(|n| *n == 0).await.is_err() {
             return "client registry closed";
         }
-        match tokio::time::timeout(timeout, rx.wait_for(|n| *n > 0)).await {
-            Ok(Ok(_)) => continue,
-            Ok(Err(_)) => return "client registry closed",
-            Err(_) => return "idle timeout (no frontends connected)",
+        if !timeout.is_zero() {
+            match tokio::time::timeout(timeout, rx.wait_for(|n| *n > 0)).await {
+                Ok(Ok(_)) => continue,
+                Ok(Err(_)) => return "client registry closed",
+                Err(_) => {}
+            }
         }
+        // Draining: persist first; a frontend that connects meanwhile cancels the shutdown.
+        tracing::debug!("no frontend connected: flushing before shutdown");
+        hub.flush_all().await;
+        if hub.commit_shutdown(false) {
+            return if timeout.is_zero() {
+                "last frontend disconnected (idle-timeout 0)"
+            } else {
+                "idle timeout (no frontends connected)"
+            };
+        }
+        tracing::info!("a client connected while draining: shutdown cancelled");
+        // Re-check shortly: the new connection either says Hello (frontend count > 0) or
+        // goes away / times out.
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }

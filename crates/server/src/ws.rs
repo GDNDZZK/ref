@@ -83,16 +83,41 @@ async fn ws_handler(
         tracing::warn!("rejected connection from {addr}");
         return (StatusCode::FORBIDDEN, "client address not allowed").into_response();
     }
-    match ws {
-        Ok(ws) => ws.max_message_size(256 << 20).on_upgrade(move |socket| client_loop(socket, state.hub)).into_response(),
-        Err(_) => (StatusCode::OK, format!("hernees-server {} (WebSocket endpoint)\n", env!("CARGO_PKG_VERSION"))).into_response(),
+    let ws = match ws {
+        Ok(ws) => ws,
+        Err(_) => {
+            return (StatusCode::OK, format!("hernees-server {} (WebSocket endpoint)\n", env!("CARGO_PKG_VERSION"))).into_response()
+        }
+    };
+    // Register before the upgrade response goes out: the idle shutdown cannot be committed
+    // while this connection is pending, and once it is committed we refuse cleanly instead
+    // of accepting a client we are about to drop.
+    let (tx, rx) = mpsc::unbounded_channel::<crate::hub::Frame>();
+    let Some(cid) = state.hub.add_client(tx) else {
+        tracing::info!("refused connection from {addr}: shutting down");
+        return (StatusCode::SERVICE_UNAVAILABLE, "hernees-server is shutting down\n").into_response();
+    };
+    // Removes the registration if the upgrade never completes (the callback is dropped).
+    let reg = Registration { hub: state.hub.clone(), cid };
+    ws.max_message_size(256 << 20).on_upgrade(move |socket| client_loop(socket, reg, rx)).into_response()
+}
+
+/// A registered connection; unregistered on drop.
+struct Registration {
+    hub: Arc<Hub>,
+    cid: u64,
+}
+
+impl Drop for Registration {
+    fn drop(&mut self) {
+        self.hub.remove_client(self.cid);
     }
 }
 
-async fn client_loop(socket: WebSocket, hub: Arc<Hub>) {
+async fn client_loop(socket: WebSocket, reg: Registration, mut rx: mpsc::UnboundedReceiver<crate::hub::Frame>) {
+    let hub = reg.hub.clone();
+    let cid = reg.cid;
     let (mut sink, mut stream) = socket.split();
-    let (tx, mut rx) = mpsc::unbounded_channel::<crate::hub::Frame>();
-    let cid = hub.add_client(tx);
     tracing::info!("client {cid} connected");
     let writer = tokio::spawn(async move {
         while let Some(frame) = rx.recv().await {
@@ -115,20 +140,38 @@ async fn client_loop(socket: WebSocket, hub: Arc<Hub>) {
             Ok(_) => continue,
         };
         match serde_json::from_str::<Request>(&text) {
+            Ok(req) if matches!(req.msg, ClientMsg::Hello { .. }) => {
+                // Never waits; handled inline so every later request sees the client's cwd.
+                if let Some(resp) = handle(&hub, cid, req).await {
+                    hub.send_to(cid, resp);
+                }
+            }
             Ok(req) => {
                 chains.retain(|_, h| !h.is_finished());
                 let key = order_key(&req.msg);
-                let prev = chains.remove(&key);
+                let prev = match &key {
+                    Some(k) => chains.remove(k),
+                    None => None,
+                };
                 let hub = hub.clone();
                 let h = tokio::spawn(async move {
                     if let Some(p) = prev {
                         let _ = p.await;
                     }
-                    if let Some(resp) = handle(&hub, cid, req).await {
+                    let what = request_name(&req.msg);
+                    let start = std::time::Instant::now();
+                    let resp = handle(&hub, cid, req).await;
+                    let took = start.elapsed();
+                    if took >= SLOW_REQUEST {
+                        tracing::debug!("client {cid}: {what} took {:.1}s", took.as_secs_f64());
+                    }
+                    if let Some(resp) = resp {
                         hub.send_to(cid, resp);
                     }
                 });
-                chains.insert(key, h);
+                if let Some(k) = key {
+                    chains.insert(k, h);
+                }
             }
             Err(e) => {
                 let id = serde_json::from_str::<Value>(&text).ok().and_then(|v| v.get("id").and_then(|i| i.as_u64())).unwrap_or(0);
@@ -137,13 +180,46 @@ async fn client_loop(socket: WebSocket, hub: Arc<Hub>) {
         }
     }
     // Requests already received still run (their effects are wanted); responses are dropped.
-    hub.remove_client(cid);
+    drop(reg);
     writer.abort();
     tracing::info!("client {cid} disconnected ({} frontend(s) left)", hub.client_count());
 }
 
-/// Ordering domain of a request: its session id, or "" for connection-level requests.
-fn order_key(msg: &ClientMsg) -> String {
+/// Requests slower than this are logged (debug).
+const SLOW_REQUEST: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Request kind (for logs).
+fn request_name(msg: &ClientMsg) -> &'static str {
+    match msg {
+        ClientMsg::Hello { .. } => "hello",
+        ClientMsg::ListSessions { .. } => "list_sessions",
+        ClientMsg::CreateSession { .. } => "create_session",
+        ClientMsg::Attach { .. } => "attach",
+        ClientMsg::Detach { .. } => "detach",
+        ClientMsg::WatchBackground { .. } => "watch_background",
+        ClientMsg::Prompt { .. } => "prompt",
+        ClientMsg::Command { .. } => "command",
+        ClientMsg::Abort { .. } => "abort",
+        ClientMsg::Permission { .. } => "permission",
+        ClientMsg::SetModel { .. } => "set_model",
+        ClientMsg::SetAgent { .. } => "set_agent",
+        ClientMsg::Rename { .. } => "rename",
+        ClientMsg::Compact { .. } => "compact",
+        ClientMsg::Undo { .. } => "undo",
+        ClientMsg::Close { .. } => "close",
+        ClientMsg::Delete { .. } => "delete",
+        ClientMsg::ListModels => "list_models",
+        ClientMsg::ListAgents => "list_agents",
+        ClientMsg::ListCommands { .. } => "list_commands",
+        ClientMsg::Export { .. } => "export",
+        ClientMsg::Ping => "ping",
+    }
+}
+
+/// Ordering domain of a request: its session id, "" for connection-level state changes,
+/// or None for read-only requests that need no ordering (they never wait behind a slow
+/// request such as a config load or an undo).
+fn order_key(msg: &ClientMsg) -> Option<String> {
     match msg {
         ClientMsg::Attach { session, .. }
         | ClientMsg::Detach { session }
@@ -158,9 +234,13 @@ fn order_key(msg: &ClientMsg) -> String {
         | ClientMsg::Undo { session }
         | ClientMsg::Close { session }
         | ClientMsg::Delete { session }
-        | ClientMsg::ListCommands { session }
-        | ClientMsg::Export { session } => format!("s:{session}"),
-        _ => String::new(),
+        | ClientMsg::Export { session } => Some(format!("s:{session}")),
+        ClientMsg::Hello { .. } | ClientMsg::WatchBackground { .. } | ClientMsg::CreateSession { .. } => Some(String::new()),
+        ClientMsg::ListSessions { .. }
+        | ClientMsg::ListModels
+        | ClientMsg::ListAgents
+        | ClientMsg::ListCommands { .. }
+        | ClientMsg::Ping => None,
     }
 }
 
