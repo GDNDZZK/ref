@@ -565,6 +565,80 @@ async fn queued_message_delivered_after_current_step() {
 }
 
 #[tokio::test]
+async fn remove_queued_message_before_delivery() {
+    let m = mock(Arc::new(|n, _| match n {
+        0 => Reply::Tools(vec![tool("c1", "bash", json!({"purpose": "p", "command": "sleep 0.5"}))]),
+        _ => Reply::Text("ok".into()),
+    }))
+    .await;
+    let (hub, work) = hub(config(&m.url), "unqueue");
+    let s = session(&hub, &work, "main", "build").await;
+    let conn = hub.add_conn();
+    conn.lock().hello = true;
+    let req = |text: &str| ref_proto::Request::Prompt { session_id: s.id.clone(), text: text.into(), images: vec![] };
+    let r = ref_server::api::handle(&hub, &conn, req("first")).await.unwrap();
+    assert_eq!(r["queued"], false);
+    assert!(r["message_id"].as_str().is_some_and(|id| !id.is_empty()));
+    let s2 = s.clone();
+    wait_until("running", T, move || tool_parts(&s2).iter().any(|p| matches!(p, Part::Tool { state: ToolState::Running, .. }))).await;
+    let r = ref_server::api::handle(&hub, &conn, req("withdrawn while busy")).await.unwrap();
+    assert_eq!(r["queued"], true);
+    let id = r["message_id"].as_str().unwrap().to_string();
+    assert_eq!(s.lock().queue.front().map(|m| m.id.clone()), Some(id.clone()));
+    assert!(hub.store.load(&s.id).unwrap().messages.iter().any(|m| m.id == id), "queued prompt saved");
+    let remove = |id: &str| ref_proto::Request::RemoveQueued { session_id: s.id.clone(), message_id: id.into() };
+    let r = ref_server::api::handle(&hub, &conn, remove(&id)).await.unwrap();
+    assert_eq!(r["removed"], true);
+    assert!(s.lock().queue.is_empty());
+    // Not persisted either (saves include the queue).
+    assert!(!s.persisted().messages.iter().any(|m| m.id == id));
+    assert!(!hub.store.load(&s.id).unwrap().messages.iter().any(|m| m.id == id));
+    // Removing again: nothing left to remove.
+    let r = ref_server::api::handle(&hub, &conn, remove(&id)).await.unwrap();
+    assert_eq!(r["removed"], false);
+    wait_idle(&s).await;
+    // The run finishes its tool step and never sends the withdrawn prompt.
+    assert_eq!(m.count(), 2);
+    assert!(!m.bodies().iter().any(|b| b.to_string().contains("withdrawn while busy")));
+    assert!(!messages(&s).iter().any(|m| m.id == id || m.raw_text().contains("withdrawn")));
+    assert!(!hub.store.load(&s.id).unwrap().messages.iter().any(|m| m.id == id));
+}
+
+#[tokio::test]
+async fn remove_queued_after_delivery_removes_nothing() {
+    let m = mock(Arc::new(|n, _| match n {
+        0 => Reply::Tools(vec![tool("c1", "bash", json!({"purpose": "p", "command": "sleep 0.3"}))]),
+        _ => Reply::Text("ok".into()),
+    }))
+    .await;
+    let (hub, work) = hub(config(&m.url), "unqueue-late");
+    let s = session(&hub, &work, "main", "build").await;
+    let conn = hub.add_conn();
+    conn.lock().hello = true;
+    prompt(&hub, &s, "first");
+    let s2 = s.clone();
+    wait_until("running", T, move || tool_parts(&s2).iter().any(|p| matches!(p, Part::Tool { state: ToolState::Running, .. }))).await;
+    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::Prompt { session_id: s.id.clone(), text: "second".into(), images: vec![] })
+        .await
+        .unwrap();
+    assert_eq!(r["queued"], true);
+    let id = r["message_id"].as_str().unwrap().to_string();
+    wait_idle(&s).await;
+    // Delivered at the safe point after the tool step.
+    assert!(messages(&s).iter().any(|m| m.id == id));
+    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::RemoveQueued { session_id: s.id.clone(), message_id: id.clone() })
+        .await
+        .unwrap();
+    assert_eq!(r["removed"], false);
+    // The delivered message stays in the conversation.
+    assert_eq!(messages(&s).iter().filter(|m| m.id == id).count(), 1);
+    assert!(m.bodies()[1].to_string().contains("second"));
+    // Unknown session: error.
+    let e = ref_server::api::handle(&hub, &conn, ref_proto::Request::RemoveQueued { session_id: "nope".into(), message_id: id }).await;
+    assert!(e.is_err());
+}
+
+#[tokio::test]
 async fn create_session_must_report_and_close_rules() {
     let m = mock(Arc::new(|_, body| {
         let msgs = body["messages"].as_array().unwrap();

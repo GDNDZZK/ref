@@ -17,6 +17,8 @@ struct MSession {
     messages: Vec<Message>,
     perms: Vec<PermissionRequest>,
     abort: Arc<AtomicBool>,
+    /// Ids of prompts waiting for the session to become idle.
+    queue: Vec<String>,
 }
 
 #[derive(Default)]
@@ -192,16 +194,20 @@ impl Mock {
         }
         let i = info(&name, agent, cwd);
         w.order.push(i.id.clone());
-        w.sessions.insert(i.id.clone(), MSession { info: i.clone(), messages: Vec::new(), perms: Vec::new(), abort: Arc::new(AtomicBool::new(false)) });
+        w.sessions.insert(i.id.clone(), MSession { info: i.clone(), messages: Vec::new(), perms: Vec::new(), abort: Arc::new(AtomicBool::new(false)), queue: Vec::new() });
         i
     }
 
     fn user_message(&self, sid: &str, text: &str, source: MessageSource, images: Vec<ImageData>) {
+        self.user_message_id(sid, id("msg"), text, source, images);
+    }
+
+    fn user_message_id(&self, sid: &str, mid: String, text: &str, source: MessageSource, images: Vec<ImageData>) {
         let mut parts = vec![Part::Text { text: text.to_string(), time: now_ms() }];
         for (i, img) in images.into_iter().enumerate() {
             parts.push(Part::Image { image: img, name: Some(format!("image-{}", i + 1)) });
         }
-        let m = Message { id: id("msg"), role: Role::User, time: now_ms(), time_end: None, source, parts, model: None, agent: None, usage: None, error: None };
+        let m = Message { id: mid, role: Role::User, time: now_ms(), time_end: None, source, parts, model: None, agent: None, usage: None, error: None };
         {
             let mut w = self.w.lock().unwrap();
             if let Some(s) = w.sessions.get_mut(sid)
@@ -610,7 +616,7 @@ impl Mock {
                     ];
                     let mut w = self.w.lock().unwrap();
                     w.order.push(h.id.clone());
-                    w.sessions.insert(h.id.clone(), MSession { info: h, messages: msgs, perms: vec![], abort: Arc::new(AtomicBool::new(false)) });
+                    w.sessions.insert(h.id.clone(), MSession { info: h, messages: msgs, perms: vec![], abort: Arc::new(AtomicBool::new(false)), queue: Vec::new() });
                 }
                 let snap = {
                     let mut w = self.w.lock().unwrap();
@@ -649,11 +655,16 @@ impl Mock {
                 self.ok(id, json!({}));
             }
             Request::Prompt { session_id, text, images } => {
-                self.ok(id, json!({}));
+                let mid = id_s("msg");
                 let busy = self.with_session(&session_id, |s| {
                     s.abort.store(false, Ordering::Relaxed);
-                    !s.info.status.is_idle()
+                    let busy = !s.info.status.is_idle();
+                    if busy {
+                        s.queue.push(mid.clone());
+                    }
+                    busy
                 });
+                self.ok(id, json!({ "queued": busy == Some(true), "message_id": mid }));
                 let m = self.clone();
                 tokio::spawn(async move {
                     // Queued while busy: wait until idle (the client shows it as queued meanwhile).
@@ -665,7 +676,17 @@ impl Mock {
                             }
                         }
                     }
-                    m.user_message(&session_id, &text, MessageSource::Human, images);
+                    if busy == Some(true) {
+                        // Withdrawn with `RemoveQueued` meanwhile: never delivered.
+                        let queued = m.with_session(&session_id, |s| {
+                            let i = s.queue.iter().position(|q| *q == mid);
+                            i.map(|i| s.queue.remove(i)).is_some()
+                        });
+                        if queued != Some(true) {
+                            return;
+                        }
+                    }
+                    m.user_message_id(&session_id, mid, &text, MessageSource::Human, images);
                     let first = m.with_session(&session_id, |s| s.messages.iter().filter(|x| x.role == Role::User).count() <= 1).unwrap_or(false);
                     if first || text.contains("demo") {
                         m.demo_turn(&session_id, &text).await;
@@ -673,6 +694,16 @@ impl Mock {
                         m.reply_turn(&session_id, &text).await;
                     }
                 });
+            }
+            Request::RemoveQueued { session_id, message_id } => {
+                let removed = self.with_session(&session_id, |s| {
+                    let i = s.queue.iter().position(|q| *q == message_id);
+                    i.map(|i| s.queue.remove(i)).is_some()
+                });
+                match removed {
+                    Some(removed) => self.ok(id, json!({ "removed": removed })),
+                    None => self.err(id, "no such session"),
+                }
             }
             Request::Shell { session_id, command } => {
                 self.ok(id, json!({}));

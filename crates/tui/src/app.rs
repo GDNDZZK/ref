@@ -11,7 +11,7 @@ use ref_proto::{
 use serde_json::Value;
 
 use crate::net::{Client, NetEvent};
-use crate::state::SessionView;
+use crate::state::{Queued, SessionView};
 use crate::ui::dialog::{Dialog, HelpDialog, Item, Kind, ListDialog};
 use crate::ui::editor::{Editor, History};
 use crate::ui::permission::PermissionView;
@@ -58,7 +58,10 @@ pub enum Pending {
     /// Show the `{text}` result in a text dialog.
     Text { title: String },
     /// A prompt; on failure its text goes back into the (empty) editor so it isn't lost.
-    Prompt { sid: String, text: String },
+    /// `key`: its `Queued` entry when it was shown as queued.
+    Prompt { sid: String, text: String, key: Option<u64> },
+    /// `RemoveQueued` for the `Queued` entry `key`.
+    Unqueue { sid: String, key: u64 },
     /// `McpStatus`; errors (older backend) fall back to the `GetConfig` status lines.
     Mcp,
     /// `GetConfig` used only to refresh MCP status lines (fallback polling).
@@ -445,11 +448,9 @@ impl App {
                     self.views.remove(&sid);
                 }
             }
-            Pending::Prompt { sid, text } => {
-                if let Some(v) = self.views.get_mut(&sid)
-                    && let Some(i) = v.queued.iter().position(|q| *q == text)
-                {
-                    v.queued.remove(i);
+            Pending::Prompt { sid, text, key } => {
+                if let Some(v) = self.views.get_mut(&sid) {
+                    v.queued.retain(|q| Some(q.key) != key);
                 }
                 if self.editor.is_empty() && !text.is_empty() && self.mode == Mode::Chat {
                     self.editor.set_text(&text);
@@ -476,6 +477,12 @@ impl App {
                 }
             }
             Pending::ConfigMcp => self.mcp_inflight = false,
+            Pending::Unqueue { sid, key } => {
+                if let Some(q) = self.views.get_mut(&sid).and_then(|v| v.queued_mut(key)) {
+                    q.removing = false;
+                }
+                self.toasts.error(format!("Cannot remove queued prompt: {err}"));
+            }
             _ => self.toasts.error(err),
         }
     }
@@ -656,7 +663,20 @@ impl App {
                 let text = result.get("text").and_then(Value::as_str).unwrap_or_default();
                 self.dialog = Some(Dialog::Help(HelpDialog::text(&title, text)));
             }
-            Pending::Prompt { .. } => {}
+            Pending::Prompt { sid, text, key } => self.on_prompt_sent(&sid, text, key, &result),
+            Pending::Unqueue { sid, key } => {
+                let removed = result.get("removed").and_then(Value::as_bool).unwrap_or(false);
+                let Some(v) = self.views.get_mut(&sid) else { return };
+                if removed {
+                    v.queued.retain(|q| q.key != key);
+                } else {
+                    // Delivered first: the row goes away once the message is in the transcript.
+                    if let Some(q) = v.queued_mut(key) {
+                        q.removing = false;
+                    }
+                    self.toasts.info("Already sent; the prompt can no longer be removed");
+                }
+            }
             Pending::Mcp => {
                 self.mcp_inflight = false;
                 let servers = result.get("servers").map(|s| serde_json::from_value::<Vec<ref_proto::McpServerStatus>>(s.clone()));
@@ -840,15 +860,62 @@ impl App {
     }
 
     pub fn send_prompt(&mut self, sid: &str, text: String, images: Vec<ImageData>) {
+        let mut key = None;
         if let Some(v) = self.views.get_mut(sid) {
             if v.is_busy() {
-                v.queued.push(text.clone());
+                let q = Queued::new(text.clone());
+                key = Some(q.key);
+                v.queued.push(q);
             }
             v.error = None;
             v.chat.scroll_to_bottom(true);
         }
-        let p = Pending::Prompt { sid: sid.to_string(), text: text.clone() };
+        let p = Pending::Prompt { sid: sid.to_string(), text: text.clone(), key };
         self.req(Request::Prompt { session_id: sid.to_string(), text, images }, p);
+    }
+
+    /// `Prompt` response: binds the queued row to the server message id (or shows a row when the
+    /// server queued a prompt we sent as idle). A delete clicked meanwhile is sent now.
+    fn on_prompt_sent(&mut self, sid: &str, text: String, key: Option<u64>, result: &Value) {
+        let queued = result.get("queued").and_then(Value::as_bool).unwrap_or(false);
+        // Older backends don't return the id: rows are then matched by text only.
+        let Some(id) = result.get("message_id").and_then(Value::as_str).map(String::from) else { return };
+        let Some(v) = self.views.get_mut(sid) else { return };
+        if !queued || v.find(&id).is_some() {
+            // Delivered right away (or already appended).
+            v.queued.retain(|q| Some(q.key) != key);
+            return;
+        }
+        let q = match key.and_then(|k| v.queued.iter().position(|q| q.key == k)) {
+            Some(i) => &mut v.queued[i],
+            None => {
+                v.queued.push(Queued::new(text));
+                v.queued.last_mut().expect("just pushed")
+            }
+        };
+        q.id = Some(id);
+        if q.removing {
+            let key = q.key;
+            q.removing = false;
+            self.unqueue(sid, key);
+        }
+    }
+
+    /// ✕ on a queued prompt: withdraw it from the server queue before it is sent.
+    pub fn unqueue(&mut self, sid: &str, key: u64) {
+        if !self.connected {
+            self.toasts.warn("Not connected to the backend");
+            return;
+        }
+        let Some(q) = self.views.get_mut(sid).and_then(|v| v.queued_mut(key)) else { return };
+        if q.removing {
+            return;
+        }
+        q.removing = true;
+        // Without an id yet, the request goes out when the `Prompt` response arrives.
+        if let Some(id) = q.id.clone() {
+            self.req(Request::RemoveQueued { session_id: sid.to_string(), message_id: id }, Pending::Unqueue { sid: sid.to_string(), key });
+        }
     }
 
     /// Sends to the current session, creating one if needed.

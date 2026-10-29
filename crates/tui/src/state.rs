@@ -13,6 +13,24 @@ pub fn next_version() -> u64 {
     VERSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
+/// A prompt sent while the session was busy, not yet appended by the server.
+#[derive(Debug, Clone)]
+pub struct Queued {
+    /// Client-local key (click target identity; `id` is unknown until the server answers).
+    pub key: u64,
+    /// Server message id (from the `Prompt` response).
+    pub id: Option<String>,
+    pub text: String,
+    /// Delete clicked: waiting for the server (or for `id`).
+    pub removing: bool,
+}
+
+impl Queued {
+    pub fn new(text: String) -> Self {
+        Queued { key: next_version(), id: None, text, removing: false }
+    }
+}
+
 pub struct SessionView {
     pub info: SessionInfo,
     pub messages: Vec<Message>,
@@ -25,7 +43,7 @@ pub struct SessionView {
     /// When the session last became non-idle (client clock).
     pub busy_since: Option<Instant>,
     /// Prompts sent while busy, not yet appended by the server.
-    pub queued: Vec<String>,
+    pub queued: Vec<Queued>,
     /// Last `Error` event text (cleared on next prompt).
     pub error: Option<String>,
     pub closed: bool,
@@ -165,7 +183,8 @@ impl SessionView {
         true
     }
 
-    /// Removes queued prompts that the server has now appended as user messages.
+    /// Removes queued prompts that the server has now appended as user messages: by id, or by
+    /// text while the id is still unknown (the `Prompt` response hasn't arrived yet).
     fn drop_matched_queued(&mut self) {
         if self.queued.is_empty() {
             return;
@@ -178,7 +197,15 @@ impl SessionView {
             .filter(|m| m.role == Role::User && m.source == MessageSource::Human)
             .map(|m| m.raw_text().trim().to_string())
             .collect();
-        self.queued.retain(|q| !tail.iter().any(|t| t == q.trim()));
+        let index = &self.index;
+        self.queued.retain(|q| match &q.id {
+            Some(id) => !index.contains_key(id),
+            None => !tail.iter().any(|t| t == q.text.trim()),
+        });
+    }
+
+    pub fn queued_mut(&mut self, key: u64) -> Option<&mut Queued> {
+        self.queued.iter_mut().find(|q| q.key == key)
     }
 
     /// Context usage percentage (0..=100+), if known.
@@ -336,9 +363,21 @@ mod tests {
     #[test]
     fn queued_matching() {
         let mut v = SessionView::new(info(), true);
-        v.queued.push("do it".into());
+        v.queued.push(Queued::new("do it".into()));
         let mut m = msg("u", Role::User);
         m.parts.push(Part::Text { text: "do it".into(), time: 0 });
+        v.apply(SessionEvent::Message { message: m });
+        assert!(v.queued.is_empty());
+        // With a known id only that message counts, not one with the same text.
+        let mut q = Queued::new("again".into());
+        q.id = Some("u3".into());
+        v.queued.push(q);
+        let mut m = msg("u2", Role::User);
+        m.parts.push(Part::Text { text: "again".into(), time: 0 });
+        v.apply(SessionEvent::Message { message: m });
+        assert_eq!(v.queued.len(), 1);
+        let mut m = msg("u3", Role::User);
+        m.parts.push(Part::Text { text: "again".into(), time: 0 });
         v.apply(SessionEvent::Message { message: m });
         assert!(v.queued.is_empty());
     }

@@ -466,6 +466,7 @@ pub const KEYBINDS: &[(&str, &[(&str, &str)])] = &[
             ("click ▸ line", "expand / collapse tool or thinking"),
             ("click ⧉ copy", "copy raw markdown of a message"),
             ("click ↶ undo", "remove a prompt and everything after it"),
+            ("click ✕ remove", "withdraw a queued prompt before it is sent"),
         ],
     ),
     (

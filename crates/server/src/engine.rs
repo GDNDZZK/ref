@@ -61,6 +61,24 @@ pub fn submit(hub: &Arc<Hub>, s: &Arc<Session>, msg: Message) -> bool {
     queued
 }
 
+/// Withdraw a queued message before it is delivered. Returns false when it is no longer queued
+/// (already delivered, or unknown). The queue is drained under the same lock, so a message is
+/// either removed here or delivered, never both.
+pub fn remove_queued(hub: &Arc<Hub>, s: &Arc<Session>, message_id: &str) -> bool {
+    let removed = {
+        let mut st = s.lock();
+        match st.queue.iter().position(|m| m.id == message_id) {
+            Some(i) => st.queue.remove(i).is_some(),
+            None => false,
+        }
+    };
+    if removed {
+        // Saves include the queue: drop the withdrawn message from disk too.
+        crate::ops::persist(hub, s);
+    }
+    removed
+}
+
 /// Append a message without starting a run (shell output on an idle session).
 pub fn append_only(hub: &Arc<Hub>, s: &Arc<Session>, msg: Message) {
     {

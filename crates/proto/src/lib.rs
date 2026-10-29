@@ -506,12 +506,17 @@ pub enum Request {
     Detach { session_id: String },
     /// Subscribe to every live background session (split view). -> `{sessions: [SessionInfo]}`
     WatchAll { enabled: bool },
+    /// -> `{queued, message_id}`. `queued` = the session was busy and the message waits in its
+    /// queue until the next safe point (it can be withdrawn with `RemoveQueued` until then).
     Prompt {
         session_id: String,
         text: String,
         #[serde(default)]
         images: Vec<ImageData>,
     },
+    /// Withdraw a queued (not yet delivered) message. -> `{removed}`; false when it was already
+    /// delivered (or is unknown).
+    RemoveQueued { session_id: String, message_id: String },
     /// Run `!command` on behalf of the user; output added to the conversation.
     Shell { session_id: String, command: String },
     /// Stop the current turn (esc).

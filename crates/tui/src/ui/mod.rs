@@ -52,11 +52,13 @@ pub enum Hit {
     Copy { msg: String },
     /// Undo a human prompt (remove it and everything after it).
     Undo { msg: String },
+    /// Remove a queued prompt (`Queued::key`) before it is sent.
+    Unqueue { key: u64 },
 }
 
 impl Hit {
     pub fn is_button(&self) -> bool {
-        matches!(self, Hit::Copy { .. } | Hit::ShowAll { .. } | Hit::Undo { .. })
+        matches!(self, Hit::Copy { .. } | Hit::ShowAll { .. } | Hit::Undo { .. } | Hit::Unqueue { .. })
     }
 }
 

@@ -56,6 +56,7 @@ A session is **foreground** while a frontend is directly attached to it, and **b
 - Collapsed thinking shows, on a single line, the latest characters of the reasoning, updated live.
 - Selecting text with the mouse never copies it. Copy with `ctrl+c`, `y` or right-click. The `⧉ copy` button under every message copies its raw markdown.
 - `/` commands, `@` file mentions, `!` shell mode, `ctrl+v` to paste an image (pasting an image path works too), `shift+enter` / `ctrl+j` for a newline, `esc esc` to interrupt.
+- Prompts sent while the session is busy are queued and shown under the transcript until the next safe point (after the current tool step). Click `✕ remove` on a queued prompt to withdraw it before it is sent; if it was delivered in the meantime, a toast says so.
 - Leader key `ctrl+x`: `n` new session, `l` sessions (live fg/bg plus history), `m` models, `a` agents, `t` thinking, `d` tool details, `c` compact, `u` undo, `e` $EDITOR, `x` export, `w` split view, `h` help, `q` quit. `ctrl+p` opens the command palette. `tab` cycles agents, `ctrl+t` cycles the model variant.
 - Split view (`ref -w` or `ctrl+x w`): sessions are tiled automatically. `tab` or `alt+arrows` move focus, typing and `enter` message the focused session, `esc esc` aborts it, `ctrl+o` zooms in.
 

@@ -391,6 +391,24 @@ async fn mock_end_to_end() {
     type_str(&mut app, "queued question");
     crate::input::handle(&mut app, key(KeyCode::Enter, KeyModifiers::NONE));
     assert_eq!(app.views[&sid].queued.len(), 1);
+    // Queue another one and remove it with its ✕ button while the turn is still running.
+    type_str(&mut app, "never send this");
+    crate::input::handle(&mut app, key(KeyCode::Enter, KeyModifiers::NONE));
+    pump(&mut app, &mut ev_rx, 200).await;
+    assert!(app.views[&sid].queued.iter().all(|q| q.id.is_some()), "queued rows bound to server ids");
+    assert!(app.views[&sid].is_busy());
+    let (term, s) = render(&mut app, 100, 30);
+    let qy = s.lines().position(|l| l.contains("never send this") && l.contains("✕ remove")).expect("queued row with remove button") as u16;
+    let qx = find_col(&term, qy, "✕").unwrap();
+    app.screen = ratatui::layout::Rect::new(0, 0, 100, 30);
+    {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        crate::input::handle(&mut app, mouse(MouseEventKind::Down(MouseButton::Left), qx, qy));
+        crate::input::handle(&mut app, mouse(MouseEventKind::Up(MouseButton::Left), qx, qy));
+    }
+    pump(&mut app, &mut ev_rx, 200).await;
+    let q: Vec<&str> = app.views[&sid].queued.iter().map(|q| q.text.as_str()).collect();
+    assert_eq!(q, ["queued question"], "removed from the queue");
     // Let the turn finish.
     for _ in 0..120 {
         if app.views[&sid].messages.iter().any(|m| m.raw_text().contains("Got it")) && !app.views[&sid].is_busy() {
@@ -401,6 +419,7 @@ async fn mock_end_to_end() {
     let v = &app.views[&sid];
     assert!(!v.is_busy(), "turn finished");
     assert!(v.queued.is_empty(), "queued prompt delivered");
+    assert!(!v.messages.iter().any(|m| m.raw_text().contains("never send this")), "removed prompt never sent");
     let (_, s) = render(&mut app, 100, 50);
     println!("--- done ---\n{s}");
     assert!(s.contains("Got it"), "reply to queued prompt");
@@ -989,6 +1008,65 @@ fn undo_button_hit_zone_and_flow() {
     assert!(app.hint.as_ref().is_some_and(|h| h.0.contains("aborts the running turn")));
     click2(&mut app);
     assert!(app.pending.values().any(|p| matches!(p, Pending::Undo { .. })));
+}
+
+#[test]
+fn queued_prompt_remove_button_and_already_sent_race() {
+    use crate::app::Pending;
+    use crate::ui::Hit;
+    let mut app = test_app(true);
+    let sid = "ses_test".to_string();
+    app.screen = ratatui::layout::Rect::new(0, 0, 100, 30);
+    let respond = |app: &mut App, pred: &dyn Fn(&Pending) -> bool, result: serde_json::Value| {
+        let id = *app.pending.iter().find(|(_, p)| pred(p)).map(|(k, _)| k).expect("pending request");
+        app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response { id, ok: true, result, error: None }));
+    };
+    let click_remove = |app: &mut App, text: &str| {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        let (term, s) = render(app, 100, 30);
+        let y = s.lines().position(|l| l.contains(text) && l.contains("✕ remove")).expect("queued row") as u16;
+        let x = find_col(&term, y, "✕").unwrap();
+        let key = app.views["ses_test"].queued.iter().find(|q| q.text == text).unwrap().key;
+        assert_eq!(app.views["ses_test"].chat.hit_at(x, y), Some(Hit::Unqueue { key }));
+        crate::input::handle(app, mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+        crate::input::handle(app, mouse(MouseEventKind::Up(MouseButton::Left), x, y));
+    };
+    // Clicked before the Prompt response: the delete waits for the message id.
+    type_str(&mut app, "first queued");
+    crate::input::handle(&mut app, key(crossterm::event::KeyCode::Enter, crossterm::event::KeyModifiers::NONE));
+    click_remove(&mut app, "first queued");
+    assert!(app.views[&sid].queued[0].removing);
+    assert!(!app.pending.values().any(|p| matches!(p, Pending::Unqueue { .. })));
+    let (_, s) = render(&mut app, 100, 30);
+    assert!(s.contains("removing…"));
+    respond(&mut app, &|p| matches!(p, Pending::Prompt { .. }), json!({"queued": true, "message_id": "q1"}));
+    assert!(app.pending.values().any(|p| matches!(p, Pending::Unqueue { .. })), "RemoveQueued sent once the id is known");
+    respond(&mut app, &|p| matches!(p, Pending::Unqueue { .. }), json!({"removed": true}));
+    assert!(app.views[&sid].queued.is_empty());
+    let (_, s) = render(&mut app, 100, 30);
+    assert!(!s.contains("first queued") && !s.contains("✕ remove"));
+    // Already delivered when the delete arrives: toast, row stays until the message shows up.
+    type_str(&mut app, "second queued");
+    crate::input::handle(&mut app, key(crossterm::event::KeyCode::Enter, crossterm::event::KeyModifiers::NONE));
+    respond(&mut app, &|p| matches!(p, Pending::Prompt { .. }), json!({"queued": true, "message_id": "q2"}));
+    click_remove(&mut app, "second queued");
+    respond(&mut app, &|p| matches!(p, Pending::Unqueue { .. }), json!({"removed": false}));
+    assert!(app.toasts.items.iter().any(|t| t.text.contains("Already sent")));
+    assert_eq!(app.views[&sid].queued.len(), 1);
+    assert!(!app.views[&sid].queued[0].removing);
+    // A user message with the same text but another id doesn't match; the delivered one does.
+    let v = app.views.get_mut(&sid).unwrap();
+    v.apply(SessionEvent::Message { message: msg("other", Role::User, MessageSource::Human, 0, "second queued") });
+    assert_eq!(v.queued.len(), 1);
+    v.apply(SessionEvent::Message { message: msg("q2", Role::User, MessageSource::Human, 0, "second queued") });
+    assert!(v.queued.is_empty());
+    // Sent while we thought it idle but the server queued it: a removable row appears.
+    v.set_info(info());
+    type_str(&mut app, "late");
+    crate::input::handle(&mut app, key(crossterm::event::KeyCode::Enter, crossterm::event::KeyModifiers::NONE));
+    assert!(app.views[&sid].queued.is_empty());
+    respond(&mut app, &|p| matches!(p, Pending::Prompt { .. }), json!({"queued": true, "message_id": "q3"}));
+    assert_eq!(app.views[&sid].queued.iter().map(|q| q.id.as_deref()).collect::<Vec<_>>(), [Some("q3")]);
 }
 
 fn bg_session(id: &str, name: &str, status: SessionStatus, attached: u32) -> SessionInfo {

@@ -428,11 +428,18 @@ fn tail_rows(view: &SessionView, env: &Env<'_>, w: usize) -> Vec<Row> {
     if !view.queued.is_empty() {
         rows.push(Row::blank());
         for q in &view.queued {
-            let line = Line::from(vec![
+            let left = vec![
                 Span::styled("  queued ", theme::fg(theme::DIM).add_modifier(Modifier::BOLD)),
-                Span::styled(text::truncate(&text::one_line(q), w.saturating_sub(10)), theme::fg(theme::DIM)),
-            ]);
-            rows.push(Row::new(line).decor());
+                Span::styled(text::one_line(&q.text), theme::fg(theme::DIM)),
+            ];
+            let label = if q.removing { "removing…" } else { message::UNQUEUE_LABEL };
+            let (line, rx) = message::compose(left, vec![Span::styled(label, theme::fg(theme::DIM))], w);
+            let mut row = Row::new(line).decor();
+            if !q.removing {
+                let x0 = rx as u16;
+                row = row.zone(x0, x0 + width(label) as u16, Hit::Unqueue { key: q.key });
+            }
+            rows.push(row);
         }
     }
     rows.push(Row::blank().decor());

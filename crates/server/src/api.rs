@@ -124,8 +124,13 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             }
             reload_config(hub, &s).await;
             let msg = user_message(MessageSource::Human, text, images);
+            let id = msg.id.clone();
             let queued = crate::engine::submit(hub, &s, msg);
-            Ok(json!({ "queued": queued }))
+            Ok(json!({ "queued": queued, "message_id": id }))
+        }
+        Request::RemoveQueued { session_id, message_id } => {
+            let s = live(hub, &session_id)?;
+            Ok(json!({ "removed": crate::engine::remove_queued(hub, &s, &message_id) }))
         }
         Request::Shell { session_id, command } => {
             let s = live(hub, &session_id)?;

@@ -923,6 +923,7 @@ fn mouse(app: &mut App, me: MouseEvent) {
                 }
                 Some(Hit::Copy { msg }) => app.copy_message(&sid, &msg),
                 Some(Hit::Undo { msg }) => app.undo_message(&sid, &msg),
+                Some(Hit::Unqueue { key }) => app.unqueue(&sid, key),
                 None => {}
             }
         }

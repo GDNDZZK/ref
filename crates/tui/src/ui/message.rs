@@ -183,6 +183,8 @@ fn copy_button(hover: bool) -> Span<'static> {
 }
 
 pub const UNDO_LABEL: &str = "↶ undo";
+/// Button on a queued prompt row (removes it from the queue).
+pub const UNQUEUE_LABEL: &str = "✕ remove";
 
 fn undo_button() -> Span<'static> {
     Span::styled(UNDO_LABEL, theme::fg(theme::DIM))
