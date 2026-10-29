@@ -899,3 +899,59 @@ async fn todo_tool_replaces_list_and_validates() {
     // Persisted with the session info.
     assert_eq!(hub.store.load(&s.id).unwrap().info.todos.len(), 3);
 }
+
+#[tokio::test]
+async fn set_cwd_switches_directory_and_tells_the_model() {
+    let m = mock(Arc::new(|n, _| match n {
+        0 => Reply::Hang("thinking".into()),
+        _ => Reply::Text("ok".into()),
+    }))
+    .await;
+    let (hub, work) = hub(config(&m.url), "cwd");
+    std::fs::create_dir_all(work.join("sub dir")).unwrap();
+    let s = session(&hub, &work, "main", "build").await;
+    let conn = hub.add_conn();
+    conn.lock().hello = true;
+    let set = |path: &str| ref_proto::Request::SetCwd { session_id: s.id.clone(), path: path.into() };
+    let old = s.info().cwd;
+
+    // Busy: rejected, nothing changes.
+    prompt(&hub, &s, "go");
+    let s2 = s.clone();
+    wait_until("partial text", T, move || last_text(&s2) == "thinking").await;
+    let e = ref_server::api::handle(&hub, &conn, set("sub dir")).await.unwrap_err();
+    assert!(e.contains("busy"), "{e}");
+    assert_eq!(s.info().cwd, old);
+    ref_server::engine::abort(&hub, &s, true);
+    wait_idle(&s).await;
+    let calls = m.count();
+
+    // Relative to the current directory; a reminder is appended without an LLM turn.
+    let r = ref_server::api::handle(&hub, &conn, set("sub dir")).await.unwrap();
+    let new = std::fs::canonicalize(work.join("sub dir")).unwrap().to_string_lossy().to_string();
+    assert_eq!(r["session"]["cwd"], json!(new));
+    assert_eq!(s.info().cwd, new);
+    let last = messages(&s).last().cloned().unwrap();
+    assert_eq!(last.source, MessageSource::Reminder);
+    assert!(last.raw_text().contains(&old) && last.raw_text().contains(&new), "{}", last.raw_text());
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(m.count(), calls, "no LLM turn");
+    assert_eq!(s.info().status, SessionStatus::Idle);
+    assert_eq!(hub.store.load(&s.id).unwrap().info.cwd, new, "persisted");
+
+    // Same directory again: no second reminder. Missing directory: error.
+    let n = messages(&s).len();
+    ref_server::api::handle(&hub, &conn, set(".")).await.unwrap();
+    assert_eq!(messages(&s).len(), n);
+    let e = ref_server::api::handle(&hub, &conn, set("missing")).await.unwrap_err();
+    assert!(e.contains("does not exist"), "{e}");
+    assert!(ref_server::api::handle(&hub, &conn, set("  ")).await.is_err());
+
+    // The next turn sees the new directory in the system prompt and the reminder.
+    prompt(&hub, &s, "next");
+    wait_idle(&s).await;
+    let body = m.bodies().into_iter().rev().find(|b| b.get("tools").is_some()).unwrap();
+    let all = body["messages"].to_string();
+    assert!(body["messages"][0]["content"].to_string().contains(&new), "system prompt uses the new cwd");
+    assert!(all.contains("changed the working directory"), "{all}");
+}

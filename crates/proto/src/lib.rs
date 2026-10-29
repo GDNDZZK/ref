@@ -541,6 +541,10 @@ pub enum Request {
     SetModel { session_id: String, model: ModelRef },
     SetAgent { session_id: String, agent: String },
     Rename { session_id: String, name: String },
+    /// Change the session's working directory (`/cd`). `path` is absolute or relative to the
+    /// current one; `~` is expanded. Rejected while the session is busy. A reminder telling the
+    /// model about the change is appended (no LLM turn). -> `{session: SessionInfo}`
+    SetCwd { session_id: String, path: String },
     /// Manual compaction (/compact).
     Compact { session_id: String },
     /// Remove the last human prompt and everything after it — or, with `message_id`, that

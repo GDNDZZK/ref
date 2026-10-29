@@ -60,9 +60,12 @@ A session is **foreground** while a frontend is directly attached to it, and **b
 - Undo (`ctrl+x u`, `/undo`, or `↶ undo` under a prompt to undo from that prompt) removes the prompt and everything after it and puts the prompt's text and images back into the input box, appended after a blank line if you were typing. Files are not restored.
 - While a session works, the status line and its row under Live sessions in the sidebar show how long the current turn has been running (taken from the backend, so it survives switching sessions).
 - Leader key `ctrl+x`: `n` new session, `l` sessions (live fg/bg plus history), `m` models, `a` agents, `t` thinking, `d` tool details, `c` compact, `u` undo, `e` $EDITOR, `x` export, `w` split view, `h` help, `q` quit. `ctrl+p` opens the command palette. `tab` cycles agents, `ctrl+t` cycles the model variant.
-- Split view (`ref -w` or `ctrl+x w`): sessions are tiled automatically. `tab` or `alt+arrows` move focus, typing and `enter` message the focused session, `esc esc` aborts it, `ctrl+o` zooms in.
+- Split view (`ref -w` or `ctrl+x w`): sessions are tiled automatically. `tab` or `alt+arrows` move focus, typing and `enter` message the focused session, `esc esc` aborts it, `ctrl+o` zooms in. `/close` and `/cd` typed in a tile act on that tile's session.
 
-Slash commands: `/new /sessions /models /agents /variant /compact /undo /rename /close /export /thinking /details /watch /editor /help /exit`. Commands from your config are listed too.
+Slash commands: `/new /sessions /models /agents /variant /compact /undo /rename /cd /close /export /thinking /details /watch /editor /help /exit`. Commands from your config are listed too.
+
+- `/cd DIR` (alias `/cwd`) moves the session to another directory: absolute, relative to the current one, or `~/…`. Project config and instructions are reloaded, and a reminder telling the model about the change is added to the conversation (no LLM turn). Not allowed while the session is busy. New sessions from this frontend then start there too. Without an argument it shows the current directory.
+- `/close` (or `ctrl+x k` twice) closes the current session and switches to the oldest remaining live session. When none is left, `ref` exits; a backend that `ref` started itself then exits too.
 
 Cross-session commands run in the backend without an LLM turn:
 

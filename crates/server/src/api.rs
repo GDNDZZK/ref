@@ -221,6 +221,11 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             crate::ops::persist(hub, &s);
             Ok(json!({ "session": s.info() }))
         }
+        Request::SetCwd { session_id, path } => {
+            let s = live(hub, &session_id)?;
+            set_cwd(hub, &s, &path).await?;
+            Ok(json!({ "session": s.info() }))
+        }
         Request::Compact { session_id } => {
             let s = live(hub, &session_id)?;
             crate::engine::start_custom_run(hub, &s, crate::compaction::manual)?;
@@ -306,6 +311,48 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
 
 /// Reload the session config before a human prompt; invalidate the cached system prompt
 /// only when the config actually changed (keeps prompt cache hits).
+const BUSY_CWD: &str = "The session is busy; wait for it or interrupt it (esc esc) before changing the working directory.";
+
+/// `/cd`: switch the session to another directory and tell the model with a reminder.
+async fn set_cwd(hub: &Arc<Hub>, s: &Arc<Session>, path: &str) -> Result<(), String> {
+    let path = path.trim();
+    if path.is_empty() {
+        return Err("Usage: /cd <directory>".into());
+    }
+    let (old, busy) = {
+        let st = s.lock();
+        (st.info.cwd.clone(), st.run.is_some())
+    };
+    if busy {
+        return Err(BUSY_CWD.into());
+    }
+    let home = hub.opts.home.clone().or_else(dirs::home_dir);
+    let p = crate::util::expand_home(path, home.as_deref());
+    let p = if p.is_absolute() { p } else { Path::new(&old).join(p) };
+    let new = crate::ops::validate_cwd(&p.to_string_lossy())?;
+    if new == old {
+        return Ok(());
+    }
+    // Instructions (AGENTS.md), skills and project config depend on the directory.
+    let cfg = load_cfg(hub, &new).await?;
+    {
+        let mut st = s.lock();
+        if st.run.is_some() {
+            return Err(BUSY_CWD.into());
+        }
+        st.info.cwd = new.clone();
+        st.cfg = Arc::new(cfg);
+        st.system = None;
+        let _ = hub.mcp.servers_for(&st.cfg);
+        hub.emit_info(&st);
+    }
+    let text = format!(
+        "[Reminder] The user changed the working directory from {old} to {new}. Relative paths and commands now resolve against {new}."
+    );
+    crate::engine::append_only(hub, s, user_message(MessageSource::Reminder, text, vec![]));
+    Ok(())
+}
+
 async fn reload_config(hub: &Arc<Hub>, s: &Arc<Session>) {
     let cwd = s.lock().info.cwd.clone();
     let Ok(cfg) = load_cfg(hub, &cwd).await else { return };

@@ -49,6 +49,8 @@ pub enum Pending {
     Undo { sid: String, count: Option<usize>, images: Vec<(ImageData, Option<String>)> },
     /// A session was closed; refresh dialogs / history afterwards.
     Closed { name: String },
+    /// `/cd` on `sid`.
+    Cwd { sid: String },
     Expand { sid: Option<String> },
     Files { query: String },
     /// Generic: toast `ok` on success (if non-empty); errors always toast.
@@ -116,7 +118,8 @@ pub const COMMANDS: &[Cmd] = &[
     Cmd { name: "compact", aliases: &["summarize"], desc: "Compact the conversation", key: "ctrl+x c", args: false },
     Cmd { name: "undo", aliases: &[], desc: "Undo last prompt", key: "ctrl+x u", args: false },
     Cmd { name: "rename", aliases: &[], desc: "Rename the session", key: "", args: true },
-    Cmd { name: "close", aliases: &[], desc: "Close this session and open a new one", key: "ctrl+x k", args: false },
+    Cmd { name: "cd", aliases: &["cwd"], desc: "Change this session's working directory", key: "", args: true },
+    Cmd { name: "close", aliases: &[], desc: "Close this session (go to the next live one, or exit)", key: "ctrl+x k", args: false },
     Cmd { name: "close-session", aliases: &["kill"], desc: "Close live sessions (picker, or by name / id)", key: "", args: true },
     Cmd { name: "peers", aliases: &["list-agents"], desc: "List other live sessions you can message", key: "", args: false },
     Cmd { name: "peers-name", aliases: &[], desc: "Show or set this session's peer name", key: "", args: true },
@@ -172,6 +175,8 @@ pub struct App {
     pub ever_connected: bool,
     pub net_status: Option<String>,
     pub quit: bool,
+    /// The last session was closed: exit once the backend confirmed the close.
+    pub quit_after_close: bool,
     pub ac: Option<Autocomplete>,
     pub watch: Watch,
     pub sidebar: bool,
@@ -253,6 +258,7 @@ impl App {
             ever_connected: false,
             net_status: None,
             quit: false,
+            quit_after_close: false,
             ac: None,
             watch: Watch::default(),
             sidebar: true,
@@ -382,6 +388,9 @@ impl App {
                 self.files_inflight = false;
                 self.mcp_inflight = false;
                 self.mcp_poll_at = None;
+                if self.quit_after_close {
+                    self.quit = true;
+                }
             }
             NetEvent::Frame(f) => self.on_frame(f),
         }
@@ -424,6 +433,10 @@ impl App {
     }
 
     fn on_error(&mut self, p: Pending, err: String) {
+        if matches!(p, Pending::Closed { .. }) && self.quit_after_close {
+            self.quit = true;
+            return;
+        }
         match p {
             Pending::Attach { sid, fg } => {
                 self.attaching.remove(&sid);
@@ -593,6 +606,10 @@ impl App {
                 self.toasts.info(what);
             }
             Pending::Closed { name } => {
+                if self.quit_after_close {
+                    self.quit = true;
+                    return;
+                }
                 if !name.is_empty() {
                     self.toasts.info(format!("Closed \"{name}\""));
                 }
@@ -634,6 +651,18 @@ impl App {
                     && w != query
                 {
                     self.request_files(w);
+                }
+            }
+            Pending::Cwd { sid } => {
+                if let Some(info) = result.get("session").and_then(|s| serde_json::from_value::<SessionInfo>(s.clone()).ok()) {
+                    if self.current.as_deref() == Some(sid.as_str()) {
+                        // New sessions, `@` mentions and exports follow the directory.
+                        self.cwd = info.cwd.clone();
+                    }
+                    self.toasts.info(format!("Working directory: {}", text::tilde(&info.cwd)));
+                    if let Some(v) = self.views.get_mut(&sid) {
+                        v.set_info(info);
+                    }
                 }
             }
             Pending::Simple { ok } => {
@@ -1410,11 +1439,12 @@ impl App {
         // Optimistic: the server's session broadcast follows, but lists update right away.
         self.live.retain(|s| s.id != sid);
         if self.current.as_deref() == Some(sid) {
-            self.views.remove(sid);
-            self.current = None;
             self.perm = None;
             if self.mode == Mode::Chat {
-                self.create_session(None);
+                self.leave_closed_session(sid, true);
+            } else {
+                self.views.remove(sid);
+                self.current = None;
             }
         } else if self.views.get(sid).is_some_and(|v| !v.foreground) {
             self.views.remove(sid);
@@ -1423,6 +1453,49 @@ impl App {
         }
         self.sync_watch();
         self.refresh_session_dialog();
+    }
+
+    /// The current session `sid` was closed: switch to the first live session (sidebar order),
+    /// or exit when none is left. `wait`: a Close request is in flight; exit once it is answered
+    /// so the backend unloads the session before this frontend disconnects.
+    fn leave_closed_session(&mut self, sid: &str, wait: bool) {
+        let mut rest: Vec<&SessionInfo> = self.live.iter().filter(|s| s.live && s.id != sid).collect();
+        rest.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id)));
+        match rest.first().map(|s| s.id.clone()) {
+            Some(next) => {
+                self.views.remove(sid);
+                self.current = None;
+                self.attach_fg(&next);
+            }
+            None => {
+                // Keep the view for the exit screen (how to resume it from history).
+                if let Some(v) = self.views.get_mut(sid) {
+                    v.closed = true;
+                    v.info.live = false;
+                }
+                if wait {
+                    self.quit_after_close = true;
+                } else {
+                    self.quit = true;
+                }
+            }
+        }
+    }
+
+    /// `/cd PATH` on `sid`; without a path shows the current directory.
+    pub fn change_dir(&mut self, sid: &str, args: &str) {
+        let path = args.trim().trim_matches(|c| c == '"' || c == '\'');
+        if path.is_empty() {
+            let cwd = self.views.get(sid).map(|v| v.info.cwd.clone()).unwrap_or_else(|| self.cwd.clone());
+            self.toasts.info(format!("Working directory: {} (change it with /cd <dir>)", text::tilde(&cwd)));
+            return;
+        }
+        self.req(Request::SetCwd { session_id: sid.to_string(), path: path.to_string() }, Pending::Cwd { sid: sid.to_string() });
+    }
+
+    /// Directory of the current session (falls back to the frontend's).
+    fn session_cwd(&self) -> String {
+        self.cur().map(|v| v.info.cwd.clone()).filter(|c| !c.is_empty()).unwrap_or_else(|| self.cwd.clone())
     }
 
     /// Closes `sid`, asking for a second confirmation when it is open in another frontend.
@@ -1563,7 +1636,7 @@ impl App {
         let args = args.trim();
         // Commands needing backend data run once it has arrived (startup race).
         let needs_config = matches!(name, "models" | "agents" | "variant");
-        let needs_session = matches!(name, "variant" | "compact" | "undo" | "rename" | "export" | "copy" | "peers" | "peers-name" | "peers-inbox" | "peers-outbox");
+        let needs_session = matches!(name, "cd" | "variant" | "compact" | "undo" | "rename" | "export" | "copy" | "peers" | "peers-name" | "peers-inbox" | "peers-outbox");
         if (needs_config && self.config.is_none()) || (needs_session && self.cur().is_none_or(|v| !v.loaded)) {
             if self.connected || !self.ever_connected {
                 self.deferred = Some((name.to_string(), args.to_string(), Instant::now()));
@@ -1628,12 +1701,15 @@ impl App {
             }
             "close" => match cur {
                 Some(sid) if self.views.get(&sid).is_some_and(|v| !v.closed) => self.close_session(&sid),
-                _ => {
-                    self.views.retain(|_, v| !(v.foreground && v.closed));
-                    self.current = None;
-                    self.create_session(None);
-                }
+                // Already gone on the server.
+                Some(sid) => self.leave_closed_session(&sid, false),
+                None => self.quit = true,
             },
+            "cd" => {
+                if let Some(sid) = cur {
+                    self.change_dir(&sid, args);
+                }
+            }
             "close-session" => {
                 if args.is_empty() {
                     self.open_close_picker();
@@ -1650,7 +1726,7 @@ impl App {
             "export" => {
                 if let Some(sid) = cur {
                     let p = if args.is_empty() { format!("ref-session-{sid}.md") } else { args.to_string() };
-                    let p = if std::path::Path::new(&p).is_absolute() { p } else { std::path::Path::new(&self.cwd).join(&p).to_string_lossy().into_owned() };
+                    let p = if std::path::Path::new(&p).is_absolute() { p } else { std::path::Path::new(&self.session_cwd()).join(&p).to_string_lossy().into_owned() };
                     self.req(Request::Export { session_id: sid, path: p }, Pending::Export);
                 }
             }
@@ -1741,7 +1817,7 @@ impl App {
                 let sub = self.editor.submit();
                 let args = sub.text.trim().strip_prefix('/').and_then(|r| r.split_once(char::is_whitespace)).map(|x| x.1.to_string()).unwrap_or_default();
                 let sid = self.current.clone();
-                self.req(Request::ExpandCommand { name: name.to_string(), args, cwd: self.cwd.clone() }, Pending::Expand { sid });
+                self.req(Request::ExpandCommand { name: name.to_string(), args, cwd: self.session_cwd() }, Pending::Expand { sid });
                 return;
             }
         }
@@ -1816,7 +1892,7 @@ impl App {
             return;
         }
         self.files_inflight = true;
-        self.req(Request::ListFiles { cwd: self.cwd.clone(), query: q.clone(), limit: Some(20) }, Pending::Files { query: q });
+        self.req(Request::ListFiles { cwd: self.session_cwd(), query: q.clone(), limit: Some(20) }, Pending::Files { query: q });
     }
 
     /// Accepts the selected completion. Returns true if a slash command should run now.

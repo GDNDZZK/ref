@@ -690,6 +690,25 @@ fn watch_key(app: &mut App, k: KeyEvent) {
                 app.zoom(&f);
                 return;
             }
+            // Built-in commands typed in a tile act on that tile's session.
+            if let Some(rest) = ed.text.trim().strip_prefix('/') {
+                let (name, args) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+                if let Some(c) = crate::app::find_cmd(name) {
+                    let args = args.to_string();
+                    match c.name {
+                        "close" => {
+                            ed.clear();
+                            app.close_session(&f);
+                        }
+                        "cd" => {
+                            ed.clear();
+                            app.change_dir(&f, &args);
+                        }
+                        other => app.set_hint(format!("/{other} works in the chat view (ctrl+o opens this session)"), theme::MUTED),
+                    }
+                    return;
+                }
+            }
             let sub = ed.submit();
             let images = sub.images.into_iter().map(|(i, _)| i).collect();
             app.send_prompt(&f, sub.text, images);

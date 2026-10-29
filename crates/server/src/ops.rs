@@ -34,7 +34,7 @@ fn unique_name(hub: &Hub, base: &str, except: Option<&str>) -> String {
     unreachable!()
 }
 
-fn validate_cwd(cwd: &str) -> Result<String, String> {
+pub(crate) fn validate_cwd(cwd: &str) -> Result<String, String> {
     let p = std::path::Path::new(cwd);
     if !p.is_absolute() {
         return Err(format!("Working directory must be absolute: {cwd}"));

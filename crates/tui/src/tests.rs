@@ -1215,13 +1215,14 @@ fn close_session_command_and_confirmation() {
     assert!(matches!(&app.dialog, Some(Dialog::List(d)) if d.kind == Kind::CloseSessions), "dialog stays open");
     let (_, s) = render(&mut app, 120, 34);
     assert!(!s.contains("x1") && s.contains("y1"), "{s}");
-    // Closing the current session from the picker starts a new one.
+    // Closing the current session from the picker switches to the remaining live one.
     if let Some(Dialog::List(d)) = app.dialog.as_mut() {
         d.select_key("live:ses_test");
     }
     crate::input::handle(&mut app, key(crossterm::event::KeyCode::Enter, crossterm::event::KeyModifiers::NONE));
-    assert!(app.current.is_none());
-    assert!(app.pending.values().any(|p| matches!(p, Pending::Created { .. })));
+    assert_eq!(app.current.as_deref(), Some("ses_y"));
+    assert!(!app.pending.values().any(|p| matches!(p, Pending::Created { .. })));
+    assert!(!app.quit && !app.quit_after_close);
 }
 
 #[test]
@@ -1263,7 +1264,7 @@ fn leader_k_closes_current_and_focused_tile() {
     assert!(app.hint.as_ref().is_some_and(|h| h.0.contains("press ctrl+x k again to close \"ref-a1b2\"")));
     lk(&mut app);
     assert!(app.pending.values().any(|p| matches!(p, Pending::Closed { .. })));
-    assert!(app.pending.values().any(|p| matches!(p, Pending::Created { .. })), "new session like /close");
+    assert!(app.quit_after_close && !app.quit, "last session: exit once the close is confirmed");
     assert!(app.hint.is_none(), "confirmation hint cleared");
     // Watch mode: closes the focused tile.
     let mut app = test_app(false);
@@ -2090,4 +2091,114 @@ fn expanding_tool_keeps_header_row() {
     assert!(row_text(&r_exp[0]).contains("Thought") && row_text(&collapsed[0]).contains("Thought"));
     // All tools expanded by default (/details): the first tool header is still in the same row.
     assert_eq!(find(&render_with(&[], true), "bash  Run the unit tests"), bash);
+}
+
+fn respond(app: &mut App, pred: impl Fn(&crate::app::Pending) -> bool, result: serde_json::Value) {
+    let id = *app.pending.iter().find(|(_, p)| pred(p)).map(|(k, _)| k).expect("pending request");
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response { id, ok: true, result, error: None }));
+}
+
+#[test]
+fn close_current_goes_to_first_live_session_or_exits() {
+    use crate::app::Pending;
+    let enter = |app: &mut App| crate::input::handle(app, key(crossterm::event::KeyCode::Enter, crossterm::event::KeyModifiers::NONE));
+    // Other live sessions: switch to the oldest one (sidebar order), no new session.
+    let mut app = test_app(false);
+    let cur = app.views["ses_test"].info.clone();
+    let mut newer = bg_session("ses_new", "newer", SessionStatus::Idle, 0);
+    newer.created_at = 50;
+    let mut older = bg_session("ses_old", "older", SessionStatus::Idle, 0);
+    older.created_at = 10;
+    app.live = vec![cur.clone(), newer, older];
+    type_str(&mut app, "/close");
+    enter(&mut app);
+    assert!(app.pending.values().any(|p| matches!(p, Pending::Closed { .. })));
+    assert_eq!(app.current.as_deref(), Some("ses_old"));
+    assert!(app.pending.values().any(|p| matches!(p, Pending::Attach { sid, fg: true } if sid == "ses_old")));
+    assert!(!app.views.contains_key("ses_test"));
+    assert!(!app.pending.values().any(|p| matches!(p, Pending::Created { .. })));
+    assert!(!app.quit_after_close);
+
+    // Nothing else live: exit after the backend confirmed the close; the exit screen still
+    // shows how to resume the closed session.
+    let mut app = test_app(false);
+    app.live = vec![cur.clone()];
+    type_str(&mut app, "/close");
+    enter(&mut app);
+    assert!(!app.quit, "waits for the Close response");
+    respond(&mut app, |p| matches!(p, Pending::Closed { .. }), json!({}));
+    assert!(app.quit);
+    assert!(app.epilogue().is_some_and(|t| t.contains("ses_test")));
+
+    // A failed close or a dropped connection exits as well.
+    let mut app = test_app(false);
+    app.run_command("close", "");
+    fail_pending(&mut app, |p| matches!(p, Pending::Closed { .. }), "boom");
+    assert!(app.quit);
+    let mut app = test_app(false);
+    app.run_command("close", "");
+    app.on_net(crate::net::NetEvent::Disconnected("gone".into()));
+    assert!(app.quit);
+
+    // Session already gone on the server: exit right away.
+    let mut app = test_app(false);
+    app.views.get_mut("ses_test").unwrap().closed = true;
+    app.run_command("close", "");
+    assert!(app.quit);
+    assert!(!app.pending.values().any(|p| matches!(p, Pending::Closed { .. })));
+}
+
+#[test]
+fn cd_command_changes_session_directory() {
+    use crate::app::Pending;
+    let mut app = test_app(false);
+    app.run_command("cd", "");
+    assert!(app.pending.is_empty());
+    assert!(app.toasts.items.iter().any(|t| t.text.contains("Working directory:") && t.text.contains("/cd <dir>")), "no argument shows the directory");
+    type_str(&mut app, "/cwd \"../other dir\"");
+    crate::input::handle(&mut app, key(crossterm::event::KeyCode::Enter, crossterm::event::KeyModifiers::NONE));
+    assert!(app.pending.values().any(|p| matches!(p, Pending::Cwd { sid } if sid == "ses_test")));
+    let mut info = app.views["ses_test"].info.clone();
+    info.cwd = "/home/u/other dir".into();
+    respond(&mut app, |p| matches!(p, Pending::Cwd { .. }), json!({ "session": info }));
+    assert_eq!(app.views["ses_test"].info.cwd, "/home/u/other dir");
+    assert_eq!(app.cwd, "/home/u/other dir", "new sessions follow");
+    assert!(app.toasts.items.iter().any(|t| t.text.contains("other dir")));
+    // Errors are shown, nothing changes.
+    type_str(&mut app, "/cd /nope");
+    crate::input::handle(&mut app, key(crossterm::event::KeyCode::Enter, crossterm::event::KeyModifiers::NONE));
+    fail_pending(&mut app, |p| matches!(p, Pending::Cwd { .. }), "Directory does not exist: /nope");
+    assert!(app.toasts.items.iter().any(|t| t.text.contains("Directory does not exist")));
+    assert_eq!(app.cwd, "/home/u/other dir");
+}
+
+#[test]
+fn split_tile_commands_act_on_that_session() {
+    use crate::app::Pending;
+    use crossterm::event::{KeyCode, KeyModifiers};
+    let mut app = test_app(false);
+    app.mode = Mode::Watch;
+    let bg = bg_session("ses_bg", "worker-1", SessionStatus::Idle, 0);
+    app.views.insert("ses_bg".into(), SessionView::new(bg.clone(), false));
+    app.live = vec![app.views["ses_test"].info.clone(), bg];
+    app.watch.focus = Some("ses_bg".into());
+    let typed = |app: &mut App, t: &str| {
+        for c in t.chars() {
+            crate::input::handle(app, key(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        crate::input::handle(app, key(KeyCode::Enter, KeyModifiers::NONE));
+    };
+    typed(&mut app, "/cd sub");
+    assert!(app.pending.values().any(|p| matches!(p, Pending::Cwd { sid } if sid == "ses_bg")));
+    assert!(!app.pending.values().any(|p| matches!(p, Pending::Prompt { .. })), "not sent to the model");
+    typed(&mut app, "/compact");
+    assert!(app.hint.as_ref().is_some_and(|h| h.0.contains("works in the chat view")));
+    assert_eq!(app.watch.inputs["ses_bg"].text, "/compact", "kept for editing");
+    app.watch.inputs.get_mut("ses_bg").unwrap().clear();
+    typed(&mut app, "/close");
+    assert!(app.pending.values().any(|p| matches!(p, Pending::Closed { name } if name == "worker-1")));
+    assert!(!app.views.contains_key("ses_bg"));
+    assert_eq!(app.current.as_deref(), Some("ses_test"));
+    assert_eq!(app.mode, Mode::Watch);
+    assert!(!app.quit_after_close);
 }

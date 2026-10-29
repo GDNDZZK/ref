@@ -789,6 +789,21 @@ impl Mock {
                 self.ok(id, json!({}));
                 self.broadcast_sessions();
             }
+            Request::SetCwd { session_id, path } => {
+                let info = self.with_session(&session_id, |s| {
+                    let p = std::path::Path::new(&s.info.cwd).join(&path);
+                    s.info.cwd = p.to_string_lossy().into_owned();
+                    s.info.clone()
+                });
+                match info {
+                    Some(info) => {
+                        self.emit(&session_id, SessionEvent::Info { info: info.clone() });
+                        self.ok(id, json!({ "session": info }));
+                        self.broadcast_sessions();
+                    }
+                    None => self.err(id, "no such session"),
+                }
+            }
             Request::Compact { session_id } => {
                 self.ok(id, json!({}));
                 let m = self.clone();
