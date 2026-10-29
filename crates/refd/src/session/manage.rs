@@ -18,6 +18,8 @@ pub struct CreateOpts {
     pub name: Option<String>,
     pub parent: Option<String>,
     pub must_report: bool,
+    /// Model to use when the agent has no model of its own (children inherit the parent's).
+    pub fallback_model: Option<(String, Option<String>)>,
 }
 
 fn normalize_cwd(cwd: &str) -> Result<String, String> {
@@ -51,9 +53,12 @@ impl Hub {
                 let spec = cfg.resolve_for_agent(&agent, &m, opts.variant.as_deref()).map_err(|e| format!("{e:#}"))?;
                 (spec.full_id(), opts.variant.or_else(|| m.split_once('#').map(|x| x.1.to_string())))
             }
-            None => cfg
-                .default_model_for(&agent)
-                .ok_or_else(|| "No model configured: add a provider to your opencode config".to_string())?,
+            None => match (cfg.agents.get(&agent).and_then(|a| a.model.clone()), opts.fallback_model) {
+                (None, Some(fb)) if cfg.resolve_model(&fb.0, None).is_ok() => fb,
+                _ => cfg
+                    .default_model_for(&agent)
+                    .ok_or_else(|| "No model configured: add a provider to your opencode config".to_string())?,
+            },
         };
         let variant = opts_variant(variant);
         let id = ref_proto::new_id("ses");

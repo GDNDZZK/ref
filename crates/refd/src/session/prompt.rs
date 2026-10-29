@@ -9,7 +9,7 @@ use serde_json::{json, Map, Value};
 
 pub const PURPOSE_DESC: &str = "Brief purpose of this call, shown to the user (in the user's language)";
 
-pub const BASE_PROMPT: &str = "You are ref, an AI coding agent running in the user's terminal. You operate on the user's machine through the provided tools and work autonomously until the task is done.\nEvery tool call takes a `purpose` argument: a few words, in the user's language, describing why you are making the call.";
+pub const BASE_PROMPT: &str = "You are ref, an AI coding agent running in the user's terminal. You operate on the user's machine through the provided tools and work autonomously until the task is done.\nEvery tool call takes a `purpose` argument: a few words, in the user's language, describing why you are making the call.\nChange files with the edit/write tools rather than shell scripts.";
 
 pub struct PromptInputs<'a> {
     pub cwd: &'a str,
