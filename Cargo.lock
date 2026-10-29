@@ -2501,6 +2501,7 @@ dependencies = [
  "anyhow",
  "futures-util",
  "ref-proto",
+ "ref-sys",
  "reqwest",
  "serde",
  "serde_json",
@@ -2513,6 +2514,7 @@ dependencies = [
 name = "ref-proto"
 version = "0.1.0"
 dependencies = [
+ "dirs",
  "serde",
  "serde_json",
 ]
@@ -2534,6 +2536,7 @@ dependencies = [
  "ref-llm",
  "ref-mcp",
  "ref-proto",
+ "ref-sys",
  "ref-tools",
  "regex",
  "reqwest",
@@ -2548,15 +2551,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "ref-sys"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "ref-tools"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "dirs",
  "globset",
  "ignore",
- "libc",
  "ref-proto",
+ "ref-sys",
  "regex",
  "serde",
  "serde_json",
@@ -2579,12 +2591,12 @@ dependencies = [
  "crossterm",
  "dirs",
  "futures-util",
- "libc",
  "png",
  "pulldown-cmark",
  "rand 0.9.5",
  "ratatui",
  "ref-proto",
+ "ref-sys",
  "serde",
  "serde_json",
  "syntect",

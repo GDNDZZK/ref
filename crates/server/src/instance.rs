@@ -195,10 +195,8 @@ pub async fn stop(pid: Option<u32>) -> i32 {
                 }
             }
             Err(e) => {
-                eprintln!("Could not reach ref-server pid {} ({e}); sending SIGTERM.", i.pid);
-                // SAFETY: plain kill(2) on a pid read from our own instance file.
-                let r = unsafe { libc::kill(i.pid as libc::pid_t, libc::SIGTERM) };
-                if r != 0 {
+                eprintln!("Could not reach ref-server pid {} ({e}); terminating it.", i.pid);
+                if !ref_sys::terminate(i.pid) {
                     code = 1;
                 }
             }

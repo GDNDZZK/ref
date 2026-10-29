@@ -9,6 +9,16 @@ cargo build --release
 
 `ref` looks for a running backend and connects to it. If none is running, it starts one on a random free port ≥ 10000 with `--idle-timeout 0`, so the backend exits when the last frontend leaves.
 
+## Platforms
+
+Linux, macOS and Windows (x86_64 and arm64).
+
+- The `bash` tool needs bash. On Windows install [Git for Windows](https://git-scm.com/download/win); ref finds its Git Bash through `git.exe` in `PATH` or the default install locations. The WSL `bash.exe` in `System32` is skipped because it runs commands inside the Linux VM with different paths.
+- On Windows, a stopped or timed-out command is killed with its whole process tree right away (`taskkill /T /F`). Unix gets SIGTERM first and SIGKILL after 2 s.
+- The state and data directories below are under the user's home directory on every platform (`%USERPROFILE%` on Windows).
+- `$EDITOR` defaults to `vi`, or `notepad` on Windows.
+- MCP stdio commands such as `npx` also resolve to `npx.cmd` on Windows (through `PATHEXT`).
+
 ## Binaries
 
 ### `ref-server`

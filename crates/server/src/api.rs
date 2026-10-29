@@ -398,7 +398,7 @@ async fn expand_shell(text: &str, cwd: &str) -> String {
         out.push_str(&text[last..m.start()]);
         let res = tokio::time::timeout(
             Duration::from_secs(30),
-            tokio::process::Command::new("bash").arg("-c").arg(cmd.as_str()).current_dir(cwd).output(),
+            tokio::process::Command::new(ref_tools::default_shell()).arg("-c").arg(cmd.as_str()).current_dir(cwd).output(),
         )
         .await;
         match res {

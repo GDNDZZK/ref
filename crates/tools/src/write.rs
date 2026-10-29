@@ -133,6 +133,7 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     Ok(out)
 }
 
+#[cfg(unix)]
 fn make_executable(path: &std::path::Path) {
     use std::os::unix::fs::PermissionsExt;
     if let Ok(m) = std::fs::metadata(path) {
@@ -141,6 +142,10 @@ fn make_executable(path: &std::path::Path) {
         let _ = std::fs::set_permissions(path, p);
     }
 }
+
+/// Windows has no executable bit.
+#[cfg(not(unix))]
+fn make_executable(_path: &std::path::Path) {}
 
 #[cfg(test)]
 mod tests {

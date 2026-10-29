@@ -370,14 +370,14 @@ pub fn fmt_ago(ms: i64, now: i64) -> String {
 
 /// Replace `$HOME` prefix with `~`.
 pub fn tilde(path: &str) -> String {
-    if let Some(h) = std::env::var_os("HOME") {
+    if let Some(h) = std::env::var_os("HOME").filter(|h| !h.is_empty()).map(std::path::PathBuf::from).or_else(dirs::home_dir) {
         let h = h.to_string_lossy();
         if !h.is_empty() && h != "/" {
             if path == h {
                 return "~".into();
             }
             if let Some(rest) = path.strip_prefix(h.as_ref())
-                && rest.starts_with('/')
+                && rest.starts_with(std::path::is_separator)
             {
                 return format!("~{rest}");
             }

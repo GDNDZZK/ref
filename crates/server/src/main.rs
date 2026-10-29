@@ -55,6 +55,7 @@ fn init_logging(path: &PathBuf) -> anyhow::Result<()> {
 
 fn main() {
     let cli = Cli::parse();
+    #[cfg(unix)]
     if cli.status || cli.stop.is_some() {
         // Behave like a normal CLI when piped into `head` etc. (exit quietly on EPIPE).
         // SAFETY: setting a signal disposition before any threads are started.
@@ -135,13 +136,11 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     eprintln!("ref-server listening on ws://{}:{} (pid {pid})", bind, info.port);
 
     let hub = running.hub.clone();
-    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
-    let mut sighup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())?;
+    let mut signals = StopSignals::new()?;
     tokio::select! {
         _ = hub.shutdown.cancelled() => {}
         _ = tokio::signal::ctrl_c() => tracing::info!("SIGINT"),
-        _ = sigterm.recv() => tracing::info!("SIGTERM"),
-        _ = sighup.recv() => tracing::info!("SIGHUP"),
+        name = signals.recv() => tracing::info!("{name}"),
     }
     hub.shutdown.cancel();
     tracing::info!("shutting down");
@@ -150,4 +149,50 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     running.task.abort();
     tracing::info!("bye");
     Ok(())
+}
+
+/// OS requests to stop, besides ctrl-c.
+#[cfg(unix)]
+struct StopSignals {
+    term: tokio::signal::unix::Signal,
+    hup: tokio::signal::unix::Signal,
+}
+
+#[cfg(unix)]
+impl StopSignals {
+    fn new() -> std::io::Result<Self> {
+        use tokio::signal::unix::{SignalKind, signal};
+        Ok(StopSignals { term: signal(SignalKind::terminate())?, hup: signal(SignalKind::hangup())? })
+    }
+
+    async fn recv(&mut self) -> &'static str {
+        tokio::select! {
+            _ = self.term.recv() => "SIGTERM",
+            _ = self.hup.recv() => "SIGHUP",
+        }
+    }
+}
+
+/// OS requests to stop, besides ctrl-c.
+#[cfg(windows)]
+struct StopSignals {
+    brk: tokio::signal::windows::CtrlBreak,
+    close: tokio::signal::windows::CtrlClose,
+    shutdown: tokio::signal::windows::CtrlShutdown,
+}
+
+#[cfg(windows)]
+impl StopSignals {
+    fn new() -> std::io::Result<Self> {
+        use tokio::signal::windows::{ctrl_break, ctrl_close, ctrl_shutdown};
+        Ok(StopSignals { brk: ctrl_break()?, close: ctrl_close()?, shutdown: ctrl_shutdown()? })
+    }
+
+    async fn recv(&mut self) -> &'static str {
+        tokio::select! {
+            _ = self.brk.recv() => "CTRL_BREAK",
+            _ = self.close.recv() => "CTRL_CLOSE",
+            _ = self.shutdown.recv() => "CTRL_SHUTDOWN",
+        }
+    }
 }

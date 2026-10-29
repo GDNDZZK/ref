@@ -10,7 +10,11 @@ use serde_json::Value;
 pub const PROTOCOL_VERSION: u32 = 1;
 
 fn home() -> std::path::PathBuf {
-    std::env::var_os("HOME").map(Into::into).unwrap_or_else(|| "/tmp".into())
+    std::env::var_os("HOME")
+        .filter(|h| !h.is_empty())
+        .map(Into::into)
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(std::env::temp_dir)
 }
 
 /// Runtime state dir: `$REF_STATE_DIR` | `$XDG_STATE_HOME/ref` | `~/.local/state/ref`.

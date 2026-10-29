@@ -18,6 +18,7 @@ mod read;
 mod util;
 mod write;
 
+pub use bash::default_shell;
 pub use hashline::HashStore;
 
 /// Static description of a tool exposed to the model.

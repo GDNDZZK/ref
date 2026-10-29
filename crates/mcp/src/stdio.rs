@@ -31,7 +31,7 @@ impl StdioTransport {
         let Some((program, args)) = command.split_first() else {
             bail!("MCP server \"{name}\": empty command");
         };
-        let mut cmd = Command::new(program);
+        let mut cmd = Command::new(ref_sys::resolve_program(program));
         cmd.args(args)
             .envs(env)
             .stdin(Stdio::piped())

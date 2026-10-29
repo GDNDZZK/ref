@@ -86,6 +86,9 @@ pub fn ceil_boundary(s: &str, mut i: usize) -> usize {
 /// Atomic file write: temp file in the same directory + rename. `private` => mode 0600.
 pub fn write_atomic(path: &Path, data: &[u8], private: bool) -> std::io::Result<()> {
     use std::io::Write;
+    // Windows: files under the user profile are already private to the user.
+    #[cfg(not(unix))]
+    let _ = private;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -162,12 +165,7 @@ pub fn expand_home(p: &str, home: Option<&Path>) -> std::path::PathBuf {
 
 /// Whether a process with this pid exists.
 pub fn pid_alive(pid: u32) -> bool {
-    if pid == 0 {
-        return false;
-    }
-    // SAFETY: kill with signal 0 performs only permission/existence checks.
-    let r = unsafe { libc::kill(pid as libc::pid_t, 0) };
-    r == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    ref_sys::pid_alive(pid)
 }
 
 #[cfg(test)]

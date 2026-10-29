@@ -90,11 +90,12 @@ fn restore_terminal() {
 
 /// Suspends the TUI, runs $VISUAL/$EDITOR on the prompt text, returns the edited text.
 fn run_external_editor(initial: &str) -> Option<String> {
-    let editor = std::env::var("VISUAL").or_else(|_| std::env::var("EDITOR")).unwrap_or_else(|_| "vi".into());
+    let default = if cfg!(windows) { "notepad" } else { "vi" };
+    let editor = std::env::var("VISUAL").or_else(|_| std::env::var("EDITOR")).unwrap_or_else(|_| default.into());
     let path = std::env::temp_dir().join(format!("ref-prompt-{}-{}.md", std::process::id(), ref_proto::now_ms()));
     std::fs::write(&path, initial).ok()?;
     restore_terminal();
-    let status = std::process::Command::new("sh").arg("-c").arg(format!("{editor} \"$1\"")).arg("sh").arg(&path).status();
+    let status = editor_command(&editor, &path).status();
     let _ = setup_terminal();
     let out = std::fs::read_to_string(&path).ok();
     let _ = std::fs::remove_file(&path);
@@ -102,6 +103,22 @@ fn run_external_editor(initial: &str) -> Option<String> {
         Ok(s) if s.success() => out.map(|s| s.trim_end_matches('\n').to_string()),
         _ => None,
     }
+}
+
+/// `$EDITOR` may contain arguments (`code --wait`), so it goes through the shell.
+#[cfg(unix)]
+fn editor_command(editor: &str, path: &std::path::Path) -> std::process::Command {
+    let mut cmd = std::process::Command::new("sh");
+    cmd.arg("-c").arg(format!("{editor} \"$1\"")).arg("sh").arg(path);
+    cmd
+}
+
+#[cfg(windows)]
+fn editor_command(editor: &str, path: &std::path::Path) -> std::process::Command {
+    use std::os::windows::process::CommandExt;
+    let mut cmd = std::process::Command::new("cmd");
+    cmd.arg("/C").raw_arg(format!("{editor} \"{}\"", path.display()));
+    cmd
 }
 
 fn main() -> anyhow::Result<()> {

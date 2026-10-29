@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 ref-proto.workspace = true
+ref-sys.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 futures-util.workspace = true

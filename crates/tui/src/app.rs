@@ -1550,7 +1550,7 @@ impl App {
             "export" => {
                 if let Some(sid) = cur {
                     let p = if args.is_empty() { format!("ref-session-{sid}.md") } else { args.to_string() };
-                    let p = if p.starts_with('/') { p } else { format!("{}/{p}", self.cwd.trim_end_matches('/')) };
+                    let p = if std::path::Path::new(&p).is_absolute() { p } else { std::path::Path::new(&self.cwd).join(&p).to_string_lossy().into_owned() };
                     self.req(Request::Export { session_id: sid, path: p }, Pending::Export);
                 }
             }

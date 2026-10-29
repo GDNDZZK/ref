@@ -93,7 +93,7 @@ pub fn unwrap_header(raw: &str) -> (String, Option<String>) {
 }
 
 pub fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").filter(|h| !h.is_empty()).map(PathBuf::from)
+    std::env::var_os("HOME").filter(|h| !h.is_empty()).map(PathBuf::from).or_else(dirs::home_dir)
 }
 
 /// Resolves a user path: expands `~`, joins relative paths to `cwd`, normalizes `.`/`..` lexically.
@@ -101,7 +101,7 @@ pub fn resolve_path(cwd: &Path, raw: &str) -> PathBuf {
     let raw = raw.trim();
     let expanded: PathBuf = if raw == "~" {
         home_dir().unwrap_or_else(|| PathBuf::from("~"))
-    } else if let Some(rest) = raw.strip_prefix("~/") {
+    } else if let Some(rest) = raw.strip_prefix("~/").or_else(|| raw.strip_prefix("~\\").filter(|_| cfg!(windows))) {
         match home_dir() {
             Some(h) => h.join(rest),
             None => PathBuf::from(raw),
@@ -119,7 +119,7 @@ pub fn normalize_lexical(p: &Path) -> PathBuf {
     for c in p.components() {
         match c {
             Component::Prefix(x) => out.push(x.as_os_str()),
-            Component::RootDir => out.push("/"),
+            Component::RootDir => out.push(c.as_os_str()),
             Component::CurDir => {}
             Component::ParentDir => {
                 if !out.pop() && !out.has_root() {

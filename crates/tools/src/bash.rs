@@ -5,12 +5,10 @@ use crate::{ToolCtx, ToolOutput, ToolSpec};
 use anyhow::{Result, anyhow, bail};
 use serde_json::{Value, json};
 use std::io::Write as _;
-use std::os::fd::{FromRawFd, OwnedFd};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
-use tokio::io::AsyncReadExt;
 
 pub const DEFAULT_TIMEOUT_SECS: u64 = 120;
 pub const MAX_TIMEOUT_SECS: u64 = 3600;
@@ -263,32 +261,132 @@ fn take_tail(s: &str) -> &str {
 // Process execution
 // ---------------------------------------------------------------------------
 
-/// Creates a CLOEXEC pipe: (read end, write end).
-fn make_pipe() -> std::io::Result<(OwnedFd, OwnedFd)> {
-    let mut fds = [0 as libc::c_int; 2];
-    // SAFETY: `fds` is a valid two-element buffer; on success both fds are fresh and owned by us.
-    let rc = unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) };
-    if rc != 0 {
-        return Err(std::io::Error::last_os_error());
+/// Async reader for the combined stdout/stderr pipe.
+#[cfg(unix)]
+struct OutputReader(tokio::net::unix::pipe::Receiver);
+
+#[cfg(unix)]
+impl OutputReader {
+    fn new(r: std::io::PipeReader) -> std::io::Result<Self> {
+        tokio::net::unix::pipe::Receiver::from_owned_fd(std::os::fd::OwnedFd::from(r)).map(Self)
     }
-    // SAFETY: pipe2 succeeded, the descriptors are open and not owned elsewhere.
-    Ok(unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) })
+
+    async fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        use tokio::io::AsyncReadExt;
+        self.0.read(buf).await
+    }
 }
 
-fn signal_group(pid: Option<u32>, sig: libc::c_int) {
-    if let Some(pid) = pid
-        && pid > 0 {
-            // SAFETY: plain syscall; negative pid targets the process group we created.
-            unsafe {
-                libc::kill(-(pid as libc::pid_t), sig);
+/// tokio has no async anonymous pipes on Windows: a thread reads and forwards chunks. The
+/// thread ends at EOF or, once the reader is dropped, after its next read returns.
+#[cfg(not(unix))]
+struct OutputReader {
+    rx: tokio::sync::mpsc::Receiver<Vec<u8>>,
+    pending: Vec<u8>,
+}
+
+#[cfg(not(unix))]
+impl OutputReader {
+    fn new(mut r: std::io::PipeReader) -> std::io::Result<Self> {
+        use std::io::Read;
+        let (tx, rx) = tokio::sync::mpsc::channel(16);
+        std::thread::Builder::new().name("bash-output".into()).spawn(move || {
+            let mut buf = vec![0u8; 64 * 1024];
+            loop {
+                match r.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        if tx.blocking_send(buf[..n].to_vec()).is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        })?;
+        Ok(Self { rx, pending: Vec::new() })
+    }
+
+    /// Cancel safe: nothing is awaited after a chunk has been taken from the channel.
+    async fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.pending.is_empty() {
+            match self.rx.recv().await {
+                Some(v) => self.pending = v,
+                None => return Ok(0),
             }
         }
+        let n = self.pending.len().min(buf.len());
+        buf[..n].copy_from_slice(&self.pending[..n]);
+        self.pending.drain(..n);
+        Ok(n)
+    }
 }
 
-fn spawn_shell(command: &str, cwd: &std::path::Path, out: &OwnedFd) -> std::io::Result<tokio::process::Child> {
+fn kill_group(pid: Option<u32>, force: bool) {
+    if let Some(pid) = pid {
+        ref_sys::kill_tree(pid, force);
+    }
+}
+
+/// Shells tried in order for `-c`.
+fn shell_candidates() -> Vec<PathBuf> {
+    #[cfg(windows)]
+    {
+        windows_shells()
+    }
+    #[cfg(not(windows))]
+    {
+        vec!["bash".into(), "sh".into()]
+    }
+}
+
+/// Shell for one-off commands outside the tool (the first candidate).
+pub fn default_shell() -> PathBuf {
+    shell_candidates().into_iter().next().unwrap_or_else(|| "bash".into())
+}
+
+/// Git Bash first. `bash.exe` under System32 or WindowsApps is the WSL launcher, which runs
+/// the command inside a Linux VM with different paths, so it is skipped.
+#[cfg(windows)]
+fn windows_shells() -> Vec<PathBuf> {
+    static SHELLS: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
+    SHELLS
+        .get_or_init(|| {
+            fn add(out: &mut Vec<PathBuf>, p: PathBuf) {
+                if p.is_file() && !out.contains(&p) {
+                    out.push(p);
+                }
+            }
+            let path_dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+            let mut out = Vec::new();
+            // Git for Windows has git.exe in <root>\cmd, <root>\bin or <root>\mingw64\bin.
+            if let Some(git) = path_dirs.iter().map(|d| d.join("git.exe")).find(|p| p.is_file()) {
+                for root in git.ancestors().skip(1).take(3) {
+                    add(&mut out, root.join("bin").join("bash.exe"));
+                }
+            }
+            for var in ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)", "LOCALAPPDATA"] {
+                if let Some(base) = std::env::var_os(var).map(PathBuf::from) {
+                    add(&mut out, base.join("Git").join("bin").join("bash.exe"));
+                    add(&mut out, base.join("Programs").join("Git").join("bin").join("bash.exe"));
+                }
+            }
+            for name in ["bash.exe", "sh.exe"] {
+                for p in path_dirs.iter().map(|d| d.join(name)) {
+                    let lower = p.to_string_lossy().to_ascii_lowercase();
+                    if !lower.contains("\\windows\\system32\\") && !lower.contains("\\windowsapps\\") {
+                        add(&mut out, p);
+                    }
+                }
+            }
+            out
+        })
+        .clone()
+}
+
+fn spawn_shell(command: &str, cwd: &std::path::Path, out: &std::io::PipeWriter) -> std::io::Result<tokio::process::Child> {
     let mut last_err = None;
-    for shell in ["bash", "sh"] {
-        let mut cmd = tokio::process::Command::new(shell);
+    for shell in shell_candidates() {
+        let mut cmd = tokio::process::Command::new(&shell);
         cmd.arg("-c")
             .arg(command)
             .current_dir(cwd)
@@ -302,15 +400,21 @@ fn spawn_shell(command: &str, cwd: &std::path::Path, out: &OwnedFd) -> std::io::
             .env("NO_COLOR", "1")
             .env("CLICOLOR", "0")
             .env("GIT_TERMINAL_PROMPT", "0")
-            .process_group(0)
             .kill_on_drop(false);
+        #[cfg(unix)]
+        cmd.process_group(0);
         match cmd.spawn() {
             Ok(child) => return Ok(child),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => last_err = Some(e),
             Err(e) => return Err(e),
         }
     }
-    Err(last_err.unwrap_or_else(|| std::io::Error::other("no shell found")))
+    Err(last_err.unwrap_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "no bash found (on Windows install Git for Windows, which provides Git Bash)",
+        )
+    }))
 }
 
 /// Kills the process group if the tool future is dropped before the command finished.
@@ -322,7 +426,7 @@ struct GroupGuard {
 impl Drop for GroupGuard {
     fn drop(&mut self) {
         if self.armed {
-            signal_group(self.pid, libc::SIGKILL);
+            kill_group(self.pid, true);
         }
     }
 }
@@ -350,7 +454,7 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         )));
     }
 
-    let (read_end, write_end) = make_pipe().map_err(|e| anyhow!("cannot create pipe: {e}"))?;
+    let (read_end, write_end) = std::io::pipe().map_err(|e| anyhow!("cannot create pipe: {e}"))?;
     let started = Instant::now();
     let spawned = spawn_shell(&command, &cwd, &write_end);
     // Our copy of the write end must be closed so EOF arrives once the children exit.
@@ -358,8 +462,7 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let mut child = spawned.map_err(|e| anyhow!("failed to start shell: {e}"))?;
     let pid = child.id();
     let mut guard = GroupGuard { pid, armed: true };
-    let mut reader = tokio::net::unix::pipe::Receiver::from_owned_fd(read_end)
-        .map_err(|e| anyhow!("cannot read command output: {e}"))?;
+    let mut reader = OutputReader::new(read_end).map_err(|e| anyhow!("cannot read command output: {e}"))?;
 
     let mut asm = LineAssembler::default();
     let mut col = Collector::new(ctx.on_output.clone());
@@ -392,7 +495,7 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
 
     // Phase 2: terminate the process group if needed.
     if stop.is_some() {
-        signal_group(pid, libc::SIGTERM);
+        kill_group(pid, false);
         let grace = tokio::time::sleep(KILL_GRACE);
         tokio::pin!(grace);
         loop {
@@ -406,7 +509,7 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
                     break;
                 }
                 _ = &mut grace => {
-                    signal_group(pid, libc::SIGKILL);
+                    kill_group(pid, true);
                     let _ = child.start_kill();
                     status = child.wait().await.ok();
                     break;
@@ -414,7 +517,7 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
             }
         }
         // Make sure stragglers in the group are gone too.
-        signal_group(pid, libc::SIGKILL);
+        kill_group(pid, true);
     }
 
     // Phase 3: drain remaining output briefly (background jobs may keep the pipe open).
@@ -481,8 +584,14 @@ fn build_output(col: Collector, ending: Ending, duration: Duration, timeout_secs
             Some(0) => {}
             Some(c) => notes.push(format!("[exit code {c}]")),
             None => {
-                use std::os::unix::process::ExitStatusExt;
-                notes.push(format!("[killed by signal {}]", status.signal().unwrap_or(0)));
+                #[cfg(unix)]
+                let sig = {
+                    use std::os::unix::process::ExitStatusExt;
+                    status.signal().unwrap_or(0)
+                };
+                #[cfg(not(unix))]
+                let sig = 0;
+                notes.push(format!("[killed by signal {sig}]"));
             }
         }
     }

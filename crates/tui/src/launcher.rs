@@ -22,12 +22,7 @@ pub struct Endpoint {
 }
 
 pub fn pid_alive(pid: u32) -> bool {
-    if pid == 0 || pid > i32::MAX as u32 {
-        return false;
-    }
-    // SAFETY: kill with signal 0 only checks for existence / permission.
-    let r = unsafe { libc::kill(pid as i32, 0) };
-    r == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    ref_sys::pid_alive(pid)
 }
 
 /// Parses an instance file.
@@ -83,7 +78,7 @@ pub fn server_binary() -> PathBuf {
     if let Ok(exe) = std::env::current_exe()
         && let Some(dir) = exe.parent()
     {
-        let sib = dir.join("ref-server");
+        let sib = dir.join(format!("ref-server{}", std::env::consts::EXE_SUFFIX));
         if sib.is_file() {
             return sib;
         }
@@ -93,17 +88,10 @@ pub fn server_binary() -> PathBuf {
 
 /// Spawns a detached backend on `port`.
 pub fn spawn_server(port: u16) -> std::io::Result<()> {
-    use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
     let mut cmd = Command::new(server_binary());
     cmd.args(["--port", &port.to_string(), "--idle-timeout", "0"]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-    // SAFETY: setsid is async-signal-safe; detaches from our terminal session.
-    unsafe {
-        cmd.pre_exec(|| {
-            libc::setsid();
-            Ok(())
-        });
-    }
+    ref_sys::detach(&mut cmd);
     let mut child = cmd.spawn()?;
     // Reap it if it exits while we're alive.
     std::thread::spawn(move || {
@@ -122,14 +110,14 @@ impl SpawnLock {
     /// Acquires `<dir>/.spawn.lock`, polling until `timeout`. `None` on timeout / IO error
     /// (callers then proceed unlocked rather than hanging).
     pub async fn acquire(dir: &Path, timeout: Duration) -> Option<SpawnLock> {
-        use std::os::fd::AsRawFd;
         std::fs::create_dir_all(dir).ok()?;
         let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(dir.join(".spawn.lock")).ok()?;
         let start = std::time::Instant::now();
         loop {
-            // SAFETY: flock on a valid fd we own; non-blocking.
-            if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
-                return Some(SpawnLock { _file: file });
+            match file.try_lock() {
+                Ok(()) => return Some(SpawnLock { _file: file }),
+                Err(std::fs::TryLockError::WouldBlock) => {}
+                Err(std::fs::TryLockError::Error(_)) => return None,
             }
             if start.elapsed() > timeout {
                 return None;
@@ -186,7 +174,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ref-tui-lock-{}", std::process::id()));
         let a = SpawnLock::acquire(&dir, Duration::from_millis(100)).await;
         assert!(a.is_some());
-        // flock is per open file description: a second open in the same process conflicts too.
+        // The lock is per open file: a second open in the same process conflicts too.
         assert!(SpawnLock::acquire(&dir, Duration::from_millis(120)).await.is_none());
         drop(a);
         assert!(SpawnLock::acquire(&dir, Duration::from_millis(100)).await.is_some());
