@@ -529,6 +529,7 @@ mod tests {
             must_report: true,
             context: ContextUsage::default(),
             todos: Vec::new(),
+            busy_since: None,
         }
     }
 

@@ -68,6 +68,7 @@ fn info(name: &str, agent: &str, cwd: &str) -> SessionInfo {
         must_report: false,
         context: ContextUsage { used: 0, max: 1_000_000, recommend: 600_000, auto: 850_000 },
         todos: Vec::new(),
+        busy_since: None,
     }
 }
 
@@ -162,6 +163,12 @@ impl Mock {
         let info = {
             let mut w = self.w.lock().unwrap();
             let Some(s) = w.sessions.get_mut(sid) else { return };
+            // Like the server: the run start, kept while busy (Busy / Running / ...).
+            if st.is_idle() {
+                s.info.busy_since = None;
+            } else if s.info.status.is_idle() || s.info.busy_since.is_none() {
+                s.info.busy_since = Some(now_ms());
+            }
             s.info.status = st;
             s.info.updated_at = now_ms();
             s.info.clone()

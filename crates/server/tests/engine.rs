@@ -639,6 +639,30 @@ async fn remove_queued_after_delivery_removes_nothing() {
 }
 
 #[tokio::test]
+async fn busy_since_is_the_run_start_and_cleared_when_idle() {
+    let m = mock(Arc::new(|n, _| match n {
+        0 => Reply::Tools(vec![tool("c1", "bash", json!({"purpose": "p", "command": "sleep 0.3"}))]),
+        _ => Reply::Text("ok".into()),
+    }))
+    .await;
+    let (hub, work) = hub(config(&m.url), "busy-since");
+    let s = session(&hub, &work, "main", "build").await;
+    assert_eq!(s.info().busy_since, None);
+    let before = ref_proto::now_ms();
+    prompt(&hub, &s, "first");
+    let started = s.info().busy_since.expect("set when the run starts");
+    assert!(started >= before && started <= ref_proto::now_ms());
+    let s2 = s.clone();
+    wait_until("running", T, move || s2.info().status == SessionStatus::Running).await;
+    // Kept across status changes within the run; visible in the live list; never persisted.
+    assert_eq!(s.info().busy_since, Some(started));
+    assert!(hub.infos().iter().any(|i| i.id == s.id && i.busy_since == Some(started)));
+    assert_eq!(s.persisted().info.busy_since, None);
+    wait_idle(&s).await;
+    assert_eq!(s.info().busy_since, None);
+}
+
+#[tokio::test]
 async fn create_session_must_report_and_close_rules() {
     let m = mock(Arc::new(|_, body| {
         let msgs = body["messages"].as_array().unwrap();

@@ -2017,5 +2017,6 @@ pub fn placeholder_info(sid: &str, cwd: &str) -> SessionInfo {
         must_report: false,
         context: Default::default(),
         todos: Vec::new(),
+        busy_since: None,
     }
 }

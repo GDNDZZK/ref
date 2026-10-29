@@ -28,7 +28,7 @@ pub struct StatusCtx<'a> {
 
 pub fn status_label(v: &SessionView, tick: u64, now: i64) -> (String, Color) {
     use ref_proto::SessionStatus::*;
-    let el = v.busy_since.map(|s| text::fmt_elapsed(s.elapsed().as_millis() as i64)).unwrap_or_default();
+    let el = v.busy_ms(now).map(text::fmt_elapsed).unwrap_or_default();
     match &v.info.status {
         Idle => (String::new(), theme::MUTED),
         Busy => (format!("{} working {el}", theme::spinner(tick)), theme::PRIMARY),

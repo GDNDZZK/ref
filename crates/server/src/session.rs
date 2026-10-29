@@ -98,6 +98,7 @@ impl Session {
         info.live = false;
         info.attached = 0;
         info.status = SessionStatus::Idle;
+        info.busy_since = None;
         let mut messages = st.messages.clone();
         // Queued messages were accepted from the user; keep them.
         messages.extend(st.queue.iter().cloned());

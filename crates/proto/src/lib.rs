@@ -154,6 +154,10 @@ pub struct SessionInfo {
     /// Current todo list (set by the `todo` tool).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub todos: Vec<Todo>,
+    /// When the current run started (epoch ms); `None` while idle. Frontends show the working
+    /// time from this, so it survives switching sessions and covers unattached ones.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub busy_since: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

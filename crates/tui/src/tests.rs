@@ -58,6 +58,7 @@ fn info() -> SessionInfo {
         must_report: false,
         context: ContextUsage { used: 42_100, max: 1_000_000, recommend: 600_000, auto: 850_000 },
         todos: Vec::new(),
+        busy_since: None,
     }
 }
 
@@ -1125,6 +1126,31 @@ fn bg_session(id: &str, name: &str, status: SessionStatus, attached: u32) -> Ses
     i.attached = attached;
     i.created_at = 5;
     i
+}
+
+#[test]
+fn working_time_comes_from_server_run_start_and_survives_switching() {
+    let mut app = test_app(true);
+    let mut i = app.views["ses_test"].info.clone();
+    i.busy_since = Some(ref_proto::now_ms() - 65_000);
+    app.views.get_mut("ses_test").unwrap().set_info(i.clone());
+    app.live = vec![i.clone(), bg_session("ses_other", "other", SessionStatus::Idle, 0)];
+    let (_, s) = render(&mut app, 100, 30);
+    assert!(s.contains("running tools 1m 0"), "{s}");
+    // Switch away and back: the view is rebuilt, the time is not reset.
+    app.attach_fg("ses_other");
+    assert!(!app.views.contains_key("ses_test"));
+    app.attach_fg("ses_test");
+    assert!(app.views["ses_test"].busy_ms(ref_proto::now_ms()).is_some_and(|ms| ms >= 65_000));
+    let (_, s) = render(&mut app, 100, 30);
+    assert!(s.contains("running tools 1m 0"), "{s}");
+    // Older backend without busy_since: client-side fallback; idle: none.
+    let mut i = info();
+    i.status = SessionStatus::Busy;
+    let v = SessionView::new(i, true);
+    assert!(v.busy_ms(ref_proto::now_ms()).is_some_and(|ms| ms < 5_000));
+    let v = SessionView::new(info(), true);
+    assert_eq!(v.busy_ms(ref_proto::now_ms()), None);
 }
 
 #[test]

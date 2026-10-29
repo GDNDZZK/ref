@@ -102,6 +102,7 @@ fn start_run_locked(hub: &Arc<Hub>, s: &Arc<Session>, st: &mut SessionState) {
     let id = hub.next_run_id();
     st.run = Some(RunHandle { cancel: cancel.clone(), id });
     st.user_aborted = false;
+    st.info.busy_since = Some(now_ms());
     hub.set_status(st, SessionStatus::Busy);
     tokio::spawn(run_task(hub.clone(), s.clone(), cancel, id));
 }
@@ -120,6 +121,7 @@ where
     let id = hub.next_run_id();
     st.run = Some(RunHandle { cancel: cancel.clone(), id });
     st.user_aborted = false;
+    st.info.busy_since = Some(now_ms());
     let (hub2, s2) = (hub.clone(), s.clone());
     tokio::spawn(async move {
         f(hub2.clone(), s2.clone(), cancel).await;
@@ -223,6 +225,7 @@ fn finish_run(hub: &Arc<Hub>, s: &Arc<Session>, id: u64) {
             // Aborted / failed before the notice was delivered: allow it again later.
             st.context_notice = false;
         }
+        st.info.busy_since = None;
         hub.set_status(&mut st, SessionStatus::Idle);
         let mut restart = false;
         if !st.queue.is_empty() {

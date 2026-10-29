@@ -41,7 +41,8 @@ pub struct SessionView {
     pub permissions: Vec<PermissionRequest>,
     /// Snapshot received.
     pub loaded: bool,
-    /// When the session last became non-idle (client clock).
+    /// When the session last became non-idle (client clock). Fallback for backends that don't
+    /// send `info.busy_since`; resets when the view is recreated.
     pub busy_since: Option<Instant>,
     /// Prompts sent while busy, not yet appended by the server.
     pub queued: Vec<Queued>,
@@ -74,6 +75,14 @@ impl SessionView {
 
     pub fn is_busy(&self) -> bool {
         !self.info.status.is_idle()
+    }
+
+    /// How long the current run has been going (ms), if busy.
+    pub fn busy_ms(&self, now: i64) -> Option<i64> {
+        if !self.is_busy() {
+            return None;
+        }
+        busy_ms(&self.info, now).or_else(|| self.busy_since.map(|s| s.elapsed().as_millis() as i64))
     }
 
     fn reindex(&mut self) {
@@ -221,6 +230,14 @@ impl SessionView {
     }
 }
 
+/// Working time of a session from the server's run start (`info.busy_since`), if busy.
+pub fn busy_ms(info: &SessionInfo, now: i64) -> Option<i64> {
+    if info.status.is_idle() {
+        return None;
+    }
+    info.busy_since.map(|t| (now - t).max(0))
+}
+
 /// Assistant message still in progress (no end time) or with non-final tools.
 pub fn message_live(m: &Message) -> bool {
     if m.role != Role::Assistant {
@@ -324,6 +341,7 @@ mod tests {
             must_report: false,
             context: Default::default(),
             todos: Vec::new(),
+            busy_since: None,
         }
     }
 
