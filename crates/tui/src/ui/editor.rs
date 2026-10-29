@@ -447,6 +447,43 @@ impl Editor {
         self.insert(&format!("{pad}{token} "));
     }
 
+    /// Puts a previously sent prompt back: fills an empty editor, otherwise appends it after a
+    /// blank line. `[Image N]` tokens in `text` are bound to `images` in token-number order (the
+    /// order the editor created them) and renumbered after the editor's own images; images
+    /// without a token get one at the end. Cursor at the end.
+    pub fn restore(&mut self, text: &str, images: Vec<(ImageData, Option<String>)>) {
+        if text.trim().is_empty() && images.is_empty() {
+            return;
+        }
+        self.snapshot();
+        let mut nums: Vec<usize> = image_token_numbers(text);
+        nums.sort_unstable();
+        nums.dedup();
+        let mut images = images.into_iter();
+        // Two passes (via placeholders) so renumbering never hits a token renamed earlier.
+        let mut restored = text.to_string();
+        let mut bound = Vec::new();
+        for (i, n) in nums.into_iter().enumerate() {
+            let Some(img) = images.next() else { break };
+            restored = restored.replace(&format!("[Image {n}]"), &format!("\u{0}{i}\u{0}"));
+            bound.push(img);
+        }
+        for (i, (image, name)) in bound.into_iter().enumerate() {
+            self.image_seq += 1;
+            let token = format!("[Image {}]", self.image_seq);
+            restored = restored.replace(&format!("\u{0}{i}\u{0}"), &token);
+            self.images.push(Attachment { token, image, name });
+        }
+        let keep = self.text.trim_end();
+        self.text = if keep.is_empty() { restored } else { format!("{keep}\n\n{restored}") };
+        self.cursor = self.text.len();
+        self.anchor = None;
+        self.pref_col = None;
+        for (image, name) in images {
+            self.attach_image(image, name);
+        }
+    }
+
     /// Drops tokens no longer present in the text.
     fn gc_tokens(&mut self) {
         let t = &self.text;
@@ -719,9 +756,53 @@ impl History {
     }
 }
 
+/// Numbers `N` of the `[Image N]` tokens in `text` (in order of appearance).
+fn image_token_numbers(text: &str) -> Vec<usize> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(i) = rest.find("[Image ") {
+        rest = &rest[i + 7..];
+        let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+        if digits > 0
+            && rest[digits..].starts_with(']')
+            && let Ok(n) = rest[..digits].parse()
+        {
+            out.push(n);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn img(data: &str) -> ImageData {
+        ImageData { mime: "image/png".into(), data: data.into() }
+    }
+
+    #[test]
+    fn restore_fills_or_appends_and_rebinds_images() {
+        let mut e = Editor::default();
+        e.restore("fix it", vec![]);
+        assert_eq!((e.text.as_str(), e.cursor), ("fix it", 6));
+        // Appended after a blank line; image tokens renumbered after the editor's own.
+        let mut e = Editor::default();
+        e.insert("draft ");
+        e.attach_image(img("a"), None);
+        e.restore("see [Image 2] and [Image 1]", vec![(img("x"), None), (img("y"), Some("y.png".into()))]);
+        assert_eq!(e.text, "draft [Image 1]\n\nsee [Image 3] and [Image 2]");
+        assert_eq!(e.cursor, e.text.len());
+        let data: Vec<(&str, &str)> = e.images.iter().map(|a| (a.token.as_str(), a.image.data.as_str())).collect();
+        assert_eq!(data, [("[Image 1]", "a"), ("[Image 2]", "x"), ("[Image 3]", "y")]);
+        let sub = e.submit();
+        assert_eq!(sub.images.len(), 3);
+        // An image without a token in the text still comes back.
+        let mut e = Editor::default();
+        e.restore("look", vec![(img("z"), None)]);
+        assert_eq!(e.text, "look [Image 1] ");
+        assert_eq!(e.images.len(), 1);
+    }
 
     #[test]
     fn insert_delete_cjk() {

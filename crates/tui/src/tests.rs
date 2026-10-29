@@ -409,6 +409,8 @@ async fn mock_end_to_end() {
     pump(&mut app, &mut ev_rx, 200).await;
     let q: Vec<&str> = app.views[&sid].queued.iter().map(|q| q.text.as_str()).collect();
     assert_eq!(q, ["queued question"], "removed from the queue");
+    assert_eq!(app.editor.text, "never send this", "removed prompt back in the input box");
+    app.editor.clear();
     // Let the turn finish.
     for _ in 0..120 {
         if app.views[&sid].messages.iter().any(|m| m.raw_text().contains("Got it")) && !app.views[&sid].is_busy() {
@@ -1041,10 +1043,24 @@ fn queued_prompt_remove_button_and_already_sent_race() {
     assert!(s.contains("removing…"));
     respond(&mut app, &|p| matches!(p, Pending::Prompt { .. }), json!({"queued": true, "message_id": "q1"}));
     assert!(app.pending.values().any(|p| matches!(p, Pending::Unqueue { .. })), "RemoveQueued sent once the id is known");
+    // Typed meanwhile: the removed prompt is appended after a blank line.
+    type_str(&mut app, "draft");
     respond(&mut app, &|p| matches!(p, Pending::Unqueue { .. }), json!({"removed": true}));
     assert!(app.views[&sid].queued.is_empty());
+    assert_eq!(app.editor.text, "draft\n\nfirst queued");
+    assert_eq!(app.editor.cursor, app.editor.text.len());
     let (_, s) = render(&mut app, 100, 30);
-    assert!(!s.contains("first queued") && !s.contains("✕ remove"));
+    assert!(!s.contains("queued first queued") && !s.contains("✕ remove"));
+    app.editor.clear();
+    // Images come back with it (empty editor: filled).
+    let png = ImageData { mime: "image/png".into(), data: "iVBO".into() };
+    app.send_prompt(&sid, "see [Image 1]".into(), vec![png]);
+    respond(&mut app, &|p| matches!(p, Pending::Prompt { .. }), json!({"queued": true, "message_id": "q0"}));
+    click_remove(&mut app, "see [Image 1]");
+    respond(&mut app, &|p| matches!(p, Pending::Unqueue { .. }), json!({"removed": true}));
+    assert_eq!(app.editor.text, "see [Image 1]");
+    assert_eq!(app.editor.images.iter().map(|a| a.image.data.as_str()).collect::<Vec<_>>(), ["iVBO"]);
+    app.editor.clear();
     // Already delivered when the delete arrives: toast, row stays until the message shows up.
     type_str(&mut app, "second queued");
     crate::input::handle(&mut app, key(crossterm::event::KeyCode::Enter, crossterm::event::KeyModifiers::NONE));

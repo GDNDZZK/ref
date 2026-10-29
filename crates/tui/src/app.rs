@@ -59,7 +59,7 @@ pub enum Pending {
     Text { title: String },
     /// A prompt; on failure its text goes back into the (empty) editor so it isn't lost.
     /// `key`: its `Queued` entry when it was shown as queued.
-    Prompt { sid: String, text: String, key: Option<u64> },
+    Prompt { sid: String, text: String, images: Vec<ImageData>, key: Option<u64> },
     /// `RemoveQueued` for the `Queued` entry `key`.
     Unqueue { sid: String, key: u64 },
     /// `McpStatus`; errors (older backend) fall back to the `GetConfig` status lines.
@@ -448,7 +448,7 @@ impl App {
                     self.views.remove(&sid);
                 }
             }
-            Pending::Prompt { sid, text, key } => {
+            Pending::Prompt { sid, text, key, .. } => {
                 if let Some(v) = self.views.get_mut(&sid) {
                     v.queued.retain(|q| Some(q.key) != key);
                 }
@@ -663,12 +663,16 @@ impl App {
                 let text = result.get("text").and_then(Value::as_str).unwrap_or_default();
                 self.dialog = Some(Dialog::Help(HelpDialog::text(&title, text)));
             }
-            Pending::Prompt { sid, text, key } => self.on_prompt_sent(&sid, text, key, &result),
+            Pending::Prompt { sid, text, images, key } => self.on_prompt_sent(&sid, text, images, key, &result),
             Pending::Unqueue { sid, key } => {
                 let removed = result.get("removed").and_then(Value::as_bool).unwrap_or(false);
                 let Some(v) = self.views.get_mut(&sid) else { return };
                 if removed {
-                    v.queued.retain(|q| q.key != key);
+                    // Back into the input box so it can be edited and sent again.
+                    if let Some(i) = v.queued.iter().position(|q| q.key == key) {
+                        let q = v.queued.remove(i);
+                        self.restore_prompt(&sid, &q.text, q.images.into_iter().map(|i| (i, None)).collect());
+                    }
                 } else {
                     // Delivered first: the row goes away once the message is in the transcript.
                     if let Some(q) = v.queued_mut(key) {
@@ -863,20 +867,20 @@ impl App {
         let mut key = None;
         if let Some(v) = self.views.get_mut(sid) {
             if v.is_busy() {
-                let q = Queued::new(text.clone());
+                let q = Queued::new(text.clone(), images.clone());
                 key = Some(q.key);
                 v.queued.push(q);
             }
             v.error = None;
             v.chat.scroll_to_bottom(true);
         }
-        let p = Pending::Prompt { sid: sid.to_string(), text: text.clone(), key };
+        let p = Pending::Prompt { sid: sid.to_string(), text: text.clone(), images: images.clone(), key };
         self.req(Request::Prompt { session_id: sid.to_string(), text, images }, p);
     }
 
     /// `Prompt` response: binds the queued row to the server message id (or shows a row when the
     /// server queued a prompt we sent as idle). A delete clicked meanwhile is sent now.
-    fn on_prompt_sent(&mut self, sid: &str, text: String, key: Option<u64>, result: &Value) {
+    fn on_prompt_sent(&mut self, sid: &str, text: String, images: Vec<ImageData>, key: Option<u64>, result: &Value) {
         let queued = result.get("queued").and_then(Value::as_bool).unwrap_or(false);
         // Older backends don't return the id: rows are then matched by text only.
         let Some(id) = result.get("message_id").and_then(Value::as_str).map(String::from) else { return };
@@ -889,7 +893,7 @@ impl App {
         let q = match key.and_then(|k| v.queued.iter().position(|q| q.key == k)) {
             Some(i) => &mut v.queued[i],
             None => {
-                v.queued.push(Queued::new(text));
+                v.queued.push(Queued::new(text, images));
                 v.queued.last_mut().expect("just pushed")
             }
         };
@@ -899,6 +903,13 @@ impl App {
             q.removing = false;
             self.unqueue(sid, key);
         }
+    }
+
+    /// Puts a withdrawn / undone prompt back into the input box (the focused tile's input in
+    /// split view): fills it when empty, otherwise appends after a blank line.
+    pub fn restore_prompt(&mut self, sid: &str, text: &str, images: Vec<(ImageData, Option<String>)>) {
+        let editor = if self.mode == Mode::Watch { self.watch.inputs.entry(sid.to_string()).or_default() } else { &mut self.editor };
+        editor.restore(text, images);
     }
 
     /// ✕ on a queued prompt: withdraw it from the server queue before it is sent.

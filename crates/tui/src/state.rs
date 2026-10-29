@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use ref_proto::{Delta, Message, MessageSource, Part, PermissionRequest, Role, SessionEvent, SessionInfo, SessionSnapshot, ToolState};
+use ref_proto::{Delta, ImageData, Message, MessageSource, Part, PermissionRequest, Role, SessionEvent, SessionInfo, SessionSnapshot, ToolState};
 
 use crate::ui::chat::ChatState;
 
@@ -21,13 +21,14 @@ pub struct Queued {
     /// Server message id (from the `Prompt` response).
     pub id: Option<String>,
     pub text: String,
+    pub images: Vec<ImageData>,
     /// Delete clicked: waiting for the server (or for `id`).
     pub removing: bool,
 }
 
 impl Queued {
-    pub fn new(text: String) -> Self {
-        Queued { key: next_version(), id: None, text, removing: false }
+    pub fn new(text: String, images: Vec<ImageData>) -> Self {
+        Queued { key: next_version(), id: None, text, images, removing: false }
     }
 }
 
@@ -363,13 +364,13 @@ mod tests {
     #[test]
     fn queued_matching() {
         let mut v = SessionView::new(info(), true);
-        v.queued.push(Queued::new("do it".into()));
+        v.queued.push(Queued::new("do it".into(), vec![]));
         let mut m = msg("u", Role::User);
         m.parts.push(Part::Text { text: "do it".into(), time: 0 });
         v.apply(SessionEvent::Message { message: m });
         assert!(v.queued.is_empty());
         // With a known id only that message counts, not one with the same text.
-        let mut q = Queued::new("again".into());
+        let mut q = Queued::new("again".into(), vec![]);
         q.id = Some("u3".into());
         v.queued.push(q);
         let mut m = msg("u2", Role::User);
