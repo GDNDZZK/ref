@@ -489,7 +489,7 @@ impl App {
             return;
         }
         let selected = self.popup.as_ref().map(|p| p.selected.min(items.len() - 1)).unwrap_or(0);
-        self.popup = Some(Popup { items, selected, rect: Default::default() });
+        self.popup = Some(Popup { items, selected, rect: Default::default(), max_rows: 10 });
     }
 
     /// Accept the popup selection. `run` = enter (run if no args needed), else complete.
@@ -545,6 +545,9 @@ impl App {
     pub fn copy_message(&mut self, sid: &str, mid: &str) {
         let Some(m) = self.store.get(sid).and_then(|v| v.message(mid)) else { return };
         let mut t = m.raw_text();
+        if t.is_empty() && m.parts.is_empty() {
+            t = m.error.clone().unwrap_or_default();
+        }
         if t.is_empty() {
             // Tool-only assistant message: copy tool calls as JSON.
             t = m
@@ -552,6 +555,17 @@ impl App {
                 .iter()
                 .filter_map(|p| match p {
                     Part::Tool(tp) => Some(format!("{} {}\n{}", tp.name, serde_json::to_string_pretty(&tp.input).unwrap_or_default(), tp.output)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n");
+        }
+        if t.is_empty() {
+            t = m
+                .parts
+                .iter()
+                .filter_map(|p| match p {
+                    Part::Reasoning(r) if !r.text.trim().is_empty() => Some(r.text.clone()),
                     _ => None,
                 })
                 .collect::<Vec<_>>()

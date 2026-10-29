@@ -72,7 +72,8 @@ pub enum StreamEvent {
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum LlmError {
-    #[error("HTTP {status}: {body}")]
+    /// `body` is the raw (truncated) response body; `Display` shows a readable digest of it.
+    #[error("HTTP {status}: {}", error::describe_http(*.status, .body))]
     Http { status: u16, body: String, retry_after: Option<Duration> },
     #[error("network error: {0}")]
     Network(String),
@@ -119,6 +120,16 @@ pub fn request_body(model: &ModelSpec, req: &Request) -> Value {
         ApiKind::OpenAIChat => openai_chat::build_body(model, req),
         ApiKind::OpenAIResponses => openai_responses::build_body(model, req),
     }
+}
+
+/// The HTTP headers [`stream`] would send, with credentials redacted (for debugging / logging).
+pub fn request_headers(model: &ModelSpec, req: &Request) -> Result<Vec<(String, String)>, LlmError> {
+    let h = match model.api {
+        ApiKind::Anthropic => anthropic::build_headers(model, &anthropic::build_body(model, req), &req.session_id)?,
+        ApiKind::OpenAIChat => openai_chat::build_headers(model, req)?,
+        ApiKind::OpenAIResponses => openai_responses::build_headers(model, req)?,
+    };
+    Ok(h.redacted())
 }
 
 /// One-shot, tool-less completion that returns the concatenated response text (e.g. for

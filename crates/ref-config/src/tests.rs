@@ -196,7 +196,7 @@ fn resolve_models_by_npm() {
     assert_eq!(s.headers.get("B").map(String::as_str), Some("2"));
     assert_eq!(
         s.options,
-        json!({"custom": 1, "thinking": {"type": "enabled", "budgetTokens": 1000}})
+        json!({"setCacheKey": true, "custom": 1, "thinking": {"type": "enabled", "budgetTokens": 1000}})
             .as_object()
             .unwrap()
             .clone()
@@ -714,6 +714,104 @@ fn debug_output_hides_secrets() {
         !dbg.contains("sk-very-secret"),
         "debug output leaks the key"
     );
+}
+
+#[test]
+fn catalog_fallback_limits_and_effort_variants() {
+    let e = Env::new();
+    e.write(
+        "home/.cache/opencode/models.json",
+        &json!({
+            // First-party entry named as canonical by the others.
+            "zhipuai": {"id": "zhipuai", "env": ["ZHIPU_KEY"], "npm": "@ai-sdk/openai-compatible", "api": "https://open.bigmodel.cn/api/paas/v4",
+                "models": {
+                    "glm-5.1": {"id": "glm-5.1", "canonical_model_id": "zhipuai/glm-5.1", "reasoning": true,
+                        "limit": {"context": 200000, "output": 131072}},
+                    "glm-5.3": {"id": "glm-5.3", "reasoning": true, "canonical_model_id": "zhipuai/glm-5.3",
+                        "reasoning_options": [{"type": "effort", "values": ["low", "high", "max", "default"]}],
+                        "limit": {"context": 1000000, "output": 131072}}}},
+            "resellerA": {"id": "resellerA", "env": ["A_KEY"], "api": "https://a",
+                "models": {"glm-5.1": {"canonical_model_id": "zhipuai/glm-5.1", "limit": {"context": 202752, "output": 16384}},
+                           "kimi-k2.5": {"limit": {"context": 262144, "output": 32768}},
+                           "Gpt-X": {"limit": {"context": 1050000, "input": 922000, "output": 128000}}}},
+            "resellerB": {"id": "resellerB", "env": ["B_KEY"], "api": "https://b",
+                "models": {"kimi-k2.5": {"limit": {"context": 262144, "output": 32768}}}},
+            "resellerC": {"id": "resellerC", "env": ["C_KEY"], "api": "https://c",
+                "models": {"kimi-k2.5": {"limit": {"context": 256000, "output": 262144}}}},
+        })
+        .to_string(),
+    );
+    e.write(
+        "home/.config/opencode/opencode.json",
+        r#"{"provider": {
+            "tencent": {"npm": "@ai-sdk/openai-compatible", "options": {"baseURL": "https://t/v3", "apiKey": "k"},
+                "models": {
+                    "glm-5.1": {"options": {"thinking": {"type": "enabled"}}},
+                    "kimi-k2.5": {"limit": {"output": 8192}},
+                    "own": {"id": "gpt-x"},
+                    "unknown-model": {},
+                    "explicit": {"id": "glm-5.1", "limit": {"context": 1000, "output": 500}}}},
+            "zhipuai": {"options": {"apiKey": "k"}, "models": {"glm-5.3": {}, "glm-5.1": {"variants": {"fast": {"thinking": {"type": "disabled"}}}}}}
+        }}"#,
+    );
+    let c = e.load(&e.root);
+    let ctx = |id: &str| {
+        let s = c.resolve_model(id, None).unwrap();
+        (s.context, s.max_output)
+    };
+    // Canonical first-party limits win over reseller limits.
+    assert_eq!(ctx("tencent/glm-5.1"), (200000, 131072));
+    // No canonical entry: most common pair; configured output is kept.
+    assert_eq!(ctx("tencent/kimi-k2.5"), (262144, 8192));
+    // Lookup by configured `id`, case-insensitive; input limit caps the context.
+    assert_eq!(ctx("tencent/own"), (922000, 128000));
+    // Unknown ids and fully specified limits are untouched.
+    assert_eq!(ctx("tencent/unknown-model"), (128000, 32000));
+    assert_eq!(ctx("tencent/explicit"), (1000, 500));
+    // The fallback only fills limits (no reasoning / variants borrowed from other providers).
+    let entries = c.models();
+    let tglm = entries.iter().find(|m| m.id == "tencent/glm-5.1").unwrap();
+    assert!(tglm.variants.is_empty() && !tglm.reasoning);
+
+    // Catalog effort values drive the default variant list ("default" excluded).
+    let z = entries.iter().find(|m| m.id == "zhipuai/glm-5.3").unwrap();
+    assert_eq!(z.variants, ["low", "high", "max"]);
+    let s = c.resolve_model("zhipuai/glm-5.3", Some("max")).unwrap();
+    assert_eq!(s.options["reasoningEffort"], "max");
+    // No variant selected → model default options only.
+    let s = c.resolve_model("zhipuai/glm-5.3", None).unwrap();
+    assert!(s.options.get("reasoningEffort").is_none());
+    assert!(c.resolve_model("zhipuai/glm-5.3", Some("medium")).is_err());
+    // Configured variants replace derived ones.
+    let z1 = entries.iter().find(|m| m.id == "zhipuai/glm-5.1").unwrap();
+    assert_eq!(z1.variants, ["fast"]);
+}
+
+#[test]
+fn responses_none_variant_has_no_summary() {
+    let e = Env::new();
+    e.write(
+        "home/.cache/opencode/models.json",
+        &json!({"openai": {"id": "openai", "env": ["OPENAI_API_KEY"], "npm": "@ai-sdk/openai",
+            "models": {"gpt-5.5": {"reasoning": true,
+                "reasoning_options": [{"type": "effort", "values": ["none", "low", "medium", "high", "xhigh"]}],
+                "limit": {"context": 1050000, "input": 922000, "output": 128000}}}}})
+        .to_string(),
+    );
+    e.write(
+        "home/.config/opencode/opencode.json",
+        r#"{"provider": {"openai": {"options": {"apiKey": "k"}}}}"#,
+    );
+    let c = e.load(&e.root);
+    let m = c.models().into_iter().find(|m| m.id == "openai/gpt-5.5").unwrap();
+    assert_eq!(m.variants, ["none", "low", "medium", "high", "xhigh"]);
+    assert_eq!(m.context, 922000);
+    let s = c.resolve_model("openai/gpt-5.5#none", None).unwrap();
+    assert_eq!(s.options["reasoningEffort"], "none");
+    assert!(s.options.get("reasoningSummary").is_none());
+    let s = c.resolve_model("openai/gpt-5.5#high", None).unwrap();
+    assert_eq!(s.options["reasoningSummary"], "auto");
+    assert_eq!(s.api, ApiKind::OpenAIResponses);
 }
 
 /// Loads the real user config and prints only model ids. Run manually:

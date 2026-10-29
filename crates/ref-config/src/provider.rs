@@ -1,6 +1,6 @@
 //! Providers: config `provider` map, models.dev catalog cache, auth.json, model resolution.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
@@ -102,6 +102,12 @@ pub(crate) struct ModelDef {
     pub api_format: Option<String>,
     #[serde(default, deserialize_with = "lenient")]
     pub status: Option<String>,
+    /// models.dev: `provider/model` of the first-party entry for this model.
+    #[serde(default, deserialize_with = "lenient")]
+    pub canonical_model_id: Option<String>,
+    /// models.dev: supported reasoning controls, e.g. `[{"type": "effort", "values": [...]}]`.
+    #[serde(default, deserialize_with = "lenient")]
+    pub reasoning_options: Option<Vec<Value>>,
 }
 
 fn or<T: Clone>(a: &Option<T>, b: &Option<T>) -> Option<T> {
@@ -152,6 +158,8 @@ impl ModelDef {
             provider,
             api_format: or(&self.api_format, &cat.api_format),
             status: or(&self.status, &cat.status),
+            canonical_model_id: or(&self.canonical_model_id, &cat.canonical_model_id),
+            reasoning_options: or(&self.reasoning_options, &cat.reasoning_options),
         }
     }
 
@@ -168,13 +176,33 @@ impl ModelDef {
         modal || self.attachment.unwrap_or(false)
     }
 
+    /// Usable context window: `limit.context`, or `limit.input` when that is smaller (models
+    /// with a separate max input size, e.g. gpt-5.5: context 1.05M, input 922k).
     pub fn context(&self) -> u64 {
-        self.limit
-            .as_ref()
-            .and_then(|l| l.context)
-            .filter(|c| *c > 0.0)
-            .map(|c| c as u64)
-            .unwrap_or(DEFAULT_CONTEXT)
+        let l = self.limit.as_ref();
+        let pos = |v: Option<f64>| v.filter(|c| *c > 0.0).map(|c| c as u64);
+        let context = pos(l.and_then(|l| l.context));
+        let input = pos(l.and_then(|l| l.input));
+        match (context, input) {
+            (Some(c), Some(i)) => c.min(i),
+            (Some(c), None) => c,
+            (None, _) => DEFAULT_CONTEXT,
+        }
+    }
+
+    /// Effort values listed in the catalog's `reasoning_options` (without `default`).
+    pub fn catalog_efforts(&self) -> Option<Vec<String>> {
+        let opts = self.reasoning_options.as_ref()?;
+        let values: Vec<String> = opts
+            .iter()
+            .filter(|o| o.get("type").and_then(Value::as_str) == Some("effort"))
+            .filter_map(|o| o.get("values").and_then(Value::as_array))
+            .flatten()
+            .filter_map(|v| v.as_str())
+            .filter(|v| *v != "default")
+            .map(String::from)
+            .collect();
+        (!values.is_empty()).then_some(values)
     }
 
     pub fn max_output(&self) -> u64 {
@@ -209,16 +237,76 @@ pub(crate) struct CatProvider {
     pub api: Option<String>,
     #[serde(default, deserialize_with = "lenient")]
     pub models: Option<BTreeMap<String, ModelDef>>,
+    /// Models of a provider whose full model list was skipped, kept because their key is in
+    /// [`CatalogFilter::ids`] (moved into [`Catalog::by_id`] after loading).
+    #[serde(skip)]
+    pub id_matches: Vec<(String, ModelDef)>,
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct Catalog {
     pub providers: BTreeMap<String, CatProvider>,
+    /// Lowercased model key → entries `(provider id, model key, def)` from every catalog provider,
+    /// only for ids in [`CatalogFilter::ids`]. Used to fill missing limits of custom providers.
+    pub by_id: BTreeMap<String, Vec<(String, String, ModelDef)>>,
 }
 
 impl Catalog {
     pub fn model(&self, provider: &str, key: &str) -> Option<&ModelDef> {
         self.providers.get(provider)?.models.as_ref()?.get(key)
+    }
+
+    fn from_providers(mut providers: BTreeMap<String, CatProvider>, ids: &BTreeSet<String>) -> Catalog {
+        let mut by_id: BTreeMap<String, Vec<(String, String, ModelDef)>> = BTreeMap::new();
+        for (pid, p) in providers.iter_mut() {
+            let extra = std::mem::take(&mut p.id_matches);
+            let full = p.models.iter().flatten().filter(|(k, _)| ids.contains(&k.to_lowercase()));
+            for (key, m) in full.map(|(k, m)| (k.clone(), m.clone())).chain(extra) {
+                by_id
+                    .entry(key.to_lowercase())
+                    .or_default()
+                    .push((pid.clone(), key, m));
+            }
+        }
+        Catalog { providers, by_id }
+    }
+
+    /// Conservative limits for a model id seen in other catalog providers. Preference: the
+    /// first-party entry that most entries name as `canonical_model_id` (e.g.
+    /// `zhipuai/glm-5.1`), else the most common `(context, output)` pair (ties → smaller
+    /// context). Limits always come from one single entry. `None` if the id is unknown.
+    pub fn limits_by_id(&self, ids: &[&str]) -> Option<LimitDef> {
+        let cands: Vec<&(String, String, ModelDef)> = ids
+            .iter()
+            .find_map(|id| self.by_id.get(&id.to_lowercase()))?
+            .iter()
+            .filter(|(_, _, m)| m.limit.as_ref().and_then(|l| l.context).is_some_and(|c| c > 0.0))
+            .collect();
+        let pick = |m: &ModelDef| m.limit.clone().map(|l| LimitDef { compact: None, ..l });
+        let mut canon: BTreeMap<&str, usize> = BTreeMap::new();
+        for (_, _, m) in &cands {
+            if let Some(c) = m.canonical_model_id.as_deref() {
+                *canon.entry(c).or_default() += 1;
+            }
+        }
+        let mut canon: Vec<(&str, usize)> = canon.into_iter().collect();
+        canon.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+        for (target, _) in canon {
+            if let Some((_, _, m)) = cands.iter().find(|(pid, key, _)| format!("{pid}/{key}") == target) {
+                return pick(m);
+            }
+        }
+        let key = |m: &ModelDef| {
+            let l = m.limit.as_ref();
+            let v = |x: Option<f64>| x.map(|x| x as u64).unwrap_or(0);
+            (v(l.and_then(|l| l.context)), v(l.and_then(|l| l.output)))
+        };
+        let mut counts: BTreeMap<(u64, u64), usize> = BTreeMap::new();
+        for (_, _, m) in &cands {
+            *counts.entry(key(m)).or_default() += 1;
+        }
+        let best = counts.into_iter().max_by_key(|(k, n)| (*n, std::cmp::Reverse(*k)))?.0;
+        cands.iter().find(|(_, _, m)| key(m) == best).and_then(|(_, _, m)| pick(m))
     }
 }
 
@@ -229,6 +317,9 @@ pub(crate) struct CatalogFilter {
     pub keep: std::collections::BTreeSet<String>,
     /// Non-empty env var names: keep providers whose `env` lists one of them.
     pub env: std::collections::BTreeSet<String>,
+    /// Lowercased model ids used in the config: matching models of all other providers are
+    /// parsed too (limit fallback for custom providers).
+    pub ids: BTreeSet<String>,
 }
 
 impl CatalogFilter {
@@ -305,6 +396,9 @@ impl<'de> serde::de::Visitor<'de> for ProviderSeed<'_> {
                         .collect();
                     p.models = Some(models);
                 }
+                "models" if !self.filter.ids.is_empty() => {
+                    p.id_matches = map.next_value_seed(IdModelsSeed(&self.filter.ids))?;
+                }
                 _ => {
                     map.next_value::<IgnoredAny>()?;
                 }
@@ -333,6 +427,43 @@ impl<'de> serde::de::Visitor<'de> for ProviderSeed<'_> {
     }
     fn visit_i64<E>(self, _: i64) -> Result<Self::Value, E> {
         Ok(None)
+    }
+}
+
+/// Deserialize a provider's `models` map keeping only entries whose key is in the id set.
+struct IdModelsSeed<'a>(&'a BTreeSet<String>);
+
+impl<'de> serde::de::DeserializeSeed<'de> for IdModelsSeed<'_> {
+    type Value = Vec<(String, ModelDef)>;
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
+        d.deserialize_any(self)
+    }
+}
+
+impl<'de> serde::de::Visitor<'de> for IdModelsSeed<'_> {
+    type Value = Vec<(String, ModelDef)>;
+    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str("models object")
+    }
+    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let mut out = Vec::new();
+        while let Some(k) = map.next_key::<String>()? {
+            if self.0.contains(&k.to_lowercase()) {
+                if let Ok(m) = serde_json::from_value::<ModelDef>(map.next_value::<Value>()?) {
+                    out.push((k, m));
+                }
+            } else {
+                map.next_value::<serde::de::IgnoredAny>()?;
+            }
+        }
+        Ok(out)
+    }
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        while seq.next_element::<serde::de::IgnoredAny>()?.is_some() {}
+        Ok(Vec::new())
+    }
+    fn visit_unit<E>(self) -> Result<Self::Value, E> {
+        Ok(Vec::new())
     }
 }
 
@@ -365,7 +496,7 @@ pub(crate) fn load_catalog(path: &Path, filter: &CatalogFilter) -> Option<Arc<Ca
             return None;
         }
     };
-    let catalog = Arc::new(Catalog { providers });
+    let catalog = Arc::new(Catalog::from_providers(providers, &filter.ids));
     if let Ok(mut c) = cache.lock() {
         c.insert(
             path.to_path_buf(),
@@ -565,7 +696,6 @@ const TRANSPORT_KEYS: &[&str] = &[
     "chunkTimeout",
     "body",
     "extraBody",
-    "setCacheKey",
     "enterpriseUrl",
 ];
 
@@ -580,6 +710,27 @@ pub(crate) struct ProviderInputs<'a> {
 
 fn trim_url(s: &str) -> String {
     s.trim().trim_end_matches('/').to_string()
+}
+
+/// Fill missing `limit.context` / `limit.output` of a model that has no catalog entry in its own
+/// provider (custom providers, gateways) from catalog entries with the same model id.
+fn with_fallback_limits(m: &ModelDef, key: &str, catalog: Option<&Catalog>) -> ModelDef {
+    let mut m = m.clone();
+    let have = m.limit.clone().unwrap_or_default();
+    if have.context.is_some() && have.output.is_some() {
+        return m;
+    }
+    let ids: Vec<&str> = m.id.as_deref().into_iter().chain([key]).collect();
+    let Some(fb) = catalog.and_then(|c| c.limits_by_id(&ids)) else {
+        return m;
+    };
+    m.limit = Some(LimitDef {
+        context: have.context.or(fb.context),
+        input: have.input.or(if have.context.is_none() { fb.input } else { None }),
+        output: have.output.or(fb.output),
+        compact: have.compact,
+    });
+    m
 }
 
 /// Build the provider list: configured providers (config order) then catalog providers with
@@ -640,7 +791,7 @@ pub(crate) fn build_providers(inp: &ProviderInputs) -> Vec<ProviderInfo> {
                 });
                 let merged = match cm {
                     Some(c) => m.over(c),
-                    None => m.clone(),
+                    None => with_fallback_limits(m, k, inp.catalog),
                 };
                 models.push((k.clone(), merged));
             }
@@ -721,6 +872,10 @@ pub(crate) fn variant_names(m: &ModelDef, api: ApiKind) -> Vec<String> {
     if !m.is_reasoning() {
         return vec![];
     }
+    // Effort levels the catalog lists for this model (e.g. GLM-5.3: low/high/max).
+    if let Some(values) = m.catalog_efforts() {
+        return values;
+    }
     let names: &[&str] = match api {
         ApiKind::Anthropic => &["low", "medium", "high", "max"],
         ApiKind::OpenAIResponses => &["low", "medium", "high", "xhigh"],
@@ -754,7 +909,9 @@ pub(crate) fn variant_options(
         }
         ApiKind::OpenAIResponses => {
             o.insert("reasoningEffort".into(), Value::String(name.into()));
-            o.insert("reasoningSummary".into(), Value::String("auto".into()));
+            if name != "none" {
+                o.insert("reasoningSummary".into(), Value::String("auto".into()));
+            }
         }
         ApiKind::OpenAIChat => {
             o.insert("reasoningEffort".into(), Value::String(name.into()));

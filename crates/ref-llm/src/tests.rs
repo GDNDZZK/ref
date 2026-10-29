@@ -319,7 +319,7 @@ fn anthropic_thinking_options() {
     assert_eq!(built.body["thinking"], json!({"type": "enabled", "budget_tokens": 14_976}));
     assert!(built.body["max_tokens"].as_u64().unwrap() > 14_976);
     assert!(built.body.get("temperature").is_none());
-    let h = anthropic::build_headers(&m, &built).unwrap();
+    let h = anthropic::build_headers(&m, &built, "").unwrap();
     assert_eq!(h.get("anthropic-beta"), Some("interleaved-thinking-2025-05-14"));
     assert_eq!(h.get("x-api-key"), Some("sk-test"));
     assert_eq!(h.get("anthropic-version"), Some("2023-06-01"));
@@ -334,7 +334,7 @@ fn anthropic_thinking_options() {
     let built = anthropic::build_body(&a, &req);
     assert_eq!(built.body["thinking"]["type"], "adaptive");
     assert_eq!(built.body["output_config"], json!({"effort": "high"}), "xhigh unsupported on 4.6");
-    let h = anthropic::build_headers(&a, &built).unwrap();
+    let h = anthropic::build_headers(&a, &built, "").unwrap();
     assert_eq!(h.get("anthropic-beta"), None);
 
     for id in ["claude-opus-4-7", "claude-sonnet-5", "claude-haiku-5-5"] {
@@ -348,13 +348,21 @@ fn anthropic_thinking_options() {
     a.options.insert("effort".into(), json!("minimal"));
     assert_eq!(anthropic::build_body(&a, &req).body["output_config"]["effort"], "low");
 
-    let mut d = model(ApiKind::Anthropic, "claude-opus-4-7");
+    let mut d = model(ApiKind::Anthropic, "claude-opus-4-6");
     d.options.insert("thinking".into(), json!({"type": "disabled"}));
     d.options.insert("effort".into(), json!("high"));
     d.temperature = Some(1.0);
     let body = anthropic::build_body(&d, &req).body;
     assert_eq!(body["thinking"], json!({"type": "disabled"}));
     assert_eq!(body["temperature"], 1.0);
+    // Opus 4.7+ / *-5.5 reject temperature even with thinking disabled.
+    for id in ["claude-opus-4-7", "claude-opus-5.5", "claude-sonnet-5-5", "claude-fable-5"] {
+        d.api_model = id.into();
+        assert!(anthropic::build_body(&d, &req).body.get("temperature").is_none(), "{id}");
+    }
+    assert!(anthropic::supports_temperature("claude-sonnet-5"));
+    assert!(anthropic::supports_temperature("claude-3-7-sonnet-20250219"));
+    assert!(anthropic::supports_temperature("glm-5.3"));
 
     assert!(anthropic::supports_adaptive("claude-sonnet-4-6"));
     assert!(anthropic::supports_adaptive("anthropic/claude-opus-4.6"));
@@ -372,7 +380,7 @@ fn anthropic_headers_oauth_and_user_beta() {
     m.headers.insert("x-extra".into(), "1".into());
     let req = conversation(&m, None, None);
     let built = anthropic::build_body(&m, &req);
-    let h = anthropic::build_headers(&m, &built).unwrap();
+    let h = anthropic::build_headers(&m, &built, "").unwrap();
     assert_eq!(h.get("authorization"), Some("Bearer sk-ant-oat01-xyz"));
     assert_eq!(h.get("x-api-key"), None);
     assert_eq!(
@@ -885,4 +893,207 @@ async fn http_idle_timeout() {
         last = Some(e);
     }
     assert!(matches!(last, Some(Err(LlmError::Timeout(_)))), "{last:?}");
+}
+
+// ───────────────────────────── hardening (real-endpoint QA) ─────────────────────────────
+
+fn simple_req(messages: Vec<Message>) -> Request {
+    Request { system: vec!["sys".into()], messages, tools: vec![], session_id: "ses_1".into(), tool_choice_none: false }
+}
+
+#[test]
+fn chat_reasoning_content_required_for_deepseek_and_kimi() {
+    for id in ["deepseek-v4-pro-202606", "kimi-k2.5", "DeepSeek-V4-Flash"] {
+        let m = model(ApiKind::OpenAIChat, id);
+        // Assistant turn without reasoning (e.g. produced by another model) + tool call.
+        let mut a = assistant(&m, vec![text("Let me look."), tool("call_1", ToolState::Done, "x", vec![], None)]);
+        a.model = Some("other/model".into());
+        let req = simple_req(vec![user(vec![text("q")]), a, user(vec![text("next")])]);
+        let body = openai_chat::build_body(&m, &req);
+        let asst = body["messages"].as_array().unwrap().iter().find(|m| m["role"] == "assistant").unwrap().clone();
+        assert_eq!(asst["reasoning_content"], "", "{id}");
+        // Streamed reasoning of the same model is replayed verbatim.
+        let r = Part::Reasoning(ReasoningPart {
+            id: "r".into(),
+            text: "deep thought".into(),
+            time: 0,
+            time_end: None,
+            meta: meta(&m, json!({"field": "reasoning_content"})),
+        });
+        let req = simple_req(vec![
+            user(vec![text("q")]),
+            assistant(&m, vec![r, tool("call_1", ToolState::Done, "x", vec![], None)]),
+        ]);
+        let body = openai_chat::build_body(&m, &req);
+        assert_eq!(body["messages"][2]["reasoning_content"], "deep thought", "{id}");
+    }
+    // Other models: no empty reasoning_content is invented.
+    let m = model(ApiKind::OpenAIChat, "glm-5.3");
+    let req = simple_req(vec![user(vec![text("q")]), assistant(&m, vec![text("a")]), user(vec![text("n")])]);
+    assert_eq!(count_key(&openai_chat::build_body(&m, &req), "reasoning_content"), 0);
+}
+
+#[test]
+fn chat_compat_fields_per_host() {
+    let req = Request { tools: vec![ToolDef { name: "t".into(), description: "d".into(), parameters: json!({"type": "object"}) }], ..simple_req(vec![user(vec![text("q")])]) };
+    // Generic compatible provider: no store / prompt_cache_key / tool_stream.
+    let mut m = model(ApiKind::OpenAIChat, "glm-5.1");
+    m.options.insert("store".into(), json!(false));
+    m.options.insert("include".into(), json!(["reasoning.encrypted_content"]));
+    let body = openai_chat::build_body(&m, &req);
+    for k in ["store", "prompt_cache_key", "tool_stream", "include"] {
+        assert!(body.get(k).is_none(), "{k}: {body}");
+    }
+    // OpenAI: store, prompt_cache_key, max_completion_tokens.
+    m.base_url = "https://api.openai.com/v1".into();
+    let body = openai_chat::build_body(&m, &req);
+    assert_eq!(body["store"], false);
+    assert_eq!(body["prompt_cache_key"], "ses_1");
+    assert!(body.get("max_completion_tokens").is_some());
+    // OpenRouter: prompt_cache_key + affinity headers.
+    m.base_url = "https://openrouter.ai/api/v1".into();
+    let body = openai_chat::build_body(&m, &req);
+    assert_eq!(body["prompt_cache_key"], "ses_1");
+    let h = openai_chat::build_headers(&m, &req).unwrap();
+    assert_eq!(h.get("x-session-id"), Some("ses_1"));
+    assert_eq!(h.get("x-session-affinity"), Some("ses_1"));
+    // setCacheKey opt-in for other hosts.
+    m.base_url = "https://example.com/v1".into();
+    m.options.insert("setCacheKey".into(), json!(true));
+    assert_eq!(openai_chat::build_body(&m, &req)["prompt_cache_key"], "ses_1");
+    // Zhipu / Z.ai GLM: tool_stream when tools are present (not for glm-4.5).
+    let mut z = model(ApiKind::OpenAIChat, "glm-5.3");
+    z.base_url = "https://open.bigmodel.cn/api/coding/paas/v4".into();
+    assert_eq!(openai_chat::build_body(&z, &req)["tool_stream"], true);
+    assert!(openai_chat::build_body(&z, &simple_req(vec![user(vec![text("q")])])).get("tool_stream").is_none());
+    // GLM effort variant implies preserved thinking; explicit `thinking` / effort none win.
+    assert!(openai_chat::build_body(&z, &req).get("thinking").is_none());
+    z.options.insert("reasoningEffort".into(), json!("high"));
+    let body = openai_chat::build_body(&z, &req);
+    assert_eq!(body["thinking"], json!({"type": "enabled", "clear_thinking": false}));
+    assert_eq!(body["reasoning_effort"], "high");
+    z.options.insert("reasoningEffort".into(), json!("none"));
+    assert!(openai_chat::build_body(&z, &req).get("thinking").is_none());
+    z.options.insert("thinking".into(), json!({"type": "disabled"}));
+    assert_eq!(openai_chat::build_body(&z, &req)["thinking"], json!({"type": "disabled"}));
+    z.options.clear();
+    z.api_model = "glm-4.5-air".into();
+    assert!(openai_chat::build_body(&z, &req).get("tool_stream").is_none());
+    // Tool history without active tools → `tools: []`.
+    let hist = simple_req(vec![user(vec![text("q")]), assistant(&z, vec![tool("c", ToolState::Done, "x", vec![], None)])]);
+    assert_eq!(openai_chat::build_body(&z, &hist)["tools"], json!([]));
+}
+
+#[test]
+fn chat_tool_call_ids_fit_openai_limit() {
+    let m = model(ApiKind::OpenAIChat, "gpt-5");
+    let long = format!("call_{}|fc_{}", "a".repeat(30), "b".repeat(40));
+    let req = simple_req(vec![user(vec![text("q")]), assistant(&m, vec![tool(&long, ToolState::Done, "x", vec![], None)])]);
+    let body = openai_chat::build_body(&m, &req);
+    let id = body["messages"][2]["tool_calls"][0]["id"].as_str().unwrap().to_string();
+    assert!(id.len() <= 40, "{id}");
+    assert_eq!(body["messages"][3]["tool_call_id"], id.as_str());
+}
+
+#[test]
+fn max_tokens_fit_the_context_window() {
+    let mut m = model(ApiKind::OpenAIChat, "kimi-k2.5");
+    m.context = 262_144;
+    m.max_output = 262_144;
+    let small = simple_req(vec![user(vec![text("hi")])]);
+    let max = transport::fit_max_tokens(&m, &small);
+    assert!(max < 262_144 && max > 250_000, "{max}");
+    // A prompt filling most of the window leaves only the remaining room (min 1024).
+    let big = simple_req(vec![user(vec![text(&"word ".repeat(200_000))])]);
+    let est = transport::estimate_tokens(&big);
+    assert!(est > 250_000, "{est}");
+    let max = transport::fit_max_tokens(&m, &big);
+    assert!(max <= m.context.saturating_sub(250_000).max(1024), "{max}");
+    assert!(max >= 1024);
+    // Huge output limits are capped at 256k.
+    m.context = 2_000_000;
+    m.max_output = 393_216;
+    assert_eq!(transport::fit_max_tokens(&m, &small), 256_000);
+    // CJK text counts ~1 token per char.
+    let cjk = simple_req(vec![user(vec![text(&"上下文".repeat(1000))])]);
+    assert!(transport::estimate_tokens(&cjk) >= 3000);
+    // Applied to all three APIs.
+    let mut a = model(ApiKind::Anthropic, "claude-opus-5.5");
+    a.context = 100_000;
+    a.max_output = 128_000;
+    assert!(anthropic::build_body(&a, &small).body["max_tokens"].as_u64().unwrap() < 100_000);
+    let mut r = model(ApiKind::OpenAIResponses, "gpt-5.5");
+    r.context = 100_000;
+    r.max_output = 128_000;
+    assert!(openai_responses::build_body(&r, &small)["max_output_tokens"].as_u64().unwrap() < 100_000);
+}
+
+#[test]
+fn responses_sampling_and_orphaned_item_ids() {
+    let mut m = model(ApiKind::OpenAIResponses, "gpt-5.5");
+    m.temperature = Some(0.3);
+    m.top_p = Some(0.9);
+    let req = simple_req(vec![user(vec![text("q")])]);
+    let body = openai_responses::build_body(&m, &req);
+    assert!(body.get("temperature").is_none() && body.get("top_p").is_none());
+    m.options.insert("reasoningEffort".into(), json!("none"));
+    assert_eq!(openai_responses::build_body(&m, &req)["temperature"], 0.3);
+    m.reasoning = false;
+    m.options.clear();
+    assert_eq!(openai_responses::build_body(&m, &req)["temperature"], 0.3);
+
+    // Reasoning item without encrypted content (dropped with store=false): the paired
+    // function_call / message must lose their ids.
+    let m = model(ApiKind::OpenAIResponses, "gpt-5.5");
+    let item = json!({"type": "reasoning", "id": "rs_1", "summary": []});
+    let mut t = TextPart { id: "t".into(), text: "Looking.".into(), time: 0, meta: meta(&m, json!({"id": "msg_1"})) };
+    t.time = 0;
+    let req = simple_req(vec![
+        user(vec![text("q")]),
+        assistant(&m, vec![
+            Part::Reasoning(ReasoningPart { id: "r".into(), text: String::new(), time: 0, time_end: None, meta: meta(&m, json!({"item": item})) }),
+            Part::Text(t),
+            tool("call_1", ToolState::Done, "x", vec![], meta(&m, json!({"id": "fc_1"}))),
+        ]),
+    ]);
+    let body = openai_responses::build_body(&m, &req);
+    let input = body["input"].as_array().unwrap();
+    assert_eq!(count_key(&body, "encrypted_content"), 0);
+    assert!(input.iter().all(|i| i.get("type").and_then(Value::as_str) != Some("reasoning")));
+    assert_eq!(input[2], json!({"role": "assistant", "content": "Looking."}));
+    assert_eq!(input[3]["type"], "function_call");
+    assert!(input[3].get("id").is_none());
+    let h = openai_responses::build_headers(&m, &req).unwrap();
+    assert_eq!(h.get("session_id"), Some("ses_1"));
+}
+
+#[test]
+fn anthropic_skips_blank_text_and_sends_affinity() {
+    let m = model(ApiKind::Anthropic, "claude-opus-5.5");
+    let req = simple_req(vec![user(vec![text("  \n"), text("real")])]);
+    let built = anthropic::build_body(&m, &req);
+    let content = built.body["messages"][0]["content"].as_array().unwrap();
+    assert_eq!(content.len(), 1);
+    assert_eq!(content[0]["text"], "real");
+    let h = anthropic::build_headers(&m, &built, "ses_1").unwrap();
+    assert_eq!(h.get("x-session-affinity"), Some("ses_1"));
+    // Whitespace-only tool output becomes a placeholder (empty tool_result text is rejected).
+    let req = simple_req(vec![user(vec![text("q")]), assistant(&m, vec![tool("c1", ToolState::Done, " \n", vec![], None)])]);
+    let body = anthropic::build_body(&m, &req).body;
+    assert_eq!(body["messages"][2]["content"][0]["content"], "(no output)");
+}
+
+#[test]
+fn request_headers_are_redacted() {
+    let mut m = model(ApiKind::Anthropic, "claude-opus-5.5");
+    m.headers.insert("x-custom-token".into(), "secret".into());
+    let h = request_headers(&m, &simple_req(vec![user(vec![text("q")])])).unwrap();
+    let get = |k: &str| h.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+    assert_eq!(get("x-api-key"), Some("<redacted>"));
+    assert_eq!(get("x-custom-token"), Some("<redacted>"));
+    assert_eq!(get("anthropic-version"), Some("2023-06-01"));
+    let m = model(ApiKind::OpenAIChat, "glm-5.3");
+    let h = request_headers(&m, &simple_req(vec![user(vec![text("q")])])).unwrap();
+    assert!(h.iter().any(|(n, v)| n == "authorization" && v == "<redacted>"));
+    assert!(!h.iter().any(|(_, v)| v.contains("sk-test")));
 }

@@ -162,8 +162,47 @@ fn spawn_refd(port: u16) -> Result<()> {
     Ok(())
 }
 
+/// Exclusive advisory lock on `<data_dir>/spawn.lock` (released on drop / process exit). Serializes
+/// discovery + spawning across frontends so that several frontends reconnecting at the same moment
+/// (e.g. after refd died) don't each start their own daemon.
+struct SpawnLock(std::fs::File);
+
+impl SpawnLock {
+    async fn acquire() -> Option<SpawnLock> {
+        use std::os::unix::io::AsRawFd;
+        let dir = crate::util::data_dir();
+        let _ = std::fs::create_dir_all(&dir);
+        let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(dir.join("spawn.lock")).ok()?;
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            // SAFETY: flock on a valid, owned file descriptor.
+            if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+                return Some(SpawnLock(f));
+            }
+            if Instant::now() > deadline {
+                return None;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+}
+
+impl Drop for SpawnLock {
+    fn drop(&mut self) {
+        use std::os::unix::io::AsRawFd;
+        // SAFETY: valid fd owned by self.
+        unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_UN) };
+    }
+}
+
 /// Find a running backend, spawning one if none is alive. Returns the ws URL (with token).
 pub async fn discover_or_spawn() -> Result<String> {
+    let list = status().await.unwrap_or_default();
+    if let Some(i) = list.first() {
+        return Ok(i.ws_url());
+    }
+    let _lock = SpawnLock::acquire().await;
+    // Another frontend may have spawned one while we waited for the lock.
     let list = status().await.unwrap_or_default();
     if let Some(i) = list.first() {
         return Ok(i.ws_url());

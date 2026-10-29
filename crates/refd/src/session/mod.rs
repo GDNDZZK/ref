@@ -204,23 +204,62 @@ impl State {
         }
     }
 
+    /// Projected context size of the next request: the last reported usage plus an estimate of
+    /// what was added after it (tool results of that response, later messages). Falls back to
+    /// a full estimate when no usage is known.
+    pub fn projected_context(&self) -> u64 {
+        let start = prompt::context_start(&self.messages);
+        let msgs = &self.messages[start..];
+        let Some((i, used)) =
+            msgs.iter().enumerate().rev().find_map(|(i, m)| m.usage.as_ref().map(|u| (i, u.context_tokens())))
+        else {
+            return self.estimate_context();
+        };
+        if used == 0 {
+            return self.estimate_context();
+        }
+        let mut chars = 0usize;
+        // Tool results of the response that reported the usage are not part of it.
+        for p in &msgs[i].parts {
+            if let Part::Tool(t) = p {
+                chars += t.output.len();
+                if !t.images.is_empty() {
+                    chars += 6000 * t.images.len();
+                }
+            }
+        }
+        for m in &msgs[i + 1..] {
+            chars += message_chars(m);
+        }
+        used + crate::util::estimate_tokens(chars)
+    }
+
     /// Context token estimate for the current LLM context (chars / 4).
     pub fn estimate_context(&self) -> u64 {
         let start = prompt::context_start(&self.messages);
         let sys: usize = self.system.as_ref().map(|s| s.iter().map(|b| b.len()).sum()).unwrap_or(0);
         let mut chars = sys;
         for m in &self.messages[start..] {
-            for p in &m.parts {
-                chars += match p {
-                    Part::Text(t) => t.text.len(),
-                    Part::Reasoning(r) => r.text.len(),
-                    Part::Tool(t) => t.input_raw.len().max(t.input.to_string().len()) + t.output.len(),
-                    Part::Image(_) => 6000,
-                };
-            }
+            chars += message_chars(m);
         }
         crate::util::estimate_tokens(chars)
     }
+}
+
+/// Approximate size (chars) of a message as sent to the model.
+fn message_chars(m: &Message) -> usize {
+    m.parts
+        .iter()
+        .map(|p| match p {
+            Part::Text(t) => t.text.len(),
+            Part::Reasoning(r) => r.text.len(),
+            Part::Tool(t) => {
+                let input = if t.input_raw.is_empty() { t.input.to_string().len() } else { t.input_raw.len() };
+                input + t.output.len() + 6000 * t.images.len()
+            }
+            Part::Image(_) => 6000,
+        })
+        .sum()
 }
 
 pub enum Submitted {
@@ -228,6 +267,8 @@ pub enum Submitted {
     Started,
     /// Session is busy: delivered at the next step boundary.
     Queued,
+    /// Session is closing: the input was dropped.
+    Closed,
 }
 
 pub struct SessionCore {
@@ -330,8 +371,16 @@ impl SessionCore {
     }
 
     /// Persist dirty messages / removals and the meta file.
+    ///
+    /// No-op once the session is closed: the final state was written by `shutdown`, and a
+    /// late writer (e.g. a title arriving after close/delete) must not resurrect the files.
     pub fn persist(&self) {
+        // Checked under the log lock: `shutdown` cancels `closed` before taking the lock for
+        // the final rewrite, so no write can slip in after it.
         let mut log = self.log.lock();
+        if self.closed.is_cancelled() {
+            return;
+        }
         let (records, full, meta) = {
             let mut st = self.st.lock();
             let live = st.messages.len();
@@ -340,14 +389,16 @@ impl SessionCore {
             let dirty = std::mem::take(&mut st.dirty);
             let removed = std::mem::take(&mut st.removed);
             let full = compact.then(|| st.messages.clone());
+            // Removals first: a message that was removed and re-inserted (compaction moves the
+            // trailing prompt after the summary) must end up present, at its new position.
             let records: Vec<Result<Message, String>> = if compact {
                 vec![]
             } else {
-                let mut r: Vec<Result<Message, String>> = dirty
-                    .iter()
-                    .filter_map(|id| st.messages.iter().rev().find(|m| &m.id == id).cloned().map(Ok))
-                    .collect();
-                r.extend(removed.into_iter().map(Err));
+                let mut r: Vec<Result<Message, String>> = removed.into_iter().map(Err).collect();
+                // In history order, so new messages are appended in the right order.
+                let mut idx: Vec<usize> = dirty.iter().filter_map(|id| st.msg_index(id)).collect();
+                idx.sort_unstable();
+                r.extend(idx.into_iter().map(|i| Ok(st.messages[i].clone())));
                 r
             };
             (records, full, SessionMeta::from_info(&st.info_snapshot(), st.auto_name))
@@ -395,11 +446,17 @@ impl SessionCore {
         let hub = &self.hub;
         let started = {
             let mut st = self.st.lock();
-            if matches!(msg.origin, MessageOrigin::User | MessageOrigin::Spawn { .. } | MessageOrigin::Peer { .. }) {
+            if st.closing {
+                return Submitted::Closed;
+            }
+            // must_report counts from the last real prompt (user prompt or spawn task). Peer
+            // messages do not re-arm it: a parent answering "thanks" must not make the child
+            // report again, and two sessions must not ping-pong reminders forever.
+            if matches!(msg.origin, MessageOrigin::User | MessageOrigin::Spawn { .. }) {
                 st.reported = false;
                 st.reminders = 0;
             }
-            if st.turn.is_none() && !st.closing {
+            if st.turn.is_none() {
                 st.upsert_message(hub, msg);
                 st.run_requested = true;
                 st.begin_work(hub);
@@ -577,7 +634,9 @@ pub fn last_context_used(messages: &[Message]) -> Option<u64> {
 }
 
 /// Fix up messages loaded from disk that were interrupted (backend crash / restart).
-fn repair_loaded(messages: &mut [Message]) {
+fn repair_loaded(messages: &mut Vec<Message>) {
+    // An assistant message that was persisted before it got any content is useless noise.
+    messages.retain(|m| !(m.role == Role::Assistant && m.parts.is_empty() && m.finish.is_none()));
     for m in messages.iter_mut() {
         if m.role != Role::Assistant {
             continue;

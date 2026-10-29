@@ -44,22 +44,35 @@ pub(crate) async fn run_tools(core: &Arc<SessionCore>, tok: &CancellationToken, 
             })
             .collect()
     };
-    // Consecutive read-only calls run concurrently; any other call runs alone, in the order the
-    // model issued them, so e.g. `edit` then `bash cat` observes the edit.
-    let mut batch: Vec<ToolPart> = Vec::new();
-    for c in calls {
-        if is_read_only(&c.name) {
-            batch.push(c);
+    let names: Vec<&str> = calls.iter().map(|c| c.name.as_str()).collect();
+    let plan = batches(&names);
+    let mut calls: Vec<Option<ToolPart>> = calls.into_iter().map(Some).collect();
+    for group in plan {
+        let group: Vec<ToolPart> = group.into_iter().filter_map(|i| calls[i].take()).collect();
+        futures::future::join_all(group.into_iter().map(|c| run_one(core, tok, env, msg_id, c))).await;
+    }
+}
+
+/// Execution plan for the tool calls of one step (indices into `names`): consecutive
+/// read-only calls form one concurrent group; any other call runs alone, in the order the
+/// model issued them (so e.g. `edit` then `bash cat` observes the edit).
+pub(crate) fn batches(names: &[&str]) -> Vec<Vec<usize>> {
+    let mut out: Vec<Vec<usize>> = Vec::new();
+    let mut batch: Vec<usize> = Vec::new();
+    for (i, name) in names.iter().enumerate() {
+        if is_read_only(name) {
+            batch.push(i);
             continue;
         }
         if !batch.is_empty() {
-            futures::future::join_all(batch.drain(..).map(|c| run_one(core, tok, env, msg_id, c))).await;
+            out.push(std::mem::take(&mut batch));
         }
-        run_one(core, tok, env, msg_id, c).await;
+        out.push(vec![i]);
     }
     if !batch.is_empty() {
-        futures::future::join_all(batch.into_iter().map(|c| run_one(core, tok, env, msg_id, c))).await;
+        out.push(batch);
     }
+    out
 }
 
 fn is_read_only(name: &str) -> bool {
@@ -322,6 +335,21 @@ async fn ask_permission(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn batching_plan() {
+        assert_eq!(
+            batches(&["read", "grep", "bash", "read", "find", "edit", "write", "list_sessions"]),
+            vec![vec![0, 1], vec![2], vec![3, 4], vec![5], vec![6], vec![7]]
+        );
+        assert_eq!(batches(&["read", "read", "read"]), vec![vec![0, 1, 2]]);
+        assert_eq!(batches(&["bash", "bash"]), vec![vec![0], vec![1]]);
+        // MCP / unknown tools are treated as side-effecting.
+        assert_eq!(batches(&["srv_tool", "read"]), vec![vec![0], vec![1]]);
+        assert!(batches(&[]).is_empty());
+        let many: Vec<&str> = std::iter::repeat_n("read", 100).collect();
+        assert_eq!(batches(&many).len(), 1);
+    }
 
     #[test]
     fn subjects() {

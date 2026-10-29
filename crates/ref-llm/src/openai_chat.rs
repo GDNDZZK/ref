@@ -29,16 +29,25 @@ const TOOL_IMAGES_TEXT: &str = "Attached image(s) from tool result:";
 
 pub(crate) async fn stream(http: &reqwest::Client, model: &ModelSpec, req: &Request) -> Result<EventStream, LlmError> {
     let body = build_body(model, req);
+    let h = build_headers(model, req)?;
+    let url = transport::endpoint(model, "chat/completions")?;
+    transport::post_sse(http, model, &url, h, &body, ChatDecoder::new(model)).await
+}
+
+pub(crate) fn build_headers(model: &ModelSpec, req: &Request) -> Result<Headers, LlmError> {
     let mut h = Headers::new();
     if let Some(key) = model.api_key.as_deref().filter(|k| !k.is_empty()) {
         h.set("authorization", &format!("Bearer {key}"));
     }
-    if is_openrouter(model) && !req.session_id.is_empty() {
-        h.set("x-session-id", &req.session_id);
+    if !req.session_id.is_empty() {
+        // Session affinity for gateways / load balancers (keeps the prompt cache warm).
+        h.set("x-session-affinity", &req.session_id);
+        if is_openrouter(model) {
+            h.set("x-session-id", &req.session_id);
+        }
     }
     h.apply_user(model, &[])?;
-    let url = transport::endpoint(model, "chat/completions")?;
-    transport::post_sse(http, model, &url, h, &body, ChatDecoder::new(model)).await
+    Ok(h)
 }
 
 fn is_openrouter(model: &ModelSpec) -> bool {
@@ -47,11 +56,49 @@ fn is_openrouter(model: &ModelSpec) -> bool {
 }
 
 fn is_openai(model: &ModelSpec) -> bool {
-    transport::host_of(&model.base_url) == "api.openai.com"
+    let host = transport::host_of(&model.base_url);
+    host == "api.openai.com" || host.ends_with(".openai.azure.com")
+}
+
+/// Z.ai / Zhipu GLM endpoints (`api.z.ai`, `open.bigmodel.cn`).
+fn is_zai(model: &ModelSpec) -> bool {
+    let host = transport::host_of(&model.base_url);
+    host == "z.ai" || host.ends_with(".z.ai") || host == "bigmodel.cn" || host.ends_with(".bigmodel.cn")
+}
+
+/// Models whose API requires `reasoning_content` on every replayed assistant message while
+/// thinking is on (DeepSeek: 400 "reasoning_content must be passed back"; Kimi K2.x thinking
+/// models likewise). Matched by model id so it also works through gateways.
+pub(crate) fn requires_reasoning_content(model: &ModelSpec) -> bool {
+    let id = model.api_model.to_ascii_lowercase();
+    let host = transport::host_of(&model.base_url);
+    id.contains("deepseek")
+        || id.contains("kimi")
+        || host.ends_with("deepseek.com")
+        || host.ends_with("moonshot.cn")
+        || host.ends_with("moonshot.ai")
+}
+
+/// GLM model that supports `tool_stream` (GLM-4.6 and newer; not 4.5).
+fn zai_tool_stream(model: &ModelSpec) -> bool {
+    let id = model.api_model.to_ascii_lowercase();
+    is_zai(model) && id.contains("glm") && !id.contains("glm-4.5") && !id.contains("glm-4-")
 }
 
 fn opt_str<'a>(model: &'a ModelSpec, key: &str) -> Option<&'a str> {
     model.options.get(key).and_then(Value::as_str).filter(|s| !s.is_empty())
+}
+
+/// `prompt_cache_key`: explicit `promptCacheKey` option, else the session id when the endpoint is
+/// known to use it for cache routing (OpenAI, OpenRouter) or `setCacheKey: true` is configured.
+/// Not sent to other compatible providers (strict ones reject unknown parameters).
+fn prompt_cache_key(model: &ModelSpec, req: &Request) -> Option<String> {
+    if let Some(k) = opt_str(model, "promptCacheKey") {
+        return Some(k.to_string());
+    }
+    let set = model.options.get("setCacheKey").and_then(Value::as_bool);
+    let wanted = set.unwrap_or_else(|| is_openai(model) || is_openrouter(model));
+    (wanted && !req.session_id.is_empty()).then(|| req.session_id.clone())
 }
 
 pub(crate) fn build_body(model: &ModelSpec, req: &Request) -> Value {
@@ -73,10 +120,19 @@ pub(crate) fn build_body(model: &ModelSpec, req: &Request) -> Value {
         if let Some(p) = model.options.get("parallelToolCalls") {
             body.insert("parallel_tool_calls".into(), p.clone());
         }
+        if zai_tool_stream(model) {
+            // Stream tool-call arguments incrementally instead of in one final chunk.
+            body.insert("tool_stream".into(), json!(true));
+        }
+    } else if req.messages.iter().any(|m| m.parts.iter().any(|p| matches!(p, ref_proto::Part::Tool(_)))) {
+        // Tool history without active tools: some proxies (LiteLLM → Anthropic, Bedrock) need
+        // the field present.
+        body.insert("tools".into(), json!([]));
     }
-    if model.max_output > 0 {
+    let max = transport::fit_max_tokens(model, req);
+    if max > 0 {
         let field = if is_openai(model) { "max_completion_tokens" } else { "max_tokens" };
-        body.insert(field.into(), json!(model.max_output));
+        body.insert(field.into(), json!(max));
     }
     if let Some(t) = model.temperature {
         body.insert("temperature".into(), json!(t));
@@ -85,12 +141,19 @@ pub(crate) fn build_body(model: &ModelSpec, req: &Request) -> Value {
         body.insert("top_p".into(), json!(p));
     }
     if let Some(effort) = opt_str(model, "reasoningEffort").or_else(|| opt_str(model, "effort")) {
+        if is_zai(model) && !model.options.contains_key("thinking") && !matches!(effort, "none" | "minimal") {
+            // GLM: an effort level implies thinking on; keep earlier reasoning in context
+            // ("preserved thinking") so replayed reasoning_content is used (opencode spelling).
+            body.insert("thinking".into(), json!({"type": "enabled", "clear_thinking": false}));
+        }
         if is_openrouter(model) {
             body.insert("reasoning".into(), json!({"effort": effort}));
         } else {
             body.insert("reasoning_effort".into(), json!(effort));
         }
     }
+    // `thinking` (DeepSeek / Kimi / GLM style `{"type": "enabled"}`): camelCase keys from
+    // opencode-style configs are converted to the wire names.
     match model.options.get("thinking") {
         Some(Value::Object(t)) => {
             let mut out = Map::new();
@@ -115,10 +178,11 @@ pub(crate) fn build_body(model: &ModelSpec, req: &Request) -> Value {
     if let Some(v) = model.options.get("serviceTier") {
         body.insert("service_tier".into(), v.clone());
     }
-    if let Some(k) = opt_str(model, "promptCacheKey") {
+    if let Some(k) = prompt_cache_key(model, req) {
         body.insert("prompt_cache_key".into(), json!(k.chars().take(64).collect::<String>()));
     }
-    if let Some(v) = model.options.get("store") {
+    // `store` only exists on OpenAI / Azure; strict compatible providers reject it.
+    if let Some(v) = model.options.get("store").filter(|_| is_openai(model)) {
         body.insert("store".into(), v.clone());
     }
     for (k, v) in &model.options {
@@ -140,7 +204,9 @@ fn build_messages(model: &ModelSpec, req: &Request) -> Vec<Value> {
     if !system.is_empty() {
         msgs.push(json!({"role": "system", "content": system}));
     }
-    let mut ids = IdMap::new(64);
+    // OpenAI rejects tool call ids longer than 40 characters.
+    let mut ids = IdMap::new(40);
+    let require_reasoning = requires_reasoning_content(model);
     for turn in convert::flatten(&req.messages, model) {
         match turn {
             Turn::User(blocks) => {
@@ -167,7 +233,7 @@ fn build_messages(model: &ModelSpec, req: &Request) -> Vec<Value> {
                 msgs.push(json!({"role": "user", "content": content}));
             }
             Turn::Assistant(blocks) => {
-                if let Some(m) = assistant_message(blocks, &mut ids) {
+                if let Some(m) = assistant_message(blocks, &mut ids, require_reasoning) {
                     msgs.push(m);
                 }
             }
@@ -188,7 +254,8 @@ fn build_messages(model: &ModelSpec, req: &Request) -> Vec<Value> {
     msgs
 }
 
-fn assistant_message(blocks: Vec<AsstBlock>, ids: &mut IdMap) -> Option<Value> {
+/// `require_reasoning`: always send `reasoning_content` (empty when there is none to replay).
+fn assistant_message(blocks: Vec<AsstBlock>, ids: &mut IdMap, require_reasoning: bool) -> Option<Value> {
     let mut text = String::new();
     let mut tool_calls = Vec::new();
     // field name → accumulated reasoning text (same-model reasoning only).
@@ -232,6 +299,9 @@ fn assistant_message(blocks: Vec<AsstBlock>, ids: &mut IdMap) -> Option<Value> {
     m.insert("content".into(), if text.is_empty() { Value::Null } else { json!(text) });
     for (field, r) in reasoning {
         m.insert(field, json!(r));
+    }
+    if require_reasoning && !m.contains_key("reasoning_content") {
+        m.insert("reasoning_content".into(), json!(""));
     }
     if !details.is_empty() {
         m.insert("reasoning_details".into(), Value::Array(details));

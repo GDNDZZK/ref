@@ -66,11 +66,11 @@ pub fn defs(can_spawn: bool, has_skills: bool) -> Vec<ToolDef> {
         ),
         def(
             "read_messages",
-            "Read the transcript of another session (text and tool calls; reasoning omitted). Newest last; `offset` counts messages from the end (default 0), `limit` defaults to 20.",
+            "Read the transcript of another session (text and tool calls; reasoning omitted), oldest first. By default returns the last 20 messages. `offset` = number of newest messages to skip (0 = up to the latest message); `limit` = max messages to return. The output states the total message count and which range is shown.",
             json!({"type": "object", "properties": {
                 "session": {"type": "string", "description": "Session name or id"},
-                "offset": {"type": "integer", "description": "Messages to skip from the end"},
-                "limit": {"type": "integer", "description": "Number of messages (default 20)"}
+                "offset": {"type": "integer", "description": "Number of newest messages to skip (default 0)"},
+                "limit": {"type": "integer", "description": "Max number of messages to return (default 20, max 200)"}
             }, "required": ["session"]}),
         ),
         def(
@@ -123,10 +123,12 @@ pub fn context_line(c: &ref_proto::ContextInfo) -> String {
 pub(crate) async fn execute(core: &Arc<SessionCore>, env: &StepEnv, name: &str, args: Value) -> ToolResult {
     match name {
         "context_info" => {
-            let mut c = core.st.lock().info.context.clone();
-            if c.used == 0 {
-                c.used = core.st.lock().estimate_context();
-            }
+            let c = {
+                let st = core.st.lock();
+                let mut c = st.info.context.clone();
+                c.used = st.projected_context();
+                c
+            };
             ToolResult::ok(context_line(&c))
         }
         "compact" => {
@@ -243,15 +245,17 @@ fn send_message(core: &Arc<SessionCore>, args: &Value) -> ToolResult {
     let me = core.info();
     let wrapped = peers::wrap_peer_message(&me.name, &me.id, &me.cwd, text);
     let msg = user_message(MessageOrigin::Peer { from_session: me.id.clone(), from_name: me.name.clone() }, wrapped);
-    if me.parent.as_deref() == Some(target.id.as_str()) {
+    let tname = target.name();
+    let r = target.submit(msg);
+    if me.parent.as_deref() == Some(target.id.as_str()) && !matches!(r, Submitted::Closed) {
         core.st.lock().reported = true;
     }
-    let tname = target.name();
-    match target.submit(msg) {
+    match r {
         Submitted::Started => ToolResult::ok(format!("Delivered to \"{tname}\" ({}); it is idle and now processing it.", target.id)),
         Submitted::Queued => {
-            ToolResult::ok(format!("Delivered to \"{tname}\" ({}); it is busy and will see it after its current step.", target.id))
+            ToolResult::ok(format!("Queued for \"{tname}\" ({}); it is busy and will see it after its current step.", target.id))
         }
+        Submitted::Closed => ToolResult::err(format!("Error: session \"{tname}\" ({}) is closing.", target.id)),
     }
 }
 
@@ -266,20 +270,35 @@ fn origin_label(m: &Message) -> String {
     }
 }
 
-pub fn format_transcript(info: &SessionInfo, messages: &[Message], offset: usize, limit: usize) -> String {
-    let n = messages.len();
-    let end = n.saturating_sub(offset);
-    let start = end.saturating_sub(limit);
-    let mut out = format!("Session \"{}\" ({}), status {}: messages {}-{} of {}", info.name, info.id, status_word(info), start + 1, end, n);
-    if start >= end {
-        out = format!("Session \"{}\" ({}): no messages in that range ({} total).", info.name, info.id, n);
-        return out;
+/// Range `[start, end)` of messages selected by `offset` (counted from the end) and `limit`.
+pub fn transcript_range(total: usize, offset: usize, limit: usize) -> (usize, usize) {
+    let end = total.saturating_sub(offset);
+    (end.saturating_sub(limit), end)
+}
+
+/// Format messages `start+1..=start+messages.len()` of a transcript with `total` messages.
+pub fn format_transcript(info: &SessionInfo, messages: &[Message], start: usize, total: usize) -> String {
+    let end = start + messages.len();
+    if messages.is_empty() {
+        return format!(
+            "Session \"{}\" ({}): no messages in that range ({} message(s) in total; offset must be less than {}).",
+            info.name, info.id, total, total
+        );
     }
+    let mut out = format!(
+        "Session \"{}\" ({}), status {}: showing messages {}-{} of {} (1 = oldest).",
+        info.name,
+        info.id,
+        status_word(info),
+        start + 1,
+        end,
+        total
+    );
     if start > 0 {
-        out.push_str(&format!(" (use offset={} for older)", n - start));
+        out.push_str(&format!(" Older messages: use offset={}.", total - start));
     }
     out.push('\n');
-    for (i, m) in messages[start..end].iter().enumerate() {
+    for (i, m) in messages.iter().enumerate() {
         out.push_str(&format!("\n[{}] {}:\n", start + i + 1, origin_label(m)));
         for p in &m.parts {
             match p {
@@ -304,13 +323,32 @@ fn read_messages(core: &SessionCore, args: &Value) -> ToolResult {
         Ok(i) => i,
         Err(e) => return ToolResult::err(e),
     };
-    let offset = args.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize;
-    let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(20).clamp(1, 200) as usize;
-    let messages = match core.hub.session(&info.id) {
-        Some(t) => t.st.lock().messages.clone(),
-        None => store::load_messages(&core.hub.sessions_dir, &info.id).0,
+    // Models sometimes send numbers as strings or floats.
+    let num = |k: &str| -> Option<u64> {
+        match args.get(k)? {
+            Value::Number(n) => n.as_u64().or_else(|| n.as_f64().filter(|f| *f >= 0.0).map(|f| f as u64)),
+            Value::String(s) => s.trim().parse().ok(),
+            _ => None,
+        }
     };
-    ToolResult::ok(format_transcript(&info, &messages, offset, limit))
+    let offset = num("offset").unwrap_or(0).min(usize::MAX as u64) as usize;
+    let limit = num("limit").unwrap_or(20).clamp(1, 200) as usize;
+    // Only clone the selected range (transcripts can be long).
+    let (slice, start, total) = match core.hub.session(&info.id) {
+        Some(t) => {
+            let st = t.st.lock();
+            let total = st.messages.len();
+            let (s, e) = transcript_range(total, offset, limit);
+            (st.messages[s..e].to_vec(), s, total)
+        }
+        None => {
+            let all = store::load_messages(&core.hub.sessions_dir, &info.id).0;
+            let total = all.len();
+            let (s, e) = transcript_range(total, offset, limit);
+            (all[s..e].to_vec(), s, total)
+        }
+    };
+    ToolResult::ok(format_transcript(&info, &slice, start, total))
 }
 
 fn create_session(core: &Arc<SessionCore>, env: &StepEnv, args: &Value) -> ToolResult {

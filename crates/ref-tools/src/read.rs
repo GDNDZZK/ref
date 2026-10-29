@@ -8,7 +8,7 @@ use serde_json::Value;
 
 use crate::store::Seen;
 use crate::util::{
-    cap_line, canonical_key, decode_text, display_path, edit_distance, opt_u64, req_str,
+    canonical_key, cap_line, decode_text, display_path, edit_distance, opt_u64, req_str,
     resolve_path, split_lines, TextFile, MAX_OUTPUT_BYTES, MAX_OUTPUT_LINES,
 };
 use crate::{ToolCtx, ToolOutput};
@@ -26,7 +26,9 @@ pub fn load_text(path: &Path, shown: &str) -> Result<TextFile, String> {
         return Err(format!("{shown} is a directory, not a file"));
     }
     if !meta.is_file() {
-        return Err(format!("{shown} is not a regular file (FIFO, socket or device); refusing to read it"));
+        return Err(format!(
+            "{shown} is not a regular file (FIFO, socket or device); refusing to read it"
+        ));
     }
     if meta.len() > MAX_READ_FILE_BYTES {
         return Err(format!(
@@ -37,7 +39,10 @@ pub fn load_text(path: &Path, shown: &str) -> Result<TextFile, String> {
     let bytes = std::fs::read(path).map_err(|e| io_msg(&e, shown))?;
     let size = bytes.len() as u64;
     decode_text(bytes).map_err(|why| {
-        format!("Cannot read binary file {shown} ({}): {why}.", crate::util::human_bytes(size))
+        format!(
+            "Cannot read {shown} as text ({}): {why} (binary data or a non-UTF-8 encoding). Use `bash` (e.g. `file`, `xxd`, `iconv`) to inspect it.",
+            crate::util::human_bytes(size)
+        )
     })
 }
 
@@ -51,18 +56,23 @@ pub fn io_msg(e: &std::io::Error, shown: &str) -> String {
 
 /// Up to 3 similar names from the parent directory of a missing path.
 pub fn suggestions(cwd: &Path, path: &Path) -> Vec<String> {
-    let Some(parent) = path.parent() else { return vec![] };
+    let Some(parent) = path.parent() else {
+        return vec![];
+    };
     let Some(name) = path.file_name().map(|n| n.to_string_lossy().to_lowercase()) else {
         return vec![];
     };
-    let Ok(rd) = std::fs::read_dir(parent) else { return vec![] };
+    let Ok(rd) = std::fs::read_dir(parent) else {
+        return vec![];
+    };
     let mut scored: Vec<(usize, String, PathBuf)> = vec![];
     for e in rd.flatten().take(10_000) {
         let cand = e.file_name().to_string_lossy().to_string();
         let lc = cand.to_lowercase();
         let d = edit_distance(&name, &lc);
         let threshold = (name.chars().count() / 3).max(2);
-        let related = lc.contains(&name) || (name.len() >= 3 && name.contains(&lc) && lc.len() >= 3);
+        let related =
+            lc.contains(&name) || (name.len() >= 3 && name.contains(&lc) && lc.len() >= 3);
         let stem_eq = Path::new(&lc).file_stem() == Path::new(&name).file_stem();
         if d <= threshold || related || stem_eq {
             let score = if stem_eq { 0 } else { d };
@@ -70,7 +80,11 @@ pub fn suggestions(cwd: &Path, path: &Path) -> Vec<String> {
         }
     }
     scored.sort();
-    scored.into_iter().take(3).map(|(_, _, p)| display_path(cwd, &p)).collect()
+    scored
+        .into_iter()
+        .take(3)
+        .map(|(_, _, p)| display_path(cwd, &p))
+        .collect()
 }
 
 pub fn not_found(cwd: &Path, path: &Path, shown: &str) -> String {
@@ -78,7 +92,10 @@ pub fn not_found(cwd: &Path, path: &Path, shown: &str) -> String {
     if sugg.is_empty() {
         format!("File not found: {shown}")
     } else {
-        format!("File not found: {shown}. Did you mean: {}?", sugg.join(", "))
+        format!(
+            "File not found: {shown}. Did you mean: {}?",
+            sugg.join(", ")
+        )
     }
 }
 
@@ -185,7 +202,9 @@ fn run_inner(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput, String> {
         return Ok(out);
     }
     let file = load_text(&path, &shown)?;
-    Ok(ToolOutput::ok(render(ctx, &path, &shown, &file.text, offset, limit)))
+    Ok(ToolOutput::ok(render(
+        ctx, &path, &shown, &file.text, offset, limit,
+    )))
 }
 
 /// Render `text` in hashline format, recording the snapshot and the displayed lines.
@@ -216,6 +235,7 @@ fn render(
         }
         let end = (start - 1 + limit).min(total); // inclusive, 1-based
         let mut truncated_cols = false;
+        let mut cut_lines = vec![];
         let mut last = start - 1;
         for (i, line) in lines.iter().enumerate().take(end).skip(start - 1) {
             let n = i + 1;
@@ -227,6 +247,7 @@ fn render(
             body.push_str(&row);
             if cut {
                 truncated_cols = true;
+                cut_lines.push(n);
             } else {
                 seen.push(n);
             }
@@ -237,13 +258,14 @@ fn render(
         }
         if truncated_cols {
             footer.push_str(&format!(
-                "\n[Some lines were longer than {MAX_LINE_CHARS} chars and were cut with `…`; they cannot be edited from this view. Use `grep` or `bash` to see them whole]"
+                "\n[Lines {} are longer than {MAX_LINE_CHARS} chars and were cut with `…`; change them with `edit` old_string/new_string instead of line numbers]",
+                crate::util::format_line_list(&cut_lines)
             ));
         }
         if last < total {
             if last < end {
                 footer.push_str(&format!(
-                    "\n[Showing lines {start}-{last} of {total} (50KB limit). Use offset={} to continue]",
+                    "\n[Showing lines {start}-{last} of {total} (50 KB output limit). Use offset={} to continue]",
                     last + 1
                 ));
             } else {
@@ -273,7 +295,11 @@ fn list_dir(path: &Path, shown: &str) -> Result<String, String> {
     }
     entries.sort();
     let total = entries.len();
-    let header = if shown.ends_with('/') { shown.to_string() } else { format!("{shown}/") };
+    let header = if shown.ends_with('/') {
+        shown.to_string()
+    } else {
+        format!("{shown}/")
+    };
     if total == 0 {
         return Ok(format!("{header}\n(empty directory)"));
     }

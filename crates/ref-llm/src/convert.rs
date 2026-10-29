@@ -118,7 +118,7 @@ fn tool_result(tp: &ToolPart, image_input: bool) -> ToolResult {
             text.push_str(TOOL_IMAGE_OMITTED);
         }
     }
-    if text.is_empty() {
+    if text.trim().is_empty() {
         text = if images.is_empty() { "(no output)".into() } else { SEE_ATTACHED_IMAGE.into() };
     }
     ToolResult { call_id: tp.call_id.clone(), name: tp.name.clone(), text, images, is_error }

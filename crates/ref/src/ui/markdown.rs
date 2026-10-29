@@ -147,32 +147,42 @@ impl R {
         }
     }
 
+    /// Fenced/indented code: a panel with a left bar, the language label on the top padding row, the code
+    /// (syntax highlighted, hard-wrapped) indented by one column, and a bottom padding row.
     fn render_code(&mut self, lang: &str, code: &str) {
         self.start_block();
         let (first, cont) = self.prefixes();
         let pw: usize = first.iter().map(|s| width(&s.content)).sum();
-        let inner = self.width.saturating_sub(pw).max(4);
+        let inner = self.width.saturating_sub(pw).max(6);
         let bg = Style::new().bg(ELEMENT);
+        let bar = Span::styled("▎", Style::new().fg(BORDER_ACTIVE).bg(ELEMENT));
+        let total = self.width.max(pw + 6);
         let code = code.strip_suffix('\n').unwrap_or(code);
-        let label = if lang.is_empty() { String::new() } else { format!(" {lang}") };
         let mut header = first.clone();
-        header.push(Span::styled(label, bg.fg(MUTED).add_modifier(Modifier::ITALIC)));
-        self.out.push(pad_line(Line::from(header), self.width.max(pw + 1), bg));
+        header.push(bar.clone());
+        if !lang.is_empty() {
+            header.push(Span::styled(format!(" {}", super::text::truncate(lang, inner.saturating_sub(3))), bg.fg(MUTED)));
+        }
+        self.out.push(pad_line(Line::from(header), total, bg));
         let hl = if self.highlight { highlight(lang, code) } else { None };
+        // Columns used by the bar + left padding; one column of right padding is kept free.
+        let lead = 2usize;
+        let avail = inner.saturating_sub(lead + 1).max(1);
         for (i, l) in code.split('\n').enumerate() {
             let segs: Vec<(String, Color)> = match &hl {
                 Some(h) => h.get(i).cloned().unwrap_or_default(),
                 None => vec![(l.to_string(), MD_CODE_BLOCK)],
             };
             // Hard-wrap the styled segments.
-            let mut lines: Vec<Vec<Span<'static>>> = vec![vec![Span::styled(" ", bg)]];
-            let mut w = 1usize;
+            let start = || vec![bar.clone(), Span::styled(" ", bg)];
+            let mut lines: Vec<Vec<Span<'static>>> = vec![start()];
+            let mut w = 0usize;
             for (s, c) in segs {
                 for g in unicode_segmentation::UnicodeSegmentation::graphemes(sanitize(&s).as_str(), true) {
                     let gw = width(g);
-                    if w + gw > inner.saturating_sub(1) && w > 1 {
-                        lines.push(vec![Span::styled(" ", bg)]);
-                        w = 1;
+                    if w + gw > avail && w > 0 {
+                        lines.push(start());
+                        w = 0;
                     }
                     let st = bg.fg(c);
                     let cur = lines.last_mut().unwrap();
@@ -190,10 +200,12 @@ impl R {
             for spans in lines {
                 let mut l = cont.clone();
                 l.extend(spans);
-                self.out.push(pad_line(Line::from(l), self.width.max(pw + 1), bg));
+                self.out.push(pad_line(Line::from(l), total, bg));
             }
         }
-        self.out.push(pad_line(Line::from(cont.clone()), self.width.max(pw + 1), bg));
+        let mut footer = cont.clone();
+        footer.push(bar);
+        self.out.push(pad_line(Line::from(footer), total, bg));
         self.pending_blank = true;
     }
 
@@ -204,62 +216,19 @@ impl R {
             return;
         }
         let cell_w = |c: &Vec<Span<'static>>| c.iter().map(|s| width(&s.content)).sum::<usize>();
-        let mut widths = vec![0usize; ncols];
+        let mut natural = vec![0usize; ncols];
         for r in &t.rows {
             for (i, c) in r.iter().enumerate() {
-                widths[i] = widths[i].max(cell_w(c));
+                natural[i] = natural[i].max(cell_w(c));
             }
         }
         let (first, cont) = self.prefixes();
         let pw: usize = first.iter().map(|s| width(&s.content)).sum();
-        let total: usize = widths.iter().sum::<usize>() + 3 * ncols + 1;
+        let chrome = 3 * ncols + 1;
+        let avail = self.width.saturating_sub(pw + chrome);
         let bst = fg(BORDER);
-        if total + pw <= self.width {
-            let border = |l: &str, m: &str, r: &str| -> Line<'static> {
-                let mut s = String::from(l);
-                for (i, w) in widths.iter().enumerate() {
-                    s.push_str(&"─".repeat(w + 2));
-                    s.push_str(if i + 1 == ncols { r } else { m });
-                }
-                let mut v = cont.clone();
-                v.push(Span::styled(s, bst));
-                Line::from(v)
-            };
-            let mut top = border("┌", "┬", "┐");
-            top.spans.splice(0..cont.len(), first.clone());
-            self.out.push(top);
-            for (ri, r) in t.rows.iter().enumerate() {
-                let mut v = cont.clone();
-                v.push(Span::styled("│", bst));
-                for (i, w) in widths.iter().enumerate() {
-                    let empty = vec![];
-                    let c = r.get(i).unwrap_or(&empty);
-                    let cw = cell_w(c);
-                    let pad = w - cw;
-                    let (lp, rp) = match t.aligns.get(i) {
-                        Some(pulldown_cmark::Alignment::Right) => (pad, 0),
-                        Some(pulldown_cmark::Alignment::Center) => (pad / 2, pad - pad / 2),
-                        _ => (0, pad),
-                    };
-                    v.push(Span::raw(" ".repeat(lp + 1)));
-                    for s in c {
-                        let mut s = s.clone();
-                        if ri < t.head_rows {
-                            s.style = s.style.add_modifier(Modifier::BOLD);
-                        }
-                        v.push(s);
-                    }
-                    v.push(Span::raw(" ".repeat(rp + 1)));
-                    v.push(Span::styled("│", bst));
-                }
-                self.out.push(Line::from(v));
-                if ri + 1 == t.head_rows && t.rows.len() > t.head_rows {
-                    self.out.push(border("├", "┼", "┤"));
-                }
-            }
-            self.out.push(border("└", "┴", "┘"));
-        } else {
-            // Too wide: raw pipe rows, wrapped.
+        let Some(widths) = fit_columns(&natural, avail) else {
+            // Hopelessly narrow: raw pipe rows, wrapped.
             for (ri, r) in t.rows.iter().enumerate() {
                 let mut spans = vec![Span::styled("| ", bst)];
                 for c in r {
@@ -268,19 +237,151 @@ impl R {
                 }
                 let (f, c) = if ri == 0 { (first.clone(), cont.clone()) } else { (cont.clone(), cont.clone()) };
                 self.out.extend(wrap_spans(&spans, self.width, &f, &c));
-                if ri + 1 == t.head_rows {
-                    let mut s = String::from("|");
-                    for _ in 0..ncols {
-                        s.push_str("---|");
+            }
+            self.pending_blank = true;
+            return;
+        };
+        let border = |l: &str, m: &str, r: &str| -> Line<'static> {
+            let mut s = String::from(l);
+            for (i, w) in widths.iter().enumerate() {
+                s.push_str(&"─".repeat(w + 2));
+                s.push_str(if i + 1 == ncols { r } else { m });
+            }
+            let mut v = cont.clone();
+            v.push(Span::styled(s, bst));
+            Line::from(v)
+        };
+        let mut top = border("┌", "┬", "┐");
+        top.spans.splice(0..cont.len(), first.clone());
+        self.out.push(top);
+        let empty = vec![];
+        for (ri, r) in t.rows.iter().enumerate() {
+            // Wrap every cell to its column width; the row is as tall as its tallest cell.
+            let cells: Vec<Vec<Line<'static>>> = widths
+                .iter()
+                .enumerate()
+                .map(|(i, w)| {
+                    let mut c: Vec<Span<'static>> = r.get(i).unwrap_or(&empty).clone();
+                    if ri < t.head_rows {
+                        for s in c.iter_mut() {
+                            s.style = s.style.add_modifier(Modifier::BOLD);
+                        }
                     }
-                    let mut v = cont.clone();
-                    v.push(Span::styled(s, bst));
-                    self.out.push(Line::from(v));
+                    if cell_w(&c) <= *w {
+                        vec![Line::from(c)]
+                    } else {
+                        wrap_spans(&c, *w, &[], &[])
+                    }
+                })
+                .collect();
+            let h = cells.iter().map(|c| c.len()).max().unwrap_or(1).max(1);
+            for li in 0..h {
+                let mut v = cont.clone();
+                v.push(Span::styled("│", bst));
+                for (i, w) in widths.iter().enumerate() {
+                    let line = cells[i].get(li);
+                    let cw = line.map(|l| l.spans.iter().map(|s| width(&s.content)).sum::<usize>()).unwrap_or(0);
+                    let pad = w.saturating_sub(cw);
+                    let (lp, rp) = match t.aligns.get(i) {
+                        Some(pulldown_cmark::Alignment::Right) => (pad, 0),
+                        Some(pulldown_cmark::Alignment::Center) => (pad / 2, pad - pad / 2),
+                        _ => (0, pad),
+                    };
+                    v.push(Span::raw(" ".repeat(lp + 1)));
+                    if let Some(l) = line {
+                        v.extend(l.spans.iter().cloned());
+                    }
+                    v.push(Span::raw(" ".repeat(rp + 1)));
+                    v.push(Span::styled("│", bst));
                 }
+                self.out.push(Line::from(v));
+            }
+            if ri + 1 == t.head_rows && t.rows.len() > t.head_rows {
+                self.out.push(border("├", "┼", "┤"));
             }
         }
+        self.out.push(border("└", "┴", "┘"));
         self.pending_blank = true;
     }
+}
+
+/// Column widths for a table with `natural` content widths in `avail` columns of content space.
+/// Narrow columns keep their natural width; wide ones share the rest (water-filling). None if even
+/// 3 columns per cell don't fit.
+fn fit_columns(natural: &[usize], avail: usize) -> Option<Vec<usize>> {
+    let n = natural.len();
+    let natural: Vec<usize> = natural.iter().map(|w| (*w).max(1)).collect();
+    if natural.iter().sum::<usize>() <= avail {
+        return Some(natural);
+    }
+    let min = 3usize;
+    if avail < n * min {
+        return None;
+    }
+    let mut out = vec![0usize; n];
+    let mut fixed = vec![false; n];
+    let mut left = avail;
+    loop {
+        let open: Vec<usize> = (0..n).filter(|i| !fixed[*i]).collect();
+        if open.is_empty() {
+            break;
+        }
+        let share = left / open.len();
+        let mut changed = false;
+        for &i in &open {
+            if natural[i] <= share {
+                out[i] = natural[i];
+                fixed[i] = true;
+                left -= natural[i];
+                changed = true;
+            }
+        }
+        if !changed {
+            let share = (left / open.len()).max(min);
+            let mut extra = left.saturating_sub(share * open.len());
+            for &i in &open {
+                out[i] = share + if extra > 0 { 1 } else { 0 };
+                extra = extra.saturating_sub(1);
+            }
+            break;
+        }
+    }
+    Some(out)
+}
+
+/// For text that is still streaming: close inline markers (`**`, `` ` ``, `~~`) left open in the
+/// trailing paragraph so partially received emphasis renders styled instead of flashing raw markers.
+/// Text inside an unclosed code fence is left untouched.
+pub fn close_partial(src: &str) -> std::borrow::Cow<'_, str> {
+    let fences = src.lines().filter(|l| {
+        let t = l.trim_start();
+        t.starts_with("```") || t.starts_with("~~~")
+    });
+    if fences.count() % 2 == 1 {
+        return src.into();
+    }
+    let para = &src[src.rfind("\n\n").map(|p| p + 2).unwrap_or(0)..];
+    if para.trim_start().starts_with('|') || para.trim_start().starts_with("    ") {
+        return src.into();
+    }
+    // Inline code spans first: markers inside them don't count.
+    let ticks = para.matches('`').count();
+    let mut suffix = String::new();
+    let outside: String = para.split('`').step_by(2).collect();
+    if ticks % 2 == 1 {
+        suffix.push('`');
+    } else {
+        if outside.matches("**").count() % 2 == 1 && !para.trim_end().ends_with("**") {
+            suffix.push_str("**");
+        }
+        if outside.matches("~~").count() % 2 == 1 {
+            suffix.push_str("~~");
+        }
+    }
+    if suffix.is_empty() || para.trim().is_empty() {
+        return src.into();
+    }
+    format!("{src}{suffix}").into()
 }
 
 /// Render markdown into lines that fit `width` columns.
@@ -317,7 +418,8 @@ pub fn render(src: &str, w: usize, base: Style, highlight: bool) -> Vec<Line<'st
                     r.heading = Some(level);
                     let st = match level {
                         HeadingLevel::H1 => bold(MD_HEADING).add_modifier(Modifier::UNDERLINED),
-                        _ => bold(MD_HEADING),
+                        HeadingLevel::H2 => bold(MD_HEADING),
+                        _ => bold(TEXT),
                     };
                     r.styles.push(st);
                 }
@@ -490,8 +592,9 @@ pub fn render(src: &str, w: usize, base: Style, highlight: bool) -> Vec<Line<'st
                 }
             }
             Event::SoftBreak => {
+                // Chat output: a single newline is meant as a line break (lists of lines, poems, logs).
                 let st = r.style();
-                r.push_text(" ", st);
+                r.push_text(if r.table.is_some() { " " } else { "\n" }, st);
             }
             Event::HardBreak => {
                 let st = r.style();
@@ -518,8 +621,11 @@ pub fn render(src: &str, w: usize, base: Style, highlight: bool) -> Vec<Line<'st
     }
     // Unclosed code block while streaming.
     if let Some((lang, code)) = r.code.take() {
-        // Still streaming: skip highlighting (it would be recomputed on every delta).
-        r.highlight = false;
+        // Still streaming: keep highlighting small blocks (so colors don't pop in when the fence closes);
+        // skip it for big ones, which would be re-highlighted on every delta.
+        if code.len() > 4 * 1024 {
+            r.highlight = false;
+        }
         r.render_code(&lang, &code);
     }
     if let Some(t) = r.table.take() {
@@ -538,6 +644,13 @@ type Highlighted = Vec<Vec<(String, Color)>>;
 struct Hl {
     ss: syntect::parsing::SyntaxSet,
     theme: syntect::highlighting::Theme,
+}
+
+/// Load the syntax set in the background so the first code block doesn't stall a frame.
+pub fn prewarm() {
+    std::thread::spawn(|| {
+        let _ = hl();
+    });
 }
 
 fn hl() -> &'static Hl {
@@ -675,8 +788,57 @@ mod tests {
 
     #[test]
     fn table_too_wide_raw() {
-        let out = r("| aaaaaaaa | bbbbbbbbbb |\n|---|---|\n| 1 | 2 |", 12);
-        assert!(out[0].starts_with("| aaaa"));
+        let out = r("| aaaaaaaa | bbbbbbbbbb |\n|---|---|\n| 1 | 2 |", 10);
+        assert!(out[0].starts_with("| aaaa"), "{out:?}");
+    }
+
+    #[test]
+    fn table_narrow_wraps_cells() {
+        let src = "| key | description |\n|---|---|\n| a | a fairly long description that must wrap |\n| b | 短 |";
+        let out = render(src, 30, text(), false);
+        for l in &out {
+            assert!(line_width(l) <= 30, "{:?}", line_text(l));
+        }
+        let t: Vec<String> = out.iter().map(line_text).collect();
+        assert!(t[0].starts_with('┌'), "{t:?}");
+        assert!(t.last().unwrap().starts_with('└'));
+        // Every row line has the same width (box stays aligned).
+        let w0 = line_width(&out[0]);
+        assert!(out.iter().all(|l| line_width(l) == w0), "{t:?}");
+        assert!(t.iter().any(|l| l.contains("must wrap")), "{t:?}");
+    }
+
+    #[test]
+    fn soft_breaks_kept() {
+        assert_eq!(r("1\n2\n3", 40), vec!["1", "2", "3"]);
+        assert_eq!(r("> a\n> b", 40), vec!["│ a", "│ b"]);
+    }
+
+    #[test]
+    fn partial_markers_closed() {
+        assert_eq!(close_partial("1. **If the image is"), "1. **If the image is**");
+        assert_eq!(close_partial("use `foo"), "use `foo`");
+        assert_eq!(close_partial("**done** and more"), "**done** and more");
+        assert_eq!(close_partial("```rust\nlet **x"), "```rust\nlet **x");
+        assert_eq!(close_partial("a **b**\n\nc ~~d"), "a **b**\n\nc ~~d~~");
+        assert_eq!(close_partial("list **"), "list **");
+        let out = r(&close_partial("Hello **wor"), 40);
+        assert_eq!(out, vec!["Hello wor"]);
+    }
+
+    #[test]
+    fn code_block_panel() {
+        let out = render("```rust\nlet x = 1;\n```", 24, text(), false);
+        let t: Vec<String> = out.iter().map(line_text).collect();
+        assert_eq!(t[0].trim_end(), "▎ rust");
+        assert_eq!(t[1].trim_end(), "▎ let x = 1;");
+        assert_eq!(t[2].trim_end(), "▎");
+        assert!(out.iter().all(|l| line_width(l) == 24));
+        // Long lines wrap inside the panel and keep the bar.
+        let out = render("```\n0123456789012345678901234567890\n```", 16, text(), false);
+        let t: Vec<String> = out.iter().map(line_text).collect();
+        assert!(t[1].starts_with("▎ 0123456789012"), "{t:?}");
+        assert!(t[2].starts_with("▎ 345"), "{t:?}");
     }
 
     #[test]

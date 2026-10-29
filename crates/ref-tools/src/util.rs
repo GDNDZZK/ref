@@ -170,27 +170,19 @@ pub fn looks_binary(bytes: &[u8]) -> bool {
     bytes[..n].contains(&0)
 }
 
-/// Normalize CRLF / lone CR to LF.
+/// Normalize CRLF to LF. A lone CR is content (e.g. inside a string literal), not a line break.
 pub fn normalize_eol(s: &str) -> String {
-    if !s.contains('\r') {
-        return s.to_string();
+    if s.contains("\r\n") {
+        s.replace("\r\n", "\n")
+    } else {
+        s.to_string()
     }
-    let mut out = String::with_capacity(s.len());
-    let mut it = s.chars().peekable();
-    while let Some(c) = it.next() {
-        if c == '\r' {
-            if it.peek() == Some(&'\n') {
-                it.next();
-            }
-            out.push('\n');
-        } else {
-            out.push(c);
-        }
-    }
-    out
 }
 
 /// Decode file bytes as text. Errors (as a message fragment) for binary content.
+///
+/// CRLF is normalized only when EVERY line break is CRLF; files with mixed endings keep their
+/// `\r` bytes as line content so untouched lines are written back byte-identical.
 pub fn decode_text(bytes: Vec<u8>) -> Result<TextFile, &'static str> {
     if looks_binary(&bytes) {
         return Err("contains NUL bytes");
@@ -200,11 +192,21 @@ pub fn decode_text(bytes: Vec<u8>) -> Result<TextFile, &'static str> {
         Some(rest) => (true, rest.to_string()),
         None => (false, s),
     };
-    let eol = match s.find('\n') {
-        Some(i) if i > 0 && s.as_bytes()[i - 1] == b'\r' => Eol::CrLf,
-        _ => Eol::Lf,
-    };
-    Ok(TextFile { text: normalize_eol(&s), bom, eol })
+    let lf = s.matches('\n').count();
+    let crlf = s.matches("\r\n").count();
+    if lf > 0 && crlf == lf {
+        Ok(TextFile {
+            text: s.replace("\r\n", "\n"),
+            bom,
+            eol: Eol::CrLf,
+        })
+    } else {
+        Ok(TextFile {
+            text: s,
+            bom,
+            eol: Eol::Lf,
+        })
+    }
 }
 
 /// Addressable lines of normalized text (a trailing newline does not create an extra line).
@@ -332,7 +334,11 @@ pub fn format_line_list(lines: &[usize]) -> String {
             i += 1;
             end = v[i];
         }
-        parts.push(if start == end { start.to_string() } else { format!("{start}-{end}") });
+        parts.push(if start == end {
+            start.to_string()
+        } else {
+            format!("{start}-{end}")
+        });
         i += 1;
     }
     parts.join(", ")
@@ -404,7 +410,10 @@ mod tests {
         assert_eq!(split_lines("\n"), vec![""]);
         assert_eq!(format_line_list(&[10, 5, 6, 7]), "5-7, 10");
         assert_eq!(cap_line("héllo", 2), ("hé…".to_string(), true));
-        assert_eq!(strip_numbered_prefixes(&["3:a", "4:b"]), Some(vec!["a".into(), "b".into()]));
+        assert_eq!(
+            strip_numbered_prefixes(&["3:a", "4:b"]),
+            Some(vec!["a".into(), "b".into()])
+        );
         assert_eq!(strip_numbered_prefixes(&["3:a", "5:b"]), None);
     }
 

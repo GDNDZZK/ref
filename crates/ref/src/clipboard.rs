@@ -5,28 +5,50 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use base64::Engine;
+#[cfg(not(test))]
 use tokio::io::AsyncWriteExt;
 
-/// OSC 52 escape sequence for `text` (wrapped for tmux passthrough when inside tmux).
-pub fn osc52(text: &str) -> String {
+/// OSC 52 escape sequence(s) for `text`. Inside tmux the plain sequence is sent (tmux handles it when
+/// `set-clipboard on`) followed by a DCS passthrough copy (used when `allow-passthrough on`); a terminal
+/// or tmux that doesn't accept either silently drops it. Neither sequence prints anything.
+pub fn osc52(text: &str, tmux: bool) -> String {
     let b64 = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
     let seq = format!("\x1b]52;c;{b64}\x07");
-    if std::env::var_os("TMUX").is_some() {
-        format!("\x1bPtmux;{}\x1b\\", seq.replace('\x1b', "\x1b\x1b"))
+    if tmux {
+        format!("{seq}\x1bPtmux;{}\x1b\\", seq.replace('\x1b', "\x1b\x1b"))
     } else {
         seq
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Last text passed to `copy` on this thread (tests observe the click → clipboard path).
+    pub static LAST_COPY: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Write an OSC 52 sequence to `out` in one write + flush. Called between frames from the event loop,
+/// so it never interleaves with ratatui's buffered frame output (both go through the same stdout lock).
+pub fn write_osc52(out: &mut impl Write, text: &str, tmux: bool) -> std::io::Result<()> {
+    out.write_all(osc52(text, tmux).as_bytes())?;
+    out.flush()
+}
+
 /// Copy text: OSC 52 written to the terminal immediately, host clipboard tool run in the background.
 pub fn copy(text: String) {
-    if cfg!(test) {
-        return;
-    }
+    #[cfg(test)]
     {
-        let mut out = std::io::stdout();
-        let _ = out.write_all(osc52(&text).as_bytes());
-        let _ = out.flush();
+        LAST_COPY.with(|c| *c.borrow_mut() = Some(text));
+    }
+    #[cfg(not(test))]
+    copy_real(text)
+}
+
+#[cfg(not(test))]
+fn copy_real(text: String) {
+    {
+        let mut out = std::io::stdout().lock();
+        let _ = write_osc52(&mut out, &text, std::env::var_os("TMUX").is_some());
     }
     tokio::spawn(async move {
         let mut candidates: Vec<(&str, Vec<&str>)> = Vec::new();
@@ -45,6 +67,7 @@ pub fn copy(text: String) {
     });
 }
 
+#[cfg(not(test))]
 async fn pipe_to(cmd: &str, args: &[&str], data: &[u8]) -> bool {
     let child = tokio::process::Command::new(cmd)
         .args(args)
@@ -156,8 +179,16 @@ mod tests {
 
     #[test]
     fn osc() {
-        std::env::remove_var("TMUX");
-        assert_eq!(osc52("hi"), "\x1b]52;c;aGk=\x07");
+        assert_eq!(osc52("hi", false), "\x1b]52;c;aGk=\x07");
+        let t = osc52("hi", true);
+        assert!(t.starts_with("\x1b]52;c;aGk=\x07\x1bPtmux;\x1b\x1b]52;c;aGk=\x07"));
+        assert!(t.ends_with("\x1b\\"));
+        // No printable bytes outside escape sequences; nothing that moves the cursor.
+        let mut buf = Vec::new();
+        write_osc52(&mut buf, "多行\ntext", false).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.starts_with("\x1b]52;c;") && s.ends_with('\x07'));
+        assert!(!s[1..s.len() - 1].contains(['\x1b', '\n', '\r']));
     }
 
     #[test]

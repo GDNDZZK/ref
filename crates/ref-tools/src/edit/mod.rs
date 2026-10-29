@@ -9,13 +9,16 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
-use self::apply::{anchored_lines, check_bounds, line_map, materialize, normalize_overlaps, preview, rebase};
+use self::apply::{
+    aimed_at_current, anchored_lines, check_bounds, content_verified, line_map, lost_line_warnings,
+    materialize, normalize_overlaps, preview, rebase, trim_echoes,
+};
 use self::parse::{Hunk, HunkKind};
 use crate::hash::file_hash;
 use crate::read::{load_text, not_found, MAX_LINE_CHARS};
 use crate::store::Seen;
 use crate::util::{
-    cap_line, canonical_key, display_path, format_line_list, join_lines, resolve_path, split_lines,
+    canonical_key, cap_line, display_path, format_line_list, join_lines, resolve_path, split_lines,
     TextFile,
 };
 use crate::{ToolCtx, ToolOutput};
@@ -61,7 +64,8 @@ fn run_patch(patch: &str, ctx: &ToolCtx) -> Result<ToolOutput, String> {
 
     // Merge same-file sections (by canonical path) preserving order.
     let mut order: Vec<PathBuf> = vec![];
-    let mut merged: BTreeMap<PathBuf, (String, Option<String>, Vec<Hunk>, PathBuf)> = BTreeMap::new();
+    let mut merged: BTreeMap<PathBuf, (String, Option<String>, Vec<Hunk>, PathBuf)> =
+        BTreeMap::new();
     for s in parsed.sections {
         let path = resolve_path(&ctx.cwd, &s.path);
         let key = canonical_key(&path);
@@ -84,9 +88,21 @@ fn run_patch(patch: &str, ctx: &ToolCtx) -> Result<ToolOutput, String> {
     }
 
     let mut plans = vec![];
+    let multi = order.len() > 1;
     for key in order {
-        let Some((_, tag, hunks, path)) = merged.remove(&key) else { continue };
-        plans.push(plan_section(ctx, path, key, tag, hunks)?);
+        let Some((_, tag, hunks, path)) = merged.remove(&key) else {
+            continue;
+        };
+        let plan = plan_section(ctx, path, key, tag, hunks).map_err(|e| {
+            if multi {
+                format!(
+                    "{e}\n\nNo file was changed: a multi-file edit applies all sections or none."
+                )
+            } else {
+                e
+            }
+        })?;
+        plans.push(plan);
     }
 
     // Everything validated in memory; now write.
@@ -131,11 +147,21 @@ fn run_patch(patch: &str, ctx: &ToolCtx) -> Result<ToolOutput, String> {
         out.push_str("\n\nWarnings:\n");
         out.push_str(&warnings.join("\n"));
     }
-    Ok(if all_noop { ToolOutput::err(out) } else { ToolOutput::ok(out) })
+    Ok(if all_noop {
+        ToolOutput::err(out)
+    } else {
+        ToolOutput::ok(out)
+    })
 }
 
 /// Record the new snapshot (carrying over seen lines) and render `[path#TAG]` + preview.
-pub(crate) fn finish_file(ctx: &ToolCtx, key: &std::path::Path, shown: &str, old_text: &str, new_text: &str) -> String {
+pub(crate) fn finish_file(
+    ctx: &ToolCtx,
+    key: &std::path::Path,
+    shown: &str,
+    old_text: &str,
+    new_text: &str,
+) -> String {
     let old_lines = split_lines(old_text);
     let new_lines = split_lines(new_text);
     let (pv, shown_rows) = preview(&old_lines, &new_lines);
@@ -153,10 +179,16 @@ pub(crate) fn finish_file(ctx: &ToolCtx, key: &std::path::Path, shown: &str, old
     };
     // Lines inserted by the model are known to it even if collapsed in the preview only when
     // the whole file was writable before; otherwise only shown rows count.
-    let seen = if all_seen { Seen::All } else { Seen::Lines(seen) };
+    let seen = if all_seen {
+        Seen::All
+    } else {
+        Seen::Lines(seen)
+    };
     let tag = store.record(key, new_text, seen);
-    if pv.is_empty() {
+    if new_lines.is_empty() {
         format!("[{shown}#{tag}]\n(file is now empty)")
+    } else if pv.is_empty() {
+        format!("[{shown}#{tag}]\n(only line endings changed)")
     } else {
         format!("[{shown}#{tag}]\n{pv}")
     }
@@ -172,7 +204,9 @@ fn plan_section(
     let shown = display_path(&ctx.cwd, &path);
     if !path.exists() {
         let base = not_found(&ctx.cwd, &path, &shown);
-        return Err(format!("{base}\n`edit` only patches existing files; use `write` to create a new file."));
+        return Err(format!(
+            "{base}\n`edit` only patches existing files; use `write` to create a new file."
+        ));
     }
     let file = load_text(&path, &shown)?;
     let text = file.text.clone();
@@ -197,18 +231,72 @@ fn plan_section(
                 "Edit rejected for {shown}: `REM` requires the current tag #{cur_hash}, but the section is bound to #{tag}. Re-read the file before deleting it."
             ));
         }
-        return Ok(Planned { path, key, shown, file, old_text: text, new_text: None, warnings });
+        return Ok(Planned {
+            path,
+            key,
+            shown,
+            file,
+            old_text: text,
+            new_text: None,
+            warnings,
+        });
     }
 
-    let hunks = normalize_overlaps(hunks, &mut warnings)?;
-    let anchors = anchored_lines(&hunks);
+    let hunks = normalize_overlaps(hunks, &mut warnings)
+        .map_err(|e| format!("Edit rejected for {shown} (nothing written): {e}"))?;
+    // `<len+1` (just past the end) is an append and anchors to nothing.
+    let anchors_in = |n: usize| -> BTreeSet<usize> {
+        anchored_lines(&hunks)
+            .into_iter()
+            .filter(|l| *l <= n)
+            .collect()
+    };
+    let anchors = anchors_in(cur_lines.len());
 
+    // Another file's tag is harmless when the only snapshot of this file the model has seen is
+    // the current content and it saw every anchored line. Invented tags are still refused.
+    let tag = if tag != cur_hash {
+        let store = ctx.store.lock();
+        let foreign = store.path_with_hash(&tag, &key).is_some();
+        let only_current = foreign
+            && store.by_hash(&key, &tag).is_none()
+            && store.version_count(&key) == 1
+            && store
+                .latest(&key)
+                .is_some_and(|s| s.hash == cur_hash && anchors.iter().all(|l| s.seen.contains(*l)));
+        if only_current {
+            warnings.push(format!(
+                "The header tag #{tag} does not belong to {shown}; applied against its current tag #{cur_hash}, the only version you have seen. Copy the tag from this file's own header."
+            ));
+            cur_hash.clone()
+        } else {
+            tag
+        }
+    } else {
+        tag
+    };
     let final_hunks = if tag == cur_hash {
         check_bounds(&hunks, cur_lines.len())?;
-        let seen = ctx.store.lock().by_hash(&key, &tag).map(|s| s.seen.clone()).unwrap_or_else(Seen::none);
-        let unseen: Vec<usize> = anchors.iter().copied().filter(|l| !seen.contains(*l)).collect();
+        let seen = ctx
+            .store
+            .lock()
+            .by_hash(&key, &tag)
+            .map(|s| s.seen.clone())
+            .unwrap_or_else(Seen::none);
+        let unseen = unseen_anchors(&anchors, &seen, &cur_lines);
         if !unseen.is_empty() {
-            return Err(unseen_error(ctx, &key, &shown, &tag, &text, &cur_lines, &unseen));
+            let verified = content_verified(&hunks, &cur_lines);
+            let (ok, still): (Vec<usize>, Vec<usize>) =
+                unseen.iter().partition(|l| verified.contains(l));
+            if !still.is_empty() {
+                return Err(unseen_error(
+                    ctx, &key, &shown, &tag, &text, &cur_lines, &still,
+                ));
+            }
+            warnings.push(format!(
+                "Lines {} of {shown} were not displayed by read/grep under #{tag}; accepted because the body rows match their current content. Use `read` before editing by line number.",
+                format_line_list(&ok)
+            ));
         }
         hunks
     } else {
@@ -216,17 +304,30 @@ fn plan_section(
         match old {
             Some(old) => {
                 let old_lines = split_lines(&old.text);
-                let head_tail_only = anchors.is_empty();
+                let old_anchors = anchors_in(old_lines.len());
+                let head_tail_only = old_anchors.is_empty();
                 let rebased = if head_tail_only {
                     warnings.push(format!(
                         "{shown} changed since #{tag} was issued; the head/tail insertion was applied to the current file (#{cur_hash})."
                     ));
                     Some(hunks.clone())
                 } else if check_bounds(&hunks, old_lines.len()).is_ok()
-                    && anchors.iter().all(|l| old.seen.contains(*l))
+                    && old_anchors.iter().all(|l| old.seen.contains(*l))
                 {
                     let map = line_map(&old_lines, &cur_lines);
-                    rebase(&hunks, &map)
+                    match rebase(&hunks, &map) {
+                        Some(r) if aimed_at_current(&hunks, &r, &cur_lines) => {
+                            let mut e = mismatch_error(
+                                ctx, &key, &shown, &tag, &cur_hash, &text, &cur_lines, &anchors,
+                                false,
+                            );
+                            e.push_str(&format!(
+                                "\n\nYour body rows match the CURRENT lines at those numbers, so the numbers already refer to the current file: resend the same hunks with the header [{shown}#{cur_hash}]."
+                            ));
+                            return Err(e);
+                        }
+                        r => r,
+                    }
                 } else {
                     None
                 };
@@ -241,20 +342,59 @@ fn plan_section(
                         h
                     }
                     None => {
-                        return Err(mismatch_error(ctx, &key, &shown, &tag, &cur_hash, &text, &cur_lines, &anchors, false))
+                        return Err(mismatch_error(
+                            ctx, &key, &shown, &tag, &cur_hash, &text, &cur_lines, &anchors, false,
+                        ))
                     }
                 }
             }
             None => {
-                return Err(mismatch_error(ctx, &key, &shown, &tag, &cur_hash, &text, &cur_lines, &anchors, true))
+                return Err(mismatch_error(
+                    ctx, &key, &shown, &tag, &cur_hash, &text, &cur_lines, &anchors, true,
+                ))
             }
         }
     };
 
+    let mut final_hunks = final_hunks;
+    trim_echoes(&mut final_hunks, &cur_lines, &mut warnings);
     let new_lines = materialize(&cur_lines, &final_hunks);
+    warnings.extend(lost_line_warnings(&final_hunks, &cur_lines, &new_lines));
     let trailing_nl = text.is_empty() || text.ends_with('\n');
     let new_text = join_lines(&new_lines, trailing_nl);
-    Ok(Planned { path, key, shown, file, old_text: text, new_text: Some(new_text), warnings })
+    Ok(Planned {
+        path,
+        key,
+        shown,
+        file,
+        old_text: text,
+        new_text: Some(new_text),
+        warnings,
+    })
+}
+
+/// Anchors not displayed under the tag. Blank lines within 3 lines of a displayed line count
+/// as seen: there is no content to misjudge, and ranges often end on an undisplayed blank line.
+fn unseen_anchors(anchors: &BTreeSet<usize>, seen: &Seen, lines: &[&str]) -> Vec<usize> {
+    let blank = |n: usize| n >= 1 && lines.get(n - 1).is_some_and(|l| l.trim().is_empty());
+    let near_seen_blank = |n: usize| {
+        if !blank(n) {
+            return false;
+        }
+        let up = (1..=3)
+            .take_while(|k| n > *k)
+            .map(|k| n - k)
+            .find(|m| !blank(*m) || seen.contains(*m));
+        let down = (1..=3)
+            .map(|k| n + k)
+            .find(|m| !blank(*m) || seen.contains(*m));
+        up.is_some_and(|m| seen.contains(m)) || down.is_some_and(|m| seen.contains(m))
+    };
+    anchors
+        .iter()
+        .copied()
+        .filter(|l| !seen.contains(*l) && !near_seen_blank(*l))
+        .collect()
 }
 
 /// Context rows (`*N:` anchors, ` N:` others, `...` between runs); returns rows + displayed lines.
@@ -312,13 +452,20 @@ fn mismatch_error(
 ) -> String {
     let (rows, seen) = anchored_context(lines, anchors);
     let mut store = ctx.store.lock();
-    let other = if unknown { store.path_with_hash(tag, key) } else { None };
+    let other = if unknown {
+        store.path_with_hash(tag, key)
+    } else {
+        None
+    };
     store.record(key, text, Seen::from(seen));
     drop(store);
     let mut msg = if unknown {
         let mut m = format!("Edit rejected for {shown}: hash #{tag} is not from this session.");
         if let Some(o) = other {
-            m.push_str(&format!(" Hash #{tag} was issued in this session for {}.", display_path(&ctx.cwd, &o)));
+            m.push_str(&format!(
+                " Hash #{tag} was issued in this session for {}.",
+                display_path(&ctx.cwd, &o)
+            ));
         }
         m.push_str(&format!(
             "\nThe current file hashes to #{cur_hash}. Re-read the file with `read` to copy a current [path#tag] header — never invent the tag and never reuse one from a prior session."
@@ -347,10 +494,12 @@ fn unseen_error(
 ) -> String {
     let list = format_line_list(unseen);
     let mut msg = format!(
-        "This edit anchors to lines {list} of {shown} that [{shown}#{tag}] never displayed (it showed a partial range, a search hit, or a cut line)."
+        "Edit rejected (nothing written): it anchors to lines {list} of {shown}, which [{shown}#{tag}] never displayed (it showed a partial range, a search hit, or a cut line)."
     );
     if unseen.len() > SEEN_LINE_REVEAL_CAP {
-        msg.push_str(" Re-read them in full first with `read` (offset/limit), then re-issue the edit.");
+        msg.push_str(
+            " Re-read them in full first with `read` (offset/limit), then re-issue the edit.",
+        );
         return msg;
     }
     msg.push_str(" Actual file content at those lines:\n");
@@ -367,12 +516,11 @@ fn unseen_error(
     }
     ctx.store.lock().record(key, text, Seen::from(revealed));
     if any_cut {
-        msg.push_str("Some of these lines are too long to display whole; use `bash` or the `old_string`/`new_string` form to change them.");
+        msg.push_str("Some of these lines are too long to display whole; change them with the `old_string`/`new_string` form of `edit`.");
     } else {
         msg.push_str(
-            "Verify the content matches what you intend to touch, then re-issue the edit with the same [path#tag] header — a straight retry now succeeds without a re-read. If the content does NOT match, fix your line numbers.",
+            "If this is what you meant to change, re-send the SAME edit unchanged (same header): it now succeeds. Otherwise fix the line numbers.",
         );
     }
     msg
 }
-

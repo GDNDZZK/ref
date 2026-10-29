@@ -70,7 +70,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App) {
     scroll = scroll.min(rows.len().saturating_sub(h));
     app.regions.input_scroll = scroll;
     if ed.is_empty() {
-        let ph = if app.current.is_some() { "Ask anything…  (/ for commands)" } else { "Ask anything…" };
+        let ph = if app.current.is_some() && text_area.width >= 34 { "Ask anything…  (/ for commands)" } else { "Ask anything…" };
         buf.set_string(text_area.x, text_area.y, ph, muted().bg(PANEL));
     } else {
         render_rows(buf, text_area, ed, scroll, text().bg(PANEL));

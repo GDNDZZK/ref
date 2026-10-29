@@ -11,7 +11,7 @@ use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde_json::Value;
 
 use crate::sse::{SseEvent, SseParser};
-use crate::{EventStream, LlmError, ModelSpec, StreamEvent};
+use crate::{EventStream, LlmError, ModelSpec, Request, StreamEvent};
 
 pub(crate) const USER_AGENT: &str = concat!("ref/", env!("CARGO_PKG_VERSION"));
 
@@ -191,6 +191,23 @@ impl Headers {
         model.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str())
     }
 
+    /// All headers as (name, value) with credential values replaced by `<redacted>`.
+    pub(crate) fn redacted(&self) -> Vec<(String, String)> {
+        const SECRET: &[&str] = &["authorization", "x-api-key", "api-key", "proxy-authorization", "cookie"];
+        self.map
+            .iter()
+            .map(|(k, v)| {
+                let name = k.as_str().to_string();
+                let value = if SECRET.contains(&name.as_str()) || name.contains("token") || name.contains("secret") {
+                    "<redacted>".to_string()
+                } else {
+                    v.to_str().unwrap_or("<binary>").to_string()
+                };
+                (name, value)
+            })
+            .collect()
+    }
+
     pub(crate) fn into_map(self) -> HeaderMap {
         self.map
     }
@@ -233,7 +250,10 @@ pub(crate) async fn post_sse<D: Decoder>(
         .to_ascii_lowercase();
     if content_type.starts_with("application/json") {
         let body = read_error_body(resp, model.chunk_timeout).await;
-        return Err(LlmError::Stream(format!("expected an event stream, got JSON: {body}")));
+        return Err(LlmError::Stream(format!(
+            "expected an event stream, got JSON: {}",
+            crate::error::readable_body(&body)
+        )));
     }
 
     Ok(drive(Box::pin(resp.bytes_stream()), decoder, model.chunk_timeout))
@@ -285,6 +305,69 @@ pub(crate) fn merge_json(dst: &mut serde_json::Map<String, Value>, src: &serde_j
             }
         }
     }
+}
+
+/// Upper bound for requested output tokens (no reply needs more; opencode uses the same cap).
+const OUTPUT_TOKEN_MAX: u64 = 256_000;
+/// Never request fewer output tokens than this, even when the prompt nearly fills the window.
+const OUTPUT_TOKEN_MIN: u64 = 1_024;
+/// Rough token cost of one image.
+const IMAGE_TOKENS: u64 = 1_600;
+
+/// Conservative token estimate of a request (ASCII ≈ 4 chars/token, other chars ≈ 1 token each,
+/// +15% error margin). Used only to keep `max_tokens` inside the context window.
+pub(crate) fn estimate_tokens(req: &Request) -> u64 {
+    fn text(s: &str, acc: &mut (u64, u64)) {
+        for c in s.chars() {
+            if c.is_ascii() {
+                acc.0 += 1;
+            } else {
+                acc.1 += 1;
+            }
+        }
+    }
+    let mut acc = (0u64, 0u64);
+    let mut images = 0u64;
+    for s in &req.system {
+        text(s, &mut acc);
+    }
+    for t in &req.tools {
+        text(&t.name, &mut acc);
+        text(&t.description, &mut acc);
+        text(&t.parameters.to_string(), &mut acc);
+    }
+    for m in &req.messages {
+        for p in &m.parts {
+            match p {
+                ref_proto::Part::Text(t) => text(&t.text, &mut acc),
+                ref_proto::Part::Reasoning(r) => text(&r.text, &mut acc),
+                ref_proto::Part::Image(_) => images += 1,
+                ref_proto::Part::Tool(t) => {
+                    text(&t.input.to_string(), &mut acc);
+                    text(&t.input_raw, &mut acc);
+                    text(&t.output, &mut acc);
+                    images += t.images.len() as u64;
+                }
+            }
+        }
+    }
+    let base = acc.0.div_ceil(4) + acc.1 + images * IMAGE_TOKENS;
+    base + base * 15 / 100
+}
+
+/// Output token limit to request: the model's limit (capped at 256k), reduced so that prompt +
+/// output fit in the context window (providers such as vLLM / Kimi reject `max_tokens` larger
+/// than the remaining room). Returns 0 when the model has no known output limit.
+pub(crate) fn fit_max_tokens(model: &ModelSpec, req: &Request) -> u64 {
+    if model.max_output == 0 {
+        return 0;
+    }
+    let requested = model.max_output.min(OUTPUT_TOKEN_MAX);
+    if model.context == 0 {
+        return requested;
+    }
+    let room = model.context.saturating_sub(estimate_tokens(req));
+    requested.min(room.max(OUTPUT_TOKEN_MIN))
 }
 
 /// Host part of a base URL, lowercased (`https://api.openai.com/v1` → `api.openai.com`).

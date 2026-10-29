@@ -24,6 +24,8 @@ mod write;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_edge;
 
 pub use hash::file_hash;
 pub use store::{Seen, Snapshot, SnapshotStore};
@@ -61,10 +63,18 @@ pub struct ToolOutput {
 
 impl ToolOutput {
     pub fn ok(text: impl Into<String>) -> Self {
-        ToolOutput { text: text.into(), images: vec![], is_error: false }
+        ToolOutput {
+            text: text.into(),
+            images: vec![],
+            is_error: false,
+        }
     }
     pub fn err(text: impl Into<String>) -> Self {
-        ToolOutput { text: text.into(), images: vec![], is_error: true }
+        ToolOutput {
+            text: text.into(),
+            images: vec![],
+            is_error: true,
+        }
     }
 }
 
@@ -72,20 +82,21 @@ const READ_DESC: &str = "\
 Read a file or list a directory. Text files come back in hashline format: a `[path#TAG]` header \
 (4-hex snapshot tag of the whole file) then `N:text` rows (N = 1-based line number; the `N:` prefix is \
 not part of the file). Use the header and line numbers with `edit`.
-`offset` = first line (1-based), `limit` = number of lines (default 2000). Lines over 2000 chars are cut \
-with `…` and cannot be edited until seen whole. Images (png/jpg/gif/webp) are returned as images when supported.";
+`offset` = first line (1-based), `limit` = number of lines (default 2000; output also stops at 50 KB, \
+with a notice saying where to continue). Lines over 2000 chars are cut with `…` and cannot be edited by line number. Images (png/jpg/gif/webp) are returned as images when supported.";
 
 const EDIT_DESC: &str = "\
 Patch existing files (new files: `write`). Each file section starts with `[PATH#TAG]` copied from the latest \
 `read`/`grep`/`edit` output, followed by hunks. Line numbers are the ORIGINAL numbers of that snapshot, never \
-shifted by earlier hunks in the same call.
+shifted by earlier hunks in the same call. Line endings (CRLF) and BOM are kept automatically.
 Hunks:
-- `PUT N.=M:` replace lines N..M (inclusive, M is a line number, not a count); `PUT N:` replace line N
-- `PUT <N:` / `PUT >N:` insert before / after line N; `PUT >$:` append at end of file
-- `CUT N.=M` / `CUT N` delete lines; `REM` delete the file
+- `PUT N:` REPLACES line N; `PUT N.=M:` replaces lines N..M (inclusive, M is a line number, not a count)
+- `PUT <N:` / `PUT >N:` insert before / after line N without removing anything; `PUT >$:` append at end of file
+- `CUT N` / `CUT N.=M` delete lines; `REM` delete the file
 Body rows (only after `PUT …:`): `+TEXT` verbatim including indentation; a lone `+` is an empty line. \
-Never add `-old` or bare context rows; the body is only the final content. Touch only lines you have seen; \
-use tight ranges and separate hunks for non-adjacent changes.
+The body is only the final content of the targeted lines: no `-old` rows, no unchanged neighbours. \
+Touch only lines that `read`/`grep`/`edit` output showed under that tag (bash output does not count); use \
+tight ranges and separate hunks for non-adjacent changes; several files may be patched in one call.
 After an edit the tag and numbering change: use the new `[path#TAG]` and numbers from the response.
 Example:
 [src/app.py#1A2B]
@@ -108,8 +119,8 @@ Delete a file. Deleting a directory requires `recursive: true`.";
 const GREP_DESC: &str = "\
 Search file contents with a regex (Rust syntax; `literal: true` for plain text). `path` is a file or \
 directory (default: working directory); `glob` filters file names (e.g. `*.rs`). Respects .gitignore, \
-skips hidden and binary files. Output per file: `## path#TAG` then `*N:text` match rows and ` N:text` \
-context rows; that tag and those lines can be used directly by `edit` as `[path#TAG]`.
+skips hidden and binary files. Output per file: a `[path#TAG]` header, then `*N:text` match rows and \
+` N:text` context rows; `edit` accepts that header and those line numbers directly.
 Default 100 matches (`limit`, max 1000), 20 per file when several files match.";
 
 const FIND_DESC: &str = "\
@@ -120,7 +131,8 @@ with `.`. No pattern lists all files. Newest first; directories end with `/`. De
 const BASH_DESC: &str = "\
 Run a shell command with `bash -c` (non-interactive, no stdin). Combined stdout+stderr is returned; \
 long output keeps the head and tail and saves the full output to a file. `timeout` in seconds (default \
-300, max 7200, 0 = none). Use `cwd` instead of `cd`. Prefer read/grep/find/edit over shell equivalents.";
+300, max 7200, 0 = none). Use `cwd` instead of `cd`. Use read/grep/find instead of cat/grep/find, and \
+edit/write instead of sed, heredocs or scripts to change files.";
 
 /// Definitions of all built-in tools (without the `purpose` parameter).
 pub fn builtin_defs() -> Vec<ToolDef> {
@@ -262,7 +274,9 @@ pub async fn execute(name: &str, input: Value, ctx: &ToolCtx) -> ToolOutput {
     }
 }
 
-async fn futures_catch<F: std::future::Future<Output = ToolOutput>>(fut: F) -> Result<ToolOutput, String> {
+async fn futures_catch<F: std::future::Future<Output = ToolOutput>>(
+    fut: F,
+) -> Result<ToolOutput, String> {
     use std::panic::AssertUnwindSafe;
     use std::pin::pin;
     use std::task::Poll;

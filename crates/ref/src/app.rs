@@ -290,6 +290,11 @@ impl App {
             self.send(ClientMsg::Unwatch { session_id: id.to_string() });
         }
         // The old session is detached once the new snapshot arrives (no blank screen meanwhile).
+        if let Some(i) = self.store.list.iter().find(|s| s.id == id && !s.open) {
+            // History sessions are loaded by the backend first; acknowledge the action right away.
+            let name = i.name.clone();
+            self.toast(NoticeLevel::Info, format!("Opening \"{name}\"…"));
+        }
         let r = self.req(Req::Attach);
         self.send(ClientMsg::Attach { req: r, session_id: id.to_string() });
         self.mode = Mode::Normal;
@@ -345,6 +350,8 @@ impl App {
                 }
             }
             self.current = Some(id.clone());
+            // Drop the "Opening …" toast once the session is there.
+            self.toasts.items.retain(|t| !t.text.starts_with("Opening \""));
             self.view_mut(id).scroll_to_bottom();
             self.view_mut(id).follow = true;
             self.perm_sel = 0;
@@ -517,6 +524,24 @@ pub async fn run(
     mut app_rx: mpsc::UnboundedReceiver<AppEvent>,
 ) -> anyhow::Result<()> {
     let mut events = EventStream::new();
+    // SIGTERM / SIGHUP / SIGQUIT: leave the loop normally so the terminal is restored by the caller.
+    let mut signals = {
+        use tokio::signal::unix::{signal, SignalKind};
+        let mut v = Vec::new();
+        for k in [SignalKind::terminate(), SignalKind::hangup(), SignalKind::quit()] {
+            if let Ok(s) = signal(k) {
+                v.push(s);
+            }
+        }
+        v
+    };
+    let mut sig_fut = Box::pin(async move {
+        let futs: Vec<_> = signals.iter_mut().map(|s| Box::pin(s.recv())).collect();
+        if futs.is_empty() {
+            std::future::pending::<()>().await;
+        }
+        futures::future::select_all(futs).await;
+    });
     let mut tick = tokio::time::interval(Duration::from_millis(100));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let frame = Duration::from_millis(16);
@@ -575,6 +600,7 @@ pub async fn run(
             ev = app_rx.recv() => { if let Some(ev) = ev { app.on_app_event(ev); } }
             _ = tick.tick() => { if app.on_tick() { app.dirty = true; } }
             _ = tokio::time::sleep(wait) => {}
+            _ = &mut sig_fut => break,
         }
     }
     Ok(())

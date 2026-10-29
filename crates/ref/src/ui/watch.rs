@@ -25,7 +25,18 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &mut App) {
     if !app.connected {
         left.push(Span::styled("  disconnected — reconnecting…", fg(WARNING)));
     }
-    let right = vec![Span::styled("ctrl+arrows focus · ctrl+x enter attach · ctrl+x z zoom · ctrl+x w exit ", muted())];
+    let hints: &[(&str, &str)] = &[("ctrl+←→↑↓", "focus"), ("ctrl+x enter", "attach"), ("ctrl+x z", "zoom"), ("ctrl+x w", "exit")];
+    let used: usize = left.iter().map(|s| super::text::width(&s.content)).sum();
+    let mut right: Vec<Span<'static>> = vec![];
+    let mut rw = 0;
+    for (k, d) in hints.iter().rev() {
+        let w = super::text::width(k) + super::text::width(d) + 3;
+        if used + rw + w + 2 > area.width as usize {
+            break;
+        }
+        rw += w;
+        right.splice(0..0, [Span::styled(k.to_string(), text()), Span::styled(format!(" {d}  "), muted())]);
+    }
     let (l, _) = lr(left, right, area.width as usize);
     let l = Line::from(l.spans.into_iter().map(|s| Span::styled(s.content, s.style.bg(PANEL))).collect::<Vec<_>>());
     buf.set_line(area.x, area.y, &l, area.width);
@@ -94,31 +105,31 @@ fn draw_pane(buf: &mut Buffer, r: Rect, app: &mut App, id: &str) {
     ];
     left.extend(super::status_spans(&info, app.tick, now));
     let ctx = (info.context.used * 100).checked_div(info.context.max).map(|p| format!("{p}%")).unwrap_or_default();
-    let (hl, _) = lr(left, vec![Span::styled(ctx, muted())], inner.width as usize);
-    buf.set_line(inner.x, inner.y, &hl, inner.width);
+    let (hl, _) = lr(left, vec![Span::styled(ctx, muted())], inner.width.saturating_sub(2) as usize);
+    buf.set_line(inner.x + 1, inner.y, &hl, inner.width.saturating_sub(2));
     let mut bottom = inner.y + inner.height;
     // Input line (focused only).
     if focused {
         bottom -= 1;
         let ir = Rect { x: inner.x, y: bottom, width: inner.width, height: 1 };
         buf.set_style(ir, Style::new().bg(ELEMENT));
-        buf.set_string(ir.x, ir.y, "› ", fg(PRIMARY).bg(ELEMENT));
+        buf.set_string(ir.x + 1, ir.y, "› ", fg(PRIMARY).bg(ELEMENT));
         let ed = app.pane_editors.entry(id.to_string()).or_default();
-        let tw = ir.width.saturating_sub(3);
+        let tw = ir.width.saturating_sub(4);
         let rows = ed.rows(1000);
         let (_, cc) = ed.cursor_pos(&rows);
         if ed.is_empty() {
-            buf.set_string(ir.x + 2, ir.y, "Message this session…", muted().bg(ELEMENT));
+            buf.set_string(ir.x + 3, ir.y, truncate("Message this session…", tw as usize), muted().bg(ELEMENT));
         } else {
             // Horizontal scroll so the cursor stays visible.
             let off = (cc + 1).saturating_sub(tw as usize);
             let text: String = ed.display_text().replace('\n', "⏎");
             let shown = chat::slice_cols(&text, off, off + tw as usize);
-            buf.set_string(ir.x + 2, ir.y, shown, text_style().bg(ELEMENT));
+            buf.set_string(ir.x + 3, ir.y, shown, text_style().bg(ELEMENT));
         }
         if app.dialog.is_none() {
             let off = (cc + 1).saturating_sub(tw as usize);
-            app.regions.cursor = Some(ratatui::layout::Position { x: ir.x + 2 + (cc - off) as u16, y: ir.y });
+            app.regions.cursor = Some(ratatui::layout::Position { x: ir.x + 3 + (cc - off) as u16, y: ir.y });
         }
     }
     // Permission prompt inside the pane.
@@ -131,9 +142,10 @@ fn draw_pane(buf: &mut Buffer, r: Rect, app: &mut App, id: &str) {
         bottom = pr.y;
     } else if let Some((req, _)) = perm {
         bottom -= 1;
-        buf.set_string(inner.x, bottom, truncate(&format!("⏸ permission: {} — focus pane to answer", req.tool), inner.width as usize), fg(WARNING));
+        buf.set_string(inner.x + 1, bottom, truncate(&format!("⏸ {} needs permission — focus this pane to answer", req.tool), inner.width.saturating_sub(2) as usize), fg(WARNING));
     }
-    let chat_rect = Rect { x: inner.x, y: chat_top, width: inner.width, height: bottom.saturating_sub(chat_top) };
+    // The chat area extends over the right border column: its scrollbar thumb is drawn on the border.
+    let chat_rect = Rect { x: inner.x, y: chat_top, width: inner.width + 1, height: bottom.saturating_sub(chat_top) };
     let colors = app.agent_colors();
     let o = Opts {
         width: chat_rect.width.saturating_sub(3) as usize,
@@ -148,7 +160,7 @@ fn draw_pane(buf: &mut Buffer, r: Rect, app: &mut App, id: &str) {
     let sv = app.store.get(id).unwrap();
     let view = app.views.entry(id.to_string()).or_default();
     view.layout(sv, &o);
-    chat::draw(buf, chat_rect, view, None);
+    chat::draw_ex(buf, chat_rect, view, None, false);
     app.watch.panes.push((id.to_string(), r, chat_rect));
 }
 
