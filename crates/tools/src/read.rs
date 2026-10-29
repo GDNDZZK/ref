@@ -146,7 +146,7 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         }
         let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
         let mut out = ToolOutput::ok(format!("Read image file {display} [{mime}] ({})", util::human_bytes(meta.len())));
-        out.images.push(ImageData { mime: mime.to_string(), data });
+        out.images.push(ImageData { mime: mime.to_string(), data, ..Default::default() });
         out.meta = Some(json!({"path": abs.to_string_lossy(), "image": true}));
         return Ok(out);
     }

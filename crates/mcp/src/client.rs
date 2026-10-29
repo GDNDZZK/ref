@@ -428,7 +428,7 @@ pub(crate) fn parse_call_result(res: &Value) -> CallResult {
             "text" => texts.push(str_field("text").unwrap_or_default().to_string()),
             "image" => images.push(ImageData {
                 mime: str_field("mimeType").unwrap_or("image/png").to_string(),
-                data: str_field("data").unwrap_or_default().to_string(),
+                data: str_field("data").unwrap_or_default().to_string(), ..Default::default()
             }),
             "resource" => {
                 let r = item.get("resource").cloned().unwrap_or(Value::Null);

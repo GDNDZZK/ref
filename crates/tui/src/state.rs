@@ -69,6 +69,12 @@ pub struct SessionView {
     pub chat: ChatState,
     /// Attached as foreground (true) or watch-only.
     pub foreground: bool,
+    /// The server has messages older than `messages[0]` (history is loaded page by page).
+    pub more_before: bool,
+    /// A request for the page before `messages[0]` is in flight.
+    pub older_pending: bool,
+    /// Bumped whenever the message list is replaced; stale page responses are dropped.
+    pub history_gen: u64,
 }
 
 impl SessionView {
@@ -87,6 +93,9 @@ impl SessionView {
             closed: false,
             chat: ChatState::default(),
             foreground,
+            more_before: false,
+            older_pending: false,
+            history_gen: 0,
         }
     }
 
@@ -112,17 +121,46 @@ impl SessionView {
     pub fn load_snapshot(&mut self, snap: SessionSnapshot) {
         self.set_info(snap.info);
         self.set_queued(snap.queued);
-        self.set_messages(snap.messages);
+        self.set_messages(snap.messages, snap.more_before);
         self.permissions = snap.pending_permissions;
         self.loaded = true;
         self.closed = false;
     }
 
-    fn set_messages(&mut self, msgs: Vec<Message>) {
+    fn set_messages(&mut self, msgs: Vec<Message>, more_before: bool) {
         self.messages = msgs;
         self.versions = self.messages.iter().map(|_| next_version()).collect();
+        self.more_before = more_before;
+        self.older_pending = false;
+        self.history_gen += 1;
         self.reindex();
         self.drop_matched_queued();
+    }
+
+    /// Wants the page before `messages[0]`: `(generation, first message id)` for the request.
+    pub fn older_request(&self) -> Option<(u64, String)> {
+        (self.loaded && self.more_before && !self.older_pending).then(|| self.messages.first().map(|m| (self.history_gen, m.id.clone()))).flatten()
+    }
+
+    /// Inserts an older page in front, if it still fits (`generation` and `before` unchanged).
+    pub fn prepend_older(&mut self, generation: u64, before: &str, older: Vec<Message>, more_before: bool) -> bool {
+        if generation != self.history_gen || self.messages.first().map(|m| m.id.as_str()) != Some(before) {
+            return false;
+        }
+        self.older_pending = false;
+        self.more_before = more_before;
+        let older: Vec<Message> = older.into_iter().filter(|m| !self.index.contains_key(&m.id)).collect();
+        if older.is_empty() {
+            return false;
+        }
+        let mut versions: Vec<u64> = older.iter().map(|_| next_version()).collect();
+        versions.append(&mut self.versions);
+        self.versions = versions;
+        let mut msgs = older;
+        msgs.append(&mut self.messages);
+        self.messages = msgs;
+        self.reindex();
+        true
     }
 
     pub fn set_info(&mut self, info: SessionInfo) {
@@ -189,8 +227,8 @@ impl SessionView {
                     self.reindex();
                 }
             }
-            SessionEvent::Reset { messages } => {
-                self.set_messages(messages);
+            SessionEvent::Reset { messages, more_before } => {
+                self.set_messages(messages, more_before);
             }
             SessionEvent::Permission { request } => {
                 if !self.permissions.iter().any(|p| p.call_id == request.call_id) {
@@ -457,10 +495,10 @@ mod tests {
         v.queued = vec![gone, pending, kept.clone()];
         let mut q2 = msg("q2", Role::User);
         q2.parts.push(Part::Text { text: "from snapshot".into(), time: 0 });
-        q2.parts.push(Part::Image { image: ImageData { mime: "image/png".into(), data: "x".into() }, name: None });
+        q2.parts.push(Part::Image { image: ImageData { mime: "image/png".into(), data: "x".into(), ..Default::default() }, name: None });
         let mut q1 = msg("q1", Role::User);
         q1.parts.push(Part::Text { text: "kept".into(), time: 0 });
-        v.load_snapshot(SessionSnapshot { info: info(), messages: vec![], pending_permissions: vec![], queued: vec![q2, q1] });
+        v.load_snapshot(SessionSnapshot { info: info(), messages: vec![], more_before: false, pending_permissions: vec![], queued: vec![q2, q1] });
         let rows: Vec<(Option<&str>, &str, usize)> = v.queued.iter().map(|q| (q.id.as_deref(), q.text.as_str(), q.images.len())).collect();
         assert_eq!(rows, [(Some("q2"), "from snapshot", 1), (Some("q1"), "kept", 0), (None, "waiting for id", 0)]);
         assert!(v.queued[1].removing && v.queued[1].key == kept.key, "existing row state kept");

@@ -5,7 +5,7 @@ use crate::mcp::McpManager;
 use crate::session::{Session, SessionState};
 use crate::store::Store;
 use ref_config::Config;
-use ref_proto::{InstanceInfo, ServerFrame, SessionEvent, SessionInfo, SessionStatus};
+use ref_proto::{InstanceInfo, Message, ServerFrame, SessionEvent, SessionInfo, SessionStatus};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -247,7 +247,14 @@ impl Hub {
 
     /// Route a session event to subscribed connections. Call while holding the session lock
     /// so that snapshots taken in `Attach` are consistent with the event stream.
-    pub fn emit(&self, sid: &str, event: SessionEvent) {
+    pub fn emit(&self, sid: &str, mut event: SessionEvent) {
+        // Frontends get image stubs (see `ImageData`).
+        match &mut event {
+            SessionEvent::Message { message } => message.strip_image_data(),
+            SessionEvent::Part { message_id, index, part } => part.strip_image_data(message_id, *index),
+            SessionEvent::Reset { messages, .. } | SessionEvent::Queue { messages } => messages.iter_mut().for_each(Message::strip_image_data),
+            _ => {}
+        }
         let conns = self.conns();
         let mut frame = Some(ServerFrame::Event { session_id: sid.to_string(), event });
         let targets: Vec<&Arc<Conn>> = conns

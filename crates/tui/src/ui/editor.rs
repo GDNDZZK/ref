@@ -778,7 +778,7 @@ mod tests {
     use super::*;
 
     fn img(data: &str) -> ImageData {
-        ImageData { mime: "image/png".into(), data: data.into() }
+        ImageData::new("image/png", data)
     }
 
     #[test]
@@ -861,7 +861,7 @@ mod tests {
         assert_eq!(s.text, "line1\nline2\nline3\n end");
         // Backspace removes a token as a unit.
         let mut e = Editor::default();
-        e.attach_image(ImageData { mime: "image/png".into(), data: "AA".into() }, None);
+        e.attach_image(ImageData::new("image/png", "AA"), None);
         e.backspace(); // trailing space
         e.backspace(); // token
         assert_eq!(e.text, "");

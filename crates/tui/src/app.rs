@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ref_proto::{
-    ImageData, Message, MessageSource, ModelRef, Part, Request, Role, ServerConfigInfo, ServerFrame, SessionEvent, SessionInfo, SessionSnapshot, SessionStatus,
+    ImageData, ModelRef, Request, ServerConfigInfo, ServerFrame, SessionEvent, SessionInfo, SessionSnapshot, SessionStatus,
 };
 use serde_json::Value;
 
@@ -44,9 +44,11 @@ pub enum Pending {
     Attach { sid: String, fg: bool },
     HistoryDialog,
     Continue,
-    /// `count`: messages removed (known when undoing from a given message). `images`: those of
-    /// the undone prompt (the response only carries its text).
-    Undo { sid: String, count: Option<usize>, images: Vec<(ImageData, Option<String>)> },
+    /// `count`: messages removed (known when undoing from a given message). The response carries
+    /// the undone prompt's text and images (messages here only hold image stubs).
+    Undo { sid: String, count: Option<usize> },
+    /// Page of history before message `before` (view generation `generation`).
+    Older { sid: String, generation: u64, before: String },
     /// A session was closed; refresh dialogs / history afterwards.
     Closed { name: String },
     /// `/cd` on `sid`.
@@ -369,7 +371,7 @@ impl App {
                     let ids: Vec<(String, bool)> = self.views.iter().map(|(k, v)| (k.clone(), v.foreground)).collect();
                     for (sid, fg) in ids {
                         self.attaching.insert(sid.clone());
-                        self.req(Request::Attach { session_id: sid.clone(), foreground: fg }, Pending::Attach { sid, fg });
+                        self.req(Request::Attach { session_id: sid.clone(), foreground: fg, limit: None }, Pending::Attach { sid, fg });
                     }
                 } else if let Some(plan) = self.init.take() {
                     self.run_init(plan);
@@ -461,6 +463,14 @@ impl App {
                 } else {
                     self.views.remove(&sid);
                 }
+            }
+            Pending::Older { sid, generation, .. } => {
+                // Stop asking until the next snapshot / reset (no retry loop); keep the rest.
+                if let Some(v) = self.views.get_mut(&sid).filter(|v| v.history_gen == generation) {
+                    v.older_pending = false;
+                    v.more_before = false;
+                }
+                let _ = err;
             }
             Pending::Prompt { sid, text, key, .. } => {
                 if let Some(v) = self.views.get_mut(&sid) {
@@ -588,8 +598,9 @@ impl App {
                     }
                 }
             }
-            Pending::Undo { sid, count, images } => {
+            Pending::Undo { sid, count } => {
                 let t = result.get("text").and_then(Value::as_str).unwrap_or_default();
+                let images = response_images(&result);
                 let what = match count {
                     Some(1) => "Undid 1 message".to_string(),
                     Some(n) => format!("Undid {n} messages"),
@@ -599,8 +610,8 @@ impl App {
                 if let Some(v) = self.views.get_mut(&sid) {
                     v.queued.clear();
                 }
-                // Only human prompts come back (the text is empty otherwise).
-                if !t.trim().is_empty() {
+                // Only human prompts come back (text and images are empty otherwise).
+                if !t.trim().is_empty() || !images.is_empty() {
                     self.restore_prompt(&sid, t, images);
                 }
                 self.toasts.info(what);
@@ -693,14 +704,30 @@ impl App {
                 self.dialog = Some(Dialog::Help(HelpDialog::text(&title, text)));
             }
             Pending::Prompt { sid, text, images, key } => self.on_prompt_sent(&sid, text, images, key, &result),
+            Pending::Older { sid, generation, before } => {
+                let msgs: Vec<ref_proto::Message> = result.get("messages").and_then(|m| serde_json::from_value(m.clone()).ok()).unwrap_or_default();
+                let more = result.get("more_before").and_then(Value::as_bool).unwrap_or(false);
+                if let Some(v) = self.views.get_mut(&sid)
+                    && !v.prepend_older(generation, &before, msgs, more)
+                    && v.history_gen == generation
+                {
+                    v.older_pending = false;
+                }
+            }
             Pending::Unqueue { sid, key } => {
                 let removed = result.get("removed").and_then(Value::as_bool).unwrap_or(false);
                 let Some(v) = self.views.get_mut(&sid) else { return };
                 if removed {
-                    // Back into the input box so it can be edited and sent again.
+                    // Back into the input box so it can be edited and sent again. The response has
+                    // the image bytes (rows built from server messages only hold stubs).
                     if let Some(i) = v.queued.iter().position(|q| q.key == key) {
                         let q = v.queued.remove(i);
-                        self.restore_prompt(&sid, &q.text, q.images.into_iter().map(|i| (i, None)).collect());
+                        let text = result.get("text").and_then(Value::as_str).map_or(q.text, str::to_string);
+                        let mut images = response_images(&result);
+                        if images.is_empty() {
+                            images = q.images.into_iter().filter(|i| !i.is_stub()).map(|i| (i, None)).collect();
+                        }
+                        self.restore_prompt(&sid, &text, images);
                     }
                 } else {
                     // Delivered first: the row goes away once the message is in the transcript.
@@ -834,7 +861,7 @@ impl App {
                     self.views.insert(sid.clone(), SessionView::new(info, false));
                 }
                 self.attaching.insert(sid.clone());
-                self.req(Request::Attach { session_id: sid.clone(), foreground: false }, Pending::Attach { sid: sid.clone(), fg: false });
+                self.req(Request::Attach { session_id: sid.clone(), foreground: false, limit: None }, Pending::Attach { sid: sid.clone(), fg: false });
             }
         }
         let drop: Vec<String> = self.views.iter().filter(|(k, v)| !v.foreground && !tiles.contains(*k)).map(|(k, _)| k.clone()).collect();
@@ -883,7 +910,7 @@ impl App {
         v.foreground = true;
         v.chat.scroll_to_bottom(false);
         self.attaching.insert(sid.to_string());
-        self.req(Request::Attach { session_id: sid.to_string(), foreground: true }, Pending::Attach { sid: sid.to_string(), fg: true });
+        self.req(Request::Attach { session_id: sid.to_string(), foreground: true, limit: None }, Pending::Attach { sid: sid.to_string(), fg: true });
         self.perm = None;
         self.shell_mode = false;
     }
@@ -1570,7 +1597,6 @@ impl App {
         let Some(v) = self.views.get(sid) else { return };
         let Some(i) = v.find(msg) else { return };
         let count = v.messages.len() - i;
-        let images = prompt_images(&v.messages[i]);
         let busy = v.is_busy();
         let armed = self.undo_armed.as_ref().is_some_and(|(m, t)| m == msg && t.elapsed() < Duration::from_secs(4));
         if busy && !armed {
@@ -1581,7 +1607,7 @@ impl App {
         self.undo_armed = None;
         self.hint = None;
         self.clear_selection();
-        let p = Pending::Undo { sid: sid.to_string(), count: Some(count), images };
+        let p = Pending::Undo { sid: sid.to_string(), count: Some(count) };
         self.req(Request::Undo { session_id: sid.to_string(), message_id: Some(msg.to_string()) }, p);
     }
 
@@ -1667,14 +1693,7 @@ impl App {
             }
             "undo" => {
                 if let Some(sid) = cur {
-                    // Same choice as the server: the last human prompt.
-                    let images = self
-                        .views
-                        .get(&sid)
-                        .and_then(|v| v.messages.iter().rfind(|m| m.role == Role::User && m.source == MessageSource::Human))
-                        .map(prompt_images)
-                        .unwrap_or_default();
-                    let p = Pending::Undo { sid: sid.clone(), count: None, images };
+                    let p = Pending::Undo { sid: sid.clone(), count: None };
                     self.req(Request::Undo { session_id: sid, message_id: None }, p);
                 }
             }
@@ -1930,6 +1949,25 @@ impl App {
     // Housekeeping
     // -----------------------------------------------------------------------
 
+    /// Requests the previous page of history for shown transcripts scrolled to within one
+    /// screen of their top (history arrives page by page). Called after each draw.
+    pub fn load_older(&mut self) {
+        let shown: Vec<String> = match self.mode {
+            Mode::Chat => self.current.iter().cloned().collect(),
+            Mode::Watch => self.watch.tiles.iter().map(|(s, _)| s.clone()).collect(),
+        };
+        for sid in shown {
+            let Some(v) = self.views.get_mut(&sid) else { continue };
+            let h = v.chat.area.height as usize;
+            if h == 0 || v.chat.top() > h {
+                continue;
+            }
+            let Some((generation, before)) = v.older_request() else { continue };
+            v.older_pending = true;
+            self.req(Request::Messages { session_id: sid.clone(), before: before.clone(), limit: None }, Pending::Older { sid, generation, before });
+        }
+    }
+
     /// Whether anything needs periodic redraws, and how often.
     pub fn frame_interval(&self) -> Option<Duration> {
         let fast = self.views.values().any(|v| v.chat.scrolling() || v.chat.drag_edge != 0)
@@ -2073,14 +2111,12 @@ pub fn epilogue_text(info: &SessionInfo, resumable: bool) -> String {
     out
 }
 
-/// Images attached to a prompt (to put back into the editor with its text).
-fn prompt_images(m: &Message) -> Vec<(ImageData, Option<String>)> {
-    m.parts
-        .iter()
-        .filter_map(|p| match p {
-            Part::Image { image, name } => Some((image.clone(), name.clone())),
-            _ => None,
-        })
+/// `images` of an `Undo` / `RemoveQueued` response (to put back into the editor).
+fn response_images(result: &Value) -> Vec<(ImageData, Option<String>)> {
+    let list: Vec<ref_proto::NamedImage> = result.get("images").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
+    list.into_iter()
+        .filter(|i| !i.image.is_stub())
+        .map(|i| (i.image, i.name))
         .collect()
 }
 

@@ -131,7 +131,7 @@ pub fn paste_image() -> Option<ImageData> {
     if !png.starts_with(&[0x89, b'P', b'N', b'G']) {
         return None;
     }
-    Some(ImageData { mime: "image/png".into(), data: base64::engine::general_purpose::STANDARD.encode(png) })
+    Some(ImageData { mime: "image/png".into(), data: base64::engine::general_purpose::STANDARD.encode(png), ..Default::default() })
 }
 
 /// Reads text from the clipboard.
@@ -182,7 +182,7 @@ pub fn image_from_path(s: &str) -> Option<(ImageData, String)> {
     }
     let bytes = std::fs::read(&p).ok()?;
     let name = std::path::Path::new(&p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    Some((ImageData { mime: mime.into(), data: base64::engine::general_purpose::STANDARD.encode(bytes) }, name))
+    Some((ImageData { mime: mime.into(), data: base64::engine::general_purpose::STANDARD.encode(bytes), ..Default::default() }, name))
 }
 
 fn percent_decode(s: &str) -> String {

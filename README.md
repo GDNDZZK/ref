@@ -171,4 +171,6 @@ REF_DUMP_REQUESTS=/tmp/dump ref-server ...                    # dump LLM request
 ref --mock                      # TUI against a fake backend
 ```
 
-Crates: `proto` (wire protocol), `config`, `llm` (Chat / Responses / Anthropic streaming), `tools`, `mcp` (stdio + streamable HTTP), `server`, `tui`.
+Crates: `proto` (wire protocol), `config`, `llm` (Chat / Responses / Anthropic streaming), `tools`, `mcp` (stdio + streamable HTTP), `sys` (OS layer), `server`, `tui`.
+
+Frontends get history page by page: `Attach` returns the newest messages (100, fewer if they exceed about 1 MiB) and `Messages` returns the page before a given message; the TUI loads older pages as you scroll up. Images reach frontends as stubs (mime, size and an `id`, no bytes); `GetImage` returns the bytes for an id.

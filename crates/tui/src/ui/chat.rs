@@ -364,6 +364,21 @@ fn layout(view: &mut SessionView, env: &Env<'_>, w: usize, compact: bool) {
         cache.retain(|k, _| keep.contains(k));
     }
     offsets.push(total);
+    // Older messages loaded above: keep the same content on screen (tiles have no separator
+    // above the first message, so the old first one gained a row).
+    let shift = chat.ids.first().and_then(|old| ids.iter().position(|id| id == old)).filter(|&k| k > 0).map_or(0, |k| offsets[k] + usize::from(compact));
+    if shift > 0 {
+        chat.pos += shift as f64;
+        chat.target += shift as f64;
+        chat.last_total += shift;
+        if let Some(s) = &mut chat.sel {
+            s.anchor.0 += shift;
+            s.head.0 += shift;
+        }
+        if let Some(p) = &mut chat.press {
+            p.0 += shift;
+        }
+    }
     chat.offsets = offsets;
     chat.ids = ids;
     chat.animating = animating;

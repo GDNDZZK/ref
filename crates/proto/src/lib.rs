@@ -277,13 +277,89 @@ impl Message {
         }
         out
     }
+
+    /// Replaces every image by a stub (see [`ImageData`]).
+    pub fn strip_image_data(&mut self) {
+        for (i, p) in self.parts.iter_mut().enumerate() {
+            p.strip_image_data(&self.id, i);
+        }
+    }
+
+    /// Images attached to a prompt (`Image` parts) with their names, in order.
+    pub fn prompt_images(&self) -> Vec<NamedImage> {
+        self.parts
+            .iter()
+            .filter_map(|p| match p {
+                Part::Image { image, name } => Some(NamedImage { image: image.clone(), name: name.clone() }),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The image a stub id (see [`ImageData::id`]) of this message points to.
+    pub fn image(&self, image_id: &str) -> Option<&ImageData> {
+        let mut it = image_id.rsplitn(3, ':');
+        let (n, part, msg) = (it.next()?.parse::<usize>().ok()?, it.next()?.parse::<usize>().ok()?, it.next()?);
+        if msg != self.id {
+            return None;
+        }
+        match self.parts.get(part)? {
+            Part::Image { image, .. } if n == 0 => Some(image),
+            Part::Tool { images, .. } => images.get(n),
+            _ => None,
+        }
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Message id part of an image stub id (see [`ImageData::id`]).
+pub fn image_message_id(image_id: &str) -> Option<&str> {
+    image_id.rsplitn(3, ':').nth(2)
+}
+
+/// Frontends never receive image bytes in messages: the server replaces each image by a stub
+/// (empty `data`, with `id` and `size`) to keep snapshots and events small. `GetImage` with
+/// the `id` returns the bytes; `Undo` / `RemoveQueued` return those of the prompt they remove.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ImageData {
     pub mime: String,
-    /// Base64 (standard alphabet, no data: prefix).
+    /// Base64 (standard alphabet, no data: prefix). Empty in stubs.
     pub data: String,
+    /// Stubs only: opaque id for `GetImage` (`<message id>:<part index>:<image index>`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// Stubs only: decoded size in bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+}
+
+impl ImageData {
+    pub fn new(mime: impl Into<String>, data: impl Into<String>) -> Self {
+        ImageData { mime: mime.into(), data: data.into(), id: None, size: None }
+    }
+
+    /// True if the bytes were left out (see the type docs).
+    pub fn is_stub(&self) -> bool {
+        self.data.is_empty()
+    }
+
+    /// Stub of this image with the given id.
+    fn make_stub(&mut self, id: String) {
+        if !self.is_stub() {
+            let pad = self.data.bytes().rev().take_while(|&b| b == b'=').count();
+            self.size = Some((self.data.len() / 4 * 3).saturating_sub(pad) as u64);
+            self.data = String::new();
+        }
+        self.id = Some(id);
+    }
+}
+
+/// An image with its optional file name, as returned by `Undo` / `RemoveQueued`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NamedImage {
+    #[serde(flatten)]
+    pub image: ImageData,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -362,6 +438,21 @@ pub enum Part {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         provider_data: Option<Value>,
     },
+}
+
+impl Part {
+    /// Replaces the images of part `index` of message `message_id` by stubs (see [`ImageData`]).
+    pub fn strip_image_data(&mut self, message_id: &str, index: usize) {
+        match self {
+            Part::Image { image, .. } => image.make_stub(format!("{message_id}:{index}:0")),
+            Part::Tool { images, .. } => {
+                for (n, i) in images.iter_mut().enumerate() {
+                    i.make_stub(format!("{message_id}:{index}:{n}"));
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -454,7 +545,11 @@ pub struct ServerConfigInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionSnapshot {
     pub info: SessionInfo,
+    /// The newest messages (one page, see `Attach`); older ones via `Messages`.
     pub messages: Vec<Message>,
+    /// Older messages exist before `messages[0]`.
+    #[serde(default)]
+    pub more_before: bool,
     pub pending_permissions: Vec<PermissionRequest>,
     /// Messages waiting in the session's queue (not yet in `messages`), any source; human
     /// prompts are removable with `RemoveQueued`.
@@ -509,8 +604,25 @@ pub enum Request {
     },
     /// Attach to a session (loading it from disk if necessary).
     /// `foreground = true` counts as a direct connection; `false` = watch only.
-    /// -> `{snapshot: SessionSnapshot}`, then events stream.
-    Attach { session_id: String, foreground: bool },
+    /// -> `{snapshot: SessionSnapshot}`, then events stream. The snapshot holds the newest
+    /// `limit` messages (default and max: see `Messages`), fewer if they are large.
+    Attach {
+        session_id: String,
+        foreground: bool,
+        #[serde(default)]
+        limit: Option<u32>,
+    },
+    /// A page of older messages: up to `limit` (default 100, max 1000; fewer once the page
+    /// exceeds about 1 MiB) ending right before message `before`.
+    /// -> `{messages: [Message], more_before}`
+    Messages {
+        session_id: String,
+        before: String,
+        #[serde(default)]
+        limit: Option<u32>,
+    },
+    /// Bytes of an image stub (see `ImageData`). -> `{image: ImageData}`
+    GetImage { session_id: String, image_id: String },
     Detach { session_id: String },
     /// Subscribe to every live background session (split view). -> `{sessions: [SessionInfo]}`
     WatchAll { enabled: bool },
@@ -522,8 +634,8 @@ pub enum Request {
         #[serde(default)]
         images: Vec<ImageData>,
     },
-    /// Withdraw a queued (not yet delivered) message. -> `{removed}`; false when it was already
-    /// delivered (or is unknown).
+    /// Withdraw a queued (not yet delivered) message. -> `{removed, text, images: [NamedImage]}`;
+    /// `removed` is false when it was already delivered (or is unknown).
     RemoveQueued { session_id: String, message_id: String },
     /// Run `!command` on behalf of the user; output added to the conversation.
     Shell { session_id: String, command: String },
@@ -548,7 +660,8 @@ pub enum Request {
     /// Manual compaction (/compact).
     Compact { session_id: String },
     /// Remove the last human prompt and everything after it — or, with `message_id`, that
-    /// message and everything after it. Files are not restored. -> `{text}` of the removed prompt.
+    /// message and everything after it. Files are not restored. -> `{text, images: [NamedImage]}`
+    /// of the removed prompt (both empty unless it was a human prompt).
     Undo {
         session_id: String,
         #[serde(default)]
@@ -637,8 +750,13 @@ pub enum SessionEvent {
     Delta { message_id: String, index: usize, delta: Delta },
     /// Message removed (undo, retry reset).
     Removed { message_id: String },
-    /// Whole history replaced (compaction, undo) — client should replace its list.
-    Reset { messages: Vec<Message> },
+    /// Whole history replaced (compaction, undo) — client should replace its list. Like a
+    /// snapshot this carries only the newest page.
+    Reset {
+        messages: Vec<Message>,
+        #[serde(default)]
+        more_before: bool,
+    },
     Permission { request: PermissionRequest },
     PermissionResolved { call_id: String },
     /// The session's queue changed: every message (any source) still waiting for the next safe

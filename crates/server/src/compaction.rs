@@ -63,7 +63,7 @@ pub fn insert_summary(hub: &Arc<Hub>, s: &Arc<Session>, prep: &Prep, summary: &s
     if at == len {
         hub.emit(&s.id, SessionEvent::Message { message: msg });
     } else {
-        hub.emit(&s.id, SessionEvent::Reset { messages: st.messages.clone() });
+        hub.emit(&s.id, st.reset_event());
     }
     // Estimated from the new effective context until the next real usage arrives.
     let chat = crate::convert::to_chat(&st.messages, prep.model.images);

@@ -35,6 +35,7 @@ pub(crate) fn image() -> ImageData {
     ImageData {
         mime: "image/png".into(),
         data: "iVBORw0KGgo=".into(),
+        ..Default::default()
     }
 }
 

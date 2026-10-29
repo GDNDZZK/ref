@@ -147,7 +147,7 @@ impl Mock {
                     }
                 }
                 SessionEvent::Removed { message_id } => s.messages.retain(|m| &m.id != message_id),
-                SessionEvent::Reset { messages } => s.messages = messages.clone(),
+                SessionEvent::Reset { messages, .. } => s.messages = messages.clone(),
                 SessionEvent::Permission { request } => s.perms.push(request.clone()),
                 SessionEvent::PermissionResolved { call_id } => s.perms.retain(|p| &p.call_id != call_id),
                 _ => {}
@@ -604,7 +604,7 @@ impl Mock {
                 self.ok(id, json!({ "session": i }));
                 self.broadcast_sessions();
             }
-            Request::Attach { session_id, foreground } => {
+            Request::Attach { session_id, foreground, .. } => {
                 // History-only session → load it live.
                 let hist = {
                     let mut w = self.w.lock().unwrap();
@@ -629,7 +629,7 @@ impl Mock {
                             if foreground {
                                 s.info.attached += 1;
                             }
-                            Some(SessionSnapshot { info: s.info.clone(), messages: s.messages.clone(), pending_permissions: s.perms.clone(), queued: s.queue.clone() })
+                            Some(SessionSnapshot { info: s.info.clone(), messages: s.messages.clone(), more_before: false, pending_permissions: s.perms.clone(), queued: s.queue.clone() })
                         }
                         None => None,
                     }
@@ -840,7 +840,7 @@ impl Mock {
                 });
                 match r.flatten() {
                     Some((text, msgs)) => {
-                        self.emit(&session_id, SessionEvent::Reset { messages: msgs });
+                        self.emit(&session_id, SessionEvent::Reset { messages: msgs, more_before: false });
                         self.ok(id, json!({ "text": text }));
                     }
                     None => self.err(id, "nothing to undo"),
@@ -876,6 +876,9 @@ impl Mock {
                 self.ok(id, json!({ "files": files }));
             }
             Request::Export { path, .. } => self.ok(id, json!({ "path": path })),
+            // The demo sends whole histories with image bytes.
+            Request::Messages { .. } => self.ok(id, json!({ "messages": [], "more_before": false })),
+            Request::GetImage { .. } => self.err(id, "Image not found"),
             Request::Shutdown => self.ok(id, json!({})),
             Request::McpStatus { .. } => {
                 let started = {

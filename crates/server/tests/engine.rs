@@ -587,12 +587,14 @@ async fn remove_queued_message_before_delivery() {
     assert_eq!(s.lock().queue.front().map(|m| m.id.clone()), Some(id.clone()));
     assert!(hub.store.load(&s.id).unwrap().messages.iter().any(|m| m.id == id), "queued prompt saved");
     // Attach snapshots list it (frontends rebuild their queued rows from this).
-    let attach = ref_proto::Request::Attach { session_id: s.id.clone(), foreground: false };
+    let attach = ref_proto::Request::Attach { session_id: s.id.clone(), foreground: false, limit: None };
     let snap = ref_server::api::handle(&hub, &conn, attach.clone()).await.unwrap();
     assert_eq!(snap["snapshot"]["queued"][0]["id"], id.as_str());
     let remove = |id: &str| ref_proto::Request::RemoveQueued { session_id: s.id.clone(), message_id: id.into() };
     let r = ref_server::api::handle(&hub, &conn, remove(&id)).await.unwrap();
     assert_eq!(r["removed"], true);
+    assert_eq!(r["text"], "withdrawn while busy");
+    assert_eq!(r["images"], json!([]));
     assert!(s.lock().queue.is_empty());
     let snap = ref_server::api::handle(&hub, &conn, attach).await.unwrap();
     assert_eq!(snap["snapshot"]["queued"], json!([]));
@@ -996,7 +998,7 @@ async fn queue_changes_reach_attached_connection() {
     assert!(q[1][0].0.contains("from the worker") && matches!(&q[1][0].1, MessageSource::Peer { from_name, msg_id, .. } if from_name == "worker" && *msg_id == mid));
     assert_eq!(q[1][1], ("and me".to_string(), MessageSource::Human));
     // The snapshot lists every source too.
-    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::Attach { session_id: s.id.clone(), foreground: true }).await.unwrap();
+    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::Attach { session_id: s.id.clone(), foreground: true, limit: None }).await.unwrap();
     assert_eq!(r["snapshot"]["queued"].as_array().unwrap().len(), 2);
     // Abort: the queue is delivered at the end of the run and announced as empty.
     let _ = conn.out.drain();
@@ -1004,4 +1006,147 @@ async fn queue_changes_reach_attached_connection() {
     wait_idle(&s).await;
     let q = queues(&conn);
     assert!(q.last().is_some_and(|l| l.is_empty()), "{q:?}");
+}
+
+#[tokio::test]
+async fn frontends_get_image_stubs_and_undo_returns_the_bytes() {
+    let m = mock(Arc::new(|n, _| match n {
+        0 => Reply::Tools(vec![tool("c1", "read", json!({"purpose": "p", "path": "shot.png"}))]),
+        _ => Reply::Text("seen".into()),
+    }))
+    .await;
+    let mut cfg = config(&m.url);
+    cfg.providers.get_mut("mock").unwrap().models.get_mut("m").unwrap().images = true;
+    let (hub, work) = hub(cfg, "image-stubs");
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    png.extend_from_slice(b"tool screenshot bytes");
+    std::fs::write(work.join("shot.png"), &png).unwrap();
+    let s = session(&hub, &work, "main", "build").await;
+    let conn = hub.add_conn();
+    {
+        let mut c = conn.lock();
+        c.hello = true;
+        c.fg.insert(s.id.clone());
+    }
+    let pasted = ref_proto::ImageData { mime: "image/png".into(), data: "UGFzdGVkSW1hZ2VCeXRlcw==".into(), ..Default::default() };
+    let req = ref_proto::Request::Prompt { session_id: s.id.clone(), text: "look [Image 1]".into(), images: vec![pasted.clone()] };
+    ref_server::api::handle(&hub, &conn, req).await.unwrap();
+    wait_idle(&s).await;
+    // The session keeps the bytes (the model gets them) ...
+    let tool_img = tool_parts(&s)
+        .into_iter()
+        .find_map(|p| match p {
+            Part::Tool { images, .. } => images.into_iter().next(),
+            _ => None,
+        })
+        .expect("read returned the image");
+    assert!(!tool_img.data.is_empty());
+    let bodies = m.bodies();
+    assert!(bodies.iter().any(|b| b.to_string().contains(&pasted.data)));
+    assert!(bodies.iter().any(|b| b.to_string().contains(&tool_img.data)));
+    // ... but neither events nor the snapshot carry them to frontends.
+    let events = serde_json::to_string(&conn.out.drain()).unwrap();
+    assert!(events.contains("image/png"), "image stubs are still sent");
+    assert!(!events.contains(&pasted.data) && !events.contains(&tool_img.data));
+    let snap = ref_server::api::handle(&hub, &conn, ref_proto::Request::Attach { session_id: s.id.clone(), foreground: true, limit: None }).await.unwrap();
+    // Stubs carry an id (and the decoded size); GetImage returns the bytes.
+    let msgs: Vec<ref_proto::Message> = serde_json::from_value(snap["snapshot"]["messages"].clone()).unwrap();
+    let stubs: Vec<ref_proto::ImageData> = msgs
+        .iter()
+        .flat_map(|m| m.parts.iter())
+        .flat_map(|p| match p {
+            Part::Image { image, .. } => vec![image.clone()],
+            Part::Tool { images, .. } => images.clone(),
+            _ => vec![],
+        })
+        .collect();
+    assert_eq!(stubs.len(), 2);
+    assert!(stubs.iter().all(|i| i.is_stub() && i.id.is_some()));
+    assert_eq!(stubs[0].size, Some(16), "\"PastedImageBytes\"");
+    assert_eq!(stubs[1].size, Some(png.len() as u64));
+    let get = |id: &str| ref_proto::Request::GetImage { session_id: s.id.clone(), image_id: id.into() };
+    for (stub, data) in stubs.iter().zip([&pasted.data, &tool_img.data]) {
+        let r = ref_server::api::handle(&hub, &conn, get(stub.id.as_deref().unwrap())).await.unwrap();
+        assert_eq!(r["image"]["data"], data.as_str());
+        assert_eq!(r["image"]["mime"], "image/png");
+    }
+    assert!(ref_server::api::handle(&hub, &conn, get("nonsense")).await.is_err());
+    assert!(ref_server::api::handle(&hub, &conn, get(&format!("{}:0:5", msgs[0].id))).await.is_err());
+    let snap = snap.to_string();
+    assert!(snap.contains("image/png") && !snap.contains(&pasted.data) && !snap.contains(&tool_img.data));
+    assert!(hub.store.load(&s.id).unwrap().messages.iter().any(|m| serde_json::to_string(m).unwrap().contains(&pasted.data)), "saved with bytes");
+    // Session closed: the image is read from the store.
+    ref_server::ops::close_session(&hub, &s).await;
+    assert!(hub.session(&s.id).is_none());
+    let r = ref_server::api::handle(&hub, &conn, get(stubs[1].id.as_deref().unwrap())).await.unwrap();
+    assert_eq!(r["image"]["data"], tool_img.data.as_str());
+    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::Attach { session_id: s.id.clone(), foreground: true, limit: None }).await.unwrap();
+    assert_eq!(r["snapshot"]["info"]["id"], s.id.as_str());
+    let s = hub.session(&s.id).expect("live again");
+    // A stub sent back as a prompt image is rejected.
+    let stub = ref_proto::ImageData { mime: "image/png".into(), data: String::new(), ..Default::default() };
+    let e = ref_server::api::handle(&hub, &conn, ref_proto::Request::Prompt { session_id: s.id.clone(), text: "x".into(), images: vec![stub] }).await;
+    assert!(e.is_err());
+    // Undo returns the prompt with its image bytes.
+    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::Undo { session_id: s.id.clone(), message_id: None }).await.unwrap();
+    assert_eq!(r["text"], "look [Image 1]");
+    assert_eq!(r["images"], json!([{"mime": "image/png", "data": pasted.data}]));
+}
+
+#[tokio::test]
+async fn history_is_served_in_pages() {
+    let m = mock(Arc::new(|_, _| Reply::Text("ok".into()))).await;
+    let (hub, work) = hub(config(&m.url), "pages");
+    let s = session(&hub, &work, "main", "build").await;
+    let conn = hub.add_conn();
+    conn.lock().hello = true;
+    {
+        let mut st = s.lock();
+        for i in 0..250 {
+            st.messages.push(ref_server::session::user_message(MessageSource::Human, format!("p{i}"), vec![]));
+        }
+    }
+    let texts = |v: &serde_json::Value| -> Vec<String> {
+        let msgs: Vec<ref_proto::Message> = serde_json::from_value(v.clone()).unwrap();
+        msgs.iter().map(|m| m.raw_text()).collect()
+    };
+    let attach = |limit| ref_proto::Request::Attach { session_id: s.id.clone(), foreground: true, limit };
+    // Newest page first (default 100).
+    let r = ref_server::api::handle(&hub, &conn, attach(None)).await.unwrap();
+    let page = texts(&r["snapshot"]["messages"]);
+    assert_eq!((page.len(), page[0].as_str(), page[99].as_str()), (100, "p150", "p249"));
+    assert_eq!(r["snapshot"]["more_before"], true);
+    // Older pages before a given message, down to the start.
+    let first_id = |msgs: &serde_json::Value| msgs[0]["id"].as_str().unwrap().to_string();
+    let older = |before: String, limit| ref_proto::Request::Messages { session_id: s.id.clone(), before, limit };
+    let r2 = ref_server::api::handle(&hub, &conn, older(first_id(&r["snapshot"]["messages"]), None)).await.unwrap();
+    let page = texts(&r2["messages"]);
+    assert_eq!((page.len(), page[0].as_str(), page[99].as_str()), (100, "p50", "p149"));
+    assert_eq!(r2["more_before"], true);
+    let r3 = ref_server::api::handle(&hub, &conn, older(first_id(&r2["messages"]), Some(500))).await.unwrap();
+    assert_eq!(texts(&r3["messages"]).len(), 50);
+    assert_eq!(r3["more_before"], false);
+    // Limits are clamped; unknown anchors are errors.
+    let r = ref_server::api::handle(&hub, &conn, attach(Some(0))).await.unwrap();
+    assert_eq!(texts(&r["snapshot"]["messages"]), ["p249"]);
+    assert!(ref_server::api::handle(&hub, &conn, older("nope".into(), None)).await.is_err());
+    // Large messages: the page stops at about 1 MiB.
+    {
+        let mut st = s.lock();
+        for i in 0..20 {
+            st.messages.push(ref_server::session::user_message(MessageSource::Human, format!("big{i} {}", "x".repeat(200_000)), vec![]));
+        }
+    }
+    let r = ref_server::api::handle(&hub, &conn, attach(None)).await.unwrap();
+    let n = r["snapshot"]["messages"].as_array().unwrap().len();
+    assert!((5..=7).contains(&n), "{n}");
+    // Reset events (undo) carry the newest page only.
+    let _ = conn.out.drain();
+    ref_server::api::handle(&hub, &conn, ref_proto::Request::Undo { session_id: s.id.clone(), message_id: None }).await.unwrap();
+    let reset = conn.out.drain().into_iter().find_map(|f| match f {
+        ref_proto::ServerFrame::Event { event: SessionEvent::Reset { messages, more_before }, .. } => Some((messages.len(), more_before)),
+        _ => None,
+    });
+    let (len, more) = reset.expect("reset event");
+    assert!(len < 269 && more, "{len}");
 }

@@ -75,7 +75,7 @@ async fn ws_smoke() {
     let (ok, _, err) = response(&mut ws, 3, &mut other).await;
     assert!(!ok && err.unwrap().contains("already exists"));
 
-    send(&mut ws, 4, Request::Attach { session_id: sid.clone(), foreground: true }).await;
+    send(&mut ws, 4, Request::Attach { session_id: sid.clone(), foreground: true, limit: None }).await;
     let (ok, res, _) = response(&mut ws, 4, &mut other).await;
     assert!(ok);
     assert_eq!(res["snapshot"]["info"]["attached"], 1);
@@ -122,7 +122,7 @@ async fn ws_smoke() {
     assert!(r.hub.sessions().is_empty());
 
     // Attach reloads from history.
-    send(&mut ws, 10, Request::Attach { session_id: sid.clone(), foreground: false }).await;
+    send(&mut ws, 10, Request::Attach { session_id: sid.clone(), foreground: false, limit: None }).await;
     let (ok, res, _) = response(&mut ws, 10, &mut other).await;
     assert!(ok);
     assert_eq!(res["snapshot"]["messages"].as_array().unwrap().len(), 2);

@@ -2,7 +2,7 @@
 
 use crate::store::Persisted;
 use ref_config::Config;
-use ref_proto::{Message, MessageSource, Part, PermissionRequest, Role, SessionInfo, SessionStatus, ToolState};
+use ref_proto::{Message, MessageSource, Part, PermissionRequest, Role, SessionEvent, SessionInfo, SessionStatus, ToolState};
 use ref_tools::HashStore;
 use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -133,6 +133,39 @@ impl SessionState {
     pub fn find_message(&self, id: &str) -> Option<usize> {
         self.messages.iter().rposition(|m| m.id == id)
     }
+
+    /// `Reset` event with the newest page of messages.
+    pub fn reset_event(&self) -> SessionEvent {
+        let (messages, more_before) = page(&self.messages, self.messages.len(), None);
+        SessionEvent::Reset { messages, more_before }
+    }
+}
+
+/// Messages per page when the client does not say (`Attach`, `Messages`, `Reset`).
+pub const PAGE_DEFAULT: usize = 100;
+pub const PAGE_MAX: usize = 1000;
+/// A page stops growing once its serialized size (images as stubs) reaches this.
+pub const PAGE_BYTES: usize = 1 << 20;
+
+/// The newest messages of `messages[..end]` that fit one page, with images as stubs, and
+/// whether older messages remain. At least one message unless `end` is 0.
+pub fn page(messages: &[Message], end: usize, limit: Option<u32>) -> (Vec<Message>, bool) {
+    let limit = limit.map_or(PAGE_DEFAULT, |l| (l as usize).clamp(1, PAGE_MAX));
+    let end = end.min(messages.len());
+    let mut out = Vec::new();
+    let mut bytes = 0;
+    for m in messages[..end].iter().rev() {
+        if out.len() >= limit || bytes >= PAGE_BYTES {
+            break;
+        }
+        let mut m = m.clone();
+        m.strip_image_data();
+        bytes += serde_json::to_string(&m).map_or(0, |s| s.len());
+        out.push(m);
+    }
+    out.reverse();
+    let more = end > out.len();
+    (out, more)
 }
 
 /// Marks unfinished tool parts as cancelled (used after loading from disk / abort).

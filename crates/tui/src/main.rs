@@ -222,6 +222,7 @@ async fn run(mock: bool, target: Target, cwd: String, plan: InitPlan) -> anyhow:
                 terminal.draw(|f| render::draw(f, &mut app))?;
                 last_draw = std::time::Instant::now();
                 app.dirty = false;
+                app.load_older();
                 let title = app.terminal_title();
                 if app.last_title.as_deref() != Some(title.as_str()) {
                     let _ = execute!(std::io::stdout(), crossterm::terminal::SetTitle(&title));

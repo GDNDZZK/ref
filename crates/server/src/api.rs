@@ -3,7 +3,7 @@
 use crate::hub::{Conn, Hub};
 use crate::session::{Session, user_message};
 use ref_proto::{
-    AgentInfo, CommandInfo, Message, MessageSource, ModelInfo, Part, Request, Role, ServerConfigInfo, SessionEvent,
+    AgentInfo, CommandInfo, Message, MessageSource, ModelInfo, Part, Request, Role, ServerConfigInfo,
     SessionInfo, SessionSnapshot,
 };
 use serde_json::{Value, json};
@@ -74,7 +74,7 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             .await?;
             Ok(json!({ "session": s.info() }))
         }
-        Request::Attach { session_id, foreground } => {
+        Request::Attach { session_id, foreground, limit } => {
             let s = crate::ops::get_or_load(hub, &session_id).await?;
             let snapshot = {
                 let mut st = s.lock();
@@ -90,14 +90,39 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
                     }
                 }
                 hub.emit_info(&st);
-                SessionSnapshot {
-                    info: st.info.clone(),
-                    messages: st.messages.clone(),
-                    pending_permissions: st.perms.iter().map(|p| p.request.clone()).collect(),
-                    queued: st.queue.iter().cloned().collect(),
-                }
+                let (messages, more_before) = crate::session::page(&st.messages, st.messages.len(), limit);
+                let mut queued: Vec<Message> = st.queue.iter().cloned().collect();
+                queued.iter_mut().for_each(Message::strip_image_data);
+                SessionSnapshot { info: st.info.clone(), messages, more_before, pending_permissions: st.perms.iter().map(|p| p.request.clone()).collect(), queued }
             };
             Ok(json!({ "snapshot": snapshot }))
+        }
+        Request::Messages { session_id, before, limit } => {
+            let s = live(hub, &session_id)?;
+            let st = s.lock();
+            let end = st.find_message(&before).ok_or_else(|| "That message is no longer in the conversation.".to_string())?;
+            let (messages, more_before) = crate::session::page(&st.messages, end, limit);
+            Ok(json!({ "messages": messages, "more_before": more_before }))
+        }
+        Request::GetImage { session_id, image_id } => {
+            let mid = ref_proto::image_message_id(&image_id).ok_or_else(|| format!("Invalid image id: {image_id}"))?.to_string();
+            fn find<'a>(mut msgs: impl Iterator<Item = &'a Message>, mid: &str, image_id: &str) -> Option<ref_proto::ImageData> {
+                msgs.find(|m| m.id == mid).and_then(|m| m.image(image_id)).filter(|i| !i.is_stub()).cloned()
+            }
+            let image = match hub.session(&session_id) {
+                Some(s) => {
+                    let st = s.lock();
+                    find(st.messages.iter().rev().chain(st.queue.iter()), &mid, &image_id)
+                }
+                None => {
+                    let store = hub.store.clone();
+                    let id = session_id.clone();
+                    let p = tokio::task::spawn_blocking(move || store.load(&id)).await.map_err(|e| e.to_string())??;
+                    find(p.messages.iter().rev(), &mid, &image_id)
+                }
+            };
+            let image = image.ok_or_else(|| "Image not found (the message may have been removed).".to_string())?;
+            Ok(json!({ "image": image }))
         }
         Request::Detach { session_id } => {
             if let Some(s) = hub.session(&session_id) {
@@ -123,6 +148,9 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             if text.trim().is_empty() && images.is_empty() {
                 return Err("Prompt is empty.".into());
             }
+            if images.iter().any(ref_proto::ImageData::is_stub) {
+                return Err("An attached image has no data.".into());
+            }
             reload_config(hub, &s).await;
             let msg = user_message(MessageSource::Human, text, images);
             let id = msg.id.clone();
@@ -131,7 +159,10 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
         }
         Request::RemoveQueued { session_id, message_id } => {
             let s = live(hub, &session_id)?;
-            Ok(json!({ "removed": crate::engine::remove_queued(hub, &s, &message_id) }))
+            Ok(match crate::engine::remove_queued(hub, &s, &message_id) {
+                Some(m) => json!({ "removed": true, "text": m.raw_text(), "images": m.prompt_images() }),
+                None => json!({ "removed": false }),
+            })
         }
         Request::Shell { session_id, command } => {
             let s = live(hub, &session_id)?;
@@ -244,7 +275,7 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
                     return Err("The session did not stop in time.".into());
                 }
             }
-            let text = {
+            let (text, images) = {
                 let mut st = s.lock();
                 let i = match &message_id {
                     Some(id) => st.find_message(id).ok_or_else(|| "That message is no longer in the conversation.".to_string())?,
@@ -255,19 +286,20 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
                         .ok_or_else(|| "Nothing to undo.".to_string())?,
                 };
                 // Only human prompts go back into the editor.
-                let text = if st.messages[i].source == MessageSource::Human { st.messages[i].raw_text() } else { String::new() };
+                let m = &st.messages[i];
+                let (text, images) = if m.source == MessageSource::Human { (m.raw_text(), m.prompt_images()) } else { (String::new(), Vec::new()) };
                 st.messages.truncate(i);
                 if !st.queue.is_empty() {
                     st.queue.clear();
                     crate::engine::emit_queue(hub, &s, &st);
                 }
                 st.info.updated_at = ref_proto::now_ms();
-                hub.emit(&s.id, SessionEvent::Reset { messages: st.messages.clone() });
+                hub.emit(&s.id, st.reset_event());
                 hub.emit_info(&st);
-                text
+                (text, images)
             };
             crate::ops::persist(hub, &s);
-            Ok(json!({ "text": text }))
+            Ok(json!({ "text": text, "images": images }))
         }
         Request::Close { session_id } => {
             let s = live(hub, &session_id)?;

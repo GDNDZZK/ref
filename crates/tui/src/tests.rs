@@ -151,7 +151,7 @@ pub fn test_app(streaming: bool) -> App {
         i.status = SessionStatus::Running;
     }
     let mut v = SessionView::new(i.clone(), true);
-    v.load_snapshot(SessionSnapshot { info: i, messages: transcript(streaming), pending_permissions: vec![], queued: vec![] });
+    v.load_snapshot(SessionSnapshot { info: i, messages: transcript(streaming), more_before: false, pending_permissions: vec![], queued: vec![] });
     app.views.insert("ses_test".into(), v);
     app.current = Some("ses_test".into());
     app
@@ -294,7 +294,7 @@ fn split_view_snapshot() {
         inf.attached = 0;
         inf.status = if i == 0 { SessionStatus::Busy } else { SessionStatus::Idle };
         let mut v = SessionView::new(inf.clone(), false);
-        v.load_snapshot(SessionSnapshot { info: inf.clone(), messages: transcript(i == 0), pending_permissions: vec![], queued: vec![] });
+        v.load_snapshot(SessionSnapshot { info: inf.clone(), messages: transcript(i == 0), more_before: false, pending_permissions: vec![], queued: vec![] });
         app.views.insert(inf.id.clone(), v);
         live.push(inf);
     }
@@ -671,7 +671,7 @@ fn long_transcript_render_perf() {
                 msgs.push(m);
             }
         }
-        v.apply(SessionEvent::Reset { messages: msgs });
+        v.apply(SessionEvent::Reset { more_before: false, messages: msgs });
     }
     let t0 = std::time::Instant::now();
     render(&mut app, 120, 40);
@@ -701,7 +701,7 @@ fn shell_mode_and_image_token() {
     crate::input::handle(&mut app, key(KeyCode::Esc, KeyModifiers::NONE));
     assert!(!app.shell_mode);
     app.editor.clear();
-    app.editor.attach_image(ImageData { mime: "image/png".into(), data: "AAAA".into() }, Some("clipboard".into()));
+    app.editor.attach_image(ImageData { mime: "image/png".into(), data: "AAAA".into(), ..Default::default() }, Some("clipboard".into()));
     type_str(&mut app, "what is this?");
     let (_, s) = render(&mut app, 100, 30);
     assert!(s.contains("[Image 1] what is this?"));
@@ -816,7 +816,7 @@ fn fail_pending(app: &mut App, pred: impl Fn(&crate::app::Pending) -> bool, err:
 fn reattach_failure_of_empty_session_starts_new_one() {
     use crate::app::Pending;
     let mut app = test_app(false);
-    app.views.get_mut("ses_test").unwrap().apply(SessionEvent::Reset { messages: vec![] });
+    app.views.get_mut("ses_test").unwrap().apply(SessionEvent::Reset { more_before: false, messages: vec![] });
     app.on_net(crate::net::NetEvent::Disconnected("connection closed".into()));
     app.on_net(crate::net::NetEvent::Connected);
     fail_pending(&mut app, |p| matches!(p, Pending::Attach { fg: true, .. }), "session not found");
@@ -1028,21 +1028,22 @@ fn undo_button_hit_zone_and_flow() {
 fn undo_puts_prompt_and_images_back_into_editor() {
     use crate::app::Pending;
     let mut app = test_app(false);
-    let png = ImageData { mime: "image/png".into(), data: "iVBO".into() };
+    // The transcript only has a stub; the bytes come with the undo response.
+    let stub = ImageData { mime: "image/png".into(), data: String::new(), ..Default::default() };
     let mut m3 = msg("m3", Role::User, MessageSource::Human, 0, "look at [Image 1]");
-    m3.parts.push(Part::Image { image: png, name: Some("shot.png".into()) });
+    m3.parts.push(Part::Image { image: stub, name: Some("shot.png".into()) });
     let v = app.views.get_mut("ses_test").unwrap();
     v.apply(SessionEvent::Message { message: m3 });
     v.apply(SessionEvent::Message { message: msg("m4", Role::Assistant, MessageSource::Human, 0, "ok") });
     v.queued.push(crate::state::Queued::new("stale".into(), vec![]));
-    let respond = |app: &mut App, text: &str| {
+    let respond = |app: &mut App, result: serde_json::Value| {
         let id = *app.pending.iter().find(|(_, p)| matches!(p, Pending::Undo { .. })).map(|(k, _)| k).expect("undo request");
-        app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response { id, ok: true, result: json!({ "text": text }), error: None }));
+        app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response { id, ok: true, result, error: None }));
     };
     // /undo (= ctrl+x u): the last human prompt, with its image.
     type_str(&mut app, "/undo");
     crate::input::handle(&mut app, key(crossterm::event::KeyCode::Enter, crossterm::event::KeyModifiers::NONE));
-    respond(&mut app, "look at [Image 1]");
+    respond(&mut app, json!({"text": "look at [Image 1]", "images": [{"mime": "image/png", "data": "iVBO", "name": "shot.png"}]}));
     assert_eq!(app.editor.text, "look at [Image 1]");
     let imgs: Vec<(&str, Option<&str>)> = app.editor.images.iter().map(|a| (a.image.data.as_str(), a.name.as_deref())).collect();
     assert_eq!(imgs, [("iVBO", Some("shot.png"))]);
@@ -1050,8 +1051,8 @@ fn undo_puts_prompt_and_images_back_into_editor() {
     assert!(app.views["ses_test"].queued.is_empty(), "undo clears the server queue");
     // Undo from an earlier message: that prompt comes back (appended), not the last one.
     app.undo_message("ses_test", "m1");
-    assert!(app.pending.values().any(|p| matches!(p, Pending::Undo { count: Some(4), images, .. } if images.is_empty())));
-    respond(&mut app, "Please fix the off-by-one");
+    assert!(app.pending.values().any(|p| matches!(p, Pending::Undo { count: Some(4), .. })));
+    respond(&mut app, json!({"text": "Please fix the off-by-one", "images": []}));
     assert_eq!(app.editor.text, "look at [Image 1]\n\nPlease fix the off-by-one");
     assert_eq!(app.editor.images.len(), 1);
 }
@@ -1097,7 +1098,7 @@ fn queued_prompt_remove_button_and_already_sent_race() {
     assert!(!s.contains("queued first queued") && !s.contains("✕ remove"));
     app.editor.clear();
     // Images come back with it (empty editor: filled).
-    let png = ImageData { mime: "image/png".into(), data: "iVBO".into() };
+    let png = ImageData { mime: "image/png".into(), data: "iVBO".into(), ..Default::default() };
     app.send_prompt(&sid, "see [Image 1]".into(), vec![png]);
     respond(&mut app, &|p| matches!(p, Pending::Prompt { .. }), json!({"queued": true, "message_id": "q0"}));
     click_remove(&mut app, "see [Image 1]");
@@ -1349,7 +1350,7 @@ fn running_tool_spinner_animates_in_tiles() {
     let mut inf = bg_session("ses_bg", "worker-1", SessionStatus::Running, 0);
     inf.created_at = 1;
     let mut v = SessionView::new(inf.clone(), false);
-    v.load_snapshot(SessionSnapshot { info: inf.clone(), messages: transcript(true), pending_permissions: vec![], queued: vec![] });
+    v.load_snapshot(SessionSnapshot { info: inf.clone(), messages: transcript(true), more_before: false, pending_permissions: vec![], queued: vec![] });
     app.views.insert("ses_bg".into(), v);
     app.live = vec![inf];
     let row = |app: &mut App| render(app, 120, 30).1.lines().find(|l| l.contains("grep")).unwrap().to_string();
@@ -1405,7 +1406,7 @@ fn exit_screen_text() {
     assert_eq!(lines[5], "  Continue  ref -s ses_test");
     // Empty session: logo only, no resume line.
     let mut app = test_app(false);
-    app.views.get_mut("ses_test").unwrap().apply(SessionEvent::Reset { messages: vec![] });
+    app.views.get_mut("ses_test").unwrap().apply(SessionEvent::Reset { more_before: false, messages: vec![] });
     let t = strip_ansi(&app.epilogue().unwrap());
     assert!(t.contains("█▀▀▄") && !t.contains("Continue") && !t.contains("Session"));
     // No session at all (e.g. --watch): nothing printed.
@@ -1463,7 +1464,7 @@ fn todo_rendering_everywhere() {
     let mut inf = bg_session("ses_bg", "worker-1", SessionStatus::Busy, 0);
     inf.todos = crate::ui::todo::parse_todos(&todo_input());
     let mut v = SessionView::new(inf.clone(), false);
-    v.load_snapshot(SessionSnapshot { info: inf.clone(), messages: transcript(false), pending_permissions: vec![], queued: vec![] });
+    v.load_snapshot(SessionSnapshot { info: inf.clone(), messages: transcript(false), more_before: false, pending_permissions: vec![], queued: vec![] });
     app.views.insert("ses_bg".into(), v);
     app.live = vec![inf];
     let (_, s) = render(&mut app, 120, 30);
@@ -1747,7 +1748,7 @@ fn compacted_app() -> App {
     msgs.push(msg("m4", Role::Assistant, MessageSource::Human, ts(14, 6, 1), "Changelog updated."));
     let v = app.views.get_mut("ses_test").unwrap();
     let info = v.info.clone();
-    v.load_snapshot(SessionSnapshot { info, messages: msgs, pending_permissions: vec![], queued: vec![] });
+    v.load_snapshot(SessionSnapshot { info, messages: msgs, more_before: false, pending_permissions: vec![], queued: vec![] });
     app
 }
 
@@ -1813,7 +1814,7 @@ fn compaction_divider_keeps_old_messages_interactive() {
     let mut app = test_app(false);
     let v = app.views.get_mut("ses_test").unwrap();
     let info = v.info.clone();
-    v.load_snapshot(SessionSnapshot { info, messages: vec![msg("c1", Role::User, MessageSource::Compaction, ts(14, 5, 0), "sum")], pending_permissions: vec![], queued: vec![] });
+    v.load_snapshot(SessionSnapshot { info, messages: vec![msg("c1", Role::User, MessageSource::Compaction, ts(14, 5, 0), "sum")], more_before: false, pending_permissions: vec![], queued: vec![] });
     let (_, s) = render(&mut app, 100, 30);
     assert!(s.contains("◇ Context compacted") && !s.contains(crate::ui::message::CONTEXT_HINT));
 }
@@ -1826,7 +1827,7 @@ fn compaction_divider_in_split_tile() {
     let mut v = SessionView::new(inf.clone(), false);
     let src = compacted_app();
     let msgs = src.views["ses_test"].messages.clone();
-    v.load_snapshot(SessionSnapshot { info: inf.clone(), messages: msgs, pending_permissions: vec![], queued: vec![] });
+    v.load_snapshot(SessionSnapshot { info: inf.clone(), messages: msgs, more_before: false, pending_permissions: vec![], queued: vec![] });
     app.views.insert("ses_bg".into(), v);
     app.live = vec![inf];
     let (_, s) = render(&mut app, 120, 40);
@@ -1888,7 +1889,7 @@ fn watch_app() -> App {
         let mut inf = bg_session(id, name, SessionStatus::Idle, 0);
         inf.created_at = 10 + i as i64;
         let mut v = SessionView::new(inf.clone(), false);
-        v.load_snapshot(SessionSnapshot { info: inf.clone(), messages: long_transcript(name, 30), pending_permissions: vec![], queued: vec![] });
+        v.load_snapshot(SessionSnapshot { info: inf.clone(), messages: long_transcript(name, 30), more_before: false, pending_permissions: vec![], queued: vec![] });
         app.views.insert(id.into(), v);
         live.push(inf);
     }
@@ -2275,4 +2276,59 @@ fn queue_event_shows_messages_from_other_sessions() {
     // Delivered: the server announces the empty queue.
     ev(&mut app, vec![]);
     assert!(app.views["ses_test"].queued.is_empty());
+}
+
+#[test]
+fn history_pages_load_when_scrolled_to_the_top() {
+    use crate::app::Pending;
+    let mut app = test_app(false);
+    let sid = "ses_test";
+    let all = long_transcript("h", 60);
+    let (old, newest) = all.split_at(80);
+    let inf = app.views[sid].info.clone();
+    app.views.get_mut(sid).unwrap().load_snapshot(SessionSnapshot { info: inf, messages: newest.to_vec(), more_before: true, pending_permissions: vec![], queued: vec![] });
+    let older = |app: &App| app.pending.iter().find_map(|(id, p)| match p { Pending::Older { before, .. } => Some((*id, before.clone())), _ => None });
+    render(&mut app, 100, 30);
+    app.load_older();
+    assert!(older(&app).is_none(), "at the bottom nothing is requested");
+    // Scrolled to the top: the page before the first loaded message is requested once.
+    app.views.get_mut(sid).unwrap().chat.scroll_by(-1_000_000, false);
+    render(&mut app, 100, 30);
+    app.load_older();
+    let (id, before) = older(&app).expect("older page requested");
+    assert_eq!(before, "hu40");
+    app.load_older();
+    assert_eq!(app.pending.values().filter(|p| matches!(p, Pending::Older { .. })).count(), 1);
+    // Scrollbar column excluded: its thumb moves when content is added above.
+    let shown = |app: &mut App| render(app, 100, 30).1.lines().filter(|l| l.contains("h question") || l.contains("h answer")).map(|l| l.trim_end().trim_end_matches(['│', '┃']).to_string()).collect::<Vec<_>>();
+    let before_screen = shown(&mut app);
+    assert!(before_screen.iter().any(|l| l.contains("h question 40")), "{before_screen:?}");
+    let page = json!({ "messages": old[40..].to_vec(), "more_before": true });
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response { id, ok: true, result: page, error: None }));
+    assert_eq!(app.views[sid].messages.len(), 80);
+    assert_eq!(app.views[sid].messages[0].id, "hu20");
+    // The same content stays on screen; no new request until scrolled up again.
+    assert_eq!(shown(&mut app), before_screen);
+    app.load_older();
+    assert!(older(&app).is_none());
+    app.views.get_mut(sid).unwrap().chat.scroll_by(-1_000_000, false);
+    render(&mut app, 100, 30);
+    app.load_older();
+    let (id, before) = older(&app).expect("next page requested");
+    assert_eq!(before, "hu20");
+    // A reset in between makes the answer stale: it is dropped.
+    let v = app.views.get_mut(sid).unwrap();
+    v.apply(SessionEvent::Reset { messages: newest.to_vec(), more_before: true });
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response { id, ok: true, result: json!({ "messages": old[..40].to_vec(), "more_before": false }), error: None }));
+    assert_eq!(app.views[sid].messages.len(), 40);
+    // An error stops further requests (no retry loop).
+    app.views.get_mut(sid).unwrap().chat.scroll_by(-1_000_000, false);
+    render(&mut app, 100, 30);
+    app.load_older();
+    let (id, _) = older(&app).expect("requested after the reset");
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response { id, ok: false, result: json!(null), error: Some("gone".into()) }));
+    render(&mut app, 100, 30);
+    app.load_older();
+    assert!(older(&app).is_none());
+    assert!(!app.views[sid].more_before);
 }
