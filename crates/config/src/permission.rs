@@ -86,6 +86,7 @@ fn aliases(key: &str) -> Vec<String> {
         "write" | "patch" | "multiedit" | "apply_patch" => vec!["write".into(), "edit".into()],
         "glob" | "list" | "ls" => vec!["find".into()],
         "shell" => vec!["bash".into()],
+        "fetch" | "web_fetch" => vec!["webfetch".into()],
         k => vec![k.to_string()],
     }
 }
@@ -224,5 +225,14 @@ mod tests {
         assert!(!r.disabled("read"));
         let (r, _) = PermissionRules::from_value(&json!({"bash": {"*": "deny", "ls *": "allow"}}));
         assert!(!r.disabled("bash"));
+    }
+
+    #[test]
+    fn webfetch_url_patterns_and_aliases() {
+        let (r, _) = PermissionRules::from_value(&json!({"webfetch": {"*": "ask", "https://docs.rs/*": "allow"}}));
+        assert_eq!(r.evaluate("webfetch", "https://docs.rs/tokio/latest/tokio/"), Some(Action::Allow));
+        assert_eq!(r.evaluate("webfetch", "https://example.com/"), Some(Action::Ask));
+        let (r, _) = PermissionRules::from_value(&json!({"fetch": "deny"}));
+        assert!(r.disabled("webfetch"));
     }
 }

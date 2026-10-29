@@ -19,3 +19,14 @@ base64.workspace = true
 ref-sys.workspace = true
 dirs.workspace = true
 tracing.workspace = true
+# webfetch
+reqwest = { workspace = true, features = ["gzip", "brotli", "deflate", "zstd", "socks"] }
+dom_query.workspace = true
+dom_smoothie.workspace = true
+encoding_rs.workspace = true
+chardetng.workspace = true
+quick-xml.workspace = true
+pdf-extract.workspace = true
+
+[dev-dependencies]
+flate2 = "1"

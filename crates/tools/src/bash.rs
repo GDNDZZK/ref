@@ -7,7 +7,6 @@ use serde_json::{Value, json};
 use std::io::Write as _;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 pub const DEFAULT_TIMEOUT_SECS: u64 = 120;
@@ -105,20 +104,6 @@ fn clean(s: &str) -> String {
 
 type Sink = std::sync::Arc<dyn Fn(&str) + Send + Sync>;
 
-static SPILL_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn spill_path() -> PathBuf {
-    let n = SPILL_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let id = xxhash_rust::xxh32::xxh32(format!("{nanos}-{n}-{}", std::process::id()).as_bytes(), 0);
-    std::env::temp_dir()
-        .join("ref-tool-output")
-        .join(format!("{:08x}{:x}.log", id, nanos as u64 & 0xffff_ffff))
-}
-
 /// Keeps head + rolling tail in memory, spills the full output to a file when large.
 struct Collector {
     sink: Option<Sink>,
@@ -184,7 +169,7 @@ impl Collector {
     }
 
     fn spill(&mut self) {
-        let path = spill_path();
+        let path = util::spill_path("log");
         let file = path
             .parent()
             .map(std::fs::create_dir_all)

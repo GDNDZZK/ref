@@ -622,6 +622,10 @@ pub fn tool_detail(name: &str, input: &Value) -> String {
             None => format!("\"{p}\""),
         }),
         "find" => s("pattern").or_else(|| s("path")),
+        "webfetch" => s("url").map(|u| match s("format").filter(|f| f != "markdown") {
+            Some(f) => format!("{u} ({f})"),
+            None => u,
+        }),
         "send_message" => s("to").map(|t| format!("→ {t}")),
         "create_session" => s("name").map(|n| format!("{n} ({})", s("agent").unwrap_or_default())),
         "read_session" | "close_session" | "context_window" => s("session"),

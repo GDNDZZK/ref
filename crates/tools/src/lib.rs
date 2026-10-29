@@ -1,4 +1,4 @@
-//! Built-in coding tools (hashline-style read/edit, write, delete, grep, find, bash).
+//! Built-in coding tools (hashline-style read/edit, write, delete, grep, find, bash, webfetch).
 //!
 //! Public API in this file is a contract used by `ref-server`; keep it stable.
 
@@ -16,6 +16,7 @@ mod grep;
 pub mod hashline;
 mod read;
 mod util;
+mod web;
 mod write;
 
 pub use bash::default_shell;
@@ -73,11 +74,12 @@ pub fn specs() -> Vec<ToolSpec> {
         grep::spec(),
         find::spec(),
         bash::spec(),
+        web::spec(),
     ]
 }
 
 pub fn is_builtin(name: &str) -> bool {
-    matches!(name, "read" | "edit" | "write" | "delete" | "grep" | "find" | "bash")
+    matches!(name, "read" | "edit" | "write" | "delete" | "grep" | "find" | "bash" | "webfetch")
 }
 
 /// Execute a built-in tool. Never panics; all failures become `ToolOutput { is_error: true }`.
@@ -91,6 +93,7 @@ pub async fn execute(name: &str, input: Value, ctx: &ToolCtx) -> ToolOutput {
         "grep" => grep::run(input, ctx).await,
         "find" => find::run(input, ctx).await,
         "bash" => bash::run(input, ctx).await,
+        "webfetch" => web::run(input, ctx).await,
         _ => Err(anyhow::anyhow!("unknown tool: {name}")),
     };
     match res {

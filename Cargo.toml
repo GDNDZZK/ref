@@ -39,6 +39,12 @@ windows-sys = "0.61"
 tracing = "0.1"
 rusqlite = { version = "0.41", features = ["bundled"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dom_query = "0.29"
+dom_smoothie = "0.19"
+encoding_rs = "0.8"
+chardetng = "1"
+quick-xml = "0.42"
+pdf-extract = "0.12"
 
 [profile.release]
 opt-level = 3

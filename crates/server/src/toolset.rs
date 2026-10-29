@@ -155,6 +155,7 @@ pub fn subject(tool: &str, input: &Value) -> String {
     match tool {
         "bash" => get("command"),
         "read" | "edit" | "write" | "delete" | "grep" | "find" => get("path"),
+        "webfetch" => get("url"),
         _ => String::new(),
     }
 }

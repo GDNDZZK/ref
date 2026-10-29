@@ -136,7 +136,7 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         )));
     }
     let bytes = std::fs::read(&abs)?;
-    if let Some(mime) = image_mime(&bytes) {
+    if let Some(mime) = util::image_mime(&bytes) {
         if meta.len() > MAX_IMAGE_BYTES {
             return Ok(ToolOutput::err(format!(
                 "Image file too large: {} exceeds {} limit.",
@@ -274,22 +274,6 @@ fn list_dir(abs: &Path, display: &str) -> Result<ToolOutput> {
     Ok(o)
 }
 
-/// Detects supported raster images by magic bytes.
-fn image_mime(bytes: &[u8]) -> Option<&'static str> {
-    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-        return Some("image/png");
-    }
-    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
-        return Some("image/jpeg");
-    }
-    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
-        return Some("image/gif");
-    }
-    if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
-        return Some("image/webp");
-    }
-    None
-}
 
 #[cfg(test)]
 mod tests {

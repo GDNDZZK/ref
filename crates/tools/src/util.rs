@@ -5,6 +5,7 @@ use regex::Regex;
 use serde_json::Value;
 use std::path::{Component, Path, PathBuf};
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 // ---------------------------------------------------------------------------
 // Arguments
@@ -320,6 +321,38 @@ pub fn format_line_list(lines: &[u32]) -> String {
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
+
+static SPILL_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Fresh path under `<tmp>/ref-tool-output/` for a tool's full output (`ext`: file extension).
+pub fn spill_path(ext: &str) -> PathBuf {
+    let n = SPILL_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let id = xxhash_rust::xxh32::xxh32(format!("{nanos}-{n}-{}", std::process::id()).as_bytes(), 0);
+    std::env::temp_dir()
+        .join("ref-tool-output")
+        .join(format!("{:08x}{:x}.{ext}", id, nanos as u64 & 0xffff_ffff))
+}
+
+/// Detects supported raster images by magic bytes.
+pub fn image_mime(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Some("image/png");
+    }
+    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return Some("image/jpeg");
+    }
+    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        return Some("image/gif");
+    }
+    if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        return Some("image/webp");
+    }
+    None
+}
 
 #[cfg(test)]
 pub mod test_support {
