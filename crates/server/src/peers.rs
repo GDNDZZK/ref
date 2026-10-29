@@ -191,7 +191,13 @@ pub fn deliver(hub: &Arc<Hub>, from: &Arc<Session>, target: &Arc<Session>, text:
     }
     hub.peer_msgs.lock().unwrap_or_else(|e| e.into_inner()).insert(
         id.clone(),
-        PeerRecord { from_id, to_id: target.id.clone(), to_name: target.lock().info.name.clone() },
+        PeerRecord {
+            from_id,
+            to_id: target.id.clone(),
+            to_name: target.lock().info.name.clone(),
+            time: ref_proto::now_ms(),
+            preview: preview(text, 80),
+        },
     );
     let queued = crate::engine::submit(hub, target, msg);
     (id, queued)
@@ -385,4 +391,141 @@ async fn close_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Resul
     }
     crate::ops::close_session(hub, &target).await;
     Ok(format!("Closed session \"{name}\" ({}). It remains in history.", target.id))
+}
+
+// ---------------------------------------------------------------------------
+// Slash commands for the user (/peers, /peers-name, /peers-inbox, /peers-outbox).
+// They run directly in the backend — no LLM turn, nothing is added to the transcript.
+// ---------------------------------------------------------------------------
+
+fn preview(text: &str, max: usize) -> String {
+    let one: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    crate::util::truncate_chars(&one, max)
+}
+
+fn ago(ms: i64) -> String {
+    let secs = (ref_proto::now_ms() - ms).max(0) / 1000;
+    if secs < 60 { "just now".into() } else { format!("{} ago", crate::util::fmt_duration(secs)) }
+}
+
+/// Peer message body without the harness header/footer lines.
+fn peer_body(m: &Message) -> String {
+    let raw = m.raw_text();
+    let mut lines: Vec<&str> = raw.lines().collect();
+    if lines.first().is_some_and(|l| l.starts_with("[Message from session")) {
+        lines.remove(0);
+    }
+    if lines.last().is_some_and(|l| l.starts_with("[Reply with send_message")) {
+        lines.pop();
+    }
+    lines.join("\n")
+}
+
+pub fn user_command(hub: &Arc<Hub>, s: &Arc<Session>, command: &str, args: &str) -> Result<String, String> {
+    match command {
+        "peers" | "list-agents" => Ok(cmd_peers(hub, s)),
+        "peers-name" => cmd_name(hub, s, args),
+        "peers-inbox" => Ok(cmd_inbox(s)),
+        "peers-outbox" => Ok(cmd_outbox(hub, s)),
+        other => Err(format!("Unknown peer command /{other}")),
+    }
+}
+
+fn cmd_peers(hub: &Arc<Hub>, s: &Arc<Session>) -> String {
+    let infos = hub.infos();
+    let me = infos.iter().find(|i| i.id == s.id).map(|i| i.name.clone()).unwrap_or_default();
+    let others: Vec<_> = infos.iter().filter(|i| i.id != s.id).collect();
+    let mut out = format!("You are \"{me}\" ({}).\n", s.id);
+    if others.is_empty() {
+        out.push_str("No other live sessions.");
+        return out;
+    }
+    out.push_str(&format!("Other live sessions ({}):\n", others.len()));
+    for i in others {
+        let queued = hub.session(&i.id).map(|t| t.lock().queue.len()).unwrap_or(0);
+        out.push_str(&format!(
+            "  [{}] {} · \"{}\" · {} · {} · {} · started {}{}\n",
+            status_word(&i.status),
+            i.name,
+            crate::util::truncate_chars(&i.title, 40),
+            i.agent,
+            if i.attached > 0 { "foreground" } else { "background" },
+            i.cwd,
+            ago(i.created_at),
+            if queued > 0 { format!(" · {queued} queued") } else { String::new() },
+        ));
+    }
+    out.trim_end().to_string()
+}
+
+fn cmd_name(hub: &Arc<Hub>, s: &Arc<Session>, args: &str) -> Result<String, String> {
+    let args = args.trim();
+    if args.is_empty() {
+        return Ok(format!("Current name: \"{}\"", s.lock().info.name));
+    }
+    let name = crate::util::normalize_name(args)?;
+    if hub.name_taken(&name, Some(&s.id)) {
+        return Err(format!("A live session named \"{name}\" already exists."));
+    }
+    {
+        let mut st = s.lock();
+        st.info.name = name.clone();
+        hub.emit_info(&st);
+    }
+    crate::ops::persist(hub, s);
+    Ok(format!("Renamed to \"{name}\"."))
+}
+
+fn cmd_inbox(s: &Arc<Session>) -> String {
+    let st = s.lock();
+    let is_peer = |m: &&Message| matches!(m.source, MessageSource::Peer { .. } | MessageSource::Spawn { .. });
+    let from = |m: &Message| match &m.source {
+        MessageSource::Peer { from_name, .. } | MessageSource::Spawn { from_name, .. } => from_name.clone(),
+        _ => String::new(),
+    };
+    let queued: Vec<&Message> = st.queue.iter().filter(is_peer).collect();
+    let received: Vec<&Message> = st.messages.iter().filter(is_peer).collect();
+    if queued.is_empty() && received.is_empty() {
+        return "Inbox is empty: no messages from other sessions.".into();
+    }
+    let mut out = String::new();
+    if !queued.is_empty() {
+        out.push_str(&format!("{} queued (read after the current step):\n", queued.len()));
+        for m in &queued {
+            out.push_str(&format!("  {} · from \"{}\" · {}\n", crate::util::fmt_time(m.time), from(m), preview(&peer_body(m), 80)));
+        }
+    }
+    if !received.is_empty() {
+        let n = received.len();
+        out.push_str(&format!("{n} received{}:\n", if n > 20 { " (last 20)" } else { "" }));
+        for m in received.iter().skip(n.saturating_sub(20)) {
+            out.push_str(&format!("  {} · from \"{}\" · {}\n", crate::util::fmt_time(m.time), from(m), preview(&peer_body(m), 80)));
+        }
+    }
+    out.trim_end().to_string()
+}
+
+fn cmd_outbox(hub: &Arc<Hub>, s: &Arc<Session>) -> String {
+    let mut sent: Vec<(String, PeerRecord)> = hub
+        .peer_msgs
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .filter(|(_, r)| r.from_id == s.id)
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    if sent.is_empty() {
+        return "Outbox is empty: this session has not sent any messages.".into();
+    }
+    sent.sort_by_key(|(_, r)| r.time);
+    let n = sent.len();
+    let mut out = format!("{n} sent message(s){}:\n", if n > 20 { " (last 20)" } else { "" });
+    for (id, r) in sent.iter().skip(n.saturating_sub(20)) {
+        let status = message_status(hub, &json!({ "message_id": id }))
+            .ok()
+            .and_then(|t| t.rsplit_once(": ").map(|(_, st)| st.trim_end_matches('.').to_string()))
+            .unwrap_or_else(|| "unknown".into());
+        out.push_str(&format!("  {} · to \"{}\" · {} · {}\n", crate::util::fmt_time(r.time), r.to_name, status, r.preview));
+    }
+    out.trim_end().to_string()
 }

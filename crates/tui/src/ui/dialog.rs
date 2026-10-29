@@ -404,6 +404,9 @@ pub struct HelpDialog {
     pub opened: Instant,
     lines: Vec<Line<'static>>,
     max_scroll: usize,
+    title: String,
+    /// Width hint (widest line + padding), capped at 80 when drawing.
+    width: u16,
 }
 
 pub const KEYBINDS: &[(&str, &[(&str, &str)])] = &[
@@ -501,7 +504,14 @@ impl HelpDialog {
                 Span::styled(d.clone(), theme::text()),
             ]));
         }
-        HelpDialog { scroll: 0, opened: Instant::now(), lines, max_scroll: 0 }
+        HelpDialog { scroll: 0, opened: Instant::now(), lines, max_scroll: 0, title: "Help".into(), width: 80 }
+    }
+
+    /// Read-only text viewer (command results). Long lines are wrapped when drawn.
+    pub fn text(title: &str, body: &str) -> Self {
+        let lines: Vec<Line<'static>> = body.lines().map(|l| Line::from(Span::styled(l.replace('\t', "    "), theme::text()))).collect();
+        let widest = body.lines().map(width).max().unwrap_or(0) as u16;
+        HelpDialog { scroll: 0, opened: Instant::now(), lines, max_scroll: 0, title: title.to_string(), width: (widest + 6).max(40) }
     }
 
     pub fn scroll_by(&mut self, d: i32) {
@@ -510,14 +520,19 @@ impl HelpDialog {
 
     pub fn draw(&mut self, buf: &mut Buffer, screen: Rect) {
         let t = (self.opened.elapsed().as_secs_f32() / 0.12).min(1.0);
-        let w = screen.width.saturating_sub(4).clamp(30, 80);
-        let h = screen.height.saturating_sub(4).clamp(8, 40);
-        let r = frame(buf, screen, w, h, "Help", t);
+        let w = screen.width.saturating_sub(4).clamp(30, self.width.min(110));
+        let iw = w.saturating_sub(4) as usize;
+        let wrapped: Vec<Line<'static>> = self.lines.iter().flat_map(|l| {
+            let rows = text::wrap_spans(&l.spans, iw.max(1));
+            if rows.is_empty() { vec![Line::default()] } else { rows }
+        }).collect();
+        let h = (wrapped.len() as u16 + 2).clamp(3, screen.height.saturating_sub(4).clamp(3, 40));
+        let r = frame(buf, screen, w, h, &self.title, t);
         let inner = Rect::new(r.x + 2, r.y + 1, r.width.saturating_sub(4), r.height.saturating_sub(2));
         let vh = inner.height as usize;
-        self.max_scroll = self.lines.len().saturating_sub(vh);
+        self.max_scroll = wrapped.len().saturating_sub(vh);
         self.scroll = self.scroll.min(self.max_scroll);
-        for (i, l) in self.lines.iter().skip(self.scroll).take(vh).enumerate() {
+        for (i, l) in wrapped.iter().skip(self.scroll).take(vh).enumerate() {
             let mut l = l.clone();
             for s in &mut l.spans {
                 s.style = s.style.bg(theme::PANEL);

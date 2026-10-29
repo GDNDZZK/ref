@@ -131,6 +131,10 @@ pub struct PeerRecord {
     pub from_id: String,
     pub to_id: String,
     pub to_name: String,
+    /// Epoch ms when sent.
+    pub time: i64,
+    /// First line of the message (for /peers-outbox).
+    pub preview: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

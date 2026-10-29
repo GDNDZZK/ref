@@ -366,6 +366,22 @@ async fn peer_send_message_between_sessions() {
     assert!(e.is_error && e.text.contains("no live session named"));
     // Case-insensitive resolution.
     assert_eq!(ref_server::peers::resolve(&hub, "ALICE", None).unwrap().id, alice.id);
+
+    // User slash commands (no LLM turn).
+    let cmd = |s, c: &str, a: &str| ref_server::peers::user_command(&hub, s, c, a);
+    let p = cmd(&alice, "peers", "").unwrap();
+    assert!(p.starts_with("You are \"alice\"") && p.contains("Other live sessions (1)") && p.contains("ボブ"), "{p}");
+    let outbox = cmd(&alice, "peers-outbox", "").unwrap();
+    assert!(outbox.contains("to \"ボブ\"") && outbox.contains("read") && outbox.contains("hello bob"), "{outbox}");
+    let inbox = cmd(&bob, "peers-inbox", "").unwrap();
+    assert!(inbox.contains("1 received") && inbox.contains("from \"alice\"") && inbox.contains("hello bob"), "{inbox}");
+    assert!(!inbox.contains("[Message from session"), "{inbox}");
+    assert!(cmd(&alice, "peers-inbox", "").unwrap().starts_with("Inbox is empty"));
+    assert_eq!(cmd(&alice, "peers-name", "").unwrap(), "Current name: \"alice\"");
+    assert!(cmd(&alice, "peers-name", "ボブ").is_err(), "duplicate name must be rejected");
+    assert_eq!(cmd(&alice, "peers-name", "爱丽丝 🌸").unwrap(), "Renamed to \"爱丽丝 🌸\".");
+    assert_eq!(alice.lock().info.name, "爱丽丝 🌸");
+    assert!(cmd(&alice, "nope", "").is_err());
 }
 
 #[tokio::test]

@@ -51,6 +51,13 @@ A session is **foreground** while a frontend is directly attached to it, and **b
 
 Slash commands: `/new /sessions /models /agents /variant /compact /undo /rename /close /export /thinking /details /watch /editor /help /exit`. Commands from your config are listed too.
 
+Cross-session commands run in the backend without an LLM turn:
+
+- `/peers` (alias `/list-agents`): other live sessions with status, agent, fg/bg, directory and queued messages.
+- `/peers-name [name]`: show or set this session's peer name (any Unicode, unique among live sessions).
+- `/peers-inbox`: messages received from other sessions, including ones still queued.
+- `/peers-outbox`: messages this session sent and whether each is queued, delivered or read.
+
 ## Configuration
 
 ref reads opencode's configuration, so an existing `opencode.json` works as is (providers, models, variants, agents, permission, mcp, instructions, command). Files are merged in this order, later ones winning:

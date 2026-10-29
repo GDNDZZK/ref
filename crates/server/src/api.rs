@@ -209,6 +209,11 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             crate::engine::start_custom_run(hub, &s, crate::compaction::manual)?;
             Ok(json!({}))
         }
+        Request::PeerCommand { session_id, command, args } => {
+            let s = live(hub, &session_id)?;
+            let text = crate::peers::user_command(hub, &s, &command, &args)?;
+            Ok(json!({ "text": text }))
+        }
         Request::Undo { session_id } => {
             let s = live(hub, &session_id)?;
             if s.lock().run.is_some() {

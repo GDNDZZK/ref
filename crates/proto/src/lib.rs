@@ -516,6 +516,14 @@ pub enum Request {
     },
     /// Write the transcript as markdown to `path` (server side). -> `{path}`
     Export { session_id: String, path: String },
+    /// Cross-session slash commands run for the user without an LLM turn.
+    /// `command`: "peers" | "peers-name" | "peers-inbox" | "peers-outbox". -> `{text}`
+    PeerCommand {
+        session_id: String,
+        command: String,
+        #[serde(default)]
+        args: String,
+    },
     /// Shut the backend down (used by `ref-server --stop`).
     Shutdown,
     Ping,

@@ -52,6 +52,8 @@ pub enum Pending {
     Export,
     /// Toast the resulting variant.
     Variant,
+    /// Show the `{text}` result in a text dialog.
+    Text { title: String },
     /// A prompt; on failure its text goes back into the (empty) editor so it isn't lost.
     Prompt { sid: String, text: String },
 }
@@ -104,6 +106,10 @@ pub const COMMANDS: &[Cmd] = &[
     Cmd { name: "undo", aliases: &[], desc: "Undo last prompt", key: "ctrl+x u", args: false },
     Cmd { name: "rename", aliases: &[], desc: "Rename the session", key: "", args: true },
     Cmd { name: "close", aliases: &[], desc: "Close this session and open a new one", key: "", args: false },
+    Cmd { name: "peers", aliases: &["list-agents"], desc: "List other live sessions you can message", key: "", args: false },
+    Cmd { name: "peers-name", aliases: &[], desc: "Show or set this session's peer name", key: "", args: true },
+    Cmd { name: "peers-inbox", aliases: &[], desc: "Messages received from other sessions", key: "", args: false },
+    Cmd { name: "peers-outbox", aliases: &[], desc: "Messages sent to other sessions and their status", key: "", args: false },
     Cmd { name: "export", aliases: &[], desc: "Export transcript as markdown", key: "ctrl+x x", args: true },
     Cmd { name: "copy", aliases: &[], desc: "Copy last assistant message (raw)", key: "ctrl+x y", args: false },
     Cmd { name: "thinking", aliases: &[], desc: "Toggle expanded thinking", key: "ctrl+x t", args: false },
@@ -545,6 +551,10 @@ impl App {
             Pending::Export => {
                 let p = result.get("path").and_then(Value::as_str).unwrap_or("file");
                 self.toasts.info(format!("Exported to {p}"));
+            }
+            Pending::Text { title } => {
+                let text = result.get("text").and_then(Value::as_str).unwrap_or_default();
+                self.dialog = Some(Dialog::Help(HelpDialog::text(&title, text)));
             }
             Pending::Prompt { .. } => {}
         }
@@ -1014,8 +1024,8 @@ impl App {
                 if let Some(name) = key.strip_prefix("srv:") {
                     self.editor.set_text(&format!("/{name} "));
                 } else if let Some(c) = find_cmd(&key) {
-                    if c.args && c.name == "rename" {
-                        self.editor.set_text("/rename ");
+                    if c.args && matches!(c.name, "rename" | "peers-name") {
+                        self.editor.set_text(&format!("/{} ", c.name));
                     } else {
                         self.run_command(c.name, "");
                     }
@@ -1113,7 +1123,7 @@ impl App {
         let args = args.trim();
         // Commands needing backend data run once it has arrived (startup race).
         let needs_config = matches!(name, "models" | "agents" | "variant");
-        let needs_session = matches!(name, "variant" | "compact" | "undo" | "rename" | "export" | "copy");
+        let needs_session = matches!(name, "variant" | "compact" | "undo" | "rename" | "export" | "copy" | "peers" | "peers-name" | "peers-inbox" | "peers-outbox");
         if (needs_config && self.config.is_none()) || (needs_session && self.cur().is_none_or(|v| !v.loaded)) {
             if self.connected || !self.ever_connected {
                 self.deferred = Some((name.to_string(), args.to_string(), Instant::now()));
@@ -1152,6 +1162,20 @@ impl App {
                     self.editor.set_text("/rename ");
                 } else if let Some(sid) = cur {
                     self.req(Request::Rename { session_id: sid, name: args.to_string() }, Pending::Simple { ok: format!("Renamed to \"{args}\"") });
+                }
+            }
+            "peers" | "peers-name" | "peers-inbox" | "peers-outbox" => {
+                if let Some(sid) = cur {
+                    let title = match name {
+                        "peers" => "Peers",
+                        "peers-name" => "Peer name",
+                        "peers-inbox" => "Peer inbox",
+                        _ => "Peer outbox",
+                    };
+                    self.req(
+                        Request::PeerCommand { session_id: sid, command: name.to_string(), args: args.to_string() },
+                        Pending::Text { title: title.to_string() },
+                    );
                 }
             }
             "close" => {
