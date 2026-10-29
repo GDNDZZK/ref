@@ -54,9 +54,15 @@ fn url_with_token(ep: &Endpoint) -> String {
     }
 }
 
+/// No size limits on incoming frames: a session snapshot carries every image of the session
+/// (tool screenshots included) and easily exceeds tungstenite's 16 MiB default frame limit.
+fn ws_config() -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
+    tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default().max_message_size(None).max_frame_size(None)
+}
+
 async fn try_connect(ep: &Endpoint, timeout: Duration) -> Option<Ws> {
     let url = url_with_token(ep);
-    match tokio::time::timeout(timeout, tokio_tungstenite::connect_async(url)).await {
+    match tokio::time::timeout(timeout, tokio_tungstenite::connect_async_with_config(url, Some(ws_config()), false)).await {
         Ok(Ok((ws, _))) => Some(ws),
         _ => None,
     }

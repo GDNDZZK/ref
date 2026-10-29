@@ -15,6 +15,9 @@ use tokio_tungstenite::tungstenite::http::StatusCode;
 /// Client name used by `ref-server --status/--stop`; such connections do not count as frontends.
 pub const CONTROL_CLIENT: &str = "ref-server-cli";
 
+/// Largest frame/message accepted from a client.
+const MAX_CLIENT_MESSAGE: usize = 64 << 20;
+
 #[derive(Debug, Clone, Default)]
 pub struct Auth {
     pub any: bool,
@@ -135,7 +138,10 @@ async fn handle_conn(hub: Arc<Hub>, stream: TcpStream, peer: SocketAddr, auth: A
             None => Ok(resp),
         }
     };
-    let ws = match tokio::time::timeout(Duration::from_secs(10), tokio_tungstenite::accept_hdr_async(stream, cb)).await {
+    // Prompts carry pasted images: allow one frame up to the whole message limit (the 16 MiB
+    // default frame limit is lower than the 64 MiB message limit).
+    let cfg = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default().max_message_size(Some(MAX_CLIENT_MESSAGE)).max_frame_size(Some(MAX_CLIENT_MESSAGE));
+    let ws = match tokio::time::timeout(Duration::from_secs(10), tokio_tungstenite::accept_hdr_async_with_config(stream, cb, Some(cfg))).await {
         Ok(Ok(ws)) => ws,
         Ok(Err(e)) => {
             tracing::debug!(%peer, "websocket handshake failed: {e}");

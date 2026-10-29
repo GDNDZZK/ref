@@ -631,7 +631,8 @@ async fn net_hello_and_frames() {
             let id = f.id.unwrap_or(0);
             let reply = match f.req {
                 Request::Hello { .. } => ServerFrame::Response { id, ok: true, result: json!({}), error: None },
-                _ => ServerFrame::Response { id, ok: true, result: json!({"sessions": []}), error: None },
+                // Bigger than tungstenite's 16 MiB default frame limit (snapshots with many images).
+                _ => ServerFrame::Response { id, ok: true, result: json!({"sessions": [], "pad": "x".repeat(20 << 20)}), error: None },
             };
             ws.send(M::text(serde_json::to_string(&reply).unwrap())).await.unwrap();
             let toast = ServerFrame::Toast { level: ToastLevel::Info, text: "hi".into() };
@@ -651,8 +652,9 @@ async fn net_hello_and_frames() {
     let t = ev_rx.recv().await.unwrap();
     assert!(matches!(t, crate::net::NetEvent::Frame(ServerFrame::Toast { .. })));
     out_tx.send(ClientFrame { id: Some(7), req: Request::ListSessions }).unwrap();
-    let r = ev_rx.recv().await.unwrap();
-    assert!(matches!(r, crate::net::NetEvent::Frame(ServerFrame::Response { id: 7, ok: true, .. })), "{r:?}");
+    let r = tokio::time::timeout(std::time::Duration::from_secs(10), ev_rx.recv()).await.unwrap().unwrap();
+    let ok = matches!(&r, crate::net::NetEvent::Frame(ServerFrame::Response { id: 7, ok: true, result, .. }) if result["pad"].as_str().map(str::len) == Some(20 << 20));
+    assert!(ok, "{}", if let crate::net::NetEvent::Disconnected(e) = &r { e.clone() } else { "unexpected event".into() });
 }
 
 #[test]

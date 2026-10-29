@@ -80,7 +80,9 @@ fn idle_meaning(t: i64) -> String {
 pub async fn request(i: &InstanceInfo, req: Request, timeout: Duration) -> Result<serde_json::Value, String> {
     let fut = async {
         let url = format!("{}?token={}", connect_url(i), i.token);
-        let (mut ws, _) = tokio_tungstenite::connect_async(url).await.map_err(|e| e.to_string())?;
+        // Responses (session lists, snapshots) can exceed the 16 MiB default frame limit.
+        let cfg = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default().max_message_size(None).max_frame_size(None);
+        let (mut ws, _) = tokio_tungstenite::connect_async_with_config(url, Some(cfg), false).await.map_err(|e| e.to_string())?;
         let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "/".into());
         let frames = [
             ClientFrame {
