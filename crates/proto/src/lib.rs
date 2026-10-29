@@ -456,8 +456,8 @@ pub struct SessionSnapshot {
     pub info: SessionInfo,
     pub messages: Vec<Message>,
     pub pending_permissions: Vec<PermissionRequest>,
-    /// Human prompts waiting in the session's queue (not yet in `messages`); removable with
-    /// `RemoveQueued`.
+    /// Messages waiting in the session's queue (not yet in `messages`), any source; human
+    /// prompts are removable with `RemoveQueued`.
     #[serde(default)]
     pub queued: Vec<Message>,
 }
@@ -641,6 +641,9 @@ pub enum SessionEvent {
     Reset { messages: Vec<Message> },
     Permission { request: PermissionRequest },
     PermissionResolved { call_id: String },
+    /// The session's queue changed: every message (any source) still waiting for the next safe
+    /// point, in delivery order. Delivered messages arrive as `Message` events.
+    Queue { messages: Vec<Message> },
     /// Human-readable error for the session (also stored in message.error when relevant).
     Error { text: String },
     /// Session closed / unloaded.

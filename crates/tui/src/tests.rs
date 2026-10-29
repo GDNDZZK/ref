@@ -2240,3 +2240,37 @@ fn sidebar_live_sessions_show_todo_count() {
         assert!(crate::ui::text::width(r.trim_end()) <= crate::render::SIDEBAR_W as usize, "{r:?}");
     }
 }
+
+#[test]
+fn queue_event_shows_messages_from_other_sessions() {
+    use crate::app::Pending;
+    let mut app = test_app(true);
+    let user = |id: &str, text: &str, source: MessageSource| msg(id, Role::User, source, 1, text);
+    let peer = MessageSource::Peer { from_id: "ses_w".into(), from_name: "worker-1".into(), msg_id: "pm1".into() };
+    let ev = |app: &mut App, messages: Vec<Message>| app.on_net(crate::net::NetEvent::Frame(ServerFrame::Event { session_id: "ses_test".into(), event: SessionEvent::Queue { messages } }));
+
+    // Our prompt is queued; the Queue event arrives before the Prompt response.
+    type_str(&mut app, "my follow-up");
+    crate::input::handle(&mut app, key(crossterm::event::KeyCode::Enter, crossterm::event::KeyModifiers::NONE));
+    assert_eq!(app.views["ses_test"].queued.len(), 1);
+    ev(&mut app, vec![user("pq1", "please check the parser", peer.clone()), user("q1", "my follow-up", MessageSource::Human)]);
+    let q = &app.views["ses_test"].queued;
+    assert_eq!(q.len(), 2, "no duplicate of our own row");
+    assert_eq!((q[0].from.as_deref(), q[0].id.as_deref()), (Some("worker-1"), Some("pq1")));
+    assert_eq!((q[1].from.as_deref(), q[1].id.as_deref()), (None, Some("q1")));
+    respond(&mut app, |p| matches!(p, Pending::Prompt { .. }), json!({"queued": true, "message_id": "q1"}));
+    assert_eq!(app.views["ses_test"].queued.len(), 2);
+
+    // Rendering: the sender is shown and only our own prompt can be removed.
+    let (_, s) = render(&mut app, 100, 30);
+    let peer_row = s.lines().find(|l| l.contains("please check the parser")).unwrap();
+    assert!(peer_row.contains("queued from worker-1") && !peer_row.contains("✕ remove"), "{peer_row}");
+    assert!(s.lines().find(|l| l.contains("my follow-up")).unwrap().contains("✕ remove"));
+    let pkey = app.views["ses_test"].queued[0].key;
+    app.unqueue("ses_test", pkey);
+    assert!(!app.pending.values().any(|p| matches!(p, Pending::Unqueue { .. })));
+
+    // Delivered: the server announces the empty queue.
+    ev(&mut app, vec![]);
+    assert!(app.views["ses_test"].queued.is_empty());
+}

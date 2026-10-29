@@ -919,8 +919,8 @@ impl App {
             v.queued.retain(|q| Some(q.key) != key);
             return;
         }
-        // Already listed from a snapshot (re-attached before this response): keep that row.
-        if v.queued.iter().any(|q| q.id.as_deref() == Some(id.as_str())) {
+        // Listed under another row already (snapshot after a re-attach): keep that row.
+        if v.queued.iter().any(|q| q.id.as_deref() == Some(id.as_str()) && Some(q.key) != key) {
             let mut removing = false;
             if let Some(i) = key.and_then(|k| v.queued.iter().position(|q| q.key == k)) {
                 removing = v.queued.remove(i).removing;
@@ -960,7 +960,7 @@ impl App {
             return;
         }
         let Some(q) = self.views.get_mut(sid).and_then(|v| v.queued_mut(key)) else { return };
-        if q.removing {
+        if q.removing || q.from.is_some() {
             return;
         }
         q.removing = true;

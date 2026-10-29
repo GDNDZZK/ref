@@ -955,3 +955,53 @@ async fn set_cwd_switches_directory_and_tells_the_model() {
     assert!(body["messages"][0]["content"].to_string().contains(&new), "system prompt uses the new cwd");
     assert!(all.contains("changed the working directory"), "{all}");
 }
+
+#[tokio::test]
+async fn queue_changes_reach_attached_connection() {
+    let m = mock(Arc::new(|n, _| match n {
+        0 => Reply::Hang("working".into()),
+        _ => Reply::Text("done".into()),
+    }))
+    .await;
+    let (hub, work) = hub(config(&m.url), "queue-ev");
+    let s = session(&hub, &work, "main", "build").await;
+    let peer = session(&hub, &work, "worker", "build").await;
+    let conn = hub.add_conn();
+    {
+        let mut c = conn.lock();
+        c.hello = true;
+        c.fg.insert(s.id.clone());
+    }
+    prompt(&hub, &s, "go");
+    let s2 = s.clone();
+    wait_until("streaming", T, move || last_text(&s2) == "working").await;
+    let queues = |conn: &Arc<ref_server::hub::Conn>| -> Vec<Vec<(String, MessageSource)>> {
+        conn.out
+            .drain()
+            .into_iter()
+            .filter_map(|f| match f {
+                ref_proto::ServerFrame::Event { event: SessionEvent::Queue { messages }, .. } => Some(messages.iter().map(|m| (m.raw_text(), m.source.clone())).collect()),
+                _ => None,
+            })
+            .collect()
+    };
+    let _ = queues(&conn);
+    // A peer message and a human prompt while busy: each push is announced with the whole queue.
+    let (mid, queued) = ref_server::peers::deliver(&hub, &peer, &s, "from the worker");
+    assert!(queued);
+    prompt(&hub, &s, "and me");
+    let q = queues(&conn);
+    assert_eq!(q.len(), 2, "{q:?}");
+    assert_eq!(q[1].len(), 2);
+    assert!(q[1][0].0.contains("from the worker") && matches!(&q[1][0].1, MessageSource::Peer { from_name, msg_id, .. } if from_name == "worker" && *msg_id == mid));
+    assert_eq!(q[1][1], ("and me".to_string(), MessageSource::Human));
+    // The snapshot lists every source too.
+    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::Attach { session_id: s.id.clone(), foreground: true }).await.unwrap();
+    assert_eq!(r["snapshot"]["queued"].as_array().unwrap().len(), 2);
+    // Abort: the queue is delivered at the end of the run and announced as empty.
+    let _ = conn.out.drain();
+    ref_server::engine::abort(&hub, &s, true);
+    wait_idle(&s).await;
+    let q = queues(&conn);
+    assert!(q.last().is_some_and(|l| l.is_empty()), "{q:?}");
+}

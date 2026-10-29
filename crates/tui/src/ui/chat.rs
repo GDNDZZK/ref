@@ -428,14 +428,17 @@ fn tail_rows(view: &SessionView, env: &Env<'_>, w: usize) -> Vec<Row> {
     if !view.queued.is_empty() {
         rows.push(Row::blank());
         for q in &view.queued {
-            let left = vec![
-                Span::styled("  queued ", theme::fg(theme::DIM).add_modifier(Modifier::BOLD)),
-                Span::styled(text::one_line(&q.text), theme::fg(theme::DIM)),
-            ];
-            let label = if q.removing { "removing…" } else { message::UNQUEUE_LABEL };
-            let (line, rx) = message::compose(left, vec![Span::styled(label, theme::fg(theme::DIM))], w);
+            let mut left = vec![Span::styled("  queued ", theme::fg(theme::DIM).add_modifier(Modifier::BOLD))];
+            if let Some(from) = &q.from {
+                left.push(Span::styled(format!("from {from} "), theme::fg(theme::ACCENT)));
+            }
+            left.push(Span::styled(text::one_line(&q.text), theme::fg(theme::DIM)));
+            // Messages from other sessions are shown only.
+            let label = if q.from.is_some() { "" } else if q.removing { "removing…" } else { message::UNQUEUE_LABEL };
+            let right = if label.is_empty() { vec![] } else { vec![Span::styled(label, theme::fg(theme::DIM))] };
+            let (line, rx) = message::compose(left, right, w);
             let mut row = Row::new(line).decor();
-            if !q.removing {
+            if !q.removing && q.from.is_none() {
                 let x0 = rx as u16;
                 row = row.zone(x0, x0 + width(label) as u16, Hit::Unqueue { key: q.key });
             }

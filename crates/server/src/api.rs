@@ -94,7 +94,7 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
                     info: st.info.clone(),
                     messages: st.messages.clone(),
                     pending_permissions: st.perms.iter().map(|p| p.request.clone()).collect(),
-                    queued: st.queue.iter().filter(|m| m.source == MessageSource::Human).cloned().collect(),
+                    queued: st.queue.iter().cloned().collect(),
                 }
             };
             Ok(json!({ "snapshot": snapshot }))
@@ -257,7 +257,10 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
                 // Only human prompts go back into the editor.
                 let text = if st.messages[i].source == MessageSource::Human { st.messages[i].raw_text() } else { String::new() };
                 st.messages.truncate(i);
-                st.queue.clear();
+                if !st.queue.is_empty() {
+                    st.queue.clear();
+                    crate::engine::emit_queue(hub, &s, &st);
+                }
                 st.info.updated_at = ref_proto::now_ms();
                 hub.emit(&s.id, SessionEvent::Reset { messages: st.messages.clone() });
                 hub.emit_info(&st);

@@ -24,11 +24,28 @@ pub struct Queued {
     pub images: Vec<ImageData>,
     /// Delete clicked: waiting for the server (or for `id`).
     pub removing: bool,
+    /// Sender when it is not a prompt of the user (another session, a reminder). Such rows
+    /// are shown only; they cannot be removed.
+    pub from: Option<String>,
 }
 
 impl Queued {
     pub fn new(text: String, images: Vec<ImageData>) -> Self {
-        Queued { key: next_version(), id: None, text, images, removing: false }
+        Queued { key: next_version(), id: None, text, images, removing: false, from: None }
+    }
+
+    fn from_message(m: &Message) -> Self {
+        let images = m.parts.iter().filter_map(|p| if let Part::Image { image, .. } = p { Some(image.clone()) } else { None }).collect();
+        let mut q = Queued::new(m.raw_text(), images);
+        q.id = Some(m.id.clone());
+        q.from = match &m.source {
+            MessageSource::Human => None,
+            MessageSource::Peer { from_name, .. } | MessageSource::Spawn { from_name, .. } => Some(from_name.clone()),
+            MessageSource::Reminder => Some("reminder".into()),
+            MessageSource::Shell => Some("shell".into()),
+            MessageSource::Compaction => Some("compaction".into()),
+        };
+        q
     }
 }
 
@@ -183,6 +200,9 @@ impl SessionView {
             SessionEvent::PermissionResolved { call_id } => {
                 self.permissions.retain(|p| p.call_id != call_id);
             }
+            SessionEvent::Queue { messages } => {
+                self.set_queued(messages);
+            }
             SessionEvent::Error { text } => {
                 self.error = Some(text);
             }
@@ -215,20 +235,22 @@ impl SessionView {
         });
     }
 
-    /// Queued rows from the server's queue (snapshot), in queue order. Existing rows keep their
-    /// key / pending delete; rows still waiting for their id stay; other id-bound rows are gone
-    /// from the server queue (delivered, withdrawn elsewhere or undone).
+    /// Queued rows from the server's queue (snapshot or `Queue` event), in queue order.
+    /// Existing rows keep their key / pending delete. A row of ours still waiting for its id
+    /// takes the id of the queued human prompt with the same text (no duplicate row); the rest
+    /// of those stay. Other id-bound rows are gone from the server queue (delivered, withdrawn
+    /// elsewhere or undone).
     fn set_queued(&mut self, queue: Vec<Message>) {
         let mut old = std::mem::take(&mut self.queued);
         for m in queue {
-            let q = match old.iter().position(|q| q.id.as_deref() == Some(m.id.as_str())) {
-                Some(i) => old.remove(i),
-                None => {
-                    let images = m.parts.iter().filter_map(|p| if let Part::Image { image, .. } = p { Some(image.clone()) } else { None }).collect();
-                    let mut q = Queued::new(m.raw_text(), images);
+            let mine = || old.iter().position(|q| q.id.is_none() && m.source == MessageSource::Human && q.text.trim() == m.raw_text().trim());
+            let q = match old.iter().position(|q| q.id.as_deref() == Some(m.id.as_str())).or_else(mine) {
+                Some(i) => {
+                    let mut q = old.remove(i);
                     q.id = Some(m.id.clone());
                     q
                 }
+                None => Queued::from_message(&m),
             };
             self.queued.push(q);
         }

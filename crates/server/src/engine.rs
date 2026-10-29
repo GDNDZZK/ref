@@ -49,6 +49,7 @@ pub fn submit(hub: &Arc<Hub>, s: &Arc<Session>, msg: Message) -> bool {
         maybe_title(hub, s, &mut st, &msg);
         if st.run.is_some() {
             st.queue.push_back(msg);
+            emit_queue(hub, s, &st);
             true
         } else {
             hub.emit(&s.id, SessionEvent::Message { message: msg.clone() });
@@ -67,10 +68,14 @@ pub fn submit(hub: &Arc<Hub>, s: &Arc<Session>, msg: Message) -> bool {
 pub fn remove_queued(hub: &Arc<Hub>, s: &Arc<Session>, message_id: &str) -> bool {
     let removed = {
         let mut st = s.lock();
-        match st.queue.iter().position(|m| m.id == message_id) {
+        let removed = match st.queue.iter().position(|m| m.id == message_id) {
             Some(i) => st.queue.remove(i).is_some(),
             None => false,
+        };
+        if removed {
+            emit_queue(hub, s, &st);
         }
+        removed
     };
     if removed {
         // Saves include the queue: drop the withdrawn message from disk too.
@@ -85,6 +90,7 @@ pub fn append_only(hub: &Arc<Hub>, s: &Arc<Session>, msg: Message) {
         let mut st = s.lock();
         if st.run.is_some() {
             st.queue.push_back(msg);
+            emit_queue(hub, s, &st);
         } else {
             hub.emit(&s.id, SessionEvent::Message { message: msg.clone() });
             st.push_message(msg);
@@ -237,6 +243,7 @@ fn finish_run(hub: &Arc<Hub>, s: &Arc<Session>, id: u64) {
                     hub.emit(&s.id, SessionEvent::Message { message: m.clone() });
                     st.push_message(m);
                 }
+                emit_queue(hub, s, &st);
             } else {
                 restart = true;
             }
@@ -326,8 +333,14 @@ fn drain_queue(hub: &Arc<Hub>, s: &Arc<Session>) {
         any = true;
     }
     if any {
+        emit_queue(hub, s, &st);
         hub.emit_info(&st);
     }
+}
+
+/// Tells frontends what is waiting in the queue now.
+pub fn emit_queue(hub: &Arc<Hub>, s: &Arc<Session>, st: &SessionState) {
+    hub.emit(&s.id, SessionEvent::Queue { messages: st.queue.iter().cloned().collect() });
 }
 
 fn apply_pending_compact(hub: &Arc<Hub>, s: &Arc<Session>, prep: &Prep) {
