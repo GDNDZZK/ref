@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { highlight } from './highlighter.ts'
 import { languageFromName, languageFromPath } from './languages.ts'
 
+describe('language names', () => {
+  it('knows only its own names, not those of Object.prototype', () => {
+    for (const name of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
+      expect(languageFromName(name), name).toBeUndefined()
+    }
+  })
+})
+
 describe('languages', () => {
   it('resolves fence info strings and aliases', () => {
     expect(languageFromName('rust')).toBe('rust')
