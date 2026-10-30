@@ -30,8 +30,23 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
     match req {
         Request::Hello { .. } => Err("Hello was already received.".into()),
         Request::Ping => Ok(json!({})),
-        Request::SetNotify { .. } | Request::SetFocus { .. } | Request::ListDirs { .. } => {
-            Err("Not implemented yet.".into())
+        Request::SetNotify { kinds } => {
+            conn.lock().notify = kinds.into_iter().collect();
+            Ok(json!({}))
+        }
+        Request::SetFocus { focused, sessions } => {
+            let stamp = focused.then(|| hub.next_stamp());
+            let mut st = conn.lock();
+            st.focused = focused;
+            st.shown = sessions.into_iter().collect();
+            if let Some(stamp) = stamp {
+                st.focus_stamp = stamp;
+            }
+            Ok(json!({}))
+        }
+        Request::ListDirs { path } => {
+            let cwd = conn.lock().cwd.clone();
+            list_dirs(hub, &cwd, &path).await
         }
         Request::Shutdown => {
             tracing::info!("shutdown requested by a client");
@@ -504,6 +519,36 @@ async fn set_cwd(hub: &Arc<Hub>, s: &Arc<Session>, path: &str) -> Result<(), Str
     );
     crate::engine::append_only(hub, s, user_message(MessageSource::Reminder, text, vec![]));
     Ok(())
+}
+
+/// `ListDirs`: the normalized absolute path and the names of its sub-directories (links to
+/// directories included), case-insensitively sorted.
+async fn list_dirs(hub: &Arc<Hub>, cwd: &str, path: &str) -> R {
+    let path = path.trim();
+    if path.is_empty() {
+        return Err("Path is empty.".into());
+    }
+    let home = hub.opts.home.clone().or_else(dirs::home_dir);
+    let p = crate::util::expand_home(path, home.as_deref());
+    let p = if p.is_absolute() {
+        p
+    } else {
+        Path::new(cwd).join(p)
+    };
+    tokio::task::spawn_blocking(move || {
+        let dir = crate::ops::validate_cwd(&p.to_string_lossy())?;
+        let entries =
+            std::fs::read_dir(&dir).map_err(|e| format!("Cannot read directory {dir}: {e}"))?;
+        let mut dirs: Vec<String> = entries
+            .filter_map(Result::ok)
+            .filter(|e| e.path().is_dir())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        dirs.sort_by_key(|d| (d.to_lowercase(), d.clone()));
+        Ok(json!({ "path": dir, "dirs": dirs }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Downscales / recompresses prompt images (`images.auto_resize`); undecodable ones are kept.
