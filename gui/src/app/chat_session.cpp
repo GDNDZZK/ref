@@ -6,7 +6,7 @@
 using refgui::client::Backend;
 using namespace Qt::StringLiterals;
 
-ChatSession::ChatSession(Backend::Source source, QString cwd, Start start, QObject* parent)
+ChatSession::ChatSession(Backend::Source source, QString cwd, refgui::cli::SessionStart start, QObject* parent)
 	: QObject(parent)
 	, m_cwd(std::move(cwd))
 	, m_start(std::move(start))
@@ -14,6 +14,7 @@ ChatSession::ChatSession(Backend::Source source, QString cwd, Start start, QObje
 	, m_controller(m_backend)
 {
 	connect(&m_backend, &Backend::stateChanged, this, &ChatSession::connectionChanged);
+	connect(&m_backend, &Backend::stateChanged, this, &ChatSession::readyChanged);
 	connect(&m_backend, &Backend::stateChanged, this, &ChatSession::statusTextChanged);
 	connect(&m_backend, &Backend::connected, this, [this] {
 		if(!m_controller.hasSession() && !m_opening)
@@ -48,6 +49,11 @@ QAbstractItemModel* ChatSession::blocks()
 bool ChatSession::isBusy() const
 {
 	return m_controller.isTurnInProgress();
+}
+
+bool ChatSession::isReady() const
+{
+	return m_backend.state() == Backend::State::Connected && m_controller.hasSession();
 }
 
 QString ChatSession::connectionState() const
@@ -90,6 +96,11 @@ QString ChatSession::title() const
 void ChatSession::send(const QString& text)
 {
 	Q_ASSERT(!isBusy() && !text.trimmed().isEmpty());
+	if(!isReady())
+	{
+		setFailure(tr("Not connected to the ref backend."));
+		return;
+	}
 	sendPrompt(text);
 }
 
@@ -111,7 +122,7 @@ void ChatSession::permissionReply(const QString& callId, bool allow, bool always
 QCoro::Task<> ChatSession::open()
 {
 	m_opening = true;
-	using Kind = Start::Kind;
+	using Kind = refgui::cli::SessionStart::Kind;
 
 	refgui::session::SessionController::Result<void> outcome;
 	if(m_start.kind == Kind::Attach)
@@ -147,11 +158,13 @@ QCoro::Task<> ChatSession::open()
 		emit openFailed(outcome.error());
 		co_return;
 	}
+	emit readyChanged();
 	emit opened(m_controller.sessionId());
 }
 
 QCoro::Task<> ChatSession::sendPrompt(QString text)
 {
+	m_notice.clear();
 	setFailure({});
 	const auto result = co_await m_controller.send(std::move(text));
 	if(!result)

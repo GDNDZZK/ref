@@ -2,22 +2,30 @@
 import QtQuick
 import RefGui
 
-// A tool call: status, title and, on demand, its output.
+// A tool call: status, title and, on demand, its input and output. While the tool waits
+// for permission, the card asks for it.
 Block {
 	id: block
 
 	required property string output
 	required property bool failed
+	required property string toolState
+	required property string inputJson
+	required property string rawInput // the arguments while they stream
+	required property string callId
 
 	property bool expanded: false
-	readonly property bool hasOutput: output !== ""
+	readonly property string input: inputJson !== "" ? inputJson : rawInput
+	readonly property string details: [input, output].filter(part => part !== "").join("\n\n")
+	readonly property bool hasDetails: details !== ""
+	readonly property bool awaitingPermission: toolState === "awaiting_permission"
 
 	Rectangle {
 		id: card
 		width: block.columnWidth
-		height: header.height + body.height
+		height: header.height + body.height + permission.height
 		radius: Theme.radius
-		color: hover.hovered && block.hasOutput ? Theme.surfaceHover : Theme.surface
+		color: hover.hovered && block.hasDetails ? Theme.surfaceHover : Theme.surface
 		border.color: Theme.border
 
 		Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
@@ -86,7 +94,7 @@ Block {
 				id: chevron
 				anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
 				rotation: block.expanded ? 90 : 0
-				opacity: block.hasOutput ? 1 : 0
+				opacity: block.hasDetails ? 1 : 0
 
 				Behavior on rotation { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 				Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
@@ -94,10 +102,10 @@ Block {
 
 			HoverHandler {
 				id: hover
-				cursorShape: block.hasOutput ? Qt.PointingHandCursor : Qt.ArrowCursor
+				cursorShape: block.hasDetails ? Qt.PointingHandCursor : Qt.ArrowCursor
 			}
 			TapHandler {
-				enabled: block.hasOutput
+				enabled: block.hasDetails
 				onTapped: {
 					if (block.expanded && header.offset > 0)
 						block.holdHeader(header.height)
@@ -146,12 +154,54 @@ Block {
 				selectByMouse: true
 				wrapMode: TextEdit.Wrap
 				textFormat: TextEdit.PlainText
-				text: block.output
+				text: block.details
 				color: Theme.textMuted
 				selectionColor: Theme.selection
 				selectedTextColor: Theme.text
 				font.family: Theme.monoFamily
 				font.pixelSize: Theme.smallFontSize
+			}
+		}
+
+		// The question, under the header and the details.
+		Item {
+			id: permission
+			y: header.height + body.height
+			width: parent.width
+			height: block.awaitingPermission ? 40 : 0
+			clip: true
+
+			Behavior on height { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+
+			Rectangle {
+				width: parent.width
+				height: 1
+				color: Theme.border
+			}
+
+			Text {
+				anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }
+				text: qsTr("Waiting for your permission")
+				color: Theme.textMuted
+				font.pixelSize: Theme.smallFontSize
+			}
+
+			Row {
+				anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
+				spacing: 4
+
+				TextButton {
+					text: qsTr("Allow")
+					onClicked: block.ListView.view.permissionAnswered(block.callId, true, false)
+				}
+				TextButton {
+					text: qsTr("Allow for session")
+					onClicked: block.ListView.view.permissionAnswered(block.callId, true, true)
+				}
+				TextButton {
+					text: qsTr("Deny")
+					onClicked: block.ListView.view.permissionAnswered(block.callId, false, false)
+				}
 			}
 		}
 	}

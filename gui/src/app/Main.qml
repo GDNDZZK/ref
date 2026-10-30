@@ -47,6 +47,36 @@ Window {
 			anchors { left: parent.left; right: parent.right; top: parent.top; bottom: composer.top }
 			model: window.session.blocks
 			turnInProgress: window.session.busy
+			onPermissionAnswered: (callId, allow, always) => window.session.permissionReply(callId, allow, always)
+		}
+
+		// Connection trouble and the last failure, until they are gone.
+		Rectangle {
+			id: status
+
+			readonly property bool shown: window.session.statusText !== ""
+
+			anchors { horizontalCenter: parent.horizontalCenter; top: parent.top; topMargin: 14 }
+			width: Math.min(statusLabel.implicitWidth + 2 * 14, parent.width - 2 * 80) // clear of the theme toggle
+			height: statusLabel.implicitHeight + 2 * 6
+			radius: height / 2
+			color: Theme.surface
+			border.color: Theme.border
+			opacity: shown ? 1 : 0
+			visible: opacity > 0
+
+			Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+
+			Text {
+				id: statusLabel
+				x: 14
+				y: 6
+				width: parent.width - 2 * 14
+				text: window.session.statusText
+				elide: Text.ElideRight
+				color: Theme.textMuted
+				font.pixelSize: Theme.smallFontSize
+			}
 		}
 
 		Text {
@@ -140,6 +170,7 @@ Window {
 			anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: Theme.pagePadding }
 			width: chat.columnWidth
 			busy: window.session.busy
+			sendingEnabled: window.session.ready
 			onSubmitted: text => {
 				chat.following = true
 				window.session.send(text)
