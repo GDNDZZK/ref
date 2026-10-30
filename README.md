@@ -1,185 +1,97 @@
+<div align="center">
+
 # ref
 
-A terminal coding agent written in Rust. The backend (`ref-server`) does all the real work: sessions, the agent loop, LLM calls, tools, MCP, permissions and cross-session messaging. The TUI (`ref`) only renders and sends requests. The two talk over WebSocket.
+**A terminal coding agent written in Rust.**
 
-```
-cargo build --release
-./target/release/ref            # new session in the current directory
-```
+Sessions run in a background server and keep working while no window is open.
+Several sessions can work side by side and message each other.
 
-`ref` looks for a running backend and connects to it. If none is running, it starts one on a random free port ≥ 10000 with `--idle-timeout 0`, so the backend exits when the last frontend leaves.
+[![CI](https://github.com/GDNDZZK/ref/actions/workflows/ci.yml/badge.svg)](https://github.com/GDNDZZK/ref/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/GDNDZZK/ref?sort=semver)](https://github.com/GDNDZZK/ref/releases/latest)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
+![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
 
-## Platforms
+**English** · [简体中文](README.zh-CN.md)
 
-Linux, macOS and Windows (x86_64 and arm64).
+</div>
 
-- The `bash` tool needs bash. On Windows install [Git for Windows](https://git-scm.com/download/win); ref finds its Git Bash through `git.exe` in `PATH` or the default install locations. The WSL `bash.exe` in `System32` is skipped because it runs commands inside the Linux VM with different paths.
-- On Windows, a stopped or timed-out command is killed with its whole process tree right away (`taskkill /T /F`). Unix gets SIGTERM first and SIGKILL after 2 s.
-- The state and data directories below are under the user's home directory on every platform (`%USERPROFILE%` on Windows).
-- `$EDITOR` defaults to `vi`, or `notepad` on Windows.
-- MCP stdio commands such as `npx` also resolve to `npx.cmd` on Windows (through `PATHEXT`).
+---
 
-## Binaries
+## Features
 
-### `ref-server`
+- **Server and TUI are separate.** `ref-server` runs sessions, the agent loop, LLM calls, tools and permissions. `ref` only draws the screen. Close the window and the session keeps going; open it again from any terminal.
+- **Many sessions at once.** A split view tiles all background sessions. Sessions can send each other messages, and the `build` agent can start worker sessions and give them tasks.
+- **Works with opencode configuration.** An existing `opencode.json` with providers, models, agents, permissions, MCP servers and commands works unchanged.
+- **Any model provider.** Anthropic Messages, OpenAI Responses and OpenAI-compatible Chat Completions, with model variants for reasoning effort or extended thinking.
+- **Control over tool calls.** Allow, ask or deny per tool, with patterns for commands, paths and URLs, plus optional countdowns before a tool runs.
+- **Reliable file edits.** Edits address hash-tagged line numbers, so a stale view of a file is detected instead of corrupting it.
+- **Long sessions.** Automatic context compaction, retries without limit for rate limits and outages, and image downscaling for every provider.
+- **MCP** servers over stdio and Streamable HTTP.
+- **Linux, macOS and Windows**, on x86_64 and arm64.
 
-| Flag | Meaning |
+## Installation
+
+### Download
+
+Get the archive for your system from the [latest release](https://github.com/GDNDZZK/ref/releases/latest):
+
+| System | Archive |
 |---|---|
-| `--port N` | Port. Absent or `0` picks a random free port in 10000–65535. |
-| `--host ADDR` | Bind address. Default `127.0.0.1`, or `0.0.0.0` when a non-loopback host is allowed. |
-| `--allow-host H` | Hosts/IPs allowed to connect (repeatable, comma separated, `*` = any). Default: loopback only. |
-| `--idle-timeout S` | Seconds to stay alive after the last frontend disconnects. `0` = exit immediately, `-1` = never. Only counts after the first connection. |
-| `--token T` | Shared secret clients must present (default: random, stored in the instance file). |
-| `--status [--json]` | List running instances with their configuration. Exit code 1 if none. |
-| `--stop [PID]` | Stop all instances, or the one with PID. |
+| Linux x86_64 | `ref-<version>-x86_64-unknown-linux-gnu.tar.gz` |
+| Linux arm64 | `ref-<version>-aarch64-unknown-linux-gnu.tar.gz` |
+| macOS Apple silicon | `ref-<version>-aarch64-apple-darwin.tar.gz` |
+| macOS Intel | `ref-<version>-x86_64-apple-darwin.tar.gz` |
+| Windows x86_64 | `ref-<version>-x86_64-pc-windows-msvc.zip` |
+| Windows arm64 | `ref-<version>-aarch64-pc-windows-msvc.zip` |
 
-Instance files are written to `~/.local/state/ref/instances/<pid>.json` (mode 600). Sessions are stored in `~/.local/share/ref/sessions/`. Logs go to `~/.local/state/ref/logs/`. `REF_STATE_DIR` and `REF_DATA_DIR` override these locations.
+Unpack it and put `ref` and `ref-server` **in the same directory** on your `PATH`:
 
-### `ref`
+```bash
+tar -xzf ref-*.tar.gz
+install -m 755 ref-*/ref ref-*/ref-server ~/.local/bin/
+```
 
-| Flag | Meaning |
+- **Linux**: needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36, RHEL 10, Arch and newer). NixOS needs `programs.nix-ld.enable = true`.
+- **macOS**: the binaries are not signed. If macOS blocks them, run `xattr -d com.apple.quarantine ref ref-server`.
+- **Windows**: install [Git for Windows](https://git-scm.com/download/win); the `bash` tool uses its Git Bash.
+
+Each release has a `SHA256SUMS` file for checking the download.
+
+### Build from source
+
+```bash
+git clone https://github.com/GDNDZZK/ref.git
+cd ref
+cargo build --release      # needs current stable Rust and a C compiler
+./target/release/ref
+```
+
+## Quick start
+
+1. Set an API key, for example `export ANTHROPIC_API_KEY=...`. `OPENAI_API_KEY`, `DEEPSEEK_API_KEY` and `OPENROUTER_API_KEY` work too. For other providers, see [Configuration](docs/configuration.md#providers-and-models).
+2. Run `ref` in your project directory.
+3. Type a task and press `enter`.
+
+| Key | Action |
 |---|---|
-| `[PATH]` | Working directory for the new session. |
-| `-s ID` | Attach to an existing session (live or from history). |
-| `-c` | Continue the most recent session for this directory. |
-| `-w`, `--watch` | Split view of all live **background** sessions. Creates no session. |
-| `--agent NAME`, `--model provider/model[#variant]` | Agent and model for the new session (not remembered). |
-| `-p TEXT` | Send an initial prompt. |
-| `--server ws://host:port --token T` | Connect to an explicit backend (no auto-spawn). |
+| `ctrl+x m` / `ctrl+x a` | Pick a model / an agent |
+| `tab` | Next agent (`build` edits, `plan` only reads) |
+| `ctrl+x l` | Sessions, live and past |
+| `ctrl+x w` | Split view of background sessions |
+| `esc esc` | Interrupt |
+| `ctrl+x h` | All keys and commands |
 
-A session is **foreground** while a frontend is directly attached to it, and **background** otherwise. Watching a session in split view does not make it foreground. When a frontend switches to split view, the session it had in the foreground goes to the background (and shows up as a tile); leaving split view makes it foreground again.
+## Documentation
 
-## TUI
+| Document | Contents |
+|---|---|
+| [Using ref](docs/usage.md) | Sessions, the screen, prompts, keybindings, slash commands, split view, working with several sessions |
+| [Configuration](docs/configuration.md) | Every configuration key: providers and models, agents, permissions, delays, compaction, MCP, commands, instructions and skills |
+| [Tools](docs/tools.md) | What the model can do: file tools, bash, webfetch, image handling, context and cross-session tools |
+| [Command line](docs/cli.md) | `ref` and `ref-server` options, remote backends, files and environment variables |
+| [Development](docs/development.md) | Building, tests, crate layout, CI and releases |
 
-- The sidebar's Live sessions list shows, right-aligned per session, its todo count (`2/5`; `✓3/3` in green when all are done; cancelled items are not counted) and, while busy, the working time.
-- Every message shows its time: your prompts, each assistant reply (start → end, duration, tokens), and each tool call (start, duration).
-- Collapsed tool calls show the tool name and the model's `purpose`. Click one to see the raw input and output.
-- Collapsed thinking shows, on a single line, the latest characters of the reasoning, updated live.
-- Text in the transcript and in the input box can be selected with the mouse (drag; double click selects a word, triple click a line). Selecting never copies. Copy with `ctrl+c` or right-click (`y` also copies a transcript selection); typing replaces a selection in the input box. The `⧉ copy` button under every message copies its raw markdown.
-- `/` commands, `@` file mentions, `!` shell mode, `ctrl+v` to paste an image (pasting an image path works too), `shift+enter` / `ctrl+j` for a newline, `esc esc` to interrupt.
-- Prompts sent while the session is busy are queued and shown under the transcript until the next safe point (after the current tool step). Click `✕ remove` on a queued prompt to withdraw it before it is sent: its text and images go back into the input box (appended after a blank line if you were typing). If it was delivered in the meantime, a toast says so. Messages queued by other sessions (and reminders) are listed too, labelled with their sender, but cannot be removed. Every frontend attached to the session sees the queue update live.
-- Undo (`ctrl+x u`, `/undo`, or `↶ undo` under a prompt to undo from that prompt) removes the prompt and everything after it and puts the prompt's text and images back into the input box, appended after a blank line if you were typing. Files are not restored.
-- While a session works, the status line and its row under Live sessions in the sidebar show how long the current turn has been running (taken from the backend, so it survives switching sessions).
-- Leader key `ctrl+x`: `n` new session, `l` sessions (live fg/bg plus history), `m` models, `a` agents, `t` thinking, `d` tool details, `c` compact, `u` undo, `e` $EDITOR, `x` export, `w` split view, `h` help, `q` quit. `ctrl+p` opens the command palette. `tab` cycles agents, `ctrl+t` cycles the model variant.
-- Split view (`ref -w` or `ctrl+x w`): sessions are tiled automatically. `tab` or `alt+arrows` move focus, typing and `enter` message the focused session, `esc esc` aborts it, `ctrl+o` zooms in. `/close` and `/cd` typed in a tile act on that tile's session. Tiles list queued prompts under the transcript (`✕ remove` withdraws one), and clicking a tool call expands its input and output in the tile.
+## License
 
-Slash commands: `/new /sessions /models /agents /variant /compact /undo /rename /cd /close /export /thinking /details /watch /editor /help /exit`. Commands from your config are listed too.
-
-- `/cd DIR` (alias `/cwd`) moves the session to another directory: absolute, relative to the current one, or `~/…`. Project config and instructions are reloaded, and a reminder telling the model about the change is added to the conversation (no LLM turn). Not allowed while the session is busy. New sessions from this frontend then start there too. Without an argument it shows the current directory.
-- `/close` (or `ctrl+x k` twice) closes the current session and switches to the oldest remaining live session. When none is left, `ref` exits; a backend that `ref` started itself then exits too.
-
-Cross-session commands run in the backend without an LLM turn:
-
-- `/peers` (alias `/list-agents`): other live sessions with status, agent, fg/bg, directory and queued messages.
-- `/peers-name [name]`: show or set this session's peer name (any Unicode, unique among live sessions).
-- `/peers-inbox`: messages received from other sessions, including ones still queued.
-- `/peers-outbox`: messages this session sent and whether each is queued, delivered or read.
-
-## Configuration
-
-ref reads opencode's configuration, so an existing `opencode.json` works as is (providers, models, variants, agents, permission, mcp, instructions, command). Files are merged in this order, later ones winning:
-
-1. `~/.config/opencode/opencode.json[c]`, then `~/.config/ref/ref.json[c]`
-2. `$OPENCODE_CONFIG`, `$REF_CONFIG`
-3. From the git root down to the cwd: `opencode.json[c]`, `.opencode/opencode.json[c]`, `ref.json[c]`, `.ref/ref.json[c]`
-
-JSONC comments and trailing commas are accepted. `{env:VAR}` and `{file:path}` are substituted in string values. Agents and commands can also be markdown files under `agent(s)/` and `command(s)/` in `~/.config/opencode`, `~/.config/ref` and `.opencode/` / `.ref/` directories.
-
-Provider API selection follows opencode's `npm` field: `@ai-sdk/anthropic` uses Anthropic Messages, `@ai-sdk/openai` uses OpenAI Responses, and anything else uses OpenAI Chat Completions. The `api` field overrides this (`"chat"`, `"responses"`, `"anthropic"`).
-
-ref-specific keys:
-
-```jsonc
-{
-  // Default model when the agent has none.
-  "model": "anthropic/claude-sonnet-4-5",
-
-  // Permission per tool: "allow" | "ask" | "deny", or an object of patterns (last match wins).
-  // Patterns match the command (bash), the path (file tools) or the URL (webfetch).
-  "permission": {
-    "bash": { "*": "ask", "git status*": "allow", "rm *": "deny" },
-    "webfetch": { "*": "ask", "https://docs.rs/*": "allow" },
-    "delete": "ask"
-  },
-
-  // Seconds to wait before running a tool. During the countdown esc cancels it.
-  "delay": { "bash": 2, "delete": 5 },
-
-  // Context management. Values ≤ 1 are fractions of the window; larger values are tokens.
-  "compaction": { "auto": true, "recommend": 0.6, "threshold": 0.9 },
-
-  // Retry backoff cap in seconds. Retryable errors are retried forever.
-  "retry": { "max_delay": 600 },
-
-  // Downscale and recompress images before the model sees them (default true).
-  "images": { "auto_resize": true },
-
-  "agent": {
-    "build": { "can_spawn": true },
-    "reviewer": {
-      "description": "Reviews diffs and reports problems.",  // shown to agents that can create sessions
-      "prompt": "{file:./prompts/reviewer.md}",
-      "model": "dgn/claude-opus-5.5",
-      "variant": "high",
-      "creatable": true,          // may be created by other sessions (default true)
-      "can_spawn": false,         // may create/close other sessions (default false; true for build)
-      "permission": { "edit": "deny" },   // overrides the global setting
-      "delay": { "bash": 0 }
-    }
-  },
-
-  "provider": {
-    "mymodels": {
-      "npm": "@ai-sdk/openai-compatible",
-      "options": { "baseURL": "https://example.com/v1", "apiKey": "{env:MY_KEY}" },
-      "models": {
-        "some-model": {
-          "limit": { "context": 200000, "output": 32000, "compact": 120000 },
-          "attachment": true,
-          "reasoning": true,
-          "variants": { "high": { "reasoningEffort": "high" } }
-        }
-      }
-    }
-  }
-}
-```
-
-Built-in agents: `build` (default, can create sessions), `plan` (read-only), `general` and `explore` (read-only). A new session always starts with its agent's default model. Switching the model affects only that session.
-
-Context files: `~/.config/opencode/AGENTS.md`, `~/.config/ref/AGENTS.md`, then `AGENTS.md` (or `CLAUDE.md` if there is none) in every directory from the git root down to the cwd, plus `instructions` globs. Skills: `SKILL.md` files under `skill(s)/` in config directories, `.opencode/`, `.claude/skills`, `.agents/skills` and `~/.claude/skills`. They are listed in the system prompt and the model reads them with `read`.
-
-## Tools
-
-Built-in tools: `read`, `edit`, `write`, `delete`, `grep`, `find`, `bash` and `webfetch`. Every tool, including MCP tools, takes a `purpose` argument that the TUI displays.
-
-`webfetch` fetches an http(s) URL. HTML becomes markdown (or text, or stays HTML); for articles only the main content is kept unless `full_page` is set, and the header says so. It also handles markdown served by content negotiation or linked with `<link rel="alternate" type="text/markdown">`, JSON (pretty-printed), RSS/Atom feeds, images (attached, up to 5MB before downscaling), GitHub file pages (raw file) and GitHub issues / pull requests (via the API; `GITHUB_TOKEN` or `GH_TOKEN` is used if set). Other binary content, PDFs included, is not shown; the model is told to download it with `curl`. Charsets come from the header, the page or detection. Long content is cut at 50KB / 2000 lines with the full text saved to a file for `read`. It uses the `HTTP(S)_PROXY` / `NO_PROXY` environment variables, except for local and private addresses, which are always fetched directly.
-
-Images are downscaled as in oh-my-pi when `images.auto_resize` is on (the default). This applies to images from `read` (up to 10MB), from `webfetch`, and to images attached to a prompt; MCP images are stored unchanged. The longest edge is fit into 1568px (the size Claude scales to anyway), images with a short edge under 200px are scaled up, and the smaller of PNG and JPEG (quality 80) is kept. When that is still over the target (500KB, 300KB for `webfetch`) JPEG quality drops to 40 and then the size to a quarter. Images with transparency stay PNG. Small images within the bounds (under a quarter of the target) are sent as they are. When the size changes, the tool result tells the model the original size and the factor that maps coordinates back. `read` refuses images it cannot decode instead of sending them, because the provider would reject the whole request. Independently of that setting, every request to a Claude model (the Anthropic API, or a model id containing `claude` on another API) is checked against Claude's limits: images over 8000px on a side or 10MB of base64 are downscaled, and all images are kept within 2000px once the request holds more than 20. Only the outgoing request changes; the session keeps the originals, and results are cached so repeated requests do not re-encode. When a provider rejects a request with a stricter image limit in the error (for example Bedrock's "image exceeds 5 MB maximum: … > 5242880 bytes", or "image dimensions exceed max allowed size: N pixels"), ref remembers that limit for the provider until the server restarts, and resends the request with images fit to it at once; this works for any provider, not only Claude. An image error without a readable limit fails like any other non-retryable error.
-
-File tools use hashline anchors, modeled on oh-my-pi. `read` and `grep` print a `[path#TAG]` header (a hash of the whole file) followed by `N:content` rows. `edit` addresses original line numbers under that tag and applies all its edits at once. Stale tags are remapped through a diff when possible and rejected with the current content otherwise.
-
-Harness tools:
-
-- `context_window`: tokens used, the maximum, and the recommended and automatic compaction points, for this session or another one.
-- `compact_context`: replaces the history with a summary the model writes.
-
-Cross-session tools (in-process, so delivery is reliable; session names may be any Unicode):
-
-- `list_sessions`, `send_message`, `message_status`, `read_session` (paginated).
-- `create_session` and `close_session`, only for agents with `can_spawn`. Created sessions run in the background. With `must_report`, a session that stops without sending a message gets a reminder. `close_session` refuses foreground sessions.
-
-LLM failures retry with exponential backoff (2s doubling, capped at `retry.max_delay`, default 600s), forever for retryable errors. Tool errors are returned to the model and never end the loop.
-
-## Development
-
-```
-cargo test                      # all crates
-python3 scripts/e2e.py dgn/claude-sonnet-5.5 "prompt" [cwd]   # end-to-end against a real model
-REF_DUMP_REQUESTS=/tmp/dump ref-server ...                    # dump LLM request bodies (no headers)
-ref --mock                      # TUI against a fake backend
-```
-
-Crates: `proto` (wire protocol), `config`, `llm` (Chat / Responses / Anthropic streaming), `tools`, `mcp` (stdio + streamable HTTP), `sys` (OS layer), `server`, `tui`.
-
-Frontends get history page by page: `Attach` returns the newest messages (100, fewer if they exceed about 1 MiB) and `Messages` returns the page before a given message; the TUI loads older pages as you scroll up. Images reach frontends as stubs (mime, size and an `id`, no bytes); `GetImage` returns the bytes for an id.
+[GPL-3.0](LICENSE)
