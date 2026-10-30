@@ -72,6 +72,7 @@ fn info() -> SessionInfo {
         },
         todos: Vec::new(),
         busy_since: None,
+        last_error: None,
     }
 }
 
@@ -986,7 +987,7 @@ async fn net_hello_and_frames() {
     });
     let (out_tx, out_rx) = mpsc::unbounded_channel();
     let (ev_tx, mut ev_rx) = mpsc::unbounded_channel();
-    let target = crate::launcher::Target::Explicit {
+    let target = ref_client::Target::Explicit {
         url: format!("ws://127.0.0.1:{port}/"),
         token: Some("tok".into()),
     };

@@ -1,0 +1,60 @@
+{
+  "kind": "response",
+  "id": 2,
+  "ok": true,
+  "result": {
+    "config": {
+      "agents": [
+        {
+          "name": "build",
+          "description": "Writes and changes code",
+          "model": null,
+          "creatable": true,
+          "can_spawn": true,
+          "color": "#3b82f6"
+        },
+        {
+          "name": "plan",
+          "description": "Reads and plans, never edits",
+          "model": null,
+          "creatable": true,
+          "can_spawn": false,
+          "color": null
+        }
+      ],
+      "default_agent": "build",
+      "models": [
+        {
+          "provider": "anthropic",
+          "provider_name": "Anthropic",
+          "id": "claude-sonnet-4",
+          "name": "Claude Sonnet 4",
+          "context": 200000,
+          "output": 64000,
+          "images": true,
+          "reasoning": true,
+          "variants": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      ],
+      "commands": [
+        {
+          "name": "review",
+          "description": "Review the current changes",
+          "source": "config"
+        }
+      ],
+      "mcp": [
+        [
+          "github",
+          "connected (12 tools)"
+        ]
+      ],
+      "tui": null
+    }
+  },
+  "error": null
+}

@@ -1,0 +1,12 @@
+{
+  "id": 5,
+  "op": "create_session",
+  "cwd": "/home/user/project",
+  "agent": "build",
+  "model": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4",
+    "variant": "high"
+  },
+  "name": "parser-fix"
+}

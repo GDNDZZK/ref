@@ -104,6 +104,7 @@ pub async fn request(
                     version: ref_proto::PROTOCOL_VERSION,
                     cwd,
                     token: Some(i.token.clone()),
+                    notify: Vec::new(),
                 },
             },
             ClientFrame { id: Some(2), req },
