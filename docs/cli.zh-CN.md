@@ -3,6 +3,7 @@
 # 命令行
 
 - [`ref`](#ref)
+- [`ref-web`](#ref-web)
 - [`ref-server`](#ref-server)
 - [在另一台机器上运行后端](#在另一台机器上运行后端)
 - [文件与目录](#文件与目录)
@@ -31,6 +32,27 @@ ref [PATH] [options]
 | `-V`, `--version`, `-h`, `--help` | 版本和帮助。 |
 
 不带 `--server` 时，`ref` 会在实例文件（见下文）中查找运行中的后端并连接。如果没有，它会从 `ref` 所在目录（或 `PATH`）启动 `ref-server`，使用随机空闲端口和 `--idle-timeout 0`，这样最后一个 `ref` 断开后后端就会退出。
+
+## `ref-web`
+
+Web 界面服务器，作用见 [Web 界面](web.zh-CN.md)。
+
+```
+ref-web [DIR] [选项]
+```
+
+| 选项 | 含义 |
+|---|---|
+| `DIR` | 新会话的目录（默认：当前目录）。 |
+| `--port N` | 监听端口（默认 `7480`）。 |
+| `--host ADDR` | 监听地址（默认 `127.0.0.1`）。其他地址会向网络开放 `ref-web`，且没有 TLS；此时会打印警告。 |
+| `--no-open` | 不打开浏览器。 |
+| `--server ws://host:port` | 连接指定的后端，而不是查找或启动后端。 |
+| `--token T` | `--server` 的 token。必须与 `--server` 一起使用。 |
+| `--mock` | 使用私有的假后端（开发用）。不能与 `--server` 同时使用。 |
+| `-V`, `--version`, `-h`, `--help` | 版本和帮助。 |
+
+不带 `--server` 时，`ref-web` 查找后端的方式与 `ref` 相同。浏览器的登录 token 保存在 `<state 目录>/web/login-token`。
 
 ## `ref-server`
 
@@ -76,6 +98,7 @@ ref --server ws://127.0.0.1:7777 --token <token>
 | `~/.config/ref/`, `~/.config/opencode/` | 配置。参见[配置](configuration.zh-CN.md#配置文件的读取位置)。 |
 | `~/.local/share/ref/sessions/` | 保存的会话。 |
 | `~/.local/state/ref/instances/<pid>.json` | 每个运行中的后端一个文件：端口、令牌和设置。只有你自己可读（权限 600）。 |
+| `~/.local/state/ref/web/login-token` | `ref-web` 的登录 token，仅你本人可读（权限 600）。在 `ref-web` 停止时删除它即可换新 token。 |
 | `~/.local/state/ref/logs/` | 后端日志，包括配置警告。 |
 
 在 Windows 上，`~` 指 `%USERPROFILE%`。
