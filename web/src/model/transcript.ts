@@ -285,11 +285,13 @@ export class Transcript {
     this.structureChanged = true
   }
 
-  private resolvePermission(callId: string): void {
+  // Removes the request and returns it, if it was pending.
+  resolvePermission(callId: string): PermissionRequest | undefined {
     const request = this.permissions.get(callId)
-    if (!request) return
+    if (!request) return undefined
     this.permissions.delete(callId)
     this.markDirty(request.message_id)
+    return request
   }
 
   // History loaded or replaced as a whole: shown at once, not paced.

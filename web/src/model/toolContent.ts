@@ -130,6 +130,16 @@ function genericDetail(input: JsonValue | null | undefined): string {
   return parts.join(' ')
 }
 
+// Only web addresses are opened from a tool card: the URL comes from the model.
+export function isWebUrl(target: string): boolean {
+  try {
+    const { protocol } = new URL(target)
+    return protocol === 'http:' || protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
 // The session a cross-session tool talks to (or creates).
 export function peerName(name: string, input: JsonValue | null | undefined): string | undefined {
   if (name === 'send_message') return stringArg(input, 'to')
