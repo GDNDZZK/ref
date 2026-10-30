@@ -6,8 +6,11 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use ts_rs::TS;
 
-pub const PROTOCOL_VERSION: u32 = 1;
+/// Version of the wire protocol, reported in the `Hello` response (`"protocol"`).
+/// Adding fields or requests does not change it. Version 1 clients are still served.
+pub const PROTOCOL_VERSION: u32 = 2;
 
 fn home() -> std::path::PathBuf {
     std::env::var_os("HOME")
@@ -58,7 +61,7 @@ pub fn now_ms() -> i64 {
 // ---------------------------------------------------------------------------
 
 /// Written by the server to `<state_dir>/instances/<pid>.json`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct InstanceInfo {
     pub pid: u32,
     pub port: u16,
@@ -78,7 +81,7 @@ pub struct InstanceInfo {
 // Core data model
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default, TS)]
 pub struct ModelRef {
     pub provider: String,
     pub model: String,
@@ -109,7 +112,7 @@ impl ModelRef {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default, TS)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum SessionStatus {
     #[default]
@@ -136,7 +139,7 @@ impl SessionStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct SessionInfo {
     pub id: String,
     /// Peer name; arbitrary unicode, unique among live sessions.
@@ -166,9 +169,12 @@ pub struct SessionInfo {
     /// time from this, so it survives switching sessions and covers unattached ones.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub busy_since: Option<i64>,
+    /// Error that ended the last run; cleared when the next run starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum TodoStatus {
     #[default]
@@ -178,7 +184,7 @@ pub enum TodoStatus {
     Cancelled,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct Todo {
     pub content: String,
     #[serde(default)]
@@ -191,7 +197,7 @@ impl SessionInfo {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, TS)]
 pub struct ContextUsage {
     /// Tokens used by the last request (input + cache + output).
     pub used: u64,
@@ -203,7 +209,7 @@ pub struct ContextUsage {
     pub auto: u64,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, TS)]
 pub struct Usage {
     /// Uncached input tokens.
     pub input: u64,
@@ -220,7 +226,7 @@ impl Usage {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
     User,
@@ -228,7 +234,7 @@ pub enum Role {
 }
 
 /// Where a user-role message came from.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default, TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MessageSource {
     /// Typed by a human in a frontend.
@@ -251,7 +257,7 @@ pub enum MessageSource {
     Shell,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct Message {
     pub id: String,
     pub role: Role,
@@ -338,7 +344,7 @@ pub fn image_message_id(image_id: &str) -> Option<&str> {
 /// Frontends never receive image bytes in messages: the server replaces each image by a stub
 /// (empty `data`, with `id` and `size`) to keep snapshots and events small. `GetImage` with
 /// the `id` returns the bytes; `Undo` / `RemoveQueued` return those of the prompt they remove.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
 pub struct ImageData {
     pub mime: String,
     /// Base64 (standard alphabet, no data: prefix). Empty in stubs.
@@ -378,7 +384,7 @@ impl ImageData {
 }
 
 /// An image with its optional file name, as returned by `Undo` / `RemoveQueued`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct NamedImage {
     #[serde(flatten)]
     pub image: ImageData,
@@ -386,7 +392,7 @@ pub struct NamedImage {
     pub name: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolState {
     /// Arguments still streaming from the model.
@@ -414,7 +420,7 @@ impl ToolState {
 // `Part::Tool` is much larger than the other variants. Boxing it would change every place that
 // builds or matches parts for a small memory saving, so the size difference is accepted.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Part {
     Text {
@@ -485,7 +491,7 @@ impl Part {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Delta {
     Text { text: String },
@@ -493,8 +499,20 @@ pub enum Delta {
     ToolInput { text: String },
 }
 
+/// Kind of system notification a frontend can ask for (see `Request::SetNotify`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum NotifyKind {
+    /// A tool call is waiting for a permission decision.
+    Permission,
+    /// A run finished normally and the session is idle again.
+    TurnDone,
+    /// A run ended with a final error (retries do not count; user aborts are not reported).
+    TurnError,
+}
+
 /// Pending permission request shown to the user.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct PermissionRequest {
     pub session_id: String,
     pub message_id: String,
@@ -506,7 +524,7 @@ pub struct PermissionRequest {
     pub time: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct AgentInfo {
     pub name: String,
     pub description: String,
@@ -519,7 +537,7 @@ pub struct AgentInfo {
     pub color: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct ModelInfo {
     pub provider: String,
     pub provider_name: String,
@@ -542,7 +560,7 @@ impl ModelInfo {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct CommandInfo {
     pub name: String,
     pub description: String,
@@ -550,7 +568,7 @@ pub struct CommandInfo {
     pub source: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct McpServerStatus {
     pub name: String,
     /// "connected" | "connecting" | "failed" | "disabled"
@@ -562,7 +580,7 @@ pub struct McpServerStatus {
     pub tools: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct ServerConfigInfo {
     pub agents: Vec<AgentInfo>,
     pub default_agent: String,
@@ -576,7 +594,7 @@ pub struct ServerConfigInfo {
     pub tui: Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct SessionSnapshot {
     pub info: SessionInfo,
     /// The newest messages (one page, see `Attach`); older ones via `Messages`.
@@ -595,17 +613,19 @@ pub struct SessionSnapshot {
 // Client -> Server
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct ClientFrame {
     /// Correlation id; server answers with `ServerFrame::Response { id }`.
     #[serde(default)]
+    #[ts(optional = nullable)]
     pub id: Option<u64>,
     #[serde(flatten)]
     pub req: Request,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "op", rename_all = "snake_case")]
+#[ts(optional_fields = nullable)]
 pub enum Request {
     /// Must be the first frame. Registers the frontend and its working directory.
     Hello {
@@ -614,6 +634,9 @@ pub enum Request {
         cwd: String,
         #[serde(default)]
         token: Option<String>,
+        /// Notification kinds this connection is willing to show; empty = none.
+        #[serde(default)]
+        notify: Vec<NotifyKind>,
     },
     /// -> `{config: ServerConfigInfo}`
     GetConfig,
@@ -775,6 +798,23 @@ pub enum Request {
         #[serde(default)]
         cwd: Option<String>,
     },
+    /// Replace the notification kinds this connection wants (see `Hello.notify`). -> `{}`
+    SetNotify {
+        kinds: Vec<NotifyKind>,
+    },
+    /// Tell the backend whether the window / tab is in the foreground and which sessions it
+    /// shows (one in a single-session view, all tiles in the split view). Send on every change.
+    /// A `ServerFrame::Notify` is sent only when no connection shows the session. -> `{}`
+    SetFocus {
+        focused: bool,
+        sessions: Vec<String>,
+    },
+    /// Sub-directories of `path` for a directory picker: `~` is expanded and a relative path
+    /// is taken from the connection's cwd. -> `{path: <absolute, normalized>, dirs: [String]}`
+    /// (names only, sorted)
+    ListDirs {
+        path: String,
+    },
     /// Shut the backend down (used by `ref-server --stop`).
     Shutdown,
     Ping,
@@ -786,7 +826,7 @@ pub enum Request {
 
 // `ServerFrame::Event` carries a whole `SessionEvent`; frames are short-lived, so it stays unboxed.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ServerFrame {
     Response {
@@ -807,9 +847,19 @@ pub enum ServerFrame {
     Sessions { sessions: Vec<SessionInfo> },
     /// Transient notice for the user.
     Toast { level: ToastLevel, text: String },
+    /// A system notification for a connection that asked for `notify_kind` and whose user is not
+    /// looking at the session. `detail`: tool name (permission), error text (turn_error),
+    /// null (turn_done). Clients build the notification text themselves.
+    Notify {
+        session_id: String,
+        /// Not called `kind`: that is the tag of `ServerFrame`.
+        notify_kind: NotifyKind,
+        session_title: String,
+        detail: Option<String>,
+    },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ToastLevel {
     Info,
@@ -817,7 +867,7 @@ pub enum ToastLevel {
     Error,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionEvent {
     Info {
@@ -868,3 +918,6 @@ pub enum SessionEvent {
     /// Session closed / unloaded.
     Closed,
 }
+
+#[cfg(test)]
+mod tests;

@@ -1,0 +1,6 @@
+{
+  "id": 13,
+  "op": "remove_queued",
+  "session_id": "ses_a1b2c3d4",
+  "message_id": "msg_user_02"
+}

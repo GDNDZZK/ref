@@ -1,0 +1,13 @@
+{
+  "kind": "event",
+  "session_id": "ses_a1b2c3d4",
+  "event": {
+    "type": "delta",
+    "message_id": "msg_0f1e2d3c",
+    "index": 1,
+    "delta": {
+      "type": "text",
+      "text": " The loop"
+    }
+  }
+}

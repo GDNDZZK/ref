@@ -1,0 +1,12 @@
+{
+  "id": 12,
+  "op": "prompt",
+  "session_id": "ses_a1b2c3d4",
+  "text": "This is what I see",
+  "images": [
+    {
+      "mime": "image/png",
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=="
+    }
+  ]
+}

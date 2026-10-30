@@ -1,0 +1,9 @@
+{
+  "type": "reasoning",
+  "text": "The test fails with an index out of bounds, so the range is probably inclusive.",
+  "time": 1760000005000,
+  "time_end": 1760000009000,
+  "provider_data": {
+    "signature": "EqQBCkYIAxgC"
+  }
+}
