@@ -7,6 +7,7 @@ import { defineConfig } from 'vitest/config'
 const REF_WEB = 'http://127.0.0.1:7480'
 
 export default defineConfig({
+  publicDir: '../assets/app/web', // favicons
   plugins: [vue()],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
