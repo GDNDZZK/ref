@@ -114,7 +114,7 @@ function openMenu(event: MouseEvent): void {
     @contextmenu.prevent="openMenu"
   >
     <span v-if="tile" class="tile-bar" />
-    <SessionDot class="dot" :state="state" />
+    <SessionDot class="state" :state="state" />
     <input
       v-if="editing"
       ref="field"
@@ -200,7 +200,7 @@ function openMenu(event: MouseEvent): void {
   background: var(--accent);
 }
 
-.dot {
+.state {
   grid-row: 1;
   grid-column: 1;
 }

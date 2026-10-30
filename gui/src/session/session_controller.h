@@ -36,6 +36,9 @@ public:
 	ConversationModel& model() { return m_model; }
 	const ConversationModel& model() const { return m_model; }
 	const proto::SessionInfo& info() const { return m_info; }
+	// Messages waiting for the next safe point, in delivery order: the server's word, from the
+	// snapshot and Queue events. Prompts of the user can be withdrawn while they are here.
+	const QList<proto::Message>& queued() const { return m_queued; }
 	// Empty until a session is attached.
 	const QString& sessionId() const { return m_sessionId; }
 	bool hasSession() const { return !m_sessionId.isEmpty(); }
@@ -72,7 +75,7 @@ public:
 	// Adds the page of messages before the oldest one. Does nothing when there are none or a page is on its way.
 	QCoro::Task<Result<void>> loadOlder();
 
-	QCoro::Task<Result<proto::PromptResult>> send(QString text);
+	QCoro::Task<Result<proto::PromptResult>> send(QString text, QList<proto::ImageData> images = {});
 	QCoro::Task<Result<void>> abort();
 	QCoro::Task<Result<void>> permissionReply(QString callId, bool allow, bool always);
 
@@ -80,6 +83,7 @@ signals:
 	void infoChanged();
 	void busyChanged();
 	void turnInProgressChanged();
+	void queueChanged();
 	void moreBeforeChanged();
 	void loadingOlderChanged();
 	// The backend reported a problem with the session (an Error event).
@@ -93,6 +97,7 @@ private:
 	void onFrame(const proto::ServerFrame& frame);
 	void onEvent(const proto::SessionEvent& event);
 	void setInfo(const proto::SessionInfo& info);
+	void setQueued(QList<proto::Message> messages);
 	void setMoreBefore(bool moreBefore);
 	void setLoadingOlder(bool loading);
 
@@ -103,6 +108,7 @@ private:
 	bool m_attached = false;
 	bool m_foreground = true;
 	proto::SessionInfo m_info;
+	QList<proto::Message> m_queued;
 	bool m_moreBefore = false;
 	bool m_loadingOlder = false;
 };

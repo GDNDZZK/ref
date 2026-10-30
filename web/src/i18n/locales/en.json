@@ -150,7 +150,8 @@
       "title": "Export transcript as markdown"
     },
     "copy": {
-      "title": "Copy last assistant message (raw)"
+      "title": "Copy last assistant message (raw)",
+      "nothing": "No reply to copy."
     },
     "thinking": {
       "title": "Toggle expanded thinking"

@@ -140,18 +140,18 @@ function toggleSplit(): void {
 
 .corner {
   position: absolute;
-  top: 14px;
+  top: var(--corner-inset);
   z-index: 5;
   display: flex;
-  gap: 8px;
+  gap: var(--corner-gap);
 }
 
 .corner.left {
-  left: 14px;
+  left: var(--corner-inset);
 }
 
 .corner.right {
-  right: 14px;
+  right: var(--corner-inset);
 }
 
 .drawer-scrim {
