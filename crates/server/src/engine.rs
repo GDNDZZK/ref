@@ -149,6 +149,7 @@ where
     st.user_aborted = false;
     st.info.last_error = None;
     st.info.busy_since = Some(now_ms());
+    hub.emit_info(&st);
     let (hub2, s2) = (hub.clone(), s.clone());
     tokio::spawn(async move {
         f(hub2.clone(), s2.clone(), cancel).await;
