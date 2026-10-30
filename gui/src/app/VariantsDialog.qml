@@ -27,6 +27,7 @@ ModalDialog {
 			}
 
 			Text {
+				textFormat: Text.PlainText
 				anchors { left: parent.left; leftMargin: 22; right: check.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
 				text: row.modelData
 				color: Theme.text

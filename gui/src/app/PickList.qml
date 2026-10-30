@@ -78,6 +78,7 @@ Item {
 			Keys.onEnterPressed: event => pick.activateCurrent()
 
 			Text {
+				textFormat: Text.PlainText
 				anchors.fill: parent
 				verticalAlignment: Text.AlignVCenter
 				text: pick.placeholderText
@@ -137,6 +138,7 @@ Item {
 			height: Theme.sidebarSectionHeight
 
 			Text {
+				textFormat: Text.PlainText
 				x: 18
 				anchors.verticalCenter: parent.verticalCenter
 				text: pick.sectionLabel(parent.section)
@@ -161,6 +163,7 @@ Item {
 	}
 
 	Text {
+		textFormat: Text.PlainText
 		anchors { horizontalCenter: parent.horizontalCenter; top: divider.bottom; topMargin: 22 }
 		text: pick.emptyText
 		color: Theme.textMuted

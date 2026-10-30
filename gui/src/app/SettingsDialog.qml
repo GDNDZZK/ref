@@ -15,6 +15,7 @@ ModalDialog {
 		bottomPadding: 18
 
 		Text {
+			textFormat: Text.PlainText
 			width: parent.width
 			height: Theme.sidebarSectionHeight
 			leftPadding: 22
@@ -29,6 +30,7 @@ ModalDialog {
 			height: dialog.rowHeight
 
 			Text {
+				textFormat: Text.PlainText
 				x: 22
 				anchors.verticalCenter: parent.verticalCenter
 				text: qsTr("Theme")
@@ -55,6 +57,7 @@ ModalDialog {
 			height: dialog.rowHeight
 
 			Text {
+				textFormat: Text.PlainText
 				x: 22
 				anchors.verticalCenter: parent.verticalCenter
 				text: qsTr("Language")
@@ -84,6 +87,7 @@ ModalDialog {
 		}
 
 		TextEdit {
+			textFormat: TextEdit.PlainText
 			x: 22
 			width: parent.width - 2 * 22
 			topPadding: 14
