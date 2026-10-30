@@ -1107,6 +1107,56 @@ async fn busy_since_is_the_run_start_and_cleared_when_idle() {
 }
 
 #[tokio::test]
+async fn manual_compaction_never_shows_busy_since_while_idle() {
+    let m = mock(Arc::new(|n, _| match n {
+        0 => Reply::Text("answer".into()),
+        _ => Reply::Text("## Goal\n- summary".into()),
+    }))
+    .await;
+    let (hub, work) = hub(config(&m.url), "compact-busy");
+    let s = session(&hub, &work, "main", "build").await;
+    prompt(&hub, &s, "q");
+    wait_idle(&s).await;
+    let conn = hub.add_conn();
+    {
+        let mut c = conn.lock();
+        c.hello = true;
+        c.fg.insert(s.id.clone());
+    }
+    conn.out.drain();
+
+    ref_server::engine::start_custom_run(&hub, &s, ref_server::compaction::manual).unwrap();
+    assert_eq!(s.info().status, SessionStatus::Busy);
+    assert!(s.info().busy_since.is_some());
+    wait_idle(&s).await;
+    assert_eq!(s.info().status, SessionStatus::Idle);
+    assert_eq!(s.info().busy_since, None);
+
+    let infos: Vec<_> = conn
+        .out
+        .drain()
+        .into_iter()
+        .filter_map(|f| match f {
+            ref_proto::ServerFrame::Event {
+                event: SessionEvent::Info { info },
+                ..
+            } => Some(info),
+            _ => None,
+        })
+        .collect();
+    assert!(infos.iter().any(|i| i.status == SessionStatus::Compacting));
+    for i in &infos {
+        assert_eq!(
+            i.busy_since.is_some(),
+            !i.status.is_idle(),
+            "status {:?} with busy_since {:?}",
+            i.status,
+            i.busy_since
+        );
+    }
+}
+
+#[tokio::test]
 async fn create_session_must_report_and_close_rules() {
     let m = mock(Arc::new(|_, body| {
         let msgs = body["messages"].as_array().unwrap();
