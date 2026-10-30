@@ -6,15 +6,25 @@ import RefGui
 Item {
 	id: tile
 
-	required property int index
 	required property ChatSession session
 	required property string sessionId
+	required property bool leaving
+	required property int place
 
 	// Where the grid wants the tile, and whether it is the zoomed one.
 	property rect slot: Qt.rect(0, 0, 0, 0)
 	property rect zoomRect: Qt.rect(0, 0, 0, 0)
+	// The tile of the current session starts as the whole area when split view opens, and
+	// grows back to the whole area when it closes, in place of the single pane.
+	property bool takeover: false
+	readonly property bool growing: leaving && !Workspace.splitView && session !== null && session === Workspace.current
 	readonly property bool zoomed: Workspace.zoomedId === sessionId
+	readonly property bool expanded: zoomed || takeover || growing
+	readonly property bool fading: leaving && !growing
 	readonly property bool othersZoomed: Workspace.zoomedId !== "" && !zoomed
+	// Whether the tile moves between its slot and the whole area (slowly) or just reflows.
+	property bool travelling: expanded
+	readonly property int travelDuration: travelling || leaving ? Motion.slow : Motion.standard
 	readonly property bool focused: Workspace.focusedTileId === sessionId
 	readonly property var facts: live.data
 	readonly property bool hasPermission: facts.hasPermission === true
@@ -25,24 +35,51 @@ Item {
 		pane.focusInput()
 	}
 
-	x: zoomed ? zoomRect.x : slot.x
-	y: zoomed ? zoomRect.y : slot.y
-	width: zoomed ? zoomRect.width : slot.width
-	height: zoomed ? zoomRect.height : slot.height
-	z: zoomed ? 1 : 0
-	opacity: othersZoomed ? 0 : 1
-	scale: othersZoomed ? Motion.tileExitScale : 1
+	x: expanded ? zoomRect.x : slot.x
+	y: expanded ? zoomRect.y : slot.y
+	width: expanded ? zoomRect.width : slot.width
+	height: expanded ? zoomRect.height : slot.height
+	z: expanded ? 1 : fading ? -1 : 0
+	opacity: othersZoomed || fading ? 0 : 1
+	scale: othersZoomed || fading ? Motion.tileExitScale : 1
 	visible: opacity > 0
+	enabled: !leaving
 
-	Behavior on x { NumberAnimation { duration: tile.zoomed || Workspace.zoomedId !== "" ? Motion.slow : Motion.standard; easing.type: Motion.ease } }
-	Behavior on y { NumberAnimation { duration: tile.zoomed || Workspace.zoomedId !== "" ? Motion.slow : Motion.standard; easing.type: Motion.ease } }
-	Behavior on width { NumberAnimation { duration: tile.zoomed || Workspace.zoomedId !== "" ? Motion.slow : Motion.standard; easing.type: Motion.ease } }
-	Behavior on height { NumberAnimation { duration: tile.zoomed || Workspace.zoomedId !== "" ? Motion.slow : Motion.standard; easing.type: Motion.ease } }
-	Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-	Behavior on scale { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+	Behavior on x { NumberAnimation { duration: tile.travelDuration; easing.type: Motion.ease } }
+	Behavior on y { NumberAnimation { duration: tile.travelDuration; easing.type: Motion.ease } }
+	Behavior on width { NumberAnimation { duration: tile.travelDuration; easing.type: Motion.ease } }
+	Behavior on height { NumberAnimation { duration: tile.travelDuration; easing.type: Motion.ease } }
+	Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: tile.fading ? Motion.exitEase : Motion.ease } }
+	Behavior on scale { NumberAnimation { duration: Motion.standard; easing.type: tile.fading ? Motion.exitEase : Motion.ease } }
 
-	// A tile arrives by fading and growing into its slot.
-	Component.onCompleted: arrival.start()
+	// A tile that leaves stays where it was while it fades; the others reflow into its slot.
+	onLeavingChanged: {
+		if (leaving)
+			slot = Qt.rect(slot.x, slot.y, slot.width, slot.height)
+	}
+
+	onExpandedChanged: {
+		if (expanded) {
+			travelling = true
+			settle.stop()
+		} else {
+			settle.restart()
+		}
+	}
+
+	Timer {
+		id: settle
+		interval: Motion.slow
+		onTriggered: tile.travelling = false
+	}
+
+	// A tile arrives by fading and growing into its slot; the taking-over one by shrinking from the whole area.
+	Component.onCompleted: {
+		if (takeover)
+			Qt.callLater(() => tile.takeover = false)
+		else
+			arrival.start()
+	}
 	ParallelAnimation {
 		id: arrival
 		NumberAnimation { target: frame; property: "opacity"; from: 0; to: 1; duration: Motion.standard; easing.type: Motion.ease }
@@ -66,7 +103,7 @@ Item {
 		anchors.fill: parent
 		radius: Theme.radius
 		color: Theme.background
-		border.color: tile.focused || tile.zoomed ? Theme.accent : Theme.border
+		border.color: tile.focused || tile.expanded ? Theme.accent : Theme.border
 		clip: true
 
 		Behavior on border.color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
@@ -74,9 +111,9 @@ Item {
 		Rectangle {
 			id: header
 			width: parent.width
-			height: tile.zoomed ? 0 : Theme.tileHeaderHeight
+			height: tile.expanded ? 0 : Theme.tileHeaderHeight
 			color: tile.hasPermission ? Theme.warningSurface : Theme.surface
-			opacity: tile.zoomed ? 0 : 1
+			opacity: tile.expanded ? 0 : 1
 			clip: true
 
 			Behavior on height { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
@@ -98,6 +135,7 @@ Item {
 			}
 
 			Text {
+				textFormat: Text.PlainText
 				anchors { left: parent.left; leftMargin: 30; right: status.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
 				text: tile.facts.displayTitle ?? ""
 				color: Theme.text
@@ -124,6 +162,7 @@ Item {
 					visible: tile.failed
 				}
 				Text {
+					textFormat: Text.PlainText
 					anchors.verticalCenter: parent.verticalCenter
 					visible: tile.facts.todoTotal > 0
 					text: (tile.facts.todoAllDone ? "✓" : "") + tile.facts.todoDone + "/" + tile.facts.todoTotal
@@ -131,6 +170,7 @@ Item {
 					font.pixelSize: Theme.smallFontSize
 				}
 				Text {
+					textFormat: Text.PlainText
 					anchors.verticalCenter: parent.verticalCenter
 					visible: tile.facts.busySince > 0
 					text: Format.elapsed(tile.now - tile.facts.busySince)
@@ -165,7 +205,7 @@ Item {
 			id: pane
 			anchors { top: header.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
 			session: tile.session
-			compact: !tile.zoomed
+			compact: !tile.expanded
 		}
 
 		// A click anywhere in the tile focuses it, and its input box.

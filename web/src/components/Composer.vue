@@ -8,7 +8,6 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { SessionComposer } from '../composer/sessionComposer.ts'
-import { TAG_ROW_HEIGHT, TEXT_TAG_GAP, THUMB_GAP, THUMB_SIZE } from '../composer/metrics.ts'
 import type { ChatSession } from '../model/chatSession.ts'
 import { useCommandsStore } from '../stores/commands.ts'
 import { useConnectionStore } from '../stores/connection.ts'
@@ -24,8 +23,15 @@ import SendButton from './SendButton.vue'
 const props = defineProps<{ session: ChatSession; composer: SessionComposer }>()
 const emit = defineEmits<{ submitted: [] }>()
 
-const { padding: PADDING, maxInputHeight: MAX_INPUT_HEIGHT } = components.composer
-const TEXT_LEFT_EXTRA = 4
+const {
+  padding: PADDING,
+  maxInputHeight: MAX_INPUT_HEIGHT,
+  tagRowHeight: TAG_ROW_HEIGHT,
+  textGap: TEXT_TAG_GAP,
+  inputLeftInset: TEXT_LEFT_EXTRA,
+  thumbRowGap: THUMB_ROW_GAP,
+} = components.composer
+const { thumbSize: THUMB_SIZE } = components.attachmentStrip
 const SEND_BUTTON_SIZE = 32
 
 const { t } = useI18n()
@@ -41,7 +47,7 @@ const inputHeight = ref(SEND_BUTTON_SIZE)
 const dragDepth = ref(0) // drag events of the children come in pairs; the box is hovered while > 0
 
 const canSend = computed(() => draft.value.text.trim() !== '' || draft.value.attachments.length > 0)
-const stripHeight = computed(() => (draft.value.attachments.length > 0 ? THUMB_SIZE + THUMB_GAP : 0))
+const stripHeight = computed(() => (draft.value.attachments.length > 0 ? THUMB_SIZE + THUMB_ROW_GAP : 0))
 const boxHeight = computed(
   () => 2 * PADDING + stripHeight.value + inputHeight.value + TEXT_TAG_GAP + TAG_ROW_HEIGHT,
 )
@@ -410,18 +416,23 @@ defineExpose({ focus: () => input.value?.focus() })
   display: flex;
   flex: none;
   align-items: center;
-  gap: 8px;
-  margin-top: 4px;
+  gap: var(--composer-tags-hint-gap);
+  margin-top: var(--composer-text-gap);
 }
 
 .tag-row > :first-child {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
 }
 
+.tag-row > :last-child {
+  margin-left: auto;
+}
+
 .hint {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   max-width: 0; /* takes no room from the tags until it is shown */
   overflow: hidden;
   color: var(--text);

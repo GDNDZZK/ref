@@ -15,6 +15,7 @@ ModalDialog {
 		bottomPadding: 18
 
 		Text {
+			textFormat: Text.PlainText
 			width: parent.width
 			height: Theme.sidebarSectionHeight
 			leftPadding: 22
@@ -29,6 +30,7 @@ ModalDialog {
 			height: dialog.rowHeight
 
 			Text {
+				textFormat: Text.PlainText
 				x: 22
 				anchors.verticalCenter: parent.verticalCenter
 				text: qsTr("Theme")
@@ -55,6 +57,7 @@ ModalDialog {
 			height: dialog.rowHeight
 
 			Text {
+				textFormat: Text.PlainText
 				x: 22
 				anchors.verticalCenter: parent.verticalCenter
 				text: qsTr("Language")
@@ -77,13 +80,14 @@ ModalDialog {
 		Rectangle { x: 22; width: parent.width - 2 * 22; height: 1; color: Theme.border }
 
 		// The notification switches are the composer's part of the window.
-		Loader {
+		NotificationSettingsSection {
 			x: 22
 			width: parent.width - 2 * 22
-			Component.onCompleted: setSource("NotificationSettingsSection.qml", {settings: Workspace.settings})
+			settings: Workspace.settings
 		}
 
 		TextEdit {
+			textFormat: TextEdit.PlainText
 			x: 22
 			width: parent.width - 2 * 22
 			topPadding: 14

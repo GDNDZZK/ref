@@ -22,6 +22,7 @@ Rectangle {
 	Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 
 	Text {
+		textFormat: Text.PlainText
 		id: label
 		x: 14
 		y: 6

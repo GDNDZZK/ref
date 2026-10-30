@@ -284,7 +284,7 @@ function open(id: string): void {
   flex-direction: column;
   gap: 2px;
   min-height: 0;
-  max-height: max(50%, calc(3 * (var(--sidebar-row-height) + 2px)));
+  max-height: max(50%, calc(var(--sidebar-min-running-rows) * (var(--sidebar-row-height) + 2px)));
   overflow-y: auto;
 }
 

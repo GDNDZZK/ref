@@ -399,11 +399,15 @@ void TestWorkspace::splitViewWatchesAndComesBack()
 	QVERIFY(!f.stub.requests(u"attach"_s).last().value(u"foreground"_s).toBool());
 	QCOMPARE(f.workspace->focusedTileId(), u"ses_a"_s);
 	QCOMPARE(f.workspace->visibleSessionIds().size(), 2);
+	QCOMPARE(f.workspace->tileStage()->placed(), 2);
 
 	f.workspace->toggleSplit();
 
 	QTRY_VERIFY(!f.workspace->isSplitView());
 	QCOMPARE(f.workspace->tiles()->rowCount(), 0);
+	// The stage lets the tiles go after their exit animation.
+	QCOMPARE(f.workspace->tileStage()->placed(), 0);
+	QTRY_COMPARE(f.workspace->tileStage()->rowCount(), 0);
 	QTRY_COMPARE(f.stub.requests(u"watch_all"_s).size(), 2);
 	QVERIFY(!f.stub.requests(u"watch_all"_s).last().value(u"enabled"_s).toBool());
 	QTRY_VERIFY(f.stub.requests(u"attach"_s).last().value(u"foreground"_s).toBool());
