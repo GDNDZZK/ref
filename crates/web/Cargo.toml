@@ -1,0 +1,37 @@
+[package]
+name = "ref-web"
+version.workspace = true
+edition.workspace = true
+build = "build.rs"
+
+[[bin]]
+name = "ref-web"
+path = "src/main.rs"
+
+[dependencies]
+ref-client.workspace = true
+ref-proto.workspace = true
+axum.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures-util.workspace = true
+serde.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+rand.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+open.workspace = true
+tokio-tungstenite.workspace = true
+
+[build-dependencies]
+brotli.workspace = true
+flate2.workspace = true
+
+[dev-dependencies]
+ref-server.workspace = true
+ref-config.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+brotli.workspace = true
+flate2.workspace = true
