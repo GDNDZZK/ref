@@ -4,10 +4,12 @@
 //   assistant message     -> per part: text -> markdown / code blocks (cut at code fences)
 //                                      reasoning -> reasoning block, tool -> tool block
 //                            then the message's error, if it ended in one
+//   compaction message    -> one compaction block
+//   every other message   -> ends with a meta block
 
 import type { Message, PermissionRequest } from '../proto/generated'
 import { isFinalToolState } from './blocks.ts'
-import type { Block, UserBlock, UserSource } from './blocks.ts'
+import type { Block, CompactionBlock, ImageRef, MetaBlock, UserBlock, UserSource } from './blocks.ts'
 import type { PartView } from './partView.ts'
 import { partialPurpose } from './toolArgs.ts'
 
@@ -20,6 +22,8 @@ export interface BuildContext {
   sessionBusy: boolean
   hasOlderRows: boolean // messages exist above the first loaded one
   isFirst: boolean // the first loaded message
+  stale: boolean // before the last compaction
+  lastCompaction: boolean // this is the last compaction message
   isPacing(partIndex: number): boolean // the pacer still holds text of that part
   permissions: ReadonlyMap<string, PermissionRequest>
 }
@@ -27,8 +31,21 @@ export interface BuildContext {
 const INTERRUPTED = 'aborted' // the error text of a turn the user interrupted; not shown as an error
 const TURN_OPENING_SOURCES: UserSource[] = ['human', 'peer', 'spawn']
 
+export function messageText(message: Message): string {
+  return message.parts.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join('\n\n')
+}
+
+function imageRef(image: {
+  name?: string | null
+  mime: string
+  id?: string | null
+  size?: number | null
+}): ImageRef {
+  return { id: image.id ?? null, name: image.name ?? null, mime: image.mime, size: image.size ?? null }
+}
+
 function userBlock(message: Message, context: BuildContext): UserBlock {
-  const text = message.parts.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join('\n\n')
+  const text = messageText(message)
   const source = message.source.kind
   const senderName =
     message.source.kind === 'peer' || message.source.kind === 'spawn' ? message.source.from_name : undefined
@@ -38,11 +55,53 @@ function userBlock(message: Message, context: BuildContext): UserBlock {
     key: `${message.id}:user`,
     messageId: message.id,
     streaming: false,
+    stale: context.stale,
     text,
     source,
     senderName,
     opensTurn: startsTurn,
+    images: message.parts.flatMap((part) => (part.type === 'image' ? [imageRef(part)] : [])),
   }
+}
+
+function compactionBlock(message: Message, context: BuildContext): CompactionBlock {
+  return {
+    kind: 'compaction',
+    key: `${message.id}:compaction`,
+    messageId: message.id,
+    streaming: false,
+    stale: context.stale,
+    text: messageText(message),
+    time: message.time,
+    last: context.lastCompaction,
+  }
+}
+
+function metaBlock(message: Message, context: BuildContext, open: boolean): MetaBlock {
+  const { usage } = message
+  return {
+    kind: 'meta',
+    key: `${message.id}:meta`,
+    messageId: message.id,
+    streaming: open,
+    stale: context.stale,
+    role: message.role,
+    source: message.source.kind,
+    time: message.time,
+    timeEnd: message.time_end,
+    agent: message.agent,
+    model: message.model?.model ?? null,
+    variant: message.model?.variant ?? null,
+    tokensIn: usage ? usage.input + usage.cache_read + usage.cache_write : 0,
+    tokensOut: usage?.output ?? 0,
+    interrupted: isInterrupted(message),
+    failed: message.error !== null && !isInterrupted(message),
+    canUndo: message.role === 'user' && message.source.kind === 'human',
+  }
+}
+
+function isInterrupted(message: Message): boolean {
+  return message.error?.toLowerCase() === INTERRUPTED
 }
 
 function assistantBlocks(entry: MessageEntry, context: BuildContext): Block[] {
@@ -53,7 +112,7 @@ function assistantBlocks(entry: MessageEntry, context: BuildContext): Block[] {
 
   message.parts.forEach((part, index) => {
     const streaming = context.isPacing(index) || (open && index === lastIndex)
-    const base = { messageId: message.id }
+    const base = { messageId: message.id, stale: context.stale }
 
     if (part.type === 'tool') {
       blocks.push({
@@ -73,6 +132,7 @@ function assistantBlocks(entry: MessageEntry, context: BuildContext): Block[] {
         timeEnd: part.time_end,
         runAt: part.run_at ?? null,
         permission: context.permissions.get(part.call_id),
+        images: (part.images ?? []).map(imageRef),
       })
       return
     }
@@ -109,19 +169,24 @@ function assistantBlocks(entry: MessageEntry, context: BuildContext): Block[] {
   })
 
   const pacing = message.parts.some((_, index) => context.isPacing(index))
-  const failed = message.error !== null && message.error.toLowerCase() !== INTERRUPTED
+  const failed = message.error !== null && !isInterrupted(message)
   if (failed && !pacing) {
     blocks.push({
       kind: 'error',
       key: `${message.id}:error`,
       messageId: message.id,
       streaming: false,
+      stale: context.stale,
       text: message.error!,
     })
   }
+  blocks.push(metaBlock(message, context, open || pacing))
   return blocks
 }
 
 export function buildBlocks(entry: MessageEntry, context: BuildContext): Block[] {
-  return entry.message.role === 'user' ? [userBlock(entry.message, context)] : assistantBlocks(entry, context)
+  const { message } = entry
+  if (message.role === 'assistant') return assistantBlocks(entry, context)
+  if (message.source.kind === 'compaction') return [compactionBlock(message, context)]
+  return [userBlock(message, context), metaBlock(message, context, false)]
 }

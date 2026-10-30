@@ -11,6 +11,7 @@ import { ChatSession } from '../model/chatSession.ts'
 import type { EventFrame } from '../net/connection.ts'
 import type { ModelRef, SessionInfo } from '../proto/generated'
 import { useConnectionStore } from './connection.ts'
+import { emitDraftRestored } from './draftBus.ts'
 import { useNoticesStore } from './notices.ts'
 
 export interface NewSessionOptions {
@@ -24,6 +25,8 @@ export interface NewSessionOptions {
 export function sortLive(sessions: readonly SessionInfo[]): SessionInfo[] {
   return [...sessions].sort((a, b) => a.created_at - b.created_at || a.id.localeCompare(b.id))
 }
+
+const ERROR_TOAST_MAX_CHARS = 200
 
 export const useWorkspaceStore = defineStore('workspace', () => {
   const connection = useConnectionStore()
@@ -44,11 +47,23 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const info = live.value.find((candidate) => candidate.id === id)
     const created = new ChatSession(
       id,
-      { api: () => connection.getApi(), notify: (level, text) => notices.push(level, text) },
+      {
+        api: () => connection.getApi(),
+        notify: (level, text) => notices.push(level, text),
+        sessionError,
+        draftRestored: emitDraftRestored,
+      },
       info,
     )
     chats.set(id, created)
     return created
+  }
+
+  // The open session shows its error in the conversation; any other one says which it is about.
+  function sessionError(session: ChatSession, text: string): void {
+    if (session.id === currentId.value) return
+    const line = text.split('\n')[0]!.slice(0, ERROR_TOAST_MAX_CHARS)
+    notices.push('error', `${session.info?.name ?? session.id}: ${line}`)
   }
 
   // Makes `id` the open session, attached in the foreground. The one shown before is detached.
