@@ -49,6 +49,12 @@ private slots:
 	void resetReplacesEverything();
 	void ignoresUnknownMessages();
 	void replacingAMessageKeepsRowIdentity();
+	void everyMessageEndsWithAMetaLine();
+	void marksMessagesBeforeTheLastCompaction();
+	void keepsTheTailErrorLast();
+	void togglesFoldingAgainstTheDefault();
+	void carriesToolMetaAndImages();
+	void givesMessageTexts();
 };
 
 void TestConversationModel::splitsAssistantTextIntoBlocks()
@@ -101,10 +107,10 @@ void TestConversationModel::marksOnlyTheLastBlockStreaming()
 
 	model.setMessage(assistant(u"a1"_s, {reasoning(u"hm"_s, false), text(u"Hello ```"_s)}, false));
 	QCOMPARE(streamingRowCount(model), 1);
-	QVERIFY(roleOf(model, model.rowCount() - 1, ConversationModel::StreamingRole).toBool());
+	QVERIFY(roleOf(model, contentRowCount(model) - 1, ConversationModel::StreamingRole).toBool());
 
 	model.setMessage(assistant(u"a2"_s, {text(u"Running"_s), tool(u"bash"_s, u"x"_s, ToolState::Running)}, false));
-	const int tools = model.rowCount() - 1;
+	const int tools = contentRowCount(model) - 1;
 	QVERIFY(roleOf(model, tools, ConversationModel::StreamingRole).toBool());
 	QVERIFY(!roleOf(model, tools - 1, ConversationModel::StreamingRole).toBool());
 }
@@ -293,11 +299,11 @@ void TestConversationModel::prependKeepsRowsBelow()
 	QCOMPARE(render(model), (QStringList{u"user:oldest"_s, u"markdown:old reply"_s, u"user:newer"_s}));
 	QCOMPARE(inserted.count(), 1);
 	QCOMPARE(inserted.first().at(1).toInt(), 0);
-	QCOMPARE(inserted.first().at(2).toInt(), 1);
+	QCOMPARE(inserted.first().at(2).toInt(), 3); // each message also brings its meta line
 	QCOMPARE(resets.count(), 0);
 	QVERIFY(roleOf(model, 2, ConversationModel::OpensTurnRole).toBool());
 	QCOMPARE(changed.count(), 1); // the former first row now opens a turn
-	QCOMPARE(changed.first().at(0).value<QModelIndex>().row(), 2);
+	QCOMPARE(changed.first().at(0).value<QModelIndex>().row(), 4);
 }
 
 void TestConversationModel::resetReplacesEverything()
@@ -339,10 +345,168 @@ void TestConversationModel::replacingAMessageKeepsRowIdentity()
 	model.setMessage(assistant(u"a1"_s, {text(u"First."_s), tool(u"bash"_s, u"run"_s, ToolState::Running)}, false));
 
 	QCOMPARE(inserted.count(), 1);
-	QCOMPARE(inserted.first().at(1).toInt(), 2);
+	QCOMPARE(inserted.first().at(1).toInt(), 3); // between the text and the meta line, after the user's two rows
 	QCOMPARE(removed.count(), 0);
 	QCOMPARE(resets.count(), 0);
 	QCOMPARE(render(model), (QStringList{u"user:go"_s, u"markdown:First."_s, u"tool:bash run"_s}));
+}
+
+namespace
+{
+
+int rowOfKind(const ConversationModel& model, const QString& kind, int nth = 0)
+{
+	for(int row = 0; row < model.rowCount(); ++row)
+	{
+		if(model.index(row).data(ConversationModel::KindRole).toString() == kind && nth-- == 0)
+		{
+			return row;
+		}
+	}
+	return -1;
+}
+
+} // namespace
+
+void TestConversationModel::everyMessageEndsWithAMetaLine()
+{
+	ConversationModel model;
+	QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
+	refgui::proto::Message reply = assistant(u"a1"_s, {text(u"Hi"_s)});
+	reply.agent = u"build"_s;
+	reply.model = refgui::proto::ModelRef{.provider = u"p"_s, .model = u"m1"_s, .variant = u"high"_s};
+	reply.usage = refgui::proto::Usage{.input = 10, .output = 5, .cacheRead = 100, .cacheWrite = 1};
+	model.setMessage(user(u"u1"_s, u"go"_s));
+	model.setMessage(reply);
+
+	QCOMPARE(model.rowCount(), 4);
+	const int userMeta = rowOfKind(model, u"meta"_s, 0);
+	const int replyMeta = rowOfKind(model, u"meta"_s, 1);
+	QCOMPARE(userMeta, 1);
+	QCOMPARE(replyMeta, 3);
+	QVERIFY(model.index(userMeta).data(ConversationModel::HumanRole).toBool());
+	QVERIFY(!model.index(replyMeta).data(ConversationModel::HumanRole).toBool());
+	QCOMPARE(model.index(replyMeta).data(ConversationModel::AgentRole).toString(), u"build"_s);
+	QCOMPARE(model.index(replyMeta).data(ConversationModel::ModelIdRole).toString(), u"m1"_s);
+	QCOMPARE(model.index(replyMeta).data(ConversationModel::VariantRole).toString(), u"high"_s);
+	QCOMPARE(model.index(replyMeta).data(ConversationModel::TokensInRole).toULongLong(), 111ULL);
+	QCOMPARE(model.index(replyMeta).data(ConversationModel::TokensOutRole).toULongLong(), 5ULL);
+	QCOMPARE(model.index(replyMeta).data(ConversationModel::TimeEndRole).toLongLong(), 2LL);
+
+	refgui::proto::Message stopped = assistant(u"a2"_s, {}, false);
+	stopped.error = u"Aborted"_s;
+	model.setMessage(stopped);
+	const int stoppedMeta = rowOfKind(model, u"meta"_s, 2);
+	QVERIFY(model.index(stoppedMeta).data(ConversationModel::InterruptedRole).toBool());
+	QVERIFY(!model.index(stoppedMeta).data(ConversationModel::ErroredRole).toBool());
+	QCOMPARE(rowOfKind(model, u"error"_s), -1);
+}
+
+void TestConversationModel::marksMessagesBeforeTheLastCompaction()
+{
+	ConversationModel model;
+	QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
+	model.setMessage(user(u"u1"_s, u"old"_s));
+	model.setMessage(assistant(u"a1"_s, {text(u"old reply"_s)}));
+	QVERIFY(!roleOf(model, 0, ConversationModel::StaleRole).toBool());
+
+	model.setMessage(user(u"c1"_s, u"summary"_s, {.kind = refgui::proto::MessageSource::Kind::Compaction}));
+	model.setMessage(user(u"u2"_s, u"new"_s));
+
+	QCOMPARE(render(model), (QStringList{u"user:old"_s, u"markdown:old reply"_s, u"user:summary"_s, u"user:new"_s}));
+	QVERIFY(roleOf(model, 0, ConversationModel::StaleRole).toBool());
+	QVERIFY(roleOf(model, 1, ConversationModel::StaleRole).toBool());
+	QVERIFY(!roleOf(model, 2, ConversationModel::StaleRole).toBool());
+	QVERIFY(roleOf(model, 2, ConversationModel::ContextStartRole).toBool());
+	QVERIFY(!roleOf(model, 3, ConversationModel::StaleRole).toBool());
+	QCOMPARE(rowOfKind(model, u"meta"_s, 2), 6); // the summary has no meta line: its divider says it all
+	QVERIFY(model.index(0).data(ConversationModel::StaleRole).toBool());
+
+	model.removeMessage(u"c1"_s);
+	QVERIFY(!roleOf(model, 0, ConversationModel::StaleRole).toBool());
+}
+
+void TestConversationModel::keepsTheTailErrorLast()
+{
+	ConversationModel model;
+	QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
+	model.setMessage(user(u"u1"_s, u"go"_s));
+	model.setTailError(u"offline"_s);
+	QCOMPARE(model.rowCount(), 3);
+	QCOMPARE(model.index(2).data(ConversationModel::KindRole).toString(), u"error"_s);
+
+	model.setMessage(assistant(u"a1"_s, {text(u"Hi"_s)}));
+	QCOMPARE(model.rowCount(), 5);
+	QCOMPARE(model.index(4).data(ConversationModel::ContentRole).toString(), u"offline"_s);
+	QCOMPARE(model.index(2).data(ConversationModel::KindRole).toString(), u"markdown"_s);
+
+	model.setTailError(u"still offline"_s);
+	QCOMPARE(model.index(4).data(ConversationModel::ContentRole).toString(), u"still offline"_s);
+	model.setTailError({});
+	QCOMPARE(model.rowCount(), 4);
+}
+
+void TestConversationModel::togglesFoldingAgainstTheDefault()
+{
+	ConversationModel model;
+	QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
+	model.setMessage(assistant(u"a1"_s, {reasoning(u"hm"_s), tool(u"bash"_s, u"x"_s, ToolState::Done)}));
+	QVERIFY(!roleOf(model, 0, ConversationModel::ExpandedRole).toBool());
+	QVERIFY(!roleOf(model, 1, ConversationModel::ExpandedRole).toBool());
+
+	model.toggleExpanded(0);
+	QVERIFY(roleOf(model, 0, ConversationModel::ExpandedRole).toBool());
+	QVERIFY(!roleOf(model, 1, ConversationModel::ExpandedRole).toBool());
+
+	model.setDefaultExpansion(false, true); // "show tools" also forgets the single flips
+	QVERIFY(!roleOf(model, 0, ConversationModel::ExpandedRole).toBool());
+	QVERIFY(roleOf(model, 1, ConversationModel::ExpandedRole).toBool());
+	model.toggleExpanded(1);
+	QVERIFY(!roleOf(model, 1, ConversationModel::ExpandedRole).toBool());
+
+	// A flip stays with the part when the message is replaced.
+	model.setMessage(assistant(u"a1"_s, {reasoning(u"hmm"_s), tool(u"bash"_s, u"x"_s, ToolState::Done)}));
+	QVERIFY(!roleOf(model, 1, ConversationModel::ExpandedRole).toBool());
+}
+
+void TestConversationModel::carriesToolMetaAndImages()
+{
+	ConversationModel model;
+	QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
+	refgui::proto::ToolPart running{.callId = u"c1"_s, .name = u"bash"_s, .state = ToolState::Running, .time = 5};
+	running.meta = QJsonObject{{u"live_output"_s, u"tail"_s}, {u"exit_code"_s, 0}};
+	running.runAt = 99;
+	refgui::proto::ToolPart finished = running;
+	finished.state = ToolState::Done;
+	finished.timeEnd = 8;
+	finished.images = {refgui::proto::ImageData{.mime = u"image/png"_s, .data = {}, .id = u"a1:0:0"_s, .size = 12}};
+
+	model.setMessage(assistant(u"a1"_s, {running}, false));
+	QCOMPARE(roleOf(model, 0, ConversationModel::LiveOutputRole).toString(), u"tail"_s);
+	QVERIFY(!roleOf(model, 0, ConversationModel::MetaRole).toMap().contains(u"live_output"_s));
+	QCOMPARE(roleOf(model, 0, ConversationModel::RunAtRole).toLongLong(), 99LL);
+
+	model.setMessage(assistant(u"a1"_s, {finished}, false));
+	QCOMPARE(roleOf(model, 0, ConversationModel::TimeEndRole).toLongLong(), 8LL);
+	const QVariantList images = roleOf(model, 0, ConversationModel::ImagesRole).toList();
+	QCOMPARE(images.size(), 1);
+	QCOMPARE(images.first().toMap().value(u"id"_s).toString(), u"a1:0:0"_s);
+	QCOMPARE(images.first().toMap().value(u"size"_s).toLongLong(), 12LL);
+}
+
+void TestConversationModel::givesMessageTexts()
+{
+	ConversationModel model;
+	QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
+	QVERIFY(model.lastReplyId().isEmpty());
+	model.setMessage(user(u"u1"_s, u"go"_s));
+	model.setMessage(assistant(u"a1"_s, {text(u"one"_s), tool(u"bash"_s, u"x"_s, ToolState::Done), text(u"two"_s)}));
+	model.setMessage(assistant(u"a2"_s, {tool(u"bash"_s, u"y"_s, ToolState::Done)}));
+
+	QCOMPARE(model.messageText(u"a1"_s), u"one\n\ntwo"_s);
+	QCOMPARE(model.lastReplyId(), u"a1"_s);
+	QCOMPARE(model.firstMessageId(), u"u1"_s);
+	QVERIFY(!model.messageText(u"nope"_s));
 }
 
 QTEST_GUILESS_MAIN(TestConversationModel)

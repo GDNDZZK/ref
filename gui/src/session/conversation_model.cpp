@@ -3,6 +3,8 @@
 
 #include <QDateTime>
 
+#include <algorithm>
+
 #include <utility>
 
 using namespace Qt::StringLiterals;
@@ -41,6 +43,19 @@ QList<int> changedRoles(const Block& before, const Block& after)
 		{Role::InputJsonRole, before.inputJson != after.inputJson},
 		{Role::RawInputRole, before.rawInput != after.rawInput},
 		{Role::CallIdRole, before.callId != after.callId},
+		{Role::TimeEndRole, before.timeEnd != after.timeEnd},
+		{Role::RunAtRole, before.runAt != after.runAt},
+		{Role::MetaRole, before.meta != after.meta},
+		{Role::LiveOutputRole, before.liveOutput != after.liveOutput},
+		{Role::ImagesRole, before.images != after.images},
+		{Role::AgentRole, before.agent != after.agent},
+		{Role::ModelIdRole, before.modelId != after.modelId},
+		{Role::VariantRole, before.variant != after.variant},
+		{Role::TokensInRole, before.tokensIn != after.tokensIn},
+		{Role::TokensOutRole, before.tokensOut != after.tokensOut},
+		{Role::InterruptedRole, before.interrupted != after.interrupted},
+		{Role::ErroredRole, before.errored != after.errored},
+		{Role::HumanRole, before.human != after.human},
 	};
 	QList<int> roles;
 	for(const auto& [role, differs] : differences)
@@ -51,6 +66,16 @@ QList<int> changedRoles(const Block& before, const Block& after)
 		}
 	}
 	return roles;
+}
+
+QVariantList imagesToVariant(const QList<Block::ImageRef>& images)
+{
+	QVariantList list;
+	for(const Block::ImageRef& image : images)
+	{
+		list.append(QVariantMap{{u"id"_s, image.id}, {u"mime"_s, image.mime}, {u"size"_s, image.size}, {u"name"_s, image.name}});
+	}
+	return list;
 }
 
 // What a delta for a part not seen yet creates, same as the terminal client does.
@@ -83,13 +108,27 @@ QList<proto::Part> partsOf(const auto& nodes)
 
 int ConversationModel::rowCount(const QModelIndex& parent) const
 {
-	return parent.isValid() ? 0 : static_cast<int>(m_rows.size());
+	return parent.isValid() ? 0 : static_cast<int>(m_rows.size()) + (m_tailError.isEmpty() ? 0 : 1);
+}
+
+// The tail error is the row after the last of `m_rows`.
+const Block& ConversationModel::blockAt(qsizetype row) const
+{
+	return row < m_rows.size() ? m_rows.at(row) : m_tailBlock;
+}
+
+bool ConversationModel::isExpanded(const Block& block) const
+{
+	const bool isCompaction = block.kind == Block::Kind::User && block.source == u"compaction"_s;
+	const bool defaultExpanded = block.kind == Block::Kind::Reasoning ? m_reasoningExpanded : block.kind == Block::Kind::Tool ? m_toolsExpanded : false;
+	const bool foldable = isCompaction || block.kind == Block::Kind::Reasoning || block.kind == Block::Kind::Tool;
+	return foldable && defaultExpanded != m_toggled.contains({block.messageId, block.partIndex});
 }
 
 QVariant ConversationModel::data(const QModelIndex& index, int role) const
 {
 	Q_ASSERT(checkIndex(index, CheckIndexOption::IndexIsValid | CheckIndexOption::ParentIsInvalid));
-	const Block& block = m_rows.at(index.row());
+	const Block& block = blockAt(index.row());
 
 	switch(role)
 	{
@@ -129,6 +168,40 @@ QVariant ConversationModel::data(const QModelIndex& index, int role) const
 		return block.rawInput;
 	case CallIdRole:
 		return block.callId;
+	case TimeEndRole:
+		return block.timeEnd;
+	case RunAtRole:
+		return block.runAt;
+	case MetaRole:
+		return block.meta.toVariantMap();
+	case LiveOutputRole:
+		return block.liveOutput;
+	case ImagesRole:
+		return imagesToVariant(block.images);
+	case AgentRole:
+		return block.agent;
+	case ModelIdRole:
+		return block.modelId;
+	case VariantRole:
+		return block.variant;
+	case TokensInRole:
+		return block.tokensIn;
+	case TokensOutRole:
+		return block.tokensOut;
+	case InterruptedRole:
+		return block.interrupted;
+	case ErroredRole:
+		return block.errored;
+	case HumanRole:
+		return block.human;
+	case StaleRole:
+		return block.stale;
+	case ContextStartRole:
+		return block.contextStart;
+	case ExpandedRole:
+		return isExpanded(block);
+	case ShowAllRole:
+		return m_shownAll.contains({block.messageId, block.partIndex});
 	default:
 		return {};
 	}
@@ -155,6 +228,23 @@ QHash<int, QByteArray> ConversationModel::roleNames() const
 		{InputJsonRole, "inputJson"},
 		{RawInputRole, "rawInput"},
 		{CallIdRole, "callId"},
+		{TimeEndRole, "timeEnd"},
+		{RunAtRole, "runAt"},
+		{MetaRole, "meta"},
+		{LiveOutputRole, "liveOutput"},
+		{ImagesRole, "images"},
+		{AgentRole, "agent"},
+		{ModelIdRole, "modelId"},
+		{VariantRole, "variant"},
+		{TokensInRole, "tokensIn"},
+		{TokensOutRole, "tokensOut"},
+		{InterruptedRole, "interrupted"},
+		{ErroredRole, "errored"},
+		{HumanRole, "human"},
+		{StaleRole, "stale"},
+		{ContextStartRole, "contextStart"},
+		{ExpandedRole, "expanded"},
+		{ShowAllRole, "showAll"},
 	};
 }
 
@@ -173,6 +263,7 @@ void ConversationModel::reset(const QList<proto::Message>& messages)
 	m_messages = std::move(nodes);
 	m_rows = std::move(rows);
 	endResetModel();
+	refreshContext();
 }
 
 void ConversationModel::prependMessages(const QList<proto::Message>& older)
@@ -188,6 +279,7 @@ void ConversationModel::prependMessages(const QList<proto::Message>& older)
 	if(rows.isEmpty())
 	{
 		m_messages = nodes + m_messages;
+		refreshContext();
 		return;
 	}
 
@@ -202,6 +294,7 @@ void ConversationModel::prependMessages(const QList<proto::Message>& older)
 	{
 		notifyOpensTurn(added); // the former first row now has something above it
 	}
+	refreshContext();
 }
 
 void ConversationModel::setMessage(const proto::Message& message)
@@ -225,6 +318,7 @@ void ConversationModel::setMessage(const proto::Message& message)
 	m_messages.append(std::move(node));
 	m_rows += rows;
 	endInsertRows();
+	refreshContext();
 }
 
 bool ConversationModel::setPart(const QString& messageId, qsizetype index, const proto::Part& part)
@@ -327,6 +421,7 @@ void ConversationModel::removeMessage(const QString& messageId)
 	{
 		notifyOpensTurn(0);
 	}
+	refreshContext();
 }
 
 std::optional<QString> ConversationModel::partText(const QString& messageId, qsizetype index) const
@@ -352,6 +447,162 @@ qsizetype ConversationModel::partCount(const QString& messageId) const
 {
 	const qsizetype messageIndex = indexOf(messageId);
 	return messageIndex < 0 ? -1 : m_messages.at(messageIndex).parts.size();
+}
+
+std::optional<QString> ConversationModel::messageText(const QString& messageId) const
+{
+	const qsizetype messageIndex = indexOf(messageId);
+	if(messageIndex < 0)
+	{
+		return std::nullopt;
+	}
+	QStringList texts;
+	for(const PartNode& node : m_messages.at(messageIndex).parts)
+	{
+		if(const auto* text = std::get_if<proto::TextPart>(&node.part))
+		{
+			texts.append(text->text);
+		}
+	}
+	return texts.join(u"\n\n"_s);
+}
+
+QString ConversationModel::lastReplyId() const
+{
+	for(qsizetype i = m_messages.size() - 1; i >= 0; --i)
+	{
+		const MessageNode& node = m_messages.at(i);
+		const auto isText = [](const PartNode& part) { return std::holds_alternative<proto::TextPart>(part.part); };
+		if(node.header.role == proto::Role::Assistant && std::ranges::any_of(node.parts, isText))
+		{
+			return node.header.id;
+		}
+	}
+	return {};
+}
+
+QString ConversationModel::firstMessageId() const
+{
+	return m_messages.isEmpty() ? QString() : m_messages.first().header.id;
+}
+
+void ConversationModel::setTailError(const QString& text)
+{
+	if(text == m_tailError)
+	{
+		return;
+	}
+	const int row = static_cast<int>(m_rows.size());
+	m_tailBlock = {.kind = Block::Kind::Error, .content = text, .partIndex = -1};
+	if(m_tailError.isEmpty())
+	{
+		beginInsertRows({}, row, row);
+		m_tailError = text;
+		endInsertRows();
+	}
+	else if(text.isEmpty())
+	{
+		beginRemoveRows({}, row, row);
+		m_tailError.clear();
+		endRemoveRows();
+	}
+	else
+	{
+		m_tailError = text;
+		emit dataChanged(index(row), index(row), {ContentRole});
+	}
+}
+
+void ConversationModel::setDefaultExpansion(bool reasoning, bool tools)
+{
+	// "Show all" and "hide all" overrule what the user flipped one by one.
+	m_toggled.clear();
+	m_reasoningExpanded = reasoning;
+	m_toolsExpanded = tools;
+	for(qsizetype row = 0; row < m_rows.size(); ++row)
+	{
+		if(m_rows.at(row).kind == Block::Kind::Reasoning || m_rows.at(row).kind == Block::Kind::Tool)
+		{
+			emitRoleChanged(row, ExpandedRole);
+		}
+	}
+}
+
+void ConversationModel::toggleExpanded(int row)
+{
+	if(row < 0 || row >= m_rows.size())
+	{
+		return;
+	}
+	const Block& block = m_rows.at(row);
+	const PartKey key{block.messageId, block.partIndex};
+	if(!m_toggled.remove(key))
+	{
+		m_toggled.insert(key);
+	}
+	emitRoleChanged(row, ExpandedRole);
+}
+
+void ConversationModel::toggleShowAll(int row)
+{
+	if(row < 0 || row >= m_rows.size())
+	{
+		return;
+	}
+	const Block& block = m_rows.at(row);
+	const PartKey key{block.messageId, block.partIndex};
+	if(!m_shownAll.remove(key))
+	{
+		m_shownAll.insert(key);
+	}
+	emitRoleChanged(row, ShowAllRole);
+}
+
+void ConversationModel::emitRoleChanged(qsizetype row, int role)
+{
+	const QModelIndex changed = index(static_cast<int>(row));
+	emit dataChanged(changed, changed, {role});
+}
+
+void ConversationModel::refreshContext()
+{
+	qsizetype lastCompaction = -1;
+	for(qsizetype i = 0; i < m_messages.size(); ++i)
+	{
+		const proto::Message& header = m_messages.at(i).header;
+		if(header.role == proto::Role::User && header.source.kind == proto::MessageSource::Kind::Compaction)
+		{
+			lastCompaction = i;
+		}
+	}
+
+	qsizetype row = 0;
+	for(qsizetype i = 0; i < m_messages.size(); ++i)
+	{
+		const bool stale = i < lastCompaction;
+		const bool contextStart = i == lastCompaction && i > 0;
+		for(qsizetype n = m_messages.at(i).rows(); n > 0; --n, ++row)
+		{
+			Block& block = m_rows[row];
+			QList<int> roles;
+			if(block.stale != stale)
+			{
+				roles.append(StaleRole);
+			}
+			if(block.contextStart != contextStart)
+			{
+				roles.append(ContextStartRole);
+			}
+			if(roles.isEmpty())
+			{
+				continue;
+			}
+			block.stale = stale;
+			block.contextStart = contextStart;
+			const QModelIndex changed = index(static_cast<int>(row));
+			emit dataChanged(changed, changed, roles);
+		}
+	}
 }
 
 ConversationModel::MessageNode ConversationModel::makeNode(proto::Message message)
@@ -403,15 +654,9 @@ qsizetype ConversationModel::firstRowOfPart(qsizetype messageIndex, qsizetype pa
 QList<Block> ConversationModel::buildRows(MessageNode& node)
 {
 	node.partRows = 0;
-	if(node.header.role == proto::Role::User)
-	{
-		const QList<Block> rows = userBlocks(node.header, partsOf(node.parts));
-		node.ownRows = rows.size();
-		return rows;
-	}
-
 	QList<Block> rows;
-	for(qsizetype i = 0; i < node.parts.size(); ++i)
+	const bool isAssistant = node.header.role == proto::Role::Assistant;
+	for(qsizetype i = 0; isAssistant && i < node.parts.size(); ++i)
 	{
 		PartNode& part = node.parts[i];
 		part.streaming = isPartStreaming(node.header, part.part, i == node.parts.size() - 1);
@@ -421,9 +666,15 @@ QList<Block> ConversationModel::buildRows(MessageNode& node)
 		node.partRows += part.rows;
 		rows += blocks;
 	}
-	const QList<Block> error = errorBlocks(node.header);
-	node.ownRows = error.size();
-	return rows + error;
+	const QList<Block> own = ownBlocks(node);
+	node.ownRows = own.size();
+	return rows + own;
+}
+
+QList<Block> ConversationModel::ownBlocks(const MessageNode& node)
+{
+	const QList<Block> content = node.header.role == proto::Role::User ? userBlocks(node.header, partsOf(node.parts)) : errorBlocks(node.header);
+	return content + metaBlocks(node.header);
 }
 
 void ConversationModel::rebuildPart(qsizetype messageIndex, qsizetype partIndex)
@@ -445,8 +696,7 @@ void ConversationModel::rebuildOwnRows(qsizetype messageIndex)
 	MessageNode& node = m_messages[messageIndex];
 	const qsizetype first = firstRowOf(messageIndex) + node.partRows;
 
-	const bool isUser = node.header.role == proto::Role::User;
-	const QList<Block> rows = isUser ? userBlocks(node.header, partsOf(node.parts)) : errorBlocks(node.header);
+	const QList<Block> rows = ownBlocks(node);
 	replaceRows(first, node.ownRows, rows);
 	node.ownRows = rows.size();
 }
@@ -469,12 +719,18 @@ void ConversationModel::refresh(qsizetype messageIndex)
 void ConversationModel::replaceMessage(qsizetype messageIndex, proto::Message message)
 {
 	const qsizetype first = firstRowOf(messageIndex);
-	const qsizetype oldCount = m_messages.at(messageIndex).rows();
+	const qsizetype oldPartRows = m_messages.at(messageIndex).partRows;
+	const qsizetype oldOwnRows = m_messages.at(messageIndex).ownRows;
 
 	MessageNode node = makeNode(std::move(message));
 	const QList<Block> rows = buildRows(node);
+	// Parts and the rows after them are diffed apart, so a new part is inserted between them
+	// instead of turning the last row into something else.
+	const qsizetype partRows = node.partRows;
 	m_messages[messageIndex] = std::move(node);
-	replaceRows(first, oldCount, rows);
+	replaceRows(first, oldPartRows, rows.first(partRows));
+	replaceRows(first + partRows, oldOwnRows, rows.mid(partRows));
+	refreshContext();
 }
 
 void ConversationModel::feedPart(qsizetype messageIndex, qsizetype partIndex, const QString& text)
@@ -506,12 +762,16 @@ void ConversationModel::replaceRows(qsizetype first, qsizetype oldCount, const Q
 	const qsizetype common = std::min(oldCount, fresh.size());
 	for(qsizetype i = 0; i < common; ++i)
 	{
-		const QList<int> roles = changedRoles(m_rows.at(first + i), fresh.at(i));
+		// The position in the conversation is not the builders' to say, see refreshContext().
+		Block row = fresh.at(i);
+		row.stale = m_rows.at(first + i).stale;
+		row.contextStart = m_rows.at(first + i).contextStart;
+		const QList<int> roles = changedRoles(m_rows.at(first + i), row);
 		if(roles.isEmpty())
 		{
 			continue;
 		}
-		m_rows[first + i] = fresh.at(i);
+		m_rows[first + i] = std::move(row);
 		const QModelIndex changed = index(static_cast<int>(first + i));
 		emit dataChanged(changed, changed, roles);
 	}
@@ -519,9 +779,12 @@ void ConversationModel::replaceRows(qsizetype first, qsizetype oldCount, const Q
 	if(fresh.size() > oldCount)
 	{
 		beginInsertRows({}, static_cast<int>(first + oldCount), static_cast<int>(first + fresh.size()) - 1);
+		// A row added inside a message is stale like the rows next to it.
+		const bool stale = first + oldCount > 0 && m_rows.at(first + oldCount - 1).stale;
 		for(qsizetype i = oldCount; i < fresh.size(); ++i)
 		{
 			m_rows.insert(first + i, fresh.at(i));
+			m_rows[first + i].stale = stale;
 		}
 		endInsertRows();
 	}
