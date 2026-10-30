@@ -1,7 +1,12 @@
 #include "session/markdown_text.h"
 
+#include <QCoreApplication>
+#include <QGuiApplication>
 #include <QList>
 #include <QStringView>
+#include <QTextBlock>
+#include <QTextDocument>
+#include <QTextFragment>
 
 #include <algorithm>
 #include <optional>
@@ -26,11 +31,14 @@ qsizetype runLength(const QString& text, qsizetype from, QChar character)
 }
 
 // Where the code span opened by the `fenceLength` backticks at `from` ends (after its closing
-// run), or -1 when it is never closed.
-qsizetype codeSpanEnd(const QString& text, qsizetype from, qsizetype fenceLength)
+// run), or -1 when no run of the same length follows on its line (`sameLineOnly`) or at all. A
+// span can run over a line break, but not over a paragraph or other block boundary, and telling
+// those apart is the renderer's business: a closing run past the line could be in another
+// paragraph, and what looks like code there would let an image through.
+qsizetype codeSpanEnd(const QString& text, qsizetype from, qsizetype fenceLength, bool sameLineOnly)
 {
 	qsizetype position = from + fenceLength;
-	while(position < text.size())
+	while(position < text.size() && !(sameLineOnly && text.at(position) == u'\n'))
 	{
 		if(text.at(position) != u'`')
 		{
@@ -71,14 +79,28 @@ QString displayInline(const QString& markdown)
 		else if(current == u'`')
 		{
 			const qsizetype fenceLength = runLength(markdown, i, u'`');
-			const qsizetype end = codeSpanEnd(markdown, i, fenceLength);
-			const qsizetype length = end < 0 ? fenceLength : end - i;
-			out += markdown.mid(i, length);
-			i += length;
+			const qsizetype end = codeSpanEnd(markdown, i, fenceLength, true);
+			if(end < 0)
+			{
+				// No span on this line. The renderer might still pair these with a run further down,
+				// so they are escaped unless nothing is there to pair with.
+				const bool canPair = codeSpanEnd(markdown, i, fenceLength, false) >= 0;
+				for(qsizetype tick = 0; tick < fenceLength; ++tick)
+					out += canPair ? u"\\`"_s : u"`"_s;
+				i += fenceLength;
+			}
+			else
+			{
+				out += markdown.mid(i, end - i);
+				i = end;
+			}
 		}
 		else if(current == u'!' && next == u'[')
 		{
-			++i; // the image becomes a link
+			// The image becomes a link. After another "!", dropping this one would make "![" again.
+			const bool afterBang = out.endsWith(u'!');
+			out += afterBang ? u"\\["_s : u"["_s;
+			i += 2;
 		}
 		else if(current == u'<' && opensTagOrComment(next))
 		{
@@ -188,6 +210,25 @@ qsizetype listContentColumn(QStringView line)
 	return spaced ? indent + markerLength + 1 : -1;
 }
 
+// Whether the Markdown renderer makes a picture of `markdown`. Parsing loads nothing: pictures
+// are fetched when a document is drawn.
+bool rendersImage(const QString& markdown)
+{
+	if(!qobject_cast<QGuiApplication*>(QCoreApplication::instance()))
+		return true; // the renderer needs one; without it, assume the worst
+	QTextDocument document;
+	document.setMarkdown(markdown);
+	for(QTextBlock block = document.begin(); block.isValid(); block = block.next())
+	{
+		for(QTextBlock::iterator it = block.begin(); !it.atEnd(); ++it)
+		{
+			if(it.fragment().charFormat().isImageFormat())
+				return true;
+		}
+	}
+	return false;
+}
+
 // A stretch of the text that is either code, which stays as it is, or running text.
 struct Segment
 {
@@ -279,6 +320,10 @@ QString markdownForDisplay(const QString& markdown)
 		const QString part = markdown.mid(segment.start, segment.end - segment.start);
 		out += segment.code ? part : displayInline(part);
 	}
+	// What is left of image syntax is in code, as far as the analysis above can tell. The renderer has
+	// the last word on that: if it still makes a picture of it, nothing stays.
+	if(out.contains(u"!["_s) && rendersImage(out))
+		return out.replace(u"!["_s, u"!\\["_s);
 	return out;
 }
 
