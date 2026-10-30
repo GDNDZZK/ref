@@ -13,6 +13,12 @@ Window {
 	title: "ref"
 	color: Theme.background
 
+	Binding {
+		target: Workspace
+		property: "windowActive"
+		value: window.active
+	}
+
 	// Swaps the theme under a snapshot of the old look and fades the snapshot out,
 	// so every color crossfades at once without per-item color animations.
 	function switchTheme() {
