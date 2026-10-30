@@ -387,12 +387,10 @@ async fn list_dirs_answers_with_sorted_sub_directories() {
     );
     assert_eq!(res["dirs"], serde_json::json!([]));
 
-    // `~` is the home directory.
+    // Without a configured home directory `~` is just a missing name.
     send(&mut ws, 4, Request::ListDirs { path: "~".into() }).await;
-    let (ok, res, err) = response(&mut ws, 4, &mut other).await;
-    assert!(ok, "{err:?}");
-    let home = std::fs::canonicalize(dirs::home_dir().unwrap()).unwrap();
-    assert_eq!(res["path"], home.to_string_lossy().as_ref());
+    let (ok, _, err) = response(&mut ws, 4, &mut other).await;
+    assert!(!ok && err.is_some());
 
     // Errors: missing path, a file, empty path.
     for (id, path) in [(5, "nowhere"), (6, "file.txt"), (7, "  ")] {
@@ -400,4 +398,77 @@ async fn list_dirs_answers_with_sorted_sub_directories() {
         let (ok, _, err) = response(&mut ws, id, &mut other).await;
         assert!(!ok && err.is_some(), "{path}");
     }
+}
+
+#[tokio::test]
+async fn list_dirs_expands_the_configured_home() {
+    let m = mock(Arc::new(|_, _| Reply::Text("pong".into()))).await;
+    let dir = temp_dir("ws-home");
+    let home = dir.join("home");
+    std::fs::create_dir_all(home.join("docs")).unwrap();
+    let cfg = config(&m.url);
+    let mut opts = ref_server::HubOptions::new(dir.join("data"));
+    opts.home = Some(home.clone());
+    opts.config_loader = Arc::new(move |_| cfg.clone());
+    let hub = ref_server::Hub::new(opts);
+    let conn = hub.add_conn();
+    conn.lock().cwd = dir.to_string_lossy().into();
+    for path in ["~", "~/"] {
+        let req = Request::ListDirs { path: path.into() };
+        let res = ref_server::api::handle(&hub, &conn, req).await.unwrap();
+        let canonical = std::fs::canonicalize(&home).unwrap();
+        assert_eq!(res["path"], canonical.to_string_lossy().as_ref(), "{path}");
+        assert_eq!(res["dirs"], serde_json::json!(["docs"]));
+    }
+}
+
+#[tokio::test]
+async fn frames_before_hello_are_refused() {
+    let (_r, url, _work) = start("", -1).await;
+    let (mut ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+    let focus = Request::SetFocus {
+        focused: true,
+        sessions: vec![],
+    };
+    send(&mut ws, 1, focus).await;
+    let (ok, _, err) = response(&mut ws, 1, &mut Vec::new()).await;
+    assert!(!ok);
+    assert!(err.unwrap().contains("hello"));
+    // The server hangs up afterwards.
+    let closed = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(m) = ws.next().await {
+            if m.is_err() {
+                return;
+            }
+        }
+    })
+    .await;
+    assert!(closed.is_ok(), "the connection is closed");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn list_dirs_skips_names_that_are_not_utf8() {
+    use std::os::unix::ffi::OsStrExt;
+    let m = mock(Arc::new(|_, _| Reply::Text("pong".into()))).await;
+    let dir = temp_dir("ws-utf8");
+    std::fs::create_dir_all(dir.join("good")).unwrap();
+    std::fs::create_dir_all(dir.join(std::ffi::OsStr::from_bytes(b"bad\xff"))).unwrap();
+    let cfg = config(&m.url);
+    let mut opts = ref_server::HubOptions::new(dir.join("data"));
+    opts.home = None;
+    opts.config_loader = Arc::new(move |_| cfg.clone());
+    let hub = ref_server::Hub::new(opts);
+    let conn = hub.add_conn();
+    conn.lock().cwd = dir.to_string_lossy().into();
+    let req = Request::ListDirs { path: ".".into() };
+    let res = ref_server::api::handle(&hub, &conn, req).await.unwrap();
+    let names: Vec<&str> = res["dirs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|d| d.as_str())
+        .filter(|d| *d == "good" || d.contains("bad") || d.contains('\u{fffd}'))
+        .collect();
+    assert_eq!(names, ["good"]);
 }

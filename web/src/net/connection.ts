@@ -8,7 +8,7 @@
 // `open` once more; whatever the upper layer attached is its own to restore.
 
 import { PROTOCOL_VERSION } from '../proto/generated'
-import type { JsonValue, Request, ServerFrame } from '../proto/generated'
+import type { JsonValue, NotifyKind, Request, ServerFrame } from '../proto/generated'
 import type { Transport, TransportFactory } from './transport.ts'
 
 export type ConnectionState = 'connecting' | 'open' | 'closed'
@@ -28,6 +28,7 @@ export interface ConnectionOptions {
   client: string // shown to other clients, e.g. "ref-web"
   cwd: string
   token?: string
+  notifyKinds?: () => NotifyKind[] // asked at each handshake, so a reconnect carries the current choice
   retryDelaysMs?: number[] // waits between reconnect attempts; the last one repeats
 }
 
@@ -120,7 +121,7 @@ export class RefConnection {
   }
 
   private async handshake(transport: Transport): Promise<void> {
-    const { client, cwd, token } = this.options
+    const { client, cwd, token, notifyKinds } = this.options
     try {
       const result = await this.send(transport, {
         op: 'hello',
@@ -128,7 +129,7 @@ export class RefConnection {
         version: PROTOCOL_VERSION,
         cwd,
         token: token ?? null,
-        notify: [],
+        notify: notifyKinds?.() ?? [],
       })
       this.helloResult = result as unknown as HelloResult
     } catch (error) {

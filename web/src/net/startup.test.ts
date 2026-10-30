@@ -16,12 +16,17 @@ function environment(overrides: Partial<Parameters<typeof resolveStartup>[0]> = 
 describe('resolveStartup', () => {
   it('prefers ?dir= over /api/info', async () => {
     const startup = await resolveStartup(environment({ search: '?dir=%2Fwork%2Fa' }), URL)
-    expect(startup).toEqual({ url: URL, cwd: '/work/a', sessionId: undefined })
+    expect(startup).toEqual({ url: URL, cwd: '/work/a', sessionId: undefined, split: false })
   })
 
   it('falls back to /api/info.cwd', async () => {
     const startup = await resolveStartup(environment(), URL)
     expect(startup.cwd).toBe('/from/info')
+  })
+
+  it('reads ?view=split', async () => {
+    expect((await resolveStartup(environment({ search: '?view=split' }), URL)).split).toBe(true)
+    expect((await resolveStartup(environment({ search: '?view=other' }), URL)).split).toBe(false)
   })
 
   it('reads ?session=', async () => {

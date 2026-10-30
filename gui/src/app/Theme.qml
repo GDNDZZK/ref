@@ -34,6 +34,7 @@ QtObject {
 	readonly property color warning: dark ? "#e6b450" : "#b7791f"
 	readonly property color warningSurface: dark ? "#2b2417" : "#fcf4e2"
 	readonly property color warningBorder: dark ? "#5a4723" : "#ecd29a"
+	readonly property color scrim: dark ? "#8c000000" : "#40000000" // behind dialogs
 	// Messages from other sessions, diff hunks, tool input.
 	readonly property color info: dark ? "#6fb7e0" : "#2a7fb5"
 	readonly property color diffAdded: dark ? "#6cc28a" : "#1f7a4d"
@@ -71,6 +72,39 @@ QtObject {
 	readonly property int blockSpacing: 14
 	readonly property int turnGap: 18 // extra space around the divider that opens a turn
 	readonly property int contentWidth: 760 // reading column
+
+	// Window shell: sidebar, command palette, dialogs, split view, toasts, banner.
+	readonly property int windowMinWidth: 640
+	readonly property int windowMinHeight: 420
+	readonly property int sidebarWidth: 264
+	readonly property int sidebarPadding: 8
+	readonly property int sidebarHeaderHeight: 52
+	readonly property int sidebarRowHeight: 56
+	readonly property int sidebarHistoryRowHeight: 44
+	readonly property int sidebarSectionHeight: 28
+	readonly property int sidebarFooterHeight: 44
+	readonly property int sidebarMinRunningRows: 3
+	readonly property int buttonHeight: 34
+	readonly property int fieldHeight: 38
+	readonly property int paletteWidth: 560
+	readonly property int paletteSearchHeight: 52
+	readonly property int paletteRowHeight: 40
+	readonly property int paletteMaxRows: 9
+	readonly property real paletteTopRatio: 0.14
+	readonly property int dialogWidth: 480
+	readonly property int dialogWidthWide: 640
+	readonly property int settingsWidth: 520
+	readonly property int dialogHeaderHeight: 56
+	readonly property int dialogFooterHeight: 64
+	readonly property real dialogMaxHeightRatio: 0.8
+	readonly property int tileMinWidth: 420
+	readonly property int tileMinHeight: 300
+	readonly property int tileGap: 12
+	readonly property int tilePadding: 16
+	readonly property int tileHeaderHeight: 36
+	readonly property int toastWidth: 320
+	readonly property int toastMax: 4
+	readonly property int bannerHeight: 40
 
 	// The color of an agent: `spec` is its configured color (#rrggbb, #rgb or a name), `index` its position
 	// in the agent list, which picks the palette entry when there is no usable spec.

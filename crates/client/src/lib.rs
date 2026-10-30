@@ -59,11 +59,11 @@ pub enum ConnectError {
         binary: String,
         source: std::io::Error,
     },
-    #[error("backend did not start within 10s")]
+    #[error("backend did not start within {}s", BACKEND_START_TIMEOUT.as_secs())]
     StartTimeout,
     #[error("could not connect to the new backend")]
     CannotConnectNew,
-    #[error("cannot connect to {url}")]
+    #[error("cannot connect to {url}: {reason}")]
     CannotConnect { url: String, reason: String },
     #[error("cannot start the mock backend: {0}")]
     MockStartFailed(String),
@@ -72,13 +72,26 @@ pub enum ConnectError {
 impl Endpoint {
     /// The URL with the token as query parameter (how `ref-server` authenticates the upgrade).
     fn url_with_token(&self) -> String {
+        let url = with_root_path(&self.url);
         match &self.token {
             Some(t) if !t.is_empty() => {
-                let sep = if self.url.contains('?') { '&' } else { '?' };
-                format!("{}{sep}token={t}", self.url)
+                let sep = if url.contains('?') { '&' } else { '?' };
+                format!("{url}{sep}token={t}")
             }
-            _ => self.url.clone(),
+            _ => url,
         }
+    }
+}
+
+/// `ws://host:port` and `ws://host:port?x=1` become `ws://host:port/` and `ws://host:port/?x=1`:
+/// without a path the handshake request line would start with `?`, which the server rejects.
+fn with_root_path(url: &str) -> String {
+    let authority_start = url.find("://").map_or(0, |i| i + "://".len());
+    let rest = &url[authority_start..];
+    match rest.find(['/', '?']) {
+        Some(i) if rest.as_bytes()[i] == b'/' => url.to_string(),
+        Some(i) => format!("{}/{}", &url[..authority_start + i], &rest[i..]),
+        None => format!("{url}/"),
     }
 }
 
@@ -176,4 +189,68 @@ async fn discover(mut on_starting_backend: impl FnMut()) -> Result<(Ws, Endpoint
         tokio::time::sleep(NEW_BACKEND_CONNECT_PAUSE).await;
     }
     Err(ConnectError::CannotConnectNew)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_url_without_a_path_gets_the_root_path_before_the_token() {
+        let url = |url: &str, token: Option<&str>| {
+            Endpoint {
+                url: url.into(),
+                token: token.map(Into::into),
+            }
+            .url_with_token()
+        };
+        assert_eq!(url("ws://h:1", None), "ws://h:1/");
+        assert_eq!(url("ws://h:1", Some("t")), "ws://h:1/?token=t");
+        assert_eq!(url("ws://h:1/", Some("t")), "ws://h:1/?token=t");
+        assert_eq!(url("ws://h:1?x=1", Some("t")), "ws://h:1/?x=1&token=t");
+        assert_eq!(url("ws://h:1/p?x=1", Some("t")), "ws://h:1/p?x=1&token=t");
+        assert_eq!(url("ws://[::1]:1", None), "ws://[::1]:1/");
+    }
+
+    #[test]
+    fn error_texts_name_their_cause_and_limits() {
+        let refused = ConnectError::CannotConnect {
+            url: "ws://127.0.0.1:1/".into(),
+            reason: "connection refused".into(),
+        };
+        assert_eq!(
+            refused.to_string(),
+            "cannot connect to ws://127.0.0.1:1/: connection refused"
+        );
+        assert_eq!(
+            ConnectError::StartTimeout.to_string(),
+            "backend did not start within 10s"
+        );
+    }
+
+    #[tokio::test]
+    async fn connect_error_carries_the_reason() {
+        let free_port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let endpoint = Endpoint {
+            url: format!("ws://127.0.0.1:{free_port}/"),
+            token: Some("secret".into()),
+        };
+        let error = connect(&endpoint, Duration::from_secs(3))
+            .await
+            .err()
+            .unwrap();
+        let text = error.to_string();
+        assert!(
+            text.starts_with(&format!("cannot connect to ws://127.0.0.1:{free_port}/: ")),
+            "{text}"
+        );
+        assert!(
+            !text.contains("secret"),
+            "the token stays out of messages: {text}"
+        );
+    }
 }

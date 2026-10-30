@@ -7,10 +7,18 @@ set_source_files_properties(Theme.qml Motion.qml Format.qml ToolInfo.qml PROPERT
 qt_add_qml_module(ref-gui
 	URI RefGui
 	SOURCES
+		app_translator.cpp
+		app_translator.h
 		chat_session.cpp
 		chat_session.h
+		qml_types.h
 		system_fonts.h
+		tile_model.cpp
+		tile_model.h
 		workspace.cpp
+		workspace_commands.cpp
+		workspace_requests.cpp
+		workspace_split.cpp
 		workspace.h
 	QML_FILES
 		Main.qml
@@ -64,7 +72,7 @@ qt_add_translations(ref-gui
 # CodeBlock.qml imports org.kde.syntaxhighlighting at run time; nothing links against it.
 find_package(KF6SyntaxHighlighting REQUIRED)
 
-target_link_libraries(ref-gui PRIVATE refgui_session refgui_cli refgui_icons Qt6::Gui Qt6::Qml Qt6::Quick)
+target_link_libraries(ref-gui PRIVATE refgui_workspace refgui_session refgui_cli refgui_icons Qt6::Gui Qt6::Qml Qt6::Quick)
 target_compile_definitions(ref-gui PRIVATE REF_GUI_VERSION="${PROJECT_VERSION}")
 refgui_configure_target(ref-gui)
 

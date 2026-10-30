@@ -1,6 +1,8 @@
 // Adapted from an early version of qutie by LightBlueCube
+#include "app/app_translator.h"
 #include "app/workspace.h"
 #include "cli/command_line.h"
+#include "client/instance_files.h"
 #include "icons/icon_provider.h"
 
 #include <QDir>
@@ -9,7 +11,6 @@
 #include <QQmlApplicationEngine>
 #include <QTextStream>
 #include <QTimer>
-#include <QTranslator>
 
 #include <chrono>
 #include <cstdlib>
@@ -70,13 +71,7 @@ int main(int argc, char* argv[])
 	QGuiApplication::setApplicationName(u"ref-gui"_s);
 	const QString version = QString::fromLatin1(REF_GUI_VERSION);
 	QGuiApplication::setApplicationVersion(version);
-
-	// The interface follows the system language; English is the fallback.
-	QTranslator translator;
-	if(translator.load(QLocale(), u"ref-gui"_s, u"_"_s, u":/i18n"_s))
-	{
-		QCoreApplication::installTranslator(&translator);
-	}
+	QGuiApplication::setDesktopFileName(u"ref-gui"_s); // ties the window to the desktop entry
 
 	const refgui::cli::ParseResult parsed = refgui::cli::parseCommandLine(QCoreApplication::arguments(), QDir::currentPath(), version);
 	if(const auto* exit = std::get_if<refgui::cli::Exit>(&parsed))
@@ -93,8 +88,12 @@ int main(int argc, char* argv[])
 	}
 
 	// Outlives the engine, whose window refers to it.
-	Workspace workspace(options);
+	Workspace workspace(options, refgui::client::stateDirectory() + u"/gui.json"_s);
 	Workspace::setInstance(&workspace);
+
+	// The interface follows the language setting; English is the fallback.
+	AppTranslator translator;
+	translator.setLanguage(workspace.settings()->language());
 	if(options.smoke)
 	{
 		exitWhenOpened(workspace);
@@ -103,6 +102,11 @@ int main(int argc, char* argv[])
 	QQmlApplicationEngine engine;
 	QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] { QCoreApplication::exit(EXIT_FAILURE); }, Qt::QueuedConnection);
 	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	QObject::connect(workspace.settings(), &refgui::workspace::Settings::languageChanged, &app, [&] {
+		translator.setLanguage(workspace.settings()->language());
+		engine.retranslate();
+		workspace.retranslate();
+	});
 	engine.loadFromModule("RefGui", "Main");
 
 	return QGuiApplication::exec();

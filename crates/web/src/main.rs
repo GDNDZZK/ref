@@ -3,6 +3,7 @@
 mod assets;
 mod guard;
 mod launch;
+mod ping;
 mod routes;
 mod token;
 mod tunnel;
@@ -10,19 +11,24 @@ mod upstream;
 
 use std::net::IpAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context as _;
 use clap::Parser;
 use ref_client::Target;
 use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 
-use crate::guard::HostPolicy;
+use crate::guard::{HostPolicy, SessionCookie};
 use crate::routes::AppState;
+use crate::tunnel::Heartbeat;
 use crate::upstream::Upstream;
 
 const DEFAULT_PORT: u16 = 7480;
 const DEFAULT_HOST: &str = "127.0.0.1";
 const LOCALHOST: &str = "localhost";
+/// How long shutdown waits for tabs to receive their close frame.
+const TUNNEL_CLOSE_GRACE: Duration = Duration::from_secs(3);
 
 #[derive(Parser, Debug)]
 #[command(
@@ -76,9 +82,11 @@ fn init_logging() {
         .init();
 }
 
+/// The absolute start directory. `dunce` keeps Windows paths free of the `\\?\` prefix, which
+/// the backend and the page would show to the user.
 fn start_dir(dir: Option<&str>) -> anyhow::Result<String> {
     let path = match dir {
-        Some(p) => std::fs::canonicalize(p).with_context(|| p.to_string())?,
+        Some(p) => dunce::canonicalize(p).with_context(|| p.to_string())?,
         None => std::env::current_dir()?,
     };
     anyhow::ensure!(path.is_dir(), "{} is not a directory", path.display());
@@ -105,7 +113,7 @@ fn upstream_for(cli: &Cli) -> Upstream {
 
 async fn run(cli: Cli) -> anyhow::Result<()> {
     let cwd = start_dir(cli.dir.as_deref())?;
-    let login_token = token::load_or_create()?;
+    let login_token = token::load_or_create().await?;
     let url_host = launch::reachable_host(&cli.host);
     let login_url = launch::login_url(&url_host, cli.port, &login_token, Some(&cwd));
 
@@ -113,7 +121,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     let listener = match tokio::net::TcpListener::bind((bind_host, cli.port)).await {
         Ok(listener) => listener,
         Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
-            return open_running(&cli, &url_host, &login_url).await;
+            return open_running(&cli, &url_host, &login_token, &login_url).await;
         }
         Err(e) => {
             return Err(e).with_context(|| format!("cannot listen on {}:{}", cli.host, cli.port));
@@ -135,25 +143,41 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     let shutdown = CancellationToken::new();
     let state = Arc::new(AppState {
         login_token,
+        session: SessionCookie::new(cli.port),
         hosts: HostPolicy::new(&cli.host, cli.port),
         cwd,
         upstream: upstream_for(&cli),
+        heartbeat: Heartbeat::DEFAULT,
         shutdown: shutdown.clone(),
+        tunnels: TaskTracker::new(),
     });
     let stop = shutdown.clone();
     tokio::spawn(async move {
         wait_for_stop_signal().await;
         stop.cancel();
     });
-    axum::serve(listener, routes::router(state))
+    let served = axum::serve(listener, routes::router(state.clone()))
         .with_graceful_shutdown(async move { shutdown.cancelled().await })
+        .await;
+    state.tunnels.close();
+    if tokio::time::timeout(TUNNEL_CLOSE_GRACE, state.tunnels.wait())
         .await
-        .context("server failed")
+        .is_err()
+    {
+        eprintln!("ref-web: some tabs did not close in time");
+    }
+    state.upstream.shutdown().await;
+    served.context("server failed")
 }
 
 /// The port is taken: if a ref-web has it, point the browser there; otherwise fail.
-async fn open_running(cli: &Cli, url_host: &str, login_url: &str) -> anyhow::Result<()> {
-    if !launch::is_ref_web(url_host, cli.port).await {
+async fn open_running(
+    cli: &Cli,
+    url_host: &str,
+    login_token: &str,
+    login_url: &str,
+) -> anyhow::Result<()> {
+    if !ping::is_our_ref_web(url_host, cli.port, login_token).await {
         anyhow::bail!(
             "port {} is in use by another program (choose another with --port)",
             cli.port
@@ -185,4 +209,25 @@ async fn wait_for_stop_signal() {
 #[cfg(not(unix))]
 async fn wait_for_stop_signal() {
     let _ = tokio::signal::ctrl_c().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn start_dir_is_absolute_and_must_be_a_directory() {
+        let here = std::env::current_dir().unwrap();
+        assert_eq!(
+            start_dir(None).unwrap(),
+            here.to_string_lossy().into_owned()
+        );
+        assert_eq!(
+            start_dir(Some(".")).unwrap(),
+            dunce::canonicalize(&here).unwrap().to_string_lossy()
+        );
+        let manifest = format!("{}/Cargo.toml", env!("CARGO_MANIFEST_DIR"));
+        assert!(start_dir(Some(&manifest)).is_err());
+        assert!(start_dir(Some("/no/such/dir/anywhere")).is_err());
+    }
 }
