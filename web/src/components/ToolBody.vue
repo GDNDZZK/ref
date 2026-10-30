@@ -6,6 +6,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ToolBlock } from '../model/blocks.ts'
 import {
+  isWebUrl,
   metaFlag,
   metaNumber,
   metaString,
@@ -79,6 +80,7 @@ const truncated = computed(() => metaFlag(meta.value, 'truncated'))
 const countOf = (key: string) => metaNumber(meta.value, key) ?? 0
 
 function open(target: string): void {
+  if (!isWebUrl(target)) return
   window.open(target, '_blank', 'noopener,noreferrer')
 }
 </script>
