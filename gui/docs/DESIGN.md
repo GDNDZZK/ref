@@ -222,7 +222,7 @@ Motion:
 
 The zoomed tile is the shared element: it is the same `SessionPane` item during the animation, so scroll position,
 streaming text and Hold survive. Hold (D5) is per pane and keeps working inside tiles.
-Zoom is `Ctrl+O` on the focused tile, a click on the maximize button, or a double click on the header.
+Zoom is `Ctrl+Shift+Z` on the focused tile, a click on the maximize button, or a double click on the header.
 Focus moves by clicking a tile, `Alt+arrows` (nearest tile in that direction by centre distance) or `Tab` outside
 the composer. Typing goes to the focused tile's composer; a click on a tile focuses its composer.
 
@@ -232,8 +232,8 @@ the composer. Typing goes to the focused tile's composer; a click on a tile focu
             ┌──────────────────────────────────────┐   width 560, top = max(48, 14% of the window height)
             │ ⌕  Type a command…                   │   52px search row
             ├──────────────────────────────────────┤   1px border
-            │ ▣  New session                Ctrl+N │   rows 40px, at most 9 visible (scrolls)
-            │ ▣  Sessions                   Ctrl+K │
+            │ ▣  New session          Ctrl+Shift+N │   rows 40px, at most 9 visible (scrolls)
+            │ ▣  Switch session       Ctrl+Shift+L │
             └──────────────────────────────────────┘
 ```
 
@@ -298,16 +298,11 @@ Name tab: a text field with the current peer name and a "Set name" primary butto
 **Help** (640): two sections, "Keyboard" and "Commands", each a table of rows 30px high (`smallFontSize+1`): left the
 name, right the keys as chips (palette style); commands show `/name` aliases and the hint in textMuted. Generated from
 the CommandRegistry, so it cannot drift from the real shortcuts. Fixed keys that are not commands (Esc Esc, Tab,
-Ctrl+T, Enter, Shift+Enter) are listed in a "Writing" group.
+Enter, Shift+Enter) are listed in a "Writing" group.
 
 **Export** (480): text "Write the conversation as markdown to this path on the backend's machine." (`smallFontSize`,
 textMuted), a path field prefilled with `ref-session-<id>.md`, inline error, buttons Cancel / Export.
 Success: the dialog closes and a toast shows the resolved path.
-
-**Compact** (480): body "Summarize the older part of the conversation to free up context. This asks the model and
-cannot be undone." and a context bar: 6px high, radius 3, `border` track, `accent` fill with width
-`used / max` (`Motion.standard`), caption "84k of 200k tokens (42%)" in `smallFontSize` textMuted; a tick mark 2px wide
-in `textMuted` at `recommend / max`. Buttons Cancel / Compact (primary).
 
 **Change directory** (480, `/cd`): path field prefilled with the session's directory, selected. Below it (remote
 backend or typing) the completion list from `ListDirs`: rows 32px, `folder-16` + name, at most 6 visible; Tab or click
@@ -323,7 +318,7 @@ it stops the work; the conversation stays in history." Buttons Cancel / Close (d
 **Rename** (480): one text field with the name, buttons Cancel / Rename. Names are unique among live sessions: the
 backend's rejection shows inline.
 
-## Settings panel (Ctrl+,)
+## Settings panel (Ctrl+Shift+S)
 
 Dialog 520 wide, title "Settings". Sections are labels (`smallFontSize`, textMuted, 28px) with rows of 48px below,
 label (`Theme.fontSize`) at the left, control at the right, 1px `border` dividers inset 22px.
@@ -373,33 +368,40 @@ running or waiting, with the tooltip "Close or finish running sessions first". A
 
 ## Keyboard map (GUI)
 
-| Key | Action | Command id |
-|---|---|---|
-| Ctrl+P | Command palette | `palette.open` |
-| Ctrl+N | New session in the window's directory | `session.new` |
-| Ctrl+Shift+N | New session in another folder… | `session.newIn` |
-| Ctrl+K | Sessions (switch, live and history) | `session.list` |
-| Ctrl+W | Close this session | `session.close` |
-| Ctrl+Tab / Ctrl+Shift+Tab | Next / previous live session | `session.next` / `session.previous` |
-| Alt+1 … Alt+9 | Nth live session | `session.nth` |
-| Ctrl+M | Model for this session | `session.model` |
-| Ctrl+Shift+A | Agent | `session.agent` |
-| Ctrl+Shift+E | Export transcript | `session.export` |
-| Ctrl+Shift+C | Copy last reply | `session.copy` |
-| Ctrl+Shift+R | Expand / collapse reasoning | `view.reasoning` |
-| Ctrl+Shift+D | Expand / collapse tool details | `view.details` |
-| Ctrl+B | Show / hide the sidebar | `view.sidebar` |
-| Ctrl+\\ | Split view | `view.split` |
-| Ctrl+O | Zoom the focused tile (split view) | `split.zoom` |
-| Alt+arrows | Move the tile focus (split view) | `split.focus*` |
-| Ctrl+, | Settings | `app.settings` |
-| F1 | Help | `app.help` |
-| Ctrl+Q | Quit | `app.quit` |
+One letter per command, shared with the WebUI. The GUI uses Ctrl+Shift+letter (Ctrl is Cmd on macOS); the WebUI uses
+Alt+letter. Command ids are the TUI's canonical slash names (`/new`, `/sessions`, …). Titles are the TUI's `desc` texts,
+except where the behavior differs.
 
-Owned by the composer (area C), not listed in the registry: Enter, Shift+Enter, Tab / Shift+Tab (agents), Ctrl+T
-(variants), Esc Esc (interrupt), ↑ / ↓ (prompt history), Ctrl+V. Palette-only (no shortcut): compact, undo, rename, cd,
-variant, peers*, mcp, close-session. The WebUI replaces Ctrl+N / Ctrl+T / Ctrl+W (browser-reserved) with Alt+N and
-Alt+W; the rest is the same.
+| Key | Id | Title |
+|---|---|---|
+| Ctrl+P | `palette` | Command palette |
+| Ctrl+Shift+N | `new` | New session (in the window's directory, at once) |
+| (none) | `new-in` | New session in another folder… |
+| Ctrl+Shift+L | `sessions` | Switch session (live + history) |
+| Ctrl+Shift+M | `models` | Switch model (this session only) |
+| Ctrl+Shift+A | `agents` | Switch agent |
+| Ctrl+Shift+T | `variant` | Set or cycle model variant (no argument: next variant) |
+| Ctrl+Shift+C | `compact` | Compact the conversation (runs at once, no confirmation) |
+| Ctrl+Shift+U | `undo` | Undo last prompt |
+| Ctrl+Shift+K | `close` | Close this session |
+| Ctrl+Shift+X | `export` | Export transcript as markdown |
+| Ctrl+Shift+Y | `copy` | Copy last assistant message (raw) |
+| Ctrl+Shift+R | `thinking` | Toggle expanded thinking |
+| Ctrl+Shift+O | `details` | Toggle expanded tool details |
+| Ctrl+Shift+W | `watch` | Split view of background sessions |
+| Ctrl+Shift+B | `sidebar` | Toggle sidebar |
+| Ctrl+Shift+H | `help` | Keybindings and commands |
+| Ctrl+Shift+S | `settings` | Settings |
+| Ctrl+Shift+Z | `zoom` | Zoom the focused tile (split view only) |
+| Alt+arrows | (tile focus) | Move the focus between tiles (split view); not in the registry |
+
+Palette-only (no key): `new-in`, `rename`, `cd`, `close-session`, `peers`, `peers-name`, `peers-inbox`,
+`peers-outbox`, `mcp`. There are no `editor` and `exit` commands. Slash aliases are the TUI's (`/clear`, `/resume`,
+`/continue`, `/effort`, `/summarize`, `/kill`, `/split`, `/cwd`, `/list-agents`, `/mcps`, …).
+Owned by the composer (area C), not registry commands: Enter, Shift+Enter, Ctrl+J, Tab / Shift+Tab (cycle agents, via
+`Workspace.cycleAgent`), Esc Esc (interrupt), ↑ / ↓ (prompt history), Ctrl+V. Unlike the TUI, the GUI does not bind
+Ctrl+T: variants cycle with Ctrl+Shift+T or by clicking the variant pill.
+Unverified: Ctrl+Shift+U is taken by IBus' Unicode input on Linux.
 
 ## New constants
 
