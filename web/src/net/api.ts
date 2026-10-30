@@ -1,7 +1,15 @@
 // The protocol's requests as typed methods. The result shapes are the ones in
 // crates/proto/fixtures/server_frame/response_*.json.
 
-import type { ImageData, ModelRef, ServerConfigInfo, SessionInfo, SessionSnapshot } from '../proto/generated'
+import type {
+  ImageData,
+  ModelRef,
+  NamedImage,
+  NotifyKind,
+  ServerConfigInfo,
+  SessionInfo,
+  SessionSnapshot,
+} from '../proto/generated'
 import type { RefConnection } from './connection.ts'
 
 export class RefApi {
@@ -76,5 +84,48 @@ export class RefApi {
       allow,
       always,
     })
+  }
+
+  // `removed` is false when the message was delivered in the meantime.
+  async removeQueued(
+    sessionId: string,
+    messageId: string,
+  ): Promise<{ removed: boolean; text: string; images: NamedImage[] }> {
+    const result = await this.connection.request({
+      op: 'remove_queued',
+      session_id: sessionId,
+      message_id: messageId,
+    })
+    return result as unknown as { removed: boolean; text: string; images: NamedImage[] }
+  }
+
+  // The output is added to the conversation as events.
+  async shell(sessionId: string, command: string): Promise<void> {
+    await this.connection.request({ op: 'shell', session_id: sessionId, command })
+  }
+
+  // Relative paths; directories end with `/`.
+  async listFiles(cwd: string, query: string, limit: number): Promise<string[]> {
+    const result = (await this.connection.request({ op: 'list_files', cwd, query, limit })) as unknown as {
+      files: string[]
+    }
+    return result.files
+  }
+
+  async expandCommand(name: string, args: string, cwd: string): Promise<string> {
+    const result = (await this.connection.request({ op: 'expand_command', name, args, cwd })) as unknown as {
+      text: string
+    }
+    return result.text
+  }
+
+  // Replaces the kinds this connection wants; the handshake carries the first choice.
+  async setNotify(kinds: NotifyKind[]): Promise<void> {
+    await this.connection.request({ op: 'set_notify', kinds })
+  }
+
+  // Whether the tab is in front and which sessions it shows, so the backend does not notify about those.
+  async setFocus(focused: boolean, sessions: string[]): Promise<void> {
+    await this.connection.request({ op: 'set_focus', focused, sessions })
   }
 }
