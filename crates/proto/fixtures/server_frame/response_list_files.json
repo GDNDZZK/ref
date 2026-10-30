@@ -1,0 +1,13 @@
+{
+  "kind": "response",
+  "id": 27,
+  "ok": true,
+  "result": {
+    "files": [
+      "src/parser.rs",
+      "src/parser/",
+      "tests/parser.rs"
+    ]
+  },
+  "error": null
+}

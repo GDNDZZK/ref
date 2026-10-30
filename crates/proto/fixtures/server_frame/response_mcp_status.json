@@ -1,0 +1,25 @@
+{
+  "kind": "response",
+  "id": 31,
+  "ok": true,
+  "result": {
+    "servers": [
+      {
+        "name": "github",
+        "status": "connected",
+        "error": null,
+        "tools": [
+          "github_search_issues",
+          "github_get_pr"
+        ]
+      },
+      {
+        "name": "docs",
+        "status": "failed",
+        "error": "spawn docs-mcp: No such file or directory",
+        "tools": []
+      }
+    ]
+  },
+  "error": null
+}

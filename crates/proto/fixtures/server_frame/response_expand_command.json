@@ -1,0 +1,9 @@
+{
+  "kind": "response",
+  "id": 26,
+  "ok": true,
+  "result": {
+    "text": "Review src/parser.rs"
+  },
+  "error": null
+}

@@ -1,0 +1,7 @@
+{
+  "id": 30,
+  "op": "peer_command",
+  "session_id": "ses_a1b2c3d4",
+  "command": "peers",
+  "args": ""
+}

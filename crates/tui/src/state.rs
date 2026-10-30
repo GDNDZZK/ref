@@ -517,6 +517,7 @@ mod tests {
             context: Default::default(),
             todos: Vec::new(),
             busy_since: None,
+            last_error: None,
         }
     }
 

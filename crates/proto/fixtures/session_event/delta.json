@@ -1,0 +1,9 @@
+{
+  "type": "delta",
+  "message_id": "msg_0f1e2d3c",
+  "index": 1,
+  "delta": {
+    "type": "text",
+    "text": " runs one step"
+  }
+}

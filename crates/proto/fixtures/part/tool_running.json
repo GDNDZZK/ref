@@ -1,0 +1,18 @@
+{
+  "type": "tool",
+  "call_id": "call_9x8y7z",
+  "name": "bash",
+  "purpose": "Run the parser tests",
+  "input": {
+    "command": "cargo test -p parser",
+    "timeout": 120
+  },
+  "raw_input": "{\"purpose\":\"Run the parser tests\",\"command\":\"cargo test -p parser\",\"timeout\":120}",
+  "state": "running",
+  "output": null,
+  "meta": {
+    "live_output": "   Compiling parser v0.3.1\n"
+  },
+  "time": 1760000020000,
+  "time_end": null
+}

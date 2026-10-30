@@ -1,0 +1,10 @@
+{
+  "id": 17,
+  "op": "set_model",
+  "session_id": "ses_a1b2c3d4",
+  "model": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4",
+    "variant": "high"
+  }
+}
