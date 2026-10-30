@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { resolveStartup, StartupError } from './startup.ts'
+import { describe, expect, it, vi } from 'vitest'
+import { browserEnvironment, resolveStartup, StartupError } from './startup.ts'
 
 const URL = 'ws://example/ws'
 
@@ -47,5 +47,12 @@ describe('resolveStartup', () => {
     const failure = resolveStartup(environment({ directUrl: 'ws://127.0.0.1:1/' }), URL)
     await expect(failure).rejects.toBeInstanceOf(StartupError)
     await expect(failure).rejects.toMatchObject({ messageKey: 'connection.noDirectory' })
+  })
+
+  it('says so when ref-web does not know the browser (401 from /api/info)', async () => {
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response('', { status: 401 })))
+    const failure = browserEnvironment().fetchInfo()
+    await expect(failure).rejects.toMatchObject({ messageKey: 'connection.notLoggedIn' })
+    vi.unstubAllGlobals()
   })
 })

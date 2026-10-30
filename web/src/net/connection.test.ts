@@ -34,7 +34,11 @@ class FakeSocket {
   }
 }
 
-function setup(retryDelaysMs = [100, 200], notifyKinds?: () => NotifyKind[]) {
+function setup(
+  retryDelaysMs = [100, 200],
+  notifyKinds?: () => NotifyKind[],
+  giveUp?: () => Promise<boolean>,
+) {
   const sockets: FakeSocket[] = []
   const connection = new RefConnection({
     connect: (handlers) => {
@@ -46,6 +50,7 @@ function setup(retryDelaysMs = [100, 200], notifyKinds?: () => NotifyKind[]) {
     cwd: '/work',
     notifyKinds,
     retryDelaysMs,
+    giveUp,
   })
   const states: ConnectionState[] = []
   const errors: Error[] = []
@@ -226,5 +231,27 @@ describe('RefConnection', () => {
 
     expect(env.connection.state).toBe('closed')
     expect(env.sockets).toHaveLength(1)
+  })
+
+  it('stops retrying when told to give up after a loss', async () => {
+    const env = setup([100], undefined, () => Promise.resolve(true))
+    env.connection.open()
+    env.sockets[0]!.handlers.closed('closed (1006)')
+
+    await vi.waitFor(() => expect(env.connection.state).toBe('closed'))
+    vi.advanceTimersByTime(60_000)
+    expect(env.sockets).toHaveLength(1)
+  })
+
+  it('keeps retrying when it is told to carry on', async () => {
+    const giveUp = vi.fn(() => Promise.resolve(false))
+    const env = setup([100], undefined, giveUp)
+    env.connection.open()
+    env.sockets[0]!.handlers.closed('closed (1006)')
+
+    await vi.advanceTimersByTimeAsync(100)
+    expect(giveUp).toHaveBeenCalledOnce()
+    expect(env.sockets).toHaveLength(2)
+    expect(env.connection.state).toBe('connecting')
   })
 })
