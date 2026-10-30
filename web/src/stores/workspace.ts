@@ -36,11 +36,13 @@ export function sortLive(sessions: readonly SessionInfo[]): SessionInfo[] {
   return [...sessions].sort((a, b) => a.created_at - b.created_at || a.id.localeCompare(b.id))
 }
 
-// "name: first line of the error", cut at 200 characters (the TUI's toast for a session in the background).
+// "name: the error on one line", cut at 200 characters with an ellipsis (the TUI's toast for a
+// session in the background: whitespace runs, newlines included, become one space).
 export function errorToast(name: string, text: string): string {
-  const firstLine = text.trim().split('\n')[0] ?? ''
-  const full = `${name}: ${firstLine}`
-  return full.length <= ERROR_TOAST_MAX_CHARS ? full : `${full.slice(0, ERROR_TOAST_MAX_CHARS - 1)}…`
+  const oneLine = text.replace(/\s+/g, ' ').trim()
+  const characters = Array.from(`${name}: ${oneLine}`)
+  if (characters.length <= ERROR_TOAST_MAX_CHARS) return characters.join('')
+  return `${characters.slice(0, ERROR_TOAST_MAX_CHARS - 1).join('')}…`
 }
 
 export const useWorkspaceStore = defineStore('workspace', () => {
@@ -58,6 +60,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const tileRects = shallowRef<readonly Rect[]>([]) // where the split view drew the tiles, for moving the focus
 
   const chats = new Map<string, ChatSession>()
+  let openChain: Promise<void> = Promise.resolve()
+  let latestOpen = 0
+  let latestOpenTarget: string | undefined
   const goneListeners = new Set<(id: string) => void>()
   const attachingTiles = new Set<string>() // tiles whose first Attach has not been answered yet
 
@@ -106,14 +111,30 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   // Makes `id` the open session, attached in the foreground. The one shown before is detached.
-  async function openSession(id: string): Promise<void> {
+  // Opens run one after the other. Of several quick clicks only the last one counts: the earlier
+  // ones either do not start or undo their own attach, so no session stays attached by mistake.
+  function openSession(id: string): Promise<void> {
     if (mode.value === 'split') {
       currentId.value = id
-      await leaveSplit()
+      return leaveSplit()
+    }
+    const mine = ++latestOpen
+    latestOpenTarget = id
+    const run = openChain.then(() => openOne(id, mine))
+    openChain = run.catch(() => undefined)
+    return run
+  }
+
+  async function openOne(id: string, mine: number): Promise<void> {
+    if (mine !== latestOpen) return // a later click replaced this one before it began
+    const session = chat(id)
+    await session.attach(true)
+    if (mine !== latestOpen) {
+      const stillWanted = id === latestOpenTarget || id === currentId.value
+      if (!stillWanted) await session.detach()
       return
     }
     const previousId = currentId.value
-    await chat(id).attach(true)
     await crossfade(() => (currentId.value = id), 'standard')
     if (previousId === undefined || previousId === id) return
     await chat(previousId).detach()
@@ -331,7 +352,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function onConnected(isReconnect: boolean, start: Startup): Promise<void> {
     const api = connection.getApi()
     if (isReconnect) {
-      setLive(mode.value === 'split' ? await api.watchAll(true) : await api.listSessions())
+      const sessions = mode.value === 'split' ? await api.watchAll(true) : await api.listSessions()
+      setLive(sessions)
+      // A session closed while the connection was down never sent its `closed` event.
+      for (const id of [...chats.keys()]) {
+        if (sessions.some((session) => session.id === id)) continue
+        await discard(id, infoOf(id)?.cwd ?? cwd.value)
+      }
       await Promise.all([...chats.values()].map((session) => session.resync()))
       return
     }
