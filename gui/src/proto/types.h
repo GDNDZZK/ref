@@ -16,6 +16,16 @@ namespace refgui::proto
 // Sent in Hello; the backend answers with its own version.
 constexpr int ProtocolVersion = 2;
 
+// Written by ref-server to `<state dir>/instances/<pid>.json`.
+struct InstanceInfo
+{
+	quint32 pid = 0;
+	quint16 port = 0;
+	QString bind;       // address the server listens on, e.g. 127.0.0.1 or 0.0.0.0
+	qint64 startedAt = 0;
+	QString token;      // clients must present it
+};
+
 struct ModelRef
 {
 	QString provider;
