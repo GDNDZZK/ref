@@ -244,7 +244,11 @@ onBeforeUnmount(() => {
   overflow-x: hidden;
   overflow-y: auto;
   overflow-anchor: none; /* the view decides where to stay */
-  padding: var(--page-padding) var(--page-padding) 0;
+  padding: 0 var(--page-padding); /* top padding is on the rows: sticky headers pin to the padding edge */
+}
+
+.rows {
+  padding-top: var(--page-padding);
 }
 
 .footer {
