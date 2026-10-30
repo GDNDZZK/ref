@@ -9,8 +9,8 @@ Block {
 
 	ImageStrip {
 		images: block.images
-		sessionId: block.ListView.view.sessionId
-		onImageClicked: image => block.ListView.view.imageClicked(image)
+		sessionId: block.chat.sessionId
+		onImageClicked: image => block.chat.imageClicked(image)
 		maxWidth: block.thumbnailMaxWidth
 		maxHeight: block.thumbnailHeight
 	}

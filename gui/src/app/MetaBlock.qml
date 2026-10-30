@@ -130,13 +130,13 @@ Block {
 				visible: block.human
 				iconName: "undo"
 				label: qsTr("Undo")
-				onTriggered: block.ListView.view.undoRequested(block.messageId)
+				onTriggered: block.chat.undoRequested(block.messageId)
 			}
 			MetaAction {
 				iconName: block.copied ? "check" : "copy"
 				label: qsTr("Copy")
 				onTriggered: {
-					block.ListView.view.copyRequested(block.messageId)
+					block.chat.copyRequested(block.messageId)
 					block.copied = true
 					copiedTimer.restart()
 				}

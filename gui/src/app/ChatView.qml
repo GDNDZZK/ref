@@ -1,4 +1,6 @@
 // Adapted from an early version of qutie by LightBlueCube
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQml.Models

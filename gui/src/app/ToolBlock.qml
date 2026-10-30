@@ -1,4 +1,6 @@
 // Adapted from an early version of qutie by LightBlueCube
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Layouts
 import RefGui
@@ -203,7 +205,7 @@ Block {
 				TextButton {
 					visible: block.delayed
 					text: qsTr("Cancel")
-					onClicked: block.ListView.view.cancelRequested()
+					onClicked: block.chat.cancelRequested()
 				}
 				Text {
 					textFormat: Text.PlainText
@@ -258,7 +260,7 @@ Block {
 			id: body
 			y: header.height + failure.height
 			width: parent.width
-			height: block.open && bodyLoader.item ? bodyLoader.item.height : 0
+			height: block.open && bodyLoader.item ? (bodyLoader.item as Item).height : 0
 			clip: true
 
 			Behavior on height {
@@ -291,7 +293,7 @@ Block {
 
 				sourceComponent: ToolBody {
 					call: block
-					onShowAllRequested: block.ListView.view.model.toggleShowAll(block.index)
+					onShowAllRequested: block.chat.model.toggleShowAll(block.index)
 				}
 			}
 		}
@@ -302,8 +304,8 @@ Block {
 			toolName: block.toolName
 			input: block.inputObject
 			open: block.awaitingPermission
-			othersWaiting: block.ListView.view.permissionCount - 1
-			onAnswered: (allow, always) => block.ListView.view.permissionAnswered(block.callId, allow, always)
+			othersWaiting: block.chat.permissionCount - 1
+			onAnswered: (allow, always) => block.chat.permissionAnswered(block.callId, allow, always)
 		}
 	}
 }
