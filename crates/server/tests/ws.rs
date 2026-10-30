@@ -387,17 +387,37 @@ async fn list_dirs_answers_with_sorted_sub_directories() {
     );
     assert_eq!(res["dirs"], serde_json::json!([]));
 
-    // `~` is the home directory.
+    // Without a configured home directory `~` is just a missing name.
     send(&mut ws, 4, Request::ListDirs { path: "~".into() }).await;
-    let (ok, res, err) = response(&mut ws, 4, &mut other).await;
-    assert!(ok, "{err:?}");
-    let home = std::fs::canonicalize(dirs::home_dir().unwrap()).unwrap();
-    assert_eq!(res["path"], home.to_string_lossy().as_ref());
+    let (ok, _, err) = response(&mut ws, 4, &mut other).await;
+    assert!(!ok && err.is_some());
 
     // Errors: missing path, a file, empty path.
     for (id, path) in [(5, "nowhere"), (6, "file.txt"), (7, "  ")] {
         send(&mut ws, id, Request::ListDirs { path: path.into() }).await;
         let (ok, _, err) = response(&mut ws, id, &mut other).await;
         assert!(!ok && err.is_some(), "{path}");
+    }
+}
+
+#[tokio::test]
+async fn list_dirs_expands_the_configured_home() {
+    let m = mock(Arc::new(|_, _| Reply::Text("pong".into()))).await;
+    let dir = temp_dir("ws-home");
+    let home = dir.join("home");
+    std::fs::create_dir_all(home.join("docs")).unwrap();
+    let cfg = config(&m.url);
+    let mut opts = ref_server::HubOptions::new(dir.join("data"));
+    opts.home = Some(home.clone());
+    opts.config_loader = Arc::new(move |_| cfg.clone());
+    let hub = ref_server::Hub::new(opts);
+    let conn = hub.add_conn();
+    conn.lock().cwd = dir.to_string_lossy().into();
+    for path in ["~", "~/"] {
+        let req = Request::ListDirs { path: path.into() };
+        let res = ref_server::api::handle(&hub, &conn, req).await.unwrap();
+        let canonical = std::fs::canonicalize(&home).unwrap();
+        assert_eq!(res["path"], canonical.to_string_lossy().as_ref(), "{path}");
+        assert_eq!(res["dirs"], serde_json::json!(["docs"]));
     }
 }

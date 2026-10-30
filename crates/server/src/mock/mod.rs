@@ -9,6 +9,10 @@
 //!
 //! Nothing outside that directory is read or written: no user or project configuration, no
 //! real working directories (see `HubOptions::sandbox_cwd`), no real session history.
+//!
+//! Known limits, not enforced: `Export` writes to a path the client chooses, and `Shell`
+//! (`!command` in a frontend) runs a real command; both can reach outside the workspace.
+//! Tools called by the scripts only touch the workspace.
 
 mod config;
 mod history;
