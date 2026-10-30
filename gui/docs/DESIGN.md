@@ -405,10 +405,6 @@ Unverified: Ctrl+Shift+U is taken by IBus' Unicode input on Linux.
 
 ## As built (differences from the spec above)
 
-- Switching from one dialog to another does not cross-fade: the new dialog is created and plays its enter animation.
-- Entering and leaving split view fades the grid and the single pane (`Motion.standard`); the pane does not shrink
-  into or grow out of its slot. Zoom does animate one `SessionPane` to the full area.
-- A tile that leaves does not fade out; only arrival and reflow are animated.
 - In split view the grid starts below the window buttons (split, theme, leave zoom) instead of under them.
 - `Esc` leaves zoom. `Alt+arrows` pick the nearest tile by centre distance, across-distance counting twice.
 - The folder picker (`FolderDialog`) starts in the platform's default directory.
