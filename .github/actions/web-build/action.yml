@@ -1,0 +1,13 @@
+# Builds the web frontend into web/dist. `cargo build/test/clippy` need it:
+# the build script of ref-web stops when web/dist/index.html is missing.
+name: Build the web frontend
+description: Installs the web dependencies and runs `pnpm build` in web/.
+
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/web-install
+    - name: Build the web frontend
+      shell: bash
+      working-directory: web
+      run: pnpm build
