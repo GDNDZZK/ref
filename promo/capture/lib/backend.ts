@@ -1,10 +1,12 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { binary } from './binaries.ts'
 
+// Scratch state of the processes started here. Under promo/.cache, not /tmp, which is shared.
+const RUN_DIR = join(import.meta.dirname, '..', '..', '.cache', 'run')
+const STOP_GRACE_MS = 5000
 const POLL_ATTEMPTS = 100
 const POLL_INTERVAL_MS = 100
 
@@ -17,7 +19,8 @@ export interface IsolatedEnv {
 }
 
 export function isolatedEnv(): IsolatedEnv {
-  const root = mkdtempSync(join(tmpdir(), 'ref-promo-'))
+  mkdirSync(RUN_DIR, { recursive: true })
+  const root = mkdtempSync(join(RUN_DIR, 'run-'))
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     REF_STATE_DIR: join(root, 'state'),
@@ -75,10 +78,11 @@ export interface WebServer {
   stop(): Promise<void>
 }
 
-// `ref-web --mock` on a free port.
-export async function startMockWeb(isolated: IsolatedEnv): Promise<WebServer> {
+// `ref-web --mock` on a free port, or with `backend` a ref-web in front of that backend.
+export async function startMockWeb(isolated: IsolatedEnv, backend?: Backend): Promise<WebServer> {
   const port = await freePort()
-  const child = spawn(binary('ref-web'), ['--mock', '--no-open', '--port', String(port)], {
+  const backendArgs = backend ? ['--server', backend.url, '--token', backend.token] : ['--mock']
+  const child = spawn(binary('ref-web'), [...backendArgs, '--no-open', '--port', String(port)], {
     env: isolated.env,
     stdio: ['pipe', 'ignore', 'inherit'], // open stdin keeps the mock backend alive; stdout has the login token
   })
@@ -93,11 +97,14 @@ export async function startMockWeb(isolated: IsolatedEnv): Promise<WebServer> {
   return { loginUrl: `http://127.0.0.1:${port}/login?token=${token}`, stop: () => endProcess(child) }
 }
 
-// Ends a process this module started: closes its stdin, then terminates it by PID.
+// Ends a process this module started: closes its stdin, asks it to stop and, if it
+// lingers (open connections keep a server alive), kills it. Always by its own PID.
 async function endProcess(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null) return
   const exited = new Promise((resolve) => child.once('exit', resolve))
   child.stdin?.end()
-  child.kill()
+  child.kill('SIGTERM')
+  const timer = setTimeout(() => child.kill('SIGKILL'), STOP_GRACE_MS)
   await exited
+  clearTimeout(timer)
 }
