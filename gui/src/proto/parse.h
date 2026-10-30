@@ -39,6 +39,7 @@ Parsed<SessionSnapshot> parseAttachResult(const QJsonObject& result);          /
 Parsed<QList<SessionInfo>> parseSessionsResult(const QJsonObject& result);     // list_sessions, list_history, watch_all
 Parsed<PromptResult> parsePromptResult(const QJsonObject& result);             // prompt
 Parsed<MessagesPage> parseMessagesResult(const QJsonObject& result);           // messages
+Parsed<ImageData> parseImageResult(const QJsonObject& result);                 // get_image
 Parsed<ServerConfig> parseConfigResult(const QJsonObject& result);             // get_config
 Parsed<QList<McpServerStatus>> parseMcpResult(const QJsonObject& result);      // mcp_status
 Parsed<DirListing> parseDirsResult(const QJsonObject& result);                 // list_dirs

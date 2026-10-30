@@ -262,4 +262,9 @@ Parsed<QList<NamedImage>> parseNamedImages(const QJsonValue& images)
 	return json::guarded([&] { return json::Fields(QJsonObject{{u"images"_s, images}}, u"result"_s).listOrEmpty<NamedImage>("images"_L1, json::readNamedImage); });
 }
 
+Parsed<ImageData> parseImageResult(const QJsonObject& result)
+{
+	return json::guarded([&] { return json::readImageData(json::child(json::Fields(result, u"result"_s), "image"_L1)); });
+}
+
 } // namespace refgui::proto

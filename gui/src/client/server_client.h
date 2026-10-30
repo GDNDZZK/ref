@@ -87,6 +87,9 @@ public:
 	QCoro::Task<Result<QString>> peerCommand(QString sessionId, QString command, QString args);
 	QCoro::Task<Result<QList<proto::McpServerStatus>>> mcpStatus(std::optional<QString> cwd);
 	QCoro::Task<Result<proto::DirListing>> listDirs(QString path);
+	// A page of messages before `before`, see Request::Messages.
+	QCoro::Task<Result<proto::MessagesPage>> messages(QString sessionId, QString before, int limit);
+	QCoro::Task<Result<proto::ImageData>> getImage(QString sessionId, QString imageId);
 	QCoro::Task<Result<void>> shutdown();
 
 signals:

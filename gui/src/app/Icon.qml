@@ -7,7 +7,7 @@ import RefGui
 Image {
 	id: icon
 
-	required property string name // File name without the set suffix, e.g. "check"
+	required property string name // File name without the set suffix, e.g. "check"; empty shows nothing
 	property int size: 16 // The set: 16 or 20
 	property color color: Theme.text
 
@@ -18,7 +18,7 @@ Image {
 	height: size
 	// Rasterised at device pixels so that the image maps 1:1 onto the screen.
 	sourceSize: Qt.size(size * Screen.devicePixelRatio, size * Screen.devicePixelRatio)
-	source: "image://icons/" + name + "-" + size + "?color=" + colorHex
+	source: name === "" ? "" : "image://icons/" + name + "-" + size + "?color=" + colorHex
 	fillMode: Image.Pad
 	smooth: false
 }

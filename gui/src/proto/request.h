@@ -44,6 +44,10 @@ QJsonObject exportTranscript(const QString& sessionId, const QString& path);
 QJsonObject peerCommand(const QString& sessionId, const QString& command, const QString& args);
 QJsonObject mcpStatus(const std::optional<QString>& cwd);
 QJsonObject listDirs(const QString& path);
+// A page of messages ending right before message `before`.
+QJsonObject messages(const QString& sessionId, const QString& before, int limit);
+// The bytes of an image the messages only name.
+QJsonObject getImage(const QString& sessionId, const QString& imageId);
 QJsonObject shutdown();
 
 } // namespace refgui::proto::request
