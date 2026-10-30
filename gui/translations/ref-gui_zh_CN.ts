@@ -12,7 +12,7 @@
 <context>
     <name>ChatSession</name>
     <message>
-        <location filename="../src/app/chat_session.cpp" line="78"/>
+        <location filename="../src/app/chat_session.cpp" line="203"/>
         <source>Not connected to the ref backend.</source>
         <translation>未连接到 ref 后端。</translation>
     </message>
@@ -211,7 +211,12 @@
         <translation>给 ref 发消息</translation>
     </message>
     <message>
-        <location filename="../src/app/Composer.qml" line="251"/>
+        <location filename="../src/app/Composer.qml" line="195"/>
+        <source>Cancelled the delayed tool call</source>
+        <translation>已取消延迟中的工具调用</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Composer.qml" line="258"/>
         <source>Drop images to attach</source>
         <translation>拖放图片以附加</translation>
     </message>
@@ -260,11 +265,37 @@
     </message>
 </context>
 <context>
+    <name>CopyButton</name>
+    <message>
+        <location filename="../src/app/CopyButton.qml" line="51"/>
+        <source>Copy</source>
+        <translation type="unfinished">复制</translation>
+    </message>
+</context>
+<context>
     <name>ImageBlock</name>
     <message>
         <location filename="../src/app/ImageBlock.qml" line="20"/>
         <source>Image: %1</source>
         <translation>图片：%1</translation>
+    </message>
+</context>
+<context>
+    <name>MetaBlock</name>
+    <message>
+        <location filename="../src/app/MetaBlock.qml" line="115"/>
+        <source>interrupted</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../src/app/MetaBlock.qml" line="133"/>
+        <source>Undo</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../src/app/MetaBlock.qml" line="138"/>
+        <source>Copy</source>
+        <translation type="unfinished">复制</translation>
     </message>
 </context>
 <context>
@@ -298,6 +329,39 @@
         <location filename="../src/app/NotificationSettingsSection.qml" line="82"/>
         <source>A turn ended with an error</source>
         <translation>一轮对话出错结束</translation>
+    </message>
+</context>
+<context>
+    <name>OutputText</name>
+    <message numerus="yes">
+        <location filename="../src/app/OutputText.qml" line="44"/>
+        <source>Show %n more line(s)</source>
+        <translation type="unfinished">
+            <numerusform></numerusform>
+        </translation>
+    </message>
+</context>
+<context>
+    <name>PermissionSection</name>
+    <message>
+        <location filename="../src/app/PermissionSection.qml" line="84"/>
+        <source>Allow</source>
+        <translation type="unfinished">允许</translation>
+    </message>
+    <message>
+        <location filename="../src/app/PermissionSection.qml" line="91"/>
+        <source>Allow for session</source>
+        <translation type="unfinished">本会话内允许</translation>
+    </message>
+    <message>
+        <location filename="../src/app/PermissionSection.qml" line="98"/>
+        <source>Deny</source>
+        <translation type="unfinished">拒绝</translation>
+    </message>
+    <message>
+        <location filename="../src/app/PermissionSection.qml" line="108"/>
+        <source>+%1 more waiting</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -342,12 +406,12 @@
 <context>
     <name>SessionPane</name>
     <message>
-        <location filename="../src/app/SessionPane.qml" line="32"/>
+        <location filename="../src/app/SessionPane.qml" line="70"/>
         <source>What are we building?</source>
         <translation>我们要做点什么？</translation>
     </message>
     <message>
-        <location filename="../src/app/SessionPane.qml" line="60"/>
+        <location filename="../src/app/SessionPane.qml" line="98"/>
         <source>Jump to latest</source>
         <translation>跳到最新</translation>
     </message>
@@ -368,52 +432,160 @@
 <context>
     <name>ToolBlock</name>
     <message>
-        <location filename="../src/app/ToolBlock.qml" line="184"/>
         <source>Waiting for your permission</source>
-        <translation>等待你的授权</translation>
+        <translation type="vanished">等待你的授权</translation>
     </message>
     <message>
-        <location filename="../src/app/ToolBlock.qml" line="194"/>
         <source>Allow</source>
-        <translation>允许</translation>
+        <translation type="vanished">允许</translation>
+    </message>
+    <message>
+        <source>Allow for session</source>
+        <translation type="vanished">本会话内允许</translation>
+    </message>
+    <message>
+        <source>Deny</source>
+        <translation type="vanished">拒绝</translation>
+    </message>
+    <message>
+        <location filename="../src/app/ToolBlock.qml" line="49"/>
+        <source>writing…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../src/app/ToolBlock.qml" line="51"/>
+        <source>Needs permission</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../src/app/ToolBlock.qml" line="53"/>
+        <source>Runs in %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../src/app/ToolBlock.qml" line="55"/>
+        <source>running %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../src/app/ToolBlock.qml" line="57"/>
+        <source>error</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../src/app/ToolBlock.qml" line="57"/>
+        <source>error %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../src/app/ToolBlock.qml" line="59"/>
+        <source>denied</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../src/app/ToolBlock.qml" line="61"/>
+        <source>cancelled</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../src/app/ToolBlock.qml" line="198"/>
-        <source>Allow for session</source>
-        <translation>本会话内允许</translation>
+        <source>Cancel</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>ToolBody</name>
+    <message>
+        <location filename="../src/app/ToolBody.qml" line="33"/>
+        <source>Input</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../src/app/ToolBlock.qml" line="202"/>
-        <source>Deny</source>
-        <translation>拒绝</translation>
+        <location filename="../src/app/ToolBody.qml" line="44"/>
+        <source>Output</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../src/app/ToolBody.qml" line="47"/>
+        <source>(no output)</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>ToolInfo</name>
+    <message>
+        <location filename="../src/app/ToolInfo.qml" line="71"/>
+        <source>%1 (%2 edits)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../src/app/ToolInfo.qml" line="74"/>
+        <source>&quot;%1&quot; in %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../src/app/ToolInfo.qml" line="89"/>
+        <source>%1/%2 done</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
     <name>UserBlock</name>
     <message>
-        <location filename="../src/app/UserBlock.qml" line="20"/>
         <source>From %1</source>
-        <translation>来自 %1</translation>
+        <translation type="vanished">来自 %1</translation>
     </message>
     <message>
-        <location filename="../src/app/UserBlock.qml" line="22"/>
         <source>Task from %1</source>
-        <translation>来自 %1 的任务</translation>
+        <translation type="vanished">来自 %1 的任务</translation>
     </message>
     <message>
-        <location filename="../src/app/UserBlock.qml" line="24"/>
         <source>Shell command</source>
-        <translation>Shell 命令</translation>
+        <translation type="vanished">Shell 命令</translation>
     </message>
     <message>
-        <location filename="../src/app/UserBlock.qml" line="26"/>
         <source>Reminder</source>
-        <translation>提醒</translation>
+        <translation type="vanished">提醒</translation>
     </message>
     <message>
-        <location filename="../src/app/UserBlock.qml" line="28"/>
         <source>Summary of the earlier conversation</source>
-        <translation>此前对话的摘要</translation>
+        <translation type="vanished">此前对话的摘要</translation>
+    </message>
+    <message>
+        <location filename="../src/app/UserBlock.qml" line="35"/>
+        <source>message from &quot;%1&quot;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../src/app/UserBlock.qml" line="37"/>
+        <source>created by &quot;%1&quot;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../src/app/UserBlock.qml" line="39"/>
+        <source>shell</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../src/app/UserBlock.qml" line="41"/>
+        <source>reminder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../src/app/UserBlock.qml" line="140"/>
+        <location filename="../src/app/UserBlock.qml" line="161"/>
+        <source>Context compacted</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../src/app/UserBlock.qml" line="167"/>
+        <source>Copy</source>
+        <translation type="unfinished">复制</translation>
+    </message>
+    <message>
+        <location filename="../src/app/UserBlock.qml" line="210"/>
+        <source>Messages above stay visible but are no longer sent to the model</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -500,28 +672,28 @@
 <context>
     <name>refgui::composer::ComposerModel</name>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="269"/>
-        <location filename="../src/composer/composer_model.cpp" line="310"/>
+        <location filename="../src/composer/composer_model.cpp" line="270"/>
+        <location filename="../src/composer/composer_model.cpp" line="311"/>
         <source>Not connected to the ref backend.</source>
         <translation>未连接到 ref 后端。</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="352"/>
+        <location filename="../src/composer/composer_model.cpp" line="353"/>
         <source>The command expanded to nothing</source>
         <translation>命令展开后为空</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="421"/>
+        <location filename="../src/composer/composer_model.cpp" line="422"/>
         <source>Already sent; the prompt can no longer be removed</source>
         <translation>已经发送，无法再撤回该提示</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="562"/>
+        <location filename="../src/composer/composer_model.cpp" line="563"/>
         <source>The image is larger than 20 MiB.</source>
         <translation>图片超过 20 MiB。</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="592"/>
+        <location filename="../src/composer/composer_model.cpp" line="593"/>
         <source>%1 is not a supported image (PNG, JPEG, GIF or WebP)</source>
         <translation>%1 不是支持的图片（PNG、JPEG、GIF 或 WebP）</translation>
     </message>
