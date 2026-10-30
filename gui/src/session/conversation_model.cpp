@@ -207,6 +207,51 @@ QVariant ConversationModel::data(const QModelIndex& index, int role) const
 	}
 }
 
+ConversationModel::ConversationModel(QObject* parent)
+	: QAbstractListModel(parent)
+{
+	// Tool states change through row updates of any kind; the summary follows all of them.
+	connect(this, &QAbstractItemModel::dataChanged, this, [this](const QModelIndex&, const QModelIndex&, const QList<int>& roles) {
+		if(roles.isEmpty() || roles.contains(ToolStateRole))
+		{
+			refreshToolSummary();
+		}
+	});
+	connect(this, &QAbstractItemModel::rowsInserted, this, &ConversationModel::refreshToolSummary);
+	connect(this, &QAbstractItemModel::rowsRemoved, this, &ConversationModel::refreshToolSummary);
+	connect(this, &QAbstractItemModel::modelReset, this, &ConversationModel::refreshToolSummary);
+}
+
+void ConversationModel::refreshToolSummary()
+{
+	ToolSummary summary;
+	bool lastToolSeen = false;
+	for(qsizetype i = m_rows.size() - 1; i >= 0; --i)
+	{
+		const Block& block = m_rows.at(i);
+		if(block.kind != Block::Kind::Tool)
+		{
+			continue;
+		}
+		if(!lastToolSeen)
+		{
+			summary.lastToolDelayed = block.toolState == u"delayed"_s;
+			lastToolSeen = true;
+		}
+		if(block.toolState == u"awaiting_permission"_s)
+		{
+			++summary.awaitingPermission;
+			summary.oldestAwaitingCallId = block.callId; // the loop runs backwards: the last one set is the oldest
+		}
+	}
+	if(summary == m_toolSummary)
+	{
+		return;
+	}
+	m_toolSummary = summary;
+	emit toolSummaryChanged();
+}
+
 QHash<int, QByteArray> ConversationModel::roleNames() const
 {
 	return {

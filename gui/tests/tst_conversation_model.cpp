@@ -56,6 +56,7 @@ private slots:
 	void togglesFoldingAgainstTheDefault();
 	void carriesToolMetaAndImages();
 	void givesMessageTexts();
+	void summarisesWhatToolsAskOfTheUser();
 };
 
 void TestConversationModel::splitsAssistantTextIntoBlocks()
@@ -515,6 +516,32 @@ void TestConversationModel::carriesToolMetaAndImages()
 	QCOMPARE(images.size(), 1);
 	QCOMPARE(images.first().toMap().value(u"id"_s).toString(), u"a1:0:0"_s);
 	QCOMPARE(images.first().toMap().value(u"size"_s).toLongLong(), 12LL);
+}
+
+void TestConversationModel::summarisesWhatToolsAskOfTheUser()
+{
+	ConversationModel model;
+	QSignalSpy changed(&model, &ConversationModel::toolSummaryChanged);
+	const auto call = [](const QString& id, ToolState state) {
+		return refgui::proto::ToolPart{.callId = id, .name = u"bash"_s, .state = state};
+	};
+
+	model.setMessage(assistant(u"a1"_s, {call(u"c1"_s, ToolState::AwaitingPermission), call(u"c2"_s, ToolState::AwaitingPermission), call(u"c3"_s, ToolState::Delayed)}, false));
+	QCOMPARE(model.toolSummary().awaitingPermission, 2);
+	QCOMPARE(model.toolSummary().oldestAwaitingCallId, u"c1"_s);
+	QVERIFY(model.toolSummary().lastToolDelayed);
+	QVERIFY(changed.count() >= 1);
+
+	model.setPart(u"a1"_s, 0, call(u"c1"_s, ToolState::Running));
+	QCOMPARE(model.toolSummary().awaitingPermission, 1);
+	QCOMPARE(model.toolSummary().oldestAwaitingCallId, u"c2"_s);
+
+	model.setPart(u"a1"_s, 2, call(u"c3"_s, ToolState::Running));
+	QVERIFY(!model.toolSummary().lastToolDelayed);
+
+	model.reset({});
+	QCOMPARE(model.toolSummary().awaitingPermission, 0);
+	QVERIFY(model.toolSummary().oldestAwaitingCallId.isEmpty());
 }
 
 void TestConversationModel::givesMessageTexts()

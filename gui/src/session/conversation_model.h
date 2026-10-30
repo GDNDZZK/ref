@@ -76,7 +76,18 @@ public:
 		ShowAllRole,      // tool blocks: the whole output instead of a preview
 	};
 
-	using QAbstractListModel::QAbstractListModel;
+	explicit ConversationModel(QObject* parent = nullptr);
+
+	// What the tool calls ask of the user, for the keys and the status line.
+	struct ToolSummary
+	{
+		qsizetype awaitingPermission = 0;
+		QString oldestAwaitingCallId; // the request the keys answer
+		bool lastToolDelayed = false; // the newest tool call waits out its start delay
+
+		bool operator==(const ToolSummary&) const = default;
+	};
+	const ToolSummary& toolSummary() const { return m_toolSummary; }
 
 	// The error of the session that belongs to no message. It is the last row, unless the last
 	// message ended with the same error: that one shows it already. An empty text removes it.
@@ -121,6 +132,9 @@ public:
 	std::optional<QString> partText(const QString& messageId, qsizetype index) const;
 	// Number of parts of a message, -1 when it is unknown.
 	qsizetype partCount(const QString& messageId) const;
+
+signals:
+	void toolSummaryChanged();
 
 private:
 	struct PartNode
@@ -172,6 +186,7 @@ private:
 	static QList<Block> ownBlocks(const MessageNode& node);
 	// Brings what depends on the whole list up to date: which messages are stale, the tail error.
 	void refreshDerivedState();
+	void refreshToolSummary();
 	void refreshContext();
 	void refreshTailError();
 	const Block& blockAt(qsizetype row) const;
@@ -184,6 +199,7 @@ private:
 	QList<Block> m_rows;
 	Block m_tailBlock;
 	QString m_tailError;
+	ToolSummary m_toolSummary;
 	bool m_tailShown = false;
 	QSet<PartKey> m_toggled;
 	QSet<PartKey> m_shownAll;
