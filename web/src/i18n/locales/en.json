@@ -8,7 +8,36 @@
   "composer": {
     "placeholder": "Message ref",
     "send": "Send",
-    "stop": "Stop"
+    "stop": "Stop",
+    "label": "Message",
+    "placeholderWaiting": "Waiting for the ref backend…",
+    "placeholderQueue": "Type to queue a message…",
+    "placeholderShell": "Run a shell command…",
+    "interruptHint": "Press Esc again to interrupt",
+    "dropImages": "Drop images to attach",
+    "tags": {
+      "agent": "Agent (Tab)",
+      "model": "Model",
+      "variant": "Variant (Alt+T)",
+      "defaultVariant": "default",
+      "shell": "Shell"
+    },
+    "attachments": {
+      "remove": "Remove {name}"
+    },
+    "queue": {
+      "remove": "Remove",
+      "reminder": "reminder"
+    },
+    "toast": {
+      "expandedToNothing": "Command expanded to nothing",
+      "delayedCancelled": "Cancelled delayed tool call",
+      "alreadySent": "Already sent; the prompt can no longer be removed",
+      "image": {
+        "type": "{name} is not a supported image (PNG, JPEG, GIF or WebP)",
+        "size": "{name} is larger than 20 MiB"
+      }
+    }
   },
   "code": {
     "plainText": "text",
@@ -57,5 +86,26 @@
   },
   "command": {
     "unavailable": "This command is not available right now."
+  },
+  "notify": {
+    "permission": "Waiting for permission",
+    "permissionTool": "Waiting for permission to use {tool}",
+    "turnDone": "Finished",
+    "turnError": "Stopped with an error",
+    "turnErrorDetail": "Stopped with an error: {error}"
+  },
+  "notifySettings": {
+    "title": "Notifications",
+    "enable": "Show system notifications",
+    "permission": "A tool needs permission",
+    "turnDone": "A turn finished",
+    "turnError": "A turn ended with an error",
+    "insecure": "Not available on this page: browsers only show notifications on https or localhost. The tab title flashes instead.",
+    "unsupported": "This browser cannot show notifications. The tab title flashes instead.",
+    "denied": "Blocked in the browser's site settings. The tab title flashes instead.",
+    "needsPermission": "The browser still has to allow notifications.",
+    "allow": "Allow",
+    "later": "Not now",
+    "prompt": "Allow desktop notifications when another session needs you?"
   }
 }

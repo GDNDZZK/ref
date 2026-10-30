@@ -8,10 +8,13 @@ use axum::http::header::{CONTENT_TYPE, COOKIE, HOST};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use subtle::ConstantTimeEq as _;
 
 use crate::routes::{AppState, LOGIN_PATH, PING_PATH};
+use crate::token;
 
-pub const COOKIE_NAME: &str = "ref_web";
+const COOKIE_NAME_PREFIX: &str = "ref_web_";
+const COOKIE_MAX_AGE_SECS: u32 = 30 * 24 * 60 * 60;
 const LOCALHOST: &str = "localhost";
 const DEFAULT_HTTP_PORT: u16 = 80;
 
@@ -72,21 +75,47 @@ pub fn origin_matches_host(origin: &str, host: &str) -> bool {
         .is_some_and(|o| o.eq_ignore_ascii_case(host))
 }
 
-/// Compares in time independent of where the first difference is.
+/// Compares without leaking where the first difference is.
 pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+    a.ct_eq(b).into()
 }
 
-pub fn has_valid_cookie(headers: &HeaderMap, login_token: &str) -> bool {
-    headers
-        .get_all(COOKIE)
-        .iter()
-        .filter_map(|v| v.to_str().ok())
-        .flat_map(|line| line.split(';'))
-        .filter_map(|pair| pair.trim().split_once('='))
-        .any(|(name, value)| {
-            name == COOKIE_NAME && constant_time_eq(value.as_bytes(), login_token.as_bytes())
-        })
+/// The login cookie. Browsers share cookies between ports of a host, so other servers on
+/// `localhost` receive it too. Hence the name carries the port (two ref-web instances do not
+/// overwrite each other's cookie), and the value is a random id that only this process knows
+/// and that stops working when it exits, not the login token that sits in a file.
+pub struct SessionCookie {
+    name: String,
+    id: String,
+}
+
+impl SessionCookie {
+    pub fn new(port: u16) -> Self {
+        SessionCookie {
+            name: format!("{COOKIE_NAME_PREFIX}{port}"),
+            id: token::random_hex(),
+        }
+    }
+
+    /// Value of the `Set-Cookie` header that logs the browser in.
+    pub fn set_cookie(&self) -> String {
+        format!(
+            "{}={}; Path=/; HttpOnly; SameSite=Strict; Max-Age={COOKIE_MAX_AGE_SECS}",
+            self.name, self.id
+        )
+    }
+
+    pub fn is_sent_in(&self, headers: &HeaderMap) -> bool {
+        headers
+            .get_all(COOKIE)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .flat_map(|line| line.split(';'))
+            .filter_map(|pair| pair.trim().split_once('='))
+            .any(|(name, value)| {
+                name == self.name && constant_time_eq(value.as_bytes(), self.id.as_bytes())
+            })
+    }
 }
 
 pub fn text_response(status: StatusCode, text: &'static str) -> Response {
@@ -105,10 +134,10 @@ pub async fn guard(State(state): State<Arc<AppState>>, req: Request, next: Next)
     }
     let path = req.uri().path();
     let open_route = path == LOGIN_PATH || path == PING_PATH;
-    if !open_route && !has_valid_cookie(req.headers(), &state.login_token) {
+    if !open_route && !state.session.is_sent_in(req.headers()) {
         return text_response(
             StatusCode::UNAUTHORIZED,
-            "Not logged in. Open the login URL that ref-web printed.\n",
+            "Not logged in. Run ref-web again: it opens the login URL again.\n",
         );
     }
     next.run(req).await
@@ -178,13 +207,30 @@ mod tests {
 
     #[test]
     fn cookie_lookup() {
-        let mut h = HeaderMap::new();
-        h.insert(COOKIE, "a=1; ref_web=secret; b=2".parse().unwrap());
-        assert!(has_valid_cookie(&h, "secret"));
-        assert!(!has_valid_cookie(&h, "other"));
-        assert!(!has_valid_cookie(&HeaderMap::new(), "secret"));
-        let mut h = HeaderMap::new();
-        h.insert(COOKIE, "xref_web=secret".parse().unwrap());
-        assert!(!has_valid_cookie(&h, "secret"));
+        let cookie = SessionCookie::new(7480);
+        let sent = |line: String| {
+            let mut h = HeaderMap::new();
+            h.insert(COOKIE, line.parse().unwrap());
+            cookie.is_sent_in(&h)
+        };
+        let (name, id) = (cookie.name.clone(), cookie.id.clone());
+        assert!(sent(format!("a=1; {name}={id}; b=2")));
+        assert!(!sent(format!("{name}=other")));
+        assert!(!sent(format!("x{name}={id}")));
+        assert!(!sent(format!("ref_web_7481={id}")));
+        assert!(!cookie.is_sent_in(&HeaderMap::new()));
+    }
+
+    #[test]
+    fn cookie_name_has_the_port_and_value_is_random() {
+        let (a, b) = (SessionCookie::new(1), SessionCookie::new(1));
+        assert_eq!(a.name, "ref_web_1");
+        assert_ne!(a.id, b.id);
+        let header = a.set_cookie();
+        assert!(
+            header.starts_with(&format!("ref_web_1={}; ", a.id)),
+            "{header}"
+        );
+        assert!(header.contains("HttpOnly") && header.contains("SameSite=Strict"));
     }
 }

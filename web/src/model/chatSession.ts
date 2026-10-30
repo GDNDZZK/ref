@@ -39,13 +39,13 @@ export class ChatSession {
     blocks: [] as readonly Block[],
     info: undefined as SessionInfo | undefined,
     permissions: [] as PermissionRequest[],
+    queued: [] as readonly Message[], // waiting for the next safe point, in delivery order
     loaded: false,
     generation: 0, // counts the times the history was loaded
     attachment: 'detached' as Attachment,
     moreBefore: false,
     loadingOlder: false,
     olderError: '',
-    queued: [] as readonly Message[],
     lastToolDelayed: false,
     thinkingExpanded: false,
     detailsExpanded: false,
@@ -80,6 +80,10 @@ export class ChatSession {
 
   get permissions(): readonly PermissionRequest[] {
     return this.state.permissions
+  }
+
+  get queued(): readonly Message[] {
+    return this.state.queued
   }
 
   get loaded(): boolean {
@@ -131,10 +135,6 @@ export class ChatSession {
 
   get olderError(): string {
     return this.state.olderError
-  }
-
-  get queued(): readonly Message[] {
-    return this.state.queued
   }
 
   get lastToolDelayed(): boolean {
@@ -286,9 +286,9 @@ export class ChatSession {
   private publish(): void {
     this.state.info = this.transcript.info
     this.state.moreBefore = this.transcript.moreBefore
-    this.state.queued = this.transcript.queued
     this.state.lastToolDelayed = this.transcript.lastToolDelayed
     this.state.permissions = [...this.transcript.permissions.values()]
+    this.state.queued = this.transcript.queued
     this.flushing.value = true
   }
 }
