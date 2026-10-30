@@ -6,6 +6,8 @@
 #include <QSignalSpy>
 #include <QtTest>
 
+#include <algorithm>
+
 using namespace Qt::StringLiterals;
 using namespace std::chrono_literals;
 using namespace refgui;
@@ -207,6 +209,40 @@ private slots:
 		QCOMPARE(result.error(), u"connection closed"_s);
 		QTRY_COMPARE(closed.size(), 1);
 		QVERIFY(!client.isOpen());
+	}
+
+	void silentBackendGetsOnePingAndIsDropped()
+	{
+		FakeBackend backend;
+		backend.onRequest = [](const QJsonObject&) {}; // never answers
+		ServerClient client;
+		client.setHeartbeat({.pingAfter = 100ms, .deadAfter = 500ms, .tick = 20ms});
+		QVERIFY(open(client, backend));
+		QSignalSpy closed(&client, &ServerClient::closed);
+
+		QTRY_COMPARE_WITH_TIMEOUT(closed.size(), 1, 3000);
+
+		QCOMPARE(closed.first().first().toString(), u"the backend stopped answering"_s);
+		QVERIFY(!client.isOpen());
+		const auto pings = std::count_if(backend.requests().begin(), backend.requests().end(),
+		                                 [](const QJsonObject& request) { return request.value(u"op"_s).toString() == u"ping"_s; });
+		QCOMPARE(pings, 1); // not another one while the first is unanswered
+	}
+
+	void answeredPingsKeepTheConnection()
+	{
+		FakeBackend backend;
+		backend.onRequest = [&](const QJsonObject& request) { backend.respond(request, {}); };
+		ServerClient client;
+		client.setHeartbeat({.pingAfter = 50ms, .deadAfter = 200ms, .tick = 10ms});
+		QVERIFY(open(client, backend));
+		QSignalSpy closed(&client, &ServerClient::closed);
+
+		QTest::qWait(700); // several times what a silent backend gets
+
+		QVERIFY(client.isOpen());
+		QCOMPARE(closed.size(), 0);
+		QVERIFY(backend.requests().size() >= 3); // Hello and at least two pings
 	}
 
 	void requestsWithoutAConnectionFail()

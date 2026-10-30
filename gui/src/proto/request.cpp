@@ -327,4 +327,9 @@ QJsonObject shutdown()
 	return op(u"shutdown"_s);
 }
 
+QJsonObject ping()
+{
+	return op(u"ping"_s);
+}
+
 } // namespace refgui::proto::request
