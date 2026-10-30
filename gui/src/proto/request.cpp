@@ -294,6 +294,23 @@ QJsonObject listDirs(const QString& path)
 	return json;
 }
 
+QJsonObject messages(const QString& sessionId, const QString& before, int limit)
+{
+	QJsonObject json = op(u"messages"_s);
+	json.insert(u"session_id"_s, sessionId);
+	json.insert(u"before"_s, before);
+	json.insert(u"limit"_s, limit);
+	return json;
+}
+
+QJsonObject getImage(const QString& sessionId, const QString& imageId)
+{
+	QJsonObject json = op(u"get_image"_s);
+	json.insert(u"session_id"_s, sessionId);
+	json.insert(u"image_id"_s, imageId);
+	return json;
+}
+
 QJsonObject shutdown()
 {
 	return op(u"shutdown"_s);

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// Says why the conversation is not live: connecting, lost, closed, or a backend that is too old.
+// Says why the conversation is not live: connecting, lost or closed. (An old backend has its own
+// banner.)
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useConnectionStore } from '../stores/connection.ts'
@@ -9,7 +10,6 @@ const connection = useConnectionStore()
 
 const text = computed(() => {
   if (connection.fatal) return t(connection.fatal)
-  if (connection.backendTooOld) return t('connection.backendTooOld')
   if (connection.state === 'closed') return t('connection.closed', { reason: connection.detail })
   if (connection.state === 'connecting')
     return connection.hello ? t('connection.reconnecting') : t('connection.connecting')

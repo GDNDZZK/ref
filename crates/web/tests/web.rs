@@ -397,6 +397,22 @@ async fn a_port_held_by_another_program_is_an_error() {
 }
 
 #[tokio::test]
+async fn a_ref_web_with_another_login_token_is_reported_as_such() {
+    let first_env = Env::new("token-a");
+    let first = first_env.start(&["--server", "ws://127.0.0.1:1/"]).await;
+    let second_env = Env::new("token-b");
+    let port = first.port.to_string();
+    let output = second_env.run(&["--no-open", "--port", &port]);
+    assert!(!output.status.success());
+    let err = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        err.contains("or by a ref-web with a different login token"),
+        "{err}"
+    );
+    assert!(!err.contains(&first.token), "{err}");
+}
+
+#[tokio::test]
 async fn the_login_token_survives_a_restart_but_sessions_do_not() {
     let env = Env::new("token");
     let (first, _upstream) = web_with_fake_upstream(&env).await;

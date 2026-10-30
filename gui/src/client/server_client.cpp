@@ -257,6 +257,16 @@ QCoro::Task<Result<proto::DirListing>> ServerClient::listDirs(QString path)
 	co_return asResult(co_await request(proto::request::listDirs(path)), proto::parseDirsResult);
 }
 
+QCoro::Task<Result<proto::MessagesPage>> ServerClient::messages(QString sessionId, QString before, int limit)
+{
+	co_return asResult(co_await request(proto::request::messages(sessionId, before, limit)), proto::parseMessagesResult);
+}
+
+QCoro::Task<Result<proto::ImageData>> ServerClient::getImage(QString sessionId, QString imageId)
+{
+	co_return asResult(co_await request(proto::request::getImage(sessionId, imageId)), proto::parseImageResult);
+}
+
 QCoro::Task<Result<void>> ServerClient::shutdown()
 {
 	co_return asVoidResult(co_await request(proto::request::shutdown()));

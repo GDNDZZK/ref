@@ -98,6 +98,16 @@ export class ChatSession {
     this.showHistory()
   }
 
+  // Moves between foreground and watching. While the window already receives the session's events
+  // (split view subscribes to all of them) the history stays as it is; otherwise it is loaded again.
+  async setForeground(foreground: boolean): Promise<void> {
+    const receivingEvents = this.state.loaded && this.state.attachment !== 'detached'
+    if (!receivingEvents) return this.attach(foreground)
+    if (foreground) await this.deps.api().attach(this.id, true)
+    else await this.deps.api().detach(this.id)
+    this.state.attachment = foreground ? 'foreground' : 'watching'
+  }
+
   async detach(): Promise<void> {
     await this.deps.api().detach(this.id)
     this.state.attachment = 'detached'
@@ -114,7 +124,6 @@ export class ChatSession {
 
   applyEvent(event: SessionEvent): void {
     if (!this.state.loaded) return // before the snapshot: the snapshot already has it
-    if (event.type === 'error') this.deps.notify('error', this.errorText(event.text))
     this.transcript.apply(event, performance.now())
     this.publish()
   }
@@ -146,12 +155,6 @@ export class ChatSession {
 
   private newTranscript(): Transcript {
     return new Transcript({ reportError: (message) => this.deps.notify('error', message) })
-  }
-
-  // A session that is not in the foreground says which one the error is about.
-  private errorText(text: string): string {
-    const name = this.state.info?.name
-    return this.state.attachment === 'foreground' || !name ? text : `${name}: ${text}`
   }
 
   private showHistory(): void {

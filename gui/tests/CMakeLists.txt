@@ -154,6 +154,6 @@ qt_add_executable(tst_workspace tst_workspace.cpp fake_backend.h
 	${PROJECT_SOURCE_DIR}/src/app/tile_model.cpp
 	${PROJECT_SOURCE_DIR}/src/app/tile_model.h
 )
-target_link_libraries(tst_workspace PRIVATE refgui_workspace refgui_session refgui_composer refgui_cli Qt6::Qml Qt6::Test)
+target_link_libraries(tst_workspace PRIVATE refgui_workspace refgui_session refgui_composer refgui_cli Qt6::Gui Qt6::Qml Qt6::Test)
 refgui_configure_target(tst_workspace)
 add_test(NAME tst_workspace COMMAND tst_workspace)

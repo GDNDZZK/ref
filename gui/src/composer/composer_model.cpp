@@ -316,7 +316,7 @@ void ComposerModel::runCustomCommand(const QString& name, const QString& args)
 
 QCoro::Task<> ComposerModel::sendPrompt(QString text, QList<proto::NamedImage> images, bool restoreOnFailure)
 {
-	const auto result = co_await m_backend.client().prompt(m_controller.sessionId(), text, imageData(images));
+	const auto result = co_await m_controller.send(text, imageData(images));
 	if(result)
 	{
 		emit sent();

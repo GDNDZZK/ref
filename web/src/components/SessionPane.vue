@@ -50,7 +50,7 @@ watch(following, (isFollowing) => {
 </script>
 
 <template>
-  <div class="pane">
+  <div class="pane" :data-pane="session.id">
     <div class="chat">
       <ChatView
         v-model:following="following"

@@ -10,6 +10,8 @@ namespace
 {
 
 constexpr int NewestSessionOnly = 1;
+// Messages asked for at a time when scrolling back; the server caps a page at 1000.
+constexpr int OlderPageSize = 100;
 
 } // namespace
 
@@ -106,10 +108,37 @@ QCoro::Task<SessionController::Result<bool>> SessionController::continueLast(QSt
 	co_return true;
 }
 
-QCoro::Task<SessionController::Result<proto::PromptResult>> SessionController::send(QString text)
+QCoro::Task<SessionController::Result<void>> SessionController::loadOlder()
 {
 	Q_ASSERT(hasSession());
-	co_return co_await m_backend.client().prompt(m_sessionId, std::move(text));
+	const QString before = m_model.firstMessageId();
+	if(!m_moreBefore || m_loadingOlder || before.isEmpty())
+	{
+		co_return Result<void>();
+	}
+	setLoadingOlder(true);
+	const QString sessionId = m_sessionId;
+	const auto page = co_await m_backend.client().messages(sessionId, before, OlderPageSize);
+	setLoadingOlder(false);
+	if(!page)
+	{
+		co_return std::unexpected(page.error());
+	}
+	// The conversation was replaced while the page was on its way: it does not fit any more.
+	const bool stillFits = sessionId == m_sessionId && m_model.firstMessageId() == before;
+	if(stillFits)
+	{
+		m_model.prependMessages(page->messages);
+		setMoreBefore(page->moreBefore);
+	}
+	co_return Result<void>();
+}
+
+QCoro::Task<SessionController::Result<proto::PromptResult>> SessionController::send(QString text, QList<proto::ImageData> images)
+{
+	Q_ASSERT(hasSession());
+	m_model.setTailError({}); // a new prompt starts afresh
+	co_return co_await m_backend.client().prompt(m_sessionId, std::move(text), std::move(images));
 }
 
 QCoro::Task<SessionController::Result<void>> SessionController::abort()
@@ -140,6 +169,7 @@ void SessionController::adopt(const proto::SessionSnapshot& snapshot)
 {
 	m_feed.reset(snapshot.messages);
 	setQueued(snapshot.queued);
+	setMoreBefore(snapshot.moreBefore);
 	setInfo(snapshot.info);
 }
 
@@ -167,7 +197,13 @@ void SessionController::onEvent(const proto::SessionEvent& event)
 	}
 	else if(const auto* error = std::get_if<proto::ErrorEvent>(&event))
 	{
+		m_model.setTailError(error->text);
 		emit errorReported(error->text);
+	}
+	else if(const auto* reset = std::get_if<proto::ResetEvent>(&event))
+	{
+		setMoreBefore(reset->moreBefore);
+		m_feed.apply(event);
 	}
 	else
 	{
@@ -179,6 +215,24 @@ void SessionController::setQueued(QList<proto::Message> messages)
 {
 	m_queued = std::move(messages);
 	emit queueChanged();
+}
+
+void SessionController::setMoreBefore(bool moreBefore)
+{
+	if(moreBefore != m_moreBefore)
+	{
+		m_moreBefore = moreBefore;
+		emit moreBeforeChanged();
+	}
+}
+
+void SessionController::setLoadingOlder(bool loading)
+{
+	if(loading != m_loadingOlder)
+	{
+		m_loadingOlder = loading;
+		emit loadingOlderChanged();
+	}
 }
 
 void SessionController::setInfo(const proto::SessionInfo& info)
