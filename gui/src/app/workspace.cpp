@@ -1,6 +1,7 @@
 #include "app/workspace.h"
 
 #include <QJSEngine>
+#include <QTimer>
 
 #include <algorithm>
 #include <utility>
@@ -14,6 +15,8 @@ namespace
 
 // Longest error text in a toast; the rest is in the session's own view.
 constexpr int MaxToastErrorLength = 200;
+// How long a closed session is kept for its tile to fade out; longer than the tile animations.
+constexpr int SessionRetireDelay = 1000; // ms
 
 Workspace* theInstance = nullptr;
 
@@ -500,7 +503,8 @@ void Workspace::dropChat(const QString& sessionId)
 	{
 		syncTiles();
 	}
-	gone->deleteLater();
+	// A tile of the session may still be fading out; it needs the object until then.
+	QTimer::singleShot(SessionRetireDelay, gone, &QObject::deleteLater);
 }
 
 // Reacts to the backend's session list: sessions that disappeared were closed.
