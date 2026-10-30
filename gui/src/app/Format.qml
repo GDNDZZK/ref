@@ -6,6 +6,7 @@ QtObject {
 	readonly property int msPerSecond: 1000
 	readonly property int secondsPerMinute: 60
 	readonly property int secondsPerHour: 3600
+	readonly property int secondsPerDay: 86400
 	readonly property int wholeSecondFrom: 10000 // ms; below this a duration shows a decimal
 	readonly property int thousand: 1000
 	readonly property int million: 1000000
@@ -44,5 +45,28 @@ QtObject {
 		if (n >= thousand)
 			return (n / thousand).toFixed(1) + "k"
 		return String(n)
+	}
+
+	// "just now", "5m ago", "3h ago", "Yesterday", then the date.
+	function relativeTime(ms) {
+		const now = new Date()
+		const then = new Date(ms)
+		const seconds = Math.max(0, (now.getTime() - ms) / msPerSecond)
+		if (seconds < secondsPerMinute)
+			return qsTr("just now")
+		if (seconds < secondsPerHour)
+			return qsTr("%1m ago").arg(Math.floor(seconds / secondsPerMinute))
+		if (seconds < secondsPerDay && now.getDate() === then.getDate())
+			return qsTr("%1h ago").arg(Math.floor(seconds / secondsPerHour))
+		const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1)
+		if (then.getFullYear() === yesterday.getFullYear() && then.getMonth() === yesterday.getMonth() && then.getDate() === yesterday.getDate())
+			return qsTr("Yesterday")
+		return then.getFullYear() === now.getFullYear() ? Qt.formatDate(then, "MMM d") : Qt.formatDate(then, "MMM d, yyyy")
+	}
+
+	// The local path of a file: URL.
+	function localPath(url) {
+		const text = url.toString()
+		return /^file:\/\/\/[A-Za-z]:/.test(text) ? decodeURIComponent(text.slice(8)) : decodeURIComponent(text.replace(/^file:\/\//, ""))
 	}
 }
