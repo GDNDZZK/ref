@@ -15,6 +15,8 @@ qt_add_qml_module(ref-gui
 		system_fonts.h
 		tile_model.cpp
 		tile_model.h
+		tile_stage.cpp
+		tile_stage.h
 		workspace.cpp
 		workspace_commands.cpp
 		workspace_requests.cpp
