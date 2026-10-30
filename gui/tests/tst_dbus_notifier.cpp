@@ -5,6 +5,7 @@
 #include <QDBusConnection>
 #include <QDBusContext>
 #include <QDBusMessage>
+#include <QDBusPendingCallWatcher>
 #include <QProcess>
 #include <QSignalSpy>
 #include <QTest>
@@ -20,6 +21,10 @@ namespace
 
 const QString ServiceName = u"org.freedesktop.Notifications"_s;
 const QString ObjectPath = u"/org/freedesktop/Notifications"_s;
+const QString BusService = u"org.freedesktop.DBus"_s;
+const QString BusPath = u"/org/freedesktop/DBus"_s;
+
+constexpr int FlushTimeoutMs = 5000;
 
 struct Received
 {
@@ -95,6 +100,7 @@ private:
 	void restartService(const QStringList& capabilities);
 
 	void sendSignal(const QString& name, const QList<QVariant>& arguments);
+	void flush();
 
 	QProcess m_daemon;
 	QString m_address;
@@ -107,6 +113,11 @@ void TestDBusNotifier::initTestCase()
 	m_daemon.start(u"dbus-daemon"_s, {u"--session"_s, u"--nofork"_s, u"--print-address"_s});
 	if(!m_daemon.waitForStarted() || !m_daemon.waitForReadyRead(5000))
 	{
+		// A CI machine is set up for this test; a missing daemon there is a mistake that must not pass unseen.
+		if(qEnvironmentVariableIsSet("CI"))
+		{
+			QFAIL("dbus-daemon is not available, and this is CI");
+		}
 		QSKIP("dbus-daemon is not available");
 	}
 	m_address = QString::fromUtf8(m_daemon.readLine()).trimmed();
@@ -129,7 +140,20 @@ void TestDBusNotifier::sendSignal(const QString& name, const QList<QVariant>& ar
 {
 	QDBusMessage signal = QDBusMessage::createSignal(ObjectPath, ServiceName, name);
 	signal.setArguments(arguments);
-	QDBusConnection::connectToBus(m_address, u"service"_s).send(signal);
+	QDBusConnection bus = QDBusConnection::connectToBus(m_address, u"service"_s);
+	bus.send(signal);
+	// The daemon has the signal once it answers a later call of the same connection.
+	bus.call(QDBusMessage::createMethodCall(BusService, BusPath, BusService, u"GetId"_s));
+}
+
+// Returns when the notifier has handled every reply and signal the daemon sent it before now: the
+// daemon hands them over in order, so the answer to a later call comes after them.
+void TestDBusNotifier::flush()
+{
+	QDBusConnection bus = QDBusConnection::connectToBus(m_address, u"notifier"_s);
+	QDBusPendingCallWatcher watcher(bus.asyncCall(QDBusMessage::createMethodCall(BusService, BusPath, BusService, u"GetId"_s)));
+	QSignalSpy finished(&watcher, &QDBusPendingCallWatcher::finished);
+	QVERIFY(finished.wait(FlushTimeoutMs));
 }
 
 void TestDBusNotifier::unavailableWithoutAService()
@@ -139,7 +163,7 @@ void TestDBusNotifier::unavailableWithoutAService()
 
 	QSignalSpy shown(m_notifier.get(), &DBusNotifier::showFailed);
 	m_notifier->show({.sessionId = u"s1"_s, .kind = Kind::TurnDone, .title = u"t"_s, .body = u"b"_s});
-	QTest::qWait(50);
+	flush();
 	QCOMPARE(shown.count(), 0); // nothing was attempted
 }
 
@@ -169,8 +193,7 @@ void TestDBusNotifier::showsTitleBodyAndClickAction()
 
 void TestDBusNotifier::aNewerNotificationOfASessionReplacesTheOlder()
 {
-	// Let the reply to the first one arrive, so its id is known.
-	QTest::qWait(100);
+	flush(); // the reply to the first one arrives, so its id is known
 	const uint first = m_service->lastId;
 	QVERIFY(first != 0);
 
@@ -178,19 +201,19 @@ void TestDBusNotifier::aNewerNotificationOfASessionReplacesTheOlder()
 	QTRY_COMPARE(m_service->received.size(), 2);
 	QCOMPARE(m_service->received.last().replaces, first);
 	QCOMPARE(m_service->received.last().hints.value(u"urgency"_s).value<uchar>(), uchar(2));
-	QTest::qWait(100);
+	flush();
 
 	m_notifier->show({.sessionId = u"s2"_s, .kind = Kind::Permission, .title = u"Other"_s, .body = u"Needs your permission"_s});
 	QTRY_COMPARE(m_service->received.size(), 3);
 	QCOMPARE(m_service->received.last().replaces, 0u);
-	QTest::qWait(100);
+	flush();
 
 	// Another kind of the same session is a notification of its own, as in the Web interface.
 	m_notifier->show({.sessionId = u"s1"_s, .kind = Kind::TurnDone, .title = u"Fix build"_s, .body = u"Finished"_s});
 	QTRY_COMPARE(m_service->received.size(), 4);
 	QCOMPARE(m_service->received.last().replaces, 0u);
 	QCOMPARE(m_service->received.last().hints.value(u"urgency"_s).value<uchar>(), uchar(1));
-	QTest::qWait(100);
+	flush();
 }
 
 void TestDBusNotifier::clickActivatesTheSession()
@@ -198,7 +221,7 @@ void TestDBusNotifier::clickActivatesTheSession()
 	QSignalSpy activated(m_notifier.get(), &DBusNotifier::activated);
 	const uint idOfS1 = 1; // the fake hands out 1 for s1 and reuses it when replacing
 	sendSignal(u"ActionInvoked"_s, {idOfS1, u"other"_s});
-	QTest::qWait(100);
+	flush();
 	QCOMPARE(activated.count(), 0);
 
 	sendSignal(u"ActionInvoked"_s, {idOfS1, u"default"_s});
@@ -211,9 +234,8 @@ void TestDBusNotifier::closedNotificationsAreForgotten()
 	QSignalSpy activated(m_notifier.get(), &DBusNotifier::activated);
 	const uint idOfS2 = 2;
 	sendSignal(u"NotificationClosed"_s, {idOfS2, 1u});
-	QTest::qWait(100);
 	sendSignal(u"ActionInvoked"_s, {idOfS2, u"default"_s});
-	QTest::qWait(100);
+	flush();
 	QCOMPARE(activated.count(), 0);
 }
 
