@@ -37,6 +37,10 @@ Item {
 		turnInProgress: pane.session.busy
 		sessionId: pane.session.sessionId
 		permissionCount: pane.session.permissionCount
+		moreBefore: pane.session.moreBefore
+		loadingOlder: pane.session.loadingOlder
+		olderError: pane.session.olderError
+		onLoadOlderRequested: pane.session.loadOlder()
 		onImageClicked: image => lightbox.open(pane.session.sessionId, image)
 		onCancelRequested: pane.session.cancelDelayedTool()
 		onCopyRequested: messageId => pane.session.copyMessage(messageId)
