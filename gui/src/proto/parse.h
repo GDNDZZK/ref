@@ -29,6 +29,7 @@ Parsed<Message> parseMessage(const QJsonObject& message);
 Parsed<Delta> parseDelta(const QJsonObject& delta);
 Parsed<ToolState> parseToolState(const QJsonValue& state);
 Parsed<SessionInfo> parseSessionInfo(const QJsonObject& info);
+Parsed<InstanceInfo> parseInstanceInfo(const QJsonObject& instance);
 
 // Results of requests (the `result` of a ResponseFrame).
 Parsed<HelloResult> parseHelloResult(const QJsonObject& result);               // hello

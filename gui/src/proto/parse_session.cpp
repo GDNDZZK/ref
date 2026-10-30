@@ -295,4 +295,16 @@ Parsed<SessionInfo> parseSessionInfo(const QJsonObject& info)
 	return json::guarded([&] { return json::readSessionInfo(json::Fields(info, u"session"_s)); });
 }
 
+Parsed<InstanceInfo> parseInstanceInfo(const QJsonObject& instance)
+{
+	return json::guarded([&] {
+		const json::Fields fields(instance, u"instance"_s);
+		return InstanceInfo{.pid = static_cast<quint32>(fields.integer("pid"_L1)),
+		                    .port = static_cast<quint16>(fields.integer("port"_L1)),
+		                    .bind = fields.string("bind"_L1),
+		                    .startedAt = fields.integer("started_at"_L1),
+		                    .token = fields.string("token"_L1)};
+	});
+}
+
 } // namespace refgui::proto

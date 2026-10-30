@@ -50,3 +50,13 @@ target_link_libraries(tst_proto PRIVATE refgui_proto Qt6::Test)
 target_compile_definitions(tst_proto PRIVATE REF_FIXTURES_DIR="${PROJECT_SOURCE_DIR}/../crates/proto/fixtures")
 refgui_configure_target(tst_proto)
 add_test(NAME tst_proto COMMAND tst_proto)
+
+qt_add_executable(tst_server_client tst_server_client.cpp coro_test.h fake_backend.h)
+target_link_libraries(tst_server_client PRIVATE refgui_client Qt6::Test)
+refgui_configure_target(tst_server_client)
+add_test(NAME tst_server_client COMMAND tst_server_client)
+
+qt_add_executable(tst_launcher tst_launcher.cpp coro_test.h)
+target_link_libraries(tst_launcher PRIVATE refgui_client Qt6::Test)
+refgui_configure_target(tst_launcher)
+add_test(NAME tst_launcher COMMAND tst_launcher)
