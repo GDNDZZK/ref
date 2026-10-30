@@ -6,8 +6,10 @@
 #include "session/fence_splitter.h"
 
 #include <QAbstractListModel>
+#include <QSet>
 
 #include <optional>
+#include <utility>
 
 namespace refgui::session
 {
@@ -20,6 +22,8 @@ namespace refgui::session
 //   code        "qt_add_qml_module(...)"        language = "cmake"
 //   tool        "bash ctest"                    toolState, output, failed
 //   error       "Connection failed: ..."
+//   image       "logo.png"                      images
+//   meta        the line under a message        time, agent, tokens
 //
 // A message is split into blocks because each kind has its own delegate (a code
 // block needs a dedicated highlighted TextEdit) and animates independently.
@@ -53,9 +57,39 @@ public:
 		InputJsonRole, // the arguments, formatted
 		RawInputRole,  // the arguments while they are still streaming
 		CallIdRole,
+		TimeEndRole,   // tool and meta blocks, 0 while unfinished
+		RunAtRole,     // delayed tool blocks: when the tool starts
+		MetaRole,      // tool blocks: display extras of the tool as a map
+		LiveOutputRole,
+		ImagesRole,    // list of {id, mime, size, name}
+		AgentRole,     // meta blocks from here on
+		ModelIdRole,
+		VariantRole,
+		TokensInRole,
+		TokensOutRole,
+		InterruptedRole,
+		ErroredRole,
+		HumanRole,
+		StaleRole,        // before the last compaction
+		ContextStartRole, // the last compaction, with older messages above it
+		ExpandedRole,     // reasoning, tool and compaction blocks: unfolded
+		ShowAllRole,      // tool blocks: the whole output instead of a preview
 	};
 
 	using QAbstractListModel::QAbstractListModel;
+
+	// The error that ends the conversation without belonging to a message. It is the last row.
+	// An empty text removes it.
+	void setTailError(const QString& text);
+	const QString& tailError() const { return m_tailError; }
+
+	// Whether reasoning and tool blocks are unfolded unless the user flipped them.
+	void setDefaultExpansion(bool reasoning, bool tools);
+	bool reasoningExpandedByDefault() const { return m_reasoningExpanded; }
+	bool toolsExpandedByDefault() const { return m_toolsExpanded; }
+	// Flips the block of the row against the default; the choice stays with the message part.
+	Q_INVOKABLE void toggleExpanded(int row);
+	Q_INVOKABLE void toggleShowAll(int row);
 
 	int rowCount(const QModelIndex& parent = {}) const override;
 	QVariant data(const QModelIndex& index, int role) const override;
@@ -75,6 +109,13 @@ public:
 	// when the message is unknown.
 	bool appendDelta(const QString& messageId, qsizetype index, const proto::Delta& delta);
 	void removeMessage(const QString& messageId);
+
+	// The message text as the copy button gives it: the text parts, apart by a blank line.
+	std::optional<QString> messageText(const QString& messageId) const;
+	// The id of the newest assistant message with text, empty when there is none.
+	QString lastReplyId() const;
+	// The id of the oldest message, empty when there is none.
+	QString firstMessageId() const;
 
 	// The text of a text or reasoning part as shown, if there is one.
 	std::optional<QString> partText(const QString& messageId, qsizetype index) const;
@@ -126,8 +167,25 @@ private:
 	void replaceRows(qsizetype first, qsizetype oldCount, const QList<Block>& fresh);
 	void notifyOpensTurn(qsizetype row);
 
+	// The rows of a message after its parts: the error of an assistant message, or the
+	// text and images of a user message; then the meta line.
+	static QList<Block> ownBlocks(const MessageNode& node);
+	// Marks the messages before the last compaction as stale, and the compaction itself.
+	void refreshContext();
+	const Block& blockAt(qsizetype row) const;
+	bool isExpanded(const Block& block) const;
+	void emitRoleChanged(qsizetype row, int role);
+
+	using PartKey = std::pair<QString, qsizetype>; // message id, part index
+
 	QList<MessageNode> m_messages;
 	QList<Block> m_rows;
+	Block m_tailBlock;
+	QString m_tailError;
+	QSet<PartKey> m_toggled;
+	QSet<PartKey> m_shownAll;
+	bool m_reasoningExpanded = false;
+	bool m_toolsExpanded = false;
 };
 
 } // namespace refgui::session
