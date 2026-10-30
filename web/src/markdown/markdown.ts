@@ -14,6 +14,11 @@ const ALIGN_STYLE = /^text-align:\s*(left|center|right)$/
 const markdown = new MarkdownIt({ html: false, linkify: true, typographer: false })
 markdown.linkify.set({ fuzzyLink: false, fuzzyEmail: false })
 
+// The GUI opens the same schemes (Links.qml); anything else stays plain text.
+const LINK_SCHEMES = /^(https?|mailto):/i
+const defaultValidateLink = markdown.validateLink
+markdown.validateLink = (url) => defaultValidateLink(url) && LINK_SCHEMES.test(url.trim())
+
 function addLinkAttributes(token: Token): void {
   token.attrSet('target', '_blank')
   token.attrSet('rel', 'noopener noreferrer')
