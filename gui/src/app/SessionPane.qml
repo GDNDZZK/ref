@@ -18,6 +18,7 @@ Item {
 		anchors { left: parent.left; right: parent.right; top: parent.top; bottom: composer.top }
 		model: pane.session.blocks
 		turnInProgress: pane.session.busy
+		onCopyRequested: messageId => pane.session.copyMessage(messageId)
 		onPermissionAnswered: (callId, allow, always) => pane.session.permissionReply(callId, allow, always)
 	}
 
