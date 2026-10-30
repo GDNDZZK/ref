@@ -52,6 +52,8 @@ pub struct SessionState {
     pub user_aborted: bool,
     pub title_started: bool,
     pub closed: bool,
+    /// The agent switch the model was or will be told about (see `agent_switch`).
+    pub agent_switch: Option<crate::agent_switch::AgentSwitch>,
 }
 
 pub struct Session {
@@ -89,6 +91,7 @@ impl Session {
                 pending_compact: None,
                 user_aborted: false,
                 closed: false,
+                agent_switch: None,
             }),
         })
     }
