@@ -67,7 +67,7 @@ function close(item: SessionItem): void {
     @close="dialogs.close()"
   >
     <template #row="{ item }">
-      <SessionDot v-if="isLive(item)" :state="rowState(item.info)" class="dot" />
+      <SessionDot v-if="isLive(item)" :state="rowState(item.info)" class="state" />
       <div class="text">
         <span class="name">{{ displayTitle(item.info) }}</span>
         <span class="detail">{{ subtitle(item) }}</span>
@@ -87,7 +87,7 @@ function close(item: SessionItem): void {
 
 <style scoped src="./pickRow.css"></style>
 <style scoped>
-.dot {
+.state {
   flex: none;
 }
 
