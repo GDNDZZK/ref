@@ -251,6 +251,7 @@ async fn handle_conn(hub: Arc<Hub>, stream: TcpStream, peer: SocketAddr, auth: A
                     token,
                     notify,
                 } => {
+                    let cwd = hub.effective_cwd(&cwd);
                     let ok = conn.lock().authed
                         || (!auth.token.is_empty()
                             && token.as_deref() == Some(auth.token.as_str()));

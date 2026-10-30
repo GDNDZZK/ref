@@ -1,0 +1,18 @@
+//! Sample crate used by the mock backend.
+
+pub mod parser;
+
+/// Greets `name`.
+pub fn greet(name: &str) -> String {
+    format!("Hello, {name}!")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn greets() {
+        assert_eq!(greet("world"), "Hello, world!");
+    }
+}
