@@ -67,6 +67,7 @@ sleep 3600 | ref-server --mock      # stdout 只打印一行 {"port":N,"token":"
 - **工作区**：无论客户端请求哪个目录，所有会话都在带示例文件的临时工作区中运行（`README.md`、`NOTES.txt`、`src/parser.rs`、`src/lib.rs`、`docs/design.md`、`data/big.log`、`logo.png`、`scratch/`），不会改动你的文件。预置了 3 条历史会话。
 - **模型**：`mock/mock-1`（默认；200k 上下文、图片、推理、变体 `low`、`medium`、`high`）和 `mock/mock-fast`（64k）。多一个智能体 `reviewer`。
 - **权限**：`edit` 和 `write` 询问（`scratch/` 下允许）。`delete` 允许，但延迟 5 秒。`bash` 询问，以 `echo`、`ls`、`cat`、`seq`、`sleep`、`printf` 开头的命令允许，`curl` 拒绝。`webfetch` 关闭。
+- **限制**：mock 并不拦截所有操作。*导出*会写到客户端给出的路径，`!` shell 命令会真的运行命令，所以两者都可能写到或运行到工作区之外。脚本调用的工具只会碰工作区。目录选择器限定在工作区内，`~` 就是工作区。
 - **脚本**：提示词的第一个词选择脚本，不区分大小写。其他文字运行 `default`。提示词 `help` 会列出全部脚本。
 
 | 提示词 | 内容 |
@@ -174,10 +175,14 @@ scripts/package.sh --version v0.2.0 --target x86_64-unknown-linux-gnu \
 发布新版本：
 
 ```bash
-# 1. 修改 Cargo.toml 中的版本（[workspace.package] version），提交并推送。
+# 1. 修改 Cargo.toml 中的版本（[workspace.package] version），并运行
+#    `cargo update --workspace` 刷新 Cargo.lock（CI 用 --locked 构建）。
+#    把发布说明写进 .github/release-notes/v0.2.0.md。提交并推送。
 # 2. 打标签并推送标签：
 git tag v0.2.0
 git push origin v0.2.0
 ```
+
+`ref-gui` 的版本、Windows 和 macOS 的元数据以及压缩包名称都由标签和 `Cargo.toml` 决定。标签与 `Cargo.toml` 中的版本不一致时，工作流的第一个任务会失败。发布说明取自文件 `.github/release-notes/<标签>.md`；文件不存在时，由 GitHub 根据提交生成。
 
 手动运行 Release 工作流（Actions → Release → Run workflow）会构建压缩包和 `SHA256SUMS` 并附加到该次运行，不会发布。

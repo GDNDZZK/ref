@@ -67,6 +67,7 @@ sleep 3600 | ref-server --mock      # prints {"port":N,"token":"..."} on stdout,
 - **Workspace**: every session runs in a temporary workspace with sample files (`README.md`, `NOTES.txt`, `src/parser.rs`, `src/lib.rs`, `docs/design.md`, `data/big.log`, `logo.png`, `scratch/`), whatever directory the client asks for. Your files are never touched. Three past sessions are preloaded as history.
 - **Models**: `mock/mock-1` (default; 200k context, images, reasoning, variants `low`, `medium`, `high`) and `mock/mock-fast` (64k). There is an extra agent, `reviewer`.
 - **Permissions**: `edit` and `write` ask (allowed in `scratch/`). `delete` is allowed after a 5-second delay. `bash` asks, except commands starting with `echo`, `ls`, `cat`, `seq`, `sleep` or `printf`, which are allowed, and `curl`, which is denied. `webfetch` is off.
+- **Limits**: the mock does not block everything. *Export* writes to the path the client gives, and a `!` shell command runs a real command, so both can reach outside the workspace. Tools that the scripts call only touch the workspace. The directory picker is limited to the workspace, where `~` means the workspace.
 - **Scripts**: the first word of a prompt picks a script, case-insensitively. Other text runs `default`. The prompt `help` lists them.
 
 | Prompt | What happens |
@@ -174,10 +175,14 @@ Without `--gui-dir` (the folder from `cmake --install`, see [Deploying](#deployi
 To make a release:
 
 ```bash
-# 1. Set the version in Cargo.toml ([workspace.package] version), commit and push.
+# 1. Set the version in Cargo.toml ([workspace.package] version) and run
+#    `cargo update --workspace` to refresh Cargo.lock (CI builds with --locked).
+#    Write the release text in .github/release-notes/v0.2.0.md. Commit and push.
 # 2. Tag and push the tag:
 git tag v0.2.0
 git push origin v0.2.0
 ```
+
+The `ref-gui` version, the Windows and macOS metadata and the archive names follow from the tag and `Cargo.toml`. The first job of the workflow fails when the tag and the version in `Cargo.toml` differ. The release text is the file `.github/release-notes/<tag>.md`; when it does not exist, GitHub generates the text from the commits.
 
 Running the Release workflow by hand (Actions → Release → Run workflow) builds the archives and `SHA256SUMS` and attaches them to the run, without publishing.
