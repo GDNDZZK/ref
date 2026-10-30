@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 // Adapted from an early version of qutie by LightBlueCube
 import QtQuick
 import QtQml
@@ -27,7 +28,7 @@ Window {
 		if (Workspace.splitView)
 			tiles.focusFocused()
 		else if (single.item)
-			single.item.focusInput()
+			(single.item as SessionPane).focusInput()
 	}
 
 	title: "ref"
@@ -89,6 +90,8 @@ Window {
 		model: Commands
 
 		delegate: Shortcut {
+			required property var model
+
 			sequence: model.shortcut
 			enabled: model.shortcut !== "" && model.enabled
 			autoRepeat: false
@@ -110,12 +113,6 @@ Window {
 			enabled: Workspace.splitView && Workspace.dialog === ""
 			onActivated: tiles.moveFocus(modelData.dx, modelData.dy)
 		}
-	}
-
-	Shortcut {
-		sequences: [StandardKey.Cancel]
-		enabled: window.zoomed && Workspace.dialog === ""
-		onActivated: Workspace.unzoom()
 	}
 
 	Item {

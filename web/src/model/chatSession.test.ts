@@ -127,6 +127,23 @@ describe('ChatSession', () => {
     expect(session.blocks.map((block) => block.key)).toEqual(['u1:user', 'u1:meta', 'u2:user', 'u2:meta'])
   })
 
+  it('drops an older page that arrives after the history was replaced', async () => {
+    const { api, session } = setup()
+    api.attach.mockResolvedValue(snapshot([userMessage('u2', 'new')], { more_before: true }))
+    let deliver: (page: unknown) => void = () => {}
+    const messagesBefore = vi.fn().mockReturnValue(new Promise((resolve) => (deliver = resolve)))
+    Object.assign(api, { messagesBefore })
+    await session.attach(true)
+    const loading = session.loadOlder()
+    api.attach.mockResolvedValue(snapshot([userMessage('u9', 'other')], { more_before: false }))
+    await session.attach(true)
+    deliver({ messages: [userMessage('u1', 'old')], more_before: false })
+    await loading
+    await afterFrame()
+    expect(session.blocks.map((block) => block.key)).toEqual(['u9:user', 'u9:meta'])
+    expect(session.loadingOlder).toBe(false)
+  })
+
   it('keeps the error of a failed page load and tries again', async () => {
     const { api, session } = setup()
     api.attach.mockResolvedValue(snapshot([userMessage('u2', 'new')], { more_before: true }))
@@ -141,6 +158,46 @@ describe('ChatSession', () => {
     expect(session.olderError).toBe('')
   })
 
+  it('answers a permission request once, however fast the keys come', async () => {
+    const { api, session } = setup()
+    const request = {
+      session_id: 'ses_1',
+      message_id: 'a1',
+      call_id: 'c1',
+      tool: 'bash',
+      purpose: '',
+      input: {},
+      time: 1,
+    }
+    api.attach.mockResolvedValue(snapshot([userMessage('u1', 'hi')], { pending_permissions: [request] }))
+    const permissionReply = vi.fn().mockResolvedValue(undefined)
+    Object.assign(api, { permissionReply })
+    await session.attach(true)
+    const first = session.answerPermission('c1', true, false)
+    expect(session.pendingPermission).toBeUndefined()
+    await session.answerPermission('c1', true, false).catch(() => {})
+    await first
+    expect(permissionReply).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows the request again when the answer could not be sent', async () => {
+    const { api, session } = setup()
+    const request = {
+      session_id: 'ses_1',
+      message_id: 'a1',
+      call_id: 'c1',
+      tool: 'bash',
+      purpose: '',
+      input: {},
+      time: 1,
+    }
+    api.attach.mockResolvedValue(snapshot([userMessage('u1', 'hi')], { pending_permissions: [request] }))
+    Object.assign(api, { permissionReply: vi.fn().mockRejectedValue(new Error('offline')) })
+    await session.attach(true)
+    await expect(session.answerPermission('c1', true, false)).rejects.toThrow('offline')
+    expect(session.pendingPermission?.call_id).toBe('c1')
+  })
+
   it('hands the prompt it takes back to the composer', async () => {
     const { api, draftRestored, session } = setup()
     const undo = vi.fn().mockResolvedValue({ text: 'fix it [Image 1]', images: [] })
@@ -150,6 +207,18 @@ describe('ChatSession', () => {
     expect(draftRestored).toHaveBeenCalledWith('ses_1', 'fix it [Image 1]', [])
     await session.undoLast()
     expect(undo).toHaveBeenLastCalledWith('ses_1', undefined)
+  })
+
+  it('asks for a picture once, and again after the session was detached', async () => {
+    const { api, session } = setup()
+    const getImage = vi.fn().mockResolvedValue({ mime: 'image/png', data: 'AAAA' })
+    Object.assign(api, { getImage })
+    expect(await session.imageUrl('img_1')).toBe('data:image/png;base64,AAAA')
+    await session.imageUrl('img_1')
+    expect(getImage).toHaveBeenCalledTimes(1)
+    await session.detach()
+    await session.imageUrl('img_1')
+    expect(getImage).toHaveBeenCalledTimes(2)
   })
 
   it('toggles the default folds', () => {

@@ -51,5 +51,6 @@ QJsonObject messages(const QString& sessionId, const QString& before, int limit)
 // The bytes of an image the messages only name.
 QJsonObject getImage(const QString& sessionId, const QString& imageId);
 QJsonObject shutdown();
+QJsonObject ping();
 
 } // namespace refgui::proto::request

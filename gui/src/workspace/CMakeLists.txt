@@ -10,6 +10,8 @@ qt_add_library(refgui_workspace STATIC
 	session_list_model.h
 	settings.cpp
 	settings.h
+	toast_text.cpp
+	toast_text.h
 )
 
 target_include_directories(refgui_workspace PUBLIC ${PROJECT_SOURCE_DIR}/src)

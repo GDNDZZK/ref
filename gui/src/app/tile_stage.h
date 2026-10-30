@@ -39,6 +39,9 @@ public:
 	int lingerMs() const { return m_lingerMs; }
 	void setLingerMs(int lingerMs);
 
+	// Deletes a session that is gone: at once when no tile shows it, else when its tile has left.
+	void deleteWhenLeft(ChatSession* session);
+
 	int rowCount(const QModelIndex& parent = {}) const override;
 	QVariant data(const QModelIndex& index, int role) const override;
 	QHash<int, QByteArray> roleNames() const override;
@@ -54,6 +57,7 @@ private:
 		QPointer<ChatSession> session;
 		QString sessionId;
 		bool leaving = false;
+		bool deleteSession = false; // the stage deletes the session when the row goes
 		int place = 0;
 	};
 

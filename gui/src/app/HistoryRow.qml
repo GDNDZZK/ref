@@ -56,7 +56,7 @@ Item {
 	}
 	TapHandler {
 		acceptedButtons: Qt.RightButton
-		onTapped: menu.popup()
+		onTapped: point => menu.openAt(point.position)
 	}
 
 	ContextMenu {

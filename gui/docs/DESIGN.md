@@ -392,7 +392,7 @@ except where the behavior differs.
 | Ctrl+Shift+B | `sidebar` | Toggle sidebar |
 | Ctrl+Shift+H | `help` | Keybindings and commands |
 | Ctrl+Shift+S | `settings` | Settings |
-| Ctrl+Shift+Z | `zoom` | Zoom the focused tile (split view only) |
+| Ctrl+Shift+Z | `zoom` | Zoom the focused tile, or leave zoom (split view only) |
 | Alt+arrows | (tile focus) | Move the focus between tiles (split view); not in the registry |
 
 Palette-only (no key): `new-in`, `rename`, `cd`, `close-session`, `peers`, `peers-name`, `peers-inbox`,
@@ -406,7 +406,7 @@ Unverified: Ctrl+Shift+U is taken by IBus' Unicode input on Linux.
 ## As built (differences from the spec above)
 
 - In split view the grid starts below the window buttons (split, theme, leave zoom) instead of under them.
-- `Esc` leaves zoom. `Alt+arrows` pick the nearest tile by centre distance, across-distance counting twice.
+- Zoom is left with `Ctrl+Shift+Z` (the `zoom` command toggles) or the restore button (the header is hidden while zoomed); `Esc` is not bound, it belongs to the input box, completions and permission questions. `Alt+arrows` pick the nearest tile by centre distance, across-distance counting twice.
 - The folder picker (`FolderDialog`) starts in the platform's default directory.
 - `Ctrl+Shift+Z` may be taken by the input box's redo (Unverified); the maximize button and the header double click work.
 - The history list in the sidebar filters on the client, over the 200 most recent sessions the backend lists.

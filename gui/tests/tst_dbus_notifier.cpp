@@ -5,6 +5,7 @@
 #include <QDBusConnection>
 #include <QDBusContext>
 #include <QDBusMessage>
+#include <QDBusPendingCallWatcher>
 #include <QProcess>
 #include <QSignalSpy>
 #include <QTest>
@@ -20,6 +21,10 @@ namespace
 
 const QString ServiceName = u"org.freedesktop.Notifications"_s;
 const QString ObjectPath = u"/org/freedesktop/Notifications"_s;
+const QString BusService = u"org.freedesktop.DBus"_s;
+const QString BusPath = u"/org/freedesktop/DBus"_s;
+
+constexpr int FlushTimeoutMs = 5000;
 
 struct Received
 {
@@ -39,6 +44,7 @@ class FakeService : public QObject, protected QDBusContext
 public:
 	QList<Received> received;
 	bool failNext = false;
+	QStringList capabilities{u"body"_s, u"actions"_s};
 	uint lastId = 0;
 
 public slots:
@@ -48,6 +54,11 @@ public slots:
 		version = u"1"_s;
 		specVersion = u"1.2"_s;
 		return u"fake"_s;
+	}
+
+	QStringList GetCapabilities()
+	{
+		return capabilities;
 	}
 
 	uint Notify(const QString&, uint replaces, const QString&, const QString& summary, const QString& body, const QStringList& actions,
@@ -82,9 +93,14 @@ private slots:
 	void closedNotificationsAreForgotten();
 	void failedCallIsReported();
 	void unavailableAgainWhenTheServiceLeaves();
+	void markupServicesGetTheBodyEscaped();
+	void plainServicesGetTheBodyAsItIs();
 
 private:
+	void restartService(const QStringList& capabilities);
+
 	void sendSignal(const QString& name, const QList<QVariant>& arguments);
+	void flush();
 
 	QProcess m_daemon;
 	QString m_address;
@@ -97,6 +113,11 @@ void TestDBusNotifier::initTestCase()
 	m_daemon.start(u"dbus-daemon"_s, {u"--session"_s, u"--nofork"_s, u"--print-address"_s});
 	if(!m_daemon.waitForStarted() || !m_daemon.waitForReadyRead(5000))
 	{
+		// A CI machine is set up for this test; a missing daemon there is a mistake that must not pass unseen.
+		if(qEnvironmentVariableIsSet("CI"))
+		{
+			QFAIL("dbus-daemon is not available, and this is CI");
+		}
 		QSKIP("dbus-daemon is not available");
 	}
 	m_address = QString::fromUtf8(m_daemon.readLine()).trimmed();
@@ -119,7 +140,20 @@ void TestDBusNotifier::sendSignal(const QString& name, const QList<QVariant>& ar
 {
 	QDBusMessage signal = QDBusMessage::createSignal(ObjectPath, ServiceName, name);
 	signal.setArguments(arguments);
-	QDBusConnection::connectToBus(m_address, u"service"_s).send(signal);
+	QDBusConnection bus = QDBusConnection::connectToBus(m_address, u"service"_s);
+	bus.send(signal);
+	// The daemon has the signal once it answers a later call of the same connection.
+	bus.call(QDBusMessage::createMethodCall(BusService, BusPath, BusService, u"GetId"_s));
+}
+
+// Returns when the notifier has handled every reply and signal the daemon sent it before now: the
+// daemon hands them over in order, so the answer to a later call comes after them.
+void TestDBusNotifier::flush()
+{
+	QDBusConnection bus = QDBusConnection::connectToBus(m_address, u"notifier"_s);
+	QDBusPendingCallWatcher watcher(bus.asyncCall(QDBusMessage::createMethodCall(BusService, BusPath, BusService, u"GetId"_s)));
+	QSignalSpy finished(&watcher, &QDBusPendingCallWatcher::finished);
+	QVERIFY(finished.wait(FlushTimeoutMs));
 }
 
 void TestDBusNotifier::unavailableWithoutAService()
@@ -129,7 +163,7 @@ void TestDBusNotifier::unavailableWithoutAService()
 
 	QSignalSpy shown(m_notifier.get(), &DBusNotifier::showFailed);
 	m_notifier->show({.sessionId = u"s1"_s, .kind = Kind::TurnDone, .title = u"t"_s, .body = u"b"_s});
-	QTest::qWait(50);
+	flush();
 	QCOMPARE(shown.count(), 0); // nothing was attempted
 }
 
@@ -159,21 +193,27 @@ void TestDBusNotifier::showsTitleBodyAndClickAction()
 
 void TestDBusNotifier::aNewerNotificationOfASessionReplacesTheOlder()
 {
-	// Let the reply to the first one arrive, so its id is known.
-	QTest::qWait(100);
+	flush(); // the reply to the first one arrives, so its id is known
 	const uint first = m_service->lastId;
 	QVERIFY(first != 0);
 
-	m_notifier->show({.sessionId = u"s1"_s, .kind = Kind::TurnDone, .title = u"Fix build"_s, .body = u"Finished"_s});
+	m_notifier->show({.sessionId = u"s1"_s, .kind = Kind::Permission, .title = u"Fix build"_s, .body = u"Needs your permission"_s});
 	QTRY_COMPARE(m_service->received.size(), 2);
 	QCOMPARE(m_service->received.last().replaces, first);
-	QCOMPARE(m_service->received.last().hints.value(u"urgency"_s).value<uchar>(), uchar(1));
-	QTest::qWait(100);
+	QCOMPARE(m_service->received.last().hints.value(u"urgency"_s).value<uchar>(), uchar(2));
+	flush();
 
-	m_notifier->show({.sessionId = u"s2"_s, .kind = Kind::TurnDone, .title = u"Other"_s, .body = u"Finished"_s});
+	m_notifier->show({.sessionId = u"s2"_s, .kind = Kind::Permission, .title = u"Other"_s, .body = u"Needs your permission"_s});
 	QTRY_COMPARE(m_service->received.size(), 3);
 	QCOMPARE(m_service->received.last().replaces, 0u);
-	QTest::qWait(100);
+	flush();
+
+	// Another kind of the same session is a notification of its own, as in the Web interface.
+	m_notifier->show({.sessionId = u"s1"_s, .kind = Kind::TurnDone, .title = u"Fix build"_s, .body = u"Finished"_s});
+	QTRY_COMPARE(m_service->received.size(), 4);
+	QCOMPARE(m_service->received.last().replaces, 0u);
+	QCOMPARE(m_service->received.last().hints.value(u"urgency"_s).value<uchar>(), uchar(1));
+	flush();
 }
 
 void TestDBusNotifier::clickActivatesTheSession()
@@ -181,7 +221,7 @@ void TestDBusNotifier::clickActivatesTheSession()
 	QSignalSpy activated(m_notifier.get(), &DBusNotifier::activated);
 	const uint idOfS1 = 1; // the fake hands out 1 for s1 and reuses it when replacing
 	sendSignal(u"ActionInvoked"_s, {idOfS1, u"other"_s});
-	QTest::qWait(100);
+	flush();
 	QCOMPARE(activated.count(), 0);
 
 	sendSignal(u"ActionInvoked"_s, {idOfS1, u"default"_s});
@@ -194,9 +234,8 @@ void TestDBusNotifier::closedNotificationsAreForgotten()
 	QSignalSpy activated(m_notifier.get(), &DBusNotifier::activated);
 	const uint idOfS2 = 2;
 	sendSignal(u"NotificationClosed"_s, {idOfS2, 1u});
-	QTest::qWait(100);
 	sendSignal(u"ActionInvoked"_s, {idOfS2, u"default"_s});
-	QTest::qWait(100);
+	flush();
 	QCOMPARE(activated.count(), 0);
 }
 
@@ -215,6 +254,39 @@ void TestDBusNotifier::unavailableAgainWhenTheServiceLeaves()
 	QVERIFY(QDBusConnection::connectToBus(m_address, u"service"_s).unregisterService(ServiceName));
 	QTRY_VERIFY(!m_notifier->isAvailable());
 	QVERIFY(changed.count() >= 1);
+}
+
+// The service goes and comes back saying `capabilities`.
+void TestDBusNotifier::restartService(const QStringList& capabilities)
+{
+	QDBusConnection bus = QDBusConnection::connectToBus(m_address, u"service"_s);
+	m_service->capabilities = capabilities;
+	m_service->received.clear();
+	QVERIFY(bus.registerService(ServiceName));
+	QTRY_VERIFY(m_notifier->isAvailable());
+}
+
+void TestDBusNotifier::markupServicesGetTheBodyEscaped()
+{
+	restartService({u"body"_s, u"body-markup"_s});
+
+	m_notifier->show({.sessionId = u"m1"_s, .kind = Kind::TurnError, .title = u"<b>t</b>"_s, .body = u"<img src=\"http://x/y.png\"> & more"_s});
+
+	QTRY_COMPARE(m_service->received.size(), 1);
+	QCOMPARE(m_service->received.last().body, u"&lt;img src=&quot;http://x/y.png&quot;&gt; &amp; more"_s);
+	QCOMPARE(m_service->received.last().summary, u"<b>t</b>"_s); // the summary is never markup
+}
+
+void TestDBusNotifier::plainServicesGetTheBodyAsItIs()
+{
+	QVERIFY(QDBusConnection::connectToBus(m_address, u"service"_s).unregisterService(ServiceName));
+	QTRY_VERIFY(!m_notifier->isAvailable());
+	restartService({u"body"_s});
+
+	m_notifier->show({.sessionId = u"p1"_s, .kind = Kind::TurnError, .title = u"t"_s, .body = u"a < b & c"_s});
+
+	QTRY_COMPARE(m_service->received.size(), 1);
+	QCOMPARE(m_service->received.last().body, u"a < b & c"_s);
 }
 
 QTEST_GUILESS_MAIN(TestDBusNotifier)
