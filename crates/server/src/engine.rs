@@ -232,7 +232,9 @@ async fn run_task(hub: Arc<Hub>, s: Arc<Session>, cancel: CancellationToken, id:
         st.messages.push(m);
         hub.emit(&s.id, SessionEvent::Error { text: text.clone() });
         st.info.last_error = Some(text.clone());
-        hub.notify(&st, NotifyKind::TurnError, Some(text.clone()));
+        if !st.stopped_by_user() {
+            hub.notify(&st, NotifyKind::TurnError, Some(text.clone()));
+        }
     }
     finish_run(&hub, &s, id, matches!(outcome, Outcome::Done));
 }
@@ -289,8 +291,7 @@ fn finish_run(hub: &Arc<Hub>, s: &Arc<Session>, id: u64, completed: bool) {
             }
         }
         hub.emit_info(&st);
-        let user_stopped = st.user_aborted || st.closed;
-        if completed && !restart && !user_stopped {
+        if completed && !restart && !st.stopped_by_user() {
             hub.notify(&st, NotifyKind::TurnDone, None);
         }
         if restart {
