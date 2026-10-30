@@ -5,7 +5,9 @@ use crate::mcp::McpManager;
 use crate::session::{Session, SessionState};
 use crate::store::Store;
 use ref_config::Config;
-use ref_proto::{InstanceInfo, Message, ServerFrame, SessionEvent, SessionInfo, SessionStatus};
+use ref_proto::{
+    InstanceInfo, Message, NotifyKind, ServerFrame, SessionEvent, SessionInfo, SessionStatus,
+};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -132,6 +134,15 @@ pub struct ConnState {
     pub fg: HashSet<String>,
     pub watch: HashSet<String>,
     pub watch_all: bool,
+    /// Notification kinds this connection wants (`Hello.notify`, `SetNotify`).
+    pub notify: HashSet<NotifyKind>,
+    /// The user's window is in the foreground (`SetFocus`).
+    pub focused: bool,
+    /// Sessions the window shows (`SetFocus`).
+    pub shown: HashSet<String>,
+    /// When the window last came to the front, as a hub stamp (see `Hub::next_stamp`); the
+    /// connection time until the first `SetFocus`.
+    pub focus_stamp: u64,
 }
 
 pub struct Conn {
@@ -197,6 +208,7 @@ pub struct Hub {
     conns: Mutex<HashMap<u64, Arc<Conn>>>,
     next_conn: AtomicU64,
     next_run: AtomicU64,
+    next_stamp: AtomicU64,
     pub shutdown: CancellationToken,
     dirty: Arc<Notify>,
     idle: Mutex<IdleState>,
@@ -215,6 +227,7 @@ impl Hub {
             conns: Mutex::new(HashMap::new()),
             next_conn: AtomicU64::new(1),
             next_run: AtomicU64::new(1),
+            next_stamp: AtomicU64::new(1),
             shutdown: CancellationToken::new(),
             dirty: Arc::new(Notify::new()),
             idle: Mutex::new(IdleState::default()),
@@ -232,6 +245,11 @@ impl Hub {
 
     pub fn next_run_id(&self) -> u64 {
         self.next_run.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// A number larger than every earlier one: orders connection and focus times.
+    pub fn next_stamp(&self) -> u64 {
+        self.next_stamp.fetch_add(1, Ordering::Relaxed)
     }
 
     // ----- sessions -----
