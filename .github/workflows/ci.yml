@@ -1,4 +1,5 @@
-# Checks every push and pull request: formatting, clippy and tests on Linux, macOS and Windows.
+# Checks every push and pull request: formatting, clippy and Rust tests on Linux, macOS and Windows,
+# and the web frontend checks.
 name: CI
 
 on:
@@ -23,6 +24,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+      - uses: ./.github/actions/web-build
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -39,6 +41,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+      - uses: ./.github/actions/web-build
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # --no-fail-fast: run every crate's tests and report all failures at once.
@@ -61,3 +64,28 @@ jobs:
           msg=$(head -c 60000 failures.txt)
           msg=${msg//'%'/'%25'}; msg=${msg//$'\r'/'%0D'}; msg=${msg//$'\n'/'%0A'}
           echo "::error title=Failed tests (${{ matrix.os }})::$msg"
+
+  web:
+    name: web (types, lint, tests, generated files)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/web-install
+      - name: Check
+        working-directory: web
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm check 2>&1 | tee ../check.log
+
+      # Repeats the end of the output in the run summary and as an error annotation.
+      - name: Show check output
+        if: failure()
+        shell: bash
+        run: |
+          tail -n 200 check.log > failures.txt || true
+          cat failures.txt
+          { echo '### pnpm check'; echo '```'; cat failures.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          msg=$(head -c 60000 failures.txt)
+          msg=${msg//'%'/'%25'}; msg=${msg//$'\r'/'%0D'}; msg=${msg//$'\n'/'%0A'}
+          echo "::error title=pnpm check::$msg"

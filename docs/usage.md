@@ -31,7 +31,7 @@ All flags are listed in [Command line](cli.md#ref).
 
 ref has two programs. `ref-server` (the backend) runs the sessions: it calls the LLM, runs tools, stores history and handles permissions. `ref` (the TUI) shows sessions and sends your input. They talk over a local WebSocket.
 
-When you start `ref`, it connects to a running backend or starts one. A backend started this way exits when the last `ref` window closes. Sessions keep running in the backend while no window shows them, so you can close a window, open another and continue where the session is.
+When you start `ref`, it connects to a running backend or starts one. A backend started this way exits when the last `ref` window closes. Other programs that show sessions, such as the browser UI ([Web UI](web.md)), find the same backend through the same instance file, so a session can be open in several of them at once. A backend started by one of them exits after its last client of any kind disconnects. Sessions keep running in the backend while no window shows them, so you can close a window, open another and continue where the session is.
 
 - A session is **foreground** while a `ref` window is attached to it, and **background** otherwise.
 - Sessions are saved in `~/.local/share/ref/sessions/`. `ctrl+x l` lists live sessions and history; opening an old one loads it again.
@@ -69,6 +69,7 @@ When you start `ref`, it connects to a running backend or starts one. A backend 
 - Every message shows its time: your prompts, each reply (start, end, duration and tokens) and each tool call (start and duration).
 - A collapsed tool call shows the tool name and the `purpose` the model gave. Click it to see the input and output. `ctrl+x d` expands all of them.
 - Collapsed reasoning shows its latest characters on one line, updated live. `ctrl+x t` expands it.
+- While a turn runs and the view follows the end of the conversation, the bottom of the conversation does not move up. If the content gets shorter, for example when a retry notice disappears, a tool's live output is replaced by its result or expanded reasoning folds to one line, the freed rows stay blank. They are released at once when the turn ends. This also applies to each tile in split view. The rule only starts while the view follows the end; scrolling up does not add blank rows.
 - Select text with the mouse: drag, double click for a word, triple click for a line. Selecting does not copy. Copy with `ctrl+c` or a right click (`y` also copies a transcript selection). Typing replaces a selection in the input box.
 - `⧉ copy` under a message copies its raw markdown. `ctrl+x y` copies the last reply.
 
