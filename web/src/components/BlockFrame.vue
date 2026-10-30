@@ -19,11 +19,12 @@ const frame = useTemplateRef<HTMLElement>('frame')
 const column = useTemplateRef<HTMLElement>('column')
 
 let naturalHeight = 0
-let easedHeight = 0
+let measured = false
+let easedHeight = 0 // starts at the natural height; the observer reports it after the first layout
 const easing = ref(false) // from the start of streaming until caught up after it ends
 
 useFrame(easing, (frameSeconds) => {
-  if (!frame.value) return
+  if (!frame.value || !measured) return
   easedHeight = chase(easedHeight, naturalHeight, frameSeconds)
   easing.value = props.streaming || !arrived(easedHeight, naturalHeight)
   frame.value.style.height = easing.value ? `${easedHeight}px` : ''
@@ -40,13 +41,14 @@ watch(
 
 const sizeObserver = new ResizeObserver((entries) => {
   const size = entries[0]?.borderBoxSize[0]
-  if (size) naturalHeight = size.blockSize
+  if (!size) return
+  if (!measured) easedHeight = size.blockSize
+  measured = true
+  naturalHeight = size.blockSize
 })
 
 onMounted(() => {
   if (!frame.value || !column.value) return
-  naturalHeight = column.value.offsetHeight
-  easedHeight = naturalHeight
   easing.value = props.streaming
   sizeObserver.observe(column.value)
   if (props.fresh) enter(frame.value)
