@@ -27,6 +27,14 @@ impl Upstream {
         matches!(self, Upstream::Mock(_))
     }
 
+    /// Stops the mock backend, if there is one, so that it cleans up after itself.
+    pub async fn shutdown(&self) {
+        let Upstream::Mock(slot) = self else { return };
+        if let Some(backend) = slot.lock().await.take() {
+            backend.shutdown().await;
+        }
+    }
+
     /// Opens a new connection to the backend, starting it when needed.
     pub async fn connect(&self) -> Result<Ws, ConnectError> {
         match self {

@@ -63,6 +63,18 @@ impl Ctx<'_> {
 /// Testable loader. `home` is used for `~` expansion; `global_dirs` are the global config
 /// directories (e.g. `~/.config/opencode`, `~/.config/ref`); `env` provides env vars.
 pub fn load_with(home: Option<&Path>, global_dirs: &[PathBuf], cwd: &Path, env: EnvFn) -> Config {
+    load_in(home, global_dirs, None, cwd, env)
+}
+
+/// Like [`load_with`], but the project starts at `project_root` (an ancestor of `cwd`, or
+/// `cwd` itself) instead of the git worktree root, so nothing above it is read.
+pub fn load_in(
+    home: Option<&Path>,
+    global_dirs: &[PathBuf],
+    project_root: Option<&Path>,
+    cwd: &Path,
+    env: EnvFn,
+) -> Config {
     let mut ctx = Ctx {
         home,
         env,
@@ -96,7 +108,7 @@ pub fn load_with(home: Option<&Path>, global_dirs: &[PathBuf], cwd: &Path, env: 
     }
 
     // 4. Project directories, root-most first.
-    for dir in project_dirs(cwd) {
+    for dir in project_dirs(cwd, project_root) {
         push_dir(&mut config_dirs, &dir);
         // Order: opencode.json(c), .opencode/opencode.json(c), ref.json(c), .ref/ref.json(c).
         for (stem, sub) in [("opencode", ".opencode"), ("ref", ".ref")] {
@@ -118,6 +130,7 @@ pub fn load_with(home: Option<&Path>, global_dirs: &[PathBuf], cwd: &Path, env: 
 
     let mut cfg = parse::build(&mut ctx, &layers);
     cfg.config_dirs = config_dirs;
+    cfg.project_root = project_root.map(Path::to_path_buf);
     cfg.warnings = ctx.warnings;
     cfg
 }
@@ -135,9 +148,9 @@ fn push_dir(list: &mut Vec<PathBuf>, d: &Path) {
     }
 }
 
-/// Directories from the git worktree root (nearest ancestor containing `.git`) down to
-/// `cwd`; just `[cwd]` when not inside a git repository.
-pub(crate) fn project_dirs(cwd: &Path) -> Vec<PathBuf> {
+/// Directories from the project root down to `cwd`. The root is `project_root` if given, else
+/// the git worktree root (nearest ancestor containing `.git`); just `[cwd]` when there is none.
+pub(crate) fn project_dirs(cwd: &Path, project_root: Option<&Path>) -> Vec<PathBuf> {
     let cwd = if cwd.is_absolute() {
         cwd.to_path_buf()
     } else {
@@ -149,7 +162,11 @@ pub(crate) fn project_dirs(cwd: &Path) -> Vec<PathBuf> {
     let mut found_root = false;
     for anc in cwd.ancestors() {
         up.push(anc.to_path_buf());
-        if anc.join(".git").exists() {
+        let is_root = match project_root {
+            Some(root) => anc == root,
+            None => anc.join(".git").exists(),
+        };
+        if is_root {
             found_root = true;
             break;
         }

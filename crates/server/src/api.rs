@@ -525,13 +525,15 @@ async fn set_cwd(hub: &Arc<Hub>, s: &Arc<Session>, path: &str) -> Result<(), Str
 }
 
 /// `ListDirs`: the normalized absolute path and the names of its sub-directories (links to
-/// directories included), case-insensitively sorted.
+/// directories included), case-insensitively sorted. In mock mode `~` is the sandbox and
+/// nothing outside it is listed.
 async fn list_dirs(hub: &Arc<Hub>, cwd: &str, path: &str) -> R {
     let path = path.trim();
     if path.is_empty() {
         return Err("Path is empty.".into());
     }
-    let home = hub.opts.home.clone().or_else(dirs::home_dir);
+    let sandbox = hub.opts.sandbox_cwd.clone();
+    let home = sandbox.clone().or_else(|| hub.opts.home.clone());
     let p = crate::util::expand_home(path, home.as_deref());
     let p = if p.is_absolute() {
         p
@@ -540,18 +542,40 @@ async fn list_dirs(hub: &Arc<Hub>, cwd: &str, path: &str) -> R {
     };
     tokio::task::spawn_blocking(move || {
         let dir = crate::ops::validate_cwd(&p.to_string_lossy())?;
+        if sandbox.is_some_and(|root| !Path::new(&dir).starts_with(root)) {
+            return Err(format!("{dir} is outside the mock workspace."));
+        }
         let entries =
             std::fs::read_dir(&dir).map_err(|e| format!("Cannot read directory {dir}: {e}"))?;
-        let mut dirs: Vec<String> = entries
-            .filter_map(Result::ok)
-            .filter(|e| e.path().is_dir())
-            .map(|e| e.file_name().to_string_lossy().into_owned())
-            .collect();
+        let mut dirs = sub_dir_names(&dir, entries);
         dirs.sort_by_key(|d| (d.to_lowercase(), d.clone()));
         Ok(json!({ "path": dir, "dirs": dirs }))
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Names of the directories among `entries` (links to directories included). Unreadable
+/// entries and names that are not valid UTF-8 (JSON cannot carry them as they are) are skipped.
+fn sub_dir_names(dir: &str, entries: std::fs::ReadDir) -> Vec<String> {
+    let mut names = Vec::new();
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(e) => {
+                tracing::debug!("ListDirs: skipping an unreadable entry of {dir}: {e}");
+                continue;
+            }
+        };
+        if !entry.path().is_dir() {
+            continue;
+        }
+        match entry.file_name().into_string() {
+            Ok(name) => names.push(name),
+            Err(name) => tracing::debug!("ListDirs: skipping {name:?} in {dir}: not UTF-8"),
+        }
+    }
+    names
 }
 
 /// Downscales / recompresses prompt images (`images.auto_resize`); undecodable ones are kept.

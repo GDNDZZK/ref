@@ -9,10 +9,15 @@ use std::path::{Path, PathBuf};
 
 const DIST_FROM_MANIFEST: &str = "../../web/dist";
 const INDEX: &str = "index.html";
-const BROTLI_QUALITY: u32 = 11;
+/// Release builds compress as hard as brotli goes. Build scripts are not optimized, and at
+/// quality 11 that takes ~16s for the whole frontend on every change, so other profiles use a
+/// middle setting (~1s, ~10% bigger).
+const BROTLI_QUALITY_RELEASE: u32 = 11;
+const BROTLI_QUALITY_OTHER: u32 = 5;
 const BROTLI_WINDOW_BITS: u32 = 22;
 const BROTLI_BUFFER: usize = 4096;
-const GZIP_LEVEL: u32 = 9;
+const GZIP_LEVEL_RELEASE: u32 = 9;
+const GZIP_LEVEL_OTHER: u32 = 6;
 
 /// Extension → MIME type of everything a Vite build emits.
 const MIME_TYPES: &[(&str, &str)] = &[
@@ -21,7 +26,6 @@ const MIME_TYPES: &[(&str, &str)] = &[
     ("mjs", "text/javascript; charset=utf-8"),
     ("css", "text/css; charset=utf-8"),
     ("json", "application/json"),
-    ("map", "application/json"),
     ("webmanifest", "application/manifest+json"),
     ("txt", "text/plain; charset=utf-8"),
     ("svg", "image/svg+xml"),
@@ -41,7 +45,6 @@ const COMPRESSIBLE: &[&str] = &[
     "mjs",
     "css",
     "json",
-    "map",
     "webmanifest",
     "txt",
     "svg",
@@ -101,10 +104,23 @@ fn main() {
     std::fs::write(out.join("assets.rs"), table).expect("write assets.rs");
 }
 
+/// Files and directories that are not served: hidden ones (`.DS_Store`, Vite's `.vite`
+/// manifest directory) and source maps (large, only useful when debugging the frontend).
+fn is_skipped(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy())
+        .unwrap_or_default();
+    name.starts_with('.') || name.ends_with(".map")
+}
+
 fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let entries = std::fs::read_dir(dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
     for entry in entries {
         let path = entry.expect("read dist entry").path();
+        if is_skipped(&path) {
+            continue;
+        }
         if path.is_dir() {
             collect_files(&path, out);
         } else {
@@ -131,22 +147,32 @@ fn smaller(compressed: Vec<u8>, original: usize) -> Option<Vec<u8>> {
     (compressed.len() < original).then_some(compressed)
 }
 
+fn is_release_build() -> bool {
+    std::env::var("PROFILE").is_ok_and(|p| p == "release")
+}
+
 fn brotli(raw: &[u8]) -> Vec<u8> {
+    let quality = if is_release_build() {
+        BROTLI_QUALITY_RELEASE
+    } else {
+        BROTLI_QUALITY_OTHER
+    };
     let mut out = Vec::new();
     {
-        let mut w = brotli::CompressorWriter::new(
-            &mut out,
-            BROTLI_BUFFER,
-            BROTLI_QUALITY,
-            BROTLI_WINDOW_BITS,
-        );
+        let mut w =
+            brotli::CompressorWriter::new(&mut out, BROTLI_BUFFER, quality, BROTLI_WINDOW_BITS);
         w.write_all(raw).expect("brotli");
     }
     out
 }
 
 fn gzip(raw: &[u8]) -> Vec<u8> {
-    let mut w = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::new(GZIP_LEVEL));
+    let level = if is_release_build() {
+        GZIP_LEVEL_RELEASE
+    } else {
+        GZIP_LEVEL_OTHER
+    };
+    let mut w = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::new(level));
     w.write_all(raw).expect("gzip");
     w.finish().expect("gzip")
 }
