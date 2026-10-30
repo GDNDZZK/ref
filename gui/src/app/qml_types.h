@@ -33,6 +33,8 @@ struct CommandsType
 public:
 	static refgui::workspace::CommandRegistry* create(QQmlEngine*, QJSEngine*)
 	{
-		return Workspace::instance()->commands();
+		auto* commands = Workspace::instance()->commands();
+		QJSEngine::setObjectOwnership(commands, QJSEngine::CppOwnership); // the workspace owns it
+		return commands;
 	}
 };
