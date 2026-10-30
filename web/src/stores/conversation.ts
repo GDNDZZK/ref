@@ -21,6 +21,7 @@ export const useConversationStore = defineStore('conversation', () => {
   const info = shallowRef<SessionInfo>()
   const permissions = shallowRef<PermissionRequest[]>([])
   const loaded = ref(false)
+  const generation = ref(0) // counts the times the history was loaded
   const busy = computed(() => info.value !== undefined && info.value.status.state !== 'idle')
 
   let transcript = new Transcript({ reportError: (message) => notices.push('error', message) })
@@ -30,6 +31,13 @@ export const useConversationStore = defineStore('conversation', () => {
     if (transcript.flush(now)) blocks.value = transcript.blocks
     flushing.value = transcript.needsFlush
   })
+
+  function showHistory(): void {
+    transcript.flush(performance.now())
+    blocks.value = transcript.blocks
+    generation.value++
+    publish()
+  }
 
   function publish(): void {
     info.value = transcript.info
@@ -43,7 +51,7 @@ export const useConversationStore = defineStore('conversation', () => {
     transcript = new Transcript({ reportError: (message) => notices.push('error', message) })
     transcript.load(snapshot)
     loaded.value = true
-    publish()
+    showHistory()
   }
 
   function applyEvent(sessionId: string, event: SessionEvent): void {
@@ -58,7 +66,7 @@ export const useConversationStore = defineStore('conversation', () => {
     const sessionId = transcript.info?.id
     if (!sessionId) return
     transcript.load(await connection.getApi().attach(sessionId, true))
-    publish()
+    showHistory()
   }
 
   async function send(text: string): Promise<void> {
@@ -81,5 +89,18 @@ export const useConversationStore = defineStore('conversation', () => {
     await connection.getApi().permissionReply(sessionId, callId, allow, always)
   }
 
-  return { blocks, info, permissions, loaded, busy, open, applyEvent, resync, send, stop, answerPermission }
+  return {
+    blocks,
+    generation,
+    info,
+    permissions,
+    loaded,
+    busy,
+    open,
+    applyEvent,
+    resync,
+    send,
+    stop,
+    answerPermission,
+  }
 })

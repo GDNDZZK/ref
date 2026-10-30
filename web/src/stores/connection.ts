@@ -22,6 +22,7 @@ export const useConnectionStore = defineStore('connection', () => {
   const backendTooOld = computed(
     () => hello.value !== undefined && (hello.value.protocol ?? PROTOCOL_WITHOUT_FIELD) < PROTOCOL_VERSION,
   )
+  const fatal = ref<string>() // i18n key of an error that stops the app before it connects
   const reconnected = ref(0) // counts the times the connection came back after a loss
 
   const frameListeners = new Set<(frame: EventFrame) => void>()
@@ -81,6 +82,7 @@ export const useConnectionStore = defineStore('connection', () => {
     config,
     backendTooOld,
     reconnected,
+    fatal,
     start,
     stop,
     loadConfig,
