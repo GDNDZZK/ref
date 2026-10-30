@@ -40,6 +40,14 @@ struct Cli {
     /// Stop running instance(s) (all, or the one with PID).
     #[arg(long, value_name = "PID", num_args = 0..=1)]
     stop: Option<Option<u32>>,
+    /// Run a self-contained mock backend with a scripted model, in a temporary directory that
+    /// is deleted on exit. Prints one line `{"port":N,"token":"..."}` and exits when stdin
+    /// closes or the last client leaves.
+    #[arg(
+        long,
+        conflicts_with_all = ["status", "stop", "host", "allow_host", "idle_timeout", "token", "log"]
+    )]
+    mock: bool,
 }
 
 fn is_loopback(h: &str) -> bool {
@@ -94,7 +102,12 @@ fn main() {
         if let Some(pid) = cli.stop {
             return instance::stop(pid).await;
         }
-        match serve(cli).await {
+        let result = if cli.mock {
+            serve_mock(cli.port).await
+        } else {
+            serve(cli).await
+        };
+        match result {
             Ok(()) => 0,
             Err(e) => {
                 eprintln!("ref-server: {e:#}");
@@ -187,6 +200,46 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     let _ = tokio::time::timeout(Duration::from_secs(15), ops::shutdown_all(&hub)).await;
     let _ = std::fs::remove_file(&inst_file);
     running.task.abort();
+    tracing::info!("bye");
+    Ok(())
+}
+
+/// Resolves when stdin reaches end of file: the process that started the mock backend is gone.
+async fn stdin_closed() {
+    use tokio::io::AsyncReadExt;
+    let mut stdin = tokio::io::stdin();
+    let mut buf = [0u8; 256];
+    loop {
+        match stdin.read(&mut buf).await {
+            Ok(0) | Err(_) => return,
+            Ok(_) => {}
+        }
+    }
+}
+
+/// `--mock`: serve until stdin closes, a signal arrives or the last client leaves.
+async fn serve_mock(port: Option<u16>) -> anyhow::Result<()> {
+    let token = ref_server::util::random_hex(32);
+    let mock = ref_server::mock::start(port.unwrap_or(0), token.clone()).await?;
+    let log = mock.log_path();
+    if let Err(e) = init_logging(&log) {
+        eprintln!("ref-server: cannot open log file {}: {e}", log.display());
+    }
+    let port = mock.running.addr.port();
+    tracing::info!(port, root = %mock.root().display(), "ref-server mock listening");
+    println!("{}", serde_json::json!({ "port": port, "token": token }));
+
+    let hub = mock.running.hub.clone();
+    let mut signals = StopSignals::new()?;
+    tokio::select! {
+        _ = hub.shutdown.cancelled() => {}
+        _ = stdin_closed() => tracing::info!("stdin closed"),
+        _ = tokio::signal::ctrl_c() => tracing::info!("SIGINT"),
+        name = signals.recv() => tracing::info!("{name}"),
+    }
+    hub.shutdown.cancel();
+    let _ = tokio::time::timeout(Duration::from_secs(15), ops::shutdown_all(&hub)).await;
+    mock.running.task.abort();
     tracing::info!("bye");
     Ok(())
 }
