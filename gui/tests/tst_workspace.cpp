@@ -233,6 +233,7 @@ private slots:
 	void zoomUpgradesTheTileToTheForeground();
 	void aClosedTileKeepsItsSessionUntilItHasLeft();
 	void closingTheCurrentTileSendsNoAttach();
+	void aRevivedTileLeavesOnItsOwnTimer();
 	void sessionsHaveTheMethodsCommandsCall();
 	void undoPutsThePromptBackIntoTheInputBox();
 	void oldBackendOffersARestart();
@@ -487,6 +488,26 @@ void TestWorkspace::closingTheCurrentTileSendsNoAttach()
 		QVERIFY(attaches[i].value(u"session_id"_s).toString() != u"ses_a"_s);
 	}
 	QCOMPARE(toasts.count(), 0);
+}
+
+void TestWorkspace::aRevivedTileLeavesOnItsOwnTimer()
+{
+	Fixture f;
+	TileModel tiles;
+	TileStage stage(&tiles);
+	const int lingerMs = 400;
+	stage.setLingerMs(lingerMs);
+	ChatSession session(f.workspace->backend(), u"ses_x"_s);
+	tiles.setTiles({&session});
+	tiles.setTiles({}); // leaves
+	QTest::qWait(lingerMs / 2);
+	tiles.setTiles({&session}); // comes back
+	tiles.setTiles({}); // leaves again, later than the first time
+
+	// The timer of the first leave is over; it must not take the second one with it.
+	QTest::qWait(lingerMs / 2 + lingerMs / 4);
+	QCOMPARE(stage.rowCount(), 1);
+	QTRY_COMPARE(stage.rowCount(), 0);
 }
 
 void TestWorkspace::oldBackendOffersARestart()

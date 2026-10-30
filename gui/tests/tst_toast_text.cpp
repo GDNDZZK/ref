@@ -39,6 +39,20 @@ private slots:
 		QCOMPARE(truncated(emoji, 3), QString::fromStdU32String(U"\U0001F600\U0001F601") + QChar(0x2026));
 	}
 
+	void doesNotCutInsideAGrapheme()
+	{
+		// A family emoji is five characters joined by zero-width joiners and shows as one.
+		const QString family = QString::fromStdU32String(U"\U0001F468\u200D\U0001F469\u200D\U0001F467");
+		const QString text = u"ab"_s + family + u"cd"_s;
+
+		QCOMPARE(truncated(text, 5), u"ab\u2026"_s); // the family would need characters 3 to 7
+		QCOMPARE(truncated(text, 8), u"ab"_s + family + u"\u2026"_s);
+
+		// A letter with a combining accent is two characters and one grapheme.
+		const QString accented = u"abe\u0301cd"_s;
+		QCOMPARE(truncated(accented, 4), u"ab\u2026"_s);
+	}
+
 	void toastTextIsAtMostTwoHundredCharacters()
 	{
 		const QString text = toastText(QString(u'x').repeated(500));
