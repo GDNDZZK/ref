@@ -3,6 +3,7 @@
 # Command line
 
 - [`ref`](#ref)
+- [`ref-web`](#ref-web)
 - [`ref-server`](#ref-server)
 - [Running the backend on another machine](#running-the-backend-on-another-machine)
 - [Files and directories](#files-and-directories)
@@ -31,6 +32,27 @@ ref [PATH] [options]
 | `-V`, `--version`, `-h`, `--help` | Version and help. |
 
 Without `--server`, `ref` looks for a running backend in the instance files (see below) and connects to it. If none is running, it starts `ref-server` from the same directory as `ref` (or from `PATH`) with a random free port and `--idle-timeout 0`, so the backend exits when the last `ref` disconnects.
+
+## `ref-web`
+
+The web UI server. See [Web UI](web.md) for what it does.
+
+```
+ref-web [DIR] [options]
+```
+
+| Option | Meaning |
+|---|---|
+| `DIR` | Directory for new sessions (default: the current directory). |
+| `--port N` | Port to listen on (default `7480`). |
+| `--host ADDR` | Address to listen on (default `127.0.0.1`). Any other address opens `ref-web` to the network, without TLS; a warning is printed. |
+| `--no-open` | Do not open the browser. |
+| `--server ws://host:port` | Connect to this backend instead of finding or starting one. |
+| `--token T` | Token for `--server`. Needs `--server`. |
+| `--mock` | Use a private fake backend (for development). Cannot be combined with `--server`. |
+| `-V`, `--version`, `-h`, `--help` | Version and help. |
+
+Without `--server`, `ref-web` finds the backend the same way `ref` does. The login token for browsers is kept in `<state dir>/web/login-token`.
 
 ## `ref-server`
 
@@ -76,6 +98,7 @@ ref --server ws://127.0.0.1:7777 --token <token>
 | `~/.config/ref/`, `~/.config/opencode/` | Configuration. See [Configuration](configuration.md#where-configuration-is-read-from). |
 | `~/.local/share/ref/sessions/` | Saved sessions. |
 | `~/.local/state/ref/instances/<pid>.json` | One file per running backend: port, token and settings. Readable only by you (mode 600). |
+| `~/.local/state/ref/web/login-token` | Login token of `ref-web`. Readable only by you (mode 600). Delete it while `ref-web` is stopped to get a new one. |
 | `~/.local/state/ref/logs/` | Backend logs, including configuration warnings. |
 
 On Windows, `~` is `%USERPROFILE%`.
