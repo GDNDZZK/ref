@@ -10,7 +10,7 @@ Image {
 
 	// Grabs `item`, then calls `change()` and fades the old look out.
 	function run(item, change) {
-		const size = Qt.size(item.width * Screen.devicePixelRatio, item.height * Screen.devicePixelRatio)
+		const size = Qt.size(item.width, item.height) // logical; Qt applies the device pixel ratio
 		const grabbing = item.grabToImage(result => {
 			grab = result
 			source = result.url
