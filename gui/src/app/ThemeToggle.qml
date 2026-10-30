@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 // Adapted from an early version of qutie by LightBlueCube
 import QtQuick
 import RefGui
