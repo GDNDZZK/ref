@@ -396,7 +396,7 @@ QVariant CommandRegistry::data(const QModelIndex& index, int role) const
 
 QHash<int, QByteArray> CommandRegistry::roleNames() const
 {
-	return {{IdRole, "id"},
+	return {{IdRole, "commandId"}, // not "id": that is a QML keyword
 	        {TitleRole, "title"},
 	        {SlashRole, "slash"},
 	        {AliasesRole, "aliases"},
