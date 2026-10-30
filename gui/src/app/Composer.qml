@@ -140,6 +140,8 @@ Item {
 					: qsTr("Message ref")
 				placeholderTextColor: Theme.textMuted
 				wrapMode: TextArea.Wrap
+				// What is written back (history, undo, a withdrawn prompt) is text, whatever tags it holds.
+				textFormat: TextEdit.PlainText
 				color: Theme.text
 				selectionColor: Theme.selection
 				selectedTextColor: Theme.text
