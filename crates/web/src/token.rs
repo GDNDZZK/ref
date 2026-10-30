@@ -1,4 +1,4 @@
-//! The login token: created on first start, kept in `<state_dir>/web/login-token` so that
+//! The login token (and random ids): created on first start, kept in `<state_dir>/web/login-token` so that
 //! bookmarks and the browser cookie survive restarts. Delete the file to rotate it.
 
 use std::io::Write as _;
@@ -66,13 +66,14 @@ fn try_create(path: &Path) -> anyhow::Result<Option<String>> {
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(None),
         Err(e) => return Err(e).with_context(|| format!("cannot create {}", path.display())),
     };
-    let token = random_token();
+    let token = random_hex();
     file.write_all(token.as_bytes())
         .with_context(|| format!("cannot write {}", path.display()))?;
     Ok(Some(token))
 }
 
-fn random_token() -> String {
+/// 32 random bytes as hex.
+pub fn random_hex() -> String {
     let mut bytes = [0u8; TOKEN_BYTES];
     rand::rng().fill_bytes(&mut bytes);
     bytes.iter().map(|b| format!("{b:02x}")).collect()
@@ -84,7 +85,7 @@ mod tests {
 
     #[test]
     fn random_tokens_are_hex_and_distinct() {
-        let (a, b) = (random_token(), random_token());
+        let (a, b) = (random_hex(), random_hex());
         assert_eq!(a.len(), TOKEN_BYTES * 2);
         assert!(a.bytes().all(|c| c.is_ascii_hexdigit()));
         assert_ne!(a, b);
