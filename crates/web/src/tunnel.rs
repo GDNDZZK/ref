@@ -27,7 +27,8 @@ const CLOSE_GOING_AWAY: u16 = 1001;
 /// A close reason must fit a control frame (125 bytes) next to the 2-byte code.
 const MAX_CLOSE_REASON: usize = 123;
 
-/// How often a tab is pinged, and how long it may stay silent before its connection is dropped.
+/// How often a tab is pinged, and how long it may stay silent (no frame at all) or refuse
+/// data before its connection is dropped.
 /// A tab that went away without closing (sleeping laptop, dead network) would otherwise keep
 /// its upstream connection, and with it a session subscription, until the TCP stack gives up.
 #[derive(Clone, Copy)]
@@ -116,16 +117,16 @@ async fn pump(state: &AppState, browser: &mut WebSocket, upstream: &mut Ws) -> E
         heartbeat.ping_interval,
     );
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    let mut last_pong = Instant::now();
+    let mut last_heard = Instant::now();
     loop {
         tokio::select! {
             _ = state.shutdown.cancelled() => return Ended::Shutdown,
             _ = ticker.tick() => {
-                if last_pong.elapsed() >= heartbeat.pong_timeout {
-                    tracing::debug!("browser did not answer pings, dropping it");
+                if last_heard.elapsed() >= heartbeat.pong_timeout {
+                    tracing::debug!("browser went silent, dropping it");
                     return Ended::BrowserClosed;
                 }
-                if browser.send(Message::Ping(Bytes::new())).await.is_err() {
+                if !send_to_browser(browser, Message::Ping(Bytes::new()), heartbeat).await {
                     return Ended::BrowserClosed;
                 }
             }
@@ -136,12 +137,13 @@ async fn pump(state: &AppState, browser: &mut WebSocket, upstream: &mut Ws) -> E
                         tracing::debug!("browser read failed: {e}");
                         return Ended::BrowserClosed;
                     }
-                    Some(Ok(Message::Pong(_))) => {
-                        last_pong = Instant::now();
-                        continue;
-                    }
                     Some(Ok(message)) => message,
                 };
+                // Any frame shows the tab is alive; a large upload can queue its pong.
+                last_heard = Instant::now();
+                if matches!(message, Message::Pong(_)) {
+                    continue;
+                }
                 let Some(forward) = to_upstream(message) else { continue };
                 if let Err(e) = upstream.send(forward).await {
                     tracing::debug!("backend write failed: {e}");
@@ -161,10 +163,23 @@ async fn pump(state: &AppState, browser: &mut WebSocket, upstream: &mut Ws) -> E
                     None => return Ended::UpstreamClosed(None),
                 };
                 let Some(forward) = to_browser(message) else { continue };
-                if browser.send(forward).await.is_err() {
+                if !send_to_browser(browser, forward, heartbeat).await {
                     return Ended::BrowserClosed;
                 }
             }
+        }
+    }
+}
+
+/// False when the tab is gone or does not take the frame within the pong timeout (its
+/// receive buffer is full). Waiting longer would also stop the pings.
+async fn send_to_browser(browser: &mut WebSocket, message: Message, heartbeat: Heartbeat) -> bool {
+    match tokio::time::timeout(heartbeat.pong_timeout, browser.send(message)).await {
+        Ok(Ok(())) => true,
+        Ok(Err(_)) => false,
+        Err(_) => {
+            tracing::debug!("browser does not take data, dropping it");
+            false
         }
     }
 }
@@ -227,6 +242,12 @@ mod tests {
     /// Several pong timeouts: a healthy tab must stay connected for this long.
     const HEALTHY_FOR: Duration = Duration::from_millis(1500);
 
+    /// Enough data to fill the socket buffers of a tab that does not read.
+    const FLOOD_MESSAGES: usize = 256;
+    const FLOOD_MESSAGE_BYTES: usize = 1 << 20;
+    /// How often a busy tab sends something.
+    const BUSY_TAB_SENDS_EVERY: Duration = Duration::from_millis(50);
+
     /// A backend that reports (once) when its connection ends.
     async fn upstream_that_reports_close() -> (String, oneshot::Receiver<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -236,6 +257,34 @@ mod tests {
             let (stream, _) = listener.accept().await.unwrap();
             let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
             while let Some(Ok(message)) = ws.next().await {
+                if message.is_close() {
+                    break;
+                }
+            }
+            let _ = closed_tx.send(());
+        });
+        (url, closed_rx)
+    }
+
+    /// Like `upstream_that_reports_close`, but the backend also sends `FLOOD_MESSAGES` large
+    /// binary frames as soon as the tab connects.
+    async fn flooding_upstream_that_reports_close() -> (String, oneshot::Receiver<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        let (closed_tx, closed_rx) = oneshot::channel();
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let (mut sink, mut source) = ws.split();
+            tokio::spawn(async move {
+                for _ in 0..FLOOD_MESSAGES {
+                    let chunk = vec![0u8; FLOOD_MESSAGE_BYTES];
+                    if sink.send(UpMessage::Binary(chunk.into())).await.is_err() {
+                        return;
+                    }
+                }
+            });
+            while let Some(Ok(message)) = source.next().await {
                 if message.is_close() {
                     break;
                 }
@@ -302,5 +351,31 @@ mod tests {
         let reader = tokio::spawn(async move { while tab.next().await.is_some() {} });
         assert!(timeout(HEALTHY_FOR, &mut closed).await.is_err());
         reader.abort();
+    }
+
+    #[tokio::test]
+    async fn a_tab_that_stops_reading_is_dropped_even_when_data_is_waiting_for_it() {
+        let (url, closed) = flooding_upstream_that_reports_close().await;
+        let address = serve_tunnel(url).await;
+        // Never read: the tunnel ends up blocked writing to this tab.
+        let _stuck_tab = open_tab(&address).await;
+        timeout(WAIT, closed)
+            .await
+            .expect("the tunnel stayed stuck on the tab")
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_tab_that_keeps_sending_is_alive_without_answering_pings() {
+        let (url, mut closed) = upstream_that_reports_close().await;
+        let address = serve_tunnel(url).await;
+        let mut tab = open_tab(&address).await;
+        // Sending only: the library does not get to answer the pings.
+        let deadline = Instant::now() + HEALTHY_FOR;
+        while Instant::now() < deadline {
+            tab.send(UpMessage::text("busy")).await.unwrap();
+            tokio::time::sleep(BUSY_TAB_SENDS_EVERY).await;
+        }
+        assert!(closed.try_recv().is_err(), "the tab was dropped while busy");
     }
 }
