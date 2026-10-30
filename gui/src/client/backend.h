@@ -58,6 +58,11 @@ public:
 	// whatever awaits them.
 	void shutdown();
 
+	// The system notifications this connection wants; Hello tells the backend, so set it before
+	// `start()` and again whenever it changes (the new value is used on reconnecting). A running
+	// connection is told with ServerClient::setNotify.
+	void setNotifyKinds(QList<proto::NotifyFrame::Kind> kinds) { m_notifyKinds = std::move(kinds); }
+
 	ServerClient& client() { return m_client; }
 	State state() const { return m_state; }
 	const QString& reason() const { return m_reason; }
@@ -77,6 +82,7 @@ private:
 
 	Source m_source;
 	QString m_cwd;
+	QList<proto::NotifyFrame::Kind> m_notifyKinds;
 	ServerClient m_client;
 	std::unique_ptr<MockBackend> m_mock;
 	proto::HelloResult m_hello;

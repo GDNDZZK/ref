@@ -1,15 +1,18 @@
 // Adapted from an early version of qutie by LightBlueCube
 #include "app/app_translator.h"
 #include "app/chat_image_provider.h"
+#include "app/notification_center_type.h"
 #include "app/workspace.h"
 #include "cli/command_line.h"
 #include "client/instance_files.h"
 #include "icons/icon_provider.h"
+#include "notify/notifier.h"
 
 #include <QDir>
 #include <QGuiApplication>
 #include <QLocale>
 #include <QQmlApplicationEngine>
+#include <QWindow>
 #include <QTextStream>
 #include <QTimer>
 
@@ -100,6 +103,18 @@ int main(int argc, char* argv[])
 		exitWhenOpened(workspace);
 	}
 
+	// Tells the backend where the user looks and shows what it sends. The settings supply the kinds.
+	refgui::notify::NotificationCenter notifications(workspace.backend(), refgui::notify::createPlatformNotifier());
+	NotificationCenterForeign::instance = &notifications;
+	const auto reportFocus = [&] { notifications.setFocus(workspace.isWindowActive(), workspace.visibleSessionIds()); };
+	QObject::connect(&workspace, &Workspace::windowActiveChanged, &notifications, reportFocus);
+	QObject::connect(&workspace, &Workspace::visibleSessionIdsChanged, &notifications, reportFocus);
+	reportFocus();
+	const auto reportKinds = [&] { notifications.setKinds(workspace.settings()->notifyKinds()); };
+	QObject::connect(workspace.settings(), &refgui::workspace::Settings::notifyKindsChanged, &notifications, reportKinds);
+	reportKinds();
+	QObject::connect(&notifications, &refgui::notify::NotificationCenter::sessionRequested, &workspace, &Workspace::openSession);
+
 	QQmlApplicationEngine engine;
 	QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] { QCoreApplication::exit(EXIT_FAILURE); }, Qt::QueuedConnection);
 	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
@@ -110,6 +125,10 @@ int main(int argc, char* argv[])
 		workspace.retranslate();
 	});
 	engine.loadFromModule("RefGui", "Main");
+	if(!engine.rootObjects().isEmpty())
+	{
+		notifications.setWindow(qobject_cast<QWindow*>(engine.rootObjects().first()));
+	}
 
 	return QGuiApplication::exec();
 }

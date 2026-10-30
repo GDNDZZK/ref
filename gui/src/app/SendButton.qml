@@ -11,6 +11,7 @@ Item {
 
 	property bool busy: false
 	property bool canSend: false
+	property color activeColor: Theme.accent
 	signal clicked()
 
 	readonly property bool active: busy || canSend
@@ -22,7 +23,7 @@ Item {
 		id: face
 		anchors.fill: parent
 		radius: width / 2
-		color: button.active ? Theme.accent : Theme.surfaceHover
+		color: button.active ? button.activeColor : Theme.surfaceHover
 		scale: tap.pressed ? 0.9 : 1
 
 		Behavior on color { ColorAnimation { duration: Motion.slow; easing.type: Motion.ease } }
