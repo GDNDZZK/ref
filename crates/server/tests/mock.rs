@@ -7,6 +7,7 @@ use ref_server::hub::{Conn, Hub};
 use ref_server::mock::Mock;
 use ref_server::ops::{self, CreateOpts};
 use ref_server::session::{Session, user_message};
+use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -405,5 +406,53 @@ async fn the_remaining_tool_scripts_end_in_the_states_they_promise() {
     rig.prompt("todo");
     rig.run(true).await;
     assert_eq!(rig.session.info().todos.len(), 3);
+    rig.finish().await;
+}
+
+#[tokio::test]
+async fn directory_listing_stays_inside_the_workspace() {
+    let rig = rig().await;
+    rig.conn.lock().cwd = rig.mock.workspace().to_string_lossy().into();
+    let workspace = std::fs::canonicalize(rig.mock.workspace()).unwrap();
+    let list = |path: &str| {
+        let req = Request::ListDirs { path: path.into() };
+        api::handle(&rig.hub, &rig.conn, req)
+    };
+
+    let home = list("~").await.unwrap();
+    assert_eq!(home["path"], workspace.to_string_lossy().as_ref());
+    assert_eq!(home["dirs"], json!(["data", "docs", "scratch", "src"]));
+    assert!(list("src/..").await.is_ok());
+    for outside in ["/", "..", "/tmp", "~/../.."] {
+        let err = list(outside).await.unwrap_err();
+        assert!(
+            err.contains("outside the mock workspace"),
+            "{outside}: {err}"
+        );
+    }
+    rig.finish().await;
+}
+
+#[tokio::test]
+async fn retry_can_be_demonstrated_again_after_an_undo() {
+    let rig = rig().await;
+    let retries = |seen: &[SessionStatus]| {
+        seen.iter()
+            .filter(|s| matches!(s, SessionStatus::Retrying { .. }))
+            .count()
+    };
+    rig.prompt("retry");
+    assert!(retries(&rig.run(true).await) >= 2);
+
+    let undo = Request::Undo {
+        session_id: rig.session.id.clone(),
+        message_id: None,
+    };
+    api::handle(&rig.hub, &rig.conn, undo).await.unwrap();
+    rig.prompt("retry");
+    assert!(
+        retries(&rig.run(true).await) >= 2,
+        "failed again the second time"
+    );
     rig.finish().await;
 }

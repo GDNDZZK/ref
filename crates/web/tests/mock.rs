@@ -47,7 +47,7 @@ async fn create_session(ws: &mut Ws, name: &str) {
 
 #[tokio::test]
 async fn mock_mode_serves_tabs_from_a_private_backend() {
-    ensure_ref_server();
+    require_ref_server();
     let env = Env::new("mock");
     let web = env.start(&["--mock"]).await;
     let info: serde_json::Value = web.get("/api/info").await.json().await.unwrap();
@@ -61,10 +61,10 @@ async fn mock_mode_serves_tabs_from_a_private_backend() {
     assert!(!env.state_dir().join("instances").exists());
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn a_mock_that_exited_is_started_again_for_the_next_tab() {
-    ensure_ref_server();
+    require_ref_server();
     let env = Env::new("mock-restart");
     let web = env.start(&["--mock"]).await;
 
@@ -97,10 +97,10 @@ async fn a_mock_that_exited_is_started_again_for_the_next_tab() {
     assert_ne!(second_mock[0], first_mock[0], "a new mock process");
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn the_mock_does_not_outlive_ref_web() {
-    ensure_ref_server();
+    require_ref_server();
     let env = Env::new("mock-orphan");
     let mut web = env.start(&["--mock"]).await;
     let mut tab = web.ws().await;
@@ -113,10 +113,10 @@ async fn the_mock_does_not_outlive_ref_web() {
     wait_until("the mock to exit", || process_gone(mock[0])).await;
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn without_an_explicit_server_ref_web_starts_the_backend_beside_it() {
-    ensure_ref_server();
+    require_ref_server();
     let env = Env::new("auto");
     let web = env.start(&[]).await;
     let mut tab = web.ws().await;
@@ -130,7 +130,7 @@ async fn without_an_explicit_server_ref_web_starts_the_backend_beside_it() {
 }
 
 /// The pid in the one instance file of the private state directory.
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn backend_pid(env: &Env) -> u32 {
     let files: Vec<_> = std::fs::read_dir(env.state_dir().join("instances"))
         .unwrap()
@@ -141,4 +141,36 @@ fn backend_pid(env: &Env) -> u32 {
     let info: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&files[0]).unwrap()).unwrap();
     info["pid"].as_u64().unwrap() as u32
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn stopping_ref_web_stops_the_mock_and_removes_its_directory() {
+    require_ref_server();
+    let env = Env::new("mock-cleanup");
+    let mut web = env.start(&["--mock"]).await;
+    let mut tab = web.ws().await;
+    hello(&mut tab).await;
+    let mock_dirs = |env: &Env| {
+        std::fs::read_dir(env.tmp_dir())
+            .unwrap()
+            .filter(|e| {
+                e.as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("ref-mock-")
+            })
+            .count()
+    };
+    assert_eq!(mock_dirs(&env), 1);
+
+    assert!(ref_sys::terminate(web.pid()));
+    let status = web.wait_exit().await;
+    assert!(status.success(), "{status}");
+    assert_eq!(
+        mock_dirs(&env),
+        0,
+        "the mock removed its temporary directory"
+    );
 }

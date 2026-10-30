@@ -5,16 +5,19 @@ import { computed, ref, shallowRef } from 'vue'
 import { RefApi } from '../net/api.ts'
 import { RefConnection } from '../net/connection.ts'
 import type { ConnectionState, EventFrame, HelloResult } from '../net/connection.ts'
+import { loginRequired } from '../net/login.ts'
 import { webSocketTransport } from '../net/transport.ts'
 import { PROTOCOL_VERSION } from '../proto/generated'
 import type { ServerConfigInfo } from '../proto/generated'
 import { useNoticesStore } from './notices.ts'
+import { useSettingsStore } from './settings.ts'
 
 const CLIENT_NAME = 'ref-web'
 const PROTOCOL_WITHOUT_FIELD = 1 // servers older than protocol 2 do not report theirs
 
 export const useConnectionStore = defineStore('connection', () => {
   const notices = useNoticesStore()
+  const settings = useSettingsStore()
   const state = ref<ConnectionState>('connecting')
   const detail = ref('')
   const hello = shallowRef<HelloResult>()
@@ -31,8 +34,21 @@ export const useConnectionStore = defineStore('connection', () => {
   let api: RefApi | undefined
   let opened = false
 
+  // ref-web forgets the browser's login when it restarts: reconnecting would be refused for good.
+  async function giveUpWithoutLogin(): Promise<boolean> {
+    if (!(await loginRequired())) return false
+    fatal.value = 'connection.notLoggedIn'
+    return true
+  }
+
   function start(url: string, cwd: string): void {
-    const created = new RefConnection({ connect: webSocketTransport(url), client: CLIENT_NAME, cwd })
+    const created = new RefConnection({
+      connect: webSocketTransport(url),
+      client: CLIENT_NAME,
+      cwd,
+      notifyKinds: () => settings.notifyKinds,
+      giveUp: giveUpWithoutLogin,
+    })
     connection = created
     api = new RefApi(created)
 

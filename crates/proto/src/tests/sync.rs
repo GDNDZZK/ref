@@ -4,6 +4,12 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 const UPDATE_ENV: &str = "REF_UPDATE_FIXTURES";
+const UPDATE_VALUE: &str = "1";
+
+/// Only `REF_UPDATE_FIXTURES=1` rewrites files; `0`, an empty value or anything else does not.
+fn update_requested(value: Option<&std::ffi::OsStr>) -> bool {
+    value.is_some_and(|v| v == UPDATE_VALUE)
+}
 
 /// Files by path relative to the root (`/` separated).
 pub type Tree = BTreeMap<String, String>;
@@ -35,7 +41,7 @@ fn collect(root: &Path, dir: &Path, tree: &mut Tree) {
 
 /// Makes `dir` hold exactly `expected` (update mode) or fails when it does not.
 pub fn sync(dir: &Path, expected: &Tree, what: &str) {
-    if std::env::var_os(UPDATE_ENV).is_some() {
+    if update_requested(std::env::var_os(UPDATE_ENV).as_deref()) {
         write_tree(dir, expected);
         return;
     }
@@ -67,5 +73,20 @@ fn write_tree(dir: &Path, expected: &Tree) {
         let file = dir.join(path);
         std::fs::create_dir_all(file.parent().expect("file has a parent")).expect("create dir");
         std::fs::write(file, text).expect("write file");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::update_requested;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn only_one_asks_for_an_update() {
+        assert!(update_requested(Some(OsStr::new("1"))));
+        for other in ["", "0", "true", "yes"] {
+            assert!(!update_requested(Some(OsStr::new(other))), "{other:?}");
+        }
+        assert!(!update_requested(None));
     }
 }

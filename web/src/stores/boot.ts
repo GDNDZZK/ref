@@ -3,6 +3,7 @@
 import { StartupError, browserEnvironment, resolveStartup } from '../net/startup.ts'
 import { useConnectionStore } from './connection.ts'
 import { useNoticesStore } from './notices.ts'
+import { useNotificationsStore } from './notifications.ts'
 import { useWorkspaceStore } from './workspace.ts'
 
 export async function boot(): Promise<StartupError | undefined> {
@@ -18,14 +19,19 @@ export async function boot(): Promise<StartupError | undefined> {
     throw error
   }
 
+  // A backend restarted after "too old" is the first usable connection, though not the first one.
+  let loaded = false
   connection.onOpen((isReconnect) => {
     if (connection.backendTooOld) return
-    workspace.onConnected(isReconnect, startup).catch((error) => notices.pushError(error))
+    const wasLoaded = loaded
+    loaded = true
+    workspace.onConnected(isReconnect && wasLoaded, startup).catch((error) => notices.pushError(error))
   })
   connection.onFrame((frame) => {
     if (frame.kind === 'toast') notices.push(frame.level, frame.text)
     else workspace.onFrame(frame)
   })
+  useNotificationsStore().start()
   connection.start(startup.url, startup.cwd)
   return undefined
 }

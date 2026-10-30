@@ -269,7 +269,6 @@ async fn handle_conn(hub: Arc<Hub>, stream: TcpStream, peer: SocketAddr, auth: A
                         st.frontend = client != CONTROL_CLIENT;
                         st.cwd = cwd.clone();
                         st.notify = notify.into_iter().collect();
-                        st.focus_stamp = hub.next_stamp();
                     }
                     if client != CONTROL_CLIENT {
                         hub.frontend_joined();

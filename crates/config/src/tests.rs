@@ -571,6 +571,31 @@ fn compaction_thresholds() {
 }
 
 #[test]
+fn explicit_project_root_hides_the_directories_above() {
+    let fx = Fx::new();
+    fx.write("proj/opencode.json", r#"{"model": "outer/model"}"#);
+    fx.write(
+        "proj/pkg/opencode.json",
+        r#"{"small_model": "inner/model"}"#,
+    );
+    let pkg = fx.proj().join("pkg");
+
+    // Without a root the git worktree (proj) is the top: both files count.
+    let c = fx.load_at(&pkg);
+    assert_eq!(c.model, ModelRef::parse("outer/model"));
+    assert_eq!(c.small_model, ModelRef::parse("inner/model"));
+    assert_eq!(c.project_root, None);
+
+    let home = fx.home();
+    let globals = [home.join(".config/opencode")];
+    let env = |_: &str| None;
+    let c = load_in(Some(&home), &globals, Some(&pkg), &pkg, &env);
+    assert_eq!(c.model, None, "proj/opencode.json is above the root");
+    assert_eq!(c.small_model, ModelRef::parse("inner/model"));
+    assert_eq!(c.project_root, Some(pkg));
+}
+
+#[test]
 fn mcp_parsing() {
     let fx = Fx::new();
     fx.write(
