@@ -47,7 +47,7 @@ pub(crate) fn validate_cwd(cwd: &str) -> Result<String, String> {
 }
 
 pub async fn create_session(hub: &Arc<Hub>, o: CreateOpts) -> Result<Arc<Session>, String> {
-    let cwd = validate_cwd(&o.cwd)?;
+    let cwd = validate_cwd(&hub.effective_cwd(&o.cwd))?;
     let cfg = {
         let hub = hub.clone();
         let cwd = cwd.clone();

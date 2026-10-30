@@ -33,6 +33,8 @@ pub struct HubOptions {
     pub mcp_wait: Duration,
     /// -1 never, 0 immediately, N seconds after the last frontend leaves.
     pub idle_timeout: i64,
+    /// Mock mode: every working directory a client asks for is replaced by this one.
+    pub sandbox_cwd: Option<PathBuf>,
 }
 
 impl HubOptions {
@@ -44,6 +46,7 @@ impl HubOptions {
             retry_base: Duration::from_secs(2),
             mcp_wait: Duration::from_secs(30),
             idle_timeout: -1,
+            sandbox_cwd: None,
         }
     }
 }
@@ -237,6 +240,14 @@ impl Hub {
         });
         tokio::spawn(broadcaster(Arc::downgrade(&hub)));
         hub
+    }
+
+    /// The directory to use for a requested one: the sandbox in mock mode, else as requested.
+    pub fn effective_cwd(&self, requested: &str) -> String {
+        match &self.opts.sandbox_cwd {
+            Some(dir) => dir.to_string_lossy().to_string(),
+            None => requested.to_string(),
+        }
     }
 
     pub fn load_config(&self, cwd: &Path) -> Config {
