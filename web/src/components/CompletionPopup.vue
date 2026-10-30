@@ -2,8 +2,14 @@
 // The list above the input box while typing `/command` or `@file`.
 import { computed, nextTick, useTemplateRef, watch } from 'vue'
 import type { Completion } from '../composer/completion.ts'
-import { POPUP_MAX_ROWS, POPUP_PADDING, POPUP_ROW_HEIGHT } from '../composer/metrics.ts'
+import { components } from '../theme/generated/components.ts'
 import Icon from './Icon.vue'
+
+const {
+  popupMaxRows: POPUP_MAX_ROWS,
+  popupPadding: POPUP_PADDING,
+  popupRowHeight: POPUP_ROW_HEIGHT,
+} = components.completionPopup
 
 const props = defineProps<{ completion: Completion | undefined }>()
 const emit = defineEmits<{ hover: [index: number]; pick: [index: number] }>()
@@ -69,13 +75,13 @@ function splitPath(path: string): [string, string] {
 
 <style scoped>
 .popup {
-  --popup-gap: 8px;
+  --popup-gap: var(--completion-popup-popup-gap);
   position: absolute;
   left: 0;
   right: 0;
   bottom: calc(100% + var(--popup-gap));
   z-index: 5;
-  padding: 4px;
+  padding: var(--completion-popup-popup-padding);
   border-radius: var(--radius);
   background: var(--surface);
   box-shadow: inset 0 0 0 1px var(--border);
@@ -93,7 +99,7 @@ function splitPath(path: string): [string, string] {
   left: 0;
   right: 0;
   top: 0;
-  height: 36px;
+  height: var(--completion-popup-popup-row-height);
   border-radius: var(--radius-small);
   background: var(--surface-hover);
   transition: translate var(--motion-quick) var(--motion-ease);
@@ -104,7 +110,7 @@ function splitPath(path: string): [string, string] {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 36px;
+  height: var(--completion-popup-popup-row-height);
   padding: 0 10px;
   cursor: pointer;
 }
