@@ -88,6 +88,7 @@ Item {
 		}
 
 		Text {
+			textFormat: Text.PlainText
 			id: title
 			x: 30
 			y: 8
@@ -119,6 +120,7 @@ Item {
 		}
 
 		Text {
+			textFormat: Text.PlainText
 			x: 30
 			y: 30
 			width: parent.width - x - 12
@@ -169,6 +171,7 @@ Item {
 					visible: row.todoAllDone && !row.attention
 				}
 				Text {
+					textFormat: Text.PlainText
 					anchors.verticalCenter: parent.verticalCenter
 					text: row.todoDone + "/" + row.todoTotal
 					color: row.todoAllDone ? Theme.success : Theme.textMuted

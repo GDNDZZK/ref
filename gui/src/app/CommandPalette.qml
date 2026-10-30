@@ -129,6 +129,7 @@ FocusScope {
 				visible: launcher.askingArgument
 
 				Text {
+					textFormat: Text.PlainText
 					id: chipLabel
 					anchors.centerIn: parent
 					text: launcher.chosen?.title ?? ""
@@ -159,6 +160,7 @@ FocusScope {
 				}
 
 				Text {
+					textFormat: Text.PlainText
 					anchors.fill: parent
 					verticalAlignment: Text.AlignVCenter
 					text: launcher.askingArgument ? launcher.chosen.hint : qsTr("Type a command…")
@@ -208,6 +210,7 @@ FocusScope {
 					color: Theme.textMuted
 				}
 				Text {
+					textFormat: Text.PlainText
 					id: titleLabel
 					anchors { left: parent.left; leftMargin: 46; verticalCenter: parent.verticalCenter }
 					text: row.title
@@ -215,6 +218,7 @@ FocusScope {
 					font.pixelSize: Theme.fontSize
 				}
 				Text {
+					textFormat: Text.PlainText
 					anchors { left: titleLabel.right; leftMargin: 8; right: chips.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
 					text: row.slash !== "" ? "/" + row.slash : ""
 					color: Theme.textMuted
@@ -230,6 +234,7 @@ FocusScope {
 		}
 
 		Text {
+			textFormat: Text.PlainText
 			id: description
 			y: divider.y + 1
 			width: parent.width

@@ -80,6 +80,7 @@ ModalDialog {
 				boundsBehavior: Flickable.StopAtBounds
 
 				TextEdit {
+					textFormat: TextEdit.PlainText
 					id: output
 					width: parent.width
 					readOnly: true
