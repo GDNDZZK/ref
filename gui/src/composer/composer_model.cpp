@@ -600,7 +600,7 @@ int ComposerModel::attachImageUrls(const QList<QUrl>& urls, bool reportOthers)
 	int attached = 0;
 	for(const QUrl& url : urls)
 	{
-		const auto file = compose::imageFromPath(url.toString(QUrl::FullyEncoded));
+		const auto file = compose::imageFromUrl(url);
 		if(!file)
 		{
 			emit failed(file.error());

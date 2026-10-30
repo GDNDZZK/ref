@@ -15,7 +15,7 @@ namespace
 
 constexpr qsizetype MaxPathLength = 4096;
 
-const QString FileScheme = u"file://"_s;
+const QString FileScheme = u"file:"_s;
 
 // The mime type of an image file by its extension, or an empty string.
 QString mimeOf(const QString& path)
@@ -51,9 +51,10 @@ QString pathOf(const QString& text)
 		path.removeLast();
 	}
 
-	if(path.startsWith(FileScheme))
+	if(path.startsWith(FileScheme, Qt::CaseInsensitive))
 	{
-		path = QUrl::fromPercentEncoding(path.mid(FileScheme.size()).toUtf8());
+		// Qt knows the forms of a file URL on each platform (file:///C:/x, file://host/share, file://localhost/x).
+		path = QUrl(path).toLocalFile();
 	}
 	path.replace(u"\\ "_s, u" "_s);
 	if(path.isEmpty() || path.contains(u'\n') || path.size() > MaxPathLength)
@@ -71,7 +72,20 @@ QString pathOf(const QString& text)
 
 std::expected<std::optional<proto::NamedImage>, QString> imageFromPath(const QString& text)
 {
-	const QString path = pathOf(text);
+	return imageFromFile(pathOf(text));
+}
+
+std::expected<std::optional<proto::NamedImage>, QString> imageFromUrl(const QUrl& url)
+{
+	if(!url.isLocalFile())
+	{
+		return std::nullopt;
+	}
+	return imageFromFile(url.toLocalFile());
+}
+
+std::expected<std::optional<proto::NamedImage>, QString> imageFromFile(const QString& path)
+{
 	const QString mime = mimeOf(path);
 	const QFileInfo info(path);
 	if(mime.isEmpty() || !info.isFile())
