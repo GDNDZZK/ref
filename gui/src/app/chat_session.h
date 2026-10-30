@@ -21,6 +21,21 @@ class ChatSession : public QObject
 	Q_PROPERTY(bool ready READ isReady NOTIFY readyChanged)
 	Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
 	Q_PROPERTY(QString title READ title NOTIFY titleChanged)
+	// What the session is doing: "idle", "thinking", "running", "waiting_permission", "retrying" or "compacting".
+	Q_PROPERTY(QString activity READ activity NOTIFY infoChanged)
+	Q_PROPERTY(qint64 busySince READ busySince NOTIFY infoChanged) // epoch ms, 0 while idle
+	Q_PROPERTY(int retryAttempt READ retryAttempt NOTIFY infoChanged)
+	Q_PROPERTY(qint64 retryAt READ retryAt NOTIFY infoChanged) // epoch ms
+	Q_PROPERTY(QString retryError READ retryError NOTIFY infoChanged)
+	Q_PROPERTY(qint64 contextUsed READ contextUsed NOTIFY infoChanged)
+	Q_PROPERTY(qint64 contextMax READ contextMax NOTIFY infoChanged)
+	Q_PROPERTY(qint64 contextRecommend READ contextRecommend NOTIFY infoChanged)
+	Q_PROPERTY(qint64 contextAuto READ contextAuto NOTIFY infoChanged)
+	Q_PROPERTY(bool moreBefore READ hasMoreBefore NOTIFY moreBeforeChanged)
+	Q_PROPERTY(bool loadingOlder READ isLoadingOlder NOTIFY loadingOlderChanged)
+	Q_PROPERTY(QString olderError READ olderError NOTIFY olderErrorChanged) // why the last page did not load
+	Q_PROPERTY(bool thinkingExpanded READ thinkingExpanded NOTIFY expansionChanged)
+	Q_PROPERTY(bool detailsExpanded READ detailsExpanded NOTIFY expansionChanged)
 
 public:
 	// `backend` is shared by all sessions of the window and outlives them.
@@ -42,6 +57,20 @@ public:
 	// What the user should be told about this session: the last failure or a remark. Empty when all is well.
 	QString statusText() const;
 	QString title() const;
+	QString activity() const;
+	qint64 busySince() const;
+	int retryAttempt() const;
+	qint64 retryAt() const;
+	QString retryError() const;
+	qint64 contextUsed() const;
+	qint64 contextMax() const;
+	qint64 contextRecommend() const;
+	qint64 contextAuto() const;
+	bool hasMoreBefore() const { return m_controller.hasMoreBefore(); }
+	bool isLoadingOlder() const { return m_controller.isLoadingOlder(); }
+	const QString& olderError() const { return m_olderError; }
+	bool thinkingExpanded() const;
+	bool detailsExpanded() const;
 
 	// Precondition: !busy and `text` is not blank.
 	Q_INVOKABLE void send(const QString& text);
@@ -49,18 +78,32 @@ public:
 	Q_INVOKABLE void stop();
 	// Answers a tool call that waits for permission.
 	Q_INVOKABLE void permissionReply(const QString& callId, bool allow, bool always);
+	// Adds the page of messages before the oldest one.
+	Q_INVOKABLE void loadOlder();
+	// Puts the text of a message on the clipboard.
+	Q_INVOKABLE void copyMessage(const QString& messageId);
+	// For the commands copy, thinking and details.
+	Q_INVOKABLE void copyLastReply();
+	Q_INVOKABLE void toggleReasoning();
+	Q_INVOKABLE void toggleDetails();
 
 signals:
 	void busyChanged();
 	void readyChanged();
 	void statusTextChanged();
 	void titleChanged();
+	void infoChanged();
+	void moreBeforeChanged();
+	void loadingOlderChanged();
+	void olderErrorChanged();
+	void expansionChanged();
 	// The backend reported a problem with the session (an Error event).
 	void errorReported(const QString& text);
 
 private:
 	QCoro::Task<> sendPrompt(QString text);
 	QCoro::Task<> sendAbort();
+	QCoro::Task<> fetchOlder();
 	QCoro::Task<> sendPermission(QString callId, bool allow, bool always);
 	void setFailure(const QString& text);
 
@@ -68,4 +111,5 @@ private:
 	QString m_sessionId;
 	refgui::session::SessionController m_controller;
 	QString m_failure; // the last thing that went wrong, until the next action
+	QString m_olderError;
 };
