@@ -21,7 +21,7 @@ SessionController::SessionController(client::Backend& backend, QObject* parent)
 {
 	connect(&backend.client(), &client::ServerClient::frameReceived, this, &SessionController::onFrame);
 	connect(&backend, &client::Backend::connected, this, [this] {
-		if(hasSession())
+		if(m_attached)
 		{
 			reattach();
 		}
@@ -51,18 +51,33 @@ QCoro::Task<SessionController::Result<void>> SessionController::create(QString c
 	co_return co_await attach(created->id);
 }
 
-QCoro::Task<SessionController::Result<void>> SessionController::attach(QString sessionId)
+QCoro::Task<SessionController::Result<void>> SessionController::attach(QString sessionId, bool foreground)
 {
-	const auto snapshot = co_await m_backend.client().attach(sessionId);
+	const bool onlyModeChanges = m_attached && sessionId == m_sessionId;
+	const auto snapshot = co_await m_backend.client().attach(sessionId, foreground);
 	if(!snapshot)
 	{
 		co_return std::unexpected(snapshot.error());
 	}
+	m_foreground = foreground;
+	if(onlyModeChanges)
+	{
+		setInfo(snapshot->info);
+		co_return Result<void>();
+	}
 	// Events that came before the snapshot are in it, or never come, so nothing is
 	// buffered. The client resumes us before it handles the next frame.
 	m_sessionId = std::move(sessionId);
+	m_attached = true;
 	adopt(*snapshot);
 	co_return Result<void>();
+}
+
+QCoro::Task<SessionController::Result<void>> SessionController::detach()
+{
+	Q_ASSERT(m_attached);
+	m_attached = false; // also when the request fails: a lost connection detaches anyway
+	co_return co_await m_backend.client().detach(m_sessionId);
 }
 
 QCoro::Task<SessionController::Result<bool>> SessionController::continueLast(QString cwd)
@@ -105,7 +120,7 @@ QCoro::Task<SessionController::Result<void>> SessionController::permissionReply(
 // The connection is new, so the backend knows nothing of our attachment.
 QCoro::Task<> SessionController::reattach()
 {
-	const auto snapshot = co_await m_backend.client().attach(m_sessionId);
+	const auto snapshot = co_await m_backend.client().attach(m_sessionId, m_foreground);
 	if(!snapshot)
 	{
 		emit reattachFailed(snapshot.error());
@@ -124,14 +139,11 @@ void SessionController::onFrame(const proto::ServerFrame& frame)
 {
 	if(const auto* event = std::get_if<proto::EventFrame>(&frame))
 	{
-		if(event->sessionId == m_sessionId)
+		// Detached, the model is behind; the next attach replaces it.
+		if(m_attached && event->sessionId == m_sessionId)
 		{
 			onEvent(event->event);
 		}
-	}
-	else if(const auto* toast = std::get_if<proto::ToastFrame>(&frame))
-	{
-		emit toastReceived(*toast);
 	}
 }
 
