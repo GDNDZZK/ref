@@ -12,7 +12,8 @@ namespace refgui::notify
 // Talks to org.freedesktop.Notifications (the desktop notification service of GNOME, KDE,
 // and most others). Available while a service answers on the bus. A click on the
 // notification (its "default" action) activates the session. A newer notification of a
-// session replaces its older one instead of stacking.
+// session and kind replaces its older one instead of stacking. The body is text, also for
+// services that read markup.
 class DBusNotifier : public Notifier
 {
 	Q_OBJECT
@@ -32,15 +33,22 @@ private slots:
 
 private:
 	void probe();
+	void probeCapabilities();
 	void setAvailable(bool available, const QString& reason);
 	void forget(uint id);
 
 	QDBusConnection m_connection;
 	QDBusServiceWatcher m_watcher;
 	bool m_available = false;
+	bool m_bodyMarkup = false; // the service reads markup in the body
 	QString m_reason;
-	QHash<uint, QString> m_sessionOf; // notification id -> session
-	QHash<QString, uint> m_idOf;      // session -> its newest notification
+	struct Shown
+	{
+		QString sessionId;
+		QString key; // what replaces it
+	};
+	QHash<uint, Shown> m_shown;  // notification id -> what it shows
+	QHash<QString, uint> m_idOf; // replace key -> its newest notification
 };
 
 } // namespace refgui::notify
