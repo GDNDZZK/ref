@@ -77,10 +77,10 @@ ModalDialog {
 		Rectangle { x: 22; width: parent.width - 2 * 22; height: 1; color: Theme.border }
 
 		// The notification switches are the composer's part of the window.
-		Loader {
+		NotificationSettingsSection {
 			x: 22
 			width: parent.width - 2 * 22
-			Component.onCompleted: setSource("NotificationSettingsSection.qml", {settings: Workspace.settings})
+			settings: Workspace.settings
 		}
 
 		TextEdit {
