@@ -19,13 +19,16 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SHARED_FILES=(README.md README.zh-CN.md LICENSE)
 SHARED_DIRS=(docs)
 
-# Executables of each package kind. ref-server is part of every package, see main().
-declare -A KIND_BINARIES=(
-  [tui]="ref"
-  [web]="ref-web"
-  [all]="ref ref-web"
-)
 KINDS=(tui web all)
+
+# Prints the executables of a package kind. ref-server is part of every package and not listed.
+kind_binaries() {
+  case "$1" in
+    tui) echo "ref" ;;
+    web) echo "ref-web" ;;
+    all) echo "ref ref-web" ;;
+  esac
+}
 
 usage() {
   echo "usage: $0 --version V --target TRIPLE --bin-dir DIR --out DIR" >&2
@@ -52,7 +55,7 @@ stage_package() {
   local folder="$stage/$name" binary
 
   mkdir -p "$folder"
-  for binary in ${KIND_BINARIES[$kind]} ref-server; do
+  for binary in $(kind_binaries "$kind") ref-server; do
     cp "$BIN_DIR/$binary$EXE_SUFFIX" "$folder/"
   done
   cp "${SHARED_FILES[@]/#/$REPO_ROOT/}" "$folder/"
