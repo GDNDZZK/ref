@@ -2820,6 +2820,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ref-client"
+version = "0.1.0"
+dependencies = [
+ "rand 0.9.5",
+ "ref-proto",
+ "ref-sys",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-tungstenite",
+]
+
+[[package]]
 name = "ref-config"
 version = "0.1.0"
 dependencies = [
@@ -2962,8 +2976,8 @@ dependencies = [
  "futures-util",
  "png",
  "pulldown-cmark",
- "rand 0.9.5",
  "ratatui",
+ "ref-client",
  "ref-proto",
  "ref-sys",
  "serde",
