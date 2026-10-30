@@ -13,6 +13,9 @@ export interface TileSpec {
   padding: number
 }
 
+// Theme.qml's tileMinWidth, tileMinHeight, tileGap and tilePadding (the --tile-* variables).
+export const TILE_SPEC: TileSpec = { minWidth: 420, minHeight: 300, gap: 12, padding: 16 }
+
 export interface Rect {
   x: number
   y: number
