@@ -48,6 +48,23 @@ check_syntax_highlighting_module() {
   pass "KSyntaxHighlighting QML module"
 }
 
+# ref-gui uses the Basic style only (gui/cmake/PruneControlsStyles.cmake removes the others),
+# but still needs the Basic style and what QtQuick.Dialogs loads.
+check_controls_styles() {
+  local other
+  other="$(find "$PACKAGE" -path '*/QtQuick/Controls/*' -maxdepth 8 -type d -prune \
+    ! -name Basic ! -name impl -print | grep -E '/QtQuick/Controls/[^/]+$' || true)"
+  [[ -z "$other" ]] || fail "styles other than Basic are in the package: $other"
+
+  other="$(find "$PACKAGE" -iname '*QuickControls2*' ! -path '*/QtQuick/Controls/*' |
+    grep -E 'QuickControls2(Fusion|Imagine|Material|Universal|FluentWinUI3|Windows|MacOS|IOS)' || true)"
+  [[ -z "$other" ]] || fail "libraries of other styles are in the package: $other"
+
+  [[ -n "$(files -path '*/QtQuick/Controls/Basic/qmldir')" ]] || fail "the Basic style is missing"
+  [[ -n "$(files -path '*/QtQuick/Dialogs/qmldir')" ]] || fail "the QtQuick.Dialogs module is missing"
+  pass "Controls styles: Basic only"
+}
+
 # Runs the program the way a user would, with the environment of the build machine removed.
 smoke() {
   local program=$1 output status=0
@@ -81,6 +98,7 @@ verify_linux() {
   done
 
   check_syntax_highlighting_module
+  check_controls_styles
   smoke "$PACKAGE/ref-gui" xvfb-run -a "${clean_env[@]}"
 }
 
@@ -99,6 +117,7 @@ verify_macos() {
   pass "no references outside the bundle"
 
   check_syntax_highlighting_module
+  check_controls_styles
   smoke "$app/Contents/MacOS/ref-gui" env
 }
 
@@ -123,6 +142,7 @@ verify_windows() {
   pass "required files"
 
   check_syntax_highlighting_module
+  check_controls_styles
   smoke "$exe" env
 }
 
