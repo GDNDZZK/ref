@@ -95,3 +95,8 @@ if(REF_SERVER)
 	endif()
 	set_tests_properties(tst_app_smoke PROPERTIES ENVIRONMENT "QML_IMPORT_PATH=${qml_import_path}")
 endif()
+
+qt_add_executable(tst_session_list tst_session_list.cpp fake_backend.h)
+target_link_libraries(tst_session_list PRIVATE refgui_workspace Qt6::Test)
+refgui_configure_target(tst_session_list)
+add_test(NAME tst_session_list COMMAND tst_session_list)
