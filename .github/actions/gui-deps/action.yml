@@ -14,8 +14,9 @@ runs:
       shell: bash
       run: |
         sudo apt-get update
-        # Ninja, and the system libraries Qt's libraries and its xcb platform plugin load.
-        sudo apt-get install -y ninja-build xvfb libgl1-mesa-dev libglx-dev libegl1 libfontconfig1 \
+        # Ninja, dbus-daemon (the notification test starts its own session bus), and the system
+        # libraries Qt's libraries and its xcb platform plugin load.
+        sudo apt-get install -y ninja-build dbus xvfb libgl1-mesa-dev libglx-dev libegl1 libfontconfig1 \
           libdbus-1-3 libxkbcommon-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
           libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
           libxcb-xfixes0 libxcb-xinerama0 libxcb-xkb1
