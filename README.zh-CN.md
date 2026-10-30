@@ -20,7 +20,7 @@
 
 ## 特性
 
-- **服务器与界面分离。** `ref-server` 负责运行会话、智能体循环、LLM 调用、工具和权限，`ref`（终端）和 `ref-web`（浏览器）只负责显示。关掉窗口后会话继续运行，之后可以在任意终端或浏览器中重新打开，也可以两边同时打开。
+- **服务器与界面分离。** `ref-server` 负责运行会话、智能体循环、LLM 调用、工具和权限，`ref`（终端）、`ref-gui`（桌面窗口）和 `ref-web`（浏览器）只负责显示。关掉窗口后会话继续运行，之后可以在其中任何一个里重新打开，也可以同时在几个里打开。
 - **同时运行多个会话。** 分屏视图平铺显示所有后台会话。会话之间可以互发消息，`build` 智能体可以启动工作会话并给它们分派任务。
 - **兼容 opencode 配置。** 已有的 `opencode.json`（提供商、模型、智能体、权限、MCP 服务器和命令）无需修改即可使用。
 - **支持任意模型提供商。** 支持 Anthropic Messages、OpenAI Responses 和兼容 OpenAI 的 Chat Completions，并可通过模型变体设置推理强度或扩展思考。
@@ -39,8 +39,9 @@
 | 界面 | 压缩包 | 内容 |
 |---|---|---|
 | 终端（TUI） | `ref-tui-<version>-<platform>` | `ref`、`ref-server` |
+| 桌面（GUI） | `ref-gui-<version>-<platform>` | `ref-gui`（macOS 上是 `ref.app`）、它需要的库、`ref-server` |
 | 浏览器（Web） | `ref-web-<version>-<platform>` | `ref-web`、`ref-server` |
-| 全部 | `ref-all-<version>-<platform>` | `ref`、`ref-web`、`ref-server` |
+| 全部 | `ref-all-<version>-<platform>` | `ref`、`ref-gui`、`ref-web`、`ref-server` |
 
 | 系统 | `<platform>` 与文件类型 |
 |---|---|
@@ -58,11 +59,20 @@ tar -xzf ref-tui-*.tar.gz
 install -m 755 ref-tui-*/ref ref-tui-*/ref-server ~/.local/bin/
 ```
 
+GUI 压缩包里是一个必须保持完整的文件夹：`ref-gui` 在自己所在的文件夹中查找库、插件和 `ref-server`。把文件夹解压到你想长期保存的位置，从那里运行 `ref-gui`。
+
 所有界面共用同一个后端。如果装了多个界面，其中任何一个都会连接到已在运行的后端。
 
-- **Linux**：需要 glibc 2.35 或更新版本（Ubuntu 22.04、Debian 12、Fedora 36、RHEL 10、Arch 及更新版本）。NixOS 需要设置 `programs.nix-ld.enable = true`。
-- **macOS**：二进制文件没有签名。如果被 macOS 拦截，运行 `xattr -d com.apple.quarantine ref ref-web ref-server`（以你的压缩包中实际有的程序为准）。
-- **Windows**：需要安装 [Git for Windows](https://git-scm.com/download/win)，`bash` 工具使用其中的 Git Bash。
+- **Linux**：`ref`、`ref-web` 和 `ref-server` 需要 glibc 2.35 或更新版本（Ubuntu 22.04、Debian 12、Fedora 36、RHEL 10、Arch 及更新版本）。NixOS 需要设置 `programs.nix-ld.enable = true`。
+- **Linux 上的 GUI**：需要 glibc 2.35 和 GCC 13 的 C++ 运行库（带 `CXXABI_1.3.14` 的 `libstdc++`）：Ubuntu 24.04、Debian 13、Fedora 38、Arch 及更新版本。在 Ubuntu 22.04 和 Debian 12 上无法启动。GUI 运行在 X11 上，在 Wayland 会话中通过 XWayland 运行；没有 XWayland 的纯 Wayland 会话不受支持（Unverified）。需要这些系统库，桌面系统大多已经有：`libxcb-cursor0`、`libxkbcommon-x11-0`、`libxcb-icccm4`、`libxcb-image0`、`libxcb-keysyms1`、`libxcb-randr0`、`libxcb-render-util0`、`libxcb-shape0`、`libxcb-xkb1`、`libegl1`、`libfontconfig1` 和 `libdbus-1-3`（Debian 和 Ubuntu 的包名）。想把 `ref` 加入应用菜单，复制 desktop 文件和图标，并把程序链接到 `PATH` 中：
+
+  ```bash
+  install -Dm644 ref-gui.desktop ~/.local/share/applications/ref-gui.desktop
+  install -Dm644 ref.png ~/.local/share/icons/hicolor/256x256/apps/ref.png
+  ln -s "$PWD/ref-gui" ~/.local/bin/ref-gui
+  ```
+- **macOS**：程序没有用开发者证书签名（`ref.app` 带有 ad-hoc 签名）。如果被 macOS 拦截，运行 `xattr -dr com.apple.quarantine ref ref-web ref-server ref.app`（以你的压缩包中实际有的程序为准）。`ref.app` 可以移到 `/Applications`。
+- **Windows**：需要安装 [Git for Windows](https://git-scm.com/download/win)，`bash` 工具使用其中的 Git Bash。程序没有签名，第一次运行时 Windows 可能提示未知发布者。GUI 不需要安装：运行 `ref-gui.exe` 即可，Visual C++ 运行库已在文件夹中。
 
 每个发布版都附带 `SHA256SUMS` 文件，用于校验下载内容。
 
@@ -76,13 +86,15 @@ cargo build --release                    # 需要当前稳定版 Rust 和 C 编�
 ./target/release/ref
 ```
 
+GUI 用 CMake 和 Qt 单独构建，见[开发](docs/development.zh-CN.md#gui)。
+
 ## 快速开始
 
 1. 设置 API 密钥，例如 `export ANTHROPIC_API_KEY=...`。也可以使用 `OPENAI_API_KEY`、`DEEPSEEK_API_KEY` 和 `OPENROUTER_API_KEY`。其他提供商请参阅[配置](docs/configuration.zh-CN.md#提供商与模型)。
 2. 在项目目录中运行 `ref`。
 3. 输入任务并按 `enter`。
 
-想用浏览器，就在项目目录中运行 `ref-web`，它会打开页面。见 [Web 界面](docs/web.zh-CN.md)。
+想用桌面窗口，在项目目录中运行 `ref-gui`（[桌面 GUI](docs/gui.zh-CN.md)）；想用浏览器，运行 `ref-web`（[Web 界面](docs/web.zh-CN.md)），它会打开页面。
 
 终端界面的按键：
 
@@ -102,9 +114,14 @@ cargo build --release                    # 需要当前稳定版 Rust 和 C 编�
 | [使用 ref](docs/usage.zh-CN.md) | 会话、界面、提示输入、快捷键、斜杠命令、分屏视图、多会话协作 |
 | [配置](docs/configuration.zh-CN.md) | 全部配置项：提供商与模型、智能体、权限、延迟、压缩、MCP、命令、指令和技能 |
 | [工具](docs/tools.zh-CN.md) | 模型能做什么：文件工具、bash、webfetch、图片处理、上下文与跨会话工具 |
+| [桌面 GUI](docs/gui.zh-CN.md) | `ref-gui`：安装、启动、文件 |
 | [Web 界面](docs/web.zh-CN.md) | `ref-web`：启动、登录、向局域网开放、开发页面 |
-| [命令行](docs/cli.zh-CN.md) | `ref`、`ref-web` 和 `ref-server` 的选项、远程后端、文件和环境变量 |
+| [命令行](docs/cli.zh-CN.md) | `ref`、`ref-gui`、`ref-web` 和 `ref-server` 的选项、远程后端、文件和环境变量 |
 | [开发](docs/development.zh-CN.md) | 构建、测试、crate 结构、CI 和发布 |
+
+## 致谢
+
+GUI 改编自 LightBlueCube 的 qutie 早期版本。
 
 ## 许可证
 

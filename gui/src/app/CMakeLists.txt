@@ -55,3 +55,5 @@ find_package(KF6SyntaxHighlighting REQUIRED)
 target_link_libraries(ref-gui PRIVATE refgui_session refgui_cli refgui_icons Qt6::Gui Qt6::Qml Qt6::Quick)
 target_compile_definitions(ref-gui PRIVATE REF_GUI_VERSION="${PROJECT_VERSION}")
 refgui_configure_target(ref-gui)
+
+include(${PROJECT_SOURCE_DIR}/cmake/Deploy.cmake)
