@@ -51,6 +51,12 @@ void SessionDirectory::update(const proto::SessionInfo& info)
 	setLive(std::move(sessions));
 }
 
+void SessionDirectory::forgetPersisted(const QString& sessionId)
+{
+	m_persisted.removeIf([&sessionId](const proto::SessionInfo& info) { return info.id == sessionId; });
+	applyHistory();
+}
+
 QCoro::Task<> SessionDirectory::loadLive()
 {
 	const auto sessions = co_await m_backend.client().listSessions();
@@ -77,6 +83,11 @@ QCoro::Task<> SessionDirectory::loadHistory()
 	}
 	m_persisted = *sessions;
 	applyHistory();
+	if(!m_historyLoaded)
+	{
+		m_historyLoaded = true;
+		emit historyLoadedChanged();
+	}
 }
 
 void SessionDirectory::setLive(QList<proto::SessionInfo> sessions)

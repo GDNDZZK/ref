@@ -33,6 +33,8 @@ public:
 	// A tile watches (`foreground` false); the session in the window's main view is in the foreground.
 	QCoro::Task<refgui::client::Result<void>> attach(bool foreground);
 	QCoro::Task<refgui::client::Result<void>> detach();
+	// Stays shown but no longer in the foreground (split view). Precondition: attached.
+	QCoro::Task<refgui::client::Result<void>> background();
 
 	QAbstractItemModel* blocks();
 	// A reply is being produced or still being shown.
