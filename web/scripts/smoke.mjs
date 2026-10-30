@@ -81,6 +81,28 @@ async function checkHighlighting(page, problems) {
   if (light < 3) problems.push(`code blocks use only ${light} color(s): not highlighted`)
 }
 
+// Every message has a footer, and Undo takes the last prompt back into the input box.
+async function checkUndo(page, problems) {
+  const footers = page.locator('.meta')
+  if ((await footers.count()) === 0) problems.push('messages have no footer')
+  const prompts = page.locator('.meta.user')
+  const before = await prompts.count()
+  await page.fill('textarea', 'tools')
+  await page.keyboard.press('Enter')
+  await page.waitForSelector('button.send.busy', { timeout: WAIT_MS }).catch(() => {})
+  await page.waitForSelector('button.send:not(.busy)', { timeout: WAIT_MS })
+  await prompts.last().hover()
+  await prompts.last().locator('.action').click()
+  await page
+    .waitForFunction((count) => document.querySelectorAll('.meta.user').length === count, before, {
+      timeout: WAIT_MS,
+    })
+    .catch(() => problems.push('undo did not remove the message'))
+  const draft = await page.inputValue('textarea')
+  if (draft !== 'tools') problems.push(`undo put "${draft}" in the input box, not the prompt`)
+  await page.fill('textarea', '')
+}
+
 async function scenarios(page, problems) {
   await page.waitForTimeout(500)
   await page.screenshot({ path: join(OUT, 'empty.png') })
@@ -101,6 +123,7 @@ async function scenarios(page, problems) {
   }
 
   await checkScrolling(page, problems)
+  await checkUndo(page, problems)
   await page.click('button[aria-label="Switch to dark theme"]')
   await page.waitForTimeout(800)
   await page.screenshot({ path: join(OUT, 'dark.png') })
