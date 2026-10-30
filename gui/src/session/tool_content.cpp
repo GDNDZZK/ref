@@ -6,6 +6,7 @@
 #include <QHash>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLocale>
 #include <QRegularExpression>
 
 using namespace Qt::StringLiterals;
@@ -30,50 +31,211 @@ QString textArg(const QVariantMap& input, const QString& key)
 	return value.metaType().id() == QMetaType::QString ? value.toString() : QString();
 }
 
-QString bashDetail(const QVariantMap& input)
+// The input's value for `key` when the input has it as text, even empty text.
+std::optional<QString> optionalText(const QVariantMap& input, const QString& key)
 {
-	const QString command = textArg(input, u"command"_s);
-	return command.isEmpty() ? QString() : u"$ "_s + firstLine(command);
+	const QVariant value = input.value(key);
+	if(value.metaType().id() != QMetaType::QString)
+		return std::nullopt;
+	return value.toString();
 }
 
-QString editDetail(const QVariantMap& input)
+std::optional<QString> bashDetail(const QVariantMap& input)
 {
-	const QString path = textArg(input, u"path"_s);
+	const auto command = optionalText(input, u"command"_s);
+	if(!command)
+		return std::nullopt;
+	return u"$ "_s + firstLine(*command);
+}
+
+std::optional<QString> editDetail(const QVariantMap& input)
+{
+	const auto path = optionalText(input, u"path"_s);
+	if(!path)
+		return std::nullopt;
 	const qsizetype edits = listArg(input, u"edits"_s).size();
 	if(edits <= 1)
 		return path;
-	return QCoreApplication::translate("refgui::session::tool_content", "%1 (%2 edits)").arg(path).arg(edits);
+	return QCoreApplication::translate("refgui::session::tool_content", "%1 (%2 edits)").arg(*path).arg(edits);
 }
 
-QString grepDetail(const QVariantMap& input)
+std::optional<QString> grepDetail(const QVariantMap& input)
 {
-	const QString pattern = textArg(input, u"pattern"_s);
-	const QString path = textArg(input, u"path"_s);
-	if(path.isEmpty())
-		return u"\"%1\""_s.arg(pattern);
-	return QCoreApplication::translate("refgui::session::tool_content", "\"%1\" in %2").arg(pattern, path);
+	const auto pattern = optionalText(input, u"pattern"_s);
+	if(!pattern)
+		return std::nullopt;
+	const auto path = optionalText(input, u"path"_s);
+	if(!path)
+		return u"\"%1\""_s.arg(*pattern);
+	return QCoreApplication::translate("refgui::session::tool_content", "\"%1\" in %2").arg(*pattern, *path);
 }
 
-QString findDetail(const QVariantMap& input)
+std::optional<QString> findDetail(const QVariantMap& input)
 {
-	const QString pattern = textArg(input, u"pattern"_s);
-	return pattern.isEmpty() ? textArg(input, u"path"_s) : pattern;
+	const auto pattern = optionalText(input, u"pattern"_s);
+	return pattern ? pattern : optionalText(input, u"path"_s);
 }
 
-QString recipientDetail(const QVariantMap& input)
+std::optional<QString> webfetchDetail(const QVariantMap& input)
 {
-	const QString to = textArg(input, u"to"_s);
-	return to.isEmpty() ? QString() : u"\u2192 "_s + to;
+	const auto url = optionalText(input, u"url"_s);
+	if(!url)
+		return std::nullopt;
+	const auto format = optionalText(input, u"format"_s);
+	if(!format || *format == u"markdown"_s)
+		return url;
+	return u"%1 (%2)"_s.arg(*url, *format);
 }
 
-QString todoDetail(const QVariantMap& input)
+std::optional<QString> recipientDetail(const QVariantMap& input)
+{
+	const auto to = optionalText(input, u"to"_s);
+	if(!to)
+		return std::nullopt;
+	return u"\u2192 "_s + *to;
+}
+
+std::optional<QString> createSessionDetail(const QVariantMap& input)
+{
+	const auto name = optionalText(input, u"name"_s);
+	if(!name)
+		return std::nullopt;
+	return u"%1 (%2)"_s.arg(*name, optionalText(input, u"agent"_s).value_or(QString()));
+}
+
+std::optional<QString> todoDetail(const QVariantMap& input)
 {
 	const QVariantList items = todos(input);
 	if(items.isEmpty())
-		return {};
+		return std::nullopt;
 	const auto isDone = [](const QVariant& item) { return item.toMap().value(u"status"_s).toString() == u"completed"_s; };
 	const qsizetype done = std::count_if(items.cbegin(), items.cend(), isDone);
 	return QCoreApplication::translate("refgui::session::tool_content", "%1/%2 done").arg(done).arg(items.size());
+}
+
+// The detail the tool's own arguments give, if it has a rule for them.
+std::optional<QString> toolDetail(const QString& toolName, const QVariantMap& input)
+{
+	if(toolName == u"bash"_s)
+		return bashDetail(input);
+	if(toolName == u"read"_s || toolName == u"write"_s || toolName == u"delete"_s)
+		return optionalText(input, u"path"_s);
+	if(toolName == u"edit"_s)
+		return editDetail(input);
+	if(toolName == u"grep"_s)
+		return grepDetail(input);
+	if(toolName == u"find"_s)
+		return findDetail(input);
+	if(toolName == u"webfetch"_s)
+		return webfetchDetail(input);
+	if(toolName == u"send_message"_s)
+		return recipientDetail(input);
+	if(toolName == u"create_session"_s)
+		return createSessionDetail(input);
+	if(toolName == u"read_session"_s || toolName == u"close_session"_s || toolName == u"context_window"_s)
+		return optionalText(input, u"session"_s);
+	if(toolName == u"todo"_s)
+		return todoDetail(input);
+	return std::nullopt;
+}
+
+// Terminal columns of a character, roughly: 0 for combining marks, 2 for East Asian wide ones and
+// emoji, else 1. The terminal client cuts text by columns.
+int columnsOf(char32_t character)
+{
+	struct Range
+	{
+		char32_t first;
+		char32_t last;
+	};
+	static constexpr Range wide[] = {
+		{0x1100, 0x115F}, {0x2E80, 0xA4CF}, {0xAC00, 0xD7A3}, {0xF900, 0xFAFF}, {0xFE30, 0xFE6F},
+		{0xFF00, 0xFF60}, {0xFFE0, 0xFFE6}, {0x1F300, 0x1F64F}, {0x1F900, 0x1F9FF}, {0x20000, 0x3FFFD},
+	};
+	const QChar::Category category = QChar::category(character);
+	if(category == QChar::Mark_NonSpacing || category == QChar::Mark_Enclosing || category == QChar::Other_Format)
+		return 0;
+	const bool isWide = std::any_of(std::begin(wide), std::end(wide), [character](const Range& r) { return character >= r.first && character <= r.last; });
+	return isWide ? 2 : 1;
+}
+
+// `text` cut to at most `maxColumns` columns, ending in "…" when something was cut.
+QString truncated(const QString& text, int maxColumns)
+{
+	int columns = 0;
+	for(const char32_t character : text.toUcs4())
+		columns += columnsOf(character);
+	if(columns <= maxColumns)
+		return text;
+
+	QString result;
+	int used = 0;
+	for(const char32_t character : text.toUcs4())
+	{
+		const int width = columnsOf(character);
+		if(used + width > maxColumns - 1)
+			break;
+		used += width;
+		result += QString::fromUcs4(&character, 1);
+	}
+	return result + u'\u2026';
+}
+
+// Whitespace runs become one space, control characters go, nothing leads or trails.
+QString oneLine(const QString& text)
+{
+	QString result;
+	bool space = false;
+	for(const QChar character : text)
+	{
+		if(character.isSpace())
+		{
+			space = true;
+			continue;
+		}
+		if(character.category() == QChar::Other_Control)
+			continue;
+		if(space && !result.isEmpty())
+			result += u' ';
+		space = false;
+		result += character;
+	}
+	return result;
+}
+
+// The text of a plain argument (text, number, flag) for `key=value`, if it is one.
+std::optional<QString> plainValue(const QVariant& value)
+{
+	switch(value.metaType().id())
+	{
+	case QMetaType::QString:
+		return oneLine(value.toString());
+	case QMetaType::Bool:
+		return value.toBool() ? u"true"_s : u"false"_s;
+	case QMetaType::Int:
+	case QMetaType::UInt:
+	case QMetaType::LongLong:
+	case QMetaType::ULongLong:
+		return QString::number(value.toLongLong());
+	case QMetaType::Double:
+		return QString::number(value.toDouble(), 'g', QLocale::FloatingPointShortest);
+	default:
+		return std::nullopt;
+	}
+}
+
+// `key=value` of the first few plain arguments, for tools without a rule of their own.
+QString genericDetail(const QVariantMap& input)
+{
+	constexpr int MaxArguments = 3;
+	constexpr int MaxValueColumns = 40;
+	QStringList parts;
+	for(auto it = input.cbegin(); it != input.cend() && parts.size() < MaxArguments; ++it)
+	{
+		if(const auto value = plainValue(it.value()))
+			parts.append(u"%1=%2"_s.arg(it.key(), truncated(*value, MaxValueColumns)));
+	}
+	return parts.join(u' ');
 }
 
 // The row of a diff line.
@@ -152,27 +314,8 @@ QVariantList todos(const QVariantMap& input)
 
 QString detail(const QString& toolName, const QVariantMap& input)
 {
-	if(toolName == u"bash"_s)
-		return bashDetail(input);
-	if(toolName == u"read"_s || toolName == u"write"_s || toolName == u"delete"_s)
-		return textArg(input, u"path"_s);
-	if(toolName == u"edit"_s)
-		return editDetail(input);
-	if(toolName == u"grep"_s)
-		return grepDetail(input);
-	if(toolName == u"find"_s)
-		return findDetail(input);
-	if(toolName == u"webfetch"_s)
-		return textArg(input, u"url"_s);
-	if(toolName == u"send_message"_s)
-		return recipientDetail(input);
-	if(toolName == u"create_session"_s)
-		return textArg(input, u"name"_s);
-	if(toolName == u"read_session"_s || toolName == u"close_session"_s)
-		return textArg(input, u"session"_s);
-	if(toolName == u"todo"_s)
-		return todoDetail(input);
-	return {};
+	const auto own = toolDetail(toolName, input);
+	return own ? oneLine(*own) : genericDetail(input);
 }
 
 QVariantList listing(const QString& output)

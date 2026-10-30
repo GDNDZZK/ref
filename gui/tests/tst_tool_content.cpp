@@ -27,6 +27,8 @@ private slots:
 	void parsesObjectsOnly();
 	void todosSkipEmptyItemsAndUnknownStatuses();
 	void detailsTellCallsApart();
+	void detailsFollowTheTerminalClient();
+	void toolsWithoutARuleListTheirFirstArguments();
 	void listingReadsHeadersRowsAndNotes();
 	void listingWithoutHeaderStillGroups();
 	void listingIgnoresOtherText();
@@ -83,12 +85,40 @@ void TestToolContent::detailsTellCallsApart()
 	QCOMPARE(detail(u"webfetch"_s, map({{u"url"_s, u"https://example.com"_s}})), u"https://example.com"_s);
 	QCOMPARE(detail(u"send_message"_s, map({{u"to"_s, u"worker"_s}})), u"\u2192 worker"_s);
 	QCOMPARE(detail(u"send_message"_s, {}), QString());
-	QCOMPARE(detail(u"create_session"_s, map({{u"name"_s, u"worker"_s}})), u"worker"_s);
+	QCOMPARE(detail(u"create_session"_s, map({{u"name"_s, u"worker"_s}, {u"agent"_s, u"build"_s}})), u"worker (build)"_s);
+	QCOMPARE(detail(u"create_session"_s, map({{u"name"_s, u"worker"_s}})), u"worker ()"_s);
+	QCOMPARE(detail(u"webfetch"_s, map({{u"url"_s, u"https://e.com"_s}, {u"format"_s, u"text"_s}})), u"https://e.com (text)"_s);
+	QCOMPARE(detail(u"webfetch"_s, map({{u"url"_s, u"https://e.com"_s}, {u"format"_s, u"markdown"_s}})), u"https://e.com"_s);
 	QCOMPARE(detail(u"close_session"_s, map({{u"session"_s, u"worker"_s}})), u"worker"_s);
-	QCOMPARE(detail(u"unknown"_s, map({{u"path"_s, u"a"_s}})), QString());
+	QCOMPARE(detail(u"context_window"_s, map({{u"session"_s, u"worker"_s}})), u"worker"_s);
 	const auto todo = [](const QString& status) { return map({{u"content"_s, u"x"_s}, {u"status"_s, status}}); };
 	QCOMPARE(detail(u"todo"_s, map({{u"todos"_s, QVariantList{todo(u"completed"_s), todo(u"pending"_s)}}})), u"1/2 done"_s);
 	QCOMPARE(detail(u"todo"_s, {}), QString());
+}
+
+void TestToolContent::detailsFollowTheTerminalClient()
+{
+	// Text that is present counts even when empty; a missing key falls back to the generic detail.
+	QCOMPARE(detail(u"bash"_s, map({{u"command"_s, u""_s}})), u"$"_s);
+	QCOMPARE(detail(u"find"_s, map({{u"pattern"_s, u""_s}, {u"path"_s, u"src"_s}})), QString());
+	QCOMPARE(detail(u"read"_s, map({{u"file"_s, u"a.rs"_s}})), u"file=a.rs"_s);
+	// One line: white space runs collapse, control characters go, the ends are trimmed.
+	QCOMPARE(detail(u"bash"_s, map({{u"command"_s, u"a \t b\u0001c"_s}})), u"$ a bc"_s);
+	QCOMPARE(detail(u"read"_s, map({{u"path"_s, u"  a\u00a0 b "_s}})), u"a b"_s);
+}
+
+void TestToolContent::toolsWithoutARuleListTheirFirstArguments()
+{
+	const QVariantMap input = map({{u"a"_s, u"one  two"_s}, {u"b"_s, 7}, {u"c"_s, true}, {u"d"_s, u"never"_s}, {u"list"_s, QVariantList{1}}});
+	QCOMPARE(detail(u"mcp_files_list"_s, input), u"a=one two b=7 c=true"_s);
+	// Lists and objects are skipped and do not count.
+	QCOMPARE(detail(u"x"_s, map({{u"a"_s, QVariantList{1}}, {u"b"_s, 1.5}})), u"b=1.5"_s);
+	QCOMPARE(detail(u"x"_s, {}), QString());
+
+	// Values are cut at 40 terminal columns, wide characters count twice.
+	QCOMPARE(detail(u"x"_s, map({{u"a"_s, QString(45, u'z')}})), u"a="_s + QString(39, u'z') + u"\u2026"_s);
+	QCOMPARE(detail(u"x"_s, map({{u"a"_s, QString(20, u'\u4e2d')}})), u"a="_s + QString(20, u'\u4e2d'));
+	QCOMPARE(detail(u"x"_s, map({{u"a"_s, QString(21, u'\u4e2d')}})), u"a="_s + QString(19, u'\u4e2d') + u"\u2026"_s);
 }
 
 void TestToolContent::listingReadsHeadersRowsAndNotes()
