@@ -37,7 +37,7 @@ pub fn spec() -> ToolSpec {
         name: "webfetch",
         description: "Fetch a URL (http/https) and return its content. Read-only; no JavaScript is run.\n\
 - HTML becomes markdown (default), plain text (`format: \"text\"`) or stays HTML (`format: \"html\"`). For markdown and text, the main content is extracted when the page reads like an article (the header says so); pass `full_page: true` for everything (navigation, sidebars, comments).\n\
-- Markdown / plain text / JSON (pretty-printed) / XML are returned as text, RSS and Atom feeds as a list of entries, PDFs as their extracted text, images (png, jpeg, gif, webp up to 5MB) as an image you can see. Other binary files are not shown: download them with bash (`curl -L -o`).\n\
+- Markdown / plain text / JSON (pretty-printed) / XML are returned as text, RSS and Atom feeds as a list of entries, images (png, jpeg, gif, webp up to 5MB) as an image you can see. Other binary files (PDFs included) are not shown: download them with bash (`curl -L -o`).\n\
 - GitHub file pages return the raw file; GitHub issues and pull requests return the conversation (from the API).\n\
 - Output starts with a header (URL, Content-Type, Title, notes) and `---`. Content over 50KB or 2000 lines is cut; the full content is saved to a file you can `read` with offset/limit or `grep`.\n\
 - `timeout` in seconds (default 30, max 120). Responses over 20MB are refused. HTTP errors return the status and the start of the error page."
@@ -148,7 +148,6 @@ enum Kind {
     Html,
     Text,
     Json,
-    Pdf,
     Image(&'static str),
     Binary,
 }
@@ -160,7 +159,7 @@ fn classify(mime: &str, body: &[u8]) -> Kind {
         return Kind::Image(m);
     }
     if mime == "application/pdf" || body.starts_with(b"%PDF-") {
-        return Kind::Pdf;
+        return Kind::Binary;
     }
     if mime == "text/html" || mime == "application/xhtml+xml" || ((mime.is_empty() || mime == "application/octet-stream") && sniff_html) {
         return Kind::Html;
@@ -233,29 +232,6 @@ async fn convert(out: &mut Out, f: fetch::Fetched, format: Format, full_page: bo
             out.ext = if mime.contains("markdown") { "md" } else { "txt" };
             out.body = text;
         }
-        Kind::Pdf => {
-            let bytes = f.body;
-            let res = tokio::task::spawn_blocking(move || pdf_extract::extract_text_from_mem_by_pages(&bytes).map_err(|e| e.to_string())).await;
-            match res {
-                Ok(Ok(pages_text)) => {
-                    let pages = pages_text.len();
-                    let t: Vec<String> = pages_text.iter().enumerate().map(|(i, p)| format!("[Page {}]\n\n{}", i + 1, collapse_blank_lines(p))).collect();
-                    out.body = t.join("\n\n");
-                    out.notes.push(format!("Text extracted from a PDF ({pages} pages); layout, images and some symbols are lost."));
-                    if pages_text.iter().all(|p| p.trim().is_empty()) {
-                        out.notes.push("No text found: the PDF probably holds scanned images.".into());
-                    }
-                }
-                Ok(Err(e)) => {
-                    out.body = format!("Could not extract text from the PDF: {e}");
-                    out.error = true;
-                }
-                Err(_) => {
-                    out.body = "Could not extract text from the PDF (the extractor crashed on this file).".into();
-                    out.error = true;
-                }
-            }
-        }
         Kind::Image(m) => {
             if f.body.len() > MAX_IMAGE_BYTES {
                 out.body = format!("Image ({m}, {}) is larger than {} and was not attached. Download it with bash (curl -L -o) to inspect it.", util::human_bytes(f.body.len() as u64), util::human_bytes(MAX_IMAGE_BYTES as u64));
@@ -270,20 +246,6 @@ async fn convert(out: &mut Out, f: fetch::Fetched, format: Format, full_page: bo
         }
     }
     Ok(())
-}
-
-fn collapse_blank_lines(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut blank = 0;
-    for l in s.lines() {
-        let l = l.trim_end();
-        blank = if l.is_empty() { blank + 1 } else { 0 };
-        if blank <= 1 {
-            out.push_str(l);
-            out.push('\n');
-        }
-    }
-    out.trim().to_string()
 }
 
 async fn github_issue(owner: &str, repo: &str, number: u64, deadline: Instant, ctx: &ToolCtx) -> Result<(String, String)> {

@@ -26,7 +26,6 @@ dom_smoothie.workspace = true
 encoding_rs.workspace = true
 chardetng.workspace = true
 quick-xml.workspace = true
-pdf-extract.workspace = true
 
 [dev-dependencies]
 flate2 = "1"

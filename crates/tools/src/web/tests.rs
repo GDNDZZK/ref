@@ -225,40 +225,11 @@ async fn json_feeds_images_svg_and_binary() {
     assert!(!o.is_error && body(&o).starts_with("Binary content (application/octet-stream, 8 B) is not shown"), "{}", o.text);
 }
 
-/// A one-page PDF with "Hello PDF world" in Helvetica (xref offsets computed).
-fn tiny_pdf() -> Vec<u8> {
-    let content = "BT /F1 18 Tf 20 100 Td (Hello PDF world) Tj ET";
-    let objs = [
-        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
-        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
-        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".to_string(),
-        format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
-        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
-    ];
-    let mut out = b"%PDF-1.4\n".to_vec();
-    let mut offsets = Vec::new();
-    for (i, o) in objs.iter().enumerate() {
-        offsets.push(out.len());
-        out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
-    }
-    let xref = out.len();
-    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
-    for o in offsets {
-        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
-    }
-    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
-    out
-}
-
 #[tokio::test]
-async fn pdf_text_and_broken_pdf() {
-    let pdf = tiny_pdf();
-    let base = serve(move |r| if r.path == "/ok.pdf" { ok("application/pdf", pdf.clone()) } else { ok("application/pdf", "%PDF-1.4 garbage") }).await;
-    let o = fetch(json!({"url": format!("{base}/ok.pdf")})).await;
-    assert!(!o.is_error, "{}", o.text);
-    assert!(o.text.contains("Text extracted from a PDF (1 pages)") && body(&o).starts_with("[Page 1]") && body(&o).contains("Hello PDF world"), "{}", o.text);
-    let o = fetch(json!({"url": format!("{base}/bad.pdf")})).await;
-    assert!(o.is_error && body(&o).starts_with("Could not extract text from the PDF"), "{}", o.text);
+async fn pdf_is_binary() {
+    let base = serve(|_| ok("application/pdf", "%PDF-1.4 plain ascii")).await;
+    let o = fetch(json!({"url": format!("{base}/a.pdf")})).await;
+    assert!(!o.is_error && body(&o).starts_with("Binary content (application/pdf"), "{}", o.text);
 }
 
 #[tokio::test]
