@@ -78,7 +78,10 @@ ServerClient::~ServerClient()
 	failPending(ConnectionClosed);
 }
 
-QCoro::Task<Result<proto::HelloResult>> ServerClient::open(Endpoint endpoint, QString cwd, std::chrono::milliseconds timeout)
+QCoro::Task<Result<proto::HelloResult>> ServerClient::open(Endpoint endpoint,
+                                                           QString cwd,
+                                                           std::chrono::milliseconds timeout,
+                                                           QList<proto::NotifyFrame::Kind> notify)
 {
 	m_closeReason.clear();
 	const bool connected = co_await qCoro(m_socket).open(withToken(endpoint.url, endpoint.token), timeout);
@@ -89,7 +92,7 @@ QCoro::Task<Result<proto::HelloResult>> ServerClient::open(Endpoint endpoint, QS
 		co_return std::unexpected(reason);
 	}
 
-	const Result<QJsonObject> response = co_await request(proto::request::hello(ClientName, cwd, endpoint.token));
+	const Result<QJsonObject> response = co_await request(proto::request::hello(ClientName, cwd, endpoint.token, notify));
 	const Result<proto::HelloResult> hello = asResult(response, proto::parseHelloResult);
 	if(!hello)
 	{
@@ -129,9 +132,39 @@ QCoro::Task<Result<QList<proto::SessionInfo>>> ServerClient::listHistory(QString
 	co_return asResult(co_await request(proto::request::listHistory(cwd, limit)), proto::parseSessionsResult);
 }
 
-QCoro::Task<Result<proto::PromptResult>> ServerClient::prompt(QString sessionId, QString text)
+QCoro::Task<Result<proto::PromptResult>> ServerClient::prompt(QString sessionId, QString text, QList<proto::ImageData> images)
 {
-	co_return asResult(co_await request(proto::request::prompt(sessionId, text)), proto::parsePromptResult);
+	co_return asResult(co_await request(proto::request::prompt(sessionId, text, images)), proto::parsePromptResult);
+}
+
+QCoro::Task<Result<proto::RemovedPrompt>> ServerClient::removeQueued(QString sessionId, QString messageId)
+{
+	co_return asResult(co_await request(proto::request::removeQueued(sessionId, messageId)), proto::parseRemovedPromptResult);
+}
+
+QCoro::Task<Result<void>> ServerClient::shell(QString sessionId, QString command)
+{
+	co_return asVoidResult(co_await request(proto::request::shell(sessionId, command)));
+}
+
+QCoro::Task<Result<QStringList>> ServerClient::listFiles(QString cwd, QString query, int limit)
+{
+	co_return asResult(co_await request(proto::request::listFiles(cwd, query, limit)), proto::parseFilesResult);
+}
+
+QCoro::Task<Result<QString>> ServerClient::expandCommand(QString name, QString args, QString cwd)
+{
+	co_return asResult(co_await request(proto::request::expandCommand(name, args, cwd)), proto::parseExpandedCommandResult);
+}
+
+QCoro::Task<Result<void>> ServerClient::setNotify(QList<proto::NotifyFrame::Kind> kinds)
+{
+	co_return asVoidResult(co_await request(proto::request::setNotify(kinds)));
+}
+
+QCoro::Task<Result<void>> ServerClient::setFocus(bool focused, QStringList sessions)
+{
+	co_return asVoidResult(co_await request(proto::request::setFocus(focused, sessions)));
 }
 
 QCoro::Task<Result<void>> ServerClient::abort(QString sessionId)
