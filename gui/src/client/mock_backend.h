@@ -1,6 +1,7 @@
 #pragma once
 
 #include "client/endpoint.h"
+#include "client/stop_source.h"
 
 #include <QCoroTask>
 #include <QProcess>
@@ -18,8 +19,8 @@ namespace refgui::client
 class MockBackend
 {
 public:
-	// Starts the mock backend and waits for it to announce its port.
-	static QCoro::Task<std::expected<std::unique_ptr<MockBackend>, QString>> start(QString program);
+	// Starts the mock backend and waits for it to announce its port, or for `stop` to be requested.
+	static QCoro::Task<std::expected<std::unique_ptr<MockBackend>, QString>> start(QString program, StopSource& stop);
 
 	// The one JSON line the backend prints once it listens: {"port":N,"token":"..."}.
 	static std::expected<Endpoint, QString> parseAnnouncement(const QByteArray& line);

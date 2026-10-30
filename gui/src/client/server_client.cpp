@@ -7,7 +7,7 @@
 #include <QLoggingCategory>
 #include <QUrlQuery>
 
-#include <QCoroWebSocket>
+#include <utility>
 
 
 using namespace Qt::StringLiterals;
@@ -73,11 +73,45 @@ ServerClient::ServerClient(QObject* parent)
 	connect(&m_socket, &QWebSocket::textMessageReceived, this, &ServerClient::onTextMessage);
 	connect(&m_socket, &QWebSocket::disconnected, this, &ServerClient::onDisconnected);
 	connect(&m_heartbeatTimer, &QTimer::timeout, this, &ServerClient::onHeartbeat);
+
+	m_connectTimer.setSingleShot(true);
+	connect(&m_connectTimer, &QTimer::timeout, this, [this] { finishConnecting(false); });
+	connect(&m_socket, &QWebSocket::connected, this, [this] { finishConnecting(true); });
+	connect(&m_socket, &QWebSocket::errorOccurred, this, [this] { finishConnecting(false); });
 }
 
 ServerClient::~ServerClient()
 {
 	failPending(ConnectionClosed);
+}
+
+bool ServerClient::ConnectAwaiter::await_ready()
+{
+	client.m_connectOutcome = false;
+	client.m_socket.open(url);
+	// A URL the socket refuses ends here, before anything could be awaited.
+	return client.m_socket.state() == QAbstractSocket::UnconnectedState;
+}
+
+void ServerClient::ConnectAwaiter::await_suspend(std::coroutine_handle<> handle)
+{
+	client.m_connectWaiter = handle;
+	if(timeout.count() > 0)
+	{
+		client.m_connectTimer.start(timeout);
+	}
+}
+
+void ServerClient::finishConnecting(bool connected)
+{
+	const std::coroutine_handle<> waiter = std::exchange(m_connectWaiter, {});
+	if(!waiter)
+	{
+		return;
+	}
+	m_connectTimer.stop();
+	m_connectOutcome = connected;
+	waiter.resume();
 }
 
 QCoro::Task<Result<proto::HelloResult>> ServerClient::open(Endpoint endpoint,
@@ -86,7 +120,7 @@ QCoro::Task<Result<proto::HelloResult>> ServerClient::open(Endpoint endpoint,
                                                            QList<proto::NotifyFrame::Kind> notify)
 {
 	m_closeReason.clear();
-	const bool connected = co_await qCoro(m_socket).open(withToken(endpoint.url, endpoint.token), timeout);
+	const bool connected = co_await ConnectAwaiter{*this, withToken(endpoint.url, endpoint.token), timeout};
 	if(!connected)
 	{
 		const QString reason = m_socket.errorString();
@@ -158,6 +192,7 @@ void ServerClient::close()
 		m_socket.abort();
 	}
 	failPending(ConnectionClosed);
+	finishConnecting(false);
 }
 
 bool ServerClient::isOpen() const
@@ -377,6 +412,7 @@ void ServerClient::onDisconnected()
 	const QString reason = m_closeReason.isEmpty() ? (m_socket.closeReason().isEmpty() ? m_socket.errorString() : m_socket.closeReason()) : m_closeReason;
 	m_closeReason.clear();
 	failPending(ConnectionClosed);
+	finishConnecting(false);
 	emit closed(reason.isEmpty() ? ConnectionClosed : reason);
 }
 
