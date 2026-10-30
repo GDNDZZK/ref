@@ -1,0 +1,45 @@
+/* TEMPORARY: the area B constants of gui/docs/DESIGN.md ("New constants"), by the names the
+   generator gives them. Delete this file when Theme.qml / Motion.qml have them and `pnpm gen`
+   writes them into theme.css. */
+:root {
+  --warning: #b7791f;
+  --warning-surface: #fcf4e2;
+  --warning-border: #ecd29a;
+  --scrim: #00000040; /* Qt writes ARGB, CSS RGBA */
+  --sidebar-width: 264px;
+  --sidebar-padding: 8px;
+  --sidebar-header-height: 52px;
+  --sidebar-row-height: 56px;
+  --sidebar-history-row-height: 44px;
+  --sidebar-section-height: 28px;
+  --sidebar-footer-height: 44px;
+  --button-height: 34px;
+  --field-height: 38px;
+  --palette-width: 560px;
+  --palette-search-height: 52px;
+  --palette-row-height: 40px;
+  --dialog-width: 480px;
+  --dialog-width-wide: 640px;
+  --settings-width: 520px;
+  --dialog-header-height: 56px;
+  --dialog-footer-height: 64px;
+  --tile-min-width: 420px;
+  --tile-min-height: 300px;
+  --tile-gap: 12px;
+  --tile-padding: 16px;
+  --tile-header-height: 36px;
+  --toast-width: 320px;
+  --banner-height: 40px;
+  --motion-dialog-drop: 16px;
+  --motion-pop-scale: 0.97;
+  --motion-tile-enter-scale: 0.94;
+  --motion-tile-exit-scale: 0.96;
+  --motion-toast-slide: 24px;
+}
+
+:root[data-theme='dark'] {
+  --warning: #e6b450;
+  --warning-surface: #2b2417;
+  --warning-border: #5a4723;
+  --scrim: #0000008c;
+}

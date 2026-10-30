@@ -18,11 +18,12 @@ export type Label = { key: string } | { text: string }
 
 export type CommandSource = 'builtin' | 'config' | 'skill' | 'mcp'
 
-export type CommandGroup = 'session' | 'model' | 'view' | 'peers' | 'app' | 'custom'
+export type CommandGroup = 'session' | 'view' | 'help' | 'custom'
 
+// What the command takes after its name, e.g. "NAME" or "[DIR]" (brackets: optional). Shown in lists
+// and as the placeholder of the palette's argument prompt.
 export interface CommandArgs {
-  usage: string // e.g. "NAME", "[DIR]"
-  placeholder: Label // the palette's argument prompt
+  usage: string
 }
 
 export interface Command {

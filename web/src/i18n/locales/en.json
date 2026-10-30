@@ -29,13 +29,244 @@
     "connecting": "Connecting…",
     "reconnecting": "Connection lost. Reconnecting…",
     "closed": "Disconnected: {reason}",
-    "backendTooOld": "The backend is older than this interface. Restart it to continue.",
     "noDirectory": "No working directory: open this page through ref-web, or set ?cwd= (or VITE_REF_CWD) when connecting to ref-server directly."
   },
   "message": {
     "from": "from {name}"
   },
   "command": {
-    "unavailable": "This command is not available right now."
+    "group": {
+      "session": "Session",
+      "view": "View",
+      "help": "Help",
+      "custom": "Custom commands"
+    },
+    "unavailable": "This command is not available right now.",
+    "noSuchSession": "No live session named \"{name}\".",
+    "new": {
+      "title": "New session"
+    },
+    "new-in": {
+      "title": "New session in another folder…"
+    },
+    "sessions": {
+      "title": "Switch session (live + history)"
+    },
+    "models": {
+      "title": "Switch model (this session only)"
+    },
+    "agents": {
+      "title": "Switch agent"
+    },
+    "variant": {
+      "title": "Set or cycle model variant"
+    },
+    "compact": {
+      "title": "Compact the conversation"
+    },
+    "undo": {
+      "title": "Undo last prompt"
+    },
+    "rename": {
+      "title": "Rename the session"
+    },
+    "cd": {
+      "title": "Change this session's working directory"
+    },
+    "close": {
+      "title": "Close this session"
+    },
+    "close-session": {
+      "title": "Close live sessions (picker, or by name / id)"
+    },
+    "peers": {
+      "title": "List other live sessions you can message"
+    },
+    "peers-name": {
+      "title": "Show or set this session's peer name"
+    },
+    "peers-inbox": {
+      "title": "Messages received from other sessions"
+    },
+    "peers-outbox": {
+      "title": "Messages sent to other sessions and their status"
+    },
+    "export": {
+      "title": "Export transcript as markdown"
+    },
+    "copy": {
+      "title": "Copy last assistant message (raw)"
+    },
+    "thinking": {
+      "title": "Toggle expanded thinking"
+    },
+    "details": {
+      "title": "Toggle expanded tool details"
+    },
+    "watch": {
+      "title": "Split view of background sessions"
+    },
+    "sidebar": {
+      "title": "Toggle sidebar"
+    },
+    "zoom": {
+      "title": "Zoom in on the focused tile"
+    },
+    "mcp": {
+      "title": "MCP servers: status, errors and tools"
+    },
+    "help": {
+      "title": "Keybindings and commands"
+    },
+    "palette": {
+      "title": "Command palette"
+    },
+    "settings": {
+      "title": "Settings"
+    }
+  },
+  "palette": {
+    "placeholder": "Type a command…",
+    "noMatch": "No matching commands"
+  },
+  "sidebar": {
+    "newSession": "New session",
+    "newSessionIn": "New session in another folder…",
+    "running": "Running",
+    "history": "History",
+    "searchHistory": "Search history",
+    "clearSearch": "Clear search",
+    "noMatch": "No matching sessions",
+    "loading": "Loading…",
+    "needsPermission": "Needs permission",
+    "compacting": "Compacting",
+    "retrying": "Retrying",
+    "rename": "Rename",
+    "close": "Close",
+    "delete": "Delete",
+    "hide": "Hide sidebar",
+    "show": "Show sidebar",
+    "mcp": "MCP",
+    "settings": "Settings",
+    "sessions": "Sessions"
+  },
+  "split": {
+    "empty": "No background sessions",
+    "zoom": "Zoom in on this tile",
+    "unzoom": "Back to the split view",
+    "enter": "Split view",
+    "leave": "Leave split view"
+  },
+  "time": {
+    "justNow": "just now",
+    "minutesAgo": "{n}m ago",
+    "hoursAgo": "{n}h ago",
+    "yesterday": "Yesterday"
+  },
+  "dialog": {
+    "cancel": "Cancel",
+    "close": "Close",
+    "models": {
+      "title": "Switch model",
+      "search": "Search models",
+      "context": "{size} context",
+      "reasoning": "reasoning",
+      "images": "images"
+    },
+    "agents": {
+      "title": "Switch agent",
+      "search": "Search agents"
+    },
+    "variants": {
+      "title": "Model variant",
+      "default": "default"
+    },
+    "sessions": {
+      "title": "Sessions",
+      "search": "Search sessions"
+    },
+    "mcp": {
+      "title": "MCP servers",
+      "empty": "No MCP servers configured",
+      "refresh": "Refresh",
+      "connected": "connected",
+      "connecting": "connecting",
+      "failed": "failed",
+      "disabled": "disabled",
+      "tools": "{count} tools"
+    },
+    "peers": {
+      "title": "Peers",
+      "peers": "Peers",
+      "name": "Name",
+      "inbox": "Inbox",
+      "outbox": "Outbox",
+      "setName": "Set name",
+      "loading": "Loading…",
+      "nameLabel": "Peer name"
+    },
+    "help": {
+      "title": "Help",
+      "keyboard": "Keyboard",
+      "commands": "Commands",
+      "writing": "Writing",
+      "send": "Send",
+      "newLine": "New line",
+      "interrupt": "Interrupt the session",
+      "cycleAgent": "Next / previous agent",
+      "history": "Previous prompts",
+      "pasteImage": "Paste an image",
+      "moveFocus": "Move the tile focus"
+    },
+    "export": {
+      "title": "Export transcript",
+      "body": "Write the conversation as markdown to this path on the backend's machine.",
+      "action": "Export",
+      "done": "Exported to {path}"
+    },
+    "cd": {
+      "title": "Change directory",
+      "action": "Change"
+    },
+    "newSession": {
+      "title": "New session",
+      "action": "Start"
+    },
+    "path": {
+      "label": "Directory path",
+      "noDirs": "No sub-directories"
+    },
+    "closeSession": {
+      "title": "Close session?",
+      "body": "This session is still working. Closing it stops the work; the conversation stays in history.",
+      "action": "Close"
+    },
+    "deleteHistory": {
+      "title": "Delete session?",
+      "body": "\"{title}\" will be removed from history for good.",
+      "action": "Delete"
+    },
+    "rename": {
+      "title": "Rename session",
+      "action": "Rename",
+      "label": "Session name"
+    },
+    "settings": {
+      "title": "Settings",
+      "theme": "Theme",
+      "language": "Language",
+      "system": "System",
+      "light": "Light",
+      "dark": "Dark",
+      "english": "English",
+      "chinese": "简体中文",
+      "about": "ref-web {version} · backend {backend}"
+    }
+  },
+  "banner": {
+    "backendTooOld": "The backend is older than this app (protocol {have}, needs {need}).",
+    "restart": "Restart backend",
+    "busyHint": "Close or finish running sessions first",
+    "restarting": "Restarting the backend…"
   }
 }
