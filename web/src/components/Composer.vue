@@ -11,9 +11,9 @@ import type { SessionComposer } from '../composer/sessionComposer.ts'
 import { TAG_ROW_HEIGHT, TEXT_TAG_GAP, THUMB_GAP, THUMB_SIZE } from '../composer/metrics.ts'
 import type { ChatSession } from '../model/chatSession.ts'
 import { useCommandsStore } from '../stores/commands.ts'
-import { useComposerStore } from '../stores/composer.ts'
 import { useConnectionStore } from '../stores/connection.ts'
 import { useNoticesStore } from '../stores/notices.ts'
+import { useWorkspaceStore } from '../stores/workspace.ts'
 import { components } from '../theme/generated/components.ts'
 import AttachmentStrip from './AttachmentStrip.vue'
 import CompletionPopup from './CompletionPopup.vue'
@@ -31,7 +31,7 @@ const SEND_BUTTON_SIZE = 32
 const { t } = useI18n()
 const connection = useConnectionStore()
 const commands = useCommandsStore()
-const composerStore = useComposerStore()
+const workspace = useWorkspaceStore()
 const notices = useNoticesStore()
 
 const draft = computed(() => props.composer.draft)
@@ -166,7 +166,7 @@ function onLineBreak(event: KeyboardEvent, area: HTMLTextAreaElement): boolean {
 function onTab(event: KeyboardEvent): boolean {
   const hasModifier = event.ctrlKey || event.metaKey || event.altKey
   if (event.key !== 'Tab' || hasModifier) return false
-  void composerStore.cycleAgent(props.session.id, event.shiftKey ? -1 : 1)
+  workspace.cycleAgent(props.session.id, event.shiftKey ? -1 : 1).catch(notices.pushError)
   return true
 }
 
@@ -270,7 +270,7 @@ function onDrop(event: DragEvent): void {
 // --- tags ---------------------------------------------------------------------------------
 
 function openDialog(commandId: 'agents' | 'models'): void {
-  commands.run(commandId, { sessionId: props.session.id }).catch((error) => notices.pushError(error))
+  commands.run(commandId, '', props.session.id).catch((error) => notices.pushError(error))
 }
 
 // The prompt comes back into the box: the caret goes there, ready to edit.
@@ -343,7 +343,7 @@ defineExpose({ focus: () => input.value?.focus() })
             :shell="draft.shell"
             @agent-clicked="openDialog('agents')"
             @model-clicked="openDialog('models')"
-            @variant-clicked="composerStore.cycleVariant(session.id)"
+            @variant-clicked="workspace.setVariant(session.id, '').catch(notices.pushError)"
           />
           <span class="hint" :class="{ shown: interruptHint }">{{ t('composer.interruptHint') }}</span>
           <SendButton :busy="session.busy" :can-send="canSend" @click="onSendButton" />

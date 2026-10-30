@@ -57,6 +57,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const tileRects = shallowRef<readonly Rect[]>([]) // where the split view drew the tiles, for moving the focus
 
   const chats = new Map<string, ChatSession>()
+  const goneListeners = new Set<(id: string) => void>()
   const attachingTiles = new Set<string>() // tiles whose first Attach has not been answered yet
 
   const current = computed(() => (currentId.value ? chat(currentId.value) : undefined))
@@ -122,11 +123,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   // A session is gone (closed here, by another client, or by the backend). When it was the open one,
   // the oldest live session takes over; when none is left, a new one starts in the same directory.
+  // `listener` hears of every session that is gone (closed here or elsewhere), to drop what hangs on it.
+  function onGone(listener: (id: string) => void): void {
+    goneListeners.add(listener)
+  }
+
   async function discard(id: string, lastCwd: string): Promise<void> {
     const known = chats.has(id) || live.value.some((session) => session.id === id)
     if (!known) return // already handled: the closed event and the response of Close both end here
     chats.get(id)?.dispose()
     chats.delete(id)
+    for (const listener of goneListeners) listener(id)
     live.value = live.value.filter((session) => session.id !== id)
     void refreshHistory()
     if (zoomedId.value === id) zoomedId.value = undefined
@@ -358,6 +365,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     cwd,
     chat,
     infoOf,
+    onGone,
     openSession,
     newSession,
     closeSession,

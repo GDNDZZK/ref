@@ -8,6 +8,7 @@ import { useConnectionStore } from '../../stores/connection.ts'
 import { useDialogsStore } from '../../stores/dialogs.ts'
 import { useSettingsStore } from '../../stores/settings.ts'
 import ModalDialog from '../ModalDialog.vue'
+import NotificationSettings from '../NotificationSettings.vue'
 import Segmented from '../Segmented.vue'
 
 const PROTOCOL_WITHOUT_FIELD = 1
@@ -56,6 +57,7 @@ const about = computed(() =>
       <span>{{ t('dialog.settings.language') }}</span>
       <Segmented v-model="language" :options="languages" :label="t('dialog.settings.language')" />
     </div>
+    <NotificationSettings class="notifications" />
     <p class="about">{{ about }}</p>
   </ModalDialog>
 </template>
@@ -70,6 +72,10 @@ const about = computed(() =>
 }
 
 .row + .row {
+  border-top: 1px solid var(--border);
+}
+
+.notifications {
   border-top: 1px solid var(--border);
 }
 
