@@ -464,8 +464,9 @@ every interaction is frequent. Icons come from `assets/icons` through the icon p
   Palette order: blue, purple, green, orange, red. Same names as the TUI.
 - Labels: agent name; model display name (the provider is in the tooltip); variant name, or "default" when the
   model has variants and none is chosen. The variant pill is absent when the model has no variants.
-- Clicking the agent or model pill opens the agent / model dialog (signals `agentClicked`, `modelClicked`);
-  clicking the variant pill cycles it. Tooltips: "Agent (Tab)", "Model", "Variant" (each with the shortcut the command registry reports).
+- Clicking the agent or model pill runs the `agents` / `models` command (their dialogs); clicking the variant pill
+  opens the variants dialog. Cycling the variant is the `variant` command. Tooltips: "Agent (Tab)", "Model: <provider> /
+  <model id>", "Variant".
 - Morph when a value changes (Tab, Shift+Tab, the variant command, a dialog, `/model`, another client): the pill width
   follows its content, `Motion.standard` / OutExpo. The old label fades out while moving up `labelSlide`
   (new, 6) and the new one fades in from `labelSlide` below, both `Motion.standard` / OutExpo. The icon color
@@ -494,7 +495,7 @@ every interaction is frequent. Icons come from `assets/icons` through the icon p
   Background `Theme.surface`, border `Theme.border`, radius `Theme.radius`, inner padding `popupPadding` (new, 4).
 - Rows `popupRowHeight` (new, 36), radius `Theme.radiusSmall`, at most `popupMaxRows` (new, 8) visible, then it
   scrolls. Height = rows x 36 + 2 x 4 and follows the result count with `Motion.standard` / OutExpo.
-- Row, `/`: label `/name` (`Theme.text`, `Theme.fontSize`); an alias that matched shows as `/alias -> /name`;
+- Row, `/`: label `/name` (`Theme.text`, `Theme.fontSize`);
   right-aligned description in `Theme.smallFontSize`, `Theme.textMuted`, elided; the command's shortcut, when
   it has one, after it. A `slash` icon (16, `Theme.textMuted`) leads each row.
 - Row, `@`: leading `file` or `folder` icon (16); the path in `Theme.monoFamily` at `Theme.codeFontSize`, the
@@ -554,8 +555,9 @@ every interaction is frequent. Icons come from `assets/icons` through the icon p
 - Esc while the session is busy and no list is open shows "Press Esc again to interrupt" in the tag row, right of
   the pills and left of the send button: `Theme.smallFontSize`, `Theme.text`, fading in with `Motion.quick`.
   A second Esc inside `Motion.interruptWindow` (new, 1500 ms) interrupts; after the window the hint fades out
-  and the next Esc arms it again. A delayed tool call is cancelled by a single Esc (as in the TUI); that rule
-  belongs to the transcript area, the composer only forwards Esc.
+  and the next Esc arms it again. A delayed tool call is cancelled by a single Esc (as in the TUI): the
+  composer does it when the session's newest tool is delayed and no list is open and shell mode is off, and says so in a toast.
+  Pending permission questions take Esc (deny) before the composer does; see the conversation area.
 
 ### Keys in the box
 
@@ -589,9 +591,13 @@ reason from the platform layer is the tooltip). The switches still work: they ch
 - `Theme.qml`: `shellSurface`, `shellBorder`, `agentOrange`, `agentBlue`, `agentPurple`, `agentRed`,
   `agentYellow`, `agentGreen`, `agentCyan`, function `agentColor(spec, index)`.
 - `Motion.qml`: `interruptWindow` (1500).
-- Composer.qml literals: `tagRowHeight` 32, `chipHeight` 28, `chipPaddingX` 10, `chipIconGap` 6, `chipGap` 4,
-  `labelSlide` 6, `thumbSize` 56, `thumbGap` 8, `attachmentRemoveSize` 18, `popupGap` 8, `popupPadding` 4,
-  `popupRowHeight` 36, `popupMaxRows` 8, `queueGap` 8, `queueRowHeight` 32, `queueMaxRows` 4.
+- Component literals, at the top of each file: `Composer.qml` `padding` 8, `maxInputHeight` 220, `tagRowHeight` 32,
+  `textGap` 4, `queueGap` 8, `inputLeftInset` 4, `thumbRowGap` 8; `ComposerChip.qml` `chipHeight` 28, `paddingX` 10,
+  `iconGap` 6, `labelSlide` 6, `maxWidth` 240; `ComposerTags.qml` `chipGap` 4, `hintGap` 12; `AttachmentStrip.qml`
+  `thumbSize` 56, `thumbGap` 8, `attachmentRemoveSize` 18, `removeBackgroundOpacity` 0.85, `enterScale` 0.8;
+  `CompletionPopup.qml` `popupGap` 8, `popupPadding` 4, `popupRowHeight` 36, `popupMaxRows` 8; `QueueStrip.qml`
+  `queueRowHeight` 32, `queueMaxRows` 4, `removingOpacity` 0.5; `NotificationSettingsSection.qml` `rowHeight` 40,
+  `subIndent` 24, `disabledOpacity` 0.4.
 
 ---
 

@@ -36,6 +36,7 @@ qt_add_executable(tst_composer_model tst_composer_model.cpp coro_test.h fake_bac
 target_link_libraries(tst_composer_model PRIVATE refgui_composer Qt6::Test)
 refgui_configure_target(tst_composer_model)
 add_test(NAME tst_composer_model COMMAND tst_composer_model)
+set_tests_properties(tst_composer_model PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen") # the clipboard needs a platform
 
 qt_add_executable(tst_launcher tst_launcher.cpp coro_test.h)
 target_link_libraries(tst_launcher PRIVATE refgui_client Qt6::Test)
