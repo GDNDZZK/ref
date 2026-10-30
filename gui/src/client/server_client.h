@@ -61,6 +61,8 @@ public:
 	QCoro::Task<Result<QList<proto::SessionInfo>>> watchAll(bool enabled);
 	QCoro::Task<Result<proto::PromptResult>> prompt(QString sessionId, QString text, QList<proto::ImageData> images = {});
 	QCoro::Task<Result<proto::RemovedPrompt>> removeQueued(QString sessionId, QString messageId);
+	// Without `messageId` the last human prompt. The answer holds its text and pictures.
+	QCoro::Task<Result<proto::RemovedPrompt>> undo(QString sessionId, std::optional<QString> messageId);
 	QCoro::Task<Result<void>> shell(QString sessionId, QString command);
 	// Paths below `cwd` matching `query` (best first); directories end with "/".
 	QCoro::Task<Result<QStringList>> listFiles(QString cwd, QString query, int limit);

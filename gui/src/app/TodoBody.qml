@@ -92,6 +92,7 @@ Column {
 			}
 
 			Text {
+				textFormat: Text.PlainText
 				anchors { left: marker.right; leftMargin: 8; right: parent.right; rightMargin: body.leftPad; verticalCenter: parent.verticalCenter }
 				text: row.modelData.content
 				elide: Text.ElideRight

@@ -136,6 +136,7 @@ Block {
 						color: Theme.accent
 					}
 					Text {
+						textFormat: Text.PlainText
 						anchors.verticalCenter: parent.verticalCenter
 						text: qsTr("Context compacted")
 						color: Theme.accent
@@ -143,6 +144,7 @@ Block {
 						font.bold: true
 					}
 					Text {
+						textFormat: Text.PlainText
 						anchors.verticalCenter: parent.verticalCenter
 						text: Format.clock(block.time)
 						color: Theme.textMuted
@@ -204,6 +206,7 @@ Block {
 		}
 
 		Text {
+			textFormat: Text.PlainText
 			visible: block.isCompaction && block.contextStart
 			width: parent.width
 			horizontalAlignment: Text.AlignHCenter
@@ -254,6 +257,7 @@ Block {
 					color: block.markerColor
 				}
 				Text {
+					textFormat: Text.PlainText
 					anchors.verticalCenter: parent.verticalCenter
 					text: block.markerTitle
 					color: block.markerColor

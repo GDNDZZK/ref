@@ -49,6 +49,7 @@ Block {
 				}
 
 				Text {
+					textFormat: Text.PlainText
 					id: title
 					anchors.verticalCenter: parent.verticalCenter
 					text: block.streaming ? qsTr("Thinking") : qsTr("Thought")
