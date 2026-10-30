@@ -39,7 +39,7 @@ pub(crate) fn validate_cwd(cwd: &str) -> Result<String, String> {
     if !p.is_absolute() {
         return Err(format!("Working directory must be absolute: {cwd}"));
     }
-    let c = std::fs::canonicalize(p).map_err(|_| format!("Directory does not exist: {cwd}"))?;
+    let c = dunce::canonicalize(p).map_err(|_| format!("Directory does not exist: {cwd}"))?;
     if !c.is_dir() {
         return Err(format!("Not a directory: {cwd}"));
     }

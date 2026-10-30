@@ -26,8 +26,6 @@ export type Activity = 'idle' | 'thinking' | 'running' | 'waiting_permission' | 
 export interface ChatSessionDeps {
   api(): RefApi
   notify(level: 'info' | 'warn' | 'error', text: string): void
-  // The session reported an error. The workspace decides whether it becomes a toast.
-  sessionError(session: ChatSession, text: string): void
   // Undo took a prompt back: the composer of the session gets its text and pictures.
   draftRestored(sessionId: string, text: string, images: NamedImage[]): void
 }
@@ -164,6 +162,16 @@ export class ChatSession {
     this.showHistory()
   }
 
+  // Moves between foreground and watching. While the window already receives the session's events
+  // (split view subscribes to all of them) the history stays as it is; otherwise it is loaded again.
+  async setForeground(foreground: boolean): Promise<void> {
+    const receivingEvents = this.state.loaded && this.state.attachment !== 'detached'
+    if (!receivingEvents) return this.attach(foreground)
+    if (foreground) await this.deps.api().attach(this.id, true)
+    else await this.deps.api().detach(this.id)
+    this.state.attachment = foreground ? 'foreground' : 'watching'
+  }
+
   async detach(): Promise<void> {
     await this.deps.api().detach(this.id)
     this.state.attachment = 'detached'
@@ -180,7 +188,6 @@ export class ChatSession {
 
   applyEvent(event: SessionEvent): void {
     if (!this.state.loaded) return // before the snapshot: the snapshot already has it
-    if (event.type === 'error') this.deps.sessionError(this, event.text)
     this.transcript.apply(event, performance.now())
     this.publish()
   }

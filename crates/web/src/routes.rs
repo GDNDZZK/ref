@@ -15,6 +15,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 
 use crate::assets::{self, Asset};
 use crate::guard::{self, HostPolicy, SessionCookie, constant_time_eq, text_response};
@@ -45,6 +46,9 @@ pub struct AppState {
     pub upstream: Upstream,
     pub heartbeat: tunnel::Heartbeat,
     pub shutdown: CancellationToken,
+    /// Open tunnels: an upgraded connection is no longer tracked by the HTTP server, so
+    /// shutdown waits for them here to let each tab receive its close frame.
+    pub tunnels: TaskTracker,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {

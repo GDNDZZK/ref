@@ -49,8 +49,8 @@ export const useNotificationsStore = defineStore('notifications', () => {
     reportError: (error) => notices.pushError(error),
   })
 
-  // Sessions on screen now. TODO(split view): all tiles, once the workspace has them.
-  const visibleSessionIds = computed(() => (workspace.currentId ? [workspace.currentId] : []))
+  // Sessions on screen now: the open one, or the tiles of the split view.
+  const visibleSessionIds = computed(() => workspace.visibleSessionIds)
 
   // The browser's permission can change in its site settings while the page is open.
   function foregroundChanged(): void {
