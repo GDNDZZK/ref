@@ -316,18 +316,21 @@ async fn run_loop(hub: &Arc<Hub>, s: &Arc<Session>, cancel: &CancellationToken) 
             (st.info.context.used, st.info.context.auto)
         };
         let compactable = crate::compaction::compactable_upto(&s.lock().messages).is_some();
-        if prep.cfg.compaction.auto && auto > 0 && used >= auto && compactable {
-            if let Err(e) = crate::compaction::compact(hub, s, &prep, cancel).await {
-                if cancel.is_cancelled() {
-                    return Outcome::Aborted;
-                }
-                hub.emit(
-                    &s.id,
-                    SessionEvent::Error {
-                        text: format!("Automatic compaction failed: {e}"),
-                    },
-                );
+        if prep.cfg.compaction.auto
+            && auto > 0
+            && used >= auto
+            && compactable
+            && let Err(e) = crate::compaction::compact(hub, s, &prep, cancel).await
+        {
+            if cancel.is_cancelled() {
+                return Outcome::Aborted;
             }
+            hub.emit(
+                &s.id,
+                SessionEvent::Error {
+                    text: format!("Automatic compaction failed: {e}"),
+                },
+            );
         }
         let prep = if s.lock().system.is_none() {
             match prepare(hub, s, cancel).await {

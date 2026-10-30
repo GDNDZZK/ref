@@ -152,15 +152,15 @@ pub fn fmt_duration(secs: i64) -> String {
 
 /// Expand a leading `~/`.
 pub fn expand_home(p: &str, home: Option<&Path>) -> std::path::PathBuf {
-    if p == "~" {
-        if let Some(h) = home {
-            return h.to_path_buf();
-        }
+    if p == "~"
+        && let Some(h) = home
+    {
+        return h.to_path_buf();
     }
-    if let Some(rest) = p.strip_prefix("~/") {
-        if let Some(h) = home {
-            return h.join(rest);
-        }
+    if let Some(rest) = p.strip_prefix("~/")
+        && let Some(h) = home
+    {
+        return h.join(rest);
     }
     std::path::PathBuf::from(p)
 }

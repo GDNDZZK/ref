@@ -33,6 +33,9 @@ pub struct ToolSpec {
     pub parameters: Value,
 }
 
+/// Receives live tool output chunks (see [`ToolCtx::on_output`]).
+pub type OutputSink = Arc<dyn Fn(&str) + Send + Sync>;
+
 /// Execution context for one tool call.
 #[derive(Clone)]
 pub struct ToolCtx {
@@ -42,7 +45,7 @@ pub struct ToolCtx {
     pub store: Arc<HashStore>,
     pub cancel: CancellationToken,
     /// Optional live-output sink (bash streams combined stdout/stderr chunks here).
-    pub on_output: Option<Arc<dyn Fn(&str) + Send + Sync>>,
+    pub on_output: Option<OutputSink>,
     /// Downscale / recompress images for the model (`images.auto_resize`, see [`imgfit`]).
     pub resize_images: bool,
 }

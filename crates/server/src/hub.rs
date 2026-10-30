@@ -180,6 +180,9 @@ pub fn idle_action(timeout: i64, ever_connected: bool, connected: usize) -> Idle
     }
 }
 
+/// A cached file list for `files_cache`, with the time it was built.
+pub type FileList = (Instant, Arc<Vec<String>>);
+
 #[derive(Default)]
 struct IdleState {
     ever: bool,
@@ -198,7 +201,7 @@ pub struct Hub {
     dirty: Arc<Notify>,
     idle: Mutex<IdleState>,
     pub peer_msgs: Mutex<HashMap<String, PeerRecord>>,
-    pub files_cache: Mutex<HashMap<String, (Instant, Arc<Vec<String>>)>>,
+    pub files_cache: Mutex<HashMap<String, FileList>>,
     pub instance: Mutex<Option<InstanceInfo>>,
 }
 

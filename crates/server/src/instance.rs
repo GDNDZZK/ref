@@ -44,7 +44,7 @@ pub fn list_instances(dir: &Path) -> Vec<InstanceInfo> {
             Err(_) => {}
         }
     }
-    out.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+    out.sort_by_key(|i| std::cmp::Reverse(i.started_at));
     out
 }
 

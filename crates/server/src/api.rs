@@ -68,7 +68,7 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             if let Some(c) = cwd {
                 list.retain(|i| i.cwd == c);
             }
-            list.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+            list.sort_by_key(|i| std::cmp::Reverse(i.updated_at));
             list.truncate(limit);
             Ok(json!({ "sessions": list }))
         }

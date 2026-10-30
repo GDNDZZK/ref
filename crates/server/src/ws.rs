@@ -133,6 +133,8 @@ async fn handle_conn(hub: Arc<Hub>, stream: TcpStream, peer: SocketAddr, auth: A
     let _ = stream.set_nodelay(true);
     let mut query_ok = false;
     let auth2 = auth.clone();
+    // The handshake callback signature (and its large `ErrorResponse`) is fixed by tungstenite.
+    #[allow(clippy::result_large_err)]
     let cb = |req: &HsRequest, resp: HsResponse| -> Result<HsResponse, ErrorResponse> {
         match query_token(&req.uri().to_string()) {
             Some(t) if !auth2.token.is_empty() && t != auth2.token => {

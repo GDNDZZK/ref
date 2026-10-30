@@ -2255,11 +2255,9 @@ fn frame_interval_animates_background_sessions_in_sidebar() {
     assert_eq!(app.frame_interval(), None);
     // Session dialog lists it too.
     app.open_sessions();
-    app.dialog.as_mut().map(|d| {
-        if let crate::ui::dialog::Dialog::List(l) = d {
-            l.opened -= std::time::Duration::from_secs(1)
-        }
-    });
+    if let Some(crate::ui::dialog::Dialog::List(l)) = app.dialog.as_mut() {
+        l.opened -= std::time::Duration::from_secs(1)
+    }
     assert!(app.frame_interval().is_some());
     app.dialog = None;
     // Split view: an unattached busy tile animates.

@@ -411,6 +411,9 @@ impl ToolState {
     }
 }
 
+// `Part::Tool` is much larger than the other variants. Boxing it would change every place that
+// builds or matches parts for a small memory saving, so the size difference is accepted.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Part {
@@ -781,6 +784,8 @@ pub enum Request {
 // Server -> Client
 // ---------------------------------------------------------------------------
 
+// `ServerFrame::Event` carries a whole `SessionEvent`; frames are short-lived, so it stays unboxed.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ServerFrame {

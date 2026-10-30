@@ -243,14 +243,14 @@ impl Config {
 
     /// Default model for an agent: agent.model -> top-level model -> first configured model.
     pub fn default_model_for(&self, agent: &str) -> Option<ModelRef> {
-        if let Some(a) = self.agents.get(agent) {
-            if let Some(m) = &a.model {
-                let mut m = m.clone();
-                if m.variant.is_none() {
-                    m.variant = a.variant.clone();
-                }
-                return Some(m);
+        if let Some(a) = self.agents.get(agent)
+            && let Some(m) = &a.model
+        {
+            let mut m = m.clone();
+            if m.variant.is_none() {
+                m.variant = a.variant.clone();
             }
+            return Some(m);
         }
         if let Some(m) = &self.model {
             return Some(m.clone());
@@ -272,10 +272,10 @@ impl Config {
     /// `subject` is the matchable string for the call (bash command, file path, or "").
     pub fn permission_for(&self, agent: &str, tool: &str, subject: &str) -> Action {
         let mut act = self.permission.evaluate(tool, subject);
-        if let Some(a) = self.agents.get(agent) {
-            if let Some(x) = a.permission.evaluate(tool, subject) {
-                act = Some(x);
-            }
+        if let Some(a) = self.agents.get(agent)
+            && let Some(x) = a.permission.evaluate(tool, subject)
+        {
+            act = Some(x);
         }
         act.unwrap_or(Action::Allow)
     }
@@ -302,10 +302,10 @@ impl Config {
             }
             r
         }
-        if let Some(a) = self.agents.get(agent) {
-            if let Some(d) = find(&a.delay, tool) {
-                return d;
-            }
+        if let Some(a) = self.agents.get(agent)
+            && let Some(d) = find(&a.delay, tool)
+        {
+            return d;
         }
         find(&self.delay, tool).unwrap_or(0.0)
     }
