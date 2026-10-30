@@ -115,6 +115,17 @@ struct Fixture
 				fake.fail(request, promptError);
 			}
 		}
+		else if(op == u"shell"_s)
+		{
+			if(shellError.isEmpty())
+			{
+				fake.respond(request, {});
+			}
+			else
+			{
+				fake.fail(request, shellError);
+			}
+		}
 		else if(op == u"list_files"_s)
 		{
 			fake.respond(request, {{u"files"_s, QJsonArray::fromStringList(files)}});
@@ -167,6 +178,7 @@ struct Fixture
 	ComposerModel composer;
 	QStringList files;
 	QString promptError;
+	QString shellError;
 	std::optional<QString> expansion;
 	QJsonObject removal;
 };
@@ -182,6 +194,7 @@ private slots:
 	void sendsThePromptAndEmptiesTheDraft();
 	void failedPromptComesBack();
 	void bangStartsShellMode();
+	void failedShellLineComesBackAsShellLine();
 	void shellLineIsSentAsShell();
 	void historyWalksBackAndForth();
 	void historyKeepsShellLines();
@@ -257,6 +270,21 @@ void TestComposerModel::bangStartsShellMode()
 
 	f.type(u"a!"_s);
 	QVERIFY(!f.composer.shellMode());
+}
+
+void TestComposerModel::failedShellLineComesBackAsShellLine()
+{
+	Fixture f;
+	f.shellError = u"no shell"_s;
+	QSignalSpy failed(&f.composer, &ComposerModel::failed);
+	f.type(u"!"_s);
+	f.type(u"ls -l"_s);
+
+	QVERIFY(f.composer.submit());
+
+	QTRY_COMPARE(failed.count(), 1);
+	QVERIFY(f.composer.shellMode());
+	QCOMPARE(f.composer.text(), u"ls -l"_s);
 }
 
 void TestComposerModel::shellLineIsSentAsShell()
