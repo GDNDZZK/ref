@@ -6,13 +6,13 @@
 #include <QTest>
 
 using namespace Qt::StringLiterals;
-namespace openai = qutie::llm::openai;
-using qutie::llm::AssistantMessage;
-using qutie::llm::ReasoningDelta;
-using qutie::llm::StopReason;
-using qutie::llm::StreamEvent;
-using qutie::llm::TextDelta;
-using qutie::llm::UserMessage;
+namespace openai = refgui::llm::openai;
+using refgui::llm::AssistantMessage;
+using refgui::llm::ReasoningDelta;
+using refgui::llm::StopReason;
+using refgui::llm::StreamEvent;
+using refgui::llm::TextDelta;
+using refgui::llm::UserMessage;
 
 namespace
 {

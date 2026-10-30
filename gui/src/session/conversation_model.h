@@ -1,12 +1,13 @@
+// Adapted from an early version of qutie by LightBlueCube
 #pragma once
 
-#include "ui/fence_splitter.h"
+#include "session/fence_splitter.h"
 
 #include <QAbstractListModel>
 
 #include <optional>
 
-namespace qutie::ui
+namespace refgui::session
 {
 
 // The conversation as a flat list of blocks in display order.
@@ -97,4 +98,4 @@ private:
 	FenceSplitter m_splitter; // splits the current text segment
 };
 
-} // namespace qutie::ui
+} // namespace refgui::session

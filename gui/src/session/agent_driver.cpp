@@ -1,7 +1,7 @@
-#include "ui/agent_driver.h"
+#include "session/agent_driver.h"
 
 #include "llm/config.h"
-#include "ui/conversation_model.h"
+#include "session/conversation_model.h"
 
 #include <chrono>
 #include <utility>
@@ -9,7 +9,7 @@
 using namespace Qt::StringLiterals;
 using namespace std::chrono_literals;
 
-namespace qutie::ui
+namespace refgui::session
 {
 namespace
 {
@@ -150,4 +150,4 @@ void AgentDriver::endTurn(const std::optional<QString>& notice)
 	emit runningChanged();
 }
 
-} // namespace qutie::ui
+} // namespace refgui::session

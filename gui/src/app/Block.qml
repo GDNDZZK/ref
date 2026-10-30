@@ -1,5 +1,6 @@
+// Adapted from an early version of qutie by LightBlueCube
 import QtQuick
-import Qutie
+import RefGui
 
 // Base of every ChatView row: centers its content in the reading column.
 //

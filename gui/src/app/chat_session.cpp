@@ -1,20 +1,21 @@
+// Adapted from an early version of qutie by LightBlueCube
 #include "app/chat_session.h"
 
 #include "llm/config.h"
-#include "ui/agent_driver.h"
-#include "ui/mock_driver.h"
+#include "session/agent_driver.h"
+#include "session/mock_driver.h"
 
 namespace
 {
 
-std::unique_ptr<qutie::ui::Driver> makeDriver(ChatSession::Replies replies, qutie::ui::ConversationModel& model)
+std::unique_ptr<refgui::session::Driver> makeDriver(ChatSession::Replies replies, refgui::session::ConversationModel& model)
 {
 	switch(replies)
 	{
 	case ChatSession::Replies::FromModel:
-		return std::make_unique<qutie::ui::AgentDriver>(model, qutie::llm::configPath());
+		return std::make_unique<refgui::session::AgentDriver>(model, refgui::llm::configPath());
 	case ChatSession::Replies::FromMock:
-		return std::make_unique<qutie::ui::MockDriver>(model);
+		return std::make_unique<refgui::session::MockDriver>(model);
 	}
 	Q_UNREACHABLE_RETURN(nullptr);
 }
@@ -26,7 +27,7 @@ ChatSession::ChatSession(Replies replies, QObject* parent)
 	, m_model(this)
 	, m_driver(makeDriver(replies, m_model))
 {
-	connect(m_driver.get(), &qutie::ui::Driver::runningChanged, this, &ChatSession::busyChanged);
+	connect(m_driver.get(), &refgui::session::Driver::runningChanged, this, &ChatSession::busyChanged);
 }
 
 ChatSession::~ChatSession() = default;

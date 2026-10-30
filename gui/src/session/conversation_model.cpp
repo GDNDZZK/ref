@@ -1,10 +1,11 @@
-#include "ui/conversation_model.h"
+// Adapted from an early version of qutie by LightBlueCube
+#include "session/conversation_model.h"
 
 #include <utility>
 
 using namespace Qt::StringLiterals;
 
-namespace qutie::ui
+namespace refgui::session
 {
 
 int ConversationModel::rowCount(const QModelIndex& parent) const
@@ -197,4 +198,4 @@ void ConversationModel::notifyChanged(qsizetype row, const QList<int>& roles)
 	emit dataChanged(changed, changed, roles);
 }
 
-} // namespace qutie::ui
+} // namespace refgui::session

@@ -6,7 +6,7 @@
 #include <expected>
 #include <variant>
 
-namespace qutie::llm
+namespace refgui::llm
 {
 
 struct UserMessage
@@ -66,4 +66,4 @@ struct Endpoint
 	QString apiKey{}; // sent as a bearer token unless empty
 };
 
-} // namespace qutie::llm
+} // namespace refgui::llm

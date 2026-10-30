@@ -8,11 +8,11 @@ namespace
 // Feeds `chunks` in order and renders every event as "type|data" for easy comparison.
 QByteArrayList parseChunks(const QByteArrayList& chunks)
 {
-	qutie::sse::Parser parser;
+	refgui::sse::Parser parser;
 	QByteArrayList rendered;
 	for(const QByteArray& chunk : chunks)
 	{
-		for(const qutie::sse::Event& event : parser.feed(chunk))
+		for(const refgui::sse::Event& event : parser.feed(chunk))
 		{
 			rendered.append(event.type + '|' + event.data);
 		}

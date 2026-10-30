@@ -2,8 +2,8 @@
 
 #include "llm/message.h"
 #include "llm/openai_client.h"
-#include "ui/driver.h"
-#include "ui/stream_pacer.h"
+#include "session/driver.h"
+#include "session/stream_pacer.h"
 
 #include <QCoroTask>
 #include <QList>
@@ -13,7 +13,7 @@
 #include <optional>
 #include <stop_token>
 
-namespace qutie::ui
+namespace refgui::session
 {
 
 class ConversationModel;
@@ -62,4 +62,4 @@ private:
 	std::optional<QString> m_notice; // how the reply ended, for the user; once the stream ended
 };
 
-} // namespace qutie::ui
+} // namespace refgui::session

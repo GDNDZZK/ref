@@ -6,7 +6,7 @@
 
 #include <expected>
 
-namespace qutie::jsonc
+namespace refgui::jsonc
 {
 
 struct ParseError
@@ -20,4 +20,4 @@ struct ParseError
 // The top-level value must be an object or an array (QJsonDocument restriction).
 std::expected<QJsonDocument, ParseError> parse(QByteArrayView source);
 
-} // namespace qutie::jsonc
+} // namespace refgui::jsonc

@@ -1,4 +1,5 @@
-#include "ui/stream_pacer.h"
+// Adapted from an early version of qutie by LightBlueCube
+#include "session/stream_pacer.h"
 
 #include <QTextBoundaryFinder>
 
@@ -7,7 +8,7 @@
 
 using namespace std::chrono_literals;
 
-namespace qutie::ui
+namespace refgui::session
 {
 namespace
 {
@@ -132,4 +133,4 @@ void StreamPacer::accrue(Clock::time_point now)
 	m_credit = std::min(m_credit + m_rate * elapsed.count(), static_cast<double>(m_backlog));
 }
 
-} // namespace qutie::ui
+} // namespace refgui::session

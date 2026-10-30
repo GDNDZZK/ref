@@ -1,7 +1,8 @@
+// Adapted from an early version of qutie by LightBlueCube
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQml.Models
-import Qutie
+import RefGui
 
 // The conversation, one delegate per block, centered in a reading column.
 //

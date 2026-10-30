@@ -1,3 +1,4 @@
+// Adapted from an early version of qutie by LightBlueCube
 #include "app/chat_session.h"
 
 #include <QCommandLineParser>
@@ -11,7 +12,8 @@ using namespace Qt::StringLiterals;
 int main(int argc, char* argv[])
 {
 	QGuiApplication app(argc, argv);
-	QGuiApplication::setApplicationName(u"qutie"_s);
+	QGuiApplication::setApplicationName(u"ref-gui"_s);
+	QGuiApplication::setApplicationVersion(QString::fromLatin1(REF_GUI_VERSION));
 
 	QCommandLineParser parser;
 	parser.addHelpOption();
@@ -25,7 +27,7 @@ int main(int argc, char* argv[])
 	QQmlApplicationEngine engine;
 	QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] { QCoreApplication::exit(EXIT_FAILURE); }, Qt::QueuedConnection);
 	engine.setInitialProperties({{u"session"_s, QVariant::fromValue(&session)}});
-	engine.loadFromModule("Qutie", "Main");
+	engine.loadFromModule("RefGui", "Main");
 
 	return QGuiApplication::exec();
 }

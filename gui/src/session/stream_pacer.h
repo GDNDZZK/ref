@@ -1,3 +1,4 @@
+// Adapted from an early version of qutie by LightBlueCube
 #pragma once
 
 #include "llm/message.h"
@@ -7,7 +8,7 @@
 #include <chrono>
 #include <optional>
 
-namespace qutie::ui
+namespace refgui::session
 {
 
 // Evens out the pace of a streamed reply. Servers send text in bursts: a token at a
@@ -46,4 +47,4 @@ private:
 	double m_credit = 0; // code units due but not taken yet
 };
 
-} // namespace qutie::ui
+} // namespace refgui::session

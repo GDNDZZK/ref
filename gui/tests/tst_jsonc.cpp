@@ -2,7 +2,7 @@
 
 #include <QTest>
 
-using qutie::jsonc::parse;
+using refgui::jsonc::parse;
 
 class TestJsonc : public QObject
 {

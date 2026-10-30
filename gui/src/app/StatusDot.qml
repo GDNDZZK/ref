@@ -1,5 +1,6 @@
+// Adapted from an early version of qutie by LightBlueCube
 import QtQuick
-import Qutie
+import RefGui
 
 // Tool status: pulses while running, plays a Flourish in its final color on finishing.
 Item {

@@ -18,7 +18,7 @@
 //   }
 //
 // Errors are messages for the user.
-namespace qutie::llm
+namespace refgui::llm
 {
 
 // $XDG_CONFIG_HOME/qutie/config.jsonc, by default ~/.config/qutie/config.jsonc.
@@ -27,4 +27,4 @@ QString configPath();
 std::expected<Endpoint, QString> loadEndpoint(const QString& path);
 std::expected<Endpoint, QString> parseEndpoint(QByteArrayView source);
 
-} // namespace qutie::llm
+} // namespace refgui::llm

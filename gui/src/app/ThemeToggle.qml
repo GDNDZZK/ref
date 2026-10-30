@@ -1,5 +1,6 @@
+// Adapted from an early version of qutie by LightBlueCube
 import QtQuick
-import Qutie
+import RefGui
 
 // Sun / moon toggle. Rays retract and a "bite" slides over the disc to form the moon.
 // Switching themes is rare, so this morph may overshoot.

@@ -18,7 +18,7 @@ private slots:
 
 void TestConfig::parsesEndpoint()
 {
-	const auto endpoint = qutie::llm::parseEndpoint(R"({
+	const auto endpoint = refgui::llm::parseEndpoint(R"({
 		// local server
 		"endpoint": {
 			"baseUrl": "http://localhost:8080/v1",
@@ -35,7 +35,7 @@ void TestConfig::parsesEndpoint()
 
 void TestConfig::apiKeyIsOptional()
 {
-	const auto endpoint = qutie::llm::parseEndpoint(R"({"endpoint": {"baseUrl": "https://api.example.com/v1", "model": "m"}})"_ba);
+	const auto endpoint = refgui::llm::parseEndpoint(R"({"endpoint": {"baseUrl": "https://api.example.com/v1", "model": "m"}})"_ba);
 
 	QVERIFY(endpoint.has_value());
 	QVERIFY(endpoint->apiKey.isEmpty());
@@ -57,7 +57,7 @@ void TestConfig::rejects()
 	QFETCH(QByteArray, source);
 	QFETCH(QString, mentions);
 
-	const auto endpoint = qutie::llm::parseEndpoint(source);
+	const auto endpoint = refgui::llm::parseEndpoint(source);
 
 	QVERIFY(!endpoint.has_value());
 	QVERIFY2(endpoint.error().contains(mentions), qPrintable(endpoint.error()));
@@ -66,7 +66,7 @@ void TestConfig::rejects()
 void TestConfig::reportsMissingFile()
 {
 	const QString path = u"/nonexistent/qutie/config.jsonc"_s;
-	const auto endpoint = qutie::llm::loadEndpoint(path);
+	const auto endpoint = refgui::llm::loadEndpoint(path);
 
 	QVERIFY(!endpoint.has_value());
 	QVERIFY(endpoint.error().contains(path));

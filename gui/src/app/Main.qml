@@ -1,5 +1,6 @@
+// Adapted from an early version of qutie by LightBlueCube
 import QtQuick
-import Qutie
+import RefGui
 
 Window {
 	id: window
@@ -9,7 +10,7 @@ Window {
 	minimumWidth: 520
 	minimumHeight: 420
 	visible: true
-	title: "qutie"
+	title: "ref"
 	color: Theme.background
 
 	// Swaps the theme under a snapshot of the old look and fades the snapshot out,

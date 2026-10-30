@@ -6,7 +6,7 @@
 #include <coroutine>
 #include <memory>
 
-namespace qutie::http
+namespace refgui::http
 {
 namespace
 {
@@ -124,4 +124,4 @@ QCoro::Task<std::expected<void, Error>> postStreaming(QNetworkAccessManager& net
 	co_return std::expected<void, Error>();
 }
 
-} // namespace qutie::http
+} // namespace refgui::http

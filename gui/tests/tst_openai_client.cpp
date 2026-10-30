@@ -8,13 +8,13 @@
 #include <QTest>
 
 using namespace Qt::StringLiterals;
-using qutie::llm::Completion;
-using qutie::llm::Endpoint;
-using qutie::llm::OpenAiClient;
-using qutie::llm::StopReason;
-using qutie::llm::StreamEvent;
-using qutie::llm::TextDelta;
-using qutie::llm::UserMessage;
+using refgui::llm::Completion;
+using refgui::llm::Endpoint;
+using refgui::llm::OpenAiClient;
+using refgui::llm::StopReason;
+using refgui::llm::StreamEvent;
+using refgui::llm::TextDelta;
+using refgui::llm::UserMessage;
 
 namespace
 {

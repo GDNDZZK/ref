@@ -8,7 +8,7 @@
 
 using namespace Qt::StringLiterals;
 
-namespace qutie::llm
+namespace refgui::llm
 {
 namespace
 {
@@ -79,4 +79,4 @@ std::expected<Endpoint, QString> parseEndpoint(QByteArrayView source)
 	return Endpoint{.baseUrl = url, .model = model, .apiKey = endpoint.value("apiKey"_L1).toString()};
 }
 
-} // namespace qutie::llm
+} // namespace refgui::llm

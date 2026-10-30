@@ -1,21 +1,28 @@
+# Adapted from an early version of qutie by LightBlueCube
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Shared compile settings for every qutie-owned target (GCC / Clang).
+# Shared compile settings for every ref-gui target (GCC, Clang and MSVC).
 
-option(QUTIE_SANITIZE "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+option(REFGUI_SANITIZE "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 
-function(qutie_configure_target target)
-	target_compile_options(${target} PRIVATE
-		-Wall
-		-Wextra
-		-Wpedantic
-		-Wshadow
-		-Wnon-virtual-dtor
-		-Woverloaded-virtual
-		-Wold-style-cast
-		-Wcast-qual
-		-Wconversion
-		-Wimplicit-fallthrough
-	)
+function(refgui_configure_target target)
+	if(MSVC)
+		# /permissive- and /Zc:__cplusplus make MSVC follow the standard (Qt needs the latter
+		# to see the real C++ version); /utf-8 reads sources and string literals as UTF-8.
+		target_compile_options(${target} PRIVATE /W4 /permissive- /Zc:__cplusplus /utf-8 /EHsc)
+	else()
+		target_compile_options(${target} PRIVATE
+			-Wall
+			-Wextra
+			-Wpedantic
+			-Wshadow
+			-Wnon-virtual-dtor
+			-Woverloaded-virtual
+			-Wold-style-cast
+			-Wcast-qual
+			-Wconversion
+			-Wimplicit-fallthrough
+		)
+	endif()
 	# Override locally with `cmake --compile-no-warning-as-error`.
 	set_target_properties(${target} PROPERTIES COMPILE_WARNING_AS_ERROR ON)
 
@@ -26,7 +33,7 @@ function(qutie_configure_target target)
 		QT_NO_CAST_FROM_ASCII
 	)
 
-	if(QUTIE_SANITIZE)
+	if(REFGUI_SANITIZE AND NOT MSVC)
 		target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
 		target_link_options(${target} PRIVATE -fsanitize=address,undefined)
 	endif()

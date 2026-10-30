@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <utility>
 
-namespace qutie::sse
+namespace refgui::sse
 {
 namespace
 {
@@ -117,4 +117,4 @@ void Parser::dispatch(QList<Event>& completed)
 	completed.append(Event{std::move(type), std::move(data)});
 }
 
-} // namespace qutie::sse
+} // namespace refgui::sse

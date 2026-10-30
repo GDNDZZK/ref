@@ -1,6 +1,7 @@
+// Adapted from an early version of qutie by LightBlueCube
 import QtQuick
 import QtQuick.Controls.Basic
-import Qutie
+import RefGui
 
 // Message input. Enter sends, Shift+Enter inserts a line break.
 // While a reply is running, the send button turns into stop.
@@ -47,7 +48,7 @@ Rectangle {
 
 		TextArea {
 			id: input
-			placeholderText: qsTr("Message qutie")
+			placeholderText: qsTr("Message ref")
 			placeholderTextColor: Theme.textMuted
 			wrapMode: TextArea.Wrap
 			color: Theme.text

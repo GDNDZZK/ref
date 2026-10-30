@@ -12,7 +12,7 @@
 
 class QNetworkAccessManager;
 
-namespace qutie::http
+namespace refgui::http
 {
 
 struct Error
@@ -33,4 +33,4 @@ struct Error
 QCoro::Task<std::expected<void, Error>> postStreaming(QNetworkAccessManager& network, QNetworkRequest request, QByteArray body,
 	std::function<void(QByteArrayView chunk)> onChunk, std::stop_token stop);
 
-} // namespace qutie::http
+} // namespace refgui::http
