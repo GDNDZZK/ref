@@ -39,6 +39,6 @@ qt_add_qml_module(ref-gui
 # CodeBlock.qml imports org.kde.syntaxhighlighting at run time; nothing links against it.
 find_package(KF6SyntaxHighlighting REQUIRED)
 
-target_link_libraries(ref-gui PRIVATE refgui_session refgui_llm Qt6::Gui Qt6::Qml Qt6::Quick)
+target_link_libraries(ref-gui PRIVATE refgui_session Qt6::Gui Qt6::Qml Qt6::Quick)
 target_compile_definitions(ref-gui PRIVATE REF_GUI_VERSION="${PROJECT_VERSION}")
 refgui_configure_target(ref-gui)

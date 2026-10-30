@@ -27,6 +27,7 @@ public:
 		Q_ASSERT(listening);
 		connect(&m_server, &QWebSocketServer::newConnection, this, [this] {
 			m_socket = m_server.nextPendingConnection();
+			m_socket->setParent(this); // freed with the fake, also when a client reconnects
 			connect(m_socket, &QWebSocket::textMessageReceived, this, &FakeBackend::onText);
 			emit accepted();
 		});

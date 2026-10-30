@@ -2,12 +2,14 @@
 #include "app/chat_session.h"
 
 #include <QCommandLineParser>
+#include <QDir>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 
 #include <cstdlib>
 
 using namespace Qt::StringLiterals;
+using refgui::client::Backend;
 
 int main(int argc, char* argv[])
 {
@@ -17,12 +19,14 @@ int main(int argc, char* argv[])
 
 	QCommandLineParser parser;
 	parser.addHelpOption();
-	const QCommandLineOption mockOption(u"mock"_s, u"Reply with canned scripts instead of the configured model."_s);
+	const QCommandLineOption mockOption(u"mock"_s, u"Talk to a private `ref-server --mock` with canned scripts."_s);
 	parser.addOption(mockOption);
 	parser.process(app);
 
+	const Backend::Source source = parser.isSet(mockOption) ? Backend::Source(Backend::Mode::Mock{}) : Backend::Source(Backend::Mode::Shared{});
+
 	// Outlives the engine, whose window refers to it.
-	ChatSession session(parser.isSet(mockOption) ? ChatSession::Replies::FromMock : ChatSession::Replies::FromModel);
+	ChatSession session(source, QDir::currentPath(), {});
 
 	QQmlApplicationEngine engine;
 	QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] { QCoreApplication::exit(EXIT_FAILURE); }, Qt::QueuedConnection);

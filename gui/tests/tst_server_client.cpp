@@ -117,8 +117,12 @@ private slots:
 
 		std::optional<Result<proto::PromptResult>> first;
 		std::optional<Result<proto::PromptResult>> second;
-		[&]() -> QCoro::Task<> { first = co_await client.prompt(u"ses_1"_s, u"one"_s); }();
-		[&]() -> QCoro::Task<> { second = co_await client.prompt(u"ses_1"_s, u"two"_s); }();
+		// Parameters, not captures: the closure of a coroutine lambda is gone after the call.
+		const auto prompt = [](ServerClient& to, QString text, std::optional<Result<proto::PromptResult>>& out) -> QCoro::Task<> {
+			out = co_await to.prompt(u"ses_1"_s, std::move(text));
+		};
+		prompt(client, u"one"_s, first);
+		prompt(client, u"two"_s, second);
 		QTRY_VERIFY(first && second);
 
 		QCOMPARE((*first)->messageId, u"msg_for_first"_s);
@@ -153,10 +157,10 @@ private slots:
 		QStringList order;
 		connect(&client, &ServerClient::frameReceived, this, [&] { order << u"frame"_s; });
 		std::optional<Result<proto::SessionSnapshot>> attached;
-		[&]() -> QCoro::Task<> {
-			attached = co_await client.attach(u"ses_1"_s);
-			order << u"response"_s;
-		}();
+		[](ServerClient& to, std::optional<Result<proto::SessionSnapshot>>& out, QStringList& log) -> QCoro::Task<> {
+			out = co_await to.attach(u"ses_1"_s);
+			log << u"response"_s;
+		}(client, attached, order);
 		QTRY_COMPARE(order, (QStringList{u"response"_s, u"frame"_s}));
 		QVERIFY(attached->has_value());
 	}
@@ -221,7 +225,9 @@ private slots:
 		QVERIFY(open(client, backend));
 
 		std::optional<Result<proto::PromptResult>> result;
-		[&]() -> QCoro::Task<> { result = co_await client.prompt(u"ses_1"_s, u"hi"_s); }();
+		[](ServerClient& to, std::optional<Result<proto::PromptResult>>& out) -> QCoro::Task<> {
+			out = co_await to.prompt(u"ses_1"_s, u"hi"_s);
+		}(client, result);
 		QVERIFY(!result);
 
 		client.close();
