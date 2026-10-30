@@ -340,6 +340,7 @@ QML 部分没有自动化测试：`tst_app_smoke` 只检查界面能加载、不
 - 对话在后端断开期间保持原样，恢复连接后用快照整段替换。
 - MarkdownBlock 每来一段增量就整段重新解析 Markdown，超长正文的性能还没测过。
 - 超过 `retainedDistance`（约 200 行）的长会话里，视口外的行会被销毁，滚动条长度按平均行高估算，拖动滚动条时可能有轻微的跳动。
+- 没有专门规则的工具，卡片头部的 `key=value` 摘要按键名的字母顺序取前 3 个简单参数；终端客户端按服务器 JSON 里的键顺序取。协议层把参数解析成 `QJsonObject`，它会给键排序，所以顺序丢了。
 - bash 退出码非 0 时卡片头部的状态仍是 done（退出码只在正文标签里显示）。
 - 末尾的脉冲点依赖 `positionToRectangle`，Markdown 以列表或表格结尾时位置可能偏。
 - Windows 上的拉起锁、`CREATE_NO_WINDOW` 拉起和图标渲染没有在 Windows 上验证过。
