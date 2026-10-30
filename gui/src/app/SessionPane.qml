@@ -23,7 +23,9 @@ Item {
 		model: pane.session.blocks
 		sidePadding: pane.columnPadding
 		turnInProgress: pane.session.busy
+		sessionId: pane.session.sessionId
 		permissionCount: pane.session.permissionCount
+		onImageClicked: image => lightbox.open(pane.session.sessionId, image)
 		onCancelRequested: pane.session.cancelDelayedTool()
 		onCopyRequested: messageId => pane.session.copyMessage(messageId)
 		onPermissionAnswered: (callId, allow, always) => pane.session.permissionReply(callId, allow, always)
@@ -168,6 +170,11 @@ Item {
 			pane.session.send(text)
 		}
 		onStopRequested: pane.session.stop()
+	}
+
+	Lightbox {
+		id: lightbox
+		onClosed: pane.focusInput()
 	}
 
 	Component.onCompleted: focusInput()

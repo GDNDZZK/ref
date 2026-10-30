@@ -9,6 +9,8 @@ qt_add_qml_module(ref-gui
 	SOURCES
 		app_translator.cpp
 		app_translator.h
+		chat_image_provider.cpp
+		chat_image_provider.h
 		chat_session.cpp
 		chat_session.h
 		qml_types.h
@@ -79,6 +81,20 @@ qt_add_qml_module(ref-gui
 		CountdownRing.qml
 		ToolInfo.qml
 		ToolBody.qml
+		ToolBodyBase.qml
+		GenericBody.qml
+		OutputSection.qml
+		DiffBody.qml
+		BashBody.qml
+		ReadBody.qml
+		GrepBody.qml
+		FindBody.qml
+		WebfetchBody.qml
+		SessionBody.qml
+		TodoBody.qml
+		CommandBox.qml
+		LineView.qml
+		ToolChip.qml
 		ToolSection.qml
 		OutputText.qml
 		CopyButton.qml
@@ -95,6 +111,9 @@ qt_add_qml_module(ref-gui
 		AlertBadge.qml
 		ErrorBlock.qml
 		ImageBlock.qml
+		Thumbnail.qml
+		ImageStrip.qml
+		Lightbox.qml
 		MetaBlock.qml
 		MetaText.qml
 		MetaAction.qml
