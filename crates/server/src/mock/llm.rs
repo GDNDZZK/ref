@@ -24,9 +24,6 @@ const SUMMARY_TEXT: &str = "## Goal\n- Explore the mock backend with the user.\n
 const SUMMARY_DELAY_MS: u64 = 2500;
 const TITLE_WORDS: usize = 6;
 
-/// Context windows of the mock models (see `config.rs`).
-pub const CONTEXT_WINDOWS: [(&str, u64); 2] = [("mock-1", 200_000), ("mock-fast", 64_000)];
-
 /// Requests seen so far, by (session, number of messages): a retry sends the same request.
 type Attempts = Mutex<HashMap<(String, usize), u32>>;
 
@@ -153,7 +150,8 @@ async fn reply(
     let script = select(&ctx.prompt);
     let round = (script.play)(ctx);
     let prompt_tokens = if round.fill_context {
-        context_window(model).map_or(prompt_tokens, |w| (w as f64 * FILLED_CONTEXT) as u64)
+        super::config::context_window(model)
+            .map_or(prompt_tokens, |w| (w as f64 * FILLED_CONTEXT) as u64)
     } else {
         prompt_tokens
     };
@@ -161,13 +159,6 @@ async fn reply(
         return write_error(stream, *status, message).await;
     }
     stream_round(stream, round, script.pace, prompt_tokens).await
-}
-
-fn context_window(model: &str) -> Option<u64> {
-    CONTEXT_WINDOWS
-        .iter()
-        .find(|(id, _)| *id == model)
-        .map(|(_, w)| *w)
 }
 
 fn estimate_tokens(body: &Value) -> u64 {
