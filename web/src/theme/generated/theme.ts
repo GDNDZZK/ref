@@ -20,6 +20,15 @@ export const colors = {
     errorBorder: '#f0c3c5',
     scrollHandle: '#c6c6c2',
     scrollHandlePressed: '#9fa1a8',
+    shellSurface: '#fbf3e3',
+    shellBorder: '#d9922b',
+    agentOrange: '#d4783a',
+    agentBlue: '#2f6fd6',
+    agentPurple: '#7a52c2',
+    agentRed: '#d23f45',
+    agentYellow: '#c98312',
+    agentGreen: '#2e9d5b',
+    agentCyan: '#2a8f9c',
   },
   dark: {
     background: '#16171a',
@@ -40,12 +49,21 @@ export const colors = {
     errorBorder: '#5c2f35',
     scrollHandle: '#4a4d56',
     scrollHandlePressed: '#6b6e79',
+    shellSurface: '#2a2419',
+    shellBorder: '#f5a742',
+    agentOrange: '#fab283',
+    agentBlue: '#5c9cf5',
+    agentPurple: '#9d7cd8',
+    agentRed: '#e06c75',
+    agentYellow: '#f5a742',
+    agentGreen: '#7fd88f',
+    agentCyan: '#56b6c2',
   },
 } as const
 
 export type ColorName = keyof typeof colors.light
 
-// px
+// px, except the ratios and counts in METRIC_UNITLESS of scripts/gen-theme.ts
 export const metrics = {
   fontSize: 15,
   smallFontSize: 12,
@@ -62,3 +80,5 @@ export const metrics = {
 export const themedStrings = {
   syntaxTheme: { light: 'Breeze Light', dark: 'Breeze Dark' },
 } as const
+
+export const agentPalette = ['agentBlue', 'agentPurple', 'agentGreen', 'agentOrange', 'agentRed'] as const satisfies readonly ColorName[]
