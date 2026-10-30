@@ -209,6 +209,18 @@ describe('ChatSession', () => {
     expect(undo).toHaveBeenLastCalledWith('ses_1', undefined)
   })
 
+  it('asks for a picture once, and again after the session was detached', async () => {
+    const { api, session } = setup()
+    const getImage = vi.fn().mockResolvedValue({ mime: 'image/png', data: 'AAAA' })
+    Object.assign(api, { getImage })
+    expect(await session.imageUrl('img_1')).toBe('data:image/png;base64,AAAA')
+    await session.imageUrl('img_1')
+    expect(getImage).toHaveBeenCalledTimes(1)
+    await session.detach()
+    await session.imageUrl('img_1')
+    expect(getImage).toHaveBeenCalledTimes(2)
+  })
+
   it('toggles the default folds', () => {
     const { session } = setup()
     session.toggleReasoning()
