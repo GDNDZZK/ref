@@ -58,6 +58,7 @@
     "connecting": "Connecting…",
     "reconnecting": "Connection lost. Reconnecting…",
     "closed": "Disconnected: {reason}",
+    "notLoggedIn": "Not logged in. Run ref-web again: it opens the login URL again.",
     "noDirectory": "No working directory: open this page through ref-web, or set ?cwd= (or VITE_REF_CWD) when connecting to ref-server directly."
   },
   "message": {
