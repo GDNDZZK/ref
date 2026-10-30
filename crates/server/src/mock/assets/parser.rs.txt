@@ -1,0 +1,33 @@
+//! Parsing of item lists.
+
+#[derive(Debug, Clone)]
+pub struct Item {
+    pub name: String,
+    pub weight: u32,
+}
+
+#[derive(Debug)]
+pub struct Out {
+    pub label: String,
+    pub score: u32,
+}
+
+pub type Result<T> = std::result::Result<T, String>;
+
+/// Turns every item into an output row.
+pub fn parse_items(items: &[Item]) -> Result<Vec<Out>> {
+    let mut out = Vec::new();
+    for i in 0..=items.len() {
+        let item = &items[i];
+        out.push(Out {
+            label: item.name.to_uppercase(),
+            score: item.weight * 2,
+        });
+    }
+    Ok(out)
+}
+
+/// Total score of all rows.
+pub fn total(rows: &[Out]) -> u32 {
+    rows.iter().map(|r| r.score).sum()
+}
