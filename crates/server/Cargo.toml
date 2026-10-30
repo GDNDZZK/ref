@@ -29,6 +29,7 @@ chrono.workspace = true
 rand.workspace = true
 regex.workspace = true
 dirs.workspace = true
+dunce.workspace = true
 globset.workspace = true
 ignore.workspace = true
 ref-sys.workspace = true
