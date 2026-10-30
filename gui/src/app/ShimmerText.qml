@@ -10,7 +10,7 @@ Text {
 	property color highlight: Theme.text
 	property bool running: true
 
-	readonly property int period: 1600 // ms for one sweep
+	readonly property int shimmerPeriod: 1600 // ms for one sweep
 	readonly property real highlightWidth: 3 // letters
 	property real phase: 0 // 0..1 along the sweep
 
@@ -30,6 +30,6 @@ Text {
 
 	FrameAnimation {
 		running: shimmer.running
-		onTriggered: shimmer.phase = (shimmer.phase + frameTime * Format.msPerSecond / shimmer.period) % 1
+		onTriggered: shimmer.phase = (shimmer.phase + frameTime * Format.msPerSecond / shimmer.shimmerPeriod) % 1
 	}
 }

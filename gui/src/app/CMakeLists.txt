@@ -112,6 +112,7 @@ qt_add_qml_module(ref-gui
 		ErrorBlock.qml
 		ImageBlock.qml
 		StatusLine.qml
+		OlderPill.qml
 		ShimmerText.qml
 		Thumbnail.qml
 		ImageStrip.qml
