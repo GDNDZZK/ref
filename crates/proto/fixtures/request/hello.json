@@ -1,0 +1,13 @@
+{
+  "id": 1,
+  "op": "hello",
+  "client": "ref-web",
+  "version": 2,
+  "cwd": "/home/user/project",
+  "token": "3f9c1d2e",
+  "notify": [
+    "permission",
+    "turn_done",
+    "turn_error"
+  ]
+}

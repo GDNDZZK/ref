@@ -82,6 +82,7 @@ async fn ws_smoke() {
             version: 1,
             cwd: work.to_string_lossy().into(),
             token: Some("sekret".into()),
+            notify: Vec::new(),
         },
     )
     .await;
@@ -249,6 +250,7 @@ async fn ws_first_frame_must_be_hello_and_idle_zero_shuts_down() {
             version: 1,
             cwd: work.to_string_lossy().into(),
             token: None,
+            notify: Vec::new(),
         },
     )
     .await;

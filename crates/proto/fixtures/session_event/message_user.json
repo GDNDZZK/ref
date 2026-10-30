@@ -1,0 +1,31 @@
+{
+  "type": "message",
+  "message": {
+    "id": "msg_user_01",
+    "role": "user",
+    "time": 1760000002000,
+    "time_end": null,
+    "source": {
+      "kind": "human"
+    },
+    "parts": [
+      {
+        "type": "text",
+        "text": "The parser test fails, please fix it. This is what I see:",
+        "time": 1760000000000
+      },
+      {
+        "type": "image",
+        "mime": "image/png",
+        "data": "",
+        "id": "msg_0f1e2d3c:1:0",
+        "size": 48213,
+        "name": "screenshot.png"
+      }
+    ],
+    "model": null,
+    "agent": null,
+    "usage": null,
+    "error": null
+  }
+}

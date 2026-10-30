@@ -1,0 +1,7 @@
+{
+  "id": 6,
+  "op": "attach",
+  "session_id": "ses_a1b2c3d4",
+  "foreground": true,
+  "limit": 100
+}

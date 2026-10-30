@@ -1,0 +1,6 @@
+{
+  "id": 4,
+  "op": "list_history",
+  "cwd": "/home/user/project",
+  "limit": 50
+}

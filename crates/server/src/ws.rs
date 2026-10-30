@@ -249,6 +249,7 @@ async fn handle_conn(hub: Arc<Hub>, stream: TcpStream, peer: SocketAddr, auth: A
                     version,
                     cwd,
                     token,
+                    ..
                 } => {
                     let ok = conn.lock().authed
                         || (!auth.token.is_empty()

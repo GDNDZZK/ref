@@ -1,0 +1,15 @@
+{
+  "type": "tool",
+  "call_id": "call_9x8y7z",
+  "name": "bash",
+  "purpose": "Run the parser tests",
+  "input": {
+    "command": "cargo test -p parser",
+    "timeout": 120
+  },
+  "raw_input": "{\"purpose\":\"Run the parser tests\",\"command\":\"cargo test -p parser\",\"timeout\":120}",
+  "state": "cancelled",
+  "output": "Cancelled by user.",
+  "time": 1760000020000,
+  "time_end": 1760000022000
+}

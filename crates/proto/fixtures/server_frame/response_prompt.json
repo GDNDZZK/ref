@@ -1,0 +1,10 @@
+{
+  "kind": "response",
+  "id": 11,
+  "ok": true,
+  "result": {
+    "queued": true,
+    "message_id": "msg_user_02"
+  },
+  "error": null
+}

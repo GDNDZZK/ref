@@ -1,0 +1,6 @@
+{
+  "id": 18,
+  "op": "set_agent",
+  "session_id": "ses_a1b2c3d4",
+  "agent": "plan"
+}

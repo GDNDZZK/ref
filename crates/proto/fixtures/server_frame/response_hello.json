@@ -1,0 +1,24 @@
+{
+  "kind": "response",
+  "id": 1,
+  "ok": true,
+  "result": {
+    "server_version": "0.2.0",
+    "protocol": 2,
+    "instance": {
+      "pid": 4242,
+      "port": 41873,
+      "bind": "127.0.0.1",
+      "allow_hosts": [
+        "127.0.0.1",
+        "::1",
+        "localhost"
+      ],
+      "idle_timeout": 0,
+      "started_at": 1760000000000,
+      "version": "0.2.0"
+    },
+    "cwd": "/home/user/project"
+  },
+  "error": null
+}

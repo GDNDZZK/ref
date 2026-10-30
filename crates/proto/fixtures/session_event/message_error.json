@@ -1,0 +1,21 @@
+{
+  "type": "message",
+  "message": {
+    "id": "msg_failed_01",
+    "role": "assistant",
+    "time": 1760000002000,
+    "time_end": 1760000040000,
+    "source": {
+      "kind": "human"
+    },
+    "parts": [],
+    "model": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4",
+      "variant": "high"
+    },
+    "agent": "build",
+    "usage": null,
+    "error": "429 Too Many Requests: rate limit exceeded"
+  }
+}
