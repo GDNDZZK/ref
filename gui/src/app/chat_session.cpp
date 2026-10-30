@@ -1,6 +1,7 @@
 // Adapted from an early version of qutie by LightBlueCube
 #include "app/chat_session.h"
 
+#include "composer/shared_history.h"
 #include <QClipboard>
 #include <QGuiApplication>
 
@@ -14,6 +15,7 @@ ChatSession::ChatSession(Backend& backend, QString sessionId, QObject* parent)
 	, m_backend(backend)
 	, m_sessionId(std::move(sessionId))
 	, m_controller(backend)
+	, m_composer(backend, m_controller, refgui::composer::sharedPromptHistory())
 {
 	connect(&m_backend, &Backend::stateChanged, this, &ChatSession::readyChanged);
 	connect(&m_controller, &refgui::session::SessionController::turnInProgressChanged, this, &ChatSession::busyChanged);
@@ -24,6 +26,9 @@ ChatSession::ChatSession(Backend& backend, QString sessionId, QObject* parent)
 	connect(&m_controller, &refgui::session::SessionController::errorReported, this, &ChatSession::setFailure);
 	connect(&m_controller, &refgui::session::SessionController::errorReported, this, &ChatSession::errorReported);
 	connect(&m_controller, &refgui::session::SessionController::reattachFailed, this, &ChatSession::setFailure);
+	connect(&m_composer, &refgui::composer::ComposerModel::failed, this, &ChatSession::setFailure);
+	connect(&m_composer, &refgui::composer::ComposerModel::sent, this, [this] { setFailure({}); });
+	connect(&m_composer, &refgui::composer::ComposerModel::interruptRequested, this, &ChatSession::stop);
 
 	m_permissionGuard.setSingleShot(true);
 	m_permissionGuard.setInterval(PermissionGuard);

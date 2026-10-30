@@ -5,6 +5,7 @@
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QString>
+#include <QStringList>
 
 #include <expected>
 
@@ -44,5 +45,8 @@ Parsed<QList<McpServerStatus>> parseMcpResult(const QJsonObject& result);      /
 Parsed<DirListing> parseDirsResult(const QJsonObject& result);                 // list_dirs
 Parsed<QString> parseTextResult(const QJsonObject& result);                    // peer_command, expand_command
 Parsed<QString> parsePathResult(const QJsonObject& result);                    // export
+Parsed<RemovedPrompt> parseRemovedPromptResult(const QJsonObject& result);     // remove_queued
+Parsed<QStringList> parseFilesResult(const QJsonObject& result);               // list_files
+Parsed<QList<NamedImage>> parseNamedImages(const QJsonValue& images);          // `images` of remove_queued and undo
 
 } // namespace refgui::proto
