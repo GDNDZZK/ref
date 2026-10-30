@@ -4299,27 +4299,37 @@ fn hold_keeps_transcript_still_when_the_retry_notice_goes_away() {
 }
 
 #[test]
-fn hold_is_dropped_when_messages_are_removed() {
-    let last = |pairs: usize| format!("second line of answer {}", pairs - 1);
+fn hold_absorbs_the_removal_of_an_unfinished_message() {
+    // A retry makes the server remove the unfinished assistant message.
+    let last_answer = "second line of answer 29";
     let mut app = long_session_app(30);
     set_status(&mut app, "ses_test", SessionStatus::Busy);
-    let (_, s) = render(&mut app, 100, 30);
-    let at_rest = row_of(&s, &last(30));
-    set_status(&mut app, "ses_test", retrying());
-    render(&mut app, 100, 30);
-    set_status(&mut app, "ses_test", SessionStatus::Busy);
-    render(&mut app, 100, 30);
-
-    // Compaction (or an undo) replaces the history with a shorter one.
+    let streaming = msg(
+        "streaming",
+        Role::Assistant,
+        MessageSource::Human,
+        ts(10, 5, 0),
+        &"partial output\n".repeat(8),
+    );
     app.views
         .get_mut("ses_test")
         .unwrap()
-        .apply(SessionEvent::Reset {
-            more_before: false,
-            messages: long_transcript("a", 15),
+        .apply(SessionEvent::Message { message: streaming });
+    let (_, s) = render(&mut app, 100, 30);
+    let before = row_of(&s, last_answer);
+
+    app.views
+        .get_mut("ses_test")
+        .unwrap()
+        .apply(SessionEvent::Removed {
+            message_id: "streaming".into(),
         });
     let (_, s) = render(&mut app, 100, 30);
-    assert_eq!(row_of(&s, &last(15)), at_rest, "no blank rows left behind");
+    assert_eq!(row_of(&s, last_answer), before, "held\n{s}");
+
+    set_status(&mut app, "ses_test", SessionStatus::Idle);
+    let (_, s) = render(&mut app, 100, 30);
+    assert!(row_of(&s, last_answer) > before, "released with the turn");
 }
 
 #[test]
