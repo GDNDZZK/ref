@@ -4,6 +4,10 @@ name: Build the GUI
 description: cmake configure and build of gui/ against the dependencies from gui-deps.
 
 inputs:
+  build-type:
+    description: CMAKE_BUILD_TYPE.
+    required: false
+    default: Release
   cmake-args:
     description: Extra arguments for cmake's configure step.
     required: false
@@ -16,6 +20,7 @@ runs:
       shell: bash
       env:
         CMAKE_ARGS: ${{ inputs.cmake-args }}
+        BUILD_TYPE: ${{ inputs.build-type }}
       run: |
         build_dir="${RUNNER_TEMP//\\//}/gui-build"
         echo "REF_GUI_BUILD_DIR=$build_dir" >> "$GITHUB_ENV"
@@ -23,7 +28,7 @@ runs:
         if [[ -n "$REF_QT_HOST_DIR" ]]; then host_args=(-DQT_HOST_PATH="$REF_QT_HOST_DIR"); fi
         # CMAKE_ARGS is a word list.
         # shellcheck disable=SC2086
-        cmake -S gui -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+        cmake -S gui -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
           -DCMAKE_PREFIX_PATH="$REF_QT_DIR;$REF_DEPS_DIR/prefix" \
           ${host_args[@]+"${host_args[@]}"} $CMAKE_ARGS
         cmake --build "$build_dir"
