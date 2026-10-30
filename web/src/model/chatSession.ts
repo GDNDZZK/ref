@@ -93,6 +93,16 @@ export class ChatSession {
     this.showHistory()
   }
 
+  // Moves between foreground and watching. While the window already receives the session's events
+  // (split view subscribes to all of them) the history stays as it is; otherwise it is loaded again.
+  async setForeground(foreground: boolean): Promise<void> {
+    const receivingEvents = this.state.loaded && this.state.attachment !== 'detached'
+    if (!receivingEvents) return this.attach(foreground)
+    if (foreground) await this.deps.api().attach(this.id, true)
+    else await this.deps.api().detach(this.id)
+    this.state.attachment = foreground ? 'foreground' : 'watching'
+  }
+
   async detach(): Promise<void> {
     await this.deps.api().detach(this.id)
     this.state.attachment = 'detached'
