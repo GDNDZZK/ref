@@ -9,8 +9,9 @@ import Icon from '../Icon.vue'
 import ModalDialog from '../ModalDialog.vue'
 import PickList from '../PickList.vue'
 
-const ROW_HEIGHT_PX = 44
-const MAX_ROWS = 8
+// Rows of the pick dialogs (models, agents, variants, sessions).
+const PICK_ROW_HEIGHT_PX = 44
+const PICK_MAX_ROWS = 8
 
 const props = defineProps<{
   title: string
@@ -67,8 +68,8 @@ function onKey(event: KeyboardEvent): void {
     <PickList
       :items="shown"
       :selected="selected"
-      :row-height="ROW_HEIGHT_PX"
-      :max-rows="MAX_ROWS"
+      :row-height="PICK_ROW_HEIGHT_PX"
+      :max-rows="PICK_MAX_ROWS"
       :grouped="!searching"
       :empty="empty ?? t('palette.noMatch')"
       @hover="selected = $event"
