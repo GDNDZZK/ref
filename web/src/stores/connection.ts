@@ -9,12 +9,14 @@ import { webSocketTransport } from '../net/transport.ts'
 import { PROTOCOL_VERSION } from '../proto/generated'
 import type { ServerConfigInfo } from '../proto/generated'
 import { useNoticesStore } from './notices.ts'
+import { useSettingsStore } from './settings.ts'
 
 const CLIENT_NAME = 'ref-web'
 const PROTOCOL_WITHOUT_FIELD = 1 // servers older than protocol 2 do not report theirs
 
 export const useConnectionStore = defineStore('connection', () => {
   const notices = useNoticesStore()
+  const settings = useSettingsStore()
   const state = ref<ConnectionState>('connecting')
   const detail = ref('')
   const hello = shallowRef<HelloResult>()
@@ -32,7 +34,12 @@ export const useConnectionStore = defineStore('connection', () => {
   let opened = false
 
   function start(url: string, cwd: string): void {
-    const created = new RefConnection({ connect: webSocketTransport(url), client: CLIENT_NAME, cwd })
+    const created = new RefConnection({
+      connect: webSocketTransport(url),
+      client: CLIENT_NAME,
+      cwd,
+      notifyKinds: () => settings.notifyKinds,
+    })
     connection = created
     api = new RefApi(created)
 

@@ -11,9 +11,6 @@ Item {
 	id: composer
 
 	required property ChatSession session
-	// The window's command registry: the `/` list and slash commands. Without it `/` is plain text.
-	property var commands: null
-
 	readonly property ComposerModel model: session.composer
 
 	readonly property int padding: 8
@@ -27,7 +24,6 @@ Item {
 
 	// A prompt went to the backend.
 	signal submitted()
-	signal cycleAgentRequested(int direction)
 
 	function focusInput() {
 		input.forceActiveFocus()
@@ -37,7 +33,7 @@ Item {
 	function submit() {
 		const line = model.text.trim()
 		const isCommand = !model.shellMode && line.startsWith("/")
-		if (isCommand && commands && commands.runSlash(line, session.sessionId)) {
+		if (isCommand && Commands.runSlash(line, session.sessionId)) {
 			model.finishCommand()
 			return
 		}
@@ -177,10 +173,10 @@ Item {
 						if (listOpen)
 							composer.acceptCompletion(false)
 						else
-							composer.cycleAgentRequested(1)
+							Workspace.cycleAgent(composer.session.sessionId, 1)
 					} else if (event.key === Qt.Key_Backtab) {
 						event.accepted = true
-						composer.cycleAgentRequested(-1)
+						Workspace.cycleAgent(composer.session.sessionId, -1)
 					} else if (listOpen && (event.key === Qt.Key_Up && plain || event.key === Qt.Key_P && ctrl)) {
 						event.accepted = true
 						popup.move(-1)
@@ -218,9 +214,9 @@ Item {
 				bottomMargin: composer.padding
 			}
 			height: composer.tagRowHeight
-			onAgentClicked: composer.commands?.run("agents", "", composer.session.sessionId)
-			onModelClicked: composer.commands?.run("models", "", composer.session.sessionId)
-			onVariantClicked: composer.commands?.run("variant", "", composer.session.sessionId)
+			onAgentClicked: Commands.run("agents", "", composer.session.sessionId)
+			onModelClicked: Commands.run("models", "", composer.session.sessionId)
+			onVariantClicked: Workspace.openDialog("variants", {sessionId: composer.session.sessionId})
 		}
 
 		SendButton {
@@ -264,7 +260,7 @@ Item {
 		anchors { left: parent.left; right: parent.right; bottom: parent.top; bottomMargin: popupGap }
 		kind: composer.model.completionKind
 		entries: composer.model.completionKind === "file" ? composer.model.files
-			: (composer.model.completionKind === "command" && composer.commands ? composer.commands.match(composer.model.completionQuery, true) : [])
+			: (composer.model.completionKind === "command" ? Commands.match(composer.model.completionQuery, true) : [])
 		onAccepted: index => {
 			popup.currentIndex = index
 			composer.acceptCompletion(false)

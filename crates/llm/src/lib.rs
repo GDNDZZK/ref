@@ -192,19 +192,43 @@ impl LlmError {
     }
 }
 
-/// Shared HTTP client (connection pooling).
-pub fn http_client() -> reqwest::Client {
-    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    CLIENT
-        .get_or_init(|| {
-            reqwest::Client::builder()
-                .connect_timeout(Duration::from_secs(30))
-                .pool_idle_timeout(Duration::from_secs(90))
-                .user_agent(concat!("ref/", env!("CARGO_PKG_VERSION")))
-                .build()
-                .expect("http client")
-        })
-        .clone()
+fn build_client(direct: bool) -> reqwest::Client {
+    let mut builder = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(30))
+        .pool_idle_timeout(Duration::from_secs(90))
+        .user_agent(concat!("ref/", env!("CARGO_PKG_VERSION")));
+    if direct {
+        builder = builder.no_proxy();
+    }
+    builder.build().expect("http client")
+}
+
+/// True for `localhost` and loopback addresses (127.0.0.0/8, ::1): never worth a proxy.
+fn is_loopback(url: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(url) else {
+        return false;
+    };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
+/// Shared HTTP client (connection pooling) for requests to `url`. Loopback targets bypass the
+/// proxy; everything else follows the proxy environment variables (`HTTP_PROXY`, ...).
+pub fn http_client(url: &str) -> reqwest::Client {
+    static VIA_ENV: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    static DIRECT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    let client = if is_loopback(url) {
+        DIRECT.get_or_init(|| build_client(true))
+    } else {
+        VIA_ENV.get_or_init(|| build_client(false))
+    };
+    client.clone()
 }
 
 /// Stream one assistant turn. Calls `on_event` for every streaming event and
@@ -229,5 +253,31 @@ pub fn build_body(provider: &Provider, model: &Model, req: &Request) -> Value {
         ApiKind::OpenAIChat => chat::build_body(provider, model, req),
         ApiKind::OpenAIResponses => responses::build_body(provider, model, req),
         ApiKind::Anthropic => anthropic::build_body(provider, model, req),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_loopback;
+
+    #[test]
+    fn loopback_targets_skip_the_proxy() {
+        for url in [
+            "http://127.0.0.1:8080/v1",
+            "http://127.1.2.3/v1",
+            "http://[::1]:9000/",
+            "http://localhost/v1",
+            "https://LocalHost:443/",
+        ] {
+            assert!(is_loopback(url), "{url}");
+        }
+        for url in [
+            "https://api.openai.com/v1",
+            "http://192.168.1.5/v1",
+            "http://localhost.example.com/",
+            "not a url",
+        ] {
+            assert!(!is_loopback(url), "{url}");
+        }
     }
 }
