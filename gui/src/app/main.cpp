@@ -1,6 +1,7 @@
 // Adapted from an early version of qutie by LightBlueCube
 #include "app/chat_session.h"
 #include "cli/command_line.h"
+#include "icons/icon_provider.h"
 
 #include <QDir>
 #include <QGuiApplication>
@@ -100,6 +101,7 @@ int main(int argc, char* argv[])
 
 	QQmlApplicationEngine engine;
 	QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] { QCoreApplication::exit(EXIT_FAILURE); }, Qt::QueuedConnection);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
 	engine.setInitialProperties({{u"session"_s, QVariant::fromValue(&session)}});
 	engine.loadFromModule("RefGui", "Main");
 
