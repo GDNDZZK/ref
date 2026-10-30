@@ -164,6 +164,11 @@ private:
 			m_sessions[id][u"agent"_s] = request.value(u"agent"_s);
 			m_fake.respond(request, {{u"session"_s, m_sessions.value(id)}});
 		}
+		else if(op == u"undo"_s)
+		{
+			const QJsonObject image{{u"mime"_s, u"image/png"_s}, {u"data"_s, u"YWJj"_s}, {u"name"_s, u"shot.png"_s}};
+			m_fake.respond(request, {{u"text"_s, u"take this back"_s}, {u"images"_s, QJsonArray{image}}});
+		}
 		else if(op == u"shutdown"_s)
 		{
 			m_fake.respond(request, {});
@@ -229,6 +234,7 @@ private slots:
 	void aClosedTileKeepsItsSessionUntilItHasLeft();
 	void closingTheCurrentTileSendsNoAttach();
 	void sessionsHaveTheMethodsCommandsCall();
+	void undoPutsThePromptBackIntoTheInputBox();
 	void oldBackendOffersARestart();
 	void commandsFollowTheState();
 };
@@ -524,6 +530,22 @@ void TestWorkspace::sessionsHaveTheMethodsCommandsCall()
 	{
 		QVERIFY2(ChatSession::staticMetaObject.indexOfMethod(method) >= 0, method);
 	}
+}
+
+// ChatSession connects the prompt that Undo takes back to the input box; the two know nothing of each other otherwise.
+void TestWorkspace::undoPutsThePromptBackIntoTheInputBox()
+{
+	Fixture f;
+	ChatSession* session = f.workspace->current();
+	session->composer()->edit(u"!"_s, 1); // a shell line is being typed
+	QVERIFY(session->composer()->shellMode());
+
+	session->undoLast();
+
+	QTRY_VERIFY(session->composer()->text().startsWith(u"take this back"_s)); // the image adds its tag
+	QCOMPARE(session->composer()->attachments()->rowCount(), 1);
+	QVERIFY(!session->composer()->shellMode()); // it was a prompt
+	QVERIFY(f.stub.ops().contains(u"undo"_s));
 }
 
 QTEST_MAIN(TestWorkspace)
