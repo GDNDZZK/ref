@@ -486,7 +486,7 @@ async fn stream_with_retry(
     let mut prep_owned: Option<Prep> = None;
     loop {
         let p = prep_owned.as_ref().unwrap_or(prep);
-        let req = build_request(s, p);
+        let req = crate::images::clamp_request(build_request(s, p), &p.provider, &p.model).await;
         let msg_id = crate::util::new_id("msg");
         {
             let mut st = s.lock();

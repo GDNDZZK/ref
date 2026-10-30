@@ -5,6 +5,7 @@ pub mod compaction;
 pub mod convert;
 pub mod engine;
 pub mod hub;
+pub mod images;
 pub mod instance;
 pub mod mcp;
 pub mod models;

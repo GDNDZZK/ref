@@ -172,6 +172,7 @@ async fn summarize(
         session_id: s.id.clone(),
     };
     req.messages.push(ChatMessage::User(vec![UserContent::Text(SUMMARY_REQUEST.into())]));
+    let mut req = crate::images::clamp_request(req, &cs.provider, &cs.model).await;
     let max = Duration::from_secs(if prep.cfg.retry_max_delay > 0 { prep.cfg.retry_max_delay } else { 600 });
     let mut attempt = 0u32;
     let mut hard_failures = 0u32;

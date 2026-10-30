@@ -2882,12 +2882,14 @@ name = "ref-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "clap",
  "dirs",
  "futures-util",
  "globset",
  "ignore",
+ "image",
  "libc",
  "rand 0.9.5",
  "ref-config",
