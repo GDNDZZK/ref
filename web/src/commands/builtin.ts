@@ -67,7 +67,6 @@ export function registerBuiltinCommands(): void {
     define({
       id: 'new-in',
       slash: false,
-      shortcut: altKey('N', true),
       run: () => dialogs.open({ kind: 'newSession' }),
     }),
     define({
