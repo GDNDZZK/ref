@@ -1,7 +1,7 @@
-build*
+/build*/
 .clangd
 **/.qmlls.ini
 
 *.bak*
 *.kate-swp
-.deps
+/.deps
