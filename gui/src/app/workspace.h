@@ -26,6 +26,8 @@ class Workspace : public QObject
 	Q_PROPERTY(QString connectionText READ connectionText NOTIFY connectionChanged)
 	Q_PROPERTY(QString failureText READ failureText NOTIFY failureTextChanged)
 	Q_PROPERTY(QString cwd READ cwd NOTIFY cwdChanged)
+	Q_PROPERTY(QStringList visibleSessionIds READ visibleSessionIds NOTIFY visibleSessionIdsChanged)
+	Q_PROPERTY(bool windowActive READ isWindowActive WRITE setWindowActive NOTIFY windowActiveChanged)
 
 public:
 	explicit Workspace(refgui::cli::LaunchOptions options, QObject* parent = nullptr);
@@ -45,12 +47,19 @@ public:
 	QString failureText() const { return m_failure; }
 	// The directory new sessions start in.
 	const QString& cwd() const { return m_cwd; }
+	// The sessions the user can see now: the current one, or every tile in split view.
+	QStringList visibleSessionIds() const;
+	// The window is in the foreground. Set by the window; the notification logic needs it with the above.
+	bool isWindowActive() const { return m_windowActive; }
+	void setWindowActive(bool active);
 
 signals:
 	void currentChanged();
 	void connectionChanged();
 	void failureTextChanged();
 	void cwdChanged();
+	void visibleSessionIdsChanged();
+	void windowActiveChanged();
 	// A message for the user that is not about one session. `level` is info, warn or error.
 	void toastRequested(const QString& level, const QString& text);
 	// The first session is open.
@@ -72,4 +81,5 @@ private:
 	ChatSession* m_current = nullptr;
 	QString m_failure;
 	bool m_started = false;
+	bool m_windowActive = false;
 };
