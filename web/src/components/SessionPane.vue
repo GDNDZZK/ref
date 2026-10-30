@@ -8,6 +8,7 @@ import Chevron from './Chevron.vue'
 import CircleButton from './CircleButton.vue'
 import Composer from './Composer.vue'
 import Flourish from './Flourish.vue'
+import StatusLine from './StatusLine.vue'
 import { chatSessionKey } from '../composables/chatSessionContext.ts'
 import type { ChatSession } from '../model/chatSession.ts'
 import { useComposerStore } from '../stores/composer.ts'
@@ -50,15 +51,9 @@ watch(following, (isFollowing) => {
 </script>
 
 <template>
-  <div class="pane">
+  <div class="pane" :data-pane="session.id">
     <div class="chat">
-      <ChatView
-        v-model:following="following"
-        :blocks="session.blocks"
-        :turn-in-progress="session.busy"
-        :generation="session.generation"
-        @error-out-of-sight="onErrorOutOfSight"
-      />
+      <ChatView v-model:following="following" :session="session" @error-out-of-sight="onErrorOutOfSight" />
       <p class="empty" :class="{ hidden: session.blocks.length > 0 }">{{ t('chat.empty') }}</p>
     </div>
     <div class="composer-area">
@@ -72,6 +67,7 @@ watch(following, (isFollowing) => {
             <span ref="alertBadge" class="alert-dot"><AlertBadge :size="12" /></span>
           </span>
         </div>
+        <StatusLine :session="session" />
         <Composer ref="composerBox" :session="session" :composer="composer" @submitted="following = true" />
       </div>
     </div>

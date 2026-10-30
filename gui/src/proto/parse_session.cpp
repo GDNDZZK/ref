@@ -95,16 +95,6 @@ Usage readUsage(const Fields& fields)
 	        .reasoning = static_cast<quint64>(fields.integerOr("reasoning"_L1, 0))};
 }
 
-ImageData readImageData(const Fields& fields)
-{
-	ImageData image{.mime = fields.string("mime"_L1), .data = fields.string("data"_L1), .id = fields.optionalString("id"_L1)};
-	if(const std::optional<qint64> size = fields.optionalInteger("size"_L1))
-	{
-		image.size = static_cast<quint64>(*size);
-	}
-	return image;
-}
-
 MessageSource readMessageSource(const Fields& fields)
 {
 	static constexpr std::array<std::pair<QLatin1StringView, MessageSource::Kind>, 6> names{{
@@ -150,6 +140,16 @@ ToolPart readToolPart(const Fields& fields)
 }
 
 } // namespace
+
+ImageData readImageData(const Fields& fields)
+{
+	ImageData image{.mime = fields.string("mime"_L1), .data = fields.string("data"_L1), .id = fields.optionalString("id"_L1)};
+	if(const std::optional<qint64> size = fields.optionalInteger("size"_L1))
+	{
+		image.size = static_cast<quint64>(*size);
+	}
+	return image;
+}
 
 ToolState readToolState(const QString& path, const QJsonValue& value)
 {
@@ -260,6 +260,11 @@ Message readMessage(const Fields& fields)
 QList<Message> readMessages(const Fields& fields, QLatin1StringView key)
 {
 	return fields.list<Message>(key, readMessage);
+}
+
+NamedImage readNamedImage(const Fields& fields)
+{
+	return {.mime = fields.string("mime"_L1), .data = fields.string("data"_L1), .name = fields.optionalString("name"_L1)};
 }
 
 PermissionRequest readPermissionRequest(const Fields& fields)

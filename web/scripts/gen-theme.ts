@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { easingNameFromQml, outElastic, plainEasings } from '../src/motion/easing.ts'
 import type { EasingFn } from '../src/motion/easing.ts'
 import { linearPoints, toCssLinear } from '../src/motion/linearCss.ts'
-import { findProperty, parseProperties, parseValue } from './qmlProperties.ts'
+import { cssColor, findProperty, parseProperties, parseValue } from './qmlProperties.ts'
 import type { QmlProperty } from './qmlProperties.ts'
 
 type Unit = 'px' | 'ms' | '' // '' = unitless
@@ -30,6 +30,7 @@ const METRIC_UNITLESS = [
   'sidebarMinRunningRows',
   'paletteMaxRows',
   'toastMax',
+  'staleOpacity',
 ]
 
 const MOTION_UNITS: Record<string, Unit> = {
@@ -63,8 +64,35 @@ const COMPONENT_PROPERTIES: Record<string, Record<string, Unit>> = {
     springPeriod: '',
     springDuration: 'ms',
   },
-  Composer: { padding: 'px', maxInputHeight: 'px' },
-  ErrorBlock: { verticalPadding: 'px', horizontalPadding: 'px' },
+  Composer: {
+    padding: 'px',
+    maxInputHeight: 'px',
+    tagRowHeight: 'px',
+    textGap: 'px',
+    queueGap: 'px',
+    inputLeftInset: 'px',
+    thumbRowGap: 'px',
+  },
+  ComposerChip: { chipHeight: 'px', paddingX: 'px', iconGap: 'px', labelSlide: 'px', maxWidth: 'px' },
+  ComposerTags: { chipGap: 'px', hintGap: 'px' },
+  AttachmentStrip: {
+    thumbSize: 'px',
+    thumbGap: 'px',
+    attachmentRemoveSize: 'px',
+    removeBackgroundOpacity: '',
+    enterScale: '',
+  },
+  CompletionPopup: { popupGap: 'px', popupPadding: 'px', popupRowHeight: 'px', popupMaxRows: '' },
+  QueueStrip: { queueRowHeight: 'px', queueMaxRows: '', removingOpacity: '' },
+  NotificationSettingsSection: { rowHeight: 'px', subIndent: 'px', disabledOpacity: '' },
+  OutputText: { previewLines: '' },
+  BashBody: { liveTailLines: '' },
+  ImageStrip: { maxWidth: 'px', maxHeight: 'px' },
+  ImageBlock: { thumbnailHeight: 'px' },
+  Lightbox: { margin: 'px' },
+  ChatView: { olderTriggerDistance: 'px' },
+  ShimmerText: { shimmerPeriod: 'ms' },
+  ErrorBlock: { verticalPadding: 'px', horizontalPadding: 'px', spreadSpeed: '' },
   UserBlock: { horizontalPadding: 'px', verticalPadding: 'px' },
 }
 
@@ -112,8 +140,8 @@ function readTheme(): Theme {
   for (const property of properties.filter((p) => p.readonly && !THEME_SKIPPED.includes(p.name))) {
     const value = parseValue(property, where)
     if (property.type === 'color' && value.kind === 'themed') {
-      theme.colors.dark.push([property.name, String(value.dark)])
-      theme.colors.light.push([property.name, String(value.light)])
+      theme.colors.dark.push([property.name, cssColor(String(value.dark))])
+      theme.colors.light.push([property.name, cssColor(String(value.light))])
     } else if (THEME_STRINGS.includes(property.name) && value.kind === 'themed') {
       theme.strings.push([property.name, { light: String(value.light), dark: String(value.dark) }])
     } else if (value.kind === 'list') {

@@ -3,7 +3,8 @@ import { fuzzyScore } from './fuzzy.ts'
 
 describe('fuzzyScore', () => {
   it('matches subsequences only', () => {
-    expect(fuzzyScore('compact', 'cmp')).toBeDefined()
+    // c: 10 + word start 12; m (2 after c): 10 - 2/2; p (adjacent to m): 10 + 15; no prefix bonus
+    expect(fuzzyScore('compact', 'cmp')).toBe(10 + 12 + (10 - 1) + (10 + 15))
     expect(fuzzyScore('compact', 'cpm')).toBeUndefined()
     expect(fuzzyScore('anything', '')).toBe(0)
   })
@@ -13,7 +14,9 @@ describe('fuzzyScore', () => {
   })
 
   it('ignores case and spaces in the query', () => {
-    expect(fuzzyScore('Export', 'e x')).toBeDefined()
+    // e: 10 + word start 12; x (adjacent): 10 + 15. The space is skipped when matching, but the
+    // prefix bonus compares the query with its space ("e x" is not a prefix of "export").
+    expect(fuzzyScore('Export', 'e x')).toBe(10 + 12 + 10 + 15)
   })
 
   it('scores like the TUI', () => {

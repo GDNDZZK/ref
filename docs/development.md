@@ -28,6 +28,8 @@ python3 scripts/e2e.py provider/model "prompt" [cwd]           # end-to-end agai
 REF_DUMP_REQUESTS=/tmp/dump ref-server ...                     # dump LLM request bodies
 ```
 
+The `ref-web` tests that start a backend use the `ref-server` binary next to `ref-web` and fail with a hint when it is missing. `cargo test --workspace` builds it; with `cargo test -p ref-web`, run `cargo build -p ref-server` first.
+
 Some tests start `python3` (a fake MCP server) and `bash`. The end-to-end scripts need the Python `websockets` package and a configured model.
 
 ## Crates
@@ -125,11 +127,13 @@ scripts/package.sh --version v0.2.0 --target x86_64-unknown-linux-gnu \
   --bin-dir target/release --out dist --gui-dir stage      # needs the Rust build, see above
 ```
 
+`cmake --install` also removes the Qt Quick Controls styles other than Basic (`gui/cmake/PruneControlsStyles.cmake`): `ref-gui` sets the Basic style, and the scan for QML imports would otherwise deploy all five.
+
 - **Linux**: libraries go in `lib/` and the program has the run path `$ORIGIN/lib`; `qt.conf` points Qt to `plugins/` and `qml/`. Plugins that a desktop does not use (QML debugging, embedded displays, Wayland helpers) are left out.
 - **macOS**: `macdeployqt` builds `ref-gui.app`. `package.sh` renames it to `ref.app`, puts `ref-server` into `Contents/MacOS` and runs `scripts/sign-macos-app.sh`, which signs everything again, inner files first, with an ad-hoc signature (there is no developer certificate) and checks it with `codesign --verify --deep --strict`. The `all` archive links its `ref-server` to the one in the app.
 - **Windows**: `windeployqt` copies the DLLs and the Visual C++ runtime next to `ref-gui.exe`, without the software OpenGL fallback. The program uses the GUI subsystem (no console window) and has an icon and version resource.
 
-`scripts/verify-gui-package.sh DIR` checks an unpacked `ref-gui` archive and runs on the platform it was built for. CI runs it after packing. It checks that every library resolves without the build machine's environment, that the KSyntaxHighlighting module is there, and that `ref-gui --smoke --mock` opens a session (on Linux under `xvfb-run`). On Linux it also checks what the package asks of the system, and on macOS the signature and that nothing refers to a path outside the app. On Windows it checks that `ref-gui.exe` uses the GUI subsystem.
+`scripts/verify-gui-package.sh DIR` checks an unpacked `ref-gui` archive and runs on the platform it was built for. CI runs it after packing. It checks that every library resolves without the build machine's environment, that the KSyntaxHighlighting module is there, that the only Controls style is Basic, and that `ref-gui --smoke --mock` opens a session (on Linux under `xvfb-run`). On Linux it also checks what the package asks of the system, and on macOS the signature and that nothing refers to a path outside the app. On Windows it checks that `ref-gui.exe` uses the GUI subsystem.
 
 **Linux requirements.** C++23 needs GCC 13, which Ubuntu 22.04 does not have, so CI builds the Linux GUI on Ubuntu 24.04 while `ref`, `ref-web` and `ref-server` are still built on 22.04. Qt 6.12.0's own libraries need glibc 2.34 at most. A program built with GCC 13 needs `CXXABI_1.3.14` from `libstdc++`, which the GCC 12 of Ubuntu 22.04 and Debian 12 does not have. `verify-gui-package.sh` therefore fails when anything in the package needs more than glibc 2.35, `GLIBCXX_3.4.32` or `CXXABI_1.3.14`; the README states the same numbers. If a newer compiler or Qt raises one, change the constants at the top of the script and the README together.
 

@@ -24,6 +24,8 @@ class SessionController : public QObject
 	Q_OBJECT
 	Q_PROPERTY(bool busy READ isBusy NOTIFY busyChanged)
 	Q_PROPERTY(bool turnInProgress READ isTurnInProgress NOTIFY turnInProgressChanged)
+	Q_PROPERTY(bool moreBefore READ hasMoreBefore NOTIFY moreBeforeChanged)
+	Q_PROPERTY(bool loadingOlder READ isLoadingOlder NOTIFY loadingOlderChanged)
 
 public:
 	template<typename T>
@@ -34,6 +36,9 @@ public:
 	ConversationModel& model() { return m_model; }
 	const ConversationModel& model() const { return m_model; }
 	const proto::SessionInfo& info() const { return m_info; }
+	// Messages waiting for the next safe point, in delivery order: the server's word, from the
+	// snapshot and Queue events. Prompts of the user can be withdrawn while they are here.
+	const QList<proto::Message>& queued() const { return m_queued; }
 	// Empty until a session is attached.
 	const QString& sessionId() const { return m_sessionId; }
 	bool hasSession() const { return !m_sessionId.isEmpty(); }
@@ -55,20 +60,35 @@ public:
 	// Stops the events (unless a WatchAll is on) but keeps the model and the session id, so
 	// the controller can attach again.
 	QCoro::Task<Result<void>> detach();
+	// Gives up the foreground but keeps following the session: the backend no longer counts
+	// this window as attached, and the events come on through a WatchAll. Precondition: attached.
+	QCoro::Task<Result<void>> background();
 	// Attaches the newest session of `cwd`. False when it has none.
 	QCoro::Task<Result<bool>> continueLast(QString cwd);
 
 	// Shows streamed text that is still waiting for its turn on screen.
 	void showPendingNow() { m_feed.flush(); }
 
-	QCoro::Task<Result<proto::PromptResult>> send(QString text);
+	// Older messages exist than the ones in the model.
+	bool hasMoreBefore() const { return m_moreBefore; }
+	bool isLoadingOlder() const { return m_loadingOlder; }
+	// Adds the page of messages before the oldest one. Does nothing when there are none or a page is on its way.
+	QCoro::Task<Result<void>> loadOlder();
+
+	QCoro::Task<Result<proto::PromptResult>> send(QString text, QList<proto::ImageData> images = {});
 	QCoro::Task<Result<void>> abort();
 	QCoro::Task<Result<void>> permissionReply(QString callId, bool allow, bool always);
+	// Takes back a human prompt and what followed (the last one without `messageId`); the answer
+	// has the prompt's text and pictures. The conversation shrinks by a Reset event.
+	QCoro::Task<Result<proto::RemovedPrompt>> undo(std::optional<QString> messageId);
 
 signals:
 	void infoChanged();
 	void busyChanged();
 	void turnInProgressChanged();
+	void queueChanged();
+	void moreBeforeChanged();
+	void loadingOlderChanged();
 	// The backend reported a problem with the session (an Error event).
 	void errorReported(const QString& text);
 	// Attaching again after a reconnect failed, e.g. because the session is gone.
@@ -80,6 +100,9 @@ private:
 	void onFrame(const proto::ServerFrame& frame);
 	void onEvent(const proto::SessionEvent& event);
 	void setInfo(const proto::SessionInfo& info);
+	void setQueued(QList<proto::Message> messages);
+	void setMoreBefore(bool moreBefore);
+	void setLoadingOlder(bool loading);
 
 	client::Backend& m_backend;
 	ConversationModel m_model;
@@ -88,6 +111,9 @@ private:
 	bool m_attached = false;
 	bool m_foreground = true;
 	proto::SessionInfo m_info;
+	QList<proto::Message> m_queued;
+	bool m_moreBefore = false;
+	bool m_loadingOlder = false;
 };
 
 } // namespace refgui::session

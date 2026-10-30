@@ -8,7 +8,9 @@
 #include <QCoroTask>
 #include <QObject>
 #include <QString>
+#include <QTimer>
 
+#include <coroutine>
 #include <memory>
 
 namespace refgui::client
@@ -55,13 +57,20 @@ public:
 	// Starts connecting. Call once.
 	void start();
 	// Closes the connection for good; pending requests fail first. Call before destroying
-	// whatever awaits them.
+	// whatever awaits them. Also ends the connecting loop; the destructor does this too.
 	void shutdown();
+
+	// The system notifications this connection wants; Hello tells the backend, so set it before
+	// `start()` and again whenever it changes (the new value is used on reconnecting). A running
+	// connection is told with ServerClient::setNotify.
+	void setNotifyKinds(QList<proto::NotifyFrame::Kind> kinds) { m_notifyKinds = std::move(kinds); }
 
 	ServerClient& client() { return m_client; }
 	State state() const { return m_state; }
 	const QString& reason() const { return m_reason; }
 	const proto::HelloResult& hello() const { return m_hello; }
+	// What Hello of the current connection asked for; `setNotifyKinds` may have changed since.
+	const QList<proto::NotifyFrame::Kind>& helloNotifyKinds() const { return m_helloNotifyKinds; }
 
 signals:
 	void stateChanged();
@@ -69,6 +78,19 @@ signals:
 	void connected();
 
 private:
+	// `co_await pause()` waits out the reconnect pause. shutdown() cuts it short: a coroutine
+	// that is never resumed is never destroyed.
+	struct PauseAwaiter
+	{
+		Backend& backend;
+
+		bool await_ready() const noexcept { return false; }
+		void await_suspend(std::coroutine_handle<> waiter);
+		void await_resume() const noexcept {}
+	};
+	PauseAwaiter pause() { return {*this}; }
+	void endPause();
+
 	QCoro::Task<> run();
 	QCoro::Task<std::expected<Endpoint, QString>> connectOnce();
 	QCoro::Task<bool> tryConnect(const Endpoint& endpoint, std::chrono::milliseconds timeout);
@@ -77,12 +99,16 @@ private:
 
 	Source m_source;
 	QString m_cwd;
+	QList<proto::NotifyFrame::Kind> m_notifyKinds;
+	QList<proto::NotifyFrame::Kind> m_helloNotifyKinds;
 	ServerClient m_client;
 	std::unique_ptr<MockBackend> m_mock;
 	proto::HelloResult m_hello;
 	State m_state = State::Connecting;
 	QString m_reason;
 	bool m_stopping = false;
+	QTimer m_pauseTimer;
+	std::coroutine_handle<> m_pauseWaiter;
 };
 
 } // namespace refgui::client

@@ -5,9 +5,10 @@
 // and shell pills come and go.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef } from 'vue'
 import type { IconKey } from '../icons/generated/icons.ts'
+import { components } from '../theme/generated/components.ts'
 import Icon from './Icon.vue'
 
-const CHIP_GAP = 4 // between pills; part of the width that collapses
+const CHIP_GAP = components.composerTags.chipGap // between pills; part of the width that collapses
 
 const props = defineProps<{
   shown: boolean
@@ -70,10 +71,10 @@ onBeforeUnmount(() => observer.disconnect())
 
 <style scoped>
 .pill-slot {
-  --chip-height: 28px;
-  --chip-padding-x: 10px;
-  --chip-icon-gap: 6px;
-  --label-slide: 6px;
+  --chip-height: var(--composer-chip-chip-height);
+  --chip-padding-x: var(--composer-chip-padding-x);
+  --chip-icon-gap: var(--composer-chip-icon-gap);
+  --label-slide: var(--composer-chip-label-slide);
   flex: none;
   height: var(--chip-height);
   overflow: hidden;
@@ -102,6 +103,7 @@ onBeforeUnmount(() => observer.disconnect())
   align-items: center;
   gap: var(--chip-icon-gap);
   width: max-content;
+  max-width: var(--composer-chip-max-width);
   height: var(--chip-height);
   padding: 0 var(--chip-padding-x);
   border-radius: calc(var(--chip-height) / 2);
@@ -137,10 +139,14 @@ onBeforeUnmount(() => observer.disconnect())
 .label {
   position: relative;
   display: block;
+  min-width: 0;
 }
 
 /* Holds the width of the current label; the visible text is laid over it. */
 .sizer {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
   visibility: hidden;
 }
 
@@ -148,6 +154,9 @@ onBeforeUnmount(() => observer.disconnect())
   position: absolute;
   left: 0;
   top: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .morph-enter-active,

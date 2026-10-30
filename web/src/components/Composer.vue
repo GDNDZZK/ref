@@ -8,12 +8,11 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { SessionComposer } from '../composer/sessionComposer.ts'
-import { TAG_ROW_HEIGHT, TEXT_TAG_GAP, THUMB_GAP, THUMB_SIZE } from '../composer/metrics.ts'
 import type { ChatSession } from '../model/chatSession.ts'
 import { useCommandsStore } from '../stores/commands.ts'
-import { useComposerStore } from '../stores/composer.ts'
 import { useConnectionStore } from '../stores/connection.ts'
 import { useNoticesStore } from '../stores/notices.ts'
+import { useWorkspaceStore } from '../stores/workspace.ts'
 import { components } from '../theme/generated/components.ts'
 import AttachmentStrip from './AttachmentStrip.vue'
 import CompletionPopup from './CompletionPopup.vue'
@@ -24,14 +23,21 @@ import SendButton from './SendButton.vue'
 const props = defineProps<{ session: ChatSession; composer: SessionComposer }>()
 const emit = defineEmits<{ submitted: [] }>()
 
-const { padding: PADDING, maxInputHeight: MAX_INPUT_HEIGHT } = components.composer
-const TEXT_LEFT_EXTRA = 4
+const {
+  padding: PADDING,
+  maxInputHeight: MAX_INPUT_HEIGHT,
+  tagRowHeight: TAG_ROW_HEIGHT,
+  textGap: TEXT_TAG_GAP,
+  inputLeftInset: TEXT_LEFT_EXTRA,
+  thumbRowGap: THUMB_ROW_GAP,
+} = components.composer
+const { thumbSize: THUMB_SIZE } = components.attachmentStrip
 const SEND_BUTTON_SIZE = 32
 
 const { t } = useI18n()
 const connection = useConnectionStore()
 const commands = useCommandsStore()
-const composerStore = useComposerStore()
+const workspace = useWorkspaceStore()
 const notices = useNoticesStore()
 
 const draft = computed(() => props.composer.draft)
@@ -41,7 +47,7 @@ const inputHeight = ref(SEND_BUTTON_SIZE)
 const dragDepth = ref(0) // drag events of the children come in pairs; the box is hovered while > 0
 
 const canSend = computed(() => draft.value.text.trim() !== '' || draft.value.attachments.length > 0)
-const stripHeight = computed(() => (draft.value.attachments.length > 0 ? THUMB_SIZE + THUMB_GAP : 0))
+const stripHeight = computed(() => (draft.value.attachments.length > 0 ? THUMB_SIZE + THUMB_ROW_GAP : 0))
 const boxHeight = computed(
   () => 2 * PADDING + stripHeight.value + inputHeight.value + TEXT_TAG_GAP + TAG_ROW_HEIGHT,
 )
@@ -166,7 +172,7 @@ function onLineBreak(event: KeyboardEvent, area: HTMLTextAreaElement): boolean {
 function onTab(event: KeyboardEvent): boolean {
   const hasModifier = event.ctrlKey || event.metaKey || event.altKey
   if (event.key !== 'Tab' || hasModifier) return false
-  void composerStore.cycleAgent(props.session.id, event.shiftKey ? -1 : 1)
+  workspace.cycleAgent(props.session.id, event.shiftKey ? -1 : 1).catch(notices.pushError)
   return true
 }
 
@@ -270,7 +276,7 @@ function onDrop(event: DragEvent): void {
 // --- tags ---------------------------------------------------------------------------------
 
 function openDialog(commandId: 'agents' | 'models'): void {
-  commands.run(commandId, { sessionId: props.session.id }).catch((error) => notices.pushError(error))
+  commands.run(commandId, '', props.session.id).catch((error) => notices.pushError(error))
 }
 
 // The prompt comes back into the box: the caret goes there, ready to edit.
@@ -343,7 +349,7 @@ defineExpose({ focus: () => input.value?.focus() })
             :shell="draft.shell"
             @agent-clicked="openDialog('agents')"
             @model-clicked="openDialog('models')"
-            @variant-clicked="composerStore.cycleVariant(session.id)"
+            @variant-clicked="workspace.setVariant(session.id, '').catch(notices.pushError)"
           />
           <span class="hint" :class="{ shown: interruptHint }">{{ t('composer.interruptHint') }}</span>
           <SendButton :busy="session.busy" :can-send="canSend" @click="onSendButton" />
@@ -410,18 +416,23 @@ defineExpose({ focus: () => input.value?.focus() })
   display: flex;
   flex: none;
   align-items: center;
-  gap: 8px;
-  margin-top: 4px;
+  gap: var(--composer-tags-hint-gap);
+  margin-top: var(--composer-text-gap);
 }
 
 .tag-row > :first-child {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
 }
 
+.tag-row > :last-child {
+  margin-left: auto;
+}
+
 .hint {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   max-width: 0; /* takes no room from the tags until it is shown */
   overflow: hidden;
   color: var(--text);

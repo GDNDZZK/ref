@@ -247,6 +247,35 @@ private slots:
 		QVERIFY((*started)->isRunning());
 	}
 
+	// The backend leaves by itself when its stdin is closed, which lets it clean up after itself.
+	void mockBackendIsGivenTimeToLeaveWhenItsObjectEnds()
+	{
+		QTemporaryDir directory;
+		const QString marker = directory.filePath(u"left"_s);
+		const QString script = writeScript(directory, u"polite"_s,
+		                                   u"echo '{\"port\":41873,\"token\":\"abc\"}'\ncat >/dev/null\nsleep 0.3\ntouch '"_s + marker + u"'\n"_s);
+
+		auto started = await(MockBackend::start(script)).value();
+		QVERIFY(started.has_value());
+		started->reset(); // waits for the script to finish
+
+		QVERIFY(QFileInfo::exists(marker));
+	}
+
+	void mockBackendThatIgnoresItsStdinIsTerminated()
+	{
+		QTemporaryDir directory;
+		const QString script = writeScript(directory, u"stubborn"_s, u"echo '{\"port\":41873,\"token\":\"abc\"}'\nexec sleep 60\n"_s);
+
+		auto started = await(MockBackend::start(script)).value();
+		QVERIFY(started.has_value());
+		QElapsedTimer waited;
+		waited.start();
+		started->reset();
+
+		QVERIFY2(waited.elapsed() < 10000, "the backend was not ended");
+	}
+
 	void mockBackendThatExitsEarlyIsAnError()
 	{
 		QTemporaryDir directory;

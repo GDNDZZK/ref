@@ -47,14 +47,19 @@ private slots:
 	void removeUpdatesOpensTurn();
 	void prependKeepsRowsBelow();
 	void resetReplacesEverything();
+	void replacingHistoryTouchesOnlyWhatChanged();
+	void replacingHistoryWithTheSameLeavesTheRows();
 	void ignoresUnknownMessages();
 	void replacingAMessageKeepsRowIdentity();
 	void everyMessageEndsWithAMetaLine();
 	void marksMessagesBeforeTheLastCompaction();
 	void keepsTheTailErrorLast();
+	void hidesTheTailErrorTheLastMessageShows();
 	void togglesFoldingAgainstTheDefault();
 	void carriesToolMetaAndImages();
 	void givesMessageTexts();
+	void summarisesWhatToolsAskOfTheUser();
+	void showsMarkdownWithoutImagesOrTags();
 };
 
 void TestConversationModel::splitsAssistantTextIntoBlocks()
@@ -320,6 +325,48 @@ void TestConversationModel::resetReplacesEverything()
 	QCOMPARE(model.partCount(u"u1"_s), -1);
 }
 
+void TestConversationModel::replacingHistoryTouchesOnlyWhatChanged()
+{
+	ConversationModel model;
+	QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
+	model.reset({user(u"u1"_s, u"one"_s), assistant(u"a1"_s, {text(u"first"_s)}), user(u"u2"_s, u"two"_s), assistant(u"a2"_s, {text(u"second"_s)})});
+	QSignalSpy resets(&model, &QAbstractItemModel::modelReset);
+	QSignalSpy removed(&model, &QAbstractItemModel::rowsRemoved);
+	QSignalSpy inserted(&model, &QAbstractItemModel::rowsInserted);
+	const int rowsBefore = model.rowCount();
+
+	model.replaceHistory({user(u"u1"_s, u"one"_s), assistant(u"a1"_s, {text(u"first"_s)}), user(u"u3"_s, u"three"_s)});
+
+	QCOMPARE(resets.count(), 0);
+	QCOMPARE(removed.count(), 1);
+	QCOMPARE(removed.first().at(1).toInt(), 4); // u1 and a1 with their meta lines stay
+	QCOMPARE(removed.first().at(2).toInt(), rowsBefore - 1);
+	QCOMPARE(inserted.count(), 1);
+	QCOMPARE(inserted.first().at(1).toInt(), 4);
+	QCOMPARE(render(model).mid(0, 2), (QStringList{u"user:one"_s, u"markdown:first"_s}));
+	QCOMPARE(render(model).last(), u"user:three"_s);
+	QCOMPARE(model.partCount(u"a2"_s), -1);
+	QCOMPARE(model.partCount(u"a1"_s), 1);
+}
+
+void TestConversationModel::replacingHistoryWithTheSameLeavesTheRows()
+{
+	ConversationModel model;
+	QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
+	const QList<refgui::proto::Message> history{user(u"u1"_s, u"one"_s), assistant(u"a1"_s, {text(u"first"_s)})};
+	model.reset(history);
+	QSignalSpy rowChanges(&model, &QAbstractItemModel::rowsRemoved);
+	QSignalSpy rowAdditions(&model, &QAbstractItemModel::rowsInserted);
+
+	model.replaceHistory(history);
+
+	QCOMPARE(rowChanges.count(), 0);
+	QCOMPARE(rowAdditions.count(), 0);
+	model.replaceHistory({});
+	QCOMPARE(model.rowCount(), 0);
+	QCOMPARE(rowChanges.count(), 1);
+}
+
 void TestConversationModel::ignoresUnknownMessages()
 {
 	ConversationModel model;
@@ -446,6 +493,28 @@ void TestConversationModel::keepsTheTailErrorLast()
 	QCOMPARE(model.rowCount(), 4);
 }
 
+// The last message shows its own error, so the same text at the end would say it twice.
+void TestConversationModel::hidesTheTailErrorTheLastMessageShows()
+{
+	ConversationModel model;
+	QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
+	model.setMessage(user(u"u1"_s, u"go"_s));
+	model.setTailError(u"Rate limited"_s);
+	QCOMPARE(model.rowCount(), 3);
+
+	refgui::proto::Message failed = assistant(u"a1"_s, {}, false);
+	failed.error = u"Rate limited"_s;
+	model.setMessage(failed);
+	QCOMPARE(model.rowCount(), 4); // the message's own error block and meta line, no tail
+	QCOMPARE(rowOfKind(model, u"error"_s), 2);
+	QCOMPARE(model.index(model.rowCount() - 1).data(ConversationModel::KindRole).toString(), u"meta"_s);
+
+	model.setTailError(u"Another"_s);
+	QCOMPARE(model.rowCount(), 5);
+	model.removeMessage(u"a1"_s);
+	QCOMPARE(model.rowCount(), 3);
+}
+
 void TestConversationModel::togglesFoldingAgainstTheDefault()
 {
 	ConversationModel model;
@@ -492,6 +561,43 @@ void TestConversationModel::carriesToolMetaAndImages()
 	QCOMPARE(images.size(), 1);
 	QCOMPARE(images.first().toMap().value(u"id"_s).toString(), u"a1:0:0"_s);
 	QCOMPARE(images.first().toMap().value(u"size"_s).toLongLong(), 12LL);
+}
+
+void TestConversationModel::summarisesWhatToolsAskOfTheUser()
+{
+	ConversationModel model;
+	QSignalSpy changed(&model, &ConversationModel::toolSummaryChanged);
+	const auto call = [](const QString& id, ToolState state) {
+		return refgui::proto::ToolPart{.callId = id, .name = u"bash"_s, .state = state};
+	};
+
+	model.setMessage(assistant(u"a1"_s, {call(u"c1"_s, ToolState::AwaitingPermission), call(u"c2"_s, ToolState::AwaitingPermission), call(u"c3"_s, ToolState::Delayed)}, false));
+	QCOMPARE(model.toolSummary().awaitingPermission, 2);
+	QCOMPARE(model.toolSummary().oldestAwaitingCallId, u"c1"_s);
+	QVERIFY(model.toolSummary().lastToolDelayed);
+	QVERIFY(changed.count() >= 1);
+
+	model.setPart(u"a1"_s, 0, call(u"c1"_s, ToolState::Running));
+	QCOMPARE(model.toolSummary().awaitingPermission, 1);
+	QCOMPARE(model.toolSummary().oldestAwaitingCallId, u"c2"_s);
+
+	model.setPart(u"a1"_s, 2, call(u"c3"_s, ToolState::Running));
+	QVERIFY(!model.toolSummary().lastToolDelayed);
+
+	model.reset({});
+	QCOMPARE(model.toolSummary().awaitingPermission, 0);
+	QVERIFY(model.toolSummary().oldestAwaitingCallId.isEmpty());
+}
+
+void TestConversationModel::showsMarkdownWithoutImagesOrTags()
+{
+	ConversationModel model;
+	model.setMessage(assistant(u"a1"_s, {text(u"look ![x](http://example.com/a.png) <img src=y>"_s), reasoning(u"![r](http://example.com/r.png)"_s)}));
+	QCOMPARE(roleOf(model, 0, ConversationModel::ContentRole).toString(), u"look [x](http://example.com/a.png) \\<img src=y>"_s);
+	QCOMPARE(roleOf(model, 1, ConversationModel::ContentRole).toString(), u"[r](http://example.com/r.png)"_s);
+	// What the user typed is plain text and stays as it is.
+	model.setMessage(user(u"u1"_s, u"![x](y)"_s));
+	QCOMPARE(roleOf(model, 2, ConversationModel::ContentRole).toString(), u"![x](y)"_s);
 }
 
 void TestConversationModel::givesMessageTexts()

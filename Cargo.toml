@@ -20,6 +20,10 @@ axum = { version = "0.8", features = ["ws"] }
 brotli = "9"
 flate2 = "1"
 open = "5"
+dunce = "1"
+hmac = "0.12"
+sha2 = "0.10"
+subtle = "2"
 tokio = { version = "1.54", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 tokio-tungstenite = "0.30"

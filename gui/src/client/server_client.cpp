@@ -22,6 +22,7 @@ Q_LOGGING_CATEGORY(lcClient, "refgui.client")
 const QString ClientName = u"ref-gui"_s;
 const QString NotConnected = u"not connected"_s;
 const QString ConnectionClosed = u"connection closed"_s;
+const QString BackendSilent = u"the backend stopped answering"_s;
 
 // The token goes in the URL as well as in Hello, the way ref-server's other clients send it.
 QUrl withToken(QUrl url, const QString& token)
@@ -71,6 +72,7 @@ ServerClient::ServerClient(QObject* parent)
 
 	connect(&m_socket, &QWebSocket::textMessageReceived, this, &ServerClient::onTextMessage);
 	connect(&m_socket, &QWebSocket::disconnected, this, &ServerClient::onDisconnected);
+	connect(&m_heartbeatTimer, &QTimer::timeout, this, &ServerClient::onHeartbeat);
 }
 
 ServerClient::~ServerClient()
@@ -78,7 +80,10 @@ ServerClient::~ServerClient()
 	failPending(ConnectionClosed);
 }
 
-QCoro::Task<Result<proto::HelloResult>> ServerClient::open(Endpoint endpoint, QString cwd, std::chrono::milliseconds timeout)
+QCoro::Task<Result<proto::HelloResult>> ServerClient::open(Endpoint endpoint,
+                                                           QString cwd,
+                                                           std::chrono::milliseconds timeout,
+                                                           QList<proto::NotifyFrame::Kind> notify)
 {
 	m_closeReason.clear();
 	const bool connected = co_await qCoro(m_socket).open(withToken(endpoint.url, endpoint.token), timeout);
@@ -89,17 +94,63 @@ QCoro::Task<Result<proto::HelloResult>> ServerClient::open(Endpoint endpoint, QS
 		co_return std::unexpected(reason);
 	}
 
-	const Result<QJsonObject> response = co_await request(proto::request::hello(ClientName, cwd, endpoint.token));
+	// Also a backend that never answers Hello is given up on.
+	m_silence.start();
+	m_heartbeatTimer.start(m_heartbeat.tick);
+	const Result<QJsonObject> response = co_await request(proto::request::hello(ClientName, cwd, endpoint.token, notify));
 	const Result<proto::HelloResult> hello = asResult(response, proto::parseHelloResult);
 	if(!hello)
 	{
 		close();
+		co_return hello;
 	}
+	m_helloDone = true;
 	co_return hello;
+}
+
+void ServerClient::setHeartbeat(const Heartbeat& heartbeat)
+{
+	m_heartbeat = heartbeat;
+	if(m_heartbeatTimer.isActive())
+	{
+		m_heartbeatTimer.start(m_heartbeat.tick);
+	}
+}
+
+void ServerClient::onHeartbeat()
+{
+	const auto silence = std::chrono::milliseconds(m_silence.elapsed());
+	if(silence >= m_heartbeat.deadAfter)
+	{
+		qCWarning(lcClient) << "no word from the backend for" << silence.count() << "ms; dropping the connection";
+		m_closeReason = BackendSilent;
+		m_socket.abort();
+		return;
+	}
+	// Before Hello is answered the backend does not take requests.
+	if(silence >= m_heartbeat.pingAfter && m_helloDone && !m_pingOutstanding)
+	{
+		ping();
+	}
+}
+
+QCoro::Task<> ServerClient::ping()
+{
+	m_pingOutstanding = true;
+	co_await request(proto::request::ping());
+	m_pingOutstanding = false;
+}
+
+void ServerClient::stopHeartbeat()
+{
+	m_heartbeatTimer.stop();
+	m_helloDone = false;
+	m_pingOutstanding = false;
 }
 
 void ServerClient::close()
 {
+	stopHeartbeat();
 	m_closeReason = ConnectionClosed;
 	m_socket.close();
 	if(m_socket.state() != QAbstractSocket::UnconnectedState)
@@ -149,9 +200,44 @@ QCoro::Task<Result<QList<proto::SessionInfo>>> ServerClient::listHistory(QString
 	co_return asResult(co_await request(proto::request::listHistory(cwd, limit)), proto::parseSessionsResult);
 }
 
-QCoro::Task<Result<proto::PromptResult>> ServerClient::prompt(QString sessionId, QString text)
+QCoro::Task<Result<proto::PromptResult>> ServerClient::prompt(QString sessionId, QString text, QList<proto::ImageData> images)
 {
-	co_return asResult(co_await request(proto::request::prompt(sessionId, text)), proto::parsePromptResult);
+	co_return asResult(co_await request(proto::request::prompt(sessionId, text, images)), proto::parsePromptResult);
+}
+
+QCoro::Task<Result<proto::RemovedPrompt>> ServerClient::undo(QString sessionId, std::optional<QString> messageId)
+{
+	co_return asResult(co_await request(proto::request::undo(sessionId, messageId)), proto::parseUndoResult);
+}
+
+QCoro::Task<Result<proto::RemovedPrompt>> ServerClient::removeQueued(QString sessionId, QString messageId)
+{
+	co_return asResult(co_await request(proto::request::removeQueued(sessionId, messageId)), proto::parseRemovedPromptResult);
+}
+
+QCoro::Task<Result<void>> ServerClient::shell(QString sessionId, QString command)
+{
+	co_return asVoidResult(co_await request(proto::request::shell(sessionId, command)));
+}
+
+QCoro::Task<Result<QStringList>> ServerClient::listFiles(QString cwd, QString query, int limit)
+{
+	co_return asResult(co_await request(proto::request::listFiles(cwd, query, limit)), proto::parseFilesResult);
+}
+
+QCoro::Task<Result<QString>> ServerClient::expandCommand(QString name, QString args, QString cwd)
+{
+	co_return asResult(co_await request(proto::request::expandCommand(name, args, cwd)), proto::parseTextResult);
+}
+
+QCoro::Task<Result<void>> ServerClient::setNotify(QList<proto::NotifyFrame::Kind> kinds)
+{
+	co_return asVoidResult(co_await request(proto::request::setNotify(kinds)));
+}
+
+QCoro::Task<Result<void>> ServerClient::setFocus(bool focused, QStringList sessions)
+{
+	co_return asVoidResult(co_await request(proto::request::setFocus(focused, sessions)));
 }
 
 QCoro::Task<Result<void>> ServerClient::abort(QString sessionId)
@@ -224,6 +310,16 @@ QCoro::Task<Result<proto::DirListing>> ServerClient::listDirs(QString path)
 	co_return asResult(co_await request(proto::request::listDirs(path)), proto::parseDirsResult);
 }
 
+QCoro::Task<Result<proto::MessagesPage>> ServerClient::messages(QString sessionId, QString before, int limit)
+{
+	co_return asResult(co_await request(proto::request::messages(sessionId, before, limit)), proto::parseMessagesResult);
+}
+
+QCoro::Task<Result<proto::ImageData>> ServerClient::getImage(QString sessionId, QString imageId)
+{
+	co_return asResult(co_await request(proto::request::getImage(sessionId, imageId)), proto::parseImageResult);
+}
+
 QCoro::Task<Result<void>> ServerClient::shutdown()
 {
 	co_return asVoidResult(co_await request(proto::request::shutdown()));
@@ -249,6 +345,7 @@ QCoro::Task<Result<QJsonObject>> ServerClient::request(QJsonObject body)
 
 void ServerClient::onTextMessage(const QString& text)
 {
+	m_silence.restart();
 	QJsonParseError parseError;
 	const QJsonDocument document = QJsonDocument::fromJson(text.toUtf8(), &parseError);
 	if(!document.isObject())
@@ -276,6 +373,7 @@ void ServerClient::onTextMessage(const QString& text)
 
 void ServerClient::onDisconnected()
 {
+	stopHeartbeat();
 	const QString reason = m_closeReason.isEmpty() ? (m_socket.closeReason().isEmpty() ? m_socket.errorString() : m_socket.closeReason()) : m_closeReason;
 	m_closeReason.clear();
 	failPending(ConnectionClosed);

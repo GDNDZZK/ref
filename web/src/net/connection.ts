@@ -30,7 +30,11 @@ export interface ConnectionOptions {
   token?: string
   notifyKinds?: () => NotifyKind[] // asked at each handshake, so a reconnect carries the current choice
   retryDelaysMs?: number[] // waits between reconnect attempts; the last one repeats
+  // Asked after each lost connection; true stops the retrying for good (e.g. the login expired).
+  giveUp?: () => Promise<boolean>
 }
+
+const MAX_QUOTED_FRAME = 80 // characters of a bad frame that go into the error
 
 const DEFAULT_RETRY_DELAYS_MS = [500, 1000, 2000, 4000, 8000]
 
@@ -153,17 +157,31 @@ export class RefConnection {
     const delay = delays[Math.min(this.attempt, delays.length - 1)]!
     this.attempt++
     this.setState('connecting', `lost (${reason}); retrying`)
-    this.retryTimer = setTimeout(() => this.dial(), delay)
+    const timer = setTimeout(() => this.dial(), delay)
+    this.retryTimer = timer
+    void this.askToGiveUp(timer)
+  }
+
+  private async askToGiveUp(timer: ReturnType<typeof setTimeout>): Promise<void> {
+    const giveUp = await this.options.giveUp?.().catch(() => false)
+    if (giveUp && this.retryTimer === timer) this.close('the connection was refused for good')
   }
 
   private receive(text: string): void {
-    let frame: ServerFrame
+    let parsed: unknown
     try {
-      frame = JSON.parse(text) as ServerFrame
+      parsed = JSON.parse(text)
     } catch (error) {
       this.reportError(new RefError(`invalid JSON from the server: ${String(error)}`))
       return
     }
+    if (typeof parsed !== 'object' || parsed === null) {
+      this.reportError(
+        new RefError(`a frame from the server is not an object: ${text.slice(0, MAX_QUOTED_FRAME)}`),
+      )
+      return
+    }
+    const frame = parsed as ServerFrame
 
     if (frame.kind === 'response') {
       this.settle(frame)
@@ -174,7 +192,7 @@ export class RefConnection {
       case 'sessions':
       case 'toast':
       case 'notify':
-        for (const listener of this.frameListeners) listener(frame)
+        for (const listener of [...this.frameListeners]) this.callListener(() => listener(frame))
         return
       default:
         this.reportError(new RefError(`unknown frame kind "${String((frame as { kind: unknown }).kind)}"`))
@@ -200,11 +218,26 @@ export class RefConnection {
 
   private setState(state: ConnectionState, detail: string): void {
     this.currentState = state
-    for (const listener of this.stateListeners) listener(state, detail)
+    for (const listener of [...this.stateListeners]) this.callListener(() => listener(state, detail))
   }
 
   private reportError(error: unknown): void {
     const wrapped = error instanceof Error ? error : new RefError(String(error))
-    for (const listener of this.errorListeners) listener(wrapped)
+    for (const listener of [...this.errorListeners]) {
+      try {
+        listener(wrapped)
+      } catch (listenerError) {
+        console.error('an error listener threw', listenerError) // nobody left to tell
+      }
+    }
+  }
+
+  // A listener that throws must not keep the others from hearing the news.
+  private callListener(call: () => void): void {
+    try {
+      call()
+    } catch (error) {
+      this.reportError(error)
+    }
   }
 }

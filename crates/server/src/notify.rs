@@ -15,7 +15,7 @@ use ref_proto::{NotifyKind, ServerFrame};
 impl Hub {
     /// Notifies the user about `st`'s session, following the rules in the module docs.
     /// `detail` is the tool name (permission) or the error text (turn_error).
-    pub fn notify(&self, st: &SessionState, kind: NotifyKind, detail: Option<String>) {
+    pub(crate) fn notify(&self, st: &SessionState, kind: NotifyKind, detail: Option<String>) {
         let session_id = &st.info.id;
         let mut winner = None;
         let mut winner_stamp = 0;

@@ -45,10 +45,10 @@ public:
 private:
 	struct Fence
 	{
-		QChar marker;
-		qsizetype length;
-		qsizetype indent;
-		QString language;
+		QChar marker{};
+		qsizetype length = 0;
+		qsizetype indent = 0;
+		QString language{};
 	};
 
 	static std::optional<Fence> parseOpeningFence(QStringView line);

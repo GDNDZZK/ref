@@ -4,6 +4,7 @@
 import type {
   ImageData,
   McpServerStatus,
+  Message,
   ModelRef,
   NamedImage,
   NotifyKind,
@@ -160,6 +161,41 @@ export class RefApi {
 
   async detach(sessionId: string): Promise<void> {
     await this.connection.request({ op: 'detach', session_id: sessionId })
+  }
+
+  // One page of messages older than `before`, oldest first.
+  async messagesBefore(
+    sessionId: string,
+    before: string,
+    limit?: number,
+  ): Promise<{ messages: Message[]; more_before: boolean }> {
+    const result = await this.connection.request({
+      op: 'messages',
+      session_id: sessionId,
+      before,
+      limit: limit ?? null,
+    })
+    return result as unknown as { messages: Message[]; more_before: boolean }
+  }
+
+  // The bytes of an image the messages only carry as a stub.
+  async getImage(sessionId: string, imageId: string): Promise<{ mime: string; data: string }> {
+    const result = (await this.connection.request({
+      op: 'get_image',
+      session_id: sessionId,
+      image_id: imageId,
+    })) as unknown as { image: { mime: string; data: string } }
+    return result.image
+  }
+
+  // Removes the message and all after it (the last human prompt without `messageId`).
+  async undo(sessionId: string, messageId?: string): Promise<{ text: string; images: NamedImage[] }> {
+    const result = await this.connection.request({
+      op: 'undo',
+      session_id: sessionId,
+      message_id: messageId ?? null,
+    })
+    return result as unknown as { text: string; images: NamedImage[] }
   }
 
   // `queued`: the session was busy, the message waits for the next safe point.

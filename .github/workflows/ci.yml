@@ -137,3 +137,35 @@ jobs:
           msg=$(head -c 60000 failures.txt)
           msg=${msg//'%'/'%25'}; msg=${msg//$'\r'/'%0D'}; msg=${msg//$'\n'/'%0A'}
           echo "::error title=GUI tests (${{ matrix.os }})::$msg"
+
+  # The tests of use-after-free and lifetime fixes only fail under AddressSanitizer. Debug,
+  # because the optimizer's -Wmaybe-uninitialized warnings are errors in the sanitizer build.
+  gui-sanitizers:
+    name: gui tests with ASan and UBSan
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/gui-deps
+
+      - name: Build ref-server
+        run: |
+          cargo build -p ref-server --locked
+          echo "REF_SERVER_BIN=$PWD/target/debug/ref-server" >> "$GITHUB_ENV"
+
+      - uses: ./.github/actions/gui-build
+        with:
+          build-type: Debug
+          cmake-args: -DREFGUI_SANITIZE=ON -DREF_SERVER=${{ env.REF_SERVER_BIN }}
+
+      # Any ASan, UBSan or LeakSanitizer report ends the test that hit it with an error.
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+          ASAN_OPTIONS: halt_on_error=1:detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          export REF_STATE_DIR="$RUNNER_TEMP/ref-state" REF_DATA_DIR="$RUNNER_TEMP/ref-data"
+          export QML_IMPORT_PATH="$REF_DEPS_DIR/prefix/lib/qml"
+          ctest --test-dir "$REF_GUI_BUILD_DIR" --output-on-failure

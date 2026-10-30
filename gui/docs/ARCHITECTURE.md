@@ -92,6 +92,7 @@ markdown    "The QML module is missing a file:"
 code        "qt_add_qml_module(...)"   language = "cmake"
 tool        "bash ctest"               toolState, input, output, failed
 error       "The request failed: ..."
+meta        "Build · mock-1 · 1.1s · ↑4.3k ↓100"   消息下面的一行：用时、token、Copy、Undo
 ```
 
 为什么拆成块：
@@ -105,7 +106,8 @@ error       "The request failed: ..."
 模型直接吃协议数据：
 
 ```cpp
-reset(messages)                       // 整段历史替换，唯一会 reset 的操作
+reset(messages)                       // 换成另一个会话的历史，唯一会 reset 的操作
+replaceHistory(messages)              // 同一会话的历史被改写：只删除、插入有差别的行
 prependMessages(older)                // 在最前面插入更早的消息
 setMessage(message)                   // 新消息，或按 id 整条替换
 setPart(messageId, index, part)       // 替换或追加一个 part
@@ -115,12 +117,17 @@ removeMessage(messageId)
 
 一条消息怎么变成块（`blocks.cpp`）：
 
-- 用户消息：所有文本 part 用空行连成一个 user 块，每张图片一个 image 块（M0 只显示文件名）。来源不是用户本人时带 `source` 和 `sender`（对等会话、派生任务、提醒、压缩摘要、shell 输出）。
+- 用户消息：所有文本 part 用空行连成一个 user 块，每张图片一个 image 块（带图片 id，缩略图按需从后端取）。来源不是用户本人时带 `source` 和 `sender`（对等会话、派生任务、提醒、压缩摘要、shell 输出）。
+- 每条消息末尾多一个 meta 块（压缩摘要消息除外），装着时间、agent、模型、token、interrupted / failed 标记和 Copy / Undo 的动作。
 - 助手消息：Text part 交给 `FenceSplitter` 切成 markdown / code 块（一个 part 一个 splitter，围栏不跨 part）；Reasoning part 是一个 reasoning 块；Tool part 是一个 tool 块；`error` 不为空且不是 "aborted"（忽略大小写，与 TUI 一致）时末尾再加一个 error 块。
 - `streaming`：消息没结束时，最后一个文本或思考 part 在流式；工具在状态不是终态时算流式。所以同一时刻最多一个块在接收内容（运行中的工具除外）。
 - `opensTurn`：user 块、来源是本人/对等/派生、且上面有行时为真，界面据此画分割线。prepend 和删除第一条消息时会对受影响的行发 `dataChanged`。
 
-内部结构：`m_rows` 是平铺的块列表，`data()` 直接按行取；每条消息记着自己占几行（`MessageNode`），每个 part 记着自己占几行并带着它的 splitter。更新时把受影响的块重新算出来，和旧的逐行比较（`replaceRows`）：内容变了的发带 role 列表的 `dataChanged`，多出来的插入，少了的删除。除了 `reset()`，不会 reset 模型，ListView 的入场动画才不会失效。
+内部结构：`m_rows` 是平铺的块列表，`data()` 直接按行取；每条消息记着自己占几行（`MessageNode`），每个 part 记着自己占几行并带着它的 splitter。更新时把受影响的块重新算出来，和旧的逐行比较（`replaceRows`）：内容变了的发带 role 列表的 `dataChanged`，多出来的插入，少了的删除。除了 `reset()`，不会 reset 模型，ListView 的入场动画才不会失效。`replaceHistory()`（Reset 事件，如压缩后的新历史）从第一个有差别的行起删除再插入，前面没变的行原地不动；被删除的行在 `Block` 里淡出再收起高度。
+
+模型还给每行算出两个与消息内容无关的状态（`refreshContext()`）：`stale`（在最后一次压缩之前，模型已看不到，界面变淡）和 `contextStart`（压缩摘要本身）。`ToolSummary`（有几个工具在等授权、最早的是哪个、最后一个工具是否在延迟倒计时）随行的变化更新，授权键和状态行读它。
+
+交给界面显示的 Markdown（Markdown / 思考 / shell / 压缩摘要块）过 `markdownForDisplay()`（`markdown_text.cpp`）：`![alt](src)` 变成 `[alt](src)`，开标签或注释的 `<` 转义成文字；行内代码、围栏代码（含还没闭合的）和缩进代码原样保留。这样模型的内容不会让 Qt 的 Markdown 渲染器去取图片或解释 HTML。
 
 Delta 指向还没见过的 part 时，按 TUI 的 `apply_delta` 规则补建（中间缺的补空文本 part；工具参数的 purpose 从流式 JSON 里提前解析出来显示）。
 
@@ -154,11 +161,17 @@ Delta 指向还没见过的 part 时，按 TUI 的 `apply_delta` 规则补建（
 
 ### SessionController
 
-一个会话的控制器：`create()`、`attach()`、`continueLast()`、`send()`、`abort()`、`permissionReply()`。订阅 `ServerClient::frameReceived`，按 session_id 过滤事件。
+一个会话的控制器：`create()`、`attach()`、`continueLast()`、`send()`、`abort()`、`permissionReply()`、`undo()`、`loadOlder()`、`getImage()`。订阅 `ServerClient::frameReceived`，按 session_id 过滤事件。
 
 - Attach 响应之前到达的事件不缓冲也不处理：它们要么已经在快照里，要么根本不会发来。这一点依赖服务器的行为，没有对着真实服务器的并发场景验证过。
 - 每次 `Backend::connected()` 后，如果已经有会话，自动重新 attach，快照替换整个历史；失败发 `reattachFailed`。
-- 工具等待授权的状态在 tool part 里（`awaiting_permission`），所以 Permission、PermissionResolved、Queue 事件目前不处理。
+- 工具等待授权的状态在 tool part 里（`awaiting_permission`），所以 Permission、PermissionResolved 事件不处理。
+- `loadOlder()` 取比当前最早一条更早的 100 条消息，先 `prependMessages()` 再清 `loadingOlder`，视图据此知道新增的行是历史、不播入场动画；`moreBefore` 来自快照、Reset 事件和每次翻页的响应。
+- `undo()` 回退到某条用户消息之前，返回被撤销的提示（文字和图片），`ChatSession` 把它交给输入框（`draftRestored`）。
+
+### tool_content
+
+`session/tool_content.{h,cpp}` 把工具调用读成界面要的结构：参数 JSON 解析、图标名、header 上的一行摘要（命令、路径、模式、`n/m done` 等）、todo 清单、read / grep 输出（`[path#TAG]` 头、`N:`、`*N:`、` N:` 行和 `...`）、diff 行、路径拆分、大小文字。格式是 `crates/tools` 写出来的那些，不认识的内容返回空，卡片退回到原样的输入和输出。`app/tool_info.h` 把这些函数作为 QML 单例 `ToolInfo` 暴露。有单元测试（`tst_tool_content`），WebUI 的 `web/src/model/toolContent.ts` 是同一份逻辑。
 
 ## 6. app：界面
 
@@ -210,7 +223,8 @@ current  += remaining * (1 - e^(-frameTime / followLag))
 
 - `following` 这个状态只由用户的手势改变：开始滚动或按住滚动条时置为 false；手势结束时，停在底部就恢复为 true。
 - 底部位置从 footer 读取，footer 紧跟在最后一行后面。底部留白也用 footer 来做，因为 `positionViewAtEnd()` 不计入 `bottomMargin`。
-- `cacheBuffer` 设得很大，所有行常驻。ListView 默认会销毁屏幕外的行，并按平均行高估算它们的高度；高的代码块一进出视口，估算值就会变，滚动条长度跟着变，拖动滚动条时内容来回跳。
+- `cacheBuffer` 设为 `retainedDistance`（20000 px，约 200 行），视口上下这个范围内的行常驻。ListView 销毁屏幕外的行后会按平均行高估算它们的高度；高的代码块一进出视口，估算值就会变，滚动条长度跟着变，拖动滚动条时内容来回跳。多数会话在这个范围内，所以几何量是精确的。全部常驻太费内存：mock 会话 800 行时，常驻全部的峰值是 256 MB，默认缓存是 124 MB（每行约 0.25 MB）。
+- 向上翻页：`ChatView` 的 `onContentYChanged` 在离顶部不到 `olderTriggerDistance`（400 px）、有更早的消息、不在加载、没有待重试的错误、且不在跟随时发 `loadOlderRequested`。顶部的 `OlderPill` 显示加载中、失败（点击重试）。前面插入行时 ListView 自己保持阅读位置，不需要补偿代码；`prepending` 为真期间新增的行不播入场动画。
 
 滚轮：
 
@@ -242,15 +256,34 @@ Flickable 自带的滚轮动画，每一格都从当前位置重新开始，上�
 |---|---|
 | `Block.qml` | 所有块的基类：在阅读栏里居中；流式输出时高度做追赶；`clip` 防止内容在追赶过程中溢出 |
 | `UserBlock.qml` | 气泡宽度贴合文字；开启新一轮的消息（`opensTurn`）上方加一条分割线，新发送的消息分割线从左往右展开（`added()`）；不是用户自己输入的消息（对等会话、派生任务、提醒、压缩摘要、shell 输出）上方有一行说明来源 |
-| `ImageBlock.qml` | 消息里的图片，目前只显示文件名 |
+| `ImageBlock.qml` | 消息里的图片：`ImageStrip` + `Thumbnail`（72 px 高），经 `image://chatimage/<会话 id>/<图片 id>` 取图（`ChatImageProvider`，异步，64 MB 缓存），点击发 `imageClicked`，由 `SessionPane` 里的 `Lightbox` 显示大图 |
+| `MetaBlock.qml` | 消息下面的一行（`MetaText`、`MetaAction`）：角色 / agent / 模型 / 用时 / token，interrupted / failed 标记，hover 显示 Copy，用户消息有 Undo；比消息本身淡 |
 | `MarkdownBlock.qml` | `TextEdit.MarkdownText` 渲染；流式输出时末尾有一个跟着走的脉冲点（`StreamCaret`） |
 | `CodeBlock.qml` | PlainText 加 `SyntaxHighlighter`；语言名匹配不到时按纯文本显示；复制按钮 |
 | `ReasoningBlock.qml` | 输出时自动展开，结束后自动折叠，也可以手动点击开合；"Thinking" 字样在输出时呼吸闪烁 |
 | 吸顶标题 | 思考块和工具块展开时，标题行贴在视口顶部，直到整个块滚出去（`Block.pinOffset()`）。吸顶时点击折叠，视图会跟着块变矮往回滚，标题停在原处不动 |
-| `ToolBlock.qml` | 通用工具卡片：状态点（`StatusDot.qml`：运行中脉冲，完成后变成绿色或红色，弹性回弹并扩散一圈圆环）和 `名称 用途` 标题；有参数或输出时可以展开查看。状态是 `awaiting_permission` 时，卡片底部出现“允许 / 本会话内允许 / 拒绝”三个按钮，通过 `ChatView.permissionAnswered` 回到 `ChatSession.permissionReply()` |
+| `ToolBlock.qml` | 工具卡片。头部：`ToolStateSlot`（16×16 的状态槽，8 种状态；运行中脉冲，完成 / 出错时 `Flourish`）、类型图标、名称、purpose 和摘要、Cancel 按钮（延迟倒计时中，带 `CountdownRing`）、状态文字、用时。折叠的失败卡片显示输出首行；等待授权时强制展开，边框变 warning 色，下方是 `PermissionSection`（允许 / 本会话内允许 / 拒绝，带 a / s / d 键帽）。正文由 `ToolBody` 按工具分派（见下） |
+| `StatusLine.qml` | 输入框上方一行：活动文字（`ShimmerText`）、本轮用时、重试倒计时、上下文占用条；信息来自 `ChatSession` 的 `activity`、`retry*`、`context*` 属性 |
 | `ErrorBlock.qml` | 浅红底卡片，左边一个"!"圆标（`AlertBadge.qml`）。出错很少见，但一定要让用户注意到：卡片以中性底色入场，落定后圆标用 `Flourish` 弹出并扩散一圈红色圆环，同时错误底色以硬边圆形从圆标处匀速扩散，盖满卡片即结束。动作都从一个点向外扩散，和工具状态点同一种语言；回弹只发生在圆标周围几个像素。用户正往上翻时出错，回到最新按钮的右上角会弹出一个红色"!"徽标，按钮消失时清掉 |
 | `Flourish.qml` | "发生了"的局部点缀：`play()` 让已显示的目标收缩后用 `OutElastic` 弹回并扩散圆环；`enter()` 用于新出现的目标，从 40% 大小淡入并同时弹开（从 0 放大会像一个膨胀的点）。工具状态点、错误圆标、回到最新按钮的徽标共用 |
 | `Pulse.qml` | 上面三处"进行中"闪烁共用的组件。停止时从当前透明度直接缓动回 1，不跑完当前周期；用 `alwaysRunToEnd` 的话，结束后最多还会再闪一次。周期由 `period` 设置，默认 `Motion.pulse`，Thinking 标题用更慢的 `Motion.calmPulse` |
+
+### 工具正文
+
+`ToolBody` 按工具名选一个正文组件：`DiffBody`（edit / write 的 diff）、`BashBody`（命令、输出、退出码和 exit / timed out / cancelled / truncated 标签；运行中只显示输出末尾 20 行）、`ReadBody`、`GrepBody`、`FindBody`、`WebfetchBody`、`SessionBody`（send_message 等跨会话工具）、`TodoBody`（清单，常驻展开）、其余用 `GenericBody`（输入 JSON 加输出）。结果缺了某个工具的布局所需的内容时也退回 `GenericBody`。共用件：`ToolBodyBase`（内边距和分段间距）、`ToolSection`（带标题的一段）、`OutputText`（200 行预览加 “Show more” 和复制）、`LineView`（带行号和符号列、可横向滚动的行表）、`CommandBox`、`ToolChip`、`CopyButton`。所有正文都从 `ToolBlock` 读数据（`call`），解析走 `ToolInfo`。
+
+### 授权按键
+
+`ChatSession.permissionKeysActive` 在有工具等待授权、且距第一次出现已过 350 ms（`PermissionGuard`）时为真。`SessionPane` 里的 `permissionKeys` 此时抢走焦点，把 a / Enter、s、d / Esc 交给 `ChatSession.answerOldestPermission()`，其他单字符键吞掉；答完把焦点还给输入框。同一个 call id 只回复一次（失败可以重试）。`SessionPane.keysEnabled` 在分屏里由分块是否有焦点决定。
+
+### 来自外部的文字
+
+模型的输出、工具的输出和其他会话发来的消息都不可信，界面按下面几条处理：
+
+- 除了 Markdown 块（`MarkdownBlock`、`ReasoningBlock`、`UserBlock` 里的 shell 和压缩摘要）和 `ShimmerText`，QML 里所有 `Text` 都是 `Text.PlainText`，`TextEdit` 必须写明 `textFormat`；`tst_plain_text` 检查这一点。`ProseText` 默认也是纯文本。
+- Markdown 先过 `markdownForDisplay()`（见 session 一节），再交给渲染器。
+- `LocalOnlyNetwork`（`local_only_network.cpp`）是 QML 引擎的网络工厂，只放行 `qrc` 和 `data`；后端的 WebSocket 不经过它。即使上面哪一层漏了，图片地址也不会被取。
+- `Links.open()` 只打开 http、https、mailto。
 
 ### 主题切换
 
@@ -273,6 +306,7 @@ grabToImage(page) → 截图盖到最上层 → Theme.toggle() → 截图淡出
 ### 图标与滚动条
 
 - 箭头图标统一用 `Chevron.qml` 绘制：90 度尖角、圆角端点，通过旋转改变朝向。不用字符，因为字体度量会让它在垂直方向上对不齐。根元素是普通 Item，Shape 只作为子元素，否则 Shape 按路径设置自己的尺寸，会和路径依赖尺寸形成绑定循环。
+- 工具和界面里的图标是 `assets/icons/` 的 SVG，经 `IconProvider` 加载：`image://icons/<名字>-<网格>?color=<hex>`，`Icon.qml` 包了一层，名字为空时不加载。
 - 滚动条的 handle 自绘，颜色取自 Theme。Basic 风格默认用系统 palette，不跟随主题。
 - 输入框高度随内容增长，最大 220px。
 
@@ -289,6 +323,10 @@ grabToImage(page) → 截图盖到最上层 → Theme.toggle() → 截图淡出
 | `tst_stream_pacer` | 首段按最大延迟摊开、成段到达时每帧放出量稳定、逐 token 的流几乎不加延迟、目标顺序、不拆字素、空闲后不攒额度、takeAll、按 part 查询待放出的文字 |
 | `tst_conversation_feed` | delta 被匀速放出、工具参数立即显示、整个 part 延长已显示的文字时只放出多的部分、不连续的文字立即替换、新 part 等前面的文字放完、回复结束的 Message 不截断文字、reset 丢弃待放出的文字、删除前先放空 |
 | `tst_session_controller` | 用假后端：创建并 attach、attach 失败、事件流和 busy 的变化、忽略其他会话的事件、发送不回显、abort、continue、重连后重新 attach、错误和 toast |
+| `tst_tool_content` | 工具调用的解析：参数、todo、摘要、read / grep 列表、diff 行、路径拆分、大小文字 |
+| `tst_markdown_text` | 图片变链接、标签转义、行内 / 围栏（含未闭合、`~~~`、列表里）/ 缩进代码原样保留 |
+| `tst_network_policy` | 组件的网络工厂只放行 qrc 和 data，对着本地 server 计数，确认模型内容不会触发请求 |
+| `tst_plain_text` | 来自外部的文字一律按纯文本显示：除白名单（Markdown 块、`ShimmerText`）外 QML 里的 Text / TextEdit 都要声明格式 |
 | `tst_command_line` | 目录检查和规范化、`-s` / `-c` / 新建的优先级、`-w`、`--agent`、`--model` 的格式、`--server` 和 `--token`、`--mock`、帮助和版本、隐藏的 `--smoke` |
 | `tst_mock_session` | 对着真实的 `ref-server --mock`：markdown 和代码块流式显示、工具调用、等待授权后允许或拒绝 |
 | `tst_app_smoke` | 整个程序（offscreen）：`--mock`、显式 `--server`、错误的 token、不存在的会话、自动拉起后端并在退出后自动消失、帮助和版本、错误参数；要求 stderr 里没有 QML 警告 |
@@ -299,12 +337,11 @@ QML 部分没有自动化测试：`tst_app_smoke` 只检查界面能加载、不
 
 ## 8. 已知限制
 
-- M0 没有的：输入框里的 agent / 模型切换和 `/`、`@`、`!`，粘贴图片，设置面板，侧边栏，分屏（`-w`），向上翻页加载更早的消息（`moreBefore` 已解析，还没使用）。
-- 图片只显示文件名。`IconProvider`（`image://icons/<name>-<size>?color=<hex>`，用 `assets/icons/` 里的 SVG）还没实现，界面上的图标目前都是手绘的 Shape。
-- 忙时发送按钮变成停止，不能排队发送第二条。
 - 对话在后端断开期间保持原样，恢复连接后用快照整段替换。
 - MarkdownBlock 每来一段增量就整段重新解析 Markdown，超长正文的性能还没测过。
-- 所有行常驻内存，超长会话的开销还没测过。
+- 超过 `retainedDistance`（约 200 行）的长会话里，视口外的行会被销毁，滚动条长度按平均行高估算，拖动滚动条时可能有轻微的跳动。
+- 没有专门规则的工具，卡片头部的 `key=value` 摘要按键名的字母顺序取前 3 个简单参数；终端客户端按服务器 JSON 里的键顺序取。协议层把参数解析成 `QJsonObject`，它会给键排序，所以顺序丢了。
+- bash 退出码非 0 时卡片头部的状态仍是 done（退出码只在正文标签里显示）。
 - 末尾的脉冲点依赖 `positionToRectangle`，Markdown 以列表或表格结尾时位置可能偏。
 - Windows 上的拉起锁、`CREATE_NO_WINDOW` 拉起和图标渲染没有在 Windows 上验证过。
 - 如果 ref-gui 在拉起后端之后、连上之前就退出，后端会留着（它的空闲超时只在第一次连接之后才生效）。TUI 有同样的限制。

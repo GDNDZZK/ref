@@ -34,7 +34,11 @@ class FakeSocket {
   }
 }
 
-function setup(retryDelaysMs = [100, 200], notifyKinds?: () => NotifyKind[]) {
+function setup(
+  retryDelaysMs = [100, 200],
+  notifyKinds?: () => NotifyKind[],
+  giveUp?: () => Promise<boolean>,
+) {
   const sockets: FakeSocket[] = []
   const connection = new RefConnection({
     connect: (handlers) => {
@@ -46,6 +50,7 @@ function setup(retryDelaysMs = [100, 200], notifyKinds?: () => NotifyKind[]) {
     cwd: '/work',
     notifyKinds,
     retryDelaysMs,
+    giveUp,
   })
   const states: ConnectionState[] = []
   const errors: Error[] = []
@@ -160,6 +165,48 @@ describe('RefConnection', () => {
     ])
   })
 
+  it('drops a frame that is not an object and reports it', async () => {
+    const env = setup()
+    const socket = await openFully(env)
+
+    socket.serverSends('null')
+    socket.serverSends('42')
+
+    expect(env.errors.map((e) => e.message)).toEqual([
+      expect.stringContaining('not an object'),
+      expect.stringContaining('not an object'),
+    ])
+  })
+
+  it('reports a listener that throws and still calls the others', async () => {
+    const env = setup()
+    const socket = await openFully(env)
+    const seen: unknown[] = []
+    env.connection.onFrame(() => {
+      throw new Error('broken listener')
+    })
+    env.connection.onFrame((frame) => seen.push(frame))
+
+    socket.serverSends({ kind: 'toast', level: 'info', text: 'hi' })
+
+    expect(seen).toHaveLength(1)
+    expect(env.errors.map((e) => e.message)).toEqual(['broken listener'])
+  })
+
+  it('tells every state listener even when one throws', async () => {
+    const env = setup()
+    const states: string[] = []
+    env.connection.onState(() => {
+      throw new Error('broken state listener')
+    })
+    env.connection.onState((state) => states.push(state))
+
+    env.connection.open()
+
+    expect(states).toEqual(['connecting'])
+    expect(env.errors.map((e) => e.message)).toEqual(['broken state listener'])
+  })
+
   it('fails pending requests when the connection drops, then reconnects and says hello again', async () => {
     const env = setup([100])
     const socket = await openFully(env)
@@ -226,5 +273,27 @@ describe('RefConnection', () => {
 
     expect(env.connection.state).toBe('closed')
     expect(env.sockets).toHaveLength(1)
+  })
+
+  it('stops retrying when told to give up after a loss', async () => {
+    const env = setup([100], undefined, () => Promise.resolve(true))
+    env.connection.open()
+    env.sockets[0]!.handlers.closed('closed (1006)')
+
+    await vi.waitFor(() => expect(env.connection.state).toBe('closed'))
+    vi.advanceTimersByTime(60_000)
+    expect(env.sockets).toHaveLength(1)
+  })
+
+  it('keeps retrying when it is told to carry on', async () => {
+    const giveUp = vi.fn(() => Promise.resolve(false))
+    const env = setup([100], undefined, giveUp)
+    env.connection.open()
+    env.sockets[0]!.handlers.closed('closed (1006)')
+
+    await vi.advanceTimersByTimeAsync(100)
+    expect(giveUp).toHaveBeenCalledOnce()
+    expect(env.sockets).toHaveLength(2)
+    expect(env.connection.state).toBe('connecting')
   })
 })

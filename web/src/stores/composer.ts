@@ -6,6 +6,7 @@ import { SessionComposer } from '../composer/sessionComposer.ts'
 import type { ComposerHost } from '../composer/sessionComposer.ts'
 import type { SlashCommand } from '../composer/completion.ts'
 import { HISTORY_STORAGE_KEY, StoredPromptHistory } from '../composer/historyStorage.ts'
+import { labelText } from '../commands/label.ts'
 import { translate } from '../i18n/index.ts'
 import type { ChatSession } from '../model/chatSession.ts'
 import { useCommandsStore } from './commands.ts'
@@ -38,26 +39,15 @@ export const useComposerStore = defineStore('composer', () => {
 
   const composers = new Map<string, SessionComposer>()
 
-  // The built-in commands of the registry, then the user's own from the configuration.
+  // Every command that has a slash name: built-in ones and the user's own from the configuration.
   function slashCommands(): SlashCommand[] {
-    const builtin = commands.slashEntries().map((entry): SlashCommand => ({
+    return commands.slashEntries().map((entry) => ({
       name: entry.name,
       aliases: entry.aliases,
-      title: entry.descriptionKey ? translate(entry.descriptionKey) : '',
-      takesArgs: entry.argsHint !== undefined,
-      custom: false,
+      title: labelText(entry.title),
+      takesArgs: entry.usage !== undefined,
+      custom: entry.source !== 'builtin',
     }))
-    const taken = new Set(builtin.flatMap((command) => [command.name, ...command.aliases]))
-    const custom = (connection.config?.commands ?? [])
-      .filter((command) => !taken.has(command.name))
-      .map((command): SlashCommand => ({
-        name: command.name,
-        aliases: [],
-        title: command.description,
-        takesArgs: true,
-        custom: true,
-      }))
-    return [...builtin, ...custom]
   }
 
   function hostFor(sessionId: string): ComposerHost {
@@ -70,7 +60,7 @@ export const useComposerStore = defineStore('composer', () => {
       isBusy: () => session().busy,
       hasDelayedTool: () => hasDelayedTool(session()),
       slashCommands,
-      runSlash: (line) => commands.runSlash(line, { sessionId }).then(() => undefined),
+      runSlash: (line) => commands.runSlash(line, sessionId).then(() => undefined),
       abort: () => session().stop(),
       toast: (level, messageKey, params) => notices.push(level, translate(messageKey, params)),
       reportError: (error) => notices.pushError(error),
@@ -91,27 +81,7 @@ export const useComposerStore = defineStore('composer', () => {
     composers.delete(sessionId)
   }
 
-  // Tab / Shift+Tab. The tags change when the backend confirms with an Info event.
-  async function cycleAgent(sessionId: string, direction: 1 | -1): Promise<void> {
-    const names = (connection.config?.agents ?? []).map((agent) => agent.name)
-    if (names.length === 0) return
-    const current = names.indexOf(workspace.chat(sessionId).info?.agent ?? '')
-    const next = names[(current + direction + names.length) % names.length]!
-    try {
-      await connection.getApi().setAgent(sessionId, next)
-    } catch (error) {
-      notices.pushError(error)
-    }
-  }
+  workspace.onGone(forget)
 
-  // Ctrl+T: the next variant of the model.
-  async function cycleVariant(sessionId: string): Promise<void> {
-    try {
-      await connection.getApi().setVariant(sessionId)
-    } catch (error) {
-      notices.pushError(error)
-    }
-  }
-
-  return { of, forget, slashCommands, cycleAgent, cycleVariant }
+  return { of, forget, slashCommands }
 })

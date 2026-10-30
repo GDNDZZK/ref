@@ -20,8 +20,8 @@ Block {
 
 	onAdded: {
 		arrival.restart()
-		if (!ListView.view.following)
-			ListView.view.errorOutOfSight()
+		if (!chat.following)
+			chat.errorOutOfSight()
 	}
 
 	Rectangle {

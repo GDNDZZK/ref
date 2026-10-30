@@ -59,8 +59,12 @@ async fn login_trades_the_token_for_a_cookie() {
     );
     let cookie = login.headers()["set-cookie"].to_str().unwrap();
     assert!(
-        cookie.starts_with(&format!("ref_web={}", web.token)),
-        "{cookie}"
+        cookie.starts_with(&format!("ref_web_{}=", web.port)),
+        "the name carries the port: {cookie}"
+    );
+    assert!(
+        !cookie.contains(&web.token),
+        "the cookie is not the login token: {cookie}"
     );
     assert!(
         cookie.contains("HttpOnly") && cookie.contains("SameSite=Strict"),
@@ -96,7 +100,7 @@ async fn login_trades_the_token_for_a_cookie() {
 
     let ping: serde_json::Value = web
         .http
-        .get(web.url("/api/ping"))
+        .get(web.url("/api/ping?nonce=00ff"))
         .send()
         .await
         .unwrap()
@@ -104,6 +108,21 @@ async fn login_trades_the_token_for_a_cookie() {
         .await
         .unwrap();
     assert_eq!(ping["app"], "ref-web");
+    assert_eq!(ping["proof"].as_str().unwrap().len(), 64, "{ping}");
+    let other_nonce: serde_json::Value = web
+        .http
+        .get(web.url("/api/ping?nonce=00fe"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_ne!(ping["proof"], other_nonce["proof"]);
+    for bad in ["/api/ping", "/api/ping?nonce=", "/api/ping?nonce=zz"] {
+        let response = web.http.get(web.url(bad)).send().await.unwrap();
+        assert_eq!(response.status(), 400, "{bad}");
+    }
 }
 
 #[tokio::test]
@@ -173,7 +192,11 @@ async fn websocket_checks_cookie_origin_and_host() {
         .unwrap();
     assert_eq!(status_of(no_cookie), 401);
     let bad_cookie = web
-        .try_ws(Some("ref_web=wrong".into()), Some(web.origin()), None)
+        .try_ws(
+            Some(format!("{}=wrong", web.cookie_name())),
+            Some(web.origin()),
+            None,
+        )
         .await
         .err()
         .unwrap();
@@ -306,7 +329,8 @@ async fn unreachable_backend_closes_the_tab_with_the_reason() {
 async fn a_real_backend_accepts_a_hello_without_token() {
     let env = Env::new("real");
     let (_backend, backend_port) = real_backend(&env, BACKEND_TOKEN).await;
-    let server = format!("ws://127.0.0.1:{backend_port}/");
+    // No trailing slash: the form users type.
+    let server = format!("ws://127.0.0.1:{backend_port}");
     let web = env
         .start(&["--server", &server, "--token", BACKEND_TOKEN])
         .await;
@@ -373,18 +397,114 @@ async fn a_port_held_by_another_program_is_an_error() {
 }
 
 #[tokio::test]
-async fn the_login_token_survives_a_restart() {
+async fn a_ref_web_with_another_login_token_is_reported_as_such() {
+    let first_env = Env::new("token-a");
+    let first = first_env.start(&["--server", "ws://127.0.0.1:1/"]).await;
+    let second_env = Env::new("token-b");
+    let port = first.port.to_string();
+    let output = second_env.run(&["--no-open", "--port", &port]);
+    assert!(!output.status.success());
+    let err = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        err.contains("or by a ref-web with a different login token"),
+        "{err}"
+    );
+    assert!(!err.contains(&first.token), "{err}");
+}
+
+#[tokio::test]
+async fn the_login_token_survives_a_restart_but_sessions_do_not() {
     let env = Env::new("token");
     let (first, _upstream) = web_with_fake_upstream(&env).await;
-    let token = first.token.clone();
+    let (token, port, old_cookie) = (first.token.clone(), first.port, first.cookie());
     drop(first);
-    let (second, _upstream) = web_with_fake_upstream(&env).await;
+
+    let upstream = fake_upstream().await;
+    let server = format!("ws://127.0.0.1:{}/", upstream.port);
+    let second = env.start_on(port, &["--server", &server]).await;
     assert_eq!(second.token, token);
-    let login = second
+    assert_ne!(second.cookie(), old_cookie, "a new random session id");
+    let with_old_cookie = second
         .http
-        .get(second.url(&format!("/login?token={token}")))
+        .get(second.url("/api/info"))
+        .header("cookie", old_cookie)
         .send()
         .await
         .unwrap();
-    assert_eq!(login.status(), 303);
+    assert_eq!(
+        with_old_cookie.status(),
+        401,
+        "sessions end with the process"
+    );
+    assert_eq!(second.get("/api/info").await.status(), 200);
+}
+
+#[tokio::test]
+async fn two_instances_keep_separate_cookies() {
+    let env = Env::new("two");
+    let (first, _upstream) = web_with_fake_upstream(&env).await;
+    let (second, _upstream) = web_with_fake_upstream(&env).await;
+    assert_ne!(first.cookie_name(), second.cookie_name());
+
+    // Both cookies sit in one browser jar, which sends them to every port of the host.
+    let both = format!("{}; {}", first.cookie(), second.cookie());
+    for web in [&first, &second] {
+        let response = web
+            .http
+            .get(web.url("/api/info"))
+            .header("cookie", &both)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+    }
+    // And one instance does not accept the other's session.
+    let crossed = first
+        .http
+        .get(first.url("/api/info"))
+        .header("cookie", second.cookie())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(crossed.status(), 401);
+}
+
+/// A program that answers every request like a ref-web would, without knowing the login token.
+async fn impostor_ref_web() -> u16 {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        loop {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            tokio::spawn(async move {
+                use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+                let mut request = [0u8; 1024];
+                let _ = stream.read(&mut request).await;
+                let body = r#"{"app":"ref-web","version":"0.1.0","proof":"00"}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes()).await;
+            });
+        }
+    });
+    port
+}
+
+// Multi-threaded: `env.run` blocks this thread while the impostor has to answer.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_program_that_only_looks_like_ref_web_does_not_get_the_login_token() {
+    let env = Env::new("impostor");
+    let port = impostor_ref_web().await.to_string();
+    let output = env.run(&["--no-open", "--port", &port]);
+    assert!(!output.status.success(), "{output:?}");
+    let all = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(all.contains("in use by another program"), "{all}");
+    let token = std::fs::read_to_string(env.state_dir().join("web/login-token")).unwrap();
+    assert!(!all.contains(token.trim()), "the login URL leaked: {all}");
 }
