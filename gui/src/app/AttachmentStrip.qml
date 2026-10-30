@@ -49,7 +49,7 @@ ListView {
 				source: thumb.source
 				fillMode: Image.PreserveAspectCrop
 				asynchronous: true
-				sourceSize: Qt.size(strip.thumbSize * Screen.devicePixelRatio, strip.thumbSize * Screen.devicePixelRatio)
+				sourceSize: Qt.size(strip.thumbSize, strip.thumbSize) // logical: Image scales it by the device pixel ratio
 			}
 		}
 
