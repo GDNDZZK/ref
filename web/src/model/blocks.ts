@@ -8,10 +8,19 @@ import type { JsonValue, PermissionRequest, ToolState } from '../proto/generated
 
 export type UserSource = 'human' | 'peer' | 'spawn' | 'reminder' | 'compaction' | 'shell'
 
+// An image the messages carry as a stub; `getImage` fetches the bytes.
+export interface ImageRef {
+  id: string | null
+  name: string | null
+  mime: string
+  size: number | null
+}
+
 interface BlockBase {
   key: string // stable across updates: `<message id>:<part index>[:<segment>]`
   messageId: string
   streaming: boolean // text or tool call still being produced
+  stale: boolean // before the last compaction: no longer sent to the model
 }
 
 export interface UserBlock extends BlockBase {
@@ -20,6 +29,7 @@ export interface UserBlock extends BlockBase {
   source: UserSource
   senderName: string | undefined // other sessions' messages
   opensTurn: boolean // draws the divider above it
+  images: ImageRef[]
 }
 
 export interface ReasoningBlock extends BlockBase {
@@ -52,6 +62,7 @@ export interface ToolBlock extends BlockBase {
   timeEnd: number | null
   runAt: number | null // Delayed: when execution starts
   permission: PermissionRequest | undefined // set while the call waits for the user
+  images: ImageRef[]
 }
 
 export interface ErrorBlock extends BlockBase {
@@ -59,15 +70,61 @@ export interface ErrorBlock extends BlockBase {
   text: string
 }
 
-export type Block = UserBlock | ReasoningBlock | MarkdownBlock | CodeBlock | ToolBlock | ErrorBlock
+// The footer under a message.
+export interface MetaBlock extends BlockBase {
+  kind: 'meta'
+  role: 'user' | 'assistant'
+  source: UserSource
+  time: number
+  timeEnd: number | null // null while the reply is still being written
+  agent: string | null
+  model: string | null
+  variant: string | null
+  tokensIn: number // input + cache read + cache write
+  tokensOut: number
+  interrupted: boolean
+  failed: boolean
+  canUndo: boolean
+  copyable: boolean // the message has text to copy
+}
+
+// The message that summarizes the history before it.
+export interface CompactionBlock extends BlockBase {
+  kind: 'compaction'
+  text: string
+  time: number
+  last: boolean // the last compaction of the session
+}
+
+export type Block =
+  | UserBlock
+  | ReasoningBlock
+  | MarkdownBlock
+  | CodeBlock
+  | ToolBlock
+  | ErrorBlock
+  | MetaBlock
+  | CompactionBlock
 
 export function isFinalToolState(state: ToolState): boolean {
   return state === 'done' || state === 'error' || state === 'denied' || state === 'cancelled'
+}
+
+// Same value, looking into arrays and plain objects (image lists are rebuilt on every build).
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  const keys = Object.keys(a)
+  if (keys.length !== Object.keys(b).length) return false
+  return keys.every((key) =>
+    sameValue((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]),
+  )
 }
 
 // Keeps `previous` when `next` says the same, so the view sees no change.
 export function reuseIfEqual<T extends Block>(previous: T | undefined, next: T): T {
   if (!previous || previous.kind !== next.kind) return next
   const keys = Object.keys(next) as (keyof T)[]
-  return keys.every((key) => previous[key] === next[key]) ? previous : next
+  return keys.every((key) => sameValue(previous[key], next[key])) ? previous : next
 }

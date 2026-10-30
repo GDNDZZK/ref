@@ -4,7 +4,7 @@ import { ref, useTemplateRef, watch } from 'vue'
 import { usePulse } from '../motion/usePulse.ts'
 import Flourish from './Flourish.vue'
 
-const props = defineProps<{ running: boolean; failed: boolean; muted?: boolean }>()
+const props = defineProps<{ running: boolean; failed: boolean; muted?: boolean; color?: string }>()
 
 const PULSE_DIMMED = 0.5
 
@@ -24,7 +24,11 @@ watch(
 </script>
 
 <template>
-  <span class="status" :class="{ running, failed, muted }">
+  <span
+    class="status"
+    :class="{ running, failed, muted }"
+    :style="color ? { '--state-color': color } : undefined"
+  >
     <Flourish ref="flourish" />
     <span ref="dot" class="dot" />
   </span>

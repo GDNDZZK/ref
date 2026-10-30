@@ -2,9 +2,7 @@
 // engine and token output only, so the page's CSP stays strict. Colors come out as CSS custom
 // properties for both themes (--shiki-light, --shiki-dark), so switching theme re-tokenizes nothing.
 
-import { createHighlighterCore } from 'shiki/core'
 import type { HighlighterCore } from 'shiki/core'
-import { createJavaScriptRegexEngine } from 'shiki/engine/javascript'
 import { BREEZE_DARK, BREEZE_LIGHT } from './breeze.ts'
 import { languageFromName, loadLanguage } from './languages.ts'
 import type { LanguageId } from './languages.ts'
@@ -25,12 +23,21 @@ const MAX_CHARS = 200_000 // beyond this, plain text: tokenizing it would stall 
 let highlighter: Promise<HighlighterCore> | undefined
 const loaded = new Set<LanguageId>()
 
-function core(): Promise<HighlighterCore> {
-  highlighter ??= createHighlighterCore({
+// Shiki itself is a chunk of its own, fetched when the first code block appears.
+async function createCore(): Promise<HighlighterCore> {
+  const [{ createHighlighterCore }, { createJavaScriptRegexEngine }] = await Promise.all([
+    import('shiki/core'),
+    import('shiki/engine/javascript'),
+  ])
+  return createHighlighterCore({
     themes: [BREEZE_LIGHT, BREEZE_DARK],
     langs: [],
     engine: createJavaScriptRegexEngine({ forgiving: true }),
   })
+}
+
+function core(): Promise<HighlighterCore> {
+  highlighter ??= createCore()
   return highlighter
 }
 

@@ -24,9 +24,17 @@ proto::SessionInfo session(const QString& id, qint64 created, qint64 updated = 0
 	proto::SessionInfo info;
 	info.id = id;
 	info.cwd = u"/home/me/project"_s;
+	info.live = true;
 	info.createdAt = created;
 	info.updatedAt = updated == 0 ? created : updated;
 	info.model = {u"p"_s, u"m"_s, std::nullopt};
+	return info;
+}
+
+proto::SessionInfo stored(const QString& id, qint64 created, qint64 updated = 0)
+{
+	proto::SessionInfo info = session(id, created, updated);
+	info.live = false;
 	return info;
 }
 
@@ -75,18 +83,23 @@ private slots:
 
 void TstSessionList::sortsLiveByCreationAndHistoryByUpdate()
 {
-	SessionListModel live(SessionListModel::Order::CreatedNewestFirst, true);
+	SessionListModel live;
 	live.setSessions({session(u"a"_s, 1, 90), session(u"b"_s, 3, 10), session(u"c"_s, 2, 50)});
 	QCOMPARE(ids(live), (QStringList{u"b"_s, u"c"_s, u"a"_s}));
 
-	SessionListModel history(SessionListModel::Order::UpdatedNewestFirst, false);
-	history.setSessions({session(u"a"_s, 1, 90), session(u"b"_s, 3, 10), session(u"c"_s, 2, 50)});
+	SessionListModel history;
+	history.setSessions({stored(u"a"_s, 1, 90), stored(u"b"_s, 3, 10), stored(u"c"_s, 2, 50)});
 	QCOMPARE(ids(history), (QStringList{u"a"_s, u"c"_s, u"b"_s}));
+
+	// Together, the live ones come first.
+	SessionListModel both;
+	both.setSessions({stored(u"old"_s, 1, 99), session(u"live"_s, 2, 5)});
+	QCOMPARE(ids(both), (QStringList{u"live"_s, u"old"_s}));
 }
 
 void TstSessionList::keepsRowsOfSessionsThatStay()
 {
-	SessionListModel model(SessionListModel::Order::CreatedNewestFirst, true);
+	SessionListModel model;
 	model.setSessions({session(u"a"_s, 1), session(u"b"_s, 2)});
 	QSignalSpy inserted(&model, &QAbstractItemModel::rowsInserted);
 	QSignalSpy removed(&model, &QAbstractItemModel::rowsRemoved);
@@ -115,13 +128,13 @@ void TstSessionList::keepsRowsOfSessionsThatStay()
 
 void TstSessionList::movesInsteadOfRecreating()
 {
-	SessionListModel model(SessionListModel::Order::UpdatedNewestFirst, false);
-	model.setSessions({session(u"a"_s, 1, 30), session(u"b"_s, 2, 20), session(u"c"_s, 3, 10)});
+	SessionListModel model;
+	model.setSessions({stored(u"a"_s, 1, 30), stored(u"b"_s, 2, 20), stored(u"c"_s, 3, 10)});
 	QSignalSpy moved(&model, &QAbstractItemModel::rowsMoved);
 	QSignalSpy inserted(&model, &QAbstractItemModel::rowsInserted);
 	QSignalSpy removed(&model, &QAbstractItemModel::rowsRemoved);
 
-	model.setSessions({session(u"a"_s, 1, 30), session(u"b"_s, 2, 20), session(u"c"_s, 3, 40)});
+	model.setSessions({stored(u"a"_s, 1, 30), stored(u"b"_s, 2, 20), stored(u"c"_s, 3, 40)});
 	QCOMPARE(ids(model), (QStringList{u"c"_s, u"a"_s, u"b"_s}));
 	QCOMPARE(moved.count(), 1);
 	QCOMPARE(inserted.count(), 0);
@@ -130,7 +143,7 @@ void TstSessionList::movesInsteadOfRecreating()
 
 void TstSessionList::filtersIgnoringCase()
 {
-	SessionListModel model(SessionListModel::Order::UpdatedNewestFirst, false);
+	SessionListModel model;
 	proto::SessionInfo a = session(u"ses_aaa"_s, 1);
 	a.title = u"Fix the Parser"_s;
 	proto::SessionInfo b = session(u"ses_bbb"_s, 2);
@@ -153,7 +166,7 @@ void TstSessionList::filtersIgnoringCase()
 
 void TstSessionList::derivesRoles()
 {
-	SessionListModel model(SessionListModel::Order::CreatedNewestFirst, true);
+	SessionListModel model;
 	proto::SessionInfo info = session(u"a"_s, 1);
 	info.status.state = proto::SessionStatus::State::WaitingPermission;
 	info.model.variant = u"high"_s;
@@ -185,7 +198,7 @@ void TstSessionList::derivesRoles()
 
 void TstSessionList::marksCurrentAndTiles()
 {
-	SessionListModel model(SessionListModel::Order::CreatedNewestFirst, true);
+	SessionListModel model;
 	model.setSessions({session(u"a"_s, 1), session(u"b"_s, 2)});
 	QSignalSpy changed(&model, &QAbstractItemModel::dataChanged);
 

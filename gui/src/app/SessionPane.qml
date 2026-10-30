@@ -8,6 +8,10 @@ Item {
 	id: pane
 
 	required property ChatSession session
+	// In a split-view tile: tighter margins.
+	property bool compact: false
+	readonly property real margin: compact ? 10 : Theme.pagePadding
+	readonly property real columnPadding: compact ? 16 : Theme.pagePadding
 
 	function focusInput() {
 		composer.focusInput()
@@ -17,6 +21,7 @@ Item {
 		id: chat
 		anchors { left: parent.left; right: parent.right; top: parent.top; bottom: composer.top }
 		model: pane.session.blocks
+		sidePadding: pane.columnPadding
 		turnInProgress: pane.session.busy
 		sessionId: pane.session.sessionId
 		permissionCount: pane.session.permissionCount
@@ -156,7 +161,7 @@ Item {
 
 	Composer {
 		id: composer
-		anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: Theme.pagePadding }
+		anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: pane.margin }
 		width: chat.columnWidth
 		busy: pane.session.busy
 		sendingEnabled: pane.session.ready
