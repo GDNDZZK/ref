@@ -81,7 +81,11 @@ impl Env {
 
     /// Starts ref-web in the background and waits until it listens.
     pub async fn start(&self, args: &[&str]) -> Web {
-        let port = free_port();
+        self.start_on(free_port(), args).await
+    }
+
+    /// Like `start`, on a given port.
+    pub async fn start_on(&self, port: u16, args: &[&str]) -> Web {
         let port_arg = port.to_string();
         let mut all = vec!["--no-open", "--port", &port_arg];
         all.extend_from_slice(args);
@@ -95,6 +99,7 @@ impl Env {
             child,
             port,
             token: String::new(),
+            session_cookie: String::new(),
             http: reqwest::Client::builder()
                 .no_proxy()
                 .redirect(reqwest::redirect::Policy::none())
@@ -103,6 +108,7 @@ impl Env {
         };
         web.wait_until_listening().await;
         web.token = std::fs::read_to_string(self.state_dir().join("web/login-token")).unwrap();
+        web.session_cookie = web.log_in().await;
         web
     }
 }
@@ -111,6 +117,8 @@ pub struct Web {
     child: Child,
     pub port: u16,
     pub token: String,
+    /// `name=value` of the session cookie that `/login` handed out.
+    session_cookie: String,
     pub http: reqwest::Client,
 }
 
@@ -169,7 +177,23 @@ impl Web {
     }
 
     pub fn cookie(&self) -> String {
-        format!("ref_web={}", self.token)
+        self.session_cookie.clone()
+    }
+
+    /// Name of the session cookie.
+    pub fn cookie_name(&self) -> &str {
+        self.session_cookie.split('=').next().unwrap()
+    }
+
+    async fn log_in(&self) -> String {
+        let response = self
+            .http
+            .get(self.url(&format!("/login?token={}", self.token)))
+            .send()
+            .await
+            .unwrap();
+        let set_cookie = response.headers()["set-cookie"].to_str().unwrap();
+        set_cookie.split(';').next().unwrap().to_string()
     }
 
     pub fn origin(&self) -> String {

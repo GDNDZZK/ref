@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
 use crate::assets::{self, Asset};
-use crate::guard::{self, COOKIE_NAME, HostPolicy, constant_time_eq, text_response};
+use crate::guard::{self, HostPolicy, SessionCookie, constant_time_eq, text_response};
 use crate::launch;
 use crate::tunnel;
 use crate::upstream::Upstream;
@@ -30,13 +30,14 @@ const API_PREFIX: &str = "/api/";
 const INDEX_PATH: &str = "/index.html";
 const HASHED_ASSETS_PREFIX: &str = "/assets/";
 const APP_NAME: &str = "ref-web";
-const COOKIE_MAX_AGE_SECS: u32 = 30 * 24 * 60 * 60;
 const IMMUTABLE: &str = "public, max-age=31536000, immutable";
 const REVALIDATE: &str = "no-cache";
 const NO_STORE: &str = "no-store";
 
 pub struct AppState {
+    /// What `/login?token=` must present.
     pub login_token: String,
+    pub session: SessionCookie,
     pub hosts: HostPolicy,
     /// Directory new sessions start in ([DIR]).
     pub cwd: String,
@@ -73,15 +74,11 @@ async fn login(State(state): State<Arc<AppState>>, Query(query): Query<LoginQuer
         return text_response(StatusCode::FORBIDDEN, "Forbidden: invalid login token\n");
     }
     let location = launch::page_path(query.dir.as_deref());
-    let cookie = format!(
-        "{COOKIE_NAME}={}; Path=/; HttpOnly; SameSite=Strict; Max-Age={COOKIE_MAX_AGE_SECS}",
-        state.login_token
-    );
     (
         StatusCode::SEE_OTHER,
         [
             (LOCATION, location),
-            (SET_COOKIE, cookie),
+            (SET_COOKIE, state.session.set_cookie()),
             (CACHE_CONTROL, NO_STORE.to_string()),
             (REFERRER_POLICY, "no-referrer".to_string()),
         ],

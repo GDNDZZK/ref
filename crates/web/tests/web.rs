@@ -59,8 +59,12 @@ async fn login_trades_the_token_for_a_cookie() {
     );
     let cookie = login.headers()["set-cookie"].to_str().unwrap();
     assert!(
-        cookie.starts_with(&format!("ref_web={}", web.token)),
-        "{cookie}"
+        cookie.starts_with(&format!("ref_web_{}=", web.port)),
+        "the name carries the port: {cookie}"
+    );
+    assert!(
+        !cookie.contains(&web.token),
+        "the cookie is not the login token: {cookie}"
     );
     assert!(
         cookie.contains("HttpOnly") && cookie.contains("SameSite=Strict"),
@@ -173,7 +177,11 @@ async fn websocket_checks_cookie_origin_and_host() {
         .unwrap();
     assert_eq!(status_of(no_cookie), 401);
     let bad_cookie = web
-        .try_ws(Some("ref_web=wrong".into()), Some(web.origin()), None)
+        .try_ws(
+            Some(format!("{}=wrong", web.cookie_name())),
+            Some(web.origin()),
+            None,
+        )
         .await
         .err()
         .unwrap();
@@ -373,18 +381,58 @@ async fn a_port_held_by_another_program_is_an_error() {
 }
 
 #[tokio::test]
-async fn the_login_token_survives_a_restart() {
+async fn the_login_token_survives_a_restart_but_sessions_do_not() {
     let env = Env::new("token");
     let (first, _upstream) = web_with_fake_upstream(&env).await;
-    let token = first.token.clone();
+    let (token, port, old_cookie) = (first.token.clone(), first.port, first.cookie());
     drop(first);
-    let (second, _upstream) = web_with_fake_upstream(&env).await;
+
+    let upstream = fake_upstream().await;
+    let server = format!("ws://127.0.0.1:{}/", upstream.port);
+    let second = env.start_on(port, &["--server", &server]).await;
     assert_eq!(second.token, token);
-    let login = second
+    assert_ne!(second.cookie(), old_cookie, "a new random session id");
+    let with_old_cookie = second
         .http
-        .get(second.url(&format!("/login?token={token}")))
+        .get(second.url("/api/info"))
+        .header("cookie", old_cookie)
         .send()
         .await
         .unwrap();
-    assert_eq!(login.status(), 303);
+    assert_eq!(
+        with_old_cookie.status(),
+        401,
+        "sessions end with the process"
+    );
+    assert_eq!(second.get("/api/info").await.status(), 200);
+}
+
+#[tokio::test]
+async fn two_instances_keep_separate_cookies() {
+    let env = Env::new("two");
+    let (first, _upstream) = web_with_fake_upstream(&env).await;
+    let (second, _upstream) = web_with_fake_upstream(&env).await;
+    assert_ne!(first.cookie_name(), second.cookie_name());
+
+    // Both cookies sit in one browser jar, which sends them to every port of the host.
+    let both = format!("{}; {}", first.cookie(), second.cookie());
+    for web in [&first, &second] {
+        let response = web
+            .http
+            .get(web.url("/api/info"))
+            .header("cookie", &both)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+    }
+    // And one instance does not accept the other's session.
+    let crossed = first
+        .http
+        .get(first.url("/api/info"))
+        .header("cookie", second.cookie())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(crossed.status(), 401);
 }

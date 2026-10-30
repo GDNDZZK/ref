@@ -16,7 +16,7 @@ use clap::Parser;
 use ref_client::Target;
 use tokio_util::sync::CancellationToken;
 
-use crate::guard::HostPolicy;
+use crate::guard::{HostPolicy, SessionCookie};
 use crate::routes::AppState;
 use crate::upstream::Upstream;
 
@@ -135,6 +135,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     let shutdown = CancellationToken::new();
     let state = Arc::new(AppState {
         login_token,
+        session: SessionCookie::new(cli.port),
         hosts: HostPolicy::new(&cli.host, cli.port),
         cwd,
         upstream: upstream_for(&cli),
