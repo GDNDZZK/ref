@@ -77,9 +77,11 @@ fn init_logging() {
         .init();
 }
 
+/// The absolute start directory. `dunce` keeps Windows paths free of the `\\?\` prefix, which
+/// the backend and the page would show to the user.
 fn start_dir(dir: Option<&str>) -> anyhow::Result<String> {
     let path = match dir {
-        Some(p) => std::fs::canonicalize(p).with_context(|| p.to_string())?,
+        Some(p) => dunce::canonicalize(p).with_context(|| p.to_string())?,
         None => std::env::current_dir()?,
     };
     anyhow::ensure!(path.is_dir(), "{} is not a directory", path.display());
@@ -193,4 +195,25 @@ async fn wait_for_stop_signal() {
 #[cfg(not(unix))]
 async fn wait_for_stop_signal() {
     let _ = tokio::signal::ctrl_c().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn start_dir_is_absolute_and_must_be_a_directory() {
+        let here = std::env::current_dir().unwrap();
+        assert_eq!(
+            start_dir(None).unwrap(),
+            here.to_string_lossy().into_owned()
+        );
+        assert_eq!(
+            start_dir(Some(".")).unwrap(),
+            dunce::canonicalize(&here).unwrap().to_string_lossy()
+        );
+        let manifest = format!("{}/Cargo.toml", env!("CARGO_MANIFEST_DIR"));
+        assert!(start_dir(Some(&manifest)).is_err());
+        assert!(start_dir(Some("/no/such/dir/anywhere")).is_err());
+    }
 }

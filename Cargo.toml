@@ -20,6 +20,7 @@ axum = { version = "0.8", features = ["ws"] }
 brotli = "9"
 flate2 = "1"
 open = "5"
+dunce = "1"
 hmac = "0.12"
 sha2 = "0.10"
 subtle = "2"
