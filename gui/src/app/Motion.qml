@@ -19,6 +19,8 @@ QtObject {
 	// frames, so a short exit reads as a cut. Used where a glyph's exit should be seen.
 	readonly property int exitEase: Easing.InCubic
 
+	readonly property int interruptWindow: 1500 // ms in which a second Esc interrupts the session
+
 	readonly property real enterDrop: 48 // px a new block drops into place while it fades in
 
 	// Exponential chases track targets that keep moving: the scroll following the end
