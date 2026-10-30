@@ -1,5 +1,5 @@
-# Builds the release archives (ref-tui, ref-web and ref-all) for 6 platforms.
-# Pushing a tag like v0.1.0 publishes them as a GitHub Release.
+# Builds the release archives (ref-tui, ref-web, ref-gui and ref-all) for 6 platforms.
+# Pushing a tag like v0.2.0 publishes them as a GitHub Release.
 # Running it by hand (Actions tab -> Release -> Run workflow) only builds; the archives
 # can then be downloaded from the run page.
 name: Release
@@ -22,6 +22,18 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+
+      # Every later job depends on this one, so a wrong tag stops the run before any build.
+      - name: Check that the tag matches the version in Cargo.toml
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          cargo_version=$(sed -n 's/^version = "\([0-9.]*\)"$/\1/p' Cargo.toml | head -n 1)
+          if [[ "$GITHUB_REF_NAME" != "v$cargo_version" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match version $cargo_version in Cargo.toml"
+            exit 1
+          fi
+
       - uses: ./.github/actions/web-build
       - uses: actions/upload-artifact@v7
         with:
@@ -29,6 +41,8 @@ jobs:
           path: web/dist
           if-no-files-found: error
 
+  # ref, ref-server and ref-web, built once per platform. The Linux ones are built on Ubuntu
+  # 22.04 (glibc 2.35), so they run on more distributions.
   build:
     name: build (${{ matrix.target }})
     needs: frontend
@@ -36,7 +50,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Ubuntu 22.04 links against an older glibc (2.35), so the binaries run on more distros.
           - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04 }
           - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm }
           - { target: x86_64-apple-darwin, os: macos-15-intel }
@@ -61,6 +74,59 @@ jobs:
       - name: Build
         run: cargo build --release --locked --workspace --target ${{ matrix.target }}
 
+      # A tar file, because artifacts lose the executable bit of their files.
+      - name: Collect the programs
+        shell: bash
+        run: |
+          suffix=""
+          [[ "${{ matrix.target }}" == *windows* ]] && suffix=".exe"
+          tar -C "target/${{ matrix.target }}/release" -czf programs.tar.gz \
+            "ref$suffix" "ref-web$suffix" "ref-server$suffix"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: programs-${{ matrix.target }}
+          path: programs.tar.gz
+          if-no-files-found: error
+
+  # Builds and deploys the GUI, then packs all archives of the platform. The Linux GUI is built
+  # on Ubuntu 24.04: C++23 needs GCC 13, which 22.04 does not have. scripts/verify-gui-package.sh
+  # checks that the result still runs on what the README promises.
+  package:
+    name: package (${{ matrix.target }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-24.04 }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm }
+          - { target: x86_64-apple-darwin, os: macos-15-intel }
+          - { target: aarch64-apple-darwin, os: macos-15 }
+          - { target: x86_64-pc-windows-msvc, os: windows-2025 }
+          - { target: aarch64-pc-windows-msvc, os: windows-11-arm }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: programs-${{ matrix.target }}
+      - name: Unpack the programs
+        shell: bash
+        run: |
+          mkdir programs
+          tar -xzf programs.tar.gz -C programs
+
+      - uses: ./.github/actions/gui-deps
+      # CMAKE_INSTALL_BINDIR=. puts ref-gui at the top of the install folder, see gui/cmake/Deploy.cmake.
+      - uses: ./.github/actions/gui-build
+        with:
+          cmake-args: -DCMAKE_INSTALL_BINDIR=.
+
+      - name: Deploy the GUI
+        shell: bash
+        run: cmake --install "$REF_GUI_BUILD_DIR" --prefix "${RUNNER_TEMP//\\//}/gui-stage"
+
       - name: Package
         shell: bash
         run: |
@@ -68,9 +134,18 @@ jobs:
           # Tag name for releases, short commit hash for manual runs.
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then version="$GITHUB_REF_NAME"; else version="${GITHUB_SHA::7}"; fi
           scripts/package.sh --version "$version" --target "${{ matrix.target }}" \
-            --bin-dir "target/${{ matrix.target }}/release" --out dist > sizes.md
+            --bin-dir programs --gui-dir "${RUNNER_TEMP//\\//}/gui-stage" --out dist > sizes.md
           { echo '### Packages (${{ matrix.target }})'; echo; cat sizes.md; } >> "$GITHUB_STEP_SUMMARY"
           ls -l dist
+
+      - name: Verify the GUI package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir verify
+          archive=(dist/ref-gui-*)
+          if [[ "$archive" == *.zip ]]; then 7z x -y -overify "$archive" > /dev/null; else tar -xzf "$archive" -C verify; fi
+          scripts/verify-gui-package.sh verify/ref-gui-*
 
       - uses: actions/upload-artifact@v7
         with:
@@ -81,11 +156,15 @@ jobs:
   # Collects all archives and their checksums. Releases are published from here on tags.
   publish:
     name: checksums and release
-    needs: build
+    needs: package
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
+      # Only the release notes are needed from the repository.
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/release-notes
       - uses: actions/download-artifact@v8
         with:
           path: dist
@@ -101,6 +180,8 @@ jobs:
           name: SHA256SUMS
           path: dist/SHA256SUMS
 
+      # The text of the release is .github/release-notes/<tag>.md when that file exists
+      # (for example v0.2.0.md), otherwise GitHub generates it from the commits.
       - name: Create or update the release
         if: github.ref_type == 'tag'
         env:
@@ -109,9 +190,13 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          notes_file=".github/release-notes/$TAG.md"
           if gh release view "$TAG" > /dev/null 2>&1; then
-            # Re-run of the same tag: replace the files.
+            # Re-run of the same tag: replace the files, and the text if there is a file for it.
             gh release upload "$TAG" dist/* --clobber
+            if [[ -f "$notes_file" ]]; then gh release edit "$TAG" --notes-file "$notes_file"; fi
+          elif [[ -f "$notes_file" ]]; then
+            gh release create "$TAG" dist/* --verify-tag --notes-file "$notes_file" --title "$TAG"
           else
             gh release create "$TAG" dist/* --verify-tag --generate-notes --title "$TAG"
           fi

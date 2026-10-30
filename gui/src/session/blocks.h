@@ -3,6 +3,7 @@
 #include "proto/types.h"
 #include "session/fence_splitter.h"
 
+#include <QJsonObject>
 #include <QList>
 #include <QString>
 
@@ -22,6 +23,18 @@ struct Block
 		Tool,
 		Error,
 		Image,
+		Meta, // the line under a message: time, agent, tokens, actions
+	};
+
+	// An image the server holds: its bytes come from GetImage with `id`.
+	struct ImageRef
+	{
+		QString id{};
+		QString mime{};
+		qint64 size = 0; // bytes
+		QString name{};
+
+		bool operator==(const ImageRef&) const = default;
 	};
 
 	Kind kind = Kind::Markdown;
@@ -44,6 +57,27 @@ struct Block
 	QString inputJson{};
 	QString rawInput{}; // only while the arguments are not valid JSON yet
 	QString callId{};
+	qint64 timeEnd = 0; // 0 while running
+	qint64 runAt = 0;   // Delayed: when execution starts
+	QJsonObject meta{}; // display extras of the tool (diff, exit code, ...), without the live output
+	QString liveOutput{};
+
+	// Image blocks have one entry, tool blocks all the images of the result.
+	QList<ImageRef> images{};
+
+	// Meta blocks, which also use `time` and `timeEnd` of the message.
+	QString agent{};
+	QString modelId{};
+	QString variant{};
+	quint64 tokensIn = 0; // input including cache reads and writes
+	quint64 tokensOut = 0;
+	bool interrupted = false; // the user stopped the turn
+	bool errored = false;
+	bool human = false; // typed by the user, so it can be undone
+
+	// Set by the model from the position of the last compaction, never by the builders.
+	bool stale = false;        // before the last compaction: no longer sent to the model
+	bool contextStart = false; // the last compaction, with older messages above it
 
 	bool operator==(const Block&) const = default;
 };
@@ -72,6 +106,9 @@ QList<Block> userBlocks(const MessageHeader& header, const QList<proto::Part>& p
 
 // The error that ended an assistant message, if it is one worth showing.
 QList<Block> errorBlocks(const MessageHeader& header);
+
+// The line under a message. A compaction summary has none: its divider says it all.
+QList<Block> metaBlocks(const MessageHeader& header);
 
 // The `purpose` value in tool arguments that are still streaming, as far as it has arrived.
 QString partialPurpose(const QString& rawInput);

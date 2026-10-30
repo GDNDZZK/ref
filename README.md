@@ -20,7 +20,7 @@ Several sessions can work side by side and message each other.
 
 ## Features
 
-- **Server and interfaces are separate.** `ref-server` runs sessions, the agent loop, LLM calls, tools and permissions. `ref` (terminal) and `ref-web` (browser) only show them. Close the window and the session keeps going; open it again from any terminal or browser, or in both at once.
+- **Server and interfaces are separate.** `ref-server` runs sessions, the agent loop, LLM calls, tools and permissions. `ref` (terminal), `ref-gui` (desktop window) and `ref-web` (browser) only show them. Close the window and the session keeps going; open it again from any of them, or from several at once.
 - **Many sessions at once.** A split view tiles all background sessions. Sessions can send each other messages, and the `build` agent can start worker sessions and give them tasks.
 - **Works with opencode configuration.** An existing `opencode.json` with providers, models, agents, permissions, MCP servers and commands works unchanged.
 - **Any model provider.** Anthropic Messages, OpenAI Responses and OpenAI-compatible Chat Completions, with model variants for reasoning effort or extended thinking.
@@ -39,8 +39,9 @@ Pick an interface, then get the archive for your system from the [latest release
 | Interface | Archive | Contents |
 |---|---|---|
 | Terminal (TUI) | `ref-tui-<version>-<platform>` | `ref`, `ref-server` |
+| Desktop (GUI) | `ref-gui-<version>-<platform>` | `ref-gui` (on macOS `ref.app`), the libraries it needs, `ref-server` |
 | Browser (Web) | `ref-web-<version>-<platform>` | `ref-web`, `ref-server` |
-| All | `ref-all-<version>-<platform>` | `ref`, `ref-web`, `ref-server` |
+| All | `ref-all-<version>-<platform>` | `ref`, `ref-gui`, `ref-web`, `ref-server` |
 
 | System | `<platform>` and file type |
 |---|---|
@@ -58,11 +59,20 @@ tar -xzf ref-tui-*.tar.gz
 install -m 755 ref-tui-*/ref ref-tui-*/ref-server ~/.local/bin/
 ```
 
+The GUI archives are folders that must stay together: `ref-gui` finds its libraries, plugins and `ref-server` in its own folder. Unpack the folder where you want to keep it and run `ref-gui` from there.
+
 All interfaces share one backend. If you installed several, any of them connects to the backend that is already running.
 
-- **Linux**: needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36, RHEL 10, Arch and newer). NixOS needs `programs.nix-ld.enable = true`.
-- **macOS**: the binaries are not signed. If macOS blocks them, run `xattr -d com.apple.quarantine ref ref-web ref-server` (the names that are in your archive).
-- **Windows**: install [Git for Windows](https://git-scm.com/download/win); the `bash` tool uses its Git Bash.
+- **Linux**: `ref`, `ref-web` and `ref-server` need glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36, RHEL 10, Arch and newer). NixOS needs `programs.nix-ld.enable = true`.
+- **Linux GUI**: needs glibc 2.35 and the C++ runtime of GCC 13 (`libstdc++` with `CXXABI_1.3.14`): Ubuntu 24.04, Debian 13, Fedora 38, Arch and newer. It does not start on Ubuntu 22.04 or Debian 12. It runs on X11 and, through XWayland, on Wayland; a Wayland session without XWayland is not supported (Unverified). It needs these system libraries, most of which a desktop has: `libxcb-cursor0`, `libxkbcommon-x11-0`, `libxcb-icccm4`, `libxcb-image0`, `libxcb-keysyms1`, `libxcb-randr0`, `libxcb-render-util0`, `libxcb-shape0`, `libxcb-xkb1`, `libegl1`, `libfontconfig1` and `libdbus-1-3` (Debian and Ubuntu package names). To add `ref` to your application menu, copy the desktop file and the icon, and link the program into your `PATH`:
+
+  ```bash
+  install -Dm644 ref-gui.desktop ~/.local/share/applications/ref-gui.desktop
+  install -Dm644 ref.png ~/.local/share/icons/hicolor/256x256/apps/ref.png
+  ln -s "$PWD/ref-gui" ~/.local/bin/ref-gui
+  ```
+- **macOS**: the programs are not signed with a developer certificate (`ref.app` has an ad-hoc signature). If macOS blocks them, run `xattr -dr com.apple.quarantine ref ref-web ref-server ref.app` (the names that are in your archive). `ref.app` can be moved to `/Applications`.
+- **Windows**: install [Git for Windows](https://git-scm.com/download/win); the `bash` tool uses its Git Bash. The programs are not signed, so Windows may warn about an unknown publisher the first time. The GUI needs no installation: run `ref-gui.exe`; the Visual C++ runtime is in the folder.
 
 Each release has a `SHA256SUMS` file for checking the download.
 
@@ -76,13 +86,15 @@ cargo build --release                    # needs current stable Rust and a C com
 ./target/release/ref
 ```
 
+The GUI is built separately with CMake and Qt, see [Development](docs/development.md#the-gui).
+
 ## Quick start
 
 1. Set an API key, for example `export ANTHROPIC_API_KEY=...`. `OPENAI_API_KEY`, `DEEPSEEK_API_KEY` and `OPENROUTER_API_KEY` work too. For other providers, see [Configuration](docs/configuration.md#providers-and-models).
 2. Run `ref` in your project directory.
 3. Type a task and press `enter`.
 
-To use the browser instead, run `ref-web` in your project directory; it opens the page. See [Web UI](docs/web.md).
+To use a desktop window instead, run `ref-gui` in your project directory ([Desktop GUI](docs/gui.md)); for the browser, run `ref-web` ([Web UI](docs/web.md)), which opens the page.
 
 Keys in the terminal UI:
 
@@ -102,9 +114,14 @@ Keys in the terminal UI:
 | [Using ref](docs/usage.md) | Sessions, the screen, prompts, keybindings, slash commands, split view, working with several sessions |
 | [Configuration](docs/configuration.md) | Every configuration key: providers and models, agents, permissions, delays, compaction, MCP, commands, instructions and skills |
 | [Tools](docs/tools.md) | What the model can do: file tools, bash, webfetch, image handling, context and cross-session tools |
+| [Desktop GUI](docs/gui.md) | `ref-gui`: installing, starting, files |
 | [Web UI](docs/web.md) | `ref-web`: starting, signing in, opening it to the network, developing the page |
-| [Command line](docs/cli.md) | `ref`, `ref-web` and `ref-server` options, remote backends, files and environment variables |
+| [Command line](docs/cli.md) | `ref`, `ref-gui`, `ref-web` and `ref-server` options, remote backends, files and environment variables |
 | [Development](docs/development.md) | Building, tests, crate layout, CI and releases |
+
+## Acknowledgements
+
+The GUI is adapted from an early version of qutie by LightBlueCube.
 
 ## License
 

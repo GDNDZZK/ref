@@ -30,6 +30,18 @@ QtObject {
 	readonly property color errorBorder: dark ? "#5c2f35" : "#f0c3c5"
 	readonly property color scrollHandle: dark ? "#4a4d56" : "#c6c6c2"
 	readonly property color scrollHandlePressed: dark ? "#6b6e79" : "#9fa1a8"
+	// Attention that is not an error: permission, delay, retry, an interrupted turn.
+	readonly property color warning: dark ? "#e6b450" : "#b7791f"
+	readonly property color warningSurface: dark ? "#2b2417" : "#fcf4e2"
+	readonly property color warningBorder: dark ? "#5a4723" : "#ecd29a"
+	// Messages from other sessions, diff hunks, tool input.
+	readonly property color info: dark ? "#6fb7e0" : "#2a7fb5"
+	readonly property color diffAdded: dark ? "#6cc28a" : "#1f7a4d"
+	readonly property color diffAddedBackground: dark ? "#1d2f27" : "#e3f3e9"
+	readonly property color diffRemoved: dark ? "#ec6f73" : "#b3303f"
+	readonly property color diffRemovedBackground: dark ? "#33202a" : "#fbe6e8"
+	readonly property color matchBackground: dark ? "#3a3420" : "#fff1c2" // grep matches
+	readonly property real staleOpacity: 0.55 // messages before the last compaction
 	// Composer in shell mode (`!command`): amber, like the TUI's warning color.
 	readonly property color shellSurface: dark ? "#2a2419" : "#fbf3e3"
 	readonly property color shellBorder: dark ? "#f5a742" : "#d9922b"

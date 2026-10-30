@@ -44,7 +44,7 @@ inline proto::Message assistant(const QString& id, const QList<proto::Part>& par
 	return {.id = id, .role = proto::Role::Assistant, .time = 1, .timeEnd = ended ? std::optional<qint64>(2) : std::nullopt, .parts = parts};
 }
 
-// Renders every block as "kind:content", plus "@language" for code blocks.
+// Renders every block but the meta lines as "kind:content", plus "@language" for code blocks.
 inline QStringList render(const session::ConversationModel& model)
 {
 	QStringList rendered;
@@ -52,6 +52,10 @@ inline QStringList render(const session::ConversationModel& model)
 	{
 		const QModelIndex index = model.index(row);
 		const QString kind = index.data(session::ConversationModel::KindRole).toString();
+		if(kind == u"meta")
+		{
+			continue; // the line under a message has its own tests
+		}
 		QString block = kind + u':' + index.data(session::ConversationModel::ContentRole).toString();
 		if(kind == u"code")
 		{
@@ -62,9 +66,25 @@ inline QStringList render(const session::ConversationModel& model)
 	return rendered;
 }
 
+// A role of a row, counting the rows without the meta lines (like `render`).
 inline QVariant roleOf(const session::ConversationModel& model, int row, int role)
 {
-	return model.index(row).data(role);
+	int contentRow = -1;
+	for(int index = 0; index < model.rowCount(); ++index)
+	{
+		const bool isMeta = model.index(index).data(session::ConversationModel::KindRole).toString() == u"meta";
+		if(!isMeta && ++contentRow == row)
+		{
+			return model.index(index).data(role);
+		}
+	}
+	return {};
+}
+
+// The number of rows without the meta lines.
+inline int contentRowCount(const session::ConversationModel& model)
+{
+	return static_cast<int>(render(model).size());
 }
 
 } // namespace refgui::test
