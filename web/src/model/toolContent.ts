@@ -4,8 +4,9 @@
 
 import type { IconKey } from '../icons/generated/icons.ts'
 import type { JsonValue, Todo, TodoStatus } from '../proto/generated'
+import { truncateColumns } from './columns.ts'
 
-const DETAIL_ARG_MAX_CHARS = 40
+const DETAIL_ARG_MAX_COLUMNS = 40
 const DETAIL_ARG_MAX_COUNT = 3
 
 const TOOL_ICONS: Record<string, IconKey> = {
@@ -45,12 +46,29 @@ function firstLine(text: string): string {
   return text.split('\n')[0] ?? ''
 }
 
-function oneLine(text: string): string {
-  return text.replace(/\s+/g, ' ').trim()
+// As the terminal client has it: Unicode white space (U+0085 included) is a separator, other
+// control characters go.
+const CONTROL = /^\p{Cc}$/u
+const NEXT_LINE = '\u0085'
+const BYTE_ORDER_MARK = '\ufeff'
+
+function isSpace(character: string): boolean {
+  return character === NEXT_LINE || (character !== BYTE_ORDER_MARK && /^\s$/.test(character))
 }
 
-function truncate(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text
+function oneLine(text: string): string {
+  let result = ''
+  let space = false
+  for (const character of text) {
+    if (isSpace(character)) {
+      space = true
+    } else if (!CONTROL.test(character)) {
+      if (space && result !== '') result += ' '
+      space = false
+      result += character
+    }
+  }
+  return result
 }
 
 export function parseTodos(input: JsonValue | null | undefined): Todo[] {
@@ -95,7 +113,7 @@ export function toolDetail(name: string, input: JsonValue | null | undefined): s
       case 'webfetch': {
         const url = arg('url')
         const format = arg('format')
-        return url !== undefined && format && format !== 'markdown' ? `${url} (${format})` : url
+        return url !== undefined && format !== undefined && format !== 'markdown' ? `${url} (${format})` : url
       }
       case 'send_message':
         return arg('to') === undefined ? undefined : `→ ${arg('to')}`
@@ -124,7 +142,7 @@ function genericDetail(input: JsonValue | null | undefined): string {
   const parts: string[] = []
   for (const [key, value] of Object.entries(object)) {
     if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') continue
-    parts.push(`${key}=${truncate(oneLine(String(value)), DETAIL_ARG_MAX_CHARS)}`)
+    parts.push(`${key}=${truncateColumns(oneLine(String(value)), DETAIL_ARG_MAX_COLUMNS)}`)
     if (parts.length >= DETAIL_ARG_MAX_COUNT) break
   }
   return parts.join(' ')
