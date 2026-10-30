@@ -1,12 +1,15 @@
 // Adapted from an early version of qutie by LightBlueCube
+#include "app/notification_center_type.h"
 #include "app/workspace.h"
 #include "cli/command_line.h"
 #include "icons/icon_provider.h"
+#include "notify/notifier.h"
 
 #include <QDir>
 #include <QGuiApplication>
 #include <QLocale>
 #include <QQmlApplicationEngine>
+#include <QWindow>
 #include <QTextStream>
 #include <QTimer>
 #include <QTranslator>
@@ -100,10 +103,22 @@ int main(int argc, char* argv[])
 		exitWhenOpened(workspace);
 	}
 
+	// Tells the backend where the user looks and shows what it sends. Settings supply the kinds.
+	refgui::notify::NotificationCenter notifications(workspace.backend(), refgui::notify::createPlatformNotifier());
+	NotificationCenterForeign::instance = &notifications;
+	const auto reportFocus = [&] { notifications.setFocus(workspace.isWindowActive(), workspace.visibleSessionIds()); };
+	QObject::connect(&workspace, &Workspace::windowActiveChanged, &notifications, reportFocus);
+	QObject::connect(&workspace, &Workspace::visibleSessionIdsChanged, &notifications, reportFocus);
+	reportFocus();
+
 	QQmlApplicationEngine engine;
 	QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] { QCoreApplication::exit(EXIT_FAILURE); }, Qt::QueuedConnection);
 	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
 	engine.loadFromModule("RefGui", "Main");
+	if(!engine.rootObjects().isEmpty())
+	{
+		notifications.setWindow(qobject_cast<QWindow*>(engine.rootObjects().first()));
+	}
 
 	return QGuiApplication::exec();
 }
