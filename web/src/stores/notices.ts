@@ -2,6 +2,8 @@
 
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { motion } from '../theme/generated/motion.ts'
+import { metrics } from '../theme/generated/theme.ts'
 
 export type NoticeLevel = 'info' | 'warn' | 'error'
 
@@ -12,9 +14,12 @@ export interface Notice {
   repeats: number // grows when the same message arrives again while it shows
 }
 
-// Theme.qml's toastInfoMs, toastWarnMs, toastErrorMs and toastMax.
-const SHOWN_FOR_MS: Record<NoticeLevel, number> = { info: 3500, warn: 6000, error: 8000 }
-const MAX_SHOWN = 4
+const SHOWN_FOR_MS: Record<NoticeLevel, number> = {
+  info: motion.toastInfoMs,
+  warn: motion.toastWarnMs,
+  error: motion.toastErrorMs,
+}
+const MAX_SHOWN = metrics.toastMax
 
 export function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
