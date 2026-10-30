@@ -166,6 +166,7 @@ Item {
 			anchors { top: header.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
 			session: tile.session
 			compact: !tile.zoomed
+			keysEnabled: tile.focused || tile.zoomed
 		}
 
 		// A click anywhere in the tile focuses it, and its input box.
