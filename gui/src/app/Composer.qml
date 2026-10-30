@@ -188,7 +188,14 @@ Item {
 					} else if (event.key === Qt.Key_Down && plain) {
 						event.accepted = composer.model.historyNext()
 					} else if (event.key === Qt.Key_Escape) {
-						event.accepted = composer.model.escape()
+						const nothingToClose = composer.model.completionKind === "none" && !composer.model.shellMode
+						if (nothingToClose && composer.session.lastToolDelayed) {
+							event.accepted = true
+							composer.session.cancelDelayedTool()
+							Workspace.toastRequested("info", qsTr("Cancelled the delayed tool call"))
+						} else {
+							event.accepted = composer.model.escape()
+						}
 					} else if (event.key === Qt.Key_Backspace && composer.model.shellMode && input.length === 0) {
 						event.accepted = true
 						composer.model.leaveShell()
