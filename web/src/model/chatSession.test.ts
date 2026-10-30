@@ -127,6 +127,23 @@ describe('ChatSession', () => {
     expect(session.blocks.map((block) => block.key)).toEqual(['u1:user', 'u1:meta', 'u2:user', 'u2:meta'])
   })
 
+  it('drops an older page that arrives after the history was replaced', async () => {
+    const { api, session } = setup()
+    api.attach.mockResolvedValue(snapshot([userMessage('u2', 'new')], { more_before: true }))
+    let deliver: (page: unknown) => void = () => {}
+    const messagesBefore = vi.fn().mockReturnValue(new Promise((resolve) => (deliver = resolve)))
+    Object.assign(api, { messagesBefore })
+    await session.attach(true)
+    const loading = session.loadOlder()
+    api.attach.mockResolvedValue(snapshot([userMessage('u9', 'other')], { more_before: false }))
+    await session.attach(true)
+    deliver({ messages: [userMessage('u1', 'old')], more_before: false })
+    await loading
+    await afterFrame()
+    expect(session.blocks.map((block) => block.key)).toEqual(['u9:user', 'u9:meta'])
+    expect(session.loadingOlder).toBe(false)
+  })
+
   it('keeps the error of a failed page load and tries again', async () => {
     const { api, session } = setup()
     api.attach.mockResolvedValue(snapshot([userMessage('u2', 'new')], { more_before: true }))

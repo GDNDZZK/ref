@@ -205,20 +205,24 @@ export class ChatSession {
     await this.deps.api().prompt(this.id, text)
   }
 
-  // Loads the page of messages before the first one shown.
+  // Loads the page of messages before the first one shown. A page that arrives after the
+  // history was loaded again belongs to the old one and is dropped.
   async loadOlder(): Promise<void> {
     const before = this.transcript.oldestMessageId
     if (this.state.loadingOlder || !this.state.moreBefore || before === undefined) return
+    const generation = this.state.generation
     this.state.loadingOlder = true
     this.state.olderError = ''
     try {
       const page = await this.deps.api().messagesBefore(this.id, before)
+      if (generation !== this.state.generation) return
       this.transcript.prepend(page.messages, page.more_before)
       this.publish()
     } catch (error) {
+      if (generation !== this.state.generation) return
       this.state.olderError = error instanceof Error ? error.message : String(error)
     } finally {
-      this.state.loadingOlder = false
+      if (generation === this.state.generation) this.state.loadingOlder = false
     }
   }
 
@@ -287,6 +291,8 @@ export class ChatSession {
     this.transcript.flush(performance.now())
     this.state.blocks = this.transcript.blocks
     this.state.generation++
+    this.state.loadingOlder = false // a page still on its way is dropped
+    this.state.olderError = ''
     this.publish()
   }
 
