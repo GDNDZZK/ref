@@ -1,5 +1,7 @@
 # HANDOFF — 给下一位 agent 的工作上下文
 
+> **过时（qutie 时期）。** `llm`、`infra` 和 `ui/agent_driver` 已被 `proto`、`client`、`session` 取代，ref-gui 现在是 ref-server 的客户端。当前架构见 ARCHITECTURE.md，这份文件只保留当时的上下文。
+
 用途：用户读完代码回来继续工作时，把本文件作为上下文。详细度对标一次上下文压缩。
 最后更新：M1 后端写完，等待首次编译。
 

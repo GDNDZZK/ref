@@ -1,123 +1,96 @@
-# qutie 架构与实现
+# ref-gui 架构与实现
 
-这份文档帮你读懂当前代码：它是怎么分层的，各部分为什么这样写。建议按章节顺序读，每一章都对应一组源文件。
+这份文档帮你读懂当前代码：它是怎么分层的，各部分为什么这样写。建议按章节顺序读，每一章都对应一组源文件。ref-gui 是 ref 的 Qt Quick 前端，它只是 ref-server 的一个客户端，自己不调用任何模型；界面和动效部分最初来自 qutie（LightBlueCube），协议、连接、会话这几层是为 ref 重写的。
 
 ## 1. 分层
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│ src/app  QML 界面 + ChatSession                                  │
-│   Main ─ ChatView ─ {User,Markdown,Code,Reasoning,Tool,Error}Block│
-│        └ Composer, ThemeToggle, 回到最新按钮                      │
+┌──────────────────────────────────────────────────────────────────┐
+│ src/app  QML 界面 + ChatSession + main                            │
+│   Main ─ ChatView ─ {User,Image,Markdown,Code,Reasoning,Tool,     │
+│        │            Error}Block                                   │
+│        └ Composer, ThemeToggle, 回到最新按钮, 状态条              │
 │   Theme / Motion (单例)        SystemFonts (C++ 单例)             │
-├──────────────────────── ChatSession ─────────────────────────────┤
-│ src/ui   与界面框架无关的视图模型（不依赖 Gui，可以单测）         │
-│   ConversationModel ◄── Driver: MockDriver (--mock) | AgentDriver │
-│        └ FenceSplitter                                           │
+├────────────────────── ChatSession ───────────────────────────────┤
+│ src/session  与界面框架无关的会话层（不依赖 Gui，可以单测）        │
+│   SessionController ─ ConversationFeed ─ StreamPacer              │
+│                         └ ConversationModel ─ blocks, FenceSplitter│
 ├──────────────────────────────────────────────────────────────────┤
-│ src/llm  和模型对话                                              │
-│   config（读 endpoint）  OpenAiClient ─ openai_wire（纯函数）     │
+│ src/client  连接后端                                              │
+│   Backend（找到/拉起后端、断线重连）─ ServerClient（一条 WebSocket）│
+│   launcher, instance_files, spawn_lock, process_alive, mock_backend│
 ├──────────────────────────────────────────────────────────────────┤
-│ src/infra  通用基础设施                                          │
-│   jsonc（配置解析）   sse（流式响应解析）  http_stream（流式 POST）│
+│ src/proto   ref 线协议：类型、解析、请求构造（只依赖 Qt Core）     │
+├──────────────────────────────────────────────────────────────────┤
+│ src/cli     命令行解析（只产出 LaunchOptions，不碰界面）           │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
 规则如下：
 
-- QML 只能看到 `ChatSession`。它暴露了 `blocks`（类型是 `QAbstractItemModel*`）、`busy`、`send()`、`stop()`。
-- `src/ui` 里的类型不注册给 QML，所以它们的接口改了也不会波及界面。
-- 每一层只调用紧挨着的下一层：AgentDriver 不直接碰网络，OpenAiClient 不碰 model。
-- 没有全局状态。每个 ChatSession 持有自己的 driver，driver 持有自己的 client，client 持有自己的 `QNetworkAccessManager`。以后做多 tab，就是多建几个 ChatSession。
+- QML 只能看到 `ChatSession`。它暴露了 `blocks`（`QAbstractItemModel*`）、`busy`、`ready`、`connectionState`、`statusText`、`title`，以及 `send()`、`stop()`、`permissionReply()`。
+- `src/session`、`src/client`、`src/proto` 里的类型不注册给 QML，所以它们的接口改了也不会波及界面。
+- 每一层只调用紧挨着的下一层。`proto` 不知道 Qt 网络；`client` 不知道会话怎么显示。
+- 没有全局状态。每个 `ChatSession` 持有自己的 `Backend` 和 `SessionController`；以后做多 tab 或分屏，就是多建几个。
+- 对话内容以服务器为准。发出的 prompt 不会在本地回显，用户的消息在服务器通过 Message 事件宣布后才出现。
 
 ## 2. 构建
 
-- 根目录的 `CMakeLists.txt` 要求 C++23（因为用到 `std::expected`）和 Qt 6.10。
-- `cmake/CompilerOptions.cmake` 里的 `qutie_configure_target()` 会套用到我们自己的每个 target 上，内容是：警告全开并当作错误（`-Werror`），打开 Qt strict mode（关掉 6.10 之前已废弃的 API），以及 `QT_NO_CAST_FROM_ASCII`（任何 `char*` 转 `QString` 都必须写明编码）。
-- 库只依赖它真正用到的东西：`qutie_infra` 依赖 Core、Network 和 QCoro::Core；`qutie_llm` 依赖 infra；`qutie_ui` 依赖 llm。只有可执行文件才依赖 Gui、Qml、Quick。
-- QCoro 用的是系统包（Arch 上是 0.13），`find_package(QCoro6 COMPONENTS Core)`。
-- `src/app` 是一个 QML 模块（URI 为 `Qutie`）。`Theme.qml` 和 `Motion.qml` 通过源文件属性 `QT_QML_SINGLETON_TYPE` 声明成单例，这个属性必须在 `qt_add_qml_module()` 之前设置。
-- 代码块高亮用的 `org.kde.syntaxhighlighting` 是运行时加载的 QML 插件，CMake 里只用 `find_package` 确认它已安装，不链接它。
+- 根目录的 `CMakeLists.txt` 要求 C++23（`std::expected`、协程）和 Qt 6.10 以上。版本号读自上一级 `Cargo.toml` 的 workspace 版本，经 `REF_GUI_VERSION` 传给 `setApplicationVersion`。
+- `cmake/CompilerOptions.cmake` 里的 `refgui_configure_target()` 套用到我们自己的每个 target 上：警告全开并当作错误，打开 Qt strict mode 和 `QT_NO_CAST_FROM_ASCII`；MSVC 用 `/W4 /permissive- /Zc:__cplusplus /utf-8 /EHsc`；`-DREFGUI_SANITIZE=ON` 打开 ASan/UBSan。
+- 依赖：Qt 6.12（含 WebSockets、Quick、LinguistTools）、QCoro 0.13（Core、Network、WebSockets）、KSyntaxHighlighting（运行时的 QML 插件，代码块高亮用）。`scripts/install-qt.sh` 和 `scripts/build-deps.sh` 会把它们装到 `REF_DEPS_DIR`（默认 `gui/.deps`），之后 `-DCMAKE_PREFIX_PATH="<deps>/Qt/6.12.0/gcc_64;<deps>/prefix"` 即可。
+- 运行时要让 Qt 找到 KSyntaxHighlighting 的 QML 插件：设置 `QML_IMPORT_PATH=<deps>/prefix/lib/qml`。
+- 库只依赖它真正用到的东西：`refgui_proto` 只要 Core；`refgui_client` 加 Network、WebSockets、QCoro；`refgui_session` 依赖 proto 和 client；只有可执行文件才依赖 Gui、Qml、Quick。
+- `src/app` 是一个 QML 模块（URI 为 `RefGui`）。`Theme.qml` 和 `Motion.qml` 通过源文件属性 `QT_QML_SINGLETON_TYPE` 声明成单例，这个属性必须在 `qt_add_qml_module()` 之前设置。
+- 翻译：界面文字在源码里是英文，QML 用 `qsTr`，C++ 用 `tr`。`translations/ref-gui_zh_CN.ts` 在构建时编成 `.qm` 放进资源（前缀 `/i18n`），启动时按系统语言加载，没有对应语言就用英文。改了文字后运行 `cmake --build build --target update_translations` 更新 `.ts`。
+- 命令行：`ref-gui [DIR] [-c] [-s ID] [-w] [--agent NAME] [--model provider/model[#variant]] [--server ws://… --token T] [--mock]`。参数名与 TUI 一致。`-s` 优先于 `-c`，`-c` 优先于新建；`-w` 目前只解析并提示 "split view is not available yet"。隐藏参数 `--smoke` 供自动化测试使用：会话打开后打印 `attached <id>` 并退出 0，连不上或会话不存在则退出 1。
 
-## 3. infra
+## 3. proto：线协议
 
-### jsonc
+`src/proto` 是 `crates/proto` 的 C++ 镜像，只有数据和解析，没有 I/O。
 
-`parse()` 把 JSONC 转成 `QJsonDocument`。做法是在原字节上把注释和尾逗号覆写成空格，再交给 Qt 解析。字节偏移不变，所以 Qt 报错时给出的位置可以直接对应回源文件的行和列。
+- `types.h`：全部协议类型，字段名用 camelCase，时间戳是毫秒。`ToolState` 带 `isFinal()`。
+- `parse.h`：`Parsed<T>` 是 `std::expected<T, ParseError>`。服务器版本比客户端新时，未知的帧种类、事件种类、part 种类不算错：它们解析成可以忽略的结果（part 变成 `UnknownPart`，保持下标对齐）。`ParseError::unknown` 区分“没见过的”和“格式错的”。
+- `request.h`：请求体的构造函数（hello、create_session、attach、prompt、abort、permission_reply 等）。关联用的 id 由 `ServerClient` 加。
+- `tests/tst_proto.cpp` 遍历 `crates/proto/fixtures/` 里的全部样例，所以协议改了而这里没跟上，测试会红。
 
-核心是一个单遍状态机 `lowerToJson()`，状态转换图写在源文件开头。有两个细节：
+## 4. client：连接后端
 
-- 尾逗号的判断：遇到逗号时先记下它的位置（`pendingComma`），等看到下一个 token 再决定。如果下一个是 `]` 或 `}`，就把这个逗号抹掉。
-- 紧跟在 `[`、`{`、`,` 后面的逗号不会被抹掉，这样 `[,]`、`[1,,]` 这类本来就非法的写法仍然由 Qt 报错。
+### ServerClient
 
-### sse
+一条 WebSocket 连接。每个请求是一个协程：发一帧（带新 id），在收到同 id 的响应时恢复。其余帧（事件、sessions、toast、notify）按到达顺序通过 `frameReceived` 发出。
 
-`sse::Parser::feed()` 是一个增量解析器，每喂进一段网络数据，就返回这段数据里凑齐了的事件。实现遵循 WHATWG 规范：
+- 响应是在 `textMessageReceived` 的槽里**同步**恢复协程的，所以 Attach 的快照一定在紧随其后的事件之前处理完。QCoro 自带的信号 awaiter 经事件循环排队恢复，做不到这一点，所以这里自己写了 awaiter。
+- 关闭连接或销毁 client 时，所有等待中的请求以 "connection closed" 失败，它们的协程当场继续运行。所以必须先 `close()`，再销毁协程会访问的对象。
 
-- 全程处理原始字节，不做解码。分隔符都是 ASCII，被拆开的 UTF-8 字符会在行缓冲里重新拼完整。
-- 一个 CRLF 被拆在两段数据之间时，用 `m_previousLineEndedWithCr` 记住前一段末尾的 CR，避免把后面的 LF 当成一个空行，否则事件会被提前派发。
-- 文件开头的 BOM 只在第一行检查。`id` 和 `retry` 字段直接忽略，它们只在浏览器的 EventSource 里用于断线重连。
+### launcher：找到或拉起后端
 
-### http_stream
+`connectTarget()` 的逻辑与 TUI 的 `ref-client` 一致：
 
-`http::postStreaming()` 是一个 QCoro 协程：发出 POST，响应体到一段就交给 `onChunk` 一段。状态码不是 2xx 时，响应体不交给回调，而是收集起来作为错误信息返回（`Error{status, message}`）。`status` 为 0 表示传输本身失败，比如连不上、超时、被取消。
+1. 读 `<state dir>/instances/*.json`，挑存活的实例直接连。
+2. 没有就等 `spawn.lock`（Unix 用 `flock`，Windows 用 `LockFileEx`）。同一时刻只有一个前端在拉起后端，其余的等到锁之后再找一次实例，通常就找到了刚拉起的那个。
+3. 拿到锁又没有实例时，选一个空闲端口，启动一个脱离进程的 `ref-server --port P --idle-timeout 0`，等它写出 instances 文件（最长等 BackendStartTimeout），再连。
+4. `--server` 指定的地址直接连，不拉起任何东西。
 
-取消用 `std::stop_token`：请求停止时调用 `reply->abort()`。这里有一个关键点：
+`ref-server` 先找 ref-gui 同目录，找不到再走 `PATH`。状态目录由 `REF_STATE_DIR` 覆盖，数据目录由 `REF_DATA_DIR` 覆盖，自动化测试靠它们隔离。
 
-```
-request_stop() → reply->abort() → 同步发出 finished() → Finished awaiter 直接恢复协程
-               → postStreaming 结束 → OpenAiClient::complete 结束 → AgentDriver::reply 结束
-               → request_stop() 返回
-```
+### Backend
 
-也就是说，`request_stop()` 返回时，整条协程链都已经跑完了。QCoro 自带的 `co_await reply` 是通过 queued connection 恢复协程的，要等到下一轮事件循环才会继续执行。如果 driver 在析构函数里调用 stop，协程恢复时 driver 已经没了。所以这里自己写了一个 `Finished` awaiter，直接在 `finished()` 信号发出时恢复协程。也正因为恢复发生在 reply 自己的信号发射过程中，reply 只能用 `deleteLater` 释放。
+在整个程序生命期内持有连接：找到或拉起后端、连接、连接断开后等 1 秒重试。状态是 Connecting、StartingBackend、Connected、Disconnected（带原因）。每次连上都发 `connected()`，使用者据此重新 attach。`--mock` 时由 `MockBackend` 启动一个私有的 `ref-server --mock`（stdin 保持打开，关闭 stdin 它就退出）。
 
-## 4. llm：和模型对话
+等待连接结束用的是自己写的 awaiter，原因同上：在信号发出的那一刻恢复，而不是之后排队，否则 Backend 在中间被销毁时，排队的事件会去恢复一个已经销毁的协程。
 
-### openai_wire
-
-这个模块只有纯函数和一个解码器，没有 I/O，所以可以直接拿录好的 SSE 数据来测。
-
-- `requestBody()`：把 history 拼成请求 JSON。推理内容会回传给模型，用的是它到达时的字段名（`reasoning_content`、`reasoning` 等都不在 OpenAI 的 schema 里，各家服务端各取各的名字）。没有正文的 assistant 消息不发，因为服务端会拒绝 content 为空的 assistant 消息。
-- `StreamDecoder::decode()`：每次喂一个 SSE 事件的 data，返回其中的增量，同时把完整的消息拼起来。一旦知道了结果（收到 finish_reason、流里报了错、或者 data 无法解析），之后的事件全部忽略。
-
-### OpenAiClient
-
-`complete(history, onEvent, stop)` 把 http_stream、sse::Parser 和 StreamDecoder 串起来，返回 `Completion`：
-
-```cpp
-struct Completion {
-	AssistantMessage message;              // 收到多少算多少，出错或取消时也有
-	std::expected<StopReason, Error> end;  // 正常结束的原因（含 Cancelled），或者错误
-};
-```
-
-判定回复怎么结束的优先级：流里明确说了的（finish_reason 或 error）优先；其次看是否被取消；再看传输是否失败；如果流正常结束但从没收到 finish_reason，也算错误，因为回复不完整。
-
-### config
-
-`loadEndpoint(path)` 读取 `config.jsonc` 里的 `endpoint`，返回 `Endpoint` 或者一段给用户看的错误文字。文件不存在时，错误文字里会附上一个配置示例。
-
-```jsonc
-{
-  "endpoint": {
-    "baseUrl": "http://localhost:8080/v1",
-    "model": "qwen3-coder",
-    "apiKey": "sk-..." // 可选；暂时明文
-  }
-}
-```
-
-## 5. ui：会话模型
+## 5. session：会话模型
 
 ### 一行是一个块，不是一条消息
 
 ```
 user        "Fix the build"
+image       "shot.png"
 reasoning   "The error says ..."
 markdown    "The QML module is missing a file:"
 code        "qt_add_qml_module(...)"   language = "cmake"
-tool        "bash ctest"               output, failed
+tool        "bash ctest"               toolState, input, output, failed
 error       "The request failed: ..."
 ```
 
@@ -129,23 +102,27 @@ error       "The request failed: ..."
 
 ### ConversationModel
 
-写入接口（driver 调用这些）：
+模型直接吃协议数据：
 
 ```cpp
-appendUserMessage(text)
-appendReasoning(delta)        // 和下面几个调用可以任意交错
-appendAssistantText(delta)    // 内部交给 FenceSplitter 切成 markdown / code 块
-beginToolCall(title)
-endToolCall(succeeded, output)
-endAssistantTurn()
-appendError(message)          // 一轮结束后追加，说明这一轮为什么失败或被截断
+reset(messages)                       // 整段历史替换，唯一会 reset 的操作
+prependMessages(older)                // 在最前面插入更早的消息
+setMessage(message)                   // 新消息，或按 id 整条替换
+setPart(messageId, index, part)       // 替换或追加一个 part
+appendDelta(messageId, index, delta)  // 文本、思考、工具参数的增量
+removeMessage(messageId)
 ```
 
-几条不变量：
+一条消息怎么变成块（`blocks.cpp`）：
 
-- 同一时刻最多只有一个块在接收内容（`m_streamingRow`），它的 `streaming` role 为 true。
-- 只用 `rowsInserted` 和带 role 列表的 `dataChanged` 通知变化，从来不 reset。一旦 reset，ListView 会重建所有行，入场动画就全部失效了。
-- 在思考、正文、工具调用之间切换时，会调用 `endTextSegment()`：先让 splitter 把扣住的最后一行放出来，再把它重置。所以代码围栏不会跨过一次工具调用。
+- 用户消息：所有文本 part 用空行连成一个 user 块，每张图片一个 image 块（M0 只显示文件名）。来源不是用户本人时带 `source` 和 `sender`（对等会话、派生任务、提醒、压缩摘要、shell 输出）。
+- 助手消息：Text part 交给 `FenceSplitter` 切成 markdown / code 块（一个 part 一个 splitter，围栏不跨 part）；Reasoning part 是一个 reasoning 块；Tool part 是一个 tool 块；`error` 不为空且不是 "aborted"（忽略大小写，与 TUI 一致）时末尾再加一个 error 块。
+- `streaming`：消息没结束时，最后一个文本或思考 part 在流式；工具在状态不是终态时算流式。所以同一时刻最多一个块在接收内容（运行中的工具除外）。
+- `opensTurn`：user 块、来源是本人/对等/派生、且上面有行时为真，界面据此画分割线。prepend 和删除第一条消息时会对受影响的行发 `dataChanged`。
+
+内部结构：`m_rows` 是平铺的块列表，`data()` 直接按行取；每条消息记着自己占几行（`MessageNode`），每个 part 记着自己占几行并带着它的 splitter。更新时把受影响的块重新算出来，和旧的逐行比较（`replaceRows`）：内容变了的发带 role 列表的 `dataChanged`，多出来的插入，少了的删除。除了 `reset()`，不会 reset 模型，ListView 的入场动画才不会失效。
+
+Delta 指向还没见过的 part 时，按 TUI 的 `apply_delta` 规则补建（中间缺的补空文本 part；工具参数的 purpose 从流式 JSON 里提前解析出来显示）。
 
 ### FenceSplitter
 
@@ -160,37 +137,35 @@ appendError(message)          // 一轮结束后追加，说明这一轮为什�
 - 一行一旦可以确定不是围栏（比如第一个非空字符是字母），就立刻放出，不必等到行尾。
 - 有可能成为围栏的行先扣住（`m_heldLine`），等这一行结束再判断。
 - 换行符延迟放出（`m_pendingLineBreaks`），等到后面确实还有内容时才补上。这样块的末尾不会挂着分隔用的空行。
+- part 不再流式（消息结束，或后面又来了新 part）时，调用 `finish()` 放出扣住的最后一行。
 
 测试里每个用例都会跑两遍，一遍整段输入，一遍逐字符输入，两种方式的结果必须完全一致。
 
-### MockDriver
+### StreamPacer 与 ConversationFeed
 
-它用一个 `QTimer` 按 tick 回放脚本，每个 tick 输出一小段随机长度的文字。每个脚本自带名字和速度（`Pace`）。在输入框里发脚本名就会播放对应脚本，发别的内容则按顺序轮换：
+真实服务端常常隔一两百毫秒发一大段，直接写进去就是一段一段蹦出来。`StreamPacer` 把积压的文字匀速放出：每次到达时按最近几次到达的间隔估计下一段什么时候到，让积压刚好在那时放完，所以文字以稳定的速度流出，最多比网络慢 200ms。切分按字素边界，不会拆开 emoji。事件带着目标（消息、part 下标、文本或思考），相邻同目标的才合并。
 
-| 脚本 | 覆盖的内容 |
-|---|---|
-| `code` | 思考过程、工具调用、两个代码块、链接 |
-| `tools` | 表格、失败的工具调用、Python 代码、有序列表 |
-| `zh` | 中文排版、引用、粗体 |
-| `slow` | 约 4 tok/s 的输出速度，首个 token 前等待 2.5 秒 |
-| `long` | 多段思考过程、41 行的工具输出、约 60 行的代码、两张表格 |
-| `error` | 输出一半后断开，追加 error 块 |
+`ConversationFeed` 把会话事件应用到模型上，并决定哪些走 pacer：
 
-### AgentDriver
+- 文本和思考的 Delta 走 pacer，由 16ms 的 ticker 每帧取出该显示的部分写入模型。工具参数的 Delta 立即写入。
+- “服务器说过的内容”等于已显示的文字加 pacer 里还没放出的文字。整条 Message 或整个 Part 到达时，如果新文本以这个内容开头，只把多出来的部分交给 pacer，其余字段（时间、状态、其他 part）立即更新；不是这个关系，或者事件改变了结构（新增 part、删除消息），就先放空 pacer 再应用，保证显示顺序不乱。
+- 所以回复结束的 Message 事件不会把还没放完的文字一下子切出来。
+- `hasPending()` 为真表示还有文字在路上。`ChatSession.busy` 是“会话忙，或还有文字没显示完”，沿用 qutie 的行为：忙时发送按钮变成停止。
 
-真实后端的 driver，实现了和 MockDriver 相同的 `Driver` 接口。
+### SessionController
 
-- 持有对话的 history。用户发一条，就追加一条 `UserMessage`；回复结束（不管成功、出错还是被取消），就把收到的那部分 `AssistantMessage` 追加进去。所以下一轮模型看到的内容，和用户在屏幕上看到的一致。
-- 配置在发第一条消息时读取。读取失败就显示一个 error 块，下一条消息再读一次，用户改好配置文件后不用重启。
-- 增量不是一到就写进 model，而是先交给 `StreamPacer`，由一个 16ms 的 ticker 每帧取出该显示的部分写入。真实服务端常常隔一两百毫秒发一大段，直接写进去就是一段一段蹦出来。pacer 根据最近几次到达的间隔估计下一段什么时候到，把积压的文字在这段时间里匀速放完，所以文字以稳定的速度流出，最多比网络慢 200ms。切分按字素边界，不会拆开 emoji。
-- 流结束后，要等 pacer 放空才结束这一轮，然后才追加 error 块。用户按停止时，剩下的文字一次全部放出，屏幕上看到的和 history 保持一致。
-- 析构时如果回复还在进行，就先置 `m_destroying` 再请求停止。按 http_stream 一节说的，停止是同步完成的，`reply()` 看到这个标志后就不再写 model。
+一个会话的控制器：`create()`、`attach()`、`continueLast()`、`send()`、`abort()`、`permissionReply()`。订阅 `ServerClient::frameReceived`，按 session_id 过滤事件。
+
+- Attach 响应之前到达的事件不缓冲也不处理：它们要么已经在快照里，要么根本不会发来。这一点依赖服务器的行为，没有对着真实服务器的并发场景验证过。
+- 每次 `Backend::connected()` 后，如果已经有会话，自动重新 attach，快照替换整个历史；失败发 `reattachFailed`。
+- 工具等待授权的状态在 tool part 里（`awaiting_permission`），所以 Permission、PermissionResolved、Queue 事件目前不处理。
 
 ## 6. app：界面
 
 ### ChatSession 与 SystemFonts
 
-- `ChatSession` 是 QML 唯一能直接访问的业务对象，它持有 model 和 driver。它在 `main()` 里创建（根据 `--mock` 参数选择 driver），再通过 `setInitialProperties` 交给 `Main.qml` 的 `required property ChatSession session`。QML 不能自己创建 ChatSession（`QML_UNCREATABLE`）。
+- `ChatSession` 是 QML 唯一能直接访问的业务对象，它持有 `Backend` 和 `SessionController`（析构时先 `shutdown()`，让挂起的请求先失败，再销毁它们依赖的成员）。`main()` 解析命令行后创建它，通过 `setInitialProperties` 交给 `Main.qml` 的 `required property ChatSession session`。QML 不能自己创建 ChatSession（`QML_UNCREATABLE`）。
+- 后端一连上就按命令行打开会话（新建、继续上一个或按 id 附着）；连接状态和失败信息通过 `statusText` 显示在窗口顶部的状态条里，`ready`（已连接且有会话）为假时输入框不能发送。
 - `SystemFonts` 只做一件事：把系统等宽字体告诉 QML。`"monospace"` 这种字体名只是 fontconfig 的别名，在 Windows 和 macOS 上无效，所以要用 `QFontDatabase::systemFont(FixedFont)` 去取。
 
 ### Theme 与 Motion
@@ -266,12 +241,13 @@ Flickable 自带的滚轮动画，每一格都从当前位置重新开始，上�
 | 文件 | 要点 |
 |---|---|
 | `Block.qml` | 所有块的基类：在阅读栏里居中；流式输出时高度做追赶；`clip` 防止内容在追赶过程中溢出 |
-| `UserBlock.qml` | 气泡宽度贴合文字；从第二轮开始，上方加一条分割线，新发送的消息分割线从左往右展开（`added()`） |
+| `UserBlock.qml` | 气泡宽度贴合文字；开启新一轮的消息（`opensTurn`）上方加一条分割线，新发送的消息分割线从左往右展开（`added()`）；不是用户自己输入的消息（对等会话、派生任务、提醒、压缩摘要、shell 输出）上方有一行说明来源 |
+| `ImageBlock.qml` | 消息里的图片，目前只显示文件名 |
 | `MarkdownBlock.qml` | `TextEdit.MarkdownText` 渲染；流式输出时末尾有一个跟着走的脉冲点（`StreamCaret`） |
 | `CodeBlock.qml` | PlainText 加 `SyntaxHighlighter`；语言名匹配不到时按纯文本显示；复制按钮 |
 | `ReasoningBlock.qml` | 输出时自动展开，结束后自动折叠，也可以手动点击开合；"Thinking" 字样在输出时呼吸闪烁 |
 | 吸顶标题 | 思考块和工具块展开时，标题行贴在视口顶部，直到整个块滚出去（`Block.pinOffset()`）。吸顶时点击折叠，视图会跟着块变矮往回滚，标题停在原处不动 |
-| `ToolBlock.qml` | 状态点（`StatusDot.qml`：运行中脉冲，完成后变成绿色或红色，弹性回弹并扩散一圈圆环）；有输出时可以展开查看 |
+| `ToolBlock.qml` | 通用工具卡片：状态点（`StatusDot.qml`：运行中脉冲，完成后变成绿色或红色，弹性回弹并扩散一圈圆环）和 `名称 用途` 标题；有参数或输出时可以展开查看。状态是 `awaiting_permission` 时，卡片底部出现“允许 / 本会话内允许 / 拒绝”三个按钮，通过 `ChatView.permissionAnswered` 回到 `ChatSession.permissionReply()` |
 | `ErrorBlock.qml` | 浅红底卡片，左边一个"!"圆标（`AlertBadge.qml`）。出错很少见，但一定要让用户注意到：卡片以中性底色入场，落定后圆标用 `Flourish` 弹出并扩散一圈红色圆环，同时错误底色以硬边圆形从圆标处匀速扩散，盖满卡片即结束。动作都从一个点向外扩散，和工具状态点同一种语言；回弹只发生在圆标周围几个像素。用户正往上翻时出错，回到最新按钮的右上角会弹出一个红色"!"徽标，按钮消失时清掉 |
 | `Flourish.qml` | "发生了"的局部点缀：`play()` 让已显示的目标收缩后用 `OutElastic` 弹回并扩散圆环；`enter()` 用于新出现的目标，从 40% 大小淡入并同时弹开（从 0 放大会像一个膨胀的点）。工具状态点、错误圆标、回到最新按钮的徽标共用 |
 | `Pulse.qml` | 上面三处"进行中"闪烁共用的组件。停止时从当前透明度直接缓动回 1，不跑完当前周期；用 `alwaysRunToEnd` 的话，结束后最多还会再闪一次。周期由 `period` 设置，默认 `Motion.pulse`，Thinking 标题用更慢的 `Motion.calmPulse` |
@@ -300,26 +276,35 @@ grabToImage(page) → 截图盖到最上层 → Theme.toggle() → 截图淡出
 - 滚动条的 handle 自绘，颜色取自 Theme。Basic 风格默认用系统 palette，不跟随主题。
 - 输入框高度随内容增长，最大 220px。
 
+
 ## 7. 测试
 
 | 测试 | 覆盖 |
 |---|---|
-| `tst_jsonc` | 各种扩展语法、该报错的非法输入、报错位置的行列号 |
-| `tst_sse` | 各种换行符、跨 chunk 的 CRLF 和 BOM、注释、多行 data、逐字节拆分 |
-| `tst_config` | 正常配置、apiKey 可省略、缺字段、语法错误、非 http 地址、文件不存在 |
-| `tst_openai_wire` | 请求 JSON、推理内容按原字段回传、跳过空 assistant 消息；解码正文和推理、重复字段只取一个、finish_reason 映射、流中报错、无法解析的 data |
-| `tst_openai_client` | 用假服务端：正常流、请求头和路径、逐字节拆分（含 UTF-8）、HTTP 500、连接中途断开、连不上、取消同步完成 |
-| `tst_fence_splitter` | 15 个用例，每个都分别按整段和逐字符各跑一遍；正文立即放出；可能是围栏的行先扣住 |
-| `tst_conversation_model` | 块的切分、交错输出、同时只有一个块在 streaming、更新过程中不 reset（配合 `QAbstractItemModelTester`）、error 块 |
-| `tst_stream_pacer` | 首段按最大延迟摊开、成段到达时每帧放出量稳定、逐 token 的流几乎不加延迟、类型顺序、不拆字素、空闲后不攒额度、takeAll |
-| `tst_agent_driver` | 用假服务端：回复写进 model、缺配置、中途失败、取消后部分回复留在 history 里、回复进行中销毁 driver |
+| `tst_proto` | 遍历 `crates/proto/fixtures/` 的全部样例；未知种类的帧、事件、part 的处理；格式错误的报错 |
+| `tst_server_client` | 响应按 id 对应请求、乱序响应、后端报错的文字、Attach 响应先于后面的帧处理、帧按到达顺序、连接关闭时等待中的请求失败 |
+| `tst_launcher` | 实例文件的读取和存活判断、拉起锁、已有实例直接连、拉起后等待实例出现、显式地址、超时 |
+| `tst_fence_splitter` | 每个用例分别按整段和逐字符各跑一遍；正文立即放出；可能是围栏的行先扣住 |
+| `tst_conversation_model` | 消息到块的映射、交错输出、同时只有一个块在流式、delta 不 reset（配合 `QAbstractItemModelTester`）、part 替换和追加、工具状态变化、error 块（忽略 aborted）、来源和 `opensTurn`、删除、prepend、reset |
+| `tst_stream_pacer` | 首段按最大延迟摊开、成段到达时每帧放出量稳定、逐 token 的流几乎不加延迟、目标顺序、不拆字素、空闲后不攒额度、takeAll、按 part 查询待放出的文字 |
+| `tst_conversation_feed` | delta 被匀速放出、工具参数立即显示、整个 part 延长已显示的文字时只放出多的部分、不连续的文字立即替换、新 part 等前面的文字放完、回复结束的 Message 不截断文字、reset 丢弃待放出的文字、删除前先放空 |
+| `tst_session_controller` | 用假后端：创建并 attach、attach 失败、事件流和 busy 的变化、忽略其他会话的事件、发送不回显、abort、continue、重连后重新 attach、错误和 toast |
+| `tst_command_line` | 目录检查和规范化、`-s` / `-c` / 新建的优先级、`-w`、`--agent`、`--model` 的格式、`--server` 和 `--token`、`--mock`、帮助和版本、隐藏的 `--smoke` |
+| `tst_mock_session` | 对着真实的 `ref-server --mock`：markdown 和代码块流式显示、工具调用、等待授权后允许或拒绝 |
+| `tst_app_smoke` | 整个程序（offscreen）：`--mock`、显式 `--server`、错误的 token、不存在的会话、自动拉起后端并在退出后自动消失、帮助和版本、错误参数；要求 stderr 里没有 QML 警告 |
 
-`tests/fake_server.h` 是一个跑在 `QTcpServer` 上的最小 HTTP/1.1 服务端，用 chunked 编码一段一段回放响应，结尾可以选正常结束（Complete）、中途断开（Drop）或一直挂着（Hold）。
+`tst_mock_session` 和 `tst_app_smoke` 只在配置时提供了 `-DREF_SERVER=<path>/ref-server`（`cargo build -p ref-server` 的产物）才会注册。它们不调用任何模型，自己启动的进程自己结束，状态和数据目录都用临时目录，不会碰用户正在运行的后端。`tests/fake_backend.h` 是一个跑在 loopback WebSocket 上的假后端，其余测试用它脚本化服务器的行为。
 
-QML 部分没有自动化测试，目前靠人工运行 mock 脚本来检查。
+QML 部分没有自动化测试：`tst_app_smoke` 只检查界面能加载、不报警告。动画和观感靠人工运行（可以用 `ref-gui --mock`，在输入框里发 `help` 看有哪些脚本，比如 `tools`、`permission`、`markdown`、`long`、`fail`）来检查。
 
 ## 8. 已知限制
 
+- M0 没有的：输入框里的 agent / 模型切换和 `/`、`@`、`!`，粘贴图片，设置面板，侧边栏，分屏（`-w`），向上翻页加载更早的消息（`moreBefore` 已解析，还没使用）。
+- 图片只显示文件名。`IconProvider`（`image://icons/<name>-<size>?color=<hex>`，用 `assets/icons/` 里的 SVG）还没实现，界面上的图标目前都是手绘的 Shape。
+- 忙时发送按钮变成停止，不能排队发送第二条。
+- 对话在后端断开期间保持原样，恢复连接后用快照整段替换。
 - MarkdownBlock 每来一段增量就整段重新解析 Markdown，超长正文的性能还没测过。
-- 所有行常驻内存，超长会话的开销还没测过；到做会话持久化时再评估。
+- 所有行常驻内存，超长会话的开销还没测过。
 - 末尾的脉冲点依赖 `positionToRectangle`，Markdown 以列表或表格结尾时位置可能偏。
+- Windows 上的拉起锁、`CREATE_NO_WINDOW` 拉起和图标渲染没有在 Windows 上验证过。
+- 如果 ref-gui 在拉起后端之后、连上之前就退出，后端会留着（它的空闲超时只在第一次连接之后才生效）。TUI 有同样的限制。

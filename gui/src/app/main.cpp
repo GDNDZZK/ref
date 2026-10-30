@@ -31,7 +31,8 @@ void print(QTextStream& stream, const QString& text)
 	stream.flush();
 }
 
-// For --smoke: ends the program as soon as the session is open (or cannot be).
+// For --smoke: ends the program as soon as the session is open, or the backend cannot be
+// reached or has no such session.
 void exitWhenOpened(ChatSession& session)
 {
 	QObject::connect(&session, &ChatSession::opened, &session, [](const QString& sessionId) {
@@ -42,6 +43,15 @@ void exitWhenOpened(ChatSession& session)
 	QObject::connect(&session, &ChatSession::openFailed, &session, [](const QString& reason) {
 		QTextStream err(stderr);
 		print(err, u"ref-gui: %1\n"_s.arg(reason));
+		QCoreApplication::exit(EXIT_FAILURE);
+	});
+	QObject::connect(&session, &ChatSession::connectionChanged, &session, [&session] {
+		if(session.connectionState() != u"disconnected"_s)
+		{
+			return;
+		}
+		QTextStream err(stderr);
+		print(err, u"ref-gui: %1\n"_s.arg(session.statusText()));
 		QCoreApplication::exit(EXIT_FAILURE);
 	});
 	QTimer::singleShot(SmokeTimeout, &session, [] {

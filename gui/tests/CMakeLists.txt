@@ -56,4 +56,27 @@ if(REF_SERVER)
 	target_compile_definitions(tst_mock_session PRIVATE REF_SERVER_BINARY="${REF_SERVER}")
 	refgui_configure_target(tst_mock_session)
 	add_test(NAME tst_mock_session COMMAND tst_mock_session)
+
+	# The whole program, offscreen. ref-gui imports the KSyntaxHighlighting QML plugin at run
+	# time, which lives in the dependency prefix.
+	qt_add_executable(tst_app_smoke tst_app_smoke.cpp)
+	target_link_libraries(tst_app_smoke PRIVATE refgui_client Qt6::Test)
+	target_compile_definitions(tst_app_smoke PRIVATE
+		REF_SERVER_BINARY="${REF_SERVER}"
+		REF_GUI_BINARY="$<TARGET_FILE:ref-gui>"
+	)
+	add_dependencies(tst_app_smoke ref-gui)
+	refgui_configure_target(tst_app_smoke)
+	add_test(NAME tst_app_smoke COMMAND tst_app_smoke)
+	set(qml_import_paths "")
+	foreach(prefix IN LISTS CMAKE_PREFIX_PATH)
+		list(APPEND qml_import_paths "${prefix}/lib/qml")
+	endforeach()
+	# QML_IMPORT_PATH is a path list; ';' separates the test's environment entries, hence the escape.
+	if(WIN32)
+		list(JOIN qml_import_paths "\\;" qml_import_path)
+	else()
+		list(JOIN qml_import_paths ":" qml_import_path)
+	endif()
+	set_tests_properties(tst_app_smoke PROPERTIES ENVIRONMENT "QML_IMPORT_PATH=${qml_import_path}")
 endif()
