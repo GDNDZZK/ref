@@ -18,6 +18,8 @@
     "test": "vitest run",
     "gen": "node scripts/gen-theme.ts",
     "gen:check": "node scripts/gen-theme.ts --check",
+    "smoke": "node scripts/smoke.mjs",
+    "perf": "node scripts/perf.mjs",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm gen:check && pnpm test"
   },
   "dependencies": {
@@ -28,7 +30,6 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@intlify/unplugin-vue-i18n": "^11.2.8",
     "@types/markdown-it": "^14.2.0",
     "@types/node": "^26.6.6",
     "@vitejs/plugin-vue": "^6.0.10",
@@ -37,6 +38,7 @@
     "eslint-plugin-vue": "^10.12.0",
     "globals": "^17.13.0",
     "happy-dom": "^21.0.4",
+    "playwright-core": "^1.64.1",
     "prettier": "^3.9.10",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.1",
