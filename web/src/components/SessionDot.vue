@@ -2,7 +2,7 @@
 // A session's state as an 8px dot (the sidebar's and the tiles' StatusDot.qml): it pulses while the
 // session works, and a turn that finishes plays the flourish in the success color before the dot
 // settles to the idle color.
-import { computed, ref, useTemplateRef, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { usePulse } from '../motion/usePulse.ts'
 import { motion } from '../theme/generated/motion.ts'
 import type { RowState } from '../shell/sessionRow.ts'
@@ -17,6 +17,7 @@ const dot = useTemplateRef<HTMLElement>('dot')
 const flourish = useTemplateRef<InstanceType<typeof Flourish>>('flourish')
 const pulsing = computed(() => WORKING.includes(props.state))
 const finished = ref(false) // the success color, while the flourish plays
+let settle: ReturnType<typeof setTimeout> | undefined
 
 usePulse(dot, pulsing, { dimmed: PULSE_DIMMED })
 
@@ -27,9 +28,11 @@ watch(
     if (!turnEnded || !dot.value) return
     finished.value = true
     flourish.value?.play(dot.value)
-    setTimeout(() => (finished.value = false), motion.slow)
+    clearTimeout(settle)
+    settle = setTimeout(() => (finished.value = false), motion.slow)
   },
 )
+onBeforeUnmount(() => clearTimeout(settle))
 </script>
 
 <template>

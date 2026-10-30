@@ -57,6 +57,7 @@ private slots:
 	void carriesToolMetaAndImages();
 	void givesMessageTexts();
 	void summarisesWhatToolsAskOfTheUser();
+	void showsMarkdownWithoutImagesOrTags();
 };
 
 void TestConversationModel::splitsAssistantTextIntoBlocks()
@@ -542,6 +543,17 @@ void TestConversationModel::summarisesWhatToolsAskOfTheUser()
 	model.reset({});
 	QCOMPARE(model.toolSummary().awaitingPermission, 0);
 	QVERIFY(model.toolSummary().oldestAwaitingCallId.isEmpty());
+}
+
+void TestConversationModel::showsMarkdownWithoutImagesOrTags()
+{
+	ConversationModel model;
+	model.setMessage(assistant(u"a1"_s, {text(u"look ![x](http://example.com/a.png) <img src=y>"_s), reasoning(u"![r](http://example.com/r.png)"_s)}));
+	QCOMPARE(roleOf(model, 0, ConversationModel::ContentRole).toString(), u"look [x](http://example.com/a.png) \\<img src=y>"_s);
+	QCOMPARE(roleOf(model, 1, ConversationModel::ContentRole).toString(), u"[r](http://example.com/r.png)"_s);
+	// What the user typed is plain text and stays as it is.
+	model.setMessage(user(u"u1"_s, u"![x](y)"_s));
+	QCOMPARE(roleOf(model, 2, ConversationModel::ContentRole).toString(), u"![x](y)"_s);
 }
 
 void TestConversationModel::givesMessageTexts()

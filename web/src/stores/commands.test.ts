@@ -131,13 +131,14 @@ describe('palette', () => {
 
 describe('fuzzyScore', () => {
   it('needs the letters in order', () => {
-    expect(fuzzyScore('nws', 'New session')).toBeDefined()
+    // n and s start words (+2 each), three letters (+1 each), minus 0.01 per character of the text.
+    expect(fuzzyScore('nws', 'New session')).toBeCloseTo(6.89, 2)
     expect(fuzzyScore('swn', 'New session')).toBeUndefined()
   })
 
   it('prefers contiguous matches and word starts', () => {
     expect(fuzzyScore('new', 'New session')!).toBeGreaterThan(fuzzyScore('new', 'Rename the window')!)
-    expect(fuzzyScore('', 'anything')).toBeDefined()
+    expect(fuzzyScore('', 'anything')).toBeCloseTo(-0.08, 2) // an empty query matches everything, shorter text first
   })
 })
 

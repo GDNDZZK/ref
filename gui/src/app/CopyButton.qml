@@ -23,6 +23,7 @@ Item {
 	TextEdit {
 		id: clipboard
 		visible: false
+		textFormat: TextEdit.PlainText
 	}
 
 	Rectangle {

@@ -254,6 +254,7 @@ Item {
 			Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 
 			Text {
+				textFormat: Text.PlainText
 				anchors.centerIn: parent
 				text: qsTr("Drop images to attach")
 				color: Theme.textMuted

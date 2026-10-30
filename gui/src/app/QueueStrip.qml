@@ -75,6 +75,7 @@ Rectangle {
 				Icon { name: "clock"; size: strip.iconSize; color: Theme.textMuted }
 
 				Text {
+					textFormat: Text.PlainText
 					Layout.fillWidth: true
 					text: row.text.replace(/\s+/g, " ")
 					color: Theme.text
@@ -87,6 +88,7 @@ Rectangle {
 					spacing: 4
 					Icon { name: "image"; size: strip.iconSize; color: Theme.textMuted }
 					Text {
+						textFormat: Text.PlainText
 						text: row.imageCount
 						color: Theme.textMuted
 						font.pixelSize: Theme.smallFontSize
@@ -94,6 +96,7 @@ Rectangle {
 				}
 
 				Text {
+					textFormat: Text.PlainText
 					visible: row.sender !== ""
 					text: row.sender
 					color: Theme.textMuted
@@ -113,6 +116,7 @@ Rectangle {
 						Icon { name: "recall"; size: strip.iconSize; color: recallLabel.color }
 						Text {
 							id: recallLabel
+							textFormat: Text.PlainText
 							anchors.verticalCenter: parent.verticalCenter
 							text: qsTr("Remove")
 							color: recallHover.hovered ? Theme.text : Theme.textMuted

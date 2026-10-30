@@ -15,6 +15,9 @@ namespace
 
 constexpr auto AnnounceTimeout = 10s;
 constexpr auto AnnouncePoll = 20ms;
+// Time the backend gets to leave and remove its workspace once its stdin is closed, the same as
+// the Rust client's MockBackend::shutdown; then it is ended.
+constexpr auto ExitTimeout = 3s;
 constexpr auto KillTimeout = 2s;
 
 } // namespace
@@ -76,10 +79,21 @@ std::expected<Endpoint, QString> MockBackend::parseAnnouncement(const QByteArray
 
 MockBackend::~MockBackend()
 {
-	if(isRunning())
+	if(!isRunning())
+	{
+		return;
+	}
+	const auto wait = [this](std::chrono::milliseconds timeout) { return m_process.waitForFinished(static_cast<int>(timeout.count())); };
+	m_process.closeWriteChannel(); // the backend exits and removes its workspace when its stdin ends
+	if(wait(ExitTimeout))
+	{
+		return;
+	}
+	m_process.terminate();
+	if(!wait(KillTimeout))
 	{
 		m_process.kill();
-		m_process.waitForFinished(static_cast<int>(std::chrono::milliseconds(KillTimeout).count()));
+		wait(KillTimeout);
 	}
 }
 

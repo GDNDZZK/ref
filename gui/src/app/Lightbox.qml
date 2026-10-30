@@ -63,6 +63,7 @@ Item {
 	}
 
 	Text {
+		textFormat: Text.PlainText
 		anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: lightbox.margin / 2 }
 		text: lightbox.image ? [lightbox.image.name ?? "", ToolInfo.sizeText(lightbox.image.size ?? 0)].filter(part => part !== "").join(" \u00b7 ") : ""
 		color: Qt.rgba(1, 1, 1, 0.8)

@@ -38,6 +38,12 @@ refgui_configure_target(tst_composer_model)
 add_test(NAME tst_composer_model COMMAND tst_composer_model)
 set_tests_properties(tst_composer_model PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen") # the clipboard needs a platform
 
+qt_add_executable(tst_plain_text tst_plain_text.cpp)
+target_link_libraries(tst_plain_text PRIVATE Qt6::Test)
+target_compile_definitions(tst_plain_text PRIVATE REF_QML_DIR="${PROJECT_SOURCE_DIR}/src/app")
+refgui_configure_target(tst_plain_text)
+add_test(NAME tst_plain_text COMMAND tst_plain_text)
+
 qt_add_executable(tst_launcher tst_launcher.cpp coro_test.h)
 target_link_libraries(tst_launcher PRIVATE refgui_client Qt6::Test)
 refgui_configure_target(tst_launcher)
@@ -164,3 +170,19 @@ qt_add_executable(tst_workspace tst_workspace.cpp fake_backend.h
 target_link_libraries(tst_workspace PRIVATE refgui_workspace refgui_session refgui_composer refgui_cli Qt6::Gui Qt6::Qml Qt6::Test)
 refgui_configure_target(tst_workspace)
 add_test(NAME tst_workspace COMMAND tst_workspace)
+
+qt_add_executable(tst_markdown_text tst_markdown_text.cpp)
+target_link_libraries(tst_markdown_text PRIVATE refgui_session Qt6::Test)
+refgui_configure_target(tst_markdown_text)
+add_test(NAME tst_markdown_text COMMAND tst_markdown_text)
+
+# Text from the model must not reach the network. Compiles the program's network policy.
+qt_add_executable(tst_network_policy tst_network_policy.cpp
+	${PROJECT_SOURCE_DIR}/src/app/local_only_network.cpp
+	${PROJECT_SOURCE_DIR}/src/app/local_only_network.h
+)
+target_link_libraries(tst_network_policy PRIVATE refgui_session Qt6::Network Qt6::Qml Qt6::Quick Qt6::Test)
+target_compile_definitions(tst_network_policy PRIVATE REF_QML_DIR="${PROJECT_SOURCE_DIR}/src/app")
+refgui_configure_target(tst_network_policy)
+add_test(NAME tst_network_policy COMMAND tst_network_policy)
+set_tests_properties(tst_network_policy PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

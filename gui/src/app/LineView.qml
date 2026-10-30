@@ -92,6 +92,7 @@ Item {
 					color: style.background
 
 					Text {
+						textFormat: Text.PlainText
 						visible: view.gutterWidth > 0
 						x: view.sidePadding
 						width: view.gutterWidth - view.gutterGap
@@ -104,6 +105,7 @@ Item {
 						font.pixelSize: 11
 					}
 					Text {
+						textFormat: Text.PlainText
 						visible: view.hasSigns
 						x: view.sidePadding + view.gutterWidth
 						anchors.verticalCenter: parent.verticalCenter
@@ -113,6 +115,7 @@ Item {
 						font.pixelSize: Theme.smallFontSize
 					}
 					Text {
+						textFormat: Text.PlainText
 						x: row.modelData.kind === "file" || row.modelData.kind === "hunk" ? view.sidePadding + view.gutterWidth : view.textX // headers start where the sign column does
 						anchors.verticalCenter: parent.verticalCenter
 						text: row.modelData.text

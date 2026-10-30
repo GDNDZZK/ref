@@ -48,6 +48,7 @@ Item {
 			color: Theme.codeBackground
 
 			Text {
+				textFormat: Text.PlainText
 				id: commandText
 				x: section.fieldPaddingWide
 				y: section.fieldPadding
@@ -62,6 +63,7 @@ Item {
 		}
 
 		Text {
+			textFormat: Text.PlainText
 			visible: section.path !== ""
 			width: parent.width
 			text: section.path
@@ -103,6 +105,7 @@ Item {
 			}
 
 			Text {
+				textFormat: Text.PlainText
 				anchors { right: parent.right; verticalCenter: parent.verticalCenter }
 				visible: section.othersWaiting > 0
 				text: qsTr("+%1 more waiting").arg(section.othersWaiting)

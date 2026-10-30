@@ -34,6 +34,8 @@ private slots:
 	void toolCallsFinish();
 	void permissionWaitsForTheUser();
 	void deniedPermissionShowsAsFailed();
+	void undoTakesThePromptBack();
+	void mockDirectoryIsRemovedWhenTheBackendIsDestroyed();
 
 private:
 	// A connected backend with a session, and the controller on it.
@@ -160,6 +162,30 @@ void TestMockSession::permissionWaitsForTheUser()
 	QCOMPARE(awaitingRow(), -1);
 }
 
+void TestMockSession::undoTakesThePromptBack()
+{
+	Session s;
+	s.say(u"hello"_s);
+	QTRY_VERIFY_WITH_TIMEOUT(!s.controller.isTurnInProgress() && s.hasBlock(u"markdown"_s), ReplyTimeoutMs);
+	s.say(u"markdown"_s);
+	QTRY_VERIFY_WITH_TIMEOUT(!s.controller.isTurnInProgress(), ReplyTimeoutMs);
+
+	// The last prompt goes, with its reply; the first stays.
+	const auto undone = await(s.controller.undo(std::nullopt));
+	QVERIFY(undone && undone->has_value());
+	QCOMPARE((*undone)->text, u"markdown"_s);
+	QVERIFY((*undone)->removed);
+	QTRY_VERIFY_WITH_TIMEOUT(s.blocks().filter(u"user:"_s).size() == 1, ReplyTimeoutMs);
+	QVERIFY(s.blocks().filter(u"user:hello"_s).size() == 1);
+
+	// By message id: the only prompt left.
+	const QString firstId = s.controller.model().firstMessageId();
+	const auto all = await(s.controller.undo(firstId));
+	QVERIFY(all && all->has_value());
+	QCOMPARE((*all)->text, u"hello"_s);
+	QTRY_VERIFY_WITH_TIMEOUT(s.controller.model().rowCount() == 0, ReplyTimeoutMs);
+}
+
 void TestMockSession::deniedPermissionShowsAsFailed()
 {
 	Session s;
@@ -183,6 +209,29 @@ void TestMockSession::deniedPermissionShowsAsFailed()
 
 	QTRY_VERIFY_WITH_TIMEOUT(toolRow(u"denied"_s) >= 0, ReplyTimeoutMs);
 	QVERIFY(roleOf(model, toolRow(u"denied"_s), ConversationModel::FailedRole).toBool());
+}
+
+// The mock backend keeps its workspace under the temporary directory and removes it when it exits
+// on its own. Killing it leaves the directory behind, so the backend has to be given time to leave.
+void TestMockSession::mockDirectoryIsRemovedWhenTheBackendIsDestroyed()
+{
+	QTemporaryDir temporary;
+	QVERIFY(temporary.isValid());
+	const QByteArray before = qgetenv("TMPDIR");
+	qputenv("TMPDIR", temporary.path().toLocal8Bit());
+	{
+		Session s;
+		QVERIFY(!QDir(temporary.path()).entryList({u"ref-mock-*"_s}, QDir::Dirs | QDir::NoDotAndDotDot).isEmpty());
+	}
+	if(before.isNull())
+	{
+		qunsetenv("TMPDIR");
+	}
+	else
+	{
+		qputenv("TMPDIR", before);
+	}
+	QCOMPARE(QDir(temporary.path()).entryList({u"ref-mock-*"_s}, QDir::Dirs | QDir::NoDotAndDotDot), QStringList());
 }
 
 QTEST_GUILESS_MAIN(TestMockSession)

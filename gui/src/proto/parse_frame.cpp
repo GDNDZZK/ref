@@ -240,6 +240,16 @@ Parsed<RemovedPrompt> parseRemovedPromptResult(const QJsonObject& result)
 	});
 }
 
+Parsed<RemovedPrompt> parseUndoResult(const QJsonObject& result)
+{
+	auto parsed = parseRemovedPromptResult(result);
+	if(parsed)
+	{
+		parsed->removed = true; // Undo answers only for what it removed
+	}
+	return parsed;
+}
+
 Parsed<QStringList> parseFilesResult(const QJsonObject& result)
 {
 	return json::guarded([&] {
