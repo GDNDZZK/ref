@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Checks that an unpacked ref-gui package is complete and runs, on the platform it was built for.
 #
-#   scripts/verify-gui-package.sh ref-gui-v0.1.0-x86_64-unknown-linux-gnu
+#   scripts/verify-gui-package.sh ref-gui-v0.2.0-x86_64-unknown-linux-gnu
 #
 # - Every library the program and its plugins need is in the package or part of the system.
 # - Linux: the package asks no more of the system than the limits below.
