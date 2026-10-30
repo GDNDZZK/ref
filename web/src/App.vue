@@ -2,6 +2,7 @@
 // The window (Main.qml): the open session, with the theme toggle and the notices on top.
 import ConnectionBanner from './components/ConnectionBanner.vue'
 import NoticeList from './components/NoticeList.vue'
+import NotificationPrompt from './components/NotificationPrompt.vue'
 import SessionPane from './components/SessionPane.vue'
 import ThemeToggle from './components/ThemeToggle.vue'
 import { usePermissionKeys } from './composables/usePermissionKeys.ts'
@@ -14,6 +15,7 @@ usePermissionKeys()
 <template>
   <div class="app">
     <ConnectionBanner />
+    <NotificationPrompt />
     <SessionPane v-if="workspace.current" :key="workspace.current.id" :session="workspace.current" />
     <ThemeToggle class="theme-toggle" />
     <NoticeList />

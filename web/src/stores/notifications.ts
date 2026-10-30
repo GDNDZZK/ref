@@ -19,6 +19,7 @@ import { useSettingsStore } from './settings.ts'
 import { useWorkspaceStore } from './workspace.ts'
 
 const NOTIFICATION_ICON = '/favicon.png'
+const PROMPT_DISMISSED_KEY = 'ref.notifyPromptDismissed'
 
 export const useNotificationsStore = defineStore('notifications', () => {
   const connection = useConnectionStore()
@@ -33,6 +34,8 @@ export const useNotificationsStore = defineStore('notifications', () => {
   })
   const availability = notifier.availability
   const permission = ref<NotificationPermissionState>(notifier.permission())
+
+  const promptDismissed = ref(localStorage.getItem(PROMPT_DISMISSED_KEY) === '1')
 
   const center = new NotificationCenter({
     notifier,
@@ -60,6 +63,21 @@ export const useNotificationsStore = defineStore('notifications', () => {
     permission.value = await notifier.requestPermission()
   }
 
+  // Ask once, in the page, before the browser's own prompt: browsers hide that one if it is
+  // shown without a click, and a refused request cannot be repeated.
+  const promptVisible = computed(
+    () =>
+      settings.settings.notifications.enabled &&
+      availability === 'available' &&
+      permission.value === 'default' &&
+      !promptDismissed.value,
+  )
+
+  function dismissPrompt(): void {
+    promptDismissed.value = true
+    localStorage.setItem(PROMPT_DISMISSED_KEY, '1')
+  }
+
   function start(): void {
     watch(
       () => settings.settings.notifications,
@@ -83,5 +101,12 @@ export const useNotificationsStore = defineStore('notifications', () => {
     document.addEventListener('visibilitychange', foregroundChanged)
   }
 
-  return { availability, permission, requestPermission, start }
+  return {
+    availability,
+    permission,
+    promptVisible,
+    requestPermission,
+    dismissPrompt,
+    start,
+  }
 })

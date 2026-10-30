@@ -73,5 +73,19 @@
     "turnDone": "已完成",
     "turnError": "因错误而停止",
     "turnErrorDetail": "因错误而停止：{error}"
+  },
+  "notifySettings": {
+    "title": "通知",
+    "enable": "显示系统通知",
+    "permission": "工具需要授权",
+    "turnDone": "一轮对话结束",
+    "turnError": "一轮对话出错结束",
+    "insecure": "此页面不可用：浏览器只在 https 或 localhost 页面显示通知。改为让标签页标题闪烁提醒。",
+    "unsupported": "此浏览器无法显示通知。改为让标签页标题闪烁提醒。",
+    "denied": "已在浏览器的站点设置中被禁止。改为让标签页标题闪烁提醒。",
+    "needsPermission": "还需要浏览器允许通知。",
+    "allow": "允许",
+    "later": "暂不",
+    "prompt": "其他会话需要你时，允许显示桌面通知吗？"
   }
 }
