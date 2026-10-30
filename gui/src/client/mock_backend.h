@@ -13,8 +13,8 @@ namespace refgui::client
 {
 
 // A private `ref-server --mock`, for working on the UI without touching the shared backend.
-// It is killed with this object, and it also exits when its stdin closes (we hold the
-// write end), so it does not outlive a GUI that died.
+// It leaves when this object ends (stdin is closed, then terminate and kill if it takes too
+// long), and also when the GUI dies, as we hold the write end of its stdin.
 class MockBackend
 {
 public:
