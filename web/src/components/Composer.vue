@@ -55,9 +55,11 @@ const placeholder = computed(() => {
 function measure(): void {
   const area = input.value
   if (!area) return
+  // Vue owns the inline height; put it back so a measure without a change leaves it alone.
+  const applied = area.style.height
   area.style.height = '0'
   const wanted = Math.max(SEND_BUTTON_SIZE, area.scrollHeight)
-  area.style.height = ''
+  area.style.height = applied
   inputHeight.value = Math.min(wanted, MAX_INPUT_HEIGHT)
 }
 
@@ -420,13 +422,19 @@ defineExpose({ focus: () => input.value?.focus() })
 
 .hint {
   flex: none;
+  max-width: 0; /* takes no room from the tags until it is shown */
+  overflow: hidden;
   color: var(--text);
   font-size: var(--small-font-size);
+  white-space: nowrap;
   opacity: 0;
-  transition: opacity var(--motion-quick) var(--motion-ease);
+  transition:
+    opacity var(--motion-quick) var(--motion-ease),
+    max-width var(--motion-standard) var(--motion-ease);
 }
 
 .hint.shown {
+  max-width: 240px;
   opacity: 1;
 }
 
