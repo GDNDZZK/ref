@@ -421,3 +421,27 @@ async fn list_dirs_expands_the_configured_home() {
         assert_eq!(res["dirs"], serde_json::json!(["docs"]));
     }
 }
+
+#[tokio::test]
+async fn frames_before_hello_are_refused() {
+    let (_r, url, _work) = start("", -1).await;
+    let (mut ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+    let focus = Request::SetFocus {
+        focused: true,
+        sessions: vec![],
+    };
+    send(&mut ws, 1, focus).await;
+    let (ok, _, err) = response(&mut ws, 1, &mut Vec::new()).await;
+    assert!(!ok);
+    assert!(err.unwrap().contains("hello"));
+    // The server hangs up afterwards.
+    let closed = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(m) = ws.next().await {
+            if m.is_err() {
+                return;
+            }
+        }
+    })
+    .await;
+    assert!(closed.is_ok(), "the connection is closed");
+}
