@@ -217,7 +217,7 @@ void TestSessionController::ignoresEventsOfOtherSessions()
 	f.fake.send(infoFrame(u"ses_1"_s, u"busy"_s)); // a marker: handled after the frame above
 	QTRY_VERIFY(f.controller.isBusy());
 
-	QCOMPARE(f.controller.model().rowCount(), 2);
+	QCOMPARE(contentRowCount(f.controller.model()), 2);
 }
 
 void TestSessionController::sendDoesNotEchoThePrompt()
@@ -231,7 +231,7 @@ void TestSessionController::sendDoesNotEchoThePrompt()
 	QCOMPARE(f.fake.requests().last().value(u"op"_s).toString(), u"prompt"_s);
 	QCOMPARE(f.fake.requests().last().value(u"session_id"_s).toString(), u"ses_1"_s);
 	QCOMPARE(f.fake.requests().last().value(u"text"_s).toString(), u"Do it"_s);
-	QCOMPARE(f.controller.model().rowCount(), 2);
+	QCOMPARE(contentRowCount(f.controller.model()), 2);
 }
 
 void TestSessionController::abortAsksTheBackend()
