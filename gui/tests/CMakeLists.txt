@@ -27,6 +27,11 @@ target_link_libraries(tst_server_client PRIVATE refgui_client Qt6::Test)
 refgui_configure_target(tst_server_client)
 add_test(NAME tst_server_client COMMAND tst_server_client)
 
+qt_add_executable(tst_composer_requests tst_composer_requests.cpp coro_test.h fake_backend.h)
+target_link_libraries(tst_composer_requests PRIVATE refgui_client Qt6::Test)
+refgui_configure_target(tst_composer_requests)
+add_test(NAME tst_composer_requests COMMAND tst_composer_requests)
+
 qt_add_executable(tst_launcher tst_launcher.cpp coro_test.h)
 target_link_libraries(tst_launcher PRIVATE refgui_client Qt6::Test)
 refgui_configure_target(tst_launcher)

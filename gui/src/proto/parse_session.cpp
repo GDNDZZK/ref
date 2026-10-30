@@ -262,6 +262,11 @@ QList<Message> readMessages(const Fields& fields, QLatin1StringView key)
 	return fields.list<Message>(key, readMessage);
 }
 
+NamedImage readNamedImage(const Fields& fields)
+{
+	return {.mime = fields.string("mime"_L1), .data = fields.string("data"_L1), .name = fields.optionalString("name"_L1)};
+}
+
 PermissionRequest readPermissionRequest(const Fields& fields)
 {
 	return {.sessionId = fields.string("session_id"_L1),

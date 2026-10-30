@@ -230,4 +230,41 @@ Parsed<MessagesPage> parseMessagesResult(const QJsonObject& result)
 	});
 }
 
+Parsed<RemovedPrompt> parseRemovedPromptResult(const QJsonObject& result)
+{
+	return json::guarded([&] {
+		const json::Fields fields(result, u"result"_s);
+		return RemovedPrompt{.removed = fields.booleanOr("removed"_L1, false),
+		                     .text = fields.optionalString("text"_L1).value_or(QString()),
+		                     .images = fields.listOrEmpty<NamedImage>("images"_L1, json::readNamedImage)};
+	});
+}
+
+Parsed<QStringList> parseFilesResult(const QJsonObject& result)
+{
+	return json::guarded([&] {
+		const json::Fields fields(result, u"result"_s);
+		QStringList files;
+		for(const QJsonValue& file : fields.array("files"_L1))
+		{
+			if(!file.isString())
+			{
+				json::fail(fields.childPath("files"_L1), u"expected a list of strings"_s);
+			}
+			files.append(file.toString());
+		}
+		return files;
+	});
+}
+
+Parsed<QString> parseExpandedCommandResult(const QJsonObject& result)
+{
+	return json::guarded([&] { return json::Fields(result, u"result"_s).string("text"_L1); });
+}
+
+Parsed<QList<NamedImage>> parseNamedImages(const QJsonValue& images)
+{
+	return json::guarded([&] { return json::Fields(QJsonObject{{u"images"_s, images}}, u"result"_s).listOrEmpty<NamedImage>("images"_L1, json::readNamedImage); });
+}
+
 } // namespace refgui::proto
