@@ -42,6 +42,11 @@ const ICONS: Record<string, IconKey> = {
   help: 'info-16',
 }
 
+// Custom command names come from the user: only the table's own keys count.
+function iconOf(key: string): IconKey {
+  return Object.hasOwn(ICONS, key) ? ICONS[key]! : DEFAULT_ICON
+}
+
 const { t } = useI18n()
 const commands = useCommandsStore()
 const dialogs = useDialogsStore()
@@ -153,7 +158,7 @@ function onKey(event: KeyboardEvent): void {
         @pick="pick"
       >
         <template #row="{ item }">
-          <Icon :icon="ICONS[item.key] ?? DEFAULT_ICON" class="icon" />
+          <Icon :icon="iconOf(item.key)" class="icon" />
           <span class="title">{{ item.title }}</span>
           <span v-if="item.command.slash" class="slash">/{{ item.command.id }}</span>
           <ShortcutChips v-if="item.command.shortcut" :shortcut="item.command.shortcut" class="keys" />

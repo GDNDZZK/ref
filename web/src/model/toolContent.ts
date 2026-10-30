@@ -28,8 +28,7 @@ const TOOL_ICONS: Record<string, IconKey> = {
 }
 
 export function toolIcon(name: string): IconKey {
-  const known = TOOL_ICONS[name]
-  if (known) return known
+  if (Object.hasOwn(TOOL_ICONS, name)) return TOOL_ICONS[name]!
   return name.includes('_') ? 'mcp-16' : 'tool-16'
 }
 
