@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import RefGui
@@ -34,7 +35,7 @@ Item {
 	// Puts the keyboard in the input box of the focused tile.
 	function focusFocused() {
 		for (let i = 0; i < repeater.count; ++i) {
-			const tile = repeater.itemAt(i)
+			const tile = repeater.itemAt(i) as Tile
 			if (tile.focused)
 				tile.focusPane()
 		}
@@ -47,8 +48,8 @@ Item {
 			return
 		let from = null
 		for (let i = 0; i < repeater.count; ++i) {
-			if (repeater.itemAt(i).focused)
-				from = repeater.itemAt(i)
+			if ((repeater.itemAt(i) as Tile).focused)
+				from = repeater.itemAt(i) as Tile
 		}
 		if (from === null)
 			return
@@ -56,7 +57,7 @@ Item {
 		let best = null
 		let bestCost = Infinity
 		for (let i = 0; i < repeater.count; ++i) {
-			const tile = repeater.itemAt(i)
+			const tile = repeater.itemAt(i) as Tile
 			const along = ((tile.slot.x + tile.slot.width / 2) - (from.slot.x + from.slot.width / 2)) * dx
 			              + ((tile.slot.y + tile.slot.height / 2) - (from.slot.y + from.slot.height / 2)) * dy
 			if (tile === from || tile.leaving || along <= 0)
