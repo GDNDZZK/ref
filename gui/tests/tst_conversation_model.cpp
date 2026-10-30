@@ -52,9 +52,11 @@ private slots:
 	void everyMessageEndsWithAMetaLine();
 	void marksMessagesBeforeTheLastCompaction();
 	void keepsTheTailErrorLast();
+	void hidesTheTailErrorTheLastMessageShows();
 	void togglesFoldingAgainstTheDefault();
 	void carriesToolMetaAndImages();
 	void givesMessageTexts();
+	void summarisesWhatToolsAskOfTheUser();
 };
 
 void TestConversationModel::splitsAssistantTextIntoBlocks()
@@ -446,6 +448,28 @@ void TestConversationModel::keepsTheTailErrorLast()
 	QCOMPARE(model.rowCount(), 4);
 }
 
+// The last message shows its own error, so the same text at the end would say it twice.
+void TestConversationModel::hidesTheTailErrorTheLastMessageShows()
+{
+	ConversationModel model;
+	QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
+	model.setMessage(user(u"u1"_s, u"go"_s));
+	model.setTailError(u"Rate limited"_s);
+	QCOMPARE(model.rowCount(), 3);
+
+	refgui::proto::Message failed = assistant(u"a1"_s, {}, false);
+	failed.error = u"Rate limited"_s;
+	model.setMessage(failed);
+	QCOMPARE(model.rowCount(), 4); // the message's own error block and meta line, no tail
+	QCOMPARE(rowOfKind(model, u"error"_s), 2);
+	QCOMPARE(model.index(model.rowCount() - 1).data(ConversationModel::KindRole).toString(), u"meta"_s);
+
+	model.setTailError(u"Another"_s);
+	QCOMPARE(model.rowCount(), 5);
+	model.removeMessage(u"a1"_s);
+	QCOMPARE(model.rowCount(), 3);
+}
+
 void TestConversationModel::togglesFoldingAgainstTheDefault()
 {
 	ConversationModel model;
@@ -492,6 +516,32 @@ void TestConversationModel::carriesToolMetaAndImages()
 	QCOMPARE(images.size(), 1);
 	QCOMPARE(images.first().toMap().value(u"id"_s).toString(), u"a1:0:0"_s);
 	QCOMPARE(images.first().toMap().value(u"size"_s).toLongLong(), 12LL);
+}
+
+void TestConversationModel::summarisesWhatToolsAskOfTheUser()
+{
+	ConversationModel model;
+	QSignalSpy changed(&model, &ConversationModel::toolSummaryChanged);
+	const auto call = [](const QString& id, ToolState state) {
+		return refgui::proto::ToolPart{.callId = id, .name = u"bash"_s, .state = state};
+	};
+
+	model.setMessage(assistant(u"a1"_s, {call(u"c1"_s, ToolState::AwaitingPermission), call(u"c2"_s, ToolState::AwaitingPermission), call(u"c3"_s, ToolState::Delayed)}, false));
+	QCOMPARE(model.toolSummary().awaitingPermission, 2);
+	QCOMPARE(model.toolSummary().oldestAwaitingCallId, u"c1"_s);
+	QVERIFY(model.toolSummary().lastToolDelayed);
+	QVERIFY(changed.count() >= 1);
+
+	model.setPart(u"a1"_s, 0, call(u"c1"_s, ToolState::Running));
+	QCOMPARE(model.toolSummary().awaitingPermission, 1);
+	QCOMPARE(model.toolSummary().oldestAwaitingCallId, u"c2"_s);
+
+	model.setPart(u"a1"_s, 2, call(u"c3"_s, ToolState::Running));
+	QVERIFY(!model.toolSummary().lastToolDelayed);
+
+	model.reset({});
+	QCOMPARE(model.toolSummary().awaitingPermission, 0);
+	QVERIFY(model.toolSummary().oldestAwaitingCallId.isEmpty());
 }
 
 void TestConversationModel::givesMessageTexts()
