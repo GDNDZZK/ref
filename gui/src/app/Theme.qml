@@ -30,6 +30,20 @@ QtObject {
 	readonly property color errorBorder: dark ? "#5c2f35" : "#f0c3c5"
 	readonly property color scrollHandle: dark ? "#4a4d56" : "#c6c6c2"
 	readonly property color scrollHandlePressed: dark ? "#6b6e79" : "#9fa1a8"
+	// Composer in shell mode (`!command`): amber, like the TUI's warning color.
+	readonly property color shellSurface: dark ? "#2a2419" : "#fbf3e3"
+	readonly property color shellBorder: dark ? "#f5a742" : "#d9922b"
+
+	// Agent colors, named as in the TUI's configuration (primary, secondary, ...).
+	readonly property color agentOrange: dark ? "#fab283" : "#d4783a"
+	readonly property color agentBlue: dark ? "#5c9cf5" : "#2f6fd6"
+	readonly property color agentPurple: dark ? "#9d7cd8" : "#7a52c2"
+	readonly property color agentRed: dark ? "#e06c75" : "#d23f45"
+	readonly property color agentYellow: dark ? "#f5a742" : "#c98312"
+	readonly property color agentGreen: dark ? "#7fd88f" : "#2e9d5b"
+	readonly property color agentCyan: dark ? "#56b6c2" : "#2a8f9c"
+	readonly property var agentPalette: [agentBlue, agentPurple, agentGreen, agentOrange, agentRed] // for agents without a color, by position
+
 	readonly property string syntaxTheme: dark ? "Breeze Dark" : "Breeze Light" // KSyntaxHighlighting theme names
 
 	readonly property string monoFamily: SystemFonts.fixed.family
@@ -45,4 +59,24 @@ QtObject {
 	readonly property int blockSpacing: 14
 	readonly property int turnGap: 18 // extra space around the divider that opens a turn
 	readonly property int contentWidth: 760 // reading column
+
+	// The color of an agent: `spec` is its configured color (#rrggbb, #rgb or a name), `index` its position
+	// in the agent list, which picks the palette entry when there is no usable spec.
+	function agentColor(spec, index) {
+		const named = {
+			primary: agentOrange, orange: agentOrange,
+			secondary: agentBlue, blue: agentBlue,
+			accent: agentPurple, purple: agentPurple,
+			error: agentRed, red: agentRed,
+			warning: agentYellow, yellow: agentYellow,
+			success: agentGreen, green: agentGreen,
+			info: agentCyan, cyan: agentCyan
+		}
+		const key = spec.trim().toLowerCase()
+		if (named[key] !== undefined)
+			return named[key]
+		if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/.test(key))
+			return key
+		return agentPalette[Math.abs(index) % agentPalette.length]
+	}
 }
