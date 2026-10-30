@@ -327,7 +327,12 @@ fn parse_errors_become_warnings() {
     );
     let c = fx.load();
     assert_eq!(c.warnings.len(), 4, "{:?}", c.warnings);
-    assert!(c.warnings[0].contains("home/.config/opencode/opencode.json"));
+    // Windows paths mix `\` and `/`; compare with one separator.
+    assert!(
+        c.warnings[0]
+            .replace('\\', "/")
+            .contains("home/.config/opencode/opencode.json")
+    );
     assert!(c.warnings.iter().any(|w| w.contains("JSON object")));
     assert!(c.warnings.iter().any(|w| w.contains("maybe")));
 }
