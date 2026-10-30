@@ -82,6 +82,8 @@ public:
 	static Workspace* instance();
 	static Workspace* create(QQmlEngine* qmlEngine, QJSEngine* jsEngine);
 
+	// The connection to the backend, which the notification center shares.
+	refgui::client::Backend& backend() { return m_backend; }
 	ChatSession* current() const { return m_current; }
 	QString currentId() const;
 	// "connecting", "starting", "connected" or "disconnected".

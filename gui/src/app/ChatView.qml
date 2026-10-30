@@ -34,11 +34,13 @@ ListView {
 	readonly property real columnWidth: Math.min(width - 2 * sidePadding, Theme.contentWidth)
 	property bool following: true
 	property bool turnInProgress: false
+	property string sessionId // the session whose pictures the rows show
 	property int permissionCount: 0 // tool calls waiting for the user's answer
 
 	signal errorOutOfSight() // an error block arrived while the user was reading further up
 	signal undoRequested(string messageId)
 	signal copyRequested(string messageId)
+	signal imageClicked(var image) // a thumbnail, to be shown large
 	signal cancelRequested() // the Cancel button of a delayed tool call
 	signal permissionAnswered(string callId, bool allow, bool always) // from a tool card that asks for permission
 

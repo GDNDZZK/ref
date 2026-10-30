@@ -23,7 +23,9 @@ Item {
 		model: pane.session.blocks
 		sidePadding: pane.columnPadding
 		turnInProgress: pane.session.busy
+		sessionId: pane.session.sessionId
 		permissionCount: pane.session.permissionCount
+		onImageClicked: image => lightbox.open(pane.session.sessionId, image)
 		onCancelRequested: pane.session.cancelDelayedTool()
 		onCopyRequested: messageId => pane.session.copyMessage(messageId)
 		onPermissionAnswered: (callId, allow, always) => pane.session.permissionReply(callId, allow, always)
@@ -161,13 +163,21 @@ Item {
 		id: composer
 		anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: pane.margin }
 		width: chat.columnWidth
-		busy: pane.session.busy
-		sendingEnabled: pane.session.ready
-		onSubmitted: text => {
-			chat.following = true
-			pane.session.send(text)
+		session: pane.session
+		onSubmitted: chat.following = true
+	}
+
+	// The input box's remarks are the window's toasts.
+	Connections {
+		target: pane.session.composer
+		function onToastRequested(level, text) {
+			Workspace.toastRequested(level, text)
 		}
-		onStopRequested: pane.session.stop()
+	}
+
+	Lightbox {
+		id: lightbox
+		onClosed: pane.focusInput()
 	}
 
 	Component.onCompleted: focusInput()

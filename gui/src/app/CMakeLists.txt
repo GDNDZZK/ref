@@ -9,8 +9,12 @@ qt_add_qml_module(ref-gui
 	SOURCES
 		app_translator.cpp
 		app_translator.h
+		chat_image_provider.cpp
+		chat_image_provider.h
 		chat_session.cpp
 		chat_session.h
+		composer_model_type.h
+		notification_center_type.h
 		qml_types.h
 		system_fonts.h
 		tile_model.cpp
@@ -81,12 +85,32 @@ qt_add_qml_module(ref-gui
 		CountdownRing.qml
 		ToolInfo.qml
 		ToolBody.qml
+		ToolBodyBase.qml
+		GenericBody.qml
+		OutputSection.qml
+		DiffBody.qml
+		BashBody.qml
+		ReadBody.qml
+		GrepBody.qml
+		FindBody.qml
+		WebfetchBody.qml
+		SessionBody.qml
+		TodoBody.qml
+		CommandBox.qml
+		LineView.qml
+		ToolChip.qml
 		ToolSection.qml
 		OutputText.qml
 		CopyButton.qml
 		PermissionSection.qml
 		PermissionButton.qml
 		Composer.qml
+		ComposerChip.qml
+		ComposerTags.qml
+		AttachmentStrip.qml
+		QueueStrip.qml
+		CompletionPopup.qml
+		NotificationSettingsSection.qml
 		SendButton.qml
 		TextButton.qml
 		CircleButton.qml
@@ -97,6 +121,9 @@ qt_add_qml_module(ref-gui
 		AlertBadge.qml
 		ErrorBlock.qml
 		ImageBlock.qml
+		Thumbnail.qml
+		ImageStrip.qml
+		Lightbox.qml
 		MetaBlock.qml
 		MetaText.qml
 		MetaAction.qml
@@ -112,7 +139,7 @@ qt_add_translations(ref-gui
 # CodeBlock.qml imports org.kde.syntaxhighlighting at run time; nothing links against it.
 find_package(KF6SyntaxHighlighting REQUIRED)
 
-target_link_libraries(ref-gui PRIVATE refgui_workspace refgui_session refgui_cli refgui_icons Qt6::Gui Qt6::Qml Qt6::Quick)
+target_link_libraries(ref-gui PRIVATE refgui_workspace refgui_session refgui_composer refgui_notify refgui_cli refgui_icons Qt6::Gui Qt6::Qml Qt6::Quick)
 target_compile_definitions(ref-gui PRIVATE REF_GUI_VERSION="${PROJECT_VERSION}")
 refgui_configure_target(ref-gui)
 
