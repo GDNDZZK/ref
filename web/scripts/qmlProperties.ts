@@ -100,3 +100,11 @@ export function findProperty(properties: readonly QmlProperty[], name: string, w
   if (found.length > 1) throw new Error(`${where}: property "${name}" is declared more than once`)
   return found[0]!
 }
+
+const QML_ALPHA_COLOR = /^#([0-9a-f]{2})([0-9a-f]{6})$/i
+
+// Qt writes a color with alpha as #AARRGGBB, CSS as #RRGGBBAA.
+export function cssColor(qmlColor: string): string {
+  const match = QML_ALPHA_COLOR.exec(qmlColor)
+  return match ? `#${match[2]}${match[1]}` : qmlColor
+}

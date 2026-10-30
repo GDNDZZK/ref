@@ -99,7 +99,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
 .scrim.top {
   align-items: flex-start;
-  padding-top: max(48px, 14vh);
+  padding-top: max(48px, calc(var(--palette-top-ratio) * 100vh));
 }
 
 .scrim-enter-active,
