@@ -44,6 +44,11 @@ target_compile_definitions(tst_plain_text PRIVATE REF_QML_DIR="${PROJECT_SOURCE_
 refgui_configure_target(tst_plain_text)
 add_test(NAME tst_plain_text COMMAND tst_plain_text)
 
+qt_add_executable(tst_backend_shutdown tst_backend_shutdown.cpp)
+target_link_libraries(tst_backend_shutdown PRIVATE refgui_client Qt6::Test)
+refgui_configure_target(tst_backend_shutdown)
+add_test(NAME tst_backend_shutdown COMMAND tst_backend_shutdown)
+
 qt_add_executable(tst_launcher tst_launcher.cpp coro_test.h)
 target_link_libraries(tst_launcher PRIVATE refgui_client Qt6::Test)
 refgui_configure_target(tst_launcher)

@@ -3,8 +3,6 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
-#include <QCoroTimer>
-
 using namespace Qt::StringLiterals;
 using namespace std::chrono_literals;
 
@@ -22,7 +20,7 @@ constexpr auto KillTimeout = 2s;
 
 } // namespace
 
-QCoro::Task<std::expected<std::unique_ptr<MockBackend>, QString>> MockBackend::start(QString program)
+QCoro::Task<std::expected<std::unique_ptr<MockBackend>, QString>> MockBackend::start(QString program, StopSource& stop)
 {
 	std::unique_ptr<MockBackend> backend(new MockBackend);
 	QProcess& process = backend->m_process;
@@ -39,12 +37,16 @@ QCoro::Task<std::expected<std::unique_ptr<MockBackend>, QString>> MockBackend::s
 	// still fires when it happens before we start waiting.
 	std::chrono::milliseconds waited = 0ms;
 	const auto announcementPending = [&] {
-		return !process.canReadLine() && process.state() != QProcess::NotRunning && waited < AnnounceTimeout;
+		return !process.canReadLine() && process.state() != QProcess::NotRunning && waited < AnnounceTimeout && !stop.stopped();
 	};
 	while(announcementPending())
 	{
-		co_await QCoro::sleepFor(AnnouncePoll);
+		co_await stop.sleep(AnnouncePoll);
 		waited += AnnouncePoll;
+	}
+	if(stop.stopped())
+	{
+		co_return failure(u"stopped"_s);
 	}
 	if(process.error() == QProcess::FailedToStart)
 	{
