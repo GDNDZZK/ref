@@ -1,0 +1,10 @@
+{
+  "kind": "response",
+  "id": 22,
+  "ok": true,
+  "result": {
+    "text": "Fix the failing parser test",
+    "images": []
+  },
+  "error": null
+}

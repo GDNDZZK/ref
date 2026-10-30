@@ -1,0 +1,9 @@
+{
+  "id": 33,
+  "op": "set_focus",
+  "focused": true,
+  "sessions": [
+    "ses_a1b2c3d4",
+    "ses_e5f6a7b8"
+  ]
+}

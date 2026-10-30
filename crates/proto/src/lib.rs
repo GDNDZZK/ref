@@ -918,3 +918,6 @@ pub enum SessionEvent {
     /// Session closed / unloaded.
     Closed,
 }
+
+#[cfg(test)]
+mod tests;

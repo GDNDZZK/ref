@@ -1,0 +1,200 @@
+{
+  "kind": "response",
+  "id": 6,
+  "ok": true,
+  "result": {
+    "snapshot": {
+      "info": {
+        "id": "ses_a1b2c3d4",
+        "name": "parser-fix",
+        "title": "Fix the failing parser test",
+        "agent": "build",
+        "model": {
+          "provider": "anthropic",
+          "model": "claude-sonnet-4",
+          "variant": "high"
+        },
+        "cwd": "/home/user/project",
+        "created_at": 1760000000000,
+        "updated_at": 1760000090000,
+        "status": {
+          "state": "busy"
+        },
+        "attached": 1,
+        "live": true,
+        "parent": null,
+        "must_report": false,
+        "context": {
+          "used": 42000,
+          "max": 200000,
+          "recommend": 150000,
+          "auto": 180000
+        },
+        "todos": [
+          {
+            "content": "Reproduce the failing test",
+            "status": "completed"
+          },
+          {
+            "content": "Fix the off-by-one in parse_items",
+            "status": "in_progress"
+          },
+          {
+            "content": "Add a regression test",
+            "status": "pending"
+          },
+          {
+            "content": "Update the changelog",
+            "status": "cancelled"
+          }
+        ],
+        "busy_since": 1760000060000
+      },
+      "messages": [
+        {
+          "id": "msg_user_01",
+          "role": "user",
+          "time": 1760000002000,
+          "time_end": null,
+          "source": {
+            "kind": "human"
+          },
+          "parts": [
+            {
+              "type": "text",
+              "text": "The parser test fails, please fix it. This is what I see:",
+              "time": 1760000000000
+            },
+            {
+              "type": "image",
+              "mime": "image/png",
+              "data": "",
+              "id": "msg_0f1e2d3c:1:0",
+              "size": 48213,
+              "name": "screenshot.png"
+            }
+          ],
+          "model": null,
+          "agent": null,
+          "usage": null,
+          "error": null
+        },
+        {
+          "id": "msg_0f1e2d3c",
+          "role": "assistant",
+          "time": 1760000002000,
+          "time_end": 1760000022000,
+          "source": {
+            "kind": "human"
+          },
+          "parts": [
+            {
+              "type": "reasoning",
+              "text": "The test fails with an index out of bounds, so the range is probably inclusive.",
+              "time": 1760000005000,
+              "time_end": 1760000009000,
+              "provider_data": {
+                "signature": "EqQBCkYIAxgC"
+              }
+            },
+            {
+              "type": "text",
+              "text": "The loop runs one step too far.\n\n```rust\nfor i in 0..items.len() {\n    let item = &items[i];\n}\n```",
+              "time": 1760000010000
+            },
+            {
+              "type": "tool",
+              "call_id": "call_9x8y7z",
+              "name": "edit",
+              "purpose": "Fix the off-by-one in parse_items",
+              "input": {
+                "path": "src/parser.rs",
+                "tag": "a1f3",
+                "edits": [
+                  {
+                    "op": "replace",
+                    "start": 42,
+                    "end": 42,
+                    "lines": [
+                      "    for i in 0..items.len() {"
+                    ]
+                  }
+                ]
+              },
+              "raw_input": "{\"purpose\": \"Fix the off-by-one in parse_items\", \"path\": \"src/parser.rs\", \"tag\": \"a1f3\", \"edits\": [{\"op\":\"replace\",\"start\":42,\"end\":42,\"lines\":[\"    for i in 0..items.len() {\"]}]}",
+              "state": "running",
+              "output": null,
+              "time": 1760000020000,
+              "time_end": null
+            }
+          ],
+          "model": {
+            "provider": "anthropic",
+            "model": "claude-sonnet-4",
+            "variant": "high"
+          },
+          "agent": "build",
+          "usage": {
+            "input": 1200,
+            "output": 340,
+            "cache_read": 38000,
+            "cache_write": 2500,
+            "reasoning": 120
+          },
+          "error": null
+        }
+      ],
+      "more_before": true,
+      "pending_permissions": [
+        {
+          "session_id": "ses_a1b2c3d4",
+          "message_id": "msg_0f1e2d3c",
+          "call_id": "call_9x8y7z",
+          "tool": "edit",
+          "purpose": "Fix the off-by-one in parse_items",
+          "input": {
+            "path": "src/parser.rs",
+            "tag": "a1f3",
+            "edits": [
+              {
+                "op": "replace",
+                "start": 42,
+                "end": 42,
+                "lines": [
+                  "    for i in 0..items.len() {"
+                ]
+              }
+            ]
+          },
+          "time": 1760000021000
+        }
+      ],
+      "queued": [
+        {
+          "id": "msg_peer_01",
+          "role": "user",
+          "time": 1760000002000,
+          "time_end": null,
+          "source": {
+            "kind": "peer",
+            "from_id": "ses_e5f6a7b8",
+            "from_name": "reviewer",
+            "msg_id": "peer_77aa"
+          },
+          "parts": [
+            {
+              "type": "text",
+              "text": "Please also check the benchmark in benches/parse.rs.",
+              "time": 1760000030000
+            }
+          ],
+          "model": null,
+          "agent": null,
+          "usage": null,
+          "error": null
+        }
+      ]
+    }
+  },
+  "error": null
+}

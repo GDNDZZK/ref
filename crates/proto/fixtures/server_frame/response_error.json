@@ -1,0 +1,7 @@
+{
+  "kind": "response",
+  "id": 5,
+  "ok": false,
+  "result": null,
+  "error": "Directory does not exist: /home/user/nowhere"
+}

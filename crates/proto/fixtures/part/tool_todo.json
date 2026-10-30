@@ -1,0 +1,31 @@
+{
+  "type": "tool",
+  "call_id": "call_9x8y7z",
+  "name": "todo",
+  "purpose": "Track the plan",
+  "input": {
+    "todos": [
+      {
+        "content": "Reproduce the failing test",
+        "status": "completed"
+      },
+      {
+        "content": "Fix the off-by-one in parse_items",
+        "status": "in_progress"
+      },
+      {
+        "content": "Add a regression test",
+        "status": "pending"
+      },
+      {
+        "content": "Update the changelog",
+        "status": "cancelled"
+      }
+    ]
+  },
+  "raw_input": "",
+  "state": "done",
+  "output": "Todo list updated.",
+  "time": 1760000020000,
+  "time_end": 1760000022000
+}

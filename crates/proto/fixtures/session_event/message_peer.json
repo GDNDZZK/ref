@@ -1,0 +1,26 @@
+{
+  "type": "message",
+  "message": {
+    "id": "msg_peer_01",
+    "role": "user",
+    "time": 1760000002000,
+    "time_end": null,
+    "source": {
+      "kind": "peer",
+      "from_id": "ses_e5f6a7b8",
+      "from_name": "reviewer",
+      "msg_id": "peer_77aa"
+    },
+    "parts": [
+      {
+        "type": "text",
+        "text": "Please also check the benchmark in benches/parse.rs.",
+        "time": 1760000030000
+      }
+    ],
+    "model": null,
+    "agent": null,
+    "usage": null,
+    "error": null
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "kind": "toast",
+  "level": "warn",
+  "text": "MCP server docs failed to start"
+}

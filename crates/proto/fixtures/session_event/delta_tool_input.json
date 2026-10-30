@@ -1,0 +1,9 @@
+{
+  "type": "delta",
+  "message_id": "msg_0f1e2d3c",
+  "index": 2,
+  "delta": {
+    "type": "tool_input",
+    "text": "s/parser.rs\", \"tag\": \"a1"
+  }
+}

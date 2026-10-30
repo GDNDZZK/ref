@@ -1,0 +1,54 @@
+{
+  "kind": "response",
+  "id": 17,
+  "ok": true,
+  "result": {
+    "session": {
+      "id": "ses_a1b2c3d4",
+      "name": "parser-fix",
+      "title": "Fix the failing parser test",
+      "agent": "build",
+      "model": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-4",
+        "variant": "high"
+      },
+      "cwd": "/home/user/project",
+      "created_at": 1760000000000,
+      "updated_at": 1760000090000,
+      "status": {
+        "state": "busy"
+      },
+      "attached": 1,
+      "live": true,
+      "parent": null,
+      "must_report": false,
+      "context": {
+        "used": 42000,
+        "max": 200000,
+        "recommend": 150000,
+        "auto": 180000
+      },
+      "todos": [
+        {
+          "content": "Reproduce the failing test",
+          "status": "completed"
+        },
+        {
+          "content": "Fix the off-by-one in parse_items",
+          "status": "in_progress"
+        },
+        {
+          "content": "Add a regression test",
+          "status": "pending"
+        },
+        {
+          "content": "Update the changelog",
+          "status": "cancelled"
+        }
+      ],
+      "busy_since": 1760000060000
+    }
+  },
+  "error": null
+}
