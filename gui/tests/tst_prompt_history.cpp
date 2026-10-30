@@ -23,6 +23,7 @@ private slots:
 	void browsingReturnsTheDraftAfterTheNewest();
 	void browsingNeedsHistory();
 	void imagePathsAreRecognised();
+	void fileUrlsOfEveryFormAreRecognised();
 	void otherPathsAreText();
 	void unusableImageFilesAreErrors();
 };
@@ -151,6 +152,29 @@ void TestPromptHistory::imagePathsAreRecognised()
 	QVERIFY(imageFromPath(escaped)->has_value());
 	QVERIFY(imageFromPath(u"'"_s + path + u"'"_s)->has_value());
 	QVERIFY(imageFromPath(u"file://"_s + QString(path).replace(u' ', u"%20"_s))->has_value());
+}
+
+void TestPromptHistory::fileUrlsOfEveryFormAreRecognised()
+{
+	QTemporaryDir dir;
+	const QString path = dir.filePath(u"100% #1 shot.png"_s);
+	QFile file(path);
+	QVERIFY(file.open(QIODevice::WriteOnly));
+	file.write("abc");
+	file.close();
+	const QUrl url = QUrl::fromLocalFile(path);
+
+	// What a file manager puts on the clipboard, with the characters of URLs encoded.
+	QVERIFY(imageFromPath(url.toString(QUrl::FullyEncoded))->has_value());
+	// The scheme is case-insensitive and the slashes after it may be missing.
+	const QString encodedPath = QString::fromUtf8(QUrl::toPercentEncoding(path, "/"));
+	QVERIFY(imageFromPath(u"FILE://"_s + encodedPath)->has_value());
+	QVERIFY(imageFromPath(u"file:"_s + encodedPath)->has_value());
+	// A dropped URL is converted by Qt, not by cutting the scheme off.
+	const auto dropped = imageFromUrl(url);
+	QVERIFY(dropped && dropped->has_value());
+	QCOMPARE((*dropped)->name, u"100% #1 shot.png"_s);
+	QVERIFY(!imageFromUrl(QUrl(u"https://example.com/shot.png"_s))->has_value());
 }
 
 void TestPromptHistory::otherPathsAreText()
