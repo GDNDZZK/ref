@@ -61,6 +61,7 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
         Request::McpStatus { cwd } => {
             let cwd = cwd
                 .filter(|c| !c.trim().is_empty())
+                .map(|c| hub.effective_cwd(&c))
                 .unwrap_or_else(|| conn.lock().cwd.clone());
             let cfg = load_cfg(hub, &cwd).await?;
             Ok(json!({ "servers": hub.mcp.status(&cfg) }))
@@ -438,6 +439,7 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             Ok(json!({}))
         }
         Request::ExpandCommand { name, args, cwd } => {
+            let cwd = hub.effective_cwd(&cwd);
             let cfg = load_cfg(hub, &cwd).await?;
             let Some(cmd) = cfg.commands.get(&name) else {
                 return Err(format!("Unknown command: /{name}"));
@@ -447,6 +449,7 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             Ok(json!({ "text": text }))
         }
         Request::ListFiles { cwd, query, limit } => {
+            let cwd = hub.effective_cwd(&cwd);
             let files = list_files(hub, &cwd).await?;
             let limit = limit.unwrap_or(50).clamp(1, 500);
             let res = tokio::task::spawn_blocking(move || fuzzy_filter(&files, &query, limit))
@@ -497,7 +500,7 @@ async fn set_cwd(hub: &Arc<Hub>, s: &Arc<Session>, path: &str) -> Result<(), Str
     } else {
         Path::new(&old).join(p)
     };
-    let new = crate::ops::validate_cwd(&p.to_string_lossy())?;
+    let new = crate::ops::validate_cwd(&hub.effective_cwd(&p.to_string_lossy()))?;
     if new == old {
         return Ok(());
     }

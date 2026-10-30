@@ -8,6 +8,7 @@ pub mod hub;
 pub mod images;
 pub mod instance;
 pub mod mcp;
+pub mod mock;
 pub mod models;
 pub mod notify;
 pub mod ops;
