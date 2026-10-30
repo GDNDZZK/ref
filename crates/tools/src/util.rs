@@ -398,6 +398,7 @@ pub mod test_support {
             store: Arc::new(HashStore::new()),
             cancel: CancellationToken::new(),
             on_output: None,
+            resize_images: true,
         }
     }
 }

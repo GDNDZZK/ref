@@ -144,9 +144,26 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
                 util::human_bytes(MAX_IMAGE_BYTES)
             )));
         }
-        let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
-        let mut out = ToolOutput::ok(format!("Read image file {display} [{mime}] ({})", util::human_bytes(meta.len())));
-        out.images.push(ImageData { mime: mime.to_string(), data, ..Default::default() });
+        let mut text = format!("Read image file {display} [{mime}] ({})", util::human_bytes(meta.len()));
+        let mut sent = (mime.to_string(), bytes);
+        if ctx.resize_images {
+            let fitted = match crate::imgfit::fit(&sent.1, &crate::imgfit::Limits::default()) {
+                Ok(f) => f,
+                Err(e) => return Ok(ToolOutput::err(format!("Image file {display} could not be decoded ({e}); it was not attached."))),
+            };
+            let note = fitted.note();
+            if let Some(data) = fitted.data {
+                text.push_str(&format!(", sent as {} {}x{} ({})", fitted.mime, fitted.size.0, fitted.size.1, util::human_bytes(data.len() as u64)));
+                sent = (fitted.mime.to_string(), data);
+            }
+            if let Some(n) = note {
+                text.push('\n');
+                text.push_str(&n);
+            }
+        }
+        let data = base64::engine::general_purpose::STANDARD.encode(&sent.1);
+        let mut out = ToolOutput::ok(text);
+        out.images.push(ImageData::new(sent.0, data));
         out.meta = Some(json!({"path": abs.to_string_lossy(), "image": true}));
         return Ok(out);
     }
@@ -348,7 +365,7 @@ mod tests {
         std::fs::write(d.join("c.txt"), "\u{FEFF}a \r\nb\r\n").unwrap();
         std::fs::write(d.join("e.txt"), "").unwrap();
         std::fs::write(d.join("b.bin"), [0u8, 1, 2, 3]).unwrap();
-        std::fs::write(d.join("i.png"), b"\x89PNG\r\n\x1a\nrest").unwrap();
+        std::fs::write(d.join("i.png"), crate::imgfit::test_png(400, 300, false)).unwrap();
         std::fs::create_dir_all(d.join("sub")).unwrap();
         std::fs::create_dir_all(d.join(".git")).unwrap();
         std::fs::write(d.join(".hidden"), "h").unwrap();
@@ -362,10 +379,27 @@ mod tests {
         let o = read(&c, json!({"path": "i.png"})).await;
         assert_eq!(o.images.len(), 1);
         assert_eq!(o.images[0].mime, "image/png");
+        assert!(o.text.starts_with("Read image file i.png [image/png] (") && !o.text.contains("sent as"), "{}", o.text);
         let o = read(&c, json!({"path": "."})).await;
         assert!(o.text.contains("\n.hidden\nb.bin\nc.txt\ne.txt\ni.png\nsub/"), "{}", o.text);
         assert!(!o.text.contains(".git"));
         let o = read(&c, json!({"path": "nope.txt"})).await;
         assert!(o.is_error && o.text.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn images_are_downscaled_or_refused() {
+        let d = temp_dir("read-img");
+        std::fs::write(d.join("big.png"), crate::imgfit::test_png(1000, 3000, true)).unwrap();
+        std::fs::write(d.join("bad.png"), b"\x89PNG\r\n\x1a\nrest").unwrap();
+        let mut c = ctx(&d);
+        let o = read(&c, json!({"path": "big.png"})).await;
+        assert!(!o.is_error && o.images.len() == 1 && o.images[0].mime == "image/jpeg", "{}", o.text);
+        assert!(o.text.contains(", sent as image/jpeg 523x1568 (") && o.text.contains("\n[Image: original 1000x3000, displayed at 523x1568. Multiply coordinates by 1.91"), "{}", o.text);
+        let o = read(&c, json!({"path": "bad.png"})).await;
+        assert!(o.is_error && o.images.is_empty() && o.text.contains("could not be decoded"), "{}", o.text);
+        c.resize_images = false;
+        let o = read(&c, json!({"path": "big.png"})).await;
+        assert!(o.images[0].mime == "image/png" && !o.text.contains("sent as"), "{}", o.text);
     }
 }

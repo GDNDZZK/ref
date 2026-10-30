@@ -174,8 +174,8 @@ pub async fn dispatch(
 ) -> ToolOutput {
     match kind {
         Kind::Builtin => {
-            let cwd = s.lock().info.cwd.clone();
-            let ctx = ref_tools::ToolCtx { cwd: cwd.into(), store: s.hashes.clone(), cancel, on_output };
+            let (cwd, resize_images) = { let st = s.lock(); (st.info.cwd.clone(), st.cfg.images_auto_resize) };
+            let ctx = ref_tools::ToolCtx { cwd: cwd.into(), store: s.hashes.clone(), cancel, on_output, resize_images };
             ref_tools::execute(&name, input, &ctx).await
         }
         Kind::Harness => harness(&hub, &s, &name, &input),

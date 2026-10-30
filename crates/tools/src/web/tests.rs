@@ -196,12 +196,13 @@ const ATOM: &str = r#"<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://
 
 #[tokio::test]
 async fn json_feeds_images_svg_and_binary() {
-    let png = b"\x89PNG\r\n\x1a\n0000IHDR fake png".to_vec();
+    let png = crate::imgfit::test_png(2000, 500, true);
     let base = serve(move |r| match r.path.as_str() {
         "/j" => ok("application/json", r#"{"a":[1,2],"b":{"c":"d"}}"#),
         "/rss" => ok("application/rss+xml", RSS),
         "/atom" => ok("application/xml", ATOM),
         "/img" => ok("image/png", png.clone()),
+        "/fake" => ok("image/png", b"\x89PNG\r\n\x1a\n0000IHDR fake png".to_vec()),
         "/svg" => ok("image/svg+xml", "<svg xmlns='http://www.w3.org/2000/svg'><circle r='1'/></svg>"),
         _ => ok("application/octet-stream", vec![0u8, 1, 2, 3, 0, 0, 255, 254]),
     })
@@ -218,8 +219,10 @@ async fn json_feeds_images_svg_and_binary() {
     assert!(b.contains("# Atom feed") && b.contains("## [Entry one](https://ex.org/e1)\n2024-02-02T00:00:00Z · Ann\n\nShort summary"), "{b}");
     let o = fetch(json!({"url": format!("{base}/img")})).await;
     assert_eq!(o.images.len(), 1);
-    assert_eq!(o.images[0].mime, "image/png");
-    assert!(body(&o).starts_with("Image (image/png"));
+    assert_eq!(o.images[0].mime, "image/jpeg");
+    assert!(body(&o).starts_with("Image (image/png, ") && body(&o).contains("attached as image/jpeg 1568x392 (") && body(&o).contains("[Image: original 2000x500, displayed at 1568x392."), "{}", o.text);
+    let o = fetch(json!({"url": format!("{base}/fake")})).await;
+    assert!(o.images.is_empty() && !o.is_error && body(&o).starts_with("The content looks like image/png (25 B) but could not be decoded"), "{}", o.text);
     assert!(body(&fetch(json!({"url": format!("{base}/svg")})).await).starts_with("<svg"));
     let o = fetch(json!({"url": format!("{base}/bin")})).await;
     assert!(!o.is_error && body(&o).starts_with("Binary content (application/octet-stream, 8 B) is not shown"), "{}", o.text);

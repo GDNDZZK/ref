@@ -71,6 +71,8 @@ pub struct Config {
     pub compaction: CompactionConfig,
     /// Retry: max delay between attempts in seconds (default 600). Retries are unlimited.
     pub retry_max_delay: u64,
+    /// `images.auto_resize` (default true): downscale / recompress images before they reach the model.
+    pub images_auto_resize: bool,
     /// `tui` key passthrough.
     pub tui: Value,
     /// Directories that were scanned for config (for skills / agents discovery).

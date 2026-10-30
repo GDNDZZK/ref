@@ -14,6 +14,7 @@ mod edit;
 mod find;
 mod grep;
 pub mod hashline;
+pub mod imgfit;
 mod read;
 mod util;
 mod web;
@@ -42,6 +43,8 @@ pub struct ToolCtx {
     pub cancel: CancellationToken,
     /// Optional live-output sink (bash streams combined stdout/stderr chunks here).
     pub on_output: Option<Arc<dyn Fn(&str) + Send + Sync>>,
+    /// Downscale / recompress images for the model (`images.auto_resize`, see [`imgfit`]).
+    pub resize_images: bool,
 }
 
 #[derive(Debug, Clone, Default)]

@@ -152,6 +152,7 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
                 return Err("An attached image has no data.".into());
             }
             reload_config(hub, &s).await;
+            let images = if s.lock().cfg.images_auto_resize { fit_images(images).await? } else { images };
             let msg = user_message(MessageSource::Human, text, images);
             let id = msg.id.clone();
             let queued = crate::engine::submit(hub, &s, msg);
@@ -388,6 +389,16 @@ async fn set_cwd(hub: &Arc<Hub>, s: &Arc<Session>, path: &str) -> Result<(), Str
     Ok(())
 }
 
+/// Downscales / recompresses prompt images (`images.auto_resize`); undecodable ones are kept.
+async fn fit_images(images: Vec<ref_proto::ImageData>) -> Result<Vec<ref_proto::ImageData>, String> {
+    if images.is_empty() {
+        return Ok(images);
+    }
+    tokio::task::spawn_blocking(move || images.into_iter().map(|i| ref_tools::imgfit::fit_image_data(&i).unwrap_or(i)).collect())
+        .await
+        .map_err(|_| "Processing the attached images failed.".to_string())
+}
+
 async fn reload_config(hub: &Arc<Hub>, s: &Arc<Session>) {
     let cwd = s.lock().info.cwd.clone();
     let Ok(cfg) = load_cfg(hub, &cwd).await else { return };
@@ -446,6 +457,7 @@ async fn run_shell(hub: Arc<Hub>, s: Arc<Session>, command: String) {
         store: s.hashes.clone(),
         cancel: hub.shutdown.child_token(),
         on_output: None,
+        resize_images: false,
     };
     let out = ref_tools::execute("bash", json!({"command": command, "timeout": 600}), &ctx).await;
     let text = format!("I ran this command:\n```\n$ {command}\n{}\n```", out.text.trim_end());

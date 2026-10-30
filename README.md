@@ -111,6 +111,9 @@ ref-specific keys:
   // Retry backoff cap in seconds. Retryable errors are retried forever.
   "retry": { "max_delay": 600 },
 
+  // Downscale and recompress images before the model sees them (default true).
+  "images": { "auto_resize": true },
+
   "agent": {
     "build": { "can_spawn": true },
     "reviewer": {
@@ -150,7 +153,9 @@ Context files: `~/.config/opencode/AGENTS.md`, `~/.config/ref/AGENTS.md`, then `
 
 Built-in tools: `read`, `edit`, `write`, `delete`, `grep`, `find`, `bash` and `webfetch`. Every tool, including MCP tools, takes a `purpose` argument that the TUI displays.
 
-`webfetch` fetches an http(s) URL. HTML becomes markdown (or text, or stays HTML); for articles only the main content is kept unless `full_page` is set, and the header says so. It also handles markdown served by content negotiation or linked with `<link rel="alternate" type="text/markdown">`, JSON (pretty-printed), RSS/Atom feeds, images (attached, up to 5MB), GitHub file pages (raw file) and GitHub issues / pull requests (via the API; `GITHUB_TOKEN` or `GH_TOKEN` is used if set). Other binary content, PDFs included, is not shown; the model is told to download it with `curl`. Charsets come from the header, the page or detection. Long content is cut at 50KB / 2000 lines with the full text saved to a file for `read`. It uses the `HTTP(S)_PROXY` / `NO_PROXY` environment variables, except for local and private addresses, which are always fetched directly.
+`webfetch` fetches an http(s) URL. HTML becomes markdown (or text, or stays HTML); for articles only the main content is kept unless `full_page` is set, and the header says so. It also handles markdown served by content negotiation or linked with `<link rel="alternate" type="text/markdown">`, JSON (pretty-printed), RSS/Atom feeds, images (attached, up to 5MB before downscaling), GitHub file pages (raw file) and GitHub issues / pull requests (via the API; `GITHUB_TOKEN` or `GH_TOKEN` is used if set). Other binary content, PDFs included, is not shown; the model is told to download it with `curl`. Charsets come from the header, the page or detection. Long content is cut at 50KB / 2000 lines with the full text saved to a file for `read`. It uses the `HTTP(S)_PROXY` / `NO_PROXY` environment variables, except for local and private addresses, which are always fetched directly.
+
+Images are downscaled as in oh-my-pi when `images.auto_resize` is on (the default). This applies to images from `read` (up to 10MB), from `webfetch`, and to images attached to a prompt; MCP images are passed through unchanged. The longest edge is fit into 1568px (the size Claude scales to anyway), images with a short edge under 200px are scaled up, and the smaller of PNG and JPEG (quality 80) is kept. When that is still over the target (500KB, 300KB for `webfetch`) JPEG quality drops to 40 and then the size to a quarter. Images with transparency stay PNG. Small images within the bounds (under a quarter of the target) are sent as they are. When the size changes, the tool result tells the model the original size and the factor that maps coordinates back. `read` refuses images it cannot decode instead of sending them, because the provider would reject the whole request.
 
 File tools use hashline anchors, modeled on oh-my-pi. `read` and `grep` print a `[path#TAG]` header (a hash of the whole file) followed by `N:content` rows. `edit` addresses original line numbers under that tag and applies all its edits at once. Stale tags are remapped through a diff when possible and rejected with the current content otherwise.
 

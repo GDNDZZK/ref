@@ -29,6 +29,8 @@ pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
 pub const MAX_TIMEOUT_SECS: u64 = 120;
 /// Images larger than this are not attached (model APIs reject them).
 const MAX_IMAGE_BYTES: usize = 5 * 1024 * 1024;
+/// Target size of a fetched image after downscaling (the value oh-my-pi uses).
+const FETCH_IMAGE_BYTES: usize = 300 * 1024;
 /// Body shown with an HTTP error status.
 const ERROR_BODY_CHARS: usize = 4000;
 
@@ -233,12 +235,44 @@ async fn convert(out: &mut Out, f: fetch::Fetched, format: Format, full_page: bo
             out.body = text;
         }
         Kind::Image(m) => {
+            let size = util::human_bytes(f.body.len() as u64);
             if f.body.len() > MAX_IMAGE_BYTES {
-                out.body = format!("Image ({m}, {}) is larger than {} and was not attached. Download it with bash (curl -L -o) to inspect it.", util::human_bytes(f.body.len() as u64), util::human_bytes(MAX_IMAGE_BYTES as u64));
-            } else {
-                out.body = format!("Image ({m}, {}), attached.", util::human_bytes(f.body.len() as u64));
-                out.images.push(ImageData::new(m, base64::engine::general_purpose::STANDARD.encode(&f.body)));
+                out.body = format!("Image ({m}, {size}) is larger than {} and was not attached. Download it with bash (curl -L -o) to inspect it.", util::human_bytes(MAX_IMAGE_BYTES as u64));
+                return Ok(());
             }
+            let mut sent = (m, f.body);
+            out.body = format!("Image ({m}, {size}), attached.");
+            if ctx.resize_images {
+                let bytes = sent.1;
+                let limits = crate::imgfit::Limits { max_bytes: FETCH_IMAGE_BYTES, ..Default::default() };
+                let (bytes, fitted) = tokio::task::spawn_blocking(move || {
+                    let r = crate::imgfit::fit(&bytes, &limits);
+                    (bytes, r)
+                })
+                .await
+                .map_err(|_| anyhow!("image conversion failed"))?;
+                match fitted {
+                    Err(e) => {
+                        out.body = format!("The content looks like {m} ({size}) but could not be decoded ({e}); not attached.");
+                        return Ok(());
+                    }
+                    Ok(fitted) => {
+                        let note = fitted.note();
+                        sent = match fitted.data {
+                            Some(d) => {
+                                out.body = format!("Image ({m}, {size}), attached as {} {}x{} ({}).", fitted.mime, fitted.size.0, fitted.size.1, util::human_bytes(d.len() as u64));
+                                (fitted.mime, d)
+                            }
+                            None => (m, bytes),
+                        };
+                        if let Some(n) = note {
+                            out.body.push('\n');
+                            out.body.push_str(&n);
+                        }
+                    }
+                }
+            }
+            out.images.push(ImageData::new(sent.0, base64::engine::general_purpose::STANDARD.encode(&sent.1)));
         }
         Kind::Binary => {
             let what = if mime.is_empty() { "unknown type".to_string() } else { mime.clone() };

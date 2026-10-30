@@ -82,6 +82,7 @@ fn empty_config_has_builtins() {
     assert!(!c.agents["plan"].can_spawn);
     assert!(c.providers.is_empty());
     assert_eq!(c.retry_max_delay, 600);
+    assert!(c.images_auto_resize);
     assert!(c.compaction.auto);
     assert!(c.config_dirs.contains(&fx.home().join(".config/opencode")));
     assert!(c.config_dirs.contains(&fx.proj()));
@@ -258,7 +259,7 @@ fn merge_order_and_project_walk() {
     );
     fx.write("proj/.opencode/opencode.jsonc", r#"{"default_agent": "plan",}"#);
     fx.write("proj/sub/ref.json", r#"{"model": "a/sub", "instructions": ["s.md"]}"#);
-    fx.write("proj/sub/.ref/ref.jsonc", r#"{"retry": {"max_delay": 30}}"#);
+    fx.write("proj/sub/.ref/ref.jsonc", r#"{"retry": {"max_delay": 30}, "images": {"auto_resize": false}}"#);
     fx.write("proj/other/opencode.json", r#"{"model": "a/other"}"#);
     // Above the git root: ignored.
     fx.write("opencode.json", r#"{"model": "a/outside"}"#);
@@ -269,6 +270,7 @@ fn merge_order_and_project_walk() {
     assert_eq!(c.small_model.unwrap().key(), "a/small");
     assert_eq!(c.default_agent, "plan");
     assert_eq!(c.retry_max_delay, 30);
+    assert!(!c.images_auto_resize);
     assert_eq!(c.tui, serde_json::json!({"theme": "y", "keep": 1}));
     assert_eq!(c.instructions, ["g.md", "s.md"]);
     let p = &c.providers["p"];

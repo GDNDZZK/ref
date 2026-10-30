@@ -18,6 +18,7 @@ pub(crate) fn build(ctx: &mut Ctx, layers: &[Layer]) -> Config {
         instructions,
         skill_paths: skills,
         retry_max_delay: 600,
+        images_auto_resize: true,
         ..Default::default()
     };
 
@@ -33,6 +34,12 @@ pub(crate) fn build(ctx: &mut Ctx, layers: &[Layer]) -> Config {
             Some(s) if s >= 0.0 => cfg.retry_max_delay = s as u64,
             Some(_) => ctx.warn("retry.max_delay must be >= 0"),
             None => {}
+        }
+    }
+    if let Some(v) = merged.get("images").and_then(|i| i.get("auto_resize")) {
+        match v.as_bool() {
+            Some(b) => cfg.images_auto_resize = b,
+            None => ctx.warn("images.auto_resize must be true or false"),
         }
     }
     cfg.tui = merged.get("tui").cloned().unwrap_or(Value::Null);
