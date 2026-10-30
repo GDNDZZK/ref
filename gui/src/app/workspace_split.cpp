@@ -135,7 +135,7 @@ void Workspace::syncTiles()
 	}
 	for(ChatSession* other : std::as_const(m_chats))
 	{
-		if(other->isAttached() && !tiles.contains(other) && other != m_current)
+		if(other->isAttached() && !tiles.contains(other) && other != m_current && !m_leaving.contains(other->sessionId()))
 		{
 			other->detach();
 		}

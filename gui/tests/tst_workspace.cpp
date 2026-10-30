@@ -226,6 +226,8 @@ private slots:
 	void serverToastsArePassedOn();
 	void splitViewWatchesAndComesBack();
 	void zoomUpgradesTheTileToTheForeground();
+	void aClosedTileKeepsItsSessionUntilItHasLeft();
+	void closingTheCurrentTileSendsNoAttach();
 	void oldBackendOffersARestart();
 	void commandsFollowTheState();
 };
@@ -435,6 +437,49 @@ void TestWorkspace::zoomUpgradesTheTileToTheForeground()
 	QCOMPARE(f.workspace->zoomedId(), QString());
 	QTRY_COMPARE(f.stub.requests(u"detach"_s).last().value(u"session_id"_s).toString(), u"ses_b"_s);
 	QCOMPARE(f.workspace->visibleSessionIds().size(), 2);
+}
+
+void TestWorkspace::aClosedTileKeepsItsSessionUntilItHasLeft()
+{
+	Fixture f(2, true);
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
+	const int lingerMs = 1000;
+	f.workspace->tileStage()->setLingerMs(lingerMs);
+	f.workspace->toggleSplit();
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	QPointer<ChatSession> closed = f.workspace->session(u"ses_b"_s);
+	QVERIFY(closed != nullptr);
+
+	f.workspace->closeSession(u"ses_b"_s);
+
+	QTRY_COMPARE(f.workspace->tileStage()->placed(), 1);
+	QCOMPARE(f.workspace->tileStage()->rowCount(), 2); // the closed tile is still on stage
+	QVERIFY(!closed.isNull());
+	QTRY_COMPARE_WITH_TIMEOUT(f.workspace->tileStage()->rowCount(), 1, 2 * lingerMs);
+	QTRY_VERIFY(closed.isNull());
+}
+
+void TestWorkspace::closingTheCurrentTileSendsNoAttach()
+{
+	Fixture f(2, true);
+	
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
+	f.workspace->toggleSplit();
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	QTRY_VERIFY(f.workspace->session(u"ses_b"_s)->isAttached());
+	QSignalSpy toasts(f.workspace.get(), &Workspace::toastRequested);
+	const qsizetype attachesBefore = f.stub.requests(u"attach"_s).size();
+
+	f.workspace->closeSession(u"ses_a"_s);
+
+	QTRY_COMPARE(f.workspace->currentId(), u"ses_b"_s);
+	QTest::qWait(200);
+	const QList<QJsonObject> attaches = f.stub.requests(u"attach"_s);
+	for(qsizetype i = attachesBefore; i < attaches.size(); ++i)
+	{
+		QVERIFY(attaches[i].value(u"session_id"_s).toString() != u"ses_a"_s);
+	}
+	QCOMPARE(toasts.count(), 0);
 }
 
 void TestWorkspace::oldBackendOffersARestart()
