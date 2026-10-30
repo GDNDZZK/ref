@@ -116,6 +116,12 @@ export class CompletionController {
     this.current.value = { ...completion, selected }
   }
 
+  select(index: number): void {
+    const completion = this.current.value
+    if (!completion || index === completion.selected || !completion.items[index]) return
+    this.current.value = { ...completion, selected: index }
+  }
+
   // Esc: close the list, and keep it closed while the text stays the same.
   dismiss(): void {
     this.suppressed = true

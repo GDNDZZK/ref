@@ -7,15 +7,10 @@
 // Everything outside the page (API, Notification, document) comes in through `CenterDeps`.
 
 import type { NotifyKind } from '../proto/generated'
+import { notifyKinds } from '../settings/model.ts'
+import type { NotificationSettings } from '../settings/model.ts'
 import type { Attention } from './attention.ts'
 import type { BrowserNotifications } from './notifier.ts'
-
-export interface NotificationSettings {
-  enabled: boolean // master switch
-  permission: boolean // a tool waits for a decision
-  turnDone: boolean
-  turnError: boolean
-}
 
 export interface NotifyFrame {
   session_id: string
@@ -39,15 +34,6 @@ export interface CenterDeps {
 
 const DEFAULT_TITLE = 'ref'
 const MAX_DETAIL_CHARS = 300
-
-export function wantedKinds(settings: NotificationSettings): NotifyKind[] {
-  if (!settings.enabled) return []
-  const kinds: NotifyKind[] = []
-  if (settings.permission) kinds.push('permission')
-  if (settings.turnDone) kinds.push('turn_done')
-  if (settings.turnError) kinds.push('turn_error')
-  return kinds
-}
 
 export class NotificationCenter {
   private readonly deps: CenterDeps
@@ -77,11 +63,11 @@ export class NotificationCenter {
     this.syncFocus()
   }
 
-  // The connection opened or came back. The handshake carried the wanted kinds (`wantedKinds`),
+  // The connection opened or came back. The handshake carried the wanted kinds (`notifyKinds`),
   // but the backend knows nothing about this tab's focus yet.
   connected(): void {
     this.isOpen = true
-    this.sentKinds = this.settings && wantedKinds(this.settings).join(',')
+    this.sentKinds = this.settings && notifyKinds(this.settings).join(',')
     this.sentFocus = undefined
     this.syncKinds()
     this.syncFocus()
@@ -131,7 +117,7 @@ export class NotificationCenter {
 
   private syncKinds(): void {
     if (!this.settings || !this.isOpen) return
-    const kinds = wantedKinds(this.settings)
+    const kinds = notifyKinds(this.settings)
     const key = kinds.join(',')
     if (key === this.sentKinds) return
     this.sentKinds = key

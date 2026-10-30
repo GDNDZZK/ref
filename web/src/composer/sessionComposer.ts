@@ -23,10 +23,7 @@ import { HistoryBrowser } from './history.ts'
 import type { PromptHistory } from './history.ts'
 import { readImage, rejectionOf } from './images.ts'
 
-export type ComposerApi = Pick<
-  RefApi,
-  'prompt' | 'shell' | 'abort' | 'removeQueued' | 'listFiles' | 'expandCommand'
->
+export type ComposerApi = Pick<RefApi, 'prompt' | 'shell' | 'removeQueued' | 'listFiles' | 'expandCommand'>
 
 export type ToastLevel = 'info' | 'warn' | 'error'
 
@@ -38,7 +35,8 @@ export interface ComposerHost {
   isBusy(): boolean
   hasDelayedTool(): boolean // the last tool call waits out its delay: one Esc cancels it
   slashCommands(): readonly SlashCommand[]
-  runSlash(line: string): boolean // false: not a registered command, send it as a prompt
+  runSlash(line: string): Promise<void> // a built-in command, e.g. "/rename Work"
+  abort(): Promise<void> // stops the running turn
   toast(level: ToastLevel, messageKey: string, params?: Record<string, string>): void
   reportError(error: unknown): void
 }
@@ -46,6 +44,7 @@ export interface ComposerHost {
 export const INTERRUPT_ARMED_MS = 1500
 const SHELL_PREFIX = '!'
 const FILE_LIMIT = 20
+const MIN_CHARS_TO_KEEP = 20 // a cleared text this long is kept in the history
 
 export class SessionComposer {
   readonly draft: Draft = reactive(emptyDraft())
@@ -74,6 +73,11 @@ export class SessionComposer {
 
   get completion() {
     return this.completionController.completion
+  }
+
+  // Where the caret is (or should be after the composer changed the text).
+  get caret(): number {
+    return this.cursor
   }
 
   dispose(): void {
@@ -146,6 +150,10 @@ export class SessionComposer {
     this.completionController.move(delta)
   }
 
+  selectCompletion(index: number): void {
+    this.completionController.select(index)
+  }
+
   // Tab inserts the choice; Enter (`run`) also runs a command that needs no arguments.
   // Returns the new caret when the text changed.
   acceptCompletion(run: boolean): number | undefined {
@@ -178,17 +186,46 @@ export class SessionComposer {
       void this.submit()
       return undefined
     }
-    if (run && !takesArgs) {
-      this.runCommand(`/${name}`)
+    const command = commands.find((candidate) => candidate.name === name)
+    if (run && !takesArgs && command) {
+      this.host.history.push(`/${name}`)
+      clearDraft(this.draft)
+      void this.runCommand(command, `/${name}`)
       return undefined
     }
     return this.setText(value)
   }
 
-  private runCommand(line: string): void {
-    this.host.history.push(line)
+  // The command a line such as "/rename Work" names, if there is one.
+  private commandIn(line: string): SlashCommand | undefined {
+    if (!line.startsWith('/')) return undefined
+    const typed = (line.slice(1).split(/\s+/)[0] ?? '').toLowerCase()
+    return this.host
+      .slashCommands()
+      .find((command) => command.name === typed || command.aliases.includes(typed))
+  }
+
+  private async runCommand(command: SlashCommand, line: string): Promise<void> {
+    if (command.custom) {
+      const args = line.replace(/^\/\S+\s*/, '')
+      await this.runCustomCommand(command.name, args)
+      return
+    }
+    try {
+      await this.host.runSlash(line)
+    } catch (error) {
+      this.host.reportError(error)
+    }
+  }
+
+  // Ctrl+C: empties the box. A long text goes to the history first, so it is not lost.
+  clear(): void {
+    const text = this.draft.text.trim()
+    if (Array.from(text).length >= MIN_CHARS_TO_KEEP) this.host.history.push(this.draft.text)
     clearDraft(this.draft)
-    this.host.runSlash(line)
+    this.browser.reset()
+    this.cursor = 0
+    this.completionController.close()
   }
 
   // --- sending --------------------------------------------------------------------------
@@ -201,13 +238,12 @@ export class SessionComposer {
     this.browser.reset()
 
     if (draft.shell) return this.submitShell(trimmed)
-    const isCommand = trimmed.startsWith('/') && this.host.runSlash(trimmed)
-    if (isCommand) {
-      this.host.history.push(trimmed)
-      clearDraft(draft)
-      return
-    }
-    await this.submitPrompt()
+    const command = this.commandIn(trimmed)
+    if (!command) return this.submitPrompt()
+
+    this.host.history.push(trimmed)
+    clearDraft(draft)
+    await this.runCommand(command, trimmed)
   }
 
   private async submitShell(command: string): Promise<void> {
@@ -279,7 +315,7 @@ export class SessionComposer {
 
   async abort(): Promise<void> {
     try {
-      await this.host.api().abort(this.host.sessionId)
+      await this.host.abort()
     } catch (error) {
       this.host.reportError(error)
     }
