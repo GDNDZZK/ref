@@ -179,7 +179,8 @@ async fn open_running(
 ) -> anyhow::Result<()> {
     if !ping::is_our_ref_web(url_host, cli.port, login_token).await {
         anyhow::bail!(
-            "port {} is in use by another program (choose another with --port)",
+            "port {} is in use by another program or by a ref-web with a different login token \
+             (choose another port with --port)",
             cli.port
         );
     }
