@@ -68,6 +68,12 @@ export const components = {
   lightbox: {
     margin: 48 /* px */,
   },
+  chatView: {
+    olderTriggerDistance: 400 /* px */,
+  },
+  shimmerText: {
+    shimmerPeriod: 1600 /* ms */,
+  },
   errorBlock: {
     verticalPadding: 12 /* px */,
     horizontalPadding: 14 /* px */,

@@ -153,6 +153,8 @@
   --image-strip-max-height: 96px;
   --image-block-thumbnail-height: 72px;
   --lightbox-margin: 48px;
+  --chat-view-older-trigger-distance: 400px;
+  --shimmer-text-shimmer-period: 1600ms;
   --error-block-vertical-padding: 12px;
   --error-block-horizontal-padding: 14px;
   --error-block-spread-speed: 1.5;
