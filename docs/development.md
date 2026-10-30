@@ -28,6 +28,8 @@ python3 scripts/e2e.py provider/model "prompt" [cwd]           # end-to-end agai
 REF_DUMP_REQUESTS=/tmp/dump ref-server ...                     # dump LLM request bodies
 ```
 
+The `ref-web` tests that start a backend use the `ref-server` binary next to `ref-web` and fail with a hint when it is missing. `cargo test --workspace` builds it; with `cargo test -p ref-web`, run `cargo build -p ref-server` first.
+
 Some tests start `python3` (a fake MCP server) and `bash`. The end-to-end scripts need the Python `websockets` package and a configured model.
 
 ## Crates

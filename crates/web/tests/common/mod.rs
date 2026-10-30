@@ -327,24 +327,17 @@ pub async fn real_backend(env: &Env, token: &str) -> (ref_server::Running, u16) 
     (running, port)
 }
 
-/// Builds `ref-server` next to `ref-web` (a no-op when it is up to date): `cargo test` does not
-/// build the binaries of other packages by itself, and ref-web starts the one beside it.
-pub fn ensure_ref_server() {
-    static BUILT: std::sync::Once = std::sync::Once::new();
-    BUILT.call_once(|| {
-        let web = PathBuf::from(env!("CARGO_BIN_EXE_ref-web"));
-        let profile_dir = web.parent().unwrap();
-        let cargo = std::env::var_os("CARGO").unwrap_or("cargo".into());
-        let mut build = Command::new(cargo);
-        build.args(["build", "-p", "ref-server"]);
-        if profile_dir.file_name().is_some_and(|n| n == "release") {
-            build.arg("--release");
-        }
-        assert!(
-            build.status().unwrap().success(),
-            "cargo build -p ref-server"
-        );
-    });
+/// Fails with a hint unless `ref-server` sits next to `ref-web`, where ref-web looks for it.
+/// `cargo test -p ref-web` does not build the binaries of other packages, and a test must not
+/// run `cargo build` from inside cargo.
+pub fn require_ref_server() {
+    let web = PathBuf::from(env!("CARGO_BIN_EXE_ref-web"));
+    let server = web.with_file_name(format!("ref-server{}", std::env::consts::EXE_SUFFIX));
+    assert!(
+        server.exists(),
+        "{} is missing: run `cargo build -p ref-server` first, or `cargo test --workspace`",
+        server.display()
+    );
 }
 
 /// Direct children of `parent` (Unix `pgrep -P`).
