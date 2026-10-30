@@ -1,7 +1,6 @@
 #include "app/workspace.h"
 
 #include <QJSEngine>
-#include <QTimer>
 
 #include <algorithm>
 #include <utility>
@@ -15,8 +14,6 @@ namespace
 
 // Longest error text in a toast; the rest is in the session's own view.
 constexpr int MaxToastErrorLength = 200;
-// How long a closed session is kept for its tile to fade out; longer than the tile animations.
-constexpr int SessionRetireDelay = 1000; // ms
 
 Workspace* theInstance = nullptr;
 
@@ -493,7 +490,11 @@ QCoro::Task<> Workspace::leaveCurrent(QString closedId, QString cwd)
 
 void Workspace::dropChat(const QString& sessionId)
 {
-	m_leaving.remove(sessionId);
+	// While the backend still lists the session, nothing may bring it back (see syncTiles).
+	if(!m_seenLive.contains(sessionId))
+	{
+		m_leaving.remove(sessionId);
+	}
 	ChatSession* gone = m_chats.take(sessionId);
 	if(gone == nullptr)
 	{
@@ -503,8 +504,7 @@ void Workspace::dropChat(const QString& sessionId)
 	{
 		syncTiles();
 	}
-	// A tile of the session may still be fading out; it needs the object until then.
-	QTimer::singleShot(SessionRetireDelay, gone, &QObject::deleteLater);
+	m_stage.deleteWhenLeft(gone); // its tile may still be fading out
 }
 
 // Reacts to the backend's session list: sessions that disappeared were closed.
@@ -523,6 +523,8 @@ void Workspace::onLiveChanged()
 			handleGone(it.key(), it.value());
 		}
 	}
+	// Closed sessions the backend no longer lists cannot come back.
+	m_leaving.removeIf([this, &now](const QString& id) { return !now.contains(id) && !m_chats.contains(id); });
 	if(m_split)
 	{
 		syncTiles();
