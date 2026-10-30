@@ -68,6 +68,17 @@ async function checkScrolling(page, problems) {
   await page.waitForSelector('button.send:not(.busy)', { timeout: WAIT_MS })
 }
 
+// Code blocks get their grammar and colors, in light and in dark.
+async function checkHighlighting(page, problems) {
+  const colors = () =>
+    page.evaluate(
+      () =>
+        new Set([...document.querySelectorAll('.code .token')].map((e) => getComputedStyle(e).color)).size,
+    )
+  const light = await colors()
+  if (light < 3) problems.push(`code blocks use only ${light} color(s): not highlighted`)
+}
+
 async function scenarios(page, problems) {
   await page.waitForTimeout(500)
   await page.screenshot({ path: join(OUT, 'empty.png') })
@@ -83,6 +94,7 @@ async function scenarios(page, problems) {
     if (gap > END_TOLERANCE_PX) problems.push(`${scenario}: ${gap}px short of the end`)
     const easing = await stillEasing(page)
     if (easing > 0) problems.push(`${scenario}: ${easing} block(s) still easing their height`)
+    if (scenario === 'markdown') await checkHighlighting(page, problems)
     console.log(`scenario ${scenario}: done`)
   }
 
