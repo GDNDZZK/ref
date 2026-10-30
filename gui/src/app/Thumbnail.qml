@@ -44,7 +44,7 @@ Item {
 		height: thumbnail.maxHeight
 		asynchronous: true
 		fillMode: Image.PreserveAspectFit
-		sourceSize: Qt.size(thumbnail.maxWidth * Screen.devicePixelRatio, thumbnail.maxHeight * Screen.devicePixelRatio)
+		sourceSize: Qt.size(thumbnail.maxWidth, thumbnail.maxHeight) // logical: Image scales it by the device pixel ratio
 		source: thumbnail.image.id ? "image://chatimage/" + thumbnail.sessionId + "/" + thumbnail.image.id : ""
 	}
 

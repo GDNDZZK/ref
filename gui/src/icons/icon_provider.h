@@ -23,7 +23,8 @@ bool parseIconRequest(const QString& id, IconRequest& request);
 QByteArray colouredSvg(const QByteArray& svg, const QColor& color);
 
 // Serves the line icons in the theme's colours. The icon is rasterised at the size the Image
-// asks for (sourceSize = logical size * devicePixelRatio), so strokes land on device pixels.
+// asks for: Qt multiplies the Image's sourceSize (logical pixels) by the device pixel ratio, so
+// strokes land on device pixels.
 class IconProvider : public QQuickImageProvider
 {
 public:
