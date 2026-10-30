@@ -31,7 +31,7 @@ namespace refgui::session
 // The model shows what the session events say: it is fed whole messages, replaced
 // parts and text deltas, and keeps the protocol data next to the rows so that a delta
 // lands in the right block. Rows are inserted, removed and updated in place; the model
-// is only reset when the whole history is replaced, so view transitions stay intact.
+// is only reset when the history of another session is loaded, so view transitions stay intact.
 class ConversationModel : public QAbstractListModel
 {
 	Q_OBJECT
@@ -108,6 +108,9 @@ public:
 
 	// Replaces the whole history. The only operation that resets the model.
 	void reset(const QList<proto::Message>& messages);
+	// Replaces the history of the same session: rows that stay as they are are left alone, the
+	// rest is removed and inserted, so a view can animate what changed.
+	void replaceHistory(const QList<proto::Message>& messages);
 	// Adds older messages in front of the current ones.
 	void prependMessages(const QList<proto::Message>& older);
 
