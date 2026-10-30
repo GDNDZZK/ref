@@ -16,11 +16,21 @@ export function pickLocale(preferred: readonly string[]): LocaleName {
   return FALLBACK_LOCALE
 }
 
+let appI18n: ReturnType<typeof createAppI18n> | undefined
+
 export function createAppI18n(preferred: readonly string[] = navigator.languages) {
-  return createI18n({
+  const created = createI18n({
     legacy: false,
     locale: pickLocale(preferred),
     fallbackLocale: FALLBACK_LOCALE,
     messages: LOCALES,
   })
+  appI18n = created
+  return created
+}
+
+// For text made outside components (toasts from stores).
+export function translate(key: string, named: Record<string, unknown> = {}): string {
+  if (!appI18n) throw new Error('the interface language has not been set up')
+  return appI18n.global.t(key, named)
 }

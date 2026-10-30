@@ -34,5 +34,8 @@
   },
   "message": {
     "from": "来自 {name}"
+  },
+  "command": {
+    "unavailable": "这个命令现在不可用。"
   }
 }
