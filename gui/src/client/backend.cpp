@@ -2,7 +2,6 @@
 
 #include "client/instance_files.h"
 
-#include <QCoroSignal>
 #include <QCoroTimer>
 
 using namespace Qt::StringLiterals;
@@ -14,6 +13,32 @@ namespace
 {
 
 constexpr auto ReconnectPause = 1s;
+
+// Waits for the client's `closed` signal and resumes the coroutine inside the emission.
+// QCoro's signal awaiter resumes through the event loop instead, and that event could
+// outlive a Backend destroyed in between.
+struct ClosedAwaiter
+{
+	ServerClient& client;
+	QString reason{};
+
+	bool await_ready() const noexcept { return false; }
+
+	void await_suspend(std::coroutine_handle<> waiter)
+	{
+		QObject::connect(
+			&client,
+			&ServerClient::closed,
+			&client,
+			[this, waiter](const QString& why) {
+				reason = why;
+				waiter.resume();
+			},
+			Qt::SingleShotConnection);
+	}
+
+	QString await_resume() { return std::move(reason); }
+};
 
 } // namespace
 
@@ -58,7 +83,7 @@ QCoro::Task<> Backend::run()
 
 		setState(State::Connected);
 		emit connected();
-		const QString reason = co_await qCoro(&m_client, &ServerClient::closed);
+		const QString reason = co_await ClosedAwaiter{m_client};
 		if(m_stopping)
 		{
 			co_return;
