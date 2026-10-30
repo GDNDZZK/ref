@@ -128,6 +128,22 @@ private:
 		Result<QJsonObject> await_resume() { return std::move(*result); }
 	};
 
+	// Opens the socket and suspends the coroutine until it is connected (true), or it failed,
+	// was closed by close() or timed out (false). Waiting on the socket's signals alone would leave
+	// the coroutine suspended for good when the client is closed meanwhile.
+	struct ConnectAwaiter
+	{
+		ServerClient& client;
+		QUrl url;
+		std::chrono::milliseconds timeout;
+
+		bool await_ready();
+		void await_suspend(std::coroutine_handle<> handle);
+		bool await_resume() const noexcept { return client.m_connectOutcome; }
+	};
+
+	void finishConnecting(bool connected);
+
 	QCoro::Task<Result<QJsonObject>> request(QJsonObject body);
 	QCoro::Task<> ping();
 	void onHeartbeat();
@@ -143,6 +159,9 @@ private:
 	QString m_closeReason; // set when we close it ourselves
 	Heartbeat m_heartbeat;
 	QTimer m_heartbeatTimer;
+	QTimer m_connectTimer;
+	std::coroutine_handle<> m_connectWaiter;
+	bool m_connectOutcome = false;
 	QElapsedTimer m_silence; // since the last message of the peer
 	bool m_helloDone = false;
 	bool m_pingOutstanding = false;
