@@ -599,12 +599,10 @@ Existing metrics stay: reading column `Theme.contentWidth` 760, `blockSpacing` 1
 
 | Name | Light | Dark | Use |
 |---|---|---|---|
-| `warning` | #b86e00 | #e5b567 | permission, delay, retry, interrupted, shell/reminder bar |
 | `info` | #2a7fb5 | #6fb7e0 | messages from other sessions, hunk headers, tool input |
 | `diffAdded` / `diffAddedBackground` | #1f7a4d / #e3f3e9 | #6cc28a / #1d2f27 | added lines |
 | `diffRemoved` / `diffRemovedBackground` | #b3303f / #fbe6e8 | #ec6f73 / #33202a | removed lines |
 | `matchBackground` | #fff1c2 | #3a3420 | grep match lines |
-| `agentPalette` (5) | #5c9cf5 #9d7cd8 #2e9d5b #d9822b #d23f45 | #7aa2f7 #b49bf0 #6cc28a #f0a86a #ec6f73 | agent colour when the agent has none; index = position in the agent list, else hash of the name |
 
 `Theme.staleOpacity` 0.55: messages before the last compaction.
 
@@ -754,6 +752,6 @@ A row of height 28 at the bottom of the chat, in the reading column, 12 `textMut
 
 ## Constants added (for the WebUI's list)
 
-Theme: `warning`, `info`, `diffAdded`, `diffAddedBackground`, `diffRemoved`, `diffRemovedBackground`, `matchBackground`, `agentPalette`, `staleOpacity`.
+Theme: `info`, `diffAdded`, `diffAddedBackground`, `diffRemoved`, `diffRemovedBackground`, `matchBackground`; number `staleOpacity`. `warning` and the agent colours (`Theme.agentColor`) are the shell's and composer's.
 Component literals: `permissionGuard` 350 ms, `previewLines` 200, `lightboxMargin` 48, `olderTriggerDistance` 400, `shimmerPeriod` 1600,
 `thumbnailMaxWidth` 160, `thumbnailMaxHeight` 96, `userThumbnailHeight` 72, `liveTailLines` 20, `spreadSpeed` 1.5.
