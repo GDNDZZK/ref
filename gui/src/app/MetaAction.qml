@@ -8,6 +8,8 @@ Item {
 	required property string iconName
 	required property string label
 
+	readonly property bool hovered: hover.hovered
+
 	signal triggered
 
 	implicitWidth: content.width + 2 * padding
