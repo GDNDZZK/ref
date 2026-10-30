@@ -12,6 +12,7 @@
 #include <QGuiApplication>
 #include <QLocale>
 #include <QQmlApplicationEngine>
+#include <QQuickStyle>
 #include <QWindow>
 #include <QTextStream>
 #include <QTimer>
@@ -72,6 +73,7 @@ void exitWhenOpened(Workspace& workspace)
 int main(int argc, char* argv[])
 {
 	QGuiApplication app(argc, argv);
+	QQuickStyle::setStyle(u"Basic"_s); // the same look on every platform
 	QGuiApplication::setApplicationName(u"ref-gui"_s);
 	const QString version = QString::fromLatin1(REF_GUI_VERSION);
 	QGuiApplication::setApplicationVersion(version);
