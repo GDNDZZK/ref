@@ -111,6 +111,8 @@ qt_add_qml_module(ref-gui
 		AlertBadge.qml
 		ErrorBlock.qml
 		ImageBlock.qml
+		StatusLine.qml
+		ShimmerText.qml
 		Thumbnail.qml
 		ImageStrip.qml
 		Lightbox.qml
