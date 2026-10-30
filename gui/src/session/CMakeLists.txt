@@ -15,6 +15,8 @@ qt_add_library(refgui_session STATIC
 	session_controller.h
 	stream_pacer.cpp
 	stream_pacer.h
+	tool_content.cpp
+	tool_content.h
 )
 
 target_include_directories(refgui_session PUBLIC ${PROJECT_SOURCE_DIR}/src)
