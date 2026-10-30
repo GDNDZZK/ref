@@ -14,6 +14,9 @@ namespace
 
 // Same word as the server uses for a turn the user cancelled; such a turn is not an error to show.
 constexpr QLatin1StringView AbortedError = "aborted"_L1;
+// Where the server puts the tail of the output of a running tool in the tool's meta.
+constexpr qsizetype NotAPart = -1; // partIndex of a block that belongs to the message, not to a part
+constexpr QLatin1StringView LiveOutputKey = "live_output"_L1;
 
 QString sourceName(proto::MessageSource::Kind kind)
 {
@@ -113,6 +116,11 @@ void applySplitEvent(QList<Block>& blocks, const FenceSplitter::Event& event, co
 	blocks.last().content += std::get<FenceSplitter::TextAppended>(event).text;
 }
 
+Block::ImageRef imageRef(const proto::ImageData& image, const QString& name = {})
+{
+	return {.id = image.id.value_or(QString()), .mime = image.mime, .size = static_cast<qint64>(image.size.value_or(0)), .name = name};
+}
+
 QList<Block> toolBlocks(const MessageHeader& header, qsizetype index, const proto::ToolPart& tool)
 {
 	Block block = makeBlock(Block::Kind::Tool, header, index);
@@ -124,6 +132,14 @@ QList<Block> toolBlocks(const MessageHeader& header, qsizetype index, const prot
 	block.output = tool.output.value_or(QString());
 	block.streaming = !proto::isFinal(tool.state);
 	block.failed = tool.state == proto::ToolState::Error || tool.state == proto::ToolState::Denied;
+	block.timeEnd = tool.timeEnd.value_or(0);
+	block.runAt = tool.runAt.value_or(0);
+	block.meta = tool.meta.toObject();
+	block.liveOutput = block.meta.take(LiveOutputKey).toString();
+	for(const proto::ImageData& image : tool.images)
+	{
+		block.images.append(imageRef(image));
+	}
 	if(tool.input.isObject())
 	{
 		block.inputJson = QString::fromUtf8(QJsonDocument(tool.input.toObject()).toJson(QJsonDocument::Indented));
@@ -194,6 +210,8 @@ QString kindName(Block::Kind kind)
 		return u"error"_s;
 	case Block::Kind::Image:
 		return u"image"_s;
+	case Block::Kind::Meta:
+		return u"meta"_s;
 	}
 	Q_UNREACHABLE_RETURN(QString());
 }
@@ -260,6 +278,7 @@ QList<Block> userBlocks(const MessageHeader& header, const QList<proto::Part>& p
 		{
 			Block block = makeBlock(Block::Kind::Image, header, index);
 			block.content = image->name.value_or(image->image.mime);
+			block.images = {imageRef(image->image, image->name.value_or(QString()))};
 			images.append(block);
 		}
 	}
@@ -282,9 +301,34 @@ QList<Block> errorBlocks(const MessageHeader& header)
 	{
 		return {};
 	}
-	constexpr qsizetype NotAPart = -1;
 	Block block = makeBlock(Block::Kind::Error, header, NotAPart);
 	block.content = *header.error;
+	return {block};
+}
+
+QList<Block> metaBlocks(const MessageHeader& header)
+{
+	if(header.source.kind == proto::MessageSource::Kind::Compaction)
+	{
+		return {};
+	}
+	Block block = makeBlock(Block::Kind::Meta, header, NotAPart);
+	block.timeEnd = header.timeEnd.value_or(0);
+	block.agent = header.agent.value_or(QString());
+	if(header.model)
+	{
+		block.modelId = header.model->model;
+		block.variant = header.model->variant.value_or(QString());
+	}
+	if(header.usage)
+	{
+		block.tokensIn = header.usage->input + header.usage->cacheRead + header.usage->cacheWrite;
+		block.tokensOut = header.usage->output;
+	}
+	const bool aborted = header.error && header.error->compare(AbortedError, Qt::CaseInsensitive) == 0;
+	block.interrupted = aborted;
+	block.errored = header.error && !aborted;
+	block.human = header.role == proto::Role::User && header.source.kind == proto::MessageSource::Kind::Human;
 	return {block};
 }
 

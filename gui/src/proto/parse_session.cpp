@@ -78,11 +78,6 @@ SessionStatus readSessionStatus(const Fields& fields)
 	return status;
 }
 
-ModelRef readModelRef(const Fields& fields)
-{
-	return {.provider = fields.string("provider"_L1), .model = fields.string("model"_L1), .variant = fields.optionalString("variant"_L1)};
-}
-
 ContextUsage readContextUsage(const Fields& fields)
 {
 	return {.used = static_cast<quint64>(fields.integerOr("used"_L1, 0)),
@@ -173,6 +168,11 @@ ToolState readToolState(const QString& path, const QJsonValue& value)
 		fail(path, u"expected a string"_s);
 	}
 	return readEnum(path, value.toString(), names);
+}
+
+ModelRef readModelRef(const Fields& fields)
+{
+	return {.provider = fields.string("provider"_L1), .model = fields.string("model"_L1), .variant = fields.optionalString("variant"_L1)};
 }
 
 SessionInfo readSessionInfo(const Fields& fields)
