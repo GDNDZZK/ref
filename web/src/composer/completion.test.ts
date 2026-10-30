@@ -54,7 +54,7 @@ describe('CompletionController', () => {
   it('closes once the command has arguments or the text is not a command', () => {
     const { controller } = setup()
     controller.update('/', 1, false, true)
-    expect(controller.completion).toBeDefined()
+    expect(controller.completion?.items.map((item) => item.label)).toEqual(['/undo', '/new', '/review'])
     controller.update('/undo now', 9, false, true)
     expect(controller.completion).toBeUndefined()
     controller.update('hello', 5, false, true)
@@ -84,7 +84,7 @@ describe('CompletionController', () => {
     controller.update('/u', 2, false, false)
     expect(controller.completion).toBeUndefined()
     controller.update('/un', 3, false, true)
-    expect(controller.completion).toBeDefined()
+    expect(controller.completion?.items.map((item) => item.label)).toEqual(['/undo'])
   })
 
   it('lists files for a mention after a short delay', async () => {
