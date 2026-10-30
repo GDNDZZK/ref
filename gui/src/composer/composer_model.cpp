@@ -350,6 +350,9 @@ QCoro::Task<> ComposerModel::sendShell(QString command)
 		emit sent();
 		co_return;
 	}
+	// Back into the box as a shell line, so nothing typed is lost.
+	restoreDraft(command, {});
+	setShellMode(true);
 	emit failed(result.error());
 }
 
