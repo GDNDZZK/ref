@@ -85,7 +85,7 @@ async fn start_in(root: &Path, port: u16, token: &str) -> anyhow::Result<Running
     let workspace = root.join("workspace");
     std::fs::create_dir_all(root.join("logs"))?;
     std::fs::create_dir_all(&workspace)?;
-    let workspace = std::fs::canonicalize(workspace)?;
+    let workspace = dunce::canonicalize(workspace)?;
     workspace::create(&workspace)?;
 
     let llm = llm::start().await?;

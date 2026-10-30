@@ -485,7 +485,7 @@ async fn create_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Resu
             } else {
                 std::path::Path::new(&my_cwd).join(p)
             };
-            let p = std::fs::canonicalize(&p)
+            let p = dunce::canonicalize(&p)
                 .map_err(|_| format!("Error: directory does not exist: {}", p.display()))?;
             if !p.is_dir() {
                 return Err(format!("Error: not a directory: {}", p.display()));
