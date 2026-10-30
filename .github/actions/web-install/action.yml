@@ -1,0 +1,20 @@
+# Installs Node 24 and pnpm (store cached) and the locked dependencies of web/.
+name: Install web dependencies
+description: Node 24, pnpm and `pnpm install --frozen-lockfile` in web/.
+
+runs:
+  using: composite
+  steps:
+    # The pnpm version comes from the "packageManager" field of web/package.json.
+    - uses: pnpm/action-setup@v6
+      with:
+        package_json_file: web/package.json
+        cache: true
+        cache_dependency_path: web/pnpm-lock.yaml
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 24
+    - name: Install web dependencies
+      shell: bash
+      working-directory: web
+      run: pnpm install --frozen-lockfile
