@@ -34,6 +34,7 @@ private slots:
 	void toolCallsFinish();
 	void permissionWaitsForTheUser();
 	void deniedPermissionShowsAsFailed();
+	void mockDirectoryIsRemovedWhenTheBackendIsDestroyed();
 
 private:
 	// A connected backend with a session, and the controller on it.
@@ -183,6 +184,29 @@ void TestMockSession::deniedPermissionShowsAsFailed()
 
 	QTRY_VERIFY_WITH_TIMEOUT(toolRow(u"denied"_s) >= 0, ReplyTimeoutMs);
 	QVERIFY(roleOf(model, toolRow(u"denied"_s), ConversationModel::FailedRole).toBool());
+}
+
+// The mock backend keeps its workspace under the temporary directory and removes it when it exits
+// on its own. Killing it leaves the directory behind, so the backend has to be given time to leave.
+void TestMockSession::mockDirectoryIsRemovedWhenTheBackendIsDestroyed()
+{
+	QTemporaryDir temporary;
+	QVERIFY(temporary.isValid());
+	const QByteArray before = qgetenv("TMPDIR");
+	qputenv("TMPDIR", temporary.path().toLocal8Bit());
+	{
+		Session s;
+		QVERIFY(!QDir(temporary.path()).entryList({u"ref-mock-*"_s}, QDir::Dirs | QDir::NoDotAndDotDot).isEmpty());
+	}
+	if(before.isNull())
+	{
+		qunsetenv("TMPDIR");
+	}
+	else
+	{
+		qputenv("TMPDIR", before);
+	}
+	QCOMPARE(QDir(temporary.path()).entryList({u"ref-mock-*"_s}, QDir::Dirs | QDir::NoDotAndDotDot), QStringList());
 }
 
 QTEST_GUILESS_MAIN(TestMockSession)

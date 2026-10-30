@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls.Basic
 import RefGui
 
 // A pill in the tag row: an icon and a label. When the label changes, the old text slides up and
@@ -68,6 +67,7 @@ Rectangle {
 
 		Text {
 			id: current
+			textFormat: Text.PlainText
 			property real slide: 0
 			y: (parent.height - height) / 2 + slide
 			width: parent.width
@@ -80,6 +80,7 @@ Rectangle {
 
 		Text {
 			id: previous
+			textFormat: Text.PlainText
 			property real slide: 0
 			y: (parent.height - height) / 2 + slide
 			width: parent.width
@@ -107,9 +108,11 @@ Rectangle {
 		onTapped: chip.clicked()
 	}
 
-	ToolTip.visible: hover.hovered && tip !== ""
-	ToolTip.text: tip
-	ToolTip.delay: tipDelay
+	PlainToolTip {
+		visible: hover.hovered && chip.tip !== ""
+		text: chip.tip
+		delay: chip.tipDelay
+	}
 
 	Accessible.role: clickable ? Accessible.Button : Accessible.StaticText
 	Accessible.name: label
