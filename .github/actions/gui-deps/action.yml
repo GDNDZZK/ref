@@ -1,0 +1,77 @@
+# Qt, ECM, KSyntaxHighlighting and QCoro for building ref-gui, installed by the scripts in
+# gui/scripts (the same ones a developer runs) and cached. Sets, for later steps:
+#   REF_DEPS_DIR      where the dependencies are
+#   REF_QT_DIR        the Qt of this runner, the first entry of CMAKE_PREFIX_PATH
+#   REF_QT_HOST_DIR   Qt for the build machine, only on Windows on Arm (QT_HOST_PATH), else empty
+name: GUI dependencies
+description: Installs and caches Qt and the C++ libraries of ref-gui, and the build tools.
+
+runs:
+  using: composite
+  steps:
+    - name: Build tools and system libraries
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        # Ninja, and the system libraries Qt's libraries and its xcb platform plugin load.
+        sudo apt-get install -y ninja-build xvfb libgl1-mesa-dev libglx-dev libegl1 libfontconfig1 \
+          libdbus-1-3 libxkbcommon-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
+          libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+          libxcb-xfixes0 libxcb-xinerama0 libxcb-xkb1
+
+    - name: Build tools
+      if: runner.os != 'Linux'
+      shell: bash
+      run: |
+        command -v ninja > /dev/null && exit 0
+        if [[ "$RUNNER_OS" == macOS ]]; then brew install ninja; else choco install ninja -y; fi
+
+    # The Visual C++ compiler and its environment, for the dependency build and for ref-gui.
+    - uses: ilammy/msvc-dev-cmd@v1
+      if: runner.os == 'Windows'
+      with:
+        arch: ${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
+
+    - name: Locate the dependencies
+      shell: bash
+      run: |
+        # Forward slashes: the scripts and CMake both read this path.
+        echo "REF_DEPS_DIR=${RUNNER_TEMP//\\//}/ref-deps" >> "$GITHUB_ENV"
+        # Git Bash on an Arm runner can still report an x64 machine.
+        if [[ "$RUNNER_OS" == Windows && "$RUNNER_ARCH" == ARM64 ]]; then
+          echo "AQT_ARCH=win64_msvc2022_arm64" >> "$GITHUB_ENV"
+        fi
+
+    # The key holds the scripts, which pin the versions: changing one rebuilds everything.
+    - name: Restore the dependencies
+      id: cache
+      uses: actions/cache/restore@v6
+      with:
+        path: |
+          ${{ env.REF_DEPS_DIR }}/Qt
+          ${{ env.REF_DEPS_DIR }}/prefix
+        key: gui-deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('gui/scripts/**') }}
+
+    - name: Install the dependencies
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        gui/scripts/install-qt.sh
+        gui/scripts/build-deps.sh
+
+    # Saved here and not at the end of the job, so that a failing build keeps the cache.
+    - name: Save the dependencies
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: |
+          ${{ env.REF_DEPS_DIR }}/Qt
+          ${{ env.REF_DEPS_DIR }}/prefix
+        key: ${{ steps.cache.outputs.cache-primary-key }}
+
+    - name: Locate Qt
+      shell: bash
+      run: |
+        echo "REF_QT_DIR=$(gui/scripts/qt-dir.sh)" >> "$GITHUB_ENV"
+        echo "REF_QT_HOST_DIR=$(gui/scripts/qt-dir.sh --host)" >> "$GITHUB_ENV"
