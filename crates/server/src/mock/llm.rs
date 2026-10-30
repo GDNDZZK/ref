@@ -23,6 +23,7 @@ const FILLED_CONTEXT: f64 = 0.95;
 const SUMMARY_TEXT: &str = "## Goal\n- Explore the mock backend with the user.\n\n## Accomplished\n- Ran several mock scripts and their tools in the sample workspace.\n\n## Next steps\n1. Continue with whatever the user asks next.\n\n## Relevant files\n- `src/parser.rs`: the file the demo edits.";
 const SUMMARY_DELAY_MS: u64 = 2500;
 const TITLE_WORDS: usize = 6;
+const ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 /// Requests seen so far, by (session, number of messages): a retry sends the same request.
 type Attempts = Mutex<HashMap<(String, usize), u32>>;
@@ -37,8 +38,14 @@ pub async fn start() -> std::io::Result<LlmServer> {
     let attempts: Arc<Attempts> = Arc::default();
     tokio::spawn(async move {
         loop {
-            let Ok((stream, _)) = listener.accept().await else {
-                continue;
+            let (stream, _) = match listener.accept().await {
+                Ok(accepted) => accepted,
+                Err(e) => {
+                    // Typically out of file descriptors: wait instead of spinning.
+                    tracing::warn!("mock llm accept failed: {e}");
+                    tokio::time::sleep(ACCEPT_RETRY_DELAY).await;
+                    continue;
+                }
             };
             let attempts = attempts.clone();
             tokio::spawn(async move {
@@ -155,7 +162,7 @@ async fn reply(
     } else {
         prompt_tokens
     };
-    if let [Step::Error(HttpError { status, message })] = round.steps.as_slice() {
+    if let Some(HttpError { status, message }) = &round.error {
         return write_error(stream, *status, message).await;
     }
     stream_round(stream, round, script.pace, prompt_tokens).await
@@ -255,7 +262,6 @@ async fn stream_round(
                 out.pieces(&arguments, pace, make).await?;
             }
             Step::Pause(ms) => tokio::time::sleep(Duration::from_millis(*ms)).await,
-            Step::Error(_) => unreachable!("an error round has no other steps"),
         }
     }
     let reason = if tool_calls > 0 { "tool_calls" } else { "stop" };
