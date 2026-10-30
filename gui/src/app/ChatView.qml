@@ -35,6 +35,8 @@ ListView {
 	property bool turnInProgress: false
 
 	signal errorOutOfSight() // an error block arrived while the user was reading further up
+	signal undoRequested(string messageId)
+	signal copyRequested(string messageId)
 	signal permissionAnswered(string callId, bool allow, bool always) // from a tool card that asks for permission
 
 	// Where the content ends, without and with the held room. The footer sits right
@@ -257,5 +259,6 @@ ListView {
 		DelegateChoice { roleValue: "code"; CodeBlock {} }
 		DelegateChoice { roleValue: "tool"; ToolBlock {} }
 		DelegateChoice { roleValue: "error"; ErrorBlock {} }
+		DelegateChoice { roleValue: "meta"; MetaBlock {} }
 	}
 }

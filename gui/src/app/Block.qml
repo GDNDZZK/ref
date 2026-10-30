@@ -19,24 +19,31 @@ Item {
 
 	required property string content
 	required property bool streaming
+	required property bool stale // before the context window's start: the model no longer sees it
+	required property int index
 
 	signal added() // inserted into the model, as opposed to created with the view
 
 	readonly property real columnWidth: ListView.view.columnWidth
 	default property alias body: column.data
 
-	readonly property real naturalHeight: column.childrenRect.height
+	property real pullUp: 0 // how far the content moves up into the gap above the row
+	readonly property real naturalHeight: column.childrenRect.height - pullUp
 	property real easedHeight: 0
 	property bool easing: false // from the start of streaming until caught up after it ends
 
 	width: ListView.view.width
 	height: easing ? easedHeight : naturalHeight
-	clip: true
+	clip: pullUp === 0
 	transform: Translate { id: entryShift }
 
 	ListView.onAdd: {
 		entrance.restart()
 		added()
+	}
+
+	function toggleExpanded() {
+		ListView.view.model.toggleExpanded(index)
 	}
 
 	// How far down the block a header `headerHeight` tall sits so that it stays in
@@ -96,6 +103,10 @@ Item {
 	Item {
 		id: column
 		x: (block.width - block.columnWidth) / 2
+		y: -block.pullUp
 		width: block.columnWidth
+		opacity: block.stale ? Theme.staleOpacity : 1
+
+		Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 	}
 }
