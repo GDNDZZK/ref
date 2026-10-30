@@ -1,0 +1,17 @@
+{
+  "kind": "response",
+  "id": 13,
+  "ok": true,
+  "result": {
+    "removed": true,
+    "text": "Also check the docs",
+    "images": [
+      {
+        "mime": "image/png",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==",
+        "name": "screenshot.png"
+      }
+    ]
+  },
+  "error": null
+}

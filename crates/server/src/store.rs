@@ -620,6 +620,7 @@ mod tests {
             context: ContextUsage::default(),
             todos: Vec::new(),
             busy_since: None,
+            last_error: None,
         }
     }
 

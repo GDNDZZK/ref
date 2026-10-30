@@ -30,6 +30,9 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
     match req {
         Request::Hello { .. } => Err("Hello was already received.".into()),
         Request::Ping => Ok(json!({})),
+        Request::SetNotify { .. } | Request::SetFocus { .. } | Request::ListDirs { .. } => {
+            Err("Not implemented yet.".into())
+        }
         Request::Shutdown => {
             tracing::info!("shutdown requested by a client");
             hub.shutdown.cancel();
