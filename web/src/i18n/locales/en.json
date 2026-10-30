@@ -1,0 +1,38 @@
+{
+  "chat": {
+    "empty": "What are we building?",
+    "jumpToLatest": "Jump to latest",
+    "thinking": "Thinking",
+    "thought": "Thought"
+  },
+  "composer": {
+    "placeholder": "Message ref",
+    "send": "Send",
+    "stop": "Stop"
+  },
+  "code": {
+    "plainText": "text",
+    "copy": "Copy",
+    "copied": "Copied"
+  },
+  "tool": {
+    "input": "Input",
+    "allow": "Allow",
+    "allowSession": "Allow for this session",
+    "deny": "Deny"
+  },
+  "theme": {
+    "switchToLight": "Switch to light theme",
+    "switchToDark": "Switch to dark theme"
+  },
+  "connection": {
+    "connecting": "Connecting…",
+    "reconnecting": "Connection lost. Reconnecting…",
+    "closed": "Disconnected: {reason}",
+    "backendTooOld": "The backend is older than this interface. Restart it to continue.",
+    "noDirectory": "No working directory: open this page through ref-web, or set ?cwd= (or VITE_REF_CWD) when connecting to ref-server directly."
+  },
+  "message": {
+    "from": "from {name}"
+  }
+}
