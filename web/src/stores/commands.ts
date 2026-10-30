@@ -88,6 +88,14 @@ export const useCommandsStore = defineStore('commands', () => {
     return commands.value.filter((command) => command.palette !== false && isEnabled(command, sessionTarget))
   }
 
+  // Every command the palette lists, with whether it can run now (disabled ones are shown dimmed).
+  function listed(sessionId = ''): { command: Command; enabled: boolean }[] {
+    const sessionTarget = target(sessionId)
+    return commands.value
+      .filter((command) => command.palette !== false)
+      .map((command) => ({ command, enabled: isEnabled(command, sessionTarget) }))
+  }
+
   // The enabled command bound to the key press, if any.
   function matchKey(event: KeyboardEvent): Command | undefined {
     const sessionTarget = target('')
@@ -97,5 +105,5 @@ export const useCommandsStore = defineStore('commands', () => {
     )
   }
 
-  return { commands, register, replaceCustom, find, run, runSlash, slashEntries, available, matchKey }
+  return { commands, register, replaceCustom, find, run, runSlash, slashEntries, available, listed, matchKey }
 })

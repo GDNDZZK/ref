@@ -199,6 +199,10 @@ textarea:focus-visible {
   animation: theme-fade-out var(--motion-slow) var(--easing-out-expo) both;
 }
 
+[data-fade='standard']::view-transition-old(root) {
+  animation-duration: var(--motion-standard);
+}
+
 ::view-transition-new(root) {
   mix-blend-mode: normal;
   animation: none;
