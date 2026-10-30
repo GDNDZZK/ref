@@ -9,6 +9,7 @@ qt_add_qml_module(ref-gui
 	SOURCES
 		chat_session.cpp
 		chat_session.h
+		composer_model_type.h
 		system_fonts.h
 		workspace.cpp
 		workspace.h
@@ -30,6 +31,11 @@ qt_add_qml_module(ref-gui
 		StreamCaret.qml
 		StatusDot.qml
 		Composer.qml
+		ComposerChip.qml
+		ComposerTags.qml
+		AttachmentStrip.qml
+		QueueStrip.qml
+		CompletionPopup.qml
 		SendButton.qml
 		TextButton.qml
 		CircleButton.qml
@@ -52,7 +58,7 @@ qt_add_translations(ref-gui
 # CodeBlock.qml imports org.kde.syntaxhighlighting at run time; nothing links against it.
 find_package(KF6SyntaxHighlighting REQUIRED)
 
-target_link_libraries(ref-gui PRIVATE refgui_session refgui_cli refgui_icons Qt6::Gui Qt6::Qml Qt6::Quick)
+target_link_libraries(ref-gui PRIVATE refgui_session refgui_composer refgui_cli refgui_icons Qt6::Gui Qt6::Qml Qt6::Quick)
 target_compile_definitions(ref-gui PRIVATE REF_GUI_VERSION="${PROJECT_VERSION}")
 refgui_configure_target(ref-gui)
 

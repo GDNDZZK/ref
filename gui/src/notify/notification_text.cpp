@@ -33,11 +33,11 @@ QString bodyOf(const proto::NotifyFrame& frame)
 	switch(frame.kind)
 	{
 	case proto::NotifyFrame::Kind::Permission:
-		return detail.isEmpty() ? tr("Needs your permission") : tr("Needs your permission: %1").arg(detail);
+		return detail.isEmpty() ? tr("Waiting for permission") : tr("Waiting for permission to use %1").arg(detail);
 	case proto::NotifyFrame::Kind::TurnDone:
 		return tr("Finished");
 	case proto::NotifyFrame::Kind::TurnError:
-		return detail.isEmpty() ? tr("Failed") : tr("Failed: %1").arg(detail);
+		return detail.isEmpty() ? tr("Stopped with an error") : tr("Stopped with an error: %1").arg(detail);
 	}
 	Q_UNREACHABLE_RETURN(QString());
 }

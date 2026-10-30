@@ -13,7 +13,6 @@ namespace refgui::compose
 namespace
 {
 
-constexpr qint64 MaxImageBytes = 20 * 1024 * 1024;
 constexpr qsizetype MaxPathLength = 4096;
 
 const QString FileScheme = u"file://"_s;
