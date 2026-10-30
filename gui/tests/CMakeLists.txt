@@ -52,6 +52,11 @@ target_link_libraries(tst_icon_provider PRIVATE refgui_icons Qt6::Gui Qt6::Test)
 refgui_configure_target(tst_icon_provider)
 add_test(NAME tst_icon_provider COMMAND tst_icon_provider)
 
+qt_add_executable(tst_settings tst_settings.cpp)
+target_link_libraries(tst_settings PRIVATE refgui_workspace Qt6::Test)
+refgui_configure_target(tst_settings)
+add_test(NAME tst_settings COMMAND tst_settings)
+
 # Tests against the real backend. Point REF_SERVER at a built ref-server
 # (`cargo build -p ref-server` gives target/debug/ref-server) to enable them.
 set(REF_SERVER "" CACHE FILEPATH "ref-server binary for the tests that run against it")
