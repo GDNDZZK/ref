@@ -2,7 +2,7 @@
 qt_add_executable(ref-gui main.cpp)
 
 # Must be set before qt_add_qml_module() reads the files.
-set_source_files_properties(Theme.qml Motion.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set_source_files_properties(Theme.qml Motion.qml Format.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 qt_add_qml_module(ref-gui
 	URI RefGui
@@ -24,6 +24,44 @@ qt_add_qml_module(ref-gui
 		Main.qml
 		SessionPane.qml
 		StatusPill.qml
+		Sidebar.qml
+		SessionRow.qml
+		HistoryRow.qml
+		SessionDot.qml
+		ContextMenu.qml
+		ThemedScrollBar.qml
+		Crossfade.qml
+		ToastHost.qml
+		BackendBanner.qml
+		TileGrid.qml
+		Tile.qml
+		LiveInfo.qml
+		Format.qml
+		DialogHost.qml
+		ModalDialog.qml
+		DialogButton.qml
+		DialogField.qml
+		Segmented.qml
+		ToggleSwitch.qml
+		KeyChips.qml
+		PickList.qml
+		PickRow.qml
+		PathField.qml
+		CommandPalette.qml
+		SettingsDialog.qml
+		SessionsDialog.qml
+		ModelsDialog.qml
+		AgentsDialog.qml
+		VariantsDialog.qml
+		McpDialog.qml
+		PeersDialog.qml
+		HelpDialog.qml
+		ExportDialog.qml
+		CdDialog.qml
+		NewSessionDialog.qml
+		CloseDialog.qml
+		RenameDialog.qml
+		DeleteHistoryDialog.qml
 		Icon.qml
 		Theme.qml
 		Motion.qml
