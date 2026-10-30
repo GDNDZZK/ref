@@ -10,7 +10,7 @@ pub mod instance;
 pub mod mcp;
 pub mod mock;
 pub mod models;
-pub mod notify;
+mod notify;
 pub mod ops;
 pub mod peers;
 pub mod prompt;

@@ -23,7 +23,6 @@ fn connect(hub: &Arc<Hub>, kinds: &[NotifyKind]) -> Arc<Conn> {
         let mut c = conn.lock();
         c.hello = true;
         c.notify = kinds.iter().copied().collect();
-        c.focus_stamp = hub.next_stamp();
     }
     conn
 }
