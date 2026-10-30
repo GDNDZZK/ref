@@ -94,7 +94,7 @@ The page is the same interface as the [desktop GUI](gui.md). This section lists 
 | Shift+Enter, Ctrl+J | New line. |
 | Tab, Shift+Tab | Next or previous agent. With the `/` or `@` list open, Tab completes. |
 | Alt+T | Next model variant (Ctrl+T belongs to the browser). |
-| Esc, Esc | Interrupt the running turn (the second press within 1.5 seconds). A first Esc closes an open list, leaves shell mode, or cancels a tool call that waits for its delay. |
+| Esc, Esc | Interrupt the running turn (the second press within 1.5 seconds). A first Esc closes an open list, leaves shell mode, or, when a tool call waits for its delay, stops the turn before the tool runs. |
 | ↑, ↓ | Prompt history: ↑ from an empty box or from the start of the text, and while browsing from the first line; ↓ from the last line while browsing. |
 | Ctrl+C | Without a selection, empties the input box; with a selection it copies. |
 | `!` at the start | Shell mode: the line runs as a shell command. Backspace on an empty box or Esc leaves it. |
