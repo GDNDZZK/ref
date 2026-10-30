@@ -55,14 +55,15 @@ Rectangle {
 			Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 
 			Component.onCompleted: entered = true
-			// qmllint disable missing-property
-			ListView.onRemove: SequentialAnimation {
+			// The row stays until the animation has folded it away.
+			ListView.onRemove: removeAnimation.start()
+			SequentialAnimation {
+				id: removeAnimation
 				PropertyAction { target: row; property: "ListView.delayRemove"; value: true }
 				ScriptAction { script: row.entered = false }
 				PauseAnimation { duration: Motion.standard }
 				PropertyAction { target: row; property: "ListView.delayRemove"; value: false }
 			}
-			// qmllint enable missing-property
 
 			Rectangle {
 				visible: row.index > 0
