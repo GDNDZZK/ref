@@ -24,6 +24,10 @@ function onPointerDown(event: PointerEvent): void {
   if (!menu.value?.contains(event.target as Node)) emit('close')
 }
 
+function onBlur(): void {
+  emit('close')
+}
+
 function onKeydown(event: KeyboardEvent): void {
   if (event.key !== 'Escape') return
   event.stopPropagation()
@@ -40,12 +44,13 @@ onMounted(() => {
   element.style.top = `${Math.max(EDGE_MARGIN, top)}px`
   window.addEventListener('pointerdown', onPointerDown, true)
   window.addEventListener('keydown', onKeydown, true)
-  window.addEventListener('blur', () => emit('close'), { once: true })
+  window.addEventListener('blur', onBlur)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('pointerdown', onPointerDown, true)
   window.removeEventListener('keydown', onKeydown, true)
+  window.removeEventListener('blur', onBlur)
 })
 </script>
 
