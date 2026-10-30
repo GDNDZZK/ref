@@ -24,6 +24,8 @@ class SessionController : public QObject
 	Q_OBJECT
 	Q_PROPERTY(bool busy READ isBusy NOTIFY busyChanged)
 	Q_PROPERTY(bool turnInProgress READ isTurnInProgress NOTIFY turnInProgressChanged)
+	Q_PROPERTY(bool moreBefore READ hasMoreBefore NOTIFY moreBeforeChanged)
+	Q_PROPERTY(bool loadingOlder READ isLoadingOlder NOTIFY loadingOlderChanged)
 
 public:
 	template<typename T>
@@ -64,6 +66,12 @@ public:
 	// Shows streamed text that is still waiting for its turn on screen.
 	void showPendingNow() { m_feed.flush(); }
 
+	// Older messages exist than the ones in the model.
+	bool hasMoreBefore() const { return m_moreBefore; }
+	bool isLoadingOlder() const { return m_loadingOlder; }
+	// Adds the page of messages before the oldest one. Does nothing when there are none or a page is on its way.
+	QCoro::Task<Result<void>> loadOlder();
+
 	QCoro::Task<Result<proto::PromptResult>> send(QString text);
 	QCoro::Task<Result<void>> abort();
 	QCoro::Task<Result<void>> permissionReply(QString callId, bool allow, bool always);
@@ -72,6 +80,8 @@ signals:
 	void infoChanged();
 	void busyChanged();
 	void turnInProgressChanged();
+	void moreBeforeChanged();
+	void loadingOlderChanged();
 	// The backend reported a problem with the session (an Error event).
 	void errorReported(const QString& text);
 	// Attaching again after a reconnect failed, e.g. because the session is gone.
@@ -83,6 +93,8 @@ private:
 	void onFrame(const proto::ServerFrame& frame);
 	void onEvent(const proto::SessionEvent& event);
 	void setInfo(const proto::SessionInfo& info);
+	void setMoreBefore(bool moreBefore);
+	void setLoadingOlder(bool loading);
 
 	client::Backend& m_backend;
 	ConversationModel m_model;
@@ -91,6 +103,8 @@ private:
 	bool m_attached = false;
 	bool m_foreground = true;
 	proto::SessionInfo m_info;
+	bool m_moreBefore = false;
+	bool m_loadingOlder = false;
 };
 
 } // namespace refgui::session

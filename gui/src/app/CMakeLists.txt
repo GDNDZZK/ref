@@ -2,7 +2,7 @@
 qt_add_executable(ref-gui main.cpp)
 
 # Must be set before qt_add_qml_module() reads the files.
-set_source_files_properties(Theme.qml Motion.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set_source_files_properties(Theme.qml Motion.qml Format.qml ToolInfo.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 qt_add_qml_module(ref-gui
 	URI RefGui
@@ -27,6 +27,7 @@ qt_add_qml_module(ref-gui
 		Icon.qml
 		Theme.qml
 		Motion.qml
+		Format.qml
 		ChatView.qml
 		Block.qml
 		UserBlock.qml
@@ -36,7 +37,15 @@ qt_add_qml_module(ref-gui
 		ToolBlock.qml
 		ProseText.qml
 		StreamCaret.qml
-		StatusDot.qml
+		ToolStateSlot.qml
+		CountdownRing.qml
+		ToolInfo.qml
+		ToolBody.qml
+		ToolSection.qml
+		OutputText.qml
+		CopyButton.qml
+		PermissionSection.qml
+		PermissionButton.qml
 		Composer.qml
 		SendButton.qml
 		TextButton.qml
@@ -48,6 +57,9 @@ qt_add_qml_module(ref-gui
 		AlertBadge.qml
 		ErrorBlock.qml
 		ImageBlock.qml
+		MetaBlock.qml
+		MetaText.qml
+		MetaAction.qml
 )
 
 # Interface text is English in the sources. The .ts files hold the other languages; their

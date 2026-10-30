@@ -113,6 +113,10 @@ struct Fixture
 		{
 			fake.respond(request, {{u"queued"_s, false}, {u"message_id"_s, u"u2"_s}});
 		}
+		else if(op == u"messages")
+		{
+			fake.respond(request, {{u"messages"_s, olderPage}, {u"more_before"_s, olderHasMore}});
+		}
 		else if(op == u"abort" || op == u"detach")
 		{
 			fake.respond(request, {});
@@ -134,6 +138,8 @@ struct Fixture
 	SessionController controller;
 	QJsonObject snapshot;
 	QJsonArray history;
+	QJsonArray olderPage;
+	bool olderHasMore = false;
 };
 
 } // namespace
@@ -156,6 +162,9 @@ private slots:
 	void watcherAttachDoesNotTakeTheForeground();
 	void upgradingAWatcherKeepsTheConversation();
 	void detachedControllerIgnoresEventsAndAttachesAgain();
+	void loadsOlderMessagesInFront();
+	void doesNotAskWhenNothingIsOlder();
+	void showsSessionErrorsAtTheEndUntilTheNextPrompt();
 };
 
 void TestSessionController::createShowsTheSnapshot()
@@ -340,6 +349,55 @@ void TestSessionController::detachedControllerIgnoresEventsAndAttachesAgain()
 	f.snapshot = snapshotJson(u"ses_1"_s, u"idle"_s, {messageJson(u"u1"_s, u"user"_s, u"Hello"_s, true), messageJson(u"u2"_s, u"user"_s, u"Missed"_s, true)});
 	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
 	QCOMPARE(render(f.controller.model()), (QStringList{u"user:Hello"_s, u"user:Missed"_s}));
+}
+
+void TestSessionController::loadsOlderMessagesInFront()
+{
+	Fixture f;
+	f.snapshot[u"snapshot"_s] = [&] {
+		QJsonObject snapshot = f.snapshot.value(u"snapshot"_s).toObject();
+		snapshot[u"more_before"_s] = true;
+		return snapshot;
+	}();
+	f.olderPage = {messageJson(u"u0"_s, u"user"_s, u"Earlier"_s, true)};
+	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
+	QVERIFY(f.controller.hasMoreBefore());
+	QSignalSpy resets(&f.controller.model(), &QAbstractItemModel::modelReset);
+
+	QVERIFY(await(f.controller.loadOlder()));
+
+	QCOMPARE(render(f.controller.model()).first(), u"user:Earlier"_s);
+	QVERIFY(!f.controller.hasMoreBefore());
+	QVERIFY(!f.controller.isLoadingOlder());
+	QCOMPARE(resets.count(), 0);
+	const QJsonObject request = f.fake.requests().last();
+	QCOMPARE(request.value(u"op"_s).toString(), u"messages"_s);
+	QCOMPARE(request.value(u"before"_s).toString(), u"u1"_s);
+}
+
+void TestSessionController::doesNotAskWhenNothingIsOlder()
+{
+	Fixture f;
+	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
+	QVERIFY(!f.controller.hasMoreBefore());
+
+	QVERIFY(await(f.controller.loadOlder()));
+
+	QVERIFY(!f.ops().contains(u"messages"_s));
+}
+
+void TestSessionController::showsSessionErrorsAtTheEndUntilTheNextPrompt()
+{
+	Fixture f;
+	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
+
+	f.fake.send(eventFrame(u"ses_1"_s, {{u"type"_s, u"error"_s}, {u"text"_s, u"Provider rejected the request"_s}}));
+	QTRY_COMPARE(f.controller.model().tailError(), u"Provider rejected the request"_s);
+	QCOMPARE(render(f.controller.model()).last(), u"error:Provider rejected the request"_s);
+
+	QVERIFY(await(f.controller.send(u"again"_s)));
+	QVERIFY(f.controller.model().tailError().isEmpty());
+	QCOMPARE(render(f.controller.model()).size(), 2);
 }
 
 QTEST_GUILESS_MAIN(TestSessionController)
