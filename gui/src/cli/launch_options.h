@@ -33,6 +33,8 @@ struct LaunchOptions
 	QString directory; // absolute and canonical
 	SessionStart start{};
 	client::Backend::Source source{client::Backend::Mode::Shared{}};
+	// Start in split view.
+	bool watch = false;
 	// Open the session, say so on stdout and exit. For tests that run the whole program.
 	bool smoke = false;
 	QStringList warnings{}; // for stderr, e.g. an option that has no effect yet
