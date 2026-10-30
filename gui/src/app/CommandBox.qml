@@ -17,6 +17,7 @@ Rectangle {
 	color: Theme.codeBackground
 
 	Text {
+		textFormat: Text.PlainText
 		id: text
 		x: box.horizontalPadding
 		y: box.verticalPadding

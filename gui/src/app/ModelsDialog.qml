@@ -69,6 +69,7 @@ ModalDialog {
 				spacing: 2
 
 				Text {
+					textFormat: Text.PlainText
 					width: parent.width
 					text: row.name
 					color: Theme.text
@@ -76,6 +77,7 @@ ModalDialog {
 					elide: Text.ElideRight
 				}
 				Text {
+					textFormat: Text.PlainText
 					width: parent.width
 					text: row.summary
 					color: Theme.textMuted

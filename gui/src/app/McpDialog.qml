@@ -50,6 +50,7 @@ ModalDialog {
 				}
 
 				Text {
+					textFormat: Text.PlainText
 					anchors { left: parent.left; leftMargin: 42; right: status.left; rightMargin: 12 }
 					height: Theme.sidebarHistoryRowHeight
 					verticalAlignment: Text.AlignVCenter
@@ -59,6 +60,7 @@ ModalDialog {
 					elide: Text.ElideRight
 				}
 				Text {
+					textFormat: Text.PlainText
 					id: status
 					anchors { right: chevron.left; rightMargin: 8 }
 					height: Theme.sidebarHistoryRowHeight
@@ -94,6 +96,7 @@ ModalDialog {
 					spacing: 8
 
 					Text {
+						textFormat: Text.PlainText
 						width: parent.width
 						visible: server.modelData.error !== ""
 						text: server.modelData.error
@@ -116,6 +119,7 @@ ModalDialog {
 								color: Theme.codeBackground
 
 								Text {
+									textFormat: Text.PlainText
 									id: label
 									anchors.centerIn: parent
 									text: parent.modelData
@@ -130,6 +134,7 @@ ModalDialog {
 		}
 
 		Text {
+			textFormat: Text.PlainText
 			width: parent.width
 			height: 64
 			horizontalAlignment: Text.AlignHCenter

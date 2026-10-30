@@ -21,6 +21,7 @@ Row {
 			border.color: Theme.border
 
 			Text {
+				textFormat: Text.PlainText
 				id: label
 				anchors.centerIn: parent
 				text: parent.modelData
