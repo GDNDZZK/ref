@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import RefGui
@@ -54,12 +55,14 @@ Rectangle {
 			Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 
 			Component.onCompleted: entered = true
+			// qmllint disable missing-property
 			ListView.onRemove: SequentialAnimation {
 				PropertyAction { target: row; property: "ListView.delayRemove"; value: true }
 				ScriptAction { script: row.entered = false }
 				PauseAnimation { duration: Motion.standard }
 				PropertyAction { target: row; property: "ListView.delayRemove"; value: false }
 			}
+			// qmllint enable missing-property
 
 			Rectangle {
 				visible: row.index > 0

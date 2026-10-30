@@ -67,6 +67,8 @@ public:
 	State state() const { return m_state; }
 	const QString& reason() const { return m_reason; }
 	const proto::HelloResult& hello() const { return m_hello; }
+	// What Hello of the current connection asked for; `setNotifyKinds` may have changed since.
+	const QList<proto::NotifyFrame::Kind>& helloNotifyKinds() const { return m_helloNotifyKinds; }
 
 signals:
 	void stateChanged();
@@ -83,6 +85,7 @@ private:
 	Source m_source;
 	QString m_cwd;
 	QList<proto::NotifyFrame::Kind> m_notifyKinds;
+	QList<proto::NotifyFrame::Kind> m_helloNotifyKinds;
 	ServerClient m_client;
 	std::unique_ptr<MockBackend> m_mock;
 	proto::HelloResult m_hello;

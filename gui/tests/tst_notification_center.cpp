@@ -95,6 +95,8 @@ class TestNotificationCenter : public QObject
 
 private slots:
 	void kindsSetBeforeConnectingGoInHello();
+	void connectingDoesNotSendTheKindsAgain();
+	void kindsChangedWhileHelloWasOnItsWayAreSent();
 	void kindsChangedLaterAreSent();
 	void unknownKindsAreIgnored();
 	void focusIsSentOnChangeOnly();
@@ -110,6 +112,34 @@ void TestNotificationCenter::kindsSetBeforeConnectingGoInHello()
 	f.center.setKinds({u"permission"_s, u"turn_error"_s});
 	f.connect();
 	QCOMPARE(f.helloKinds, (QJsonArray{u"permission"_s, u"turn_error"_s}));
+}
+
+void TestNotificationCenter::connectingDoesNotSendTheKindsAgain()
+{
+	Fixture f;
+	f.center.setKinds({u"permission"_s});
+	f.center.setFocus(true, {u"ses_1"_s});
+	f.connect();
+
+	QTRY_COMPARE(f.requestsOf(u"set_focus"_s).size(), 1); // the focus is not in Hello, the kinds are
+	QVERIFY(f.requestsOf(u"set_notify"_s).isEmpty());
+}
+
+void TestNotificationCenter::kindsChangedWhileHelloWasOnItsWayAreSent()
+{
+	Fixture f;
+	QJsonObject pendingHello;
+	f.fake.onHello = [&](const QJsonObject& hello) { pendingHello = hello; };
+	f.center.setKinds({u"permission"_s});
+	f.backend.start();
+	QTRY_VERIFY(!pendingHello.isEmpty());
+
+	f.center.setKinds({u"turn_done"_s}); // not connected yet, so nothing is sent
+	f.fake.respond(pendingHello, {{u"server_version"_s, u"0.0.0-test"_s}, {u"protocol"_s, 2}});
+
+	QTRY_COMPARE(f.backend.state(), Backend::State::Connected);
+	QTRY_COMPARE(f.requestsOf(u"set_notify"_s).size(), 1);
+	QCOMPARE(f.requestsOf(u"set_notify"_s).last().value(u"kinds"_s).toArray(), (QJsonArray{u"turn_done"_s}));
 }
 
 void TestNotificationCenter::kindsChangedLaterAreSent()

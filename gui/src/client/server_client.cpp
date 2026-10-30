@@ -22,6 +22,7 @@ Q_LOGGING_CATEGORY(lcClient, "refgui.client")
 const QString ClientName = u"ref-gui"_s;
 const QString NotConnected = u"not connected"_s;
 const QString ConnectionClosed = u"connection closed"_s;
+const QString BackendSilent = u"the backend stopped answering"_s;
 
 // The token goes in the URL as well as in Hello, the way ref-server's other clients send it.
 QUrl withToken(QUrl url, const QString& token)
@@ -71,6 +72,7 @@ ServerClient::ServerClient(QObject* parent)
 
 	connect(&m_socket, &QWebSocket::textMessageReceived, this, &ServerClient::onTextMessage);
 	connect(&m_socket, &QWebSocket::disconnected, this, &ServerClient::onDisconnected);
+	connect(&m_heartbeatTimer, &QTimer::timeout, this, &ServerClient::onHeartbeat);
 }
 
 ServerClient::~ServerClient()
@@ -92,17 +94,63 @@ QCoro::Task<Result<proto::HelloResult>> ServerClient::open(Endpoint endpoint,
 		co_return std::unexpected(reason);
 	}
 
+	// Also a backend that never answers Hello is given up on.
+	m_silence.start();
+	m_heartbeatTimer.start(m_heartbeat.tick);
 	const Result<QJsonObject> response = co_await request(proto::request::hello(ClientName, cwd, endpoint.token, notify));
 	const Result<proto::HelloResult> hello = asResult(response, proto::parseHelloResult);
 	if(!hello)
 	{
 		close();
+		co_return hello;
 	}
+	m_helloDone = true;
 	co_return hello;
+}
+
+void ServerClient::setHeartbeat(const Heartbeat& heartbeat)
+{
+	m_heartbeat = heartbeat;
+	if(m_heartbeatTimer.isActive())
+	{
+		m_heartbeatTimer.start(m_heartbeat.tick);
+	}
+}
+
+void ServerClient::onHeartbeat()
+{
+	const auto silence = std::chrono::milliseconds(m_silence.elapsed());
+	if(silence >= m_heartbeat.deadAfter)
+	{
+		qCWarning(lcClient) << "no word from the backend for" << silence.count() << "ms; dropping the connection";
+		m_closeReason = BackendSilent;
+		m_socket.abort();
+		return;
+	}
+	// Before Hello is answered the backend does not take requests.
+	if(silence >= m_heartbeat.pingAfter && m_helloDone && !m_pingOutstanding)
+	{
+		ping();
+	}
+}
+
+QCoro::Task<> ServerClient::ping()
+{
+	m_pingOutstanding = true;
+	co_await request(proto::request::ping());
+	m_pingOutstanding = false;
+}
+
+void ServerClient::stopHeartbeat()
+{
+	m_heartbeatTimer.stop();
+	m_helloDone = false;
+	m_pingOutstanding = false;
 }
 
 void ServerClient::close()
 {
+	stopHeartbeat();
 	m_closeReason = ConnectionClosed;
 	m_socket.close();
 	if(m_socket.state() != QAbstractSocket::UnconnectedState)
@@ -297,6 +345,7 @@ QCoro::Task<Result<QJsonObject>> ServerClient::request(QJsonObject body)
 
 void ServerClient::onTextMessage(const QString& text)
 {
+	m_silence.restart();
 	QJsonParseError parseError;
 	const QJsonDocument document = QJsonDocument::fromJson(text.toUtf8(), &parseError);
 	if(!document.isObject())
@@ -324,6 +373,7 @@ void ServerClient::onTextMessage(const QString& text)
 
 void ServerClient::onDisconnected()
 {
+	stopHeartbeat();
 	const QString reason = m_closeReason.isEmpty() ? (m_socket.closeReason().isEmpty() ? m_socket.errorString() : m_socket.closeReason()) : m_closeReason;
 	m_closeReason.clear();
 	failPending(ConnectionClosed);
