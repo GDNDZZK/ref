@@ -20,5 +20,5 @@ qt_add_library(refgui_session STATIC
 )
 
 target_include_directories(refgui_session PUBLIC ${PROJECT_SOURCE_DIR}/src)
-target_link_libraries(refgui_session PUBLIC Qt6::Core refgui_proto refgui_client)
+target_link_libraries(refgui_session PUBLIC Qt6::Core Qt6::Gui refgui_proto refgui_client)
 refgui_configure_target(refgui_session)

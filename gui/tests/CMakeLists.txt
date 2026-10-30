@@ -172,9 +172,10 @@ refgui_configure_target(tst_workspace)
 add_test(NAME tst_workspace COMMAND tst_workspace)
 
 qt_add_executable(tst_markdown_text tst_markdown_text.cpp)
-target_link_libraries(tst_markdown_text PRIVATE refgui_session Qt6::Test)
+target_link_libraries(tst_markdown_text PRIVATE refgui_session Qt6::Gui Qt6::Test)
 refgui_configure_target(tst_markdown_text)
 add_test(NAME tst_markdown_text COMMAND tst_markdown_text)
+set_tests_properties(tst_markdown_text PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 qt_add_executable(tst_tool_content tst_tool_content.cpp)
 target_link_libraries(tst_tool_content PRIVATE refgui_session Qt6::Test)

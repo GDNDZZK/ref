@@ -1,5 +1,10 @@
 #include "session/markdown_text.h"
 
+#include <QGuiApplication>
+#include <QRandomGenerator>
+#include <QTextBlock>
+#include <QTextDocument>
+#include <QTextFragment>
 #include <QtTest>
 
 using namespace Qt::StringLiterals;
@@ -20,6 +25,8 @@ private slots:
 	void leavesIndentedBlocksAlone();
 	void leavesFencesInListsAlone();
 	void goesBackToTextAfterCode();
+	void codeSpansDoNotCrossParagraphs();
+	void leavesNoImageForTheRendererWhateverTheText();
 };
 
 void TestMarkdownText::turnsImagesIntoLinks()
@@ -40,6 +47,8 @@ void TestMarkdownText::leavesCodeSpansAlone()
 	QCOMPARE(markdownForDisplay(u"use `<img>` and ``![x](y)`` here"_s), u"use `<img>` and ``![x](y)`` here"_s);
 	// An unclosed span is only a run of backticks.
 	QCOMPARE(markdownForDisplay(u"`<b>"_s), u"`\\<b>"_s);
+	// Backticks the renderer could pair with a later run, in another paragraph, are escaped.
+	QCOMPARE(markdownForDisplay(u"`<b>\n\n`"_s), u"\\`\\<b>\n\n`"_s);
 }
 
 void TestMarkdownText::leavesPlainTextAlone()
@@ -102,5 +111,67 @@ void TestMarkdownText::goesBackToTextAfterCode()
 	         u"```\n<a>\n```\n\\<b> and `<c>`\n\n    <d>\n\n\\<e>"_s);
 }
 
-QTEST_APPLESS_MAIN(TestMarkdownText)
+namespace
+{
+
+// The images the Markdown renderer makes of `markdown`.
+int imagesRendered(const QString& markdown)
+{
+	QTextDocument document;
+	document.setMarkdown(markdown);
+	int images = 0;
+	for(QTextBlock block = document.begin(); block.isValid(); block = block.next())
+	{
+		for(QTextBlock::iterator it = block.begin(); !it.atEnd(); ++it)
+		{
+			images += it.fragment().charFormat().isImageFormat() ? 1 : 0;
+		}
+	}
+	return images;
+}
+
+} // namespace
+
+// A code span ends in its own paragraph. Backticks that look like its end further down are not its end,
+// so the image between them is no code.
+void TestMarkdownText::codeSpansDoNotCrossParagraphs()
+{
+	const QStringList texts{
+		u"``![x](http://example.com/a.png)\n\n``"_s,
+		u"`![x](http://example.com/a.png)\n\n`"_s,
+		u"- `![x](http://example.com/a.png)\n- `"_s,
+		u"> `![x](http://example.com/a.png)\n\n> `"_s,
+		u"`![x](http://example.com/a.png)\n# heading `"_s,
+	};
+	for(const QString& text : texts)
+	{
+		QVERIFY2(imagesRendered(markdownForDisplay(text)) == 0, qPrintable(text));
+	}
+	// The same line is still a span.
+	QCOMPARE(markdownForDisplay(u"`![x](y)` and ``<b>``"_s), u"`![x](y)` and ``<b>``"_s);
+}
+
+// Compares what the renderer makes of random mixes of the Markdown pieces that matter: whatever the
+// order, no picture comes out of text that went through markdownForDisplay.
+void TestMarkdownText::leavesNoImageForTheRendererWhateverTheText()
+{
+	const QStringList pieces{u"`"_s, u"``"_s, u"```"_s, u"~~~"_s, u"![x](http://example.com/a.png)"_s, u"![x][r]"_s, u"\n"_s, u"\n\n"_s, u"- "_s,
+	                         u"1. "_s, u"> "_s, u"    "_s, u"\t"_s, u"# "_s, u"<b>"_s, u"<img src=u>"_s, u"x"_s, u" "_s, u"\\"_s, u"["_s, u"]"_s, u"(u)"_s, u"*"_s, u"!"_s};
+	constexpr quint32 Seed = 20240131;
+	constexpr int Iterations = 4000;
+	constexpr int MaxPieces = 14;
+	QRandomGenerator random(Seed);
+	for(int i = 0; i < Iterations; ++i)
+	{
+		QString text;
+		const int count = 1 + random.bounded(MaxPieces);
+		for(int piece = 0; piece < count; ++piece)
+		{
+			text += pieces.at(random.bounded(static_cast<int>(pieces.size())));
+		}
+		QVERIFY2(imagesRendered(markdownForDisplay(text)) == 0, qPrintable(u"%1: %2"_s.arg(i).arg(QString(text).replace(u'\n', u"\\n"_s))));
+	}
+}
+
+QTEST_MAIN(TestMarkdownText)
 #include "tst_markdown_text.moc"
