@@ -271,6 +271,13 @@ function openDialog(commandId: 'agents' | 'models'): void {
   commands.run(commandId, { sessionId: props.session.id }).catch((error) => notices.pushError(error))
 }
 
+// The prompt comes back into the box: the caret goes there, ready to edit.
+async function takeBack(messageId: string): Promise<void> {
+  await props.composer.removeQueued(messageId)
+  input.value?.focus()
+  void showCaret()
+}
+
 function pickCompletion(index: number): void {
   props.composer.selectCompletion(index)
   props.composer.acceptCompletion(true)
@@ -294,7 +301,7 @@ defineExpose({ focus: () => input.value?.focus() })
     <QueueStrip
       :messages="session.queued"
       :removing="composer.removingQueued"
-      @remove="(id) => composer.removeQueued(id)"
+      @remove="takeBack"
     />
     <div class="box-wrap">
       <CompletionPopup
