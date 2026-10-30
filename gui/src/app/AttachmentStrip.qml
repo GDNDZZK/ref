@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls.Basic
 import QtQuick.Shapes
 import RefGui
 
@@ -16,6 +15,7 @@ ListView {
 	readonly property real removeBackgroundOpacity: 0.85
 	readonly property real enterScale: 0.8
 	readonly property int removeInset: 4
+	readonly property int tipDelay: 600
 
 	signal removeRequested(int row)
 
@@ -99,9 +99,11 @@ ListView {
 			Accessible.onPressAction: strip.removeRequested(thumb.index)
 		}
 
-		ToolTip.visible: hover.hovered
-		ToolTip.text: thumb.name
-		ToolTip.delay: 600
+		PlainToolTip {
+			visible: hover.hovered
+			text: thumb.name
+			delay: strip.tipDelay
+		}
 	}
 
 	add: Transition {

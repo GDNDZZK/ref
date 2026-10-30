@@ -57,6 +57,7 @@ Item {
 	}
 
 	Text {
+		textFormat: Text.PlainText
 		anchors { left: row.right; leftMargin: tags.hintGap; verticalCenter: parent.verticalCenter }
 		width: Math.max(0, tags.width - row.width - tags.hintGap)
 		text: qsTr("Press Esc again to interrupt")

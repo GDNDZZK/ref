@@ -108,6 +108,7 @@ Rectangle {
 
 			Text {
 				id: nameLabel
+				textFormat: Text.PlainText
 				anchors { left: slashIcon.right; leftMargin: popup.rowSpacing; verticalCenter: parent.verticalCenter }
 				text: "/" + row.modelData.slash
 				color: Theme.text
@@ -116,6 +117,7 @@ Rectangle {
 
 			Text {
 				id: shortcutLabel
+				textFormat: Text.PlainText
 				anchors { right: parent.right; rightMargin: popup.rowPaddingX; verticalCenter: parent.verticalCenter }
 				text: row.modelData.shortcut
 				color: Theme.textMuted
@@ -123,6 +125,7 @@ Rectangle {
 			}
 
 			Text {
+				textFormat: Text.PlainText
 				anchors {
 					left: nameLabel.right
 					leftMargin: popup.rowSpacing
@@ -166,28 +169,34 @@ Rectangle {
 				color: Theme.textMuted
 			}
 
-			Text {
-				anchors {
-					left: fileIcon.right
-					leftMargin: popup.rowSpacing
-					right: parent.right
-					rightMargin: popup.rowPaddingX
-					verticalCenter: parent.verticalCenter
+			// The directory part is muted and is what gets cut when the path is too long.
+			Row {
+				id: pathRow
+				anchors { left: fileIcon.right; leftMargin: popup.rowSpacing; verticalCenter: parent.verticalCenter }
+				width: parent.width - x - popup.rowPaddingX
+
+				Text {
+					textFormat: Text.PlainText
+					width: Math.min(implicitWidth, pathRow.width - fileName.implicitWidth)
+					text: row.directory
+					color: Theme.textMuted
+					font.family: Theme.monoFamily
+					font.pixelSize: Theme.codeFontSize
+					elide: Text.ElideLeft
 				}
-				textFormat: Text.StyledText
-				text: "<font color=\"" + Theme.textMuted + "\">" + popup.htmlEscape(row.directory) + "</font><font color=\"" + Theme.text + "\">"
-					+ popup.htmlEscape(row.name) + (row.isDirectory ? "/" : "") + "</font>"
-				font.family: Theme.monoFamily
-				font.pixelSize: Theme.codeFontSize
-				elide: Text.ElideLeft
+
+				Text {
+					id: fileName
+					textFormat: Text.PlainText
+					text: row.name + (row.isDirectory ? "/" : "")
+					color: Theme.text
+					font.family: Theme.monoFamily
+					font.pixelSize: Theme.codeFontSize
+				}
 			}
 
 			HoverHandler { onHoveredChanged: if (hovered) view.currentIndex = row.index }
 			TapHandler { onTapped: popup.accepted(row.index) }
 		}
-	}
-
-	function htmlEscape(text) {
-		return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 	}
 }
