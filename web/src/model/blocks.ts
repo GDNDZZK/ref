@@ -85,6 +85,7 @@ export interface MetaBlock extends BlockBase {
   interrupted: boolean
   failed: boolean
   canUndo: boolean
+  copyable: boolean // the message has text to copy
 }
 
 // The message that summarizes the history before it.
