@@ -332,3 +332,40 @@ async fn a_queued_prompt_restarts_the_run_after_a_final_error() {
     assert_eq!(last_text(&s), "fine");
     assert_eq!(s.info().last_error, None, "the restarted run cleared it");
 }
+
+#[tokio::test]
+async fn a_custom_run_tells_clients_the_error_is_gone() {
+    let m = mock(Arc::new(|_, _| {
+        Reply::Status(400, r#"{"error":{"message":"bad request"}}"#.into())
+    }))
+    .await;
+    let (hub, work) = hub(config(&m.url), "custom-run");
+    let s = titled_session(&hub, &work).await;
+    prompt(&hub, &s, "go");
+    wait_idle(&s).await;
+    assert!(s.info().last_error.is_some());
+
+    let conn = hub.add_conn();
+    conn.lock().hello = true;
+    let attach = Request::Attach {
+        session_id: s.id.clone(),
+        foreground: true,
+        limit: None,
+    };
+    api::handle(&hub, &conn, attach).await.unwrap();
+    conn.out.drain();
+
+    ref_server::engine::start_custom_run(&hub, &s, |_, _, cancel| async move {
+        cancel.cancelled().await;
+    })
+    .unwrap();
+    let cleared = conn.out.drain().into_iter().any(|f| {
+        matches!(f, ServerFrame::Event { event: ref_proto::SessionEvent::Info { info }, .. } if info.last_error.is_none())
+    });
+    assert!(
+        cleared,
+        "an Info event without last_error follows the start"
+    );
+    ref_server::engine::abort(&hub, &s, true);
+    wait_idle(&s).await;
+}
