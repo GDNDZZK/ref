@@ -161,6 +161,8 @@ private:
 	void draftEdited();
 	void setShellMode(bool shellMode);
 	void fillFromHistory(const QString& entry);
+	// Attaches the image files among `urls`; returns how many. Other files are reported if asked.
+	int attachImageUrls(const QList<QUrl>& urls, bool reportOthers);
 	void attachImage(proto::NamedImage image);
 	void disarmInterrupt();
 	QCoro::Task<> loadConfig();

@@ -1,5 +1,6 @@
 #include "notify/notifier.h"
 
+#include <QCoreApplication>
 #include <QtSystemDetection>
 
 #if defined(Q_OS_WIN)
@@ -25,7 +26,7 @@ public:
 	using Notifier::Notifier;
 
 	bool isAvailable() const override { return false; }
-	QString unavailableReason() const override { return tr("This system has no notification service ref can use."); }
+	QString unavailableReason() const override { return QCoreApplication::translate("refgui::notify", "This system has no notification service ref can use."); }
 	void show(const Notification&) override {}
 };
 #endif
