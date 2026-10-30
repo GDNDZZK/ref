@@ -20,6 +20,8 @@ use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 pub type Ws =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
+/// Another process may take a port between `free_port` and ref-web binding it.
+const START_ATTEMPTS: u32 = 5;
 const START_TIMEOUT: Duration = Duration::from_secs(15);
 pub const STEP_TIMEOUT: Duration = Duration::from_secs(10);
 /// Sent by the fake upstream: close the connection with `FAKE_CLOSE_CODE` / `FAKE_CLOSE_REASON`.
@@ -79,13 +81,31 @@ impl Env {
         self.command(args).output().unwrap()
     }
 
-    /// Starts ref-web in the background and waits until it listens.
+    /// Starts ref-web in the background on a free port and waits until it listens. Tries
+    /// another port when ref-web exits at once because the port was taken meanwhile.
     pub async fn start(&self, args: &[&str]) -> Web {
+        for _ in 1..START_ATTEMPTS {
+            if let Ok(web) = self.try_start_on(free_port(), args).await {
+                return web;
+            }
+        }
         self.start_on(free_port(), args).await
     }
 
     /// Like `start`, on a given port.
     pub async fn start_on(&self, port: u16, args: &[&str]) -> Web {
+        match self.try_start_on(port, args).await {
+            Ok(web) => web,
+            Err(status) => panic!("ref-web exited early: {status}"),
+        }
+    }
+
+    /// `Err` holds the exit status of a ref-web that stopped before it listened.
+    async fn try_start_on(
+        &self,
+        port: u16,
+        args: &[&str],
+    ) -> Result<Web, std::process::ExitStatus> {
         let port_arg = port.to_string();
         let mut all = vec!["--no-open", "--port", &port_arg];
         all.extend_from_slice(args);
@@ -106,10 +126,10 @@ impl Env {
                 .build()
                 .unwrap(),
         };
-        web.wait_until_listening().await;
+        web.wait_until_listening().await?;
         web.token = std::fs::read_to_string(self.state_dir().join("web/login-token")).unwrap();
         web.session_cookie = web.log_in().await;
-        web
+        Ok(web)
     }
 }
 
@@ -152,17 +172,17 @@ impl Web {
         self.child.wait().unwrap();
     }
 
-    async fn wait_until_listening(&mut self) {
+    async fn wait_until_listening(&mut self) -> Result<(), std::process::ExitStatus> {
         let deadline = std::time::Instant::now() + START_TIMEOUT;
         loop {
             if let Some(status) = self.child.try_wait().unwrap() {
-                panic!("ref-web exited early: {status}");
+                return Err(status);
             }
             if tokio::net::TcpStream::connect(("127.0.0.1", self.port))
                 .await
                 .is_ok()
             {
-                return;
+                return Ok(());
             }
             assert!(
                 std::time::Instant::now() < deadline,
