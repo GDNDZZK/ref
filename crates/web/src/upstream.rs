@@ -58,7 +58,9 @@ async fn connect_mock(slot: &Mutex<Option<MockBackend>>) -> Result<Ws, ConnectEr
             Ok(ws) => return Ok(ws),
             Err(e) if restarted => return Err(e),
             Err(_) => {
-                *slot = None;
+                if let Some(old) = slot.take() {
+                    old.shutdown().await;
+                }
                 restarted = true;
             }
         }

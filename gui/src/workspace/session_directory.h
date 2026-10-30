@@ -23,9 +23,13 @@ public:
 
 	explicit SessionDirectory(client::Backend& backend, QObject* parent = nullptr);
 
+	// The live sessions, for the sidebar's running list.
 	SessionListModel& live() { return m_live; }
+	// The sessions on disk that are not live, filtered by the sidebar's search.
 	SessionListModel& history() { return m_history; }
-	const SessionListModel& history() const { return m_history; }
+	// Both together with a filter of their own, for the session picker.
+	SessionListModel& choices() { return m_choices; }
+	const SessionListModel& choices() const { return m_choices; }
 	// The live session, or null.
 	const proto::SessionInfo* find(const QString& sessionId) const { return m_live.find(sessionId); }
 	// Every live session, newest first.
@@ -55,8 +59,9 @@ private:
 	void onFrame(const proto::ServerFrame& frame);
 
 	client::Backend& m_backend;
-	SessionListModel m_live{SessionListModel::Order::CreatedNewestFirst, true};
-	SessionListModel m_history{SessionListModel::Order::UpdatedNewestFirst, false};
+	SessionListModel m_live;
+	SessionListModel m_history;
+	SessionListModel m_choices;
 	QList<proto::SessionInfo> m_liveSessions;
 	QList<proto::SessionInfo> m_persisted; // as the backend listed them; may include live ones
 	QTimer m_historyTimer;

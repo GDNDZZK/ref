@@ -26,6 +26,44 @@ qt_add_qml_module(ref-gui
 		Main.qml
 		SessionPane.qml
 		StatusPill.qml
+		Sidebar.qml
+		SessionRow.qml
+		HistoryRow.qml
+		SessionDot.qml
+		ContextMenu.qml
+		ThemedScrollBar.qml
+		Crossfade.qml
+		ToastHost.qml
+		BackendBanner.qml
+		TileGrid.qml
+		Tile.qml
+		LiveInfo.qml
+		Format.qml
+		DialogHost.qml
+		ModalDialog.qml
+		DialogButton.qml
+		DialogField.qml
+		Segmented.qml
+		ToggleSwitch.qml
+		KeyChips.qml
+		PickList.qml
+		PickRow.qml
+		PathField.qml
+		CommandPalette.qml
+		SettingsDialog.qml
+		SessionsDialog.qml
+		ModelsDialog.qml
+		AgentsDialog.qml
+		VariantsDialog.qml
+		McpDialog.qml
+		PeersDialog.qml
+		HelpDialog.qml
+		ExportDialog.qml
+		CdDialog.qml
+		NewSessionDialog.qml
+		CloseDialog.qml
+		RenameDialog.qml
+		DeleteHistoryDialog.qml
 		Icon.qml
 		Theme.qml
 		Motion.qml

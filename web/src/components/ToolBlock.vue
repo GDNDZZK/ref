@@ -1,59 +1,116 @@
 <script setup lang="ts">
-// A tool call: status, title and, on demand, its input and output (ToolBlock.qml).
+// A tool call (ToolBlock.qml): a header with the eight states, and a body laid out by tool.
+// A permission request is part of the card, which opens for it.
 import { computed, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useChatScroll } from '../composables/chatScroll.ts'
 import { useChatSession } from '../composables/chatSessionContext.ts'
+import { useCountdown } from '../composables/useCountdown.ts'
+import { useNow } from '../composables/useNow.ts'
 import { useStuck } from '../composables/useStuck.ts'
 import type { ToolBlock } from '../model/blocks.ts'
+import { formatClock, formatDuration, formatElapsed } from '../model/format.ts'
+import { parseTodos, toolDetail, toolIcon } from '../model/toolContent.ts'
 import { useNoticesStore } from '../stores/notices.ts'
 import Chevron from './Chevron.vue'
-import StatusDot from './StatusDot.vue'
+import Icon from './Icon.vue'
+import TextButton from './TextButton.vue'
+import TodoList from './TodoList.vue'
+import ToolBody from './ToolBody.vue'
+import ToolPermission from './ToolPermission.vue'
+import ToolStateMark from './ToolStateMark.vue'
 
 const props = defineProps<{ block: ToolBlock }>()
 
-const RUNNING_STATES: readonly string[] = ['streaming', 'delayed', 'running', 'awaiting_permission']
-const MUTED_STATES: readonly string[] = ['denied', 'cancelled']
-const JSON_INDENT = 2
+const MS_PER_SECOND = 1000
 
 const { t } = useI18n()
 const chatScroll = useChatScroll()
 const session = useChatSession()
 const notices = useNoticesStore()
+const now = useNow()
 const root = useTemplateRef<HTMLElement>('root')
 const header = useTemplateRef<HTMLElement>('header')
 const sentinel = useTemplateRef<HTMLElement>('sentinel')
 const stuck = useStuck(sentinel)
 
-const chosen = ref<boolean>() // set once the user toggles
-const opened = ref(false) // the body is built on first open, so a long list stays cheap
-
-const title = computed(() => `${props.block.name} ${props.block.purpose}`.trim())
-const running = computed(() => RUNNING_STATES.includes(props.block.state))
-const failed = computed(() => props.block.state === 'error')
-const muted = computed(() => MUTED_STATES.includes(props.block.state))
-const awaitingPermission = computed(() => props.block.permission !== undefined)
-const hasInput = computed(() => {
-  const { input } = props.block
-  return input !== null && !(typeof input === 'object' && Object.keys(input).length === 0)
-})
-const inputText = computed(() => {
-  if (!opened.value) return ''
-  return hasInput.value ? JSON.stringify(props.block.input, null, JSON_INDENT) : props.block.rawInput
-})
-const hasContent = computed(
-  () => hasInput.value || props.block.rawInput !== '' || !!props.block.output || awaitingPermission.value,
+const state = computed(() => props.block.state)
+const delayed = computed(() => state.value === 'delayed')
+const countdown = useCountdown(
+  computed(() => props.block.runAt),
+  delayed,
 )
-const expanded = computed(() => chosen.value ?? awaitingPermission.value)
+const delayFraction = computed(() =>
+  countdown.total.value > 0 ? countdown.remaining.value / countdown.total.value : 0,
+)
 
-watch(expanded, (isExpanded) => (opened.value ||= isExpanded), { immediate: true })
+const isTodo = computed(() => props.block.name === 'todo')
+const todos = computed(() => (isTodo.value ? parseTodos(props.block.input) : []))
+const detail = computed(() => toolDetail(props.block.name, props.block.input))
+const awaitingPermission = computed(() => state.value === 'awaiting_permission')
+const hasContent = computed(() => {
+  const { input, rawInput, output, images } = props.block
+  const hasInput = input !== null && !(typeof input === 'object' && Object.keys(input).length === 0)
+  return (
+    !isTodo.value &&
+    (hasInput || rawInput !== '' || !!output || images.length > 0 || !!props.block.permission)
+  )
+})
+
+// The default comes from the session; a click flips this card against it.
+const flipped = ref(false)
+const expanded = computed(
+  () => hasContent.value && (awaitingPermission.value || session.detailsExpanded !== flipped.value),
+)
+const showPermission = ref(false) // once a request was there, the section stays to fold away
+const bodyBuilt = ref(false) // built on first open, so a long list stays cheap
+
+watch(
+  () => props.block.permission,
+  (request) => request && (showPermission.value = true),
+  { immediate: true },
+)
+watch(expanded, (isExpanded) => isExpanded && (bodyBuilt.value = true), { immediate: true })
+
+const firstErrorLine = computed(() =>
+  state.value === 'error' && !expanded.value
+    ? props.block.output
+        ?.split('\n')
+        .find((line) => line.trim() !== '')
+        ?.trim()
+    : undefined,
+)
+
+const statusText = computed(() => {
+  const { time, timeEnd } = props.block
+  switch (state.value) {
+    case 'streaming':
+      return t('tool.writing')
+    case 'awaiting_permission':
+      return t('tool.needsPermission')
+    case 'delayed':
+      return t('tool.runsIn', { seconds: Math.ceil(countdown.remaining.value / MS_PER_SECOND) })
+    case 'running':
+      return t('tool.running', { elapsed: formatElapsed(now.value - time) })
+    case 'done':
+      return timeEnd === null ? '' : formatDuration(timeEnd - time)
+    case 'error':
+      return `${t('tool.error')}${timeEnd === null ? '' : ` ${formatDuration(timeEnd - time)}`}`
+    case 'denied':
+      return t('tool.denied')
+    case 'cancelled':
+      return t('tool.cancelledState')
+    default:
+      return ''
+  }
+})
 
 function toggle(): void {
-  if (!hasContent.value) return
+  if (!hasContent.value || awaitingPermission.value) return
   if (expanded.value && stuck.value && root.value && header.value) {
     chatScroll.holdHeader(root.value, header.value.offsetHeight)
   }
-  chosen.value = !expanded.value
+  flipped.value = !flipped.value
 }
 
 function onFolded(event: TransitionEvent): void {
@@ -63,23 +120,54 @@ function onFolded(event: TransitionEvent): void {
 function answer(allow: boolean, always: boolean): void {
   session.answerPermission(props.block.callId, allow, always).catch((error) => notices.pushError(error))
 }
+
+function cancel(): void {
+  session.stop().catch((error) => notices.pushError(error))
+}
 </script>
 
 <template>
-  <div ref="root" class="tool">
+  <div
+    ref="root"
+    class="tool"
+    :class="{
+      warn: awaitingPermission || delayed,
+      muted: state === 'denied' || state === 'cancelled',
+      denied: state === 'denied',
+    }"
+  >
     <span ref="sentinel" class="sentinel" />
-    <button
+    <div
       ref="header"
-      type="button"
       class="header"
-      :class="{ stuck, clickable: hasContent }"
+      :class="{ stuck, clickable: hasContent && !awaitingPermission }"
+      :role="hasContent ? 'button' : undefined"
+      :tabindex="hasContent && !awaitingPermission ? 0 : undefined"
       :aria-expanded="hasContent ? expanded : undefined"
       @click="toggle"
+      @keydown.enter.self.prevent="toggle"
+      @keydown.space.self.prevent="toggle"
     >
-      <StatusDot :running="running" :failed="failed" :muted="muted" />
-      <span class="title">{{ title }}</span>
-      <Chevron class="chevron" :class="{ open: expanded, hidden: !hasContent }" />
-    </button>
+      <ToolStateMark :state="state" :delay-fraction="delayFraction" />
+      <Icon :icon="toolIcon(block.name)" class="type" />
+      <span class="title">
+        <span class="name">{{ block.name }}</span>
+        <span v-if="block.purpose" class="purpose">{{ block.purpose }}</span>
+        <span v-if="detail" class="detail">{{ detail }}</span>
+      </span>
+      <span v-if="delayed" @click.stop><TextButton :label="t('tool.cancel')" @click="cancel" /></span>
+      <span class="status" :class="state">{{ statusText }}</span>
+      <span v-if="block.time > 0" class="clock">{{ formatClock(block.time) }}</span>
+      <Chevron class="chevron" :class="{ open: expanded, hidden: !hasContent || awaitingPermission }" />
+    </div>
+    <TodoList v-if="isTodo" :todos="todos" />
+    <ToolPermission
+      v-if="showPermission"
+      :request="block.permission"
+      :waiting="Math.max(0, session.permissions.length - 1)"
+      @answer="answer"
+    />
+    <div v-if="firstErrorLine" class="error-line">└ {{ firstErrorLine }}</div>
     <div
       class="body"
       :class="{ open: expanded }"
@@ -87,21 +175,7 @@ function answer(allow: boolean, always: boolean): void {
       @transitioncancel.self="onFolded"
     >
       <div class="fold">
-        <div v-if="opened" class="content">
-          <pre v-if="inputText" class="text" :aria-label="t('tool.input')">{{ inputText }}</pre>
-          <div v-if="block.permission" class="permission">
-            <button type="button" class="choice allow" @click="answer(true, false)">
-              {{ t('tool.allow') }} <kbd>a</kbd>
-            </button>
-            <button type="button" class="choice" @click="answer(true, true)">
-              {{ t('tool.allowSession') }} <kbd>s</kbd>
-            </button>
-            <button type="button" class="choice" @click="answer(false, false)">
-              {{ t('tool.deny') }} <kbd>d</kbd>
-            </button>
-          </div>
-          <pre v-if="block.output" class="text output">{{ block.output }}</pre>
-        </div>
+        <ToolBody v-if="bodyBuilt" :block="block" />
       </div>
     </div>
     <span class="outline" />
@@ -111,11 +185,17 @@ function answer(allow: boolean, always: boolean): void {
 <style scoped>
 .tool {
   --card: var(--surface);
+  --edge: var(--border);
   position: relative;
+  container-type: inline-size;
   border-radius: var(--radius);
   background: var(--card);
   overflow: clip;
   transition: background-color var(--motion-quick) var(--motion-ease);
+}
+
+.tool.warn {
+  --edge: color-mix(in srgb, var(--warning) 60%, transparent);
 }
 
 .tool:has(.header.clickable:hover) {
@@ -127,8 +207,9 @@ function answer(allow: boolean, always: boolean): void {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  box-shadow: inset 0 0 0 1px var(--border);
+  box-shadow: inset 0 0 0 1px var(--edge);
   pointer-events: none;
+  transition: box-shadow var(--motion-standard) var(--motion-ease);
 }
 
 .sentinel {
@@ -166,13 +247,74 @@ function answer(allow: boolean, always: boolean): void {
   box-shadow: 0 1px 0 var(--border);
 }
 
+.type {
+  flex: none;
+  color: var(--text-muted);
+}
+
 .title {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font: var(--code-font-size) var(--font-mono);
+  font-size: 13px;
+}
+
+.name {
+  font: bold var(--code-font-size) var(--font-mono);
+}
+
+.purpose,
+.detail {
+  margin-left: 10px;
+}
+
+.detail {
+  color: var(--text-muted);
+  font: var(--small-font-size) var(--font-mono);
+}
+
+.muted .purpose,
+.muted .name {
+  color: var(--text-muted);
+}
+
+.denied .name {
+  text-decoration: line-through;
+}
+
+.status {
+  flex: none;
+  color: var(--text-muted);
+  font-size: var(--small-font-size);
+  transition: color var(--motion-standard) var(--motion-ease);
+}
+
+.status.awaiting_permission,
+.status.delayed {
+  color: var(--warning);
+}
+
+.status.running {
+  color: var(--accent);
+}
+
+.status.error {
+  color: var(--danger);
+}
+
+.clock {
+  display: none;
+  flex: none;
+  color: var(--text-muted);
+  font-size: var(--small-font-size);
+}
+
+@container (min-width: 560px) {
+  .clock {
+    display: inline;
+  }
 }
 
 .chevron {
@@ -191,6 +333,15 @@ function answer(allow: boolean, always: boolean): void {
   opacity: 0;
 }
 
+.error-line {
+  padding: 0 14px 8px;
+  overflow: hidden;
+  color: var(--danger);
+  font: var(--small-font-size) var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .body {
   display: grid;
   grid-template-rows: 0fr;
@@ -204,52 +355,5 @@ function answer(allow: boolean, always: boolean): void {
 .fold {
   min-height: 0;
   overflow: hidden;
-}
-
-.content {
-  border-top: 1px solid var(--border);
-}
-
-.text {
-  margin: 0;
-  padding: 10px 14px 12px;
-  color: var(--text-muted);
-  font: var(--small-font-size) / 1.45 var(--font-mono);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.output {
-  border-top: 1px solid var(--border);
-}
-
-.content > .text:first-child {
-  border-top: 0;
-}
-
-.permission {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 0 14px 12px;
-}
-
-.choice {
-  padding: 4px 10px;
-  border-radius: var(--radius-small);
-  background: var(--surface-hover);
-  font-size: var(--small-font-size);
-}
-
-.choice.allow {
-  background: var(--accent);
-  color: var(--on-accent);
-}
-
-kbd {
-  margin-left: 4px;
-  color: inherit;
-  font: inherit;
-  opacity: 0.6;
 }
 </style>

@@ -18,7 +18,7 @@ import type {
 } from '../proto/generated'
 import { reuseIfEqual } from './blocks.ts'
 import type { Block } from './blocks.ts'
-import { buildBlocks } from './buildBlocks.ts'
+import { buildBlocks, messageText } from './buildBlocks.ts'
 import type { MessageEntry } from './buildBlocks.ts'
 import { PartView } from './partView.ts'
 import { StreamPacer } from './streamPacer.ts'
@@ -31,7 +31,11 @@ export interface TranscriptOptions {
 interface MessageBlocks {
   entry: MessageEntry
   blocks: Block[]
+  stale: boolean // before the last compaction
+  lastCompaction: boolean
 }
+
+const TAIL_ERROR_KEY = 'session:error'
 
 const STREAM_SEPARATOR = '@'
 
@@ -53,13 +57,17 @@ export class Transcript {
   private readonly dirty = new Set<string>() // messages whose blocks must be rebuilt
   private readonly pacedMessages = new Set<string>() // messages with text in the pacer
   private structureChanged = false
+  private tailChanged = false
   private flat: readonly Block[] = []
+  private tailError: Block | undefined
 
   info: SessionInfo | undefined
   moreBefore = false
   closed = false
   readonly permissions = new Map<string, PermissionRequest>()
   queued: Message[] = []
+  // The last `Error` event; it stays until the user sends the next prompt.
+  errorText = ''
 
   constructor(options: TranscriptOptions) {
     this.options = options
@@ -75,7 +83,48 @@ export class Transcript {
 
   // Something is waiting for the next `flush`: keep the frame loop running.
   get needsFlush(): boolean {
-    return this.dirty.size > 0 || this.structureChanged || !this.pacer.isEmpty()
+    return this.dirty.size > 0 || this.structureChanged || this.tailChanged || !this.pacer.isEmpty()
+  }
+
+  get oldestMessageId(): string | undefined {
+    return this.entries[0]?.entry.message.id
+  }
+
+  // Whether the newest tool call still waits for its delay to pass.
+  get lastToolDelayed(): boolean {
+    const reply = this.entries.findLast(({ entry }) => entry.message.role === 'assistant')
+    const tool = reply?.entry.message.parts.findLast((part) => part.type === 'tool')
+    return tool?.state === 'delayed'
+  }
+
+  // The text of the message as the copy button gives it.
+  textOf(messageId: string): string {
+    const message = this.byId.get(messageId)?.entry.message
+    return message ? messageText(message) : ''
+  }
+
+  lastReplyText(): string {
+    const reply = this.entries.findLast(
+      ({ entry }) => entry.message.role === 'assistant' && messageText(entry.message) !== '',
+    )
+    return reply ? messageText(reply.entry.message) : ''
+  }
+
+  // A prompt was sent: the error of the turn before is history.
+  clearError(): void {
+    if (this.errorText === '') return
+    this.errorText = ''
+    this.tailChanged = true
+  }
+
+  // A page of older messages: shown at once, above what is there.
+  prepend(messages: Message[], moreBefore: boolean): void {
+    const added = messages
+      .filter((message) => !this.byId.has(message.id))
+      .map((message) => this.newEntry(message, false, 0))
+    this.entries = [...added, ...this.entries]
+    this.moreBefore = moreBefore
+    this.structureChanged = true
   }
 
   load(snapshot: SessionSnapshot): void {
@@ -83,6 +132,8 @@ export class Transcript {
     this.moreBefore = snapshot.more_before
     this.queued = snapshot.queued
     this.closed = false
+    this.errorText = ''
+    this.tailChanged = true
     this.permissions.clear()
     for (const request of snapshot.pending_permissions) this.permissions.set(request.call_id, request)
     this.replaceMessages(snapshot.messages)
@@ -107,7 +158,7 @@ export class Transcript {
         break
       case 'reset':
         this.moreBefore = event.more_before
-        this.replaceMessages(event.messages)
+        this.replaceMessages(event.messages, true)
         break
       case 'permission':
         this.permissions.set(event.request.call_id, event.request)
@@ -123,7 +174,9 @@ export class Transcript {
         this.closed = true
         break
       case 'error':
-        break // a notice for the user, not part of the conversation; the store shows it
+        this.errorText = event.text
+        this.tailChanged = true
+        break
     }
   }
 
@@ -139,14 +192,16 @@ export class Transcript {
   flush(now: number): boolean {
     for (const chunk of this.pacer.take(now)) this.show(chunk.stream, chunk.text)
     this.markDrained()
-    if (this.dirty.size === 0 && !this.structureChanged) return false
+    if (this.dirty.size === 0 && !this.structureChanged && !this.tailChanged) return false
 
     // Whether a message is the first decides its turn divider.
     const first = this.entries[0]
     if (this.structureChanged && first) this.dirty.add(first.entry.message.id)
+    if (this.structureChanged) this.markCompactions()
     for (const id of this.dirty) this.rebuild(id)
     this.dirty.clear()
     this.structureChanged = false
+    this.tailChanged = false
     return this.publish()
   }
 
@@ -238,26 +293,51 @@ export class Transcript {
   }
 
   // History loaded or replaced as a whole: shown at once, not paced.
-  private replaceMessages(messages: Message[]): void {
+  // `keepBlocks`: the messages that stay keep their blocks, so only what differs changes.
+  private replaceMessages(messages: Message[], keepBlocks = false): void {
+    const previous = keepBlocks ? this.byId : new Map<string, MessageBlocks>()
+    const previousBlocks = new Map([...previous].map(([id, existing]) => [id, existing.blocks]))
     this.pacedMessages.clear()
     this.pacer.takeAll()
     this.entries = []
     this.byId.clear()
     this.dirty.clear()
-    for (const message of messages) this.addMessage(message, false, 0)
+    for (const message of messages) {
+      const added = this.newEntry(message, false, 0)
+      added.blocks = previousBlocks.get(message.id) ?? []
+      this.entries.push(added)
+    }
     this.structureChanged = true
   }
 
   private addMessage(message: Message, live: boolean, now: number): void {
+    this.entries.push(this.newEntry(message, live, now))
+    this.structureChanged = true
+  }
+
+  // Registers the message; the caller places it in `entries`.
+  private newEntry(message: Message, live: boolean, now: number): MessageBlocks {
     const entry: MessageEntry = { message: { ...message, parts: [] }, views: new Map() }
-    const existing: MessageBlocks = { entry, blocks: [] }
-    this.entries.push(existing)
+    const existing: MessageBlocks = { entry, blocks: [], stale: false, lastCompaction: false }
     this.byId.set(message.id, existing)
 
     const paced = live && message.role === 'assistant'
     message.parts.forEach((part, index) => this.setPart(entry, index, part, paced ? now : undefined))
     this.markDirty(message.id)
-    this.structureChanged = true
+    return existing
+  }
+
+  // Messages before the last compaction are stale; the compaction itself carries the note.
+  private markCompactions(): void {
+    const last = this.entries.findLastIndex(({ entry }) => entry.message.source.kind === 'compaction')
+    this.entries.forEach((existing, index) => {
+      const stale = index < last
+      const lastCompaction = index === last
+      if (existing.stale === stale && existing.lastCompaction === lastCompaction) return
+      existing.stale = stale
+      existing.lastCompaction = lastCompaction
+      this.dirty.add(existing.entry.message.id)
+    })
   }
 
   // Sets part `index` to `part`. `paceFrom`: the time to pace new text from, or undefined to
@@ -333,15 +413,39 @@ export class Transcript {
       sessionBusy: this.busy,
       hasOlderRows: this.moreBefore,
       isFirst: position === 0,
+      stale: existing.stale,
+      lastCompaction: existing.lastCompaction,
       isPacing: (index) => this.pacer.hasPending(streamKey(messageId, index)),
       permissions: this.permissions,
     })
     existing.blocks = built.map((block) => reuseIfEqual(previousBlocks.get(block.key), block))
   }
 
+  // The session's error as a block at the end, unless the last message already shows it.
+  private tailErrorBlock(): Block | undefined {
+    const text = this.errorText
+    const lastError = this.entries.at(-1)?.entry.message.error
+    if (text === '' || text === lastError) {
+      this.tailError = undefined
+      return undefined
+    }
+    const block: Block = {
+      kind: 'error',
+      key: TAIL_ERROR_KEY,
+      messageId: '',
+      streaming: false,
+      stale: false,
+      text,
+    }
+    this.tailError = reuseIfEqual(this.tailError?.kind === 'error' ? this.tailError : undefined, block)
+    return this.tailError
+  }
+
   // The flat list, or the old array when nothing in it changed.
   private publish(): boolean {
     const next = this.entries.flatMap((existing) => existing.blocks)
+    const tail = this.tailErrorBlock()
+    if (tail) next.push(tail)
     const unchanged = next.length === this.flat.length && next.every((block, i) => block === this.flat[i])
     if (unchanged) return false
     this.flat = next

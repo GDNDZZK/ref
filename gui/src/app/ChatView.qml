@@ -30,7 +30,8 @@ import RefGui
 ListView {
 	id: view
 
-	readonly property real columnWidth: Math.min(width - 2 * Theme.pagePadding, Theme.contentWidth)
+	property real sidePadding: Theme.pagePadding // narrower in a split-view tile
+	readonly property real columnWidth: Math.min(width - 2 * sidePadding, Theme.contentWidth)
 	property bool following: true
 	property bool turnInProgress: false
 	property string sessionId // the session whose pictures the rows show

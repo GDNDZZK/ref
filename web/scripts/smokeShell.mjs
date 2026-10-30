@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { OUT, WAIT_MS } from './smokeLib.mjs'
 
 const SETTLE_MS = 500
+const LOGIN_LOST_WATCH_MS = 12000 // longer than the longest retry delay (8 s)
 const ROWS = '.sidebar .running .row'
 const DIALOG = '[role="dialog"]'
 
@@ -94,4 +95,24 @@ export async function shellScenario(page, problems) {
   await page.keyboard.press('Alt+KeyK')
   await expectCount(page, problems, ROWS, 1, 'Alt+K did not close the session')
   await shot(page, 'closed')
+}
+
+// ref-web forgets the browser's login when it restarts: the page says so and stops reconnecting.
+export async function loginLostScenario(page, problems, restartServer) {
+  const before = problems.length
+  await restartServer()
+  const banner = page.locator('[role="alert"]', { hasText: 'Not logged in' })
+  await banner.waitFor({ timeout: WAIT_MS })
+  await shot(page, 'not-logged-in')
+  // The refused reconnects are expected; anything else stays a problem.
+  const expected = /401|WebSocket|ERR_CONNECTION_REFUSED/
+  const kept = problems.slice(before).filter((problem) => !expected.test(problem))
+  problems.splice(before, problems.length - before, ...kept)
+
+  let attempts = 0
+  page.on('request', (request) => {
+    if (request.url().includes('/ws')) attempts++
+  })
+  await page.waitForTimeout(LOGIN_LOST_WATCH_MS)
+  if (attempts > 0) problems.push(`the page kept reconnecting after the login was lost (${attempts} tries)`)
 }

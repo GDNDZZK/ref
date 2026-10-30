@@ -3,7 +3,8 @@
     "empty": "What are we building?",
     "jumpToLatest": "Jump to latest",
     "thinking": "Thinking",
-    "thought": "Thought"
+    "thought": "Thought",
+    "loadOlder": "Load older messages"
   },
   "composer": {
     "placeholder": "Message ref",
@@ -48,7 +49,27 @@
     "input": "Input",
     "allow": "Allow",
     "allowSession": "Allow for this session",
-    "deny": "Deny"
+    "deny": "Deny",
+    "output": "Output",
+    "moreWaiting": "+{count} more waiting",
+    "showMore": "Show {count} more lines",
+    "earlierLines": "{count} earlier lines",
+    "noOutput": "(no output)",
+    "timedOut": "timed out",
+    "cancelled": "cancelled",
+    "truncated": "truncated",
+    "matches": "{matches} matches in {files} files",
+    "results": "{count} results",
+    "openUrl": "Open in a new tab",
+    "closeImage": "Close",
+    "writing": "writing…",
+    "needsPermission": "Needs permission",
+    "runsIn": "Runs in {seconds}s",
+    "running": "running {elapsed}",
+    "error": "error",
+    "denied": "denied",
+    "cancelledState": "cancelled",
+    "cancel": "Cancel"
   },
   "theme": {
     "switchToLight": "Switch to light theme",
@@ -58,10 +79,15 @@
     "connecting": "Connecting…",
     "reconnecting": "Connection lost. Reconnecting…",
     "closed": "Disconnected: {reason}",
+    "notLoggedIn": "Not logged in. Run ref-web again: it opens the login URL again.",
     "noDirectory": "No working directory: open this page through ref-web, or set ?cwd= (or VITE_REF_CWD) when connecting to ref-server directly."
   },
   "message": {
-    "from": "from {name}"
+    "from": "from {name}",
+    "fromPeer": "message from \"{name}\"",
+    "createdBy": "created by \"{name}\"",
+    "reminder": "reminder",
+    "shell": "shell"
   },
   "command": {
     "group": {
@@ -318,5 +344,23 @@
     "allow": "Allow",
     "later": "Not now",
     "prompt": "Allow desktop notifications when another session needs you?"
+  },
+  "meta": {
+    "undo": "Undo",
+    "copy": "Copy",
+    "interrupted": "interrupted",
+    "tokensPerSecond": "{rate} tok/s"
+  },
+  "compaction": {
+    "title": "Context compacted",
+    "note": "Messages above stay visible but are no longer sent to the model"
+  },
+  "status": {
+    "working": "Working",
+    "runningTools": "Running tools",
+    "waitingPermission": "Waiting for your permission",
+    "compacting": "Compacting context…",
+    "retrying": "Retrying in {seconds}s (attempt {attempt}): {error}",
+    "contextTitle": "Context: {used} of {max} tokens ({percent}%). Recommended compaction at {recommend}, automatic at {auto}."
   }
 }
