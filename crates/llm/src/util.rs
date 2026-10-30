@@ -403,7 +403,7 @@ pub(crate) async fn run_sse(
         let _ = std::fs::create_dir_all(&dir);
         let _ = std::fs::write(path, &payload);
     }
-    let request = crate::http_client()
+    let request = crate::http_client(url)
         .post(url)
         .headers(headers)
         .body(payload)
