@@ -112,12 +112,6 @@ Window {
 		}
 	}
 
-	Shortcut {
-		sequences: [StandardKey.Cancel]
-		enabled: window.zoomed && Workspace.dialog === ""
-		onActivated: Workspace.unzoom()
-	}
-
 	Item {
 		id: page
 		anchors.fill: parent

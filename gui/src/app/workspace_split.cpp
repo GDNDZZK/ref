@@ -1,6 +1,10 @@
 // Split view: tiles of the live sessions nobody is attached to, as in the TUI.
 #include "app/workspace.h"
 
+#include "workspace/toast_text.h"
+
+#include <QPointer>
+
 #include <algorithm>
 
 using refgui::client::Result;
@@ -73,9 +77,15 @@ QCoro::Task<> Workspace::leaveSplit()
 	{
 		toast(u"error"_s, watching.error());
 	}
+	// Sessions can be closed while a detach is out, which changes m_chats.
+	QList<QPointer<ChatSession>> others;
 	for(ChatSession* other : std::as_const(m_chats))
 	{
-		if(other != m_current && other->isAttached())
+		others.append(other);
+	}
+	for(const QPointer<ChatSession>& other : others)
+	{
+		if(other && other != m_current && other->isAttached())
 		{
 			co_await other->detach();
 		}
@@ -155,7 +165,7 @@ QCoro::Task<> Workspace::attachTile(ChatSession* tile)
 	m_tileAttaching.remove(id);
 	if(!attached)
 	{
-		toast(u"error"_s, u"%1: %2"_s.arg(nameOf(id), attached.error()));
+		toast(u"error"_s, refgui::workspace::toastText(u"%1: %2"_s.arg(nameOf(id), refgui::workspace::oneLine(attached.error()))));
 	}
 }
 
@@ -188,19 +198,20 @@ void Workspace::zoomTile(const QString& sessionId)
 
 QCoro::Task<> Workspace::zoomTask(QString sessionId)
 {
-	if(!m_zoomed.isEmpty())
+	if(ChatSession* previous = session(m_zoomed); previous != nullptr && previous->isAttached())
 	{
-		ChatSession& previous = chat(m_zoomed);
-		if(previous.isAttached())
-		{
-			co_await previous.background();
-		}
+		co_await previous->background();
 	}
 	m_zoomed = sessionId;
 	setFocusedTile(sessionId);
 	emit zoomedChanged();
 	emit visibleSessionIdsChanged();
-	const Result<void> attached = co_await chat(sessionId).attach(true);
+	ChatSession* zoomed = session(sessionId);
+	if(zoomed == nullptr)
+	{
+		co_return; // closed meanwhile
+	}
+	const Result<void> attached = co_await zoomed->attach(true);
 	if(!attached)
 	{
 		toast(u"error"_s, attached.error());
@@ -222,9 +233,9 @@ QCoro::Task<> Workspace::unzoomTask()
 	const QString id = std::exchange(m_zoomed, QString());
 	emit zoomedChanged();
 	emit visibleSessionIdsChanged();
-	ChatSession& tile = chat(id);
-	if(tile.isAttached())
+	ChatSession* tile = session(id);
+	if(tile != nullptr && tile->isAttached())
 	{
-		co_await tile.background();
+		co_await tile->background();
 	}
 }

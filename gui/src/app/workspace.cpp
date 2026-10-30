@@ -1,5 +1,7 @@
 #include "app/workspace.h"
 
+#include "workspace/toast_text.h"
+
 #include <QJSEngine>
 
 #include <algorithm>
@@ -11,9 +13,6 @@ using namespace Qt::StringLiterals;
 
 namespace
 {
-
-// Longest error text in a toast; the rest is in the session's own view.
-constexpr int MaxToastErrorLength = 200;
 
 Workspace* theInstance = nullptr;
 
@@ -59,6 +58,8 @@ Workspace::Workspace(refgui::cli::LaunchOptions options, QString settingsPath, Q
 // The backend goes quiet before the chat sessions that call back into it are destroyed.
 Workspace::~Workspace()
 {
+	// The sessions refer to the backend, which is a member and goes before the children do.
+	qDeleteAll(findChildren<ChatSession*>(Qt::FindDirectChildrenOnly));
 	m_backend.shutdown();
 }
 
@@ -287,7 +288,7 @@ QCoro::Task<> Workspace::openFirstSession()
 
 ChatSession* Workspace::session(const QString& sessionId)
 {
-	return sessionId.isEmpty() ? nullptr : &chat(sessionId);
+	return m_chats.value(sessionId, nullptr); // never creates one: a closed session must not come back
 }
 
 ChatSession& Workspace::chat(const QString& sessionId)
@@ -302,7 +303,7 @@ ChatSession& Workspace::chat(const QString& sessionId)
 			{
 				return;
 			}
-			toast(u"error"_s, u"%1: %2"_s.arg(nameOf(sessionId), text.simplified().left(MaxToastErrorLength)));
+			toast(u"error"_s, refgui::workspace::toastText(u"%1: %2"_s.arg(nameOf(sessionId), refgui::workspace::oneLine(text))));
 		});
 	}
 	return *slot;
