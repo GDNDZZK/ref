@@ -15,6 +15,7 @@ Rectangle {
 	border.color: Qt.alpha(tint, 0.35)
 
 	Text {
+		textFormat: Text.PlainText
 		id: label
 		anchors.centerIn: parent
 		color: chip.tint

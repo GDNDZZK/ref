@@ -7,6 +7,7 @@ TextEdit {
 	id: prose
 
 	readOnly: true
+	textFormat: TextEdit.PlainText // Markdown items say so; text from outside is never read as markup
 	selectByMouse: true
 	wrapMode: TextEdit.Wrap
 	color: Theme.text
@@ -14,7 +15,7 @@ TextEdit {
 	selectedTextColor: Theme.text
 	font.pixelSize: Theme.fontSize
 
-	onLinkActivated: link => Qt.openUrlExternally(link)
+	onLinkActivated: link => Links.open(link)
 
 	HoverHandler {
 		cursorShape: prose.hoveredLink ? Qt.PointingHandCursor : Qt.IBeamCursor

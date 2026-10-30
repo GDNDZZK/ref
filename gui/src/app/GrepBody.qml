@@ -21,6 +21,7 @@ ToolBodyBase {
 			spacing: 4
 
 			Text {
+				textFormat: Text.PlainText
 				visible: group.modelData.path !== ""
 				width: parent.width
 				text: group.modelData.path
@@ -37,6 +38,7 @@ ToolBodyBase {
 				onShowAllRequested: body.showAllRequested()
 			}
 			Text {
+				textFormat: Text.PlainText
 				visible: group.modelData.notes.length > 0
 				width: parent.width
 				text: group.modelData.notes.join("\n")

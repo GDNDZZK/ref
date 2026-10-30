@@ -11,6 +11,24 @@ using namespace Qt::StringLiterals;
 namespace
 {
 
+// Files of the conversation area.
+const QStringList ConversationFiles = {u"Block.qml"_s,        u"ChatView.qml"_s,       u"UserBlock.qml"_s,     u"ImageBlock.qml"_s,
+                                       u"ErrorBlock.qml"_s,   u"MarkdownBlock.qml"_s,  u"ReasoningBlock.qml"_s, u"ToolBlock.qml"_s,
+                                       u"ToolBody.qml"_s,     u"ToolBodyBase.qml"_s,   u"GenericBody.qml"_s,   u"DiffBody.qml"_s,
+                                       u"BashBody.qml"_s,     u"ReadBody.qml"_s,       u"GrepBody.qml"_s,      u"FindBody.qml"_s,
+                                       u"WebfetchBody.qml"_s, u"SessionBody.qml"_s,    u"TodoBody.qml"_s,      u"CommandBox.qml"_s,
+                                       u"LineView.qml"_s,     u"OutputText.qml"_s,     u"OutputSection.qml"_s, u"ToolSection.qml"_s,
+                                       u"ToolChip.qml"_s,     u"PermissionSection.qml"_s, u"PermissionButton.qml"_s, u"CopyButton.qml"_s,
+                                       u"MetaBlock.qml"_s,    u"MetaText.qml"_s,       u"MetaAction.qml"_s,    u"StatusLine.qml"_s,
+                                       u"OlderPill.qml"_s,    u"Thumbnail.qml"_s,      u"ImageStrip.qml"_s,    u"Lightbox.qml"_s,
+                                       u"ToolStateSlot.qml"_s, u"CodeBlock.qml"_s,     u"ProseText.qml"_s,     u"SessionPane.qml"_s};
+
+// Files that render Markdown on purpose. Their text has been through markdownForDisplay().
+const QStringList MarkdownFiles = {u"MarkdownBlock.qml"_s, u"ReasoningBlock.qml"_s, u"UserBlock.qml"_s};
+
+// Letters of fixed labels laid out as rich text, escaped one by one.
+const QStringList RichTextFiles = {u"ShimmerText.qml"_s};
+
 const QStringList Files = {u"Composer.qml"_s,
                            u"ComposerChip.qml"_s,
                            u"ComposerTags.qml"_s,
@@ -19,6 +37,11 @@ const QStringList Files = {u"Composer.qml"_s,
                            u"CompletionPopup.qml"_s,
                            u"NotificationSettingsSection.qml"_s,
                            u"PlainToolTip.qml"_s};
+
+QStringList allFiles()
+{
+	return Files + ConversationFiles + MarkdownFiles + RichTextFiles;
+}
 
 QString read(const QString& name)
 {
@@ -51,15 +74,20 @@ private slots:
 	void textItemsArePlain();
 	void tooltipsArePlain();
 	void noRichFormats();
+	void textEditsSayWhatTheyAre();
 };
 
 void TestPlainText::textItemsArePlain()
 {
 	const QRegularExpression textItem(uR"(\bText \{)"_s);
-	for(const QString& name : Files)
+	for(const QString& name : allFiles())
 	{
 		const QString source = read(name);
 		QVERIFY2(!source.isEmpty(), qPrintable(name));
+		if(RichTextFiles.contains(name))
+		{
+			continue;
+		}
 		for(const QRegularExpressionMatch& match : textItem.globalMatch(source))
 		{
 			const QString body = block(source, match.capturedEnd() - 1);
@@ -70,7 +98,7 @@ void TestPlainText::textItemsArePlain()
 
 void TestPlainText::tooltipsArePlain()
 {
-	for(const QString& name : Files)
+	for(const QString& name : allFiles())
 	{
 		QVERIFY2(!read(name).contains(u"ToolTip.text"_s), qPrintable(name + u": use PlainToolTip"_s));
 	}
@@ -78,10 +106,30 @@ void TestPlainText::tooltipsArePlain()
 
 void TestPlainText::noRichFormats()
 {
-	for(const QString& name : Files)
+	for(const QString& name : Files + ConversationFiles)
 	{
+		if(MarkdownFiles.contains(name))
+		{
+			continue;
+		}
 		const QString source = read(name);
 		QVERIFY2(!source.contains(u"StyledText"_s) && !source.contains(u"RichText"_s) && !source.contains(u"MarkdownText"_s), qPrintable(name));
+	}
+}
+
+// TextEdit and ProseText read AutoText unless told: markup in their text would be rendered.
+// ProseText.qml itself sets plain text; items that want Markdown say so.
+void TestPlainText::textEditsSayWhatTheyAre()
+{
+	const QRegularExpression editItem(uR"(\bTextEdit \{)"_s);
+	for(const QString& name : ConversationFiles)
+	{
+		const QString source = read(name);
+		for(const QRegularExpressionMatch& match : editItem.globalMatch(source))
+		{
+			const QString body = block(source, match.capturedEnd() - 1);
+			QVERIFY2(body.contains(u"textFormat:"_s), qPrintable(u"%1: a TextEdit without textFormat near\n%2"_s.arg(name, body.left(120))));
+		}
 	}
 }
 

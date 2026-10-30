@@ -30,6 +30,7 @@ Item {
 			color: hover.hovered ? Theme.text : Theme.textMuted
 		}
 		Text {
+			textFormat: Text.PlainText
 			anchors.verticalCenter: parent.verticalCenter
 			text: action.label
 			color: hover.hovered ? Theme.text : Theme.textMuted

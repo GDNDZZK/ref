@@ -43,6 +43,7 @@ Item {
 			color: button.tint
 		}
 		Text {
+			textFormat: Text.PlainText
 			anchors.verticalCenter: parent.verticalCenter
 			text: button.label
 			color: Theme.text
@@ -57,6 +58,7 @@ Item {
 			border.color: button.tint
 
 			Text {
+				textFormat: Text.PlainText
 				anchors.centerIn: parent
 				text: button.keyName
 				color: button.tint
