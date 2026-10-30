@@ -47,7 +47,7 @@ public:
 
 	QCoro::Task<Result<proto::SessionInfo>> createSession(QString cwd, std::optional<QString> agent, std::optional<proto::ModelRef> model);
 	// `foreground` counts the attachment as the user's view of the session; a watcher only follows it.
-	QCoro::Task<Result<proto::SessionSnapshot>> attach(QString sessionId, bool foreground);
+	QCoro::Task<Result<proto::SessionSnapshot>> attach(QString sessionId, bool foreground = true);
 	QCoro::Task<Result<void>> detach(QString sessionId);
 	QCoro::Task<Result<proto::ServerConfig>> getConfig();
 	QCoro::Task<Result<QList<proto::SessionInfo>>> listSessions();
