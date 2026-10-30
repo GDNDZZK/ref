@@ -1,5 +1,6 @@
 // Adapted from an early version of qutie by LightBlueCube
 #include "app/app_translator.h"
+#include "app/chat_image_provider.h"
 #include "app/workspace.h"
 #include "cli/command_line.h"
 #include "client/instance_files.h"
@@ -102,6 +103,7 @@ int main(int argc, char* argv[])
 	QQmlApplicationEngine engine;
 	QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] { QCoreApplication::exit(EXIT_FAILURE); }, Qt::QueuedConnection);
 	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([&workspace](const QString& sessionId) { return workspace.session(sessionId); }));
 	QObject::connect(workspace.settings(), &refgui::workspace::Settings::languageChanged, &app, [&] {
 		translator.setLanguage(workspace.settings()->language());
 		engine.retranslate();

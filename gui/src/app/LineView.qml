@@ -113,7 +113,7 @@ Item {
 						font.pixelSize: Theme.smallFontSize
 					}
 					Text {
-						x: view.textX
+						x: row.modelData.kind === "file" || row.modelData.kind === "hunk" ? view.sidePadding + view.gutterWidth : view.textX // headers start where the sign column does
 						anchors.verticalCenter: parent.verticalCenter
 						text: row.modelData.text
 						color: row.style.color

@@ -11,6 +11,9 @@ Item {
 	signal showAllRequested()
 
 	readonly property var meta: call.meta
+	readonly property int horizontalPadding: 14
+	readonly property int verticalPadding: 10
+	readonly property bool hasLines: ToolInfo.listing(call.output).some(group => group.rows.length > 0)
 	readonly property string kind: {
 		switch (call.toolName) {
 		case "edit":
@@ -23,7 +26,7 @@ Item {
 		case "todo":
 			return call.toolName
 		case "read":
-			return call.output !== "" && !call.failed && call.toolState === "done" ? "read" : "generic"
+			return hasLines && !call.failed && call.toolState === "done" ? "read" : "generic"
 		case "send_message":
 		case "create_session":
 		case "read_session":
@@ -37,7 +40,7 @@ Item {
 	}
 
 	width: parent ? parent.width : 0
-	height: loader.item ? loader.item.height : 0
+	height: (loader.item ? loader.item.height : 0) + (call.images.length > 0 ? pictures.height : 0)
 
 	Component { id: generic; GenericBody { call: body.call; onShowAllRequested: body.showAllRequested() } }
 	Component { id: diff; DiffBody { call: body.call; onShowAllRequested: body.showAllRequested() } }
@@ -48,6 +51,18 @@ Item {
 	Component { id: webfetch; WebfetchBody { call: body.call; onShowAllRequested: body.showAllRequested() } }
 	Component { id: session; SessionBody { call: body.call; onShowAllRequested: body.showAllRequested() } }
 	Component { id: todo; TodoBody { call: body.call } }
+
+	ImageStrip {
+		id: pictures
+		x: horizontalPadding
+		y: loader.height
+		width: parent.width - 2 * horizontalPadding
+		visible: call.images.length > 0
+		images: call.images
+		sessionId: call.ListView.view.sessionId
+		onImageClicked: image => call.ListView.view.imageClicked(image)
+		bottomPadding: verticalPadding + 2
+	}
 
 	Loader {
 		id: loader
