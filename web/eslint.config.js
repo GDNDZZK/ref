@@ -10,6 +10,7 @@ export default tseslint.config(
       'node_modules',
       'src/proto/generated',
       'src/theme/generated',
+      'src/icons/generated',
       'src/motion/__fixtures__',
     ],
   },
@@ -34,5 +35,10 @@ export default tseslint.config(
       'vue/html-closing-bracket-newline': 'off',
       'vue/first-attribute-linebreak': 'off',
     },
+  },
+  {
+    // Markup from our own assets, never from the user.
+    files: ['src/components/Icon.vue'],
+    rules: { 'vue/no-v-html': 'off' },
   },
 )
