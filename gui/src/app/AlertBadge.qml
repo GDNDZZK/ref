@@ -1,5 +1,6 @@
+// Adapted from an early version of qutie by LightBlueCube
 import QtQuick
-import Qutie
+import RefGui
 
 // "!" in a disc, drawn rather than typed so it centers exactly at any size.
 Rectangle {

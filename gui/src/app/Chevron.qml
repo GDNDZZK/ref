@@ -1,6 +1,7 @@
+// Adapted from an early version of qutie by LightBlueCube
 import QtQuick
 import QtQuick.Shapes
-import Qutie
+import RefGui
 
 // A ">" stroke centered in its box; rotate it to point elsewhere. Drawn rather than
 // typed, so it sits at the geometric center regardless of font metrics.

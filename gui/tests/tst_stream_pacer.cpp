@@ -1,13 +1,14 @@
-#include "ui/stream_pacer.h"
+// Adapted from an early version of qutie by LightBlueCube
+#include "session/stream_pacer.h"
 
 #include <QTest>
 
 using namespace Qt::StringLiterals;
 using namespace std::chrono_literals;
-using qutie::llm::ReasoningDelta;
-using qutie::llm::StreamEvent;
-using qutie::llm::TextDelta;
-using qutie::ui::StreamPacer;
+using refgui::llm::ReasoningDelta;
+using refgui::llm::StreamEvent;
+using refgui::llm::TextDelta;
+using refgui::session::StreamPacer;
 
 namespace
 {

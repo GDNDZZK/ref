@@ -10,7 +10,7 @@
 #include <functional>
 #include <stop_token>
 
-namespace qutie::llm
+namespace refgui::llm
 {
 
 // Streams replies from an OpenAI-compatible Chat Completions endpoint.
@@ -33,4 +33,4 @@ private:
 	QNetworkAccessManager m_network;
 };
 
-} // namespace qutie::llm
+} // namespace refgui::llm

@@ -1,11 +1,12 @@
-#include "ui/conversation_model.h"
+// Adapted from an early version of qutie by LightBlueCube
+#include "session/conversation_model.h"
 
 #include <QAbstractItemModelTester>
 #include <QSignalSpy>
 #include <QTest>
 
 using namespace Qt::StringLiterals;
-using qutie::ui::ConversationModel;
+using refgui::session::ConversationModel;
 
 namespace
 {

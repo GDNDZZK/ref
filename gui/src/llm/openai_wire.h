@@ -12,7 +12,7 @@
 
 // The Chat Completions wire format (OpenAI's openapi.yaml: CreateChatCompletionRequest,
 // CreateChatCompletionStreamResponse), with no I/O, so it can be tested on recorded chunks.
-namespace qutie::llm::openai
+namespace refgui::llm::openai
 {
 
 // The body of a streaming request for the reply to `history`.
@@ -47,4 +47,4 @@ private:
 	std::optional<std::expected<StopReason, Error>> m_outcome;
 };
 
-} // namespace qutie::llm::openai
+} // namespace refgui::llm::openai

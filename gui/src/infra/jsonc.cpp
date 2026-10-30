@@ -11,7 +11,7 @@ using namespace Qt::StringLiterals;
 //   {"a": 1, // note      ->   {"a": 1
 //   }                     ->   }
 
-namespace qutie::jsonc
+namespace refgui::jsonc
 {
 namespace
 {
@@ -179,4 +179,4 @@ std::expected<QJsonDocument, ParseError> parse(QByteArrayView source)
 	return document;
 }
 
-} // namespace qutie::jsonc
+} // namespace refgui::jsonc

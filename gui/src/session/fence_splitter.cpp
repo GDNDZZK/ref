@@ -1,9 +1,10 @@
-#include "ui/fence_splitter.h"
+// Adapted from an early version of qutie by LightBlueCube
+#include "session/fence_splitter.h"
 
 #include <algorithm>
 #include <utility>
 
-namespace qutie::ui
+namespace refgui::session
 {
 namespace
 {
@@ -214,4 +215,4 @@ void FenceSplitter::emitText(QStringView text, QList<Event>& events)
 	events.append(TextAppended{std::move(released)});
 }
 
-} // namespace qutie::ui
+} // namespace refgui::session

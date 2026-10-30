@@ -1,6 +1,7 @@
+// Adapted from an early version of qutie by LightBlueCube
 import QtQuick
 import QtQuick.Shapes
-import Qutie
+import RefGui
 
 // Why a reply failed or was cut short. Errors are rare and must not be missed.
 //

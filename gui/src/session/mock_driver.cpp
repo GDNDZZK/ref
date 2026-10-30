@@ -1,6 +1,6 @@
-#include "ui/mock_driver.h"
+#include "session/mock_driver.h"
 
-#include "ui/conversation_model.h"
+#include "session/conversation_model.h"
 
 #include <QRandomGenerator>
 
@@ -9,7 +9,7 @@
 using namespace Qt::StringLiterals;
 using namespace std::chrono_literals;
 
-namespace qutie::ui
+namespace refgui::session
 {
 namespace
 {
@@ -313,7 +313,7 @@ MockDriver::Script MockDriver::longScript()
 	constexpr int CompileSteps = 40;
 	for(int i = 1; i <= CompileSteps; ++i)
 	{
-		buildLog += u"[%1/%2] Building CXX object src/ui/CMakeFiles/qutie_ui.dir/unit_%3.cpp.o\n"_s.arg(i).arg(CompileSteps).arg(i, 2, 10, u'0');
+		buildLog += u"[%1/%2] Building CXX object src/ui/CMakeFiles/refgui_session.dir/unit_%3.cpp.o\n"_s.arg(i).arg(CompileSteps).arg(i, 2, 10, u'0');
 	}
 	buildLog += u"[%1/%1] Linking CXX executable src/app/qutie"_s.arg(CompileSteps);
 
@@ -392,7 +392,7 @@ MockDriver::Script MockDriver::longScript()
 				 u"// SPDX-License-Identifier: GPL-3.0-or-later\n"
 				 u"#include \"ui/event_router.h\"\n\n"
 				 u"using namespace Qt::StringLiterals;\n\n"
-				 u"namespace qutie::ui\n"
+				 u"namespace refgui::session\n"
 				 u"{\n\n"
 				 u"void EventRouter::dispatch(const Event& event)\n"
 				 u"{\n"
@@ -402,7 +402,7 @@ MockDriver::Script MockDriver::longScript()
 				 + u"\t}\n"
 				   u"\temit stateChanged();\n"
 				   u"}\n\n"
-				   u"} // namespace qutie::ui\n"
+				   u"} // namespace refgui::session\n"
 				   u"```\n\n"
 				   u"A table of handlers would be shorter, but the `switch` lets the compiler warn when a new kind "
 				   u"is added and not handled."_s},
@@ -424,4 +424,4 @@ MockDriver::Script MockDriver::longScript()
 	};
 }
 
-} // namespace qutie::ui
+} // namespace refgui::session

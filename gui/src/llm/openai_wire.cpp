@@ -9,7 +9,7 @@
 
 using namespace Qt::StringLiterals;
 
-namespace qutie::llm::openai
+namespace refgui::llm::openai
 {
 namespace
 {
@@ -197,4 +197,4 @@ const std::optional<std::expected<StopReason, Error>>& StreamDecoder::outcome() 
 	return m_outcome;
 }
 
-} // namespace qutie::llm::openai
+} // namespace refgui::llm::openai

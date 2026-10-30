@@ -1,5 +1,5 @@
 # Talking to models: the wire formats and clients of their APIs, and where to reach them.
-qt_add_library(qutie_llm STATIC
+qt_add_library(refgui_llm STATIC
 	config.cpp
 	config.h
 	message.h
@@ -9,6 +9,6 @@ qt_add_library(qutie_llm STATIC
 	openai_wire.h
 )
 
-target_include_directories(qutie_llm PUBLIC ${PROJECT_SOURCE_DIR}/src)
-target_link_libraries(qutie_llm PUBLIC qutie_infra)
-qutie_configure_target(qutie_llm)
+target_include_directories(refgui_llm PUBLIC ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(refgui_llm PUBLIC refgui_infra)
+refgui_configure_target(refgui_llm)

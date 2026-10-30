@@ -11,7 +11,7 @@
 using namespace Qt::StringLiterals;
 using namespace std::chrono_literals;
 
-namespace qutie::llm
+namespace refgui::llm
 {
 namespace
 {
@@ -92,4 +92,4 @@ QNetworkRequest OpenAiClient::request() const
 	return chatRequest;
 }
 
-} // namespace qutie::llm
+} // namespace refgui::llm

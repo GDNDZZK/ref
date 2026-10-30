@@ -1,5 +1,6 @@
+// Adapted from an early version of qutie by LightBlueCube
 import QtQuick
-import Qutie
+import RefGui
 
 // Pulsing dot that trails the end of streaming text. It chases the end rather than
 // animating to it with a Behavior: the end moves every frame while text streams in.

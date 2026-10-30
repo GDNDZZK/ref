@@ -1,3 +1,4 @@
+// Adapted from an early version of qutie by LightBlueCube
 #pragma once
 
 #include <QChar>
@@ -8,7 +9,7 @@
 #include <optional>
 #include <variant>
 
-namespace qutie::ui
+namespace refgui::session
 {
 
 // Splits streamed Markdown into prose and fenced code blocks.
@@ -66,4 +67,4 @@ private:
 	bool m_atBlockStart = true; // nothing emitted since the last fence or the start
 };
 
-} // namespace qutie::ui
+} // namespace refgui::session

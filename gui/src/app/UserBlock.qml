@@ -1,5 +1,6 @@
+// Adapted from an early version of qutie by LightBlueCube
 import QtQuick
-import Qutie
+import RefGui
 
 // The user's message. It opens a turn: every message but the first sits below a
 // divider that separates it from the previous reply. Short messages hug their text.

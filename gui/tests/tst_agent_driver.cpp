@@ -1,6 +1,6 @@
 #include "fake_server.h"
-#include "ui/agent_driver.h"
-#include "ui/conversation_model.h"
+#include "session/agent_driver.h"
+#include "session/conversation_model.h"
 
 #include <QFile>
 #include <QJsonArray>
@@ -12,8 +12,8 @@
 #include <memory>
 
 using namespace Qt::StringLiterals;
-using qutie::ui::AgentDriver;
-using qutie::ui::ConversationModel;
+using refgui::session::AgentDriver;
+using refgui::session::ConversationModel;
 
 namespace
 {
@@ -151,7 +151,7 @@ void TestAgentDriver::stopKeepsPartialReplyInHistory()
 }
 
 // Closing the window mid-reply: the reply must not resume into a destroyed driver.
-// Run under QUTIE_SANITIZE to see a use after free.
+// Run under REFGUI_SANITIZE to see a use after free.
 void TestAgentDriver::destroyingMidReplyIsSafe()
 {
 	FakeServer server;

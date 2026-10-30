@@ -3,7 +3,7 @@
 #include <QObject>
 #include <QStringView>
 
-namespace qutie::ui
+namespace refgui::session
 {
 
 // Produces the assistant's side of a conversation in a ConversationModel.
@@ -25,4 +25,4 @@ signals:
 	void runningChanged();
 };
 
-} // namespace qutie::ui
+} // namespace refgui::session

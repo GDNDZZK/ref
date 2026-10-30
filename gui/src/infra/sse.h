@@ -4,7 +4,7 @@
 #include <QByteArrayView>
 #include <QList>
 
-namespace qutie::sse
+namespace refgui::sse
 {
 
 struct Event
@@ -35,4 +35,4 @@ private:
 	bool m_isFirstLine = true;              // the only place a UTF-8 BOM may appear
 };
 
-} // namespace qutie::sse
+} // namespace refgui::sse

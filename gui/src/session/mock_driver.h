@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ui/driver.h"
+#include "session/driver.h"
 
 #include <QDeadlineTimer>
 #include <QList>
@@ -10,7 +10,7 @@
 #include <chrono>
 #include <variant>
 
-namespace qutie::ui
+namespace refgui::session
 {
 
 class ConversationModel;
@@ -103,4 +103,4 @@ private:
 	QDeadlineTimer m_stepDeadline; // Pause and ToolCall steps
 };
 
-} // namespace qutie::ui
+} // namespace refgui::session

@@ -1,5 +1,6 @@
+// Adapted from an early version of qutie by LightBlueCube
 import QtQuick
-import Qutie
+import RefGui
 
 // Loops `target`'s opacity between `dimmed` and 1 while `running`. On stop it eases
 // straight back to 1 from wherever the pulse was. alwaysRunToEnd would instead finish

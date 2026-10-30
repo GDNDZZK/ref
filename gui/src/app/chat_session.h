@@ -1,7 +1,8 @@
+// Adapted from an early version of qutie by LightBlueCube
 #pragma once
 
-#include "ui/conversation_model.h"
-#include "ui/driver.h"
+#include "session/conversation_model.h"
+#include "session/driver.h"
 
 #include <QObject>
 #include <QtQmlIntegration>
@@ -40,6 +41,6 @@ signals:
 	void busyChanged();
 
 private:
-	qutie::ui::ConversationModel m_model;
-	std::unique_ptr<qutie::ui::Driver> m_driver; // writes to m_model, so declared after it
+	refgui::session::ConversationModel m_model;
+	std::unique_ptr<refgui::session::Driver> m_driver; // writes to m_model, so declared after it
 };

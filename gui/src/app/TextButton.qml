@@ -1,5 +1,6 @@
+// Adapted from an early version of qutie by LightBlueCube
 import QtQuick
-import Qutie
+import RefGui
 
 // Small borderless button with a text label.
 // Only the face shrinks on press; the handlers stay on the unscaled root (see CircleButton).
