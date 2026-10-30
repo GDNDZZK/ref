@@ -88,7 +88,7 @@ function setKind(key: KindKey, value: boolean): void {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 40px;
+  height: var(--notification-settings-section-row-height);
 }
 
 .bell {
@@ -106,17 +106,17 @@ h3 {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 40px;
+  min-height: var(--notification-settings-section-row-height);
   font-size: var(--font-size);
 }
 
 .kind {
-  padding-left: 24px;
+  padding-left: var(--notification-settings-section-sub-indent);
   transition: opacity var(--motion-standard) var(--motion-ease);
 }
 
 .dimmed {
-  opacity: 0.4;
+  opacity: var(--notification-settings-section-disabled-opacity);
   pointer-events: none;
 }
 

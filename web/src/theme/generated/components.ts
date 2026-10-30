@@ -12,6 +12,61 @@ export const components = {
   composer: {
     padding: 8 /* px */,
     maxInputHeight: 220 /* px */,
+    tagRowHeight: 32 /* px */,
+    textGap: 4 /* px */,
+    queueGap: 8 /* px */,
+    inputLeftInset: 4 /* px */,
+    thumbRowGap: 8 /* px */,
+  },
+  composerChip: {
+    chipHeight: 28 /* px */,
+    paddingX: 10 /* px */,
+    iconGap: 6 /* px */,
+    labelSlide: 6 /* px */,
+    maxWidth: 240 /* px */,
+  },
+  composerTags: {
+    chipGap: 4 /* px */,
+    hintGap: 12 /* px */,
+  },
+  attachmentStrip: {
+    thumbSize: 56 /* px */,
+    thumbGap: 8 /* px */,
+    attachmentRemoveSize: 18 /* px */,
+    removeBackgroundOpacity: 0.85 /* unitless */,
+    enterScale: 0.8 /* unitless */,
+  },
+  completionPopup: {
+    popupGap: 8 /* px */,
+    popupPadding: 4 /* px */,
+    popupRowHeight: 36 /* px */,
+    popupMaxRows: 8 /* unitless */,
+  },
+  queueStrip: {
+    queueRowHeight: 32 /* px */,
+    queueMaxRows: 4 /* unitless */,
+    removingOpacity: 0.5 /* unitless */,
+  },
+  notificationSettingsSection: {
+    rowHeight: 40 /* px */,
+    subIndent: 24 /* px */,
+    disabledOpacity: 0.4 /* unitless */,
+  },
+  outputText: {
+    previewLines: 200 /* unitless */,
+  },
+  bashBody: {
+    liveTailLines: 20 /* unitless */,
+  },
+  imageStrip: {
+    maxWidth: 160 /* px */,
+    maxHeight: 96 /* px */,
+  },
+  imageBlock: {
+    thumbnailHeight: 72 /* px */,
+  },
+  lightbox: {
+    margin: 48 /* px */,
   },
   errorBlock: {
     verticalPadding: 12 /* px */,

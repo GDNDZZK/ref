@@ -2,6 +2,7 @@
 
 #include "app/chat_session.h"
 #include "app/tile_model.h"
+#include "app/tile_stage.h"
 #include "cli/launch_options.h"
 #include "client/backend.h"
 #include "workspace/backend_config.h"
@@ -55,6 +56,7 @@ class Workspace : public QObject
 	Q_PROPERTY(bool historyLoaded READ historyLoaded NOTIFY historyLoadedChanged)
 	// Split view.
 	Q_PROPERTY(QAbstractItemModel* tiles READ tiles CONSTANT)
+	Q_PROPERTY(TileStage* tileStage READ tileStage CONSTANT)
 	Q_PROPERTY(bool splitView READ isSplitView NOTIFY splitViewChanged)
 	Q_PROPERTY(QString focusedTileId READ focusedTileId NOTIFY focusedTileChanged)
 	Q_PROPERTY(QString zoomedId READ zoomedId NOTIFY zoomedChanged)
@@ -80,6 +82,8 @@ public:
 	static Workspace* instance();
 	static Workspace* create(QQmlEngine* qmlEngine, QJSEngine* jsEngine);
 
+	// The connection to the backend, which the notification center shares.
+	refgui::client::Backend& backend() { return m_backend; }
 	ChatSession* current() const { return m_current; }
 	QString currentId() const;
 	// "connecting", "starting", "connected" or "disconnected".
@@ -105,6 +109,7 @@ public:
 	refgui::workspace::SessionListModel* sessionChoices() { return &m_directory.choices(); }
 	bool historyLoaded() const { return m_directory.historyLoaded(); }
 	QAbstractItemModel* tiles() { return &m_tiles; }
+	TileStage* tileStage() { return &m_stage; }
 	bool isSplitView() const { return m_split; }
 	const QString& focusedTileId() const { return m_focusedTile; }
 	const QString& zoomedId() const { return m_zoomed; }
@@ -249,6 +254,7 @@ private:
 	refgui::workspace::BackendConfig m_config{m_backend};
 	QHash<QString, ChatSession*> m_chats;
 	TileModel m_tiles;
+	TileStage m_stage{&m_tiles};
 	ChatSession* m_current = nullptr;
 	QHash<QString, QString> m_seenLive; // sessions that were in the live list, with their directory; one that leaves it was closed
 	QSet<QString> m_leaving; // closed sessions whose chat session is about to go

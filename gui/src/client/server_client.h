@@ -41,7 +41,11 @@ public:
 	~ServerClient() override;
 
 	// Connects and says Hello. Gives up on the connection after `timeout`.
-	QCoro::Task<Result<proto::HelloResult>> open(Endpoint endpoint, QString cwd, std::chrono::milliseconds timeout);
+	// `notify` is what Hello tells the backend about the system notifications this connection shows.
+	QCoro::Task<Result<proto::HelloResult>> open(Endpoint endpoint,
+	                                             QString cwd,
+	                                             std::chrono::milliseconds timeout,
+	                                             QList<proto::NotifyFrame::Kind> notify = {});
 	void close();
 	bool isOpen() const;
 
@@ -55,7 +59,15 @@ public:
 	QCoro::Task<Result<QList<proto::SessionInfo>>> listHistory(QString cwd, int limit);
 	// Subscribes to the events of every live session (split view). Answers with the live sessions.
 	QCoro::Task<Result<QList<proto::SessionInfo>>> watchAll(bool enabled);
-	QCoro::Task<Result<proto::PromptResult>> prompt(QString sessionId, QString text);
+	QCoro::Task<Result<proto::PromptResult>> prompt(QString sessionId, QString text, QList<proto::ImageData> images = {});
+	QCoro::Task<Result<proto::RemovedPrompt>> removeQueued(QString sessionId, QString messageId);
+	QCoro::Task<Result<void>> shell(QString sessionId, QString command);
+	// Paths below `cwd` matching `query` (best first); directories end with "/".
+	QCoro::Task<Result<QStringList>> listFiles(QString cwd, QString query, int limit);
+	// The prompt text a user-defined slash command stands for.
+	QCoro::Task<Result<QString>> expandCommand(QString name, QString args, QString cwd);
+	QCoro::Task<Result<void>> setNotify(QList<proto::NotifyFrame::Kind> kinds);
+	QCoro::Task<Result<void>> setFocus(bool focused, QStringList sessions);
 	QCoro::Task<Result<void>> abort(QString sessionId);
 	QCoro::Task<Result<void>> permissionReply(QString sessionId, QString callId, bool allow, bool always);
 

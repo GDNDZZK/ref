@@ -134,11 +134,11 @@ QCoro::Task<SessionController::Result<void>> SessionController::loadOlder()
 	co_return Result<void>();
 }
 
-QCoro::Task<SessionController::Result<proto::PromptResult>> SessionController::send(QString text)
+QCoro::Task<SessionController::Result<proto::PromptResult>> SessionController::send(QString text, QList<proto::ImageData> images)
 {
 	Q_ASSERT(hasSession());
 	m_model.setTailError({}); // a new prompt starts afresh
-	co_return co_await m_backend.client().prompt(m_sessionId, std::move(text));
+	co_return co_await m_backend.client().prompt(m_sessionId, std::move(text), std::move(images));
 }
 
 QCoro::Task<SessionController::Result<void>> SessionController::abort()
@@ -168,6 +168,7 @@ QCoro::Task<> SessionController::reattach()
 void SessionController::adopt(const proto::SessionSnapshot& snapshot)
 {
 	m_feed.reset(snapshot.messages);
+	setQueued(snapshot.queued);
 	setMoreBefore(snapshot.moreBefore);
 	setInfo(snapshot.info);
 }
@@ -190,6 +191,10 @@ void SessionController::onEvent(const proto::SessionEvent& event)
 	{
 		setInfo(info->info);
 	}
+	else if(const auto* queue = std::get_if<proto::QueueEvent>(&event))
+	{
+		setQueued(queue->messages);
+	}
 	else if(const auto* error = std::get_if<proto::ErrorEvent>(&event))
 	{
 		m_model.setTailError(error->text);
@@ -202,8 +207,14 @@ void SessionController::onEvent(const proto::SessionEvent& event)
 	}
 	else
 	{
-		m_feed.apply(event); // ignores permission and queue events: tool parts carry their state
+		m_feed.apply(event); // ignores permission events: tool parts carry their state
 	}
+}
+
+void SessionController::setQueued(QList<proto::Message> messages)
+{
+	m_queued = std::move(messages);
+	emit queueChanged();
 }
 
 void SessionController::setMoreBefore(bool moreBefore)

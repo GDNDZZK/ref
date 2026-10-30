@@ -159,11 +159,9 @@ Window {
 					id: single
 					anchors.fill: parent
 					active: window.shown !== null
-					opacity: Workspace.splitView ? 0 : 1
-					visible: opacity > 0
+					// The tile of the current session takes its place at once, and gives it back at once.
+					visible: Workspace.tileStage.placed === 0
 					enabled: !Workspace.splitView
-
-					Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 
 					sourceComponent: SessionPane {
 						session: window.shown
@@ -174,11 +172,8 @@ Window {
 					id: tiles
 					anchors.fill: parent
 					topInset: window.zoomed ? 0 : Math.max(0, themeToggle.y + themeToggle.height - content.y)
-					opacity: Workspace.splitView ? 1 : 0
-					visible: opacity > 0
+					visible: Workspace.splitView || occupied
 					enabled: Workspace.splitView
-
-					Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 				}
 
 				// Connection trouble, or why no session could be opened, until it is gone.

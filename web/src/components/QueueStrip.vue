@@ -4,9 +4,10 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Message } from '../proto/generated'
+import { components } from '../theme/generated/components.ts'
 import Icon from './Icon.vue'
 
-const QUEUE_MAX_ROWS = 4
+const QUEUE_MAX_ROWS = components.queueStrip.queueMaxRows
 
 const props = defineProps<{ messages: readonly Message[]; removing: ReadonlySet<string> }>()
 defineEmits<{ remove: [messageId: string] }>()
@@ -82,8 +83,8 @@ const rows = computed<Row[]>(() =>
 
 <style scoped>
 .queue {
-  --queue-gap: 8px;
-  --row-height: 32px;
+  --queue-gap: var(--composer-queue-gap);
+  --row-height: var(--queue-strip-queue-row-height);
   display: grid;
   grid-template-rows: 0fr;
   transition: grid-template-rows var(--motion-standard) var(--motion-ease);
@@ -139,7 +140,7 @@ const rows = computed<Row[]>(() =>
 }
 
 .row.removing .row-content {
-  opacity: 0.5;
+  opacity: var(--queue-strip-removing-opacity);
 }
 
 .row-enter-from,
