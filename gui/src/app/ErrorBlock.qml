@@ -14,9 +14,8 @@ Block {
 	// 0 = neutral card, 1 = covered by the tint. Rows created with the view start covered.
 	property real spread: 1
 
-	// px per ms the circle's edge travels. It was Motion.slow (480), which made the whole spread
-	// last under 2 ms; at 1.5 a full-width card (about 760 px from the badge to the far corner)
-	// takes about half a second, like the other slow motions.
+	// px per ms the circle's edge travels: a full-width card (about 760 px from the badge to the
+	// far corner) is covered in about half a second.
 	readonly property real spreadSpeed: 1.5
 
 	onAdded: {
