@@ -78,8 +78,8 @@ public:
 
 	using QAbstractListModel::QAbstractListModel;
 
-	// The error that ends the conversation without belonging to a message. It is the last row.
-	// An empty text removes it.
+	// The error of the session that belongs to no message. It is the last row, unless the last
+	// message ended with the same error: that one shows it already. An empty text removes it.
 	void setTailError(const QString& text);
 	const QString& tailError() const { return m_tailError; }
 
@@ -170,8 +170,10 @@ private:
 	// The rows of a message after its parts: the error of an assistant message, or the
 	// text and images of a user message; then the meta line.
 	static QList<Block> ownBlocks(const MessageNode& node);
-	// Marks the messages before the last compaction as stale, and the compaction itself.
+	// Brings what depends on the whole list up to date: which messages are stale, the tail error.
+	void refreshDerivedState();
 	void refreshContext();
+	void refreshTailError();
 	const Block& blockAt(qsizetype row) const;
 	bool isExpanded(const Block& block) const;
 	void emitRoleChanged(qsizetype row, int role);
@@ -182,6 +184,7 @@ private:
 	QList<Block> m_rows;
 	Block m_tailBlock;
 	QString m_tailError;
+	bool m_tailShown = false;
 	QSet<PartKey> m_toggled;
 	QSet<PartKey> m_shownAll;
 	bool m_reasoningExpanded = false;

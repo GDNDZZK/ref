@@ -108,7 +108,7 @@ QList<proto::Part> partsOf(const auto& nodes)
 
 int ConversationModel::rowCount(const QModelIndex& parent) const
 {
-	return parent.isValid() ? 0 : static_cast<int>(m_rows.size()) + (m_tailError.isEmpty() ? 0 : 1);
+	return parent.isValid() ? 0 : static_cast<int>(m_rows.size()) + (m_tailShown ? 1 : 0);
 }
 
 // The tail error is the row after the last of `m_rows`.
@@ -263,7 +263,7 @@ void ConversationModel::reset(const QList<proto::Message>& messages)
 	m_messages = std::move(nodes);
 	m_rows = std::move(rows);
 	endResetModel();
-	refreshContext();
+	refreshDerivedState();
 }
 
 void ConversationModel::prependMessages(const QList<proto::Message>& older)
@@ -279,7 +279,7 @@ void ConversationModel::prependMessages(const QList<proto::Message>& older)
 	if(rows.isEmpty())
 	{
 		m_messages = nodes + m_messages;
-		refreshContext();
+		refreshDerivedState();
 		return;
 	}
 
@@ -294,7 +294,7 @@ void ConversationModel::prependMessages(const QList<proto::Message>& older)
 	{
 		notifyOpensTurn(added); // the former first row now has something above it
 	}
-	refreshContext();
+	refreshDerivedState();
 }
 
 void ConversationModel::setMessage(const proto::Message& message)
@@ -318,7 +318,7 @@ void ConversationModel::setMessage(const proto::Message& message)
 	m_messages.append(std::move(node));
 	m_rows += rows;
 	endInsertRows();
-	refreshContext();
+	refreshDerivedState();
 }
 
 bool ConversationModel::setPart(const QString& messageId, qsizetype index, const proto::Part& part)
@@ -421,7 +421,7 @@ void ConversationModel::removeMessage(const QString& messageId)
 	{
 		notifyOpensTurn(0);
 	}
-	refreshContext();
+	refreshDerivedState();
 }
 
 std::optional<QString> ConversationModel::partText(const QString& messageId, qsizetype index) const
@@ -488,29 +488,39 @@ QString ConversationModel::firstMessageId() const
 
 void ConversationModel::setTailError(const QString& text)
 {
-	if(text == m_tailError)
-	{
-		return;
-	}
+	m_tailError = text;
+	refreshTailError();
+}
+
+void ConversationModel::refreshTailError()
+{
+	const bool lastMessageShowsIt = !m_messages.isEmpty() && m_messages.last().header.error == m_tailError;
+	const bool shown = !m_tailError.isEmpty() && !lastMessageShowsIt;
 	const int row = static_cast<int>(m_rows.size());
-	m_tailBlock = {.kind = Block::Kind::Error, .content = text, .partIndex = -1};
-	if(m_tailError.isEmpty())
+	if(shown && !m_tailShown)
 	{
+		m_tailBlock = {.kind = Block::Kind::Error, .content = m_tailError, .partIndex = -1};
 		beginInsertRows({}, row, row);
-		m_tailError = text;
+		m_tailShown = true;
 		endInsertRows();
 	}
-	else if(text.isEmpty())
+	else if(!shown && m_tailShown)
 	{
 		beginRemoveRows({}, row, row);
-		m_tailError.clear();
+		m_tailShown = false;
 		endRemoveRows();
 	}
-	else
+	else if(shown && m_tailBlock.content != m_tailError)
 	{
-		m_tailError = text;
+		m_tailBlock.content = m_tailError;
 		emit dataChanged(index(row), index(row), {ContentRole});
 	}
+}
+
+void ConversationModel::refreshDerivedState()
+{
+	refreshContext();
+	refreshTailError();
 }
 
 void ConversationModel::setDefaultExpansion(bool reasoning, bool tools)
@@ -730,7 +740,7 @@ void ConversationModel::replaceMessage(qsizetype messageIndex, proto::Message me
 	m_messages[messageIndex] = std::move(node);
 	replaceRows(first, oldPartRows, rows.first(partRows));
 	replaceRows(first + partRows, oldOwnRows, rows.mid(partRows));
-	refreshContext();
+	refreshDerivedState();
 }
 
 void ConversationModel::feedPart(qsizetype messageIndex, qsizetype partIndex, const QString& text)

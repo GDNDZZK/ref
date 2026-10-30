@@ -52,6 +52,7 @@ private slots:
 	void everyMessageEndsWithAMetaLine();
 	void marksMessagesBeforeTheLastCompaction();
 	void keepsTheTailErrorLast();
+	void hidesTheTailErrorTheLastMessageShows();
 	void togglesFoldingAgainstTheDefault();
 	void carriesToolMetaAndImages();
 	void givesMessageTexts();
@@ -444,6 +445,28 @@ void TestConversationModel::keepsTheTailErrorLast()
 	QCOMPARE(model.index(4).data(ConversationModel::ContentRole).toString(), u"still offline"_s);
 	model.setTailError({});
 	QCOMPARE(model.rowCount(), 4);
+}
+
+// The last message shows its own error, so the same text at the end would say it twice.
+void TestConversationModel::hidesTheTailErrorTheLastMessageShows()
+{
+	ConversationModel model;
+	QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
+	model.setMessage(user(u"u1"_s, u"go"_s));
+	model.setTailError(u"Rate limited"_s);
+	QCOMPARE(model.rowCount(), 3);
+
+	refgui::proto::Message failed = assistant(u"a1"_s, {}, false);
+	failed.error = u"Rate limited"_s;
+	model.setMessage(failed);
+	QCOMPARE(model.rowCount(), 4); // the message's own error block and meta line, no tail
+	QCOMPARE(rowOfKind(model, u"error"_s), 2);
+	QCOMPARE(model.index(model.rowCount() - 1).data(ConversationModel::KindRole).toString(), u"meta"_s);
+
+	model.setTailError(u"Another"_s);
+	QCOMPARE(model.rowCount(), 5);
+	model.removeMessage(u"a1"_s);
+	QCOMPARE(model.rowCount(), 3);
 }
 
 void TestConversationModel::togglesFoldingAgainstTheDefault()
