@@ -1,0 +1,5 @@
+dist
+pnpm-lock.yaml
+src/proto/generated
+src/theme/generated
+src/motion/__fixtures__
