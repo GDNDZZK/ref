@@ -119,6 +119,13 @@ void TestToolContent::toolsWithoutARuleListTheirFirstArguments()
 	QCOMPARE(detail(u"x"_s, map({{u"a"_s, QString(45, u'z')}})), u"a="_s + QString(39, u'z') + u"\u2026"_s);
 	QCOMPARE(detail(u"x"_s, map({{u"a"_s, QString(20, u'\u4e2d')}})), u"a="_s + QString(20, u'\u4e2d'));
 	QCOMPARE(detail(u"x"_s, map({{u"a"_s, QString(21, u'\u4e2d')}})), u"a="_s + QString(19, u'\u4e2d') + u"\u2026"_s);
+	// Transport emoji (U+1F680) are wide; a cluster counts at most two columns, combining marks none.
+	const QString rocket = QString::fromUcs4(U"\x1F680");
+	QCOMPARE(detail(u"x"_s, map({{u"a"_s, rocket.repeated(21)}})), u"a="_s + rocket.repeated(19) + u"\u2026"_s);
+	const QString family = QString::fromUcs4(U"\x1F468\x200D\x1F469\x200D\x1F467");
+	QCOMPARE(detail(u"x"_s, map({{u"a"_s, family.repeated(20)}})), u"a="_s + family.repeated(20));
+	const QString accented = QString::fromUcs4(U"e\x0301");
+	QCOMPARE(detail(u"x"_s, map({{u"a"_s, accented.repeated(40)}})), u"a="_s + accented.repeated(40));
 }
 
 void TestToolContent::listingReadsHeadersRowsAndNotes()
