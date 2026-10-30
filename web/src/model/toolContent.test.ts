@@ -21,6 +21,31 @@ describe('toolDetail', () => {
     expect(toolDetail('send_message', { to: 'helper' })).toBe('→ helper')
   })
 
+  it('follows the terminal client where a value is empty or missing', () => {
+    expect(toolDetail('bash', { command: '' })).toBe('$')
+    expect(toolDetail('find', { pattern: '', path: 'src' })).toBe('')
+    expect(toolDetail('read', { file: 'a.rs' })).toBe('file=a.rs')
+    expect(toolDetail('webfetch', { url: 'https://e.com', format: '' })).toBe('https://e.com ()')
+    expect(toolDetail('webfetch', { url: 'https://e.com', format: 'markdown' })).toBe('https://e.com')
+    expect(toolDetail('webfetch', { url: 'https://e.com' })).toBe('https://e.com')
+    expect(toolDetail('create_session', { name: 'worker', agent: 'build' })).toBe('worker (build)')
+    expect(toolDetail('create_session', { name: 'worker' })).toBe('worker ()')
+    expect(toolDetail('context_window', { session: 'worker' })).toBe('worker')
+    expect(toolDetail('send_message', {})).toBe('')
+  })
+
+  it('makes one line: white space runs collapse, control characters go', () => {
+    expect(toolDetail('bash', { command: 'a \t b\u0001c' })).toBe('$ a bc')
+    expect(toolDetail('read', { path: '  a\u00a0 b ' })).toBe('a b')
+    expect(toolDetail('read', { path: 'a\u007fb\u0085c' })).toBe('ab c')
+  })
+
+  it('cuts a value at 40 terminal columns, wide characters count twice', () => {
+    expect(toolDetail('x', { a: 'z'.repeat(45) })).toBe(`a=${'z'.repeat(39)}…`)
+    expect(toolDetail('x', { a: '中'.repeat(20) })).toBe(`a=${'中'.repeat(20)}`)
+    expect(toolDetail('x', { a: '中'.repeat(21) })).toBe(`a=${'中'.repeat(19)}…`)
+  })
+
   it('counts finished todos', () => {
     const todos = [
       { content: 'a', status: 'completed' },
