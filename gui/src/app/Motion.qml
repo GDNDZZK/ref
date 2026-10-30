@@ -19,6 +19,15 @@ QtObject {
 	// frames, so a short exit reads as a cut. Used where a glyph's exit should be seen.
 	readonly property int exitEase: Easing.InCubic
 
+	readonly property int dialogDrop: 16 // px a dialog drops into place
+	readonly property real popScale: 0.97 // dialogs and menus grow from this
+	readonly property real tileEnterScale: 0.94
+	readonly property real tileExitScale: 0.96
+	readonly property int toastSlide: 24 // px a toast slides in from the right
+	readonly property int toastInfoMs: 3500
+	readonly property int toastWarnMs: 6000
+	readonly property int toastErrorMs: 8000
+
 	readonly property int interruptWindow: 1500 // ms in which a second Esc interrupts the session
 
 	readonly property real enterDrop: 48 // px a new block drops into place while it fades in

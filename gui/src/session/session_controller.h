@@ -57,6 +57,9 @@ public:
 	// Stops the events (unless a WatchAll is on) but keeps the model and the session id, so
 	// the controller can attach again.
 	QCoro::Task<Result<void>> detach();
+	// Gives up the foreground but keeps following the session: the backend no longer counts
+	// this window as attached, and the events come on through a WatchAll. Precondition: attached.
+	QCoro::Task<Result<void>> background();
 	// Attaches the newest session of `cwd`. False when it has none.
 	QCoro::Task<Result<bool>> continueLast(QString cwd);
 
