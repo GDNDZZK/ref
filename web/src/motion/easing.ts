@@ -78,6 +78,8 @@ export const plainEasings = {
 
 export type EasingName = keyof typeof plainEasings
 
+export const easings: Record<EasingName, EasingFn> = plainEasings
+
 export function isEasingName(name: string): name is EasingName {
   return Object.hasOwn(plainEasings, name)
 }
