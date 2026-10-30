@@ -4,6 +4,7 @@
 #import <Foundation/Foundation.h>
 #import <UserNotifications/UserNotifications.h>
 
+#include <QCoreApplication>
 #include <QMetaObject>
 #include <QPointer>
 
@@ -75,22 +76,20 @@ UserNotificationsNotifier::UserNotificationsNotifier(QObject* parent)
 	UNUserNotificationCenter* center = [UNUserNotificationCenter currentNotificationCenter];
 
 	m_state->delegate = [[RefNotificationDelegate alloc] init];
-	// The callbacks of macOS come on other threads and can come after this object is gone.
+	// The callbacks of macOS come on other threads and can come after this object is gone. A QPointer is only
+	// safe to look at on the thread of its object, so each callback hops to the main thread first.
 	const QPointer<UserNotificationsNotifier> self(this);
 	m_state->delegate.onActivated = ^(NSString* session) {
 		const QString id = QString::fromNSString(session);
-		if(self)
-		{
-			QMetaObject::invokeMethod(
-			    self.data(),
-			    [self, id] {
-				    if(self)
-				    {
-					    emit self->activated(id);
-				    }
-			    },
-			    Qt::QueuedConnection);
-		}
+		QMetaObject::invokeMethod(
+		    qApp,
+		    [self, id] {
+			    if(self)
+			    {
+				    emit self->activated(id);
+			    }
+		    },
+		    Qt::QueuedConnection);
 	};
 	center.delegate = m_state->delegate;
 
@@ -105,12 +104,8 @@ UserNotificationsNotifier::UserNotificationsNotifier(QObject* parent)
 		                      {
 			                      reason = tr("Notifications for ref are turned off in the macOS System Settings.");
 		                      }
-		                      if(!self)
-		                      {
-			                      return;
-		                      }
 		                      QMetaObject::invokeMethod(
-		                          self.data(),
+		                          qApp,
 		                          [self, reason] {
 			                          if(!self)
 			                          {
@@ -167,13 +162,9 @@ void UserNotificationsNotifier::show(const Notification& notification)
 		                                                       {
 			                                                       return;
 		                                                       }
-		                                                       if(!self)
-		                                                       {
-			                                                       return;
-		                                                       }
 		                                                       const QString reason = QString::fromNSString(error.localizedDescription);
 		                                                       QMetaObject::invokeMethod(
-		                                                           self.data(),
+		                                                           qApp,
 		                                                           [self, notification, reason] {
 			                                                           if(self)
 			                                                           {
