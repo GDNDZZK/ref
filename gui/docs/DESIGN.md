@@ -145,7 +145,7 @@ with `plus-16` before it. Hover `surfaceHover`, press scale 0.96 (face only), `M
 - Right click: context menu Rename / Close. Double click on the title: inline rename (a TextField in place of the
   title, Enter commits, Esc cancels, losing focus commits).
 
-State dot (8px, same drawing as `StatusDot`):
+State dot (8px, `SessionDot.qml`):
 
 | State | Dot | Row |
 |---|---|---|
@@ -667,8 +667,8 @@ Inside the card, under the details, separated by a 1 divider. Height animates ov
   `path` as a mono 13 `info` line. The full input follows in the card's body (forced open).
 - Button row, padding 10 x 14, spacing 8, height 30 each (radius `radiusSmall`): icon 16, label 13, key cap on the right.
   **Allow** (`check`, `success`, key `a`), **Allow for session** (`check-all`, `accent`, key `s`), **Deny** (`close`, `danger`, key `d`).
-  Style: 1 border in the colour at 50%, text in the colour, fill = colour at 12% on hover and 22% pressed.
-  Key cap: 18 x 18, radius 4, 1 border in the same colour, mono 11 letter.
+  Style: 1 border in the colour at 50%, icon in the colour, label in `Theme.text`, fill = colour at 12% on hover and 22% pressed.
+  Key cap: 18 x 18, radius 4, 1 border in the same colour, mono 11 letter in the colour.
 - Right end: "+N more waiting" 12 `textMuted` when other requests of this session are pending.
 - Keys act on the oldest pending request of the session: `a` or Enter allow, `s` always, `d` or Esc deny. Keys are ignored for
   `permissionGuard` = 350 ms after the request appears (the user was still typing); letters then no longer reach the composer
@@ -725,7 +725,8 @@ User-role messages by `source`:
 - `reminder`: `surface` bubble, bar `warning`; header `retry` icon + `reminder` (12 bold `warning`).
 - `shell`: `codeBackground` bubble, bar `warning`; header `terminal` icon + `shell` (12 bold `warning`); body is the Markdown of the output (mono).
 - `compaction`: the divider (below).
-Bubbles keep the human bubble's radius and padding; the header sits 6 above the text.
+Bubbles keep the human bubble's radius and padding; the header sits 6 above the text. The bar is 3 wide, rounded, at the left padding (14) and inset
+by the vertical padding top and bottom; the text and the header start 10 right of the bar.
 
 **Meta row** under every message (height 24, 12, `textMuted`, gap 8 with "·" separators), full opacity on hover of the message, 60% otherwise:
 - User: `HH:mm:ss` · **Undo** (`undo` 16 + "Undo", human messages only) · **Copy** (`copy` 16 + "Copy"). Right aligned in the bubble column.
@@ -772,8 +773,15 @@ A row of height 28 at the bottom of the chat, in the reading column, 12 `textMut
   It leaves with the next prompt the user sends. Details in the TUI: view.error, tail rows.
 - Spread speed of the error tint `spreadSpeed` = 1.5 px/ms (constant, linear, starts `Motion.quick` after the card lands).
 
+## Removed rows
+
+A row that goes away (Undo, a history rewritten by compaction) fades out over `Motion.quick`, then its height closes over
+`Motion.standard`; the rows below follow. Rows that did not change stay where they are: the history is compared row by row and
+only the differing tail is removed and added again. Rows added this way enter like new ones; earlier history loaded by paging
+does not animate.
+
 ## Constants added (for the WebUI's list)
 
 Theme: `info`, `diffAdded`, `diffAddedBackground`, `diffRemoved`, `diffRemovedBackground`, `matchBackground`; number `staleOpacity`. `warning` and the agent colours (`Theme.agentColor`) are the shell's and composer's.
 Component literals: `permissionGuard` 350 ms, `previewLines` 200, `lightboxMargin` 48, `olderTriggerDistance` 400, `shimmerPeriod` 1600,
-`thumbnailMaxWidth` 160, `thumbnailMaxHeight` 96, `userThumbnailHeight` 72, `liveTailLines` 20, `spreadSpeed` 1.5.
+`retainedDistance` 20000 (ChatView: px of rows kept instantiated around the view), `thumbnailMaxWidth` 160, `thumbnailMaxHeight` 96, `userThumbnailHeight` 72, `liveTailLines` 20, `spreadSpeed` 1.5.

@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls.Basic
 import RefGui
@@ -57,7 +59,7 @@ Item {
 	Flickable {
 		id: scroller
 		width: parent.width
-		height: view.shownRows.length * view.rowHeight + (contentWidth > width ? scrollBarRoom : 0)
+		height: view.shownRows.length * view.rowHeight + (scroller.contentWidth > scroller.width ? view.scrollBarRoom : 0)
 		contentWidth: Math.max(width, view.fullWidth)
 		contentHeight: height
 		flickableDirection: Flickable.HorizontalFlick

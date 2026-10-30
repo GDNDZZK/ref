@@ -176,6 +176,11 @@ target_link_libraries(tst_markdown_text PRIVATE refgui_session Qt6::Test)
 refgui_configure_target(tst_markdown_text)
 add_test(NAME tst_markdown_text COMMAND tst_markdown_text)
 
+qt_add_executable(tst_tool_content tst_tool_content.cpp)
+target_link_libraries(tst_tool_content PRIVATE refgui_session Qt6::Test)
+refgui_configure_target(tst_tool_content)
+add_test(NAME tst_tool_content COMMAND tst_tool_content)
+
 # Text from the model must not reach the network. Compiles the program's network policy.
 qt_add_executable(tst_network_policy tst_network_policy.cpp
 	${PROJECT_SOURCE_DIR}/src/app/local_only_network.cpp

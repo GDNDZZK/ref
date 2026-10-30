@@ -47,6 +47,8 @@ private slots:
 	void removeUpdatesOpensTurn();
 	void prependKeepsRowsBelow();
 	void resetReplacesEverything();
+	void replacingHistoryTouchesOnlyWhatChanged();
+	void replacingHistoryWithTheSameLeavesTheRows();
 	void ignoresUnknownMessages();
 	void replacingAMessageKeepsRowIdentity();
 	void everyMessageEndsWithAMetaLine();
@@ -321,6 +323,48 @@ void TestConversationModel::resetReplacesEverything()
 	QCOMPARE(resets.count(), 1);
 	QCOMPARE(render(model), (QStringList{u"user:new"_s, u"markdown:reply"_s}));
 	QCOMPARE(model.partCount(u"u1"_s), -1);
+}
+
+void TestConversationModel::replacingHistoryTouchesOnlyWhatChanged()
+{
+	ConversationModel model;
+	QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
+	model.reset({user(u"u1"_s, u"one"_s), assistant(u"a1"_s, {text(u"first"_s)}), user(u"u2"_s, u"two"_s), assistant(u"a2"_s, {text(u"second"_s)})});
+	QSignalSpy resets(&model, &QAbstractItemModel::modelReset);
+	QSignalSpy removed(&model, &QAbstractItemModel::rowsRemoved);
+	QSignalSpy inserted(&model, &QAbstractItemModel::rowsInserted);
+	const int rowsBefore = model.rowCount();
+
+	model.replaceHistory({user(u"u1"_s, u"one"_s), assistant(u"a1"_s, {text(u"first"_s)}), user(u"u3"_s, u"three"_s)});
+
+	QCOMPARE(resets.count(), 0);
+	QCOMPARE(removed.count(), 1);
+	QCOMPARE(removed.first().at(1).toInt(), 4); // u1 and a1 with their meta lines stay
+	QCOMPARE(removed.first().at(2).toInt(), rowsBefore - 1);
+	QCOMPARE(inserted.count(), 1);
+	QCOMPARE(inserted.first().at(1).toInt(), 4);
+	QCOMPARE(render(model).mid(0, 2), (QStringList{u"user:one"_s, u"markdown:first"_s}));
+	QCOMPARE(render(model).last(), u"user:three"_s);
+	QCOMPARE(model.partCount(u"a2"_s), -1);
+	QCOMPARE(model.partCount(u"a1"_s), 1);
+}
+
+void TestConversationModel::replacingHistoryWithTheSameLeavesTheRows()
+{
+	ConversationModel model;
+	QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
+	const QList<refgui::proto::Message> history{user(u"u1"_s, u"one"_s), assistant(u"a1"_s, {text(u"first"_s)})};
+	model.reset(history);
+	QSignalSpy rowChanges(&model, &QAbstractItemModel::rowsRemoved);
+	QSignalSpy rowAdditions(&model, &QAbstractItemModel::rowsInserted);
+
+	model.replaceHistory(history);
+
+	QCOMPARE(rowChanges.count(), 0);
+	QCOMPARE(rowAdditions.count(), 0);
+	model.replaceHistory({});
+	QCOMPARE(model.rowCount(), 0);
+	QCOMPARE(rowChanges.count(), 1);
 }
 
 void TestConversationModel::ignoresUnknownMessages()

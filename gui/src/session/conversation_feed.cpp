@@ -50,10 +50,15 @@ ConversationFeed::ConversationFeed(ConversationModel& model, QObject* parent)
 
 void ConversationFeed::reset(const QList<proto::Message>& messages)
 {
+	replace(messages, &ConversationModel::reset);
+}
+
+void ConversationFeed::replace(const QList<proto::Message>& messages, void (ConversationModel::*install)(const QList<proto::Message>&))
+{
 	const bool wasPending = hasPending();
 	m_pacer = {};
 	m_ticker.stop();
-	m_model.reset(messages);
+	(m_model.*install)(messages);
 	updatePending(wasPending);
 }
 
@@ -78,7 +83,7 @@ void ConversationFeed::apply(const proto::SessionEvent& event)
 	}
 	else if(const auto* reset = std::get_if<proto::ResetEvent>(&event))
 	{
-		this->reset(reset->messages);
+		replace(reset->messages, &ConversationModel::replaceHistory);
 	}
 }
 
