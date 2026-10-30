@@ -1,0 +1,14 @@
+{
+  "kind": "response",
+  "id": 34,
+  "ok": true,
+  "result": {
+    "path": "/home/user/project",
+    "dirs": [
+      "benches",
+      "crates",
+      "docs"
+    ]
+  },
+  "error": null
+}

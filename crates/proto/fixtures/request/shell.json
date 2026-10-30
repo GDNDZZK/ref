@@ -1,0 +1,6 @@
+{
+  "id": 14,
+  "op": "shell",
+  "session_id": "ses_a1b2c3d4",
+  "command": "git status --short"
+}

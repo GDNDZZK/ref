@@ -82,6 +82,7 @@ fn info(name: &str, agent: &str, cwd: &str) -> SessionInfo {
         },
         todos: Vec::new(),
         busy_since: None,
+        last_error: None,
     }
 }
 
@@ -1020,7 +1021,11 @@ impl Mock {
     fn handle(&self, f: ClientFrame) {
         let id = f.id;
         match f.req {
-            Request::Hello { .. } | Request::Ping => self.ok(id, json!({})),
+            Request::Hello { .. }
+            | Request::Ping
+            | Request::SetNotify { .. }
+            | Request::SetFocus { .. } => self.ok(id, json!({})),
+            Request::ListDirs { .. } => self.err(id, "not supported by the mock backend"),
             Request::GetConfig => self.ok(id, json!({ "config": config() })),
             Request::ListSessions => {
                 let w = self.w.lock().unwrap();

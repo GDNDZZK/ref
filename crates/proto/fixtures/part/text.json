@@ -1,0 +1,5 @@
+{
+  "type": "text",
+  "text": "The loop runs one step too far.\n\n```rust\nfor i in 0..items.len() {\n    let item = &items[i];\n}\n```",
+  "time": 1760000010000
+}

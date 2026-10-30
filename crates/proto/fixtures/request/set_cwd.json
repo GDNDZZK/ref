@@ -1,0 +1,6 @@
+{
+  "id": 20,
+  "op": "set_cwd",
+  "session_id": "ses_a1b2c3d4",
+  "path": "~/project/crates/parser"
+}
