@@ -248,7 +248,6 @@ private:
 	QString m_cwd;
 	refgui::workspace::Settings m_settings;
 	refgui::workspace::CommandRegistry m_commands;
-	// The chat sessions refer to the backend, so it is declared before them.
 	refgui::client::Backend m_backend;
 	refgui::workspace::SessionDirectory m_directory{m_backend};
 	refgui::workspace::BackendConfig m_config{m_backend};
@@ -257,7 +256,7 @@ private:
 	TileStage m_stage{&m_tiles};
 	ChatSession* m_current = nullptr;
 	QHash<QString, QString> m_seenLive; // sessions that were in the live list, with their directory; one that leaves it was closed
-	QSet<QString> m_leaving; // closed sessions whose chat session is about to go
+	QSet<QString> m_leaving; // closed sessions that the backend may still list; they must not come back
 	QString m_failure;
 	QString m_dialog;
 	QVariantMap m_dialogArgs;
