@@ -94,36 +94,78 @@ sleep 3600 | ref-server --mock      # stdout 只打印一行 {"port":N,"token":"
 | `peer` | 创建 `reviewer` 会话 `helper`，它用 `send_message` 回报 |
 | `everything` | `tools`、`todo` 和 `image` 连成一个长回合 |
 
+## GUI
+
+`ref-gui` 在 `gui/` 中（C++23、Qt Quick、CMake），与 Rust 工作区分开构建。需要支持 C++23 的编译器（GCC 13、较新的 Clang 或 Visual Studio 2022）、CMake 3.25 和 Ninja。依赖库由 `gui/scripts/` 中的两个脚本安装，CI 也运行它们；版本固定在 `gui/scripts/versions.sh`（Qt 6.12.0 通过 aqtinstall 安装官方预编译包；extra-cmake-modules、KSyntaxHighlighting 和 QCoro 从源码编译）：
+
+```bash
+export REF_DEPS_DIR=$HOME/ref-deps                 # 默认：gui/.deps
+gui/scripts/install-qt.sh
+gui/scripts/build-deps.sh
+cargo build -p ref-server                          # 有两个测试针对真实后端运行
+cmake -S gui -B gui/build -G Ninja \
+  -DCMAKE_PREFIX_PATH="$(gui/scripts/qt-dir.sh);$REF_DEPS_DIR/prefix" \
+  -DREF_SERVER=$PWD/target/debug/ref-server
+cmake --build gui/build
+QT_QPA_PLATFORM=offscreen QML_IMPORT_PATH=$REF_DEPS_DIR/prefix/lib/qml \
+  ctest --test-dir gui/build --output-on-failure
+```
+
+`ref-gui` 在运行时加载 KSyntaxHighlighting 的 QML 模块。它位于 `$REF_DEPS_DIR/prefix/lib/qml`，所以从构建目录运行程序时，这个目录必须在 `QML_IMPORT_PATH` 中。部署后的包自带这个模块。
+
+### 部署
+
+`gui/cmake/Deploy.cmake` 包含安装规则。`cmake --install` 复制程序，并通过 Qt 的部署 API 复制它需要的 Qt 库、插件和 QML 模块。QML 模块通过扫描 QML 源码中的 import 找到，所以新增 import 不需要修改任何清单。配置时加 `-DCMAKE_INSTALL_BINDIR=.`，得到 `ref-gui` 在顶层的平铺文件夹：
+
+```bash
+cmake -S gui -B gui/build -G Ninja -DCMAKE_INSTALL_BINDIR=. -DCMAKE_PREFIX_PATH=…
+cmake --build gui/build
+cmake --install gui/build --prefix stage
+scripts/package.sh --version v0.2.0 --target x86_64-unknown-linux-gnu \
+  --bin-dir target/release --out dist --gui-dir stage      # 需要先完成 Rust 构建，见上文
+```
+
+- **Linux**：库放在 `lib/`，程序的运行路径是 `$ORIGIN/lib`；`qt.conf` 让 Qt 到 `plugins/` 和 `qml/` 中查找。桌面用不到的插件（QML 调试、嵌入式显示、Wayland 辅助插件）不会部署。
+- **macOS**：`macdeployqt` 生成 `ref-gui.app`。`package.sh` 把它改名为 `ref.app`，把 `ref-server` 放进 `Contents/MacOS`，再运行 `scripts/sign-macos-app.sh`：由内向外重新做 ad-hoc 签名（没有开发者证书），并用 `codesign --verify --deep --strict` 检查。`all` 压缩包里的 `ref-server` 是指向 app 内那一份的符号链接。
+- **Windows**：`windeployqt` 把 DLL 和 Visual C++ 运行库复制到 `ref-gui.exe` 旁边，不含软件 OpenGL 后备。程序使用 GUI 子系统（不弹控制台窗口），并带有图标和版本资源。
+
+`scripts/verify-gui-package.sh DIR` 检查解压后的 `ref-gui` 压缩包，必须在它所构建的平台上运行。CI 在打包后运行它。它检查：不依赖构建机的环境时每个库都能找到、KSyntaxHighlighting 模块在包里、`ref-gui --smoke --mock` 能打开会话（Linux 上在 `xvfb-run` 下）。Linux 上还检查包对系统的要求，macOS 上检查签名以及没有引用 app 之外的路径，Windows 上检查 `ref-gui.exe` 使用 GUI 子系统。
+
+**Linux 的要求。** C++23 需要 GCC 13，而 Ubuntu 22.04 没有，所以 CI 在 Ubuntu 24.04 上构建 Linux 的 GUI，`ref`、`ref-web` 和 `ref-server` 仍在 22.04 上构建。Qt 6.12.0 自带的库最多需要 glibc 2.34。用 GCC 13 编译的程序需要 `libstdc++` 中的 `CXXABI_1.3.14`，Ubuntu 22.04 和 Debian 12 的 GCC 12 没有它。因此，只要包里有东西需要高于 glibc 2.35、`GLIBCXX_3.4.32` 或 `CXXABI_1.3.14`，`verify-gui-package.sh` 就会失败；README 写的是同样的数字。如果更新的编译器或 Qt 抬高了其中某项，请同时修改脚本开头的常量和 README。
+
 ## 持续集成与发布
 
 `.github/workflows/` 中有两个 GitHub Actions 工作流。两者都先用 `.github/actions/` 中的 action 构建前端（Node 24、带缓存的 pnpm、`pnpm install --frozen-lockfile`、`pnpm build`）。
 
-- **`ci.yml`** 在每次推送和拉取请求时运行：在 Linux 上执行 `cargo fmt --check` 和 `cargo clippy -D warnings`，在 Linux、macOS 和 Windows 上执行 `cargo test`，并运行前端的 `pnpm check`。测试或前端检查失败时，失败输出会在运行摘要中再显示一次。
-- **`release.yml`** 在推送 `v*` 标签时运行。它先构建一次前端，再在原生 runner 上为六个目标构建 `ref`、`ref-server` 和 `ref-web`（每个目标一次 `cargo build --release --workspace`），并用 `scripts/package.sh` 打包。最后一个任务生成 `SHA256SUMS` 文件，标签触发时发布 GitHub Release。每次构建都会在运行摘要中列出各压缩包的体积。
+- **`ci.yml`** 在每次推送和拉取请求时运行：在 Linux 上执行 `cargo fmt --check` 和 `cargo clippy -D warnings`，在 Linux、macOS（Intel）和 Windows 上执行 `cargo test`，运行前端的 `pnpm check`，并在同样三个系统上构建 GUI 并运行它的测试（`ctest`）。GUI 的依赖库来自 `gui/scripts`，按这些脚本的哈希缓存。测试或前端检查失败时，失败输出会在运行摘要中再显示一次。
+- **`release.yml`** 在推送 `v*` 标签时运行。它的任务依次是：构建一次前端；在原生 runner 上为六个目标构建 `ref`、`ref-server` 和 `ref-web`（每个目标一次 `cargo build --release --workspace`）；为每个目标构建并部署 GUI，用 `scripts/package.sh` 打出四个压缩包，再用 `scripts/verify-gui-package.sh` 检查 GUI 压缩包；生成 `SHA256SUMS` 文件，标签触发时发布 GitHub Release。每个打包任务都会在运行摘要中列出各压缩包的体积。
 
-| 目标 | Runner | 压缩包 |
+| 目标 | Runner（Linux 的 GUI 与打包） | 压缩包 |
 |---|---|---|
-| `x86_64-unknown-linux-gnu` | Ubuntu 22.04 | `.tar.gz` |
-| `aarch64-unknown-linux-gnu` | Ubuntu 22.04 arm64 | `.tar.gz` |
+| `x86_64-unknown-linux-gnu` | Ubuntu 22.04（24.04） | `.tar.gz` |
+| `aarch64-unknown-linux-gnu` | Ubuntu 22.04 arm64（24.04 arm64） | `.tar.gz` |
 | `x86_64-apple-darwin` | macOS 15 Intel | `.tar.gz` |
 | `aarch64-apple-darwin` | macOS 15 | `.tar.gz` |
 | `x86_64-pc-windows-msvc` | Windows Server 2025 | `.zip` |
 | `aarch64-pc-windows-msvc` | Windows 11 arm64 | `.zip` |
 
-每个目标生成三个压缩包。每个压缩包里是一个同名文件夹，包含该界面、`ref-server`、两个 README、许可证和 `docs/`。
+每个目标生成四个压缩包。每个压缩包里是一个同名文件夹，包含该界面、`ref-server`、两个 README、许可证和 `docs/`。
 
 | 压缩包 | 程序 |
 |---|---|
 | `ref-tui-<version>-<target>` | `ref`、`ref-server` |
+| `ref-gui-<version>-<target>` | GUI（见[部署](#部署)）、`ref-server` |
 | `ref-web-<version>-<target>` | `ref-web`、`ref-server` |
-| `ref-all-<version>-<target>` | `ref`、`ref-web`、`ref-server` |
+| `ref-all-<version>-<target>` | `ref`、`ref-web`、GUI、`ref-server` |
 
 在 `cargo build --release` 之后手动打包：
 
 ```bash
 scripts/package.sh --version v0.2.0 --target x86_64-unknown-linux-gnu \
-  --bin-dir target/release --out dist
+  --bin-dir target/release --out dist [--gui-dir stage]
 ```
+
+不带 `--gui-dir`（`cmake --install` 的结果文件夹，见[部署](#部署)）时不生成 `gui` 压缩包，`all` 里也没有 GUI。
 
 发布新版本：
 

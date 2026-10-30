@@ -55,8 +55,9 @@ const active = computed(() => props.busy || props.canSend)
     scale var(--motion-quick) var(--motion-ease);
 }
 
+/* Shell mode sets --send-active to its amber. */
 .active .face {
-  background: var(--accent);
+  background: var(--send-active, var(--accent));
   color: var(--on-accent);
 }
 

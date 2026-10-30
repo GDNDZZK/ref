@@ -10,29 +10,20 @@ import Composer from './Composer.vue'
 import Flourish from './Flourish.vue'
 import { chatSessionKey } from '../composables/chatSessionContext.ts'
 import type { ChatSession } from '../model/chatSession.ts'
-import { useNoticesStore } from '../stores/notices.ts'
+import { useComposerStore } from '../stores/composer.ts'
 import { motion } from '../theme/generated/motion.ts'
 
 const ALERT_RING_REACH = 2.5
 
 const { t } = useI18n()
 const props = defineProps<{ session: ChatSession }>()
-const notices = useNoticesStore()
+const composer = useComposerStore().of(props.session.id)
 provide(chatSessionKey, props.session)
 
 const following = ref(true)
-const composer = useTemplateRef<InstanceType<typeof Composer>>('composer')
+const composerBox = useTemplateRef<InstanceType<typeof Composer>>('composerBox')
 
-onMounted(() => composer.value?.focus())
-
-function send(text: string): void {
-  following.value = true
-  props.session.send(text).catch((error) => notices.pushError(error))
-}
-
-function stop(): void {
-  props.session.stop().catch((error) => notices.pushError(error))
-}
+onMounted(() => composerBox.value?.focus())
 
 // An error that arrived out of sight puts a badge on the jump button, until the button is gone.
 // The badge stays while the button fades out, so it does not pop away first.
@@ -81,7 +72,7 @@ watch(following, (isFollowing) => {
             <span ref="alertBadge" class="alert-dot"><AlertBadge :size="12" /></span>
           </span>
         </div>
-        <Composer ref="composer" :busy="session.busy" @submitted="send" @stop-requested="stop" />
+        <Composer ref="composerBox" :session="session" :composer="composer" @submitted="following = true" />
       </div>
     </div>
   </div>
