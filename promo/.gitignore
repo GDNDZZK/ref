@@ -1,0 +1,5 @@
+node_modules/
+dist/
+# Finished videos and intermediate renders are not tracked.
+out/
+.cache/

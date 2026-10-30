@@ -1,0 +1,86 @@
+/* Stage: a fixed 1920x1080 canvas. Nothing may animate by itself; all motion comes from seek(). */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  animation: none !important;
+  transition: none !important;
+}
+
+:root {
+  --font-sans: system-ui, 'Segoe UI', Roboto, 'Noto Sans', 'Noto Sans CJK SC', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace;
+  --stage-width: 1920px;
+  --stage-height: 1080px;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  overflow: hidden;
+}
+
+#viewport {
+  width: var(--stage-width);
+  height: var(--stage-height);
+}
+
+#stage {
+  position: relative;
+  width: var(--stage-width);
+  height: var(--stage-height);
+  overflow: hidden;
+  background: var(--background);
+}
+
+.shot {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--background);
+}
+
+.part {
+  position: absolute;
+}
+
+:root[data-preview] body {
+  overflow: auto;
+  background: #000;
+}
+
+:root[data-preview] #viewport {
+  width: calc(1920px * var(--preview-scale));
+  height: calc(1080px * var(--preview-scale));
+}
+
+:root[data-preview] #stage {
+  transform: scale(var(--preview-scale));
+  transform-origin: 0 0;
+}
+
+.debug-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+  background: #111;
+  color: #ddd;
+  font: 13px var(--font-mono);
+}
+
+.debug-bar input {
+  flex: 1;
+}
