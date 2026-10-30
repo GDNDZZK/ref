@@ -2,13 +2,14 @@
 
 import type { EasingName } from '../../motion/easing.ts'
 
-// ms, except enterDrop and chaseSnap (px)
+// ms, except the px distances and unitless scales listed in MOTION_UNITS of scripts/gen-theme.ts
 export const motion = {
   quick: 120,
   standard: 260,
   slow: 480,
   pulse: 1100,
   calmPulse: 1800,
+  interruptWindow: 1500,
   enterDrop: 48,
   followLag: 70,
   chaseSnap: 0.5,
