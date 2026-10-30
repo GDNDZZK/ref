@@ -73,7 +73,7 @@ struct ToastNotifier::State
 
 	QString reason;
 	toast::ToastNotifier notifier{nullptr};
-	std::map<QString, Shown> shown; // by session: a newer toast replaces the older one
+	std::map<QString, Shown> shown; // by tag: a newer toast of the same session and kind replaces the older one
 
 	void revoke(Shown& entry)
 	{
@@ -136,7 +136,9 @@ void ToastNotifier::show(const Notification& notification)
 		texts.Item(1).AppendChild(xml.CreateTextNode(winrt::hstring(notification.body.toStdWString())));
 
 		toast::ToastNotification message{xml};
-		message.Tag(winrt::hstring(notification.sessionId.left(MaxTagLength).toStdWString()));
+		// The kind comes first so that it survives the cut, like the tag of a Web notification.
+		const QString tag = u"%1:%2"_s.arg(static_cast<int>(notification.kind)).arg(notification.sessionId).left(MaxTagLength);
+		message.Tag(winrt::hstring(tag.toStdWString()));
 
 		// These run on a thread of the Windows runtime; hand over to the main thread.
 		const QString session = notification.sessionId;
@@ -150,13 +152,13 @@ void ToastNotifier::show(const Notification& notification)
 			QMetaObject::invokeMethod(this, [this, notification, reason] { emit showFailed(notification, reason); }, Qt::QueuedConnection);
 		});
 
-		if(const auto previous = m_state->shown.find(session); previous != m_state->shown.end())
+		if(const auto previous = m_state->shown.find(tag); previous != m_state->shown.end())
 		{
 			m_state->revoke(previous->second);
 			m_state->shown.erase(previous);
 		}
 		m_state->notifier.Show(message);
-		m_state->shown.emplace(session, std::move(entry));
+		m_state->shown.emplace(tag, std::move(entry));
 	}
 	catch(const winrt::hresult_error& error)
 	{

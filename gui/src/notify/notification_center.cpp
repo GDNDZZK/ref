@@ -40,11 +40,15 @@ NotificationCenter::NotificationCenter(client::Backend& backend, std::unique_ptr
 	, m_notifier(std::move(notifier))
 {
 	connect(&m_backend.client(), &client::ServerClient::frameReceived, this, &NotificationCenter::onFrame);
-	// A new connection starts with what Hello said; tell it everything we know.
+	// A new connection starts with what Hello said; tell it what changed since. The kinds may
+	// have changed while Hello was on its way, when nothing could be sent yet.
 	connect(&m_backend, &client::Backend::connected, this,
 	        [this]
 	        {
-		        sendKinds();
+		        if(m_backend.helloNotifyKinds() != m_kinds)
+		        {
+			        sendKinds();
+		        }
 		        sendFocus();
 	        });
 	connect(m_notifier.get(), &Notifier::availabilityChanged, this, &NotificationCenter::availabilityChanged);
