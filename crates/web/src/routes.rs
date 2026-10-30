@@ -43,6 +43,7 @@ pub struct AppState {
     /// Directory new sessions start in ([DIR]).
     pub cwd: String,
     pub upstream: Upstream,
+    pub heartbeat: tunnel::Heartbeat,
     pub shutdown: CancellationToken,
 }
 
