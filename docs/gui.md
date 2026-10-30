@@ -88,7 +88,7 @@ The split view (Ctrl+Shift+W, the button at the top right, or `ref-gui -w`) show
 - Every tool call is a card: a state mark, the tool's icon and name, what it is for, one line from its arguments (command, path, pattern, URL, …), the state, how long it took and when it started. Click the header to open it. Failed calls show the first line of the error when folded.
 - Open cards show what is useful for the tool: a diff for edits and writes, the command, output and exit code for bash (a non-zero code is a red label; timeout, cancel and truncation have labels too), numbered lines for read and grep (matches highlighted, gaps marked), the paths for find, status code, type and size for webfetch with *Open in browser*, the recipient and text for messages to other sessions. The to-do list of a `todo` call is always open. Anything else shows its input and output as text.
 - Long output is cut to 200 lines with *Show N more lines*; code lines scroll sideways. A bash call that is still running shows its last 20 lines. Output has a *Copy* button.
-- A tool that is waiting for a delay shows a ring and a *Cancel* button. Esc in the input box cancels it too.
+- A tool that is waiting for a delay shows a ring and a *Cancel* button. *Cancel*, or a single Esc in the input box, stops the turn before the tool runs.
 
 **Permissions**
 
