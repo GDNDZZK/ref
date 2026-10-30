@@ -34,6 +34,9 @@ public:
 	ConversationModel& model() { return m_model; }
 	const ConversationModel& model() const { return m_model; }
 	const proto::SessionInfo& info() const { return m_info; }
+	// Messages waiting for the next safe point, in delivery order: the server's word, from the
+	// snapshot and Queue events. Prompts of the user can be withdrawn while they are here.
+	const QList<proto::Message>& queued() const { return m_queued; }
 	// Empty until a session is attached.
 	const QString& sessionId() const { return m_sessionId; }
 	bool hasSession() const { return !m_sessionId.isEmpty(); }
@@ -60,6 +63,7 @@ signals:
 	void infoChanged();
 	void busyChanged();
 	void turnInProgressChanged();
+	void queueChanged();
 	// The backend reported a problem with the session (an Error event).
 	void errorReported(const QString& text);
 	// A toast the backend wants shown.
@@ -73,12 +77,14 @@ private:
 	void onFrame(const proto::ServerFrame& frame);
 	void onEvent(const proto::SessionEvent& event);
 	void setInfo(const proto::SessionInfo& info);
+	void setQueued(QList<proto::Message> messages);
 
 	client::Backend& m_backend;
 	ConversationModel m_model;
 	ConversationFeed m_feed;
 	QString m_sessionId;
 	proto::SessionInfo m_info;
+	QList<proto::Message> m_queued;
 };
 
 } // namespace refgui::session

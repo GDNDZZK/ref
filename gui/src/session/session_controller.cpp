@@ -117,6 +117,7 @@ QCoro::Task<> SessionController::reattach()
 void SessionController::adopt(const proto::SessionSnapshot& snapshot)
 {
 	m_feed.reset(snapshot.messages);
+	setQueued(snapshot.queued);
 	setInfo(snapshot.info);
 }
 
@@ -141,14 +142,24 @@ void SessionController::onEvent(const proto::SessionEvent& event)
 	{
 		setInfo(info->info);
 	}
+	else if(const auto* queue = std::get_if<proto::QueueEvent>(&event))
+	{
+		setQueued(queue->messages);
+	}
 	else if(const auto* error = std::get_if<proto::ErrorEvent>(&event))
 	{
 		emit errorReported(error->text);
 	}
 	else
 	{
-		m_feed.apply(event); // ignores permission and queue events: tool parts carry their state
+		m_feed.apply(event); // ignores permission events: tool parts carry their state
 	}
+}
+
+void SessionController::setQueued(QList<proto::Message> messages)
+{
+	m_queued = std::move(messages);
+	emit queueChanged();
 }
 
 void SessionController::setInfo(const proto::SessionInfo& info)
