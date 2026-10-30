@@ -131,8 +131,10 @@ public:
 	Q_INVOKABLE int attachUrls(const QList<QUrl>& urls);
 	Q_INVOKABLE void removeAttachment(int row);
 
+
+public slots:
 	// Puts a prompt that was taken back (undo) into the draft.
-	void restoreDraft(const QString& text, const QList<proto::NamedImage>& images);
+	void restoreDraft(const QString& text, const QList<refgui::proto::NamedImage>& images);
 
 signals:
 	// The text, the cursor or the attachments changed, by whoever.
