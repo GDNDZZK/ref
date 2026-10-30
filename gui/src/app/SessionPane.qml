@@ -43,6 +43,7 @@ Item {
 		onLoadOlderRequested: pane.session.loadOlder()
 		onImageClicked: image => lightbox.open(pane.session.sessionId, image)
 		onCancelRequested: pane.session.cancelDelayedTool()
+		onUndoRequested: messageId => pane.session.undo(messageId)
 		onCopyRequested: messageId => pane.session.copyMessage(messageId)
 		onPermissionAnswered: (callId, allow, always) => pane.session.permissionReply(callId, allow, always)
 	}
