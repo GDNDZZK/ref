@@ -361,6 +361,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(windows, ignore = "`:` is not allowed in Windows file names")]
     async fn suffix_only_when_literal_missing() {
         let d = temp_dir("read-literal");
         std::fs::write(d.join("x:1-2"), "literal\n").unwrap();

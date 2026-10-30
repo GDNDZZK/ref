@@ -674,7 +674,13 @@ mod tests {
         assert_eq!(o.meta.as_ref().unwrap()["exit_code"], json!(3));
         assert_eq!(&*streamed.lock().unwrap(), "one\ntwo\nred\n");
         let o = bash(&c, json!({"command": "pwd", "cwd": "."})).await;
-        assert_eq!(o.text, d.to_string_lossy());
+        if cfg!(windows) {
+            // Git Bash prints `/c/Users/...` for `C:\Users\...`; compare the directory name.
+            let name = d.file_name().unwrap().to_string_lossy().into_owned();
+            assert!(o.text.ends_with(&format!("/{name}")), "{}", o.text);
+        } else {
+            assert_eq!(o.text, d.to_string_lossy());
+        }
         let o = bash(&c, json!({"command": "true"})).await;
         assert_eq!(o.text, "(no output)");
         let o = bash(&c, json!({"command": "echo $TERM $PAGER $NO_COLOR"})).await;

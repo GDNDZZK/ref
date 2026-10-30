@@ -1536,8 +1536,13 @@ async fn set_cwd_switches_directory_and_tells_the_model() {
         .find(|b| b.get("tools").is_some())
         .unwrap();
     let all = body["messages"].to_string();
+    // The body is JSON text, where Windows backslashes are escaped.
+    let new_json = serde_json::to_string(&new).unwrap();
+    let new_json = new_json.trim_matches('"');
     assert!(
-        body["messages"][0]["content"].to_string().contains(&new),
+        body["messages"][0]["content"]
+            .to_string()
+            .contains(new_json),
         "system prompt uses the new cwd"
     );
     assert!(all.contains("changed the working directory"), "{all}");

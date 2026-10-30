@@ -268,7 +268,12 @@ async fn env_cwd_and_stderr_drain() {
         .unwrap();
     let tok = CancellationToken::new();
     let r = c.call_tool("env", json!({}), &tok).await.unwrap();
-    assert_eq!(r.text, format!("val|{}|path", dir.display()));
+    // canonicalize() adds a `\\?\` prefix on Windows that the server's getcwd() does not report.
+    let shown = dir
+        .to_string_lossy()
+        .trim_start_matches(r"\\?\")
+        .to_string();
+    assert_eq!(r.text, format!("val|{shown}|path"));
     // ~400KB of stderr must not block the server.
     let r = tokio::time::timeout(
         Duration::from_secs(10),

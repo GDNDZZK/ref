@@ -151,10 +151,13 @@ pub fn normalize_lexical(p: &Path) -> PathBuf {
 }
 
 /// Path shown to the model: relative to `cwd` when inside it, else absolute.
+/// Relative paths use `/` on every platform (Windows accepts it, and so does Git Bash).
+/// Absolute paths keep the native form: `\\?\` paths only work with `\`.
 pub fn display_path(cwd: &Path, abs: &Path) -> String {
     let cwd = normalize_lexical(cwd);
     match abs.strip_prefix(&cwd) {
         Ok(rel) if rel.as_os_str().is_empty() => ".".to_string(),
+        Ok(rel) if cfg!(windows) => rel.to_string_lossy().replace('\\', "/"),
         Ok(rel) => rel.to_string_lossy().into_owned(),
         Err(_) => abs.to_string_lossy().into_owned(),
     }
