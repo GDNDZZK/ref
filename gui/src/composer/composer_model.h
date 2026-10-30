@@ -15,6 +15,7 @@
 #include <QUrl>
 
 #include <chrono>
+#include <optional>
 
 namespace refgui::composer
 {
@@ -187,7 +188,7 @@ private:
 	QueueModel m_queue;
 	FileModel m_files;
 	QTimer m_fileTimer;
-	QString m_fileQuery;
+	std::optional<QString> m_fileQuery; // the query the list is for or is being fetched for
 	quint64 m_fileSerial = 0;
 	QTimer m_interruptTimer;
 	proto::ServerConfig m_config;

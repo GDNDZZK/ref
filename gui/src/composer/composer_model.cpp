@@ -211,16 +211,17 @@ void ComposerModel::updateCompletion()
 {
 	const compose::CompletionTarget target = compose::completionTarget(m_draft.text(), m_draft.cursor(), m_shellMode);
 	const bool wantsFiles = target.kind == compose::CompletionTarget::Kind::File && !m_completionDismissed;
-	const bool queryChanged = target.kind != m_target.kind || target.query != m_target.query;
 	m_target = target;
 	if(!wantsFiles)
 	{
 		m_fileTimer.stop();
 		++m_fileSerial; // answers still on their way are stale
+		m_fileQuery.reset();
 		m_files.setPaths({});
 	}
-	else if(queryChanged)
+	else if(m_fileQuery != target.query)
 	{
+		m_fileQuery = target.query;
 		++m_fileSerial;
 		m_fileTimer.start();
 	}
