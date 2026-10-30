@@ -421,13 +421,18 @@ defineExpose({ focus: () => input.value?.focus() })
 }
 
 .tag-row > :first-child {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
 }
 
+.tag-row > :last-child {
+  margin-left: auto;
+}
+
 .hint {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   max-width: 0; /* takes no room from the tags until it is shown */
   overflow: hidden;
   color: var(--text);
