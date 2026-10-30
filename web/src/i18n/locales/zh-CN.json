@@ -8,7 +8,36 @@
   "composer": {
     "placeholder": "给 ref 发消息",
     "send": "发送",
-    "stop": "停止"
+    "stop": "停止",
+    "label": "消息",
+    "placeholderWaiting": "正在等待 ref 后端…",
+    "placeholderQueue": "输入后加入队列…",
+    "placeholderShell": "运行 shell 命令…",
+    "interruptHint": "再按一次 Esc 中断",
+    "dropImages": "拖放图片以附加",
+    "tags": {
+      "agent": "智能体（Tab）",
+      "model": "模型",
+      "variant": "变体（Alt+T）",
+      "defaultVariant": "默认",
+      "shell": "Shell"
+    },
+    "attachments": {
+      "remove": "移除 {name}"
+    },
+    "queue": {
+      "remove": "撤回",
+      "reminder": "提醒"
+    },
+    "toast": {
+      "expandedToNothing": "命令展开后为空",
+      "delayedCancelled": "已取消延迟中的工具调用",
+      "alreadySent": "已经发送，无法再撤回该提示",
+      "image": {
+        "type": "{name} 不是支持的图片（PNG、JPEG、GIF 或 WebP）",
+        "size": "{name} 超过 20 MiB"
+      }
+    }
   },
   "code": {
     "plainText": "文本",
@@ -37,5 +66,26 @@
   },
   "command": {
     "unavailable": "这个命令现在不可用。"
+  },
+  "notify": {
+    "permission": "等待授权",
+    "permissionTool": "等待授权使用 {tool}",
+    "turnDone": "已完成",
+    "turnError": "因错误而停止",
+    "turnErrorDetail": "因错误而停止：{error}"
+  },
+  "notifySettings": {
+    "title": "通知",
+    "enable": "显示系统通知",
+    "permission": "工具需要授权",
+    "turnDone": "一轮对话结束",
+    "turnError": "一轮对话出错结束",
+    "insecure": "此页面不可用：浏览器只在 https 或 localhost 页面显示通知。改为让标签页标题闪烁提醒。",
+    "unsupported": "此浏览器无法显示通知。改为让标签页标题闪烁提醒。",
+    "denied": "已在浏览器的站点设置中被禁止。改为让标签页标题闪烁提醒。",
+    "needsPermission": "还需要浏览器允许通知。",
+    "allow": "允许",
+    "later": "暂不",
+    "prompt": "其他会话需要你时，允许显示桌面通知吗？"
   }
 }
