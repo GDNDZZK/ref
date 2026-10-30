@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/proto", "crates/config", "crates/llm", "crates/tools", "crates/mcp", "crates/sys", "crates/server", "crates/client", "crates/tui"]
+members = ["crates/proto", "crates/config", "crates/llm", "crates/tools", "crates/mcp", "crates/sys", "crates/server", "crates/client", "crates/tui", "crates/web"]
 
 [workspace.package]
 version = "0.1.0"
@@ -15,6 +15,11 @@ ref-tools = { path = "crates/tools" }
 ref-mcp = { path = "crates/mcp" }
 ref-sys = { path = "crates/sys" }
 ref-client = { path = "crates/client" }
+ref-server = { path = "crates/server" }
+axum = { version = "0.8", features = ["ws"] }
+brotli = "9"
+flate2 = "1"
+open = "5"
 tokio = { version = "1.54", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 tokio-tungstenite = "0.30"
