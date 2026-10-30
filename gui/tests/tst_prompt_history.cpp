@@ -143,8 +143,8 @@ void TestPromptHistory::imagePathsAreRecognised()
 
 	const auto plain = imageFromPath(path);
 	QVERIFY(plain && plain->has_value());
-	QCOMPARE((*plain)->image.mime, u"image/png"_s);
-	QCOMPARE((*plain)->image.data, u"YWJj"_s);
+	QCOMPARE((*plain)->mime, u"image/png"_s);
+	QCOMPARE((*plain)->data, u"YWJj"_s);
 	QCOMPARE((*plain)->name, u"my shot.PNG"_s);
 
 	const QString escaped = QString(path).replace(u' ', u"\\ "_s);

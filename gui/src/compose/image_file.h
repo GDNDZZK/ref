@@ -1,6 +1,6 @@
 #pragma once
 
-#include "compose/prompt_draft.h"
+#include "proto/types.h"
 
 #include <QByteArray>
 #include <QString>
@@ -16,9 +16,9 @@ namespace refgui::compose
 // the TUI does. png, jpg/jpeg, gif and webp up to 20 MiB are images.
 //   nullopt  not an image path: treat the text as text
 //   error    it names an image file that cannot be used (unreadable, too large)
-std::expected<std::optional<NamedImage>, QString> imageFromPath(const QString& text);
+std::expected<std::optional<proto::NamedImage>, QString> imageFromPath(const QString& text);
 
 // Image bytes from memory, e.g. a screenshot on the clipboard encoded as PNG.
-NamedImage imageFromBytes(const QByteArray& bytes, const QString& mime, const QString& name);
+proto::NamedImage imageFromBytes(const QByteArray& bytes, const QString& mime, const QString& name);
 
 } // namespace refgui::compose
