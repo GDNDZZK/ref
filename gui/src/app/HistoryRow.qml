@@ -23,6 +23,7 @@ Item {
 		Behavior on scale { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 
 		Text {
+			textFormat: Text.PlainText
 			x: 12
 			y: 5
 			width: parent.width - 2 * 12
@@ -34,6 +35,7 @@ Item {
 			elide: Text.ElideRight
 		}
 		Text {
+			textFormat: Text.PlainText
 			x: 12
 			y: 23
 			width: parent.width - 2 * 12

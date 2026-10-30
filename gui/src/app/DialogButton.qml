@@ -31,6 +31,7 @@ Item {
 		Behavior on scale { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 
 		Text {
+			textFormat: Text.PlainText
 			id: label
 			anchors.centerIn: parent
 			color: button.filled ? Theme.onAccent : Theme.text

@@ -1,5 +1,5 @@
-// The commands this app itself provides (area B). The conversation commands (undo, copy,
-// thinking, details) are registered by the conversation view.
+// The commands of the app: sessions, view, help, and the conversation commands (undo, copy,
+// thinking, details), which act on the session's ChatSession.
 
 import { translate } from '../i18n/index.ts'
 import { rowState } from '../shell/sessionRow.ts'
@@ -101,6 +101,36 @@ export function registerBuiltinCommands(): void {
       shortcut: altKey('C'),
       enabled: hasSession,
       run: (sessionId) => workspace.compact(sessionId),
+    }),
+    define({
+      id: 'undo',
+      shortcut: altKey('U'),
+      enabled: hasSession,
+      run: (sessionId) => workspace.chat(sessionId).undoLast(),
+    }),
+    define({
+      id: 'copy',
+      shortcut: altKey('Y'),
+      enabled: hasSession,
+      run: async (sessionId) => {
+        const copied = await workspace.chat(sessionId).copyLastReply()
+        if (copied) notices.push('info', translate('code.copied'))
+        else notices.push('warn', translate('command.copy.nothing'))
+      },
+    }),
+    define({
+      id: 'thinking',
+      group: 'view',
+      shortcut: altKey('R'),
+      enabled: hasSession,
+      run: (sessionId) => workspace.chat(sessionId).toggleReasoning(),
+    }),
+    define({
+      id: 'details',
+      group: 'view',
+      shortcut: altKey('O'),
+      enabled: hasSession,
+      run: (sessionId) => workspace.chat(sessionId).toggleDetails(),
     }),
     define({
       id: 'rename',

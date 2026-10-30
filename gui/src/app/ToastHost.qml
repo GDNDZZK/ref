@@ -151,6 +151,7 @@ Item {
 					}
 
 					Text {
+						textFormat: Text.PlainText
 						id: message
 						x: 12 + 16 + 10
 						y: 10

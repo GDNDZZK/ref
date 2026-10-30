@@ -57,6 +57,7 @@ ModalDialog {
 				spacing: 2
 
 				Text {
+					textFormat: Text.PlainText
 					width: parent.width
 					text: row.displayTitle
 					color: Theme.text
@@ -64,6 +65,7 @@ ModalDialog {
 					elide: Text.ElideRight
 				}
 				Text {
+					textFormat: Text.PlainText
 					width: parent.width
 					text: row.isLive ? row.dirName : row.dirName + " · " + Format.relativeTime(row.updatedAt)
 					color: Theme.textMuted

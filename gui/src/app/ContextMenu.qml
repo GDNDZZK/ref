@@ -50,6 +50,7 @@ Popup {
 					Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 				}
 				Text {
+					textFormat: Text.PlainText
 					id: label
 					anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }
 					text: entry.modelData.text
