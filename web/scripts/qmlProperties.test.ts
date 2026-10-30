@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findProperty, parseProperties, parseValue } from './qmlProperties.ts'
+import { cssColor, findProperty, parseProperties, parseValue } from './qmlProperties.ts'
 
 function valueOf(declaration: string) {
   const [property] = parseProperties(declaration)
@@ -65,5 +65,16 @@ describe('findProperty', () => {
   it('reports missing and duplicate properties', () => {
     expect(() => findProperty(properties, 'c', 'x.qml')).toThrow('not found')
     expect(() => findProperty(properties, 'b', 'x.qml')).toThrow('more than once')
+  })
+})
+
+describe('cssColor', () => {
+  it('moves the alpha of a Qt color to the end', () => {
+    expect(cssColor('#8c000000')).toBe('#0000008c')
+    expect(cssColor('#40112233')).toBe('#11223340')
+  })
+
+  it('leaves opaque colors alone', () => {
+    expect(cssColor('#7aa2f7')).toBe('#7aa2f7')
   })
 })

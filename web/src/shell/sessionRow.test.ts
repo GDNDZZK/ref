@@ -4,7 +4,6 @@ import type { Todo } from '../proto/generated'
 import {
   dirName,
   displayTitle,
-  formatElapsed,
   matchesQuery,
   relativeTime,
   rowState,
@@ -52,14 +51,7 @@ describe('todoProgress', () => {
   })
 })
 
-describe('formatElapsed', () => {
-  it('uses seconds, minutes and hours', () => {
-    expect(formatElapsed(45_000)).toBe('45s')
-    expect(formatElapsed(185_000)).toBe('3m 05s')
-    expect(formatElapsed(3_720_000)).toBe('1h 02m')
-    expect(formatElapsed(-5)).toBe('0s')
-  })
-
+describe('runningTime', () => {
   it('has a running time only while busy', () => {
     expect(runningTime(info({ busy_since: 1000 }), 6000)).toBe('5s')
     expect(runningTime(info(), 6000)).toBeUndefined()

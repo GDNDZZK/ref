@@ -150,7 +150,8 @@
       "title": "导出对话为 Markdown"
     },
     "copy": {
-      "title": "复制最后一条回复（原文）"
+      "title": "复制最后一条回复（原文）",
+      "nothing": "没有可复制的回复。"
     },
     "thinking": {
       "title": "展开 / 折叠推理"
