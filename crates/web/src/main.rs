@@ -11,11 +11,13 @@ mod upstream;
 
 use std::net::IpAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context as _;
 use clap::Parser;
 use ref_client::Target;
 use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 
 use crate::guard::{HostPolicy, SessionCookie};
 use crate::routes::AppState;
@@ -25,6 +27,8 @@ use crate::upstream::Upstream;
 const DEFAULT_PORT: u16 = 7480;
 const DEFAULT_HOST: &str = "127.0.0.1";
 const LOCALHOST: &str = "localhost";
+/// How long shutdown waits for tabs to receive their close frame.
+const TUNNEL_CLOSE_GRACE: Duration = Duration::from_secs(3);
 
 #[derive(Parser, Debug)]
 #[command(
@@ -145,6 +149,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         upstream: upstream_for(&cli),
         heartbeat: Heartbeat::DEFAULT,
         shutdown: shutdown.clone(),
+        tunnels: TaskTracker::new(),
     });
     let stop = shutdown.clone();
     tokio::spawn(async move {
@@ -154,6 +159,13 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     let served = axum::serve(listener, routes::router(state.clone()))
         .with_graceful_shutdown(async move { shutdown.cancelled().await })
         .await;
+    state.tunnels.close();
+    if tokio::time::timeout(TUNNEL_CLOSE_GRACE, state.tunnels.wait())
+        .await
+        .is_err()
+    {
+        eprintln!("ref-web: some tabs did not close in time");
+    }
     state.upstream.shutdown().await;
     served.context("server failed")
 }

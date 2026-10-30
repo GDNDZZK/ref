@@ -329,7 +329,8 @@ async fn unreachable_backend_closes_the_tab_with_the_reason() {
 async fn a_real_backend_accepts_a_hello_without_token() {
     let env = Env::new("real");
     let (_backend, backend_port) = real_backend(&env, BACKEND_TOKEN).await;
-    let server = format!("ws://127.0.0.1:{backend_port}/");
+    // No trailing slash: the form users type.
+    let server = format!("ws://127.0.0.1:{backend_port}");
     let web = env
         .start(&["--server", &server, "--token", BACKEND_TOKEN])
         .await;
