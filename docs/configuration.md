@@ -167,7 +167,8 @@ ref speaks three APIs. It picks one from `npm`, unless `api` is set:
       "context": 200000,                // context window in tokens (default 128000)
       "output": 32000,                  // max output tokens
       "input": 180000,                  // accepted for opencode compatibility, not used
-      "compact": 120000                 // ref: recommended compaction point in tokens
+      "compact": 120000,                // ref: recommended compaction point in tokens
+      "threshold": 0.8                  // ref: automatic compaction point for this model (fraction, or tokens if above 1)
     },
     "attachment": true,                 // accepts images (or "modalities": {"input": ["text", "image"]})
     "reasoning": true,                  // reasoning model ("thinking" also works)
@@ -340,7 +341,7 @@ Keys are tool-name globs and values are seconds. The last matching key wins. `"d
 }
 ```
 
-Values up to 1 are fractions of the context window. Larger values are token counts. A model's `limit.compact` overrides `recommend` for that model.
+Values up to 1 are fractions of the context window. Larger values are token counts. A model's `limit.compact` overrides `recommend` for that model. A model's `limit.threshold` overrides `threshold` for that model, with the same meaning of the value.
 
 The model sees both points through the `context_window` tool and can compact on its own with `compact_context`. You can compact any time with `ctrl+x c` or `/compact`.
 
