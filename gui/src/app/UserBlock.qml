@@ -168,7 +168,7 @@ Block {
 				iconName: "copy"
 				label: qsTr("Copy")
 				opacity: pillHover.hovered || hovered ? 1 : 0
-				onTriggered: block.ListView.view.copyRequested(block.messageId)
+				onTriggered: block.chat.copyRequested(block.messageId)
 
 				Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 			}

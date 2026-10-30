@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import RefGui
 
@@ -40,7 +42,7 @@ Item {
 	}
 
 	width: parent ? parent.width : 0
-	height: (loader.item ? loader.item.height : 0) + (call.images.length > 0 ? pictures.height : 0)
+	height: (loader.item ? (loader.item as Item).height : 0) + (call.images.length > 0 ? pictures.height : 0)
 
 	Component { id: generic; GenericBody { call: body.call; onShowAllRequested: body.showAllRequested() } }
 	Component { id: diff; DiffBody { call: body.call; onShowAllRequested: body.showAllRequested() } }
@@ -54,14 +56,14 @@ Item {
 
 	ImageStrip {
 		id: pictures
-		x: horizontalPadding
+		x: body.horizontalPadding
 		y: loader.height
-		width: parent.width - 2 * horizontalPadding
-		visible: call.images.length > 0
-		images: call.images
-		sessionId: call.ListView.view.sessionId
-		onImageClicked: image => call.ListView.view.imageClicked(image)
-		bottomPadding: verticalPadding + 2
+		width: parent.width - 2 * body.horizontalPadding
+		visible: body.call.images.length > 0
+		images: body.call.images
+		sessionId: body.call.chat.sessionId
+		onImageClicked: image => body.call.chat.imageClicked(image)
+		bottomPadding: body.verticalPadding + 2
 	}
 
 	Loader {

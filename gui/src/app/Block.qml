@@ -14,6 +14,8 @@ import RefGui
 // Behavior: a Behavior restarts whenever its target changes, and content that is
 // itself animating (a reasoning body easing open) changes it every frame, which
 // keeps restarting the animation and stalls the height.
+//
+// A removed row stays in the view until it has faded out and its height has closed.
 Item {
 	id: block
 
@@ -24,7 +26,8 @@ Item {
 
 	signal added() // inserted into the model, as opposed to created with the view
 
-	readonly property real columnWidth: ListView.view.columnWidth
+	readonly property var chat: ListView.view // the ChatView; untyped, as ListView.view is a plain ListView to the linter
+	readonly property real columnWidth: chat.columnWidth
 	default property alias body: column.data
 
 	property real pullUp: 0 // how far the content moves up into the gap above the row
@@ -32,27 +35,30 @@ Item {
 	property real easedHeight: 0
 	property bool easing: false // from the start of streaming until caught up after it ends
 
-	width: ListView.view.width
+	width: chat.width
 	height: easing ? easedHeight : naturalHeight
 	clip: pullUp === 0
 	transform: Translate { id: entryShift }
 
 	ListView.onAdd: {
-		if (ListView.view.prepending) // earlier history, not news
+		if (chat.prepending) // earlier history, not news
 			return
 		entrance.restart()
 		added()
 	}
 
+	// A removed row (undo, a rewritten history) fades out, then its space closes.
+	ListView.onRemove: exit.start()
+
 	function toggleExpanded() {
-		ListView.view.model.toggleExpanded(index)
+		chat.model.toggleExpanded(index)
 	}
 
 	// How far down the block a header `headerHeight` tall sits so that it stays in
 	// view while the rest of the block scrolls past: pinned to the view's top, until
 	// it meets the block's end. 0 while the block's top is in view.
 	function pinOffset(headerHeight) {
-		return Math.max(0, Math.min(ListView.view.contentY - y, height - headerHeight))
+		return Math.max(0, Math.min(chat.contentY - y, height - headerHeight))
 	}
 
 	// Folding the body under a pinned header would carry the header up out of view with
@@ -73,8 +79,8 @@ Item {
 		if (heldHeaderHeight === 0)
 			return
 		const pinLimit = y + height - heldHeaderHeight // furthest contentY that keeps the header pinned
-		if (ListView.view.contentY > pinLimit)
-			ListView.view.scrollTo(pinLimit, false)
+		if (chat.contentY > pinLimit)
+			chat.scrollTo(pinLimit, false)
 	}
 
 	Component.onCompleted: {
@@ -92,6 +98,14 @@ Item {
 		id: entrance
 		NumberAnimation { target: block; property: "opacity"; from: 0; to: 1; duration: Motion.standard; easing.type: Motion.ease }
 		NumberAnimation { target: entryShift; property: "y"; from: -Motion.enterDrop; to: 0; duration: Motion.standard; easing.type: Motion.ease }
+	}
+
+	SequentialAnimation {
+		id: exit
+		PropertyAction { target: block; property: "ListView.delayRemove"; value: true }
+		NumberAnimation { target: block; property: "opacity"; to: 0; duration: Motion.quick; easing.type: Motion.ease }
+		NumberAnimation { target: block; property: "height"; to: 0; duration: Motion.standard; easing.type: Motion.ease }
+		PropertyAction { target: block; property: "ListView.delayRemove"; value: false }
 	}
 
 	FrameAnimation {

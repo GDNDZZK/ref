@@ -320,6 +320,45 @@ void ConversationModel::reset(const QList<proto::Message>& messages)
 	refreshDerivedState();
 }
 
+void ConversationModel::replaceHistory(const QList<proto::Message>& messages)
+{
+	QList<MessageNode> nodes;
+	QList<Block> rows;
+	for(const proto::Message& message : messages)
+	{
+		MessageNode node = makeNode(message);
+		rows += buildRows(node);
+		nodes.append(std::move(node));
+	}
+
+	const qsizetype comparable = std::min(m_rows.size(), rows.size());
+	qsizetype kept = 0;
+	while(kept < comparable && changedRoles(m_rows.at(kept), rows.at(kept)).isEmpty())
+	{
+		++kept;
+	}
+
+	if(kept < m_rows.size())
+	{
+		beginRemoveRows({}, static_cast<int>(kept), static_cast<int>(m_rows.size()) - 1);
+		m_messages = nodes;
+		m_rows.remove(kept, m_rows.size() - kept);
+		endRemoveRows();
+	}
+	else
+	{
+		m_messages = nodes;
+	}
+
+	if(kept < rows.size())
+	{
+		beginInsertRows({}, static_cast<int>(kept), static_cast<int>(rows.size()) - 1);
+		m_rows += rows.mid(kept);
+		endInsertRows();
+	}
+	refreshDerivedState();
+}
+
 void ConversationModel::prependMessages(const QList<proto::Message>& older)
 {
 	QList<MessageNode> nodes;
