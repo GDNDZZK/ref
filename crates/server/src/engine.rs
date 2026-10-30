@@ -10,8 +10,8 @@ use crate::toolset::{self, Entry, Kind};
 use ref_config::{Action, Config};
 use ref_llm::{AssistantBlock, BlockKind, LlmError, Model, Provider, StreamEvent};
 use ref_proto::{
-    Delta, Message, MessageSource, ModelRef, Part, PermissionRequest, Role, SessionEvent,
-    SessionStatus, ToolState, now_ms,
+    Delta, Message, MessageSource, ModelRef, NotifyKind, Part, PermissionRequest, Role,
+    SessionEvent, SessionStatus, ToolState, now_ms,
 };
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
@@ -124,6 +124,7 @@ fn start_run_locked(hub: &Arc<Hub>, s: &Arc<Session>, st: &mut SessionState) {
         id,
     });
     st.user_aborted = false;
+    st.info.last_error = None;
     st.info.busy_since = Some(now_ms());
     hub.set_status(st, SessionStatus::Busy);
     tokio::spawn(run_task(hub.clone(), s.clone(), cancel, id));
@@ -146,11 +147,12 @@ where
         id,
     });
     st.user_aborted = false;
+    st.info.last_error = None;
     st.info.busy_since = Some(now_ms());
     let (hub2, s2) = (hub.clone(), s.clone());
     tokio::spawn(async move {
         f(hub2.clone(), s2.clone(), cancel).await;
-        finish_run(&hub2, &s2, id);
+        finish_run(&hub2, &s2, id, false);
     });
     Ok(())
 }
@@ -229,11 +231,15 @@ async fn run_task(hub: Arc<Hub>, s: Arc<Session>, cancel: CancellationToken, id:
         hub.emit(&s.id, SessionEvent::Message { message: m.clone() });
         st.messages.push(m);
         hub.emit(&s.id, SessionEvent::Error { text: text.clone() });
+        st.info.last_error = Some(text.clone());
+        hub.notify(&st, NotifyKind::TurnError, Some(text.clone()));
     }
-    finish_run(&hub, &s, id);
+    finish_run(&hub, &s, id, matches!(outcome, Outcome::Done));
 }
 
-fn finish_run(hub: &Arc<Hub>, s: &Arc<Session>, id: u64) {
+/// Ends the run `id`. `completed`: the turn ended normally (the user is told if the session
+/// goes idle).
+fn finish_run(hub: &Arc<Hub>, s: &Arc<Session>, id: u64, completed: bool) {
     {
         let mut st = s.lock();
         if st.run.as_ref().map(|r| r.id) != Some(id) {
@@ -283,6 +289,10 @@ fn finish_run(hub: &Arc<Hub>, s: &Arc<Session>, id: u64) {
             }
         }
         hub.emit_info(&st);
+        let user_stopped = st.user_aborted || st.closed;
+        if completed && !restart && !user_stopped {
+            hub.notify(&st, NotifyKind::TurnDone, None);
+        }
         if restart {
             start_run_locked(hub, s, &mut st);
         }
@@ -1231,6 +1241,7 @@ async fn run_one(
                 });
                 hub.set_status(&mut st, SessionStatus::WaitingPermission);
                 hub.emit(&s.id, SessionEvent::Permission { request });
+                hub.notify(&st, NotifyKind::Permission, Some(call.name.clone()));
             }
             set_state(hub, s, msg_id, idx, ToolState::AwaitingPermission, None);
             let reply = tokio::select! {

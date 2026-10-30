@@ -9,6 +9,7 @@ pub mod images;
 pub mod instance;
 pub mod mcp;
 pub mod models;
+pub mod notify;
 pub mod ops;
 pub mod peers;
 pub mod prompt;
