@@ -100,7 +100,7 @@ async fn login_trades_the_token_for_a_cookie() {
 
     let ping: serde_json::Value = web
         .http
-        .get(web.url("/api/ping"))
+        .get(web.url("/api/ping?nonce=00ff"))
         .send()
         .await
         .unwrap()
@@ -108,6 +108,21 @@ async fn login_trades_the_token_for_a_cookie() {
         .await
         .unwrap();
     assert_eq!(ping["app"], "ref-web");
+    assert_eq!(ping["proof"].as_str().unwrap().len(), 64, "{ping}");
+    let other_nonce: serde_json::Value = web
+        .http
+        .get(web.url("/api/ping?nonce=00fe"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_ne!(ping["proof"], other_nonce["proof"]);
+    for bad in ["/api/ping", "/api/ping?nonce=", "/api/ping?nonce=zz"] {
+        let response = web.http.get(web.url(bad)).send().await.unwrap();
+        assert_eq!(response.status(), 400, "{bad}");
+    }
 }
 
 #[tokio::test]
@@ -435,4 +450,44 @@ async fn two_instances_keep_separate_cookies() {
         .await
         .unwrap();
     assert_eq!(crossed.status(), 401);
+}
+
+/// A program that answers every request like a ref-web would, without knowing the login token.
+async fn impostor_ref_web() -> u16 {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        loop {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            tokio::spawn(async move {
+                use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+                let mut request = [0u8; 1024];
+                let _ = stream.read(&mut request).await;
+                let body = r#"{"app":"ref-web","version":"0.1.0","proof":"00"}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes()).await;
+            });
+        }
+    });
+    port
+}
+
+// Multi-threaded: `env.run` blocks this thread while the impostor has to answer.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_program_that_only_looks_like_ref_web_does_not_get_the_login_token() {
+    let env = Env::new("impostor");
+    let port = impostor_ref_web().await.to_string();
+    let output = env.run(&["--no-open", "--port", &port]);
+    assert!(!output.status.success(), "{output:?}");
+    let all = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(all.contains("in use by another program"), "{all}");
+    let token = std::fs::read_to_string(env.state_dir().join("web/login-token")).unwrap();
+    assert!(!all.contains(token.trim()), "the login URL leaked: {all}");
 }

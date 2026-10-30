@@ -3,6 +3,7 @@
 mod assets;
 mod guard;
 mod launch;
+mod ping;
 mod routes;
 mod token;
 mod tunnel;
@@ -113,7 +114,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     let listener = match tokio::net::TcpListener::bind((bind_host, cli.port)).await {
         Ok(listener) => listener,
         Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
-            return open_running(&cli, &url_host, &login_url).await;
+            return open_running(&cli, &url_host, &login_token, &login_url).await;
         }
         Err(e) => {
             return Err(e).with_context(|| format!("cannot listen on {}:{}", cli.host, cli.port));
@@ -154,8 +155,13 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
 }
 
 /// The port is taken: if a ref-web has it, point the browser there; otherwise fail.
-async fn open_running(cli: &Cli, url_host: &str, login_url: &str) -> anyhow::Result<()> {
-    if !launch::is_ref_web(url_host, cli.port).await {
+async fn open_running(
+    cli: &Cli,
+    url_host: &str,
+    login_token: &str,
+    login_url: &str,
+) -> anyhow::Result<()> {
+    if !ping::is_our_ref_web(url_host, cli.port, login_token).await {
         anyhow::bail!(
             "port {} is in use by another program (choose another with --port)",
             cli.port
