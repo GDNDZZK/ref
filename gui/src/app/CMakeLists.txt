@@ -41,6 +41,20 @@ qt_add_qml_module(ref-gui
 		CountdownRing.qml
 		ToolInfo.qml
 		ToolBody.qml
+		ToolBodyBase.qml
+		GenericBody.qml
+		OutputSection.qml
+		DiffBody.qml
+		BashBody.qml
+		ReadBody.qml
+		GrepBody.qml
+		FindBody.qml
+		WebfetchBody.qml
+		SessionBody.qml
+		TodoBody.qml
+		CommandBox.qml
+		LineView.qml
+		ToolChip.qml
 		ToolSection.qml
 		OutputText.qml
 		CopyButton.qml
