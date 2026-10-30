@@ -4,6 +4,7 @@
 #include "composer/shared_history.h"
 #include <QClipboard>
 #include <QGuiApplication>
+#include <QPointer>
 
 #include <utility>
 
@@ -42,7 +43,12 @@ ChatSession::ChatSession(Backend& backend, QString sessionId, QObject* parent)
 
 QCoro::Task<refgui::client::Result<void>> ChatSession::attach(bool foreground)
 {
+	const QPointer<ChatSession> self(this); // the session can be gone when the answer arrives
 	const auto result = co_await m_controller.attach(m_sessionId, foreground);
+	if(!self)
+	{
+		co_return result;
+	}
 	emit readyChanged();
 	co_return result;
 }
@@ -59,7 +65,12 @@ QCoro::Task<refgui::client::Result<QByteArray>> ChatSession::fetchImage(QString 
 
 QCoro::Task<refgui::client::Result<void>> ChatSession::detach()
 {
+	const QPointer<ChatSession> self(this); // the session can be gone when the answer arrives
 	const auto result = co_await m_controller.detach();
+	if(!self)
+	{
+		co_return result;
+	}
 	emit readyChanged();
 	co_return result;
 }
@@ -197,7 +208,12 @@ void ChatSession::loadOlder()
 
 QCoro::Task<> ChatSession::fetchOlder()
 {
+	const QPointer<ChatSession> self(this); // the session can be gone when the answer arrives
 	const auto result = co_await m_controller.loadOlder();
+	if(!self)
+	{
+		co_return;
+	}
 	const QString error = result ? QString() : result.error();
 	if(error != m_olderError)
 	{
@@ -276,7 +292,12 @@ void ChatSession::undoLast()
 QCoro::Task<> ChatSession::sendUndo(std::optional<QString> messageId)
 {
 	setFailure({});
+	const QPointer<ChatSession> self(this); // the session can be gone when the answer arrives
 	const auto result = co_await m_controller.undo(std::move(messageId));
+	if(!self)
+	{
+		co_return;
+	}
 	if(!result)
 	{
 		setFailure(result.error());
@@ -307,7 +328,12 @@ void ChatSession::permissionReply(const QString& callId, bool allow, bool always
 QCoro::Task<> ChatSession::sendPrompt(QString text)
 {
 	setFailure({});
+	const QPointer<ChatSession> self(this); // the session can be gone when the answer arrives
 	const auto result = co_await m_controller.send(std::move(text));
+	if(!self)
+	{
+		co_return;
+	}
 	if(!result)
 	{
 		setFailure(result.error());
@@ -316,7 +342,12 @@ QCoro::Task<> ChatSession::sendPrompt(QString text)
 
 QCoro::Task<> ChatSession::sendAbort()
 {
+	const QPointer<ChatSession> self(this); // the session can be gone when the answer arrives
 	const auto result = co_await m_controller.abort();
+	if(!self)
+	{
+		co_return;
+	}
 	if(!result)
 	{
 		setFailure(result.error());
@@ -325,7 +356,12 @@ QCoro::Task<> ChatSession::sendAbort()
 
 QCoro::Task<> ChatSession::sendPermission(QString callId, bool allow, bool always)
 {
+	const QPointer<ChatSession> self(this); // the session can be gone when the answer arrives
 	const auto result = co_await m_controller.permissionReply(callId, allow, always);
+	if(!self)
+	{
+		co_return;
+	}
 	if(!result)
 	{
 		m_repliedCalls.remove(callId); // it may be tried again

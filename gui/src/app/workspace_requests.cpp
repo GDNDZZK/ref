@@ -18,7 +18,11 @@ Workspace::Reply Workspace::wrap(const QJSValue& cb) const
 	}
 	return [this, cb](bool ok, const QVariant& payload) {
 		QJSValue callback = cb;
-		callback.call({ok, m_engine->toScriptValue(payload)});
+		const QJSValue result = callback.call({ok, m_engine->toScriptValue(payload)});
+		if(result.isError())
+		{
+			qWarning().noquote() << u"A reply callback failed: %1 (%2:%3)"_s.arg(result.property(u"message"_s).toString(), result.property(u"fileName"_s).toString(), result.property(u"lineNumber"_s).toString());
+		}
 	};
 }
 
@@ -155,10 +159,15 @@ void Workspace::listDirs(const QString& path, const QJSValue& cb)
 void Workspace::deleteHistory(const QString& sessionId)
 {
 	m_directory.forgetPersisted(sessionId);
-	perform(m_backend.client().deleteSession(sessionId), {}, [this] {
+	// The list is reloaded either way: on failure that brings the row back.
+	const Reply reloaded = [this](bool ok, const QVariant& payload) {
 		m_directory.refreshHistory();
-		return QVariant();
-	});
+		if(!ok)
+		{
+			toast(u"error"_s, payload.toString());
+		}
+	};
+	perform(m_backend.client().deleteSession(sessionId), reloaded, [] { return QVariant(); });
 }
 
 // ---- Backend --------------------------------------------------------------------------

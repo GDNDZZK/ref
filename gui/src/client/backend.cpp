@@ -122,7 +122,8 @@ QCoro::Task<std::expected<Endpoint, QString>> Backend::connectOnce()
 
 QCoro::Task<bool> Backend::tryConnect(const Endpoint& endpoint, std::chrono::milliseconds timeout)
 {
-	const Result<proto::HelloResult> hello = co_await m_client.open(endpoint, m_cwd, timeout, m_notifyKinds);
+	m_helloNotifyKinds = m_notifyKinds;
+	const Result<proto::HelloResult> hello = co_await m_client.open(endpoint, m_cwd, timeout, m_helloNotifyKinds);
 	if(hello)
 	{
 		m_hello = *hello;

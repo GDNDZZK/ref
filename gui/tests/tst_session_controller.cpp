@@ -8,6 +8,8 @@
 #include <QSignalSpy>
 #include <QtTest>
 
+#include <memory>
+
 using namespace Qt::StringLiterals;
 using namespace refgui;
 using namespace refgui::test;
@@ -166,6 +168,8 @@ private slots:
 	void loadsOlderMessagesInFront();
 	void doesNotAskWhenNothingIsOlder();
 	void showsSessionErrorsAtTheEndUntilTheNextPrompt();
+	void attachAnsweredAfterTheControllerIsGone();
+	void loadOlderAnsweredAfterTheControllerIsGone();
 };
 
 void TestSessionController::createShowsTheSnapshot()
@@ -418,6 +422,52 @@ void TestSessionController::showsSessionErrorsAtTheEndUntilTheNextPrompt()
 	QVERIFY(await(f.controller.send(u"again"_s)));
 	QVERIFY(f.controller.model().tailError().isEmpty());
 	QCOMPARE(render(f.controller.model()).size(), 2);
+}
+
+// An answer that arrives after the controller was destroyed must not touch it. The test passes without a
+// sanitizer too, but then the waiting caller must at least be told that the request came to nothing.
+void TestSessionController::attachAnsweredAfterTheControllerIsGone()
+{
+	Fixture f;
+	std::optional<SessionController::Result<void>> outcome;
+	QJsonObject held;
+	f.fake.onRequest = [&](const QJsonObject& request) { held = request; };
+	auto gone = std::make_unique<SessionController>(f.backend);
+	[](SessionController& controller, std::optional<SessionController::Result<void>>& out) -> QCoro::Task<> {
+		out = co_await controller.attach(u"ses_1"_s);
+	}(*gone, outcome);
+	QTRY_VERIFY(!held.isEmpty());
+
+	gone.reset();
+	f.fake.respond(held, f.snapshot);
+
+	QTRY_VERIFY(outcome.has_value());
+	QVERIFY(!*outcome);
+}
+
+void TestSessionController::loadOlderAnsweredAfterTheControllerIsGone()
+{
+	Fixture f;
+	f.snapshot[u"snapshot"_s] = [&] {
+		QJsonObject snapshot = f.snapshot.value(u"snapshot"_s).toObject();
+		snapshot[u"more_before"_s] = true;
+		return snapshot;
+	}();
+	auto gone = std::make_unique<SessionController>(f.backend);
+	QVERIFY(await(gone->attach(u"ses_1"_s)));
+	std::optional<SessionController::Result<void>> outcome;
+	QJsonObject held;
+	f.fake.onRequest = [&](const QJsonObject& request) { held = request; };
+	[](SessionController& controller, std::optional<SessionController::Result<void>>& out) -> QCoro::Task<> {
+		out = co_await controller.loadOlder();
+	}(*gone, outcome);
+	QTRY_VERIFY(!held.isEmpty());
+
+	gone.reset();
+	f.fake.respond(held, {{u"messages"_s, QJsonArray()}, {u"more_before"_s, false}});
+
+	QTRY_VERIFY(outcome.has_value());
+	QVERIFY(!*outcome);
 }
 
 QTEST_GUILESS_MAIN(TestSessionController)

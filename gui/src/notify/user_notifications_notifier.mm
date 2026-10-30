@@ -5,6 +5,9 @@
 #import <UserNotifications/UserNotifications.h>
 
 #include <QMetaObject>
+#include <QPointer>
+
+using namespace Qt::StringLiterals;
 
 namespace
 {
@@ -72,9 +75,22 @@ UserNotificationsNotifier::UserNotificationsNotifier(QObject* parent)
 	UNUserNotificationCenter* center = [UNUserNotificationCenter currentNotificationCenter];
 
 	m_state->delegate = [[RefNotificationDelegate alloc] init];
+	// The callbacks of macOS come on other threads and can come after this object is gone.
+	const QPointer<UserNotificationsNotifier> self(this);
 	m_state->delegate.onActivated = ^(NSString* session) {
 		const QString id = QString::fromNSString(session);
-		QMetaObject::invokeMethod(this, [this, id] { emit activated(id); }, Qt::QueuedConnection);
+		if(self)
+		{
+			QMetaObject::invokeMethod(
+			    self.data(),
+			    [self, id] {
+				    if(self)
+				    {
+					    emit self->activated(id);
+				    }
+			    },
+			    Qt::QueuedConnection);
+		}
 	};
 	center.delegate = m_state->delegate;
 
@@ -89,11 +105,19 @@ UserNotificationsNotifier::UserNotificationsNotifier(QObject* parent)
 		                      {
 			                      reason = tr("Notifications for ref are turned off in the macOS System Settings.");
 		                      }
+		                      if(!self)
+		                      {
+			                      return;
+		                      }
 		                      QMetaObject::invokeMethod(
-		                          this,
-		                          [this, reason] {
-			                          m_state->reason = reason;
-			                          emit availabilityChanged();
+		                          self.data(),
+		                          [self, reason] {
+			                          if(!self)
+			                          {
+				                          return;
+			                          }
+			                          self->m_state->reason = reason;
+			                          emit self->availabilityChanged();
 		                          },
 		                          Qt::QueuedConnection);
 	                      }];
@@ -131,8 +155,10 @@ void UserNotificationsNotifier::show(const Notification& notification)
 	content.userInfo = @{SessionKey : toNSString(notification.sessionId)};
 	content.threadIdentifier = toNSString(notification.sessionId);
 
-	// The session as identifier: a newer notification replaces the older one.
-	UNNotificationRequest* request = [UNNotificationRequest requestWithIdentifier:toNSString(notification.sessionId)
+	// Session and kind as identifier: a newer notification of both replaces the older one, as in the Web interface.
+	const QString identifier = u"%1:%2"_s.arg(notification.sessionId).arg(static_cast<int>(notification.kind));
+	const QPointer<UserNotificationsNotifier> self(this);
+	UNNotificationRequest* request = [UNNotificationRequest requestWithIdentifier:toNSString(identifier)
 	                                                                      content:content
 	                                                                      trigger:nil];
 	[[UNUserNotificationCenter currentNotificationCenter] addNotificationRequest:request
@@ -141,9 +167,19 @@ void UserNotificationsNotifier::show(const Notification& notification)
 		                                                       {
 			                                                       return;
 		                                                       }
+		                                                       if(!self)
+		                                                       {
+			                                                       return;
+		                                                       }
 		                                                       const QString reason = QString::fromNSString(error.localizedDescription);
 		                                                       QMetaObject::invokeMethod(
-		                                                           this, [this, notification, reason] { emit showFailed(notification, reason); },
+		                                                           self.data(),
+		                                                           [self, notification, reason] {
+			                                                           if(self)
+			                                                           {
+				                                                           emit self->showFailed(notification, reason);
+			                                                           }
+		                                                           },
 		                                                           Qt::QueuedConnection);
 	                                                       }];
 }
