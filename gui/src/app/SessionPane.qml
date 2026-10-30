@@ -18,7 +18,45 @@ Item {
 		anchors { left: parent.left; right: parent.right; top: parent.top; bottom: composer.top }
 		model: pane.session.blocks
 		turnInProgress: pane.session.busy
+		permissionCount: pane.session.permissionCount
+		onCancelRequested: pane.session.cancelDelayedTool()
+		onCopyRequested: messageId => pane.session.copyMessage(messageId)
 		onPermissionAnswered: (callId, allow, always) => pane.session.permissionReply(callId, allow, always)
+	}
+
+	// Takes the keyboard from the input box once the keys may answer a permission request
+	// (the user may be typing when it appears), and hands it back when none is left.
+	Item {
+		id: permissionKeys
+
+		Keys.onPressed: event => {
+			event.accepted = true
+			switch (event.key) {
+			case Qt.Key_A:
+			case Qt.Key_Return:
+			case Qt.Key_Enter:
+				pane.session.answerOldestPermission(true, false)
+				break
+			case Qt.Key_S:
+				pane.session.answerOldestPermission(true, true)
+				break
+			case Qt.Key_D:
+			case Qt.Key_Escape:
+				pane.session.answerOldestPermission(false, false)
+				break
+			}
+		}
+
+		Connections {
+			target: pane.session
+
+			function onToolsChanged() {
+				if (pane.session.permissionKeysActive)
+					permissionKeys.forceActiveFocus()
+				else if (permissionKeys.activeFocus)
+					pane.focusInput()
+			}
+		}
 	}
 
 	// This session's last failure, until it is gone. Connection trouble, which concerns all

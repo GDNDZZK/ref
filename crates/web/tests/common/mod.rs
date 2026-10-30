@@ -51,6 +51,13 @@ pub struct Env {
     pub dir: PathBuf,
 }
 
+impl Drop for Env {
+    fn drop(&mut self) {
+        // Processes started from this Env are dropped first (declared later in each test).
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
 impl Env {
     pub fn new(tag: &str) -> Env {
         Env { dir: temp_dir(tag) }
