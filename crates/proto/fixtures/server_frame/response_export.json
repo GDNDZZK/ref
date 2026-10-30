@@ -1,0 +1,9 @@
+{
+  "kind": "response",
+  "id": 29,
+  "ok": true,
+  "result": {
+    "path": "/tmp/parser-fix.md"
+  },
+  "error": null
+}

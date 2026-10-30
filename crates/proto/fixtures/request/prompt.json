@@ -1,0 +1,7 @@
+{
+  "id": 11,
+  "op": "prompt",
+  "session_id": "ses_a1b2c3d4",
+  "text": "Fix the failing parser test",
+  "images": []
+}

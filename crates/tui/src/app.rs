@@ -651,6 +651,8 @@ impl App {
             ServerFrame::Event { session_id, event } => self.on_event(session_id, event),
             ServerFrame::Sessions { sessions } => self.on_sessions(sessions),
             ServerFrame::Toast { level, text } => self.toasts.push(level, text),
+            // The TUI does not ask for notifications (Hello.notify is empty).
+            ServerFrame::Notify { .. } => {}
         }
     }
 
@@ -3154,5 +3156,6 @@ pub fn placeholder_info(sid: &str, cwd: &str) -> SessionInfo {
         context: Default::default(),
         todos: Vec::new(),
         busy_since: None,
+        last_error: None,
     }
 }

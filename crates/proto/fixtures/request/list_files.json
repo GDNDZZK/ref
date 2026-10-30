@@ -1,0 +1,7 @@
+{
+  "id": 27,
+  "op": "list_files",
+  "cwd": "/home/user/project",
+  "query": "pars",
+  "limit": 20
+}
