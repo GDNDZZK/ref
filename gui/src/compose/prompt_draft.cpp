@@ -155,7 +155,7 @@ void PromptDraft::clear()
 
 void PromptDraft::dropOrphans()
 {
-	std::erase_if(m_attachments, [this](const Attachment& attachment) { return !m_text.contains(attachment.token); });
+	m_attachments.removeIf([this](const Attachment& attachment) { return !m_text.contains(attachment.token); });
 }
 
 } // namespace refgui::compose
