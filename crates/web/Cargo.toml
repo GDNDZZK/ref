@@ -29,6 +29,7 @@ brotli.workspace = true
 flate2.workspace = true
 
 [dev-dependencies]
+ref-sys.workspace = true
 ref-server.workspace = true
 ref-config.workspace = true
 reqwest.workspace = true

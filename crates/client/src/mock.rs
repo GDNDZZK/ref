@@ -1,5 +1,6 @@
 //! A private `ref-server --mock` child process.
 
+use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -32,7 +33,12 @@ pub struct MockBackend {
 impl MockBackend {
     /// Starts the `ref-server` next to the running executable in mock mode.
     pub async fn spawn() -> Result<MockBackend, ConnectError> {
-        let mut command = Command::new(spawn::server_binary());
+        Self::spawn_with(&spawn::server_binary()).await
+    }
+
+    /// Starts the given `ref-server` binary in mock mode.
+    pub async fn spawn_with(binary: &Path) -> Result<MockBackend, ConnectError> {
+        let mut command = Command::new(binary);
         command.arg("--mock");
         Self::spawn_command(command).await
     }
