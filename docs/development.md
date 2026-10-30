@@ -23,7 +23,7 @@ cargo test --workspace                                         # all crates (nee
 cargo fmt --all --check                                        # formatting
 cargo clippy --workspace --all-targets -- -D warnings          # lints
 ref --mock                                                     # TUI against a fake backend
-(cd web && pnpm check)                                         # frontend: types, lint, unit tests, generated files up to date
+(cd web && pnpm check)                                         # frontend: types, lint, unit tests, generated Theme/Motion files up to date
 python3 scripts/e2e.py provider/model "prompt" [cwd]           # end-to-end against a real model
 REF_DUMP_REQUESTS=/tmp/dump ref-server ...                     # dump LLM request bodies
 ```
@@ -48,6 +48,49 @@ Some tests start `python3` (a fake MCP server) and `bash`. The end-to-end script
 ## Protocol notes
 
 The TUI and the backend exchange JSON frames over WebSocket. Frontends get history page by page: `Attach` returns the newest messages (100, or fewer if they exceed about 1 MiB) and `Messages` returns the page before a given message, so the TUI loads older pages as you scroll up. Images reach frontends as stubs (MIME type, size and an `id`, no bytes); `GetImage` returns the bytes for an id.
+
+## The mock backend
+
+`ref-server --mock` is a fake backend for developing interfaces without an LLM. `ref-gui --mock` and `ref-web --mock` start a private one through `ref-client`. (`ref --mock` is a separate, in-process fake and does not use it.)
+
+To run one by hand, keep its stdin open, because it exits when stdin reaches end of file:
+
+```bash
+sleep 3600 | ref-server --mock      # prints {"port":N,"token":"..."} on stdout, nothing else
+```
+
+- **Exit**: stdin end of file, the last client disconnecting, or ctrl-c. It then deletes its temporary directory (a `SIGKILL` leaves `/tmp/ref-mock-*` behind).
+- **Workspace**: every session runs in a temporary workspace with sample files (`README.md`, `NOTES.txt`, `src/parser.rs`, `src/lib.rs`, `docs/design.md`, `data/big.log`, `logo.png`, `scratch/`), whatever directory the client asks for. Your files are never touched. Three past sessions are preloaded as history.
+- **Models**: `mock/mock-1` (default; 200k context, images, reasoning, variants `low`, `medium`, `high`) and `mock/mock-fast` (64k). There is an extra agent, `reviewer`.
+- **Permissions**: `edit` and `write` ask (allowed in `scratch/`). `delete` is allowed after a 5-second delay. `bash` asks, except commands starting with `echo`, `ls`, `cat`, `seq`, `sleep` or `printf`, which are allowed, and `curl`, which is denied. `webfetch` is off.
+- **Scripts**: the first word of a prompt picks a script, case-insensitively. Other text runs `default`. The prompt `help` lists them.
+
+| Prompt | What happens |
+|---|---|
+| `help` | Lists all scripts |
+| `hello` | A one-sentence reply |
+| `default` | Any other text: echoes the prompt |
+| `markdown` | Headings, lists, a table, a quote, links, code blocks in several languages |
+| `reasoning` | Long reasoning, then a short answer |
+| `article` | A long article with many code blocks (about 18 s) |
+| `slow` | Very slow streaming, about a minute, for frame-by-frame checks |
+| `tools` | `read`, reading a missing file (error), `grep`, `find`, an `edit` that needs approval (with diff), `bash` succeeding and exiting with 3 |
+| `stream-args` | A `write` whose arguments stream slowly |
+| `permission` | An `edit` waiting for approval: `a` allow, `s` allow for the session, `d` deny |
+| `delay` | A `delete` with a 5-second countdown (`esc` cancels) |
+| `running` | A `bash` command that prints for 8 seconds |
+| `bash-fail` | A `bash` command that exits with 1 |
+| `denied` | A call denied by the configuration |
+| `cancel` | A command that never ends, for cancelling with `esc` |
+| `todo` | A todo list updated in several steps |
+| `image` | Reads `logo.png`; the tool result has an image |
+| `long` | A tool with 400 lines of output, then a long answer |
+| `retry` | Two 529 errors (retrying), then success (about 6 s) |
+| `fail` | A 401 error; retries, then ends with the error (about 6 s) |
+| `fill` | Context near 95%; the next prompt compacts first |
+| `compact-tool` | The model calls `compact_context` |
+| `peer` | Creates a `reviewer` session `helper`, which reports back with `send_message` |
+| `everything` | `tools`, `todo` and `image` in one long turn |
 
 ## Continuous integration and releases
 
