@@ -7,6 +7,7 @@
 #include <QGuiApplication>
 #include <QImage>
 #include <QMimeData>
+#include <QPointer>
 
 #include <algorithm>
 
@@ -152,8 +153,9 @@ bool ComposerModel::variantAvailable() const
 
 QCoro::Task<> ComposerModel::loadConfig()
 {
+	const QPointer<ComposerModel> self(this); // the model can be gone when the answer arrives
 	const auto config = co_await m_backend.client().getConfig();
-	if(!config)
+	if(!self || !config)
 	{
 		co_return;
 	}
@@ -230,8 +232,9 @@ void ComposerModel::updateCompletion()
 
 QCoro::Task<> ComposerModel::findFiles(QString query, quint64 serial)
 {
+	const QPointer<ComposerModel> self(this); // the model can be gone when the answer arrives
 	const auto result = co_await m_backend.client().listFiles(m_controller.info().cwd, std::move(query), FileLimit);
-	if(serial != m_fileSerial || !result)
+	if(!self || serial != m_fileSerial || !result)
 	{
 		co_return;
 	}
@@ -316,7 +319,12 @@ void ComposerModel::runCustomCommand(const QString& name, const QString& args)
 
 QCoro::Task<> ComposerModel::sendPrompt(QString text, QList<proto::NamedImage> images, bool restoreOnFailure)
 {
+	const QPointer<ComposerModel> self(this); // the model can be gone when the answer arrives
 	const auto result = co_await m_controller.send(text, imageData(images));
+	if(!self)
+	{
+		co_return;
+	}
 	if(result)
 	{
 		emit sent();
@@ -331,7 +339,12 @@ QCoro::Task<> ComposerModel::sendPrompt(QString text, QList<proto::NamedImage> i
 
 QCoro::Task<> ComposerModel::sendShell(QString command)
 {
+	const QPointer<ComposerModel> self(this); // the model can be gone when the answer arrives
 	const auto result = co_await m_backend.client().shell(m_controller.sessionId(), command);
+	if(!self)
+	{
+		co_return;
+	}
 	if(result)
 	{
 		emit sent();
@@ -342,7 +355,12 @@ QCoro::Task<> ComposerModel::sendShell(QString command)
 
 QCoro::Task<> ComposerModel::expandAndSend(QString name, QString args)
 {
+	const QPointer<ComposerModel> self(this); // the model can be gone when the answer arrives
 	const auto expanded = co_await m_backend.client().expandCommand(std::move(name), std::move(args), m_controller.info().cwd);
+	if(!self)
+	{
+		co_return;
+	}
 	if(!expanded)
 	{
 		emit failed(expanded.error());
@@ -410,7 +428,12 @@ void ComposerModel::withdraw(int row)
 
 QCoro::Task<> ComposerModel::removeQueued(QString messageId)
 {
+	const QPointer<ComposerModel> self(this); // the model can be gone when the answer arrives
 	const auto result = co_await m_backend.client().removeQueued(m_controller.sessionId(), messageId);
+	if(!self)
+	{
+		co_return;
+	}
 	m_queue.setRemoving(messageId, false);
 	if(!result)
 	{

@@ -2,6 +2,8 @@
 
 #include "proto/types.h"
 
+#include <QPointer>
+
 #include <utility>
 
 namespace refgui::session
@@ -12,6 +14,12 @@ namespace
 constexpr int NewestSessionOnly = 1;
 // Messages asked for at a time when scrolling back; the server caps a page at 1000.
 constexpr int OlderPageSize = 100;
+
+// What a request that outlived its controller reports to whoever still waits for it.
+QString destroyedError()
+{
+	return QStringLiteral("The session was closed.");
+}
 
 } // namespace
 
@@ -45,7 +53,12 @@ QCoro::Task<SessionController::Result<void>> SessionController::create(QString c
                                                                        std::optional<QString> agent,
                                                                        std::optional<proto::ModelRef> model)
 {
+	const QPointer<SessionController> self(this); // the controller can be gone when the answer arrives
 	const auto created = co_await m_backend.client().createSession(std::move(cwd), std::move(agent), std::move(model));
+	if(!self)
+	{
+		co_return std::unexpected(destroyedError());
+	}
 	if(!created)
 	{
 		co_return std::unexpected(created.error());
@@ -55,8 +68,13 @@ QCoro::Task<SessionController::Result<void>> SessionController::create(QString c
 
 QCoro::Task<SessionController::Result<void>> SessionController::attach(QString sessionId, bool foreground)
 {
+	const QPointer<SessionController> self(this); // the controller can be gone when the answer arrives
 	const bool onlyModeChanges = m_attached && sessionId == m_sessionId;
 	const auto snapshot = co_await m_backend.client().attach(sessionId, foreground);
+	if(!self)
+	{
+		co_return std::unexpected(destroyedError());
+	}
 	if(!snapshot)
 	{
 		co_return std::unexpected(snapshot.error());
@@ -91,7 +109,12 @@ QCoro::Task<SessionController::Result<void>> SessionController::background()
 
 QCoro::Task<SessionController::Result<bool>> SessionController::continueLast(QString cwd)
 {
+	const QPointer<SessionController> self(this); // the controller can be gone when the answer arrives
 	const auto history = co_await m_backend.client().listHistory(std::move(cwd), NewestSessionOnly);
+	if(!self)
+	{
+		co_return std::unexpected(destroyedError());
+	}
 	if(!history)
 	{
 		co_return std::unexpected(history.error());
@@ -101,6 +124,10 @@ QCoro::Task<SessionController::Result<bool>> SessionController::continueLast(QSt
 		co_return false;
 	}
 	const auto attached = co_await attach(history->first().id);
+	if(!self)
+	{
+		co_return std::unexpected(destroyedError());
+	}
 	if(!attached)
 	{
 		co_return std::unexpected(attached.error());
@@ -117,8 +144,13 @@ QCoro::Task<SessionController::Result<void>> SessionController::loadOlder()
 		co_return Result<void>();
 	}
 	setLoadingOlder(true);
+	const QPointer<SessionController> self(this); // the controller can be gone when the page arrives
 	const QString sessionId = m_sessionId;
 	const auto page = co_await m_backend.client().messages(sessionId, before, OlderPageSize);
+	if(!self)
+	{
+		co_return std::unexpected(destroyedError());
+	}
 	setLoadingOlder(false);
 	if(!page)
 	{
@@ -156,7 +188,12 @@ QCoro::Task<SessionController::Result<void>> SessionController::permissionReply(
 // The connection is new, so the backend knows nothing of our attachment.
 QCoro::Task<> SessionController::reattach()
 {
+	const QPointer<SessionController> self(this); // the controller can be gone when the answer arrives
 	const auto snapshot = co_await m_backend.client().attach(m_sessionId, m_foreground);
+	if(!self)
+	{
+		co_return;
+	}
 	if(!snapshot)
 	{
 		emit reattachFailed(snapshot.error());
