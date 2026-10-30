@@ -5,7 +5,12 @@
 #include "coro_test.h"
 #include "fake_backend.h"
 
+#include <QBuffer>
+#include <QClipboard>
+#include <QGuiApplication>
+#include <QImage>
 #include <QJsonArray>
+#include <QMimeData>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -188,6 +193,8 @@ private slots:
 	void customCommandSendsTheExpandedText();
 	void emptyExpansionSendsNothing();
 	void imageFilesAreAttached();
+	void clipboardImageIsAttached();
+	void clipboardImagePathIsAttachedAndOtherTextIsLeftAlone();
 	void clearDraftKeepsLongDraftsInTheHistory();
 	void queueFollowsTheServer();
 };
@@ -473,6 +480,38 @@ void TestComposerModel::imageFilesAreAttached()
 	QCOMPARE(images.size(), 1);
 	QCOMPARE(images.first().toObject().value(u"data"_s).toString(), u"YWJj"_s);
 	QCOMPARE(f.composer.attachments()->rowCount(), 0);
+}
+
+void TestComposerModel::clipboardImageIsAttached()
+{
+	Fixture f;
+	QImage image(4, 4, QImage::Format_RGB32);
+	image.fill(Qt::red);
+	QGuiApplication::clipboard()->setImage(image);
+
+	QVERIFY(f.composer.pasteFromClipboard());
+
+	QCOMPARE(f.composer.attachments()->rowCount(), 1);
+	QVERIFY(f.composer.text().contains(u"[Image 1]"_s));
+	QVERIFY(f.composer.attachments()->index(0, 0).data(composer::AttachmentModel::SourceRole).toString().startsWith(u"data:image/png;base64,"_s));
+}
+
+void TestComposerModel::clipboardImagePathIsAttachedAndOtherTextIsLeftAlone()
+{
+	Fixture f;
+	QTemporaryDir dir;
+	QFile file(dir.filePath(u"shot.png"_s));
+	QVERIFY(file.open(QIODevice::WriteOnly));
+	file.write("abc");
+	file.close();
+
+	QGuiApplication::clipboard()->setText(file.fileName());
+	QVERIFY(f.composer.pasteFromClipboard());
+	QCOMPARE(f.composer.attachments()->rowCount(), 1);
+
+	QGuiApplication::clipboard()->setText(u"just words"_s);
+	QVERIFY(!f.composer.pasteFromClipboard()); // the text area pastes it
+	QCOMPARE(f.composer.attachments()->rowCount(), 1);
 }
 
 void TestComposerModel::clearDraftKeepsLongDraftsInTheHistory()
