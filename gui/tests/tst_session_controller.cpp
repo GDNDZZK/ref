@@ -113,7 +113,7 @@ struct Fixture
 		{
 			fake.respond(request, {{u"queued"_s, false}, {u"message_id"_s, u"u2"_s}});
 		}
-		else if(op == u"abort")
+		else if(op == u"abort" || op == u"detach")
 		{
 			fake.respond(request, {});
 		}
@@ -152,7 +152,10 @@ private slots:
 	void continueLastAttachesTheNewestSession();
 	void continueLastWithoutHistory();
 	void attachesAgainAfterReconnect();
-	void passesOnErrorsAndToasts();
+	void passesOnErrors();
+	void watcherAttachDoesNotTakeTheForeground();
+	void upgradingAWatcherKeepsTheConversation();
+	void detachedControllerIgnoresEventsAndAttachesAgain();
 };
 
 void TestSessionController::createShowsTheSnapshot()
@@ -282,19 +285,61 @@ void TestSessionController::attachesAgainAfterReconnect()
 	QCOMPARE(f.fake.requests().last().value(u"session_id"_s).toString(), u"ses_1"_s);
 }
 
-void TestSessionController::passesOnErrorsAndToasts()
+void TestSessionController::passesOnErrors()
 {
 	Fixture f;
 	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
 	QSignalSpy errors(&f.controller, &SessionController::errorReported);
-	QSignalSpy toasts(&f.controller, &SessionController::toastReceived);
 
 	f.fake.send(eventFrame(u"ses_1"_s, {{u"type"_s, u"error"_s}, {u"text"_s, u"it broke"_s}}));
-	f.fake.send({{u"kind"_s, u"toast"_s}, {u"level"_s, u"warn"_s}, {u"text"_s, u"careful"_s}});
 
 	QTRY_COMPARE(errors.count(), 1);
 	QCOMPARE(errors.first().first().toString(), u"it broke"_s);
-	QTRY_COMPARE(toasts.count(), 1);
+}
+
+void TestSessionController::watcherAttachDoesNotTakeTheForeground()
+{
+	Fixture f;
+	QVERIFY(await(f.controller.attach(u"ses_1"_s, false)));
+
+	QCOMPARE(f.fake.requests().last().value(u"op"_s).toString(), u"attach"_s);
+	QCOMPARE(f.fake.requests().last().value(u"foreground"_s).toBool(), false);
+	QVERIFY(f.controller.isAttached());
+}
+
+void TestSessionController::upgradingAWatcherKeepsTheConversation()
+{
+	Fixture f;
+	f.snapshot = snapshotJson(u"ses_1"_s, u"idle"_s, {messageJson(u"u1"_s, u"user"_s, u"Hello"_s, true)});
+	QVERIFY(await(f.controller.attach(u"ses_1"_s, false)));
+	QSignalSpy resets(&f.controller.model(), &QAbstractItemModel::modelReset);
+
+	f.snapshot = snapshotJson(u"ses_1"_s, u"idle"_s, {messageJson(u"u1"_s, u"user"_s, u"Changed"_s, true)});
+	QVERIFY(await(f.controller.attach(u"ses_1"_s, true)));
+
+	QCOMPARE(f.fake.requests().last().value(u"foreground"_s).toBool(), true);
+	QCOMPARE(resets.count(), 0);
+	QCOMPARE(render(f.controller.model()), (QStringList{u"user:Hello"_s}));
+}
+
+void TestSessionController::detachedControllerIgnoresEventsAndAttachesAgain()
+{
+	Fixture f;
+	f.snapshot = snapshotJson(u"ses_1"_s, u"idle"_s, {messageJson(u"u1"_s, u"user"_s, u"Hello"_s, true)});
+	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
+
+	QVERIFY(await(f.controller.detach()));
+	QVERIFY(!f.controller.isAttached());
+	QCOMPARE(f.controller.sessionId(), u"ses_1"_s);
+	QCOMPARE(f.fake.requests().last().value(u"op"_s).toString(), u"detach"_s);
+
+	f.fake.send(eventFrame(u"ses_1"_s, {{u"type"_s, u"message"_s}, {u"message"_s, messageJson(u"u2"_s, u"user"_s, u"Missed"_s, true)}}));
+	QTest::qWait(50);
+	QCOMPARE(render(f.controller.model()), (QStringList{u"user:Hello"_s}));
+
+	f.snapshot = snapshotJson(u"ses_1"_s, u"idle"_s, {messageJson(u"u1"_s, u"user"_s, u"Hello"_s, true), messageJson(u"u2"_s, u"user"_s, u"Missed"_s, true)});
+	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
+	QCOMPARE(render(f.controller.model()), (QStringList{u"user:Hello"_s, u"user:Missed"_s}));
 }
 
 QTEST_GUILESS_MAIN(TestSessionController)

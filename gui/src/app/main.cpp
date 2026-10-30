@@ -1,5 +1,5 @@
 // Adapted from an early version of qutie by LightBlueCube
-#include "app/chat_session.h"
+#include "app/workspace.h"
 #include "cli/command_line.h"
 #include "icons/icon_provider.h"
 
@@ -34,28 +34,28 @@ void print(QTextStream& stream, const QString& text)
 
 // For --smoke: ends the program as soon as the session is open, or the backend cannot be
 // reached or has no such session.
-void exitWhenOpened(ChatSession& session)
+void exitWhenOpened(Workspace& workspace)
 {
-	QObject::connect(&session, &ChatSession::opened, &session, [](const QString& sessionId) {
+	QObject::connect(&workspace, &Workspace::opened, &workspace, [](const QString& sessionId) {
 		QTextStream out(stdout);
 		print(out, u"attached %1\n"_s.arg(sessionId));
 		QTimer::singleShot(SmokeSettle, [] { QCoreApplication::exit(EXIT_SUCCESS); });
 	});
-	QObject::connect(&session, &ChatSession::openFailed, &session, [](const QString& reason) {
+	QObject::connect(&workspace, &Workspace::openFailed, &workspace, [](const QString& reason) {
 		QTextStream err(stderr);
 		print(err, u"ref-gui: %1\n"_s.arg(reason));
 		QCoreApplication::exit(EXIT_FAILURE);
 	});
-	QObject::connect(&session, &ChatSession::connectionChanged, &session, [&session] {
-		if(session.connectionState() != u"disconnected"_s)
+	QObject::connect(&workspace, &Workspace::connectionChanged, &workspace, [&workspace] {
+		if(workspace.connectionState() != u"disconnected"_s)
 		{
 			return;
 		}
 		QTextStream err(stderr);
-		print(err, u"ref-gui: %1\n"_s.arg(session.statusText()));
+		print(err, u"ref-gui: %1\n"_s.arg(workspace.connectionText()));
 		QCoreApplication::exit(EXIT_FAILURE);
 	});
-	QTimer::singleShot(SmokeTimeout, &session, [] {
+	QTimer::singleShot(SmokeTimeout, &workspace, [] {
 		QTextStream err(stderr);
 		print(err, u"ref-gui: no session after %1 s\n"_s.arg(SmokeTimeout.count() / 1000));
 		QCoreApplication::exit(EXIT_FAILURE);
@@ -93,16 +93,16 @@ int main(int argc, char* argv[])
 	}
 
 	// Outlives the engine, whose window refers to it.
-	ChatSession session(options.source, options.directory, options.start);
+	Workspace workspace(options);
+	Workspace::setInstance(&workspace);
 	if(options.smoke)
 	{
-		exitWhenOpened(session);
+		exitWhenOpened(workspace);
 	}
 
 	QQmlApplicationEngine engine;
 	QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] { QCoreApplication::exit(EXIT_FAILURE); }, Qt::QueuedConnection);
 	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
-	engine.setInitialProperties({{u"session"_s, QVariant::fromValue(&session)}});
 	engine.loadFromModule("RefGui", "Main");
 
 	return QGuiApplication::exec();

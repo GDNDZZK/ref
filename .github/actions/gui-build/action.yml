@@ -1,0 +1,29 @@
+# Configures and builds ref-gui in $RUNNER_TEMP/gui-build (REF_GUI_BUILD_DIR for later steps).
+# Needs the gui-deps action to have run.
+name: Build the GUI
+description: cmake configure and build of gui/ against the dependencies from gui-deps.
+
+inputs:
+  cmake-args:
+    description: Extra arguments for cmake's configure step.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Configure and build
+      shell: bash
+      env:
+        CMAKE_ARGS: ${{ inputs.cmake-args }}
+      run: |
+        build_dir="${RUNNER_TEMP//\\//}/gui-build"
+        echo "REF_GUI_BUILD_DIR=$build_dir" >> "$GITHUB_ENV"
+        host_args=()
+        if [[ -n "$REF_QT_HOST_DIR" ]]; then host_args=(-DQT_HOST_PATH="$REF_QT_HOST_DIR"); fi
+        # CMAKE_ARGS is a word list.
+        # shellcheck disable=SC2086
+        cmake -S gui -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_PREFIX_PATH="$REF_QT_DIR;$REF_DEPS_DIR/prefix" \
+          ${host_args[@]+"${host_args[@]}"} $CMAKE_ARGS
+        cmake --build "$build_dir"
