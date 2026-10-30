@@ -249,7 +249,7 @@ async fn handle_conn(hub: Arc<Hub>, stream: TcpStream, peer: SocketAddr, auth: A
                     version,
                     cwd,
                     token,
-                    ..
+                    notify,
                 } => {
                     let ok = conn.lock().authed
                         || (!auth.token.is_empty()
@@ -267,6 +267,8 @@ async fn handle_conn(hub: Arc<Hub>, stream: TcpStream, peer: SocketAddr, auth: A
                         st.hello = true;
                         st.frontend = client != CONTROL_CLIENT;
                         st.cwd = cwd.clone();
+                        st.notify = notify.into_iter().collect();
+                        st.focus_stamp = hub.next_stamp();
                     }
                     if client != CONTROL_CLIENT {
                         hub.frontend_joined();
