@@ -125,6 +125,9 @@ pub struct ModelConfig {
     pub variants: BTreeMap<String, Map<String, Value>>,
     /// ref extension: `limit.compact` absolute recommended compaction threshold (tokens).
     pub compact_at: Option<u64>,
+    /// ref extension: `limit.threshold`, this model's automatic compaction point. Same meaning
+    /// as `compaction.threshold`: a fraction of the window up to 1, tokens above.
+    pub threshold: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -222,8 +225,8 @@ impl CompactionConfig {
     pub fn recommend_tokens(&self, max: u64, model_override: Option<u64>) -> u64 {
         model_override.unwrap_or_else(|| Self::resolve(self.recommend, max))
     }
-    pub fn auto_tokens(&self, max: u64) -> u64 {
-        Self::resolve(self.threshold, max)
+    pub fn auto_tokens(&self, max: u64, model_override: Option<f64>) -> u64 {
+        Self::resolve(model_override.unwrap_or(self.threshold), max)
     }
 }
 

@@ -553,7 +553,7 @@ fn compaction_thresholds() {
     let c = fx.load();
     assert_eq!(c.compaction.recommend_tokens(100_000, None), 60_000);
     assert_eq!(c.compaction.recommend_tokens(100_000, Some(42)), 42);
-    assert_eq!(c.compaction.auto_tokens(100_000), 90_000);
+    assert_eq!(c.compaction.auto_tokens(100_000, None), 90_000);
 
     fx.write(
         "home/.config/opencode/opencode.json",
@@ -567,7 +567,38 @@ fn compaction_thresholds() {
         10_000,
         "absolute capped at window"
     );
-    assert_eq!(c.compaction.auto_tokens(200_000), 160_000);
+    assert_eq!(c.compaction.auto_tokens(200_000, None), 160_000);
+}
+
+#[test]
+fn model_threshold_overrides_the_global_one() {
+    let fx = Fx::new();
+    fx.write(
+        "home/.config/opencode/opencode.json",
+        r#"{"compaction": {"threshold": 0.8},
+            "provider": {"p": {"models": {
+              "ratio": {"limit": {"context": 200000, "threshold": 0.5}},
+              "tokens": {"limit": {"context": 1000000, "threshold": 250000, "compact": 100000}},
+              "plain": {"limit": {"context": 200000}},
+              "bad": {"limit": {"context": 200000, "threshold": -1}}}}}}"#,
+    );
+    let c = fx.load();
+    let model = |key: &str| &c.providers["p"].models[key];
+    let auto = |key: &str| {
+        let m = model(key);
+        c.compaction.auto_tokens(m.context, m.threshold)
+    };
+    assert_eq!(auto("ratio"), 100_000, "fraction of the window");
+    assert_eq!(auto("tokens"), 250_000, "absolute tokens");
+    assert_eq!(auto("plain"), 160_000, "falls back to the global threshold");
+    assert_eq!(auto("bad"), 160_000, "an invalid value is ignored");
+    // `limit.compact` only moves the recommended point.
+    let tokens = model("tokens");
+    let recommend = c
+        .compaction
+        .recommend_tokens(tokens.context, tokens.compact_at);
+    assert_eq!(recommend, 100_000);
+    assert_eq!(model("ratio").compact_at, None);
 }
 
 #[test]
