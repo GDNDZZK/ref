@@ -73,5 +73,19 @@
     "turnDone": "Finished",
     "turnError": "Stopped with an error",
     "turnErrorDetail": "Stopped with an error: {error}"
+  },
+  "notifySettings": {
+    "title": "Notifications",
+    "enable": "Show system notifications",
+    "permission": "A tool needs permission",
+    "turnDone": "A turn finished",
+    "turnError": "A turn ended with an error",
+    "insecure": "Not available on this page: browsers only show notifications on https or localhost. The tab title flashes instead.",
+    "unsupported": "This browser cannot show notifications. The tab title flashes instead.",
+    "denied": "Blocked in the browser's site settings. The tab title flashes instead.",
+    "needsPermission": "The browser still has to allow notifications.",
+    "allow": "Allow",
+    "later": "Not now",
+    "prompt": "Allow desktop notifications when another session needs you?"
   }
 }
