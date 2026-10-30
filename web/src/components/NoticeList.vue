@@ -22,10 +22,10 @@ const store = useNoticesStore()
 <style scoped>
 .notices {
   position: fixed;
-  top: 62px;
-  right: 14px;
+  top: var(--toast-top);
+  right: var(--toast-right);
   z-index: 10;
-  width: min(var(--toast-width), calc(100vw - 28px));
+  width: min(var(--toast-width), calc(100vw - 2 * var(--toast-right)));
   pointer-events: none;
 }
 
