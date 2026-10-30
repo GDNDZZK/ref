@@ -51,7 +51,7 @@ watch(following, (isFollowing) => {
 </script>
 
 <template>
-  <div class="pane">
+  <div class="pane" :data-pane="session.id">
     <div class="chat">
       <ChatView v-model:following="following" :session="session" @error-out-of-sight="onErrorOutOfSight" />
       <p class="empty" :class="{ hidden: session.blocks.length > 0 }">{{ t('chat.empty') }}</p>

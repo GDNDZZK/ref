@@ -12,14 +12,13 @@ function setup(sessionInfo = info({ id: 'ses_1' })) {
     detach: vi.fn().mockResolvedValue(undefined),
   }
   const notify = vi.fn()
-  const sessionError = vi.fn()
   const draftRestored = vi.fn()
   const session = new ChatSession(
     'ses_1',
-    { api: () => api as unknown as RefApi, notify, sessionError, draftRestored },
+    { api: () => api as unknown as RefApi, notify, draftRestored },
     sessionInfo,
   )
-  return { api, notify, sessionError, draftRestored, session }
+  return { api, notify, draftRestored, session }
 }
 
 describe('ChatSession', () => {
@@ -70,12 +69,11 @@ describe('ChatSession', () => {
     expect(session.busy).toBe(false)
   })
 
-  it('reports every error event and keeps it as a block after the messages', async () => {
-    const { sessionError, session } = setup()
+  it('keeps an error event as a block after the messages', async () => {
+    const { session } = setup()
     await session.attach(true)
     session.applyEvent({ type: 'error', text: 'rate limited' })
     await afterFrame()
-    expect(sessionError).toHaveBeenCalledWith(session, 'rate limited')
     expect(session.blocks.at(-1)).toMatchObject({ kind: 'error', text: 'rate limited' })
   })
 

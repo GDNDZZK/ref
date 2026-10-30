@@ -1,5 +1,6 @@
-// Answers the oldest pending permission request of the open session from the keyboard:
-// a or Enter = allow, s = allow for the session, d or Esc = deny.
+// Answers the oldest pending permission request from the keyboard: a or Enter = allow, s = allow
+// for the session, d or Esc = deny. Works on the focused session, or any session on screen that
+// is waiting.
 //
 // The keys are ignored for a moment after a request appears, because the user may still be typing.
 // After that the request owns the keyboard: other letters no longer reach the composer until
@@ -27,15 +28,22 @@ export function usePermissionKeys(): void {
   const notices = useNoticesStore()
   let armedAt = 0
 
+  // The focused session, or another one on screen that is waiting for an answer.
+  function askingSession() {
+    const ids = [workspace.focusedId, ...workspace.visibleSessionIds]
+    const sessions = ids.flatMap((id) => (id === undefined ? [] : [workspace.chat(id)]))
+    return sessions.find((session) => session.permissions.length > 0)
+  }
+
   // Each new request starts its own guard time.
   watch(
-    () => workspace.current?.pendingPermission?.call_id,
+    () => askingSession()?.pendingPermission?.call_id,
     (callId) => callId && (armedAt = performance.now() + PERMISSION_GUARD_MS),
     { immediate: true },
   )
 
   function onKeydown(event: KeyboardEvent): void {
-    const session = workspace.current
+    const session = askingSession()
     const request = session?.pendingPermission
     if (!session || !request || performance.now() < armedAt || inDialog(event.target)) return
     if (event.ctrlKey || event.metaKey || event.altKey) return

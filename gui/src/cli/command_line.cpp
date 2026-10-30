@@ -82,7 +82,7 @@ ParseResult parseCommandLine(const QStringList& arguments, const QString& curren
 	const QCommandLineOption versionOption({u"V"_s, u"version"_s}, u"Show the version."_s);
 	const QCommandLineOption continueOption({u"c"_s, u"continue"_s}, u"Continue the most recent session of the directory."_s);
 	const QCommandLineOption sessionOption({u"s"_s, u"session"_s}, u"Attach to a session by id (live or from history)."_s, u"ID"_s);
-	const QCommandLineOption watchOption({u"w"_s, u"watch"_s}, u"Split view of all live background sessions (not available yet)."_s);
+	const QCommandLineOption watchOption({u"w"_s, u"watch"_s}, u"Split view of all live background sessions."_s);
 	const QCommandLineOption agentOption(u"agent"_s, u"Agent for a new session."_s, u"NAME"_s);
 	const QCommandLineOption modelOption(u"model"_s, u"Model for a new session."_s, u"provider/model[#variant]"_s);
 	const QCommandLineOption serverOption(u"server"_s, u"Backend to use (ws://host:port); none is started."_s, u"URL"_s);
@@ -122,10 +122,7 @@ ParseResult parseCommandLine(const QStringList& arguments, const QString& curren
 	{
 		options.start.kind = SessionStart::Kind::Continue;
 	}
-	if(parser.isSet(watchOption))
-	{
-		options.warnings.append(u"split view is not available yet; opening a session instead"_s);
-	}
+	options.watch = parser.isSet(watchOption);
 	if(parser.isSet(agentOption))
 	{
 		options.start.agent = parser.value(agentOption);

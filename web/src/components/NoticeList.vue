@@ -1,68 +1,51 @@
 <script setup lang="ts">
-// Short messages from the backend and from failed requests. Click to dismiss.
+// The toast stack, top right under the corner buttons: the newest at the bottom, at most four.
 import { useNoticesStore } from '../stores/notices.ts'
+import NoticeToast from './NoticeToast.vue'
 
 const store = useNoticesStore()
 </script>
 
 <template>
   <TransitionGroup tag="div" name="notice" class="notices" role="status">
-    <button
+    <NoticeToast
       v-for="notice in store.notices"
       :key="notice.id"
-      type="button"
-      class="notice"
-      :class="notice.level"
-      @click="store.dismiss(notice.id)"
-    >
-      {{ notice.text }}
-    </button>
+      :notice="notice"
+      @dismiss="store.dismiss(notice.id)"
+      @pause="store.pause(notice.id)"
+      @resume="store.resume(notice.id)"
+    />
   </TransitionGroup>
 </template>
 
 <style scoped>
 .notices {
   position: fixed;
-  top: 14px;
-  left: 50%;
+  top: 62px;
+  right: 14px;
   z-index: 10;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: min(520px, calc(100% - 120px));
-  translate: -50% 0;
+  width: min(var(--toast-width), calc(100vw - 28px));
   pointer-events: none;
-}
-
-.notice {
-  padding: 10px 14px;
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--border);
-  font-size: var(--small-font-size);
-  text-align: left;
-  pointer-events: auto;
-}
-
-.notice.warn {
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-
-.notice.error {
-  background: var(--error-surface);
-  box-shadow: inset 0 0 0 1px var(--error-border);
 }
 
 .notice-enter-active,
 .notice-leave-active {
   transition:
     opacity var(--motion-standard) var(--motion-ease),
-    translate var(--motion-standard) var(--motion-ease);
+    translate var(--motion-standard) var(--motion-ease),
+    grid-template-rows var(--motion-standard) var(--motion-ease),
+    margin-bottom var(--motion-standard) var(--motion-ease);
 }
 
-.notice-enter-from,
+.notice-enter-from {
+  opacity: 0;
+  translate: var(--motion-toast-slide) 0;
+}
+
 .notice-leave-to {
   opacity: 0;
-  translate: 0 -10px;
+  grid-template-rows: 0fr;
+  margin-bottom: 0;
 }
 </style>

@@ -1,7 +1,6 @@
-// The current time in ms, refreshed every second while a component uses it. For counters
-// (running 12s, retrying in 4s) that must tick without any event arriving.
+// The current time in ms, updated every second while someone uses it (running time counters).
 
-import { computed, onScopeDispose, ref } from 'vue'
+import { onScopeDispose, ref } from 'vue'
 import type { Ref } from 'vue'
 
 const TICK_MS = 1000
@@ -16,9 +15,7 @@ export function useNow(): Readonly<Ref<number>> {
     timer = setInterval(() => (now.value = Date.now()), TICK_MS)
   }
   onScopeDispose(() => {
-    if (--users > 0) return
-    clearInterval(timer)
-    timer = undefined
+    if (--users === 0) clearInterval(timer)
   })
-  return computed(() => now.value)
+  return now
 }
