@@ -34,5 +34,8 @@
   },
   "message": {
     "from": "from {name}"
+  },
+  "command": {
+    "unavailable": "This command is not available right now."
   }
 }
