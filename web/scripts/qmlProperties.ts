@@ -4,6 +4,7 @@
 //   readonly property int quick: 120                                -> number
 //   readonly property int ease: Easing.OutExpo                      -> easing
 //   readonly property string syntaxTheme: dark ? "Breeze Dark" : "Breeze Light"
+//   readonly property var agentPalette: [agentBlue, agentGreen]        -> list of other properties' names
 //
 // Anything else is an error: a value that depends on other properties cannot be generated.
 
@@ -13,6 +14,7 @@ export type Value =
   | { kind: 'number'; value: number }
   | { kind: 'string'; value: string }
   | { kind: 'easing'; name: string }
+  | { kind: 'list'; names: string[] } // property names; the properties are defined elsewhere in the file
   | { kind: 'themed'; dark: Literal; light: Literal }
 
 export interface QmlProperty {
@@ -27,6 +29,7 @@ const DECLARATION = /^\s*(readonly\s+)?property\s+(\w+)\s+(\w+)\s*:\s*(.*)$/
 const NUMBER = /^-?\d+(?:\.\d+)?$/
 const STRING = /^"([^"\\]*)"$/
 const EASING = /^Easing\.(\w+)$/
+const NAME_LIST = /^\[\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s*\]$/
 const THEMED_PREFIX = /^dark\s*\?\s*/
 
 // Removes a trailing `// comment` that is not inside a string.
@@ -78,6 +81,9 @@ export function parseValue(property: QmlProperty, where: string): Value {
 
   const easing = EASING.exec(expression)
   if (easing) return { kind: 'easing', name: easing[1]! }
+
+  const list = NAME_LIST.exec(expression)
+  if (list) return { kind: 'list', names: list[1]!.split(',').map((name) => name.trim()) }
 
   if (!THEMED_PREFIX.test(expression)) return fail()
   const branches = expression.replace(THEMED_PREFIX, '').split(/\s:\s/)
