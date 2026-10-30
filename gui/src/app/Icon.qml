@@ -16,8 +16,9 @@ Image {
 
 	width: size
 	height: size
-	// Rasterised at device pixels so that the image maps 1:1 onto the screen.
-	sourceSize: Qt.size(size * Screen.devicePixelRatio, size * Screen.devicePixelRatio)
+	// In logical pixels: Image asks the provider for sourceSize times the device pixel ratio, so
+	// the picture maps 1:1 onto the screen.
+	sourceSize: Qt.size(size, size)
 	source: name === "" ? "" : "image://icons/" + name + "-" + size + "?color=" + colorHex
 	fillMode: Image.Pad
 	smooth: false

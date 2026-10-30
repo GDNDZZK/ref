@@ -8,6 +8,7 @@
 #include <QJsonObject>
 #include <QLocale>
 #include <QRegularExpression>
+#include <QTextBoundaryFinder>
 
 using namespace Qt::StringLiterals;
 
@@ -139,9 +140,10 @@ std::optional<QString> toolDetail(const QString& toolName, const QVariantMap& in
 	return std::nullopt;
 }
 
-// Terminal columns of a character, roughly: 0 for combining marks, 2 for East Asian wide ones and
-// emoji, else 1. The terminal client cuts text by columns.
-int columnsOf(char32_t character)
+// Terminal columns of a code point, roughly: 0 for combining marks, 2 for East Asian wide ones and
+// emoji, else 1. The terminal client cuts text by columns (unicode-width); this is the same table
+// as the WebUI's (web/src/model/columns.ts).
+int codePointColumns(char32_t character)
 {
 	struct Range
 	{
@@ -149,8 +151,8 @@ int columnsOf(char32_t character)
 		char32_t last;
 	};
 	static constexpr Range wide[] = {
-		{0x1100, 0x115F}, {0x2E80, 0xA4CF}, {0xAC00, 0xD7A3}, {0xF900, 0xFAFF}, {0xFE30, 0xFE6F},
-		{0xFF00, 0xFF60}, {0xFFE0, 0xFFE6}, {0x1F300, 0x1F64F}, {0x1F900, 0x1F9FF}, {0x20000, 0x3FFFD},
+		{0x1100, 0x115F},   {0x2E80, 0xA4CF},   {0xAC00, 0xD7A3},   {0xF900, 0xFAFF},   {0xFE30, 0xFE6F},  {0xFF00, 0xFF60},
+		{0xFFE0, 0xFFE6},   {0x1F300, 0x1F64F}, {0x1F680, 0x1F6FF}, {0x1F900, 0x1F9FF}, {0x20000, 0x3FFFD},
 	};
 	const QChar::Category category = QChar::category(character);
 	if(category == QChar::Mark_NonSpacing || category == QChar::Mark_Enclosing || category == QChar::Other_Format)
@@ -159,24 +161,49 @@ int columnsOf(char32_t character)
 	return isWide ? 2 : 1;
 }
 
-// `text` cut to at most `maxColumns` columns, ending in "…" when something was cut.
+// Columns of one grapheme cluster: its code points added up, but never more than two.
+int clusterColumns(QStringView cluster)
+{
+	constexpr int MaxClusterColumns = 2;
+	int columns = 0;
+	for(const char32_t character : cluster.toUcs4())
+		columns += codePointColumns(character);
+	return std::min(columns, MaxClusterColumns);
+}
+
+// The grapheme clusters of `text`, in order.
+QList<QStringView> clustersOf(const QString& text)
+{
+	QList<QStringView> clusters;
+	QTextBoundaryFinder finder(QTextBoundaryFinder::Grapheme, text);
+	qsizetype start = 0;
+	for(qsizetype end = finder.toNextBoundary(); end != -1; end = finder.toNextBoundary())
+	{
+		clusters.append(QStringView(text).mid(start, end - start));
+		start = end;
+	}
+	return clusters;
+}
+
+// `text` cut to at most `maxColumns` columns, ending in "\u2026" when something was cut.
 QString truncated(const QString& text, int maxColumns)
 {
+	const QList<QStringView> clusters = clustersOf(text);
 	int columns = 0;
-	for(const char32_t character : text.toUcs4())
-		columns += columnsOf(character);
+	for(const QStringView cluster : clusters)
+		columns += clusterColumns(cluster);
 	if(columns <= maxColumns)
 		return text;
 
 	QString result;
 	int used = 0;
-	for(const char32_t character : text.toUcs4())
+	for(const QStringView cluster : clusters)
 	{
-		const int width = columnsOf(character);
+		const int width = clusterColumns(cluster);
 		if(used + width > maxColumns - 1)
 			break;
 		used += width;
-		result += QString::fromUcs4(&character, 1);
+		result += cluster;
 	}
 	return result + u'\u2026';
 }
