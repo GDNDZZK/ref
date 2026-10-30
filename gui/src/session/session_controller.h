@@ -78,6 +78,9 @@ public:
 	QCoro::Task<Result<proto::PromptResult>> send(QString text, QList<proto::ImageData> images = {});
 	QCoro::Task<Result<void>> abort();
 	QCoro::Task<Result<void>> permissionReply(QString callId, bool allow, bool always);
+	// Takes back a human prompt and what followed (the last one without `messageId`); the answer
+	// has the prompt's text and pictures. The conversation shrinks by a Reset event.
+	QCoro::Task<Result<proto::RemovedPrompt>> undo(std::optional<QString> messageId);
 
 signals:
 	void infoChanged();
