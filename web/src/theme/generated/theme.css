@@ -37,7 +37,7 @@
   --agent-yellow: #c98312;
   --agent-green: #2e9d5b;
   --agent-cyan: #2a8f9c;
-  --stale-opacity: 0.55px;
+  --stale-opacity: 0.55;
   --font-size: 15px;
   --small-font-size: 12px;
   --code-font-size: 13px;
@@ -82,6 +82,7 @@
   --composer-max-input-height: 220px;
   --error-block-vertical-padding: 12px;
   --error-block-horizontal-padding: 14px;
+  --error-block-spread-speed: 1.5;
   --user-block-horizontal-padding: 14px;
   --user-block-vertical-padding: 9px;
 }

@@ -30,6 +30,7 @@ const METRIC_UNITLESS = [
   'sidebarMinRunningRows',
   'paletteMaxRows',
   'toastMax',
+  'staleOpacity',
 ]
 
 const MOTION_UNITS: Record<string, Unit> = {
@@ -64,7 +65,7 @@ const COMPONENT_PROPERTIES: Record<string, Record<string, Unit>> = {
     springDuration: 'ms',
   },
   Composer: { padding: 'px', maxInputHeight: 'px' },
-  ErrorBlock: { verticalPadding: 'px', horizontalPadding: 'px' },
+  ErrorBlock: { verticalPadding: 'px', horizontalPadding: 'px', spreadSpeed: '' },
   UserBlock: { horizontalPadding: 'px', verticalPadding: 'px' },
 }
 
