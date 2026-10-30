@@ -95,6 +95,10 @@ void SessionDirectory::setLive(QList<proto::SessionInfo> sessions)
 	std::ranges::sort(sessions, [](const proto::SessionInfo& a, const proto::SessionInfo& b) {
 		return a.createdAt != b.createdAt ? a.createdAt > b.createdAt : a.id < b.id;
 	});
+	for(proto::SessionInfo& info : sessions)
+	{
+		info.live = true;
+	}
 	m_liveSessions = sessions;
 	m_live.setSessions(sessions);
 	applyHistory();
@@ -104,14 +108,16 @@ void SessionDirectory::setLive(QList<proto::SessionInfo> sessions)
 void SessionDirectory::applyHistory()
 {
 	QList<proto::SessionInfo> shown;
-	for(const proto::SessionInfo& info : std::as_const(m_persisted))
+	for(proto::SessionInfo info : std::as_const(m_persisted))
 	{
 		if(!m_live.contains(info.id))
 		{
+			info.live = false;
 			shown.append(info);
 		}
 	}
 	m_history.setSessions(shown);
+	m_choices.setSessions(m_liveSessions + shown);
 }
 
 void SessionDirectory::onFrame(const proto::ServerFrame& frame)

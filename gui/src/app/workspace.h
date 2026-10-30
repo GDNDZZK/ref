@@ -48,9 +48,10 @@ class Workspace : public QObject
 	Q_PROPERTY(refgui::workspace::Settings* settings READ settings CONSTANT)
 	Q_PROPERTY(refgui::workspace::BackendConfig* config READ config CONSTANT)
 	Q_PROPERTY(QVariantList mcpServers READ mcpServers NOTIFY mcpServersChanged)
-	Q_PROPERTY(QAbstractItemModel* sessions READ sessions CONSTANT)
-	Q_PROPERTY(QAbstractItemModel* history READ history CONSTANT)
-	Q_PROPERTY(QString historyFilter READ historyFilter WRITE setHistoryFilter NOTIFY historyFilterChanged)
+	Q_PROPERTY(refgui::workspace::SessionListModel* sessions READ sessions CONSTANT)
+	Q_PROPERTY(refgui::workspace::SessionListModel* history READ history CONSTANT)
+	// Live and persisted sessions in one list with a filter of its own, for the session picker.
+	Q_PROPERTY(refgui::workspace::SessionListModel* sessionChoices READ sessionChoices CONSTANT)
 	Q_PROPERTY(bool historyLoaded READ historyLoaded NOTIFY historyLoadedChanged)
 	// Split view.
 	Q_PROPERTY(QAbstractItemModel* tiles READ tiles CONSTANT)
@@ -66,6 +67,7 @@ class Workspace : public QObject
 	Q_PROPERTY(bool protocolOutdated READ isProtocolOutdated NOTIFY backendChanged)
 	Q_PROPERTY(QString backendVersion READ backendVersion NOTIFY backendChanged)
 	Q_PROPERTY(int protocolVersion READ protocolVersion NOTIFY backendChanged)
+	Q_PROPERTY(int requiredProtocol READ requiredProtocol CONSTANT)
 	Q_PROPERTY(bool canRestartBackend READ canRestartBackend NOTIFY backendChanged)
 
 public:
@@ -98,10 +100,9 @@ public:
 	refgui::workspace::BackendConfig* config() { return &m_config; }
 	refgui::workspace::CommandRegistry* commands() { return &m_commands; }
 	QVariantList mcpServers() const { return m_config.mcpServers(); }
-	QAbstractItemModel* sessions() { return &m_directory.live(); }
-	QAbstractItemModel* history() { return &m_directory.history(); }
-	QString historyFilter() const { return m_directory.history().filter(); }
-	void setHistoryFilter(const QString& filter);
+	refgui::workspace::SessionListModel* sessions() { return &m_directory.live(); }
+	refgui::workspace::SessionListModel* history() { return &m_directory.history(); }
+	refgui::workspace::SessionListModel* sessionChoices() { return &m_directory.choices(); }
 	bool historyLoaded() const { return m_directory.historyLoaded(); }
 	QAbstractItemModel* tiles() { return &m_tiles; }
 	bool isSplitView() const { return m_split; }
@@ -113,6 +114,7 @@ public:
 	bool isProtocolOutdated() const { return m_backend.hello().protocol < refgui::proto::ProtocolVersion && m_backend.state() == refgui::client::Backend::State::Connected; }
 	QString backendVersion() const { return m_backend.hello().serverVersion; }
 	int protocolVersion() const { return m_backend.hello().protocol; }
+	static constexpr int requiredProtocol() { return refgui::proto::ProtocolVersion; }
 	// Restarting is only offered when no session would lose work.
 	bool canRestartBackend() const;
 
@@ -149,6 +151,14 @@ public:
 	Q_INVOKABLE void zoomTile(const QString& sessionId);
 	Q_INVOKABLE void unzoom();
 
+	// The user picked a theme (system, light or dark). The window changes it under a crossfade
+	// and then sets Settings.theme.
+	Q_INVOKABLE void requestTheme(const QString& theme) { emit themeChangeRequested(theme); }
+	// Shows a toast. `level` is info, warn or error.
+	Q_INVOKABLE void showToast(const QString& level, const QString& text) { toast(level, text); }
+	// The row of a live or listed session as a map (see SessionList), empty when unknown.
+	Q_INVOKABLE QVariantMap info(const QString& sessionId) const { return m_directory.choices().get(sessionId); }
+
 	Q_INVOKABLE void openDialog(const QString& id, const QVariantMap& args = {});
 	Q_INVOKABLE void closeDialog();
 
@@ -166,15 +176,18 @@ signals:
 	void visibleSessionIdsChanged();
 	void windowActiveChanged();
 	void mcpServersChanged();
-	void historyFilterChanged();
 	void historyLoadedChanged();
 	void splitViewChanged();
 	void focusedTileChanged();
 	void zoomedChanged();
 	void dialogChanged();
 	void backendChanged();
+	void themeChangeRequested(const QString& theme);
 	// A message for the user that is not about one session. `level` is info, warn or error.
 	void toastRequested(const QString& level, const QString& text);
+	// The user asked for a new session in a folder of their choice; the window shows a folder dialog
+	// (the backend is on this machine). A remote backend gets the `new-in` dialog instead.
+	void newSessionFolderRequested();
 	// The first session is open.
 	void opened(const QString& sessionId);
 	// The first session could not be opened.

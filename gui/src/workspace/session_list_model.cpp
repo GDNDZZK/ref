@@ -57,10 +57,8 @@ QString displayTitle(const QString& name, const QString& title, const QString& c
 
 } // namespace
 
-SessionListModel::SessionListModel(Order order, bool live, QObject* parent)
+SessionListModel::SessionListModel(QObject* parent)
 	: QAbstractListModel(parent)
-	, m_order(order)
-	, m_live(live)
 {
 }
 
@@ -73,6 +71,9 @@ SessionListModel::Row SessionListModel::toRow(const proto::SessionInfo& info)
 	row.cwd = info.cwd;
 	row.agent = info.agent;
 	row.modelLabel = info.model.variant ? info.model.model + u" · "_s + *info.model.variant : info.model.model;
+	row.provider = info.model.provider;
+	row.modelId = info.model.model;
+	row.variant = info.model.variant.value_or(QString());
 	row.state = stateName(info.status.state);
 	row.busySince = info.busySince.value_or(0);
 	row.updatedAt = info.updatedAt;
@@ -87,6 +88,7 @@ SessionListModel::Row SessionListModel::toRow(const proto::SessionInfo& info)
 	}
 	row.lastError = info.lastError.value_or(QString());
 	row.attached = int(info.attached);
+	row.live = info.live;
 	return row;
 }
 
@@ -108,8 +110,12 @@ bool SessionListModel::matchesFilter(const Row& row) const
 
 bool SessionListModel::before(const Row& a, const Row& b) const
 {
-	const qint64 left = m_order == Order::CreatedNewestFirst ? a.createdAt : a.updatedAt;
-	const qint64 right = m_order == Order::CreatedNewestFirst ? b.createdAt : b.updatedAt;
+	if(a.live != b.live)
+	{
+		return a.live;
+	}
+	const qint64 left = a.live ? a.createdAt : a.updatedAt;
+	const qint64 right = a.live ? b.createdAt : b.updatedAt;
 	if(left != right)
 	{
 		return left > right;
@@ -135,6 +141,7 @@ void SessionListModel::setFilter(const QString& filter)
 	}
 	m_filter = filter;
 	rebuild();
+	emit filterChanged();
 }
 
 void SessionListModel::setCurrentId(const QString& id)
@@ -280,7 +287,28 @@ QVariant SessionListModel::data(const QModelIndex& index, int role) const
 	{
 		return {};
 	}
-	const Row& row = m_rows[index.row()];
+	return roleData(m_rows[index.row()], role);
+}
+
+QVariantMap SessionListModel::get(const QString& sessionId) const
+{
+	const proto::SessionInfo* info = find(sessionId);
+	if(info == nullptr)
+	{
+		return {};
+	}
+	const Row row = toRow(*info);
+	QVariantMap map;
+	const QHash<int, QByteArray> names = roleNames();
+	for(auto it = names.cbegin(); it != names.cend(); ++it)
+	{
+		map.insert(QString::fromLatin1(it.value()), roleData(row, it.key()));
+	}
+	return map;
+}
+
+QVariant SessionListModel::roleData(const Row& row, int role) const
+{
 	switch(role)
 	{
 	case SessionIdRole:
@@ -297,6 +325,12 @@ QVariant SessionListModel::data(const QModelIndex& index, int role) const
 		return lastComponent(row.cwd);
 	case AgentRole:
 		return row.agent;
+	case ProviderRole:
+		return row.provider;
+	case ModelIdRole:
+		return row.modelId;
+	case VariantRole:
+		return row.variant;
 	case ModelLabelRole:
 		return row.modelLabel;
 	case StateRole:
@@ -326,7 +360,7 @@ QVariant SessionListModel::data(const QModelIndex& index, int role) const
 	case IsTileRole:
 		return m_tileIds.contains(row.id);
 	case IsLiveRole:
-		return m_live;
+		return row.live;
 	default:
 		return {};
 	}
@@ -342,8 +376,11 @@ QHash<int, QByteArray> SessionListModel::roleNames() const
 		{CwdRole, "cwd"},
 		{DirNameRole, "dirName"},
 		{AgentRole, "agent"},
+		{ProviderRole, "provider"},
+		{ModelIdRole, "modelId"},
+		{VariantRole, "variant"},
 		{ModelLabelRole, "modelLabel"},
-		{StateRole, "state"},
+		{StateRole, "activity"},
 		{BusySinceRole, "busySince"},
 		{UpdatedAtRole, "updatedAt"},
 		{CreatedAtRole, "createdAt"},

@@ -112,16 +112,6 @@ void Workspace::setWindowActive(bool active)
 	emit windowActiveChanged();
 }
 
-void Workspace::setHistoryFilter(const QString& filter)
-{
-	if(filter == m_directory.history().filter())
-	{
-		return;
-	}
-	m_directory.history().setFilter(filter);
-	emit historyFilterChanged();
-}
-
 bool Workspace::isBackendLocal() const
 {
 	const auto* remote = std::get_if<Backend::Mode::Remote>(&m_options.source);
