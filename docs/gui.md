@@ -118,6 +118,8 @@ The split view (Ctrl+Shift+W, the button at the top right, or `ref-gui -w`) show
 | Ctrl+C | Without a selection, empties the input box (text of 20 characters or more goes to the history first). With a selection it copies. |
 | `!` at the start | Shell mode: the line runs as a shell command. Backspace on an empty box or Esc leaves it. |
 
+On macOS, Ctrl in this table is Cmd.
+
 - The tags under the box show the agent, the model and the variant. Click one to choose; a tag changes only after the backend has confirmed. There is no Ctrl+T for the variant: use Ctrl+Shift+T or click the variant tag.
 - `/` lists the commands, the same as the command palette, custom commands included. `@` lists files under the session's directory (`.gitignore` is respected) and inserts `@path `.
 - Images: paste from the clipboard (Ctrl+V), paste the path or `file://` address of an image file, or drop image files on the box. PNG, JPEG, GIF and WebP up to 20 MiB each. Each picture is a thumbnail above the text with a remove button, and an `[Image N]` token in the text, as in the terminal UI.
