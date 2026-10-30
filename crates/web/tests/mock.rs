@@ -61,7 +61,7 @@ async fn mock_mode_serves_tabs_from_a_private_backend() {
     assert!(!env.state_dir().join("instances").exists());
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn a_mock_that_exited_is_started_again_for_the_next_tab() {
     require_ref_server();
@@ -97,7 +97,7 @@ async fn a_mock_that_exited_is_started_again_for_the_next_tab() {
     assert_ne!(second_mock[0], first_mock[0], "a new mock process");
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn the_mock_does_not_outlive_ref_web() {
     require_ref_server();
@@ -113,7 +113,7 @@ async fn the_mock_does_not_outlive_ref_web() {
     wait_until("the mock to exit", || process_gone(mock[0])).await;
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn without_an_explicit_server_ref_web_starts_the_backend_beside_it() {
     require_ref_server();
@@ -130,7 +130,7 @@ async fn without_an_explicit_server_ref_web_starts_the_backend_beside_it() {
 }
 
 /// The pid in the one instance file of the private state directory.
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn backend_pid(env: &Env) -> u32 {
     let files: Vec<_> = std::fs::read_dir(env.state_dir().join("instances"))
         .unwrap()

@@ -360,8 +360,8 @@ pub fn require_ref_server() {
     );
 }
 
-/// Direct children of `parent` (Unix `pgrep -P`).
-#[cfg(unix)]
+/// Direct children of `parent` (`pgrep -P`; the process tests are Linux-only).
+#[cfg(target_os = "linux")]
 pub fn child_pids(parent: u32) -> Vec<u32> {
     let output = Command::new("pgrep")
         .args(["-P", &parent.to_string()])
@@ -373,8 +373,8 @@ pub fn child_pids(parent: u32) -> Vec<u32> {
         .collect()
 }
 
-/// True once `pid` is gone or only a zombie waiting to be reaped.
-#[cfg(unix)]
+/// True once `pid` is gone or only a zombie waiting to be reaped (reads `/proc`).
+#[cfg(target_os = "linux")]
 pub fn process_gone(pid: u32) -> bool {
     if !ref_sys::pid_alive(pid) {
         return true;
