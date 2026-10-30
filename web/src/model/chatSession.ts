@@ -175,6 +175,7 @@ export class ChatSession {
   async detach(): Promise<void> {
     await this.deps.api().detach(this.id)
     this.state.attachment = 'detached'
+    this.images.clear() // pictures are fetched again when the session is shown again
   }
 
   // The session list changed: keeps the status, name and the like fresh, also before the first attach.
@@ -291,6 +292,7 @@ export class ChatSession {
   }
 
   dispose(): void {
+    this.images.clear()
     this.scope.stop()
   }
 
