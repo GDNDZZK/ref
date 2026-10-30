@@ -56,6 +56,21 @@ QString Workspace::currentId() const
 	return m_current == nullptr ? QString() : m_current->sessionId();
 }
 
+QStringList Workspace::visibleSessionIds() const
+{
+	return m_current == nullptr ? QStringList() : QStringList{m_current->sessionId()};
+}
+
+void Workspace::setWindowActive(bool active)
+{
+	if(active == m_windowActive)
+	{
+		return;
+	}
+	m_windowActive = active;
+	emit windowActiveChanged();
+}
+
 QString Workspace::connectionState() const
 {
 	switch(m_backend.state())
@@ -147,6 +162,7 @@ QCoro::Task<Result<void>> Workspace::show(const QString& sessionId)
 	}
 	m_current = &session;
 	emit currentChanged();
+	emit visibleSessionIdsChanged();
 	co_return Result<void>();
 }
 
