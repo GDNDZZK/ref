@@ -132,6 +132,7 @@ pub async fn create_session(hub: &Arc<Hub>, o: CreateOpts) -> Result<Arc<Session
         context,
         todos: Vec::new(),
         busy_since: None,
+        last_error: None,
     };
     let cfg = Arc::new(cfg);
     // Start connecting MCP servers in the background.

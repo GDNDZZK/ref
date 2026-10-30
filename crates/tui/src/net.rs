@@ -179,6 +179,7 @@ pub async fn run(
                 version: PROTOCOL_VERSION,
                 cwd: cwd.clone(),
                 token: ep.token.clone(),
+                notify: Vec::new(),
             },
         };
         let Ok(txt) = serde_json::to_string(&hello) else {

@@ -72,6 +72,7 @@ fn info() -> SessionInfo {
         },
         todos: Vec::new(),
         busy_since: None,
+        last_error: None,
     }
 }
 
