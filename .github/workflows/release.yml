@@ -1,5 +1,5 @@
 # Builds the release archives (ref-tui, ref-web, ref-gui and ref-all) for 6 platforms.
-# Pushing a tag like v0.1.0 publishes them as a GitHub Release.
+# Pushing a tag like v0.2.0 publishes them as a GitHub Release.
 # Running it by hand (Actions tab -> Release -> Run workflow) only builds; the archives
 # can then be downloaded from the run page.
 name: Release
@@ -22,6 +22,18 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+
+      # Every later job depends on this one, so a wrong tag stops the run before any build.
+      - name: Check that the tag matches the version in Cargo.toml
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          cargo_version=$(sed -n 's/^version = "\([0-9.]*\)"$/\1/p' Cargo.toml | head -n 1)
+          if [[ "$GITHUB_REF_NAME" != "v$cargo_version" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match version $cargo_version in Cargo.toml"
+            exit 1
+          fi
+
       - uses: ./.github/actions/web-build
       - uses: actions/upload-artifact@v7
         with:
