@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import RefGui
@@ -9,6 +10,13 @@ Popup {
 	property var entries: []
 
 	signal triggered(int index)
+
+	// Opens the menu with its corner at `point`, in the coordinates of the parent item.
+	function openAt(point: point) {
+		x = point.x
+		y = point.y
+		open()
+	}
 
 	padding: 4
 	closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
