@@ -3,8 +3,9 @@
 // and one highlight that slides to the selected row.
 import { computed, nextTick, useTemplateRef, watch } from 'vue'
 import type { PickItem } from '../composables/usePickSelection.ts'
+import { metrics } from '../theme/generated/theme.ts'
 
-const SECTION_HEIGHT_PX = 28
+const SECTION_HEIGHT_PX = metrics.sidebarSectionHeight
 
 const props = defineProps<{
   items: readonly T[]

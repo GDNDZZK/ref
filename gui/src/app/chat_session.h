@@ -1,7 +1,9 @@
 // Adapted from an early version of qutie by LightBlueCube
 #pragma once
 
+#include "app/composer_model_type.h"
 #include "client/backend.h"
+#include "composer/composer_model.h"
 #include "session/session_controller.h"
 
 #include <QCoroTask>
@@ -19,11 +21,13 @@ class ChatSession : public QObject
 	Q_OBJECT
 	QML_ELEMENT
 	QML_UNCREATABLE("Created by Workspace.")
+	Q_PROPERTY(QString sessionId READ sessionId CONSTANT)
 	Q_PROPERTY(QAbstractItemModel* blocks READ blocks CONSTANT)
 	Q_PROPERTY(bool busy READ isBusy NOTIFY busyChanged)
 	Q_PROPERTY(bool ready READ isReady NOTIFY readyChanged)
 	Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
 	Q_PROPERTY(QString title READ title NOTIFY titleChanged)
+	Q_PROPERTY(refgui::composer::ComposerModel* composer READ composer CONSTANT)
 	// What the session is doing: "idle", "thinking", "running", "waiting_permission", "retrying" or "compacting".
 	Q_PROPERTY(QString activity READ activity NOTIFY infoChanged)
 	Q_PROPERTY(qint64 busySince READ busySince NOTIFY infoChanged) // epoch ms, 0 while idle
@@ -60,6 +64,8 @@ public:
 	// A tile watches (`foreground` false); the session in the window's main view is in the foreground.
 	QCoro::Task<refgui::client::Result<void>> attach(bool foreground);
 	QCoro::Task<refgui::client::Result<void>> detach();
+	// The bytes of a picture of this session, e.g. an attachment or a tool's image.
+	QCoro::Task<refgui::client::Result<QByteArray>> fetchImage(QString imageId);
 	// Stays shown but no longer in the foreground (split view). Precondition: attached.
 	QCoro::Task<refgui::client::Result<void>> background();
 
@@ -71,6 +77,8 @@ public:
 	// What the user should be told about this session: the last failure or a remark. Empty when all is well.
 	QString statusText() const;
 	QString title() const;
+	// The input box of this session.
+	refgui::composer::ComposerModel* composer() { return &m_composer; }
 	QString activity() const;
 	qint64 busySince() const;
 	int retryAttempt() const;
@@ -133,6 +141,7 @@ private:
 	refgui::client::Backend& m_backend;
 	QString m_sessionId;
 	refgui::session::SessionController m_controller;
+	refgui::composer::ComposerModel m_composer;
 	QString m_failure; // the last thing that went wrong, until the next action
 	QString m_olderError;
 	QString m_guardedCallId; // the request the guard timer runs for

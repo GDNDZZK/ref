@@ -115,6 +115,15 @@ struct ImageData
 	std::optional<quint64> size{};
 };
 
+// An image with its file name that was taken back: the removed prompt's images in the
+// answer to RemoveQueued (and Undo), with their bytes.
+struct NamedImage
+{
+	QString mime;
+	QString data; // base64
+	std::optional<QString> name{};
+};
+
 enum class ToolState
 {
 	Streaming,          // arguments still streaming from the model
@@ -426,6 +435,14 @@ struct PromptResult
 {
 	bool queued = false; // the session was busy: the message waits for the next safe point
 	QString messageId;
+};
+
+// RemoveQueued: `removed` is false when the message was delivered already.
+struct RemovedPrompt
+{
+	bool removed = false;
+	QString text{};
+	QList<NamedImage> images{};
 };
 
 struct MessagesPage

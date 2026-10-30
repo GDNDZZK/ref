@@ -6,6 +6,8 @@
 //
 // The tiles of a partly filled last row share its width.
 
+import { metrics } from '../theme/generated/theme.ts'
+
 export interface TileSpec {
   minWidth: number
   minHeight: number
@@ -13,8 +15,12 @@ export interface TileSpec {
   padding: number
 }
 
-// Theme.qml's tileMinWidth, tileMinHeight, tileGap and tilePadding (the --tile-* variables).
-export const TILE_SPEC: TileSpec = { minWidth: 420, minHeight: 300, gap: 12, padding: 16 }
+export const TILE_SPEC: TileSpec = {
+  minWidth: metrics.tileMinWidth,
+  minHeight: metrics.tileMinHeight,
+  gap: metrics.tileGap,
+  padding: metrics.tilePadding,
+}
 
 export interface Rect {
   x: number

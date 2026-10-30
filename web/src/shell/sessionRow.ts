@@ -1,5 +1,6 @@
 // What a sidebar row or a tile header says about a session, from its SessionInfo.
 
+import { formatElapsed } from '../model/format.ts'
 import type { SessionInfo, Todo } from '../proto/generated'
 
 export type RowState = 'idle' | 'busy' | 'compacting' | 'retrying' | 'permission' | 'error'
@@ -41,22 +42,6 @@ export function todoProgress(todos: readonly Todo[] | undefined): TodoProgress |
   return { done, total: counted.length, complete: done === counted.length }
 }
 
-const MS_PER_SECOND = 1000
-const SECONDS_PER_MINUTE = 60
-const SECONDS_PER_HOUR = 3600
-
-// "45s", "3m 05s", "1h 02m".
-export function formatElapsed(ms: number): string {
-  const seconds = Math.floor(Math.max(0, ms) / MS_PER_SECOND)
-  if (seconds < SECONDS_PER_MINUTE) return `${seconds}s`
-  const pad = (value: number) => String(value).padStart(2, '0')
-  if (seconds < SECONDS_PER_HOUR) {
-    return `${Math.floor(seconds / SECONDS_PER_MINUTE)}m ${pad(seconds % SECONDS_PER_MINUTE)}s`
-  }
-  const minutes = Math.floor((seconds % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE)
-  return `${Math.floor(seconds / SECONDS_PER_HOUR)}h ${pad(minutes)}m`
-}
-
 // The turn's running time, or undefined while the session is idle.
 export function runningTime(info: SessionInfo, now: number): string | undefined {
   return info.busy_since == null ? undefined : formatElapsed(now - info.busy_since)
@@ -73,6 +58,9 @@ export function displayTitle(info: SessionInfo): string {
   return info.title.trim() || info.name
 }
 
+const MS_PER_SECOND = 1000
+const SECONDS_PER_MINUTE = 60
+const SECONDS_PER_HOUR = 3600
 const MS_PER_MINUTE = SECONDS_PER_MINUTE * MS_PER_SECOND
 const MS_PER_HOUR = SECONDS_PER_HOUR * MS_PER_SECOND
 

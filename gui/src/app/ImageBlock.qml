@@ -1,26 +1,20 @@
 import QtQuick
 import RefGui
 
-// An image attached to a message. Only its name is shown for now.
+// The pictures attached to a message, under its text.
 Block {
 	id: block
 
-	Rectangle {
-		width: Math.min(label.implicitWidth + 2 * 14, block.columnWidth)
-		height: label.implicitHeight + 2 * 8
-		radius: Theme.radius
-		color: Theme.surface
-		border.color: Theme.border
+	required property var images
 
-		Text {
-			id: label
-			x: 14
-			y: 8
-			width: parent.width - 2 * 14
-			text: qsTr("Image: %1").arg(block.content)
-			elide: Text.ElideRight
-			color: Theme.textMuted
-			font.pixelSize: Theme.smallFontSize
-		}
+	ImageStrip {
+		images: block.images
+		sessionId: block.ListView.view.sessionId
+		onImageClicked: image => block.ListView.view.imageClicked(image)
+		maxWidth: block.thumbnailMaxWidth
+		maxHeight: block.thumbnailHeight
 	}
+
+	readonly property int thumbnailHeight: 72
+	readonly property int thumbnailMaxWidth: 240
 }

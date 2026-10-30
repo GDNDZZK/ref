@@ -22,13 +22,17 @@ Block {
 	required property real runAt
 	required property bool expanded
 	required property bool showAll
+	required property var meta
+	required property string liveOutput
+	required property var images
 
 	readonly property var inputObject: ToolInfo.parse(inputJson)
 	readonly property string detail: ToolInfo.detail(toolName, inputObject)
-	readonly property bool hasDetails: inputJson !== "" || rawInput !== "" || output !== ""
+	readonly property bool hasDetails: !alwaysOpen && (inputJson !== "" || rawInput !== "" || output !== "" || images.length > 0)
 	readonly property bool awaitingPermission: toolState === "awaiting_permission"
 	readonly property bool delayed: toolState === "delayed"
-	readonly property bool open: (expanded || awaitingPermission) && hasDetails
+	readonly property bool alwaysOpen: toolName === "todo" && ToolInfo.todos(inputObject).length > 0
+	readonly property bool open: alwaysOpen || ((expanded || awaitingPermission) && hasDetails)
 	readonly property bool inactive: toolState === "denied" || toolState === "cancelled"
 	readonly property bool showsTime: columnWidth >= timeShownFromWidth
 	readonly property int timeShownFromWidth: 560
@@ -280,13 +284,7 @@ Block {
 				active: block.open || body.height > 0
 
 				sourceComponent: ToolBody {
-					toolName: block.toolName
-					toolState: block.toolState
-					inputJson: block.inputJson
-					rawInput: block.rawInput
-					output: block.output
-					failed: block.failed
-					showAll: block.showAll
+					call: block
 					onShowAllRequested: block.ListView.view.model.toggleShowAll(block.index)
 				}
 			}
