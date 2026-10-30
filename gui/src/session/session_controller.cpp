@@ -80,6 +80,13 @@ QCoro::Task<SessionController::Result<void>> SessionController::detach()
 	co_return co_await m_backend.client().detach(m_sessionId);
 }
 
+QCoro::Task<SessionController::Result<void>> SessionController::background()
+{
+	Q_ASSERT(m_attached);
+	m_foreground = false;
+	co_return co_await m_backend.client().detach(m_sessionId);
+}
+
 QCoro::Task<SessionController::Result<bool>> SessionController::continueLast(QString cwd)
 {
 	const auto history = co_await m_backend.client().listHistory(std::move(cwd), NewestSessionOnly);

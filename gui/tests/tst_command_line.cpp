@@ -29,7 +29,7 @@ private slots:
 	void defaultsToANewSessionInTheCurrentDirectory();
 	void directoryIsCheckedAndMadeCanonical();
 	void sessionBeatsContinueBeatsNew();
-	void watchOnlyWarns();
+	void watchStartsSplitView();
 	void readsAgentAndModel();
 	void rejectsMalformedModels_data();
 	void rejectsMalformedModels();
@@ -91,13 +91,14 @@ void TestCommandLine::sessionBeatsContinueBeatsNew()
 	QCOMPARE(longForm.start.kind, SessionStart::Kind::Continue);
 }
 
-void TestCommandLine::watchOnlyWarns()
+void TestCommandLine::watchStartsSplitView()
 {
 	const auto options = std::get<LaunchOptions>(parse({u"-w"_s}, m_root));
 
 	QCOMPARE(options.start.kind, SessionStart::Kind::New);
-	QCOMPARE(options.warnings.size(), 1);
-	QVERIFY(options.warnings.first().contains(u"split view is not available yet"_s));
+	QVERIFY(options.watch);
+	QVERIFY(options.warnings.isEmpty());
+	QVERIFY(!std::get<LaunchOptions>(parse({}, m_root)).watch);
 }
 
 void TestCommandLine::readsAgentAndModel()

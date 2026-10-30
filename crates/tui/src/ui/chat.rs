@@ -72,8 +72,11 @@ pub struct ChatState {
 }
 
 /// Blank rows kept under the transcript while a turn runs, so streaming content that gives
-/// room back (see `ChatState::update_hold`) does not make the view bounce. Same rules as the
-/// GUI's `holdEnd` in ChatView.qml.
+/// room back (see `ChatState::update_hold`) does not make the view bounce.
+///
+/// Follows the GUI's `holdEnd` in ChatView.qml (hold only while following; resume from the
+/// current extent) with two differences: the space is capped at the viewport height minus
+/// one, and it is released at once when the turn ends instead of with an animation.
 #[derive(Default)]
 struct Hold {
     /// Blank rows under the last content row.
@@ -145,8 +148,9 @@ impl ChatState {
         hold.space = hold.high_water - self.total;
     }
 
-    /// Drops the held space (the transcript was re-wrapped or lost messages: the old
-    /// extent means nothing now).
+    /// Drops the held space after a re-wrap: row counts of the old width mean nothing now.
+    /// Removed messages do not release it: a retry removes the unfinished assistant message,
+    /// which is exactly the shrinking that the hold absorbs.
     fn release_hold(&mut self) {
         self.hold = Hold {
             was_busy: self.hold.was_busy,
@@ -535,10 +539,6 @@ fn layout(view: &mut SessionView, env: &Env<'_>, w: usize, compact: bool) {
         if let Some(p) = &mut chat.press {
             p.0 += shift;
         }
-    }
-    // Compaction, undo or deletion removed messages: the held extent is meaningless.
-    if ids.len() < chat.ids.len() {
-        chat.release_hold();
     }
     chat.offsets = offsets;
     chat.ids = ids;

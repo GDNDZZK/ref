@@ -28,6 +28,8 @@ python3 scripts/e2e.py provider/model "prompt" [cwd]           # 用真实模型
 REF_DUMP_REQUESTS=/tmp/dump ref-server ...                     # 导出 LLM 请求体
 ```
 
+`ref-web` 中需要启动后端的测试使用与 `ref-web` 同目录的 `ref-server`，找不到时会失败并给出提示。`cargo test --workspace` 会构建它；单独运行 `cargo test -p ref-web` 时，请先运行 `cargo build -p ref-server`。
+
 部分测试会启动 `python3`（假 MCP 服务器）和 `bash`。端到端脚本需要 Python 的 `websockets` 包和一个已配置的模型。
 
 ## Crate

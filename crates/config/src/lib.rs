@@ -40,7 +40,7 @@ pub use jsonc::parse_jsonc;
 /// Name of the hidden built-in agent that writes compaction summaries. It is not a
 /// session agent: it cannot be selected for sessions and is not listed to frontends.
 pub const COMPACTION_AGENT: &str = "compaction";
-pub use load::load_with;
+pub use load::{load_in, load_with};
 pub use markdown::split_frontmatter;
 pub use permission::{Action, PermissionRules, Rule};
 
@@ -77,6 +77,8 @@ pub struct Config {
     pub tui: Value,
     /// Directories that were scanned for config (for skills / agents discovery).
     pub config_dirs: Vec<PathBuf>,
+    /// Top of the project when it was set explicitly instead of found by the git root.
+    pub project_root: Option<PathBuf>,
     /// Non-fatal problems found while loading (shown to the user).
     pub warnings: Vec<String>,
 }

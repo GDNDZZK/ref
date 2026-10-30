@@ -40,6 +40,11 @@ QCoro::Task<refgui::client::Result<void>> ChatSession::detach()
 	co_return result;
 }
 
+QCoro::Task<refgui::client::Result<void>> ChatSession::background()
+{
+	co_return co_await m_controller.background();
+}
+
 QAbstractItemModel* ChatSession::blocks()
 {
 	return &m_controller.model();

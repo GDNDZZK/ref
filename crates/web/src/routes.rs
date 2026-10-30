@@ -15,10 +15,12 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 
 use crate::assets::{self, Asset};
-use crate::guard::{self, COOKIE_NAME, HostPolicy, constant_time_eq, text_response};
+use crate::guard::{self, HostPolicy, SessionCookie, constant_time_eq, text_response};
 use crate::launch;
+use crate::ping;
 use crate::tunnel;
 use crate::upstream::Upstream;
 
@@ -29,19 +31,24 @@ const WS_PATH: &str = "/ws";
 const API_PREFIX: &str = "/api/";
 const INDEX_PATH: &str = "/index.html";
 const HASHED_ASSETS_PREFIX: &str = "/assets/";
-const APP_NAME: &str = "ref-web";
-const COOKIE_MAX_AGE_SECS: u32 = 30 * 24 * 60 * 60;
+pub const APP_NAME: &str = "ref-web";
 const IMMUTABLE: &str = "public, max-age=31536000, immutable";
 const REVALIDATE: &str = "no-cache";
 const NO_STORE: &str = "no-store";
 
 pub struct AppState {
+    /// What `/login?token=` must present.
     pub login_token: String,
+    pub session: SessionCookie,
     pub hosts: HostPolicy,
     /// Directory new sessions start in ([DIR]).
     pub cwd: String,
     pub upstream: Upstream,
+    pub heartbeat: tunnel::Heartbeat,
     pub shutdown: CancellationToken,
+    /// Open tunnels: an upgraded connection is no longer tracked by the HTTP server, so
+    /// shutdown waits for them here to let each tab receive its close frame.
+    pub tunnels: TaskTracker,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
@@ -73,15 +80,11 @@ async fn login(State(state): State<Arc<AppState>>, Query(query): Query<LoginQuer
         return text_response(StatusCode::FORBIDDEN, "Forbidden: invalid login token\n");
     }
     let location = launch::page_path(query.dir.as_deref());
-    let cookie = format!(
-        "{COOKIE_NAME}={}; Path=/; HttpOnly; SameSite=Strict; Max-Age={COOKIE_MAX_AGE_SECS}",
-        state.login_token
-    );
     (
         StatusCode::SEE_OTHER,
         [
             (LOCATION, location),
-            (SET_COOKIE, cookie),
+            (SET_COOKIE, state.session.set_cookie()),
             (CACHE_CONTROL, NO_STORE.to_string()),
             (REFERRER_POLICY, "no-referrer".to_string()),
         ],
@@ -89,18 +92,33 @@ async fn login(State(state): State<Arc<AppState>>, Query(query): Query<LoginQuer
         .into_response()
 }
 
+#[derive(Deserialize)]
+struct PingQuery {
+    nonce: Option<String>,
+}
+
 #[derive(Serialize)]
 struct Ping {
     app: &'static str,
     version: &'static str,
+    /// HMAC of the caller's nonce, keyed with the login token.
+    proof: String,
 }
 
-/// Lets a second ref-web recognise this one.
-async fn ping() -> Json<Ping> {
+/// Lets a second ref-web recognise this one (see `ping`).
+async fn ping(State(state): State<Arc<AppState>>, Query(query): Query<PingQuery>) -> Response {
+    let Some(nonce) = query.nonce.filter(|n| ping::is_valid_nonce(n)) else {
+        return text_response(
+            StatusCode::BAD_REQUEST,
+            "Bad request: missing or invalid nonce\n",
+        );
+    };
     Json(Ping {
         app: APP_NAME,
         version: env!("CARGO_PKG_VERSION"),
+        proof: ping::proof(&state.login_token, &nonce),
     })
+    .into_response()
 }
 
 #[derive(Serialize)]
