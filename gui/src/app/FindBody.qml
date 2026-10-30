@@ -33,12 +33,14 @@ ToolBodyBase {
 					anchors.verticalCenter: parent.verticalCenter
 
 					Text {
+						textFormat: Text.PlainText
 						text: entry.parts.directory
 						color: Theme.textMuted
 						font.family: Theme.monoFamily
 						font.pixelSize: Theme.smallFontSize
 					}
 					Text {
+						textFormat: Text.PlainText
 						text: entry.parts.name + (entry.parts.isDirectory ? "/" : "")
 						color: Theme.text
 						font.family: Theme.monoFamily

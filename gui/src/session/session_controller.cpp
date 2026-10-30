@@ -151,17 +151,17 @@ QCoro::Task<SessionController::Result<void>> SessionController::loadOlder()
 	{
 		co_return std::unexpected(destroyedError());
 	}
+	// The conversation was replaced while the page was on its way: it does not fit any more.
+	const bool stillFits = page && sessionId == m_sessionId && m_model.firstMessageId() == before;
+	if(stillFits)
+	{
+		m_model.prependMessages(page->messages); // while loadingOlder still holds: the view takes them in quietly
+		setMoreBefore(page->moreBefore);
+	}
 	setLoadingOlder(false);
 	if(!page)
 	{
 		co_return std::unexpected(page.error());
-	}
-	// The conversation was replaced while the page was on its way: it does not fit any more.
-	const bool stillFits = sessionId == m_sessionId && m_model.firstMessageId() == before;
-	if(stillFits)
-	{
-		m_model.prependMessages(page->messages);
-		setMoreBefore(page->moreBefore);
 	}
 	co_return Result<void>();
 }
@@ -177,6 +177,12 @@ QCoro::Task<SessionController::Result<void>> SessionController::abort()
 {
 	Q_ASSERT(hasSession());
 	co_return co_await m_backend.client().abort(m_sessionId);
+}
+
+QCoro::Task<SessionController::Result<proto::RemovedPrompt>> SessionController::undo(std::optional<QString> messageId)
+{
+	Q_ASSERT(hasSession());
+	co_return co_await m_backend.client().undo(m_sessionId, std::move(messageId));
 }
 
 QCoro::Task<SessionController::Result<void>> SessionController::permissionReply(QString callId, bool allow, bool always)

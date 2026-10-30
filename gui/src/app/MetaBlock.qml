@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls.Basic
 import RefGui
 
 // The line under a message: for the user's, the time and the actions; for the reply, who
@@ -99,7 +98,7 @@ Block {
 				text: block.timeEnd > 0
 					? Format.clock(block.time) + " \u2192 " + Format.clock(block.timeEnd) + " (" + Format.duration(block.replyTime) + ")"
 					: Format.clock(block.time) + " \u00b7 " + Format.elapsed(block.now - block.time)
-				ToolTip { text: new Date(block.time).toLocaleString(); visible: timeHover.hovered }
+				PlainToolTip { text: new Date(block.time).toLocaleString(); visible: timeHover.hovered }
 				HoverHandler { id: timeHover }
 			}
 			MetaText {

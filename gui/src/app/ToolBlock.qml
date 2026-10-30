@@ -164,6 +164,7 @@ Block {
 					color: Theme.textMuted
 				}
 				Text {
+					textFormat: Text.PlainText
 					text: block.toolName
 					color: block.inactive ? Theme.textMuted : Theme.text
 					font.family: Theme.monoFamily
@@ -178,6 +179,7 @@ Block {
 					Layout.fillHeight: true
 
 					Text {
+						textFormat: Text.PlainText
 						id: purposeText
 						anchors.verticalCenter: parent.verticalCenter
 						width: Math.min(implicitWidth, parent.width)
@@ -187,6 +189,7 @@ Block {
 						font.pixelSize: Theme.codeFontSize
 					}
 					Text {
+						textFormat: Text.PlainText
 						anchors.verticalCenter: parent.verticalCenter
 						x: purposeText.visible && purposeText.text !== "" ? purposeText.width + block.itemSpacing : 0
 						width: Math.max(0, parent.width - x)
@@ -203,6 +206,7 @@ Block {
 					onClicked: block.ListView.view.cancelRequested()
 				}
 				Text {
+					textFormat: Text.PlainText
 					text: block.statusText
 					color: block.statusColor
 					font.pixelSize: Theme.smallFontSize
@@ -210,6 +214,7 @@ Block {
 					Behavior on color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 				}
 				Text {
+					textFormat: Text.PlainText
 					visible: block.showsTime
 					text: Format.clock(block.time)
 					color: Theme.textMuted
@@ -239,6 +244,7 @@ Block {
 			Behavior on height { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 
 			Text {
+				textFormat: Text.PlainText
 				anchors { left: parent.left; leftMargin: block.cardPadding; right: parent.right; rightMargin: block.cardPadding; top: parent.top }
 				text: "\u2514 " + block.firstOutputLine
 				elide: Text.ElideRight

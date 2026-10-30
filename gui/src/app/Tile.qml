@@ -206,6 +206,7 @@ Item {
 			anchors { top: header.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
 			session: tile.session
 			compact: !tile.expanded
+			keysEnabled: tile.focused || tile.expanded
 		}
 
 		// A click anywhere in the tile focuses it, and its input box.

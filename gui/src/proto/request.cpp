@@ -126,6 +126,17 @@ QJsonObject removeQueued(const QString& sessionId, const QString& messageId)
 	return json;
 }
 
+QJsonObject undo(const QString& sessionId, const std::optional<QString>& messageId)
+{
+	QJsonObject json = op(u"undo"_s);
+	json.insert(u"session_id"_s, sessionId);
+	if(messageId)
+	{
+		json.insert(u"message_id"_s, *messageId);
+	}
+	return json;
+}
+
 QJsonObject shell(const QString& sessionId, const QString& command)
 {
 	QJsonObject json = op(u"shell"_s);

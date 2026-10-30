@@ -10,6 +10,8 @@ const SCENARIOS =
 const END_TOLERANCE_PX = 1.5
 const SETTLE_MS = 1500
 const FAR_FROM_END_PX = 200
+const SCROLLER_BLANK_X = 490 // a point inside the conversation
+const SCROLLER_BLANK_Y = 300
 const GUARD_WAIT_MS = 500 // longer than the 350 ms during which keys do not answer
 
 // Answers every permission request until the reply ends: the first by click, the rest by the
@@ -48,7 +50,7 @@ async function stillEasing(page) {
 // Scrolling up releases the end, the jump button brings it back, and a reply that streams in
 // meanwhile does not pull the view down.
 async function checkScrolling(page, problems) {
-  await page.mouse.move(490, 300)
+  await page.mouse.move(SCROLLER_BLANK_X, SCROLLER_BLANK_Y)
   await page.mouse.wheel(0, -2000)
   await page.waitForTimeout(600)
   if (!(await page.locator('.jump.shown').count())) problems.push('scrolling up did not show the jump button')
@@ -66,6 +68,21 @@ async function checkScrolling(page, problems) {
   const gap = await gapToEnd(page)
   if (gap < FAR_FROM_END_PX)
     problems.push(`a streaming reply pulled the view back down (${gap}px from the end)`)
+  await page.click('button.send.busy') // stop
+  await page.waitForSelector('button.send:not(.busy)', { timeout: WAIT_MS })
+
+  // The keyboard scrolls like the wheel: a streaming reply does not pull the view back.
+  await page.click('.jump.shown button')
+  await page.waitForTimeout(SETTLE_MS)
+  await page.fill('textarea', 'slow')
+  await page.keyboard.press('Enter')
+  await page.waitForSelector('button.send.busy', { timeout: WAIT_MS })
+  await page.mouse.click(SCROLLER_BLANK_X, SCROLLER_BLANK_Y)
+  await page.keyboard.press('PageUp')
+  await page.waitForTimeout(SETTLE_MS)
+  const keyGap = await gapToEnd(page)
+  if (keyGap < FAR_FROM_END_PX)
+    problems.push(`a streaming reply pulled the view back down after PageUp (${keyGap}px from the end)`)
   await page.click('button.send.busy') // stop
   await page.waitForSelector('button.send:not(.busy)', { timeout: WAIT_MS })
 }

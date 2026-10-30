@@ -30,6 +30,7 @@ ChatSession::ChatSession(Backend& backend, QString sessionId, QObject* parent)
 	connect(&m_composer, &refgui::composer::ComposerModel::failed, this, &ChatSession::setFailure);
 	connect(&m_composer, &refgui::composer::ComposerModel::sent, this, [this] { setFailure({}); });
 	connect(&m_composer, &refgui::composer::ComposerModel::interruptRequested, this, &ChatSession::stop);
+	connect(this, &ChatSession::draftRestored, &m_composer, &refgui::composer::ComposerModel::restoreDraft);
 
 	m_permissionGuard.setSingleShot(true);
 	m_permissionGuard.setInterval(PermissionGuard);
@@ -278,6 +279,36 @@ void ChatSession::answerOldestPermission(bool allow, bool always)
 	permissionReply(m_guardedCallId, allow, always);
 }
 
+void ChatSession::undo(const QString& messageId)
+{
+	sendUndo(messageId);
+}
+
+void ChatSession::undoLast()
+{
+	sendUndo(std::nullopt);
+}
+
+QCoro::Task<> ChatSession::sendUndo(std::optional<QString> messageId)
+{
+	setFailure({});
+	const QPointer<ChatSession> self(this); // the session can be gone when the answer arrives
+	const auto result = co_await m_controller.undo(std::move(messageId));
+	if(!self)
+	{
+		co_return;
+	}
+	if(!result)
+	{
+		setFailure(result.error());
+		co_return;
+	}
+	if(!result->text.isEmpty() || !result->images.isEmpty())
+	{
+		emit draftRestored(result->text, result->images);
+	}
+}
+
 void ChatSession::cancelDelayedTool()
 {
 	stop();
@@ -285,6 +316,12 @@ void ChatSession::cancelDelayedTool()
 
 void ChatSession::permissionReply(const QString& callId, bool allow, bool always)
 {
+	// The backend's answer takes a moment; a second reply to the same call would be refused.
+	if(m_repliedCalls.contains(callId))
+	{
+		return;
+	}
+	m_repliedCalls.insert(callId);
 	sendPermission(callId, allow, always);
 }
 
@@ -320,13 +357,14 @@ QCoro::Task<> ChatSession::sendAbort()
 QCoro::Task<> ChatSession::sendPermission(QString callId, bool allow, bool always)
 {
 	const QPointer<ChatSession> self(this); // the session can be gone when the answer arrives
-	const auto result = co_await m_controller.permissionReply(std::move(callId), allow, always);
+	const auto result = co_await m_controller.permissionReply(callId, allow, always);
 	if(!self)
 	{
 		co_return;
 	}
 	if(!result)
 	{
+		m_repliedCalls.remove(callId); // it may be tried again
 		setFailure(result.error());
 	}
 }

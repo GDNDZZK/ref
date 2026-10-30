@@ -31,6 +31,7 @@ ToolBodyBase {
 			spacing: 4
 
 			Text {
+				textFormat: Text.PlainText
 				visible: body.earlierLines > 0
 				text: qsTr("%n earlier line(s)", "", body.earlierLines)
 				color: Theme.textMuted

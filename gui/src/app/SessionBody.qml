@@ -29,6 +29,7 @@ ToolBodyBase {
 			color: Theme.info
 		}
 		Text {
+			textFormat: Text.PlainText
 			anchors.verticalCenter: parent.verticalCenter
 			text: body.who
 			color: Theme.info

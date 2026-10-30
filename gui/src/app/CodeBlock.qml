@@ -22,6 +22,7 @@ Block {
 			height: 34
 
 			Text {
+				textFormat: Text.PlainText
 				anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }
 				text: block.language || qsTr("text")
 				color: Theme.textMuted
