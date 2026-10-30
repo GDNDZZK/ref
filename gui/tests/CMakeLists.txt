@@ -112,6 +112,8 @@ qt_add_executable(tst_workspace tst_workspace.cpp fake_backend.h
 	${PROJECT_SOURCE_DIR}/src/app/chat_session.h
 	${PROJECT_SOURCE_DIR}/src/app/tile_model.cpp
 	${PROJECT_SOURCE_DIR}/src/app/tile_model.h
+	${PROJECT_SOURCE_DIR}/src/app/tile_stage.cpp
+	${PROJECT_SOURCE_DIR}/src/app/tile_stage.h
 )
 target_link_libraries(tst_workspace PRIVATE refgui_workspace refgui_session refgui_cli Qt6::Gui Qt6::Qml Qt6::Test)
 refgui_configure_target(tst_workspace)
