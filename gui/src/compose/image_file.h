@@ -11,6 +11,8 @@
 namespace refgui::compose
 {
 
+constexpr qint64 MaxImageBytes = 20 * 1024 * 1024;
+
 // Whether `text` (a pasted or dropped string) names an image file, and the image if so.
 // Accepts a plain path, `~/…`, a `file://` URL, quotes around it, and `\ ` for spaces, as
 // the TUI does. png, jpg/jpeg, gif and webp up to 20 MiB are images.

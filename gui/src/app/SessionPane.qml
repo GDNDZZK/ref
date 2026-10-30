@@ -118,13 +118,16 @@ Item {
 		id: composer
 		anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: Theme.pagePadding }
 		width: chat.columnWidth
-		busy: pane.session.busy
-		sendingEnabled: pane.session.ready
-		onSubmitted: text => {
-			chat.following = true
-			pane.session.send(text)
+		session: pane.session
+		onSubmitted: chat.following = true
+	}
+
+	// The input box's remarks are the window's toasts.
+	Connections {
+		target: pane.session.composer
+		function onToastRequested(level, text) {
+			Workspace.toastRequested(level, text)
 		}
-		onStopRequested: pane.session.stop()
 	}
 
 	Component.onCompleted: focusInput()

@@ -1,7 +1,9 @@
 // Adapted from an early version of qutie by LightBlueCube
 #pragma once
 
+#include "app/composer_model_type.h"
 #include "client/backend.h"
+#include "composer/composer_model.h"
 #include "session/session_controller.h"
 
 #include <QCoroTask>
@@ -21,6 +23,7 @@ class ChatSession : public QObject
 	Q_PROPERTY(bool ready READ isReady NOTIFY readyChanged)
 	Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
 	Q_PROPERTY(QString title READ title NOTIFY titleChanged)
+	Q_PROPERTY(refgui::composer::ComposerModel* composer READ composer CONSTANT)
 
 public:
 	// `backend` is shared by all sessions of the window and outlives them.
@@ -42,6 +45,8 @@ public:
 	// What the user should be told about this session: the last failure or a remark. Empty when all is well.
 	QString statusText() const;
 	QString title() const;
+	// The input box of this session.
+	refgui::composer::ComposerModel* composer() { return &m_composer; }
 
 	// Precondition: !busy and `text` is not blank.
 	Q_INVOKABLE void send(const QString& text);
@@ -67,5 +72,6 @@ private:
 	refgui::client::Backend& m_backend;
 	QString m_sessionId;
 	refgui::session::SessionController m_controller;
+	refgui::composer::ComposerModel m_composer;
 	QString m_failure; // the last thing that went wrong, until the next action
 };
