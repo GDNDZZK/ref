@@ -12,7 +12,7 @@ import { effectScope, markRaw, ref, shallowReactive } from 'vue'
 import type { EffectScope } from 'vue'
 import { useFrame } from '../motion/useFrame.ts'
 import type { RefApi } from '../net/api.ts'
-import type { Message, PermissionRequest, SessionEvent, SessionInfo } from '../proto/generated'
+import type { Message, NamedImage, PermissionRequest, SessionEvent, SessionInfo } from '../proto/generated'
 import type { Block } from './blocks.ts'
 import { Transcript } from './transcript.ts'
 
@@ -20,9 +20,14 @@ import { Transcript } from './transcript.ts'
 // receives events (split view tiles).
 export type Attachment = 'detached' | 'watching' | 'foreground'
 
+// What the session is doing, for the status line.
+export type Activity = 'idle' | 'thinking' | 'running' | 'waiting_permission' | 'retrying' | 'compacting'
+
 export interface ChatSessionDeps {
   api(): RefApi
   notify(level: 'info' | 'warn' | 'error', text: string): void
+  // Undo took a prompt back: the composer of the session gets its text and pictures.
+  draftRestored(sessionId: string, text: string, images: NamedImage[]): void
 }
 
 export class ChatSession {
@@ -36,11 +41,18 @@ export class ChatSession {
     loaded: false,
     generation: 0, // counts the times the history was loaded
     attachment: 'detached' as Attachment,
+    moreBefore: false,
+    loadingOlder: false,
+    olderError: '',
+    lastToolDelayed: false,
+    thinkingExpanded: false,
+    detailsExpanded: false,
   })
   private readonly deps: ChatSessionDeps
   private readonly scope: EffectScope = effectScope()
   private transcript: Transcript
   private readonly flushing = ref(false) // something waits for the next frame
+  private readonly images = new Map<string, Promise<string>>() // image id -> data URL
 
   // `info` is what the session list already knows, so the session can be shown before it is attached.
   constructor(id: string, deps: ChatSessionDeps, info?: SessionInfo) {
@@ -86,6 +98,58 @@ export class ChatSession {
 
   get busy(): boolean {
     return this.state.info !== undefined && this.state.info.status.state !== 'idle'
+  }
+
+  get activity(): Activity {
+    const status = this.state.info?.status
+    if (!status) return 'idle'
+    if (status.state === 'busy') return 'thinking'
+    return status.state
+  }
+
+  // When the current run started (ms), if one is running.
+  get busySince(): number | undefined {
+    return this.state.info?.busy_since ?? undefined
+  }
+
+  get retry(): { attempt: number; at: number; error: string } | undefined {
+    const status = this.state.info?.status
+    return status?.state === 'retrying'
+      ? { attempt: status.attempt, at: status.next_at, error: status.error }
+      : undefined
+  }
+
+  get context(): { used: number; max: number; recommend: number; auto: number } | undefined {
+    return this.state.info?.context
+  }
+
+  get moreBefore(): boolean {
+    return this.state.moreBefore
+  }
+
+  get loadingOlder(): boolean {
+    return this.state.loadingOlder
+  }
+
+  get olderError(): string {
+    return this.state.olderError
+  }
+
+  get lastToolDelayed(): boolean {
+    return this.state.lastToolDelayed
+  }
+
+  get pendingPermission(): PermissionRequest | undefined {
+    return this.state.permissions[0]
+  }
+
+  // The defaults of the folds. A block flips against them when the user toggles it.
+  get thinkingExpanded(): boolean {
+    return this.state.thinkingExpanded
+  }
+
+  get detailsExpanded(): boolean {
+    return this.state.detailsExpanded
   }
 
   // Attaches (or changes how it is attached) and shows the history the backend sends.
@@ -136,7 +200,69 @@ export class ChatSession {
   }
 
   async send(text: string): Promise<void> {
+    this.transcript.clearError()
+    this.publish()
     await this.deps.api().prompt(this.id, text)
+  }
+
+  // Loads the page of messages before the first one shown.
+  async loadOlder(): Promise<void> {
+    const before = this.transcript.oldestMessageId
+    if (this.state.loadingOlder || !this.state.moreBefore || before === undefined) return
+    this.state.loadingOlder = true
+    this.state.olderError = ''
+    try {
+      const page = await this.deps.api().messagesBefore(this.id, before)
+      this.transcript.prepend(page.messages, page.more_before)
+      this.publish()
+    } catch (error) {
+      this.state.olderError = error instanceof Error ? error.message : String(error)
+    } finally {
+      this.state.loadingOlder = false
+    }
+  }
+
+  // Takes back the message (default: the last prompt) and everything after it.
+  async undo(messageId = ''): Promise<void> {
+    const taken = await this.deps.api().undo(this.id, messageId === '' ? undefined : messageId)
+    this.deps.draftRestored(this.id, taken.text, taken.images)
+  }
+
+  undoLast(): Promise<void> {
+    return this.undo()
+  }
+
+  async copyMessage(messageId: string): Promise<void> {
+    await navigator.clipboard.writeText(this.transcript.textOf(messageId))
+  }
+
+  // Returns false when there is no reply to copy.
+  async copyLastReply(): Promise<boolean> {
+    const text = this.transcript.lastReplyText()
+    if (text === '') return false
+    await navigator.clipboard.writeText(text)
+    return true
+  }
+
+  // The picture a message carries as a stub, as a `data:` URL. Asked once per picture.
+  imageUrl(imageId: string): Promise<string> {
+    const cached = this.images.get(imageId)
+    if (cached) return cached
+    const loading = this.deps
+      .api()
+      .getImage(this.id, imageId)
+      .then((image) => `data:${image.mime};base64,${image.data}`)
+    this.images.set(imageId, loading)
+    loading.catch(() => this.images.delete(imageId)) // a failed load can be tried again
+    return loading
+  }
+
+  toggleReasoning(): void {
+    this.state.thinkingExpanded = !this.state.thinkingExpanded
+  }
+
+  toggleDetails(): void {
+    this.state.detailsExpanded = !this.state.detailsExpanded
   }
 
   async stop(): Promise<void> {
@@ -166,6 +292,8 @@ export class ChatSession {
 
   private publish(): void {
     this.state.info = this.transcript.info
+    this.state.moreBefore = this.transcript.moreBefore
+    this.state.lastToolDelayed = this.transcript.lastToolDelayed
     this.state.permissions = [...this.transcript.permissions.values()]
     this.state.queued = this.transcript.queued
     this.flushing.value = true

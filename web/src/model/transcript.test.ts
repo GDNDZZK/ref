@@ -20,8 +20,11 @@ function setup() {
   return { transcript, errors }
 }
 
-const kinds = (blocks: readonly Block[]) => blocks.map((block) => block.kind)
-const texts = (blocks: readonly Block[]) => blocks.map((block) => ('text' in block ? block.text : ''))
+// Message footers are tested on their own; the other tests look at the content.
+const content = (blocks: readonly Block[]) => blocks.filter((block) => block.kind !== 'meta')
+const kinds = (blocks: readonly Block[]) => content(blocks).map((block) => block.kind)
+const texts = (blocks: readonly Block[]) =>
+  content(blocks).map((block) => ('text' in block ? block.text : ''))
 
 // What the assistant message a1 shows so far.
 function shownOf(transcript: Transcript): string {
@@ -55,11 +58,13 @@ describe('Transcript: loading', () => {
     expect(texts(transcript.blocks)).toEqual(['Fix it', 'Hmm', 'Look:', 'let x = 1;', 'Done.', ''])
     expect(transcript.blocks.map((b) => b.key)).toEqual([
       'u1:user',
+      'u1:meta',
       'a1:0',
       'a1:1:0',
       'a1:1:1',
       'a1:1:2',
       'a1:2',
+      'a1:meta',
     ])
     expect(transcript.blocks.every((block) => !block.streaming)).toBe(true)
   })
@@ -175,7 +180,9 @@ describe('Transcript: streaming', () => {
     const { transcript } = streaming()
     transcript.apply(textDelta('a1', 0, 'one\n\n```js\nx\n```\ntail'), 0)
     transcript.flush(LATER)
-    const flags = transcript.blocks.filter((b) => b.messageId === 'a1').map((b) => b.streaming)
+    const flags = content(transcript.blocks)
+      .filter((b) => b.messageId === 'a1')
+      .map((b) => b.streaming)
     expect(flags).toEqual([false, false, true])
 
     transcript.apply({ type: 'info', info: info({ status: { state: 'idle' } }) }, LATER)
@@ -270,7 +277,7 @@ describe('Transcript: streaming', () => {
     )
     transcript.flush(0)
 
-    const tool = transcript.blocks.at(-1)
+    const tool = content(transcript.blocks).at(-1)
     expect(tool).toMatchObject({ kind: 'tool', state: 'streaming', purpose: 'List fi', streaming: true })
   })
 
@@ -320,5 +327,141 @@ describe('Transcript: permissions', () => {
     transcript.apply({ type: 'permission_resolved', call_id: 'c1' }, 0)
     transcript.flush(0)
     expect(transcript.blocks[0]).toMatchObject({ kind: 'tool', permission: undefined })
+  })
+})
+
+describe('Transcript: message footers', () => {
+  it('ends every message with a meta block carrying time, model and tokens', () => {
+    const { transcript } = setup()
+    transcript.load(
+      snapshot([
+        userMessage('u1', 'hi'),
+        assistantMessage('a1', [textPart('ok')], {
+          time: 10,
+          time_end: 1210,
+          agent: 'build',
+          model: { provider: 'p', model: 'm', variant: 'high' },
+          usage: { input: 100, output: 20, cache_read: 30, cache_write: 4, reasoning: 0 },
+        }),
+      ]),
+    )
+    transcript.flush(0)
+    const metas = transcript.blocks.filter((block) => block.kind === 'meta')
+    expect(metas[0]).toMatchObject({ messageId: 'u1', role: 'user', canUndo: true })
+    expect(metas[1]).toMatchObject({
+      messageId: 'a1',
+      timeEnd: 1210,
+      agent: 'build',
+      model: 'm',
+      variant: 'high',
+      tokensIn: 134,
+      tokensOut: 20,
+      interrupted: false,
+    })
+  })
+
+  it('marks an interrupted reply instead of showing an error', () => {
+    const { transcript } = setup()
+    transcript.load(snapshot([assistantMessage('a1', [], { time_end: 1, error: 'Aborted' })]))
+    transcript.flush(0)
+    expect(transcript.blocks).toHaveLength(1)
+    expect(transcript.blocks[0]).toMatchObject({ kind: 'meta', interrupted: true, failed: false })
+  })
+
+  it('lets only human prompts be undone', () => {
+    const { transcript } = setup()
+    transcript.load(snapshot([userMessage('u1', 'out', { kind: 'shell' })]))
+    transcript.flush(0)
+    expect(transcript.blocks[1]).toMatchObject({ kind: 'meta', canUndo: false })
+  })
+})
+
+describe('Transcript: compaction', () => {
+  const compacted = [
+    userMessage('u1', 'old'),
+    userMessage('c1', 'summary one', { kind: 'compaction' }),
+    userMessage('u2', 'mid'),
+    userMessage('c2', 'summary two', { kind: 'compaction' }),
+    userMessage('u3', 'new'),
+  ]
+
+  it('draws compaction messages as one block and marks what came before the last as stale', () => {
+    const { transcript } = setup()
+    transcript.load(snapshot(compacted))
+    transcript.flush(0)
+    const stale = transcript.blocks.filter((block) => block.stale).map((block) => block.key)
+    expect(stale).toEqual(['u1:user', 'u1:meta', 'c1:compaction', 'u2:user', 'u2:meta'])
+    const dividers = transcript.blocks.filter((block) => block.kind === 'compaction')
+    expect(dividers.map((block) => block.last)).toEqual([false, true])
+  })
+
+  it('refreshes the marks when a reset drops the last compaction', () => {
+    const { transcript } = setup()
+    transcript.load(snapshot(compacted))
+    transcript.flush(0)
+    transcript.apply({ type: 'reset', messages: compacted.slice(0, 3), more_before: false }, 0)
+    transcript.flush(0)
+    expect(transcript.blocks.filter((block) => block.kind === 'compaction')).toMatchObject([{ last: true }])
+    expect(transcript.blocks.filter((block) => block.stale).map((block) => block.key)).toEqual([
+      'u1:user',
+      'u1:meta',
+    ])
+  })
+})
+
+describe('Transcript: reset and older pages', () => {
+  it('keeps the blocks of the messages a reset leaves alone', () => {
+    const { transcript } = setup()
+    transcript.load(snapshot([userMessage('u1', 'a'), userMessage('u2', 'b')]))
+    transcript.flush(0)
+    const before = transcript.blocks
+    transcript.apply({ type: 'reset', messages: [userMessage('u1', 'a')], more_before: false }, 0)
+    transcript.flush(0)
+    expect(transcript.blocks).toHaveLength(2)
+    expect(transcript.blocks[0]).toBe(before[0])
+    expect(transcript.blocks[1]).toBe(before[1])
+  })
+
+  it('puts an older page above and moves the first turn divider', () => {
+    const { transcript } = setup()
+    transcript.load(snapshot([userMessage('u2', 'b')], { more_before: true }))
+    transcript.flush(0)
+    expect(transcript.oldestMessageId).toBe('u2')
+    transcript.prepend([userMessage('u1', 'a')], false)
+    transcript.flush(0)
+    expect(transcript.oldestMessageId).toBe('u1')
+    const opens = transcript.blocks.filter((block) => block.kind === 'user').map((block) => block.opensTurn)
+    expect(opens).toEqual([false, true])
+  })
+})
+
+describe('Transcript: session error', () => {
+  it('shows the last error after the messages unless the last message has it', () => {
+    const { transcript } = setup()
+    transcript.load(snapshot([assistantMessage('a1', [], { time_end: 1, error: 'boom' })]))
+    transcript.apply({ type: 'error', text: 'boom' }, 0)
+    transcript.flush(0)
+    expect(transcript.blocks.filter((block) => block.kind === 'error')).toHaveLength(1)
+    transcript.apply({ type: 'error', text: 'later' }, 0)
+    transcript.flush(0)
+    expect(transcript.blocks.at(-1)).toMatchObject({ kind: 'error', messageId: '', text: 'later' })
+    transcript.clearError()
+    transcript.flush(0)
+    expect(transcript.blocks.at(-1)?.kind).toBe('meta')
+  })
+
+  it('keeps the error through message and reset events', () => {
+    const { transcript } = setup()
+    transcript.load(snapshot([userMessage('u1', 'a')]))
+    transcript.apply({ type: 'error', text: 'boom' }, 0)
+    transcript.apply({ type: 'reset', messages: [], more_before: false }, 0)
+    transcript.flush(0)
+    expect(transcript.blocks).toMatchObject([{ kind: 'error', text: 'boom' }])
+  })
+
+  it('knows whether the newest tool call waits for its delay', () => {
+    const { transcript } = setup()
+    transcript.load(snapshot([assistantMessage('a1', [toolPart('c1', 'delayed')])]))
+    expect(transcript.lastToolDelayed).toBe(true)
   })
 })

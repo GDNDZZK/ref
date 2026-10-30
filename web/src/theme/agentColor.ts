@@ -34,3 +34,21 @@ export function agentColor(spec: string, index: number): string {
   if (HEX_COLOR.test(key)) return key
   return `var(--agent-palette-${Math.abs(index) % agentPalette.length})`
 }
+
+const HASH_MULTIPLIER = 31
+
+// Position in the agent list, or a hash of the name for an agent the list does not have.
+function paletteIndex(agents: readonly { name: string }[], name: string): number {
+  const position = agents.findIndex((agent) => agent.name === name)
+  if (position >= 0) return position
+  return [...name].reduce((hash, char) => (hash * HASH_MULTIPLIER + char.charCodeAt(0)) >>> 0, 0)
+}
+
+// The color of the agent called `name`, given the server's agent list.
+export function agentColorByName(
+  agents: readonly { name: string; color: string | null }[],
+  name: string,
+): string {
+  const spec = agents.find((agent) => agent.name === name)?.color ?? ''
+  return agentColor(spec, paletteIndex(agents, name))
+}

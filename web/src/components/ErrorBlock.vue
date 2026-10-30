@@ -15,10 +15,9 @@ import Flourish from './Flourish.vue'
 const props = defineProps<{ block: ErrorBlock; fresh: boolean }>()
 
 const RING_REACH = 2.2 // stays inside a one-line card
-const SPREAD_SPEED = motion.slow // px per ms the circle's edge travels, as in ErrorBlock.qml
 const EDGE_SOFTNESS = 1 // px over which the circle's edge fades
 
-const { verticalPadding, horizontalPadding } = components.errorBlock
+const { verticalPadding, horizontalPadding, spreadSpeed } = components.errorBlock // speed: px per ms
 
 const card = useTemplateRef<HTMLElement>('card')
 const badge = useTemplateRef<HTMLElement>('badge')
@@ -59,7 +58,7 @@ function arrive(element: HTMLElement, dot: HTMLElement): void {
     stopSpread = tween({
       from: 0,
       to: 1,
-      durationMs: (endRadius - startRadius) / SPREAD_SPEED,
+      durationMs: (endRadius - startRadius) / spreadSpeed,
       easing: 'linear',
       update: (spread) =>
         setSpread(element, spread, startRadius + spread * (endRadius - startRadius), centerX, centerY),

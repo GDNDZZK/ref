@@ -3,6 +3,7 @@
 import { computed, ref, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useChatScroll } from '../composables/chatScroll.ts'
+import { useChatSession } from '../composables/chatSessionContext.ts'
 import { useStuck } from '../composables/useStuck.ts'
 import { renderMarkdown } from '../markdown/markdown.ts'
 import type { ReasoningBlock } from '../model/blocks.ts'
@@ -16,14 +17,16 @@ const PULSE_DIMMED = 0.5
 
 const { t } = useI18n()
 const chatScroll = useChatScroll()
+const session = useChatSession()
 const root = useTemplateRef<HTMLElement>('root')
 const header = useTemplateRef<HTMLElement>('header')
 const title = useTemplateRef<HTMLElement>('title')
 const sentinel = useTemplateRef<HTMLElement>('sentinel')
 const stuck = useStuck(sentinel)
 
-const chosen = ref<boolean>() // set once the user toggles; until then it follows streaming
-const expanded = computed(() => chosen.value ?? props.block.streaming)
+// Open while it streams, or when the session shows all reasoning; a click flips this block against that.
+const flipped = ref(false)
+const expanded = computed(() => (props.block.streaming || session.thinkingExpanded) !== flipped.value)
 const streaming = computed(() => props.block.streaming)
 const html = computed(() => renderMarkdown(props.block.text))
 
@@ -33,7 +36,7 @@ function toggle(): void {
   if (expanded.value && stuck.value && root.value && header.value) {
     chatScroll.holdHeader(root.value, header.value.offsetHeight)
   }
-  chosen.value = !expanded.value
+  flipped.value = !flipped.value
 }
 
 function onFolded(event: TransitionEvent): void {
