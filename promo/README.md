@@ -2,7 +2,7 @@
 
 Source of the promo videos and the screenshots in `docs/images/`. The films are planned in [STORYBOARD.md](STORYBOARD.md). Finished videos go to `out/` and are not tracked; everything needed to render them is.
 
-Needs Node 24, pnpm, ffmpeg and ffprobe on `PATH`, and a Chromium. Fonts come from the system (the stack of the web page: `system-ui`, Noto Sans, Noto Sans CJK for Chinese, DejaVu Sans Mono), so install them for identical output between machines.
+Needs Node 24, pnpm, ffmpeg and ffprobe on `PATH`, and a Chromium. Fonts come from the system; none are bundled. The stack is the web page's (`system-ui`, `Noto Sans`, `Noto Sans CJK SC`) for text and `ui-monospace`, `DejaVu Sans Mono` for code and the terminal. The reference renders were made on Debian 13 where `system-ui` resolves to Noto Sans CJK SC (`/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc`) and the monospace font is DejaVu Sans Mono (`/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf`). Install the same two families (Debian: `fonts-noto-cjk`, `fonts-dejavu-core`) to get the same glyph shapes and line breaks; with other fonts the output is still correct but text widths differ. Check with `fc-match system-ui`.
 
 ```bash
 cd promo
