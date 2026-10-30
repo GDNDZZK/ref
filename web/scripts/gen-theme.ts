@@ -90,6 +90,8 @@ const COMPONENT_PROPERTIES: Record<string, Record<string, Unit>> = {
   ImageStrip: { maxWidth: 'px', maxHeight: 'px' },
   ImageBlock: { thumbnailHeight: 'px' },
   Lightbox: { margin: 'px' },
+  ChatView: { olderTriggerDistance: 'px' },
+  ShimmerText: { shimmerPeriod: 'ms' },
   ErrorBlock: { verticalPadding: 'px', horizontalPadding: 'px', spreadSpeed: '' },
   UserBlock: { horizontalPadding: 'px', verticalPadding: 'px' },
 }
