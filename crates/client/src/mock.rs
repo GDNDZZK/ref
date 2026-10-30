@@ -67,9 +67,10 @@ impl MockBackend {
         let read = tokio::time::timeout(ANNOUNCE_TIMEOUT, stdout.read_line(&mut line)).await;
         match read {
             Err(_) => {
-                return Err(ConnectError::MockStartFailed(
-                    "no port announced within 10s".into(),
-                ));
+                return Err(ConnectError::MockStartFailed(format!(
+                    "no port announced within {}s",
+                    ANNOUNCE_TIMEOUT.as_secs()
+                )));
             }
             Ok(Err(e)) => return Err(ConnectError::MockStartFailed(e.to_string())),
             Ok(Ok(0)) => {

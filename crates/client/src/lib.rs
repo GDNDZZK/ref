@@ -59,11 +59,11 @@ pub enum ConnectError {
         binary: String,
         source: std::io::Error,
     },
-    #[error("backend did not start within 10s")]
+    #[error("backend did not start within {}s", BACKEND_START_TIMEOUT.as_secs())]
     StartTimeout,
     #[error("could not connect to the new backend")]
     CannotConnectNew,
-    #[error("cannot connect to {url}")]
+    #[error("cannot connect to {url}: {reason}")]
     CannotConnect { url: String, reason: String },
     #[error("cannot start the mock backend: {0}")]
     MockStartFailed(String),
@@ -176,4 +176,51 @@ async fn discover(mut on_starting_backend: impl FnMut()) -> Result<(Ws, Endpoint
         tokio::time::sleep(NEW_BACKEND_CONNECT_PAUSE).await;
     }
     Err(ConnectError::CannotConnectNew)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_texts_name_their_cause_and_limits() {
+        let refused = ConnectError::CannotConnect {
+            url: "ws://127.0.0.1:1/".into(),
+            reason: "connection refused".into(),
+        };
+        assert_eq!(
+            refused.to_string(),
+            "cannot connect to ws://127.0.0.1:1/: connection refused"
+        );
+        assert_eq!(
+            ConnectError::StartTimeout.to_string(),
+            "backend did not start within 10s"
+        );
+    }
+
+    #[tokio::test]
+    async fn connect_error_carries_the_reason() {
+        let free_port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let endpoint = Endpoint {
+            url: format!("ws://127.0.0.1:{free_port}/"),
+            token: Some("secret".into()),
+        };
+        let error = connect(&endpoint, Duration::from_secs(3))
+            .await
+            .err()
+            .unwrap();
+        let text = error.to_string();
+        assert!(
+            text.starts_with(&format!("cannot connect to ws://127.0.0.1:{free_port}/: ")),
+            "{text}"
+        );
+        assert!(
+            !text.contains("secret"),
+            "the token stays out of messages: {text}"
+        );
+    }
 }
