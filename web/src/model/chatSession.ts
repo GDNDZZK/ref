@@ -54,6 +54,7 @@ export class ChatSession {
   private readonly scope: EffectScope = effectScope()
   private transcript: Transcript
   private readonly flushing = ref(false) // something waits for the next frame
+  private readonly images = new Map<string, Promise<string>>() // image id -> data URL
 
   // `info` is what the session list already knows, so the session can be shown before it is attached.
   constructor(id: string, deps: ChatSessionDeps, info?: SessionInfo) {
@@ -234,6 +235,19 @@ export class ChatSession {
     if (text === '') return false
     await navigator.clipboard.writeText(text)
     return true
+  }
+
+  // The picture a message carries as a stub, as a `data:` URL. Asked once per picture.
+  imageUrl(imageId: string): Promise<string> {
+    const cached = this.images.get(imageId)
+    if (cached) return cached
+    const loading = this.deps
+      .api()
+      .getImage(this.id, imageId)
+      .then((image) => `data:${image.mime};base64,${image.data}`)
+    this.images.set(imageId, loading)
+    loading.catch(() => this.images.delete(imageId)) // a failed load can be tried again
+    return loading
   }
 
   toggleReasoning(): void {

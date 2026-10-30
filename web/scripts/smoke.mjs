@@ -9,11 +9,12 @@ const SCENARIOS =
 const END_TOLERANCE_PX = 1.5
 const SETTLE_MS = 1500
 const FAR_FROM_END_PX = 200
+const GUARD_WAIT_MS = 500 // longer than the 350 ms during which keys do not answer
 
 // Answers every permission request until the reply ends: the first by click, the rest by the
-// "a" key, which works once the composer has lost focus.
+// "a" key, which works while the composer has the focus, once the guard time has passed.
 async function answerPermissions(page, scenario) {
-  const allow = page.locator('button.choice.allow')
+  const allow = page.locator('.permission.open button.choice.success')
   const idle = page.locator('button.send:not(.busy)')
   const deadline = Date.now() + WAIT_MS * 2
   for (let asked = 0; !(await idle.isVisible());) {
@@ -22,7 +23,7 @@ async function answerPermissions(page, scenario) {
       if (asked++ === 0) await page.screenshot({ path: join(OUT, `${scenario}-permission.png`) })
       if (asked === 1) await allow.click()
       else {
-        await page.evaluate(() => document.activeElement?.blur())
+        await page.waitForTimeout(GUARD_WAIT_MS)
         await page.keyboard.press('a')
       }
     }
