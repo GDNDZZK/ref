@@ -48,7 +48,7 @@ The TUI and the backend exchange JSON frames over WebSocket. Frontends get histo
 Two GitHub Actions workflows live in `.github/workflows/`:
 
 - **`ci.yml`** runs on every push and pull request: `cargo fmt --check` and `cargo clippy -D warnings` on Linux, and `cargo test` on Linux, macOS and Windows. When tests fail, their output is repeated in the run summary.
-- **`release.yml`** runs when a `v*` tag is pushed. It builds `ref` and `ref-server` for six targets on native runners, packs them with the README and the license, and publishes a GitHub Release with a `SHA256SUMS` file.
+- **`release.yml`** runs when a `v*` tag is pushed. It builds `ref` and `ref-server` for six targets on native runners, packs them with the READMEs, the `docs/` directory and the license, and publishes a GitHub Release with a `SHA256SUMS` file.
 
 | Target | Runner | Archive |
 |---|---|---|

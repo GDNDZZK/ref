@@ -54,7 +54,8 @@ jobs:
           [[ "${{ matrix.target }}" == *windows* ]] && ext=".exe"
           # ref finds ref-server next to its own executable, so both go in the same folder.
           cp "target/${{ matrix.target }}/release/ref$ext" "target/${{ matrix.target }}/release/ref-server$ext" "dist/$name/"
-          cp README.md LICENSE "dist/$name/"
+          cp README.md README.zh-CN.md LICENSE "dist/$name/"
+          cp -R docs "dist/$name/"
           cd dist
           if [[ -n "$ext" ]]; then
             7z a -tzip "$name.zip" "$name" > /dev/null

@@ -48,7 +48,7 @@ TUI 与后端通过 WebSocket 交换 JSON 帧。前端分页获取历史：`Atta
 `.github/workflows/` 中有两个 GitHub Actions 工作流：
 
 - **`ci.yml`** 在每次推送和拉取请求时运行：在 Linux 上执行 `cargo fmt --check` 和 `cargo clippy -D warnings`，在 Linux、macOS 和 Windows 上执行 `cargo test`。测试失败时，失败输出会在运行摘要中再显示一次。
-- **`release.yml`** 在推送 `v*` 标签时运行。它在原生 runner 上为六个目标构建 `ref` 和 `ref-server`，与 README 和许可证一起打包，然后发布带有 `SHA256SUMS` 文件的 GitHub Release。
+- **`release.yml`** 在推送 `v*` 标签时运行。它在原生 runner 上为六个目标构建 `ref` 和 `ref-server`，与 README、`docs/` 目录和许可证一起打包，然后发布带有 `SHA256SUMS` 文件的 GitHub Release。
 
 | 目标 | Runner | 压缩包 |
 |---|---|---|
