@@ -19,6 +19,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::guard::{HostPolicy, SessionCookie};
 use crate::routes::AppState;
+use crate::tunnel::Heartbeat;
 use crate::upstream::Upstream;
 
 const DEFAULT_PORT: u16 = 7480;
@@ -142,6 +143,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         hosts: HostPolicy::new(&cli.host, cli.port),
         cwd,
         upstream: upstream_for(&cli),
+        heartbeat: Heartbeat::DEFAULT,
         shutdown: shutdown.clone(),
     });
     let stop = shutdown.clone();
