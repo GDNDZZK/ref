@@ -243,7 +243,7 @@ impl Hub {
     }
 
     /// The directory to use for a requested one: the sandbox in mock mode, else as requested.
-    pub fn effective_cwd(&self, requested: &str) -> String {
+    pub(crate) fn effective_cwd(&self, requested: &str) -> String {
         match &self.opts.sandbox_cwd {
             Some(dir) => dir.to_string_lossy().to_string(),
             None => requested.to_string(),
@@ -259,7 +259,7 @@ impl Hub {
     }
 
     /// A number larger than every earlier one: orders connection and focus times.
-    pub fn next_stamp(&self) -> u64 {
+    pub(crate) fn next_stamp(&self) -> u64 {
         self.next_stamp.fetch_add(1, Ordering::Relaxed)
     }
 
@@ -411,7 +411,10 @@ impl Hub {
         let c = Arc::new(Conn {
             id,
             out: OutQueue::default(),
-            st: Mutex::new(ConnState::default()),
+            st: Mutex::new(ConnState {
+                focus_stamp: self.next_stamp(),
+                ..ConnState::default()
+            }),
             kill: CancellationToken::new(),
         });
         self.conns

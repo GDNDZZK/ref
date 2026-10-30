@@ -39,7 +39,8 @@ pub fn build(inp: &PromptInput) -> Vec<String> {
             ));
         }
     }
-    let git = git_root(inp.cwd).is_some();
+    // An explicit project root (mock mode) hides the repository the directory may lie in.
+    let git = inp.cfg.project_root.is_none() && git_root(inp.cwd).is_some();
     parts.push(format!(
         "<env>\nWorking directory: {}\nPlatform: {}\nShell: bash\nGit repository: {}\nToday's date: {}\n</env>",
         inp.cwd.display(),
@@ -103,9 +104,13 @@ pub fn git_root(cwd: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Directories from the git root (or cwd) down to cwd.
-fn project_dirs(cwd: &Path) -> Vec<PathBuf> {
-    let root = git_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+/// Directories from the project root down to cwd: `project_root` if set, else the git root,
+/// else cwd.
+fn project_dirs(cwd: &Path, project_root: Option<&Path>) -> Vec<PathBuf> {
+    let root = project_root
+        .map(Path::to_path_buf)
+        .or_else(|| git_root(cwd))
+        .unwrap_or_else(|| cwd.to_path_buf());
     let mut dirs = Vec::new();
     let mut d = Some(cwd);
     while let Some(x) = d {
@@ -148,7 +153,7 @@ pub fn instructions(cfg: &Config, cwd: &Path, home: Option<&Path>) -> Vec<(PathB
         push(h.join(".config/opencode/AGENTS.md"), &mut out);
         push(h.join(".config/ref/AGENTS.md"), &mut out);
     }
-    for d in project_dirs(cwd) {
+    for d in project_dirs(cwd, cfg.project_root.as_deref()) {
         let a = d.join("AGENTS.md");
         if a.is_file() {
             push(a, &mut out);
@@ -217,7 +222,7 @@ pub struct Skill {
 /// Discover skills (later roots override earlier ones by name), sorted by name.
 pub fn skills(cfg: &Config, cwd: &Path, home: Option<&Path>) -> Vec<Skill> {
     let mut roots: Vec<PathBuf> = Vec::new();
-    let pdirs = project_dirs(cwd);
+    let pdirs = project_dirs(cwd, cfg.project_root.as_deref());
     for d in &cfg.config_dirs {
         // Plain project directories are in config_dirs too; only scan dedicated config dirs.
         if cwd.starts_with(d) {
@@ -371,5 +376,33 @@ mod tests {
         assert!(ri < si);
         assert!(all.contains("<skill name=\"foo\""));
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn instructions_stop_at_an_explicit_project_root() {
+        let dir = std::env::temp_dir().join(format!("ref-root-{}", crate::util::random_hex(8)));
+        std::fs::create_dir_all(dir.join(".git")).unwrap();
+        std::fs::create_dir_all(dir.join("inner")).unwrap();
+        std::fs::write(dir.join("AGENTS.md"), "outer rules").unwrap();
+        std::fs::write(dir.join("inner/AGENTS.md"), "inner rules").unwrap();
+        let cwd = dir.join("inner");
+
+        let texts = |cfg: &Config| -> String {
+            let found = instructions(cfg, &cwd, None);
+            found.into_iter().map(|(_, text)| text).collect()
+        };
+        assert!(
+            texts(&Config::default()).contains("outer rules"),
+            "git root"
+        );
+        let cfg = Config {
+            project_root: Some(cwd.clone()),
+            ..Config::default()
+        };
+        let text = texts(&cfg);
+        assert!(
+            text.contains("inner rules") && !text.contains("outer rules"),
+            "{text}"
+        );
     }
 }

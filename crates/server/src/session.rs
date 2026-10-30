@@ -144,6 +144,11 @@ impl SessionState {
         self.messages.push(msg);
     }
 
+    /// The user aborted the run or closed the session: they know it ended, so no notification.
+    pub fn stopped_by_user(&self) -> bool {
+        self.user_aborted || self.closed
+    }
+
     pub fn find_message(&self, id: &str) -> Option<usize> {
         self.messages.iter().rposition(|m| m.id == id)
     }

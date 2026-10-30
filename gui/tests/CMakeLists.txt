@@ -52,6 +52,16 @@ target_link_libraries(tst_icon_provider PRIVATE refgui_icons Qt6::Gui Qt6::Test)
 refgui_configure_target(tst_icon_provider)
 add_test(NAME tst_icon_provider COMMAND tst_icon_provider)
 
+qt_add_executable(tst_settings tst_settings.cpp)
+target_link_libraries(tst_settings PRIVATE refgui_workspace Qt6::Test)
+refgui_configure_target(tst_settings)
+add_test(NAME tst_settings COMMAND tst_settings)
+
+qt_add_executable(tst_command_registry tst_command_registry.cpp)
+target_link_libraries(tst_command_registry PRIVATE refgui_workspace Qt6::Test)
+refgui_configure_target(tst_command_registry)
+add_test(NAME tst_command_registry COMMAND tst_command_registry)
+
 # Tests against the real backend. Point REF_SERVER at a built ref-server
 # (`cargo build -p ref-server` gives target/debug/ref-server) to enable them.
 set(REF_SERVER "" CACHE FILEPATH "ref-server binary for the tests that run against it")
@@ -85,3 +95,24 @@ if(REF_SERVER)
 	endif()
 	set_tests_properties(tst_app_smoke PROPERTIES ENVIRONMENT "QML_IMPORT_PATH=${qml_import_path}")
 endif()
+
+qt_add_executable(tst_session_list tst_session_list.cpp fake_backend.h)
+target_link_libraries(tst_session_list PRIVATE refgui_workspace Qt6::Test)
+refgui_configure_target(tst_session_list)
+add_test(NAME tst_session_list COMMAND tst_session_list)
+
+# Workspace is part of the program; the test compiles its sources.
+qt_add_executable(tst_workspace tst_workspace.cpp fake_backend.h
+	${PROJECT_SOURCE_DIR}/src/app/workspace.cpp
+	${PROJECT_SOURCE_DIR}/src/app/workspace_commands.cpp
+	${PROJECT_SOURCE_DIR}/src/app/workspace_requests.cpp
+	${PROJECT_SOURCE_DIR}/src/app/workspace_split.cpp
+	${PROJECT_SOURCE_DIR}/src/app/workspace.h
+	${PROJECT_SOURCE_DIR}/src/app/chat_session.cpp
+	${PROJECT_SOURCE_DIR}/src/app/chat_session.h
+	${PROJECT_SOURCE_DIR}/src/app/tile_model.cpp
+	${PROJECT_SOURCE_DIR}/src/app/tile_model.h
+)
+target_link_libraries(tst_workspace PRIVATE refgui_workspace refgui_session refgui_cli Qt6::Qml Qt6::Test)
+refgui_configure_target(tst_workspace)
+add_test(NAME tst_workspace COMMAND tst_workspace)
