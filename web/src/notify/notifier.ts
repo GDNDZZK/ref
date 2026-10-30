@@ -29,7 +29,7 @@ export interface NotificationConstructor {
     title: string,
     options?: { body?: string; tag?: string; icon?: string },
   ): {
-    onclick: (() => void) | null
+    onclick: ((event: Event) => void) | null
     close(): void
   }
   readonly permission: NotificationPermissionState

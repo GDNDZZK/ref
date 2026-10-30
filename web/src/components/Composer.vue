@@ -298,11 +298,7 @@ defineExpose({ focus: () => input.value?.focus() })
 
 <template>
   <div class="composer">
-    <QueueStrip
-      :messages="session.queued"
-      :removing="composer.removingQueued"
-      @remove="takeBack"
-    />
+    <QueueStrip :messages="session.queued" :removing="composer.removingQueued" @remove="takeBack" />
     <div class="box-wrap">
       <CompletionPopup
         :completion="composer.completion"
