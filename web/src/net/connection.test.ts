@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PROTOCOL_VERSION } from '../proto/generated'
+import type { NotifyKind } from '../proto/generated'
 import { RefConnection, RefError } from './connection.ts'
 import type { ConnectionState } from './connection.ts'
 import type { TransportHandlers } from './transport.ts'
@@ -33,7 +34,7 @@ class FakeSocket {
   }
 }
 
-function setup(retryDelaysMs = [100, 200]) {
+function setup(retryDelaysMs = [100, 200], notifyKinds?: () => NotifyKind[]) {
   const sockets: FakeSocket[] = []
   const connection = new RefConnection({
     connect: (handlers) => {
@@ -43,6 +44,7 @@ function setup(retryDelaysMs = [100, 200]) {
     },
     client: 'ref-web-test',
     cwd: '/work',
+    notifyKinds,
     retryDelaysMs,
   })
   const states: ConnectionState[] = []
@@ -79,6 +81,20 @@ describe('RefConnection', () => {
     })
     expect(env.states).toEqual(['connecting', 'open'])
     expect(env.connection.hello?.cwd).toBe('/work')
+  })
+
+  it('asks for the notification kinds at every handshake', async () => {
+    let kinds: NotifyKind[] = ['turn_done']
+    const env = setup([100], () => kinds)
+    const socket = await openFully(env)
+    expect(socket.sent[0]).toMatchObject({ op: 'hello', notify: ['turn_done'] })
+
+    kinds = ['permission', 'turn_error']
+    socket.handlers.closed('gone')
+    vi.advanceTimersByTime(100)
+    const second = env.sockets.at(-1)!
+    second.handlers.opened()
+    expect(second.sent[0]).toMatchObject({ op: 'hello', notify: ['permission', 'turn_error'] })
   })
 
   it('matches responses to requests by id, in any order', async () => {
