@@ -1,7 +1,7 @@
 // Light or dark. Follows the system until the user toggles; from then on the choice is theirs
 // (Theme.dark in Theme.qml). Stored in localStorage and shared between tabs.
 
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 export type ThemeChoice = 'system' | 'light' | 'dark'
 
@@ -28,10 +28,20 @@ export function applyTheme(): void {
   document.documentElement.dataset['theme'] = isDark.value ? 'dark' : 'light'
 }
 
+// Follows the system and other tabs.
+watch(isDark, applyTheme, { flush: 'sync' })
+
+// Swaps the theme under a snapshot of the old look and fades the snapshot out (base.css), so
+// every color crossfades at once without per-element transitions. Without view transitions
+// the theme switches at once.
 export function toggleTheme(): void {
-  choice.value = isDark.value ? 'light' : 'dark'
-  localStorage.setItem(STORAGE_KEY, choice.value)
-  applyTheme()
+  const change = () => {
+    choice.value = isDark.value ? 'light' : 'dark'
+    localStorage.setItem(STORAGE_KEY, choice.value)
+    applyTheme()
+  }
+  if (document.startViewTransition) document.startViewTransition(change)
+  else change()
 }
 
 export function useTheme() {
