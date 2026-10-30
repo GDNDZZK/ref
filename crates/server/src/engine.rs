@@ -251,6 +251,7 @@ fn finish_run(hub: &Arc<Hub>, s: &Arc<Session>, id: u64) {
                 );
             }
         }
+        crate::agent_switch::deliver(hub, &mut st);
         let perms: Vec<PendingPerm> = std::mem::take(&mut st.perms);
         for p in perms {
             hub.emit(
@@ -497,7 +498,9 @@ pub async fn prepare(
     cancel: &CancellationToken,
 ) -> Result<Prep, String> {
     let (cfg, agent, cwd, model_ref, has_system, date) = {
-        let st = s.lock();
+        let mut st = s.lock();
+        // The agent is read here for the request, so a switch made during the run is told now.
+        crate::agent_switch::deliver(hub, &mut st);
         (
             st.cfg.clone(),
             st.info.agent.clone(),

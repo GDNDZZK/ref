@@ -1,5 +1,6 @@
 //! ref-server library: the backend of the ref coding agent.
 
+pub mod agent_switch;
 pub mod api;
 pub mod compaction;
 pub mod convert;
