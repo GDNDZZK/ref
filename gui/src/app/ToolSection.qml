@@ -11,6 +11,7 @@ Column {
 	spacing: 6
 
 	Text {
+		textFormat: Text.PlainText
 		id: caption
 		visible: text !== ""
 		color: Theme.textMuted

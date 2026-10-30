@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls.Basic
 import RefGui
 
 // What the session is doing, how long this has gone on, and how full its context window is.
@@ -88,6 +87,7 @@ Item {
 			font.pixelSize: Theme.smallFontSize
 		}
 		Text {
+			textFormat: Text.PlainText
 			anchors.verticalCenter: parent.verticalCenter
 			visible: line.waiting || line.retrying
 			text: line.activityText
@@ -97,6 +97,7 @@ Item {
 			font.pixelSize: Theme.smallFontSize
 		}
 		Text {
+			textFormat: Text.PlainText
 			anchors.verticalCenter: parent.verticalCenter
 			visible: line.activity !== "idle" && line.busyMs >= line.shownFromMs
 			text: "\u00b7 " + Format.elapsed(line.busyMs)
@@ -112,6 +113,7 @@ Item {
 		visible: line.contextMax > 0
 
 		Text {
+			textFormat: Text.PlainText
 			anchors.verticalCenter: parent.verticalCenter
 			text: Format.tokens(line.contextUsed) + " / " + Format.tokens(line.contextMax)
 			color: line.contextColor === Theme.accent ? Theme.textMuted : line.contextColor
@@ -136,7 +138,7 @@ Item {
 		}
 
 		HoverHandler { id: contextHover }
-		ToolTip {
+		PlainToolTip {
 			visible: contextHover.hovered
 			text: qsTr("Context: %1 of %2 tokens. Compaction is recommended at %3 and automatic at %4.")
 				.arg(line.contextUsed).arg(line.contextMax).arg(line.session.contextRecommend).arg(line.session.contextAuto)

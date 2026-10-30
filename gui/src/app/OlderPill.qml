@@ -57,6 +57,7 @@ Item {
 				}
 			}
 			Text {
+				textFormat: Text.PlainText
 				anchors.verticalCenter: parent.verticalCenter
 				width: Math.min(implicitWidth, pill.maxWidth - 2 * pill.innerPadding - 22)
 				text: pill.error !== "" ? pill.error : qsTr("Load older messages")

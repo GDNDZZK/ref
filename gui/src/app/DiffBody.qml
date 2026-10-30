@@ -14,12 +14,14 @@ ToolBodyBase {
 		spacing: 10
 
 		Text {
+			textFormat: Text.PlainText
 			text: body.path
 			color: Theme.text
 			font.family: Theme.monoFamily
 			font.pixelSize: Theme.smallFontSize
 		}
 		Text {
+			textFormat: Text.PlainText
 			visible: (body.meta.added ?? 0) > 0
 			text: "+" + body.meta.added
 			color: Theme.diffAdded
@@ -27,6 +29,7 @@ ToolBodyBase {
 			font.pixelSize: Theme.smallFontSize
 		}
 		Text {
+			textFormat: Text.PlainText
 			visible: (body.meta.removed ?? 0) > 0
 			text: "-" + body.meta.removed
 			color: Theme.diffRemoved

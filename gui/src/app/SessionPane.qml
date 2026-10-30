@@ -87,6 +87,7 @@ Item {
 	}
 
 	Text {
+		textFormat: Text.PlainText
 		anchors.centerIn: chat
 		text: qsTr("What are we building?")
 		color: Theme.textMuted
