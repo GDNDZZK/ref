@@ -20,6 +20,24 @@ export const colors = {
     errorBorder: '#f0c3c5',
     scrollHandle: '#c6c6c2',
     scrollHandlePressed: '#9fa1a8',
+    warning: '#b7791f',
+    warningSurface: '#fcf4e2',
+    warningBorder: '#ecd29a',
+    info: '#2a7fb5',
+    diffAdded: '#1f7a4d',
+    diffAddedBackground: '#e3f3e9',
+    diffRemoved: '#b3303f',
+    diffRemovedBackground: '#fbe6e8',
+    matchBackground: '#fff1c2',
+    shellSurface: '#fbf3e3',
+    shellBorder: '#d9922b',
+    agentOrange: '#d4783a',
+    agentBlue: '#2f6fd6',
+    agentPurple: '#7a52c2',
+    agentRed: '#d23f45',
+    agentYellow: '#c98312',
+    agentGreen: '#2e9d5b',
+    agentCyan: '#2a8f9c',
   },
   dark: {
     background: '#16171a',
@@ -40,13 +58,32 @@ export const colors = {
     errorBorder: '#5c2f35',
     scrollHandle: '#4a4d56',
     scrollHandlePressed: '#6b6e79',
+    warning: '#e6b450',
+    warningSurface: '#2b2417',
+    warningBorder: '#5a4723',
+    info: '#6fb7e0',
+    diffAdded: '#6cc28a',
+    diffAddedBackground: '#1d2f27',
+    diffRemoved: '#ec6f73',
+    diffRemovedBackground: '#33202a',
+    matchBackground: '#3a3420',
+    shellSurface: '#2a2419',
+    shellBorder: '#f5a742',
+    agentOrange: '#fab283',
+    agentBlue: '#5c9cf5',
+    agentPurple: '#9d7cd8',
+    agentRed: '#e06c75',
+    agentYellow: '#f5a742',
+    agentGreen: '#7fd88f',
+    agentCyan: '#56b6c2',
   },
 } as const
 
 export type ColorName = keyof typeof colors.light
 
-// px
+// px, except the ratios and counts in METRIC_UNITLESS of scripts/gen-theme.ts
 export const metrics = {
+  staleOpacity: 0.55,
   fontSize: 15,
   smallFontSize: 12,
   codeFontSize: 13,
@@ -62,3 +99,5 @@ export const metrics = {
 export const themedStrings = {
   syntaxTheme: { light: 'Breeze Light', dark: 'Breeze Dark' },
 } as const
+
+export const agentPalette = ['agentBlue', 'agentPurple', 'agentGreen', 'agentOrange', 'agentRed'] as const satisfies readonly ColorName[]

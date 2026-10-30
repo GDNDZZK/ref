@@ -37,6 +37,9 @@ public:
 	// Empty until a session is attached.
 	const QString& sessionId() const { return m_sessionId; }
 	bool hasSession() const { return !m_sessionId.isEmpty(); }
+	// The backend sends this session's events and the snapshot is in the model. False before
+	// the first attach and after detach().
+	bool isAttached() const { return m_attached; }
 
 	// The session has work going on (an LLM response, tools, a question to the user).
 	bool isBusy() const;
@@ -45,7 +48,13 @@ public:
 
 	// The backend must be connected for all of these.
 	QCoro::Task<Result<void>> create(QString cwd, std::optional<QString> agent, std::optional<proto::ModelRef> model);
-	QCoro::Task<Result<void>> attach(QString sessionId);
+	// `foreground` counts the attachment as the user's view of the session; a watcher follows
+	// it without that. Attaching the session that is already attached only changes the mode:
+	// the model is kept, so a tile can be zoomed without its conversation reloading.
+	QCoro::Task<Result<void>> attach(QString sessionId, bool foreground = true);
+	// Stops the events (unless a WatchAll is on) but keeps the model and the session id, so
+	// the controller can attach again.
+	QCoro::Task<Result<void>> detach();
 	// Attaches the newest session of `cwd`. False when it has none.
 	QCoro::Task<Result<bool>> continueLast(QString cwd);
 
@@ -62,8 +71,6 @@ signals:
 	void turnInProgressChanged();
 	// The backend reported a problem with the session (an Error event).
 	void errorReported(const QString& text);
-	// A toast the backend wants shown.
-	void toastReceived(const refgui::proto::ToastFrame& toast);
 	// Attaching again after a reconnect failed, e.g. because the session is gone.
 	void reattachFailed(const QString& reason);
 
@@ -78,6 +85,8 @@ private:
 	ConversationModel m_model;
 	ConversationFeed m_feed;
 	QString m_sessionId;
+	bool m_attached = false;
+	bool m_foreground = true;
 	proto::SessionInfo m_info;
 };
 

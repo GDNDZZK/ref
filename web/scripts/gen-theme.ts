@@ -23,6 +23,14 @@ const OUT_DIR = join(WEB_ROOT, 'src', 'theme', 'generated')
 // Theme.qml properties that are not literals; the web side has its own value.
 const THEME_SKIPPED = ['monoFamily']
 const THEME_STRINGS = ['syntaxTheme'] // string properties, TS only
+// Theme.qml numbers that are not pixels.
+const METRIC_UNITLESS = [
+  'paletteTopRatio',
+  'dialogMaxHeightRatio',
+  'sidebarMinRunningRows',
+  'paletteMaxRows',
+  'toastMax',
+]
 
 const MOTION_UNITS: Record<string, Unit> = {
   quick: 'ms',
@@ -33,6 +41,15 @@ const MOTION_UNITS: Record<string, Unit> = {
   enterDrop: 'px',
   followLag: 'ms',
   chaseSnap: 'px',
+  interruptWindow: 'ms',
+  dialogDrop: 'px',
+  popScale: '',
+  tileEnterScale: '',
+  tileExitScale: '',
+  toastSlide: 'px',
+  toastInfoMs: 'ms',
+  toastWarnMs: 'ms',
+  toastErrorMs: 'ms',
 }
 
 // Component constants that the web side needs. Only these are read; each must be a literal.
@@ -85,11 +102,12 @@ interface Theme {
   colors: { light: [string, string][]; dark: [string, string][] }
   metrics: [string, number][]
   strings: [string, { light: string; dark: string }][]
+  lists: [string, string[]][] // arrays of color names
 }
 
 function readTheme(): Theme {
   const { properties, where } = loadQml('Theme.qml')
-  const theme: Theme = { colors: { light: [], dark: [] }, metrics: [], strings: [] }
+  const theme: Theme = { colors: { light: [], dark: [] }, metrics: [], strings: [], lists: [] }
 
   for (const property of properties.filter((p) => p.readonly && !THEME_SKIPPED.includes(p.name))) {
     const value = parseValue(property, where)
@@ -98,6 +116,8 @@ function readTheme(): Theme {
       theme.colors.light.push([property.name, String(value.light)])
     } else if (THEME_STRINGS.includes(property.name) && value.kind === 'themed') {
       theme.strings.push([property.name, { light: String(value.light), dark: String(value.dark) }])
+    } else if (value.kind === 'list') {
+      theme.lists.push([property.name, value.names])
     } else if (value.kind === 'number') {
       theme.metrics.push([property.name, value.value])
     } else {
@@ -105,6 +125,11 @@ function readTheme(): Theme {
         `${where}:${property.line}: unexpected form of "${property.name}"; add it to the generator`,
       )
     }
+  }
+  for (const [name, names] of theme.lists) {
+    const known = theme.colors.light.map(([colorName]) => colorName)
+    const missing = names.filter((entry) => !known.includes(entry))
+    if (missing.length > 0) throw new Error(`${where}: "${name}" lists unknown colors: ${missing.join(', ')}`)
   }
   return theme
 }
@@ -163,7 +188,12 @@ function buildCss(theme: Theme, motion: Motion, components: ComponentValues): st
   const colorBlock = (colors: [string, string][]) =>
     colors.map(([name, value]) => `  --${kebab(name)}: ${value};`).join('\n')
 
-  const metrics = theme.metrics.map(([name, value]) => `  --${kebab(name)}: ${cssNumber(value, 'px')};`)
+  const metrics = theme.metrics.map(
+    ([name, value]) => `  --${kebab(name)}: ${cssNumber(value, METRIC_UNITLESS.includes(name) ? '' : 'px')};`,
+  )
+  const lists = theme.lists.flatMap(([name, names]) =>
+    names.map((entry, index) => `  --${kebab(name)}-${index}: var(--${kebab(entry)});`),
+  )
   const motionNumbers = motion.numbers.map(
     ([name, value, unit]) => `  --motion-${kebab(name)}: ${cssNumber(value, unit)};`,
   )
@@ -194,6 +224,7 @@ function buildCss(theme: Theme, motion: Motion, components: ComponentValues): st
     '  color-scheme: light;',
     colorBlock(theme.colors.light),
     ...metrics,
+    ...lists,
     ...motionNumbers,
     ...motionEasings,
     ...plain,
@@ -232,7 +263,7 @@ function buildThemeTs(theme: Theme): string {
     '',
     'export type ColorName = keyof typeof colors.light',
     '',
-    '// px',
+    '// px, except the ratios and counts in METRIC_UNITLESS of scripts/gen-theme.ts',
     'export const metrics = {',
     tsObject(
       theme.metrics.map(([n, v]) => [n, String(v)]),
@@ -244,6 +275,10 @@ function buildThemeTs(theme: Theme): string {
     ...strings,
     '} as const',
     '',
+    ...theme.lists.flatMap(([name, names]) => [
+      `export const ${name} = [${names.map(tsString).join(', ')}] as const satisfies readonly ColorName[]`,
+      '',
+    ]),
   ].join('\n')
 }
 
@@ -253,7 +288,7 @@ function buildMotionTs(motion: Motion): string {
     '',
     "import type { EasingName } from '../../motion/easing.ts'",
     '',
-    '// ms, except enterDrop and chaseSnap (px)',
+    '// ms, except the px distances and unitless scales listed in MOTION_UNITS of scripts/gen-theme.ts',
     'export const motion = {',
     tsObject(
       motion.numbers.map(([n, v]) => [n, String(v)]),

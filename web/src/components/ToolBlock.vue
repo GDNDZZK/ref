@@ -3,9 +3,9 @@
 import { computed, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useChatScroll } from '../composables/chatScroll.ts'
+import { useChatSession } from '../composables/chatSessionContext.ts'
 import { useStuck } from '../composables/useStuck.ts'
 import type { ToolBlock } from '../model/blocks.ts'
-import { useConversationStore } from '../stores/conversation.ts'
 import { useNoticesStore } from '../stores/notices.ts'
 import Chevron from './Chevron.vue'
 import StatusDot from './StatusDot.vue'
@@ -18,7 +18,7 @@ const JSON_INDENT = 2
 
 const { t } = useI18n()
 const chatScroll = useChatScroll()
-const conversation = useConversationStore()
+const session = useChatSession()
 const notices = useNoticesStore()
 const root = useTemplateRef<HTMLElement>('root')
 const header = useTemplateRef<HTMLElement>('header')
@@ -61,7 +61,7 @@ function onFolded(event: TransitionEvent): void {
 }
 
 function answer(allow: boolean, always: boolean): void {
-  conversation.answerPermission(props.block.callId, allow, always).catch((error) => notices.pushError(error))
+  session.answerPermission(props.block.callId, allow, always).catch((error) => notices.pushError(error))
 }
 </script>
 
