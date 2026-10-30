@@ -42,7 +42,9 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let cwd_lex = util::normalize_lexical(&ctx.cwd);
     let cwd_canon = std::fs::canonicalize(&ctx.cwd).unwrap_or_else(|_| cwd_lex.clone());
     let home = util::home_dir();
-    let home_canon = home.as_ref().map(|h| std::fs::canonicalize(h).unwrap_or_else(|_| h.clone()));
+    let home_canon = home
+        .as_ref()
+        .map(|h| std::fs::canonicalize(h).unwrap_or_else(|_| h.clone()));
     let protected = |p: &std::path::Path| {
         p.parent().is_none()
             || p == cwd_lex
@@ -76,7 +78,11 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
                 "{display}/ is a non-empty directory. Pass `recursive: true` to delete it and everything inside."
             )));
         }
-        if non_empty { std::fs::remove_dir_all(&abs)? } else { std::fs::remove_dir(&abs)? }
+        if non_empty {
+            std::fs::remove_dir_all(&abs)?
+        } else {
+            std::fs::remove_dir(&abs)?
+        }
         "directory"
     };
     ctx.store.forget(&abs);

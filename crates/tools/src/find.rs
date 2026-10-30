@@ -109,15 +109,20 @@ fn split_patterns(spec: &str) -> Vec<String> {
 }
 
 fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
-    let pattern = util::opt_str(input, "pattern")?.filter(|p| !p.trim().is_empty()).unwrap_or_else(|| "**/*".into());
-    let kind = util::opt_str(input, "type")?.unwrap_or_else(|| "any".into()).to_ascii_lowercase();
+    let pattern = util::opt_str(input, "pattern")?
+        .filter(|p| !p.trim().is_empty())
+        .unwrap_or_else(|| "**/*".into());
+    let kind = util::opt_str(input, "type")?
+        .unwrap_or_else(|| "any".into())
+        .to_ascii_lowercase();
     let (want_files, want_dirs) = match kind.as_str() {
         "file" | "f" | "files" => (true, false),
         "dir" | "d" | "directory" | "dirs" => (false, true),
         "any" | "all" | "" => (true, true),
         other => bail!("invalid `type` {other:?} (expected file, dir or any)"),
     };
-    let limit = (util::opt_u64(input, "limit")?.unwrap_or(DEFAULT_LIMIT as u64) as usize).clamp(1, MAX_LIMIT);
+    let limit = (util::opt_u64(input, "limit")?.unwrap_or(DEFAULT_LIMIT as u64) as usize)
+        .clamp(1, MAX_LIMIT);
     let root = match util::opt_str(input, "path")? {
         Some(p) if !p.trim().is_empty() => util::resolve_path(&ctx.cwd, &p),
         _ => ctx.cwd.clone(),
@@ -127,7 +132,9 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         return Ok(ToolOutput::err(format!("Not a directory: {root_display}")));
     }
     if root.parent().is_none() {
-        return Ok(ToolOutput::err("Refusing to search from `/`; pass a narrower `path`."));
+        return Ok(ToolOutput::err(
+            "Refusing to search from `/`; pass a narrower `path`.",
+        ));
     }
     let matcher = PathMatcher::new(&pattern)?;
 
@@ -150,7 +157,9 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         if entry.depth() == 0 {
             continue;
         }
-        let Some(ft) = entry.file_type() else { continue };
+        let Some(ft) = entry.file_type() else {
+            continue;
+        };
         let is_dir = ft.is_dir();
         if (is_dir && !want_dirs) || (!is_dir && !want_files) {
             continue;
@@ -159,7 +168,11 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         if !matcher.is_match(rel) {
             continue;
         }
-        let mtime = entry.metadata().ok().and_then(|m| m.modified().ok()).unwrap_or(SystemTime::UNIX_EPOCH);
+        let mtime = entry
+            .metadata()
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .unwrap_or(SystemTime::UNIX_EPOCH);
         let mut shown = util::display_path(&ctx.cwd, entry.path());
         if is_dir {
             shown.push('/');
@@ -168,12 +181,19 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     }
     let total = found.len();
     if total == 0 {
-        let mut o = ToolOutput::ok(format!("No files found matching `{pattern}` in {root_display}"));
+        let mut o = ToolOutput::ok(format!(
+            "No files found matching `{pattern}` in {root_display}"
+        ));
         o.meta = Some(json!({"count": 0}));
         return Ok(o);
     }
     found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-    let mut out: String = found.iter().take(limit).map(|(_, p)| p.as_str()).collect::<Vec<_>>().join("\n");
+    let mut out: String = found
+        .iter()
+        .take(limit)
+        .map(|(_, p)| p.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
     if total > limit {
         out.push_str(&format!(
             "\n\n[Showing {limit} of {total} results. Narrow the pattern or use limit={} for more]",
@@ -201,7 +221,12 @@ mod tests {
         std::fs::write(d.join(".git/config"), "").unwrap();
         std::fs::write(d.join("src/old.rs"), "").unwrap();
         let old = SystemTime::now() - std::time::Duration::from_secs(3600);
-        std::fs::File::options().write(true).open(d.join("src/old.rs")).unwrap().set_modified(old).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(d.join("src/old.rs"))
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
         std::fs::write(d.join("src/nested/new.rs"), "").unwrap();
         std::fs::write(d.join("README.md"), "").unwrap();
         let c = ctx(&d);
@@ -210,14 +235,23 @@ mod tests {
         assert_eq!(o.text, "src/nested/new.rs\nsrc/old.rs");
         let o = crate::execute("find", json!({"pattern": "src/*.rs"}), &c).await;
         assert_eq!(o.text, "src/old.rs");
-        let o = crate::execute("find", json!({"pattern": "**/*.{md,rs}", "type": "file"}), &c).await;
+        let o = crate::execute(
+            "find",
+            json!({"pattern": "**/*.{md,rs}", "type": "file"}),
+            &c,
+        )
+        .await;
         assert!(o.text.contains("README.md") && o.text.contains("src/old.rs"));
         let o = crate::execute("find", json!({"type": "dir"}), &c).await;
         let mut lines: Vec<&str> = o.text.lines().collect();
         lines.sort();
         assert_eq!(lines, vec!["src/", "src/nested/"]);
         let o = crate::execute("find", json!({}), &c).await;
-        assert!(o.text.contains(".gitignore") && !o.text.contains(".git/") && !o.text.contains("target"));
+        assert!(
+            o.text.contains(".gitignore")
+                && !o.text.contains(".git/")
+                && !o.text.contains("target")
+        );
         let o = crate::execute("find", json!({"limit": 2}), &c).await;
         assert!(o.text.contains("[Showing 2 of"));
         let o = crate::execute("find", json!({"pattern": "*.py"}), &c).await;

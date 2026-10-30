@@ -24,9 +24,15 @@ async fn basic_turn_and_persistence() {
     let body = &m.bodies()[0];
     let tools = body["tools"].as_array().unwrap();
     assert_eq!(tools[0]["function"]["name"], "read");
-    let props = tools[0]["function"]["parameters"]["properties"].as_object().unwrap();
+    let props = tools[0]["function"]["parameters"]["properties"]
+        .as_object()
+        .unwrap();
     assert_eq!(props.keys().next().unwrap(), "purpose");
-    assert!(tools.iter().any(|t| t["function"]["name"] == "create_session"));
+    assert!(
+        tools
+            .iter()
+            .any(|t| t["function"]["name"] == "create_session")
+    );
     // Persisted to disk.
     let p = hub.store.load(&s.id).unwrap();
     assert_eq!(p.messages.len(), 2);
@@ -39,10 +45,18 @@ async fn basic_turn_and_persistence() {
 async fn tool_loop_errors_do_not_terminate_and_replay_is_stable() {
     let m = mock(Arc::new(|n, _| match n {
         0 => Reply::Tools(vec![
-            tool("c1", "read", json!({"purpose": "Read missing file", "path": "nope.txt"})),
+            tool(
+                "c1",
+                "read",
+                json!({"purpose": "Read missing file", "path": "nope.txt"}),
+            ),
             tool("c2", "no_such_tool", json!({"purpose": "x"})),
             ("c3".into(), "bash".into(), "{not json".into()),
-            tool("c4", "bash", json!({"purpose": "Say hi", "command": "echo hi"})),
+            tool(
+                "c4",
+                "bash",
+                json!({"purpose": "Say hi", "command": "echo hi"}),
+            ),
         ]),
         _ => Reply::Text("done".into()),
     }))
@@ -54,8 +68,25 @@ async fn tool_loop_errors_do_not_terminate_and_replay_is_stable() {
     assert_eq!(last_text(&s), "done");
     let tools = tool_parts(&s);
     assert_eq!(tools.len(), 4);
-    let states: Vec<ToolState> = tools.iter().map(|p| if let Part::Tool { state, .. } = p { *state } else { unreachable!() }).collect();
-    assert_eq!(states, [ToolState::Error, ToolState::Error, ToolState::Error, ToolState::Done]);
+    let states: Vec<ToolState> = tools
+        .iter()
+        .map(|p| {
+            if let Part::Tool { state, .. } = p {
+                *state
+            } else {
+                unreachable!()
+            }
+        })
+        .collect();
+    assert_eq!(
+        states,
+        [
+            ToolState::Error,
+            ToolState::Error,
+            ToolState::Error,
+            ToolState::Done
+        ]
+    );
     if let Part::Tool { purpose, input, .. } = &tools[0] {
         assert_eq!(purpose, "Read missing file");
         assert_eq!(input, &json!({"path": "nope.txt"}));
@@ -64,11 +95,27 @@ async fn tool_loop_errors_do_not_terminate_and_replay_is_stable() {
     assert_eq!(bodies.len(), 2);
     let results = tool_results(&bodies[1]);
     assert_eq!(results.len(), 4);
-    assert!(results[1]["content"].as_str().unwrap().contains("Unknown tool"));
-    assert!(results[2]["content"].as_str().unwrap().contains("Invalid JSON"));
+    assert!(
+        results[1]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Unknown tool")
+    );
+    assert!(
+        results[2]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid JSON")
+    );
     assert!(results[3]["content"].as_str().unwrap().contains("hi"));
     // Byte-identical replay: raw arguments incl. purpose.
-    let am = bodies[1]["messages"].as_array().unwrap().iter().find(|x| x["role"] == "assistant").unwrap().clone();
+    let am = bodies[1]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["role"] == "assistant")
+        .unwrap()
+        .clone();
     assert_eq!(
         am["tool_calls"][0]["function"]["arguments"],
         json!(json!({"purpose": "Read missing file", "path": "nope.txt"}).to_string())
@@ -82,8 +129,16 @@ async fn tool_loop_errors_do_not_terminate_and_replay_is_stable() {
 async fn permission_ask_then_reply_and_deny() {
     let m = mock(Arc::new(|n, _| match n {
         0 => Reply::Tools(vec![
-            tool("c1", "bash", json!({"purpose": "p1", "command": "echo one"})),
-            tool("c2", "bash", json!({"purpose": "p2", "command": "echo two"})),
+            tool(
+                "c1",
+                "bash",
+                json!({"purpose": "p1", "command": "echo one"}),
+            ),
+            tool(
+                "c2",
+                "bash",
+                json!({"purpose": "p2", "command": "echo two"}),
+            ),
             tool("c3", "delete", json!({"purpose": "p3", "path": "x"})),
         ]),
         _ => Reply::Text("ok".into()),
@@ -107,17 +162,32 @@ async fn permission_ask_then_reply_and_deny() {
     tx.send((true, false)).unwrap();
     // Second ask: deny.
     let s2 = s.clone();
-    wait_until("permission 2", T, move || s2.lock().perms.first().is_some_and(|p| p.request.call_id == "c2" && p.tx.is_some())).await;
+    wait_until("permission 2", T, move || {
+        s2.lock()
+            .perms
+            .first()
+            .is_some_and(|p| p.request.call_id == "c2" && p.tx.is_some())
+    })
+    .await;
     let tx = s.lock().perms[0].tx.take().unwrap();
     tx.send((false, false)).unwrap();
     wait_idle(&s).await;
     let tools = tool_parts(&s);
     let st: Vec<(ToolState, String)> = tools
         .iter()
-        .map(|p| if let Part::Tool { state, output, .. } = p { (*state, output.clone().unwrap_or_default()) } else { unreachable!() })
+        .map(|p| {
+            if let Part::Tool { state, output, .. } = p {
+                (*state, output.clone().unwrap_or_default())
+            } else {
+                unreachable!()
+            }
+        })
         .collect();
     assert_eq!(st[0].0, ToolState::Done);
-    assert_eq!(st[1], (ToolState::Denied, "The user denied this tool call.".into()));
+    assert_eq!(
+        st[1],
+        (ToolState::Denied, "The user denied this tool call.".into())
+    );
     assert_eq!(st[2].0, ToolState::Denied);
     assert!(st[2].1.contains("Permission denied by configuration"));
     assert_eq!(last_text(&s), "ok");
@@ -143,13 +213,23 @@ async fn permission_always_allows_rest_of_session() {
     let tx = s.lock().perms[0].tx.take().unwrap();
     tx.send((true, true)).unwrap();
     wait_idle(&s).await;
-    assert!(tool_parts(&s).iter().all(|p| matches!(p, Part::Tool { state: ToolState::Done, .. })));
+    assert!(tool_parts(&s).iter().all(|p| matches!(
+        p,
+        Part::Tool {
+            state: ToolState::Done,
+            ..
+        }
+    )));
 }
 
 #[tokio::test]
 async fn agent_permission_overrides_global_and_delay_applies() {
     let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Tools(vec![tool("c1", "bash", json!({"purpose": "p", "command": "echo delayed"}))]),
+        0 => Reply::Tools(vec![tool(
+            "c1",
+            "bash",
+            json!({"purpose": "p", "command": "echo delayed"}),
+        )]),
         _ => Reply::Text("ok".into()),
     }))
     .await;
@@ -164,19 +244,41 @@ async fn agent_permission_overrides_global_and_delay_applies() {
     prompt(&hub, &s, "go");
     let s2 = s.clone();
     wait_until("delayed state", T, move || {
-        tool_parts(&s2).iter().any(|p| matches!(p, Part::Tool { state: ToolState::Delayed, run_at: Some(_), .. }))
+        tool_parts(&s2).iter().any(|p| {
+            matches!(
+                p,
+                Part::Tool {
+                    state: ToolState::Delayed,
+                    run_at: Some(_),
+                    ..
+                }
+            )
+        })
     })
     .await;
     wait_idle(&s).await;
     let el = start.elapsed();
-    assert!(el >= Duration::from_millis(400) && el < Duration::from_secs(4), "{el:?}");
-    assert!(matches!(&tool_parts(&s)[0], Part::Tool { state: ToolState::Done, .. }));
+    assert!(
+        el >= Duration::from_millis(400) && el < Duration::from_secs(4),
+        "{el:?}"
+    );
+    assert!(matches!(
+        &tool_parts(&s)[0],
+        Part::Tool {
+            state: ToolState::Done,
+            ..
+        }
+    ));
 }
 
 #[tokio::test]
 async fn abort_during_delay_and_stream() {
     let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Tools(vec![tool("c1", "bash", json!({"purpose": "p", "command": "echo x"}))]),
+        0 => Reply::Tools(vec![tool(
+            "c1",
+            "bash",
+            json!({"purpose": "p", "command": "echo x"}),
+        )]),
         1 => Reply::Hang("partial".into()),
         _ => Reply::Text("after".into()),
     }))
@@ -187,11 +289,24 @@ async fn abort_during_delay_and_stream() {
     let s = session(&hub, &work, "main", "build").await;
     prompt(&hub, &s, "go");
     let s2 = s.clone();
-    wait_until("delayed", T, move || tool_parts(&s2).iter().any(|p| matches!(p, Part::Tool { state: ToolState::Delayed, .. }))).await;
+    wait_until("delayed", T, move || {
+        tool_parts(&s2).iter().any(|p| {
+            matches!(
+                p,
+                Part::Tool {
+                    state: ToolState::Delayed,
+                    ..
+                }
+            )
+        })
+    })
+    .await;
     ref_server::engine::abort(&hub, &s, true);
     wait_idle(&s).await;
     let tools = tool_parts(&s);
-    assert!(matches!(&tools[0], Part::Tool { state: ToolState::Cancelled, output: Some(o), .. } if o == "Cancelled by user."));
+    assert!(
+        matches!(&tools[0], Part::Tool { state: ToolState::Cancelled, output: Some(o), .. } if o == "Cancelled by user.")
+    );
     let last = messages(&s).last().unwrap().clone();
     assert_eq!(last.error.as_deref(), Some("Aborted"));
     assert_eq!(s.info().status, SessionStatus::Idle);
@@ -229,7 +344,10 @@ async fn retry_on_500_then_success() {
 
 #[tokio::test]
 async fn non_retryable_error_fails_after_three_attempts() {
-    let m = mock(Arc::new(|_, _| Reply::Status(400, r#"{"error":{"message":"bad request"}}"#.into()))).await;
+    let m = mock(Arc::new(|_, _| {
+        Reply::Status(400, r#"{"error":{"message":"bad request"}}"#.into())
+    }))
+    .await;
     let (hub, work) = hub(config(&m.url), "fail");
     let s = session(&hub, &work, "main", "build").await;
     prompt(&hub, &s, "go");
@@ -248,20 +366,36 @@ fn backoff_math() {
     assert_eq!(backoff(b, 3, max, None, 0.0), Duration::from_secs(8));
     assert_eq!(backoff(b, 20, max, None, 0.0), max);
     assert_eq!(backoff(b, 20, max, None, 0.2), max);
-    assert_eq!(backoff(b, 1, max, Some(Duration::from_secs(30)), 0.0), Duration::from_secs(30));
-    assert_eq!(backoff(b, 1, max, Some(Duration::from_secs(9999)), 0.0), max);
+    assert_eq!(
+        backoff(b, 1, max, Some(Duration::from_secs(30)), 0.0),
+        Duration::from_secs(30)
+    );
+    assert_eq!(
+        backoff(b, 1, max, Some(Duration::from_secs(9999)), 0.0),
+        max
+    );
     let j = backoff(b, 2, max, None, -0.2);
     assert!((j.as_secs_f64() - 3.2).abs() < 1e-9);
 }
 
 fn non_system(body: &serde_json::Value) -> Vec<serde_json::Value> {
-    body["messages"].as_array().unwrap().iter().filter(|x| x["role"] != "system").cloned().collect()
+    body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|x| x["role"] != "system")
+        .cloned()
+        .collect()
 }
 
 #[tokio::test]
 async fn compact_context_tool_keeps_history_but_sends_summary_only() {
     let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Tools(vec![tool("c1", "compact_context", json!({"purpose": "p", "summary": "The user wants X. Done Y."}))]),
+        0 => Reply::Tools(vec![tool(
+            "c1",
+            "compact_context",
+            json!({"purpose": "p", "summary": "The user wants X. Done Y."}),
+        )]),
         _ => Reply::Text("continuing".into()),
     }))
     .await;
@@ -279,7 +413,12 @@ async fn compact_context_tool_keeps_history_but_sends_summary_only() {
     let bodies = m.bodies();
     let second = non_system(&bodies[1]);
     assert_eq!(second.len(), 1, "{second:#?}");
-    assert!(second[0]["content"].as_str().unwrap().starts_with("[Context compacted."));
+    assert!(
+        second[0]["content"]
+            .as_str()
+            .unwrap()
+            .starts_with("[Context compacted.")
+    );
     // The next request extends the same effective prefix (prompt caching).
     prompt(&hub, &s, "more");
     wait_idle(&s).await;
@@ -314,7 +453,10 @@ async fn manual_compaction_uses_model_summary_and_undo_restores_context() {
     let b = m.bodies();
     assert!(b[1].get("tools").is_none());
     // Default compaction prompt (no compaction agent configured) as the system prompt.
-    assert_eq!(b[1]["messages"][0]["content"], ref_config::COMPACTION_PROMPT);
+    assert_eq!(
+        b[1]["messages"][0]["content"],
+        ref_config::COMPACTION_PROMPT
+    );
     // Context usage estimated from the new effective context (system + tools + summary),
     // not the last reported usage.
     let used = s.info().context.used;
@@ -329,13 +471,25 @@ async fn manual_compaction_uses_model_summary_and_undo_restores_context() {
     let after = non_system(&m.bodies()[2]);
     assert_eq!(after.len(), 1, "{after:#?}");
     let c = after[0]["content"].as_str().unwrap();
-    assert!(c.contains("summary text") && c.ends_with("next") && !c.contains("first answer"), "{c}");
+    assert!(
+        c.contains("summary text") && c.ends_with("next") && !c.contains("first answer"),
+        "{c}"
+    );
 
     // Undo from the compaction message: the old context becomes effective again.
     let conn = hub.add_conn();
     conn.lock().hello = true;
     let cid = msgs[2].id.clone();
-    ref_server::api::handle(&hub, &conn, ref_proto::Request::Undo { session_id: s.id.clone(), message_id: Some(cid) }).await.unwrap();
+    ref_server::api::handle(
+        &hub,
+        &conn,
+        ref_proto::Request::Undo {
+            session_id: s.id.clone(),
+            message_id: Some(cid),
+        },
+    )
+    .await
+    .unwrap();
     assert_eq!(messages(&s).len(), 2);
     prompt(&hub, &s, "again");
     wait_idle(&s).await;
@@ -354,14 +508,24 @@ async fn compaction_agent_prompt_and_model_from_config() {
     let mut cfg = config(&m.url);
     cfg.providers.get_mut("mock").unwrap().models.insert(
         "small".into(),
-        ref_config::ModelConfig { key: "small".into(), id: "small-wire".into(), name: "Small".into(), context: 10_000, ..Default::default() },
+        ref_config::ModelConfig {
+            key: "small".into(),
+            id: "small-wire".into(),
+            name: "Small".into(),
+            context: 10_000,
+            ..Default::default()
+        },
     );
     cfg.agents.insert(
         "compaction".into(),
         ref_config::AgentConfig {
             name: "compaction".into(),
             prompt: "CUSTOM COMPACTION PROMPT".into(),
-            model: Some(ref_proto::ModelRef { provider: "mock".into(), model: "small".into(), variant: None }),
+            model: Some(ref_proto::ModelRef {
+                provider: "mock".into(),
+                model: "small".into(),
+                variant: None,
+            }),
             hidden: true,
             ..Default::default()
         },
@@ -383,20 +547,43 @@ async fn compaction_agent_prompt_and_model_from_config() {
     // Hidden agents are not offered to frontends and cannot run sessions.
     let conn = hub.add_conn();
     conn.lock().hello = true;
-    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::GetConfig).await.unwrap();
-    let names: Vec<&str> = r["config"]["agents"].as_array().unwrap().iter().map(|a| a["name"].as_str().unwrap()).collect();
+    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::GetConfig)
+        .await
+        .unwrap();
+    let names: Vec<&str> = r["config"]["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["name"].as_str().unwrap())
+        .collect();
     assert!(!names.contains(&"compaction"), "{names:?}");
-    let e = ref_server::api::handle(&hub, &conn, ref_proto::Request::SetAgent { session_id: s.id.clone(), agent: "compaction".into() }).await;
+    let e = ref_server::api::handle(
+        &hub,
+        &conn,
+        ref_proto::Request::SetAgent {
+            session_id: s.id.clone(),
+            agent: "compaction".into(),
+        },
+    )
+    .await;
     assert!(e.is_err());
 }
 
 #[tokio::test]
 async fn recommend_compaction_notice_once_per_epoch() {
     let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Tools(vec![tool("c1", "bash", json!({"purpose": "p", "command": "echo hi"}))]),
+        0 => Reply::Tools(vec![tool(
+            "c1",
+            "bash",
+            json!({"purpose": "p", "command": "echo hi"}),
+        )]),
         1 => Reply::Text("done".into()),
         2 => Reply::Text("second".into()),
-        3 => Reply::Tools(vec![tool("c2", "compact_context", json!({"purpose": "p", "summary": "S"}))]),
+        3 => Reply::Tools(vec![tool(
+            "c2",
+            "compact_context",
+            json!({"purpose": "p", "summary": "S"}),
+        )]),
         _ => Reply::Text("fresh".into()),
     }))
     .await;
@@ -415,13 +602,26 @@ async fn recommend_compaction_notice_once_per_epoch() {
     let b1 = non_system(&m.bodies()[1]);
     assert_eq!(b1[b1.len() - 2]["role"], "tool");
     assert_eq!(b1[b1.len() - 1]["role"], "user");
-    assert!(b1[b1.len() - 1]["content"].as_str().unwrap().starts_with("[Context notice]"));
+    assert!(
+        b1[b1.len() - 1]["content"]
+            .as_str()
+            .unwrap()
+            .starts_with("[Context notice]")
+    );
     assert!(s.lock().context_notice);
-    assert!(hub.store.load(&s.id).unwrap().context_notice, "flag persisted");
+    assert!(
+        hub.store.load(&s.id).unwrap().context_notice,
+        "flag persisted"
+    );
     // Only once per context epoch.
     prompt(&hub, &s, "two");
     wait_idle(&s).await;
-    let count = |s: &Arc<ref_server::session::Session>| messages(s).iter().filter(|m| m.source == MessageSource::Reminder).count();
+    let count = |s: &Arc<ref_server::session::Session>| {
+        messages(s)
+            .iter()
+            .filter(|m| m.source == MessageSource::Reminder)
+            .count()
+    };
     assert_eq!(count(&s), 1);
     // After a compaction it can fire again; with no further request in the run it is
     // appended at the end (and goes out with the next prompt).
@@ -440,14 +640,33 @@ async fn mcp_status_request() {
     let mut cfg = config(&m.url);
     cfg.mcp.insert(
         "off".into(),
-        ref_config::McpConfig::Local { command: vec!["true".into()], environment: Default::default(), cwd: None, enabled: false, timeout_ms: None },
+        ref_config::McpConfig::Local {
+            command: vec!["true".into()],
+            environment: Default::default(),
+            cwd: None,
+            enabled: false,
+            timeout_ms: None,
+        },
     );
     let (hub, _work) = hub(cfg, "mcpstatus");
     let conn = hub.add_conn();
     conn.lock().hello = true;
-    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::McpStatus { cwd: Some("/".into()) }).await.unwrap();
-    assert_eq!(r["servers"], json!([{"name": "off", "status": "disabled", "error": null, "tools": []}]));
-    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::GetConfig).await.unwrap();
+    let r = ref_server::api::handle(
+        &hub,
+        &conn,
+        ref_proto::Request::McpStatus {
+            cwd: Some("/".into()),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        r["servers"],
+        json!([{"name": "off", "status": "disabled", "error": null, "tools": []}])
+    );
+    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::GetConfig)
+        .await
+        .unwrap();
     assert_eq!(r["config"]["mcp"], json!([["off", "disabled"]]));
 }
 
@@ -466,10 +685,15 @@ async fn context_window_tool() {
     prompt(&hub, &s, "2");
     wait_idle(&s).await;
     let out = match &tool_parts(&s)[0] {
-        Part::Tool { output: Some(o), .. } => o.clone(),
+        Part::Tool {
+            output: Some(o), ..
+        } => o.clone(),
         _ => panic!(),
     };
-    assert!(out.contains("Context window for \"main\": used 1020 tokens of 10000 (10%)"), "{out}");
+    assert!(
+        out.contains("Context window for \"main\": used 1020 tokens of 10000 (10%)"),
+        "{out}"
+    );
     assert!(out.contains("Recommended compaction at 6000"), "{out}");
 }
 
@@ -477,10 +701,21 @@ async fn context_window_tool() {
 async fn peer_send_message_between_sessions() {
     let m = mock(Arc::new(|_, body| {
         let all = body.to_string();
-        let last_user = body["messages"].as_array().unwrap().iter().rev().find(|x| x["role"] == "user").cloned().unwrap();
+        let last_user = body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|x| x["role"] == "user")
+            .cloned()
+            .unwrap();
         let lu = last_user["content"].to_string();
         if lu.contains("ping bob") && !all.contains("\"role\":\"tool\"") {
-            Reply::Tools(vec![tool("c1", "send_message", json!({"purpose": "p", "to": "ボブ", "message": "hello bob"}))])
+            Reply::Tools(vec![tool(
+                "c1",
+                "send_message",
+                json!({"purpose": "p", "to": "ボブ", "message": "hello bob"}),
+            )])
         } else if lu.contains("[Message from session") {
             Reply::Text("bob got it".into())
         } else {
@@ -501,42 +736,110 @@ async fn peer_send_message_between_sessions() {
     assert!(bm[0].raw_text().contains("hello bob"));
     assert!(bm[0].raw_text().contains(&format!("(id {})", alice.id)));
     let out = match &tool_parts(&alice)[0] {
-        Part::Tool { output: Some(o), .. } => o.clone(),
+        Part::Tool {
+            output: Some(o), ..
+        } => o.clone(),
         _ => panic!(),
     };
     assert!(out.starts_with("Delivered to \"ボブ\""), "{out}");
     // message_status: read.
-    let msg_id = out.split("Message id ").nth(1).unwrap().split('.').next().unwrap().trim().to_string();
-    let st = ref_server::peers::run(&hub, &alice, "message_status", &json!({"message_id": msg_id})).await;
+    let msg_id = out
+        .split("Message id ")
+        .nth(1)
+        .unwrap()
+        .split('.')
+        .next()
+        .unwrap()
+        .trim()
+        .to_string();
+    let st = ref_server::peers::run(
+        &hub,
+        &alice,
+        "message_status",
+        &json!({"message_id": msg_id}),
+    )
+    .await;
     assert!(st.text.contains("read"), "{}", st.text);
     // list_sessions + read_session.
     let ls = ref_server::peers::run(&hub, &alice, "list_sessions", &json!({})).await;
     assert!(ls.text.starts_with("2 live session(s):"));
     assert!(ls.text.contains("\"alice\" (id") && ls.text.contains("(you)"));
-    let rs = ref_server::peers::run(&hub, &alice, "read_session", &json!({"session": "ボブ", "page_size": 1})).await;
-    assert!(rs.text.contains("messages 2–2 of 2 (page 1/2, newest first)"), "{}", rs.text);
+    let rs = ref_server::peers::run(
+        &hub,
+        &alice,
+        "read_session",
+        &json!({"session": "ボブ", "page_size": 1}),
+    )
+    .await;
+    assert!(
+        rs.text
+            .contains("messages 2–2 of 2 (page 1/2, newest first)"),
+        "{}",
+        rs.text
+    );
     assert!(rs.text.contains("bob got it"));
     // Self target and unknown target errors.
-    let e = ref_server::peers::run(&hub, &alice, "send_message", &json!({"to": "alice", "message": "x"})).await;
+    let e = ref_server::peers::run(
+        &hub,
+        &alice,
+        "send_message",
+        &json!({"to": "alice", "message": "x"}),
+    )
+    .await;
     assert!(e.is_error);
-    let e = ref_server::peers::run(&hub, &alice, "send_message", &json!({"to": "carol", "message": "x"})).await;
+    let e = ref_server::peers::run(
+        &hub,
+        &alice,
+        "send_message",
+        &json!({"to": "carol", "message": "x"}),
+    )
+    .await;
     assert!(e.is_error && e.text.contains("no live session named"));
     // Case-insensitive resolution.
-    assert_eq!(ref_server::peers::resolve(&hub, "ALICE", None).unwrap().id, alice.id);
+    assert_eq!(
+        ref_server::peers::resolve(&hub, "ALICE", None).unwrap().id,
+        alice.id
+    );
 
     // User slash commands (no LLM turn).
     let cmd = |s, c: &str, a: &str| ref_server::peers::user_command(&hub, s, c, a);
     let p = cmd(&alice, "peers", "").unwrap();
-    assert!(p.starts_with("You are \"alice\"") && p.contains("Other live sessions (1)") && p.contains("ボブ"), "{p}");
+    assert!(
+        p.starts_with("You are \"alice\"")
+            && p.contains("Other live sessions (1)")
+            && p.contains("ボブ"),
+        "{p}"
+    );
     let outbox = cmd(&alice, "peers-outbox", "").unwrap();
-    assert!(outbox.contains("to \"ボブ\"") && outbox.contains("read") && outbox.contains("hello bob"), "{outbox}");
+    assert!(
+        outbox.contains("to \"ボブ\"") && outbox.contains("read") && outbox.contains("hello bob"),
+        "{outbox}"
+    );
     let inbox = cmd(&bob, "peers-inbox", "").unwrap();
-    assert!(inbox.contains("1 received") && inbox.contains("from \"alice\"") && inbox.contains("hello bob"), "{inbox}");
+    assert!(
+        inbox.contains("1 received")
+            && inbox.contains("from \"alice\"")
+            && inbox.contains("hello bob"),
+        "{inbox}"
+    );
     assert!(!inbox.contains("[Message from session"), "{inbox}");
-    assert!(cmd(&alice, "peers-inbox", "").unwrap().starts_with("Inbox is empty"));
-    assert_eq!(cmd(&alice, "peers-name", "").unwrap(), "Current name: \"alice\"");
-    assert!(cmd(&alice, "peers-name", "ボブ").is_err(), "duplicate name must be rejected");
-    assert_eq!(cmd(&alice, "peers-name", "爱丽丝 🌸").unwrap(), "Renamed to \"爱丽丝 🌸\".");
+    assert!(
+        cmd(&alice, "peers-inbox", "")
+            .unwrap()
+            .starts_with("Inbox is empty")
+    );
+    assert_eq!(
+        cmd(&alice, "peers-name", "").unwrap(),
+        "Current name: \"alice\""
+    );
+    assert!(
+        cmd(&alice, "peers-name", "ボブ").is_err(),
+        "duplicate name must be rejected"
+    );
+    assert_eq!(
+        cmd(&alice, "peers-name", "爱丽丝 🌸").unwrap(),
+        "Renamed to \"爱丽丝 🌸\"."
+    );
     assert_eq!(alice.lock().info.name, "爱丽丝 🌸");
     assert!(cmd(&alice, "nope", "").is_err());
 }
@@ -544,7 +847,11 @@ async fn peer_send_message_between_sessions() {
 #[tokio::test]
 async fn queued_message_delivered_after_current_step() {
     let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Tools(vec![tool("c1", "bash", json!({"purpose": "p", "command": "sleep 0.5"}))]),
+        0 => Reply::Tools(vec![tool(
+            "c1",
+            "bash",
+            json!({"purpose": "p", "command": "sleep 0.5"}),
+        )]),
         _ => Reply::Text("ok".into()),
     }))
     .await;
@@ -552,7 +859,18 @@ async fn queued_message_delivered_after_current_step() {
     let s = session(&hub, &work, "main", "build").await;
     prompt(&hub, &s, "first");
     let s2 = s.clone();
-    wait_until("running", T, move || tool_parts(&s2).iter().any(|p| matches!(p, Part::Tool { state: ToolState::Running, .. }))).await;
+    wait_until("running", T, move || {
+        tool_parts(&s2).iter().any(|p| {
+            matches!(
+                p,
+                Part::Tool {
+                    state: ToolState::Running,
+                    ..
+                }
+            )
+        })
+    })
+    .await;
     prompt(&hub, &s, "second while busy");
     assert_eq!(s.lock().queue.len(), 1);
     wait_idle(&s).await;
@@ -567,7 +885,11 @@ async fn queued_message_delivered_after_current_step() {
 #[tokio::test]
 async fn remove_queued_message_before_delivery() {
     let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Tools(vec![tool("c1", "bash", json!({"purpose": "p", "command": "sleep 0.5"}))]),
+        0 => Reply::Tools(vec![tool(
+            "c1",
+            "bash",
+            json!({"purpose": "p", "command": "sleep 0.5"}),
+        )]),
         _ => Reply::Text("ok".into()),
     }))
     .await;
@@ -575,23 +897,64 @@ async fn remove_queued_message_before_delivery() {
     let s = session(&hub, &work, "main", "build").await;
     let conn = hub.add_conn();
     conn.lock().hello = true;
-    let req = |text: &str| ref_proto::Request::Prompt { session_id: s.id.clone(), text: text.into(), images: vec![] };
-    let r = ref_server::api::handle(&hub, &conn, req("first")).await.unwrap();
+    let req = |text: &str| ref_proto::Request::Prompt {
+        session_id: s.id.clone(),
+        text: text.into(),
+        images: vec![],
+    };
+    let r = ref_server::api::handle(&hub, &conn, req("first"))
+        .await
+        .unwrap();
     assert_eq!(r["queued"], false);
     assert!(r["message_id"].as_str().is_some_and(|id| !id.is_empty()));
     let s2 = s.clone();
-    wait_until("running", T, move || tool_parts(&s2).iter().any(|p| matches!(p, Part::Tool { state: ToolState::Running, .. }))).await;
-    let r = ref_server::api::handle(&hub, &conn, req("withdrawn while busy")).await.unwrap();
+    wait_until("running", T, move || {
+        tool_parts(&s2).iter().any(|p| {
+            matches!(
+                p,
+                Part::Tool {
+                    state: ToolState::Running,
+                    ..
+                }
+            )
+        })
+    })
+    .await;
+    let r = ref_server::api::handle(&hub, &conn, req("withdrawn while busy"))
+        .await
+        .unwrap();
     assert_eq!(r["queued"], true);
     let id = r["message_id"].as_str().unwrap().to_string();
-    assert_eq!(s.lock().queue.front().map(|m| m.id.clone()), Some(id.clone()));
-    assert!(hub.store.load(&s.id).unwrap().messages.iter().any(|m| m.id == id), "queued prompt saved");
+    assert_eq!(
+        s.lock().queue.front().map(|m| m.id.clone()),
+        Some(id.clone())
+    );
+    assert!(
+        hub.store
+            .load(&s.id)
+            .unwrap()
+            .messages
+            .iter()
+            .any(|m| m.id == id),
+        "queued prompt saved"
+    );
     // Attach snapshots list it (frontends rebuild their queued rows from this).
-    let attach = ref_proto::Request::Attach { session_id: s.id.clone(), foreground: false, limit: None };
-    let snap = ref_server::api::handle(&hub, &conn, attach.clone()).await.unwrap();
+    let attach = ref_proto::Request::Attach {
+        session_id: s.id.clone(),
+        foreground: false,
+        limit: None,
+    };
+    let snap = ref_server::api::handle(&hub, &conn, attach.clone())
+        .await
+        .unwrap();
     assert_eq!(snap["snapshot"]["queued"][0]["id"], id.as_str());
-    let remove = |id: &str| ref_proto::Request::RemoveQueued { session_id: s.id.clone(), message_id: id.into() };
-    let r = ref_server::api::handle(&hub, &conn, remove(&id)).await.unwrap();
+    let remove = |id: &str| ref_proto::Request::RemoveQueued {
+        session_id: s.id.clone(),
+        message_id: id.into(),
+    };
+    let r = ref_server::api::handle(&hub, &conn, remove(&id))
+        .await
+        .unwrap();
     assert_eq!(r["removed"], true);
     assert_eq!(r["text"], "withdrawn while busy");
     assert_eq!(r["images"], json!([]));
@@ -600,22 +963,50 @@ async fn remove_queued_message_before_delivery() {
     assert_eq!(snap["snapshot"]["queued"], json!([]));
     // Not persisted either (saves include the queue).
     assert!(!s.persisted().messages.iter().any(|m| m.id == id));
-    assert!(!hub.store.load(&s.id).unwrap().messages.iter().any(|m| m.id == id));
+    assert!(
+        !hub.store
+            .load(&s.id)
+            .unwrap()
+            .messages
+            .iter()
+            .any(|m| m.id == id)
+    );
     // Removing again: nothing left to remove.
-    let r = ref_server::api::handle(&hub, &conn, remove(&id)).await.unwrap();
+    let r = ref_server::api::handle(&hub, &conn, remove(&id))
+        .await
+        .unwrap();
     assert_eq!(r["removed"], false);
     wait_idle(&s).await;
     // The run finishes its tool step and never sends the withdrawn prompt.
     assert_eq!(m.count(), 2);
-    assert!(!m.bodies().iter().any(|b| b.to_string().contains("withdrawn while busy")));
-    assert!(!messages(&s).iter().any(|m| m.id == id || m.raw_text().contains("withdrawn")));
-    assert!(!hub.store.load(&s.id).unwrap().messages.iter().any(|m| m.id == id));
+    assert!(
+        !m.bodies()
+            .iter()
+            .any(|b| b.to_string().contains("withdrawn while busy"))
+    );
+    assert!(
+        !messages(&s)
+            .iter()
+            .any(|m| m.id == id || m.raw_text().contains("withdrawn"))
+    );
+    assert!(
+        !hub.store
+            .load(&s.id)
+            .unwrap()
+            .messages
+            .iter()
+            .any(|m| m.id == id)
+    );
 }
 
 #[tokio::test]
 async fn remove_queued_after_delivery_removes_nothing() {
     let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Tools(vec![tool("c1", "bash", json!({"purpose": "p", "command": "sleep 0.3"}))]),
+        0 => Reply::Tools(vec![tool(
+            "c1",
+            "bash",
+            json!({"purpose": "p", "command": "sleep 0.3"}),
+        )]),
         _ => Reply::Text("ok".into()),
     }))
     .await;
@@ -625,31 +1016,69 @@ async fn remove_queued_after_delivery_removes_nothing() {
     conn.lock().hello = true;
     prompt(&hub, &s, "first");
     let s2 = s.clone();
-    wait_until("running", T, move || tool_parts(&s2).iter().any(|p| matches!(p, Part::Tool { state: ToolState::Running, .. }))).await;
-    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::Prompt { session_id: s.id.clone(), text: "second".into(), images: vec![] })
-        .await
-        .unwrap();
+    wait_until("running", T, move || {
+        tool_parts(&s2).iter().any(|p| {
+            matches!(
+                p,
+                Part::Tool {
+                    state: ToolState::Running,
+                    ..
+                }
+            )
+        })
+    })
+    .await;
+    let r = ref_server::api::handle(
+        &hub,
+        &conn,
+        ref_proto::Request::Prompt {
+            session_id: s.id.clone(),
+            text: "second".into(),
+            images: vec![],
+        },
+    )
+    .await
+    .unwrap();
     assert_eq!(r["queued"], true);
     let id = r["message_id"].as_str().unwrap().to_string();
     wait_idle(&s).await;
     // Delivered at the safe point after the tool step.
     assert!(messages(&s).iter().any(|m| m.id == id));
-    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::RemoveQueued { session_id: s.id.clone(), message_id: id.clone() })
-        .await
-        .unwrap();
+    let r = ref_server::api::handle(
+        &hub,
+        &conn,
+        ref_proto::Request::RemoveQueued {
+            session_id: s.id.clone(),
+            message_id: id.clone(),
+        },
+    )
+    .await
+    .unwrap();
     assert_eq!(r["removed"], false);
     // The delivered message stays in the conversation.
     assert_eq!(messages(&s).iter().filter(|m| m.id == id).count(), 1);
     assert!(m.bodies()[1].to_string().contains("second"));
     // Unknown session: error.
-    let e = ref_server::api::handle(&hub, &conn, ref_proto::Request::RemoveQueued { session_id: "nope".into(), message_id: id }).await;
+    let e = ref_server::api::handle(
+        &hub,
+        &conn,
+        ref_proto::Request::RemoveQueued {
+            session_id: "nope".into(),
+            message_id: id,
+        },
+    )
+    .await;
     assert!(e.is_err());
 }
 
 #[tokio::test]
 async fn busy_since_is_the_run_start_and_cleared_when_idle() {
     let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Tools(vec![tool("c1", "bash", json!({"purpose": "p", "command": "sleep 0.3"}))]),
+        0 => Reply::Tools(vec![tool(
+            "c1",
+            "bash",
+            json!({"purpose": "p", "command": "sleep 0.3"}),
+        )]),
         _ => Reply::Text("ok".into()),
     }))
     .await;
@@ -661,10 +1090,17 @@ async fn busy_since_is_the_run_start_and_cleared_when_idle() {
     let started = s.info().busy_since.expect("set when the run starts");
     assert!(started >= before && started <= ref_proto::now_ms());
     let s2 = s.clone();
-    wait_until("running", T, move || s2.info().status == SessionStatus::Running).await;
+    wait_until("running", T, move || {
+        s2.info().status == SessionStatus::Running
+    })
+    .await;
     // Kept across status changes within the run; visible in the live list; never persisted.
     assert_eq!(s.info().busy_since, Some(started));
-    assert!(hub.infos().iter().any(|i| i.id == s.id && i.busy_since == Some(started)));
+    assert!(
+        hub.infos()
+            .iter()
+            .any(|i| i.id == s.id && i.busy_since == Some(started))
+    );
     assert_eq!(s.persisted().info.busy_since, None);
     wait_idle(&s).await;
     assert_eq!(s.info().busy_since, None);
@@ -698,10 +1134,19 @@ async fn create_session_must_report_and_close_rules() {
     wait_idle(&parent).await;
     let h2 = hub.clone();
     wait_until("child exists", T, move || h2.sessions().len() == 2).await;
-    let child = hub.sessions().into_iter().find(|x| x.id != parent.id).unwrap();
+    let child = hub
+        .sessions()
+        .into_iter()
+        .find(|x| x.id != parent.id)
+        .unwrap();
     // Child runs, stops without reporting, gets a reminder, then reports.
     let p2 = parent.clone();
-    wait_until("parent got report", T, move || messages(&p2).iter().any(|m| m.raw_text().contains("result: 42"))).await;
+    wait_until("parent got report", T, move || {
+        messages(&p2)
+            .iter()
+            .any(|m| m.raw_text().contains("result: 42"))
+    })
+    .await;
     wait_idle(&child).await;
     let cm = messages(&child);
     assert!(matches!(&cm[0].source, MessageSource::Spawn { from_name, .. } if from_name == "boss"));
@@ -716,29 +1161,79 @@ async fn create_session_must_report_and_close_rules() {
         assert!(child.lock().reported);
     }
     // Worker agent can't spawn: no spawn tools sent for it.
-    let worker_bodies: Vec<_> = m.bodies().into_iter().filter(|b| b["messages"][1]["content"].to_string().contains("[Session created by")).collect();
+    let worker_bodies: Vec<_> = m
+        .bodies()
+        .into_iter()
+        .filter(|b| {
+            b["messages"][1]["content"]
+                .to_string()
+                .contains("[Session created by")
+        })
+        .collect();
     assert!(!worker_bodies.is_empty());
-    assert!(worker_bodies.iter().all(|b| !b["tools"].to_string().contains("create_session")));
-    assert!(worker_bodies.iter().all(|b| !b["messages"][0]["content"].as_str().unwrap().contains("Agents available")));
+    assert!(
+        worker_bodies
+            .iter()
+            .all(|b| !b["tools"].to_string().contains("create_session"))
+    );
+    assert!(worker_bodies.iter().all(|b| {
+        !b["messages"][0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Agents available")
+    }));
 
     wait_idle(&parent).await;
     // close_session refuses foreground sessions.
     child.lock().info.attached = 1;
-    let e = ref_server::peers::run(&hub, &parent, "close_session", &json!({"session": "worker"})).await;
+    let e = ref_server::peers::run(
+        &hub,
+        &parent,
+        "close_session",
+        &json!({"session": "worker"}),
+    )
+    .await;
     assert!(e.is_error);
-    assert_eq!(e.text, "Cannot close \"worker\": it is a foreground session (a user is attached).");
+    assert_eq!(
+        e.text,
+        "Cannot close \"worker\": it is a foreground session (a user is attached)."
+    );
     // Self close refused.
-    let e = ref_server::peers::run(&hub, &parent, "close_session", &json!({"session": parent.id.clone()})).await;
+    let e = ref_server::peers::run(
+        &hub,
+        &parent,
+        "close_session",
+        &json!({"session": parent.id.clone()}),
+    )
+    .await;
     assert!(e.is_error);
     child.lock().info.attached = 0;
-    let ok = ref_server::peers::run(&hub, &parent, "close_session", &json!({"session": "worker"})).await;
+    let ok = ref_server::peers::run(
+        &hub,
+        &parent,
+        "close_session",
+        &json!({"session": "worker"}),
+    )
+    .await;
     assert!(!ok.is_error, "{}", ok.text);
     assert_eq!(hub.sessions().len(), 1);
     assert!(hub.store.exists(&child.id));
     // Name collision on create_session tool -> suffix.
-    let r = ref_server::peers::run(&hub, &parent, "create_session", &json!({"name": "boss", "agent": "worker", "prompt": "x", "must_report": false})).await;
+    let r = ref_server::peers::run(
+        &hub,
+        &parent,
+        "create_session",
+        &json!({"name": "boss", "agent": "worker", "prompt": "x", "must_report": false}),
+    )
+    .await;
     assert!(r.text.contains("\"boss-2\""), "{}", r.text);
-    let r = ref_server::peers::run(&hub, &parent, "create_session", &json!({"name": "x", "agent": "nope", "prompt": "x"})).await;
+    let r = ref_server::peers::run(
+        &hub,
+        &parent,
+        "create_session",
+        &json!({"name": "x", "agent": "nope", "prompt": "x"}),
+    )
+    .await;
     assert!(r.is_error);
 }
 
@@ -804,7 +1299,13 @@ async fn load_from_history_marks_unfinished_tools_cancelled() {
     hub.remove_session(&s.id);
     let loaded = ref_server::ops::get_or_load(&hub, &s.id).await.unwrap();
     assert!(loaded.info().live);
-    assert!(matches!(tool_parts(&loaded).last().unwrap(), Part::Tool { state: ToolState::Cancelled, .. }));
+    assert!(matches!(
+        tool_parts(&loaded).last().unwrap(),
+        Part::Tool {
+            state: ToolState::Cancelled,
+            ..
+        }
+    ));
 }
 
 #[tokio::test]
@@ -832,13 +1333,19 @@ async fn auto_compaction_when_threshold_reached() {
     assert_eq!(msgs[3].raw_text(), "two");
     assert_eq!(last_text(&s), "second");
     let b = m.bodies();
-    assert!(b[1].to_string().contains("Summarize the conversation above"));
+    assert!(
+        b[1].to_string()
+            .contains("Summarize the conversation above")
+    );
     assert!(!b[1].to_string().contains("\"two\""));
     // Consecutive user messages are merged by the chat converter: summary + "two".
     let third = non_system(&b[2]);
     assert_eq!(third.len(), 1, "{third:#?}");
     let c = third[0]["content"].as_str().unwrap();
-    assert!(c.starts_with("[Context compacted.") && c.contains("auto summary") && c.ends_with("two"), "{c}");
+    assert!(
+        c.starts_with("[Context compacted.") && c.contains("auto summary") && c.ends_with("two"),
+        "{c}"
+    );
 }
 
 #[tokio::test]
@@ -854,28 +1361,62 @@ async fn undo_last_prompt_or_from_given_message() {
     let conn = hub.add_conn();
     conn.lock().hello = true;
     // Default: the last human prompt and everything after it.
-    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::Undo { session_id: s.id.clone(), message_id: None }).await.unwrap();
+    let r = ref_server::api::handle(
+        &hub,
+        &conn,
+        ref_proto::Request::Undo {
+            session_id: s.id.clone(),
+            message_id: None,
+        },
+    )
+    .await
+    .unwrap();
     assert_eq!(r["text"], "three");
     assert_eq!(messages(&s).len(), 4);
     // From a specific message: removes it and everything after.
     let first = messages(&s)[0].id.clone();
-    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::Undo { session_id: s.id.clone(), message_id: Some(first.clone()) }).await.unwrap();
+    let r = ref_server::api::handle(
+        &hub,
+        &conn,
+        ref_proto::Request::Undo {
+            session_id: s.id.clone(),
+            message_id: Some(first.clone()),
+        },
+    )
+    .await
+    .unwrap();
     assert_eq!(r["text"], "one");
     assert!(messages(&s).is_empty());
     assert!(hub.store.load(&s.id).unwrap().messages.is_empty());
-    let e = ref_server::api::handle(&hub, &conn, ref_proto::Request::Undo { session_id: s.id.clone(), message_id: Some(first) }).await;
+    let e = ref_server::api::handle(
+        &hub,
+        &conn,
+        ref_proto::Request::Undo {
+            session_id: s.id.clone(),
+            message_id: Some(first),
+        },
+    )
+    .await;
     assert!(e.is_err());
 }
 
 #[tokio::test]
 async fn todo_tool_replaces_list_and_validates() {
     let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Tools(vec![tool("t1", "todo", json!({"purpose": "p", "todos": [
-            {"content": "Read code", "status": "completed"},
-            {"content": "Fix bug", "status": "in_progress"},
-            {"content": "Run tests", "status": "pending"}
-        ]}))]),
-        1 => Reply::Tools(vec![tool("t2", "todo", json!({"purpose": "p", "todos": [{"content": "x", "status": "bogus"}]}))]),
+        0 => Reply::Tools(vec![tool(
+            "t1",
+            "todo",
+            json!({"purpose": "p", "todos": [
+                {"content": "Read code", "status": "completed"},
+                {"content": "Fix bug", "status": "in_progress"},
+                {"content": "Run tests", "status": "pending"}
+            ]}),
+        )]),
+        1 => Reply::Tools(vec![tool(
+            "t2",
+            "todo",
+            json!({"purpose": "p", "todos": [{"content": "x", "status": "bogus"}]}),
+        )]),
         _ => Reply::Text("done".into()),
     }))
     .await;
@@ -889,9 +1430,23 @@ async fn todo_tool_replaces_list_and_validates() {
     assert_eq!(todos[1].status, ref_proto::TodoStatus::InProgress);
     let parts = tool_parts(&s);
     match (&parts[0], &parts[1]) {
-        (Part::Tool { output: Some(a), state: sa, .. }, Part::Tool { output: Some(b), state: sb, .. }) => {
+        (
+            Part::Tool {
+                output: Some(a),
+                state: sa,
+                ..
+            },
+            Part::Tool {
+                output: Some(b),
+                state: sb,
+                ..
+            },
+        ) => {
             assert_eq!(*sa, ToolState::Done);
-            assert!(a.starts_with("Todo list updated (1/3 completed):") && a.contains("[~] Fix bug"), "{a}");
+            assert!(
+                a.starts_with("Todo list updated (1/3 completed):") && a.contains("[~] Fix bug"),
+                "{a}"
+            );
             assert_eq!(*sb, ToolState::Error);
             assert!(b.contains("invalid"), "{b}");
         }
@@ -914,14 +1469,19 @@ async fn set_cwd_switches_directory_and_tells_the_model() {
     let s = session(&hub, &work, "main", "build").await;
     let conn = hub.add_conn();
     conn.lock().hello = true;
-    let set = |path: &str| ref_proto::Request::SetCwd { session_id: s.id.clone(), path: path.into() };
+    let set = |path: &str| ref_proto::Request::SetCwd {
+        session_id: s.id.clone(),
+        path: path.into(),
+    };
     let old = s.info().cwd;
 
     // Busy: rejected, nothing changes.
     prompt(&hub, &s, "go");
     let s2 = s.clone();
     wait_until("partial text", T, move || last_text(&s2) == "thinking").await;
-    let e = ref_server::api::handle(&hub, &conn, set("sub dir")).await.unwrap_err();
+    let e = ref_server::api::handle(&hub, &conn, set("sub dir"))
+        .await
+        .unwrap_err();
     assert!(e.contains("busy"), "{e}");
     assert_eq!(s.info().cwd, old);
     ref_server::engine::abort(&hub, &s, true);
@@ -929,13 +1489,22 @@ async fn set_cwd_switches_directory_and_tells_the_model() {
     let calls = m.count();
 
     // Relative to the current directory; a reminder is appended without an LLM turn.
-    let r = ref_server::api::handle(&hub, &conn, set("sub dir")).await.unwrap();
-    let new = std::fs::canonicalize(work.join("sub dir")).unwrap().to_string_lossy().to_string();
+    let r = ref_server::api::handle(&hub, &conn, set("sub dir"))
+        .await
+        .unwrap();
+    let new = std::fs::canonicalize(work.join("sub dir"))
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
     assert_eq!(r["session"]["cwd"], json!(new));
     assert_eq!(s.info().cwd, new);
     let last = messages(&s).last().cloned().unwrap();
     assert_eq!(last.source, MessageSource::Reminder);
-    assert!(last.raw_text().contains(&old) && last.raw_text().contains(&new), "{}", last.raw_text());
+    assert!(
+        last.raw_text().contains(&old) && last.raw_text().contains(&new),
+        "{}",
+        last.raw_text()
+    );
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(m.count(), calls, "no LLM turn");
     assert_eq!(s.info().status, SessionStatus::Idle);
@@ -943,18 +1512,34 @@ async fn set_cwd_switches_directory_and_tells_the_model() {
 
     // Same directory again: no second reminder. Missing directory: error.
     let n = messages(&s).len();
-    ref_server::api::handle(&hub, &conn, set(".")).await.unwrap();
+    ref_server::api::handle(&hub, &conn, set("."))
+        .await
+        .unwrap();
     assert_eq!(messages(&s).len(), n);
-    let e = ref_server::api::handle(&hub, &conn, set("missing")).await.unwrap_err();
+    let e = ref_server::api::handle(&hub, &conn, set("missing"))
+        .await
+        .unwrap_err();
     assert!(e.contains("does not exist"), "{e}");
-    assert!(ref_server::api::handle(&hub, &conn, set("  ")).await.is_err());
+    assert!(
+        ref_server::api::handle(&hub, &conn, set("  "))
+            .await
+            .is_err()
+    );
 
     // The next turn sees the new directory in the system prompt and the reminder.
     prompt(&hub, &s, "next");
     wait_idle(&s).await;
-    let body = m.bodies().into_iter().rev().find(|b| b.get("tools").is_some()).unwrap();
+    let body = m
+        .bodies()
+        .into_iter()
+        .rev()
+        .find(|b| b.get("tools").is_some())
+        .unwrap();
     let all = body["messages"].to_string();
-    assert!(body["messages"][0]["content"].to_string().contains(&new), "system prompt uses the new cwd");
+    assert!(
+        body["messages"][0]["content"].to_string().contains(&new),
+        "system prompt uses the new cwd"
+    );
     assert!(all.contains("changed the working directory"), "{all}");
 }
 
@@ -982,7 +1567,15 @@ async fn queue_changes_reach_attached_connection() {
             .drain()
             .into_iter()
             .filter_map(|f| match f {
-                ref_proto::ServerFrame::Event { event: SessionEvent::Queue { messages }, .. } => Some(messages.iter().map(|m| (m.raw_text(), m.source.clone())).collect()),
+                ref_proto::ServerFrame::Event {
+                    event: SessionEvent::Queue { messages },
+                    ..
+                } => Some(
+                    messages
+                        .iter()
+                        .map(|m| (m.raw_text(), m.source.clone()))
+                        .collect(),
+                ),
                 _ => None,
             })
             .collect()
@@ -995,10 +1588,23 @@ async fn queue_changes_reach_attached_connection() {
     let q = queues(&conn);
     assert_eq!(q.len(), 2, "{q:?}");
     assert_eq!(q[1].len(), 2);
-    assert!(q[1][0].0.contains("from the worker") && matches!(&q[1][0].1, MessageSource::Peer { from_name, msg_id, .. } if from_name == "worker" && *msg_id == mid));
+    assert!(
+        q[1][0].0.contains("from the worker")
+            && matches!(&q[1][0].1, MessageSource::Peer { from_name, msg_id, .. } if from_name == "worker" && *msg_id == mid)
+    );
     assert_eq!(q[1][1], ("and me".to_string(), MessageSource::Human));
     // The snapshot lists every source too.
-    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::Attach { session_id: s.id.clone(), foreground: true, limit: None }).await.unwrap();
+    let r = ref_server::api::handle(
+        &hub,
+        &conn,
+        ref_proto::Request::Attach {
+            session_id: s.id.clone(),
+            foreground: true,
+            limit: None,
+        },
+    )
+    .await
+    .unwrap();
     assert_eq!(r["snapshot"]["queued"].as_array().unwrap().len(), 2);
     // Abort: the queue is delivered at the end of the run and announced as empty.
     let _ = conn.out.drain();
@@ -1011,12 +1617,22 @@ async fn queue_changes_reach_attached_connection() {
 #[tokio::test]
 async fn frontends_get_image_stubs_and_undo_returns_the_bytes() {
     let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Tools(vec![tool("c1", "read", json!({"purpose": "p", "path": "shot.png"}))]),
+        0 => Reply::Tools(vec![tool(
+            "c1",
+            "read",
+            json!({"purpose": "p", "path": "shot.png"}),
+        )]),
         _ => Reply::Text("seen".into()),
     }))
     .await;
     let mut cfg = config(&m.url);
-    cfg.providers.get_mut("mock").unwrap().models.get_mut("m").unwrap().images = true;
+    cfg.providers
+        .get_mut("mock")
+        .unwrap()
+        .models
+        .get_mut("m")
+        .unwrap()
+        .images = true;
     let (hub, work) = hub(cfg, "image-stubs");
     let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
     png.extend_from_slice(b"tool screenshot bytes");
@@ -1028,8 +1644,16 @@ async fn frontends_get_image_stubs_and_undo_returns_the_bytes() {
         c.hello = true;
         c.fg.insert(s.id.clone());
     }
-    let pasted = ref_proto::ImageData { mime: "image/png".into(), data: "UGFzdGVkSW1hZ2VCeXRlcw==".into(), ..Default::default() };
-    let req = ref_proto::Request::Prompt { session_id: s.id.clone(), text: "look [Image 1]".into(), images: vec![pasted.clone()] };
+    let pasted = ref_proto::ImageData {
+        mime: "image/png".into(),
+        data: "UGFzdGVkSW1hZ2VCeXRlcw==".into(),
+        ..Default::default()
+    };
+    let req = ref_proto::Request::Prompt {
+        session_id: s.id.clone(),
+        text: "look [Image 1]".into(),
+        images: vec![pasted.clone()],
+    };
     ref_server::api::handle(&hub, &conn, req).await.unwrap();
     wait_idle(&s).await;
     // The session keeps the bytes (the model gets them) ...
@@ -1043,14 +1667,29 @@ async fn frontends_get_image_stubs_and_undo_returns_the_bytes() {
     assert!(!tool_img.data.is_empty());
     let bodies = m.bodies();
     assert!(bodies.iter().any(|b| b.to_string().contains(&pasted.data)));
-    assert!(bodies.iter().any(|b| b.to_string().contains(&tool_img.data)));
+    assert!(
+        bodies
+            .iter()
+            .any(|b| b.to_string().contains(&tool_img.data))
+    );
     // ... but neither events nor the snapshot carry them to frontends.
     let events = serde_json::to_string(&conn.out.drain()).unwrap();
     assert!(events.contains("image/png"), "image stubs are still sent");
     assert!(!events.contains(&pasted.data) && !events.contains(&tool_img.data));
-    let snap = ref_server::api::handle(&hub, &conn, ref_proto::Request::Attach { session_id: s.id.clone(), foreground: true, limit: None }).await.unwrap();
+    let snap = ref_server::api::handle(
+        &hub,
+        &conn,
+        ref_proto::Request::Attach {
+            session_id: s.id.clone(),
+            foreground: true,
+            limit: None,
+        },
+    )
+    .await
+    .unwrap();
     // Stubs carry an id (and the decoded size); GetImage returns the bytes.
-    let msgs: Vec<ref_proto::Message> = serde_json::from_value(snap["snapshot"]["messages"].clone()).unwrap();
+    let msgs: Vec<ref_proto::Message> =
+        serde_json::from_value(snap["snapshot"]["messages"].clone()).unwrap();
     let stubs: Vec<ref_proto::ImageData> = msgs
         .iter()
         .flat_map(|m| m.parts.iter())
@@ -1064,33 +1703,95 @@ async fn frontends_get_image_stubs_and_undo_returns_the_bytes() {
     assert!(stubs.iter().all(|i| i.is_stub() && i.id.is_some()));
     assert_eq!(stubs[0].size, Some(16), "\"PastedImageBytes\"");
     assert_eq!(stubs[1].size, Some(png.len() as u64));
-    let get = |id: &str| ref_proto::Request::GetImage { session_id: s.id.clone(), image_id: id.into() };
+    let get = |id: &str| ref_proto::Request::GetImage {
+        session_id: s.id.clone(),
+        image_id: id.into(),
+    };
     for (stub, data) in stubs.iter().zip([&pasted.data, &tool_img.data]) {
-        let r = ref_server::api::handle(&hub, &conn, get(stub.id.as_deref().unwrap())).await.unwrap();
+        let r = ref_server::api::handle(&hub, &conn, get(stub.id.as_deref().unwrap()))
+            .await
+            .unwrap();
         assert_eq!(r["image"]["data"], data.as_str());
         assert_eq!(r["image"]["mime"], "image/png");
     }
-    assert!(ref_server::api::handle(&hub, &conn, get("nonsense")).await.is_err());
-    assert!(ref_server::api::handle(&hub, &conn, get(&format!("{}:0:5", msgs[0].id))).await.is_err());
+    assert!(
+        ref_server::api::handle(&hub, &conn, get("nonsense"))
+            .await
+            .is_err()
+    );
+    assert!(
+        ref_server::api::handle(&hub, &conn, get(&format!("{}:0:5", msgs[0].id)))
+            .await
+            .is_err()
+    );
     let snap = snap.to_string();
-    assert!(snap.contains("image/png") && !snap.contains(&pasted.data) && !snap.contains(&tool_img.data));
-    assert!(hub.store.load(&s.id).unwrap().messages.iter().any(|m| serde_json::to_string(m).unwrap().contains(&pasted.data)), "saved with bytes");
+    assert!(
+        snap.contains("image/png")
+            && !snap.contains(&pasted.data)
+            && !snap.contains(&tool_img.data)
+    );
+    assert!(
+        hub.store
+            .load(&s.id)
+            .unwrap()
+            .messages
+            .iter()
+            .any(|m| serde_json::to_string(m).unwrap().contains(&pasted.data)),
+        "saved with bytes"
+    );
     // Session closed: the image is read from the store.
     ref_server::ops::close_session(&hub, &s).await;
     assert!(hub.session(&s.id).is_none());
-    let r = ref_server::api::handle(&hub, &conn, get(stubs[1].id.as_deref().unwrap())).await.unwrap();
+    let r = ref_server::api::handle(&hub, &conn, get(stubs[1].id.as_deref().unwrap()))
+        .await
+        .unwrap();
     assert_eq!(r["image"]["data"], tool_img.data.as_str());
-    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::Attach { session_id: s.id.clone(), foreground: true, limit: None }).await.unwrap();
+    let r = ref_server::api::handle(
+        &hub,
+        &conn,
+        ref_proto::Request::Attach {
+            session_id: s.id.clone(),
+            foreground: true,
+            limit: None,
+        },
+    )
+    .await
+    .unwrap();
     assert_eq!(r["snapshot"]["info"]["id"], s.id.as_str());
     let s = hub.session(&s.id).expect("live again");
     // A stub sent back as a prompt image is rejected.
-    let stub = ref_proto::ImageData { mime: "image/png".into(), data: String::new(), ..Default::default() };
-    let e = ref_server::api::handle(&hub, &conn, ref_proto::Request::Prompt { session_id: s.id.clone(), text: "x".into(), images: vec![stub] }).await;
+    let stub = ref_proto::ImageData {
+        mime: "image/png".into(),
+        data: String::new(),
+        ..Default::default()
+    };
+    let e = ref_server::api::handle(
+        &hub,
+        &conn,
+        ref_proto::Request::Prompt {
+            session_id: s.id.clone(),
+            text: "x".into(),
+            images: vec![stub],
+        },
+    )
+    .await;
     assert!(e.is_err());
     // Undo returns the prompt with its image bytes.
-    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::Undo { session_id: s.id.clone(), message_id: None }).await.unwrap();
+    let r = ref_server::api::handle(
+        &hub,
+        &conn,
+        ref_proto::Request::Undo {
+            session_id: s.id.clone(),
+            message_id: None,
+        },
+    )
+    .await
+    .unwrap();
     assert_eq!(r["text"], "look [Image 1]");
-    assert_eq!(r["images"], json!([{"mime": "image/png", "data": pasted.data}]));
+    assert_eq!(
+        r["images"],
+        json!([{"mime": "image/png", "data": pasted.data}])
+    );
 }
 
 #[tokio::test]
@@ -1103,48 +1804,104 @@ async fn history_is_served_in_pages() {
     {
         let mut st = s.lock();
         for i in 0..250 {
-            st.messages.push(ref_server::session::user_message(MessageSource::Human, format!("p{i}"), vec![]));
+            st.messages.push(ref_server::session::user_message(
+                MessageSource::Human,
+                format!("p{i}"),
+                vec![],
+            ));
         }
     }
     let texts = |v: &serde_json::Value| -> Vec<String> {
         let msgs: Vec<ref_proto::Message> = serde_json::from_value(v.clone()).unwrap();
         msgs.iter().map(|m| m.raw_text()).collect()
     };
-    let attach = |limit| ref_proto::Request::Attach { session_id: s.id.clone(), foreground: true, limit };
+    let attach = |limit| ref_proto::Request::Attach {
+        session_id: s.id.clone(),
+        foreground: true,
+        limit,
+    };
     // Newest page first (default 100).
-    let r = ref_server::api::handle(&hub, &conn, attach(None)).await.unwrap();
+    let r = ref_server::api::handle(&hub, &conn, attach(None))
+        .await
+        .unwrap();
     let page = texts(&r["snapshot"]["messages"]);
-    assert_eq!((page.len(), page[0].as_str(), page[99].as_str()), (100, "p150", "p249"));
+    assert_eq!(
+        (page.len(), page[0].as_str(), page[99].as_str()),
+        (100, "p150", "p249")
+    );
     assert_eq!(r["snapshot"]["more_before"], true);
     // Older pages before a given message, down to the start.
     let first_id = |msgs: &serde_json::Value| msgs[0]["id"].as_str().unwrap().to_string();
-    let older = |before: String, limit| ref_proto::Request::Messages { session_id: s.id.clone(), before, limit };
-    let r2 = ref_server::api::handle(&hub, &conn, older(first_id(&r["snapshot"]["messages"]), None)).await.unwrap();
+    let older = |before: String, limit| ref_proto::Request::Messages {
+        session_id: s.id.clone(),
+        before,
+        limit,
+    };
+    let r2 = ref_server::api::handle(
+        &hub,
+        &conn,
+        older(first_id(&r["snapshot"]["messages"]), None),
+    )
+    .await
+    .unwrap();
     let page = texts(&r2["messages"]);
-    assert_eq!((page.len(), page[0].as_str(), page[99].as_str()), (100, "p50", "p149"));
+    assert_eq!(
+        (page.len(), page[0].as_str(), page[99].as_str()),
+        (100, "p50", "p149")
+    );
     assert_eq!(r2["more_before"], true);
-    let r3 = ref_server::api::handle(&hub, &conn, older(first_id(&r2["messages"]), Some(500))).await.unwrap();
+    let r3 = ref_server::api::handle(&hub, &conn, older(first_id(&r2["messages"]), Some(500)))
+        .await
+        .unwrap();
     assert_eq!(texts(&r3["messages"]).len(), 50);
     assert_eq!(r3["more_before"], false);
     // Limits are clamped; unknown anchors are errors.
-    let r = ref_server::api::handle(&hub, &conn, attach(Some(0))).await.unwrap();
+    let r = ref_server::api::handle(&hub, &conn, attach(Some(0)))
+        .await
+        .unwrap();
     assert_eq!(texts(&r["snapshot"]["messages"]), ["p249"]);
-    assert!(ref_server::api::handle(&hub, &conn, older("nope".into(), None)).await.is_err());
+    assert!(
+        ref_server::api::handle(&hub, &conn, older("nope".into(), None))
+            .await
+            .is_err()
+    );
     // Large messages: the page stops at about 1 MiB.
     {
         let mut st = s.lock();
         for i in 0..20 {
-            st.messages.push(ref_server::session::user_message(MessageSource::Human, format!("big{i} {}", "x".repeat(200_000)), vec![]));
+            st.messages.push(ref_server::session::user_message(
+                MessageSource::Human,
+                format!("big{i} {}", "x".repeat(200_000)),
+                vec![],
+            ));
         }
     }
-    let r = ref_server::api::handle(&hub, &conn, attach(None)).await.unwrap();
+    let r = ref_server::api::handle(&hub, &conn, attach(None))
+        .await
+        .unwrap();
     let n = r["snapshot"]["messages"].as_array().unwrap().len();
     assert!((5..=7).contains(&n), "{n}");
     // Reset events (undo) carry the newest page only.
     let _ = conn.out.drain();
-    ref_server::api::handle(&hub, &conn, ref_proto::Request::Undo { session_id: s.id.clone(), message_id: None }).await.unwrap();
+    ref_server::api::handle(
+        &hub,
+        &conn,
+        ref_proto::Request::Undo {
+            session_id: s.id.clone(),
+            message_id: None,
+        },
+    )
+    .await
+    .unwrap();
     let reset = conn.out.drain().into_iter().find_map(|f| match f {
-        ref_proto::ServerFrame::Event { event: SessionEvent::Reset { messages, more_before }, .. } => Some((messages.len(), more_before)),
+        ref_proto::ServerFrame::Event {
+            event:
+                SessionEvent::Reset {
+                    messages,
+                    more_before,
+                },
+            ..
+        } => Some((messages.len(), more_before)),
         _ => None,
     });
     let (len, more) = reset.expect("reset event");
@@ -1160,16 +1917,33 @@ async fn stated_image_limit_is_learned_and_the_request_resent() {
     }))
     .await;
     let mut cfg = config(&m.url);
-    cfg.providers.get_mut("mock").unwrap().models.get_mut("m").unwrap().images = true;
+    cfg.providers
+        .get_mut("mock")
+        .unwrap()
+        .models
+        .get_mut("m")
+        .unwrap()
+        .images = true;
     let (hub, work) = hub(cfg, "image-limit");
     let s = session(&hub, &work, "main", "build").await;
     let conn = hub.add_conn();
     conn.lock().hello = true;
     let mut png = Vec::new();
-    let img = image::RgbImage::from_fn(1200, 300, |x, y| image::Rgb([(x % 256) as u8, (y % 256) as u8, 7]));
-    image::DynamicImage::ImageRgb8(img).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
-    let pasted = ref_proto::ImageData::new("image/png", base64::engine::general_purpose::STANDARD.encode(&png));
-    let req = ref_proto::Request::Prompt { session_id: s.id.clone(), text: "look".into(), images: vec![pasted.clone()] };
+    let img = image::RgbImage::from_fn(1200, 300, |x, y| {
+        image::Rgb([(x % 256) as u8, (y % 256) as u8, 7])
+    });
+    image::DynamicImage::ImageRgb8(img)
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .unwrap();
+    let pasted = ref_proto::ImageData::new(
+        "image/png",
+        base64::engine::general_purpose::STANDARD.encode(&png),
+    );
+    let req = ref_proto::Request::Prompt {
+        session_id: s.id.clone(),
+        text: "look".into(),
+        images: vec![pasted.clone()],
+    };
     ref_server::api::handle(&hub, &conn, req).await.unwrap();
     wait_idle(&s).await;
     assert_eq!(last_text(&s), "seen");
@@ -1180,11 +1954,20 @@ async fn stated_image_limit_is_learned_and_the_request_resent() {
         let s = b.to_string();
         let start = s.find("base64,").expect("image in request") + 7;
         let data = &s[start..start + s[start..].find('"').unwrap()];
-        let img = image::load_from_memory(&base64::engine::general_purpose::STANDARD.decode(data).unwrap()).unwrap();
+        let img = image::load_from_memory(
+            &base64::engine::general_purpose::STANDARD
+                .decode(data)
+                .unwrap(),
+        )
+        .unwrap();
         (img.width(), img.height())
     };
     assert_eq!(sent(&bodies[0]), (1200, 300));
     assert_eq!(sent(&bodies[1]), (1000, 250));
     // The session keeps the original.
-    assert!(serde_json::to_string(&messages(&s)).unwrap().contains(&pasted.data));
+    assert!(
+        serde_json::to_string(&messages(&s))
+            .unwrap()
+            .contains(&pasted.data)
+    );
 }

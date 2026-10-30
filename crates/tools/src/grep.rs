@@ -97,7 +97,12 @@ fn search_file(path: &Path, re: &Regex, context: usize, remaining: usize) -> Opt
     }
     let matches = hits.len();
     drop(lines);
-    Some(FileResult { path: path.to_path_buf(), text, rows, matches })
+    Some(FileResult {
+        path: path.to_path_buf(),
+        text,
+        rows,
+        matches,
+    })
 }
 
 fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
@@ -108,14 +113,21 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let literal = util::opt_bool(input, "literal")?.unwrap_or(false);
     let ignore_case = util::opt_bool(input, "ignore_case")?.unwrap_or(false);
     let context = (util::opt_u64(input, "context")?.unwrap_or(0) as usize).min(MAX_CONTEXT);
-    let limit = (util::opt_u64(input, "limit")?.unwrap_or(DEFAULT_LIMIT as u64) as usize).clamp(1, MAX_LIMIT);
+    let limit = (util::opt_u64(input, "limit")?.unwrap_or(DEFAULT_LIMIT as u64) as usize)
+        .clamp(1, MAX_LIMIT);
     let glob = util::opt_str(input, "glob")?.filter(|g| !g.trim().is_empty());
-    let src = if literal { regex::escape(&pattern) } else { pattern.clone() };
+    let src = if literal {
+        regex::escape(&pattern)
+    } else {
+        pattern.clone()
+    };
     let re = RegexBuilder::new(&src)
         .case_insensitive(ignore_case)
         .size_limit(64 * 1024 * 1024)
         .build()
-        .map_err(|e| anyhow!("Invalid regex: {e}. Set `literal: true` to search for plain text."))?;
+        .map_err(|e| {
+            anyhow!("Invalid regex: {e}. Set `literal: true` to search for plain text.")
+        })?;
 
     let root = match util::opt_str(input, "path")? {
         Some(p) if !p.trim().is_empty() => util::resolve_path(&ctx.cwd, &util::unwrap_header(&p).0),
@@ -133,7 +145,10 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     };
 
     // Search in sorted order, in parallel batches, stopping at the match limit.
-    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(16);
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(16);
     let mut results: Vec<FileResult> = Vec::new();
     let mut total_matches = 0usize;
     let mut hit_limit = false;
@@ -157,9 +172,13 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
                     })
                 })
                 .collect();
-            handles.into_iter().map(|h| h.join().unwrap_or_default()).collect()
+            handles
+                .into_iter()
+                .map(|h| h.join().unwrap_or_default())
+                .collect()
         });
-        let mut batch_results: Vec<(usize, FileResult)> = per_thread.into_iter().flatten().collect();
+        let mut batch_results: Vec<(usize, FileResult)> =
+            per_thread.into_iter().flatten().collect();
         batch_results.sort_by_key(|(i, _)| *i);
         for (_, mut r) in batch_results {
             let room = limit - total_matches;
@@ -230,7 +249,9 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         out.push_str(&notices.join("\n"));
     }
     let mut o = ToolOutput::ok(out);
-    o.meta = Some(json!({"matches": total_matches, "files": results.len(), "truncated": hit_limit || bytes_limited}));
+    o.meta = Some(
+        json!({"matches": total_matches, "files": results.len(), "truncated": hit_limit || bytes_limited}),
+    );
     Ok(o)
 }
 
@@ -252,7 +273,11 @@ fn truncate_rows(r: &mut FileResult, keep: usize) {
     r.matches = count;
 }
 
-pub(crate) fn collect_files(root: &Path, glob: Option<&str>, ctx: &ToolCtx) -> Result<Vec<PathBuf>> {
+pub(crate) fn collect_files(
+    root: &Path,
+    glob: Option<&str>,
+    ctx: &ToolCtx,
+) -> Result<Vec<PathBuf>> {
     let mut wb = WalkBuilder::new(root);
     wb.hidden(false)
         .git_ignore(true)
@@ -292,7 +317,11 @@ mod tests {
     fn setup() -> (crate::util::test_support::TempDir, ToolCtx) {
         let d = temp_dir("grep");
         std::fs::create_dir_all(d.join("src/nested")).unwrap();
-        std::fs::write(d.join("src/a.rs"), "fn main() {\n    let x = 1;\n    foo(x);\n}\n").unwrap();
+        std::fs::write(
+            d.join("src/a.rs"),
+            "fn main() {\n    let x = 1;\n    foo(x);\n}\n",
+        )
+        .unwrap();
         std::fs::write(d.join("src/nested/b.rs"), "// foo here\nbar\nFOO\n").unwrap();
         std::fs::write(d.join("notes.md"), "foo in markdown\n").unwrap();
         std::fs::write(d.join(".hidden.rs"), "foo hidden\n").unwrap();
@@ -326,8 +355,17 @@ mod tests {
     #[tokio::test]
     async fn context_case_literal_limit() {
         let (_d, c) = setup();
-        let o = crate::execute("grep", json!({"pattern": "foo", "path": "src/nested/b.rs", "ignore_case": true, "context": 1}), &c).await;
-        assert!(o.text.ends_with("*1:// foo here\n 2:bar\n*3:FOO"), "{}", o.text);
+        let o = crate::execute(
+            "grep",
+            json!({"pattern": "foo", "path": "src/nested/b.rs", "ignore_case": true, "context": 1}),
+            &c,
+        )
+        .await;
+        assert!(
+            o.text.ends_with("*1:// foo here\n 2:bar\n*3:FOO"),
+            "{}",
+            o.text
+        );
         let o = crate::execute("grep", json!({"pattern": "foo(", "literal": true}), &c).await;
         assert!(o.text.contains("*3:    foo(x);") && !o.text.contains("hidden"));
         let o = crate::execute("grep", json!({"pattern": "foo(", "literal": false}), &c).await;
@@ -351,10 +389,23 @@ mod tests {
     #[tokio::test]
     async fn context_gaps() {
         let d = temp_dir("grep-gaps");
-        let text: String = (1..=20).map(|i| if i == 3 || i == 15 { "hit\n".to_string() } else { format!("l{i}\n") }).collect();
+        let text: String = (1..=20)
+            .map(|i| {
+                if i == 3 || i == 15 {
+                    "hit\n".to_string()
+                } else {
+                    format!("l{i}\n")
+                }
+            })
+            .collect();
         std::fs::write(d.join("g.txt"), &text).unwrap();
         let c = ctx(&d);
         let o = crate::execute("grep", json!({"pattern": "hit", "context": 1}), &c).await;
-        assert!(o.text.ends_with(" 2:l2\n*3:hit\n 4:l4\n...\n 14:l14\n*15:hit\n 16:l16"), "{}", o.text);
+        assert!(
+            o.text
+                .ends_with(" 2:l2\n*3:hit\n 4:l4\n...\n 14:l14\n*15:hit\n 16:l16"),
+            "{}",
+            o.text
+        );
     }
 }

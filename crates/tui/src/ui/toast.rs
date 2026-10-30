@@ -35,7 +35,12 @@ impl Toasts {
             ToastLevel::Warn => Duration::from_secs(4),
             ToastLevel::Info => Duration::from_secs(3),
         };
-        self.items.push(Toast { level, text, born: Instant::now(), ttl });
+        self.items.push(Toast {
+            level,
+            text,
+            born: Instant::now(),
+            ttl,
+        });
         if self.items.len() > 4 {
             self.items.remove(0);
         }
@@ -82,13 +87,22 @@ impl Toasts {
         for t in self.items.iter().rev() {
             let e = t.born.elapsed().as_secs_f32();
             let ttl = t.ttl.as_secs_f32();
-            let alpha = if e < FADE_IN { e / FADE_IN } else if e > ttl - FADE_OUT { ((ttl - e) / FADE_OUT).max(0.0) } else { 1.0 };
+            let alpha = if e < FADE_IN {
+                e / FADE_IN
+            } else if e > ttl - FADE_OUT {
+                ((ttl - e) / FADE_OUT).max(0.0)
+            } else {
+                1.0
+            };
             let (accent, label) = match t.level {
                 ToastLevel::Info => (theme::INFO, "●"),
                 ToastLevel::Warn => (theme::WARNING, "▲"),
                 ToastLevel::Error => (theme::ERROR, "✗"),
             };
-            let lines = text::wrap_spans(&[ratatui::text::Span::raw(text::one_line(&t.text))], maxw.saturating_sub(4));
+            let lines = text::wrap_spans(
+                &[ratatui::text::Span::raw(text::one_line(&t.text))],
+                maxw.saturating_sub(4),
+            );
             let lines: Vec<String> = lines.iter().take(4).map(text::line_text).collect();
             let inner_w = lines.iter().map(|l| width(l)).max().unwrap_or(0) + 4;
             // Slide in from the right during the fade-in.
@@ -116,7 +130,13 @@ impl Toasts {
                 if i == 0 {
                     buf.set_string(x + 2, yy, label, Style::new().fg(ac).bg(bg));
                 }
-                buf.set_stringn(x + 4, yy, l, inner_w.saturating_sub(4), Style::new().fg(fg).bg(bg));
+                buf.set_stringn(
+                    x + 4,
+                    yy,
+                    l,
+                    inner_w.saturating_sub(4),
+                    Style::new().fg(fg).bg(bg),
+                );
             }
             y += h + 1;
         }

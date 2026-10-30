@@ -25,7 +25,13 @@ pub struct Limits {
 
 impl Default for Limits {
     fn default() -> Self {
-        Limits { max_width: 1568, max_height: 1568, max_bytes: 500 * 1024, jpeg_quality: 80, min_dimension: 200 }
+        Limits {
+            max_width: 1568,
+            max_height: 1568,
+            max_bytes: 500 * 1024,
+            jpeg_quality: 80,
+            min_dimension: 200,
+        }
     }
 }
 
@@ -69,7 +75,9 @@ fn mime_of(f: ImageFormat) -> Option<&'static str> {
 
 /// Format, mime and dimensions from the header, without decoding the pixels.
 fn probe(bytes: &[u8]) -> Result<(ImageFormat, &'static str, u32, u32), String> {
-    let reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format().map_err(|e| e.to_string())?;
+    let reader = ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|e| e.to_string())?;
     let format = reader.format().ok_or("unknown image format")?;
     let mime = mime_of(format).ok_or_else(|| format!("unsupported image format {format:?}"))?;
     let (w, h) = reader.into_dimensions().map_err(|e| e.to_string())?;
@@ -84,7 +92,11 @@ fn decode(bytes: &[u8], format: ImageFormat) -> Result<DynamicImage, String> {
     let img = image::load_from_memory_with_format(bytes, format).map_err(|e| e.to_string())?;
     Ok(if img.color().has_alpha() {
         let rgba = img.into_rgba8();
-        if rgba.pixels().any(|p| p[3] < 255) { DynamicImage::ImageRgba8(rgba) } else { DynamicImage::ImageRgb8(DynamicImage::ImageRgba8(rgba).into_rgb8()) }
+        if rgba.pixels().any(|p| p[3] < 255) {
+            DynamicImage::ImageRgba8(rgba)
+        } else {
+            DynamicImage::ImageRgb8(DynamicImage::ImageRgba8(rgba).into_rgb8())
+        }
     } else {
         DynamicImage::ImageRgb8(img.into_rgb8())
     })
@@ -97,8 +109,18 @@ pub fn fit(bytes: &[u8], limits: &Limits) -> Result<Fitted, String> {
     let (max_w, max_h) = (limits.max_width.max(1), limits.max_height.max(1));
     let min_dim = limits.min_dimension.min(max_w).min(max_h);
     // Already within the bounds and compact (a quarter of the budget): keep the original bytes.
-    if ow >= min_dim && oh >= min_dim && ow <= max_w && oh <= max_h && bytes.len() <= limits.max_bytes / 4 {
-        return Ok(Fitted { data: None, mime, original: (ow, oh), size: (ow, oh) });
+    if ow >= min_dim
+        && oh >= min_dim
+        && ow <= max_w
+        && oh <= max_h
+        && bytes.len() <= limits.max_bytes / 4
+    {
+        return Ok(Fitted {
+            data: None,
+            mime,
+            original: (ow, oh),
+            size: (ow, oh),
+        });
     }
 
     let (mut tw, mut th) = (ow as f64, oh as f64);
@@ -112,7 +134,9 @@ pub fn fit(bytes: &[u8], limits: &Limits) -> Result<Fitted, String> {
     }
     // Lift undersized images toward the minimum without crossing a cap or distorting them.
     if tw < min_dim as f64 || th < min_dim as f64 {
-        let up = (min_dim as f64 / tw.min(th)).min(max_w as f64 / tw).min(max_h as f64 / th);
+        let up = (min_dim as f64 / tw.min(th))
+            .min(max_w as f64 / tw)
+            .min(max_h as f64 / th);
         if up > 1.0 {
             tw = (tw * up).round().min(max_w as f64);
             th = (th * up).round().min(max_h as f64);
@@ -128,17 +152,31 @@ pub fn fit(bytes: &[u8], limits: &Limits) -> Result<Fitted, String> {
     let mut best: Option<Fitted> = None;
     let mut consider = |data: Vec<u8>, mime: &'static str, size: (u32, u32)| -> bool {
         let fits = data.len() <= limits.max_bytes;
-        if best.as_ref().is_none_or(|b| data.len() < b.data.as_ref().map_or(usize::MAX, Vec::len)) {
-            best = Some(Fitted { data: Some(data), mime, original: (ow, oh), size });
+        if best
+            .as_ref()
+            .is_none_or(|b| data.len() < b.data.as_ref().map_or(usize::MAX, Vec::len))
+        {
+            best = Some(Fitted {
+                data: Some(data),
+                mime,
+                original: (ow, oh),
+                size,
+            });
         }
         fits
     };
 
     let target = resize(&mut resizer, &src, tw, th)?;
     let png = encode_png(&target)?;
-    let jpeg = if lossy { Some(encode_jpeg(&target, limits.jpeg_quality)?) } else { None };
+    let jpeg = if lossy {
+        Some(encode_jpeg(&target, limits.jpeg_quality)?)
+    } else {
+        None
+    };
     let fits_png = consider(png, "image/png", (tw, th));
-    let fits_jpeg = jpeg.map(|j| consider(j, "image/jpeg", (tw, th))).unwrap_or(false);
+    let fits_jpeg = jpeg
+        .map(|j| consider(j, "image/jpeg", (tw, th)))
+        .unwrap_or(false);
     let mut done = fits_png || fits_jpeg;
     if !done && lossy {
         for q in QUALITY_STEPS {
@@ -150,7 +188,10 @@ pub fn fit(bytes: &[u8], limits: &Limits) -> Result<Fitted, String> {
     }
     if !done {
         'scales: for scale in SCALE_STEPS {
-            let (w, h) = ((tw as f64 * scale).round() as u32, (th as f64 * scale).round() as u32);
+            let (w, h) = (
+                (tw as f64 * scale).round() as u32,
+                (th as f64 * scale).round() as u32,
+            );
             if w < 100 || h < 100 {
                 break;
             }
@@ -171,19 +212,32 @@ pub fn fit(bytes: &[u8], limits: &Limits) -> Result<Fitted, String> {
     let best = best.expect("at least one candidate");
     // Same dimensions and no smaller: re-encoding gained nothing.
     if best.size == (ow, oh) && best.data.as_ref().is_some_and(|d| d.len() >= bytes.len()) {
-        return Ok(Fitted { data: None, mime, original: (ow, oh), size: (ow, oh) });
+        return Ok(Fitted {
+            data: None,
+            mime,
+            original: (ow, oh),
+            size: (ow, oh),
+        });
     }
     Ok(best)
 }
 
-fn resize(resizer: &mut Resizer, src: &DynamicImage, w: u32, h: u32) -> Result<DynamicImage, String> {
+fn resize(
+    resizer: &mut Resizer,
+    src: &DynamicImage,
+    w: u32,
+    h: u32,
+) -> Result<DynamicImage, String> {
     if (src.width(), src.height()) == (w, h) {
         return Ok(src.clone());
     }
-    let pixel = fast_image_resize::IntoImageView::pixel_type(src).ok_or("unsupported pixel layout")?;
+    let pixel =
+        fast_image_resize::IntoImageView::pixel_type(src).ok_or("unsupported pixel layout")?;
     let mut dst = Image::new(w, h, pixel);
     // Lanczos3 with alpha premultiplied during the resize (the crate's defaults).
-    resizer.resize(src, &mut dst, None).map_err(|e| e.to_string())?;
+    resizer
+        .resize(src, &mut dst, None)
+        .map_err(|e| e.to_string())?;
     let buf = dst.into_vec();
     let out = if src.color().has_alpha() {
         image::RgbaImage::from_raw(w, h, buf).map(DynamicImage::ImageRgba8)
@@ -195,28 +249,37 @@ fn resize(resizer: &mut Resizer, src: &DynamicImage, w: u32, h: u32) -> Result<D
 
 fn encode_png(img: &DynamicImage) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
-    img.write_with_encoder(PngEncoder::new(&mut out)).map_err(|e| e.to_string())?;
+    img.write_with_encoder(PngEncoder::new(&mut out))
+        .map_err(|e| e.to_string())?;
     Ok(out)
 }
 
 fn encode_jpeg(img: &DynamicImage, quality: u8) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
-    img.write_with_encoder(JpegEncoder::new_with_quality(&mut out, quality)).map_err(|e| e.to_string())?;
+    img.write_with_encoder(JpegEncoder::new_with_quality(&mut out, quality))
+        .map_err(|e| e.to_string())?;
     Ok(out)
 }
 
 /// [`fit`] with default limits for a base64 image (pasted or attached by the user). Returns
 /// the replacement, or `None` to keep the image (it already fits or cannot be decoded).
 pub fn fit_image_data(img: &ImageData) -> Option<ImageData> {
-    let bytes = base64::engine::general_purpose::STANDARD.decode(img.data.as_bytes()).ok()?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(img.data.as_bytes())
+        .ok()?;
     let fitted = guarded(|| fit(&bytes, &Limits::default()))?;
     let data = fitted.data?;
-    Some(ImageData::new(fitted.mime, base64::engine::general_purpose::STANDARD.encode(data)))
+    Some(ImageData::new(
+        fitted.mime,
+        base64::engine::general_purpose::STANDARD.encode(data),
+    ))
 }
 
 /// Runs a decoder step, treating an error or a panic (malformed input) as no result.
 fn guarded<T>(f: impl FnOnce() -> Result<T, String>) -> Option<T> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).ok()?.ok()
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+        .ok()?
+        .ok()
 }
 
 /// Result of [`clamp`].
@@ -250,7 +313,9 @@ pub fn clamp(bytes: &[u8], max_dim: u32, max_b64: usize) -> Result<Option<Clampe
     let src = decode(bytes, format)?;
     let lossy = !src.color().has_alpha();
     let mut resizer = Resizer::new();
-    let mut scale = (max_dim as f64 / w as f64).min(max_dim as f64 / h as f64).min(1.0);
+    let mut scale = (max_dim as f64 / w as f64)
+        .min(max_dim as f64 / h as f64)
+        .min(1.0);
     let mut best = None;
     for _ in 0..CLAMP_ATTEMPTS {
         let tw = ((w as f64 * scale).round() as u32).clamp(1, max_dim);
@@ -262,7 +327,11 @@ pub fn clamp(bytes: &[u8], max_dim: u32, max_b64: usize) -> Result<Option<Clampe
             _ => ("image/png", png),
         };
         let enc = b64_len(data.len());
-        best = Some(Clamped { mime, data, size: (tw, th) });
+        best = Some(Clamped {
+            mime,
+            data,
+            size: (tw, th),
+        });
         if enc <= max_b64 || (tw, th) == (1, 1) {
             break;
         }
@@ -283,7 +352,10 @@ struct ClampCache {
     bytes: usize,
 }
 
-static CLAMP_CACHE: std::sync::Mutex<ClampCache> = std::sync::Mutex::new(ClampCache { entries: std::collections::VecDeque::new(), bytes: 0 });
+static CLAMP_CACHE: std::sync::Mutex<ClampCache> = std::sync::Mutex::new(ClampCache {
+    entries: std::collections::VecDeque::new(),
+    bytes: 0,
+});
 const CLAMP_CACHE_BYTES: usize = 64 << 20;
 const CLAMP_CACHE_ENTRIES: usize = 1024;
 
@@ -292,20 +364,36 @@ pub fn clamp_image_data(img: &ImageData, max_dim: u32, max_b64: usize) -> Option
     if img.is_stub() {
         return None;
     }
-    let key = xxhash_rust::xxh3::xxh3_128_with_seed(img.data.as_bytes(), ((max_dim as u64) << 40) ^ max_b64 as u64);
-    if let Some((_, hit)) = CLAMP_CACHE.lock().unwrap_or_else(|e| e.into_inner()).entries.iter().find(|(k, _)| *k == key) {
+    let key = xxhash_rust::xxh3::xxh3_128_with_seed(
+        img.data.as_bytes(),
+        ((max_dim as u64) << 40) ^ max_b64 as u64,
+    );
+    if let Some((_, hit)) = CLAMP_CACHE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .entries
+        .iter()
+        .find(|(k, _)| *k == key)
+    {
         return hit.clone();
     }
     let out = base64::engine::general_purpose::STANDARD
         .decode(img.data.as_bytes())
         .ok()
         .and_then(|b| guarded(|| clamp(&b, max_dim, max_b64)).flatten())
-        .map(|c| ImageData::new(c.mime, base64::engine::general_purpose::STANDARD.encode(c.data)));
+        .map(|c| {
+            ImageData::new(
+                c.mime,
+                base64::engine::general_purpose::STANDARD.encode(c.data),
+            )
+        });
     let mut c = CLAMP_CACHE.lock().unwrap_or_else(|e| e.into_inner());
     c.bytes += out.as_ref().map_or(0, |i| i.data.len());
     c.entries.push_back((key, out.clone()));
     while c.bytes > CLAMP_CACHE_BYTES || c.entries.len() > CLAMP_CACHE_ENTRIES {
-        let Some((_, old)) = c.entries.pop_front() else { break };
+        let Some((_, old)) = c.entries.pop_front() else {
+            break;
+        };
         c.bytes -= old.map_or(0, |i| i.data.len());
     }
     out
@@ -338,7 +426,9 @@ mod tests {
     fn small_image_is_kept() {
         let bytes = test_png(400, 300, false);
         let f = fit(&bytes, &Limits::default()).unwrap();
-        assert!(f.data.is_none() && f.mime == "image/png" && f.size == (400, 300) && f.note().is_none());
+        assert!(
+            f.data.is_none() && f.mime == "image/png" && f.size == (400, 300) && f.note().is_none()
+        );
     }
 
     #[test]
@@ -352,16 +442,24 @@ mod tests {
         assert!(data.len() <= l.max_bytes, "{}", data.len());
         assert_eq!(f.mime, "image/jpeg");
         assert_eq!(image::load_from_memory(data).unwrap().width(), f.size.0);
-        assert!(f.note().unwrap().starts_with("[Image: original 3000x1000, displayed at "));
+        assert!(
+            f.note()
+                .unwrap()
+                .starts_with("[Image: original 3000x1000, displayed at ")
+        );
     }
 
     #[test]
     fn translucent_stays_png_and_tiny_is_lifted() {
-        let img = DynamicImage::ImageRgba8(image::RgbaImage::from_fn(20, 10, |x, _| image::Rgba([255, 0, 0, if x < 10 { 0 } else { 255 }])));
+        let img = DynamicImage::ImageRgba8(image::RgbaImage::from_fn(20, 10, |x, _| {
+            image::Rgba([255, 0, 0, if x < 10 { 0 } else { 255 }])
+        }));
         let f = fit(&png(&img), &Limits::default()).unwrap();
         assert_eq!(f.mime, "image/png");
         assert_eq!(f.size, (400, 200));
-        let out = image::load_from_memory(f.data.as_ref().unwrap()).unwrap().into_rgba8();
+        let out = image::load_from_memory(f.data.as_ref().unwrap())
+            .unwrap()
+            .into_rgba8();
         assert_eq!(out.get_pixel(5, 100)[3], 0);
         assert_eq!(*out.get_pixel(395, 100), image::Rgba([255, 0, 0, 255]));
     }
@@ -383,9 +481,17 @@ mod tests {
         assert!(clamp(&big, 8000, 10 << 20).unwrap().is_none());
         // Over the byte budget only: shrunk until the base64 fits.
         let c = clamp(&big, 8000, 100_000).unwrap().unwrap();
-        assert!(b64_len(c.data.len()) <= 100_000 && c.size.0 < 3000, "{} {:?}", c.data.len(), c.size);
+        assert!(
+            b64_len(c.data.len()) <= 100_000 && c.size.0 < 3000,
+            "{} {:?}",
+            c.data.len(),
+            c.size
+        );
         // Cached result, same bytes; stubs and undecodable images are kept.
-        let img = ImageData::new("image/png", base64::engine::general_purpose::STANDARD.encode(&big));
+        let img = ImageData::new(
+            "image/png",
+            base64::engine::general_purpose::STANDARD.encode(&big),
+        );
         let a = clamp_image_data(&img, 2000, 10 << 20).unwrap();
         let b = clamp_image_data(&img, 2000, 10 << 20).unwrap();
         assert!(a.mime == "image/jpeg" && a.data == b.data);

@@ -124,7 +124,10 @@ impl ListDialog {
                 .enumerate()
                 .filter_map(|(i, it)| {
                     let a = text::fuzzy_score(&it.title, &q).map(|s| s + 20);
-                    let b = text::fuzzy_score(&format!("{} {} {} {}", it.title, it.desc, it.section, it.keywords), &q);
+                    let b = text::fuzzy_score(
+                        &format!("{} {} {} {}", it.title, it.desc, it.section, it.keywords),
+                        &q,
+                    );
                     a.max(b).map(|s| (s, i))
                 })
                 .collect();
@@ -186,12 +189,22 @@ impl ListDialog {
         let t = (self.opened.elapsed().as_secs_f32() / 0.12).min(1.0);
         let r = frame(buf, screen, w, h, &self.title, t);
         self.rect = r;
-        let inner = Rect::new(r.x + 2, r.y + 1, r.width.saturating_sub(4), r.height.saturating_sub(2));
+        let inner = Rect::new(
+            r.x + 2,
+            r.y + 1,
+            r.width.saturating_sub(4),
+            r.height.saturating_sub(2),
+        );
         let bg = theme::PANEL;
         let fade = |c: Color| theme::blend(bg, c, t);
         // Filter line.
         let fy = inner.y + 1;
-        buf.set_string(inner.x, fy, "› ", Style::new().fg(fade(theme::PRIMARY)).bg(bg));
+        buf.set_string(
+            inner.x,
+            fy,
+            "› ",
+            Style::new().fg(fade(theme::PRIMARY)).bg(bg),
+        );
         let farea = Rect::new(inner.x + 2, fy, inner.width.saturating_sub(2), 1);
         self.filter.draw(buf, farea, "Search…", false);
         // Fake cursor in the filter (real cursor handled by caller).
@@ -217,7 +230,10 @@ impl ListDialog {
             }
             disp.push(Disp::Item(vi));
         }
-        let sel_row = disp.iter().position(|d| matches!(d, Disp::Item(v) if *v == self.sel)).unwrap_or(0);
+        let sel_row = disp
+            .iter()
+            .position(|d| matches!(d, Disp::Item(v) if *v == self.sel))
+            .unwrap_or(0);
         if sel_row < self.scroll {
             self.scroll = sel_row.saturating_sub(1);
         }
@@ -227,7 +243,12 @@ impl ListDialog {
         self.scroll = self.scroll.min(disp.len().saturating_sub(list_h));
         self.rows.clear();
         if self.visible.is_empty() {
-            buf.set_string(inner.x, list_top, "No results", Style::new().fg(fade(theme::MUTED)).bg(bg));
+            buf.set_string(
+                inner.x,
+                list_top,
+                "No results",
+                Style::new().fg(fade(theme::MUTED)).bg(bg),
+            );
         }
         let iw = inner.width as usize;
         for (k, d) in disp.iter().enumerate().skip(self.scroll).take(list_h) {
@@ -235,7 +256,15 @@ impl ListDialog {
             match d {
                 Disp::Gap => {}
                 Disp::Section(s) => {
-                    buf.set_string(inner.x, y, text::truncate(s, iw), Style::new().fg(fade(theme::ACCENT)).bg(bg).add_modifier(Modifier::BOLD));
+                    buf.set_string(
+                        inner.x,
+                        y,
+                        text::truncate(s, iw),
+                        Style::new()
+                            .fg(fade(theme::ACCENT))
+                            .bg(bg)
+                            .add_modifier(Modifier::BOLD),
+                    );
                 }
                 Disp::Item(vi) => {
                     let it = &self.items[self.visible[*vi]];
@@ -246,31 +275,62 @@ impl ListDialog {
                     buf.set_style(row, Style::new().bg(rbg));
                     let mut left: Vec<Span<'static>> = vec![Span::raw(" ")];
                     if it.spinner {
-                        left.push(Span::styled(format!("{} ", theme::spinner(tick)), Style::new().fg(fgc(theme::PRIMARY))));
+                        left.push(Span::styled(
+                            format!("{} ", theme::spinner(tick)),
+                            Style::new().fg(fgc(theme::PRIMARY)),
+                        ));
                     } else if let Some((m, c)) = &it.marker {
                         left.push(Span::styled(format!("{m} "), Style::new().fg(fgc(*c))));
                     }
                     let tstyle = Style::new().fg(fgc(it.title_color.unwrap_or(theme::TEXT)));
-                    left.push(Span::styled(it.title.clone(), if selected { tstyle.add_modifier(Modifier::BOLD) } else { tstyle }));
+                    left.push(Span::styled(
+                        it.title.clone(),
+                        if selected {
+                            tstyle.add_modifier(Modifier::BOLD)
+                        } else {
+                            tstyle
+                        },
+                    ));
                     // Section headers are hidden while filtering; keep the provider visible for
                     // models (the same model id often exists under several providers).
                     if filtering && self.kind == Kind::Models && !it.section.is_empty() {
-                        left.push(Span::styled(format!("  {}", it.section), Style::new().fg(fgc(theme::ACCENT))));
+                        left.push(Span::styled(
+                            format!("  {}", it.section),
+                            Style::new().fg(fgc(theme::ACCENT)),
+                        ));
                     }
                     if !it.desc.is_empty() {
-                        left.push(Span::styled(format!("  {}", it.desc), Style::new().fg(fgc(theme::MUTED))));
+                        left.push(Span::styled(
+                            format!("  {}", it.desc),
+                            Style::new().fg(fgc(theme::MUTED)),
+                        ));
                     }
                     let mut right: Vec<Span<'static>> = Vec::new();
                     if self.confirm.as_deref() == Some(it.key.as_str()) && selected {
-                        let t = if self.confirm_text.is_empty() { "press ctrl+d again to confirm " } else { self.confirm_text.as_str() };
-                        right.push(Span::styled(t.to_string(), Style::new().fg(theme::PANEL).add_modifier(Modifier::BOLD)));
+                        let t = if self.confirm_text.is_empty() {
+                            "press ctrl+d again to confirm "
+                        } else {
+                            self.confirm_text.as_str()
+                        };
+                        right.push(Span::styled(
+                            t.to_string(),
+                            Style::new().fg(theme::PANEL).add_modifier(Modifier::BOLD),
+                        ));
                     } else {
                         if let Some((b, c)) = &it.badge {
-                            right.push(Span::styled(format!(" {b} "), Style::new().fg(if selected { *c } else { theme::PANEL }).bg(if selected { theme::PANEL } else { fade(*c) })));
+                            right.push(Span::styled(
+                                format!(" {b} "),
+                                Style::new()
+                                    .fg(if selected { *c } else { theme::PANEL })
+                                    .bg(if selected { theme::PANEL } else { fade(*c) }),
+                            ));
                             right.push(Span::raw(" "));
                         }
                         if !it.right.is_empty() {
-                            right.push(Span::styled(it.right.clone(), Style::new().fg(fgc(theme::MUTED))));
+                            right.push(Span::styled(
+                                it.right.clone(),
+                                Style::new().fg(fgc(theme::MUTED)),
+                            ));
                         }
                         right.push(Span::raw(" "));
                     }
@@ -289,17 +349,34 @@ impl ListDialog {
             }
         }
         // Footer hint.
-        let hint = if self.hint.is_empty() { "↑↓ select · enter confirm · esc close".to_string() } else { self.hint.clone() };
+        let hint = if self.hint.is_empty() {
+            "↑↓ select · enter confirm · esc close".to_string()
+        } else {
+            self.hint.clone()
+        };
         let hy = inner.y + inner.height.saturating_sub(1);
         let count = format!("{}/{}", self.visible.len(), self.items.len());
-        buf.set_string(inner.x, hy, text::truncate(&hint, iw.saturating_sub(width(&count) + 2)), Style::new().fg(fade(theme::DIM)).bg(bg));
-        buf.set_string(inner.x + inner.width.saturating_sub(width(&count) as u16), hy, &count, Style::new().fg(fade(theme::DIM)).bg(bg));
+        buf.set_string(
+            inner.x,
+            hy,
+            text::truncate(&hint, iw.saturating_sub(width(&count) + 2)),
+            Style::new().fg(fade(theme::DIM)).bg(bg),
+        );
+        buf.set_string(
+            inner.x + inner.width.saturating_sub(width(&count) as u16),
+            hy,
+            &count,
+            Style::new().fg(fade(theme::DIM)).bg(bg),
+        );
     }
 
     /// Cursor position for the filter input.
     pub fn cursor(&self) -> (u16, u16) {
         let x = self.rect.x + 4 + width(&self.filter.text[..self.filter.cursor]) as u16;
-        (x.min(self.rect.x + self.rect.width.saturating_sub(3)), self.rect.y + 2)
+        (
+            x.min(self.rect.x + self.rect.width.saturating_sub(3)),
+            self.rect.y + 2,
+        )
     }
 }
 
@@ -360,10 +437,23 @@ pub fn frame(buf: &mut Buffer, screen: Rect, w: u16, h: u16, title: &str, t: f32
     buf.set_string(r.x, r.y + r.height - 1, "╰", bst);
     buf.set_string(r.x + r.width - 1, r.y + r.height - 1, "╯", bst);
     let title = format!(" {title} ");
-    buf.set_string(r.x + 2, r.y, text::truncate(&title, w.saturating_sub(4) as usize), Style::new().fg(theme::blend(bg, theme::TEXT, t)).bg(bg).add_modifier(Modifier::BOLD));
+    buf.set_string(
+        r.x + 2,
+        r.y,
+        text::truncate(&title, w.saturating_sub(4) as usize),
+        Style::new()
+            .fg(theme::blend(bg, theme::TEXT, t))
+            .bg(bg)
+            .add_modifier(Modifier::BOLD),
+    );
     let esc = " esc ";
     if w > 20 {
-        buf.set_string(r.x + r.width - 2 - esc.len() as u16, r.y, esc, Style::new().fg(theme::blend(bg, theme::DIM, t)).bg(bg));
+        buf.set_string(
+            r.x + r.width - 2 - esc.len() as u16,
+            r.y,
+            esc,
+            Style::new().fg(theme::blend(bg, theme::DIM, t)).bg(bg),
+        );
     }
     r
 }
@@ -439,7 +529,10 @@ pub const KEYBINDS: &[(&str, &[(&str, &str)])] = &[
         "Leader (ctrl+x …)",
         &[
             ("n", "new session"),
-            ("l", "session list (live + history; ctrl+d closes / deletes)"),
+            (
+                "l",
+                "session list (live + history; ctrl+d closes / deletes)",
+            ),
             ("m / a", "models / agents"),
             ("t / d", "toggle thinking / tool details"),
             ("c / u", "compact / undo last prompt"),
@@ -466,7 +559,10 @@ pub const KEYBINDS: &[(&str, &[(&str, &str)])] = &[
             ("click ▸ line", "expand / collapse tool or thinking"),
             ("click ⧉ copy", "copy raw markdown of a message"),
             ("click ↶ undo", "remove a prompt and everything after it"),
-            ("click ✕ remove", "withdraw a queued prompt before it is sent"),
+            (
+                "click ✕ remove",
+                "withdraw a queued prompt before it is sent",
+            ),
         ],
     ),
     (
@@ -493,7 +589,10 @@ pub const KEYBINDS: &[(&str, &[(&str, &str)])] = &[
             ("enter", "send to focused session"),
             ("esc", "clear input / unfocus the tile"),
             ("esc esc", "abort focused session (busy)"),
-            ("wheel, pgup / pgdn, shift+↑↓", "scroll a tile (end: back to bottom)"),
+            (
+                "wheel, pgup / pgdn, shift+↑↓",
+                "scroll a tile (end: back to bottom)",
+            ),
             ("enter on empty, ctrl+o", "zoom (attach as foreground)"),
             ("ctrl+n / ctrl+b", "next / previous page"),
             ("ctrl+x k (twice)", "close the focused session"),
@@ -506,7 +605,10 @@ impl HelpDialog {
     pub fn new(commands: &[(String, String)]) -> Self {
         let mut lines = Vec::new();
         for (sec, items) in KEYBINDS {
-            lines.push(Line::from(Span::styled(sec.to_string(), theme::bold(theme::ACCENT))));
+            lines.push(Line::from(Span::styled(
+                sec.to_string(),
+                theme::bold(theme::ACCENT),
+            )));
             for (k, d) in *items {
                 lines.push(Line::from(vec![
                     Span::styled(format!("  {:<30}", k), theme::fg(theme::PRIMARY)),
@@ -515,21 +617,44 @@ impl HelpDialog {
             }
             lines.push(Line::default());
         }
-        lines.push(Line::from(Span::styled("Slash commands", theme::bold(theme::ACCENT))));
+        lines.push(Line::from(Span::styled(
+            "Slash commands",
+            theme::bold(theme::ACCENT),
+        )));
         for (n, d) in commands {
             lines.push(Line::from(vec![
-                Span::styled(format!("  {:<30}", format!("/{n}")), theme::fg(theme::PRIMARY)),
+                Span::styled(
+                    format!("  {:<30}", format!("/{n}")),
+                    theme::fg(theme::PRIMARY),
+                ),
                 Span::styled(d.clone(), theme::text()),
             ]));
         }
-        HelpDialog { scroll: 0, opened: Instant::now(), lines, max_scroll: 0, title: "Help".into(), width: 80 }
+        HelpDialog {
+            scroll: 0,
+            opened: Instant::now(),
+            lines,
+            max_scroll: 0,
+            title: "Help".into(),
+            width: 80,
+        }
     }
 
     /// Read-only text viewer (command results). Long lines are wrapped when drawn.
     pub fn text(title: &str, body: &str) -> Self {
-        let lines: Vec<Line<'static>> = body.lines().map(|l| Line::from(Span::styled(l.replace('\t', "    "), theme::text()))).collect();
+        let lines: Vec<Line<'static>> = body
+            .lines()
+            .map(|l| Line::from(Span::styled(l.replace('\t', "    "), theme::text())))
+            .collect();
         let widest = body.lines().map(width).max().unwrap_or(0) as u16;
-        HelpDialog { scroll: 0, opened: Instant::now(), lines, max_scroll: 0, title: title.to_string(), width: (widest + 6).max(40) }
+        HelpDialog {
+            scroll: 0,
+            opened: Instant::now(),
+            lines,
+            max_scroll: 0,
+            title: title.to_string(),
+            width: (widest + 6).max(40),
+        }
     }
 
     pub fn scroll_by(&mut self, d: i32) {
@@ -538,15 +663,31 @@ impl HelpDialog {
 
     pub fn draw(&mut self, buf: &mut Buffer, screen: Rect) {
         let t = (self.opened.elapsed().as_secs_f32() / 0.12).min(1.0);
-        let w = screen.width.saturating_sub(4).clamp(30, self.width.min(110));
+        let w = screen
+            .width
+            .saturating_sub(4)
+            .clamp(30, self.width.min(110));
         let iw = w.saturating_sub(4) as usize;
-        let wrapped: Vec<Line<'static>> = self.lines.iter().flat_map(|l| {
-            let rows = text::wrap_spans(&l.spans, iw.max(1));
-            if rows.is_empty() { vec![Line::default()] } else { rows }
-        }).collect();
+        let wrapped: Vec<Line<'static>> = self
+            .lines
+            .iter()
+            .flat_map(|l| {
+                let rows = text::wrap_spans(&l.spans, iw.max(1));
+                if rows.is_empty() {
+                    vec![Line::default()]
+                } else {
+                    rows
+                }
+            })
+            .collect();
         let h = (wrapped.len() as u16 + 2).clamp(3, screen.height.saturating_sub(4).clamp(3, 40));
         let r = frame(buf, screen, w, h, &self.title, t);
-        let inner = Rect::new(r.x + 2, r.y + 1, r.width.saturating_sub(4), r.height.saturating_sub(2));
+        let inner = Rect::new(
+            r.x + 2,
+            r.y + 1,
+            r.width.saturating_sub(4),
+            r.height.saturating_sub(2),
+        );
         let vh = inner.height as usize;
         self.max_scroll = wrapped.len().saturating_sub(vh);
         self.scroll = self.scroll.min(self.max_scroll);

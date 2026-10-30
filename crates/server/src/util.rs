@@ -18,7 +18,9 @@ pub fn new_id(prefix: &str) -> String {
 
 pub fn random_hex(n: usize) -> String {
     let mut rng = rand::rng();
-    (0..n).map(|_| char::from_digit(rng.random_range(0..16u32), 16).unwrap_or('0')).collect()
+    (0..n)
+        .map(|_| char::from_digit(rng.random_range(0..16u32), 16).unwrap_or('0'))
+        .collect()
 }
 
 /// Validates and normalizes a peer name: trimmed, 1..=64 chars, no control characters.

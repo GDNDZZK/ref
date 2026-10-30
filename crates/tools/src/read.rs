@@ -78,7 +78,10 @@ fn split_range_suffix(cwd: &Path, raw: &str) -> Option<(PathBuf, Range)> {
     }
     let start: usize = caps.get(2)?.as_str().parse().ok()?;
     let start = start.max(1);
-    let range = match (caps.get(3).map(|m| m.as_str()), caps.get(4).map(|m| m.as_str())) {
+    let range = match (
+        caps.get(3).map(|m| m.as_str()),
+        caps.get(4).map(|m| m.as_str()),
+    ) {
         (None, _) => Range::From(start, None),
         (Some("-"), Some("")) => Range::From(start, None),
         (Some("-"), Some(end)) => {
@@ -107,10 +110,11 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let mut abs = util::resolve_path(&ctx.cwd, &raw);
     let mut suffix_range = None;
     if !abs.exists()
-        && let Some((base, range)) = split_range_suffix(&ctx.cwd, &raw) {
-            abs = base;
-            suffix_range = Some(range);
-        }
+        && let Some((base, range)) = split_range_suffix(&ctx.cwd, &raw)
+    {
+        abs = base;
+        suffix_range = Some(range);
+    }
     let display = util::display_path(&ctx.cwd, &abs);
     let meta = match std::fs::metadata(&abs) {
         Ok(m) => m,
@@ -144,16 +148,29 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
                 util::human_bytes(MAX_IMAGE_BYTES)
             )));
         }
-        let mut text = format!("Read image file {display} [{mime}] ({})", util::human_bytes(meta.len()));
+        let mut text = format!(
+            "Read image file {display} [{mime}] ({})",
+            util::human_bytes(meta.len())
+        );
         let mut sent = (mime.to_string(), bytes);
         if ctx.resize_images {
             let fitted = match crate::imgfit::fit(&sent.1, &crate::imgfit::Limits::default()) {
                 Ok(f) => f,
-                Err(e) => return Ok(ToolOutput::err(format!("Image file {display} could not be decoded ({e}); it was not attached."))),
+                Err(e) => {
+                    return Ok(ToolOutput::err(format!(
+                        "Image file {display} could not be decoded ({e}); it was not attached."
+                    )));
+                }
             };
             let note = fitted.note();
             if let Some(data) = fitted.data {
-                text.push_str(&format!(", sent as {} {}x{} ({})", fitted.mime, fitted.size.0, fitted.size.1, util::human_bytes(data.len() as u64)));
+                text.push_str(&format!(
+                    ", sent as {} {}x{} ({})",
+                    fitted.mime,
+                    fitted.size.0,
+                    fitted.size.1,
+                    util::human_bytes(data.len() as u64)
+                ));
                 sent = (fitted.mime.to_string(), data);
             }
             if let Some(n) = note {
@@ -266,12 +283,18 @@ fn list_dir(abs: &Path, display: &str) -> Result<ToolOutput> {
             continue;
         }
         // Follow symlinks for the dir check so linked dirs show `/`.
-        let is_dir = std::fs::metadata(e.path()).map(|m| m.is_dir()).unwrap_or(false);
+        let is_dir = std::fs::metadata(e.path())
+            .map(|m| m.is_dir())
+            .unwrap_or(false);
         entries.push(if is_dir { format!("{name}/") } else { name });
     }
     entries.sort();
     let total = entries.len();
-    let dir_label = if display.ends_with('/') { display.to_string() } else { format!("{display}/") };
+    let dir_label = if display.ends_with('/') {
+        display.to_string()
+    } else {
+        format!("{display}/")
+    };
     let mut out = format!("Directory {dir_label} ({total} entries)");
     if total == 0 {
         out.push_str("\n(empty directory)");
@@ -290,7 +313,6 @@ fn list_dir(abs: &Path, display: &str) -> Result<ToolOutput> {
     o.meta = Some(json!({"path": abs.to_string_lossy(), "dir": true}));
     Ok(o)
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -321,7 +343,10 @@ mod tests {
         std::fs::write(d.join("big.txt"), &text).unwrap();
         let c = ctx(&d);
         let o = read(&c, json!({"path": "big.txt"})).await;
-        assert!(o.text.contains("\n500:line500\n\n[500 more lines in file. Use offset=501 to continue]"));
+        assert!(
+            o.text
+                .contains("\n500:line500\n\n[500 more lines in file. Use offset=501 to continue]")
+        );
         let o = read(&c, json!({"path": "big.txt", "offset": 998})).await;
         assert!(o.text.ends_with("998:line998\n999:line999\n1000:line1000"));
         let o = read(&c, json!({"path": "big.txt:50-52"})).await;
@@ -371,7 +396,13 @@ mod tests {
         std::fs::write(d.join(".hidden"), "h").unwrap();
         let c = ctx(&d);
         let o = read(&c, json!({"path": "c.txt"})).await;
-        assert_eq!(o.text, format!("[c.txt#{}]\n1:a \n2:b", crate::hashline::file_hash("a \nb\n")));
+        assert_eq!(
+            o.text,
+            format!(
+                "[c.txt#{}]\n1:a \n2:b",
+                crate::hashline::file_hash("a \nb\n")
+            )
+        );
         let o = read(&c, json!({"path": "e.txt"})).await;
         assert_eq!(o.text, "[e.txt#5D05]\n(empty file)");
         let o = read(&c, json!({"path": "b.bin"})).await;
@@ -379,9 +410,19 @@ mod tests {
         let o = read(&c, json!({"path": "i.png"})).await;
         assert_eq!(o.images.len(), 1);
         assert_eq!(o.images[0].mime, "image/png");
-        assert!(o.text.starts_with("Read image file i.png [image/png] (") && !o.text.contains("sent as"), "{}", o.text);
+        assert!(
+            o.text.starts_with("Read image file i.png [image/png] (")
+                && !o.text.contains("sent as"),
+            "{}",
+            o.text
+        );
         let o = read(&c, json!({"path": "."})).await;
-        assert!(o.text.contains("\n.hidden\nb.bin\nc.txt\ne.txt\ni.png\nsub/"), "{}", o.text);
+        assert!(
+            o.text
+                .contains("\n.hidden\nb.bin\nc.txt\ne.txt\ni.png\nsub/"),
+            "{}",
+            o.text
+        );
         assert!(!o.text.contains(".git"));
         let o = read(&c, json!({"path": "nope.txt"})).await;
         assert!(o.is_error && o.text.contains("not found"));
@@ -394,12 +435,24 @@ mod tests {
         std::fs::write(d.join("bad.png"), b"\x89PNG\r\n\x1a\nrest").unwrap();
         let mut c = ctx(&d);
         let o = read(&c, json!({"path": "big.png"})).await;
-        assert!(!o.is_error && o.images.len() == 1 && o.images[0].mime == "image/jpeg", "{}", o.text);
+        assert!(
+            !o.is_error && o.images.len() == 1 && o.images[0].mime == "image/jpeg",
+            "{}",
+            o.text
+        );
         assert!(o.text.contains(", sent as image/jpeg 523x1568 (") && o.text.contains("\n[Image: original 1000x3000, displayed at 523x1568. Multiply coordinates by 1.91"), "{}", o.text);
         let o = read(&c, json!({"path": "bad.png"})).await;
-        assert!(o.is_error && o.images.is_empty() && o.text.contains("could not be decoded"), "{}", o.text);
+        assert!(
+            o.is_error && o.images.is_empty() && o.text.contains("could not be decoded"),
+            "{}",
+            o.text
+        );
         c.resize_images = false;
         let o = read(&c, json!({"path": "big.png"})).await;
-        assert!(o.images[0].mime == "image/png" && !o.text.contains("sent as"), "{}", o.text);
+        assert!(
+            o.images[0].mime == "image/png" && !o.text.contains("sent as"),
+            "{}",
+            o.text
+        );
     }
 }

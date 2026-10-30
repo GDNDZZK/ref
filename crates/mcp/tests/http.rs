@@ -40,7 +40,10 @@ async fn read_req(s: &mut TcpStream) -> Option<Req> {
         .filter_map(|l| l.split_once(':'))
         .map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string()))
         .collect();
-    let len: usize = headers.get("content-length").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let len: usize = headers
+        .get("content-length")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
     let mut body = buf[head_end + 4..].to_vec();
     while body.len() < len {
         let n = s.read(&mut tmp).await.ok()?;
@@ -49,11 +52,25 @@ async fn read_req(s: &mut TcpStream) -> Option<Req> {
         }
         body.extend_from_slice(&tmp[..n]);
     }
-    Some(Req { method, path, headers, body })
+    Some(Req {
+        method,
+        path,
+        headers,
+        body,
+    })
 }
 
-async fn respond(s: &mut TcpStream, status: &str, extra: &[(&str, String)], ctype: &str, body: &str) {
-    let mut out = format!("HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n", body.len());
+async fn respond(
+    s: &mut TcpStream,
+    status: &str,
+    extra: &[(&str, String)],
+    ctype: &str,
+    body: &str,
+) {
+    let mut out = format!(
+        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n",
+        body.len()
+    );
     if !ctype.is_empty() {
         out.push_str(&format!("Content-Type: {ctype}\r\n"));
     }
@@ -79,7 +96,9 @@ async fn sse_send(s: &mut TcpStream, msg: &Value) -> bool {
     // Split data over two writes to exercise incremental parsing.
     let text = format!("id: 1\r\nevent: message\r\ndata: {msg}\r\n\r\n");
     let (a, b) = text.split_at(text.len() / 2);
-    s.write_all(a.as_bytes()).await.is_ok() && s.flush().await.is_ok() && s.write_all(b.as_bytes()).await.is_ok()
+    s.write_all(a.as_bytes()).await.is_ok()
+        && s.flush().await.is_ok()
+        && s.write_all(b.as_bytes()).await.is_ok()
 }
 
 fn text(t: &str) -> Value {
@@ -115,7 +134,9 @@ struct Streamable {
 }
 
 async fn streamable_conn(mut s: TcpStream, srv: Arc<Streamable>) {
-    let Some(req) = read_req(&mut s).await else { return };
+    let Some(req) = read_req(&mut s).await else {
+        return;
+    };
     let sid_hdr = req.headers.get("mcp-session-id").cloned();
     let current = format!("sess-{}", srv.state.lock().unwrap().session);
     if req.method == "GET" {
@@ -126,7 +147,11 @@ async fn streamable_conn(mut s: TcpStream, srv: Arc<Streamable>) {
         srv.state.lock().unwrap().get_streams += 1;
         sse_head(&mut s, &[]).await;
         let _ = s.write_all(b": keepalive\n\n").await;
-        sse_send(&mut s, &json!({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})).await;
+        sse_send(
+            &mut s,
+            &json!({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}),
+        )
+        .await;
         tokio::time::sleep(Duration::from_secs(30)).await;
         return;
     }
@@ -136,21 +161,33 @@ async fn streamable_conn(mut s: TcpStream, srv: Arc<Streamable>) {
     }
     assert_eq!(req.method, "POST");
     assert_eq!(req.path, "/mcp");
-    assert_eq!(req.headers.get("content-type").map(String::as_str), Some("application/json"));
+    assert_eq!(
+        req.headers.get("content-type").map(String::as_str),
+        Some("application/json")
+    );
     let accept = req.headers.get("accept").cloned().unwrap_or_default();
-    assert!(accept.contains("application/json") && accept.contains("text/event-stream"), "{accept}");
+    assert!(
+        accept.contains("application/json") && accept.contains("text/event-stream"),
+        "{accept}"
+    );
     if req.headers.get("authorization").map(String::as_str) != Some("Bearer secret") {
         respond(&mut s, "401 Unauthorized", &[], "", "no auth").await;
         return;
     }
     let msg: Value = serde_json::from_slice(&req.body).unwrap();
-    let method = msg.get("method").and_then(Value::as_str).unwrap_or("").to_string();
+    let method = msg
+        .get("method")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
     let id = msg.get("id").cloned().unwrap_or(Value::Null);
     srv.state.lock().unwrap().seen.push((
         method.clone(),
         sid_hdr.clone(),
         req.headers.get("mcp-protocol-version").cloned(),
-        msg.pointer("/params/name").and_then(Value::as_str).map(String::from),
+        msg.pointer("/params/name")
+            .and_then(Value::as_str)
+            .map(String::from),
     ));
 
     if method == "initialize" {
@@ -160,9 +197,19 @@ async fn streamable_conn(mut s: TcpStream, srv: Arc<Streamable>) {
             st.inits += 1;
             format!("sess-{}", st.session)
         };
-        let body = ok(&id, json!({"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
-            "serverInfo": {"name": "h", "version": "1"}, "instructions": "http instructions"}));
-        respond(&mut s, "200 OK", &[("Mcp-Session-Id", sid)], "application/json", &body.to_string()).await;
+        let body = ok(
+            &id,
+            json!({"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
+            "serverInfo": {"name": "h", "version": "1"}, "instructions": "http instructions"}),
+        );
+        respond(
+            &mut s,
+            "200 OK",
+            &[("Mcp-Session-Id", sid)],
+            "application/json",
+            &body.to_string(),
+        )
+        .await;
         return;
     }
     if sid_hdr.as_deref() != Some(current.as_str()) {
@@ -194,8 +241,11 @@ async fn streamable_conn(mut s: TcpStream, srv: Arc<Streamable>) {
             let _ = s.write_all(b": comment\r\n\r\n").await;
             sse_send(&mut s, &json!({"jsonrpc": "2.0", "method": "notifications/message", "params": {"level": "info"}})).await;
             let page = match msg.pointer("/params/cursor").and_then(Value::as_str) {
-                None => ok(&id, json!({"tools": [{"name": "a", "description": "A",
-                    "inputSchema": {"type": "object", "properties": {"x": {"type": "string"}}}}], "nextCursor": "c2"})),
+                None => ok(
+                    &id,
+                    json!({"tools": [{"name": "a", "description": "A",
+                    "inputSchema": {"type": "object", "properties": {"x": {"type": "string"}}}}], "nextCursor": "c2"}),
+                ),
                 Some("c2") => ok(&id, json!({"tools": [{"name": "b"}]})),
                 Some(other) => panic!("bad cursor {other}"),
             };
@@ -203,12 +253,25 @@ async fn streamable_conn(mut s: TcpStream, srv: Arc<Streamable>) {
             let _ = s.shutdown().await;
         }
         "tools/call" => {
-            let name = msg.pointer("/params/name").and_then(Value::as_str).unwrap_or("");
-            let args = msg.pointer("/params/arguments").cloned().unwrap_or(Value::Null);
+            let name = msg
+                .pointer("/params/name")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let args = msg
+                .pointer("/params/arguments")
+                .cloned()
+                .unwrap_or(Value::Null);
             match name {
                 "echo" => {
                     let body = ok(&id, text(args["msg"].as_str().unwrap_or("")));
-                    respond(&mut s, "200 OK", &[], "application/json; charset=utf-8", &body.to_string()).await;
+                    respond(
+                        &mut s,
+                        "200 OK",
+                        &[],
+                        "application/json; charset=utf-8",
+                        &body.to_string(),
+                    )
+                    .await;
                 }
                 "batch" => {
                     let body = json!([
@@ -222,8 +285,15 @@ async fn streamable_conn(mut s: TcpStream, srv: Arc<Streamable>) {
                     // client's POSTed reply, then answer.
                     let mut replies = srv.replies.subscribe();
                     sse_head(&mut s, &[]).await;
-                    sse_send(&mut s, &json!({"jsonrpc": "2.0", "id": "p1", "method": "ping"})).await;
-                    let reply = tokio::time::timeout(Duration::from_secs(5), replies.recv()).await.unwrap().unwrap();
+                    sse_send(
+                        &mut s,
+                        &json!({"jsonrpc": "2.0", "id": "p1", "method": "ping"}),
+                    )
+                    .await;
+                    let reply = tokio::time::timeout(Duration::from_secs(5), replies.recv())
+                        .await
+                        .unwrap()
+                        .unwrap();
                     sse_send(&mut s, &ok(&id, text(&reply.to_string()))).await;
                     let _ = s.shutdown().await;
                 }
@@ -250,7 +320,11 @@ async fn streamable_conn(mut s: TcpStream, srv: Arc<Streamable>) {
 async fn start_streamable(get_enabled: bool) -> (String, Arc<Streamable>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let srv = Arc::new(Streamable { state: Mutex::default(), replies: broadcast::channel(16).0, get_enabled });
+    let srv = Arc::new(Streamable {
+        state: Mutex::default(),
+        replies: broadcast::channel(16).0,
+        get_enabled,
+    });
     let s2 = srv.clone();
     tokio::spawn(async move {
         while let Ok((sock, _)) = listener.accept().await {
@@ -277,16 +351,28 @@ async fn streamable_basic_flow() {
     let c = McpClient::connect(&remote(&url)).await.unwrap();
     assert_eq!(c.instructions().as_deref(), Some("http instructions"));
     let tools = c.list_tools().await.unwrap();
-    assert_eq!(tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+    assert_eq!(
+        tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+        ["a", "b"]
+    );
     assert_eq!(tools[0].input_schema["properties"]["x"]["type"], "string");
 
     let tok = CancellationToken::new();
-    assert_eq!(c.call_tool("echo", json!({"msg": "yo"}), &tok).await.unwrap().text, "yo");
+    assert_eq!(
+        c.call_tool("echo", json!({"msg": "yo"}), &tok)
+            .await
+            .unwrap()
+            .text,
+        "yo"
+    );
     let err = c.call_tool("fail", json!({}), &tok).await.unwrap_err();
     assert_eq!(err.to_string(), "MCP error -32000: boom");
 
     let mut rx = c.tools_changed();
-    assert_eq!(c.call_tool("batch", json!({}), &tok).await.unwrap().text, "batched");
+    assert_eq!(
+        c.call_tool("batch", json!({}), &tok).await.unwrap().text,
+        "batched"
+    );
     assert_eq!(*rx.borrow_and_update(), 1);
 
     let r = c.call_tool("ask", json!({}), &tok).await.unwrap();
@@ -311,9 +397,18 @@ async fn streamable_session_expiry_reinitializes() {
     let (url, srv) = start_streamable(false).await;
     let c = McpClient::connect(&remote(&url)).await.unwrap();
     let tok = CancellationToken::new();
-    assert_eq!(c.call_tool("expire", json!({}), &tok).await.unwrap().text, "expired");
+    assert_eq!(
+        c.call_tool("expire", json!({}), &tok).await.unwrap().text,
+        "expired"
+    );
     // Old session is now unknown -> 404 -> re-init -> retry succeeds.
-    assert_eq!(c.call_tool("echo", json!({"msg": "again"}), &tok).await.unwrap().text, "again");
+    assert_eq!(
+        c.call_tool("echo", json!({"msg": "again"}), &tok)
+            .await
+            .unwrap()
+            .text,
+        "again"
+    );
     let st = srv.state.lock().unwrap();
     assert_eq!(st.inits, 2);
     assert_eq!(st.initialized_notes, 2);
@@ -325,7 +420,10 @@ async fn streamable_cancel_and_get_stream() {
     let (url, srv) = start_streamable(true).await;
     let c = McpClient::connect(&remote(&url)).await.unwrap();
     let mut rx = c.tools_changed();
-    tokio::time::timeout(Duration::from_secs(5), rx.changed()).await.unwrap().unwrap();
+    tokio::time::timeout(Duration::from_secs(5), rx.changed())
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(srv.state.lock().unwrap().get_streams, 1);
 
     let tok = CancellationToken::new();
@@ -351,7 +449,10 @@ async fn streamable_cancel_and_get_stream() {
 async fn streamable_auth_error() {
     let (url, _srv) = start_streamable(false).await;
     let mut cfg = remote(&url);
-    cfg.transport = Transport::Remote { url, headers: BTreeMap::new() };
+    cfg.transport = Transport::Remote {
+        url,
+        headers: BTreeMap::new(),
+    };
     let err = McpClient::connect(&cfg).await.err().unwrap();
     assert!(format!("{err:#}").contains("401"), "{err:#}");
 }
@@ -367,15 +468,22 @@ struct Legacy {
 }
 
 async fn legacy_conn(mut s: TcpStream, srv: Arc<Legacy>) {
-    let Some(req) = read_req(&mut s).await else { return };
+    let Some(req) = read_req(&mut s).await else {
+        return;
+    };
     match (req.method.as_str(), req.path.as_str()) {
         ("POST", "/sse") => respond(&mut s, "405 Method Not Allowed", &[], "", "").await,
         ("GET", "/sse") => {
-            assert_eq!(req.headers.get("accept").map(String::as_str), Some("text/event-stream"));
+            assert_eq!(
+                req.headers.get("accept").map(String::as_str),
+                Some("text/event-stream")
+            );
             let (tx, mut rx) = mpsc::unbounded_channel();
             *srv.sse.lock().unwrap() = Some(tx);
             sse_head(&mut s, &[]).await;
-            let _ = s.write_all(b"event: endpoint\ndata: messages?sid=abc\n\n").await;
+            let _ = s
+                .write_all(b"event: endpoint\ndata: messages?sid=abc\n\n")
+                .await;
             while let Some(msg) = rx.recv().await {
                 if !sse_send(&mut s, &msg).await {
                     break;
@@ -384,17 +492,28 @@ async fn legacy_conn(mut s: TcpStream, srv: Arc<Legacy>) {
         }
         ("POST", path) if path.starts_with("/messages?sid=abc") => {
             let msg: Value = serde_json::from_slice(&req.body).unwrap();
-            srv.posts.lock().unwrap().push(msg["method"].as_str().unwrap_or("").to_string());
+            srv.posts
+                .lock()
+                .unwrap()
+                .push(msg["method"].as_str().unwrap_or("").to_string());
             respond(&mut s, "202 Accepted", &[], "", "Accepted").await;
             let tx = srv.sse.lock().unwrap().clone().unwrap();
             let id = msg.get("id").cloned().unwrap_or(Value::Null);
             match msg["method"].as_str() {
                 Some("initialize") => {
-                    let _ = tx.send(ok(&id, json!({"protocolVersion": "2024-11-05", "capabilities": {}})));
+                    let _ = tx.send(ok(
+                        &id,
+                        json!({"protocolVersion": "2024-11-05", "capabilities": {}}),
+                    ));
                 }
                 Some("tools/list") => {
-                    let _ = tx.send(json!({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}));
-                    let _ = tx.send(ok(&id, json!({"tools": [{"name": "legacy_tool", "description": "L"}]})));
+                    let _ = tx.send(
+                        json!({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}),
+                    );
+                    let _ = tx.send(ok(
+                        &id,
+                        json!({"tools": [{"name": "legacy_tool", "description": "L"}]}),
+                    ));
                 }
                 Some("tools/call") => {
                     let _ = tx.send(ok(&id, text("legacy result")));
@@ -410,7 +529,10 @@ async fn legacy_conn(mut s: TcpStream, srv: Arc<Legacy>) {
 async fn legacy_sse_fallback() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let srv = Arc::new(Legacy { sse: Mutex::new(None), posts: Mutex::default() });
+    let srv = Arc::new(Legacy {
+        sse: Mutex::new(None),
+        posts: Mutex::default(),
+    });
     let s2 = srv.clone();
     tokio::spawn(async move {
         while let Ok((sock, _)) = listener.accept().await {
@@ -418,7 +540,10 @@ async fn legacy_sse_fallback() {
         }
     });
     let mut cfg = remote(&format!("http://{addr}/sse"));
-    cfg.transport = Transport::Remote { url: format!("http://{addr}/sse"), headers: BTreeMap::new() };
+    cfg.transport = Transport::Remote {
+        url: format!("http://{addr}/sse"),
+        headers: BTreeMap::new(),
+    };
     let c = McpClient::connect(&cfg).await.unwrap();
     assert_eq!(c.instructions(), None);
     let rx = c.tools_changed();
@@ -428,10 +553,21 @@ async fn legacy_sse_fallback() {
     assert_eq!(tools[0].input_schema["type"], "object");
     assert_eq!(*rx.borrow(), 1);
     let tok = CancellationToken::new();
-    assert_eq!(c.call_tool("legacy_tool", json!({}), &tok).await.unwrap().text, "legacy result");
+    assert_eq!(
+        c.call_tool("legacy_tool", json!({}), &tok)
+            .await
+            .unwrap()
+            .text,
+        "legacy result"
+    );
     assert_eq!(
         *srv.posts.lock().unwrap(),
-        ["initialize", "notifications/initialized", "tools/list", "tools/call"]
+        [
+            "initialize",
+            "notifications/initialized",
+            "tools/list",
+            "tools/call"
+        ]
     );
     c.close().await;
 }

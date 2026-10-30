@@ -31,14 +31,28 @@ pub fn status_label(v: &SessionView, tick: u64, now: i64) -> (String, Color) {
     let el = v.busy_ms(now).map(text::fmt_elapsed).unwrap_or_default();
     match &v.info.status {
         Idle => (String::new(), theme::MUTED),
-        Busy => (format!("{} working {el}", theme::spinner(tick)), theme::PRIMARY),
-        Running => (format!("{} running tools {el}", theme::spinner(tick)), theme::PRIMARY),
+        Busy => (
+            format!("{} working {el}", theme::spinner(tick)),
+            theme::PRIMARY,
+        ),
+        Running => (
+            format!("{} running tools {el}", theme::spinner(tick)),
+            theme::PRIMARY,
+        ),
         WaitingPermission => ("△ waiting for permission".into(), theme::WARNING),
-        Retrying { next_at, attempt, .. } => {
+        Retrying {
+            next_at, attempt, ..
+        } => {
             let s = ((next_at - now).max(0) + 999) / 1000;
-            (format!("{} retrying in {s}s (#{attempt})", theme::spinner(tick)), theme::WARNING)
+            (
+                format!("{} retrying in {s}s (#{attempt})", theme::spinner(tick)),
+                theme::WARNING,
+            )
         }
-        Compacting => (format!("{} compacting", theme::spinner(tick)), theme::ACCENT),
+        Compacting => (
+            format!("{} compacting", theme::spinner(tick)),
+            theme::ACCENT,
+        ),
     }
 }
 
@@ -57,8 +71,15 @@ pub fn context_spans(v: &SessionView) -> Vec<Span<'static>> {
     } else {
         theme::MUTED
     };
-    let max = if c.max > 0 { format!("/{}", text::fmt_tokens(c.max)) } else { String::new() };
-    vec![Span::styled(format!("{}{max} ({pct}%)", text::fmt_tokens(c.used)), theme::fg(color))]
+    let max = if c.max > 0 {
+        format!("/{}", text::fmt_tokens(c.max))
+    } else {
+        String::new()
+    };
+    vec![Span::styled(
+        format!("{}{max} ({pct}%)", text::fmt_tokens(c.used)),
+        theme::fg(color),
+    )]
 }
 
 pub fn draw_status(buf: &mut Buffer, area: Rect, cx: &StatusCtx<'_>) {
@@ -68,14 +89,26 @@ pub fn draw_status(buf: &mut Buffer, area: Rect, cx: &StatusCtx<'_>) {
     let now = ref_proto::now_ms();
     let mut left: Vec<Span<'static>> = vec![Span::raw(" ")];
     if !cx.connected {
-        left.push(Span::styled("● disconnected — reconnecting…", theme::fg(theme::ERROR)));
+        left.push(Span::styled(
+            "● disconnected — reconnecting…",
+            theme::fg(theme::ERROR),
+        ));
     } else if cx.watch_mode {
-        left.push(Span::styled("◫ background sessions", theme::bold(theme::PRIMARY)));
-        left.push(Span::styled(format!(" · {}", cx.watch_count), theme::muted()));
+        left.push(Span::styled(
+            "◫ background sessions",
+            theme::bold(theme::PRIMARY),
+        ));
+        left.push(Span::styled(
+            format!(" · {}", cx.watch_count),
+            theme::muted(),
+        ));
         if let Some((p, n)) = cx.page
             && n > 1
         {
-            left.push(Span::styled(format!(" · page {}/{n}", p + 1), theme::muted()));
+            left.push(Span::styled(
+                format!(" · page {}/{n}", p + 1),
+                theme::muted(),
+            ));
         }
     } else {
         left.push(Span::styled(text::tilde(cx.cwd), theme::muted()));
@@ -91,15 +124,27 @@ pub fn draw_status(buf: &mut Buffer, area: Rect, cx: &StatusCtx<'_>) {
     // Hint section.
     if cx.leader {
         left.push(Span::styled("   ctrl+x ", theme::bold(theme::PRIMARY)));
-        left.push(Span::styled("n new · l sessions · k close · m models · a agents · w watch · h help", theme::muted()));
+        left.push(Span::styled(
+            "n new · l sessions · k close · m models · a agents · w watch · h help",
+            theme::muted(),
+        ));
     } else if let Some((h, c)) = &cx.hint {
-        left.push(Span::styled(format!("   {h}"), theme::fg(*c).add_modifier(Modifier::BOLD)));
+        left.push(Span::styled(
+            format!("   {h}"),
+            theme::fg(*c).add_modifier(Modifier::BOLD),
+        ));
     } else if cx.shell_mode {
         left.push(Span::styled("   esc exit shell mode", theme::muted()));
     } else if cx.watch_mode && cx.watch_count > 0 && !cx.watch_focused {
-        left.push(Span::styled("   click or tab to focus a session · wheel scrolls a tile", theme::fg(theme::DIM)));
+        left.push(Span::styled(
+            "   click or tab to focus a session · wheel scrolls a tile",
+            theme::fg(theme::DIM),
+        ));
     } else if cx.watch_mode && cx.watch_count > 0 {
-        left.push(Span::styled("   enter send · pgup/pgdn scroll · esc unfocus · esc esc abort · ctrl+o zoom", theme::fg(theme::DIM)));
+        left.push(Span::styled(
+            "   enter send · pgup/pgdn scroll · esc unfocus · esc esc abort · ctrl+o zoom",
+            theme::fg(theme::DIM),
+        ));
     } else if cx.view.is_some_and(|v| v.is_busy()) {
         left.push(Span::styled("   esc ", theme::text()));
         left.push(Span::styled("interrupt", theme::muted()));
@@ -118,22 +163,54 @@ pub fn draw_status(buf: &mut Buffer, area: Rect, cx: &StatusCtx<'_>) {
 }
 
 /// Prompt metadata row: `Agent · Model provider · variant`.
-pub fn meta_line(agent: &str, agent_color: Color, model: &str, provider: &str, variant: Option<&str>, shell: bool, w: usize) -> Line<'static> {
+pub fn meta_line(
+    agent: &str,
+    agent_color: Color,
+    model: &str,
+    provider: &str,
+    variant: Option<&str>,
+    shell: bool,
+    w: usize,
+) -> Line<'static> {
     let bg = theme::PANEL;
     if shell {
-        return Line::from(vec![Span::styled("Shell", Style::new().fg(theme::WARNING).bg(bg).add_modifier(Modifier::BOLD))]);
+        return Line::from(vec![Span::styled(
+            "Shell",
+            Style::new()
+                .fg(theme::WARNING)
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        )]);
     }
-    let mut spans = vec![Span::styled(titlecase(agent), Style::new().fg(agent_color).bg(bg).add_modifier(Modifier::BOLD))];
+    let mut spans = vec![Span::styled(
+        titlecase(agent),
+        Style::new()
+            .fg(agent_color)
+            .bg(bg)
+            .add_modifier(Modifier::BOLD),
+    )];
     if !model.is_empty() {
         spans.push(Span::styled(" · ", Style::new().fg(theme::MUTED).bg(bg)));
-        spans.push(Span::styled(model.to_string(), Style::new().fg(theme::TEXT).bg(bg)));
+        spans.push(Span::styled(
+            model.to_string(),
+            Style::new().fg(theme::TEXT).bg(bg),
+        ));
         if !provider.is_empty() {
-            spans.push(Span::styled(format!(" {provider}"), Style::new().fg(theme::MUTED).bg(bg)));
+            spans.push(Span::styled(
+                format!(" {provider}"),
+                Style::new().fg(theme::MUTED).bg(bg),
+            ));
         }
     }
     if let Some(v) = variant {
         spans.push(Span::styled(" · ", Style::new().fg(theme::MUTED).bg(bg)));
-        spans.push(Span::styled(v.to_string(), Style::new().fg(theme::WARNING).bg(bg).add_modifier(Modifier::BOLD)));
+        spans.push(Span::styled(
+            v.to_string(),
+            Style::new()
+                .fg(theme::WARNING)
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        ));
     }
     Line::from(super::message::truncate_spans(spans, w))
 }

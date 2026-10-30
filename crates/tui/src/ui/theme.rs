@@ -3,7 +3,11 @@
 use ratatui::style::{Color, Modifier, Style};
 
 pub const fn rgb(hex: u32) -> Color {
-    Color::Rgb(((hex >> 16) & 0xff) as u8, ((hex >> 8) & 0xff) as u8, (hex & 0xff) as u8)
+    Color::Rgb(
+        ((hex >> 16) & 0xff) as u8,
+        ((hex >> 8) & 0xff) as u8,
+        (hex & 0xff) as u8,
+    )
 }
 
 pub const PRIMARY: Color = rgb(0xfab283);
@@ -88,12 +92,17 @@ pub fn parse_color(s: &str) -> Option<Color> {
 /// Colour of an agent: configured colour, else palette entry by position.
 pub fn agent_color(agents: &[ref_proto::AgentInfo], name: &str) -> Color {
     let idx = agents.iter().position(|a| a.name == name);
-    if let Some(c) = idx.and_then(|i| agents[i].color.as_deref()).and_then(parse_color) {
+    if let Some(c) = idx
+        .and_then(|i| agents[i].color.as_deref())
+        .and_then(parse_color)
+    {
         return c;
     }
     let i = match idx {
         Some(i) => i,
-        None => name.bytes().fold(0usize, |a, b| a.wrapping_mul(31).wrapping_add(b as usize)),
+        None => name
+            .bytes()
+            .fold(0usize, |a, b| a.wrapping_mul(31).wrapping_add(b as usize)),
     };
     AGENT_PALETTE[i % AGENT_PALETTE.len()]
 }

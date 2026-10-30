@@ -43,7 +43,10 @@ pub(crate) fn id_key(id: &Value) -> String {
 /// Convert a JSON-RPC error object into an anyhow error.
 pub(crate) fn rpc_error(err: &Value) -> anyhow::Error {
     let code = err.get("code").and_then(Value::as_i64).unwrap_or(0);
-    let message = err.get("message").and_then(Value::as_str).unwrap_or("unknown error");
+    let message = err
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown error");
     anyhow!("MCP error {code}: {message}")
 }
 
@@ -61,9 +64,17 @@ pub(crate) fn contains_response(msg: &Value, id: &Value) -> bool {
 }
 
 impl Shared {
-    pub(crate) fn new(name: String, out_tx: mpsc::UnboundedSender<Value>) -> (Arc<Self>, watch::Receiver<u64>) {
+    pub(crate) fn new(
+        name: String,
+        out_tx: mpsc::UnboundedSender<Value>,
+    ) -> (Arc<Self>, watch::Receiver<u64>) {
         let (tools_tx, tools_rx) = watch::channel(0u64);
-        let shared = Arc::new(Shared { name, pending: Default::default(), tools_tx, out_tx });
+        let shared = Arc::new(Shared {
+            name,
+            pending: Default::default(),
+            tools_tx,
+            out_tx,
+        });
         (shared, tools_rx)
     }
 
@@ -86,7 +97,13 @@ impl Shared {
 
     /// Fail every pending request (transport closed).
     pub(crate) fn fail_all(&self, err: &str) {
-        let drained: Vec<Reply> = self.pending.lock().unwrap().drain().map(|(_, v)| v).collect();
+        let drained: Vec<Reply> = self
+            .pending
+            .lock()
+            .unwrap()
+            .drain()
+            .map(|(_, v)| v)
+            .collect();
         for tx in drained {
             let _ = tx.send(Err(anyhow!("{err}")));
         }
@@ -127,7 +144,9 @@ impl Shared {
                 };
                 let _ = tx.send(res);
             }
-            (None, None) => tracing::debug!(server = %self.name, "ignoring malformed JSON-RPC message"),
+            (None, None) => {
+                tracing::debug!(server = %self.name, "ignoring malformed JSON-RPC message")
+            }
         }
     }
 
@@ -219,14 +238,18 @@ impl McpClient {
     pub async fn connect(cfg: &ServerConfig) -> Result<McpClient> {
         let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Value>();
         let (shared, tools_rx) = Shared::new(cfg.name.clone(), out_tx);
-        let conn = match &cfg.transport {
-            Transport::Local { command, env, cwd } => {
-                Conn::Stdio(Box::new(StdioTransport::spawn(&cfg.name, command, env, cwd.as_deref(), shared.clone())?))
-            }
-            Transport::Remote { url, headers } => {
-                Conn::Http(Box::new(HttpTransport::new(url, headers, shared.clone(), cfg.timeout)?))
-            }
-        };
+        let conn =
+            match &cfg.transport {
+                Transport::Local { command, env, cwd } => Conn::Stdio(Box::new(
+                    StdioTransport::spawn(&cfg.name, command, env, cwd.as_deref(), shared.clone())?,
+                )),
+                Transport::Remote { url, headers } => Conn::Http(Box::new(HttpTransport::new(
+                    url,
+                    headers,
+                    shared.clone(),
+                    cfg.timeout,
+                )?)),
+            };
         let conn = Arc::new(conn);
         let writer = {
             let conn = conn.clone();
@@ -269,8 +292,13 @@ impl McpClient {
             "capabilities": {"roots": {"listChanged": false}},
             "clientInfo": {"name": "ref", "version": env!("CARGO_PKG_VERSION")},
         });
-        let res = self.request("initialize", params, Some(self.timeout), None).await?;
-        let version = res.get("protocolVersion").and_then(Value::as_str).unwrap_or(PROTOCOL_VERSION);
+        let res = self
+            .request("initialize", params, Some(self.timeout), None)
+            .await?;
+        let version = res
+            .get("protocolVersion")
+            .and_then(Value::as_str)
+            .unwrap_or(PROTOCOL_VERSION);
         self.conn.set_protocol_version(version);
         self.instructions = res
             .get("instructions")
@@ -312,7 +340,10 @@ impl McpClient {
         }
         let id = json!(self.next_id.fetch_add(1, Ordering::SeqCst));
         let rx = self.shared.register(&id);
-        let _guard = PendingGuard { shared: &self.shared, id: id.clone() };
+        let _guard = PendingGuard {
+            shared: &self.shared,
+            id: id.clone(),
+        };
         let msg = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
         let fut = async {
             self.conn.send(&msg).await?;
@@ -327,7 +358,10 @@ impl McpClient {
                         if method != "initialize" {
                             self.send_cancelled(&id, "timeout");
                         }
-                        Err(anyhow!("MCP request {method} timed out after {}s", t.as_secs_f64()))
+                        Err(anyhow!(
+                            "MCP request {method} timed out after {}s",
+                            t.as_secs_f64()
+                        ))
                     }
                 },
                 None => fut.await,
@@ -362,14 +396,26 @@ impl McpClient {
                 Some(c) => json!({"cursor": c}),
                 None => json!({}),
             };
-            let res = self.request("tools/list", params, Some(self.timeout), None).await?;
-            for t in res.get("tools").and_then(Value::as_array).into_iter().flatten() {
+            let res = self
+                .request("tools/list", params, Some(self.timeout), None)
+                .await?;
+            for t in res
+                .get("tools")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
                 match parse_tool(t) {
                     Some(tool) => tools.push(tool),
-                    None => tracing::warn!(server = %self.name, "skipping invalid tool definition: {t}"),
+                    None => {
+                        tracing::warn!(server = %self.name, "skipping invalid tool definition: {t}")
+                    }
                 }
             }
-            let next = res.get("nextCursor").and_then(Value::as_str).filter(|s| !s.is_empty());
+            let next = res
+                .get("nextCursor")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty());
             match next {
                 Some(n) if cursor.as_deref() != Some(n) => cursor = Some(n.to_string()),
                 _ => return Ok(tools),
@@ -379,10 +425,20 @@ impl McpClient {
     }
 
     /// Call a tool. No timeout; `cancel` aborts the call and notifies the server.
-    pub async fn call_tool(&self, name: &str, args: Value, cancel: &CancellationToken) -> Result<CallResult> {
+    pub async fn call_tool(
+        &self,
+        name: &str,
+        args: Value,
+        cancel: &CancellationToken,
+    ) -> Result<CallResult> {
         let args = if args.is_null() { json!({}) } else { args };
         let res = self
-            .request("tools/call", json!({"name": name, "arguments": args}), None, Some(cancel))
+            .request(
+                "tools/call",
+                json!({"name": name, "arguments": args}),
+                None,
+                Some(cancel),
+            )
             .await?;
         Ok(parse_call_result(&res))
     }
@@ -411,29 +467,46 @@ fn parse_tool(t: &Value) -> Option<McpTool> {
     if name.is_empty() {
         return None;
     }
-    let description = t.get("description").and_then(Value::as_str).unwrap_or_default().to_string();
+    let description = t
+        .get("description")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
     let input_schema = match t.get("inputSchema") {
         Some(s @ Value::Object(_)) => s.clone(),
         _ => json!({"type": "object", "properties": {}}),
     };
-    Some(McpTool { name, description, input_schema })
+    Some(McpTool {
+        name,
+        description,
+        input_schema,
+    })
 }
 
 pub(crate) fn parse_call_result(res: &Value) -> CallResult {
     let mut texts: Vec<String> = Vec::new();
     let mut images = Vec::new();
-    for item in res.get("content").and_then(Value::as_array).into_iter().flatten() {
+    for item in res
+        .get("content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         let str_field = |k: &str| item.get(k).and_then(Value::as_str);
         match str_field("type").unwrap_or("") {
             "text" => texts.push(str_field("text").unwrap_or_default().to_string()),
             "image" => images.push(ImageData {
                 mime: str_field("mimeType").unwrap_or("image/png").to_string(),
-                data: str_field("data").unwrap_or_default().to_string(), ..Default::default()
+                data: str_field("data").unwrap_or_default().to_string(),
+                ..Default::default()
             }),
             "resource" => {
                 let r = item.get("resource").cloned().unwrap_or(Value::Null);
                 let uri = r.get("uri").and_then(Value::as_str).unwrap_or("");
-                let mime = r.get("mimeType").and_then(Value::as_str).unwrap_or("unknown type");
+                let mime = r
+                    .get("mimeType")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown type");
                 match r.get("text").and_then(Value::as_str) {
                     Some(text) => texts.push(text.to_string()),
                     None => texts.push(format!("[Binary resource {uri} ({mime}) omitted]")),
@@ -460,7 +533,11 @@ pub(crate) fn parse_call_result(res: &Value) -> CallResult {
         text = serde_json::to_string(sc).unwrap_or_default();
     }
     let is_error = res.get("isError").and_then(Value::as_bool).unwrap_or(false);
-    CallResult { text, images, is_error }
+    CallResult {
+        text,
+        images,
+        is_error,
+    }
 }
 
 #[cfg(test)]
@@ -490,8 +567,14 @@ mod tests {
     #[test]
     fn response_detection() {
         let id = json!(3);
-        assert!(contains_response(&json!({"jsonrpc":"2.0","id":3,"result":{}}), &id));
-        assert!(contains_response(&json!([{"method":"x"},{"id":3,"error":{}}]), &id));
+        assert!(contains_response(
+            &json!({"jsonrpc":"2.0","id":3,"result":{}}),
+            &id
+        ));
+        assert!(contains_response(
+            &json!([{"method":"x"},{"id":3,"error":{}}]),
+            &id
+        ));
         assert!(!contains_response(&json!({"id":3,"method":"ping"}), &id));
         assert!(!contains_response(&json!({"id":"3","result":{}}), &id));
     }

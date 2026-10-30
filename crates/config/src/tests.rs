@@ -47,7 +47,10 @@ impl Fx {
         let t = TempDir::new();
         fs::create_dir_all(t.path().join("home/.config/opencode")).unwrap();
         fs::create_dir_all(t.path().join("proj/.git")).unwrap();
-        Fx { t, env: HashMap::new() }
+        Fx {
+            t,
+            env: HashMap::new(),
+        }
     }
     fn home(&self) -> PathBuf {
         self.t.path().join("home")
@@ -141,7 +144,10 @@ fn providers_models_variants_images() {
     assert_eq!((m.context, m.output, m.input), (1_000_000, 128_000, 0));
     assert_eq!(m.compact_at, Some(500_000));
     assert!(m.images && m.reasoning);
-    assert_eq!(m.temperature, None, "temperature: true is a capability flag");
+    assert_eq!(
+        m.temperature, None,
+        "temperature: true is a capability flag"
+    );
     assert_eq!(m.variants.keys().collect::<Vec<_>>(), ["high"]);
     assert_eq!(m.variants["high"]["reasoningEffort"], "high");
 
@@ -204,7 +210,10 @@ fn builtin_catalog_only_with_env() {
     assert!(ds.models.contains_key("deepseek-chat") && ds.models["deepseek-reasoner"].reasoning);
     let oa = &c.providers["openai"];
     assert_eq!(oa.npm.as_deref(), Some("@ai-sdk/openai"));
-    assert_eq!(oa.models["gpt-5"].variants.keys().collect::<Vec<_>>(), ["high", "low", "medium"]);
+    assert_eq!(
+        oa.models["gpt-5"].variants.keys().collect::<Vec<_>>(),
+        ["high", "low", "medium"]
+    );
 
     // A configured provider with the same id is not replaced.
     fx.write(
@@ -222,7 +231,10 @@ fn builtin_catalog_only_with_env() {
 #[test]
 fn substitution_env_and_file() {
     let mut fx = Fx::new();
-    fx.write("home/.config/opencode/prompts/rev.md", "  Review carefully.\n\n");
+    fx.write(
+        "home/.config/opencode/prompts/rev.md",
+        "  Review carefully.\n\n",
+    );
     fx.write("home/secret.txt", "tok\n");
     fx.write(
         "home/.config/opencode/opencode.json",
@@ -257,9 +269,18 @@ fn merge_order_and_project_walk() {
         "proj/opencode.json",
         r#"{"model": "a/root", "tui": {"theme": "y"}, "provider": {"p": {"models": {"m3": {}}}}}"#,
     );
-    fx.write("proj/.opencode/opencode.jsonc", r#"{"default_agent": "plan",}"#);
-    fx.write("proj/sub/ref.json", r#"{"model": "a/sub", "instructions": ["s.md"]}"#);
-    fx.write("proj/sub/.ref/ref.jsonc", r#"{"retry": {"max_delay": 30}, "images": {"auto_resize": false}}"#);
+    fx.write(
+        "proj/.opencode/opencode.jsonc",
+        r#"{"default_agent": "plan",}"#,
+    );
+    fx.write(
+        "proj/sub/ref.json",
+        r#"{"model": "a/sub", "instructions": ["s.md"]}"#,
+    );
+    fx.write(
+        "proj/sub/.ref/ref.jsonc",
+        r#"{"retry": {"max_delay": 30}, "images": {"auto_resize": false}}"#,
+    );
     fx.write("proj/other/opencode.json", r#"{"model": "a/other"}"#);
     // Above the git root: ignored.
     fx.write("opencode.json", r#"{"model": "a/outside"}"#);
@@ -300,7 +321,10 @@ fn parse_errors_become_warnings() {
     let fx = Fx::new();
     fx.write("home/.config/opencode/opencode.json", "{ \"model\": ");
     fx.write("proj/opencode.json", "[1, 2]");
-    fx.write("proj/.opencode/opencode.json", r#"{"permission": {"bash": "maybe"}, "model": 5}"#);
+    fx.write(
+        "proj/.opencode/opencode.json",
+        r#"{"permission": {"bash": "maybe"}, "model": 5}"#,
+    );
     let c = fx.load();
     assert_eq!(c.warnings.len(), 4, "{:?}", c.warnings);
     assert!(c.warnings[0].contains("home/.config/opencode/opencode.json"));
@@ -331,7 +355,10 @@ fn compaction_agent_builtin_and_overrides() {
     assert!(a.hidden && !a.creatable);
 
     // Markdown agent file replaces the prompt.
-    fx.write("proj/.opencode/agent/compaction.md", "---\ntemperature: 0.1\n---\nSummarize tersely.\n");
+    fx.write(
+        "proj/.opencode/agent/compaction.md",
+        "---\ntemperature: 0.1\n---\nSummarize tersely.\n",
+    );
     let c = fx.load();
     let a = &c.agents[COMPACTION_AGENT];
     assert_eq!(a.prompt.trim(), "Summarize tersely.");
@@ -365,7 +392,10 @@ fn agents_merge_and_disable() {
     assert_eq!(b.options["x"], 1);
     assert_eq!(b.options["reasoningEffort"], "low");
     let dm = c.default_model_for("build").unwrap();
-    assert_eq!((dm.key().as_str(), dm.variant.as_deref()), ("p/m", Some("high")));
+    assert_eq!(
+        (dm.key().as_str(), dm.variant.as_deref()),
+        ("p/m", Some("high"))
+    );
     assert!(!c.agents.contains_key("general"));
     let r = &c.agents["rev"];
     assert_eq!(r.description, "Reviewer");
@@ -389,8 +419,14 @@ fn markdown_agents_and_commands() {
          permission:\n  edit: deny\n  bash:\n    \"*\": ask\n    \"git diff\": allow\n\
          tools:\n  webfetch: false\ndelay:\n  bash: 1.5\ncan_spawn: true\n---\nYou review code.\n",
     );
-    fx.write("home/.config/opencode/agents/team/lead.md", "Lead prompt only.");
-    fx.write("proj/.opencode/agents/review.md", "---\ndescription: Project reviewer\n---\nProject prompt.");
+    fx.write(
+        "home/.config/opencode/agents/team/lead.md",
+        "Lead prompt only.",
+    );
+    fx.write(
+        "proj/.opencode/agents/review.md",
+        "---\ndescription: Project reviewer\n---\nProject prompt.",
+    );
     fx.write("proj/.ref/modes/fast.md", "---\nmode: subagent\n---\nFast.");
     fx.write(
         "proj/.opencode/command/test.md",
@@ -416,7 +452,10 @@ fn markdown_agents_and_commands() {
     assert_eq!(r.delay, vec![("bash".to_string(), 1.5)]);
     assert_eq!(c.permission_for("review", "edit", "a.rs"), Action::Deny);
     assert_eq!(c.permission_for("review", "bash", "ls"), Action::Ask);
-    assert_eq!(c.permission_for("review", "bash", "git diff"), Action::Allow);
+    assert_eq!(
+        c.permission_for("review", "bash", "git diff"),
+        Action::Allow
+    );
     assert_eq!(c.permission_for("review", "webfetch", ""), Action::Deny);
     assert!(c.tool_disabled("review", "webfetch"));
 
@@ -450,8 +489,14 @@ fn permission_precedence() {
     // `*: allow` comes after the legacy tools map, so it re-enables webfetch globally.
     assert_eq!(c.permission_for("build", "webfetch", ""), Action::Allow);
     assert_eq!(c.permission_for("build", "bash", "ls"), Action::Ask);
-    assert_eq!(c.permission_for("build", "bash", "git status"), Action::Allow);
-    assert_eq!(c.permission_for("build", "bash", "git push origin"), Action::Ask);
+    assert_eq!(
+        c.permission_for("build", "bash", "git status"),
+        Action::Allow
+    );
+    assert_eq!(
+        c.permission_for("build", "bash", "git push origin"),
+        Action::Ask
+    );
     assert_eq!(c.permission_for("build", "bash", "rm -rf x"), Action::Deny);
     assert_eq!(c.permission_for("nobody", "bash", "git log"), Action::Allow);
     // Agent rules override global ones.
@@ -469,7 +514,10 @@ fn permission_precedence() {
 #[test]
 fn global_permission_string() {
     let fx = Fx::new();
-    fx.write("home/.config/opencode/opencode.json", r#"{"permission": "ask"}"#);
+    fx.write(
+        "home/.config/opencode/opencode.json",
+        r#"{"permission": "ask"}"#,
+    );
     let c = fx.load();
     assert_eq!(c.permission_for("build", "anything", ""), Action::Ask);
     assert_eq!(c.permission_for("plan", "edit", "x"), Action::Deny);
@@ -509,7 +557,11 @@ fn compaction_thresholds() {
     let c = fx.load();
     assert!(!c.compaction.auto);
     assert_eq!(c.compaction.recommend_tokens(200_000, None), 50_000);
-    assert_eq!(c.compaction.recommend_tokens(10_000, None), 10_000, "absolute capped at window");
+    assert_eq!(
+        c.compaction.recommend_tokens(10_000, None),
+        10_000,
+        "absolute capped at window"
+    );
     assert_eq!(c.compaction.auto_tokens(200_000), 160_000);
 }
 
@@ -530,9 +582,18 @@ fn mcp_parsing() {
     );
     let c = fx.load();
     assert_eq!(c.warnings.len(), 1, "{:?}", c.warnings);
-    assert_eq!(c.mcp.keys().collect::<Vec<_>>(), ["inferred", "loc", "rem", "url-only"]);
+    assert_eq!(
+        c.mcp.keys().collect::<Vec<_>>(),
+        ["inferred", "loc", "rem", "url-only"]
+    );
     match &c.mcp["loc"] {
-        McpConfig::Local { command, environment, cwd, enabled, timeout_ms } => {
+        McpConfig::Local {
+            command,
+            environment,
+            cwd,
+            enabled,
+            timeout_ms,
+        } => {
             assert_eq!(command, &["npx", "-y", "srv"]);
             assert_eq!(environment["A"], "1");
             assert_eq!(cwd.as_deref(), Some("tools"));
@@ -559,13 +620,20 @@ fn mcp_parsing() {
 #[test]
 fn skills_paths() {
     let fx = Fx::new();
-    fx.write("home/.config/opencode/opencode.json", r#"{"skills": ["~/sk", "./rel"]}"#);
+    fx.write(
+        "home/.config/opencode/opencode.json",
+        r#"{"skills": ["~/sk", "./rel"]}"#,
+    );
     fx.write("proj/opencode.json", r#"{"skills": {"paths": ["more"]}}"#);
     let c = fx.load();
     assert!(c.warnings.is_empty(), "{:?}", c.warnings);
     assert_eq!(
         c.skill_paths,
-        vec![fx.home().join("sk"), fx.home().join(".config/opencode/./rel"), fx.proj().join("more")]
+        vec![
+            fx.home().join("sk"),
+            fx.home().join(".config/opencode/./rel"),
+            fx.proj().join("more")
+        ]
     );
 }
 
@@ -587,10 +655,23 @@ fn real_config_sanity() {
             p.models.keys().collect::<Vec<_>>()
         );
     }
-    println!("model={:?} small_model={:?}", c.model.as_ref().map(|m| m.key()), c.small_model.as_ref().map(|m| m.key()));
-    println!("agents={} {:?} default={}", c.agents.len(), c.agents.keys().collect::<Vec<_>>(), c.default_agent);
+    println!(
+        "model={:?} small_model={:?}",
+        c.model.as_ref().map(|m| m.key()),
+        c.small_model.as_ref().map(|m| m.key())
+    );
+    println!(
+        "agents={} {:?} default={}",
+        c.agents.len(),
+        c.agents.keys().collect::<Vec<_>>(),
+        c.default_agent
+    );
     println!("mcp={:?}", c.mcp.keys().collect::<Vec<_>>());
-    println!("permission rules={} commands={}", c.permission.rules.len(), c.commands.len());
+    println!(
+        "permission rules={} commands={}",
+        c.permission.rules.len(),
+        c.commands.len()
+    );
     println!("config_dirs={:?}", c.config_dirs);
     println!("warnings={:?}", c.warnings);
 }

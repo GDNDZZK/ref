@@ -8,7 +8,10 @@ const SUMMARY_CHARS: usize = 600;
 
 /// The document's root element is `rss`, `feed` (Atom) or `rdf:RDF` (RSS 1.0).
 pub fn is_feed(mime: &str, text: &str) -> bool {
-    if matches!(mime, "application/rss+xml" | "application/atom+xml" | "application/rdf+xml") {
+    if matches!(
+        mime,
+        "application/rss+xml" | "application/atom+xml" | "application/rdf+xml"
+    ) {
         return true;
     }
     if !mime.contains("xml") {
@@ -59,7 +62,10 @@ pub fn to_markdown(xml: &str) -> Option<(Option<String>, String)> {
                     let mut href = None;
                     let mut rel = String::from("alternate");
                     for a in e.attributes().flatten() {
-                        let v = a.normalized_value(quick_xml::XmlVersion::Implicit1_0).map(|v| v.to_string()).unwrap_or_default();
+                        let v = a
+                            .normalized_value(quick_xml::XmlVersion::Implicit1_0)
+                            .map(|v| v.to_string())
+                            .unwrap_or_default();
                         match a.key.local_name().as_ref() {
                             "href" => href = Some(v),
                             "rel" => rel = v,
@@ -112,8 +118,12 @@ pub fn to_markdown(xml: &str) -> Option<(Option<String>, String)> {
                 let slot = match name.as_str() {
                     "title" => &mut target.title,
                     "link" => &mut target.link,
-                    "pubDate" | "published" | "updated" | "date" | "lastBuildDate" => &mut target.date,
-                    "description" | "summary" | "subtitle" | "encoded" | "content" => &mut target.summary,
+                    "pubDate" | "published" | "updated" | "date" | "lastBuildDate" => {
+                        &mut target.date
+                    }
+                    "description" | "summary" | "subtitle" | "encoded" | "content" => {
+                        &mut target.summary
+                    }
                     "name" | "creator" | "author" => &mut target.author,
                     _ => continue,
                 };
@@ -142,7 +152,9 @@ pub fn to_markdown(xml: &str) -> Option<(Option<String>, String)> {
     }
     md.push_str(&format!("{} entries\n", entries.len()));
     for e in &entries {
-        let t = Some(plain(&e.title)).filter(|t| !t.is_empty()).unwrap_or_else(|| "(untitled)".into());
+        let t = Some(plain(&e.title))
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| "(untitled)".into());
         md.push_str("\n## ");
         if e.link.is_empty() {
             md.push_str(&t);
@@ -150,7 +162,10 @@ pub fn to_markdown(xml: &str) -> Option<(Option<String>, String)> {
             md.push_str(&format!("[{t}]({})", e.link.trim()));
         }
         md.push('\n');
-        let meta: Vec<&str> = [e.date.as_str(), e.author.as_str()].into_iter().filter(|s| !s.is_empty()).collect();
+        let meta: Vec<&str> = [e.date.as_str(), e.author.as_str()]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect();
         if !meta.is_empty() {
             md.push_str(&format!("{}\n", meta.join(" · ")));
         }
@@ -169,6 +184,13 @@ fn plain(s: &str) -> String {
     static HTML: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
         regex::Regex::new(r"(?i)</?(p|br|b|i|em|strong|a|div|span|img|ul|ol|li|code|pre|h[1-6]|blockquote|table|tr|td|figure|hr)\b|&(#\d+|#x[0-9a-f]+|[a-z]+);").unwrap()
     });
-    let t = if HTML.is_match(s) { dom_query::Document::from(format!("<body>{s}</body>").as_str()).select("body").text().to_string() } else { s.to_string() };
+    let t = if HTML.is_match(s) {
+        dom_query::Document::from(format!("<body>{s}</body>").as_str())
+            .select("body")
+            .text()
+            .to_string()
+    } else {
+        s.to_string()
+    };
     t.split_whitespace().collect::<Vec<_>>().join(" ")
 }

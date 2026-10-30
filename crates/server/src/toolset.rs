@@ -12,8 +12,7 @@ use serde_json::{Map, Value, json};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
-pub const PURPOSE_DESC: &str =
-    "One short sentence saying why you are calling this tool; shown to the user. Use the language of the user's messages.";
+pub const PURPOSE_DESC: &str = "One short sentence saying why you are calling this tool; shown to the user. Use the language of the user's messages.";
 
 /// Max MCP text output returned to the model.
 const MCP_MAX_BYTES: usize = 50 * 1024;
@@ -24,7 +23,10 @@ pub enum Kind {
     Harness,
     Peer,
     Spawn,
-    Mcp { server: Arc<McpServer>, tool: String },
+    Mcp {
+        server: Arc<McpServer>,
+        tool: String,
+    },
 }
 
 #[derive(Clone)]
@@ -38,7 +40,10 @@ pub fn with_purpose(schema: &Value) -> Value {
     let mut obj = schema.as_object().cloned().unwrap_or_default();
     obj.entry("type").or_insert_with(|| json!("object"));
     let mut props = Map::new();
-    props.insert("purpose".into(), json!({"type": "string", "description": PURPOSE_DESC}));
+    props.insert(
+        "purpose".into(),
+        json!({"type": "string", "description": PURPOSE_DESC}),
+    );
     if let Some(Value::Object(p)) = obj.get("properties") {
         for (k, v) in p {
             if k != "purpose" {
@@ -67,13 +72,23 @@ pub fn with_purpose(schema: &Value) -> Value {
 pub fn mcp_tool_name(server: &str, tool: &str) -> String {
     let raw = format!("{server}_{tool}");
     raw.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .take(64)
         .collect()
 }
 
 fn def(name: &str, description: &str, params: Value) -> ToolDef {
-    ToolDef { name: name.into(), description: description.into(), parameters: with_purpose(&params) }
+    ToolDef {
+        name: name.into(),
+        description: description.into(),
+        parameters: with_purpose(&params),
+    }
 }
 
 pub fn harness_defs() -> Vec<ToolDef> {
@@ -118,7 +133,11 @@ pub fn assemble(cfg: &Config, agent: &str, mcp: &[Arc<McpServer>]) -> Vec<Entry>
         }
     };
     for s in ref_tools::specs() {
-        push(def(s.name, &s.description, s.parameters), Kind::Builtin, &mut out);
+        push(
+            def(s.name, &s.description, s.parameters),
+            Kind::Builtin,
+            &mut out,
+        );
     }
     for d in harness_defs() {
         push(d, Kind::Harness, &mut out);
@@ -135,10 +154,21 @@ pub fn assemble(cfg: &Config, agent: &str, mcp: &[Arc<McpServer>]) -> Vec<Entry>
     for server in mcp {
         for t in server.tools() {
             let name = mcp_tool_name(&server.name, &t.name);
-            let desc = if t.description.trim().is_empty() { format!("MCP tool {} from server {}", t.name, server.name) } else { t.description.clone() };
+            let desc = if t.description.trim().is_empty() {
+                format!("MCP tool {} from server {}", t.name, server.name)
+            } else {
+                t.description.clone()
+            };
             mcp_entries.push(Entry {
-                def: ToolDef { name, description: desc, parameters: with_purpose(&t.input_schema) },
-                kind: Kind::Mcp { server: server.clone(), tool: t.name.clone() },
+                def: ToolDef {
+                    name,
+                    description: desc,
+                    parameters: with_purpose(&t.input_schema),
+                },
+                kind: Kind::Mcp {
+                    server: server.clone(),
+                    tool: t.name.clone(),
+                },
             });
         }
     }
@@ -151,7 +181,13 @@ pub fn assemble(cfg: &Config, agent: &str, mcp: &[Arc<McpServer>]) -> Vec<Entry>
 
 /// Permission subject for a call.
 pub fn subject(tool: &str, input: &Value) -> String {
-    let get = |k: &str| input.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    let get = |k: &str| {
+        input
+            .get(k)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
     match tool {
         "bash" => get("command"),
         "read" | "edit" | "write" | "delete" | "grep" | "find" => get("path"),
@@ -174,8 +210,17 @@ pub async fn dispatch(
 ) -> ToolOutput {
     match kind {
         Kind::Builtin => {
-            let (cwd, resize_images) = { let st = s.lock(); (st.info.cwd.clone(), st.cfg.images_auto_resize) };
-            let ctx = ref_tools::ToolCtx { cwd: cwd.into(), store: s.hashes.clone(), cancel, on_output, resize_images };
+            let (cwd, resize_images) = {
+                let st = s.lock();
+                (st.info.cwd.clone(), st.cfg.images_auto_resize)
+            };
+            let ctx = ref_tools::ToolCtx {
+                cwd: cwd.into(),
+                store: s.hashes.clone(),
+                cancel,
+                on_output,
+                resize_images,
+            };
             ref_tools::execute(&name, input, &ctx).await
         }
         Kind::Harness => harness(&hub, &s, &name, &input),
@@ -192,7 +237,12 @@ pub async fn dispatch(
                         text = crate::util::truncate_middle(&text, MCP_MAX_BYTES);
                         text.push_str(&format!("\n\n[Output truncated: {total} bytes total.]"));
                     }
-                    ToolOutput { text, images: r.images, meta: None, is_error: r.is_error }
+                    ToolOutput {
+                        text,
+                        images: r.images,
+                        meta: None,
+                        is_error: r.is_error,
+                    }
                 }
                 Err(e) => ToolOutput::err(format!("MCP error: {e:#}")),
             }
@@ -203,7 +253,12 @@ pub async fn dispatch(
 fn harness(hub: &Arc<Hub>, s: &Arc<Session>, name: &str, input: &Value) -> ToolOutput {
     match name {
         "context_window" => {
-            let target = match input.get("session").and_then(Value::as_str).map(str::trim).filter(|x| !x.is_empty()) {
+            let target = match input
+                .get("session")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|x| !x.is_empty())
+            {
                 Some(q) => match crate::peers::resolve(hub, q, None) {
                     Ok(t) => t,
                     Err(e) => return ToolOutput::err(e),
@@ -212,7 +267,13 @@ fn harness(hub: &Arc<Hub>, s: &Arc<Session>, name: &str, input: &Value) -> ToolO
             };
             let info = target.info();
             let c = info.context;
-            let pct = |n: u64| if c.max > 0 { n as f64 * 100.0 / c.max as f64 } else { 0.0 };
+            let pct = |n: u64| {
+                if c.max > 0 {
+                    n as f64 * 100.0 / c.max as f64
+                } else {
+                    0.0
+                }
+            };
             ToolOutput::ok(format!(
                 "Context window for \"{}\": used {} tokens of {} ({:.0}%). Recommended compaction at {} tokens ({:.0}%). Automatic compaction at {} tokens.",
                 info.name,
@@ -230,11 +291,21 @@ fn harness(hub: &Arc<Hub>, s: &Arc<Session>, name: &str, input: &Value) -> ToolO
             };
             let mut todos = Vec::with_capacity(items.len());
             for (i, it) in items.iter().enumerate() {
-                let content = it.get("content").and_then(Value::as_str).map(str::trim).unwrap_or("");
+                let content = it
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .unwrap_or("");
                 if content.is_empty() {
-                    return ToolOutput::err(format!("Error: todos[{i}].content must be a non-empty string."));
+                    return ToolOutput::err(format!(
+                        "Error: todos[{i}].content must be a non-empty string."
+                    ));
                 }
-                let status = match it.get("status").and_then(Value::as_str).unwrap_or("pending") {
+                let status = match it
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .unwrap_or("pending")
+                {
                     "pending" => TodoStatus::Pending,
                     "in_progress" => TodoStatus::InProgress,
                     "completed" => TodoStatus::Completed,
@@ -242,10 +313,13 @@ fn harness(hub: &Arc<Hub>, s: &Arc<Session>, name: &str, input: &Value) -> ToolO
                     other => {
                         return ToolOutput::err(format!(
                             "Error: todos[{i}].status {other:?} is invalid; use pending, in_progress, completed or cancelled."
-                        ))
+                        ));
                     }
                 };
-                todos.push(Todo { content: content.to_string(), status });
+                todos.push(Todo {
+                    content: content.to_string(),
+                    status,
+                });
             }
             let text = format_todos(&todos);
             {
@@ -256,12 +330,19 @@ fn harness(hub: &Arc<Hub>, s: &Arc<Session>, name: &str, input: &Value) -> ToolO
             ToolOutput::ok(text)
         }
         "compact_context" => {
-            let summary = input.get("summary").and_then(Value::as_str).unwrap_or("").trim().to_string();
+            let summary = input
+                .get("summary")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string();
             if summary.is_empty() {
                 return ToolOutput::err("Error: summary must not be empty.");
             }
             s.lock().pending_compact = Some(summary);
-            ToolOutput::ok("After this batch of tool calls your context will be replaced by your summary.")
+            ToolOutput::ok(
+                "After this batch of tool calls your context will be replaced by your summary.",
+            )
         }
         _ => ToolOutput::err(format!("Unknown tool: {name}")),
     }
@@ -272,7 +353,10 @@ pub fn format_todos(todos: &[Todo]) -> String {
     if todos.is_empty() {
         return "Todo list cleared.".into();
     }
-    let done = todos.iter().filter(|t| t.status == TodoStatus::Completed).count();
+    let done = todos
+        .iter()
+        .filter(|t| t.status == TodoStatus::Completed)
+        .count();
     let mut out = format!("Todo list updated ({done}/{} completed):\n", todos.len());
     for t in todos {
         let mark = match t.status {
@@ -292,7 +376,9 @@ mod tests {
 
     #[test]
     fn purpose_first() {
-        let s = with_purpose(&json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}));
+        let s = with_purpose(
+            &json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}),
+        );
         let keys: Vec<&String> = s["properties"].as_object().unwrap().keys().collect();
         assert_eq!(keys, ["purpose", "path"]);
         assert_eq!(s["required"], json!(["purpose", "path"]));
@@ -310,11 +396,33 @@ mod tests {
     #[test]
     fn order_and_spawn_gating() {
         let mut cfg = Config::default();
-        cfg.agents.insert("a".into(), ref_config::AgentConfig { name: "a".into(), can_spawn: true, ..Default::default() });
-        cfg.agents.insert("b".into(), ref_config::AgentConfig { name: "b".into(), ..Default::default() });
-        let a: Vec<String> = assemble(&cfg, "a", &[]).into_iter().map(|e| e.def.name).collect();
-        let b: Vec<String> = assemble(&cfg, "b", &[]).into_iter().map(|e| e.def.name).collect();
-        assert_eq!(&a[..7], ["read", "edit", "write", "delete", "grep", "find", "bash"]);
+        cfg.agents.insert(
+            "a".into(),
+            ref_config::AgentConfig {
+                name: "a".into(),
+                can_spawn: true,
+                ..Default::default()
+            },
+        );
+        cfg.agents.insert(
+            "b".into(),
+            ref_config::AgentConfig {
+                name: "b".into(),
+                ..Default::default()
+            },
+        );
+        let a: Vec<String> = assemble(&cfg, "a", &[])
+            .into_iter()
+            .map(|e| e.def.name)
+            .collect();
+        let b: Vec<String> = assemble(&cfg, "b", &[])
+            .into_iter()
+            .map(|e| e.def.name)
+            .collect();
+        assert_eq!(
+            &a[..7],
+            ["read", "edit", "write", "delete", "grep", "find", "bash"]
+        );
         assert!(a.contains(&"create_session".to_string()));
         assert!(!b.contains(&"create_session".to_string()));
         assert!(b.contains(&"send_message".to_string()));

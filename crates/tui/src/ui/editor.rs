@@ -78,7 +78,8 @@ impl Editor {
 
     pub fn undo(&mut self) {
         if let Some((t, c)) = self.undo.pop() {
-            self.redo.push((std::mem::replace(&mut self.text, t), self.cursor));
+            self.redo
+                .push((std::mem::replace(&mut self.text, t), self.cursor));
             self.cursor = c.min(self.text.len());
             self.anchor = None;
         }
@@ -86,7 +87,8 @@ impl Editor {
 
     pub fn redo(&mut self) {
         if let Some((t, c)) = self.redo.pop() {
-            self.undo.push((std::mem::replace(&mut self.text, t), self.cursor));
+            self.undo
+                .push((std::mem::replace(&mut self.text, t), self.cursor));
             self.cursor = c.min(self.text.len());
             self.anchor = None;
         }
@@ -159,7 +161,10 @@ impl Editor {
         if !self.delete_selection() {
             self.snapshot_coalesced(s);
         }
-        let s = s.replace("\r\n", "\n").replace('\r', "\n").replace('\t', "    ");
+        let s = s
+            .replace("\r\n", "\n")
+            .replace('\r', "\n")
+            .replace('\t', "    ");
         self.text.insert_str(self.cursor, &s);
         self.cursor += s.len();
         self.pref_col = None;
@@ -177,16 +182,28 @@ impl Editor {
     }
 
     fn prev_boundary(&self, i: usize) -> usize {
-        self.text[..i].grapheme_indices(true).next_back().map(|(j, _)| j).unwrap_or(0)
+        self.text[..i]
+            .grapheme_indices(true)
+            .next_back()
+            .map(|(j, _)| j)
+            .unwrap_or(0)
     }
 
     fn next_boundary(&self, i: usize) -> usize {
-        self.text[i..].graphemes(true).next().map(|g| i + g.len()).unwrap_or(i)
+        self.text[i..]
+            .graphemes(true)
+            .next()
+            .map(|g| i + g.len())
+            .unwrap_or(i)
     }
 
     /// Token (paste / image) ending exactly at `i` or containing it.
     fn token_around(&self, i: usize) -> Option<(usize, usize)> {
-        let toks = self.pastes.iter().map(|p| p.token.as_str()).chain(self.images.iter().map(|a| a.token.as_str()));
+        let toks = self
+            .pastes
+            .iter()
+            .map(|p| p.token.as_str())
+            .chain(self.images.iter().map(|a| a.token.as_str()));
         for t in toks {
             let mut from = 0;
             while let Some(p) = self.text[from..].find(t) {
@@ -209,7 +226,9 @@ impl Editor {
             return;
         }
         self.snapshot();
-        let (s, e) = self.token_around(self.cursor).unwrap_or((self.prev_boundary(self.cursor), self.cursor));
+        let (s, e) = self
+            .token_around(self.cursor)
+            .unwrap_or((self.prev_boundary(self.cursor), self.cursor));
         self.text.replace_range(s..e, "");
         self.cursor = s;
         self.pref_col = None;
@@ -225,7 +244,10 @@ impl Editor {
         }
         self.snapshot();
         let n = self.next_boundary(self.cursor);
-        let (s, e) = self.token_around(n).filter(|(s, _)| *s >= self.cursor).unwrap_or((self.cursor, n));
+        let (s, e) = self
+            .token_around(n)
+            .filter(|(s, _)| *s >= self.cursor)
+            .unwrap_or((self.cursor, n));
         self.text.replace_range(s..e, "");
         self.gc_tokens();
     }
@@ -299,11 +321,17 @@ impl Editor {
     }
 
     fn line_start(&self) -> usize {
-        self.text[..self.cursor].rfind('\n').map(|i| i + 1).unwrap_or(0)
+        self.text[..self.cursor]
+            .rfind('\n')
+            .map(|i| i + 1)
+            .unwrap_or(0)
     }
 
     fn line_end(&self) -> usize {
-        self.text[self.cursor..].find('\n').map(|i| self.cursor + i).unwrap_or(self.text.len())
+        self.text[self.cursor..]
+            .find('\n')
+            .map(|i| self.cursor + i)
+            .unwrap_or(self.text.len())
     }
 
     pub fn kill_to_start(&mut self) {
@@ -320,7 +348,11 @@ impl Editor {
 
     pub fn kill_to_end(&mut self) {
         let e = self.line_end();
-        let e = if e == self.cursor && e < self.text.len() { e + 1 } else { e };
+        let e = if e == self.cursor && e < self.text.len() {
+            e + 1
+        } else {
+            e
+        };
         if e > self.cursor {
             self.snapshot();
             self.text.replace_range(self.cursor..e, "");
@@ -434,7 +466,10 @@ impl Editor {
             } else {
                 token
             };
-            self.pastes.push(Paste { token: token.clone(), text: s });
+            self.pastes.push(Paste {
+                token: token.clone(),
+                text: s,
+            });
             self.insert(&token);
         } else {
             self.insert(&s);
@@ -444,8 +479,16 @@ impl Editor {
     pub fn attach_image(&mut self, image: ImageData, name: Option<String>) {
         self.image_seq += 1;
         let token = format!("[Image {}]", self.image_seq);
-        self.images.push(Attachment { token: token.clone(), image, name });
-        let pad = if self.cursor > 0 && !self.text[..self.cursor].ends_with([' ', '\n']) { " " } else { "" };
+        self.images.push(Attachment {
+            token: token.clone(),
+            image,
+            name,
+        });
+        let pad = if self.cursor > 0 && !self.text[..self.cursor].ends_with([' ', '\n']) {
+            " "
+        } else {
+            ""
+        };
         self.insert(&format!("{pad}{token} "));
     }
 
@@ -477,7 +520,11 @@ impl Editor {
             self.images.push(Attachment { token, image, name });
         }
         let keep = self.text.trim_end();
-        self.text = if keep.is_empty() { restored } else { format!("{keep}\n\n{restored}") };
+        self.text = if keep.is_empty() {
+            restored
+        } else {
+            format!("{keep}\n\n{restored}")
+        };
         self.cursor = self.text.len();
         self.anchor = None;
         self.pref_col = None;
@@ -507,7 +554,12 @@ impl Editor {
         for p in &self.pastes {
             text = text.replacen(&p.token, &p.text, 1);
         }
-        let images = self.images.iter().filter(|a| self.text.contains(&a.token)).map(|a| (a.image.clone(), a.name.clone())).collect();
+        let images = self
+            .images
+            .iter()
+            .filter(|a| self.text.contains(&a.token))
+            .map(|a| (a.image.clone(), a.name.clone()))
+            .collect();
         self.clear();
         self.undo.clear();
         Submit { text, images }
@@ -516,7 +568,12 @@ impl Editor {
     /// Ranges of tokens in the text (for highlighting).
     fn token_ranges(&self) -> Vec<(usize, usize)> {
         let mut out = Vec::new();
-        for t in self.pastes.iter().map(|p| p.token.as_str()).chain(self.images.iter().map(|a| a.token.as_str())) {
+        for t in self
+            .pastes
+            .iter()
+            .map(|p| p.token.as_str())
+            .chain(self.images.iter().map(|a| a.token.as_str()))
+        {
             let mut from = 0;
             while let Some(p) = self.text[from..].find(t) {
                 out.push((from + p, from + p + t.len()));
@@ -539,7 +596,9 @@ impl Editor {
         } else {
             self.scroll + (y - area.y) as usize
         };
-        let Some(r) = rows.get(ri.min(rows.len().saturating_sub(1))).copied() else { return 0 };
+        let Some(r) = rows.get(ri.min(rows.len().saturating_sub(1))).copied() else {
+            return 0;
+        };
         let want = x.saturating_sub(area.x) as usize;
         let mut col = 0;
         let mut pos = r.start;
@@ -573,7 +632,9 @@ impl Editor {
             }
             3 => {
                 self.anchor = Some(self.text[..off].rfind('\n').map_or(0, |i| i + 1));
-                self.cursor = self.text[off..].find('\n').map_or(self.text.len(), |i| off + i);
+                self.cursor = self.text[off..]
+                    .find('\n')
+                    .map_or(self.text.len(), |i| off + i);
             }
             _ => {
                 self.anchor = None;
@@ -606,7 +667,11 @@ impl Editor {
     fn snap_selection(&mut self) {
         let Some(anchor) = self.anchor else { return };
         let fwd = anchor <= self.cursor;
-        let (mut a, mut b) = if fwd { (anchor, self.cursor) } else { (self.cursor, anchor) };
+        let (mut a, mut b) = if fwd {
+            (anchor, self.cursor)
+        } else {
+            (self.cursor, anchor)
+        };
         for (s, e) in self.token_ranges() {
             if a > s && a < e {
                 a = s;
@@ -650,7 +715,11 @@ impl Editor {
                         Some(s) if s > start => s,
                         _ => i,
                     };
-                    rows.push(VRow { start: base + start, end: base + brk, last: false });
+                    rows.push(VRow {
+                        start: base + start,
+                        end: base + brk,
+                        last: false,
+                    });
                     start = brk;
                     x = width(&line[start..i]);
                     last_space = None;
@@ -660,7 +729,11 @@ impl Editor {
                     last_space = Some(i + 1);
                 }
             }
-            rows.push(VRow { start: base + start, end: base + line.len(), last: true });
+            rows.push(VRow {
+                start: base + start,
+                end: base + line.len(),
+                last: true,
+            });
             line_start += line.len() + 1;
         }
         rows
@@ -669,7 +742,9 @@ impl Editor {
     /// (visual row, column) of the cursor.
     pub fn cursor_rc(&self, rows: &[VRow]) -> (usize, usize) {
         for (ri, r) in rows.iter().enumerate() {
-            let inside = self.cursor >= r.start && (self.cursor < r.end || (self.cursor == r.end && (r.last || ri + 1 == rows.len())));
+            let inside = self.cursor >= r.start
+                && (self.cursor < r.end
+                    || (self.cursor == r.end && (r.last || ri + 1 == rows.len())));
             if inside {
                 return (ri, width(&self.text[r.start..self.cursor]));
             }
@@ -683,7 +758,13 @@ impl Editor {
     }
 
     /// Draws into `area`; returns the screen cursor position.
-    pub fn draw(&mut self, buf: &mut Buffer, area: Rect, placeholder: &str, focused: bool) -> Option<(u16, u16)> {
+    pub fn draw(
+        &mut self,
+        buf: &mut Buffer,
+        area: Rect,
+        placeholder: &str,
+        focused: bool,
+    ) -> Option<(u16, u16)> {
         let w = area.width as usize;
         self.last_width = w;
         if area.height == 0 || w == 0 {
@@ -734,7 +815,10 @@ impl Editor {
             return None;
         }
         let y = area.y + (cr - self.scroll) as u16;
-        Some(((area.x + cc as u16).min(area.x + area.width.saturating_sub(1)), y))
+        Some((
+            (area.x + cc as u16).min(area.x + area.width.saturating_sub(1)),
+            y,
+        ))
     }
 
     /// The `@word` being typed at the cursor: (byte start of `@`, query).
@@ -794,7 +878,12 @@ impl History {
         if n > HISTORY_MAX {
             items.drain(..n - HISTORY_MAX);
         }
-        History { items, pos: None, draft: String::new(), path: Some(path) }
+        History {
+            items,
+            pos: None,
+            draft: String::new(),
+            path: Some(path),
+        }
     }
 
     pub fn push(&mut self, t: &str) {
@@ -813,9 +902,17 @@ impl History {
             if rewrite {
                 let n = self.items.len();
                 self.items.drain(..n - HISTORY_MAX);
-                let body: String = self.items.iter().map(|i| format!("{}\n", serde_json::json!({ "text": i }))).collect();
+                let body: String = self
+                    .items
+                    .iter()
+                    .map(|i| format!("{}\n", serde_json::json!({ "text": i })))
+                    .collect();
                 let _ = std::fs::write(p, body);
-            } else if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) {
+            } else if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(p)
+            {
                 let _ = writeln!(f, "{}", serde_json::json!({ "text": t }));
             }
         }
@@ -890,11 +987,21 @@ mod tests {
         let mut e = Editor::default();
         e.insert("draft ");
         e.attach_image(img("a"), None);
-        e.restore("see [Image 2] and [Image 1]", vec![(img("x"), None), (img("y"), Some("y.png".into()))]);
+        e.restore(
+            "see [Image 2] and [Image 1]",
+            vec![(img("x"), None), (img("y"), Some("y.png".into()))],
+        );
         assert_eq!(e.text, "draft [Image 1]\n\nsee [Image 3] and [Image 2]");
         assert_eq!(e.cursor, e.text.len());
-        let data: Vec<(&str, &str)> = e.images.iter().map(|a| (a.token.as_str(), a.image.data.as_str())).collect();
-        assert_eq!(data, [("[Image 1]", "a"), ("[Image 2]", "x"), ("[Image 3]", "y")]);
+        let data: Vec<(&str, &str)> = e
+            .images
+            .iter()
+            .map(|a| (a.token.as_str(), a.image.data.as_str()))
+            .collect();
+        assert_eq!(
+            data,
+            [("[Image 1]", "a"), ("[Image 2]", "x"), ("[Image 3]", "y")]
+        );
         let sub = e.submit();
         assert_eq!(sub.images.len(), 3);
         // An image without a token in the text still comes back.

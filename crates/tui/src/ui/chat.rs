@@ -80,7 +80,11 @@ pub fn hash_key(parts: &[u64]) -> u64 {
 }
 
 fn set_hash(s: Option<&BTreeSet<usize>>) -> u64 {
-    s.map(|s| s.iter().fold(7u64, |a, x| a.wrapping_mul(31).wrapping_add(*x as u64 + 1))).unwrap_or(0)
+    s.map(|s| {
+        s.iter()
+            .fold(7u64, |a, x| a.wrapping_mul(31).wrapping_add(*x as u64 + 1))
+    })
+    .unwrap_or(0)
 }
 
 impl ChatState {
@@ -161,7 +165,11 @@ impl ChatState {
             Err(k) => k.checked_sub(1)?,
         };
         let id = self.ids.get(k)?;
-        let cache = if self.compact { &self.tile_cache } else { &self.cache };
+        let cache = if self.compact {
+            &self.tile_cache
+        } else {
+            &self.cache
+        };
         cache.get(id)?.rows.get(i - self.offsets[k])
     }
 
@@ -175,14 +183,20 @@ impl ChatState {
 
     /// Clamped conversion for drags (outside the area → edge).
     fn screen_to_content_clamped(&self, x: u16, y: u16) -> (usize, u16) {
-        let yy = y.clamp(self.area.y, (self.area.y + self.area.height).saturating_sub(1));
+        let yy = y.clamp(
+            self.area.y,
+            (self.area.y + self.area.height).saturating_sub(1),
+        );
         let row = self.top() + (yy - self.area.y) as usize;
         let row = row.min(self.total.saturating_sub(1));
         (row, x.saturating_sub(self.content_x))
     }
 
     pub fn contains(&self, x: u16, y: u16) -> bool {
-        x >= self.area.x && x < self.area.x + self.area.width && y >= self.area.y && y < self.area.y + self.area.height
+        x >= self.area.x
+            && x < self.area.x + self.area.width
+            && y >= self.area.y
+            && y < self.area.y + self.area.height
     }
 
     pub fn hit_at(&self, x: u16, y: u16) -> Option<Hit> {
@@ -195,23 +209,40 @@ impl ChatState {
 
     /// Mouse down: start selection (clicks = 1/2/3 for char/word/line).
     pub fn mouse_down(&mut self, x: u16, y: u16, clicks: u8) {
-        let Some((r, c)) = self.screen_to_content(x, y) else { return };
+        let Some((r, c)) = self.screen_to_content(x, y) else {
+            return;
+        };
         self.press = Some((r, c));
         match clicks {
             2 => {
                 if let Some(row) = self.row(r) {
                     let (a, b) = selection::word_at(row, c);
-                    self.sel = Some(Selection { anchor: (r, a), head: (r, b), dragging: false, active: true });
+                    self.sel = Some(Selection {
+                        anchor: (r, a),
+                        head: (r, b),
+                        dragging: false,
+                        active: true,
+                    });
                 }
             }
             3 => {
                 if let Some(row) = self.row(r) {
                     let e = selection::row_end(row);
-                    self.sel = Some(Selection { anchor: (r, row.skip), head: (r, e), dragging: false, active: true });
+                    self.sel = Some(Selection {
+                        anchor: (r, row.skip),
+                        head: (r, e),
+                        dragging: false,
+                        active: true,
+                    });
                 }
             }
             _ => {
-                self.sel = Some(Selection { anchor: (r, c), head: (r, c), dragging: true, active: false });
+                self.sel = Some(Selection {
+                    anchor: (r, c),
+                    head: (r, c),
+                    dragging: true,
+                    active: false,
+                });
             }
         }
     }
@@ -245,7 +276,11 @@ impl ChatState {
             return false;
         }
         self.scroll_by(self.drag_edge as i32, false);
-        let y = if self.drag_edge < 0 { self.area.y } else { self.area.y + self.area.height.saturating_sub(1) };
+        let y = if self.drag_edge < 0 {
+            self.area.y
+        } else {
+            self.area.y + self.area.height.saturating_sub(1)
+        };
         let r = (self.top() + (y - self.area.y) as usize).min(self.total.saturating_sub(1));
         if let Some(s) = self.sel.as_mut() {
             s.head.0 = r;
@@ -293,7 +328,10 @@ impl ChatState {
     }
 
     pub fn show_all(&mut self, msg: &str, part: usize) {
-        self.show_all.entry(msg.to_string()).or_default().insert(part);
+        self.show_all
+            .entry(msg.to_string())
+            .or_default()
+            .insert(part);
         self.sel = None;
         self.last_total = 0;
     }
@@ -301,14 +339,22 @@ impl ChatState {
 
 /// Index of the last compaction message: the model's context starts there.
 pub fn last_compaction(messages: &[ref_proto::Message]) -> Option<usize> {
-    messages.iter().rposition(|m| m.role == ref_proto::Role::User && m.source == ref_proto::MessageSource::Compaction)
+    messages.iter().rposition(|m| {
+        m.role == ref_proto::Role::User && m.source == ref_proto::MessageSource::Compaction
+    })
 }
 
 /// Builds (or reuses) cached rows for all messages and the tail, for content width `w`.
 /// `compact` selects the split-tile rendering (own cache; tools / reasoning one-line).
 fn layout(view: &mut SessionView, env: &Env<'_>, w: usize, compact: bool) {
     let busy = !view.info.status.is_idle();
-    let SessionView { messages, versions, chat, info, .. } = view;
+    let SessionView {
+        messages,
+        versions,
+        chat,
+        info,
+        ..
+    } = view;
     let mut offsets = Vec::with_capacity(messages.len() + 1);
     let mut ids = Vec::with_capacity(messages.len());
     let mut total = 0usize;
@@ -327,11 +373,37 @@ fn layout(view: &mut SessionView, env: &Env<'_>, w: usize, compact: bool) {
         // Tiles expand tool calls on click too (they share the toggles with the chat view).
         let (tog, all) = (chat.toggled.get(&m.id), chat.show_all.get(&m.id));
         let key = if compact {
-            hash_key(&[ver, w as u64, set_hash(tog), set_hash(all), anim, secs, stale as u64, (i > 0) as u64, 11])
+            hash_key(&[
+                ver,
+                w as u64,
+                set_hash(tog),
+                set_hash(all),
+                anim,
+                secs,
+                stale as u64,
+                (i > 0) as u64,
+                11,
+            ])
         } else {
-            hash_key(&[ver, w as u64, set_hash(tog), set_hash(all), env.details as u64, env.thinking as u64, anim, secs, stale as u64, context_start as u64, 7])
+            hash_key(&[
+                ver,
+                w as u64,
+                set_hash(tog),
+                set_hash(all),
+                env.details as u64,
+                env.thinking as u64,
+                anim,
+                secs,
+                stale as u64,
+                context_start as u64,
+                7,
+            ])
         };
-        let cache = if compact { &chat.tile_cache } else { &chat.cache };
+        let cache = if compact {
+            &chat.tile_cache
+        } else {
+            &chat.cache
+        };
         if !cache.get(&m.id).is_some_and(|c| c.key == key) {
             let cx = Ctx {
                 agents: env.agents,
@@ -348,18 +420,34 @@ fn layout(view: &mut SessionView, env: &Env<'_>, w: usize, compact: bool) {
                 context_start: context_start && !compact,
             };
             // Blank separator above each message (tiles: not above the first one).
-            let mut rows = if compact && i == 0 { Vec::new() } else { vec![Row::blank()] };
+            let mut rows = if compact && i == 0 {
+                Vec::new()
+            } else {
+                vec![Row::blank()]
+            };
             rows.extend(message::render(m, &cx, w));
-            let cache = if compact { &mut chat.tile_cache } else { &mut chat.cache };
+            let cache = if compact {
+                &mut chat.tile_cache
+            } else {
+                &mut chat.cache
+            };
             cache.insert(m.id.clone(), Cached { key, rows });
         }
-        let cache = if compact { &chat.tile_cache } else { &chat.cache };
+        let cache = if compact {
+            &chat.tile_cache
+        } else {
+            &chat.cache
+        };
         offsets.push(total);
         ids.push(m.id.clone());
         total += cache.get(&m.id).map(|c| c.rows.len()).unwrap_or(0);
     }
     // Evict cache entries for removed messages.
-    let cache = if compact { &mut chat.tile_cache } else { &mut chat.cache };
+    let cache = if compact {
+        &mut chat.tile_cache
+    } else {
+        &mut chat.cache
+    };
     if cache.len() > ids.len() + 8 {
         let keep: std::collections::HashSet<&String> = ids.iter().collect();
         cache.retain(|k, _| keep.contains(k));
@@ -367,7 +455,12 @@ fn layout(view: &mut SessionView, env: &Env<'_>, w: usize, compact: bool) {
     offsets.push(total);
     // Older messages loaded above: keep the same content on screen (tiles have no separator
     // above the first message, so the old first one gained a row).
-    let shift = chat.ids.first().and_then(|old| ids.iter().position(|id| id == old)).filter(|&k| k > 0).map_or(0, |k| offsets[k] + usize::from(compact));
+    let shift = chat
+        .ids
+        .first()
+        .and_then(|old| ids.iter().position(|id| id == old))
+        .filter(|&k| k > 0)
+        .map_or(0, |k| offsets[k] + usize::from(compact));
     if shift > 0 {
         chat.pos += shift as f64;
         chat.target += shift as f64;
@@ -419,26 +512,67 @@ fn settle(chat: &mut ChatState, area: Rect, width_changed: bool) {
 /// Rows shown after the transcript: retry status, error, queued prompts.
 fn tail_rows(view: &SessionView, env: &Env<'_>, w: usize) -> Vec<Row> {
     let mut rows = Vec::new();
-    if let SessionStatus::Retrying { attempt, next_at, error } = &view.info.status {
+    if let SessionStatus::Retrying {
+        attempt,
+        next_at,
+        error,
+    } = &view.info.status
+    {
         rows.push(Row::blank());
         let secs = ((next_at - env.now).max(0) + 999) / 1000;
-        let msg = format!("{} Retrying in {secs}s (attempt {attempt}): {}", theme::spinner(env.tick), text::one_line(error));
-        for (i, (l, sp)) in text::wrap_spans_flags(&[Span::styled(msg, theme::fg(theme::WARNING))], w.saturating_sub(4)).into_iter().enumerate() {
-            rows.push(Row::new(l).soft_sp(i > 0, sp).indent(vec![Span::raw("  "), Span::styled("┃ ", theme::fg(theme::WARNING))]));
+        let msg = format!(
+            "{} Retrying in {secs}s (attempt {attempt}): {}",
+            theme::spinner(env.tick),
+            text::one_line(error)
+        );
+        for (i, (l, sp)) in text::wrap_spans_flags(
+            &[Span::styled(msg, theme::fg(theme::WARNING))],
+            w.saturating_sub(4),
+        )
+        .into_iter()
+        .enumerate()
+        {
+            rows.push(Row::new(l).soft_sp(i > 0, sp).indent(vec![
+                Span::raw("  "),
+                Span::styled("┃ ", theme::fg(theme::WARNING)),
+            ]));
         }
     }
     if let SessionStatus::Compacting = view.info.status {
         rows.push(Row::blank());
-        let mut spans = vec![Span::raw("  "), Span::styled(format!("{} ", theme::spinner(env.tick)), theme::fg(theme::ACCENT))];
-        spans.extend(message::shimmer("Compacting context…", env.tick, theme::MUTED, theme::ACCENT));
+        let mut spans = vec![
+            Span::raw("  "),
+            Span::styled(
+                format!("{} ", theme::spinner(env.tick)),
+                theme::fg(theme::ACCENT),
+            ),
+        ];
+        spans.extend(message::shimmer(
+            "Compacting context…",
+            env.tick,
+            theme::MUTED,
+            theme::ACCENT,
+        ));
         rows.push(Row::new(Line::from(spans)).decor());
     }
     if let Some(e) = &view.error
-        && !view.messages.last().is_some_and(|m| m.error.as_deref() == Some(e.as_str()))
+        && !view
+            .messages
+            .last()
+            .is_some_and(|m| m.error.as_deref() == Some(e.as_str()))
     {
         rows.push(Row::blank());
-        for (i, (l, sp)) in text::wrap_spans_flags(&[Span::styled(text::one_line(e), theme::fg(theme::ERROR))], w.saturating_sub(4)).into_iter().enumerate() {
-            rows.push(Row::new(l).soft_sp(i > 0, sp).indent(vec![Span::raw("  "), Span::styled("┃ ", theme::fg(theme::ERROR))]));
+        for (i, (l, sp)) in text::wrap_spans_flags(
+            &[Span::styled(text::one_line(e), theme::fg(theme::ERROR))],
+            w.saturating_sub(4),
+        )
+        .into_iter()
+        .enumerate()
+        {
+            rows.push(Row::new(l).soft_sp(i > 0, sp).indent(vec![
+                Span::raw("  "),
+                Span::styled("┃ ", theme::fg(theme::ERROR)),
+            ]));
         }
     }
     if !view.queued.is_empty() {
@@ -453,14 +587,30 @@ fn tail_rows(view: &SessionView, env: &Env<'_>, w: usize) -> Vec<Row> {
 fn queued_rows(view: &SessionView, w: usize) -> Vec<Row> {
     let mut rows = Vec::new();
     for q in &view.queued {
-        let mut left = vec![Span::styled("  queued ", theme::fg(theme::DIM).add_modifier(Modifier::BOLD))];
+        let mut left = vec![Span::styled(
+            "  queued ",
+            theme::fg(theme::DIM).add_modifier(Modifier::BOLD),
+        )];
         if let Some(from) = &q.from {
-            left.push(Span::styled(format!("from {from} "), theme::fg(theme::ACCENT)));
+            left.push(Span::styled(
+                format!("from {from} "),
+                theme::fg(theme::ACCENT),
+            ));
         }
         left.push(Span::styled(text::one_line(&q.text), theme::fg(theme::DIM)));
         // Messages from other sessions are shown only.
-        let label = if q.from.is_some() { "" } else if q.removing { "removing…" } else { message::UNQUEUE_LABEL };
-        let right = if label.is_empty() { vec![] } else { vec![Span::styled(label, theme::fg(theme::DIM))] };
+        let label = if q.from.is_some() {
+            ""
+        } else if q.removing {
+            "removing…"
+        } else {
+            message::UNQUEUE_LABEL
+        };
+        let right = if label.is_empty() {
+            vec![]
+        } else {
+            vec![Span::styled(label, theme::fg(theme::DIM))]
+        };
         let (line, rx) = message::compose(left, right, w);
         let mut row = Row::new(line).decor();
         if !q.removing && q.from.is_none() {
@@ -478,7 +628,10 @@ fn draw_welcome(buf: &mut Buffer, area: Rect, view: &SessionView, loaded: bool) 
     }
     let mut lines: Vec<Line<'static>> = Vec::new();
     for l in crate::app::LOGO.iter() {
-        lines.push(Line::from(Span::styled(l.to_string(), theme::bold(theme::PRIMARY))));
+        lines.push(Line::from(Span::styled(
+            l.to_string(),
+            theme::bold(theme::PRIMARY),
+        )));
     }
     lines.push(Line::default());
     if !loaded {
@@ -487,11 +640,24 @@ fn draw_welcome(buf: &mut Buffer, area: Rect, view: &SessionView, loaded: bool) 
         lines.push(Line::from(vec![
             Span::styled("session ", theme::muted()),
             Span::styled(view.info.name.clone(), theme::text()),
-            Span::styled(format!("  ·  {}", text::tilde(&view.info.cwd)), theme::muted()),
+            Span::styled(
+                format!("  ·  {}", text::tilde(&view.info.cwd)),
+                theme::muted(),
+            ),
         ]));
         lines.push(Line::default());
-        for (k, d) in [("/", "commands"), ("@", "attach files"), ("!", "run shell command"), ("ctrl+p", "command palette"), ("ctrl+x l", "sessions"), ("ctrl+x w", "background sessions")] {
-            lines.push(Line::from(vec![Span::styled(format!("{k:>10}  "), theme::fg(theme::PRIMARY)), Span::styled(format!("{d:<20}"), theme::muted())]));
+        for (k, d) in [
+            ("/", "commands"),
+            ("@", "attach files"),
+            ("!", "run shell command"),
+            ("ctrl+p", "command palette"),
+            ("ctrl+x l", "sessions"),
+            ("ctrl+x w", "background sessions"),
+        ] {
+            lines.push(Line::from(vec![
+                Span::styled(format!("{k:>10}  "), theme::fg(theme::PRIMARY)),
+                Span::styled(format!("{d:<20}"), theme::muted()),
+            ]));
         }
     }
     let h = lines.len() as u16;
@@ -548,14 +714,18 @@ pub fn draw(buf: &mut Buffer, area: Rect, view: &mut SessionView, env: &Env<'_>)
             if z.hit.is_button() {
                 for x in z.x0..z.x1.min(cw as u16) {
                     if let Some(cell) = buf.cell_mut((chat.content_x + x, y)) {
-                        cell.set_style(Style::new().fg(theme::PRIMARY).add_modifier(Modifier::BOLD));
+                        cell.set_style(
+                            Style::new().fg(theme::PRIMARY).add_modifier(Modifier::BOLD),
+                        );
                     }
                 }
             } else {
                 // Brighten the disclosure arrow (first non-blank cell).
                 let lw = (text::line_width(&row.line) as u16).min(cw as u16);
-                if let Some(x) = (0..lw).find(|&x| buf.cell((chat.content_x + x, y)).is_some_and(|c| !c.symbol().trim().is_empty()))
-                    && let Some(c) = buf.cell_mut((chat.content_x + x, y))
+                if let Some(x) = (0..lw).find(|&x| {
+                    buf.cell((chat.content_x + x, y))
+                        .is_some_and(|c| !c.symbol().trim().is_empty())
+                }) && let Some(c) = buf.cell_mut((chat.content_x + x, y))
                 {
                     c.set_style(Style::new().fg(theme::PRIMARY).add_modifier(Modifier::BOLD));
                 }
@@ -567,7 +737,11 @@ pub fn draw(buf: &mut Buffer, area: Rect, view: &mut SessionView, env: &Env<'_>)
             if gi >= r0 && gi <= r1 {
                 let from = if gi == r0 { c0 } else { 0 }.max(row.skip);
                 let lw = text::line_width(&row.line) as u16;
-                let to = if gi == r1 { c1.min(lw.saturating_sub(1)) } else { lw.saturating_sub(1) };
+                let to = if gi == r1 {
+                    c1.min(lw.saturating_sub(1))
+                } else {
+                    lw.saturating_sub(1)
+                };
                 let to = to.min(cw as u16 - 1);
                 if !row.decor && from <= to {
                     for x in from..=to {
@@ -581,7 +755,15 @@ pub fn draw(buf: &mut Buffer, area: Rect, view: &mut SessionView, env: &Env<'_>)
     }
     // Scrollbar.
     if chat.total > area.height as usize {
-        draw_scrollbar(buf, Rect::new(area.x + area.width - 1, area.y, 1, area.height), chat.total, chat.pos, chat.max_scroll(), ("┃", theme::BORDER_ACTIVE), Some(("│", theme::BORDER_SUBTLE)));
+        draw_scrollbar(
+            buf,
+            Rect::new(area.x + area.width - 1, area.y, 1, area.height),
+            chat.total,
+            chat.pos,
+            chat.max_scroll(),
+            ("┃", theme::BORDER_ACTIVE),
+            Some(("│", theme::BORDER_SUBTLE)),
+        );
     }
     // "new messages" pill.
     if chat.new_below && !chat.follow {
@@ -592,7 +774,15 @@ pub fn draw(buf: &mut Buffer, area: Rect, view: &mut SessionView, env: &Env<'_>)
 
 /// Draws a vertical scrollbar into the one-column rect `r` for `total` rows scrolled to `pos`.
 /// `track: None` keeps whatever is drawn under the track (e.g. a tile border).
-pub fn draw_scrollbar(buf: &mut Buffer, r: Rect, total: usize, pos: f64, max: f64, thumb_sym: (&str, ratatui::style::Color), track: Option<(&str, ratatui::style::Color)>) {
+pub fn draw_scrollbar(
+    buf: &mut Buffer,
+    r: Rect,
+    total: usize,
+    pos: f64,
+    max: f64,
+    thumb_sym: (&str, ratatui::style::Color),
+    track: Option<(&str, ratatui::style::Color)>,
+) {
     let h = r.height as usize;
     if h == 0 || total <= h {
         return;
@@ -600,7 +790,13 @@ pub fn draw_scrollbar(buf: &mut Buffer, r: Rect, total: usize, pos: f64, max: f6
     let thumb = ((h * h) as f64 / total as f64).ceil().clamp(1.0, h as f64) as usize;
     let start = ((pos / max.max(1.0)) * (h - thumb) as f64).round() as usize;
     for i in 0..h {
-        let Some((sym, c)) = (if i >= start && i < start + thumb { Some(thumb_sym) } else { track }) else { continue };
+        let Some((sym, c)) = (if i >= start && i < start + thumb {
+            Some(thumb_sym)
+        } else {
+            track
+        }) else {
+            continue;
+        };
         if let Some(cell) = buf.cell_mut((r.x, r.y + i as u16)) {
             cell.set_symbol(sym).set_style(Style::new().fg(c));
         }
@@ -622,7 +818,15 @@ fn draw_pill(buf: &mut Buffer, area: Rect, label: &str) -> Option<Rect> {
             c.reset();
         }
     }
-    buf.set_string(x, y, &label, Style::new().fg(theme::PANEL).bg(theme::PRIMARY).add_modifier(Modifier::BOLD));
+    buf.set_string(
+        x,
+        y,
+        &label,
+        Style::new()
+            .fg(theme::PANEL)
+            .bg(theme::PRIMARY)
+            .add_modifier(Modifier::BOLD),
+    );
     Some(Rect::new(x, y, lw, 1))
 }
 
@@ -636,7 +840,13 @@ pub fn draw_tile(buf: &mut Buffer, area: Rect, bar_x: u16, view: &mut SessionVie
     }
     let cw = area.width as usize;
     // Queued prompts under the transcript (no trailing blank: tiles are small).
-    view.chat.tail = if view.queued.is_empty() { Vec::new() } else { std::iter::once(Row::blank()).chain(queued_rows(view, cw)).collect() };
+    view.chat.tail = if view.queued.is_empty() {
+        Vec::new()
+    } else {
+        std::iter::once(Row::blank())
+            .chain(queued_rows(view, cw))
+            .collect()
+    };
     let reflow = view.chat.last_w != cw || !view.chat.compact;
     layout(view, env, cw, true);
     view.chat.last_w = cw;
@@ -646,22 +856,37 @@ pub fn draw_tile(buf: &mut Buffer, area: Rect, bar_x: u16, view: &mut SessionVie
     chat.pill = None;
     let top = chat.top();
     for dy in 0..area.height {
-        let Some(row) = chat.row(top + dy as usize) else { break };
+        let Some(row) = chat.row(top + dy as usize) else {
+            break;
+        };
         buf.set_line(area.x, area.y + dy, &row.line, area.width);
     }
     if chat.follow || chat.total <= area.height as usize {
         return;
     }
     // Scrolled up: thumb on the right border; "↓ N new lines" once more content arrives.
-    draw_scrollbar(buf, Rect::new(bar_x, area.y, 1, area.height), chat.total, chat.pos, chat.max_scroll(), ("┃", theme::MUTED), None);
+    draw_scrollbar(
+        buf,
+        Rect::new(bar_x, area.y, 1, area.height),
+        chat.total,
+        chat.pos,
+        chat.max_scroll(),
+        ("┃", theme::MUTED),
+        None,
+    );
     if chat.new_rows > 0 {
         let n = chat.new_rows;
-        let pill = draw_pill(buf, area, &format!(" ↓ {n} new line{} ", if n == 1 { "" } else { "s" }));
+        let pill = draw_pill(
+            buf,
+            area,
+            &format!(" ↓ {n} new line{} ", if n == 1 { "" } else { "s" }),
+        );
         view.chat.pill = pill;
     }
 }
 
 /// Whether the "new messages" pill (or a tile's "↓" marker) was clicked.
 pub fn pill_hit(chat: &ChatState, x: u16, y: u16) -> bool {
-    chat.pill.is_some_and(|r| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height)
+    chat.pill
+        .is_some_and(|r| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height)
 }

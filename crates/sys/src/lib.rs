@@ -31,7 +31,11 @@ pub fn kill_tree(pid: u32, force: bool) {
 /// (`npx.cmd`). Elsewhere, and when nothing matches, the name is returned unchanged.
 pub fn resolve_program(program: &str) -> std::path::PathBuf {
     #[cfg(windows)]
-    if let Some(p) = find_in_path(program, std::env::var_os("PATH"), std::env::var_os("PATHEXT")) {
+    if let Some(p) = find_in_path(
+        program,
+        std::env::var_os("PATH"),
+        std::env::var_os("PATHEXT"),
+    ) {
         return p;
     }
     std::path::PathBuf::from(program)
@@ -47,9 +51,14 @@ fn find_in_path(
     if p.extension().is_some() || p.components().count() != 1 {
         return None;
     }
-    let exts = pathext.map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".into());
+    let exts = pathext
+        .map(|e| e.to_string_lossy().into_owned())
+        .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".into());
     std::env::split_paths(&path?).find_map(|dir| {
-        exts.split(';').filter(|e| !e.is_empty()).map(|e| dir.join(format!("{program}{e}"))).find(|c| c.is_file())
+        exts.split(';')
+            .filter(|e| !e.is_empty())
+            .map(|e| dir.join(format!("{program}{e}")))
+            .find(|c| c.is_file())
     })
 }
 
@@ -101,10 +110,12 @@ mod imp {
 mod imp {
     use std::os::windows::process::CommandExt;
     use std::process::{Command, Stdio};
-    use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ACCESS_DENIED, GetLastError, STILL_ACTIVE};
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, ERROR_ACCESS_DENIED, GetLastError, STILL_ACTIVE,
+    };
     use windows_sys::Win32::System::Threading::{
-        CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW, GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-        PROCESS_TERMINATE, TerminateProcess,
+        CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW, GetExitCodeProcess, OpenProcess,
+        PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE, TerminateProcess,
     };
 
     pub fn pid_alive(pid: u32) -> bool {
@@ -172,7 +183,10 @@ mod tests {
         let path = Some(dir.clone().into_os_string());
         // Lower case so the test also passes on case-sensitive file systems.
         let ext = Some(".exe;.cmd".into());
-        assert_eq!(find_in_path("tool", path.clone(), ext.clone()), Some(dir.join("tool.cmd")));
+        assert_eq!(
+            find_in_path("tool", path.clone(), ext.clone()),
+            Some(dir.join("tool.cmd"))
+        );
         assert_eq!(find_in_path("tool.cmd", path.clone(), ext.clone()), None);
         assert_eq!(find_in_path("missing", path, ext), None);
         std::fs::remove_dir_all(&dir).unwrap();
@@ -196,7 +210,8 @@ mod tests {
         #[cfg(windows)]
         let mut cmd = {
             let mut c = Command::new("ping");
-            c.args(["-n", "30", "127.0.0.1"]).stdout(std::process::Stdio::null());
+            c.args(["-n", "30", "127.0.0.1"])
+                .stdout(std::process::Stdio::null());
             c
         };
         let mut child = cmd.spawn().unwrap();

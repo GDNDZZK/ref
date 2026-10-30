@@ -11,7 +11,8 @@ const PLAN_PROMPT: &str = "You are in read-only planning mode. Analyze the code 
 but do not create, modify or delete files and do not run commands that change state. \
 If the user asks you to implement changes, tell them to switch to the build agent.";
 
-const EXPLORE_PROMPT: &str = "You are a file search specialist. You excel at thoroughly navigating and exploring codebases.
+const EXPLORE_PROMPT: &str =
+    "You are a file search specialist. You excel at thoroughly navigating and exploring codebases.
 
 Guidelines:
 - Your role is EXCLUSIVELY to search and analyze
@@ -66,7 +67,9 @@ pub fn agents() -> Vec<AgentConfig> {
             name: "plan".into(),
             description: "Read-only analysis and planning; cannot modify files.".into(),
             prompt: PLAN_PROMPT.into(),
-            permission: perm(json!({"edit": "deny", "write": "deny", "delete": "deny", "bash": "ask"})),
+            permission: perm(
+                json!({"edit": "deny", "write": "deny", "delete": "deny", "bash": "ask"}),
+            ),
             creatable: true,
             can_spawn: false,
             mode: "primary".into(),
@@ -74,7 +77,8 @@ pub fn agents() -> Vec<AgentConfig> {
         },
         AgentConfig {
             name: "general".into(),
-            description: "General-purpose agent for multi-step tasks; runs in its own session.".into(),
+            description: "General-purpose agent for multi-step tasks; runs in its own session."
+                .into(),
             creatable: true,
             can_spawn: false,
             mode: "subagent".into(),
@@ -82,9 +86,10 @@ pub fn agents() -> Vec<AgentConfig> {
         },
         AgentConfig {
             name: "explore".into(),
-            description: "Fast read-only agent for exploring codebases: finding files, searching code \
+            description:
+                "Fast read-only agent for exploring codebases: finding files, searching code \
                           and answering questions about how the code works."
-                .into(),
+                    .into(),
             prompt: EXPLORE_PROMPT.into(),
             permission: perm(json!({"edit": "deny", "write": "deny", "delete": "deny"})),
             creatable: true,
@@ -94,7 +99,9 @@ pub fn agents() -> Vec<AgentConfig> {
         },
         AgentConfig {
             name: "compaction".into(),
-            description: "Summarizes the conversation when the context is compacted (/compact, automatic).".into(),
+            description:
+                "Summarizes the conversation when the context is compacted (/compact, automatic)."
+                    .into(),
             prompt: COMPACTION_PROMPT.into(),
             creatable: false,
             can_spawn: false,
@@ -108,10 +115,26 @@ pub fn agents() -> Vec<AgentConfig> {
 /// Defaults for a known provider id: (npm, base_url, env var).
 pub fn provider_defaults(id: &str) -> Option<(&'static str, &'static str, &'static str)> {
     Some(match id {
-        "anthropic" => ("@ai-sdk/anthropic", "https://api.anthropic.com/v1", "ANTHROPIC_API_KEY"),
-        "openai" => ("@ai-sdk/openai", "https://api.openai.com/v1", "OPENAI_API_KEY"),
-        "deepseek" => ("@ai-sdk/openai-compatible", "https://api.deepseek.com/v1", "DEEPSEEK_API_KEY"),
-        "openrouter" => ("@openrouter/ai-sdk-provider", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"),
+        "anthropic" => (
+            "@ai-sdk/anthropic",
+            "https://api.anthropic.com/v1",
+            "ANTHROPIC_API_KEY",
+        ),
+        "openai" => (
+            "@ai-sdk/openai",
+            "https://api.openai.com/v1",
+            "OPENAI_API_KEY",
+        ),
+        "deepseek" => (
+            "@ai-sdk/openai-compatible",
+            "https://api.deepseek.com/v1",
+            "DEEPSEEK_API_KEY",
+        ),
+        "openrouter" => (
+            "@openrouter/ai-sdk-provider",
+            "https://openrouter.ai/api/v1",
+            "OPENROUTER_API_KEY",
+        ),
         _ => return None,
     })
 }
@@ -119,7 +142,8 @@ pub fn provider_defaults(id: &str) -> Option<(&'static str, &'static str, &'stat
 /// Built-in provider catalog: (id, env var, opencode-style provider config).
 /// Only added when the env var is set and the provider is not configured.
 pub fn catalog() -> Vec<(&'static str, &'static str, Value)> {
-    let anthropic_thinking = json!({"high": {"thinking": {"type": "enabled", "budgetTokens": 16000}}});
+    let anthropic_thinking =
+        json!({"high": {"thinking": {"type": "enabled", "budgetTokens": 16000}}});
     let openai_variants = {
         let v = |e: &str| json!({"reasoningEffort": e, "reasoningSummary": "auto", "include": ["reasoning.encrypted_content"]});
         json!({"low": v("low"), "medium": v("medium"), "high": v("high")})

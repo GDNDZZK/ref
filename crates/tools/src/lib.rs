@@ -60,10 +60,17 @@ pub struct ToolOutput {
 
 impl ToolOutput {
     pub fn ok(text: impl Into<String>) -> Self {
-        ToolOutput { text: text.into(), ..Default::default() }
+        ToolOutput {
+            text: text.into(),
+            ..Default::default()
+        }
     }
     pub fn err(text: impl Into<String>) -> Self {
-        ToolOutput { text: text.into(), is_error: true, ..Default::default() }
+        ToolOutput {
+            text: text.into(),
+            is_error: true,
+            ..Default::default()
+        }
     }
 }
 
@@ -82,7 +89,10 @@ pub fn specs() -> Vec<ToolSpec> {
 }
 
 pub fn is_builtin(name: &str) -> bool {
-    matches!(name, "read" | "edit" | "write" | "delete" | "grep" | "find" | "bash" | "webfetch")
+    matches!(
+        name,
+        "read" | "edit" | "write" | "delete" | "grep" | "find" | "bash" | "webfetch"
+    )
 }
 
 /// Execute a built-in tool. Never panics; all failures become `ToolOutput { is_error: true }`.

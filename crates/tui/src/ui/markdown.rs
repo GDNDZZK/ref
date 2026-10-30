@@ -65,7 +65,12 @@ pub fn render(src: &str, width: usize, base: Style) -> Vec<Row> {
     if let Some((lang, code)) = r.code.take() {
         r.code_block(&lang, &code);
     }
-    while r.rows.last().is_some_and(|x| text::line_width(&x.line) == 0 && x.hits.is_empty()) && r.rows.len() > 1 {
+    while r
+        .rows
+        .last()
+        .is_some_and(|x| text::line_width(&x.line) == 0 && x.hits.is_empty())
+        && r.rows.len() > 1
+    {
         r.rows.pop();
     }
     r.rows
@@ -125,7 +130,11 @@ impl R {
                     let w = width(marker);
                     if first && !*used {
                         *used = true;
-                        let st = if marker.trim_end().ends_with('.') { theme::fg(theme::MD_ENUM) } else { theme::fg(theme::MD_LIST) };
+                        let st = if marker.trim_end().ends_with('.') {
+                            theme::fg(theme::MD_ENUM)
+                        } else {
+                            theme::fg(theme::MD_LIST)
+                        };
                         out.push(Span::styled(marker.clone(), st));
                     } else {
                         out.push(Span::raw(" ".repeat(w)));
@@ -165,7 +174,11 @@ impl R {
         if !self.rows.is_empty() {
             let p = self.quote_only_prefix();
             let mut row = Row::new(Line::from(p));
-            if self.containers.iter().any(|c| matches!(c, Container::Quote)) {
+            if self
+                .containers
+                .iter()
+                .any(|c| matches!(c, Container::Quote))
+            {
                 row = row.skip(self.prefix_width() as u16);
             }
             self.rows.push(row);
@@ -175,8 +188,14 @@ impl R {
     fn emit_wrapped(&mut self, lines: Vec<Vec<Span<'static>>>, hard: bool) {
         let avail = self.width.saturating_sub(self.prefix_width()).max(1);
         for logical in lines {
-            let wrapped: Vec<(Line<'static>, bool)> =
-                if hard { text::wrap_hard(&logical, avail).into_iter().map(|l| (l, false)).collect() } else { text::wrap_spans_flags(&logical, avail) };
+            let wrapped: Vec<(Line<'static>, bool)> = if hard {
+                text::wrap_hard(&logical, avail)
+                    .into_iter()
+                    .map(|l| (l, false))
+                    .collect()
+            } else {
+                text::wrap_spans_flags(&logical, avail)
+            };
             for (i, (l, sp)) in wrapped.into_iter().enumerate() {
                 let first = i == 0;
                 let p = self.prefix(true);
@@ -259,7 +278,11 @@ impl R {
                 self.rows.push(Row::new(Line::from(spans)));
             }
             Event::TaskListMarker(done) => {
-                let (s, st) = if done { ("[✓] ", theme::fg(theme::SUCCESS)) } else { ("[ ] ", theme::muted()) };
+                let (s, st) = if done {
+                    ("[✓] ", theme::fg(theme::SUCCESS))
+                } else {
+                    ("[ ] ", theme::muted())
+                };
                 self.push_text(s, st);
             }
             Event::FootnoteReference(n) => {
@@ -276,9 +299,13 @@ impl R {
                 self.block_start();
                 self.heading = Some(level);
                 let st = match level {
-                    HeadingLevel::H1 => theme::bold(theme::MD_HEADING).add_modifier(Modifier::UNDERLINED),
+                    HeadingLevel::H1 => {
+                        theme::bold(theme::MD_HEADING).add_modifier(Modifier::UNDERLINED)
+                    }
                     HeadingLevel::H2 | HeadingLevel::H3 => theme::bold(theme::MD_HEADING),
-                    _ => theme::bold(theme::MD_HEADING).remove_modifier(Modifier::BOLD).add_modifier(Modifier::ITALIC),
+                    _ => theme::bold(theme::MD_HEADING)
+                        .remove_modifier(Modifier::BOLD)
+                        .add_modifier(Modifier::ITALIC),
                 };
                 self.styles.push(st);
             }
@@ -320,10 +347,15 @@ impl R {
                         _ => "▪ ".to_string(),
                     },
                 };
-                self.containers.push(Container::Item { marker, used: false });
+                self.containers.push(Container::Item {
+                    marker,
+                    used: false,
+                });
                 self.suppress_blank = true;
             }
-            Tag::Emphasis => self.push_style(|s| s.fg(theme::MD_EMPH).add_modifier(Modifier::ITALIC)),
+            Tag::Emphasis => {
+                self.push_style(|s| s.fg(theme::MD_EMPH).add_modifier(Modifier::ITALIC))
+            }
             Tag::Strong => self.push_style(|s| s.fg(theme::MD_STRONG).add_modifier(Modifier::BOLD)),
             Tag::Strikethrough => self.push_style(|s| s.add_modifier(Modifier::CROSSED_OUT)),
             Tag::Superscript | Tag::Subscript => self.push_style(|s| s),
@@ -339,7 +371,12 @@ impl R {
             }
             Tag::Table(aligns) => {
                 self.block_start();
-                self.table = Some(Table { aligns, rows: Vec::new(), head_rows: 0, cur_row: Vec::new() });
+                self.table = Some(Table {
+                    aligns,
+                    rows: Vec::new(),
+                    head_rows: 0,
+                    cur_row: Vec::new(),
+                });
             }
             Tag::TableHead | Tag::TableRow => {
                 if let Some(t) = self.table.as_mut() {
@@ -351,9 +388,10 @@ impl R {
                     t.cur_row.push(Vec::new());
                 }
             }
-            Tag::FootnoteDefinition(_) | Tag::DefinitionList | Tag::DefinitionListTitle | Tag::DefinitionListDefinition => {
-                self.block_start()
-            }
+            Tag::FootnoteDefinition(_)
+            | Tag::DefinitionList
+            | Tag::DefinitionListTitle
+            | Tag::DefinitionListDefinition => self.block_start(),
             Tag::MetadataBlock(_) => {}
         }
     }
@@ -369,7 +407,11 @@ impl R {
             TagEnd::BlockQuote(_) => {
                 self.flush();
                 self.pop_style();
-                if let Some(i) = self.containers.iter().rposition(|c| matches!(c, Container::Quote)) {
+                if let Some(i) = self
+                    .containers
+                    .iter()
+                    .rposition(|c| matches!(c, Container::Quote))
+                {
                     self.containers.truncate(i);
                 }
                 self.suppress_blank = false;
@@ -383,7 +425,11 @@ impl R {
             }
             TagEnd::Item => {
                 self.flush();
-                if let Some(i) = self.containers.iter().rposition(|c| matches!(c, Container::Item { .. })) {
+                if let Some(i) = self
+                    .containers
+                    .iter()
+                    .rposition(|c| matches!(c, Container::Item { .. }))
+                {
                     // Item with no content still shows its marker.
                     if let Container::Item { used: false, .. } = &self.containers[i] {
                         let p = self.prefix(true);
@@ -393,13 +439,19 @@ impl R {
                 }
                 self.suppress_blank = false;
             }
-            TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough | TagEnd::Superscript | TagEnd::Subscript => {
-                self.pop_style()
-            }
+            TagEnd::Emphasis
+            | TagEnd::Strong
+            | TagEnd::Strikethrough
+            | TagEnd::Superscript
+            | TagEnd::Subscript => self.pop_style(),
             TagEnd::Link => {
                 self.pop_style();
                 let url = self.link.pop().unwrap_or_default();
-                let shown: String = self.inline.last().map(|l| l.iter().map(|s| s.content.as_ref()).collect()).unwrap_or_default();
+                let shown: String = self
+                    .inline
+                    .last()
+                    .map(|l| l.iter().map(|s| s.content.as_ref()).collect())
+                    .unwrap_or_default();
                 if !url.is_empty() && !shown.ends_with(&url) && !url.starts_with('#') {
                     let st = theme::fg(theme::MD_LINK).add_modifier(Modifier::DIM);
                     self.push_text(&format!(" ({url})"), st);
@@ -430,9 +482,10 @@ impl R {
                 }
             }
             TagEnd::TableCell => {}
-            TagEnd::FootnoteDefinition | TagEnd::DefinitionList | TagEnd::DefinitionListTitle | TagEnd::DefinitionListDefinition => {
-                self.flush()
-            }
+            TagEnd::FootnoteDefinition
+            | TagEnd::DefinitionList
+            | TagEnd::DefinitionListTitle
+            | TagEnd::DefinitionListDefinition => self.flush(),
             TagEnd::MetadataBlock(_) => {}
         }
     }
@@ -448,7 +501,10 @@ impl R {
         let lang_label = lang.split_whitespace().next().unwrap_or("").to_string();
         for (i, line) in lines.iter().enumerate() {
             let spans: Vec<Span<'static>> = match hl.as_ref().and_then(|h| h.get(i)) {
-                Some(segs) => segs.iter().map(|(st, s)| Span::styled(s.clone(), st.bg(bg))).collect(),
+                Some(segs) => segs
+                    .iter()
+                    .map(|(st, s)| Span::styled(s.clone(), st.bg(bg)))
+                    .collect(),
                 None => vec![Span::styled(line.to_string(), base)],
             };
             let wrapped = text::wrap_hard(&spans, inner);
@@ -462,7 +518,10 @@ impl R {
                 let mut label = None;
                 if i == 0 && j == 0 && !lang_label.is_empty() && fill > width(&lang_label) + 2 {
                     fill -= width(&lang_label);
-                    label = Some(Span::styled(lang_label.clone(), Style::new().fg(theme::DIM).bg(bg)));
+                    label = Some(Span::styled(
+                        lang_label.clone(),
+                        Style::new().fg(theme::DIM).bg(bg),
+                    ));
                 }
                 out.push(Span::styled(" ".repeat(fill), base));
                 let mut row = Row::new(Line::from(out)).soft(j > 0).skip((pw + 2) as u16);
@@ -495,7 +554,11 @@ impl R {
             // Shrink the widest columns first.
             let mut w = widths.clone();
             while w.iter().sum::<usize>() > avail {
-                let (mi, _) = w.iter().enumerate().max_by_key(|(_, v)| **v).unwrap_or((0, &0));
+                let (mi, _) = w
+                    .iter()
+                    .enumerate()
+                    .max_by_key(|(_, v)| **v)
+                    .unwrap_or((0, &0));
                 if w[mi] <= 2 {
                     break;
                 }
@@ -561,7 +624,8 @@ impl R {
                     spans.push(Span::raw(" ".repeat(rp)));
                 }
                 spans.push(Span::styled(" │", bst));
-                self.rows.push(Row::new(Line::from(spans)).soft_sp(li > 0, true));
+                self.rows
+                    .push(Row::new(Line::from(spans)).soft_sp(li > 0, true));
             }
             if head && ri + 1 == t.head_rows {
                 let mut p = self.prefix(false);
@@ -584,13 +648,19 @@ mod tests {
     use super::*;
 
     fn plain(src: &str, w: usize) -> Vec<String> {
-        render(src, w, theme::text()).iter().map(|r| text::line_text(&r.line).trim_end().to_string()).collect()
+        render(src, w, theme::text())
+            .iter()
+            .map(|r| text::line_text(&r.line).trim_end().to_string())
+            .collect()
     }
 
     #[test]
     fn headings_and_paragraphs() {
         let out = plain("# Title\n\nHello **world**, `code`.\n\nSecond para", 40);
-        assert_eq!(out, vec!["Title", "", "Hello world, code.", "", "Second para"]);
+        assert_eq!(
+            out,
+            vec!["Title", "", "Hello world, code.", "", "Second para"]
+        );
     }
 
     #[test]
@@ -646,7 +716,11 @@ mod tests {
         let src = "# 标题很长很长很长很长很长\n\n中文段落，包含很多很多字符以测试换行是否正确处理宽字符。\n\n| 列一 | 列二 |\n|---|---|\n| 很长的单元格内容很长 | x |\n\n```\nlong code line that goes on and on and on\n```";
         for w in [10usize, 17, 25] {
             for r in render(src, w, theme::text()) {
-                assert!(text::line_width(&r.line) <= w, "w={w} {:?}", text::line_text(&r.line));
+                assert!(
+                    text::line_width(&r.line) <= w,
+                    "w={w} {:?}",
+                    text::line_text(&r.line)
+                );
             }
         }
     }

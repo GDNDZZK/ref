@@ -58,13 +58,19 @@ pub enum Hit {
 
 impl Hit {
     pub fn is_button(&self) -> bool {
-        matches!(self, Hit::Copy { .. } | Hit::ShowAll { .. } | Hit::Undo { .. } | Hit::Unqueue { .. })
+        matches!(
+            self,
+            Hit::Copy { .. } | Hit::ShowAll { .. } | Hit::Undo { .. } | Hit::Unqueue { .. }
+        )
     }
 }
 
 impl Row {
     pub fn new(line: Line<'static>) -> Self {
-        Row { line, ..Default::default() }
+        Row {
+            line,
+            ..Default::default()
+        }
     }
     pub fn blank() -> Self {
         Row::default()
@@ -93,7 +99,11 @@ impl Row {
     }
     /// Whole-row click target (added after any button zones).
     pub fn hit(mut self, h: Hit) -> Self {
-        self.hits.push(Zone { x0: 0, x1: u16::MAX, hit: h });
+        self.hits.push(Zone {
+            x0: 0,
+            x1: u16::MAX,
+            hit: h,
+        });
         self
     }
     /// Click target on columns `x0..x1`, taking priority over whole-row zones.
@@ -121,6 +131,9 @@ impl Row {
         self
     }
     pub fn hit_at(&self, x: u16) -> Option<&Hit> {
-        self.hits.iter().find(|z| x >= z.x0 && x < z.x1).map(|z| &z.hit)
+        self.hits
+            .iter()
+            .find(|z| x >= z.x0 && x < z.x1)
+            .map(|z| &z.hit)
     }
 }

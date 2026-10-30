@@ -18,7 +18,12 @@ struct Resp {
 }
 
 fn ok(ct: &str, body: impl Into<Vec<u8>>) -> Resp {
-    Resp { status: 200, headers: vec![("Content-Type", ct.to_string())], body: body.into(), delay_ms: 0 }
+    Resp {
+        status: 200,
+        headers: vec![("Content-Type", ct.to_string())],
+        body: body.into(),
+        delay_ms: 0,
+    }
 }
 
 type Handler = Arc<dyn Fn(&Req) -> Resp + Send + Sync>;
@@ -42,8 +47,17 @@ async fn serve(h: impl Fn(&Req) -> Resp + Send + Sync + 'static) -> String {
                 }
                 let head = String::from_utf8_lossy(&buf).to_string();
                 let mut lines = head.split("\r\n");
-                let path = lines.next().unwrap_or("").split(' ').nth(1).unwrap_or("/").to_string();
-                let headers = lines.filter_map(|l| l.split_once(':')).map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string())).collect();
+                let path = lines
+                    .next()
+                    .unwrap_or("")
+                    .split(' ')
+                    .nth(1)
+                    .unwrap_or("/")
+                    .to_string();
+                let headers = lines
+                    .filter_map(|l| l.split_once(':'))
+                    .map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string()))
+                    .collect();
                 let r = h(&Req { path, headers });
                 if r.delay_ms > 0 {
                     tokio::time::sleep(Duration::from_millis(r.delay_ms)).await;
@@ -56,7 +70,11 @@ async fn serve(h: impl Fn(&Req) -> Resp + Send + Sync + 'static) -> String {
                     _ => "Status",
                 };
                 let mut out = format!("HTTP/1.1 {} {reason}\r\nConnection: close\r\n", r.status);
-                if !r.headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-length")) {
+                if !r
+                    .headers
+                    .iter()
+                    .any(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+                {
                     out.push_str(&format!("Content-Length: {}\r\n", r.body.len()));
                 }
                 for (k, v) in &r.headers {
@@ -105,12 +123,31 @@ async fn html_article_full_page_text_and_html() {
     assert!(!o.is_error, "{}", o.text);
     assert!(o.text.starts_with(&format!("URL: {base}/guide\nContent-Type: text/html\nTitle: Guide to things\nNote: Main content only")), "{}", o.text);
     let b = body(&o);
-    assert!(b.contains(&format!("[the docs]({base}/docs/page?a=1&b=2)")), "{b}");
-    assert!(b.contains("[iam@example.com](mailto:iam@example.com)"), "{b}");
+    assert!(
+        b.contains(&format!("[the docs]({base}/docs/page?a=1&b=2)")),
+        "{b}"
+    );
+    assert!(
+        b.contains("[iam@example.com](mailto:iam@example.com)"),
+        "{b}"
+    );
     assert!(b.contains("```python\ndef f():\n    return 1\n```"), "{b}");
-    assert!(b.contains(&format!("![Picture]({base}/img/pic.png)")), "{b}");
-    assert!(b.contains("**Spoiler**") && b.contains("Hidden detail"), "{b}");
-    for junk in ["NAVTEXT", "FOOTERTEXT", "SCRIPTTEXT", "INVISIBLE", "ALSOHIDDEN", "data:image"] {
+    assert!(
+        b.contains(&format!("![Picture]({base}/img/pic.png)")),
+        "{b}"
+    );
+    assert!(
+        b.contains("**Spoiler**") && b.contains("Hidden detail"),
+        "{b}"
+    );
+    for junk in [
+        "NAVTEXT",
+        "FOOTERTEXT",
+        "SCRIPTTEXT",
+        "INVISIBLE",
+        "ALSOHIDDEN",
+        "data:image",
+    ] {
         assert!(!b.contains(junk), "{junk} in {b}");
     }
     let m = o.meta.as_ref().unwrap();
@@ -119,18 +156,37 @@ async fn html_article_full_page_text_and_html() {
     // Whole page: navigation and footer too, still without scripts / hidden nodes.
     let o = fetch(json!({"url": format!("{base}/guide"), "full_page": true})).await;
     let b = body(&o);
-    assert!(b.contains("NAVTEXT") && b.contains("FOOTERTEXT") && b.contains("# Guide to things"), "{b}");
-    assert!(!b.contains("SCRIPTTEXT") && !b.contains("INVISIBLE") && !o.text.contains("Note: Main content"));
+    assert!(
+        b.contains("NAVTEXT") && b.contains("FOOTERTEXT") && b.contains("# Guide to things"),
+        "{b}"
+    );
+    assert!(
+        !b.contains("SCRIPTTEXT")
+            && !b.contains("INVISIBLE")
+            && !o.text.contains("Note: Main content")
+    );
     // Text: no markdown syntax.
     let o = fetch(json!({"url": format!("{base}/guide"), "format": "text"})).await;
     let b = body(&o);
-    assert!(b.contains("This guide explains things") && !b.contains("](") && !b.contains("```"), "{b}");
+    assert!(
+        b.contains("This guide explains things") && !b.contains("](") && !b.contains("```"),
+        "{b}"
+    );
     // HTML: the page as received.
     let o = fetch(json!({"url": format!("{base}/guide"), "format": "html"})).await;
     assert_eq!(body(&o), ARTICLE.trim_end());
     // Bad arguments.
-    assert!(fetch(json!({"url": format!("{base}/guide"), "format": "pdf"})).await.is_error);
-    assert!(fetch(json!({"url": "ftp://example.com/x"})).await.text.contains("Only http and https"));
+    assert!(
+        fetch(json!({"url": format!("{base}/guide"), "format": "pdf"}))
+            .await
+            .is_error
+    );
+    assert!(
+        fetch(json!({"url": "ftp://example.com/x"}))
+            .await
+            .text
+            .contains("Only http and https")
+    );
     assert!(fetch(json!({"url": "  "})).await.is_error);
 }
 
@@ -138,12 +194,27 @@ async fn html_article_full_page_text_and_html() {
 async fn non_article_pages_convert_whole_and_js_pages_say_so() {
     let page = "<html><head><title>Portal</title></head><body><ul><li><a href='/a'>Alpha news</a></li><li><a href='/b'>Beta news</a></li><li><a href='/c'>Gamma</a></li></ul></body></html>";
     let spa = "<html><head><title>App</title></head><body><div id='root'></div><script src='/app.js'></script></body></html>";
-    let base = serve(move |r| if r.path == "/spa" { ok("text/html", spa) } else { ok("text/html; charset=utf-8", page) }).await;
+    let base = serve(move |r| {
+        if r.path == "/spa" {
+            ok("text/html", spa)
+        } else {
+            ok("text/html; charset=utf-8", page)
+        }
+    })
+    .await;
     let o = fetch(json!({"url": format!("{base}/")})).await;
     assert!(!o.text.contains("Note: Main content"), "{}", o.text);
-    assert!(body(&o).contains(&format!("- [Alpha news]({base}/a)")), "{}", o.text);
+    assert!(
+        body(&o).contains(&format!("- [Alpha news]({base}/a)")),
+        "{}",
+        o.text
+    );
     let o = fetch(json!({"url": format!("{base}/spa")})).await;
-    assert!(o.text.contains("no text without JavaScript") && body(&o) == "(no content)", "{}", o.text);
+    assert!(
+        o.text.contains("no text without JavaScript") && body(&o) == "(no content)",
+        "{}",
+        o.text
+    );
 }
 
 #[tokio::test]
@@ -161,10 +232,20 @@ async fn charsets_from_header_meta_and_bom() {
     })
     .await;
     let o = fetch(json!({"url": format!("{base}/meta"), "full_page": true})).await;
-    assert!(o.text.contains("Title: 中文标题") && body(&o).contains("你好，世界"), "{}", o.text);
-    assert_eq!(body(&fetch(json!({"url": format!("{base}/header")})).await), "日本語のテキスト");
+    assert!(
+        o.text.contains("Title: 中文标题") && body(&o).contains("你好，世界"),
+        "{}",
+        o.text
+    );
+    assert_eq!(
+        body(&fetch(json!({"url": format!("{base}/header")})).await),
+        "日本語のテキスト"
+    );
     // A BOM wins over the declared charset.
-    assert_eq!(body(&fetch(json!({"url": format!("{base}/bom")})).await), "BOM text é");
+    assert_eq!(
+        body(&fetch(json!({"url": format!("{base}/bom")})).await),
+        "BOM text é"
+    );
 }
 
 #[tokio::test]
@@ -178,14 +259,30 @@ async fn markdown_by_negotiation_or_alternate_link() {
     })
     .await;
     let o = fetch(json!({"url": format!("{base}/neg")})).await;
-    assert!(o.text.contains("Content-Type: text/markdown") && body(&o) == "# Served as markdown", "{}", o.text);
+    assert!(
+        o.text.contains("Content-Type: text/markdown") && body(&o) == "# Served as markdown",
+        "{}",
+        o.text
+    );
     // format html asks for HTML first.
-    assert!(body(&fetch(json!({"url": format!("{base}/neg"), "format": "html"})).await).contains("html version"));
+    assert!(
+        body(&fetch(json!({"url": format!("{base}/neg"), "format": "html"})).await)
+            .contains("html version")
+    );
     let o = fetch(json!({"url": format!("{base}/alt")})).await;
     assert_eq!(body(&o), "# Alternate markdown");
-    assert!(o.text.contains(&format!("links a markdown version; this is it: {base}/alt.md")), "{}", o.text);
+    assert!(
+        o.text.contains(&format!(
+            "links a markdown version; this is it: {base}/alt.md"
+        )),
+        "{}",
+        o.text
+    );
     // full_page converts the HTML itself.
-    assert!(body(&fetch(json!({"url": format!("{base}/alt"), "full_page": true})).await).contains("html body"));
+    assert!(
+        body(&fetch(json!({"url": format!("{base}/alt"), "full_page": true})).await)
+            .contains("html body")
+    );
 }
 
 const RSS: &str = r#"<?xml version="1.0"?><rss version="2.0"><channel><title>Feed &amp; Co</title><link>https://ex.com/</link><description>News</description>
@@ -203,36 +300,85 @@ async fn json_feeds_images_svg_and_binary() {
         "/atom" => ok("application/xml", ATOM),
         "/img" => ok("image/png", png.clone()),
         "/fake" => ok("image/png", b"\x89PNG\r\n\x1a\n0000IHDR fake png".to_vec()),
-        "/svg" => ok("image/svg+xml", "<svg xmlns='http://www.w3.org/2000/svg'><circle r='1'/></svg>"),
-        _ => ok("application/octet-stream", vec![0u8, 1, 2, 3, 0, 0, 255, 254]),
+        "/svg" => ok(
+            "image/svg+xml",
+            "<svg xmlns='http://www.w3.org/2000/svg'><circle r='1'/></svg>",
+        ),
+        _ => ok(
+            "application/octet-stream",
+            vec![0u8, 1, 2, 3, 0, 0, 255, 254],
+        ),
     })
     .await;
-    assert_eq!(body(&fetch(json!({"url": format!("{base}/j")})).await), "{\n  \"a\": [\n    1,\n    2\n  ],\n  \"b\": {\n    \"c\": \"d\"\n  }\n}");
-    assert_eq!(body(&fetch(json!({"url": format!("{base}/j"), "format": "html"})).await), r#"{"a":[1,2],"b":{"c":"d"}}"#);
+    assert_eq!(
+        body(&fetch(json!({"url": format!("{base}/j")})).await),
+        "{\n  \"a\": [\n    1,\n    2\n  ],\n  \"b\": {\n    \"c\": \"d\"\n  }\n}"
+    );
+    assert_eq!(
+        body(&fetch(json!({"url": format!("{base}/j"), "format": "html"})).await),
+        r#"{"a":[1,2],"b":{"c":"d"}}"#
+    );
     let o = fetch(json!({"url": format!("{base}/rss")})).await;
     let b = body(&o);
     assert!(o.text.contains("Title: Feed & Co"), "{}", o.text);
-    assert!(b.contains("2 entries") && b.contains("## [First post](https://ex.com/1)\nMon, 01 Jan 2024 00:00:00 GMT\n\nHello world"), "{b}");
+    assert!(
+        b.contains("2 entries")
+            && b.contains(
+                "## [First post](https://ex.com/1)\nMon, 01 Jan 2024 00:00:00 GMT\n\nHello world"
+            ),
+        "{b}"
+    );
     assert!(b.contains("## [Second <post>](https://ex.com/2)"), "{b}");
-    assert!(body(&fetch(json!({"url": format!("{base}/rss"), "format": "html"})).await).starts_with("<?xml"));
+    assert!(
+        body(&fetch(json!({"url": format!("{base}/rss"), "format": "html"})).await)
+            .starts_with("<?xml")
+    );
     let b = body(&fetch(json!({"url": format!("{base}/atom")})).await).to_string();
-    assert!(b.contains("# Atom feed") && b.contains("## [Entry one](https://ex.org/e1)\n2024-02-02T00:00:00Z · Ann\n\nShort summary"), "{b}");
+    assert!(
+        b.contains("# Atom feed")
+            && b.contains(
+                "## [Entry one](https://ex.org/e1)\n2024-02-02T00:00:00Z · Ann\n\nShort summary"
+            ),
+        "{b}"
+    );
     let o = fetch(json!({"url": format!("{base}/img")})).await;
     assert_eq!(o.images.len(), 1);
     assert_eq!(o.images[0].mime, "image/jpeg");
-    assert!(body(&o).starts_with("Image (image/png, ") && body(&o).contains("attached as image/jpeg 1568x392 (") && body(&o).contains("[Image: original 2000x500, displayed at 1568x392."), "{}", o.text);
+    assert!(
+        body(&o).starts_with("Image (image/png, ")
+            && body(&o).contains("attached as image/jpeg 1568x392 (")
+            && body(&o).contains("[Image: original 2000x500, displayed at 1568x392."),
+        "{}",
+        o.text
+    );
     let o = fetch(json!({"url": format!("{base}/fake")})).await;
-    assert!(o.images.is_empty() && !o.is_error && body(&o).starts_with("The content looks like image/png (25 B) but could not be decoded"), "{}", o.text);
+    assert!(
+        o.images.is_empty()
+            && !o.is_error
+            && body(&o)
+                .starts_with("The content looks like image/png (25 B) but could not be decoded"),
+        "{}",
+        o.text
+    );
     assert!(body(&fetch(json!({"url": format!("{base}/svg")})).await).starts_with("<svg"));
     let o = fetch(json!({"url": format!("{base}/bin")})).await;
-    assert!(!o.is_error && body(&o).starts_with("Binary content (application/octet-stream, 8 B) is not shown"), "{}", o.text);
+    assert!(
+        !o.is_error
+            && body(&o).starts_with("Binary content (application/octet-stream, 8 B) is not shown"),
+        "{}",
+        o.text
+    );
 }
 
 #[tokio::test]
 async fn pdf_is_binary() {
     let base = serve(|_| ok("application/pdf", "%PDF-1.4 plain ascii")).await;
     let o = fetch(json!({"url": format!("{base}/a.pdf")})).await;
-    assert!(!o.is_error && body(&o).starts_with("Binary content (application/pdf"), "{}", o.text);
+    assert!(
+        !o.is_error && body(&o).starts_with("Binary content (application/pdf"),
+        "{}",
+        o.text
+    );
 }
 
 #[tokio::test]
@@ -244,30 +390,107 @@ async fn errors_redirects_challenge_gzip_and_limits() {
     let base = serve(move |r| {
         let ua = r.headers.get("user-agent").cloned().unwrap_or_default();
         match r.path.as_str() {
-            "/missing" => Resp { status: 404, headers: vec![("Content-Type", "text/html".into())], body: format!("<html><body><p>No such page</p>{}</body></html>", "x".repeat(9000)).into(), delay_ms: 0 },
-            "/old" => Resp { status: 302, headers: vec![("Location", "/new".into())], ..Default::default() },
+            "/missing" => Resp {
+                status: 404,
+                headers: vec![("Content-Type", "text/html".into())],
+                body: format!(
+                    "<html><body><p>No such page</p>{}</body></html>",
+                    "x".repeat(9000)
+                )
+                .into(),
+                delay_ms: 0,
+            },
+            "/old" => Resp {
+                status: 302,
+                headers: vec![("Location", "/new".into())],
+                ..Default::default()
+            },
             "/new" => ok("text/plain", "moved here"),
-            "/cf" if !ua.starts_with("ref/") => Resp { status: 403, headers: vec![("cf-mitigated", "challenge".into()), ("Content-Type", "text/html".into())], body: b"<html>Just a moment</html>".to_vec(), delay_ms: 0 },
-            "/cf" => ok("text/plain", format!("hello {}", ua.split('/').next().unwrap_or(""))),
-            "/gz" => Resp { status: 200, headers: vec![("Content-Type", "text/plain".into()), ("Content-Encoding", "gzip".into())], body: gz.clone(), delay_ms: 0 },
-            "/huge" => Resp { status: 200, headers: vec![("Content-Type", "text/plain".into()), ("Content-Length", "999999999".into())], ..Default::default() },
-            "/slow" => Resp { delay_ms: 5000, ..ok("text/plain", "late") },
-            _ => ok("text/plain", format!("lang={}", r.headers.get("accept-language").cloned().unwrap_or_default())),
+            "/cf" if !ua.starts_with("ref/") => Resp {
+                status: 403,
+                headers: vec![
+                    ("cf-mitigated", "challenge".into()),
+                    ("Content-Type", "text/html".into()),
+                ],
+                body: b"<html>Just a moment</html>".to_vec(),
+                delay_ms: 0,
+            },
+            "/cf" => ok(
+                "text/plain",
+                format!("hello {}", ua.split('/').next().unwrap_or("")),
+            ),
+            "/gz" => Resp {
+                status: 200,
+                headers: vec![
+                    ("Content-Type", "text/plain".into()),
+                    ("Content-Encoding", "gzip".into()),
+                ],
+                body: gz.clone(),
+                delay_ms: 0,
+            },
+            "/huge" => Resp {
+                status: 200,
+                headers: vec![
+                    ("Content-Type", "text/plain".into()),
+                    ("Content-Length", "999999999".into()),
+                ],
+                ..Default::default()
+            },
+            "/slow" => Resp {
+                delay_ms: 5000,
+                ..ok("text/plain", "late")
+            },
+            _ => ok(
+                "text/plain",
+                format!(
+                    "lang={}",
+                    r.headers
+                        .get("accept-language")
+                        .cloned()
+                        .unwrap_or_default()
+                ),
+            ),
         }
     })
     .await;
     let o = fetch(json!({"url": format!("{base}/missing")})).await;
-    assert!(o.is_error && o.text.contains("\nStatus: 404 Not Found\n") && body(&o).starts_with("No such page"), "{}", o.text);
+    assert!(
+        o.is_error
+            && o.text.contains("\nStatus: 404 Not Found\n")
+            && body(&o).starts_with("No such page"),
+        "{}",
+        o.text
+    );
     assert!(o.text.contains("[… error page cut …]") && o.text.len() < 5000);
     let o = fetch(json!({"url": format!("{base}/old")})).await;
-    assert!(o.text.starts_with(&format!("URL: {base}/new (redirected from {base}/old)")) && body(&o) == "moved here", "{}", o.text);
-    assert_eq!(body(&fetch(json!({"url": format!("{base}/cf")})).await), "hello ref");
-    assert_eq!(body(&fetch(json!({"url": format!("{base}/gz")})).await), "compressed body");
+    assert!(
+        o.text
+            .starts_with(&format!("URL: {base}/new (redirected from {base}/old)"))
+            && body(&o) == "moved here",
+        "{}",
+        o.text
+    );
+    assert_eq!(
+        body(&fetch(json!({"url": format!("{base}/cf")})).await),
+        "hello ref"
+    );
+    assert_eq!(
+        body(&fetch(json!({"url": format!("{base}/gz")})).await),
+        "compressed body"
+    );
     let o = fetch(json!({"url": format!("{base}/huge")})).await;
-    assert!(o.is_error && o.text.contains("Response too large"), "{}", o.text);
+    assert!(
+        o.is_error && o.text.contains("Response too large"),
+        "{}",
+        o.text
+    );
     let t = std::time::Instant::now();
     let o = fetch(json!({"url": format!("{base}/slow"), "timeout": 1})).await;
-    assert!(o.is_error && o.text.contains("timed out") && t.elapsed() < Duration::from_secs(4), "{}", o.text);
+    assert!(
+        o.is_error && o.text.contains("timed out") && t.elapsed() < Duration::from_secs(4),
+        "{}",
+        o.text
+    );
     // Cancel.
     let d = temp_dir("webfetch-cancel");
     let c = ctx(&d);
@@ -277,10 +500,17 @@ async fn errors_redirects_challenge_gzip_and_limits() {
         token.cancel();
     });
     let o = crate::execute("webfetch", json!({"url": format!("{base}/slow")}), &c).await;
-    assert!(o.is_error && o.text.contains("cancelled") && t.elapsed() < Duration::from_secs(6), "{}", o.text);
+    assert!(
+        o.is_error && o.text.contains("cancelled") && t.elapsed() < Duration::from_secs(6),
+        "{}",
+        o.text
+    );
     // Scheme-less URLs are https; the Accept-Language header is sent.
-    assert!(body(&fetch(json!({"url": format!("{base}/lang")})).await).starts_with("lang=") );
-    assert_eq!(parse_url("example.com/a").unwrap().as_str(), "https://example.com/a");
+    assert!(body(&fetch(json!({"url": format!("{base}/lang")})).await).starts_with("lang="));
+    assert_eq!(
+        parse_url("example.com/a").unwrap().as_str(),
+        "https://example.com/a"
+    );
 }
 
 #[tokio::test]
@@ -291,7 +521,12 @@ async fn long_content_is_cut_and_saved() {
     let o = fetch(json!({"url": format!("{base}/long")})).await;
     let m = o.meta.as_ref().unwrap();
     assert_eq!(m["truncated"], true);
-    assert!(body(&o).starts_with("line 1\nline 2\n") && o.text.contains("[Content cut: showing 2000 of 5000 lines"), "{}", &o.text[o.text.len() - 300..]);
+    assert!(
+        body(&o).starts_with("line 1\nline 2\n")
+            && o.text.contains("[Content cut: showing 2000 of 5000 lines"),
+        "{}",
+        &o.text[o.text.len() - 300..]
+    );
     let path = m["output_path"].as_str().unwrap();
     assert_eq!(std::fs::read_to_string(path).unwrap(), text);
     std::fs::remove_file(path).unwrap();
@@ -299,25 +534,56 @@ async fn long_content_is_cut_and_saved() {
 
 #[test]
 fn helpers() {
-    assert_eq!(html::cf_email("5a333b371a3f223b372a363f74393537").as_deref(), Some("iam@example.com"));
+    assert_eq!(
+        html::cf_email("5a333b371a3f223b372a363f74393537").as_deref(),
+        Some("iam@example.com")
+    );
     assert_eq!(html::cf_email("zz"), None);
-    for h in ["localhost", "127.0.0.1", "[::1]", "10.1.2.3", "192.168.0.9", "172.16.0.1", "fe80::1", "box.local"] {
+    for h in [
+        "localhost",
+        "127.0.0.1",
+        "[::1]",
+        "10.1.2.3",
+        "192.168.0.9",
+        "172.16.0.1",
+        "fe80::1",
+        "box.local",
+    ] {
         assert!(fetch::bypass_proxy(h), "{h}");
     }
-    assert!(!fetch::bypass_proxy("8.8.8.8") || std::env::var("NO_PROXY").is_ok_and(|v| v.contains('*')));
-    assert_eq!(fetch::accept_language_for("zh_CN.UTF-8"), "zh-CN,zh;q=0.9,en;q=0.8");
+    assert!(
+        !fetch::bypass_proxy("8.8.8.8") || std::env::var("NO_PROXY").is_ok_and(|v| v.contains('*'))
+    );
+    assert_eq!(
+        fetch::accept_language_for("zh_CN.UTF-8"),
+        "zh-CN,zh;q=0.9,en;q=0.8"
+    );
     assert_eq!(fetch::accept_language_for("de"), "de,en;q=0.8");
     assert_eq!(fetch::accept_language_for("C.UTF-8"), "en-US,en;q=0.9");
     assert_eq!(fetch::accept_language_for(""), "en-US,en;q=0.9");
     let u = |s: &str| Url::parse(s).unwrap();
     match sites::special(&u("https://github.com/o/r/blob/main/src/a b.rs")) {
-        Some(sites::Special::Rewrite { url, .. }) => assert_eq!(url.as_str(), "https://raw.githubusercontent.com/o/r/main/src/a%20b.rs"),
+        Some(sites::Special::Rewrite { url, .. }) => assert_eq!(
+            url.as_str(),
+            "https://raw.githubusercontent.com/o/r/main/src/a%20b.rs"
+        ),
         _ => panic!("blob rewrite"),
     }
-    assert!(matches!(sites::special(&u("https://github.com/o/r/pull/12")), Some(sites::Special::GithubIssue { number: 12, .. })));
+    assert!(matches!(
+        sites::special(&u("https://github.com/o/r/pull/12")),
+        Some(sites::Special::GithubIssue { number: 12, .. })
+    ));
     assert!(sites::special(&u("https://github.com/o/r")).is_none());
     let issue = json!({"number": 7, "title": "Crash", "state": "closed", "state_reason": "completed", "user": {"login": "ann"}, "created_at": "2024-03-01T10:00:00Z", "labels": [{"name": "bug"}], "comments": 1, "body": "It crashes."});
-    let (t, md) = sites::github_issue_markdown(&issue, &[json!({"user": {"login": "bob"}, "created_at": "2024-03-02T00:00:00Z", "body": "Fixed."})]);
+    let (t, md) = sites::github_issue_markdown(
+        &issue,
+        &[
+            json!({"user": {"login": "bob"}, "created_at": "2024-03-02T00:00:00Z", "body": "Fixed."}),
+        ],
+    );
     assert_eq!(t, "Crash");
-    assert_eq!(md, "# Crash (#7)\n\nIssue, closed (completed) · by ann · opened 2024-03-01 · labels: bug · 1 comments\n\nIt crashes.\n\n---\n\n**bob** · 2024-03-02\n\nFixed.\n");
+    assert_eq!(
+        md,
+        "# Crash (#7)\n\nIssue, closed (completed) · by ann · opened 2024-03-01 · labels: bug · 1 comments\n\nIt crashes.\n\n---\n\n**bob** · 2024-03-02\n\nFixed.\n"
+    );
 }

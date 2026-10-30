@@ -57,15 +57,24 @@ impl StdioTransport {
             });
         }
         let reader = tokio::spawn(read_loop(BufReader::new(stdout), shared));
-        Ok(StdioTransport { stdin: Mutex::new(Some(stdin)), child: Mutex::new(Some(child)), reader })
+        Ok(StdioTransport {
+            stdin: Mutex::new(Some(stdin)),
+            child: Mutex::new(Some(child)),
+            reader,
+        })
     }
 
     pub(crate) async fn send(&self, msg: &Value) -> Result<()> {
         let mut line = serde_json::to_vec(msg)?;
         line.push(b'\n');
         let mut guard = self.stdin.lock().await;
-        let stdin = guard.as_mut().ok_or_else(|| anyhow!("MCP stdio transport closed"))?;
-        stdin.write_all(&line).await.context("writing to MCP server stdin")?;
+        let stdin = guard
+            .as_mut()
+            .ok_or_else(|| anyhow!("MCP stdio transport closed"))?;
+        stdin
+            .write_all(&line)
+            .await
+            .context("writing to MCP server stdin")?;
         stdin.flush().await.context("flushing MCP server stdin")?;
         Ok(())
     }
@@ -90,7 +99,11 @@ async fn read_loop<R: tokio::io::AsyncRead + Unpin>(mut reader: BufReader<R>, sh
     loop {
         buf.clear();
         // Bounded read_until: stop accumulating past MAX_FRAME.
-        let n = match (&mut reader).take(MAX_FRAME as u64 + 1).read_until(b'\n', &mut buf).await {
+        let n = match (&mut reader)
+            .take(MAX_FRAME as u64 + 1)
+            .read_until(b'\n', &mut buf)
+            .await
+        {
             Ok(n) => n,
             Err(e) => {
                 tracing::debug!(server = %shared.name, "stdout read error: {e}");

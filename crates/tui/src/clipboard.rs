@@ -22,7 +22,13 @@ fn osc52(text: &str) {
 
 #[cfg(not(test))]
 fn pipe_to(cmd: &str, args: &[&str], text: &str) -> bool {
-    let Ok(mut child) = Command::new(cmd).args(args).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() else {
+    let Ok(mut child) = Command::new(cmd)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
         return false;
     };
     if let Some(mut stdin) = child.stdin.take() {
@@ -103,7 +109,12 @@ fn encode_png(w: usize, h: usize, rgba: &[u8]) -> Option<Vec<u8>> {
 }
 
 fn run_bytes(cmd: &str, args: &[&str]) -> Option<Vec<u8>> {
-    let out = Command::new(cmd).args(args).stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?;
+    let out = Command::new(cmd)
+        .args(args)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
     (out.status.success() && !out.stdout.is_empty()).then_some(out.stdout)
 }
 
@@ -119,19 +130,28 @@ pub fn paste_image() -> Option<ImageData> {
     })()
     .or_else(|| {
         if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-            let types = run_bytes("wl-paste", &["--list-types"]).map(|b| String::from_utf8_lossy(&b).to_string()).unwrap_or_default();
+            let types = run_bytes("wl-paste", &["--list-types"])
+                .map(|b| String::from_utf8_lossy(&b).to_string())
+                .unwrap_or_default();
             if types.lines().any(|t| t.trim() == "image/png") {
                 return run_bytes("wl-paste", &["--no-newline", "--type", "image/png"]);
             }
             None
         } else {
-            run_bytes("xclip", &["-selection", "clipboard", "-t", "image/png", "-o"])
+            run_bytes(
+                "xclip",
+                &["-selection", "clipboard", "-t", "image/png", "-o"],
+            )
         }
     })?;
     if !png.starts_with(&[0x89, b'P', b'N', b'G']) {
         return None;
     }
-    Some(ImageData { mime: "image/png".into(), data: base64::engine::general_purpose::STANDARD.encode(png), ..Default::default() })
+    Some(ImageData {
+        mime: "image/png".into(),
+        data: base64::engine::general_purpose::STANDARD.encode(png),
+        ..Default::default()
+    })
 }
 
 /// Reads text from the clipboard.
@@ -144,7 +164,8 @@ pub fn paste_text() -> Option<String> {
     let b = if std::env::var_os("WAYLAND_DISPLAY").is_some() {
         run_bytes("wl-paste", &["--no-newline"])
     } else {
-        run_bytes("xclip", &["-selection", "clipboard", "-o"]).or_else(|| run_bytes("xsel", &["--clipboard", "--output"]))
+        run_bytes("xclip", &["-selection", "clipboard", "-o"])
+            .or_else(|| run_bytes("xsel", &["--clipboard", "--output"]))
     }?;
     Some(String::from_utf8_lossy(&b).into_owned())
 }
@@ -160,7 +181,10 @@ pub fn image_from_path(s: &str) -> Option<(ImageData, String)> {
         return None;
     }
     if let Some(rest) = p.strip_prefix("~/")
-        && let Some(h) = std::env::var_os("HOME").filter(|h| !h.is_empty()).map(std::path::PathBuf::from).or_else(dirs::home_dir)
+        && let Some(h) = std::env::var_os("HOME")
+            .filter(|h| !h.is_empty())
+            .map(std::path::PathBuf::from)
+            .or_else(dirs::home_dir)
     {
         p = h.join(rest).to_string_lossy().into_owned();
     }
@@ -181,8 +205,18 @@ pub fn image_from_path(s: &str) -> Option<(ImageData, String)> {
         return None;
     }
     let bytes = std::fs::read(&p).ok()?;
-    let name = std::path::Path::new(&p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    Some((ImageData { mime: mime.into(), data: base64::engine::general_purpose::STANDARD.encode(bytes), ..Default::default() }, name))
+    let name = std::path::Path::new(&p)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    Some((
+        ImageData {
+            mime: mime.into(),
+            data: base64::engine::general_purpose::STANDARD.encode(bytes),
+            ..Default::default()
+        },
+        name,
+    ))
 }
 
 fn percent_decode(s: &str) -> String {

@@ -122,7 +122,9 @@ fn cfg(env: BTreeMap<String, String>, cwd: Option<String>) -> ServerConfig {
 }
 
 async fn connect() -> McpClient {
-    McpClient::connect(&cfg(BTreeMap::new(), None)).await.expect("connect")
+    McpClient::connect(&cfg(BTreeMap::new(), None))
+        .await
+        .expect("connect")
 }
 
 #[tokio::test]
@@ -142,7 +144,10 @@ async fn initialize_and_list_tools() {
 async fn call_tools_and_content_mapping() {
     let c = connect().await;
     let tok = CancellationToken::new();
-    let r = c.call_tool("echo", json!({"msg": "hi"}), &tok).await.unwrap();
+    let r = c
+        .call_tool("echo", json!({"msg": "hi"}), &tok)
+        .await
+        .unwrap();
     assert_eq!(r.text, "hi");
     assert!(!r.is_error);
 
@@ -154,7 +159,10 @@ async fn call_tools_and_content_mapping() {
     assert_eq!(r.images[0].mime, "image/png");
     assert_eq!(r.images[0].data, "iVBORw0K");
 
-    let r = c.call_tool("structured", serde_json::Value::Null, &tok).await.unwrap();
+    let r = c
+        .call_tool("structured", serde_json::Value::Null, &tok)
+        .await
+        .unwrap();
     assert_eq!(r.text, r#"{"n":42}"#);
 
     let err = c.call_tool("nope", json!({}), &tok).await.unwrap_err();
@@ -170,7 +178,12 @@ async fn concurrent_calls() {
     let fast = async {
         let mut out = Vec::new();
         for i in 0..20 {
-            out.push(c.call_tool("echo", json!({"msg": i.to_string()}), &tok).await.unwrap().text);
+            out.push(
+                c.call_tool("echo", json!({"msg": i.to_string()}), &tok)
+                    .await
+                    .unwrap()
+                    .text,
+            );
         }
         out
     };
@@ -196,13 +209,20 @@ async fn cancellation_sends_notification() {
         tokio::time::sleep(Duration::from_millis(200)).await;
         t2.cancel();
     });
-    let err = c.call_tool("slow", json!({"secs": 30}), &tok).await.unwrap_err();
+    let err = c
+        .call_tool("slow", json!({"secs": 30}), &tok)
+        .await
+        .unwrap_err();
     assert_eq!(err.to_string(), "cancelled");
     // Notification is sent asynchronously; poll the server for it.
     let fresh = CancellationToken::new();
     let mut seen = String::new();
     for _ in 0..50 {
-        seen = c.call_tool("last_cancel", json!({}), &fresh).await.unwrap().text;
+        seen = c
+            .call_tool("last_cancel", json!({}), &fresh)
+            .await
+            .unwrap()
+            .text;
         if seen != "null" {
             break;
         }
@@ -221,12 +241,18 @@ async fn notifications_and_server_requests() {
     assert_eq!(*rx.borrow(), 0);
     let tok = CancellationToken::new();
     c.call_tool("notify", json!({}), &tok).await.unwrap();
-    tokio::time::timeout(Duration::from_secs(5), rx.changed()).await.unwrap().unwrap();
+    tokio::time::timeout(Duration::from_secs(5), rx.changed())
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(*rx.borrow(), 1);
 
     let r = c.call_tool("ask", json!({}), &tok).await.unwrap();
     let v: serde_json::Value = serde_json::from_str(&r.text).unwrap();
-    assert_eq!(v[0], json!({"jsonrpc": "2.0", "id": "srv-ping", "result": {}}));
+    assert_eq!(
+        v[0],
+        json!({"jsonrpc": "2.0", "id": "srv-ping", "result": {}})
+    );
     assert_eq!(v[1]["result"], json!({"roots": []}));
     assert_eq!(v[2]["id"], 77);
     assert_eq!(v[2]["error"]["code"], -32601);
@@ -237,12 +263,19 @@ async fn notifications_and_server_requests() {
 async fn env_cwd_and_stderr_drain() {
     let dir = std::env::temp_dir().canonicalize().unwrap();
     let env = BTreeMap::from([("MCP_TEST_VAR".to_string(), "val".to_string())]);
-    let c = McpClient::connect(&cfg(env, Some(dir.to_string_lossy().into_owned()))).await.unwrap();
+    let c = McpClient::connect(&cfg(env, Some(dir.to_string_lossy().into_owned())))
+        .await
+        .unwrap();
     let tok = CancellationToken::new();
     let r = c.call_tool("env", json!({}), &tok).await.unwrap();
     assert_eq!(r.text, format!("val|{}|path", dir.display()));
     // ~400KB of stderr must not block the server.
-    let r = tokio::time::timeout(Duration::from_secs(10), c.call_tool("noisy", json!({}), &tok)).await.unwrap();
+    let r = tokio::time::timeout(
+        Duration::from_secs(10),
+        c.call_tool("noisy", json!({}), &tok),
+    )
+    .await
+    .unwrap();
     assert_eq!(r.unwrap().text, "quiet now");
     c.close().await;
     let err = c.call_tool("echo", json!({}), &tok).await.unwrap_err();
@@ -253,7 +286,11 @@ async fn env_cwd_and_stderr_drain() {
 async fn spawn_failure_and_early_exit() {
     let bad = ServerConfig {
         name: "bad".into(),
-        transport: Transport::Local { command: vec!["/nonexistent/ref-mcp-bin".into()], env: BTreeMap::new(), cwd: None },
+        transport: Transport::Local {
+            command: vec!["/nonexistent/ref-mcp-bin".into()],
+            env: BTreeMap::new(),
+            cwd: None,
+        },
         timeout: Duration::from_secs(5),
     };
     let err = McpClient::connect(&bad).await.err().unwrap();
@@ -262,7 +299,11 @@ async fn spawn_failure_and_early_exit() {
     let exits = ServerConfig {
         name: "exits".into(),
         transport: Transport::Local {
-            command: vec!["python3".into(), "-c".into(), "import sys; sys.exit(3)".into()],
+            command: vec![
+                "python3".into(),
+                "-c".into(),
+                "import sys; sys.exit(3)".into(),
+            ],
             env: BTreeMap::new(),
             cwd: None,
         },

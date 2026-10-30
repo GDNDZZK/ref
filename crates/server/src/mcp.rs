@@ -39,7 +39,9 @@ impl McpServer {
         self.lock().client.clone()
     }
     pub fn instructions(&self) -> Option<String> {
-        self.client().and_then(|c| c.instructions()).filter(|s| !s.trim().is_empty())
+        self.client()
+            .and_then(|c| c.instructions())
+            .filter(|s| !s.trim().is_empty())
     }
     pub async fn wait_ready(&self, timeout: Duration) {
         let mut rx = self.ready.subscribe();
@@ -58,13 +60,32 @@ fn key(name: &str, cfg: &McpConfig) -> String {
 
 fn server_config(name: &str, cfg: &McpConfig) -> ServerConfig {
     let (transport, timeout_ms) = match cfg {
-        McpConfig::Local { command, environment, cwd, timeout_ms, .. } => (
-            Transport::Local { command: command.clone(), env: environment.clone(), cwd: cwd.clone() },
+        McpConfig::Local {
+            command,
+            environment,
+            cwd,
+            timeout_ms,
+            ..
+        } => (
+            Transport::Local {
+                command: command.clone(),
+                env: environment.clone(),
+                cwd: cwd.clone(),
+            },
             *timeout_ms,
         ),
-        McpConfig::Remote { url, headers, timeout_ms, .. } => {
-            (Transport::Remote { url: url.clone(), headers: headers.clone() }, *timeout_ms)
-        }
+        McpConfig::Remote {
+            url,
+            headers,
+            timeout_ms,
+            ..
+        } => (
+            Transport::Remote {
+                url: url.clone(),
+                headers: headers.clone(),
+            },
+            *timeout_ms,
+        ),
     };
     ServerConfig {
         name: name.to_string(),
@@ -90,7 +111,11 @@ impl McpManager {
             let (tx, _) = tokio::sync::watch::channel(false);
             let server = Arc::new(McpServer {
                 name: name.clone(),
-                state: Mutex::new(McpState { status: McpStatus::Connecting, client: None, tools: Vec::new() }),
+                state: Mutex::new(McpState {
+                    status: McpStatus::Connecting,
+                    client: None,
+                    tools: Vec::new(),
+                }),
                 ready: tx,
             });
             map.insert(k, server.clone());
@@ -119,8 +144,11 @@ impl McpManager {
                     Some(s) => match s.status() {
                         McpStatus::Connected => {
                             st.status = "connected".into();
-                            let mut tools: Vec<String> =
-                                s.tools().iter().map(|t| crate::toolset::mcp_tool_name(name, &t.name)).collect();
+                            let mut tools: Vec<String> = s
+                                .tools()
+                                .iter()
+                                .map(|t| crate::toolset::mcp_tool_name(name, &t.name))
+                                .collect();
                             tools.sort();
                             st.tools = tools;
                         }
@@ -154,8 +182,13 @@ impl McpManager {
     }
 
     pub async fn close_all(&self) {
-        let all: Vec<Arc<McpServer>> =
-            self.servers.lock().unwrap_or_else(|e| e.into_inner()).drain().map(|(_, v)| v).collect();
+        let all: Vec<Arc<McpServer>> = self
+            .servers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .drain()
+            .map(|(_, v)| v)
+            .collect();
         for s in all {
             if let Some(c) = s.client() {
                 let _ = tokio::time::timeout(Duration::from_secs(3), c.close()).await;
@@ -189,7 +222,9 @@ async fn connect(server: Arc<McpServer>, conf: ServerConfig) {
                 let Some(c) = weak.upgrade() else { break };
                 match c.list_tools().await {
                     Ok(t) => server.lock().tools = t,
-                    Err(e) => tracing::warn!(server = %server.name, "MCP tools refresh failed: {e:#}"),
+                    Err(e) => {
+                        tracing::warn!(server = %server.name, "MCP tools refresh failed: {e:#}")
+                    }
                 }
             }
         }

@@ -64,7 +64,9 @@ pub async fn create_session(hub: &Arc<Hub>, o: CreateOpts) -> Result<Arc<Session
         }
         Some(a) if cfg.agents.contains_key(&a) => a,
         Some(a) => return Err(format!("Unknown agent: {a}")),
-        None if cfg.default_agent != ref_config::COMPACTION_AGENT && cfg.agents.contains_key(&cfg.default_agent) => {
+        None if cfg.default_agent != ref_config::COMPACTION_AGENT
+            && cfg.agents.contains_key(&cfg.default_agent) =>
+        {
             cfg.default_agent.clone()
         }
         None => cfg

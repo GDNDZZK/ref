@@ -32,7 +32,12 @@ pub struct Running {
 }
 
 /// Bind the listener and start serving.
-pub async fn start(opts: HubOptions, bind: &str, port: u16, auth: ws::Auth) -> anyhow::Result<Running> {
+pub async fn start(
+    opts: HubOptions,
+    bind: &str,
+    port: u16,
+    auth: ws::Auth,
+) -> anyhow::Result<Running> {
     let listener = tokio::net::TcpListener::bind((bind, port)).await?;
     let addr = listener.local_addr()?;
     let hub = Hub::new(opts);

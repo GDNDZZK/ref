@@ -5,7 +5,11 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 #[derive(Parser, Debug)]
-#[command(name = "ref-server", version, about = "Backend of the ref coding agent (WebSocket server)")]
+#[command(
+    name = "ref-server",
+    version,
+    about = "Backend of the ref coding agent (WebSocket server)"
+)]
 struct Cli {
     /// Port to listen on (0 or absent: random free port in 10000..=65535).
     #[arg(long)]
@@ -40,16 +44,26 @@ struct Cli {
 
 fn is_loopback(h: &str) -> bool {
     let h = h.trim().trim_start_matches('[').trim_end_matches(']');
-    h == "localhost" || h.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
+    h == "localhost"
+        || h.parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
 }
 
 fn init_logging(path: &PathBuf) -> anyhow::Result<()> {
     if let Some(d) = path.parent() {
         std::fs::create_dir_all(d)?;
     }
-    let file = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
-    let filter = tracing_subscriber::EnvFilter::try_from_env("REF_LOG").unwrap_or_else(|_| "info".into());
-    tracing_subscriber::fmt().with_writer(std::sync::Mutex::new(file)).with_ansi(false).with_env_filter(filter).init();
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    let filter =
+        tracing_subscriber::EnvFilter::try_from_env("REF_LOG").unwrap_or_else(|_| "info".into());
+    tracing_subscriber::fmt()
+        .with_writer(std::sync::Mutex::new(file))
+        .with_ansi(false)
+        .with_env_filter(filter)
+        .init();
     Ok(())
 }
 
@@ -63,7 +77,10 @@ fn main() {
             libc::signal(libc::SIGPIPE, libc::SIG_DFL);
         }
     }
-    let rt = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+    let rt = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
         Ok(rt) => rt,
         Err(e) => {
             eprintln!("ref-server: cannot start runtime: {e}");
@@ -92,17 +109,29 @@ fn main() {
 
 async fn serve(cli: Cli) -> anyhow::Result<()> {
     let pid = std::process::id();
-    let log = cli.log.clone().unwrap_or_else(|| ref_proto::state_dir().join("logs").join(format!("server-{pid}.log")));
+    let log = cli.log.clone().unwrap_or_else(|| {
+        ref_proto::state_dir()
+            .join("logs")
+            .join(format!("server-{pid}.log"))
+    });
     if let Err(e) = init_logging(&log) {
         eprintln!("ref-server: cannot open log file {}: {e}", log.display());
     }
     let allow: Vec<String> = if cli.allow_host.is_empty() {
         vec!["127.0.0.1".into(), "::1".into(), "localhost".into()]
     } else {
-        cli.allow_host.iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+        cli.allow_host
+            .iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
     };
     let bind = match &cli.host {
-        Some(h) => h.trim().trim_start_matches('[').trim_end_matches(']').to_string(),
+        Some(h) => h
+            .trim()
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .to_string(),
         None if allow.iter().any(|h| !is_loopback(h)) => "0.0.0.0".into(),
         None => "127.0.0.1".into(),
     };
@@ -110,7 +139,11 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         Some(p) if p != 0 => p,
         _ => instance::pick_port(&bind).ok_or_else(|| anyhow::anyhow!("no free port found"))?,
     };
-    let token = cli.token.clone().filter(|t| !t.is_empty()).unwrap_or_else(|| ref_server::util::random_hex(32));
+    let token = cli
+        .token
+        .clone()
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| ref_server::util::random_hex(32));
     let (auth, warnings) = ws::resolve_hosts(&allow, token.clone());
     for w in warnings {
         tracing::warn!("{w}");
@@ -129,11 +162,18 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         version: env!("CARGO_PKG_VERSION").to_string(),
         token,
     };
-    *running.hub.instance.lock().unwrap_or_else(|e| e.into_inner()) = Some(info.clone());
+    *running
+        .hub
+        .instance
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = Some(info.clone());
     let dir = ref_proto::instances_dir();
     let inst_file = instance::write_instance(&dir, &info)?;
     tracing::info!(port = info.port, %bind, idle_timeout = cli.idle_timeout, "ref-server listening");
-    eprintln!("ref-server listening on ws://{}:{} (pid {pid})", bind, info.port);
+    eprintln!(
+        "ref-server listening on ws://{}:{} (pid {pid})",
+        bind, info.port
+    );
 
     let hub = running.hub.clone();
     let mut signals = StopSignals::new()?;
@@ -162,7 +202,10 @@ struct StopSignals {
 impl StopSignals {
     fn new() -> std::io::Result<Self> {
         use tokio::signal::unix::{SignalKind, signal};
-        Ok(StopSignals { term: signal(SignalKind::terminate())?, hup: signal(SignalKind::hangup())? })
+        Ok(StopSignals {
+            term: signal(SignalKind::terminate())?,
+            hup: signal(SignalKind::hangup())?,
+        })
     }
 
     async fn recv(&mut self) -> &'static str {
@@ -185,7 +228,11 @@ struct StopSignals {
 impl StopSignals {
     fn new() -> std::io::Result<Self> {
         use tokio::signal::windows::{ctrl_break, ctrl_close, ctrl_shutdown};
-        Ok(StopSignals { brk: ctrl_break()?, close: ctrl_close()?, shutdown: ctrl_shutdown()? })
+        Ok(StopSignals {
+            brk: ctrl_break()?,
+            close: ctrl_close()?,
+            shutdown: ctrl_shutdown()?,
+        })
     }
 
     async fn recv(&mut self) -> &'static str {

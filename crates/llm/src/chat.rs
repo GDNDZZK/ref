@@ -241,7 +241,9 @@ fn convert_messages(provider: &Provider, model: &Model, req: &Request) -> Vec<Va
                 }));
                 if model.images {
                     for img in images {
-                        tool_images.push(json!({"type": "image_url", "image_url": {"url": data_url(img)}}));
+                        tool_images.push(
+                            json!({"type": "image_url", "image_url": {"url": data_url(img)}}),
+                        );
                     }
                 }
                 let run_ends = !matches!(history.get(i + 1), Some(ChatMessage::ToolResult { .. }));

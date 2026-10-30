@@ -27,7 +27,9 @@ pub fn write_instance(dir: &Path, info: &InstanceInfo) -> std::io::Result<PathBu
 /// Live instances (stale files of dead processes are removed), newest first.
 pub fn list_instances(dir: &Path) -> Vec<InstanceInfo> {
     let mut out = Vec::new();
-    let Ok(rd) = std::fs::read_dir(dir) else { return out };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return out;
+    };
     for e in rd.flatten() {
         let p = e.path();
         if p.extension().and_then(|x| x.to_str()) != Some("json") {
@@ -77,17 +79,32 @@ fn idle_meaning(t: i64) -> String {
 }
 
 /// Connects, says Hello, sends `req`, returns the response result.
-pub async fn request(i: &InstanceInfo, req: Request, timeout: Duration) -> Result<serde_json::Value, String> {
+pub async fn request(
+    i: &InstanceInfo,
+    req: Request,
+    timeout: Duration,
+) -> Result<serde_json::Value, String> {
     let fut = async {
         let url = format!("{}?token={}", connect_url(i), i.token);
         // Responses (session lists, snapshots) can exceed the 16 MiB default frame limit.
-        let cfg = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default().max_message_size(None).max_frame_size(None);
-        let (mut ws, _) = tokio_tungstenite::connect_async_with_config(url, Some(cfg), false).await.map_err(|e| e.to_string())?;
-        let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "/".into());
+        let cfg = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
+            .max_message_size(None)
+            .max_frame_size(None);
+        let (mut ws, _) = tokio_tungstenite::connect_async_with_config(url, Some(cfg), false)
+            .await
+            .map_err(|e| e.to_string())?;
+        let cwd = std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| "/".into());
         let frames = [
             ClientFrame {
                 id: Some(1),
-                req: Request::Hello { client: crate::ws::CONTROL_CLIENT.into(), version: ref_proto::PROTOCOL_VERSION, cwd, token: Some(i.token.clone()) },
+                req: Request::Hello {
+                    client: crate::ws::CONTROL_CLIENT.into(),
+                    version: ref_proto::PROTOCOL_VERSION,
+                    cwd,
+                    token: Some(i.token.clone()),
+                },
             },
             ClientFrame { id: Some(2), req },
         ];
@@ -102,19 +119,31 @@ pub async fn request(i: &InstanceInfo, req: Request, timeout: Duration) -> Resul
                 }
                 continue;
             };
-            if let Ok(ServerFrame::Response { id, ok, result, error }) = serde_json::from_str::<ServerFrame>(&t) {
+            if let Ok(ServerFrame::Response {
+                id,
+                ok,
+                result,
+                error,
+            }) = serde_json::from_str::<ServerFrame>(&t)
+            {
                 if id == 1 && !ok {
                     return Err(error.unwrap_or_else(|| "hello rejected".into()));
                 }
                 if id == 2 {
                     let _ = ws.close(None).await;
-                    return if ok { Ok(result) } else { Err(error.unwrap_or_default()) };
+                    return if ok {
+                        Ok(result)
+                    } else {
+                        Err(error.unwrap_or_default())
+                    };
                 }
             }
         }
         Err("connection closed".to_string())
     };
-    tokio::time::timeout(timeout, fut).await.map_err(|_| "timed out".to_string())?
+    tokio::time::timeout(timeout, fut)
+        .await
+        .map_err(|_| "timed out".to_string())?
 }
 
 /// `--status`: exit code 0 if any instance is running.
@@ -126,7 +155,11 @@ pub async fn status(json_out: bool) -> i32 {
         let sessions = request(i, Request::ListSessions, Duration::from_secs(3))
             .await
             .ok()
-            .and_then(|v| v.get("sessions").and_then(|s| s.as_array()).map(|a| a.len()));
+            .and_then(|v| {
+                v.get("sessions")
+                    .and_then(|s| s.as_array())
+                    .map(|a| a.len())
+            });
         rows.push((i.clone(), sessions));
     }
     if json_out {
@@ -141,9 +174,15 @@ pub async fn status(json_out: bool) -> i32 {
                 v
             })
             .collect();
-        println!("{}", serde_json::to_string_pretty(&arr).unwrap_or_else(|_| "[]".into()));
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&arr).unwrap_or_else(|_| "[]".into())
+        );
     } else if rows.is_empty() {
-        println!("No ref-server instances running (instances dir: {}).", dir.display());
+        println!(
+            "No ref-server instances running (instances dir: {}).",
+            dir.display()
+        );
     } else {
         let now = ref_proto::now_ms();
         for (k, (i, n)) in rows.iter().enumerate() {
@@ -154,8 +193,16 @@ pub async fn status(json_out: bool) -> i32 {
             println!("  url:           {}", connect_url(i));
             println!("  bind:          {}:{}", i.bind, i.port);
             println!("  allowed hosts: {}", i.allow_hosts.join(", "));
-            println!("  idle timeout:  {} ({})", i.idle_timeout, idle_meaning(i.idle_timeout));
-            println!("  started:       {} (up {})", fmt_time(i.started_at), fmt_duration((now - i.started_at) / 1000));
+            println!(
+                "  idle timeout:  {} ({})",
+                i.idle_timeout,
+                idle_meaning(i.idle_timeout)
+            );
+            println!(
+                "  started:       {} (up {})",
+                fmt_time(i.started_at),
+                fmt_duration((now - i.started_at) / 1000)
+            );
             println!("  version:       {}", i.version);
             match n {
                 Some(n) => println!("  live sessions: {n}"),
@@ -170,7 +217,10 @@ pub async fn status(json_out: bool) -> i32 {
 /// `--stop [PID]`.
 pub async fn stop(pid: Option<u32>) -> i32 {
     let dir = ref_proto::instances_dir();
-    let list: Vec<InstanceInfo> = list_instances(&dir).into_iter().filter(|i| pid.is_none_or(|p| p == i.pid)).collect();
+    let list: Vec<InstanceInfo> = list_instances(&dir)
+        .into_iter()
+        .filter(|i| pid.is_none_or(|p| p == i.pid))
+        .collect();
     if list.is_empty() {
         match pid {
             Some(p) => eprintln!("No ref-server instance with pid {p}."),
@@ -193,11 +243,17 @@ pub async fn stop(pid: Option<u32>) -> i32 {
                 if gone {
                     println!("Stopped ref-server pid {}.", i.pid);
                 } else {
-                    println!("Shutdown requested for ref-server pid {} (still exiting).", i.pid);
+                    println!(
+                        "Shutdown requested for ref-server pid {} (still exiting).",
+                        i.pid
+                    );
                 }
             }
             Err(e) => {
-                eprintln!("Could not reach ref-server pid {} ({e}); terminating it.", i.pid);
+                eprintln!(
+                    "Could not reach ref-server pid {} ({e}); terminating it.",
+                    i.pid
+                );
                 if !ref_sys::terminate(i.pid) {
                     code = 1;
                 }

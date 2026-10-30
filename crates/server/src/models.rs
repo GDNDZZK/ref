@@ -22,7 +22,9 @@ pub fn deep_merge(base: &mut Map<String, Value>, overlay: &Map<String, Value>) {
 
 fn api_kind(api: Option<&str>, npm: Option<&str>) -> ApiKind {
     match api.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
-        Some("chat" | "openai-chat" | "openai-compatible" | "completions" | "chat-completions") => ApiKind::OpenAIChat,
+        Some("chat" | "openai-chat" | "openai-compatible" | "completions" | "chat-completions") => {
+            ApiKind::OpenAIChat
+        }
         Some("responses" | "openai-responses" | "openai") => ApiKind::OpenAIResponses,
         Some("anthropic" | "messages" | "anthropic-messages") => ApiKind::Anthropic,
         _ => ApiKind::from_npm(npm),
@@ -41,14 +43,20 @@ pub fn resolve(cfg: &Config, r: &ModelRef, agent: &str) -> Result<(Provider, Mod
     if r.provider.is_empty() || r.model.is_empty() {
         return Err("No model configured. Add a provider with models to your config (opencode.json / ref.json).".into());
     }
-    let (p, m) = cfg.model(r).ok_or_else(|| format!("Model {} is not configured.", r.key()))?;
+    let (p, m) = cfg
+        .model(r)
+        .ok_or_else(|| format!("Model {} is not configured.", r.key()))?;
     let api = api_kind(p.api.as_deref(), p.npm.as_deref());
     let base_url = p.base_url.clone().unwrap_or_default();
     let mut headers = p.headers.clone();
     headers.extend(m.headers.clone());
-    let set_cache_key = p.options.get("setCacheKey").and_then(Value::as_bool).unwrap_or_else(|| {
-        api == ApiKind::OpenAIResponses || host_of(&base_url) == "api.openai.com"
-    });
+    let set_cache_key = p
+        .options
+        .get("setCacheKey")
+        .and_then(Value::as_bool)
+        .unwrap_or_else(|| {
+            api == ApiKind::OpenAIResponses || host_of(&base_url) == "api.openai.com"
+        });
     let chunk_timeout = p
         .options
         .get("chunkTimeout")
@@ -75,7 +83,11 @@ pub fn resolve(cfg: &Config, r: &ModelRef, agent: &str) -> Result<(Provider, Mod
     }
     let model = Model {
         id: m.id.clone(),
-        context: if m.context > 0 { m.context } else { DEFAULT_CONTEXT },
+        context: if m.context > 0 {
+            m.context
+        } else {
+            DEFAULT_CONTEXT
+        },
         output: m.output,
         images: m.images,
         reasoning: m.reasoning,
@@ -89,7 +101,14 @@ pub fn resolve(cfg: &Config, r: &ModelRef, agent: &str) -> Result<(Provider, Mod
 /// Context window thresholds for a model (used = 0).
 pub fn context_for(cfg: &Config, r: &ModelRef) -> ContextUsage {
     let (max, compact_at) = match cfg.model(r) {
-        Some((_, m)) => (if m.context > 0 { m.context } else { DEFAULT_CONTEXT }, m.compact_at),
+        Some((_, m)) => (
+            if m.context > 0 {
+                m.context
+            } else {
+                DEFAULT_CONTEXT
+            },
+            m.compact_at,
+        ),
         None => (DEFAULT_CONTEXT, None),
     };
     ContextUsage {
@@ -102,7 +121,9 @@ pub fn context_for(cfg: &Config, r: &ModelRef) -> ContextUsage {
 
 /// Variant names of a model, sorted.
 pub fn variants(cfg: &Config, r: &ModelRef) -> Vec<String> {
-    cfg.model(r).map(|(_, m)| m.variants.keys().cloned().collect()).unwrap_or_default()
+    cfg.model(r)
+        .map(|(_, m)| m.variants.keys().cloned().collect())
+        .unwrap_or_default()
 }
 
 /// Next variant in the cycle `None -> v0 -> v1 -> ... -> None`.
@@ -120,10 +141,16 @@ mod tests {
 
     #[test]
     fn merge() {
-        let mut a = json!({"a": 1, "o": {"x": 1, "y": 2}}).as_object().cloned().unwrap();
+        let mut a = json!({"a": 1, "o": {"x": 1, "y": 2}})
+            .as_object()
+            .cloned()
+            .unwrap();
         let b = json!({"b": 2, "o": {"y": 3}}).as_object().cloned().unwrap();
         deep_merge(&mut a, &b);
-        assert_eq!(Value::Object(a), json!({"a": 1, "o": {"x": 1, "y": 3}, "b": 2}));
+        assert_eq!(
+            Value::Object(a),
+            json!({"a": 1, "o": {"x": 1, "y": 3}, "b": 2})
+        );
     }
 
     #[test]
@@ -138,8 +165,14 @@ mod tests {
 
     #[test]
     fn api_kinds() {
-        assert_eq!(api_kind(Some("chat"), Some("@ai-sdk/anthropic")), ApiKind::OpenAIChat);
-        assert_eq!(api_kind(None, Some("@ai-sdk/anthropic")), ApiKind::Anthropic);
+        assert_eq!(
+            api_kind(Some("chat"), Some("@ai-sdk/anthropic")),
+            ApiKind::OpenAIChat
+        );
+        assert_eq!(
+            api_kind(None, Some("@ai-sdk/anthropic")),
+            ApiKind::Anthropic
+        );
         assert_eq!(host_of("https://api.openai.com/v1"), "api.openai.com");
     }
 }

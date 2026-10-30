@@ -19,9 +19,16 @@ pub use client::McpClient;
 #[derive(Debug, Clone)]
 pub enum Transport {
     /// Spawn a child process speaking newline-delimited JSON-RPC on stdio.
-    Local { command: Vec<String>, env: BTreeMap<String, String>, cwd: Option<String> },
+    Local {
+        command: Vec<String>,
+        env: BTreeMap<String, String>,
+        cwd: Option<String>,
+    },
     /// Streamable HTTP endpoint (falls back to legacy SSE transport on 4xx for POST-initialize).
-    Remote { url: String, headers: BTreeMap<String, String> },
+    Remote {
+        url: String,
+        headers: BTreeMap<String, String>,
+    },
 }
 
 #[derive(Debug, Clone)]

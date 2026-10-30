@@ -99,7 +99,14 @@ fn compaction_divider(m: &Message, exp: bool, w: usize) -> Row {
             Span::styled(format!(" · {time}"), theme::muted()),
         ];
         if hint {
-            v.push(Span::styled(if exp { " · click to hide summary" } else { " · click to view summary" }, theme::muted()));
+            v.push(Span::styled(
+                if exp {
+                    " · click to hide summary"
+                } else {
+                    " · click to view summary"
+                },
+                theme::muted(),
+            ));
         }
         v.push(Span::raw(" "));
         v
@@ -114,7 +121,13 @@ fn compaction_divider(m: &Message, exp: bool, w: usize) -> Row {
     spans.push(Span::styled("─".repeat(fill), bst));
     spans.extend(right);
     let x0 = (total - 6) as u16;
-    Row::new(Line::from(spans)).decor().zone(x0, x0 + 6, Hit::Copy { msg: m.id.clone() }).hit(Hit::Toggle { msg: m.id.clone(), part: 0 })
+    Row::new(Line::from(spans))
+        .decor()
+        .zone(x0, x0 + 6, Hit::Copy { msg: m.id.clone() })
+        .hit(Hit::Toggle {
+            msg: m.id.clone(),
+            part: 0,
+        })
 }
 
 // ---------------------------------------------------------------------------
@@ -122,7 +135,11 @@ fn compaction_divider(m: &Message, exp: bool, w: usize) -> Row {
 // ---------------------------------------------------------------------------
 
 /// Builds `left … right` within `w` columns, truncating `left` as needed.
-pub fn compose(left: Vec<Span<'static>>, right: Vec<Span<'static>>, w: usize) -> (Line<'static>, usize) {
+pub fn compose(
+    left: Vec<Span<'static>>,
+    right: Vec<Span<'static>>,
+    w: usize,
+) -> (Line<'static>, usize) {
     let rw: usize = right.iter().map(|s| width(&s.content)).sum();
     let avail = w.saturating_sub(rw + if rw > 0 { 1 } else { 0 });
     let mut l = truncate_spans(left, avail);
@@ -236,11 +253,21 @@ fn render_user(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
         if cx.context_start {
             let hint = text::truncate(CONTEXT_HINT, w.saturating_sub(4));
             let pad = w.saturating_sub(1 + width(&hint)) / 2;
-            rows.push(Row::new(Line::from(vec![Span::raw(" ".repeat(pad)), Span::styled(hint, theme::fg(theme::DIM).add_modifier(Modifier::ITALIC))])).decor());
+            rows.push(
+                Row::new(Line::from(vec![
+                    Span::raw(" ".repeat(pad)),
+                    Span::styled(hint, theme::fg(theme::DIM).add_modifier(Modifier::ITALIC)),
+                ]))
+                .decor(),
+            );
         }
         if exp {
             for r in markdown::render(&raw, w.saturating_sub(PAD + 4), theme::muted()) {
-                rows.push(r.indent(vec![Span::raw(" ".repeat(PAD)), Span::styled("│ ", theme::fg(theme::ACCENT)), Span::raw(" ")]));
+                rows.push(r.indent(vec![
+                    Span::raw(" ".repeat(PAD)),
+                    Span::styled("│ ", theme::fg(theme::ACCENT)),
+                    Span::raw(" "),
+                ]));
             }
         }
         return rows;
@@ -251,7 +278,10 @@ fn render_user(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
     let pad = |r: Row| -> Row {
         let lw = text::line_width(&r.line);
         let mut r = r.indent(vec![bar.clone(), Span::styled("  ", Style::new().bg(bg))]);
-        r.line.spans.push(Span::styled(" ".repeat(w.saturating_sub(lw + 3)), Style::new().bg(bg)));
+        r.line.spans.push(Span::styled(
+            " ".repeat(w.saturating_sub(lw + 3)),
+            Style::new().bg(bg),
+        ));
         let e = (3 + lw) as u16;
         if r.end.is_none() {
             r.end = Some(e);
@@ -261,14 +291,22 @@ fn render_user(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
     // Header / top padding row.
     let header: Option<Vec<Span<'static>>> = match &m.source {
         MessageSource::Human => None,
-        MessageSource::Peer { from_name, .. } => {
-            Some(vec![Span::styled(format!("↘ message from \"{from_name}\""), theme::bold(theme::INFO).bg(bg))])
-        }
-        MessageSource::Spawn { from_name, .. } => {
-            Some(vec![Span::styled(format!("↘ created by \"{from_name}\""), theme::bold(theme::INFO).bg(bg))])
-        }
-        MessageSource::Reminder => Some(vec![Span::styled("⟳ reminder", theme::bold(theme::WARNING).bg(bg))]),
-        MessageSource::Shell => Some(vec![Span::styled("$ shell", theme::bold(theme::WARNING).bg(bg))]),
+        MessageSource::Peer { from_name, .. } => Some(vec![Span::styled(
+            format!("↘ message from \"{from_name}\""),
+            theme::bold(theme::INFO).bg(bg),
+        )]),
+        MessageSource::Spawn { from_name, .. } => Some(vec![Span::styled(
+            format!("↘ created by \"{from_name}\""),
+            theme::bold(theme::INFO).bg(bg),
+        )]),
+        MessageSource::Reminder => Some(vec![Span::styled(
+            "⟳ reminder",
+            theme::bold(theme::WARNING).bg(bg),
+        )]),
+        MessageSource::Shell => Some(vec![Span::styled(
+            "$ shell",
+            theme::bold(theme::WARNING).bg(bg),
+        )]),
         MessageSource::Compaction => None,
     };
     match header {
@@ -290,11 +328,15 @@ fn render_user(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
         let clean = text::sanitize(&raw);
         let clean = clean.trim_matches('\n');
         if clean.is_empty() && !m.parts.iter().any(|p| matches!(p, Part::Image { .. })) {
-            rows.push(pad(Row::new(Line::from(Span::styled("(empty)", theme::muted().bg(bg))))));
+            rows.push(pad(Row::new(Line::from(Span::styled(
+                "(empty)",
+                theme::muted().bg(bg),
+            )))));
         }
         if !clean.is_empty() {
             for logical in clean.split('\n') {
-                let wrapped = text::wrap_spans_flags(&[Span::styled(logical.to_string(), body_style)], inner);
+                let wrapped =
+                    text::wrap_spans_flags(&[Span::styled(logical.to_string(), body_style)], inner);
                 for (i, (l, sp)) in wrapped.into_iter().enumerate() {
                     rows.push(pad(Row::new(l).soft_sp(i > 0, sp)));
                 }
@@ -313,13 +355,24 @@ fn render_user(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
     if !images.is_empty() {
         let mut spans = Vec::new();
         for (i, n) in images.iter().enumerate() {
-            spans.push(Span::styled(" image ", Style::new().fg(bg).bg(theme::ACCENT).add_modifier(Modifier::BOLD)));
-            spans.push(Span::styled(format!(" {} ", text::truncate(n, 30)), Style::new().fg(theme::MUTED).bg(theme::PANEL_HOVER)));
+            spans.push(Span::styled(
+                " image ",
+                Style::new()
+                    .fg(bg)
+                    .bg(theme::ACCENT)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::styled(
+                format!(" {} ", text::truncate(n, 30)),
+                Style::new().fg(theme::MUTED).bg(theme::PANEL_HOVER),
+            ));
             if i + 1 < images.len() {
                 spans.push(Span::styled(" ", Style::new().bg(bg)));
             }
         }
-        rows.push(pad(Row::new(Line::from(truncate_spans(spans, inner))).decor()));
+        rows.push(pad(
+            Row::new(Line::from(truncate_spans(spans, inner))).decor()
+        ));
     }
     // Meta row: time + [undo] + copy, right aligned.
     let gap = || Span::styled("  ", Style::new().bg(bg));
@@ -384,14 +437,34 @@ fn render_user_compact(m: &Message, _cx: &Ctx<'_>, w: usize, color: Color) -> Ve
     ];
     rows.push(Row::new(Line::from(truncate_spans(head, w))).decor());
     let lines: Vec<&str> = raw.trim().lines().collect();
-    let max = if m.source == MessageSource::Compaction { 1 } else { 6 };
+    let max = if m.source == MessageSource::Compaction {
+        1
+    } else {
+        6
+    };
     for l in lines.iter().take(max) {
-        for (i, (wl, sp)) in text::wrap_spans_flags(&[Span::styled(l.to_string(), theme::text())], w.saturating_sub(2)).into_iter().enumerate() {
-            rows.push(Row::new(wl).indent(vec![Span::styled("┃ ", theme::fg(color))]).soft_sp(i > 0, sp));
+        for (i, (wl, sp)) in text::wrap_spans_flags(
+            &[Span::styled(l.to_string(), theme::text())],
+            w.saturating_sub(2),
+        )
+        .into_iter()
+        .enumerate()
+        {
+            rows.push(
+                Row::new(wl)
+                    .indent(vec![Span::styled("┃ ", theme::fg(color))])
+                    .soft_sp(i > 0, sp),
+            );
         }
     }
     if lines.len() > max {
-        rows.push(Row::new(Line::from(Span::styled(format!("┃ … {} more lines", lines.len() - max), theme::muted()))).decor());
+        rows.push(
+            Row::new(Line::from(Span::styled(
+                format!("┃ … {} more lines", lines.len() - max),
+                theme::muted(),
+            )))
+            .decor(),
+        );
     }
     rows
 }
@@ -406,7 +479,9 @@ fn render_user_compact(m: &Message, _cx: &Ctx<'_>, w: usize, color: Color) -> Ve
 fn single_edges(p: &Part, idx: usize, cx: &Ctx<'_>) -> (bool, bool) {
     match p {
         // Todo rows carry their list inline: keep them visually separated from neighbours.
-        Part::Tool { name, input, .. } if name == "todo" && !parse_todos(input).is_empty() => (false, false),
+        Part::Tool { name, input, .. } if name == "todo" && !parse_todos(input).is_empty() => {
+            (false, false)
+        }
         Part::Tool { .. } => (true, !cx.expanded(idx, cx.details)),
         Part::Reasoning { .. } => (true, cx.compact || !cx.expanded(idx, cx.thinking)),
         _ => (false, false),
@@ -420,7 +495,9 @@ fn render_assistant(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
     let mut prev_single: Option<bool> = None;
     let last_idx = m.parts.len().saturating_sub(1);
     let pad = if cx.compact { 0 } else { PAD };
-    let inner = w.saturating_sub(pad + if cx.compact { 0 } else { 1 }).max(10);
+    let inner = w
+        .saturating_sub(pad + if cx.compact { 0 } else { 1 })
+        .max(10);
     for (idx, part) in m.parts.iter().enumerate() {
         // Skip empty text parts entirely (except while they're the streaming tail).
         if let Part::Text { text: t, .. } = part
@@ -450,7 +527,9 @@ fn render_assistant(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
                     let on = (cx.tick / 6).is_multiple_of(2);
                     let cur = Span::styled(if on { "▍" } else { " " }, theme::fg(theme::PRIMARY));
                     match r.last_mut() {
-                        Some(last) if text::line_width(&last.line) < inner => last.line.spans.push(cur),
+                        Some(last) if text::line_width(&last.line) < inner => {
+                            last.line.spans.push(cur)
+                        }
                         _ => r.push(Row::new(Line::from(cur))),
                     }
                     if let Some(last) = r.last_mut() {
@@ -460,43 +539,85 @@ fn render_assistant(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
                 }
                 r
             }
-            Part::Reasoning { text: t, time, time_end, .. } => {
+            Part::Reasoning {
+                text: t,
+                time,
+                time_end,
+                ..
+            } => {
                 let active = time_end.is_none() && streaming;
                 render_reasoning(m, idx, t, *time, *time_end, active, cx, inner)
             }
             Part::Tool { .. } => render_tool(m, idx, part, cx, inner),
             Part::Image { name, image } => vec![
                 Row::new(Line::from(vec![
-                    Span::styled(" image ", Style::new().fg(theme::PANEL).bg(theme::ACCENT).add_modifier(Modifier::BOLD)),
-                    Span::styled(format!(" {}", name.clone().unwrap_or_else(|| image.mime.clone())), theme::muted()),
+                    Span::styled(
+                        " image ",
+                        Style::new()
+                            .fg(theme::PANEL)
+                            .bg(theme::ACCENT)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!(" {}", name.clone().unwrap_or_else(|| image.mime.clone())),
+                        theme::muted(),
+                    ),
                 ]))
                 .decor(),
             ],
         };
         for r in part_rows {
-            rows.push(if pad > 0 { r.indent(vec![Span::raw(" ".repeat(pad))]) } else { r });
+            rows.push(if pad > 0 {
+                r.indent(vec![Span::raw(" ".repeat(pad))])
+            } else {
+                r
+            });
         }
     }
     if m.parts.is_empty() && streaming {
-        let mut spans = vec![Span::styled(format!("{} ", theme::spinner(cx.tick)), theme::fg(theme::PRIMARY))];
-        spans.extend(shimmer("Waiting for response…", cx.tick, theme::MUTED, theme::TEXT));
-        rows.push(Row::new(Line::from(spans)).decor().indent(vec![Span::raw(" ".repeat(pad))]));
+        let mut spans = vec![Span::styled(
+            format!("{} ", theme::spinner(cx.tick)),
+            theme::fg(theme::PRIMARY),
+        )];
+        spans.extend(shimmer(
+            "Waiting for response…",
+            cx.tick,
+            theme::MUTED,
+            theme::TEXT,
+        ));
+        rows.push(
+            Row::new(Line::from(spans))
+                .decor()
+                .indent(vec![Span::raw(" ".repeat(pad))]),
+        );
     }
     // Error.
-    let interrupted = m.error.as_deref().is_some_and(|e| e.eq_ignore_ascii_case("aborted"));
+    let interrupted = m
+        .error
+        .as_deref()
+        .is_some_and(|e| e.eq_ignore_ascii_case("aborted"));
     if let Some(err) = m.error.as_deref().filter(|_| !interrupted) {
         if !rows.is_empty() {
             rows.push(Row::blank());
         }
         let clean = text::sanitize(err);
         for (li, logical) in clean.trim().split('\n').enumerate() {
-            let content = if li == 0 { format!("Error: {logical}") } else { logical.to_string() };
-            for (i, (l, sp)) in text::wrap_spans_flags(&[Span::styled(content, theme::fg(theme::ERROR))], inner.saturating_sub(2)).into_iter().enumerate() {
-                rows.push(
-                    Row::new(l)
-                        .soft_sp(i > 0, sp)
-                        .indent(vec![Span::raw(" ".repeat(pad)), Span::styled("┃ ", theme::fg(theme::ERROR))]),
-                );
+            let content = if li == 0 {
+                format!("Error: {logical}")
+            } else {
+                logical.to_string()
+            };
+            for (i, (l, sp)) in text::wrap_spans_flags(
+                &[Span::styled(content, theme::fg(theme::ERROR))],
+                inner.saturating_sub(2),
+            )
+            .into_iter()
+            .enumerate()
+            {
+                rows.push(Row::new(l).soft_sp(i > 0, sp).indent(vec![
+                    Span::raw(" ".repeat(pad)),
+                    Span::styled("┃ ", theme::fg(theme::ERROR)),
+                ]));
             }
         }
     }
@@ -507,14 +628,31 @@ fn render_assistant(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
     if !rows.is_empty() {
         rows.push(Row::blank());
     }
-    let agent = m.agent.clone().unwrap_or_else(|| cx.session_agent.to_string());
-    let acolor = if m.error.is_some() && !interrupted { theme::MUTED } else { theme::agent_color(cx.agents, &agent) };
+    let agent = m
+        .agent
+        .clone()
+        .unwrap_or_else(|| cx.session_agent.to_string());
+    let acolor = if m.error.is_some() && !interrupted {
+        theme::MUTED
+    } else {
+        theme::agent_color(cx.agents, &agent)
+    };
     let mut left = vec![
-        Span::styled(if live { format!("{} ", theme::spinner(cx.tick)) } else { "▣ ".to_string() }, theme::fg(acolor)),
+        Span::styled(
+            if live {
+                format!("{} ", theme::spinner(cx.tick))
+            } else {
+                "▣ ".to_string()
+            },
+            theme::fg(acolor),
+        ),
         Span::styled(titlecase(&agent), theme::fg(acolor)),
     ];
     if let Some(model) = &m.model {
-        left.push(Span::styled(format!(" · {}", model_name(cx.models, model)), theme::muted()));
+        left.push(Span::styled(
+            format!(" · {}", model_name(cx.models, model)),
+            theme::muted(),
+        ));
         if let Some(v) = &model.variant {
             left.push(Span::styled(format!(" {v}"), theme::fg(theme::WARNING)));
         }
@@ -522,22 +660,42 @@ fn render_assistant(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
     let start = text::fmt_time(m.time);
     match m.time_end {
         Some(end) => {
-            left.push(Span::styled(format!(" · {start} → {} ({})", text::fmt_clock(end), text::fmt_dur(end - m.time)), theme::muted()));
+            left.push(Span::styled(
+                format!(
+                    " · {start} → {} ({})",
+                    text::fmt_clock(end),
+                    text::fmt_dur(end - m.time)
+                ),
+                theme::muted(),
+            ));
         }
         None => {
-            left.push(Span::styled(format!(" · {start} · {}", text::fmt_elapsed(cx.now - m.time)), theme::muted()));
+            left.push(Span::styled(
+                format!(" · {start} · {}", text::fmt_elapsed(cx.now - m.time)),
+                theme::muted(),
+            ));
         }
     }
     if let Some(u) = &m.usage {
         let input = u.input + u.cache_read + u.cache_write;
-        left.push(Span::styled(format!(" · ↑{} ↓{}", text::fmt_tokens(input), text::fmt_tokens(u.output)), theme::muted()));
+        left.push(Span::styled(
+            format!(
+                " · ↑{} ↓{}",
+                text::fmt_tokens(input),
+                text::fmt_tokens(u.output)
+            ),
+            theme::muted(),
+        ));
         if u.output > 0
             && let Some(end) = m.time_end
             && end > m.time
         {
             let tps = u.output as f64 / ((end - m.time) as f64 / 1000.0);
             if tps.is_finite() && tps < 100_000.0 {
-                left.push(Span::styled(format!(" · {tps:.0} tok/s"), theme::fg(theme::DIM)));
+                left.push(Span::styled(
+                    format!(" · {tps:.0} tok/s"),
+                    theme::fg(theme::DIM),
+                ));
             }
         }
     }
@@ -547,7 +705,10 @@ fn render_assistant(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
     let right = vec![copy_button(false)];
     let (line, rx) = compose(left, right, inner);
     let x0 = rx as u16;
-    let foot = Row::new(line).zone(x0, x0 + 6, Hit::Copy { msg: m.id.clone() }).indent(vec![Span::raw(" ".repeat(pad))]).decor();
+    let foot = Row::new(line)
+        .zone(x0, x0 + 6, Hit::Copy { msg: m.id.clone() })
+        .indent(vec![Span::raw(" ".repeat(pad))])
+        .decor();
     rows.push(foot);
     rows
 }
@@ -573,18 +734,27 @@ fn render_reasoning(
     if cx.compact {
         head.push(Span::styled("✱ ", theme::fg(theme::DIM)));
     } else {
-        head.push(Span::styled(if exp { "▾ " } else { "▸ " }, theme::fg(theme::DIM)));
+        head.push(Span::styled(
+            if exp { "▾ " } else { "▸ " },
+            theme::fg(theme::DIM),
+        ));
     }
     if active {
         head.extend(shimmer("Thinking", cx.tick, theme::MUTED, theme::PRIMARY));
     } else {
-        head.push(Span::styled("Thought", theme::fg(theme::MUTED).add_modifier(Modifier::ITALIC)));
+        head.push(Span::styled(
+            "Thought",
+            theme::fg(theme::MUTED).add_modifier(Modifier::ITALIC),
+        ));
     }
     if let Some(d) = dur {
         head.push(Span::styled(format!(" · {d}"), theme::fg(theme::DIM)));
     }
     let hw = spans_width(&head);
-    let hit = Hit::Toggle { msg: m.id.clone(), part: idx };
+    let hit = Hit::Toggle {
+        msg: m.id.clone(),
+        part: idx,
+    };
     if exp && !cx.compact {
         let mut rows = vec![Row::new(Line::from(head)).decor().hit(hit)];
         let st = theme::muted().add_modifier(Modifier::ITALIC);
@@ -600,7 +770,10 @@ fn render_reasoning(
     let mut spans = head;
     if !tail.is_empty() {
         spans.push(Span::raw("  "));
-        spans.push(Span::styled(tail, theme::fg(theme::DIM).add_modifier(Modifier::ITALIC)));
+        spans.push(Span::styled(
+            tail,
+            theme::fg(theme::DIM).add_modifier(Modifier::ITALIC),
+        ));
     }
     let row = Row::new(Line::from(spans)).hit(hit).skip((hw + 2) as u16);
     vec![row]
@@ -614,7 +787,11 @@ pub fn tool_detail(name: &str, input: &Value) -> String {
         "bash" => s("command").map(|c| format!("$ {}", c.lines().next().unwrap_or(""))),
         "read" | "write" | "delete" => s("path"),
         "edit" => s("path").map(|p| {
-            let n = input.get("edits").and_then(Value::as_array).map(|a| a.len()).unwrap_or(0);
+            let n = input
+                .get("edits")
+                .and_then(Value::as_array)
+                .map(|a| a.len())
+                .unwrap_or(0);
             if n > 1 { format!("{p} ({n} edits)") } else { p }
         }),
         "grep" => s("pattern").map(|p| match s("path") {
@@ -631,7 +808,15 @@ pub fn tool_detail(name: &str, input: &Value) -> String {
         "read_session" | "close_session" | "context_window" => s("session"),
         "todo" => {
             let t = parse_todos(input);
-            (!t.is_empty()).then(|| format!("{}/{} done", t.iter().filter(|x| x.status == TodoStatus::Completed).count(), t.len()))
+            (!t.is_empty()).then(|| {
+                format!(
+                    "{}/{} done",
+                    t.iter()
+                        .filter(|x| x.status == TodoStatus::Completed)
+                        .count(),
+                    t.len()
+                )
+            })
         }
         _ => None,
     };
@@ -661,13 +846,21 @@ pub fn tool_detail(name: &str, input: &Value) -> String {
 /// Display width as the terminal buffer will lay it out (per grapheme, zero-width dropped).
 fn cells_width(spans: &[Span<'_>]) -> usize {
     use unicode_segmentation::UnicodeSegmentation;
-    spans.iter().flat_map(|s| s.content.graphemes(true)).map(text::gwidth).sum()
+    spans
+        .iter()
+        .flat_map(|s| s.content.graphemes(true))
+        .map(text::gwidth)
+        .sum()
 }
 
 /// `╭─ label ───╮` / `├─ label ───┤`, exactly `bw` columns.
 fn box_section(label: &str, first: bool, bw: usize) -> Row {
     let bst = theme::fg(theme::BORDER);
-    let (l, r) = if first { ("╭", "╮") } else { ("├", "┤") };
+    let (l, r) = if first {
+        ("╭", "╮")
+    } else {
+        ("├", "┤")
+    };
     // l + "─ " + label + " " + fill + r
     let label = text::truncate(label, bw.saturating_sub(6));
     let lw = cells_width(&[Span::raw(label.as_str())]);
@@ -688,17 +881,36 @@ fn box_body(spans: Vec<Span<'static>>, iw: usize, soft: bool) -> Row {
     s.extend(spans);
     s.push(Span::raw(" ".repeat(iw.saturating_sub(lw))));
     s.push(Span::styled(" │", bst));
-    Row::new(Line::from(s)).skip(2).end((2 + iw) as u16).soft(soft)
+    Row::new(Line::from(s))
+        .skip(2)
+        .end((2 + iw) as u16)
+        .soft(soft)
 }
 
 fn render_tool(m: &Message, idx: usize, part: &Part, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
-    let Part::Tool { name, purpose, input, raw_input, state, output, meta, images, time, time_end, run_at, .. } = part else {
+    let Part::Tool {
+        name,
+        purpose,
+        input,
+        raw_input,
+        state,
+        output,
+        meta,
+        images,
+        time,
+        time_end,
+        run_at,
+        ..
+    } = part
+    else {
         return Vec::new();
     };
     let exp = cx.expanded(idx, cx.details);
     let tick = cx.tick;
     let (icon, icolor) = match state {
-        ToolState::Streaming | ToolState::Running => (theme::spinner(tick).to_string(), theme::PRIMARY),
+        ToolState::Streaming | ToolState::Running => {
+            (theme::spinner(tick).to_string(), theme::PRIMARY)
+        }
         ToolState::AwaitingPermission => ("?".into(), theme::WARNING),
         ToolState::Delayed => ("◷".into(), theme::WARNING),
         ToolState::Done => ("✓".into(), theme::SUCCESS),
@@ -706,17 +918,31 @@ fn render_tool(m: &Message, idx: usize, part: &Part, cx: &Ctx<'_>, w: usize) -> 
         ToolState::Denied | ToolState::Cancelled => ("⊘".into(), theme::MUTED),
     };
     let dim_state = matches!(state, ToolState::Denied | ToolState::Cancelled);
-    let name_disp = if name.is_empty() { "tool".to_string() } else { name.clone() };
+    let name_disp = if name.is_empty() {
+        "tool".to_string()
+    } else {
+        name.clone()
+    };
     let mut name_style = theme::bold(if dim_state { theme::MUTED } else { theme::TEXT });
     if *state == ToolState::Denied {
         name_style = name_style.add_modifier(Modifier::CROSSED_OUT);
     }
-    let mut left: Vec<Span<'static>> = vec![Span::styled(if exp { "▾ " } else { "▸ " }, theme::fg(theme::DIM))];
+    let mut left: Vec<Span<'static>> = vec![Span::styled(
+        if exp { "▾ " } else { "▸ " },
+        theme::fg(theme::DIM),
+    )];
     left.push(Span::styled(format!("{icon} "), theme::fg(icolor)));
     left.push(Span::styled(name_disp, name_style));
     let purpose = text::one_line(purpose);
     if !purpose.is_empty() {
-        left.push(Span::styled(format!("  {purpose}"), if dim_state { theme::muted() } else { theme::text() }));
+        left.push(Span::styled(
+            format!("  {purpose}"),
+            if dim_state {
+                theme::muted()
+            } else {
+                theme::text()
+            },
+        ));
     }
     let detail = tool_detail(name, input);
     if !detail.is_empty() && !cx.compact {
@@ -726,14 +952,23 @@ fn render_tool(m: &Message, idx: usize, part: &Part, cx: &Ctx<'_>, w: usize) -> 
     let mut right: Vec<Span<'static>> = Vec::new();
     match state {
         ToolState::Streaming => right.push(Span::styled("writing…", theme::muted())),
-        ToolState::AwaitingPermission => right.push(Span::styled("awaiting permission", theme::fg(theme::WARNING))),
+        ToolState::AwaitingPermission => right.push(Span::styled(
+            "awaiting permission",
+            theme::fg(theme::WARNING),
+        )),
         ToolState::Delayed => {
-            let secs = run_at.map(|r| ((r - cx.now).max(0) + 999) / 1000).unwrap_or(0);
-            right.push(Span::styled(format!("runs in {secs}s · esc to cancel"), theme::fg(theme::WARNING)));
+            let secs = run_at
+                .map(|r| ((r - cx.now).max(0) + 999) / 1000)
+                .unwrap_or(0);
+            right.push(Span::styled(
+                format!("runs in {secs}s · esc to cancel"),
+                theme::fg(theme::WARNING),
+            ));
         }
-        ToolState::Running => {
-            right.push(Span::styled(format!("running {}", text::fmt_elapsed(cx.now - time)), theme::fg(theme::PRIMARY)))
-        }
+        ToolState::Running => right.push(Span::styled(
+            format!("running {}", text::fmt_elapsed(cx.now - time)),
+            theme::fg(theme::PRIMARY),
+        )),
         ToolState::Done => {
             if let Some(e) = time_end {
                 right.push(Span::styled(text::fmt_dur(e - time), theme::muted()));
@@ -742,20 +977,29 @@ fn render_tool(m: &Message, idx: usize, part: &Part, cx: &Ctx<'_>, w: usize) -> 
         ToolState::Error => {
             right.push(Span::styled("error", theme::fg(theme::ERROR)));
             if let Some(e) = time_end {
-                right.push(Span::styled(format!(" {}", text::fmt_dur(e - time)), theme::muted()));
+                right.push(Span::styled(
+                    format!(" {}", text::fmt_dur(e - time)),
+                    theme::muted(),
+                ));
             }
         }
         ToolState::Denied => right.push(Span::styled("denied", theme::muted())),
         ToolState::Cancelled => right.push(Span::styled("cancelled", theme::muted())),
     }
     if *time > 0 && !cx.compact {
-        right.push(Span::styled(format!("  {}", text::fmt_clock(*time)), theme::fg(theme::DIM)));
+        right.push(Span::styled(
+            format!("  {}", text::fmt_clock(*time)),
+            theme::fg(theme::DIM),
+        ));
     }
     if cx.compact && w < 50 {
         right.clear();
     }
     let (line, _) = compose(left, right, w);
-    let hit = Hit::Toggle { msg: m.id.clone(), part: idx };
+    let hit = Hit::Toggle {
+        msg: m.id.clone(),
+        part: idx,
+    };
     let mut rows = vec![Row::new(line).hit(hit.clone()).decor()];
     // Todo lists are always shown inline (like opencode's todo block).
     if name == "todo" {
@@ -774,7 +1018,10 @@ fn render_tool(m: &Message, idx: usize, part: &Part, cx: &Ctx<'_>, w: usize) -> 
         {
             let l = Line::from(vec![
                 Span::styled("  └ ", theme::fg(theme::DIM)),
-                Span::styled(text::truncate(first, w.saturating_sub(4)), theme::fg(theme::ERROR)),
+                Span::styled(
+                    text::truncate(first, w.saturating_sub(4)),
+                    theme::fg(theme::ERROR),
+                ),
             ]);
             rows.push(Row::new(l).skip(4));
         }
@@ -793,7 +1040,10 @@ fn render_tool(m: &Message, idx: usize, part: &Part, cx: &Ctx<'_>, w: usize) -> 
         let n = lines.len();
         let shown = limit.map(|l| l.min(n)).unwrap_or(n);
         for l in &lines[..shown] {
-            for (i, wl) in text::wrap_hard(&[Span::styled(l.to_string(), style)], iw).into_iter().enumerate() {
+            for (i, wl) in text::wrap_hard(&[Span::styled(l.to_string(), style)], iw)
+                .into_iter()
+                .enumerate()
+            {
                 rows.push(body(wl.spans, i > 0));
             }
         }
@@ -802,35 +1052,75 @@ fn render_tool(m: &Message, idx: usize, part: &Part, cx: &Ctx<'_>, w: usize) -> 
 
     let mut blk: Vec<Row> = Vec::new();
     blk.push(section("input", true));
-    let input_text = if input.is_null() || (input.as_object().is_some_and(|o| o.is_empty()) && !raw_input.trim().is_empty() && raw_input.trim() != "{}") {
+    let input_text = if input.is_null()
+        || (input.as_object().is_some_and(|o| o.is_empty())
+            && !raw_input.trim().is_empty()
+            && raw_input.trim() != "{}")
+    {
         raw_input.clone()
     } else {
         serde_json::to_string_pretty(input).unwrap_or_default()
     };
     let input_text = text::sanitize(&input_text);
-    let in_hidden = push_text(&mut blk, input_text.trim_end(), theme::fg(theme::INFO), if cx.all(idx) { None } else { Some(OUTPUT_PREVIEW_LINES) });
+    let in_hidden = push_text(
+        &mut blk,
+        input_text.trim_end(),
+        theme::fg(theme::INFO),
+        if cx.all(idx) {
+            None
+        } else {
+            Some(OUTPUT_PREVIEW_LINES)
+        },
+    );
     if in_hidden > 0 {
-        blk.push(body(vec![Span::styled(format!("… {in_hidden} more lines (click to show all)"), theme::fg(theme::WARNING))], false).hit(Hit::ShowAll { msg: m.id.clone(), part: idx }).decor());
+        blk.push(
+            body(
+                vec![Span::styled(
+                    format!("… {in_hidden} more lines (click to show all)"),
+                    theme::fg(theme::WARNING),
+                )],
+                false,
+            )
+            .hit(Hit::ShowAll {
+                msg: m.id.clone(),
+                part: idx,
+            })
+            .decor(),
+        );
     }
     // Diff (edit/write).
-    if let Some(diff) = meta.as_ref().and_then(|x| x.get("diff")).and_then(Value::as_str).filter(|d| !d.trim().is_empty()) {
+    if let Some(diff) = meta
+        .as_ref()
+        .and_then(|x| x.get("diff"))
+        .and_then(Value::as_str)
+        .filter(|d| !d.trim().is_empty())
+    {
         blk.push(section("diff", false));
         let diff = text::sanitize(diff);
         let lines: Vec<&str> = diff.trim_end().split('\n').collect();
-        let limit = if cx.all(idx) { lines.len() } else { lines.len().min(OUTPUT_PREVIEW_LINES) };
+        let limit = if cx.all(idx) {
+            lines.len()
+        } else {
+            lines.len().min(OUTPUT_PREVIEW_LINES)
+        };
         for l in &lines[..limit] {
             let st = if l.starts_with("+++") || l.starts_with("---") {
                 theme::bold(theme::MUTED)
             } else if l.starts_with('+') {
                 Style::new().fg(theme::DIFF_ADDED).bg(theme::DIFF_ADDED_BG)
             } else if l.starts_with('-') {
-                Style::new().fg(theme::DIFF_REMOVED).bg(theme::DIFF_REMOVED_BG)
+                Style::new()
+                    .fg(theme::DIFF_REMOVED)
+                    .bg(theme::DIFF_REMOVED_BG)
             } else if l.starts_with("@@") {
                 theme::fg(theme::INFO)
             } else {
                 theme::fg(theme::DIFF_CONTEXT)
             };
-            for (i, wl) in text::wrap_hard(&[Span::styled(l.to_string(), st)], iw).into_iter().enumerate() {
+            for (i, wl) in text::wrap_hard(&[Span::styled(l.to_string(), st)], iw)
+                .into_iter()
+                .enumerate()
+            {
                 let lw = text::line_width(&wl);
                 let mut spans = wl.spans;
                 if st.bg.is_some() {
@@ -840,18 +1130,39 @@ fn render_tool(m: &Message, idx: usize, part: &Part, cx: &Ctx<'_>, w: usize) -> 
             }
         }
         if limit < lines.len() {
-            blk.push(body(vec![Span::styled(format!("… {} more lines (click to show all)", lines.len() - limit), theme::fg(theme::WARNING))], false).hit(Hit::ShowAll { msg: m.id.clone(), part: idx }).decor());
+            blk.push(
+                body(
+                    vec![Span::styled(
+                        format!("… {} more lines (click to show all)", lines.len() - limit),
+                        theme::fg(theme::WARNING),
+                    )],
+                    false,
+                )
+                .hit(Hit::ShowAll {
+                    msg: m.id.clone(),
+                    part: idx,
+                })
+                .decor(),
+            );
         }
     }
     // Output (or live output while running).
-    let live_out = meta.as_ref().and_then(|x| x.get("live_output")).and_then(Value::as_str).map(text::sanitize);
+    let live_out = meta
+        .as_ref()
+        .and_then(|x| x.get("live_output"))
+        .and_then(Value::as_str)
+        .map(text::sanitize);
     let (label, out) = match (state, &live_out) {
         (ToolState::Running, Some(lo)) => ("output (live)", lo.clone()),
         _ => ("output", out_text.clone()),
     };
     if !out.is_empty() || state.is_final() {
         blk.push(section(label, false));
-        let st = if *state == ToolState::Error { theme::fg(theme::ERROR) } else { theme::text() };
+        let st = if *state == ToolState::Error {
+            theme::fg(theme::ERROR)
+        } else {
+            theme::text()
+        };
         if out.trim().is_empty() {
             blk.push(body(vec![Span::styled("(no output)", theme::muted())], false).decor());
         } else if *state == ToolState::Running {
@@ -859,22 +1170,58 @@ fn render_tool(m: &Message, idx: usize, part: &Part, cx: &Ctx<'_>, w: usize) -> 
             let lines: Vec<&str> = out.trim_end().split('\n').collect();
             let start = lines.len().saturating_sub(20);
             if start > 0 {
-                blk.push(body(vec![Span::styled(format!("… {start} earlier lines"), theme::muted())], false).decor());
+                blk.push(
+                    body(
+                        vec![Span::styled(
+                            format!("… {start} earlier lines"),
+                            theme::muted(),
+                        )],
+                        false,
+                    )
+                    .decor(),
+                );
             }
             push_text(&mut blk, &lines[start..].join("\n"), st, None);
         } else {
-            let hidden = push_text(&mut blk, out.trim_end(), st, if cx.all(idx) { None } else { Some(OUTPUT_PREVIEW_LINES) });
+            let hidden = push_text(
+                &mut blk,
+                out.trim_end(),
+                st,
+                if cx.all(idx) {
+                    None
+                } else {
+                    Some(OUTPUT_PREVIEW_LINES)
+                },
+            );
             if hidden > 0 {
                 blk.push(
-                    body(vec![Span::styled(format!("… {hidden} more lines (click to show all)"), theme::fg(theme::WARNING))], false)
-                        .hit(Hit::ShowAll { msg: m.id.clone(), part: idx })
-                        .decor(),
+                    body(
+                        vec![Span::styled(
+                            format!("… {hidden} more lines (click to show all)"),
+                            theme::fg(theme::WARNING),
+                        )],
+                        false,
+                    )
+                    .hit(Hit::ShowAll {
+                        msg: m.id.clone(),
+                        part: idx,
+                    })
+                    .decor(),
                 );
             }
         }
     }
     if !images.is_empty() {
-        blk.push(body(vec![Span::styled(format!("[{} image(s) attached]", images.len()), theme::fg(theme::ACCENT))], false).decor());
+        blk.push(
+            body(
+                vec![Span::styled(
+                    format!("[{} image(s) attached]", images.len()),
+                    theme::fg(theme::ACCENT),
+                )],
+                false,
+            )
+            .decor(),
+        );
     }
     // Extra meta (exit code etc.), excluding big fields.
     if let Some(obj) = meta.as_ref().and_then(Value::as_object) {
@@ -894,12 +1241,21 @@ fn render_tool(m: &Message, idx: usize, part: &Part, cx: &Ctx<'_>, w: usize) -> 
         if !bits.is_empty() {
             blk.push(section("meta", false));
             let joined = bits.join("  ·  ");
-            for (i, wl) in text::wrap_spans(&[Span::styled(joined, theme::muted())], iw).into_iter().enumerate() {
+            for (i, wl) in text::wrap_spans(&[Span::styled(joined, theme::muted())], iw)
+                .into_iter()
+                .enumerate()
+            {
                 blk.push(body(wl.spans, i > 0));
             }
         }
     }
-    blk.push(Row::new(Line::from(Span::styled(format!("╰{}╯", "─".repeat(bw.saturating_sub(2))), bst))).decor());
+    blk.push(
+        Row::new(Line::from(Span::styled(
+            format!("╰{}╯", "─".repeat(bw.saturating_sub(2))),
+            bst,
+        )))
+        .decor(),
+    );
     for r in blk {
         rows.push(r.indent(vec![Span::raw("  ")]));
     }

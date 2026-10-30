@@ -222,9 +222,10 @@ fn take_head(s: &str) -> &str {
         end = i + 1;
     }
     if end < s.len()
-        && let Some(i) = s[..end].rfind('\n') {
-            end = i + 1;
-        }
+        && let Some(i) = s[..end].rfind('\n')
+    {
+        end = i + 1;
+    }
     &s[..end]
 }
 
@@ -236,9 +237,10 @@ fn take_tail(s: &str) -> &str {
         start += i + 1;
     } else if start > 0
         && let Some(i) = s[start..].find('\n')
-            && start + i + 1 < s.len() {
-                start += i + 1;
-            }
+        && start + i + 1 < s.len()
+    {
+        start += i + 1;
+    }
     &s[start..]
 }
 
@@ -275,20 +277,25 @@ impl OutputReader {
     fn new(mut r: std::io::PipeReader) -> std::io::Result<Self> {
         use std::io::Read;
         let (tx, rx) = tokio::sync::mpsc::channel(16);
-        std::thread::Builder::new().name("bash-output".into()).spawn(move || {
-            let mut buf = vec![0u8; 64 * 1024];
-            loop {
-                match r.read(&mut buf) {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => {
-                        if tx.blocking_send(buf[..n].to_vec()).is_err() {
-                            break;
+        std::thread::Builder::new()
+            .name("bash-output".into())
+            .spawn(move || {
+                let mut buf = vec![0u8; 64 * 1024];
+                loop {
+                    match r.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => {
+                            if tx.blocking_send(buf[..n].to_vec()).is_err() {
+                                break;
+                            }
                         }
                     }
                 }
-            }
-        })?;
-        Ok(Self { rx, pending: Vec::new() })
+            })?;
+        Ok(Self {
+            rx,
+            pending: Vec::new(),
+        })
     }
 
     /// Cancel safe: nothing is awaited after a chunk has been taken from the channel.
@@ -326,7 +333,10 @@ fn shell_candidates() -> Vec<PathBuf> {
 
 /// Shell for one-off commands outside the tool (the first candidate).
 pub fn default_shell() -> PathBuf {
-    shell_candidates().into_iter().next().unwrap_or_else(|| "bash".into())
+    shell_candidates()
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| "bash".into())
 }
 
 /// Git Bash first. `bash.exe` under System32 or WindowsApps is the WSL launcher, which runs
@@ -341,24 +351,43 @@ fn windows_shells() -> Vec<PathBuf> {
                     out.push(p);
                 }
             }
-            let path_dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+            let path_dirs: Vec<PathBuf> = std::env::var_os("PATH")
+                .map(|p| std::env::split_paths(&p).collect())
+                .unwrap_or_default();
             let mut out = Vec::new();
             // Git for Windows has git.exe in <root>\cmd, <root>\bin or <root>\mingw64\bin.
-            if let Some(git) = path_dirs.iter().map(|d| d.join("git.exe")).find(|p| p.is_file()) {
+            if let Some(git) = path_dirs
+                .iter()
+                .map(|d| d.join("git.exe"))
+                .find(|p| p.is_file())
+            {
                 for root in git.ancestors().skip(1).take(3) {
                     add(&mut out, root.join("bin").join("bash.exe"));
                 }
             }
-            for var in ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)", "LOCALAPPDATA"] {
+            for var in [
+                "ProgramFiles",
+                "ProgramW6432",
+                "ProgramFiles(x86)",
+                "LOCALAPPDATA",
+            ] {
                 if let Some(base) = std::env::var_os(var).map(PathBuf::from) {
                     add(&mut out, base.join("Git").join("bin").join("bash.exe"));
-                    add(&mut out, base.join("Programs").join("Git").join("bin").join("bash.exe"));
+                    add(
+                        &mut out,
+                        base.join("Programs")
+                            .join("Git")
+                            .join("bin")
+                            .join("bash.exe"),
+                    );
                 }
             }
             for name in ["bash.exe", "sh.exe"] {
                 for p in path_dirs.iter().map(|d| d.join(name)) {
                     let lower = p.to_string_lossy().to_ascii_lowercase();
-                    if !lower.contains("\\windows\\system32\\") && !lower.contains("\\windowsapps\\") {
+                    if !lower.contains("\\windows\\system32\\")
+                        && !lower.contains("\\windowsapps\\")
+                    {
                         add(&mut out, p);
                     }
                 }
@@ -368,7 +397,11 @@ fn windows_shells() -> Vec<PathBuf> {
         .clone()
 }
 
-fn spawn_shell(command: &str, cwd: &std::path::Path, out: &std::io::PipeWriter) -> std::io::Result<tokio::process::Child> {
+fn spawn_shell(
+    command: &str,
+    cwd: &std::path::Path,
+    out: &std::io::PipeWriter,
+) -> std::io::Result<tokio::process::Child> {
     let mut last_err = None;
     for shell in shell_candidates() {
         let mut cmd = tokio::process::Command::new(&shell);
@@ -427,7 +460,9 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     if command.trim().is_empty() {
         bail!("`command` must not be empty");
     }
-    let timeout_secs = util::opt_u64(&input, "timeout")?.unwrap_or(DEFAULT_TIMEOUT_SECS).min(MAX_TIMEOUT_SECS);
+    let timeout_secs = util::opt_u64(&input, "timeout")?
+        .unwrap_or(DEFAULT_TIMEOUT_SECS)
+        .min(MAX_TIMEOUT_SECS);
     let cwd = match util::opt_str(&input, "cwd")? {
         Some(c) if !c.trim().is_empty() => util::resolve_path(&ctx.cwd, &c),
         _ => ctx.cwd.clone(),
@@ -447,14 +482,16 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let mut child = spawned.map_err(|e| anyhow!("failed to start shell: {e}"))?;
     let pid = child.id();
     let mut guard = GroupGuard { pid, armed: true };
-    let mut reader = OutputReader::new(read_end).map_err(|e| anyhow!("cannot read command output: {e}"))?;
+    let mut reader =
+        OutputReader::new(read_end).map_err(|e| anyhow!("cannot read command output: {e}"))?;
 
     let mut asm = LineAssembler::default();
     let mut col = Collector::new(ctx.on_output.clone());
     let mut buf = vec![0u8; 64 * 1024];
     let mut eof = false;
 
-    let deadline = (timeout_secs > 0).then(|| tokio::time::Instant::now() + Duration::from_secs(timeout_secs));
+    let deadline =
+        (timeout_secs > 0).then(|| tokio::time::Instant::now() + Duration::from_secs(timeout_secs));
     let sleep_until = async move {
         match deadline {
             Some(d) => tokio::time::sleep_until(d).await,
@@ -531,7 +568,12 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     Ok(build_output(col, ending, duration, timeout_secs))
 }
 
-fn build_output(col: Collector, ending: Ending, duration: Duration, timeout_secs: u64) -> ToolOutput {
+fn build_output(
+    col: Collector,
+    ending: Ending,
+    duration: Duration,
+    timeout_secs: u64,
+) -> ToolOutput {
     let total_lines = col.total_lines;
     let total_bytes = col.total_bytes;
     let (mut text, truncated, path) = col.finish();
@@ -622,7 +664,11 @@ mod tests {
         let streamed = Arc::new(Mutex::new(String::new()));
         let s2 = streamed.clone();
         c.on_output = Some(Arc::new(move |t: &str| s2.lock().unwrap().push_str(t)));
-        let o = bash(&c, json!({"command": "echo one; echo two >&2; printf '\\033[31mred\\033[0m\\n'; exit 3"})).await;
+        let o = bash(
+            &c,
+            json!({"command": "echo one; echo two >&2; printf '\\033[31mred\\033[0m\\n'; exit 3"}),
+        )
+        .await;
         assert!(!o.is_error);
         assert_eq!(o.text, "one\ntwo\nred\n\n[exit code 3]");
         assert_eq!(o.meta.as_ref().unwrap()["exit_code"], json!(3));
@@ -642,9 +688,18 @@ mod tests {
         let d = temp_dir("bash-timeout");
         let c = ctx(&d);
         let t = Instant::now();
-        let o = bash(&c, json!({"command": "echo start; sleep 30 & sleep 30; echo never", "timeout": 1})).await;
+        let o = bash(
+            &c,
+            json!({"command": "echo start; sleep 30 & sleep 30; echo never", "timeout": 1}),
+        )
+        .await;
         assert!(o.is_error);
-        assert!(o.text.starts_with("start\n\n[Command timed out after 1 seconds]"), "{}", o.text);
+        assert!(
+            o.text
+                .starts_with("start\n\n[Command timed out after 1 seconds]"),
+            "{}",
+            o.text
+        );
         assert!(t.elapsed() < Duration::from_secs(5));
     }
 
@@ -682,7 +737,12 @@ mod tests {
         assert_eq!(m["truncated"], json!(true));
         assert!(o.text.starts_with("1\n2\n"));
         assert!(o.text.contains("lines elided …]"));
-        assert!(o.text.contains("\n100000\n\n[Output truncated: 100000 lines"), "{}", &o.text[o.text.len() - 300..]);
+        assert!(
+            o.text
+                .contains("\n100000\n\n[Output truncated: 100000 lines"),
+            "{}",
+            &o.text[o.text.len() - 300..]
+        );
         assert!(o.text.len() < MAX_BYTES + 1024);
         let path = m["output_path"].as_str().unwrap();
         let full = std::fs::read_to_string(path).unwrap();

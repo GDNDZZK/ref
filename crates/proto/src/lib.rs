@@ -101,7 +101,11 @@ impl ModelRef {
         if p.is_empty() || m.is_empty() {
             return None;
         }
-        Some(ModelRef { provider: p.into(), model: m.into(), variant })
+        Some(ModelRef {
+            provider: p.into(),
+            model: m.into(),
+            variant,
+        })
     }
 }
 
@@ -117,7 +121,11 @@ pub enum SessionStatus {
     /// Blocked on a user permission decision.
     WaitingPermission,
     /// LLM request failed; will retry at `next_at`.
-    Retrying { attempt: u32, next_at: i64, error: String },
+    Retrying {
+        attempt: u32,
+        next_at: i64,
+        error: String,
+    },
     /// Automatic compaction in progress.
     Compacting,
 }
@@ -227,7 +235,11 @@ pub enum MessageSource {
     #[default]
     Human,
     /// Delivered from another session through `send_message`.
-    Peer { from_id: String, from_name: String, msg_id: String },
+    Peer {
+        from_id: String,
+        from_name: String,
+        msg_id: String,
+    },
     /// Prompt given by the creating session through `create_session`.
     Spawn { from_id: String, from_name: String },
     /// Automatic reminder injected by the harness (e.g. must_report).
@@ -290,7 +302,10 @@ impl Message {
         self.parts
             .iter()
             .filter_map(|p| match p {
-                Part::Image { image, name } => Some(NamedImage { image: image.clone(), name: name.clone() }),
+                Part::Image { image, name } => Some(NamedImage {
+                    image: image.clone(),
+                    name: name.clone(),
+                }),
                 _ => None,
             })
             .collect()
@@ -299,7 +314,11 @@ impl Message {
     /// The image a stub id (see [`ImageData::id`]) of this message points to.
     pub fn image(&self, image_id: &str) -> Option<&ImageData> {
         let mut it = image_id.rsplitn(3, ':');
-        let (n, part, msg) = (it.next()?.parse::<usize>().ok()?, it.next()?.parse::<usize>().ok()?, it.next()?);
+        let (n, part, msg) = (
+            it.next()?.parse::<usize>().ok()?,
+            it.next()?.parse::<usize>().ok()?,
+            it.next()?,
+        );
         if msg != self.id {
             return None;
         }
@@ -334,7 +353,12 @@ pub struct ImageData {
 
 impl ImageData {
     pub fn new(mime: impl Into<String>, data: impl Into<String>) -> Self {
-        ImageData { mime: mime.into(), data: data.into(), id: None, size: None }
+        ImageData {
+            mime: mime.into(),
+            data: data.into(),
+            id: None,
+            size: None,
+        }
     }
 
     /// True if the bytes were left out (see the type docs).
@@ -380,7 +404,10 @@ pub enum ToolState {
 
 impl ToolState {
     pub fn is_final(self) -> bool {
-        matches!(self, ToolState::Done | ToolState::Error | ToolState::Denied | ToolState::Cancelled)
+        matches!(
+            self,
+            ToolState::Done | ToolState::Error | ToolState::Denied | ToolState::Cancelled
+        )
     }
 }
 
@@ -504,7 +531,11 @@ pub struct ModelInfo {
 
 impl ModelInfo {
     pub fn model_ref(&self, variant: Option<String>) -> ModelRef {
-        ModelRef { provider: self.provider.clone(), model: self.id.clone(), variant }
+        ModelRef {
+            provider: self.provider.clone(),
+            model: self.id.clone(),
+            variant,
+        }
     }
 }
 
@@ -622,10 +653,17 @@ pub enum Request {
         limit: Option<u32>,
     },
     /// Bytes of an image stub (see `ImageData`). -> `{image: ImageData}`
-    GetImage { session_id: String, image_id: String },
-    Detach { session_id: String },
+    GetImage {
+        session_id: String,
+        image_id: String,
+    },
+    Detach {
+        session_id: String,
+    },
     /// Subscribe to every live background session (split view). -> `{sessions: [SessionInfo]}`
-    WatchAll { enabled: bool },
+    WatchAll {
+        enabled: bool,
+    },
     /// -> `{queued, message_id}`. `queued` = the session was busy and the message waits in its
     /// queue until the next safe point (it can be withdrawn with `RemoveQueued` until then).
     Prompt {
@@ -636,11 +674,19 @@ pub enum Request {
     },
     /// Withdraw a queued (not yet delivered) message. -> `{removed, text, images: [NamedImage]}`;
     /// `removed` is false when it was already delivered (or is unknown).
-    RemoveQueued { session_id: String, message_id: String },
+    RemoveQueued {
+        session_id: String,
+        message_id: String,
+    },
     /// Run `!command` on behalf of the user; output added to the conversation.
-    Shell { session_id: String, command: String },
+    Shell {
+        session_id: String,
+        command: String,
+    },
     /// Stop the current turn (esc).
-    Abort { session_id: String },
+    Abort {
+        session_id: String,
+    },
     PermissionReply {
         session_id: String,
         call_id: String,
@@ -650,15 +696,29 @@ pub enum Request {
         always: bool,
     },
     /// Change model for this session only (not remembered for new sessions).
-    SetModel { session_id: String, model: ModelRef },
-    SetAgent { session_id: String, agent: String },
-    Rename { session_id: String, name: String },
+    SetModel {
+        session_id: String,
+        model: ModelRef,
+    },
+    SetAgent {
+        session_id: String,
+        agent: String,
+    },
+    Rename {
+        session_id: String,
+        name: String,
+    },
     /// Change the session's working directory (`/cd`). `path` is absolute or relative to the
     /// current one; `~` is expanded. Rejected while the session is busy. A reminder telling the
     /// model about the change is appended (no LLM turn). -> `{session: SessionInfo}`
-    SetCwd { session_id: String, path: String },
+    SetCwd {
+        session_id: String,
+        path: String,
+    },
     /// Manual compaction (/compact).
-    Compact { session_id: String },
+    Compact {
+        session_id: String,
+    },
     /// Remove the last human prompt and everything after it — or, with `message_id`, that
     /// message and everything after it. Files are not restored. -> `{text, images: [NamedImage]}`
     /// of the removed prompt (both empty unless it was a human prompt).
@@ -668,11 +728,19 @@ pub enum Request {
         message_id: Option<String>,
     },
     /// Unload a live session (it remains in history). Allowed for any session from a frontend.
-    Close { session_id: String },
+    Close {
+        session_id: String,
+    },
     /// Delete a session from history permanently.
-    Delete { session_id: String },
+    Delete {
+        session_id: String,
+    },
     /// Expand a user-defined command into prompt text. -> `{text}`
-    ExpandCommand { name: String, args: String, cwd: String },
+    ExpandCommand {
+        name: String,
+        args: String,
+        cwd: String,
+    },
     /// Fuzzy file search for `@` mentions (gitignore-aware). -> `{files: [String]}` (relative paths, dirs end with `/`)
     ListFiles {
         cwd: String,
@@ -687,7 +755,10 @@ pub enum Request {
         variant: Option<String>,
     },
     /// Write the transcript as markdown to `path` (server side). -> `{path}`
-    Export { session_id: String, path: String },
+    Export {
+        session_id: String,
+        path: String,
+    },
     /// Cross-session slash commands run for the user without an LLM turn.
     /// `command`: "peers" | "peers-name" | "peers-inbox" | "peers-outbox". -> `{text}`
     PeerCommand {
@@ -723,7 +794,10 @@ pub enum ServerFrame {
         error: Option<String>,
     },
     /// Event scoped to a session the client is attached to / watching.
-    Event { session_id: String, event: SessionEvent },
+    Event {
+        session_id: String,
+        event: SessionEvent,
+    },
     /// Live session list changed (sent to every client).
     Sessions { sessions: Vec<SessionInfo> },
     /// Transient notice for the user.
@@ -741,15 +815,29 @@ pub enum ToastLevel {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionEvent {
-    Info { info: SessionInfo },
+    Info {
+        info: SessionInfo,
+    },
     /// New message appended (or full replacement of an existing one with the same id).
-    Message { message: Message },
+    Message {
+        message: Message,
+    },
     /// Part appended / replaced at `index` of `message_id`.
-    Part { message_id: String, index: usize, part: Part },
+    Part {
+        message_id: String,
+        index: usize,
+        part: Part,
+    },
     /// Streaming delta for part `index`.
-    Delta { message_id: String, index: usize, delta: Delta },
+    Delta {
+        message_id: String,
+        index: usize,
+        delta: Delta,
+    },
     /// Message removed (undo, retry reset).
-    Removed { message_id: String },
+    Removed {
+        message_id: String,
+    },
     /// Whole history replaced (compaction, undo) — client should replace its list. Like a
     /// snapshot this carries only the newest page.
     Reset {
@@ -757,13 +845,21 @@ pub enum SessionEvent {
         #[serde(default)]
         more_before: bool,
     },
-    Permission { request: PermissionRequest },
-    PermissionResolved { call_id: String },
+    Permission {
+        request: PermissionRequest,
+    },
+    PermissionResolved {
+        call_id: String,
+    },
     /// The session's queue changed: every message (any source) still waiting for the next safe
     /// point, in delivery order. Delivered messages arrive as `Message` events.
-    Queue { messages: Vec<Message> },
+    Queue {
+        messages: Vec<Message>,
+    },
     /// Human-readable error for the session (also stored in message.error when relevant).
-    Error { text: String },
+    Error {
+        text: String,
+    },
     /// Session closed / unloaded.
     Closed,
 }

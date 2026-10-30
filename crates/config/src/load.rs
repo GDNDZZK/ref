@@ -7,7 +7,13 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// Global config file names tried (in order) in every global config dir.
-const GLOBAL_FILES: &[&str] = &["opencode.json", "opencode.jsonc", "config.json", "ref.json", "ref.jsonc"];
+const GLOBAL_FILES: &[&str] = &[
+    "opencode.json",
+    "opencode.jsonc",
+    "config.json",
+    "ref.json",
+    "ref.jsonc",
+];
 
 /// Environment lookup used during loading (injectable for tests).
 pub type EnvFn<'a> = &'a dyn Fn(&str) -> Option<String>;
@@ -57,7 +63,11 @@ impl Ctx<'_> {
 /// Testable loader. `home` is used for `~` expansion; `global_dirs` are the global config
 /// directories (e.g. `~/.config/opencode`, `~/.config/ref`); `env` provides env vars.
 pub fn load_with(home: Option<&Path>, global_dirs: &[PathBuf], cwd: &Path, env: EnvFn) -> Config {
-    let mut ctx = Ctx { home, env, warnings: Vec::new() };
+    let mut ctx = Ctx {
+        home,
+        env,
+        warnings: Vec::new(),
+    };
     let mut layers: Vec<Layer> = Vec::new();
     let mut config_dirs: Vec<PathBuf> = Vec::new();
 
@@ -131,7 +141,9 @@ pub(crate) fn project_dirs(cwd: &Path) -> Vec<PathBuf> {
     let cwd = if cwd.is_absolute() {
         cwd.to_path_buf()
     } else {
-        std::env::current_dir().map(|d| d.join(cwd)).unwrap_or_else(|_| cwd.to_path_buf())
+        std::env::current_dir()
+            .map(|d| d.join(cwd))
+            .unwrap_or_else(|_| cwd.to_path_buf())
     };
     let mut up = Vec::new();
     let mut found_root = false;
@@ -165,9 +177,14 @@ fn load_file(ctx: &mut Ctx, path: &Path, layers: &mut Vec<Layer>) {
     let base = path.parent().unwrap_or(Path::new("/")).to_path_buf();
     let mut v = Value::Object(value);
     substitute_value(ctx, &mut v, &base, path);
-    let Value::Object(mut value) = v else { unreachable!() };
+    let Value::Object(mut value) = v else {
+        unreachable!()
+    };
     normalize_paths(ctx, &mut value, &base);
-    layers.push(Layer { source: path.to_path_buf(), value });
+    layers.push(Layer {
+        source: path.to_path_buf(),
+        value,
+    });
 }
 
 /// Markdown agents/commands of one config directory, converted to config layers.
@@ -180,7 +197,9 @@ fn load_markdown(ctx: &mut Ctx, dir: &Path, layers: &mut Vec<Layer>) {
         let base = doc.path.parent().unwrap_or(dir).to_path_buf();
         let mut fm = Value::Object(doc.frontmatter);
         substitute_value(ctx, &mut fm, &base, &doc.path);
-        let Value::Object(mut fm) = fm else { unreachable!() };
+        let Value::Object(mut fm) = fm else {
+            unreachable!()
+        };
         fm.remove("name");
         fm.insert("prompt".into(), Value::String(doc.body));
         let key = if doc.legacy_mode { "mode" } else { "agent" };
@@ -188,25 +207,35 @@ fn load_markdown(ctx: &mut Ctx, dir: &Path, layers: &mut Vec<Layer>) {
         entry.insert(doc.name, Value::Object(fm));
         let mut value = Map::new();
         value.insert(key.into(), Value::Object(entry));
-        layers.push(Layer { source: doc.path, value });
+        layers.push(Layer {
+            source: doc.path,
+            value,
+        });
     }
     for doc in commands {
         let base = doc.path.parent().unwrap_or(dir).to_path_buf();
         let mut fm = Value::Object(doc.frontmatter);
         substitute_value(ctx, &mut fm, &base, &doc.path);
-        let Value::Object(mut fm) = fm else { unreachable!() };
+        let Value::Object(mut fm) = fm else {
+            unreachable!()
+        };
         fm.insert("template".into(), Value::String(doc.body));
         let mut entry = Map::new();
         entry.insert(doc.name, Value::Object(fm));
         let mut value = Map::new();
         value.insert("command".into(), Value::Object(entry));
-        layers.push(Layer { source: doc.path, value });
+        layers.push(Layer {
+            source: doc.path,
+            value,
+        });
     }
 }
 
 /// Make `skills` paths absolute relative to the config file's directory.
 fn normalize_paths(ctx: &mut Ctx, v: &mut Map<String, Value>, base: &Path) {
-    let Some(skills) = v.get_mut("skills") else { return };
+    let Some(skills) = v.get_mut("skills") else {
+        return;
+    };
     let list = match skills {
         Value::Array(a) => a.clone(),
         Value::String(_) => vec![skills.clone()],
@@ -220,9 +249,11 @@ fn normalize_paths(ctx: &mut Ctx, v: &mut Map<String, Value>, base: &Path) {
     let mut out = Vec::new();
     for item in list {
         match item.as_str() {
-            Some(s) if !s.trim().is_empty() => {
-                out.push(Value::String(expand_home(s.trim(), ctx.home, base).to_string_lossy().into_owned()))
-            }
+            Some(s) if !s.trim().is_empty() => out.push(Value::String(
+                expand_home(s.trim(), ctx.home, base)
+                    .to_string_lossy()
+                    .into_owned(),
+            )),
             _ => ctx.warn(format!("invalid skills path entry {item}")),
         }
     }
@@ -251,8 +282,12 @@ pub(crate) fn substitute_value(ctx: &mut Ctx, v: &mut Value, base: &Path, source
                 *s = substitute(ctx, s, base, source);
             }
         }
-        Value::Array(a) => a.iter_mut().for_each(|x| substitute_value(ctx, x, base, source)),
-        Value::Object(m) => m.values_mut().for_each(|x| substitute_value(ctx, x, base, source)),
+        Value::Array(a) => a
+            .iter_mut()
+            .for_each(|x| substitute_value(ctx, x, base, source)),
+        Value::Object(m) => m
+            .values_mut()
+            .for_each(|x| substitute_value(ctx, x, base, source)),
         _ => {}
     }
 }
@@ -262,7 +297,10 @@ pub(crate) fn substitute(ctx: &mut Ctx, s: &str, base: &Path, source: &Path) -> 
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
     loop {
-        let next = [rest.find("{env:"), rest.find("{file:")].into_iter().flatten().min();
+        let next = [rest.find("{env:"), rest.find("{file:")]
+            .into_iter()
+            .flatten()
+            .min();
         let Some(start) = next else {
             out.push_str(rest);
             break;
@@ -300,7 +338,12 @@ pub(crate) fn deep_merge(dst: &mut Map<String, Value>, src: &Map<String, Value>)
 }
 
 /// Rules from one document's `tools` (legacy) then `permission` keys.
-pub(crate) fn layer_rules(ctx: &mut Ctx, m: &Map<String, Value>, source: &Path, what: &str) -> PermissionRules {
+pub(crate) fn layer_rules(
+    ctx: &mut Ctx,
+    m: &Map<String, Value>,
+    source: &Path,
+    what: &str,
+) -> PermissionRules {
     let mut rules = PermissionRules::default();
     if let Some(t) = m.get("tools") {
         rules.extend(PermissionRules::from_tools_map(t));
@@ -328,13 +371,17 @@ pub(crate) fn accumulate(ctx: &mut Ctx, layers: &[Layer]) -> (Map<String, Value>
     let mut merged = Map::new();
     let mut acc = Accum::default();
     for l in layers {
-        acc.permission.extend(layer_rules(ctx, &l.value, &l.source, "permission"));
+        acc.permission
+            .extend(layer_rules(ctx, &l.value, &l.source, "permission"));
         for key in ["mode", "agent"] {
             if let Some(Value::Object(agents)) = l.value.get(key) {
                 for (name, a) in agents {
                     if let Value::Object(a) = a {
                         let r = layer_rules(ctx, a, &l.source, &format!("agent {name}"));
-                        acc.agent_permission.entry(name.clone()).or_default().extend(r);
+                        acc.agent_permission
+                            .entry(name.clone())
+                            .or_default()
+                            .extend(r);
                     }
                 }
             }
@@ -343,21 +390,33 @@ pub(crate) fn accumulate(ctx: &mut Ctx, layers: &[Layer]) -> (Map<String, Value>
             Some(Value::Array(a)) => {
                 for x in a {
                     match x.as_str() {
-                        Some(s) if !acc.instructions.iter().any(|y| y == s) => acc.instructions.push(s.to_string()),
+                        Some(s) if !acc.instructions.iter().any(|y| y == s) => {
+                            acc.instructions.push(s.to_string())
+                        }
                         Some(_) => {}
-                        None => ctx.warn(format!("{}: invalid instructions entry {x}", l.source.display())),
+                        None => ctx.warn(format!(
+                            "{}: invalid instructions entry {x}",
+                            l.source.display()
+                        )),
                     }
                 }
             }
-            Some(Value::String(s)) if !acc.instructions.contains(s) => acc.instructions.push(s.clone()),
+            Some(Value::String(s)) if !acc.instructions.contains(s) => {
+                acc.instructions.push(s.clone())
+            }
             Some(Value::String(_)) | None => {}
-            Some(_) => ctx.warn(format!("{}: `instructions` must be an array of strings", l.source.display())),
+            Some(_) => ctx.warn(format!(
+                "{}: `instructions` must be an array of strings",
+                l.source.display()
+            )),
         }
         if let Some(Value::Array(a)) = l.value.get("instructions") {
             // `~` expansion only; relative entries are resolved later against the project.
             for s in a.iter().filter_map(Value::as_str) {
                 if s.starts_with('~') {
-                    let e = expand_home(s, ctx.home, Path::new("")).to_string_lossy().into_owned();
+                    let e = expand_home(s, ctx.home, Path::new(""))
+                        .to_string_lossy()
+                        .into_owned();
                     if let Some(x) = acc.instructions.iter_mut().find(|x| x.as_str() == s) {
                         *x = e;
                     }

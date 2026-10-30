@@ -32,7 +32,8 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     util::blocking(move || run_sync(&input, &ctx)).await
 }
 
-static ROW_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\d+):").expect("valid regex"));
+static ROW_PREFIX_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(\d+):").expect("valid regex"));
 static HEADER_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\s*\[[^#\r\n]+#[0-9a-fA-F]{4}\]\s*$").expect("valid regex"));
 
@@ -76,7 +77,9 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let abs = util::resolve_path(&ctx.cwd, &raw_path);
     let display = util::display_path(&ctx.cwd, &abs);
     if abs.is_dir() {
-        return Ok(ToolOutput::err(format!("{display} is a directory; cannot write a file there.")));
+        return Ok(ToolOutput::err(format!(
+            "{display} is a directory; cannot write a file there."
+        )));
     }
 
     // Existing file: keep its conventions, diff against it.
@@ -95,13 +98,22 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     }
     let encoding = match &old_file {
         // Keep the existing file's conventions unless the new content explicitly uses CRLF/BOM.
-        Some(o) => TextFile { bom: o.bom || new.bom, crlf: o.crlf || new.crlf, text: String::new() },
-        None => TextFile { bom: new.bom, crlf: new.crlf, text: String::new() },
+        Some(o) => TextFile {
+            bom: o.bom || new.bom,
+            crlf: o.crlf || new.crlf,
+            text: String::new(),
+        },
+        None => TextFile {
+            bom: new.bom,
+            crlf: new.crlf,
+            text: String::new(),
+        },
     };
     let bytes = encoding.encode(&new.text);
 
     if let Some(parent) = abs.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| anyhow!("cannot create directory {}: {e}", parent.display()))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| anyhow!("cannot create directory {}: {e}", parent.display()))?;
     }
     std::fs::write(&abs, &bytes).map_err(|e| anyhow!("failed to write {display}: {e}"))?;
     if new.text.starts_with("#!") && old.is_none() {
@@ -112,7 +124,11 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let line_count = util::split_lines(&new.text).0.len();
     let old_text = old_file.as_ref().map(|o| o.text.as_str()).unwrap_or("");
     let (diff, added, removed) = util::unified_diff(old_text, &new.text, &display);
-    let verb = if old.is_some() { "Overwrote" } else { "Created" };
+    let verb = if old.is_some() {
+        "Overwrote"
+    } else {
+        "Created"
+    };
     let mut text = format!(
         "{}\n{verb} {display}: {line_count} lines ({} bytes).",
         format_header(&display, &tag),
@@ -156,17 +172,33 @@ mod tests {
     async fn create_overwrite_and_conventions() {
         let d = temp_dir("write");
         let c = ctx(&d);
-        let o = crate::execute("write", json!({"path": "sub/dir/a.txt", "content": "one\ntwo\n"}), &c).await;
+        let o = crate::execute(
+            "write",
+            json!({"path": "sub/dir/a.txt", "content": "one\ntwo\n"}),
+            &c,
+        )
+        .await;
         assert!(!o.is_error, "{}", o.text);
         let tag = crate::hashline::file_hash("one\ntwo\n");
-        assert_eq!(o.text, format!("[sub/dir/a.txt#{tag}]\nCreated sub/dir/a.txt: 2 lines (8 bytes)."));
+        assert_eq!(
+            o.text,
+            format!("[sub/dir/a.txt#{tag}]\nCreated sub/dir/a.txt: 2 lines (8 bytes).")
+        );
         assert_eq!(o.meta.as_ref().unwrap()["created"], json!(true));
         assert!(c.store.get(&d.join("sub/dir/a.txt"), &tag).unwrap().seen == Seen::All);
 
         std::fs::write(d.join("crlf.txt"), "\u{FEFF}x\r\ny\r\n").unwrap();
-        let o = crate::execute("write", json!({"path": "crlf.txt", "content": "x\nz\n"}), &c).await;
+        let o = crate::execute(
+            "write",
+            json!({"path": "crlf.txt", "content": "x\nz\n"}),
+            &c,
+        )
+        .await;
         assert!(o.text.contains("Overwrote crlf.txt"));
-        assert_eq!(std::fs::read_to_string(d.join("crlf.txt")).unwrap(), "\u{FEFF}x\r\nz\r\n");
+        assert_eq!(
+            std::fs::read_to_string(d.join("crlf.txt")).unwrap(),
+            "\u{FEFF}x\r\nz\r\n"
+        );
         let m = o.meta.unwrap();
         assert_eq!(m["created"], json!(false));
         assert!(m["diff"].as_str().unwrap().contains("-y\n+z"));
@@ -176,12 +208,25 @@ mod tests {
     async fn strips_pasted_read_output() {
         let d = temp_dir("write-strip");
         let c = ctx(&d);
-        let o = crate::execute("write", json!({"path": "p.txt", "content": "[p.txt#ABCD]\n1:a\n2:b\n"}), &c).await;
+        let o = crate::execute(
+            "write",
+            json!({"path": "p.txt", "content": "[p.txt#ABCD]\n1:a\n2:b\n"}),
+            &c,
+        )
+        .await;
         assert!(o.text.contains("stripped"));
         assert_eq!(std::fs::read_to_string(d.join("p.txt")).unwrap(), "a\nb\n");
         // Numbers that don't count from 1 are content.
-        let o = crate::execute("write", json!({"path": "q.txt", "content": "10:00 start\n11:00 end\n"}), &c).await;
+        let o = crate::execute(
+            "write",
+            json!({"path": "q.txt", "content": "10:00 start\n11:00 end\n"}),
+            &c,
+        )
+        .await;
         assert!(!o.text.contains("stripped"));
-        assert_eq!(std::fs::read_to_string(d.join("q.txt")).unwrap(), "10:00 start\n11:00 end\n");
+        assert_eq!(
+            std::fs::read_to_string(d.join("q.txt")).unwrap(),
+            "10:00 start\n11:00 end\n"
+        );
     }
 }

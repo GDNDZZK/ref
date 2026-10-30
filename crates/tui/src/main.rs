@@ -18,10 +18,13 @@ use std::time::Duration;
 
 use clap::Parser;
 use crossterm::event::{
-    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, EventStream, KeyboardEnhancementFlags,
-    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    EventStream, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
 };
-use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode};
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
 use crossterm::{cursor, execute};
 use futures_util::StreamExt;
 use ratatui::Terminal;
@@ -70,11 +73,20 @@ struct Cli {
 fn setup_terminal() -> std::io::Result<()> {
     enable_raw_mode()?;
     let mut out = std::io::stdout();
-    execute!(out, EnterAlternateScreen, EnableMouseCapture, EnableBracketedPaste, cursor::SetCursorStyle::SteadyBar)?;
+    execute!(
+        out,
+        EnterAlternateScreen,
+        EnableMouseCapture,
+        EnableBracketedPaste,
+        cursor::SetCursorStyle::SteadyBar
+    )?;
     if crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false) {
         let _ = execute!(
             out,
-            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS)
+            PushKeyboardEnhancementFlags(
+                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                    | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
+            )
         );
     }
     Ok(())
@@ -83,7 +95,14 @@ fn setup_terminal() -> std::io::Result<()> {
 fn restore_terminal() {
     let mut out = std::io::stdout();
     let _ = execute!(out, PopKeyboardEnhancementFlags);
-    let _ = execute!(out, DisableBracketedPaste, DisableMouseCapture, LeaveAlternateScreen, cursor::SetCursorStyle::DefaultUserShape, cursor::Show);
+    let _ = execute!(
+        out,
+        DisableBracketedPaste,
+        DisableMouseCapture,
+        LeaveAlternateScreen,
+        cursor::SetCursorStyle::DefaultUserShape,
+        cursor::Show
+    );
     let _ = disable_raw_mode();
     let _ = out.flush();
 }
@@ -91,8 +110,14 @@ fn restore_terminal() {
 /// Suspends the TUI, runs $VISUAL/$EDITOR on the prompt text, returns the edited text.
 fn run_external_editor(initial: &str) -> Option<String> {
     let default = if cfg!(windows) { "notepad" } else { "vi" };
-    let editor = std::env::var("VISUAL").or_else(|_| std::env::var("EDITOR")).unwrap_or_else(|_| default.into());
-    let path = std::env::temp_dir().join(format!("ref-prompt-{}-{}.md", std::process::id(), ref_proto::now_ms()));
+    let editor = std::env::var("VISUAL")
+        .or_else(|_| std::env::var("EDITOR"))
+        .unwrap_or_else(|_| default.into());
+    let path = std::env::temp_dir().join(format!(
+        "ref-prompt-{}-{}.md",
+        std::process::id(),
+        ref_proto::now_ms()
+    ));
     std::fs::write(&path, initial).ok()?;
     restore_terminal();
     let status = editor_command(&editor, &path).status();
@@ -109,7 +134,10 @@ fn run_external_editor(initial: &str) -> Option<String> {
 #[cfg(unix)]
 fn editor_command(editor: &str, path: &std::path::Path) -> std::process::Command {
     let mut cmd = std::process::Command::new("sh");
-    cmd.arg("-c").arg(format!("{editor} \"$1\"")).arg("sh").arg(path);
+    cmd.arg("-c")
+        .arg(format!("{editor} \"$1\""))
+        .arg("sh")
+        .arg(path);
     cmd
 }
 
@@ -117,7 +145,8 @@ fn editor_command(editor: &str, path: &std::path::Path) -> std::process::Command
 fn editor_command(editor: &str, path: &std::path::Path) -> std::process::Command {
     use std::os::windows::process::CommandExt;
     let mut cmd = std::process::Command::new("cmd");
-    cmd.arg("/C").raw_arg(format!("{editor} \"{}\"", path.display()));
+    cmd.arg("/C")
+        .raw_arg(format!("{editor} \"{}\"", path.display()));
     cmd
 }
 
@@ -132,16 +161,32 @@ fn main() -> anyhow::Result<()> {
     }
     let cwd = cwd.to_string_lossy().into_owned();
     let model = match &cli.model {
-        Some(m) => Some(ModelRef::parse(m).ok_or_else(|| anyhow::anyhow!("invalid --model {m:?}; expected provider/model"))?),
+        Some(m) => Some(
+            ModelRef::parse(m)
+                .ok_or_else(|| anyhow::anyhow!("invalid --model {m:?}; expected provider/model"))?,
+        ),
         None => None,
     };
-    let plan = InitPlan { session: cli.session.clone(), continue_last: cli.continue_last, watch: cli.watch, agent: cli.agent.clone(), model, prompt: cli.prompt.clone() };
+    let plan = InitPlan {
+        session: cli.session.clone(),
+        continue_last: cli.continue_last,
+        watch: cli.watch,
+        agent: cli.agent.clone(),
+        model,
+        prompt: cli.prompt.clone(),
+    };
     let target = match cli.server.clone() {
-        Some(url) => Target::Explicit { url, token: cli.token.clone() },
+        Some(url) => Target::Explicit {
+            url,
+            token: cli.token.clone(),
+        },
         None => Target::Auto,
     };
 
-    let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build()?;
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()?;
     // Panic hook: restore the terminal before printing.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -169,7 +214,12 @@ fn full_clear(t: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> std::io::R
 }
 
 /// Runs the TUI; returns the exit-screen text to print after the terminal is restored.
-async fn run(mock: bool, target: Target, cwd: String, plan: InitPlan) -> anyhow::Result<Option<String>> {
+async fn run(
+    mock: bool,
+    target: Target,
+    cwd: String,
+    plan: InitPlan,
+) -> anyhow::Result<Option<String>> {
     let (out_tx, out_rx) = mpsc::unbounded_channel();
     let (ev_tx, mut ev_rx) = mpsc::unbounded_channel();
     if mock {
@@ -233,7 +283,12 @@ async fn run(mock: bool, target: Target, cwd: String, plan: InitPlan) -> anyhow:
         let wait = if app.dirty {
             Duration::from_millis(14).saturating_sub(last_draw.elapsed())
         } else {
-            interval.map(|iv| iv.saturating_sub(last_draw.elapsed()).max(Duration::from_millis(1))).unwrap_or(Duration::from_secs(3600))
+            interval
+                .map(|iv| {
+                    iv.saturating_sub(last_draw.elapsed())
+                        .max(Duration::from_millis(1))
+                })
+                .unwrap_or(Duration::from_secs(3600))
         };
         tokio::select! {
             ev = events.next() => {
@@ -269,7 +324,8 @@ async fn run(mock: bool, target: Target, cwd: String, plan: InitPlan) -> anyhow:
     }
     // Detach politely (server counts frontends; idle-timeout handles the rest).
     if let Some(sid) = app.current.clone() {
-        app.client.send(None, ref_proto::Request::Detach { session_id: sid });
+        app.client
+            .send(None, ref_proto::Request::Detach { session_id: sid });
         tokio::time::sleep(Duration::from_millis(30)).await;
     }
     if app.last_title.is_some() {

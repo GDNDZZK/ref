@@ -20,7 +20,11 @@ pub struct Selection {
 
 impl Selection {
     pub fn range(&self) -> (Pos, Pos) {
-        if self.anchor <= self.head { (self.anchor, self.head) } else { (self.head, self.anchor) }
+        if self.anchor <= self.head {
+            (self.anchor, self.head)
+        } else {
+            (self.head, self.anchor)
+        }
     }
 }
 
@@ -102,7 +106,11 @@ pub fn word_at(row: &Row, col: u16) -> (u16, u16) {
     let cs = cells(row);
     let idx = cs.iter().rposition(|(x, _)| *x <= col);
     let Some(i) = idx else { return (col, col) };
-    let is_word = |g: &str| g.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.' || c == '/' || is_cjk(c));
+    let is_word = |g: &str| {
+        g.chars().all(|c| {
+            c.is_alphanumeric() || c == '_' || c == '-' || c == '.' || c == '/' || is_cjk(c)
+        })
+    };
     if !is_word(cs[i].1) {
         return (cs[i].0, cs[i].0);
     }
@@ -121,7 +129,11 @@ pub fn word_at(row: &Row, col: u16) -> (u16, u16) {
 /// Last column with content in a row.
 pub fn row_end(row: &Row) -> u16 {
     let cs = cells(row);
-    cs.iter().rev().find(|(_, g)| g.trim() != "").map(|(x, g)| x + gwidth(g) as u16 - 1).unwrap_or(0)
+    cs.iter()
+        .rev()
+        .find(|(_, g)| g.trim() != "")
+        .map(|(x, g)| x + gwidth(g) as u16 - 1)
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -135,9 +147,21 @@ mod tests {
 
     #[test]
     fn extract_multi_row() {
-        let rows = vec![row("  hello world"), row("  wrapped").soft_sp(true, true).skip(2), row("  next para")];
-        let rows: Vec<Row> = rows.into_iter().map(|r| if r.skip == 0 { r.skip(2) } else { r }).collect();
-        let sel = Selection { anchor: (0, 8), head: (2, 5), dragging: false, active: true };
+        let rows = vec![
+            row("  hello world"),
+            row("  wrapped").soft_sp(true, true).skip(2),
+            row("  next para"),
+        ];
+        let rows: Vec<Row> = rows
+            .into_iter()
+            .map(|r| if r.skip == 0 { r.skip(2) } else { r })
+            .collect();
+        let sel = Selection {
+            anchor: (0, 8),
+            head: (2, 5),
+            dragging: false,
+            active: true,
+        };
         let t = extract(&sel, |i| rows.get(i));
         assert_eq!(t, "world wrapped\nnext");
     }
@@ -145,14 +169,24 @@ mod tests {
     #[test]
     fn decor_and_end_excluded() {
         let rows = [row("text  ⧉ copy").end(4), row("────").decor(), row("more")];
-        let sel = Selection { anchor: (0, 0), head: (2, 10), dragging: false, active: true };
+        let sel = Selection {
+            anchor: (0, 0),
+            head: (2, 10),
+            dragging: false,
+            active: true,
+        };
         assert_eq!(extract(&sel, |i| rows.get(i)), "text\nmore");
     }
 
     #[test]
     fn cjk_columns() {
         let rows = [row("你好世界")];
-        let sel = Selection { anchor: (0, 2), head: (0, 5), dragging: false, active: true };
+        let sel = Selection {
+            anchor: (0, 2),
+            head: (0, 5),
+            dragging: false,
+            active: true,
+        };
         assert_eq!(extract(&sel, |i| rows.get(i)), "好世");
         assert_eq!(word_at(&row("foo bar_baz qux"), 6), (4, 10));
     }

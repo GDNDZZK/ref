@@ -2,7 +2,9 @@
 
 use std::time::{Duration, Instant};
 
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 
 use crate::app::{AcKind, App, Mode};
 use crate::render;
@@ -17,20 +19,32 @@ const SHIFT: KeyModifiers = KeyModifiers::SHIFT;
 /// Appends a line to `$REF_TUI_LOG` (debugging aid; no-op when unset).
 fn log_path() -> Option<&'static std::path::PathBuf> {
     static PATH: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
-    PATH.get_or_init(|| std::env::var_os("REF_TUI_LOG").map(Into::into)).as_ref()
+    PATH.get_or_init(|| std::env::var_os("REF_TUI_LOG").map(Into::into))
+        .as_ref()
 }
 
 pub fn debug_log(s: &str) {
     use std::io::Write;
     if let Some(p) = log_path()
-        && let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p)
+        && let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(p)
     {
         let _ = writeln!(f, "{} {s}", ref_proto::now_ms());
     }
 }
 
 pub fn handle(app: &mut App, ev: Event) {
-    if log_path().is_some() && !matches!(ev, Event::Mouse(MouseEvent { kind: MouseEventKind::Moved, .. })) {
+    if log_path().is_some()
+        && !matches!(
+            ev,
+            Event::Mouse(MouseEvent {
+                kind: MouseEventKind::Moved,
+                ..
+            })
+        )
+    {
         debug_log(&format!("input {ev:?} mode={:?}", app.mode));
     }
     app.dirty = true;
@@ -48,12 +62,17 @@ fn is(k: &KeyEvent, code: KeyCode, mods: KeyModifiers) -> bool {
 }
 
 fn ctrl_char(k: &KeyEvent, c: char) -> bool {
-    k.modifiers.contains(CTRL) && !k.modifiers.contains(ALT) && matches!(k.code, KeyCode::Char(x) if x.eq_ignore_ascii_case(&c))
+    k.modifiers.contains(CTRL)
+        && !k.modifiers.contains(ALT)
+        && matches!(k.code, KeyCode::Char(x) if x.eq_ignore_ascii_case(&c))
 }
 
 fn key(app: &mut App, k: KeyEvent) {
     // Copy selection: ctrl+c / ctrl+shift+c / y (when a transcript selection exists).
-    if app.has_selection() && (ctrl_char(&k, 'c') || (is(&k, KeyCode::Char('y'), KeyModifiers::NONE) && app.editor.is_empty())) {
+    if app.has_selection()
+        && (ctrl_char(&k, 'c')
+            || (is(&k, KeyCode::Char('y'), KeyModifiers::NONE) && app.editor.is_empty()))
+    {
         app.copy_selection();
         return;
     }
@@ -74,8 +93,14 @@ fn key(app: &mut App, k: KeyEvent) {
         }
         // Ignore keys right after the modal appears (they were meant for the prompt).
         // Plain typing still lands in the editor instead of being lost (or answering the modal).
-        if app.perm.as_ref().is_none_or(|p| p.opened.elapsed() < Duration::from_millis(350)) {
-            if matches!(k.code, KeyCode::Char(_) | KeyCode::Backspace) && k.modifiers.difference(SHIFT).is_empty() {
+        if app
+            .perm
+            .as_ref()
+            .is_none_or(|p| p.opened.elapsed() < Duration::from_millis(350))
+        {
+            if matches!(k.code, KeyCode::Char(_) | KeyCode::Backspace)
+                && k.modifiers.difference(SHIFT).is_empty()
+            {
                 let ed = target_editor(app);
                 if edit_key(ed, &k, false) {
                     app.history.reset();
@@ -84,9 +109,13 @@ fn key(app: &mut App, k: KeyEvent) {
             return;
         }
         match k.code {
-            KeyCode::Char('a') | KeyCode::Enter => app.reply_permission(&sid, &req.call_id, true, false),
+            KeyCode::Char('a') | KeyCode::Enter => {
+                app.reply_permission(&sid, &req.call_id, true, false)
+            }
             KeyCode::Char('s') => app.reply_permission(&sid, &req.call_id, true, true),
-            KeyCode::Char('d') | KeyCode::Esc => app.reply_permission(&sid, &req.call_id, false, false),
+            KeyCode::Char('d') | KeyCode::Esc => {
+                app.reply_permission(&sid, &req.call_id, false, false)
+            }
             KeyCode::Up | KeyCode::Char('k') => scroll_perm(app, -1),
             KeyCode::Down | KeyCode::Char('j') => scroll_perm(app, 1),
             KeyCode::PageUp => scroll_perm(app, -10),
@@ -116,7 +145,10 @@ fn scroll_perm(app: &mut App, d: i32) {
 }
 
 fn exit_or_arm(app: &mut App) {
-    if app.ctrlc_armed.is_some_and(|t| t.elapsed() < Duration::from_millis(1500)) {
+    if app
+        .ctrlc_armed
+        .is_some_and(|t| t.elapsed() < Duration::from_millis(1500))
+    {
         app.quit = true;
     } else {
         app.ctrlc_armed = Some(Instant::now());
@@ -180,42 +212,40 @@ fn dialog_key(app: &mut App, k: KeyEvent) {
                 _ => app.dirty = false,
             }
         }
-        Some(Dialog::List(d)) => {
-            match k.code {
-                KeyCode::Esc => {
-                    if d.confirm.is_some() {
-                        d.confirm = None;
-                    } else {
-                        app.dialog = None;
-                    }
-                }
-                KeyCode::Up => d.move_sel(-1),
-                KeyCode::Down => d.move_sel(1),
-                KeyCode::Char('p') if k.modifiers == CTRL => d.move_sel(-1),
-                KeyCode::Char('n') if k.modifiers == CTRL => d.move_sel(1),
-                KeyCode::PageUp => d.page(-1),
-                KeyCode::PageDown => d.page(1),
-                KeyCode::Enter => app.dialog_submit(),
-                KeyCode::Char('d') if k.modifiers == CTRL => {
-                    if matches!(d.kind, Kind::Sessions | Kind::CloseSessions) {
-                        app.dialog_delete();
-                    }
-                }
-                KeyCode::Char('c') if k.modifiers == CTRL => {
-                    if d.filter.text.is_empty() {
-                        app.dialog = None;
-                    } else {
-                        d.filter.clear();
-                        d.refilter();
-                    }
-                }
-                _ => {
-                    if edit_key(&mut d.filter, &k, false) {
-                        d.refilter();
-                    }
+        Some(Dialog::List(d)) => match k.code {
+            KeyCode::Esc => {
+                if d.confirm.is_some() {
+                    d.confirm = None;
+                } else {
+                    app.dialog = None;
                 }
             }
-        }
+            KeyCode::Up => d.move_sel(-1),
+            KeyCode::Down => d.move_sel(1),
+            KeyCode::Char('p') if k.modifiers == CTRL => d.move_sel(-1),
+            KeyCode::Char('n') if k.modifiers == CTRL => d.move_sel(1),
+            KeyCode::PageUp => d.page(-1),
+            KeyCode::PageDown => d.page(1),
+            KeyCode::Enter => app.dialog_submit(),
+            KeyCode::Char('d') if k.modifiers == CTRL => {
+                if matches!(d.kind, Kind::Sessions | Kind::CloseSessions) {
+                    app.dialog_delete();
+                }
+            }
+            KeyCode::Char('c') if k.modifiers == CTRL => {
+                if d.filter.text.is_empty() {
+                    app.dialog = None;
+                } else {
+                    d.filter.clear();
+                    d.refilter();
+                }
+            }
+            _ => {
+                if edit_key(&mut d.filter, &k, false) {
+                    d.refilter();
+                }
+            }
+        },
         None => {}
     }
 }
@@ -266,19 +296,35 @@ pub fn edit_key(e: &mut Editor, k: &KeyEvent, multiline: bool) -> bool {
         KeyCode::Delete => e.delete(),
         KeyCode::Left => {
             e.select_mode(shift);
-            if m.intersects(CTRL | ALT) { e.word_left() } else { e.left() }
+            if m.intersects(CTRL | ALT) {
+                e.word_left()
+            } else {
+                e.left()
+            }
         }
         KeyCode::Right => {
             e.select_mode(shift);
-            if m.intersects(CTRL | ALT) { e.word_right() } else { e.right() }
+            if m.intersects(CTRL | ALT) {
+                e.word_right()
+            } else {
+                e.right()
+            }
         }
         KeyCode::Home => {
             e.select_mode(shift);
-            if m.contains(CTRL) { e.buf_start() } else { e.home() }
+            if m.contains(CTRL) {
+                e.buf_start()
+            } else {
+                e.home()
+            }
         }
         KeyCode::End => {
             e.select_mode(shift);
-            if m.contains(CTRL) { e.buf_end() } else { e.end() }
+            if m.contains(CTRL) {
+                e.buf_end()
+            } else {
+                e.end()
+            }
         }
         KeyCode::Enter if multiline && m.intersects(SHIFT | ALT | CTRL) => e.newline(),
         _ => return false,
@@ -366,7 +412,10 @@ fn chat_key(app: &mut App, k: KeyEvent) {
                     app.toasts.info("Cancelled delayed tool call");
                 }
             } else if app.cur().is_some_and(|v| v.is_busy()) {
-                if app.esc_armed.is_some_and(|t| t.elapsed() < Duration::from_millis(1500)) {
+                if app
+                    .esc_armed
+                    .is_some_and(|t| t.elapsed() < Duration::from_millis(1500))
+                {
                     app.esc_armed = None;
                     app.hint = None;
                     if let Some(sid) = app.current.clone() {
@@ -389,10 +438,18 @@ fn chat_key(app: &mut App, k: KeyEvent) {
         KeyCode::Char('e') if m == CTRL | ALT => scroll(app, |c| c.scroll_by(1, false)),
         KeyCode::Char('g') if m == CTRL => scroll(app, |c| c.scroll_to_top()),
         KeyCode::Char('g') if m == CTRL | ALT => scroll(app, |c| c.scroll_to_bottom(true)),
-        KeyCode::Up if m == SHIFT && app.editor.selection().is_none() && app.editor.height(app.editor.last_width.max(1)) <= 1 => {
+        KeyCode::Up
+            if m == SHIFT
+                && app.editor.selection().is_none()
+                && app.editor.height(app.editor.last_width.max(1)) <= 1 =>
+        {
             scroll(app, |c| c.scroll_by(-1, false))
         }
-        KeyCode::Down if m == SHIFT && app.editor.selection().is_none() && app.editor.height(app.editor.last_width.max(1)) <= 1 => {
+        KeyCode::Down
+            if m == SHIFT
+                && app.editor.selection().is_none()
+                && app.editor.height(app.editor.last_width.max(1)) <= 1 =>
+        {
             scroll(app, |c| c.scroll_by(1, false))
         }
         KeyCode::Home if app.editor.is_empty() => scroll(app, |c| c.scroll_to_top()),
@@ -438,7 +495,9 @@ fn chat_key(app: &mut App, k: KeyEvent) {
                 app.editor.buf_end();
             }
         }
-        KeyCode::Char('!') if app.editor.text.is_empty() && !app.shell_mode && m.difference(SHIFT).is_empty() => {
+        KeyCode::Char('!')
+            if app.editor.text.is_empty() && !app.shell_mode && m.difference(SHIFT).is_empty() =>
+        {
             app.shell_mode = true;
             app.ac = None;
         }
@@ -464,7 +523,17 @@ fn chat_key(app: &mut App, k: KeyEvent) {
 }
 
 fn has_delayed_tool(v: &crate::state::SessionView) -> bool {
-    v.messages.last().is_some_and(|m| m.parts.iter().any(|p| matches!(p, ref_proto::Part::Tool { state: ref_proto::ToolState::Delayed, .. })))
+    v.messages.last().is_some_and(|m| {
+        m.parts.iter().any(|p| {
+            matches!(
+                p,
+                ref_proto::Part::Tool {
+                    state: ref_proto::ToolState::Delayed,
+                    ..
+                }
+            )
+        })
+    })
 }
 
 fn set_from_history(app: &mut App, h: &str) {
@@ -548,15 +617,29 @@ fn paste(app: &mut App, s: String) {
     // One or more image paths.
     let paths: Vec<&str> = s.split_whitespace().collect();
     if !paths.is_empty() && paths.len() <= 32 {
-        let imgs: Vec<_> = paths.iter().filter_map(|p| crate::clipboard::image_from_path(p)).collect();
-        if imgs.len() == paths.len() || (imgs.len() == 1 && crate::clipboard::image_from_path(s.trim()).is_some()) {
-            let imgs = if imgs.len() == paths.len() { imgs } else { crate::clipboard::image_from_path(s.trim()).into_iter().collect() };
+        let imgs: Vec<_> = paths
+            .iter()
+            .filter_map(|p| crate::clipboard::image_from_path(p))
+            .collect();
+        if imgs.len() == paths.len()
+            || (imgs.len() == 1 && crate::clipboard::image_from_path(s.trim()).is_some())
+        {
+            let imgs = if imgs.len() == paths.len() {
+                imgs
+            } else {
+                crate::clipboard::image_from_path(s.trim())
+                    .into_iter()
+                    .collect()
+            };
             let n = imgs.len();
             let ed = target_editor(app);
             for (img, name) in imgs {
                 ed.attach_image(img, Some(name));
             }
-            app.toasts.info(format!("Attached {n} image{}", if n > 1 { "s" } else { "" }));
+            app.toasts.info(format!(
+                "Attached {n} image{}",
+                if n > 1 { "s" } else { "" }
+            ));
             return;
         }
     }
@@ -578,7 +661,11 @@ fn watch_key(app: &mut App, k: KeyEvent) {
     let m = k.modifiers;
     let tiles: Vec<String> = app.watch.tiles.iter().map(|t| t.0.clone()).collect();
     let all = app.tile_ids();
-    let focus_idx = app.watch.focus.as_ref().and_then(|f| tiles.iter().position(|t| t == f));
+    let focus_idx = app
+        .watch
+        .focus
+        .as_ref()
+        .and_then(|f| tiles.iter().position(|t| t == f));
     let dir = match k.code {
         KeyCode::Left if m.intersects(CTRL | ALT) => Some((-1, 0)),
         KeyCode::Right if m.intersects(CTRL | ALT) => Some((1, 0)),
@@ -598,7 +685,12 @@ fn watch_key(app: &mut App, k: KeyEvent) {
         return;
     }
     if ctrl_char(&k, 'c') {
-        let empty = app.watch.focus.as_ref().and_then(|f| app.watch.inputs.get(f)).is_none_or(|e| e.is_empty());
+        let empty = app
+            .watch
+            .focus
+            .as_ref()
+            .and_then(|f| app.watch.inputs.get(f))
+            .is_none_or(|e| e.is_empty());
         if empty {
             exit_or_arm(app);
         } else if let Some(f) = app.watch.focus.clone() {
@@ -607,7 +699,12 @@ fn watch_key(app: &mut App, k: KeyEvent) {
         return;
     }
     if ctrl_char(&k, 'd') {
-        let empty = app.watch.focus.as_ref().and_then(|f| app.watch.inputs.get(f)).is_none_or(|e| e.is_empty());
+        let empty = app
+            .watch
+            .focus
+            .as_ref()
+            .and_then(|f| app.watch.inputs.get(f))
+            .is_none_or(|e| e.is_empty());
         if empty {
             app.quit = true;
             return;
@@ -620,7 +717,11 @@ fn watch_key(app: &mut App, k: KeyEvent) {
     if ctrl_char(&k, 'n') || ctrl_char(&k, 'b') {
         let pages = app.watch.pages.max(1);
         let per = split::per_page(app.screen.width, app.screen.height.saturating_sub(1)).max(1);
-        let p = if ctrl_char(&k, 'n') { (app.watch.page + 1) % pages } else { (app.watch.page + pages - 1) % pages };
+        let p = if ctrl_char(&k, 'n') {
+            (app.watch.page + 1) % pages
+        } else {
+            (app.watch.page + pages - 1) % pages
+        };
         app.watch.page = p;
         // The focused tile pins its page: move focus along (if any) instead of clearing it.
         if app.watch.focus.is_some() {
@@ -641,20 +742,31 @@ fn watch_key(app: &mut App, k: KeyEvent) {
             }
             let back = k.code == KeyCode::BackTab;
             let n = all.len() as i32;
-            let i = match app.watch.focus.as_ref().and_then(|f| all.iter().position(|t| t == f)) {
+            let i = match app
+                .watch
+                .focus
+                .as_ref()
+                .and_then(|f| all.iter().position(|t| t == f))
+            {
                 Some(i) => (i as i32 + if back { -1 } else { 1 }).rem_euclid(n),
                 // Nothing focused: start with the first (shift+tab: last) tile of this page.
                 None => {
-                    let page: Vec<usize> = tiles.iter().filter_map(|t| all.iter().position(|a| a == t)).collect();
+                    let page: Vec<usize> = tiles
+                        .iter()
+                        .filter_map(|t| all.iter().position(|a| a == t))
+                        .collect();
                     let pick = if back { page.last() } else { page.first() };
-                    pick.map(|&p| p as i32).unwrap_or(if back { n - 1 } else { 0 })
+                    pick.map(|&p| p as i32)
+                        .unwrap_or(if back { n - 1 } else { 0 })
                 }
             };
             app.watch.focus = Some(all[i as usize].clone());
         }
         // Scroll the focused tile's transcript.
-        KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End if app.watch.focus.is_some() && tile_scroll_key(app, &k) => {}
-        KeyCode::Up | KeyCode::Down if m == SHIFT && app.watch.focus.is_some() && tile_scroll_key(app, &k) => {}
+        KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End
+            if app.watch.focus.is_some() && tile_scroll_key(app, &k) => {}
+        KeyCode::Up | KeyCode::Down
+            if m == SHIFT && app.watch.focus.is_some() && tile_scroll_key(app, &k) => {}
         KeyCode::Esc => {
             let Some(f) = app.watch.focus.clone() else {
                 app.dirty = false;
@@ -668,15 +780,26 @@ fn watch_key(app: &mut App, k: KeyEvent) {
                     e.clear();
                 }
             } else if busy {
-                if app.esc_armed.is_some_and(|t| t.elapsed() < Duration::from_millis(1500)) {
+                if app
+                    .esc_armed
+                    .is_some_and(|t| t.elapsed() < Duration::from_millis(1500))
+                {
                     app.esc_armed = None;
                     app.hint = None;
                     app.abort(&f);
-                    let name = app.views.get(&f).map(|v| v.info.name.clone()).unwrap_or_default();
+                    let name = app
+                        .views
+                        .get(&f)
+                        .map(|v| v.info.name.clone())
+                        .unwrap_or_default();
                     app.toasts.info(format!("Interrupted \"{name}\""));
                 } else {
                     app.esc_armed = Some(Instant::now());
-                    let name = app.views.get(&f).map(|v| v.info.name.clone()).unwrap_or_default();
+                    let name = app
+                        .views
+                        .get(&f)
+                        .map(|v| v.info.name.clone())
+                        .unwrap_or_default();
                     app.set_hint(format!("esc again to interrupt \"{name}\""), theme::WARNING);
                 }
             } else {
@@ -684,7 +807,9 @@ fn watch_key(app: &mut App, k: KeyEvent) {
             }
         }
         KeyCode::Enter if m.is_empty() && app.watch.focus.is_some() => {
-            let Some(f) = app.watch.focus.clone() else { return };
+            let Some(f) = app.watch.focus.clone() else {
+                return;
+            };
             let ed = app.watch.inputs.entry(f.clone()).or_default();
             if ed.is_empty() {
                 app.zoom(&f);
@@ -704,7 +829,10 @@ fn watch_key(app: &mut App, k: KeyEvent) {
                             ed.clear();
                             app.change_dir(&f, &args);
                         }
-                        other => app.set_hint(format!("/{other} works in the chat view (ctrl+o opens this session)"), theme::MUTED),
+                        other => app.set_hint(
+                            format!("/{other} works in the chat view (ctrl+o opens this session)"),
+                            theme::MUTED,
+                        ),
                     }
                     return;
                 }
@@ -719,7 +847,11 @@ fn watch_key(app: &mut App, k: KeyEvent) {
                 edit_key(ed, &k, false);
             }
             None => {
-                if matches!(k.code, KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Enter) && !app.watch.tiles.is_empty() {
+                if matches!(
+                    k.code,
+                    KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Enter
+                ) && !app.watch.tiles.is_empty()
+                {
                     app.set_hint("click or tab to focus a session", theme::MUTED);
                 } else {
                     app.dirty = false;
@@ -731,9 +863,13 @@ fn watch_key(app: &mut App, k: KeyEvent) {
 
 /// PgUp/PgDn/Home/End/shift+↑↓ on the focused tile. Home/End only while its input is empty.
 fn tile_scroll_key(app: &mut App, k: &KeyEvent) -> bool {
-    let Some(f) = app.watch.focus.clone() else { return false };
+    let Some(f) = app.watch.focus.clone() else {
+        return false;
+    };
     let empty = app.watch.inputs.get(&f).is_none_or(|e| e.is_empty());
-    let Some(v) = app.views.get_mut(&f) else { return false };
+    let Some(v) = app.views.get_mut(&f) else {
+        return false;
+    };
     let c = &mut v.chat;
     match k.code {
         KeyCode::PageUp => c.page(-1, false),
@@ -753,7 +889,9 @@ fn tile_scroll_key(app: &mut App, k: &KeyEvent) -> bool {
 
 fn click_count(app: &mut App, x: u16, y: u16) -> u8 {
     let n = match app.last_click {
-        Some((t, lx, ly, n)) if t.elapsed() < Duration::from_millis(450) && lx == x && ly == y => (n % 3) + 1,
+        Some((t, lx, ly, n)) if t.elapsed() < Duration::from_millis(450) && lx == x && ly == y => {
+            (n % 3) + 1
+        }
         _ => 1,
     };
     app.last_click = Some((Instant::now(), x, y, n));
@@ -828,7 +966,9 @@ fn mouse(app: &mut App, me: MouseEvent) {
         return;
     }
     // Chat mode.
-    let Some(sid) = app.current.clone() else { return };
+    let Some(sid) = app.current.clone() else {
+        return;
+    };
     let lay = render::chat_layout(app, app.screen);
     // Autocomplete popup.
     if let Some(ac) = app.ac.as_mut() {
@@ -863,7 +1003,11 @@ fn mouse(app: &mut App, me: MouseEvent) {
         && x + 1 >= sb.x
     {
         let before = app.sidebar_scroll;
-        app.sidebar_scroll = if me.kind == MouseEventKind::ScrollUp { before.saturating_sub(3) } else { (before + 3).min(app.sidebar_max_scroll) };
+        app.sidebar_scroll = if me.kind == MouseEventKind::ScrollUp {
+            before.saturating_sub(3)
+        } else {
+            (before + 3).min(app.sidebar_max_scroll)
+        };
         app.dirty = app.sidebar_scroll != before;
         return;
     }
@@ -876,12 +1020,19 @@ fn mouse(app: &mut App, me: MouseEvent) {
             && id != sid
         {
             app.attach_fg(&id);
-        } else if let Some((_, name)) = app.sidebar_mcp_rows.iter().find(|(ry, _)| *ry == y).cloned() {
+        } else if let Some((_, name)) = app
+            .sidebar_mcp_rows
+            .iter()
+            .find(|(ry, _)| *ry == y)
+            .cloned()
+        {
             app.open_mcp(Some(&name));
         }
         return;
     }
-    let Some(v) = app.views.get_mut(&sid) else { return };
+    let Some(v) = app.views.get_mut(&sid) else {
+        return;
+    };
     let c = &mut v.chat;
     match me.kind {
         MouseEventKind::ScrollUp => {
@@ -905,7 +1056,9 @@ fn mouse(app: &mut App, me: MouseEvent) {
                 let on_button = c.hit_at(x, y).is_some_and(|h| h.is_button());
                 let n = click_count(app, x, y);
                 let n = if on_button { 1 } else { n };
-                let Some(v) = app.views.get_mut(&sid) else { return };
+                let Some(v) = app.views.get_mut(&sid) else {
+                    return;
+                };
                 v.chat.mouse_down(x, y, n);
                 if v.chat.has_selection() {
                     app.sel_owner = Some(sid);
@@ -975,12 +1128,22 @@ fn mouse(app: &mut App, me: MouseEvent) {
 
 fn watch_mouse(app: &mut App, me: MouseEvent) {
     let (x, y) = (me.column, me.row);
-    let inside = |r: &ratatui::layout::Rect| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
-    let tile = app.watch.tiles.iter().find(|(_, r)| inside(r)).map(|(s, _)| s.clone());
+    let inside =
+        |r: &ratatui::layout::Rect| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
+    let tile = app
+        .watch
+        .tiles
+        .iter()
+        .find(|(_, r)| inside(r))
+        .map(|(s, _)| s.clone());
     match me.kind {
         // The wheel scrolls the tile under the pointer, focused or not.
         MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
-            let d = if me.kind == MouseEventKind::ScrollUp { -3 } else { 3 };
+            let d = if me.kind == MouseEventKind::ScrollUp {
+                -3
+            } else {
+                3
+            };
             match tile.and_then(|sid| app.views.get_mut(&sid)) {
                 Some(v) => v.chat.scroll_by(d, false),
                 None => app.dirty = false,
@@ -1002,7 +1165,10 @@ fn watch_mouse(app: &mut App, me: MouseEvent) {
             // They focus the tile but never zoom (clicking a tool twice collapses it again).
             let hit = app.views.get(&sid).and_then(|v| v.chat.hit_at(x, y));
             let is_tool = |app: &App, msg: &str, part: usize| {
-                app.views.get(&sid).and_then(|v| v.find(msg).and_then(|i| v.messages[i].parts.get(part))).is_some_and(|p| matches!(p, ref_proto::Part::Tool { .. }))
+                app.views
+                    .get(&sid)
+                    .and_then(|v| v.find(msg).and_then(|i| v.messages[i].parts.get(part)))
+                    .is_some_and(|p| matches!(p, ref_proto::Part::Tool { .. }))
             };
             let handled = match hit {
                 Some(Hit::Toggle { msg, part }) if is_tool(app, &msg, part) => {
@@ -1041,7 +1207,10 @@ fn watch_mouse(app: &mut App, me: MouseEvent) {
 impl App {
     pub fn update_autocomplete_after_accept(&mut self) {
         // After accepting a slash command needing args, or a file, close the popup.
-        if self.ac.is_none() && self.editor.mention().is_none() && !self.editor.text.starts_with('/') {
+        if self.ac.is_none()
+            && self.editor.mention().is_none()
+            && !self.editor.text.starts_with('/')
+        {
             return;
         }
         if self.editor.text.ends_with(' ') {
@@ -1051,4 +1220,3 @@ impl App {
         }
     }
 }
-

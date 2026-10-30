@@ -50,7 +50,10 @@ pub fn format_header(path: &str, tag: &str) -> String {
 /// Normalizes a model-supplied tag (`#ab12`, ` AB12 `) to uppercase hex; `None` if malformed.
 pub fn normalize_tag(raw: &str) -> Option<String> {
     let t = raw.trim().trim_start_matches('#').trim();
-    let t = t.strip_prefix('[').and_then(|s| s.strip_suffix(']')).unwrap_or(t);
+    let t = t
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .unwrap_or(t);
     let t = t.rsplit_once('#').map_or(t, |(_, tag)| tag);
     (t.len() == 4 && t.chars().all(|c| c.is_ascii_hexdigit())).then(|| t.to_ascii_uppercase())
 }
@@ -100,7 +103,9 @@ impl LineSet {
 
     pub fn iter(&self) -> impl Iterator<Item = u32> + '_ {
         self.bits.iter().enumerate().flat_map(|(w, &word)| {
-            (0..64).filter(move |b| word & (1u64 << b) != 0).map(move |b| (w * 64 + b) as u32)
+            (0..64)
+                .filter(move |b| word & (1u64 << b) != 0)
+                .map(move |b| (w * 64 + b) as u32)
         })
     }
 
@@ -199,7 +204,9 @@ impl Inner {
                 .map(|(p, _)| p.clone());
             let Some(victim) = victim else {
                 // Only `keep` remains: trim its older versions.
-                let Some(e) = self.paths.get_mut(keep) else { return };
+                let Some(e) = self.paths.get_mut(keep) else {
+                    return;
+                };
                 if e.versions.len() <= 1 {
                     return;
                 }
@@ -223,7 +230,9 @@ pub struct HashStore {
 
 impl std::fmt::Debug for HashStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HashStore").field("bytes", &self.total_bytes()).finish()
+        f.debug_struct("HashStore")
+            .field("bytes", &self.total_bytes())
+            .finish()
     }
 }
 
@@ -253,7 +262,10 @@ impl HashStore {
         g.tick += 1;
         let tick = g.tick;
         let inner = &mut *g;
-        let entry = inner.paths.entry(k.clone()).or_insert_with(|| PathEntry { versions: Vec::new(), used: tick });
+        let entry = inner.paths.entry(k.clone()).or_insert_with(|| PathEntry {
+            versions: Vec::new(),
+            used: tick,
+        });
         entry.used = tick;
         let snap = match entry.versions.iter().position(|s| s.tag == tag) {
             Some(i) => {
@@ -264,10 +276,18 @@ impl HashStore {
                     s.seen.merge(&seen);
                     s
                 } else {
-                    Snapshot { tag: tag.clone(), text: Arc::from(text), seen }
+                    Snapshot {
+                        tag: tag.clone(),
+                        text: Arc::from(text),
+                        seen,
+                    }
                 }
             }
-            None => Snapshot { tag: tag.clone(), text: Arc::from(text), seen },
+            None => Snapshot {
+                tag: tag.clone(),
+                text: Arc::from(text),
+                seen,
+            },
         };
         inner.total += snap.bytes();
         entry.versions.insert(0, snap);
@@ -286,11 +306,15 @@ impl HashStore {
         let mut g = self.lock();
         let inner = &mut *g;
         if let Some(e) = inner.paths.get_mut(&k)
-            && let Some(s) = e.versions.iter_mut().find(|s| s.tag.eq_ignore_ascii_case(tag)) {
-                let before = s.bytes();
-                s.seen.merge(&Seen::lines(lines));
-                inner.total = inner.total - before + s.bytes();
-            }
+            && let Some(s) = e
+                .versions
+                .iter_mut()
+                .find(|s| s.tag.eq_ignore_ascii_case(tag))
+        {
+            let before = s.bytes();
+            s.seen.merge(&Seen::lines(lines));
+            inner.total = inner.total - before + s.bytes();
+        }
     }
 
     /// Snapshot of `path` with `tag` (case-insensitive).
@@ -301,13 +325,19 @@ impl HashStore {
         let tick = g.tick;
         let e = g.paths.get_mut(&k)?;
         e.used = tick;
-        e.versions.iter().find(|s| s.tag.eq_ignore_ascii_case(tag)).cloned()
+        e.versions
+            .iter()
+            .find(|s| s.tag.eq_ignore_ascii_case(tag))
+            .cloned()
     }
 
     /// Most recently recorded snapshot of `path`.
     pub fn latest(&self, path: &Path) -> Option<Snapshot> {
         let k = key(path);
-        self.lock().paths.get(&k).and_then(|e| e.versions.first().cloned())
+        self.lock()
+            .paths
+            .get(&k)
+            .and_then(|e| e.versions.first().cloned())
     }
 
     /// Paths (canonical) that have a snapshot with `tag`.
@@ -327,7 +357,12 @@ impl HashStore {
     pub fn forget(&self, path: &Path) {
         let k = key(path);
         let mut g = self.lock();
-        let victims: Vec<PathBuf> = g.paths.keys().filter(|p| p.starts_with(&k) || p.starts_with(path)).cloned().collect();
+        let victims: Vec<PathBuf> = g
+            .paths
+            .keys()
+            .filter(|p| p.starts_with(&k) || p.starts_with(path))
+            .cloned()
+            .collect();
         for v in victims {
             if let Some(e) = g.paths.remove(&v) {
                 g.total -= e.versions.iter().map(Snapshot::bytes).sum::<usize>();
@@ -353,11 +388,16 @@ mod tests {
     fn reference(text: &str) -> String {
         let mut normalized = String::with_capacity(text.len());
         for segment in text.split_inclusive('\n') {
-            let (line, nl) = segment.strip_suffix('\n').map_or((segment, ""), |l| (l, "\n"));
+            let (line, nl) = segment
+                .strip_suffix('\n')
+                .map_or((segment, ""), |l| (l, "\n"));
             normalized.push_str(line.trim_end_matches([' ', '\t', '\r']));
             normalized.push_str(nl);
         }
-        format!("{:04X}", xxhash_rust::xxh32::xxh32(normalized.as_bytes(), 0) & 0xffff)
+        format!(
+            "{:04X}",
+            xxhash_rust::xxh32::xxh32(normalized.as_bytes(), 0) & 0xffff
+        )
     }
 
     #[test]
@@ -365,7 +405,14 @@ mod tests {
         assert_eq!(file_hash(""), "5D05");
         assert_eq!(file_hash("hello\n"), "5BF9");
         assert_eq!(file_hash("a \n b\t\r\nc"), "80BA");
-        for t in ["", "x", "a  \n\n  b \t", "trailing \n", "\r\n\r\n", "über  \nzz\t"] {
+        for t in [
+            "",
+            "x",
+            "a  \n\n  b \t",
+            "trailing \n",
+            "\r\n\r\n",
+            "über  \nzz\t",
+        ] {
             assert_eq!(file_hash(t), reference(t), "{t:?}");
         }
     }
@@ -380,7 +427,10 @@ mod tests {
 
     #[test]
     fn seen_rows() {
-        assert_eq!(seen_lines_from_body("[a#1234]\n1:x\n*12:y\n 13:z\n...\nfoo"), vec![1, 12, 13]);
+        assert_eq!(
+            seen_lines_from_body("[a#1234]\n1:x\n*12:y\n 13:z\n...\nfoo"),
+            vec![1, 12, 13]
+        );
     }
 
     #[test]
@@ -425,7 +475,11 @@ mod tests {
         let store = HashStore::new();
         let chunk = "y".repeat(3 * 1024 * 1024);
         for i in 0..40 {
-            store.record(Path::new(&format!("/nonexistent/f{i}")), &format!("{chunk}{i}"), Seen::All);
+            store.record(
+                Path::new(&format!("/nonexistent/f{i}")),
+                &format!("{chunk}{i}"),
+                Seen::All,
+            );
         }
         assert!(store.total_bytes() <= MAX_TOTAL_BYTES);
         assert!(store.latest(Path::new("/nonexistent/f39")).is_some());

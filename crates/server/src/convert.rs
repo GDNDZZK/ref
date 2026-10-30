@@ -10,7 +10,10 @@ pub const IMAGE_OMITTED: &str = "[image omitted: model does not support image in
 /// Index of the last compaction summary (0 if the session was never compacted). Messages
 /// before it stay in the transcript (visible to users) but are not sent to the model.
 pub fn effective_start(messages: &[Message]) -> usize {
-    messages.iter().rposition(|m| m.role == Role::User && m.source == MessageSource::Compaction).unwrap_or(0)
+    messages
+        .iter()
+        .rposition(|m| m.role == Role::User && m.source == MessageSource::Compaction)
+        .unwrap_or(0)
 }
 
 /// Chat messages for a request: the effective context, i.e. the transcript from the last
@@ -26,7 +29,9 @@ pub fn to_chat(messages: &[Message], images: bool) -> Vec<ChatMessage> {
                 for p in &m.parts {
                     match p {
                         Part::Text { text, .. } => content.push(UserContent::Text(text.clone())),
-                        Part::Image { image, .. } if images => content.push(UserContent::Image(image.clone())),
+                        Part::Image { image, .. } if images => {
+                            content.push(UserContent::Image(image.clone()))
+                        }
                         Part::Image { .. } => content.push(UserContent::Text(IMAGE_OMITTED.into())),
                         _ => {}
                     }
@@ -45,7 +50,11 @@ pub fn to_chat(messages: &[Message], images: bool) -> Vec<ChatMessage> {
                                 blocks.push(AssistantBlock::Text(text.clone()));
                             }
                         }
-                        Part::Reasoning { text, provider_data, .. } => {
+                        Part::Reasoning {
+                            text,
+                            provider_data,
+                            ..
+                        } => {
                             if !text.is_empty() || provider_data.is_some() {
                                 blocks.push(AssistantBlock::Reasoning {
                                     text: text.clone(),
@@ -53,8 +62,21 @@ pub fn to_chat(messages: &[Message], images: bool) -> Vec<ChatMessage> {
                                 });
                             }
                         }
-                        Part::Tool { call_id, name, raw_input, provider_data, state, output, images: imgs, .. } => {
-                            let arguments = if raw_input.trim().is_empty() { "{}".to_string() } else { raw_input.clone() };
+                        Part::Tool {
+                            call_id,
+                            name,
+                            raw_input,
+                            provider_data,
+                            state,
+                            output,
+                            images: imgs,
+                            ..
+                        } => {
+                            let arguments = if raw_input.trim().is_empty() {
+                                "{}".to_string()
+                            } else {
+                                raw_input.clone()
+                            };
                             blocks.push(AssistantBlock::ToolCall {
                                 id: call_id.clone(),
                                 name: name.clone(),
@@ -70,7 +92,10 @@ pub fn to_chat(messages: &[Message], images: bool) -> Vec<ChatMessage> {
                                 name: name.clone(),
                                 content,
                                 images: imgs.clone(),
-                                is_error: matches!(state, ToolState::Error | ToolState::Denied | ToolState::Cancelled),
+                                is_error: matches!(
+                                    state,
+                                    ToolState::Error | ToolState::Denied | ToolState::Cancelled
+                                ),
                             });
                         }
                         Part::Image { .. } => {}
@@ -79,7 +104,10 @@ pub fn to_chat(messages: &[Message], images: bool) -> Vec<ChatMessage> {
                 if blocks.is_empty() {
                     continue;
                 }
-                let origin = m.model.as_ref().map(|r| (r.provider.clone(), r.model.clone()));
+                let origin = m
+                    .model
+                    .as_ref()
+                    .map(|r| (r.provider.clone(), r.model.clone()));
                 out.push(ChatMessage::Assistant { blocks, origin });
                 out.extend(results);
             }
@@ -111,7 +139,9 @@ pub fn parse_tool_input(raw: &str) -> Result<(Value, String), String> {
 /// Extract a complete `"purpose": "..."` string from partial JSON.
 pub fn partial_purpose(raw: &str) -> Option<String> {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let re = RE.get_or_init(|| regex::Regex::new(r#""purpose"\s*:\s*"((?:[^"\\]|\\.)*)""#).expect("regex"));
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(r#""purpose"\s*:\s*"((?:[^"\\]|\\.)*)""#).expect("regex")
+    });
     let c = re.captures(raw)?;
     let lit = format!("\"{}\"", c.get(1)?.as_str());
     serde_json::from_str::<String>(&lit).ok()
@@ -127,7 +157,10 @@ mod tests {
         assert_eq!(p, "look");
         assert_eq!(v, serde_json::json!({"path":"a"}));
         assert!(parse_tool_input("{bad").is_err());
-        assert_eq!(partial_purpose(r#"{"purpose": "re\"ad", "pa"#).as_deref(), Some("re\"ad"));
+        assert_eq!(
+            partial_purpose(r#"{"purpose": "re\"ad", "pa"#).as_deref(),
+            Some("re\"ad")
+        );
         assert_eq!(partial_purpose(r#"{"purpose": "rea"#), None);
     }
 }

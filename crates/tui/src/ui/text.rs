@@ -141,7 +141,9 @@ pub fn tail_fit(s: &str, max: usize) -> String {
 
 /// Punctuation that must not begin a wrapped row (simplified kinsoku shori).
 fn no_line_start(g: &str) -> bool {
-    g.chars().next().is_some_and(|c| ",.:;!?)]}%、。，．：；！？）】》」』〉〕”’…·ー々".contains(c))
+    g.chars()
+        .next()
+        .is_some_and(|c| ",.:;!?)]}%、。，．：；！？）】》」』〉〕”’…·ー々".contains(c))
 }
 
 fn is_wide(g: &str) -> bool {
@@ -152,7 +154,10 @@ fn is_wide(g: &str) -> bool {
 /// Breaks at spaces and around wide (CJK) characters; hard-breaks words that don't fit.
 /// Returns at least one (possibly empty) line.
 pub fn wrap_spans(spans: &[Span<'_>], width: usize) -> Vec<Line<'static>> {
-    wrap_spans_flags(spans, width).into_iter().map(|(l, _)| l).collect()
+    wrap_spans_flags(spans, width)
+        .into_iter()
+        .map(|(l, _)| l)
+        .collect()
 }
 
 /// Like [`wrap_spans`], also reporting for each row whether the break before it swallowed
@@ -189,7 +194,11 @@ pub fn wrap_spans_flags(spans: &[Span<'_>], width: usize) -> Vec<(Line<'static>,
                 continue;
             }
             // Never start a row with closing punctuation: carry the preceding wide glyph along.
-            if no_line_start(g) && brk == Some(cur.len()) && cur.len() > 1 && cur.last().is_some_and(|x| is_wide(x.0)) {
+            if no_line_start(g)
+                && brk == Some(cur.len())
+                && cur.len() > 1
+                && cur.last().is_some_and(|x| is_wide(x.0))
+            {
                 brk = Some(cur.len() - 1);
             }
             if let Some(b) = brk.filter(|&b| b > 0) {
@@ -370,7 +379,11 @@ pub fn fmt_ago(ms: i64, now: i64) -> String {
 
 /// Replace `$HOME` prefix with `~`.
 pub fn tilde(path: &str) -> String {
-    if let Some(h) = std::env::var_os("HOME").filter(|h| !h.is_empty()).map(std::path::PathBuf::from).or_else(dirs::home_dir) {
+    if let Some(h) = std::env::var_os("HOME")
+        .filter(|h| !h.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(dirs::home_dir)
+    {
         let h = h.to_string_lossy();
         if !h.is_empty() && h != "/" {
             if path == h {
@@ -425,7 +438,10 @@ pub fn fuzzy_score(hay: &str, needle: &str) -> Option<i64> {
         }
         last = Some(i);
     }
-    if h.iter().collect::<String>().starts_with(&n.iter().collect::<String>()) {
+    if h.iter()
+        .collect::<String>()
+        .starts_with(&n.iter().collect::<String>())
+    {
         score += 40;
     }
     Some(score)
@@ -436,7 +452,10 @@ mod tests {
     use super::*;
 
     fn rows(s: &str, w: usize) -> Vec<String> {
-        wrap_spans(&[Span::raw(s.to_string())], w).iter().map(line_text).collect()
+        wrap_spans(&[Span::raw(s.to_string())], w)
+            .iter()
+            .map(line_text)
+            .collect()
     }
 
     #[test]
@@ -449,12 +468,29 @@ mod tests {
 
     #[test]
     fn wrap_flags_record_swallowed_spaces() {
-        let f = |s: &str, w: usize| wrap_spans_flags(&[Span::raw(s.to_string())], w).into_iter().map(|(l, sp)| (line_text(&l), sp)).collect::<Vec<_>>();
-        assert_eq!(f("hello world", 5), vec![("hello".into(), false), ("world".into(), true)]);
-        assert_eq!(f("abcdefgh", 4), vec![("abcd".into(), false), ("efgh".into(), false)]);
+        let f = |s: &str, w: usize| {
+            wrap_spans_flags(&[Span::raw(s.to_string())], w)
+                .into_iter()
+                .map(|(l, sp)| (line_text(&l), sp))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            f("hello world", 5),
+            vec![("hello".into(), false), ("world".into(), true)]
+        );
+        assert_eq!(
+            f("abcdefgh", 4),
+            vec![("abcd".into(), false), ("efgh".into(), false)]
+        );
         // Break after a CJK run at a space keeps the space; between CJK glyphs it doesn't.
-        assert_eq!(f("中文 abc", 5), vec![("中文".into(), false), ("abc".into(), true)]);
-        assert_eq!(f("中文中文", 4), vec![("中文".into(), false), ("中文".into(), false)]);
+        assert_eq!(
+            f("中文 abc", 5),
+            vec![("中文".into(), false), ("abc".into(), true)]
+        );
+        assert_eq!(
+            f("中文中文", 4),
+            vec![("中文".into(), false), ("中文".into(), false)]
+        );
     }
 
     #[test]

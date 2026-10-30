@@ -9,7 +9,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::Message as WsMsg;
-use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request as HsRequest, Response as HsResponse};
+use tokio_tungstenite::tungstenite::handshake::server::{
+    ErrorResponse, Request as HsRequest, Response as HsResponse,
+};
 use tokio_tungstenite::tungstenite::http::StatusCode;
 
 /// Client name used by `ref-server --status/--stop`; such connections do not count as frontends.
@@ -36,7 +38,10 @@ impl Auth {
 /// Resolve `--allow-host` entries (IPs, hostnames, `*`) into an [`Auth`].
 pub fn resolve_hosts(hosts: &[String], token: String) -> (Auth, Vec<String>) {
     use std::net::ToSocketAddrs;
-    let mut auth = Auth { token, ..Default::default() };
+    let mut auth = Auth {
+        token,
+        ..Default::default()
+    };
     let mut warnings = Vec::new();
     for h in hosts {
         let h = h.trim().trim_start_matches('[').trim_end_matches(']');
@@ -130,7 +135,9 @@ async fn handle_conn(hub: Arc<Hub>, stream: TcpStream, peer: SocketAddr, auth: A
     let auth2 = auth.clone();
     let cb = |req: &HsRequest, resp: HsResponse| -> Result<HsResponse, ErrorResponse> {
         match query_token(&req.uri().to_string()) {
-            Some(t) if !auth2.token.is_empty() && t != auth2.token => Err(forbidden("invalid token")),
+            Some(t) if !auth2.token.is_empty() && t != auth2.token => {
+                Err(forbidden("invalid token"))
+            }
             Some(_) => {
                 query_ok = true;
                 Ok(resp)
@@ -140,8 +147,15 @@ async fn handle_conn(hub: Arc<Hub>, stream: TcpStream, peer: SocketAddr, auth: A
     };
     // Prompts carry pasted images: allow one frame up to the whole message limit (the 16 MiB
     // default frame limit is lower than the 64 MiB message limit).
-    let cfg = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default().max_message_size(Some(MAX_CLIENT_MESSAGE)).max_frame_size(Some(MAX_CLIENT_MESSAGE));
-    let ws = match tokio::time::timeout(Duration::from_secs(10), tokio_tungstenite::accept_hdr_async_with_config(stream, cb, Some(cfg))).await {
+    let cfg = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
+        .max_message_size(Some(MAX_CLIENT_MESSAGE))
+        .max_frame_size(Some(MAX_CLIENT_MESSAGE));
+    let ws = match tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio_tungstenite::accept_hdr_async_with_config(stream, cb, Some(cfg)),
+    )
+    .await
+    {
         Ok(Ok(ws)) => ws,
         Ok(Err(e)) => {
             tracing::debug!(%peer, "websocket handshake failed: {e}");
@@ -173,7 +187,9 @@ async fn handle_conn(hub: Arc<Hub>, stream: TcpStream, peer: SocketAddr, auth: A
                 return;
             }
             for f in wconn.out.drain() {
-                let Ok(txt) = serde_json::to_string(&f) else { continue };
+                let Ok(txt) = serde_json::to_string(&f) else {
+                    continue;
+                };
                 if sink.feed(WsMsg::text(txt)).await.is_err() {
                     wconn.kill.cancel();
                     return;
@@ -206,11 +222,16 @@ async fn handle_conn(hub: Arc<Hub>, stream: TcpStream, peer: SocketAddr, auth: A
         let frame: ClientFrame = match serde_json::from_str(&text) {
             Ok(f) => f,
             Err(e) => {
-                let id = serde_json::from_str::<Value>(&text).ok().and_then(|v| v.get("id").and_then(Value::as_u64));
+                let id = serde_json::from_str::<Value>(&text)
+                    .ok()
+                    .and_then(|v| v.get("id").and_then(Value::as_u64));
                 if let Some(id) = id {
                     conn.send(err_frame(id, format!("Invalid request: {e}")));
                 } else {
-                    conn.send(ServerFrame::Toast { level: ref_proto::ToastLevel::Error, text: format!("Invalid frame: {e}") });
+                    conn.send(ServerFrame::Toast {
+                        level: ref_proto::ToastLevel::Error,
+                        text: format!("Invalid frame: {e}"),
+                    });
                 }
                 if !conn.lock().hello {
                     break;
@@ -221,8 +242,15 @@ async fn handle_conn(hub: Arc<Hub>, stream: TcpStream, peer: SocketAddr, auth: A
         let hello_done = conn.lock().hello;
         if !hello_done {
             match frame.req {
-                Request::Hello { client, version, cwd, token } => {
-                    let ok = conn.lock().authed || (!auth.token.is_empty() && token.as_deref() == Some(auth.token.as_str()));
+                Request::Hello {
+                    client,
+                    version,
+                    cwd,
+                    token,
+                } => {
+                    let ok = conn.lock().authed
+                        || (!auth.token.is_empty()
+                            && token.as_deref() == Some(auth.token.as_str()));
                     if !ok {
                         if let Some(id) = frame.id {
                             conn.send(err_frame(id, "invalid or missing token".into()));
@@ -242,8 +270,13 @@ async fn handle_conn(hub: Arc<Hub>, stream: TcpStream, peer: SocketAddr, auth: A
                     }
                     tracing::info!(conn = conn.id, %client, version, "hello");
                     if let Some(id) = frame.id {
-                        let mut inst = serde_json::to_value(hub.instance.lock().unwrap_or_else(|e| e.into_inner()).clone())
-                            .unwrap_or(Value::Null);
+                        let mut inst = serde_json::to_value(
+                            hub.instance
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .clone(),
+                        )
+                        .unwrap_or(Value::Null);
                         if let Some(o) = inst.as_object_mut() {
                             o.remove("token");
                         }
@@ -259,7 +292,9 @@ async fn handle_conn(hub: Arc<Hub>, stream: TcpStream, peer: SocketAddr, auth: A
                             error: None,
                         });
                     }
-                    conn.send(ServerFrame::Sessions { sessions: hub.infos() });
+                    conn.send(ServerFrame::Sessions {
+                        sessions: hub.infos(),
+                    });
                 }
                 _ => {
                     if let Some(id) = frame.id {
@@ -274,11 +309,19 @@ async fn handle_conn(hub: Arc<Hub>, stream: TcpStream, peer: SocketAddr, auth: A
         let res = crate::api::handle(&hub, &conn, frame.req).await;
         if let Some(id) = frame.id {
             conn.send(match res {
-                Ok(result) => ServerFrame::Response { id, ok: true, result, error: None },
+                Ok(result) => ServerFrame::Response {
+                    id,
+                    ok: true,
+                    result,
+                    error: None,
+                },
                 Err(e) => err_frame(id, e),
             });
         } else if let Err(e) = res {
-            conn.send(ServerFrame::Toast { level: ref_proto::ToastLevel::Error, text: e });
+            conn.send(ServerFrame::Toast {
+                level: ref_proto::ToastLevel::Error,
+                text: e,
+            });
         }
     }
     tracing::info!(conn = conn.id, "connection closed");
@@ -292,7 +335,12 @@ fn finish(hub: &Arc<Hub>, conn: &Arc<Conn>) {
 }
 
 fn err_frame(id: u64, e: String) -> ServerFrame {
-    ServerFrame::Response { id, ok: false, result: Value::Null, error: Some(e) }
+    ServerFrame::Response {
+        id,
+        ok: false,
+        result: Value::Null,
+        error: Some(e),
+    }
 }
 
 #[cfg(test)]
@@ -301,7 +349,10 @@ mod tests {
 
     #[test]
     fn hosts() {
-        let (a, _) = resolve_hosts(&["127.0.0.1".into(), "::1".into(), "localhost".into()], "t".into());
+        let (a, _) = resolve_hosts(
+            &["127.0.0.1".into(), "::1".into(), "localhost".into()],
+            "t".into(),
+        );
         assert!(a.ip_allowed("127.0.0.1".parse().unwrap()));
         assert!(a.ip_allowed("::ffff:127.0.0.1".parse().unwrap()));
         assert!(!a.ip_allowed("10.0.0.1".parse().unwrap()));

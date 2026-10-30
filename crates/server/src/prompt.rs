@@ -33,7 +33,10 @@ pub fn build(inp: &PromptInput) -> Vec<String> {
             .map(|a| format!("- {}: {}", a.name, one_line(&a.description)))
             .collect();
         if !list.is_empty() {
-            parts.push(format!("Agents available for create_session:\n{}", list.join("\n")));
+            parts.push(format!(
+                "Agents available for create_session:\n{}",
+                list.join("\n")
+            ));
         }
     }
     let git = git_root(inp.cwd).is_some();
@@ -69,7 +72,11 @@ pub fn build(inp: &PromptInput) -> Vec<String> {
         parts.push(s);
     }
     for (name, text) in &inp.mcp_instructions {
-        parts.push(format!("<mcp_instructions server=\"{}\">\n{}\n</mcp_instructions>", xml_escape(name), text.trim()));
+        parts.push(format!(
+            "<mcp_instructions server=\"{}\">\n{}\n</mcp_instructions>",
+            xml_escape(name),
+            text.trim()
+        ));
     }
     parts
 }
@@ -79,7 +86,10 @@ fn one_line(s: &str) -> String {
 }
 
 fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 pub fn git_root(cwd: &Path) -> Option<PathBuf> {
@@ -114,7 +124,9 @@ fn read_text(p: &Path) -> Option<String> {
     if !meta.is_file() || meta.len() > 512 * 1024 {
         return None;
     }
-    std::fs::read_to_string(p).ok().filter(|s| !s.trim().is_empty())
+    std::fs::read_to_string(p)
+        .ok()
+        .filter(|s| !s.trim().is_empty())
 }
 
 /// Instruction files in order: global, project (root -> cwd), configured.
@@ -122,7 +134,10 @@ pub fn instructions(cfg: &Config, cwd: &Path, home: Option<&Path>) -> Vec<(PathB
     let mut out: Vec<(PathBuf, String)> = Vec::new();
     let push = |p: PathBuf, out: &mut Vec<(PathBuf, String)>| {
         let canon = std::fs::canonicalize(&p).unwrap_or(p.clone());
-        if out.iter().any(|(q, _)| std::fs::canonicalize(q).unwrap_or(q.clone()) == canon) {
+        if out
+            .iter()
+            .any(|(q, _)| std::fs::canonicalize(q).unwrap_or(q.clone()) == canon)
+        {
             return;
         }
         if let Some(t) = read_text(&p) {
@@ -146,7 +161,11 @@ pub fn instructions(cfg: &Config, cwd: &Path, home: Option<&Path>) -> Vec<(PathB
             continue;
         }
         let expanded = crate::util::expand_home(pat, home);
-        let abs = if expanded.is_absolute() { expanded } else { cwd.join(expanded) };
+        let abs = if expanded.is_absolute() {
+            expanded
+        } else {
+            cwd.join(expanded)
+        };
         let s = abs.to_string_lossy().to_string();
         if !s.contains(['*', '?', '[', '{']) {
             push(abs, &mut out);
@@ -161,7 +180,10 @@ pub fn instructions(cfg: &Config, cwd: &Path, home: Option<&Path>) -> Vec<(PathB
 
 /// Expand an absolute glob pattern into matching files (sorted).
 fn glob_files(pattern: &str) -> Vec<PathBuf> {
-    let Ok(glob) = globset::GlobBuilder::new(pattern).literal_separator(true).build() else {
+    let Ok(glob) = globset::GlobBuilder::new(pattern)
+        .literal_separator(true)
+        .build()
+    else {
         return Vec::new();
     };
     let m = glob.compile_matcher();
@@ -248,7 +270,9 @@ fn scan_skills(root: &Path) -> Vec<Skill> {
         if depth >= 6 {
             continue;
         }
-        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
         let mut subs: Vec<PathBuf> = rd
             .flatten()
             .filter(|e| e.file_type().is_ok_and(|t| t.is_dir() || t.is_symlink()))
@@ -270,14 +294,23 @@ fn scan_skills(root: &Path) -> Vec<Skill> {
 fn parse_skill(file: &Path) -> Option<Skill> {
     let text = read_text(file)?;
     let (fm, _) = ref_config::split_frontmatter(&text);
-    let description = fm.get("description").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let description = fm
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if description.is_empty() {
         return None;
     }
     if fm.get("disable-model-invocation").and_then(|v| v.as_bool()) == Some(true) {
         return None;
     }
-    let dir_name = file.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str()).unwrap_or("skill");
+    let dir_name = file
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        .unwrap_or("skill");
     let name = fm
         .get("name")
         .and_then(|v| v.as_str())
@@ -286,7 +319,11 @@ fn parse_skill(file: &Path) -> Option<Skill> {
         .unwrap_or(dir_name)
         .to_string();
     let path = std::fs::canonicalize(file).unwrap_or(file.to_path_buf());
-    Some(Skill { name, description, path })
+    Some(Skill {
+        name,
+        description,
+        path,
+    })
 }
 
 #[cfg(test)]
@@ -309,9 +346,22 @@ mod tests {
         let mut cfg = Config::default();
         cfg.agents.insert(
             "build".into(),
-            ref_config::AgentConfig { name: "build".into(), can_spawn: true, creatable: true, description: "Builder".into(), ..Default::default() },
+            ref_config::AgentConfig {
+                name: "build".into(),
+                can_spawn: true,
+                creatable: true,
+                description: "Builder".into(),
+                ..Default::default()
+            },
         );
-        let parts = build(&PromptInput { cfg: &cfg, agent: "build", cwd: &cwd, home: None, date: "2026-01-02", mcp_instructions: vec![] });
+        let parts = build(&PromptInput {
+            cfg: &cfg,
+            agent: "build",
+            cwd: &cwd,
+            home: None,
+            date: "2026-01-02",
+            mcp_instructions: vec![],
+        });
         let all = parts.join("\n---\n");
         assert!(all.contains("- build: Builder"));
         assert!(all.contains("Git repository: yes"));

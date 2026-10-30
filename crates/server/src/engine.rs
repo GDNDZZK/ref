@@ -3,13 +3,15 @@
 
 use crate::convert::{parse_tool_input, partial_purpose, to_chat};
 use crate::hub::Hub;
-use crate::session::{PendingPerm, RunHandle, Session, SessionState, cancel_unfinished, user_message};
+use crate::session::{
+    PendingPerm, RunHandle, Session, SessionState, cancel_unfinished, user_message,
+};
 use crate::toolset::{self, Entry, Kind};
 use ref_config::{Action, Config};
 use ref_llm::{AssistantBlock, BlockKind, LlmError, Model, Provider, StreamEvent};
 use ref_proto::{
-    Delta, Message, MessageSource, ModelRef, Part, PermissionRequest, Role, SessionEvent, SessionStatus, ToolState,
-    now_ms,
+    Delta, Message, MessageSource, ModelRef, Part, PermissionRequest, Role, SessionEvent,
+    SessionStatus, ToolState, now_ms,
 };
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
@@ -52,7 +54,12 @@ pub fn submit(hub: &Arc<Hub>, s: &Arc<Session>, msg: Message) -> bool {
             emit_queue(hub, s, &st);
             true
         } else {
-            hub.emit(&s.id, SessionEvent::Message { message: msg.clone() });
+            hub.emit(
+                &s.id,
+                SessionEvent::Message {
+                    message: msg.clone(),
+                },
+            );
             st.push_message(msg);
             start_run_locked(hub, s, &mut st);
             false
@@ -68,7 +75,11 @@ pub fn submit(hub: &Arc<Hub>, s: &Arc<Session>, msg: Message) -> bool {
 pub fn remove_queued(hub: &Arc<Hub>, s: &Arc<Session>, message_id: &str) -> Option<Message> {
     let removed = {
         let mut st = s.lock();
-        let removed = st.queue.iter().position(|m| m.id == message_id).and_then(|i| st.queue.remove(i));
+        let removed = st
+            .queue
+            .iter()
+            .position(|m| m.id == message_id)
+            .and_then(|i| st.queue.remove(i));
         if removed.is_some() {
             emit_queue(hub, s, &st);
         }
@@ -89,7 +100,12 @@ pub fn append_only(hub: &Arc<Hub>, s: &Arc<Session>, msg: Message) {
             st.queue.push_back(msg);
             emit_queue(hub, s, &st);
         } else {
-            hub.emit(&s.id, SessionEvent::Message { message: msg.clone() });
+            hub.emit(
+                &s.id,
+                SessionEvent::Message {
+                    message: msg.clone(),
+                },
+            );
             st.push_message(msg);
             hub.emit_info(&st);
         }
@@ -103,7 +119,10 @@ fn start_run_locked(hub: &Arc<Hub>, s: &Arc<Session>, st: &mut SessionState) {
     }
     let cancel = CancellationToken::new();
     let id = hub.next_run_id();
-    st.run = Some(RunHandle { cancel: cancel.clone(), id });
+    st.run = Some(RunHandle {
+        cancel: cancel.clone(),
+        id,
+    });
     st.user_aborted = false;
     st.info.busy_since = Some(now_ms());
     hub.set_status(st, SessionStatus::Busy);
@@ -122,7 +141,10 @@ where
     }
     let cancel = CancellationToken::new();
     let id = hub.next_run_id();
-    st.run = Some(RunHandle { cancel: cancel.clone(), id });
+    st.run = Some(RunHandle {
+        cancel: cancel.clone(),
+        id,
+    });
     st.user_aborted = false;
     st.info.busy_since = Some(now_ms());
     let (hub2, s2) = (hub.clone(), s.clone());
@@ -147,7 +169,12 @@ pub fn abort(hub: &Arc<Hub>, s: &Arc<Session>, by_user: bool) {
         if let Some(tx) = p.tx.take() {
             let _ = tx.send((false, false));
         }
-        hub.emit(&s.id, SessionEvent::PermissionResolved { call_id: p.request.call_id });
+        hub.emit(
+            &s.id,
+            SessionEvent::PermissionResolved {
+                call_id: p.request.call_id,
+            },
+        );
     }
 }
 
@@ -216,12 +243,22 @@ fn finish_run(hub: &Arc<Hub>, s: &Arc<Session>, id: u64) {
         if cancel_unfinished(&mut st.messages, CANCELLED_OUTPUT) {
             let msgs = st.messages.clone();
             if let Some(last) = msgs.last().filter(|m| m.role == Role::Assistant) {
-                hub.emit(&s.id, SessionEvent::Message { message: last.clone() });
+                hub.emit(
+                    &s.id,
+                    SessionEvent::Message {
+                        message: last.clone(),
+                    },
+                );
             }
         }
         let perms: Vec<PendingPerm> = std::mem::take(&mut st.perms);
         for p in perms {
-            hub.emit(&s.id, SessionEvent::PermissionResolved { call_id: p.request.call_id });
+            hub.emit(
+                &s.id,
+                SessionEvent::PermissionResolved {
+                    call_id: p.request.call_id,
+                },
+            );
         }
         st.pending_compact = None;
         if std::mem::take(&mut st.notice_pending) {
@@ -265,7 +302,13 @@ async fn run_loop(hub: &Arc<Hub>, s: &Arc<Session>, cancel: &CancellationToken) 
         drain_queue(hub, s);
         let prep = match prepare(hub, s, cancel).await {
             Ok(p) => p,
-            Err(e) => return if cancel.is_cancelled() { Outcome::Aborted } else { Outcome::Failed(e) },
+            Err(e) => {
+                return if cancel.is_cancelled() {
+                    Outcome::Aborted
+                } else {
+                    Outcome::Failed(e)
+                };
+            }
         };
         // Automatic compaction.
         let (used, auto) = {
@@ -278,13 +321,24 @@ async fn run_loop(hub: &Arc<Hub>, s: &Arc<Session>, cancel: &CancellationToken) 
                 if cancel.is_cancelled() {
                     return Outcome::Aborted;
                 }
-                hub.emit(&s.id, SessionEvent::Error { text: format!("Automatic compaction failed: {e}") });
+                hub.emit(
+                    &s.id,
+                    SessionEvent::Error {
+                        text: format!("Automatic compaction failed: {e}"),
+                    },
+                );
             }
         }
         let prep = if s.lock().system.is_none() {
             match prepare(hub, s, cancel).await {
                 Ok(p) => p,
-                Err(e) => return if cancel.is_cancelled() { Outcome::Aborted } else { Outcome::Failed(e) },
+                Err(e) => {
+                    return if cancel.is_cancelled() {
+                        Outcome::Aborted
+                    } else {
+                        Outcome::Failed(e)
+                    };
+                }
             }
         } else {
             prep
@@ -296,7 +350,12 @@ async fn run_loop(hub: &Arc<Hub>, s: &Arc<Session>, cancel: &CancellationToken) 
         let has_tools = {
             let st = s.lock();
             st.find_message(&msg_id)
-                .map(|i| st.messages[i].parts.iter().any(|p| matches!(p, Part::Tool { .. })))
+                .map(|i| {
+                    st.messages[i]
+                        .parts
+                        .iter()
+                        .any(|p| matches!(p, Part::Tool { .. }))
+                })
                 .unwrap_or(false)
         };
         if has_tools {
@@ -337,7 +396,12 @@ fn drain_queue(hub: &Arc<Hub>, s: &Arc<Session>) {
 
 /// Tells frontends what is waiting in the queue now.
 pub fn emit_queue(hub: &Arc<Hub>, s: &Arc<Session>, st: &SessionState) {
-    hub.emit(&s.id, SessionEvent::Queue { messages: st.queue.iter().cloned().collect() });
+    hub.emit(
+        &s.id,
+        SessionEvent::Queue {
+            messages: st.queue.iter().cloned().collect(),
+        },
+    );
 }
 
 fn apply_pending_compact(hub: &Arc<Hub>, s: &Arc<Session>, prep: &Prep) {
@@ -350,7 +414,11 @@ fn apply_pending_compact(hub: &Arc<Hub>, s: &Arc<Session>, prep: &Prep) {
 
 /// Text of the one-time recommend-compaction notice.
 pub fn context_notice_text(c: &ref_proto::ContextUsage) -> String {
-    let pct = if c.max > 0 { c.used as f64 * 100.0 / c.max as f64 } else { 0.0 };
+    let pct = if c.max > 0 {
+        c.used as f64 * 100.0 / c.max as f64
+    } else {
+        0.0
+    };
     format!(
         "[Context notice] This conversation has used {} of {} tokens ({pct:.0}%), past the recommended compaction point ({} tokens). At a good moment (e.g. after finishing the current step), call compact_context with a thorough summary to continue with a fresh context.",
         c.used, c.max, c.recommend
@@ -367,8 +435,17 @@ fn context_notice(hub: &Arc<Hub>, s: &Arc<Session>, prep: &Prep) {
         if !prep.tools.iter().any(|e| e.def.name == "compact_context") {
             return;
         }
-        let msg = user_message(MessageSource::Reminder, context_notice_text(&st.info.context), vec![]);
-        hub.emit(&s.id, SessionEvent::Message { message: msg.clone() });
+        let msg = user_message(
+            MessageSource::Reminder,
+            context_notice_text(&st.info.context),
+            vec![],
+        );
+        hub.emit(
+            &s.id,
+            SessionEvent::Message {
+                message: msg.clone(),
+            },
+        );
         st.push_message(msg);
         hub.emit_info(&st);
     }
@@ -387,7 +464,9 @@ fn must_report_reminder(hub: &Arc<Hub>, s: &Arc<Session>) -> bool {
             None => return false,
         }
     };
-    let Some(ps) = hub.session(&parent) else { return false };
+    let Some(ps) = hub.session(&parent) else {
+        return false;
+    };
     let pname = ps.lock().info.name.clone();
     let text = format!(
         "[Reminder] You stopped without reporting. Send your result (or what blocks you) to \"{pname}\" with send_message (to: \"{parent}\")."
@@ -396,7 +475,12 @@ fn must_report_reminder(hub: &Arc<Hub>, s: &Arc<Session>) -> bool {
     {
         let mut st = s.lock();
         st.reminders += 1;
-        hub.emit(&s.id, SessionEvent::Message { message: msg.clone() });
+        hub.emit(
+            &s.id,
+            SessionEvent::Message {
+                message: msg.clone(),
+            },
+        );
         st.push_message(msg);
     }
     crate::ops::persist(hub, s);
@@ -404,10 +488,21 @@ fn must_report_reminder(hub: &Arc<Hub>, s: &Arc<Session>) -> bool {
 }
 
 /// Resolve config, model, system prompt (cached) and tools for the next request.
-pub async fn prepare(hub: &Arc<Hub>, s: &Arc<Session>, cancel: &CancellationToken) -> Result<Prep, String> {
+pub async fn prepare(
+    hub: &Arc<Hub>,
+    s: &Arc<Session>,
+    cancel: &CancellationToken,
+) -> Result<Prep, String> {
     let (cfg, agent, cwd, model_ref, has_system, date) = {
         let st = s.lock();
-        (st.cfg.clone(), st.info.agent.clone(), st.info.cwd.clone(), st.info.model.clone(), st.system.is_some(), st.date.clone())
+        (
+            st.cfg.clone(),
+            st.info.agent.clone(),
+            st.info.cwd.clone(),
+            st.info.model.clone(),
+            st.system.is_some(),
+            st.date.clone(),
+        )
     };
     let servers = hub.mcp.servers_for(&cfg);
     for srv in &servers {
@@ -420,8 +515,10 @@ pub async fn prepare(hub: &Arc<Hub>, s: &Arc<Session>, cancel: &CancellationToke
     let system = if has_system {
         s.lock().system.clone().unwrap_or_default()
     } else {
-        let mcp_instructions: Vec<(String, String)> =
-            servers.iter().filter_map(|x| x.instructions().map(|i| (x.name.clone(), i))).collect();
+        let mcp_instructions: Vec<(String, String)> = servers
+            .iter()
+            .filter_map(|x| x.instructions().map(|i| (x.name.clone(), i)))
+            .collect();
         let home = hub.opts.home.clone();
         let cfg2 = cfg.clone();
         let agent2 = agent.clone();
@@ -441,7 +538,15 @@ pub async fn prepare(hub: &Arc<Hub>, s: &Arc<Session>, cancel: &CancellationToke
         parts
     };
     let (provider, model) = crate::models::resolve(&cfg, &model_ref, &agent)?;
-    Ok(Prep { cfg, provider, model, model_ref, agent, system, tools })
+    Ok(Prep {
+        cfg,
+        provider,
+        model,
+        model_ref,
+        agent,
+        system,
+        tools,
+    })
 }
 
 pub fn build_request(s: &Arc<Session>, prep: &Prep) -> ref_llm::Request {
@@ -460,7 +565,13 @@ pub fn build_request(s: &Arc<Session>, prep: &Prep) -> ref_llm::Request {
 
 /// Backoff delay before retry `attempt` (1-based): `base * 2^(attempt-1)` capped at `max`,
 /// with `jitter` in [-0.2, 0.2] applied, at least `retry_after`, never above `max`.
-pub fn backoff(base: Duration, attempt: u32, max: Duration, retry_after: Option<Duration>, jitter: f64) -> Duration {
+pub fn backoff(
+    base: Duration,
+    attempt: u32,
+    max: Duration,
+    retry_after: Option<Duration>,
+    jitter: f64,
+) -> Duration {
     let exp = 2f64.powi(attempt.saturating_sub(1).min(40) as i32);
     let raw = (base.as_secs_f64() * exp).min(max.as_secs_f64());
     let jittered = raw * (1.0 + jitter.clamp(-0.2, 0.2));
@@ -482,7 +593,11 @@ async fn stream_with_retry(
     let mut attempt: u32 = 0;
     let mut non_retryable: u32 = 0;
     let mut overflow_compacted = false;
-    let max = Duration::from_secs(if prep.cfg.retry_max_delay > 0 { prep.cfg.retry_max_delay } else { 600 });
+    let max = Duration::from_secs(if prep.cfg.retry_max_delay > 0 {
+        prep.cfg.retry_max_delay
+    } else {
+        600
+    });
     let mut prep_owned: Option<Prep> = None;
     loop {
         let p = prep_owned.as_ref().unwrap_or(prep);
@@ -584,7 +699,12 @@ fn remove_message(hub: &Arc<Hub>, s: &Arc<Session>, id: &str) {
     let mut st = s.lock();
     if let Some(i) = st.find_message(id) {
         st.messages.remove(i);
-        hub.emit(&s.id, SessionEvent::Removed { message_id: id.to_string() });
+        hub.emit(
+            &s.id,
+            SessionEvent::Removed {
+                message_id: id.to_string(),
+            },
+        );
     }
 }
 
@@ -600,7 +720,12 @@ fn keep_aborted_partial(hub: &Arc<Hub>, s: &Arc<Session>, id: &str) {
     });
     if m.parts.is_empty() {
         st.messages.remove(i);
-        hub.emit(&s.id, SessionEvent::Removed { message_id: id.to_string() });
+        hub.emit(
+            &s.id,
+            SessionEvent::Removed {
+                message_id: id.to_string(),
+            },
+        );
         return;
     }
     m.time_end = Some(now_ms());
@@ -626,14 +751,37 @@ fn finalize_message(hub: &Arc<Hub>, s: &Arc<Session>, p: &Prep, id: &str, resp: 
         for (bi, block) in resp.blocks.iter().enumerate() {
             match (m.parts.get_mut(bi), block) {
                 (Some(Part::Text { text, .. }), AssistantBlock::Text(t)) => *text = t.clone(),
-                (Some(Part::Reasoning { text, provider_data, time_end, .. }), AssistantBlock::Reasoning { text: t, provider_data: pd }) => {
+                (
+                    Some(Part::Reasoning {
+                        text,
+                        provider_data,
+                        time_end,
+                        ..
+                    }),
+                    AssistantBlock::Reasoning {
+                        text: t,
+                        provider_data: pd,
+                    },
+                ) => {
                     *text = t.clone();
                     *provider_data = pd.clone();
                     time_end.get_or_insert(now);
                 }
                 (
-                    Some(Part::Tool { raw_input, provider_data, input, purpose, call_id, .. }),
-                    AssistantBlock::ToolCall { arguments, provider_data: pd, id, .. },
+                    Some(Part::Tool {
+                        raw_input,
+                        provider_data,
+                        input,
+                        purpose,
+                        call_id,
+                        ..
+                    }),
+                    AssistantBlock::ToolCall {
+                        arguments,
+                        provider_data: pd,
+                        id,
+                        ..
+                    },
                 ) => {
                     *raw_input = arguments.clone();
                     *provider_data = pd.clone();
@@ -678,18 +826,49 @@ fn finalize_message(hub: &Arc<Hub>, s: &Arc<Session>, p: &Prep, id: &str, resp: 
 
 fn block_to_part(b: &AssistantBlock, now: i64) -> Part {
     match b {
-        AssistantBlock::Text(t) => Part::Text { text: t.clone(), time: now },
-        AssistantBlock::Reasoning { text, provider_data } => {
-            Part::Reasoning { text: text.clone(), time: now, time_end: Some(now), provider_data: provider_data.clone() }
-        }
-        AssistantBlock::ToolCall { id, name, arguments, provider_data } => {
-            let (input, purpose) = parse_tool_input(arguments).unwrap_or((Value::Null, String::new()));
-            tool_part(id.clone(), name.clone(), purpose, input, arguments.clone(), provider_data.clone(), now)
+        AssistantBlock::Text(t) => Part::Text {
+            text: t.clone(),
+            time: now,
+        },
+        AssistantBlock::Reasoning {
+            text,
+            provider_data,
+        } => Part::Reasoning {
+            text: text.clone(),
+            time: now,
+            time_end: Some(now),
+            provider_data: provider_data.clone(),
+        },
+        AssistantBlock::ToolCall {
+            id,
+            name,
+            arguments,
+            provider_data,
+        } => {
+            let (input, purpose) =
+                parse_tool_input(arguments).unwrap_or((Value::Null, String::new()));
+            tool_part(
+                id.clone(),
+                name.clone(),
+                purpose,
+                input,
+                arguments.clone(),
+                provider_data.clone(),
+                now,
+            )
         }
     }
 }
 
-fn tool_part(call_id: String, name: String, purpose: String, input: Value, raw_input: String, provider_data: Option<Value>, now: i64) -> Part {
+fn tool_part(
+    call_id: String,
+    name: String,
+    purpose: String,
+    input: Value,
+    raw_input: String,
+    provider_data: Option<Value>,
+    now: i64,
+) -> Part {
     Part::Tool {
         call_id,
         name,
@@ -721,30 +900,60 @@ impl Streamer {
 
     fn handle(&mut self, ev: StreamEvent) {
         let mut st = self.s.lock();
-        let Some(mi) = st.find_message(&self.msg_id) else { return };
+        let Some(mi) = st.find_message(&self.msg_id) else {
+            return;
+        };
         let now = now_ms();
         let sid = self.s.id.clone();
         let msg = &mut st.messages[mi];
         match ev {
             StreamEvent::BlockStart { index, kind } => {
                 let part = match kind {
-                    BlockKind::Text => Part::Text { text: String::new(), time: now },
-                    BlockKind::Reasoning => Part::Reasoning { text: String::new(), time: now, time_end: None, provider_data: None },
-                    BlockKind::ToolCall { id, name } => tool_part(id, name, String::new(), Value::Null, String::new(), None, now),
+                    BlockKind::Text => Part::Text {
+                        text: String::new(),
+                        time: now,
+                    },
+                    BlockKind::Reasoning => Part::Reasoning {
+                        text: String::new(),
+                        time: now,
+                        time_end: None,
+                        provider_data: None,
+                    },
+                    BlockKind::ToolCall { id, name } => tool_part(
+                        id,
+                        name,
+                        String::new(),
+                        Value::Null,
+                        String::new(),
+                        None,
+                        now,
+                    ),
                 };
                 // Block indices are sequential; pad defensively.
                 while msg.parts.len() < index {
-                    msg.parts.push(Part::Text { text: String::new(), time: now });
+                    msg.parts.push(Part::Text {
+                        text: String::new(),
+                        time: now,
+                    });
                 }
                 if index < msg.parts.len() {
                     msg.parts[index] = part.clone();
                 } else {
                     msg.parts.push(part.clone());
                 }
-                self.hub.emit(&sid, SessionEvent::Part { message_id: self.msg_id.clone(), index, part });
+                self.hub.emit(
+                    &sid,
+                    SessionEvent::Part {
+                        message_id: self.msg_id.clone(),
+                        index,
+                        part,
+                    },
+                );
             }
             StreamEvent::Delta { index, text } => {
-                let Some(part) = msg.parts.get_mut(index) else { return };
+                let Some(part) = msg.parts.get_mut(index) else {
+                    return;
+                };
                 let delta = match part {
                     Part::Text { text: t, .. } => {
                         t.push_str(&text);
@@ -754,27 +963,50 @@ impl Streamer {
                         t.push_str(&text);
                         Delta::Reasoning { text }
                     }
-                    Part::Tool { raw_input, purpose, .. } => {
+                    Part::Tool {
+                        raw_input, purpose, ..
+                    } => {
                         raw_input.push_str(&text);
                         if purpose.is_empty()
                             && let Some(p) = partial_purpose(raw_input)
                         {
                             *purpose = p;
                             let part = part.clone();
-                            self.hub.emit(&sid, SessionEvent::Part { message_id: self.msg_id.clone(), index, part });
+                            self.hub.emit(
+                                &sid,
+                                SessionEvent::Part {
+                                    message_id: self.msg_id.clone(),
+                                    index,
+                                    part,
+                                },
+                            );
                             return;
                         }
                         Delta::ToolInput { text }
                     }
                     Part::Image { .. } => return,
                 };
-                self.hub.emit(&sid, SessionEvent::Delta { message_id: self.msg_id.clone(), index, delta });
+                self.hub.emit(
+                    &sid,
+                    SessionEvent::Delta {
+                        message_id: self.msg_id.clone(),
+                        index,
+                        delta,
+                    },
+                );
             }
             StreamEvent::BlockEnd { index } => {
-                let Some(part) = msg.parts.get_mut(index) else { return };
+                let Some(part) = msg.parts.get_mut(index) else {
+                    return;
+                };
                 match part {
                     Part::Reasoning { time_end, .. } => *time_end = Some(now),
-                    Part::Tool { raw_input, input, purpose, .. } => {
+                    Part::Tool {
+                        raw_input,
+                        input,
+                        purpose,
+                        ..
+                    } => {
                         if let Ok((v, p)) = parse_tool_input(raw_input) {
                             *input = v;
                             *purpose = p;
@@ -783,7 +1015,14 @@ impl Streamer {
                     _ => {}
                 }
                 let part = part.clone();
-                self.hub.emit(&sid, SessionEvent::Part { message_id: self.msg_id.clone(), index, part });
+                self.hub.emit(
+                    &sid,
+                    SessionEvent::Part {
+                        message_id: self.msg_id.clone(),
+                        index,
+                        part,
+                    },
+                );
             }
             StreamEvent::Usage(u) => msg.usage = Some(u),
         }
@@ -804,16 +1043,40 @@ struct Call {
 /// Update a tool part in place and broadcast it.
 fn update_tool(hub: &Hub, s: &Session, msg_id: &str, index: usize, f: impl FnOnce(&mut Part)) {
     let mut st = s.lock();
-    let Some(mi) = st.find_message(msg_id) else { return };
-    let Some(part) = st.messages[mi].parts.get_mut(index) else { return };
+    let Some(mi) = st.find_message(msg_id) else {
+        return;
+    };
+    let Some(part) = st.messages[mi].parts.get_mut(index) else {
+        return;
+    };
     f(part);
     let part = part.clone();
-    hub.emit(&s.id, SessionEvent::Part { message_id: msg_id.to_string(), index, part });
+    hub.emit(
+        &s.id,
+        SessionEvent::Part {
+            message_id: msg_id.to_string(),
+            index,
+            part,
+        },
+    );
 }
 
-fn set_state(hub: &Hub, s: &Session, msg_id: &str, index: usize, new: ToolState, run_at: Option<i64>) {
+fn set_state(
+    hub: &Hub,
+    s: &Session,
+    msg_id: &str,
+    index: usize,
+    new: ToolState,
+    run_at: Option<i64>,
+) {
     update_tool(hub, s, msg_id, index, |p| {
-        if let Part::Tool { state, run_at: ra, time, .. } = p {
+        if let Part::Tool {
+            state,
+            run_at: ra,
+            time,
+            ..
+        } = p
+        {
             *state = new;
             *ra = run_at;
             // Durations shown to the user measure execution only, not approval/delay waits.
@@ -824,16 +1087,36 @@ fn set_state(hub: &Hub, s: &Session, msg_id: &str, index: usize, new: ToolState,
     });
 }
 
-fn finish_tool(hub: &Hub, s: &Session, msg_id: &str, index: usize, new: ToolState, out: ref_tools::ToolOutput) {
+fn finish_tool(
+    hub: &Hub,
+    s: &Session,
+    msg_id: &str,
+    index: usize,
+    new: ToolState,
+    out: ref_tools::ToolOutput,
+) {
     update_tool(hub, s, msg_id, index, |p| {
-        if let Part::Tool { state, output, meta, images, time_end, run_at, .. } = p {
+        if let Part::Tool {
+            state,
+            output,
+            meta,
+            images,
+            time_end,
+            run_at,
+            ..
+        } = p
+        {
             *state = new;
             *output = Some(out.text);
             *meta = match (meta.take(), out.meta) {
                 (_, Some(m)) => Some(m),
                 (Some(Value::Object(mut old)), None) => {
                     old.remove("live_output");
-                    if old.is_empty() { None } else { Some(Value::Object(old)) }
+                    if old.is_empty() {
+                        None
+                    } else {
+                        Some(Value::Object(old))
+                    }
                 }
                 (old, None) => old,
             };
@@ -844,18 +1127,35 @@ fn finish_tool(hub: &Hub, s: &Session, msg_id: &str, index: usize, new: ToolStat
     });
 }
 
-async fn execute_batch(hub: &Arc<Hub>, s: &Arc<Session>, prep: &Prep, msg_id: &str, cancel: &CancellationToken) {
+async fn execute_batch(
+    hub: &Arc<Hub>,
+    s: &Arc<Session>,
+    prep: &Prep,
+    msg_id: &str,
+    cancel: &CancellationToken,
+) {
     let calls: Vec<Call> = {
         let st = s.lock();
-        let Some(mi) = st.find_message(msg_id) else { return };
+        let Some(mi) = st.find_message(msg_id) else {
+            return;
+        };
         st.messages[mi]
             .parts
             .iter()
             .enumerate()
             .filter_map(|(index, p)| match p {
-                Part::Tool { call_id, name, raw_input, state, .. } if !state.is_final() => {
-                    Some(Call { index, call_id: call_id.clone(), name: name.clone(), raw: raw_input.clone() })
-                }
+                Part::Tool {
+                    call_id,
+                    name,
+                    raw_input,
+                    state,
+                    ..
+                } if !state.is_final() => Some(Call {
+                    index,
+                    call_id: call_id.clone(),
+                    name: name.clone(),
+                    raw: raw_input.clone(),
+                }),
                 _ => None,
             })
             .collect()
@@ -868,13 +1168,21 @@ async fn execute_batch(hub: &Arc<Hub>, s: &Arc<Session>, prep: &Prep, msg_id: &s
     }
 }
 
-async fn run_one(hub: &Arc<Hub>, s: &Arc<Session>, prep: &Prep, msg_id: &str, call: Call, cancel: &CancellationToken) {
+async fn run_one(
+    hub: &Arc<Hub>,
+    s: &Arc<Session>,
+    prep: &Prep,
+    msg_id: &str,
+    call: Call,
+    cancel: &CancellationToken,
+) {
     let idx = call.index;
     let (input, purpose) = match parse_tool_input(&call.raw) {
         Ok(x) => x,
         Err(e) => {
             let raw = crate::util::truncate_chars(&call.raw, 2000);
-            let out = ref_tools::ToolOutput::err(format!("Invalid JSON arguments: {e}; raw: {raw}"));
+            let out =
+                ref_tools::ToolOutput::err(format!("Invalid JSON arguments: {e}; raw: {raw}"));
             finish_tool(hub, s, msg_id, idx, ToolState::Error, out);
             return;
         }
@@ -894,7 +1202,10 @@ async fn run_one(hub: &Arc<Hub>, s: &Arc<Session>, prep: &Prep, msg_id: &str, ca
     match action {
         Action::Allow => {}
         Action::Deny => {
-            let out = ref_tools::ToolOutput::err(format!("Permission denied by configuration for tool {}.", call.name));
+            let out = ref_tools::ToolOutput::err(format!(
+                "Permission denied by configuration for tool {}.",
+                call.name
+            ));
             finish_tool(hub, s, msg_id, idx, ToolState::Denied, out);
             return;
         }
@@ -911,7 +1222,10 @@ async fn run_one(hub: &Arc<Hub>, s: &Arc<Session>, prep: &Prep, msg_id: &str, ca
                     input: input.clone(),
                     time: now_ms(),
                 };
-                st.perms.push(PendingPerm { request: request.clone(), tx: Some(tx) });
+                st.perms.push(PendingPerm {
+                    request: request.clone(),
+                    tx: Some(tx),
+                });
                 hub.set_status(&mut st, SessionStatus::WaitingPermission);
                 hub.emit(&s.id, SessionEvent::Permission { request });
             }
@@ -923,7 +1237,12 @@ async fn run_one(hub: &Arc<Hub>, s: &Arc<Session>, prep: &Prep, msg_id: &str, ca
             {
                 let mut st = s.lock();
                 st.perms.retain(|p| p.request.call_id != call.call_id);
-                hub.emit(&s.id, SessionEvent::PermissionResolved { call_id: call.call_id.clone() });
+                hub.emit(
+                    &s.id,
+                    SessionEvent::PermissionResolved {
+                        call_id: call.call_id.clone(),
+                    },
+                );
                 if let Some((true, true)) = reply {
                     st.always.insert(call.name.clone());
                 }
@@ -931,11 +1250,25 @@ async fn run_one(hub: &Arc<Hub>, s: &Arc<Session>, prep: &Prep, msg_id: &str, ca
             match reply {
                 Some((true, _)) => {}
                 _ if cancel.is_cancelled() => {
-                    finish_tool(hub, s, msg_id, idx, ToolState::Cancelled, ref_tools::ToolOutput::err(CANCELLED_OUTPUT));
+                    finish_tool(
+                        hub,
+                        s,
+                        msg_id,
+                        idx,
+                        ToolState::Cancelled,
+                        ref_tools::ToolOutput::err(CANCELLED_OUTPUT),
+                    );
                     return;
                 }
                 _ => {
-                    finish_tool(hub, s, msg_id, idx, ToolState::Denied, ref_tools::ToolOutput::err("The user denied this tool call."));
+                    finish_tool(
+                        hub,
+                        s,
+                        msg_id,
+                        idx,
+                        ToolState::Denied,
+                        ref_tools::ToolOutput::err("The user denied this tool call."),
+                    );
                     return;
                 }
             }
@@ -946,7 +1279,14 @@ async fn run_one(hub: &Arc<Hub>, s: &Arc<Session>, prep: &Prep, msg_id: &str, ca
     let delay = prep.cfg.delay_for(&prep.agent, &call.name);
     if delay > 0.0 && delay.is_finite() {
         let d = Duration::from_secs_f64(delay.min(86_400.0));
-        set_state(hub, s, msg_id, idx, ToolState::Delayed, Some(now_ms() + d.as_millis() as i64));
+        set_state(
+            hub,
+            s,
+            msg_id,
+            idx,
+            ToolState::Delayed,
+            Some(now_ms() + d.as_millis() as i64),
+        );
         tokio::select! {
             _ = tokio::time::sleep(d) => {}
             _ = cancel.cancelled() => {
@@ -994,7 +1334,10 @@ async fn run_one(hub: &Arc<Hub>, s: &Arc<Session>, prep: &Prep, msg_id: &str, ca
         }
         Ok(o) if o.is_error => (ToolState::Error, o),
         Ok(o) => (ToolState::Done, o),
-        Err(e) => (ToolState::Error, ref_tools::ToolOutput::err(format!("Tool crashed: {e}"))),
+        Err(e) => (
+            ToolState::Error,
+            ref_tools::ToolOutput::err(format!("Tool crashed: {e}")),
+        ),
     };
     finish_tool(hub, s, msg_id, idx, state, out);
     let mut st = s.lock();
@@ -1002,11 +1345,20 @@ async fn run_one(hub: &Arc<Hub>, s: &Arc<Session>, prep: &Prep, msg_id: &str, ca
 }
 
 /// Throttled live output (bash): updates the part's `meta.live_output` (tail 4KB) every ~200ms.
-fn live_output_sink(hub: &Arc<Hub>, s: &Arc<Session>, msg_id: &str, index: usize, enabled: bool) -> toolset::OutputSink {
+fn live_output_sink(
+    hub: &Arc<Hub>,
+    s: &Arc<Session>,
+    msg_id: &str,
+    index: usize,
+    enabled: bool,
+) -> toolset::OutputSink {
     if !enabled {
         return None;
     }
-    let buf = Arc::new(Mutex::new((String::new(), Instant::now() - Duration::from_secs(1))));
+    let buf = Arc::new(Mutex::new((
+        String::new(),
+        Instant::now() - Duration::from_secs(1),
+    )));
     let (hub, s, msg_id) = (Arc::downgrade(hub), Arc::downgrade(s), msg_id.to_string());
     Some(Arc::new(move |chunk: &str| {
         let tail = {
@@ -1022,7 +1374,9 @@ fn live_output_sink(hub: &Arc<Hub>, s: &Arc<Session>, msg_id: &str, index: usize
             b.1 = Instant::now();
             crate::util::tail_bytes(&b.0, 4096).to_string()
         };
-        let (Some(hub), Some(s)) = (hub.upgrade(), s.upgrade()) else { return };
+        let (Some(hub), Some(s)) = (hub.upgrade(), s.upgrade()) else {
+            return;
+        };
         update_tool(&hub, &s, &msg_id, index, |p| {
             if let Part::Tool { meta, .. } = p {
                 let mut m = match meta.take() {
@@ -1041,7 +1395,12 @@ fn live_output_sink(hub: &Arc<Hub>, s: &Arc<Session>, msg_id: &str, index: usize
 // ---------------------------------------------------------------------------
 
 fn maybe_title(hub: &Arc<Hub>, s: &Arc<Session>, st: &mut SessionState, msg: &Message) {
-    if st.title_started || !matches!(msg.source, MessageSource::Human | MessageSource::Spawn { .. }) {
+    if st.title_started
+        || !matches!(
+            msg.source,
+            MessageSource::Human | MessageSource::Spawn { .. }
+        )
+    {
         return;
     }
     let text = msg.raw_text();
@@ -1049,7 +1408,12 @@ fn maybe_title(hub: &Arc<Hub>, s: &Arc<Session>, st: &mut SessionState, msg: &Me
         return;
     }
     st.title_started = true;
-    let first = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("").to_string();
+    let first = text
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("")
+        .to_string();
     st.info.title = crate::util::truncate_chars(&first, 50);
     hub.emit_info(st);
     tokio::spawn(crate::title::generate(hub.clone(), s.clone(), text));

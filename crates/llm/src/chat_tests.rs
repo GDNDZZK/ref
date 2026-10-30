@@ -75,7 +75,10 @@ fn tool_images_without_vision_are_noted_inline() {
     let msgs = body["messages"].as_array().unwrap();
     // No synthetic "Attached image(s)" user message; the note goes into the tool result.
     assert_eq!(msgs[3]["role"], "tool");
-    assert_eq!(msgs[3]["content"], format!("fn main() {{}}\n\n{IMAGE_OMITTED}"));
+    assert_eq!(
+        msgs[3]["content"],
+        format!("fn main() {{}}\n\n{IMAGE_OMITTED}")
+    );
     assert_eq!(msgs[4], json!({"role": "user", "content": "thanks"}));
     assert_eq!(msgs.len(), 5);
 }

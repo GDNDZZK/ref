@@ -203,13 +203,21 @@ pub struct CompactionConfig {
 
 impl Default for CompactionConfig {
     fn default() -> Self {
-        CompactionConfig { auto: true, recommend: 0.6, threshold: 0.9 }
+        CompactionConfig {
+            auto: true,
+            recommend: 0.6,
+            threshold: 0.9,
+        }
     }
 }
 
 impl CompactionConfig {
     fn resolve(v: f64, max: u64) -> u64 {
-        if v > 1.0 { (v as u64).min(max.max(1)) } else { (max as f64 * v) as u64 }
+        if v > 1.0 {
+            (v as u64).min(max.max(1))
+        } else {
+            (max as f64 * v) as u64
+        }
     }
     pub fn recommend_tokens(&self, max: u64, model_override: Option<u64>) -> u64 {
         model_override.unwrap_or_else(|| Self::resolve(self.recommend, max))
@@ -249,7 +257,11 @@ impl Config {
         }
         for (pid, p) in &self.providers {
             if let Some((mid, _)) = p.models.iter().next() {
-                return Some(ModelRef { provider: pid.clone(), model: mid.clone(), variant: None });
+                return Some(ModelRef {
+                    provider: pid.clone(),
+                    model: mid.clone(),
+                    variant: None,
+                });
             }
         }
         None
@@ -272,7 +284,10 @@ impl Config {
     /// and there are no pattern-specific allow/ask rules) — such tools are not sent to the model.
     pub fn tool_disabled(&self, agent: &str, tool: &str) -> bool {
         let g = self.permission.disabled(tool);
-        let a = self.agents.get(agent).and_then(|a| a.permission.disabled_opt(tool));
+        let a = self
+            .agents
+            .get(agent)
+            .and_then(|a| a.permission.disabled_opt(tool));
         a.unwrap_or(g)
     }
 

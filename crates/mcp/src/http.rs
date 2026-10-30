@@ -132,7 +132,11 @@ impl SseParser {
         if data.ends_with('\n') {
             data.pop();
         }
-        out.push(SseEvent { event, data, id: self.id.clone() });
+        out.push(SseEvent {
+            event,
+            data,
+            id: self.id.clone(),
+        });
     }
 }
 
@@ -143,7 +147,9 @@ impl SseParser {
 enum Mode {
     Streamable,
     /// Legacy HTTP+SSE: POST to `endpoint`, responses arrive on the GET stream.
-    Legacy { endpoint: Url },
+    Legacy {
+        endpoint: Url,
+    },
 }
 
 pub(crate) struct HttpTransport {
@@ -164,10 +170,14 @@ pub(crate) struct HttpTransport {
 }
 
 fn is_loopback(url: &Url) -> bool {
-    let Some(host) = url.host_str() else { return false };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
     let host = host.trim_start_matches('[').trim_end_matches(']');
     host.eq_ignore_ascii_case("localhost")
-        || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
 }
 
 fn content_type(resp: &reqwest::Response) -> String {
@@ -192,7 +202,11 @@ async fn error_body(resp: reqwest::Response) -> String {
     let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
     let body: String = body.trim().chars().take(500).collect();
-    if body.is_empty() { format!("HTTP {status}") } else { format!("HTTP {status}: {body}") }
+    if body.is_empty() {
+        format!("HTTP {status}")
+    } else {
+        format!("HTTP {status}: {body}")
+    }
 }
 
 impl HttpTransport {
@@ -205,8 +219,10 @@ impl HttpTransport {
         let url = Url::parse(url).with_context(|| format!("invalid MCP url {url:?}"))?;
         let mut map = HeaderMap::new();
         for (k, v) in headers {
-            let name = HeaderName::from_bytes(k.as_bytes()).with_context(|| format!("invalid header name {k:?}"))?;
-            let value = HeaderValue::from_str(v).with_context(|| format!("invalid value for header {k:?}"))?;
+            let name = HeaderName::from_bytes(k.as_bytes())
+                .with_context(|| format!("invalid header name {k:?}"))?;
+            let value = HeaderValue::from_str(v)
+                .with_context(|| format!("invalid value for header {k:?}"))?;
             map.insert(name, value);
         }
         let mut builder = reqwest::Client::builder()
@@ -263,7 +279,10 @@ impl HttpTransport {
 
     /// Common headers: user headers, session id and protocol version.
     fn base_request(&self, method: reqwest::Method, url: Url) -> reqwest::RequestBuilder {
-        let mut req = self.client.request(method, url).headers(self.headers.clone());
+        let mut req = self
+            .client
+            .request(method, url)
+            .headers(self.headers.clone());
         if let Some(sid) = self.session() {
             req = req.header(SESSION_HEADER, sid);
         }
@@ -305,21 +324,30 @@ impl HttpTransport {
                 if matches!(status.as_u16(), 400 | 404 | 405) && sid_used.is_none() {
                     let primary = error_body(resp).await;
                     tracing::debug!(server = %self.shared.name, "streamable HTTP initialize failed ({primary}); trying legacy SSE");
-                    let endpoint = self
-                        .open_legacy()
-                        .await
-                        .map_err(|e| anyhow!("{primary} (legacy SSE fallback also failed: {e:#})"))?;
+                    let endpoint = self.open_legacy().await.map_err(|e| {
+                        anyhow!("{primary} (legacy SSE fallback also failed: {e:#})")
+                    })?;
                     return self.send_legacy(endpoint, msg).await;
                 }
-                if let Some(sid) = resp.headers().get(SESSION_HEADER).and_then(|v| v.to_str().ok()) {
+                if let Some(sid) = resp
+                    .headers()
+                    .get(SESSION_HEADER)
+                    .and_then(|v| v.to_str().ok())
+                {
                     *self.session_id.lock().unwrap() = Some(sid.to_string());
                 }
             }
 
-            if status == StatusCode::NOT_FOUND && sid_used.is_some() && !retried && !is_initialize(msg) {
+            if status == StatusCode::NOT_FOUND
+                && sid_used.is_some()
+                && !retried
+                && !is_initialize(msg)
+            {
                 tracing::debug!(server = %self.shared.name, "MCP session expired; re-initializing");
                 retried = true;
-                self.reinitialize(sid_used).await.context("re-initializing expired MCP session")?;
+                self.reinitialize(sid_used)
+                    .await
+                    .context("re-initializing expired MCP session")?;
                 continue;
             }
             if !status.is_success() {
@@ -340,8 +368,12 @@ impl HttpTransport {
             let id = req_id.as_ref().unwrap();
             match pump(&self.shared, resp, Some(id), false).await {
                 Ok(Some(_)) => {}
-                Ok(None) => self.shared.fail_pending(id, "MCP server closed the response without a result"),
-                Err(e) => self.shared.fail_pending(id, &format!("MCP response stream failed: {e:#}")),
+                Ok(None) => self
+                    .shared
+                    .fail_pending(id, "MCP server closed the response without a result"),
+                Err(e) => self
+                    .shared
+                    .fail_pending(id, &format!("MCP response stream failed: {e:#}")),
             }
             return Ok(());
         }
@@ -354,15 +386,26 @@ impl HttpTransport {
             return Ok(()); // someone else already re-initialized
         }
         *self.session_id.lock().unwrap() = None;
-        let mut init = self.init_msg.lock().unwrap().clone().ok_or_else(|| anyhow!("no initialize request recorded"))?;
-        let seq = self.reinit_seq.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let mut init = self
+            .init_msg
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or_else(|| anyhow!("no initialize request recorded"))?;
+        let seq = self
+            .reinit_seq
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let id = json!(format!("ref-reinit-{seq}"));
         init["id"] = id.clone();
         let resp = self.post(self.url.clone(), &init).await?;
         if !resp.status().is_success() {
             bail!("{}", error_body(resp).await);
         }
-        if let Some(sid) = resp.headers().get(SESSION_HEADER).and_then(|v| v.to_str().ok()) {
+        if let Some(sid) = resp
+            .headers()
+            .get(SESSION_HEADER)
+            .and_then(|v| v.to_str().ok())
+        {
             *self.session_id.lock().unwrap() = Some(sid.to_string());
         }
         let reply = tokio::time::timeout(self.timeout, pump(&self.shared, resp, Some(&id), true))
@@ -370,13 +413,19 @@ impl HttpTransport {
             .map_err(|_| anyhow!("timed out"))??
             .ok_or_else(|| anyhow!("no initialize response"))?;
         let reply = match reply {
-            Value::Array(items) => items.into_iter().find(|m| contains_response(m, &id)).unwrap_or(Value::Null),
+            Value::Array(items) => items
+                .into_iter()
+                .find(|m| contains_response(m, &id))
+                .unwrap_or(Value::Null),
             other => other,
         };
         if let Some(err) = reply.get("error") {
             return Err(rpc_error(err));
         }
-        if let Some(v) = reply.pointer("/result/protocolVersion").and_then(Value::as_str) {
+        if let Some(v) = reply
+            .pointer("/result/protocolVersion")
+            .and_then(Value::as_str)
+        {
             self.set_protocol_version(v);
         }
         let note = json!({"jsonrpc": "2.0", "method": "notifications/initialized"});
@@ -447,8 +496,13 @@ impl HttpTransport {
             .await
             .map_err(|_| anyhow!("timed out waiting for endpoint event"))?
             .map_err(|_| anyhow!("SSE stream closed before endpoint event"))?;
-        let endpoint = self.url.join(&path).with_context(|| format!("invalid endpoint {path:?}"))?;
-        *self.mode.lock().unwrap() = Mode::Legacy { endpoint: endpoint.clone() };
+        let endpoint = self
+            .url
+            .join(&path)
+            .with_context(|| format!("invalid endpoint {path:?}"))?;
+        *self.mode.lock().unwrap() = Mode::Legacy {
+            endpoint: endpoint.clone(),
+        };
         Ok(endpoint)
     }
 
@@ -506,7 +560,11 @@ impl GetStream {
     async fn run(self, shared: Arc<Shared>) {
         let mut backoff = Duration::from_secs(1);
         loop {
-            let mut req = self.client.get(self.url.clone()).headers(self.headers.clone()).header(ACCEPT, "text/event-stream");
+            let mut req = self
+                .client
+                .get(self.url.clone())
+                .headers(self.headers.clone())
+                .header(ACCEPT, "text/event-stream");
             if let Some(s) = &self.session {
                 req = req.header(SESSION_HEADER, s);
             }
@@ -520,7 +578,8 @@ impl GetStream {
                     return;
                 }
             };
-            if !resp.status().is_success() || !content_type(&resp).starts_with("text/event-stream") {
+            if !resp.status().is_success() || !content_type(&resp).starts_with("text/event-stream")
+            {
                 // 405 = server doesn't offer a GET stream; anything else: give up quietly.
                 tracing::debug!(server = %shared.name, "no GET SSE stream (HTTP {})", resp.status());
                 return;
@@ -557,7 +616,10 @@ fn dispatch_data(shared: &Shared, data: &str) {
 }
 
 /// Read an SSE response, calling `on_event` for each event until it returns false.
-async fn read_sse(mut resp: reqwest::Response, mut on_event: impl FnMut(SseEvent) -> bool) -> Result<()> {
+async fn read_sse(
+    mut resp: reqwest::Response,
+    mut on_event: impl FnMut(SseEvent) -> bool,
+) -> Result<()> {
     let mut parser = SseParser::default();
     let mut events = Vec::new();
     loop {
@@ -580,7 +642,12 @@ async fn read_sse(mut resp: reqwest::Response, mut on_event: impl FnMut(SseEvent
 /// Consume a POST response body (JSON or SSE), dispatching messages to `shared`.
 /// Returns the message containing the response for `id` once seen (reading stops
 /// there). With `intercept`, that message is returned instead of dispatched.
-async fn pump(shared: &Shared, resp: reqwest::Response, id: Option<&Value>, intercept: bool) -> Result<Option<Value>> {
+async fn pump(
+    shared: &Shared,
+    resp: reqwest::Response,
+    id: Option<&Value>,
+    intercept: bool,
+) -> Result<Option<Value>> {
     let ct = content_type(&resp);
     let mut found = None;
     let mut handle = |msg: Value| -> bool {
@@ -639,7 +706,11 @@ mod tests {
 
     #[test]
     fn sse_basic_and_split() {
-        let ev = parse_all(&[b"\xEF\xBB\xBFevent: endpoint\r", b"\ndata: /msg?x=1\r\n\r\n", b": ping\n\ndata:a\ndata: b\n\n"]);
+        let ev = parse_all(&[
+            b"\xEF\xBB\xBFevent: endpoint\r",
+            b"\ndata: /msg?x=1\r\n\r\n",
+            b": ping\n\ndata:a\ndata: b\n\n",
+        ]);
         assert_eq!(ev.len(), 2);
         assert_eq!(ev[0].event, "endpoint");
         assert_eq!(ev[0].data, "/msg?x=1");
@@ -659,6 +730,13 @@ mod tests {
     #[test]
     fn sse_event_without_data_is_skipped() {
         let ev = parse_all(&[b"event: x\n\nretry: 10\n\ndata\n\n"]);
-        assert_eq!(ev, vec![SseEvent { event: String::new(), data: String::new(), id: None }]);
+        assert_eq!(
+            ev,
+            vec![SseEvent {
+                event: String::new(),
+                data: String::new(),
+                id: None
+            }]
+        );
     }
 }

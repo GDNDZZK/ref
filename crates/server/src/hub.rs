@@ -57,10 +57,23 @@ pub struct OutQueue {
 impl OutQueue {
     pub fn push(&self, f: ServerFrame) {
         let mut q = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        if let ServerFrame::Event { session_id, event: SessionEvent::Delta { message_id, index, delta } } = &f
+        if let ServerFrame::Event {
+            session_id,
+            event:
+                SessionEvent::Delta {
+                    message_id,
+                    index,
+                    delta,
+                },
+        } = &f
             && let Some(ServerFrame::Event {
                 session_id: s2,
-                event: SessionEvent::Delta { message_id: m2, index: i2, delta: d2 },
+                event:
+                    SessionEvent::Delta {
+                        message_id: m2,
+                        index: i2,
+                        delta: d2,
+                    },
             }) = q.back_mut()
             && s2 == session_id
             && m2 == message_id
@@ -86,14 +99,26 @@ impl OutQueue {
     }
 
     pub fn drain(&self) -> Vec<ServerFrame> {
-        self.inner.lock().unwrap_or_else(|e| e.into_inner()).drain(..).collect()
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .drain(..)
+            .collect()
     }
 
     /// True if every queued frame is a delta (worth waiting a bit to coalesce more).
     pub fn only_deltas(&self) -> bool {
         let q = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         !q.is_empty()
-            && q.iter().all(|f| matches!(f, ServerFrame::Event { event: SessionEvent::Delta { .. }, .. }))
+            && q.iter().all(|f| {
+                matches!(
+                    f,
+                    ServerFrame::Event {
+                        event: SessionEvent::Delta { .. },
+                        ..
+                    }
+                )
+            })
     }
 }
 
@@ -209,20 +234,36 @@ impl Hub {
     // ----- sessions -----
 
     pub fn session(&self, id: &str) -> Option<Arc<Session>> {
-        self.sessions.lock().unwrap_or_else(|e| e.into_inner()).get(id).cloned()
+        self.sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(id)
+            .cloned()
     }
 
     pub fn sessions(&self) -> Vec<Arc<Session>> {
-        self.sessions.lock().unwrap_or_else(|e| e.into_inner()).values().cloned().collect()
+        self.sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .cloned()
+            .collect()
     }
 
     pub fn insert_session(&self, s: Arc<Session>) {
-        self.sessions.lock().unwrap_or_else(|e| e.into_inner()).insert(s.id.clone(), s);
+        self.sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(s.id.clone(), s);
         self.mark_dirty();
     }
 
     pub fn remove_session(&self, id: &str) -> Option<Arc<Session>> {
-        let r = self.sessions.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
+        let r = self
+            .sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(id);
         for c in self.conns() {
             let mut st = c.lock();
             st.fg.remove(id);
@@ -240,7 +281,9 @@ impl Hub {
 
     /// Whether a live session (other than `except`) has this exact name.
     pub fn name_taken(&self, name: &str, except: Option<&str>) -> bool {
-        self.sessions().iter().any(|s| Some(s.id.as_str()) != except && s.lock().info.name == name)
+        self.sessions()
+            .iter()
+            .any(|s| Some(s.id.as_str()) != except && s.lock().info.name == name)
     }
 
     // ----- events -----
@@ -251,12 +294,21 @@ impl Hub {
         // Frontends get image stubs (see `ImageData`).
         match &mut event {
             SessionEvent::Message { message } => message.strip_image_data(),
-            SessionEvent::Part { message_id, index, part } => part.strip_image_data(message_id, *index),
-            SessionEvent::Reset { messages, .. } | SessionEvent::Queue { messages } => messages.iter_mut().for_each(Message::strip_image_data),
+            SessionEvent::Part {
+                message_id,
+                index,
+                part,
+            } => part.strip_image_data(message_id, *index),
+            SessionEvent::Reset { messages, .. } | SessionEvent::Queue { messages } => {
+                messages.iter_mut().for_each(Message::strip_image_data)
+            }
             _ => {}
         }
         let conns = self.conns();
-        let mut frame = Some(ServerFrame::Event { session_id: sid.to_string(), event });
+        let mut frame = Some(ServerFrame::Event {
+            session_id: sid.to_string(),
+            event,
+        });
         let targets: Vec<&Arc<Conn>> = conns
             .iter()
             .filter(|c| {
@@ -266,7 +318,11 @@ impl Hub {
             .collect();
         let n = targets.len();
         for (i, c) in targets.into_iter().enumerate() {
-            let f = if i + 1 == n { frame.take() } else { frame.clone() };
+            let f = if i + 1 == n {
+                frame.take()
+            } else {
+                frame.clone()
+            };
             if let Some(f) = f {
                 c.send(f);
             }
@@ -275,7 +331,12 @@ impl Hub {
 
     /// Emit an `Info` event and schedule a session-list broadcast.
     pub fn emit_info(&self, st: &SessionState) {
-        self.emit(&st.info.id, SessionEvent::Info { info: st.info.clone() });
+        self.emit(
+            &st.info.id,
+            SessionEvent::Info {
+                info: st.info.clone(),
+            },
+        );
         self.mark_dirty();
     }
 
@@ -294,7 +355,10 @@ impl Hub {
         let text = text.into();
         for c in self.conns() {
             if c.lock().hello {
-                c.send(ServerFrame::Toast { level, text: text.clone() });
+                c.send(ServerFrame::Toast {
+                    level,
+                    text: text.clone(),
+                });
             }
         }
     }
@@ -302,7 +366,12 @@ impl Hub {
     // ----- connections -----
 
     pub fn conns(&self) -> Vec<Arc<Conn>> {
-        self.conns.lock().unwrap_or_else(|e| e.into_inner()).values().cloned().collect()
+        self.conns
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .cloned()
+            .collect()
     }
 
     pub fn add_conn(&self) -> Arc<Conn> {
@@ -313,7 +382,10 @@ impl Hub {
             st: Mutex::new(ConnState::default()),
             kill: CancellationToken::new(),
         });
-        self.conns.lock().unwrap_or_else(|e| e.into_inner()).insert(id, c.clone());
+        self.conns
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, c.clone());
         c
     }
 
@@ -329,7 +401,14 @@ impl Hub {
     }
 
     pub fn remove_conn(self: &Arc<Self>, id: u64) {
-        let Some(c) = self.conns.lock().unwrap_or_else(|e| e.into_inner()).remove(&id) else { return };
+        let Some(c) = self
+            .conns
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&id)
+        else {
+            return;
+        };
         c.kill.cancel();
         let (fg, was_frontend) = {
             let mut st = c.lock();
@@ -363,7 +442,12 @@ impl Hub {
                 tokio::spawn(async move {
                     tokio::time::sleep(Duration::from_secs(secs)).await;
                     let Some(hub) = hub.upgrade() else { return };
-                    let still = hub.idle.lock().unwrap_or_else(|e| e.into_inner()).generation == generation;
+                    let still = hub
+                        .idle
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .generation
+                        == generation;
                     if still && hub.frontend_count() == 0 {
                         tracing::info!("idle timeout reached; shutting down");
                         hub.shutdown.cancel();
@@ -397,7 +481,9 @@ async fn broadcaster(hub: Weak<Hub>) {
         last = Some(key);
         for c in h.conns() {
             if c.lock().hello {
-                c.send(ServerFrame::Sessions { sessions: infos.clone() });
+                c.send(ServerFrame::Sessions {
+                    sessions: infos.clone(),
+                });
             }
         }
     }
@@ -423,17 +509,31 @@ mod tests {
         let q = OutQueue::default();
         let d = |t: &str| ServerFrame::Event {
             session_id: "s".into(),
-            event: SessionEvent::Delta { message_id: "m".into(), index: 0, delta: Delta::Text { text: t.into() } },
+            event: SessionEvent::Delta {
+                message_id: "m".into(),
+                index: 0,
+                delta: Delta::Text { text: t.into() },
+            },
         };
         q.push(d("a"));
         q.push(d("b"));
         assert!(q.only_deltas());
-        q.push(ServerFrame::Toast { level: ref_proto::ToastLevel::Info, text: "x".into() });
+        q.push(ServerFrame::Toast {
+            level: ref_proto::ToastLevel::Info,
+            text: "x".into(),
+        });
         q.push(d("c"));
         let v = q.drain();
         assert_eq!(v.len(), 3);
         match &v[0] {
-            ServerFrame::Event { event: SessionEvent::Delta { delta: Delta::Text { text }, .. }, .. } => {
+            ServerFrame::Event {
+                event:
+                    SessionEvent::Delta {
+                        delta: Delta::Text { text },
+                        ..
+                    },
+                ..
+            } => {
                 assert_eq!(text, "ab")
             }
             _ => panic!(),

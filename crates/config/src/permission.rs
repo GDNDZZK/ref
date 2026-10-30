@@ -98,7 +98,11 @@ impl PermissionRules {
         let mut warns = Vec::new();
         match v {
             Value::String(s) => match Action::parse(s) {
-                Some(a) => rules.push(Rule { tool: "*".into(), pattern: "*".into(), action: a }),
+                Some(a) => rules.push(Rule {
+                    tool: "*".into(),
+                    pattern: "*".into(),
+                    action: a,
+                }),
                 None => warns.push(format!("invalid permission action {s:?}")),
             },
             Value::Object(map) => {
@@ -106,8 +110,14 @@ impl PermissionRules {
                     for tool in aliases(k) {
                         match val {
                             Value::String(s) => match Action::parse(s) {
-                                Some(a) => rules.push(Rule { tool: tool.clone(), pattern: "*".into(), action: a }),
-                                None => warns.push(format!("invalid permission action {s:?} for {k}")),
+                                Some(a) => rules.push(Rule {
+                                    tool: tool.clone(),
+                                    pattern: "*".into(),
+                                    action: a,
+                                }),
+                                None => {
+                                    warns.push(format!("invalid permission action {s:?} for {k}"))
+                                }
                             },
                             Value::Object(pats) => {
                                 for (pat, pv) in pats {
@@ -117,7 +127,9 @@ impl PermissionRules {
                                             pattern: pat.clone(),
                                             action: a,
                                         }),
-                                        None => warns.push(format!("invalid permission action for {k}.{pat}")),
+                                        None => warns.push(format!(
+                                            "invalid permission action for {k}.{pat}"
+                                        )),
                                     }
                                 }
                             }
@@ -211,7 +223,9 @@ mod tests {
 
     #[test]
     fn last_wins() {
-        let (r, w) = PermissionRules::from_value(&json!({"*": "allow", "bash": {"*": "ask", "git *": "allow"}}));
+        let (r, w) = PermissionRules::from_value(
+            &json!({"*": "allow", "bash": {"*": "ask", "git *": "allow"}}),
+        );
         assert!(w.is_empty());
         assert_eq!(r.evaluate("read", ""), Some(Action::Allow));
         assert_eq!(r.evaluate("bash", "rm -rf /"), Some(Action::Ask));
@@ -229,9 +243,17 @@ mod tests {
 
     #[test]
     fn webfetch_url_patterns_and_aliases() {
-        let (r, _) = PermissionRules::from_value(&json!({"webfetch": {"*": "ask", "https://docs.rs/*": "allow"}}));
-        assert_eq!(r.evaluate("webfetch", "https://docs.rs/tokio/latest/tokio/"), Some(Action::Allow));
-        assert_eq!(r.evaluate("webfetch", "https://example.com/"), Some(Action::Ask));
+        let (r, _) = PermissionRules::from_value(
+            &json!({"webfetch": {"*": "ask", "https://docs.rs/*": "allow"}}),
+        );
+        assert_eq!(
+            r.evaluate("webfetch", "https://docs.rs/tokio/latest/tokio/"),
+            Some(Action::Allow)
+        );
+        assert_eq!(
+            r.evaluate("webfetch", "https://example.com/"),
+            Some(Action::Ask)
+        );
         let (r, _) = PermissionRules::from_value(&json!({"fetch": "deny"}));
         assert!(r.disabled("webfetch"));
     }

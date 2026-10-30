@@ -5,8 +5,8 @@ use std::sync::{Mutex, OnceLock};
 
 use ratatui::style::{Color, Modifier, Style};
 use syntect::highlighting::{
-    Color as SColor, FontStyle, HighlightState, Highlighter, RangedHighlightIterator, ScopeSelectors, StyleModifier, Theme,
-    ThemeItem, ThemeSettings,
+    Color as SColor, FontStyle, HighlightState, Highlighter, RangedHighlightIterator,
+    ScopeSelectors, StyleModifier, Theme, ThemeItem, ThemeSettings,
 };
 use syntect::parsing::{ParseState, ScopeStack, SyntaxReference, SyntaxSet};
 
@@ -65,7 +65,10 @@ fn hl_theme() -> &'static Theme {
 fn find_syntax(lang: &str) -> Option<&'static SyntaxReference> {
     let ss = syntaxes();
     let l = lang.trim().to_ascii_lowercase();
-    let l = l.split(|c: char| c == ',' || c.is_whitespace()).next().unwrap_or("");
+    let l = l
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .next()
+        .unwrap_or("");
     if l.is_empty() {
         return None;
     }
@@ -82,7 +85,8 @@ fn find_syntax(lang: &str) -> Option<&'static SyntaxReference> {
         "toml" => "toml",
         other => other,
     };
-    ss.find_syntax_by_token(alias).or_else(|| ss.find_syntax_by_extension(alias))
+    ss.find_syntax_by_token(alias)
+        .or_else(|| ss.find_syntax_by_extension(alias))
 }
 
 pub type HlLine = Vec<(Style, String)>;
@@ -127,7 +131,12 @@ pub fn highlight(lang: &str, lines: &[&str]) -> Option<Vec<HlLine>> {
         if e.lang != lang {
             continue;
         }
-        let common = e.lines.iter().zip(lines.iter()).take_while(|(a, b)| a.as_str() == **b).count();
+        let common = e
+            .lines
+            .iter()
+            .zip(lines.iter())
+            .take_while(|(a, b)| a.as_str() == **b)
+            .count();
         if best.is_none_or(|(_, c)| common > c) {
             best = Some((i, common));
         }
@@ -135,7 +144,12 @@ pub fn highlight(lang: &str, lines: &[&str]) -> Option<Vec<HlLine>> {
     let (mut entry, common) = match best {
         Some((i, c)) if c > 0 => (guard.swap_remove(i), c),
         _ => (
-            Entry { lang: lang.to_string(), lines: Vec::new(), states: Vec::new(), out: Vec::new() },
+            Entry {
+                lang: lang.to_string(),
+                lines: Vec::new(),
+                states: Vec::new(),
+                out: Vec::new(),
+            },
             0,
         ),
     };
@@ -144,13 +158,17 @@ pub fn highlight(lang: &str, lines: &[&str]) -> Option<Vec<HlLine>> {
     entry.out.truncate(common);
     let (mut ps, mut hs) = match entry.states.last() {
         Some((p, h)) => (p.clone(), h.clone()),
-        None => (ParseState::new(syntax), HighlightState::new(&highlighter, ScopeStack::new())),
+        None => (
+            ParseState::new(syntax),
+            HighlightState::new(&highlighter, ScopeStack::new()),
+        ),
     };
     for line in &lines[common..] {
         let with_nl = format!("{line}\n");
         let ops = ps.parse_line(&with_nl, syntaxes()).unwrap_or_default();
         let mut hl: HlLine = Vec::new();
-        for (style, piece, _) in RangedHighlightIterator::new(&mut hs, &ops, &with_nl, &highlighter) {
+        for (style, piece, _) in RangedHighlightIterator::new(&mut hs, &ops, &with_nl, &highlighter)
+        {
             let piece = piece.trim_end_matches('\n');
             if !piece.is_empty() {
                 hl.push((conv(style), piece.to_string()));

@@ -33,13 +33,17 @@ pub fn parse_instance(s: &str) -> Option<InstanceInfo> {
 /// Reads all instance files (live pids only, newest first). Removes files of dead pids.
 pub fn instances(dir: &Path) -> Vec<InstanceInfo> {
     let mut out = Vec::new();
-    let Ok(rd) = std::fs::read_dir(dir) else { return out };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return out;
+    };
     for e in rd.flatten() {
         let p = e.path();
         if p.extension().and_then(|x| x.to_str()) != Some("json") {
             continue;
         }
-        let Ok(s) = std::fs::read_to_string(&p) else { continue };
+        let Ok(s) = std::fs::read_to_string(&p) else {
+            continue;
+        };
         match parse_instance(&s) {
             Some(i) if pid_alive(i.pid) => out.push(i),
             Some(_) => {
@@ -58,7 +62,10 @@ pub fn endpoint_for(i: &InstanceInfo) -> Endpoint {
         h if h.contains(':') && !h.starts_with('[') => format!("[{h}]"),
         h => h.to_string(),
     };
-    Endpoint { url: format!("ws://{host}:{}/", i.port), token: Some(i.token.clone()) }
+    Endpoint {
+        url: format!("ws://{host}:{}/", i.port),
+        token: Some(i.token.clone()),
+    }
 }
 
 /// Random free port in 10000..=65535 (bind-tested on 127.0.0.1).
@@ -90,7 +97,10 @@ pub fn server_binary() -> PathBuf {
 pub fn spawn_server(port: u16) -> std::io::Result<()> {
     use std::process::{Command, Stdio};
     let mut cmd = Command::new(server_binary());
-    cmd.args(["--port", &port.to_string(), "--idle-timeout", "0"]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    cmd.args(["--port", &port.to_string(), "--idle-timeout", "0"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     ref_sys::detach(&mut cmd);
     let mut child = cmd.spawn()?;
     // Reap it if it exits while we're alive.
@@ -111,7 +121,12 @@ impl SpawnLock {
     /// (callers then proceed unlocked rather than hanging).
     pub async fn acquire(dir: &Path, timeout: Duration) -> Option<SpawnLock> {
         std::fs::create_dir_all(dir).ok()?;
-        let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(dir.join(".spawn.lock")).ok()?;
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(dir.join(".spawn.lock"))
+            .ok()?;
         let start = std::time::Instant::now();
         loop {
             match file.try_lock() {
@@ -158,7 +173,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ref-tui-test-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let me = std::process::id();
-        let live = format!(r#"{{"pid":{me},"port":1,"bind":"127.0.0.1","allow_hosts":[],"idle_timeout":0,"started_at":1,"version":"x","token":"t"}}"#);
+        let live = format!(
+            r#"{{"pid":{me},"port":1,"bind":"127.0.0.1","allow_hosts":[],"idle_timeout":0,"started_at":1,"version":"x","token":"t"}}"#
+        );
         std::fs::write(dir.join("a.json"), live).unwrap();
         let dead = r#"{"pid":2147483000,"port":2,"bind":"127.0.0.1","allow_hosts":[],"idle_timeout":0,"started_at":2,"version":"x","token":"t"}"#;
         std::fs::write(dir.join("b.json"), dead).unwrap();
@@ -175,9 +192,17 @@ mod tests {
         let a = SpawnLock::acquire(&dir, Duration::from_millis(100)).await;
         assert!(a.is_some());
         // The lock is per open file: a second open in the same process conflicts too.
-        assert!(SpawnLock::acquire(&dir, Duration::from_millis(120)).await.is_none());
+        assert!(
+            SpawnLock::acquire(&dir, Duration::from_millis(120))
+                .await
+                .is_none()
+        );
         drop(a);
-        assert!(SpawnLock::acquire(&dir, Duration::from_millis(100)).await.is_some());
+        assert!(
+            SpawnLock::acquire(&dir, Duration::from_millis(100))
+                .await
+                .is_some()
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

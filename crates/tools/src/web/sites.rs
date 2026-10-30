@@ -8,7 +8,11 @@ pub enum Special {
     /// Fetch this URL instead (e.g. the raw file behind a GitHub file page).
     Rewrite { url: Url, note: String },
     /// A GitHub issue or pull request, read from the REST API.
-    GithubIssue { owner: String, repo: String, number: u64 },
+    GithubIssue {
+        owner: String,
+        repo: String,
+        number: u64,
+    },
 }
 
 pub fn special(url: &Url) -> Option<Special> {
@@ -18,20 +22,38 @@ pub fn special(url: &Url) -> Option<Special> {
         // /<owner>/<repo>/blob/<ref>/<path…> → raw.githubusercontent.com/<owner>/<repo>/<ref>/<path…>
         if seg.len() >= 5 && seg[2] == "blob" {
             // Segments are already percent-encoded.
-            let raw = Url::parse(&format!("https://raw.githubusercontent.com/{}/{}/{}", seg[0], seg[1], seg[3..].join("/"))).ok()?;
-            return Some(Special::Rewrite { url: raw, note: format!("Raw file behind the GitHub page {url}") });
+            let raw = Url::parse(&format!(
+                "https://raw.githubusercontent.com/{}/{}/{}",
+                seg[0],
+                seg[1],
+                seg[3..].join("/")
+            ))
+            .ok()?;
+            return Some(Special::Rewrite {
+                url: raw,
+                note: format!("Raw file behind the GitHub page {url}"),
+            });
         }
-        if seg.len() == 4 && matches!(seg[2], "issues" | "pull")
-            && let Ok(number) = seg[3].parse::<u64>() {
-                return Some(Special::GithubIssue { owner: seg[0].into(), repo: seg[1].into(), number });
-            }
+        if seg.len() == 4
+            && matches!(seg[2], "issues" | "pull")
+            && let Ok(number) = seg[3].parse::<u64>()
+        {
+            return Some(Special::GithubIssue {
+                owner: seg[0].into(),
+                repo: seg[1].into(),
+                number,
+            });
+        }
     }
     None
 }
 
 /// API token for GitHub requests (higher rate limit, private repositories), if configured.
 pub fn github_token() -> Option<String> {
-    ["GITHUB_TOKEN", "GH_TOKEN"].iter().filter_map(|k| std::env::var(k).ok()).find(|t| !t.trim().is_empty())
+    ["GITHUB_TOKEN", "GH_TOKEN"]
+        .iter()
+        .filter_map(|k| std::env::var(k).ok())
+        .find(|t| !t.trim().is_empty())
 }
 
 /// Markdown for an issue / pull request from the `issues/<n>` and `issues/<n>/comments` API
@@ -44,14 +66,35 @@ pub fn github_issue_markdown(issue: &Value, comments: &[Value]) -> (String, Stri
     let number = issue.get("number").and_then(Value::as_u64).unwrap_or(0);
     let title = s(issue, "title");
     let mut state = s(issue, "state");
-    if is_pr && issue["pull_request"].get("merged_at").is_some_and(|m| !m.is_null()) {
+    if is_pr
+        && issue["pull_request"]
+            .get("merged_at")
+            .is_some_and(|m| !m.is_null())
+    {
         state = "merged".into();
     } else if !s(issue, "state_reason").is_empty() && state == "closed" {
         state = format!("closed ({})", s(issue, "state_reason").replace('_', " "));
     }
-    let labels: Vec<String> = issue.get("labels").and_then(Value::as_array).map(|a| a.iter().map(|l| s(l, "name")).filter(|n| !n.is_empty()).collect()).unwrap_or_default();
+    let labels: Vec<String> = issue
+        .get("labels")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .map(|l| s(l, "name"))
+                .filter(|n| !n.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
     let mut md = format!("# {title} (#{number})\n\n");
-    let mut meta = vec![if is_pr { format!("Pull request, {state}") } else { format!("Issue, {state}") }, format!("by {}", user(issue)), format!("opened {}", day(s(issue, "created_at")))];
+    let mut meta = vec![
+        if is_pr {
+            format!("Pull request, {state}")
+        } else {
+            format!("Issue, {state}")
+        },
+        format!("by {}", user(issue)),
+        format!("opened {}", day(s(issue, "created_at"))),
+    ];
     if !labels.is_empty() {
         meta.push(format!("labels: {}", labels.join(", ")));
     }
@@ -61,14 +104,27 @@ pub fn github_issue_markdown(issue: &Value, comments: &[Value]) -> (String, Stri
     md.push_str(&meta.join(" · "));
     md.push_str("\n\n");
     let body = s(issue, "body");
-    md.push_str(if body.trim().is_empty() { "(no description)" } else { body.trim() });
+    md.push_str(if body.trim().is_empty() {
+        "(no description)"
+    } else {
+        body.trim()
+    });
     md.push('\n');
     for c in comments {
-        md.push_str(&format!("\n---\n\n**{}** · {}\n\n{}\n", user(c), day(s(c, "created_at")), s(c, "body").trim()));
+        md.push_str(&format!(
+            "\n---\n\n**{}** · {}\n\n{}\n",
+            user(c),
+            day(s(c, "created_at")),
+            s(c, "body").trim()
+        ));
     }
     let total = issue.get("comments").and_then(Value::as_u64).unwrap_or(0) as usize;
     if total > comments.len() {
-        md.push_str(&format!("\n---\n\n({} more comments not shown: {}?page=2)\n", total - comments.len(), s(issue, "comments_url")));
+        md.push_str(&format!(
+            "\n---\n\n({} more comments not shown: {}?page=2)\n",
+            total - comments.len(),
+            s(issue, "comments_url")
+        ));
     }
     (title, md)
 }

@@ -3,7 +3,10 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use ref_proto::{Delta, ImageData, Message, MessageSource, Part, PermissionRequest, Role, SessionEvent, SessionInfo, SessionSnapshot, ToolState};
+use ref_proto::{
+    Delta, ImageData, Message, MessageSource, Part, PermissionRequest, Role, SessionEvent,
+    SessionInfo, SessionSnapshot, ToolState,
+};
 
 use crate::ui::chat::ChatState;
 
@@ -31,16 +34,35 @@ pub struct Queued {
 
 impl Queued {
     pub fn new(text: String, images: Vec<ImageData>) -> Self {
-        Queued { key: next_version(), id: None, text, images, removing: false, from: None }
+        Queued {
+            key: next_version(),
+            id: None,
+            text,
+            images,
+            removing: false,
+            from: None,
+        }
     }
 
     fn from_message(m: &Message) -> Self {
-        let images = m.parts.iter().filter_map(|p| if let Part::Image { image, .. } = p { Some(image.clone()) } else { None }).collect();
+        let images = m
+            .parts
+            .iter()
+            .filter_map(|p| {
+                if let Part::Image { image, .. } = p {
+                    Some(image.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
         let mut q = Queued::new(m.raw_text(), images);
         q.id = Some(m.id.clone());
         q.from = match &m.source {
             MessageSource::Human => None,
-            MessageSource::Peer { from_name, .. } | MessageSource::Spawn { from_name, .. } => Some(from_name.clone()),
+            MessageSource::Peer { from_name, .. } | MessageSource::Spawn { from_name, .. } => {
+                Some(from_name.clone())
+            }
             MessageSource::Reminder => Some("reminder".into()),
             MessageSource::Shell => Some("shell".into()),
             MessageSource::Compaction => Some("compaction".into()),
@@ -139,17 +161,34 @@ impl SessionView {
 
     /// Wants the page before `messages[0]`: `(generation, first message id)` for the request.
     pub fn older_request(&self) -> Option<(u64, String)> {
-        (self.loaded && self.more_before && !self.older_pending).then(|| self.messages.first().map(|m| (self.history_gen, m.id.clone()))).flatten()
+        (self.loaded && self.more_before && !self.older_pending)
+            .then(|| {
+                self.messages
+                    .first()
+                    .map(|m| (self.history_gen, m.id.clone()))
+            })
+            .flatten()
     }
 
     /// Inserts an older page in front, if it still fits (`generation` and `before` unchanged).
-    pub fn prepend_older(&mut self, generation: u64, before: &str, older: Vec<Message>, more_before: bool) -> bool {
-        if generation != self.history_gen || self.messages.first().map(|m| m.id.as_str()) != Some(before) {
+    pub fn prepend_older(
+        &mut self,
+        generation: u64,
+        before: &str,
+        older: Vec<Message>,
+        more_before: bool,
+    ) -> bool {
+        if generation != self.history_gen
+            || self.messages.first().map(|m| m.id.as_str()) != Some(before)
+        {
             return false;
         }
         self.older_pending = false;
         self.more_before = more_before;
-        let older: Vec<Message> = older.into_iter().filter(|m| !self.index.contains_key(&m.id)).collect();
+        let older: Vec<Message> = older
+            .into_iter()
+            .filter(|m| !self.index.contains_key(&m.id))
+            .collect();
         if older.is_empty() {
             return false;
         }
@@ -178,7 +217,10 @@ impl SessionView {
 
     /// Index of a message by id.
     pub fn find(&self, id: &str) -> Option<usize> {
-        self.index.get(id).copied().filter(|&i| i < self.messages.len())
+        self.index
+            .get(id)
+            .copied()
+            .filter(|&i| i < self.messages.len())
     }
 
     fn touch(&mut self, i: usize) {
@@ -204,8 +246,14 @@ impl SessionView {
                 }
                 self.drop_matched_queued();
             }
-            SessionEvent::Part { message_id, index, part } => {
-                let Some(i) = self.find(&message_id) else { return false };
+            SessionEvent::Part {
+                message_id,
+                index,
+                part,
+            } => {
+                let Some(i) = self.find(&message_id) else {
+                    return false;
+                };
                 let parts = &mut self.messages[i].parts;
                 if index < parts.len() {
                     parts[index] = part;
@@ -215,8 +263,14 @@ impl SessionView {
                 }
                 self.touch(i);
             }
-            SessionEvent::Delta { message_id, index, delta } => {
-                let Some(i) = self.find(&message_id) else { return false };
+            SessionEvent::Delta {
+                message_id,
+                index,
+                delta,
+            } => {
+                let Some(i) = self.find(&message_id) else {
+                    return false;
+                };
                 apply_delta(&mut self.messages[i].parts, index, delta);
                 self.touch(i);
             }
@@ -227,11 +281,18 @@ impl SessionView {
                     self.reindex();
                 }
             }
-            SessionEvent::Reset { messages, more_before } => {
+            SessionEvent::Reset {
+                messages,
+                more_before,
+            } => {
                 self.set_messages(messages, more_before);
             }
             SessionEvent::Permission { request } => {
-                if !self.permissions.iter().any(|p| p.call_id == request.call_id) {
+                if !self
+                    .permissions
+                    .iter()
+                    .any(|p| p.call_id == request.call_id)
+                {
                     self.permissions.push(request);
                 }
             }
@@ -281,8 +342,18 @@ impl SessionView {
     fn set_queued(&mut self, queue: Vec<Message>) {
         let mut old = std::mem::take(&mut self.queued);
         for m in queue {
-            let mine = || old.iter().position(|q| q.id.is_none() && m.source == MessageSource::Human && q.text.trim() == m.raw_text().trim());
-            let q = match old.iter().position(|q| q.id.as_deref() == Some(m.id.as_str())).or_else(mine) {
+            let mine = || {
+                old.iter().position(|q| {
+                    q.id.is_none()
+                        && m.source == MessageSource::Human
+                        && q.text.trim() == m.raw_text().trim()
+                })
+            };
+            let q = match old
+                .iter()
+                .position(|q| q.id.as_deref() == Some(m.id.as_str()))
+                .or_else(mine)
+            {
                 Some(i) => {
                     let mut q = old.remove(i);
                     q.id = Some(m.id.clone());
@@ -292,7 +363,8 @@ impl SessionView {
             };
             self.queued.push(q);
         }
-        self.queued.extend(old.into_iter().filter(|q| q.id.is_none()));
+        self.queued
+            .extend(old.into_iter().filter(|q| q.id.is_none()));
     }
 
     pub fn queued_mut(&mut self, key: u64) -> Option<&mut Queued> {
@@ -327,7 +399,9 @@ pub fn message_live(m: &Message) -> bool {
     if m.time_end.is_none() && m.error.is_none() {
         return true;
     }
-    m.parts.iter().any(|p| matches!(p, Part::Tool { state, .. } if !state.is_final()))
+    m.parts
+        .iter()
+        .any(|p| matches!(p, Part::Tool { state, .. } if !state.is_final()))
 }
 
 pub fn apply_delta(parts: &mut Vec<Part>, index: usize, delta: Delta) {
@@ -335,8 +409,16 @@ pub fn apply_delta(parts: &mut Vec<Part>, index: usize, delta: Delta) {
         // Delta for a part we haven't seen: create it.
         let now = ref_proto::now_ms();
         let p = match &delta {
-            Delta::Text { .. } => Part::Text { text: String::new(), time: now },
-            Delta::Reasoning { .. } => Part::Reasoning { text: String::new(), time: now, time_end: None, provider_data: None },
+            Delta::Text { .. } => Part::Text {
+                text: String::new(),
+                time: now,
+            },
+            Delta::Reasoning { .. } => Part::Reasoning {
+                text: String::new(),
+                time: now,
+                time_end: None,
+                provider_data: None,
+            },
             Delta::ToolInput { .. } => Part::Tool {
                 call_id: format!("pending-{index}"),
                 name: String::new(),
@@ -354,14 +436,22 @@ pub fn apply_delta(parts: &mut Vec<Part>, index: usize, delta: Delta) {
             },
         };
         while parts.len() < index {
-            parts.push(Part::Text { text: String::new(), time: now });
+            parts.push(Part::Text {
+                text: String::new(),
+                time: now,
+            });
         }
         parts.push(p);
     }
     match (&mut parts[index], delta) {
         (Part::Text { text, .. }, Delta::Text { text: d }) => text.push_str(&d),
         (Part::Reasoning { text, .. }, Delta::Reasoning { text: d }) => text.push_str(&d),
-        (Part::Tool { raw_input, purpose, .. }, Delta::ToolInput { text: d }) => {
+        (
+            Part::Tool {
+                raw_input, purpose, ..
+            },
+            Delta::ToolInput { text: d },
+        ) => {
             raw_input.push_str(&d);
             if purpose.is_empty()
                 && let Some(p) = partial_purpose(raw_input)
@@ -379,7 +469,11 @@ pub fn apply_delta(parts: &mut Vec<Part>, index: usize, delta: Delta) {
 /// Extracts a (possibly partial) `"purpose": "..."` value from streaming tool JSON.
 pub fn partial_purpose(raw: &str) -> Option<String> {
     let k = raw.find("\"purpose\"")?;
-    let rest = raw[k + 9..].trim_start().strip_prefix(':')?.trim_start().strip_prefix('"')?;
+    let rest = raw[k + 9..]
+        .trim_start()
+        .strip_prefix(':')?
+        .trim_start()
+        .strip_prefix('"')?;
     let mut out = String::new();
     let mut esc = false;
     for c in rest.chars() {
@@ -444,19 +538,54 @@ mod tests {
     #[test]
     fn deltas_and_parts() {
         let mut v = SessionView::new(info(), true);
-        v.apply(SessionEvent::Message { message: msg("a", Role::Assistant) });
-        v.apply(SessionEvent::Delta { message_id: "a".into(), index: 0, delta: Delta::Reasoning { text: "hm".into() } });
-        v.apply(SessionEvent::Delta { message_id: "a".into(), index: 0, delta: Delta::Reasoning { text: "m".into() } });
-        v.apply(SessionEvent::Part { message_id: "a".into(), index: 1, part: Part::Text { text: "Hi".into(), time: 1 } });
-        v.apply(SessionEvent::Delta { message_id: "a".into(), index: 1, delta: Delta::Text { text: " there".into() } });
-        v.apply(SessionEvent::Delta { message_id: "a".into(), index: 2, delta: Delta::ToolInput { text: r#"{"purpose": "Run te"#.into() } });
+        v.apply(SessionEvent::Message {
+            message: msg("a", Role::Assistant),
+        });
+        v.apply(SessionEvent::Delta {
+            message_id: "a".into(),
+            index: 0,
+            delta: Delta::Reasoning { text: "hm".into() },
+        });
+        v.apply(SessionEvent::Delta {
+            message_id: "a".into(),
+            index: 0,
+            delta: Delta::Reasoning { text: "m".into() },
+        });
+        v.apply(SessionEvent::Part {
+            message_id: "a".into(),
+            index: 1,
+            part: Part::Text {
+                text: "Hi".into(),
+                time: 1,
+            },
+        });
+        v.apply(SessionEvent::Delta {
+            message_id: "a".into(),
+            index: 1,
+            delta: Delta::Text {
+                text: " there".into(),
+            },
+        });
+        v.apply(SessionEvent::Delta {
+            message_id: "a".into(),
+            index: 2,
+            delta: Delta::ToolInput {
+                text: r#"{"purpose": "Run te"#.into(),
+            },
+        });
         let m = &v.messages[0];
         assert!(matches!(&m.parts[0], Part::Reasoning { text, .. } if text == "hmm"));
         assert_eq!(m.raw_text(), "Hi there");
         assert!(matches!(&m.parts[2], Part::Tool { purpose, .. } if purpose == "Run te"));
         // Unknown message: ignored, no panic.
-        assert!(!v.apply(SessionEvent::Delta { message_id: "zz".into(), index: 5, delta: Delta::Text { text: "x".into() } }));
-        v.apply(SessionEvent::Removed { message_id: "a".into() });
+        assert!(!v.apply(SessionEvent::Delta {
+            message_id: "zz".into(),
+            index: 5,
+            delta: Delta::Text { text: "x".into() }
+        }));
+        v.apply(SessionEvent::Removed {
+            message_id: "a".into(),
+        });
         assert!(v.messages.is_empty() && v.find("a").is_none());
     }
 
@@ -465,7 +594,10 @@ mod tests {
         let mut v = SessionView::new(info(), true);
         v.queued.push(Queued::new("do it".into(), vec![]));
         let mut m = msg("u", Role::User);
-        m.parts.push(Part::Text { text: "do it".into(), time: 0 });
+        m.parts.push(Part::Text {
+            text: "do it".into(),
+            time: 0,
+        });
         v.apply(SessionEvent::Message { message: m });
         assert!(v.queued.is_empty());
         // With a known id only that message counts, not one with the same text.
@@ -473,11 +605,17 @@ mod tests {
         q.id = Some("u3".into());
         v.queued.push(q);
         let mut m = msg("u2", Role::User);
-        m.parts.push(Part::Text { text: "again".into(), time: 0 });
+        m.parts.push(Part::Text {
+            text: "again".into(),
+            time: 0,
+        });
         v.apply(SessionEvent::Message { message: m });
         assert_eq!(v.queued.len(), 1);
         let mut m = msg("u3", Role::User);
-        m.parts.push(Part::Text { text: "again".into(), time: 0 });
+        m.parts.push(Part::Text {
+            text: "again".into(),
+            time: 0,
+        });
         v.apply(SessionEvent::Message { message: m });
         assert!(v.queued.is_empty());
     }
@@ -494,19 +632,55 @@ mod tests {
         gone.id = Some("q0".into());
         v.queued = vec![gone, pending, kept.clone()];
         let mut q2 = msg("q2", Role::User);
-        q2.parts.push(Part::Text { text: "from snapshot".into(), time: 0 });
-        q2.parts.push(Part::Image { image: ImageData { mime: "image/png".into(), data: "x".into(), ..Default::default() }, name: None });
+        q2.parts.push(Part::Text {
+            text: "from snapshot".into(),
+            time: 0,
+        });
+        q2.parts.push(Part::Image {
+            image: ImageData {
+                mime: "image/png".into(),
+                data: "x".into(),
+                ..Default::default()
+            },
+            name: None,
+        });
         let mut q1 = msg("q1", Role::User);
-        q1.parts.push(Part::Text { text: "kept".into(), time: 0 });
-        v.load_snapshot(SessionSnapshot { info: info(), messages: vec![], more_before: false, pending_permissions: vec![], queued: vec![q2, q1] });
-        let rows: Vec<(Option<&str>, &str, usize)> = v.queued.iter().map(|q| (q.id.as_deref(), q.text.as_str(), q.images.len())).collect();
-        assert_eq!(rows, [(Some("q2"), "from snapshot", 1), (Some("q1"), "kept", 0), (None, "waiting for id", 0)]);
-        assert!(v.queued[1].removing && v.queued[1].key == kept.key, "existing row state kept");
+        q1.parts.push(Part::Text {
+            text: "kept".into(),
+            time: 0,
+        });
+        v.load_snapshot(SessionSnapshot {
+            info: info(),
+            messages: vec![],
+            more_before: false,
+            pending_permissions: vec![],
+            queued: vec![q2, q1],
+        });
+        let rows: Vec<(Option<&str>, &str, usize)> = v
+            .queued
+            .iter()
+            .map(|q| (q.id.as_deref(), q.text.as_str(), q.images.len()))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                (Some("q2"), "from snapshot", 1),
+                (Some("q1"), "kept", 0),
+                (None, "waiting for id", 0)
+            ]
+        );
+        assert!(
+            v.queued[1].removing && v.queued[1].key == kept.key,
+            "existing row state kept"
+        );
     }
 
     #[test]
     fn purpose_extraction() {
-        assert_eq!(partial_purpose(r#"{"purpose":"Read \"x\" file","path":"a"}"#).as_deref(), Some("Read \"x\" file"));
+        assert_eq!(
+            partial_purpose(r#"{"purpose":"Read \"x\" file","path":"a"}"#).as_deref(),
+            Some("Read \"x\" file")
+        );
         assert_eq!(partial_purpose(r#"{"path":"a"}"#), None);
         assert_eq!(partial_purpose(r#"{"purpose": "#), None);
     }

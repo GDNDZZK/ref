@@ -62,10 +62,17 @@ fn parse_url(raw: &str) -> Result<Url> {
     if raw.is_empty() {
         bail!("`url` must not be empty");
     }
-    let with_scheme = if raw.contains("://") { raw.to_string() } else { format!("https://{}", raw.trim_start_matches('/')) };
+    let with_scheme = if raw.contains("://") {
+        raw.to_string()
+    } else {
+        format!("https://{}", raw.trim_start_matches('/'))
+    };
     let url = Url::parse(&with_scheme).map_err(|e| anyhow!("Invalid URL {raw}: {e}"))?;
     if !matches!(url.scheme(), "http" | "https") {
-        bail!("Only http and https URLs can be fetched (got {}:).", url.scheme());
+        bail!(
+            "Only http and https URLs can be fetched (got {}:).",
+            url.scheme()
+        );
     }
     if url.host_str().is_none_or(str::is_empty) {
         bail!("Invalid URL {raw}: no host");
@@ -99,7 +106,9 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         Some(f) => bail!("`format` must be markdown, text or html (got {f:?})"),
     };
     let full_page = util::opt_bool(&input, "full_page")?.unwrap_or(false);
-    let timeout = util::opt_u64(&input, "timeout")?.unwrap_or(DEFAULT_TIMEOUT_SECS).clamp(1, MAX_TIMEOUT_SECS);
+    let timeout = util::opt_u64(&input, "timeout")?
+        .unwrap_or(DEFAULT_TIMEOUT_SECS)
+        .clamp(1, MAX_TIMEOUT_SECS);
     let deadline = Instant::now() + Duration::from_secs(timeout);
     let started = std::time::Instant::now();
     let mut notes = Vec::new();
@@ -110,18 +119,38 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
                 target = u;
                 notes.push(note);
             }
-            Some(sites::Special::GithubIssue { owner, repo, number }) => match github_issue(&owner, &repo, number, deadline, ctx).await {
+            Some(sites::Special::GithubIssue {
+                owner,
+                repo,
+                number,
+            }) => match github_issue(&owner, &repo, number, deadline, ctx).await {
                 Ok((title, body)) => {
-                    let out = Out { requested: url.clone(), url, status: None, content_type: "application/json (GitHub API)".into(), title: Some(title), notes: vec!["Read from the GitHub API.".into()], body, images: vec![], error: false, raw_bytes: 0, ext: "md" };
+                    let out = Out {
+                        requested: url.clone(),
+                        url,
+                        status: None,
+                        content_type: "application/json (GitHub API)".into(),
+                        title: Some(title),
+                        notes: vec!["Read from the GitHub API.".into()],
+                        body,
+                        images: vec![],
+                        error: false,
+                        raw_bytes: 0,
+                        ext: "md",
+                    };
                     return Ok(finish(out, started));
                 }
-                Err(e) => notes.push(format!("GitHub API not usable ({e:#}); fetched the web page instead.")),
+                Err(e) => notes.push(format!(
+                    "GitHub API not usable ({e:#}); fetched the web page instead."
+                )),
             },
             None => {}
         }
     }
     let accept = match format {
-        Format::Markdown => "text/markdown;q=1.0, text/x-markdown;q=0.9, text/plain;q=0.8, text/html;q=0.7, */*;q=0.1",
+        Format::Markdown => {
+            "text/markdown;q=1.0, text/x-markdown;q=0.9, text/plain;q=0.8, text/html;q=0.7, */*;q=0.1"
+        }
         Format::Text => "text/plain;q=1.0, text/markdown;q=0.9, text/html;q=0.8, */*;q=0.1",
         Format::Html => "text/html;q=1.0, application/xhtml+xml;q=0.9, text/plain;q=0.8, */*;q=0.1",
     };
@@ -139,7 +168,11 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         raw_bytes: f.body.len(),
         ext: "txt",
     };
-    if out.error && (f.status.as_u16() == 403 || f.status.as_u16() == 503) && String::from_utf8_lossy(&f.body[..f.body.len().min(64 * 1024)]).contains("challenge-platform") {
+    if out.error
+        && (f.status.as_u16() == 403 || f.status.as_u16() == 503)
+        && String::from_utf8_lossy(&f.body[..f.body.len().min(64 * 1024)])
+            .contains("challenge-platform")
+    {
         out.notes.push("Blocked by a Cloudflare bot check that needs a browser running JavaScript; the page cannot be fetched this way. Look for an API, a raw source or a mirror.".into());
     }
     convert(&mut out, f, format, full_page, deadline, ctx).await?;
@@ -155,7 +188,9 @@ enum Kind {
 }
 
 fn classify(mime: &str, body: &[u8]) -> Kind {
-    let start = String::from_utf8_lossy(&body[..body.len().min(512)]).trim_start().to_ascii_lowercase();
+    let start = String::from_utf8_lossy(&body[..body.len().min(512)])
+        .trim_start()
+        .to_ascii_lowercase();
     let sniff_html = start.starts_with("<!doctype html") || start.starts_with("<html");
     if let Some(m) = util::image_mime(body) {
         return Kind::Image(m);
@@ -163,7 +198,10 @@ fn classify(mime: &str, body: &[u8]) -> Kind {
     if mime == "application/pdf" || body.starts_with(b"%PDF-") {
         return Kind::Binary;
     }
-    if mime == "text/html" || mime == "application/xhtml+xml" || ((mime.is_empty() || mime == "application/octet-stream") && sniff_html) {
+    if mime == "text/html"
+        || mime == "application/xhtml+xml"
+        || ((mime.is_empty() || mime == "application/octet-stream") && sniff_html)
+    {
         return Kind::Html;
     }
     if mime == "application/json" || mime == "text/json" || mime.ends_with("+json") {
@@ -173,14 +211,34 @@ fn classify(mime: &str, body: &[u8]) -> Kind {
         || mime.contains("xml")
         || mime.contains("javascript")
         || mime.contains("ecmascript")
-        || ["yaml", "toml", "csv", "x-sh", "x-python", "x-rust", "markdown", "graphql", "x-www-form-urlencoded", "sql"].iter().any(|t| mime.contains(t));
+        || [
+            "yaml",
+            "toml",
+            "csv",
+            "x-sh",
+            "x-python",
+            "x-rust",
+            "markdown",
+            "graphql",
+            "x-www-form-urlencoded",
+            "sql",
+        ]
+        .iter()
+        .any(|t| mime.contains(t));
     if texty || (!body.is_empty() && !util::looks_binary(body)) {
         return Kind::Text;
     }
     Kind::Binary
 }
 
-async fn convert(out: &mut Out, f: fetch::Fetched, format: Format, full_page: bool, deadline: Instant, ctx: &ToolCtx) -> Result<()> {
+async fn convert(
+    out: &mut Out,
+    f: fetch::Fetched,
+    format: Format,
+    full_page: bool,
+    deadline: Instant,
+    ctx: &ToolCtx,
+) -> Result<()> {
     let mime = f.mime();
     let host = f.url.host_str().map(str::to_string);
     match classify(&mime, &f.body) {
@@ -194,21 +252,41 @@ async fn convert(out: &mut Out, f: fetch::Fetched, format: Format, full_page: bo
             if !full_page
                 && !out.error
                 && let Some(alt) = html::markdown_alternate(&text, &f.url)
-                && let Ok(m) = fetch::get(&alt, "text/markdown, text/plain;q=0.9", &HeaderMap::new(), deadline, &ctx.cancel).await
+                && let Ok(m) = fetch::get(
+                    &alt,
+                    "text/markdown, text/plain;q=0.9",
+                    &HeaderMap::new(),
+                    deadline,
+                    &ctx.cancel,
+                )
+                .await
                 && m.status.is_success()
-                && matches!(m.mime().as_str(), "text/markdown" | "text/x-markdown" | "text/plain")
+                && matches!(
+                    m.mime().as_str(),
+                    "text/markdown" | "text/x-markdown" | "text/plain"
+                )
             {
                 out.body = fetch::decode(&m.body, &m.content_type, false, host.as_deref());
-                out.notes.push(format!("The page links a markdown version; this is it: {}", m.url));
+                out.notes.push(format!(
+                    "The page links a markdown version; this is it: {}",
+                    m.url
+                ));
                 out.ext = "md";
                 return Ok(());
             }
             let url = f.url.clone();
-            let page = tokio::task::spawn_blocking(move || html::convert(&text, &url, format, full_page)).await.map_err(|_| anyhow!("HTML conversion failed"))?;
+            let page =
+                tokio::task::spawn_blocking(move || html::convert(&text, &url, format, full_page))
+                    .await
+                    .map_err(|_| anyhow!("HTML conversion failed"))?;
             out.title = page.title;
             out.notes.extend(page.note);
             out.body = page.body;
-            out.ext = if format == Format::Markdown { "md" } else { "txt" };
+            out.ext = if format == Format::Markdown {
+                "md"
+            } else {
+                "txt"
+            };
             if out.body.trim().is_empty() && !out.error {
                 out.notes.push("The page has no text without JavaScript (probably rendered in the browser). Try format: \"html\" to see the raw page, or look for an API / raw source.".into());
             }
@@ -222,29 +300,46 @@ async fn convert(out: &mut Out, f: fetch::Fetched, format: Format, full_page: bo
             out.ext = "json";
         }
         Kind::Text => {
-            let text = fetch::decode(&f.body, &f.content_type, mime.contains("xml"), host.as_deref());
-            if format != Format::Html && feed::is_feed(&mime, &text)
-                && let Some((title, md)) = feed::to_markdown(&text) {
-                    out.title = title;
-                    out.notes.push("RSS / Atom feed shown as a list of entries; format: \"html\" returns the raw XML.".into());
-                    out.body = md;
-                    out.ext = "md";
-                    return Ok(());
-                }
-            out.ext = if mime.contains("markdown") { "md" } else { "txt" };
+            let text = fetch::decode(
+                &f.body,
+                &f.content_type,
+                mime.contains("xml"),
+                host.as_deref(),
+            );
+            if format != Format::Html
+                && feed::is_feed(&mime, &text)
+                && let Some((title, md)) = feed::to_markdown(&text)
+            {
+                out.title = title;
+                out.notes.push("RSS / Atom feed shown as a list of entries; format: \"html\" returns the raw XML.".into());
+                out.body = md;
+                out.ext = "md";
+                return Ok(());
+            }
+            out.ext = if mime.contains("markdown") {
+                "md"
+            } else {
+                "txt"
+            };
             out.body = text;
         }
         Kind::Image(m) => {
             let size = util::human_bytes(f.body.len() as u64);
             if f.body.len() > MAX_IMAGE_BYTES {
-                out.body = format!("Image ({m}, {size}) is larger than {} and was not attached. Download it with bash (curl -L -o) to inspect it.", util::human_bytes(MAX_IMAGE_BYTES as u64));
+                out.body = format!(
+                    "Image ({m}, {size}) is larger than {} and was not attached. Download it with bash (curl -L -o) to inspect it.",
+                    util::human_bytes(MAX_IMAGE_BYTES as u64)
+                );
                 return Ok(());
             }
             let mut sent = (m, f.body);
             out.body = format!("Image ({m}, {size}), attached.");
             if ctx.resize_images {
                 let bytes = sent.1;
-                let limits = crate::imgfit::Limits { max_bytes: FETCH_IMAGE_BYTES, ..Default::default() };
+                let limits = crate::imgfit::Limits {
+                    max_bytes: FETCH_IMAGE_BYTES,
+                    ..Default::default()
+                };
                 let (bytes, fitted) = tokio::task::spawn_blocking(move || {
                     let r = crate::imgfit::fit(&bytes, &limits);
                     (bytes, r)
@@ -253,14 +348,22 @@ async fn convert(out: &mut Out, f: fetch::Fetched, format: Format, full_page: bo
                 .map_err(|_| anyhow!("image conversion failed"))?;
                 match fitted {
                     Err(e) => {
-                        out.body = format!("The content looks like {m} ({size}) but could not be decoded ({e}); not attached.");
+                        out.body = format!(
+                            "The content looks like {m} ({size}) but could not be decoded ({e}); not attached."
+                        );
                         return Ok(());
                     }
                     Ok(fitted) => {
                         let note = fitted.note();
                         sent = match fitted.data {
                             Some(d) => {
-                                out.body = format!("Image ({m}, {size}), attached as {} {}x{} ({}).", fitted.mime, fitted.size.0, fitted.size.1, util::human_bytes(d.len() as u64));
+                                out.body = format!(
+                                    "Image ({m}, {size}), attached as {} {}x{} ({}).",
+                                    fitted.mime,
+                                    fitted.size.0,
+                                    fitted.size.1,
+                                    util::human_bytes(d.len() as u64)
+                                );
                                 (fitted.mime, d)
                             }
                             None => (m, bytes),
@@ -272,36 +375,74 @@ async fn convert(out: &mut Out, f: fetch::Fetched, format: Format, full_page: bo
                     }
                 }
             }
-            out.images.push(ImageData::new(sent.0, base64::engine::general_purpose::STANDARD.encode(&sent.1)));
+            out.images.push(ImageData::new(
+                sent.0,
+                base64::engine::general_purpose::STANDARD.encode(&sent.1),
+            ));
         }
         Kind::Binary => {
-            let what = if mime.is_empty() { "unknown type".to_string() } else { mime.clone() };
-            out.body = format!("Binary content ({what}, {}) is not shown. Download it with bash, e.g. curl -L -o FILE '{}'.", util::human_bytes(f.body.len() as u64), f.url);
+            let what = if mime.is_empty() {
+                "unknown type".to_string()
+            } else {
+                mime.clone()
+            };
+            out.body = format!(
+                "Binary content ({what}, {}) is not shown. Download it with bash, e.g. curl -L -o FILE '{}'.",
+                util::human_bytes(f.body.len() as u64),
+                f.url
+            );
         }
     }
     Ok(())
 }
 
-async fn github_issue(owner: &str, repo: &str, number: u64, deadline: Instant, ctx: &ToolCtx) -> Result<(String, String)> {
+async fn github_issue(
+    owner: &str,
+    repo: &str,
+    number: u64,
+    deadline: Instant,
+    ctx: &ToolCtx,
+) -> Result<(String, String)> {
     let mut h = HeaderMap::new();
-    h.insert("X-GitHub-Api-Version", HeaderValue::from_static("2022-11-28"));
-    if let Some(t) = sites::github_token().and_then(|t| HeaderValue::from_str(&format!("Bearer {}", t.trim())).ok()) {
+    h.insert(
+        "X-GitHub-Api-Version",
+        HeaderValue::from_static("2022-11-28"),
+    );
+    if let Some(t) = sites::github_token()
+        .and_then(|t| HeaderValue::from_str(&format!("Bearer {}", t.trim())).ok())
+    {
         h.insert(AUTHORIZATION, t);
     }
     let get = |u: String| {
         let h = h.clone();
         async move {
             let url = Url::parse(&u)?;
-            let f = fetch::get(&url, "application/vnd.github+json", &h, deadline, &ctx.cancel).await?;
+            let f = fetch::get(
+                &url,
+                "application/vnd.github+json",
+                &h,
+                deadline,
+                &ctx.cancel,
+            )
+            .await?;
             if !f.status.is_success() {
                 bail!("HTTP {}", f.status);
             }
             serde_json::from_slice::<Value>(&f.body).map_err(|e| anyhow!("bad JSON: {e}"))
         }
     };
-    let issue = get(format!("https://api.github.com/repos/{owner}/{repo}/issues/{number}")).await?;
+    let issue = get(format!(
+        "https://api.github.com/repos/{owner}/{repo}/issues/{number}"
+    ))
+    .await?;
     let comments = match issue.get("comments").and_then(Value::as_u64) {
-        Some(n) if n > 0 => get(format!("https://api.github.com/repos/{owner}/{repo}/issues/{number}/comments?per_page=100")).await?.as_array().cloned().unwrap_or_default(),
+        Some(n) if n > 0 => get(format!(
+            "https://api.github.com/repos/{owner}/{repo}/issues/{number}/comments?per_page=100"
+        ))
+        .await?
+        .as_array()
+        .cloned()
+        .unwrap_or_default(),
         _ => Vec::new(),
     };
     Ok(sites::github_issue_markdown(&issue, &comments))
@@ -316,16 +457,27 @@ fn finish(mut out: Out, started: std::time::Instant) -> ToolOutput {
         out.body = format!("{cut}\n[… error page cut …]");
     }
     let mut saved = None;
-    let cut = !out.error && (total_bytes > crate::bash::MAX_BYTES || total_lines > crate::bash::MAX_LINES);
+    let cut = !out.error
+        && (total_bytes > crate::bash::MAX_BYTES || total_lines > crate::bash::MAX_LINES);
     if cut {
         let path = util::spill_path(out.ext);
-        let ok = path.parent().map(std::fs::create_dir_all).transpose().and_then(|_| std::fs::write(&path, &out.body));
+        let ok = path
+            .parent()
+            .map(std::fs::create_dir_all)
+            .transpose()
+            .and_then(|_| std::fs::write(&path, &out.body));
         match ok {
             Ok(_) => saved = Some(path),
-            Err(e) => tracing::warn!("webfetch: cannot save full content to {}: {e}", path.display()),
+            Err(e) => tracing::warn!(
+                "webfetch: cannot save full content to {}: {e}",
+                path.display()
+            ),
         }
         let mut end = util::floor_char_boundary(&out.body, crate::bash::MAX_BYTES);
-        if let Some((i, _)) = out.body[..end].match_indices('\n').nth(crate::bash::MAX_LINES - 1) {
+        if let Some((i, _)) = out.body[..end]
+            .match_indices('\n')
+            .nth(crate::bash::MAX_LINES - 1)
+        {
             end = i;
         } else if let Some(i) = out.body[..end].rfind('\n') {
             end = i;
@@ -336,12 +488,22 @@ fn finish(mut out: Out, started: std::time::Instant) -> ToolOutput {
     if out.url == out.requested {
         text.push_str(&format!("URL: {}\n", out.url));
     } else {
-        text.push_str(&format!("URL: {} (redirected from {})\n", out.url, out.requested));
+        text.push_str(&format!(
+            "URL: {} (redirected from {})\n",
+            out.url, out.requested
+        ));
     }
     if let Some(s) = out.status.filter(|s| !s.is_success()) {
         text.push_str(&format!("Status: {s}\n"));
     }
-    text.push_str(&format!("Content-Type: {}\n", if out.content_type.is_empty() { "(none)" } else { &out.content_type }));
+    text.push_str(&format!(
+        "Content-Type: {}\n",
+        if out.content_type.is_empty() {
+            "(none)"
+        } else {
+            &out.content_type
+        }
+    ));
     if let Some(t) = &out.title {
         text.push_str(&format!("Title: {t}\n"));
     }
@@ -349,12 +511,23 @@ fn finish(mut out: Out, started: std::time::Instant) -> ToolOutput {
         text.push_str(&format!("Note: {n}\n"));
     }
     text.push_str("---\n");
-    text.push_str(if out.body.trim().is_empty() { "(no content)" } else { out.body.trim_end() });
+    text.push_str(if out.body.trim().is_empty() {
+        "(no content)"
+    } else {
+        out.body.trim_end()
+    });
     if cut {
         let shown = out.body.lines().count();
-        text.push_str(&format!("\n\n[Content cut: showing {shown} of {total_lines} lines ({} of {}).", util::human_bytes(out.body.len() as u64), util::human_bytes(total_bytes as u64)));
+        text.push_str(&format!(
+            "\n\n[Content cut: showing {shown} of {total_lines} lines ({} of {}).",
+            util::human_bytes(out.body.len() as u64),
+            util::human_bytes(total_bytes as u64)
+        ));
         match &saved {
-            Some(p) => text.push_str(&format!(" Full content saved to {}; use `read` with offset/limit or `grep` on it.]", p.display())),
+            Some(p) => text.push_str(&format!(
+                " Full content saved to {}; use `read` with offset/limit or `grep` on it.]",
+                p.display()
+            )),
             None => text.push(']'),
         }
     }

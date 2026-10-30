@@ -75,7 +75,9 @@ pub async fn blocking<F>(f: F) -> Result<crate::ToolOutput>
 where
     F: FnOnce() -> Result<crate::ToolOutput> + Send + 'static,
 {
-    tokio::task::spawn_blocking(f).await.map_err(|e| anyhow!("tool task failed: {e}"))?
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| anyhow!("tool task failed: {e}"))?
 }
 
 // ---------------------------------------------------------------------------
@@ -87,14 +89,19 @@ pub fn unwrap_header(raw: &str) -> (String, Option<String>) {
     let t = raw.trim();
     if let Some(inner) = t.strip_prefix('[').and_then(|s| s.strip_suffix(']'))
         && let Some((p, tag)) = inner.rsplit_once('#')
-            && tag.len() == 4 && tag.chars().all(|c| c.is_ascii_hexdigit()) {
-                return (p.to_string(), Some(tag.to_ascii_uppercase()));
-            }
+        && tag.len() == 4
+        && tag.chars().all(|c| c.is_ascii_hexdigit())
+    {
+        return (p.to_string(), Some(tag.to_ascii_uppercase()));
+    }
     (t.to_string(), None)
 }
 
 pub fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").filter(|h| !h.is_empty()).map(PathBuf::from).or_else(dirs::home_dir)
+    std::env::var_os("HOME")
+        .filter(|h| !h.is_empty())
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)
 }
 
 /// Resolves a user path: expands `~`, joins relative paths to `cwd`, normalizes `.`/`..` lexically.
@@ -102,7 +109,10 @@ pub fn resolve_path(cwd: &Path, raw: &str) -> PathBuf {
     let raw = raw.trim();
     let expanded: PathBuf = if raw == "~" {
         home_dir().unwrap_or_else(|| PathBuf::from("~"))
-    } else if let Some(rest) = raw.strip_prefix("~/").or_else(|| raw.strip_prefix("~\\").filter(|_| cfg!(windows))) {
+    } else if let Some(rest) = raw
+        .strip_prefix("~/")
+        .or_else(|| raw.strip_prefix("~\\").filter(|_| cfg!(windows)))
+    {
         match home_dir() {
             Some(h) => h.join(rest),
             None => PathBuf::from(raw),
@@ -110,7 +120,11 @@ pub fn resolve_path(cwd: &Path, raw: &str) -> PathBuf {
     } else {
         PathBuf::from(raw)
     };
-    let joined = if expanded.is_absolute() { expanded } else { cwd.join(expanded) };
+    let joined = if expanded.is_absolute() {
+        expanded
+    } else {
+        cwd.join(expanded)
+    };
     normalize_lexical(&joined)
 }
 
@@ -173,7 +187,11 @@ impl TextFile {
         let crlf_count = body.matches("\r\n").count();
         let lf_count = body.matches('\n').count();
         let crlf = crlf_count > 0 && crlf_count * 2 >= lf_count;
-        TextFile { bom, crlf, text: normalize_to_lf(body) }
+        TextFile {
+            bom,
+            crlf,
+            text: normalize_to_lf(body),
+        }
     }
 
     /// Re-encodes LF text with this file's BOM / line-ending convention.
@@ -206,7 +224,11 @@ pub fn split_lines(text: &str) -> (Vec<&str>, bool) {
         return (Vec::new(), false);
     }
     let trailing = text.ends_with('\n');
-    let body = if trailing { &text[..text.len() - 1] } else { text };
+    let body = if trailing {
+        &text[..text.len() - 1]
+    } else {
+        text
+    };
     (body.split('\n').collect(), trailing)
 }
 
@@ -312,7 +334,11 @@ pub fn format_line_list(lines: &[u32]) -> String {
             i += 1;
             end = lines[i];
         }
-        parts.push(if start == end { start.to_string() } else { format!("{start}-{end}") });
+        parts.push(if start == end {
+            start.to_string()
+        } else {
+            format!("{start}-{end}")
+        });
         i += 1;
     }
     parts.join(", ")
@@ -332,9 +358,11 @@ pub fn spill_path(ext: &str) -> PathBuf {
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     let id = xxhash_rust::xxh32::xxh32(format!("{nanos}-{n}-{}", std::process::id()).as_bytes(), 0);
-    std::env::temp_dir()
-        .join("ref-tool-output")
-        .join(format!("{:08x}{:x}.{ext}", id, nanos as u64 & 0xffff_ffff))
+    std::env::temp_dir().join("ref-tool-output").join(format!(
+        "{:08x}{:x}.{ext}",
+        id,
+        nanos as u64 & 0xffff_ffff
+    ))
 }
 
 /// Detects supported raster images by magic bytes.
@@ -387,7 +415,10 @@ pub mod test_support {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        let dir = std::env::temp_dir().join(format!("ref-tools-test-{tag}-{}-{nanos}-{n}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "ref-tools-test-{tag}-{}-{nanos}-{n}",
+            std::process::id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         TempDir(std::fs::canonicalize(&dir).unwrap())
     }
@@ -410,10 +441,19 @@ mod tests {
     #[test]
     fn resolve_and_display() {
         let cwd = Path::new("/work/proj");
-        assert_eq!(resolve_path(cwd, "src/../a.rs"), PathBuf::from("/work/proj/a.rs"));
-        assert_eq!(resolve_path(cwd, "/etc/./hosts"), PathBuf::from("/etc/hosts"));
+        assert_eq!(
+            resolve_path(cwd, "src/../a.rs"),
+            PathBuf::from("/work/proj/a.rs")
+        );
+        assert_eq!(
+            resolve_path(cwd, "/etc/./hosts"),
+            PathBuf::from("/etc/hosts")
+        );
         assert_eq!(resolve_path(cwd, "../other"), PathBuf::from("/work/other"));
-        assert_eq!(display_path(cwd, Path::new("/work/proj/src/a.rs")), "src/a.rs");
+        assert_eq!(
+            display_path(cwd, Path::new("/work/proj/src/a.rs")),
+            "src/a.rs"
+        );
         assert_eq!(display_path(cwd, Path::new("/work/other")), "/work/other");
         if let Some(h) = home_dir() {
             assert_eq!(resolve_path(cwd, "~/x"), h.join("x"));
@@ -422,7 +462,10 @@ mod tests {
 
     #[test]
     fn header_unwrap() {
-        assert_eq!(unwrap_header("[src/a.rs#ab12]"), ("src/a.rs".into(), Some("AB12".into())));
+        assert_eq!(
+            unwrap_header("[src/a.rs#ab12]"),
+            ("src/a.rs".into(), Some("AB12".into()))
+        );
         assert_eq!(unwrap_header("src/a.rs"), ("src/a.rs".into(), None));
     }
 
@@ -443,7 +486,10 @@ mod tests {
         assert_eq!(truncate_chars("héllo", 2), ("hé…".into(), true));
         assert_eq!(strip_ansi("\x1b[31mred\x1b[0m"), "red");
         assert_eq!(format_line_list(&[1, 2, 3, 5, 7, 8]), "1-3, 5, 7-8");
-        assert_eq!(value_u64(Some(&serde_json::json!("12")), "x").unwrap(), Some(12));
+        assert_eq!(
+            value_u64(Some(&serde_json::json!("12")), "x").unwrap(),
+            Some(12)
+        );
         assert!(value_u64(Some(&serde_json::json!(-1)), "x").is_err());
     }
 }

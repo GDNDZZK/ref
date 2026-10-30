@@ -51,7 +51,11 @@ enum Cmd {
     Save(Box<Persisted>),
     Load(String, Reply<Persisted>),
     Exists(String, Reply<bool>),
-    List { cwd: Option<String>, limit: Option<usize>, reply: Reply<Vec<SessionInfo>> },
+    List {
+        cwd: Option<String>,
+        limit: Option<usize>,
+        reply: Reply<Vec<SessionInfo>>,
+    },
     Delete(String, Reply<()>),
     Flush(Reply<()>),
 }
@@ -63,7 +67,11 @@ pub struct Store {
 }
 
 fn valid_id(id: &str) -> bool {
-    !id.is_empty() && id.len() <= 128 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 impl Store {
@@ -81,8 +89,11 @@ impl Store {
 
     fn call<T>(&self, f: impl FnOnce(Reply<T>) -> Cmd) -> Result<T, String> {
         let (tx, rx) = mpsc::channel();
-        self.tx.send(f(tx)).map_err(|_| "session store is not available".to_string())?;
-        rx.recv().map_err(|_| "session store is not available".to_string())?
+        self.tx
+            .send(f(tx))
+            .map_err(|_| "session store is not available".to_string())?;
+        rx.recv()
+            .map_err(|_| "session store is not available".to_string())?
     }
 
     /// Queue an incremental save (non-blocking). Sessions without messages that were never
@@ -108,7 +119,10 @@ impl Store {
     }
 
     pub fn exists(&self, id: &str) -> bool {
-        valid_id(id) && self.call(|r| Cmd::Exists(id.to_string(), r)).unwrap_or(false)
+        valid_id(id)
+            && self
+                .call(|r| Cmd::Exists(id.to_string(), r))
+                .unwrap_or(false)
     }
 
     pub fn delete(&self, id: &str) -> Result<(), String> {
@@ -125,10 +139,11 @@ impl Store {
 
     /// Persisted session infos (optionally only for `cwd`), newest first, at most `limit`.
     pub fn list_for(&self, cwd: Option<String>, limit: Option<usize>) -> Vec<SessionInfo> {
-        self.call(|reply| Cmd::List { cwd, limit, reply }).unwrap_or_else(|e| {
-            tracing::warn!("listing sessions failed: {e}");
-            Vec::new()
-        })
+        self.call(|reply| Cmd::List { cwd, limit, reply })
+            .unwrap_or_else(|e| {
+                tracing::warn!("listing sessions failed: {e}");
+                Vec::new()
+            })
     }
 }
 
@@ -163,24 +178,33 @@ fn hash_json<T: Serialize>(v: &T) -> u64 {
 }
 
 fn open(data_dir: &Path, path: &Path) -> Result<Connection, String> {
-    std::fs::create_dir_all(data_dir).map_err(|e| format!("cannot create {}: {e}", data_dir.display()))?;
-    let conn = Connection::open(path).map_err(|e| format!("cannot open {}: {e}", path.display()))?;
+    std::fs::create_dir_all(data_dir)
+        .map_err(|e| format!("cannot create {}: {e}", data_dir.display()))?;
+    let conn =
+        Connection::open(path).map_err(|e| format!("cannot open {}: {e}", path.display()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
     }
-    conn.busy_timeout(std::time::Duration::from_secs(5)).map_err(|e| e.to_string())?;
-    conn.pragma_update(None, "journal_mode", "WAL").map_err(|e| e.to_string())?;
-    conn.pragma_update(None, "synchronous", "NORMAL").map_err(|e| e.to_string())?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))
+        .map_err(|e| e.to_string())?;
+    conn.pragma_update(None, "journal_mode", "WAL")
+        .map_err(|e| e.to_string())?;
+    conn.pragma_update(None, "synchronous", "NORMAL")
+        .map_err(|e| e.to_string())?;
     migrate(&conn)?;
     Ok(conn)
 }
 
 fn migrate(conn: &Connection) -> Result<(), String> {
-    let v: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).map_err(|e| e.to_string())?;
+    let v: i64 = conn
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .map_err(|e| e.to_string())?;
     if v > SCHEMA_VERSION {
-        return Err(format!("database schema version {v} is newer than supported ({SCHEMA_VERSION})"));
+        return Err(format!(
+            "database schema version {v} is newer than supported ({SCHEMA_VERSION})"
+        ));
     }
     if v < 1 {
         conn.execute_batch(
@@ -311,9 +335,16 @@ fn exists(db: &Connection, id: &str) -> Result<bool, String> {
         .map_err(|e| e.to_string())
 }
 
-fn save(db: &mut Connection, cache: &mut HashMap<String, Cached>, p: &Persisted) -> Result<(), String> {
+fn save(
+    db: &mut Connection,
+    cache: &mut HashMap<String, Cached>,
+    p: &Persisted,
+) -> Result<(), String> {
     let id = p.info.id.as_str();
-    let extra = Extra { reported: p.reported, context_notice: p.context_notice };
+    let extra = Extra {
+        reported: p.reported,
+        context_notice: p.context_notice,
+    };
     let info_hash = hash_json(&(&p.info, &extra));
     let known = cache.contains_key(id);
     if !known && p.messages.is_empty() && !exists(db, id)? {
@@ -348,12 +379,16 @@ fn save(db: &mut Connection, cache: &mut HashMap<String, Cached>, p: &Persisted)
                 continue;
             }
             let data = serde_json::to_string(m).map_err(|e| e.to_string())?;
-            up.execute(params![id, seq as i64, m.id, m.time, data]).map_err(|e| e.to_string())?;
+            up.execute(params![id, seq as i64, m.id, m.time, data])
+                .map_err(|e| e.to_string())?;
         }
     }
     if !known || entry.msgs.len() > hashes.len() {
-        tx.execute("DELETE FROM messages WHERE session_id = ?1 AND seq >= ?2", params![id, hashes.len() as i64])
-            .map_err(|e| e.to_string())?;
+        tx.execute(
+            "DELETE FROM messages WHERE session_id = ?1 AND seq >= ?2",
+            params![id, hashes.len() as i64],
+        )
+        .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
     entry.info = info_hash;
@@ -361,14 +396,27 @@ fn save(db: &mut Connection, cache: &mut HashMap<String, Cached>, p: &Persisted)
     Ok(())
 }
 
-fn load(db: &Connection, cache: &mut HashMap<String, Cached>, id: &str) -> Result<Persisted, String> {
+fn load(
+    db: &Connection,
+    cache: &mut HashMap<String, Cached>,
+    id: &str,
+) -> Result<Persisted, String> {
     let row: Option<(String, Option<String>)> = db
-        .query_row("SELECT info, extra FROM sessions WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .query_row(
+            "SELECT info, extra FROM sessions WHERE id = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
         .optional()
         .map_err(|e| e.to_string())?;
-    let Some((info, extra)) = row else { return Err(format!("Session not found: {id}")) };
-    let info: SessionInfo = serde_json::from_str(&info).map_err(|e| format!("Session {id} is corrupt: {e}"))?;
-    let extra: Extra = extra.and_then(|x| serde_json::from_str(&x).ok()).unwrap_or_default();
+    let Some((info, extra)) = row else {
+        return Err(format!("Session not found: {id}"));
+    };
+    let info: SessionInfo =
+        serde_json::from_str(&info).map_err(|e| format!("Session {id} is corrupt: {e}"))?;
+    let extra: Extra = extra
+        .and_then(|x| serde_json::from_str(&x).ok())
+        .unwrap_or_default();
     let mut stmt = db
         .prepare_cached("SELECT seq, data FROM messages WHERE session_id = ?1 ORDER BY seq")
         .map_err(|e| e.to_string())?;
@@ -388,12 +436,23 @@ fn load(db: &Connection, cache: &mut HashMap<String, Cached>, id: &str) -> Resul
             }
         }
     }
-    let p = Persisted { info, messages, reported: extra.reported, context_notice: extra.context_notice };
+    let p = Persisted {
+        info,
+        messages,
+        reported: extra.reported,
+        context_notice: extra.context_notice,
+    };
     if contiguous {
-        let e = Extra { reported: p.reported, context_notice: p.context_notice };
+        let e = Extra {
+            reported: p.reported,
+            context_notice: p.context_notice,
+        };
         cache.insert(
             id.to_string(),
-            Cached { info: hash_json(&(&p.info, &e)), msgs: p.messages.iter().map(hash_json).collect() },
+            Cached {
+                info: hash_json(&(&p.info, &e)),
+                msgs: p.messages.iter().map(hash_json).collect(),
+            },
         );
     } else {
         // Rows do not map 1:1 to positions: rewrite everything on the next save.
@@ -402,14 +461,20 @@ fn load(db: &Connection, cache: &mut HashMap<String, Cached>, id: &str) -> Resul
     Ok(p)
 }
 
-fn list(db: &Connection, cwd: Option<&str>, limit: Option<usize>) -> Result<Vec<SessionInfo>, String> {
+fn list(
+    db: &Connection,
+    cwd: Option<&str>,
+    limit: Option<usize>,
+) -> Result<Vec<SessionInfo>, String> {
     let limit = limit.map(|l| l as i64).unwrap_or(-1);
     let mut stmt = db
         .prepare_cached(
             "SELECT info FROM sessions WHERE (?1 IS NULL OR cwd = ?1) ORDER BY updated_at DESC LIMIT ?2",
         )
         .map_err(|e| e.to_string())?;
-    let rows = stmt.query_map(params![cwd, limit], |r| r.get::<_, String>(0)).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![cwd, limit], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
     let mut out = Vec::new();
     for r in rows {
         let raw = r.map_err(|e| e.to_string())?;
@@ -423,21 +488,32 @@ fn list(db: &Connection, cwd: Option<&str>, limit: Option<usize>) -> Result<Vec<
 
 fn delete(db: &mut Connection, id: &str) -> Result<(), String> {
     let tx = db.transaction().map_err(|e| e.to_string())?;
-    tx.execute("DELETE FROM messages WHERE session_id = ?1", [id]).map_err(|e| e.to_string())?;
-    let n = tx.execute("DELETE FROM sessions WHERE id = ?1", [id]).map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM messages WHERE session_id = ?1", [id])
+        .map_err(|e| e.to_string())?;
+    let n = tx
+        .execute("DELETE FROM sessions WHERE id = ?1", [id])
+        .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
-    if n == 0 { Err(format!("Session not found: {id}")) } else { Ok(()) }
+    if n == 0 {
+        Err(format!("Session not found: {id}"))
+    } else {
+        Ok(())
+    }
 }
 
 /// One-time import of `<data_dir>/sessions/*.json`; the directory is renamed afterwards.
 fn import_json(db: &mut Connection, data_dir: &Path) -> Result<(), String> {
     let dir = data_dir.join("sessions");
-    let Ok(rd) = std::fs::read_dir(&dir) else { return Ok(()) };
+    let Ok(rd) = std::fs::read_dir(&dir) else {
+        return Ok(());
+    };
     let mut files: Vec<PathBuf> = rd
         .flatten()
         .map(|e| e.path())
         .filter(|p| {
-            p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with(".json") && !n.ends_with(".meta.json"))
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.ends_with(".json") && !n.ends_with(".meta.json"))
         })
         .collect();
     files.sort();
@@ -451,7 +527,11 @@ fn import_json(db: &mut Connection, data_dir: &Path) -> Result<(), String> {
         let p = match parsed {
             Ok(p) if valid_id(&p.info.id) => p,
             Ok(p) => {
-                tracing::warn!("import: {}: invalid session id {:?}", f.display(), p.info.id);
+                tracing::warn!(
+                    "import: {}: invalid session id {:?}",
+                    f.display(),
+                    p.info.id
+                );
                 skipped += 1;
                 continue;
             }
@@ -464,7 +544,10 @@ fn import_json(db: &mut Connection, data_dir: &Path) -> Result<(), String> {
         if exists(&tx, &p.info.id)? {
             continue;
         }
-        let extra = Extra { reported: p.reported, context_notice: false };
+        let extra = Extra {
+            reported: p.reported,
+            context_notice: false,
+        };
         tx.execute(
             "INSERT INTO sessions (id, info, cwd, title, name, created_at, updated_at, extra)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
@@ -494,8 +577,15 @@ fn import_json(db: &mut Connection, data_dir: &Path) -> Result<(), String> {
     if target.exists() {
         target = data_dir.join(format!("sessions.imported.{}", ref_proto::now_ms()));
     }
-    std::fs::rename(&dir, &target).map_err(|e| format!("renaming {} failed: {e}", dir.display()))?;
-    tracing::info!(imported, skipped, "imported legacy JSON sessions into {}; moved files to {}", "ref.db", target.display());
+    std::fs::rename(&dir, &target)
+        .map_err(|e| format!("renaming {} failed: {e}", dir.display()))?;
+    tracing::info!(
+        imported,
+        skipped,
+        "imported legacy JSON sessions into {}; moved files to {}",
+        "ref.db",
+        target.display()
+    );
     Ok(())
 }
 
@@ -540,7 +630,10 @@ mod tests {
             time: 1,
             time_end: None,
             source: MessageSource::Human,
-            parts: vec![Part::Text { text: text.into(), time: 1 }],
+            parts: vec![Part::Text {
+                text: text.into(),
+                time: 1,
+            }],
             model: None,
             agent: None,
             usage: None,
@@ -550,8 +643,13 @@ mod tests {
 
     fn rows(path: &Path, id: &str) -> Vec<(i64, String)> {
         let c = Connection::open(path).unwrap();
-        let mut st = c.prepare("SELECT seq, id FROM messages WHERE session_id = ?1 ORDER BY seq").unwrap();
-        st.query_map([id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|r| r.unwrap()).collect()
+        let mut st = c
+            .prepare("SELECT seq, id FROM messages WHERE session_id = ?1 ORDER BY seq")
+            .unwrap();
+        st.query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect()
     }
 
     #[test]
@@ -559,7 +657,12 @@ mod tests {
         let dir = tmp();
         let store = Store::new(dir.clone());
         // Empty, never-saved sessions are not stored.
-        store.save(Persisted { info: info("ses_empty", "/", 1), messages: vec![], reported: false, context_notice: false });
+        store.save(Persisted {
+            info: info("ses_empty", "/", 1),
+            messages: vec![],
+            reported: false,
+            context_notice: false,
+        });
         assert!(!store.exists("ses_empty"));
 
         let mut p = Persisted {
@@ -584,9 +687,17 @@ mod tests {
         assert_eq!(l.messages[0].raw_text(), "edited");
         assert!(!l.context_notice);
 
-        store.save(Persisted { info: info("ses_b", "/b", 5), messages: vec![msg("x", "y")], reported: false, context_notice: false });
+        store.save(Persisted {
+            info: info("ses_b", "/b", 5),
+            messages: vec![msg("x", "y")],
+            reported: false,
+            context_notice: false,
+        });
         let all = store.list();
-        assert_eq!(all.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["ses_b", "ses_abc"]);
+        assert_eq!(
+            all.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
+            ["ses_b", "ses_abc"]
+        );
         assert_eq!(store.list_for(Some("/a".into()), None).len(), 1);
         assert_eq!(store.list_for(None, Some(1)).len(), 1);
         assert!(store.load("../etc").is_err());
@@ -603,7 +714,10 @@ mod tests {
         b.messages.push(msg("z", "new"));
         store.save(b);
         assert_eq!(store.load("ses_b").unwrap().messages.len(), 2);
-        let v: i64 = Connection::open(&store.path).unwrap().pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
+        let v: i64 = Connection::open(&store.path)
+            .unwrap()
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
         assert_eq!(v, SCHEMA_VERSION);
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -623,7 +737,11 @@ mod tests {
         let mut v = serde_json::to_value(&p).unwrap();
         v.as_object_mut().unwrap().remove("context_notice");
         std::fs::write(sessions.join("ses_old.json"), v.to_string()).unwrap();
-        std::fs::write(sessions.join("ses_old.meta.json"), serde_json::to_string(&p.info).unwrap()).unwrap();
+        std::fs::write(
+            sessions.join("ses_old.meta.json"),
+            serde_json::to_string(&p.info).unwrap(),
+        )
+        .unwrap();
         std::fs::write(sessions.join("ses_bad.json"), "{not json").unwrap();
         let store = Store::new(dir.clone());
         let l = store.load("ses_old").unwrap();

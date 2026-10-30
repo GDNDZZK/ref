@@ -70,20 +70,33 @@ pub fn layout(n: usize, area: Rect) -> Vec<Rect> {
 /// Nearest tile from `from` in direction (dx, dy).
 pub fn neighbor(rects: &[Rect], from: usize, dx: i32, dy: i32) -> Option<usize> {
     let a = rects.get(from)?;
-    let (ax, ay) = (a.x as i32 + a.width as i32 / 2, a.y as i32 + a.height as i32 / 2);
+    let (ax, ay) = (
+        a.x as i32 + a.width as i32 / 2,
+        a.y as i32 + a.height as i32 / 2,
+    );
     let mut best: Option<(i64, usize)> = None;
     for (i, r) in rects.iter().enumerate() {
         if i == from {
             continue;
         }
-        let (bx, by) = (r.x as i32 + r.width as i32 / 2, r.y as i32 + r.height as i32 / 2);
+        let (bx, by) = (
+            r.x as i32 + r.width as i32 / 2,
+            r.y as i32 + r.height as i32 / 2,
+        );
         let (ddx, ddy) = (bx - ax, by - ay);
-        let ok = (dx > 0 && ddx > 0) || (dx < 0 && ddx < 0) || (dy > 0 && ddy > 0) || (dy < 0 && ddy < 0);
+        let ok = (dx > 0 && ddx > 0)
+            || (dx < 0 && ddx < 0)
+            || (dy > 0 && ddy > 0)
+            || (dy < 0 && ddy < 0);
         if !ok {
             continue;
         }
         // Penalise off-axis distance.
-        let d = if dx != 0 { (ddx.abs() as i64) + 3 * ddy.abs() as i64 } else { (ddy.abs() as i64) * 2 + 3 * ddx.abs() as i64 };
+        let d = if dx != 0 {
+            (ddx.abs() as i64) + 3 * ddy.abs() as i64
+        } else {
+            (ddy.abs() as i64) * 2 + 3 * ddx.abs() as i64
+        };
         if best.is_none_or(|(bd, _)| d < bd) {
             best = Some((d, i));
         }
@@ -98,13 +111,26 @@ fn status_text(v: &SessionView, tick: u64) -> (String, ratatui::style::Color) {
         Busy => (format!("{} working", theme::spinner(tick)), theme::PRIMARY),
         Running => (format!("{} running", theme::spinner(tick)), theme::PRIMARY),
         WaitingPermission => ("? permission".into(), theme::WARNING),
-        Retrying { attempt, .. } => (format!("{} retry #{attempt}", theme::spinner(tick)), theme::WARNING),
-        Compacting => (format!("{} compacting", theme::spinner(tick)), theme::ACCENT),
+        Retrying { attempt, .. } => (
+            format!("{} retry #{attempt}", theme::spinner(tick)),
+            theme::WARNING,
+        ),
+        Compacting => (
+            format!("{} compacting", theme::spinner(tick)),
+            theme::ACCENT,
+        ),
     }
 }
 
 /// Draws the frame of a tile; returns the body rect (inside borders, above the input row if focused).
-pub fn draw_frame(buf: &mut Buffer, r: Rect, v: &SessionView, focused: bool, tick: u64, agents: &[ref_proto::AgentInfo]) -> Rect {
+pub fn draw_frame(
+    buf: &mut Buffer,
+    r: Rect,
+    v: &SessionView,
+    focused: bool,
+    tick: u64,
+    agents: &[ref_proto::AgentInfo],
+) -> Rect {
     if r.width < 4 || r.height < 3 {
         return Rect::default();
     }
@@ -147,7 +173,11 @@ pub fn draw_frame(buf: &mut Buffer, r: Rect, v: &SessionView, focused: bool, tic
         *x += width(&t) as u16;
     };
     put(" ", bst, &mut x);
-    let name_style = if focused { theme::bold(theme::PRIMARY) } else { theme::bold(theme::TEXT) };
+    let name_style = if focused {
+        theme::bold(theme::PRIMARY)
+    } else {
+        theme::bold(theme::TEXT)
+    };
     put(&v.info.name, name_style, &mut x);
     put(" · ", theme::muted(), &mut x);
     put(&v.info.agent, theme::fg(ac), &mut x);
@@ -168,10 +198,20 @@ pub fn draw_frame(buf: &mut Buffer, r: Rect, v: &SessionView, focused: bool, tic
     // Title of the conversation on the bottom border.
     if !v.info.title.is_empty() && r.width > 12 {
         let t = text::truncate(&text::one_line(&v.info.title), (r.width - 6) as usize);
-        buf.set_string(x0 + 2, y1, format!(" {t} "), theme::fg(theme::DIM).add_modifier(Modifier::ITALIC));
+        buf.set_string(
+            x0 + 2,
+            y1,
+            format!(" {t} "),
+            theme::fg(theme::DIM).add_modifier(Modifier::ITALIC),
+        );
     }
     let input_h = if focused { 2 } else { 0 };
-    Rect::new(x0 + 1, y0 + 1, r.width - 2, (r.height - 2).saturating_sub(input_h))
+    Rect::new(
+        x0 + 1,
+        y0 + 1,
+        r.width - 2,
+        (r.height - 2).saturating_sub(input_h),
+    )
 }
 
 /// Draws the focused tile's input separator; returns the input rect.

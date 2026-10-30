@@ -47,7 +47,16 @@ fn parse_state(s: &str) -> McpState {
 impl McpEntry {
     pub fn from_status(s: &McpServerStatus) -> Self {
         let prefix = format!("{}_", s.name);
-        let tools: Vec<String> = s.tools.iter().map(|t| t.strip_prefix(&prefix).filter(|x| !x.is_empty()).unwrap_or(t).to_string()).collect();
+        let tools: Vec<String> = s
+            .tools
+            .iter()
+            .map(|t| {
+                t.strip_prefix(&prefix)
+                    .filter(|x| !x.is_empty())
+                    .unwrap_or(t)
+                    .to_string()
+            })
+            .collect();
         McpEntry {
             name: s.name.clone(),
             state: parse_state(&s.status),
@@ -64,7 +73,10 @@ impl McpEntry {
             Some((h, r)) if !h.contains('(') => (h.trim(), Some(r.trim())),
             _ => (l, None),
         };
-        let word = head.split(|c: char| c.is_whitespace() || c == '(').next().unwrap_or("");
+        let word = head
+            .split(|c: char| c.is_whitespace() || c == '(')
+            .next()
+            .unwrap_or("");
         let state = parse_state(word);
         let n_tools = head
             .split_once('(')
@@ -75,7 +87,13 @@ impl McpEntry {
             McpState::Failed => rest.filter(|r| !r.is_empty()).map(str::to_string),
             _ => None,
         };
-        McpEntry { name: name.to_string(), state, error, tools: Vec::new(), n_tools }
+        McpEntry {
+            name: name.to_string(),
+            state,
+            error,
+            tools: Vec::new(),
+            n_tools,
+        }
     }
 
     pub fn connecting(&self) -> bool {
@@ -95,7 +113,10 @@ pub fn dot(state: &McpState, tick: u64) -> Span<'static> {
         McpState::Connecting => {
             let phase = (tick % 12) as f32 / 6.0;
             let t = (phase - 1.0).abs();
-            Span::styled("◌", theme::fg(theme::blend(theme::DIM, theme::WARNING, 0.35 + 0.65 * t)))
+            Span::styled(
+                "◌",
+                theme::fg(theme::blend(theme::DIM, theme::WARNING, 0.35 + 0.65 * t)),
+            )
         }
         McpState::Failed => Span::styled("●", theme::fg(theme::ERROR)),
         McpState::Disabled => Span::styled("○", theme::fg(theme::DIM)),
@@ -112,7 +133,13 @@ pub fn status_text(e: &McpEntry) -> (String, Color) {
     match &e.state {
         McpState::Connected => (tools_label(e.n_tools), theme::MUTED),
         McpState::Connecting => ("connecting…".into(), theme::WARNING),
-        McpState::Failed => (e.error.as_deref().map(text::one_line).unwrap_or_else(|| "failed".into()), theme::ERROR),
+        McpState::Failed => (
+            e.error
+                .as_deref()
+                .map(text::one_line)
+                .unwrap_or_else(|| "failed".into()),
+            theme::ERROR,
+        ),
         McpState::Disabled => ("disabled".into(), theme::DIM),
         McpState::Other(s) => (s.clone(), theme::MUTED),
     }
@@ -120,8 +147,14 @@ pub fn status_text(e: &McpEntry) -> (String, Color) {
 
 /// `MCP` header summary, e.g. `2/3` (connected / enabled).
 pub fn summary(entries: &[McpEntry]) -> String {
-    let enabled = entries.iter().filter(|e| e.state != McpState::Disabled).count();
-    let on = entries.iter().filter(|e| e.state == McpState::Connected).count();
+    let enabled = entries
+        .iter()
+        .filter(|e| e.state != McpState::Disabled)
+        .count();
+    let on = entries
+        .iter()
+        .filter(|e| e.state == McpState::Connected)
+        .count();
     format!("{on}/{enabled}")
 }
 
@@ -133,9 +166,21 @@ pub fn sidebar_line(e: &McpEntry, w: usize, tick: u64) -> Line<'static> {
     let avail = w.saturating_sub(2);
     let min_name = name_w.min(avail.div_ceil(2).max(4));
     let right_room = avail.saturating_sub(min_name + 1);
-    let right = if right_room >= 3 { text::truncate(&st, right_room) } else { String::new() };
-    let left = vec![dot(&e.state, tick), Span::raw(" "), Span::styled(e.name.clone(), theme::text())];
-    let r = if right.is_empty() { vec![] } else { vec![Span::styled(right, theme::fg(color))] };
+    let right = if right_room >= 3 {
+        text::truncate(&st, right_room)
+    } else {
+        String::new()
+    };
+    let left = vec![
+        dot(&e.state, tick),
+        Span::raw(" "),
+        Span::styled(e.name.clone(), theme::text()),
+    ];
+    let r = if right.is_empty() {
+        vec![]
+    } else {
+        vec![Span::styled(right, theme::fg(color))]
+    };
     message::compose(left, r, w).0
 }
 
@@ -191,7 +236,9 @@ impl McpDialog {
 
     /// Expand (`Some(true)`), collapse (`Some(false)`) or toggle (`None`) the selected server.
     pub fn set_expanded(&mut self, entries: &[McpEntry], v: Option<bool>) {
-        let Some(e) = entries.get(self.sel) else { return };
+        let Some(e) = entries.get(self.sel) else {
+            return;
+        };
         let on = v.unwrap_or(!self.expanded.contains(&e.name));
         if on {
             self.expanded.insert(e.name.clone());
@@ -223,10 +270,20 @@ impl McpDialog {
         let mut out: Vec<(Line<'static>, Option<usize>)> = Vec::new();
         let mut blocks = Vec::new();
         if entries.is_empty() {
-            let msg = if loaded { "No MCP servers configured" } else { "Loading MCP servers…" };
+            let msg = if loaded {
+                "No MCP servers configured"
+            } else {
+                "Loading MCP servers…"
+            };
             out.push((Line::from(Span::styled(msg, theme::muted())), None));
             if loaded {
-                out.push((Line::from(Span::styled("add servers under \"mcp\" in your config", theme::fg(theme::DIM))), None));
+                out.push((
+                    Line::from(Span::styled(
+                        "add servers under \"mcp\" in your config",
+                        theme::fg(theme::DIM),
+                    )),
+                    None,
+                ));
             }
             return (out, blocks);
         }
@@ -234,7 +291,11 @@ impl McpDialog {
             let start = out.len();
             let exp = self.expanded.contains(&e.name);
             let has_tools = e.n_tools > 0;
-            let arrow = if has_tools { if exp { "▾ " } else { "▸ " } } else { "  " };
+            let arrow = if has_tools {
+                if exp { "▾ " } else { "▸ " }
+            } else {
+                "  "
+            };
             let left = vec![
                 Span::styled(arrow, theme::fg(theme::DIM)),
                 dot(&e.state, tick),
@@ -242,7 +303,10 @@ impl McpDialog {
                 Span::styled(e.name.clone(), theme::bold(theme::TEXT)),
             ];
             let (st, color) = match &e.state {
-                McpState::Connected => (format!("connected · {}", tools_label(e.n_tools)), theme::SUCCESS),
+                McpState::Connected => (
+                    format!("connected · {}", tools_label(e.n_tools)),
+                    theme::SUCCESS,
+                ),
                 McpState::Failed => ("failed".to_string(), theme::ERROR),
                 _ => status_text(e),
             };
@@ -254,8 +318,15 @@ impl McpDialog {
                 let flat = text::sanitize(err);
                 let mut lines = Vec::new();
                 for (li, logical) in flat.trim().split('\n').enumerate() {
-                    let content = if li == 0 { format!("error: {logical}") } else { logical.to_string() };
-                    lines.extend(text::wrap_spans(&[Span::styled(content, theme::fg(theme::ERROR))], body_w));
+                    let content = if li == 0 {
+                        format!("error: {logical}")
+                    } else {
+                        logical.to_string()
+                    };
+                    lines.extend(text::wrap_spans(
+                        &[Span::styled(content, theme::fg(theme::ERROR))],
+                        body_w,
+                    ));
                 }
                 // Long errors are capped unless the server is expanded.
                 let cap = if exp { usize::MAX } else { 4 };
@@ -266,12 +337,33 @@ impl McpDialog {
                     out.push((Line::from(spans), None));
                 }
                 if n > cap {
-                    out.push((Line::from(vec![Span::raw(ind), Span::styled(format!("… {} more lines (enter to show)", n - cap), theme::fg(theme::DIM))]), None));
+                    out.push((
+                        Line::from(vec![
+                            Span::raw(ind),
+                            Span::styled(
+                                format!("… {} more lines (enter to show)", n - cap),
+                                theme::fg(theme::DIM),
+                            ),
+                        ]),
+                        None,
+                    ));
                 }
             }
             if exp && has_tools {
                 if e.tools.is_empty() {
-                    out.push((Line::from(vec![Span::raw(ind), Span::styled(format!("{} (names not reported by this backend)", tools_label(e.n_tools)), theme::muted())]), None));
+                    out.push((
+                        Line::from(vec![
+                            Span::raw(ind),
+                            Span::styled(
+                                format!(
+                                    "{} (names not reported by this backend)",
+                                    tools_label(e.n_tools)
+                                ),
+                                theme::muted(),
+                            ),
+                        ]),
+                        None,
+                    ));
                 } else {
                     for l in tool_grid(&e.tools, body_w) {
                         let mut spans = vec![Span::raw(ind)];
@@ -288,7 +380,14 @@ impl McpDialog {
         (out, blocks)
     }
 
-    pub fn draw(&mut self, buf: &mut Buffer, screen: Rect, entries: &[McpEntry], tick: u64, loaded: bool) {
+    pub fn draw(
+        &mut self,
+        buf: &mut Buffer,
+        screen: Rect,
+        entries: &[McpEntry],
+        tick: u64,
+        loaded: bool,
+    ) {
         if let Some(w) = self.want.clone()
             && let Some(p) = entries.iter().position(|e| e.name == w)
         {
@@ -306,7 +405,12 @@ impl McpDialog {
         let h = (lines.len() as u16 + 5).clamp(6, max_h);
         let r = dialog::frame(buf, screen, w, h, "MCP servers", t);
         self.rect = r;
-        let inner = Rect::new(r.x + 2, r.y + 2, r.width.saturating_sub(4), r.height.saturating_sub(5));
+        let inner = Rect::new(
+            r.x + 2,
+            r.y + 2,
+            r.width.saturating_sub(4),
+            r.height.saturating_sub(5),
+        );
         let vh = inner.height as usize;
         self.max_scroll = lines.len().saturating_sub(vh);
         if self.follow
@@ -330,7 +434,11 @@ impl McpDialog {
             let mut l = l.clone();
             for s in &mut l.spans {
                 if selected {
-                    s.style = s.style.fg(theme::PANEL).bg(theme::PRIMARY).add_modifier(Modifier::BOLD);
+                    s.style = s
+                        .style
+                        .fg(theme::PANEL)
+                        .bg(theme::PRIMARY)
+                        .add_modifier(Modifier::BOLD);
                 } else {
                     s.style = s.style.bg(bg);
                     if let Some(c) = s.style.fg {
@@ -339,7 +447,10 @@ impl McpDialog {
                 }
             }
             if selected {
-                buf.set_style(Rect::new(inner.x.saturating_sub(1), y, inner.width + 2, 1), Style::new().bg(theme::PRIMARY));
+                buf.set_style(
+                    Rect::new(inner.x.saturating_sub(1), y, inner.width + 2, 1),
+                    Style::new().bg(theme::PRIMARY),
+                );
             }
             buf.set_line(inner.x, y, &l, inner.width);
             if let Some(i) = idx {
@@ -348,15 +459,29 @@ impl McpDialog {
         }
         // Scroll hint + footer.
         let fy = r.y + r.height.saturating_sub(2);
-        let more = if self.scroll < self.max_scroll { " · pgdn more" } else { "" };
+        let more = if self.scroll < self.max_scroll {
+            " · pgdn more"
+        } else {
+            ""
+        };
         let hint = format!("↑↓ select · enter/→ tools · ← hide{more} · esc close");
         let total: usize = entries.iter().map(|e| e.n_tools).sum();
         let count = format!("{} connected · {}", summary(entries), tools_label(total));
         let iwf = inner.width as usize;
         let cw = width(&count);
-        buf.set_string(inner.x, fy, text::truncate(&hint, iwf.saturating_sub(cw + 2)), Style::new().fg(theme::blend(bg, theme::DIM, t)).bg(bg));
+        buf.set_string(
+            inner.x,
+            fy,
+            text::truncate(&hint, iwf.saturating_sub(cw + 2)),
+            Style::new().fg(theme::blend(bg, theme::DIM, t)).bg(bg),
+        );
         if cw + 2 < iwf {
-            buf.set_string(inner.x + inner.width - cw as u16, fy, &count, Style::new().fg(theme::blend(bg, theme::DIM, t)).bg(bg));
+            buf.set_string(
+                inner.x + inner.width - cw as u16,
+                fy,
+                &count,
+                Style::new().fg(theme::blend(bg, theme::DIM, t)).bg(bg),
+            );
         }
     }
 }
@@ -372,9 +497,15 @@ fn tool_grid(tools: &[String], w: usize) -> Vec<Line<'static>> {
         let mut spans = Vec::new();
         for c in 0..cols {
             // Column-major so the list reads top to bottom.
-            let Some(t) = tools.get(c * rows + r) else { break };
+            let Some(t) = tools.get(c * rows + r) else {
+                break;
+            };
             let name = text::truncate(t, maxw);
-            let pad = if c + 1 < cols { colw.saturating_sub(width(&name) + 2) } else { 0 };
+            let pad = if c + 1 < cols {
+                colw.saturating_sub(width(&name) + 2)
+            } else {
+                0
+            };
             spans.push(Span::styled("· ", theme::fg(theme::DIM)));
             spans.push(Span::styled(name, theme::fg(theme::INFO)));
             spans.push(Span::raw(" ".repeat(pad)));
@@ -391,18 +522,35 @@ mod tests {
     #[test]
     fn parse_fallback_lines() {
         let e = McpEntry::from_line("ctx", "connected (12 tools)");
-        assert_eq!((e.state.clone(), e.n_tools, e.error.clone()), (McpState::Connected, 12, None));
+        assert_eq!(
+            (e.state.clone(), e.n_tools, e.error.clone()),
+            (McpState::Connected, 12, None)
+        );
         let e = McpEntry::from_line("x", "failed: HTTP 401: Unauthorized");
         assert_eq!(e.state, McpState::Failed);
         assert_eq!(e.error.as_deref(), Some("HTTP 401: Unauthorized"));
-        assert_eq!(McpEntry::from_line("x", "connecting").state, McpState::Connecting);
-        assert_eq!(McpEntry::from_line("x", "disabled").state, McpState::Disabled);
-        assert!(matches!(McpEntry::from_line("x", "needs_auth").state, McpState::Other(_)));
+        assert_eq!(
+            McpEntry::from_line("x", "connecting").state,
+            McpState::Connecting
+        );
+        assert_eq!(
+            McpEntry::from_line("x", "disabled").state,
+            McpState::Disabled
+        );
+        assert!(matches!(
+            McpEntry::from_line("x", "needs_auth").state,
+            McpState::Other(_)
+        ));
     }
 
     #[test]
     fn status_strips_prefix() {
-        let s = McpServerStatus { name: "gh".into(), status: "connected".into(), error: None, tools: vec!["gh_search".into(), "gh_".into(), "other".into()] };
+        let s = McpServerStatus {
+            name: "gh".into(),
+            status: "connected".into(),
+            error: None,
+            tools: vec!["gh_search".into(), "gh_".into(), "other".into()],
+        };
         let e = McpEntry::from_status(&s);
         assert_eq!(e.tools, vec!["search", "gh_", "other"]);
         assert_eq!(e.n_tools, 3);
@@ -410,7 +558,13 @@ mod tests {
 
     #[test]
     fn sidebar_line_fits() {
-        let e = McpEntry { name: "very-long-server-name-here".into(), state: McpState::Failed, error: Some("connection refused (os error 111) while connecting".into()), tools: vec![], n_tools: 0 };
+        let e = McpEntry {
+            name: "very-long-server-name-here".into(),
+            state: McpState::Failed,
+            error: Some("connection refused (os error 111) while connecting".into()),
+            tools: vec![],
+            n_tools: 0,
+        };
         for w in [12usize, 20, 30] {
             let l = sidebar_line(&e, w, 0);
             assert!(text::line_width(&l) <= w, "w={w}: {}", text::line_text(&l));

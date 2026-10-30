@@ -3,8 +3,8 @@
 use crate::hub::{Conn, Hub};
 use crate::session::{Session, user_message};
 use ref_proto::{
-    AgentInfo, CommandInfo, Message, MessageSource, ModelInfo, Part, Request, Role, ServerConfigInfo,
-    SessionInfo, SessionSnapshot,
+    AgentInfo, CommandInfo, Message, MessageSource, ModelInfo, Part, Request, Role,
+    ServerConfigInfo, SessionInfo, SessionSnapshot,
 };
 use serde_json::{Value, json};
 use std::path::Path;
@@ -16,11 +16,14 @@ type R = Result<Value, String>;
 async fn load_cfg(hub: &Arc<Hub>, cwd: &str) -> Result<ref_config::Config, String> {
     let hub = hub.clone();
     let cwd = cwd.to_string();
-    tokio::task::spawn_blocking(move || hub.load_config(Path::new(&cwd))).await.map_err(|e| e.to_string())
+    tokio::task::spawn_blocking(move || hub.load_config(Path::new(&cwd)))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 fn live(hub: &Arc<Hub>, id: &str) -> Result<Arc<Session>, String> {
-    hub.session(id).ok_or_else(|| format!("Session {id} is not live (attach to it first)."))
+    hub.session(id)
+        .ok_or_else(|| format!("Session {id} is not live (attach to it first)."))
 }
 
 pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
@@ -38,7 +41,9 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
         }
         Request::ListSessions => Ok(json!({ "sessions": hub.infos() })),
         Request::McpStatus { cwd } => {
-            let cwd = cwd.filter(|c| !c.trim().is_empty()).unwrap_or_else(|| conn.lock().cwd.clone());
+            let cwd = cwd
+                .filter(|c| !c.trim().is_empty())
+                .unwrap_or_else(|| conn.lock().cwd.clone());
             let cfg = load_cfg(hub, &cwd).await?;
             Ok(json!({ "servers": hub.mcp.status(&cfg) }))
         }
@@ -46,8 +51,9 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             let store = hub.store.clone();
             let cwd = cwd.filter(|c| !c.is_empty());
             let (c2, limit) = (cwd.clone(), limit.unwrap_or(100));
-            let mut list =
-                tokio::task::spawn_blocking(move || store.list_for(c2, Some(limit))).await.map_err(|e| e.to_string())?;
+            let mut list = tokio::task::spawn_blocking(move || store.list_for(c2, Some(limit)))
+                .await
+                .map_err(|e| e.to_string())?;
             let live: Vec<SessionInfo> = hub.infos();
             for i in &mut list {
                 if let Some(l) = live.iter().find(|l| l.id == i.id) {
@@ -66,15 +72,32 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             list.truncate(limit);
             Ok(json!({ "sessions": list }))
         }
-        Request::CreateSession { cwd, agent, model, name } => {
+        Request::CreateSession {
+            cwd,
+            agent,
+            model,
+            name,
+        } => {
             let s = crate::ops::create_session(
                 hub,
-                crate::ops::CreateOpts { cwd, agent, model, name, unique_suffix: false, parent: None, must_report: false },
+                crate::ops::CreateOpts {
+                    cwd,
+                    agent,
+                    model,
+                    name,
+                    unique_suffix: false,
+                    parent: None,
+                    must_report: false,
+                },
             )
             .await?;
             Ok(json!({ "session": s.info() }))
         }
-        Request::Attach { session_id, foreground, limit } => {
+        Request::Attach {
+            session_id,
+            foreground,
+            limit,
+        } => {
             let s = crate::ops::get_or_load(hub, &session_id).await?;
             let snapshot = {
                 let mut st = s.lock();
@@ -90,38 +113,71 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
                     }
                 }
                 hub.emit_info(&st);
-                let (messages, more_before) = crate::session::page(&st.messages, st.messages.len(), limit);
+                let (messages, more_before) =
+                    crate::session::page(&st.messages, st.messages.len(), limit);
                 let mut queued: Vec<Message> = st.queue.iter().cloned().collect();
                 queued.iter_mut().for_each(Message::strip_image_data);
-                SessionSnapshot { info: st.info.clone(), messages, more_before, pending_permissions: st.perms.iter().map(|p| p.request.clone()).collect(), queued }
+                SessionSnapshot {
+                    info: st.info.clone(),
+                    messages,
+                    more_before,
+                    pending_permissions: st.perms.iter().map(|p| p.request.clone()).collect(),
+                    queued,
+                }
             };
             Ok(json!({ "snapshot": snapshot }))
         }
-        Request::Messages { session_id, before, limit } => {
+        Request::Messages {
+            session_id,
+            before,
+            limit,
+        } => {
             let s = live(hub, &session_id)?;
             let st = s.lock();
-            let end = st.find_message(&before).ok_or_else(|| "That message is no longer in the conversation.".to_string())?;
+            let end = st
+                .find_message(&before)
+                .ok_or_else(|| "That message is no longer in the conversation.".to_string())?;
             let (messages, more_before) = crate::session::page(&st.messages, end, limit);
             Ok(json!({ "messages": messages, "more_before": more_before }))
         }
-        Request::GetImage { session_id, image_id } => {
-            let mid = ref_proto::image_message_id(&image_id).ok_or_else(|| format!("Invalid image id: {image_id}"))?.to_string();
-            fn find<'a>(mut msgs: impl Iterator<Item = &'a Message>, mid: &str, image_id: &str) -> Option<ref_proto::ImageData> {
-                msgs.find(|m| m.id == mid).and_then(|m| m.image(image_id)).filter(|i| !i.is_stub()).cloned()
+        Request::GetImage {
+            session_id,
+            image_id,
+        } => {
+            let mid = ref_proto::image_message_id(&image_id)
+                .ok_or_else(|| format!("Invalid image id: {image_id}"))?
+                .to_string();
+            fn find<'a>(
+                mut msgs: impl Iterator<Item = &'a Message>,
+                mid: &str,
+                image_id: &str,
+            ) -> Option<ref_proto::ImageData> {
+                msgs.find(|m| m.id == mid)
+                    .and_then(|m| m.image(image_id))
+                    .filter(|i| !i.is_stub())
+                    .cloned()
             }
             let image = match hub.session(&session_id) {
                 Some(s) => {
                     let st = s.lock();
-                    find(st.messages.iter().rev().chain(st.queue.iter()), &mid, &image_id)
+                    find(
+                        st.messages.iter().rev().chain(st.queue.iter()),
+                        &mid,
+                        &image_id,
+                    )
                 }
                 None => {
                     let store = hub.store.clone();
                     let id = session_id.clone();
-                    let p = tokio::task::spawn_blocking(move || store.load(&id)).await.map_err(|e| e.to_string())??;
+                    let p = tokio::task::spawn_blocking(move || store.load(&id))
+                        .await
+                        .map_err(|e| e.to_string())??;
                     find(p.messages.iter().rev(), &mid, &image_id)
                 }
             };
-            let image = image.ok_or_else(|| "Image not found (the message may have been removed).".to_string())?;
+            let image = image.ok_or_else(|| {
+                "Image not found (the message may have been removed).".to_string()
+            })?;
             Ok(json!({ "image": image }))
         }
         Request::Detach { session_id } => {
@@ -143,7 +199,11 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             conn.lock().watch_all = enabled;
             Ok(json!({ "sessions": hub.infos() }))
         }
-        Request::Prompt { session_id, text, images } => {
+        Request::Prompt {
+            session_id,
+            text,
+            images,
+        } => {
             let s = live(hub, &session_id)?;
             if text.trim().is_empty() && images.is_empty() {
                 return Err("Prompt is empty.".into());
@@ -152,20 +212,32 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
                 return Err("An attached image has no data.".into());
             }
             reload_config(hub, &s).await;
-            let images = if s.lock().cfg.images_auto_resize { fit_images(images).await? } else { images };
+            let images = if s.lock().cfg.images_auto_resize {
+                fit_images(images).await?
+            } else {
+                images
+            };
             let msg = user_message(MessageSource::Human, text, images);
             let id = msg.id.clone();
             let queued = crate::engine::submit(hub, &s, msg);
             Ok(json!({ "queued": queued, "message_id": id }))
         }
-        Request::RemoveQueued { session_id, message_id } => {
+        Request::RemoveQueued {
+            session_id,
+            message_id,
+        } => {
             let s = live(hub, &session_id)?;
             Ok(match crate::engine::remove_queued(hub, &s, &message_id) {
-                Some(m) => json!({ "removed": true, "text": m.raw_text(), "images": m.prompt_images() }),
+                Some(m) => {
+                    json!({ "removed": true, "text": m.raw_text(), "images": m.prompt_images() })
+                }
                 None => json!({ "removed": false }),
             })
         }
-        Request::Shell { session_id, command } => {
+        Request::Shell {
+            session_id,
+            command,
+        } => {
             let s = live(hub, &session_id)?;
             let (hub2, s2) = (hub.clone(), s.clone());
             tokio::spawn(async move { run_shell(hub2, s2, command).await });
@@ -176,11 +248,19 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             crate::engine::abort(hub, &s, true);
             Ok(json!({}))
         }
-        Request::PermissionReply { session_id, call_id, allow, always } => {
+        Request::PermissionReply {
+            session_id,
+            call_id,
+            allow,
+            always,
+        } => {
             let s = live(hub, &session_id)?;
             let tx = {
                 let mut st = s.lock();
-                st.perms.iter_mut().find(|p| p.request.call_id == call_id).and_then(|p| p.tx.take())
+                st.perms
+                    .iter_mut()
+                    .find(|p| p.request.call_id == call_id)
+                    .and_then(|p| p.tx.take())
             };
             match tx {
                 Some(tx) => {
@@ -207,9 +287,13 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             let s = live(hub, &session_id)?;
             let mut st = s.lock();
             if agent == ref_config::COMPACTION_AGENT {
-                return Err(format!("Agent {agent} is internal and cannot run a session."));
+                return Err(format!(
+                    "Agent {agent} is internal and cannot run a session."
+                ));
             }
-            let Some(a) = st.cfg.agents.get(&agent) else { return Err(format!("Unknown agent: {agent}")) };
+            let Some(a) = st.cfg.agents.get(&agent) else {
+                return Err(format!("Unknown agent: {agent}"));
+            };
             if a.model.is_some()
                 && let Some(m) = st.cfg.default_model_for(&agent)
             {
@@ -225,14 +309,19 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             hub.emit_info(&st);
             Ok(json!({ "session": st.info.clone() }))
         }
-        Request::SetVariant { session_id, variant } => {
+        Request::SetVariant {
+            session_id,
+            variant,
+        } => {
             let s = live(hub, &session_id)?;
             let mut st = s.lock();
             let list = crate::models::variants(&st.cfg, &st.info.model);
             let next = match variant {
                 Some(v) if v.is_empty() => None,
                 Some(v) if list.contains(&v) => Some(v),
-                Some(v) => return Err(format!("Model {} has no variant {v}.", st.info.model.key())),
+                Some(v) => {
+                    return Err(format!("Model {} has no variant {v}.", st.info.model.key()));
+                }
                 None => crate::models::next_variant(&list, st.info.model.variant.as_deref()),
             };
             st.info.model.variant = next;
@@ -263,12 +352,19 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             crate::engine::start_custom_run(hub, &s, crate::compaction::manual)?;
             Ok(json!({}))
         }
-        Request::PeerCommand { session_id, command, args } => {
+        Request::PeerCommand {
+            session_id,
+            command,
+            args,
+        } => {
             let s = live(hub, &session_id)?;
             let text = crate::peers::user_command(hub, &s, &command, &args)?;
             Ok(json!({ "text": text }))
         }
-        Request::Undo { session_id, message_id } => {
+        Request::Undo {
+            session_id,
+            message_id,
+        } => {
             let s = live(hub, &session_id)?;
             if s.lock().run.is_some() {
                 crate::engine::abort(hub, &s, true);
@@ -279,7 +375,9 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             let (text, images) = {
                 let mut st = s.lock();
                 let i = match &message_id {
-                    Some(id) => st.find_message(id).ok_or_else(|| "That message is no longer in the conversation.".to_string())?,
+                    Some(id) => st.find_message(id).ok_or_else(|| {
+                        "That message is no longer in the conversation.".to_string()
+                    })?,
                     None => st
                         .messages
                         .iter()
@@ -288,7 +386,11 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
                 };
                 // Only human prompts go back into the editor.
                 let m = &st.messages[i];
-                let (text, images) = if m.source == MessageSource::Human { (m.raw_text(), m.prompt_images()) } else { (String::new(), Vec::new()) };
+                let (text, images) = if m.source == MessageSource::Human {
+                    (m.raw_text(), m.prompt_images())
+                } else {
+                    (String::new(), Vec::new())
+                };
                 st.messages.truncate(i);
                 if !st.queue.is_empty() {
                     st.queue.clear();
@@ -312,12 +414,16 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
                 crate::ops::close_session(hub, &s).await;
             }
             let store = hub.store.clone();
-            tokio::task::spawn_blocking(move || store.delete(&session_id)).await.map_err(|e| e.to_string())??;
+            tokio::task::spawn_blocking(move || store.delete(&session_id))
+                .await
+                .map_err(|e| e.to_string())??;
             Ok(json!({}))
         }
         Request::ExpandCommand { name, args, cwd } => {
             let cfg = load_cfg(hub, &cwd).await?;
-            let Some(cmd) = cfg.commands.get(&name) else { return Err(format!("Unknown command: /{name}")) };
+            let Some(cmd) = cfg.commands.get(&name) else {
+                return Err(format!("Unknown command: /{name}"));
+            };
             let text = expand_template(&cmd.template, &args);
             let text = expand_shell(&text, &cwd).await;
             Ok(json!({ "text": text }))
@@ -337,7 +443,11 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
                 (st.info.clone(), st.messages.clone())
             };
             let p = std::path::PathBuf::from(&path);
-            let p = if p.is_absolute() { p } else { Path::new(&info.cwd).join(p) };
+            let p = if p.is_absolute() {
+                p
+            } else {
+                Path::new(&info.cwd).join(p)
+            };
             let md = export_markdown(&info, &messages);
             std::fs::write(&p, md).map_err(|e| format!("Cannot write {}: {e}", p.display()))?;
             Ok(json!({ "path": p.to_string_lossy() }))
@@ -364,7 +474,11 @@ async fn set_cwd(hub: &Arc<Hub>, s: &Arc<Session>, path: &str) -> Result<(), Str
     }
     let home = hub.opts.home.clone().or_else(dirs::home_dir);
     let p = crate::util::expand_home(path, home.as_deref());
-    let p = if p.is_absolute() { p } else { Path::new(&old).join(p) };
+    let p = if p.is_absolute() {
+        p
+    } else {
+        Path::new(&old).join(p)
+    };
     let new = crate::ops::validate_cwd(&p.to_string_lossy())?;
     if new == old {
         return Ok(());
@@ -390,18 +504,27 @@ async fn set_cwd(hub: &Arc<Hub>, s: &Arc<Session>, path: &str) -> Result<(), Str
 }
 
 /// Downscales / recompresses prompt images (`images.auto_resize`); undecodable ones are kept.
-async fn fit_images(images: Vec<ref_proto::ImageData>) -> Result<Vec<ref_proto::ImageData>, String> {
+async fn fit_images(
+    images: Vec<ref_proto::ImageData>,
+) -> Result<Vec<ref_proto::ImageData>, String> {
     if images.is_empty() {
         return Ok(images);
     }
-    tokio::task::spawn_blocking(move || images.into_iter().map(|i| ref_tools::imgfit::fit_image_data(&i).unwrap_or(i)).collect())
-        .await
-        .map_err(|_| "Processing the attached images failed.".to_string())
+    tokio::task::spawn_blocking(move || {
+        images
+            .into_iter()
+            .map(|i| ref_tools::imgfit::fit_image_data(&i).unwrap_or(i))
+            .collect()
+    })
+    .await
+    .map_err(|_| "Processing the attached images failed.".to_string())
 }
 
 async fn reload_config(hub: &Arc<Hub>, s: &Arc<Session>) {
     let cwd = s.lock().info.cwd.clone();
-    let Ok(cfg) = load_cfg(hub, &cwd).await else { return };
+    let Ok(cfg) = load_cfg(hub, &cwd).await else {
+        return;
+    };
     let mut st = s.lock();
     if format!("{:?}", *st.cfg) != format!("{cfg:?}") {
         st.cfg = Arc::new(cfg);
@@ -444,10 +567,21 @@ async fn config_info(hub: &Arc<Hub>, cwd: &str) -> Result<ServerConfigInfo, Stri
     let commands = cfg
         .commands
         .values()
-        .map(|c| CommandInfo { name: c.name.clone(), description: c.description.clone(), source: "config".into() })
+        .map(|c| CommandInfo {
+            name: c.name.clone(),
+            description: c.description.clone(),
+            source: "config".into(),
+        })
         .collect();
     let mcp = hub.mcp.status_lines(&cfg);
-    Ok(ServerConfigInfo { agents, default_agent: cfg.default_agent.clone(), models, commands, mcp, tui: cfg.tui.clone() })
+    Ok(ServerConfigInfo {
+        agents,
+        default_agent: cfg.default_agent.clone(),
+        models,
+        commands,
+        mcp,
+        tui: cfg.tui.clone(),
+    })
 }
 
 async fn run_shell(hub: Arc<Hub>, s: Arc<Session>, command: String) {
@@ -460,7 +594,10 @@ async fn run_shell(hub: Arc<Hub>, s: Arc<Session>, command: String) {
         resize_images: false,
     };
     let out = ref_tools::execute("bash", json!({"command": command, "timeout": 600}), &ctx).await;
-    let text = format!("I ran this command:\n```\n$ {command}\n{}\n```", out.text.trim_end());
+    let text = format!(
+        "I ran this command:\n```\n$ {command}\n{}\n```",
+        out.text.trim_end()
+    );
     let msg = user_message(MessageSource::Shell, text, vec![]);
     crate::engine::append_only(&hub, &s, msg);
 }
@@ -468,7 +605,10 @@ async fn run_shell(hub: Arc<Hub>, s: Arc<Session>, command: String) {
 /// `$ARGUMENTS`, `$1`..`$9` substitution (the last numbered placeholder takes the rest).
 pub fn expand_template(template: &str, args: &str) -> String {
     let words: Vec<&str> = args.split_whitespace().collect();
-    let max_n = (1..=9).rev().find(|n| template.contains(&format!("${n}"))).unwrap_or(0);
+    let max_n = (1..=9)
+        .rev()
+        .find(|n| template.contains(&format!("${n}")))
+        .unwrap_or(0);
     let mut out = template.replace("$ARGUMENTS", args.trim());
     for n in (1..=9).rev() {
         let key = format!("${n}");
@@ -494,11 +634,17 @@ async fn expand_shell(text: &str, cwd: &str) -> String {
     let mut out = String::new();
     let mut last = 0;
     for c in re.captures_iter(text) {
-        let (Some(m), Some(cmd)) = (c.get(0), c.get(1)) else { continue };
+        let (Some(m), Some(cmd)) = (c.get(0), c.get(1)) else {
+            continue;
+        };
         out.push_str(&text[last..m.start()]);
         let res = tokio::time::timeout(
             Duration::from_secs(30),
-            tokio::process::Command::new(ref_tools::default_shell()).arg("-c").arg(cmd.as_str()).current_dir(cwd).output(),
+            tokio::process::Command::new(ref_tools::default_shell())
+                .arg("-c")
+                .arg(cmd.as_str())
+                .current_dir(cwd)
+                .output(),
         )
         .await;
         match res {
@@ -517,7 +663,11 @@ async fn expand_shell(text: &str, cwd: &str) -> String {
 }
 
 async fn list_files(hub: &Arc<Hub>, cwd: &str) -> Result<Arc<Vec<String>>, String> {
-    if let Some((t, v)) = hub.files_cache.lock().unwrap_or_else(|e| e.into_inner()).get(cwd)
+    if let Some((t, v)) = hub
+        .files_cache
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(cwd)
         && t.elapsed() < Duration::from_secs(10)
     {
         return Ok(v.clone());
@@ -528,8 +678,15 @@ async fn list_files(hub: &Arc<Hub>, cwd: &str) -> Result<Arc<Vec<String>>, Strin
     }
     let files = tokio::task::spawn_blocking(move || {
         let mut out = Vec::new();
-        for e in ignore::WalkBuilder::new(&root).hidden(true).max_depth(Some(16)).build().flatten() {
-            let Ok(rel) = e.path().strip_prefix(&root) else { continue };
+        for e in ignore::WalkBuilder::new(&root)
+            .hidden(true)
+            .max_depth(Some(16))
+            .build()
+            .flatten()
+        {
+            let Ok(rel) = e.path().strip_prefix(&root) else {
+                continue;
+            };
             let rel = rel.to_string_lossy();
             if rel.is_empty() {
                 continue;
@@ -563,7 +720,11 @@ pub fn fuzzy_score(path: &str, q: &str) -> Option<i64> {
     }
     let p: Vec<char> = path.to_lowercase().chars().collect();
     let qc: Vec<char> = q.to_lowercase().chars().collect();
-    let base_start = path.trim_end_matches('/').rfind('/').map(|i| path[..=i].chars().count()).unwrap_or(0);
+    let base_start = path
+        .trim_end_matches('/')
+        .rfind('/')
+        .map(|i| path[..=i].chars().count())
+        .unwrap_or(0);
     let mut score: i64 = 0;
     let mut pi = 0;
     let mut prev: Option<usize> = None;
@@ -603,15 +764,30 @@ pub fn fuzzy_score(path: &str, q: &str) -> Option<i64> {
 
 fn fuzzy_filter(files: &[String], q: &str, limit: usize) -> Vec<String> {
     let q = q.trim();
-    let mut scored: Vec<(i64, &String)> = files.iter().filter_map(|f| fuzzy_score(f, q).map(|s| (s, f))).collect();
-    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.len().cmp(&b.1.len())).then(a.1.cmp(b.1)));
-    scored.into_iter().take(limit).map(|(_, f)| f.clone()).collect()
+    let mut scored: Vec<(i64, &String)> = files
+        .iter()
+        .filter_map(|f| fuzzy_score(f, q).map(|s| (s, f)))
+        .collect();
+    scored.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then(a.1.len().cmp(&b.1.len()))
+            .then(a.1.cmp(b.1))
+    });
+    scored
+        .into_iter()
+        .take(limit)
+        .map(|(_, f)| f.clone())
+        .collect()
 }
 
 pub fn export_markdown(info: &SessionInfo, messages: &[Message]) -> String {
     let mut out = format!(
         "# {}\n\nSession `{}` (\"{}\") — agent {} — model {} — {}\n\n",
-        if info.title.is_empty() { "Untitled session" } else { &info.title },
+        if info.title.is_empty() {
+            "Untitled session"
+        } else {
+            &info.title
+        },
         info.id,
         info.name,
         info.agent,
@@ -622,8 +798,12 @@ pub fn export_markdown(info: &SessionInfo, messages: &[Message]) -> String {
         let who = match (&m.role, &m.source) {
             (Role::Assistant, _) => "Assistant".to_string(),
             (Role::User, MessageSource::Human) => "User".into(),
-            (Role::User, MessageSource::Peer { from_name, .. }) => format!("Message from \"{from_name}\""),
-            (Role::User, MessageSource::Spawn { from_name, .. }) => format!("Task from \"{from_name}\""),
+            (Role::User, MessageSource::Peer { from_name, .. }) => {
+                format!("Message from \"{from_name}\"")
+            }
+            (Role::User, MessageSource::Spawn { from_name, .. }) => {
+                format!("Task from \"{from_name}\"")
+            }
             (Role::User, MessageSource::Reminder) => "Reminder".into(),
             (Role::User, MessageSource::Compaction) => "Compaction summary".into(),
             (Role::User, MessageSource::Shell) => "User shell".into(),
@@ -641,15 +821,31 @@ pub fn export_markdown(info: &SessionInfo, messages: &[Message]) -> String {
                     out.push_str("\n\n</details>\n\n");
                 }
                 Part::Image { name, .. } => {
-                    out.push_str(&format!("[image{}]\n\n", name.as_ref().map(|n| format!(": {n}")).unwrap_or_default()));
+                    out.push_str(&format!(
+                        "[image{}]\n\n",
+                        name.as_ref().map(|n| format!(": {n}")).unwrap_or_default()
+                    ));
                 }
-                Part::Tool { name, purpose, input, state, output, .. } => {
+                Part::Tool {
+                    name,
+                    purpose,
+                    input,
+                    state,
+                    output,
+                    ..
+                } => {
                     let st = serde_json::to_string(state).unwrap_or_default();
-                    out.push_str(&format!("**Tool `{name}`** — {purpose} [{}]\n\n", st.trim_matches('"')));
+                    out.push_str(&format!(
+                        "**Tool `{name}`** — {purpose} [{}]\n\n",
+                        st.trim_matches('"')
+                    ));
                     let inp = serde_json::to_string_pretty(input).unwrap_or_default();
                     out.push_str(&format!("```json\n{inp}\n```\n\n"));
                     if let Some(o) = output {
-                        out.push_str(&format!("```\n{}\n```\n\n", o.trim_end().replace("```", "`\u{200b}``")));
+                        out.push_str(&format!(
+                            "```\n{}\n```\n\n",
+                            o.trim_end().replace("```", "`\u{200b}``")
+                        ));
                     }
                 }
                 _ => {}
@@ -668,15 +864,25 @@ mod tests {
 
     #[test]
     fn templates() {
-        assert_eq!(expand_template("fix $ARGUMENTS now", "the bug"), "fix the bug now");
+        assert_eq!(
+            expand_template("fix $ARGUMENTS now", "the bug"),
+            "fix the bug now"
+        );
         assert_eq!(expand_template("a=$1 b=$2", "x y z"), "a=x b=y z");
         assert_eq!(expand_template("plain", "extra"), "plain\n\nextra");
     }
 
     #[test]
     fn fuzzy() {
-        let files: Vec<String> =
-            ["src/main.rs", "src/engine.rs", "docs/main_notes.md", "Cargo.toml"].iter().map(|s| s.to_string()).collect();
+        let files: Vec<String> = [
+            "src/main.rs",
+            "src/engine.rs",
+            "docs/main_notes.md",
+            "Cargo.toml",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
         let r = fuzzy_filter(&files, "main", 10);
         assert_eq!(r[0], "src/main.rs");
         assert!(!r.contains(&"Cargo.toml".to_string()));

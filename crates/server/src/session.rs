@@ -2,7 +2,10 @@
 
 use crate::store::Persisted;
 use ref_config::Config;
-use ref_proto::{Message, MessageSource, Part, PermissionRequest, Role, SessionEvent, SessionInfo, SessionStatus, ToolState};
+use ref_proto::{
+    Message, MessageSource, Part, PermissionRequest, Role, SessionEvent, SessionInfo,
+    SessionStatus, ToolState,
+};
 use ref_tools::HashStore;
 use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -58,7 +61,13 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn new(info: SessionInfo, messages: Vec<Message>, cfg: Arc<Config>, reported: bool, context_notice: bool) -> Arc<Session> {
+    pub fn new(
+        info: SessionInfo,
+        messages: Vec<Message>,
+        cfg: Arc<Config>,
+        reported: bool,
+        context_notice: bool,
+    ) -> Arc<Session> {
         Arc::new(Session {
             id: info.id.clone(),
             hashes: Arc::new(HashStore::new()),
@@ -102,7 +111,12 @@ impl Session {
         let mut messages = st.messages.clone();
         // Queued messages were accepted from the user; keep them.
         messages.extend(st.queue.iter().cloned());
-        Persisted { info, messages, reported: st.reported, context_notice: st.context_notice }
+        Persisted {
+            info,
+            messages,
+            reported: st.reported,
+            context_notice: st.context_notice,
+        }
     }
 }
 
@@ -137,7 +151,10 @@ impl SessionState {
     /// `Reset` event with the newest page of messages.
     pub fn reset_event(&self) -> SessionEvent {
         let (messages, more_before) = page(&self.messages, self.messages.len(), None);
-        SessionEvent::Reset { messages, more_before }
+        SessionEvent::Reset {
+            messages,
+            more_before,
+        }
     }
 }
 
@@ -174,7 +191,13 @@ pub fn cancel_unfinished(messages: &mut [Message], output: &str) -> bool {
     let now = ref_proto::now_ms();
     for m in messages {
         for p in &mut m.parts {
-            if let Part::Tool { state, output: out, time_end, run_at, .. } = p
+            if let Part::Tool {
+                state,
+                output: out,
+                time_end,
+                run_at,
+                ..
+            } = p
                 && !state.is_final()
             {
                 *state = ToolState::Cancelled;
@@ -191,11 +214,18 @@ pub fn cancel_unfinished(messages: &mut [Message], output: &str) -> bool {
 }
 
 /// Plain user message.
-pub fn user_message(source: MessageSource, text: String, images: Vec<ref_proto::ImageData>) -> Message {
+pub fn user_message(
+    source: MessageSource,
+    text: String,
+    images: Vec<ref_proto::ImageData>,
+) -> Message {
     let now = ref_proto::now_ms();
     let mut parts = vec![Part::Text { text, time: now }];
     for img in images {
-        parts.push(Part::Image { image: img, name: None });
+        parts.push(Part::Image {
+            image: img,
+            name: None,
+        });
     }
     Message {
         id: crate::util::new_id("msg"),

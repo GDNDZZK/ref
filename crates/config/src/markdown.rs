@@ -35,7 +35,10 @@ pub fn split_frontmatter(text: &str) -> (Map<String, Value>, String) {
         // Unterminated frontmatter: treat everything as body.
         return (Map::new(), text.trim().to_string());
     }
-    (parse_frontmatter(&fm.join("\n")), body.join("\n").trim().to_string())
+    (
+        parse_frontmatter(&fm.join("\n")),
+        body.join("\n").trim().to_string(),
+    )
 }
 
 struct Line<'a> {
@@ -51,11 +54,19 @@ pub fn parse_frontmatter(src: &str) -> Map<String, Value> {
         .map(|raw| {
             let t = raw.trim_start();
             let blank = t.is_empty() || t.starts_with('#');
-            Line { indent: raw.len() - t.len(), text: t.trim_end(), blank }
+            Line {
+                indent: raw.len() - t.len(),
+                text: t.trim_end(),
+                blank,
+            }
         })
         .collect();
     let mut i = 0;
-    let start = lines.iter().find(|l| !l.blank).map(|l| l.indent).unwrap_or(0);
+    let start = lines
+        .iter()
+        .find(|l| !l.blank)
+        .map(|l| l.indent)
+        .unwrap_or(0);
     let mut out = parse_map(&lines, &mut i, start);
     // Anything left over at lower indentation (malformed) is parsed as further top-level keys.
     while i < lines.len() {
@@ -108,7 +119,9 @@ fn parse_map(lines: &[Line], i: &mut usize, indent: usize) -> Map<String, Value>
                     parse_list(lines, i, ind)
                 }
                 // A list may also be written at the same indentation as its key.
-                Some(n) if n.indent == indent && n.text.starts_with("- ") => parse_list(lines, i, indent),
+                Some(n) if n.indent == indent && n.text.starts_with("- ") => {
+                    parse_list(lines, i, indent)
+                }
                 Some(n) if n.indent > indent => {
                     let ind = n.indent;
                     Value::Object(parse_map(lines, i, ind))
@@ -147,10 +160,22 @@ struct BlockStyle {
 
 fn block_style(rest: &str) -> Option<BlockStyle> {
     match rest {
-        "|" | "|+" => Some(BlockStyle { folded: false, strip: false }),
-        "|-" => Some(BlockStyle { folded: false, strip: true }),
-        ">" | ">+" => Some(BlockStyle { folded: true, strip: false }),
-        ">-" => Some(BlockStyle { folded: true, strip: true }),
+        "|" | "|+" => Some(BlockStyle {
+            folded: false,
+            strip: false,
+        }),
+        "|-" => Some(BlockStyle {
+            folded: false,
+            strip: true,
+        }),
+        ">" | ">+" => Some(BlockStyle {
+            folded: true,
+            strip: false,
+        }),
+        ">-" => Some(BlockStyle {
+            folded: true,
+            strip: true,
+        }),
         _ => None,
     }
 }
@@ -207,7 +232,9 @@ fn split_key(text: &str) -> Option<(String, &str)> {
     }
     let bytes = text.as_bytes();
     for (idx, &b) in bytes.iter().enumerate() {
-        if b == b':' && (idx + 1 == bytes.len() || bytes[idx + 1] == b' ' || bytes[idx + 1] == b'\t') {
+        if b == b':'
+            && (idx + 1 == bytes.len() || bytes[idx + 1] == b' ' || bytes[idx + 1] == b'\t')
+        {
             let k = text[..idx].trim();
             if k.is_empty() {
                 return None;
@@ -318,7 +345,10 @@ fn split_flow(s: &str) -> Vec<String> {
         }
     }
     out.push(cur);
-    out.into_iter().map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect()
+    out.into_iter()
+        .map(|x| x.trim().to_string())
+        .filter(|x| !x.is_empty())
+        .collect()
 }
 
 /// A markdown definition found on disk.
@@ -349,7 +379,11 @@ pub fn collect(root: &Path, subdirs: &[&str]) -> (Vec<MdDoc>, Vec<String>) {
                 Ok(r) => r.with_extension(""),
                 Err(_) => continue,
             };
-            let name = rel.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/");
+            let name = rel
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
             match std::fs::read_to_string(&f) {
                 Ok(text) => {
                     let (frontmatter, body) = split_frontmatter(&text);
@@ -372,7 +406,9 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>, depth: usize) {
     if depth > 16 {
         return;
     }
-    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
     for e in rd.flatten() {
         let p = e.path();
         let Ok(ft) = e.file_type() else { continue };
@@ -423,7 +459,10 @@ You are in code review mode.
 "##;
         let (fm, body) = split_frontmatter(text);
         assert_eq!(body, "You are in code review mode.");
-        assert_eq!(fm["description"], json!("Reviews code: quality and best practices"));
+        assert_eq!(
+            fm["description"],
+            json!("Reviews code: quality and best practices")
+        );
         assert_eq!(fm["mode"], json!("subagent"));
         assert_eq!(fm["temperature"], json!(0.1));
         assert_eq!(fm["hidden"], json!(false));
@@ -432,7 +471,12 @@ You are in code review mode.
             Value::Object(fm["permission"].as_object().unwrap().clone()),
             json!({"edit": "deny", "bash": {"*": "ask", "git diff": "allow", "git log*": "allow"}, "webfetch": "deny"})
         );
-        let keys: Vec<_> = fm["permission"]["bash"].as_object().unwrap().keys().cloned().collect();
+        let keys: Vec<_> = fm["permission"]["bash"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
         assert_eq!(keys, ["*", "git diff", "git log*"]);
         assert_eq!(fm["tools"], json!({"write": false}));
         assert_eq!(fm["delay"], json!({"bash": 2}));

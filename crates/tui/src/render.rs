@@ -30,7 +30,15 @@ pub struct Layout {
 }
 
 pub fn chat_layout(app: &App, area: Rect) -> Layout {
-    let sidebar = (app.sidebar && area.width >= SIDEBAR_MIN_SCREEN && app.current.is_some()).then(|| Rect::new(area.x + area.width - SIDEBAR_W, area.y, SIDEBAR_W, area.height));
+    let sidebar =
+        (app.sidebar && area.width >= SIDEBAR_MIN_SCREEN && app.current.is_some()).then(|| {
+            Rect::new(
+                area.x + area.width - SIDEBAR_W,
+                area.y,
+                SIDEBAR_W,
+                area.height,
+            )
+        });
     let main_w = area.width - sidebar.map(|s| s.width + 1).unwrap_or(0);
     let main = Rect::new(area.x, area.y, main_w, area.height);
     // Prompt box: 1 col margin each side; inner: bar(1) + pad(2) + text + pad(2).
@@ -46,9 +54,25 @@ pub fn chat_layout(app: &App, area: Rect) -> Layout {
     let chat_h = avail.saturating_sub(prompt_h);
     let chat = Rect::new(main.x, main.y, main.width, chat_h);
     let prompt = Rect::new(px, main.y + chat_h, pw, prompt_h);
-    let editor = Rect::new(px + 3, prompt.y + 1, ew as u16, eh.min(prompt_h.saturating_sub(3)).max(1));
-    let status = Rect::new(main.x, main.y + main.height.saturating_sub(1), main.width, 1);
-    Layout { chat, prompt, editor, status, sidebar }
+    let editor = Rect::new(
+        px + 3,
+        prompt.y + 1,
+        ew as u16,
+        eh.min(prompt_h.saturating_sub(3)).max(1),
+    );
+    let status = Rect::new(
+        main.x,
+        main.y + main.height.saturating_sub(1),
+        main.width,
+        1,
+    );
+    Layout {
+        chat,
+        prompt,
+        editor,
+        status,
+        sidebar,
+    }
 }
 
 pub fn draw(f: &mut Frame<'_>, app: &mut App) {
@@ -67,7 +91,13 @@ pub fn draw(f: &mut Frame<'_>, app: &mut App) {
         if app.perm.as_ref().is_none_or(|p| p.call_id != req.call_id) {
             app.perm = Some(PermissionView::new(&req.call_id));
         }
-        let name = (app.mode == Mode::Watch || app.current.as_deref() != Some(sid.as_str())).then(|| app.views.get(&sid).map(|v| v.info.name.clone()).unwrap_or_default());
+        let name =
+            (app.mode == Mode::Watch || app.current.as_deref() != Some(sid.as_str())).then(|| {
+                app.views
+                    .get(&sid)
+                    .map(|v| v.info.name.clone())
+                    .unwrap_or_default()
+            });
         if let Some(p) = app.perm.as_mut() {
             p.draw(buf, area, &req, name.as_deref(), more);
         }
@@ -96,7 +126,15 @@ pub fn draw(f: &mut Frame<'_>, app: &mut App) {
         let r = Rect::new(area.x, area.y, area.width, 1);
         fill(buf, r, Style::new().bg(theme::ERROR));
         let w = width(&msg) as u16;
-        buf.set_string(area.x + area.width.saturating_sub(w) / 2, area.y, msg, Style::new().fg(theme::PANEL).bg(theme::ERROR).add_modifier(Modifier::BOLD));
+        buf.set_string(
+            area.x + area.width.saturating_sub(w) / 2,
+            area.y,
+            msg,
+            Style::new()
+                .fg(theme::PANEL)
+                .bg(theme::ERROR)
+                .add_modifier(Modifier::BOLD),
+        );
     }
     app.toasts.draw(buf, area);
     if let Some((x, y)) = cursor {
@@ -106,8 +144,16 @@ pub fn draw(f: &mut Frame<'_>, app: &mut App) {
 
 fn env<'a>(app: &'a App, now: i64, tick: u64) -> Env<'a> {
     Env {
-        agents: app.config.as_ref().map(|c| c.agents.as_slice()).unwrap_or(&[]),
-        models: app.config.as_ref().map(|c| c.models.as_slice()).unwrap_or(&[]),
+        agents: app
+            .config
+            .as_ref()
+            .map(|c| c.agents.as_slice())
+            .unwrap_or(&[]),
+        models: app
+            .config
+            .as_ref()
+            .map(|c| c.models.as_slice())
+            .unwrap_or(&[]),
         details: app.details,
         thinking: app.thinking,
         tick,
@@ -115,11 +161,20 @@ fn env<'a>(app: &'a App, now: i64, tick: u64) -> Env<'a> {
     }
 }
 
-fn draw_chat_mode(buf: &mut Buffer, area: Rect, app: &mut App, now: i64, tick: u64) -> Option<(u16, u16)> {
+fn draw_chat_mode(
+    buf: &mut Buffer,
+    area: Rect,
+    app: &mut App,
+    now: i64,
+    tick: u64,
+) -> Option<(u16, u16)> {
     let lay = chat_layout(app, area);
     // Transcript.
     let cur = app.current.clone();
-    match cur.as_ref().and_then(|c| app.views.contains_key(c).then_some(c.clone())) {
+    match cur
+        .as_ref()
+        .and_then(|c| app.views.contains_key(c).then_some(c.clone()))
+    {
         Some(c) => {
             let mut v = app.views.remove(&c).expect("present");
             {
@@ -148,7 +203,10 @@ fn draw_chat_mode(buf: &mut Buffer, area: Rect, app: &mut App, now: i64, tick: u
     let hint = app.hint.as_ref().map(|h| (h.0.clone(), h.1));
     let sc = StatusCtx {
         view,
-        cwd: view.map(|v| v.info.cwd.as_str()).filter(|c| !c.is_empty()).unwrap_or(&app.cwd),
+        cwd: view
+            .map(|v| v.info.cwd.as_str())
+            .filter(|c| !c.is_empty())
+            .unwrap_or(&app.cwd),
         tick,
         hint,
         leader: app.leader.is_some(),
@@ -164,7 +222,10 @@ fn draw_chat_mode(buf: &mut Buffer, area: Rect, app: &mut App, now: i64, tick: u
 }
 
 fn connect_text(app: &App) -> Vec<Line<'static>> {
-    let mut l = vec![Line::from(Span::styled(format!("{} connecting…", theme::spinner(app.tick())), theme::muted()))];
+    let mut l = vec![Line::from(Span::styled(
+        format!("{} connecting…", theme::spinner(app.tick())),
+        theme::muted(),
+    ))];
     if let Some(s) = &app.net_status {
         l.push(Line::from(Span::styled(s.clone(), theme::fg(theme::DIM))));
     }
@@ -204,10 +265,16 @@ fn draw_prompt(buf: &mut Buffer, lay: &Layout, app: &mut App, focused: bool) -> 
     let view = app.cur();
     let agent = view.map(|v| v.info.agent.clone()).unwrap_or_default();
     let busy = view.is_some_and(|v| v.is_busy());
-    let view_model = view.map(|v| v.info.model.clone()).filter(|m| !m.model.is_empty());
+    let view_model = view
+        .map(|v| v.info.model.clone())
+        .filter(|m| !m.model.is_empty());
     let queued = view.map(|v| v.queued.len()).unwrap_or(0);
     let todos = view.map(|v| v.info.todos.clone()).unwrap_or_default();
-    let bar_color = if app.shell_mode { theme::WARNING } else { app.agent_color(&agent) };
+    let bar_color = if app.shell_mode {
+        theme::WARNING
+    } else {
+        app.agent_color(&agent)
+    };
     // Body (all rows but the bottom edge).
     let body = Rect::new(p.x, p.y, p.width, p.height - 1);
     fill(buf, body, Style::new().bg(bg));
@@ -234,23 +301,41 @@ fn draw_prompt(buf: &mut Buffer, lay: &Layout, app: &mut App, focused: bool) -> 
     // Metadata row.
     let my = p.y + p.height - 2;
     let (model, provider, variant) = match view_model {
-        Some(m) => (app.model_display(&m), app.provider_display(&m), m.variant.clone()),
+        Some(m) => (
+            app.model_display(&m),
+            app.provider_display(&m),
+            m.variant.clone(),
+        ),
         None => (String::new(), String::new(), None),
     };
     let mw = p.width.saturating_sub(5) as usize;
-    let mut meta = footer::meta_line(if agent.is_empty() { "…" } else { &agent }, app.agent_color(&agent), &model, &provider, variant.as_deref(), app.shell_mode, mw);
+    let mut meta = footer::meta_line(
+        if agent.is_empty() { "…" } else { &agent },
+        app.agent_color(&agent),
+        &model,
+        &provider,
+        variant.as_deref(),
+        app.shell_mode,
+        mw,
+    );
     // Right side: attachments count / queued count.
     let mut right: Vec<Span<'static>> = Vec::new();
     let n_img = app.editor.images.len();
     if n_img > 0 {
-        right.push(Span::styled(format!("{n_img} image{}", if n_img > 1 { "s" } else { "" }), Style::new().fg(theme::ACCENT).bg(bg)));
+        right.push(Span::styled(
+            format!("{n_img} image{}", if n_img > 1 { "s" } else { "" }),
+            Style::new().fg(theme::ACCENT).bg(bg),
+        ));
     }
     if queued > 0 {
         let q = queued;
         if !right.is_empty() {
             right.push(Span::styled(" · ", Style::new().fg(theme::MUTED).bg(bg)));
         }
-        right.push(Span::styled(format!("{q} queued"), Style::new().fg(theme::MUTED).bg(bg)));
+        right.push(Span::styled(
+            format!("{q} queued"),
+            Style::new().fg(theme::MUTED).bg(bg),
+        ));
     }
     // Todo progress (current item · done/total), at most ~half the row so the model stays visible.
     let used: usize = right.iter().map(|s| width(&s.content)).sum();
@@ -313,10 +398,28 @@ fn draw_autocomplete(buf: &mut Buffer, lay: &Layout, app: &mut App) {
         fill(buf, Rect::new(r.x, yy, r.width, 1), Style::new().bg(rbg));
         let lw = (r.width as usize).saturating_sub(4);
         let label_w = width(label).min(lw);
-        buf.set_stringn(r.x + 2, yy, label, lw, Style::new().fg(fgc).bg(rbg).add_modifier(if sel { Modifier::BOLD } else { Modifier::empty() }));
+        buf.set_stringn(
+            r.x + 2,
+            yy,
+            label,
+            lw,
+            Style::new().fg(fgc).bg(rbg).add_modifier(if sel {
+                Modifier::BOLD
+            } else {
+                Modifier::empty()
+            }),
+        );
         let dx = (label_w + 2).max(24.min(lw / 2));
         if !desc.is_empty() && dx + 4 < lw {
-            buf.set_stringn(r.x + 2 + dx as u16, yy, text::truncate(desc, lw - dx), lw - dx, Style::new().fg(if sel { theme::PANEL } else { theme::MUTED }).bg(rbg));
+            buf.set_stringn(
+                r.x + 2 + dx as u16,
+                yy,
+                text::truncate(desc, lw - dx),
+                lw - dx,
+                Style::new()
+                    .fg(if sel { theme::PANEL } else { theme::MUTED })
+                    .bg(rbg),
+            );
         }
     }
 }
@@ -354,7 +457,13 @@ impl SbSection {
         2 + self.items.len()
     }
     fn render(self) -> Vec<SbRow> {
-        let mut out = vec![sb_blank(), SbRow { spans: self.header, click: self.header_click }];
+        let mut out = vec![
+            sb_blank(),
+            SbRow {
+                spans: self.header,
+                click: self.header_click,
+            },
+        ];
         out.extend(self.items);
         out
     }
@@ -362,7 +471,9 @@ impl SbSection {
 
 fn context_bar(c: ref_proto::ContextUsage, bw: usize) -> Vec<Span<'static>> {
     let fillw = ((c.used as f64 / c.max as f64).min(1.0) * bw as f64).round() as usize;
-    let mark = |t: u64| -> Option<usize> { (t > 0).then(|| ((t as f64 / c.max as f64) * bw as f64) as usize) };
+    let mark = |t: u64| -> Option<usize> {
+        (t > 0).then(|| ((t as f64 / c.max as f64) * bw as f64) as usize)
+    };
     let (rm, am) = (mark(c.recommend), mark(c.auto));
     let col = if c.auto > 0 && c.used >= c.auto {
         theme::ERROR
@@ -373,8 +484,21 @@ fn context_bar(c: ref_proto::ContextUsage, bw: usize) -> Vec<Span<'static>> {
     };
     (0..bw)
         .map(|i| {
-            let ch = if i < fillw { "━" } else if Some(i) == rm || Some(i) == am { "┊" } else { "─" };
-            Span::styled(ch, if i < fillw { theme::fg(col) } else { theme::fg(theme::BORDER) })
+            let ch = if i < fillw {
+                "━"
+            } else if Some(i) == rm || Some(i) == am {
+                "┊"
+            } else {
+                "─"
+            };
+            Span::styled(
+                ch,
+                if i < fillw {
+                    theme::fg(col)
+                } else {
+                    theme::fg(theme::BORDER)
+                },
+            )
         })
         .collect()
 }
@@ -396,8 +520,17 @@ fn draw_sidebar(buf: &mut Buffer, r: Rect, app: &mut App, now: i64, tick: u64) {
     let h = (r.height - 1) as usize; // top margin
 
     // --- Session info (full and compact forms).
-    let title = if v.info.title.trim().is_empty() { "New session".to_string() } else { text::one_line(&v.info.title) };
-    let title_rows: Vec<SbRow> = text::wrap_spans(&[Span::styled(title.clone(), theme::bold(theme::TEXT))], w).into_iter().take(3).map(|l| sb(l.spans)).collect();
+    let title = if v.info.title.trim().is_empty() {
+        "New session".to_string()
+    } else {
+        text::one_line(&v.info.title)
+    };
+    let title_rows: Vec<SbRow> =
+        text::wrap_spans(&[Span::styled(title.clone(), theme::bold(theme::TEXT))], w)
+            .into_iter()
+            .take(3)
+            .map(|l| sb(l.spans))
+            .collect();
     let ac = theme::agent_color(app.agents(), &v.info.agent);
     let model = app.model_display(&v.info.model);
     let c = v.info.context;
@@ -408,23 +541,42 @@ fn draw_sidebar(buf: &mut Buffer, r: Rect, app: &mut App, now: i64, tick: u64) {
     let bar = (c.max > 0).then(|| context_bar(c, w));
     let mut full = title_rows;
     full.push(sb_blank());
-    full.push(sb(vec![Span::styled("name  ", theme::muted()), Span::styled(v.info.name.clone(), theme::text())]));
-    full.push(sb(vec![Span::styled("id    ", theme::muted()), Span::styled(v.info.id.clone(), theme::fg(theme::DIM))]));
-    full.push(sb(vec![Span::styled("agent ", theme::muted()), Span::styled(v.info.agent.clone(), theme::fg(ac))]));
-    let mut mspans = vec![Span::styled("model ", theme::muted()), Span::styled(model.clone(), theme::text())];
+    full.push(sb(vec![
+        Span::styled("name  ", theme::muted()),
+        Span::styled(v.info.name.clone(), theme::text()),
+    ]));
+    full.push(sb(vec![
+        Span::styled("id    ", theme::muted()),
+        Span::styled(v.info.id.clone(), theme::fg(theme::DIM)),
+    ]));
+    full.push(sb(vec![
+        Span::styled("agent ", theme::muted()),
+        Span::styled(v.info.agent.clone(), theme::fg(ac)),
+    ]));
+    let mut mspans = vec![
+        Span::styled("model ", theme::muted()),
+        Span::styled(model.clone(), theme::text()),
+    ];
     if let Some(var) = &v.info.model.variant {
         mspans.push(Span::styled(format!(" {var}"), theme::fg(theme::WARNING)));
     }
     full.push(sb(mspans));
     full.push(sb_blank());
-    full.push(sb(vec![Span::styled("Context", theme::bold(theme::ACCENT))]));
+    full.push(sb(vec![Span::styled(
+        "Context",
+        theme::bold(theme::ACCENT),
+    )]));
     full.push(sb(ctx_spans.clone()));
     if let Some(b) = &bar {
         full.push(sb(b.clone()));
     }
     let mut compact = vec![
         sb(vec![Span::styled(title, theme::bold(theme::TEXT))]),
-        sb(vec![Span::styled(v.info.agent.clone(), theme::fg(ac)), Span::styled(" · ", theme::muted()), Span::styled(model, theme::text())]),
+        sb(vec![
+            Span::styled(v.info.agent.clone(), theme::fg(ac)),
+            Span::styled(" · ", theme::muted()),
+            Span::styled(model, theme::text()),
+        ]),
         sb(ctx_spans),
     ];
     if let Some(b) = bar {
@@ -435,51 +587,109 @@ fn draw_sidebar(buf: &mut Buffer, r: Rect, app: &mut App, now: i64, tick: u64) {
     let todos = v.info.todos.clone();
     let todo_sec = (!todos.is_empty()).then(|| {
         let (done, total) = todo::counts(&todos);
-        let header = vec![Span::styled("Todo", theme::bold(theme::ACCENT)), Span::styled(format!("  {done}/{total}"), theme::muted())];
-        let items = todo::todo_rows(&todos, w, usize::MAX).into_iter().map(|r| sb(r.line.spans)).collect();
-        SbSection { header, header_click: None, items }
+        let header = vec![
+            Span::styled("Todo", theme::bold(theme::ACCENT)),
+            Span::styled(format!("  {done}/{total}"), theme::muted()),
+        ];
+        let items = todo::todo_rows(&todos, w, usize::MAX)
+            .into_iter()
+            .map(|r| sb(r.line.spans))
+            .collect();
+        SbSection {
+            header,
+            header_click: None,
+            items,
+        }
     });
     let mcp_sec = (!app.mcp.is_empty()).then(|| {
         let sum = crate::ui::mcp::summary(&app.mcp);
-        let header = vec![Span::styled("MCP", theme::bold(theme::ACCENT)), Span::styled(format!("  {sum}"), theme::muted())];
-        let items = app.mcp.iter().map(|e| SbRow { spans: crate::ui::mcp::sidebar_line(e, w, tick).spans, click: Some(SbClick::Mcp(e.name.clone())) }).collect();
-        SbSection { header, header_click: Some(SbClick::Mcp(String::new())), items }
+        let header = vec![
+            Span::styled("MCP", theme::bold(theme::ACCENT)),
+            Span::styled(format!("  {sum}"), theme::muted()),
+        ];
+        let items = app
+            .mcp
+            .iter()
+            .map(|e| SbRow {
+                spans: crate::ui::mcp::sidebar_line(e, w, tick).spans,
+                click: Some(SbClick::Mcp(e.name.clone())),
+            })
+            .collect();
+        SbSection {
+            header,
+            header_click: Some(SbClick::Mcp(String::new())),
+            items,
+        }
     });
     let mut live: Vec<_> = app.live.iter().filter(|s| s.live).cloned().collect();
     live.sort_by_key(|s| s.created_at);
     let live_sec = (!live.is_empty()).then(|| {
-        let header = vec![Span::styled("Live sessions", theme::bold(theme::ACCENT)), Span::styled(format!("  {}", live.len()), theme::muted())];
+        let header = vec![
+            Span::styled("Live sessions", theme::bold(theme::ACCENT)),
+            Span::styled(format!("  {}", live.len()), theme::muted()),
+        ];
         let cur_id = v.info.id.clone();
         let items = live
             .iter()
             .map(|s| {
                 let me = s.id == cur_id;
-                let dot = if !s.status.is_idle() { theme::spinner(tick).to_string() } else { "○".to_string() };
-                let dc = if !s.status.is_idle() { theme::PRIMARY } else { theme::MUTED };
+                let dot = if !s.status.is_idle() {
+                    theme::spinner(tick).to_string()
+                } else {
+                    "○".to_string()
+                };
+                let dc = if !s.status.is_idle() {
+                    theme::PRIMARY
+                } else {
+                    theme::MUTED
+                };
                 let fgbg = if s.attached > 0 { "fg" } else { "bg" };
-                let name_st = if me { theme::bold(theme::PRIMARY) } else { theme::text() };
-                let left = vec![Span::styled(format!("{dot} "), theme::fg(dc)), Span::styled(s.name.clone(), name_st), Span::styled(format!(" {fgbg}"), theme::fg(theme::DIM))];
+                let name_st = if me {
+                    theme::bold(theme::PRIMARY)
+                } else {
+                    theme::text()
+                };
+                let left = vec![
+                    Span::styled(format!("{dot} "), theme::fg(dc)),
+                    Span::styled(s.name.clone(), name_st),
+                    Span::styled(format!(" {fgbg}"), theme::fg(theme::DIM)),
+                ];
                 // Right-aligned: todo count, then the working time of the current run (same source
                 // as the status line). `compose` truncates the name first, these stay whole.
                 let todos = if me { &v.info.todos } else { &s.todos };
-                let mut right: Vec<Span<'static>> = crate::ui::todo::badge(todos).into_iter().collect();
+                let mut right: Vec<Span<'static>> =
+                    crate::ui::todo::badge(todos).into_iter().collect();
                 if let Some(ms) = crate::state::busy_ms(s, now) {
                     if !right.is_empty() {
                         right.push(Span::raw(" "));
                     }
                     right.push(Span::styled(text::fmt_elapsed(ms), theme::fg(theme::MUTED)));
                 }
-                SbRow { spans: message::compose(left, right, w).0.spans, click: Some(SbClick::Session(s.id.clone())) }
+                SbRow {
+                    spans: message::compose(left, right, w).0.spans,
+                    click: Some(SbClick::Session(s.id.clone())),
+                }
             })
             .collect();
-        SbSection { header, header_click: None, items }
+        SbSection {
+            header,
+            header_click: None,
+            items,
+        }
     });
 
     // --- Layout: full session info when everything fits; otherwise the compact form, and the
     // whole list scrolls (wheel over the sidebar) with a thumb on the separator.
-    let secs: Vec<SbSection> = [mcp_sec, todo_sec, live_sec].into_iter().flatten().collect(); // display order
+    let secs: Vec<SbSection> = [mcp_sec, todo_sec, live_sec]
+        .into_iter()
+        .flatten()
+        .collect(); // display order
     let sec_len: usize = secs.iter().map(SbSection::len).sum();
-    let mut rows = if full.len() + sec_len <= h { full } else { compact };
+    let mut rows = if full.len() + sec_len <= h {
+        full
+    } else {
+        compact
+    };
     for s in secs {
         rows.extend(s.render());
     }
@@ -499,7 +709,15 @@ fn draw_sidebar(buf: &mut Buffer, r: Rect, app: &mut App, now: i64, tick: u64) {
     // Scrollbar in the (otherwise empty) rightmost column.
     if max_scroll > 0 {
         let bar = Rect::new(r.x + r.width - 1, r.y + 1, 1, h as u16);
-        chat::draw_scrollbar(buf, bar, h + max_scroll, scroll as f64, max_scroll as f64, ("┃", theme::BORDER_ACTIVE), Some(("│", theme::BORDER_SUBTLE)));
+        chat::draw_scrollbar(
+            buf,
+            bar,
+            h + max_scroll,
+            scroll as f64,
+            max_scroll as f64,
+            ("┃", theme::BORDER_ACTIVE),
+            Some(("│", theme::BORDER_SUBTLE)),
+        );
     }
 }
 
@@ -507,8 +725,19 @@ fn draw_sidebar(buf: &mut Buffer, r: Rect, app: &mut App, now: i64, tick: u64) {
 // Watch (split) mode
 // ---------------------------------------------------------------------------
 
-fn draw_watch_mode(buf: &mut Buffer, area: Rect, app: &mut App, now: i64, tick: u64) -> Option<(u16, u16)> {
-    let status = Rect::new(area.x, area.y + area.height.saturating_sub(1), area.width, 1);
+fn draw_watch_mode(
+    buf: &mut Buffer,
+    area: Rect,
+    app: &mut App,
+    now: i64,
+    tick: u64,
+) -> Option<(u16, u16)> {
+    let status = Rect::new(
+        area.x,
+        area.y + area.height.saturating_sub(1),
+        area.width,
+        1,
+    );
     let body = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1));
     let ids = app.tile_ids();
     let per = split::per_page(body.width, body.height).max(1);
@@ -523,16 +752,35 @@ fn draw_watch_mode(buf: &mut Buffer, area: Rect, app: &mut App, now: i64, tick: 
     {
         app.watch.page = pos / per;
     }
-    let page_ids: Vec<String> = ids.iter().skip(app.watch.page * per).take(per).cloned().collect();
+    let page_ids: Vec<String> = ids
+        .iter()
+        .skip(app.watch.page * per)
+        .take(per)
+        .cloned()
+        .collect();
     let rects = split::layout(page_ids.len(), body);
-    app.watch.tiles = page_ids.iter().cloned().zip(rects.iter().copied()).collect();
+    app.watch.tiles = page_ids
+        .iter()
+        .cloned()
+        .zip(rects.iter().copied())
+        .collect();
     let mut cursor = None;
     if page_ids.is_empty() {
         let lines = vec![
             Line::from(Span::styled("No background sessions", theme::muted())),
-            Line::from(Span::styled("sessions created by agents or detached from a frontend appear here live", theme::fg(theme::DIM))),
+            Line::from(Span::styled(
+                "sessions created by agents or detached from a frontend appear here live",
+                theme::fg(theme::DIM),
+            )),
             Line::default(),
-            Line::from(Span::styled(if app.current.is_some() { "ctrl+x w back to chat" } else { "ctrl+x n new session · ctrl+x l sessions" }, theme::fg(theme::DIM))),
+            Line::from(Span::styled(
+                if app.current.is_some() {
+                    "ctrl+x w back to chat"
+                } else {
+                    "ctrl+x n new session · ctrl+x l sessions"
+                },
+                theme::fg(theme::DIM),
+            )),
         ];
         draw_center(buf, body, &lines);
     }
@@ -543,7 +791,11 @@ fn draw_watch_mode(buf: &mut Buffer, area: Rect, app: &mut App, now: i64, tick: 
             if let Some(info) = app.live.iter().find(|s| s.id == sid).cloned() {
                 let tmp = SessionView::new(info, false);
                 let inner = split::draw_frame(buf, r, &tmp, focused, tick, app.agents());
-                draw_center(buf, inner, &[Line::from(Span::styled("loading…", theme::muted()))]);
+                draw_center(
+                    buf,
+                    inner,
+                    &[Line::from(Span::styled("loading…", theme::muted()))],
+                );
             }
             continue;
         };
@@ -553,7 +805,14 @@ fn draw_watch_mode(buf: &mut Buffer, area: Rect, app: &mut App, now: i64, tick: 
             let e = env(app, now, tick);
             chat::draw_tile(buf, content, r.x + r.width - 1, &mut v, &e);
             if v.messages.is_empty() {
-                draw_center(buf, content, &[Line::from(Span::styled(if v.loaded { "empty" } else { "loading…" }, theme::muted()))]);
+                draw_center(
+                    buf,
+                    content,
+                    &[Line::from(Span::styled(
+                        if v.loaded { "empty" } else { "loading…" },
+                        theme::muted(),
+                    ))],
+                );
             }
         } else {
             v.chat.area = Rect::default();
@@ -561,7 +820,11 @@ fn draw_watch_mode(buf: &mut Buffer, area: Rect, app: &mut App, now: i64, tick: 
         if focused && r.height >= 5 {
             let ir = split::draw_input_sep(buf, r);
             let ed = app.watch.inputs.entry(sid.clone()).or_default();
-            let ph = if v.is_busy() { "message (queued) · esc esc abort" } else { "message · enter on empty = zoom" };
+            let ph = if v.is_busy() {
+                "message (queued) · esc esc abort"
+            } else {
+                "message · enter on empty = zoom"
+            };
             cursor = ed.draw(buf, ir, ph, app.perm.is_none());
         }
         app.views.insert(sid, v);

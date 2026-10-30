@@ -42,7 +42,8 @@ impl Client {
 
 const HELLO_ID: u64 = u64::MAX;
 
-type Ws = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+type Ws =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 fn url_with_token(ep: &Endpoint) -> String {
     match &ep.token {
@@ -57,12 +58,19 @@ fn url_with_token(ep: &Endpoint) -> String {
 /// No size limits on incoming frames: a session snapshot carries every image of the session
 /// (tool screenshots included) and easily exceeds tungstenite's 16 MiB default frame limit.
 fn ws_config() -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
-    tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default().max_message_size(None).max_frame_size(None)
+    tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
+        .max_message_size(None)
+        .max_frame_size(None)
 }
 
 async fn try_connect(ep: &Endpoint, timeout: Duration) -> Option<Ws> {
     let url = url_with_token(ep);
-    match tokio::time::timeout(timeout, tokio_tungstenite::connect_async_with_config(url, Some(ws_config()), false)).await {
+    match tokio::time::timeout(
+        timeout,
+        tokio_tungstenite::connect_async_with_config(url, Some(ws_config()), false),
+    )
+    .await
+    {
         Ok(Ok((ws, _))) => Some(ws),
         _ => None,
     }
@@ -79,7 +87,10 @@ async fn connect_existing(dir: &std::path::Path) -> Option<(Ws, Endpoint)> {
 }
 
 /// Discovers a running backend, or launches one.
-async fn discover(events: &mpsc::UnboundedSender<NetEvent>, allow_spawn: bool) -> Result<(Ws, Endpoint), String> {
+async fn discover(
+    events: &mpsc::UnboundedSender<NetEvent>,
+    allow_spawn: bool,
+) -> Result<(Ws, Endpoint), String> {
     let dir = ref_proto::instances_dir();
     if let Some(c) = connect_existing(&dir).await {
         return Ok(c);
@@ -94,10 +105,17 @@ async fn discover(events: &mpsc::UnboundedSender<NetEvent>, allow_spawn: bool) -
     }
     let port = launcher::pick_port().ok_or("no free port")?;
     let started = std::time::Instant::now();
-    launcher::spawn_server(port).map_err(|e| format!("failed to start {}: {e}", launcher::server_binary().display()))?;
+    launcher::spawn_server(port).map_err(|e| {
+        format!(
+            "failed to start {}: {e}",
+            launcher::server_binary().display()
+        )
+    })?;
     let wait = async {
         loop {
-            if let Some(i) = launcher::wait_for_instance(&dir, port, Duration::from_millis(300)).await {
+            if let Some(i) =
+                launcher::wait_for_instance(&dir, port, Duration::from_millis(300)).await
+            {
                 return Some(i);
             }
             let _ = events.send(NetEvent::Status("starting backend…".into()));
@@ -118,14 +136,25 @@ async fn discover(events: &mpsc::UnboundedSender<NetEvent>, allow_spawn: bool) -
 }
 
 /// Runs the transport until the app drops the client.
-pub async fn run(target: Target, cwd: String, mut out: mpsc::UnboundedReceiver<ClientFrame>, events: mpsc::UnboundedSender<NetEvent>) {
+pub async fn run(
+    target: Target,
+    cwd: String,
+    mut out: mpsc::UnboundedReceiver<ClientFrame>,
+    events: mpsc::UnboundedSender<NetEvent>,
+) {
     let mut first = true;
     loop {
         let conn = match &target {
             Target::Auto => discover(&events, true).await,
             Target::Explicit { url, token } => {
-                let ep = Endpoint { url: url.clone(), token: token.clone() };
-                try_connect(&ep, Duration::from_secs(3)).await.map(|ws| (ws, ep)).ok_or_else(|| format!("cannot connect to {url}"))
+                let ep = Endpoint {
+                    url: url.clone(),
+                    token: token.clone(),
+                };
+                try_connect(&ep, Duration::from_secs(3))
+                    .await
+                    .map(|ws| (ws, ep))
+                    .ok_or_else(|| format!("cannot connect to {url}"))
             }
         };
         let (mut ws, ep) = match conn {
@@ -145,9 +174,16 @@ pub async fn run(target: Target, cwd: String, mut out: mpsc::UnboundedReceiver<C
         };
         let hello = ClientFrame {
             id: Some(HELLO_ID),
-            req: Request::Hello { client: "ref-tui".into(), version: PROTOCOL_VERSION, cwd: cwd.clone(), token: ep.token.clone() },
+            req: Request::Hello {
+                client: "ref-tui".into(),
+                version: PROTOCOL_VERSION,
+                cwd: cwd.clone(),
+                token: ep.token.clone(),
+            },
         };
-        let Ok(txt) = serde_json::to_string(&hello) else { return };
+        let Ok(txt) = serde_json::to_string(&hello) else {
+            return;
+        };
         if ws.send(WsMsg::text(txt)).await.is_err() {
             tokio::time::sleep(Duration::from_secs(1)).await;
             continue;
