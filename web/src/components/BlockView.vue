@@ -19,6 +19,6 @@ defineProps<{ block: Block; fresh: boolean }>()
     <MarkdownBlock v-else-if="block.kind === 'markdown'" :block="block" />
     <CodeBlock v-else-if="block.kind === 'code'" :block="block" />
     <ToolBlock v-else-if="block.kind === 'tool'" :block="block" />
-    <ErrorBlock v-else :block="block" :fresh="fresh" />
+    <ErrorBlock v-else-if="block.kind === 'error'" :block="block" :fresh="fresh" />
   </BlockFrame>
 </template>

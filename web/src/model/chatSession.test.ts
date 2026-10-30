@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { RefApi } from '../net/api.ts'
 import { ChatSession } from './chatSession.ts'
-import { info, snapshot, userMessage } from './testMessages.ts'
+import { assistantMessage, info, snapshot, userMessage } from './testMessages.ts'
+
+const FRAME_WAIT_MS = 60 // the session shows changes on the next animation frame
+const afterFrame = () => new Promise((resolve) => setTimeout(resolve, FRAME_WAIT_MS))
 
 function setup(sessionInfo = info({ id: 'ses_1' })) {
   const api = {
@@ -9,8 +12,14 @@ function setup(sessionInfo = info({ id: 'ses_1' })) {
     detach: vi.fn().mockResolvedValue(undefined),
   }
   const notify = vi.fn()
-  const session = new ChatSession('ses_1', { api: () => api as unknown as RefApi, notify }, sessionInfo)
-  return { api, notify, session }
+  const sessionError = vi.fn()
+  const draftRestored = vi.fn()
+  const session = new ChatSession(
+    'ses_1',
+    { api: () => api as unknown as RefApi, notify, sessionError, draftRestored },
+    sessionInfo,
+  )
+  return { api, notify, sessionError, draftRestored, session }
 }
 
 describe('ChatSession', () => {
@@ -26,7 +35,7 @@ describe('ChatSession', () => {
     await session.attach(true)
     expect(api.attach).toHaveBeenCalledWith('ses_1', true)
     expect(session.attachment).toBe('foreground')
-    expect(session.blocks.map((block) => block.kind)).toEqual(['user'])
+    expect(session.blocks.map((block) => block.kind)).toEqual(['user', 'meta'])
     expect(session.generation).toBe(1)
   })
 
@@ -42,7 +51,7 @@ describe('ChatSession', () => {
     await session.detach()
     expect(api.detach).toHaveBeenCalledWith('ses_1')
     expect(session.attachment).toBe('detached')
-    expect(session.blocks).toHaveLength(1)
+    expect(session.blocks).toHaveLength(2)
   })
 
   it('ignores events that come before the snapshot', () => {
@@ -61,13 +70,94 @@ describe('ChatSession', () => {
     expect(session.busy).toBe(false)
   })
 
-  it('names the session in an error it shows from the background', async () => {
-    const { notify, session } = setup()
-    await session.attach(false)
-    session.applyEvent({ type: 'error', text: 'rate limited' })
-    expect(notify).toHaveBeenCalledWith('error', 'test: rate limited')
+  it('reports every error event and keeps it as a block after the messages', async () => {
+    const { sessionError, session } = setup()
     await session.attach(true)
-    session.applyEvent({ type: 'error', text: 'again' })
-    expect(notify).toHaveBeenLastCalledWith('error', 'again')
+    session.applyEvent({ type: 'error', text: 'rate limited' })
+    await afterFrame()
+    expect(sessionError).toHaveBeenCalledWith(session, 'rate limited')
+    expect(session.blocks.at(-1)).toMatchObject({ kind: 'error', text: 'rate limited' })
+  })
+
+  it('removes the error block with the next prompt', async () => {
+    const { api, session } = setup()
+    Object.assign(api, { prompt: vi.fn().mockResolvedValue({ queued: false, message_id: 'u2' }) })
+    await session.attach(true)
+    session.applyEvent({ type: 'error', text: 'boom' })
+    await session.send('again')
+    expect(session.blocks.some((block) => block.kind === 'error')).toBe(false)
+  })
+
+  it('does not repeat the error the last message already shows', async () => {
+    const { api, session } = setup()
+    api.attach.mockResolvedValue(
+      snapshot([userMessage('u1', 'hi'), assistantMessage('a1', [], { time_end: 1, error: 'boom' })]),
+    )
+    await session.attach(true)
+    session.applyEvent({ type: 'error', text: 'boom' })
+    await afterFrame()
+    expect(session.blocks.filter((block) => block.kind === 'error')).toHaveLength(1)
+    session.applyEvent({ type: 'error', text: 'other' })
+    await afterFrame()
+    expect(session.blocks.at(-1)).toMatchObject({ kind: 'error', text: 'other' })
+  })
+
+  it('derives what the session is doing from its status', async () => {
+    const { session } = setup()
+    expect(session.activity).toBe('idle')
+    session.setInfo(info({ status: { state: 'busy' }, busy_since: 5 }))
+    expect(session.activity).toBe('thinking')
+    expect(session.busySince).toBe(5)
+    session.setInfo(info({ status: { state: 'retrying', attempt: 2, next_at: 9, error: 'overloaded' } }))
+    expect(session.activity).toBe('retrying')
+    expect(session.retry).toEqual({ attempt: 2, at: 9, error: 'overloaded' })
+  })
+
+  it('loads the page before the oldest message and shows it above', async () => {
+    const { api, session } = setup()
+    api.attach.mockResolvedValue(snapshot([userMessage('u2', 'new')], { more_before: true }))
+    const messagesBefore = vi
+      .fn()
+      .mockResolvedValue({ messages: [userMessage('u1', 'old')], more_before: false })
+    Object.assign(api, { messagesBefore })
+    await session.attach(true)
+    expect(session.moreBefore).toBe(true)
+    await session.loadOlder()
+    await afterFrame()
+    expect(messagesBefore).toHaveBeenCalledWith('ses_1', 'u2')
+    expect(session.moreBefore).toBe(false)
+    expect(session.blocks.map((block) => block.key)).toEqual(['u1:user', 'u1:meta', 'u2:user', 'u2:meta'])
+  })
+
+  it('keeps the error of a failed page load and tries again', async () => {
+    const { api, session } = setup()
+    api.attach.mockResolvedValue(snapshot([userMessage('u2', 'new')], { more_before: true }))
+    const messagesBefore = vi.fn().mockRejectedValue(new Error('offline'))
+    Object.assign(api, { messagesBefore })
+    await session.attach(true)
+    await session.loadOlder()
+    expect(session.olderError).toBe('offline')
+    expect(session.loadingOlder).toBe(false)
+    messagesBefore.mockResolvedValue({ messages: [], more_before: false })
+    await session.loadOlder()
+    expect(session.olderError).toBe('')
+  })
+
+  it('hands the prompt it takes back to the composer', async () => {
+    const { api, draftRestored, session } = setup()
+    const undo = vi.fn().mockResolvedValue({ text: 'fix it [Image 1]', images: [] })
+    Object.assign(api, { undo })
+    await session.undo('u1')
+    expect(undo).toHaveBeenCalledWith('ses_1', 'u1')
+    expect(draftRestored).toHaveBeenCalledWith('ses_1', 'fix it [Image 1]', [])
+    await session.undoLast()
+    expect(undo).toHaveBeenLastCalledWith('ses_1', undefined)
+  })
+
+  it('toggles the default folds', () => {
+    const { session } = setup()
+    session.toggleReasoning()
+    session.toggleDetails()
+    expect([session.thinkingExpanded, session.detailsExpanded]).toEqual([true, true])
   })
 })
