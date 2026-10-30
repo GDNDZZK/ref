@@ -98,6 +98,8 @@ ref --server ws://127.0.0.1:7777 --token <token>
 | `~/.config/ref/`, `~/.config/opencode/` | Configuration. See [Configuration](configuration.md#where-configuration-is-read-from). |
 | `~/.local/share/ref/sessions/` | Saved sessions. |
 | `~/.local/state/ref/instances/<pid>.json` | One file per running backend: port, token and settings. Readable only by you (mode 600). |
+| `~/.local/state/ref/prompt-history.jsonl` | Prompt history (500 entries), shared by `ref` and `ref-gui`. |
+| `~/.local/state/ref/gui.json` | Settings of `ref-gui` ([Settings](gui.md#settings)). |
 | `~/.local/state/ref/web/login-token` | Login token of `ref-web`. Readable only by you (mode 600). Delete it while `ref-web` is stopped to get a new one. |
 | `~/.local/state/ref/logs/` | Backend logs, including configuration warnings. |
 
