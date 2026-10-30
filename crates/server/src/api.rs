@@ -525,13 +525,15 @@ async fn set_cwd(hub: &Arc<Hub>, s: &Arc<Session>, path: &str) -> Result<(), Str
 }
 
 /// `ListDirs`: the normalized absolute path and the names of its sub-directories (links to
-/// directories included), case-insensitively sorted.
+/// directories included), case-insensitively sorted. In mock mode `~` is the sandbox and
+/// nothing outside it is listed.
 async fn list_dirs(hub: &Arc<Hub>, cwd: &str, path: &str) -> R {
     let path = path.trim();
     if path.is_empty() {
         return Err("Path is empty.".into());
     }
-    let home = hub.opts.home.clone().or_else(dirs::home_dir);
+    let sandbox = hub.opts.sandbox_cwd.clone();
+    let home = sandbox.clone().or_else(|| hub.opts.home.clone());
     let p = crate::util::expand_home(path, home.as_deref());
     let p = if p.is_absolute() {
         p
@@ -540,6 +542,9 @@ async fn list_dirs(hub: &Arc<Hub>, cwd: &str, path: &str) -> R {
     };
     tokio::task::spawn_blocking(move || {
         let dir = crate::ops::validate_cwd(&p.to_string_lossy())?;
+        if sandbox.is_some_and(|root| !Path::new(&dir).starts_with(root)) {
+            return Err(format!("{dir} is outside the mock workspace."));
+        }
         let entries =
             std::fs::read_dir(&dir).map_err(|e| format!("Cannot read directory {dir}: {e}"))?;
         let mut dirs: Vec<String> = entries
