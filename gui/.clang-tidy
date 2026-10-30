@@ -1,0 +1,33 @@
+---
+# Disabled checks and why:
+#   easily-swappable-parameters  noisy on (int line, int column)-style APIs
+#   owning-memory                Qt parent/child ownership hands out raw `new` pointers
+#   pro-bounds-*, avoid-c-arrays argv/main and Qt containers trip these without real bugs
+#   avoid-magic-numbers          duplicate of readability-magic-numbers
+#   misc-include-cleaner         does not understand Qt's forwarding headers
+#   non-private-member-variables plain data structs (e.g. jsonc::ParseError) are intentional
+#   modernize-use-trailing-return-type, readability-identifier-length  style we don't follow
+#   readability-redundant-access-specifiers  Qt's `private slots:` expands to `private:`
+Checks: >
+  bugprone-*,
+  cppcoreguidelines-*,
+  misc-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+  -bugprone-easily-swappable-parameters,
+  -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-pro-bounds-*,
+  -cppcoreguidelines-avoid-c-arrays,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -modernize-avoid-c-arrays,
+  -misc-include-cleaner,
+  -misc-non-private-member-variables-in-classes,
+  -modernize-use-trailing-return-type,
+  -readability-identifier-length,
+  -readability-redundant-access-specifiers,
+HeaderFilterRegex: '.*/qutie/src/.*'
+CheckOptions:
+  readability-braces-around-statements.ShortStatementLines: 0
+  readability-function-cognitive-complexity.IgnoreMacros: true
+...
