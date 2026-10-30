@@ -8,7 +8,9 @@
 #include <QCoroTask>
 #include <QObject>
 #include <QString>
+#include <QTimer>
 
+#include <coroutine>
 #include <memory>
 
 namespace refgui::client
@@ -55,7 +57,7 @@ public:
 	// Starts connecting. Call once.
 	void start();
 	// Closes the connection for good; pending requests fail first. Call before destroying
-	// whatever awaits them.
+	// whatever awaits them. Also ends the connecting loop; the destructor does this too.
 	void shutdown();
 
 	// The system notifications this connection wants; Hello tells the backend, so set it before
@@ -76,6 +78,19 @@ signals:
 	void connected();
 
 private:
+	// `co_await pause()` waits out the reconnect pause. shutdown() cuts it short: a coroutine
+	// that is never resumed is never destroyed.
+	struct PauseAwaiter
+	{
+		Backend& backend;
+
+		bool await_ready() const noexcept { return false; }
+		void await_suspend(std::coroutine_handle<> waiter);
+		void await_resume() const noexcept {}
+	};
+	PauseAwaiter pause() { return {*this}; }
+	void endPause();
+
 	QCoro::Task<> run();
 	QCoro::Task<std::expected<Endpoint, QString>> connectOnce();
 	QCoro::Task<bool> tryConnect(const Endpoint& endpoint, std::chrono::milliseconds timeout);
@@ -92,6 +107,8 @@ private:
 	State m_state = State::Connecting;
 	QString m_reason;
 	bool m_stopping = false;
+	QTimer m_pauseTimer;
+	std::coroutine_handle<> m_pauseWaiter;
 };
 
 } // namespace refgui::client
