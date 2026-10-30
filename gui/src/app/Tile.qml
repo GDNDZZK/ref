@@ -135,6 +135,7 @@ Item {
 			}
 
 			Text {
+				textFormat: Text.PlainText
 				anchors { left: parent.left; leftMargin: 30; right: status.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
 				text: tile.facts.displayTitle ?? ""
 				color: Theme.text
@@ -161,6 +162,7 @@ Item {
 					visible: tile.failed
 				}
 				Text {
+					textFormat: Text.PlainText
 					anchors.verticalCenter: parent.verticalCenter
 					visible: tile.facts.todoTotal > 0
 					text: (tile.facts.todoAllDone ? "✓" : "") + tile.facts.todoDone + "/" + tile.facts.todoTotal
@@ -168,6 +170,7 @@ Item {
 					font.pixelSize: Theme.smallFontSize
 				}
 				Text {
+					textFormat: Text.PlainText
 					anchors.verticalCenter: parent.verticalCenter
 					visible: tile.facts.busySince > 0
 					text: Format.elapsed(tile.now - tile.facts.busySince)

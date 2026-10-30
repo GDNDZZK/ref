@@ -45,6 +45,7 @@ ModalDialog {
 		spacing: 12
 
 		Text {
+			textFormat: Text.PlainText
 			width: parent.width
 			text: qsTr("Write the conversation as markdown to this path on the backend's machine.")
 			color: Theme.textMuted

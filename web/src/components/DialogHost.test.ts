@@ -41,7 +41,7 @@ describe('DialogHost', () => {
     dialogs.open({ kind: 'help' })
     await nextTick()
     await wrapper.find('[role="dialog"]').trigger('mousedown')
-    expect(dialogs.current).toBeDefined()
+    expect(dialogs.current).toEqual({ kind: 'help' })
     await wrapper.find('.scrim').trigger('mousedown')
     expect(dialogs.current).toBeUndefined()
   })

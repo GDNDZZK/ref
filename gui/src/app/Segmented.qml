@@ -59,6 +59,7 @@ Item {
 				height: parent.height
 
 				Text {
+					textFormat: Text.PlainText
 					anchors.centerIn: parent
 					text: parent.modelData.text
 					color: parent.index === segmented.currentIndex ? Theme.text : Theme.textMuted

@@ -28,6 +28,7 @@ ModalDialog {
 	]
 
 	Text {
+		textFormat: Text.PlainText
 		x: 22
 		width: parent.width - 2 * 22
 		topPadding: 4

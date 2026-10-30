@@ -47,14 +47,20 @@ describe('sortLive', () => {
 })
 
 describe('errorToast', () => {
-  it('names the session and keeps the first line', () => {
-    expect(errorToast('parser', 'rate limited\nretry later')).toBe('parser: rate limited')
+  it('names the session and puts the whole error on one line, as the TUI does', () => {
+    expect(errorToast('parser', 'rate limited\n\n  retry\tlater \n')).toBe('parser: rate limited retry later')
   })
 
   it('cuts long text at 200 characters', () => {
     const toast = errorToast('x', 'e'.repeat(500))
     expect(toast).toHaveLength(200)
-    expect(toast.endsWith('…')).toBe(true)
+    expect(toast).toBe(`x: ${'e'.repeat(196)}…`)
+  })
+
+  it('counts characters, not UTF-16 units', () => {
+    const toast = errorToast('x', '😀'.repeat(500))
+    expect(Array.from(toast)).toHaveLength(200)
+    expect(toast.endsWith('😀…')).toBe(true)
   })
 })
 
@@ -67,6 +73,36 @@ describe('opening sessions', () => {
     expect(api.detach).toHaveBeenCalledWith('ses_1')
     expect(workspace.currentId).toBe('ses_2')
     expect(workspace.visibleSessionIds).toEqual(['ses_2'])
+  })
+
+  // The backend counts the attached clients: a session left attached keeps counting this window.
+  it.each([
+    ['the first answer comes first', 5, 20],
+    ['the second answer comes first', 20, 5],
+  ])('leaves only the last of two quick clicks attached when %s', async (_name, slowMs, fastMs) => {
+    const sessions = [session('ses_1'), session('ses_2'), session('ses_3')]
+    const workspace = setup(sessions)
+    const attached = new Set<string>()
+    const delays: Record<string, number> = { ses_1: 0, ses_2: slowMs, ses_3: fastMs }
+    api.attach.mockImplementation(
+      (id: string) =>
+        new Promise((resolve) =>
+          setTimeout(() => {
+            attached.add(id)
+            resolve(snapshot([userMessage('u1', 'hi')], { info: sessions.find((entry) => entry.id === id)! }))
+          }, delays[id]),
+        ),
+    )
+    api.detach.mockImplementation((id: string) => {
+      attached.delete(id)
+      return Promise.resolve()
+    })
+    await workspace.openSession('ses_1')
+
+    await Promise.all([workspace.openSession('ses_2'), workspace.openSession('ses_3')])
+
+    expect(workspace.currentId).toBe('ses_3')
+    expect([...attached]).toEqual(['ses_3'])
   })
 
   it('keeps the open session when attaching fails', async () => {
@@ -85,6 +121,21 @@ describe('opening sessions', () => {
     expect(api.createSession).toHaveBeenCalledWith('/work', {})
     expect(workspace.currentId).toBe('ses_5')
     expect(workspace.live.map((entry) => entry.id)).toEqual(['ses_5'])
+  })
+})
+
+describe('reconnecting', () => {
+  const startup = { url: 'ws://x/ws', cwd: '/work', sessionId: undefined, split: false }
+
+  it('moves on from a session that was closed while the connection was down', async () => {
+    const workspace = setup([session('ses_1'), session('ses_2')])
+    await workspace.openSession('ses_1')
+    api.listSessions.mockResolvedValue([session('ses_2')])
+
+    await workspace.onConnected(true, startup)
+
+    expect(workspace.live.map((entry) => entry.id)).toEqual(['ses_2'])
+    expect(workspace.currentId).toBe('ses_2')
   })
 })
 
