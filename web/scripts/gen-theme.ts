@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { easingNameFromQml, outElastic, plainEasings } from '../src/motion/easing.ts'
 import type { EasingFn } from '../src/motion/easing.ts'
 import { linearPoints, toCssLinear } from '../src/motion/linearCss.ts'
-import { findProperty, parseProperties, parseValue } from './qmlProperties.ts'
+import { cssColor, findProperty, parseProperties, parseValue } from './qmlProperties.ts'
 import type { QmlProperty } from './qmlProperties.ts'
 
 type Unit = 'px' | 'ms' | '' // '' = unitless
@@ -113,8 +113,8 @@ function readTheme(): Theme {
   for (const property of properties.filter((p) => p.readonly && !THEME_SKIPPED.includes(p.name))) {
     const value = parseValue(property, where)
     if (property.type === 'color' && value.kind === 'themed') {
-      theme.colors.dark.push([property.name, String(value.dark)])
-      theme.colors.light.push([property.name, String(value.light)])
+      theme.colors.dark.push([property.name, cssColor(String(value.dark))])
+      theme.colors.light.push([property.name, cssColor(String(value.light))])
     } else if (THEME_STRINGS.includes(property.name) && value.kind === 'themed') {
       theme.strings.push([property.name, { light: String(value.light), dark: String(value.dark) }])
     } else if (value.kind === 'list') {

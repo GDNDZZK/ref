@@ -28,7 +28,7 @@ const { t } = useI18n()
   display: flex;
   flex-direction: column;
   width: min(var(--dialog-width), calc(100vw - 24px));
-  max-height: 80vh;
+  max-height: calc(var(--dialog-max-height-ratio) * 100vh);
   overflow: hidden;
   border-radius: var(--radius-large);
   background: var(--surface);
