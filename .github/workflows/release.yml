@@ -149,6 +149,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Only the release notes are needed from the repository.
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/release-notes
       - uses: actions/download-artifact@v8
         with:
           path: dist
@@ -164,6 +168,8 @@ jobs:
           name: SHA256SUMS
           path: dist/SHA256SUMS
 
+      # The text of the release is .github/release-notes/<tag>.md when that file exists
+      # (for example v0.2.0.md), otherwise GitHub generates it from the commits.
       - name: Create or update the release
         if: github.ref_type == 'tag'
         env:
@@ -172,9 +178,13 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          notes_file=".github/release-notes/$TAG.md"
           if gh release view "$TAG" > /dev/null 2>&1; then
-            # Re-run of the same tag: replace the files.
+            # Re-run of the same tag: replace the files, and the text if there is a file for it.
             gh release upload "$TAG" dist/* --clobber
+            if [[ -f "$notes_file" ]]; then gh release edit "$TAG" --notes-file "$notes_file"; fi
+          elif [[ -f "$notes_file" ]]; then
+            gh release create "$TAG" dist/* --verify-tag --notes-file "$notes_file" --title "$TAG"
           else
             gh release create "$TAG" dist/* --verify-tag --generate-notes --title "$TAG"
           fi
