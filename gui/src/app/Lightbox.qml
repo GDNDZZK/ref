@@ -53,8 +53,11 @@ Item {
 
 		Behavior on scale { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 
+		// Not enlarged past its own size: a small picture would only turn blurry.
 		Image {
-			anchors.fill: parent
+			anchors.centerIn: parent
+			width: Math.min(parent.width, implicitWidth)
+			height: Math.min(parent.height, implicitHeight)
 			asynchronous: true
 			fillMode: Image.PreserveAspectFit
 			source: lightbox.image && lightbox.image.id ? "image://chatimage/" + lightbox.sessionId + "/" + lightbox.image.id : ""
