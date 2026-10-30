@@ -41,7 +41,14 @@ void Workspace::registerCommands()
 	};
 
 	on(u"new"_s, [this](const QString&, const QString&) { newSession(); });
-	on(u"new-in"_s, [this](const QString&, const QString&) { openDialog(u"new-in"_s); });
+	on(u"new-in"_s, [this](const QString&, const QString&) {
+		if(isBackendLocal())
+		{
+			emit newSessionFolderRequested();
+			return;
+		}
+		openDialog(u"new-in"_s);
+	});
 	on(u"sessions"_s, [this](const QString&, const QString&) { openDialog(u"sessions"_s); });
 	on(u"models"_s, dialogFor(u"models"_s));
 	on(u"agents"_s, dialogFor(u"agents"_s));

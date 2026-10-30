@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { agentColor } from './agentColor.ts'
+import { agentColor, agentColorByName } from './agentColor.ts'
 import { agentPalette, colors } from './generated/theme.ts'
 
 describe('agentColor', () => {
@@ -29,5 +29,23 @@ describe('agentColor', () => {
 
   it('lists palette entries that exist as colors', () => {
     for (const name of agentPalette) expect(colors.light).toHaveProperty(name)
+  })
+})
+
+describe('agentColorByName', () => {
+  const agents = [
+    { name: 'build', color: null },
+    { name: 'plan', color: 'blue' },
+  ]
+
+  it('uses the configured color, else the position in the list', () => {
+    expect(agentColorByName(agents, 'plan')).toBe('var(--agent-blue)')
+    expect(agentColorByName(agents, 'build')).toBe('var(--agent-palette-0)')
+  })
+
+  it('hashes the name of an agent the list does not have', () => {
+    const color = agentColorByName(agents, 'ghost')
+    expect(color).toMatch(/^var\(--agent-palette-\d\)$/)
+    expect(agentColorByName(agents, 'ghost')).toBe(color)
   })
 })
