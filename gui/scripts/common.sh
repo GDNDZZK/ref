@@ -20,7 +20,8 @@ die() {
 }
 
 # Prints "<aqt host> <aqt arch>" for the machine running the script. Pass AQT_ARCH to
-# override the arch (e.g. win64_msvc2022_arm64).
+# override the arch (e.g. win64_msvc2022_arm64, which Git Bash on an Arm runner cannot report
+# reliably). aqt names the host of Arm machines linux_arm64 / windows_arm64.
 detect_aqt_target() {
 	local os machine host arch
 	os="$(uname -s)"
@@ -44,13 +45,37 @@ detect_aqt_target() {
 		;;
 	*) die "unsupported OS: $os" ;;
 	esac
-	echo "$host ${AQT_ARCH:-$arch}"
+	arch="${AQT_ARCH:-$arch}"
+	if [[ "$arch" == *arm64* ]]; then
+		host="${host}_arm64"
+	fi
+	echo "$host $arch"
 }
 
-# Directory holding bin/, lib/ and lib/cmake of the installed Qt.
+# Name of the directory aqt creates under $DEPS_DIR/Qt/$QT_VERSION for an aqt arch.
+qt_arch_dir() {
+	case "$1" in
+	clang_64) echo macos ;;
+	linux_*) echo "${1#linux_}" ;;
+	win64_*) echo "${1#win64_}" ;;
+	*) die "unknown aqt arch: $1" ;;
+	esac
+}
+
+# Directory holding bin/, lib/ and lib/cmake of the installed Qt for this machine's arch.
 qt_dir() {
-	local found
-	found="$(find "$DEPS_DIR/Qt/$QT_VERSION" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
-	[[ -n "$found" ]] || die "no Qt $QT_VERSION under $DEPS_DIR/Qt; run install-qt.sh first"
-	echo "$found"
+	local host arch dir
+	read -r host arch < <(detect_aqt_target)
+	dir="$DEPS_DIR/Qt/$QT_VERSION/$(qt_arch_dir "$arch")"
+	[[ -d "$dir" ]] || die "no Qt $QT_VERSION in $dir; run install-qt.sh first"
+	echo "$dir"
+}
+
+# Directory of the Qt for the build machine, for cross builds that need its tools
+# (QT_HOST_PATH). Only Windows on Arm installs a second Qt for that; prints nothing elsewhere.
+qt_host_dir() {
+	local host arch
+	read -r host arch < <(detect_aqt_target)
+	[[ "$host" == windows_arm64 ]] || return 0
+	echo "$DEPS_DIR/Qt/$QT_VERSION/msvc2022_64"
 }
