@@ -196,6 +196,10 @@ async fn summarize(
                 return Ok(text.trim().to_string());
             }
             Err(e) if e.cancelled || cancel.is_cancelled() => return Err("aborted".into()),
+            // The provider stated a stricter image limit (recorded by `learn`): clamp again and resend.
+            Err(e) if crate::images::learn(&cs.provider, &cs.model, &e.message) => {
+                req = crate::images::clamp_request(req, &cs.provider, &cs.model).await;
+            }
             Err(e) if e.context_overflow => {
                 if clipped {
                     return Err(format!("history too large to summarize: {}", e.message));

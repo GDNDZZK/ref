@@ -1150,3 +1150,41 @@ async fn history_is_served_in_pages() {
     let (len, more) = reset.expect("reset event");
     assert!(len < 269 && more, "{len}");
 }
+
+#[tokio::test]
+async fn stated_image_limit_is_learned_and_the_request_resent() {
+    use base64::Engine as _;
+    let m = mock(Arc::new(|n, _| match n {
+        0 => Reply::Status(400, r#"{"error":{"message":"messages.0.content.1.image.source.base64.data: At least one of the image dimensions exceed max allowed size: 1000 pixels"}}"#.into()),
+        _ => Reply::Text("seen".into()),
+    }))
+    .await;
+    let mut cfg = config(&m.url);
+    cfg.providers.get_mut("mock").unwrap().models.get_mut("m").unwrap().images = true;
+    let (hub, work) = hub(cfg, "image-limit");
+    let s = session(&hub, &work, "main", "build").await;
+    let conn = hub.add_conn();
+    conn.lock().hello = true;
+    let mut png = Vec::new();
+    let img = image::RgbImage::from_fn(1200, 300, |x, y| image::Rgb([(x % 256) as u8, (y % 256) as u8, 7]));
+    image::DynamicImage::ImageRgb8(img).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let pasted = ref_proto::ImageData::new("image/png", base64::engine::general_purpose::STANDARD.encode(&png));
+    let req = ref_proto::Request::Prompt { session_id: s.id.clone(), text: "look".into(), images: vec![pasted.clone()] };
+    ref_server::api::handle(&hub, &conn, req).await.unwrap();
+    wait_idle(&s).await;
+    assert_eq!(last_text(&s), "seen");
+    // Resent at once (no backoff, not counted as a failure) with the image fit to 1000px.
+    let bodies = m.bodies();
+    assert_eq!(bodies.len(), 2);
+    let sent = |b: &serde_json::Value| -> (u32, u32) {
+        let s = b.to_string();
+        let start = s.find("base64,").expect("image in request") + 7;
+        let data = &s[start..start + s[start..].find('"').unwrap()];
+        let img = image::load_from_memory(&base64::engine::general_purpose::STANDARD.decode(data).unwrap()).unwrap();
+        (img.width(), img.height())
+    };
+    assert_eq!(sent(&bodies[0]), (1200, 300));
+    assert_eq!(sent(&bodies[1]), (1000, 250));
+    // The session keeps the original.
+    assert!(serde_json::to_string(&messages(&s)).unwrap().contains(&pasted.data));
+}

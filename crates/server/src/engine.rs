@@ -521,6 +521,10 @@ async fn stream_with_retry(
             }
             Err(e) => {
                 remove_message(hub, s, &msg_id);
+                // The provider stated a stricter image limit: the next request is clamped to it.
+                if crate::images::learn(&p.provider, &p.model, &e.message) {
+                    continue;
+                }
                 if e.context_overflow {
                     if overflow_compacted {
                         return Err(Outcome::Failed(format!(
