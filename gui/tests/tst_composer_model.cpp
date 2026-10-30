@@ -15,6 +15,8 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include <memory>
+
 using namespace Qt::StringLiterals;
 using namespace refgui;
 using namespace refgui::test;
@@ -197,6 +199,7 @@ private slots:
 	void clipboardImagePathIsAttachedAndOtherTextIsLeftAlone();
 	void clearDraftKeepsLongDraftsInTheHistory();
 	void queueFollowsTheServer();
+	void answersAfterTheModelIsGoneAreIgnored();
 };
 
 void TestComposerModel::labelsFollowTheSessionAndTheConfiguration()
@@ -537,6 +540,52 @@ void TestComposerModel::queueFollowsTheServer()
 	const QModelIndex row = f.composer.queue()->index(0, 0);
 	QCOMPARE(row.data(composer::QueueModel::TextRole).toString(), u"later"_s);
 	QVERIFY(row.data(composer::QueueModel::RemovableRole).toBool());
+}
+
+// Every request the model makes is held back, the model is destroyed, and then the answers arrive.
+// The test passes without a sanitizer too; an address sanitizer build reports the access to the freed model.
+void TestComposerModel::answersAfterTheModelIsGoneAreIgnored()
+{
+	Fixture f;
+	const QStringList held{u"prompt"_s, u"shell"_s, u"expand_command"_s, u"list_files"_s, u"remove_queued"_s};
+	QList<QJsonObject> pending;
+	f.fake.onRequest = [&](const QJsonObject& request) {
+		if(held.contains(request.value(u"op"_s).toString()))
+		{
+			pending.append(request);
+			return;
+		}
+		f.answer(request);
+	};
+	f.queue({queuedMessage(u"q1"_s, u"first"_s)});
+	auto gone = std::make_unique<ComposerModel>(f.backend, f.controller, f.history);
+	QTRY_COMPARE(gone->queue()->rowCount(), 1);
+	gone->edit(u"look at @sr"_s, 11);
+	QTRY_COMPARE(pending.size(), 1); // the file lookup waits a moment before it asks
+	gone->edit(u"Do it"_s, 5);
+	QVERIFY(gone->submit());
+	gone->edit(u"!"_s, 1);
+	gone->edit(u"ls"_s, 2);
+	QVERIFY(gone->submit());
+	gone->runCustomCommand(u"review"_s, u"x"_s);
+	gone->withdraw(0);
+	QTRY_COMPARE(pending.size(), 5);
+
+	gone.reset();
+	// One answer that fits every held request.
+	const QJsonObject answer{{u"queued"_s, false},
+	                         {u"message_id"_s, u"u9"_s},
+	                         {u"text"_s, u"x"_s},
+	                         {u"files"_s, QJsonArray()},
+	                         {u"removed"_s, true},
+	                         {u"images"_s, QJsonArray()}};
+	for(const QJsonObject& request : std::as_const(pending))
+	{
+		f.fake.respond(request, answer);
+	}
+
+	QTest::qWait(100); // the answers are handled
+	QVERIFY(f.fake.socket()->isValid());
 }
 
 QTEST_MAIN(TestComposerModel)
