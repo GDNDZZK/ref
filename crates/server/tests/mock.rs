@@ -432,3 +432,27 @@ async fn directory_listing_stays_inside_the_workspace() {
     }
     rig.finish().await;
 }
+
+#[tokio::test]
+async fn retry_can_be_demonstrated_again_after_an_undo() {
+    let rig = rig().await;
+    let retries = |seen: &[SessionStatus]| {
+        seen.iter()
+            .filter(|s| matches!(s, SessionStatus::Retrying { .. }))
+            .count()
+    };
+    rig.prompt("retry");
+    assert!(retries(&rig.run(true).await) >= 2);
+
+    let undo = Request::Undo {
+        session_id: rig.session.id.clone(),
+        message_id: None,
+    };
+    api::handle(&rig.hub, &rig.conn, undo).await.unwrap();
+    rig.prompt("retry");
+    assert!(
+        retries(&rig.run(true).await) >= 2,
+        "failed again the second time"
+    );
+    rig.finish().await;
+}
