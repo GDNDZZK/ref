@@ -54,7 +54,10 @@ Rectangle {
 		onClicked: Workspace.restartBackend()
 
 		HoverHandler { id: hint }
-		ToolTip.visible: hint.hovered && !restart.enabled
-		ToolTip.text: qsTr("Close or finish running sessions first")
+
+		PlainToolTip {
+			visible: hint.hovered && !restart.enabled
+			text: qsTr("Close or finish running sessions first")
+		}
 	}
 }
