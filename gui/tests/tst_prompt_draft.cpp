@@ -3,7 +3,7 @@
 #include <QTest>
 
 using namespace Qt::StringLiterals;
-using refgui::compose::NamedImage;
+using refgui::proto::NamedImage;
 using refgui::compose::PromptDraft;
 
 namespace
@@ -11,10 +11,7 @@ namespace
 
 NamedImage image(const QString& data, std::optional<QString> name = std::nullopt)
 {
-	refgui::proto::ImageData image;
-	image.mime = u"image/png"_s;
-	image.data = data;
-	return {.image = image, .name = std::move(name)};
+	return {.mime = u"image/png"_s, .data = data, .name = std::move(name)};
 }
 
 QStringList dataOf(const PromptDraft& draft)
@@ -49,7 +46,7 @@ private slots:
 void TestPromptDraft::attachInsertsTokenAtCursor()
 {
 	PromptDraft draft;
-	draft.attach(image(u"a"_s).image, std::nullopt);
+	draft.attach(image(u"a"_s));
 	QCOMPARE(draft.text(), u"[Image 1] "_s);
 	QCOMPARE(draft.cursor(), 10);
 	QCOMPARE(dataOf(draft), QStringList{u"[Image 1]=a"_s});
@@ -59,28 +56,28 @@ void TestPromptDraft::attachPadsAfterText()
 {
 	PromptDraft draft;
 	draft.setText(u"look at"_s, 7);
-	draft.attach(image(u"a"_s).image, std::nullopt);
+	draft.attach(image(u"a"_s));
 	QCOMPARE(draft.text(), u"look at [Image 1] "_s);
 
 	draft.setText(u"line\n"_s, 5);
-	draft.attach(image(u"b"_s).image, std::nullopt);
+	draft.attach(image(u"b"_s));
 	QVERIFY(draft.text().endsWith(u"line\n[Image 2] "_s));
 }
 
 void TestPromptDraft::tokensKeepCountingAfterClear()
 {
 	PromptDraft draft;
-	draft.attach(image(u"a"_s).image, std::nullopt);
+	draft.attach(image(u"a"_s));
 	draft.clear();
-	draft.attach(image(u"b"_s).image, std::nullopt);
+	draft.attach(image(u"b"_s));
 	QCOMPARE(draft.text(), u"[Image 2] "_s);
 }
 
 void TestPromptDraft::editingTheTextDropsOrphanedImages()
 {
 	PromptDraft draft;
-	draft.attach(image(u"a"_s).image, std::nullopt);
-	draft.attach(image(u"b"_s).image, std::nullopt);
+	draft.attach(image(u"a"_s));
+	draft.attach(image(u"b"_s));
 	QCOMPARE(draft.attachments().size(), 2);
 
 	draft.setText(u"only [Image 2] left"_s, 19);
@@ -91,7 +88,7 @@ void TestPromptDraft::removingAnAttachmentRemovesItsToken()
 {
 	PromptDraft draft;
 	draft.setText(u"see "_s, 4);
-	draft.attach(image(u"a"_s).image, std::nullopt);
+	draft.attach(image(u"a"_s));
 	draft.setText(draft.text() + u"and more"_s, draft.text().size() + 8);
 	QCOMPARE(draft.text(), u"see [Image 1] and more"_s);
 
@@ -104,7 +101,7 @@ void TestPromptDraft::removingAnAttachmentRemovesItsToken()
 void TestPromptDraft::takeReturnsTextAndImages()
 {
 	PromptDraft draft;
-	draft.attach(image(u"a"_s).image, std::nullopt);
+	draft.attach(image(u"a"_s));
 	draft.setText(draft.text() + u"what is this"_s, draft.text().size() + 12);
 
 	const auto submission = draft.take();
@@ -128,13 +125,13 @@ void TestPromptDraft::restoreAppendsAfterABlankLineAndRebinds()
 {
 	PromptDraft draft;
 	draft.setText(u"draft "_s, 6);
-	draft.attach(image(u"a"_s).image, std::nullopt);
+	draft.attach(image(u"a"_s));
 
 	draft.restore(u"see [Image 2] and [Image 1]"_s, {image(u"x"_s), image(u"y"_s, u"y.png"_s)});
 	QCOMPARE(draft.text(), u"draft [Image 1]\n\nsee [Image 3] and [Image 2]"_s);
 	QCOMPARE(draft.cursor(), draft.text().size());
 	QCOMPARE(dataOf(draft), (QStringList{u"[Image 1]=a"_s, u"[Image 2]=x"_s, u"[Image 3]=y"_s}));
-	QCOMPARE(draft.attachments()[2].name, u"y.png"_s);
+	QCOMPARE(draft.attachments()[2].image.name, u"y.png"_s);
 	QCOMPARE(draft.take().images.size(), 3);
 }
 

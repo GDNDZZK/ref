@@ -48,10 +48,10 @@ QString PromptDraft::nextToken()
 	return u"[Image %1]"_s.arg(++m_lastImageNumber);
 }
 
-void PromptDraft::attach(proto::ImageData image, std::optional<QString> name)
+void PromptDraft::attach(proto::NamedImage image)
 {
 	const QString token = nextToken();
-	m_attachments.append({token, std::move(image), std::move(name)});
+	m_attachments.append({token, std::move(image)});
 
 	const bool followsText = m_cursor > 0 && m_text[m_cursor - 1] != u' ' && m_text[m_cursor - 1] != u'\n';
 	const QString inserted = (followsText ? u" "_s : QString()) + token + u" "_s;
@@ -91,7 +91,7 @@ void PromptDraft::removeAttachment(qsizetype index)
 	}
 }
 
-void PromptDraft::restore(const QString& text, const QList<NamedImage>& images)
+void PromptDraft::restore(const QString& text, const QList<proto::NamedImage>& images)
 {
 	if(text.trimmed().isEmpty() && images.isEmpty())
 	{
@@ -118,7 +118,7 @@ void PromptDraft::restore(const QString& text, const QList<NamedImage>& images)
 	{
 		const QString token = nextToken();
 		restored.replace(placeholder(i), token);
-		m_attachments.append({token, images[i].image, images[i].name});
+		m_attachments.append({token, images[i]});
 	}
 
 	qsizetype keepEnd = m_text.size();
@@ -131,7 +131,7 @@ void PromptDraft::restore(const QString& text, const QList<NamedImage>& images)
 
 	for(qsizetype i = bound; i < images.size(); ++i)
 	{
-		attach(images[i].image, images[i].name);
+		attach(images[i]);
 	}
 }
 
@@ -140,7 +140,7 @@ Submission PromptDraft::take()
 	Submission submission{.text = m_text, .images = {}};
 	for(const Attachment& attachment : m_attachments)
 	{
-		submission.images.append(attachment.image);
+		submission.images.append({.mime = attachment.image.mime, .data = attachment.image.data});
 	}
 	clear();
 	return submission;

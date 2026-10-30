@@ -70,7 +70,7 @@ QString pathOf(const QString& text)
 
 } // namespace
 
-std::expected<std::optional<NamedImage>, QString> imageFromPath(const QString& text)
+std::expected<std::optional<proto::NamedImage>, QString> imageFromPath(const QString& text)
 {
 	const QString path = pathOf(text);
 	const QString mime = mimeOf(path);
@@ -92,13 +92,9 @@ std::expected<std::optional<NamedImage>, QString> imageFromPath(const QString& t
 	return imageFromBytes(file.readAll(), mime, info.fileName());
 }
 
-NamedImage imageFromBytes(const QByteArray& bytes, const QString& mime, const QString& name)
+proto::NamedImage imageFromBytes(const QByteArray& bytes, const QString& mime, const QString& name)
 {
-	proto::ImageData image;
-	image.mime = mime;
-	image.data = QString::fromLatin1(bytes.toBase64());
-	image.size = static_cast<quint64>(bytes.size());
-	return {.image = std::move(image), .name = name};
+	return {.mime = mime, .data = QString::fromLatin1(bytes.toBase64()), .name = name};
 }
 
 } // namespace refgui::compose

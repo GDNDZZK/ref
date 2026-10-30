@@ -10,13 +10,6 @@
 namespace refgui::compose
 {
 
-// An image with the file name it came from, if any (the protocol's NamedImage).
-struct NamedImage
-{
-	proto::ImageData image;
-	std::optional<QString> name{};
-};
-
 // What Enter sends: the text, with `[Image N]` tokens, and the images those tokens name.
 struct Submission
 {
@@ -36,8 +29,7 @@ public:
 	struct Attachment
 	{
 		QString token;
-		proto::ImageData image;
-		std::optional<QString> name;
+		proto::NamedImage image;
 	};
 
 	const QString& text() const { return m_text; }
@@ -51,7 +43,7 @@ public:
 
 	// Puts `image` in the text at the cursor as a new token, with a space before it when it
 	// follows other text and one after it.
-	void attach(proto::ImageData image, std::optional<QString> name);
+	void attach(proto::NamedImage image);
 	// Removes the attachment and its token.
 	void removeAttachment(qsizetype index);
 
@@ -59,7 +51,7 @@ public:
 	// it fills an empty draft and goes after a blank line otherwise. The tokens in `text` are
 	// bound to `images` in order of their numbers and renumbered after the draft's own;
 	// images without a token get one at the end. The cursor ends up at the end.
-	void restore(const QString& text, const QList<NamedImage>& images);
+	void restore(const QString& text, const QList<proto::NamedImage>& images);
 
 	// The prompt as it is sent, and the draft emptied.
 	Submission take();
