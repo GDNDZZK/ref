@@ -109,7 +109,6 @@ export class ChatSession {
 
   applyEvent(event: SessionEvent): void {
     if (!this.state.loaded) return // before the snapshot: the snapshot already has it
-    if (event.type === 'error') this.deps.notify('error', this.errorText(event.text))
     this.transcript.apply(event, performance.now())
     this.publish()
   }
@@ -141,12 +140,6 @@ export class ChatSession {
 
   private newTranscript(): Transcript {
     return new Transcript({ reportError: (message) => this.deps.notify('error', message) })
-  }
-
-  // A session that is not in the foreground says which one the error is about.
-  private errorText(text: string): string {
-    const name = this.state.info?.name
-    return this.state.attachment === 'foreground' || !name ? text : `${name}: ${text}`
   }
 
   private showHistory(): void {

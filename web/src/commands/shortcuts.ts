@@ -12,7 +12,7 @@ export function matchesShortcut(shortcut: Shortcut, event: KeyboardEvent): boole
     event.altKey === (shortcut.alt ?? false) &&
     event.ctrlKey === (shortcut.ctrl ?? false) &&
     event.shiftKey === (shortcut.shift ?? false) &&
-    !event.metaKey
+    event.metaKey === (shortcut.meta ?? false)
   )
 }
 
@@ -24,6 +24,11 @@ function keyName(code: string): string {
 
 // "Alt+N", "Ctrl+P".
 export function formatShortcut(shortcut: Shortcut): string {
-  const modifiers = [shortcut.ctrl && 'Ctrl', shortcut.alt && 'Alt', shortcut.shift && 'Shift']
+  const modifiers = [
+    shortcut.ctrl && 'Ctrl',
+    shortcut.meta && 'Cmd',
+    shortcut.alt && 'Alt',
+    shortcut.shift && 'Shift',
+  ]
   return [...modifiers.filter((name): name is string => Boolean(name)), keyName(shortcut.code)].join('+')
 }
