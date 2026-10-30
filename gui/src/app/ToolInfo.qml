@@ -51,6 +51,12 @@ QtObject {
 			.map(item => ({ content: item.content.trim(), status: typeof item.status === "string" ? item.status : "pending" }))
 	}
 
+	// The first of `keys` that holds text in `input`, else "".
+	function firstText(input, keys) {
+		const key = keys.find(name => typeof input[name] === "string" && input[name] !== "")
+		return key === undefined ? "" : input[key]
+	}
+
 	function firstLine(text) {
 		const end = text.indexOf("\n")
 		return end < 0 ? text : text.slice(0, end)
@@ -91,5 +97,73 @@ QtObject {
 		default:
 			return ""
 		}
+	}
+
+	// Output of read and grep: `[path#TAG]` headers, then rows `N:text`, `*N:text` (a match) and
+	// ` N:text` (context), `...` between non-adjacent ones. Returns [{path, tag, rows, notes}] with
+	// rows [{number, text, kind}] (kind "line", "match", "context" or "gap") and notes: other lines.
+	function listing(output) {
+		const groups = []
+		let group = null
+		const open = (path, tag) => {
+			group = { path: path, tag: tag, rows: [], notes: [] }
+			groups.push(group)
+		}
+		for (const line of output.split("\n")) {
+			if (line === "")
+				continue
+			const header = /^\[(.*)#([0-9A-Fa-f]{4})\]$/.exec(line)
+			if (header) {
+				open(header[1], header[2])
+				continue
+			}
+			if (group === null)
+				open("", "")
+			const row = /^([ *]?)(\d+):(.*)$/.exec(line)
+			if (row)
+				group.rows.push({ number: row[2], text: row[3], kind: row[1] === "*" ? "match" : row[1] === " " ? "context" : "line" })
+			else if (line === "...")
+				group.rows.push({ number: "", text: "\u22ef", kind: "gap" })
+			else
+				group.notes.push(line)
+		}
+		return groups
+	}
+
+	// A unified diff as rows [{text, kind}], kind "added", "removed", "hunk", "file" or "context".
+	function diffRows(diff) {
+		const lines = diff.split("\n")
+		if (lines.length > 0 && lines[lines.length - 1] === "")
+			lines.pop()
+		return lines.map(line => {
+			let kind = "context"
+			if (line.startsWith("+++") || line.startsWith("---"))
+				kind = "file"
+			else if (line.startsWith("@@"))
+				kind = "hunk"
+			else if (line.startsWith("+"))
+				kind = "added"
+			else if (line.startsWith("-"))
+				kind = "removed"
+			const marked = kind === "added" || kind === "removed"
+			return { text: marked ? line.slice(1) : line, sign: marked ? line.charAt(0) : "", kind: kind }
+		})
+	}
+
+	// "src/" and "parser.rs" of "src/parser.rs"; a trailing slash stays with the directory.
+	function splitPath(path) {
+		const trimmed = path.endsWith("/") ? path.slice(0, -1) : path
+		const cut = trimmed.lastIndexOf("/")
+		return { directory: path.slice(0, cut + 1), name: path.slice(cut + 1), isDirectory: path.endsWith("/") }
+	}
+
+	function sizeText(bytes) {
+		const kib = 1024
+		const mib = kib * kib
+		if (bytes >= mib)
+			return (bytes / mib).toFixed(1) + " MiB"
+		if (bytes >= kib)
+			return (bytes / kib).toFixed(1) + " KiB"
+		return bytes + " B"
 	}
 }
