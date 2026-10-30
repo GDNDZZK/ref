@@ -1,0 +1,14 @@
+[package]
+name = "ref-client"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ref-proto.workspace = true
+ref-sys.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+rand.workspace = true

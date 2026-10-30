@@ -10,7 +10,7 @@ use ref_proto::{ClientFrame, PROTOCOL_VERSION, Request, ServerFrame};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message as WsMsg;
 
-use crate::launcher::{self, Endpoint, Target};
+use ref_client::{Endpoint, Target, Ws};
 
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
@@ -42,97 +42,16 @@ impl Client {
 
 const HELLO_ID: u64 = u64::MAX;
 
-type Ws =
-    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
-
-fn url_with_token(ep: &Endpoint) -> String {
-    match &ep.token {
-        Some(t) if !t.is_empty() => {
-            let sep = if ep.url.contains('?') { '&' } else { '?' };
-            format!("{}{sep}token={t}", ep.url)
-        }
-        _ => ep.url.clone(),
-    }
-}
-
-/// No size limits on incoming frames: a session snapshot carries every image of the session
-/// (tool screenshots included) and easily exceeds tungstenite's 16 MiB default frame limit.
-fn ws_config() -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
-    tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
-        .max_message_size(None)
-        .max_frame_size(None)
-}
-
-async fn try_connect(ep: &Endpoint, timeout: Duration) -> Option<Ws> {
-    let url = url_with_token(ep);
-    match tokio::time::timeout(
-        timeout,
-        tokio_tungstenite::connect_async_with_config(url, Some(ws_config()), false),
-    )
-    .await
-    {
-        Ok(Ok((ws, _))) => Some(ws),
-        _ => None,
-    }
-}
-
-async fn connect_existing(dir: &std::path::Path) -> Option<(Ws, Endpoint)> {
-    for inst in launcher::instances(dir) {
-        let ep = launcher::endpoint_for(&inst);
-        if let Some(ws) = try_connect(&ep, Duration::from_millis(1500)).await {
-            return Some((ws, ep));
-        }
-    }
-    None
-}
-
-/// Discovers a running backend, or launches one.
-async fn discover(
+/// Connects to the backend, reporting progress while one is being started.
+async fn connect(
+    target: &Target,
     events: &mpsc::UnboundedSender<NetEvent>,
-    allow_spawn: bool,
 ) -> Result<(Ws, Endpoint), String> {
-    let dir = ref_proto::instances_dir();
-    if let Some(c) = connect_existing(&dir).await {
-        return Ok(c);
-    }
-    if !allow_spawn {
-        return Err("no backend running".into());
-    }
-    // Only one frontend spawns; the others wait for the lock and then find its instance.
-    let _lock = launcher::SpawnLock::acquire(&dir, Duration::from_secs(15)).await;
-    if let Some(c) = connect_existing(&dir).await {
-        return Ok(c);
-    }
-    let port = launcher::pick_port().ok_or("no free port")?;
-    let started = std::time::Instant::now();
-    launcher::spawn_server(port).map_err(|e| {
-        format!(
-            "failed to start {}: {e}",
-            launcher::server_binary().display()
-        )
-    })?;
-    let wait = async {
-        loop {
-            if let Some(i) =
-                launcher::wait_for_instance(&dir, port, Duration::from_millis(300)).await
-            {
-                return Some(i);
-            }
-            let _ = events.send(NetEvent::Status("starting backend…".into()));
-            if started.elapsed() > Duration::from_secs(10) {
-                return None;
-            }
-        }
-    };
-    let inst = wait.await.ok_or("backend did not start within 10s")?;
-    let ep = launcher::endpoint_for(&inst);
-    for _ in 0..20 {
-        if let Some(ws) = try_connect(&ep, Duration::from_millis(1500)).await {
-            return Ok((ws, ep));
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    Err("could not connect to the new backend".into())
+    ref_client::connect_target(target, || {
+        let _ = events.send(NetEvent::Status("starting backend…".into()));
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// Runs the transport until the app drops the client.
@@ -144,19 +63,7 @@ pub async fn run(
 ) {
     let mut first = true;
     loop {
-        let conn = match &target {
-            Target::Auto => discover(&events, true).await,
-            Target::Explicit { url, token } => {
-                let ep = Endpoint {
-                    url: url.clone(),
-                    token: token.clone(),
-                };
-                try_connect(&ep, Duration::from_secs(3))
-                    .await
-                    .map(|ws| (ws, ep))
-                    .ok_or_else(|| format!("cannot connect to {url}"))
-            }
-        };
+        let conn = connect(&target, &events).await;
         let (mut ws, ep) = match conn {
             Ok(c) => c,
             Err(e) => {
