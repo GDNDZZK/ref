@@ -1,6 +1,9 @@
 //! Test harness: a ref-web process in a private state directory, HTTP and WebSocket clients
 //! that behave like a browser (cookie, Origin), a fake upstream and a real ref-server.
 
+// Each test file uses a different part of this module.
+#![allow(dead_code)]
+
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -112,6 +115,16 @@ impl Drop for Web {
 }
 
 impl Web {
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
+    /// SIGKILL: no chance to clean up.
+    pub fn kill_hard(&mut self) {
+        self.child.kill().unwrap();
+        self.child.wait().unwrap();
+    }
+
     async fn wait_until_listening(&mut self) {
         let deadline = std::time::Instant::now() + START_TIMEOUT;
         loop {
@@ -269,4 +282,60 @@ pub async fn real_backend(env: &Env, token: &str) -> (ref_server::Running, u16) 
         .unwrap();
     let port = running.addr.port();
     (running, port)
+}
+
+/// Builds `ref-server` next to `ref-web` (a no-op when it is up to date): `cargo test` does not
+/// build the binaries of other packages by itself, and ref-web starts the one beside it.
+pub fn ensure_ref_server() {
+    static BUILT: std::sync::Once = std::sync::Once::new();
+    BUILT.call_once(|| {
+        let web = PathBuf::from(env!("CARGO_BIN_EXE_ref-web"));
+        let profile_dir = web.parent().unwrap();
+        let cargo = std::env::var_os("CARGO").unwrap_or("cargo".into());
+        let mut build = Command::new(cargo);
+        build.args(["build", "-p", "ref-server"]);
+        if profile_dir.file_name().is_some_and(|n| n == "release") {
+            build.arg("--release");
+        }
+        assert!(
+            build.status().unwrap().success(),
+            "cargo build -p ref-server"
+        );
+    });
+}
+
+/// Direct children of `parent` (Unix `pgrep -P`).
+#[cfg(unix)]
+pub fn child_pids(parent: u32) -> Vec<u32> {
+    let output = Command::new("pgrep")
+        .args(["-P", &parent.to_string()])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|l| l.trim().parse().ok())
+        .collect()
+}
+
+/// True once `pid` is gone or only a zombie waiting to be reaped.
+#[cfg(unix)]
+pub fn process_gone(pid: u32) -> bool {
+    if !ref_sys::pid_alive(pid) {
+        return true;
+    }
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
+    stat.rsplit(')')
+        .next()
+        .is_some_and(|rest| rest.trim_start().starts_with('Z'))
+}
+
+pub async fn wait_until(what: &str, mut condition: impl FnMut() -> bool) {
+    let deadline = std::time::Instant::now() + STEP_TIMEOUT;
+    while !condition() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for {what}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 }

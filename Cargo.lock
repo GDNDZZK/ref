@@ -2926,6 +2926,7 @@ dependencies = [
 name = "ref-client"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
  "rand 0.9.5",
  "ref-proto",
  "ref-sys",
@@ -3109,6 +3110,7 @@ dependencies = [
  "ref-config",
  "ref-proto",
  "ref-server",
+ "ref-sys",
  "reqwest",
  "serde",
  "serde_json",
