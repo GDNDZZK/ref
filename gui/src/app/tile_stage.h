@@ -57,13 +57,14 @@ private:
 		QPointer<ChatSession> session;
 		QString sessionId;
 		bool leaving = false;
+		int leaveSerial = 0; // which leave this is, so that only its timer retires the row
 		bool deleteSession = false; // the stage deletes the session when the row goes
 		int place = 0;
 	};
 
 	void sync();
 	void markLeaving(int row);
-	void retire(const QString& sessionId);
+	void retire(const QString& sessionId, int leaveSerial);
 	void setOpening(bool opening);
 	void setPlaced(int placed);
 	int rowOf(const ChatSession* session) const;
@@ -73,4 +74,5 @@ private:
 	int m_placed = 0;
 	bool m_opening = false;
 	int m_lingerMs = 0;
+	int m_leaves = 0;
 };

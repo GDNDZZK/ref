@@ -74,7 +74,7 @@ void TileStage::sync()
 			continue;
 		}
 		beginInsertRows({}, int(m_rows.size()), int(m_rows.size()));
-		m_rows.append({wanted[place], wanted[place]->sessionId(), false, false, place});
+		m_rows.append({wanted[place], wanted[place]->sessionId(), false, 0, false, place});
 		endInsertRows();
 	}
 	setPlaced(int(wanted.size()));
@@ -84,16 +84,18 @@ void TileStage::sync()
 void TileStage::markLeaving(int row)
 {
 	m_rows[row].leaving = true;
+	m_rows[row].leaveSerial = ++m_leaves;
 	emit dataChanged(index(row), index(row), {LeavingRole});
 	const QString sessionId = m_rows[row].sessionId;
-	QTimer::singleShot(m_lingerMs, this, [this, sessionId] { retire(sessionId); });
+	const int serial = m_rows[row].leaveSerial;
+	QTimer::singleShot(m_lingerMs, this, [this, sessionId, serial] { retire(sessionId, serial); });
 }
 
-void TileStage::retire(const QString& sessionId)
+void TileStage::retire(const QString& sessionId, int leaveSerial)
 {
 	for(int i = 0; i < m_rows.size(); ++i)
 	{
-		if(m_rows[i].sessionId == sessionId && m_rows[i].leaving)
+		if(m_rows[i].sessionId == sessionId && m_rows[i].leaving && m_rows[i].leaveSerial == leaveSerial)
 		{
 			const Row row = m_rows[i];
 			beginRemoveRows({}, i, i);
