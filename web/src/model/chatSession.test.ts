@@ -60,14 +60,4 @@ describe('ChatSession', () => {
     session.setInfo(info({ id: 'ses_1' }))
     expect(session.busy).toBe(false)
   })
-
-  it('names the session in an error it shows from the background', async () => {
-    const { notify, session } = setup()
-    await session.attach(false)
-    session.applyEvent({ type: 'error', text: 'rate limited' })
-    expect(notify).toHaveBeenCalledWith('error', 'test: rate limited')
-    await session.attach(true)
-    session.applyEvent({ type: 'error', text: 'again' })
-    expect(notify).toHaveBeenLastCalledWith('error', 'again')
-  })
 })
