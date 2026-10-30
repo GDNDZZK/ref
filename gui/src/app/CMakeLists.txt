@@ -9,6 +9,8 @@ qt_add_qml_module(ref-gui
 	SOURCES
 		app_translator.cpp
 		app_translator.h
+		chat_image_provider.cpp
+		chat_image_provider.h
 		chat_session.cpp
 		chat_session.h
 		qml_types.h
@@ -71,6 +73,9 @@ qt_add_qml_module(ref-gui
 		AlertBadge.qml
 		ErrorBlock.qml
 		ImageBlock.qml
+		Thumbnail.qml
+		ImageStrip.qml
+		Lightbox.qml
 		MetaBlock.qml
 		MetaText.qml
 		MetaAction.qml

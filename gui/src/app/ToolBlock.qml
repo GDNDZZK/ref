@@ -28,7 +28,7 @@ Block {
 
 	readonly property var inputObject: ToolInfo.parse(inputJson)
 	readonly property string detail: ToolInfo.detail(toolName, inputObject)
-	readonly property bool hasDetails: !alwaysOpen && (inputJson !== "" || rawInput !== "" || output !== "")
+	readonly property bool hasDetails: !alwaysOpen && (inputJson !== "" || rawInput !== "" || output !== "" || images.length > 0)
 	readonly property bool awaitingPermission: toolState === "awaiting_permission"
 	readonly property bool delayed: toolState === "delayed"
 	readonly property bool alwaysOpen: toolName === "todo" && ToolInfo.todos(inputObject).length > 0
