@@ -8,6 +8,7 @@ edition = "2024"
 license = "GPL-3.0"
 
 [workspace.dependencies]
+dunce = "1"
 ref-proto = { path = "crates/proto" }
 ref-llm = { path = "crates/llm" }
 ref-config = { path = "crates/config" }

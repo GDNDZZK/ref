@@ -3005,6 +3005,7 @@ dependencies = [
  "chrono",
  "clap",
  "dirs",
+ "dunce",
  "futures-util",
  "globset",
  "ignore",
