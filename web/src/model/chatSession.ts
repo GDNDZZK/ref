@@ -275,8 +275,19 @@ export class ChatSession {
     this.publish()
   }
 
+  // The request leaves at once, so a second key press cannot answer it twice; it comes back
+  // when the answer was not sent.
   async answerPermission(callId: string, allow: boolean, always: boolean): Promise<void> {
-    await this.deps.api().permissionReply(this.id, callId, allow, always)
+    const request = this.transcript.resolvePermission(callId)
+    if (!request) return
+    this.publish()
+    try {
+      await this.deps.api().permissionReply(this.id, callId, allow, always)
+    } catch (error) {
+      this.transcript.apply({ type: 'permission', request }, performance.now())
+      this.publish()
+      throw error
+    }
   }
 
   dispose(): void {
