@@ -106,4 +106,119 @@ QJsonObject permissionReply(const QString& sessionId, const QString& callId, boo
 	return json;
 }
 
+QJsonObject getConfig()
+{
+	return op(u"get_config"_s);
+}
+
+QJsonObject watchAll(bool enabled)
+{
+	QJsonObject json = op(u"watch_all"_s);
+	json.insert(u"enabled"_s, enabled);
+	return json;
+}
+
+QJsonObject setModel(const QString& sessionId, const ModelRef& model)
+{
+	QJsonObject json = op(u"set_model"_s);
+	json.insert(u"session_id"_s, sessionId);
+	json.insert(u"model"_s, toJson(model));
+	return json;
+}
+
+QJsonObject setAgent(const QString& sessionId, const QString& agent)
+{
+	QJsonObject json = op(u"set_agent"_s);
+	json.insert(u"session_id"_s, sessionId);
+	json.insert(u"agent"_s, agent);
+	return json;
+}
+
+QJsonObject setVariant(const QString& sessionId, const std::optional<QString>& variant)
+{
+	QJsonObject json = op(u"set_variant"_s);
+	json.insert(u"session_id"_s, sessionId);
+	if(variant)
+	{
+		json.insert(u"variant"_s, *variant);
+	}
+	return json;
+}
+
+QJsonObject rename(const QString& sessionId, const QString& name)
+{
+	QJsonObject json = op(u"rename"_s);
+	json.insert(u"session_id"_s, sessionId);
+	json.insert(u"name"_s, name);
+	return json;
+}
+
+QJsonObject setCwd(const QString& sessionId, const QString& path)
+{
+	QJsonObject json = op(u"set_cwd"_s);
+	json.insert(u"session_id"_s, sessionId);
+	json.insert(u"path"_s, path);
+	return json;
+}
+
+QJsonObject compact(const QString& sessionId)
+{
+	QJsonObject json = op(u"compact"_s);
+	json.insert(u"session_id"_s, sessionId);
+	return json;
+}
+
+QJsonObject close(const QString& sessionId)
+{
+	QJsonObject json = op(u"close"_s);
+	json.insert(u"session_id"_s, sessionId);
+	return json;
+}
+
+QJsonObject deleteSession(const QString& sessionId)
+{
+	QJsonObject json = op(u"delete"_s);
+	json.insert(u"session_id"_s, sessionId);
+	return json;
+}
+
+QJsonObject exportTranscript(const QString& sessionId, const QString& path)
+{
+	QJsonObject json = op(u"export"_s);
+	json.insert(u"session_id"_s, sessionId);
+	json.insert(u"path"_s, path);
+	return json;
+}
+
+QJsonObject peerCommand(const QString& sessionId, const QString& command, const QString& args)
+{
+	QJsonObject json = op(u"peer_command"_s);
+	json.insert(u"session_id"_s, sessionId);
+	json.insert(u"command"_s, command);
+	json.insert(u"args"_s, args);
+	return json;
+}
+
+QJsonObject mcpStatus(const std::optional<QString>& cwd)
+{
+	QJsonObject json = op(u"mcp_status"_s);
+	if(cwd)
+	{
+		json.insert(u"cwd"_s, *cwd);
+	}
+	return json;
+}
+
+QJsonObject listDirs(const QString& path)
+{
+	QJsonObject json = op(u"list_dirs"_s);
+	json.insert(u"path"_s, path);
+	return json;
+}
+
+QJsonObject shutdown()
+{
+	return op(u"shutdown"_s);
+}
+
 } // namespace refgui::proto::request

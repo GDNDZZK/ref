@@ -119,9 +119,29 @@ QCoro::Task<Result<proto::SessionInfo>> ServerClient::createSession(QString cwd,
 	co_return asResult(co_await request(proto::request::createSession(cwd, agent, model)), proto::parseSessionResult);
 }
 
-QCoro::Task<Result<proto::SessionSnapshot>> ServerClient::attach(QString sessionId)
+QCoro::Task<Result<proto::SessionSnapshot>> ServerClient::attach(QString sessionId, bool foreground)
 {
-	co_return asResult(co_await request(proto::request::attach(sessionId, true)), proto::parseAttachResult);
+	co_return asResult(co_await request(proto::request::attach(sessionId, foreground)), proto::parseAttachResult);
+}
+
+QCoro::Task<Result<void>> ServerClient::detach(QString sessionId)
+{
+	co_return asVoidResult(co_await request(proto::request::detach(sessionId)));
+}
+
+QCoro::Task<Result<proto::ServerConfig>> ServerClient::getConfig()
+{
+	co_return asResult(co_await request(proto::request::getConfig()), proto::parseConfigResult);
+}
+
+QCoro::Task<Result<QList<proto::SessionInfo>>> ServerClient::listSessions()
+{
+	co_return asResult(co_await request(proto::request::listSessions()), proto::parseSessionsResult);
+}
+
+QCoro::Task<Result<QList<proto::SessionInfo>>> ServerClient::watchAll(bool enabled)
+{
+	co_return asResult(co_await request(proto::request::watchAll(enabled)), proto::parseSessionsResult);
 }
 
 QCoro::Task<Result<QList<proto::SessionInfo>>> ServerClient::listHistory(QString cwd, int limit)
@@ -142,6 +162,71 @@ QCoro::Task<Result<void>> ServerClient::abort(QString sessionId)
 QCoro::Task<Result<void>> ServerClient::permissionReply(QString sessionId, QString callId, bool allow, bool always)
 {
 	co_return asVoidResult(co_await request(proto::request::permissionReply(sessionId, callId, allow, always)));
+}
+
+QCoro::Task<Result<proto::SessionInfo>> ServerClient::setModel(QString sessionId, proto::ModelRef model)
+{
+	co_return asResult(co_await request(proto::request::setModel(sessionId, model)), proto::parseSessionResult);
+}
+
+QCoro::Task<Result<proto::SessionInfo>> ServerClient::setAgent(QString sessionId, QString agent)
+{
+	co_return asResult(co_await request(proto::request::setAgent(sessionId, agent)), proto::parseSessionResult);
+}
+
+QCoro::Task<Result<proto::SessionInfo>> ServerClient::setVariant(QString sessionId, std::optional<QString> variant)
+{
+	co_return asResult(co_await request(proto::request::setVariant(sessionId, variant)), proto::parseSessionResult);
+}
+
+QCoro::Task<Result<proto::SessionInfo>> ServerClient::rename(QString sessionId, QString name)
+{
+	co_return asResult(co_await request(proto::request::rename(sessionId, name)), proto::parseSessionResult);
+}
+
+QCoro::Task<Result<proto::SessionInfo>> ServerClient::setCwd(QString sessionId, QString path)
+{
+	co_return asResult(co_await request(proto::request::setCwd(sessionId, path)), proto::parseSessionResult);
+}
+
+QCoro::Task<Result<void>> ServerClient::compact(QString sessionId)
+{
+	co_return asVoidResult(co_await request(proto::request::compact(sessionId)));
+}
+
+QCoro::Task<Result<void>> ServerClient::close(QString sessionId)
+{
+	co_return asVoidResult(co_await request(proto::request::close(sessionId)));
+}
+
+QCoro::Task<Result<void>> ServerClient::deleteSession(QString sessionId)
+{
+	co_return asVoidResult(co_await request(proto::request::deleteSession(sessionId)));
+}
+
+QCoro::Task<Result<QString>> ServerClient::exportTranscript(QString sessionId, QString path)
+{
+	co_return asResult(co_await request(proto::request::exportTranscript(sessionId, path)), proto::parsePathResult);
+}
+
+QCoro::Task<Result<QString>> ServerClient::peerCommand(QString sessionId, QString command, QString args)
+{
+	co_return asResult(co_await request(proto::request::peerCommand(sessionId, command, args)), proto::parseTextResult);
+}
+
+QCoro::Task<Result<QList<proto::McpServerStatus>>> ServerClient::mcpStatus(std::optional<QString> cwd)
+{
+	co_return asResult(co_await request(proto::request::mcpStatus(cwd)), proto::parseMcpResult);
+}
+
+QCoro::Task<Result<proto::DirListing>> ServerClient::listDirs(QString path)
+{
+	co_return asResult(co_await request(proto::request::listDirs(path)), proto::parseDirsResult);
+}
+
+QCoro::Task<Result<void>> ServerClient::shutdown()
+{
+	co_return asVoidResult(co_await request(proto::request::shutdown()));
 }
 
 void ServerClient::ResponseAwaiter::await_suspend(std::coroutine_handle<> handle)

@@ -4,29 +4,9 @@
 <context>
     <name>ChatSession</name>
     <message>
-        <location filename="../src/app/chat_session.cpp" line="80"/>
-        <source>Connecting to the ref backend…</source>
-        <translation>正在连接 ref 后端…</translation>
-    </message>
-    <message>
-        <location filename="../src/app/chat_session.cpp" line="82"/>
-        <source>Starting the ref backend…</source>
-        <translation>正在启动 ref 后端…</translation>
-    </message>
-    <message>
-        <location filename="../src/app/chat_session.cpp" line="84"/>
-        <source>Disconnected: %1. Trying again…</source>
-        <translation>连接已断开：%1。正在重试…</translation>
-    </message>
-    <message>
-        <location filename="../src/app/chat_session.cpp" line="101"/>
+        <location filename="../src/app/chat_session.cpp" line="67"/>
         <source>Not connected to the ref backend.</source>
         <translation>未连接到 ref 后端。</translation>
-    </message>
-    <message>
-        <location filename="../src/app/chat_session.cpp" line="141"/>
-        <source>No earlier session in this directory. Started a new one.</source>
-        <translation>此目录下没有更早的会话，已新建一个。</translation>
     </message>
 </context>
 <context>
@@ -69,19 +49,6 @@
     </message>
 </context>
 <context>
-    <name>Main</name>
-    <message>
-        <location filename="../src/app/Main.qml" line="84"/>
-        <source>What are we building?</source>
-        <translation>我们要做点什么？</translation>
-    </message>
-    <message>
-        <location filename="../src/app/Main.qml" line="111"/>
-        <source>Jump to latest</source>
-        <translation>跳到最新</translation>
-    </message>
-</context>
-<context>
     <name>ReasoningBlock</name>
     <message>
         <location filename="../src/app/ReasoningBlock.qml" line="54"/>
@@ -105,6 +72,19 @@
         <location filename="../src/app/SendButton.qml" line="96"/>
         <source>Send</source>
         <translation>发送</translation>
+    </message>
+</context>
+<context>
+    <name>SessionPane</name>
+    <message>
+        <location filename="../src/app/SessionPane.qml" line="32"/>
+        <source>What are we building?</source>
+        <translation>我们要做点什么？</translation>
+    </message>
+    <message>
+        <location filename="../src/app/SessionPane.qml" line="60"/>
+        <source>Jump to latest</source>
+        <translation>跳到最新</translation>
     </message>
 </context>
 <context>
@@ -169,6 +149,29 @@
         <location filename="../src/app/UserBlock.qml" line="28"/>
         <source>Summary of the earlier conversation</source>
         <translation>此前对话的摘要</translation>
+    </message>
+</context>
+<context>
+    <name>Workspace</name>
+    <message>
+        <location filename="../src/app/workspace.cpp" line="80"/>
+        <source>Connecting to the ref backend…</source>
+        <translation>正在连接 ref 后端…</translation>
+    </message>
+    <message>
+        <location filename="../src/app/workspace.cpp" line="82"/>
+        <source>Starting the ref backend…</source>
+        <translation>正在启动 ref 后端…</translation>
+    </message>
+    <message>
+        <location filename="../src/app/workspace.cpp" line="84"/>
+        <source>Disconnected: %1. Trying again…</source>
+        <translation>连接已断开：%1。正在重试…</translation>
+    </message>
+    <message>
+        <location filename="../src/app/workspace.cpp" line="110"/>
+        <source>No earlier session in this directory. Started a new one.</source>
+        <translation>此目录下没有更早的会话，已新建一个。</translation>
     </message>
 </context>
 </TS>
