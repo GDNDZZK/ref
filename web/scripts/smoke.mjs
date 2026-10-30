@@ -3,6 +3,7 @@
 // Needs a built ref-web (cargo build -p ref-web) and system Chromium. Screenshots go to $SMOKE_OUT.
 import { join } from 'node:path'
 import { OUT, WAIT_MS, withMockPage } from './smokeLib.mjs'
+import { loginLostScenario, shellScenario } from './smokeShell.mjs'
 
 const SCENARIOS =
   process.argv.length > 2 ? process.argv.slice(2) : ['tools', 'reasoning', 'markdown', 'permission', 'fail']
@@ -104,8 +105,10 @@ async function scenarios(page, problems) {
   await page.screenshot({ path: join(OUT, 'dark.png') })
 }
 
-const passed = await withMockPage(async (page, problems) => {
+const passed = await withMockPage(async (page, problems, { restartServer }) => {
   await scenarios(page, problems)
+  await shellScenario(page, problems)
+  await loginLostScenario(page, problems, restartServer)
 })
 console.log(passed ? `smoke passed, screenshots in ${OUT}` : 'smoke found problems')
 process.exit(passed ? 0 : 1)

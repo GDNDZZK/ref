@@ -133,7 +133,7 @@ Item {
 				Text {
 					anchors.verticalCenter: parent.verticalCenter
 					visible: tile.facts.busySince > 0
-					text: Format.duration(tile.now - tile.facts.busySince)
+					text: Format.elapsed(tile.now - tile.facts.busySince)
 					color: Theme.textMuted
 					font.pixelSize: Theme.smallFontSize
 				}

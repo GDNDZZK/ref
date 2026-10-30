@@ -5,10 +5,13 @@
 
 import { defaultServerUrl } from './transport.ts'
 
+const SPLIT_VIEW = 'split'
+
 export interface Startup {
   url: string
   cwd: string
   sessionId: string | undefined // ?session=<id> opens that session instead of a new one
+  split: boolean // ?view=split starts in split view (the `-w` of the TUI)
 }
 
 export class StartupError extends Error {
@@ -33,17 +36,18 @@ export async function resolveStartup(
 ): Promise<Startup> {
   const params = new URLSearchParams(environment.search)
   const sessionId = params.get('session') ?? undefined
+  const split = params.get('view') === SPLIT_VIEW
   const dir = params.get('dir')
-  if (dir) return { url, cwd: dir, sessionId }
+  if (dir) return { url, cwd: dir, sessionId, split }
 
   if (environment.directUrl) {
     const cwd = params.get('cwd') ?? environment.directCwd
     if (!cwd) throw new StartupError('connection.noDirectory', 'no ?dir=, ?cwd= or VITE_REF_CWD')
-    return { url, cwd, sessionId }
+    return { url, cwd, sessionId, split }
   }
 
   const info = await environment.fetchInfo()
-  return { url, cwd: info.cwd, sessionId }
+  return { url, cwd: info.cwd, sessionId, split }
 }
 
 export function browserEnvironment(): Environment {
@@ -53,6 +57,7 @@ export function browserEnvironment(): Environment {
     directCwd: import.meta.env.VITE_REF_CWD as string | undefined,
     async fetchInfo() {
       const response = await fetch('/api/info')
+      if (response.status === 401) throw new StartupError('connection.notLoggedIn', '/api/info: 401')
       if (!response.ok) throw new StartupError('connection.closed', `/api/info: ${response.status}`)
       return (await response.json()) as { cwd: string }
     },

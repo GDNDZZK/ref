@@ -20,6 +20,8 @@ use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 pub type Ws =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
+/// Another process may take a port between `free_port` and ref-web binding it.
+const START_ATTEMPTS: u32 = 5;
 const START_TIMEOUT: Duration = Duration::from_secs(15);
 pub const STEP_TIMEOUT: Duration = Duration::from_secs(10);
 /// Sent by the fake upstream: close the connection with `FAKE_CLOSE_CODE` / `FAKE_CLOSE_REASON`.
@@ -49,6 +51,13 @@ pub struct Env {
     pub dir: PathBuf,
 }
 
+impl Drop for Env {
+    fn drop(&mut self) {
+        // Processes started from this Env are dropped first (declared later in each test).
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
 impl Env {
     pub fn new(tag: &str) -> Env {
         Env { dir: temp_dir(tag) }
@@ -58,10 +67,17 @@ impl Env {
         self.dir.join("state")
     }
 
+    /// `TMPDIR` of the processes we start: a mock backend creates its directory here.
+    pub fn tmp_dir(&self) -> PathBuf {
+        self.dir.join("tmp")
+    }
+
     fn command(&self, args: &[&str]) -> Command {
+        std::fs::create_dir_all(self.tmp_dir()).unwrap();
         let mut command = Command::new(env!("CARGO_BIN_EXE_ref-web"));
         command
             .args(args)
+            .env("TMPDIR", self.tmp_dir())
             .env("REF_STATE_DIR", self.state_dir())
             .env("REF_DATA_DIR", self.dir.join("data"));
         command
@@ -72,9 +88,31 @@ impl Env {
         self.command(args).output().unwrap()
     }
 
-    /// Starts ref-web in the background and waits until it listens.
+    /// Starts ref-web in the background on a free port and waits until it listens. Tries
+    /// another port when ref-web exits at once because the port was taken meanwhile.
     pub async fn start(&self, args: &[&str]) -> Web {
-        let port = free_port();
+        for _ in 1..START_ATTEMPTS {
+            if let Ok(web) = self.try_start_on(free_port(), args).await {
+                return web;
+            }
+        }
+        self.start_on(free_port(), args).await
+    }
+
+    /// Like `start`, on a given port.
+    pub async fn start_on(&self, port: u16, args: &[&str]) -> Web {
+        match self.try_start_on(port, args).await {
+            Ok(web) => web,
+            Err(status) => panic!("ref-web exited early: {status}"),
+        }
+    }
+
+    /// `Err` holds the exit status of a ref-web that stopped before it listened.
+    async fn try_start_on(
+        &self,
+        port: u16,
+        args: &[&str],
+    ) -> Result<Web, std::process::ExitStatus> {
         let port_arg = port.to_string();
         let mut all = vec!["--no-open", "--port", &port_arg];
         all.extend_from_slice(args);
@@ -88,15 +126,17 @@ impl Env {
             child,
             port,
             token: String::new(),
+            session_cookie: String::new(),
             http: reqwest::Client::builder()
                 .no_proxy()
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .unwrap(),
         };
-        web.wait_until_listening().await;
+        web.wait_until_listening().await?;
         web.token = std::fs::read_to_string(self.state_dir().join("web/login-token")).unwrap();
-        web
+        web.session_cookie = web.log_in().await;
+        Ok(web)
     }
 }
 
@@ -104,6 +144,8 @@ pub struct Web {
     child: Child,
     pub port: u16,
     pub token: String,
+    /// `name=value` of the session cookie that `/login` handed out.
+    session_cookie: String,
     pub http: reqwest::Client,
 }
 
@@ -119,23 +161,35 @@ impl Web {
         self.child.id()
     }
 
+    /// Waits for the process to exit by itself.
+    pub async fn wait_exit(&mut self) -> std::process::ExitStatus {
+        let deadline = std::time::Instant::now() + STEP_TIMEOUT;
+        loop {
+            if let Some(status) = self.child.try_wait().unwrap() {
+                return status;
+            }
+            assert!(std::time::Instant::now() < deadline, "ref-web did not exit");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
     /// SIGKILL: no chance to clean up.
     pub fn kill_hard(&mut self) {
         self.child.kill().unwrap();
         self.child.wait().unwrap();
     }
 
-    async fn wait_until_listening(&mut self) {
+    async fn wait_until_listening(&mut self) -> Result<(), std::process::ExitStatus> {
         let deadline = std::time::Instant::now() + START_TIMEOUT;
         loop {
             if let Some(status) = self.child.try_wait().unwrap() {
-                panic!("ref-web exited early: {status}");
+                return Err(status);
             }
             if tokio::net::TcpStream::connect(("127.0.0.1", self.port))
                 .await
                 .is_ok()
             {
-                return;
+                return Ok(());
             }
             assert!(
                 std::time::Instant::now() < deadline,
@@ -150,7 +204,23 @@ impl Web {
     }
 
     pub fn cookie(&self) -> String {
-        format!("ref_web={}", self.token)
+        self.session_cookie.clone()
+    }
+
+    /// Name of the session cookie.
+    pub fn cookie_name(&self) -> &str {
+        self.session_cookie.split('=').next().unwrap()
+    }
+
+    async fn log_in(&self) -> String {
+        let response = self
+            .http
+            .get(self.url(&format!("/login?token={}", self.token)))
+            .send()
+            .await
+            .unwrap();
+        let set_cookie = response.headers()["set-cookie"].to_str().unwrap();
+        set_cookie.split(';').next().unwrap().to_string()
     }
 
     pub fn origin(&self) -> String {
@@ -284,28 +354,21 @@ pub async fn real_backend(env: &Env, token: &str) -> (ref_server::Running, u16) 
     (running, port)
 }
 
-/// Builds `ref-server` next to `ref-web` (a no-op when it is up to date): `cargo test` does not
-/// build the binaries of other packages by itself, and ref-web starts the one beside it.
-pub fn ensure_ref_server() {
-    static BUILT: std::sync::Once = std::sync::Once::new();
-    BUILT.call_once(|| {
-        let web = PathBuf::from(env!("CARGO_BIN_EXE_ref-web"));
-        let profile_dir = web.parent().unwrap();
-        let cargo = std::env::var_os("CARGO").unwrap_or("cargo".into());
-        let mut build = Command::new(cargo);
-        build.args(["build", "-p", "ref-server"]);
-        if profile_dir.file_name().is_some_and(|n| n == "release") {
-            build.arg("--release");
-        }
-        assert!(
-            build.status().unwrap().success(),
-            "cargo build -p ref-server"
-        );
-    });
+/// Fails with a hint unless `ref-server` sits next to `ref-web`, where ref-web looks for it.
+/// `cargo test -p ref-web` does not build the binaries of other packages, and a test must not
+/// run `cargo build` from inside cargo.
+pub fn require_ref_server() {
+    let web = PathBuf::from(env!("CARGO_BIN_EXE_ref-web"));
+    let server = web.with_file_name(format!("ref-server{}", std::env::consts::EXE_SUFFIX));
+    assert!(
+        server.exists(),
+        "{} is missing: run `cargo build -p ref-server` first, or `cargo test --workspace`",
+        server.display()
+    );
 }
 
-/// Direct children of `parent` (Unix `pgrep -P`).
-#[cfg(unix)]
+/// Direct children of `parent` (`pgrep -P`; the process tests are Linux-only).
+#[cfg(target_os = "linux")]
 pub fn child_pids(parent: u32) -> Vec<u32> {
     let output = Command::new("pgrep")
         .args(["-P", &parent.to_string()])
@@ -317,8 +380,8 @@ pub fn child_pids(parent: u32) -> Vec<u32> {
         .collect()
 }
 
-/// True once `pid` is gone or only a zombie waiting to be reaped.
-#[cfg(unix)]
+/// True once `pid` is gone or only a zombie waiting to be reaped (reads `/proc`).
+#[cfg(target_os = "linux")]
 pub fn process_gone(pid: u32) -> bool {
     if !ref_sys::pid_alive(pid) {
         return true;

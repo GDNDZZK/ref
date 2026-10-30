@@ -1,8 +1,7 @@
 //! `MockBackend` against the real `ref-server --mock`.
 
-use std::path::PathBuf;
+use std::path::Path;
 use std::process::Stdio;
-use std::sync::OnceLock;
 use std::time::Duration;
 
 use futures_util::{SinkExt as _, StreamExt as _};
@@ -14,27 +13,8 @@ const STEP: Duration = Duration::from_secs(15);
 const POLL: Duration = Duration::from_millis(20);
 const HELLO: &str = r#"{"id":1,"op":"hello","client":"ref-client-test","version":2,"cwd":"/tmp"}"#;
 
-/// Builds `ref-server` next to the test binaries (a no-op when it is up to date) and returns
-/// its path. `cargo test` does not build the binaries of other packages by itself.
-fn ref_server_binary() -> PathBuf {
-    static BINARY: OnceLock<PathBuf> = OnceLock::new();
-    BINARY
-        .get_or_init(|| {
-            let exe = std::env::current_exe().unwrap();
-            let profile_dir = exe.parent().unwrap().parent().unwrap().to_path_buf();
-            let cargo = std::env::var_os("CARGO").unwrap_or("cargo".into());
-            let mut build = std::process::Command::new(cargo);
-            build.args(["build", "-p", "ref-server"]);
-            if profile_dir.file_name().is_some_and(|n| n == "release") {
-                build.arg("--release");
-            }
-            assert!(
-                build.status().unwrap().success(),
-                "cargo build -p ref-server"
-            );
-            profile_dir.join(format!("ref-server{}", std::env::consts::EXE_SUFFIX))
-        })
-        .clone()
+fn ref_server_binary() -> &'static Path {
+    Path::new(env!("CARGO_BIN_EXE_ref-server"))
 }
 
 async fn hello(ws: &mut Ws) -> serde_json::Value {
@@ -57,15 +37,18 @@ async fn hello(ws: &mut Ws) -> serde_json::Value {
 
 #[tokio::test]
 async fn announces_an_endpoint_that_accepts_its_token() {
-    let mock = MockBackend::spawn_with(&ref_server_binary()).await.unwrap();
+    let mock = MockBackend::spawn_with(ref_server_binary()).await.unwrap();
     let mut ws = ref_client::connect(mock.endpoint(), STEP).await.unwrap();
     let response = hello(&mut ws).await;
     assert_eq!(response["ok"], true, "{response}");
+    // Dropping the handle would kill the mock and leave its temporary directory behind.
+    drop(ws);
+    mock.shutdown().await;
 }
 
 #[tokio::test]
 async fn exits_when_its_last_client_disconnects() {
-    let mut mock = MockBackend::spawn_with(&ref_server_binary()).await.unwrap();
+    let mut mock = MockBackend::spawn_with(ref_server_binary()).await.unwrap();
     let mut ws = ref_client::connect(mock.endpoint(), STEP).await.unwrap();
     hello(&mut ws).await;
     assert!(!mock.has_exited().unwrap());
@@ -79,6 +62,7 @@ async fn exits_when_its_last_client_disconnects() {
         );
         tokio::time::sleep(POLL).await;
     }
+    mock.shutdown().await;
 }
 
 /// The contract `MockBackend` relies on, checked on the bare process: one JSON line on stdout,

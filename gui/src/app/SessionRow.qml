@@ -126,7 +126,7 @@ Item {
 				: row.failed ? row.lastError.split("\n")[0]
 				: row.retrying ? qsTr("Retrying")
 				: row.activity === "compacting" ? qsTr("Compacting")
-				: row.busySince > 0 ? row.dirName + " · " + Format.duration(row.now - row.busySince)
+				: row.busySince > 0 ? row.dirName + " · " + Format.elapsed(row.now - row.busySince)
 				: row.dirName
 			color: row.hasPermission || row.retrying ? Theme.warning : row.failed ? Theme.danger : Theme.textMuted
 			font.pixelSize: Theme.smallFontSize
