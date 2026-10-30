@@ -250,3 +250,85 @@ async fn manual_compaction_sends_nothing() {
     wait_idle(&s).await;
     assert!(notes(&conn).is_empty());
 }
+
+#[tokio::test]
+async fn a_final_error_after_the_user_stopped_the_run_sends_nothing() {
+    for closed in [false, true] {
+        let m = mock(Arc::new(|_, _| {
+            Reply::Status(400, r#"{"error":{"message":"bad request"}}"#.into())
+        }))
+        .await;
+        let (hub, work) = hub(config(&m.url), "stopped-error");
+        let s = titled_session(&hub, &work).await;
+        let conn = connect(&hub, &ALL);
+
+        prompt(&hub, &s, "go");
+        // The run task has not started yet: mark the run as stopped before it fails.
+        {
+            let mut st = s.lock();
+            st.user_aborted = !closed;
+            st.closed = closed;
+        }
+        wait_idle(&s).await;
+        assert!(notes(&conn).is_empty(), "closed: {closed}");
+    }
+}
+
+#[tokio::test]
+async fn closing_a_session_sends_nothing() {
+    let m = mock(Arc::new(|_, _| Reply::Hang("thinking".into()))).await;
+    let (hub, work) = hub(config(&m.url), "close");
+    let s = titled_session(&hub, &work).await;
+    let conn = connect(&hub, &ALL);
+
+    prompt(&hub, &s, "go");
+    let s2 = s.clone();
+    wait_until("streaming", Duration::from_secs(10), move || {
+        s2.lock().messages.len() >= 2
+    })
+    .await;
+    let req = Request::Close {
+        session_id: s.id.clone(),
+    };
+    api::handle(&hub, &conn, req).await.unwrap();
+    wait_idle(&s).await;
+    assert!(notes(&conn).is_empty());
+}
+
+#[tokio::test]
+async fn a_queued_prompt_restarts_the_run_after_a_final_error() {
+    // The first request fails for good (three non-retryable answers), then all is well.
+    let m = mock(Arc::new(|n, _| {
+        if n < 3 {
+            Reply::Status(400, r#"{"error":{"message":"bad request"}}"#.into())
+        } else {
+            Reply::Text("fine".into())
+        }
+    }))
+    .await;
+    // Slow retries leave time to queue a prompt after the run took its queue for the last time.
+    let cfg = config(&m.url);
+    let dir = temp_dir("restart");
+    let mut opts = ref_server::HubOptions::new(dir.join("data"));
+    opts.home = None;
+    opts.retry_base = Duration::from_millis(300);
+    opts.config_loader = Arc::new(move |_| cfg.clone());
+    let hub = Hub::new(opts);
+    let work = dir.join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let s = titled_session(&hub, &work).await;
+    let conn = connect(&hub, &ALL);
+
+    prompt(&hub, &s, "go");
+    let s2 = s.clone();
+    wait_until("retrying", Duration::from_secs(10), move || {
+        matches!(s2.lock().info.status, SessionStatus::Retrying { .. })
+    })
+    .await;
+    prompt(&hub, &s, "and then this");
+    wait_idle(&s).await;
+    let kinds: Vec<NotifyKind> = notes(&conn).into_iter().map(|(k, _)| k).collect();
+    assert_eq!(kinds, [NotifyKind::TurnError, NotifyKind::TurnDone]);
+    assert_eq!(last_text(&s), "fine");
+    assert_eq!(s.info().last_error, None, "the restarted run cleared it");
+}
