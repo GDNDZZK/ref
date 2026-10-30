@@ -42,4 +42,22 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # --no-fail-fast: run every crate's tests and report all failures at once.
-      - run: cargo test --workspace --locked --no-fail-fast
+      - name: Test
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --workspace --locked --no-fail-fast 2>&1 | tee test.log
+
+      # Repeats the output of every failed test at the end of the log, in the run summary and
+      # as an error annotation on the run page (annotations are readable without logging in).
+      - name: Show failed tests
+        if: failure()
+        shell: bash
+        run: |
+          # cargo prints each binary's failure details between two `failures:` lines.
+          awk '/^failures:$/ { inside = !inside; next } inside' test.log > failures.txt || true
+          cat failures.txt
+          { echo '### Failed tests (${{ matrix.os }})'; echo '```'; cat failures.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          msg=$(head -c 60000 failures.txt)
+          msg=${msg//'%'/'%25'}; msg=${msg//$'\r'/'%0D'}; msg=${msg//$'\n'/'%0A'}
+          echo "::error title=Failed tests (${{ matrix.os }})::$msg"
