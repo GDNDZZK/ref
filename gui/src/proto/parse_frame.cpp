@@ -230,4 +230,9 @@ Parsed<MessagesPage> parseMessagesResult(const QJsonObject& result)
 	});
 }
 
+Parsed<ImageData> parseImageResult(const QJsonObject& result)
+{
+	return json::guarded([&] { return json::readImageData(json::child(json::Fields(result, u"result"_s), "image"_L1)); });
+}
+
 } // namespace refgui::proto
