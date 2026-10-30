@@ -16,6 +16,7 @@ export const components = {
   errorBlock: {
     verticalPadding: 12 /* px */,
     horizontalPadding: 14 /* px */,
+    spreadSpeed: 1.5 /* unitless */,
   },
   userBlock: {
     horizontalPadding: 14 /* px */,
