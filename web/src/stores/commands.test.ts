@@ -72,7 +72,7 @@ describe('slash commands', () => {
     const cd = command('cd', {
       slash: true,
       aliases: ['cwd'],
-      args: { usage: '[DIR]', placeholder: { text: '' } },
+      args: { usage: '[DIR]' },
     })
     store.register(cd)
     expect(await store.runSlash('/CWD  ~/src  x ', 's')).toBe(true)
