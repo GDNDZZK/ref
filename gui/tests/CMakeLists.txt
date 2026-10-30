@@ -92,3 +92,16 @@ foreach(name tst_prompt_draft tst_completion tst_prompt_history)
 	refgui_configure_target(${name})
 	add_test(NAME ${name} COMMAND ${name})
 endforeach()
+
+qt_add_executable(tst_notification_text tst_notification_text.cpp)
+target_link_libraries(tst_notification_text PRIVATE refgui_notify Qt6::Test)
+refgui_configure_target(tst_notification_text)
+add_test(NAME tst_notification_text COMMAND tst_notification_text)
+
+# Needs `dbus-daemon`; skips itself without it. Never touches the user's session bus.
+if(UNIX AND NOT APPLE)
+	qt_add_executable(tst_dbus_notifier tst_dbus_notifier.cpp)
+	target_link_libraries(tst_dbus_notifier PRIVATE refgui_notify Qt6::Test)
+	refgui_configure_target(tst_dbus_notifier)
+	add_test(NAME tst_dbus_notifier COMMAND tst_dbus_notifier)
+endif()
