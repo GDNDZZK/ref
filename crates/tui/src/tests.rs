@@ -458,6 +458,12 @@ async fn mock_end_to_end() {
     println!("--- watch ---\n{s}");
     assert_eq!(app.mode, Mode::Watch);
     assert!(s.contains("worker-1") && s.contains("reviewer") && s.contains("docs-写手"));
+    // The session that was foreground in this frontend is background now, and tiled.
+    let attached = |app: &App| app.live.iter().find(|i| i.id == sid).map(|i| i.attached);
+    assert_eq!(attached(&app), Some(0));
+    assert!(!app.views[&sid].foreground);
+    assert!(app.tile_ids().contains(&sid));
+    assert_eq!(app.current.as_deref(), Some(sid.as_str()));
     // A background tile asks for permission: the modal names the session; deny it.
     if app.active_permission().is_some() {
         assert!(s.contains("Permission required · docs-写手"));
@@ -481,6 +487,9 @@ async fn mock_end_to_end() {
     crate::input::handle(&mut app, key(KeyCode::Char('x'), KeyModifiers::CONTROL));
     crate::input::handle(&mut app, key(KeyCode::Char('w'), KeyModifiers::NONE));
     assert_eq!(app.mode, Mode::Chat);
+    pump(&mut app, &mut ev_rx, 300).await;
+    assert_eq!(attached(&app), Some(1), "foreground again");
+    assert!(app.views[&sid].foreground);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1361,6 +1370,42 @@ fn running_tool_spinner_animates_in_tiles() {
 }
 
 #[test]
+fn split_tile_shows_queue_and_expands_tools() {
+    use crate::app::Pending;
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let mut app = test_app(false);
+    app.mode = Mode::Watch;
+    let inf = bg_session("ses_bg", "worker-1", SessionStatus::Busy, 0);
+    let mut v = SessionView::new(inf.clone(), false);
+    let queued = vec![msg("q1", Role::User, MessageSource::Human, 0, "then update the docs")];
+    v.load_snapshot(SessionSnapshot { info: inf.clone(), messages: transcript(false), more_before: false, pending_permissions: vec![], queued });
+    app.views.insert("ses_bg".into(), v);
+    app.live = vec![inf];
+    let (_, s) = render(&mut app, 120, 40);
+    let label = crate::ui::message::UNQUEUE_LABEL;
+    assert!(s.lines().any(|l| l.contains("queued then update the docs") && l.contains(label)), "{s}");
+    // Position of `pat` on screen (display columns).
+    let at = |s: &str, pat: &str| {
+        let (y, l) = s.lines().enumerate().find(|(_, l)| l.contains(pat)).expect(pat);
+        (text::width(&l[..l.find(pat).unwrap()]) as u16, y as u16)
+    };
+    let click = |app: &mut App, (x, y): (u16, u16)| crate::input::handle(app, mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+    // Clicking a tool row opens its details in the tile; clicking again closes them (no zoom).
+    click(&mut app, at(&s, "Run the unit tests"));
+    assert_eq!(app.watch.focus.as_deref(), Some("ses_bg"));
+    let (_, s) = render(&mut app, 120, 40);
+    assert!(s.contains("▾ ✓ bash") && s.contains("╭─ input"), "{s}");
+    click(&mut app, at(&s, "Run the unit tests"));
+    assert_eq!(app.mode, Mode::Watch);
+    let (_, s) = render(&mut app, 120, 40);
+    assert!(s.contains("▸ ✓ bash") && !s.contains("╭─ input"), "{s}");
+    // `✕ remove` withdraws the queued prompt.
+    app.pending.clear();
+    click(&mut app, at(&s, label));
+    assert!(app.pending.values().any(|p| matches!(p, Pending::Unqueue { .. })));
+}
+
+#[test]
 fn terminal_title_text() {
     let mut app = test_app(false);
     assert_eq!(app.terminal_title(), "R|Fix the parser");
@@ -1880,11 +1925,14 @@ fn long_transcript(tag: &str, n: usize) -> Vec<Message> {
     out
 }
 
-/// Split view with two idle background sessions holding long transcripts.
+/// Split view with two idle background sessions holding long transcripts. The current session
+/// is foreground in another frontend, so it is not tiled.
 fn watch_app() -> App {
     let mut app = test_app(false);
     app.toggle_watch();
-    let mut live = vec![app.views["ses_test"].info.clone()];
+    let mut cur = app.views["ses_test"].info.clone();
+    cur.attached = 1;
+    let mut live = vec![cur];
     for (i, (id, name)) in [("ses_w1", "alpha"), ("ses_w2", "beta")].into_iter().enumerate() {
         let mut inf = bg_session(id, name, SessionStatus::Idle, 0);
         inf.created_at = 10 + i as i64;
@@ -2099,6 +2147,34 @@ fn expanding_tool_keeps_header_row() {
 fn respond(app: &mut App, pred: impl Fn(&crate::app::Pending) -> bool, result: serde_json::Value) {
     let id = *app.pending.iter().find(|(_, p)| pred(p)).map(|(k, _)| k).expect("pending request");
     app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response { id, ok: true, result, error: None }));
+}
+
+#[test]
+fn current_session_goes_background_in_split_view() {
+    use crate::app::Pending;
+    let mut app = test_app(false);
+    app.live = vec![app.views["ses_test"].info.clone()];
+    app.toggle_watch();
+    assert_eq!(app.mode, Mode::Watch);
+    let v = &app.views["ses_test"];
+    assert!(!v.foreground);
+    assert_eq!(app.live[0].attached, 0);
+    assert_eq!(app.tile_ids(), ["ses_test"]);
+    assert!(!app.attached_elsewhere("ses_test"));
+    app.sync_watch();
+    assert!(app.views.contains_key("ses_test"), "current view kept");
+    // Back to chat: attached as foreground again.
+    app.pending.clear();
+    app.toggle_watch();
+    assert_eq!(app.mode, Mode::Chat);
+    assert!(app.views["ses_test"].foreground);
+    assert_eq!(app.live[0].attached, 1);
+    assert!(app.pending.values().any(|p| matches!(p, Pending::Attach { sid, fg: true } if sid == "ses_test")));
+    // Into the split view before that attach is answered: the late answer keeps it background.
+    app.toggle_watch();
+    let snap = SessionSnapshot { info: app.views["ses_test"].info.clone(), messages: vec![], more_before: false, pending_permissions: vec![], queued: vec![] };
+    respond(&mut app, |p| matches!(p, Pending::Attach { fg: true, .. }), json!({ "snapshot": snap }));
+    assert!(!app.views["ses_test"].foreground);
 }
 
 #[test]

@@ -998,6 +998,35 @@ fn watch_mouse(app: &mut App, me: MouseEvent) {
                 v.chat.scroll_to_bottom(true);
                 return;
             }
+            // Click targets: expand a tool call, show all output, withdraw a queued prompt.
+            // They focus the tile but never zoom (clicking a tool twice collapses it again).
+            let hit = app.views.get(&sid).and_then(|v| v.chat.hit_at(x, y));
+            let is_tool = |app: &App, msg: &str, part: usize| {
+                app.views.get(&sid).and_then(|v| v.find(msg).and_then(|i| v.messages[i].parts.get(part))).is_some_and(|p| matches!(p, ref_proto::Part::Tool { .. }))
+            };
+            let handled = match hit {
+                Some(Hit::Toggle { msg, part }) if is_tool(app, &msg, part) => {
+                    if let Some(v) = app.views.get_mut(&sid) {
+                        v.chat.toggle(&msg, part);
+                    }
+                    true
+                }
+                Some(Hit::ShowAll { msg, part }) => {
+                    if let Some(v) = app.views.get_mut(&sid) {
+                        v.chat.show_all(&msg, part);
+                    }
+                    true
+                }
+                Some(Hit::Unqueue { key }) => {
+                    app.unqueue(&sid, key);
+                    true
+                }
+                _ => false,
+            };
+            if handled {
+                app.watch.focus = Some(sid);
+                return;
+            }
             if app.watch.focus.as_deref() == Some(sid.as_str()) && click_count(app, x, y) == 2 {
                 app.zoom(&sid);
             } else {

@@ -324,9 +324,10 @@ fn layout(view: &mut SessionView, env: &Env<'_>, w: usize, compact: bool) {
         let ver = versions.get(i).copied().unwrap_or(0);
         let anim = if live { env.tick } else { 0 };
         let secs = if live { (env.now / 1000) as u64 } else { 0 };
-        let (tog, all) = if compact { (None, None) } else { (chat.toggled.get(&m.id), chat.show_all.get(&m.id)) };
+        // Tiles expand tool calls on click too (they share the toggles with the chat view).
+        let (tog, all) = (chat.toggled.get(&m.id), chat.show_all.get(&m.id));
         let key = if compact {
-            hash_key(&[ver, w as u64, anim, secs, stale as u64, (i > 0) as u64, 11])
+            hash_key(&[ver, w as u64, set_hash(tog), set_hash(all), anim, secs, stale as u64, (i > 0) as u64, 11])
         } else {
             hash_key(&[ver, w as u64, set_hash(tog), set_hash(all), env.details as u64, env.thinking as u64, anim, secs, stale as u64, context_start as u64, 7])
         };
@@ -442,25 +443,32 @@ fn tail_rows(view: &SessionView, env: &Env<'_>, w: usize) -> Vec<Row> {
     }
     if !view.queued.is_empty() {
         rows.push(Row::blank());
-        for q in &view.queued {
-            let mut left = vec![Span::styled("  queued ", theme::fg(theme::DIM).add_modifier(Modifier::BOLD))];
-            if let Some(from) = &q.from {
-                left.push(Span::styled(format!("from {from} "), theme::fg(theme::ACCENT)));
-            }
-            left.push(Span::styled(text::one_line(&q.text), theme::fg(theme::DIM)));
-            // Messages from other sessions are shown only.
-            let label = if q.from.is_some() { "" } else if q.removing { "removing…" } else { message::UNQUEUE_LABEL };
-            let right = if label.is_empty() { vec![] } else { vec![Span::styled(label, theme::fg(theme::DIM))] };
-            let (line, rx) = message::compose(left, right, w);
-            let mut row = Row::new(line).decor();
-            if !q.removing && q.from.is_none() {
-                let x0 = rx as u16;
-                row = row.zone(x0, x0 + width(label) as u16, Hit::Unqueue { key: q.key });
-            }
-            rows.push(row);
-        }
+        rows.extend(queued_rows(view, w));
     }
     rows.push(Row::blank().decor());
+    rows
+}
+
+/// One row per queued prompt, with a `✕ remove` button on the ones this user sent.
+fn queued_rows(view: &SessionView, w: usize) -> Vec<Row> {
+    let mut rows = Vec::new();
+    for q in &view.queued {
+        let mut left = vec![Span::styled("  queued ", theme::fg(theme::DIM).add_modifier(Modifier::BOLD))];
+        if let Some(from) = &q.from {
+            left.push(Span::styled(format!("from {from} "), theme::fg(theme::ACCENT)));
+        }
+        left.push(Span::styled(text::one_line(&q.text), theme::fg(theme::DIM)));
+        // Messages from other sessions are shown only.
+        let label = if q.from.is_some() { "" } else if q.removing { "removing…" } else { message::UNQUEUE_LABEL };
+        let right = if label.is_empty() { vec![] } else { vec![Span::styled(label, theme::fg(theme::DIM))] };
+        let (line, rx) = message::compose(left, right, w);
+        let mut row = Row::new(line).decor();
+        if !q.removing && q.from.is_none() {
+            let x0 = rx as u16;
+            row = row.zone(x0, x0 + width(label) as u16, Hit::Unqueue { key: q.key });
+        }
+        rows.push(row);
+    }
     rows
 }
 
@@ -627,7 +635,8 @@ pub fn draw_tile(buf: &mut Buffer, area: Rect, bar_x: u16, view: &mut SessionVie
         return;
     }
     let cw = area.width as usize;
-    view.chat.tail.clear();
+    // Queued prompts under the transcript (no trailing blank: tiles are small).
+    view.chat.tail = if view.queued.is_empty() { Vec::new() } else { std::iter::once(Row::blank()).chain(queued_rows(view, cw)).collect() };
     let reflow = view.chat.last_w != cw || !view.chat.compact;
     layout(view, env, cw, true);
     view.chat.last_w = cw;

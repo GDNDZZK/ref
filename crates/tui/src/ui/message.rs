@@ -407,7 +407,7 @@ fn single_edges(p: &Part, idx: usize, cx: &Ctx<'_>) -> (bool, bool) {
     match p {
         // Todo rows carry their list inline: keep them visually separated from neighbours.
         Part::Tool { name, input, .. } if name == "todo" && !parse_todos(input).is_empty() => (false, false),
-        Part::Tool { .. } => (true, cx.compact || !cx.expanded(idx, cx.details)),
+        Part::Tool { .. } => (true, !cx.expanded(idx, cx.details)),
         Part::Reasoning { .. } => (true, cx.compact || !cx.expanded(idx, cx.thinking)),
         _ => (false, false),
     }
@@ -711,10 +711,7 @@ fn render_tool(m: &Message, idx: usize, part: &Part, cx: &Ctx<'_>, w: usize) -> 
     if *state == ToolState::Denied {
         name_style = name_style.add_modifier(Modifier::CROSSED_OUT);
     }
-    let mut left: Vec<Span<'static>> = Vec::new();
-    if !cx.compact {
-        left.push(Span::styled(if exp { "▾ " } else { "▸ " }, theme::fg(theme::DIM)));
-    }
+    let mut left: Vec<Span<'static>> = vec![Span::styled(if exp { "▾ " } else { "▸ " }, theme::fg(theme::DIM))];
     left.push(Span::styled(format!("{icon} "), theme::fg(icolor)));
     left.push(Span::styled(name_disp, name_style));
     let purpose = text::one_line(purpose);
@@ -770,7 +767,7 @@ fn render_tool(m: &Message, idx: usize, part: &Part, cx: &Ctx<'_>, w: usize) -> 
     }
 
     let out_text = output.as_deref().map(text::sanitize).unwrap_or_default();
-    if !exp || cx.compact {
+    if !exp {
         // Errors: show the first output line under the collapsed row.
         if *state == ToolState::Error
             && let Some(first) = out_text.lines().map(str::trim).find(|l| !l.is_empty())

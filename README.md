@@ -47,7 +47,7 @@ Instance files are written to `~/.local/state/ref/instances/<pid>.json` (mode 60
 | `-p TEXT` | Send an initial prompt. |
 | `--server ws://host:port --token T` | Connect to an explicit backend (no auto-spawn). |
 
-A session is **foreground** while a frontend is directly attached to it, and **background** otherwise. Watching a session in split view does not make it foreground.
+A session is **foreground** while a frontend is directly attached to it, and **background** otherwise. Watching a session in split view does not make it foreground. When a frontend switches to split view, the session it had in the foreground goes to the background (and shows up as a tile); leaving split view makes it foreground again.
 
 ## TUI
 
@@ -61,7 +61,7 @@ A session is **foreground** while a frontend is directly attached to it, and **b
 - Undo (`ctrl+x u`, `/undo`, or `↶ undo` under a prompt to undo from that prompt) removes the prompt and everything after it and puts the prompt's text and images back into the input box, appended after a blank line if you were typing. Files are not restored.
 - While a session works, the status line and its row under Live sessions in the sidebar show how long the current turn has been running (taken from the backend, so it survives switching sessions).
 - Leader key `ctrl+x`: `n` new session, `l` sessions (live fg/bg plus history), `m` models, `a` agents, `t` thinking, `d` tool details, `c` compact, `u` undo, `e` $EDITOR, `x` export, `w` split view, `h` help, `q` quit. `ctrl+p` opens the command palette. `tab` cycles agents, `ctrl+t` cycles the model variant.
-- Split view (`ref -w` or `ctrl+x w`): sessions are tiled automatically. `tab` or `alt+arrows` move focus, typing and `enter` message the focused session, `esc esc` aborts it, `ctrl+o` zooms in. `/close` and `/cd` typed in a tile act on that tile's session.
+- Split view (`ref -w` or `ctrl+x w`): sessions are tiled automatically. `tab` or `alt+arrows` move focus, typing and `enter` message the focused session, `esc esc` aborts it, `ctrl+o` zooms in. `/close` and `/cd` typed in a tile act on that tile's session. Tiles list queued prompts under the transcript (`✕ remove` withdraws one), and clicking a tool call expands its input and output in the tile.
 
 Slash commands: `/new /sessions /models /agents /variant /compact /undo /rename /cd /close /export /thinking /details /watch /editor /help /exit`. Commands from your config are listed too.
 
