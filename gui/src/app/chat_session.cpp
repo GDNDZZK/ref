@@ -24,6 +24,14 @@ ChatSession::ChatSession(Backend& backend, QString sessionId, QObject* parent)
 	connect(&m_controller, &refgui::session::SessionController::errorReported, this, &ChatSession::setFailure);
 	connect(&m_controller, &refgui::session::SessionController::errorReported, this, &ChatSession::errorReported);
 	connect(&m_controller, &refgui::session::SessionController::reattachFailed, this, &ChatSession::setFailure);
+
+	m_permissionGuard.setSingleShot(true);
+	m_permissionGuard.setInterval(PermissionGuard);
+	connect(&m_permissionGuard, &QTimer::timeout, this, [this] {
+		m_permissionKeysActive = true;
+		emit toolsChanged();
+	});
+	connect(&m_controller.model(), &refgui::session::ConversationModel::toolSummaryChanged, this, &ChatSession::trackOldestPermission);
 }
 
 QCoro::Task<refgui::client::Result<void>> ChatSession::attach(bool foreground)
@@ -196,6 +204,47 @@ void ChatSession::stop()
 		return;
 	}
 	m_controller.showPendingNow(); // the server is done, only the display lags
+}
+
+bool ChatSession::lastToolDelayed() const
+{
+	return m_controller.model().toolSummary().lastToolDelayed;
+}
+
+int ChatSession::permissionCount() const
+{
+	return static_cast<int>(m_controller.model().toolSummary().awaitingPermission);
+}
+
+// A new oldest request restarts the guard; the keys are off until it runs out.
+void ChatSession::trackOldestPermission()
+{
+	const QString& oldest = m_controller.model().toolSummary().oldestAwaitingCallId;
+	if(oldest != m_guardedCallId)
+	{
+		m_guardedCallId = oldest;
+		m_permissionKeysActive = false;
+		m_permissionGuard.stop();
+		if(!oldest.isEmpty())
+		{
+			m_permissionGuard.start();
+		}
+	}
+	emit toolsChanged();
+}
+
+void ChatSession::answerOldestPermission(bool allow, bool always)
+{
+	if(!m_permissionKeysActive)
+	{
+		return;
+	}
+	permissionReply(m_guardedCallId, allow, always);
+}
+
+void ChatSession::cancelDelayedTool()
+{
+	stop();
 }
 
 void ChatSession::permissionReply(const QString& callId, bool allow, bool always)

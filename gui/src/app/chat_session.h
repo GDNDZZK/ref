@@ -6,7 +6,10 @@
 
 #include <QCoroTask>
 #include <QObject>
+#include <QTimer>
 #include <QtQmlIntegration>
+
+#include <chrono>
 
 // One session as the window shows it: the conversation and the actions on it. Workspace
 // creates one for each session opened in the window and keeps it until the session is
@@ -36,8 +39,17 @@ class ChatSession : public QObject
 	Q_PROPERTY(QString olderError READ olderError NOTIFY olderErrorChanged) // why the last page did not load
 	Q_PROPERTY(bool thinkingExpanded READ thinkingExpanded NOTIFY expansionChanged)
 	Q_PROPERTY(bool detailsExpanded READ detailsExpanded NOTIFY expansionChanged)
+	// The newest tool call waits out its start delay; Esc in the input box cancels it.
+	Q_PROPERTY(bool lastToolDelayed READ lastToolDelayed NOTIFY toolsChanged)
+	// Tool calls waiting for the user's permission, the oldest first.
+	Q_PROPERTY(int permissionCount READ permissionCount NOTIFY toolsChanged)
+	// The keys a, s, d, Enter and Esc may answer the oldest request: it has been shown for permissionGuard.
+	Q_PROPERTY(bool permissionKeysActive READ permissionKeysActive NOTIFY toolsChanged)
 
 public:
+	// How long a request is shown before the keys answer it: the user may still be typing.
+	static constexpr std::chrono::milliseconds PermissionGuard{350};
+
 	// `backend` is shared by all sessions of the window and outlives them.
 	ChatSession(refgui::client::Backend& backend, QString sessionId, QObject* parent = nullptr);
 
@@ -71,6 +83,9 @@ public:
 	const QString& olderError() const { return m_olderError; }
 	bool thinkingExpanded() const;
 	bool detailsExpanded() const;
+	bool lastToolDelayed() const;
+	int permissionCount() const;
+	bool permissionKeysActive() const { return m_permissionKeysActive; }
 
 	// Precondition: !busy and `text` is not blank.
 	Q_INVOKABLE void send(const QString& text);
@@ -78,6 +93,10 @@ public:
 	Q_INVOKABLE void stop();
 	// Answers a tool call that waits for permission.
 	Q_INVOKABLE void permissionReply(const QString& callId, bool allow, bool always);
+	// Answers the oldest request by the keys. Does nothing unless permissionKeysActive.
+	Q_INVOKABLE void answerOldestPermission(bool allow, bool always);
+	// The same as the Cancel button on a delayed tool call.
+	Q_INVOKABLE void cancelDelayedTool();
 	// Adds the page of messages before the oldest one.
 	Q_INVOKABLE void loadOlder();
 	// Puts the text of a message on the clipboard.
@@ -97,6 +116,7 @@ signals:
 	void loadingOlderChanged();
 	void olderErrorChanged();
 	void expansionChanged();
+	void toolsChanged();
 	// The backend reported a problem with the session (an Error event).
 	void errorReported(const QString& text);
 
@@ -106,10 +126,14 @@ private:
 	QCoro::Task<> fetchOlder();
 	QCoro::Task<> sendPermission(QString callId, bool allow, bool always);
 	void setFailure(const QString& text);
+	void trackOldestPermission();
 
 	refgui::client::Backend& m_backend;
 	QString m_sessionId;
 	refgui::session::SessionController m_controller;
 	QString m_failure; // the last thing that went wrong, until the next action
 	QString m_olderError;
+	QString m_guardedCallId; // the request the guard timer runs for
+	QTimer m_permissionGuard;
+	bool m_permissionKeysActive = false;
 };
