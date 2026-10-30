@@ -29,6 +29,7 @@ ChatSession::ChatSession(Backend& backend, QString sessionId, QObject* parent)
 	connect(&m_composer, &refgui::composer::ComposerModel::failed, this, &ChatSession::setFailure);
 	connect(&m_composer, &refgui::composer::ComposerModel::sent, this, [this] { setFailure({}); });
 	connect(&m_composer, &refgui::composer::ComposerModel::interruptRequested, this, &ChatSession::stop);
+	connect(this, &ChatSession::draftRestored, &m_composer, &refgui::composer::ComposerModel::restoreDraft);
 
 	m_permissionGuard.setSingleShot(true);
 	m_permissionGuard.setInterval(PermissionGuard);
