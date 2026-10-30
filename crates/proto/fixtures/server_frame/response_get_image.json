@@ -1,0 +1,12 @@
+{
+  "kind": "response",
+  "id": 8,
+  "ok": true,
+  "result": {
+    "image": {
+      "mime": "image/png",
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=="
+    }
+  },
+  "error": null
+}

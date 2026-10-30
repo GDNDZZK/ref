@@ -1,0 +1,7 @@
+{
+  "id": 7,
+  "op": "messages",
+  "session_id": "ses_a1b2c3d4",
+  "before": "msg_user_01",
+  "limit": 100
+}

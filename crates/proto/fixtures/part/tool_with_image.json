@@ -1,0 +1,26 @@
+{
+  "type": "tool",
+  "call_id": "call_9x8y7z",
+  "name": "read",
+  "purpose": "Look at the screenshot",
+  "input": {
+    "path": "screenshot.png"
+  },
+  "raw_input": "{\"purpose\":\"Look at the screenshot\",\"path\":\"screenshot.png\"}",
+  "state": "done",
+  "output": "Image: screenshot.png (image/png, 47.1 KB)",
+  "meta": {
+    "path": "/home/user/project/screenshot.png",
+    "image": true
+  },
+  "images": [
+    {
+      "mime": "image/png",
+      "data": "",
+      "id": "msg_0f1e2d3c:3:0",
+      "size": 48213
+    }
+  ],
+  "time": 1760000020000,
+  "time_end": 1760000022000
+}

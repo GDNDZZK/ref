@@ -1,0 +1,14 @@
+{
+  "type": "tool",
+  "call_id": "call_9x8y7z",
+  "name": "read",
+  "purpose": "Read the parser",
+  "input": {
+    "path": "src/lib"
+  },
+  "raw_input": "{\"purpose\":\"Read the parser\",\"path\":\"src/lib\"}",
+  "state": "error",
+  "output": "Path not found: src/lib\nDid you mean src/?",
+  "time": 1760000020000,
+  "time_end": 1760000022000
+}

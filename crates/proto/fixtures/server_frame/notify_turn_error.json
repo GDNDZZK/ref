@@ -1,0 +1,7 @@
+{
+  "kind": "notify",
+  "session_id": "ses_a1b2c3d4",
+  "notify_kind": "turn_error",
+  "session_title": "Fix the failing parser test",
+  "detail": "429 Too Many Requests: rate limit exceeded"
+}

@@ -3,7 +3,6 @@
 mod app;
 mod clipboard;
 mod input;
-mod launcher;
 mod mock;
 mod net;
 mod render;
@@ -33,8 +32,8 @@ use ref_proto::ModelRef;
 use tokio::sync::mpsc;
 
 use crate::app::{App, InitPlan};
-use crate::launcher::Target;
 use crate::net::Client;
+use ref_client::Target;
 
 #[derive(Parser, Debug)]
 #[command(name = "ref", version, about = "ref — coding agent TUI")]
