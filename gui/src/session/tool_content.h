@@ -22,7 +22,8 @@ QVariantMap parseInput(const QString& inputJson);
 QVariantList todos(const QVariantMap& input);
 
 // One line from the input that tells calls of the same tool apart: command, path, pattern, url,
-// recipient, progress. Empty when the tool has none.
+// recipient, progress. A tool without a rule gets `key=value` of its first plain arguments. The
+// rules are the terminal client's (crates/tui, tool_detail).
 QString detail(const QString& toolName, const QVariantMap& input);
 
 // Output of read and grep: `[path#TAG]` headers, then rows `N:text`, `*N:text` (a match) and
