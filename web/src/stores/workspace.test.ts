@@ -69,6 +69,36 @@ describe('opening sessions', () => {
     expect(workspace.visibleSessionIds).toEqual(['ses_2'])
   })
 
+  // The backend counts the attached clients: a session left attached keeps counting this window.
+  it.each([
+    ['the first answer comes first', 5, 20],
+    ['the second answer comes first', 20, 5],
+  ])('leaves only the last of two quick clicks attached when %s', async (_name, slowMs, fastMs) => {
+    const sessions = [session('ses_1'), session('ses_2'), session('ses_3')]
+    const workspace = setup(sessions)
+    const attached = new Set<string>()
+    const delays: Record<string, number> = { ses_1: 0, ses_2: slowMs, ses_3: fastMs }
+    api.attach.mockImplementation(
+      (id: string) =>
+        new Promise((resolve) =>
+          setTimeout(() => {
+            attached.add(id)
+            resolve(snapshot([userMessage('u1', 'hi')], { info: sessions.find((entry) => entry.id === id)! }))
+          }, delays[id]),
+        ),
+    )
+    api.detach.mockImplementation((id: string) => {
+      attached.delete(id)
+      return Promise.resolve()
+    })
+    await workspace.openSession('ses_1')
+
+    await Promise.all([workspace.openSession('ses_2'), workspace.openSession('ses_3')])
+
+    expect(workspace.currentId).toBe('ses_3')
+    expect([...attached]).toEqual(['ses_3'])
+  })
+
   it('keeps the open session when attaching fails', async () => {
     const workspace = setup([session('ses_1')])
     await workspace.openSession('ses_1')

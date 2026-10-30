@@ -58,6 +58,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const tileRects = shallowRef<readonly Rect[]>([]) // where the split view drew the tiles, for moving the focus
 
   const chats = new Map<string, ChatSession>()
+  let openChain: Promise<void> = Promise.resolve()
+  let latestOpen = 0
+  let latestOpenTarget: string | undefined
   const goneListeners = new Set<(id: string) => void>()
   const attachingTiles = new Set<string>() // tiles whose first Attach has not been answered yet
 
@@ -106,14 +109,30 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   // Makes `id` the open session, attached in the foreground. The one shown before is detached.
-  async function openSession(id: string): Promise<void> {
+  // Opens run one after the other. Of several quick clicks only the last one counts: the earlier
+  // ones either do not start or undo their own attach, so no session stays attached by mistake.
+  function openSession(id: string): Promise<void> {
     if (mode.value === 'split') {
       currentId.value = id
-      await leaveSplit()
+      return leaveSplit()
+    }
+    const mine = ++latestOpen
+    latestOpenTarget = id
+    const run = openChain.then(() => openOne(id, mine))
+    openChain = run.catch(() => undefined)
+    return run
+  }
+
+  async function openOne(id: string, mine: number): Promise<void> {
+    if (mine !== latestOpen) return // a later click replaced this one before it began
+    const session = chat(id)
+    await session.attach(true)
+    if (mine !== latestOpen) {
+      const stillWanted = id === latestOpenTarget || id === currentId.value
+      if (!stillWanted) await session.detach()
       return
     }
     const previousId = currentId.value
-    await chat(id).attach(true)
     await crossfade(() => (currentId.value = id), 'standard')
     if (previousId === undefined || previousId === id) return
     await chat(previousId).detach()
