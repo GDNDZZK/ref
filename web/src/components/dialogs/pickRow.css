@@ -1,0 +1,17 @@
+.text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.name,
+.detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail {
+  color: var(--text-muted);
+  font-size: var(--small-font-size);
+}

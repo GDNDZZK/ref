@@ -58,14 +58,245 @@
     "connecting": "正在连接…",
     "reconnecting": "连接已断开，正在重连…",
     "closed": "已断开：{reason}",
-    "backendTooOld": "后端版本低于此界面，请重启后端后继续。",
     "noDirectory": "没有工作目录：请通过 ref-web 打开此页面，或在直连 ref-server 时设置 ?cwd=（或 VITE_REF_CWD）。"
   },
   "message": {
     "from": "来自 {name}"
   },
   "command": {
-    "unavailable": "这个命令现在不可用。"
+    "group": {
+      "session": "会话",
+      "view": "视图",
+      "help": "帮助",
+      "custom": "自定义命令"
+    },
+    "unavailable": "这个命令现在不可用。",
+    "noSuchSession": "没有名为“{name}”的运行中会话。",
+    "new": {
+      "title": "新建会话"
+    },
+    "new-in": {
+      "title": "在其他文件夹新建会话…"
+    },
+    "sessions": {
+      "title": "切换会话（运行中 + 历史）"
+    },
+    "models": {
+      "title": "切换模型（仅此会话）"
+    },
+    "agents": {
+      "title": "切换 agent"
+    },
+    "variant": {
+      "title": "设置或轮换模型变体"
+    },
+    "compact": {
+      "title": "压缩对话"
+    },
+    "undo": {
+      "title": "撤销上一条提示"
+    },
+    "rename": {
+      "title": "重命名会话"
+    },
+    "cd": {
+      "title": "更改此会话的工作目录"
+    },
+    "close": {
+      "title": "关闭此会话"
+    },
+    "close-session": {
+      "title": "关闭运行中的会话（选择，或按名称 / id）"
+    },
+    "peers": {
+      "title": "列出可发消息的其他运行中会话"
+    },
+    "peers-name": {
+      "title": "查看或设置此会话的对等名称"
+    },
+    "peers-inbox": {
+      "title": "收到的其他会话消息"
+    },
+    "peers-outbox": {
+      "title": "发给其他会话的消息及状态"
+    },
+    "export": {
+      "title": "导出对话为 Markdown"
+    },
+    "copy": {
+      "title": "复制最后一条回复（原文）"
+    },
+    "thinking": {
+      "title": "展开 / 折叠推理"
+    },
+    "details": {
+      "title": "展开 / 折叠工具详情"
+    },
+    "watch": {
+      "title": "后台会话分屏视图"
+    },
+    "sidebar": {
+      "title": "显示 / 隐藏侧边栏"
+    },
+    "zoom": {
+      "title": "放大当前分块"
+    },
+    "mcp": {
+      "title": "MCP 服务器：状态、错误和工具"
+    },
+    "help": {
+      "title": "快捷键和命令"
+    },
+    "palette": {
+      "title": "命令面板"
+    },
+    "settings": {
+      "title": "设置"
+    }
+  },
+  "palette": {
+    "placeholder": "输入命令…",
+    "noMatch": "没有匹配的命令"
+  },
+  "sidebar": {
+    "newSession": "新建会话",
+    "newSessionIn": "在其他文件夹新建会话…",
+    "running": "运行中",
+    "history": "历史",
+    "searchHistory": "搜索历史",
+    "clearSearch": "清除搜索",
+    "noMatch": "没有匹配的会话",
+    "loading": "加载中…",
+    "needsPermission": "等待授权",
+    "compacting": "正在压缩",
+    "retrying": "正在重试",
+    "rename": "重命名",
+    "close": "关闭",
+    "delete": "删除",
+    "hide": "隐藏侧边栏",
+    "show": "显示侧边栏",
+    "mcp": "MCP",
+    "settings": "设置",
+    "sessions": "会话"
+  },
+  "split": {
+    "empty": "没有后台会话",
+    "zoom": "放大此分块",
+    "unzoom": "返回分屏视图",
+    "enter": "分屏视图",
+    "leave": "退出分屏视图"
+  },
+  "time": {
+    "justNow": "刚刚",
+    "minutesAgo": "{n} 分钟前",
+    "hoursAgo": "{n} 小时前",
+    "yesterday": "昨天"
+  },
+  "dialog": {
+    "cancel": "取消",
+    "close": "关闭",
+    "models": {
+      "title": "切换模型",
+      "search": "搜索模型",
+      "context": "{size} 上下文",
+      "reasoning": "推理",
+      "images": "图片"
+    },
+    "agents": {
+      "title": "切换 agent",
+      "search": "搜索 agent"
+    },
+    "variants": {
+      "title": "模型变体",
+      "default": "默认"
+    },
+    "sessions": {
+      "title": "会话",
+      "search": "搜索会话"
+    },
+    "mcp": {
+      "title": "MCP 服务器",
+      "empty": "没有配置 MCP 服务器",
+      "refresh": "刷新",
+      "connected": "已连接",
+      "connecting": "连接中",
+      "failed": "失败",
+      "disabled": "已禁用",
+      "tools": "{count} 个工具"
+    },
+    "peers": {
+      "title": "对等会话",
+      "peers": "会话",
+      "name": "名称",
+      "inbox": "收件箱",
+      "outbox": "发件箱",
+      "setName": "设置名称",
+      "loading": "加载中…",
+      "nameLabel": "对等名称"
+    },
+    "help": {
+      "title": "帮助",
+      "keyboard": "键盘",
+      "commands": "命令",
+      "writing": "输入",
+      "send": "发送",
+      "newLine": "换行",
+      "interrupt": "中断会话",
+      "cycleAgent": "下一个 / 上一个 agent",
+      "history": "历史提示",
+      "pasteImage": "粘贴图片",
+      "moveFocus": "移动分块焦点"
+    },
+    "export": {
+      "title": "导出对话",
+      "body": "把对话以 Markdown 写入后端所在机器上的这个路径。",
+      "action": "导出",
+      "done": "已导出到 {path}"
+    },
+    "cd": {
+      "title": "更改目录",
+      "action": "更改"
+    },
+    "newSession": {
+      "title": "新建会话",
+      "action": "开始"
+    },
+    "path": {
+      "label": "目录路径",
+      "noDirs": "没有子目录"
+    },
+    "closeSession": {
+      "title": "关闭会话？",
+      "body": "这个会话仍在工作。关闭会使工作停止，对话仍保留在历史中。",
+      "action": "关闭"
+    },
+    "deleteHistory": {
+      "title": "删除会话？",
+      "body": "“{title}”将从历史中永久删除。",
+      "action": "删除"
+    },
+    "rename": {
+      "title": "重命名会话",
+      "action": "重命名",
+      "label": "会话名称"
+    },
+    "settings": {
+      "title": "设置",
+      "theme": "主题",
+      "language": "语言",
+      "system": "跟随系统",
+      "light": "亮色",
+      "dark": "暗色",
+      "english": "English",
+      "chinese": "简体中文",
+      "about": "ref {version} · 协议 {protocol}"
+    }
+  },
+  "banner": {
+    "backendTooOld": "后端比本应用旧（协议 {have}，需要 {need}）。",
+    "restart": "重启后端",
+    "busyHint": "请先关闭或结束运行中的会话",
+    "restarting": "正在重启后端…"
   },
   "notify": {
     "permission": "等待授权",
