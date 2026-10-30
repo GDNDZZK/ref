@@ -108,7 +108,7 @@ fn upstream_for(cli: &Cli) -> Upstream {
 
 async fn run(cli: Cli) -> anyhow::Result<()> {
     let cwd = start_dir(cli.dir.as_deref())?;
-    let login_token = token::load_or_create()?;
+    let login_token = token::load_or_create().await?;
     let url_host = launch::reachable_host(&cli.host);
     let login_url = launch::login_url(&url_host, cli.port, &login_token, Some(&cwd));
 
