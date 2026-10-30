@@ -1,4 +1,4 @@
-# Builds the release archives (ref-tui, ref-web and ref-all) for 6 platforms.
+# Builds the release archives (ref-tui, ref-web, ref-gui and ref-all) for 6 platforms.
 # Pushing a tag like v0.1.0 publishes them as a GitHub Release.
 # Running it by hand (Actions tab -> Release -> Run workflow) only builds; the archives
 # can then be downloaded from the run page.
@@ -29,6 +29,8 @@ jobs:
           path: web/dist
           if-no-files-found: error
 
+  # ref, ref-server and ref-web, built once per platform. The Linux ones are built on Ubuntu
+  # 22.04 (glibc 2.35), so they run on more distributions.
   build:
     name: build (${{ matrix.target }})
     needs: frontend
@@ -36,7 +38,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Ubuntu 22.04 links against an older glibc (2.35), so the binaries run on more distros.
           - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04 }
           - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm }
           - { target: x86_64-apple-darwin, os: macos-15-intel }
@@ -61,6 +62,59 @@ jobs:
       - name: Build
         run: cargo build --release --locked --workspace --target ${{ matrix.target }}
 
+      # A tar file, because artifacts lose the executable bit of their files.
+      - name: Collect the programs
+        shell: bash
+        run: |
+          suffix=""
+          [[ "${{ matrix.target }}" == *windows* ]] && suffix=".exe"
+          tar -C "target/${{ matrix.target }}/release" -czf programs.tar.gz \
+            "ref$suffix" "ref-web$suffix" "ref-server$suffix"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: programs-${{ matrix.target }}
+          path: programs.tar.gz
+          if-no-files-found: error
+
+  # Builds and deploys the GUI, then packs all archives of the platform. The Linux GUI is built
+  # on Ubuntu 24.04: C++23 needs GCC 13, which 22.04 does not have. scripts/verify-gui-package.sh
+  # checks that the result still runs on what the README promises.
+  package:
+    name: package (${{ matrix.target }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-24.04 }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm }
+          - { target: x86_64-apple-darwin, os: macos-15-intel }
+          - { target: aarch64-apple-darwin, os: macos-15 }
+          - { target: x86_64-pc-windows-msvc, os: windows-2025 }
+          - { target: aarch64-pc-windows-msvc, os: windows-11-arm }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: programs-${{ matrix.target }}
+      - name: Unpack the programs
+        shell: bash
+        run: |
+          mkdir programs
+          tar -xzf programs.tar.gz -C programs
+
+      - uses: ./.github/actions/gui-deps
+      # CMAKE_INSTALL_BINDIR=. puts ref-gui at the top of the install folder, see gui/cmake/Deploy.cmake.
+      - uses: ./.github/actions/gui-build
+        with:
+          cmake-args: -DCMAKE_INSTALL_BINDIR=.
+
+      - name: Deploy the GUI
+        shell: bash
+        run: cmake --install "$REF_GUI_BUILD_DIR" --prefix "${RUNNER_TEMP//\\//}/gui-stage"
+
       - name: Package
         shell: bash
         run: |
@@ -68,9 +122,18 @@ jobs:
           # Tag name for releases, short commit hash for manual runs.
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then version="$GITHUB_REF_NAME"; else version="${GITHUB_SHA::7}"; fi
           scripts/package.sh --version "$version" --target "${{ matrix.target }}" \
-            --bin-dir "target/${{ matrix.target }}/release" --out dist > sizes.md
+            --bin-dir programs --gui-dir "${RUNNER_TEMP//\\//}/gui-stage" --out dist > sizes.md
           { echo '### Packages (${{ matrix.target }})'; echo; cat sizes.md; } >> "$GITHUB_STEP_SUMMARY"
           ls -l dist
+
+      - name: Verify the GUI package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir verify
+          archive=(dist/ref-gui-*)
+          if [[ "$archive" == *.zip ]]; then 7z x -y -overify "$archive" > /dev/null; else tar -xzf "$archive" -C verify; fi
+          scripts/verify-gui-package.sh verify/ref-gui-*
 
       - uses: actions/upload-artifact@v7
         with:
@@ -81,7 +144,7 @@ jobs:
   # Collects all archives and their checksums. Releases are published from here on tags.
   publish:
     name: checksums and release
-    needs: build
+    needs: package
     runs-on: ubuntu-24.04
     permissions:
       contents: write
