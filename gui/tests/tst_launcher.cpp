@@ -182,7 +182,7 @@ private slots:
 		};
 		const Endpoint wanted{.url = QUrl(u"ws://remote.test:9/"_s), .token = u"t"_s};
 
-		const auto connected = await(launcher::connectTarget(launcher::Explicit{wanted}, connect, [] {}, {})).value();
+		const auto connected = await(launcher::connectTarget(launcher::Explicit{wanted}, connect, [] {}, {}, stop)).value();
 
 		QVERIFY(connected.has_value());
 		QCOMPARE(connected->url, wanted.url);
@@ -193,7 +193,7 @@ private slots:
 	{
 		const launcher::TryConnect refuse = [](const Endpoint&, std::chrono::milliseconds) -> QCoro::Task<bool> { co_return false; };
 
-		const auto connected = await(launcher::connectTarget(launcher::Explicit{{.url = QUrl(u"ws://remote.test:9/"_s)}}, refuse, [] {}, {})).value();
+		const auto connected = await(launcher::connectTarget(launcher::Explicit{{.url = QUrl(u"ws://remote.test:9/"_s)}}, refuse, [] {}, {}, stop)).value();
 
 		QVERIFY(!connected.has_value());
 		QVERIFY2(connected.error().contains(u"ws://remote.test:9/"_s), qPrintable(connected.error()));
@@ -212,7 +212,7 @@ private slots:
 			co_return endpoint.url.port() == 4002; // the newest one is not listening any more
 		};
 
-		const auto connected = await(launcher::connectTarget(launcher::Auto{}, connect, [] {}, directory.path())).value();
+		const auto connected = await(launcher::connectTarget(launcher::Auto{}, connect, [] {}, directory.path(), stop)).value();
 
 		QVERIFY(connected.has_value());
 		QCOMPARE(connected->url.port(), 4002);
@@ -240,7 +240,7 @@ private slots:
 		QTemporaryDir directory;
 		const QString script = writeScript(directory, u"announce"_s, u"echo '{\"port\":41873,\"token\":\"abc\"}'\nexec cat >/dev/null\n"_s);
 
-		auto started = await(MockBackend::start(script)).value();
+		auto started = await(MockBackend::start(script, stop)).value();
 
 		QVERIFY(started.has_value());
 		QCOMPARE((*started)->endpoint().url.port(), 41873);
@@ -255,7 +255,7 @@ private slots:
 		const QString script = writeScript(directory, u"polite"_s,
 		                                   u"echo '{\"port\":41873,\"token\":\"abc\"}'\ncat >/dev/null\nsleep 0.3\ntouch '"_s + marker + u"'\n"_s);
 
-		auto started = await(MockBackend::start(script)).value();
+		auto started = await(MockBackend::start(script, stop)).value();
 		QVERIFY(started.has_value());
 		started->reset(); // waits for the script to finish
 
@@ -267,7 +267,7 @@ private slots:
 		QTemporaryDir directory;
 		const QString script = writeScript(directory, u"stubborn"_s, u"echo '{\"port\":41873,\"token\":\"abc\"}'\nexec sleep 60\n"_s);
 
-		auto started = await(MockBackend::start(script)).value();
+		auto started = await(MockBackend::start(script, stop)).value();
 		QVERIFY(started.has_value());
 		QElapsedTimer waited;
 		waited.start();
@@ -281,7 +281,7 @@ private slots:
 		QTemporaryDir directory;
 		const QString script = writeScript(directory, u"quit"_s, u"exit 3\n"_s);
 
-		const auto started = await(MockBackend::start(script)).value();
+		const auto started = await(MockBackend::start(script, stop)).value();
 
 		QVERIFY(!started.has_value());
 		QVERIFY2(started.error().contains(u"exited before announcing"_s), qPrintable(started.error()));
@@ -289,12 +289,14 @@ private slots:
 
 	void mockBackendThatCannotStartIsAnError()
 	{
-		const auto started = await(MockBackend::start(u"/nonexistent/ref-server"_s)).value();
+		const auto started = await(MockBackend::start(u"/nonexistent/ref-server"_s, stop)).value();
 		QVERIFY(!started.has_value());
 		QVERIFY(started.error().contains(u"/nonexistent/ref-server"_s));
 	}
 
 private:
+	StopSource stop; // never requested here
+
 	static QString writeScript(const QTemporaryDir& directory, const QString& name, const QString& body)
 	{
 		const QString path = directory.filePath(name);
