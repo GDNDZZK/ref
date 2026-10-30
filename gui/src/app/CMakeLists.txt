@@ -110,6 +110,7 @@ qt_add_qml_module(ref-gui
 		AttachmentStrip.qml
 		QueueStrip.qml
 		CompletionPopup.qml
+		PlainToolTip.qml
 		NotificationSettingsSection.qml
 		SendButton.qml
 		TextButton.qml

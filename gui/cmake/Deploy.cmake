@@ -89,3 +89,9 @@ qt_generate_deploy_qml_app_script(
 	EXCLUDE_PLUGIN_TYPES ${ref_gui_deploy_exclude_plugin_types}
 )
 install(SCRIPT "${ref_gui_deploy_script}")
+
+# After the deploy step: only the Basic style, which ref-gui uses.
+install(CODE "
+	set(REF_GUI_DEPLOY_ROOT \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}\")
+	include(\"${CMAKE_CURRENT_LIST_DIR}/PruneControlsStyles.cmake\")
+")

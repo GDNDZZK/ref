@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls.Basic
 import RefGui
 
 // The "Notifications" block of the settings panel. `settings` is the window's Settings object.
@@ -33,6 +32,7 @@ Column {
 		}
 
 		Text {
+			textFormat: Text.PlainText
 			anchors.verticalCenter: parent.verticalCenter
 			text: qsTr("Notifications")
 			color: Theme.text
@@ -49,6 +49,7 @@ Column {
 
 	// Why there is no system notification; the switches still decide when the taskbar flashes instead.
 	Text {
+		textFormat: Text.PlainText
 		visible: !NotificationCenter.systemNotificationsAvailable
 		width: parent.width
 		text: qsTr("Not available on this system. The taskbar flashes instead.")
@@ -58,8 +59,10 @@ Column {
 		bottomPadding: 4
 
 		HoverHandler { id: reasonHover }
-		ToolTip.visible: reasonHover.hovered && NotificationCenter.unavailableReason !== ""
-		ToolTip.text: NotificationCenter.unavailableReason
+		PlainToolTip {
+			visible: reasonHover.hovered && NotificationCenter.unavailableReason !== ""
+			text: NotificationCenter.unavailableReason
+		}
 	}
 
 	SwitchRow {
@@ -102,6 +105,7 @@ Column {
 
 		Text {
 			id: label
+			textFormat: Text.PlainText
 			anchors {
 				left: parent.left
 				leftMargin: row.indented ? section.subIndent : 0
