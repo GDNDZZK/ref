@@ -32,6 +32,7 @@ public:
 	explicit SessionController(client::Backend& backend, QObject* parent = nullptr);
 
 	ConversationModel& model() { return m_model; }
+	const ConversationModel& model() const { return m_model; }
 	const proto::SessionInfo& info() const { return m_info; }
 	// Empty until a session is attached.
 	const QString& sessionId() const { return m_sessionId; }

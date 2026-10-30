@@ -35,6 +35,7 @@ ListView {
 	property bool turnInProgress: false
 
 	signal errorOutOfSight() // an error block arrived while the user was reading further up
+	signal permissionAnswered(string callId, bool allow, bool always) // from a tool card that asks for permission
 
 	// Where the content ends, without and with the held room. The footer sits right
 	// after the last row.
@@ -250,6 +251,7 @@ ListView {
 		role: "kind"
 
 		DelegateChoice { roleValue: "user"; UserBlock {} }
+		DelegateChoice { roleValue: "image"; ImageBlock {} }
 		DelegateChoice { roleValue: "reasoning"; ReasoningBlock {} }
 		DelegateChoice { roleValue: "markdown"; MarkdownBlock {} }
 		DelegateChoice { roleValue: "code"; CodeBlock {} }

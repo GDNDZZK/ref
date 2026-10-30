@@ -34,11 +34,19 @@ qt_add_qml_module(ref-gui
 		Flourish.qml
 		AlertBadge.qml
 		ErrorBlock.qml
+		ImageBlock.qml
+)
+
+# Interface text is English in the sources. The .ts files hold the other languages; their
+# .qm are compiled into the program (resource prefix /i18n). `update_translations` refreshes
+# the .ts files from the sources.
+qt_add_translations(ref-gui
+	TS_FILES ${PROJECT_SOURCE_DIR}/translations/ref-gui_zh_CN.ts
 )
 
 # CodeBlock.qml imports org.kde.syntaxhighlighting at run time; nothing links against it.
 find_package(KF6SyntaxHighlighting REQUIRED)
 
-target_link_libraries(ref-gui PRIVATE refgui_session Qt6::Gui Qt6::Qml Qt6::Quick)
+target_link_libraries(ref-gui PRIVATE refgui_session refgui_cli Qt6::Gui Qt6::Qml Qt6::Quick)
 target_compile_definitions(ref-gui PRIVATE REF_GUI_VERSION="${PROJECT_VERSION}")
 refgui_configure_target(ref-gui)

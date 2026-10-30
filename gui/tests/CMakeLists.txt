@@ -41,3 +41,19 @@ qt_add_executable(tst_session_controller tst_session_controller.cpp coro_test.h 
 target_link_libraries(tst_session_controller PRIVATE refgui_session Qt6::Test)
 refgui_configure_target(tst_session_controller)
 add_test(NAME tst_session_controller COMMAND tst_session_controller)
+
+qt_add_executable(tst_command_line tst_command_line.cpp)
+target_link_libraries(tst_command_line PRIVATE refgui_cli Qt6::Test)
+refgui_configure_target(tst_command_line)
+add_test(NAME tst_command_line COMMAND tst_command_line)
+
+# Tests against the real backend. Point REF_SERVER at a built ref-server
+# (`cargo build -p ref-server` gives target/debug/ref-server) to enable them.
+set(REF_SERVER "" CACHE FILEPATH "ref-server binary for the tests that run against it")
+if(REF_SERVER)
+	qt_add_executable(tst_mock_session tst_mock_session.cpp coro_test.h session_test_data.h)
+	target_link_libraries(tst_mock_session PRIVATE refgui_session Qt6::Test)
+	target_compile_definitions(tst_mock_session PRIVATE REF_SERVER_BINARY="${REF_SERVER}")
+	refgui_configure_target(tst_mock_session)
+	add_test(NAME tst_mock_session COMMAND tst_mock_session)
+endif()
