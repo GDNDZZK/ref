@@ -119,8 +119,8 @@ every interaction is frequent. Icons come from `assets/icons` through the icon p
 - Labels: agent name; model display name (the provider is in the tooltip); variant name, or "default" when the
   model has variants and none is chosen. The variant pill is absent when the model has no variants.
 - Clicking the agent or model pill opens the agent / model dialog (signals `agentClicked`, `modelClicked`);
-  clicking the variant pill cycles it. Tooltips: "Agent (Tab)", "Model", "Variant (Ctrl+T)".
-- Morph when a value changes (Tab, Shift+Tab, Ctrl+T, a dialog, `/model`, another client): the pill width
+  clicking the variant pill cycles it. Tooltips: "Agent (Tab)", "Model", "Variant" (each with the shortcut the command registry reports).
+- Morph when a value changes (Tab, Shift+Tab, the variant command, a dialog, `/model`, another client): the pill width
   follows its content, `Motion.standard` / OutExpo. The old label fades out while moving up `labelSlide`
   (new, 6) and the new one fades in from `labelSlide` below, both `Motion.standard` / OutExpo. The icon color
   eases to the new agent color, `Motion.standard`. Pills to the right slide along with the width. Switching
@@ -172,6 +172,12 @@ every interaction is frequent. Icons come from `assets/icons` through the icon p
   keyboard focus (`Motion.quick`) and is always shown on touch screens. Tooltip: the file name.
 - Add: scale 0.8 -> 1 and fade in, `Motion.standard` / OutExpo; the strip grows 0 -> 56 + 8 with it. Remove:
   scale 1 -> 0.8 and fade out, `Motion.quick`; the others slide over with `Motion.standard`.
+- Tokens: like the TUI, attaching an image inserts the token `[Image N]` at the cursor (a space before it
+  when the cursor follows other text, one after it), N counting up per box. The prompt text is sent with the
+  tokens, so history and restored drafts interchange with the TUI and the WebUI. Removing a thumbnail deletes its
+  token from the text; deleting a token from the text removes the attachment. Images whose token is gone are not
+  sent. A restored draft binds the images to its tokens in numeric order and renumbers them after the box's own;
+  images without a token get one at the end.
 - Sources: Ctrl+V with an image on the clipboard, pasting the path or `file://` URL of an image file (png, jpg,
   gif, webp; at most 20 MiB), dropping image files on the box. Restored drafts (undo, withdrawing a queued
   prompt) bring their images back as thumbnails.
@@ -211,8 +217,8 @@ every interaction is frequent. Icons come from `assets/icons` through the icon p
 |---|---|
 | Enter | Send (or run the command / shell line). Not while an input method is composing. |
 | Shift+Enter, Ctrl+J | New line |
-| Tab / Shift+Tab | Next / previous agent (accepts the list entry while a list is open) |
-| Ctrl+T | Next variant of the model |
+| Tab / Shift+Tab | Next / previous agent (Tab accepts the list entry while a list is open) |
+| Ctrl+Shift+T | Next variant of the model (the `variant` command; plain Ctrl+T is not bound) |
 | Ctrl+V | Paste; an image on the clipboard becomes an attachment |
 | Up / Down | Prompt history: Up when the box is empty, the cursor is at the very start, or history is being browsed; Down while browsing and on the last line. Otherwise they move the cursor. |
 | Esc Esc | Interrupt the session |
