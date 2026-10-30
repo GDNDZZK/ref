@@ -80,11 +80,40 @@ fn document(llm_port: u16) -> Value {
 }
 
 /// Loads the mock config through the normal loader from a file in `config_dir`, with an empty
-/// environment and no home directory, so nothing outside leaks in.
+/// environment, no home directory and the workspace as the top of the project, so nothing
+/// outside leaks in (the temporary directory may lie inside a git repository).
 pub fn load(config_dir: &Path, workspace: &Path, llm_port: u16) -> std::io::Result<Config> {
     std::fs::create_dir_all(config_dir)?;
     let text = serde_json::to_string_pretty(&document(llm_port)).expect("config serializes");
     std::fs::write(config_dir.join("ref.json"), text)?;
     let dirs = [config_dir.to_path_buf()];
-    Ok(ref_config::load_with(None, &dirs, workspace, &|_| None))
+    Ok(ref_config::load_in(
+        None,
+        &dirs,
+        Some(workspace),
+        workspace,
+        &|_| None,
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The temporary directory may lie inside a git repository with its own project config.
+    #[test]
+    fn project_config_above_the_workspace_is_ignored() {
+        let outer =
+            std::env::temp_dir().join(format!("ref-mock-cfg-{}", crate::util::random_hex(8)));
+        let workspace = outer.join("root/workspace");
+        std::fs::create_dir_all(outer.join(".git")).unwrap();
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::write(outer.join("opencode.json"), r#"{"model": "leak/model"}"#).unwrap();
+
+        let cfg = load(&outer.join("root/config"), &workspace, 1).unwrap();
+        std::fs::remove_dir_all(&outer).unwrap();
+        let model = cfg.model.expect("the mock model");
+        assert_eq!(model.key(), "mock/mock-1");
+        assert!(cfg.warnings.is_empty(), "{:?}", cfg.warnings);
+    }
 }
