@@ -2,7 +2,7 @@
 qt_add_executable(ref-gui main.cpp)
 
 # Must be set before qt_add_qml_module() reads the files.
-set_source_files_properties(Theme.qml Motion.qml Format.qml ToolInfo.qml Links.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set_source_files_properties(Theme.qml Motion.qml Format.qml Links.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 qt_add_qml_module(ref-gui
 	URI RefGui
@@ -19,6 +19,7 @@ qt_add_qml_module(ref-gui
 		notification_center_type.h
 		qml_types.h
 		system_fonts.h
+		tool_info.h
 		tile_model.cpp
 		tile_model.h
 		tile_stage.cpp
@@ -85,7 +86,6 @@ qt_add_qml_module(ref-gui
 		StreamCaret.qml
 		ToolStateSlot.qml
 		CountdownRing.qml
-		ToolInfo.qml
 		Links.qml
 		ToolBody.qml
 		ToolBodyBase.qml
