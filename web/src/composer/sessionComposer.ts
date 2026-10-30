@@ -218,6 +218,13 @@ export class SessionComposer {
     }
   }
 
+  // The x on a thumbnail: the token goes from the text (with the space after it), and the image with it.
+  removeAttachment(token: string): void {
+    this.draft.text = this.draft.text.replace(`${token} `, '').replace(token, '')
+    this.cursor = Math.min(this.cursor, this.draft.text.length)
+    dropOrphanAttachments(this.draft)
+  }
+
   // Ctrl+C: empties the box. A long text goes to the history first, so it is not lost.
   clear(): void {
     const text = this.draft.text.trim()
