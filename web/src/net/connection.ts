@@ -30,6 +30,8 @@ export interface ConnectionOptions {
   token?: string
   notifyKinds?: () => NotifyKind[] // asked at each handshake, so a reconnect carries the current choice
   retryDelaysMs?: number[] // waits between reconnect attempts; the last one repeats
+  // Asked after each lost connection; true stops the retrying for good (e.g. the login expired).
+  giveUp?: () => Promise<boolean>
 }
 
 const DEFAULT_RETRY_DELAYS_MS = [500, 1000, 2000, 4000, 8000]
@@ -153,7 +155,14 @@ export class RefConnection {
     const delay = delays[Math.min(this.attempt, delays.length - 1)]!
     this.attempt++
     this.setState('connecting', `lost (${reason}); retrying`)
-    this.retryTimer = setTimeout(() => this.dial(), delay)
+    const timer = setTimeout(() => this.dial(), delay)
+    this.retryTimer = timer
+    void this.askToGiveUp(timer)
+  }
+
+  private async askToGiveUp(timer: ReturnType<typeof setTimeout>): Promise<void> {
+    const giveUp = await this.options.giveUp?.().catch(() => false)
+    if (giveUp && this.retryTimer === timer) this.close('the connection was refused for good')
   }
 
   private receive(text: string): void {

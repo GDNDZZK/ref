@@ -57,6 +57,7 @@ export function browserEnvironment(): Environment {
     directCwd: import.meta.env.VITE_REF_CWD as string | undefined,
     async fetchInfo() {
       const response = await fetch('/api/info')
+      if (response.status === 401) throw new StartupError('connection.notLoggedIn', '/api/info: 401')
       if (!response.ok) throw new StartupError('connection.closed', `/api/info: ${response.status}`)
       return (await response.json()) as { cwd: string }
     },
