@@ -123,6 +123,7 @@ Item {
 		visible: grid.count === 0 && Workspace.splitView && Workspace.current === null
 
 		Text {
+			textFormat: Text.PlainText
 			anchors.horizontalCenter: parent.horizontalCenter
 			text: qsTr("No background sessions")
 			color: Theme.textMuted

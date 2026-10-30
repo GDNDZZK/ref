@@ -35,6 +35,7 @@ Rectangle {
 			height: Theme.sidebarHeaderHeight
 
 			Text {
+				textFormat: Text.PlainText
 				x: 18
 				anchors.verticalCenter: parent.verticalCenter
 				text: "ref"
@@ -88,6 +89,7 @@ Rectangle {
 						color: Theme.text
 					}
 					Text {
+						textFormat: Text.PlainText
 						anchors.verticalCenter: parent.verticalCenter
 						text: qsTr("New session")
 						color: Theme.text
@@ -195,6 +197,7 @@ Rectangle {
 				onTextChanged: Workspace.history.filter = text.trim()
 
 				Text {
+					textFormat: Text.PlainText
 					anchors.fill: parent
 					verticalAlignment: Text.AlignVCenter
 					text: qsTr("Search history")
@@ -236,6 +239,7 @@ Rectangle {
 			ScrollBar.vertical: ThemedScrollBar {}
 
 			Text {
+				textFormat: Text.PlainText
 				anchors { horizontalCenter: parent.horizontalCenter; top: parent.top; topMargin: 16 }
 				visible: history.count === 0
 				text: !Workspace.historyLoaded ? qsTr("Loading…") : searchInput.text !== "" ? qsTr("No matching sessions") : qsTr("No earlier sessions")
@@ -270,6 +274,7 @@ Rectangle {
 					color: Theme.textMuted
 				}
 				Text {
+					textFormat: Text.PlainText
 					anchors.verticalCenter: parent.verticalCenter
 					text: "MCP"
 					color: Theme.textMuted
@@ -302,6 +307,7 @@ Rectangle {
 					}
 				}
 				Text {
+					textFormat: Text.PlainText
 					anchors.verticalCenter: parent.verticalCenter
 					visible: Workspace.mcpServers.length > sidebar.maxMcpDots
 					text: "+" + (Workspace.mcpServers.length - sidebar.maxMcpDots)
@@ -331,6 +337,8 @@ Rectangle {
 	}
 
 	component SectionLabel: Text {
+
+		textFormat: Text.PlainText
 		width: column.width
 		height: Theme.sidebarSectionHeight
 		leftPadding: 18

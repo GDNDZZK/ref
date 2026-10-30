@@ -32,6 +32,7 @@ ModalDialog {
 				height: 30
 
 				Text {
+					textFormat: Text.PlainText
 					x: 22
 					anchors.verticalCenter: parent.verticalCenter
 					text: parent.modelData.title
@@ -54,6 +55,7 @@ ModalDialog {
 				height: 30
 
 				Text {
+					textFormat: Text.PlainText
 					x: 22
 					anchors.verticalCenter: parent.verticalCenter
 					text: parent.modelData.title
@@ -77,6 +79,7 @@ ModalDialog {
 				height: 30
 
 				Text {
+					textFormat: Text.PlainText
 					x: 22
 					anchors.verticalCenter: parent.verticalCenter
 					text: row.modelData.title
@@ -84,6 +87,7 @@ ModalDialog {
 					font.pixelSize: Theme.smallFontSize + 1
 				}
 				Text {
+					textFormat: Text.PlainText
 					anchors { right: parent.right; rightMargin: 22; verticalCenter: parent.verticalCenter }
 					text: ["/" + row.modelData.slash].concat(row.modelData.aliases.map(alias => "/" + alias)).join(" ") + (row.modelData.hint !== "" ? " " + row.modelData.hint : "")
 					color: Theme.textMuted
@@ -94,6 +98,8 @@ ModalDialog {
 	}
 
 	component SectionLabel: Text {
+
+		textFormat: Text.PlainText
 		width: parent.width
 		height: Theme.sidebarSectionHeight
 		leftPadding: 22

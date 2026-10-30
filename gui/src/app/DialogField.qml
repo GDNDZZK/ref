@@ -55,6 +55,7 @@ Item {
 		}
 
 		Text {
+			textFormat: Text.PlainText
 			anchors { fill: input }
 			verticalAlignment: Text.AlignVCenter
 			text: field.placeholderText
@@ -66,6 +67,7 @@ Item {
 	}
 
 	Text {
+		textFormat: Text.PlainText
 		id: errorLabel
 		anchors { top: box.bottom; topMargin: 6; left: parent.left; right: parent.right }
 		text: field.errorText

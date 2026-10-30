@@ -72,6 +72,7 @@ FocusScope {
 			height: Theme.dialogHeaderHeight
 
 			Text {
+				textFormat: Text.PlainText
 				anchors { left: parent.left; leftMargin: 22; right: closeButton.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
 				text: dialog.title
 				color: Theme.text

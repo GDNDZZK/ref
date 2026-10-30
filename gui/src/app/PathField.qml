@@ -107,6 +107,7 @@ Item {
 				color: Theme.textMuted
 			}
 			Text {
+				textFormat: Text.PlainText
 				anchors { left: parent.left; leftMargin: 38; right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
 				text: row.modelData
 				color: Theme.text
