@@ -10,8 +10,12 @@ qt_add_qml_module(ref-gui
 		chat_session.cpp
 		chat_session.h
 		system_fonts.h
+		workspace.cpp
+		workspace.h
 	QML_FILES
 		Main.qml
+		SessionPane.qml
+		StatusPill.qml
 		Icon.qml
 		Theme.qml
 		Motion.qml

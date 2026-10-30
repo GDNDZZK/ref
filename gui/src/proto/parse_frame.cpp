@@ -257,11 +257,6 @@ Parsed<QStringList> parseFilesResult(const QJsonObject& result)
 	});
 }
 
-Parsed<QString> parseExpandedCommandResult(const QJsonObject& result)
-{
-	return json::guarded([&] { return json::Fields(result, u"result"_s).string("text"_L1); });
-}
-
 Parsed<QList<NamedImage>> parseNamedImages(const QJsonValue& images)
 {
 	return json::guarded([&] { return json::Fields(QJsonObject{{u"images"_s, images}}, u"result"_s).listOrEmpty<NamedImage>("images"_L1, json::readNamedImage); });

@@ -39,9 +39,13 @@ Parsed<SessionSnapshot> parseAttachResult(const QJsonObject& result);          /
 Parsed<QList<SessionInfo>> parseSessionsResult(const QJsonObject& result);     // list_sessions, list_history, watch_all
 Parsed<PromptResult> parsePromptResult(const QJsonObject& result);             // prompt
 Parsed<MessagesPage> parseMessagesResult(const QJsonObject& result);           // messages
+Parsed<ServerConfig> parseConfigResult(const QJsonObject& result);             // get_config
+Parsed<QList<McpServerStatus>> parseMcpResult(const QJsonObject& result);      // mcp_status
+Parsed<DirListing> parseDirsResult(const QJsonObject& result);                 // list_dirs
+Parsed<QString> parseTextResult(const QJsonObject& result);                    // peer_command, expand_command
+Parsed<QString> parsePathResult(const QJsonObject& result);                    // export
 Parsed<RemovedPrompt> parseRemovedPromptResult(const QJsonObject& result);     // remove_queued
 Parsed<QStringList> parseFilesResult(const QJsonObject& result);               // list_files
-Parsed<QString> parseExpandedCommandResult(const QJsonObject& result);         // expand_command
 Parsed<QList<NamedImage>> parseNamedImages(const QJsonValue& images);          // `images` of remove_queued and undo
 
 } // namespace refgui::proto

@@ -30,8 +30,6 @@ Window {
 			Theme.toggle()
 	}
 
-	required property ChatSession session
-
 	Item {
 		id: page
 		anchors.fill: parent
@@ -42,140 +40,18 @@ Window {
 			color: Theme.background
 		}
 
-		ChatView {
-			id: chat
-			anchors { left: parent.left; right: parent.right; top: parent.top; bottom: composer.top }
-			model: window.session.blocks
-			turnInProgress: window.session.busy
-			onPermissionAnswered: (callId, allow, always) => window.session.permissionReply(callId, allow, always)
-		}
+		Loader {
+			anchors.fill: parent
+			active: Workspace.current !== null
 
-		// Connection trouble and the last failure, until they are gone.
-		Rectangle {
-			id: status
-
-			readonly property bool shown: window.session.statusText !== ""
-
-			anchors { horizontalCenter: parent.horizontalCenter; top: parent.top; topMargin: 14 }
-			width: Math.min(statusLabel.implicitWidth + 2 * 14, parent.width - 2 * 80) // clear of the theme toggle
-			height: statusLabel.implicitHeight + 2 * 6
-			radius: height / 2
-			color: Theme.surface
-			border.color: Theme.border
-			opacity: shown ? 1 : 0
-			visible: opacity > 0
-
-			Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-
-			Text {
-				id: statusLabel
-				x: 14
-				y: 6
-				width: parent.width - 2 * 14
-				text: window.session.statusText
-				elide: Text.ElideRight
-				color: Theme.textMuted
-				font.pixelSize: Theme.smallFontSize
+			sourceComponent: SessionPane {
+				session: Workspace.current
 			}
 		}
 
-		Text {
-			anchors.centerIn: chat
-			text: qsTr("What are we building?")
-			color: Theme.textMuted
-			font.pixelSize: 22
-			opacity: chat.count === 0 ? 1 : 0
-
-			Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-		}
-
-		// Carries an alert badge after an error arrived out of sight, until the button is
-		// gone. The badge stays while the button fades out, so it does not pop away first.
-		CircleButton {
-			id: jumpToEnd
-
-			readonly property bool shown: !chat.following
-			property bool alerting: false
-
-			// Stacked above the send button, on its center line.
-			x: composer.x + composer.sendButtonCenterX - width / 2
-			anchors { bottom: composer.top; bottomMargin: 12 }
-			implicitWidth: 34
-			implicitHeight: 34
-			opacity: shown ? 1 : 0
-			visible: opacity > 0
-			transform: Translate {
-				y: jumpToEnd.shown ? 0 : 10
-				Behavior on y { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-			}
-			Accessible.name: qsTr("Jump to latest")
-
-			onClicked: chat.glideToEnd()
-			onVisibleChanged: {
-				if (visible)
-					return
-				alerting = false
-				alert.opacity = 0 // the next alert enters again
-			}
-
-			Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-
-			Connections {
-				target: chat
-				// A later error while the badge is shown springs it again.
-				function onErrorOutOfSight() {
-					if (jumpToEnd.alerting) {
-						alertFlourish.play()
-						return
-					}
-					jumpToEnd.alerting = true
-					alertFlourish.enter()
-				}
-			}
-
-			Chevron {
-				anchors.centerIn: parent
-				width: 16
-				height: 16
-				rotation: 90 // points down
-				color: Theme.textMuted
-				strokeWidth: 2
-			}
-
-			Flourish {
-				id: alertFlourish
-				target: alert
-				color: Theme.danger
-				ringReach: 2.5
-			}
-
-			// On the button's rim, at its upper right. The background-colored border
-			// cuts it out of the button.
-			AlertBadge {
-				id: alert
-				readonly property real rimOffset: jumpToEnd.width / 2 * Math.SQRT1_2 // from the button's center at 45°
-				x: jumpToEnd.width / 2 + rimOffset - width / 2
-				y: jumpToEnd.height / 2 - rimOffset - height / 2
-				implicitWidth: 16
-				implicitHeight: 16
-				border.color: Theme.background
-				border.width: 2
-				opacity: 0 // the Flourish fades it in
-				visible: jumpToEnd.alerting
-			}
-		}
-
-		Composer {
-			id: composer
-			anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: Theme.pagePadding }
-			width: chat.columnWidth
-			busy: window.session.busy
-			sendingEnabled: window.session.ready
-			onSubmitted: text => {
-				chat.following = true
-				window.session.send(text)
-			}
-			onStopRequested: window.session.stop()
+		// Connection trouble, or why no session could be opened, until it is gone.
+		StatusPill {
+			text: Workspace.connectionText !== "" ? Workspace.connectionText : Workspace.current === null ? Workspace.failureText : ""
 		}
 	}
 
@@ -207,6 +83,4 @@ Window {
 		anchors { top: parent.top; right: parent.right; margins: 14 }
 		onClicked: window.switchTheme()
 	}
-
-	Component.onCompleted: composer.focusInput()
 }
