@@ -1,6 +1,7 @@
+// Adapted from an early version of qutie by LightBlueCube
 pragma Singleton
 import QtQuick
-import Qutie
+import RefGui
 
 // Colors, type and layout metrics. Follows the system color scheme until toggle()
 // is called; from then on the choice is the user's.

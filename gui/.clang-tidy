@@ -26,7 +26,7 @@ Checks: >
   -modernize-use-trailing-return-type,
   -readability-identifier-length,
   -readability-redundant-access-specifiers,
-HeaderFilterRegex: '.*/qutie/src/.*'
+HeaderFilterRegex: '.*/gui/src/.*'
 CheckOptions:
   readability-braces-around-statements.ShortStatementLines: 0
   readability-function-cognitive-complexity.IgnoreMacros: true

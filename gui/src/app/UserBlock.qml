@@ -1,14 +1,35 @@
+// Adapted from an early version of qutie by LightBlueCube
 import QtQuick
-import Qutie
+import RefGui
 
-// The user's message. It opens a turn: every message but the first sits below a
-// divider that separates it from the previous reply. Short messages hug their text.
+// The user's message. A message that opens a turn sits below a divider that separates
+// it from the previous reply; so do all but the first, except those the harness or a
+// shell command added in the middle of a turn. Short messages hug their text.
 Block {
 	id: block
 
-	required property int index
+	required property bool opensTurn
+	required property string source
+	required property string sender
 
-	readonly property bool opensLaterTurn: index > 0
+	readonly property bool opensLaterTurn: opensTurn
+	// Says who a message is from when it is not what the user typed.
+	readonly property string caption: {
+		switch (source) {
+		case "peer":
+			return qsTr("From %1").arg(sender)
+		case "spawn":
+			return qsTr("Task from %1").arg(sender)
+		case "shell":
+			return qsTr("Shell command")
+		case "reminder":
+			return qsTr("Reminder")
+		case "compaction":
+			return qsTr("Summary of the earlier conversation")
+		default:
+			return ""
+		}
+	}
 
 	// Draws the divider across only for a freshly sent message.
 	onAdded: if (opensLaterTurn) dividerGrow.restart()
@@ -40,6 +61,13 @@ Block {
 				duration: Motion.slow
 				easing.type: Motion.ease
 			}
+		}
+
+		Text {
+			visible: block.caption !== ""
+			text: block.caption
+			color: Theme.textMuted
+			font.pixelSize: Theme.smallFontSize
 		}
 
 		Rectangle {

@@ -1,6 +1,7 @@
+// Adapted from an early version of qutie by LightBlueCube
 pragma Singleton
 import QtQuick
-import Qutie
+import RefGui
 
 // Timing for every animation.
 // Frequent interactions use a short exponential ease-out and never overshoot.

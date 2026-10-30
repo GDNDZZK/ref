@@ -1,5 +1,6 @@
+// Adapted from an early version of qutie by LightBlueCube
 import QtQuick
-import Qutie
+import RefGui
 import org.kde.syntaxhighlighting
 
 // A fenced code block: language label, copy action and highlighted source.
