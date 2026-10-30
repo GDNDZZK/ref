@@ -1,17 +1,16 @@
 // Starts the app: connects, then opens the requested session or a new one.
 
 import { StartupError, browserEnvironment, resolveStartup } from '../net/startup.ts'
-import type { Startup } from '../net/startup.ts'
 import { useConnectionStore } from './connection.ts'
-import { useConversationStore } from './conversation.ts'
 import { useNoticesStore } from './notices.ts'
+import { useWorkspaceStore } from './workspace.ts'
 
 export async function boot(): Promise<StartupError | undefined> {
   const connection = useConnectionStore()
-  const conversation = useConversationStore()
+  const workspace = useWorkspaceStore()
   const notices = useNoticesStore()
 
-  let startup: Startup
+  let startup
   try {
     startup = await resolveStartup(browserEnvironment())
   } catch (error) {
@@ -19,25 +18,13 @@ export async function boot(): Promise<StartupError | undefined> {
     throw error
   }
 
-  async function openSession(isReconnect: boolean): Promise<void> {
+  connection.onOpen((isReconnect) => {
     if (connection.backendTooOld) return
-    try {
-      if (isReconnect) {
-        await conversation.resync()
-        return
-      }
-      await connection.loadConfig()
-      const sessionId = startup.sessionId ?? (await connection.getApi().createSession(startup.cwd)).id
-      await conversation.open(sessionId)
-    } catch (error) {
-      notices.pushError(error)
-    }
-  }
-
-  connection.onOpen((isReconnect) => void openSession(isReconnect))
+    workspace.onConnected(isReconnect, startup).catch((error) => notices.pushError(error))
+  })
   connection.onFrame((frame) => {
-    if (frame.kind === 'event') conversation.applyEvent(frame.session_id, frame.event)
     if (frame.kind === 'toast') notices.push(frame.level, frame.text)
+    else workspace.onFrame(frame)
   })
   connection.start(startup.url, startup.cwd)
   return undefined
