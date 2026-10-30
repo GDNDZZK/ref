@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import RefGui
@@ -229,7 +230,7 @@ Rectangle {
 
 		ListView {
 			id: history
-			anchors { top: search.bottom; topMargin: 8; bottom: footer.top }
+			anchors { top: search.bottom; topMargin: 8; bottom: footerBar.top }
 			width: parent.width
 			model: Workspace.history
 			clip: true
@@ -249,7 +250,7 @@ Rectangle {
 		}
 
 		Item {
-			id: footer
+			id: footerBar
 			anchors.bottom: parent.bottom
 			width: parent.width
 			height: Theme.sidebarFooterHeight

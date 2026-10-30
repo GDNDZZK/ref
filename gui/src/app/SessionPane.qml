@@ -10,10 +10,12 @@ Item {
 	required property ChatSession session
 	// In a split-view tile: tighter margins.
 	property bool compact: false
+	readonly property real compactMargin: 10 // below the input box
+	readonly property real compactColumnPadding: 16 // beside the conversation
+	readonly property real margin: compact ? compactMargin : Theme.pagePadding
+	readonly property real columnPadding: compact ? compactColumnPadding : Theme.pagePadding
 	// Whether the keys may answer a permission request of this session (one pane at a time has them).
 	property bool keysEnabled: true
-	readonly property real margin: compact ? 10 : Theme.pagePadding
-	readonly property real columnPadding: compact ? 16 : Theme.pagePadding
 
 	function focusInput() {
 		composer.focusInput()

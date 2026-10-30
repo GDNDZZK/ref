@@ -74,7 +74,7 @@ void TileStage::sync()
 			continue;
 		}
 		beginInsertRows({}, int(m_rows.size()), int(m_rows.size()));
-		m_rows.append({wanted[place], wanted[place]->sessionId(), false, place});
+		m_rows.append({wanted[place], wanted[place]->sessionId(), false, false, place});
 		endInsertRows();
 	}
 	setPlaced(int(wanted.size()));
@@ -95,12 +95,28 @@ void TileStage::retire(const QString& sessionId)
 	{
 		if(m_rows[i].sessionId == sessionId && m_rows[i].leaving)
 		{
+			const Row row = m_rows[i];
 			beginRemoveRows({}, i, i);
 			m_rows.removeAt(i);
 			endRemoveRows();
+			if(row.deleteSession && row.session)
+			{
+				row.session->deleteLater();
+			}
 			return;
 		}
 	}
+}
+
+void TileStage::deleteWhenLeft(ChatSession* session)
+{
+	const int row = rowOf(session);
+	if(row < 0 || !m_rows[row].leaving)
+	{
+		session->deleteLater();
+		return;
+	}
+	m_rows[row].deleteSession = true;
 }
 
 void TileStage::setOpening(bool opening)
