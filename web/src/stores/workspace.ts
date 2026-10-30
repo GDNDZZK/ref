@@ -16,6 +16,7 @@ import type { Rect } from '../shell/tileLayout.ts'
 import type { Startup } from '../net/startup.ts'
 import type { ModelRef, SessionInfo } from '../proto/generated'
 import { useConnectionStore } from './connection.ts'
+import { emitDraftRestored } from './draftBus.ts'
 import { useNoticesStore } from './notices.ts'
 
 export type ViewMode = 'single' | 'split'
@@ -89,7 +90,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const info = live.value.find((candidate) => candidate.id === id)
     const created = new ChatSession(
       id,
-      { api: () => connection.getApi(), notify: (level, text) => notices.push(level, text) },
+      {
+        api: () => connection.getApi(),
+        notify: (level, text) => notices.push(level, text),
+        draftRestored: emitDraftRestored,
+      },
       info,
     )
     chats.set(id, created)

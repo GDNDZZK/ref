@@ -13,7 +13,7 @@ import { cssEasing } from '../motion/cssEasing.ts'
 import { useFrame } from '../motion/useFrame.ts'
 import { motion } from '../theme/generated/motion.ts'
 
-const props = defineProps<{ streaming: boolean; fresh: boolean }>()
+const props = defineProps<{ streaming: boolean; fresh: boolean; stale: boolean; tight: boolean }>()
 
 const frame = useTemplateRef<HTMLElement>('frame')
 const column = useTemplateRef<HTMLElement>('column')
@@ -67,7 +67,7 @@ function enter(element: HTMLElement): void {
 </script>
 
 <template>
-  <div ref="frame" class="frame">
+  <div ref="frame" class="frame" :class="{ stale, tight }">
     <div ref="column" class="column"><slot /></div>
   </div>
 </template>
@@ -75,10 +75,21 @@ function enter(element: HTMLElement): void {
 <style scoped>
 .frame {
   overflow: clip;
+  transition: opacity var(--motion-standard) var(--motion-ease);
 }
 
 .frame + .frame {
   margin-top: var(--block-spacing);
+}
+
+/* A message's footer sits close under it. */
+.frame + .frame.tight {
+  margin-top: 4px;
+}
+
+/* Before the last compaction: no longer sent to the model. */
+.frame.stale {
+  opacity: var(--stale-opacity);
 }
 
 .column {
