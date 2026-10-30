@@ -110,4 +110,16 @@ describe('StreamPacer', () => {
     expect(pacer.isEmpty()).toBe(true)
     expect(lengthOf(pacer.take(START + 1000))).toBe(0)
   })
+
+  it('reports and discards what waits for one stream', () => {
+    const pacer = new StreamPacer()
+    pacer.push(text('ab'), START)
+    pacer.push(reasoning('cd'), START)
+    expect(pacer.hasPending('text')).toBe(true)
+
+    pacer.discard('text')
+
+    expect(pacer.hasPending('text')).toBe(false)
+    expect(render(pacer.takeAll())).toEqual(['reasoning:cd'])
+  })
 })

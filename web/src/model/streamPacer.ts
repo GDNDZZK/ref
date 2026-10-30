@@ -100,6 +100,18 @@ export class StreamPacer {
     return this.pending.length === 0
   }
 
+  hasPending(stream: string): boolean {
+    return this.pending.some((chunk) => chunk.stream === stream)
+  }
+
+  // Drops what waits for `stream`, e.g. when its text was rewritten rather than extended.
+  discard(stream: string): void {
+    const kept = this.pending.filter((chunk) => chunk.stream !== stream)
+    this.backlog = kept.reduce((sum, chunk) => sum + chunk.text.length, 0)
+    this.credit = Math.min(this.credit, this.backlog)
+    this.pending = kept
+  }
+
   private merge(chunk: PacedText): void {
     const last = this.pending.at(-1)
     if (last?.stream === chunk.stream) {
