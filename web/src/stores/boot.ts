@@ -3,6 +3,7 @@
 import { StartupError, browserEnvironment, resolveStartup } from '../net/startup.ts'
 import { useConnectionStore } from './connection.ts'
 import { useNoticesStore } from './notices.ts'
+import { useNotificationsStore } from './notifications.ts'
 import { useWorkspaceStore } from './workspace.ts'
 
 export async function boot(): Promise<StartupError | undefined> {
@@ -30,6 +31,7 @@ export async function boot(): Promise<StartupError | undefined> {
     if (frame.kind === 'toast') notices.push(frame.level, frame.text)
     else workspace.onFrame(frame)
   })
+  useNotificationsStore().start()
   connection.start(startup.url, startup.cwd)
   return undefined
 }

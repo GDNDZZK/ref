@@ -9,6 +9,7 @@ import ConnectionBanner from './components/ConnectionBanner.vue'
 import DialogHost from './components/DialogHost.vue'
 import Icon from './components/Icon.vue'
 import NoticeList from './components/NoticeList.vue'
+import NotificationPrompt from './components/NotificationPrompt.vue'
 import SessionPane from './components/SessionPane.vue'
 import Sidebar from './components/Sidebar.vue'
 import SplitView from './components/SplitView.vue'
@@ -62,6 +63,7 @@ function toggleSplit(): void {
       <main class="content">
         <BackendBanner />
         <ConnectionBanner />
+        <NotificationPrompt />
         <SplitView v-if="workspace.mode === 'split'" />
         <SessionPane v-else-if="workspace.current" :key="workspace.current.id" :session="workspace.current" />
 

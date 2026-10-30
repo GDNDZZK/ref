@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=ref
+Comment=Coding agent
+Exec=ref-gui
+Icon=ref
+Terminal=false
+Categories=Development;
