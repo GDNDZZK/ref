@@ -19,6 +19,7 @@ class ChatSession : public QObject
 	Q_OBJECT
 	QML_ELEMENT
 	QML_UNCREATABLE("Created by Workspace.")
+	Q_PROPERTY(QString sessionId READ sessionId CONSTANT)
 	Q_PROPERTY(QAbstractItemModel* blocks READ blocks CONSTANT)
 	Q_PROPERTY(bool busy READ isBusy NOTIFY busyChanged)
 	Q_PROPERTY(bool ready READ isReady NOTIFY readyChanged)
@@ -60,6 +61,8 @@ public:
 	// A tile watches (`foreground` false); the session in the window's main view is in the foreground.
 	QCoro::Task<refgui::client::Result<void>> attach(bool foreground);
 	QCoro::Task<refgui::client::Result<void>> detach();
+	// The bytes of a picture of this session, e.g. an attachment or a tool's image.
+	QCoro::Task<refgui::client::Result<QByteArray>> fetchImage(QString imageId);
 	// Stays shown but no longer in the foreground (split view). Precondition: attached.
 	QCoro::Task<refgui::client::Result<void>> background();
 

@@ -41,6 +41,16 @@ QCoro::Task<refgui::client::Result<void>> ChatSession::attach(bool foreground)
 	co_return result;
 }
 
+QCoro::Task<refgui::client::Result<QByteArray>> ChatSession::fetchImage(QString imageId)
+{
+	const auto image = co_await m_backend.client().getImage(m_sessionId, std::move(imageId));
+	if(!image)
+	{
+		co_return std::unexpected(image.error());
+	}
+	co_return QByteArray::fromBase64(image->data.toLatin1());
+}
+
 QCoro::Task<refgui::client::Result<void>> ChatSession::detach()
 {
 	const auto result = co_await m_controller.detach();
