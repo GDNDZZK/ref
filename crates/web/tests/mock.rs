@@ -47,7 +47,7 @@ async fn create_session(ws: &mut Ws, name: &str) {
 
 #[tokio::test]
 async fn mock_mode_serves_tabs_from_a_private_backend() {
-    ensure_ref_server();
+    require_ref_server();
     let env = Env::new("mock");
     let web = env.start(&["--mock"]).await;
     let info: serde_json::Value = web.get("/api/info").await.json().await.unwrap();
@@ -64,7 +64,7 @@ async fn mock_mode_serves_tabs_from_a_private_backend() {
 #[cfg(unix)]
 #[tokio::test]
 async fn a_mock_that_exited_is_started_again_for_the_next_tab() {
-    ensure_ref_server();
+    require_ref_server();
     let env = Env::new("mock-restart");
     let web = env.start(&["--mock"]).await;
 
@@ -100,7 +100,7 @@ async fn a_mock_that_exited_is_started_again_for_the_next_tab() {
 #[cfg(unix)]
 #[tokio::test]
 async fn the_mock_does_not_outlive_ref_web() {
-    ensure_ref_server();
+    require_ref_server();
     let env = Env::new("mock-orphan");
     let mut web = env.start(&["--mock"]).await;
     let mut tab = web.ws().await;
@@ -116,7 +116,7 @@ async fn the_mock_does_not_outlive_ref_web() {
 #[cfg(unix)]
 #[tokio::test]
 async fn without_an_explicit_server_ref_web_starts_the_backend_beside_it() {
-    ensure_ref_server();
+    require_ref_server();
     let env = Env::new("auto");
     let web = env.start(&[]).await;
     let mut tab = web.ws().await;
@@ -146,7 +146,7 @@ fn backend_pid(env: &Env) -> u32 {
 #[cfg(unix)]
 #[tokio::test]
 async fn stopping_ref_web_stops_the_mock_and_removes_its_directory() {
-    ensure_ref_server();
+    require_ref_server();
     let env = Env::new("mock-cleanup");
     let mut web = env.start(&["--mock"]).await;
     let mut tab = web.ws().await;
