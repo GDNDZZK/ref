@@ -7,7 +7,6 @@ import { createAppI18n } from './i18n/index.ts'
 import { boot } from './stores/boot.ts'
 import { useConnectionStore } from './stores/connection.ts'
 import './theme/generated/theme.css'
-import './styles/shell-tokens.css'
 import './styles/base.css'
 
 const app = createApp(App).use(createPinia())

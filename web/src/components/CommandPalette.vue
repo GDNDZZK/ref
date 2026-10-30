@@ -9,6 +9,7 @@ import type { Command, CommandGroup } from '../commands/types.ts'
 import { usePickSelection } from '../composables/usePickSelection.ts'
 import type { PickItem } from '../composables/usePickSelection.ts'
 import type { IconKey } from '../icons/generated/icons.ts'
+import { metrics } from '../theme/generated/theme.ts'
 import { useCommandsStore } from '../stores/commands.ts'
 import { useDialogsStore } from '../stores/dialogs.ts'
 import { useNoticesStore } from '../stores/notices.ts'
@@ -16,8 +17,8 @@ import Icon from './Icon.vue'
 import PickList from './PickList.vue'
 import ShortcutChips from './ShortcutChips.vue'
 
-const ROW_HEIGHT_PX = 40
-const MAX_ROWS = 9
+const ROW_HEIGHT_PX = metrics.paletteRowHeight
+const MAX_ROWS = metrics.paletteMaxRows
 const GROUP_ORDER: readonly CommandGroup[] = ['session', 'view', 'help', 'custom']
 const DEFAULT_ICON: IconKey = 'slash-16'
 // Command id -> icon; the commands without one use the slash.
