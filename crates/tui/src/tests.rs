@@ -4238,3 +4238,115 @@ fn editor_mouse_drag_double_and_triple_click_select() {
     type_str(&mut app, "bye");
     assert_eq!(app.editor.text, "bye brave new world");
 }
+
+// --- Hold: the transcript end does not move up while a turn runs ---
+
+fn set_status(app: &mut App, sid: &str, status: SessionStatus) {
+    let v = app.views.get_mut(sid).unwrap();
+    let mut i = v.info.clone();
+    i.status = status;
+    v.set_info(i);
+}
+
+fn retrying() -> SessionStatus {
+    SessionStatus::Retrying {
+        attempt: 2,
+        next_at: ref_proto::now_ms() + 60_000,
+        error: "rate limited".into(),
+    }
+}
+
+/// Screen row of the first line containing `needle`.
+fn row_of(screen: &str, needle: &str) -> usize {
+    screen
+        .lines()
+        .position(|l| l.contains(needle))
+        .unwrap_or_else(|| panic!("{needle:?} not on screen:\n{screen}"))
+}
+
+fn long_session_app(pairs: usize) -> App {
+    let mut app = test_app(false);
+    app.views
+        .get_mut("ses_test")
+        .unwrap()
+        .apply(SessionEvent::Reset {
+            more_before: false,
+            messages: long_transcript("a", pairs),
+        });
+    app
+}
+
+#[test]
+fn hold_keeps_transcript_still_when_the_retry_notice_goes_away() {
+    let last = "second line of answer 29";
+    let mut app = long_session_app(30);
+    set_status(&mut app, "ses_test", SessionStatus::Busy);
+    let (_, s) = render(&mut app, 100, 30);
+    let at_rest = row_of(&s, last);
+
+    set_status(&mut app, "ses_test", retrying());
+    let (_, s) = render(&mut app, 100, 30);
+    let with_notice = row_of(&s, last);
+    assert!(with_notice < at_rest, "the notice pushes the transcript up");
+
+    set_status(&mut app, "ses_test", SessionStatus::Busy);
+    let (_, s) = render(&mut app, 100, 30);
+    assert_eq!(row_of(&s, last), with_notice, "held: nothing moves\n{s}");
+
+    set_status(&mut app, "ses_test", SessionStatus::Idle);
+    let (_, s) = render(&mut app, 100, 30);
+    assert_eq!(row_of(&s, last), at_rest, "released at the end of the turn");
+}
+
+#[test]
+fn hold_is_dropped_when_messages_are_removed() {
+    let last = |pairs: usize| format!("second line of answer {}", pairs - 1);
+    let mut app = long_session_app(30);
+    set_status(&mut app, "ses_test", SessionStatus::Busy);
+    let (_, s) = render(&mut app, 100, 30);
+    let at_rest = row_of(&s, &last(30));
+    set_status(&mut app, "ses_test", retrying());
+    render(&mut app, 100, 30);
+    set_status(&mut app, "ses_test", SessionStatus::Busy);
+    render(&mut app, 100, 30);
+
+    // Compaction (or an undo) replaces the history with a shorter one.
+    app.views
+        .get_mut("ses_test")
+        .unwrap()
+        .apply(SessionEvent::Reset {
+            more_before: false,
+            messages: long_transcript("a", 15),
+        });
+    let (_, s) = render(&mut app, 100, 30);
+    assert_eq!(row_of(&s, &last(15)), at_rest, "no blank rows left behind");
+}
+
+#[test]
+fn hold_applies_to_split_tiles() {
+    let mut app = watch_app();
+    set_status(&mut app, "ses_w2", SessionStatus::Busy);
+    let (_, s) = render(&mut app, 120, 30);
+    let at_rest = row_of(&s, "beta answer 29");
+
+    let queued = crate::state::Queued {
+        key: 1,
+        id: None,
+        text: "later".into(),
+        images: vec![],
+        removing: false,
+        from: Some("alpha".into()),
+    };
+    app.views.get_mut("ses_w2").unwrap().queued.push(queued);
+    let (_, s) = render(&mut app, 120, 30);
+    let with_queue = row_of(&s, "beta answer 29");
+    assert!(with_queue < at_rest, "the queued row pushes the tile up");
+
+    app.views.get_mut("ses_w2").unwrap().queued.clear();
+    let (_, s) = render(&mut app, 120, 30);
+    assert_eq!(row_of(&s, "beta answer 29"), with_queue, "held\n{s}");
+
+    set_status(&mut app, "ses_w2", SessionStatus::Idle);
+    let (_, s) = render(&mut app, 120, 30);
+    assert_eq!(row_of(&s, "beta answer 29"), at_rest, "released");
+}

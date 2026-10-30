@@ -2,7 +2,7 @@ mod common;
 
 use common::*;
 use futures_util::{SinkExt, StreamExt};
-use ref_proto::{ClientFrame, Request, ServerFrame};
+use ref_proto::{ClientFrame, NotifyKind, Request, ServerFrame};
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
@@ -263,4 +263,141 @@ async fn ws_first_frame_must_be_hello_and_idle_zero_shuts_down() {
         hub.shutdown.is_cancelled()
     })
     .await;
+}
+
+async fn hello(ws: &mut Ws, cwd: &std::path::Path, notify: Vec<NotifyKind>) -> Value {
+    let req = Request::Hello {
+        client: "test".into(),
+        version: ref_proto::PROTOCOL_VERSION,
+        cwd: cwd.to_string_lossy().into(),
+        token: None,
+        notify,
+    };
+    send(ws, 1, req).await;
+    let (ok, result, err) = response(ws, 1, &mut Vec::new()).await;
+    assert!(ok, "{err:?}");
+    result
+}
+
+#[tokio::test]
+async fn hello_reports_protocol_and_notifications_follow_focus() {
+    let (_r, url, work) = start("", -1).await;
+    let (mut ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+    let result = hello(&mut ws, &work, vec![NotifyKind::TurnDone]).await;
+    assert_eq!(result["protocol"], ref_proto::PROTOCOL_VERSION);
+
+    let mut other = Vec::new();
+    let create = Request::CreateSession {
+        cwd: work.to_string_lossy().into(),
+        agent: None,
+        model: None,
+        name: None,
+    };
+    send(&mut ws, 2, create).await;
+    let (_, res, _) = response(&mut ws, 2, &mut other).await;
+    let sid = res["session"]["id"].as_str().unwrap().to_string();
+
+    // In front and showing the session: no notification.
+    let focus = Request::SetFocus {
+        focused: true,
+        sessions: vec![sid.clone()],
+    };
+    send(&mut ws, 3, focus).await;
+    assert!(response(&mut ws, 3, &mut other).await.0);
+    let prompt = || Request::Prompt {
+        session_id: sid.clone(),
+        text: "hi".into(),
+        images: vec![],
+    };
+    send(&mut ws, 4, prompt()).await;
+    assert!(response(&mut ws, 4, &mut other).await.0);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let notified = |frames: &[ServerFrame]| {
+        frames
+            .iter()
+            .any(|f| matches!(f, ServerFrame::Notify { .. }))
+    };
+    send(&mut ws, 5, Request::Ping).await;
+    response(&mut ws, 5, &mut other).await;
+    assert!(!notified(&other), "{other:?}");
+
+    // Window in the background: the next turn is announced.
+    let blur = Request::SetFocus {
+        focused: false,
+        sessions: vec![sid.clone()],
+    };
+    send(&mut ws, 6, blur).await;
+    assert!(response(&mut ws, 6, &mut other).await.0);
+    send(&mut ws, 7, prompt()).await;
+    assert!(response(&mut ws, 7, &mut other).await.0);
+    let fut = async {
+        while let Some(m) = ws.next().await {
+            let Ok(WsMsg::Text(t)) = m else { continue };
+            if let ServerFrame::Notify {
+                session_id,
+                notify_kind,
+                detail,
+                ..
+            } = serde_json::from_str(&t).unwrap()
+            {
+                return (session_id, notify_kind, detail);
+            }
+        }
+        panic!("socket closed")
+    };
+    let (session_id, kind, detail) = tokio::time::timeout(Duration::from_secs(10), fut)
+        .await
+        .expect("notification timeout");
+    assert_eq!(
+        (session_id, kind, detail),
+        (sid, NotifyKind::TurnDone, None)
+    );
+}
+
+#[tokio::test]
+async fn list_dirs_answers_with_sorted_sub_directories() {
+    let (_r, url, work) = start("", -1).await;
+    for d in ["beta", "Alpha", "gamma/inner", ".hidden"] {
+        std::fs::create_dir_all(work.join(d)).unwrap();
+    }
+    std::fs::write(work.join("file.txt"), "x").unwrap();
+    let (mut ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+    hello(&mut ws, &work, vec![]).await;
+    let mut other = Vec::new();
+    let canonical = std::fs::canonicalize(&work).unwrap();
+
+    // Relative to the connection's cwd.
+    send(&mut ws, 2, Request::ListDirs { path: ".".into() }).await;
+    let (ok, res, err) = response(&mut ws, 2, &mut other).await;
+    assert!(ok, "{err:?}");
+    assert_eq!(res["path"], canonical.to_string_lossy().as_ref());
+    assert_eq!(
+        res["dirs"],
+        serde_json::json!([".hidden", "Alpha", "beta", "gamma"])
+    );
+
+    // Absolute and normalized.
+    let messy = format!("{}/gamma/../gamma/inner", work.display());
+    send(&mut ws, 3, Request::ListDirs { path: messy }).await;
+    let (ok, res, _) = response(&mut ws, 3, &mut other).await;
+    assert!(ok);
+    assert_eq!(
+        res["path"],
+        canonical.join("gamma/inner").to_string_lossy().as_ref()
+    );
+    assert_eq!(res["dirs"], serde_json::json!([]));
+
+    // `~` is the home directory.
+    send(&mut ws, 4, Request::ListDirs { path: "~".into() }).await;
+    let (ok, res, err) = response(&mut ws, 4, &mut other).await;
+    assert!(ok, "{err:?}");
+    let home = std::fs::canonicalize(dirs::home_dir().unwrap()).unwrap();
+    assert_eq!(res["path"], home.to_string_lossy().as_ref());
+
+    // Errors: missing path, a file, empty path.
+    for (id, path) in [(5, "nowhere"), (6, "file.txt"), (7, "  ")] {
+        send(&mut ws, id, Request::ListDirs { path: path.into() }).await;
+        let (ok, _, err) = response(&mut ws, id, &mut other).await;
+        assert!(!ok && err.is_some(), "{path}");
+    }
 }
