@@ -145,10 +145,11 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         wait_for_stop_signal().await;
         stop.cancel();
     });
-    axum::serve(listener, routes::router(state))
+    let served = axum::serve(listener, routes::router(state.clone()))
         .with_graceful_shutdown(async move { shutdown.cancelled().await })
-        .await
-        .context("server failed")
+        .await;
+    state.upstream.shutdown().await;
+    served.context("server failed")
 }
 
 /// The port is taken: if a ref-web has it, point the browser there; otherwise fail.

@@ -58,10 +58,17 @@ impl Env {
         self.dir.join("state")
     }
 
+    /// `TMPDIR` of the processes we start: a mock backend creates its directory here.
+    pub fn tmp_dir(&self) -> PathBuf {
+        self.dir.join("tmp")
+    }
+
     fn command(&self, args: &[&str]) -> Command {
+        std::fs::create_dir_all(self.tmp_dir()).unwrap();
         let mut command = Command::new(env!("CARGO_BIN_EXE_ref-web"));
         command
             .args(args)
+            .env("TMPDIR", self.tmp_dir())
             .env("REF_STATE_DIR", self.state_dir())
             .env("REF_DATA_DIR", self.dir.join("data"));
         command
@@ -117,6 +124,18 @@ impl Drop for Web {
 impl Web {
     pub fn pid(&self) -> u32 {
         self.child.id()
+    }
+
+    /// Waits for the process to exit by itself.
+    pub async fn wait_exit(&mut self) -> std::process::ExitStatus {
+        let deadline = std::time::Instant::now() + STEP_TIMEOUT;
+        loop {
+            if let Some(status) = self.child.try_wait().unwrap() {
+                return status;
+            }
+            assert!(std::time::Instant::now() < deadline, "ref-web did not exit");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
     }
 
     /// SIGKILL: no chance to clean up.
