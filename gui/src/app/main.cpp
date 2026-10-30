@@ -1,6 +1,7 @@
 // Adapted from an early version of qutie by LightBlueCube
 #include "app/app_translator.h"
 #include "app/chat_image_provider.h"
+#include "app/local_only_network.h"
 #include "app/notification_center_type.h"
 #include "app/workspace.h"
 #include "cli/command_line.h"
@@ -117,7 +118,10 @@ int main(int argc, char* argv[])
 	reportKinds();
 	QObject::connect(&notifications, &refgui::notify::NotificationCenter::sessionRequested, &workspace, &Workspace::openSession);
 
+	// Outlives the engine, which asks it for its network access.
+	LocalOnlyNetworkAccessManagerFactory networkFactory;
 	QQmlApplicationEngine engine;
+	engine.setNetworkAccessManagerFactory(&networkFactory);
 	QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] { QCoreApplication::exit(EXIT_FAILURE); }, Qt::QueuedConnection);
 	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
 	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([&workspace](const QString& sessionId) { return workspace.session(sessionId); }));

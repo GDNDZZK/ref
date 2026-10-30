@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  isWebUrl,
   limitLines,
   parseDiff,
   parseFound,
@@ -132,5 +133,16 @@ describe('limitLines and tailLines', () => {
     expect(limitLines('a\nb', 5)).toEqual({ text: 'a\nb', hidden: 0 })
     expect(limitLines('a\nb\nc', undefined).hidden).toBe(0)
     expect(tailLines('a\nb\nc\nd', 2)).toEqual({ text: 'c\nd', hidden: 2 })
+  })
+})
+
+describe('isWebUrl', () => {
+  it('accepts http and https only', () => {
+    expect(isWebUrl('https://example.com/a?b=1')).toBe(true)
+    expect(isWebUrl('http://localhost:3000')).toBe(true)
+    expect(isWebUrl('javascript:alert(1)')).toBe(false)
+    expect(isWebUrl('data:text/html,<b>x</b>')).toBe(false)
+    expect(isWebUrl('file:///etc/passwd')).toBe(false)
+    expect(isWebUrl('not a url')).toBe(false)
   })
 })

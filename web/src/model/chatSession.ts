@@ -175,6 +175,7 @@ export class ChatSession {
   async detach(): Promise<void> {
     await this.deps.api().detach(this.id)
     this.state.attachment = 'detached'
+    this.images.clear() // pictures are fetched again when the session is shown again
   }
 
   // The session list changed: keeps the status, name and the like fresh, also before the first attach.
@@ -205,20 +206,24 @@ export class ChatSession {
     await this.deps.api().prompt(this.id, text)
   }
 
-  // Loads the page of messages before the first one shown.
+  // Loads the page of messages before the first one shown. A page that arrives after the
+  // history was loaded again belongs to the old one and is dropped.
   async loadOlder(): Promise<void> {
     const before = this.transcript.oldestMessageId
     if (this.state.loadingOlder || !this.state.moreBefore || before === undefined) return
+    const generation = this.state.generation
     this.state.loadingOlder = true
     this.state.olderError = ''
     try {
       const page = await this.deps.api().messagesBefore(this.id, before)
+      if (generation !== this.state.generation) return
       this.transcript.prepend(page.messages, page.more_before)
       this.publish()
     } catch (error) {
+      if (generation !== this.state.generation) return
       this.state.olderError = error instanceof Error ? error.message : String(error)
     } finally {
-      this.state.loadingOlder = false
+      if (generation === this.state.generation) this.state.loadingOlder = false
     }
   }
 
@@ -271,11 +276,23 @@ export class ChatSession {
     this.publish()
   }
 
+  // The request leaves at once, so a second key press cannot answer it twice; it comes back
+  // when the answer was not sent.
   async answerPermission(callId: string, allow: boolean, always: boolean): Promise<void> {
-    await this.deps.api().permissionReply(this.id, callId, allow, always)
+    const request = this.transcript.resolvePermission(callId)
+    if (!request) return
+    this.publish()
+    try {
+      await this.deps.api().permissionReply(this.id, callId, allow, always)
+    } catch (error) {
+      this.transcript.apply({ type: 'permission', request }, performance.now())
+      this.publish()
+      throw error
+    }
   }
 
   dispose(): void {
+    this.images.clear()
     this.scope.stop()
   }
 
@@ -287,6 +304,8 @@ export class ChatSession {
     this.transcript.flush(performance.now())
     this.state.blocks = this.transcript.blocks
     this.state.generation++
+    this.state.loadingOlder = false // a page still on its way is dropped
+    this.state.olderError = ''
     this.publish()
   }
 

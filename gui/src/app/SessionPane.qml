@@ -14,21 +14,38 @@ Item {
 	readonly property real compactColumnPadding: 16 // beside the conversation
 	readonly property real margin: compact ? compactMargin : Theme.pagePadding
 	readonly property real columnPadding: compact ? compactColumnPadding : Theme.pagePadding
+	// Whether the keys may answer a permission request of this session (one pane at a time has them).
+	property bool keysEnabled: true
 
 	function focusInput() {
 		composer.focusInput()
 	}
 
+	// The keyboard goes to the permission keys while they may answer, and back to the input box after.
+	function updateKeyFocus() {
+		if (keysEnabled && session.permissionKeysActive)
+			permissionKeys.forceActiveFocus()
+		else if (permissionKeys.activeFocus)
+			focusInput()
+	}
+
+	onKeysEnabledChanged: updateKeyFocus()
+
 	ChatView {
 		id: chat
-		anchors { left: parent.left; right: parent.right; top: parent.top; bottom: composer.top }
+		anchors { left: parent.left; right: parent.right; top: parent.top; bottom: statusLine.top }
 		model: pane.session.blocks
 		sidePadding: pane.columnPadding
 		turnInProgress: pane.session.busy
 		sessionId: pane.session.sessionId
 		permissionCount: pane.session.permissionCount
+		moreBefore: pane.session.moreBefore
+		loadingOlder: pane.session.loadingOlder
+		olderError: pane.session.olderError
+		onLoadOlderRequested: pane.session.loadOlder()
 		onImageClicked: image => lightbox.open(pane.session.sessionId, image)
 		onCancelRequested: pane.session.cancelDelayedTool()
+		onUndoRequested: messageId => pane.session.undo(messageId)
 		onCopyRequested: messageId => pane.session.copyMessage(messageId)
 		onPermissionAnswered: (callId, allow, always) => pane.session.permissionReply(callId, allow, always)
 	}
@@ -60,10 +77,7 @@ Item {
 			target: pane.session
 
 			function onToolsChanged() {
-				if (pane.session.permissionKeysActive)
-					permissionKeys.forceActiveFocus()
-				else if (permissionKeys.activeFocus)
-					pane.focusInput()
+				pane.updateKeyFocus()
 			}
 		}
 	}
@@ -75,6 +89,7 @@ Item {
 	}
 
 	Text {
+		textFormat: Text.PlainText
 		anchors.centerIn: chat
 		text: qsTr("What are we building?")
 		color: Theme.textMuted
@@ -95,7 +110,7 @@ Item {
 
 		// Stacked above the send button, on its center line.
 		x: composer.x + composer.sendButtonCenterX - width / 2
-		anchors { bottom: composer.top; bottomMargin: 12 }
+		anchors { bottom: statusLine.top; bottomMargin: 4 }
 		implicitWidth: 34
 		implicitHeight: 34
 		opacity: shown ? 1 : 0
@@ -159,6 +174,13 @@ Item {
 			opacity: 0 // the Flourish fades it in
 			visible: jumpToEnd.alerting
 		}
+	}
+
+	StatusLine {
+		id: statusLine
+		session: pane.session
+		anchors { horizontalCenter: parent.horizontalCenter; bottom: composer.top }
+		width: chat.columnWidth
 	}
 
 	Composer {
