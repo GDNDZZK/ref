@@ -59,7 +59,10 @@ pub async fn ws_handler(
     upgrade
         .max_message_size(MAX_BROWSER_MESSAGE)
         .max_frame_size(MAX_BROWSER_MESSAGE)
-        .on_upgrade(move |browser| tunnel(state, browser))
+        .on_upgrade(move |browser| {
+            let tunnels = state.tunnels.clone();
+            tunnels.track_future(tunnel(state, browser))
+        })
 }
 
 async fn tunnel(state: Arc<AppState>, mut browser: WebSocket) {
@@ -214,6 +217,7 @@ mod tests {
     use tokio::time::timeout;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
     use tokio_util::sync::CancellationToken;
+    use tokio_util::task::TaskTracker;
 
     const TEST_HEARTBEAT: Heartbeat = Heartbeat {
         ping_interval: Duration::from_millis(50),
@@ -254,6 +258,7 @@ mod tests {
             }),
             heartbeat: TEST_HEARTBEAT,
             shutdown: CancellationToken::new(),
+            tunnels: TaskTracker::new(),
         });
         let app = Router::new()
             .route("/ws", get(ws_handler))
