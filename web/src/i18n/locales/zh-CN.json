@@ -1,0 +1,38 @@
+{
+  "chat": {
+    "empty": "我们要做点什么？",
+    "jumpToLatest": "回到最新",
+    "thinking": "思考中",
+    "thought": "已思考"
+  },
+  "composer": {
+    "placeholder": "给 ref 发消息",
+    "send": "发送",
+    "stop": "停止"
+  },
+  "code": {
+    "plainText": "文本",
+    "copy": "复制",
+    "copied": "已复制"
+  },
+  "tool": {
+    "input": "输入",
+    "allow": "允许",
+    "allowSession": "本会话都允许",
+    "deny": "拒绝"
+  },
+  "theme": {
+    "switchToLight": "切换到浅色主题",
+    "switchToDark": "切换到深色主题"
+  },
+  "connection": {
+    "connecting": "正在连接…",
+    "reconnecting": "连接已断开，正在重连…",
+    "closed": "已断开：{reason}",
+    "backendTooOld": "后端版本低于此界面，请重启后端后继续。",
+    "noDirectory": "没有工作目录：请通过 ref-web 打开此页面，或在直连 ref-server 时设置 ?cwd=（或 VITE_REF_CWD）。"
+  },
+  "message": {
+    "from": "来自 {name}"
+  }
+}
