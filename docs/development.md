@@ -94,36 +94,78 @@ sleep 3600 | ref-server --mock      # prints {"port":N,"token":"..."} on stdout,
 | `peer` | Creates a `reviewer` session `helper`, which reports back with `send_message` |
 | `everything` | `tools`, `todo` and `image` in one long turn |
 
+## The GUI
+
+`ref-gui` is in `gui/` (C++23, Qt Quick, CMake). It is built apart from the Rust workspace. You need a C++23 compiler (GCC 13, a current Clang or Visual Studio 2022), CMake 3.25 and Ninja. The libraries are installed by two scripts in `gui/scripts/` that CI runs too; the versions are pinned in `gui/scripts/versions.sh` (Qt 6.12.0 from the official binary packages through aqtinstall; extra-cmake-modules, KSyntaxHighlighting and QCoro built from source):
+
+```bash
+export REF_DEPS_DIR=$HOME/ref-deps                 # default: gui/.deps
+gui/scripts/install-qt.sh
+gui/scripts/build-deps.sh
+cargo build -p ref-server                          # two tests run against the real backend
+cmake -S gui -B gui/build -G Ninja \
+  -DCMAKE_PREFIX_PATH="$(gui/scripts/qt-dir.sh);$REF_DEPS_DIR/prefix" \
+  -DREF_SERVER=$PWD/target/debug/ref-server
+cmake --build gui/build
+QT_QPA_PLATFORM=offscreen QML_IMPORT_PATH=$REF_DEPS_DIR/prefix/lib/qml \
+  ctest --test-dir gui/build --output-on-failure
+```
+
+`ref-gui` loads KSyntaxHighlighting's QML module at run time. It sits in `$REF_DEPS_DIR/prefix/lib/qml`, so that directory must be in `QML_IMPORT_PATH` when you run the program from the build folder. A deployed package carries the module itself.
+
+### Deploying
+
+`gui/cmake/Deploy.cmake` holds the install rules. `cmake --install` copies the program and, with Qt's deploy API, the Qt libraries, plugins and QML modules it needs. The QML modules are found by scanning the QML sources for imports, so a new import is deployed without a change to a list. Configure with `-DCMAKE_INSTALL_BINDIR=.` to get a flat folder with `ref-gui` at the top:
+
+```bash
+cmake -S gui -B gui/build -G Ninja -DCMAKE_INSTALL_BINDIR=. -DCMAKE_PREFIX_PATH=… 
+cmake --build gui/build
+cmake --install gui/build --prefix stage
+scripts/package.sh --version v0.2.0 --target x86_64-unknown-linux-gnu \
+  --bin-dir target/release --out dist --gui-dir stage      # needs the Rust build, see above
+```
+
+- **Linux**: libraries go in `lib/` and the program has the run path `$ORIGIN/lib`; `qt.conf` points Qt to `plugins/` and `qml/`. Plugins that a desktop does not use (QML debugging, embedded displays, Wayland helpers) are left out.
+- **macOS**: `macdeployqt` builds `ref-gui.app`. `package.sh` renames it to `ref.app`, puts `ref-server` into `Contents/MacOS` and runs `scripts/sign-macos-app.sh`, which signs everything again, inner files first, with an ad-hoc signature (there is no developer certificate) and checks it with `codesign --verify --deep --strict`. The `all` archive links its `ref-server` to the one in the app.
+- **Windows**: `windeployqt` copies the DLLs and the Visual C++ runtime next to `ref-gui.exe`, without the software OpenGL fallback. The program uses the GUI subsystem (no console window) and has an icon and version resource.
+
+`scripts/verify-gui-package.sh DIR` checks an unpacked `ref-gui` archive and runs on the platform it was built for. CI runs it after packing. It checks that every library resolves without the build machine's environment, that the KSyntaxHighlighting module is there, and that `ref-gui --smoke --mock` opens a session (on Linux under `xvfb-run`). On Linux it also checks what the package asks of the system, and on macOS the signature and that nothing refers to a path outside the app. On Windows it checks that `ref-gui.exe` uses the GUI subsystem.
+
+**Linux requirements.** C++23 needs GCC 13, which Ubuntu 22.04 does not have, so CI builds the Linux GUI on Ubuntu 24.04 while `ref`, `ref-web` and `ref-server` are still built on 22.04. Qt 6.12.0's own libraries need glibc 2.34 at most. A program built with GCC 13 needs `CXXABI_1.3.14` from `libstdc++`, which the GCC 12 of Ubuntu 22.04 and Debian 12 does not have. `verify-gui-package.sh` therefore fails when anything in the package needs more than glibc 2.35, `GLIBCXX_3.4.32` or `CXXABI_1.3.14`; the README states the same numbers. If a newer compiler or Qt raises one, change the constants at the top of the script and the README together.
+
 ## Continuous integration and releases
 
 Two GitHub Actions workflows live in `.github/workflows/`. Both build the frontend first with the actions in `.github/actions/` (Node 24, pnpm with a cached store, `pnpm install --frozen-lockfile`, `pnpm build`).
 
-- **`ci.yml`** runs on every push and pull request: `cargo fmt --check` and `cargo clippy -D warnings` on Linux, `cargo test` on Linux, macOS and Windows, and `pnpm check` for the frontend. When tests or the frontend check fail, their output is repeated in the run summary.
-- **`release.yml`** runs when a `v*` tag is pushed. It builds the frontend once, then builds `ref`, `ref-server` and `ref-web` for six targets on native runners (one `cargo build --release --workspace` per target) and packs them with `scripts/package.sh`. A final job writes the `SHA256SUMS` file and, for tags, publishes a GitHub Release. Every build lists the archive sizes in the run summary.
+- **`ci.yml`** runs on every push and pull request: `cargo fmt --check` and `cargo clippy -D warnings` on Linux, `cargo test` on Linux, macOS (Intel) and Windows, `pnpm check` for the frontend, and the GUI build with its tests (`ctest`) on the same three systems. The GUI libraries come from `gui/scripts` and are cached by the hash of those scripts. When tests or the frontend check fail, their output is repeated in the run summary.
+- **`release.yml`** runs when a `v*` tag is pushed. Its jobs, in order: build the frontend once; build `ref`, `ref-server` and `ref-web` for six targets on native runners (one `cargo build --release --workspace` per target); build and deploy the GUI for each target and pack the four archives with `scripts/package.sh`, then check the GUI archive with `scripts/verify-gui-package.sh`; write the `SHA256SUMS` file and, for tags, publish a GitHub Release. Every package job lists the archive sizes in the run summary.
 
-| Target | Runner | Archive |
+| Target | Runner (Linux GUI and packaging) | Archive |
 |---|---|---|
-| `x86_64-unknown-linux-gnu` | Ubuntu 22.04 | `.tar.gz` |
-| `aarch64-unknown-linux-gnu` | Ubuntu 22.04 arm64 | `.tar.gz` |
+| `x86_64-unknown-linux-gnu` | Ubuntu 22.04 (24.04) | `.tar.gz` |
+| `aarch64-unknown-linux-gnu` | Ubuntu 22.04 arm64 (24.04 arm64) | `.tar.gz` |
 | `x86_64-apple-darwin` | macOS 15 Intel | `.tar.gz` |
 | `aarch64-apple-darwin` | macOS 15 | `.tar.gz` |
 | `x86_64-pc-windows-msvc` | Windows Server 2025 | `.zip` |
 | `aarch64-pc-windows-msvc` | Windows 11 arm64 | `.zip` |
 
-Each target gets three archives. Every archive holds one folder of the same name with the interface, `ref-server`, both READMEs, the license and `docs/`.
+Each target gets four archives. Every archive holds one folder of the same name with the interface, `ref-server`, both READMEs, the license and `docs/`.
 
 | Archive | Programs |
 |---|---|
 | `ref-tui-<version>-<target>` | `ref`, `ref-server` |
+| `ref-gui-<version>-<target>` | the GUI (see [Deploying](#deploying)), `ref-server` |
 | `ref-web-<version>-<target>` | `ref-web`, `ref-server` |
-| `ref-all-<version>-<target>` | `ref`, `ref-web`, `ref-server` |
+| `ref-all-<version>-<target>` | `ref`, `ref-web`, the GUI, `ref-server` |
 
 To pack by hand after `cargo build --release`:
 
 ```bash
 scripts/package.sh --version v0.2.0 --target x86_64-unknown-linux-gnu \
-  --bin-dir target/release --out dist
+  --bin-dir target/release --out dist [--gui-dir stage]
 ```
+
+Without `--gui-dir` (the folder from `cmake --install`, see [Deploying](#deploying)) no `gui` archive is made and `all` has no GUI.
 
 To make a release:
 
