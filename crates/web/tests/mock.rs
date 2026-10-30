@@ -142,3 +142,35 @@ fn backend_pid(env: &Env) -> u32 {
         serde_json::from_str(&std::fs::read_to_string(&files[0]).unwrap()).unwrap();
     info["pid"].as_u64().unwrap() as u32
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn stopping_ref_web_stops_the_mock_and_removes_its_directory() {
+    ensure_ref_server();
+    let env = Env::new("mock-cleanup");
+    let mut web = env.start(&["--mock"]).await;
+    let mut tab = web.ws().await;
+    hello(&mut tab).await;
+    let mock_dirs = |env: &Env| {
+        std::fs::read_dir(env.tmp_dir())
+            .unwrap()
+            .filter(|e| {
+                e.as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("ref-mock-")
+            })
+            .count()
+    };
+    assert_eq!(mock_dirs(&env), 1);
+
+    assert!(ref_sys::terminate(web.pid()));
+    let status = web.wait_exit().await;
+    assert!(status.success(), "{status}");
+    assert_eq!(
+        mock_dirs(&env),
+        0,
+        "the mock removed its temporary directory"
+    );
+}

@@ -11,6 +11,8 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use crate::{ConnectError, Endpoint, spawn};
 
 const ANNOUNCE_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long `shutdown` lets the mock clean up before killing it.
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// The one JSON line `ref-server --mock` prints once it listens.
 #[derive(Deserialize)]
@@ -19,9 +21,12 @@ struct Announcement {
     token: String,
 }
 
-/// A running `ref-server --mock`. It is killed on drop. It also exits by itself when its
-/// stdin closes (we hold the write end), so it never outlives a parent that died abruptly,
-/// and when its last client disconnects.
+/// A running `ref-server --mock`. It exits by itself when its stdin closes (we hold the write
+/// end), so it never outlives a parent that died abruptly, and when its last client
+/// disconnects.
+///
+/// Stop it with [`MockBackend::shutdown`]: the mock then deletes its temporary directory.
+/// Dropping it kills the process, which leaves that directory behind.
 pub struct MockBackend {
     endpoint: Endpoint,
     child: Child,
@@ -86,6 +91,21 @@ impl MockBackend {
             _stdin: stdin,
             _stdout: stdout,
         })
+    }
+
+    /// Closes the mock's stdin and waits for it to exit, killing it if that takes too long.
+    pub async fn shutdown(self) {
+        let MockBackend {
+            mut child,
+            _stdin,
+            _stdout,
+            ..
+        } = self;
+        drop(_stdin);
+        let exited = tokio::time::timeout(SHUTDOWN_TIMEOUT, child.wait()).await;
+        if exited.is_err() {
+            let _ = child.kill().await;
+        }
     }
 
     pub fn endpoint(&self) -> &Endpoint {
