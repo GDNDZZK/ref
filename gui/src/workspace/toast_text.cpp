@@ -1,11 +1,25 @@
 #include "workspace/toast_text.h"
 
 #include <QChar>
+#include <QList>
+#include <QStringView>
+#include <QTextBoundaryFinder>
 #include <algorithm>
 #include <string>
 
 namespace refgui::workspace
 {
+
+namespace
+{
+
+// The length of `text` in Unicode characters.
+qsizetype characterCount(QStringView text)
+{
+	return text.toUcs4().size();
+}
+
+} // namespace
 
 QString oneLine(const QString& text)
 {
@@ -34,8 +48,7 @@ QString oneLine(const QString& text)
 
 QString truncated(const QString& text, int maxChars)
 {
-	const std::u32string chars = text.toStdU32String();
-	if(chars.size() <= size_t(std::max(maxChars, 0)))
+	if(characterCount(text) <= maxChars)
 	{
 		return text;
 	}
@@ -43,7 +56,21 @@ QString truncated(const QString& text, int maxChars)
 	{
 		return {};
 	}
-	return QString::fromStdU32String(chars.substr(0, size_t(maxChars - 1))) + QChar(0x2026);
+	// Cuts only between graphemes, so that an emoji sequence or a letter with its accent stays whole.
+	const qsizetype room = maxChars - 1; // the ellipsis takes one
+	QTextBoundaryFinder boundaries(QTextBoundaryFinder::Grapheme, text);
+	qsizetype end = 0;
+	qsizetype used = 0;
+	for(qsizetype next = boundaries.toNextBoundary(); next >= 0; next = boundaries.toNextBoundary())
+	{
+		used += characterCount(QStringView(text).sliced(end, next - end));
+		if(used > room)
+		{
+			break;
+		}
+		end = next;
+	}
+	return text.left(end) + QChar(0x2026);
 }
 
 } // namespace refgui::workspace
