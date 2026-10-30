@@ -25,6 +25,7 @@ const QString AppName = u"ref"_s;
 const QString AppIcon = u"ref-gui"_s;      // icon theme name, installed with the .desktop file
 const QString DesktopEntry = u"ref-gui"_s; // lets the desktop group the notification under the app
 const QString DefaultAction = u"default"_s; // what a click on the notification itself invokes
+const QString BodyMarkupCapability = u"body-markup"_s;
 
 // Urgency levels of the specification.
 constexpr uchar UrgencyNormal = 1;
@@ -35,6 +36,12 @@ constexpr uint NewNotification = 0; // replaces_id
 QDBusMessage call(const QString& method)
 {
 	return QDBusMessage::createMethodCall(Service, Path, Interface, method);
+}
+
+// What a newer notification replaces: the one of the same session and kind, like the tag of a Web notification.
+QString replaceKey(const Notification& notification)
+{
+	return u"%1:%2"_s.arg(notification.sessionId).arg(static_cast<int>(notification.kind));
 }
 
 } // namespace
@@ -51,7 +58,8 @@ DBusNotifier::DBusNotifier(QDBusConnection connection, QObject* parent)
 	probe();
 }
 
-// Asks the service who it is: an answer means notifications can be shown.
+// Asks the service who it is: an answer means notifications can be shown. Then it asks what the
+// service can do, so the first notification is already worded for it.
 void DBusNotifier::probe()
 {
 	auto* watcher = new QDBusPendingCallWatcher(m_connection.asyncCall(call(u"GetServerInformation"_s)), this);
@@ -63,6 +71,18 @@ void DBusNotifier::probe()
 			setAvailable(false, tr("No desktop notification service is running."));
 			return;
 		}
+		probeCapabilities();
+	});
+}
+
+void DBusNotifier::probeCapabilities()
+{
+	auto* watcher = new QDBusPendingCallWatcher(m_connection.asyncCall(call(u"GetCapabilities"_s)), this);
+	connect(watcher, &QDBusPendingCallWatcher::finished, this, [this](QDBusPendingCallWatcher* finished) {
+		finished->deleteLater();
+		const QDBusPendingReply<QStringList> reply = *finished;
+		// Without an answer the body stays plain text, which every service shows as it is.
+		m_bodyMarkup = !reply.isError() && reply.value().contains(BodyMarkupCapability);
 		setAvailable(true, {});
 	});
 }
@@ -82,7 +102,7 @@ void DBusNotifier::onServiceOwnerChanged(const QString&, const QString&, const Q
 {
 	if(newOwner.isEmpty())
 	{
-		m_sessionOf.clear();
+		m_shown.clear();
 		m_idOf.clear();
 		setAvailable(false, tr("No desktop notification service is running."));
 		return;
@@ -102,12 +122,15 @@ void DBusNotifier::show(const Notification& notification)
 		{u"desktop-entry"_s, DesktopEntry},
 		{u"urgency"_s, critical ? UrgencyCritical : UrgencyNormal},
 	};
+	const QString key = replaceKey(notification);
+	// A service with markup reads the body as markup; the body is text from the conversation.
+	const QString body = m_bodyMarkup ? notification.body.toHtmlEscaped() : notification.body;
 	QDBusMessage message = call(u"Notify"_s);
-	message << AppName << m_idOf.value(notification.sessionId, NewNotification) << AppIcon << notification.title << notification.body
+	message << AppName << m_idOf.value(key, NewNotification) << AppIcon << notification.title << body
 	        << QStringList{DefaultAction, tr("Open")} << hints << ServerDefaultTimeout;
 
 	auto* watcher = new QDBusPendingCallWatcher(m_connection.asyncCall(message), this);
-	connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, notification](QDBusPendingCallWatcher* finished) {
+	connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, notification, key](QDBusPendingCallWatcher* finished) {
 		finished->deleteLater();
 		const QDBusPendingReply<uint> reply = *finished;
 		if(reply.isError())
@@ -116,20 +139,20 @@ void DBusNotifier::show(const Notification& notification)
 			return;
 		}
 		const uint id = reply.value();
-		forget(m_idOf.value(notification.sessionId));
-		m_sessionOf.insert(id, notification.sessionId);
-		m_idOf.insert(notification.sessionId, id);
+		forget(m_idOf.value(key));
+		m_shown.insert(id, {notification.sessionId, key});
+		m_idOf.insert(key, id);
 	});
 }
 
 void DBusNotifier::onActionInvoked(uint id, const QString& action)
 {
-	const auto session = m_sessionOf.constFind(id);
-	if(action != DefaultAction || session == m_sessionOf.constEnd())
+	const auto shown = m_shown.constFind(id);
+	if(action != DefaultAction || shown == m_shown.constEnd())
 	{
 		return;
 	}
-	emit activated(*session);
+	emit activated(shown->sessionId);
 }
 
 void DBusNotifier::onNotificationClosed(uint id, uint)
@@ -139,10 +162,10 @@ void DBusNotifier::onNotificationClosed(uint id, uint)
 
 void DBusNotifier::forget(uint id)
 {
-	const QString session = m_sessionOf.take(id);
-	if(!session.isEmpty() && m_idOf.value(session) == id)
+	const Shown shown = m_shown.take(id);
+	if(!shown.key.isEmpty() && m_idOf.value(shown.key) == id)
 	{
-		m_idOf.remove(session);
+		m_idOf.remove(shown.key);
 	}
 }
 

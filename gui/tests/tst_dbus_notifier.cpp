@@ -39,6 +39,7 @@ class FakeService : public QObject, protected QDBusContext
 public:
 	QList<Received> received;
 	bool failNext = false;
+	QStringList capabilities{u"body"_s, u"actions"_s};
 	uint lastId = 0;
 
 public slots:
@@ -48,6 +49,11 @@ public slots:
 		version = u"1"_s;
 		specVersion = u"1.2"_s;
 		return u"fake"_s;
+	}
+
+	QStringList GetCapabilities()
+	{
+		return capabilities;
 	}
 
 	uint Notify(const QString&, uint replaces, const QString&, const QString& summary, const QString& body, const QStringList& actions,
@@ -82,8 +88,12 @@ private slots:
 	void closedNotificationsAreForgotten();
 	void failedCallIsReported();
 	void unavailableAgainWhenTheServiceLeaves();
+	void markupServicesGetTheBodyEscaped();
+	void plainServicesGetTheBodyAsItIs();
 
 private:
+	void restartService(const QStringList& capabilities);
+
 	void sendSignal(const QString& name, const QList<QVariant>& arguments);
 
 	QProcess m_daemon;
@@ -164,15 +174,22 @@ void TestDBusNotifier::aNewerNotificationOfASessionReplacesTheOlder()
 	const uint first = m_service->lastId;
 	QVERIFY(first != 0);
 
-	m_notifier->show({.sessionId = u"s1"_s, .kind = Kind::TurnDone, .title = u"Fix build"_s, .body = u"Finished"_s});
+	m_notifier->show({.sessionId = u"s1"_s, .kind = Kind::Permission, .title = u"Fix build"_s, .body = u"Needs your permission"_s});
 	QTRY_COMPARE(m_service->received.size(), 2);
 	QCOMPARE(m_service->received.last().replaces, first);
-	QCOMPARE(m_service->received.last().hints.value(u"urgency"_s).value<uchar>(), uchar(1));
+	QCOMPARE(m_service->received.last().hints.value(u"urgency"_s).value<uchar>(), uchar(2));
 	QTest::qWait(100);
 
-	m_notifier->show({.sessionId = u"s2"_s, .kind = Kind::TurnDone, .title = u"Other"_s, .body = u"Finished"_s});
+	m_notifier->show({.sessionId = u"s2"_s, .kind = Kind::Permission, .title = u"Other"_s, .body = u"Needs your permission"_s});
 	QTRY_COMPARE(m_service->received.size(), 3);
 	QCOMPARE(m_service->received.last().replaces, 0u);
+	QTest::qWait(100);
+
+	// Another kind of the same session is a notification of its own, as in the Web interface.
+	m_notifier->show({.sessionId = u"s1"_s, .kind = Kind::TurnDone, .title = u"Fix build"_s, .body = u"Finished"_s});
+	QTRY_COMPARE(m_service->received.size(), 4);
+	QCOMPARE(m_service->received.last().replaces, 0u);
+	QCOMPARE(m_service->received.last().hints.value(u"urgency"_s).value<uchar>(), uchar(1));
 	QTest::qWait(100);
 }
 
@@ -215,6 +232,39 @@ void TestDBusNotifier::unavailableAgainWhenTheServiceLeaves()
 	QVERIFY(QDBusConnection::connectToBus(m_address, u"service"_s).unregisterService(ServiceName));
 	QTRY_VERIFY(!m_notifier->isAvailable());
 	QVERIFY(changed.count() >= 1);
+}
+
+// The service goes and comes back saying `capabilities`.
+void TestDBusNotifier::restartService(const QStringList& capabilities)
+{
+	QDBusConnection bus = QDBusConnection::connectToBus(m_address, u"service"_s);
+	m_service->capabilities = capabilities;
+	m_service->received.clear();
+	QVERIFY(bus.registerService(ServiceName));
+	QTRY_VERIFY(m_notifier->isAvailable());
+}
+
+void TestDBusNotifier::markupServicesGetTheBodyEscaped()
+{
+	restartService({u"body"_s, u"body-markup"_s});
+
+	m_notifier->show({.sessionId = u"m1"_s, .kind = Kind::TurnError, .title = u"<b>t</b>"_s, .body = u"<img src=\"http://x/y.png\"> & more"_s});
+
+	QTRY_COMPARE(m_service->received.size(), 1);
+	QCOMPARE(m_service->received.last().body, u"&lt;img src=&quot;http://x/y.png&quot;&gt; &amp; more"_s);
+	QCOMPARE(m_service->received.last().summary, u"<b>t</b>"_s); // the summary is never markup
+}
+
+void TestDBusNotifier::plainServicesGetTheBodyAsItIs()
+{
+	QVERIFY(QDBusConnection::connectToBus(m_address, u"service"_s).unregisterService(ServiceName));
+	QTRY_VERIFY(!m_notifier->isAvailable());
+	restartService({u"body"_s});
+
+	m_notifier->show({.sessionId = u"p1"_s, .kind = Kind::TurnError, .title = u"t"_s, .body = u"a < b & c"_s});
+
+	QTRY_COMPARE(m_service->received.size(), 1);
+	QCOMPARE(m_service->received.last().body, u"a < b & c"_s);
 }
 
 QTEST_GUILESS_MAIN(TestDBusNotifier)
