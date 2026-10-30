@@ -15,6 +15,9 @@ import Sidebar from './components/Sidebar.vue'
 import SplitView from './components/SplitView.vue'
 import ThemeToggle from './components/ThemeToggle.vue'
 import { registerBuiltinCommands } from './commands/builtin.ts'
+import { installCustomCommands } from './commands/custom.ts'
+import { setBaseTitle } from './composables/useAttention.ts'
+import { displayTitle } from './shell/sessionRow.ts'
 import { usePermissionKeys } from './composables/usePermissionKeys.ts'
 import { useShortcuts } from './composables/useShortcuts.ts'
 import { useCommandsStore } from './stores/commands.ts'
@@ -31,8 +34,16 @@ const layout = useLayoutStore()
 const notices = useNoticesStore()
 
 registerBuiltinCommands()
+installCustomCommands()
 useShortcuts()
 usePermissionKeys()
+
+// The tab is named after the open session.
+watch(
+  () => (workspace.current?.info ? displayTitle(workspace.current.info) : ''),
+  (title) => setBaseTitle(title ? `${title} · ref` : 'ref'),
+  { immediate: true },
+)
 
 // A narrow window has no split view.
 watch(
