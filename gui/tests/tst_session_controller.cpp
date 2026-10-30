@@ -156,6 +156,7 @@ private slots:
 	void watcherAttachDoesNotTakeTheForeground();
 	void upgradingAWatcherKeepsTheConversation();
 	void detachedControllerIgnoresEventsAndAttachesAgain();
+	void tracksTheQueuedPrompts();
 };
 
 void TestSessionController::createShowsTheSnapshot()
@@ -340,6 +341,25 @@ void TestSessionController::detachedControllerIgnoresEventsAndAttachesAgain()
 	f.snapshot = snapshotJson(u"ses_1"_s, u"idle"_s, {messageJson(u"u1"_s, u"user"_s, u"Hello"_s, true), messageJson(u"u2"_s, u"user"_s, u"Missed"_s, true)});
 	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
 	QCOMPARE(render(f.controller.model()), (QStringList{u"user:Hello"_s, u"user:Missed"_s}));
+}
+
+void TestSessionController::tracksTheQueuedPrompts()
+{
+	Fixture f;
+	f.snapshot[u"snapshot"_s] = [&]
+	{
+		QJsonObject snapshot = f.snapshot.value(u"snapshot"_s).toObject();
+		snapshot[u"queued"_s] = QJsonArray{messageJson(u"q1"_s, u"user"_s, u"First"_s, false)};
+		return snapshot;
+	}();
+	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
+	QCOMPARE(f.controller.queued().size(), 1);
+	QCOMPARE(f.controller.queued().first().id, u"q1"_s);
+
+	QSignalSpy changed(&f.controller, &SessionController::queueChanged);
+	f.fake.send(eventFrame(u"ses_1"_s, {{u"type"_s, u"queue"_s}, {u"messages"_s, QJsonArray()}}));
+	QTRY_COMPARE(changed.count(), 1);
+	QVERIFY(f.controller.queued().isEmpty());
 }
 
 QTEST_GUILESS_MAIN(TestSessionController)
