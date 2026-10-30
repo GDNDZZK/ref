@@ -1,10 +1,10 @@
 //! The mock "LLM": a loopback HTTP server that speaks OpenAI Chat Completions streaming, so
 //! the real `ref-llm` client, retry logic and tool loop run against scripted answers.
 
+use super::attempts::Attempts;
 use super::script::{Ctx, HttpError, Pace, Round, Step, Task, analyze, select};
 use serde_json::{Value, json};
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -24,9 +24,6 @@ const SUMMARY_TEXT: &str = "## Goal\n- Explore the mock backend with the user.\n
 const SUMMARY_DELAY_MS: u64 = 2500;
 const TITLE_WORDS: usize = 6;
 const ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(100);
-
-/// Requests seen so far, by (session, number of messages): a retry sends the same request.
-type Attempts = Mutex<HashMap<(String, usize), u32>>;
 
 pub struct LlmServer {
     pub port: u16,
@@ -124,14 +121,7 @@ async fn serve(mut stream: TcpStream, attempts: &Attempts) -> std::io::Result<()
         return write_error(&mut stream, 404, "unknown path").await;
     }
     let message_count = req.body["messages"].as_array().map_or(0, Vec::len);
-    let attempt = {
-        let mut seen = attempts.lock().unwrap_or_else(|e| e.into_inner());
-        let n = seen
-            .entry((req.session_id.clone(), message_count))
-            .or_insert(0);
-        *n += 1;
-        *n
-    };
+    let attempt = attempts.count(&req.session_id, message_count);
     let model = req.body["model"].as_str().unwrap_or("").to_string();
     let prompt_tokens = estimate_tokens(&req.body);
     match analyze(&req.body, &req.session_id, attempt) {
@@ -144,7 +134,13 @@ async fn serve(mut stream: TcpStream, attempts: &Attempts) -> std::io::Result<()
             let round = Round::new().pause(SUMMARY_DELAY_MS).text(SUMMARY_TEXT);
             stream_round(&mut stream, round, Pace::MEDIUM, prompt_tokens).await
         }
-        Task::Reply(ctx) => reply(&mut stream, &ctx, &model, prompt_tokens).await,
+        Task::Reply(ctx) => {
+            let answered = reply(&mut stream, &ctx, &model, prompt_tokens).await?;
+            if answered {
+                attempts.forget(&req.session_id, message_count);
+            }
+            Ok(())
+        }
     }
 }
 
@@ -153,7 +149,7 @@ async fn reply(
     ctx: &Ctx,
     model: &str,
     prompt_tokens: u64,
-) -> std::io::Result<()> {
+) -> std::io::Result<bool> {
     let script = select(&ctx.prompt);
     let round = (script.play)(ctx);
     let prompt_tokens = if round.fill_context {
@@ -163,9 +159,11 @@ async fn reply(
         prompt_tokens
     };
     if let Some(HttpError { status, message }) = &round.error {
-        return write_error(stream, *status, message).await;
+        write_error(stream, *status, message).await?;
+        return Ok(false);
     }
-    stream_round(stream, round, script.pace, prompt_tokens).await
+    stream_round(stream, round, script.pace, prompt_tokens).await?;
+    Ok(true)
 }
 
 fn estimate_tokens(body: &Value) -> u64 {

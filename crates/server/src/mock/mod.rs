@@ -14,6 +14,7 @@
 //! (`!command` in a frontend) runs a real command; both can reach outside the workspace.
 //! Tools called by the scripts only touch the workspace.
 
+mod attempts;
 mod config;
 mod history;
 mod llm;
