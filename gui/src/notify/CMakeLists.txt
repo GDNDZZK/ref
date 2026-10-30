@@ -1,5 +1,7 @@
 # System notifications: what to say, and how to show it on this platform.
 set(notify_sources
+	notification_center.cpp
+	notification_center.h
 	notification_text.cpp
 	notification_text.h
 	notifier.h
@@ -18,7 +20,7 @@ endif()
 qt_add_library(refgui_notify STATIC ${notify_sources})
 
 target_include_directories(refgui_notify PUBLIC ${PROJECT_SOURCE_DIR}/src)
-target_link_libraries(refgui_notify PUBLIC Qt6::Core refgui_proto)
+target_link_libraries(refgui_notify PUBLIC Qt6::Core Qt6::Gui refgui_proto refgui_client)
 if(WIN32)
 	target_link_libraries(refgui_notify PRIVATE windowsapp shell32)
 elseif(APPLE)

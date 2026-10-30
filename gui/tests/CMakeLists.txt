@@ -108,6 +108,11 @@ target_link_libraries(tst_notification_text PRIVATE refgui_notify Qt6::Test)
 refgui_configure_target(tst_notification_text)
 add_test(NAME tst_notification_text COMMAND tst_notification_text)
 
+qt_add_executable(tst_notification_center tst_notification_center.cpp fake_backend.h)
+target_link_libraries(tst_notification_center PRIVATE refgui_notify Qt6::Test)
+refgui_configure_target(tst_notification_center)
+add_test(NAME tst_notification_center COMMAND tst_notification_center)
+
 # Needs `dbus-daemon`; skips itself without it. Never touches the user's session bus.
 if(UNIX AND NOT APPLE)
 	qt_add_executable(tst_dbus_notifier tst_dbus_notifier.cpp)
