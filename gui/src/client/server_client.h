@@ -46,11 +46,36 @@ public:
 	bool isOpen() const;
 
 	QCoro::Task<Result<proto::SessionInfo>> createSession(QString cwd, std::optional<QString> agent, std::optional<proto::ModelRef> model);
-	QCoro::Task<Result<proto::SessionSnapshot>> attach(QString sessionId);
+	// `foreground` counts the attachment as the user's view of the session; a watcher only follows it.
+	QCoro::Task<Result<proto::SessionSnapshot>> attach(QString sessionId, bool foreground = true);
+	QCoro::Task<Result<void>> detach(QString sessionId);
+	QCoro::Task<Result<proto::ServerConfig>> getConfig();
+	QCoro::Task<Result<QList<proto::SessionInfo>>> listSessions();
+	// Persisted sessions, newest first; of every directory when `cwd` is empty.
 	QCoro::Task<Result<QList<proto::SessionInfo>>> listHistory(QString cwd, int limit);
+	// Subscribes to the events of every live session (split view). Answers with the live sessions.
+	QCoro::Task<Result<QList<proto::SessionInfo>>> watchAll(bool enabled);
 	QCoro::Task<Result<proto::PromptResult>> prompt(QString sessionId, QString text);
 	QCoro::Task<Result<void>> abort(QString sessionId);
 	QCoro::Task<Result<void>> permissionReply(QString sessionId, QString callId, bool allow, bool always);
+
+	// Session management. The ones that change the session answer with its new info.
+	QCoro::Task<Result<proto::SessionInfo>> setModel(QString sessionId, proto::ModelRef model);
+	QCoro::Task<Result<proto::SessionInfo>> setAgent(QString sessionId, QString agent);
+	// No `variant` rotates to the model's next one.
+	QCoro::Task<Result<proto::SessionInfo>> setVariant(QString sessionId, std::optional<QString> variant);
+	QCoro::Task<Result<proto::SessionInfo>> rename(QString sessionId, QString name);
+	QCoro::Task<Result<proto::SessionInfo>> setCwd(QString sessionId, QString path);
+	QCoro::Task<Result<void>> compact(QString sessionId);
+	QCoro::Task<Result<void>> close(QString sessionId);
+	QCoro::Task<Result<void>> deleteSession(QString sessionId);
+	// The path the transcript was written to, on the backend's machine.
+	QCoro::Task<Result<QString>> exportTranscript(QString sessionId, QString path);
+	// `command` is peers, peers-name, peers-inbox or peers-outbox; answers with text to show.
+	QCoro::Task<Result<QString>> peerCommand(QString sessionId, QString command, QString args);
+	QCoro::Task<Result<QList<proto::McpServerStatus>>> mcpStatus(std::optional<QString> cwd);
+	QCoro::Task<Result<proto::DirListing>> listDirs(QString path);
+	QCoro::Task<Result<void>> shutdown();
 
 signals:
 	// Every frame but responses, in arrival order.
