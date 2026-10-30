@@ -82,6 +82,12 @@ if(REF_SERVER)
 	refgui_configure_target(tst_mock_session)
 	add_test(NAME tst_mock_session COMMAND tst_mock_session)
 
+	qt_add_executable(tst_mock_composer tst_mock_composer.cpp coro_test.h session_test_data.h)
+	target_link_libraries(tst_mock_composer PRIVATE refgui_composer Qt6::Test)
+	target_compile_definitions(tst_mock_composer PRIVATE REF_SERVER_BINARY="${REF_SERVER}")
+	refgui_configure_target(tst_mock_composer)
+	add_test(NAME tst_mock_composer COMMAND tst_mock_composer)
+
 	# The whole program, offscreen. ref-gui imports the KSyntaxHighlighting QML plugin at run
 	# time, which lives in the dependency prefix.
 	qt_add_executable(tst_app_smoke tst_app_smoke.cpp)

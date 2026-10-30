@@ -114,7 +114,7 @@ struct Fixture
 		}
 		else if(op == u"expand_command"_s)
 		{
-			fake.respond(request, {{u"text"_s, u"expanded "_s + request.value(u"args"_s).toString()}});
+			fake.respond(request, {{u"text"_s, expansion.value_or(u"expanded "_s + request.value(u"args"_s).toString())}});
 		}
 		else if(op == u"remove_queued"_s)
 		{
@@ -160,6 +160,7 @@ struct Fixture
 	ComposerModel composer;
 	QStringList files;
 	QString promptError;
+	std::optional<QString> expansion;
 	QJsonObject removal;
 };
 
@@ -185,6 +186,7 @@ private slots:
 	void withdrawingFillsTheDraft();
 	void withdrawingASentPromptTellsSo();
 	void customCommandSendsTheExpandedText();
+	void emptyExpansionSendsNothing();
 	void imageFilesAreAttached();
 	void clearDraftKeepsLongDraftsInTheHistory();
 	void queueFollowsTheServer();
@@ -435,6 +437,18 @@ void TestComposerModel::customCommandSendsTheExpandedText()
 	QCOMPARE(f.requestsOf(u"prompt"_s).first().value(u"text"_s).toString(), u"expanded main.rs"_s);
 }
 
+void TestComposerModel::emptyExpansionSendsNothing()
+{
+	Fixture f;
+	f.expansion = u"  "_s;
+	QSignalSpy toasts(&f.composer, &ComposerModel::toastRequested);
+
+	f.composer.runCustomCommand(u"empty"_s, {});
+
+	QTRY_COMPARE(toasts.count(), 1);
+	QVERIFY(f.requestsOf(u"prompt"_s).isEmpty());
+}
+
 void TestComposerModel::imageFilesAreAttached()
 {
 	Fixture f;
@@ -445,7 +459,9 @@ void TestComposerModel::imageFilesAreAttached()
 	file.close();
 	f.type(u"look: "_s);
 
+	QSignalSpy toasts(&f.composer, &ComposerModel::toastRequested);
 	QCOMPARE(f.composer.attachUrls({QUrl::fromLocalFile(file.fileName()), QUrl(u"file:///nowhere/readme.txt"_s)}), 1);
+	QCOMPARE(toasts.count(), 1); // the text file is not an image
 
 	QCOMPARE(f.composer.attachments()->rowCount(), 1);
 	QVERIFY(f.composer.text().contains(u"[Image 1]"_s));

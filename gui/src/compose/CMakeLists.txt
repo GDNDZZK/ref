@@ -1,12 +1,8 @@
 # What the input box does apart from drawing: the draft with its image tokens, history, the
 # `/` and `@` lists.
 qt_add_library(refgui_compose STATIC
-	command_ranking.cpp
-	command_ranking.h
 	completion_target.cpp
 	completion_target.h
-	fuzzy.cpp
-	fuzzy.h
 	image_file.cpp
 	image_file.h
 	prompt_draft.cpp

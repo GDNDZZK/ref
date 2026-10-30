@@ -11,11 +11,6 @@ namespace
 
 constexpr qsizetype MaxDetailLength = 200;
 
-QString tr(const char* source)
-{
-	return QCoreApplication::translate("refgui::notify", source);
-}
-
 // Errors can be long and span lines; a notification has room for the first line.
 QString firstLine(const QString& text)
 {
@@ -33,11 +28,11 @@ QString bodyOf(const proto::NotifyFrame& frame)
 	switch(frame.kind)
 	{
 	case proto::NotifyFrame::Kind::Permission:
-		return detail.isEmpty() ? tr("Waiting for permission") : tr("Waiting for permission to use %1").arg(detail);
+		return detail.isEmpty() ? QCoreApplication::translate("refgui::notify", "Waiting for permission") : QCoreApplication::translate("refgui::notify", "Waiting for permission to use %1").arg(detail);
 	case proto::NotifyFrame::Kind::TurnDone:
-		return tr("Finished");
+		return QCoreApplication::translate("refgui::notify", "Finished");
 	case proto::NotifyFrame::Kind::TurnError:
-		return detail.isEmpty() ? tr("Stopped with an error") : tr("Stopped with an error: %1").arg(detail);
+		return detail.isEmpty() ? QCoreApplication::translate("refgui::notify", "Stopped with an error") : QCoreApplication::translate("refgui::notify", "Stopped with an error: %1").arg(detail);
 	}
 	Q_UNREACHABLE_RETURN(QString());
 }

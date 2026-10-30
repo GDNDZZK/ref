@@ -347,6 +347,11 @@ QCoro::Task<> ComposerModel::expandAndSend(QString name, QString args)
 		emit failed(expanded.error());
 		co_return;
 	}
+	if(expanded->trimmed().isEmpty())
+	{
+		emit toastRequested(u"warn"_s, tr("The command expanded to nothing"));
+		co_return;
+	}
 	co_await sendPrompt(*expanded, {}, false);
 }
 
@@ -522,7 +527,7 @@ bool ComposerModel::pasteFromClipboard()
 	{
 		return false;
 	}
-	if(data->hasUrls() && attachUrls(data->urls()) > 0)
+	if(data->hasUrls() && attachImageUrls(data->urls(), false) > 0)
 	{
 		return true;
 	}
@@ -563,6 +568,11 @@ bool ComposerModel::pasteFromClipboard()
 
 int ComposerModel::attachUrls(const QList<QUrl>& urls)
 {
+	return attachImageUrls(urls, true);
+}
+
+int ComposerModel::attachImageUrls(const QList<QUrl>& urls, bool reportOthers)
+{
 	int attached = 0;
 	for(const QUrl& url : urls)
 	{
@@ -576,6 +586,10 @@ int ComposerModel::attachUrls(const QList<QUrl>& urls)
 		{
 			attachImage(**file);
 			++attached;
+		}
+		else if(reportOthers)
+		{
+			emit toastRequested(u"warn"_s, tr("%1 is not a supported image (PNG, JPEG, GIF or WebP)").arg(url.fileName()));
 		}
 	}
 	return attached;
