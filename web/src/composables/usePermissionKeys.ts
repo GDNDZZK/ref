@@ -2,8 +2,8 @@
 // session, d = deny. Typing in the composer is left alone.
 
 import { onBeforeUnmount, onMounted } from 'vue'
-import { useConversationStore } from '../stores/conversation.ts'
 import { useNoticesStore } from '../stores/notices.ts'
+import { useWorkspaceStore } from '../stores/workspace.ts'
 
 const ANSWERS: Record<string, { allow: boolean; always: boolean }> = {
   a: { allow: true, always: false },
@@ -19,16 +19,17 @@ function isTyping(target: EventTarget | null): boolean {
 }
 
 export function usePermissionKeys(): void {
-  const conversation = useConversationStore()
+  const workspace = useWorkspaceStore()
   const notices = useNoticesStore()
 
   function onKeydown(event: KeyboardEvent): void {
     const answer = ANSWERS[event.key]
-    const request = conversation.permissions[0]
-    if (!answer || !request || isTyping(event.target)) return
+    const session = workspace.current
+    const request = session?.permissions[0]
+    if (!answer || !session || !request || isTyping(event.target)) return
     if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return
     event.preventDefault()
-    conversation
+    session
       .answerPermission(request.call_id, answer.allow, answer.always)
       .catch((error) => notices.pushError(error))
   }

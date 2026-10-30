@@ -42,6 +42,19 @@ describe('parseValue', () => {
   })
 })
 
+describe('lists of property names', () => {
+  it('reads an array of other properties', () => {
+    expect(valueOf('readonly property var agentPalette: [agentBlue, agentPurple,agentGreen]')).toEqual({
+      kind: 'list',
+      names: ['agentBlue', 'agentPurple', 'agentGreen'],
+    })
+  })
+
+  it.each(['[]', '[1, 2]', '[a, "b"]', '[a, b.c]'])('rejects %s', (list) => {
+    expect(() => valueOf(`readonly property var x: ${list}`)).toThrow(/cannot generate/)
+  })
+})
+
 describe('findProperty', () => {
   const properties = parseProperties('property int a: 1\nproperty int b: 2\nproperty int b: 3\n')
 
