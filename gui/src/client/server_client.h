@@ -6,7 +6,9 @@
 #include <QCoroTask>
 #include <QHash>
 #include <QJsonObject>
+#include <QElapsedTimer>
 #include <QObject>
+#include <QTimer>
 #include <QWebSocket>
 
 #include <chrono>
@@ -48,6 +50,18 @@ public:
 	                                             QList<proto::NotifyFrame::Kind> notify = {});
 	void close();
 	bool isOpen() const;
+
+	// A peer that vanishes without closing (a suspended or crashed machine, a dropped network)
+	// leaves the connection open and its requests unanswered. So a connection that stays silent
+	// for `pingAfter` gets a Ping, and one that stays silent for `deadAfter` is dropped, which
+	// is reported as `closed` like any other end. `tick` is how often the silence is looked at.
+	struct Heartbeat
+	{
+		std::chrono::milliseconds pingAfter{30000};
+		std::chrono::milliseconds deadAfter{60000};
+		std::chrono::milliseconds tick{5000};
+	};
+	void setHeartbeat(const Heartbeat& heartbeat);
 
 	QCoro::Task<Result<proto::SessionInfo>> createSession(QString cwd, std::optional<QString> agent, std::optional<proto::ModelRef> model);
 	// `foreground` counts the attachment as the user's view of the session; a watcher only follows it.
@@ -113,6 +127,9 @@ private:
 	};
 
 	QCoro::Task<Result<QJsonObject>> request(QJsonObject body);
+	QCoro::Task<> ping();
+	void onHeartbeat();
+	void stopHeartbeat();
 	void onTextMessage(const QString& text);
 	void onDisconnected();
 	void complete(quint64 id, Result<QJsonObject> result);
@@ -122,6 +139,11 @@ private:
 	quint64 m_lastId = 0;
 	QHash<quint64, ResponseAwaiter*> m_pending;
 	QString m_closeReason; // set when we close it ourselves
+	Heartbeat m_heartbeat;
+	QTimer m_heartbeatTimer;
+	QElapsedTimer m_silence; // since the last message of the peer
+	bool m_helloDone = false;
+	bool m_pingOutstanding = false;
 };
 
 } // namespace refgui::client
