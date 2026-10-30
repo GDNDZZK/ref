@@ -12,7 +12,7 @@ import { effectScope, markRaw, ref, shallowReactive } from 'vue'
 import type { EffectScope } from 'vue'
 import { useFrame } from '../motion/useFrame.ts'
 import type { RefApi } from '../net/api.ts'
-import type { PermissionRequest, SessionEvent, SessionInfo } from '../proto/generated'
+import type { Message, PermissionRequest, SessionEvent, SessionInfo } from '../proto/generated'
 import type { Block } from './blocks.ts'
 import { Transcript } from './transcript.ts'
 
@@ -32,6 +32,7 @@ export class ChatSession {
     blocks: [] as readonly Block[],
     info: undefined as SessionInfo | undefined,
     permissions: [] as PermissionRequest[],
+    queued: [] as readonly Message[], // waiting for the next safe point, in delivery order
     loaded: false,
     generation: 0, // counts the times the history was loaded
     attachment: 'detached' as Attachment,
@@ -65,6 +66,10 @@ export class ChatSession {
 
   get permissions(): readonly PermissionRequest[] {
     return this.state.permissions
+  }
+
+  get queued(): readonly Message[] {
+    return this.state.queued
   }
 
   get loaded(): boolean {
@@ -159,6 +164,7 @@ export class ChatSession {
   private publish(): void {
     this.state.info = this.transcript.info
     this.state.permissions = [...this.transcript.permissions.values()]
+    this.state.queued = this.transcript.queued
     this.flushing.value = true
   }
 }
