@@ -3,7 +3,8 @@
     "empty": "我们要做点什么？",
     "jumpToLatest": "回到最新",
     "thinking": "思考中",
-    "thought": "已思考"
+    "thought": "已思考",
+    "loadOlder": "加载更早的消息"
   },
   "composer": {
     "placeholder": "给 ref 发消息",
@@ -82,7 +83,11 @@
     "noDirectory": "没有工作目录：请通过 ref-web 打开此页面，或在直连 ref-server 时设置 ?cwd=（或 VITE_REF_CWD）。"
   },
   "message": {
-    "from": "来自 {name}"
+    "from": "来自 {name}",
+    "fromPeer": "来自“{name}”的消息",
+    "createdBy": "由“{name}”创建",
+    "reminder": "提醒",
+    "shell": "命令行"
   },
   "command": {
     "unavailable": "这个命令现在不可用。"
@@ -107,5 +112,23 @@
     "allow": "允许",
     "later": "暂不",
     "prompt": "其他会话需要你时，允许显示桌面通知吗？"
+  },
+  "meta": {
+    "undo": "撤销",
+    "copy": "复制",
+    "interrupted": "已中断",
+    "tokensPerSecond": "{rate} 词元/秒"
+  },
+  "compaction": {
+    "title": "上下文已压缩",
+    "note": "上方的消息仍可查看，但不再发送给模型"
+  },
+  "status": {
+    "working": "处理中",
+    "runningTools": "正在运行工具",
+    "waitingPermission": "等待你的授权",
+    "compacting": "正在压缩上下文…",
+    "retrying": "{seconds} 秒后重试（第 {attempt} 次）：{error}",
+    "contextTitle": "上下文：{used} / {max} 词元（{percent}%）。建议在 {recommend} 压缩，{auto} 时自动压缩。"
   }
 }

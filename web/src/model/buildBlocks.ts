@@ -97,6 +97,7 @@ function metaBlock(message: Message, context: BuildContext, open: boolean): Meta
     interrupted: isInterrupted(message),
     failed: message.error !== null && !isInterrupted(message),
     canUndo: message.role === 'user' && message.source.kind === 'human',
+    copyable: messageText(message) !== '',
   }
 }
 
