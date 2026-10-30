@@ -68,6 +68,12 @@ describe('toolIcon and peerName', () => {
     expect(toolIcon('mystery')).toBe('tool-16')
   })
 
+  it('does not mistake a tool named like an Object.prototype member for a known one', () => {
+    expect(toolIcon('toString')).toBe('tool-16')
+    expect(toolIcon('constructor')).toBe('tool-16')
+    expect(toolIcon('__proto__')).toBe('mcp-16') // has an underscore, like any server tool
+  })
+
   it('names the session a cross-session tool talks to', () => {
     expect(peerName('send_message', { to: 'a' })).toBe('a')
     expect(peerName('read_session', { session: 'b' })).toBe('b')
