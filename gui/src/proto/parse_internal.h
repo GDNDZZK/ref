@@ -13,6 +13,8 @@ SessionInfo readSessionInfo(const Fields& fields);
 Part readPart(const Fields& fields);
 Message readMessage(const Fields& fields);
 QList<Message> readMessages(const Fields& fields, QLatin1StringView key);
+ImageData readImageData(const Fields& fields);
 PermissionRequest readPermissionRequest(const Fields& fields);
+NamedImage readNamedImage(const Fields& fields);
 
 } // namespace refgui::proto::json

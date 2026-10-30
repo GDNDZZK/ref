@@ -2,7 +2,7 @@
 
 #include "client/instance_files.h"
 
-#include <QCoroTimer>
+#include <utility>
 
 using namespace Qt::StringLiterals;
 using namespace std::chrono_literals;
@@ -48,9 +48,15 @@ Backend::Backend(Source source, QString cwd, QObject* parent)
 	, m_cwd(std::move(cwd))
 	, m_client(this)
 {
+	m_pauseTimer.setSingleShot(true);
+	m_pauseTimer.setInterval(ReconnectPause);
+	connect(&m_pauseTimer, &QTimer::timeout, this, &Backend::endPause);
 }
 
-Backend::~Backend() = default;
+Backend::~Backend()
+{
+	shutdown();
+}
 
 void Backend::start()
 {
@@ -61,6 +67,22 @@ void Backend::shutdown()
 {
 	m_stopping = true;
 	m_client.close();
+	endPause();
+}
+
+void Backend::PauseAwaiter::await_suspend(std::coroutine_handle<> waiter)
+{
+	backend.m_pauseWaiter = waiter;
+	backend.m_pauseTimer.start();
+}
+
+void Backend::endPause()
+{
+	m_pauseTimer.stop();
+	if(const std::coroutine_handle<> waiter = std::exchange(m_pauseWaiter, {}))
+	{
+		waiter.resume();
+	}
 }
 
 // Connect, wait for the connection to end, pause, repeat.
@@ -77,7 +99,7 @@ QCoro::Task<> Backend::run()
 		if(!endpoint)
 		{
 			setState(State::Disconnected, endpoint.error());
-			co_await QCoro::sleepFor(ReconnectPause);
+			co_await pause();
 			continue;
 		}
 
@@ -89,7 +111,7 @@ QCoro::Task<> Backend::run()
 			co_return;
 		}
 		setState(State::Disconnected, reason);
-		co_await QCoro::sleepFor(ReconnectPause);
+		co_await pause();
 	}
 }
 
@@ -122,7 +144,8 @@ QCoro::Task<std::expected<Endpoint, QString>> Backend::connectOnce()
 
 QCoro::Task<bool> Backend::tryConnect(const Endpoint& endpoint, std::chrono::milliseconds timeout)
 {
-	const Result<proto::HelloResult> hello = co_await m_client.open(endpoint, m_cwd, timeout);
+	m_helloNotifyKinds = m_notifyKinds;
+	const Result<proto::HelloResult> hello = co_await m_client.open(endpoint, m_cwd, timeout, m_helloNotifyKinds);
 	if(hello)
 	{
 		m_hello = *hello;

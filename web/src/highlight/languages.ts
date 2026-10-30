@@ -87,8 +87,8 @@ const ALIASES: Record<string, LanguageId> = {
 
 export function languageFromName(name: string): LanguageId | undefined {
   const key = name.trim().toLowerCase()
-  if (key in LOADERS) return key as LanguageId
-  return ALIASES[key]
+  if (Object.hasOwn(LOADERS, key)) return key as LanguageId
+  return Object.hasOwn(ALIASES, key) ? ALIASES[key] : undefined
 }
 
 // The language of a file, from its extension.

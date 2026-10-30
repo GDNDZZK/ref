@@ -5,6 +5,7 @@ import type { InjectionKey, Ref } from 'vue'
 
 export interface ChatScroll {
   scroller: Readonly<Ref<HTMLElement | null>>
+  hoveredMessageId: Readonly<Ref<string>> // the message under the pointer, '' for none
   // Folding a body under a pinned header would carry the header up out of view with the end of
   // its block. While held, the view scrolls back as the block shrinks, so the header stays where
   // it is. Release once the fold is done.

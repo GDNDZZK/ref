@@ -63,13 +63,13 @@ pub enum Step {
     Tool(ToolCall),
     /// Stop streaming for a while.
     Pause(u64),
-    /// Fail the whole request with an HTTP error (must be the only step).
-    Error(HttpError),
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct Round {
     pub steps: Vec<Step>,
+    /// Fail the whole request with this HTTP error instead of streaming the steps.
+    pub error: Option<HttpError>,
     /// Report the context as almost full, so the next prompt triggers automatic compaction.
     pub fill_context: bool,
 }
@@ -105,11 +105,11 @@ impl Round {
 
     pub fn error(status: u16, message: impl Into<String>) -> Round {
         Round {
-            steps: vec![Step::Error(HttpError {
+            error: Some(HttpError {
                 status,
                 message: message.into(),
-            })],
-            fill_context: false,
+            }),
+            ..Round::default()
         }
     }
 

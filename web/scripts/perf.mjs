@@ -1,4 +1,4 @@
-// Long-conversation check in headless Chromium: puts synthetic blocks into the conversation store
+// Long-conversation check in headless Chromium: puts synthetic blocks into the open ChatSession's state
 // of a page connected to `ref-web --mock`, then measures first render, scrolling and streaming at
 // the end. Software rendering, so read the numbers as relative.
 //   node scripts/perf.mjs [blockCount]
@@ -9,10 +9,32 @@ const COUNT = Number(process.argv[2] ?? 5000)
 
 function measure({ count, RENDER_LIMIT_MS }) {
   const app = document.querySelector('#app').__vue_app__
-  const store = app.config.globalProperties.$pinia._s.get('conversation')
+  // The synthetic blocks go straight into the session's reactive state (private in TypeScript).
+  const store = app.config.globalProperties.$pinia._s.get('workspace').current.state
   const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
   const sentence = 'The quick brown fox jumps over the lazy dog while the parser reads another line. '
-  const base = { messageId: 'm', streaming: false }
+  const base = { messageId: 'm', streaming: false, stale: false }
+
+  function meta(key, role) {
+    return {
+      ...base,
+      key,
+      kind: 'meta',
+      role,
+      source: 'human',
+      time: 0,
+      timeEnd: 1200,
+      agent: 'build',
+      model: 'model',
+      variant: null,
+      tokensIn: 1234,
+      tokensOut: 56,
+      interrupted: false,
+      failed: false,
+      canUndo: role === 'user',
+      copyable: true,
+    }
+  }
 
   function makeBlocks() {
     const blocks = []
@@ -26,7 +48,9 @@ function measure({ count, RENDER_LIMIT_MS }) {
         source: 'human',
         senderName: undefined,
         opensTurn: i > 0,
+        images: [],
       })
+      blocks.push(meta(`umeta-${i}`, 'user'))
       blocks.push({ ...base, key: key('reasoning'), kind: 'reasoning', text: sentence.repeat(3) })
       blocks.push({
         ...base,
@@ -57,7 +81,9 @@ function measure({ count, RENDER_LIMIT_MS }) {
         timeEnd: 1,
         runAt: null,
         permission: undefined,
+        images: [],
       })
+      blocks.push(meta(`ameta-${i}`, 'assistant'))
     }
     return blocks.slice(0, count)
   }
@@ -109,6 +135,21 @@ function measure({ count, RENDER_LIMIT_MS }) {
     result.heapMB = performance.memory ? performance.memory.usedJSHeapSize / 1048576 : null
 
     const scroller = document.querySelector('.scroller')
+    // Reading upwards from the end: a row in view must move exactly as far as the view scrolled.
+    // Rows that change size above it (estimated heights becoming real) show up as drift.
+    scroller.scrollTop = scroller.scrollHeight
+    await frames()
+    const STEP = 400
+    const drifts = []
+    for (let step = 0; step < 40; step++) {
+      const probe = [...document.querySelectorAll('.frame')].find((f) => f.getBoundingClientRect().top > 200)
+      const before = probe.getBoundingClientRect().top
+      scroller.scrollTop -= STEP
+      await frames()
+      drifts.push(Math.abs(probe.getBoundingClientRect().top - (before + STEP)))
+    }
+    result.scrollUpDrift = { max: Math.max(...drifts), total: drifts.reduce((a, b) => a + b, 0) }
+
     const stride = scroller.scrollHeight / 200
     result.scrollFrames = await frameTimes(200, (step) => (scroller.scrollTop = step * stride))
 

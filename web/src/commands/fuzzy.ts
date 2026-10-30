@@ -23,3 +23,12 @@ export function fuzzyScore(query: string, text: string): number | undefined {
   }
   return score - haystack.length * 0.01 // among equals the shorter text wins
 }
+
+// The items that match the query, best first. Equal scores keep their order.
+export function rankByQuery<T>(items: readonly T[], query: string, text: (item: T) => string): T[] {
+  return items
+    .map((item, index) => ({ item, index, score: fuzzyScore(query, text(item)) }))
+    .filter((entry): entry is typeof entry & { score: number } => entry.score !== undefined)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map((entry) => entry.item)
+}

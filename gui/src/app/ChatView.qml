@@ -1,4 +1,6 @@
 // Adapted from an early version of qutie by LightBlueCube
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQml.Models
@@ -23,18 +25,32 @@ import RefGui
 //
 // Both chases (following, wheel) step in whole pixels; see scrollStep().
 //
-// Geometry: every row stays instantiated (cacheBuffer), so contentHeight and originY
-// are exact. Once rows off screen are destroyed, ListView estimates them from the
-// average row height, and a tall code block entering or leaving the view resizes the
-// scroll bar and shifts the content under a dragged handle.
+// Geometry: the rows within `retainedDistance` of the view stay instantiated, so
+// contentHeight and originY are exact for all but very long conversations. Beyond that,
+// ListView estimates the rows it destroyed from the average row height, and a tall code
+// block entering or leaving the view resizes the scroll bar and shifts the content under a
+// dragged handle. Keeping every row costs memory: about 0.25 MB per row measured with a
+// mock session of 800 rows, 256 MB against 124 MB with the default cache.
 ListView {
 	id: view
 
-	readonly property real columnWidth: Math.min(width - 2 * Theme.pagePadding, Theme.contentWidth)
+	property real sidePadding: Theme.pagePadding // narrower in a split-view tile
+	readonly property real columnWidth: Math.min(width - 2 * sidePadding, Theme.contentWidth)
 	property bool following: true
 	property bool turnInProgress: false
+	property string sessionId // the session whose pictures the rows show
+	property bool moreBefore: false // the backend has earlier messages
+	property bool loadingOlder: false
+	property string olderError
+	readonly property bool prepending: loadingOlder // rows added now are earlier history
+	property int permissionCount: 0 // tool calls waiting for the user's answer
 
 	signal errorOutOfSight() // an error block arrived while the user was reading further up
+	signal undoRequested(string messageId)
+	signal copyRequested(string messageId)
+	signal loadOlderRequested()
+	signal imageClicked(var image) // a thumbnail, to be shown large
+	signal cancelRequested() // the Cancel button of a delayed tool call
 	signal permissionAnswered(string callId, bool allow, bool always) // from a tool card that asks for permission
 
 	// Where the content ends, without and with the held room. The footer sits right
@@ -46,6 +62,8 @@ ListView {
 	property bool holdUpdating: false // holdEnd() is writing heldSpace
 	property bool holdStale: false // the end moved during that write
 
+	readonly property int retainedDistance: 20000 // px above and below the view whose rows stay instantiated, about 200 rows
+	readonly property int olderTriggerDistance: 400 // px from the top at which the next page loads by itself
 	readonly property real minContentY: originY - topMargin
 	readonly property real maxContentY: Math.max(minContentY, originY + contentHeight - height)
 
@@ -123,9 +141,35 @@ ListView {
 	clip: true
 	spacing: Theme.blockSpacing
 	topMargin: Theme.pagePadding
-	cacheBuffer: 1e7 // px, beyond any conversation: keeps every row instantiated
+	cacheBuffer: retainedDistance
 	boundsBehavior: Flickable.StopAtBounds
 	acceptedButtons: Qt.NoButton // mouse drags select text; wheel, touchpad and touch still scroll
+
+	// Loads earlier messages when the top is near. A failed load waits for a click.
+	function loadOlderIfNear() {
+		const nearTop = contentY - originY < olderTriggerDistance
+		if (moreBefore && count > 0 && !loadingOlder && olderError === "" && nearTop && !following)
+			loadOlderRequested()
+	}
+
+	// The view keeps the rows it shows where they are when earlier ones are added above them.
+	onContentYChanged: loadOlderIfNear()
+	onMoreBeforeChanged: loadOlderIfNear()
+	onLoadingOlderChanged: loadOlderIfNear()
+
+	header: Item {
+		width: view.width
+		height: view.moreBefore ? pill.height + Theme.blockSpacing : 0
+		clip: true
+
+		OlderPill {
+			id: pill
+			width: parent.width
+			loading: view.loadingOlder
+			error: view.olderError
+			onClicked: view.loadOlderRequested()
+		}
+	}
 
 	// Bottom padding plus held room. A footer rather than bottomMargin, so its
 	// position marks the exact end of the rows.
@@ -257,5 +301,6 @@ ListView {
 		DelegateChoice { roleValue: "code"; CodeBlock {} }
 		DelegateChoice { roleValue: "tool"; ToolBlock {} }
 		DelegateChoice { roleValue: "error"; ErrorBlock {} }
+		DelegateChoice { roleValue: "meta"; MetaBlock {} }
 	}
 }

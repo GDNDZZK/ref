@@ -1,34 +1,106 @@
 // Adapted from an early version of qutie by LightBlueCube
+pragma ComponentBehavior: Bound
+
 import QtQuick
+import QtQuick.Layouts
 import RefGui
 
-// A tool call: status, title and, on demand, its input and output. While the tool waits
-// for permission, the card asks for it.
+// A tool call: its state, what it does and, on demand, its input and output. A call that
+// waits for permission opens and asks for it in the card; one that waits to start can be
+// cancelled from the card.
 Block {
 	id: block
 
-	required property string output
-	required property bool failed
+	required property string toolName
+	required property string purpose
 	required property string toolState
 	required property string inputJson
 	required property string rawInput // the arguments while they stream
+	required property string output
+	required property bool failed
 	required property string callId
+	required property real time
+	required property real timeEnd
+	required property real runAt
+	required property bool expanded
+	required property bool showAll
+	required property var meta
+	required property string liveOutput
+	required property var images
 
-	property bool expanded: false
-	readonly property string input: inputJson !== "" ? inputJson : rawInput
-	readonly property string details: [input, output].filter(part => part !== "").join("\n\n")
-	readonly property bool hasDetails: details !== ""
+	readonly property var inputObject: ToolInfo.parse(inputJson)
+	readonly property string detail: ToolInfo.detail(toolName, inputObject)
+	readonly property bool hasDetails: !alwaysOpen && (inputJson !== "" || rawInput !== "" || output !== "" || images.length > 0)
 	readonly property bool awaitingPermission: toolState === "awaiting_permission"
+	readonly property bool delayed: toolState === "delayed"
+	readonly property bool alwaysOpen: toolName === "todo" && ToolInfo.todos(inputObject).length > 0
+	readonly property bool open: alwaysOpen || ((expanded || awaitingPermission) && hasDetails)
+	readonly property bool inactive: toolState === "denied" || toolState === "cancelled"
+	readonly property bool showsTime: columnWidth >= timeShownFromWidth
+	readonly property int timeShownFromWidth: 560
+	readonly property int headerHeight: 38
+	readonly property int cardPadding: 14
+	readonly property int itemSpacing: 10
+	readonly property real attentionBorderOpacity: 0.6
+	readonly property int tickInterval: 250 // ms between redraws of the clock texts
+	readonly property string firstOutputLine: ToolInfo.firstLine(output)
+
+	property real now: Date.now()
+
+	// What the right end of the header says, and in which color.
+	readonly property string statusText: {
+		const took = timeEnd > 0 ? Format.duration(timeEnd - time) : ""
+		switch (toolState) {
+		case "streaming":
+			return qsTr("writing\u2026")
+		case "awaiting_permission":
+			return qsTr("Needs permission")
+		case "delayed":
+			return qsTr("Runs in %1").arg(Format.elapsed(Math.max(0, runAt - now) + Format.msPerSecond - 1))
+		case "running":
+			return qsTr("running %1").arg(Format.elapsed(now - time))
+		case "error":
+			return took === "" ? qsTr("error") : qsTr("error %1").arg(took)
+		case "denied":
+			return qsTr("denied")
+		case "cancelled":
+			return qsTr("cancelled")
+		default:
+			return took
+		}
+	}
+	readonly property color statusColor: {
+		switch (toolState) {
+		case "awaiting_permission":
+		case "delayed":
+			return Theme.warning
+		case "streaming":
+		case "running":
+			return Theme.accent
+		case "error":
+			return Theme.danger
+		default:
+			return Theme.textMuted
+		}
+	}
+
+	Timer {
+		interval: block.tickInterval
+		running: block.toolState === "running" || block.delayed
+		repeat: true
+		onTriggered: block.now = Date.now()
+	}
 
 	Rectangle {
 		id: card
 		width: block.columnWidth
-		height: header.height + body.height + permission.height
+		height: header.height + failure.height + body.height + permission.height
 		radius: Theme.radius
 		color: hover.hovered && block.hasDetails ? Theme.surfaceHover : Theme.surface
-		border.color: Theme.border
+		border.color: block.awaitingPermission || block.delayed ? Qt.alpha(Theme.warning, block.attentionBorderOpacity) : Theme.border
 
 		Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+		Behavior on border.color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 
 		// Stays in view while the output scrolls past under it (Block.pinOffset).
 		Item {
@@ -39,7 +111,7 @@ Block {
 			y: offset
 			z: 1 // above the output
 			width: parent.width
-			height: 38
+			height: block.headerHeight
 
 			// Hides the output under the pinned header. Inside the card's border; its
 			// corners follow the card's where the header nears the card's top or end.
@@ -68,57 +140,127 @@ Block {
 				}
 			}
 
-			StatusDot {
-				id: dot
-				anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }
-				running: block.streaming
-				failed: block.failed
-			}
-
-			Text {
-				anchors {
-					left: dot.right
-					leftMargin: 10
-					right: chevron.left
-					rightMargin: 8
-					verticalCenter: parent.verticalCenter
-				}
-				text: block.content
-				elide: Text.ElideRight
-				color: Theme.text
-				font.family: Theme.monoFamily
-				font.pixelSize: Theme.codeFontSize
-			}
-
-			Chevron {
-				id: chevron
-				anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
-				rotation: block.expanded ? 90 : 0
-				opacity: block.hasDetails ? 1 : 0
-
-				Behavior on rotation { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-				Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-			}
-
 			HoverHandler {
 				id: hover
-				cursorShape: block.hasDetails ? Qt.PointingHandCursor : Qt.ArrowCursor
+				cursorShape: block.hasDetails && !block.awaitingPermission ? Qt.PointingHandCursor : Qt.ArrowCursor
 			}
 			TapHandler {
-				enabled: block.hasDetails
+				enabled: block.hasDetails && !block.awaitingPermission
 				onTapped: {
-					if (block.expanded && header.offset > 0)
+					if (block.open && header.offset > 0)
 						block.holdHeader(header.height)
-					block.expanded = !block.expanded
+					block.toggleExpanded()
 				}
+			}
+
+			RowLayout {
+				anchors { fill: parent; leftMargin: block.cardPadding; rightMargin: block.cardPadding }
+				spacing: block.itemSpacing
+
+				ToolStateSlot {
+					toolState: block.toolState
+					runAt: block.runAt
+				}
+				Icon {
+					name: ToolInfo.icon(block.toolName)
+					color: Theme.textMuted
+				}
+				Text {
+					textFormat: Text.PlainText
+					text: block.toolName
+					color: block.inactive ? Theme.textMuted : Theme.text
+					font.family: Theme.monoFamily
+					font.pixelSize: Theme.codeFontSize
+					font.bold: true
+					font.strikeout: block.toolState === "denied"
+				}
+				// The purpose keeps its words; the detail gets what is left.
+				Item {
+					Layout.fillWidth: true
+					Layout.preferredWidth: 0
+					Layout.fillHeight: true
+
+					Text {
+						textFormat: Text.PlainText
+						id: purposeText
+						anchors.verticalCenter: parent.verticalCenter
+						width: Math.min(implicitWidth, parent.width)
+						text: block.purpose
+						elide: Text.ElideRight
+						color: block.toolState === "cancelled" ? Theme.textMuted : Theme.text
+						font.pixelSize: Theme.codeFontSize
+					}
+					Text {
+						textFormat: Text.PlainText
+						anchors.verticalCenter: parent.verticalCenter
+						x: purposeText.visible && purposeText.text !== "" ? purposeText.width + block.itemSpacing : 0
+						width: Math.max(0, parent.width - x)
+						text: block.detail
+						elide: Text.ElideRight
+						color: Theme.textMuted
+						font.family: Theme.monoFamily
+						font.pixelSize: Theme.smallFontSize
+					}
+				}
+				TextButton {
+					visible: block.delayed
+					text: qsTr("Cancel")
+					onClicked: block.chat.cancelRequested()
+				}
+				Text {
+					textFormat: Text.PlainText
+					text: block.statusText
+					color: block.statusColor
+					font.pixelSize: Theme.smallFontSize
+
+					Behavior on color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+				}
+				Text {
+					textFormat: Text.PlainText
+					visible: block.showsTime
+					text: Format.clock(block.time)
+					color: Theme.textMuted
+					font.pixelSize: Theme.smallFontSize
+				}
+				Chevron {
+					rotation: block.open ? 90 : 0
+					opacity: block.hasDetails ? 1 : 0
+
+					Behavior on rotation { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+					Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+				}
+			}
+		}
+
+		// Why a failed call failed, without opening the card.
+		Item {
+			id: failure
+
+			readonly property bool shown: block.toolState === "error" && !block.open && block.firstOutputLine !== ""
+
+			y: header.height
+			width: parent.width
+			height: shown ? 26 : 0
+			clip: true
+
+			Behavior on height { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+
+			Text {
+				textFormat: Text.PlainText
+				anchors { left: parent.left; leftMargin: block.cardPadding; right: parent.right; rightMargin: block.cardPadding; top: parent.top }
+				text: "\u2514 " + block.firstOutputLine
+				elide: Text.ElideRight
+				color: Theme.danger
+				font.family: Theme.monoFamily
+				font.pixelSize: Theme.smallFontSize
 			}
 		}
 
 		Item {
 			id: body
-			y: header.height
+			y: header.height + failure.height
 			width: parent.width
-			height: block.expanded ? outputText.height : 0
+			height: block.open && bodyLoader.item ? (bodyLoader.item as Item).height : 0
 			clip: true
 
 			Behavior on height {
@@ -143,66 +285,27 @@ Block {
 				color: Theme.border
 			}
 
-			TextEdit {
-				id: outputText
+			// Kept while the body folds away, so it does not vanish before it closes.
+			Loader {
+				id: bodyLoader
 				width: parent.width
-				topPadding: 10
-				bottomPadding: 12
-				leftPadding: 14
-				rightPadding: 14
-				readOnly: true
-				selectByMouse: true
-				wrapMode: TextEdit.Wrap
-				textFormat: TextEdit.PlainText
-				text: block.details
-				color: Theme.textMuted
-				selectionColor: Theme.selection
-				selectedTextColor: Theme.text
-				font.family: Theme.monoFamily
-				font.pixelSize: Theme.smallFontSize
+				active: block.open || body.height > 0
+
+				sourceComponent: ToolBody {
+					call: block
+					onShowAllRequested: block.chat.model.toggleShowAll(block.index)
+				}
 			}
 		}
 
-		// The question, under the header and the details.
-		Item {
+		PermissionSection {
 			id: permission
-			y: header.height + body.height
-			width: parent.width
-			height: block.awaitingPermission ? 40 : 0
-			clip: true
-
-			Behavior on height { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-
-			Rectangle {
-				width: parent.width
-				height: 1
-				color: Theme.border
-			}
-
-			Text {
-				anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }
-				text: qsTr("Waiting for your permission")
-				color: Theme.textMuted
-				font.pixelSize: Theme.smallFontSize
-			}
-
-			Row {
-				anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
-				spacing: 4
-
-				TextButton {
-					text: qsTr("Allow")
-					onClicked: block.ListView.view.permissionAnswered(block.callId, true, false)
-				}
-				TextButton {
-					text: qsTr("Allow for session")
-					onClicked: block.ListView.view.permissionAnswered(block.callId, true, true)
-				}
-				TextButton {
-					text: qsTr("Deny")
-					onClicked: block.ListView.view.permissionAnswered(block.callId, false, false)
-				}
-			}
+			y: header.height + failure.height + body.height
+			toolName: block.toolName
+			input: block.inputObject
+			open: block.awaitingPermission
+			othersWaiting: block.chat.permissionCount - 1
+			onAnswered: (allow, always) => block.chat.permissionAnswered(block.callId, allow, always)
 		}
 	}
 }

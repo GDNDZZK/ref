@@ -19,6 +19,26 @@ describe('renderMarkdown', () => {
     expect(renderMarkdown('[x](javascript:alert(1))')).not.toContain('href')
   })
 
+  it('links only http, https and mailto, in any letter case', () => {
+    for (const href of ['HTTPS://example.com/a', 'http://example.com', 'Mailto:a@example.com']) {
+      expect(renderMarkdown(`[x](${href})`)).toContain(`<a href="${href}"`)
+    }
+    for (const href of [
+      'ftp://example.com/a',
+      '//host/x',
+      'ms-msdt:/id',
+      'search-ms:query=x',
+      'data:image/png;base64,AAAA',
+      'file:///etc/passwd',
+      'docs/readme.md',
+      '/etc/passwd',
+    ]) {
+      const html = renderMarkdown(`[x](${href})`)
+      expect(html, href).not.toContain('<a ')
+      expect(html, href).not.toContain('href')
+    }
+  })
+
   it('opens links in a new tab without opener', () => {
     expect(renderMarkdown('[a](https://example.com)')).toContain(
       '<a href="https://example.com" target="_blank" rel="noopener noreferrer">a</a>',

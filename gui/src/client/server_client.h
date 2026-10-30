@@ -6,7 +6,9 @@
 #include <QCoroTask>
 #include <QHash>
 #include <QJsonObject>
+#include <QElapsedTimer>
 #include <QObject>
+#include <QTimer>
 #include <QWebSocket>
 
 #include <chrono>
@@ -41,9 +43,25 @@ public:
 	~ServerClient() override;
 
 	// Connects and says Hello. Gives up on the connection after `timeout`.
-	QCoro::Task<Result<proto::HelloResult>> open(Endpoint endpoint, QString cwd, std::chrono::milliseconds timeout);
+	// `notify` is what Hello tells the backend about the system notifications this connection shows.
+	QCoro::Task<Result<proto::HelloResult>> open(Endpoint endpoint,
+	                                             QString cwd,
+	                                             std::chrono::milliseconds timeout,
+	                                             QList<proto::NotifyFrame::Kind> notify = {});
 	void close();
 	bool isOpen() const;
+
+	// A peer that vanishes without closing (a suspended or crashed machine, a dropped network)
+	// leaves the connection open and its requests unanswered. So a connection that stays silent
+	// for `pingAfter` gets a Ping, and one that stays silent for `deadAfter` is dropped, which
+	// is reported as `closed` like any other end. `tick` is how often the silence is looked at.
+	struct Heartbeat
+	{
+		std::chrono::milliseconds pingAfter{30000};
+		std::chrono::milliseconds deadAfter{60000};
+		std::chrono::milliseconds tick{5000};
+	};
+	void setHeartbeat(const Heartbeat& heartbeat);
 
 	QCoro::Task<Result<proto::SessionInfo>> createSession(QString cwd, std::optional<QString> agent, std::optional<proto::ModelRef> model);
 	// `foreground` counts the attachment as the user's view of the session; a watcher only follows it.
@@ -55,7 +73,17 @@ public:
 	QCoro::Task<Result<QList<proto::SessionInfo>>> listHistory(QString cwd, int limit);
 	// Subscribes to the events of every live session (split view). Answers with the live sessions.
 	QCoro::Task<Result<QList<proto::SessionInfo>>> watchAll(bool enabled);
-	QCoro::Task<Result<proto::PromptResult>> prompt(QString sessionId, QString text);
+	QCoro::Task<Result<proto::PromptResult>> prompt(QString sessionId, QString text, QList<proto::ImageData> images = {});
+	QCoro::Task<Result<proto::RemovedPrompt>> removeQueued(QString sessionId, QString messageId);
+	// Without `messageId` the last human prompt. The answer holds its text and pictures.
+	QCoro::Task<Result<proto::RemovedPrompt>> undo(QString sessionId, std::optional<QString> messageId);
+	QCoro::Task<Result<void>> shell(QString sessionId, QString command);
+	// Paths below `cwd` matching `query` (best first); directories end with "/".
+	QCoro::Task<Result<QStringList>> listFiles(QString cwd, QString query, int limit);
+	// The prompt text a user-defined slash command stands for.
+	QCoro::Task<Result<QString>> expandCommand(QString name, QString args, QString cwd);
+	QCoro::Task<Result<void>> setNotify(QList<proto::NotifyFrame::Kind> kinds);
+	QCoro::Task<Result<void>> setFocus(bool focused, QStringList sessions);
 	QCoro::Task<Result<void>> abort(QString sessionId);
 	QCoro::Task<Result<void>> permissionReply(QString sessionId, QString callId, bool allow, bool always);
 
@@ -75,6 +103,9 @@ public:
 	QCoro::Task<Result<QString>> peerCommand(QString sessionId, QString command, QString args);
 	QCoro::Task<Result<QList<proto::McpServerStatus>>> mcpStatus(std::optional<QString> cwd);
 	QCoro::Task<Result<proto::DirListing>> listDirs(QString path);
+	// A page of messages before `before`, see Request::Messages.
+	QCoro::Task<Result<proto::MessagesPage>> messages(QString sessionId, QString before, int limit);
+	QCoro::Task<Result<proto::ImageData>> getImage(QString sessionId, QString imageId);
 	QCoro::Task<Result<void>> shutdown();
 
 signals:
@@ -98,6 +129,9 @@ private:
 	};
 
 	QCoro::Task<Result<QJsonObject>> request(QJsonObject body);
+	QCoro::Task<> ping();
+	void onHeartbeat();
+	void stopHeartbeat();
 	void onTextMessage(const QString& text);
 	void onDisconnected();
 	void complete(quint64 id, Result<QJsonObject> result);
@@ -107,6 +141,11 @@ private:
 	quint64 m_lastId = 0;
 	QHash<quint64, ResponseAwaiter*> m_pending;
 	QString m_closeReason; // set when we close it ourselves
+	Heartbeat m_heartbeat;
+	QTimer m_heartbeatTimer;
+	QElapsedTimer m_silence; // since the last message of the peer
+	bool m_helloDone = false;
+	bool m_pingOutstanding = false;
 };
 
 } // namespace refgui::client

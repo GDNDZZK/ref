@@ -28,6 +28,8 @@ python3 scripts/e2e.py provider/model "prompt" [cwd]           # 用真实模型
 REF_DUMP_REQUESTS=/tmp/dump ref-server ...                     # 导出 LLM 请求体
 ```
 
+`ref-web` 中需要启动后端的测试使用与 `ref-web` 同目录的 `ref-server`，找不到时会失败并给出提示。`cargo test --workspace` 会构建它；单独运行 `cargo test -p ref-web` 时，请先运行 `cargo build -p ref-server`。
+
 部分测试会启动 `python3`（假 MCP 服务器）和 `bash`。端到端脚本需要 Python 的 `websockets` 包和一个已配置的模型。
 
 ## Crate
@@ -125,11 +127,13 @@ scripts/package.sh --version v0.2.0 --target x86_64-unknown-linux-gnu \
   --bin-dir target/release --out dist --gui-dir stage      # 需要先完成 Rust 构建，见上文
 ```
 
+`cmake --install` 还会删掉 Basic 以外的 Qt Quick Controls 样式（`gui/cmake/PruneControlsStyles.cmake`）：`ref-gui` 自己设置 Basic 样式，否则对 QML import 的扫描会把五种样式都部署进去。
+
 - **Linux**：库放在 `lib/`，程序的运行路径是 `$ORIGIN/lib`；`qt.conf` 让 Qt 到 `plugins/` 和 `qml/` 中查找。桌面用不到的插件（QML 调试、嵌入式显示、Wayland 辅助插件）不会部署。
 - **macOS**：`macdeployqt` 生成 `ref-gui.app`。`package.sh` 把它改名为 `ref.app`，把 `ref-server` 放进 `Contents/MacOS`，再运行 `scripts/sign-macos-app.sh`：由内向外重新做 ad-hoc 签名（没有开发者证书），并用 `codesign --verify --deep --strict` 检查。`all` 压缩包里的 `ref-server` 是指向 app 内那一份的符号链接。
 - **Windows**：`windeployqt` 把 DLL 和 Visual C++ 运行库复制到 `ref-gui.exe` 旁边，不含软件 OpenGL 后备。程序使用 GUI 子系统（不弹控制台窗口），并带有图标和版本资源。
 
-`scripts/verify-gui-package.sh DIR` 检查解压后的 `ref-gui` 压缩包，必须在它所构建的平台上运行。CI 在打包后运行它。它检查：不依赖构建机的环境时每个库都能找到、KSyntaxHighlighting 模块在包里、`ref-gui --smoke --mock` 能打开会话（Linux 上在 `xvfb-run` 下）。Linux 上还检查包对系统的要求，macOS 上检查签名以及没有引用 app 之外的路径，Windows 上检查 `ref-gui.exe` 使用 GUI 子系统。
+`scripts/verify-gui-package.sh DIR` 检查解压后的 `ref-gui` 压缩包，必须在它所构建的平台上运行。CI 在打包后运行它。它检查：不依赖构建机的环境时每个库都能找到、KSyntaxHighlighting 模块在包里、Controls 样式只有 Basic、`ref-gui --smoke --mock` 能打开会话（Linux 上在 `xvfb-run` 下）。Linux 上还检查包对系统的要求，macOS 上检查签名以及没有引用 app 之外的路径，Windows 上检查 `ref-gui.exe` 使用 GUI 子系统。
 
 **Linux 的要求。** C++23 需要 GCC 13，而 Ubuntu 22.04 没有，所以 CI 在 Ubuntu 24.04 上构建 Linux 的 GUI，`ref`、`ref-web` 和 `ref-server` 仍在 22.04 上构建。Qt 6.12.0 自带的库最多需要 glibc 2.34。用 GCC 13 编译的程序需要 `libstdc++` 中的 `CXXABI_1.3.14`，Ubuntu 22.04 和 Debian 12 的 GCC 12 没有它。因此，只要包里有东西需要高于 glibc 2.35、`GLIBCXX_3.4.32` 或 `CXXABI_1.3.14`，`verify-gui-package.sh` 就会失败；README 写的是同样的数字。如果更新的编译器或 Qt 抬高了其中某项，请同时修改脚本开头的常量和 README。
 

@@ -25,7 +25,7 @@ class ConversationFeed : public QObject
 public:
 	explicit ConversationFeed(ConversationModel& model, QObject* parent = nullptr);
 
-	// Replaces the history and drops whatever was waiting to be shown.
+	// Loads the history of another session and drops whatever was waiting to be shown.
 	void reset(const QList<proto::Message>& messages);
 	// Handles message, part, delta, removal and reset events; ignores the others.
 	void apply(const proto::SessionEvent& event);
@@ -41,6 +41,8 @@ private:
 	void applyMessage(proto::Message message);
 	void applyPart(const proto::PartEvent& event);
 	void applyDelta(const proto::DeltaEvent& event);
+	// Drops what was waiting to be shown and installs the history with `install` of the model.
+	void replace(const QList<proto::Message>& messages, void (ConversationModel::*install)(const QList<proto::Message>&));
 
 	enum class Fit
 	{

@@ -1,10 +1,10 @@
 //! The mock "LLM": a loopback HTTP server that speaks OpenAI Chat Completions streaming, so
 //! the real `ref-llm` client, retry logic and tool loop run against scripted answers.
 
+use super::attempts::Attempts;
 use super::script::{Ctx, HttpError, Pace, Round, Step, Task, analyze, select};
 use serde_json::{Value, json};
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -23,12 +23,7 @@ const FILLED_CONTEXT: f64 = 0.95;
 const SUMMARY_TEXT: &str = "## Goal\n- Explore the mock backend with the user.\n\n## Accomplished\n- Ran several mock scripts and their tools in the sample workspace.\n\n## Next steps\n1. Continue with whatever the user asks next.\n\n## Relevant files\n- `src/parser.rs`: the file the demo edits.";
 const SUMMARY_DELAY_MS: u64 = 2500;
 const TITLE_WORDS: usize = 6;
-
-/// Context windows of the mock models (see `config.rs`).
-pub const CONTEXT_WINDOWS: [(&str, u64); 2] = [("mock-1", 200_000), ("mock-fast", 64_000)];
-
-/// Requests seen so far, by (session, number of messages): a retry sends the same request.
-type Attempts = Mutex<HashMap<(String, usize), u32>>;
+const ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 pub struct LlmServer {
     pub port: u16,
@@ -40,8 +35,14 @@ pub async fn start() -> std::io::Result<LlmServer> {
     let attempts: Arc<Attempts> = Arc::default();
     tokio::spawn(async move {
         loop {
-            let Ok((stream, _)) = listener.accept().await else {
-                continue;
+            let (stream, _) = match listener.accept().await {
+                Ok(accepted) => accepted,
+                Err(e) => {
+                    // Typically out of file descriptors: wait instead of spinning.
+                    tracing::warn!("mock llm accept failed: {e}");
+                    tokio::time::sleep(ACCEPT_RETRY_DELAY).await;
+                    continue;
+                }
             };
             let attempts = attempts.clone();
             tokio::spawn(async move {
@@ -120,14 +121,7 @@ async fn serve(mut stream: TcpStream, attempts: &Attempts) -> std::io::Result<()
         return write_error(&mut stream, 404, "unknown path").await;
     }
     let message_count = req.body["messages"].as_array().map_or(0, Vec::len);
-    let attempt = {
-        let mut seen = attempts.lock().unwrap_or_else(|e| e.into_inner());
-        let n = seen
-            .entry((req.session_id.clone(), message_count))
-            .or_insert(0);
-        *n += 1;
-        *n
-    };
+    let attempt = attempts.count(&req.session_id, message_count);
     let model = req.body["model"].as_str().unwrap_or("").to_string();
     let prompt_tokens = estimate_tokens(&req.body);
     match analyze(&req.body, &req.session_id, attempt) {
@@ -140,7 +134,13 @@ async fn serve(mut stream: TcpStream, attempts: &Attempts) -> std::io::Result<()
             let round = Round::new().pause(SUMMARY_DELAY_MS).text(SUMMARY_TEXT);
             stream_round(&mut stream, round, Pace::MEDIUM, prompt_tokens).await
         }
-        Task::Reply(ctx) => reply(&mut stream, &ctx, &model, prompt_tokens).await,
+        Task::Reply(ctx) => {
+            let answered = reply(&mut stream, &ctx, &model, prompt_tokens).await?;
+            if answered {
+                attempts.forget(&req.session_id, message_count);
+            }
+            Ok(())
+        }
     }
 }
 
@@ -149,25 +149,21 @@ async fn reply(
     ctx: &Ctx,
     model: &str,
     prompt_tokens: u64,
-) -> std::io::Result<()> {
+) -> std::io::Result<bool> {
     let script = select(&ctx.prompt);
     let round = (script.play)(ctx);
     let prompt_tokens = if round.fill_context {
-        context_window(model).map_or(prompt_tokens, |w| (w as f64 * FILLED_CONTEXT) as u64)
+        super::config::context_window(model)
+            .map_or(prompt_tokens, |w| (w as f64 * FILLED_CONTEXT) as u64)
     } else {
         prompt_tokens
     };
-    if let [Step::Error(HttpError { status, message })] = round.steps.as_slice() {
-        return write_error(stream, *status, message).await;
+    if let Some(HttpError { status, message }) = &round.error {
+        write_error(stream, *status, message).await?;
+        return Ok(false);
     }
-    stream_round(stream, round, script.pace, prompt_tokens).await
-}
-
-fn context_window(model: &str) -> Option<u64> {
-    CONTEXT_WINDOWS
-        .iter()
-        .find(|(id, _)| *id == model)
-        .map(|(_, w)| *w)
+    stream_round(stream, round, script.pace, prompt_tokens).await?;
+    Ok(true)
 }
 
 fn estimate_tokens(body: &Value) -> u64 {
@@ -264,7 +260,6 @@ async fn stream_round(
                 out.pieces(&arguments, pace, make).await?;
             }
             Step::Pause(ms) => tokio::time::sleep(Duration::from_millis(*ms)).await,
-            Step::Error(_) => unreachable!("an error round has no other steps"),
         }
     }
     let reason = if tool_calls > 0 { "tool_calls" } else { "stop" };

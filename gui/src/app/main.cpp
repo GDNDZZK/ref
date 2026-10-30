@@ -1,15 +1,22 @@
 // Adapted from an early version of qutie by LightBlueCube
+#include "app/app_translator.h"
+#include "app/chat_image_provider.h"
+#include "app/local_only_network.h"
+#include "app/notification_center_type.h"
 #include "app/workspace.h"
 #include "cli/command_line.h"
+#include "client/instance_files.h"
 #include "icons/icon_provider.h"
+#include "notify/notifier.h"
 
 #include <QDir>
 #include <QGuiApplication>
 #include <QLocale>
 #include <QQmlApplicationEngine>
+#include <QQuickStyle>
+#include <QWindow>
 #include <QTextStream>
 #include <QTimer>
-#include <QTranslator>
 
 #include <chrono>
 #include <cstdlib>
@@ -67,16 +74,11 @@ void exitWhenOpened(Workspace& workspace)
 int main(int argc, char* argv[])
 {
 	QGuiApplication app(argc, argv);
+	QQuickStyle::setStyle(u"Basic"_s); // the same look on every platform
 	QGuiApplication::setApplicationName(u"ref-gui"_s);
 	const QString version = QString::fromLatin1(REF_GUI_VERSION);
 	QGuiApplication::setApplicationVersion(version);
-
-	// The interface follows the system language; English is the fallback.
-	QTranslator translator;
-	if(translator.load(QLocale(), u"ref-gui"_s, u"_"_s, u":/i18n"_s))
-	{
-		QCoreApplication::installTranslator(&translator);
-	}
+	QGuiApplication::setDesktopFileName(u"ref-gui"_s); // ties the window to the desktop entry
 
 	const refgui::cli::ParseResult parsed = refgui::cli::parseCommandLine(QCoreApplication::arguments(), QDir::currentPath(), version);
 	if(const auto* exit = std::get_if<refgui::cli::Exit>(&parsed))
@@ -93,17 +95,46 @@ int main(int argc, char* argv[])
 	}
 
 	// Outlives the engine, whose window refers to it.
-	Workspace workspace(options);
+	Workspace workspace(options, refgui::client::stateDirectory() + u"/gui.json"_s);
 	Workspace::setInstance(&workspace);
+
+	// The interface follows the language setting; English is the fallback.
+	AppTranslator translator;
+	translator.setLanguage(workspace.settings()->language());
 	if(options.smoke)
 	{
 		exitWhenOpened(workspace);
 	}
 
+	// Tells the backend where the user looks and shows what it sends. The settings supply the kinds.
+	refgui::notify::NotificationCenter notifications(workspace.backend(), refgui::notify::createPlatformNotifier());
+	NotificationCenterForeign::instance = &notifications;
+	const auto reportFocus = [&] { notifications.setFocus(workspace.isWindowActive(), workspace.visibleSessionIds()); };
+	QObject::connect(&workspace, &Workspace::windowActiveChanged, &notifications, reportFocus);
+	QObject::connect(&workspace, &Workspace::visibleSessionIdsChanged, &notifications, reportFocus);
+	reportFocus();
+	const auto reportKinds = [&] { notifications.setKinds(workspace.settings()->notifyKinds()); };
+	QObject::connect(workspace.settings(), &refgui::workspace::Settings::notifyKindsChanged, &notifications, reportKinds);
+	reportKinds();
+	QObject::connect(&notifications, &refgui::notify::NotificationCenter::sessionRequested, &workspace, &Workspace::openSession);
+
+	// Outlives the engine, which asks it for its network access.
+	LocalOnlyNetworkAccessManagerFactory networkFactory;
 	QQmlApplicationEngine engine;
+	engine.setNetworkAccessManagerFactory(&networkFactory);
 	QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] { QCoreApplication::exit(EXIT_FAILURE); }, Qt::QueuedConnection);
 	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([&workspace](const QString& sessionId) { return workspace.session(sessionId); }));
+	QObject::connect(workspace.settings(), &refgui::workspace::Settings::languageChanged, &app, [&] {
+		translator.setLanguage(workspace.settings()->language());
+		engine.retranslate();
+		workspace.retranslate();
+	});
 	engine.loadFromModule("RefGui", "Main");
+	if(!engine.rootObjects().isEmpty())
+	{
+		notifications.setWindow(qobject_cast<QWindow*>(engine.rootObjects().first()));
+	}
 
 	return QGuiApplication::exec();
 }

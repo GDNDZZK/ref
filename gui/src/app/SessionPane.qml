@@ -8,17 +8,78 @@ Item {
 	id: pane
 
 	required property ChatSession session
+	// In a split-view tile: tighter margins.
+	property bool compact: false
+	readonly property real compactMargin: 10 // below the input box
+	readonly property real compactColumnPadding: 16 // beside the conversation
+	readonly property real margin: compact ? compactMargin : Theme.pagePadding
+	readonly property real columnPadding: compact ? compactColumnPadding : Theme.pagePadding
+	// Whether the keys may answer a permission request of this session (one pane at a time has them).
+	property bool keysEnabled: true
 
 	function focusInput() {
 		composer.focusInput()
 	}
 
+	// The keyboard goes to the permission keys while they may answer, and back to the input box after.
+	function updateKeyFocus() {
+		if (keysEnabled && session.permissionKeysActive)
+			permissionKeys.forceActiveFocus()
+		else if (permissionKeys.activeFocus)
+			focusInput()
+	}
+
+	onKeysEnabledChanged: updateKeyFocus()
+
 	ChatView {
 		id: chat
-		anchors { left: parent.left; right: parent.right; top: parent.top; bottom: composer.top }
+		anchors { left: parent.left; right: parent.right; top: parent.top; bottom: statusLine.top }
 		model: pane.session.blocks
+		sidePadding: pane.columnPadding
 		turnInProgress: pane.session.busy
+		sessionId: pane.session.sessionId
+		permissionCount: pane.session.permissionCount
+		moreBefore: pane.session.moreBefore
+		loadingOlder: pane.session.loadingOlder
+		olderError: pane.session.olderError
+		onLoadOlderRequested: pane.session.loadOlder()
+		onImageClicked: image => lightbox.open(pane.session.sessionId, image)
+		onCancelRequested: pane.session.cancelDelayedTool()
+		onUndoRequested: messageId => pane.session.undo(messageId)
+		onCopyRequested: messageId => pane.session.copyMessage(messageId)
 		onPermissionAnswered: (callId, allow, always) => pane.session.permissionReply(callId, allow, always)
+	}
+
+	// Takes the keyboard from the input box once the keys may answer a permission request
+	// (the user may be typing when it appears), and hands it back when none is left.
+	Item {
+		id: permissionKeys
+
+		Keys.onPressed: event => {
+			event.accepted = true
+			switch (event.key) {
+			case Qt.Key_A:
+			case Qt.Key_Return:
+			case Qt.Key_Enter:
+				pane.session.answerOldestPermission(true, false)
+				break
+			case Qt.Key_S:
+				pane.session.answerOldestPermission(true, true)
+				break
+			case Qt.Key_D:
+			case Qt.Key_Escape:
+				pane.session.answerOldestPermission(false, false)
+				break
+			}
+		}
+
+		Connections {
+			target: pane.session
+
+			function onToolsChanged() {
+				pane.updateKeyFocus()
+			}
+		}
 	}
 
 	// This session's last failure, until it is gone. Connection trouble, which concerns all
@@ -28,6 +89,7 @@ Item {
 	}
 
 	Text {
+		textFormat: Text.PlainText
 		anchors.centerIn: chat
 		text: qsTr("What are we building?")
 		color: Theme.textMuted
@@ -48,7 +110,7 @@ Item {
 
 		// Stacked above the send button, on its center line.
 		x: composer.x + composer.sendButtonCenterX - width / 2
-		anchors { bottom: composer.top; bottomMargin: 12 }
+		anchors { bottom: statusLine.top; bottomMargin: 4 }
 		implicitWidth: 34
 		implicitHeight: 34
 		opacity: shown ? 1 : 0
@@ -114,17 +176,32 @@ Item {
 		}
 	}
 
+	StatusLine {
+		id: statusLine
+		session: pane.session
+		anchors { horizontalCenter: parent.horizontalCenter; bottom: composer.top }
+		width: chat.columnWidth
+	}
+
 	Composer {
 		id: composer
-		anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: Theme.pagePadding }
+		anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: pane.margin }
 		width: chat.columnWidth
-		busy: pane.session.busy
-		sendingEnabled: pane.session.ready
-		onSubmitted: text => {
-			chat.following = true
-			pane.session.send(text)
+		session: pane.session
+		onSubmitted: chat.following = true
+	}
+
+	// The input box's remarks are the window's toasts.
+	Connections {
+		target: pane.session.composer
+		function onToastRequested(level, text) {
+			Workspace.toastRequested(level, text)
 		}
-		onStopRequested: pane.session.stop()
+	}
+
+	Lightbox {
+		id: lightbox
+		onClosed: pane.focusInput()
 	}
 
 	Component.onCompleted: focusInput()

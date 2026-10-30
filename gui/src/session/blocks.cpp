@@ -132,6 +132,10 @@ QList<Block> toolBlocks(const MessageHeader& header, qsizetype index, const prot
 	block.output = tool.output.value_or(QString());
 	block.streaming = !proto::isFinal(tool.state);
 	block.failed = tool.state == proto::ToolState::Error || tool.state == proto::ToolState::Denied;
+	if(tool.time != 0)
+	{
+		block.time = tool.time; // when the call started, not the message
+	}
 	block.timeEnd = tool.timeEnd.value_or(0);
 	block.runAt = tool.runAt.value_or(0);
 	block.meta = tool.meta.toObject();

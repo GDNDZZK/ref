@@ -7,6 +7,12 @@
 }
 
 :root {
+  /* Shell layout values that Theme.qml does not name: the corner buttons sit 14px from the window
+     edge, 8px apart, and the toasts start below them. */
+  --corner-inset: 14px;
+  --corner-gap: 8px;
+  --toast-top: 62px;
+  --toast-right: var(--corner-inset);
   --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', sans-serif;
   --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace;
 }
@@ -197,6 +203,10 @@ textarea:focus-visible {
   z-index: 1;
   mix-blend-mode: normal;
   animation: theme-fade-out var(--motion-slow) var(--easing-out-expo) both;
+}
+
+[data-fade='standard']::view-transition-old(root) {
+  animation-duration: var(--motion-standard);
 }
 
 ::view-transition-new(root) {

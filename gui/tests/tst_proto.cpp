@@ -211,6 +211,7 @@ private slots:
 		QCOMPARE(request::mcpStatus(u"/home/user/project"_s), withoutId(u"mcp_status"_s));
 		QCOMPARE(request::listDirs(u"~/pro"_s), withoutId(u"list_dirs"_s));
 		QCOMPARE(request::shutdown(), withoutId(u"shutdown"_s));
+		QCOMPARE(request::ping(), withoutId(u"ping"_s));
 		QCOMPARE(request::setModel(u"ses_a1b2c3d4"_s, {.provider = u"anthropic"_s, .model = u"claude-sonnet-4"_s, .variant = u"high"_s}),
 		         withoutId(u"set_model"_s));
 		QVERIFY(!request::setVariant(u"ses_a1b2c3d4"_s, std::nullopt).contains(u"variant"_s)); // rotates

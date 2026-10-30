@@ -1,14 +1,9 @@
-//! Login URLs, opening the browser, and recognising a ref-web that already runs.
+//! Login URLs and opening the browser.
 
 use std::net::IpAddr;
-use std::time::Duration;
 
-use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use crate::routes::LOGIN_PATH;
 
-use crate::routes::{LOGIN_PATH, PING_PATH};
-
-const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
-const PING_APP_FIELD: &str = "\"app\":\"ref-web\"";
 const LOOPBACK_V4: &str = "127.0.0.1";
 const LOOPBACK_V6: &str = "[::1]";
 
@@ -57,23 +52,6 @@ fn percent_encode(text: &str) -> String {
 pub fn open_browser(url: &str) {
     if let Err(e) = open::that_detached(url) {
         eprintln!("ref-web: cannot open the browser ({e}); open the login URL above yourself");
-    }
-}
-
-/// True when a ref-web answers on `host:port`.
-pub async fn is_ref_web(host: &str, port: u16) -> bool {
-    let probe = async {
-        let mut stream = tokio::net::TcpStream::connect(format!("{host}:{port}")).await?;
-        let request =
-            format!("GET {PING_PATH} HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\n\r\n");
-        stream.write_all(request.as_bytes()).await?;
-        let mut response = Vec::new();
-        stream.read_to_end(&mut response).await?;
-        Ok::<_, std::io::Error>(response)
-    };
-    match tokio::time::timeout(PROBE_TIMEOUT, probe).await {
-        Ok(Ok(response)) => String::from_utf8_lossy(&response).contains(PING_APP_FIELD),
-        Ok(Err(_)) | Err(_) => false,
     }
 }
 

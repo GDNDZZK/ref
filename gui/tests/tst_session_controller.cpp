@@ -8,6 +8,8 @@
 #include <QSignalSpy>
 #include <QtTest>
 
+#include <memory>
+
 using namespace Qt::StringLiterals;
 using namespace refgui;
 using namespace refgui::test;
@@ -113,6 +115,10 @@ struct Fixture
 		{
 			fake.respond(request, {{u"queued"_s, false}, {u"message_id"_s, u"u2"_s}});
 		}
+		else if(op == u"messages")
+		{
+			fake.respond(request, {{u"messages"_s, olderPage}, {u"more_before"_s, olderHasMore}});
+		}
 		else if(op == u"abort" || op == u"detach")
 		{
 			fake.respond(request, {});
@@ -134,6 +140,8 @@ struct Fixture
 	SessionController controller;
 	QJsonObject snapshot;
 	QJsonArray history;
+	QJsonArray olderPage;
+	bool olderHasMore = false;
 };
 
 } // namespace
@@ -156,6 +164,12 @@ private slots:
 	void watcherAttachDoesNotTakeTheForeground();
 	void upgradingAWatcherKeepsTheConversation();
 	void detachedControllerIgnoresEventsAndAttachesAgain();
+	void tracksTheQueuedPrompts();
+	void loadsOlderMessagesInFront();
+	void doesNotAskWhenNothingIsOlder();
+	void showsSessionErrorsAtTheEndUntilTheNextPrompt();
+	void attachAnsweredAfterTheControllerIsGone();
+	void loadOlderAnsweredAfterTheControllerIsGone();
 };
 
 void TestSessionController::createShowsTheSnapshot()
@@ -340,6 +354,120 @@ void TestSessionController::detachedControllerIgnoresEventsAndAttachesAgain()
 	f.snapshot = snapshotJson(u"ses_1"_s, u"idle"_s, {messageJson(u"u1"_s, u"user"_s, u"Hello"_s, true), messageJson(u"u2"_s, u"user"_s, u"Missed"_s, true)});
 	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
 	QCOMPARE(render(f.controller.model()), (QStringList{u"user:Hello"_s, u"user:Missed"_s}));
+}
+
+void TestSessionController::tracksTheQueuedPrompts()
+{
+	Fixture f;
+	f.snapshot[u"snapshot"_s] = [&]
+	{
+		QJsonObject snapshot = f.snapshot.value(u"snapshot"_s).toObject();
+		snapshot[u"queued"_s] = QJsonArray{messageJson(u"q1"_s, u"user"_s, u"First"_s, false)};
+		return snapshot;
+	}();
+	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
+	QCOMPARE(f.controller.queued().size(), 1);
+	QCOMPARE(f.controller.queued().first().id, u"q1"_s);
+
+	QSignalSpy changed(&f.controller, &SessionController::queueChanged);
+	f.fake.send(eventFrame(u"ses_1"_s, {{u"type"_s, u"queue"_s}, {u"messages"_s, QJsonArray()}}));
+	QTRY_COMPARE(changed.count(), 1);
+	QVERIFY(f.controller.queued().isEmpty());
+}
+
+void TestSessionController::loadsOlderMessagesInFront()
+{
+	Fixture f;
+	f.snapshot[u"snapshot"_s] = [&] {
+		QJsonObject snapshot = f.snapshot.value(u"snapshot"_s).toObject();
+		snapshot[u"more_before"_s] = true;
+		return snapshot;
+	}();
+	f.olderPage = {messageJson(u"u0"_s, u"user"_s, u"Earlier"_s, true)};
+	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
+	QVERIFY(f.controller.hasMoreBefore());
+	QSignalSpy resets(&f.controller.model(), &QAbstractItemModel::modelReset);
+
+	QVERIFY(await(f.controller.loadOlder()));
+
+	QCOMPARE(render(f.controller.model()).first(), u"user:Earlier"_s);
+	QVERIFY(!f.controller.hasMoreBefore());
+	QVERIFY(!f.controller.isLoadingOlder());
+	QCOMPARE(resets.count(), 0);
+	const QJsonObject request = f.fake.requests().last();
+	QCOMPARE(request.value(u"op"_s).toString(), u"messages"_s);
+	QCOMPARE(request.value(u"before"_s).toString(), u"u1"_s);
+}
+
+void TestSessionController::doesNotAskWhenNothingIsOlder()
+{
+	Fixture f;
+	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
+	QVERIFY(!f.controller.hasMoreBefore());
+
+	QVERIFY(await(f.controller.loadOlder()));
+
+	QVERIFY(!f.ops().contains(u"messages"_s));
+}
+
+void TestSessionController::showsSessionErrorsAtTheEndUntilTheNextPrompt()
+{
+	Fixture f;
+	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
+
+	f.fake.send(eventFrame(u"ses_1"_s, {{u"type"_s, u"error"_s}, {u"text"_s, u"Provider rejected the request"_s}}));
+	QTRY_COMPARE(f.controller.model().tailError(), u"Provider rejected the request"_s);
+	QCOMPARE(render(f.controller.model()).last(), u"error:Provider rejected the request"_s);
+
+	QVERIFY(await(f.controller.send(u"again"_s)));
+	QVERIFY(f.controller.model().tailError().isEmpty());
+	QCOMPARE(render(f.controller.model()).size(), 2);
+}
+
+// An answer that arrives after the controller was destroyed must not touch it. The test passes without a
+// sanitizer too, but then the waiting caller must at least be told that the request came to nothing.
+void TestSessionController::attachAnsweredAfterTheControllerIsGone()
+{
+	Fixture f;
+	std::optional<SessionController::Result<void>> outcome;
+	QJsonObject held;
+	f.fake.onRequest = [&](const QJsonObject& request) { held = request; };
+	auto gone = std::make_unique<SessionController>(f.backend);
+	[](SessionController& controller, std::optional<SessionController::Result<void>>& out) -> QCoro::Task<> {
+		out = co_await controller.attach(u"ses_1"_s);
+	}(*gone, outcome);
+	QTRY_VERIFY(!held.isEmpty());
+
+	gone.reset();
+	f.fake.respond(held, f.snapshot);
+
+	QTRY_VERIFY(outcome.has_value());
+	QVERIFY(!*outcome);
+}
+
+void TestSessionController::loadOlderAnsweredAfterTheControllerIsGone()
+{
+	Fixture f;
+	f.snapshot[u"snapshot"_s] = [&] {
+		QJsonObject snapshot = f.snapshot.value(u"snapshot"_s).toObject();
+		snapshot[u"more_before"_s] = true;
+		return snapshot;
+	}();
+	auto gone = std::make_unique<SessionController>(f.backend);
+	QVERIFY(await(gone->attach(u"ses_1"_s)));
+	std::optional<SessionController::Result<void>> outcome;
+	QJsonObject held;
+	f.fake.onRequest = [&](const QJsonObject& request) { held = request; };
+	[](SessionController& controller, std::optional<SessionController::Result<void>>& out) -> QCoro::Task<> {
+		out = co_await controller.loadOlder();
+	}(*gone, outcome);
+	QTRY_VERIFY(!held.isEmpty());
+
+	gone.reset();
+	f.fake.respond(held, {{u"messages"_s, QJsonArray()}, {u"more_before"_s, false}});
+
+	QTRY_VERIFY(outcome.has_value());
+	QVERIFY(!*outcome);
 }
 
 QTEST_GUILESS_MAIN(TestSessionController)
