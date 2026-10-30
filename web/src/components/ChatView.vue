@@ -2,7 +2,7 @@
 // The conversation, one row per block, centered in a reading column (ChatView.qml).
 //
 // Following: while `following`, the scroll position chases the end with an exponential ease
-// instead of jumping. Only user gestures change `following`: scrolling (wheel, touch) or
+// instead of jumping. Only user gestures change `following`: scrolling (wheel, touch, keys) or
 // dragging the scroll bar releases it, and ending such a gesture at the end re-engages it.
 //
 // Holding: while `turnInProgress` and following, the end never moves up. Streaming content can
@@ -235,6 +235,18 @@ function onWheel(event: WheelEvent): void {
   if (event.deltaY < 0) following.value = false
 }
 
+const KEYS_UP = ['PageUp', 'ArrowUp', 'Home']
+const KEYS_SCROLL = [...KEYS_UP, 'PageDown', 'ArrowDown', 'End', ' ']
+
+// Keys scroll the view when nothing that takes keys has the focus.
+function onKeydown(event: KeyboardEvent): void {
+  if (!KEYS_SCROLL.includes(event.key) || event.ctrlKey || event.metaKey || event.altKey) return
+  const target = event.target
+  if (target !== document.body && !(target instanceof Node && scroller.value?.contains(target))) return
+  beginGesture()
+  if (KEYS_UP.includes(event.key) || (event.key === ' ' && event.shiftKey)) following.value = false
+}
+
 function onScroll(): void {
   loadOlderIfNear()
   if (!gesturing) return
@@ -284,10 +296,12 @@ provide(chatScrollKey, {
 })
 
 onMounted(() => {
+  window.addEventListener('keydown', onKeydown)
   if (rows.value) sizeObserver.observe(rows.value)
   if (scroller.value) sizeObserver.observe(scroller.value)
 })
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown)
   sizeObserver.disconnect()
   holdObserver.disconnect()
   clearTimeout(gestureTimer)

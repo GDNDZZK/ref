@@ -46,6 +46,7 @@ Parsed<DirListing> parseDirsResult(const QJsonObject& result);                 /
 Parsed<QString> parseTextResult(const QJsonObject& result);                    // peer_command, expand_command
 Parsed<QString> parsePathResult(const QJsonObject& result);                    // export
 Parsed<RemovedPrompt> parseRemovedPromptResult(const QJsonObject& result);     // remove_queued
+Parsed<RemovedPrompt> parseUndoResult(const QJsonObject& result);              // undo; `removed` is always true
 Parsed<QStringList> parseFilesResult(const QJsonObject& result);               // list_files
 Parsed<QList<NamedImage>> parseNamedImages(const QJsonValue& images);          // `images` of remove_queued and undo
 

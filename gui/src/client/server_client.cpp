@@ -205,6 +205,11 @@ QCoro::Task<Result<proto::PromptResult>> ServerClient::prompt(QString sessionId,
 	co_return asResult(co_await request(proto::request::prompt(sessionId, text, images)), proto::parsePromptResult);
 }
 
+QCoro::Task<Result<proto::RemovedPrompt>> ServerClient::undo(QString sessionId, std::optional<QString> messageId)
+{
+	co_return asResult(co_await request(proto::request::undo(sessionId, messageId)), proto::parseUndoResult);
+}
+
 QCoro::Task<Result<proto::RemovedPrompt>> ServerClient::removeQueued(QString sessionId, QString messageId)
 {
 	co_return asResult(co_await request(proto::request::removeQueued(sessionId, messageId)), proto::parseRemovedPromptResult);

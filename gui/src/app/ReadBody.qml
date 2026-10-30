@@ -13,12 +13,14 @@ ToolBodyBase {
 		spacing: 8
 
 		Text {
+			textFormat: Text.PlainText
 			text: body.group ? body.group.path : ""
 			color: Theme.text
 			font.family: Theme.monoFamily
 			font.pixelSize: Theme.smallFontSize
 		}
 		Text {
+			textFormat: Text.PlainText
 			text: body.group ? "#" + body.group.tag : ""
 			color: Theme.textMuted
 			opacity: 0.7
@@ -36,6 +38,7 @@ ToolBodyBase {
 	}
 
 	Text {
+		textFormat: Text.PlainText
 		visible: body.group !== null && body.group.notes.length > 0
 		width: body.contentWidth
 		text: body.group ? body.group.notes.join("\n") : ""

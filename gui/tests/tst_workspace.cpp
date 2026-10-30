@@ -226,6 +226,7 @@ private slots:
 	void serverToastsArePassedOn();
 	void splitViewWatchesAndComesBack();
 	void zoomUpgradesTheTileToTheForeground();
+	void sessionsHaveTheMethodsCommandsCall();
 	void oldBackendOffersARestart();
 	void commandsFollowTheState();
 };
@@ -469,6 +470,15 @@ void TestWorkspace::commandsFollowTheState()
 	QVERIFY(!enabled(u"zoom"_s)); // only in split view
 	f.workspace->toggleSplit();
 	QTRY_VERIFY(enabled(u"zoom"_s));
+}
+
+// The commands call these by name (Workspace::runOnSession), so a rename would only show at run time.
+void TestWorkspace::sessionsHaveTheMethodsCommandsCall()
+{
+	for(const char* method : {"undoLast()", "copyLastReply()", "toggleReasoning()", "toggleDetails()"})
+	{
+		QVERIFY2(ChatSession::staticMetaObject.indexOfMethod(method) >= 0, method);
+	}
 }
 
 QTEST_MAIN(TestWorkspace)

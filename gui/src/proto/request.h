@@ -22,6 +22,8 @@ QJsonObject listSessions();
 QJsonObject listHistory(const QString& cwd, int limit);
 QJsonObject prompt(const QString& sessionId, const QString& text, const QList<ImageData>& images = {});
 QJsonObject removeQueued(const QString& sessionId, const QString& messageId);
+// Takes back the last human prompt and what came after it, or with `messageId` that message and what followed.
+QJsonObject undo(const QString& sessionId, const std::optional<QString>& messageId);
 QJsonObject shell(const QString& sessionId, const QString& command);
 QJsonObject listFiles(const QString& cwd, const QString& query, int limit);
 QJsonObject expandCommand(const QString& name, const QString& args, const QString& cwd);
