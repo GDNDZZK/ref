@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Shows the open dialog over a scrim (ModalDialog.qml's scrim and entrance). A click on the scrim and
 // Esc close it. Opening one dialog while another is open cross-fades the panels.
-import { computed, nextTick, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
 import { useDialogsStore } from '../stores/dialogs.ts'
 import type { DialogRequest } from '../stores/dialogs.ts'
 import { useWorkspaceStore } from '../stores/workspace.ts'
@@ -48,7 +48,8 @@ function onKeydown(event: KeyboardEvent): void {
   }
 }
 
-window.addEventListener('keydown', onKeydown)
+onMounted(() => window.addEventListener('keydown', onKeydown))
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>

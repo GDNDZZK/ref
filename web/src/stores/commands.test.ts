@@ -1,6 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fuzzyScore } from '../commands/fuzzy.ts'
+import { fuzzyScore, rankByQuery } from '../commands/fuzzy.ts'
 import { formatShortcut } from '../commands/shortcuts.ts'
 import type { Command } from '../commands/types.ts'
 import { createAppI18n } from '../i18n/index.ts'
@@ -138,5 +138,16 @@ describe('fuzzyScore', () => {
   it('prefers contiguous matches and word starts', () => {
     expect(fuzzyScore('new', 'New session')!).toBeGreaterThan(fuzzyScore('new', 'Rename the window')!)
     expect(fuzzyScore('', 'anything')).toBeDefined()
+  })
+})
+
+describe('rankByQuery', () => {
+  it('drops what does not match and puts the better match first', () => {
+    const texts = ['Rename the session', 'New session', 'Compact']
+    expect(rankByQuery(texts, 'sess', (text) => text)).toEqual(['New session', 'Rename the session'])
+  })
+
+  it('keeps the order of equal matches', () => {
+    expect(rankByQuery(['ab', 'ac'], 'a', (text) => text)).toEqual(['ab', 'ac'])
   })
 })
