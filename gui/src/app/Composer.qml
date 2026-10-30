@@ -80,7 +80,7 @@ Item {
 
 	Connections {
 		target: composer.model
-		function onDraftChanged() { composer.syncFromModel() }
+		function onDraftReplaced() { composer.syncFromModel() }
 	}
 
 	QueueStrip {

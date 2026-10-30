@@ -24,7 +24,7 @@ namespace refgui::composer
 // for agent, model and variant, and the actions Enter and Esc stand for.
 //
 // The text area owns the editing; it tells this object what the text and the cursor are
-// (edit(), moveCursor()), and shows `text` and `cursor` again when draftChanged() says they
+// (edit(), moveCursor()), and shows `text` and `cursor` again when draftReplaced() says they
 // were changed from here (history, a restored prompt, a new attachment).
 //
 // Slash commands are the window's: the view asks the command registry first and calls
@@ -134,8 +134,10 @@ public:
 	void restoreDraft(const QString& text, const QList<proto::NamedImage>& images);
 
 signals:
-	// The text or the cursor was changed from this side; the text area shows them again.
+	// The text, the cursor or the attachments changed, by whoever.
 	void draftChanged();
+	// The text or the cursor was changed from this side; the text area shows them again.
+	void draftReplaced();
 	void shellModeChanged();
 	void readyChanged();
 	void completionChanged();
@@ -153,7 +155,10 @@ signals:
 
 private:
 	void updateCompletion();
+	// The draft was changed from here: the text area must show it.
 	void changeDraft();
+	// The draft was edited in the text area, which already shows it.
+	void draftEdited();
 	void setShellMode(bool shellMode);
 	void fillFromHistory(const QString& entry);
 	void attachImage(proto::NamedImage image);

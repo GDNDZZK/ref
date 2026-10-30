@@ -180,7 +180,7 @@ void ComposerModel::edit(const QString& text, int cursor)
 		m_browser.reset();
 	}
 	m_draft.setText(text, cursor);
-	changeDraft();
+	draftEdited();
 }
 
 void ComposerModel::moveCursor(int cursor)
@@ -194,11 +194,17 @@ void ComposerModel::moveCursor(int cursor)
 	emit draftChanged();
 }
 
-void ComposerModel::changeDraft()
+void ComposerModel::draftEdited()
 {
 	m_attachments.setAttachments(m_draft.attachments());
 	updateCompletion();
 	emit draftChanged();
+}
+
+void ComposerModel::changeDraft()
+{
+	draftEdited();
+	emit draftReplaced();
 }
 
 void ComposerModel::updateCompletion()
