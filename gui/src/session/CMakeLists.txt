@@ -9,6 +9,8 @@ qt_add_library(refgui_session STATIC
 	conversation_model.h
 	fence_splitter.cpp
 	fence_splitter.h
+	markdown_text.cpp
+	markdown_text.h
 	session_controller.cpp
 	session_controller.h
 	stream_pacer.cpp

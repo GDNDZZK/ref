@@ -2,13 +2,15 @@
 qt_add_executable(ref-gui main.cpp)
 
 # Must be set before qt_add_qml_module() reads the files.
-set_source_files_properties(Theme.qml Motion.qml Format.qml ToolInfo.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set_source_files_properties(Theme.qml Motion.qml Format.qml ToolInfo.qml Links.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 qt_add_qml_module(ref-gui
 	URI RefGui
 	SOURCES
 		app_translator.cpp
 		app_translator.h
+		local_only_network.cpp
+		local_only_network.h
 		chat_image_provider.cpp
 		chat_image_provider.h
 		chat_session.cpp
@@ -84,6 +86,7 @@ qt_add_qml_module(ref-gui
 		ToolStateSlot.qml
 		CountdownRing.qml
 		ToolInfo.qml
+		Links.qml
 		ToolBody.qml
 		ToolBodyBase.qml
 		GenericBody.qml
@@ -122,6 +125,9 @@ qt_add_qml_module(ref-gui
 		AlertBadge.qml
 		ErrorBlock.qml
 		ImageBlock.qml
+		StatusLine.qml
+		OlderPill.qml
+		ShimmerText.qml
 		Thumbnail.qml
 		ImageStrip.qml
 		Lightbox.qml

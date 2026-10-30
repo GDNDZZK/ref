@@ -1,6 +1,8 @@
 // Adapted from an early version of qutie by LightBlueCube
 #include "session/conversation_model.h"
 
+#include "session/markdown_text.h"
+
 #include <QDateTime>
 
 #include <algorithm>
@@ -15,6 +17,13 @@ namespace
 {
 
 // Source names of the user messages that start a new turn; the others are interjections.
+// Whether the views draw the content as Markdown: they then must not get it raw.
+bool rendersMarkdown(const Block& block)
+{
+	const bool markdownSource = block.kind == Block::Kind::User && (block.source == u"shell"_s || block.source == u"compaction"_s);
+	return block.kind == Block::Kind::Markdown || block.kind == Block::Kind::Reasoning || markdownSource;
+}
+
 bool opensTurn(const Block& block)
 {
 	const bool isTurnSource = block.source == u"human"_s || block.source == u"peer"_s || block.source == u"spawn"_s;
@@ -135,7 +144,7 @@ QVariant ConversationModel::data(const QModelIndex& index, int role) const
 	case KindRole:
 		return kindName(block.kind);
 	case ContentRole:
-		return block.content;
+		return rendersMarkdown(block) ? markdownForDisplay(block.content) : block.content;
 	case LanguageRole:
 		return block.language;
 	case StreamingRole:

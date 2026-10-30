@@ -14,6 +14,7 @@ ToolBodyBase {
 		spacing: 8
 
 		Text {
+			textFormat: Text.PlainText
 			width: parent.width - parent.spacing - 24
 			anchors.verticalCenter: parent.verticalCenter
 			text: body.url
@@ -32,7 +33,7 @@ ToolBodyBase {
 				color: openHover.hovered ? Theme.text : Theme.textMuted
 			}
 			HoverHandler { id: openHover; cursorShape: Qt.PointingHandCursor }
-			TapHandler { onTapped: Qt.openUrlExternally(body.url) }
+			TapHandler { onTapped: Links.open(body.url) }
 			Accessible.role: Accessible.Button
 			Accessible.name: qsTr("Open in browser")
 		}

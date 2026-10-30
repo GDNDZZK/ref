@@ -38,6 +38,8 @@ Item {
 	transform: Translate { id: entryShift }
 
 	ListView.onAdd: {
+		if (ListView.view.prepending) // earlier history, not news
+			return
 		entrance.restart()
 		added()
 	}

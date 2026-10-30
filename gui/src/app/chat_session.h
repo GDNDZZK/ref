@@ -8,6 +8,7 @@
 
 #include <QCoroTask>
 #include <QObject>
+#include <QSet>
 #include <QTimer>
 #include <QtQmlIntegration>
 
@@ -107,6 +108,11 @@ public:
 	Q_INVOKABLE void answerOldestPermission(bool allow, bool always);
 	// The same as the Cancel button on a delayed tool call.
 	Q_INVOKABLE void cancelDelayedTool();
+	// Takes back a message of the user and everything after it; the text and pictures return to
+	// the input box (draftRestored).
+	Q_INVOKABLE void undo(const QString& messageId);
+	// The same for the last message of the user.
+	Q_INVOKABLE void undoLast();
 	// Adds the page of messages before the oldest one.
 	Q_INVOKABLE void loadOlder();
 	// Puts the text of a message on the clipboard.
@@ -129,11 +135,14 @@ signals:
 	void toolsChanged();
 	// The backend reported a problem with the session (an Error event).
 	void errorReported(const QString& text);
+	// Undo took a prompt back: its text and pictures, for the input box.
+	void draftRestored(const QString& text, const QList<refgui::proto::NamedImage>& images);
 
 private:
 	QCoro::Task<> sendPrompt(QString text);
 	QCoro::Task<> sendAbort();
 	QCoro::Task<> fetchOlder();
+	QCoro::Task<> sendUndo(std::optional<QString> messageId);
 	QCoro::Task<> sendPermission(QString callId, bool allow, bool always);
 	void setFailure(const QString& text);
 	void trackOldestPermission();
@@ -144,6 +153,7 @@ private:
 	refgui::composer::ComposerModel m_composer;
 	QString m_failure; // the last thing that went wrong, until the next action
 	QString m_olderError;
+	QSet<QString> m_repliedCalls; // permission requests that have an answer on its way
 	QString m_guardedCallId; // the request the guard timer runs for
 	QTimer m_permissionGuard;
 	bool m_permissionKeysActive = false;
