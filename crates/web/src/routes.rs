@@ -19,6 +19,7 @@ use tokio_util::sync::CancellationToken;
 use crate::assets::{self, Asset};
 use crate::guard::{self, HostPolicy, SessionCookie, constant_time_eq, text_response};
 use crate::launch;
+use crate::ping;
 use crate::tunnel;
 use crate::upstream::Upstream;
 
@@ -29,7 +30,7 @@ const WS_PATH: &str = "/ws";
 const API_PREFIX: &str = "/api/";
 const INDEX_PATH: &str = "/index.html";
 const HASHED_ASSETS_PREFIX: &str = "/assets/";
-const APP_NAME: &str = "ref-web";
+pub const APP_NAME: &str = "ref-web";
 const IMMUTABLE: &str = "public, max-age=31536000, immutable";
 const REVALIDATE: &str = "no-cache";
 const NO_STORE: &str = "no-store";
@@ -86,18 +87,33 @@ async fn login(State(state): State<Arc<AppState>>, Query(query): Query<LoginQuer
         .into_response()
 }
 
+#[derive(Deserialize)]
+struct PingQuery {
+    nonce: Option<String>,
+}
+
 #[derive(Serialize)]
 struct Ping {
     app: &'static str,
     version: &'static str,
+    /// HMAC of the caller's nonce, keyed with the login token.
+    proof: String,
 }
 
-/// Lets a second ref-web recognise this one.
-async fn ping() -> Json<Ping> {
+/// Lets a second ref-web recognise this one (see `ping`).
+async fn ping(State(state): State<Arc<AppState>>, Query(query): Query<PingQuery>) -> Response {
+    let Some(nonce) = query.nonce.filter(|n| ping::is_valid_nonce(n)) else {
+        return text_response(
+            StatusCode::BAD_REQUEST,
+            "Bad request: missing or invalid nonce\n",
+        );
+    };
     Json(Ping {
         app: APP_NAME,
         version: env!("CARGO_PKG_VERSION"),
+        proof: ping::proof(&state.login_token, &nonce),
     })
+    .into_response()
 }
 
 #[derive(Serialize)]

@@ -8,6 +8,7 @@ use axum::http::header::{CONTENT_TYPE, COOKIE, HOST};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use subtle::ConstantTimeEq as _;
 
 use crate::routes::{AppState, LOGIN_PATH, PING_PATH};
 use crate::token;
@@ -74,9 +75,9 @@ pub fn origin_matches_host(origin: &str, host: &str) -> bool {
         .is_some_and(|o| o.eq_ignore_ascii_case(host))
 }
 
-/// Compares in time independent of where the first difference is.
+/// Compares without leaking where the first difference is.
 pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+    a.ct_eq(b).into()
 }
 
 /// The login cookie. Browsers share cookies between ports of a host, so other servers on
