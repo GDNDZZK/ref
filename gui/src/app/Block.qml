@@ -14,6 +14,8 @@ import RefGui
 // Behavior: a Behavior restarts whenever its target changes, and content that is
 // itself animating (a reasoning body easing open) changes it every frame, which
 // keeps restarting the animation and stalls the height.
+//
+// A removed row stays in the view until it has faded out and its height has closed.
 Item {
 	id: block
 
@@ -44,6 +46,9 @@ Item {
 		entrance.restart()
 		added()
 	}
+
+	// A removed row (undo, a rewritten history) fades out, then its space closes.
+	ListView.onRemove: exit.start()
 
 	function toggleExpanded() {
 		chat.model.toggleExpanded(index)
@@ -93,6 +98,14 @@ Item {
 		id: entrance
 		NumberAnimation { target: block; property: "opacity"; from: 0; to: 1; duration: Motion.standard; easing.type: Motion.ease }
 		NumberAnimation { target: entryShift; property: "y"; from: -Motion.enterDrop; to: 0; duration: Motion.standard; easing.type: Motion.ease }
+	}
+
+	SequentialAnimation {
+		id: exit
+		PropertyAction { target: block; property: "ListView.delayRemove"; value: true }
+		NumberAnimation { target: block; property: "opacity"; to: 0; duration: Motion.quick; easing.type: Motion.ease }
+		NumberAnimation { target: block; property: "height"; to: 0; duration: Motion.standard; easing.type: Motion.ease }
+		PropertyAction { target: block; property: "ListView.delayRemove"; value: false }
 	}
 
 	FrameAnimation {
