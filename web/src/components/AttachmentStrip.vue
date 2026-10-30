@@ -30,9 +30,9 @@ const { t } = useI18n()
 
 <style scoped>
 .strip {
-  --thumb-size: 56px;
-  --thumb-gap: 8px;
-  --remove-size: 18px;
+  --thumb-size: var(--attachment-strip-thumb-size);
+  --thumb-gap: var(--attachment-strip-thumb-gap);
+  --remove-size: var(--attachment-strip-attachment-remove-size);
   display: flex;
   gap: var(--thumb-gap);
   overflow-x: auto;
@@ -65,7 +65,11 @@ img {
   width: var(--remove-size);
   height: var(--remove-size);
   border-radius: 50%;
-  background: color-mix(in srgb, var(--background) 85%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--background) calc(var(--attachment-strip-remove-background-opacity) * 100%),
+    transparent
+  );
   color: var(--text);
   opacity: 0;
   transition: opacity var(--motion-quick) var(--motion-ease);
@@ -105,6 +109,6 @@ img {
 .thumb-enter-from,
 .thumb-leave-to {
   opacity: 0;
-  scale: 0.8;
+  scale: var(--attachment-strip-enter-scale);
 }
 </style>
