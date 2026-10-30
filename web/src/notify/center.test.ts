@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { NotifyKind } from '../proto/generated'
-import { NotificationCenter, wantedKinds } from './center.ts'
-import type { CenterDeps, NotificationSettings, NotifyFrame } from './center.ts'
+import type { NotificationSettings } from '../settings/model.ts'
+import { NotificationCenter } from './center.ts'
+import type { CenterDeps, NotifyFrame } from './center.ts'
 import type { NotificationPermissionState, NotificationRequest } from './notifier.ts'
 
 const ALL_ON: NotificationSettings = { enabled: true, permission: true, turnDone: true, turnError: true }
@@ -42,17 +43,6 @@ function setup(permission: NotificationPermissionState = 'granted') {
 function frame(overrides: Partial<NotifyFrame> = {}): NotifyFrame {
   return { session_id: 's1', notify_kind: 'turn_done', session_title: 'Fix bug', detail: null, ...overrides }
 }
-
-describe('wantedKinds', () => {
-  it('lists the kinds that are on', () => {
-    expect(wantedKinds(ALL_ON)).toEqual(['permission', 'turn_done', 'turn_error'])
-    expect(wantedKinds({ ...ALL_ON, turnDone: false })).toEqual(['permission', 'turn_error'])
-  })
-
-  it('is empty when the master switch is off', () => {
-    expect(wantedKinds({ ...ALL_ON, enabled: false })).toEqual([])
-  })
-})
 
 describe('SetNotify', () => {
   it('is not sent for what the handshake carried', () => {
