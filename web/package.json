@@ -16,8 +16,8 @@
     "format:check": "prettier --check .",
     "format": "prettier --write .",
     "test": "vitest run",
-    "gen": "node scripts/gen-theme.ts",
-    "gen:check": "node scripts/gen-theme.ts --check",
+    "gen": "node scripts/gen-theme.ts && node scripts/gen-icons.ts",
+    "gen:check": "node scripts/gen-theme.ts --check && node scripts/gen-icons.ts --check",
     "smoke": "node scripts/smoke.mjs",
     "perf": "node scripts/perf.mjs",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm gen:check && pnpm test"
