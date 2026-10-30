@@ -445,3 +445,30 @@ async fn frames_before_hello_are_refused() {
     .await;
     assert!(closed.is_ok(), "the connection is closed");
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn list_dirs_skips_names_that_are_not_utf8() {
+    use std::os::unix::ffi::OsStrExt;
+    let m = mock(Arc::new(|_, _| Reply::Text("pong".into()))).await;
+    let dir = temp_dir("ws-utf8");
+    std::fs::create_dir_all(dir.join("good")).unwrap();
+    std::fs::create_dir_all(dir.join(std::ffi::OsStr::from_bytes(b"bad\xff"))).unwrap();
+    let cfg = config(&m.url);
+    let mut opts = ref_server::HubOptions::new(dir.join("data"));
+    opts.home = None;
+    opts.config_loader = Arc::new(move |_| cfg.clone());
+    let hub = ref_server::Hub::new(opts);
+    let conn = hub.add_conn();
+    conn.lock().cwd = dir.to_string_lossy().into();
+    let req = Request::ListDirs { path: ".".into() };
+    let res = ref_server::api::handle(&hub, &conn, req).await.unwrap();
+    let names: Vec<&str> = res["dirs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|d| d.as_str())
+        .filter(|d| *d == "good" || d.contains("bad") || d.contains('\u{fffd}'))
+        .collect();
+    assert_eq!(names, ["good"]);
+}
