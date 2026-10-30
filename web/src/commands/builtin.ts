@@ -177,6 +177,7 @@ export function registerBuiltinCommands(): void {
       aliases: ['split'],
       group: 'view',
       shortcut: altKey('W'),
+      enabled: () => !layout.narrow,
       run: () => workspace.toggleSplit(),
     }),
     define({
@@ -190,7 +191,7 @@ export function registerBuiltinCommands(): void {
       slash: false,
       group: 'view',
       shortcut: altKey('Z'),
-      enabled: () => workspace.mode === 'split' && workspace.focusedId !== undefined,
+      enabled: () => !layout.narrow && workspace.mode === 'split' && workspace.focusedId !== undefined,
       run: (sessionId) => (workspace.zoomedId ? workspace.unzoom() : workspace.zoomTile(sessionId)),
     }),
     define({
