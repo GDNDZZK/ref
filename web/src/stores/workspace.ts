@@ -36,11 +36,13 @@ export function sortLive(sessions: readonly SessionInfo[]): SessionInfo[] {
   return [...sessions].sort((a, b) => a.created_at - b.created_at || a.id.localeCompare(b.id))
 }
 
-// "name: first line of the error", cut at 200 characters (the TUI's toast for a session in the background).
+// "name: the error on one line", cut at 200 characters with an ellipsis (the TUI's toast for a
+// session in the background: whitespace runs, newlines included, become one space).
 export function errorToast(name: string, text: string): string {
-  const firstLine = text.trim().split('\n')[0] ?? ''
-  const full = `${name}: ${firstLine}`
-  return full.length <= ERROR_TOAST_MAX_CHARS ? full : `${full.slice(0, ERROR_TOAST_MAX_CHARS - 1)}…`
+  const oneLine = text.replace(/\s+/g, ' ').trim()
+  const characters = Array.from(`${name}: ${oneLine}`)
+  if (characters.length <= ERROR_TOAST_MAX_CHARS) return characters.join('')
+  return `${characters.slice(0, ERROR_TOAST_MAX_CHARS - 1).join('')}…`
 }
 
 export const useWorkspaceStore = defineStore('workspace', () => {
@@ -350,7 +352,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function onConnected(isReconnect: boolean, start: Startup): Promise<void> {
     const api = connection.getApi()
     if (isReconnect) {
-      setLive(mode.value === 'split' ? await api.watchAll(true) : await api.listSessions())
+      const sessions = mode.value === 'split' ? await api.watchAll(true) : await api.listSessions()
+      setLive(sessions)
+      // A session closed while the connection was down never sent its `closed` event.
+      for (const id of [...chats.keys()]) {
+        if (sessions.some((session) => session.id === id)) continue
+        await discard(id, infoOf(id)?.cwd ?? cwd.value)
+      }
       await Promise.all([...chats.values()].map((session) => session.resync()))
       return
     }

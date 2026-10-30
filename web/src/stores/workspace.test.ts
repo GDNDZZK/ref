@@ -47,14 +47,20 @@ describe('sortLive', () => {
 })
 
 describe('errorToast', () => {
-  it('names the session and keeps the first line', () => {
-    expect(errorToast('parser', 'rate limited\nretry later')).toBe('parser: rate limited')
+  it('names the session and puts the whole error on one line, as the TUI does', () => {
+    expect(errorToast('parser', 'rate limited\n\n  retry\tlater \n')).toBe('parser: rate limited retry later')
   })
 
   it('cuts long text at 200 characters', () => {
     const toast = errorToast('x', 'e'.repeat(500))
     expect(toast).toHaveLength(200)
-    expect(toast.endsWith('…')).toBe(true)
+    expect(toast).toBe(`x: ${'e'.repeat(196)}…`)
+  })
+
+  it('counts characters, not UTF-16 units', () => {
+    const toast = errorToast('x', '😀'.repeat(500))
+    expect(Array.from(toast)).toHaveLength(200)
+    expect(toast.endsWith('😀…')).toBe(true)
   })
 })
 
@@ -115,6 +121,21 @@ describe('opening sessions', () => {
     expect(api.createSession).toHaveBeenCalledWith('/work', {})
     expect(workspace.currentId).toBe('ses_5')
     expect(workspace.live.map((entry) => entry.id)).toEqual(['ses_5'])
+  })
+})
+
+describe('reconnecting', () => {
+  const startup = { url: 'ws://x/ws', cwd: '/work', sessionId: undefined, split: false }
+
+  it('moves on from a session that was closed while the connection was down', async () => {
+    const workspace = setup([session('ses_1'), session('ses_2')])
+    await workspace.openSession('ses_1')
+    api.listSessions.mockResolvedValue([session('ses_2')])
+
+    await workspace.onConnected(true, startup)
+
+    expect(workspace.live.map((entry) => entry.id)).toEqual(['ses_2'])
+    expect(workspace.currentId).toBe('ses_2')
   })
 })
 
