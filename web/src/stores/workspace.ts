@@ -7,6 +7,7 @@
 
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef, watch } from 'vue'
+import { crossfade } from '../composables/crossfade.ts'
 import { ChatSession } from '../model/chatSession.ts'
 import type { EventFrame } from '../net/connection.ts'
 import { writeLocation } from '../net/location.ts'
@@ -107,7 +108,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     const previousId = currentId.value
     await chat(id).attach(true)
-    currentId.value = id
+    await crossfade(() => (currentId.value = id), 'standard')
     if (previousId === undefined || previousId === id) return
     await chat(previousId).detach()
   }
@@ -174,6 +175,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   // An empty `variant` rotates to the model's next one.
   async function setVariant(id: string, variant: string): Promise<void> {
     showInfo(await connection.getApi().setVariant(id, variant === '' ? undefined : variant))
+  }
+
+  // Back to the model's default (no variant).
+  async function clearVariant(id: string): Promise<void> {
+    showInfo(await connection.getApi().setVariant(id, ''))
   }
 
   // To the next agent (`direction` 1) or the previous one (-1), wrapping around.
@@ -351,6 +357,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     visibleSessionIds,
     cwd,
     chat,
+    infoOf,
     openSession,
     newSession,
     closeSession,
@@ -360,6 +367,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setModel,
     setAgent,
     setVariant,
+    clearVariant,
     cycleAgent,
     compact,
     exportSession,
