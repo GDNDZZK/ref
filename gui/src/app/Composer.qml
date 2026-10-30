@@ -1,6 +1,7 @@
+// Adapted from an early version of qutie by LightBlueCube
 import QtQuick
 import QtQuick.Controls.Basic
-import Qutie
+import RefGui
 
 // Message input. Enter sends, Shift+Enter inserts a line break.
 // While a reply is running, the send button turns into stop.
@@ -8,6 +9,7 @@ Rectangle {
 	id: composer
 
 	property bool busy: false
+	property bool sendingEnabled: true // false while there is no session to send to
 	signal submitted(string text)
 	signal stopRequested()
 
@@ -21,7 +23,7 @@ Rectangle {
 
 	function submit() {
 		const blank = input.text.trim() === ""
-		if (busy || blank)
+		if (busy || blank || !sendingEnabled)
 			return
 		submitted(input.text)
 		input.clear()
@@ -47,7 +49,7 @@ Rectangle {
 
 		TextArea {
 			id: input
-			placeholderText: qsTr("Message qutie")
+			placeholderText: composer.sendingEnabled ? qsTr("Message ref") : qsTr("Waiting for the ref backend…")
 			placeholderTextColor: Theme.textMuted
 			wrapMode: TextArea.Wrap
 			color: Theme.text
@@ -71,7 +73,7 @@ Rectangle {
 		id: sendButton
 		anchors { right: parent.right; bottom: parent.bottom; margins: composer.padding }
 		busy: composer.busy
-		canSend: input.text.trim() !== ""
+		canSend: input.text.trim() !== "" && composer.sendingEnabled
 		onClicked: composer.busy ? composer.stopRequested() : composer.submit()
 	}
 }

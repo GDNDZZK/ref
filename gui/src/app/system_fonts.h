@@ -1,3 +1,4 @@
+// Adapted from an early version of qutie by LightBlueCube
 #pragma once
 
 #include <QFont>

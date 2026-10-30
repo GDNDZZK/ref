@@ -1,5 +1,6 @@
+// Adapted from an early version of qutie by LightBlueCube
 import QtQuick
-import Qutie
+import RefGui
 
 // Assistant prose, rendered as Markdown while it streams.
 Block {

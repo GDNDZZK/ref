@@ -1,5 +1,6 @@
+// Adapted from an early version of qutie by LightBlueCube
 import QtQuick
-import Qutie
+import RefGui
 
 // Round send button that morphs into stop while a reply is running.
 // Into stop the glyphs swap with the usual ease-out; back to send, the square turns

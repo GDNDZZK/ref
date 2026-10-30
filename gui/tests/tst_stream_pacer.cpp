@@ -1,43 +1,46 @@
-#include "ui/stream_pacer.h"
+// Adapted from an early version of qutie by LightBlueCube
+#include "session/stream_pacer.h"
 
 #include <QTest>
 
 using namespace Qt::StringLiterals;
 using namespace std::chrono_literals;
-using qutie::llm::ReasoningDelta;
-using qutie::llm::StreamEvent;
-using qutie::llm::TextDelta;
-using qutie::ui::StreamPacer;
+using refgui::proto::Delta;
+using refgui::session::StreamPacer;
+using Chunk = StreamPacer::Chunk;
 
 namespace
 {
 
 const StreamPacer::Clock::time_point Start{};
 
-// Renders events as "kind:text" pieces, so tests see both order and content.
-QStringList render(const QList<StreamEvent>& events)
+Chunk TextDelta(const QString& text, qsizetype partIndex = 0)
+{
+	return {u"m1"_s, partIndex, Delta::Kind::Text, text};
+}
+
+Chunk ReasoningDelta(const QString& text)
+{
+	return {u"m1"_s, 0, Delta::Kind::Reasoning, text};
+}
+
+// Renders chunks as "kind:text" pieces, so tests see both order and content.
+QStringList render(const QList<Chunk>& chunks)
 {
 	QStringList rendered;
-	for(const StreamEvent& event : events)
+	for(const Chunk& chunk : chunks)
 	{
-		if(const auto* text = std::get_if<TextDelta>(&event))
-		{
-			rendered.append(u"text:"_s + text->text);
-		}
-		else
-		{
-			rendered.append(u"reasoning:"_s + std::get<ReasoningDelta>(event).text);
-		}
+		rendered.append((chunk.kind == Delta::Kind::Text ? u"text:"_s : u"reasoning:"_s) + chunk.text);
 	}
 	return rendered;
 }
 
-qsizetype lengthOf(const QList<StreamEvent>& events)
+qsizetype lengthOf(const QList<Chunk>& chunks)
 {
 	qsizetype length = 0;
-	for(const StreamEvent& event : events)
+	for(const Chunk& chunk : chunks)
 	{
-		length += std::visit([](const auto& delta) { return delta.text.size(); }, event);
+		length += chunk.text.size();
 	}
 	return length;
 }
@@ -56,13 +59,15 @@ private slots:
 	void neverSplitsGrapheme();
 	void idleTimeDoesNotBank();
 	void takeAllEmptiesIt();
+	void keepsPartsApart();
+	void reportsPendingTextOfAPart();
 };
 
 // With no gap seen yet, the pacer assumes the longest one.
 void TestStreamPacer::firstArrivalSpreadsOverMaxLag()
 {
 	StreamPacer pacer;
-	pacer.push(TextDelta{QString(100, u'a')}, Start);
+	pacer.push(TextDelta(QString(100, u'a')), Start);
 
 	QCOMPARE(lengthOf(pacer.take(Start)), 0);
 	const qsizetype halfway = lengthOf(pacer.take(Start + 100ms));
@@ -83,7 +88,7 @@ void TestStreamPacer::burstsShowAtSteadyRate()
 	for(int burst = 0; burst < Bursts; ++burst)
 	{
 		const auto arrival = Start + burst * Gap;
-		pacer.push(TextDelta{QString(120, u'a')}, arrival);
+		pacer.push(TextDelta(QString(120, u'a')), arrival);
 		for(auto frame = Frame; frame <= Gap; frame += Frame)
 		{
 			perFrame.append(lengthOf(pacer.take(arrival + frame)));
@@ -106,7 +111,7 @@ void TestStreamPacer::tokenStreamsShowPromptly()
 	for(int token = 0; token < 50; ++token)
 	{
 		const auto arrival = Start + token * 16ms;
-		pacer.push(TextDelta{u"word "_s}, arrival);
+		pacer.push(TextDelta(u"word "_s), arrival);
 		sent += 5;
 		shown += lengthOf(pacer.take(arrival + 8ms));
 	}
@@ -116,9 +121,9 @@ void TestStreamPacer::tokenStreamsShowPromptly()
 void TestStreamPacer::keepsKindsInOrder()
 {
 	StreamPacer pacer;
-	pacer.push(ReasoningDelta{u"thin"_s}, Start);
-	pacer.push(ReasoningDelta{u"k"_s}, Start);
-	pacer.push(TextDelta{u"say"_s}, Start);
+	pacer.push(ReasoningDelta(u"thin"_s), Start);
+	pacer.push(ReasoningDelta(u"k"_s), Start);
+	pacer.push(TextDelta(u"say"_s), Start);
 
 	QCOMPARE(render(pacer.take(Start + 1s)), (QStringList{u"reasoning:think"_s, u"text:say"_s}));
 }
@@ -128,14 +133,14 @@ void TestStreamPacer::neverSplitsGrapheme()
 {
 	StreamPacer pacer;
 	const QString text = u"a\U0001F600"_s;
-	pacer.push(TextDelta{text}, Start);
+	pacer.push(TextDelta(text), Start);
 
 	QString shown;
 	for(auto now = Start; !pacer.isEmpty(); now += 1ms)
 	{
-		for(const StreamEvent& event : pacer.take(now))
+		for(const Chunk& chunk : pacer.take(now))
 		{
-			const QString piece = std::get<TextDelta>(event).text;
+			const QString piece = chunk.text;
 			QVERIFY2(!piece.back().isHighSurrogate(), "split a surrogate pair");
 			shown += piece;
 		}
@@ -147,22 +152,47 @@ void TestStreamPacer::neverSplitsGrapheme()
 void TestStreamPacer::idleTimeDoesNotBank()
 {
 	StreamPacer pacer;
-	pacer.push(TextDelta{u"abcd"_s}, Start);
+	pacer.push(TextDelta(u"abcd"_s), Start);
 	QCOMPARE(lengthOf(pacer.take(Start + 1s)), 4);
 
-	pacer.push(TextDelta{QString(100, u'a')}, Start + 5s);
+	pacer.push(TextDelta(QString(100, u'a')), Start + 5s);
 	QVERIFY(lengthOf(pacer.take(Start + 5s + 1ms)) < 10);
 }
 
 void TestStreamPacer::takeAllEmptiesIt()
 {
 	StreamPacer pacer;
-	pacer.push(TextDelta{u"ab"_s}, Start);
-	pacer.push(ReasoningDelta{u"cd"_s}, Start);
+	pacer.push(TextDelta(u"ab"_s), Start);
+	pacer.push(ReasoningDelta(u"cd"_s), Start);
 
 	QCOMPARE(render(pacer.takeAll()), (QStringList{u"text:ab"_s, u"reasoning:cd"_s}));
 	QVERIFY(pacer.isEmpty());
 	QCOMPARE(lengthOf(pacer.take(Start + 1s)), 0);
+}
+
+void TestStreamPacer::keepsPartsApart()
+{
+	StreamPacer pacer;
+	pacer.push(TextDelta(u"ab"_s, 0), Start);
+	pacer.push(TextDelta(u"cd"_s, 1), Start);
+	pacer.push(TextDelta(u"ef"_s, 1), Start);
+
+	const QList<Chunk> all = pacer.takeAll();
+	QCOMPARE(all.size(), 2);
+	QCOMPARE(all.at(1).partIndex, 1);
+	QCOMPARE(all.at(1).text, u"cdef"_s);
+}
+
+void TestStreamPacer::reportsPendingTextOfAPart()
+{
+	StreamPacer pacer;
+	pacer.push(TextDelta(u"ab"_s, 0), Start);
+	pacer.push(TextDelta(u"cd"_s, 1), Start);
+	pacer.push(TextDelta(u"ef"_s, 0), Start);
+
+	QCOMPARE(pacer.pendingText(u"m1"_s, 0), u"abef"_s);
+	QCOMPARE(pacer.pendingText(u"m1"_s, 1), u"cd"_s);
+	QCOMPARE(pacer.pendingText(u"other"_s, 0), QString());
 }
 
 QTEST_GUILESS_MAIN(TestStreamPacer)

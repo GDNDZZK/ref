@@ -1,10 +1,11 @@
-qt_add_executable(qutie main.cpp)
+# Adapted from an early version of qutie by LightBlueCube
+qt_add_executable(ref-gui main.cpp)
 
 # Must be set before qt_add_qml_module() reads the files.
 set_source_files_properties(Theme.qml Motion.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
-qt_add_qml_module(qutie
-	URI Qutie
+qt_add_qml_module(ref-gui
+	URI RefGui
 	SOURCES
 		chat_session.cpp
 		chat_session.h
@@ -33,10 +34,19 @@ qt_add_qml_module(qutie
 		Flourish.qml
 		AlertBadge.qml
 		ErrorBlock.qml
+		ImageBlock.qml
+)
+
+# Interface text is English in the sources. The .ts files hold the other languages; their
+# .qm are compiled into the program (resource prefix /i18n). `update_translations` refreshes
+# the .ts files from the sources.
+qt_add_translations(ref-gui
+	TS_FILES ${PROJECT_SOURCE_DIR}/translations/ref-gui_zh_CN.ts
 )
 
 # CodeBlock.qml imports org.kde.syntaxhighlighting at run time; nothing links against it.
 find_package(KF6SyntaxHighlighting REQUIRED)
 
-target_link_libraries(qutie PRIVATE qutie_ui qutie_llm Qt6::Gui Qt6::Qml Qt6::Quick)
-qutie_configure_target(qutie)
+target_link_libraries(ref-gui PRIVATE refgui_session refgui_cli Qt6::Gui Qt6::Qml Qt6::Quick)
+target_compile_definitions(ref-gui PRIVATE REF_GUI_VERSION="${PROJECT_VERSION}")
+refgui_configure_target(ref-gui)

@@ -1,5 +1,6 @@
+// Adapted from an early version of qutie by LightBlueCube
 import QtQuick
-import Qutie
+import RefGui
 
 // The "it happened" flourish, in two forms. Both spring `target` to full size with a
 // wobble and send a ring in `color` out from its center.

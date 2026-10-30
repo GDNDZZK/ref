@@ -1,5 +1,6 @@
+// Adapted from an early version of qutie by LightBlueCube
 import QtQuick
-import Qutie
+import RefGui
 
 // Round surface button; the glyph is its child. Set Accessible.name on each use.
 //

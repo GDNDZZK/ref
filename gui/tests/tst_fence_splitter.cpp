@@ -1,9 +1,10 @@
-#include "ui/fence_splitter.h"
+// Adapted from an early version of qutie by LightBlueCube
+#include "session/fence_splitter.h"
 
 #include <QTest>
 
 using namespace Qt::StringLiterals;
-using qutie::ui::FenceSplitter;
+using refgui::session::FenceSplitter;
 
 namespace
 {

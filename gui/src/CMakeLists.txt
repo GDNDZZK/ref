@@ -1,4 +1,6 @@
-add_subdirectory(infra)
-add_subdirectory(llm)
-add_subdirectory(ui)
+# Adapted from an early version of qutie by LightBlueCube
+add_subdirectory(proto)
+add_subdirectory(client)
+add_subdirectory(cli)
+add_subdirectory(session)
 add_subdirectory(app)

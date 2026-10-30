@@ -4,3 +4,4 @@ build*
 
 *.bak*
 *.kate-swp
+.deps
