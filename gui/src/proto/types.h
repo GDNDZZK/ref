@@ -3,7 +3,9 @@
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QList>
+#include <QPair>
 #include <QString>
+#include <QStringList>
 
 #include <optional>
 #include <variant>
@@ -252,6 +254,63 @@ struct Delta
 
 	Kind kind = Kind::Text;
 	QString text;
+};
+
+// ---- Configuration and status ---------------------------------------------------------
+
+struct AgentInfo
+{
+	QString name;
+	QString description;
+	std::optional<ModelRef> model{};
+	bool creatable = false; // other sessions may create it
+	bool canSpawn = false;  // it may create and close other sessions
+	std::optional<QString> color{};
+};
+
+struct ModelInfo
+{
+	QString provider;
+	QString providerName;
+	QString id;
+	QString name;
+	quint64 context = 0;
+	quint64 output = 0;
+	bool images = false;
+	bool reasoning = false;
+	QStringList variants{};
+};
+
+// A user-defined slash command, expanded by the backend.
+struct CommandInfo
+{
+	QString name;
+	QString description;
+	QString source; // "builtin", "config", "skill" or "mcp"
+};
+
+struct McpServerStatus
+{
+	QString name;
+	QString status; // "connected", "connecting", "failed" or "disabled"
+	std::optional<QString> error{};
+	QStringList tools{}; // as exposed to the model: <server>_<tool>
+};
+
+struct ServerConfig
+{
+	QList<AgentInfo> agents;
+	QString defaultAgent;
+	QList<ModelInfo> models;
+	QList<CommandInfo> commands;
+	QList<QPair<QString, QString>> mcp{}; // name and status text
+};
+
+// The sub-directories of `path` (an absolute, normalized path).
+struct DirListing
+{
+	QString path;
+	QStringList dirs;
 };
 
 // ---- Session events -----------------------------------------------------------------

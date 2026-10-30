@@ -29,5 +29,21 @@ QJsonObject setNotify(const QList<NotifyFrame::Kind>& kinds);
 QJsonObject setFocus(bool focused, const QStringList& sessions);
 QJsonObject abort(const QString& sessionId);
 QJsonObject permissionReply(const QString& sessionId, const QString& callId, bool allow, bool always);
+QJsonObject getConfig();
+QJsonObject watchAll(bool enabled);
+QJsonObject setModel(const QString& sessionId, const ModelRef& model);
+QJsonObject setAgent(const QString& sessionId, const QString& agent);
+// An empty `variant` rotates to the model's next one.
+QJsonObject setVariant(const QString& sessionId, const std::optional<QString>& variant);
+QJsonObject rename(const QString& sessionId, const QString& name);
+QJsonObject setCwd(const QString& sessionId, const QString& path);
+QJsonObject compact(const QString& sessionId);
+QJsonObject close(const QString& sessionId);
+QJsonObject deleteSession(const QString& sessionId);
+QJsonObject exportTranscript(const QString& sessionId, const QString& path);
+QJsonObject peerCommand(const QString& sessionId, const QString& command, const QString& args);
+QJsonObject mcpStatus(const std::optional<QString>& cwd);
+QJsonObject listDirs(const QString& path);
+QJsonObject shutdown();
 
 } // namespace refgui::proto::request

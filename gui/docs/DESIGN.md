@@ -222,7 +222,7 @@ Motion:
 
 The zoomed tile is the shared element: it is the same `SessionPane` item during the animation, so scroll position,
 streaming text and Hold survive. Hold (D5) is per pane and keeps working inside tiles.
-Zoom is `Ctrl+O` on the focused tile, a click on the maximize button, or a double click on the header.
+Zoom is `Ctrl+Shift+Z` on the focused tile, a click on the maximize button, or a double click on the header.
 Focus moves by clicking a tile, `Alt+arrows` (nearest tile in that direction by centre distance) or `Tab` outside
 the composer. Typing goes to the focused tile's composer; a click on a tile focuses its composer.
 
@@ -232,8 +232,8 @@ the composer. Typing goes to the focused tile's composer; a click on a tile focu
             ┌──────────────────────────────────────┐   width 560, top = max(48, 14% of the window height)
             │ ⌕  Type a command…                   │   52px search row
             ├──────────────────────────────────────┤   1px border
-            │ ▣  New session                Ctrl+N │   rows 40px, at most 9 visible (scrolls)
-            │ ▣  Sessions                   Ctrl+K │
+            │ ▣  New session          Ctrl+Shift+N │   rows 40px, at most 9 visible (scrolls)
+            │ ▣  Switch session       Ctrl+Shift+L │
             └──────────────────────────────────────┘
 ```
 
@@ -298,16 +298,11 @@ Name tab: a text field with the current peer name and a "Set name" primary butto
 **Help** (640): two sections, "Keyboard" and "Commands", each a table of rows 30px high (`smallFontSize+1`): left the
 name, right the keys as chips (palette style); commands show `/name` aliases and the hint in textMuted. Generated from
 the CommandRegistry, so it cannot drift from the real shortcuts. Fixed keys that are not commands (Esc Esc, Tab,
-Ctrl+T, Enter, Shift+Enter) are listed in a "Writing" group.
+Enter, Shift+Enter) are listed in a "Writing" group.
 
 **Export** (480): text "Write the conversation as markdown to this path on the backend's machine." (`smallFontSize`,
 textMuted), a path field prefilled with `ref-session-<id>.md`, inline error, buttons Cancel / Export.
 Success: the dialog closes and a toast shows the resolved path.
-
-**Compact** (480): body "Summarize the older part of the conversation to free up context. This asks the model and
-cannot be undone." and a context bar: 6px high, radius 3, `border` track, `accent` fill with width
-`used / max` (`Motion.standard`), caption "84k of 200k tokens (42%)" in `smallFontSize` textMuted; a tick mark 2px wide
-in `textMuted` at `recommend / max`. Buttons Cancel / Compact (primary).
 
 **Change directory** (480, `/cd`): path field prefilled with the session's directory, selected. Below it (remote
 backend or typing) the completion list from `ListDirs`: rows 32px, `folder-16` + name, at most 6 visible; Tab or click
@@ -323,7 +318,7 @@ it stops the work; the conversation stays in history." Buttons Cancel / Close (d
 **Rename** (480): one text field with the name, buttons Cancel / Rename. Names are unique among live sessions: the
 backend's rejection shows inline.
 
-## Settings panel (Ctrl+,)
+## Settings panel (Ctrl+Shift+S)
 
 Dialog 520 wide, title "Settings". Sections are labels (`smallFontSize`, textMuted, 28px) with rows of 48px below,
 label (`Theme.fontSize`) at the left, control at the right, 1px `border` dividers inset 22px.
@@ -373,33 +368,40 @@ running or waiting, with the tooltip "Close or finish running sessions first". A
 
 ## Keyboard map (GUI)
 
-| Key | Action | Command id |
-|---|---|---|
-| Ctrl+P | Command palette | `palette.open` |
-| Ctrl+N | New session in the window's directory | `session.new` |
-| Ctrl+Shift+N | New session in another folder… | `session.newIn` |
-| Ctrl+K | Sessions (switch, live and history) | `session.list` |
-| Ctrl+W | Close this session | `session.close` |
-| Ctrl+Tab / Ctrl+Shift+Tab | Next / previous live session | `session.next` / `session.previous` |
-| Alt+1 … Alt+9 | Nth live session | `session.nth` |
-| Ctrl+M | Model for this session | `session.model` |
-| Ctrl+Shift+A | Agent | `session.agent` |
-| Ctrl+Shift+E | Export transcript | `session.export` |
-| Ctrl+Shift+C | Copy last reply | `session.copy` |
-| Ctrl+Shift+R | Expand / collapse reasoning | `view.reasoning` |
-| Ctrl+Shift+D | Expand / collapse tool details | `view.details` |
-| Ctrl+B | Show / hide the sidebar | `view.sidebar` |
-| Ctrl+\\ | Split view | `view.split` |
-| Ctrl+O | Zoom the focused tile (split view) | `split.zoom` |
-| Alt+arrows | Move the tile focus (split view) | `split.focus*` |
-| Ctrl+, | Settings | `app.settings` |
-| F1 | Help | `app.help` |
-| Ctrl+Q | Quit | `app.quit` |
+One letter per command, shared with the WebUI. The GUI uses Ctrl+Shift+letter (Ctrl is Cmd on macOS); the WebUI uses
+Alt+letter. Command ids are the TUI's canonical slash names (`/new`, `/sessions`, …). Titles are the TUI's `desc` texts,
+except where the behavior differs.
 
-Owned by the composer (area C), not listed in the registry: Enter, Shift+Enter, Tab / Shift+Tab (agents), Ctrl+T
-(variants), Esc Esc (interrupt), ↑ / ↓ (prompt history), Ctrl+V. Palette-only (no shortcut): compact, undo, rename, cd,
-variant, peers*, mcp, close-session. The WebUI replaces Ctrl+N / Ctrl+T / Ctrl+W (browser-reserved) with Alt+N and
-Alt+W; the rest is the same.
+| Key | Id | Title |
+|---|---|---|
+| Ctrl+P | `palette` | Command palette |
+| Ctrl+Shift+N | `new` | New session (in the window's directory, at once) |
+| (none) | `new-in` | New session in another folder… |
+| Ctrl+Shift+L | `sessions` | Switch session (live + history) |
+| Ctrl+Shift+M | `models` | Switch model (this session only) |
+| Ctrl+Shift+A | `agents` | Switch agent |
+| Ctrl+Shift+T | `variant` | Set or cycle model variant (no argument: next variant) |
+| Ctrl+Shift+C | `compact` | Compact the conversation (runs at once, no confirmation) |
+| Ctrl+Shift+U | `undo` | Undo last prompt |
+| Ctrl+Shift+K | `close` | Close this session |
+| Ctrl+Shift+X | `export` | Export transcript as markdown |
+| Ctrl+Shift+Y | `copy` | Copy last assistant message (raw) |
+| Ctrl+Shift+R | `thinking` | Toggle expanded thinking |
+| Ctrl+Shift+O | `details` | Toggle expanded tool details |
+| Ctrl+Shift+W | `watch` | Split view of background sessions |
+| Ctrl+Shift+B | `sidebar` | Toggle sidebar |
+| Ctrl+Shift+H | `help` | Keybindings and commands |
+| Ctrl+Shift+S | `settings` | Settings |
+| Ctrl+Shift+Z | `zoom` | Zoom the focused tile (split view only) |
+| Alt+arrows | (tile focus) | Move the focus between tiles (split view); not in the registry |
+
+Palette-only (no key): `new-in`, `rename`, `cd`, `close-session`, `peers`, `peers-name`, `peers-inbox`,
+`peers-outbox`, `mcp`. There are no `editor` and `exit` commands. Slash aliases are the TUI's (`/clear`, `/resume`,
+`/continue`, `/effort`, `/summarize`, `/kill`, `/split`, `/cwd`, `/list-agents`, `/mcps`, …).
+Owned by the composer (area C), not registry commands: Enter, Shift+Enter, Ctrl+J, Tab / Shift+Tab (cycle agents, via
+`Workspace.cycleAgent`), Esc Esc (interrupt), ↑ / ↓ (prompt history), Ctrl+V. Unlike the TUI, the GUI does not bind
+Ctrl+T: variants cycle with Ctrl+Shift+T or by clicking the variant pill.
+Unverified: Ctrl+Shift+U is taken by IBus' Unicode input on Linux.
 
 ## New constants
 
@@ -590,3 +592,176 @@ reason from the platform layer is the tooltip). The switches still work: they ch
 - Composer.qml literals: `tagRowHeight` 32, `chipHeight` 28, `chipPaddingX` 10, `chipIconGap` 6, `chipGap` 4,
   `labelSlide` 6, `thumbSize` 56, `thumbGap` 8, `attachmentRemoveSize` 18, `popupGap` 8, `popupPadding` 4,
   `popupRowHeight` 36, `popupMaxRows` 8, `queueGap` 8, `queueRowHeight` 32, `queueMaxRows` 4.
+
+---
+
+# ref-gui conversation area (zone A): visual spec
+
+The GUI is the visual authority; the WebUI follows. Sizes are logical pixels. Names in `code` are constants:
+colours go to `Theme.qml`, timings to `Motion.qml`, the rest are literal properties at the top of the component
+that uses them. Icons are `Icon { name; size }` (assets/icons, 16 next to text, 20 in buttons), never scaled.
+Existing metrics stay: reading column `Theme.contentWidth` 760, `blockSpacing` 14, `turnGap` 18, card radius
+`Theme.radius` 10, header height 38, card padding 14.
+
+## New theme colours (light / dark)
+
+| Name | Light | Dark | Use |
+|---|---|---|---|
+| `warning` | #b86e00 | #e5b567 | permission, delay, retry, interrupted, shell/reminder bar |
+| `info` | #2a7fb5 | #6fb7e0 | messages from other sessions, hunk headers, tool input |
+| `diffAdded` / `diffAddedBackground` | #1f7a4d / #e3f3e9 | #6cc28a / #1d2f27 | added lines |
+| `diffRemoved` / `diffRemovedBackground` | #b3303f / #fbe6e8 | #ec6f73 / #33202a | removed lines |
+| `matchBackground` | #fff1c2 | #3a3420 | grep match lines |
+| `agentPalette` (5) | #5c9cf5 #9d7cd8 #2e9d5b #d9822b #d23f45 | #7aa2f7 #b49bf0 #6cc28a #f0a86a #ec6f73 | agent colour when the agent has none; index = position in the agent list, else hash of the name |
+
+`Theme.staleOpacity` 0.55: messages before the last compaction.
+
+## Tool card
+
+Header row (38): `[state 16] [type icon 16] name purpose detail ... status duration time [chevron]`, 10 between items.
+- `name` mono 13 bold; `purpose` 13 text; `detail` (one line from the input: command, path, pattern, url, `to`, `n/m done`) mono 12
+  `textMuted`, elided; status/duration/time 12 `textMuted` (status in the state's colour).
+- Time is the start clock `HH:mm:ss`, shown at widths >= 560, otherwise dropped.
+- Type icon (16, `textMuted`): read file-text, edit pencil, write file-plus, delete trash, bash terminal, grep search,
+  find folder-search, webfetch globe, todo todo, create_session chat-plus, send_message / message_status chat-send,
+  list_sessions chat-list, close_session chat-x, read_session chat, MCP tools mcp, anything else tool.
+- The card is hoverable when it has details (`surfaceHover`); a click toggles it. Expanded state is stored per
+  part in the model (`expanded` role), default `detailsExpanded`; `awaiting_permission` forces it open.
+
+### The eight states
+
+| State (`toolState`) | State slot (16 x 16) | Right-hand text | Card |
+|---|---|---|---|
+| `streaming` | 8 dot `accent`, pulsing (`Motion.pulse`, dimmed 0.5) | "writing…" | normal; detail line follows the streamed input |
+| `awaiting_permission` | `lock` icon, `warning` | "Needs permission" (`warning`) | border `warning` at 60%; permission section open |
+| `delayed` | countdown ring (below), `warning` | "Runs in 4s" (`warning`) and a **Cancel** text button | border `warning` at 60% |
+| `running` | 8 dot `accent`, pulsing | "running 12s" (`accent`, updates each second) | live output tail when expanded |
+| `done` | 8 dot `success` | duration, e.g. "1.2 s" | the dot plays Flourish when it arrives from running/streaming |
+| `error` | 8 dot `danger` | "error 1.2 s" (`danger`) | collapsed: first output line under the header (`└ `, `danger`, one line, elided) |
+| `denied` | ring 8, 1.5 stroke `textMuted`, no fill | "denied" | name struck through, text `textMuted` |
+| `cancelled` | ring 8, 1.5 stroke `textMuted`, no fill | "cancelled" | name and purpose `textMuted` |
+
+Colour changes between states cross-fade over `Motion.standard`; cards created in a final state show no Flourish.
+
+**Countdown ring** (delayed): 16 circle, stroke 2. Track `border`; arc `warning` with round caps, starting at 12 o'clock,
+shrinking anticlockwise to nothing: sweep = remaining / total * 360, linear. `total` = the remaining time when the
+card first saw the state (a card that appears mid-delay starts partly drawn). Redrawn every frame while `delayed`;
+the number in the text uses `ceil(remaining / 1000)` and ticks each second. Reaching zero swaps to `running`.
+
+## Permission section
+
+Inside the card, under the details, separated by a 1 divider. Height animates over `Motion.standard`.
+- Prominent fields first, as the TUI does: `command` as `$ cmd` mono 13 bold on `codeBackground` (radius 6, padding 8 x 10, wrapped),
+  `path` as a mono 13 `info` line. The full input follows in the card's body (forced open).
+- Button row, padding 10 x 14, spacing 8, height 30 each (radius `radiusSmall`): icon 16, label 13, key cap on the right.
+  **Allow** (`check`, `success`, key `a`), **Allow for session** (`check-all`, `accent`, key `s`), **Deny** (`close`, `danger`, key `d`).
+  Style: 1 border in the colour at 50%, text in the colour, fill = colour at 12% on hover and 22% pressed.
+  Key cap: 18 x 18, radius 4, 1 border in the same colour, mono 11 letter.
+- Right end: "+N more waiting" 12 `textMuted` when other requests of this session are pending.
+- Keys act on the oldest pending request of the session: `a` or Enter allow, `s` always, `d` or Esc deny. Keys are ignored for
+  `permissionGuard` = 350 ms after the request appears (the user was still typing); letters then no longer reach the composer
+  until all requests are answered.
+- Answered: the section collapses over `Motion.standard`; the state moves on with the next event.
+- A request outside the view puts a `warning` AlertBadge ("?") on the jump-to-latest button, like errors do.
+
+## Tool content (expanded body)
+
+Body padding 10 x 14. A section has a label row (11, `textMuted`, medium weight, 6 below) and sections are
+separated by 12. Text is mono 12, line height 18, selectable. Output over `previewLines` = 200 lines is cut with a
+text button "Show N more lines" (`accent`, 12) that shows all. Copy: a `copy` icon button (16, top right of a code or
+output area, visible on hover, turns to `check` for `Motion.slow` after copying).
+
+| Tool | Body |
+|---|---|
+| generic / unknown | "Input" (pretty JSON, `info`) then "Output" (`textMuted`; `danger` when the tool failed; "(no output)" when empty) |
+| `edit`, `write` | Path row (`meta.path`, mono 12 text) with `+added` (`diffAdded`) and `-removed` (`diffRemoved`) counts, then the diff. Without `meta.diff`: generic |
+| `bash` | Command box (`$ cmd`, as in the permission section, with copy); then "Output" with an exit chip: `exit 0` `textMuted`, otherwise `danger`, plus "timed out" / "cancelled" / "truncated" chips from `meta`; while running the live output (`meta.live_output`) as a tail of 20 lines with "N earlier lines" above |
+| `read` | Path row with the tag dim; lines as gutter + text (below) |
+| `grep` | One group per file: path row (mono 12 bold) and gutter + text lines; match lines (`*`) on `matchBackground`, context lines `textMuted`, `...` rows as a dim "⋯" separator. Footer chip "N matches in M files" (+ "truncated") from `meta` |
+| `find` | One row per path (height 24): `file` or `folder` icon 16 `textMuted`, directory part `textMuted`, name `text`; footer chip "N results" (+ "truncated") |
+| `webfetch` | URL row (mono 12 `info`) with `external-link` icon button, status and size chips from `meta`, then the output |
+| `todo` | Not foldable: the list is always shown under the header (see below) |
+| `send_message`, `create_session` | Recipient row: `chat-send` / `chat-plus` icon 16 `info` + name (`info`, bold 13); the message text (`input.message` / `input.prompt`) in prose 13 on a 3 `info` left bar (padding-left 10); then "Output" |
+| `read_session`, `list_sessions`, `message_status`, `close_session` | Session name row (`chat` / `chat-list` / `chat-send` / `chat-x` icon + name), then "Output" |
+| Images (`images` of any tool, e.g. `read` of a picture) | Thumbnail row below the sections (below) |
+
+**Gutter + text** (read, grep): line numbers right aligned in a column as wide as the longest number (mono 11, `textMuted` 70%),
+12 gap, then the text. Not wrapped; the area scrolls horizontally with a thin bar when a line is wider.
+
+**Diff**: unified diff from `meta.diff`, mono 12, line height 18, no wrapping (horizontal scroll). Row backgrounds fill the full width:
+`+` lines `diffAddedBackground` / text `diffAdded`; `-` lines `diffRemovedBackground` / `diffRemoved`; `@@` rows `info` on `surface`;
+`---` / `+++` rows `textMuted` bold; context `textMuted`. A 16 wide sign column keeps `+` / `-` aligned.
+
+**Todo**: rows of height 26, left padding 14: marker 16, 8 gap, text 13. `pending` ring 1.5 `textMuted`; `in_progress` ring `accent`
+with a pulsing 8 dot (`Motion.pulse`); `completed` `success` disc with a white tick (`check` 16 as ink on the disc), text `textMuted`
+struck through; `cancelled` `close` icon `textMuted`, text `textMuted` struck through. The header detail reads "2/5 done".
+Rows animate their marker colour over `Motion.standard`.
+
+**Image thumbnails**: row under the sections, spacing 8, each at most 160 x 96 (aspect kept, radius 6, 1 `border`), loaded with GetImage.
+A placeholder (`surface`, `image` icon 20 centred) shows until the bytes arrive; a failed load shows `error` icon `danger`. Hover
+dims 12% and shows `maximize` icon 20 white in the corner. A click opens the **lightbox**: a scrim `Qt.rgba(0, 0, 0, 0.72)` over the window,
+the picture fitted to the window minus `lightboxMargin` = 48, name and size caption below (12, white 80%), a 34 round close button
+(`close` 20) top right; Esc, a click on the scrim or on the button close it. Open/close: fade and scale 0.96 to 1 over `Motion.standard`.
+Pictures attached to a user message use the same thumbnails (72 high) under the bubble.
+
+## Message sources and meta row
+
+User-role messages by `source`:
+- `human`: unchanged (accent-tinted bubble, `userBubble`).
+- `peer`: `surface` bubble with a 3 `info` bar on the left; header row `chat-send` icon 16 + `message from "name"` (12 bold `info`).
+- `spawn`: as `peer`; header `chat-plus` + `created by "name"`.
+- `reminder`: `surface` bubble, bar `warning`; header `retry` icon + `reminder` (12 bold `warning`).
+- `shell`: `codeBackground` bubble, bar `warning`; header `terminal` icon + `shell` (12 bold `warning`); body is the Markdown of the output (mono).
+- `compaction`: the divider (below).
+Bubbles keep the human bubble's radius and padding; the header sits 6 above the text.
+
+**Meta row** under every message (height 24, 12, `textMuted`, gap 8 with "·" separators), full opacity on hover of the message, 60% otherwise:
+- User: `HH:mm:ss` · **Undo** (`undo` 16 + "Undo", human messages only) · **Copy** (`copy` 16 + "Copy"). Right aligned in the bubble column.
+- Assistant: agent dot (8, agent colour; pulsing and elapsed time while streaming) and agent name (titlecase, agent colour; `textMuted` when it ended with an error)
+  · model name and variant (variant `warning`) · `HH:mm:ss -> HH:mm:ss (1.2 s)` · `up 12.3k down 456` (up = input + cache read + cache write) · `38 tok/s` (`textMuted` 60%, shown when
+  output > 0 and the span > 0) · `interrupted` (`warning`, when the error is "aborted"). **Copy** is at the right end. The tooltip of the time shows the full date.
+- Copy writes the raw text of the message (text parts joined by a blank line); the icon becomes `check` for `Motion.slow`.
+- Undo asks nothing and removes this message and all after it (`Undo` with `message_id`); the text and pictures go back to the input box.
+
+## Compaction
+
+The message with source `compaction` is a full-width divider (1 `border` line on both sides) with a centred pill:
+`history` icon 16 `accent`, "Context compacted" (13 bold `accent`), the time (12 `textMuted`) and a chevron. A click unfolds the summary under it
+(Markdown 13 `textMuted` on a 2 `accent` left bar, padding-left 12, unfolding over `Motion.standard`). Copy sits at the line's right end
+(visible on hover). Under the divider of the **last** compaction, centred, 12 italic `textMuted` 70%: "Messages above stay visible but are no longer sent to the model".
+Every message before the last compaction is drawn at `Theme.staleOpacity`.
+
+## Removed, Reset, older messages
+
+- **Removed** (undo, retry): the block fades to 0 over `Motion.quick`, then its height closes over `Motion.standard` with `Motion.ease` (rows below move up with it).
+  A message's meta row goes with it.
+- **Reset** (compaction, undo): only the rows that differ change. Rows that stay do not move; removed rows leave as above, new rows enter as new
+  blocks do (fade and drop `Motion.enterDrop`). A snapshot (attaching, switching session) shows no animation.
+- **Older messages**: when `moreBefore` is true, a pill "Load older messages" (12 `textMuted`, `history` icon 16, height 28, centred) is the first row;
+  scrolling within `olderTriggerDistance` = 400 of the top loads the next page by itself. While loading the pill shows a pulsing dot instead of the icon.
+  Prepended rows do not animate and the view keeps what the user reads where it is (the scroll position moves by the height added above).
+  A failed load puts the error text in the pill (`danger`) and a click retries.
+
+## Status line (above the input box)
+
+A row of height 28 at the bottom of the chat, in the reading column, 12 `textMuted`, always present so nothing jumps.
+- Left, by `activity`: idle nothing; `thinking` pulsing 8 dot `accent` + "Working" with a shimmer; `running` dot + "Running tools";
+  `waiting_permission` `lock` icon + "Waiting for your permission" (`warning`); `compacting` dot + "Compacting context…" (shimmer `accent`);
+  `retrying` `retry` icon + "Retrying in 4s (attempt 2): <error, one line, elided>" (`warning`; the number counts down each second).
+  Then " · 1m 12s" for the run (from `busySince`, each second; hidden under 1 s).
+- Right: context use "12.4k / 200k" with a bar 48 x 4 (radius 2, track `border`, fill `accent`); the fill turns `warning` from `contextRecommend`
+  and `danger` from `contextAuto`; the text is the same colour then. Hidden while `contextMax` is 0. Tooltip: the four numbers.
+- A shimmer is a highlight sweeping over the label: `shimmerPeriod` = 1600 ms for one sweep, highlight width 3 characters, colours `textMuted` to `text`.
+
+## Errors
+
+- An assistant message error (not "aborted") is an `error` block under the message (existing ErrorBlock).
+- A session `Error` event is a block at the end of the list (same ErrorBlock, no message), unless its text equals the error of the last message.
+  It leaves with the next prompt the user sends. Details in the TUI: view.error, tail rows.
+- Spread speed of the error tint `spreadSpeed` = 1.5 px/ms (constant, linear, starts `Motion.quick` after the card lands).
+
+## Constants added (for the WebUI's list)
+
+Theme: `warning`, `info`, `diffAdded`, `diffAddedBackground`, `diffRemoved`, `diffRemovedBackground`, `matchBackground`, `agentPalette`, `staleOpacity`.
+Component literals: `permissionGuard` 350 ms, `previewLines` 200, `lightboxMargin` 48, `olderTriggerDistance` 400, `shimmerPeriod` 1600,
+`thumbnailMaxWidth` 160, `thumbnailMaxHeight` 96, `userThumbnailHeight` 72, `liveTailLines` 20, `spreadSpeed` 1.5.

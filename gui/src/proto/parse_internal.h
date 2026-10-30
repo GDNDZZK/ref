@@ -8,6 +8,7 @@ namespace refgui::proto::json
 {
 
 ToolState readToolState(const QString& path, const QJsonValue& value);
+ModelRef readModelRef(const Fields& fields);
 SessionInfo readSessionInfo(const Fields& fields);
 Part readPart(const Fields& fields);
 Message readMessage(const Fields& fields);

@@ -90,6 +90,26 @@ void checkResponseResult(const QString& name, const QJsonObject& result)
 	{
 		QVERIFY(parseMessagesResult(result));
 	}
+	else if(name == u"response_get_config")
+	{
+		QVERIFY(parseConfigResult(result));
+	}
+	else if(name == u"response_mcp_status")
+	{
+		QVERIFY(parseMcpResult(result));
+	}
+	else if(name == u"response_list_dirs")
+	{
+		QVERIFY(parseDirsResult(result));
+	}
+	else if(name == u"response_peer_command" || name == u"response_expand_command")
+	{
+		QVERIFY(parseTextResult(result));
+	}
+	else if(name == u"response_export")
+	{
+		QVERIFY(parsePathResult(result));
+	}
 }
 
 } // namespace
@@ -177,6 +197,24 @@ private slots:
 		QCOMPARE(request::permissionReply(u"ses_a1b2c3d4"_s, u"call_9x8y7z"_s, true, false), withoutId(u"permission_reply"_s));
 		QCOMPARE(request::prompt(u"ses_a1b2c3d4"_s, u"Fix the failing parser test"_s), withoutId(u"prompt"_s));
 
+		QCOMPARE(request::getConfig(), withoutId(u"get_config"_s));
+		QCOMPARE(request::watchAll(true), withoutId(u"watch_all"_s));
+		QCOMPARE(request::setAgent(u"ses_a1b2c3d4"_s, u"plan"_s), withoutId(u"set_agent"_s));
+		QCOMPARE(request::setVariant(u"ses_a1b2c3d4"_s, u"low"_s), withoutId(u"set_variant"_s));
+		QCOMPARE(request::rename(u"ses_a1b2c3d4"_s, u"parser-fix-2"_s), withoutId(u"rename"_s));
+		QCOMPARE(request::setCwd(u"ses_a1b2c3d4"_s, u"~/project/crates/parser"_s), withoutId(u"set_cwd"_s));
+		QCOMPARE(request::compact(u"ses_a1b2c3d4"_s), withoutId(u"compact"_s));
+		QCOMPARE(request::close(u"ses_a1b2c3d4"_s), withoutId(u"close"_s));
+		QCOMPARE(request::deleteSession(u"ses_a1b2c3d4"_s), withoutId(u"delete"_s));
+		QCOMPARE(request::exportTranscript(u"ses_a1b2c3d4"_s, u"/tmp/parser-fix.md"_s), withoutId(u"export"_s));
+		QCOMPARE(request::peerCommand(u"ses_a1b2c3d4"_s, u"peers"_s, QString()), withoutId(u"peer_command"_s));
+		QCOMPARE(request::mcpStatus(u"/home/user/project"_s), withoutId(u"mcp_status"_s));
+		QCOMPARE(request::listDirs(u"~/pro"_s), withoutId(u"list_dirs"_s));
+		QCOMPARE(request::shutdown(), withoutId(u"shutdown"_s));
+		QCOMPARE(request::setModel(u"ses_a1b2c3d4"_s, {.provider = u"anthropic"_s, .model = u"claude-sonnet-4"_s, .variant = u"high"_s}),
+		         withoutId(u"set_model"_s));
+		QVERIFY(!request::setVariant(u"ses_a1b2c3d4"_s, std::nullopt).contains(u"variant"_s)); // rotates
+
 		QJsonObject createSession = withoutId(u"create_session"_s);
 		createSession.remove(u"name"_s); // the GUI leaves naming to the backend
 		const ModelRef model{.provider = u"anthropic"_s, .model = u"claude-sonnet-4"_s, .variant = u"high"_s};
@@ -186,6 +224,26 @@ private slots:
 		hello.insert(u"client"_s, u"ref-gui"_s);
 		hello.insert(u"notify"_s, QJsonArray());
 		QCOMPARE(request::hello(u"ref-gui"_s, u"/home/user/project"_s, u"3f9c1d2e"_s), hello);
+	}
+
+	void configResult()
+	{
+		const QJsonObject frame = fixtureObject(u"server_frame"_s, u"response_get_config"_s);
+		const ServerConfig config = parsedOrFail(parseConfigResult(frame.value(u"result"_s).toObject()));
+		QCOMPARE(config.defaultAgent, u"build"_s);
+		QCOMPARE(config.agents.size(), 2);
+		QVERIFY(config.agents.at(0).canSpawn);
+		QCOMPARE(config.agents.at(0).color, u"#3b82f6"_s);
+		QVERIFY(!config.agents.at(1).color.has_value());
+		QCOMPARE(config.models.first().variants, (QStringList{u"low"_s, u"medium"_s, u"high"_s}));
+		QCOMPARE(config.commands.first().source, u"config"_s);
+		QVERIFY(!config.mcp.isEmpty());
+	}
+
+	void malformedConfigIsAnError()
+	{
+		QVERIFY(!parseConfigResult({{u"config"_s, QJsonObject{{u"agents"_s, QJsonArray{1}}}}}));
+		QVERIFY(!parseMcpResult({{u"servers"_s, QJsonArray{QJsonObject{{u"name"_s, u"x"_s}}}}})); // no status
 	}
 
 	void toolMessageContent()
