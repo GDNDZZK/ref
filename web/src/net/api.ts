@@ -1,7 +1,15 @@
 // The protocol's requests as typed methods. The result shapes are the ones in
 // crates/proto/fixtures/server_frame/response_*.json.
 
-import type { ImageData, ModelRef, ServerConfigInfo, SessionInfo, SessionSnapshot } from '../proto/generated'
+import type {
+  ImageData,
+  McpServerStatus,
+  ModelRef,
+  Request,
+  ServerConfigInfo,
+  SessionInfo,
+  SessionSnapshot,
+} from '../proto/generated'
 import type { RefConnection } from './connection.ts'
 
 export class RefApi {
@@ -23,6 +31,104 @@ export class RefApi {
       sessions: SessionInfo[]
     }
     return result.sessions
+  }
+
+  // Persisted and live sessions, newest first.
+  async listHistory(cwd?: string, limit?: number): Promise<SessionInfo[]> {
+    const result = (await this.connection.request({
+      op: 'list_history',
+      cwd: cwd ?? null,
+      limit: limit ?? null,
+    })) as unknown as { sessions: SessionInfo[] }
+    return result.sessions
+  }
+
+  // Events of every live session follow until `enabled: false`. Returns the live sessions.
+  async watchAll(enabled: boolean): Promise<SessionInfo[]> {
+    const result = (await this.connection.request({ op: 'watch_all', enabled })) as unknown as {
+      sessions: SessionInfo[]
+    }
+    return result.sessions
+  }
+
+  async rename(sessionId: string, name: string): Promise<SessionInfo> {
+    return this.sessionResult({ op: 'rename', session_id: sessionId, name })
+  }
+
+  // Unloads a live session; it stays in history.
+  async close(sessionId: string): Promise<void> {
+    await this.connection.request({ op: 'close', session_id: sessionId })
+  }
+
+  // Removes a session from history for good.
+  async deleteSession(sessionId: string): Promise<void> {
+    await this.connection.request({ op: 'delete', session_id: sessionId })
+  }
+
+  async setModel(sessionId: string, model: ModelRef): Promise<SessionInfo> {
+    return this.sessionResult({ op: 'set_model', session_id: sessionId, model })
+  }
+
+  async setAgent(sessionId: string, agent: string): Promise<SessionInfo> {
+    return this.sessionResult({ op: 'set_agent', session_id: sessionId, agent })
+  }
+
+  // Without `variant`, rotates to the next one. An empty string clears it.
+  async setVariant(sessionId: string, variant?: string): Promise<SessionInfo> {
+    return this.sessionResult({ op: 'set_variant', session_id: sessionId, variant: variant ?? null })
+  }
+
+  async setCwd(sessionId: string, path: string): Promise<SessionInfo> {
+    return this.sessionResult({ op: 'set_cwd', session_id: sessionId, path })
+  }
+
+  async compact(sessionId: string): Promise<void> {
+    await this.connection.request({ op: 'compact', session_id: sessionId })
+  }
+
+  // Writes the transcript on the backend's machine. Returns the absolute path written.
+  async exportTranscript(sessionId: string, path: string): Promise<string> {
+    const result = (await this.connection.request({
+      op: 'export',
+      session_id: sessionId,
+      path,
+    })) as unknown as {
+      path: string
+    }
+    return result.path
+  }
+
+  // `command`: "peers" | "peers-name" | "peers-inbox" | "peers-outbox". Returns text to show.
+  async peerCommand(sessionId: string, command: string, args = ''): Promise<string> {
+    const result = (await this.connection.request({
+      op: 'peer_command',
+      session_id: sessionId,
+      command,
+      args,
+    })) as unknown as { text: string }
+    return result.text
+  }
+
+  async mcpStatus(cwd?: string): Promise<McpServerStatus[]> {
+    const result = (await this.connection.request({ op: 'mcp_status', cwd: cwd ?? null })) as unknown as {
+      servers: McpServerStatus[]
+    }
+    return result.servers
+  }
+
+  // Sub-directory names of `path`, sorted. `path` comes back absolute and normalized.
+  async listDirs(path: string): Promise<{ path: string; dirs: string[] }> {
+    const result = await this.connection.request({ op: 'list_dirs', path })
+    return result as unknown as { path: string; dirs: string[] }
+  }
+
+  async shutdown(): Promise<void> {
+    await this.connection.request({ op: 'shutdown' })
+  }
+
+  private async sessionResult(request: Request): Promise<SessionInfo> {
+    const result = (await this.connection.request(request)) as unknown as { session: SessionInfo }
+    return result.session
   }
 
   // Does not attach.
