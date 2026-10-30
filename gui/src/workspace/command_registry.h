@@ -84,7 +84,7 @@ public:
 	// available now returns true and emits unavailable().
 	Q_INVOKABLE bool runSlash(const QString& line, const QString& sessionId = {});
 
-	// The commands matching `query`, best first, as maps with the role names as keys (id,
+	// The commands matching `query`, best first, as maps with the role names as keys (id [sic], 
 	// title, slash, aliases, hint, shortcut, keys, category, icon, enabled, source). With an
 	// empty query: all, in the table's order. `slashOnly` leaves out palette-only and
 	// unavailable commands, for the `/` list.

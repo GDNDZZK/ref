@@ -2,6 +2,7 @@
 
 #include "app/workspace.h"
 
+#include <QJSEngine>
 #include <QtQmlIntegration>
 
 // Makes the types of the workspace library known to QML.
@@ -22,6 +23,14 @@ struct BackendConfigType
 	QML_UNCREATABLE("Owned by Workspace.")
 };
 
+struct SessionListType
+{
+	Q_GADGET
+	QML_FOREIGN(refgui::workspace::SessionListModel)
+	QML_NAMED_ELEMENT(SessionList)
+	QML_UNCREATABLE("Owned by Workspace.")
+};
+
 // The one registry of the window, as the singleton `Commands`.
 struct CommandsType
 {
@@ -33,6 +42,8 @@ struct CommandsType
 public:
 	static refgui::workspace::CommandRegistry* create(QQmlEngine*, QJSEngine*)
 	{
-		return Workspace::instance()->commands();
+		refgui::workspace::CommandRegistry* commands = Workspace::instance()->commands();
+		QJSEngine::setObjectOwnership(commands, QJSEngine::CppOwnership); // Workspace owns it
+		return commands;
 	}
 };

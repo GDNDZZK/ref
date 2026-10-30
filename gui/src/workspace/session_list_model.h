@@ -7,6 +7,7 @@
 #include <QList>
 #include <QString>
 #include <QStringList>
+#include <QVariantMap>
 
 namespace refgui::workspace
 {
@@ -17,6 +18,8 @@ class SessionListModel : public QAbstractListModel
 {
 	Q_OBJECT
 	Q_PROPERTY(int count READ count NOTIFY countChanged)
+	// Shows only the sessions whose title, name, directory or id contains it, ignoring case.
+	Q_PROPERTY(QString filter READ filter WRITE setFilter NOTIFY filterChanged)
 
 public:
 	enum Role
@@ -29,7 +32,10 @@ public:
 		DirNameRole, // last component of the directory
 		AgentRole,
 		ModelLabelRole, // model id and variant
-		StateRole,      // idle, thinking, running, waiting_permission, retrying or compacting
+		ProviderRole,
+		ModelIdRole,
+		VariantRole, // empty without
+		StateRole,      // "activity" in QML: idle, thinking, running, waiting_permission, retrying or compacting
 		BusySinceRole,  // ms since epoch, 0 when not running
 		UpdatedAtRole,
 		CreatedAtRole,
@@ -45,17 +51,11 @@ public:
 		IsLiveRole,
 	};
 
-	enum class Order
-	{
-		CreatedNewestFirst,
-		UpdatedNewestFirst,
-	};
+	explicit SessionListModel(QObject* parent = nullptr);
 
-	SessionListModel(Order order, bool live, QObject* parent = nullptr);
-
-	// Replaces the sessions. Rows that stay are updated, not recreated.
+	// Replaces the sessions. Live ones come first, the newest created first; the others follow,
+	// the most recently updated first. Rows that stay are updated, not recreated.
 	void setSessions(const QList<proto::SessionInfo>& sessions);
-	// Shows only the sessions whose title, name, directory or id contains `filter`, ignoring case.
 	void setFilter(const QString& filter);
 	const QString& filter() const { return m_filter; }
 	// The session shown in the window's main view, and the ones in split view tiles.
@@ -68,6 +68,8 @@ public:
 	bool contains(const QString& sessionId) const { return m_all.contains(sessionId); }
 	const proto::SessionInfo* find(const QString& sessionId) const;
 	int count() const { return int(m_rows.size()); }
+	// All roles of the session (also when filtered out) as a map with the role names as keys; empty when unknown.
+	Q_INVOKABLE QVariantMap get(const QString& sessionId) const;
 
 	int rowCount(const QModelIndex& parent = {}) const override;
 	QVariant data(const QModelIndex& index, int role) const override;
@@ -75,6 +77,7 @@ public:
 
 signals:
 	void countChanged();
+	void filterChanged();
 
 private:
 	// What the views show of a session; rows are compared to see whether one changed.
@@ -86,6 +89,9 @@ private:
 		QString cwd;
 		QString agent;
 		QString modelLabel;
+		QString provider;
+		QString modelId;
+		QString variant;
 		QString state;
 		qint64 busySince = 0;
 		qint64 updatedAt = 0;
@@ -94,18 +100,18 @@ private:
 		int todoTotal = 0;
 		QString lastError;
 		int attached = 0;
+		bool live = false;
 
 		bool operator==(const Row&) const = default;
 	};
 
 	static Row toRow(const proto::SessionInfo& info);
+	QVariant roleData(const Row& row, int role) const;
 	bool matchesFilter(const Row& row) const;
 	bool before(const Row& a, const Row& b) const;
 	void rebuild();
 	void emitRowChanged(const QString& id);
 
-	Order m_order;
-	bool m_live;
 	QString m_filter;
 	QString m_currentId;
 	QStringList m_tileIds;
