@@ -41,8 +41,9 @@ struct Cli {
     #[arg(long, value_name = "PID", num_args = 0..=1)]
     stop: Option<Option<u32>>,
     /// Run a self-contained mock backend with a scripted model, in a temporary directory that
-    /// is deleted on exit. Prints one line `{"port":N,"token":"..."}` and exits when stdin
-    /// closes or the last client leaves.
+    /// is deleted on exit. Prints one line `{"port":N,"token":"..."}`. Exits when the last
+    /// client leaves, and at once when stdin is closed (started with `&`, or with stdin from
+    /// /dev/null): keep stdin open, e.g. `sleep 3600 | ref-server --mock`.
     #[arg(
         long,
         conflicts_with_all = ["status", "stop", "host", "allow_host", "idle_timeout", "token", "log"]
