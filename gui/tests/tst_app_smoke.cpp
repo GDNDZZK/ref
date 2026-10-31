@@ -72,6 +72,10 @@ QProcessEnvironment TestAppSmoke::environment() const
 	// The program looks for a desktop notification service on the session bus. A test must never reach the
 	// bus of the user's desktop, where a notification would really show: this address leads nowhere.
 	env.insert(u"DBUS_SESSION_BUS_ADDRESS"_s, u"unix:path="_s + QDir(m_directory.path()).filePath(u"no-bus"_s));
+	// The offscreen platform's theme asks for the families "Sans Serif" and "monospace", which macOS does not have; Qt
+	// then warns that building the alias table took long. A real desktop platform does not ask for them. Anything else
+	// on stderr still fails the test.
+	env.insert(u"QT_LOGGING_RULES"_s, u"qt.qpa.fonts.warning=false"_s);
 	// ref-gui finds ref-server on PATH when it is not next to it.
 	const QString serverDirectory = QFileInfo(QStringLiteral(REF_SERVER_BINARY)).absolutePath();
 	env.insert(u"PATH"_s, serverDirectory + QDir::listSeparator() + env.value(u"PATH"_s));
