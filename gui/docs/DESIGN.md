@@ -58,7 +58,9 @@ app (QML + ChatSession)  ->  ui (ConversationModel, FenceSplitter, Driver: MockD
 - Foldable blocks (reasoning, tool) keep their header pinned to the view's top while expanded, until the
   block's end pushes it out. Folding from a pinned header scrolls back with the fold, so the header stays put.
 - Hold: during a turn the end never moves up; room the content gives back is kept as footer space and
-  released with an animation when the turn ends. Prevents bouncing when wrapped lines unwrap.
+  released with an animation when the turn ends. Prevents bouncing when wrapped lines unwrap. The hold rests for
+  `Motion.slow` whenever the number of pending permission requests changes: a card that closes after its answer can be
+  taller than the view, and holding its old height would leave the view blank.
 
 ## Progress
 
@@ -181,8 +183,9 @@ The settings button is `sliders-20` in a 32px square face, hover `surfaceHover`.
 
 ## Split view
 
-Replaces the SessionPane in the content area; the sidebar stays and highlights the tiles' sessions with a 2px
-`accent` bar at the row's left edge (`isTile`). Tiles are the live sessions nobody is attached to plus the current
+Replaces the SessionPane in the content area; the sidebar stays and marks the tiles' sessions with a 2px
+`accent` bar at the row's left edge (`isTile`). The selected row (`isCurrent`) is the session of the focused tile, so it
+follows a click, `Alt+arrows` and a click on the row; `Workspace.currentId` (what comes back when split view ends) does not move. Tiles are the live sessions nobody is attached to plus the current
 one (TUI rule). Empty: centred muted text "No background sessions" and a "New session" text button below.
 
 Grid. Outer padding `tilePadding` 16, gap `tileGap` 12. With `n` tiles in a content area of width W and height H:
@@ -679,7 +682,10 @@ Inside the card, under the details, separated by a 1 divider. Height animates ov
 - Right end: "+N more waiting" 12 `textMuted` when other requests of this session are pending.
 - Keys act on the oldest pending request of the session: `a` or Enter allow, `s` always, `d` or Esc deny. Keys are ignored for
   `permissionGuard` = 350 ms after the request appears (the user was still typing); letters then no longer reach the composer
-  until all requests are answered.
+  until all requests are answered. As in the TUI and the WebUI the keys work with the caret in the input box: the box offers
+  every key to `ChatSession::permissionKey` first (`Composer.keyOffered`). It answers, swallows other printable keys, and
+  leaves Ctrl/Alt/Meta shortcuts and editing keys (Backspace, arrows) alone. Shifted letters do not answer, a held key
+  answers once. In split view only the focused (or zoomed) pane offers its keys.
 - Answered: the section collapses over `Motion.standard`; the state moves on with the next event.
 - A request outside the view puts a `warning` AlertBadge ("?") on the jump-to-latest button, like errors do.
 

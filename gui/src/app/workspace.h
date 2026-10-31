@@ -211,6 +211,7 @@ private:
 	QCoro::Task<> leaveCurrent(QString closedId, QString cwd);
 	void handleGone(const QString& sessionId, const QString& cwd);
 	void setCurrent(ChatSession* session);
+	void updateHighlight();
 	void onLiveChanged();
 	void dropChat(const QString& sessionId);
 	ChatSession& chat(const QString& sessionId);

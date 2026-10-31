@@ -333,11 +333,18 @@ QString Workspace::targetId(const QString& sessionId) const
 	return currentId();
 }
 
+// The sidebar marks the session in front: in split view the one whose tile has the focus.
+void Workspace::updateHighlight()
+{
+	const QString id = m_split && !m_focusedTile.isEmpty() ? m_focusedTile : currentId();
+	m_directory.live().setCurrentId(id);
+	m_directory.history().setCurrentId(id);
+}
+
 void Workspace::setCurrent(ChatSession* session)
 {
 	m_current = session;
-	m_directory.live().setCurrentId(currentId());
-	m_directory.history().setCurrentId(currentId());
+	updateHighlight();
 	if(m_split && session != nullptr)
 	{
 		setFocusedTile(session->sessionId());

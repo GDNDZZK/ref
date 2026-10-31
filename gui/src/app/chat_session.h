@@ -106,6 +106,10 @@ public:
 	Q_INVOKABLE void permissionReply(const QString& callId, bool allow, bool always);
 	// Answers the oldest request by the keys. Does nothing unless permissionKeysActive.
 	Q_INVOKABLE void answerOldestPermission(bool allow, bool always);
+	// Offers a key press to the pending request, as the TUI and the WebUI do: a, Enter, s, d and Esc
+	// answer it, and any other typing is the request's until it is answered. True when the key is used.
+	// Always false while the keys are not active, so the input box takes the typing meanwhile.
+	Q_INVOKABLE bool permissionKey(int key, const QString& text, int modifiers, bool autoRepeat);
 	// The same as the Cancel button on a delayed tool call.
 	Q_INVOKABLE void cancelDelayedTool();
 	// Takes back a message of the user and everything after it; the text and pictures return to
