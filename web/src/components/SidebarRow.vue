@@ -133,7 +133,7 @@ function openMenu(event: MouseEvent): void {
         <span v-if="attention" ref="mark" class="mark">
           <Flourish ref="flourish" :ring-reach="2.5" />
           <Icon v-if="state === 'permission'" icon="lock-16" class="lock" />
-          <Icon v-else-if="state === 'question'" icon="chat-16" class="lock" />
+          <Icon v-else-if="state === 'question'" icon="question-16" class="lock" />
           <AlertBadge v-else :size="BADGE_SIZE" />
         </span>
         <span v-else-if="progress" class="progress" :class="{ complete: progress.complete }">
