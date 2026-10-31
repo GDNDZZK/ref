@@ -6,6 +6,7 @@
 #include "app/workspace.h"
 #include "cli/command_line.h"
 #include "client/instance_files.h"
+#include "icons/app_icon.h"
 #include "icons/icon_provider.h"
 #include "notify/notifier.h"
 
@@ -79,6 +80,12 @@ int main(int argc, char* argv[])
 	const QString version = QString::fromLatin1(REF_GUI_VERSION);
 	QGuiApplication::setApplicationVersion(version);
 	QGuiApplication::setDesktopFileName(u"ref-gui"_s); // ties the window to the desktop entry
+#if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS)
+	// X11 title bars and many taskbars show the window's own icon (_NET_WM_ICON), not the desktop
+	// entry's. Windows takes the window icon from ref-gui.exe (IDI_ICON1); on macOS this call
+	// would replace ref.icns in the Dock.
+	QGuiApplication::setWindowIcon(refgui::icons::appIcon());
+#endif
 
 	const refgui::cli::ParseResult parsed = refgui::cli::parseCommandLine(QCoreApplication::arguments(), QDir::currentPath(), version);
 	if(const auto* exit = std::get_if<refgui::cli::Exit>(&parsed))

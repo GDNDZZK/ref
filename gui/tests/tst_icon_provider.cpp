@@ -1,3 +1,4 @@
+#include "icons/app_icon.h"
 #include "icons/icon_provider.h"
 
 #include <QDir>
@@ -125,6 +126,38 @@ private slots:
 		QSize size;
 		QVERIFY(provider.requestImage(u"nope-16"_s, &size, QSize(16, 16)).isNull());
 		QVERIFY(provider.requestImage(u"nope"_s, &size, QSize(16, 16)).isNull());
+	}
+
+	void appIconHasEverySize()
+	{
+		QList<QSize> expected;
+		for(const int pixels : AppIconSizes)
+		{
+			expected.append(QSize(pixels, pixels));
+		}
+		QCOMPARE(appIcon().availableSizes(), expected);
+		QVERIFY(appIconImage(20).isNull());
+	}
+
+	// The blue dot sits at (20, 20) of 32 in the small mark and at 788 of 1024 in the large one.
+	void smallSizesShowTheSmallMark_data()
+	{
+		QTest::addColumn<int>("pixels");
+		QTest::addColumn<QPoint>("dot");
+		QTest::newRow("small mark") << 32 << QPoint(20, 20);
+		QTest::newRow("small mark, largest") << 48 << QPoint(30, 30);
+		QTest::newRow("four panes") << 64 << QPoint(49, 49);
+		QTest::newRow("four panes, largest") << 256 << QPoint(197, 197);
+	}
+
+	void smallSizesShowTheSmallMark()
+	{
+		QFETCH(int, pixels);
+		QFETCH(QPoint, dot);
+		const QImage image = appIconImage(pixels);
+		QCOMPARE(image.size(), QSize(pixels, pixels));
+		// Inside the dot, away from its antialiased edge, the fill is exact.
+		QCOMPARE(image.pixelColor(dot).name(), u"#7aa2f7"_s);
 	}
 };
 
