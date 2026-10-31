@@ -32,10 +32,13 @@ async function withTui(body: (tui: TuiSession) => Promise<void>): Promise<void> 
   }
 }
 
-async function still(browser: Browser, output: string, name: string, readme: boolean): Promise<void> {
+// `pathRow`: the last row is the status line with the random mock workspace path (not in the split view).
+async function still(browser: Browser, output: string, name: string, readme: boolean, pathRow = true): Promise<void> {
   const png = await renderTerminalStill(browser, { cols: TUI_COLS, rows: TUI_ROWS }, output)
-  await publishImage(png, name, { readme })
-  await publishWithoutFooter(name)
+  if (!pathRow) return publishImage(png, name, { readme })
+  // The README shows the copy without the status line.
+  await publishImage(png, name, { readme: false })
+  await publishWithoutFooter(name, { readme })
 }
 
 // The mock `tools` script: reads, a failing read, grep, find, an edit that needs approval, bash.
@@ -79,7 +82,7 @@ async function captureSplit(browser: Browser): Promise<void> {
 
     mkdirSync(CASTS_DIR, { recursive: true })
     tui.saveCast(join(CASTS_DIR, 'tui-split.cast'))
-    await still(browser, tui.outputSoFar(), 'tui-split', true)
+    await still(browser, tui.outputSoFar(), 'tui-split', true, false)
   })
 }
 

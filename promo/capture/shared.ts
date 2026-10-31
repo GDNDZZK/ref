@@ -71,7 +71,7 @@ export async function captureShared(): Promise<void> {
     await publishImage(await page.screenshot({ type: 'png' }), 'web-shared', { readme: false })
     const terminal = await renderTerminalStill(browser, { cols: TUI_COLS, rows: TUI_ROWS }, tui.outputSoFar())
     await publishImage(terminal, 'tui-shared', { readme: false })
-    await publishWithoutFooter('tui-shared')
+    await publishWithoutFooter('tui-shared', { readme: false })
   } finally {
     await context?.close() // open pages keep ref-web from stopping
     await gui.close()
