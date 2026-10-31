@@ -111,6 +111,7 @@ fn status_text(v: &SessionView, tick: u64) -> (String, ratatui::style::Color) {
         Busy => (format!("{} working", theme::spinner(tick)), theme::PRIMARY),
         Running => (format!("{} running", theme::spinner(tick)), theme::PRIMARY),
         WaitingPermission => ("? permission".into(), theme::WARNING),
+        WaitingQuestion => ("? question".into(), theme::WARNING),
         Retrying { attempt, .. } => (
             format!("{} retry #{attempt}", theme::spinner(tick)),
             theme::WARNING,
