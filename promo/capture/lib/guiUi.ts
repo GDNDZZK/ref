@@ -75,9 +75,13 @@ class GuiUi implements Ui {
     await this.session.pause(SETTLE_MS)
     const fileName = shotFileName(this.kind, name, this.lang)
     const png = await this.session.grab(join(GRAB_DIR, `${fileName}.png`))
-    await publishImage(png, fileName, { readme: options.readme ?? false })
+    const sessionName = (await this.session.texts()).find((item) => SESSION_NAME.test(item.text))?.text
+    await publishImage(png, fileName, { readme: options.readme ?? false, sessionName })
   }
 }
+
+// A mock session is named "workspace-" and four hex digits.
+const SESSION_NAME = /^workspace-[0-9a-f]{4}$/
 
 export type { GuiUi }
 

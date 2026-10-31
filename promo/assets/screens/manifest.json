@@ -1,219 +1,273 @@
 {
   "gui-agents-dialog": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-ca40"
   },
   "gui-agents-dialog-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-9e02"
   },
   "gui-before-undo": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-4e3d"
   },
   "gui-before-undo-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-ae1d"
   },
   "gui-composer-at": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-81b9"
   },
   "gui-composer-at-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-0538"
   },
   "gui-composer-queue": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-3dae"
   },
   "gui-composer-queue-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-fbee"
   },
   "gui-composer-shell": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-81b9"
   },
   "gui-composer-shell-output": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-81b9"
   },
   "gui-composer-shell-output-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-0538"
   },
   "gui-composer-shell-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-0538"
   },
   "gui-composer-slash": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-81b9"
   },
   "gui-composer-slash-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-0538"
   },
   "gui-composer-undo": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-4e3d"
   },
   "gui-composer-undo-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-ae1d"
   },
   "gui-context-compact": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-a0a8"
   },
   "gui-context-compact-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-fcd0"
   },
   "gui-context-full": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-a0a8"
   },
   "gui-context-full-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-fcd0"
   },
   "gui-delay-cancelled": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-ea3f"
   },
   "gui-delay-cancelled-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-d521"
   },
   "gui-delay-ring": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-ea3f"
   },
   "gui-delay-ring-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-d521"
   },
   "gui-denied": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-25b1"
   },
   "gui-denied-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-4b04"
   },
   "gui-edit-diff": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-b761"
   },
   "gui-edit-diff-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-c35e"
   },
   "gui-help": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-806d"
   },
   "gui-help-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-e349"
   },
   "gui-long-output": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-85d0"
   },
   "gui-long-output-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-388a"
   },
   "gui-main": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-b761"
   },
   "gui-main-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-c35e"
   },
   "gui-mcp-dialog": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-ca40"
   },
   "gui-mcp-dialog-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-9e02"
   },
   "gui-models-dialog": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-ca40"
   },
   "gui-models-dialog-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-9e02"
   },
   "gui-peer-message": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-866a"
   },
   "gui-peer-message-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-a9fe"
   },
   "gui-peers-dialog": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-866a"
   },
   "gui-peers-dialog-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-a9fe"
   },
   "gui-peers-inbox": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-866a"
   },
   "gui-peers-inbox-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-a9fe"
   },
   "gui-permission-card": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-f679"
   },
   "gui-permission-card-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-6e28"
   },
   "gui-retry-done": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-a7d1"
   },
   "gui-retry-done-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-3b44"
   },
   "gui-retry-status": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-a7d1"
   },
   "gui-retry-status-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-3b44"
   },
   "gui-session-running": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-06c7"
   },
   "gui-session-running-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-8f8c"
   },
   "gui-settings": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-0e1c"
   },
   "gui-settings-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-d0d2"
   },
   "gui-shared": {
     "width": 2560,
@@ -221,35 +275,43 @@
   },
   "gui-sidebar-progress": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-5cbf"
   },
   "gui-sidebar-progress-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-ce00"
   },
   "gui-split-view": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-1cbf"
   },
   "gui-split-view-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-894e"
   },
   "gui-split-zoom": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-1cbf"
   },
   "gui-split-zoom-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-894e"
   },
   "gui-tools-permission": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-b761"
   },
   "gui-tools-permission-zh": {
     "width": 2560,
-    "height": 1600
+    "height": 1600,
+    "sessionName": "workspace-c35e"
   },
   "tui-main": {
     "width": 2058,
@@ -281,235 +343,293 @@
   },
   "web-agents-dialog": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-d313"
   },
   "web-agents-dialog-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-c32e"
   },
   "web-before-undo": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-a761"
   },
   "web-before-undo-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-c98a"
   },
   "web-composer-at": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-4be3"
   },
   "web-composer-at-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-6bf8"
   },
   "web-composer-image": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-c818"
   },
   "web-composer-image-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-e0a7"
   },
   "web-composer-queue": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-5172"
   },
   "web-composer-queue-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-db48"
   },
   "web-composer-shell": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-4be3"
   },
   "web-composer-shell-output": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-4be3"
   },
   "web-composer-shell-output-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-6bf8"
   },
   "web-composer-shell-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-6bf8"
   },
   "web-composer-slash": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-4be3"
   },
   "web-composer-slash-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-6bf8"
   },
   "web-composer-undo": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-a761"
   },
   "web-composer-undo-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-c98a"
   },
   "web-context-compact": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-5feb"
   },
   "web-context-compact-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-7260"
   },
   "web-context-full": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-5feb"
   },
   "web-context-full-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-7260"
   },
   "web-delay-cancelled": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-f7f5"
   },
   "web-delay-cancelled-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-b32c"
   },
   "web-delay-ring": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-f7f5"
   },
   "web-delay-ring-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-b32c"
   },
   "web-denied": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-1644"
   },
   "web-denied-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-816f"
   },
   "web-edit-diff": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-a455"
   },
   "web-edit-diff-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-e9f7"
   },
   "web-help": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-2583"
   },
   "web-help-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-eb7c"
   },
   "web-image-sent": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-c818"
   },
   "web-image-sent-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-e0a7"
   },
   "web-long-output": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-12da"
   },
   "web-long-output-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-37db"
   },
   "web-main": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-a455"
   },
   "web-main-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-e9f7"
   },
   "web-mcp-dialog": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-d313"
   },
   "web-mcp-dialog-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-c32e"
   },
   "web-models-dialog": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-d313"
   },
   "web-models-dialog-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-c32e"
   },
   "web-peer-message": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-1b82"
   },
   "web-peer-message-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-9a5a"
   },
   "web-peers-dialog": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-1b82"
   },
   "web-peers-dialog-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-9a5a"
   },
   "web-peers-inbox": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-1b82"
   },
   "web-peers-inbox-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-9a5a"
   },
   "web-permission-card": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-316f"
   },
   "web-permission-card-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-3bef"
   },
   "web-retry-done": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-7ec7"
   },
   "web-retry-done-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-8cda"
   },
   "web-retry-status": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-7ec7"
   },
   "web-retry-status-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-8cda"
   },
   "web-session-running": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-a77e"
   },
   "web-session-running-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-65d1"
   },
   "web-settings": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-2e3d"
   },
   "web-settings-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-e790"
   },
   "web-shared": {
     "width": 3200,
@@ -517,34 +637,42 @@
   },
   "web-sidebar-progress": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-72ff"
   },
   "web-sidebar-progress-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-b15f"
   },
   "web-split-view": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-bdce"
   },
   "web-split-view-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-cbb4"
   },
   "web-split-zoom": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-bdce"
   },
   "web-split-zoom-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-cbb4"
   },
   "web-tools-permission": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-a455"
   },
   "web-tools-permission-zh": {
     "width": 3200,
-    "height": 2000
+    "height": 2000,
+    "sessionName": "workspace-e9f7"
   }
 }
