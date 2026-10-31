@@ -1,17 +1,13 @@
 // Adapted from an early version of qutie by LightBlueCube
 import QtQuick
-import QtQuick.Shapes
 import RefGui
 
 // A ">" stroke centered in its box; rotate it to point elsewhere. Drawn rather than
 // typed, so it sits at the geometric center regardless of font metrics.
 //
-// Drawn by the software renderer, into a texture: the nodes of the GPU renderers are not cut by
-// a clipping ancestor that sits inside a rounded clip (ChatView in a tile's frame), so the
-// chevron of a card scrolled out of view showed over the tile's header.
-//
-// The size lives on a plain Item: a Shape sets its own implicit size from the path's
-// bounds, so a path computed from the Shape's size would feed back into itself.
+// Drawn on a Canvas, not a Shape: a Shape is drawn outside the clip of an ancestor when it lies
+// wholly outside it (every renderer), so the chevron of a card scrolled out of the chat showed
+// over the tile header.
 Item {
 	id: chevron
 
@@ -25,21 +21,29 @@ Item {
 	implicitWidth: 12
 	implicitHeight: 12
 
-	Shape {
+	Canvas {
+		id: canvas
+
 		anchors.fill: parent
-		preferredRendererType: Shape.SoftwareRenderer
+		renderTarget: Canvas.Image
 
-		ShapePath {
-			strokeColor: chevron.color
-			strokeWidth: chevron.strokeWidth
-			fillColor: "transparent"
-			capStyle: ShapePath.RoundCap
-			joinStyle: ShapePath.RoundJoin
-
-			startX: chevron.endsX
-			startY: chevron.height / 2 - chevron.halfSpan
-			PathLine { x: chevron.endsX + chevron.depth; y: chevron.height / 2 }
-			PathLine { x: chevron.endsX; y: chevron.height / 2 + chevron.halfSpan }
+		onPaint: {
+			const ctx = getContext("2d")
+			ctx.reset()
+			ctx.strokeStyle = chevron.color
+			ctx.lineWidth = chevron.strokeWidth
+			ctx.lineCap = "round"
+			ctx.lineJoin = "round"
+			ctx.beginPath()
+			ctx.moveTo(chevron.endsX, chevron.height / 2 - chevron.halfSpan)
+			ctx.lineTo(chevron.endsX + chevron.depth, chevron.height / 2)
+			ctx.lineTo(chevron.endsX, chevron.height / 2 + chevron.halfSpan)
+			ctx.stroke()
+		}
+		Connections {
+			target: chevron
+			function onColorChanged() { canvas.requestPaint() }
+			function onStrokeWidthChanged() { canvas.requestPaint() }
 		}
 	}
 }
