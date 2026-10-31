@@ -11,6 +11,7 @@ Tool errors are returned to the model as results. They never end the session's t
 - [webfetch](#webfetch)
 - [Images](#images)
 - [Context tools](#context-tools)
+- [question](#question)
 - [Cross-session tools](#cross-session-tools)
 - [MCP tools](#mcp-tools)
 
@@ -85,6 +86,18 @@ When a provider rejects a request with a stricter image limit in the error messa
 - `compact_context`: replaces the history with a summary the model writes itself.
 
 See [Context compaction](configuration.md#context-compaction).
+
+## question
+
+`question` lets the model ask you one or more questions and wait for the answers: preferences, a decision between approaches, a clarification. It is opencode's tool of the same name, with one addition.
+
+- Each question has a short `header`, the question, a list of options (a label and a description each), and optionally `multiple: true` (several options may be chosen) and `custom: false` (no typed answer; a "Type your own answer" row is added otherwise).
+- An option can be marked `default: true`. It is preselected when the question is shown: in a single choice the cursor starts on it, in a multiple choice it starts checked. There is no timeout, so an unanswered question waits until someone answers.
+- A call holds 1 to 4 questions of at most 8 options each. A call that breaks these limits is returned to the model as an error.
+- The model gets your answers as the result. If you dismiss the question it is told so and continues. Interrupting the turn cancels the question.
+- A session waiting for an answer is shown as such in every window, in the session list too, and sends the "question" notification like a permission request does.
+
+Only the `build` and `plan` agents may ask by default; see [the `question` permission](configuration.md#permissions).
 
 ## Cross-session tools
 

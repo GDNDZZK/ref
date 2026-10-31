@@ -96,6 +96,8 @@ sleep 3600 | ref-server --mock      # stdout 只打印一行 {"port":N,"token":"
 | `compact-tool` | 模型调用 `compact_context` |
 | `peer` | 创建 `reviewer` 会话 `helper`，它用 `send_message` 回报 |
 | `everything` | `tools`、`todo` 和 `image` 连成一个长回合 |
+| `question` | 模型提出两个问题（一个单选、一个多选，都带默认值），并复述你的回答 |
+| `question-one` | 一个带默认值的单选问题，`enter` 采纳默认值 |
 | `orchestrate` | 主会话先列计划，再创建 `scout`、`fixer`、`tester`、`docs` 四个助手，收齐它们的五份报告（第五份来自最后创建的 `reviewer`），最后给出总结（约 25 秒） |
 
 `orchestrate` 约 25 秒，需要批准一次（fixer 的 `edit`）。时间线固定：助手在 1.5、3、4.5、6 秒出现，主会话在 7.5 秒左右空闲，报告大约在 10.5 秒（`scout`）、12 秒（`docs`）、12.5 秒（`fixer`，在你于 9 秒批准之后 3.5 秒）和 14 秒（`tester`）到达，16 秒创建 reviewer，21 秒收到它的报告，25 秒总结结束。主会话忙碌时到达的报告会在它的下一次请求时并入对话，计数不受影响。`orchestrate` 之后的文字不会被使用。它启动的其他脚本（`orch-scout`、`orch-fixer`、`orch-tester`、`orch-docs`、`orch-review`、`orchestrate-report`）也会出现在 `help` 里，但不是给人输入的。
