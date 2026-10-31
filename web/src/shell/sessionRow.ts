@@ -53,9 +53,22 @@ export function dirName(path: string): string {
   return parts[parts.length - 1] ?? path
 }
 
-// The title the sidebar shows: the session's title, or its name while it has none.
-export function displayTitle(info: SessionInfo): string {
-  return info.title.trim() || info.name
+// Whitespace runs become one space and control characters vanish, as the TUI's one_line.
+function oneLine(text: string): string {
+  return text
+    .replace(/\p{Cc}/gu, (char) => (/\s/.test(char) ? ' ' : ''))
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// A live session is labelled by its name, as in the TUI; the title is secondary.
+export function liveLabel(info: SessionInfo): string {
+  return info.name.trim() || oneLine(info.title) || dirName(info.cwd)
+}
+
+// A session from history is labelled by its one-line title.
+export function historyLabel(info: SessionInfo): string {
+  return oneLine(info.title) || info.name
 }
 
 const MS_PER_SECOND = 1000
