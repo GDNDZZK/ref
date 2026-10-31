@@ -2,16 +2,16 @@ import QtQuick
 import RefGui
 
 // The state of a session as a dot: idle is dim, work pulses in the accent color, waiting for
-// permission and retrying pulse in the warning color, a failed last turn is a solid danger
+// permission or an answer and retrying pulse in the warning color, a failed last turn is a solid danger
 // dot. A turn that ends plays the Flourish.
 Item {
 	id: root
 
-	property string activity: "idle" // idle, thinking, running, waiting_permission, retrying or compacting
+	property string activity: "idle" // idle, thinking, running, waiting_permission, waiting_question, retrying or compacting
 	property bool hasError: false
 
 	readonly property bool working: activity !== "idle"
-	readonly property bool needsAttention: activity === "waiting_permission" || activity === "retrying"
+	readonly property bool needsAttention: activity === "waiting_permission" || activity === "waiting_question" || activity === "retrying"
 	readonly property color dotColor: hasError && !working ? Theme.danger : needsAttention ? Theme.warning : working ? Theme.accent : Qt.alpha(Theme.textMuted, 0.5)
 
 	implicitWidth: 8

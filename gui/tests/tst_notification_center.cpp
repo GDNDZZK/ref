@@ -102,6 +102,7 @@ private slots:
 	void focusIsSentOnChangeOnly();
 	void focusIsSentAgainAfterConnecting();
 	void notificationsAreShown();
+	void questionsAreShown();
 	void unavailableNotifierFlashesTheWindow();
 	void clickingARequestsTheSession();
 };
@@ -201,6 +202,19 @@ void TestNotificationCenter::notificationsAreShown()
 	QCOMPARE(f.notifier->shown.first().sessionId, u"ses_2"_s);
 	QCOMPARE(f.notifier->shown.first().title, u"Fix build"_s);
 	QCOMPARE(f.notifier->shown.first().body, u"Waiting for permission to use bash"_s);
+}
+
+void TestNotificationCenter::questionsAreShown()
+{
+	Fixture f;
+	f.connect();
+
+	f.fake.send(notifyFrame(u"question"_s));
+
+	QTRY_COMPARE(f.notifier->shown.size(), 1);
+	QCOMPARE(f.notifier->shown.first().sessionId, u"ses_2"_s);
+	QCOMPARE(f.notifier->shown.first().title, u"Fix build"_s);
+	QCOMPARE(f.notifier->shown.first().body, u"Asks: bash"_s);
 }
 
 void TestNotificationCenter::unavailableNotifierFlashesTheWindow()

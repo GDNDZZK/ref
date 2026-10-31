@@ -12,6 +12,12 @@
 using refgui::client::Backend;
 using namespace Qt::StringLiterals;
 
+namespace
+{
+// What the backend says to an answer for a question that is no longer pending.
+const QString NoPendingQuestion = u"No pending question with that id."_s;
+} // namespace
+
 ChatSession::ChatSession(Backend& backend, QString sessionId, QObject* parent)
 	: QObject(parent)
 	, m_backend(backend)
@@ -36,10 +42,19 @@ ChatSession::ChatSession(Backend& backend, QString sessionId, QObject* parent)
 	m_permissionGuard.setSingleShot(true);
 	m_permissionGuard.setInterval(PermissionGuard);
 	connect(&m_permissionGuard, &QTimer::timeout, this, [this] {
-		m_permissionKeysActive = true;
+		m_guardPassed = true;
+		emit answerChanged();
+	});
+	connect(&m_controller.model(), &refgui::session::ConversationModel::toolSummaryChanged, this, [this] {
+		trackAnswerTarget();
 		emit toolsChanged();
 	});
-	connect(&m_controller.model(), &refgui::session::ConversationModel::toolSummaryChanged, this, &ChatSession::trackOldestPermission);
+	connect(&m_controller, &refgui::session::SessionController::questionsChanged, this, &ChatSession::syncQuestion);
+	connect(&m_question, &refgui::session::QuestionPrompt::changed, this, &ChatSession::trackAnswerTarget);
+	connect(&m_question, &refgui::session::QuestionPrompt::submitRequested, this,
+	        [this](const QString& callId, const QList<QStringList>& answers) { sendQuestionReply(callId, answers); });
+	connect(&m_question, &refgui::session::QuestionPrompt::dismissRequested, this,
+	        [this](const QString& callId) { sendQuestionReply(callId, std::nullopt); });
 }
 
 QCoro::Task<refgui::client::Result<void>> ChatSession::attach(bool foreground)
@@ -256,35 +271,51 @@ int ChatSession::permissionCount() const
 	return static_cast<int>(m_controller.model().toolSummary().awaitingPermission);
 }
 
-// A new oldest request restarts the guard; the keys are off until it runs out.
-void ChatSession::trackOldestPermission()
+// The question is shown first, else the oldest permission request. A new target restarts the guard;
+// the keys are off until it runs out.
+void ChatSession::trackAnswerTarget()
 {
 	const QString& oldest = m_controller.model().toolSummary().oldestAwaitingCallId;
-	if(oldest != m_guardedCallId)
+	QString target;
+	if(m_question.isActive())
 	{
-		m_guardedCallId = oldest;
-		m_permissionKeysActive = false;
+		target = u"question:"_s + m_question.callId();
+	}
+	else if(!oldest.isEmpty())
+	{
+		target = u"permission:"_s + oldest;
+	}
+	if(target != m_guardedTarget)
+	{
+		m_guardedTarget = target;
+		m_guardPassed = false;
 		m_permissionGuard.stop();
-		if(!oldest.isEmpty())
+		if(!target.isEmpty())
 		{
 			m_permissionGuard.start();
 		}
 	}
-	emit toolsChanged();
+	emit answerChanged();
+}
+
+void ChatSession::syncQuestion()
+{
+	const auto& pending = m_controller.pendingQuestions();
+	m_question.setRequest(pending.isEmpty() ? std::nullopt : std::optional(pending.first()));
 }
 
 void ChatSession::answerOldestPermission(bool allow, bool always)
 {
-	if(!m_permissionKeysActive)
+	if(!answerKeysActive() || m_question.isActive())
 	{
 		return;
 	}
-	permissionReply(m_guardedCallId, allow, always);
+	permissionReply(m_controller.model().toolSummary().oldestAwaitingCallId, allow, always);
 }
 
-bool ChatSession::permissionKey(int key, const QString& text, int modifiers, bool autoRepeat)
+bool ChatSession::answerKey(int key, const QString& text, int modifiers, bool autoRepeat)
 {
-	if(!m_permissionKeysActive)
+	if(!answerKeysActive())
 	{
 		return false;
 	}
@@ -293,6 +324,31 @@ bool ChatSession::permissionKey(int key, const QString& text, int modifiers, boo
 	{
 		return false; // shortcuts stay shortcuts
 	}
+	if(m_question.isActive())
+	{
+		return questionKey(key, text, held, autoRepeat);
+	}
+	return permissionKey(key, text, held, autoRepeat);
+}
+
+bool ChatSession::questionKey(int key, const QString& text, Qt::KeyboardModifiers held, bool autoRepeat)
+{
+	// A held key moves the highlight, but must not answer, nor answer the next question as well.
+	if(autoRepeat && key != Qt::Key_Up && key != Qt::Key_Down)
+	{
+		static const QSet<int> cardKeys{Qt::Key_Return, Qt::Key_Enter, Qt::Key_Escape, Qt::Key_Space, Qt::Key_Left,
+		                                Qt::Key_Right,  Qt::Key_Tab,   Qt::Key_Backtab};
+		return cardKeys.contains(key) || (!text.isEmpty() && text.front().isPrint());
+	}
+	if(m_question.handleKey(key, static_cast<int>(held)))
+	{
+		return true;
+	}
+	return !text.isEmpty() && text.front().isPrint();
+}
+
+bool ChatSession::permissionKey(int key, const QString& text, Qt::KeyboardModifiers held, bool autoRepeat)
+{
 	struct Answer
 	{
 		bool allow;
@@ -421,6 +477,27 @@ QCoro::Task<> ChatSession::sendPermission(QString callId, bool allow, bool alway
 		m_repliedCalls.remove(callId); // it may be tried again
 		setFailure(result.error());
 	}
+}
+
+QCoro::Task<> ChatSession::sendQuestionReply(QString callId, std::optional<QList<QStringList>> answers)
+{
+	const QPointer<ChatSession> self(this); // the session can be gone when the answer arrives
+	const auto result = co_await m_controller.questionReply(callId, std::move(answers));
+	if(!self)
+	{
+		co_return;
+	}
+	if(result)
+	{
+		co_return; // the card goes when the backend reports the question resolved
+	}
+	if(result.error() == NoPendingQuestion) // answered elsewhere
+	{
+		m_controller.dropQuestion(callId);
+		co_return;
+	}
+	m_question.setBusy(false); // the card stays, to be tried again
+	setFailure(result.error());
 }
 
 void ChatSession::setFailure(const QString& text)
