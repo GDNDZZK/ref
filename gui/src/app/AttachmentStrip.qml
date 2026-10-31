@@ -115,7 +115,10 @@ ListView {
 			NumberAnimation { property: "scale"; to: strip.enterScale; duration: Motion.quick; easing.type: Motion.ease }
 		}
 	}
+	// A thumbnail displaced while it enters is not finished by the add transition: it ends at full opacity and scale here.
 	displaced: Transition {
 		NumberAnimation { properties: "x"; duration: Motion.standard; easing.type: Motion.ease }
+		NumberAnimation { property: "opacity"; to: 1; duration: Motion.standard; easing.type: Motion.ease }
+		NumberAnimation { property: "scale"; to: 1; duration: Motion.standard; easing.type: Motion.ease }
 	}
 }
