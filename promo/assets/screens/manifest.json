@@ -140,12 +140,12 @@
   "gui-edit-diff": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-eecd"
+    "sessionName": "workspace-e13a"
   },
   "gui-edit-diff-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-4289"
+    "sessionName": "workspace-4310"
   },
   "gui-help": {
     "width": 2560,
@@ -170,12 +170,12 @@
   "gui-main": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-eecd"
+    "sessionName": "workspace-e13a"
   },
   "gui-main-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-4289"
+    "sessionName": "workspace-4310"
   },
   "gui-mcp-dialog": {
     "width": 2560,
@@ -290,12 +290,12 @@
   "gui-permission-card": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-56f5"
+    "sessionName": "workspace-84b6"
   },
   "gui-permission-card-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-1b78"
+    "sessionName": "workspace-f67d"
   },
   "gui-retry-done": {
     "width": 2560,
@@ -354,12 +354,12 @@
   "gui-split-readme": {
     "width": 2560,
     "height": 2688,
-    "sessionName": "workspace-9388"
+    "sessionName": "workspace-6112"
   },
   "gui-split-readme-zh": {
     "width": 2560,
     "height": 2688,
-    "sessionName": "workspace-e1bd"
+    "sessionName": "workspace-05d6"
   },
   "gui-split-view": {
     "width": 2560,
@@ -400,12 +400,12 @@
   "gui-tools-permission": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-eecd"
+    "sessionName": "workspace-e13a"
   },
   "gui-tools-permission-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-4289"
+    "sessionName": "workspace-4310"
   },
   "tui-crew": {
     "width": 2058,
@@ -644,12 +644,12 @@
   "web-edit-diff": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-b412"
+    "sessionName": "workspace-bd94"
   },
   "web-edit-diff-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-1cd4"
+    "sessionName": "workspace-ba81"
   },
   "web-help": {
     "width": 3200,
@@ -684,12 +684,12 @@
   "web-main": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-b412"
+    "sessionName": "workspace-bd94"
   },
   "web-main-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-1cd4"
+    "sessionName": "workspace-ba81"
   },
   "web-mcp-dialog": {
     "width": 3200,
@@ -744,12 +744,12 @@
   "web-permission-card": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-f99b"
+    "sessionName": "workspace-c8f1"
   },
   "web-permission-card-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-94e5"
+    "sessionName": "workspace-f79b"
   },
   "web-question-alert": {
     "width": 3200,
@@ -818,12 +818,12 @@
   "web-split-readme": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-a697"
+    "sessionName": "workspace-6b00"
   },
   "web-split-readme-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-c47b"
+    "sessionName": "workspace-9fb4"
   },
   "web-split-view": {
     "width": 3200,
@@ -908,11 +908,11 @@
   "web-tools-permission": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-b412"
+    "sessionName": "workspace-bd94"
   },
   "web-tools-permission-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-1cd4"
+    "sessionName": "workspace-ba81"
   }
 }
