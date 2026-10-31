@@ -9,7 +9,10 @@ ToolBodyBase {
 
 	readonly property var groups: ToolInfo.listing(call.output)
 	readonly property var meta: call.meta
-	readonly property bool hasCounts: meta.matches !== undefined
+	// The counts come with the finished result; a running call or one cut short has none.
+	readonly property bool hasCounts: typeof meta.matches === "number" && typeof meta.files === "number"
+	readonly property int matchCount: hasCounts ? meta.matches : 0 // only shown when hasCounts
+	readonly property int fileCount: hasCounts ? meta.files : 0
 
 	Repeater {
 		model: body.groups
@@ -57,7 +60,7 @@ ToolBodyBase {
 
 		ToolChip {
 			visible: body.hasCounts
-			text: qsTr("%n match(es) in %1 file(s)", "", body.meta.matches).arg(body.meta.files ?? 0)
+			text: qsTr("%n match(es) in %1", "", body.matchCount).arg(qsTr("%n file(s)", "", body.fileCount))
 		}
 		ToolChip {
 			visible: body.meta.truncated === true

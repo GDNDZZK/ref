@@ -55,12 +55,15 @@ Workspace::Workspace(refgui::cli::LaunchOptions options, QString settingsPath, Q
 	m_backend.start();
 }
 
-// The backend goes quiet before the chat sessions that call back into it are destroyed.
+// Closing the connection fails every request that is out and so resumes the coroutines waiting for them
+// (leaving split view, closing a session, a session's attach...). They run to their end at once, since a closed
+// client answers new requests with an error, and they need the sessions and the other members alive. So the
+// connection closes first; nothing can resume after it. The sessions refer to the backend, which is a member
+// and goes before the children do, so they are deleted here.
 Workspace::~Workspace()
 {
-	// The sessions refer to the backend, which is a member and goes before the children do.
-	qDeleteAll(findChildren<ChatSession*>(Qt::FindDirectChildrenOnly));
 	m_backend.shutdown();
+	qDeleteAll(findChildren<ChatSession*>(Qt::FindDirectChildrenOnly));
 }
 
 void Workspace::setInstance(Workspace* instance)
