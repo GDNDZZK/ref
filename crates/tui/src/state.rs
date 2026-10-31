@@ -299,6 +299,8 @@ impl SessionView {
             SessionEvent::PermissionResolved { call_id } => {
                 self.permissions.retain(|p| p.call_id != call_id);
             }
+            // The question dialog is not built yet (the TUI session does it).
+            SessionEvent::Question { .. } | SessionEvent::QuestionResolved { .. } => {}
             SessionEvent::Queue { messages } => {
                 self.set_queued(messages);
             }
@@ -655,6 +657,7 @@ mod tests {
             messages: vec![],
             more_before: false,
             pending_permissions: vec![],
+            pending_questions: vec![],
             queued: vec![q2, q1],
         });
         let rows: Vec<(Option<&str>, &str, usize)> = v

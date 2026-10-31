@@ -736,3 +736,65 @@ fn real_config_sanity() {
     println!("config_dirs={:?}", c.config_dirs);
     println!("warnings={:?}", c.warnings);
 }
+
+fn question_state(c: &Config, agent: &str) -> (bool, Action) {
+    (
+        c.tool_disabled(agent, "question"),
+        c.permission_for(agent, "question", ""),
+    )
+}
+
+#[test]
+fn question_is_allowed_for_build_and_plan_only() {
+    let fx = Fx::new();
+    fx.write(
+        "home/.config/opencode/opencode.json",
+        r#"{"agent": {"helper": {"mode": "subagent"}}}"#,
+    );
+    let c = fx.load();
+    assert_eq!(question_state(&c, "build"), (false, Action::Allow));
+    assert_eq!(question_state(&c, "plan"), (false, Action::Allow));
+    for denied in ["general", "explore", "compaction", "helper"] {
+        assert_eq!(question_state(&c, denied), (true, Action::Deny), "{denied}");
+    }
+}
+
+#[test]
+fn a_global_question_rule_applies_to_every_agent() {
+    let fx = Fx::new();
+    fx.write(
+        "home/.config/opencode/opencode.json",
+        r#"{"permission": {"question": "allow"}}"#,
+    );
+    let c = fx.load();
+    assert_eq!(question_state(&c, "general"), (false, Action::Allow));
+    fx.write(
+        "home/.config/opencode/opencode.json",
+        r#"{"permission": {"question": "deny"}}"#,
+    );
+    let c = fx.load();
+    assert_eq!(question_state(&c, "build"), (true, Action::Deny));
+    fx.write(
+        "home/.config/opencode/opencode.json",
+        r#"{"permission": "allow"}"#,
+    );
+    let c = fx.load();
+    assert_eq!(question_state(&c, "explore"), (false, Action::Allow));
+}
+
+#[test]
+fn an_agent_rule_for_question_wins() {
+    let fx = Fx::new();
+    fx.write(
+        "home/.config/opencode/opencode.json",
+        r#"{"agent": {
+            "general": {"permission": {"question": "allow"}},
+            "build": {"permission": {"question": "deny"}},
+            "plan": {"permission": {"question": "ask"}}
+        }}"#,
+    );
+    let c = fx.load();
+    assert_eq!(question_state(&c, "general"), (false, Action::Allow));
+    assert_eq!(question_state(&c, "build"), (true, Action::Deny));
+    assert_eq!(question_state(&c, "plan"), (false, Action::Ask));
+}
