@@ -43,8 +43,18 @@ if(WIN32)
 	configure_file("${CMAKE_CURRENT_LIST_DIR}/ref-gui.rc.in" "${CMAKE_CURRENT_BINARY_DIR}/ref-gui.rc" @ONLY)
 	target_sources(ref-gui PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/ref-gui.rc")
 
-	# windeployqt copies Qt and the VC++ runtime, but knows nothing of other DLLs.
+	# windeployqt copies Qt, but knows nothing of other DLLs.
 	install(IMPORTED_RUNTIME_ARTIFACTS KF6::SyntaxHighlighting RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+
+	# The Visual C++ runtime next to the program: the zip has no installer, and a machine
+	# without the redistributable would not start it. windeployqt's own way is to copy the
+	# redistributable's installer (vc_redist.x64.exe), which the user would have to run.
+	set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION "${CMAKE_INSTALL_BINDIR}")
+	include(InstallRequiredSystemLibraries)
+	if(NOT CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
+		message(WARNING "The Visual C++ runtime DLLs were not found; the package will lack them")
+	endif()
+	list(APPEND ref_gui_deploy_tool_options --no-compiler-runtime)
 
 	# The software OpenGL fallback is 20 MB of DLL that a desktop with a GPU driver never loads.
 	list(APPEND ref_gui_deploy_tool_options --no-opengl-sw)
