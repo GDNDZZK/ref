@@ -258,6 +258,18 @@ const TESTER_STEPS: [&str; 3] = [
     "Note the baseline",
 ];
 
+const TESTER_REPORT: &str = "Tests added for the parser fix.";
+const TESTER_REPORT_TYPED: &str = "Tests added for the parser fix. Also covered: empty input.";
+
+/// The tester reports what it did, and what a person asked it to cover while it worked.
+fn tester_report(ctx: &Ctx) -> &'static str {
+    if ctx.typed.is_empty() {
+        TESTER_REPORT
+    } else {
+        TESTER_REPORT_TYPED
+    }
+}
+
 fn tester(ctx: &Ctx) -> Round {
     let plan = |done: usize| plan_todos(&TESTER_STEPS, done);
     let baseline = format!(
@@ -284,10 +296,7 @@ fn tester(ctx: &Ctx) -> Round {
             .tool(
                 "send_message",
                 "Report the baseline",
-                send_message(
-                    &ctx.args,
-                    "tester: baseline before the fix: 1 failing test, parser::off_by_one.",
-                ),
+                send_message(&ctx.args, tester_report(ctx)),
             ),
         _ => reported(),
     }
@@ -352,6 +361,7 @@ mod tests {
             args: MAIN.into(),
             root_prompt: "orchestrate fix it".into(),
             peer_reports: reports,
+            typed: vec![],
             round,
             session_id: MAIN.into(),
             attempt: 1,
@@ -515,7 +525,7 @@ mod tests {
         let workers: [(Play, usize, &str); 5] = [
             (scout, 3, "scout: parse_items has 3 callers"),
             (fixer, 3, "fixer: replaced `0..=items.len()`"),
-            (tester, 4, "tester: baseline before the fix"),
+            (tester, 4, "Tests added for the parser fix."),
             (docs, 3, "docs: added a changelog line"),
             (review, 2, "reviewer: the change is minimal"),
         ];
@@ -535,6 +545,75 @@ mod tests {
             let after = play(&ctx(report_round + 1, 0, ""));
             assert_eq!(text(&after), "Reported.");
             assert!(tools(&after).is_empty());
+        }
+    }
+
+    /// The request a created tester sends in round `round`, after the human messages `typed`.
+    fn tester_round(round: usize, typed: &[&str]) -> Round {
+        use serde_json::json;
+        let mut messages = vec![json!({"role": "user", "content":
+            format!("[Session created by \"main\" (id {MAIN})]\norch-tester {MAIN}\n[When you finish or get blocked, report]")})];
+        for i in 0..round {
+            messages.push(json!({"role": "assistant", "content": "ok"}));
+            messages.push(json!({"role": "tool", "tool_call_id": format!("c{i}"), "content": "r"}));
+            // A typed message is delivered at a round boundary, in the middle of the task.
+            if i == 1 {
+                for text in typed {
+                    messages.push(json!({"role": "user", "content": text}));
+                }
+            }
+        }
+        if round < 2 {
+            for text in typed {
+                messages.push(json!({"role": "user", "content": text}));
+            }
+        }
+        let body = json!({"messages": messages, "tools": [{"type": "function"}]});
+        let crate::mock::script::Task::Reply(ctx) = crate::mock::script::analyze(&body, "ses_t", 1)
+        else {
+            panic!("not a reply");
+        };
+        assert_eq!(ctx.round, round, "typed messages do not restart the rounds");
+        assert_eq!(ctx.prompt, format!("orch-tester {MAIN}"));
+        (crate::mock::script::select(&ctx.prompt, &ctx.root_prompt).play)(&ctx)
+    }
+
+    fn report_of(round: &Round) -> String {
+        let (name, input) = tools(round)
+            .into_iter()
+            .find(|(n, _)| *n == "send_message")
+            .unwrap();
+        assert_eq!(name, "send_message");
+        input["message"].as_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn the_tester_reports_what_a_person_asked_it_to_cover() {
+        assert_eq!(
+            report_of(&tester_round(4, &[])),
+            "Tests added for the parser fix."
+        );
+        for typed in [
+            &["also cover empty input"][..],
+            &["first", "also cover empty input"][..],
+        ] {
+            assert_eq!(
+                report_of(&tester_round(4, typed)),
+                "Tests added for the parser fix. Also covered: empty input."
+            );
+        }
+    }
+
+    #[test]
+    fn a_typed_message_does_not_restart_or_switch_the_tester() {
+        // Whenever it arrives, the script goes on with the same round.
+        for round in 0..=5 {
+            let plain = format!("{:?}", tester_round(round, &[]).steps.len());
+            let typed = format!(
+                "{:?}",
+                tester_round(round, &["also cover empty input"]).steps.len()
+            );
+            assert_eq!(plain, typed, "round {round}");
         }
     }
 

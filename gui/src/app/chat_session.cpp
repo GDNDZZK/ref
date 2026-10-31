@@ -119,6 +119,8 @@ QString ChatSession::activity() const
 		return u"running"_s;
 	case State::WaitingPermission:
 		return u"waiting_permission"_s;
+	case State::WaitingQuestion:
+		return u"waiting_question"_s;
 	case State::Retrying:
 		return u"retrying"_s;
 	case State::Compacting:

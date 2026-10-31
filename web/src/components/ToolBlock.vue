@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // A tool call (ToolBlock.qml): a header with the eight states, and a body laid out by tool.
-// A permission request is part of the card, which opens for it.
+// A permission request or a question is part of the card, which opens for it.
 import { computed, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useChatScroll } from '../composables/chatScroll.ts'
@@ -18,6 +18,7 @@ import TextButton from './TextButton.vue'
 import TodoList from './TodoList.vue'
 import ToolBody from './ToolBody.vue'
 import ToolPermission from './ToolPermission.vue'
+import ToolQuestion from './ToolQuestion.vue'
 import ToolStateMark from './ToolStateMark.vue'
 
 const props = defineProps<{ block: ToolBlock }>()
@@ -48,6 +49,7 @@ const isTodo = computed(() => props.block.name === 'todo')
 const todos = computed(() => (isTodo.value ? parseTodos(props.block.input) : []))
 const detail = computed(() => toolDetail(props.block.name, props.block.input))
 const awaitingPermission = computed(() => state.value === 'awaiting_permission')
+const awaitingAnswer = computed(() => props.block.question !== undefined)
 const hasContent = computed(() => {
   const { input, rawInput, output, images } = props.block
   const hasInput = input !== null && !(typeof input === 'object' && Object.keys(input).length === 0)
@@ -63,11 +65,17 @@ const expanded = computed(
   () => hasContent.value && (awaitingPermission.value || session.detailsExpanded !== flipped.value),
 )
 const showPermission = ref(false) // once a request was there, the section stays to fold away
+const showQuestion = ref(false) // the same for the questions
 const bodyBuilt = ref(false) // built on first open, so a long list stays cheap
 
 watch(
   () => props.block.permission,
   (request) => request && (showPermission.value = true),
+  { immediate: true },
+)
+watch(
+  () => props.block.question,
+  (request) => request && (showQuestion.value = true),
   { immediate: true },
 )
 watch(expanded, (isExpanded) => isExpanded && (bodyBuilt.value = true), { immediate: true })
@@ -88,10 +96,11 @@ const statusText = computed(() => {
       return t('tool.writing')
     case 'awaiting_permission':
       return t('tool.needsPermission')
+    case 'running':
+      if (awaitingAnswer.value) return t('tool.needsAnswer')
+      return t('tool.running', { elapsed: formatElapsed(now.value - time) })
     case 'delayed':
       return t('tool.runsIn', { seconds: Math.ceil(countdown.remaining.value / MS_PER_SECOND) })
-    case 'running':
-      return t('tool.running', { elapsed: formatElapsed(now.value - time) })
     case 'done':
       return timeEnd === null ? '' : formatDuration(timeEnd - time)
     case 'error':
@@ -121,6 +130,10 @@ function answer(allow: boolean, always: boolean): void {
   session.answerPermission(props.block.callId, allow, always).catch((error) => notices.pushError(error))
 }
 
+function answerQuestion(answers: string[][] | null): void {
+  session.answerQuestion(props.block.callId, answers).catch((error) => notices.pushError(error))
+}
+
 function cancel(): void {
   session.stop().catch((error) => notices.pushError(error))
 }
@@ -131,7 +144,7 @@ function cancel(): void {
     ref="root"
     class="tool"
     :class="{
-      warn: awaitingPermission || delayed,
+      warn: awaitingPermission || awaitingAnswer || delayed,
       muted: state === 'denied' || state === 'cancelled',
       denied: state === 'denied',
     }"
@@ -156,7 +169,7 @@ function cancel(): void {
         <span v-if="detail" class="detail">{{ detail }}</span>
       </span>
       <span v-if="delayed" @click.stop><TextButton :label="t('tool.cancel')" @click="cancel" /></span>
-      <span class="status" :class="state">{{ statusText }}</span>
+      <span class="status" :class="[state, { 'awaiting-answer': awaitingAnswer }]">{{ statusText }}</span>
       <span v-if="block.time > 0" class="clock">{{ formatClock(block.time) }}</span>
       <Chevron class="chevron" :class="{ open: expanded, hidden: !hasContent || awaitingPermission }" />
     </div>
@@ -166,6 +179,12 @@ function cancel(): void {
       :request="block.permission"
       :waiting="Math.max(0, session.permissions.length - 1)"
       @answer="answer"
+    />
+    <ToolQuestion
+      v-if="showQuestion"
+      :form="block.question && session.questionForm(block.question)"
+      :sending="session.isSendingAnswer(block.callId)"
+      @answer="answerQuestion"
     />
     <div v-if="firstErrorLine" class="error-line">└ {{ firstErrorLine }}</div>
     <div
@@ -292,11 +311,12 @@ function cancel(): void {
 }
 
 .status.awaiting_permission,
+.status.awaiting-answer,
 .status.delayed {
   color: var(--warning);
 }
 
-.status.running {
+.status.running:not(.awaiting-answer) {
   color: var(--accent);
 }
 

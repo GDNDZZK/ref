@@ -1,13 +1,16 @@
 // Answers the oldest pending permission request from the keyboard: a or Enter = allow, s = allow
-// for the session, d or Esc = deny. Works on the focused session, or any session on screen that
-// is waiting.
+// for the session, d or Esc = deny. A pending question takes the keys of its form instead
+// (questionForm.ts): arrows, numbers, Enter, Esc. Works on the focused session, or any session
+// on screen that is waiting.
 //
 // The keys are ignored for a moment after a request appears, because the user may still be typing.
 // After that the request owns the keyboard: other letters no longer reach the composer until
-// every request is answered. Dialogs keep their keys.
+// every request is answered. Dialogs keep their keys, and so does the text field of a question.
 
 import { onBeforeUnmount, onMounted, watch } from 'vue'
 import { PERMISSION_GUARD_MS } from '../components/toolLimits.ts'
+import type { ChatSession } from '../model/chatSession.ts'
+import type { QuestionRequest } from '../proto/generated'
 import { useNoticesStore } from '../stores/notices.ts'
 import { useWorkspaceStore } from '../stores/workspace.ts'
 
@@ -23,6 +26,11 @@ function inDialog(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest('[role="dialog"]') !== null
 }
 
+// The field for an own answer handles its keys itself.
+function inQuestionField(target: EventTarget | null): boolean {
+  return target instanceof HTMLInputElement && target.closest('.question') !== null
+}
+
 export function usePermissionKeys(): void {
   const workspace = useWorkspaceStore()
   const notices = useNoticesStore()
@@ -32,21 +40,42 @@ export function usePermissionKeys(): void {
   function askingSession() {
     const ids = [workspace.focusedId, ...workspace.visibleSessionIds]
     const sessions = ids.flatMap((id) => (id === undefined ? [] : [workspace.chat(id)]))
-    return sessions.find((session) => session.permissions.length > 0)
+    return sessions.find((session) => session.permissions.length > 0 || session.pendingQuestion)
   }
 
   // Each new request starts its own guard time.
   watch(
-    () => askingSession()?.pendingPermission?.call_id,
+    () => {
+      const session = askingSession()
+      return session?.pendingPermission?.call_id ?? session?.pendingQuestion?.call_id
+    },
     (callId) => callId && (armedAt = performance.now() + PERMISSION_GUARD_MS),
     { immediate: true },
   )
 
+  function answerQuestion(session: ChatSession, request: QuestionRequest, event: KeyboardEvent): void {
+    const outcome = session.questionForm(request).press(event.key, event.shiftKey)
+    if (outcome === 'ignored') {
+      if (event.key.length === 1) event.preventDefault() // a letter: not for the composer now
+      return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    if (outcome === 'handled') return
+    const answers = outcome === 'submit' ? session.questionForm(request).answers() : null
+    session.answerQuestion(request.call_id, answers).catch((error) => notices.pushError(error))
+  }
+
   function onKeydown(event: KeyboardEvent): void {
     const session = askingSession()
     const request = session?.pendingPermission
-    if (!session || !request || performance.now() < armedAt || inDialog(event.target)) return
+    const question = session?.pendingQuestion
+    if (!session || performance.now() < armedAt || inDialog(event.target)) return
     if (event.ctrlKey || event.metaKey || event.altKey) return
+    if (!request) {
+      if (question && !inQuestionField(event.target)) answerQuestion(session, question, event)
+      return
+    }
 
     const answer = ANSWERS[event.key]
     if (!answer) {

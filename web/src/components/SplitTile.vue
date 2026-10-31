@@ -58,13 +58,14 @@ const elapsed = computed(() => (info.value ? runningTime(info.value, now.value) 
   >
     <header
       class="header"
-      :class="{ permission: state === 'permission', error: state === 'error' }"
+      :class="{ permission: state === 'permission' || state === 'question', error: state === 'error' }"
       @dblclick="emit('zoom')"
     >
       <SessionDot :state="state" />
       <span class="title">{{ title }}</span>
       <span v-if="needsAttention(state)" class="mark">
         <Icon v-if="state === 'permission'" icon="lock-16" class="lock" />
+        <Icon v-else-if="state === 'question'" icon="chat-16" class="lock" />
         <AlertBadge v-else :size="BADGE_SIZE" />
       </span>
       <span v-else-if="progress" class="progress" :class="{ complete: progress.complete }">

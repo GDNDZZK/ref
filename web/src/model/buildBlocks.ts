@@ -7,7 +7,7 @@
 //   compaction message    -> one compaction block
 //   every other message   -> ends with a meta block
 
-import type { Message, PermissionRequest } from '../proto/generated'
+import type { Message, PermissionRequest, QuestionRequest } from '../proto/generated'
 import { isFinalToolState } from './blocks.ts'
 import type { Block, CompactionBlock, ImageRef, MetaBlock, UserBlock, UserSource } from './blocks.ts'
 import type { PartView } from './partView.ts'
@@ -26,6 +26,7 @@ export interface BuildContext {
   lastCompaction: boolean // this is the last compaction message
   isPacing(partIndex: number): boolean // the pacer still holds text of that part
   permissions: ReadonlyMap<string, PermissionRequest>
+  questions: ReadonlyMap<string, QuestionRequest>
 }
 
 const INTERRUPTED = 'aborted' // the error text of a turn the user interrupted; not shown as an error
@@ -133,6 +134,7 @@ function assistantBlocks(entry: MessageEntry, context: BuildContext): Block[] {
         timeEnd: part.time_end,
         runAt: part.run_at ?? null,
         permission: context.permissions.get(part.call_id),
+        question: context.questions.get(part.call_id),
         images: (part.images ?? []).map(imageRef),
       })
       return

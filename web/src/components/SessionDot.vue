@@ -11,7 +11,7 @@ import Flourish from './Flourish.vue'
 const props = defineProps<{ state: RowState }>()
 
 const PULSE_DIMMED = 0.5
-const WORKING: readonly RowState[] = ['busy', 'compacting', 'retrying', 'permission']
+const WORKING: readonly RowState[] = ['busy', 'compacting', 'retrying', 'permission', 'question']
 
 const dot = useTemplateRef<HTMLElement>('dot')
 const flourish = useTemplateRef<InstanceType<typeof Flourish>>('flourish')
@@ -58,7 +58,8 @@ onBeforeUnmount(() => clearTimeout(settle))
 }
 
 .retrying,
-.permission {
+.permission,
+.question {
   --state-color: var(--warning);
 }
 

@@ -69,7 +69,8 @@
     "error": "error",
     "denied": "denied",
     "cancelledState": "cancelled",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "needsAnswer": "Waiting for your answer"
   },
   "theme": {
     "switchToLight": "Switch to light theme",
@@ -204,7 +205,8 @@
     "show": "Show sidebar",
     "mcp": "MCP",
     "settings": "Settings",
-    "sessions": "Sessions"
+    "sessions": "Sessions",
+    "needsAnswer": "Waiting for your answer"
   },
   "split": {
     "empty": "No background sessions",
@@ -364,6 +366,19 @@
     "waitingPermission": "Waiting for your permission",
     "compacting": "Compacting context…",
     "retrying": "Retrying in {seconds}s (attempt {attempt}): {error}",
-    "contextTitle": "Context: {used} of {max} tokens ({percent}%). Recommended compaction at {recommend}, automatic at {auto}."
+    "contextTitle": "Context: {used} of {max} tokens ({percent}%). Recommended compaction at {recommend}, automatic at {auto}.",
+    "waitingQuestion": "Waiting for your answer"
+  },
+  "question": {
+    "custom": "Type your own answer",
+    "customPlaceholder": "Your answer",
+    "default": "(default)",
+    "confirm": "Confirm",
+    "submit": "Submit",
+    "dismiss": "Dismiss",
+    "unanswered": "Unanswered",
+    "hintSingle": "↑↓ move · 1-9 or Enter to pick · Esc dismiss",
+    "hintTabbed": "←→ switch question · 1-9 or Space to pick · Enter next · Esc dismiss",
+    "hintConfirm": "Enter submits · ← back · Esc dismiss"
   }
 }
