@@ -22,6 +22,41 @@ namespace
 
 constexpr int ReplyTimeoutMs = 20000;
 
+// Points the temporary directory of child processes at `path` for its lifetime. Unix programs read
+// TMPDIR; Windows programs (Rust's std::env::temp_dir included) read TMP, then TEMP.
+class TemporaryDirectoryEnvironment
+{
+public:
+	explicit TemporaryDirectoryEnvironment(const QString& path)
+	{
+		for(const char* name : Names)
+		{
+			m_before.append(qgetenv(name));
+			qputenv(name, path.toLocal8Bit());
+		}
+	}
+	~TemporaryDirectoryEnvironment()
+	{
+		for(qsizetype i = 0; i < m_before.size(); ++i)
+		{
+			if(m_before[i].isNull())
+			{
+				qunsetenv(Names[i]);
+			}
+			else
+			{
+				qputenv(Names[i], m_before[i]);
+			}
+		}
+	}
+	TemporaryDirectoryEnvironment(const TemporaryDirectoryEnvironment&) = delete;
+	TemporaryDirectoryEnvironment& operator=(const TemporaryDirectoryEnvironment&) = delete;
+
+private:
+	static constexpr const char* Names[] = {"TMPDIR", "TMP", "TEMP"};
+	QList<QByteArray> m_before;
+};
+
 }
 
 class TestMockSession : public QObject
@@ -217,19 +252,10 @@ void TestMockSession::mockDirectoryIsRemovedWhenTheBackendIsDestroyed()
 {
 	QTemporaryDir temporary;
 	QVERIFY(temporary.isValid());
-	const QByteArray before = qgetenv("TMPDIR");
-	qputenv("TMPDIR", temporary.path().toLocal8Bit());
 	{
+		const TemporaryDirectoryEnvironment environment(temporary.path());
 		Session s;
 		QVERIFY(!QDir(temporary.path()).entryList({u"ref-mock-*"_s}, QDir::Dirs | QDir::NoDotAndDotDot).isEmpty());
-	}
-	if(before.isNull())
-	{
-		qunsetenv("TMPDIR");
-	}
-	else
-	{
-		qputenv("TMPDIR", before);
 	}
 	QCOMPARE(QDir(temporary.path()).entryList({u"ref-mock-*"_s}, QDir::Dirs | QDir::NoDotAndDotDot), QStringList());
 }
