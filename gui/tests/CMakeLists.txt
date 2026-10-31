@@ -64,6 +64,11 @@ target_link_libraries(tst_session_controller PRIVATE refgui_session Qt6::Test)
 refgui_configure_target(tst_session_controller)
 add_test(NAME tst_session_controller COMMAND tst_session_controller)
 
+qt_add_executable(tst_question_prompt tst_question_prompt.cpp)
+target_link_libraries(tst_question_prompt PRIVATE refgui_session Qt6::Test)
+refgui_configure_target(tst_question_prompt)
+add_test(NAME tst_question_prompt COMMAND tst_question_prompt)
+
 qt_add_executable(tst_command_line tst_command_line.cpp)
 target_link_libraries(tst_command_line PRIVATE refgui_cli Qt6::Test)
 refgui_configure_target(tst_command_line)

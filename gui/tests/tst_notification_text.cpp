@@ -22,6 +22,7 @@ class TestNotificationText : public QObject
 
 private slots:
 	void permissionNamesTheTool();
+	void questionQuotesTheFirstQuestion();
 	void turnDoneIsShort();
 	void turnErrorShowsTheFirstLineOnly();
 	void longErrorsAreCut();
@@ -36,6 +37,15 @@ void TestNotificationText::permissionNamesTheTool()
 	QCOMPARE(n.title, u"Fix build"_s);
 	QCOMPARE(n.body, u"Waiting for permission to use bash"_s);
 	QCOMPARE(makeNotification(frame(Kind::Permission, u"t"_s, std::nullopt)).body, u"Waiting for permission"_s);
+}
+
+void TestNotificationText::questionQuotesTheFirstQuestion()
+{
+	const auto n = makeNotification(frame(Kind::Question, u"Fix build"_s, u"Which file first?"_s));
+	QCOMPARE(n.kind, Kind::Question);
+	QCOMPARE(n.title, u"Fix build"_s);
+	QCOMPARE(n.body, u"Asks: Which file first?"_s);
+	QCOMPARE(makeNotification(frame(Kind::Question, u"t"_s, std::nullopt)).body, u"Asks a question"_s);
 }
 
 void TestNotificationText::turnDoneIsShort()

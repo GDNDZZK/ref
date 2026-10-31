@@ -57,6 +57,18 @@ QJsonObject eventFrame(const QString& sessionId, const QJsonObject& event)
 	return {{u"kind"_s, u"event"_s}, {u"session_id"_s, sessionId}, {u"event"_s, event}};
 }
 
+QJsonObject questionJson(const QString& callId, const QString& text)
+{
+	const QJsonObject option{{u"label"_s, u"Yes"_s}, {u"description"_s, u"Do it"_s}, {u"default"_s, true}};
+	const QJsonObject question{{u"question"_s, text}, {u"header"_s, u"Ask"_s}, {u"options"_s, QJsonArray{option}}, {u"multiple"_s, false}, {u"custom"_s, true}};
+	return {{u"session_id"_s, u"ses_1"_s}, {u"message_id"_s, u"a1"_s}, {u"call_id"_s, callId}, {u"questions"_s, QJsonArray{question}}, {u"time"_s, 1}};
+}
+
+QJsonObject questionFrame(const QString& callId, const QString& text)
+{
+	return eventFrame(u"ses_1"_s, {{u"type"_s, u"question"_s}, {u"request"_s, questionJson(callId, text)}});
+}
+
 QJsonObject deltaFrame(const QString& sessionId, const QString& messageId, qsizetype index, const QString& text)
 {
 	return eventFrame(sessionId,
@@ -119,7 +131,7 @@ struct Fixture
 		{
 			fake.respond(request, {{u"messages"_s, olderPage}, {u"more_before"_s, olderHasMore}});
 		}
-		else if(op == u"abort" || op == u"detach")
+		else if(op == u"abort" || op == u"detach" || op == u"question_reply")
 		{
 			fake.respond(request, {});
 		}
@@ -165,6 +177,10 @@ private slots:
 	void upgradingAWatcherKeepsTheConversation();
 	void detachedControllerIgnoresEventsAndAttachesAgain();
 	void tracksTheQueuedPrompts();
+	void pendingQuestionsComeWithTheSnapshot();
+	void questionEventsAddAndResolvedOnesRemove();
+	void questionReplyAsksTheBackend();
+	void droppedQuestionIsForgotten();
 	void loadsOlderMessagesInFront();
 	void doesNotAskWhenNothingIsOlder();
 	void showsSessionErrorsAtTheEndUntilTheNextPrompt();
@@ -373,6 +389,74 @@ void TestSessionController::tracksTheQueuedPrompts()
 	f.fake.send(eventFrame(u"ses_1"_s, {{u"type"_s, u"queue"_s}, {u"messages"_s, QJsonArray()}}));
 	QTRY_COMPARE(changed.count(), 1);
 	QVERIFY(f.controller.queued().isEmpty());
+}
+
+void TestSessionController::pendingQuestionsComeWithTheSnapshot()
+{
+	Fixture f;
+	QJsonObject snapshot = f.snapshot.value(u"snapshot"_s).toObject();
+	snapshot[u"pending_questions"_s] = QJsonArray{questionJson(u"c1"_s, u"First?"_s)};
+	f.snapshot[u"snapshot"_s] = snapshot;
+
+	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
+
+	QCOMPARE(f.controller.pendingQuestions().size(), 1);
+	QCOMPARE(f.controller.pendingQuestions().first().callId, u"c1"_s);
+	QCOMPARE(f.controller.pendingQuestions().first().questions.first().question, u"First?"_s);
+}
+
+void TestSessionController::questionEventsAddAndResolvedOnesRemove()
+{
+	Fixture f;
+	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
+	QSignalSpy changed(&f.controller, &SessionController::questionsChanged);
+
+	f.fake.send(questionFrame(u"c1"_s, u"First?"_s));
+	QTRY_COMPARE(changed.count(), 1);
+	f.fake.send(questionFrame(u"c1"_s, u"First?"_s)); // a repeat changes nothing
+	f.fake.send(questionFrame(u"c2"_s, u"Second?"_s));
+	QTRY_COMPARE(changed.count(), 2);
+	QCOMPARE(f.controller.pendingQuestions().size(), 2);
+	QCOMPARE(f.controller.pendingQuestions().first().callId, u"c1"_s); // the oldest first
+
+	f.fake.send(eventFrame(u"ses_1"_s, {{u"type"_s, u"question_resolved"_s}, {u"call_id"_s, u"c1"_s}}));
+	QTRY_COMPARE(changed.count(), 3);
+	QCOMPARE(f.controller.pendingQuestions().size(), 1);
+	QCOMPARE(f.controller.pendingQuestions().first().callId, u"c2"_s);
+}
+
+void TestSessionController::questionReplyAsksTheBackend()
+{
+	Fixture f;
+	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
+
+	const auto answered = await(f.controller.questionReply(u"c1"_s, QList<QStringList>{{u"Yes"_s}, {}}));
+
+	QVERIFY(answered && answered->has_value());
+	const QJsonObject request = f.fake.requests().last();
+	QCOMPARE(request.value(u"op"_s).toString(), u"question_reply"_s);
+	QCOMPARE(request.value(u"session_id"_s).toString(), u"ses_1"_s);
+	QCOMPARE(request.value(u"call_id"_s).toString(), u"c1"_s);
+	QCOMPARE(request.value(u"answers"_s).toArray(), (QJsonArray{QJsonArray{u"Yes"_s}, QJsonArray{}}));
+
+	QVERIFY(await(f.controller.questionReply(u"c1"_s, std::nullopt)));
+	QVERIFY(f.fake.requests().last().value(u"answers"_s).isNull()); // dismissed
+}
+
+void TestSessionController::droppedQuestionIsForgotten()
+{
+	Fixture f;
+	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
+	f.fake.send(questionFrame(u"c1"_s, u"First?"_s));
+	QTRY_COMPARE(f.controller.pendingQuestions().size(), 1);
+	QSignalSpy changed(&f.controller, &SessionController::questionsChanged);
+
+	f.controller.dropQuestion(u"other"_s);
+	QVERIFY(changed.isEmpty());
+	f.controller.dropQuestion(u"c1"_s);
+
+	QCOMPARE(changed.count(), 1);
+	QVERIFY(f.controller.pendingQuestions().isEmpty());
 }
 
 void TestSessionController::loadsOlderMessagesInFront()
