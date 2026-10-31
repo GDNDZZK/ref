@@ -222,6 +222,11 @@ export class RefApi {
     })
   }
 
+  // `answers` has one entry per question; null dismisses the questions.
+  async questionReply(sessionId: string, callId: string, answers: string[][] | null): Promise<void> {
+    await this.connection.request({ op: 'question_reply', session_id: sessionId, call_id: callId, answers })
+  }
+
   // `removed` is false when the message was delivered in the meantime.
   async removeQueued(
     sessionId: string,

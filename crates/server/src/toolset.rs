@@ -83,7 +83,7 @@ pub fn mcp_tool_name(server: &str, tool: &str) -> String {
         .collect()
 }
 
-fn def(name: &str, description: &str, params: Value) -> ToolDef {
+pub(crate) fn def(name: &str, description: &str, params: Value) -> ToolDef {
     ToolDef {
         name: name.into(),
         description: description.into(),
@@ -121,6 +121,7 @@ pub fn harness_defs() -> Vec<ToolDef> {
                 "summary": {"type": "string", "description": "Complete summary that replaces the conversation history in your context."}
             }, "required": ["summary"]}),
         ),
+        crate::question::definition(),
     ]
 }
 

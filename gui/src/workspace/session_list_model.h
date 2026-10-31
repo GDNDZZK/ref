@@ -35,14 +35,14 @@ public:
 		ProviderRole,
 		ModelIdRole,
 		VariantRole, // empty without
-		StateRole,      // "activity" in QML: idle, thinking, running, waiting_permission, retrying or compacting
+		StateRole,      // "activity" in QML: idle, thinking, running, waiting_permission, waiting_question, retrying or compacting
 		BusySinceRole,  // ms since epoch, 0 when not running
 		UpdatedAtRole,
 		CreatedAtRole,
 		TodoDoneRole,
 		TodoTotalRole,
 		TodoAllDoneRole,
-		HasPermissionRole,
+		HasPermissionRole, // blocked on the user: a permission or a question
 		LastErrorRole,
 		HasErrorRole,
 		AttachedRole, // frontends attached to it

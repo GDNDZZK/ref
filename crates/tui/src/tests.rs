@@ -203,9 +203,15 @@ pub fn transcript(streaming: bool) -> Vec<Message> {
 }
 
 pub fn test_app(streaming: bool) -> App {
-    let (tx, rx) = mpsc::unbounded_channel();
+    let (app, rx) = test_app_with_requests(streaming);
     // Keep the receiver alive so requests are accepted (and recorded as pending).
     std::mem::forget(rx);
+    app
+}
+
+/// Like `test_app`, with the receiver that sees every request the app sends.
+pub fn test_app_with_requests(streaming: bool) -> (App, mpsc::UnboundedReceiver<ClientFrame>) {
+    let (tx, rx) = mpsc::unbounded_channel();
     let mut app = App::new(Client::new(tx), "/home/u/proj".into(), InitPlan::default());
     app.connected = true;
     app.ever_connected = true;
@@ -244,11 +250,12 @@ pub fn test_app(streaming: bool) -> App {
         messages: transcript(streaming),
         more_before: false,
         pending_permissions: vec![],
+        pending_questions: vec![],
         queued: vec![],
     });
     app.views.insert("ses_test".into(), v);
     app.current = Some("ses_test".into());
-    app
+    (app, rx)
 }
 
 pub fn render(app: &mut App, w: u16, h: u16) -> (Terminal<TestBackend>, String) {
@@ -452,6 +459,7 @@ fn split_view_snapshot() {
             messages: transcript(i == 0),
             more_before: false,
             pending_permissions: vec![],
+            pending_questions: vec![],
             queued: vec![],
         });
         app.views.insert(inf.id.clone(), v);
@@ -518,7 +526,7 @@ async fn pump(app: &mut App, rx: &mut mpsc::UnboundedReceiver<crate::net::NetEve
     }
 }
 
-fn key(
+pub fn key(
     code: crossterm::event::KeyCode,
     mods: crossterm::event::KeyModifiers,
 ) -> crossterm::event::Event {
@@ -1105,7 +1113,7 @@ fn shell_mode_and_image_token() {
     assert!(s.contains("1 image"));
 }
 
-fn mouse(kind: crossterm::event::MouseEventKind, x: u16, y: u16) -> crossterm::event::Event {
+pub fn mouse(kind: crossterm::event::MouseEventKind, x: u16, y: u16) -> crossterm::event::Event {
     crossterm::event::Event::Mouse(crossterm::event::MouseEvent {
         kind,
         column: x,
@@ -2319,6 +2327,7 @@ fn running_tool_spinner_animates_in_tiles() {
         messages: transcript(true),
         more_before: false,
         pending_permissions: vec![],
+        pending_questions: vec![],
         queued: vec![],
     });
     app.views.insert("ses_bg".into(), v);
@@ -2357,6 +2366,7 @@ fn split_tile_shows_queue_and_expands_tools() {
         messages: transcript(false),
         more_before: false,
         pending_permissions: vec![],
+        pending_questions: vec![],
         queued,
     });
     app.views.insert("ses_bg".into(), v);
@@ -2539,6 +2549,7 @@ fn todo_rendering_everywhere() {
         messages: transcript(false),
         more_before: false,
         pending_permissions: vec![],
+        pending_questions: vec![],
         queued: vec![],
     });
     app.views.insert("ses_bg".into(), v);
@@ -2986,6 +2997,7 @@ fn compacted_app() -> App {
         messages: msgs,
         more_before: false,
         pending_permissions: vec![],
+        pending_questions: vec![],
         queued: vec![],
     });
     app
@@ -3120,6 +3132,7 @@ fn compaction_divider_keeps_old_messages_interactive() {
         )],
         more_before: false,
         pending_permissions: vec![],
+        pending_questions: vec![],
         queued: vec![],
     });
     let (_, s) = render(&mut app, 100, 30);
@@ -3139,6 +3152,7 @@ fn compaction_divider_in_split_tile() {
         messages: msgs,
         more_before: false,
         pending_permissions: vec![],
+        pending_questions: vec![],
         queued: vec![],
     });
     app.views.insert("ses_bg".into(), v);
@@ -3246,6 +3260,7 @@ fn watch_app() -> App {
             messages: long_transcript(name, 30),
             more_before: false,
             pending_permissions: vec![],
+            pending_questions: vec![],
             queued: vec![],
         });
         app.views.insert(id.into(), v);
@@ -3619,6 +3634,7 @@ fn current_session_goes_background_in_split_view() {
         messages: vec![],
         more_before: false,
         pending_permissions: vec![],
+        pending_questions: vec![],
         queued: vec![],
     };
     respond(
@@ -4022,6 +4038,7 @@ fn history_pages_load_when_scrolled_to_the_top() {
             messages: newest.to_vec(),
             more_before: true,
             pending_permissions: vec![],
+            pending_questions: vec![],
             queued: vec![],
         });
     let older = |app: &App| {

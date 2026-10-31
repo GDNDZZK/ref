@@ -27,6 +27,8 @@ Item {
 
 	// A prompt went to the backend.
 	signal submitted()
+	// A key press, before the input box handles it; accepting the event keeps it from the box.
+	signal keyOffered(var event)
 
 	function focusInput() {
 		input.forceActiveFocus()
@@ -161,6 +163,9 @@ Item {
 
 				Keys.onPressed: event => {
 					if (input.inputMethodComposing)
+						return
+					composer.keyOffered(event)
+					if (event.accepted)
 						return
 					const shift = (event.modifiers & Qt.ShiftModifier) !== 0
 					const ctrl = (event.modifiers & Qt.ControlModifier) !== 0

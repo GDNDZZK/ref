@@ -23,8 +23,9 @@ struct Cli {
     allow_host: Vec<String>,
     /// Seconds to keep running after the last frontend disconnects
     /// (0 = exit immediately, -1 = never). Only effective after the first connection.
-    #[arg(long, default_value_t = -1, allow_negative_numbers = true)]
-    idle_timeout: i64,
+    /// Default: -1 (with --mock: 0).
+    #[arg(long, allow_negative_numbers = true)]
+    idle_timeout: Option<i64>,
     /// Shared secret clients must present (default: random).
     #[arg(long)]
     token: Option<String>,
@@ -42,11 +43,12 @@ struct Cli {
     stop: Option<Option<u32>>,
     /// Run a self-contained mock backend with a scripted model, in a temporary directory that
     /// is deleted on exit. Prints one line `{"port":N,"token":"..."}`. Exits when the last
-    /// client leaves, and at once when stdin is closed (started with `&`, or with stdin from
-    /// /dev/null): keep stdin open, e.g. `sleep 3600 | ref-server --mock`.
+    /// client leaves (unless --idle-timeout says otherwise), and at once when stdin is closed
+    /// (started with `&`, or with stdin from /dev/null): keep stdin open, e.g.
+    /// `sleep 3600 | ref-server --mock`.
     #[arg(
         long,
-        conflicts_with_all = ["status", "stop", "host", "allow_host", "idle_timeout", "token", "log"]
+        conflicts_with_all = ["status", "stop", "host", "allow_host", "token", "log"]
     )]
     mock: bool,
 }
@@ -104,7 +106,7 @@ fn main() {
             return instance::stop(pid).await;
         }
         let result = if cli.mock {
-            serve_mock(cli.port).await
+            serve_mock(cli.port, cli.idle_timeout).await
         } else {
             serve(cli).await
         };
@@ -164,14 +166,15 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         eprintln!("ref-server: warning: {w}");
     }
     let mut opts = HubOptions::new(ref_proto::data_dir());
-    opts.idle_timeout = cli.idle_timeout;
+    let idle_timeout = cli.idle_timeout.unwrap_or(-1);
+    opts.idle_timeout = idle_timeout;
     let running = ref_server::start(opts, &bind, port, auth).await?;
     let info = InstanceInfo {
         pid,
         port: running.addr.port(),
         bind: bind.clone(),
         allow_hosts: allow.clone(),
-        idle_timeout: cli.idle_timeout,
+        idle_timeout,
         started_at: ref_proto::now_ms(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         token,
@@ -183,7 +186,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         .unwrap_or_else(|e| e.into_inner()) = Some(info.clone());
     let dir = ref_proto::instances_dir();
     let inst_file = instance::write_instance(&dir, &info)?;
-    tracing::info!(port = info.port, %bind, idle_timeout = cli.idle_timeout, "ref-server listening");
+    tracing::info!(port = info.port, %bind, idle_timeout, "ref-server listening");
     eprintln!(
         "ref-server listening on ws://{}:{} (pid {pid})",
         bind, info.port
@@ -219,9 +222,10 @@ async fn stdin_closed() {
 }
 
 /// `--mock`: serve until stdin closes, a signal arrives or the last client leaves.
-async fn serve_mock(port: Option<u16>) -> anyhow::Result<()> {
+async fn serve_mock(port: Option<u16>, idle_timeout: Option<i64>) -> anyhow::Result<()> {
     let token = ref_server::util::random_hex(32);
-    let mock = ref_server::mock::start(port.unwrap_or(0), token.clone()).await?;
+    let idle_timeout = idle_timeout.unwrap_or(ref_server::mock::DEFAULT_IDLE_TIMEOUT);
+    let mock = ref_server::mock::start_with(port.unwrap_or(0), token.clone(), idle_timeout).await?;
     let log = mock.log_path();
     if let Err(e) = init_logging(&log) {
         eprintln!("ref-server: cannot open log file {}: {e}", log.display());

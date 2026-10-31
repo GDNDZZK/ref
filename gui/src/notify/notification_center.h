@@ -29,7 +29,7 @@ public:
 	// The backend outlives the center.
 	NotificationCenter(client::Backend& backend, std::unique_ptr<Notifier> notifier, QObject* parent = nullptr);
 
-	// The wire names of the kinds the user wants: permission, turn_done, turn_error. Unknown
+	// The wire names of the kinds the user wants: permission, question, turn_done, turn_error. Unknown
 	// names are ignored.
 	const QStringList& kinds() const { return m_kindNames; }
 	void setKinds(const QStringList& kinds);

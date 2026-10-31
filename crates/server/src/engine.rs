@@ -180,6 +180,7 @@ pub fn abort(hub: &Arc<Hub>, s: &Arc<Session>, by_user: bool) {
             },
         );
     }
+    crate::question::clear(hub, s, &mut st);
 }
 
 /// Wait (bounded) until the session has no run.
@@ -271,6 +272,7 @@ fn finish_run(hub: &Arc<Hub>, s: &Arc<Session>, id: u64, completed: bool) {
                 },
             );
         }
+        crate::question::clear(hub, s, &mut st);
         st.pending_compact = None;
         if std::mem::take(&mut st.notice_pending) {
             // Aborted / failed before the notice was delivered: allow it again later.
@@ -1080,7 +1082,7 @@ fn update_tool(hub: &Hub, s: &Session, msg_id: &str, index: usize, f: impl FnOnc
     );
 }
 
-fn set_state(
+pub(crate) fn set_state(
     hub: &Hub,
     s: &Session,
     msg_id: &str,
@@ -1106,7 +1108,7 @@ fn set_state(
     });
 }
 
-fn finish_tool(
+pub(crate) fn finish_tool(
     hub: &Hub,
     s: &Session,
     msg_id: &str,
@@ -1268,7 +1270,12 @@ async fn run_one(
                 }
             }
             match reply {
-                Some((true, _)) => {}
+                Some((true, _)) => {
+                    // Allowed: the tool may still wait out a delay, but the session no longer
+                    // waits for the user.
+                    let mut st = s.lock();
+                    hub.set_status(&mut st, SessionStatus::Running);
+                }
                 _ if cancel.is_cancelled() => {
                     finish_tool(
                         hub,
@@ -1314,6 +1321,12 @@ async fn run_one(
                 return;
             }
         }
+    }
+
+    // The question tool waits for the user instead of running.
+    if call.name == crate::question::TOOL && matches!(entry.kind, Kind::Harness) {
+        crate::question::run(hub, s, msg_id, idx, &call.call_id, &input, cancel).await;
+        return;
     }
 
     // Execute.

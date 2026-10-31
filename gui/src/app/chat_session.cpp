@@ -6,6 +6,7 @@
 #include <QGuiApplication>
 #include <QPointer>
 
+#include <optional>
 #include <utility>
 
 using refgui::client::Backend;
@@ -118,6 +119,8 @@ QString ChatSession::activity() const
 		return u"running"_s;
 	case State::WaitingPermission:
 		return u"waiting_permission"_s;
+	case State::WaitingQuestion:
+		return u"waiting_question"_s;
 	case State::Retrying:
 		return u"retrying"_s;
 	case State::Compacting:
@@ -277,6 +280,57 @@ void ChatSession::answerOldestPermission(bool allow, bool always)
 		return;
 	}
 	permissionReply(m_guardedCallId, allow, always);
+}
+
+bool ChatSession::permissionKey(int key, const QString& text, int modifiers, bool autoRepeat)
+{
+	if(!m_permissionKeysActive)
+	{
+		return false;
+	}
+	const Qt::KeyboardModifiers held(modifiers);
+	if(held.testAnyFlags(Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))
+	{
+		return false; // shortcuts stay shortcuts
+	}
+	struct Answer
+	{
+		bool allow;
+		bool always;
+	};
+	// A letter answers only unshifted; Enter and Esc answer with any modifier.
+	const bool shifted = held.testFlag(Qt::ShiftModifier);
+	std::optional<Answer> answer;
+	switch(key)
+	{
+	case Qt::Key_Return:
+	case Qt::Key_Enter:
+		answer = Answer{true, false};
+		break;
+	case Qt::Key_Escape:
+		answer = Answer{false, false};
+		break;
+	case Qt::Key_A:
+		answer = shifted ? std::nullopt : std::optional(Answer{true, false});
+		break;
+	case Qt::Key_S:
+		answer = shifted ? std::nullopt : std::optional(Answer{true, true});
+		break;
+	case Qt::Key_D:
+		answer = shifted ? std::nullopt : std::optional(Answer{false, false});
+		break;
+	default:
+		break;
+	}
+	if(!answer)
+	{
+		return !text.isEmpty() && text.front().isPrint();
+	}
+	if(!autoRepeat) // a held key must not answer the next request as well
+	{
+		answerOldestPermission(answer->allow, answer->always);
+	}
+	return true;
 }
 
 void ChatSession::undo(const QString& messageId)

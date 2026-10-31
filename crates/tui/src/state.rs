@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use ref_proto::{
-    Delta, ImageData, Message, MessageSource, Part, PermissionRequest, Role, SessionEvent,
-    SessionInfo, SessionSnapshot, ToolState,
+    Delta, ImageData, Message, MessageSource, Part, PermissionRequest, QuestionRequest, Role,
+    SessionEvent, SessionInfo, SessionSnapshot, ToolState,
 };
 
 use crate::ui::chat::ChatState;
@@ -78,6 +78,7 @@ pub struct SessionView {
     pub versions: Vec<u64>,
     index: HashMap<String, usize>,
     pub permissions: Vec<PermissionRequest>,
+    pub questions: Vec<QuestionRequest>,
     /// Snapshot received.
     pub loaded: bool,
     /// When the session last became non-idle (client clock). Fallback for backends that don't
@@ -108,6 +109,7 @@ impl SessionView {
             versions: Vec::new(),
             index: HashMap::new(),
             permissions: Vec::new(),
+            questions: Vec::new(),
             loaded: false,
             busy_since: busy.then(Instant::now),
             queued: Vec::new(),
@@ -145,6 +147,7 @@ impl SessionView {
         self.set_queued(snap.queued);
         self.set_messages(snap.messages, snap.more_before);
         self.permissions = snap.pending_permissions;
+        self.questions = snap.pending_questions;
         self.loaded = true;
         self.closed = false;
     }
@@ -298,6 +301,14 @@ impl SessionView {
             }
             SessionEvent::PermissionResolved { call_id } => {
                 self.permissions.retain(|p| p.call_id != call_id);
+            }
+            SessionEvent::Question { request } => {
+                if !self.questions.iter().any(|q| q.call_id == request.call_id) {
+                    self.questions.push(request);
+                }
+            }
+            SessionEvent::QuestionResolved { call_id } => {
+                self.questions.retain(|q| q.call_id != call_id);
             }
             SessionEvent::Queue { messages } => {
                 self.set_queued(messages);
@@ -655,6 +666,7 @@ mod tests {
             messages: vec![],
             more_before: false,
             pending_permissions: vec![],
+            pending_questions: vec![],
             queued: vec![q2, q1],
         });
         let rows: Vec<(Option<&str>, &str, usize)> = v
