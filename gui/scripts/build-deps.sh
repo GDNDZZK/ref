@@ -15,14 +15,31 @@ work="$DEPS_DIR/work"
 build_type="${BUILD_TYPE:-Release}"
 mkdir -p "$prefix" "$work"
 
+# sha256_of FILE -> the SHA-256 of the file as 64 lower-case hex digits. The tools differ between
+# systems (the sha256sum on macOS has no --check, Windows has only some of them), so each one is
+# tried and the first answer that looks like a digest is used.
+sha256_of() {
+	local tool digest
+	for tool in "shasum -a 256" "sha256sum" "openssl dgst -sha256 -r"; do
+		# shellcheck disable=SC2086 # the words of the command are meant to be split
+		digest="$($tool "$1" 2>/dev/null | awk '{ print tolower($1) }')"
+		if [[ "$digest" =~ ^[0-9a-f]{64}$ ]]; then
+			echo "$digest"
+			return 0
+		fi
+	done
+	die "no tool found to compute a SHA-256 (tried shasum, sha256sum, openssl)"
+}
+
 # download URL SHA256 -> path of the verified tarball
 download() {
-	local url="$1" sha256="$2" file
+	local url="$1" sha256="$2" file actual
 	file="$work/$(basename "$url")"
 	if [[ ! -f "$file" ]]; then
 		curl --fail --location --silent --show-error --output "$file" "$url"
 	fi
-	echo "$sha256  $file" | sha256sum --check --status || die "checksum mismatch for $file"
+	actual="$(sha256_of "$file")"
+	[[ "$actual" == "$sha256" ]] || die "checksum mismatch for $file: expected $sha256, got $actual"
 	echo "$file"
 }
 

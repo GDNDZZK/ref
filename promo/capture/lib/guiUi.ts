@@ -67,6 +67,10 @@ class GuiUi implements Ui {
     return this.session.waitForNoText(text, timeoutMs)
   }
 
+  async resize(width: number, height: number): Promise<void> {
+    await this.session.resize(width, height)
+  }
+
   pause(ms: number): Promise<void> {
     return this.session.pause(ms)
   }
@@ -76,7 +80,7 @@ class GuiUi implements Ui {
     const fileName = shotFileName(this.kind, name, this.lang)
     const png = await this.session.grab(join(GRAB_DIR, `${fileName}.png`))
     const sessionName = (await this.session.texts()).find((item) => SESSION_NAME.test(item.text))?.text
-    await publishImage(png, fileName, { readme: options.readme ?? false, sessionName })
+    await publishImage(png, fileName, { readme: options.readme ?? false, readmeName: options.readmeName, sessionName })
   }
 }
 

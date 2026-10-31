@@ -73,6 +73,10 @@ class WebUi implements Ui {
     await this.page.getByText(text).first().waitFor({ state: 'hidden', timeout: timeoutMs })
   }
 
+  resize(width: number, height: number): Promise<void> {
+    return this.page.setViewportSize({ width, height })
+  }
+
   pause(ms: number): Promise<void> {
     return this.page.waitForTimeout(ms)
   }
@@ -82,7 +86,7 @@ class WebUi implements Ui {
     const png = await this.page.screenshot({ type: 'png' })
     // The page title is "<session name> · ref" (web/src/App.vue).
     const sessionName = (await this.page.title()).replace(/ · ref$/, '')
-    await publishImage(png, shotFileName(this.kind, name, this.lang), { readme: options.readme ?? false, sessionName })
+    await publishImage(png, shotFileName(this.kind, name, this.lang), { readme: options.readme ?? false, readmeName: options.readmeName, sessionName })
   }
 
   // The page for scenarios that need Playwright itself (attaching a file).

@@ -70,6 +70,8 @@ Rules: times are seconds; a part's `render(t)` must not depend on earlier calls;
 | `tui` | `ref` in a pseudo terminal; keys are typed, the screen is followed with a headless xterm.js; the output is recorded as an asciicast and rendered as stills | `assets/casts/*.cast`, `assets/screens/tui-*.png`, and `tui-*-clean.png` without the last row (it shows the random mock workspace path); the videos and `docs/images/` use the clean copies |
 | `shared` | one mock backend, with `ref`, `ref-gui` and `ref-web` showing the same session | `tui-shared`, `gui-shared`, `web-shared` |
 
+The split-view picture in `docs/images/` is the `readme-split` scenario, not `sessions`: only finished sessions and one running tool call (so no streaming caret is caught mid-chase), and a 1280×1120 GUI window so that no card is cut by the top of a tile. The films keep using `sessions`.
+
 `web` and `gui` run the same scripts (`capture/scenarios.ts`) through one `Ui` interface, so a shot exists under both prefixes. `docs/images/` gets the shots that are marked `readme` in the scripts, 1440 px wide, as palette PNGs (`sharp`).
 
 What the capture needs:

@@ -18,6 +18,8 @@ const PNG_OPTIONS = { palette: true, quality: 90, effort: 10, compressionLevel: 
 export interface PublishOptions {
   // Also write a smaller copy to docs/images/ for the READMEs.
   readme: boolean
+  // File name (without .png) in docs/images/, when it differs from `name`.
+  readmeName?: string
   // Name of the session on screen (random in a mock run). The films that draw a notification or a
   // browser tab for this picture need the same name.
   sessionName?: string
@@ -25,7 +27,7 @@ export interface PublishOptions {
 
 // Saves a screenshot as assets/screens/<name>.png (full size, used by the videos) and,
 // for README images, as docs/images/<name>.png.
-export async function publishImage(png: Buffer, name: string, { readme, sessionName }: PublishOptions): Promise<void> {
+export async function publishImage(png: Buffer, name: string, { readme, readmeName, sessionName }: PublishOptions): Promise<void> {
   mkdirSync(SCREENS_DIR, { recursive: true })
   await sharp(png).png(PNG_OPTIONS).toFile(join(SCREENS_DIR, `${name}.png`))
   const { width, height } = await sharp(png).metadata()
@@ -36,7 +38,7 @@ export async function publishImage(png: Buffer, name: string, { readme, sessionN
   await sharp(png)
     .resize({ width: README_IMAGE_WIDTH_PX, withoutEnlargement: true })
     .png(PNG_OPTIONS)
-    .toFile(join(README_IMAGES_DIR, `${name}.png`))
+    .toFile(join(README_IMAGES_DIR, `${readmeName ?? name}.png`))
 }
 
 function recordSize(name: string, size: { width: number; height: number; sessionName?: string }): void {
