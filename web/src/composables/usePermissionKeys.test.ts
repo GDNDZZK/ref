@@ -125,6 +125,18 @@ describe('keys for a pending question', () => {
     host.unmount()
   })
 
+  it('moves the cursor with j and k, but not inside the own-answer field', async () => {
+    const { questionReply, host } = await ask(question())
+    await vi.advanceTimersByTimeAsync(PERMISSION_GUARD_MS)
+    expect(press('k').defaultPrevented).toBe(true)
+    expect(
+      press('j', document.body, { shiftKey: true, key: 'J' } as KeyboardEventInit).defaultPrevented,
+    ).toBe(true)
+    press('Enter')
+    expect(questionReply).toHaveBeenCalledWith('ses_1', 'c1', [['A']])
+    host.unmount()
+  })
+
   it('dismisses with Esc', async () => {
     const { questionReply, host } = await ask(question())
     await vi.advanceTimersByTimeAsync(PERMISSION_GUARD_MS)
