@@ -7,6 +7,9 @@ const LOGIN_LOST_WATCH_MS = 12000 // longer than the longest retry delay (8 s)
 const ROWS = '.sidebar .running .row'
 const DIALOG = '[role="dialog"]'
 const VIEWPORT_WIDTH = 980
+const SPLIT_VIEWPORT = { width: 1500, height: 900 }
+const SPLIT_TILES = 4
+const ARROW_KEYS = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp']
 const SIZING_HEIGHTS = [900, 600]
 const SIZING_COUNTS = [4, 8]
 const HISTORY_ROW_PX = 44 // Theme.sidebarHistoryRowHeight
@@ -156,5 +159,81 @@ export async function sidebarSizingScenario(page, problems) {
         problems.push(`sidebar ${wanted} running at ${height}px: running scrolls while history has room`)
     }
   }
+  await page.setViewportSize({ width: VIEWPORT_WIDTH, height: SIZING_HEIGHTS[0] })
+}
+
+// What the four tiles show of their composers: which are visible, whether each keeps its status line,
+// which tile is focused and whether the caret is in its box.
+async function tileComposers(page) {
+  return page.evaluate(() =>
+    [...document.querySelectorAll('[data-tile]')].map((tile) => {
+      const slot = tile.querySelector('.box-slot')
+      const box = tile.querySelector('textarea')
+      const style = getComputedStyle(slot)
+      return {
+        composerVisible: slot.getBoundingClientRect().height > 0 && style.visibility === 'visible',
+        statusLine: tile.querySelector('.statusline')?.getBoundingClientRect().height > 0,
+        focused: tile.classList.contains('focused'),
+        caretInBox: document.activeElement === box,
+        draft: box.value,
+      }
+    }),
+  )
+}
+
+async function expectOnlyFocusedComposer(page, problems, what) {
+  await page.waitForTimeout(SETTLE_MS)
+  const tiles = await tileComposers(page)
+  const focused = tiles.findIndex((tile) => tile.focused)
+  const visible = tiles.flatMap((tile, index) => (tile.composerVisible ? [index] : []))
+  if (focused < 0 || visible.length !== 1 || visible[0] !== focused)
+    problems.push(`${what}: composers visible in tiles [${visible}], focus in tile ${focused}`)
+  if (focused >= 0 && !tiles[focused].caretInBox)
+    problems.push(`${what}: the caret is not in the focused tile's box`)
+  if (tiles.some((tile) => !tile.statusLine)) problems.push(`${what}: a tile lost its status line`)
+  return { tiles, focused }
+}
+
+// In split view only the focused tile has an input box; the drafts of the others stay.
+export async function splitComposerScenario(page, problems) {
+  await page.setViewportSize(SPLIT_VIEWPORT)
+  while ((await count(page, ROWS)) < SPLIT_TILES) {
+    await page.keyboard.press('Alt+KeyN')
+    await page.waitForTimeout(SETTLE_MS / 5)
+  }
+  await page.keyboard.press('Alt+KeyW')
+  await expectCount(page, problems, '[data-tile]', SPLIT_TILES, 'tiles for the composer check')
+  const first = await expectOnlyFocusedComposer(page, problems, 'split view start')
+
+  const draft = 'a half-written prompt'
+  await page.locator('[data-tile] textarea').nth(first.focused).fill(draft)
+
+  // A click on another tile's header moves the box there.
+  const other = (first.focused + 1) % SPLIT_TILES
+  await page.locator('[data-tile]').nth(other).locator('.header .title').click()
+  const afterClick = await expectOnlyFocusedComposer(page, problems, 'after a click')
+  if (afterClick.focused !== other) problems.push(`click focused tile ${afterClick.focused}, wanted ${other}`)
+  if (afterClick.tiles[first.focused].draft !== draft)
+    problems.push('the draft of the unfocused tile was lost')
+  await shot(page, 'split-click-focus')
+
+  // Alt+arrows move it by keyboard, and the old draft comes back with its tile.
+  let focused = afterClick.focused
+  let tiles = afterClick.tiles
+  for (const key of ARROW_KEYS) {
+    if (tiles[focused].draft === draft) break
+    await page.keyboard.press(`Alt+${key}`)
+    const step = await expectOnlyFocusedComposer(page, problems, `after Alt+${key}`)
+    focused = step.focused
+    tiles = step.tiles
+    await shot(page, `split-keyboard-focus-${key}`)
+  }
+  const draftHolder = tiles.findIndex((tile) => tile.draft === draft)
+  if (draftHolder < 0) problems.push('the draft vanished after the focus round trip')
+  else if (draftHolder !== focused) problems.push('Alt+arrows did not reach the tile with the draft')
+  else await page.locator('[data-tile] textarea').nth(draftHolder).fill('')
+
+  await page.keyboard.press('Alt+KeyW')
+  await expectCount(page, problems, '[data-tile]', 0, 'tiles after the composer check')
   await page.setViewportSize({ width: VIEWPORT_WIDTH, height: SIZING_HEIGHTS[0] })
 }
