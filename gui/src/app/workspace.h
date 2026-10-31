@@ -184,6 +184,8 @@ signals:
 	void historyLoadedChanged();
 	void splitViewChanged();
 	void focusedTileChanged();
+	// A session is about to be deleted; whoever shows it must let go first. It is no longer current.
+	void sessionDropped(ChatSession* session);
 	void zoomedChanged();
 	void dialogChanged();
 	void backendChanged();
