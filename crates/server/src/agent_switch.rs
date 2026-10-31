@@ -3,16 +3,18 @@
 //!
 //! The note is a `Reminder` user message, added without a model turn. Quick switches (Tab
 //! pressed several times) share one message that always says "from the agent the model last
-//! saw", and switching back removes it.
+//! saw", and switching back removes it. A session without a conversation yet (nothing the model
+//! has answered or been asked) gets no reminder; only the agent changes.
 //!
 //! While a run is active the message is not written at once: the model may be reading the
 //! history. The switch is only remembered and written by [`deliver`] under the lock that
 //! reads the agent for the next request, so the reminder and the new agent take effect
-//! together. The memory is not persisted: a reload or a backend restart forgets a switch that
-//! was not delivered yet.
+//! together. Undo that removes the reminder resets the memory to the agent of the last
+//! remaining assistant message. The memory is not persisted: a reload or a backend restart
+//! forgets a switch that was not delivered yet.
 
 use crate::hub::Hub;
-use crate::session::{Session, SessionState, user_message};
+use crate::session::{SessionState, user_message};
 use ref_proto::{Message, MessageSource, Part, Role, SessionEvent, now_ms};
 use std::sync::Arc;
 
@@ -50,33 +52,73 @@ fn emit_message(hub: &Arc<Hub>, session_id: &str, message: &Message) {
     hub.emit(session_id, SessionEvent::Message { message });
 }
 
-/// Call after the session's agent changed from `old` to `st.info.agent`.
-pub fn switched(hub: &Arc<Hub>, s: &Arc<Session>, old: &str) {
-    {
-        let mut st = s.lock();
-        let note = take_open(&mut st);
-        let seen = note.as_ref().map_or(old, |n| n.from.as_str()).to_string();
-        let current = st.info.agent.clone();
-        let reminder_id = note.and_then(|n| n.message_id);
-        if seen == current {
-            // Back to the agent the model knows: nothing to tell.
-            if let Some(id) = reminder_id {
-                remove_reminder(hub, &mut st, &id);
-            }
-        } else if st.run.is_some() {
-            st.agent_switch = Some(AgentSwitch {
-                from: seen,
-                message_id: None,
-            });
-        } else {
-            let id = write_reminder(hub, &mut st, reminder_id, &seen);
-            st.agent_switch = Some(AgentSwitch {
-                from: seen,
-                message_id: Some(id),
-            });
-        }
+/// True once the model has been given something to answer: a prompt from a person, a peer or
+/// a creating session, or it has answered already. Reminders and summaries alone do not count.
+fn has_conversation(st: &SessionState) -> bool {
+    st.messages.iter().any(|m| match m.role {
+        Role::Assistant => true,
+        Role::User => matches!(
+            m.source,
+            MessageSource::Human | MessageSource::Peer { .. } | MessageSource::Spawn { .. }
+        ),
+    })
+}
+
+/// Call with the session lock held, right after the session's agent changed from `old` to
+/// `st.info.agent`, so no request can see the new agent without the reminder. The caller
+/// persists the session afterwards.
+pub fn switched(hub: &Arc<Hub>, st: &mut SessionState, old: &str) {
+    if !has_conversation(st) {
+        // Nothing the model could be misled by; only the agent changes.
+        st.agent_switch = None;
+        return;
     }
-    crate::ops::persist(hub, s);
+    let note = take_open(st);
+    let seen = note.as_ref().map_or(old, |n| n.from.as_str()).to_string();
+    let current = st.info.agent.clone();
+    let reminder_id = note.and_then(|n| n.message_id);
+    if seen == current {
+        // Back to the agent the model knows: nothing to tell.
+        if let Some(id) = reminder_id {
+            remove_reminder(hub, st, &id);
+        }
+    } else if st.run.is_some() {
+        st.agent_switch = Some(AgentSwitch {
+            from: seen,
+            message_id: None,
+        });
+    } else {
+        let id = write_reminder(hub, st, reminder_id, &seen);
+        st.agent_switch = Some(AgentSwitch {
+            from: seen,
+            message_id: Some(id),
+        });
+    }
+}
+
+/// Call after messages were removed from the end of the conversation (undo). If the reminder
+/// the switch points to is gone, the model's last known agent is the one of the last remaining
+/// assistant message; a difference from the current agent is told before the next request.
+pub fn truncated(st: &mut SessionState) {
+    let Some(note) = &st.agent_switch else { return };
+    let gone = note
+        .message_id
+        .as_deref()
+        .is_some_and(|id| st.find_message(id).is_none());
+    if !gone {
+        return;
+    }
+    let seen = st
+        .messages
+        .iter()
+        .rev()
+        .find(|m| m.role == Role::Assistant)
+        .and_then(|m| m.agent.clone())
+        .filter(|a| *a != st.info.agent);
+    st.agent_switch = seen.map(|from| AgentSwitch {
+        from,
+        message_id: None,
+    });
 }
 
 /// Writes a switch made during a run into the conversation. Call where the agent for the next

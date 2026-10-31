@@ -48,7 +48,24 @@ async fn rig(handler: Handler) -> Rig {
     }
 }
 
+/// A rig whose session already has one answered prompt (a reminder is only written then).
+async fn rig_with_history(handler: Handler) -> Rig {
+    let rig = rig(handler).await;
+    prompt(&rig.hub, &rig.session, "first");
+    wait_idle(&rig.session).await;
+    rig.events();
+    rig
+}
+
 impl Rig {
+    fn reminder_id(&self) -> String {
+        messages(&self.session)
+            .iter()
+            .find(|m| m.source == MessageSource::Reminder)
+            .map(|m| m.id.clone())
+            .expect("a reminder")
+    }
+
     async fn switch(&self, agent: &str) {
         let req = Request::SetAgent {
             session_id: self.session.id.clone(),
@@ -119,12 +136,15 @@ fn slow_tool_handler() -> Handler {
 }
 
 #[tokio::test]
-async fn an_idle_switch_adds_one_reminder_and_no_model_turn() {
+async fn an_idle_switch_after_history_adds_one_reminder_and_no_model_turn() {
     let rig = rig(text_handler()).await;
+    prompt(&rig.hub, &rig.session, "first");
+    wait_idle(&rig.session).await;
+    rig.events();
     rig.switch("worker").await;
     assert_eq!(rig.notes(), [from_to("build", "worker")]);
     assert!(rig.session.lock().run.is_none());
-    assert_eq!(rig.mock.count(), 0, "no LLM request for a reminder");
+    assert_eq!(rig.mock.count(), 1, "no LLM request for a reminder");
     let events = rig.events();
     assert!(
         events
@@ -135,8 +155,28 @@ async fn an_idle_switch_adds_one_reminder_and_no_model_turn() {
 
     prompt(&rig.hub, &rig.session, "go");
     wait_idle(&rig.session).await;
-    let request = rig.mock.bodies()[0].to_string();
+    let request = rig.mock.bodies()[1].to_string();
     assert!(request.contains(&from_to("build", "worker")), "{request}");
+}
+
+#[tokio::test]
+async fn switching_an_empty_session_only_changes_the_agent() {
+    let rig = rig(text_handler()).await;
+    rig.switch("worker").await;
+    rig.switch("review").await;
+    assert_eq!(rig.session.info().agent, "review");
+    assert!(messages(&rig.session).is_empty());
+    assert!(rig.session.lock().agent_switch.is_none());
+    assert!(
+        rig.events()
+            .iter()
+            .all(|e| !matches!(e, SessionEvent::Message { .. }))
+    );
+
+    prompt(&rig.hub, &rig.session, "go");
+    wait_idle(&rig.session).await;
+    assert!(!rig.mock.bodies()[0].to_string().contains(MARKER));
+    assert!(rig.notes().is_empty());
 }
 
 #[tokio::test]
@@ -148,12 +188,12 @@ async fn switching_to_the_current_agent_adds_nothing() {
 
 #[tokio::test]
 async fn quick_switches_share_one_reminder() {
-    let rig = rig(text_handler()).await;
+    let rig = rig_with_history(text_handler()).await;
     rig.switch("worker").await;
-    let id = messages(&rig.session)[0].id.clone();
+    let id = rig.reminder_id();
     rig.switch("review").await;
     assert_eq!(rig.notes(), [from_to("build", "review")]);
-    assert_eq!(messages(&rig.session)[0].id, id, "updated in place");
+    assert_eq!(rig.reminder_id(), id, "updated in place");
     let replaced = rig.events().into_iter().any(|e| {
         matches!(e, SessionEvent::Message { message } if message.id == id && message.raw_text() == from_to("build", "review"))
     });
@@ -162,9 +202,9 @@ async fn quick_switches_share_one_reminder() {
 
 #[tokio::test]
 async fn switching_back_removes_the_reminder() {
-    let rig = rig(text_handler()).await;
+    let rig = rig_with_history(text_handler()).await;
     rig.switch("worker").await;
-    let id = messages(&rig.session)[0].id.clone();
+    let id = rig.reminder_id();
     rig.events();
     rig.switch("build").await;
     assert!(rig.notes().is_empty());
@@ -177,7 +217,7 @@ async fn switching_back_removes_the_reminder() {
 
 #[tokio::test]
 async fn an_answered_reminder_is_not_rewritten() {
-    let rig = rig(text_handler()).await;
+    let rig = rig_with_history(text_handler()).await;
     rig.switch("worker").await;
     prompt(&rig.hub, &rig.session, "go");
     wait_idle(&rig.session).await;
@@ -268,4 +308,153 @@ async fn a_switch_just_before_the_run_ends_is_recorded_without_a_new_turn() {
         1,
         "the reminder did not start another turn"
     );
+}
+
+impl Rig {
+    async fn undo(&self, message_id: Option<String>) {
+        let req = Request::Undo {
+            session_id: self.session.id.clone(),
+            message_id,
+        };
+        api::handle(&self.hub, &self.conn, req).await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn undoing_the_reminder_makes_the_next_switch_start_from_the_agent_the_model_saw() {
+    let rig = rig_with_history(text_handler()).await;
+    rig.switch("worker").await;
+    prompt(&rig.hub, &rig.session, "second");
+    wait_idle(&rig.session).await;
+    let id = rig.reminder_id();
+    rig.undo(Some(id)).await;
+    assert!(rig.notes().is_empty());
+
+    // The model last saw the build agent, whatever the agent is now.
+    rig.switch("review").await;
+    assert_eq!(rig.notes(), [from_to("build", "review")]);
+}
+
+#[tokio::test]
+async fn undoing_back_to_the_agent_the_model_saw_leaves_no_pending_switch() {
+    let rig = rig_with_history(text_handler()).await;
+    rig.switch("worker").await;
+    let id = rig.reminder_id();
+    rig.undo(Some(id)).await;
+    rig.switch("build").await;
+    assert!(rig.notes().is_empty());
+    assert!(rig.session.lock().agent_switch.is_none());
+}
+
+#[tokio::test]
+async fn undoing_the_whole_conversation_forgets_the_switch() {
+    let rig = rig_with_history(text_handler()).await;
+    rig.switch("worker").await;
+    rig.undo(None).await;
+    assert!(messages(&rig.session).is_empty());
+    rig.switch("review").await;
+    assert!(rig.notes().is_empty());
+    assert_eq!(rig.session.info().agent, "review");
+}
+
+#[tokio::test]
+async fn a_switch_during_manual_compaction_is_told_after_the_summary() {
+    let rig = rig_with_history(Arc::new(|n, _| match n {
+        0 => Reply::Text("answer".into()),
+        1 => Reply::Text("## Goal\n- summary".into()),
+        _ => Reply::Text("later".into()),
+    }))
+    .await;
+    let gate = Arc::new(tokio::sync::Notify::new());
+    let g = gate.clone();
+    ref_server::engine::start_custom_run(
+        &rig.hub,
+        &rig.session,
+        move |hub, s, cancel| async move {
+            g.notified().await;
+            ref_server::compaction::manual(hub, s, cancel).await;
+        },
+    )
+    .unwrap();
+    rig.switch("worker").await;
+    assert!(
+        rig.notes().is_empty(),
+        "not written while the run is active"
+    );
+    gate.notify_one();
+    wait_idle(&rig.session).await;
+
+    let msgs = messages(&rig.session);
+    let last = msgs.last().unwrap();
+    assert_eq!(last.source, MessageSource::Reminder);
+    assert_eq!(last.raw_text(), from_to("build", "worker"));
+    assert_eq!(msgs[msgs.len() - 2].source, MessageSource::Compaction);
+    assert_eq!(rig.notes().len(), 1);
+
+    prompt(&rig.hub, &rig.session, "next");
+    wait_idle(&rig.session).await;
+    let request = rig.mock.bodies()[2].to_string();
+    assert!(request.contains("summary") && request.contains(&from_to("build", "worker")));
+}
+
+#[tokio::test]
+async fn a_second_switch_in_the_same_run_adds_a_second_reminder() {
+    let rig = rig(Arc::new(|n, _| match n {
+        0 | 1 => Reply::Tools(vec![tool(
+            &format!("c{n}"),
+            "bash",
+            json!({"purpose": "wait", "command": "sleep 1"}),
+        )]),
+        _ => Reply::Text("done".into()),
+    }))
+    .await;
+    prompt(&rig.hub, &rig.session, "go");
+    rig.wait_running().await;
+    rig.switch("worker").await;
+    // The first reminder is written before the second request; its tool runs next.
+    let s = rig.session.clone();
+    wait_until("first reminder told", Duration::from_secs(10), move || {
+        let msgs = s.lock().messages.clone();
+        msgs.iter().any(|m| m.source == MessageSource::Reminder)
+            && msgs.iter().any(|m| {
+                m.parts.iter().any(|p| {
+                    matches!(p, ref_proto::Part::Tool { call_id, state: ToolState::Running, .. } if call_id == "c1")
+                })
+            })
+    })
+    .await;
+    rig.switch("review").await;
+    wait_idle(&rig.session).await;
+    assert_eq!(
+        rig.notes(),
+        [from_to("build", "worker"), from_to("worker", "review")]
+    );
+    assert!(
+        rig.mock.bodies()[2]
+            .to_string()
+            .contains(&from_to("worker", "review"))
+    );
+}
+
+#[tokio::test]
+async fn a_pending_switch_is_not_persisted() {
+    let rig = rig(slow_tool_handler()).await;
+    prompt(&rig.hub, &rig.session, "go");
+    rig.wait_running().await;
+    rig.switch("worker").await;
+    assert!(rig.session.lock().agent_switch.is_some());
+
+    // What a reload would see: the new agent, but no reminder and no memory of the switch.
+    let saved = rig.session.persisted();
+    assert_eq!(saved.info.agent, "worker");
+    assert!(
+        saved
+            .messages
+            .iter()
+            .all(|m| m.source != MessageSource::Reminder)
+    );
+    let cfg = rig.session.lock().cfg.clone();
+    let reloaded = ref_server::session::Session::new(saved.info, saved.messages, cfg, false, false);
+    assert!(reloaded.lock().agent_switch.is_none());
+    wait_idle(&rig.session).await;
 }

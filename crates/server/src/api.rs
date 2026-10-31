@@ -327,10 +327,13 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
                 st.info.agent = agent;
                 st.system = None;
             }
+            if changed {
+                crate::agent_switch::switched(hub, &mut st, &old);
+            }
             hub.emit_info(&st);
             drop(st);
             if changed {
-                crate::agent_switch::switched(hub, &s, &old);
+                crate::ops::persist(hub, &s);
             }
             Ok(json!({ "session": s.info() }))
         }
@@ -417,6 +420,7 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
                     (String::new(), Vec::new())
                 };
                 st.messages.truncate(i);
+                crate::agent_switch::truncated(&mut st);
                 if !st.queue.is_empty() {
                     st.queue.clear();
                     crate::engine::emit_queue(hub, &s, &st);
