@@ -9,6 +9,7 @@ import { cues, drawnCut, endCut, timelineFilm } from './timeline.ts'
 
 const HOOK_END = 3.0
 const CONFIG_END = 7.0
+const DIALOGS_START = 11.0
 const DIALOGS_END = 17.0
 const KEYS_END = 20.0
 const FILM_END = 23.5
@@ -48,9 +49,27 @@ const SCROLL_ROWS_PER_SECOND = 4.5
 const API_KEY_LINE = OPENCODE_JSON.findIndex((line) => line.includes('apiKey'))
 const CARD = { x: 360, y: 90, width: 1200 }
 
-// Cast seconds of tui-fixture-start where shot 3 begins (`cd ~/project` is typed); the model
-// and agent dialogs follow in the same take.
-const CAST_START_SECONDS = 0
+// tui-fixture-start (RB1) markers: `cd ~/project` typed, ref ready, ctrl+x m, ctrl+x a.
+const FIXTURE_CAST = { name: 'tui-fixture-start', title: 'ref', x: 200, y: 96, fontSize: 22 }
+const TYPING_FROM = { mark: 'cd', offset: -0.3 }
+// Shot 3 plays the typing a little faster, then cuts over the blank screen while ref starts
+// (cast 4.3 s, after the enter on `ref`) to just before it is ready.
+const TYPING_SPEED = 1.3
+const READY_CUT = 9.85
+const READY_FROM = { mark: 'ready', offset: -0.2 }
+// Shot 4: the model dialog until just before its esc, then the agent dialog, so each caption has its dialog.
+const AGENTS_CUT = 14.1
+const MODELS_FROM = { mark: 'models', offset: -0.2 }
+const AGENTS_FROM = { mark: 'agents', offset: -0.2 }
+
+function fixtureCut(start: number, end: number, castFrom: { mark: string; offset: number }, speed = 1, enter?: 'cut') {
+  return drawnCut(
+    start,
+    end,
+    (shot, seconds) => shot.add(castWindow({ ...FIXTURE_CAST, castFrom, speed, start: 0, from: -1, to: seconds + 1 })),
+    enter,
+  )
+}
 
 export const scene = timelineFilm({
   id: 'opencode',
@@ -70,9 +89,10 @@ export const scene = timelineFilm({
         }),
       ),
     ),
-    drawnCut(CONFIG_END, DIALOGS_END, (shot, seconds) =>
-      shot.add(castWindow({ name: 'tui-fixture-start', title: 'ref', x: 200, y: 96, fontSize: 22, start: -CAST_START_SECONDS, from: -1, to: seconds + 1 })),
-    ),
+    fixtureCut(CONFIG_END, READY_CUT, TYPING_FROM, TYPING_SPEED),
+    fixtureCut(READY_CUT, DIALOGS_START, READY_FROM, 1, 'cut'),
+    fixtureCut(DIALOGS_START, AGENTS_CUT, MODELS_FROM, 1, 'cut'),
+    fixtureCut(AGENTS_CUT, DIALOGS_END, AGENTS_FROM, 1, 'cut'),
     drawnCut(DIALOGS_END, KEYS_END, (shot, seconds) => {
       shot.add(
         textCard({
