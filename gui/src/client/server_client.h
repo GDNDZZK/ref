@@ -86,6 +86,8 @@ public:
 	QCoro::Task<Result<void>> setFocus(bool focused, QStringList sessions);
 	QCoro::Task<Result<void>> abort(QString sessionId);
 	QCoro::Task<Result<void>> permissionReply(QString sessionId, QString callId, bool allow, bool always);
+	// One list of answers per question, in order (empty: not answered); none dismisses the questions.
+	QCoro::Task<Result<void>> questionReply(QString sessionId, QString callId, std::optional<QList<QStringList>> answers);
 
 	// Session management. The ones that change the session answer with its new info.
 	QCoro::Task<Result<proto::SessionInfo>> setModel(QString sessionId, proto::ModelRef model);

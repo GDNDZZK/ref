@@ -4,7 +4,7 @@
 // Blocks are immutable records. A change replaces the block's object and leaves every
 // other block's object alone, so the view re-renders only what changed.
 
-import type { JsonValue, PermissionRequest, ToolState } from '../proto/generated'
+import type { JsonValue, PermissionRequest, QuestionRequest, ToolState } from '../proto/generated'
 
 export type UserSource = 'human' | 'peer' | 'spawn' | 'reminder' | 'compaction' | 'shell'
 
@@ -62,6 +62,7 @@ export interface ToolBlock extends BlockBase {
   timeEnd: number | null
   runAt: number | null // Delayed: when execution starts
   permission: PermissionRequest | undefined // set while the call waits for the user
+  question: QuestionRequest | undefined // set while a `question` call waits for the answers
   images: ImageRef[]
 }
 

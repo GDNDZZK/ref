@@ -285,6 +285,11 @@ QCoro::Task<Result<void>> ServerClient::permissionReply(QString sessionId, QStri
 	co_return asVoidResult(co_await request(proto::request::permissionReply(sessionId, callId, allow, always)));
 }
 
+QCoro::Task<Result<void>> ServerClient::questionReply(QString sessionId, QString callId, std::optional<QList<QStringList>> answers)
+{
+	co_return asVoidResult(co_await request(proto::request::questionReply(sessionId, callId, answers)));
+}
+
 QCoro::Task<Result<proto::SessionInfo>> ServerClient::setModel(QString sessionId, proto::ModelRef model)
 {
 	co_return asResult(co_await request(proto::request::setModel(sessionId, model)), proto::parseSessionResult);

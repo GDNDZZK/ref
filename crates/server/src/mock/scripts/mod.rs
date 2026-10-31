@@ -37,6 +37,7 @@ mod tests {
             args: prompt.split_once(' ').map_or("", |(_, a)| a).into(),
             root_prompt: prompt.into(),
             peer_reports: 0,
+            typed: vec![],
             round,
             session_id: "ses_test".into(),
             attempt: 1,

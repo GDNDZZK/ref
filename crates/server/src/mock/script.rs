@@ -132,6 +132,9 @@ pub struct Ctx {
     /// How many user messages from other sessions came after `root_prompt`, the current one
     /// included.
     pub peer_reports: usize,
+    /// Messages a person typed to a created session after its task. They do not restart the
+    /// script: the round keeps counting from the task.
+    pub typed: Vec<String>,
     pub round: usize,
     pub session_id: String,
     /// Identical requests seen so far, this one included (a retry repeats its request).
@@ -219,7 +222,31 @@ pub fn analyze(body: &Value, session_id: &str, attempt: u32) -> Task {
         return Task::Summary;
     }
 
-    // Walk back to the user's prompt, counting the model's answers and collecting tool results.
+    let (prompt, round, tool_results, typed) = match since_task(messages) {
+        Some(found) => found,
+        None => since_prompt(messages),
+    };
+    let (root_prompt, peer_reports) = conversation_root(messages);
+    let prompt = task_text(prompt.trim());
+    let args = prompt
+        .split_once(char::is_whitespace)
+        .map_or("", |(_, rest)| rest.trim())
+        .to_string();
+    Task::Reply(Ctx {
+        prompt,
+        args,
+        root_prompt,
+        peer_reports,
+        typed,
+        round,
+        session_id: session_id.to_string(),
+        attempt,
+        tool_results,
+    })
+}
+
+/// Walks back to the user's prompt, counting the model's answers and collecting tool results.
+fn since_prompt(messages: &[Value]) -> (String, usize, Vec<String>, Vec<String>) {
     let mut round = 0;
     let mut tool_results = Vec::new();
     let mut prompt = String::new();
@@ -237,22 +264,39 @@ pub fn analyze(body: &Value, session_id: &str, attempt: u32) -> Task {
         }
     }
     tool_results.reverse();
-    let (root_prompt, peer_reports) = conversation_root(messages);
-    let prompt = task_text(prompt.trim());
-    let args = prompt
-        .split_once(char::is_whitespace)
-        .map_or("", |(_, rest)| rest.trim())
-        .to_string();
-    Task::Reply(Ctx {
-        prompt,
-        args,
-        root_prompt,
-        peer_reports,
-        round,
-        session_id: session_id.to_string(),
-        attempt,
-        tool_results,
-    })
+    (prompt, round, tool_results, Vec::new())
+}
+
+/// For a created session: the task, the answers and tool results since it, and what a person
+/// typed in between. The task stays the prompt, so a typed message does not change the script
+/// or restart its rounds. `None` for other conversations, and once another session has written to
+/// this one (those messages are answered like anywhere else).
+fn since_task(messages: &[Value]) -> Option<(String, usize, Vec<String>, Vec<String>)> {
+    let mut users = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| role(m) == "user");
+    let (start, first) = users.next()?;
+    let task = message_text(first);
+    if !task.starts_with(SPAWN_HEADER) {
+        return None;
+    }
+    let mut round = 0;
+    let mut tool_results = Vec::new();
+    let mut typed = Vec::new();
+    for message in &messages[start + 1..] {
+        let text = message_text(message);
+        match role(message) {
+            "assistant" => round += 1,
+            "tool" => tool_results.push(text),
+            "user" if text.starts_with(PEER_MESSAGE) => return None,
+            "user"
+                if text.starts_with(TOOL_IMAGES_MARKER) || text.starts_with(HARNESS_REMINDER) => {}
+            "user" => typed.push(text.trim().to_string()),
+            _ => {}
+        }
+    }
+    Some((task, round, tool_results, typed))
 }
 
 /// The latest prompt that did not come from another session (reminders by the harness do not

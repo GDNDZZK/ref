@@ -10,11 +10,14 @@ use crate::app::{AcKind, App, Mode};
 use crate::render;
 use crate::ui::dialog::{Dialog, Kind};
 use crate::ui::editor::Editor;
+use crate::ui::question::Outcome;
 use crate::ui::{Hit, chat, split, theme};
 
 const CTRL: KeyModifiers = KeyModifiers::CONTROL;
 const ALT: KeyModifiers = KeyModifiers::ALT;
 const SHIFT: KeyModifiers = KeyModifiers::SHIFT;
+/// Keys right after a modal opens were meant for the prompt: they are not taken as answers.
+const MODAL_GRACE: Duration = Duration::from_millis(350);
 
 /// Appends a line to `$REF_TUI_LOG` (debugging aid; no-op when unset).
 fn log_path() -> Option<&'static std::path::PathBuf> {
@@ -96,7 +99,7 @@ fn key(app: &mut App, k: KeyEvent) {
         if app
             .perm
             .as_ref()
-            .is_none_or(|p| p.opened.elapsed() < Duration::from_millis(350))
+            .is_none_or(|p| p.opened.elapsed() < MODAL_GRACE)
         {
             if matches!(k.code, KeyCode::Char(_) | KeyCode::Backspace)
                 && k.modifiers.difference(SHIFT).is_empty()
@@ -122,6 +125,10 @@ fn key(app: &mut App, k: KeyEvent) {
             KeyCode::PageDown => scroll_perm(app, 10),
             _ => {}
         }
+        return;
+    }
+    if let Some((sid, req)) = app.active_question() {
+        question_key(app, &sid, &req.call_id, k);
         return;
     }
     if app.dialog.is_some() {
@@ -251,7 +258,7 @@ fn dialog_key(app: &mut App, k: KeyEvent) {
 }
 
 /// Generic editing keys. Returns true if the text changed (or cursor moved).
-pub fn edit_key(e: &mut Editor, k: &KeyEvent, multiline: bool) -> bool {
+pub(crate) fn edit_key(e: &mut Editor, k: &KeyEvent, multiline: bool) -> bool {
     let m = k.modifiers;
     let shift = m.contains(SHIFT);
     match k.code {
@@ -597,6 +604,42 @@ fn target_editor(app: &mut App) -> &mut Editor {
     &mut app.editor
 }
 
+/// The question modal. Like the permission modal it ignores Enter, digits and Esc right after
+/// it opens (those keys were meant for the prompt), and lets plain typing land in the editor.
+fn question_key(app: &mut App, sid: &str, call_id: &str, k: KeyEvent) {
+    if ctrl_char(&k, 'c') {
+        exit_or_arm(app);
+        return;
+    }
+    let ready = app
+        .question
+        .as_ref()
+        .is_some_and(|q| q.opened.elapsed() >= MODAL_GRACE);
+    if !ready {
+        if matches!(k.code, KeyCode::Char(_) | KeyCode::Backspace)
+            && k.modifiers.difference(SHIFT).is_empty()
+        {
+            let ed = target_editor(app);
+            if edit_key(ed, &k, false) {
+                app.history.reset();
+            }
+        }
+        return;
+    }
+    let Some(outcome) = app.question.as_mut().map(|q| q.key(&k)) else {
+        return;
+    };
+    finish_question(app, sid, call_id, outcome);
+}
+
+fn finish_question(app: &mut App, sid: &str, call_id: &str, outcome: Outcome) {
+    match outcome {
+        Outcome::Open => {}
+        Outcome::Submit(answers) => app.reply_question(sid, call_id, Some(answers)),
+        Outcome::Dismiss => app.reply_question(sid, call_id, None),
+    }
+}
+
 fn paste(app: &mut App, s: String) {
     if let Some(Dialog::List(d)) = app.dialog.as_mut() {
         d.filter.insert(&crate::ui::text::one_line(&s));
@@ -604,6 +647,12 @@ fn paste(app: &mut App, s: String) {
         return;
     }
     if app.active_permission().is_some() {
+        return;
+    }
+    if app.active_question().is_some() {
+        if let Some(editor) = app.question.as_mut().and_then(|q| q.edit.as_mut()) {
+            editor.insert(&crate::ui::text::one_line(&s));
+        }
         return;
     }
     if s.trim().is_empty() {
@@ -915,6 +964,16 @@ fn mouse(app: &mut App, me: MouseEvent) {
             MouseEventKind::ScrollUp => scroll_perm(app, -3),
             MouseEventKind::ScrollDown => scroll_perm(app, 3),
             _ => app.dirty = false,
+        }
+        return;
+    }
+    if let Some((sid, req)) = app.active_question() {
+        if let MouseEventKind::Down(MouseButton::Left) = me.kind {
+            if let Some(outcome) = app.question.as_mut().map(|q| q.click(x, y)) {
+                finish_question(app, &sid, &req.call_id, outcome);
+            }
+        } else {
+            app.dirty = false;
         }
         return;
     }
