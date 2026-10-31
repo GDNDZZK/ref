@@ -597,7 +597,7 @@ every interaction is frequent. Icons come from `assets/icons` through the icon p
 left, switch right), `bell` icon (20, `Theme.textMuted`) in the section header "Notifications":
 
 1. "Show system notifications" (master switch);
-2. "A tool needs permission", "A turn finished", "A turn ended with an error", indented 24 px, 40 % opacity
+2. "A session waits for you (permission or question)", "A turn finished", "A turn ended with an error", indented 24 px, 40 % opacity
    and not clickable while the master switch is off (`Motion.standard`). Other sessions' messages never notify.
 
 When the system cannot show notifications the block adds a note under the master switch in
