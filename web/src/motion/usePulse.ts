@@ -24,6 +24,7 @@ export function usePulse(
       iterations: Infinity,
       easing: cssEasing('--easing-in-out-sine'),
     })
+    loop.finished.catch(() => {}) // cancelling rejects it; nobody waits for a loop
   }
 
   function settle(element: HTMLElement): void {

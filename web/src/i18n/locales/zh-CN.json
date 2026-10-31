@@ -380,5 +380,9 @@
     "hintSingle": "↑↓ 或 j/k 移动 · 1-9、空格或 Enter 选择 · Esc 忽略",
     "hintTabbed": "↑↓ 或 j/k 移动 · 1-9、空格或 Enter 选择 · ←→ 或 Tab 切换问题 · Esc 忽略",
     "hintConfirm": "Enter 提交 · ← 返回 · Esc 忽略"
+  },
+  "todo": {
+    "title": "待办 {done}/{total}",
+    "show": "显示待办清单"
   }
 }
