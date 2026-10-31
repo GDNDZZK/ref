@@ -15,6 +15,7 @@ mod notify;
 pub mod ops;
 pub mod peers;
 pub mod prompt;
+pub mod question;
 pub mod session;
 pub mod store;
 pub mod title;

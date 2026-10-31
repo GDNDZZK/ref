@@ -173,6 +173,31 @@ fn requests() -> Samples<ClientFrame> {
             ),
         ),
         (
+            "question_reply",
+            frame(
+                34,
+                Request::QuestionReply {
+                    session_id: sid(),
+                    call_id: CALL_ID.into(),
+                    answers: Some(vec![
+                        vec!["Exclusive range".into()],
+                        vec!["Unit tests".into(), "Clippy".into()],
+                    ]),
+                },
+            ),
+        ),
+        (
+            "question_reply_dismiss",
+            frame(
+                35,
+                Request::QuestionReply {
+                    session_id: sid(),
+                    call_id: CALL_ID.into(),
+                    answers: None,
+                },
+            ),
+        ),
+        (
             "set_model",
             frame(
                 17,
@@ -498,6 +523,15 @@ fn server_frames() -> Samples<ServerFrame> {
             },
         ),
         (
+            "notify_question",
+            ServerFrame::Notify {
+                session_id: SESSION_ID.into(),
+                notify_kind: NotifyKind::Question,
+                session_title: "Fix the failing parser test".into(),
+                detail: Some("How should the loop bound be fixed?".into()),
+            },
+        ),
+        (
             "notify_turn_done",
             ServerFrame::Notify {
                 session_id: SESSION_ID.into(),
@@ -533,6 +567,12 @@ fn session_events() -> Samples<SessionEvent> {
             "info_failed",
             SessionEvent::Info {
                 info: failed_info(),
+            },
+        ),
+        (
+            "info_waiting_question",
+            SessionEvent::Info {
+                info: waiting_question_info(),
             },
         ),
         (
@@ -617,6 +657,18 @@ fn session_events() -> Samples<SessionEvent> {
         (
             "permission_resolved",
             SessionEvent::PermissionResolved {
+                call_id: CALL_ID.into(),
+            },
+        ),
+        (
+            "question",
+            SessionEvent::Question {
+                request: question_request(),
+            },
+        ),
+        (
+            "question_resolved",
+            SessionEvent::QuestionResolved {
                 call_id: CALL_ID.into(),
             },
         ),

@@ -4,7 +4,7 @@
   "ok": true,
   "result": {
     "server_version": "0.2.0",
-    "protocol": 2,
+    "protocol": 3,
     "instance": {
       "pid": 4242,
       "port": 41873,

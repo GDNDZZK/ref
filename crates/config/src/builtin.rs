@@ -1,6 +1,7 @@
 //! Built-in agents and the small built-in provider catalog.
 
-use crate::{AgentConfig, PermissionRules};
+use crate::permission::{Action, Rule};
+use crate::{AgentConfig, Config, PermissionRules};
 use serde_json::{Value, json};
 
 fn perm(v: Value) -> PermissionRules {
@@ -51,6 +52,33 @@ Use this format (omit sections that do not apply):
 - `path`: why it matters (at most 15, most important first).
 
 Rules: be concise (terse single-line bullets), preserve exact identifiers, carry forward unanswered user requests verbatim, mention whether changes are uncommitted/committed. Do not continue the task and do not call tools. Reply with the summary only.";
+
+/// The tool the model uses to ask the user questions.
+const QUESTION_TOOL: &str = "question";
+/// The agents that may ask by default, like opencode's: the primary ones.
+const QUESTION_AGENTS: [&str; 2] = ["build", "plan"];
+
+/// opencode's default for `question`: allowed for `build` and `plan`, denied (so the tool is not
+/// even offered) for every other agent. A rule for it in the global `permission` applies to all
+/// agents; a rule in an agent's own `permission` wins over both. Call after the agents are built.
+pub(crate) fn question_defaults(cfg: &mut Config) {
+    if cfg.permission.evaluate(QUESTION_TOOL, "").is_some() {
+        return;
+    }
+    for (name, agent) in cfg.agents.iter_mut() {
+        let action = if QUESTION_AGENTS.contains(&name.as_str()) {
+            Action::Allow
+        } else {
+            Action::Deny
+        };
+        let rule = Rule {
+            tool: QUESTION_TOOL.into(),
+            pattern: "*".into(),
+            action,
+        };
+        agent.permission.rules.insert(0, rule);
+    }
+}
 
 /// Built-in agents (before user definitions are merged in).
 pub fn agents() -> Vec<AgentConfig> {
