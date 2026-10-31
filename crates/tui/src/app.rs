@@ -39,7 +39,7 @@ pub enum Mode {
 }
 
 /// What the backend answers to a reply for a question that is no longer open.
-const NO_PENDING_QUESTION: &str = "No pending question with that id.";
+const NO_PENDING_QUESTION: &str = ref_proto::NO_PENDING_QUESTION;
 
 #[derive(Debug)]
 pub enum Pending {
@@ -596,6 +596,11 @@ impl App {
                     self.net_status = Some(reason);
                 }
                 self.pending.clear();
+                // The reply in flight is lost; the snapshot after reconnecting says if the
+                // question is still open.
+                if let Some(q) = self.question.as_mut() {
+                    q.submitting = false;
+                }
                 self.attaching.clear();
                 self.files_inflight = false;
                 self.mcp_inflight = false;

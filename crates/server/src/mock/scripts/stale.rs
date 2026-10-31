@@ -119,19 +119,13 @@ fn stale(ctx: &Ctx) -> Round {
 mod tests {
     use super::*;
     use crate::mock::script::Step;
+    use crate::mock::scripts::tests::ctx;
 
-    fn ctx(round: usize, results: &[&str]) -> Ctx {
-        Ctx {
-            prompt: "stale".into(),
-            args: String::new(),
-            root_prompt: "stale".into(),
-            peer_reports: 0,
-            typed: vec![],
-            round,
-            session_id: "ses_test".into(),
-            attempt: 1,
-            tool_results: results.iter().map(|r| r.to_string()).collect(),
-        }
+    /// The context of `round` after the tool results `results`.
+    fn at(round: usize, results: &[&str]) -> Ctx {
+        let mut c = ctx("stale", round);
+        c.tool_results = results.iter().map(|r| r.to_string()).collect();
+        c
     }
 
     fn tool(round: &Round) -> (&'static str, Value) {
@@ -149,7 +143,7 @@ mod tests {
 
     #[test]
     fn the_rename_covers_every_line_with_the_old_name_and_uses_the_tag_of_the_read() {
-        let (name, input) = tool(&stale(&ctx(2, &[READ, "3 lines added"])));
+        let (name, input) = tool(&stale(&at(2, &[READ, "3 lines added"])));
         assert_eq!(name, "edit");
         assert_eq!(input["tag"], "AB12");
         let edits = input["edits"].as_array().unwrap();
@@ -162,7 +156,7 @@ mod tests {
     #[test]
     fn a_file_with_the_new_name_is_renamed_back() {
         let read = READ.replace("parse_line", "parse_row");
-        let (_, input) = tool(&stale(&ctx(2, &[&read])));
+        let (_, input) = tool(&stale(&at(2, &[&read])));
         let line = input["edits"][0]["lines"][0].as_str().unwrap();
         assert!(line.contains("parse_line"), "{line}");
     }
@@ -171,9 +165,9 @@ mod tests {
     fn a_retry_uses_the_newest_read_of_the_file() {
         let old = "[scratch/src/lib.rs#0001]\n12:        let row = parse_line(line);";
         let new = "[scratch/src/lib.rs#0002]\n12:        let row = parse_line(line); // reviewed";
-        let first = tool(&stale(&ctx(5, &[old, "changed"]))).1;
+        let first = tool(&stale(&at(5, &[old, "changed"]))).1;
         assert_eq!(first["tag"], "0001");
-        let retry = tool(&stale(&ctx(7, &[old, "changed", "rejected", new]))).1;
+        let retry = tool(&stale(&at(7, &[old, "changed", "rejected", new]))).1;
         assert_eq!(retry["tag"], "0002");
         let line = retry["edits"][0]["lines"][0].as_str().unwrap();
         assert!(line.ends_with("// reviewed"), "{line}");

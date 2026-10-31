@@ -3,10 +3,11 @@
 //!
 //! Seconds after the prompt (measured with `ref-server --mock`, see the paragraph in the
 //! development docs): helpers are created at 1.6, 3.0, 4.5 and 6.0 s, the fixer asks for
-//! approval of its edit at 6.4 s and the main session is idle at 7.3 s. When the edit is
-//! approved at 13 s the reports arrive at 10.5 (scout), 11.8 (docs), 15.6 (tester) and 16.5 s
-//! (fixer), the reviewer is created at 18.0 s and reports at 21.3 s, and the summary ends at
-//! 25.2 s. An earlier approval makes the fixer report earlier, so the order is not fixed.
+//! approval of its edit at 6.4 s and the main session is idle at 7.3 s. The scout reports at
+//! 10.5 s and docs at 11.8 s, approved or not, and the tester at 15.6 s. The fixer reports 3.5 s
+//! after the approval: at 16.5 s when it comes at 13 s. The reviewer is created 1.5 s after the
+//! last report, reports at 21.3 s and the summary ends at 25.2 s. An earlier approval makes the
+//! fixer report earlier, so the order of the tester and the fixer is not fixed.
 
 use super::tools::{bash, parser_fix, plan_todos, read};
 use crate::mock::script::{Ctx, Pace, Round, Script, sender_name};
