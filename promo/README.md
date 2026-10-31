@@ -12,6 +12,7 @@ export CHROMIUM=/usr/bin/chromium      # path of any Chromium; without it Playwr
 pnpm render demo                       # out/demo.en.mp4 and out/demo.zh.mp4
 pnpm render demo --lang en --fps 60    # one language, 60 fps
 pnpm render demo --still 6.5           # one PNG of second 6.5, to check a frame
+pnpm render trailer                    # one film; out/trailer.en.mp4 and out/trailer.zh.mp4
 pnpm render:all                        # every scene in src/scenes/registry.ts
 pnpm dev                               # preview: http://127.0.0.1:5173/?scene=demo&lang=en&debug=1
 pnpm check                             # type check and unit tests
@@ -30,11 +31,12 @@ Rendering runs at about 15 frames per second on a 12-core machine, so a one-minu
 | Path | Contents |
 |---|---|
 | `src/engine/` | `anim.ts` (progress, key tracks), `shot.ts`, `scene.ts` (timeline and transitions), `player.ts` (`seek`), `i18n.ts` |
-| `src/components/` | Parts shared by scenes: `backdrop`, `titleCard`, `caption`, `appFrame` (window with a camera over a screenshot), `highlight`, `cursor`, `typedText`, `terminalView` (replays a cast) |
-| `src/shots/` | Shots reused by several scenes (`intro`, `outro`) |
+| `src/components/` | Parts shared by scenes: `backdrop`, `titleCard`, `caption`, `appFrame` (window with a camera over a screenshot), `highlight`, `cursor`, `typedText`, `terminalView` (replays a cast), `featureTag`, `textCard`, `notificationCard`, `browserTab`, `serverPill` |
+| `src/shots/` | Shots reused by several scenes (`intro`, `outro`, `beat`) |
+| `src/films/` | The nine feature films and the trailer (see below) |
 | `src/scenes/` | One file per film, listed in `registry.ts`. `demo.ts` is the pipeline check and uses placeholder material |
 | `scripts/` | `render.ts` and its helpers |
-| `capture/` | `pnpm capture [tui\|web]`: screenshots and casts from the mock backend |
+| `capture/` | `pnpm capture`: screenshots and casts from the mock backend (see below) |
 | `assets/` | `screens/` (PNG), `casts/` (asciicast v2), `placeholder/` |
 
 The look comes from the product: `web/src/theme/generated/theme.css` (colours generated from `Theme.qml`), the easing curves in `web/src/motion/easing.ts`, `assets/icons` and `assets/app`.
@@ -59,10 +61,38 @@ Rules: times are seconds; a part's `render(t)` must not depend on earlier calls;
 
 ## Capturing screenshots
 
-`pnpm capture` starts everything it needs with temporary `REF_STATE_DIR` and `REF_DATA_DIR`, on free ports, and stops only the processes it started. It uses the binaries in `target/release` or `target/debug` of this checkout, or `REF_BIN_DIR`. Build them first (`cd web && pnpm install && pnpm build`, then `cargo build`).
+`pnpm capture [web|gui|tui|shared|all] [--only name,name] [--lang en,zh]` starts everything it needs with a temporary `REF_STATE_DIR` and `REF_DATA_DIR` under `.cache/run/`, on free ports, and stops only the processes it started. The three interfaces run against `ref-server --mock`; the scripts that make it produce a scene are in `docs/development.md#the-mock-backend`.
 
-- `pnpm capture:tui`: runs `ref --server URL --token T` in a pseudo terminal made by `script(1)`, types and presses keys, follows the screen with a headless xterm.js (`waitForText`), records an asciicast to `assets/casts/` and renders stills with the same xterm.js and theme as the videos.
-- `pnpm capture:web`: drives the WebUI with Playwright (dark and light, 1600×1000 at 2×).
-- GUI (`ref-gui --mock` with `QT_QPA_PLATFORM=offscreen`, window grab): added once the GUI is finished.
+| Part | What it does | Output |
+|---|---|---|
+| `web` | `ref-web` in headless Chromium (Playwright), 1600×1000 at 2×, dark theme; English and Chinese | `assets/screens/web-<shot>[-zh].png` |
+| `gui` | the unchanged `ref-gui --mock` with `QT_QPA_PLATFORM=offscreen` and `QT_SCALE_FACTOR=2` (2560×1600 grab); a small Qt plugin (`capture/gui-driver/`) reads commands (click, type, key, grab) from stdin | `assets/screens/gui-<shot>[-zh].png` |
+| `tui` | `ref` in a pseudo terminal; keys are typed, the screen is followed with a headless xterm.js; the output is recorded as an asciicast and rendered as stills | `assets/casts/*.cast`, `assets/screens/tui-*.png` and `tui-*-clean.png` (without the last row, which shows the random mock workspace path) |
+| `shared` | one mock backend, with `ref`, `ref-gui` and `ref-web` showing the same session | `tui-shared`, `gui-shared`, `web-shared` |
 
-Each still is written to `assets/screens/<name>.png` at full size and, for README images, to `docs/images/<name>.png` at 1440 px wide. Both are palette PNGs (`sharp`).
+`web` and `gui` run the same scripts (`capture/scenarios.ts`) through one `Ui` interface, so a shot exists under both prefixes. `docs/images/` gets the shots that are marked `readme` in the scripts, 1440 px wide, as palette PNGs (`sharp`).
+
+What the capture needs:
+
+- Binaries in `target/release` or `target/debug` of this checkout (`REF_BIN_DIR` overrides): `cargo build -p ref-server -p ref-web -p ref-tui`, and `cd web && pnpm install && pnpm build` first for the web page.
+- Chromium: `export CHROMIUM=/usr/bin/chromium`.
+- For `gui`: a `ref-gui` build and the capture plugin. Both are built into `.cache/` (not tracked). Qt and the dependency prefix are the ones the GUI build uses (here `Qt=/home/zzk/app/ref-wt/deps/Qt/6.12.0/gcc_64`, `prefix=/home/zzk/app/ref-wt/deps/prefix`):
+
+```bash
+cmake -S ../gui -B .cache/gui-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$Qt;$prefix"
+cmake --build .cache/gui-build
+cmake -S capture/gui-driver -B .cache/gui-driver-build -G Ninja -DCMAKE_PREFIX_PATH="$Qt"
+cmake --build .cache/gui-driver-build
+export REF_GUI_QML_PATH=$prefix/lib/qml   # QML modules of the dependency prefix
+```
+
+  `REF_GUI_BIN` overrides the `ref-gui` binary. No display is needed.
+- The GUI draws with the system fonts, so its text depends on the machine like the rest of the render (see above).
+
+Unverified: the capture was run on one machine (Linux, Debian 13). The drag-and-drop and paste of images into the GUI are not captured; the image shots are from the web page. The desktop notification is drawn by the film (`notificationCard`), because a headless run has none.
+
+## The films
+
+`src/films/` has one file per film (`backend`, `sessions`, `peers`, `permissions`, `edits`, `composer`, `long-sessions`, `setup`, `notify`) and `trailer`. A film is `filmScene(feature, beats)`: a title card, the beats, the closing card. A beat is either `windowBeat` (a captured window, a camera path of `looks`, `marks`, a pointer, captions) or `cardsBeat` (text cards typed out, for config files and the illustration of a rejected edit). Picture coordinates in a beat are fractions (0..1) of the screenshot; a camera look is a point and a zoom (1 = the whole picture fits the window). `backend.ts` has the two custom shots (terminal replay to browser; three windows side by side).
+
+Where a picture would show the random mock path (`/tmp/ref-mock-<hex>/workspace`), the camera looks away from it. Preview one frame of a film with `pnpm render <film> --lang en --still SEC`.
