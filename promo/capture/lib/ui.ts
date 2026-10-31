@@ -48,6 +48,12 @@ export interface Ui {
   key(chord: string): Promise<void>
   command(id: CommandId): Promise<void>
   clickText(text: string): Promise<void>
+  // Clicks the first `text` under the first `anchor` (GUI only; the GUI keeps clipped copies of buttons that clickText could hit).
+  clickTextBelow(text: string, anchor: string): Promise<void>
+  // Moves the pointer to an empty spot so that no row or button shows its hover state (GUI only).
+  parkPointer(): Promise<void>
+  // Opens the session whose row in the sidebar is titled `title` (GUI only).
+  clickSidebarRow(title: string): Promise<void>
   hasText(text: string): Promise<boolean>
   waitText(text: string, timeoutMs?: number): Promise<void>
   waitNoText(text: string, timeoutMs?: number): Promise<void>

@@ -87,17 +87,26 @@ interface SideBySide {
 
 // The terminal, the native app and the browser showing one session. Each gets a camera on the
 // start of the transcript, since three whole windows would be too small to read.
-const SIDE_BY_SIDE: readonly SideBySide[] = [
-  { name: 'tui-shared-clean', title: 'ref', zoom: 1.7, focus: { x: 0.3, y: 0.25 } },
-  { name: 'gui-shared', title: 'ref-gui', zoom: 1.6, focus: { x: 0.6, y: 0.2 } },
-  { name: 'web-shared', title: 'ref-web', zoom: 1.6, focus: { x: 0.6, y: 0.2 } },
-]
+const SIDE_BY_SIDE = {
+  shared: [
+    { name: 'tui-shared-clean', title: 'ref', zoom: 1.7, focus: { x: 0.3, y: 0.25 } },
+    { name: 'gui-shared', title: 'ref-gui', zoom: 1.6, focus: { x: 0.6, y: 0.2 } },
+    { name: 'web-shared', title: 'ref-web', zoom: 1.6, focus: { x: 0.6, y: 0.2 } },
+  ],
+  // The orchestrate session with its helpers: the GUI in split view, the browser with the helpers listed.
+  crew: [
+    { name: 'tui-crew-clean', title: 'ref', zoom: 1, focus: { x: 0.5, y: 0.5 } },
+    { name: 'gui-crew', title: 'ref-gui', zoom: 1.3, focus: { x: 0.6, y: 0.4 } },
+    { name: 'web-crew', title: 'ref-web', zoom: 1.02, focus: { x: 0.5, y: 0.3 } },
+  ],
+} as const satisfies Record<string, readonly SideBySide[]>
+export type SideBySideSet = keyof typeof SIDE_BY_SIDE
 const WINDOW_STAGGER_SECONDS = 0.5
 
-export function sideBySideShot(seconds: number, text: string | Localized | undefined) {
+export function sideBySideShot(seconds: number, text: string | Localized | undefined, set: SideBySideSet = 'shared', label: typeof tag = tag) {
   return defineShot(seconds, (shot) => {
     shot.add(backdrop())
-    SIDE_BY_SIDE.forEach((entry, index) => {
+    SIDE_BY_SIDE[set].forEach((entry, index) => {
       const picture = screen(entry.name)
       shot.add(
         appFrame({
@@ -116,7 +125,7 @@ export function sideBySideShot(seconds: number, text: string | Localized | undef
         }),
       )
     })
-    shot.add(featureTag({ ...tag, from: 0.1, to: seconds }))
+    shot.add(featureTag({ ...label, from: 0.1, to: seconds }))
     if (text) shot.add(caption([{ from: 1.2, to: seconds - 0.4, text }]))
   })
 }
