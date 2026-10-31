@@ -29,7 +29,7 @@ export const scene = filmScene(feature, [
       { at: 1.2, x: 0.8, y: 0.76, zoom: 1.8 },
     ],
     marks: [{ x: 0.61, y: 0.55, width: 0.38, height: 0.43, from: 1.8, to: 6.3 }],
-    caption: { en: 'The focused tile has its own prompt box.', zh: '选中的会话有自己的输入框。' },
+    caption: { en: 'Only the focused tile has a prompt box.', zh: '只有选中的会话有输入框。' },
   }),
   windowBeat({
     seconds: 7,
