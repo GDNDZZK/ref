@@ -26,6 +26,10 @@ struct Rig {
 
 async fn rig() -> Rig {
     let mock = ref_server::mock::start(0, "token".into()).await.unwrap();
+    rig_on(mock).await
+}
+
+async fn rig_on(mock: Mock) -> Rig {
     let hub = mock.running.hub.clone();
     let conn = hub.add_conn();
     let session = new_session(&hub, ELSEWHERE, "main").await;
@@ -99,11 +103,13 @@ impl Rig {
                     call_id,
                     name,
                     state,
+                    output,
                     ..
                 } => Some(Tool {
                     call_id,
                     name,
                     state,
+                    output: output.unwrap_or_default(),
                 }),
                 _ => None,
             })
@@ -137,6 +143,7 @@ struct Tool {
     call_id: String,
     name: String,
     state: ToolState,
+    output: String,
 }
 
 fn states(tools: &[Tool], name: &str) -> Vec<ToolState> {
@@ -738,5 +745,157 @@ async fn retry_can_be_demonstrated_again_after_an_undo() {
         retries(&rig.run(true).await) >= 2,
         "failed again the second time"
     );
+    rig.finish().await;
+}
+
+const STALE_PROMPT: &str = "stale rename parse_line to parse_row";
+const RECOVERED: &str = "Recovered: file changed since read; line numbers remapped.";
+const REJECTED: &str =
+    "Edit rejected for scratch/src/lib.rs: file changed since it was read (tag #";
+
+/// One run of `stale`: the shifted edit is moved, the changed one is rejected, the retry lands.
+async fn check_stale_run(rig: &Rig, old: &str, new: &str) {
+    let before = rig.tools().len();
+    rig.prompt(STALE_PROMPT);
+    // Denying every permission request would show up as a denied tool.
+    rig.run(false).await;
+    let tools: Vec<Tool> = rig.tools().into_iter().skip(before).collect();
+    assert!(tools.iter().all(|t| t.state != ToolState::Denied));
+    let edits: Vec<&Tool> = tools.iter().filter(|t| t.name == "edit").collect();
+    assert_eq!(edits.len(), 3, "{:?}", rig.last_text());
+    assert_eq!(edits[0].state, ToolState::Done);
+    assert!(edits[0].output.contains(RECOVERED), "{}", edits[0].output);
+    assert_eq!(edits[1].state, ToolState::Error);
+    assert!(edits[1].output.starts_with(REJECTED), "{}", edits[1].output);
+    assert!(
+        edits[1]
+            .output
+            .contains("Current content around your anchors")
+    );
+    assert_eq!(edits[2].state, ToolState::Done);
+    for file in ["scratch/src/parser.rs", "scratch/src/lib.rs"] {
+        let text = rig.workspace_file(file);
+        assert!(text.contains(new) && !text.contains(old), "{file}:\n{text}");
+    }
+}
+
+#[tokio::test]
+async fn stale_shows_a_remapped_edit_and_a_rejected_one_from_the_real_tool() {
+    let rig = rig().await;
+    check_stale_run(&rig, "parse_line", "parse_row").await;
+    // The names are swapped back, so the demo can be run again in the same backend.
+    check_stale_run(&rig, "parse_row", "parse_line").await;
+    rig.finish().await;
+}
+
+/// Base delay of the retry backoff in the `outage` test (2 s in production).
+const OUTAGE_RETRY_BASE: Duration = Duration::from_millis(100);
+
+#[tokio::test]
+async fn outage_retries_with_growing_waits_and_then_goes_on() {
+    let mock = ref_server::mock::start_with_retry_base(OUTAGE_RETRY_BASE)
+        .await
+        .unwrap();
+    let rig = rig_on(mock).await;
+    rig.prompt("outage run the tests and fix the failures");
+    let seen = rig.run(false).await;
+    let retries: Vec<(u32, String)> = seen
+        .iter()
+        .filter_map(|s| match s {
+            SessionStatus::Retrying { attempt, error, .. } => Some((*attempt, error.clone())),
+            _ => None,
+        })
+        .collect();
+    let attempts: Vec<u32> = retries.iter().map(|r| r.0).collect();
+    assert_eq!(attempts, [1, 2, 3, 4], "{seen:?}");
+    assert!(retries[0].1.contains("529") && retries[0].1.contains("Overloaded"));
+    assert!(retries[1].1.contains("529"));
+    assert!(
+        retries[2].1.to_lowercase().contains("connection reset"),
+        "{}",
+        retries[2].1
+    );
+    assert!(retries[3].1.contains("503"));
+
+    let tools = rig.tools();
+    assert!(
+        tools.iter().all(|t| t.state == ToolState::Done),
+        "no tool is lost to the outage"
+    );
+    assert_eq!(states(&tools, "bash").len(), 2);
+    assert_eq!(states(&tools, "edit"), [ToolState::Done]);
+    assert_eq!(rig.last_text(), "All 12 tests pass now.");
+    assert!(rig.session.info().last_error.is_none());
+    rig.finish().await;
+}
+
+/// Waits until some tool call has the given text in its live output.
+async fn live_output_of(rig: &Rig, session: &Arc<Session>, text: &str) {
+    let start = Instant::now();
+    loop {
+        let found = session
+            .lock()
+            .messages
+            .iter()
+            .flat_map(|m| m.parts.iter())
+            .any(|p| {
+                matches!(p, Part::Tool { meta: Some(meta), .. }
+                if meta["live_output"].as_str().is_some_and(|o| o.contains(text)))
+            });
+        if found {
+            return;
+        }
+        assert!(start.elapsed() < WAIT, "no output with {text:?}");
+        rig.approve_everywhere().await;
+        tokio::time::sleep(POLL).await;
+    }
+}
+
+#[tokio::test]
+async fn orchestrate_long_helpers_print_their_progress_while_they_work() {
+    let rig = rig().await;
+    rig.prompt("orchestrate-long fix the parser bug");
+    let start = Instant::now();
+    let mut sessions = Vec::new();
+    while sessions.len() < 4 {
+        assert!(start.elapsed() < WAIT, "the helpers did not start");
+        sessions = rig
+            .hub
+            .sessions()
+            .into_iter()
+            .filter(|s| s.id != rig.session.id)
+            .collect();
+        tokio::time::sleep(POLL).await;
+    }
+    for (name, line) in [
+        ("scout", "scout: read 2/40 files"),
+        ("fixer", "fixer: patched 0/5 files"),
+        ("tester", "tester: ran 1/30 tests"),
+        ("docs", "docs: updated 0/9 pages"),
+    ] {
+        let session = sessions
+            .iter()
+            .find(|s| s.info().name.starts_with(name))
+            .unwrap_or_else(|| panic!("no {name}"));
+        live_output_of(&rig, session, line).await;
+        let running = session.lock().run.is_some();
+        assert!(running, "{name} is still working");
+    }
+    // The main session is idle while its helpers work, and the reports go to the long variant.
+    assert!(rig.main_texts().contains("Four helpers are working"));
+    rig.finish().await;
+}
+
+#[tokio::test]
+async fn longrun_prints_a_numbered_test_and_can_be_cancelled() {
+    let rig = rig().await;
+    rig.prompt("longrun run every test in src/");
+    live_output_of(&rig, &rig.session, "step 1/20: tests::parser_01 ... ok").await;
+    let req = Request::Abort {
+        session_id: rig.session.id.clone(),
+    };
+    api::handle(&rig.hub, &rig.conn, req).await.unwrap();
+    rig.run(true).await;
+    assert!(rig.tools().iter().all(|t| t.state == ToolState::Cancelled));
     rig.finish().await;
 }

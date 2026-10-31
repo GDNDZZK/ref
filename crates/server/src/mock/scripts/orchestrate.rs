@@ -2,28 +2,32 @@
 //! reports. Every wait is a named constant, so the timeline is the same on every run.
 //!
 //! Seconds after the prompt (measured with `ref-server --mock`, see the paragraph in the
-//! development docs): helpers are created about 1.5 s apart and the fixer's edit waits for
-//! approval. When the edit is approved at 9 s, the reports arrive in the order scout, docs,
-//! fixer, tester. An earlier approval makes the fixer report earlier, so the order is not fixed.
+//! development docs): helpers are created at 1.6, 3.0, 4.5 and 6.0 s, the fixer asks for
+//! approval of its edit at 6.4 s and the main session is idle at 7.3 s. When the edit is
+//! approved at 13 s the reports arrive at 10.5 (scout), 11.8 (docs), 15.6 (tester) and 16.5 s
+//! (fixer), the reviewer is created at 18.0 s and reports at 21.3 s, and the summary ends at
+//! 25.2 s. An earlier approval makes the fixer report earlier, so the order is not fixed.
 
 use super::tools::{bash, parser_fix, plan_todos, read};
 use crate::mock::script::{Ctx, Pace, Round, Script, sender_name};
 use serde_json::{Value, json};
 
 /// Faster than `Pace::MEDIUM`: at medium speed the first helper appears after 3.6 s.
-const PACE: Pace = Pace {
+pub(super) const PACE: Pace = Pace {
     chars: 12,
     every_ms: 30,
 };
 
 /// Helpers in the order the main session creates them: (name, agent).
-const CREW: [(&str, &str); 4] = [
+pub(super) const CREW: [(&str, &str); 4] = [
     ("scout", "explore"),
     ("fixer", "build"),
     ("tester", "build"),
     ("docs", "build"),
 ];
 const REVIEWER: (&str, &str) = ("reviewer", "reviewer");
+/// Scripts of the helpers are named `orch-scout`, `orch-fixer` and so on.
+const SHORT_PREFIX: &str = "orch";
 const MAIN_STEPS: [&str; 5] = [
     "Find the bug",
     "Fix the bug",
@@ -44,20 +48,23 @@ const WRAP_UP_PAUSE_MS: u64 = 1200;
 const REVIEW_READ_PAUSE_MS: u64 = 1000;
 const SUMMARY_PAUSE_MS: u64 = 1000;
 /// How long each helper "thinks" before a tool call.
-const SCOUT_THINK_MS: u64 = 1570;
-const FIXER_THINK_MS: u64 = 1000;
-const DOCS_THINK_MS: u64 = 1150;
+pub(super) const SCOUT_THINK_MS: u64 = 1570;
+pub(super) const FIXER_THINK_MS: u64 = 1000;
+pub(super) const DOCS_THINK_MS: u64 = 1150;
 const REVIEW_THINK_MS: u64 = 800;
 /// The scout and the reviewer read their findings for a while before they report.
 const SCOUT_REPORT_PAUSE_MS: u64 = 3000;
-const REVIEW_REPORT_PAUSE_MS: u64 = 2400;
+const REVIEW_REPORT_PAUSE_MS: u64 = 800;
 /// The fixer waits this long before it asks for approval of its edit.
 const FIXER_EDIT_PAUSE_MS: u64 = 1650;
 /// After the approved edit the fixer runs the tests and reports.
 const FIXER_TEST_PAUSE_MS: u64 = 1500;
 const FIXER_REPORT_PAUSE_MS: u64 = 1000;
 /// The tester updates its todo list once per step.
-const TESTER_STEP_PAUSE_MS: u64 = 1200;
+pub(super) const TESTER_STEP_PAUSE_MS: u64 = 1200;
+/// The tester reads the baseline for a while before it reports, so its report comes after the
+/// scout's and the docs', before the fixer's.
+const TESTER_REPORT_PAUSE_MS: u64 = 1400;
 const TESTER_BASELINE_SECS: u32 = 3;
 const DOCS_REPORT_PAUSE_MS: u64 = 1150;
 
@@ -106,14 +113,14 @@ pub const SCRIPTS: &[Script] = &[
     },
 ];
 
-/// Round `n` (1-based) of `orchestrate` starts the n-th helper. The first one follows the plan
-/// at once.
-fn create(ctx: &Ctx, n: usize) -> Round {
+/// Round `n` (1-based) of `orchestrate` starts the n-th helper, whose script is `{prefix}-{name}`.
+/// The first one follows the plan at once.
+fn create(ctx: &Ctx, n: usize, prefix: &str) -> Round {
     let (name, agent) = CREW[n - 1];
     let input = json!({
         "name": name,
         "agent": agent,
-        "prompt": format!("orch-{name} {}", ctx.session_id),
+        "prompt": format!("{prefix}-{name} {}", ctx.session_id),
         "must_report": true,
     });
     let round = Round::new().text(format!("Starting {name}.\n"));
@@ -126,11 +133,16 @@ fn create(ctx: &Ctx, n: usize) -> Round {
 }
 
 fn orchestrate(ctx: &Ctx) -> Round {
+    directing(ctx, SHORT_PREFIX)
+}
+
+/// The main session's part, for the helpers of the script family `prefix`.
+pub(super) fn directing(ctx: &Ctx, prefix: &str) -> Round {
     match ctx.round {
         0 => Round::new()
             .text("The parser bug has four parts: find it, fix it, test it, update the docs. I'll hand them out.\n")
             .tool("todo", "Plan the work", plan_todos(&MAIN_STEPS, 0)),
-        r if r <= CREW.len() => create(ctx, r),
+        r if r <= CREW.len() => create(ctx, r, prefix),
         _ => Round::new()
             .pause(WRAP_UP_PAUSE_MS)
             .text("Four helpers are working. Their reports will arrive here."),
@@ -158,7 +170,7 @@ fn reviewer_session(ctx: &Ctx) -> Value {
 /// What the main session does with a report. The report's number is the count of reports in
 /// the conversation, so it stays right when several arrive while the main session is busy: the
 /// queued ones join the conversation together at the next request.
-fn report(ctx: &Ctx) -> Round {
+pub(super) fn report(ctx: &Ctx) -> Round {
     let k = ctx.peer_reports;
     let first_round = ctx.round == 0;
     let mark_done = |done: usize| plan_todos(&MAIN_STEPS, done);
@@ -189,17 +201,23 @@ fn report(ctx: &Ctx) -> Round {
     }
 }
 
-fn send_message(to: &str, message: &str) -> Value {
+pub(super) fn send_message(to: &str, message: &str) -> Value {
     json!({ "to": to, "message": message })
 }
 
 /// The last round of every helper, after its report went out.
-fn reported() -> Round {
+pub(super) fn reported() -> Round {
     Round::new().text("Reported.")
 }
 
 /// A helper's tool round: a line of text, a pause, the tool.
-fn step(text: &str, pause_ms: u64, name: &'static str, purpose: &str, input: Value) -> Round {
+pub(super) fn step(
+    text: &str,
+    pause_ms: u64,
+    name: &'static str,
+    purpose: &str,
+    input: Value,
+) -> Round {
     Round::new()
         .text(text)
         .pause(pause_ms)
@@ -252,7 +270,7 @@ fn fixer(ctx: &Ctx) -> Round {
     }
 }
 
-const TESTER_STEPS: [&str; 3] = [
+pub(super) const TESTER_STEPS: [&str; 3] = [
     "Run the parser tests",
     "Read the failure",
     "Note the baseline",
@@ -262,7 +280,7 @@ const TESTER_REPORT: &str = "Tests added for the parser fix.";
 const TESTER_REPORT_TYPED: &str = "Tests added for the parser fix. Also covered: empty input.";
 
 /// The tester reports what it did, and what a person asked it to cover while it worked.
-fn tester_report(ctx: &Ctx) -> &'static str {
+pub(super) fn tester_report(ctx: &Ctx) -> &'static str {
     if ctx.typed.is_empty() {
         TESTER_REPORT
     } else {
@@ -292,6 +310,7 @@ fn tester(ctx: &Ctx) -> Round {
             bash(&baseline),
         ),
         4 => Round::new()
+            .pause(TESTER_REPORT_PAUSE_MS)
             .tool("todo", "Everything is done", plan(TESTER_STEPS.len()))
             .tool(
                 "send_message",

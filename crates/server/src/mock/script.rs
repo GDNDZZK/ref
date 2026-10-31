@@ -72,6 +72,8 @@ pub struct Round {
     pub error: Option<HttpError>,
     /// Report the context as almost full, so the next prompt triggers automatic compaction.
     pub fill_context: bool,
+    /// Reset the connection without an answer: the client sees a network error.
+    pub reset: bool,
 }
 
 impl Round {
@@ -109,6 +111,14 @@ impl Round {
                 status,
                 message: message.into(),
             }),
+            ..Round::default()
+        }
+    }
+
+    /// A request that dies on the wire ("connection reset by peer").
+    pub fn connection_reset() -> Round {
+        Round {
+            reset: true,
             ..Round::default()
         }
     }
@@ -328,22 +338,20 @@ fn first_word(prompt: &str) -> String {
     word.to_lowercase()
 }
 
-/// Script that handles the reports of a crew directed by `orchestrate`.
-const ORCHESTRATE: &str = "orchestrate";
-const ORCHESTRATE_REPORT: &str = "orchestrate-report";
+/// Suffix of the script that handles the reports of a crew: `orchestrate` has
+/// `orchestrate-report`, `orchestrate-long` has `orchestrate-long-report`.
+const REPORT_SUFFIX: &str = "-report";
 
 /// The script a prompt asks for: its first word, case-insensitive. A message from another
-/// session goes to `orchestrate-report` when the conversation started with `orchestrate`, and
-/// to `ack` otherwise; anything else gets the default script.
+/// session goes to the `-report` script of the script that started the conversation when it
+/// has one, and to `ack` otherwise; anything else gets the default script.
 pub fn select(prompt: &str, root_prompt: &str) -> &'static Script {
     use super::scripts;
     if prompt.starts_with(PEER_MESSAGE) {
-        let name = if first_word(root_prompt) == ORCHESTRATE {
-            ORCHESTRATE_REPORT
-        } else {
-            "ack"
-        };
-        return scripts::find(name).expect("report script");
+        let report = format!("{}{REPORT_SUFFIX}", first_word(root_prompt));
+        return scripts::find(&report)
+            .or_else(|| scripts::find("ack"))
+            .expect("report script");
     }
     scripts::find(&first_word(prompt)).unwrap_or_else(|| scripts::find("default").expect("default"))
 }
@@ -438,6 +446,10 @@ mod tests {
         );
         assert_eq!(select(REPORT, "Orchestrate").name, "orchestrate-report");
         assert_eq!(select(REPORT, "orchestrated").name, "ack");
+        assert_eq!(
+            select(REPORT, "orchestrate-long fix it").name,
+            "orchestrate-long-report"
+        );
         assert_eq!(sender_name(REPORT), "x");
         assert_eq!(sender_name("hello"), "");
     }
