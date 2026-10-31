@@ -74,6 +74,8 @@ Rules: times are seconds; a part's `render(t)` must not depend on earlier calls;
 
 What the capture needs:
 
+- `dbus-run-session` (package `dbus-daemon` or `dbus-bin`): `pnpm capture` re-runs itself on a private D-Bus session, because ref-gui, ref and Chromium send real desktop notifications to the session bus when a turn ends. Starting any captured process outside it is refused (`capture/lib/privateBus.ts`).
+
 - Binaries in `target/release` or `target/debug` of this checkout (`REF_BIN_DIR` overrides): `cargo build -p ref-server -p ref-web -p ref-tui`, and `cd web && pnpm install && pnpm build` first for the web page.
 - Chromium: `export CHROMIUM=/usr/bin/chromium`.
 - For `gui`: a `ref-gui` build and the capture plugin. Both are built into `.cache/` (not tracked). Qt and the dependency prefix are the ones the GUI build uses (here `Qt=/home/zzk/app/ref-wt/deps/Qt/6.12.0/gcc_64`, `prefix=/home/zzk/app/ref-wt/deps/prefix`):

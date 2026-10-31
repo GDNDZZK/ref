@@ -1,12 +1,25 @@
 // pnpm capture [web|gui|tui|all] [--only name,name] [--lang en,zh]
 // Records pictures and casts from the mock backend into assets/ (and docs/images/).
+import { spawnSync } from 'node:child_process'
 import { parseArgs } from 'node:util'
 import { LANGS, isLang, type Lang } from '../src/engine/i18n.ts'
 import { captureGui } from './gui.ts'
 import { captureShared } from './shared.ts'
 import { SCENARIOS } from './scenarios.ts'
+import { PRIVATE_BUS_FLAG } from './lib/privateBus.ts'
 import { captureTui } from './tui.ts'
 import { captureWeb } from './web.ts'
+
+// ref-gui, ref and Chromium send desktop notifications over the session bus when a turn ends.
+// Everything the capture starts runs on a private bus, never on the user's.
+if (process.env[PRIVATE_BUS_FLAG] !== '1') {
+  const rerun = spawnSync('dbus-run-session', ['--', process.execPath, ...process.argv.slice(1)], {
+    stdio: 'inherit',
+    env: { ...process.env, [PRIVATE_BUS_FLAG]: '1' },
+  })
+  if (rerun.error) throw new Error(`cannot start a private D-Bus session (dbus-run-session): ${rerun.error.message}`)
+  process.exit(rerun.status ?? 1)
+}
 
 const TARGETS = ['web', 'gui', 'tui', 'shared'] as const
 type Target = (typeof TARGETS)[number]

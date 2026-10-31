@@ -2,272 +2,272 @@
   "gui-agents-dialog": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-ca40"
+    "sessionName": "workspace-ae5d"
   },
   "gui-agents-dialog-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-9e02"
+    "sessionName": "workspace-4f7c"
   },
   "gui-before-undo": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-4e3d"
+    "sessionName": "workspace-7177"
   },
   "gui-before-undo-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-ae1d"
+    "sessionName": "workspace-6fc8"
   },
   "gui-composer-at": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-81b9"
+    "sessionName": "workspace-ed3d"
   },
   "gui-composer-at-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-0538"
+    "sessionName": "workspace-48bd"
   },
   "gui-composer-queue": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-3dae"
+    "sessionName": "workspace-4c8d"
   },
   "gui-composer-queue-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-fbee"
+    "sessionName": "workspace-a563"
   },
   "gui-composer-shell": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-81b9"
+    "sessionName": "workspace-ed3d"
   },
   "gui-composer-shell-output": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-81b9"
+    "sessionName": "workspace-ed3d"
   },
   "gui-composer-shell-output-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-0538"
+    "sessionName": "workspace-48bd"
   },
   "gui-composer-shell-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-0538"
+    "sessionName": "workspace-48bd"
   },
   "gui-composer-slash": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-81b9"
+    "sessionName": "workspace-ed3d"
   },
   "gui-composer-slash-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-0538"
+    "sessionName": "workspace-48bd"
   },
   "gui-composer-undo": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-4e3d"
+    "sessionName": "workspace-7177"
   },
   "gui-composer-undo-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-ae1d"
+    "sessionName": "workspace-6fc8"
   },
   "gui-context-compact": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-a0a8"
+    "sessionName": "workspace-8ab9"
   },
   "gui-context-compact-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-fcd0"
+    "sessionName": "workspace-9f34"
   },
   "gui-context-full": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-a0a8"
+    "sessionName": "workspace-8ab9"
   },
   "gui-context-full-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-fcd0"
+    "sessionName": "workspace-9f34"
   },
   "gui-delay-cancelled": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-ea3f"
+    "sessionName": "workspace-4960"
   },
   "gui-delay-cancelled-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-d521"
+    "sessionName": "workspace-f8e6"
   },
   "gui-delay-ring": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-ea3f"
+    "sessionName": "workspace-4960"
   },
   "gui-delay-ring-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-d521"
+    "sessionName": "workspace-f8e6"
   },
   "gui-denied": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-25b1"
+    "sessionName": "workspace-7a70"
   },
   "gui-denied-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-4b04"
+    "sessionName": "workspace-2a29"
   },
   "gui-edit-diff": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-b761"
+    "sessionName": "workspace-eecd"
   },
   "gui-edit-diff-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-c35e"
+    "sessionName": "workspace-4289"
   },
   "gui-help": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-806d"
+    "sessionName": "workspace-c4f3"
   },
   "gui-help-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-e349"
+    "sessionName": "workspace-7dc2"
   },
   "gui-long-output": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-85d0"
+    "sessionName": "workspace-1f82"
   },
   "gui-long-output-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-388a"
+    "sessionName": "workspace-71dd"
   },
   "gui-main": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-b761"
+    "sessionName": "workspace-eecd"
   },
   "gui-main-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-c35e"
+    "sessionName": "workspace-4289"
   },
   "gui-mcp-dialog": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-ca40"
+    "sessionName": "workspace-ae5d"
   },
   "gui-mcp-dialog-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-9e02"
+    "sessionName": "workspace-4f7c"
   },
   "gui-models-dialog": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-ca40"
+    "sessionName": "workspace-ae5d"
   },
   "gui-models-dialog-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-9e02"
+    "sessionName": "workspace-4f7c"
   },
   "gui-peer-message": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-866a"
+    "sessionName": "workspace-68b9"
   },
   "gui-peer-message-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-a9fe"
+    "sessionName": "workspace-3dac"
   },
   "gui-peers-dialog": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-866a"
+    "sessionName": "workspace-68b9"
   },
   "gui-peers-dialog-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-a9fe"
+    "sessionName": "workspace-3dac"
   },
   "gui-peers-inbox": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-866a"
+    "sessionName": "workspace-68b9"
   },
   "gui-peers-inbox-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-a9fe"
+    "sessionName": "workspace-3dac"
   },
   "gui-permission-card": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-f679"
+    "sessionName": "workspace-56f5"
   },
   "gui-permission-card-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-6e28"
+    "sessionName": "workspace-1b78"
   },
   "gui-retry-done": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-a7d1"
+    "sessionName": "workspace-f100"
   },
   "gui-retry-done-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-3b44"
+    "sessionName": "workspace-754f"
   },
   "gui-retry-status": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-a7d1"
+    "sessionName": "workspace-f100"
   },
   "gui-retry-status-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-3b44"
+    "sessionName": "workspace-754f"
   },
   "gui-session-running": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-06c7"
+    "sessionName": "workspace-7183"
   },
   "gui-session-running-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-8f8c"
+    "sessionName": "workspace-2e81"
   },
   "gui-settings": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-0e1c"
+    "sessionName": "workspace-c392"
   },
   "gui-settings-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-d0d2"
+    "sessionName": "workspace-3ce8"
   },
   "gui-shared": {
     "width": 2560,
@@ -276,42 +276,42 @@
   "gui-sidebar-progress": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-5cbf"
+    "sessionName": "workspace-0da7"
   },
   "gui-sidebar-progress-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-ce00"
+    "sessionName": "workspace-dce9"
   },
   "gui-split-view": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-1cbf"
+    "sessionName": "workspace-0da7"
   },
   "gui-split-view-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-894e"
+    "sessionName": "workspace-dce9"
   },
   "gui-split-zoom": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-1cbf"
+    "sessionName": "workspace-0da7"
   },
   "gui-split-zoom-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-894e"
+    "sessionName": "workspace-dce9"
   },
   "gui-tools-permission": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-b761"
+    "sessionName": "workspace-eecd"
   },
   "gui-tools-permission-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-c35e"
+    "sessionName": "workspace-4289"
   },
   "tui-main": {
     "width": 2058,
@@ -344,292 +344,292 @@
   "web-agents-dialog": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-d313"
+    "sessionName": "workspace-6eb5"
   },
   "web-agents-dialog-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-c32e"
+    "sessionName": "workspace-d91d"
   },
   "web-before-undo": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-a761"
+    "sessionName": "workspace-abf9"
   },
   "web-before-undo-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-c98a"
+    "sessionName": "workspace-3adc"
   },
   "web-composer-at": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-4be3"
+    "sessionName": "workspace-db62"
   },
   "web-composer-at-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-6bf8"
+    "sessionName": "workspace-9bb8"
   },
   "web-composer-image": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-c818"
+    "sessionName": "workspace-1417"
   },
   "web-composer-image-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-e0a7"
+    "sessionName": "workspace-74ed"
   },
   "web-composer-queue": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-5172"
+    "sessionName": "workspace-53a8"
   },
   "web-composer-queue-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-db48"
+    "sessionName": "workspace-a921"
   },
   "web-composer-shell": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-4be3"
+    "sessionName": "workspace-db62"
   },
   "web-composer-shell-output": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-4be3"
+    "sessionName": "workspace-db62"
   },
   "web-composer-shell-output-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-6bf8"
+    "sessionName": "workspace-9bb8"
   },
   "web-composer-shell-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-6bf8"
+    "sessionName": "workspace-9bb8"
   },
   "web-composer-slash": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-4be3"
+    "sessionName": "workspace-db62"
   },
   "web-composer-slash-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-6bf8"
+    "sessionName": "workspace-9bb8"
   },
   "web-composer-undo": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-a761"
+    "sessionName": "workspace-abf9"
   },
   "web-composer-undo-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-c98a"
+    "sessionName": "workspace-3adc"
   },
   "web-context-compact": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-5feb"
+    "sessionName": "workspace-6330"
   },
   "web-context-compact-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-7260"
+    "sessionName": "workspace-fd17"
   },
   "web-context-full": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-5feb"
+    "sessionName": "workspace-6330"
   },
   "web-context-full-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-7260"
+    "sessionName": "workspace-fd17"
   },
   "web-delay-cancelled": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-f7f5"
+    "sessionName": "workspace-738f"
   },
   "web-delay-cancelled-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-b32c"
+    "sessionName": "workspace-87a3"
   },
   "web-delay-ring": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-f7f5"
+    "sessionName": "workspace-738f"
   },
   "web-delay-ring-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-b32c"
+    "sessionName": "workspace-87a3"
   },
   "web-denied": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-1644"
+    "sessionName": "workspace-3b8d"
   },
   "web-denied-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-816f"
+    "sessionName": "workspace-ccbb"
   },
   "web-edit-diff": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-a455"
+    "sessionName": "workspace-b412"
   },
   "web-edit-diff-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-e9f7"
+    "sessionName": "workspace-1cd4"
   },
   "web-help": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-2583"
+    "sessionName": "workspace-9b5f"
   },
   "web-help-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-eb7c"
+    "sessionName": "workspace-896a"
   },
   "web-image-sent": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-c818"
+    "sessionName": "workspace-1417"
   },
   "web-image-sent-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-e0a7"
+    "sessionName": "workspace-74ed"
   },
   "web-long-output": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-12da"
+    "sessionName": "workspace-836e"
   },
   "web-long-output-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-37db"
+    "sessionName": "workspace-73cd"
   },
   "web-main": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-a455"
+    "sessionName": "workspace-b412"
   },
   "web-main-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-e9f7"
+    "sessionName": "workspace-1cd4"
   },
   "web-mcp-dialog": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-d313"
+    "sessionName": "workspace-6eb5"
   },
   "web-mcp-dialog-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-c32e"
+    "sessionName": "workspace-d91d"
   },
   "web-models-dialog": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-d313"
+    "sessionName": "workspace-6eb5"
   },
   "web-models-dialog-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-c32e"
+    "sessionName": "workspace-d91d"
   },
   "web-peer-message": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-1b82"
+    "sessionName": "workspace-b6c9"
   },
   "web-peer-message-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-9a5a"
+    "sessionName": "workspace-8dbd"
   },
   "web-peers-dialog": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-1b82"
+    "sessionName": "workspace-b6c9"
   },
   "web-peers-dialog-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-9a5a"
+    "sessionName": "workspace-8dbd"
   },
   "web-peers-inbox": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-1b82"
+    "sessionName": "workspace-b6c9"
   },
   "web-peers-inbox-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-9a5a"
+    "sessionName": "workspace-8dbd"
   },
   "web-permission-card": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-316f"
+    "sessionName": "workspace-f99b"
   },
   "web-permission-card-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-3bef"
+    "sessionName": "workspace-94e5"
   },
   "web-retry-done": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-7ec7"
+    "sessionName": "workspace-1706"
   },
   "web-retry-done-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-8cda"
+    "sessionName": "workspace-c3e0"
   },
   "web-retry-status": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-7ec7"
+    "sessionName": "workspace-1706"
   },
   "web-retry-status-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-8cda"
+    "sessionName": "workspace-c3e0"
   },
   "web-session-running": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-a77e"
+    "sessionName": "workspace-c07f"
   },
   "web-session-running-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-65d1"
+    "sessionName": "workspace-1603"
   },
   "web-settings": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-2e3d"
+    "sessionName": "workspace-6b2d"
   },
   "web-settings-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-e790"
+    "sessionName": "workspace-bbb2"
   },
   "web-shared": {
     "width": 3200,
@@ -638,41 +638,41 @@
   "web-sidebar-progress": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-72ff"
+    "sessionName": "workspace-f9a7"
   },
   "web-sidebar-progress-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-b15f"
+    "sessionName": "workspace-892a"
   },
   "web-split-view": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-bdce"
+    "sessionName": "workspace-f9a7"
   },
   "web-split-view-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-cbb4"
+    "sessionName": "workspace-892a"
   },
   "web-split-zoom": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-bdce"
+    "sessionName": "workspace-f9a7"
   },
   "web-split-zoom-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-cbb4"
+    "sessionName": "workspace-892a"
   },
   "web-tools-permission": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-a455"
+    "sessionName": "workspace-b412"
   },
   "web-tools-permission-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-e9f7"
+    "sessionName": "workspace-1cd4"
   }
 }
