@@ -4,7 +4,7 @@
 
 **A coding agent written in Rust, for the terminal, the desktop and the browser.**
 
-Sessions run in a background server and keep working while no window is open.
+Sessions run in a server, apart from the windows that show them.
 Several sessions can work side by side and message each other.
 
 [![CI](https://github.com/GDNDZZK/ref/actions/workflows/ci.yml/badge.svg)](https://github.com/GDNDZZK/ref/actions/workflows/ci.yml)
@@ -26,7 +26,7 @@ Several sessions can work side by side and message each other.
 
 ## Features
 
-- **Server and interfaces are separate.** `ref-server` runs sessions, the agent loop, LLM calls, tools and permissions. `ref` (terminal), `ref-gui` (desktop window) and `ref-web` (browser) only show them. Close the window and the session keeps going; open it again from any of them, or from several at once.
+- **Server and interfaces are separate.** `ref-server` runs sessions, the agent loop, LLM calls, tools and permissions. `ref` (terminal), `ref-gui` (desktop window) and `ref-web` (browser) only show them. Sessions keep running as long as any window (terminal, desktop or browser) is connected, so you can close one and continue in another, or have several open at once. A server started by one of them exits when the last window disconnects, and running sessions stop. To keep them running with no window open, start `ref-server` yourself: `ref-server` runs until you stop it, and the interfaces connect to it.
 - **Many sessions at once.** A split view tiles all background sessions. Sessions can send each other messages, and the `build` agent can start worker sessions and give them tasks.
 - **Reads opencode configuration.** ref loads the providers, models, agents, permissions, MCP servers and commands of an existing `opencode.json`. A few keys are accepted and ignored; see [Configuration](docs/configuration.md).
 - **Three provider APIs.** Anthropic Messages, OpenAI Responses and any OpenAI-compatible Chat Completions endpoint, with model variants for reasoning effort or extended thinking. There is no native Gemini or Bedrock client.
