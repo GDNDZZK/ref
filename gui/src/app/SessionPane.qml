@@ -12,7 +12,7 @@ Item {
 	property bool compact: false
 	readonly property real compactMargin: 10 // below the input box
 	readonly property real compactColumnPadding: 16 // beside the conversation
-	readonly property real questionMaxHeightRatio: 0.6 // of the pane, for the question card
+	readonly property real questionMaxHeightRatio: 0.8 // of the pane, for the question card
 	readonly property real margin: compact ? compactMargin : Theme.pagePadding
 	readonly property real columnPadding: compact ? compactColumnPadding : Theme.pagePadding
 	// Whether the keys may answer a permission request or question of this session (one pane at a time has them).
