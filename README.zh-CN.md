@@ -1,6 +1,11 @@
 <div align="center">
 
-# ref
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/app/ref-lockup-dark.svg">
+    <img src="assets/app/ref-lockup-light.svg" alt="ref" height="96">
+  </picture>
+</h1>
 
 **用 Rust 编写的编程智能体，可在终端、桌面窗口和浏览器中使用。**
 
@@ -94,7 +99,7 @@ GUI 压缩包里是一个必须保持完整的文件夹：`ref-gui` 在自己所
 
   ```bash
   install -Dm644 ref-gui.desktop ~/.local/share/applications/ref-gui.desktop
-  install -Dm644 ref.png ~/.local/share/icons/hicolor/256x256/apps/ref.png
+  install -Dm644 ref.svg ~/.local/share/icons/hicolor/scalable/apps/ref.svg
   ln -s "$PWD/ref-gui" ~/.local/bin/ref-gui
   ```
 - **macOS**：程序没有用开发者证书签名（`ref.app` 带有 ad-hoc 签名）。如果被 macOS 拦截，运行 `xattr -dr com.apple.quarantine ref ref-web ref-server ref.app`（以你的压缩包中实际有的程序为准）。`ref.app` 可以移到 `/Applications`。

@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
-"""Build every program-icon file from the SVG sources in assets/app/.
+"""Build every program-icon file in assets/app/ from the geometry in logo.py.
 
-Sources (hand-drawn):
-  ref.svg              1024 units, full-bleed tile. Used from 64px up.
-  ref-small.svg        32 units, flat and heavier, every coordinate even so that 16, 32 and 48px renders
-                       fall on whole pixels. Used up to 48px, for the favicon and the tab icon.
-  ref-small-alert.svg  ref-small.svg with a red dot: the browser tab icon while a session needs attention.
+Sources (written from logo.py, committed):
+  ref.svg                1024 units: the four-pane mark. Used from 64px up, on macOS and in the lockups.
+  ref-small.svg          32 units: "r.", every straight edge on an even coordinate so that 16, 32 and
+                         48px renders fall on whole pixels. Used up to 48px and for the favicon.
+  ref-small-alert.svg    ref-small.svg with the dot in red: the browser tab icon while a session needs
+                         attention.
+  ref-lockup-dark.svg,   the mark and the word "ref", for dark and light backgrounds (README header,
+  ref-lockup-light.svg   title cards).
 
-Outputs (committed):
-  png/ref-<size>.png          full-bleed, for Windows, Linux and the window icon.
-  ref.ico                     Windows: 16-256, each size rendered on its own (not resampled).
-  ref-macos.svg, ref.icns     macOS: body inset on the canvas, with a shadow (see MACOS_*).
-  web/favicon.svg|png, web/favicon-alert.svg|png
+Raster outputs, only where a platform needs them (committed):
+  ref.ico                Windows: 16-256, each size rendered on its own (not resampled).
+  ref-macos.svg, ref.icns  macOS: body inset on the canvas, with a shadow (see MACOS_*).
+  web/favicon.svg, web/favicon-alert.svg, web/favicon.png (browser notifications need a raster icon)
+
+Linux uses ref.svg directly.
 
 Usage: build_app_icons.py
 """
@@ -24,16 +28,17 @@ from pathlib import Path
 import resvg_py
 from PIL import Image
 
+import logo
+
 APP_DIR = Path(__file__).resolve().parent.parent / "app"
 LARGE_SVG = APP_DIR / "ref.svg"
 SMALL_SVG = APP_DIR / "ref-small.svg"
 SMALL_ALERT_SVG = APP_DIR / "ref-small-alert.svg"
 
-LARGE_UNITS = 1024
-SMALL_UNITS = 32
+LARGE_UNITS = logo.TILE
+SMALL_UNITS = logo.SMALL_TILE
 SMALL_MAX_PIXELS = 48  # largest size drawn from the small master
 
-PNG_SIZES = (16, 24, 32, 48, 64, 128, 256, 512, 1024)
 ICO_SIZES = (16, 24, 32, 48, 64, 128, 256)
 FAVICON_SIZE = 32
 
@@ -92,12 +97,16 @@ def macos_png(pixels: int) -> bytes:
     return render(macos_svg(text, units), pixels)
 
 
-def write_png_set() -> None:
-    folder = APP_DIR / "png"
-    folder.mkdir(exist_ok=True)
-    for pixels in PNG_SIZES:
-        text, _ = source_for(pixels)
-        (folder / f"ref-{pixels}.png").write_bytes(render(text, pixels))
+def write_sources() -> None:
+    sources = {
+        LARGE_SVG: logo.large(),
+        SMALL_SVG: logo.small(),
+        SMALL_ALERT_SVG: logo.small(alert=True),
+        APP_DIR / "ref-lockup-dark.svg": logo.lockup(on_dark=True),
+        APP_DIR / "ref-lockup-light.svg": logo.lockup(on_dark=False),
+    }
+    for path, text in sources.items():
+        path.write_text(text, encoding="utf-8")
 
 
 def write_ico() -> None:
@@ -126,24 +135,23 @@ def write_macos() -> None:
 def write_favicons() -> None:
     folder = APP_DIR / "web"
     folder.mkdir(exist_ok=True)
-    for source, name in ((SMALL_SVG, "favicon"), (SMALL_ALERT_SVG, "favicon-alert")):
-        shutil.copyfile(source, folder / f"{name}.svg")
-        (folder / f"{name}.png").write_bytes(render(source.read_text(encoding="utf-8"), FAVICON_SIZE))
+    shutil.copyfile(SMALL_SVG, folder / "favicon.svg")
+    shutil.copyfile(SMALL_ALERT_SVG, folder / "favicon-alert.svg")
+    (folder / "favicon.png").write_bytes(render(SMALL_SVG.read_text(encoding="utf-8"), FAVICON_SIZE))
 
 
 def verify() -> None:
-    """Read every container back: sizes in the ICO, entries in the ICNS, canvas of the PNGs."""
+    """Read every container back: sizes in the ICO, entries in the ICNS, canvas of the favicon."""
     with Image.open(APP_DIR / "ref.ico") as ico:
         assert set(ico.info["sizes"]) == {(s, s) for s in ICO_SIZES}, ico.info["sizes"]
     with Image.open(APP_DIR / "ref.icns") as icns:
         assert icns.size == (MACOS_CANVAS, MACOS_CANVAS), icns.size
-    for pixels in PNG_SIZES:
-        with Image.open(APP_DIR / "png" / f"ref-{pixels}.png") as png:
-            assert png.size == (pixels, pixels)
+    with Image.open(APP_DIR / "web" / "favicon.png") as png:
+        assert png.size == (FAVICON_SIZE, FAVICON_SIZE), png.size
 
 
 def main() -> None:
-    write_png_set()
+    write_sources()
     write_ico()
     write_macos()
     write_favicons()

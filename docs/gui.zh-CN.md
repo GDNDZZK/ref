@@ -25,7 +25,7 @@
 
 | 系统 | 内容 |
 |---|---|
-| Linux | `ref-gui`、`ref-server`、`lib/`、`plugins/` 和 `qml/`（Qt 和其他库）、`qt.conf`、`ref-gui.desktop`、`ref.png` |
+| Linux | `ref-gui`、`ref-server`、`lib/`、`plugins/` 和 `qml/`（Qt 和其他库）、`qt.conf`、`ref-gui.desktop`、`ref.svg` |
 | macOS | `ref.app`，里面有 `ref-server` 和全部库 |
 | Windows | `ref-gui.exe`、`ref-server.exe`、Qt 和 Visual C++ 运行库的 DLL、`plugins\` 和 `qml\` |
 
