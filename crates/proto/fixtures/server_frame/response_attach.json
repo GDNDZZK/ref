@@ -169,6 +169,52 @@
           "time": 1760000021000
         }
       ],
+      "pending_questions": [
+        {
+          "session_id": "ses_a1b2c3d4",
+          "message_id": "msg_0f1e2d3c",
+          "call_id": "call_9x8y7z",
+          "questions": [
+            {
+              "question": "How should the loop bound be fixed?",
+              "header": "Loop bound",
+              "options": [
+                {
+                  "label": "Exclusive range",
+                  "description": "Use `0..items.len()`",
+                  "default": true
+                },
+                {
+                  "label": "Iterator",
+                  "description": "Use `items.iter()` instead of indexing",
+                  "default": false
+                }
+              ],
+              "multiple": false,
+              "custom": true
+            },
+            {
+              "question": "Which checks should run afterwards?",
+              "header": "Checks",
+              "options": [
+                {
+                  "label": "Unit tests",
+                  "description": "cargo test",
+                  "default": true
+                },
+                {
+                  "label": "Clippy",
+                  "description": "cargo clippy",
+                  "default": false
+                }
+              ],
+              "multiple": true,
+              "custom": false
+            }
+          ],
+          "time": 1760000022000
+        }
+      ],
       "queued": [
         {
           "id": "msg_peer_01",
