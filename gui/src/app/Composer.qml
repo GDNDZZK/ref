@@ -12,6 +12,9 @@ Item {
 
 	required property ChatSession session
 	readonly property ComposerModel model: session.composer
+	// Whether the input box is there (a split-view tile shows it only while focused). Hidden, it
+	// keeps everything it holds; the queue strip above it stays.
+	property bool boxShown: true
 
 	readonly property int padding: 8
 	readonly property int maxInputHeight: 220
@@ -95,16 +98,21 @@ Item {
 
 		readonly property real attachmentBlock: strip.count > 0 ? strip.implicitHeight + composer.thumbRowGap : 0
 		readonly property bool dropping: drop.containsDrag
+		readonly property real fullHeight: composer.padding + attachmentBlock + Math.min(input.implicitHeight, composer.maxInputHeight)
+			+ composer.textGap + composer.tagRowHeight + composer.padding
 
 		anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-		height: composer.padding + attachmentBlock + Math.min(input.implicitHeight, composer.maxInputHeight)
-			+ composer.textGap + composer.tagRowHeight + composer.padding
+		height: composer.boxShown ? fullHeight : 0
 		radius: Theme.radiusLarge
 		color: composer.model.shellMode ? Theme.shellSurface : Theme.surface
 		border.color: composer.model.shellMode ? Theme.shellBorder
 			: (dropping || input.activeFocus ? Theme.accent : Theme.border)
 		clip: true
+		opacity: composer.boxShown ? 1 : 0
+		visible: composer.boxShown || height > 0
+		enabled: composer.boxShown
 
+		Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 		Behavior on height { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 		Behavior on color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 		Behavior on border.color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
@@ -270,7 +278,7 @@ Item {
 		anchors { left: parent.left; right: parent.right; bottom: parent.top; bottomMargin: popupGap }
 		kind: composer.model.completionKind
 		entries: composer.model.completionKind === "file" ? composer.model.files
-			: (composer.model.completionKind === "command" ? Commands.match(composer.model.completionQuery, true) : [])
+			: (composer.model.completionKind === "command" ? Commands.matching(composer.model.completionQuery, true) : [])
 		onAccepted: index => {
 			popup.currentIndex = index
 			composer.acceptCompletion(false)

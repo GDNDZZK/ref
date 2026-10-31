@@ -151,7 +151,7 @@ fn states(tools: &[Tool], name: &str) -> Vec<ToolState> {
 async fn sessions_run_in_the_sample_workspace_whatever_cwd_is_asked() {
     let rig = rig().await;
     let cwd = rig.session.info().cwd;
-    let workspace = std::fs::canonicalize(rig.mock.workspace()).unwrap();
+    let workspace = dunce::canonicalize(rig.mock.workspace()).unwrap();
     assert_eq!(Path::new(&cwd), workspace);
     rig.prompt("hello");
     rig.run(true).await;
@@ -329,7 +329,9 @@ fn snapshot(dir: &Path) -> Vec<(PathBuf, u64, std::time::SystemTime)> {
     while let Some(d) = todo.pop() {
         for entry in std::fs::read_dir(&d).unwrap() {
             let entry = entry.unwrap();
-            let meta = entry.metadata().unwrap();
+            // Not `entry.metadata()`: on Windows that is the directory index's copy, which
+            // NTFS refreshes lazily, so a directory's time can lag behind its contents.
+            let meta = std::fs::metadata(entry.path()).unwrap();
             if meta.is_dir() {
                 todo.push(entry.path());
             }
@@ -413,7 +415,7 @@ async fn the_remaining_tool_scripts_end_in_the_states_they_promise() {
 async fn directory_listing_stays_inside_the_workspace() {
     let rig = rig().await;
     rig.conn.lock().cwd = rig.mock.workspace().to_string_lossy().into();
-    let workspace = std::fs::canonicalize(rig.mock.workspace()).unwrap();
+    let workspace = dunce::canonicalize(rig.mock.workspace()).unwrap();
     let list = |path: &str| {
         let req = Request::ListDirs { path: path.into() };
         api::handle(&rig.hub, &rig.conn, req)
@@ -423,7 +425,9 @@ async fn directory_listing_stays_inside_the_workspace() {
     assert_eq!(home["path"], workspace.to_string_lossy().as_ref());
     assert_eq!(home["dirs"], json!(["data", "docs", "scratch", "src"]));
     assert!(list("src/..").await.is_ok());
-    for outside in ["/", "..", "/tmp", "~/../.."] {
+    // The temporary directory holds the mock's root, so it exists on every platform.
+    let temp = std::env::temp_dir().to_string_lossy().into_owned();
+    for outside in ["/", "..", temp.as_str(), "~/../.."] {
         let err = list(outside).await.unwrap_err();
         assert!(
             err.contains("outside the mock workspace"),

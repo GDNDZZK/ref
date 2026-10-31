@@ -149,16 +149,22 @@ fn editor_command(editor: &str, path: &std::path::Path) -> std::process::Command
     cmd
 }
 
-fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
-    let cwd = match &cli.path {
-        Some(p) => std::fs::canonicalize(p).map_err(|e| anyhow::anyhow!("{p}: {e}"))?,
+/// The absolute start directory. `dunce` keeps Windows paths free of the `\\?\` prefix, which
+/// the server never reports for its own paths.
+fn start_dir(path: Option<&str>) -> anyhow::Result<String> {
+    let dir = match path {
+        Some(p) => dunce::canonicalize(p).map_err(|e| anyhow::anyhow!("{p}: {e}"))?,
         None => std::env::current_dir()?,
     };
-    if !cwd.is_dir() {
-        anyhow::bail!("{} is not a directory", cwd.display());
+    if !dir.is_dir() {
+        anyhow::bail!("{} is not a directory", dir.display());
     }
-    let cwd = cwd.to_string_lossy().into_owned();
+    Ok(dir.to_string_lossy().into_owned())
+}
+
+fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    let cwd = start_dir(cli.path.as_deref())?;
     let model = match &cli.model {
         Some(m) => Some(
             ModelRef::parse(m)
@@ -331,4 +337,26 @@ async fn run(
         let _ = execute!(std::io::stdout(), crossterm::terminal::SetTitle(""));
     }
     Ok(app.epilogue())
+}
+
+#[cfg(test)]
+mod start_dir_tests {
+    use super::start_dir;
+
+    #[test]
+    fn start_dir_is_absolute_and_must_be_a_directory() {
+        let here = std::env::current_dir().unwrap();
+        assert_eq!(
+            start_dir(None).unwrap(),
+            here.to_string_lossy().into_owned()
+        );
+        assert_eq!(
+            start_dir(Some(".")).unwrap(),
+            dunce::canonicalize(&here).unwrap().to_string_lossy()
+        );
+        assert!(!start_dir(Some(".")).unwrap().starts_with(r"\\?\"));
+        let manifest = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
+        assert!(start_dir(Some(manifest)).is_err(), "a file is no directory");
+        assert!(start_dir(Some("/no/such/ref-dir")).is_err());
+    }
 }

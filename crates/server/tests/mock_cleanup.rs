@@ -7,6 +7,8 @@ use futures_util::{SinkExt as _, StreamExt as _};
 use ref_client::MockBackend;
 use tokio_tungstenite::tungstenite::Message;
 
+/// The variable `std::env::temp_dir()` reads.
+const TEMP_DIR_VAR: &str = if cfg!(windows) { "TMP" } else { "TMPDIR" };
 const MOCK_DIR_PREFIX: &str = "ref-mock-";
 const HELLO: &str = r#"{"id":1,"op":"hello","client":"cleanup-test","version":2,"cwd":"/tmp"}"#;
 
@@ -26,8 +28,8 @@ async fn shutdown_removes_the_mock_directory() {
     let tmp = std::env::temp_dir().join(format!("ref-mock-cleanup-{}", std::process::id()));
     std::fs::create_dir_all(&tmp).unwrap();
     // SAFETY: this file holds a single test, so nothing else reads or writes the environment
-    // concurrently. The mock inherits TMPDIR and creates its directory there.
-    unsafe { std::env::set_var("TMPDIR", &tmp) };
+    // concurrently. The mock inherits the variable and creates its directory there.
+    unsafe { std::env::set_var(TEMP_DIR_VAR, &tmp) };
 
     let mock = MockBackend::spawn_with(Path::new(env!("CARGO_BIN_EXE_ref-server")))
         .await

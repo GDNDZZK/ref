@@ -4,6 +4,7 @@
 #
 #   REF_DEPS_DIR=/path/to/deps gui/scripts/install-qt.sh
 #
+# Needs git to fetch aqtinstall (see versions.sh).
 # Environment: REF_DEPS_DIR (default gui/.deps), AQT_ARCH (default: this machine's desktop arch).
 # Windows on Arm also installs the x64 Qt: the Arm build runs its moc, rcc and qsb from there.
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
@@ -19,7 +20,7 @@ if [[ ! -d "$venv" ]]; then
 fi
 venv_bin="$venv/bin"
 [[ -d "$venv_bin" ]] || venv_bin="$venv/Scripts" # Windows layout
-"$venv_bin/python" -m pip install --quiet "aqtinstall==$AQTINSTALL_VERSION"
+"$venv_bin/python" -m pip install --quiet "$AQTINSTALL_SPEC"
 
 aqt_options=()
 if [[ "$host" == windows_arm64 ]]; then

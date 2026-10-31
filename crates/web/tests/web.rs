@@ -372,17 +372,24 @@ async fn a_second_start_opens_the_running_instance() {
     let env = Env::new("single");
     let (web, _upstream) = web_with_fake_upstream(&env).await;
     let port = web.port.to_string();
-    let other_dir = env.dir.canonicalize().unwrap();
+    let other_dir = dunce::canonicalize(&env.dir).unwrap();
 
     let second = env.run(&["--no-open", "--port", &port, other_dir.to_str().unwrap()]);
     assert!(second.status.success(), "{second:?}");
     let out = String::from_utf8_lossy(&second.stdout);
     assert!(out.contains("already running"), "{out}");
-    assert!(out.contains(&format!("token={}", web.token)), "{out}");
-    assert!(
-        out.contains(&format!("dir={}", other_dir.display())),
-        "{out}"
-    );
+    // The address carries the directory percent-encoded: compare the decoded query.
+    let url = out
+        .split_whitespace()
+        .find(|word| word.starts_with("http://"))
+        .unwrap_or_else(|| panic!("no login URL in {out}"));
+    let query: std::collections::HashMap<_, _> = reqwest::Url::parse(url)
+        .unwrap()
+        .query_pairs()
+        .into_owned()
+        .collect();
+    assert_eq!(query["token"], web.token, "{out}");
+    assert_eq!(query["dir"], other_dir.to_str().unwrap(), "{out}");
 }
 
 #[tokio::test]

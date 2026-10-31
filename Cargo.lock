@@ -3089,6 +3089,7 @@ dependencies = [
  "clap",
  "crossterm",
  "dirs",
+ "dunce",
  "futures-util",
  "png",
  "pulldown-cmark",

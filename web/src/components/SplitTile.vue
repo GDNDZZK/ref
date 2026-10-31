@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // One session in the split view (SplitView.qml's tile): a header with its state and a zoom button,
 // and the session itself below. Zoomed, the header folds away and the frame fills the area.
-import { computed } from 'vue'
+import { computed, nextTick, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useNow } from '../composables/useNow.ts'
 import type { ChatSession } from '../model/chatSession.ts'
@@ -12,12 +12,34 @@ import SessionDot from './SessionDot.vue'
 import SessionPane from './SessionPane.vue'
 
 const BADGE_SIZE = 14
+const PRESS_TARGETS = 'button, a, summary'
 
 const props = defineProps<{ session: ChatSession; focused: boolean; zoomed: boolean; hidden: boolean }>()
 const emit = defineEmits<{ focus: []; zoom: [] }>()
 
 const { t } = useI18n()
 const now = useNow()
+
+// A press on a button focuses the tile only once the click is through: the composer unfolding
+// would move the button from under the pointer, and the click would be lost.
+// The press itself moves the keyboard focus off the box, so a tile that took the focus with this
+// click puts the caret into its box again once the click is through.
+const pane = useTemplateRef<InstanceType<typeof SessionPane>>('pane')
+let focusedByPress = false
+
+function onPointerDown(event: PointerEvent): void {
+  focusedByPress = !props.focused
+  if (event.target instanceof Element && event.target.closest(PRESS_TARGETS)) return
+  emit('focus')
+}
+
+async function onClick(): Promise<void> {
+  emit('focus')
+  if (!focusedByPress) return
+  focusedByPress = false
+  await nextTick()
+  pane.value?.focusComposer()
+}
 
 const info = computed(() => props.session.info)
 const state = computed(() => (info.value ? rowState(info.value) : 'idle'))
@@ -31,7 +53,8 @@ const elapsed = computed(() => (info.value ? runningTime(info.value, now.value) 
     class="tile"
     :class="{ focused, zoomed, hidden }"
     :data-tile="session.id"
-    @pointerdown.capture="emit('focus')"
+    @pointerdown.capture="onPointerDown"
+    @click="onClick"
   >
     <header
       class="header"
@@ -58,7 +81,7 @@ const elapsed = computed(() => (info.value ? runningTime(info.value, now.value) 
         <Icon icon="maximize-20" />
       </button>
     </header>
-    <SessionPane class="body" :session="session" />
+    <SessionPane ref="pane" class="body" :session="session" :composer-shown="focused || zoomed" />
   </div>
 </template>
 
