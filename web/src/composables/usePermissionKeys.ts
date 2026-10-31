@@ -28,7 +28,7 @@ function inDialog(target: EventTarget | null): boolean {
 
 // The field for an own answer handles its keys itself.
 function inQuestionField(target: EventTarget | null): boolean {
-  return target instanceof HTMLInputElement && target.closest('.question') !== null
+  return target instanceof HTMLInputElement && target.hasAttribute('data-question-field')
 }
 
 export function usePermissionKeys(): void {

@@ -142,6 +142,7 @@ watch(
                 v-if="item.custom && current.choices[current.tab]!.customPicked"
                 ref="field"
                 class="field"
+                data-question-field
                 type="text"
                 :value="current.choices[current.tab]!.customText"
                 :placeholder="t('question.customPlaceholder')"
@@ -329,12 +330,17 @@ watch(
   height: 28px;
   margin-left: 38px;
   padding: 0 8px;
+  border: 0;
   border-radius: var(--radius-small);
   background: var(--background);
   box-shadow: inset 0 0 0 1px var(--border);
   color: var(--text);
   font: inherit;
   outline: 0;
+}
+
+.field::placeholder {
+  color: var(--text-muted);
 }
 
 .field:focus {

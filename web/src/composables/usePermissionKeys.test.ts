@@ -129,11 +129,9 @@ describe('keys for a pending question', () => {
   it('leaves the keys of the own-answer field to the field', async () => {
     const { questionReply, host } = await ask(question())
     await vi.advanceTimersByTimeAsync(PERMISSION_GUARD_MS)
-    const card = document.createElement('div')
-    card.className = 'question'
     const field = document.createElement('input')
-    card.append(field)
-    document.body.append(card)
+    field.setAttribute('data-question-field', '')
+    document.body.append(field)
     expect(press('Enter', field).defaultPrevented).toBe(false)
     expect(press('a', field).defaultPrevented).toBe(false)
     expect(questionReply).not.toHaveBeenCalled()

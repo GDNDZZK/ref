@@ -339,7 +339,7 @@
   "notifySettings": {
     "title": "Notifications",
     "enable": "Show system notifications",
-    "permission": "A tool needs permission",
+    "permission": "A session waits for you (permission or question)",
     "turnDone": "A turn finished",
     "turnError": "A turn ended with an error",
     "insecure": "Not available on this page: browsers only show notifications on https or localhost. The tab title flashes instead.",
