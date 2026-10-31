@@ -63,7 +63,7 @@ function close(item: SessionItem): void {
     :search-label="t('dialog.sessions.search')"
     :items="items"
     :text="(item) => `${labelOf(item)} ${item.info.cwd}`"
-    :checked="workspace.currentId"
+    :checked="workspace.focusedId"
     :empty="t('sidebar.noMatch')"
     @pick="choose"
     @close="dialogs.close()"
