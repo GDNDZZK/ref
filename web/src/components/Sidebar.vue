@@ -260,6 +260,9 @@ function open(id: string): void {
 }
 
 .body {
+  --search-height: 32px;
+  --search-gap: 4px;
+
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -279,12 +282,19 @@ function open(id: string): void {
 }
 
 .running {
+  /* Running keeps its rows and scrolls only when History would get fewer than the minimum rows. */
   display: flex;
   flex: 0 1 auto;
   flex-direction: column;
   gap: 2px;
   min-height: 0;
-  max-height: max(50%, calc(var(--sidebar-min-running-rows) * (var(--sidebar-row-height) + 2px)));
+  max-height: max(
+    calc(
+      100% - 2 * var(--sidebar-section-height) - var(--search-height) - var(--search-gap) -
+        var(--sidebar-min-history-rows) * var(--sidebar-history-row-height)
+    ),
+    calc(var(--sidebar-min-running-rows) * (var(--sidebar-row-height) + 2px))
+  );
   overflow-y: auto;
 }
 
@@ -317,8 +327,8 @@ function open(id: string): void {
   display: flex;
   flex: none;
   align-items: center;
-  height: 32px;
-  margin-bottom: 4px;
+  height: var(--search-height);
+  margin-bottom: var(--search-gap);
   border-radius: 16px;
   background: var(--surface);
   box-shadow: inset 0 0 0 1px var(--border);
