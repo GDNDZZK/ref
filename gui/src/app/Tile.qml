@@ -210,13 +210,19 @@ Item {
 			composerShown: tile.focused || tile.expanded
 		}
 
-		// A click anywhere in the tile focuses it, and its input box.
-		TapHandler {
-			acceptedButtons: Qt.LeftButton
-			gesturePolicy: TapHandler.ReleaseWithinBounds
-			onTapped: {
-				Workspace.focusTile(tile.sessionId)
-				pane.focusInput()
+		// A click anywhere in the tile focuses it, and its input box. The overlay sits in front so that it
+		// sees the press first: selectable text and buttons take the press for themselves, and then no
+		// handler of the items behind them is asked. Passive, so those still get the click as well.
+		Item {
+			anchors.fill: parent
+
+			TapHandler {
+				acceptedButtons: Qt.LeftButton
+				gesturePolicy: TapHandler.DragThreshold
+				onTapped: {
+					Workspace.focusTile(tile.sessionId)
+					pane.focusInput()
+				}
 			}
 		}
 	}
