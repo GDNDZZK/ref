@@ -276,42 +276,42 @@
   "gui-sidebar-progress": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-0da7"
+    "sessionName": "workspace-5f7d"
   },
   "gui-sidebar-progress-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-dce9"
+    "sessionName": "workspace-551b"
   },
   "gui-split-readme": {
     "width": 2560,
-    "height": 2240,
-    "sessionName": "workspace-877d"
+    "height": 2688,
+    "sessionName": "workspace-9388"
   },
   "gui-split-readme-zh": {
     "width": 2560,
-    "height": 2240,
-    "sessionName": "workspace-2f7b"
+    "height": 2688,
+    "sessionName": "workspace-e1bd"
   },
   "gui-split-view": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-0da7"
+    "sessionName": "workspace-5f7d"
   },
   "gui-split-view-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-dce9"
+    "sessionName": "workspace-551b"
   },
   "gui-split-zoom": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-0da7"
+    "sessionName": "workspace-5f7d"
   },
   "gui-split-zoom-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-dce9"
+    "sessionName": "workspace-551b"
   },
   "gui-tools-permission": {
     "width": 2560,
@@ -648,42 +648,42 @@
   "web-sidebar-progress": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-f9a7"
+    "sessionName": "workspace-1734"
   },
   "web-sidebar-progress-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-892a"
+    "sessionName": "workspace-86eb"
   },
   "web-split-readme": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-72ad"
+    "sessionName": "workspace-a697"
   },
   "web-split-readme-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-356a"
+    "sessionName": "workspace-c47b"
   },
   "web-split-view": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-f9a7"
+    "sessionName": "workspace-1734"
   },
   "web-split-view-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-892a"
+    "sessionName": "workspace-86eb"
   },
   "web-split-zoom": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-f9a7"
+    "sessionName": "workspace-1734"
   },
   "web-split-zoom-zh": {
     "width": 3200,
     "height": 2000,
-    "sessionName": "workspace-892a"
+    "sessionName": "workspace-86eb"
   },
   "web-tools-permission": {
     "width": 3200,
