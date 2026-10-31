@@ -236,22 +236,17 @@ fn docs(ctx: &Ctx) -> Round {
 mod tests {
     use super::*;
     use crate::mock::script::Step;
+    use crate::mock::scripts::tests::ctx;
     use serde_json::Value;
 
     const MAIN: &str = "ses_main";
 
-    fn ctx(round: usize) -> Ctx {
-        Ctx {
-            prompt: String::new(),
-            args: MAIN.into(),
-            root_prompt: "orchestrate-long".into(),
-            peer_reports: 0,
-            typed: vec![],
-            round,
-            session_id: MAIN.into(),
-            attempt: 1,
-            tool_results: vec![],
-        }
+    /// The context of a helper of `orchestrate-long` that reports to the main session.
+    fn at(round: usize) -> Ctx {
+        let mut c = ctx("orch-long-scout ses_main", round);
+        c.args = MAIN.into();
+        c.session_id = MAIN.into();
+        c
     }
 
     fn tool_calls(round: &Round) -> Vec<(&'static str, Value)> {
@@ -293,7 +288,7 @@ mod tests {
             let mut long = 0;
             let mut sent = 0;
             for round in 0..=report_round + 1 {
-                for (tool, input) in tool_calls(&play(&ctx(round))) {
+                for (tool, input) in tool_calls(&play(&at(round))) {
                     match tool {
                         "bash" if input["command"].as_str().unwrap().contains("sleep") => {
                             assert!(sent == 0, "the command comes before the report");
@@ -313,7 +308,7 @@ mod tests {
 
     #[test]
     fn the_main_session_starts_the_long_helpers() {
-        let first = directing(&ctx(2), PREFIX);
+        let first = directing(&at(2), PREFIX);
         let calls = tool_calls(&first);
         assert_eq!(calls[0].0, "create_session");
         assert_eq!(calls[0].1["name"], "fixer");
