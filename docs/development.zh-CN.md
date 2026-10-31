@@ -136,7 +136,7 @@ scripts/package.sh --version v0.2.0 --target x86_64-unknown-linux-gnu \
 
 `scripts/verify-gui-package.sh DIR` 检查解压后的 `ref-gui` 压缩包，必须在它所构建的平台上运行。CI 在打包后运行它。它检查：不依赖构建机的环境时每个库都能找到、KSyntaxHighlighting 模块在包里、Controls 样式只有 Basic、`ref-gui --smoke --mock` 能打开会话（Linux 上在 `xvfb-run` 下）。Linux 上还检查包对系统的要求，macOS 上检查签名以及没有引用 app 之外的路径，Windows 上检查 `ref-gui.exe` 使用 GUI 子系统。
 
-**Linux 的要求。** C++23 需要 GCC 13，而 Ubuntu 22.04 没有，所以 CI 在 Ubuntu 24.04 上构建 Linux 的 GUI，`ref`、`ref-web` 和 `ref-server` 仍在 22.04 上构建。Qt 6.12.0 自带的库最多需要 glibc 2.34。用 GCC 13 编译的程序需要 `libstdc++` 中的 `CXXABI_1.3.14`，Ubuntu 22.04 和 Debian 12 的 GCC 12 没有它。因此，只要包里有东西需要高于 glibc 2.35、`GLIBCXX_3.4.32` 或 `CXXABI_1.3.14`，`verify-gui-package.sh` 就会失败；README 写的是同样的数字。如果更新的编译器或 Qt 抬高了其中某项，请同时修改脚本开头的常量和 README。
+**Linux 的要求。** C++23 需要 GCC 13，而 Ubuntu 22.04 没有，所以 CI 在 Ubuntu 24.04 上构建 Linux 的 GUI，`ref`、`ref-web` 和 `ref-server` 仍在 22.04 上构建。在那里构建出的程序需要 glibc 2.38：Ubuntu 24.04 的头文件会把 `strtol` 等调用换成 glibc 2.38 引入的 `__isoc23_*` 符号，aqtinstall 安装的 arm64 版 Qt 也是在 Ubuntu 24.04 上构建的，同样需要 2.38（x86-64 版 Qt 最多需要 2.34）。要针对更旧的 glibc 构建 GUI，需要另一套工具链和 Qt 构建，项目目前没有。用 GCC 13 编译的程序需要 `libstdc++` 中的 `CXXABI_1.3.14`，Ubuntu 22.04 和 Debian 12 的 GCC 12 没有它。因此，只要包里有东西需要高于 glibc 2.38、`GLIBCXX_3.4.32` 或 `CXXABI_1.3.14`，`verify-gui-package.sh` 就会失败；README 写的是同样的数字。如果更新的编译器或 Qt 抬高了其中某项，请同时修改脚本开头的常量和 README。
 
 ## 持续集成与发布
 
