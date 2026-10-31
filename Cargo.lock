@@ -2934,7 +2934,7 @@ dependencies = [
 
 [[package]]
 name = "ref-client"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "rand 0.9.5",
  "ref-proto",
@@ -2948,7 +2948,7 @@ dependencies = [
 
 [[package]]
 name = "ref-config"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -2962,7 +2962,7 @@ dependencies = [
 
 [[package]]
 name = "ref-llm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2981,7 +2981,7 @@ dependencies = [
 
 [[package]]
 name = "ref-mcp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "futures-util",
@@ -2997,7 +2997,7 @@ dependencies = [
 
 [[package]]
 name = "ref-proto"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dirs",
  "serde",
@@ -3007,7 +3007,7 @@ dependencies = [
 
 [[package]]
 name = "ref-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3042,7 +3042,7 @@ dependencies = [
 
 [[package]]
 name = "ref-sys"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
@@ -3050,7 +3050,7 @@ dependencies = [
 
 [[package]]
 name = "ref-tools"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3080,7 +3080,7 @@ dependencies = [
 
 [[package]]
 name = "ref-tui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -3108,7 +3108,7 @@ dependencies = [
 
 [[package]]
 name = "ref-web"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
