@@ -86,11 +86,59 @@ async function captureSplit(browser: Browser): Promise<void> {
   })
 }
 
-export async function captureTui(): Promise<void> {
+// M5 `outage`: two tools, four failed requests with growing waits, then the run goes on. A second
+// run of the same prompt is stopped with esc esc while it waits. Markers: enter, attempt1..4,
+// done, again, esc.
+const OUTAGE_PROMPT = 'outage run the tests and fix the failures'
+const OUTAGE_DONE = 'All 12 tests pass now.'
+const OUTAGE_ATTEMPTS = 4
+const OUTAGE_WAIT_MS = 90_000
+const ESC = '\x1b'
+const DOUBLE_ESC_GAP_MS = 150
+const BEFORE_ESC_MS = 1200
+
+async function captureOutage(): Promise<void> {
+  await withTui(async (tui) => {
+    await tui.type(OUTAGE_PROMPT, TYPING_DELAY_MS)
+    tui.mark('enter')
+    tui.send(KEYS.enter)
+    for (let attempt = 1; attempt <= OUTAGE_ATTEMPTS; attempt++) {
+      await tui.waitForText(`(attempt ${attempt})`, OUTAGE_WAIT_MS)
+      tui.mark(`attempt${attempt}`)
+    }
+    await tui.waitForText(OUTAGE_DONE, OUTAGE_WAIT_MS)
+    tui.mark('done')
+    await tui.pause(1500)
+
+    await tui.type(OUTAGE_PROMPT, TYPING_DELAY_MS)
+    tui.mark('again')
+    tui.send(KEYS.enter)
+    await tui.waitForText('(attempt 1)', OUTAGE_WAIT_MS)
+    await tui.pause(BEFORE_ESC_MS)
+    tui.mark('esc')
+    tui.send(ESC)
+    await tui.pause(DOUBLE_ESC_GAP_MS)
+    tui.send(ESC)
+    await tui.pause(2500)
+
+    mkdirSync(CASTS_DIR, { recursive: true })
+    tui.saveCast(join(CASTS_DIR, 'tui-outage.cast'))
+  })
+}
+
+// TUI captures by name, for `pnpm capture tui --only name`.
+export const TUI_CAPTURES: Record<string, (browser: Browser) => Promise<void>> = {
+  tools: captureTools,
+  split: captureSplit,
+  outage: captureOutage,
+}
+
+export async function captureTui(only?: readonly string[]): Promise<void> {
   const browser = await launchChromium()
   try {
-    await captureTools(browser)
-    await captureSplit(browser)
+    for (const [name, capture] of Object.entries(TUI_CAPTURES)) {
+      if (!only || only.includes(name)) await capture(browser)
+    }
   } finally {
     await browser.close()
   }

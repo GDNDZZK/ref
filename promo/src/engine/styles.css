@@ -47,6 +47,11 @@ body {
   background: var(--background);
 }
 
+.shot-overlay {
+  background: none;
+  z-index: 1;
+}
+
 .part {
   position: absolute;
 }

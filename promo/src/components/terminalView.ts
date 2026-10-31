@@ -13,6 +13,8 @@ interface Cast {
   cols: number
   rows: number
   events: CastEvent[]
+  // Markers the capture set (capture/lib/tuiSession.ts mark), seconds into the cast.
+  marks: Map<string, number>
 }
 
 export interface TerminalViewOptions {
@@ -24,10 +26,15 @@ export interface TerminalViewOptions {
   fontSize: number
   // Rows at the bottom that stay out of view (the status line shows the random mock path).
   hideLastRows?: number
+  // A close-up: the screen scaled up so that a point of it (fractions of the screen) is in the
+  // middle of the window; with `rows` the window is only that many scaled rows high.
+  closeup?: { scale: number; x: number; y: number; rows?: number }
   // Cast seconds that pass per video second.
   speed?: number
-  // Video time at which the cast starts playing.
+  // Video time at which the cast starts playing: from its beginning, or from `castFrom`.
   start: number
+  // Plays from a marker of the cast, `offset` seconds after it (negative: before).
+  castFrom?: { mark: string; offset?: number }
   from: number
   to: number
 }
@@ -36,16 +43,26 @@ const ENTER_SECONDS = 0.8
 const EXIT_SECONDS = 0.35
 const ENTER_SCALE = 0.94
 
-// asciicast v2: a JSON header line, then [seconds, "o", text] lines.
+// asciicast v2: a JSON header line, then [seconds, "o", text] output and [seconds, "m", label] markers.
 async function loadCast(url: string): Promise<Cast> {
   const text = await (await fetch(url)).text()
   const [headerLine, ...eventLines] = text.split('\n').filter((line) => line.length > 0)
   const header = JSON.parse(headerLine!) as { width: number; height: number }
-  const events = eventLines.map((line) => {
-    const [time, , data] = JSON.parse(line) as [number, string, string]
-    return { time, data }
-  })
-  return { cols: header.width, rows: header.height, events }
+  const events: CastEvent[] = []
+  const marks = new Map<string, number>()
+  for (const line of eventLines) {
+    const [time, kind, data] = JSON.parse(line) as [number, string, string]
+    if (kind === 'o') events.push({ time, data })
+    else if (kind === 'm') marks.set(data, time)
+  }
+  return { cols: header.width, rows: header.height, events, marks }
+}
+
+function castStart(cast: Cast, castFrom: TerminalViewOptions['castFrom'], url: string): number {
+  if (!castFrom) return 0
+  const mark = cast.marks.get(castFrom.mark)
+  if (mark === undefined) throw new Error(`the cast ${url} has no marker "${castFrom.mark}"`)
+  return mark + (castFrom.offset ?? 0)
 }
 
 function nextFrame(): Promise<void> {
@@ -77,9 +94,20 @@ export function terminalView(options: TerminalViewOptions): Part {
     terminal.open(host)
     await nextFrame()
     const screen = host.querySelector<HTMLElement>('.xterm-screen')!
-    frame.style.width = `${screen.offsetWidth}px`
+    const width = screen.offsetWidth
+    const rowHeight = screen.offsetHeight / cast.rows
     const shownRows = cast.rows - (options.hideLastRows ?? 0)
-    frame.style.height = `${(screen.offsetHeight * shownRows) / cast.rows + TITLE_BAR_HEIGHT_PX}px`
+    const closeup = options.closeup
+    const viewHeight = closeup?.rows ? closeup.rows * rowHeight * closeup.scale : rowHeight * shownRows
+    frame.style.width = `${width}px`
+    frame.style.height = `${viewHeight + TITLE_BAR_HEIGHT_PX}px`
+    if (closeup) {
+      const clamp = (offset: number, size: number, view: number) => Math.min(0, Math.max(view - size * closeup.scale, offset))
+      const x = clamp(width / 2 - closeup.x * width * closeup.scale, width, width)
+      const y = clamp(viewHeight / 2 - closeup.y * screen.offsetHeight * closeup.scale, rowHeight * shownRows, viewHeight)
+      host.style.transformOrigin = '0 0'
+      host.style.transform = `translate(${x}px, ${y}px) scale(${closeup.scale})`
+    }
     return { terminal, cast }
   }
 
@@ -89,7 +117,7 @@ export function terminalView(options: TerminalViewOptions): Part {
       ready ??= open()
       const { terminal, cast } = await ready
 
-      const castTime = Math.max(0, time - options.start) * speed
+      const castTime = castStart(cast, options.castFrom, options.cast) + Math.max(0, time - options.start) * speed
       const wanted = cast.events.filter((event) => event.time <= castTime).length
       if (wanted < appliedEvents) {
         terminal.reset()

@@ -20,9 +20,14 @@ function lookup(fileName: string): Screen | undefined {
 // A captured picture by name, e.g. "gui-permission-card". Chinese renders take the "-zh"
 // capture when there is one (the TUI has no Chinese interface).
 export function screen(name: string): Screen {
-  const found = (getLang() === 'zh' ? lookup(`${name}-zh`) : undefined) ?? lookup(name)
+  const found = findScreen(name)
   if (!found) throw new Error(`no captured picture "${name}"; run pnpm capture`)
   return found
+}
+
+// Like `screen`, but undefined when the picture is not captured yet.
+export function findScreen(name: string): Screen | undefined {
+  return (getLang() === 'zh' ? lookup(`${name}-zh`) : undefined) ?? lookup(name)
 }
 
 // The session shown in a captured picture. The name is random per capture, so a film that draws

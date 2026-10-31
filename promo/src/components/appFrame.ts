@@ -26,6 +26,8 @@ export interface PictureLayer {
   from: number
   // A recorded clip instead of a still: frame i shows from `from + i / fps` on.
   clip?: { frameUrl(index: number): string; frames: number; fps: number }
+  // Seconds into the clip at shot time `time`, when it does not simply play from `from`.
+  clipTime?: (time: number) => number
 }
 
 export interface AppFrameOptions {
@@ -127,7 +129,7 @@ export function appFrame(options: AppFrameOptions): AppFrame {
       for (const [index, layer] of options.layers.entries()) {
         const shown = index === 0 ? 1 : span(time, layer.from, LAYER_FADE_SECONDS, 'inOutSine')
         pictures[index]!.style.opacity = String(shown)
-        if (layer.clip) await showClipFrame(pictures[index]!, layer.clip, time - layer.from)
+        if (layer.clip) await showClipFrame(pictures[index]!, layer.clip, layer.clipTime ? layer.clipTime(time) : time - layer.from)
       }
 
       const entering = span(time, options.from, ENTER_SECONDS, 'outExpo')

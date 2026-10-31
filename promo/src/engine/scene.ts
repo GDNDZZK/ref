@@ -19,6 +19,8 @@ export interface Step {
 export interface SceneDefinition {
   id: string
   steps: readonly Step[]
+  // Drawn over every step, with the scene's own time: captions and chips that run across cuts.
+  overlay?: Shot
 }
 
 export interface PlacedStep {

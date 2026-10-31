@@ -2,7 +2,7 @@ import { rmSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Lang } from '../../src/engine/i18n.ts'
 import { isolatedEnv, startMockBackend } from './backend.ts'
-import { CLIP_FPS, CLIP_FRAMES_DIR, saveClip } from './clips.ts'
+import { CLIP_FPS, CLIP_FRAMES_DIR, saveClip, type ClipEvents } from './clips.ts'
 import { GuiSession } from './guiSession.ts'
 import { phrase } from './phrases.ts'
 import { publishImage } from './publish.ts'
@@ -12,19 +12,28 @@ const WINDOW = { width: 1280, height: 800 }
 const MODEL_TAG = 'Mock 1'
 const SETTLE_MS = 700 // entrance animations last up to 480 ms
 const SIDEBAR_WIDTH = 300
+const CONTEXT_METER = /^[\d.]+k? \/ [\d.]+k$/
+const TILE_HEADER_INSET = 40 // from the tile's left edge to its title
+const SAME_ROW_PX = 40
+const STATUS_LABEL_INSET = 12 // from the tile's title to inside its status label
 const PARKED_POINTER = { x: 700, y: 20 } // the empty top bar
+const MS_PER_SECOND = 1000
+const WHEEL_NOTCH = 120 // angle delta of one wheel step
 const GRAB_DIR = join(import.meta.dirname, '..', '..', '.cache', 'grab')
 
 function qtChord(chord: string): string {
   return chord === 'Enter' ? 'Return' : chord
 }
 
-class GuiUi implements Ui {
+export class GuiUi implements Ui {
   readonly kind = 'gui'
   readonly lang: Lang
   private readonly session: GuiSession
   private clipName: string | undefined
   private clipDir: string | undefined
+  private clipStartMs = 0
+  private clipEvents: ClipEvents = { clicks: [], marks: {} }
+  private size = WINDOW
 
   constructor(session: GuiSession, lang: Lang) {
     this.session = session
@@ -61,23 +70,62 @@ class GuiUi implements Ui {
     return this.session.clickText(text)
   }
 
+  private sinceClipStart(): number {
+    return (performance.now() - this.clipStartMs) / MS_PER_SECOND
+  }
+
+  // Clicks at a window point and, during a clip, notes where and when.
+  private async clickAt(x: number, y: number): Promise<void> {
+    if (this.clipName) this.clipEvents.clicks.push({ at: this.sinceClipStart(), x: x / this.size.width, y: y / this.size.height })
+    await this.session.click(x, y)
+  }
+
   async clickTextBelow(text: string, anchor: string): Promise<void> {
     const items = await this.session.texts()
     const top = items.find((item) => item.text.includes(anchor))?.y
     if (top === undefined) throw new Error(`no visible text "${anchor}"`)
     const target = items.filter((item) => item.text.includes(text) && item.y >= top).sort((a, b) => a.y - b.y)[0]
     if (!target) throw new Error(`no visible text "${text}" below "${anchor}"`)
-    await this.session.click(target.x + target.width / 2, target.y + target.height / 2)
+    await this.clickAt(target.x + target.width / 2, target.y + target.height / 2)
   }
 
   parkPointer(): Promise<void> {
     return this.session.hover(PARKED_POINTER.x, PARKED_POINTER.y)
   }
 
+  // A click on the header or the context meter does not focus a tile, and a click on a tool card
+  // opens it, so this clicks the status label ("Working") at the left end of the tile's status
+  // line, which is found by its context meter ("5.0k / 200.0k") at the right end.
+  async clickTile(title: string): Promise<void> {
+    const texts = await this.session.texts()
+    const header = texts.find((item) => item.text === title && item.x >= SIDEBAR_WIDTH)
+    if (!header) throw new Error(`no tile "${title}"`)
+    const meters = texts.filter((item) => CONTEXT_METER.test(item.text) && item.y > header.y && item.x >= header.x - TILE_HEADER_INSET)
+    const top = Math.min(...meters.map((item) => item.y))
+    const meter = meters.filter((item) => item.y - top < SAME_ROW_PX).sort((a, b) => a.x - b.x)[0]
+    if (!meter) throw new Error(`no status line in tile "${title}"`)
+    await this.clickAt(header.x + STATUS_LABEL_INSET, meter.y + meter.height / 2)
+  }
+
   async clickSidebarRow(title: string): Promise<void> {
     const row = (await this.session.texts()).find((item) => item.text === title && item.x < SIDEBAR_WIDTH)
     if (!row) throw new Error(`no sidebar row "${title}"`)
-    await this.session.click(row.x + row.width / 2, row.y + row.height / 2)
+    await this.clickAt(row.x + row.width / 2, row.y + row.height / 2)
+  }
+
+  // Clicks the `nth` (from the top) text in the session view that reads exactly `label`, such as
+  // the purpose in a tool card's header, which opens or closes the card.
+  async clickLabel(label: string, nth = 0): Promise<void> {
+    const matches = (await this.session.texts()).filter((item) => item.text === label && item.x >= SIDEBAR_WIDTH).sort((a, b) => a.y - b.y)
+    const target = matches[nth]
+    if (!target) throw new Error(`no visible text "${label}" number ${nth + 1}`)
+    await this.clickAt(target.x + target.width / 2, target.y + target.height / 2)
+  }
+
+  // Scrolls the session view by `notches` wheel steps; positive goes up.
+  async scroll(notches: number): Promise<void> {
+    const middle = { x: (SIDEBAR_WIDTH + this.size.width) / 2, y: this.size.height / 2 }
+    await this.session.wheel(middle.x, middle.y, notches * WHEEL_NOTCH)
   }
 
   hasText(text: string): Promise<boolean> {
@@ -96,19 +144,27 @@ class GuiUi implements Ui {
     this.clipName = shotFileName(this.kind, name, this.lang)
     this.clipDir = join(CLIP_FRAMES_DIR, this.clipName)
     rmSync(this.clipDir, { recursive: true, force: true })
+    this.clipEvents = { clicks: [], marks: {} }
     await this.session.startRecording(this.clipDir, CLIP_FPS)
+    this.clipStartMs = performance.now()
+  }
+
+  markClip(name: string): void {
+    if (!this.clipName) throw new Error('no clip is being recorded')
+    this.clipEvents.marks[name] = this.sinceClipStart()
   }
 
   async endClip(): Promise<void> {
     if (!this.clipName || !this.clipDir) throw new Error('no clip is being recorded')
     const times = await this.session.stopRecording()
-    await saveClip(this.clipName, this.clipDir, times)
+    await saveClip(this.clipName, this.clipDir, times, this.clipEvents)
     this.clipName = undefined
     this.clipDir = undefined
   }
 
   async resize(width: number, height: number): Promise<void> {
     await this.session.resize(width, height)
+    this.size = { width, height }
   }
 
   pause(ms: number): Promise<void> {
@@ -127,7 +183,6 @@ class GuiUi implements Ui {
 // A mock session is named "workspace-" and four hex digits.
 const SESSION_NAME = /^workspace-[0-9a-f]{4}$/
 
-export type { GuiUi }
 
 // Runs `body` against a fresh `ref-server --mock` and an offscreen `ref-gui` connected to it.
 export async function withGuiUi(lang: Lang, body: (ui: GuiUi) => Promise<void>): Promise<void> {

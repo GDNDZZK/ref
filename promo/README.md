@@ -7,7 +7,7 @@ Needs Node 24, pnpm, ffmpeg and ffprobe on `PATH`, and a Chromium. Fonts come fr
 ```bash
 cd promo
 pnpm install
-export CHROMIUM=/usr/bin/chromium      # path of any Chromium; without it Playwright's own download is used
+export CHROMIUM=/usr/bin/chromium      # optional: without it a system chromium on PATH is used, then Playwright's own download
 
 pnpm render demo                       # out/demo.en.mp4 and out/demo.zh.mp4
 pnpm render demo --lang en --fps 60    # one language, 60 fps

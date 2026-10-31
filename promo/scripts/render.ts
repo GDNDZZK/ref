@@ -85,13 +85,19 @@ async function renderScene(browsers: Browser[], baseUrl: string, args: RenderArg
     browsers.map((browser) => openScenePage(browser, baseUrl, sceneId, lang, problems)),
   )
   try {
-    const duration = await pages[0]!.page.evaluate(() => window.promo!.duration)
+    const { duration, pending } = await pages[0]!.page.evaluate(() => ({
+      duration: window.promo!.duration,
+      pending: window.promo!.pending,
+    }))
+    if (pending.length > 0) console.warn(`${label}: placeholders for captures not made yet: ${pending.join(', ')}`)
 
-    if (args.stillAt !== undefined) {
-      const file = join(args.outDir, `${label}.${args.stillAt}s.png`)
-      writeFileSync(file, await screenshotAt(pages[0]!, args.stillAt))
-      throwIfProblems(problems)
-      console.log(`wrote ${file}`)
+    if (args.stillsAt) {
+      for (const second of args.stillsAt) {
+        const file = join(args.outDir, `${label}.${second}s.png`)
+        writeFileSync(file, await screenshotAt(pages[0]!, second))
+        throwIfProblems(problems)
+        console.log(`wrote ${file}`)
+      }
       return
     }
 

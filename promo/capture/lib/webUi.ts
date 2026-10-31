@@ -69,6 +69,10 @@ class WebUi implements Ui {
     throw new Error('parkPointer is for the GUI only')
   }
 
+  clickTile(): Promise<void> {
+    throw new Error('clickTile is for the GUI only')
+  }
+
   clickSidebarRow(): Promise<void> {
     throw new Error('clickSidebarRow is for the GUI only')
   }
@@ -91,6 +95,10 @@ class WebUi implements Ui {
 
   startClip(): Promise<void> {
     throw new Error('clips are recorded from the GUI only')
+  }
+
+  markClip(): void {
+    throw new Error('markClip is for the GUI only')
   }
 
   endClip(): Promise<void> {
