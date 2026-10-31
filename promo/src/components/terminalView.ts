@@ -13,6 +13,8 @@ interface Cast {
   cols: number
   rows: number
   events: CastEvent[]
+  // Markers the capture set (capture/lib/tuiSession.ts mark), seconds into the cast.
+  marks: Map<string, number>
 }
 
 export interface TerminalViewOptions {
@@ -26,8 +28,10 @@ export interface TerminalViewOptions {
   hideLastRows?: number
   // Cast seconds that pass per video second.
   speed?: number
-  // Video time at which the cast starts playing.
+  // Video time at which the cast starts playing: from its beginning, or from `castFrom`.
   start: number
+  // Plays from a marker of the cast, `offset` seconds after it (negative: before).
+  castFrom?: { mark: string; offset?: number }
   from: number
   to: number
 }
@@ -36,16 +40,26 @@ const ENTER_SECONDS = 0.8
 const EXIT_SECONDS = 0.35
 const ENTER_SCALE = 0.94
 
-// asciicast v2: a JSON header line, then [seconds, "o", text] lines.
+// asciicast v2: a JSON header line, then [seconds, "o", text] output and [seconds, "m", label] markers.
 async function loadCast(url: string): Promise<Cast> {
   const text = await (await fetch(url)).text()
   const [headerLine, ...eventLines] = text.split('\n').filter((line) => line.length > 0)
   const header = JSON.parse(headerLine!) as { width: number; height: number }
-  const events = eventLines.map((line) => {
-    const [time, , data] = JSON.parse(line) as [number, string, string]
-    return { time, data }
-  })
-  return { cols: header.width, rows: header.height, events }
+  const events: CastEvent[] = []
+  const marks = new Map<string, number>()
+  for (const line of eventLines) {
+    const [time, kind, data] = JSON.parse(line) as [number, string, string]
+    if (kind === 'o') events.push({ time, data })
+    else if (kind === 'm') marks.set(data, time)
+  }
+  return { cols: header.width, rows: header.height, events, marks }
+}
+
+function castStart(cast: Cast, castFrom: TerminalViewOptions['castFrom'], url: string): number {
+  if (!castFrom) return 0
+  const mark = cast.marks.get(castFrom.mark)
+  if (mark === undefined) throw new Error(`the cast ${url} has no marker "${castFrom.mark}"`)
+  return mark + (castFrom.offset ?? 0)
 }
 
 function nextFrame(): Promise<void> {
@@ -89,7 +103,7 @@ export function terminalView(options: TerminalViewOptions): Part {
       ready ??= open()
       const { terminal, cast } = await ready
 
-      const castTime = Math.max(0, time - options.start) * speed
+      const castTime = castStart(cast, options.castFrom, options.cast) + Math.max(0, time - options.start) * speed
       const wanted = cast.events.filter((event) => event.time <= castTime).length
       if (wanted < appliedEvents) {
         terminal.reset()
