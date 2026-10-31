@@ -18,11 +18,15 @@ mkdir -p "$prefix" "$work"
 # On Windows a program finds its DLLs only through PATH or its own folder, and build steps run
 # tools that were just linked against Qt (KSyntaxHighlighting's katehighlightingindexer). Without
 # Qt's bin folder on PATH they stop with 0xC0000135 (DLL not found). cygpath turns D:/a/... into
-# the /d/a/... form that bash keeps in PATH; a drive letter would be split at the colon.
+# the /d/a/... form that bash keeps in PATH; a drive letter would be split at the colon. Only the
+# cmake builds get it (build_cmake_project), not curl, tar and the checksum tools.
+qt_path="$PATH"
 if command -v cygpath >/dev/null 2>&1; then
-	PATH="$(cygpath -u "$qt")/bin:$PATH"
-	export PATH
+	qt_path="$(cygpath -u "$qt")/bin:$PATH"
 fi
+
+# Names the failing command: some CI shells print nothing for a failed command otherwise.
+trap 'echo "error: build-deps.sh failed (exit $?) at line $LINENO: $BASH_COMMAND" >&2' ERR
 
 # sha256_of FILE -> the SHA-256 of the file as 64 lower-case hex digits. The tools differ between
 # systems (the sha256sum on macOS has no --check, Windows has only some of them), so each one is
@@ -71,8 +75,8 @@ build_cmake_project() {
 		-DCMAKE_PREFIX_PATH="$qt;$prefix" \
 		-DBUILD_TESTING=OFF \
 		"$@"
-	cmake --build "$build" --config "$build_type"
-	cmake --install "$build" --config "$build_type"
+	PATH="$qt_path" cmake --build "$build" --config "$build_type"
+	PATH="$qt_path" cmake --install "$build" --config "$build_type"
 }
 
 ecm_tarball="$(download "$KF_BASE_URL/extra-cmake-modules-$KF_VERSION.tar.xz" "$ECM_SHA256")"
