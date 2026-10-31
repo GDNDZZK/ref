@@ -50,6 +50,7 @@ pub(crate) fn build(ctx: &mut Ctx, layers: &[Layer]) -> Config {
     }
     cfg.tui = merged.get("tui").cloned().unwrap_or(Value::Null);
     cfg.agents = agents(ctx, &merged, agent_permission);
+    builtin::question_defaults(&mut cfg);
 
     let wanted = merged
         .get("default_agent")

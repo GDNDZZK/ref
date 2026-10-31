@@ -141,6 +141,7 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
                     messages,
                     more_before,
                     pending_permissions: st.perms.iter().map(|p| p.request.clone()).collect(),
+                    pending_questions: st.questions.iter().map(|p| p.request.clone()).collect(),
                     queued,
                 }
             };
@@ -288,6 +289,15 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
                 }
                 None => Err("No pending permission request with that id.".into()),
             }
+        }
+        Request::QuestionReply {
+            session_id,
+            call_id,
+            answers,
+        } => {
+            let s = live(hub, &session_id)?;
+            crate::question::reply(&s, &call_id, answers)?;
+            Ok(json!({}))
         }
         Request::SetModel { session_id, model } => {
             let s = live(hub, &session_id)?;

@@ -279,6 +279,43 @@ pub fn permission_request() -> PermissionRequest {
     }
 }
 
+/// Two questions: a single choice with a default and a multiple choice without custom answers.
+pub fn question_request() -> QuestionRequest {
+    let option = |label: &str, description: &str, default: bool| QuestionOption {
+        label: label.into(),
+        description: description.into(),
+        default,
+    };
+    QuestionRequest {
+        session_id: SESSION_ID.into(),
+        message_id: MESSAGE_ID.into(),
+        call_id: CALL_ID.into(),
+        questions: vec![
+            Question {
+                question: "How should the loop bound be fixed?".into(),
+                header: "Loop bound".into(),
+                options: vec![
+                    option("Exclusive range", "Use `0..items.len()`", true),
+                    option("Iterator", "Use `items.iter()` instead of indexing", false),
+                ],
+                multiple: false,
+                custom: true,
+            },
+            Question {
+                question: "Which checks should run afterwards?".into(),
+                header: "Checks".into(),
+                options: vec![
+                    option("Unit tests", "cargo test", true),
+                    option("Clippy", "cargo clippy", false),
+                ],
+                multiple: true,
+                custom: false,
+            },
+        ],
+        time: T0 + 22 * SECOND,
+    }
+}
+
 fn message(id: &str, role: Role, source: MessageSource, parts: Vec<Part>) -> Message {
     Message {
         id: id.into(),
@@ -365,6 +402,7 @@ pub fn snapshot() -> SessionSnapshot {
         messages: vec![user_message(), assistant_message()],
         more_before: true,
         pending_permissions: vec![permission_request()],
+        pending_questions: vec![question_request()],
         queued: vec![peer_message()],
     }
 }
@@ -376,6 +414,13 @@ pub fn retrying_info() -> SessionInfo {
             next_at: T0 + 100 * SECOND,
             error: "529 Overloaded".into(),
         },
+        ..info()
+    }
+}
+
+pub fn waiting_question_info() -> SessionInfo {
+    SessionInfo {
+        status: SessionStatus::WaitingQuestion,
         ..info()
     }
 }

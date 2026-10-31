@@ -172,6 +172,8 @@ async fn help_lists_the_scripts() {
         "retry",
         "peer",
         "everything",
+        "question",
+        "question-one",
     ] {
         assert!(text.contains(&format!("`{name}`")), "{name} is missing");
     }
@@ -414,6 +416,75 @@ async fn orchestrate_directs_a_crew_and_collects_five_reports() {
         rig.workspace_file("NOTES.txt")
             .contains("Fix off-by-one in parse_items")
     );
+    rig.finish().await;
+}
+
+impl Rig {
+    /// Waits for the model's question and answers it.
+    async fn answer_question(&self, answers: Option<Vec<Vec<&str>>>) {
+        let start = Instant::now();
+        let call_id = loop {
+            let pending = self
+                .session
+                .lock()
+                .questions
+                .first()
+                .map(|q| q.request.call_id.clone());
+            if let Some(id) = pending {
+                break id;
+            }
+            assert!(start.elapsed() < WAIT, "no question was asked");
+            tokio::time::sleep(POLL).await;
+        };
+        let answers = answers.map(|a| {
+            a.into_iter()
+                .map(|e| e.into_iter().map(String::from).collect())
+                .collect()
+        });
+        let req = Request::QuestionReply {
+            session_id: self.session.id.clone(),
+            call_id,
+            answers,
+        };
+        api::handle(&self.hub, &self.conn, req).await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn question_one_takes_the_default_answer() {
+    let rig = rig().await;
+    rig.prompt("question-one");
+    rig.answer_question(Some(vec![vec!["src/parser.rs"]])).await;
+    rig.run(true).await;
+    assert!(
+        rig.last_text().contains("You chose: "),
+        "{}",
+        rig.last_text()
+    );
+    assert!(rig.last_text().contains("src/parser.rs"));
+    rig.finish().await;
+}
+
+#[tokio::test]
+async fn question_asks_two_and_repeats_the_answers_or_the_dismissal() {
+    let rig = rig().await;
+    rig.prompt("question");
+    rig.answer_question(Some(vec![
+        vec!["Iterator"],
+        vec!["Unit tests", "typed check"],
+    ]))
+    .await;
+    rig.run(true).await;
+    let text = rig.last_text();
+    assert!(
+        text.contains("Iterator") && text.contains("Unit tests, typed check"),
+        "{text}"
+    );
+
+    rig.prompt("question-one");
+    rig.answer_question(None).await;
+    rig.run(true).await;
+    assert!(rig.last_text().contains("dismissed"), "{}", rig.last_text());
     rig.finish().await;
 }
 
