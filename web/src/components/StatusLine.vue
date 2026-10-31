@@ -8,6 +8,7 @@ import type { ChatSession } from '../model/chatSession.ts'
 import { formatElapsed, formatTokens, secondsUntil } from '../model/format.ts'
 import Icon from './Icon.vue'
 import StatusDot from './StatusDot.vue'
+import StatusTodo from './StatusTodo.vue'
 import { SHIMMER_PERIOD_MS } from './toolLimits.ts'
 
 const props = defineProps<{ session: ChatSession }>()
@@ -85,6 +86,7 @@ const contextTitle = computed(() => {
       </template>
       <span v-if="elapsed && activity !== 'idle'" class="elapsed">· {{ elapsed }}</span>
     </div>
+    <StatusTodo :session-id="session.id" :todos="session.info?.todos" />
     <div v-if="context && context.max > 0" class="context" :class="contextTone" :title="contextTitle">
       <span>{{ formatTokens(context.used) }} / {{ formatTokens(context.max) }}</span>
       <span class="bar"><span class="fill" :style="{ width: `${usedFraction * PERCENT}%` }" /></span>
@@ -105,6 +107,7 @@ const contextTitle = computed(() => {
 
 .left {
   display: flex;
+  flex: 1 1 auto;
   align-items: center;
   gap: 8px;
   min-width: 0;
