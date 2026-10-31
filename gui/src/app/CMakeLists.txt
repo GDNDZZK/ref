@@ -140,10 +140,12 @@ qt_add_qml_module(ref-gui
 )
 
 # Interface text is English in the sources. The .ts files hold the other languages; their
-# .qm are compiled into the program (resource prefix /i18n). `update_translations` refreshes
-# the .ts files from the sources.
+# .qm are compiled into the program (resource prefix /i18n). ref-gui_en.ts holds only the plural
+# forms of the English text ("%n line(s)" shows as "1 line" and "2 lines"). `update_translations`
+# refreshes the .ts files from the sources.
 qt_add_translations(ref-gui
 	TS_FILES ${PROJECT_SOURCE_DIR}/translations/ref-gui_zh_CN.ts
+	PLURALS_TS_FILE ${PROJECT_SOURCE_DIR}/translations/ref-gui_en.ts
 )
 
 # CodeBlock.qml imports org.kde.syntaxhighlighting at run time; nothing links against it.
