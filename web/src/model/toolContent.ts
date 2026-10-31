@@ -5,6 +5,7 @@
 import type { IconKey } from '../icons/generated/icons.ts'
 import type { JsonValue, Todo, TodoStatus } from '../proto/generated'
 import { truncateColumns } from './columns.ts'
+import { oneLine } from './oneLine.ts'
 
 const DETAIL_ARG_MAX_COLUMNS = 40
 const DETAIL_ARG_MAX_COUNT = 3
@@ -43,31 +44,6 @@ export function stringArg(input: JsonValue | null | undefined, key: string): str
 
 function firstLine(text: string): string {
   return text.split('\n')[0] ?? ''
-}
-
-// As the terminal client has it: Unicode white space (U+0085 included) is a separator, other
-// control characters go.
-const CONTROL = /^\p{Cc}$/u
-const NEXT_LINE = '\u0085'
-const BYTE_ORDER_MARK = '\ufeff'
-
-function isSpace(character: string): boolean {
-  return character === NEXT_LINE || (character !== BYTE_ORDER_MARK && /^\s$/.test(character))
-}
-
-function oneLine(text: string): string {
-  let result = ''
-  let space = false
-  for (const character of text) {
-    if (isSpace(character)) {
-      space = true
-    } else if (!CONTROL.test(character)) {
-      if (space && result !== '') result += ' '
-      space = false
-      result += character
-    }
-  }
-  return result
 }
 
 export function parseTodos(input: JsonValue | null | undefined): Todo[] {
