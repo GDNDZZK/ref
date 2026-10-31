@@ -4,7 +4,7 @@ import { formatElapsed } from '../model/format.ts'
 import { oneLine } from '../model/oneLine.ts'
 import type { SessionInfo, Todo } from '../proto/generated'
 
-export type RowState = 'idle' | 'busy' | 'compacting' | 'retrying' | 'permission' | 'error'
+export type RowState = 'idle' | 'busy' | 'compacting' | 'retrying' | 'permission' | 'question' | 'error'
 
 // The dot and the mark of a row. A session that is idle but whose last turn ended in an error
 // shows the error until the next turn starts (the backend clears `last_error`).
@@ -19,6 +19,8 @@ export function rowState(info: SessionInfo): RowState {
       return 'retrying'
     case 'waiting_permission':
       return 'permission'
+    case 'waiting_question':
+      return 'question'
     case 'idle':
       return info.last_error ? 'error' : 'idle'
   }
@@ -26,7 +28,7 @@ export function rowState(info: SessionInfo): RowState {
 
 // Rows that need the user's attention are drawn apart from the rest.
 export function needsAttention(state: RowState): boolean {
-  return state === 'permission' || state === 'error'
+  return state === 'permission' || state === 'question' || state === 'error'
 }
 
 export interface TodoProgress {

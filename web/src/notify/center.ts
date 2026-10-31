@@ -106,6 +106,10 @@ export class NotificationCenter {
         return text === undefined
           ? this.deps.translate('notify.permission')
           : this.deps.translate('notify.permissionTool', { tool: text })
+      case 'question':
+        return text === undefined
+          ? this.deps.translate('notify.question')
+          : this.deps.translate('notify.questionDetail', { question: text })
       case 'turn_done':
         return this.deps.translate('notify.turnDone')
       case 'turn_error':

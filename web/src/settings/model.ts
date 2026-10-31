@@ -77,6 +77,7 @@ export function notifyKinds(notifications: NotificationSettings): NotifyKind[] {
   if (!notifications.enabled) return []
   const wanted: [boolean, NotifyKind][] = [
     [notifications.permission, 'permission'],
+    [notifications.permission, 'question'], // a question needs the user like a permission request
     [notifications.turnDone, 'turn_done'],
     [notifications.turnError, 'turn_error'],
   ]

@@ -30,7 +30,7 @@ describe('parseSettings', () => {
 describe('notifyKinds', () => {
   it('lists the enabled kinds', () => {
     const notifications = { enabled: true, permission: true, turnDone: false, turnError: true }
-    expect(notifyKinds(notifications)).toEqual(['permission', 'turn_error'])
+    expect(notifyKinds(notifications)).toEqual(['permission', 'question', 'turn_error'])
   })
 
   it('is empty when the master switch is off', () => {
