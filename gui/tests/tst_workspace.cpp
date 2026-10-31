@@ -847,7 +847,7 @@ void TestWorkspace::aLostConnectionFreesTheCardAndItCanBeSentAgain()
 	session->question()->activateRow(1);
 
 	QTRY_COMPARE(replies().size(), 2);
-	QCOMPARE(replies().last().value(u"answers"_s).toArray(), (QJsonArray{QJsonArray{u"No"_s}}));
+	QCOMPARE(replies().last().value(u"answers"_s).toArray(), (QJsonArray{QJsonValue(QJsonArray{u"No"_s})}));
 	QCOMPARE(replies().last().value(u"call_id"_s).toString(), u"call_q"_s);
 }
 
