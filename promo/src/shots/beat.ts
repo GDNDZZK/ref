@@ -49,7 +49,8 @@ export interface BeatOptions {
   seconds: number
   // Pictures by name, or recorded clips (`clip`) that play from `at`; each fades in over the one before
   // it at `at`. All the same size.
-  screens: readonly ({ name: string; at?: number } | { clip: string; at?: number })[]
+  // A clip can map shot time to clip seconds itself (`time`), e.g. to hold a frame.
+  screens: readonly ({ name: string; at?: number } | { clip: string; at?: number; time?: (time: number) => number })[]
   looks: readonly Look[]
   marks?: readonly Mark[]
   // Waypoints and click times in picture coordinates (0..1), so the pointer follows the camera.
@@ -92,10 +93,10 @@ export function beatShot(options: BeatOptions) {
       const at = entry.at ?? 0
       if ('clip' in entry) {
         const recorded = findClip(entry.clip)
-        return { name: entry.clip, layer: recorded && { src: recorded.frameUrl(0), size: recorded.size, at, clip: recorded } }
+        return { name: entry.clip, layer: recorded && { src: recorded.frameUrl(0), size: recorded.size, at, clip: recorded, clipTime: entry.time } }
       }
       const picture = findScreen(entry.name)
-      return { name: entry.name, layer: picture && { ...picture, at, clip: undefined } }
+      return { name: entry.name, layer: picture && { ...picture, at, clip: undefined, clipTime: undefined } }
     })
     if (entries.length === 0) throw new Error('a beat needs a picture')
     const layers = entries.flatMap((entry) => (entry.layer ? [entry.layer] : []))
@@ -116,7 +117,7 @@ export function beatShot(options: BeatOptions) {
       missing.length > 0
         ? pendingFrame({ names: missing, title, rect, from: options.windowFrom ?? 0, to: options.seconds })
         : appFrame({
-            layers: layers.map((layer) => ({ src: layer.src, from: layer.at, clip: layer.clip })),
+            layers: layers.map((layer) => ({ src: layer.src, from: layer.at, clip: layer.clip, clipTime: layer.clipTime })),
             imageSize: size,
             title,
             rect,

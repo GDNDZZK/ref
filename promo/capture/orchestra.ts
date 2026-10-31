@@ -11,6 +11,7 @@ const TASK = 'orchestrate fix the parser bug, test it, update the docs'
 const HERO_TASK = 'orchestrate: fix the parser bug with one worker per job'
 const MAIN_SESSION = 'main'
 const HERO_TYPING_SECONDS = 1.5
+const REPORT_HELD_AT = 16.0
 // The summary ends at about 25.2 s; the films hold its last frame.
 const HERO_END_SECONDS = 26.5
 const PLAN_DONE = 'Four helpers are working'
@@ -152,6 +153,9 @@ export const ORCHESTRA_SCENARIOS: Scenario[] = [
       await ui.parkPointer()
       await ui.waitText(TESTER_REACTION, WAIT_MS)
       console.log('t', time.now().toFixed(1), 'tester reaction seen')
+      // The films hold this frame: the report is in main's tile until the fixer's report comes.
+      await time.until(REPORT_HELD_AT)
+      ui.markClip('report')
       await ui.waitText(SUMMARY_DONE, WAIT_MS)
       console.log('t', time.now().toFixed(1), 'summary done')
       await time.until(HERO_END_SECONDS)
