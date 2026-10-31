@@ -4,6 +4,8 @@ use std::path::Path;
 
 const PARSER_RS: &str = include_str!("assets/parser.rs.txt");
 const LIB_RS: &str = include_str!("assets/lib.rs.txt");
+const ROWS_PARSER_RS: &str = include_str!("assets/rows_parser.rs.txt");
+const ROWS_LIB_RS: &str = include_str!("assets/rows_lib.rs.txt");
 const README: &str = include_str!("assets/README.md");
 const DESIGN: &str = include_str!("assets/design.md");
 const NOTES: &str = "Things to remember\n\n- The parser panics on empty input.\n- Benchmarks live in benches/.\n- TODO: write the changelog.\n";
@@ -18,6 +20,9 @@ pub fn create(dir: &Path) -> std::io::Result<()> {
         ("src/parser.rs", PARSER_RS),
         ("src/lib.rs", LIB_RS),
         ("docs/design.md", DESIGN),
+        // A second small crate in `scratch/`, where edits need no approval (`stale`, `outage`).
+        ("scratch/src/parser.rs", ROWS_PARSER_RS),
+        ("scratch/src/lib.rs", ROWS_LIB_RS),
     ];
     for (path, text) in files {
         write(dir, path, text.as_bytes())?;

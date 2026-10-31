@@ -1,0 +1,16 @@
+//! Report tool library.
+
+pub mod parser;
+
+use parser::{Row, parse_line};
+
+/// Sum of the scores of the rows in `text`.
+pub fn total(text: &str) -> u32 {
+    let mut sum = 0;
+    for line in text.lines() {
+        // Lines that are not rows count as zero.
+        let row: Option<Row> = parse_line(line);
+        sum += row.map_or(0, |r| r.score);
+    }
+    sum
+}

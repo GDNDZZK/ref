@@ -26,9 +26,12 @@ mod workspace;
 use crate::{HubOptions, Running, ws};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 /// The mock exits as soon as its last client leaves unless told otherwise.
 pub const DEFAULT_IDLE_TIMEOUT: i64 = 0;
+/// The base delay of the retry backoff in production: waits of 2, 4, 8 and 16 seconds.
+const DEFAULT_RETRY_BASE: Duration = Duration::from_secs(2);
 const ROOT_PREFIX: &str = "ref-mock-";
 const ROOT_SUFFIX_LEN: usize = 8;
 const LOG_FILE: &str = "server.log";
@@ -73,10 +76,25 @@ pub async fn start(port: u16, token: String) -> anyhow::Result<Mock> {
 /// Like [`start`], with the idle timeout of the hub (`--idle-timeout`: -1 keeps the mock running
 /// after its last client leaves).
 pub async fn start_with(port: u16, token: String, idle_timeout: i64) -> anyhow::Result<Mock> {
+    start_all(port, token, idle_timeout, DEFAULT_RETRY_BASE).await
+}
+
+/// Like [`start`], with a shorter base delay of the retry backoff (2 s in production), so tests
+/// of `outage` need not wait 30 seconds.
+pub async fn start_with_retry_base(retry_base: Duration) -> anyhow::Result<Mock> {
+    start_all(0, "token".into(), DEFAULT_IDLE_TIMEOUT, retry_base).await
+}
+
+async fn start_all(
+    port: u16,
+    token: String,
+    idle_timeout: i64,
+    retry_base: Duration,
+) -> anyhow::Result<Mock> {
     let name = format!("{ROOT_PREFIX}{}", crate::util::random_hex(ROOT_SUFFIX_LEN));
     let root = std::env::temp_dir().join(name);
     std::fs::create_dir(&root)?;
-    match start_in(&root, port, token, idle_timeout).await {
+    match start_in(&root, port, token, idle_timeout, retry_base).await {
         Ok(running) => Ok(Mock { running, root }),
         Err(e) => {
             let _ = std::fs::remove_dir_all(&root);
@@ -90,6 +108,7 @@ async fn start_in(
     port: u16,
     token: String,
     idle_timeout: i64,
+    retry_base: Duration,
 ) -> anyhow::Result<Running> {
     let workspace = root.join("workspace");
     std::fs::create_dir_all(root.join("logs"))?;
@@ -110,6 +129,7 @@ async fn start_in(
     opts.home = None;
     opts.config_loader = Arc::new(move |_| cfg.clone());
     opts.idle_timeout = idle_timeout;
+    opts.retry_base = retry_base;
     opts.sandbox_cwd = Some(workspace);
     let allow = vec!["127.0.0.1".to_string()];
     let (auth, _) = ws::resolve_hosts(&allow, token);
