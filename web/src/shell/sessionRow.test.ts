@@ -76,6 +76,7 @@ describe('names', () => {
     expect(historyLabel(info({ title: 'Fix it', name: 'parser' }))).toBe('Fix it')
     expect(historyLabel(info({ title: 'Fix\n\n it \u0007 now', name: 'parser' }))).toBe('Fix it now')
     expect(historyLabel(info({ title: '  ', name: 'parser' }))).toBe('parser')
+    expect(historyLabel(info({ title: '', name: ' ', cwd: '/home/me/ref/' }))).toBe('ref')
   })
 })
 
