@@ -166,6 +166,15 @@ pub fn expand_home(p: &str, home: Option<&Path>) -> std::path::PathBuf {
 }
 
 /// Whether a process with this pid exists.
+/// A relative path written with `/` on every platform, as clients expect it in the protocol.
+pub fn relative_slash(rel: &Path) -> String {
+    let parts: Vec<_> = rel
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect();
+    parts.join("/")
+}
+
 pub fn pid_alive(pid: u32) -> bool {
     ref_sys::pid_alive(pid)
 }
@@ -173,6 +182,14 @@ pub fn pid_alive(pid: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relative_paths_are_joined_with_slashes() {
+        let rel = Path::new("src").join("sub").join("a.rs");
+        assert_eq!(relative_slash(&rel), "src/sub/a.rs");
+        assert_eq!(relative_slash(Path::new("")), "");
+        assert_eq!(relative_slash(Path::new("one")), "one");
+    }
 
     #[test]
     fn ids_sortable_and_prefixed() {

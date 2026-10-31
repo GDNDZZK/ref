@@ -771,34 +771,9 @@ async fn list_files(hub: &Arc<Hub>, cwd: &str) -> Result<Arc<Vec<String>>, Strin
     if !root.is_dir() {
         return Err(format!("Not a directory: {cwd}"));
     }
-    let files = tokio::task::spawn_blocking(move || {
-        let mut out = Vec::new();
-        for e in ignore::WalkBuilder::new(&root)
-            .hidden(true)
-            .max_depth(Some(16))
-            .build()
-            .flatten()
-        {
-            let Ok(rel) = e.path().strip_prefix(&root) else {
-                continue;
-            };
-            let rel = rel.to_string_lossy();
-            if rel.is_empty() {
-                continue;
-            }
-            if e.file_type().is_some_and(|t| t.is_dir()) {
-                out.push(format!("{rel}/"));
-            } else {
-                out.push(rel.to_string());
-            }
-            if out.len() >= 50_000 {
-                break;
-            }
-        }
-        out
-    })
-    .await
-    .map_err(|e| e.to_string())?;
+    let files = tokio::task::spawn_blocking(move || walk_files(&root))
+        .await
+        .map_err(|e| e.to_string())?;
     let files = Arc::new(files);
     let mut cache = hub.files_cache.lock().unwrap_or_else(|e| e.into_inner());
     if cache.len() > 32 {
@@ -806,6 +781,40 @@ async fn list_files(hub: &Arc<Hub>, cwd: &str) -> Result<Arc<Vec<String>>, Strin
     }
     cache.insert(cwd.to_string(), (Instant::now(), files.clone()));
     Ok(files)
+}
+
+/// Most entries `list_files` returns for one directory.
+const MAX_LISTED_FILES: usize = 50_000;
+/// How deep `list_files` looks.
+const MAX_LIST_DEPTH: usize = 16;
+
+/// Files and directories below `root` (directories end with `/`), relative to it, separated by
+/// `/` on every platform. Hidden and ignored entries are left out.
+fn walk_files(root: &std::path::Path) -> Vec<String> {
+    let mut out = Vec::new();
+    for e in ignore::WalkBuilder::new(root)
+        .hidden(true)
+        .max_depth(Some(MAX_LIST_DEPTH))
+        .build()
+        .flatten()
+    {
+        let Ok(rel) = e.path().strip_prefix(root) else {
+            continue;
+        };
+        let rel = crate::util::relative_slash(rel);
+        if rel.is_empty() {
+            continue;
+        }
+        if e.file_type().is_some_and(|t| t.is_dir()) {
+            out.push(format!("{rel}/"));
+        } else {
+            out.push(rel);
+        }
+        if out.len() >= MAX_LISTED_FILES {
+            break;
+        }
+    }
+    out
 }
 
 /// Fuzzy subsequence score (higher is better); None if `q` is not a subsequence of `path`.
@@ -956,6 +965,22 @@ pub fn export_markdown(info: &SessionInfo, messages: &[Message]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn listed_files_use_slashes_for_nested_files_and_directories() {
+        let root = std::env::temp_dir().join(format!("ref-list-{}", crate::util::random_hex(8)));
+        let nested = root.join("src").join("sub");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(root.join("src").join("parser.rs"), "").unwrap();
+        std::fs::write(nested.join("deep.rs"), "").unwrap();
+        let mut listed = walk_files(&root);
+        std::fs::remove_dir_all(&root).unwrap();
+        listed.sort();
+        assert_eq!(
+            listed,
+            ["src/", "src/parser.rs", "src/sub/", "src/sub/deep.rs"]
+        );
+    }
 
     #[test]
     fn templates() {
