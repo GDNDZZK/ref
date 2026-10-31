@@ -2,6 +2,7 @@ import castUrl from '../../assets/casts/tui-tools.cast?url'
 import { backdrop } from '../components/backdrop.ts'
 import { caption } from '../components/caption.ts'
 import { notificationCard } from '../components/notificationCard.ts'
+import { sessionNameOf } from '../engine/screens.ts'
 import { serverPill } from '../components/serverPill.ts'
 import { terminalView } from '../components/terminalView.ts'
 import type { SceneDefinition, Step } from '../engine/scene.ts'
@@ -133,7 +134,7 @@ const beats = [
     extras: (shot) =>
       shot.add(
         notificationCard({
-          title: 'workspace-161a',
+          title: sessionNameOf('gui-permission-card'),
           body: { en: 'Waiting for permission to use edit', zh: '等待授权使用 edit' },
           from: 1,
           to: 5,

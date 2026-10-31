@@ -80,7 +80,9 @@ class WebUi implements Ui {
   async shot(name: string, options: ShotOptions = {}): Promise<void> {
     await this.page.waitForTimeout(SETTLE_MS)
     const png = await this.page.screenshot({ type: 'png' })
-    await publishImage(png, shotFileName(this.kind, name, this.lang), { readme: options.readme ?? false })
+    // The page title is "<session name> · ref" (web/src/App.vue).
+    const sessionName = (await this.page.title()).replace(/ · ref$/, '')
+    await publishImage(png, shotFileName(this.kind, name, this.lang), { readme: options.readme ?? false, sessionName })
   }
 
   // The page for scenarios that need Playwright itself (attaching a file).
