@@ -40,17 +40,5 @@
     "marks": {
       "enter": 0.5019275230000003
     }
-  },
-  "gui-orchestra-crowd": {
-    "frames": 190,
-    "fps": 15,
-    "width": 2560,
-    "height": 2240
-  },
-  "gui-orchestra-crowd-zh": {
-    "frames": 190,
-    "fps": 15,
-    "width": 2560,
-    "height": 2240
   }
 }
