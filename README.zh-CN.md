@@ -90,7 +90,7 @@ GUI 压缩包里是一个必须保持完整的文件夹：`ref-gui` 在自己所
 所有界面共用同一个后端。如果装了多个界面，其中任何一个都会连接到已在运行的后端。
 
 - **Linux**：`ref`、`ref-web` 和 `ref-server` 需要 glibc 2.35 或更新版本（Ubuntu 22.04、Debian 12、Fedora 36、RHEL 10、Arch 及更新版本）。NixOS 需要设置 `programs.nix-ld.enable = true`。
-- **Linux 上的 GUI**：需要 glibc 2.35 和 GCC 13 的 C++ 运行库（带 `CXXABI_1.3.14` 的 `libstdc++`）：Ubuntu 24.04、Debian 13、Fedora 38、Arch 及更新版本。在 Ubuntu 22.04 和 Debian 12 上无法启动。GUI 运行在 X11 上，在 Wayland 会话中通过 XWayland 运行；没有 XWayland 的纯 Wayland 会话不受支持（Unverified）。需要这些系统库，桌面系统大多已经有：`libxcb-cursor0`、`libxkbcommon-x11-0`、`libxcb-icccm4`、`libxcb-image0`、`libxcb-keysyms1`、`libxcb-randr0`、`libxcb-render-util0`、`libxcb-shape0`、`libxcb-xkb1`、`libegl1`、`libfontconfig1` 和 `libdbus-1-3`（Debian 和 Ubuntu 的包名）。想把 `ref` 加入应用菜单，复制 desktop 文件和图标，并把程序链接到 `PATH` 中：
+- **Linux 上的 GUI**：需要 glibc 2.38 和 GCC 13 的 C++ 运行库（带 `CXXABI_1.3.14` 的 `libstdc++`）：Ubuntu 24.04、Debian 13、Fedora 39、Arch 及更新版本。在 Ubuntu 22.04 和 Debian 12 上无法启动。GUI 运行在 X11 上，在 Wayland 会话中通过 XWayland 运行；没有 XWayland 的纯 Wayland 会话不受支持（Unverified）。需要这些系统库，桌面系统大多已经有：`libxcb-cursor0`、`libxkbcommon-x11-0`、`libxcb-icccm4`、`libxcb-image0`、`libxcb-keysyms1`、`libxcb-randr0`、`libxcb-render-util0`、`libxcb-shape0`、`libxcb-xkb1`、`libegl1`、`libfontconfig1` 和 `libdbus-1-3`（Debian 和 Ubuntu 的包名）。想把 `ref` 加入应用菜单，复制 desktop 文件和图标，并把程序链接到 `PATH` 中：
 
   ```bash
   install -Dm644 ref-gui.desktop ~/.local/share/applications/ref-gui.desktop

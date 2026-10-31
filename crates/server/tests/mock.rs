@@ -290,6 +290,133 @@ async fn the_created_session_reports_back() {
     rig.finish().await;
 }
 
+/// Time allowed for the `orchestrate` crew; its script takes about 25 seconds.
+const ORCHESTRATE_WAIT: Duration = Duration::from_secs(90);
+const FINAL_SENTENCE: &str = "The parser bug is fixed.";
+const REPORTERS: [&str; 5] = ["scout", "fixer", "tester", "docs", "reviewer"];
+
+impl Rig {
+    /// Allows every tool that waits for permission in any session.
+    async fn approve_everywhere(&self) {
+        for session in self.hub.sessions() {
+            let waiting: Vec<String> = session
+                .lock()
+                .messages
+                .iter()
+                .flat_map(|m| m.parts.iter())
+                .filter_map(|p| match p {
+                    Part::Tool {
+                        call_id,
+                        state: ToolState::AwaitingPermission,
+                        ..
+                    } => Some(call_id.clone()),
+                    _ => None,
+                })
+                .collect();
+            for call_id in waiting {
+                let req = Request::PermissionReply {
+                    session_id: session.id.clone(),
+                    call_id,
+                    allow: true,
+                    always: false,
+                };
+                api::handle(&self.hub, &self.conn, req).await.unwrap();
+            }
+        }
+    }
+
+    /// Names of the sessions that reported to the main session, in arrival order.
+    fn reporters(&self) -> Vec<String> {
+        let messages = self.session.lock().messages.clone();
+        messages
+            .into_iter()
+            .filter_map(|m| match m.source {
+                MessageSource::Peer { from_name, .. } => Some(from_name),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn main_texts(&self) -> String {
+        let messages = self.session.lock().messages.clone();
+        messages
+            .iter()
+            .filter(|m| m.role == Role::Assistant)
+            .map(|m| m.raw_text())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+#[tokio::test]
+async fn orchestrate_directs_a_crew_and_collects_five_reports() {
+    let rig = rig().await;
+    let start = Instant::now();
+    rig.prompt("orchestrate fix the parser bug, test it, update the docs");
+    let mut seen_reports = 0;
+    while !rig.main_texts().contains(FINAL_SENTENCE) {
+        assert!(
+            start.elapsed() < ORCHESTRATE_WAIT,
+            "no final summary; reports so far: {:?}",
+            rig.reporters()
+        );
+        rig.approve_everywhere().await;
+        let reports = rig.reporters();
+        if reports.len() > seen_reports {
+            eprintln!(
+                "orchestrate: report {} from {} at {:.1} s",
+                reports.len(),
+                reports[reports.len() - 1],
+                start.elapsed().as_secs_f32()
+            );
+            seen_reports = reports.len();
+        }
+        tokio::time::sleep(POLL).await;
+    }
+    eprintln!(
+        "orchestrate: done at {:.1} s",
+        start.elapsed().as_secs_f32()
+    );
+
+    let reporters = rig.reporters();
+    assert_eq!(reporters.len(), REPORTERS.len(), "{reporters:?}");
+    for name in REPORTERS {
+        let n = reporters.iter().filter(|r| r.starts_with(name)).count();
+        assert_eq!(n, 1, "{name} reports once: {reporters:?}");
+    }
+    let text = rig.main_texts();
+    for sentence in [
+        "Four helpers are working",
+        "All four have reported",
+        "Waiting for the review",
+    ] {
+        assert!(text.contains(sentence), "{sentence}");
+    }
+    let todos = rig.session.info().todos;
+    assert_eq!(todos.len(), 5);
+    assert!(
+        todos
+            .iter()
+            .all(|t| t.status == ref_proto::TodoStatus::Completed)
+    );
+    let children = rig
+        .hub
+        .infos()
+        .into_iter()
+        .filter(|i| i.parent.as_deref() == Some(rig.session.id.as_str()))
+        .count();
+    assert_eq!(children, REPORTERS.len());
+    assert!(
+        rig.workspace_file("src/parser.rs")
+            .contains("0..items.len()")
+    );
+    assert!(
+        rig.workspace_file("NOTES.txt")
+            .contains("Fix off-by-one in parse_items")
+    );
+    rig.finish().await;
+}
+
 #[tokio::test]
 async fn cancel_stops_a_command_that_never_ends() {
     let rig = rig().await;

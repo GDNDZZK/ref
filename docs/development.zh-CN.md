@@ -96,6 +96,9 @@ sleep 3600 | ref-server --mock      # stdout 只打印一行 {"port":N,"token":"
 | `compact-tool` | 模型调用 `compact_context` |
 | `peer` | 创建 `reviewer` 会话 `helper`，它用 `send_message` 回报 |
 | `everything` | `tools`、`todo` 和 `image` 连成一个长回合 |
+| `orchestrate` | 主会话先列计划，再创建 `scout`、`fixer`、`tester`、`docs` 四个助手，收齐它们的五份报告（第五份来自最后创建的 `reviewer`），最后给出总结（约 25 秒） |
+
+`orchestrate` 约 25 秒，需要批准一次（fixer 的 `edit`）。时间线固定：助手在 1.5、3、4.5、6 秒出现，主会话在 7.5 秒左右空闲，报告大约在 10.5 秒（`scout`）、12 秒（`docs`）、12.5 秒（`fixer`，在你于 9 秒批准之后 3.5 秒）和 14 秒（`tester`）到达，16 秒创建 reviewer，21 秒收到它的报告，25 秒总结结束。主会话忙碌时到达的报告会在它的下一次请求时并入对话，计数不受影响。`orchestrate` 之后的文字不会被使用。它启动的其他脚本（`orch-scout`、`orch-fixer`、`orch-tester`、`orch-docs`、`orch-review`、`orchestrate-report`）也会出现在 `help` 里，但不是给人输入的。
 
 ## GUI
 
@@ -136,7 +139,7 @@ scripts/package.sh --version v0.2.0 --target x86_64-unknown-linux-gnu \
 
 `scripts/verify-gui-package.sh DIR` 检查解压后的 `ref-gui` 压缩包，必须在它所构建的平台上运行。CI 在打包后运行它。它检查：不依赖构建机的环境时每个库都能找到、KSyntaxHighlighting 模块在包里、Controls 样式只有 Basic、`ref-gui --smoke --mock` 能打开会话（Linux 上在 `xvfb-run` 下）。Linux 上还检查包对系统的要求，macOS 上检查签名以及没有引用 app 之外的路径，Windows 上检查 `ref-gui.exe` 使用 GUI 子系统。
 
-**Linux 的要求。** C++23 需要 GCC 13，而 Ubuntu 22.04 没有，所以 CI 在 Ubuntu 24.04 上构建 Linux 的 GUI，`ref`、`ref-web` 和 `ref-server` 仍在 22.04 上构建。Qt 6.12.0 自带的库最多需要 glibc 2.34。用 GCC 13 编译的程序需要 `libstdc++` 中的 `CXXABI_1.3.14`，Ubuntu 22.04 和 Debian 12 的 GCC 12 没有它。因此，只要包里有东西需要高于 glibc 2.35、`GLIBCXX_3.4.32` 或 `CXXABI_1.3.14`，`verify-gui-package.sh` 就会失败；README 写的是同样的数字。如果更新的编译器或 Qt 抬高了其中某项，请同时修改脚本开头的常量和 README。
+**Linux 的要求。** C++23 需要 GCC 13，而 Ubuntu 22.04 没有，所以 CI 在 Ubuntu 24.04 上构建 Linux 的 GUI，`ref`、`ref-web` 和 `ref-server` 仍在 22.04 上构建。在那里构建出的程序需要 glibc 2.38：Ubuntu 24.04 的头文件会把 `strtol` 等调用换成 glibc 2.38 引入的 `__isoc23_*` 符号，aqtinstall 安装的 arm64 版 Qt 也是在 Ubuntu 24.04 上构建的，同样需要 2.38（x86-64 版 Qt 最多需要 2.34）。要针对更旧的 glibc 构建 GUI，需要另一套工具链和 Qt 构建，项目目前没有。用 GCC 13 编译的程序需要 `libstdc++` 中的 `CXXABI_1.3.14`，Ubuntu 22.04 和 Debian 12 的 GCC 12 没有它。因此，只要包里有东西需要高于 glibc 2.38、`GLIBCXX_3.4.32` 或 `CXXABI_1.3.14`，`verify-gui-package.sh` 就会失败；README 写的是同样的数字。如果更新的编译器或 Qt 抬高了其中某项，请同时修改脚本开头的常量和 README。
 
 ## 持续集成与发布
 
