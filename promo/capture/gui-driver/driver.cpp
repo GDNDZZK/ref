@@ -12,8 +12,14 @@
 //   {"cmd":"click","x":X,"y":Y}   {"cmd":"clickText","text":"New session"}   {"cmd":"move","x":X,"y":Y}
 //   {"cmd":"key","sequence":"Ctrl+Shift+N"}   {"cmd":"type","text":"hello"}
 //   {"cmd":"wheel","x":X,"y":Y,"delta":-120}
+//   {"cmd":"record","dir":"d","fps":15}  photographs the window every 1000/fps ms into d/f00000.jpg ...
+//   {"cmd":"stop"}                      -> {"ok":true,"frames":N,"times":[ms since record, ...]}
 //   {"cmd":"quit"}
 #include <QtCore/QCoreApplication>
+#include <QtCore/QDir>
+#include <QtCore/QElapsedTimer>
+#include <QtCore/QThreadPool>
+#include <QtCore/QTimer>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
@@ -35,6 +41,8 @@ namespace
 constexpr int StdinFd = 0;
 constexpr size_t ReadChunkBytes = 65536;
 constexpr int ClickPauseMs = 30;
+constexpr int DefaultRecordFps = 15;
+constexpr int RecordJpegQuality = 90;
 
 QString errorReply(const QString& message)
 {
@@ -225,6 +233,31 @@ private:
 			}
 			return ok();
 		}
+		if(name == "record")
+		{
+			m_recordDir = command.value("dir").toString();
+			QDir().mkpath(m_recordDir);
+			m_recordFrames = 0;
+			m_recordTimes = {};
+			m_recordClock.start();
+			if(!m_recordTimer)
+			{
+				m_recordTimer = new QTimer(this);
+				m_recordTimer->setTimerType(Qt::PreciseTimer);
+				connect(m_recordTimer, &QTimer::timeout, this, &Driver::recordFrame);
+			}
+			m_recordTimer->start(1000 / command.value("fps").toInt(DefaultRecordFps));
+			return ok();
+		}
+		if(name == "stop")
+		{
+			if(m_recordTimer)
+			{
+				m_recordTimer->stop();
+			}
+			QThreadPool::globalInstance()->waitForDone();
+			return ok({{"frames", m_recordFrames}, {"times", m_recordTimes}});
+		}
 		if(name == "wheel")
 		{
 			const QPoint position(command.value("x").toInt(), command.value("y").toInt());
@@ -257,7 +290,26 @@ private:
 		return ok();
 	}
 
+	// One frame of the recording: the window is read back here, the JPEG is written on a worker thread.
+	void recordFrame()
+	{
+		QQuickWindow* window = mainWindow();
+		if(!window)
+		{
+			return;
+		}
+		const QImage image = window->grabWindow();
+		m_recordTimes.append(static_cast<qint64>(m_recordClock.elapsed()));
+		const QString path = u"%1/f%2.jpg"_s.arg(m_recordDir).arg(m_recordFrames++, 5, 10, QChar(u'0'));
+		QThreadPool::globalInstance()->start(QRunnable::create([image, path] { image.save(path, "JPG", RecordJpegQuality); }));
+	}
+
 	QSocketNotifier* m_stdin = nullptr;
+	QTimer* m_recordTimer = nullptr;
+	QElapsedTimer m_recordClock;
+	QString m_recordDir;
+	int m_recordFrames = 0;
+	QJsonArray m_recordTimes;
 	QByteArray m_pending;
 };
 

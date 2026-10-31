@@ -54,6 +54,9 @@ export interface Ui {
   pause(ms: number): Promise<void>
   // Changes the window (GUI) or viewport (web) size, in logical pixels.
   resize(width: number, height: number): Promise<void>
+  // Records the window as a clip until endClip, saved as <kind>-<name>[-zh] in assets/clips (GUI only).
+  startClip(name: string): Promise<void>
+  endClip(): Promise<void>
   // Saves a picture as <kind>-<name>[-zh].png.
   shot(name: string, options?: ShotOptions): Promise<void>
 }

@@ -95,6 +95,10 @@ export REF_GUI_QML_PATH=$prefix/lib/qml   # QML modules of the dependency prefix
 
 Unverified: the capture was run on one machine (Linux, Debian 13). The drag-and-drop and paste of images into the GUI are not captured; the image shots are from the web page. The desktop notification is drawn by the film (`notificationCard`), because a headless run has none.
 
+### Clips (moving GUI)
+
+A scenario can record the window instead of taking one picture: `await ui.startClip('crowd')` … `await ui.endClip()` (GUI only). The capture plugin photographs the window 15 times a second into JPEG files; `capture/lib/clips.ts` resamples them to an even 15 fps and stores one WebM per clip (`assets/clips/gui-crowd.webm`, VP9 4:4:4, a few MB, plus `manifest.json`). `pnpm render` (and `pnpm clips`) unpacks the WebM files into `.cache/clips/<name>/f0001.jpg ...`, and a beat plays one with `screens: [{ clip: 'gui-crowd' }]`; the page shows the frame for each seek time. Chinese renders take `gui-crowd-zh` when it exists.
+
 ## The films
 
 `src/films/` has one file per film (`backend`, `sessions`, `peers`, `permissions`, `edits`, `composer`, `long-sessions`, `setup`, `notify`) and `trailer`. A film is `filmScene(feature, beats)`: a title card, the beats, the closing card. A beat is either `windowBeat` (a captured window, a camera path of `looks`, `marks`, a pointer, captions) or `cardsBeat` (text cards typed out, for config files and the illustration of a rejected edit). Picture coordinates in a beat are fractions (0..1) of the screenshot; a camera look is a point and a zoom (1 = the whole picture fits the window). `backend.ts` has the two custom shots (terminal replay to browser; three windows side by side).
