@@ -505,8 +505,8 @@ async fn question_asks_two_and_repeats_the_answers_or_the_dismissal() {
     rig.finish().await;
 }
 
-/// A frontend joins and leaves; says whether the backend decided to shut down.
-async fn left_alone(mock: &Mock, wait: Duration) -> bool {
+/// A frontend joins and leaves.
+fn join_and_leave(mock: &Mock) {
     let hub = &mock.running.hub;
     let conn = hub.add_conn();
     {
@@ -516,29 +516,39 @@ async fn left_alone(mock: &Mock, wait: Duration) -> bool {
     }
     hub.frontend_joined();
     hub.remove_conn(conn.id);
-    tokio::time::sleep(wait).await;
-    hub.shutdown.is_cancelled()
 }
+
+/// Waits for the backend to shut down.
+async fn wait_for_shutdown(mock: &Mock) {
+    let cancelled = mock.running.hub.shutdown.cancelled();
+    let exited = tokio::time::timeout(WAIT, cancelled).await;
+    assert!(exited.is_ok(), "the backend did not shut down");
+}
+
+/// The idle timeout of `late` in the test below.
+const LATE_TIMEOUT_SECS: i64 = 1;
 
 #[tokio::test]
 async fn the_mock_exits_with_its_last_client_unless_an_idle_timeout_says_otherwise() {
     let default = ref_server::mock::start(0, "token".into()).await.unwrap();
-    assert!(left_alone(&default, Duration::from_millis(100)).await);
+    join_and_leave(&default);
+    wait_for_shutdown(&default).await;
 
-    let staying = ref_server::mock::start_with(0, "token".into(), -1)
+    let staying = ref_server::mock::start_with(0, "token".into(), ref_server::hub::IDLE_NEVER)
         .await
         .unwrap();
-    assert!(!left_alone(&staying, Duration::from_millis(300)).await);
-
-    let late = ref_server::mock::start_with(0, "token".into(), 1)
+    let late = ref_server::mock::start_with(0, "token".into(), LATE_TIMEOUT_SECS)
         .await
         .unwrap();
-    assert!(
-        !left_alone(&late, Duration::from_millis(300)).await,
-        "not yet"
-    );
-    tokio::time::sleep(Duration::from_millis(1200)).await;
-    assert!(late.running.hub.shutdown.is_cancelled());
+    let left_at = Instant::now();
+    join_and_leave(&staying);
+    join_and_leave(&late);
+    assert!(!late.running.hub.shutdown.is_cancelled(), "not yet");
+
+    wait_for_shutdown(&late).await;
+    assert!(left_at.elapsed() >= Duration::from_secs(LATE_TIMEOUT_SECS as u64));
+    // `staying` left at the same time, and is still there after the timeout of `late` ran out.
+    assert!(!staying.running.hub.shutdown.is_cancelled());
 }
 
 #[tokio::test]

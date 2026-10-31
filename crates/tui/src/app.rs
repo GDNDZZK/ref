@@ -39,7 +39,7 @@ pub enum Mode {
 }
 
 /// What the backend answers to a reply for a question that is no longer open.
-const NO_PENDING_QUESTION: &str = "No pending question with that id.";
+const NO_PENDING_QUESTION: &str = ref_proto::NO_PENDING_QUESTION;
 
 #[derive(Debug)]
 pub enum Pending {

@@ -165,6 +165,8 @@ When the model asks you something with the [`question` tool](tools.md#question),
 
 Like the permission dialog, it ignores keys for a third of a second after it appears, so a key you were typing for the prompt does not answer it. The first answer from any window wins.
 
+Run `ref`, the GUI and the web UI from the same version as `ref-server`. An older client cannot show a question, so the session waits until you stop it.
+
 ## Permissions and delays
 
 When a tool call needs permission, the TUI shows the call and asks:

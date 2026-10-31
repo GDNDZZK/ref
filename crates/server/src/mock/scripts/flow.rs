@@ -203,30 +203,25 @@ fn everything(ctx: &Ctx) -> Round {
 mod tests {
     use super::*;
     use crate::mock::script::Step;
+    use crate::mock::scripts::tests::ctx;
 
-    fn ctx(round: usize, attempt: u32, results: &[&str]) -> Ctx {
-        Ctx {
-            prompt: "outage".into(),
-            args: String::new(),
-            root_prompt: "outage".into(),
-            peer_reports: 0,
-            typed: vec![],
-            round,
-            session_id: "ses_test".into(),
-            attempt,
-            tool_results: results.iter().map(|r| r.to_string()).collect(),
-        }
+    /// The context of `round` at the attempt `attempt`, after the tool results `results`.
+    fn at(round: usize, attempt: u32, results: &[&str]) -> Ctx {
+        let mut c = ctx("outage", round);
+        c.attempt = attempt;
+        c.tool_results = results.iter().map(|r| r.to_string()).collect();
+        c
     }
 
     #[test]
     fn the_third_request_fails_four_times_in_a_row_and_then_goes_through() {
-        let status = |attempt| outage(&ctx(2, attempt, &[])).error.map(|e| e.status);
+        let status = |attempt| outage(&at(2, attempt, &[])).error.map(|e| e.status);
         assert_eq!(status(1), Some(OVERLOADED));
         assert_eq!(status(2), Some(OVERLOADED));
         assert_eq!(status(3), None, "a reset has no status");
-        assert!(outage(&ctx(2, 3, &[])).reset);
+        assert!(outage(&at(2, 3, &[])).reset);
         assert_eq!(status(4), Some(UNAVAILABLE));
-        let ok = outage(&ctx(2, 5, &[]));
+        let ok = outage(&at(2, 5, &[]));
         assert!(ok.error.is_none() && !ok.reset);
         assert!(matches!(ok.steps.last(), Some(Step::Tool(c)) if c.name == "edit"));
     }
@@ -234,7 +229,7 @@ mod tests {
     #[test]
     fn the_first_requests_and_the_last_ones_never_fail() {
         for round in [0, 1, 3, 4] {
-            let r = outage(&ctx(round, 1, &[]));
+            let r = outage(&at(round, 1, &[]));
             assert!(r.error.is_none() && !r.reset, "round {round}");
         }
     }
@@ -242,7 +237,7 @@ mod tests {
     #[test]
     fn the_fix_toggles_the_score_line_so_the_demo_runs_again() {
         let strict = "[scratch/src/parser.rs#AB12]\n16:        score: score.trim().parse().ok()?,";
-        let Some(Step::Tool(call)) = outage(&ctx(2, 5, &[strict])).steps.pop() else {
+        let Some(Step::Tool(call)) = outage(&at(2, 5, &[strict])).steps.pop() else {
             panic!("an edit");
         };
         assert_eq!(call.input["tag"], "AB12");
@@ -251,7 +246,7 @@ mod tests {
             "        score: score.trim().parse().unwrap_or(0),"
         );
         let lenient = strict.replace(STRICT_SCORE, LENIENT_SCORE);
-        let Some(Step::Tool(call)) = outage(&ctx(2, 5, &[&lenient])).steps.pop() else {
+        let Some(Step::Tool(call)) = outage(&at(2, 5, &[&lenient])).steps.pop() else {
             panic!("an edit");
         };
         assert!(
