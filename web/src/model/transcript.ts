@@ -12,6 +12,7 @@ import type {
   Message,
   Part,
   PermissionRequest,
+  QuestionRequest,
   SessionEvent,
   SessionInfo,
   SessionSnapshot,
@@ -65,6 +66,7 @@ export class Transcript {
   moreBefore = false
   closed = false
   readonly permissions = new Map<string, PermissionRequest>()
+  readonly questions = new Map<string, QuestionRequest>()
   queued: Message[] = []
   // The last `Error` event; it stays until the user sends the next prompt.
   errorText = ''
@@ -136,6 +138,8 @@ export class Transcript {
     this.tailChanged = true
     this.permissions.clear()
     for (const request of snapshot.pending_permissions) this.permissions.set(request.call_id, request)
+    this.questions.clear()
+    for (const request of snapshot.pending_questions) this.questions.set(request.call_id, request)
     this.replaceMessages(snapshot.messages)
   }
 
@@ -166,6 +170,13 @@ export class Transcript {
         break
       case 'permission_resolved':
         this.resolvePermission(event.call_id)
+        break
+      case 'question':
+        this.questions.set(event.request.call_id, event.request)
+        this.markDirty(event.request.message_id)
+        break
+      case 'question_resolved':
+        this.resolveQuestion(event.call_id)
         break
       case 'queue':
         this.queued = event.messages
@@ -290,6 +301,14 @@ export class Transcript {
     const request = this.permissions.get(callId)
     if (!request) return undefined
     this.permissions.delete(callId)
+    this.markDirty(request.message_id)
+    return request
+  }
+
+  resolveQuestion(callId: string): QuestionRequest | undefined {
+    const request = this.questions.get(callId)
+    if (!request) return undefined
+    this.questions.delete(callId)
     this.markDirty(request.message_id)
     return request
   }
@@ -419,6 +438,7 @@ export class Transcript {
       lastCompaction: existing.lastCompaction,
       isPacing: (index) => this.pacer.hasPending(streamKey(messageId, index)),
       permissions: this.permissions,
+      questions: this.questions,
     })
     existing.blocks = built.map((block) => reuseIfEqual(previousBlocks.get(block.key), block))
   }
