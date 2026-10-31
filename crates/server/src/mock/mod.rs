@@ -54,6 +54,8 @@ impl Mock {
 
 impl Drop for Mock {
     fn drop(&mut self) {
+        // The hub outlives this drop and its session database is open in the directory.
+        let _ = self.running.hub.store.close();
         if let Err(e) = std::fs::remove_dir_all(&self.root) {
             eprintln!("ref-server: cannot remove {}: {e}", self.root.display());
         }
