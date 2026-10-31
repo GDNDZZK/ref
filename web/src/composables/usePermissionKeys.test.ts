@@ -39,6 +39,17 @@ function question(overrides: Partial<Question> = {}): Question {
   }
 }
 
+const KeysHost = defineComponent({
+  setup() {
+    usePermissionKeys()
+    return () => h('div')
+  },
+})
+
+function mountKeys() {
+  return mount(KeysHost, { attachTo: document.body })
+}
+
 // Opens a session that has a pending question; `id` is where the question is asked.
 async function openSession(id: string, questions: Question[]) {
   const request: QuestionRequest = {
@@ -70,15 +81,7 @@ async function openSession(id: string, questions: Question[]) {
 async function ask(...questions: Question[]) {
   workspaceStub.focusedId = 'ses_1'
   const { questionReply } = await openSession('ses_1', questions)
-  const host = mount(
-    defineComponent({
-      setup() {
-        usePermissionKeys()
-        return () => h('div')
-      },
-    }),
-    { attachTo: document.body },
-  )
+  const host = mountKeys()
   await flushPromises()
   return { questionReply, host }
 }
@@ -219,14 +222,7 @@ describe('keys in split view', () => {
     sessions.set('ses_1', waiting)
     await openSession('ses_2', [])
     workspaceStub.focusedId = 'ses_2'
-    const host = mount(
-      defineComponent({
-        setup() {
-          usePermissionKeys()
-          return () => h('div')
-        },
-      }),
-    )
+    const host = mountKeys()
     await vi.advanceTimersByTimeAsync(PERMISSION_GUARD_MS * 2)
     press('a')
     press('Enter')
