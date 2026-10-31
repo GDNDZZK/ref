@@ -1270,7 +1270,12 @@ async fn run_one(
                 }
             }
             match reply {
-                Some((true, _)) => {}
+                Some((true, _)) => {
+                    // Allowed: the tool may still wait out a delay, but the session no longer
+                    // waits for the user.
+                    let mut st = s.lock();
+                    hub.set_status(&mut st, SessionStatus::Running);
+                }
                 _ if cancel.is_cancelled() => {
                     finish_tool(
                         hub,

@@ -1,7 +1,7 @@
 mod common;
 
 use common::*;
-use ref_proto::{MessageSource, Part, Role, SessionEvent, SessionStatus, ToolState};
+use ref_proto::{MessageSource, Part, Request, Role, SessionEvent, SessionStatus, ToolState};
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
@@ -269,6 +269,61 @@ async fn agent_permission_overrides_global_and_delay_applies() {
             ..
         }
     ));
+}
+
+#[tokio::test]
+async fn an_allowed_tool_no_longer_shows_waiting_for_permission_during_its_delay() {
+    let m = mock(Arc::new(|n, _| match n {
+        0 => Reply::Tools(vec![tool(
+            "c1",
+            "bash",
+            json!({"purpose": "p", "command": "echo hi"}),
+        )]),
+        _ => Reply::Text("ok".into()),
+    }))
+    .await;
+    let mut cfg = config(&m.url);
+    cfg.permission = perms(json!({"bash": "ask"}));
+    cfg.delay = vec![("bash".into(), 1.5)];
+    let (hub, work) = hub(cfg, "ask-delay");
+    let s = session(&hub, &work, "main", "build").await;
+    prompt(&hub, &s, "go");
+    let s2 = s.clone();
+    wait_until("waiting", T, move || {
+        s2.info().status == SessionStatus::WaitingPermission
+    })
+    .await;
+    let call_id = s.lock().perms[0].request.call_id.clone();
+    let conn = hub.add_conn();
+    let reply = Request::PermissionReply {
+        session_id: s.id.clone(),
+        call_id,
+        allow: true,
+        always: false,
+    };
+    ref_server::api::handle(&hub, &conn, reply).await.unwrap();
+
+    // The countdown runs, and the session is no longer waiting for the user.
+    let s3 = s.clone();
+    wait_until("delayed", T, move || {
+        tool_parts(&s3).iter().any(|p| {
+            matches!(
+                p,
+                Part::Tool {
+                    state: ToolState::Delayed,
+                    ..
+                }
+            )
+        })
+    })
+    .await;
+    assert_ne!(s.info().status, SessionStatus::WaitingPermission);
+    assert!(
+        hub.infos()
+            .iter()
+            .all(|i| i.status != SessionStatus::WaitingPermission)
+    );
+    wait_idle(&s).await;
 }
 
 #[tokio::test]
