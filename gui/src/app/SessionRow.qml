@@ -153,7 +153,7 @@ Item {
 
 				Icon {
 					anchors.verticalCenter: parent.verticalCenter
-					name: "lock"
+					name: row.activity === "waiting_question" ? "question" : "lock"
 					size: 16
 					color: Theme.warning
 					visible: row.hasPermission
