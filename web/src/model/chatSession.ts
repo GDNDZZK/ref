@@ -162,10 +162,6 @@ export class ChatSession {
     return this.state.permissions[0]
   }
 
-  get questions(): readonly QuestionRequest[] {
-    return this.state.questions
-  }
-
   // The oldest question that still waits for an answer from this window.
   get pendingQuestion(): QuestionRequest | undefined {
     return this.state.questions.find((request) => !this.state.sendingAnswers.includes(request.call_id))

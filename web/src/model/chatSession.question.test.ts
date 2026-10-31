@@ -116,6 +116,28 @@ describe('answering a question', () => {
     expect(session.pendingQuestion?.call_id).toBe('c1')
   })
 
+  it('unlocks the card with its picks when the connection drops, and sends them again after the reattach', async () => {
+    const reply = vi.fn().mockRejectedValueOnce(new Error('connection lost')).mockResolvedValue(undefined)
+    const { api, session } = await setup(reply)
+    const form = session.questionForm(REQUEST)
+    form.select(0, 0) // picks A instead of the default B
+
+    await expect(session.answerQuestion('c1', form.answers())).rejects.toThrow('connection lost')
+    expect(session.isSendingAnswer('c1')).toBe(false)
+    expect(session.pendingQuestion?.call_id).toBe('c1')
+
+    await session.detach()
+    await session.attach(true) // the snapshot still has the question
+    expect(session.pendingQuestion?.call_id).toBe('c1')
+    expect(session.questionForm(REQUEST)).toBe(form)
+    expect(form.answers()).toEqual([['A']])
+
+    await session.answerQuestion('c1', form.answers())
+    expect(reply).toHaveBeenCalledTimes(2)
+    expect(reply).toHaveBeenLastCalledWith('ses_1', 'c1', [['A']])
+    expect(api.attach).toHaveBeenCalledTimes(2)
+  })
+
   it('drops a question that was answered elsewhere without a word', async () => {
     const gone = vi.fn().mockRejectedValue(new Error('No pending question with that id.'))
     const { session } = await setup(gone)
