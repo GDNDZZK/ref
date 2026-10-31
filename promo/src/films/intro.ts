@@ -133,7 +133,7 @@ export const scene = timelineFilm({
     [43.6, 46.1, { en: 'Start the backend yourself.', zh: '单独启动后端。' }],
     [46.2, 49.2, { en: 'Close every window. The sessions keep running.', zh: '窗口全关，会话照跑。' }],
     [49.6, 52.6, { en: 'ref retries when the API fails.', zh: '接口出错，ref 会自动重试。' }],
-    [53.0, 56.0, { en: 'Set a delay: esc cancels the call.', zh: '设几秒延迟，按 esc 就能取消调用。' }],
+    [53.0, 56.0, { en: 'Set a delay: Cancel stops the call.', zh: '设几秒延迟，点取消就能停掉调用。' }],
     [56.4, 59.4, { en: 'ref reads your opencode.json.', zh: 'ref 直接读你的 opencode.json。' }],
     [59.7, 62.3, { en: 'Download from GitHub Releases.', zh: '到 GitHub Releases 下载。' }],
     [62.5, 65.5, { en: 'Set an API key and run ref.', zh: '设好 API key，运行 ref。' }],
