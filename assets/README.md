@@ -15,6 +15,8 @@ Hand-drawn artwork shared by the TUI, GUI and WebUI.
 | `scripts/` | Lint, preview and build scripts. |
 
 Everything under `app/` is generated from `scripts/logo.py` by `scripts/build_app_icons.py` and committed.
+The GUI compiles `ref.svg` and `ref-small.svg` into the program for its window icon on Linux
+(`gui/src/icons/app_icon.cpp`), so a change to them needs a rebuild of the GUI.
 
 ## Scripts
 
