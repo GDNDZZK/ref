@@ -156,8 +156,11 @@ Rectangle {
 					NumberAnimation { property: "scale"; to: Motion.tileExitScale; duration: Motion.standard; easing.type: Motion.exitEase }
 				}
 			}
+			// A row displaced while it enters is not finished by the add transition: it ends at full opacity and scale here.
 			displaced: Transition {
 				NumberAnimation { property: "y"; duration: Motion.standard; easing.type: Motion.ease }
+				NumberAnimation { property: "opacity"; to: 1; duration: Motion.standard; easing.type: Motion.ease }
+				NumberAnimation { property: "scale"; to: 1; duration: Motion.standard; easing.type: Motion.ease }
 			}
 
 			ScrollBar.vertical: ThemedScrollBar {}
