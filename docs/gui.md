@@ -29,7 +29,7 @@ Download `ref-gui-<version>-<platform>` (or `ref-all-…`) from the [latest rele
 
 Keep the folder together and run the program from where it is; moving the whole folder is fine. No installation or administrator rights are needed. Everything the GUI needs besides the system's own libraries is in the folder, so it does not use a Qt that is installed on the system.
 
-On Linux the program needs glibc 2.35 and the C++ runtime of GCC 13 (Ubuntu 24.04, Debian 13, Fedora 38, Arch and newer), and it runs with X11 or through XWayland. Qt's Wayland plugin is not included.
+On Linux the program needs glibc 2.38 and the C++ runtime of GCC 13 (Ubuntu 24.04, Debian 13, Fedora 39, Arch and newer), and it runs with X11 or through XWayland. Qt's Wayland plugin is not included.
 
 ## Starting
 

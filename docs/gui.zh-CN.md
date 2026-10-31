@@ -31,7 +31,7 @@
 
 请保持文件夹完整，并从它所在的位置运行程序；整个文件夹可以移动。不需要安装，也不需要管理员权限。除系统自带的库之外，GUI 需要的一切都在文件夹里，所以它不会使用系统上安装的 Qt。
 
-Linux 上程序需要 glibc 2.35 和 GCC 13 的 C++ 运行库（Ubuntu 24.04、Debian 13、Fedora 38、Arch 及更新版本），运行在 X11 上，或通过 XWayland 运行。不包含 Qt 的 Wayland 插件。
+Linux 上程序需要 glibc 2.38 和 GCC 13 的 C++ 运行库（Ubuntu 24.04、Debian 13、Fedora 39、Arch 及更新版本），运行在 X11 上，或通过 XWayland 运行。不包含 Qt 的 Wayland 插件。
 
 ## 启动
 
