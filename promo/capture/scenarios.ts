@@ -66,9 +66,21 @@ export const SCENARIOS: Scenario[] = [
     },
   },
   {
-    name: 'sessions',
+    name: 'progress',
     async run(ui) {
       await ui.send('todo')
+      await ui.command('new')
+      await ui.pause(500)
+      await ui.send('running')
+      await ui.pause(4500)
+      await ui.shot('sidebar-progress')
+    },
+  },
+  {
+    // No `todo` session here: its card renders wrongly in a split-view tile (reported to the GUI).
+    name: 'sessions',
+    async run(ui) {
+      await ui.send('hello')
       await ui.command('new')
       await ui.pause(500)
       await ui.send('running')
@@ -79,13 +91,33 @@ export const SCENARIOS: Scenario[] = [
       await ui.pause(500)
       await ui.send('slow')
       await ui.pause(4500)
-      await ui.shot('sidebar-progress')
       await ui.command('watch')
       await ui.pause(1500)
       await ui.shot('split-view', { readme: true })
       await ui.command('zoom')
       await ui.pause(1200)
       await ui.shot('split-zoom')
+    },
+  },
+  {
+    // Split view after every session has finished, to tell animation from rendering bugs.
+    name: 'split-idle',
+    uis: ['gui'],
+    async run(ui) {
+      await ui.send('todo')
+      await ui.command('new')
+      await ui.pause(500)
+      await ui.send('running')
+      await ui.command('new')
+      await ui.pause(500)
+      await ui.send('hello')
+      await ui.pause(14_000)
+      await ui.shot('split-idle-before')
+      await ui.command('watch')
+      await ui.pause(3000)
+      await ui.shot('split-idle')
+      await ui.pause(3000)
+      await ui.shot('split-idle-later')
     },
   },
   {
