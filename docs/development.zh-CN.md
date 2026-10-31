@@ -63,7 +63,7 @@ TUI 与后端通过 WebSocket 交换 JSON 帧。前端分页获取历史：`Atta
 sleep 3600 | ref-server --mock      # stdout 只打印一行 {"port":N,"token":"..."}
 ```
 
-- **退出**：stdin 文件结束、最后一个客户端断开，或 ctrl-c。退出时会删除它的临时目录（被 `SIGKILL` 杀死时会留下 `/tmp/ref-mock-*`）。
+- **退出**：stdin 文件结束、最后一个客户端断开，或 ctrl-c。退出时会删除它的临时目录（被 `SIGKILL` 杀死时会留下 `/tmp/ref-mock-*`）。`--idle-timeout S` 改变第二个条件：`-1` 让 mock 在最后一个客户端离开后继续运行（用来演示后端比窗口活得更久；stdin 必须保持打开），`S` 表示再等 S 秒。不带这个选项时立即退出。
 - **工作区**：无论客户端请求哪个目录，所有会话都在带示例文件的临时工作区中运行（`README.md`、`NOTES.txt`、`src/parser.rs`、`src/lib.rs`、`docs/design.md`、`data/big.log`、`logo.png`、`scratch/`），不会改动你的文件。预置了 3 条历史会话。
 - **模型**：`mock/mock-1`（默认；200k 上下文、图片、推理、变体 `low`、`medium`、`high`）和 `mock/mock-fast`（64k）。多一个智能体 `reviewer`。
 - **权限**：`edit` 和 `write` 询问（`scratch/` 下允许）。`delete` 允许，但延迟 5 秒。`bash` 询问，以 `echo`、`ls`、`cat`、`seq`、`sleep`、`printf` 开头的命令允许，`curl` 拒绝。`webfetch` 关闭。
@@ -96,6 +96,8 @@ sleep 3600 | ref-server --mock      # stdout 只打印一行 {"port":N,"token":"
 | `compact-tool` | 模型调用 `compact_context` |
 | `peer` | 创建 `reviewer` 会话 `helper`，它用 `send_message` 回报 |
 | `everything` | `tools`、`todo` 和 `image` 连成一个长回合 |
+| `question` | 模型提出两个问题（一个单选、一个多选，都带默认值），并复述你的回答 |
+| `question-one` | 一个带默认值的单选问题，`enter` 采纳默认值 |
 | `orchestrate` | 主会话先列计划，再创建 `scout`、`fixer`、`tester`、`docs` 四个助手，收齐它们的五份报告（第五份来自最后创建的 `reviewer`），最后给出总结（约 25 秒） |
 
 `orchestrate` 约 25 秒，需要批准一次（fixer 的 `edit`）。时间线固定：助手在 1.5、3、4.5、6 秒出现，主会话在 7.5 秒左右空闲，报告大约在 10.5 秒（`scout`）、12 秒（`docs`）、12.5 秒（`fixer`，在你于 9 秒批准之后 3.5 秒）和 14 秒（`tester`）到达，16 秒创建 reviewer，21 秒收到它的报告，25 秒总结结束。主会话忙碌时到达的报告会在它的下一次请求时并入对话，计数不受影响。`orchestrate` 之后的文字不会被使用。它启动的其他脚本（`orch-scout`、`orch-fixer`、`orch-tester`、`orch-docs`、`orch-review`、`orchestrate-report`）也会出现在 `help` 里，但不是给人输入的。

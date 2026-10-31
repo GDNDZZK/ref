@@ -330,7 +330,9 @@
     "permissionTool": "Waiting for permission to use {tool}",
     "turnDone": "Finished",
     "turnError": "Stopped with an error",
-    "turnErrorDetail": "Stopped with an error: {error}"
+    "turnErrorDetail": "Stopped with an error: {error}",
+    "question": "Waiting for your answer",
+    "questionDetail": "Asks: {question}"
   },
   "notifySettings": {
     "title": "Notifications",

@@ -80,6 +80,7 @@ fn status_word(s: &SessionStatus) -> &'static str {
         SessionStatus::Busy => "busy",
         SessionStatus::Running => "running tools",
         SessionStatus::WaitingPermission => "waiting for permission",
+        SessionStatus::WaitingQuestion => "waiting for an answer",
         SessionStatus::Retrying { .. } => "retrying",
         SessionStatus::Compacting => "compacting",
     }

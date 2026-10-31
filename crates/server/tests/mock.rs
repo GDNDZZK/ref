@@ -172,6 +172,8 @@ async fn help_lists_the_scripts() {
         "retry",
         "peer",
         "everything",
+        "question",
+        "question-one",
     ] {
         assert!(text.contains(&format!("`{name}`")), "{name} is missing");
     }
@@ -415,6 +417,111 @@ async fn orchestrate_directs_a_crew_and_collects_five_reports() {
             .contains("Fix off-by-one in parse_items")
     );
     rig.finish().await;
+}
+
+impl Rig {
+    /// Waits for the model's question and answers it.
+    async fn answer_question(&self, answers: Option<Vec<Vec<&str>>>) {
+        let start = Instant::now();
+        let call_id = loop {
+            let pending = self
+                .session
+                .lock()
+                .questions
+                .first()
+                .map(|q| q.request.call_id.clone());
+            if let Some(id) = pending {
+                break id;
+            }
+            assert!(start.elapsed() < WAIT, "no question was asked");
+            tokio::time::sleep(POLL).await;
+        };
+        let answers = answers.map(|a| {
+            a.into_iter()
+                .map(|e| e.into_iter().map(String::from).collect())
+                .collect()
+        });
+        let req = Request::QuestionReply {
+            session_id: self.session.id.clone(),
+            call_id,
+            answers,
+        };
+        api::handle(&self.hub, &self.conn, req).await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn question_one_takes_the_default_answer() {
+    let rig = rig().await;
+    rig.prompt("question-one");
+    rig.answer_question(Some(vec![vec!["src/parser.rs"]])).await;
+    rig.run(true).await;
+    assert!(
+        rig.last_text().contains("You chose: "),
+        "{}",
+        rig.last_text()
+    );
+    assert!(rig.last_text().contains("src/parser.rs"));
+    rig.finish().await;
+}
+
+#[tokio::test]
+async fn question_asks_two_and_repeats_the_answers_or_the_dismissal() {
+    let rig = rig().await;
+    rig.prompt("question");
+    rig.answer_question(Some(vec![
+        vec!["Iterator"],
+        vec!["Unit tests", "typed check"],
+    ]))
+    .await;
+    rig.run(true).await;
+    let text = rig.last_text();
+    assert!(
+        text.contains("Iterator") && text.contains("Unit tests, typed check"),
+        "{text}"
+    );
+
+    rig.prompt("question-one");
+    rig.answer_question(None).await;
+    rig.run(true).await;
+    assert!(rig.last_text().contains("dismissed"), "{}", rig.last_text());
+    rig.finish().await;
+}
+
+/// A frontend joins and leaves; says whether the backend decided to shut down.
+async fn left_alone(mock: &Mock, wait: Duration) -> bool {
+    let hub = &mock.running.hub;
+    let conn = hub.add_conn();
+    {
+        let mut c = conn.lock();
+        c.hello = true;
+        c.frontend = true;
+    }
+    hub.frontend_joined();
+    hub.remove_conn(conn.id);
+    tokio::time::sleep(wait).await;
+    hub.shutdown.is_cancelled()
+}
+
+#[tokio::test]
+async fn the_mock_exits_with_its_last_client_unless_an_idle_timeout_says_otherwise() {
+    let default = ref_server::mock::start(0, "token".into()).await.unwrap();
+    assert!(left_alone(&default, Duration::from_millis(100)).await);
+
+    let staying = ref_server::mock::start_with(0, "token".into(), -1)
+        .await
+        .unwrap();
+    assert!(!left_alone(&staying, Duration::from_millis(300)).await);
+
+    let late = ref_server::mock::start_with(0, "token".into(), 1)
+        .await
+        .unwrap();
+    assert!(
+        !left_alone(&late, Duration::from_millis(300)).await,
+        "not yet"
+    );
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    assert!(late.running.hub.shutdown.is_cancelled());
 }
 
 #[tokio::test]

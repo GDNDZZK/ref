@@ -72,7 +72,7 @@ The window has a sidebar on the left and the content on the right: one session, 
 
 ## Split view
 
-The split view (Ctrl+Shift+W, the button at the top right, or `ref-gui -w`) shows one tile per background session: the live sessions that no other client has open, plus the current session. Only the focused tile shows its input box (as in the terminal UI), so the others have room for the conversation; they keep the status line and the queue of waiting messages, and a draft, attachments and shell mode survive while the box is hidden. A click focuses a tile and shows its input box, and Alt+arrow keys move the focus; commands act on the focused tile. Double-click a tile's title bar, or use its zoom button (Ctrl+Shift+Z), to enlarge it. Leave the zoom with Ctrl+Shift+Z or the *Leave zoom* button at the top right. Esc does not leave it, because Esc belongs to the input box and to permission questions. With no background sessions the view says so.
+The split view (Ctrl+Shift+W, the button at the top right, or `ref-gui -w`) shows one tile per background session: the live sessions that no other client has open, plus the current session. Only the focused tile shows its input box (as in the terminal UI), so the others have room for the conversation; they keep the status line and the queue of waiting messages, and a draft, attachments and shell mode survive while the box is hidden. A click focuses a tile and shows its input box, and Alt+arrow keys move the focus; the sidebar selects the session of the focused tile, and marks all tiles with a bar; commands act on the focused tile. Double-click a tile's title bar, or use its zoom button (Ctrl+Shift+Z), to enlarge it. Leave the zoom with Ctrl+Shift+Z or the *Leave zoom* button at the top right. Esc does not leave it, because Esc belongs to the input box and to permission questions. With no background sessions the view says so.
 
 ## The conversation
 
@@ -93,7 +93,7 @@ The split view (Ctrl+Shift+W, the button at the top right, or `ref-gui -w`) show
 
 **Permissions**
 
-- A call that needs your permission opens by itself and shows the command or path with three buttons: *Allow* (a), *Allow for session* (s), *Deny* (d). With the session focused you can also press a or Enter, s, d or Esc. The keys only work 350 ms after the request appears, so text you were typing does not answer it by accident; until all requests are answered, letter keys do not go into the input box. When several calls wait, the oldest is answered first and the card says *+N more waiting*. In the split view the keys go to the focused tile.
+- A call that needs your permission opens by itself and shows the command or path with three buttons: *Allow* (a), *Allow for session* (s), *Deny* (d). With the session focused you can also press a or Enter, s, d or Esc, also while the cursor is in the input box. The keys only work 350 ms after the request appears, so text you were typing does not answer it by accident; until all requests are answered, letter keys do not go into the input box (Ctrl and Alt shortcuts and editing keys still work). When several calls wait, the oldest is answered first and the card says *+N more waiting*. In the split view the keys go to the focused tile.
 
 **Images**
 

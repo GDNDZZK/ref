@@ -12,7 +12,9 @@
 set(kept_style_folders Basic impl)
 set(kept_library_suffixes Basic BasicStyleImpl Impl)
 
-file(GLOB_RECURSE entries LIST_DIRECTORIES true "${REF_GUI_DEPLOY_ROOT}/*/QtQuick/Controls/*")
+# Everything is listed and filtered below: a "*" in the middle of a glob stands for one folder
+# level only, and the macOS app keeps its QML modules four levels down (ref.app/Contents/Resources/qml).
+file(GLOB_RECURSE entries LIST_DIRECTORIES true "${REF_GUI_DEPLOY_ROOT}/*")
 foreach(entry IN LISTS entries)
 	get_filename_component(parent "${entry}" DIRECTORY)
 	get_filename_component(name "${entry}" NAME)
