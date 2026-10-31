@@ -27,7 +27,7 @@ public:
 		SessionIdRole = Qt::UserRole + 1,
 		NameRole,         // set by the user, may be empty
 		TitleRole,        // made by the backend, may be empty
-		DisplayTitleRole, // name, else title, else the directory's name
+		DisplayTitleRole, // live: name, else title, else the directory; stored: title (one line), else name, else the directory
 		CwdRole,
 		DirNameRole, // last component of the directory
 		AgentRole,
