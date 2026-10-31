@@ -203,10 +203,17 @@ watch(
   },
 )
 
-// Rows resize (streaming text, folding bodies) and so does the window.
-const sizeObserver = new ResizeObserver(() => {
+// A viewport that changes size (the window, or the input box unfolding below) keeps the end in
+// view in the same frame; rows that change size (streaming text, folding bodies) are chased.
+function pinToEnd(): void {
+  const view = scroller.value
+  if (view) view.scrollTop = Math.max(0, view.scrollHeight - view.clientHeight)
+}
+
+const sizeObserver = new ResizeObserver((entries) => {
   if (turnInProgress.value && following.value) holdEnd()
-  chaseEnd()
+  if (following.value && !gesturing && entries.some((entry) => entry.target === scroller.value)) pinToEnd()
+  else chaseEnd()
 })
 
 // --- User gestures decide `following`.
