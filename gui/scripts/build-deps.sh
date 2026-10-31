@@ -50,7 +50,10 @@ build_cmake_project() {
 	local src="$work/src-$name" build="$work/build-$name"
 	rm -rf "$src" "$build"
 	mkdir -p "$src"
-	tar -xf "$tarball" -C "$src" --strip-components=1
+	# From the archive's own folder with a bare name: GNU tar on Windows (Git Bash) reads a path
+	# like D:/a/x.tar.xz as the file x.tar.xz on a host called D. --force-local would avoid that,
+	# but bsdtar on macOS does not have it.
+	(cd "$(dirname "$tarball")" && tar -xf "$(basename "$tarball")" -C "$src" --strip-components=1)
 
 	cmake -S "$src" -B "$build" -G "${CMAKE_GENERATOR:-Ninja}" \
 		-DCMAKE_BUILD_TYPE="$build_type" \
