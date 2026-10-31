@@ -54,26 +54,14 @@ Item {
 	}
 
 	// Takes the keyboard from the input box once the keys may answer a permission request
-	// (the user may be typing when it appears), and hands it back when none is left.
+	// (the user may be typing when it appears), and hands it back when none is left. The input
+	// box also offers its keys (onKeyOffered), so a click into it does not turn them off.
 	Item {
 		id: permissionKeys
 
 		Keys.onPressed: event => {
+			pane.session.permissionKey(event.key, event.text, event.modifiers, event.isAutoRepeat)
 			event.accepted = true
-			switch (event.key) {
-			case Qt.Key_A:
-			case Qt.Key_Return:
-			case Qt.Key_Enter:
-				pane.session.answerOldestPermission(true, false)
-				break
-			case Qt.Key_S:
-				pane.session.answerOldestPermission(true, true)
-				break
-			case Qt.Key_D:
-			case Qt.Key_Escape:
-				pane.session.answerOldestPermission(false, false)
-				break
-			}
 		}
 
 		Connections {
@@ -193,6 +181,8 @@ Item {
 		session: pane.session
 		boxShown: pane.composerShown
 		onSubmitted: chat.following = true
+		// With a request pending, its keys come before the input box, wherever the caret is.
+		onKeyOffered: event => event.accepted = pane.keysEnabled && pane.session.permissionKey(event.key, event.text, event.modifiers, event.isAutoRepeat)
 	}
 
 	// The input box's remarks are the window's toasts.

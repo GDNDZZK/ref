@@ -59,6 +59,7 @@ QCoro::Task<> Workspace::leaveSplit()
 	m_zoomed.clear();
 	setFocusedTile({});
 	m_tiles.setTiles({});
+	m_directory.live().setTileIds({});
 	emit zoomedChanged();
 	emit splitViewChanged();
 	emit visibleSessionIdsChanged();
@@ -127,6 +128,7 @@ void Workspace::syncTiles()
 	}
 	const QStringList wanted = wantedTileIds();
 	QList<ChatSession*> tiles;
+	QStringList ids;
 	for(const QString& id : wanted)
 	{
 		if(m_leaving.contains(id))
@@ -134,8 +136,10 @@ void Workspace::syncTiles()
 			continue;
 		}
 		tiles.append(&chat(id));
+		ids.append(id);
 	}
 	m_tiles.setTiles(tiles);
+	m_directory.live().setTileIds(ids);
 
 	for(ChatSession* tile : std::as_const(tiles))
 	{
@@ -182,6 +186,7 @@ void Workspace::setFocusedTile(const QString& sessionId)
 		return;
 	}
 	m_focusedTile = sessionId;
+	updateHighlight();
 	emit focusedTileChanged();
 }
 
