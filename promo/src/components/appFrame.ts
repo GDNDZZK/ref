@@ -20,8 +20,15 @@ export interface CameraKey {
   ease?: Key['ease']
 }
 
+// A picture that fades in over the ones before it at time `from`; the first one is always shown.
+export interface PictureLayer {
+  src: string
+  from: number
+}
+
 export interface AppFrameOptions {
-  image: string
+  // All layers must have the size `imageSize`.
+  layers: readonly PictureLayer[]
   // Pixel size of the picture; fixes the geometry before the file is loaded.
   imageSize: { width: number; height: number }
   title: string
@@ -32,6 +39,7 @@ export interface AppFrameOptions {
   to: number
 }
 
+const LAYER_FADE_SECONDS = 0.4
 const ENTER_SECONDS = 0.8
 const EXIT_SECONDS = 0.35
 const ENTER_SCALE = 0.94
@@ -57,8 +65,11 @@ export function appFrame(options: AppFrameOptions): AppFrame {
   const viewHeight = rect.height - TITLE_BAR_HEIGHT_PX
 
   const world = element('div', 'app-world', body)
-  const picture = element('img', 'app-picture', world)
-  picture.src = options.image
+  const pictures = options.layers.map((layer) => {
+    const picture = element('img', 'app-picture', world)
+    picture.src = layer.src
+    return picture
+  })
   const attached: Part[] = []
 
   const scale = track(options.camera.map((key) => ({ at: key.at, value: key.scale, ease: key.ease })))
@@ -101,6 +112,10 @@ export function appFrame(options: AppFrameOptions): AppFrame {
       world.style.height = `${worldHeight()}px`
       const offset = cameraOffset(time)
       world.style.transform = `translate(${offset.x}px, ${offset.y}px) scale(${scale(time)})`
+      options.layers.forEach((layer, index) => {
+        const shown = index === 0 ? 1 : span(time, layer.from, LAYER_FADE_SECONDS, 'inOutSine')
+        pictures[index]!.style.opacity = String(shown)
+      })
 
       const entering = span(time, options.from, ENTER_SECONDS, 'outExpo')
       const leaving = span(time, options.to - EXIT_SECONDS, EXIT_SECONDS, 'inCubic')

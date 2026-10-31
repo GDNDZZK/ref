@@ -255,17 +255,33 @@
     "width": 2058,
     "height": 1224
   },
+  "tui-main-clean": {
+    "width": 2058,
+    "height": 1144
+  },
   "tui-permission": {
     "width": 2058,
     "height": 1224
+  },
+  "tui-permission-clean": {
+    "width": 2058,
+    "height": 1144
   },
   "tui-shared": {
     "width": 2058,
     "height": 1224
   },
+  "tui-shared-clean": {
+    "width": 2058,
+    "height": 1144
+  },
   "tui-split": {
     "width": 2058,
     "height": 1224
+  },
+  "tui-split-clean": {
+    "width": 2058,
+    "height": 1144
   },
   "web-agents-dialog": {
     "width": 3200,

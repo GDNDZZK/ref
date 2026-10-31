@@ -42,3 +42,18 @@ function recordSize(name: string, size: { width: number; height: number }): void
   const sorted = Object.fromEntries(Object.entries(manifest).sort(([a], [b]) => a.localeCompare(b)))
   writeFileSync(MANIFEST_FILE, `${JSON.stringify(sorted, null, 2)}\n`)
 }
+
+// The terminal's last row shows the mock workspace path (random per run). The videos use
+// this copy without that row; the README images keep the real thing.
+const TERMINAL_FOOTER_PX = 80 // last row (2 x 19 px) plus the 18 px padding, at 2x
+
+export async function publishWithoutFooter(name: string): Promise<void> {
+  const source = join(SCREENS_DIR, `${name}.png`)
+  const { width, height } = await sharp(source).metadata()
+  const cropped = { width, height: height - TERMINAL_FOOTER_PX }
+  await sharp(source)
+    .extract({ left: 0, top: 0, ...cropped })
+    .png(PNG_OPTIONS)
+    .toFile(join(SCREENS_DIR, `${name}-clean.png`))
+  recordSize(`${name}-clean`, cropped)
+}
