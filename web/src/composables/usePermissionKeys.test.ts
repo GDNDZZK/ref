@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { defineComponent, h } from 'vue'
+import { defineComponent, h, reactive } from 'vue'
 import { PERMISSION_GUARD_MS } from '../components/toolLimits.ts'
 import { ChatSession } from '../model/chatSession.ts'
 import { assistantMessage, snapshot, toolPart, userMessage } from '../model/testMessages.ts'
@@ -9,13 +9,18 @@ import type { Question, QuestionRequest } from '../proto/generated'
 import { usePermissionKeys } from './usePermissionKeys.ts'
 
 const pushError = vi.fn()
-let session: ChatSession
+const sessions = new Map<string, ChatSession>()
+const workspaceStub = reactive({ focusedId: 'ses_1', visibleSessionIds: ['ses_1', 'ses_2'] })
 
 vi.mock('../stores/workspace.ts', () => ({
   useWorkspaceStore: () => ({
-    focusedId: 'ses_1',
-    visibleSessionIds: ['ses_1'],
-    chat: () => session,
+    get focusedId() {
+      return workspaceStub.focusedId
+    },
+    get visibleSessionIds() {
+      return workspaceStub.visibleSessionIds
+    },
+    chat: (id: string) => sessions.get(id),
   }),
 }))
 vi.mock('../stores/notices.ts', () => ({ useNoticesStore: () => ({ pushError }) }))
@@ -34,9 +39,10 @@ function question(overrides: Partial<Question> = {}): Question {
   }
 }
 
-async function ask(...questions: Question[]) {
+// Opens a session that has a pending question; `id` is where the question is asked.
+async function openSession(id: string, questions: Question[]) {
   const request: QuestionRequest = {
-    session_id: 'ses_1',
+    session_id: id,
     message_id: 'a1',
     call_id: 'c1',
     questions,
@@ -46,17 +52,24 @@ async function ask(...questions: Question[]) {
   const api = {
     attach: vi.fn().mockResolvedValue(
       snapshot([userMessage('u1', 'hi'), assistantMessage('a1', [toolPart('c1')])], {
-        pending_questions: [request],
+        pending_questions: questions.length > 0 ? [request] : [],
       }),
     ),
     questionReply,
   }
-  session = new ChatSession('ses_1', {
+  const session = new ChatSession(id, {
     api: () => api as unknown as RefApi,
     notify: vi.fn(),
     draftRestored: vi.fn(),
   })
   await session.attach(true)
+  sessions.set(id, session)
+  return { questionReply, session }
+}
+
+async function ask(...questions: Question[]) {
+  workspaceStub.focusedId = 'ses_1'
+  const { questionReply } = await openSession('ses_1', questions)
   const host = mount(
     defineComponent({
       setup() {
@@ -83,6 +96,7 @@ function press(
 beforeEach(() => vi.useFakeTimers())
 afterEach(() => {
   vi.useRealTimers()
+  sessions.clear()
   document.body.innerHTML = ''
 })
 
@@ -146,6 +160,81 @@ describe('keys for a pending question', () => {
     expect(questionReply).not.toHaveBeenCalled()
     press('Enter')
     expect(questionReply).toHaveBeenCalledWith('ses_1', 'c1', [['B'], ['A']])
+    host.unmount()
+  })
+})
+
+describe('keys in split view', () => {
+  it('do not answer a question in a tile that is not focused', async () => {
+    const { questionReply, host } = await ask(question())
+    const other = await openSession('ses_2', [])
+    workspaceStub.focusedId = 'ses_2'
+    await vi.advanceTimersByTimeAsync(PERMISSION_GUARD_MS * 2)
+    expect(press('Enter').defaultPrevented).toBe(false)
+    expect(press('Escape').defaultPrevented).toBe(false)
+    expect(press('x').defaultPrevented).toBe(false) // typing in the focused tile goes on
+    expect(questionReply).not.toHaveBeenCalled()
+    expect(other.questionReply).not.toHaveBeenCalled()
+    host.unmount()
+  })
+
+  it('answer once the tile with the question is focused and the guard time has passed', async () => {
+    const { questionReply, host } = await ask(question())
+    await openSession('ses_2', [])
+    workspaceStub.focusedId = 'ses_2'
+    await vi.advanceTimersByTimeAsync(PERMISSION_GUARD_MS)
+    workspaceStub.focusedId = 'ses_1'
+    await flushPromises()
+    press('Enter') // just focused: the guard time starts again
+    expect(questionReply).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(PERMISSION_GUARD_MS)
+    press('Enter')
+    expect(questionReply).toHaveBeenCalledWith('ses_1', 'c1', [['B']])
+    host.unmount()
+  })
+
+  it('do not answer a permission request in a tile that is not focused', async () => {
+    const permissionReply = vi.fn().mockResolvedValue(undefined)
+    const request = {
+      session_id: 'ses_1',
+      message_id: 'a1',
+      call_id: 'p1',
+      tool: 'bash',
+      purpose: '',
+      input: {},
+      time: 1,
+    }
+    const api = {
+      attach: vi
+        .fn()
+        .mockResolvedValue(snapshot([userMessage('u1', 'hi')], { pending_permissions: [request] })),
+      permissionReply,
+    }
+    const waiting = new ChatSession('ses_1', {
+      api: () => api as unknown as RefApi,
+      notify: vi.fn(),
+      draftRestored: vi.fn(),
+    })
+    await waiting.attach(true)
+    sessions.set('ses_1', waiting)
+    await openSession('ses_2', [])
+    workspaceStub.focusedId = 'ses_2'
+    const host = mount(
+      defineComponent({
+        setup() {
+          usePermissionKeys()
+          return () => h('div')
+        },
+      }),
+    )
+    await vi.advanceTimersByTimeAsync(PERMISSION_GUARD_MS * 2)
+    press('a')
+    press('Enter')
+    expect(permissionReply).not.toHaveBeenCalled()
+    workspaceStub.focusedId = 'ses_1'
+    await vi.advanceTimersByTimeAsync(PERMISSION_GUARD_MS)
+    press('a')
+    expect(permissionReply).toHaveBeenCalledWith('ses_1', 'p1', true, false)
     host.unmount()
   })
 })

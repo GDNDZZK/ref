@@ -1,7 +1,8 @@
 // Answers the oldest pending permission request from the keyboard: a or Enter = allow, s = allow
 // for the session, d or Esc = deny. A pending question takes the keys of its form instead
-// (questionForm.ts): arrows, numbers, Enter, Esc. Works on the focused session, or any session
-// on screen that is waiting.
+// (questionForm.ts): arrows, numbers, Enter, Esc. The keys only act on the focused pane (the
+// zoomed tile, or the focused one in split view): a card in another tile is answered with its
+// buttons, or by focusing that tile first, so typing in one tile never answers for another.
 //
 // The keys are ignored for a moment after a request appears, because the user may still be typing.
 // After that the request owns the keyboard: other letters no longer reach the composer until
@@ -36,11 +37,12 @@ export function usePermissionKeys(): void {
   const notices = useNoticesStore()
   let armedAt = 0
 
-  // The focused session, or another one on screen that is waiting for an answer.
+  // The focused session, when it is waiting for an answer.
   function askingSession() {
-    const ids = [workspace.focusedId, ...workspace.visibleSessionIds]
-    const sessions = ids.flatMap((id) => (id === undefined ? [] : [workspace.chat(id)]))
-    return sessions.find((session) => session.permissions.length > 0 || session.pendingQuestion)
+    const id = workspace.focusedId
+    if (id === undefined) return undefined
+    const session = workspace.chat(id)
+    return session.permissions.length > 0 || session.pendingQuestion ? session : undefined
   }
 
   // Each new request starts its own guard time.
