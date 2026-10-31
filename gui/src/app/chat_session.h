@@ -113,8 +113,9 @@ public:
 	Q_INVOKABLE void stop();
 	// Answers a tool call that waits for permission.
 	Q_INVOKABLE void permissionReply(const QString& callId, bool allow, bool always);
-	// Answers the oldest request by the keys. Does nothing unless answerKeysActive and no question is asked.
-	Q_INVOKABLE void answerOldestPermission(bool allow, bool always);
+	// Starts the guard time again for what the user is asked now, if anything: the view calls it when this session
+	// gets the keyboard (focus, zoom, being shown), so that a key meant for something else does not answer.
+	Q_INVOKABLE void restartAnswerGuard();
 	// Offers a key press to what the user is asked, as the TUI and the WebUI do. For a permission request, a,
 	// Enter, s, d and Esc answer it; for a question, the keys of the card (QuestionPrompt::handleKey) do. Any
 	// other typing is theirs until it is answered. True when the key is used.
@@ -162,6 +163,8 @@ private:
 	QCoro::Task<> sendPermission(QString callId, bool allow, bool always);
 	void setFailure(const QString& text);
 	QCoro::Task<> sendQuestionReply(QString callId, std::optional<QList<QStringList>> answers);
+	// Answers the oldest request by the keys. Does nothing unless answerKeysActive and no question is asked.
+	void answerOldestPermission(bool allow, bool always);
 	void syncQuestion();
 	void trackAnswerTarget();
 	bool permissionKey(int key, const QString& text, Qt::KeyboardModifiers held, bool autoRepeat);

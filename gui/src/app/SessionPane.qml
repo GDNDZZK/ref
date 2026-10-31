@@ -35,7 +35,18 @@ Item {
 			focusInput()
 	}
 
-	onKeysEnabledChanged: updateKeyFocus()
+	// The keys start with a new guard time when this pane gets them: the user may just have clicked here,
+	// or typed elsewhere, and must not answer by accident.
+	function armKeys() {
+		if (keysEnabled && session)
+			session.restartAnswerGuard()
+	}
+
+	onKeysEnabledChanged: {
+		armKeys()
+		updateKeyFocus()
+	}
+	onSessionChanged: armKeys()
 
 	ChatView {
 		id: chat
@@ -209,5 +220,8 @@ Item {
 		onClosed: pane.focusInput()
 	}
 
-	Component.onCompleted: focusInput()
+	Component.onCompleted: {
+		armKeys()
+		focusInput()
+	}
 }
