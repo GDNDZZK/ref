@@ -58,6 +58,7 @@ enum Cmd {
     },
     Delete(String, Reply<()>),
     Flush(Reply<()>),
+    Close(Reply<()>),
 }
 
 #[derive(Debug, Clone)]
@@ -104,6 +105,12 @@ impl Store {
             return;
         }
         let _ = self.tx.send(Cmd::Save(Box::new(p)));
+    }
+
+    /// Commits what is queued, then closes the database file for good (later saves are
+    /// dropped, reads fail). Windows cannot delete a directory with an open SQLite file in it.
+    pub fn close(&self) -> Result<(), String> {
+        self.call(Cmd::Close)
     }
 
     /// Wait until every queued write is committed.
@@ -289,6 +296,11 @@ fn db_thread(data_dir: &Path, path: &Path, rx: mpsc::Receiver<Cmd>) {
                 Cmd::Flush(r) => {
                     let _ = r.send(Ok(()));
                 }
+                Cmd::Close(r) => {
+                    conn = None;
+                    cache.clear();
+                    let _ = r.send(Ok(()));
+                }
             }
         }
     }
@@ -331,6 +343,9 @@ fn fail(c: Cmd, msg: &str) {
         }
         Cmd::Delete(_, r) | Cmd::Flush(r) => {
             let _ = r.send(Err(m));
+        }
+        Cmd::Close(r) => {
+            let _ = r.send(Ok(()));
         }
     }
 }
@@ -662,6 +677,41 @@ mod tests {
 
     /// Queued saves "one message" then "no messages" (a session undone to empty) must not
     /// both be dropped: the empty one alone is not stored when the session was never saved.
+    /// Files this process has open below `dir` (Linux only).
+    #[cfg(target_os = "linux")]
+    fn open_files_below(dir: &Path) -> Vec<PathBuf> {
+        let dir = dir.canonicalize().unwrap();
+        std::fs::read_dir("/proc/self/fd")
+            .unwrap()
+            .filter_map(|fd| std::fs::read_link(fd.ok()?.path()).ok())
+            .filter(|target| target.starts_with(&dir))
+            .collect()
+    }
+
+    #[test]
+    fn close_releases_the_database_so_the_directory_can_be_removed() {
+        let dir = tmp();
+        let store = Store::new(dir.clone());
+        store.save(Persisted {
+            info: info("ses_abc", "/a", 2),
+            messages: vec![msg("m1", "hi")],
+            reported: false,
+            context_notice: false,
+        });
+        store.flush().unwrap();
+        #[cfg(target_os = "linux")]
+        assert!(!open_files_below(&dir).is_empty());
+
+        store.close().unwrap();
+        #[cfg(target_os = "linux")]
+        assert_eq!(open_files_below(&dir), Vec::<PathBuf>::new());
+        assert!(
+            store.load("ses_abc").is_err(),
+            "a closed store serves nothing"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn a_save_that_gives_the_session_its_first_row_is_not_coalesced_away() {
         let save = |id: &str, messages: Vec<Message>| {
