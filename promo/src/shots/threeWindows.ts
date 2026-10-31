@@ -2,13 +2,14 @@
 import { backdrop } from '../components/backdrop.ts'
 import { TITLE_BAR_HEIGHT_PX } from '../components/windowChrome.ts'
 import { defineShot } from '../engine/shot.ts'
-import { beatShot, type Look } from './beat.ts'
+import { beatShot, type Look, type Mark } from './beat.ts'
 
 export interface WindowPicture {
   // Capture names, by interface. Later pictures fade in over earlier ones at `at`.
   screens: readonly ({ name: string; at?: number } | { clip: string; at?: number })[]
   title: string
   look: Look
+  marks?: readonly Mark[]
   // N5: the window closes at this time.
   closeAt?: number
 }
@@ -33,6 +34,7 @@ export function threeWindowsShot(seconds: number, windows: readonly WindowPictur
         seconds,
         screens: window.screens,
         looks: [window.look],
+        marks: window.marks,
         title: window.title,
         rect: rects[index],
         pendingSize: { width: rects[index]!.width, height: rects[index]!.height - TITLE_BAR_HEIGHT_PX },

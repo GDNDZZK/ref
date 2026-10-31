@@ -4,6 +4,7 @@ import { textCard } from '../components/textCard.ts'
 import { beatShot } from '../shots/beat.ts'
 import { terminalCut } from '../shots/terminalHook.ts'
 import { FEATURES } from './features.ts'
+import { clickedClip } from './shared.ts'
 import { cues, drawnCut, endCut, timelineFilm } from './timeline.ts'
 
 const HOOK_END = 3.0
@@ -24,6 +25,12 @@ const askLines = Array.from({ length: ASKED_SO_FAR }, (_, index) => ({
   tone: 'warn' as const,
 }))
 
+// Seconds into a cut at which the take clicks: Allow for session, then Cancel during the countdown
+// (marks and clicks of the clips gui-permission and gui-delay).
+const ALLOW_CLICK_AT = 2.5
+const CANCEL_CLICK_AT = 3.9
+const CARD_LOOK = { x: 0.5, y: 0.55, zoom: 1.5 }
+const REPLY_LOOK = { x: 0.55, y: 0.3, zoom: 1.5 }
 const RULES = [
   '{',
   '  "permission": {',
@@ -61,17 +68,20 @@ export const scene = timelineFilm({
       from: RULES_END,
       to: ALLOW_END,
       build: (seconds) =>
-        beatShot({
-          seconds,
-          screens: [{ clip: 'gui-permission' }],
-          looks: [{ at: 0, x: 0.6, y: 0.7, zoom: 1.5 }],
+        beatShot({ seconds, ...clickedClip('gui-permission', 'allowed', ALLOW_CLICK_AT),
+          // The card closes on the click; the camera follows the reply up.
+          looks: [
+            { at: 0, ...CARD_LOOK },
+            { at: ALLOW_CLICK_AT + 0.3, ...CARD_LOOK },
+            { at: ALLOW_CLICK_AT + 1.1, ...REPLY_LOOK },
+          ],
         }),
     },
     {
       from: ALLOW_END,
       to: DELAY_END,
       build: (seconds) =>
-        beatShot({ seconds, screens: [{ clip: 'gui-delay' }], looks: [{ at: 0, x: 0.6, y: 0.7, zoom: 1.5 }] }),
+        beatShot({ seconds, ...clickedClip('gui-delay', 'cancel', CANCEL_CLICK_AT), looks: [{ at: 0, x: 0.6, y: 0.4, zoom: 1.6 }] }),
     },
     {
       from: DELAY_END,

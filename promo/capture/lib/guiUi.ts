@@ -18,13 +18,14 @@ const SAME_ROW_PX = 40
 const STATUS_LABEL_INSET = 12 // from the tile's title to inside its status label
 const PARKED_POINTER = { x: 700, y: 20 } // the empty top bar
 const MS_PER_SECOND = 1000
+const WHEEL_NOTCH = 120 // angle delta of one wheel step
 const GRAB_DIR = join(import.meta.dirname, '..', '..', '.cache', 'grab')
 
 function qtChord(chord: string): string {
   return chord === 'Enter' ? 'Return' : chord
 }
 
-class GuiUi implements Ui {
+export class GuiUi implements Ui {
   readonly kind = 'gui'
   readonly lang: Lang
   private readonly session: GuiSession
@@ -112,6 +113,21 @@ class GuiUi implements Ui {
     await this.clickAt(row.x + row.width / 2, row.y + row.height / 2)
   }
 
+  // Clicks the `nth` (from the top) text in the session view that reads exactly `label`, such as
+  // the purpose in a tool card's header, which opens or closes the card.
+  async clickLabel(label: string, nth = 0): Promise<void> {
+    const matches = (await this.session.texts()).filter((item) => item.text === label && item.x >= SIDEBAR_WIDTH).sort((a, b) => a.y - b.y)
+    const target = matches[nth]
+    if (!target) throw new Error(`no visible text "${label}" number ${nth + 1}`)
+    await this.clickAt(target.x + target.width / 2, target.y + target.height / 2)
+  }
+
+  // Scrolls the session view by `notches` wheel steps; positive goes up.
+  async scroll(notches: number): Promise<void> {
+    const middle = { x: (SIDEBAR_WIDTH + this.size.width) / 2, y: this.size.height / 2 }
+    await this.session.wheel(middle.x, middle.y, notches * WHEEL_NOTCH)
+  }
+
   hasText(text: string): Promise<boolean> {
     return this.session.hasText(text)
   }
@@ -167,7 +183,6 @@ class GuiUi implements Ui {
 // A mock session is named "workspace-" and four hex digits.
 const SESSION_NAME = /^workspace-[0-9a-f]{4}$/
 
-export type { GuiUi }
 
 // Runs `body` against a fresh `ref-server --mock` and an offscreen `ref-gui` connected to it.
 export async function withGuiUi(lang: Lang, body: (ui: GuiUi) => Promise<void>): Promise<void> {

@@ -378,6 +378,14 @@
     "height": 1600,
     "sessionName": "workspace-551b"
   },
+  "gui-todo-idle": {
+    "width": 2560,
+    "height": 1600
+  },
+  "gui-todo-idle-zh": {
+    "width": 2560,
+    "height": 1600
+  },
   "gui-tools-permission": {
     "width": 2560,
     "height": 1600,
@@ -423,6 +431,46 @@
   "tui-split": {
     "width": 2058,
     "height": 1224
+  },
+  "tui-todo-done": {
+    "width": 2058,
+    "height": 1224
+  },
+  "tui-todo-done-clean": {
+    "width": 2058,
+    "height": 1144
+  },
+  "tui-todo-idle": {
+    "width": 2058,
+    "height": 1224
+  },
+  "tui-todo-idle-clean": {
+    "width": 2058,
+    "height": 1144
+  },
+  "tui-todo-sent": {
+    "width": 2058,
+    "height": 1224
+  },
+  "tui-todo-sent-clean": {
+    "width": 2058,
+    "height": 1144
+  },
+  "tui-todo-tick1": {
+    "width": 2058,
+    "height": 1224
+  },
+  "tui-todo-tick1-clean": {
+    "width": 2058,
+    "height": 1144
+  },
+  "tui-todo-tick2": {
+    "width": 2058,
+    "height": 1224
+  },
+  "tui-todo-tick2-clean": {
+    "width": 2058,
+    "height": 1144
   },
   "web-agents-dialog": {
     "width": 3200,
@@ -679,6 +727,16 @@
     "height": 2000,
     "sessionName": "workspace-94e5"
   },
+  "web-question-alert": {
+    "width": 3200,
+    "height": 2000,
+    "sessionName": "parser-fix"
+  },
+  "web-question-alert-zh": {
+    "width": 3200,
+    "height": 2000,
+    "sessionName": "parser-fix"
+  },
   "web-retry-done": {
     "width": 3200,
     "height": 2000,
@@ -762,6 +820,56 @@
     "width": 3200,
     "height": 2000,
     "sessionName": "workspace-86eb"
+  },
+  "web-todo-done": {
+    "width": 3200,
+    "height": 2000,
+    "sessionName": "main"
+  },
+  "web-todo-done-zh": {
+    "width": 3200,
+    "height": 2000,
+    "sessionName": "main"
+  },
+  "web-todo-idle": {
+    "width": 3200,
+    "height": 2000,
+    "sessionName": "main"
+  },
+  "web-todo-idle-zh": {
+    "width": 3200,
+    "height": 2000,
+    "sessionName": "main"
+  },
+  "web-todo-sent": {
+    "width": 3200,
+    "height": 2000,
+    "sessionName": "main"
+  },
+  "web-todo-sent-zh": {
+    "width": 3200,
+    "height": 2000,
+    "sessionName": "main"
+  },
+  "web-todo-tick1": {
+    "width": 3200,
+    "height": 2000,
+    "sessionName": "main"
+  },
+  "web-todo-tick1-zh": {
+    "width": 3200,
+    "height": 2000,
+    "sessionName": "main"
+  },
+  "web-todo-tick2": {
+    "width": 3200,
+    "height": 2000,
+    "sessionName": "main"
+  },
+  "web-todo-tick2-zh": {
+    "width": 3200,
+    "height": 2000,
+    "sessionName": "main"
   },
   "web-tools-permission": {
     "width": 3200,

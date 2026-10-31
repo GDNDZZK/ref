@@ -1,6 +1,8 @@
 // C6 "One session, three windows" (shooting script section 5), mock script `todo` (M7).
-// The browser is shown as stills crossfaded at the moments of the take (no browser clip).
+// The prompt is typed in the desktop app (clip gui-todo); the terminal and the browser are
+// stills taken at the clip's marks (capture/todo.ts), crossfaded when the take changes them.
 import { windowOutline } from '../components/windowOutline.ts'
+import { clip } from '../engine/clips.ts'
 import { terminalCut } from '../shots/terminalHook.ts'
 import { threeWindowsShot } from '../shots/threeWindows.ts'
 import { FEATURES } from './features.ts'
@@ -11,9 +13,35 @@ const IDLE_END = 7.0
 const TAKE_END = 18.0
 const FILM_END = 20.5
 
-// Seconds into the take's cut (from film 7.0): the prompt shows everywhere, then the todo items tick.
-const SENT_AT = 2.6
-const TICKED_AT = 8.0
+const TODO_CLIP = 'gui-todo'
+// The take's cut starts this long into the clip, just before the prompt is typed.
+const CLIP_FROM_SECONDS = 0.5
+// Seconds after Enter at which the prompt shows everywhere and the `todo` script ticks its
+// items off (TODO_FIRST_TICK_MS and TODO_NEXT_TICK_MS in crates/server/src/mock/scripts/tools.rs).
+const SHOWN_AFTER_ENTER = 0.4
+const TICKS_AFTER_ENTER = [4.8, 7.1, 9.4]
+
+// Stills of the terminal and the browser at each step, in order.
+const STEPS = ['sent', 'tick1', 'tick2', 'done']
+
+function stepTimes(): number[] {
+  const enter = clip(TODO_CLIP).marks.enter
+  if (enter === undefined) throw new Error(`${TODO_CLIP} lacks the mark enter`)
+  return [SHOWN_AFTER_ENTER, ...TICKS_AFTER_ENTER].map((after) => enter + after - CLIP_FROM_SECONDS)
+}
+
+function stills(kind: 'tui' | 'web', suffix: string, times: readonly number[]) {
+  return [{ name: `${kind}-todo-idle${suffix}` }, ...STEPS.map((step, index) => ({ name: `${kind}-todo-${step}${suffix}`, at: times[index] }))]
+}
+
+// Where each window looks, and its user message (the prompt) once it shows, in picture coordinates.
+const TUI_LOOK = { at: 0, x: 0.5, y: 0.5, zoom: 1.1 }
+const GUI_LOOK = { at: 0, x: 0.55, y: 0.45, zoom: 1.4 }
+const WEB_LOOK = { at: 0, x: 0.55, y: 0.4, zoom: 1.6 }
+const TUI_PROMPT = { x: 0.03, y: 0.2, width: 0.3, height: 0.08 }
+const GUI_PROMPT = { x: 0.295, y: 0.255, width: 0.17, height: 0.06 }
+const WEB_PROMPT = { x: 0.34, y: 0.198, width: 0.135, height: 0.052 }
+const PROMPT_MARK_DELAY = 0.3
 
 const HOOK_TERMINAL_RECT = { x: 80, y: 120, width: 1060, height: 700 }
 
@@ -36,33 +64,29 @@ export const scene = timelineFilm({
       to: IDLE_END,
       build: (seconds) =>
         threeWindowsShot(seconds, [
-          { screens: [{ name: 'tui-todo-idle' }], title: 'ref', look: { at: 0, x: 0.5, y: 0.5, zoom: 1 } },
-          { screens: [{ name: 'gui-todo-idle' }], title: 'ref-gui', look: { at: 0, x: 0.6, y: 0.5, zoom: 1.2 } },
-          { screens: [{ name: 'web-todo-idle' }], title: 'ref-web', look: { at: 0, x: 0.6, y: 0.5, zoom: 1.2 } },
+          { screens: [{ name: 'tui-todo-idle-clean' }], title: 'ref', look: TUI_LOOK },
+          { screens: [{ name: 'gui-todo-idle' }], title: 'ref-gui', look: GUI_LOOK },
+          { screens: [{ name: 'web-todo-idle' }], title: 'ref-web', look: WEB_LOOK },
         ]),
     },
     {
       from: IDLE_END,
       to: TAKE_END,
       enter: 'cut',
-      build: (seconds) =>
-        threeWindowsShot(
+      build: (seconds) => {
+        const times = stepTimes()
+        // The prompt is called out in all three from when it shows until the first tick.
+        const promptMark = (area: typeof GUI_PROMPT) => [{ ...area, from: times[0]! + PROMPT_MARK_DELAY, to: times[1]! }]
+        return threeWindowsShot(
           seconds,
           [
-            {
-              screens: [{ name: 'tui-todo-idle' }, { name: 'tui-todo-sent', at: SENT_AT }, { name: 'tui-todo-done', at: TICKED_AT }],
-              title: 'ref',
-              look: { at: 0, x: 0.5, y: 0.5, zoom: 1 },
-            },
-            { screens: [{ clip: 'gui-todo' }], title: 'ref-gui', look: { at: 0, x: 0.6, y: 0.5, zoom: 1.2 } },
-            {
-              screens: [{ name: 'web-todo-idle' }, { name: 'web-todo-sent', at: SENT_AT }, { name: 'web-todo-done', at: TICKED_AT }],
-              title: 'ref-web',
-              look: { at: 0, x: 0.6, y: 0.5, zoom: 1.2 },
-            },
+            { screens: stills('tui', '-clean', times), title: 'ref', look: TUI_LOOK, marks: promptMark(TUI_PROMPT) },
+            { screens: [{ clip: TODO_CLIP, at: -CLIP_FROM_SECONDS }], title: 'ref-gui', look: GUI_LOOK, marks: promptMark(GUI_PROMPT) },
+            { screens: stills('web', '', times), title: 'ref-web', look: WEB_LOOK, marks: promptMark(WEB_PROMPT) },
           ],
           false,
-        ),
+        )
+      },
     },
     endCut(TAKE_END, FILM_END),
   ],
