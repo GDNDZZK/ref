@@ -28,8 +28,8 @@
 
 - **服务器与界面分离。** `ref-server` 负责运行会话、智能体循环、LLM 调用、工具和权限，`ref`（终端）、`ref-gui`（桌面窗口）和 `ref-web`（浏览器）只负责显示。关掉窗口后会话继续运行，之后可以在其中任何一个里重新打开，也可以同时在几个里打开。
 - **同时运行多个会话。** 分屏视图平铺显示所有后台会话。会话之间可以互发消息，`build` 智能体可以启动工作会话并给它们分派任务。
-- **兼容 opencode 配置。** 已有的 `opencode.json`（提供商、模型、智能体、权限、MCP 服务器和命令）无需修改即可使用。
-- **支持任意模型提供商。** 支持 Anthropic Messages、OpenAI Responses 和兼容 OpenAI 的 Chat Completions，并可通过模型变体设置推理强度或扩展思考。
+- **读取 opencode 配置。** ref 会加载已有 `opencode.json` 中的提供商、模型、智能体、权限、MCP 服务器和命令。少数配置项会被接受但不起作用，详见[配置](docs/configuration.zh-CN.md)。
+- **三种提供商接口。** 支持 Anthropic Messages、OpenAI Responses 和任何兼容 OpenAI 的 Chat Completions 端点，并可通过模型变体设置推理强度或扩展思考。没有原生的 Gemini 或 Bedrock 客户端。
 - **可控的工具调用。** 按工具设置允许、询问或拒绝，可以按命令、路径和 URL 匹配模式，还可以在工具运行前加倒计时。
 - **可靠的文件编辑。** 编辑基于带哈希标签的行号，文件视图过期时会被检测出来，而不会把文件改坏。
 - **适合长会话。** 自动压缩上下文，遇到限流和服务中断时无限重试，并为所有提供商自动缩小图片。
@@ -90,7 +90,7 @@ GUI 压缩包里是一个必须保持完整的文件夹：`ref-gui` 在自己所
 所有界面共用同一个后端。如果装了多个界面，其中任何一个都会连接到已在运行的后端。
 
 - **Linux**：`ref`、`ref-web` 和 `ref-server` 需要 glibc 2.35 或更新版本（Ubuntu 22.04、Debian 12、Fedora 36、RHEL 10、Arch 及更新版本）。NixOS 需要设置 `programs.nix-ld.enable = true`。
-- **Linux 上的 GUI**：需要 glibc 2.38 和 GCC 13 的 C++ 运行库（带 `CXXABI_1.3.14` 的 `libstdc++`）：Ubuntu 24.04、Debian 13、Fedora 39、Arch 及更新版本。在 Ubuntu 22.04 和 Debian 12 上无法启动。GUI 运行在 X11 上，在 Wayland 会话中通过 XWayland 运行；没有 XWayland 的纯 Wayland 会话不受支持（Unverified）。需要这些系统库，桌面系统大多已经有：`libxcb-cursor0`、`libxkbcommon-x11-0`、`libxcb-icccm4`、`libxcb-image0`、`libxcb-keysyms1`、`libxcb-randr0`、`libxcb-render-util0`、`libxcb-shape0`、`libxcb-xkb1`、`libegl1`、`libfontconfig1` 和 `libdbus-1-3`（Debian 和 Ubuntu 的包名）。想把 `ref` 加入应用菜单，复制 desktop 文件和图标，并把程序链接到 `PATH` 中：
+- **Linux 上的 GUI**：需要 glibc 2.38 和 GCC 13 的 C++ 运行库（带 `CXXABI_1.3.14` 的 `libstdc++`）：Ubuntu 24.04、Debian 13、Fedora 39、Arch 及更新版本。在 Ubuntu 22.04 和 Debian 12 上无法启动；`ref-all` 压缩包里只有 GUI 受影响。GUI 运行在 X11 上，在 Wayland 会话中通过 XWayland 运行；没有 XWayland 的纯 Wayland 会话不受支持（Unverified）。需要这些系统库，桌面系统大多已经有：`libxcb-cursor0`、`libxkbcommon-x11-0`、`libxcb-icccm4`、`libxcb-image0`、`libxcb-keysyms1`、`libxcb-randr0`、`libxcb-render-util0`、`libxcb-shape0`、`libxcb-xkb1`、`libegl1`、`libfontconfig1` 和 `libdbus-1-3`（Debian 和 Ubuntu 的包名）。想把 `ref` 加入应用菜单，复制 desktop 文件和图标，并把程序链接到 `PATH` 中：
 
   ```bash
   install -Dm644 ref-gui.desktop ~/.local/share/applications/ref-gui.desktop
