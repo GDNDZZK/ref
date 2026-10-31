@@ -151,6 +151,19 @@ Sessions can talk to each other. The model has tools for it (see [Tools](tools.m
 
 Agents with `can_spawn` (the `build` agent by default) can start background sessions, give them a task and close them. Watch them in split view.
 
+## Questions from the model
+
+When the model asks you something with the [`question` tool](tools.md#question), the TUI shows the question with its options, and the session shows "waiting for your answer" in every window until you answer. Background sessions ask too: they show up in the session list like a pending permission and send a notification.
+
+- `↑` `↓` (or `k` `j`) move; the option marked default is selected when the question appears.
+- `1` to `9` pick that row. In a multiple choice they toggle it.
+- `enter` accepts the selected option. In a multiple choice `enter` or `space` toggles it.
+- With several questions, `tab` and `←` `→` switch between them, and the last tab, "Confirm", lists the answers and sends them with `enter`.
+- The last row, "Type your own answer", opens a text field; `enter` sends it, `esc` leaves the field.
+- `esc` dismisses the question: the model is told and continues. Press `esc` again to interrupt the turn.
+
+Like the permission dialog, it ignores keys for a third of a second after it appears, so a key you were typing for the prompt does not answer it. The first answer from any window wins.
+
 ## Permissions and delays
 
 When a tool call needs permission, the TUI shows the call and asks:
