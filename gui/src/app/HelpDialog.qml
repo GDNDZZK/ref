@@ -5,7 +5,7 @@ import RefGui
 ModalDialog {
 	id: dialog
 
-	readonly property var commands: Commands.match("", false)
+	readonly property var commands: Commands.matching("", false)
 	readonly property var writing: [
 		{title: qsTr("Send"), keys: ["Enter"]},
 		{title: qsTr("New line"), keys: ["Shift", "Enter"]},

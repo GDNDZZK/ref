@@ -58,6 +58,7 @@ enum Cmd {
     },
     Delete(String, Reply<()>),
     Flush(Reply<()>),
+    Close(Reply<()>),
 }
 
 #[derive(Debug, Clone)]
@@ -104,6 +105,12 @@ impl Store {
             return;
         }
         let _ = self.tx.send(Cmd::Save(Box::new(p)));
+    }
+
+    /// Commits what is queued, then closes the database file for good (later saves are
+    /// dropped, reads fail). Windows cannot delete a directory with an open SQLite file in it.
+    pub fn close(&self) -> Result<(), String> {
+        self.call(Cmd::Close)
     }
 
     /// Wait until every queued write is committed.
@@ -259,22 +266,7 @@ fn db_thread(data_dir: &Path, path: &Path, rx: mpsc::Receiver<Cmd>) {
         while let Ok(c) = rx.try_recv() {
             batch.push(c);
         }
-        // A save is skipped when a later save of the same session follows before any other
-        // command (reads must observe the state queued before them).
-        let mut skip = vec![false; batch.len()];
-        for i in 0..batch.len() {
-            let Cmd::Save(p) = &batch[i] else { continue };
-            for later in &batch[i + 1..] {
-                match later {
-                    Cmd::Save(q) if q.info.id == p.info.id => {
-                        skip[i] = true;
-                        break;
-                    }
-                    Cmd::Save(_) => {}
-                    _ => break,
-                }
-            }
-        }
+        let skip = superseded_saves(&batch);
         for (c, skip) in batch.into_iter().zip(skip) {
             let Some(db) = conn.as_mut() else {
                 fail(c, "session store is not available (see server log)");
@@ -304,9 +296,36 @@ fn db_thread(data_dir: &Path, path: &Path, rx: mpsc::Receiver<Cmd>) {
                 Cmd::Flush(r) => {
                     let _ = r.send(Ok(()));
                 }
+                Cmd::Close(r) => {
+                    conn = None;
+                    cache.clear();
+                    let _ = r.send(Ok(()));
+                }
             }
         }
     }
+}
+
+/// A save is skipped when a later save of the same session follows before any other
+/// command (reads must observe the state queued before them). The exception is a save with
+/// messages followed by one without: an empty save of a session that has no row yet stores
+/// nothing, so the earlier save must run to create the row.
+fn superseded_saves(batch: &[Cmd]) -> Vec<bool> {
+    let mut skip = vec![false; batch.len()];
+    for i in 0..batch.len() {
+        let Cmd::Save(p) = &batch[i] else { continue };
+        for later in &batch[i + 1..] {
+            match later {
+                Cmd::Save(q) if q.info.id == p.info.id => {
+                    skip[i] = p.messages.is_empty() || !q.messages.is_empty();
+                    break;
+                }
+                Cmd::Save(_) => {}
+                _ => break,
+            }
+        }
+    }
+    skip
 }
 
 fn fail(c: Cmd, msg: &str) {
@@ -324,6 +343,9 @@ fn fail(c: Cmd, msg: &str) {
         }
         Cmd::Delete(_, r) | Cmd::Flush(r) => {
             let _ = r.send(Err(m));
+        }
+        Cmd::Close(r) => {
+            let _ = r.send(Ok(()));
         }
     }
 }
@@ -651,6 +673,63 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect()
+    }
+
+    /// Queued saves "one message" then "no messages" (a session undone to empty) must not
+    /// both be dropped: the empty one alone is not stored when the session was never saved.
+    /// Files this process has open below `dir` (Linux only).
+    #[cfg(target_os = "linux")]
+    fn open_files_below(dir: &Path) -> Vec<PathBuf> {
+        let dir = dir.canonicalize().unwrap();
+        std::fs::read_dir("/proc/self/fd")
+            .unwrap()
+            .filter_map(|fd| std::fs::read_link(fd.ok()?.path()).ok())
+            .filter(|target| target.starts_with(&dir))
+            .collect()
+    }
+
+    #[test]
+    fn close_releases_the_database_so_the_directory_can_be_removed() {
+        let dir = tmp();
+        let store = Store::new(dir.clone());
+        store.save(Persisted {
+            info: info("ses_abc", "/a", 2),
+            messages: vec![msg("m1", "hi")],
+            reported: false,
+            context_notice: false,
+        });
+        store.flush().unwrap();
+        #[cfg(target_os = "linux")]
+        assert!(!open_files_below(&dir).is_empty());
+
+        store.close().unwrap();
+        #[cfg(target_os = "linux")]
+        assert_eq!(open_files_below(&dir), Vec::<PathBuf>::new());
+        assert!(
+            store.load("ses_abc").is_err(),
+            "a closed store serves nothing"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_save_that_gives_the_session_its_first_row_is_not_coalesced_away() {
+        let save = |id: &str, messages: Vec<Message>| {
+            Cmd::Save(Box::new(Persisted {
+                info: info(id, "/", 1),
+                messages,
+                reported: false,
+                context_notice: false,
+            }))
+        };
+        let batch = [
+            save("ses_a", vec![msg("m1", "hi")]),
+            save("ses_a", vec![]),
+            save("ses_b", vec![msg("m1", "hi")]),
+            save("ses_b", vec![msg("m1", "hi"), msg("m2", "there")]),
+        ];
+        // The first save of ses_a creates the row; the two for ses_b are interchangeable.
+        assert_eq!(superseded_saves(&batch), [false, false, true, false]);
     }
 
     #[test]

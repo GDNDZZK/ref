@@ -364,7 +364,7 @@ async fn list_dirs_answers_with_sorted_sub_directories() {
     let (mut ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
     hello(&mut ws, &work, vec![]).await;
     let mut other = Vec::new();
-    let canonical = std::fs::canonicalize(&work).unwrap();
+    let canonical = dunce::canonicalize(&work).unwrap();
 
     // Relative to the connection's cwd.
     send(&mut ws, 2, Request::ListDirs { path: ".".into() }).await;
@@ -383,7 +383,11 @@ async fn list_dirs_answers_with_sorted_sub_directories() {
     assert!(ok);
     assert_eq!(
         res["path"],
-        canonical.join("gamma/inner").to_string_lossy().as_ref()
+        canonical
+            .join("gamma")
+            .join("inner")
+            .to_string_lossy()
+            .as_ref()
     );
     assert_eq!(res["dirs"], serde_json::json!([]));
 
@@ -416,7 +420,7 @@ async fn list_dirs_expands_the_configured_home() {
     for path in ["~", "~/"] {
         let req = Request::ListDirs { path: path.into() };
         let res = ref_server::api::handle(&hub, &conn, req).await.unwrap();
-        let canonical = std::fs::canonicalize(&home).unwrap();
+        let canonical = dunce::canonicalize(&home).unwrap();
         assert_eq!(res["path"], canonical.to_string_lossy().as_ref(), "{path}");
         assert_eq!(res["dirs"], serde_json::json!(["docs"]));
     }
@@ -453,7 +457,13 @@ async fn list_dirs_skips_names_that_are_not_utf8() {
     let m = mock(Arc::new(|_, _| Reply::Text("pong".into()))).await;
     let dir = temp_dir("ws-utf8");
     std::fs::create_dir_all(dir.join("good")).unwrap();
-    std::fs::create_dir_all(dir.join(std::ffi::OsStr::from_bytes(b"bad\xff"))).unwrap();
+    let bad = dir.join(std::ffi::OsStr::from_bytes(b"bad\xff"));
+    if let Err(e) = std::fs::create_dir_all(&bad) {
+        // APFS refuses names that are not valid UTF-8: nothing to test there.
+        assert_eq!(e.raw_os_error(), Some(libc::EILSEQ), "{e}");
+        eprintln!("skipped: this filesystem refuses non-UTF-8 names");
+        return;
+    }
     let cfg = config(&m.url);
     let mut opts = ref_server::HubOptions::new(dir.join("data"));
     opts.home = None;

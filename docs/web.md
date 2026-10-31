@@ -77,6 +77,7 @@ The page is the same interface as the [desktop GUI](gui.md). This section lists 
 **Split view**
 
 - Alt+W or the button at the top right shows one tile per background session: the live sessions that no other client has open, plus the current session. Click a tile, or press Alt+arrow keys, to move the focus; commands act on the focused tile. Zoom a tile with Alt+Z or its button; the button then reads *Back to the split view*.
+- Only the focused tile shows its input box. The other tiles fold it away, with the chips and the attachment strip, and keep the status line (state, elapsed time, context meter) and the queue of waiting messages. Draft text, attachments, shell mode and the cursor are kept, and the box unfolds with the cursor in it when the tile gets the focus. A zoomed tile shows its input box as usual.
 
 **The conversation**
 

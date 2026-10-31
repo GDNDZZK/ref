@@ -29,7 +29,7 @@ FocusScope {
 		items.clear()
 		if (askingArgument)
 			return
-		for (const command of Commands.match(input.text.trim(), false)) {
+		for (const command of Commands.matching(input.text.trim(), false)) {
 			items.append({
 				commandId: command.id,
 				title: command.title,

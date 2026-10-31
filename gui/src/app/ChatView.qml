@@ -37,6 +37,7 @@ ListView {
 	property real sidePadding: Theme.pagePadding // narrower in a split-view tile
 	readonly property real columnWidth: Math.min(width - 2 * sidePadding, Theme.contentWidth)
 	property bool following: true
+	property real previousHeight: 0
 	property bool turnInProgress: false
 	property string sessionId // the session whose pictures the rows show
 	property bool moreBefore: false // the backend has earlier messages
@@ -153,6 +154,12 @@ ListView {
 	}
 
 	// The view keeps the rows it shows where they are when earlier ones are added above them.
+	// The end stays on the bottom edge when the view changes height (a tile's input box comes or goes).
+	onHeightChanged: {
+		if (following && previousHeight > 0)
+			contentY -= height - previousHeight
+		previousHeight = height
+	}
 	onContentYChanged: loadOlderIfNear()
 	onMoreBeforeChanged: loadOlderIfNear()
 	onLoadingOlderChanged: loadOlderIfNear()

@@ -72,7 +72,7 @@ The window has a sidebar on the left and the content on the right: one session, 
 
 ## Split view
 
-The split view (Ctrl+Shift+W, the button at the top right, or `ref-gui -w`) shows one tile per background session: the live sessions that no other client has open, plus the current session. You can type into any tile. A click focuses a tile, and Alt+arrow keys move the focus; commands act on the focused tile. Double-click a tile's title bar, or use its zoom button (Ctrl+Shift+Z), to enlarge it. Leave the zoom with Ctrl+Shift+Z or the *Leave zoom* button at the top right. Esc does not leave it, because Esc belongs to the input box and to permission questions. With no background sessions the view says so.
+The split view (Ctrl+Shift+W, the button at the top right, or `ref-gui -w`) shows one tile per background session: the live sessions that no other client has open, plus the current session. Only the focused tile shows its input box (as in the terminal UI), so the others have room for the conversation; they keep the status line and the queue of waiting messages, and a draft, attachments and shell mode survive while the box is hidden. A click focuses a tile and shows its input box, and Alt+arrow keys move the focus; commands act on the focused tile. Double-click a tile's title bar, or use its zoom button (Ctrl+Shift+Z), to enlarge it. Leave the zoom with Ctrl+Shift+Z or the *Leave zoom* button at the top right. Esc does not leave it, because Esc belongs to the input box and to permission questions. With no background sessions the view says so.
 
 ## The conversation
 

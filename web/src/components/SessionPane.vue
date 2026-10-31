@@ -17,7 +17,11 @@ import { motion } from '../theme/generated/motion.ts'
 const ALERT_RING_REACH = 2.5
 
 const { t } = useI18n()
-const props = defineProps<{ session: ChatSession }>()
+// `composerShown` is false for a tile that is not focused in split view: the input box folds away
+// (draft and attachments kept), while the status line and the queue strip stay.
+const props = withDefaults(defineProps<{ session: ChatSession; composerShown?: boolean }>(), {
+  composerShown: true,
+})
 const composer = useComposerStore().of(props.session.id)
 provide(chatSessionKey, props.session)
 
@@ -25,6 +29,17 @@ const following = ref(true)
 const composerBox = useTemplateRef<InstanceType<typeof Composer>>('composerBox')
 
 onMounted(() => composerBox.value?.focus())
+
+defineExpose({ focusComposer: () => composerBox.value?.focus() })
+
+// The tile that gets the focus gets the caret too.
+watch(
+  () => props.composerShown,
+  (shown) => {
+    if (shown) composerBox.value?.focus()
+  },
+  { flush: 'post' },
+)
 
 // An error that arrived out of sight puts a badge on the jump button, until the button is gone.
 // The badge stays while the button fades out, so it does not pop away first.
@@ -68,7 +83,13 @@ watch(following, (isFollowing) => {
           </span>
         </div>
         <StatusLine :session="session" />
-        <Composer ref="composerBox" :session="session" :composer="composer" @submitted="following = true" />
+        <Composer
+          ref="composerBox"
+          :session="session"
+          :composer="composer"
+          :folded="!composerShown"
+          @submitted="following = true"
+        />
       </div>
     </div>
   </div>

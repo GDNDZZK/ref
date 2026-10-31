@@ -205,7 +205,14 @@ Tile: radius `Theme.radius`, `Theme.background` fill, 1px `Theme.border` border 
 
 The dot, progress, time and the attention treatments are the sidebar row's (permission: header in `warningSurface`
 with `lock-16`; error: `AlertBadge`). The body is a `SessionPane` with `compact: true`: reading column =
-tile width − 2 × 16; the composer's outer margin is 10 instead of `pagePadding`; the status pill and jump-to-latest
+tile width − 2 × 16; the composer's outer margin is 10 instead of `pagePadding`; only the focused (or zoomed) tile
+shows the input box with its chip row and attachment strip (`Composer.boxShown`), as the TUI does: the others hide it
+(height → 0 and opacity → 0 over `Motion.standard`, `Motion.ease`; the draft, attachments, shell mode and caret are kept,
+the item is not destroyed), while the status line and the queue strip stay. The queue strip sits directly above the
+box's place, so only the box's height moves. A tile that follows the end of its conversation keeps the end on the
+bottom edge while its height changes (`ChatView.onHeightChanged`). Focusing a tile (click, `Alt+arrows`, the sidebar)
+shows its box and then gives it the keyboard; if the focused tile goes away, the current session's tile (else the first)
+is focused; the status pill and jump-to-latest
 button are the same, scaled by position only.
 
 Motion:
