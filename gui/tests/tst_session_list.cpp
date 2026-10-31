@@ -75,6 +75,7 @@ private slots:
 	void movesInsteadOfRecreating();
 	void filtersIgnoringCase();
 	void derivesRoles();
+	void historyRowsAreLabelledByTitle();
 	void marksCurrentAndTiles();
 	void directoryLoadsAndFollowsFrames();
 	void directoryHistoryHidesLiveSessions();
@@ -194,6 +195,30 @@ void TstSessionList::derivesRoles()
 	info.name = u"Mine"_s;
 	model.setSessions({info});
 	QCOMPARE(model.index(0).data(SessionListModel::DisplayTitleRole).toString(), u"Mine"_s);
+}
+
+void TstSessionList::historyRowsAreLabelledByTitle()
+{
+	SessionListModel model;
+	proto::SessionInfo titled = stored(u"titled"_s, 3);
+	titled.name = u"parser-fix"_s;
+	titled.title = u"Fix  parser\npanic "_s;
+	proto::SessionInfo named = stored(u"named"_s, 2);
+	named.name = u"bench-ideas"_s;
+	proto::SessionInfo bare = stored(u"bare"_s, 1);
+	proto::SessionInfo live = session(u"live"_s, 4);
+	live.name = u"live-name"_s;
+	live.title = u"A title"_s;
+	model.setSessions({titled, named, bare, live});
+
+	const auto label = [&](const QString& id) {
+		const QStringList order = ids(model);
+		return model.index(int(order.indexOf(id))).data(SessionListModel::DisplayTitleRole).toString();
+	};
+	QCOMPARE(label(u"titled"_s), u"Fix parser panic"_s); // the title on one line, not the name
+	QCOMPARE(label(u"named"_s), u"bench-ideas"_s); // no title: the name
+	QCOMPARE(label(u"bare"_s), u"project"_s); // neither: the directory
+	QCOMPARE(label(u"live"_s), u"live-name"_s); // live sessions go by name
 }
 
 void TstSessionList::marksCurrentAndTiles()
