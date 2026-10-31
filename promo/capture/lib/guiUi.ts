@@ -1,6 +1,8 @@
+import { rmSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Lang } from '../../src/engine/i18n.ts'
 import { isolatedEnv, startMockBackend } from './backend.ts'
+import { CLIP_FPS, CLIP_FRAMES_DIR, saveClip } from './clips.ts'
 import { GuiSession } from './guiSession.ts'
 import { phrase } from './phrases.ts'
 import { publishImage } from './publish.ts'
@@ -9,6 +11,8 @@ import { COMMAND_LETTERS, shotFileName, type CommandId, type ShotOptions, type U
 const WINDOW = { width: 1280, height: 800 }
 const MODEL_TAG = 'Mock 1'
 const SETTLE_MS = 700 // entrance animations last up to 480 ms
+const SIDEBAR_WIDTH = 300
+const PARKED_POINTER = { x: 700, y: 20 } // the empty top bar
 const GRAB_DIR = join(import.meta.dirname, '..', '..', '.cache', 'grab')
 
 function qtChord(chord: string): string {
@@ -19,6 +23,8 @@ class GuiUi implements Ui {
   readonly kind = 'gui'
   readonly lang: Lang
   private readonly session: GuiSession
+  private clipName: string | undefined
+  private clipDir: string | undefined
 
   constructor(session: GuiSession, lang: Lang) {
     this.session = session
@@ -55,6 +61,25 @@ class GuiUi implements Ui {
     return this.session.clickText(text)
   }
 
+  async clickTextBelow(text: string, anchor: string): Promise<void> {
+    const items = await this.session.texts()
+    const top = items.find((item) => item.text.includes(anchor))?.y
+    if (top === undefined) throw new Error(`no visible text "${anchor}"`)
+    const target = items.filter((item) => item.text.includes(text) && item.y >= top).sort((a, b) => a.y - b.y)[0]
+    if (!target) throw new Error(`no visible text "${text}" below "${anchor}"`)
+    await this.session.click(target.x + target.width / 2, target.y + target.height / 2)
+  }
+
+  parkPointer(): Promise<void> {
+    return this.session.hover(PARKED_POINTER.x, PARKED_POINTER.y)
+  }
+
+  async clickSidebarRow(title: string): Promise<void> {
+    const row = (await this.session.texts()).find((item) => item.text === title && item.x < SIDEBAR_WIDTH)
+    if (!row) throw new Error(`no sidebar row "${title}"`)
+    await this.session.click(row.x + row.width / 2, row.y + row.height / 2)
+  }
+
   hasText(text: string): Promise<boolean> {
     return this.session.hasText(text)
   }
@@ -65,6 +90,21 @@ class GuiUi implements Ui {
 
   waitNoText(text: string, timeoutMs?: number): Promise<void> {
     return this.session.waitForNoText(text, timeoutMs)
+  }
+
+  async startClip(name: string): Promise<void> {
+    this.clipName = shotFileName(this.kind, name, this.lang)
+    this.clipDir = join(CLIP_FRAMES_DIR, this.clipName)
+    rmSync(this.clipDir, { recursive: true, force: true })
+    await this.session.startRecording(this.clipDir, CLIP_FPS)
+  }
+
+  async endClip(): Promise<void> {
+    if (!this.clipName || !this.clipDir) throw new Error('no clip is being recorded')
+    const times = await this.session.stopRecording()
+    await saveClip(this.clipName, this.clipDir, times)
+    this.clipName = undefined
+    this.clipDir = undefined
   }
 
   async resize(width: number, height: number): Promise<void> {

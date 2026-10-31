@@ -16,9 +16,15 @@ export interface Feature {
   tagline: Localized
 }
 
-// The nine headline features, in trailer order. Names are the tag on screen; taglines
+// The headline features, in trailer order (`orchestra` is the hero film). Names are the tag on screen; taglines
 // are the title card of the feature's own film.
 export const FEATURES = {
+  orchestra: {
+    id: 'orchestra',
+    icon: splitIcon,
+    name: { en: 'One session, a whole crew', zh: '一个会话，一整队帮手' },
+    tagline: { en: 'Hand over one task. Helper sessions do the work and report back.', zh: '交出一个任务，帮手会话分头干活，再回来汇报。' },
+  },
   backend: {
     id: 'backend',
     icon: globeIcon,

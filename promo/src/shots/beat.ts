@@ -8,6 +8,7 @@ import { TITLE_BAR_HEIGHT_PX } from '../components/windowChrome.ts'
 import type { EasingName } from '../engine/anim.ts'
 import type { Localized } from '../engine/i18n.ts'
 import { windowRect } from '../engine/layout.ts'
+import { clip } from '../engine/clips.ts'
 import { screen } from '../engine/screens.ts'
 import { defineShot, type ShotBuilder } from '../engine/shot.ts'
 
@@ -44,8 +45,9 @@ export interface FeatureLabel {
 
 export interface BeatOptions {
   seconds: number
-  // Pictures by name; each fades in over the one before it at `at`. All the same size.
-  screens: readonly { name: string; at?: number }[]
+  // Pictures by name, or recorded clips (`clip`) that play from `at`; each fades in over the one before
+  // it at `at`. All the same size.
+  screens: readonly ({ name: string; at?: number } | { clip: string; at?: number })[]
   looks: readonly Look[]
   marks?: readonly Mark[]
   // Waypoints and click times in picture coordinates (0..1), so the pointer follows the camera.
@@ -73,7 +75,14 @@ export function captionCues(given: NonNullable<BeatOptions['caption']>, seconds:
 // caption and feature tag.
 export function beatShot(options: BeatOptions) {
   return defineShot(options.seconds, (shot) => {
-    const layers = options.screens.map((entry) => ({ ...screen(entry.name), at: entry.at ?? 0 }))
+    const layers = options.screens.map((entry) => {
+      const at = entry.at ?? 0
+      if ('clip' in entry) {
+        const recorded = clip(entry.clip)
+        return { src: recorded.frameUrl(0), size: recorded.size, at, clip: recorded }
+      }
+      return { ...screen(entry.name), at, clip: undefined }
+    })
     const first = layers[0]
     if (!first) throw new Error('a beat needs a picture')
 
@@ -87,7 +96,7 @@ export function beatShot(options: BeatOptions) {
     }))
     const frame = shot.add(
       appFrame({
-        layers: layers.map((layer) => ({ src: layer.src, from: layer.at })),
+        layers: layers.map((layer) => ({ src: layer.src, from: layer.at, clip: layer.clip })),
         imageSize: first.size,
         title: options.title ?? DEFAULT_WINDOW_TITLE,
         rect: windowRect(first.size, TITLE_BAR_HEIGHT_PX),
