@@ -138,7 +138,7 @@ verify_windows() {
   [[ "$(pe_subsystem "$exe")" == "$PE_SUBSYSTEM_GUI" ]] || fail "ref-gui.exe is a console program"
   pass "GUI subsystem"
 
-  for required in ref-server.exe Qt6Core.dll Qt6Quick.dll platforms/qwindows.dll; do
+  for required in ref-server.exe Qt6Core.dll Qt6Quick.dll plugins/platforms/qwindows.dll; do
     [[ -f "$PACKAGE/$required" ]] || fail "$required is missing"
   done
   [[ -n "$(files -iname 'vcruntime140*.dll')" ]] || fail "the Visual C++ runtime is missing"
