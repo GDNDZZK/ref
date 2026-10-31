@@ -339,6 +339,16 @@ impl Rig {
             .collect()
     }
 
+    /// The text of the message the session whose name starts with `name` sent to main.
+    fn report_from(&self, name: &str) -> String {
+        let messages = self.session.lock().messages.clone();
+        messages
+            .into_iter()
+            .find(|m| matches!(&m.source, MessageSource::Peer { from_name, .. } if from_name.starts_with(name)))
+            .map(|m| m.raw_text())
+            .unwrap_or_default()
+    }
+
     fn main_texts(&self) -> String {
         let messages = self.session.lock().messages.clone();
         messages
@@ -522,6 +532,42 @@ async fn the_mock_exits_with_its_last_client_unless_an_idle_timeout_says_otherwi
     );
     tokio::time::sleep(Duration::from_millis(1200)).await;
     assert!(late.running.hub.shutdown.is_cancelled());
+}
+
+#[tokio::test]
+async fn the_tester_reports_a_message_typed_to_it() {
+    let rig = rig().await;
+    rig.prompt("orchestrate fix the parser bug, test it, update the docs");
+    let start = Instant::now();
+    let mut typed = false;
+    while !rig.main_texts().contains(FINAL_SENTENCE) {
+        assert!(start.elapsed() < ORCHESTRATE_WAIT, "no final summary");
+        rig.approve_everywhere().await;
+        let tester = rig
+            .hub
+            .sessions()
+            .into_iter()
+            .find(|s| s.info().name.starts_with("tester"));
+        // Typed while the tester works: it waits in the queue for the next safe point.
+        if let Some(tester) = tester.filter(|t| !typed && t.lock().messages.len() >= 2) {
+            let msg = user_message(
+                MessageSource::Human,
+                "also cover empty input".into(),
+                vec![],
+            );
+            assert!(ref_server::engine::submit(&rig.hub, &tester, msg), "queued");
+            typed = true;
+        }
+        tokio::time::sleep(POLL).await;
+    }
+    assert!(typed);
+    // The report is wrapped in the sender's envelope.
+    let report = rig.report_from("tester");
+    assert!(
+        report.contains("\nTests added for the parser fix. Also covered: empty input.\n"),
+        "{report}"
+    );
+    rig.finish().await;
 }
 
 #[tokio::test]
