@@ -144,4 +144,5 @@ Sets: `20`, `16` or both. Names are the file names without the set suffix.
 | `error` | 16 | "!" in a circle | Error text |
 | `warning` | 16 | "!" in a triangle | Warning text |
 | `info` | 16 | "i" in a circle | Hint text |
+| `question` | 16 | "?" in a circle | Waiting for your answer (a question from the agent) |
 | `external-link` | 16, 20 | Box with an arrow | Open in browser / external viewer |
