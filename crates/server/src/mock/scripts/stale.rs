@@ -15,9 +15,12 @@ const CHANGED_LINE: u32 = 12;
 /// Three comment lines on top of the parser, like a `git pull` would bring.
 const PULLED: [&str; 3] = [
     "// Report parser.",
-    "// Rows look like label:score.",
-    "// Keep this file small.",
+    "// Rows: label:score.",
+    "// Keep it small.",
 ];
+/// The commands use `awk` and `mv`, which behave alike in GNU, BSD (macOS) and Git Bash
+/// environments; `sed -i` does not.
+const TMP: &str = "scratch/.tmp";
 
 pub const SCRIPTS: &[Script] = &[Script {
     name: "stale",
@@ -26,20 +29,22 @@ pub const SCRIPTS: &[Script] = &[Script {
     play: stale,
 }];
 
-/// The `sed` command that adds `PULLED` at the top of the parser.
+/// Runs `awk` with `program` over `file` and puts the result back in its place.
+fn rewrite(program: &str, file: &str, then: &str) -> String {
+    format!("awk '{program}' {file} > {TMP} && mv {TMP} {file} && echo \"{then}\"")
+}
+
+/// The command that adds `PULLED` at the top of the parser.
 fn pull_command() -> String {
-    let lines: String = PULLED.iter().map(|l| format!("-e '1i{l}' ")).collect();
-    format!(
-        "sed -i {lines}{PARSER} && echo \"{} lines added\"",
-        PULLED.len()
-    )
+    let prints: Vec<String> = PULLED.iter().map(|l| format!("print \"{l}\"")).collect();
+    let program = format!("NR==1{{{}}}1", prints.join("; "));
+    rewrite(&program, PARSER, &format!("{} lines added", PULLED.len()))
 }
 
 /// A change to one line of the library that the model did not see.
 fn change_command() -> String {
-    format!(
-        "sed -i '{CHANGED_LINE}s| *$| // reviewed|' {LIB} && echo \"line {CHANGED_LINE} changed\""
-    )
+    let program = format!("NR=={CHANGED_LINE}{{$0=$0\" // reviewed\"}}1");
+    rewrite(&program, LIB, &format!("line {CHANGED_LINE} changed"))
 }
 
 /// The numbered lines of the newest `read` of `file` in `results`, with its tag.
@@ -175,13 +180,19 @@ mod tests {
     }
 
     #[test]
-    fn the_shell_commands_start_with_what_the_mock_lets_through() {
+    fn the_shell_commands_are_short_portable_and_start_with_what_the_mock_lets_through() {
         let pull = pull_command();
-        assert!(
-            pull.starts_with("sed -i -e '1i// Report parser.' "),
-            "{pull}"
+        assert_eq!(
+            pull,
+            "awk 'NR==1{print \"// Report parser.\"; print \"// Rows: label:score.\"; print \"// Keep it small.\"}1' scratch/src/parser.rs > scratch/.tmp && mv scratch/.tmp scratch/src/parser.rs && echo \"3 lines added\""
         );
-        assert!(pull.ends_with("&& echo \"3 lines added\""), "{pull}");
-        assert!(change_command().contains("12s"));
+        assert_eq!(
+            change_command(),
+            "awk 'NR==12{$0=$0\" // reviewed\"}1' scratch/src/lib.rs > scratch/.tmp && mv scratch/.tmp scratch/src/lib.rs && echo \"line 12 changed\""
+        );
+        assert!(
+            !pull.contains("sed"),
+            "`sed -i` differs between GNU and BSD"
+        );
     }
 }
