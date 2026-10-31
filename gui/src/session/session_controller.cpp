@@ -4,6 +4,7 @@
 
 #include <QPointer>
 
+#include <algorithm>
 #include <utility>
 
 namespace refgui::session
@@ -191,6 +192,22 @@ QCoro::Task<SessionController::Result<void>> SessionController::permissionReply(
 	co_return co_await m_backend.client().permissionReply(m_sessionId, std::move(callId), allow, always);
 }
 
+QCoro::Task<SessionController::Result<void>> SessionController::questionReply(QString callId, std::optional<QList<QStringList>> answers)
+{
+	Q_ASSERT(hasSession());
+	co_return co_await m_backend.client().questionReply(m_sessionId, std::move(callId), std::move(answers));
+}
+
+void SessionController::dropQuestion(const QString& callId)
+{
+	QList<proto::QuestionRequest> left = m_questions;
+	left.removeIf([&](const proto::QuestionRequest& request) { return request.callId == callId; });
+	if(left.size() != m_questions.size())
+	{
+		setQuestions(std::move(left));
+	}
+}
+
 // The connection is new, so the backend knows nothing of our attachment.
 QCoro::Task<> SessionController::reattach()
 {
@@ -212,6 +229,7 @@ void SessionController::adopt(const proto::SessionSnapshot& snapshot)
 {
 	m_feed.reset(snapshot.messages);
 	setQueued(snapshot.queued);
+	setQuestions(snapshot.pendingQuestions);
 	setMoreBefore(snapshot.moreBefore);
 	setInfo(snapshot.info);
 }
@@ -238,6 +256,20 @@ void SessionController::onEvent(const proto::SessionEvent& event)
 	{
 		setQueued(queue->messages);
 	}
+	else if(const auto* question = std::get_if<proto::QuestionEvent>(&event))
+	{
+		const auto known = std::ranges::any_of(m_questions, [&](const proto::QuestionRequest& request) { return request.callId == question->request.callId; });
+		if(!known)
+		{
+			QList<proto::QuestionRequest> questions = m_questions;
+			questions.append(question->request);
+			setQuestions(std::move(questions));
+		}
+	}
+	else if(const auto* resolved = std::get_if<proto::QuestionResolvedEvent>(&event))
+	{
+		dropQuestion(resolved->callId);
+	}
 	else if(const auto* error = std::get_if<proto::ErrorEvent>(&event))
 	{
 		m_model.setTailError(error->text);
@@ -258,6 +290,12 @@ void SessionController::setQueued(QList<proto::Message> messages)
 {
 	m_queued = std::move(messages);
 	emit queueChanged();
+}
+
+void SessionController::setQuestions(QList<proto::QuestionRequest> questions)
+{
+	m_questions = std::move(questions);
+	emit questionsChanged();
 }
 
 void SessionController::setMoreBefore(bool moreBefore)

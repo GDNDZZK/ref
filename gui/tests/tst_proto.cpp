@@ -196,6 +196,9 @@ private slots:
 		QCOMPARE(request::abort(u"ses_a1b2c3d4"_s), withoutId(u"abort"_s));
 		QCOMPARE(request::permissionReply(u"ses_a1b2c3d4"_s, u"call_9x8y7z"_s, true, false), withoutId(u"permission_reply"_s));
 		QCOMPARE(request::prompt(u"ses_a1b2c3d4"_s, u"Fix the failing parser test"_s), withoutId(u"prompt"_s));
+		QCOMPARE(request::questionReply(u"ses_a1b2c3d4"_s, u"call_9x8y7z"_s, QList<QStringList>{{u"Exclusive range"_s}, {u"Unit tests"_s, u"Clippy"_s}}),
+		         withoutId(u"question_reply"_s));
+		QCOMPARE(request::questionReply(u"ses_a1b2c3d4"_s, u"call_9x8y7z"_s, std::nullopt), withoutId(u"question_reply_dismiss"_s));
 
 		QCOMPARE(request::getConfig(), withoutId(u"get_config"_s));
 		QCOMPARE(request::watchAll(true), withoutId(u"watch_all"_s));
@@ -285,6 +288,75 @@ private slots:
 		const auto& image = std::get<ImagePart>(snapshot.messages.at(0).parts.at(1));
 		QVERIFY(image.image.data.isEmpty());
 		QVERIFY(image.image.id.has_value());
+	}
+
+	void snapshotCarriesPendingQuestions()
+	{
+		const auto snapshot = parsedOrFail(parseAttachResult(fixtureObject(u"server_frame"_s, u"response_attach"_s).value(u"result"_s).toObject()));
+		QCOMPARE(snapshot.pendingQuestions.size(), 1);
+		const QuestionRequest& request = snapshot.pendingQuestions.first();
+		QCOMPARE(request.callId, u"call_9x8y7z"_s);
+		QCOMPARE(request.questions.size(), 2);
+	}
+
+	void questionEventKeepsOptionsAndFlags()
+	{
+		const auto event = parsedOrFail(parseSessionEvent(fixtureObject(u"session_event"_s, u"question"_s)));
+		const QuestionRequest& request = std::get<QuestionEvent>(event).request;
+		QCOMPARE(request.sessionId, u"ses_a1b2c3d4"_s);
+		QCOMPARE(request.messageId, u"msg_0f1e2d3c"_s);
+		QCOMPARE(request.questions.size(), 2);
+		const Question& single = request.questions.at(0);
+		QCOMPARE(single.header, u"Loop bound"_s);
+		QVERIFY(!single.multiple);
+		QVERIFY(single.custom);
+		QCOMPARE(single.options.size(), 2);
+		QCOMPARE(single.options.at(0).label, u"Exclusive range"_s);
+		QCOMPARE(single.options.at(0).description, u"Use `0..items.len()`"_s);
+		QVERIFY(single.options.at(0).isDefault);
+		QVERIFY(!single.options.at(1).isDefault);
+		const Question& several = request.questions.at(1);
+		QVERIFY(several.multiple);
+		QVERIFY(!several.custom);
+	}
+
+	void questionFlagsHaveDefaults()
+	{
+		QJsonObject event = fixtureObject(u"session_event"_s, u"question"_s);
+		QJsonObject request = event.value(u"request"_s).toObject();
+		QJsonObject question = request.value(u"questions"_s).toArray().first().toObject();
+		question.remove(u"multiple"_s);
+		question.remove(u"custom"_s);
+		QJsonObject option = question.value(u"options"_s).toArray().first().toObject();
+		option.remove(u"default"_s);
+		question.insert(u"options"_s, QJsonArray{option});
+		request.insert(u"questions"_s, QJsonArray{question});
+		event.insert(u"request"_s, request);
+
+		const Question parsed = std::get<QuestionEvent>(parsedOrFail(parseSessionEvent(event))).request.questions.first();
+		QVERIFY(!parsed.multiple);
+		QVERIFY(parsed.custom); // custom answers are allowed unless the backend says no
+		QVERIFY(!parsed.options.first().isDefault);
+	}
+
+	void questionNotifyCarriesTheFirstQuestion()
+	{
+		const auto frame = parsedOrFail(parseServerFrame(fixtureObject(u"server_frame"_s, u"notify_question"_s)));
+		const auto& notify = std::get<NotifyFrame>(frame);
+		QCOMPARE(notify.kind, NotifyFrame::Kind::Question);
+		QCOMPARE(notify.detail.value_or(QString()), u"How should the loop bound be fixed?"_s);
+	}
+
+	void waitingQuestionIsAStatus()
+	{
+		const auto event = parsedOrFail(parseSessionEvent(fixtureObject(u"session_event"_s, u"info_waiting_question"_s)));
+		QCOMPARE(std::get<InfoEvent>(event).info.status.state, SessionStatus::State::WaitingQuestion);
+	}
+
+	void questionResolvedNamesTheCall()
+	{
+		const auto event = parsedOrFail(parseSessionEvent(fixtureObject(u"session_event"_s, u"question_resolved"_s)));
+		QCOMPARE(std::get<QuestionResolvedEvent>(event).callId, u"call_9x8y7z"_s);
 	}
 
 	void toolStatesAreFinalOnlyAtTheEnd()
