@@ -12,6 +12,10 @@ const WINDOW = { width: 1280, height: 800 }
 const MODEL_TAG = 'Mock 1'
 const SETTLE_MS = 700 // entrance animations last up to 480 ms
 const SIDEBAR_WIDTH = 300
+const CONTEXT_METER = /^[\d.]+k? \/ [\d.]+k$/
+const TILE_HEADER_INSET = 40 // from the tile's left edge to its title
+const SAME_ROW_PX = 40
+const STATUS_LABEL_INSET = 12 // from the tile's title to inside its status label
 const PARKED_POINTER = { x: 700, y: 20 } // the empty top bar
 const GRAB_DIR = join(import.meta.dirname, '..', '..', '.cache', 'grab')
 
@@ -72,6 +76,20 @@ class GuiUi implements Ui {
 
   parkPointer(): Promise<void> {
     return this.session.hover(PARKED_POINTER.x, PARKED_POINTER.y)
+  }
+
+  // A click on the header or the context meter does not focus a tile, and a click on a tool card
+  // opens it, so this clicks the status label ("Working") at the left end of the tile's status
+  // line, which is found by its context meter ("5.0k / 200.0k") at the right end.
+  async clickTile(title: string): Promise<void> {
+    const texts = await this.session.texts()
+    const header = texts.find((item) => item.text === title && item.x >= SIDEBAR_WIDTH)
+    if (!header) throw new Error(`no tile "${title}"`)
+    const meters = texts.filter((item) => CONTEXT_METER.test(item.text) && item.y > header.y && item.x >= header.x - TILE_HEADER_INSET)
+    const top = Math.min(...meters.map((item) => item.y))
+    const meter = meters.filter((item) => item.y - top < SAME_ROW_PX).sort((a, b) => a.x - b.x)[0]
+    if (!meter) throw new Error(`no status line in tile "${title}"`)
+    await this.session.click(header.x + STATUS_LABEL_INSET, meter.y + meter.height / 2)
   }
 
   async clickSidebarRow(title: string): Promise<void> {

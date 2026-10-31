@@ -13,13 +13,20 @@ const SUMMARY_DONE = 'The parser bug is fixed.'
 const WAIT_MS = 40_000
 const MAIN_SESSION_ROW = 'workspace-' // the main session keeps its generated name; helpers are named
 const FIXER = 'fixer'
+const TESTER = 'tester'
+const FOLLOW_UP = 'also cover empty input'
+const TYPING_PAUSE_MS = 70
+const TESTER_REACTION = 'Also covered: empty input.'
 const ALLOW_KEY = 'tool.allow'
 const APPROVAL_ASKED_FOR = 'Fix the off-by-one' // the fixer's edit
 
 // Seconds since `start`, as a pause that returns at that moment.
 function clock(ui: Ui) {
   const start = Date.now()
-  return { until: (seconds: number) => ui.pause(Math.max(0, start + seconds * 1000 - Date.now())) }
+  return {
+    until: (seconds: number) => ui.pause(Math.max(0, start + seconds * 1000 - Date.now())),
+    now: () => (Date.now() - start) / 1000,
+  }
 }
 
 export const ORCHESTRA_SCENARIOS: Scenario[] = [
@@ -97,6 +104,44 @@ export const ORCHESTRA_SCENARIOS: Scenario[] = [
       await ui.clickTextBelow(ui.text(ALLOW_KEY), APPROVAL_ASKED_FOR)
       await time.until(17.5)
       await ui.shot('orchestra-six')
+    },
+  },
+  {
+    // Test of the hero shot: a message queued for the tester while the fixer waits for approval.
+    name: 'orchestra-probe',
+    uis: ['gui'],
+    async run(ui) {
+      await ui.resize(1280, 1120)
+      await ui.type(TASK)
+      await ui.key('Enter')
+      const time = clock(ui)
+      await time.until(0.4)
+      await ui.command('watch')
+      await ui.parkPointer()
+      await ui.startClip('orchestra-probe')
+      await time.until(7)
+      await ui.clickTile(TESTER)
+      await ui.parkPointer() // the input box opens under the pointer and would show a tooltip
+      const typingStart = time.now()
+      for (const character of FOLLOW_UP) {
+        await ui.type(character)
+        await ui.pause(TYPING_PAUSE_MS)
+      }
+      console.log('typing took', (time.now() - typingStart).toFixed(1))
+      await ui.key('Enter')
+      await ui.parkPointer()
+      console.log('t', time.now().toFixed(1), 'fixer still waiting:', await ui.hasText(ui.text('status.waitingPermission')))
+      await time.until(13)
+      await ui.clickTextBelow(ui.text(ALLOW_KEY), APPROVAL_ASKED_FOR)
+      await ui.parkPointer()
+      await time.until(14)
+      console.log('t', time.now().toFixed(1), 'fixer still waiting after one click:', await ui.hasText(ui.text('status.waitingPermission')))
+      await ui.waitText(TESTER_REACTION, WAIT_MS)
+      console.log('t', time.now().toFixed(1), 'tester reaction seen')
+      await ui.waitText(SUMMARY_DONE, WAIT_MS)
+      console.log('t', time.now().toFixed(1), 'summary done')
+      await ui.pause(1000)
+      await ui.endClip()
     },
   },
 ]

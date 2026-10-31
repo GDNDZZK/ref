@@ -69,6 +69,10 @@ class WebUi implements Ui {
     throw new Error('parkPointer is for the GUI only')
   }
 
+  clickTile(): Promise<void> {
+    throw new Error('clickTile is for the GUI only')
+  }
+
   clickSidebarRow(): Promise<void> {
     throw new Error('clickSidebarRow is for the GUI only')
   }
