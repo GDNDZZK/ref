@@ -259,22 +259,7 @@ fn db_thread(data_dir: &Path, path: &Path, rx: mpsc::Receiver<Cmd>) {
         while let Ok(c) = rx.try_recv() {
             batch.push(c);
         }
-        // A save is skipped when a later save of the same session follows before any other
-        // command (reads must observe the state queued before them).
-        let mut skip = vec![false; batch.len()];
-        for i in 0..batch.len() {
-            let Cmd::Save(p) = &batch[i] else { continue };
-            for later in &batch[i + 1..] {
-                match later {
-                    Cmd::Save(q) if q.info.id == p.info.id => {
-                        skip[i] = true;
-                        break;
-                    }
-                    Cmd::Save(_) => {}
-                    _ => break,
-                }
-            }
-        }
+        let skip = superseded_saves(&batch);
         for (c, skip) in batch.into_iter().zip(skip) {
             let Some(db) = conn.as_mut() else {
                 fail(c, "session store is not available (see server log)");
@@ -307,6 +292,28 @@ fn db_thread(data_dir: &Path, path: &Path, rx: mpsc::Receiver<Cmd>) {
             }
         }
     }
+}
+
+/// A save is skipped when a later save of the same session follows before any other
+/// command (reads must observe the state queued before them). The exception is a save with
+/// messages followed by one without: an empty save of a session that has no row yet stores
+/// nothing, so the earlier save must run to create the row.
+fn superseded_saves(batch: &[Cmd]) -> Vec<bool> {
+    let mut skip = vec![false; batch.len()];
+    for i in 0..batch.len() {
+        let Cmd::Save(p) = &batch[i] else { continue };
+        for later in &batch[i + 1..] {
+            match later {
+                Cmd::Save(q) if q.info.id == p.info.id => {
+                    skip[i] = p.messages.is_empty() || !q.messages.is_empty();
+                    break;
+                }
+                Cmd::Save(_) => {}
+                _ => break,
+            }
+        }
+    }
+    skip
 }
 
 fn fail(c: Cmd, msg: &str) {
@@ -651,6 +658,28 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect()
+    }
+
+    /// Queued saves "one message" then "no messages" (a session undone to empty) must not
+    /// both be dropped: the empty one alone is not stored when the session was never saved.
+    #[test]
+    fn a_save_that_gives_the_session_its_first_row_is_not_coalesced_away() {
+        let save = |id: &str, messages: Vec<Message>| {
+            Cmd::Save(Box::new(Persisted {
+                info: info(id, "/", 1),
+                messages,
+                reported: false,
+                context_notice: false,
+            }))
+        };
+        let batch = [
+            save("ses_a", vec![msg("m1", "hi")]),
+            save("ses_a", vec![]),
+            save("ses_b", vec![msg("m1", "hi")]),
+            save("ses_b", vec![msg("m1", "hi"), msg("m2", "there")]),
+        ];
+        // The first save of ses_a creates the row; the two for ses_b are interchangeable.
+        assert_eq!(superseded_saves(&batch), [false, false, true, false]);
     }
 
     #[test]
