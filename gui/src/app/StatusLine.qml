@@ -77,7 +77,7 @@ Item {
 		Icon {
 			anchors.verticalCenter: parent.verticalCenter
 			visible: line.waiting || line.retrying
-			name: line.waiting ? "lock" : "retry"
+			name: line.activity === "waiting_question" ? "question" : line.waiting ? "lock" : "retry"
 			color: Theme.warning
 		}
 		ShimmerText {
