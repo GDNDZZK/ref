@@ -2,8 +2,9 @@
 //! share a session see each other's prompts at once. Over real WebSocket connections.
 
 use futures_util::{SinkExt, StreamExt};
-use ref_proto::{ClientFrame, Request, Role, ServerFrame, SessionEvent};
+use ref_proto::{ClientFrame, Part, Request, Role, ServerFrame, SessionEvent, SessionStatus};
 use ref_server::mock::Mock;
+use ref_server::session::Session;
 use serde_json::Value;
 use std::time::{Duration, Instant};
 use tokio_tungstenite::tungstenite::Message as WsMsg;
@@ -12,12 +13,11 @@ type Ws =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 const TOKEN: &str = "token";
-const KEEP_RUNNING: i64 = -1;
-/// The `running` script prints for eight seconds.
-const RUNNING_SCRIPT_TIME: Duration = Duration::from_secs(9);
+const KEEP_RUNNING: i64 = ref_server::hub::IDLE_NEVER;
 /// A prompt typed in one window must show up in the others within this time.
 const MIRROR_LIMIT: Duration = Duration::from_secs(1);
-const WAIT: Duration = Duration::from_secs(20);
+const WAIT: Duration = Duration::from_secs(30);
+const POLL: Duration = Duration::from_millis(50);
 
 struct Client {
     ws: Ws,
@@ -156,7 +156,11 @@ async fn a_turn_finishes_while_no_window_is_connected() {
     window.wait_for_running_command(&session_id).await;
     drop(window);
 
-    tokio::time::sleep(RUNNING_SCRIPT_TIME).await;
+    // Nobody is attached: look at the backend's own state until the turn is over.
+    wait_on_server(&mock, &session_id, "the turn did not finish", |s| {
+        s.info().status == SessionStatus::Idle && s.lock().run.is_none()
+    })
+    .await;
     assert!(
         !mock.running.hub.shutdown.is_cancelled(),
         "the backend stays up"
@@ -184,7 +188,6 @@ async fn a_prompt_typed_in_one_window_shows_up_in_the_other_at_once() {
     let mut watching = connect(&mock).await;
     watching.attach(&session_id).await;
 
-    let sent = Instant::now();
     typing.prompt(&session_id, "hello").await;
     assert!(
         watching
@@ -192,7 +195,6 @@ async fn a_prompt_typed_in_one_window_shows_up_in_the_other_at_once() {
             .await,
         "not seen within {MIRROR_LIMIT:?}"
     );
-    eprintln!("prompt mirrored after {:?}", sent.elapsed());
 
     // A message typed while the turn runs reaches the other window when it is delivered.
     let queued = Request::Prompt {
@@ -228,8 +230,43 @@ impl Client {
     }
 }
 
-/// `longrun` prints a line every ten seconds; wait for the next one to be sure it came.
-const LONGRUN_TICK: Duration = Duration::from_millis(10_500);
+/// Polls the backend's own state, so no window is attached while it waits, until `done` holds
+/// for the session.
+async fn wait_on_server(
+    mock: &Mock,
+    session_id: &str,
+    what: &str,
+    done: impl Fn(&Session) -> bool,
+) {
+    let start = Instant::now();
+    loop {
+        let found = mock
+            .running
+            .hub
+            .sessions()
+            .into_iter()
+            .find(|s| s.id == session_id)
+            .is_some_and(|s| done(&s));
+        if found {
+            return;
+        }
+        assert!(start.elapsed() < WAIT, "{what}");
+        tokio::time::sleep(POLL).await;
+    }
+}
+
+/// Whether a tool of the session has `line` in its live output.
+fn prints(session: &Session, line: &str) -> bool {
+    session
+        .lock()
+        .messages
+        .iter()
+        .flat_map(|m| m.parts.iter())
+        .any(|p| {
+            matches!(p, Part::Tool { meta: Some(meta), .. }
+            if meta["live_output"].as_str().is_some_and(|o| o.contains(line)))
+        })
+}
 
 #[tokio::test]
 async fn output_printed_while_no_window_is_open_is_there_when_one_opens_the_session() {
@@ -244,7 +281,11 @@ async fn output_printed_while_no_window_is_open_is_there_when_one_opens_the_sess
     window.wait_for_running_command(&session_id).await;
     drop(window);
 
-    tokio::time::sleep(LONGRUN_TICK).await;
+    // The second line comes ten seconds after the first, while no window is open.
+    wait_on_server(&mock, &session_id, "no second line", |s| {
+        prints(s, "step 2/20: tests::parser_02 ... ok")
+    })
+    .await;
 
     let mut later = connect(&mock).await;
     let snapshot = later.attach(&session_id).await;

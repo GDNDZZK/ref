@@ -165,7 +165,6 @@ pub fn expand_home(p: &str, home: Option<&Path>) -> std::path::PathBuf {
     std::path::PathBuf::from(p)
 }
 
-/// Whether a process with this pid exists.
 /// A relative path written with `/` on every platform, as clients expect it in the protocol.
 pub fn relative_slash(rel: &Path) -> String {
     let parts: Vec<_> = rel
@@ -175,6 +174,7 @@ pub fn relative_slash(rel: &Path) -> String {
     parts.join("/")
 }
 
+/// Whether a process with this pid exists.
 pub fn pid_alive(pid: u32) -> bool {
     ref_sys::pid_alive(pid)
 }

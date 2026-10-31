@@ -234,7 +234,10 @@ pub fn analyze(body: &Value, session_id: &str, attempt: u32) -> Task {
 
     let (prompt, round, tool_results, typed) = match since_task(messages) {
         Some(found) => found,
-        None => since_prompt(messages),
+        None => {
+            let (prompt, round, tool_results) = since_prompt(messages);
+            (prompt, round, tool_results, Vec::new())
+        }
     };
     let (root_prompt, peer_reports) = conversation_root(messages);
     let prompt = task_text(prompt.trim());
@@ -256,7 +259,7 @@ pub fn analyze(body: &Value, session_id: &str, attempt: u32) -> Task {
 }
 
 /// Walks back to the user's prompt, counting the model's answers and collecting tool results.
-fn since_prompt(messages: &[Value]) -> (String, usize, Vec<String>, Vec<String>) {
+fn since_prompt(messages: &[Value]) -> (String, usize, Vec<String>) {
     let mut round = 0;
     let mut tool_results = Vec::new();
     let mut prompt = String::new();
@@ -274,7 +277,7 @@ fn since_prompt(messages: &[Value]) -> (String, usize, Vec<String>, Vec<String>)
         }
     }
     tool_results.reverse();
-    (prompt, round, tool_results, Vec::new())
+    (prompt, round, tool_results)
 }
 
 /// For a created session: the task, the answers and tool results since it, and what a person
