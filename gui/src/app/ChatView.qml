@@ -62,6 +62,7 @@ ListView {
 	property real heldSpace: 0
 	property bool holdUpdating: false // holdEnd() is writing heldSpace
 	property bool holdStale: false // the end moved during that write
+	property bool holdResting: false // a permission card is changing; the end follows the content
 
 	readonly property int retainedDistance: 20000 // px above and below the view whose rows stay instantiated, about 200 rows
 	readonly property int olderTriggerDistance: 400 // px from the top at which the next page loads by itself
@@ -133,7 +134,7 @@ ListView {
 		holdUpdating = true
 		do {
 			holdStale = false
-			highWater = Math.max(highWater, naturalEnd)
+			highWater = holdResting ? naturalEnd : Math.max(highWater, naturalEnd)
 			heldSpace = highWater - naturalEnd
 		} while (holdStale)
 		holdUpdating = false
@@ -267,6 +268,10 @@ ListView {
 
 	// Hold only while following: further up, the end moving is out of sight.
 	onNaturalEndChanged: if (turnInProgress && following) holdEnd()
+	onPermissionCountChanged: {
+		holdResting = true
+		holdResume.restart()
+	}
 	onFollowingChanged: {
 		if (!following)
 			return
@@ -281,6 +286,12 @@ ListView {
 		} else {
 			release.restart()
 		}
+	}
+
+	Timer {
+		id: holdResume
+		interval: Motion.slow
+		onTriggered: view.holdResting = false
 	}
 
 	NumberAnimation {
