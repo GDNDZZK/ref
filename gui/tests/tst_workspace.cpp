@@ -62,6 +62,9 @@ public:
 	// While held, a detach is recorded but neither carried out nor answered.
 	void holdDetach(bool hold) { m_holdDetach = hold; }
 
+	// While held, watch_all is recorded and left unanswered.
+	void holdWatchAll(bool hold) { m_holdWatchAll = hold; }
+
 	void releaseDetach()
 	{
 		m_holdDetach = false;
@@ -170,6 +173,10 @@ private:
 			m_fake.respond(request, {{u"session"_s, m_sessions.value(id)}});
 			broadcast();
 		}
+		else if(op == u"watch_all"_s && m_holdWatchAll)
+		{
+			return;
+		}
 		else if(op == u"list_sessions"_s || op == u"list_history"_s || op == u"watch_all"_s)
 		{
 			m_fake.respond(request, {{u"sessions"_s, list()}});
@@ -221,6 +228,7 @@ private:
 	int m_created = 0;
 	int m_protocol = 2;
 	bool m_holdDetach = false;
+	bool m_holdWatchAll = false;
 	std::optional<QJsonObject> m_heldDetach;
 };
 
@@ -317,6 +325,8 @@ private slots:
 	void anotherTileGetsTheFocusWhenTheFocusedOneCloses();
 	void theSidebarMarksTheFocusedTileAndTheTiles();
 	void permissionKeysComeAfterTheGuardAndTakeTheTyping();
+	void destroyingTheWorkspaceWhileLeavingSplitViewIsSafe();
+	void destroyingTheWorkspaceWithADetachOutIsSafe();
 	void questionKeysComeAfterTheGuardAndAnswerTheCard();
 	void aQuestionAnsweredElsewhereGoesQuietly();
 	void aRefusedAnswerKeepsTheCardAndSaysWhy();
@@ -778,6 +788,33 @@ void TestWorkspace::typingACustomAnswerTakesTheKeysAwayFromTheCard()
 	QVERIFY(!session->answerKey(Qt::Key_A, u"a"_s, Qt::NoModifier, false)); // the text field has them
 	session->question()->cancelCustom();
 	QVERIFY(session->answerKeysActive());
+}
+
+// Closing the connection resumes the coroutines whose requests are out. leaveSplit() waits for watch_all and then
+// goes through the sessions, so they must still exist when the workspace is destroyed with that request unanswered
+// (a use after free, found by an address sanitizer run).
+void TestWorkspace::destroyingTheWorkspaceWhileLeavingSplitViewIsSafe()
+{
+	Fixture f(2, true);
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
+	f.workspace->toggleSplit();
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	QTRY_COMPARE(f.stub.requests(u"watch_all"_s).size(), 1);
+
+	f.stub.holdWatchAll(true);
+	f.workspace->toggleSplit();
+	QTRY_COMPARE(f.stub.requests(u"watch_all"_s).size(), 2);
+	QVERIFY(!f.stub.requests(u"watch_all"_s).last().value(u"enabled"_s).toBool());
+	// Leaving ends here: the fixture goes with the request out.
+}
+
+// The same for show(), which waits for the old session's detach.
+void TestWorkspace::destroyingTheWorkspaceWithADetachOutIsSafe()
+{
+	Fixture f;
+	f.stub.holdDetach(true);
+	f.workspace->newSession(u"/other"_s);
+	QTRY_COMPARE(f.stub.requests(u"detach"_s).size(), 1);
 }
 
 void TestWorkspace::oldBackendOffersARestart()
