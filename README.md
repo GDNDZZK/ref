@@ -2,7 +2,7 @@
 
 # ref
 
-**A terminal coding agent written in Rust.**
+**A coding agent written in Rust, for the terminal, the desktop and the browser.**
 
 Sessions run in a background server and keep working while no window is open.
 Several sessions can work side by side and message each other.
@@ -13,6 +13,12 @@ Several sessions can work side by side and message each other.
 ![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
 
 **English** · [简体中文](README.zh-CN.md)
+
+<br>
+
+<img src="docs/images/gui-split-view.png" alt="ref-gui showing four background sessions side by side" width="720">
+
+<sub>Four sessions at work in the split view of the desktop GUI.</sub>
 
 </div>
 
@@ -29,6 +35,26 @@ Several sessions can work side by side and message each other.
 - **Long sessions.** Automatic context compaction, retries without limit for rate limits and outages, and image downscaling for every provider.
 - **MCP** servers over stdio and Streamable HTTP.
 - **Linux, macOS and Windows**, on x86_64 and arm64.
+
+## Interfaces
+
+All three show the same sessions, and a session can be open in several of them at once.
+
+<div align="center">
+
+<img src="docs/images/gui-permission-card.png" alt="ref-gui: an edit waits for permission" width="720">
+
+<sub><b>Desktop GUI</b> (<code>ref-gui</code>). A tool waits for permission: allow (a), allow for the session (s) or deny (d).</sub>
+
+<img src="docs/images/web-split-view.png" alt="ref-web: the split view in a browser" width="720">
+
+<sub><b>Browser</b> (<code>ref-web</code>). The same interface, here with the split view.</sub>
+
+<img src="docs/images/tui-main.png" alt="ref in the terminal" width="720">
+
+<sub><b>Terminal</b> (<code>ref</code>). Tool calls, replies and the input box.</sub>
+
+</div>
 
 ## Installation
 
@@ -114,8 +140,8 @@ Keys in the terminal UI:
 | [Using ref](docs/usage.md) | Sessions, the screen, prompts, keybindings, slash commands, split view, working with several sessions |
 | [Configuration](docs/configuration.md) | Every configuration key: providers and models, agents, permissions, delays, compaction, MCP, commands, instructions and skills |
 | [Tools](docs/tools.md) | What the model can do: file tools, bash, webfetch, image handling, context and cross-session tools |
-| [Desktop GUI](docs/gui.md) | `ref-gui`: installing, starting, files |
-| [Web UI](docs/web.md) | `ref-web`: starting, signing in, opening it to the network, developing the page |
+| [Desktop GUI](docs/gui.md) | `ref-gui`: installing, starting, the window, split view, conversation, shortcuts, settings, notifications |
+| [Web UI](docs/web.md) | `ref-web`: starting, signing in, opening it to the network, using the page, shortcuts, notifications, developing the page |
 | [Command line](docs/cli.md) | `ref`, `ref-gui`, `ref-web` and `ref-server` options, remote backends, files and environment variables |
 | [Development](docs/development.md) | Building, tests, crate layout, CI and releases |
 
