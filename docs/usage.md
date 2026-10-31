@@ -31,7 +31,7 @@ All flags are listed in [Command line](cli.md#ref).
 
 ref has two programs. `ref-server` (the backend) runs the sessions: it calls the LLM, runs tools, stores history and handles permissions. `ref` (the TUI) shows sessions and sends your input. They talk over a local WebSocket.
 
-When you start `ref`, it connects to a running backend or starts one. A backend started this way exits when the last `ref` window closes. Other programs that show sessions, such as the browser UI ([Web UI](web.md)), find the same backend through the same instance file, so a session can be open in several of them at once. A backend started by one of them exits after its last client of any kind disconnects. Sessions keep running in the backend while no window shows them, so you can close a window, open another and continue where the session is.
+When you start `ref`, it connects to a running backend or starts one. A backend started this way exits when the last `ref` window closes. Other programs that show sessions, such as the browser UI ([Web UI](web.md)), find the same backend through the same instance file, so a session can be open in several of them at once. A backend started by one of them exits after its last client of any kind disconnects, and the turns that are running stop with it. While at least one client is connected, sessions keep running even if no window shows them, so you can close one window, open another and continue where the session is. To keep sessions running with no window open, start the backend yourself with `ref-server` (see [Command line](cli.md#ref-server)); a backend started that way never exits on its own.
 
 - A session is **foreground** while a `ref` window is attached to it, and **background** otherwise.
 - Sessions are saved in `~/.local/share/ref/sessions/`. `ctrl+x l` lists live sessions and history; opening an old one loads it again.
@@ -150,6 +150,19 @@ Sessions can talk to each other. The model has tools for it (see [Tools](tools.m
 - `/peers-outbox`: messages this session sent, and whether each is queued, delivered or read.
 
 Agents with `can_spawn` (the `build` agent by default) can start background sessions, give them a task and close them. Watch them in split view.
+
+## Questions from the model
+
+When the model asks you something with the [`question` tool](tools.md#question), the TUI shows the question with its options, and the session shows "waiting for your answer" in every window until you answer. Background sessions ask too: they show up in the session list like a pending permission and send a notification.
+
+- `↑` `↓` (or `k` `j`) move; the option marked default is selected when the question appears.
+- `1` to `9` pick that row. In a multiple choice they toggle it.
+- `enter` accepts the selected option. In a multiple choice `enter` or `space` toggles it.
+- With several questions, `tab` and `←` `→` switch between them, and the last tab, "Confirm", lists the answers and sends them with `enter`.
+- The last row, "Type your own answer", opens a text field; `enter` sends it, `esc` leaves the field.
+- `esc` dismisses the question: the model is told and continues. Press `esc` again to interrupt the turn.
+
+Like the permission dialog, it ignores keys for a third of a second after it appears, so a key you were typing for the prompt does not answer it. The first answer from any window wins.
 
 ## Permissions and delays
 

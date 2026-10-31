@@ -83,6 +83,7 @@ export function snapshot(messages: Message[], overrides: Partial<SessionSnapshot
     messages,
     more_before: false,
     pending_permissions: [],
+    pending_questions: [],
     queued: [],
     ...overrides,
   }

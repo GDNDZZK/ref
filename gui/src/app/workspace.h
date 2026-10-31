@@ -211,6 +211,7 @@ private:
 	QCoro::Task<> leaveCurrent(QString closedId, QString cwd);
 	void handleGone(const QString& sessionId, const QString& cwd);
 	void setCurrent(ChatSession* session);
+	void updateHighlight();
 	void onLiveChanged();
 	void dropChat(const QString& sessionId);
 	ChatSession& chat(const QString& sessionId);
@@ -263,6 +264,7 @@ private:
 	QString m_focusedTile;
 	QString m_zoomed;
 	QSet<QString> m_tileAttaching;
+	QSet<QString> m_unzooming; // unzoomed sessions whose foreground the backend has not yet been told to give up
 	QJSEngine* m_engine = nullptr;
 	int m_showSerial = 0;
 	bool m_split = false;

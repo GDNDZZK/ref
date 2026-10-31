@@ -1116,6 +1116,7 @@ impl Mock {
                                 messages: s.messages.clone(),
                                 more_before: false,
                                 pending_permissions: s.perms.clone(),
+                                pending_questions: Vec::new(),
                                 queued: s.queue.clone(),
                             })
                         }
@@ -1237,6 +1238,8 @@ impl Mock {
                 }
                 self.ok(id, json!({}));
             }
+            // The in-process mock asks no questions.
+            Request::QuestionReply { .. } => self.ok(id, json!({})),
             Request::SetModel { session_id, model } => {
                 let info = self.with_session(&session_id, |s| {
                     s.info.model = model;

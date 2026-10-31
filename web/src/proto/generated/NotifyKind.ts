@@ -3,4 +3,4 @@
 /**
  * Kind of system notification a frontend can ask for (see `Request::SetNotify`).
  */
-export type NotifyKind = "permission" | "turn_done" | "turn_error";
+export type NotifyKind = "permission" | "question" | "turn_done" | "turn_error";

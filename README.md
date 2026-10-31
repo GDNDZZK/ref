@@ -4,7 +4,7 @@
 
 **A coding agent written in Rust, for the terminal, the desktop and the browser.**
 
-Sessions run in a background server and keep working while no window is open.
+Sessions run in a server, apart from the windows that show them.
 Several sessions can work side by side and message each other.
 
 [![CI](https://github.com/GDNDZZK/ref/actions/workflows/ci.yml/badge.svg)](https://github.com/GDNDZZK/ref/actions/workflows/ci.yml)
@@ -26,10 +26,10 @@ Several sessions can work side by side and message each other.
 
 ## Features
 
-- **Server and interfaces are separate.** `ref-server` runs sessions, the agent loop, LLM calls, tools and permissions. `ref` (terminal), `ref-gui` (desktop window) and `ref-web` (browser) only show them. Close the window and the session keeps going; open it again from any of them, or from several at once.
+- **Server and interfaces are separate.** `ref-server` runs sessions, the agent loop, LLM calls, tools and permissions. `ref` (terminal), `ref-gui` (desktop window) and `ref-web` (browser) only show them. Sessions keep running as long as any window (terminal, desktop or browser) is connected, so you can close one and continue in another, or have several open at once. A server started by one of them exits when the last window disconnects, and running sessions stop. To keep them running with no window open, start `ref-server` yourself: `ref-server` runs until you stop it, and the interfaces connect to it.
 - **Many sessions at once.** A split view tiles all background sessions. Sessions can send each other messages, and the `build` agent can start worker sessions and give them tasks.
-- **Works with opencode configuration.** An existing `opencode.json` with providers, models, agents, permissions, MCP servers and commands works unchanged.
-- **Any model provider.** Anthropic Messages, OpenAI Responses and OpenAI-compatible Chat Completions, with model variants for reasoning effort or extended thinking.
+- **Reads opencode configuration.** ref loads the providers, models, agents, permissions, MCP servers and commands of an existing `opencode.json`. A few keys are accepted and ignored; see [Configuration](docs/configuration.md).
+- **Three provider APIs.** Anthropic Messages, OpenAI Responses and any OpenAI-compatible Chat Completions endpoint, with model variants for reasoning effort or extended thinking. There is no native Gemini or Bedrock client.
 - **Control over tool calls.** Allow, ask or deny per tool, with patterns for commands, paths and URLs, plus optional countdowns before a tool runs.
 - **Reliable file edits.** Edits address hash-tagged line numbers, so a stale view of a file is detected instead of corrupting it.
 - **Long sessions.** Automatic context compaction, retries without limit for rate limits and outages, and image downscaling for every provider.
@@ -90,7 +90,7 @@ The GUI archives are folders that must stay together: `ref-gui` finds its librar
 All interfaces share one backend. If you installed several, any of them connects to the backend that is already running.
 
 - **Linux**: `ref`, `ref-web` and `ref-server` need glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36, RHEL 10, Arch and newer). NixOS needs `programs.nix-ld.enable = true`.
-- **Linux GUI**: needs glibc 2.38 and the C++ runtime of GCC 13 (`libstdc++` with `CXXABI_1.3.14`): Ubuntu 24.04, Debian 13, Fedora 39, Arch and newer. It does not start on Ubuntu 22.04 or Debian 12. It runs on X11 and, through XWayland, on Wayland; a Wayland session without XWayland is not supported (Unverified). It needs these system libraries, most of which a desktop has: `libxcb-cursor0`, `libxkbcommon-x11-0`, `libxcb-icccm4`, `libxcb-image0`, `libxcb-keysyms1`, `libxcb-randr0`, `libxcb-render-util0`, `libxcb-shape0`, `libxcb-xkb1`, `libegl1`, `libfontconfig1` and `libdbus-1-3` (Debian and Ubuntu package names). To add `ref` to your application menu, copy the desktop file and the icon, and link the program into your `PATH`:
+- **Linux GUI**: needs glibc 2.38 and the C++ runtime of GCC 13 (`libstdc++` with `CXXABI_1.3.14`): Ubuntu 24.04, Debian 13, Fedora 39, Arch and newer. It does not start on Ubuntu 22.04 or Debian 12; in the `ref-all` archive only the GUI is affected there. It runs on X11 and, through XWayland, on Wayland; a Wayland session without XWayland is not supported (Unverified). It needs these system libraries, most of which a desktop has: `libxcb-cursor0`, `libxkbcommon-x11-0`, `libxcb-icccm4`, `libxcb-image0`, `libxcb-keysyms1`, `libxcb-randr0`, `libxcb-render-util0`, `libxcb-shape0`, `libxcb-xkb1`, `libegl1`, `libfontconfig1` and `libdbus-1-3` (Debian and Ubuntu package names). To add `ref` to your application menu, copy the desktop file and the icon, and link the program into your `PATH`:
 
   ```bash
   install -Dm644 ref-gui.desktop ~/.local/share/applications/ref-gui.desktop

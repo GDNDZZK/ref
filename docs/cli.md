@@ -31,7 +31,7 @@ ref [PATH] [options]
 | `--mock` | Run against a built-in fake backend (for development). |
 | `-V`, `--version`, `-h`, `--help` | Version and help. |
 
-Without `--server`, `ref` looks for a running backend in the instance files (see below) and connects to it. If none is running, it starts `ref-server` from the same directory as `ref` (or from `PATH`) with a random free port and `--idle-timeout 0`, so the backend exits when the last `ref` disconnects.
+Without `--server`, `ref` looks for a running backend in the instance files (see below) and connects to it. If none is running, it starts `ref-server` from the same directory as `ref` (or from `PATH`) with a random free port and `--idle-timeout 0`, so the backend exits when the last `ref` disconnects. Turns that are running stop with it; start `ref-server` yourself (below) to keep sessions running without a window.
 
 ## `ref-web`
 

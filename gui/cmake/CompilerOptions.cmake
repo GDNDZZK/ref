@@ -8,7 +8,12 @@ function(refgui_configure_target target)
 	if(MSVC)
 		# /permissive- and /Zc:__cplusplus make MSVC follow the standard (Qt needs the latter
 		# to see the real C++ version); /utf-8 reads sources and string literals as UTF-8.
-		target_compile_options(${target} PRIVATE /W4 /permissive- /Zc:__cplusplus /utf-8 /EHsc)
+		# CMake passes the Qt and dependency include folders as -external:I; /external:W0 keeps
+		# MSVC from warning about code in them (C4702 in qmetatype.h, hit by the generated QML
+		# cache sources), which warnings-as-errors would turn into a failed build. Warnings from
+		# template instantiations are not always held back, so C4702 is also off: MSVC reports
+		# code after a constant `if`/`return` in templates as unreachable.
+		target_compile_options(${target} PRIVATE /W4 /external:W0 /wd4702 /permissive- /Zc:__cplusplus /utf-8 /EHsc)
 	else()
 		target_compile_options(${target} PRIVATE
 			-Wall

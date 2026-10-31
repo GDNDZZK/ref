@@ -333,11 +333,18 @@ QString Workspace::targetId(const QString& sessionId) const
 	return currentId();
 }
 
+// The sidebar marks the session in front: in split view the one whose tile has the focus.
+void Workspace::updateHighlight()
+{
+	const QString id = m_split && !m_focusedTile.isEmpty() ? m_focusedTile : currentId();
+	m_directory.live().setCurrentId(id);
+	m_directory.history().setCurrentId(id);
+}
+
 void Workspace::setCurrent(ChatSession* session)
 {
 	m_current = session;
-	m_directory.live().setCurrentId(currentId());
-	m_directory.history().setCurrentId(currentId());
+	updateHighlight();
 	if(m_split && session != nullptr)
 	{
 		setFocusedTile(session->sessionId());
@@ -385,14 +392,14 @@ QCoro::Task<Workspace::Done> Workspace::show(QString sessionId)
 	if(serial != m_showSerial && &target != m_current && !m_split)
 	{
 		// The user has moved on to another session meanwhile.
-		co_await target.detach();
+		static_cast<void>(co_await target.detach());
 		co_return Result<void>();
 	}
 	ChatSession* old = m_current;
 	setCurrent(&target);
 	if(old != nullptr && old != &target && !m_split && old->isAttached() && !m_leaving.contains(old->sessionId()))
 	{
-		co_await old->detach();
+		static_cast<void>(co_await old->detach());
 	}
 	co_return Result<void>();
 }

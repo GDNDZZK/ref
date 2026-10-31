@@ -244,6 +244,7 @@ pub fn test_app(streaming: bool) -> App {
         messages: transcript(streaming),
         more_before: false,
         pending_permissions: vec![],
+        pending_questions: vec![],
         queued: vec![],
     });
     app.views.insert("ses_test".into(), v);
@@ -452,6 +453,7 @@ fn split_view_snapshot() {
             messages: transcript(i == 0),
             more_before: false,
             pending_permissions: vec![],
+            pending_questions: vec![],
             queued: vec![],
         });
         app.views.insert(inf.id.clone(), v);
@@ -2319,6 +2321,7 @@ fn running_tool_spinner_animates_in_tiles() {
         messages: transcript(true),
         more_before: false,
         pending_permissions: vec![],
+        pending_questions: vec![],
         queued: vec![],
     });
     app.views.insert("ses_bg".into(), v);
@@ -2357,6 +2360,7 @@ fn split_tile_shows_queue_and_expands_tools() {
         messages: transcript(false),
         more_before: false,
         pending_permissions: vec![],
+        pending_questions: vec![],
         queued,
     });
     app.views.insert("ses_bg".into(), v);
@@ -2539,6 +2543,7 @@ fn todo_rendering_everywhere() {
         messages: transcript(false),
         more_before: false,
         pending_permissions: vec![],
+        pending_questions: vec![],
         queued: vec![],
     });
     app.views.insert("ses_bg".into(), v);
@@ -2986,6 +2991,7 @@ fn compacted_app() -> App {
         messages: msgs,
         more_before: false,
         pending_permissions: vec![],
+        pending_questions: vec![],
         queued: vec![],
     });
     app
@@ -3120,6 +3126,7 @@ fn compaction_divider_keeps_old_messages_interactive() {
         )],
         more_before: false,
         pending_permissions: vec![],
+        pending_questions: vec![],
         queued: vec![],
     });
     let (_, s) = render(&mut app, 100, 30);
@@ -3139,6 +3146,7 @@ fn compaction_divider_in_split_tile() {
         messages: msgs,
         more_before: false,
         pending_permissions: vec![],
+        pending_questions: vec![],
         queued: vec![],
     });
     app.views.insert("ses_bg".into(), v);
@@ -3246,6 +3254,7 @@ fn watch_app() -> App {
             messages: long_transcript(name, 30),
             more_before: false,
             pending_permissions: vec![],
+            pending_questions: vec![],
             queued: vec![],
         });
         app.views.insert(id.into(), v);
@@ -3619,6 +3628,7 @@ fn current_session_goes_background_in_split_view() {
         messages: vec![],
         more_before: false,
         pending_permissions: vec![],
+        pending_questions: vec![],
         queued: vec![],
     };
     respond(
@@ -4022,6 +4032,7 @@ fn history_pages_load_when_scrolled_to_the_top() {
             messages: newest.to_vec(),
             more_before: true,
             pending_permissions: vec![],
+            pending_questions: vec![],
             queued: vec![],
         });
     let older = |app: &App| {

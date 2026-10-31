@@ -39,7 +39,7 @@ describe('settings store', () => {
 
   it('asks for no notifications when they are switched off', () => {
     const store = useSettingsStore()
-    expect(store.notifyKinds).toEqual(['permission', 'turn_done', 'turn_error'])
+    expect(store.notifyKinds).toEqual(['permission', 'question', 'turn_done', 'turn_error'])
     store.update((draft) => (draft.notifications.enabled = false))
     expect(store.notifyKinds).toEqual([])
   })

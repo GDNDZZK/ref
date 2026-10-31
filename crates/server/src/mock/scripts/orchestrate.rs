@@ -1,9 +1,10 @@
 //! `orchestrate`: one main session directs a crew of helper sessions and collects their
 //! reports. Every wait is a named constant, so the timeline is the same on every run.
 //!
-//! Seconds after the prompt (measured with `ref-server --mock`, see the table in the
-//! development docs): helpers are created about 1.5 s apart, the fixer's edit waits for
-//! approval, and the reports arrive in the order scout, docs, fixer, tester.
+//! Seconds after the prompt (measured with `ref-server --mock`, see the paragraph in the
+//! development docs): helpers are created about 1.5 s apart and the fixer's edit waits for
+//! approval. When the edit is approved at 9 s, the reports arrive in the order scout, docs,
+//! fixer, tester. An earlier approval makes the fixer report earlier, so the order is not fixed.
 
 use super::tools::{bash, parser_fix, plan_todos, read};
 use crate::mock::script::{Ctx, Pace, Round, Script, sender_name};
@@ -136,7 +137,8 @@ fn orchestrate(ctx: &Ctx) -> Round {
     }
 }
 
-const STILL_WORKING: [&str; 3] = [
+/// The closing sentence after each report but the last of the crew.
+const STILL_WORKING: [&str; CREW_REPORTS - 1] = [
     "Three helpers are still working.",
     "Two helpers are still working.",
     "One helper is still working.",
@@ -546,5 +548,59 @@ mod tests {
         assert_eq!(edit.0, "edit");
         assert_eq!(edit.1["tag"], "AB12");
         assert_eq!(edit.1["edits"][0]["start"], 20);
+    }
+
+    /// The next request of a conversation with these user messages, answered by its script.
+    fn answer(users: &[String], round: usize) -> Round {
+        let mut messages = Vec::new();
+        for (i, text) in users.iter().enumerate() {
+            messages.push(serde_json::json!({"role": "user", "content": text}));
+            if i + 1 < users.len() {
+                messages.push(serde_json::json!({"role": "assistant", "content": "ok"}));
+            }
+        }
+        for _ in 0..round {
+            messages.push(serde_json::json!({"role": "assistant", "content": "ok"}));
+        }
+        let body = serde_json::json!({"messages": messages, "tools": [{"type": "function"}]});
+        let crate::mock::script::Task::Reply(ctx) = crate::mock::script::analyze(&body, MAIN, 1)
+        else {
+            panic!("not a reply");
+        };
+        (crate::mock::script::select(&ctx.prompt, &ctx.root_prompt).play)(&ctx)
+    }
+
+    #[test]
+    fn running_orchestrate_again_in_the_same_conversation_starts_over() {
+        let mut users: Vec<String> = vec!["orchestrate first run".into()];
+        users.extend((0..ALL_REPORTS).map(|_| ENVELOPE.to_string()));
+        users.push("orchestrate second run".into());
+
+        // The plan comes first again, not the summary.
+        let plan = answer(&users, 0);
+        assert!(text(&plan).starts_with("The parser bug has four parts"));
+
+        for k in 1..=CREW_REPORTS {
+            users.push(ENVELOPE.into());
+            let round = answer(&users, 0);
+            if k < CREW_REPORTS {
+                assert!(text(&round).starts_with(&format!("Report {k} of 4")), "{k}");
+                continue;
+            }
+            let calls = tools(&round);
+            assert_eq!(
+                calls.last().unwrap().1["name"],
+                "reviewer",
+                "reviewer again"
+            );
+        }
+        users.push(ENVELOPE.into());
+        let todo = answer(&users, 0);
+        assert!(
+            statuses(&tools(&todo)[0].1)
+                .iter()
+                .all(|s| *s == "completed")
+        );
+        assert!(text(&answer(&users, 1)).ends_with("The parser bug is fixed."));
     }
 }

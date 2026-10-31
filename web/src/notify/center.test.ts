@@ -58,7 +58,7 @@ describe('SetNotify', () => {
     center.connected()
     center.updateSettings({ ...ALL_ON, turnError: false })
     center.updateSettings({ ...ALL_ON, turnError: false })
-    expect(calls.setNotify.mock.calls).toEqual([[['permission', 'turn_done']]])
+    expect(calls.setNotify.mock.calls).toEqual([[['permission', 'question', 'turn_done']]])
   })
 
   it('waits for the connection', () => {
@@ -119,6 +119,16 @@ describe('SetFocus', () => {
 })
 
 describe('Notify frames', () => {
+  it('says what a question asks', () => {
+    const { center, shown } = setup()
+    center.handleNotify(frame({ notify_kind: 'question', detail: 'Which database?' }))
+    center.handleNotify(frame({ notify_kind: 'question', detail: null }))
+    expect(shown.map((item) => [item.body, item.tag])).toEqual([
+      ['notify.questionDetail {"question":"Which database?"}', 's1:question'],
+      ['notify.question', 's1:question'],
+    ])
+  })
+
   it('show a system notification that opens the session when clicked', () => {
     const { center, shown, calls } = setup()
     center.handleNotify(frame({ notify_kind: 'permission', detail: 'bash' }))

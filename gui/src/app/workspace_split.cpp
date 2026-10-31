@@ -59,6 +59,7 @@ QCoro::Task<> Workspace::leaveSplit()
 	m_zoomed.clear();
 	setFocusedTile({});
 	m_tiles.setTiles({});
+	m_directory.live().setTileIds({});
 	emit zoomedChanged();
 	emit splitViewChanged();
 	emit visibleSessionIdsChanged();
@@ -87,7 +88,7 @@ QCoro::Task<> Workspace::leaveSplit()
 	{
 		if(other && other != m_current && other->isAttached())
 		{
-			co_await other->detach();
+			static_cast<void>(co_await other->detach());
 		}
 	}
 }
@@ -98,7 +99,8 @@ QStringList Workspace::wantedTileIds() const
 	QList<const refgui::proto::SessionInfo*> infos;
 	for(const refgui::proto::SessionInfo& info : m_directory.liveSessions())
 	{
-		const bool free = info.attached == 0 || info.id == m_zoomed || info.id == currentId();
+		// The backend counts our own foreground attachment, too, until it has answered the detach.
+		const bool free = info.attached == 0 || info.id == m_zoomed || info.id == currentId() || m_unzooming.contains(info.id);
 		if(info.live && free)
 		{
 			infos.append(&info);
@@ -126,6 +128,7 @@ void Workspace::syncTiles()
 	}
 	const QStringList wanted = wantedTileIds();
 	QList<ChatSession*> tiles;
+	QStringList ids;
 	for(const QString& id : wanted)
 	{
 		if(m_leaving.contains(id))
@@ -133,8 +136,10 @@ void Workspace::syncTiles()
 			continue;
 		}
 		tiles.append(&chat(id));
+		ids.append(id);
 	}
 	m_tiles.setTiles(tiles);
+	m_directory.live().setTileIds(ids);
 
 	for(ChatSession* tile : std::as_const(tiles))
 	{
@@ -181,6 +186,7 @@ void Workspace::setFocusedTile(const QString& sessionId)
 		return;
 	}
 	m_focusedTile = sessionId;
+	updateHighlight();
 	emit focusedTileChanged();
 }
 
@@ -205,7 +211,7 @@ QCoro::Task<> Workspace::zoomTask(QString sessionId)
 {
 	if(ChatSession* previous = session(m_zoomed); previous != nullptr && previous->isAttached())
 	{
-		co_await previous->background();
+		static_cast<void>(co_await previous->background());
 	}
 	m_zoomed = sessionId;
 	setFocusedTile(sessionId);
@@ -241,6 +247,10 @@ QCoro::Task<> Workspace::unzoomTask()
 	ChatSession* tile = session(id);
 	if(tile != nullptr && tile->isAttached())
 	{
-		co_await tile->background();
+		// Until the answer, the backend counts the session as attached in the foreground, and an update of
+		// its session list would take the tile away.
+		m_unzooming.insert(id);
+		static_cast<void>(co_await tile->background());
+		m_unzooming.remove(id);
 	}
 }

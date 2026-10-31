@@ -112,7 +112,10 @@ verify_macos() {
   pass "signature"
 
   while IFS= read -r binary; do
-    foreign="$(otool -L "$binary" 2>/dev/null | tail -n +2 | grep -E "$MACOS_FOREIGN_PATH_REGEX" || true)"
+    # Qt's plugins are universal binaries: otool prints "<file> (architecture ...):" before each
+    # slice's libraries, and those header lines hold the path of the file itself.
+    # Files in a framework that are no programs ("<file>: is not an object file") have no libraries.
+    foreign="$(otool -L "$binary" 2>/dev/null | grep -v -e ':$' -e 'is not an object file' | grep -E "$MACOS_FOREIGN_PATH_REGEX" || true)"
     [[ -z "$foreign" ]] || fail "$binary refers to the build machine: $foreign"
   done < <(find "$app" -type f \( -name '*.dylib' -o -name '*.so' -o -path '*/Contents/MacOS/*' -o -path '*.framework/Versions/*/*' \) ! -name '*.plist')
   pass "no references outside the bundle"
@@ -135,7 +138,7 @@ verify_windows() {
   [[ "$(pe_subsystem "$exe")" == "$PE_SUBSYSTEM_GUI" ]] || fail "ref-gui.exe is a console program"
   pass "GUI subsystem"
 
-  for required in ref-server.exe Qt6Core.dll Qt6Quick.dll platforms/qwindows.dll; do
+  for required in ref-server.exe Qt6Core.dll Qt6Quick.dll plugins/platforms/qwindows.dll; do
     [[ -f "$PACKAGE/$required" ]] || fail "$required is missing"
   done
   [[ -n "$(files -iname 'vcruntime140*.dll')" ]] || fail "the Visual C++ runtime is missing"
