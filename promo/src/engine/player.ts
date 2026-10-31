@@ -27,6 +27,11 @@ export function mountScene(definition: SceneDefinition, stage: HTMLElement): Sce
     return { placed, instance }
   })
   const duration = Math.max(...mounted.map(({ placed }) => placed.end))
+  const overlay = definition.overlay?.mount()
+  if (overlay) {
+    overlay.root.classList.add('shot-overlay')
+    stage.append(overlay.root)
+  }
 
   return {
     duration,
@@ -43,6 +48,7 @@ export function mountScene(definition: SceneDefinition, stage: HTMLElement): Sce
         instance.root.style.transform = `translateY(${offsetY}px)`
         renders.push(instance.render(sinceStart))
       }
+      if (overlay) renders.push(overlay.render(time))
       await Promise.all(renders)
       await document.fonts.ready
       await whenImagesDecoded()

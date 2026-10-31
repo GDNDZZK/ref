@@ -37,7 +37,12 @@ function lookup(name: string): Clip | undefined {
 
 // A recorded clip of the GUI by name, e.g. "gui-crowd"; Chinese renders take "-zh" when there is one.
 export function clip(name: string): Clip {
-  const found = (getLang() === 'zh' ? lookup(`${name}-zh`) : undefined) ?? lookup(name)
+  const found = findClip(name)
   if (!found) throw new Error(`no recorded clip "${name}"; run pnpm capture`)
   return found
+}
+
+// Like `clip`, but undefined when the clip is not recorded yet.
+export function findClip(name: string): Clip | undefined {
+  return (getLang() === 'zh' ? lookup(`${name}-zh`) : undefined) ?? lookup(name)
 }

@@ -1,71 +1,48 @@
+// C2 "Edits go by line number, with a file tag" (shooting script section 5), mock script `stale` (M4).
+import { beatShot } from '../shots/beat.ts'
+import { terminalCut } from '../shots/terminalHook.ts'
 import { FEATURES } from './features.ts'
-import { cardsBeat, filmScene, tagOf, windowBeat } from './film.ts'
+import { cues, endCut, timelineFilm } from './timeline.ts'
 
-const feature = FEATURES.edits
-const tag = tagOf(feature)
+const HOOK_END = 3.0
+const TAKE_END = 22.5
+const FILM_END = 25.0
+// Seconds into the recording at which shot 2 starts (the read result is on screen).
+const READ_SHOWN_CLIP_SECONDS = 1.5
 
-// The picture is the permission card of an `edit` call: its input names the file tag and the line.
-export const scene = filmScene(feature, [
-  windowBeat({
-    seconds: 7,
-    tag,
-    screens: [{ name: 'gui-permission-card' }],
-    looks: [
-      { at: 0, x: 0.6, y: 0.5, zoom: 1 },
-      { at: 1.2, x: 0.45, y: 0.48, zoom: 2.2 },
-    ],
-    marks: [
-      { x: 0.364, y: 0.487, width: 0.066, height: 0.028, from: 2.4, to: 6.4 },
-      { x: 0.328, y: 0.577, width: 0.076, height: 0.028, from: 3.4, to: 6.4 },
-    ],
-    caption: { en: 'An edit names the file tag and the lines it changes.', zh: '修改时指明文件标签和行号。' },
-  }),
-  windowBeat({
-    seconds: 5.5,
-    tag,
-    screens: [{ name: 'gui-edit-diff' }],
-    // The zoom keeps the diff header, which has the random mock path, out of view.
-    looks: [
-      { at: 0, x: 0.6, y: 0.455, zoom: 1.7 },
-    ],
-    marks: [{ x: 0.305, y: 0.31, width: 0.595, height: 0.052, from: 1.2, to: 5 }],
-    caption: { en: 'The result is a diff you can read.', zh: '结果是一份看得懂的 diff。' },
-  }),
-  cardsBeat({
-    seconds: 8.5,
-    tag,
-    cards: [
-      {
-        x: 260,
-        y: 170,
-        width: 1400,
-        title: { en: 'Illustration, after docs/tools.md', zh: '示意，依据 docs/tools.md' },
-        lines: [
-          { text: '[src/main.rs#3F2A]', typeAt: 0.6, charsPerSecond: 40 },
-          { text: '1:fn main() {', typeAt: 1.2, charsPerSecond: 40 },
-          { text: '2:    println!("hi");', typeAt: 1.6, charsPerSecond: 40 },
-          { text: '3:}', typeAt: 2.1, charsPerSecond: 40 },
-          { text: '' },
-          { text: 'edit  tag 3F2A  replace line 2', typeAt: 3, charsPerSecond: 40 },
-          { text: 'src/main.rs changed since #3F2A', tone: 'bad', typeAt: 4.2, charsPerSecond: 40 },
-          {
-            text: { en: 'mapped onto the current file through a diff', zh: '能对上时，通过 diff 映射到当前文件' },
-            tone: 'good',
-            typeAt: 5.2,
-            charsPerSecond: 40,
-          },
-          {
-            text: { en: 'or rejected, with the current lines returned', zh: '对不上时，拒绝并返回当前内容' },
-            tone: 'bad',
-            typeAt: 6.4,
-            charsPerSecond: 40,
-          },
-        ],
-      },
-    ],
-    caption: [
-      { from: 0.5, to: 3.4, text: { en: 'Every read comes with a tag.', zh: '每次读取都带标签。' } },
-      { from: 3.6, to: 8, text: { en: 'A changed file is mapped or rejected, never overwritten blindly.', zh: '文件变了，要么映射，要么拒绝，不会盲目覆盖。' } },
-    ],
-  }),
-])
+export const scene = timelineFilm({
+  id: 'edits',
+  cuts: [
+    terminalCut(0, HOOK_END, {
+      lines: [
+        { at: -1, prompt: '$ ', text: 'git pull' },
+        { at: -1, text: ' scratch/src/parser.rs | 3 +++', tone: 'muted' },
+        { at: -1, text: ' 1 file changed, 3 insertions(+)', tone: 'muted' },
+        { at: 0.5, text: '' },
+        { at: 0.5, text: '● edit scratch/src/parser.rs, line 12', tone: 'accent' },
+        { at: 1.0, text: '  read:    fn parse_line(input: &str) -> Row {', tone: 'muted' },
+        { at: 1.5, text: '  line 12: // Fields are split on commas.', tone: 'error' },
+      ],
+    }),
+    {
+      from: HOOK_END,
+      to: TAKE_END,
+      build: (seconds) =>
+        beatShot({
+          seconds,
+          screens: [{ clip: 'gui-stale', at: -READ_SHOWN_CLIP_SECONDS }],
+          looks: [{ at: 0, x: 0.6, y: 0.5, zoom: 1.4 }],
+        }),
+    },
+    endCut(TAKE_END, FILM_END),
+  ],
+  captions: cues([
+    [0.2, 2.9, { en: 'Line 12 is no longer the line you read.', zh: '第 12 行已经不是你读到的那一行了。' }],
+    [3.2, 6.8, { en: 'ref edits by line. Every read returns a tag.', zh: 'ref 按行号改，读文件都带标签。' }],
+    [7.2, 10.3, { en: 'Then the file changes on disk.', zh: '然后磁盘上的文件被改了。' }],
+    [10.7, 15.8, { en: 'A shifted file: ref moves the edit.', zh: '文件移位了，ref 会把修改对过去。' }],
+    [16.2, 19.4, { en: 'If those lines changed, ref rejects the edit.', zh: '改的那几行变了，ref 就拒绝。' }],
+    [19.7, 22.4, { en: 'The model retries with the current lines.', zh: '模型按最新内容重试。' }],
+  ]),
+  chip: { ...FEATURES.edits, from: HOOK_END + 0.1, to: TAKE_END },
+})

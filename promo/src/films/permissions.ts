@@ -1,87 +1,93 @@
+// C5 "Allow for the session, a delay, rules" (shooting script section 5), mocks `permission`,
+// `delay` and `denied`.
+import { textCard } from '../components/textCard.ts'
+import { beatShot } from '../shots/beat.ts'
+import { terminalCut } from '../shots/terminalHook.ts'
 import { FEATURES } from './features.ts'
-import { cardsBeat, filmScene, tagOf, windowBeat } from './film.ts'
+import { cues, drawnCut, endCut, timelineFilm } from './timeline.ts'
 
-const feature = FEATURES.permissions
-const tag = tagOf(feature)
+const HOOK_END = 3.0
+const RULES_END = 7.5
+const ALLOW_END = 13.0
+const DELAY_END = 20.0
+const DENIED_END = 23.0
+const FILM_END = 25.5
 
-// docs/configuration.md, "Permissions".
-const POLICY_LINES = [
-  '"permission": {',
-  '  "edit": "ask",',
-  '  "bash": { "*": "ask", "git diff*": "allow", "rm *": "deny" },',
-  '  "webfetch": { "*": "ask", "https://docs.rs/*": "allow" }',
+const ASKED_SO_FAR = 6
+const ASKS_IN_TOTAL = 31
+const ANSWER_EVERY_SECONDS = 0.42
+
+// Every call asks; six answered in a row, the counter says how many are left.
+const askLines = Array.from({ length: ASKED_SO_FAR }, (_, index) => ({
+  at: index === 0 ? -1 : index * ANSWER_EVERY_SECONDS,
+  text: 'Allow edit src/parser.rs? [y/n] y',
+  tone: 'warn' as const,
+}))
+
+const RULES = [
+  '{',
+  '  "permission": {',
+  '    "bash": { "*": "ask", "git status*": "allow", "rm *": "deny" },',
+  '    "edit": { "*": "ask", "*.lock": "deny" }',
+  '  },',
+  '  "delay": { "delete": 5 }',
   '}',
 ]
-const POLICY_TYPE_START = 0.8
-const POLICY_CHARS_PER_SECOND = 55
 
-export const scene = filmScene(feature, [
-  cardsBeat({
-    seconds: 5.5,
-    tag,
-    cards: [
-      {
-        x: 240,
-        y: 270,
-        width: 1440,
-        title: 'opencode.json',
-        lines: POLICY_LINES.map((text, index) => ({
-          text,
-          typeAt: POLICY_TYPE_START + index * 0.9,
-          charsPerSecond: POLICY_CHARS_PER_SECOND,
-        })),
+export const scene = timelineFilm({
+  id: 'permissions',
+  cuts: [
+    terminalCut(0, HOOK_END, {
+      lines: askLines,
+      status: (time) => {
+        const answered = askLines.filter((line) => time >= line.at).length
+        return `${answered} of ${ASKS_IN_TOTAL}`
       },
-    ],
-    caption: { en: 'Allow, ask or deny, per tool and pattern.', zh: '按工具和命令模式，允许、询问或拒绝。' },
-  }),
-  windowBeat({
-    seconds: 8,
-    tag,
-    title: 'ref',
-    screens: [{ name: 'gui-permission-card' }],
-    looks: [
-      { at: 0, x: 0.6, y: 0.5, zoom: 1 },
-      { at: 1.2, x: 0.6, y: 0.55, zoom: 1.5 },
-      { at: 4, x: 0.5, y: 0.62, zoom: 2 },
-    ],
-    marks: [{ x: 0.31, y: 0.7, width: 0.31, height: 0.055, from: 4.4, to: 7.4 }],
-    pointer: {
-      path: [
-        { at: 0, x: 0.78, y: 0.9 },
-        { at: 4.2, x: 0.78, y: 0.9 },
-        { at: 5.8, x: 0.352, y: 0.728 },
-      ],
+    }),
+    drawnCut(HOOK_END, RULES_END, (shot, seconds) =>
+      shot.add(
+        textCard({
+          x: 240,
+          y: 200,
+          width: 1440,
+          title: 'opencode.json',
+          lines: RULES.map((text, index) => ({ text, typeAt: 0.3 + index * 0.45, charsPerSecond: 90 })),
+          from: 0,
+          to: seconds + 1,
+        }),
+      ),
+    ),
+    {
+      from: RULES_END,
+      to: ALLOW_END,
+      build: (seconds) =>
+        beatShot({
+          seconds,
+          screens: [{ clip: 'gui-permission' }],
+          looks: [{ at: 0, x: 0.6, y: 0.7, zoom: 1.5 }],
+        }),
     },
-    caption: [
-      { from: 0.5, to: 3.6, text: { en: 'The call waits for your answer.', zh: '调用会等你的答复。' } },
-      { from: 4, to: 7.6, text: { en: 'Allow once, for the session, or deny.', zh: '允许一次、允许本会话，或拒绝。' } },
-    ],
-  }),
-  windowBeat({
-    seconds: 6.5,
-    tag,
-    screens: [{ name: 'gui-delay-ring' }, { name: 'gui-delay-cancelled', at: 3.6 }],
-    looks: [
-      { at: 0, x: 0.6, y: 0.3, zoom: 1.7 },
-      { at: 3, x: 0.6, y: 0.3, zoom: 1.7 },
-    ],
-    pointer: {
-      path: [
-        { at: 0, x: 0.7, y: 0.6 },
-        { at: 0.8, x: 0.7, y: 0.6 },
-        { at: 2.4, x: 0.753, y: 0.306 },
-      ],
-      clicks: [3.4],
+    {
+      from: ALLOW_END,
+      to: DELAY_END,
+      build: (seconds) =>
+        beatShot({ seconds, screens: [{ clip: 'gui-delay' }], looks: [{ at: 0, x: 0.6, y: 0.7, zoom: 1.5 }] }),
     },
-    caption: { en: 'A countdown gives you time to stop it.', zh: '倒计时让你来得及拦下。' },
-  }),
-  windowBeat({
-    seconds: 5,
-    tag,
-    screens: [{ name: 'gui-denied' }],
-    looks: [
-      { at: 0, x: 0.6, y: 0.3, zoom: 1.5 },
-    ],
-    caption: { en: 'Denied calls do not stop the work.', zh: '被拒绝的调用不会中断工作。' },
-  }),
-])
+    {
+      from: DELAY_END,
+      to: DENIED_END,
+      build: (seconds) =>
+        beatShot({ seconds, screens: [{ name: 'gui-denied' }], looks: [{ at: 0, x: 0.6, y: 0.6, zoom: 1.4 }] }),
+    },
+    endCut(DENIED_END, FILM_END),
+  ],
+  captions: cues([
+    [0.2, 2.9, { en: 'Every single call asks for a yes.', zh: '每个调用都要你点一次允许。' }],
+    [3.2, 7.3, { en: 'Rules per tool and per command.', zh: '按工具、按命令写规则。' }],
+    [7.7, 10.9, { en: 'Allow once, or for the session.', zh: '允许一次，或本会话内一直允许。' }],
+    [13.2, 16.8, { en: 'With a delay set, a delete waits five seconds.', zh: '设了延迟，删除前先等五秒。' }],
+    [17.1, 19.9, { en: 'Cancel stops it before it runs.', zh: '点取消，它就不会执行。' }],
+    [20.2, 22.9, { en: 'A denied call does not end the turn.', zh: '被拒绝的调用不会中断任务。' }],
+  ]),
+  chip: { ...FEATURES.permissions, from: HOOK_END + 0.1, to: DENIED_END },
+})
