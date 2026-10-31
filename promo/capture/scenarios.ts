@@ -5,12 +5,14 @@ import type { WebUi } from './lib/webUi.ts'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { REPO_ROOT } from './lib/binaries.ts'
-import type { Scenario } from './lib/ui.ts'
+import { shotFileName, type Scenario } from './lib/ui.ts'
 
 const AFTER_CARD_MS = 1200 // a permission card ignores keys for a moment
 const STREAM_MS = 5000
 const DELAY_RING_MS = 3000 // the text, a temporary file and the delete call take about 2 s
 const TOOLS_DONE = 'Done. The edit went through'
+const GUI_README_WIDTH = 1280
+const GUI_README_HEIGHT = 1120
 const LOGO_PNG = join(REPO_ROOT, 'assets', 'app', 'png', 'ref-256.png')
 
 export const SCENARIOS: Scenario[] = [
@@ -86,6 +88,28 @@ export const SCENARIOS: Scenario[] = [
       await ui.command('zoom')
       await ui.pause(1200)
       await ui.shot('split-zoom')
+    },
+  },
+  {
+    // The README still of the split view. Every tile is finished or sits in a running tool call,
+    // so no streaming caret is mid-chase, and the window is tall enough for the todo card to show.
+    name: 'readme-split',
+    async run(ui) {
+      if (ui.kind === 'gui') await ui.resize(GUI_README_WIDTH, GUI_README_HEIGHT)
+      await ui.send('todo')
+      await ui.command('new')
+      await ui.pause(500)
+      await ui.send('running')
+      await ui.command('new')
+      await ui.pause(500)
+      await ui.send('denied')
+      await ui.command('new')
+      await ui.pause(500)
+      await ui.send('hello')
+      await ui.pause(800)
+      await ui.command('watch')
+      await ui.pause(2500)
+      await ui.shot('split-readme', { readme: true, readmeName: shotFileName(ui.kind, 'split-view', ui.lang) })
     },
   },
   {
