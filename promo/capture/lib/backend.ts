@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
 import { binary } from './binaries.ts'
+import { requirePrivateBus } from './privateBus.ts'
 
 // Scratch state of the processes started here. Under promo/.cache, not /tmp, which is shared.
 const RUN_DIR = join(import.meta.dirname, '..', '..', '.cache', 'run')
@@ -19,6 +20,7 @@ export interface IsolatedEnv {
 }
 
 export function isolatedEnv(): IsolatedEnv {
+  requirePrivateBus()
   mkdirSync(RUN_DIR, { recursive: true })
   const root = mkdtempSync(join(RUN_DIR, 'run-'))
   const env: NodeJS.ProcessEnv = {
