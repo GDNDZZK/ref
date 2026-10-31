@@ -2,7 +2,9 @@
 
 mod flow;
 mod orchestrate;
+mod orchestrate_long;
 mod question;
+mod stale;
 mod text;
 mod tools;
 
@@ -15,7 +17,9 @@ pub fn all() -> Vec<&'static Script> {
         tools::SCRIPTS,
         flow::SCRIPTS,
         orchestrate::SCRIPTS,
+        orchestrate_long::SCRIPTS,
         question::SCRIPTS,
+        stale::SCRIPTS,
     ]
     .into_iter()
     .flatten()

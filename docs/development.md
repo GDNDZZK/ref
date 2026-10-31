@@ -64,9 +64,9 @@ sleep 3600 | ref-server --mock      # prints {"port":N,"token":"..."} on stdout,
 ```
 
 - **Exit**: stdin end of file, the last client disconnecting, or ctrl-c. It then deletes its temporary directory (a `SIGKILL` leaves `/tmp/ref-mock-*` behind). `--idle-timeout S` changes the second condition: `-1` keeps the mock running after its last client leaves (to show a backend that outlives its windows; stdin must stay open), `S` seconds waits that long. Without the option it exits at once.
-- **Workspace**: every session runs in a temporary workspace with sample files (`README.md`, `NOTES.txt`, `src/parser.rs`, `src/lib.rs`, `docs/design.md`, `data/big.log`, `logo.png`, `scratch/`), whatever directory the client asks for. Your files are never touched. Three past sessions are preloaded as history.
+- **Workspace**: every session runs in a temporary workspace with sample files (`README.md`, `NOTES.txt`, `src/parser.rs`, `src/lib.rs`, `docs/design.md`, `data/big.log`, `logo.png`, `scratch/src/parser.rs` and `scratch/src/lib.rs`), whatever directory the client asks for. Your files are never touched. Three past sessions are preloaded as history.
 - **Models**: `mock/mock-1` (default; 200k context, images, reasoning, variants `low`, `medium`, `high`) and `mock/mock-fast` (64k). There is an extra agent, `reviewer`.
-- **Permissions**: `edit` and `write` ask (allowed in `scratch/`). `delete` is allowed after a 5-second delay. `bash` asks, except commands starting with `echo`, `ls`, `cat`, `seq`, `sleep` or `printf`, which are allowed, and `curl`, which is denied. `webfetch` is off.
+- **Permissions**: `edit` and `write` ask (allowed in `scratch/`). `delete` is allowed after a 5-second delay. `bash` asks, except commands starting with `echo`, `ls`, `cat`, `seq`, `sleep`, `printf` or `sed -i`, which are allowed, and `curl`, which is denied. `webfetch` is off.
 - **Limits**: the mock does not block everything. *Export* writes to the path the client gives, and a `!` shell command runs a real command, so both can reach outside the workspace. Tools that the scripts call only touch the workspace. The directory picker is limited to the workspace, where `~` means the workspace.
 - **Scripts**: the first word of a prompt picks a script, case-insensitively. Other text runs `default`. The prompt `help` lists them.
 
@@ -84,13 +84,15 @@ sleep 3600 | ref-server --mock      # prints {"port":N,"token":"..."} on stdout,
 | `permission` | An `edit` waiting for approval: `a` allow, `s` allow for the session, `d` deny |
 | `delay` | A `delete` with a 5-second countdown (`esc` cancels) |
 | `running` | A `bash` command that prints for 8 seconds |
+| `longrun` | A `bash` command that prints `step N/20: tests::parser_NN ... ok` every 10 seconds for 200 seconds, then `All 20 tests pass.` (`esc` cancels). Its output is kept while no window is open |
 | `bash-fail` | A `bash` command that exits with 1 |
 | `denied` | A call denied by the configuration |
 | `cancel` | A command that never ends, for cancelling with `esc` |
-| `todo` | A todo list updated in several steps |
+| `todo` | A todo list ticked off one step at a time, at about 5, 7 and 9 s, so the ticks can be watched in several windows |
 | `image` | Reads `logo.png`; the tool result has an image |
 | `long` | A tool with 400 lines of output, then a long answer |
 | `retry` | Two 529 errors (retrying), then success (about 6 s) |
+| `outage` | Two tools run, then one request fails four times (529, 529, a connection reset, 503) with waits of about 2, 4, 8 and 16 s; then an `edit`, `bash` and the answer (about 30 s) |
 | `fail` | A 401 error; retries, then ends with the error (about 6 s) |
 | `fill` | Context near 95%; the next prompt compacts first |
 | `compact-tool` | The model calls `compact_context` |
@@ -98,9 +100,15 @@ sleep 3600 | ref-server --mock      # prints {"port":N,"token":"..."} on stdout,
 | `everything` | `tools`, `todo` and `image` in one long turn |
 | `question` | The model asks two questions (a single choice and a multiple choice, with defaults) and repeats your answers |
 | `question-one` | One single-choice question with a default; `enter` accepts it |
+| `stale` | A file changes between `read` and `edit`: the real `edit` tool moves the first edit onto the shifted lines and rejects the second one, which is retried after a new `read` |
 | `orchestrate` | The main session plans, creates the helpers `scout`, `fixer`, `tester` and `docs`, collects their five reports (the fifth from a `reviewer` it creates last) and ends with a summary (about 25 s) |
+| `orchestrate-long` | Like `orchestrate`, but each helper runs one `bash` command that prints its progress every 3 s for 60 to 80 s; the summary ends at about 100 s |
 
-`orchestrate` takes about 25 seconds and needs one approval, for the fixer's `edit`. The timeline is fixed: the helpers appear at 1.5, 3, 4.5 and 6 s, the main session is idle at about 7.5 s, the reports arrive at about 10.5 (`scout`), 12 (`docs`), 12.5 (`fixer`, 3.5 s after you approve at 9 s) and 14 s (`tester`), the reviewer is created at 16 s, reports at 21 s, and the summary ends at 25 s. A report that arrives while the main session is busy joins the conversation at its next request and is counted all the same. The words in the prompt after `orchestrate` are not used. The other scripts it starts (`orch-scout`, `orch-fixer`, `orch-tester`, `orch-docs`, `orch-review`, `orchestrate-report`) are listed by `help` but are not meant to be typed.
+`orchestrate` takes about 25 seconds and needs one approval, for the fixer's `edit`. The timeline is fixed: the helpers appear at 1.5, 3, 4.5 and 6 s, the fixer asks for approval at 6.4 s, the main session is idle at about 7.3 s, and the reports arrive at about 10.5 (`scout`), 12 (`docs`), 15.5 (`tester`) and 16.5 s (`fixer`, 3.5 s after you approve at 13 s). The reviewer is created at 18 s, reports at 21 s, and the summary ends at 25 s. Approving earlier moves the fixer's report and everything after it earlier, and the `fixer` report may then come before the `tester` report. A message you type to `tester` before its report (at about 15 s) changes the report to `Tests added for the parser fix. Also covered: empty input.` A report that arrives while the main session is busy joins the conversation at its next request and is counted all the same. The words in the prompt after `orchestrate` are not used. The other scripts it starts (`orch-scout`, `orch-fixer`, `orch-tester`, `orch-docs`, `orch-review`, `orchestrate-report`) are listed by `help` but are not meant to be typed.
+
+`orchestrate-long` needs one approval too, at about 8 s; with it given at 10 s the helpers report at about 66 (`scout`), 76 (`docs`), 79 (`tester`) and 91 s (`fixer`), the reviewer at 96 s, and the summary ends at 100 s. The main session is idle from 7 s on, and the four helpers are busy until their reports. It can be used on its own. A message from another session is answered by the script named after the conversation's first script plus `-report`, so `orchestrate-long` has `orchestrate-long-report`; a conversation without such a script gets `ack`.
+
+`stale` and `outage` leave the sample files they edit changed, and run again in the same backend: the edits put the names or lines back. `stale` and `outage` work on `scratch/src/parser.rs` and `scratch/src/lib.rs`, a small crate with a function `parse_line`, because edits in `scratch/` and `sed -i` need no approval. `stale` inserts three comment lines with `sed -i` between `read` and `edit`, and changes line 12 of `scratch/src/lib.rs`. What the edit tool answers (`Recovered: file changed since read; line numbers remapped.`, `Edit rejected for ... (tag #..., current #...)`) is its own text. In `outage` the connection reset is a real reset of the socket to the mock provider, so its error line is the HTTP client's (`network error: ... Connection reset by peer`, with the loopback URL). The waits are the engine's backoff with up to 20% jitter around 2, 4, 8 and 16 s.
 
 ## The GUI
 

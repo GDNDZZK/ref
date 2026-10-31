@@ -64,9 +64,9 @@ sleep 3600 | ref-server --mock      # stdout 只打印一行 {"port":N,"token":"
 ```
 
 - **退出**：stdin 文件结束、最后一个客户端断开，或 ctrl-c。退出时会删除它的临时目录（被 `SIGKILL` 杀死时会留下 `/tmp/ref-mock-*`）。`--idle-timeout S` 改变第二个条件：`-1` 让 mock 在最后一个客户端离开后继续运行（用来演示后端比窗口活得更久；stdin 必须保持打开），`S` 表示再等 S 秒。不带这个选项时立即退出。
-- **工作区**：无论客户端请求哪个目录，所有会话都在带示例文件的临时工作区中运行（`README.md`、`NOTES.txt`、`src/parser.rs`、`src/lib.rs`、`docs/design.md`、`data/big.log`、`logo.png`、`scratch/`），不会改动你的文件。预置了 3 条历史会话。
+- **工作区**：无论客户端请求哪个目录，所有会话都在带示例文件的临时工作区中运行（`README.md`、`NOTES.txt`、`src/parser.rs`、`src/lib.rs`、`docs/design.md`、`data/big.log`、`logo.png`、`scratch/src/parser.rs` 和 `scratch/src/lib.rs`），不会改动你的文件。预置了 3 条历史会话。
 - **模型**：`mock/mock-1`（默认；200k 上下文、图片、推理、变体 `low`、`medium`、`high`）和 `mock/mock-fast`（64k）。多一个智能体 `reviewer`。
-- **权限**：`edit` 和 `write` 询问（`scratch/` 下允许）。`delete` 允许，但延迟 5 秒。`bash` 询问，以 `echo`、`ls`、`cat`、`seq`、`sleep`、`printf` 开头的命令允许，`curl` 拒绝。`webfetch` 关闭。
+- **权限**：`edit` 和 `write` 询问（`scratch/` 下允许）。`delete` 允许，但延迟 5 秒。`bash` 询问，以 `echo`、`ls`、`cat`、`seq`、`sleep`、`printf`、`sed -i` 开头的命令允许，`curl` 拒绝。`webfetch` 关闭。
 - **限制**：mock 并不拦截所有操作。*导出*会写到客户端给出的路径，`!` shell 命令会真的运行命令，所以两者都可能写到或运行到工作区之外。脚本调用的工具只会碰工作区。目录选择器限定在工作区内，`~` 就是工作区。
 - **脚本**：提示词的第一个词选择脚本，不区分大小写。其他文字运行 `default`。提示词 `help` 会列出全部脚本。
 
@@ -84,13 +84,15 @@ sleep 3600 | ref-server --mock      # stdout 只打印一行 {"port":N,"token":"
 | `permission` | 等待批准的 `edit`：`a` 允许、`s` 本会话都允许、`d` 拒绝 |
 | `delay` | 带 5 秒倒计时的 `delete`（`esc` 取消） |
 | `running` | 持续输出 8 秒的 `bash` 命令 |
+| `longrun` | 一条 `bash` 命令，200 秒内每 10 秒输出一行 `step N/20: tests::parser_NN ... ok`，最后回答 `All 20 tests pass.`（`esc` 取消）。没有窗口打开时它的输出也会保留 |
 | `bash-fail` | 以 1 退出的 `bash` 命令 |
 | `denied` | 被配置拒绝的调用 |
 | `cancel` | 永不结束的命令，用 `esc` 取消 |
-| `todo` | 分几步更新的待办 |
+| `todo` | 待办一项一项打勾，大约在 5、7、9 秒，方便在多个窗口里看它同步 |
 | `image` | 读取 `logo.png`，工具结果带图片 |
 | `long` | 输出 400 行的工具，然后是长回答 |
 | `retry` | 两次 529 错误（重试中），然后成功（约 6 秒） |
+| `outage` | 先跑两个工具，然后同一个请求连续失败四次（529、529、连接被重置、503），等待约 2、4、8、16 秒；之后是一次 `edit`、一次 `bash` 和回答（约 30 秒） |
 | `fail` | 401 错误，重试后以错误结束（约 6 秒） |
 | `fill` | 上下文接近 95%，下一条提示会先自动压缩 |
 | `compact-tool` | 模型调用 `compact_context` |
@@ -98,9 +100,15 @@ sleep 3600 | ref-server --mock      # stdout 只打印一行 {"port":N,"token":"
 | `everything` | `tools`、`todo` 和 `image` 连成一个长回合 |
 | `question` | 模型提出两个问题（一个单选、一个多选，都带默认值），并复述你的回答 |
 | `question-one` | 一个带默认值的单选问题，`enter` 采纳默认值 |
+| `stale` | 文件在 `read` 和 `edit` 之间被改动：真实的 `edit` 工具把第一次修改对到移位后的行，拒绝第二次，模型重新 `read` 后重试 |
 | `orchestrate` | 主会话先列计划，再创建 `scout`、`fixer`、`tester`、`docs` 四个助手，收齐它们的五份报告（第五份来自最后创建的 `reviewer`），最后给出总结（约 25 秒） |
+| `orchestrate-long` | 和 `orchestrate` 相同，但每个助手运行一条 `bash` 命令，每 3 秒输出一行进度，持续 60 到 80 秒；总结约在 100 秒结束 |
 
-`orchestrate` 约 25 秒，需要批准一次（fixer 的 `edit`）。时间线固定：助手在 1.5、3、4.5、6 秒出现，主会话在 7.5 秒左右空闲，报告大约在 10.5 秒（`scout`）、12 秒（`docs`）、12.5 秒（`fixer`，在你于 9 秒批准之后 3.5 秒）和 14 秒（`tester`）到达，16 秒创建 reviewer，21 秒收到它的报告，25 秒总结结束。主会话忙碌时到达的报告会在它的下一次请求时并入对话，计数不受影响。`orchestrate` 之后的文字不会被使用。它启动的其他脚本（`orch-scout`、`orch-fixer`、`orch-tester`、`orch-docs`、`orch-review`、`orchestrate-report`）也会出现在 `help` 里，但不是给人输入的。
+`orchestrate` 约 25 秒，需要批准一次（fixer 的 `edit`）。时间线固定：助手在 1.5、3、4.5、6 秒出现，fixer 在 6.4 秒请求批准，主会话在 7.3 秒左右空闲，报告大约在 10.5 秒（`scout`）、12 秒（`docs`）、15.5 秒（`tester`）和 16.5 秒（`fixer`，在你于 13 秒批准之后 3.5 秒）到达。18 秒创建 reviewer，21 秒收到它的报告，25 秒总结结束。批准得更早，fixer 的报告及其后的一切都会提前，此时 `fixer` 的报告可能先于 `tester` 的。在 `tester` 报告之前（约 15 秒前）给它发一条消息，报告就变成 `Tests added for the parser fix. Also covered: empty input.`主会话忙碌时到达的报告会在它的下一次请求时并入对话，计数不受影响。`orchestrate` 之后的文字不会被使用。它启动的其他脚本（`orch-scout`、`orch-fixer`、`orch-tester`、`orch-docs`、`orch-review`、`orchestrate-report`）也会出现在 `help` 里，但不是给人输入的。
+
+`orchestrate-long` 同样需要批准一次，约在 8 秒；在 10 秒批准时，助手大约在 66 秒（`scout`）、76 秒（`docs`）、79 秒（`tester`）和 91 秒（`fixer`）报告，reviewer 在 96 秒报告，100 秒总结结束。主会话从 7 秒起空闲，四个助手一直忙到各自报告。它可以单独使用。来自其他会话的消息，由「对话的第一个脚本名加 `-report`」命名的脚本回答，所以 `orchestrate-long` 对应 `orchestrate-long-report`；没有这样的脚本时用 `ack`。
+
+`stale` 和 `outage` 会改动它们编辑的示例文件，并且能在同一个后端里重复运行：修改会把名字或行改回去。`stale` 和 `outage` 操作 `scratch/src/parser.rs` 和 `scratch/src/lib.rs`，这是一个带 `parse_line` 函数的小 crate，因为 `scratch/` 里的编辑和 `sed -i` 不需要批准。`stale` 在 `read` 和 `edit` 之间用 `sed -i` 在文件顶部插入三行注释，并改动 `scratch/src/lib.rs` 的第 12 行。`edit` 工具的回答（`Recovered: file changed since read; line numbers remapped.`、`Edit rejected for ... (tag #..., current #...)`）是它自己的文字。`outage` 里的连接重置是到模拟提供方的套接字真的被重置，所以错误行是 HTTP 客户端的（`network error: ... Connection reset by peer`，带本机回环地址）。等待时间是引擎的退避，在 2、4、8、16 秒上下最多浮动 20%。
 
 ## GUI
 
