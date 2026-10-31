@@ -12,11 +12,12 @@
 
 set -euo pipefail
 
-# What the package may ask of the system: glibc of Ubuntu 22.04 and the libstdc++ of GCC 13,
-# the compiler the GUI is built with (C++23 needs GCC 13). Older libstdc++ versions lack
-# CXXABI_1.3.14, so Debian 12 and Ubuntu 22.04 cannot run the GUI. README.md and
-# docs/development.md state the same numbers.
-MAX_GLIBC=2.35
+# What the package may ask of the system: glibc 2.38 and the libstdc++ of GCC 13.
+# C++23 needs GCC 13, so the GUI is built on Ubuntu 24.04. Its headers make strtol and friends
+# resolve to the glibc 2.38 symbols (__isoc23_*), and the arm64 Qt from aqtinstall is built
+# on Ubuntu 24.04 and needs 2.38 too. Older libstdc++ versions lack CXXABI_1.3.14, so Debian 12
+# and Ubuntu 22.04 cannot run the GUI. README.md and docs/development.md state the same numbers.
+MAX_GLIBC=2.38
 MAX_GLIBCXX=3.4.32
 MAX_CXXABI=1.3.14
 SMOKE_TIMEOUT_SECONDS=60

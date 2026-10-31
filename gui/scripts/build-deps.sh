@@ -15,6 +15,15 @@ work="$DEPS_DIR/work"
 build_type="${BUILD_TYPE:-Release}"
 mkdir -p "$prefix" "$work"
 
+# On Windows a program finds its DLLs only through PATH or its own folder, and build steps run
+# tools that were just linked against Qt (KSyntaxHighlighting's katehighlightingindexer). Without
+# Qt's bin folder on PATH they stop with 0xC0000135 (DLL not found). cygpath turns D:/a/... into
+# the /d/a/... form that bash keeps in PATH; a drive letter would be split at the colon.
+if command -v cygpath >/dev/null 2>&1; then
+	PATH="$(cygpath -u "$qt")/bin:$PATH"
+	export PATH
+fi
+
 # sha256_of FILE -> the SHA-256 of the file as 64 lower-case hex digits. The tools differ between
 # systems (the sha256sum on macOS has no --check, Windows has only some of them), so each one is
 # tried and the first answer that looks like a digest is used.
