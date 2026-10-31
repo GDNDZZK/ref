@@ -3,7 +3,11 @@
 # Bump a version and its checksum together; build-deps.sh refuses a tarball that does not match.
 
 QT_VERSION=6.12.0
-AQTINSTALL_VERSION=3.3.0
+# aqtinstall 3.3.0, the latest release, cannot read the Windows package layout of Qt 6.11 and
+# later ("Failed to locate XML data", miurahr/aqtinstall#959). The fix (PR #1000) is on master
+# but not released yet, so this is a pinned commit of master. Go back to a version number
+# ("aqtinstall==3.4.0" or later) once there is a release with that fix.
+AQTINSTALL_SPEC="git+https://github.com/miurahr/aqtinstall.git@076e1659807d0b362a3ed684d54c2e9c775eb9c7"
 # Qt modules beyond the base install (QtQuick, QtQuick.Controls, QtQuick.Shapes, QtQuick.Dialogs,
 # QtNetwork, QtDBus and the Linguist tools come with it).
 QT_MODULES="qtwebsockets qtshadertools"
