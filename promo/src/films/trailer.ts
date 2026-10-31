@@ -13,6 +13,8 @@ const F = FEATURES
 const FEATURE_SECONDS = 4.5
 const INTRO_SECONDS = 3.5
 const SIDE_BY_SIDE_SECONDS = 5.5
+// The hook skips the first seconds of the recording, where only the main session is on screen.
+const HOOK_CLIP_OFFSET = -1.5
 
 // The first twelve seconds: one task, a crew of helper sessions, the reports coming back.
 const hook = [
@@ -27,7 +29,7 @@ const hook = [
   }),
   windowBeat({
     seconds: 6.5,
-    screens: [{ clip: 'gui-orchestra-crowd' }],
+    screens: [{ clip: 'gui-orchestra-crowd', at: HOOK_CLIP_OFFSET }],
     looks: [{ at: 0, x: 0.62, y: 0.47, zoom: 1.3 }],
     caption: [
       { from: 0.6, to: 3.1, text: { en: 'directs a whole crew.', zh: '指挥一整队帮手。' } },
