@@ -124,7 +124,8 @@ Item {
 			x: 30
 			y: 30
 			width: parent.width - x - 12
-			text: row.hasPermission ? qsTr("Needs permission")
+			text: row.activity === "waiting_question" ? qsTr("Waiting for your answer")
+				: row.hasPermission ? qsTr("Needs permission")
 				: row.failed ? row.lastError.split("\n")[0]
 				: row.retrying ? qsTr("Retrying")
 				: row.activity === "compacting" ? qsTr("Compacting")

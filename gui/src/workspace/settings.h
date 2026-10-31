@@ -53,8 +53,8 @@ public:
 	bool notifyPermission() const { return m_notifyPermission; }
 	bool notifyTurnDone() const { return m_notifyTurnDone; }
 	bool notifyTurnError() const { return m_notifyTurnError; }
-	// The wire names of the notification kinds to ask the backend for: permission, turn_done,
-	// turn_error. Empty when notifications are off.
+	// The wire names of the notification kinds to ask the backend for: permission, question,
+	// turn_done, turn_error. Empty when notifications are off.
 	QStringList notifyKinds() const;
 	bool sidebarVisible() const { return m_sidebarVisible; }
 	int windowWidth() const { return m_windowWidth; }

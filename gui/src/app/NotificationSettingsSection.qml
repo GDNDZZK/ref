@@ -67,7 +67,7 @@ Column {
 	}
 
 	SwitchRow {
-		text: qsTr("A tool needs permission")
+		text: qsTr("A session waits for you (permission or question)")
 		indented: true
 		enabled: section.settings.notifyEnabled
 		checked: section.settings.notifyPermission

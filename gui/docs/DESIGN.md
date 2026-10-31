@@ -683,10 +683,18 @@ Inside the card, under the details, separated by a 1 divider. Height animates ov
 - Keys act on the oldest pending request of the session: `a` or Enter allow, `s` always, `d` or Esc deny. Keys are ignored for
   `permissionGuard` = 350 ms after the request appears (the user was still typing); letters then no longer reach the composer
   until all requests are answered. As in the TUI and the WebUI the keys work with the caret in the input box: the box offers
-  every key to `ChatSession::permissionKey` first (`Composer.keyOffered`). It answers, swallows other printable keys, and
+  every key to `ChatSession::answerKey` first (`Composer.keyOffered`). It answers, swallows other printable keys, and
   leaves Ctrl/Alt/Meta shortcuts and editing keys (Backspace, arrows) alone. Shifted letters do not answer, a held key
   answers once. In split view only the focused (or zoomed) pane offers its keys.
 - Answered: the section collapses over `Motion.standard`; the state moves on with the next event.
+- The model's questions (`question` tool) are a card between the conversation and the status line (`QuestionCard`), not part of the
+  tool card, which stays generic. Title `? <header>`, the question, then the options (label, description, "(default)", number 1-9)
+  and a last row "Type your own answer" when the backend takes custom answers. One question with a single choice is a plain list
+  and a click answers. Otherwise there is a tab per question plus "Confirm", which lists the answers and marks the missing ones, and a
+  Submit button. Keys follow the TUI: Up/Down or j/k move, Enter or Space picks, 1-9 pick a row, Left/Right/Tab change the tab, Esc
+  dismisses; the keys go through `ChatSession::answerKey` and the same 350 ms guard as the permission keys. While a custom answer is
+  typed, the card's text field has the keyboard (Enter takes the text, Esc leaves it). The sidebar row, the tile header and the
+  status line show `waiting_question` like `waiting_permission` ("Waiting for your answer").
 - A request outside the view puts a `warning` AlertBadge ("?") on the jump-to-latest button, like errors do.
 
 ## Tool content (expanded body)

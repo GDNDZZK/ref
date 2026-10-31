@@ -15,7 +15,7 @@ Item {
 	readonly property string activity: session.activity
 	readonly property bool working: activity === "thinking" || activity === "running" || activity === "compacting"
 	readonly property bool retrying: activity === "retrying"
-	readonly property bool waiting: activity === "waiting_permission"
+	readonly property bool waiting: activity === "waiting_permission" || activity === "waiting_question"
 	readonly property real contextUsed: session.contextUsed
 	readonly property real contextMax: session.contextMax
 	readonly property real contextRatio: contextMax > 0 ? Math.min(1, contextUsed / contextMax) : 0
@@ -37,6 +37,8 @@ Item {
 			return qsTr("Compacting context\u2026")
 		case "waiting_permission":
 			return qsTr("Waiting for your permission")
+		case "waiting_question":
+			return qsTr("Waiting for your answer")
 		case "retrying":
 			return qsTr("Retrying in %1 (attempt %2): %3")
 				.arg(Format.elapsed(Math.max(0, session.retryAt - now) + Format.msPerSecond - 1))

@@ -274,7 +274,7 @@ Flickable 自带的滚轮动画，每一格都从当前位置重新开始，上�
 
 ### 授权按键
 
-`ChatSession.permissionKeysActive` 在有工具等待授权、且距第一次出现已过 350 ms（`PermissionGuard`）时为真。`SessionPane` 里的 `permissionKeys` 此时抢走焦点，把 a / Enter、s、d / Esc 交给 `ChatSession.answerOldestPermission()`，其他单字符键吞掉；答完把焦点还给输入框。同一个 call id 只回复一次（失败可以重试）。`SessionPane.keysEnabled` 在分屏里由分块是否有焦点决定。
+`ChatSession.answerKeysActive` 在有工具等待授权或模型在提问、且距第一次出现已过 350 ms（`PermissionGuard`）时为真（正在卡片文本框里输入自定义回答时为假）。`SessionPane` 里的 `permissionKeys` 此时抢走焦点，所有按键走 `ChatSession.answerKey()`：有提问时交给 `QuestionPrompt::handleKey`（↑↓/jk、Enter/Space、1–9、←→/Tab、Esc），否则 a / Enter、s、d / Esc 交给 `answerOldestPermission()`；其他单字符键吞掉；答完把焦点还给输入框。同一个 call id 只回复一次（失败可以重试）。提问由 `SessionController` 按 `question`/`question_resolved` 事件和快照的 `pending_questions` 维护，`ChatSession` 把最早的一条交给 `QuestionPrompt`（QML 里的 `QuestionCard`）；答复发出后卡片保持“发送中”，直到服务器报告 resolved；服务器回 “No pending question with that id.”（别处已答）则静默丢掉卡片，其他错误显示在状态栏并保留卡片。`SessionPane.keysEnabled` 在分屏里由分块是否有焦点决定。
 
 ### 来自外部的文字
 
