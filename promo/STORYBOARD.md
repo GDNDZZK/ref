@@ -4,8 +4,8 @@ One trailer that shows every headline feature fast, one hero film (`orchestra`),
 
 | Id | Film | Length |
 |---|---|---|
-| `trailer` | The trailer: the crew, then one beat per feature | TRAILER_LEN s |
-| `orchestra` | One session, a whole crew (the hero film) | ORCH_LEN s |
+| `trailer` | The trailer: the crew, then one beat per feature | 58.9 s |
+| `orchestra` | One session, a whole crew (the hero film) | 39.9 s |
 | `backend` | One backend, every window | 26.4 s |
 | `sessions` | Many sessions, one screen | 27.9 s |
 | `peers` | Sessions that talk to each other | 24.9 s |
@@ -45,7 +45,7 @@ The ones marked README are also copied, smaller, to `docs/images/`.
 
 Every film is a title card (2.5 s), the beats below, and the shared closing card (about 2.4 s). Captions are one line, in English or Chinese (one language per render). GUI pictures are used wherever the GUI shows the thing; the WebUI is used for the browser parts and for images, which only the web page can paste.
 
-### Trailer (about 60 s)
+### Trailer (58.9 s)
 
 1. The hook (12.5 s, no title card): the task typed into one session ("One agent."), the split view with helper sessions appearing and streaming, a recording ("directs a whole crew." / "They work at once."), the reports in the main session ("and report back.").
 2. Logo and tagline (3.5 s).
