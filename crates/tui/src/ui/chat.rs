@@ -32,6 +32,9 @@ struct Cached {
 #[derive(Default)]
 pub struct ChatState {
     cache: HashMap<String, Cached>,
+    /// Messages laid out (cache misses) so far; tests check what a frame re-renders.
+    #[cfg(test)]
+    pub laid_out: usize,
     pub toggled: HashMap<String, BTreeSet<usize>>,
     pub show_all: HashMap<String, BTreeSet<usize>>,
     /// Start row of each message block; last element = start of tail rows.
@@ -493,6 +496,10 @@ fn layout(view: &mut SessionView, env: &Env<'_>, w: usize, compact: bool) {
                 vec![Row::blank()]
             };
             rows.extend(message::render(m, &cx, w));
+            #[cfg(test)]
+            {
+                chat.laid_out += 1;
+            }
             let cache = if compact {
                 &mut chat.tile_cache
             } else {
