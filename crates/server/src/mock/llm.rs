@@ -158,6 +158,11 @@ async fn reply(
     } else {
         prompt_tokens
     };
+    if round.reset {
+        // A zero linger time makes closing the socket send a reset instead of a clean end.
+        stream.set_zero_linger()?;
+        return Ok(false);
+    }
     if let Some(HttpError { status, message }) = &round.error {
         write_error(stream, *status, message).await?;
         return Ok(false);

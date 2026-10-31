@@ -227,3 +227,38 @@ impl Client {
         panic!("the command never started");
     }
 }
+
+/// `longrun` prints a line every ten seconds; wait for the next one to be sure it came.
+const LONGRUN_TICK: Duration = Duration::from_millis(10_500);
+
+#[tokio::test]
+async fn output_printed_while_no_window_is_open_is_there_when_one_opens_the_session() {
+    let mock = ref_server::mock::start_with(0, TOKEN.into(), KEEP_RUNNING)
+        .await
+        .unwrap();
+    let mut window = connect(&mock).await;
+    let session_id = window.open_session("long").await;
+    window
+        .prompt(&session_id, "longrun run every test in src/")
+        .await;
+    window.wait_for_running_command(&session_id).await;
+    drop(window);
+
+    tokio::time::sleep(LONGRUN_TICK).await;
+
+    let mut later = connect(&mock).await;
+    let snapshot = later.attach(&session_id).await;
+    assert_eq!(snapshot["info"]["status"]["state"], "running");
+    let output = snapshot["messages"].to_string();
+    for step in [
+        "step 1/20: tests::parser_01 ... ok",
+        "step 2/20: tests::parser_02 ... ok",
+    ] {
+        assert!(output.contains(step), "{step} missing: {output}");
+    }
+    let abort = Request::Abort {
+        session_id: session_id.clone(),
+    };
+    later.call(abort).await.unwrap();
+    ref_server::ops::shutdown_all(&mock.running.hub).await;
+}
