@@ -527,7 +527,7 @@ void TestWorkspace::commandsFollowTheState()
 {
 	Fixture f;
 	const auto enabled = [&f](const QString& id) {
-		for(const QVariant& entry : f.workspace->commands()->match({}, false))
+		for(const QVariant& entry : f.workspace->commands()->matching({}, false))
 		{
 			if(entry.toMap().value(u"id"_s).toString() == id)
 			{

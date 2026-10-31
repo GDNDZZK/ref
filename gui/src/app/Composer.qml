@@ -270,7 +270,7 @@ Item {
 		anchors { left: parent.left; right: parent.right; bottom: parent.top; bottomMargin: popupGap }
 		kind: composer.model.completionKind
 		entries: composer.model.completionKind === "file" ? composer.model.files
-			: (composer.model.completionKind === "command" ? Commands.match(composer.model.completionQuery, true) : [])
+			: (composer.model.completionKind === "command" ? Commands.matching(composer.model.completionQuery, true) : [])
 		onAccepted: index => {
 			popup.currentIndex = index
 			composer.acceptCompletion(false)

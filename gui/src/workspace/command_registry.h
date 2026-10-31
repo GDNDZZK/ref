@@ -88,7 +88,7 @@ public:
 	// title, slash, aliases, hint, shortcut, keys, category, icon, enabled, source). With an
 	// empty query: all, in the table's order. `slashOnly` leaves out palette-only and
 	// unavailable commands, for the `/` list.
-	Q_INVOKABLE QVariantList match(const QString& query, bool slashOnly) const;
+	Q_INVOKABLE QVariantList matching(const QString& query, bool slashOnly) const;
 
 	// Tells the views the titles changed (after the language did).
 	void retranslate();

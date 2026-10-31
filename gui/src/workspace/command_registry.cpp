@@ -259,7 +259,7 @@ QVariantMap CommandRegistry::toMap(const Entry& entry) const
 	        {u"source"_s, entry.source}};
 }
 
-QVariantList CommandRegistry::match(const QString& query, bool slashOnly) const
+QVariantList CommandRegistry::matching(const QString& query, bool slashOnly) const
 {
 	const QString needle = query.trimmed().startsWith(u'/') ? query.trimmed().mid(1) : query.trimmed();
 

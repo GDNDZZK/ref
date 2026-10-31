@@ -172,13 +172,13 @@ void TestCommandRegistry::matchRanksSlashNamesBeforeTitles()
 {
 	Fixture f;
 
-	QCOMPARE(ids(f.registry.match(u"new"_s, false)).first(), u"new"_s); // exact name first
-	QCOMPARE(ids(f.registry.match(u"/ses"_s, false)).first(), u"sessions"_s); // prefix of a name; a leading slash is ignored
-	const QStringList byWord = ids(f.registry.match(u"split"_s, false));
+	QCOMPARE(ids(f.registry.matching(u"new"_s, false)).first(), u"new"_s); // exact name first
+	QCOMPARE(ids(f.registry.matching(u"/ses"_s, false)).first(), u"sessions"_s); // prefix of a name; a leading slash is ignored
+	const QStringList byWord = ids(f.registry.matching(u"split"_s, false));
 	QVERIFY(byWord.contains(u"watch"_s)); // alias
-	QCOMPARE(ids(f.registry.match(u"swse"_s, false)).first(), u"sessions"_s); // letters in order in "Switch session" only
-	QVERIFY(ids(f.registry.match(u"qqqq"_s, false)).isEmpty());
-	QCOMPARE(f.registry.match({}, false).size(), f.registry.rowCount());
+	QCOMPARE(ids(f.registry.matching(u"swse"_s, false)).first(), u"sessions"_s); // letters in order in "Switch session" only
+	QVERIFY(ids(f.registry.matching(u"qqqq"_s, false)).isEmpty());
+	QCOMPARE(f.registry.matching({}, false).size(), f.registry.rowCount());
 }
 
 void TestCommandRegistry::slashListHidesUnavailableAndPaletteOnlyCommands()
@@ -186,13 +186,13 @@ void TestCommandRegistry::slashListHidesUnavailableAndPaletteOnlyCommands()
 	Fixture f;
 	f.registry.setContext({.connected = true, .hasSession = false});
 
-	const QStringList slash = ids(f.registry.match({}, true));
+	const QStringList slash = ids(f.registry.matching({}, true));
 
 	QVERIFY(slash.contains(u"new"_s));
 	QVERIFY(!slash.contains(u"rename"_s)); // needs a session
 	QVERIFY(!slash.contains(u"new-in"_s));  // palette only
 	QVERIFY(!slash.contains(u"palette"_s));
-	QVERIFY(ids(f.registry.match({}, false)).contains(u"rename"_s)); // the palette lists it, greyed out
+	QVERIFY(ids(f.registry.matching({}, false)).contains(u"rename"_s)); // the palette lists it, greyed out
 }
 
 void TestCommandRegistry::customCommandsRunThroughTheRunner()
@@ -208,7 +208,7 @@ void TestCommandRegistry::customCommandsRunThroughTheRunner()
 
 	QCOMPARE(custom, (QStringList{u"review|the parser|ses_1"_s}));
 	QCOMPARE(f.ran, (QStringList{u"new||"_s}));
-	const QVariantMap entry = f.registry.match(u"review"_s, true).first().toMap();
+	const QVariantMap entry = f.registry.matching(u"review"_s, true).first().toMap();
 	QCOMPARE(entry.value(u"title"_s).toString(), u"Review the changes"_s);
 	QCOMPARE(entry.value(u"source"_s).toString(), u"config"_s);
 
