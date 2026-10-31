@@ -96,6 +96,9 @@ sleep 3600 | ref-server --mock      # prints {"port":N,"token":"..."} on stdout,
 | `compact-tool` | The model calls `compact_context` |
 | `peer` | Creates a `reviewer` session `helper`, which reports back with `send_message` |
 | `everything` | `tools`, `todo` and `image` in one long turn |
+| `orchestrate` | The main session plans, creates the helpers `scout`, `fixer`, `tester` and `docs`, collects their five reports (the fifth from a `reviewer` it creates last) and ends with a summary (about 25 s) |
+
+`orchestrate` takes about 25 seconds and needs one approval, for the fixer's `edit`. The timeline is fixed: the helpers appear at 1.5, 3, 4.5 and 6 s, the main session is idle at about 7.5 s, the reports arrive at about 10.5 (`scout`), 12 (`docs`), 12.5 (`fixer`, 3.5 s after you approve at 9 s) and 14 s (`tester`), the reviewer is created at 16 s, reports at 21 s, and the summary ends at 25 s. A report that arrives while the main session is busy joins the conversation at its next request and is counted all the same. The words in the prompt after `orchestrate` are not used. The other scripts it starts (`orch-scout`, `orch-fixer`, `orch-tester`, `orch-docs`, `orch-review`, `orchestrate-report`) are listed by `help` but are not meant to be typed.
 
 ## The GUI
 
@@ -136,7 +139,7 @@ scripts/package.sh --version v0.2.0 --target x86_64-unknown-linux-gnu \
 
 `scripts/verify-gui-package.sh DIR` checks an unpacked `ref-gui` archive and runs on the platform it was built for. CI runs it after packing. It checks that every library resolves without the build machine's environment, that the KSyntaxHighlighting module is there, that the only Controls style is Basic, and that `ref-gui --smoke --mock` opens a session (on Linux under `xvfb-run`). On Linux it also checks what the package asks of the system, and on macOS the signature and that nothing refers to a path outside the app. On Windows it checks that `ref-gui.exe` uses the GUI subsystem.
 
-**Linux requirements.** C++23 needs GCC 13, which Ubuntu 22.04 does not have, so CI builds the Linux GUI on Ubuntu 24.04 while `ref`, `ref-web` and `ref-server` are still built on 22.04. Qt 6.12.0's own libraries need glibc 2.34 at most. A program built with GCC 13 needs `CXXABI_1.3.14` from `libstdc++`, which the GCC 12 of Ubuntu 22.04 and Debian 12 does not have. `verify-gui-package.sh` therefore fails when anything in the package needs more than glibc 2.35, `GLIBCXX_3.4.32` or `CXXABI_1.3.14`; the README states the same numbers. If a newer compiler or Qt raises one, change the constants at the top of the script and the README together.
+**Linux requirements.** C++23 needs GCC 13, which Ubuntu 22.04 does not have, so CI builds the Linux GUI on Ubuntu 24.04 while `ref`, `ref-web` and `ref-server` are still built on 22.04. The program built there needs glibc 2.38: the Ubuntu 24.04 headers turn `strtol` and similar calls into the `__isoc23_*` symbols that glibc 2.38 introduced, and the arm64 Qt that aqtinstall installs is built on Ubuntu 24.04 and needs 2.38 as well (the x86-64 Qt needs 2.34 at most). Building the GUI against an older glibc would need a different toolchain and Qt build, which the project does not have. A program built with GCC 13 needs `CXXABI_1.3.14` from `libstdc++`, which the GCC 12 of Ubuntu 22.04 and Debian 12 does not have. `verify-gui-package.sh` therefore fails when anything in the package needs more than glibc 2.38, `GLIBCXX_3.4.32` or `CXXABI_1.3.14`; the README states the same numbers. If a newer compiler or Qt raises one, change the constants at the top of the script and the README together.
 
 ## Continuous integration and releases
 
