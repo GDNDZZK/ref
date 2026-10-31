@@ -154,6 +154,11 @@ void Workspace::syncTiles()
 	{
 		setFocusedTile({});
 	}
+	if(m_focusedTile.isEmpty() && !tiles.isEmpty())
+	{
+		// Only the focused tile has an input box, so one of them always has the focus.
+		setFocusedTile(tiles.contains(m_current) ? m_current->sessionId() : tiles.first()->sessionId());
+	}
 	emit visibleSessionIdsChanged();
 }
 
