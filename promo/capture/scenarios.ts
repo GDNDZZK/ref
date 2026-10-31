@@ -14,7 +14,8 @@ const DELAY_RING_MS = 3000 // the text, a temporary file and the delete call tak
 const TOOLS_DONE = 'Done. The edit went through'
 const GUI_README_WIDTH = 1280
 const GUI_README_HEIGHT = 1344
-const LOGO_PNG = join(REPO_ROOT, 'assets', 'app', 'png', 'ref-256.png')
+const LOGO_SVG = join(REPO_ROOT, 'assets', 'app', 'ref.svg')
+const LOGO_PIXELS = 256
 
 export const SCENARIOS: Scenario[] = [
   ...ORCHESTRA_SCENARIOS,
@@ -179,13 +180,26 @@ export const SCENARIOS: Scenario[] = [
     async run(ui) {
       // Pasting is how the page takes images from the clipboard.
       const page = (ui as WebUi).playwrightPage
-      const logo = readFileSync(LOGO_PNG).toString('base64')
-      await page.locator('textarea').evaluate((textarea, base64) => {
-        const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0))
-        const data = new DataTransfer()
-        data.items.add(new File([bytes], 'logo.png', { type: 'image/png' }))
-        textarea.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }))
-      }, logo)
+      // The logo exists only as SVG; the page rasterises it, since a pasted screenshot is a PNG.
+      const logo = readFileSync(LOGO_SVG, 'utf8')
+      await page.locator('textarea').evaluate(
+        async (textarea, { svg, pixels }) => {
+          const image = new Image()
+          image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+          await image.decode()
+          const canvas = document.createElement('canvas')
+          canvas.width = pixels
+          canvas.height = pixels
+          canvas.getContext('2d')!.drawImage(image, 0, 0, pixels, pixels)
+          const png = await new Promise<Blob>((resolve, reject) =>
+            canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('the logo did not rasterise'))), 'image/png'),
+          )
+          const data = new DataTransfer()
+          data.items.add(new File([png], 'logo.png', { type: 'image/png' }))
+          textarea.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }))
+        },
+        { svg: logo, pixels: LOGO_PIXELS },
+      )
       await ui.pause(600)
       await ui.type('What is in this picture?')
       await ui.shot('composer-image')
