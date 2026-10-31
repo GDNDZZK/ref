@@ -20,7 +20,8 @@ import ComposerTags from './ComposerTags.vue'
 import QueueStrip from './QueueStrip.vue'
 import SendButton from './SendButton.vue'
 
-const props = defineProps<{ session: ChatSession; composer: SessionComposer }>()
+// `folded`: the input box is folded away (an unfocused split tile); the queue strip stays.
+const props = defineProps<{ session: ChatSession; composer: SessionComposer; folded?: boolean }>()
 const emit = defineEmits<{ submitted: [] }>()
 
 const {
@@ -307,62 +308,93 @@ defineExpose({ focus: () => input.value?.focus() })
 <template>
   <div class="composer">
     <QueueStrip :messages="session.queued" :removing="composer.removingQueued" @remove="takeBack" />
-    <div class="box-wrap">
-      <CompletionPopup
-        :completion="composer.completion"
-        @hover="(index) => composer.selectCompletion(index)"
-        @pick="pickCompletion"
-      />
-      <div
-        ref="root"
-        class="box"
-        :class="{ shell: draft.shell, dragging: dragDepth > 0 }"
-        :style="{ height: `${boxHeight}px`, padding: `${PADDING}px` }"
-        @dragenter="onDragEnter"
-        @dragover="onDragOver"
-        @dragleave="onDragLeave"
-        @drop="onDrop"
-      >
-        <div class="strip-slot" :style="{ height: `${stripHeight}px` }">
-          <AttachmentStrip
-            :attachments="draft.attachments"
-            @remove="(token) => composer.removeAttachment(token)"
-          />
-        </div>
-        <textarea
-          ref="input"
-          class="input"
-          rows="1"
-          :value="draft.text"
-          :placeholder="placeholder"
-          :aria-label="t('composer.label')"
-          :style="{ height: `${inputHeight}px`, marginLeft: `${TEXT_LEFT_EXTRA}px` }"
-          @input="onInput"
-          @keydown="onKeydown"
-          @keyup="onCaretMoved"
-          @click="onCaretMoved"
-          @paste="onPaste"
+    <div class="box-slot" :class="{ folded }" :inert="folded || undefined">
+      <div class="box-wrap">
+        <CompletionPopup
+          :completion="composer.completion"
+          @hover="(index) => composer.selectCompletion(index)"
+          @pick="pickCompletion"
         />
-        <div class="tag-row" :style="{ height: `${TAG_ROW_HEIGHT}px` }">
-          <ComposerTags
-            :session="session"
-            :shell="draft.shell"
-            @agent-clicked="openDialog('agents')"
-            @model-clicked="openDialog('models')"
-            @variant-clicked="workspace.setVariant(session.id, '').catch(notices.pushError)"
+        <div
+          ref="root"
+          class="box"
+          :class="{ shell: draft.shell, dragging: dragDepth > 0 }"
+          :style="{ height: `${boxHeight}px`, padding: `${PADDING}px` }"
+          @dragenter="onDragEnter"
+          @dragover="onDragOver"
+          @dragleave="onDragLeave"
+          @drop="onDrop"
+        >
+          <div class="strip-slot" :style="{ height: `${stripHeight}px` }">
+            <AttachmentStrip
+              :attachments="draft.attachments"
+              @remove="(token) => composer.removeAttachment(token)"
+            />
+          </div>
+          <textarea
+            ref="input"
+            class="input"
+            rows="1"
+            :value="draft.text"
+            :placeholder="placeholder"
+            :aria-label="t('composer.label')"
+            :style="{ height: `${inputHeight}px`, marginLeft: `${TEXT_LEFT_EXTRA}px` }"
+            @input="onInput"
+            @keydown="onKeydown"
+            @keyup="onCaretMoved"
+            @click="onCaretMoved"
+            @paste="onPaste"
           />
-          <span class="hint" :class="{ shown: interruptHint }">{{ t('composer.interruptHint') }}</span>
-          <SendButton :busy="session.busy" :can-send="canSend" @click="onSendButton" />
+          <div class="tag-row" :style="{ height: `${TAG_ROW_HEIGHT}px` }">
+            <ComposerTags
+              :session="session"
+              :shell="draft.shell"
+              @agent-clicked="openDialog('agents')"
+              @model-clicked="openDialog('models')"
+              @variant-clicked="workspace.setVariant(session.id, '').catch(notices.pushError)"
+            />
+            <span class="hint" :class="{ shown: interruptHint }">{{ t('composer.interruptHint') }}</span>
+            <SendButton :busy="session.busy" :can-send="canSend" @click="onSendButton" />
+          </div>
+          <div class="drop-veil" :class="{ shown: dragDepth > 0 }">{{ t('composer.dropImages') }}</div>
         </div>
-        <div class="drop-veil" :class="{ shown: dragDepth > 0 }">{{ t('composer.dropImages') }}</div>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
+/* Folds by animating the grid track from the box's height to 0; the box is not clipped, so the
+   completion popup can rise out of it. A folded box is hidden once the fold is done. */
+.box-slot {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows var(--motion-standard) var(--motion-ease),
+    opacity var(--motion-standard) var(--motion-ease),
+    visibility 0s;
+}
+
+.box-slot.folded {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    grid-template-rows var(--motion-standard) var(--motion-ease),
+    opacity var(--motion-standard) var(--motion-ease),
+    visibility 0s linear var(--motion-standard);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .box-slot,
+  .box-slot.folded {
+    transition: none;
+  }
+}
+
 .box-wrap {
   position: relative;
+  min-height: 0;
 }
 
 .box {
