@@ -1,0 +1,23 @@
+//! Row parsing for the report tool.
+
+/// One parsed row.
+#[derive(Debug, PartialEq)]
+pub struct Row {
+    pub label: String,
+    pub score: u32,
+}
+
+/// Parses `label:score` into a row.
+#[must_use]
+pub fn parse_line(text: &str) -> Option<Row> {
+    let (label, score) = text.split_once(':')?;
+    Some(Row {
+        label: label.trim().to_string(),
+        score: score.trim().parse().ok()?,
+    })
+}
+
+/// Parses every line, skipping the ones that are not rows.
+pub fn parse_all(text: &str) -> Vec<Row> {
+    text.lines().filter_map(parse_line).collect()
+}
