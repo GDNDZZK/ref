@@ -1,153 +1,77 @@
-import castUrl from '../../assets/casts/tui-tools.cast?url'
-import { appFrame } from '../components/appFrame.ts'
-import { backdrop } from '../components/backdrop.ts'
-import { caption } from '../components/caption.ts'
-import { featureTag } from '../components/featureTag.ts'
+// C8 "Run the backend yourself" (shooting script section 5): a standalone ref-server (RB2) and the
+// mock script `longrun` (M3).
 import { serverPill } from '../components/serverPill.ts'
-import { terminalView } from '../components/terminalView.ts'
-import { TITLE_BAR_HEIGHT_PX } from '../components/windowChrome.ts'
-import type { Localized } from '../engine/i18n.ts'
-import { windowRect } from '../engine/layout.ts'
-import type { SceneDefinition } from '../engine/scene.ts'
-import { screen } from '../engine/screens.ts'
-import { defineShot } from '../engine/shot.ts'
+import { timeSkipChip } from '../components/timeSkipChip.ts'
+import { windowClose } from '../components/windowClose.ts'
+import { castWindow } from '../shots/castWindow.ts'
+import { terminalCut } from '../shots/terminalHook.ts'
 import { FEATURES } from './features.ts'
-import { TRANSITION_SECONDS, tagOf } from './film.ts'
-import { introShot } from '../shots/intro.ts'
-import { outroShot } from '../shots/outro.ts'
+import { cues, drawnCut, endCut, timelineFilm } from './timeline.ts'
 
-const feature = FEATURES.backend
-const tag = tagOf(feature)
+const HOOK_END = 3.4
+const ATTACH_END = 7.4
+const CLOSE_END = 11.4
+const SKIP_END = 13.9
+const REOPEN_END = 18.9
+const FILM_END = 21.4
 
-const TERMINAL_FONT_PX = 21
-const TERMINAL_POSITION = { x: 268, y: 90 }
-// The cast opens with a splash that shows the random mock workspace path, and the prompt is sent
-// at about 3 s. The replay starts after that and runs at half speed, so it lasts until the
-// turn is done at about 6 s.
-const CAST_START_SECONDS = 3.2
-const CAST_SPEED = 0.5
-const TERMINAL_SECONDS = 6
-const SESSION_SECONDS_AT_CLOSE = 9
+const HOOK_CLOSE_AT = 2.2
+// Cast seconds: where the server start begins, where the attached `ref` types the prompt, where
+// the window is closed at step 6/20, and where the reopened `ref` shows the running session.
+const CAST_AT = { serverStart: 0, attach: 0, closeAtStep6: 60, reopen: 0 }
+// The take's pill clock: 01:30 when the window closes; the gap is 120 s.
+const PILL_AT_CLOSE_SECONDS = 90
+const GAP_SECONDS = 120
+const CLOSE_AT = 2
 
-// Terminal turn, window closed, ref-server still counting, browser opens on the same session.
-export function terminalToBrowserShot(seconds: number, captions: boolean) {
-  const browserFrom = 8
-  return defineShot(seconds, (shot) => {
-    shot.add(backdrop())
+const SERVER_WINDOW = { x: 120, y: 110, fontSize: 20 }
+const REF_WINDOW = { x: 520, y: 260, fontSize: 20 }
+
+export const scene = timelineFilm({
+  id: 'backend',
+  cuts: [
+    terminalCut(0, HOOK_END, {
+      lines: [
+        { at: -1, prompt: '$ ', text: 'agent "run every test in src/"' },
+        { at: -1, text: 'step 4/20: tests::parser_04 ... ok', tone: 'muted' },
+        { at: 0.2, text: 'step 5/20: tests::parser_05 ... ok', tone: 'muted' },
+        { at: 1.2, text: 'step 6/20: tests::parser_06 ... ok', tone: 'muted' },
+      ],
+      closeAt: HOOK_CLOSE_AT,
+    }),
+    drawnCut(HOOK_END, ATTACH_END, (shot, seconds) => {
+      shot.add(castWindow({ name: 'tui-server-start', title: 'ref-server', ...SERVER_WINDOW, start: -CAST_AT.serverStart, from: 0, to: seconds + 1, pendingSize: { width: 1100, height: 400 } }))
+      shot.add(castWindow({ name: 'tui-longrun', title: 'ref', ...REF_WINDOW, start: 1.4 - CAST_AT.attach, from: 1.4, to: seconds + 1, pendingSize: { width: 1280, height: 640 } }))
+    }),
+    drawnCut(CLOSE_END - 4, CLOSE_END, (shot, seconds) => {
+      shot.add(castWindow({ name: 'tui-server-start', title: 'ref-server', ...SERVER_WINDOW, start: -CAST_AT.serverStart, from: -1, to: seconds + 1, pendingSize: { width: 1100, height: 400 } }))
+      const ref = castWindow({ name: 'tui-longrun', title: 'ref', ...REF_WINDOW, start: CLOSE_AT - CAST_AT.closeAtStep6, from: -1, to: seconds + 1, pendingSize: { width: 1280, height: 640 } })
+      shot.add(windowClose(ref, CLOSE_AT))
+    }),
+    drawnCut(CLOSE_END, SKIP_END, (shot, seconds) => {
+      shot.add(castWindow({ name: 'tui-server-start', title: 'ref-server', ...SERVER_WINDOW, start: -CAST_AT.serverStart, from: -1, to: seconds + 1, pendingSize: { width: 1100, height: 400 } }))
+      shot.add(timeSkipChip({ text: '+2 min', x: 880, y: 520, from: 0.2, to: seconds }))
+    }),
+    drawnCut(SKIP_END, REOPEN_END, (shot, seconds) =>
+      shot.add(castWindow({ name: 'tui-longrun-reopen', title: 'ref', ...REF_WINDOW, start: -CAST_AT.reopen, from: 0, to: seconds + 1, pendingSize: { width: 1280, height: 640 } })),
+    ),
+    endCut(REOPEN_END, FILM_END),
+  ],
+  captions: cues([
+    [0.2, 3.3, { en: 'Closing the terminal stops the run.', zh: '关掉终端，运行就停了。' }],
+    [3.6, 7.2, { en: 'Unless the backend runs on its own.', zh: '除非后端单独运行。' }],
+    [7.6, 11.2, { en: 'Close the window. The task keeps running.', zh: '关掉窗口，任务继续跑。' }],
+    [11.5, 13.8, { en: 'Two minutes later.', zh: '两分钟后。' }],
+    [14.1, 18.7, { en: 'Open ref again. Output from the gap is there.', zh: '再开 ref，这段时间的输出都在。' }],
+  ]),
+  chip: { ...FEATURES.backend, from: HOOK_END + 0.1, to: REOPEN_END },
+  overlay: (shot) =>
     shot.add(
-      terminalView({
-        cast: castUrl,
-        title: 'ref',
-        ...TERMINAL_POSITION,
-        fontSize: TERMINAL_FONT_PX,
-        hideLastRows: 1,
-        start: -CAST_START_SECONDS / CAST_SPEED,
-        speed: CAST_SPEED,
-        from: 0,
-        to: TERMINAL_SECONDS,
+      serverPill({
+        timerStart: PILL_AT_CLOSE_SECONDS - CLOSE_AT,
+        jumps: [{ at: CLOSE_END + 0.6, seconds: GAP_SECONDS }],
+        from: ATTACH_END,
+        to: REOPEN_END,
       }),
-    )
-    shot.add(serverPill({ timerStart: SESSION_SECONDS_AT_CLOSE, from: 5, to: seconds }))
-    const browser = screen('web-shared')
-    shot.add(
-      appFrame({
-        layers: [{ src: browser.src, from: 0 }],
-        imageSize: browser.size,
-        title: 'ref-web',
-        rect: windowRect(browser.size, TITLE_BAR_HEIGHT_PX),
-        camera: [{ at: 0, scale: 1.15, focusX: 0.45, focusY: 0.3 }],
-        from: browserFrom,
-        to: seconds,
-      }),
-    )
-    shot.add(featureTag({ ...tag, from: 0.1, to: seconds }))
-    if (captions) {
-      shot.add(
-        caption([
-          { from: 0.5, to: 5.4, text: { en: 'Start a task in the terminal.', zh: '在终端里开始一个任务。' } },
-          { from: 5.8, to: 8.8, text: { en: 'Close the window. The session keeps working.', zh: '关掉窗口，会话继续运行。' } },
-          { from: 9.2, to: seconds - 0.4, text: { en: 'Open it in a browser. Same session.', zh: '用浏览器打开，还是同一个会话。' } },
-        ]),
-      )
-    }
-  })
-}
-
-const WINDOW_WIDTH_PX = 600
-const WINDOW_GAP_PX = 30
-const WINDOW_TOP_PX = 280
-const WINDOW_HEIGHT_PX = 470
-
-interface SideBySide {
-  name: string
-  title: string
-  zoom: number
-  focus: { x: number; y: number }
-}
-
-// The terminal, the native app and the browser showing one session. Each gets a camera on the
-// start of the transcript, since three whole windows would be too small to read.
-const SIDE_BY_SIDE = {
-  shared: [
-    { name: 'tui-shared-clean', title: 'ref', zoom: 1.7, focus: { x: 0.3, y: 0.25 } },
-    { name: 'gui-shared', title: 'ref-gui', zoom: 1.6, focus: { x: 0.6, y: 0.2 } },
-    { name: 'web-shared', title: 'ref-web', zoom: 1.6, focus: { x: 0.6, y: 0.2 } },
-  ],
-  // The orchestrate session with its helpers: the GUI in split view, the browser with the helpers listed.
-  crew: [
-    { name: 'tui-crew-clean', title: 'ref', zoom: 1, focus: { x: 0.5, y: 0.5 } },
-    { name: 'gui-crew', title: 'ref-gui', zoom: 1.3, focus: { x: 0.6, y: 0.4 } },
-    { name: 'web-crew', title: 'ref-web', zoom: 1.02, focus: { x: 0.5, y: 0.3 } },
-  ],
-} as const satisfies Record<string, readonly SideBySide[]>
-export type SideBySideSet = keyof typeof SIDE_BY_SIDE
-const WINDOW_STAGGER_SECONDS = 0.5
-
-export function sideBySideShot(seconds: number, text: string | Localized | undefined, set: SideBySideSet = 'shared', label: typeof tag = tag) {
-  return defineShot(seconds, (shot) => {
-    shot.add(backdrop())
-    SIDE_BY_SIDE[set].forEach((entry, index) => {
-      const picture = screen(entry.name)
-      shot.add(
-        appFrame({
-          layers: [{ src: picture.src, from: 0 }],
-          imageSize: picture.size,
-          title: entry.title,
-          rect: {
-            x: WINDOW_GAP_PX + index * (WINDOW_WIDTH_PX + WINDOW_GAP_PX),
-            y: WINDOW_TOP_PX,
-            width: WINDOW_WIDTH_PX,
-            height: WINDOW_HEIGHT_PX,
-          },
-          camera: [{ at: 0, scale: entry.zoom, focusX: entry.focus.x, focusY: entry.focus.y }],
-          from: 0.2 + index * WINDOW_STAGGER_SECONDS,
-          to: seconds,
-        }),
-      )
-    })
-    shot.add(featureTag({ ...label, from: 0.1, to: seconds }))
-    if (text) shot.add(caption([{ from: 1.2, to: seconds - 0.4, text }]))
-  })
-}
-
-const FIRST_SECONDS = 15
-const SECOND_SECONDS = 6.5
-
-export const scene: SceneDefinition = {
-  id: feature.id,
-  steps: [
-    { shot: introShot(feature.tagline, { title: feature.name, logo: false, seconds: 3 }) },
-    {
-      shot: terminalToBrowserShot(FIRST_SECONDS + TRANSITION_SECONDS, true),
-      enter: { kind: 'fade', duration: TRANSITION_SECONDS },
-    },
-    {
-      shot: sideBySideShot(SECOND_SECONDS + TRANSITION_SECONDS, {
-        en: 'Terminal, native app, browser. One backend.',
-        zh: '终端、原生应用、浏览器，同一个后端。',
-      }),
-      enter: { kind: 'fade', duration: TRANSITION_SECONDS },
-    },
-    { shot: outroShot(), enter: { kind: 'rise', duration: TRANSITION_SECONDS } },
-  ],
-}
+    ),
+})

@@ -8,7 +8,7 @@ export interface CaptionCue {
   text: string | Localized
 }
 
-const FADE_SECONDS = 0.25
+const FADE_SECONDS = 0.2
 const RISE_PX = 16
 
 // Subtitle pill at the bottom of the frame. One cue shows at a time.

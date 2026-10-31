@@ -1,15 +1,17 @@
-import { appFrame, type AppFrame, type CameraKey } from '../components/appFrame.ts'
+import { appFrame, type AppFrame, type CameraKey, type Rect } from '../components/appFrame.ts'
 import { backdrop } from '../components/backdrop.ts'
 import { caption, type CaptionCue } from '../components/caption.ts'
 import { cursor, pointerPath, type PathKey } from '../components/cursor.ts'
 import { featureTag } from '../components/featureTag.ts'
 import { highlight } from '../components/highlight.ts'
+import { pendingFrame } from '../components/pendingFrame.ts'
 import { TITLE_BAR_HEIGHT_PX } from '../components/windowChrome.ts'
+import { windowClose } from '../components/windowClose.ts'
 import type { EasingName } from '../engine/anim.ts'
 import type { Localized } from '../engine/i18n.ts'
 import { windowRect } from '../engine/layout.ts'
-import { clip } from '../engine/clips.ts'
-import { screen } from '../engine/screens.ts'
+import { findClip } from '../engine/clips.ts'
+import { findScreen } from '../engine/screens.ts'
 import { defineShot, type ShotBuilder } from '../engine/shot.ts'
 
 // Where the camera looks at time `at`: the picture point (x, y), 0..1 each, in the middle of
@@ -56,6 +58,16 @@ export interface BeatOptions {
   caption?: string | Localized | readonly CaptionCue[]
   tag?: FeatureLabel
   title?: string
+  // Window position on the stage; centred under the feature tag when left out.
+  rect?: Rect
+  // Size of the picture while the capture does not exist yet (a placeholder stands in).
+  pendingSize?: { width: number; height: number }
+  // When the window comes in (default 0; negative = already there).
+  windowFrom?: number
+  // N5: the window closes (shrinks to its centre) at this time.
+  closeAt?: number
+  // Leave out the backdrop when the beat is drawn into another shot.
+  backdrop?: boolean
   // Anything else on the shot (a text card over the window, a notification).
   extras?: (shot: ShotBuilder, frame: AppFrame) => void
 }
@@ -63,6 +75,7 @@ export interface BeatOptions {
 const CAPTION_IN_SECONDS = 0.5
 const CAPTION_OUT_SECONDS = 0.4
 const DEFAULT_WINDOW_TITLE = 'ref'
+const DEFAULT_PENDING_SIZE = { width: 1280, height: 800 }
 
 export function captionCues(given: NonNullable<BeatOptions['caption']>, seconds: number): readonly CaptionCue[] {
   if (typeof given === 'string' || !Array.isArray(given)) {
@@ -75,18 +88,23 @@ export function captionCues(given: NonNullable<BeatOptions['caption']>, seconds:
 // caption and feature tag.
 export function beatShot(options: BeatOptions) {
   return defineShot(options.seconds, (shot) => {
-    const layers = options.screens.map((entry) => {
+    const entries = options.screens.map((entry) => {
       const at = entry.at ?? 0
       if ('clip' in entry) {
-        const recorded = clip(entry.clip)
-        return { src: recorded.frameUrl(0), size: recorded.size, at, clip: recorded }
+        const recorded = findClip(entry.clip)
+        return { name: entry.clip, layer: recorded && { src: recorded.frameUrl(0), size: recorded.size, at, clip: recorded } }
       }
-      return { ...screen(entry.name), at, clip: undefined }
+      const picture = findScreen(entry.name)
+      return { name: entry.name, layer: picture && { ...picture, at, clip: undefined } }
     })
-    const first = layers[0]
-    if (!first) throw new Error('a beat needs a picture')
+    if (entries.length === 0) throw new Error('a beat needs a picture')
+    const layers = entries.flatMap((entry) => (entry.layer ? [entry.layer] : []))
+    const missing = entries.filter((entry) => !entry.layer).map((entry) => entry.name)
 
-    shot.add(backdrop())
+    if (options.backdrop ?? true) shot.add(backdrop())
+    const title = options.title ?? DEFAULT_WINDOW_TITLE
+    const size = layers[0]?.size ?? options.pendingSize ?? DEFAULT_PENDING_SIZE
+    const rect = options.rect ?? windowRect(size, TITLE_BAR_HEIGHT_PX)
     const camera: CameraKey[] = options.looks.map((look) => ({
       at: look.at,
       scale: look.zoom,
@@ -94,17 +112,19 @@ export function beatShot(options: BeatOptions) {
       focusY: look.y,
       ease: look.ease,
     }))
-    const frame = shot.add(
-      appFrame({
-        layers: layers.map((layer) => ({ src: layer.src, from: layer.at, clip: layer.clip })),
-        imageSize: first.size,
-        title: options.title ?? DEFAULT_WINDOW_TITLE,
-        rect: windowRect(first.size, TITLE_BAR_HEIGHT_PX),
-        camera,
-        from: 0,
-        to: options.seconds,
-      }),
-    )
+    const window: AppFrame =
+      missing.length > 0
+        ? pendingFrame({ names: missing, title, rect, from: options.windowFrom ?? 0, to: options.seconds })
+        : appFrame({
+            layers: layers.map((layer) => ({ src: layer.src, from: layer.at, clip: layer.clip })),
+            imageSize: size,
+            title,
+            rect,
+            camera,
+            from: options.windowFrom ?? 0,
+            to: options.seconds,
+          })
+    const frame = shot.add(options.closeAt === undefined ? window : windowClose(window, options.closeAt))
     for (const mark of options.marks ?? []) frame.attach(highlight(mark))
 
     const pointer = options.pointer

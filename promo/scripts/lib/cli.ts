@@ -8,8 +8,8 @@ export interface RenderArgs {
   fps: number
   workers: number
   outDir: string
-  // When set, write one PNG of this second instead of a video.
-  stillAt?: number
+  // When set, write one PNG of each of these seconds instead of a video.
+  stillsAt?: number[]
 }
 
 const DEFAULT_FPS = 30
@@ -23,7 +23,7 @@ Options:
   --fps N        frame rate (default ${DEFAULT_FPS})
   --workers N    parallel browser processes (default ${DEFAULT_WORKERS})
   --out DIR      output directory (default out)
-  --still SEC    write one PNG of that second instead of a video
+  --still SEC,.. write one PNG of each of those seconds instead of a video
 Scenes: ${Object.keys(sceneLoaders).join(', ')}`
 
 export function parseRenderArgs(argv: string[]): RenderArgs {
@@ -55,6 +55,12 @@ export function parseRenderArgs(argv: string[]): RenderArgs {
     fps: Number(values.fps),
     workers: Number(values.workers),
     outDir: values.out,
-    stillAt: values.still === undefined ? undefined : Number(values.still),
+    stillsAt: values.still === undefined ? undefined : parseSeconds(values.still),
   }
+}
+
+function parseSeconds(list: string): number[] {
+  const seconds = list.split(',').map(Number)
+  if (seconds.some((value) => !Number.isFinite(value))) throw new Error(`--still needs seconds, got "${list}"`)
+  return seconds
 }
