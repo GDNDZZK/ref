@@ -62,6 +62,7 @@ The window title is `ref`. On Windows `ref-gui.exe` is a window-only program: it
 The window has a sidebar on the left and the content on the right: one session, or the [split view](#split-view).
 
 - **Running** lists the live sessions of this window, the newest first. **History** lists the sessions the backend has saved, by time of the last change; the search box filters the 200 most recent ones. A click opens a session. Double-click a running session, or use the right-click menu, to rename or close it. The right-click menu of a history entry deletes it.
+- A running session is labelled with the name you gave it, else its title, else the name of its directory. A session in the history is labelled with its title (on one line), else its name, else the name of its directory, as in the terminal UI. The *Running* list is as tall as its rows and scrolls only when *History* would get fewer than three rows.
 - The *New session* button creates a session in the directory of the current one. The folder button next to it, or the command *New session in another folder…*, asks for a directory first.
 - Closing a session that is still working asks first; its conversation stays in history. When you close the last session, a new one starts in the same directory, so the window is never empty.
 - The sidebar can be hidden and shown again (Ctrl+Shift+B). Its state is remembered.
