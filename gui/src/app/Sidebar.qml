@@ -11,6 +11,8 @@ Rectangle {
 
 	readonly property int contentWidth: Theme.sidebarWidth
 	readonly property int maxMcpDots: 6
+	readonly property real minRunningHeight: Theme.sidebarMinRunningRows * (Theme.sidebarRowHeight + 2)
+	readonly property real minHistoryHeight: Theme.sidebarMinHistoryRows * Theme.sidebarHistoryRowHeight
 	// Space for the two lists: what is left of the column after the fixed parts.
 	readonly property real listSpace: height - Theme.sidebarHeaderHeight - 44 - 2 * Theme.sidebarSectionHeight - 32 - 8 - Theme.sidebarFooterHeight
 
@@ -134,7 +136,8 @@ Rectangle {
 			id: running
 			anchors.top: runningLabel.bottom
 			width: parent.width
-			height: Math.min(contentHeight, Math.max(sidebar.listSpace / 2, Theme.sidebarMinRunningRows * (Theme.sidebarRowHeight + 2)))
+			// The rows' own height; scrolls only when the history would get less than its minimum.
+			height: Math.min(contentHeight, Math.max(sidebar.listSpace - sidebar.minHistoryHeight, sidebar.minRunningHeight))
 			model: Workspace.sessions
 			spacing: 2
 			clip: true

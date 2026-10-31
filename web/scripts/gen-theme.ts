@@ -28,6 +28,7 @@ const METRIC_UNITLESS = [
   'paletteTopRatio',
   'dialogMaxHeightRatio',
   'sidebarMinRunningRows',
+  'sidebarMinHistoryRows',
   'paletteMaxRows',
   'toastMax',
   'staleOpacity',

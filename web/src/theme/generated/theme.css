@@ -59,6 +59,7 @@
   --sidebar-section-height: 28px;
   --sidebar-footer-height: 44px;
   --sidebar-min-running-rows: 3;
+  --sidebar-min-history-rows: 3;
   --button-height: 34px;
   --field-height: 38px;
   --palette-width: 560px;

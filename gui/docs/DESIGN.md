@@ -112,7 +112,7 @@ Surface: `Theme.surface`, a 1px `Theme.border` line on the right edge.
 header   52   "ref" (Theme.fontSize+1, bold)                      [sidebar-20 button 32]
          44   [ + New session ........................ ]  [ ▾ ]    new = 36px high pill, ▾ = folder-open-20 button
 running  28   section label "Running"  (smallFontSize, textMuted)
-         56×n session rows (list scrolls beyond max(half of the body, 3 rows))
+         56×n session rows (the list is as high as its rows; it scrolls only when the history would get less than 3 rows: max(free height − 3 × 44, 3 rows))
 history  28   section label "History"
          32   search field
          44×n history rows
@@ -417,7 +417,7 @@ Unverified: Ctrl+Shift+U is taken by IBus' Unicode input on Linux.
 `warningBorder` `#5a4723` / `#ecd29a`; `scrim` `#8c000000` / `#40000000`.
 
 `Theme.qml` (metrics, px): `sidebarWidth` 264, `sidebarPadding` 8, `sidebarHeaderHeight` 52, `sidebarRowHeight` 56,
-`sidebarHistoryRowHeight` 44, `sidebarSectionHeight` 28, `sidebarFooterHeight` 44, `sidebarMinRunningRows` 3,
+`sidebarHistoryRowHeight` 44, `sidebarSectionHeight` 28, `sidebarFooterHeight` 44, `sidebarMinRunningRows` 3, `sidebarMinHistoryRows` 3,
 `buttonHeight` 34, `fieldHeight` 38, `paletteWidth` 560, `paletteSearchHeight` 52, `paletteRowHeight` 40,
 `paletteMaxRows` 9, `paletteTopRatio` 0.14, `dialogWidth` 480, `dialogWidthWide` 640, `settingsWidth` 520,
 `dialogHeaderHeight` 56, `dialogFooterHeight` 64, `dialogMaxHeightRatio` 0.8, `tileMinWidth` 420,
