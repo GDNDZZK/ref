@@ -8,8 +8,8 @@ r, e, f and the blue dot, like ref's split view.
     |  [ r ]      [ e ]    |      f      ink box centred vertically
     |                      |      r, f   one stem line for the left column. A letter with a stem looks
     |  [ f ]      [ . ]    |             centred on the point halfway between its stem and its ink box
-    +----------------------+             centre; the stem line sits where those points of r and f
-                                         average out at the pane centre (each is 0.31 u off it)
+    +----------------------+             centre; the stem line puts that point of the r on the pane
+                                         centre, and the f follows (its point 0.63 u left of centre)
                                   dot    pane centre; the r pane and the dot pane sit on the diagonal
 
 Small mark (32 units, 16-48 px and the favicons): the r and the dot, set as "r." with the dot on the
@@ -102,7 +102,7 @@ def stemmed_optical_x(ch: str) -> float:
 
 
 STEMMED = ("r", "f")
-STEM_COLUMN_X = sum(stemmed_optical_x(ch) for ch in STEMMED) / len(STEMMED)
+STEM_COLUMN_X = stemmed_optical_x("r")  # the r leads; averaging with the f left the r looking off to the right
 
 
 def letter_in_pane(ch: str, index: int) -> str:
