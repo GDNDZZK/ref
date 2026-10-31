@@ -151,7 +151,7 @@ fn states(tools: &[Tool], name: &str) -> Vec<ToolState> {
 async fn sessions_run_in_the_sample_workspace_whatever_cwd_is_asked() {
     let rig = rig().await;
     let cwd = rig.session.info().cwd;
-    let workspace = std::fs::canonicalize(rig.mock.workspace()).unwrap();
+    let workspace = dunce::canonicalize(rig.mock.workspace()).unwrap();
     assert_eq!(Path::new(&cwd), workspace);
     rig.prompt("hello");
     rig.run(true).await;
@@ -413,7 +413,7 @@ async fn the_remaining_tool_scripts_end_in_the_states_they_promise() {
 async fn directory_listing_stays_inside_the_workspace() {
     let rig = rig().await;
     rig.conn.lock().cwd = rig.mock.workspace().to_string_lossy().into();
-    let workspace = std::fs::canonicalize(rig.mock.workspace()).unwrap();
+    let workspace = dunce::canonicalize(rig.mock.workspace()).unwrap();
     let list = |path: &str| {
         let req = Request::ListDirs { path: path.into() };
         api::handle(&rig.hub, &rig.conn, req)

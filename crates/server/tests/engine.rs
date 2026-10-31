@@ -1558,7 +1558,7 @@ async fn set_cwd_switches_directory_and_tells_the_model() {
     let r = ref_server::api::handle(&hub, &conn, set("sub dir"))
         .await
         .unwrap();
-    let new = std::fs::canonicalize(work.join("sub dir"))
+    let new = dunce::canonicalize(work.join("sub dir"))
         .unwrap()
         .to_string_lossy()
         .to_string();

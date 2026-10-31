@@ -364,7 +364,7 @@ async fn list_dirs_answers_with_sorted_sub_directories() {
     let (mut ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
     hello(&mut ws, &work, vec![]).await;
     let mut other = Vec::new();
-    let canonical = std::fs::canonicalize(&work).unwrap();
+    let canonical = dunce::canonicalize(&work).unwrap();
 
     // Relative to the connection's cwd.
     send(&mut ws, 2, Request::ListDirs { path: ".".into() }).await;
@@ -416,7 +416,7 @@ async fn list_dirs_expands_the_configured_home() {
     for path in ["~", "~/"] {
         let req = Request::ListDirs { path: path.into() };
         let res = ref_server::api::handle(&hub, &conn, req).await.unwrap();
-        let canonical = std::fs::canonicalize(&home).unwrap();
+        let canonical = dunce::canonicalize(&home).unwrap();
         assert_eq!(res["path"], canonical.to_string_lossy().as_ref(), "{path}");
         assert_eq!(res["dirs"], serde_json::json!(["docs"]));
     }
