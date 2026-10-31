@@ -21,7 +21,8 @@ import { Transcript } from './transcript.ts'
 export type Attachment = 'detached' | 'watching' | 'foreground'
 
 // What the session is doing, for the status line.
-export type Activity = 'idle' | 'thinking' | 'running' | 'waiting_permission' | 'retrying' | 'compacting'
+export type Activity =
+  'idle' | 'thinking' | 'running' | 'waiting_permission' | 'waiting_question' | 'retrying' | 'compacting'
 
 export interface ChatSessionDeps {
   api(): RefApi

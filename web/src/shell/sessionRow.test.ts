@@ -18,6 +18,7 @@ describe('rowState', () => {
   it('follows the status', () => {
     expect(rowState(info({ status: { state: 'running' } }))).toBe('busy')
     expect(rowState(info({ status: { state: 'waiting_permission' } }))).toBe('permission')
+    expect(rowState(info({ status: { state: 'waiting_question' } }))).toBe('question')
     expect(rowState(info({ status: { state: 'retrying', attempt: 1, next_at: 0, error: 'x' } }))).toBe(
       'retrying',
     )
