@@ -64,6 +64,8 @@ export interface Ui {
   resize(width: number, height: number): Promise<void>
   // Records the window as a clip until endClip, saved as <kind>-<name>[-zh] in assets/clips (GUI only).
   startClip(name: string): Promise<void>
+  // Notes the current moment of the clip under `name` (e.g. "enter"), so films can line up with it.
+  markClip(name: string): void
   endClip(): Promise<void>
   // Saves a picture as <kind>-<name>[-zh].png.
   shot(name: string, options?: ShotOptions): Promise<void>

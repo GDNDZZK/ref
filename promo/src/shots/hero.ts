@@ -4,6 +4,7 @@
 // 1280x1120 window and are tuned against the recording.
 import { notificationCard } from '../components/notificationCard.ts'
 import type { Cut } from '../films/timeline.ts'
+import { findClip } from '../engine/clips.ts'
 import type { Localized } from '../engine/i18n.ts'
 import { beatShot, type Look } from './beat.ts'
 
@@ -12,9 +13,14 @@ export const HERO_SIZE = { width: 1280, height: 1120 }
 // The recording ends with the summary at t = 25.2; films hold its last frame after that.
 export const HERO_END_T = 25.2
 
-// Mock times of the scripted input (capture/orchestra.ts uses the same numbers).
-export const TESTER_CLICK_T = 7.0
-export const ALLOW_CLICK_T = 13.0
+// The scripted clicks (capture/orchestra.ts "hero"): the tester tile at 7.0, Allow at 13.0. The
+// recording's manifest has where and when they really happened; these stand in until it exists.
+const SCRIPTED_CLICKS = [
+  { at: 7.0, x: 0.32, y: 0.555 },
+  { at: 13.0, x: 0.74, y: 0.47 },
+]
+const POINTER_APPROACH_SECONDS = 1.1
+const POINTER_REST = { x: 0.9, y: 0.75 }
 const FIXER_NOTICE_T = 11.5
 const FINISHED_NOTICE_T = 25.0
 const NOTICE_SECONDS = 3.2
@@ -24,8 +30,6 @@ const GRID = { x: 0.6, y: 0.45 }
 const TESTER_TILE = { x: 0.47, y: 0.62 }
 const FIXER_TILE = { x: 0.78, y: 0.3 }
 const MAIN_TILE = { x: 0.47, y: 0.3 }
-const TESTER_STATUS = { x: 0.32, y: 0.555 }
-const FIXER_ALLOW = { x: 0.74, y: 0.47 }
 
 const LOOKS: readonly Look[] = [
   { at: 0, ...COMPOSER, zoom: 1.7 },
@@ -41,14 +45,28 @@ const LOOKS: readonly Look[] = [
   { at: 21.4, ...MAIN_TILE, zoom: 1.4 },
 ]
 
-const POINTER_PATH = [
-  { at: 5.6, x: 0.55, y: 0.7 },
-  { at: 6.9, ...TESTER_STATUS },
-  { at: 11.8, ...TESTER_STATUS },
-  { at: 12.9, ...FIXER_ALLOW },
-  { at: 14.5, ...FIXER_ALLOW },
-  { at: 15.5, x: 0.9, y: 0.75 },
-]
+// The recording in mock time: where its Enter is, and its clicks.
+function recording() {
+  const recorded = findClip(HERO_CLIP)
+  if (!recorded) return { enterAt: 0, clicks: SCRIPTED_CLICKS }
+  const enterAt = recorded.marks.enter
+  if (enterAt === undefined) throw new Error(`${HERO_CLIP} has no "enter" mark; capture it again`)
+  return { enterAt, clicks: recorded.clicks.map((click) => ({ ...click, at: click.at - enterAt })) }
+}
+
+// The pointer rests, moves to each click in POINTER_APPROACH_SECONDS, stays there until it
+// moves on to the next, and goes back to rest after the last.
+function pointerPath(clicks: readonly { at: number; x: number; y: number }[]) {
+  const keys: { at: number; x: number; y: number }[] = []
+  let position = POINTER_REST
+  for (const click of clicks) {
+    keys.push({ at: click.at - POINTER_APPROACH_SECONDS, ...position }, { at: click.at - 0.05, x: click.x, y: click.y })
+    position = { x: click.x, y: click.y }
+  }
+  const last = clicks.at(-1)
+  if (last) keys.push({ at: last.at + 0.6, ...position }, { at: last.at + 0.6 + POINTER_APPROACH_SECONDS, ...POINTER_REST })
+  return keys
+}
 
 const NOTICES: readonly { at: number; title: string; body: Localized }[] = [
   { at: FIXER_NOTICE_T, title: 'fixer', body: { en: 'Waiting for permission to use edit', zh: '等待授权使用 edit' } },
@@ -58,6 +76,7 @@ const NOTICES: readonly { at: number; title: string; body: Localized }[] = [
 // Film seconds [from, to) showing the recording from mock time `clipFrom` on.
 export function heroCut(from: number, to: number, clipFrom: number, enter?: Cut['enter']): Cut {
   const shift = (t: number) => t - clipFrom
+  const { enterAt, clicks } = recording()
   return {
     from,
     to,
@@ -65,14 +84,14 @@ export function heroCut(from: number, to: number, clipFrom: number, enter?: Cut[
     build: (seconds) =>
       beatShot({
         seconds,
-        screens: [{ clip: HERO_CLIP, at: -clipFrom }],
+        screens: [{ clip: HERO_CLIP, at: -clipFrom - enterAt }],
         pendingSize: HERO_SIZE,
         title: 'ref',
         windowFrom: -1,
         looks: LOOKS.map((look) => ({ ...look, at: shift(look.at) })),
         pointer: {
-          path: POINTER_PATH.map((key) => ({ ...key, at: shift(key.at) })),
-          clicks: [TESTER_CLICK_T, ALLOW_CLICK_T].map(shift),
+          path: pointerPath(clicks).map((key) => ({ ...key, at: shift(key.at) })),
+          clicks: clicks.map((click) => shift(click.at)),
         },
         extras: (shot) => {
           for (const notice of NOTICES) {

@@ -12,10 +12,17 @@ export const CLIP_FPS = 15
 const MS_PER_SECOND = 1000
 const VP9_CRF = 24
 
+// What the capture did during a clip, in seconds since the recording started: clicks at points
+// of the window (0..1 each), and named moments such as the Enter that starts a mock script.
+export interface ClipEvents {
+  clicks: { at: number; x: number; y: number }[]
+  marks: Record<string, number>
+}
+
 // Turns the JPEG frames of a recording (each with the time it was taken, in ms) into a clip with
 // an even frame rate: every output frame is the latest photograph taken by then. The clip is
 // stored as WebM (VP9, 4:4:4 so text keeps its edges) in assets/clips and listed in the manifest.
-export async function saveClip(name: string, framesDir: string, times: readonly number[]): Promise<void> {
+export async function saveClip(name: string, framesDir: string, times: readonly number[], events: ClipEvents): Promise<void> {
   if (times.length === 0) throw new Error(`the recording "${name}" has no frames`)
   const stepMs = MS_PER_SECOND / CLIP_FPS
   const outputFrames = Math.ceil((times.at(-1)! + stepMs) / stepMs)
@@ -43,7 +50,7 @@ export async function saveClip(name: string, framesDir: string, times: readonly 
 
   const { width, height } = await sharp(join(framesDir, files[0]!)).metadata()
   const manifest: Record<string, unknown> = existsSync(MANIFEST_FILE) ? JSON.parse(readFileSync(MANIFEST_FILE, 'utf8')) : {}
-  manifest[name] = { frames: outputFrames, fps: CLIP_FPS, width, height }
+  manifest[name] = { frames: outputFrames, fps: CLIP_FPS, width, height, ...events }
   const sorted = Object.fromEntries(Object.entries(manifest).sort(([a], [b]) => a.localeCompare(b)))
   writeFileSync(MANIFEST_FILE, `${JSON.stringify(sorted, null, 2)}\n`)
   rmSync(framesDir, { recursive: true, force: true })

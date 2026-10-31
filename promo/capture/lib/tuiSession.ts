@@ -100,9 +100,14 @@ export class TuiSession {
     return sleep(ms)
   }
 
+  // Notes this moment in the cast as an asciicast marker, so films can start playback there.
+  mark(label: string): void {
+    this.events.push([(performance.now() - this.startedAt) / 1000, 'm', label])
+  }
+
   // Everything the terminal has received so far; a "mark" for rendering a still of this moment.
   outputSoFar(): string {
-    return this.events.map(([, , text]) => text).join('')
+    return this.events.filter(([, kind]) => kind === 'o').map(([, , text]) => text).join('')
   }
 
   saveCast(file: string): void {
