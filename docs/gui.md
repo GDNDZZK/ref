@@ -23,7 +23,7 @@ Download `ref-gui-<version>-<platform>` (or `ref-all-…`) from the [latest rele
 
 | System | Contents |
 |---|---|
-| Linux | `ref-gui`, `ref-server`, `lib/`, `plugins/` and `qml/` (Qt and the other libraries), `qt.conf`, `ref-gui.desktop`, `ref.png` |
+| Linux | `ref-gui`, `ref-server`, `lib/`, `plugins/` and `qml/` (Qt and the other libraries), `qt.conf`, `ref-gui.desktop`, `ref.svg` |
 | macOS | `ref.app`, which holds `ref-server` and all libraries |
 | Windows | `ref-gui.exe`, `ref-server.exe`, the Qt and Visual C++ runtime DLLs, `plugins\` and `qml\` |
 

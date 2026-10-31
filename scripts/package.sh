@@ -16,7 +16,7 @@
 #   ref-all-<version>-<target>/   ref, ref-web, the GUI, ref-server, README*.md, LICENSE, docs/
 #
 # The GUI is the content of STAGE (ref-gui, lib/, plugins/, qml/, qt.conf) and on Linux also
-# ref-gui.desktop and ref.png. On macOS it is ref.app with ref-server inside, signed; the
+# ref-gui.desktop and ref.svg. On macOS it is ref.app with ref-server inside, signed; the
 # `all` folder links its ref-server to that one.
 #
 # stdout gets a Markdown table of the archive sizes; progress goes to stderr.
@@ -31,7 +31,7 @@ KINDS=(tui web gui all)
 GUI_APP_BUILT="ref-gui.app"
 GUI_APP="ref.app"
 LINUX_DESKTOP_FILE="$REPO_ROOT/scripts/package/ref-gui.desktop"
-LINUX_ICON="$REPO_ROOT/assets/app/png/ref-256.png"
+LINUX_ICON="$REPO_ROOT/assets/app/ref.svg"
 
 # Prints the interface programs of a package kind, from the build. ref-server is part of every
 # package and not listed; the GUI comes from --gui-dir.
@@ -109,7 +109,7 @@ prepare_gui() {
     "$REPO_ROOT/scripts/sign-macos-app.sh" "$PREPARED_GUI_DIR/$GUI_APP" >&2
   elif [[ "$TARGET" == *linux* ]]; then
     cp "$LINUX_DESKTOP_FILE" "$PREPARED_GUI_DIR/"
-    cp "$LINUX_ICON" "$PREPARED_GUI_DIR/ref.png"
+    cp "$LINUX_ICON" "$PREPARED_GUI_DIR/ref.svg"
   fi
 }
 

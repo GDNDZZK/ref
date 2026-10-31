@@ -17,6 +17,7 @@ qt_add_qml_module(ref-gui
 		chat_session.h
 		composer_model_type.h
 		notification_center_type.h
+		question_prompt_type.h
 		qml_types.h
 		system_fonts.h
 		tool_info.h
@@ -32,6 +33,8 @@ qt_add_qml_module(ref-gui
 	QML_FILES
 		Main.qml
 		SessionPane.qml
+		QuestionCard.qml
+		QuestionRow.qml
 		StatusPill.qml
 		Sidebar.qml
 		SessionRow.qml

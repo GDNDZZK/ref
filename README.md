@@ -1,6 +1,11 @@
 <div align="center">
 
-# ref
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/app/ref-lockup-dark.svg">
+    <img src="assets/app/ref-lockup-light.svg" alt="ref" height="96">
+  </picture>
+</h1>
 
 **A coding agent written in Rust, for the terminal, the desktop and the browser.**
 
@@ -94,7 +99,7 @@ All interfaces share one backend. If you installed several, any of them connects
 
   ```bash
   install -Dm644 ref-gui.desktop ~/.local/share/applications/ref-gui.desktop
-  install -Dm644 ref.png ~/.local/share/icons/hicolor/256x256/apps/ref.png
+  install -Dm644 ref.svg ~/.local/share/icons/hicolor/scalable/apps/ref.svg
   ln -s "$PWD/ref-gui" ~/.local/bin/ref-gui
   ```
 - **macOS**: the programs are not signed with a developer certificate (`ref.app` has an ad-hoc signature). If macOS blocks them, run `xattr -dr com.apple.quarantine ref ref-web ref-server ref.app` (the names that are in your archive). `ref.app` can be moved to `/Applications`.

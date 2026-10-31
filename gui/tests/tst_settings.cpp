@@ -170,9 +170,9 @@ void TestSettings::notifyKindsFollowTheSwitches()
 	Settings settings(dir.filePath(u"gui.json"_s));
 	QSignalSpy changed(&settings, &Settings::notifyKindsChanged);
 
-	QCOMPARE(settings.notifyKinds(), (QStringList{u"permission"_s, u"turn_done"_s, u"turn_error"_s}));
+	QCOMPARE(settings.notifyKinds(), (QStringList{u"permission"_s, u"question"_s, u"turn_done"_s, u"turn_error"_s}));
 	settings.setNotifyTurnDone(false);
-	QCOMPARE(settings.notifyKinds(), (QStringList{u"permission"_s, u"turn_error"_s}));
+	QCOMPARE(settings.notifyKinds(), (QStringList{u"permission"_s, u"question"_s, u"turn_error"_s}));
 	settings.setNotifyEnabled(false);
 	QVERIFY(settings.notifyKinds().isEmpty());
 	settings.setNotifyEnabled(false); // no change, no signal

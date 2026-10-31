@@ -1062,12 +1062,20 @@ fn long_transcript_render_perf() {
             messages: msgs,
         });
     }
+    let total = app.views["ses_test"].messages.len();
+    let laid_out = |app: &App| app.views["ses_test"].chat.laid_out;
     let t0 = std::time::Instant::now();
     render(&mut app, 120, 40);
     let first = t0.elapsed();
-    // Streaming into the last message: only that message is re-rendered.
+    assert_eq!(
+        laid_out(&app),
+        total,
+        "the first frame lays out every message once"
+    );
+    // Streaming into the last message: only that message is laid out again.
     let t1 = std::time::Instant::now();
     for k in 0..30 {
+        let before = laid_out(&app);
         let v = app.views.get_mut("ses_test").unwrap();
         let id = v.messages.last().unwrap().id.clone();
         v.apply(SessionEvent::Delta {
@@ -1078,12 +1086,16 @@ fn long_transcript_render_perf() {
             },
         });
         render(&mut app, 120, 40);
+        assert_eq!(
+            laid_out(&app) - before,
+            1,
+            "frame {k} re-laid-out more than the last message"
+        );
     }
-    let per = t1.elapsed() / 30;
-    println!("first full layout {first:?}, per streaming frame {per:?}");
-    assert!(
-        per * 4 < first,
-        "incremental frames must be much cheaper than the first layout ({per:?} vs {first:?})"
+    // Timing is informational only: wall-clock ratios are unreliable on shared runners.
+    println!(
+        "first full layout {first:?}, per streaming frame {:?}",
+        t1.elapsed() / 30
     );
 }
 

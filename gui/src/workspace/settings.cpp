@@ -34,6 +34,7 @@ const QString HeightKey = u"height"_s;
 const QString PermissionKind = u"permission"_s;
 const QString TurnDoneKind = u"turn_done"_s;
 const QString TurnErrorKind = u"turn_error"_s;
+const QString QuestionKind = u"question"_s;
 
 // Collects what was wrong in the file.
 class Problems
@@ -134,6 +135,7 @@ QStringList Settings::notifyKinds() const
 	if(m_notifyPermission)
 	{
 		kinds.append(PermissionKind);
+		kinds.append(QuestionKind); // the user is needed in both cases, so one switch
 	}
 	if(m_notifyTurnDone)
 	{
