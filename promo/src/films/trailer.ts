@@ -17,7 +17,7 @@ export const scene = timelineFilm({
   cuts: [
     waitingTabsCut(0, HERO_FILM_START),
     heroCut(HERO_FILM_START, FIRST_SLICE_END, 0),
-    heroCut(FIRST_SLICE_END, SECOND_SLICE_END, SECOND_SLICE_CLIP_FROM, 'cut'),
+    heroCut(FIRST_SLICE_END, SECOND_SLICE_END, SECOND_SLICE_CLIP_FROM, { enter: 'cut', holdReport: true }),
     crewWindowsCut(SECOND_SLICE_END, WINDOWS_END),
     endCut(WINDOWS_END, FILM_END, { platforms: true }),
   ],

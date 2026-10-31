@@ -10,6 +10,9 @@ import { beatShot, type Look } from './beat.ts'
 
 export const HERO_CLIP = 'gui-hero'
 export const HERO_SIZE = { width: 1280, height: 1120 }
+// The window is wider than the tall picture would fit, so the camera always crops it and the
+// text stays readable; zoom 1 shows the whole width.
+const HERO_RECT = { x: 180, y: 70, width: 1560, height: 880 }
 // The recording ends with the summary at t = 25.2; films hold its last frame after that.
 export const HERO_END_T = 25.2
 
@@ -25,33 +28,54 @@ const FIXER_NOTICE_T = 11.5
 const FINISHED_NOTICE_T = 25.0
 const NOTICE_SECONDS = 3.2
 
+// Where things are in the split view (main and scout on top, fixer and tester in the middle,
+// docs and later reviewer at the bottom).
 const COMPOSER = { x: 0.6, y: 0.9 }
-const GRID = { x: 0.6, y: 0.45 }
-const TESTER_TILE = { x: 0.47, y: 0.62 }
-const FIXER_TILE = { x: 0.78, y: 0.3 }
-const MAIN_TILE = { x: 0.47, y: 0.3 }
+const GRID = { x: 0.6, y: 0.5 }
+const TESTER_TILE = { x: 0.72, y: 0.52 }
+const FIXER_TILE = { x: 0.45, y: 0.52 }
+const MAIN_TILE = { x: 0.42, y: 0.22 }
 
-const LOOKS: readonly Look[] = [
-  { at: 0, ...COMPOSER, zoom: 1.7 },
-  { at: 2.4, ...COMPOSER, zoom: 1.7 },
-  { at: 3.2, ...GRID, zoom: 1.2 },
-  { at: 6.6, ...GRID, zoom: 1.2 },
-  { at: 7.4, ...TESTER_TILE, zoom: 1.5 },
-  { at: 10.8, ...TESTER_TILE, zoom: 1.5 },
-  { at: 11.6, ...FIXER_TILE, zoom: 1.5 },
-  { at: 14.4, ...FIXER_TILE, zoom: 1.5 },
-  { at: 15.2, ...TESTER_TILE, zoom: 1.6 },
-  { at: 20.6, ...TESTER_TILE, zoom: 1.6 },
-  { at: 21.4, ...MAIN_TILE, zoom: 1.4 },
+// The tester's report shows in main's tile from 15.6 until the fixer's report pushes it up at
+// 16.5, too short to read; films that show it hold the frame of the recording's "report" mark
+// (about 16.0) for this long, with a callout on the line.
+const REPORT_HOLD_SECONDS = 2.2
+const SCRIPTED_REPORT_AT = 16.0
+// The report line on the held frame, measured on both takes.
+const REPORT_LINE = { x: 0.246, y: 0.084, width: 0.322, height: 0.028 }
+// Right after Allow the edit card shows the absolute mock path for a frame or two; the films
+// show the frame before it instead.
+const PATH_FRAMES = { from: 13.0, to: 13.3 }
+
+// Camera in mock time; `report` is the centre of the tester's report line.
+const looks = (report: { x: number; y: number }): Look[] => [
+  { at: 0, ...COMPOSER, zoom: 1.5 },
+  { at: 2.5, ...COMPOSER, zoom: 1.5 },
+  { at: 3.3, ...GRID, zoom: 1 },
+  { at: 6.7, ...GRID, zoom: 1 },
+  { at: 7.3, ...TESTER_TILE, zoom: 1.6 },
+  { at: 10.8, ...TESTER_TILE, zoom: 1.6 },
+  { at: 11.4, ...FIXER_TILE, zoom: 1.6 },
+  { at: 14.6, ...FIXER_TILE, zoom: 1.6 },
+  { at: 15.3, ...report, zoom: 1.9 },
+  { at: 16.0, ...report, zoom: 1.9 },
+  { at: 16.8, ...GRID, zoom: 1 },
+  { at: 20.6, ...GRID, zoom: 1 },
+  { at: 21.3, ...MAIN_TILE, zoom: 1.6 },
 ]
 
 // The recording in mock time: where its Enter is, and its clicks.
 function recording() {
   const recorded = findClip(HERO_CLIP)
-  if (!recorded) return { enterAt: 0, clicks: SCRIPTED_CLICKS }
+  if (!recorded) return { enterAt: 0, clicks: SCRIPTED_CLICKS, reportAt: SCRIPTED_REPORT_AT }
   const enterAt = recorded.marks.enter
-  if (enterAt === undefined) throw new Error(`${HERO_CLIP} has no "enter" mark; capture it again`)
-  return { enterAt, clicks: recorded.clicks.map((click) => ({ ...click, at: click.at - enterAt })) }
+  const reportAt = recorded.marks.report
+  if (enterAt === undefined || reportAt === undefined) throw new Error(`${HERO_CLIP} has no "enter" or "report" mark; capture it again`)
+  return {
+    enterAt,
+    clicks: recorded.clicks.map((click) => ({ ...click, at: click.at - enterAt })),
+    reportAt: reportAt - enterAt,
+  }
 }
 
 // The pointer rests, moves to each click in POINTER_APPROACH_SECONDS, stays there until it
@@ -73,22 +97,39 @@ const NOTICES: readonly { at: number; title: string; body: Localized }[] = [
   { at: FINISHED_NOTICE_T, title: 'main', body: { en: 'Finished', zh: '已完成' } },
 ]
 
+export interface HeroCutOptions {
+  enter?: Cut['enter']
+  // Hold the frame with the tester's report (REPORT_HOLD) when the cut reaches it.
+  holdReport?: boolean
+}
+
 // Film seconds [from, to) showing the recording from mock time `clipFrom` on.
-export function heroCut(from: number, to: number, clipFrom: number, enter?: Cut['enter']): Cut {
-  const shift = (t: number) => t - clipFrom
-  const { enterAt, clicks } = recording()
+export function heroCut(from: number, to: number, clipFrom: number, options: HeroCutOptions = {}): Cut {
+  const { enterAt, clicks, reportAt } = recording()
+  const hold = options.holdReport ? { at: reportAt, seconds: REPORT_HOLD_SECONDS } : { at: Infinity, seconds: 0 }
+  // Shot seconds of mock time `t`, and the other way round.
+  const shift = (t: number) => t - clipFrom + (t > hold.at ? hold.seconds : 0)
+  const mockTime = (time: number) => {
+    const raw = clipFrom + time
+    const held = raw < hold.at ? raw : Math.max(hold.at, raw - hold.seconds)
+    return held >= PATH_FRAMES.from && held < PATH_FRAMES.to ? PATH_FRAMES.from : held
+  }
   return {
     from,
     to,
-    enter,
+    enter: options.enter,
     build: (seconds) =>
       beatShot({
         seconds,
-        screens: [{ clip: HERO_CLIP, at: -clipFrom - enterAt }],
+        screens: [{ clip: HERO_CLIP, time: (time) => enterAt + mockTime(time) }],
         pendingSize: HERO_SIZE,
+        rect: HERO_RECT,
         title: 'ref',
         windowFrom: -1,
-        looks: LOOKS.map((look) => ({ ...look, at: shift(look.at) })),
+        looks: looks({ x: REPORT_LINE.x + REPORT_LINE.width / 2, y: REPORT_LINE.y + 0.06 }).map((look) => ({ ...look, at: shift(look.at) })),
+        marks: options.holdReport
+          ? [{ ...REPORT_LINE, from: shift(reportAt) - 0.1, to: shift(reportAt) + hold.seconds }]
+          : [],
         pointer: {
           path: pointerPath(clicks).map((key) => ({ ...key, at: shift(key.at) })),
           clicks: clicks.map((click) => shift(click.at)),

@@ -6,12 +6,19 @@ import { FEATURES } from './features.ts'
 import { addBrandTitle } from './shared.ts'
 import { cues, endCut, timelineFilm } from './timeline.ts'
 
+const A6_END = 24.4
+const A7_CLIP_FROM = 21.0
 const HERO_END = 29.4
 const FILM_END = 31.9
 
 export const scene = timelineFilm({
   id: 'crew',
-  cuts: [waitingTabsCut(0, HERO_FILM_START), heroCut(HERO_FILM_START, HERO_END, 0), endCut(HERO_END, FILM_END)],
+  cuts: [
+    waitingTabsCut(0, HERO_FILM_START),
+    heroCut(HERO_FILM_START, A6_END, 0, { holdReport: true }),
+    heroCut(A6_END, HERO_END, A7_CLIP_FROM, { enter: 'cut' }),
+    endCut(HERO_END, FILM_END),
+  ],
   captions: cues([...HERO_CAPTIONS, [26.5, 29.4, COPY.finished]]),
   chip: { ...FEATURES.crew, from: HERO_FILM_START + BRAND_TITLE_SECONDS + 0.4, to: HERO_END },
   overlay: (shot) => addBrandTitle(shot, HERO_END),

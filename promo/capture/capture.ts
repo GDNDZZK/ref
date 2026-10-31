@@ -1,4 +1,4 @@
-// pnpm capture [web|gui|tui|all] [--only name,name] [--lang en,zh]
+// pnpm capture [web|gui|tui|shared|crew|all] [--only name,name] [--lang en,zh]
 // Records pictures and casts from the mock backend into assets/ (and docs/images/).
 import { spawnSync } from 'node:child_process'
 import { parseArgs } from 'node:util'
@@ -8,7 +8,7 @@ import { captureCrew } from './crew.ts'
 import { captureShared } from './shared.ts'
 import { SCENARIOS } from './scenarios.ts'
 import { PRIVATE_BUS_FLAG } from './lib/privateBus.ts'
-import { captureTui } from './tui.ts'
+import { TUI_CAPTURES, captureTui } from './tui.ts'
 import { captureWeb } from './web.ts'
 
 // ref-gui, ref and Chromium send desktop notifications over the session bus when a turn ends.
@@ -39,13 +39,13 @@ const badLang = langs.find((lang) => !isLang(lang))
 if (badLang) throw new Error(`unknown language "${badLang}"`)
 
 const only = values.only?.split(',')
-const unknownScenario = only?.find((name) => !SCENARIOS.some((scenario) => scenario.name === name))
+const unknownScenario = only?.find((name) => !SCENARIOS.some((scenario) => scenario.name === name) && !(name in TUI_CAPTURES))
 if (unknownScenario) throw new Error(`unknown scenario "${unknownScenario}"; known: ${SCENARIOS.map((s) => s.name).join(', ')}`)
 const selected = SCENARIOS.filter((scenario) => !only || only.includes(scenario.name))
 
 for (const target of targets) {
   if (target === 'tui') {
-    await captureTui()
+    await captureTui(only)
     continue
   }
   if (target === 'shared') {

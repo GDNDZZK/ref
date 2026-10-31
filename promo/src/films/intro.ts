@@ -18,6 +18,8 @@ import { RELEASE } from './release.ts'
 import { addBrandTitle, crewWindowsCut } from './shared.ts'
 import { cues, drawnCut, endCut, timelineFilm, type Cut } from './timeline.ts'
 
+const A6_END = 24.4
+const A7_CLIP_FROM = 21.0
 const HERO_END = 29.4
 const CARD_END = 38.4
 const CREW_END = 43.4
@@ -102,7 +104,8 @@ export const scene = timelineFilm({
   id: 'intro',
   cuts: [
     waitingTabsCut(0, HERO_FILM_START),
-    heroCut(HERO_FILM_START, HERO_END, 0),
+    heroCut(HERO_FILM_START, A6_END, 0, { holdReport: true }),
+    heroCut(A6_END, HERO_END, A7_CLIP_FROM, { enter: 'cut' }),
     drawnCut(HERO_END, CARD_END, (shot, seconds) => shot.add(compareCard({ ...COMPARE, from: 0, to: seconds + 1 }))),
     crewWindowsCut(CARD_END, CREW_END),
     serverStartCut,
