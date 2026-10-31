@@ -87,7 +87,7 @@ const featureCuts: Cut[] = [
 // A12: the release list, then the two commands, then ref starting.
 const START_TYPING_SECONDS = 1.8
 // The real-backend take from just before ref is ready (cast marker "ready"): the end of its start.
-const REF_STARTING = { mark: 'ready', offset: -0.6 }
+const REF_STARTING = { mark: 'ready', offset: -0.1 }
 const startCut: Cut = {
   from: RELEASE_END,
   to: START_END,
