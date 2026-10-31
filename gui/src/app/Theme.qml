@@ -84,6 +84,7 @@ QtObject {
 	readonly property int sidebarSectionHeight: 28
 	readonly property int sidebarFooterHeight: 44
 	readonly property int sidebarMinRunningRows: 3
+	readonly property int sidebarMinHistoryRows: 3
 	readonly property int buttonHeight: 34
 	readonly property int fieldHeight: 38
 	readonly property int paletteWidth: 560
