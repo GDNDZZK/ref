@@ -59,11 +59,12 @@ TodoStatus readTodoStatus(const Fields& fields)
 
 SessionStatus readSessionStatus(const Fields& fields)
 {
-	static constexpr std::array<std::pair<QLatin1StringView, SessionStatus::State>, 6> names{{
+	static constexpr std::array<std::pair<QLatin1StringView, SessionStatus::State>, 7> names{{
 		{"idle"_L1, SessionStatus::State::Idle},
 		{"busy"_L1, SessionStatus::State::Busy},
 		{"running"_L1, SessionStatus::State::Running},
 		{"waiting_permission"_L1, SessionStatus::State::WaitingPermission},
+		{"waiting_question"_L1, SessionStatus::State::WaitingQuestion},
 		{"retrying"_L1, SessionStatus::State::Retrying},
 		{"compacting"_L1, SessionStatus::State::Compacting},
 	}};
@@ -275,6 +276,29 @@ PermissionRequest readPermissionRequest(const Fields& fields)
 	        .tool = fields.string("tool"_L1),
 	        .purpose = fields.string("purpose"_L1),
 	        .input = fields.value("input"_L1),
+	        .time = fields.integer("time"_L1)};
+}
+
+QuestionOption readQuestionOption(const Fields& fields)
+{
+	return {.label = fields.string("label"_L1), .description = fields.string("description"_L1), .isDefault = fields.booleanOr("default"_L1, false)};
+}
+
+Question readQuestion(const Fields& fields)
+{
+	return {.question = fields.string("question"_L1),
+	        .header = fields.string("header"_L1),
+	        .options = fields.list<QuestionOption>("options"_L1, readQuestionOption),
+	        .multiple = fields.booleanOr("multiple"_L1, false),
+	        .custom = fields.booleanOr("custom"_L1, true)};
+}
+
+QuestionRequest readQuestionRequest(const Fields& fields)
+{
+	return {.sessionId = fields.string("session_id"_L1),
+	        .messageId = fields.string("message_id"_L1),
+	        .callId = fields.string("call_id"_L1),
+	        .questions = fields.list<Question>("questions"_L1, readQuestion),
 	        .time = fields.integer("time"_L1)};
 }
 

@@ -29,6 +29,8 @@ QString bodyOf(const proto::NotifyFrame& frame)
 	{
 	case proto::NotifyFrame::Kind::Permission:
 		return detail.isEmpty() ? QCoreApplication::translate("refgui::notify", "Waiting for permission") : QCoreApplication::translate("refgui::notify", "Waiting for permission to use %1").arg(detail);
+	case proto::NotifyFrame::Kind::Question:
+		return detail.isEmpty() ? QCoreApplication::translate("refgui::notify", "Asks a question") : QCoreApplication::translate("refgui::notify", "Asks: %1").arg(detail);
 	case proto::NotifyFrame::Kind::TurnDone:
 		return QCoreApplication::translate("refgui::notify", "Finished");
 	case proto::NotifyFrame::Kind::TurnError:
