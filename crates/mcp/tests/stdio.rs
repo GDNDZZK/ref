@@ -109,6 +109,14 @@ for line in sys.stdin:
         send({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": "Method not found"}})
 "#;
 
+/// Time allowed for the mock server to start and answer. Starting python can take many
+/// seconds on a busy CI runner (Windows, with several tests starting it at once). The timeout
+/// itself is not under test here, so it only has to be longer than any healthy start.
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
+/// A server that exits at once must fail the connect long before its timeout runs out.
+const EXIT_TIMEOUT: Duration = Duration::from_secs(30);
+const EXIT_NOTICED_WITHIN: Duration = Duration::from_secs(20);
+
 fn cfg(env: BTreeMap<String, String>, cwd: Option<String>) -> ServerConfig {
     ServerConfig {
         name: "mock".into(),
@@ -117,7 +125,7 @@ fn cfg(env: BTreeMap<String, String>, cwd: Option<String>) -> ServerConfig {
             env,
             cwd,
         },
-        timeout: Duration::from_secs(10),
+        timeout: STARTUP_TIMEOUT,
     }
 }
 
@@ -312,10 +320,10 @@ async fn spawn_failure_and_early_exit() {
             env: BTreeMap::new(),
             cwd: None,
         },
-        timeout: Duration::from_secs(5),
+        timeout: EXIT_TIMEOUT,
     };
     let start = std::time::Instant::now();
     let err = McpClient::connect(&exits).await.err().unwrap();
-    assert!(start.elapsed() < Duration::from_secs(4));
+    assert!(start.elapsed() < EXIT_NOTICED_WITHIN);
     assert!(format!("{err:#}").contains("initialize failed"), "{err:#}");
 }
