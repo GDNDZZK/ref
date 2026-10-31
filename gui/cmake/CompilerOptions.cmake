@@ -8,7 +8,10 @@ function(refgui_configure_target target)
 	if(MSVC)
 		# /permissive- and /Zc:__cplusplus make MSVC follow the standard (Qt needs the latter
 		# to see the real C++ version); /utf-8 reads sources and string literals as UTF-8.
-		target_compile_options(${target} PRIVATE /W4 /permissive- /Zc:__cplusplus /utf-8 /EHsc)
+		# CMake passes the Qt and dependency include folders as -external:I; /external:W0 keeps
+		# MSVC from warning about code in them (C4702 in qmetatype.h, hit by the generated QML
+		# cache sources), which warnings-as-errors would turn into a failed build.
+		target_compile_options(${target} PRIVATE /W4 /external:W0 /permissive- /Zc:__cplusplus /utf-8 /EHsc)
 	else()
 		target_compile_options(${target} PRIVATE
 			-Wall
