@@ -67,6 +67,7 @@ The page is the same interface as the [desktop GUI](gui.md). This section lists 
 **The window**
 
 - The sidebar on the left lists the running sessions, the history with a search box, the state of the MCP servers and the settings. It can be hidden (Alt+B); the state is remembered. In a window narrower than 800 px the sidebar becomes a drawer over the content, and there is no split view.
+- Running sessions are labelled with their name, else their title, else the name of their directory. Sessions in the history are labelled with their title (on one line), else their name, else the name of their directory, as in the terminal UI. The *Running* list is as tall as its rows and scrolls only when *History* would get fewer than three rows.
 - *New session* creates a session in the directory of the page. To start one in another directory, use the folder button next to it or the command *New session in another folder…* (no shortcut). It asks for a path; Tab or a click completes sub-directories, which the backend lists.
 - The command palette (Ctrl+P, Cmd+P on macOS) runs any command. Commands without an argument run at once; rename, change directory, export, variant, close a session and the peer name ask for it first. The `/` list in the input box shows the same commands, custom commands included.
 - Closing the last session starts a new one in the same directory; the page never ends up empty. There is no `/editor` and no `/exit`. `/compact` asks for no confirmation.
