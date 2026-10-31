@@ -126,9 +126,10 @@ pub struct Ctx {
     pub prompt: String,
     /// The prompt without its first word (the script name).
     pub args: String,
-    /// The conversation's first user message (a created session's task without its envelope).
+    /// The latest user message that is neither from another session nor a harness reminder (a
+    /// created session's task without its envelope).
     pub root_prompt: String,
-    /// How many user messages in the conversation come from other sessions, the current one
+    /// How many user messages from other sessions came after `root_prompt`, the current one
     /// included.
     pub peer_reports: usize,
     pub round: usize,
@@ -165,6 +166,8 @@ const TOOL_IMAGES_MARKER: &str = "Attached image(s) from tool result:";
 const SPAWN_HEADER: &str = "[Session created by";
 /// First line of the reminder appended to a created session's task.
 const REPORT_REMINDER: &str = "[When you finish or get blocked";
+/// How the harness's own reminders start (agent switch, working directory, must_report).
+const HARNESS_REMINDER: &str = "[Reminder]";
 /// How a message from another session starts (see `peers`).
 pub const PEER_MESSAGE: &str = "[Message from session";
 
@@ -234,17 +237,7 @@ pub fn analyze(body: &Value, session_id: &str, attempt: u32) -> Task {
         }
     }
     tool_results.reverse();
-    let users: Vec<String> = messages
-        .iter()
-        .filter(|m| role(m) == "user")
-        .map(message_text)
-        .filter(|t| !t.starts_with(TOOL_IMAGES_MARKER))
-        .collect();
-    let root_prompt = users
-        .first()
-        .map(|t| task_text(t.trim()))
-        .unwrap_or_default();
-    let peer_reports = users.iter().filter(|t| t.starts_with(PEER_MESSAGE)).count();
+    let (root_prompt, peer_reports) = conversation_root(messages);
     let prompt = task_text(prompt.trim());
     let args = prompt
         .split_once(char::is_whitespace)
@@ -260,6 +253,27 @@ pub fn analyze(body: &Value, session_id: &str, attempt: u32) -> Task {
         attempt,
         tool_results,
     })
+}
+
+/// The latest prompt that did not come from another session (reminders by the harness do not
+/// count), and the number of messages from other sessions since it, the current one included.
+/// A script that is run again in the same conversation starts over from its new prompt.
+fn conversation_root(messages: &[Value]) -> (String, usize) {
+    let mut root = String::new();
+    let mut reports = 0;
+    for message in messages.iter().filter(|m| role(m) == "user") {
+        let text = message_text(message);
+        if text.starts_with(TOOL_IMAGES_MARKER) {
+            continue;
+        }
+        if text.starts_with(PEER_MESSAGE) {
+            reports += 1;
+        } else if !text.starts_with(HARNESS_REMINDER) {
+            root = task_text(text.trim());
+            reports = 0;
+        }
+    }
+    (root, reports)
 }
 
 /// The first word of a prompt, lowercase, without surrounding punctuation (but `-` is part of
@@ -385,13 +399,14 @@ mod tests {
     }
 
     #[test]
-    fn the_root_prompt_and_the_reports_are_counted_over_the_whole_conversation() {
+    fn reports_are_counted_since_the_latest_prompt() {
         let b = body(json!([
             {"role": "system", "content": "sys"},
             {"role": "user", "content": "orchestrate fix it"},
             {"role": "assistant", "content": "ok"},
             {"role": "user", "content": REPORT},
             {"role": "assistant", "content": "got it"},
+            {"role": "user", "content": "[Reminder] The user switched the agent from a to b."},
             {"role": "user", "content": REPORT},
         ]));
         let ctx = reply(analyze(&b, "ses_1", 1));
@@ -399,6 +414,29 @@ mod tests {
         assert_eq!(ctx.peer_reports, 2);
         assert_eq!(ctx.round, 0);
         assert!(ctx.prompt.starts_with(PEER_MESSAGE));
+    }
+
+    #[test]
+    fn a_new_prompt_starts_the_count_and_the_root_over() {
+        let b = body(json!([
+            {"role": "user", "content": "orchestrate fix it"},
+            {"role": "user", "content": REPORT},
+            {"role": "user", "content": REPORT},
+            {"role": "user", "content": "orchestrate again"},
+            {"role": "assistant", "content": "ok"},
+            {"role": "user", "content": REPORT},
+        ]));
+        let ctx = reply(analyze(&b, "ses_1", 1));
+        assert_eq!(ctx.root_prompt, "orchestrate again");
+        assert_eq!(ctx.peer_reports, 1);
+
+        let started = body(json!([
+            {"role": "user", "content": REPORT},
+            {"role": "user", "content": REPORT},
+        ]));
+        let ctx = reply(analyze(&started, "ses_1", 1));
+        assert_eq!(ctx.root_prompt, "");
+        assert_eq!(ctx.peer_reports, 2);
     }
 
     #[test]
