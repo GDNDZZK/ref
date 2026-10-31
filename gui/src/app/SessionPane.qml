@@ -16,6 +16,9 @@ Item {
 	readonly property real columnPadding: compact ? compactColumnPadding : Theme.pagePadding
 	// Whether the keys may answer a permission request of this session (one pane at a time has them).
 	property bool keysEnabled: true
+	// Whether the input box is there. A hidden one keeps its draft, attachments and queue;
+	// the queue strip stays either way.
+	property bool composerShown: true
 
 	function focusInput() {
 		composer.focusInput()
@@ -188,6 +191,7 @@ Item {
 		anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: pane.margin }
 		width: chat.columnWidth
 		session: pane.session
+		boxShown: pane.composerShown
 		onSubmitted: chat.following = true
 	}
 
