@@ -596,6 +596,11 @@ impl App {
                     self.net_status = Some(reason);
                 }
                 self.pending.clear();
+                // The reply in flight is lost; the snapshot after reconnecting says if the
+                // question is still open.
+                if let Some(q) = self.question.as_mut() {
+                    q.submitting = false;
+                }
                 self.attaching.clear();
                 self.files_inflight = false;
                 self.mcp_inflight = false;
