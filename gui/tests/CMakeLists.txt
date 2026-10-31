@@ -197,3 +197,13 @@ target_compile_definitions(tst_network_policy PRIVATE REF_QML_DIR="${PROJECT_SOU
 refgui_configure_target(tst_network_policy)
 add_test(NAME tst_network_policy COMMAND tst_network_policy)
 set_tests_properties(tst_network_policy PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# No test may reach the session bus of the user's desktop, where a notification would really show.
+# A test that needs a bus starts its own, like tst_dbus_notifier.
+if(UNIX AND NOT APPLE)
+	get_property(refgui_tests DIRECTORY PROPERTY TESTS)
+	foreach(refgui_test IN LISTS refgui_tests)
+		set_property(TEST ${refgui_test} APPEND PROPERTY ENVIRONMENT_MODIFICATION
+			"DBUS_SESSION_BUS_ADDRESS=set:unix:path=${CMAKE_CURRENT_BINARY_DIR}/no-session-bus")
+	endforeach()
+endif()
