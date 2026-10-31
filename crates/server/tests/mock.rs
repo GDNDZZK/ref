@@ -329,7 +329,9 @@ fn snapshot(dir: &Path) -> Vec<(PathBuf, u64, std::time::SystemTime)> {
     while let Some(d) = todo.pop() {
         for entry in std::fs::read_dir(&d).unwrap() {
             let entry = entry.unwrap();
-            let meta = entry.metadata().unwrap();
+            // Not `entry.metadata()`: on Windows that is the directory index's copy, which
+            // NTFS refreshes lazily, so a directory's time can lag behind its contents.
+            let meta = std::fs::metadata(entry.path()).unwrap();
             if meta.is_dir() {
                 todo.push(entry.path());
             }
@@ -423,7 +425,9 @@ async fn directory_listing_stays_inside_the_workspace() {
     assert_eq!(home["path"], workspace.to_string_lossy().as_ref());
     assert_eq!(home["dirs"], json!(["data", "docs", "scratch", "src"]));
     assert!(list("src/..").await.is_ok());
-    for outside in ["/", "..", "/tmp", "~/../.."] {
+    // The temporary directory holds the mock's root, so it exists on every platform.
+    let temp = std::env::temp_dir().to_string_lossy().into_owned();
+    for outside in ["/", "..", temp.as_str(), "~/../.."] {
         let err = list(outside).await.unwrap_err();
         assert!(
             err.contains("outside the mock workspace"),
