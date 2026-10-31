@@ -78,11 +78,9 @@ export const SCENARIOS: Scenario[] = [
   },
   {
     // No `todo` session here: its card renders wrongly in a split-view tile (reported to the GUI).
+    // Three sessions: with a fourth, the Running list of the sidebar clips and fades its last row.
     name: 'sessions',
     async run(ui) {
-      await ui.send('hello')
-      await ui.command('new')
-      await ui.pause(500)
       await ui.send('running')
       await ui.command('new')
       await ui.pause(500)

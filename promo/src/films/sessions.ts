@@ -26,9 +26,9 @@ export const scene = filmScene(feature, [
     screens: [{ name: 'gui-split-view' }, { name: 'gui-split-zoom', at: 3.4 }],
     looks: [
       { at: 0, x: 0.6, y: 0.5, zoom: 1 },
-      { at: 1.2, x: 0.8, y: 0.76, zoom: 1.8 },
+      { at: 1.2, x: 0.6, y: 0.75, zoom: 1.3 },
     ],
-    marks: [{ x: 0.61, y: 0.55, width: 0.38, height: 0.43, from: 1.8, to: 6.3 }],
+    marks: [{ x: 0.215, y: 0.53, width: 0.775, height: 0.445, from: 1.8, to: 6.3 }],
     caption: { en: 'The focused tile has its own prompt box.', zh: '选中的会话有自己的输入框。' },
   }),
   windowBeat({
