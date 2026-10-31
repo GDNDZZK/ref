@@ -3,7 +3,8 @@ import { info } from '../model/testMessages.ts'
 import type { Todo } from '../proto/generated'
 import {
   dirName,
-  displayTitle,
+  historyLabel,
+  liveLabel,
   matchesQuery,
   relativeTime,
   rowState,
@@ -65,9 +66,16 @@ describe('names', () => {
     expect(dirName('/')).toBe('/')
   })
 
-  it('falls back to the name while the session has no title', () => {
-    expect(displayTitle(info({ title: '', name: 'parser' }))).toBe('parser')
-    expect(displayTitle(info({ title: 'Fix it', name: 'parser' }))).toBe('Fix it')
+  it('labels a live session by its name, then its title, then its directory', () => {
+    expect(liveLabel(info({ title: 'Fix it', name: 'parser' }))).toBe('parser')
+    expect(liveLabel(info({ title: 'Fix\n  it\tnow', name: ' ' }))).toBe('Fix it now')
+    expect(liveLabel(info({ title: '', name: '', cwd: '/home/me/ref/' }))).toBe('ref')
+  })
+
+  it('labels a history session by its one-line title, then its name', () => {
+    expect(historyLabel(info({ title: 'Fix it', name: 'parser' }))).toBe('Fix it')
+    expect(historyLabel(info({ title: 'Fix\n\n it \u0007 now', name: 'parser' }))).toBe('Fix it now')
+    expect(historyLabel(info({ title: '  ', name: 'parser' }))).toBe('parser')
   })
 })
 
