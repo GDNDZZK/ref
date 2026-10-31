@@ -61,7 +61,7 @@ export const scene = filmScene(feature, [
       { at: 1, x: COLUMN_X, y: LOWER_Y, zoom: ZOOM },
     ],
     marks: [{ x: 0.305, y: 0.815, width: 0.595, height: 0.045, from: 1.6, to: 4 }],
-    caption: { en: 'Send while it works. The prompt waits.', zh: '它工作时也能发送，提示会排队。' },
+    caption: { en: 'Send while it works. The prompt waits.', zh: '它忙的时候也能发，消息会排队。' },
   }),
   windowBeat({
     seconds: 5,

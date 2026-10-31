@@ -67,7 +67,7 @@ Rules: times are seconds; a part's `render(t)` must not depend on earlier calls;
 |---|---|---|
 | `web` | `ref-web` in headless Chromium (Playwright), 1600×1000 at 2×, dark theme; English and Chinese | `assets/screens/web-<shot>[-zh].png` |
 | `gui` | the unchanged `ref-gui --mock` with `QT_QPA_PLATFORM=offscreen` and `QT_SCALE_FACTOR=2` (2560×1600 grab); a small Qt plugin (`capture/gui-driver/`) reads commands (click, type, key, grab) from stdin | `assets/screens/gui-<shot>[-zh].png` |
-| `tui` | `ref` in a pseudo terminal; keys are typed, the screen is followed with a headless xterm.js; the output is recorded as an asciicast and rendered as stills | `assets/casts/*.cast`, `assets/screens/tui-*.png` and `tui-*-clean.png` (without the last row, which shows the random mock workspace path) |
+| `tui` | `ref` in a pseudo terminal; keys are typed, the screen is followed with a headless xterm.js; the output is recorded as an asciicast and rendered as stills | `assets/casts/*.cast`, `assets/screens/tui-*.png`, and `tui-*-clean.png` without the last row (it shows the random mock workspace path); the videos and `docs/images/` use the clean copies |
 | `shared` | one mock backend, with `ref`, `ref-gui` and `ref-web` showing the same session | `tui-shared`, `gui-shared`, `web-shared` |
 
 `web` and `gui` run the same scripts (`capture/scenarios.ts`) through one `Ui` interface, so a shot exists under both prefixes. `docs/images/` gets the shots that are marked `readme` in the scripts, 1440 px wide, as palette PNGs (`sharp`).
