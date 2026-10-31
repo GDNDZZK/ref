@@ -10,6 +10,10 @@
 #include <QTcpServer>
 #include <QtSystemDetection>
 
+#ifdef Q_OS_WIN
+#include <windows.h> // CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW
+#endif
+
 using namespace Qt::StringLiterals;
 using namespace std::chrono_literals;
 

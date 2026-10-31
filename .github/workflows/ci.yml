@@ -107,6 +107,8 @@ jobs:
       - name: Build ref-server
         shell: bash
         run: |
+          # Git Bash puts its own /usr/bin/link (GNU ln) before the MSVC linker that rustc runs.
+          [[ "$RUNNER_OS" == Windows ]] && mv /usr/bin/link.exe /usr/bin/link-gnu.exe
           cargo build -p ref-server --locked
           suffix=""
           [[ "$RUNNER_OS" == Windows ]] && suffix=".exe"

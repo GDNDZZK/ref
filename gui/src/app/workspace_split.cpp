@@ -87,7 +87,7 @@ QCoro::Task<> Workspace::leaveSplit()
 	{
 		if(other && other != m_current && other->isAttached())
 		{
-			co_await other->detach();
+			static_cast<void>(co_await other->detach());
 		}
 	}
 }
@@ -205,7 +205,7 @@ QCoro::Task<> Workspace::zoomTask(QString sessionId)
 {
 	if(ChatSession* previous = session(m_zoomed); previous != nullptr && previous->isAttached())
 	{
-		co_await previous->background();
+		static_cast<void>(co_await previous->background());
 	}
 	m_zoomed = sessionId;
 	setFocusedTile(sessionId);
@@ -241,6 +241,6 @@ QCoro::Task<> Workspace::unzoomTask()
 	ChatSession* tile = session(id);
 	if(tile != nullptr && tile->isAttached())
 	{
-		co_await tile->background();
+		static_cast<void>(co_await tile->background());
 	}
 }

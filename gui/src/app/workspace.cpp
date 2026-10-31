@@ -385,14 +385,14 @@ QCoro::Task<Workspace::Done> Workspace::show(QString sessionId)
 	if(serial != m_showSerial && &target != m_current && !m_split)
 	{
 		// The user has moved on to another session meanwhile.
-		co_await target.detach();
+		static_cast<void>(co_await target.detach());
 		co_return Result<void>();
 	}
 	ChatSession* old = m_current;
 	setCurrent(&target);
 	if(old != nullptr && old != &target && !m_split && old->isAttached() && !m_leaving.contains(old->sessionId()))
 	{
-		co_await old->detach();
+		static_cast<void>(co_await old->detach());
 	}
 	co_return Result<void>();
 }

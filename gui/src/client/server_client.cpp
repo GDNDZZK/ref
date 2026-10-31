@@ -171,7 +171,7 @@ void ServerClient::onHeartbeat()
 QCoro::Task<> ServerClient::ping()
 {
 	m_pingOutstanding = true;
-	co_await request(proto::request::ping());
+	static_cast<void>(co_await request(proto::request::ping()));
 	m_pingOutstanding = false;
 }
 

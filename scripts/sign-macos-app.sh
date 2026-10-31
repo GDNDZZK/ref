@@ -25,9 +25,14 @@ while IFS= read -r -d '' item; do
 done < <(find "$APP/Contents" -depth ! -type l \
   \( -name '*.dylib' -o -name '*.so' -o -name '*.framework' \) -print0)
 
+# The main executable goes last: codesign checks the other programs in the folder when it signs
+# it, and fails with "code object is not signed at all" for ref-server if that is not signed yet.
+# (On Apple Silicon the linker signs every program it makes, so only Intel hits this.)
+main_executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist")"
 while IFS= read -r -d '' executable; do
   sign "$executable"
-done < <(find "$APP/Contents/MacOS" -type f -print0)
+done < <(find "$APP/Contents/MacOS" -type f ! -name "$main_executable" -print0)
+sign "$APP/Contents/MacOS/$main_executable"
 
 sign "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
