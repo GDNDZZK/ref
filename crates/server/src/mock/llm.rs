@@ -150,7 +150,7 @@ async fn reply(
     model: &str,
     prompt_tokens: u64,
 ) -> std::io::Result<bool> {
-    let script = select(&ctx.prompt);
+    let script = select(&ctx.prompt, &ctx.root_prompt);
     let round = (script.play)(ctx);
     let prompt_tokens = if round.fill_context {
         super::config::context_window(model)

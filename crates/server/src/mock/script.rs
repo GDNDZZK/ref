@@ -126,6 +126,11 @@ pub struct Ctx {
     pub prompt: String,
     /// The prompt without its first word (the script name).
     pub args: String,
+    /// The conversation's first user message (a created session's task without its envelope).
+    pub root_prompt: String,
+    /// How many user messages in the conversation come from other sessions, the current one
+    /// included.
+    pub peer_reports: usize,
     pub round: usize,
     pub session_id: String,
     /// Identical requests seen so far, this one included (a retry repeats its request).
@@ -160,6 +165,8 @@ const TOOL_IMAGES_MARKER: &str = "Attached image(s) from tool result:";
 const SPAWN_HEADER: &str = "[Session created by";
 /// First line of the reminder appended to a created session's task.
 const REPORT_REMINDER: &str = "[When you finish or get blocked";
+/// How a message from another session starts (see `peers`).
+pub const PEER_MESSAGE: &str = "[Message from session";
 
 fn message_text(message: &Value) -> String {
     match &message["content"] {
@@ -227,6 +234,17 @@ pub fn analyze(body: &Value, session_id: &str, attempt: u32) -> Task {
         }
     }
     tool_results.reverse();
+    let users: Vec<String> = messages
+        .iter()
+        .filter(|m| role(m) == "user")
+        .map(message_text)
+        .filter(|t| !t.starts_with(TOOL_IMAGES_MARKER))
+        .collect();
+    let root_prompt = users
+        .first()
+        .map(|t| task_text(t.trim()))
+        .unwrap_or_default();
+    let peer_reports = users.iter().filter(|t| t.starts_with(PEER_MESSAGE)).count();
     let prompt = task_text(prompt.trim());
     let args = prompt
         .split_once(char::is_whitespace)
@@ -235,6 +253,8 @@ pub fn analyze(body: &Value, session_id: &str, attempt: u32) -> Task {
     Task::Reply(Ctx {
         prompt,
         args,
+        root_prompt,
+        peer_reports,
         round,
         session_id: session_id.to_string(),
         attempt,
@@ -242,17 +262,41 @@ pub fn analyze(body: &Value, session_id: &str, attempt: u32) -> Task {
     })
 }
 
-/// The script a prompt asks for: its first word, case-insensitive. Messages from other
-/// sessions get `ack`; anything else the default script.
-pub fn select(prompt: &str) -> &'static Script {
-    use super::scripts;
-    if prompt.starts_with("[Message from session") {
-        return scripts::find("ack").expect("ack script");
-    }
+/// The first word of a prompt, lowercase, without surrounding punctuation (but `-` is part of
+/// a script name).
+fn first_word(prompt: &str) -> String {
     let word = prompt.split_whitespace().next().unwrap_or("");
     let word = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '-');
-    scripts::find(&word.to_lowercase())
-        .unwrap_or_else(|| scripts::find("default").expect("default"))
+    word.to_lowercase()
+}
+
+/// Script that handles the reports of a crew directed by `orchestrate`.
+const ORCHESTRATE: &str = "orchestrate";
+const ORCHESTRATE_REPORT: &str = "orchestrate-report";
+
+/// The script a prompt asks for: its first word, case-insensitive. A message from another
+/// session goes to `orchestrate-report` when the conversation started with `orchestrate`, and
+/// to `ack` otherwise; anything else gets the default script.
+pub fn select(prompt: &str, root_prompt: &str) -> &'static Script {
+    use super::scripts;
+    if prompt.starts_with(PEER_MESSAGE) {
+        let name = if first_word(root_prompt) == ORCHESTRATE {
+            ORCHESTRATE_REPORT
+        } else {
+            "ack"
+        };
+        return scripts::find(name).expect("report script");
+    }
+    scripts::find(&first_word(prompt)).unwrap_or_else(|| scripts::find("default").expect("default"))
+}
+
+/// The name of the session that sent a message from another session.
+pub fn sender_name(prompt: &str) -> &str {
+    prompt
+        .strip_prefix(PEER_MESSAGE)
+        .and_then(|rest| rest.trim_start().strip_prefix('"'))
+        .and_then(|rest| rest.split('"').next())
+        .unwrap_or("")
 }
 
 #[cfg(test)]
@@ -316,14 +360,57 @@ mod tests {
 
     #[test]
     fn scripts_are_chosen_by_first_word() {
-        assert_eq!(select("Markdown").name, "markdown");
-        assert_eq!(select("stream-args now").name, "stream-args");
-        assert_eq!(select("`help`!").name, "help");
-        assert_eq!(select("something else").name, "default");
+        assert_eq!(select("Markdown", "").name, "markdown");
+        assert_eq!(select("stream-args now", "").name, "stream-args");
+        assert_eq!(select("`help`!", "").name, "help");
+        assert_eq!(select("something else", "").name, "default");
+        assert_eq!(select("", "").name, "default");
+        assert_eq!(select("orch-scout ses_1", "").name, "orch-scout");
+    }
+
+    const REPORT: &str = "[Message from session \"x\" (id y)]\nhi";
+
+    #[test]
+    fn messages_from_sessions_go_to_ack_unless_the_conversation_orchestrates() {
+        assert_eq!(select(REPORT, "peer").name, "ack");
+        assert_eq!(select(REPORT, "").name, "ack");
         assert_eq!(
-            select("[Message from session \"x\" (id y)]\nhi").name,
-            "ack"
+            select(REPORT, "orchestrate fix it").name,
+            "orchestrate-report"
         );
-        assert_eq!(select("").name, "default");
+        assert_eq!(select(REPORT, "Orchestrate").name, "orchestrate-report");
+        assert_eq!(select(REPORT, "orchestrated").name, "ack");
+        assert_eq!(sender_name(REPORT), "x");
+        assert_eq!(sender_name("hello"), "");
+    }
+
+    #[test]
+    fn the_root_prompt_and_the_reports_are_counted_over_the_whole_conversation() {
+        let b = body(json!([
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "orchestrate fix it"},
+            {"role": "assistant", "content": "ok"},
+            {"role": "user", "content": REPORT},
+            {"role": "assistant", "content": "got it"},
+            {"role": "user", "content": REPORT},
+        ]));
+        let ctx = reply(analyze(&b, "ses_1", 1));
+        assert_eq!(ctx.root_prompt, "orchestrate fix it");
+        assert_eq!(ctx.peer_reports, 2);
+        assert_eq!(ctx.round, 0);
+        assert!(ctx.prompt.starts_with(PEER_MESSAGE));
+    }
+
+    #[test]
+    fn the_root_prompt_of_a_created_session_is_its_task() {
+        let b = body(json!([
+            {"role": "user", "content": "[Session created by \"main\" (id ses_p)]\norch-scout ses_p\n[When you finish or get blocked, report]"},
+            {"role": "assistant", "content": null, "tool_calls": []},
+            {"role": "tool", "tool_call_id": "c1", "content": "x"},
+        ]));
+        let ctx = reply(analyze(&b, "ses_c", 1));
+        assert_eq!(ctx.root_prompt, "orch-scout ses_p");
+        assert_eq!(ctx.peer_reports, 0);
+        assert_eq!(ctx.round, 1);
     }
 }
