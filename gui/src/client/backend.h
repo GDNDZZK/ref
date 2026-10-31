@@ -4,13 +4,12 @@
 #include "client/launcher.h"
 #include "client/mock_backend.h"
 #include "client/server_client.h"
+#include "client/stop_source.h"
 
 #include <QCoroTask>
 #include <QObject>
 #include <QString>
-#include <QTimer>
 
-#include <coroutine>
 #include <memory>
 
 namespace refgui::client
@@ -78,19 +77,6 @@ signals:
 	void connected();
 
 private:
-	// `co_await pause()` waits out the reconnect pause. shutdown() cuts it short: a coroutine
-	// that is never resumed is never destroyed.
-	struct PauseAwaiter
-	{
-		Backend& backend;
-
-		bool await_ready() const noexcept { return false; }
-		void await_suspend(std::coroutine_handle<> waiter);
-		void await_resume() const noexcept {}
-	};
-	PauseAwaiter pause() { return {*this}; }
-	void endPause();
-
 	QCoro::Task<> run();
 	QCoro::Task<std::expected<Endpoint, QString>> connectOnce();
 	QCoro::Task<bool> tryConnect(const Endpoint& endpoint, std::chrono::milliseconds timeout);
@@ -107,8 +93,7 @@ private:
 	State m_state = State::Connecting;
 	QString m_reason;
 	bool m_stopping = false;
-	QTimer m_pauseTimer;
-	std::coroutine_handle<> m_pauseWaiter;
+	StopSource m_stop; // ends every wait of the connecting loop
 };
 
 } // namespace refgui::client

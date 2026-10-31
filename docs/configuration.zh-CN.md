@@ -167,7 +167,8 @@ ref 支持三种 API。除非设置了 `api`，否则根据 `npm` 选择：
       "context": 200000,                // 上下文窗口 token 数（默认 128000）
       "output": 32000,                  // 最大输出 token 数
       "input": 180000,                  // 为兼容 opencode 而接受，不使用
-      "compact": 120000                 // ref：建议的压缩点（token 数）
+      "compact": 120000,                // ref：建议的压缩点（token 数）
+      "threshold": 0.8                  // ref：该模型的自动压缩点（比例；大于 1 时为 token 数）
     },
     "attachment": true,                 // 接受图片（或 "modalities": {"input": ["text", "image"]}）
     "reasoning": true,                  // 推理模型（也可写 "thinking"）
@@ -340,7 +341,7 @@ ref 在 `~/.config/opencode/`、`~/.config/ref/` 以及每个项目的 `.opencod
 }
 ```
 
-不大于 1 的值表示上下文窗口的比例，更大的值表示 token 数。模型的 `limit.compact` 会覆盖该模型的 `recommend`。
+不大于 1 的值表示上下文窗口的比例，更大的值表示 token 数。模型的 `limit.compact` 会覆盖该模型的 `recommend`。模型的 `limit.threshold` 会覆盖该模型的 `threshold`，取值含义相同。
 
 模型通过 `context_window` 工具看到这两个点，并可以用 `compact_context` 自行压缩。你可以随时用 `ctrl+x c` 或 `/compact` 压缩。
 

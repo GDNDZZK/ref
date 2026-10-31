@@ -100,7 +100,7 @@ pub fn resolve(cfg: &Config, r: &ModelRef, agent: &str) -> Result<(Provider, Mod
 
 /// Context window thresholds for a model (used = 0).
 pub fn context_for(cfg: &Config, r: &ModelRef) -> ContextUsage {
-    let (max, compact_at) = match cfg.model(r) {
+    let (max, compact_at, threshold) = match cfg.model(r) {
         Some((_, m)) => (
             if m.context > 0 {
                 m.context
@@ -108,14 +108,15 @@ pub fn context_for(cfg: &Config, r: &ModelRef) -> ContextUsage {
                 DEFAULT_CONTEXT
             },
             m.compact_at,
+            m.threshold,
         ),
-        None => (DEFAULT_CONTEXT, None),
+        None => (DEFAULT_CONTEXT, None, None),
     };
     ContextUsage {
         used: 0,
         max,
         recommend: cfg.compaction.recommend_tokens(max, compact_at),
-        auto: cfg.compaction.auto_tokens(max),
+        auto: cfg.compaction.auto_tokens(max, threshold),
     }
 }
 

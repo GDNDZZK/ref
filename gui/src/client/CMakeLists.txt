@@ -15,6 +15,8 @@ qt_add_library(refgui_client STATIC
 	server_client.h
 	spawn_lock.cpp
 	spawn_lock.h
+	stop_source.cpp
+	stop_source.h
 )
 
 target_include_directories(refgui_client PUBLIC ${PROJECT_SOURCE_DIR}/src)

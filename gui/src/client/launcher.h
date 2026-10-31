@@ -1,6 +1,7 @@
 #pragma once
 
 #include "client/endpoint.h"
+#include "client/stop_source.h"
 
 #include <QCoroTask>
 #include <QString>
@@ -33,10 +34,12 @@ using TryConnect = std::function<QCoro::Task<bool>(const Endpoint&, std::chrono:
 
 // Connects to `target` with `tryConnect` and returns the endpoint that worked, or why none did.
 // `onStartingBackend` is called every few hundred milliseconds while a started backend boots.
+// Once `stop` is requested the waiting ends and the result is a failure.
 QCoro::Task<std::expected<Endpoint, QString>> connectTarget(Target target,
                                                             TryConnect tryConnect,
                                                             std::function<void()> onStartingBackend,
-                                                            QString instancesDirectory);
+                                                            QString instancesDirectory,
+                                                            StopSource& stop);
 
 // The ref-server next to the running executable, else the one on PATH.
 QString serverBinary();

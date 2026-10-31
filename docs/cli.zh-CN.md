@@ -98,6 +98,8 @@ ref --server ws://127.0.0.1:7777 --token <token>
 | `~/.config/ref/`, `~/.config/opencode/` | 配置。参见[配置](configuration.zh-CN.md#配置文件的读取位置)。 |
 | `~/.local/share/ref/sessions/` | 保存的会话。 |
 | `~/.local/state/ref/instances/<pid>.json` | 每个运行中的后端一个文件：端口、令牌和设置。只有你自己可读（权限 600）。 |
+| `~/.local/state/ref/prompt-history.jsonl` | 提示历史（500 条），`ref` 和 `ref-gui` 共用。 |
+| `~/.local/state/ref/gui.json` | `ref-gui` 的设置（[设置](gui.zh-CN.md#设置)）。 |
 | `~/.local/state/ref/web/login-token` | `ref-web` 的登录 token，仅你本人可读（权限 600）。在 `ref-web` 停止时删除它即可换新 token。 |
 | `~/.local/state/ref/logs/` | 后端日志，包括配置警告。 |
 

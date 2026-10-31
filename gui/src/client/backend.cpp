@@ -48,9 +48,6 @@ Backend::Backend(Source source, QString cwd, QObject* parent)
 	, m_cwd(std::move(cwd))
 	, m_client(this)
 {
-	m_pauseTimer.setSingleShot(true);
-	m_pauseTimer.setInterval(ReconnectPause);
-	connect(&m_pauseTimer, &QTimer::timeout, this, &Backend::endPause);
 }
 
 Backend::~Backend()
@@ -66,23 +63,8 @@ void Backend::start()
 void Backend::shutdown()
 {
 	m_stopping = true;
+	m_stop.request();
 	m_client.close();
-	endPause();
-}
-
-void Backend::PauseAwaiter::await_suspend(std::coroutine_handle<> waiter)
-{
-	backend.m_pauseWaiter = waiter;
-	backend.m_pauseTimer.start();
-}
-
-void Backend::endPause()
-{
-	m_pauseTimer.stop();
-	if(const std::coroutine_handle<> waiter = std::exchange(m_pauseWaiter, {}))
-	{
-		waiter.resume();
-	}
 }
 
 // Connect, wait for the connection to end, pause, repeat.
@@ -99,7 +81,7 @@ QCoro::Task<> Backend::run()
 		if(!endpoint)
 		{
 			setState(State::Disconnected, endpoint.error());
-			co_await pause();
+			co_await m_stop.sleep(ReconnectPause);
 			continue;
 		}
 
@@ -111,7 +93,7 @@ QCoro::Task<> Backend::run()
 			co_return;
 		}
 		setState(State::Disconnected, reason);
-		co_await pause();
+		co_await m_stop.sleep(ReconnectPause);
 	}
 }
 
@@ -127,7 +109,8 @@ QCoro::Task<std::expected<Endpoint, QString>> Backend::connectOnce()
 		co_return co_await launcher::connectTarget(launcher::Explicit{*mock},
 		                                           [this](const Endpoint& endpoint, std::chrono::milliseconds timeout) { return tryConnect(endpoint, timeout); },
 		                                           [] {},
-		                                           {});
+		                                           {},
+		                                           m_stop);
 	}
 
 	launcher::Target target = launcher::Auto{};
@@ -139,7 +122,8 @@ QCoro::Task<std::expected<Endpoint, QString>> Backend::connectOnce()
 		target,
 		[this](const Endpoint& endpoint, std::chrono::milliseconds timeout) { return tryConnect(endpoint, timeout); },
 		[this] { setState(State::StartingBackend); },
-		instancesDirectory());
+		instancesDirectory(),
+		m_stop);
 }
 
 QCoro::Task<bool> Backend::tryConnect(const Endpoint& endpoint, std::chrono::milliseconds timeout)
@@ -161,7 +145,7 @@ QCoro::Task<std::expected<Endpoint, QString>> Backend::startMock()
 		co_return m_mock->endpoint();
 	}
 	m_mock.reset();
-	auto mock = co_await MockBackend::start(launcher::serverBinary());
+	auto mock = co_await MockBackend::start(launcher::serverBinary(), m_stop);
 	if(!mock)
 	{
 		co_return std::unexpected(mock.error());
