@@ -4,7 +4,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { SessionInfo } from '../proto/generated'
 import { relativeTimeText } from '../shell/relativeTimeText.ts'
-import { dirName, displayTitle, relativeTime } from '../shell/sessionRow.ts'
+import { dirName, historyLabel, relativeTime } from '../shell/sessionRow.ts'
 import ContextMenu from './ContextMenu.vue'
 import type { MenuItem } from './ContextMenu.vue'
 
@@ -33,7 +33,7 @@ const menuItems = computed<MenuItem[]>(() => [
     @keydown.enter.self="emit('open')"
     @contextmenu.prevent="menu = { x: $event.clientX, y: $event.clientY }"
   >
-    <span class="title">{{ displayTitle(info) }}</span>
+    <span class="title">{{ historyLabel(info) }}</span>
     <span class="subtitle">{{ subtitle }}</span>
     <ContextMenu v-if="menu" :x="menu.x" :y="menu.y" :items="menuItems" @close="menu = undefined" />
   </div>

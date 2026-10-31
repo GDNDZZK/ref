@@ -7,7 +7,7 @@ import { useNow } from '../composables/useNow.ts'
 import type { SessionInfo } from '../proto/generated'
 import {
   dirName,
-  displayTitle,
+  liveLabel,
   needsAttention,
   rowState,
   runningTime,
@@ -31,7 +31,7 @@ const now = useNow()
 const state = computed(() => rowState(props.info))
 const attention = computed(() => needsAttention(state.value))
 const progress = computed(() => todoProgress(props.info.todos))
-const title = computed(() => displayTitle(props.info))
+const title = computed(() => liveLabel(props.info))
 
 // Line 2: what the session is doing, or else where it is and for how long.
 const note = computed(() => {

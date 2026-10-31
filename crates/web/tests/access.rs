@@ -10,6 +10,8 @@ use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 const NO_BACKEND: &str = "ws://127.0.0.1:1/";
 const TOKEN_FILE: &str = "web/login-token";
 const VALID_TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+/// Long enough for a ref-web that accepts its arguments to print its login URL.
+const PORT_ZERO_SETTLE: std::time::Duration = std::time::Duration::from_millis(1500);
 /// How long the half-written token stays unfinished in the race test.
 const HALF_WRITTEN_FOR: std::time::Duration = std::time::Duration::from_millis(300);
 
@@ -182,4 +184,37 @@ async fn sigterm_closes_the_tabs_and_exits_successfully() {
         Message::Close(Some(frame)) => assert_eq!(u16::from(frame.code), 1001),
         other => panic!("expected a going-away close, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn port_zero_is_rejected_before_anything_starts() {
+    let env = Env::new("port-zero");
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_ref-web"))
+        .args(["--no-open", "--port", "0", "--server", NO_BACKEND])
+        .env("REF_STATE_DIR", env.state_dir())
+        .env("REF_DATA_DIR", env.dir.join("data"))
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    // A ref-web that accepted port 0 would keep running; give it a moment, then stop it.
+    let deadline = std::time::Instant::now() + PORT_ZERO_SETTLE;
+    let mut exited = false;
+    while !exited && std::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        exited = child.try_wait().unwrap().is_some();
+    }
+    if !exited {
+        child.kill().unwrap();
+    }
+    let output = child.wait_with_output().unwrap();
+    assert!(exited, "ref-web --port 0 kept running");
+    assert!(!output.status.success());
+    let err = String::from_utf8_lossy(&output.stderr);
+    assert!(err.contains("--port"), "{err}");
+    assert!(
+        output.stdout.is_empty(),
+        "no login URL for port 0: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
 }

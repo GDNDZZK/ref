@@ -4,7 +4,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { SessionInfo } from '../../proto/generated'
 import { relativeTimeText } from '../../shell/relativeTimeText.ts'
-import { dirName, displayTitle, relativeTime, rowState } from '../../shell/sessionRow.ts'
+import { dirName, historyLabel, liveLabel, relativeTime, rowState } from '../../shell/sessionRow.ts'
 import { useCommandsStore } from '../../stores/commands.ts'
 import { useDialogsStore } from '../../stores/dialogs.ts'
 import { useLayoutStore } from '../../stores/layout.ts'
@@ -38,6 +38,8 @@ const items = computed<SessionItem[]>(() => {
 
 const isLive = (item: SessionItem) => item.info.live || workspace.live.some((s) => s.id === item.key)
 
+const labelOf = (item: SessionItem) => (isLive(item) ? liveLabel(item.info) : historyLabel(item.info))
+
 function subtitle(item: SessionItem): string {
   if (isLive(item)) return dirName(item.info.cwd)
   const when = relativeTimeText(relativeTime(item.info.updated_at, Date.now()), t, locale.value)
@@ -60,7 +62,7 @@ function close(item: SessionItem): void {
     :title="t('dialog.sessions.title')"
     :search-label="t('dialog.sessions.search')"
     :items="items"
-    :text="(item) => `${displayTitle(item.info)} ${item.info.cwd}`"
+    :text="(item) => `${labelOf(item)} ${item.info.cwd}`"
     :checked="workspace.currentId"
     :empty="t('sidebar.noMatch')"
     @pick="choose"
@@ -69,7 +71,7 @@ function close(item: SessionItem): void {
     <template #row="{ item }">
       <SessionDot v-if="isLive(item)" :state="rowState(item.info)" class="state" />
       <div class="text">
-        <span class="name">{{ displayTitle(item.info) }}</span>
+        <span class="name">{{ labelOf(item) }}</span>
         <span class="detail">{{ subtitle(item) }}</span>
       </div>
       <button

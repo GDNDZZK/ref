@@ -5,7 +5,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useNow } from '../composables/useNow.ts'
 import type { ChatSession } from '../model/chatSession.ts'
-import { displayTitle, needsAttention, rowState, runningTime, todoProgress } from '../shell/sessionRow.ts'
+import { liveLabel, needsAttention, rowState, runningTime, todoProgress } from '../shell/sessionRow.ts'
 import AlertBadge from './AlertBadge.vue'
 import Icon from './Icon.vue'
 import SessionDot from './SessionDot.vue'
@@ -21,7 +21,7 @@ const now = useNow()
 
 const info = computed(() => props.session.info)
 const state = computed(() => (info.value ? rowState(info.value) : 'idle'))
-const title = computed(() => (info.value ? displayTitle(info.value) : props.session.id))
+const title = computed(() => (info.value ? liveLabel(info.value) : props.session.id))
 const progress = computed(() => todoProgress(info.value?.todos))
 const elapsed = computed(() => (info.value ? runningTime(info.value, now.value) : undefined))
 </script>
