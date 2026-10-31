@@ -36,13 +36,21 @@ describe('a single question with a single choice', () => {
     expect(form.answers()).toEqual([['Iterator']])
   })
 
-  it('moves the highlight with the arrows, round the list including the custom row', () => {
+  it('moves the highlight with the arrows or j and k, and stops at the first and last row', () => {
     const form = formOf(question())
     form.press('ArrowUp')
+    form.press('k')
     form.press('ArrowUp')
-    expect(form.choices[0]!.cursor).toBe(3)
-    form.press('ArrowDown')
     expect(form.choices[0]!.cursor).toBe(0)
+    form.press('j')
+    form.press('ArrowDown')
+    form.press('ArrowDown')
+    form.press('ArrowDown')
+    form.press('j')
+    expect(form.choices[0]!.cursor).toBe(3) // the custom row is the last
+    form.press('k')
+    form.press('k')
+    form.press('k')
     expect(form.press('Enter')).toBe('submit')
     expect(form.answers()).toEqual([['Range']])
   })
@@ -87,8 +95,10 @@ describe('a single question with a single choice', () => {
     expect(formOf(question()).press('Escape')).toBe('dismiss')
   })
 
-  it('ignores other keys', () => {
+  it('ignores other keys, and tab keys without tabs', () => {
     expect(formOf(question()).press('x')).toBe('ignored')
+    expect(formOf(question()).press('Tab')).toBe('ignored')
+    expect(formOf(question()).press('ArrowRight')).toBe('ignored')
   })
 })
 
@@ -122,16 +132,26 @@ describe('several questions or a multiple choice', () => {
     expect(form.tab).toBe(1)
   })
 
-  it('flips checkboxes with number keys and Space, and Enter moves on', () => {
+  it('flips checkboxes with number keys, Space and Enter', () => {
     const form = formOf(checks)
     form.press('1') // unchecks Tests
     form.press('3') // checks Fmt; the cursor is on row 3
     expect(form.answers()).toEqual([['Clippy', 'Fmt']])
-    form.press('ArrowUp') // row 2 (Clippy)
+    form.press('k') // row 2 (Clippy)
     form.press(' ')
     expect(form.answers()).toEqual([['Fmt']])
+    expect(form.press('Enter')).toBe('handled') // Enter flips too, it does not move on
+    expect(form.answers()).toEqual([['Clippy', 'Fmt']])
     expect(form.tab).toBe(0)
-    expect(form.press('Enter')).toBe('handled')
+  })
+
+  it('reaches the confirm tab with the arrow or Tab keys in a multiple choice', () => {
+    const form = formOf(checks)
+    form.press('ArrowRight')
+    expect(form.onConfirmTab).toBe(true)
+    form.press('Tab', true)
+    expect(form.tab).toBe(0)
+    form.press('Tab')
     expect(form.onConfirmTab).toBe(true)
   })
 
@@ -142,6 +162,7 @@ describe('several questions or a multiple choice', () => {
     form.setCustomText(0, 'Doc tests')
     expect(form.commitCustom()).toBe('handled')
     expect(form.answers()).toEqual([['Tests', 'Clippy', 'Doc tests']])
+    expect(form.tab).toBe(0) // a multiple choice stays on its tab
   })
 
   it('walks the tabs with the arrows and Tab', () => {
@@ -154,8 +175,10 @@ describe('several questions or a multiple choice', () => {
     expect(form.tab).toBe(0)
     form.press('Tab', true)
     expect(form.onConfirmTab).toBe(true)
-    form.press('ArrowLeft')
+    form.press('Tab', true) // Shift+Tab goes back from the confirm tab too
     expect(form.tab).toBe(1)
+    form.press('ArrowLeft')
+    expect(form.tab).toBe(0)
   })
 
   it('submits from the confirm tab and lists the questions left unanswered', () => {

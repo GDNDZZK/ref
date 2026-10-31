@@ -377,8 +377,8 @@
     "submit": "Submit",
     "dismiss": "Dismiss",
     "unanswered": "Unanswered",
-    "hintSingle": "↑↓ move · 1-9 or Enter to pick · Esc dismiss",
-    "hintTabbed": "←→ switch question · 1-9 or Space to pick · Enter next · Esc dismiss",
+    "hintSingle": "↑↓ or j/k move · 1-9, Space or Enter to pick · Esc dismiss",
+    "hintTabbed": "↑↓ or j/k move · 1-9, Space or Enter to pick · ←→ or Tab switch question · Esc dismiss",
     "hintConfirm": "Enter submits · ← back · Esc dismiss"
   }
 }
