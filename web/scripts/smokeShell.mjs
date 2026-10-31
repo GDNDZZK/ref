@@ -6,6 +6,12 @@ const SETTLE_MS = 500
 const LOGIN_LOST_WATCH_MS = 12000 // longer than the longest retry delay (8 s)
 const ROWS = '.sidebar .running .row'
 const DIALOG = '[role="dialog"]'
+const VIEWPORT_WIDTH = 980
+const SIZING_HEIGHTS = [900, 600]
+const SIZING_COUNTS = [4, 8]
+const HISTORY_ROW_PX = 44 // Theme.sidebarHistoryRowHeight
+const MIN_HISTORY_ROWS = 3 // Theme.sidebarMinHistoryRows
+const MIN_RUNNING_ROWS = 3 // Theme.sidebarMinRunningRows
 
 async function count(page, selector) {
   return page.locator(selector).count()
@@ -115,4 +121,40 @@ export async function loginLostScenario(page, problems, restartServer) {
   })
   await page.waitForTimeout(LOGIN_LOST_WATCH_MS)
   if (attempts > 0) problems.push(`the page kept reconnecting after the login was lost (${attempts} tries)`)
+}
+
+async function sidebarGeometry(page) {
+  return page.evaluate(() => {
+    const box = (selector) => document.querySelector(selector).getBoundingClientRect()
+    const running = document.querySelector('.sidebar .running')
+    return {
+      running: box('.sidebar .running').height,
+      runningScrolls: running.scrollHeight > running.clientHeight,
+      runningRows: running.querySelectorAll('.row').length,
+      history: box('.sidebar .history').height,
+    }
+  })
+}
+
+// Running keeps its rows until History would get fewer than three rows; below that it scrolls.
+export async function sidebarSizingScenario(page, problems) {
+  for (const wanted of SIZING_COUNTS) {
+    while ((await count(page, ROWS)) < wanted) {
+      await page.keyboard.press('Alt+KeyN')
+      await page.waitForTimeout(SETTLE_MS / 5)
+    }
+    for (const height of SIZING_HEIGHTS) {
+      await page.setViewportSize({ width: VIEWPORT_WIDTH, height })
+      await shot(page, `sidebar-${wanted}-rows-${height}px`)
+      const geometry = await sidebarGeometry(page)
+      console.log(`sidebar ${wanted} running, ${height}px:`, JSON.stringify(geometry))
+      const minHistory = MIN_HISTORY_ROWS * HISTORY_ROW_PX
+      const runningAtMinimum = geometry.runningRows >= MIN_RUNNING_ROWS && geometry.runningScrolls
+      if (geometry.history < minHistory && !runningAtMinimum)
+        problems.push(`sidebar ${wanted} running at ${height}px: history ${geometry.history}px is too small`)
+      if (geometry.history > minHistory && geometry.runningScrolls)
+        problems.push(`sidebar ${wanted} running at ${height}px: running scrolls while history has room`)
+    }
+  }
+  await page.setViewportSize({ width: VIEWPORT_WIDTH, height: SIZING_HEIGHTS[0] })
 }
