@@ -44,7 +44,7 @@ ref-web [DIR] [options]
 | Option | Meaning |
 |---|---|
 | `DIR` | Directory for new sessions (default: the current directory). |
-| `--port N` | Port to listen on (default `7480`). |
+| `--port N` | Port to listen on (1–65535, default `7480`). |
 | `--host ADDR` | Address to listen on (default `127.0.0.1`). Any other address opens `ref-web` to the network, without TLS; a warning is printed. |
 | `--no-open` | Do not open the browser. |
 | `--server ws://host:port` | Connect to this backend instead of finding or starting one. |

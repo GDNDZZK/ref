@@ -43,8 +43,8 @@ const TUNNEL_CLOSE_GRACE: Duration = Duration::from_secs(3);
 struct Cli {
     /// Directory new sessions start in (default: current directory).
     dir: Option<String>,
-    /// Port to listen on.
-    #[arg(long, default_value_t = DEFAULT_PORT)]
+    /// Port to listen on (1-65535).
+    #[arg(long, default_value_t = DEFAULT_PORT, value_parser = clap::value_parser!(u16).range(1..))]
     port: u16,
     /// Address to listen on. Anything but a loopback address opens ref-web to the network
     /// (no TLS).
