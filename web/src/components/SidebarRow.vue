@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // A live session in the sidebar (SessionRow.qml): state dot, title, todo progress, where it runs
-// and for how long. A session that needs the user (permission, error) is drawn apart.
+// and for how long. A session that needs the user (permission, question, error) is drawn apart.
 import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useNow } from '../composables/useNow.ts'
@@ -42,6 +42,8 @@ const note = computed(() => {
       return { text: t('sidebar.retrying'), tone: 'warning' }
     case 'permission':
       return { text: t('sidebar.needsPermission'), tone: 'warning' }
+    case 'question':
+      return { text: t('sidebar.needsAnswer'), tone: 'warning' }
     case 'error':
       return { text: props.info.last_error ?? '', tone: 'danger' }
     default:
@@ -131,6 +133,7 @@ function openMenu(event: MouseEvent): void {
         <span v-if="attention" ref="mark" class="mark">
           <Flourish ref="flourish" :ring-reach="2.5" />
           <Icon v-if="state === 'permission'" icon="lock-16" class="lock" />
+          <Icon v-else-if="state === 'question'" icon="chat-16" class="lock" />
           <AlertBadge v-else :size="BADGE_SIZE" />
         </span>
         <span v-else-if="progress" class="progress" :class="{ complete: progress.complete }">
@@ -180,7 +183,8 @@ function openMenu(event: MouseEvent): void {
   box-shadow: inset 0 0 0 1px var(--user-bubble-border);
 }
 
-.row.attention.permission {
+.row.attention.permission,
+.row.attention.question {
   background: var(--warning-surface);
   box-shadow: inset 0 0 0 1px var(--warning-border);
 }

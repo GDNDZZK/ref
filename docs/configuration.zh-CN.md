@@ -2,7 +2,9 @@
 
 # 配置
 
-ref 读取 [opencode](https://opencode.ai) 的配置格式，已有的 `opencode.json` 无需修改即可使用。ref 还增加了几个自己的配置项（下文标注 **ref**）。
+ref 读取 [opencode](https://opencode.ai) 的配置格式：已有 `opencode.json` 中的提供商、模型、智能体、权限、MCP 服务器和命令都会被加载。ref 还增加了几个自己的配置项（下文标注 **ref**）。
+
+有些 opencode 配置项会被接受但不起作用：`command.<name>.agent` 和 `command.<name>.model`、智能体的 `steps` 和 `maxSteps`，以及模型的 `limit.input`。智能体的 `mode` 只有一个用途（见[智能体](#智能体)）。
 
 - [快速开始](#快速开始)
 - [配置文件的读取位置](#配置文件的读取位置)
@@ -255,7 +257,7 @@ ref 支持三种 API。除非设置了 `api`，否则根据 `npm` 选择：
 | `can_spawn` | `false`（`build` 为 `true`） | **ref** 为智能体提供 `create_session` 和 `close_session` 工具。也可写 `spawn`。 |
 | `color` | | 智能体名称在 TUI 中的颜色。 |
 | `hidden` | `false` | 不在 TUI 中列出，也不提供给其他会话。 |
-| `mode` | | opencode 的 `primary` / `subagent` / `all`。为兼容而接受；ref 不按 mode 限制智能体。 |
+| `mode` | | opencode 的 `primary` / `subagent` / `all`。ref 不按 mode 限制智能体。只有在没有 `build` 智能体、也没有有效的 `default_agent` 时才有用：第一个不是 `subagent` 且未隐藏的智能体成为默认智能体。 |
 | `disable` | `false` | 移除该智能体（也可写 `disabled`）。 |
 
 `steps` 和 `maxSteps` 会被接受并忽略。
@@ -317,6 +319,8 @@ ref 在 `~/.config/opencode/`、`~/.config/ref/` 以及每个项目的 `.opencod
 
 **工具别名。** opencode 的工具名会映射到 ref 的工具：`edit` 涵盖 `edit`、`write` 和 `delete`；`write`、`patch`、`multiedit` 和 `apply_patch` 涵盖 `write` 和 `edit`；`glob`、`list` 和 `ls` 表示 `find`；`shell` 表示 `bash`；`fetch` 和 `web_fetch` 表示 `webfetch`。
 
+**`question` 工具。** 与 opencode 一样，`question` 默认对内置的 `build` 和 `plan` 智能体允许，对其他所有智能体（包括自定义智能体）拒绝，这些智能体不会得到这个工具。全局 `permission` 里的 `question` 规则（或 `"*"` 规则）会代替这个默认值对所有智能体生效，智能体自己 `permission` 里的规则优先于两者。`"ask"` 表示先请求权限，再显示问题。例如 `"agent": {"general": {"permission": {"question": "allow"}}}` 让 `general` 可以提问。参见 [question](tools.zh-CN.md#question)。
+
 **禁用的工具。** 当一个工具最后一条 `"*"` 规则是 `deny`，并且没有模式规则允许或询问它时，这个工具根本不会提供给模型。旧写法 `"tools": {"bash": false}` 效果相同。
 
 ## 工具延迟
@@ -353,7 +357,7 @@ ref 在 `~/.config/opencode/`、`~/.config/ref/` 以及每个项目的 `.opencod
 "tui":    { "sidebar": true, "thinking": false, "details": false }
 ```
 
-- **`retry.max_delay`**（**ref**，默认 `600`）：可重试的 LLM 请求失败后会无限重试：HTTP 408、409、425、429 和 5xx、过载消息、网络错误和超时。等待时间从 2 秒开始，每次翻倍，直到这个上限；会遵守提供商返回的 `retry-after` 头。按 `esc esc` 停止重试。其他错误（例如 API 密钥无效）会结束本轮并显示错误。
+- **`retry.max_delay`**（**ref**，默认 `600`）：可重试的 LLM 请求失败后会无限重试：HTTP 408、409、425、429 和 5xx、过载消息、网络错误和超时。等待时间从 2 秒开始，每次翻倍，直到这个上限；会遵守提供商返回的 `retry-after` 头。按 `esc esc` 停止重试。其他错误（例如 API 密钥无效）一共尝试三次，中间分别等待约 2 秒和 4 秒，然后结束本轮并显示错误。
 - **`images.auto_resize`**（**ref**，默认 `true`）：来自 `read`、`webfetch` 的图片和粘贴的图片会被缩放并重新压缩到模型处理得好的尺寸。参见[工具](tools.zh-CN.md#图片)。
 - **`tui`**（**ref**）：三个 TUI 开关的初始状态：`sidebar`（默认显示）、`thinking`（展开推理内容，`ctrl+x t`）和 `details`（展开工具调用，`ctrl+x d`）。
 

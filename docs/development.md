@@ -63,7 +63,7 @@ To run one by hand, keep its stdin open, because it exits when stdin reaches end
 sleep 3600 | ref-server --mock      # prints {"port":N,"token":"..."} on stdout, nothing else
 ```
 
-- **Exit**: stdin end of file, the last client disconnecting, or ctrl-c. It then deletes its temporary directory (a `SIGKILL` leaves `/tmp/ref-mock-*` behind).
+- **Exit**: stdin end of file, the last client disconnecting, or ctrl-c. It then deletes its temporary directory (a `SIGKILL` leaves `/tmp/ref-mock-*` behind). `--idle-timeout S` changes the second condition: `-1` keeps the mock running after its last client leaves (to show a backend that outlives its windows; stdin must stay open), `S` seconds waits that long. Without the option it exits at once.
 - **Workspace**: every session runs in a temporary workspace with sample files (`README.md`, `NOTES.txt`, `src/parser.rs`, `src/lib.rs`, `docs/design.md`, `data/big.log`, `logo.png`, `scratch/`), whatever directory the client asks for. Your files are never touched. Three past sessions are preloaded as history.
 - **Models**: `mock/mock-1` (default; 200k context, images, reasoning, variants `low`, `medium`, `high`) and `mock/mock-fast` (64k). There is an extra agent, `reviewer`.
 - **Permissions**: `edit` and `write` ask (allowed in `scratch/`). `delete` is allowed after a 5-second delay. `bash` asks, except commands starting with `echo`, `ls`, `cat`, `seq`, `sleep` or `printf`, which are allowed, and `curl`, which is denied. `webfetch` is off.
@@ -96,6 +96,8 @@ sleep 3600 | ref-server --mock      # prints {"port":N,"token":"..."} on stdout,
 | `compact-tool` | The model calls `compact_context` |
 | `peer` | Creates a `reviewer` session `helper`, which reports back with `send_message` |
 | `everything` | `tools`, `todo` and `image` in one long turn |
+| `question` | The model asks two questions (a single choice and a multiple choice, with defaults) and repeats your answers |
+| `question-one` | One single-choice question with a default; `enter` accepts it |
 | `orchestrate` | The main session plans, creates the helpers `scout`, `fixer`, `tester` and `docs`, collects their five reports (the fifth from a `reviewer` it creates last) and ends with a summary (about 25 s) |
 
 `orchestrate` takes about 25 seconds and needs one approval, for the fixer's `edit`. The timeline is fixed: the helpers appear at 1.5, 3, 4.5 and 6 s, the main session is idle at about 7.5 s, the reports arrive at about 10.5 (`scout`), 12 (`docs`), 12.5 (`fixer`, 3.5 s after you approve at 9 s) and 14 s (`tester`), the reviewer is created at 16 s, reports at 21 s, and the summary ends at 25 s. A report that arrives while the main session is busy joins the conversation at its next request and is counted all the same. The words in the prompt after `orchestrate` are not used. The other scripts it starts (`orch-scout`, `orch-fixer`, `orch-tester`, `orch-docs`, `orch-review`, `orchestrate-report`) are listed by `help` but are not meant to be typed.

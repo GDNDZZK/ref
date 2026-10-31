@@ -2,7 +2,9 @@
 
 # Configuration
 
-ref reads [opencode](https://opencode.ai)'s configuration format, so an existing `opencode.json` works unchanged. ref adds a few keys of its own (marked **ref** below).
+ref reads [opencode](https://opencode.ai)'s configuration format: the providers, models, agents, permissions, MCP servers and commands of an existing `opencode.json` are loaded. ref adds a few keys of its own (marked **ref** below).
+
+Some opencode keys are accepted but have no effect: `command.<name>.agent` and `command.<name>.model`, the agent keys `steps` and `maxSteps`, and `limit.input` of a model. The agent key `mode` is used for one thing only (see [Agents](#agents)).
 
 - [Quick start](#quick-start)
 - [Where configuration is read from](#where-configuration-is-read-from)
@@ -255,7 +257,7 @@ You can change any built-in agent by defining an agent with the same name; only 
 | `can_spawn` | `false` (`true` for `build`) | **ref** The agent gets the `create_session` and `close_session` tools. `spawn` also works. |
 | `color` | | Color of the agent's name in the TUI. |
 | `hidden` | `false` | Not listed in the TUI and not offered to other sessions. |
-| `mode` | | opencode's `primary` / `subagent` / `all`. Accepted for compatibility; ref does not restrict agents by mode. |
+| `mode` | | opencode's `primary` / `subagent` / `all`. ref does not restrict agents by mode. It matters only when there is no `build` agent and no valid `default_agent`: the first agent that is not `subagent` and not hidden becomes the default. |
 | `disable` | `false` | Remove the agent (`disabled` also works). |
 
 `steps` and `maxSteps` are accepted and ignored.
@@ -317,6 +319,8 @@ A pattern ending in ` *` also matches the bare command: `"git *"` matches `git` 
 
 **Tool aliases.** opencode's tool names are mapped to ref's: `edit` covers `edit`, `write` and `delete`; `write`, `patch`, `multiedit` and `apply_patch` cover `write` and `edit`; `glob`, `list` and `ls` mean `find`; `shell` means `bash`; `fetch` and `web_fetch` mean `webfetch`.
 
+**The `question` tool.** Like in opencode, `question` is allowed for the built-in `build` and `plan` agents and denied for every other agent, custom agents included, so those do not get the tool. A `question` rule (or a `"*"` rule) in the global `permission` applies to every agent instead of this default, and a rule in an agent's own `permission` beats both. `"ask"` asks for permission first and then shows the question. For example `"agent": {"general": {"permission": {"question": "allow"}}}` lets `general` ask. See [question](tools.md#question).
+
 **Disabled tools.** When a tool's last `"*"` rule is `deny` and no pattern rule allows or asks for it, the tool is not offered to the model at all. The older form `"tools": {"bash": false}` does the same.
 
 ## Tool delays
@@ -353,7 +357,7 @@ The model sees both points through the `context_window` tool and can compact on 
 "tui":    { "sidebar": true, "thinking": false, "details": false }
 ```
 
-- **`retry.max_delay`** (**ref**, default `600`): failed LLM requests that can be retried are retried without limit: HTTP 408, 409, 425, 429 and 5xx, overload messages, network errors and timeouts. The wait starts at 2 s and doubles up to this cap; a `retry-after` header from the provider is respected. `esc esc` stops retrying. Other errors, such as an invalid API key, end the turn with the error shown.
+- **`retry.max_delay`** (**ref**, default `600`): failed LLM requests that can be retried are retried without limit: HTTP 408, 409, 425, 429 and 5xx, overload messages, network errors and timeouts. The wait starts at 2 s and doubles up to this cap; a `retry-after` header from the provider is respected. `esc esc` stops retrying. Other errors, such as an invalid API key, are tried three times in total, after waits of about 2 s and 4 s, and then end the turn with the error shown.
 - **`images.auto_resize`** (**ref**, default `true`): images from `read`, `webfetch` and pasted images are scaled and recompressed to sizes the models handle well. See [Tools](tools.md#images).
 - **`tui`** (**ref**): initial state of three TUI toggles: `sidebar` (default shown), `thinking` (expand reasoning, `ctrl+x t`) and `details` (expand tool calls, `ctrl+x d`).
 

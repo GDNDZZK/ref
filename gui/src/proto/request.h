@@ -31,6 +31,8 @@ QJsonObject setNotify(const QList<NotifyFrame::Kind>& kinds);
 QJsonObject setFocus(bool focused, const QStringList& sessions);
 QJsonObject abort(const QString& sessionId);
 QJsonObject permissionReply(const QString& sessionId, const QString& callId, bool allow, bool always);
+// One list of answers per question; none dismisses the questions.
+QJsonObject questionReply(const QString& sessionId, const QString& callId, const std::optional<QList<QStringList>>& answers);
 QJsonObject getConfig();
 QJsonObject watchAll(bool enabled);
 QJsonObject setModel(const QString& sessionId, const ModelRef& model);

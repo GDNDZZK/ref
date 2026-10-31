@@ -16,6 +16,7 @@ use crate::state::{Queued, SessionView};
 use crate::ui::dialog::{Dialog, HelpDialog, Item, Kind, ListDialog};
 use crate::ui::editor::{Editor, History};
 use crate::ui::permission::PermissionView;
+use crate::ui::question::QuestionView;
 use crate::ui::text;
 use crate::ui::theme;
 use crate::ui::toast::Toasts;
@@ -36,6 +37,9 @@ pub enum Mode {
     Chat,
     Watch,
 }
+
+/// What the backend answers to a reply for a question that is no longer open.
+const NO_PENDING_QUESTION: &str = "No pending question with that id.";
 
 #[derive(Debug)]
 pub enum Pending {
@@ -104,6 +108,11 @@ pub enum Pending {
     Mcp,
     /// `GetConfig` used only to refresh MCP status lines (fallback polling).
     ConfigMcp,
+    /// `QuestionReply`: closes the dialog, or shows why the answers were refused.
+    Question {
+        sid: String,
+        call_id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -343,6 +352,7 @@ pub struct App {
     pub history: History,
     pub dialog: Option<Dialog>,
     pub perm: Option<PermissionView>,
+    pub question: Option<QuestionView>,
     pub toasts: Toasts,
     pub details: bool,
     pub thinking: bool,
@@ -430,6 +440,7 @@ impl App {
             history,
             dialog: None,
             perm: None,
+            question: None,
             toasts: Toasts::default(),
             details: false,
             thinking: false,
@@ -732,6 +743,15 @@ impl App {
                 }
             }
             Pending::ConfigMcp => self.mcp_inflight = false,
+            Pending::Question { sid, call_id } => {
+                if err == NO_PENDING_QUESTION {
+                    // Answered somewhere else: nothing to say.
+                    self.close_question(&sid, &call_id);
+                } else if let Some(q) = self.question.as_mut().filter(|q| q.call_id == call_id) {
+                    q.submitting = false;
+                    q.error = Some(err);
+                }
+            }
             Pending::Unqueue { sid, key } => {
                 if let Some(q) = self.views.get_mut(&sid).and_then(|v| v.queued_mut(key)) {
                     q.removing = false;
@@ -745,6 +765,7 @@ impl App {
 
     fn on_response(&mut self, p: Pending, result: Value) {
         match p {
+            Pending::Question { sid, call_id } => self.close_question(&sid, &call_id),
             Pending::Config => {
                 let parsed = result
                     .get("config")
@@ -1316,6 +1337,7 @@ impl App {
             },
         );
         self.perm = None;
+        self.question = None;
         self.shell_mode = false;
     }
 
@@ -1512,6 +1534,65 @@ impl App {
 
     /// The permission request to show (current session first, then watched tiles).
     pub fn active_permission(&self) -> Option<(String, ref_proto::PermissionRequest, usize)> {
+        let order = self.modal_order();
+        let total: usize = order
+            .iter()
+            .filter_map(|k| self.views.get(*k))
+            .map(|v| v.permissions.len())
+            .sum();
+        for k in order {
+            if let Some(v) = self.views.get(k)
+                && let Some(p) = v.permissions.first()
+            {
+                return Some((k.clone(), p.clone(), total.saturating_sub(1)));
+            }
+        }
+        None
+    }
+
+    /// Answers a question (`None`: dismiss). The dialog stays until the backend has accepted
+    /// the reply, so a refused answer can be corrected.
+    pub fn reply_question(&mut self, sid: &str, call_id: &str, answers: Option<Vec<Vec<String>>>) {
+        if !self.connected {
+            self.toasts.warn("Not connected to the backend");
+            return;
+        }
+        if let Some(q) = self.question.as_mut() {
+            q.submitting = true;
+        }
+        self.req(
+            Request::QuestionReply {
+                session_id: sid.to_string(),
+                call_id: call_id.to_string(),
+                answers,
+            },
+            Pending::Question {
+                sid: sid.to_string(),
+                call_id: call_id.to_string(),
+            },
+        );
+    }
+
+    fn close_question(&mut self, sid: &str, call_id: &str) {
+        if let Some(v) = self.views.get_mut(sid) {
+            v.questions.retain(|q| q.call_id != call_id);
+        }
+        if self.question.as_ref().is_some_and(|q| q.call_id == call_id) {
+            self.question = None;
+        }
+    }
+
+    /// The question to show: like the permission request, current session first.
+    pub fn active_question(&self) -> Option<(String, ref_proto::QuestionRequest)> {
+        let order = self.modal_order();
+        order.into_iter().find_map(|k| {
+            let q = self.views.get(k)?.questions.first()?;
+            Some((k.clone(), q.clone()))
+        })
+    }
+
+    /// Sessions whose modals may be shown, in the order they are tried.
+    fn modal_order(&self) -> Vec<&String> {
         let mut order: Vec<&String> = Vec::new();
         if let Some(c) = &self.current
             && self.mode == Mode::Chat
@@ -1532,19 +1613,7 @@ impl App {
                 order.push(c);
             }
         }
-        let total: usize = order
-            .iter()
-            .filter_map(|k| self.views.get(*k))
-            .map(|v| v.permissions.len())
-            .sum();
-        for k in order {
-            if let Some(v) = self.views.get(k)
-                && let Some(p) = v.permissions.first()
-            {
-                return Some((k.clone(), p.clone(), total.saturating_sub(1)));
-            }
-        }
-        None
+        order
     }
 
     pub fn copy_text(&mut self, t: &str, what: &str) {
@@ -2170,6 +2239,7 @@ impl App {
         self.live.retain(|s| s.id != sid);
         if self.current.as_deref() == Some(sid) {
             self.perm = None;
+            self.question = None;
             if self.mode == Mode::Chat {
                 self.leave_closed_session(sid, true);
             } else {
@@ -2949,7 +3019,11 @@ impl App {
             || self
                 .perm
                 .as_ref()
-                .is_some_and(|p| p.opened.elapsed() < Duration::from_millis(150));
+                .is_some_and(|p| p.opened.elapsed() < Duration::from_millis(150))
+            || self
+                .question
+                .as_ref()
+                .is_some_and(|q| q.opened.elapsed() < Duration::from_millis(150));
         if fast {
             return Some(Duration::from_millis(16));
         }

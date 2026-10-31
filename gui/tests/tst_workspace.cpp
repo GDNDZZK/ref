@@ -52,6 +52,9 @@ public:
 
 	void setProtocol(int protocol) { m_protocol = protocol; }
 
+	// The messages an attach brings for the session.
+	void setMessages(const QString& id, const QJsonArray& messages) { m_messages.insert(id, messages); }
+
 	// While held, a detach is recorded but neither carried out nor answered.
 	void holdDetach(bool hold) { m_holdDetach = hold; }
 
@@ -129,7 +132,7 @@ private:
 			QJsonObject info = m_sessions.value(id);
 			info[u"attached"_s] = request.value(u"foreground"_s).toBool() ? 1 : 0;
 			m_sessions[id] = info;
-			m_fake.respond(request, {{u"snapshot"_s, QJsonObject{{u"info"_s, info}, {u"messages"_s, QJsonArray()}, {u"more_before"_s, false}}}});
+			m_fake.respond(request, {{u"snapshot"_s, QJsonObject{{u"info"_s, info}, {u"messages"_s, m_messages.value(id)}, {u"more_before"_s, false}}}});
 			broadcast();
 		}
 		else if(op == u"detach"_s)
@@ -205,18 +208,45 @@ private:
 
 	FakeBackend& m_fake;
 	QMap<QString, QJsonObject> m_sessions;
+	QMap<QString, QJsonArray> m_messages;
 	int m_created = 0;
 	int m_protocol = 2;
 	bool m_holdDetach = false;
 	std::optional<QJsonObject> m_heldDetach;
 };
 
+// An assistant message whose only tool call waits for the user's permission.
+QJsonArray awaitingPermission()
+{
+	const QJsonObject tool{{u"type"_s, u"tool"_s},
+	                       {u"call_id"_s, u"call_1"_s},
+	                       {u"name"_s, u"edit"_s},
+	                       {u"input"_s, QJsonObject()},
+	                       {u"state"_s, u"awaiting_permission"_s}};
+	return {QJsonObject{{u"id"_s, u"msg_1"_s}, {u"role"_s, u"assistant"_s}, {u"time"_s, 1}, {u"parts"_s, QJsonArray{tool}}}};
+}
+
+// What the sidebar row of a session says (IsCurrentRole, IsTileRole).
+bool rowFlag(Workspace& workspace, const QString& id, refgui::workspace::SessionListModel::Role role)
+{
+	const refgui::workspace::SessionListModel* model = workspace.sessions();
+	for(int row = 0; row < model->rowCount(); ++row)
+	{
+		if(model->data(model->index(row, 0), refgui::workspace::SessionListModel::SessionIdRole).toString() == id)
+		{
+			return model->data(model->index(row, 0), role).toBool();
+		}
+	}
+	return false;
+}
+
 struct Fixture
 {
-	explicit Fixture(int protocol = 2, bool withSecond = false)
+	explicit Fixture(int protocol = 2, bool withSecond = false, const QJsonArray& messagesOfA = {})
 	{
 		stub.setProtocol(protocol);
 		stub.add(u"ses_a"_s, 1);
+		stub.setMessages(u"ses_a"_s, messagesOfA);
 		if(withSecond)
 		{
 			stub.add(u"ses_b"_s, 2);
@@ -262,6 +292,8 @@ private slots:
 	void closingTheCurrentTileSendsNoAttach();
 	void aRevivedTileLeavesOnItsOwnTimer();
 	void anotherTileGetsTheFocusWhenTheFocusedOneCloses();
+	void theSidebarMarksTheFocusedTileAndTheTiles();
+	void permissionKeysComeAfterTheGuardAndTakeTheTyping();
 	void sessionsHaveTheMethodsCommandsCall();
 	void undoPutsThePromptBackIntoTheInputBox();
 	void oldBackendOffersARestart();
@@ -581,6 +613,67 @@ void TestWorkspace::anotherTileGetsTheFocusWhenTheFocusedOneCloses()
 
 	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
 	QCOMPARE(f.workspace->focusedTileId(), u"ses_a"_s); // the current session's tile
+}
+
+// The highlighted row is the session in front: in split view the one whose tile has the focus, however it got it.
+void TestWorkspace::theSidebarMarksTheFocusedTileAndTheTiles()
+{
+	using Model = refgui::workspace::SessionListModel;
+	Fixture f(2, true);
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
+	QVERIFY(rowFlag(*f.workspace, u"ses_a"_s, Model::IsCurrentRole));
+	QVERIFY(!rowFlag(*f.workspace, u"ses_a"_s, Model::IsTileRole));
+
+	f.workspace->toggleSplit();
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+
+	QVERIFY(rowFlag(*f.workspace, u"ses_a"_s, Model::IsCurrentRole));
+	QVERIFY(rowFlag(*f.workspace, u"ses_a"_s, Model::IsTileRole));
+	QVERIFY(rowFlag(*f.workspace, u"ses_b"_s, Model::IsTileRole));
+
+	f.workspace->focusTile(u"ses_b"_s); // what a click or Alt+arrow does
+	QVERIFY(rowFlag(*f.workspace, u"ses_b"_s, Model::IsCurrentRole));
+	QVERIFY(!rowFlag(*f.workspace, u"ses_a"_s, Model::IsCurrentRole));
+	QCOMPARE(f.workspace->currentId(), u"ses_a"_s); // the session that comes back when split view ends
+
+	f.workspace->toggleSplit();
+	QTRY_VERIFY(!f.workspace->isSplitView());
+	QTRY_COMPARE(f.stub.requests(u"watch_all"_s).size(), 2); // the requests of leaving are answered
+	QTRY_VERIFY(f.stub.requests(u"attach"_s).last().value(u"foreground"_s).toBool());
+	QTRY_COMPARE(f.workspace->tileStage()->rowCount(), 0);
+	QVERIFY(rowFlag(*f.workspace, u"ses_a"_s, Model::IsCurrentRole));
+	QVERIFY(!rowFlag(*f.workspace, u"ses_b"_s, Model::IsCurrentRole));
+	QVERIFY(!rowFlag(*f.workspace, u"ses_a"_s, Model::IsTileRole));
+	QVERIFY(!rowFlag(*f.workspace, u"ses_b"_s, Model::IsTileRole));
+}
+
+// As in the TUI and the WebUI: after the guard time the request owns a, Enter, s, d and Esc and all other typing;
+// before it, and for shortcuts and editing keys, the input box keeps the keys.
+void TestWorkspace::permissionKeysComeAfterTheGuardAndTakeTheTyping()
+{
+	Fixture f(2, false, awaitingPermission());
+	ChatSession* session = f.workspace->current();
+	QTRY_COMPARE(session->permissionCount(), 1);
+	const auto replies = [&] { return f.stub.requests(u"permission_reply"_s); };
+
+	QVERIFY(!session->permissionKeysActive());
+	QVERIFY(!session->permissionKey(Qt::Key_A, u"a"_s, Qt::NoModifier, false)); // typed into the box
+	QTRY_VERIFY(session->permissionKeysActive());
+	QCOMPARE(replies().size(), 0);
+
+	QVERIFY(session->permissionKey(Qt::Key_X, u"x"_s, Qt::NoModifier, false)); // not for the box
+	QVERIFY(session->permissionKey(Qt::Key_A, u"A"_s, Qt::ShiftModifier, false)); // shifted letters do not answer
+	QVERIFY(session->permissionKey(Qt::Key_A, u"a"_s, Qt::NoModifier, true) && replies().isEmpty()); // nor a held key
+	QVERIFY(!session->permissionKey(Qt::Key_A, u"\x01"_s, Qt::ControlModifier, false)); // Ctrl+A selects all
+	QVERIFY(!session->permissionKey(Qt::Key_Backspace, u"\b"_s, Qt::NoModifier, false));
+	QVERIFY(!session->permissionKey(Qt::Key_Left, QString(), Qt::NoModifier, false));
+	QCOMPARE(replies().size(), 0);
+
+	QVERIFY(session->permissionKey(Qt::Key_S, u"s"_s, Qt::NoModifier, false));
+	QTRY_COMPARE(replies().size(), 1);
+	QVERIFY(replies().first().value(u"allow"_s).toBool());
+	QVERIFY(replies().first().value(u"always"_s).toBool());
+	QCOMPARE(replies().first().value(u"call_id"_s).toString(), u"call_1"_s);
 }
 
 void TestWorkspace::oldBackendOffersARestart()

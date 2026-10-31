@@ -8,6 +8,7 @@ import {
   shellScenario,
   sidebarSizingScenario,
   splitComposerScenario,
+  splitFocusScenario,
 } from './smokeShell.mjs'
 
 const SCENARIOS =
@@ -155,6 +156,7 @@ const passed = await withMockPage(async (page, problems, { restartServer }) => {
   await scenarios(page, problems)
   await shellScenario(page, problems)
   await splitComposerScenario(page, problems)
+  await splitFocusScenario(page, problems)
   await sidebarSizingScenario(page, problems)
   await loginLostScenario(page, problems, restartServer)
 })

@@ -25,3 +25,24 @@ fn hello_without_notify_still_parses() {
         other => panic!("not a hello: {other:?}"),
     }
 }
+
+/// A snapshot from a protocol 2 server has no `pending_questions`.
+#[test]
+fn snapshot_without_questions_still_parses() {
+    let mut value = serde_json::to_value(super::samples::snapshot()).unwrap();
+    value.as_object_mut().unwrap().remove("pending_questions");
+    let snapshot: SessionSnapshot = serde_json::from_value(value).expect("old snapshot parses");
+    assert!(snapshot.pending_questions.is_empty());
+}
+
+/// `custom` defaults to true and options are not preselected unless they say so.
+#[test]
+fn question_defaults() {
+    let q: Question = serde_json::from_value(json!({
+        "question": "Which?",
+        "header": "Pick",
+        "options": [{"label": "A", "description": "first"}],
+    }))
+    .unwrap();
+    assert!(q.custom && !q.multiple && !q.options[0].default);
+}

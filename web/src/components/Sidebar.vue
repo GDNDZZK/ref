@@ -80,7 +80,7 @@ function open(id: string): void {
             v-for="info in workspace.live"
             :key="info.id"
             :info="info"
-            :current="info.id === workspace.currentId"
+            :current="info.id === workspace.focusedId"
             :tile="workspace.mode === 'split' && workspace.tileIds.includes(info.id)"
             @open="open(info.id)"
             @close="report(commands.run('close', '', info.id))"

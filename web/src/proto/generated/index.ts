@@ -15,6 +15,9 @@ export type { NamedImage } from "./NamedImage";
 export type { NotifyKind } from "./NotifyKind";
 export type { Part } from "./Part";
 export type { PermissionRequest } from "./PermissionRequest";
+export type { Question } from "./Question";
+export type { QuestionOption } from "./QuestionOption";
+export type { QuestionRequest } from "./QuestionRequest";
 export type { Request } from "./Request";
 export type { Role } from "./Role";
 export type { ServerConfigInfo } from "./ServerConfigInfo";
@@ -30,4 +33,4 @@ export type { ToolState } from "./ToolState";
 export type { Usage } from "./Usage";
 export type { JsonValue } from "./serde_json/JsonValue";
 
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;

@@ -7,6 +7,7 @@ pub mod markdown;
 pub mod mcp;
 pub mod message;
 pub mod permission;
+pub mod question;
 pub mod selection;
 pub mod split;
 pub mod text;

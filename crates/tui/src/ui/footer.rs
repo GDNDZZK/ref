@@ -40,6 +40,7 @@ pub fn status_label(v: &SessionView, tick: u64, now: i64) -> (String, Color) {
             theme::PRIMARY,
         ),
         WaitingPermission => ("△ waiting for permission".into(), theme::WARNING),
+        WaitingQuestion => ("? waiting for your answer".into(), theme::WARNING),
         Retrying {
             next_at, attempt, ..
         } => {

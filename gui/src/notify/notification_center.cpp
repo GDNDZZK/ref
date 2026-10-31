@@ -21,6 +21,10 @@ std::optional<Kind> kindOf(const QString& name)
 	{
 		return Kind::Permission;
 	}
+	if(name == u"question"_s)
+	{
+		return Kind::Question;
+	}
 	if(name == u"turn_done"_s)
 	{
 		return Kind::TurnDone;

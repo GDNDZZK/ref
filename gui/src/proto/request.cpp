@@ -34,6 +34,8 @@ QString toJson(NotifyFrame::Kind kind)
 		return u"turn_done"_s;
 	case NotifyFrame::Kind::TurnError:
 		return u"turn_error"_s;
+	case NotifyFrame::Kind::Question:
+		return u"question"_s;
 	}
 	Q_UNREACHABLE_RETURN(QString());
 }
@@ -192,6 +194,25 @@ QJsonObject permissionReply(const QString& sessionId, const QString& callId, boo
 	json.insert(u"call_id"_s, callId);
 	json.insert(u"allow"_s, allow);
 	json.insert(u"always"_s, always);
+	return json;
+}
+
+QJsonObject questionReply(const QString& sessionId, const QString& callId, const std::optional<QList<QStringList>>& answers)
+{
+	QJsonObject json = op(u"question_reply"_s);
+	json.insert(u"session_id"_s, sessionId);
+	json.insert(u"call_id"_s, callId);
+	if(!answers)
+	{
+		json.insert(u"answers"_s, QJsonValue::Null);
+		return json;
+	}
+	QJsonArray list;
+	for(const QStringList& entry : *answers)
+	{
+		list.append(QJsonArray::fromStringList(entry));
+	}
+	json.insert(u"answers"_s, list);
 	return json;
 }
 

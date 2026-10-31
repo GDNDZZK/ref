@@ -72,6 +72,14 @@ SessionEvent readSessionEvent(const Fields& fields)
 	{
 		return PermissionResolvedEvent{.callId = fields.string("call_id"_L1)};
 	}
+	if(type == "question"_L1)
+	{
+		return QuestionEvent{.request = readQuestionRequest(child(fields, "request"_L1))};
+	}
+	if(type == "question_resolved"_L1)
+	{
+		return QuestionResolvedEvent{.callId = fields.string("call_id"_L1)};
+	}
 	if(type == "queue"_L1)
 	{
 		return QueueEvent{.messages = readMessages(fields, "messages"_L1)};
@@ -123,6 +131,10 @@ NotifyFrame readNotify(const Fields& fields)
 	{
 		notify.kind = NotifyFrame::Kind::TurnError;
 	}
+	else if(kind == "question"_L1)
+	{
+		notify.kind = NotifyFrame::Kind::Question;
+	}
 	else
 	{
 		failUnknown(fields.childPath("notify_kind"_L1), u"unknown notification kind \"%1\""_s.arg(kind));
@@ -170,6 +182,7 @@ SessionSnapshot readSnapshot(const Fields& fields)
 	        .messages = readMessages(fields, "messages"_L1),
 	        .moreBefore = fields.booleanOr("more_before"_L1, false),
 	        .pendingPermissions = fields.listOrEmpty<PermissionRequest>("pending_permissions"_L1, readPermissionRequest),
+	        .pendingQuestions = fields.listOrEmpty<QuestionRequest>("pending_questions"_L1, readQuestionRequest),
 	        .queued = fields.listOrEmpty<Message>("queued"_L1, readMessage)};
 }
 

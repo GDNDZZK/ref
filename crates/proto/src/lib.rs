@@ -10,7 +10,7 @@ use ts_rs::TS;
 
 /// Version of the wire protocol, reported in the `Hello` response (`"protocol"`).
 /// Adding fields or requests does not change it. Version 1 clients are still served.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 fn home() -> std::path::PathBuf {
     std::env::var_os("HOME")
@@ -123,6 +123,8 @@ pub enum SessionStatus {
     Running,
     /// Blocked on a user permission decision.
     WaitingPermission,
+    /// Blocked on the user's answer to a `question` tool call.
+    WaitingQuestion,
     /// LLM request failed; will retry at `next_at`.
     Retrying {
         attempt: u32,
@@ -505,6 +507,8 @@ pub enum Delta {
 pub enum NotifyKind {
     /// A tool call is waiting for a permission decision.
     Permission,
+    /// The model asked the user a question (`detail`: the first question, shortened).
+    Question,
     /// A run finished normally and the session is idle again.
     TurnDone,
     /// A run ended with a final error (retries do not count; user aborts are not reported).
@@ -521,6 +525,48 @@ pub struct PermissionRequest {
     pub purpose: String,
     /// Full input parameters (purpose stripped).
     pub input: Value,
+    pub time: i64,
+}
+
+/// One choice of a [`Question`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct QuestionOption {
+    /// Display text, one to five words.
+    pub label: String,
+    /// What choosing it means.
+    pub description: String,
+    /// Preselected when the question is shown (single choice: where the cursor starts).
+    #[serde(default)]
+    pub default: bool,
+}
+
+/// One question of a `question` tool call.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct Question {
+    /// The complete question.
+    pub question: String,
+    /// Very short label (at most 30 characters), used for the tab of a multi-question dialog.
+    pub header: String,
+    pub options: Vec<QuestionOption>,
+    /// More than one option may be chosen.
+    #[serde(default)]
+    pub multiple: bool,
+    /// The user may type an answer of their own, shown as a last row after the options.
+    #[serde(default = "default_true")]
+    pub custom: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// A pending `question` tool call shown to the user.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct QuestionRequest {
+    pub session_id: String,
+    pub message_id: String,
+    pub call_id: String,
+    pub questions: Vec<Question>,
     pub time: i64,
 }
 
@@ -603,6 +649,8 @@ pub struct SessionSnapshot {
     #[serde(default)]
     pub more_before: bool,
     pub pending_permissions: Vec<PermissionRequest>,
+    #[serde(default)]
+    pub pending_questions: Vec<QuestionRequest>,
     /// Messages waiting in the session's queue (not yet in `messages`), any source; human
     /// prompts are removable with `RemoveQueued`.
     #[serde(default)]
@@ -720,6 +768,15 @@ pub enum Request {
         /// Remember for the rest of the session for this tool.
         #[serde(default)]
         always: bool,
+    },
+    /// Answer a pending question. `answers` has one entry per question, in order; each entry
+    /// lists the chosen labels or the typed text. `None` dismisses the question. The first
+    /// reply wins; a later one fails with "No pending question with that id."
+    QuestionReply {
+        session_id: String,
+        call_id: String,
+        #[serde(default)]
+        answers: Option<Vec<Vec<String>>>,
     },
     /// Change model for this session only (not remembered for new sessions).
     SetModel {
@@ -902,6 +959,14 @@ pub enum SessionEvent {
     },
     Permission {
         request: PermissionRequest,
+    },
+    /// The model asks the user a question (`WaitingQuestion`); see `QuestionReply`.
+    Question {
+        request: QuestionRequest,
+    },
+    /// The question with this call id was answered, dismissed or cancelled.
+    QuestionResolved {
+        call_id: String,
     },
     PermissionResolved {
         call_id: String,

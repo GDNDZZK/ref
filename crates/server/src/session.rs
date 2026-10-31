@@ -3,8 +3,8 @@
 use crate::store::Persisted;
 use ref_config::Config;
 use ref_proto::{
-    Message, MessageSource, Part, PermissionRequest, Role, SessionEvent, SessionInfo,
-    SessionStatus, ToolState,
+    Message, MessageSource, Part, PermissionRequest, QuestionRequest, Role, SessionEvent,
+    SessionInfo, SessionStatus, ToolState,
 };
 use ref_tools::HashStore;
 use std::collections::{HashSet, VecDeque};
@@ -23,6 +23,13 @@ pub struct PendingPerm {
     pub tx: Option<oneshot::Sender<(bool, bool)>>,
 }
 
+/// A `question` call waiting for the user's answer.
+pub struct PendingQuestion {
+    pub request: QuestionRequest,
+    /// `None` is "dismissed".
+    pub tx: Option<oneshot::Sender<crate::question::Reply>>,
+}
+
 pub struct SessionState {
     pub info: SessionInfo,
     pub messages: Vec<Message>,
@@ -30,6 +37,7 @@ pub struct SessionState {
     pub queue: VecDeque<Message>,
     pub run: Option<RunHandle>,
     pub perms: Vec<PendingPerm>,
+    pub questions: Vec<PendingQuestion>,
     /// Tools allowed for the rest of the session ("always").
     pub always: HashSet<String>,
     pub cfg: Arc<Config>,
@@ -81,6 +89,7 @@ impl Session {
                 queue: VecDeque::new(),
                 run: None,
                 perms: Vec::new(),
+                questions: Vec::new(),
                 always: HashSet::new(),
                 cfg,
                 system: None,
