@@ -383,7 +383,11 @@ async fn list_dirs_answers_with_sorted_sub_directories() {
     assert!(ok);
     assert_eq!(
         res["path"],
-        canonical.join("gamma/inner").to_string_lossy().as_ref()
+        canonical
+            .join("gamma")
+            .join("inner")
+            .to_string_lossy()
+            .as_ref()
     );
     assert_eq!(res["dirs"], serde_json::json!([]));
 
