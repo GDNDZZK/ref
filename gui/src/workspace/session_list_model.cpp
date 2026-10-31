@@ -1,5 +1,7 @@
 #include "workspace/session_list_model.h"
 
+#include "workspace/toast_text.h"
+
 #include <QSet>
 
 #include <algorithm>
@@ -46,13 +48,23 @@ QString lastComponent(const QString& path)
 	return name.isEmpty() ? path : name;
 }
 
-QString displayTitle(const QString& name, const QString& title, const QString& cwd)
+// As the terminal front end labels them: a live session by its name, a stored one by its title.
+QString displayTitle(bool live, const QString& name, const QString& title, const QString& cwd)
 {
-	if(!name.isEmpty())
+	const QString oneLineTitle = oneLine(title);
+	if(live)
 	{
-		return name;
+		if(!name.isEmpty())
+		{
+			return name;
+		}
+		return oneLineTitle.isEmpty() ? lastComponent(cwd) : oneLineTitle;
 	}
-	return title.isEmpty() ? lastComponent(cwd) : title;
+	if(!oneLineTitle.isEmpty())
+	{
+		return oneLineTitle;
+	}
+	return name.isEmpty() ? lastComponent(cwd) : name;
 }
 
 } // namespace
@@ -318,7 +330,7 @@ QVariant SessionListModel::roleData(const Row& row, int role) const
 	case TitleRole:
 		return row.title;
 	case DisplayTitleRole:
-		return displayTitle(row.name, row.title, row.cwd);
+		return displayTitle(row.live, row.name, row.title, row.cwd);
 	case CwdRole:
 		return row.cwd;
 	case DirNameRole:
