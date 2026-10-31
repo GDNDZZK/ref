@@ -207,6 +207,7 @@ Item {
 			session: tile.session
 			compact: !tile.expanded
 			keysEnabled: tile.focused || tile.expanded
+			composerShown: tile.focused || tile.expanded
 		}
 
 		// A click anywhere in the tile focuses it, and its input box.
@@ -223,8 +224,11 @@ Item {
 	Connections {
 		target: Workspace
 		function onFocusedTileChanged() {
-			if (tile.focused)
-				pane.focusInput()
+			// Once the input box is there to take the keyboard.
+			Qt.callLater(() => {
+				if (tile.focused)
+					pane.focusInput()
+			})
 		}
 	}
 }
