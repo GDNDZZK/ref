@@ -32,3 +32,6 @@ export function addBrandTitle(shot: ShotBuilder, markUntil: number) {
     }),
   )
 }
+
+// The outage take (M5) as the films show it: the status line is cut off (it has the mock path).
+export const OUTAGE_CAST = { name: 'tui-outage', title: 'ref', fontSize: 24, hideLastRows: 1, x: 168, y: 90 }

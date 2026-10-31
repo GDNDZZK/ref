@@ -15,7 +15,7 @@ import { COMPARE } from './compare.ts'
 import { COPY, HERO_CAPTIONS, HERO_FILM_START } from './copy.ts'
 import { FEATURES } from './features.ts'
 import { RELEASE } from './release.ts'
-import { addBrandTitle, crewWindowsCut } from './shared.ts'
+import { OUTAGE_CAST, addBrandTitle, crewWindowsCut } from './shared.ts'
 import { cues, drawnCut, endCut, timelineFilm, type Cut } from './timeline.ts'
 
 const A6_END = 24.4
@@ -59,12 +59,13 @@ const standaloneCut: Cut = {
     ),
 }
 
-// A11: three closeups, one feature each.
-const OUTAGE_ATTEMPT_3_CAST_SECONDS = 14
+// A11: three closeups, one feature each. f1 is the row "Retrying in 8s (attempt 3)" alone (the
+// rows under it hold the mock's local address).
+const RETRY_CLOSEUP = { scale: 2, x: 0.2, y: 0.547, rows: 1.3 }
 const FIXTURE_MODEL_DIALOG_CAST_SECONDS = 6
 const featureCuts: Cut[] = [
   drawnCut(STANDALONE_END, STANDALONE_END + FEATURE_CUT_SECONDS, (shot, seconds) => {
-    shot.add(castWindow({ name: 'tui-outage', title: 'ref', x: 160, y: 120, fontSize: 30, start: -OUTAGE_ATTEMPT_3_CAST_SECONDS, from: -1, to: seconds }))
+    shot.add(castWindow({ ...OUTAGE_CAST, y: 380, closeup: RETRY_CLOSEUP, castFrom: { mark: 'attempt3', offset: 0.3 }, start: 0, from: -1, to: seconds + 1 }))
   }),
   {
     from: STANDALONE_END + FEATURE_CUT_SECONDS,

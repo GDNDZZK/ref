@@ -4,6 +4,7 @@ import { timeSkipChip } from '../components/timeSkipChip.ts'
 import { castWindow } from '../shots/castWindow.ts'
 import { terminalCut } from '../shots/terminalHook.ts'
 import { FEATURES } from './features.ts'
+import { OUTAGE_CAST } from './shared.ts'
 import { cues, drawnCut, endCut, timelineFilm, type Cut } from './timeline.ts'
 
 const HOOK_END = 3.4
@@ -13,14 +14,33 @@ const CONTINUES_END = 17.4
 const STOP_END = 20.9
 const FILM_END = 23.4
 
-// Cast seconds where each shot of the take starts (tui-outage, measured on the recording).
-const CAST_AT = { firstRetry: 6, longWait: 16, recovered: 30, retryAgain: 8 }
-const CAST_FONT_PX = 22
-const CAST_POSITION = { x: 200, y: 96 }
+// Where each shot starts in the take (tui-outage markers, capture/tui.ts). Shot 2: the prompt is
+// sent and the first attempt fails. Shot 3 is the end of the 4th wait and runs on into shot 4,
+// where the request goes through (the take's 4th wait is about 15 s). Shot 5: a second run,
+// stopped with esc esc.
+const SHOT_SECONDS = { firstRetry: 4, longWait: 5 }
+const SHOT_STARTS = {
+  firstRetry: { mark: 'enter', offset: 0.2 },
+  longWait: { mark: 'attempt4', offset: 9.6 },
+  recovered: { mark: 'attempt4', offset: 9.6 + SHOT_SECONDS.longWait },
+  stopped: { mark: 'esc', offset: -1.2 },
+}
+// Take seconds the cut from shot 2 to shot 3 leaves out (marker attempt4 - enter = 14.1 s).
+const SKIPPED_SECONDS = 14.1 + SHOT_STARTS.longWait.offset - (SHOT_STARTS.firstRetry.offset + SHOT_SECONDS.firstRetry)
+const ESC_PRESSES = [1.2, 1.35]
+const CLOSEUP = { scale: 1.15, x: 0.3, y: 0.3, rows: 23 }
+// The second run is further down the transcript.
+const STOPPED_CLOSEUP = { ...CLOSEUP, y: 0.62 }
 
-function outageCut(from: number, to: number, castFrom: number, draw?: Parameters<typeof drawnCut>[2]): Cut {
+function outageCut(
+  from: number,
+  to: number,
+  castFrom: { mark: string; offset: number },
+  draw?: Parameters<typeof drawnCut>[2],
+  closeup = CLOSEUP,
+): Cut {
   return drawnCut(from, to, (shot, seconds) => {
-    shot.add(castWindow({ name: 'tui-outage', title: 'ref', ...CAST_POSITION, fontSize: CAST_FONT_PX, hideLastRows: 0, start: -castFrom, from: -1, to: seconds + 1 }))
+    shot.add(castWindow({ ...OUTAGE_CAST, closeup, castFrom, start: 0, from: -1, to: seconds + 1 }))
     draw?.(shot, seconds)
   })
 }
@@ -37,13 +57,17 @@ export const scene = timelineFilm({
         { at: 2.1, text: 'Run stopped.', tone: 'error' },
       ],
     }),
-    outageCut(HOOK_END, FIRST_RETRY_END, CAST_AT.firstRetry),
-    outageCut(FIRST_RETRY_END, LONG_WAIT_END, CAST_AT.longWait, (shot) =>
-      shot.add(timeSkipChip({ text: '+30 s', x: 1560, y: 120, from: 0.1, to: 2.6 })),
+    outageCut(HOOK_END, FIRST_RETRY_END, SHOT_STARTS.firstRetry),
+    outageCut(FIRST_RETRY_END, LONG_WAIT_END, SHOT_STARTS.longWait, (shot) =>
+      shot.add(timeSkipChip({ text: `+${Math.round(SKIPPED_SECONDS)} s`, x: 1500, y: 110, from: 0.1, to: 2.6 })),
     ),
-    outageCut(LONG_WAIT_END, CONTINUES_END, CAST_AT.recovered),
-    outageCut(CONTINUES_END, STOP_END, CAST_AT.retryAgain, (shot) =>
-      shot.add(keycap({ keys: ['esc', 'esc'], x: 960, y: 760, presses: [1.2, 1.5], from: 0.4, to: STOP_END - CONTINUES_END + 1 })),
+    outageCut(LONG_WAIT_END, CONTINUES_END, SHOT_STARTS.recovered),
+    outageCut(
+      CONTINUES_END,
+      STOP_END,
+      SHOT_STARTS.stopped,
+      (shot, seconds) => shot.add(keycap({ keys: ['esc', 'esc'], x: 1560, y: 900, presses: ESC_PRESSES, from: 0.4, to: seconds + 1 })),
+      STOPPED_CLOSEUP,
     ),
     endCut(STOP_END, FILM_END),
   ],
