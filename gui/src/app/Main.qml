@@ -23,6 +23,17 @@ Window {
 		sessionFade.run(content, () => shown = session)
 	}
 
+	// A session that is shown is deleted when it is closed, and the crossfade to the next one takes a
+	// frame or more to get going. What is shown moves on at once, so the pane never meets a deleted session.
+	Connections {
+		target: Workspace
+
+		function onSessionDropped(session) {
+			if (window.shown === session)
+				window.shown = Workspace.current
+		}
+	}
+
 	// Puts the keyboard back in the input box of the session in front.
 	function focusComposer() {
 		if (Workspace.splitView)

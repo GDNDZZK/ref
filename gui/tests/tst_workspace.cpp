@@ -365,6 +365,7 @@ private slots:
 	void anotherTileGetsTheFocusWhenTheFocusedOneCloses();
 	void theSidebarMarksTheFocusedTileAndTheTiles();
 	void permissionKeysComeAfterTheGuardAndTakeTheTyping();
+	void closingTheCurrentSessionLetsGoOfItBeforeItIsDeleted();
 	void destroyingTheWorkspaceWhileLeavingSplitViewIsSafe();
 	void destroyingTheWorkspaceWithADetachOutIsSafe();
 	void questionKeysComeAfterTheGuardAndAnswerTheCard();
@@ -925,6 +926,26 @@ void TestWorkspace::typingACustomAnswerTakesTheKeysAwayFromTheCard()
 	QVERIFY(!session->answerKey(Qt::Key_A, u"a"_s, Qt::NoModifier, false)); // the text field has them
 	session->question()->cancelCustom();
 	QVERIFY(session->answerKeysActive());
+}
+
+// The window shows the current session under a crossfade that takes a frame or more to start, so it can still show
+// the closed session when that is deleted; its pane then read properties of null. The window gets to move on first.
+void TestWorkspace::closingTheCurrentSessionLetsGoOfItBeforeItIsDeleted()
+{
+	Fixture f(2, true);
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
+	QPointer<ChatSession> closing = f.workspace->current();
+	QVERIFY(closing);
+	bool announcedInTime = false;
+	connect(f.workspace.get(), &Workspace::sessionDropped, this, [&](ChatSession* dropped) {
+		announcedInTime = dropped == closing.data() && f.workspace->current() != dropped;
+	});
+
+	f.workspace->closeSession(u"ses_a"_s);
+
+	QTRY_VERIFY(announcedInTime);
+	QTRY_VERIFY(closing.isNull());
+	QCOMPARE(f.workspace->currentId(), u"ses_b"_s);
 }
 
 // Closing the connection resumes the coroutines whose requests are out. leaveSplit() waits for watch_all and then
