@@ -33,15 +33,17 @@ const FILM_END = 70.6
 // A10: `ref-server` typed in a terminal (RB2), then the three windows of the standalone take (M2)
 // close one second apart. The pill counts from the server start.
 const PILL_DELAY_SECONDS = 0.6
+// RB2 from just before `ref-server` is typed (cast marker "typed").
+const SERVER_TYPED = { mark: 'typed', offset: -0.2 }
 const CLOSE_STAGGER_SECONDS = 1
 const FIRST_CLOSE_SECONDS = 0.6
 // Seconds the standalone server had been up when the windows closed, and the sessions it
-// had then (from the take).
-const UPTIME_AT_CLOSE_SECONDS = 62
+// had then: main and four workers (printed by capture/standalone.ts).
+const UPTIME_AT_CLOSE_SECONDS = 35
 const SESSIONS_AT_CLOSE = { en: '5 sessions running', zh: '5 个会话在运行' }
 
 const serverStartCut: Cut = drawnCut(CREW_END, SERVER_START_END, (shot, seconds) => {
-  shot.add(castWindow({ name: 'tui-server-start', title: '', x: 260, y: 140, fontSize: 24, start: 0, from: 0, to: seconds, pendingSize: { width: 1400, height: 600 } }))
+  shot.add(castWindow({ name: 'tui-server-start', title: '', x: 260, y: 140, fontSize: 24, castFrom: SERVER_TYPED, start: 0, from: 0, to: seconds }))
 })
 
 const standaloneCut: Cut = {
@@ -51,9 +53,10 @@ const standaloneCut: Cut = {
     threeWindowsShot(
       seconds,
       [
-        { screens: [{ name: 'tui-standalone' }], title: 'ref', look: { at: 0, x: 0.5, y: 0.5, zoom: 1 } },
+        { screens: [{ name: 'tui-standalone-clean' }], title: 'ref', look: { at: 0, x: 0.5, y: 0.5, zoom: 1 } },
         { screens: [{ name: 'gui-standalone' }], title: 'ref-gui', look: { at: 0, x: 0.6, y: 0.4, zoom: 1.3 } },
-        { screens: [{ name: 'web-standalone' }], title: 'ref-web', look: { at: 0, x: 0.5, y: 0.3, zoom: 1.02 } },
+        // Below the prompt, which starts with the mock's script name.
+        { screens: [{ name: 'web-standalone' }], title: 'ref-web', look: { at: 0, x: 0.55, y: 0.55, zoom: 1.3 } },
       ].map((window, index) => ({ ...window, closeAt: FIRST_CLOSE_SECONDS + index * CLOSE_STAGGER_SECONDS })),
       false,
     ),
@@ -62,7 +65,8 @@ const standaloneCut: Cut = {
 // A11: three closeups, one feature each. f1 is the row "Retrying in 8s (attempt 3)" alone (the
 // rows under it hold the mock's local address).
 const RETRY_CLOSEUP = { scale: 2, x: 0.2, y: 0.547, rows: 1.3 }
-const FIXTURE_MODEL_DIALOG_CAST_SECONDS = 6
+// f3: the model dialog of the real-backend take (cast marker "models": ctrl+x m is pressed).
+const MODEL_DIALOG = { mark: 'models', offset: -0.2 }
 // f2: Cancel is clicked this long into the cut, after about 2.3 s of countdown.
 const DELAY_CANCEL_AT = 2.6
 const featureCuts: Cut[] = [
@@ -76,12 +80,14 @@ const featureCuts: Cut[] = [
       beatShot({ seconds, ...clickedClip('gui-delay', 'cancel', DELAY_CANCEL_AT), looks: [{ at: 0, x: 0.6, y: 0.4, zoom: 1.7 }], windowFrom: -1 }),
   },
   drawnCut(STANDALONE_END + 2 * FEATURE_CUT_SECONDS, STANDALONE_END + 3 * FEATURE_CUT_SECONDS, (shot, seconds) => {
-    shot.add(castWindow({ name: 'tui-fixture-start', title: 'ref', x: 160, y: 120, fontSize: 28, start: -FIXTURE_MODEL_DIALOG_CAST_SECONDS, from: -1, to: seconds }))
+    shot.add(castWindow({ name: 'tui-fixture-start', title: 'ref', x: 260, y: 100, fontSize: 22, castFrom: MODEL_DIALOG, start: 0, from: -1, to: seconds }))
   }),
 ]
 
 // A12: the release list, then the two commands, then ref starting.
 const START_TYPING_SECONDS = 1.8
+// The real-backend take from just before ref is ready (cast marker "ready"): the end of its start.
+const REF_STARTING = { mark: 'ready', offset: -0.6 }
 const startCut: Cut = {
   from: RELEASE_END,
   to: START_END,
@@ -99,7 +105,7 @@ const startCut: Cut = {
           to: START_TYPING_SECONDS + 0.3,
         }),
       )
-      shot.add(castWindow({ name: 'tui-start', title: 'ref', x: 260, y: 100, fontSize: 22, start: START_TYPING_SECONDS, from: START_TYPING_SECONDS, to: seconds + 1 }))
+      shot.add(castWindow({ name: 'tui-fixture-start', title: 'ref', x: 260, y: 100, fontSize: 22, castFrom: REF_STARTING, start: START_TYPING_SECONDS, from: START_TYPING_SECONDS, to: seconds + 1 }))
     }),
 }
 
