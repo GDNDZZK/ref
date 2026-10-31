@@ -488,6 +488,42 @@ async fn question_asks_two_and_repeats_the_answers_or_the_dismissal() {
     rig.finish().await;
 }
 
+/// A frontend joins and leaves; says whether the backend decided to shut down.
+async fn left_alone(mock: &Mock, wait: Duration) -> bool {
+    let hub = &mock.running.hub;
+    let conn = hub.add_conn();
+    {
+        let mut c = conn.lock();
+        c.hello = true;
+        c.frontend = true;
+    }
+    hub.frontend_joined();
+    hub.remove_conn(conn.id);
+    tokio::time::sleep(wait).await;
+    hub.shutdown.is_cancelled()
+}
+
+#[tokio::test]
+async fn the_mock_exits_with_its_last_client_unless_an_idle_timeout_says_otherwise() {
+    let default = ref_server::mock::start(0, "token".into()).await.unwrap();
+    assert!(left_alone(&default, Duration::from_millis(100)).await);
+
+    let staying = ref_server::mock::start_with(0, "token".into(), -1)
+        .await
+        .unwrap();
+    assert!(!left_alone(&staying, Duration::from_millis(300)).await);
+
+    let late = ref_server::mock::start_with(0, "token".into(), 1)
+        .await
+        .unwrap();
+    assert!(
+        !left_alone(&late, Duration::from_millis(300)).await,
+        "not yet"
+    );
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    assert!(late.running.hub.shutdown.is_cancelled());
+}
+
 #[tokio::test]
 async fn cancel_stops_a_command_that_never_ends() {
     let rig = rig().await;

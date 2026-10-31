@@ -63,7 +63,7 @@ To run one by hand, keep its stdin open, because it exits when stdin reaches end
 sleep 3600 | ref-server --mock      # prints {"port":N,"token":"..."} on stdout, nothing else
 ```
 
-- **Exit**: stdin end of file, the last client disconnecting, or ctrl-c. It then deletes its temporary directory (a `SIGKILL` leaves `/tmp/ref-mock-*` behind).
+- **Exit**: stdin end of file, the last client disconnecting, or ctrl-c. It then deletes its temporary directory (a `SIGKILL` leaves `/tmp/ref-mock-*` behind). `--idle-timeout S` changes the second condition: `-1` keeps the mock running after its last client leaves (to show a backend that outlives its windows; stdin must stay open), `S` seconds waits that long. Without the option it exits at once.
 - **Workspace**: every session runs in a temporary workspace with sample files (`README.md`, `NOTES.txt`, `src/parser.rs`, `src/lib.rs`, `docs/design.md`, `data/big.log`, `logo.png`, `scratch/`), whatever directory the client asks for. Your files are never touched. Three past sessions are preloaded as history.
 - **Models**: `mock/mock-1` (default; 200k context, images, reasoning, variants `low`, `medium`, `high`) and `mock/mock-fast` (64k). There is an extra agent, `reviewer`.
 - **Permissions**: `edit` and `write` ask (allowed in `scratch/`). `delete` is allowed after a 5-second delay. `bash` asks, except commands starting with `echo`, `ls`, `cat`, `seq`, `sleep` or `printf`, which are allowed, and `curl`, which is denied. `webfetch` is off.

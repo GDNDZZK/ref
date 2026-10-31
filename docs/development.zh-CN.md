@@ -63,7 +63,7 @@ TUI 与后端通过 WebSocket 交换 JSON 帧。前端分页获取历史：`Atta
 sleep 3600 | ref-server --mock      # stdout 只打印一行 {"port":N,"token":"..."}
 ```
 
-- **退出**：stdin 文件结束、最后一个客户端断开，或 ctrl-c。退出时会删除它的临时目录（被 `SIGKILL` 杀死时会留下 `/tmp/ref-mock-*`）。
+- **退出**：stdin 文件结束、最后一个客户端断开，或 ctrl-c。退出时会删除它的临时目录（被 `SIGKILL` 杀死时会留下 `/tmp/ref-mock-*`）。`--idle-timeout S` 改变第二个条件：`-1` 让 mock 在最后一个客户端离开后继续运行（用来演示后端比窗口活得更久；stdin 必须保持打开），`S` 表示再等 S 秒。不带这个选项时立即退出。
 - **工作区**：无论客户端请求哪个目录，所有会话都在带示例文件的临时工作区中运行（`README.md`、`NOTES.txt`、`src/parser.rs`、`src/lib.rs`、`docs/design.md`、`data/big.log`、`logo.png`、`scratch/`），不会改动你的文件。预置了 3 条历史会话。
 - **模型**：`mock/mock-1`（默认；200k 上下文、图片、推理、变体 `low`、`medium`、`high`）和 `mock/mock-fast`（64k）。多一个智能体 `reviewer`。
 - **权限**：`edit` 和 `write` 询问（`scratch/` 下允许）。`delete` 允许，但延迟 5 秒。`bash` 询问，以 `echo`、`ls`、`cat`、`seq`、`sleep`、`printf` 开头的命令允许，`curl` 拒绝。`webfetch` 关闭。
