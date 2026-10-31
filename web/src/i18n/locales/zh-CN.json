@@ -377,8 +377,8 @@
     "submit": "提交",
     "dismiss": "忽略",
     "unanswered": "未回答",
-    "hintSingle": "↑↓ 移动 · 1-9 或 Enter 选择 · Esc 忽略",
-    "hintTabbed": "←→ 切换问题 · 1-9 或空格选择 · Enter 下一项 · Esc 忽略",
+    "hintSingle": "↑↓ 或 j/k 移动 · 1-9、空格或 Enter 选择 · Esc 忽略",
+    "hintTabbed": "↑↓ 或 j/k 移动 · 1-9、空格或 Enter 选择 · ←→ 或 Tab 切换问题 · Esc 忽略",
     "hintConfirm": "Enter 提交 · ← 返回 · Esc 忽略"
   }
 }

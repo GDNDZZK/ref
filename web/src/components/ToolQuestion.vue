@@ -61,7 +61,7 @@ function finish(outcome: FormOutcome): void {
 
 function pick(row: number): void {
   const form = current.value
-  if (form) finish(form.pick(form.tab, row, false))
+  if (form) finish(form.pick(form.tab, row))
 }
 
 function typed(event: Event): void {

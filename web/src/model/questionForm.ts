@@ -91,10 +91,11 @@ export class QuestionForm {
     if (choice) choice.cursor = row
   }
 
+  // The cursor stops at the first and last row, as in the terminal UI and the GUI.
   moveCursor(index: number, delta: number): void {
     const rows = this.rowCount(index)
     const choice = this.choices[index]
-    if (choice && rows > 0) choice.cursor = (choice.cursor + delta + rows) % rows
+    if (choice && rows > 0) choice.cursor = Math.max(0, Math.min(choice.cursor + delta, rows - 1))
   }
 
   // Chooses a row of a single choice, or flips it in a multiple choice. The custom row starts
@@ -116,13 +117,14 @@ export class QuestionForm {
     this.editing = custom && choice.customPicked
   }
 
-  // The text of the custom answer is done (Enter in the field).
+  // The text of the custom answer is done (Enter in the field). A single choice is made then;
+  // a multiple choice stays on its tab.
   commitCustom(): FormOutcome {
     const choice = this.choices[this.tab]
     if (!choice) return 'ignored'
     if (choice.customText.trim() === '') return 'handled' // nothing typed: stay in the field
     this.editing = false
-    return this.advance()
+    return this.questions[this.tab]?.multiple ? 'handled' : this.advance()
   }
 
   // Esc in the field: back to the list. With no text typed the custom row is not chosen.
@@ -140,40 +142,32 @@ export class QuestionForm {
   // A key press outside the text field.
   press(key: string, shift = false): FormOutcome {
     if (key === 'Escape') return 'dismiss'
-    if (this.onConfirmTab) return this.pressOnConfirm(key)
+    const tabDelta = this.tabbed ? tabDirection(key, shift) : 0
+    if (tabDelta !== 0) return this.moveTabBy(tabDelta)
+    if (this.onConfirmTab) return key === 'Enter' ? 'submit' : 'ignored'
+
     const index = this.tab
     switch (key) {
       case 'ArrowUp':
+      case 'k':
         this.moveCursor(index, -1)
         return 'handled'
       case 'ArrowDown':
+      case 'j':
         this.moveCursor(index, 1)
         return 'handled'
       case 'Enter':
-        return this.pick(index, this.choices[index]!.cursor, true)
       case ' ':
-        return this.pick(index, this.choices[index]!.cursor, false)
+        return this.pick(index, this.choices[index]!.cursor)
       default:
-        return this.pressOther(key, shift)
+        return this.pressNumber(key)
     }
   }
 
-  private pressOther(key: string, shift: boolean): FormOutcome {
-    if (this.tabbed) {
-      if (key === 'ArrowRight' || (key === 'Tab' && !shift)) return this.moveTabBy(1)
-      if (key === 'ArrowLeft' || (key === 'Tab' && shift)) return this.moveTabBy(-1)
-    }
+  private pressNumber(key: string): FormOutcome {
     const number = Number(key)
     const isNumberKey = Number.isInteger(number) && number >= FIRST_NUMBER_KEY && number <= MAX_NUMBER_KEY
-    if (isNumberKey) return this.pick(this.tab, number - FIRST_NUMBER_KEY, false)
-    return 'ignored'
-  }
-
-  private pressOnConfirm(key: string): FormOutcome {
-    if (key === 'Enter') return 'submit'
-    if (key === 'ArrowRight' || key === 'Tab') return this.moveTabBy(1)
-    if (key === 'ArrowLeft') return this.moveTabBy(-1)
-    return 'ignored'
+    return isNumberKey ? this.pick(this.tab, number - FIRST_NUMBER_KEY) : 'ignored'
   }
 
   private moveTabBy(delta: number): FormOutcome {
@@ -181,12 +175,10 @@ export class QuestionForm {
     return 'handled'
   }
 
-  // A row picked with the keyboard or the mouse. `enter` is Enter, which moves on in a multiple
-  // choice instead of flipping the row.
-  pick(index: number, row: number, enter: boolean): FormOutcome {
+  // A row picked with the keyboard or the mouse.
+  pick(index: number, row: number): FormOutcome {
     const question = this.questions[index]
     if (!question || row < 0 || row >= this.rowCount(index)) return 'ignored'
-    if (question.multiple && enter) return this.advance()
     this.select(index, row)
     if (question.multiple || this.editing) return 'handled'
     return this.advance()
@@ -198,6 +190,13 @@ export class QuestionForm {
     this.goToTab(this.tab + 1)
     return 'handled'
   }
+}
+
+// +1 or -1 for the keys that change the tab, else 0.
+function tabDirection(key: string, shift: boolean): number {
+  if (key === 'ArrowRight' || (key === 'Tab' && !shift)) return 1
+  if (key === 'ArrowLeft' || (key === 'Tab' && shift)) return -1
+  return 0
 }
 
 function initialChoice(question: Question): QuestionChoice {
