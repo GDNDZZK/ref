@@ -4,6 +4,7 @@ import { fakeTerminal } from '../components/fakeTerminal.ts'
 import { castWindow } from '../shots/castWindow.ts'
 import { HOOK_RECT, terminalCut } from '../shots/terminalHook.ts'
 import { FEATURES } from './features.ts'
+import { OPENCODE_JSON } from './opencodeConfig.ts'
 import { cues, drawnCut, endCut, timelineFilm } from './timeline.ts'
 
 const HOOK_END = 3.0
@@ -44,24 +45,6 @@ const SCROLLED_CONFIG = [
 ]
 const SCROLL_ROWS_PER_SECOND = 4.5
 
-// The file ref reads, as the viewer has it.
-const OPENCODE_JSON = [
-  '{',
-  '  "model": "anthropic/claude-sonnet-4-5",',
-  '  "provider": {',
-  '    "local": {',
-  '      "npm": "@ai-sdk/openai-compatible",',
-  '      "options": {',
-  '        "baseURL": "http://localhost:8080/v1",',
-  '        "apiKey": "{env:WORK_API_KEY}"',
-  '      },',
-  '      "models": { "qwen3-coder": {} }',
-  '    }',
-  '  },',
-  '  "agent": { "review": { "description": "Reviews the diff" } },',
-  '  "permission": { "bash": "ask" }',
-  '}',
-]
 const API_KEY_LINE = OPENCODE_JSON.findIndex((line) => line.includes('apiKey'))
 const CARD = { x: 360, y: 90, width: 1200 }
 
