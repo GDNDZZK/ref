@@ -283,6 +283,16 @@
     "height": 1600,
     "sessionName": "workspace-dce9"
   },
+  "gui-split-readme": {
+    "width": 2560,
+    "height": 2240,
+    "sessionName": "workspace-877d"
+  },
+  "gui-split-readme-zh": {
+    "width": 2560,
+    "height": 2240,
+    "sessionName": "workspace-2f7b"
+  },
   "gui-split-view": {
     "width": 2560,
     "height": 1600,
@@ -644,6 +654,16 @@
     "width": 3200,
     "height": 2000,
     "sessionName": "workspace-892a"
+  },
+  "web-split-readme": {
+    "width": 3200,
+    "height": 2000,
+    "sessionName": "workspace-72ad"
+  },
+  "web-split-readme-zh": {
+    "width": 3200,
+    "height": 2000,
+    "sessionName": "workspace-356a"
   },
   "web-split-view": {
     "width": 3200,

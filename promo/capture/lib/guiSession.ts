@@ -103,6 +103,10 @@ export class GuiSession {
     }
   }
 
+  async resize(width: number, height: number): Promise<void> {
+    await this.command({ cmd: 'resize', width, height })
+  }
+
   async texts(): Promise<TextOnScreen[]> {
     return ((await this.command({ cmd: 'texts' })).texts as TextOnScreen[]) ?? []
   }
