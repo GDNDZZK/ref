@@ -1,10 +1,11 @@
 # Storyboard
 
-One trailer that shows every headline feature fast, and one short film per feature. Everything is 1920×1080, 30 fps, H.264, no audio track (see [Decisions](#decisions)).
+One trailer that shows every headline feature fast, one hero film (`orchestra`), and one short film per feature. Everything is 1920×1080, 30 fps, H.264, no audio track (see [Decisions](#decisions)).
 
 | Id | Film | Length |
 |---|---|---|
-| `trailer` | The trailer: all features, one beat each | 60.4 s |
+| `trailer` | The trailer: the crew, then one beat per feature | TRAILER_LEN s |
+| `orchestra` | One session, a whole crew (the hero film) | ORCH_LEN s |
 | `backend` | One backend, every window | 26.4 s |
 | `sessions` | Many sessions, one screen | 27.9 s |
 | `peers` | Sessions that talk to each other | 24.9 s |
@@ -15,7 +16,7 @@ One trailer that shows every headline feature fast, and one short film per featu
 | `setup` | Your config, any model | 22.9 s |
 | `notify` | Walk away, get called back | 23.9 s |
 
-Why these nine: each is something a reader cannot get from "a coding agent" alone, each fits one story in under 30 seconds, and each can be shown with the scripted mock backend. Not filmed on their own: the Windows/macOS/Linux builds and the install steps (a README table does that better), and the key bindings (they appear inside the films that use them).
+Why these ten: each is something a reader cannot get from "a coding agent" alone, each fits one story in under 30 seconds, and each can be shown with the scripted mock backend. Not filmed on their own: the Windows/macOS/Linux builds and the install steps (a README table does that better), and the key bindings (they appear inside the films that use them).
 
 ## Decisions
 
@@ -44,9 +45,25 @@ The ones marked README are also copied, smaller, to `docs/images/`.
 
 Every film is a title card (2.5 s), the beats below, and the shared closing card (about 2.4 s). Captions are one line, in English or Chinese (one language per render). GUI pictures are used wherever the GUI shows the thing; the WebUI is used for the browser parts and for images, which only the web page can paste.
 
-### Trailer (60 s)
+### Trailer (about 60 s)
 
-Terminal turn with `ref-server` timer after the window closes (4.5 s, "Close the window. It keeps working."), logo (3.5 s), the three windows side by side (4.5 s, "One backend, every window."), then one beat per feature, 4.5 to 6 s each: split view, peer message, permission card, edit input with line and tag marked, `/` `@` `!` popups, context compaction, `opencode.json` typing itself, notification card. Closing card with the repository address.
+1. The hook (12.5 s, no title card): the task typed into one session ("One agent."), the split view with helper sessions appearing and streaming, a recording ("directs a whole crew." / "They work at once."), the reports in the main session ("and report back.").
+2. Logo and tagline (3.5 s).
+3. The three windows side by side (5.5 s, "One backend, every window.").
+4. One beat per feature, 4.5 s each: permission card, edit input with line and tag marked, `/` `@` `!` popups, context compaction, `opencode.json` typing itself, notification card. The sessions and peers films are not in the trailer; the hook shows both ideas working.
+5. The finale (9.5 s): the full grid of six sessions, a "Finished" notification, "Close the window. Your crew keeps working."
+6. Closing card with the repository address.
+
+### `orchestra`: One session, a whole crew
+
+The `orchestrate` script of the mock backend (`docs/development.md#the-mock-backend`): the main session starts four helpers (scout, fixer, tester, docs), then a reviewer; the fixer's edit waits for approval; the reports come back and the main session sums up.
+
+1. The task typed into the main session: "Give one session the task."
+2. The plan and the four `create_session` calls: "It plans, then starts helpers."
+3. The split view as a recording (12.5 s): tiles appear and stream; focus moves to the fixer's tile, which asks for approval; Allow is clicked: "They all work at once." / "You only step in where it matters."
+4. Terminal, app and browser side by side, all showing this crew: "Watch it from any window. Same crew."
+5. The reports in the main session, then the `/peers` inbox listing them: "Reports come back to the main session."
+6. The summary with a "Finished" notification: "One answer. You stayed in one place."
 
 ### `backend`: One backend, every window
 

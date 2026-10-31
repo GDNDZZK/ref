@@ -11,6 +11,8 @@ import { COMMAND_LETTERS, shotFileName, type CommandId, type ShotOptions, type U
 const WINDOW = { width: 1280, height: 800 }
 const MODEL_TAG = 'Mock 1'
 const SETTLE_MS = 700 // entrance animations last up to 480 ms
+const SIDEBAR_WIDTH = 300
+const PARKED_POINTER = { x: 700, y: 20 } // the empty top bar
 const GRAB_DIR = join(import.meta.dirname, '..', '..', '.cache', 'grab')
 
 function qtChord(chord: string): string {
@@ -57,6 +59,25 @@ class GuiUi implements Ui {
 
   clickText(text: string): Promise<void> {
     return this.session.clickText(text)
+  }
+
+  async clickTextBelow(text: string, anchor: string): Promise<void> {
+    const items = await this.session.texts()
+    const top = items.find((item) => item.text.includes(anchor))?.y
+    if (top === undefined) throw new Error(`no visible text "${anchor}"`)
+    const target = items.filter((item) => item.text.includes(text) && item.y >= top).sort((a, b) => a.y - b.y)[0]
+    if (!target) throw new Error(`no visible text "${text}" below "${anchor}"`)
+    await this.session.click(target.x + target.width / 2, target.y + target.height / 2)
+  }
+
+  parkPointer(): Promise<void> {
+    return this.session.hover(PARKED_POINTER.x, PARKED_POINTER.y)
+  }
+
+  async clickSidebarRow(title: string): Promise<void> {
+    const row = (await this.session.texts()).find((item) => item.text === title && item.x < SIDEBAR_WIDTH)
+    if (!row) throw new Error(`no sidebar row "${title}"`)
+    await this.session.click(row.x + row.width / 2, row.y + row.height / 2)
   }
 
   hasText(text: string): Promise<boolean> {

@@ -18,7 +18,14 @@ export type CardBeatOptions = Pick<BeatOptions, 'seconds' | 'caption' | 'tag'> &
   cards: readonly Omit<TextCardOptions, 'from' | 'to'>[]
 }
 
-export type Beat = ({ kind: 'window' } & BeatOptions) | ({ kind: 'cards' } & CardBeatOptions)
+// Any other shot, built for the given length (the viewer's seconds plus the overlap).
+export interface ShotBeat {
+  kind: 'shot'
+  seconds: number
+  build: (seconds: number) => ReturnType<typeof defineShot>
+}
+
+export type Beat = ({ kind: 'window' } & BeatOptions) | ({ kind: 'cards' } & CardBeatOptions) | ShotBeat
 
 function cardShot(options: CardBeatOptions) {
   return defineShot(options.seconds, (shot) => {
@@ -32,12 +39,17 @@ function cardShot(options: CardBeatOptions) {
 // `seconds` in a beat is what the viewer sees; the overlap is added here.
 export function stepFor(beat: Beat): Step {
   const seconds = beat.seconds + TRANSITION_SECONDS
-  const shot = beat.kind === 'window' ? beatShot({ ...beat, seconds }) : cardShot({ ...beat, seconds })
+  const shot =
+    beat.kind === 'window' ? beatShot({ ...beat, seconds }) : beat.kind === 'cards' ? cardShot({ ...beat, seconds }) : beat.build(seconds)
   return { shot, enter: { kind: 'fade', duration: TRANSITION_SECONDS } }
 }
 
 export function windowBeat(options: BeatOptions): Beat {
   return { kind: 'window', ...options }
+}
+
+export function shotBeat(seconds: number, build: ShotBeat['build']): Beat {
+  return { kind: 'shot', seconds, build }
 }
 
 export function cardsBeat(options: CardBeatOptions): Beat {

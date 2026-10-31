@@ -29,16 +29,6 @@
     "height": 1600,
     "sessionName": "workspace-48bd"
   },
-  "gui-composer-queue": {
-    "width": 2560,
-    "height": 1600,
-    "sessionName": "workspace-4c8d"
-  },
-  "gui-composer-queue-zh": {
-    "width": 2560,
-    "height": 1600,
-    "sessionName": "workspace-a563"
-  },
   "gui-composer-shell": {
     "width": 2560,
     "height": 1600,
@@ -98,6 +88,11 @@
     "width": 2560,
     "height": 1600,
     "sessionName": "workspace-9f34"
+  },
+  "gui-crew": {
+    "width": 2560,
+    "height": 2240,
+    "sessionName": "workspace-629b"
   },
   "gui-delay-cancelled": {
     "width": 2560,
@@ -188,6 +183,66 @@
     "width": 2560,
     "height": 1600,
     "sessionName": "workspace-4f7c"
+  },
+  "gui-orchestra-done": {
+    "width": 2560,
+    "height": 1600,
+    "sessionName": "workspace-e265"
+  },
+  "gui-orchestra-done-zh": {
+    "width": 2560,
+    "height": 1600,
+    "sessionName": "workspace-eda0"
+  },
+  "gui-orchestra-inbox": {
+    "width": 2560,
+    "height": 1600,
+    "sessionName": "workspace-e265"
+  },
+  "gui-orchestra-inbox-zh": {
+    "width": 2560,
+    "height": 1600,
+    "sessionName": "workspace-eda0"
+  },
+  "gui-orchestra-plan": {
+    "width": 2560,
+    "height": 1600,
+    "sessionName": "workspace-e265"
+  },
+  "gui-orchestra-plan-zh": {
+    "width": 2560,
+    "height": 1600,
+    "sessionName": "workspace-eda0"
+  },
+  "gui-orchestra-reports": {
+    "width": 2560,
+    "height": 1600,
+    "sessionName": "workspace-e265"
+  },
+  "gui-orchestra-reports-zh": {
+    "width": 2560,
+    "height": 1600,
+    "sessionName": "workspace-eda0"
+  },
+  "gui-orchestra-six": {
+    "width": 2560,
+    "height": 2240,
+    "sessionName": "workspace-39a0"
+  },
+  "gui-orchestra-six-zh": {
+    "width": 2560,
+    "height": 2240,
+    "sessionName": "workspace-1cb5"
+  },
+  "gui-orchestra-task": {
+    "width": 2560,
+    "height": 1600,
+    "sessionName": "workspace-e265"
+  },
+  "gui-orchestra-task-zh": {
+    "width": 2560,
+    "height": 1600,
+    "sessionName": "workspace-eda0"
   },
   "gui-peer-message": {
     "width": 2560,
@@ -323,6 +378,14 @@
     "height": 1600,
     "sessionName": "workspace-4289"
   },
+  "tui-crew": {
+    "width": 2058,
+    "height": 1224
+  },
+  "tui-crew-clean": {
+    "width": 2058,
+    "height": 1144
+  },
   "tui-main": {
     "width": 2058,
     "height": 1224
@@ -391,16 +454,6 @@
     "height": 2000,
     "sessionName": "workspace-74ed"
   },
-  "web-composer-queue": {
-    "width": 3200,
-    "height": 2000,
-    "sessionName": "workspace-53a8"
-  },
-  "web-composer-queue-zh": {
-    "width": 3200,
-    "height": 2000,
-    "sessionName": "workspace-a921"
-  },
   "web-composer-shell": {
     "width": 3200,
     "height": 2000,
@@ -460,6 +513,11 @@
     "width": 3200,
     "height": 2000,
     "sessionName": "workspace-fd17"
+  },
+  "web-crew": {
+    "width": 3200,
+    "height": 2000,
+    "sessionName": "workspace-629b"
   },
   "web-delay-cancelled": {
     "width": 3200,
@@ -694,5 +752,25 @@
     "width": 3200,
     "height": 2000,
     "sessionName": "workspace-1cd4"
+  },
+  "gui-composer-queue": {
+    "width": 2560,
+    "height": 1600,
+    "sessionName": "workspace-4c8d"
+  },
+  "gui-composer-queue-zh": {
+    "width": 2560,
+    "height": 1600,
+    "sessionName": "workspace-a563"
+  },
+  "web-composer-queue": {
+    "width": 3200,
+    "height": 2000,
+    "sessionName": "workspace-53a8"
+  },
+  "web-composer-queue-zh": {
+    "width": 3200,
+    "height": 2000,
+    "sessionName": "workspace-a921"
   }
 }
