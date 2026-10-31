@@ -234,7 +234,7 @@ The zoomed tile is the shared element: it is the same `SessionPane` item during 
 streaming text and Hold survive. Hold (D5) is per pane and keeps working inside tiles.
 Zoom is `Ctrl+Shift+Z` on the focused tile, a click on the maximize button, or a double click on the header.
 Focus moves by clicking a tile, `Alt+arrows` (nearest tile in that direction by centre distance) or `Tab` outside
-the composer. Typing goes to the focused tile's composer; a click on a tile focuses its composer.
+the composer. Typing goes to the focused tile's composer; a click on a tile focuses its composer. The click is seen by a passive `TapHandler` on an item in front of the pane: selectable text takes the press for itself and then asks no handler of its ancestors, so a handler behind it never saw clicks on text. Buttons keep their click.
 
 ## Command palette (Ctrl+P)
 

@@ -10,6 +10,17 @@
 using namespace Qt::StringLiterals;
 using namespace refgui::compose;
 
+namespace
+{
+
+// The path part of a file URL: Windows paths (D:/x) get the slash that file:///D:/x has before them.
+QString urlPath(const QString& path)
+{
+	return path.startsWith(u'/') ? path : u'/' + path;
+}
+
+}
+
 class TestPromptHistory : public QObject
 {
 	Q_OBJECT
@@ -151,7 +162,7 @@ void TestPromptHistory::imagePathsAreRecognised()
 	const QString escaped = QString(path).replace(u' ', u"\\ "_s);
 	QVERIFY(imageFromPath(escaped)->has_value());
 	QVERIFY(imageFromPath(u"'"_s + path + u"'"_s)->has_value());
-	QVERIFY(imageFromPath(u"file://"_s + QString(path).replace(u' ', u"%20"_s))->has_value());
+	QVERIFY(imageFromPath(u"file://"_s + urlPath(path).replace(u' ', u"%20"_s))->has_value());
 }
 
 void TestPromptHistory::fileUrlsOfEveryFormAreRecognised()
@@ -167,7 +178,7 @@ void TestPromptHistory::fileUrlsOfEveryFormAreRecognised()
 	// What a file manager puts on the clipboard, with the characters of URLs encoded.
 	QVERIFY(imageFromPath(url.toString(QUrl::FullyEncoded))->has_value());
 	// The scheme is case-insensitive and the slashes after it may be missing.
-	const QString encodedPath = QString::fromUtf8(QUrl::toPercentEncoding(path, "/"));
+	const QString encodedPath = QString::fromUtf8(QUrl::toPercentEncoding(urlPath(path), "/"));
 	QVERIFY(imageFromPath(u"FILE://"_s + encodedPath)->has_value());
 	QVERIFY(imageFromPath(u"file:"_s + encodedPath)->has_value());
 	// A dropped URL is converted by Qt, not by cutting the scheme off.

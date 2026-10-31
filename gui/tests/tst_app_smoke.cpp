@@ -27,6 +27,18 @@ struct Run
 	bool finished = false;
 };
 
+// Stops the server process a test started. On Windows QProcess::terminate() only posts WM_CLOSE,
+// which a console program never receives, so the process is killed there.
+bool stopServer(QProcess& server)
+{
+#ifdef Q_OS_WIN
+	server.kill();
+#else
+	server.terminate();
+#endif
+	return server.waitForFinished(ServerExitTimeoutMs);
+}
+
 }
 
 class TestAppSmoke : public QObject
@@ -157,8 +169,7 @@ void TestAppSmoke::explicitServerOpensASession()
 	QCOMPARE(refused.exitCode, 1);
 	QVERIFY2(!refused.err.isEmpty(), "says nothing");
 
-	server.terminate(); // the process this test started
-	QVERIFY(server.waitForFinished(ServerExitTimeoutMs));
+	QVERIFY(stopServer(server));
 }
 
 void TestAppSmoke::explicitServerRejectsUnknownSession()
@@ -180,8 +191,7 @@ void TestAppSmoke::explicitServerRejectsUnknownSession()
 	QCOMPARE(run.exitCode, 1);
 	QVERIFY2(run.err.contains(u"ses_does_not_exist"_s), qPrintable(run.err));
 
-	server.terminate();
-	QVERIFY(server.waitForFinished(ServerExitTimeoutMs));
+	QVERIFY(stopServer(server));
 }
 
 // No --server: ref-gui starts a backend of its own, which leaves again with its last client.

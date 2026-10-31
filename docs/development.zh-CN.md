@@ -66,7 +66,7 @@ sleep 3600 | ref-server --mock      # stdout 只打印一行 {"port":N,"token":"
 - **退出**：stdin 文件结束、最后一个客户端断开，或 ctrl-c。退出时会删除它的临时目录（被 `SIGKILL` 杀死时会留下 `/tmp/ref-mock-*`）。`--idle-timeout S` 改变第二个条件：`-1` 让 mock 在最后一个客户端离开后继续运行（用来演示后端比窗口活得更久；stdin 必须保持打开），`S` 表示再等 S 秒。不带这个选项时立即退出。
 - **工作区**：无论客户端请求哪个目录，所有会话都在带示例文件的临时工作区中运行（`README.md`、`NOTES.txt`、`src/parser.rs`、`src/lib.rs`、`docs/design.md`、`data/big.log`、`logo.png`、`scratch/src/parser.rs` 和 `scratch/src/lib.rs`），不会改动你的文件。预置了 3 条历史会话。
 - **模型**：`mock/mock-1`（默认；200k 上下文、图片、推理、变体 `low`、`medium`、`high`）和 `mock/mock-fast`（64k）。多一个智能体 `reviewer`。
-- **权限**：`edit` 和 `write` 询问（`scratch/` 下允许）。`delete` 允许，但延迟 5 秒。`bash` 询问，以 `echo`、`ls`、`cat`、`seq`、`sleep`、`printf`、`sed -i` 开头的命令允许，`curl` 拒绝。`webfetch` 关闭。
+- **权限**：`edit` 和 `write` 询问（`scratch/` 下允许）。`delete` 允许，但延迟 5 秒。`bash` 询问，以 `echo`、`ls`、`cat`、`seq`、`sleep`、`printf`、`awk` 开头的命令允许，`curl` 拒绝。`webfetch` 关闭。
 - **限制**：mock 并不拦截所有操作。*导出*会写到客户端给出的路径，`!` shell 命令会真的运行命令，所以两者都可能写到或运行到工作区之外。脚本调用的工具只会碰工作区。目录选择器限定在工作区内，`~` 就是工作区。
 - **脚本**：提示词的第一个词选择脚本，不区分大小写。其他文字运行 `default`。提示词 `help` 会列出全部脚本。
 
@@ -108,7 +108,7 @@ sleep 3600 | ref-server --mock      # stdout 只打印一行 {"port":N,"token":"
 
 `orchestrate-long` 同样需要批准一次，约在 8 秒；在 10 秒批准时，助手大约在 66 秒（`scout`）、76 秒（`docs`）、79 秒（`tester`）和 91 秒（`fixer`）报告，reviewer 在 96 秒报告，100 秒总结结束。主会话从 7 秒起空闲，四个助手一直忙到各自报告。它可以单独使用。来自其他会话的消息，由「对话的第一个脚本名加 `-report`」命名的脚本回答，所以 `orchestrate-long` 对应 `orchestrate-long-report`；没有这样的脚本时用 `ack`。
 
-`stale` 和 `outage` 会改动它们编辑的示例文件，并且能在同一个后端里重复运行：修改会把名字或行改回去。`stale` 和 `outage` 操作 `scratch/src/parser.rs` 和 `scratch/src/lib.rs`，这是一个带 `parse_line` 函数的小 crate，因为 `scratch/` 里的编辑和 `sed -i` 不需要批准。`stale` 在 `read` 和 `edit` 之间用 `sed -i` 在文件顶部插入三行注释，并改动 `scratch/src/lib.rs` 的第 12 行。`edit` 工具的回答（`Recovered: file changed since read; line numbers remapped.`、`Edit rejected for ... (tag #..., current #...)`）是它自己的文字。`outage` 里的连接重置是到模拟提供方的套接字真的被重置，所以错误行是 HTTP 客户端的（`network error: ... Connection reset by peer`，带本机回环地址）。等待时间是引擎的退避，在 2、4、8、16 秒上下最多浮动 20%。
+`stale` 和 `outage` 会改动它们编辑的示例文件，并且能在同一个后端里重复运行：修改会把名字或行改回去。`stale` 和 `outage` 操作 `scratch/src/parser.rs` 和 `scratch/src/lib.rs`，这是一个带 `parse_line` 函数的小 crate，因为 `scratch/` 里的编辑和 `awk` 不需要批准。`stale` 在 `read` 和 `edit` 之间用 `awk`（在 Linux、macOS、Windows 上行为一致，`sed -i` 则不然）在文件顶部插入三行注释，并改动 `scratch/src/lib.rs` 的第 12 行。`edit` 工具的回答（`Recovered: file changed since read; line numbers remapped.`、`Edit rejected for ... (tag #..., current #...)`）是它自己的文字。`outage` 里的连接重置是到模拟提供方的套接字真的被重置，所以错误行是 HTTP 客户端的（`network error: ... Connection reset by peer`，带本机回环地址）。等待时间是引擎的退避，在 2、4、8、16 秒上下最多浮动 20%。
 
 ## GUI
 
