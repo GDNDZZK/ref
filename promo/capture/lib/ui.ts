@@ -29,6 +29,8 @@ export type CommandId = keyof typeof COMMAND_LETTERS
 export interface ShotOptions {
   // Also copy a smaller version to docs/images/ for the READMEs.
   readme?: boolean
+  // File name (without .png) of that copy, when it differs from the shot's own name.
+  readmeName?: string
 }
 
 // What a scenario can do to a running interface. Both the web page and the GUI implement it,
@@ -50,6 +52,8 @@ export interface Ui {
   waitText(text: string, timeoutMs?: number): Promise<void>
   waitNoText(text: string, timeoutMs?: number): Promise<void>
   pause(ms: number): Promise<void>
+  // Changes the window (GUI) or viewport (web) size, in logical pixels.
+  resize(width: number, height: number): Promise<void>
   // Saves a picture as <kind>-<name>[-zh].png.
   shot(name: string, options?: ShotOptions): Promise<void>
 }
