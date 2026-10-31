@@ -330,7 +330,9 @@
     "permissionTool": "等待授权使用 {tool}",
     "turnDone": "已完成",
     "turnError": "因错误而停止",
-    "turnErrorDetail": "因错误而停止：{error}"
+    "turnErrorDetail": "因错误而停止：{error}",
+    "question": "等待你的回答",
+    "questionDetail": "提问：{question}"
   },
   "notifySettings": {
     "title": "通知",
