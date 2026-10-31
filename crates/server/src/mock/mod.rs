@@ -27,6 +27,8 @@ use crate::{HubOptions, Running, ws};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+/// The mock exits as soon as its last client leaves unless told otherwise.
+pub const DEFAULT_IDLE_TIMEOUT: i64 = 0;
 const ROOT_PREFIX: &str = "ref-mock-";
 const ROOT_SUFFIX_LEN: usize = 8;
 const LOG_FILE: &str = "server.log";
@@ -65,10 +67,16 @@ impl Drop for Mock {
 /// Creates `<tmp>/ref-mock-XXXXXXXX/` and everything in it, and starts listening on
 /// 127.0.0.1:`port` (0: any free port).
 pub async fn start(port: u16, token: String) -> anyhow::Result<Mock> {
+    start_with(port, token, DEFAULT_IDLE_TIMEOUT).await
+}
+
+/// Like [`start`], with the idle timeout of the hub (`--idle-timeout`: -1 keeps the mock running
+/// after its last client leaves).
+pub async fn start_with(port: u16, token: String, idle_timeout: i64) -> anyhow::Result<Mock> {
     let name = format!("{ROOT_PREFIX}{}", crate::util::random_hex(ROOT_SUFFIX_LEN));
     let root = std::env::temp_dir().join(name);
     std::fs::create_dir(&root)?;
-    match start_in(&root, port, token).await {
+    match start_in(&root, port, token, idle_timeout).await {
         Ok(running) => Ok(Mock { running, root }),
         Err(e) => {
             let _ = std::fs::remove_dir_all(&root);
@@ -77,7 +85,12 @@ pub async fn start(port: u16, token: String) -> anyhow::Result<Mock> {
     }
 }
 
-async fn start_in(root: &Path, port: u16, token: String) -> anyhow::Result<Running> {
+async fn start_in(
+    root: &Path,
+    port: u16,
+    token: String,
+    idle_timeout: i64,
+) -> anyhow::Result<Running> {
     let workspace = root.join("workspace");
     std::fs::create_dir_all(root.join("logs"))?;
     std::fs::create_dir_all(&workspace)?;
@@ -96,7 +109,7 @@ async fn start_in(root: &Path, port: u16, token: String) -> anyhow::Result<Runni
     let mut opts = HubOptions::new(data_dir);
     opts.home = None;
     opts.config_loader = Arc::new(move |_| cfg.clone());
-    opts.idle_timeout = 0;
+    opts.idle_timeout = idle_timeout;
     opts.sandbox_cwd = Some(workspace);
     let allow = vec!["127.0.0.1".to_string()];
     let (auth, _) = ws::resolve_hosts(&allow, token);

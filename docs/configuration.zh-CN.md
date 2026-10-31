@@ -319,6 +319,8 @@ ref 在 `~/.config/opencode/`、`~/.config/ref/` 以及每个项目的 `.opencod
 
 **工具别名。** opencode 的工具名会映射到 ref 的工具：`edit` 涵盖 `edit`、`write` 和 `delete`；`write`、`patch`、`multiedit` 和 `apply_patch` 涵盖 `write` 和 `edit`；`glob`、`list` 和 `ls` 表示 `find`；`shell` 表示 `bash`；`fetch` 和 `web_fetch` 表示 `webfetch`。
 
+**`question` 工具。** 与 opencode 一样，`question` 默认对内置的 `build` 和 `plan` 智能体允许，对其他所有智能体（包括自定义智能体）拒绝，这些智能体不会得到这个工具。全局 `permission` 里的 `question` 规则（或 `"*"` 规则）会代替这个默认值对所有智能体生效，智能体自己 `permission` 里的规则优先于两者。`"ask"` 表示先请求权限，再显示问题。例如 `"agent": {"general": {"permission": {"question": "allow"}}}` 让 `general` 可以提问。参见 [question](tools.zh-CN.md#question)。
+
 **禁用的工具。** 当一个工具最后一条 `"*"` 规则是 `deny`，并且没有模式规则允许或询问它时，这个工具根本不会提供给模型。旧写法 `"tools": {"bash": false}` 效果相同。
 
 ## 工具延迟
