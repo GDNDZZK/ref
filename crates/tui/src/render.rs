@@ -13,6 +13,7 @@ use crate::ui::dialog::Dialog;
 use crate::ui::footer::{self, StatusCtx};
 use crate::ui::message;
 use crate::ui::permission::PermissionView;
+use crate::ui::question::QuestionView;
 use crate::ui::text::{self, width};
 use crate::ui::{split, theme, todo};
 
@@ -86,7 +87,7 @@ pub fn draw(f: &mut Frame<'_>, app: &mut App) {
         Mode::Chat => cursor = draw_chat_mode(buf, area, app, now, tick),
         Mode::Watch => cursor = draw_watch_mode(buf, area, app, now, tick).or(cursor),
     }
-    // Overlays: permission modal > dialog.
+    // Overlays: permission modal > question modal > dialog.
     if let Some((sid, req, more)) = app.active_permission() {
         if app.perm.as_ref().is_none_or(|p| p.call_id != req.call_id) {
             app.perm = Some(PermissionView::new(&req.call_id));
@@ -102,8 +103,29 @@ pub fn draw(f: &mut Frame<'_>, app: &mut App) {
             p.draw(buf, area, &req, name.as_deref(), more);
         }
         cursor = None;
+    } else if let Some((sid, req)) = app.active_question() {
+        app.perm = None;
+        if app
+            .question
+            .as_ref()
+            .is_none_or(|q| q.call_id != req.call_id)
+        {
+            app.question = Some(QuestionView::new(&req));
+        }
+        let name =
+            (app.mode == Mode::Watch || app.current.as_deref() != Some(sid.as_str())).then(|| {
+                app.views
+                    .get(&sid)
+                    .map(|v| v.info.name.clone())
+                    .unwrap_or_default()
+            });
+        cursor = app.question.as_mut().and_then(|q| {
+            q.draw(buf, area, name.as_deref());
+            q.cursor_at
+        });
     } else {
         app.perm = None;
+        app.question = None;
         match app.dialog.as_mut() {
             Some(Dialog::List(d)) => {
                 d.draw(buf, area, tick);

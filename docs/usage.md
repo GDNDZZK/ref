@@ -12,6 +12,7 @@
 - [Split view](#split-view)
 - [Working with several sessions](#working-with-several-sessions)
 - [Permissions and delays](#permissions-and-delays)
+- [Questions from the model](#questions-from-the-model)
 
 ## Starting
 
@@ -173,3 +174,28 @@ When a tool call needs permission, the TUI shows the call and asks:
 - `d`: deny; the model is told and continues
 
 When a tool has a delay, a countdown is shown before it runs, and `esc` cancels the call. Both are set in the configuration: see [Permissions](configuration.md#permissions) and [Tool delays](configuration.md#tool-delays).
+
+## Questions from the model
+
+The model can ask you to choose with the `question` tool. The TUI shows a dialog and the session waits for your answer; a session with an open question shows `? waiting for your answer` in the status line. Like a permission request, the dialog ignores `enter`, digits and `esc` for a moment after it opens, so a key you were typing does not answer it.
+
+For one single-choice question the dialog is a list:
+
+| Key | Action |
+|---|---|
+| `↑` `↓`, `j` `k` | Move the cursor. It starts on the option marked `(default)`, or the first option. |
+| `enter` | Take the option under the cursor and send the answer. |
+| `1`–`9` | Take that row and send the answer. |
+| `esc` | Dismiss the question; the model continues without an answer. |
+
+With several questions or a multiple choice, a tab bar shows each question and a final **Confirm** tab:
+
+| Key | Action |
+|---|---|
+| `tab`, `→` / `shift+tab`, `←` | Next / previous tab. |
+| `enter` | On a single choice: take the option and go to the next tab. On a multiple choice: tick or untick the option (`space` and the row's digit do the same). On **Confirm**: send all answers. |
+| `esc` | Dismiss all questions. |
+
+Options marked `(default)` are ticked at the start of a multiple choice. Tabs you have not answered are dimmed, and **Confirm** lists them as `(not answered)`; you can still send. A click on a row or a tab works like the keys.
+
+When a question allows it, the last row is **Type your own answer**. Choose it to type in the row; `enter` keeps the text (on a lone question it also sends the answer), an empty text cancels, and `esc` leaves the field without dismissing the dialog. On a multiple choice the typed text is added to the ticked options, and choosing the row again takes it back. If another client answers first, the dialog closes by itself.

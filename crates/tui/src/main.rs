@@ -10,6 +10,8 @@ mod state;
 mod ui;
 
 #[cfg(test)]
+mod question_tests;
+#[cfg(test)]
 mod tests;
 
 use std::io::Write;
