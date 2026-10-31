@@ -29,7 +29,9 @@ Item {
 		total = Math.max(1, runAt - now)
 	}
 
+	// The row may report the state before the time it runs at.
 	onRunningChanged: if (running) start()
+	onRunAtChanged: if (running) start()
 	Component.onCompleted: if (running) start()
 
 	FrameAnimation {
