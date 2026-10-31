@@ -3,6 +3,7 @@ import type { Delta } from "./Delta";
 import type { Message } from "./Message";
 import type { Part } from "./Part";
 import type { PermissionRequest } from "./PermissionRequest";
+import type { QuestionRequest } from "./QuestionRequest";
 import type { SessionInfo } from "./SessionInfo";
 
-export type SessionEvent = { "type": "info", info: SessionInfo, } | { "type": "message", message: Message, } | { "type": "part", message_id: string, index: number, part: Part, } | { "type": "delta", message_id: string, index: number, delta: Delta, } | { "type": "removed", message_id: string, } | { "type": "reset", messages: Array<Message>, more_before: boolean, } | { "type": "permission", request: PermissionRequest, } | { "type": "permission_resolved", call_id: string, } | { "type": "queue", messages: Array<Message>, } | { "type": "error", text: string, } | { "type": "closed" };
+export type SessionEvent = { "type": "info", info: SessionInfo, } | { "type": "message", message: Message, } | { "type": "part", message_id: string, index: number, part: Part, } | { "type": "delta", message_id: string, index: number, delta: Delta, } | { "type": "removed", message_id: string, } | { "type": "reset", messages: Array<Message>, more_before: boolean, } | { "type": "permission", request: PermissionRequest, } | { "type": "question", request: QuestionRequest, } | { "type": "question_resolved", call_id: string, } | { "type": "permission_resolved", call_id: string, } | { "type": "queue", messages: Array<Message>, } | { "type": "error", text: string, } | { "type": "closed" };
