@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" font-family="sans-serif">
+  <rect width="1600" height="1000" fill="#16171a"/>
+  <rect width="300" height="1000" fill="#1f2024"/>
+  <rect x="299" width="1" height="1000" fill="#2d2f35"/>
+  <text x="28" y="56" font-size="20" fill="#8e909a">Sessions</text>
+  <rect x="16" y="80" width="268" height="64" rx="10" fill="#292a2f"/>
+  <circle cx="40" cy="112" r="6" fill="#6cc28a"/>
+  <text x="58" y="118" font-size="18" fill="#e6e6e9">api-server</text>
+  <circle cx="40" cy="176" r="6" fill="#7aa2f7"/>
+  <text x="58" y="182" font-size="18" fill="#8e909a">docs</text>
+  <rect x="580" y="120" width="720" height="84" rx="18" fill="#222a3a" stroke="#2e3a52"/>
+  <text x="608" y="170" font-size="22" fill="#e6e6e9">Refactor the parser and keep the tests green</text>
+  <rect x="340" y="260" width="540" height="22" rx="6" fill="#2d2f35"/>
+  <rect x="340" y="300" width="760" height="22" rx="6" fill="#2d2f35"/>
+  <rect x="340" y="340" width="420" height="22" rx="6" fill="#2d2f35"/>
+  <rect x="340" y="400" width="1180" height="260" rx="10" fill="#1b1c20" stroke="#2d2f35"/>
+  <text x="364" y="440" font-size="18" fill="#6cc28a" font-family="monospace">+ fn parse(input: &amp;str) -&gt; Result&lt;Ast, Error&gt; {</text>
+  <text x="364" y="472" font-size="18" fill="#ec6f73" font-family="monospace">- fn parse(input: &amp;str) -&gt; Ast {</text>
+  <rect x="340" y="860" width="1220" height="84" rx="18" fill="#1f2024" stroke="#2d2f35"/>
+</svg>
