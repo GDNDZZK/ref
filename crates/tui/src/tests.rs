@@ -203,9 +203,15 @@ pub fn transcript(streaming: bool) -> Vec<Message> {
 }
 
 pub fn test_app(streaming: bool) -> App {
-    let (tx, rx) = mpsc::unbounded_channel();
+    let (app, rx) = test_app_with_requests(streaming);
     // Keep the receiver alive so requests are accepted (and recorded as pending).
     std::mem::forget(rx);
+    app
+}
+
+/// Like `test_app`, with the receiver that sees every request the app sends.
+pub fn test_app_with_requests(streaming: bool) -> (App, mpsc::UnboundedReceiver<ClientFrame>) {
+    let (tx, rx) = mpsc::unbounded_channel();
     let mut app = App::new(Client::new(tx), "/home/u/proj".into(), InitPlan::default());
     app.connected = true;
     app.ever_connected = true;
@@ -249,7 +255,7 @@ pub fn test_app(streaming: bool) -> App {
     });
     app.views.insert("ses_test".into(), v);
     app.current = Some("ses_test".into());
-    app
+    (app, rx)
 }
 
 pub fn render(app: &mut App, w: u16, h: u16) -> (Terminal<TestBackend>, String) {
@@ -520,7 +526,7 @@ async fn pump(app: &mut App, rx: &mut mpsc::UnboundedReceiver<crate::net::NetEve
     }
 }
 
-fn key(
+pub fn key(
     code: crossterm::event::KeyCode,
     mods: crossterm::event::KeyModifiers,
 ) -> crossterm::event::Event {
@@ -1107,7 +1113,7 @@ fn shell_mode_and_image_token() {
     assert!(s.contains("1 image"));
 }
 
-fn mouse(kind: crossterm::event::MouseEventKind, x: u16, y: u16) -> crossterm::event::Event {
+pub fn mouse(kind: crossterm::event::MouseEventKind, x: u16, y: u16) -> crossterm::event::Event {
     crossterm::event::Event::Mouse(crossterm::event::MouseEvent {
         kind,
         column: x,
