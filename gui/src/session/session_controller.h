@@ -39,6 +39,9 @@ public:
 	// Messages waiting for the next safe point, in delivery order: the server's word, from the
 	// snapshot and Queue events. Prompts of the user can be withdrawn while they are here.
 	const QList<proto::Message>& queued() const { return m_queued; }
+	// Questions of the model that wait for the user's answer, oldest first: from the snapshot and
+	// Question events, until a QuestionResolved event or dropQuestion().
+	const QList<proto::QuestionRequest>& pendingQuestions() const { return m_questions; }
 	// Empty until a session is attached.
 	const QString& sessionId() const { return m_sessionId; }
 	bool hasSession() const { return !m_sessionId.isEmpty(); }
@@ -78,6 +81,11 @@ public:
 	QCoro::Task<Result<proto::PromptResult>> send(QString text, QList<proto::ImageData> images = {});
 	QCoro::Task<Result<void>> abort();
 	QCoro::Task<Result<void>> permissionReply(QString callId, bool allow, bool always);
+	// One list of answers per question (empty: not answered); none dismisses the questions. The
+	// question stays pending until the backend reports it resolved.
+	QCoro::Task<Result<void>> questionReply(QString callId, std::optional<QList<QStringList>> answers);
+	// Forgets a pending question that was answered elsewhere.
+	void dropQuestion(const QString& callId);
 	// Takes back a human prompt and what followed (the last one without `messageId`); the answer
 	// has the prompt's text and pictures. The conversation shrinks by a Reset event.
 	QCoro::Task<Result<proto::RemovedPrompt>> undo(std::optional<QString> messageId);
@@ -87,6 +95,7 @@ signals:
 	void busyChanged();
 	void turnInProgressChanged();
 	void queueChanged();
+	void questionsChanged();
 	void moreBeforeChanged();
 	void loadingOlderChanged();
 	// The backend reported a problem with the session (an Error event).
@@ -101,6 +110,7 @@ private:
 	void onEvent(const proto::SessionEvent& event);
 	void setInfo(const proto::SessionInfo& info);
 	void setQueued(QList<proto::Message> messages);
+	void setQuestions(QList<proto::QuestionRequest> questions);
 	void setMoreBefore(bool moreBefore);
 	void setLoadingOlder(bool loading);
 
@@ -112,6 +122,7 @@ private:
 	bool m_foreground = true;
 	proto::SessionInfo m_info;
 	QList<proto::Message> m_queued;
+	QList<proto::QuestionRequest> m_questions;
 	bool m_moreBefore = false;
 	bool m_loadingOlder = false;
 };
