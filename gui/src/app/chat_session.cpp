@@ -298,6 +298,17 @@ void ChatSession::trackAnswerTarget()
 	emit answerChanged();
 }
 
+void ChatSession::restartAnswerGuard()
+{
+	if(m_guardedTarget.isEmpty())
+	{
+		return;
+	}
+	m_guardPassed = false;
+	m_permissionGuard.start();
+	emit answerChanged();
+}
+
 void ChatSession::syncQuestion()
 {
 	const auto& pending = m_controller.pendingQuestions();
@@ -496,7 +507,10 @@ QCoro::Task<> ChatSession::sendQuestionReply(QString callId, std::optional<QList
 		m_controller.dropQuestion(callId);
 		co_return;
 	}
-	m_question.setBusy(false); // the card stays, to be tried again
+	if(m_question.isActive() && m_question.callId() == callId)
+	{
+		m_question.setBusy(false); // the card stays, to be tried again
+	}
 	setFailure(result.error());
 }
 
