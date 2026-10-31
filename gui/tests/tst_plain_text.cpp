@@ -2,7 +2,7 @@
 // output) must be shown as it is: with the default format a Text reads <img src="http://..."> and
 // fetches it. This scans every QML file of the app for text items and tooltips that would not be
 // plain. It looks at the properties an item sets itself, so a nested item that says PlainText
-// does not excuse the item around it.
+// does not excuse the item around it. The same scan keeps QtQuick.Shapes out of the app.
 #include <QDir>
 #include <QFile>
 #include <QRegularExpression>
@@ -26,6 +26,16 @@ const QString PlainToolTipFile = u"PlainToolTip.qml"_s;
 const QRegularExpression TextItem(uR"(\b(Text|Label|TextEdit|TextArea)\s*\{)"_s);
 const QRegularExpression ToolTipItem(uR"(\bToolTip\s*\{)"_s);
 const QRegularExpression TextFormat(uR"(\btextFormat\s*:([^\n;]*))"_s);
+
+// An import of the Shapes module. A Shape lying wholly outside the clip of an ancestor is drawn anyway
+// (every renderer, Qt 6.12), so a chevron or ring scrolled out of a ListView showed over what is next
+// to it; draw with a Canvas or plain items.
+const QRegularExpression ShapesImport(uR"(^\s*import\s+QtQuick\.Shapes\b)"_s, QRegularExpression::MultilineOption);
+
+bool importsShapes(const QString& source)
+{
+	return ShapesImport.match(source).hasMatch();
+}
 
 QString readFile(const QString& path)
 {
@@ -139,6 +149,7 @@ class TestPlainText : public QObject
 
 private slots:
 	void everyQmlFileShowsOutsideTextAsItIs();
+	void noFileImportsShapes();
 	void theScanSeesWhatItShould();
 	void theScanLooksAtTheItemsOwnProperties();
 	void theScanCoversTheFilesOfTheApp();
@@ -154,6 +165,24 @@ void TestPlainText::everyQmlFileShowsOutsideTextAsItIs()
 		found.append(problems(name, source));
 	}
 	QVERIFY2(found.isEmpty(), qPrintable(u"\n"_s + found.join(u'\n')));
+}
+
+void TestPlainText::noFileImportsShapes()
+{
+	QStringList found;
+	for(const QString& name : qmlFiles())
+	{
+		if(importsShapes(readFile(QStringLiteral(REF_QML_DIR) + u"/"_s + name)))
+		{
+			found.append(name);
+		}
+	}
+	QVERIFY2(found.isEmpty(),
+	         qPrintable(u"QtQuick.Shapes is drawn outside the clip of an ancestor when the shape lies wholly outside it; "
+	                    u"use a Canvas or plain items instead: "_s + found.join(u", "_s)));
+	QVERIFY(importsShapes(u"import QtQuick\nimport QtQuick.Shapes\nItem {}"_s));
+	QVERIFY(importsShapes(u"\timport QtQuick.Shapes 6.5\n"_s));
+	QVERIFY(!importsShapes(u"import QtQuick\n// import QtQuick.Shapes\nItem {}"_s));
 }
 
 // The checks themselves, on QML written for the purpose.

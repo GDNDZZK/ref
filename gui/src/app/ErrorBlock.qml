@@ -1,6 +1,5 @@
 // Adapted from an early version of qutie by LightBlueCube
 import QtQuick
-import QtQuick.Shapes
 import RefGui
 
 // Why a reply failed or was cut short. Errors are rare and must not be missed.
@@ -36,9 +35,9 @@ Block {
 		color: block.spread < 1 ? Theme.surface : Theme.errorSurface
 		border.color: Qt.tint(Theme.border, Qt.alpha(Theme.errorBorder, block.spread))
 
-		// The circle, drawn as a radial gradient with a one-pixel step at its edge, so
-		// the card's rounded outline clips it. Inset by the border, which stays on top.
-		Shape {
+		// The circle, drawn as a radial gradient with a one-pixel step at its edge, clipped to the
+		// card's rounded outline. Inset by the border, which stays on top.
+		Canvas {
 			id: wash
 
 			readonly property real centerX: badge.x + badge.width / 2
@@ -49,28 +48,25 @@ Block {
 			readonly property real reach: endRadius + 1 // gradient radius: the step stays within it
 
 			anchors.fill: parent
-			preferredRendererType: Shape.CurveRenderer
+			renderTarget: Canvas.Image
 			visible: block.spread > 0 && block.spread < 1
 
-			ShapePath {
-				strokeColor: "transparent"
-				fillGradient: RadialGradient {
-					centerX: wash.centerX
-					centerY: wash.centerY
-					focalX: wash.centerX
-					focalY: wash.centerY
-					centerRadius: wash.reach
-					GradientStop { position: wash.radius / wash.reach; color: Theme.errorSurface }
-					GradientStop { position: (wash.radius + 1) / wash.reach; color: Qt.alpha(Theme.errorSurface, 0) }
-				}
-
-				PathRectangle {
-					x: card.border.width
-					y: card.border.width
-					width: card.width - 2 * card.border.width
-					height: card.height - 2 * card.border.width
-					radius: card.radius - card.border.width
-				}
+			onRadiusChanged: requestPaint()
+			onVisibleChanged: requestPaint()
+			onPaint: {
+				const ctx = getContext("2d")
+				ctx.reset()
+				if (!visible)
+					return
+				const inset = card.border.width
+				const rounding = card.radius - inset
+				const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, reach)
+				gradient.addColorStop(Math.min(1, radius / reach), Theme.errorSurface)
+				gradient.addColorStop(Math.min(1, (radius + 1) / reach), Qt.alpha(Theme.errorSurface, 0))
+				ctx.fillStyle = gradient
+				ctx.beginPath()
+				ctx.roundedRect(inset, inset, width - 2 * inset, height - 2 * inset, rounding, rounding)
+				ctx.fill()
 			}
 		}
 
