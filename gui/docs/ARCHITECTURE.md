@@ -307,6 +307,7 @@ grabToImage(page) → 截图盖到最上层 → Theme.toggle() → 截图淡出
 
 - 箭头图标统一用 `Chevron.qml` 绘制：90 度尖角、圆角端点，通过旋转改变朝向。不用字符，因为字体度量会让它在垂直方向上对不齐。用 Canvas 绘制而不用 Shape：整个落在祖先裁剪区之外的 Shape 仍会被画出来（所有渲染器都如此，Qt 6.12），滚出聊天区的卡片的箭头会盖在标题栏上。因此 gui/src/app 不 import QtQuick.Shapes，tst_plain_text 检查这一点。
 - 工具和界面里的图标是 `assets/icons/` 的 SVG，经 `IconProvider` 加载：`image://icons/<名字>-<网格>?color=<hex>`，`Icon.qml` 包了一层，名字为空时不加载。
+- 窗口图标（Linux 等 X11/Wayland 桌面）：`main.cpp` 调 `setWindowIcon(refgui::icons::appIcon())`。`app_icon.cpp` 用 QSvgRenderer 把编进程序的 `assets/app/ref-small.svg`（≤48px）和 `ref.svg`（64px 起）画成 ref.ico 的那几个尺寸，不依赖 qsvg 等插件。Windows 的窗口图标来自 exe 里的 IDI_ICON1；macOS 不调用，否则 Dock 里的 ref.icns 会被替换。
 - 滚动条的 handle 自绘，颜色取自 Theme。Basic 风格默认用系统 palette，不跟随主题。
 - 输入框高度随内容增长，最大 220px。
 
