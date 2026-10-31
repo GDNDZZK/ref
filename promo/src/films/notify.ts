@@ -1,15 +1,14 @@
 import { browserTab } from '../components/browserTab.ts'
 import { notificationCard } from '../components/notificationCard.ts'
+import { sessionNameOf } from '../engine/screens.ts'
 import { FEATURES } from './features.ts'
 import { filmScene, tagOf, windowBeat } from './film.ts'
 
+// A notification is titled with its session; the page title is "<session> · ref" (web/src/App.vue)
+// and the alert mark goes in front.
 const feature = FEATURES.notify
 const tag = tagOf(feature)
 // Texts as the apps make them: gui/src/notify/notification_text.cpp with gui/translations/ref-gui_zh_CN.ts.
-// The session in the picture; a notification is titled with its session.
-const SESSION_TITLE = 'workspace-161a'
-// The page title is "<session title> · ref" (web/src/App.vue); the alert mark is added in front.
-const TAB_TITLE = 'permission · ref'
 const NOTIFICATION_BODY = { en: 'Waiting for permission to use edit', zh: '等待授权使用 edit' }
 
 export const scene = filmScene(feature, [
@@ -22,7 +21,7 @@ export const scene = filmScene(feature, [
       { at: 1.2, x: 0.6, y: 0.6, zoom: 1.4 },
     ],
     extras: (shot) =>
-      shot.add(notificationCard({ title: SESSION_TITLE, body: NOTIFICATION_BODY, from: 3, to: 7.6 })),
+      shot.add(notificationCard({ title: sessionNameOf('gui-permission-card'), body: NOTIFICATION_BODY, from: 3, to: 7.6 })),
     caption: [
       { from: 0.5, to: 2.8, text: { en: 'Go and do something else.', zh: '去忙别的。' } },
       { from: 3.2, to: 7.6, text: { en: 'A notification calls you back.', zh: '需要你时，通知会叫你回来。' } },
@@ -33,7 +32,7 @@ export const scene = filmScene(feature, [
     tag,
     screens: [{ name: 'web-permission-card' }],
     looks: [{ at: 0, x: 0.55, y: 0.5, zoom: 1.3 }],
-    extras: (shot) => shot.add(browserTab({ title: TAB_TITLE, alertAt: 2.2, from: 0.3, to: 6.5 })),
+    extras: (shot) => shot.add(browserTab({ title: `${sessionNameOf('web-permission-card')} · ref`, alertAt: 2.2, from: 0.3, to: 6.5 })),
     caption: [
       { from: 0.5, to: 2, text: { en: 'In a browser tab, ...', zh: '在浏览器标签页里，' } },
       { from: 2.4, to: 5.6, text: { en: 'the title and icon ask for attention.', zh: '标题和图标会提醒你。' } },

@@ -18,15 +18,18 @@ const PNG_OPTIONS = { palette: true, quality: 90, effort: 10, compressionLevel: 
 export interface PublishOptions {
   // Also write a smaller copy to docs/images/ for the READMEs.
   readme: boolean
+  // Name of the session on screen (random in a mock run). The films that draw a notification or a
+  // browser tab for this picture need the same name.
+  sessionName?: string
 }
 
 // Saves a screenshot as assets/screens/<name>.png (full size, used by the videos) and,
 // for README images, as docs/images/<name>.png.
-export async function publishImage(png: Buffer, name: string, { readme }: PublishOptions): Promise<void> {
+export async function publishImage(png: Buffer, name: string, { readme, sessionName }: PublishOptions): Promise<void> {
   mkdirSync(SCREENS_DIR, { recursive: true })
   await sharp(png).png(PNG_OPTIONS).toFile(join(SCREENS_DIR, `${name}.png`))
   const { width, height } = await sharp(png).metadata()
-  recordSize(name, { width, height })
+  recordSize(name, { width, height, sessionName })
   if (!readme) return
 
   mkdirSync(README_IMAGES_DIR, { recursive: true })
@@ -36,7 +39,7 @@ export async function publishImage(png: Buffer, name: string, { readme }: Publis
     .toFile(join(README_IMAGES_DIR, `${name}.png`))
 }
 
-function recordSize(name: string, size: { width: number; height: number }): void {
+function recordSize(name: string, size: { width: number; height: number; sessionName?: string }): void {
   const manifest: Record<string, unknown> = existsSync(MANIFEST_FILE) ? JSON.parse(readFileSync(MANIFEST_FILE, 'utf8')) : {}
   manifest[name] = size
   const sorted = Object.fromEntries(Object.entries(manifest).sort(([a], [b]) => a.localeCompare(b)))

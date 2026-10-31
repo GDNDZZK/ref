@@ -15,25 +15,12 @@ const GUI_SIZE = { width: 1280, height: 800 }
 const WEB_VIEWPORT = { width: 1600, height: 1000 }
 const STREAM_WAIT_MS = 6000
 const SETTLE_MS = 1000
-// A session is titled after its first prompt; the sidebar row with that title opens the
-// terminal's session in the other two.
+// Sessions are listed by name ("workspace-" and four hex digits, random per run); the terminal
+// shows its own in the status line, and the sidebar row with that name opens it in the other two.
 const SCRIPT = 'slow'
-const SESSION_TITLE = SCRIPT
+const SESSION_NAME = /workspace-[0-9a-f]{4}/
 const ROW_TIMEOUT_MS = 8000
-const RUNNING_ROW = /^\S+ · \d+s$/
 const ARTICLE_TITLE = 'A long article'
-
-// The GUI sidebar does not pick up the title change, but only the terminal's session is running
-// (its row shows the elapsed time).
-async function runningRowText(gui: GuiSession): Promise<string> {
-  const deadline = performance.now() + ROW_TIMEOUT_MS
-  while (performance.now() < deadline) {
-    const row = (await gui.texts()).find((item) => RUNNING_ROW.test(item.text))
-    if (row) return row.text
-    await gui.pause(250)
-  }
-  throw new Error('no running session in the GUI sidebar')
-}
 
 export async function captureShared(): Promise<void> {
   const isolated = isolatedEnv()
@@ -50,16 +37,20 @@ export async function captureShared(): Promise<void> {
     tui.send(KEYS.enter)
     await tui.waitForText(ARTICLE_TITLE)
 
+    const sessionName = SESSION_NAME.exec(tui.screenText())?.[0]
+    if (!sessionName) throw new Error('the terminal does not show its session name')
+
     await gui.waitForWindow()
     await gui.waitForText('Mock 1')
-    await gui.clickText(await runningRowText(gui))
+    await gui.waitForText(sessionName)
+    await gui.clickText(sessionName)
     await gui.waitForText(ARTICLE_TITLE)
 
     context = await browser.newContext({ viewport: WEB_VIEWPORT, deviceScaleFactor: 2, locale: 'en-US', colorScheme: 'dark', permissions: ['notifications'] })
     const page = await context.newPage()
     await page.goto(web.loginUrl)
     await page.waitForSelector('textarea:not([disabled])')
-    await page.getByText(SESSION_TITLE, { exact: true }).first().click({ timeout: ROW_TIMEOUT_MS }).catch(async (error) => {
+    await page.getByText(sessionName, { exact: true }).first().click({ timeout: ROW_TIMEOUT_MS }).catch(async (error) => {
       await page.screenshot({ path: join(import.meta.dirname, '..', '.cache', 'failure-web.png') })
       throw error
     })
