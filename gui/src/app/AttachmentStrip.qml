@@ -1,6 +1,5 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Shapes
 import RefGui
 
 // The images attached to the prompt: square thumbnails in a row that scrolls sideways when
@@ -71,23 +70,20 @@ ListView {
 
 			Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 
-			Shape {
-				anchors.centerIn: parent
-				width: strip.crossSize
-				height: strip.crossSize
-				preferredRendererType: Shape.CurveRenderer
+			// Two bars make the cross. A Shape here is drawn outside the clip of the strip when a thumbnail is cut
+			// at its edge inside a rounded frame, with every renderer.
+			Repeater {
+				model: [45, -45]
 
-				ShapePath {
-					strokeColor: Theme.text
-					strokeWidth: strip.crossStroke
-					fillColor: "transparent"
-					capStyle: ShapePath.RoundCap
-
-					startX: 0
-					startY: 0
-					PathLine { x: strip.crossSize; y: strip.crossSize }
-					PathMove { x: strip.crossSize; y: 0 }
-					PathLine { x: 0; y: strip.crossSize }
+				Rectangle {
+					required property int modelData
+					anchors.centerIn: parent
+					width: strip.crossSize * Math.SQRT2 + strip.crossStroke // the diagonal and the round ends
+					height: strip.crossStroke
+					radius: height / 2
+					rotation: modelData
+					antialiasing: true
+					color: Theme.text
 				}
 			}
 
