@@ -69,6 +69,9 @@ QProcessEnvironment TestAppSmoke::environment() const
 {
 	QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
 	env.insert(u"QT_QPA_PLATFORM"_s, u"offscreen"_s);
+	// The program looks for a desktop notification service on the session bus. A test must never reach the
+	// bus of the user's desktop, where a notification would really show: this address leads nowhere.
+	env.insert(u"DBUS_SESSION_BUS_ADDRESS"_s, u"unix:path="_s + QDir(m_directory.path()).filePath(u"no-bus"_s));
 	// ref-gui finds ref-server on PATH when it is not next to it.
 	const QString serverDirectory = QFileInfo(QStringLiteral(REF_SERVER_BINARY)).absolutePath();
 	env.insert(u"PATH"_s, serverDirectory + QDir::listSeparator() + env.value(u"PATH"_s));
