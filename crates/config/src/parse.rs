@@ -359,6 +359,10 @@ fn model(key: &str, m: &Map<String, Value>) -> ModelConfig {
             .unwrap_or_default(),
         variants,
         compact_at: lim("compact"),
+        threshold: limit
+            .and_then(|l| l.get("threshold"))
+            .and_then(Value::as_f64)
+            .filter(|x| *x > 0.0),
     }
 }
 

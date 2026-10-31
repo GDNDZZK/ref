@@ -1360,6 +1360,22 @@ async fn load_from_history_marks_unfinished_tools_cancelled() {
 
 #[tokio::test]
 async fn auto_compaction_when_threshold_reached() {
+    auto_compaction_with("autocompact", |cfg| cfg.compaction.threshold = 500.0).await;
+}
+
+/// The model's own `limit.threshold` decides, whatever the global threshold says.
+#[tokio::test]
+async fn auto_compaction_uses_the_model_threshold() {
+    auto_compaction_with("autocompact-model", |cfg| {
+        cfg.compaction.threshold = 1_000_000.0;
+        let models = &mut cfg.providers.get_mut("mock").unwrap().models;
+        models.get_mut("m").unwrap().threshold = Some(500.0);
+    })
+    .await;
+}
+
+/// Two prompts; the second one compacts first because the context passed 500 tokens.
+async fn auto_compaction_with(tag: &str, configure: impl FnOnce(&mut ref_config::Config)) {
     let m = mock(Arc::new(|n, _| match n {
         0 => Reply::Text("first".into()),
         1 => Reply::Text("## Goal\n- auto summary".into()),
@@ -1367,8 +1383,8 @@ async fn auto_compaction_when_threshold_reached() {
     }))
     .await;
     let mut cfg = config(&m.url);
-    cfg.compaction.threshold = 500.0;
-    let (hub, work) = hub(cfg, "autocompact");
+    configure(&mut cfg);
+    let (hub, work) = hub(cfg, tag);
     let s = session(&hub, &work, "main", "build").await;
     prompt(&hub, &s, "one");
     wait_idle(&s).await;

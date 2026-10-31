@@ -321,12 +321,18 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
                 st.info.context.used = used;
                 st.info.model = m;
             }
-            if st.info.agent != agent {
+            let old = st.info.agent.clone();
+            let changed = old != agent;
+            if changed {
                 st.info.agent = agent;
                 st.system = None;
             }
             hub.emit_info(&st);
-            Ok(json!({ "session": st.info.clone() }))
+            drop(st);
+            if changed {
+                crate::agent_switch::switched(hub, &s, &old);
+            }
+            Ok(json!({ "session": s.info() }))
         }
         Request::SetVariant {
             session_id,

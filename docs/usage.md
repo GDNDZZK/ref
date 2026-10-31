@@ -126,6 +126,8 @@ Your own commands from the configuration are listed too (see [Custom commands](c
 
 **`/cd DIR`** moves the session to another directory: absolute, relative to the current one, or `~/…`. Project configuration and context files are loaded again, and a note telling the model about the change is added to the conversation, without an LLM turn. It is not allowed while the session is busy. New sessions from this window start in the new directory too.
 
+**Switching the agent** (`tab`, `ctrl+x a` or `/agents`) adds a note to the conversation that tells the model about the change, without an LLM turn. Several quick switches share one note, and switching back to the original agent removes it. While the session is busy the note is added right before the next request.
+
 **`/close`** closes the current session and switches to the oldest remaining live session. When none is left, `ref` exits, and a backend that `ref` started exits with it.
 
 ## Split view
