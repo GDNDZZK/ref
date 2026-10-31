@@ -3,6 +3,7 @@
 
 #include <QJSEngine>
 #include <QJsonArray>
+#include <QJsonValue>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -724,7 +725,7 @@ void TestWorkspace::questionKeysComeAfterTheGuardAndAnswerTheCard()
 
 	QTRY_COMPARE(replies().size(), 1);
 	QCOMPARE(replies().first().value(u"call_id"_s).toString(), u"call_q"_s);
-	QCOMPARE(replies().first().value(u"answers"_s).toArray(), (QJsonArray{QJsonArray{u"No"_s}}));
+	QCOMPARE(replies().first().value(u"answers"_s).toArray(), (QJsonArray{QJsonValue(QJsonArray{u"No"_s})}));
 	QVERIFY(session->question()->isBusy()); // until the backend says it is resolved
 	f.fake.send({{u"kind"_s, u"event"_s},
 	             {u"session_id"_s, u"ses_a"_s},
