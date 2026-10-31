@@ -98,7 +98,8 @@ QStringList Workspace::wantedTileIds() const
 	QList<const refgui::proto::SessionInfo*> infos;
 	for(const refgui::proto::SessionInfo& info : m_directory.liveSessions())
 	{
-		const bool free = info.attached == 0 || info.id == m_zoomed || info.id == currentId();
+		// The backend counts our own foreground attachment, too, until it has answered the detach.
+		const bool free = info.attached == 0 || info.id == m_zoomed || info.id == currentId() || m_unzooming.contains(info.id);
 		if(info.live && free)
 		{
 			infos.append(&info);
@@ -241,6 +242,10 @@ QCoro::Task<> Workspace::unzoomTask()
 	ChatSession* tile = session(id);
 	if(tile != nullptr && tile->isAttached())
 	{
+		// Until the answer, the backend counts the session as attached in the foreground, and an update of
+		// its session list would take the tile away.
+		m_unzooming.insert(id);
 		static_cast<void>(co_await tile->background());
+		m_unzooming.remove(id);
 	}
 }

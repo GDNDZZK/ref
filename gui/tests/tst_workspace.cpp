@@ -7,6 +7,9 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include <optional>
+#include <utility>
+
 using namespace Qt::StringLiterals;
 using namespace refgui;
 using namespace refgui::test;
@@ -14,6 +17,9 @@ using refgui::client::Backend;
 
 namespace
 {
+
+constexpr int settleMs = 100; // time for the messages in flight to be handled
+
 
 // A backend with a few sessions that answers like the real one for what the workspace asks.
 class StubServer
@@ -45,6 +51,19 @@ public:
 	}
 
 	void setProtocol(int protocol) { m_protocol = protocol; }
+
+	// While held, a detach is recorded but neither carried out nor answered.
+	void holdDetach(bool hold) { m_holdDetach = hold; }
+
+	void releaseDetach()
+	{
+		m_holdDetach = false;
+		const std::optional<QJsonObject> held = std::exchange(m_heldDetach, std::nullopt);
+		if(held)
+		{
+			answer(*held);
+		}
+	}
 
 	QStringList ops() const
 	{
@@ -115,6 +134,11 @@ private:
 		}
 		else if(op == u"detach"_s)
 		{
+			if(m_holdDetach)
+			{
+				m_heldDetach = request;
+				return;
+			}
 			if(m_sessions.contains(id))
 			{
 				m_sessions[id][u"attached"_s] = 0;
@@ -183,6 +207,8 @@ private:
 	QMap<QString, QJsonObject> m_sessions;
 	int m_created = 0;
 	int m_protocol = 2;
+	bool m_holdDetach = false;
+	std::optional<QJsonObject> m_heldDetach;
 };
 
 struct Fixture
@@ -231,6 +257,7 @@ private slots:
 	void serverToastsArePassedOn();
 	void splitViewWatchesAndComesBack();
 	void zoomUpgradesTheTileToTheForeground();
+	void unzoomKeepsTheTileWhileItsForegroundIsGivenUp();
 	void aClosedTileKeepsItsSessionUntilItHasLeft();
 	void closingTheCurrentTileSendsNoAttach();
 	void aRevivedTileLeavesOnItsOwnTimer();
@@ -446,6 +473,36 @@ void TestWorkspace::zoomUpgradesTheTileToTheForeground()
 	QCOMPARE(f.workspace->zoomedId(), QString());
 	QTRY_COMPARE(f.stub.requests(u"detach"_s).last().value(u"session_id"_s).toString(), u"ses_b"_s);
 	QCOMPARE(f.workspace->visibleSessionIds().size(), 2);
+}
+
+// The backend still counts the unzoomed session as attached in the foreground until it has answered the detach;
+// a sessions update in that time must not take the tile away.
+void TestWorkspace::unzoomKeepsTheTileWhileItsForegroundIsGivenUp()
+{
+	Fixture f(2, true);
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
+	f.workspace->toggleSplit();
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	QTRY_VERIFY(f.workspace->session(u"ses_b"_s)->isAttached());
+	f.workspace->zoomTile(u"ses_b"_s);
+	QTRY_VERIFY(f.stub.requests(u"attach"_s).last().value(u"foreground"_s).toBool());
+	f.stub.broadcast(); // ses_b counts as attached
+	QTest::qWait(settleMs);
+
+	f.stub.holdDetach(true);
+	f.workspace->unzoom();
+	QTRY_COMPARE(f.stub.requests(u"detach"_s).last().value(u"session_id"_s).toString(), u"ses_b"_s);
+	f.stub.broadcast(); // still counts as attached
+	QTest::qWait(settleMs);
+
+	QCOMPARE(f.workspace->tiles()->rowCount(), 2);
+	QCOMPARE(f.workspace->visibleSessionIds().size(), 2);
+	QVERIFY(f.workspace->session(u"ses_b"_s)->isAttached());
+
+	f.stub.releaseDetach();
+	QTRY_COMPARE(f.workspace->visibleSessionIds().size(), 2);
+	QTest::qWait(settleMs);
+	QCOMPARE(f.workspace->tiles()->rowCount(), 2);
 }
 
 void TestWorkspace::aClosedTileKeepsItsSessionUntilItHasLeft()
