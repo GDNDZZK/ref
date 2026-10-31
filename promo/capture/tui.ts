@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { Browser } from 'playwright-core'
 import { launchChromium } from '../scripts/lib/browser.ts'
 import { isolatedEnv, startMockBackend } from './lib/backend.ts'
-import { publishImage } from './lib/publish.ts'
+import { publishImage, publishWithoutFooter } from './lib/publish.ts'
 import { renderTerminalStill } from './lib/terminalStill.ts'
 import { KEYS, TuiSession } from './lib/tuiSession.ts'
 
@@ -35,6 +35,7 @@ async function withTui(body: (tui: TuiSession) => Promise<void>): Promise<void> 
 async function still(browser: Browser, output: string, name: string, readme: boolean): Promise<void> {
   const png = await renderTerminalStill(browser, { cols: TUI_COLS, rows: TUI_ROWS }, output)
   await publishImage(png, name, { readme })
+  await publishWithoutFooter(name)
 }
 
 // The mock `tools` script: reads, a failing read, grep, find, an edit that needs approval, bash.

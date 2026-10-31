@@ -5,7 +5,7 @@ import type { BrowserContext } from 'playwright-core'
 import { launchChromium } from '../scripts/lib/browser.ts'
 import { isolatedEnv, startMockBackend, startMockWeb } from './lib/backend.ts'
 import { GuiSession } from './lib/guiSession.ts'
-import { publishImage } from './lib/publish.ts'
+import { publishImage, publishWithoutFooter } from './lib/publish.ts'
 import { renderTerminalStill } from './lib/terminalStill.ts'
 import { KEYS, TuiSession } from './lib/tuiSession.ts'
 import { TUI_COLS, TUI_ROWS } from './tui.ts'
@@ -71,6 +71,7 @@ export async function captureShared(): Promise<void> {
     await publishImage(await page.screenshot({ type: 'png' }), 'web-shared', { readme: false })
     const terminal = await renderTerminalStill(browser, { cols: TUI_COLS, rows: TUI_ROWS }, tui.outputSoFar())
     await publishImage(terminal, 'tui-shared', { readme: false })
+    await publishWithoutFooter('tui-shared')
   } finally {
     await context?.close() // open pages keep ref-web from stopping
     await gui.close()

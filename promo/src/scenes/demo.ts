@@ -20,7 +20,7 @@ const appShot = defineShot(APP_SHOT_SECONDS, (shot) => {
   shot.add(backdrop())
   const frame = shot.add(
     appFrame({
-      image: placeholderUrl,
+      layers: [{ src: placeholderUrl, from: 0 }],
       imageSize: { width: 1600, height: 1000 },
       title: 'ref',
       rect: { x: 240, y: 70, width: 1440, height: 944 },

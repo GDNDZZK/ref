@@ -22,6 +22,8 @@ export interface TerminalViewOptions {
   x: number
   y: number
   fontSize: number
+  // Rows at the bottom that stay out of view (the status line shows the random mock path).
+  hideLastRows?: number
   // Cast seconds that pass per video second.
   speed?: number
   // Video time at which the cast starts playing.
@@ -76,7 +78,8 @@ export function terminalView(options: TerminalViewOptions): Part {
     await nextFrame()
     const screen = host.querySelector<HTMLElement>('.xterm-screen')!
     frame.style.width = `${screen.offsetWidth}px`
-    frame.style.height = `${screen.offsetHeight + TITLE_BAR_HEIGHT_PX}px`
+    const shownRows = cast.rows - (options.hideLastRows ?? 0)
+    frame.style.height = `${(screen.offsetHeight * shownRows) / cast.rows + TITLE_BAR_HEIGHT_PX}px`
     return { terminal, cast }
   }
 
