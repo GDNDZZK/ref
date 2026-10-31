@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Shapes
 import RefGui
 
 // A ring that empties while a delayed tool waits for its start: from the full circle
@@ -38,37 +37,40 @@ Item {
 		onTriggered: ring.now = Date.now()
 	}
 
-	Shape {
-		anchors.fill: parent
-		preferredRendererType: Shape.CurveRenderer
+	Canvas {
+		id: canvas
 
-		ShapePath {
-			strokeColor: Theme.border
-			strokeWidth: ring.strokeWidth
-			fillColor: "transparent"
-			PathAngleArc {
-				centerX: ring.width / 2
-				centerY: ring.height / 2
-				radiusX: ring.radius
-				radiusY: ring.radius
-				startAngle: 0
-				sweepAngle: ring.almostFullTurn
-			}
+		readonly property real degrees: Math.PI / 180
+		readonly property real twelveOClock: -Math.PI / 2
+
+		anchors.fill: parent
+		renderTarget: Canvas.Image
+
+		function arc(ctx, color, cap, from, sweepDegrees) {
+			ctx.strokeStyle = color
+			ctx.lineWidth = ring.strokeWidth
+			ctx.lineCap = cap
+			ctx.beginPath()
+			ctx.arc(ring.width / 2, ring.height / 2, ring.radius, from, from + sweepDegrees * degrees, false)
+			ctx.stroke()
 		}
 
-		ShapePath {
-			strokeColor: ring.color
-			strokeWidth: ring.strokeWidth
-			fillColor: "transparent"
-			capStyle: ShapePath.RoundCap
-			PathAngleArc {
-				centerX: ring.width / 2
-				centerY: ring.height / 2
-				radiusX: ring.radius
-				radiusY: ring.radius
-				startAngle: -90 // twelve o'clock
-				sweepAngle: ring.sweep
-			}
+		onPaint: {
+			const ctx = getContext("2d")
+			ctx.reset()
+			arc(ctx, Theme.border, "butt", 0, ring.almostFullTurn)
+			arc(ctx, ring.color, "round", twelveOClock, ring.sweep)
+		}
+
+		Connections {
+			target: ring
+			function onSweepChanged() { canvas.requestPaint() }
+			function onColorChanged() { canvas.requestPaint() }
+		}
+
+		Connections {
+			target: Theme
+			function onBorderChanged() { canvas.requestPaint() }
 		}
 	}
 }
