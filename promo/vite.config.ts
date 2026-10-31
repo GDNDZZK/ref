@@ -5,6 +5,7 @@ import { defineConfig } from 'vite'
 const REPO_ROOT = resolve(import.meta.dirname, '..')
 
 export default defineConfig({
+  define: { __CLIP_DIR__: JSON.stringify(resolve(import.meta.dirname, '.cache', 'clips')) },
   server: { host: '127.0.0.1', fs: { allow: [REPO_ROOT] } },
   build: { outDir: 'dist', emptyOutDir: true },
 })

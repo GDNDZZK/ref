@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "vite",
+    "clips": "node scripts/clips.ts",
     "render": "node scripts/render.ts",
     "render:all": "node scripts/render.ts --all",
     "capture": "node capture/capture.ts",

@@ -24,6 +24,8 @@ export interface CameraKey {
 export interface PictureLayer {
   src: string
   from: number
+  // A recorded clip instead of a still: frame i shows from `from + i / fps` on.
+  clip?: { frameUrl(index: number): string; frames: number; fps: number }
 }
 
 export interface AppFrameOptions {
@@ -43,6 +45,16 @@ const LAYER_FADE_SECONDS = 0.4
 const ENTER_SECONDS = 0.8
 const EXIT_SECONDS = 0.35
 const ENTER_SCALE = 0.94
+
+// Puts the clip frame for `elapsed` seconds into the clip on the picture and waits until it is decoded,
+// so the screenshot that follows shows it.
+async function showClipFrame(picture: HTMLImageElement, clip: NonNullable<PictureLayer['clip']>, elapsed: number) {
+  const index = Math.min(clip.frames - 1, Math.max(0, Math.floor(elapsed * clip.fps)))
+  if (picture.dataset.frame === String(index)) return
+  picture.dataset.frame = String(index)
+  picture.src = clip.frameUrl(index)
+  await picture.decode()
+}
 
 export interface AppFrame extends Part {
   // A child that lives in the picture and moves with the camera (highlights, labels).
@@ -112,10 +124,11 @@ export function appFrame(options: AppFrameOptions): AppFrame {
       world.style.height = `${worldHeight()}px`
       const offset = cameraOffset(time)
       world.style.transform = `translate(${offset.x}px, ${offset.y}px) scale(${scale(time)})`
-      options.layers.forEach((layer, index) => {
+      for (const [index, layer] of options.layers.entries()) {
         const shown = index === 0 ? 1 : span(time, layer.from, LAYER_FADE_SECONDS, 'inOutSine')
         pictures[index]!.style.opacity = String(shown)
-      })
+        if (layer.clip) await showClipFrame(pictures[index]!, layer.clip, time - layer.from)
+      }
 
       const entering = span(time, options.from, ENTER_SECONDS, 'outExpo')
       const leaving = span(time, options.to - EXIT_SECONDS, EXIT_SECONDS, 'inCubic')

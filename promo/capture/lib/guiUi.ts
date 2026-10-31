@@ -1,6 +1,8 @@
+import { rmSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Lang } from '../../src/engine/i18n.ts'
 import { isolatedEnv, startMockBackend } from './backend.ts'
+import { CLIP_FPS, CLIP_FRAMES_DIR, saveClip } from './clips.ts'
 import { GuiSession } from './guiSession.ts'
 import { phrase } from './phrases.ts'
 import { publishImage } from './publish.ts'
@@ -19,6 +21,8 @@ class GuiUi implements Ui {
   readonly kind = 'gui'
   readonly lang: Lang
   private readonly session: GuiSession
+  private clipName: string | undefined
+  private clipDir: string | undefined
 
   constructor(session: GuiSession, lang: Lang) {
     this.session = session
@@ -65,6 +69,21 @@ class GuiUi implements Ui {
 
   waitNoText(text: string, timeoutMs?: number): Promise<void> {
     return this.session.waitForNoText(text, timeoutMs)
+  }
+
+  async startClip(name: string): Promise<void> {
+    this.clipName = shotFileName(this.kind, name, this.lang)
+    this.clipDir = join(CLIP_FRAMES_DIR, this.clipName)
+    rmSync(this.clipDir, { recursive: true, force: true })
+    await this.session.startRecording(this.clipDir, CLIP_FPS)
+  }
+
+  async endClip(): Promise<void> {
+    if (!this.clipName || !this.clipDir) throw new Error('no clip is being recorded')
+    const times = await this.session.stopRecording()
+    await saveClip(this.clipName, this.clipDir, times)
+    this.clipName = undefined
+    this.clipDir = undefined
   }
 
   async resize(width: number, height: number): Promise<void> {

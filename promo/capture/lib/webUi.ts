@@ -77,6 +77,14 @@ class WebUi implements Ui {
     return this.page.setViewportSize({ width, height })
   }
 
+  startClip(): Promise<void> {
+    throw new Error('clips are recorded from the GUI only')
+  }
+
+  endClip(): Promise<void> {
+    throw new Error('clips are recorded from the GUI only')
+  }
+
   pause(ms: number): Promise<void> {
     return this.page.waitForTimeout(ms)
   }
