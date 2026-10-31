@@ -114,7 +114,8 @@ verify_macos() {
   while IFS= read -r binary; do
     # Qt's plugins are universal binaries: otool prints "<file> (architecture ...):" before each
     # slice's libraries, and those header lines hold the path of the file itself.
-    foreign="$(otool -L "$binary" 2>/dev/null | grep -v ':$' | grep -E "$MACOS_FOREIGN_PATH_REGEX" || true)"
+    # Files in a framework that are no programs ("<file>: is not an object file") have no libraries.
+    foreign="$(otool -L "$binary" 2>/dev/null | grep -v -e ':$' -e 'is not an object file' | grep -E "$MACOS_FOREIGN_PATH_REGEX" || true)"
     [[ -z "$foreign" ]] || fail "$binary refers to the build machine: $foreign"
   done < <(find "$app" -type f \( -name '*.dylib' -o -name '*.so' -o -path '*/Contents/MacOS/*' -o -path '*.framework/Versions/*/*' \) ! -name '*.plist')
   pass "no references outside the bundle"
