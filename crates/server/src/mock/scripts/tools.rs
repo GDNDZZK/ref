@@ -105,11 +105,24 @@ fn replace_line(file: &str, found: Option<(String, usize)>, text: &str) -> Value
     })
 }
 
-fn read(path: &str) -> Value {
+/// The `edit` that fixes the off-by-one in `src/parser.rs`, from the newest `read` of it.
+/// When the file is fixed already, it puts the bug back so the demo can run again.
+pub(super) fn parser_fix(results: &[String]) -> Value {
+    let found = tag_and_line(results, "src/parser.rs", "for i in 0..");
+    let fixed = found.as_ref().is_some_and(|_| {
+        results
+            .iter()
+            .any(|r| r.contains(FIXED_LOOP) && !r.contains(BUGGY_LOOP))
+    });
+    let new_line = if fixed { BUGGY_LOOP } else { FIXED_LOOP };
+    replace_line("src/parser.rs", found, new_line)
+}
+
+pub(super) fn read(path: &str) -> Value {
     json!({ "path": path })
 }
 
-fn bash(command: &str) -> Value {
+pub(super) fn bash(command: &str) -> Value {
     json!({ "command": command })
 }
 
@@ -124,21 +137,13 @@ pub fn tools_round(ctx: &Ctx, round: usize) -> Round {
             .tool("read", "Read a file that is not there", read("src/missing.rs"))
             .tool("grep", "Find the users of parse_items", json!({"pattern": "parse_items", "context": 1}))
             .tool("find", "List the Rust files", json!({"pattern": "**/*.rs", "type": "file"})),
-        1 => {
-            let found = tag_and_line(results, "src/parser.rs", "for i in 0..");
-            // Fix the bug; when it is fixed already, put it back so the demo can run again.
-            let fixed = found.as_ref().is_some_and(|_| {
-                results.iter().any(|r| r.contains(FIXED_LOOP) && !r.contains(BUGGY_LOOP))
-            });
-            let new_line = if fixed { BUGGY_LOOP } else { FIXED_LOOP };
-            Round::new()
-                .text("The loop runs one step too far: `0..=items.len()` indexes past the end. Fixing it:\n")
-                .tool(
-                    "edit",
-                    "Fix the off-by-one in parse_items",
-                    replace_line("src/parser.rs", found, new_line),
-                )
-        }
+        1 => Round::new()
+            .text("The loop runs one step too far: `0..=items.len()` indexes past the end. Fixing it:\n")
+            .tool(
+                "edit",
+                "Fix the off-by-one in parse_items",
+                parser_fix(results),
+            ),
         2 => Round::new()
             .text("Now a quick check of the result.\n")
             .tool("bash", "Print the test result", bash("echo \"cargo test: 12 passed\""))
@@ -258,6 +263,23 @@ fn todos(items: &[(&str, &str)]) -> Value {
     json!({ "todos": list })
 }
 
+/// A todo list over `steps` with the first `done` completed, the next one in progress.
+pub(super) fn plan_todos(steps: &[&str], done: usize) -> Value {
+    let items: Vec<(&str, &str)> = steps
+        .iter()
+        .enumerate()
+        .map(|(i, step)| {
+            let status = match i.cmp(&done) {
+                std::cmp::Ordering::Less => "completed",
+                std::cmp::Ordering::Equal => "in_progress",
+                std::cmp::Ordering::Greater => "pending",
+            };
+            (*step, status)
+        })
+        .collect();
+    todos(&items)
+}
+
 const STEPS: [&str; 3] = [
     "Read the README",
     "Check the workspace",
@@ -266,21 +288,7 @@ const STEPS: [&str; 3] = [
 
 /// Rounds 0..=5 of the `todo` script: the plan, then work and updates.
 pub fn todo_round(round: usize) -> Round {
-    let plan = |done: usize| {
-        let items: Vec<(&str, &str)> = STEPS
-            .iter()
-            .enumerate()
-            .map(|(i, step)| {
-                let status = match i.cmp(&done) {
-                    std::cmp::Ordering::Less => "completed",
-                    std::cmp::Ordering::Equal => "in_progress",
-                    std::cmp::Ordering::Greater => "pending",
-                };
-                (*step, status)
-            })
-            .collect();
-        todos(&items)
-    };
+    let plan = |done: usize| plan_todos(&STEPS, done);
     match round {
         0 => Round::new().text("I'll plan this in three steps.\n").tool(
             "todo",
