@@ -149,7 +149,7 @@ jobs:
                 [[ -n "$name" ]] || continue
                 echo "----- $name -----"
                 # A relative file name: bash's /d/a/... would not be understood by the test.
-                (cd "$REF_GUI_BUILD_DIR/tests" && { "./$name.exe" -o "qt-$name.txt,txt" > /dev/null 2>&1 && code=0 || code=$?; echo "exit code $code" > "qt-$name.code"; })
+                (cd "$REF_GUI_BUILD_DIR/tests" && { "../$name.exe" -o "qt-$name.txt,txt" > /dev/null 2>&1 && code=0 || code=$?; echo "exit code $code" > "qt-$name.code"; })
                 cat "$REF_GUI_BUILD_DIR/tests/qt-$name.txt" 2>&1 || echo "(no log written)"
                 cat "$REF_GUI_BUILD_DIR/tests/qt-$name.code"
               done < "$failed_list"
