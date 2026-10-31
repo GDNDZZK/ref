@@ -17,6 +17,9 @@ export interface TuiOptions {
   rows: number
   // Arguments after the binary name, e.g. ['--agent', 'plan'].
   args?: string[]
+  // Runs this shell command instead of `ref` against the backend (a shell cast), in `cwd`.
+  command?: string
+  cwd?: string
 }
 
 export const KEYS = {
@@ -38,15 +41,16 @@ export class TuiSession {
 
   private readonly options: TuiOptions
 
-  constructor(options: TuiOptions, backend: Backend, isolated: IsolatedEnv) {
+  constructor(options: TuiOptions, backend: Backend | undefined, isolated: IsolatedEnv) {
     this.options = options
     this.screen = new Terminal({ cols: options.cols, rows: options.rows, allowProposedApi: true })
-    const command =
-      `stty cols ${options.cols} rows ${options.rows}; exec ${binary('ref')} ` +
-      `--server ${backend.url} --token ${backend.token} ${(options.args ?? []).join(' ')}`
+    if (!options.command && !backend) throw new Error('a TUI session needs a backend or a command')
+    const program = options.command ?? `${binary('ref')} --server ${backend!.url} --token ${backend!.token} ${(options.args ?? []).join(' ')}`
+    const command = `stty cols ${options.cols} rows ${options.rows}; exec ${program}`
     // -q quiet, -e return the child's exit code, -f flush after each write; the log goes nowhere.
     this.child = spawn('script', ['-qefc', command, '/dev/null'], {
       env: isolated.env,
+      cwd: options.cwd,
       stdio: ['pipe', 'pipe', 'inherit'],
     })
     this.exited = once(this.child, 'exit')
@@ -100,9 +104,14 @@ export class TuiSession {
     return sleep(ms)
   }
 
+  // Notes this moment in the cast as an asciicast marker, so films can start playback there.
+  mark(label: string): void {
+    this.events.push([(performance.now() - this.startedAt) / 1000, 'm', label])
+  }
+
   // Everything the terminal has received so far; a "mark" for rendering a still of this moment.
   outputSoFar(): string {
-    return this.events.map(([, , text]) => text).join('')
+    return this.events.filter(([, kind]) => kind === 'o').map(([, , text]) => text).join('')
   }
 
   saveCast(file: string): void {

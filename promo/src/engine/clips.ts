@@ -10,6 +10,15 @@ interface ClipEntry {
   fps: number
   width: number
   height: number
+  clicks?: ClipClick[]
+  marks?: Record<string, number>
+}
+
+// A click the capture made, seconds into the clip, at a point of the window (0..1 each).
+export interface ClipClick {
+  at: number
+  x: number
+  y: number
 }
 
 const entries: Record<string, ClipEntry> = manifest
@@ -19,6 +28,9 @@ export interface Clip {
   frames: number
   fps: number
   size: { width: number; height: number }
+  clicks: readonly ClipClick[]
+  // Named moments, seconds into the clip (capture/lib/ui.ts markClip).
+  marks: Readonly<Record<string, number>>
   // URL of frame `index` (0-based).
   frameUrl(index: number): string
 }
@@ -31,13 +43,20 @@ function lookup(name: string): Clip | undefined {
     frames: entry.frames,
     fps: entry.fps,
     size: { width: entry.width, height: entry.height },
+    clicks: entry.clicks ?? [],
+    marks: entry.marks ?? {},
     frameUrl: (index) => `/@fs${__CLIP_DIR__}/${name}/f${String(index + 1).padStart(4, '0')}.jpg`,
   }
 }
 
 // A recorded clip of the GUI by name, e.g. "gui-crowd"; Chinese renders take "-zh" when there is one.
 export function clip(name: string): Clip {
-  const found = (getLang() === 'zh' ? lookup(`${name}-zh`) : undefined) ?? lookup(name)
+  const found = findClip(name)
   if (!found) throw new Error(`no recorded clip "${name}"; run pnpm capture`)
   return found
+}
+
+// Like `clip`, but undefined when the clip is not recorded yet.
+export function findClip(name: string): Clip | undefined {
+  return (getLang() === 'zh' ? lookup(`${name}-zh`) : undefined) ?? lookup(name)
 }

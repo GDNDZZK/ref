@@ -52,6 +52,8 @@ export interface Ui {
   clickTextBelow(text: string, anchor: string): Promise<void>
   // Moves the pointer to an empty spot so that no row or button shows its hover state (GUI only).
   parkPointer(): Promise<void>
+  // Clicks the title of the split-view tile titled `title` (GUI only).
+  clickTile(title: string): Promise<void>
   // Opens the session whose row in the sidebar is titled `title` (GUI only).
   clickSidebarRow(title: string): Promise<void>
   hasText(text: string): Promise<boolean>
@@ -62,6 +64,8 @@ export interface Ui {
   resize(width: number, height: number): Promise<void>
   // Records the window as a clip until endClip, saved as <kind>-<name>[-zh] in assets/clips (GUI only).
   startClip(name: string): Promise<void>
+  // Notes the current moment of the clip under `name` (e.g. "enter"), so films can line up with it.
+  markClip(name: string): void
   endClip(): Promise<void>
   // Saves a picture as <kind>-<name>[-zh].png.
   shot(name: string, options?: ShotOptions): Promise<void>

@@ -8,18 +8,31 @@
 import type { Scenario, Ui } from './lib/ui.ts'
 
 const TASK = 'orchestrate fix the parser bug, test it, update the docs'
+const HERO_TASK = 'orchestrate: fix the parser bug with one worker per job'
+const MAIN_SESSION = 'main'
+const HERO_TYPING_SECONDS = 1.5
+const REPORT_HELD_AT = 16.0
+// The summary ends at about 25.2 s; the films hold its last frame.
+const HERO_END_SECONDS = 26.5
 const PLAN_DONE = 'Four helpers are working'
 const SUMMARY_DONE = 'The parser bug is fixed.'
 const WAIT_MS = 40_000
 const MAIN_SESSION_ROW = 'workspace-' // the main session keeps its generated name; helpers are named
 const FIXER = 'fixer'
+const TESTER = 'tester'
+const FOLLOW_UP = 'also cover empty input'
+const TYPING_PAUSE_MS = 70
+const TESTER_REACTION = 'Also covered: empty input.'
 const ALLOW_KEY = 'tool.allow'
 const APPROVAL_ASKED_FOR = 'Fix the off-by-one' // the fixer's edit
 
 // Seconds since `start`, as a pause that returns at that moment.
 function clock(ui: Ui) {
   const start = Date.now()
-  return { until: (seconds: number) => ui.pause(Math.max(0, start + seconds * 1000 - Date.now())) }
+  return {
+    until: (seconds: number) => ui.pause(Math.max(0, start + seconds * 1000 - Date.now())),
+    now: () => (Date.now() - start) / 1000,
+  }
 }
 
 export const ORCHESTRA_SCENARIOS: Scenario[] = [
@@ -97,6 +110,94 @@ export const ORCHESTRA_SCENARIOS: Scenario[] = [
       await ui.clickTextBelow(ui.text(ALLOW_KEY), APPROVAL_ASKED_FOR)
       await time.until(17.5)
       await ui.shot('orchestra-six')
+    },
+  },
+  {
+    // M1 in the shooting script: the hero recording for Film A, the trailer and `crew`. The prompt
+    // is typed before the clip starts; Enter is t = 0 (clip mark "enter"), and all later input is
+    // keyed to that: the tester tile is clicked at 7.0, the follow-up typed from 7.5 to 9.0 and
+    // sent at 9.5, Allow clicked in the fixer tile at 13.0.
+    name: 'hero',
+    uis: ['gui'],
+    async run(ui) {
+      await ui.resize(1280, 1120)
+      await ui.send(`/rename ${MAIN_SESSION}`)
+      await ui.pause(600)
+      await ui.type(HERO_TASK)
+      await ui.parkPointer()
+      await ui.pause(800)
+      await ui.startClip('hero')
+      await ui.pause(500)
+      await ui.key('Enter')
+      ui.markClip('enter')
+      const time = clock(ui)
+      await time.until(0.4)
+      await ui.command('watch') // split view; it needs the session to be running
+      await ui.parkPointer()
+
+      await time.until(7)
+      await ui.clickTile(TESTER)
+      await ui.parkPointer() // the input box opens under the pointer and would show a tooltip
+      await time.until(7.5)
+      const typingStart = time.now()
+      for (const [index, character] of Array.from(FOLLOW_UP).entries()) {
+        await time.until(7.5 + (index * HERO_TYPING_SECONDS) / (FOLLOW_UP.length - 1))
+        await ui.type(character)
+      }
+      console.log(`typing ${typingStart.toFixed(2)}-${time.now().toFixed(2)}`)
+      await time.until(9.5)
+      await ui.key('Enter')
+      console.log('t', time.now().toFixed(1), 'fixer still waiting:', await ui.hasText(ui.text('status.waitingPermission')))
+      await time.until(13)
+      await ui.clickTextBelow(ui.text(ALLOW_KEY), APPROVAL_ASKED_FOR)
+      await ui.parkPointer()
+      await ui.waitText(TESTER_REACTION, WAIT_MS)
+      console.log('t', time.now().toFixed(1), 'tester reaction seen')
+      // The films hold this frame: the report is in main's tile until the fixer's report comes.
+      await time.until(REPORT_HELD_AT)
+      ui.markClip('report')
+      await ui.waitText(SUMMARY_DONE, WAIT_MS)
+      console.log('t', time.now().toFixed(1), 'summary done')
+      await time.until(HERO_END_SECONDS)
+      await ui.endClip()
+    },
+  },
+  {
+    // Test of the hero shot: a message queued for the tester while the fixer waits for approval.
+    name: 'orchestra-probe',
+    uis: ['gui'],
+    async run(ui) {
+      await ui.resize(1280, 1120)
+      await ui.type(TASK)
+      await ui.key('Enter')
+      const time = clock(ui)
+      await time.until(0.4)
+      await ui.command('watch')
+      await ui.parkPointer()
+      await ui.startClip('orchestra-probe')
+      await time.until(7)
+      await ui.clickTile(TESTER)
+      await ui.parkPointer() // the input box opens under the pointer and would show a tooltip
+      const typingStart = time.now()
+      for (const character of FOLLOW_UP) {
+        await ui.type(character)
+        await ui.pause(TYPING_PAUSE_MS)
+      }
+      console.log('typing took', (time.now() - typingStart).toFixed(1))
+      await ui.key('Enter')
+      await ui.parkPointer()
+      console.log('t', time.now().toFixed(1), 'fixer still waiting:', await ui.hasText(ui.text('status.waitingPermission')))
+      await time.until(13)
+      await ui.clickTextBelow(ui.text(ALLOW_KEY), APPROVAL_ASKED_FOR)
+      await ui.parkPointer()
+      await time.until(14)
+      console.log('t', time.now().toFixed(1), 'fixer still waiting after one click:', await ui.hasText(ui.text('status.waitingPermission')))
+      await ui.waitText(TESTER_REACTION, WAIT_MS)
+      console.log('t', time.now().toFixed(1), 'tester reaction seen')
+      await ui.waitText(SUMMARY_DONE, WAIT_MS)
+      console.log('t', time.now().toFixed(1), 'summary done')
+      await ui.pause(1000)
+      await ui.endClip()
     },
   },
 ]
