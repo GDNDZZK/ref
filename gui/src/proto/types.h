@@ -16,7 +16,7 @@ namespace refgui::proto
 {
 
 // Sent in Hello; the backend answers with its own version.
-constexpr int ProtocolVersion = 2;
+constexpr int ProtocolVersion = 3;
 
 // Written by ref-server to `<state dir>/instances/<pid>.json`.
 struct InstanceInfo
@@ -74,6 +74,7 @@ struct SessionStatus
 		Busy,              // waiting for or streaming an LLM response
 		Running,           // executing tools
 		WaitingPermission, // blocked on the user
+		WaitingQuestion,   // blocked on the user's answer to a question
 		Retrying,          // the LLM request failed and will be repeated at `nextAt`
 		Compacting,
 	};
@@ -234,12 +235,39 @@ struct PermissionRequest
 	qint64 time = 0;
 };
 
+struct QuestionOption
+{
+	QString label;
+	QString description;
+	bool isDefault = false; // preselected
+};
+
+struct Question
+{
+	QString question;
+	QString header; // short, for the tab
+	QList<QuestionOption> options;
+	bool multiple = false;
+	bool custom = true; // the user may type an answer of their own
+};
+
+// The model asks the user one or more questions and waits.
+struct QuestionRequest
+{
+	QString sessionId;
+	QString messageId;
+	QString callId;
+	QList<Question> questions;
+	qint64 time = 0;
+};
+
 struct SessionSnapshot
 {
 	SessionInfo info;
 	QList<Message> messages; // the newest page
 	bool moreBefore = false;
 	QList<PermissionRequest> pendingPermissions{};
+	QList<QuestionRequest> pendingQuestions{};
 	QList<Message> queued{};
 };
 
@@ -352,6 +380,14 @@ struct PermissionResolvedEvent
 {
 	QString callId;
 };
+struct QuestionEvent
+{
+	QuestionRequest request;
+};
+struct QuestionResolvedEvent
+{
+	QString callId;
+};
 struct QueueEvent // every message still waiting for the next safe point
 {
 	QList<Message> messages;
@@ -372,6 +408,8 @@ using SessionEvent = std::variant<InfoEvent,
                                   ResetEvent,
                                   PermissionEvent,
                                   PermissionResolvedEvent,
+                                  QuestionEvent,
+                                  QuestionResolvedEvent,
                                   QueueEvent,
                                   ErrorEvent,
                                   ClosedEvent>;
@@ -413,6 +451,7 @@ struct NotifyFrame
 		Permission,
 		TurnDone,
 		TurnError,
+		Question,
 	};
 
 	QString sessionId;
