@@ -472,14 +472,14 @@
 <context>
     <name>FindBody</name>
     <message numerus="yes">
-        <location filename="../src/app/FindBody.qml" line="61"/>
+        <location filename="../src/app/FindBody.qml" line="64"/>
         <source>%n result(s)</source>
         <translation>
             <numerusform>%n 个结果</numerusform>
         </translation>
     </message>
     <message>
-        <location filename="../src/app/FindBody.qml" line="65"/>
+        <location filename="../src/app/FindBody.qml" line="68"/>
         <source>truncated</source>
         <translation>已截断</translation>
     </message>
@@ -518,14 +518,21 @@
 <context>
     <name>GrepBody</name>
     <message numerus="yes">
-        <location filename="../src/app/GrepBody.qml" line="60"/>
-        <source>%n match(es) in %1 file(s)</source>
+        <location filename="../src/app/GrepBody.qml" line="63"/>
+        <source>%n match(es) in %1</source>
         <translation>
-            <numerusform>%1 个文件中有 %n 处匹配</numerusform>
+            <numerusform>%1中有 %n 处匹配</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/app/GrepBody.qml" line="63"/>
+        <source>%n file(s)</source>
+        <translation>
+            <numerusform>%n 个文件</numerusform>
         </translation>
     </message>
     <message>
-        <location filename="../src/app/GrepBody.qml" line="64"/>
+        <location filename="../src/app/GrepBody.qml" line="67"/>
         <source>truncated</source>
         <translation>已截断</translation>
     </message>

@@ -181,6 +181,18 @@ target_link_libraries(tst_workspace PRIVATE refgui_workspace refgui_session refg
 refgui_configure_target(tst_workspace)
 add_test(NAME tst_workspace COMMAND tst_workspace)
 
+# The translator is part of the program; the test compiles it and embeds the translations like the program does.
+qt_add_executable(tst_app_translator tst_app_translator.cpp
+	${PROJECT_SOURCE_DIR}/src/app/app_translator.cpp
+	${PROJECT_SOURCE_DIR}/src/app/app_translator.h
+)
+qt_add_lrelease(TS_FILES ${PROJECT_SOURCE_DIR}/translations/ref-gui_zh_CN.ts ${PROJECT_SOURCE_DIR}/translations/ref-gui_en.ts
+	QM_FILES_OUTPUT_VARIABLE translator_test_qm_files)
+qt_add_resources(tst_app_translator translator_test_i18n PREFIX "/i18n" BASE "${CMAKE_CURRENT_BINARY_DIR}" FILES ${translator_test_qm_files})
+target_link_libraries(tst_app_translator PRIVATE refgui_workspace Qt6::Test)
+refgui_configure_target(tst_app_translator)
+add_test(NAME tst_app_translator COMMAND tst_app_translator)
+
 qt_add_executable(tst_markdown_text tst_markdown_text.cpp)
 target_link_libraries(tst_markdown_text PRIVATE refgui_session Qt6::Gui Qt6::Test)
 refgui_configure_target(tst_markdown_text)
