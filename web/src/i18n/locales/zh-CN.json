@@ -69,7 +69,8 @@
     "error": "出错",
     "denied": "已拒绝",
     "cancelledState": "已取消",
-    "cancel": "取消"
+    "cancel": "取消",
+    "needsAnswer": "等待你的回答"
   },
   "theme": {
     "switchToLight": "切换到浅色主题",
@@ -204,7 +205,8 @@
     "show": "显示侧边栏",
     "mcp": "MCP",
     "settings": "设置",
-    "sessions": "会话"
+    "sessions": "会话",
+    "needsAnswer": "等待你的回答"
   },
   "split": {
     "empty": "没有后台会话",
@@ -364,6 +366,19 @@
     "waitingPermission": "等待你的授权",
     "compacting": "正在压缩上下文…",
     "retrying": "{seconds} 秒后重试（第 {attempt} 次）：{error}",
-    "contextTitle": "上下文：{used} / {max} 词元（{percent}%）。建议在 {recommend} 压缩，{auto} 时自动压缩。"
+    "contextTitle": "上下文：{used} / {max} 词元（{percent}%）。建议在 {recommend} 压缩，{auto} 时自动压缩。",
+    "waitingQuestion": "等待你的回答"
+  },
+  "question": {
+    "custom": "输入自己的答案",
+    "customPlaceholder": "你的答案",
+    "default": "（默认）",
+    "confirm": "确认",
+    "submit": "提交",
+    "dismiss": "忽略",
+    "unanswered": "未回答",
+    "hintSingle": "↑↓ 移动 · 1-9 或 Enter 选择 · Esc 忽略",
+    "hintTabbed": "←→ 切换问题 · 1-9 或空格选择 · Enter 下一项 · Esc 忽略",
+    "hintConfirm": "Enter 提交 · ← 返回 · Esc 忽略"
   }
 }
