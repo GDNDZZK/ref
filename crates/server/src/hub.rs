@@ -18,6 +18,9 @@ use tokio_util::sync::CancellationToken;
 
 pub type ConfigLoader = Arc<dyn Fn(&Path) -> Config + Send + Sync>;
 
+/// `HubOptions::idle_timeout` that keeps the backend running after its last frontend leaves.
+pub const IDLE_NEVER: i64 = -1;
+
 /// Max queued frames per connection before it is dropped as too slow.
 pub const MAX_QUEUE: usize = 10_000;
 
@@ -45,7 +48,7 @@ impl HubOptions {
             config_loader: Arc::new(|cwd: &Path| Config::load(cwd)),
             retry_base: Duration::from_secs(2),
             mcp_wait: Duration::from_secs(30),
-            idle_timeout: -1,
+            idle_timeout: IDLE_NEVER,
             sandbox_cwd: None,
         }
     }
