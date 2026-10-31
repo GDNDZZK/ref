@@ -148,10 +148,13 @@ jobs:
                 name="${name%$'\r'}"
                 [[ -n "$name" ]] || continue
                 echo "----- $name -----"
+                exe="$(find "$REF_GUI_BUILD_DIR" -name "$name.exe" | head -n 1)"
+                echo "program: $exe"
+                dir="$(dirname "$exe")"
                 # A relative file name: bash's /d/a/... would not be understood by the test.
-                (cd "$REF_GUI_BUILD_DIR/tests" && { "../$name.exe" -o "qt-$name.txt,txt" > /dev/null 2>&1 && code=0 || code=$?; echo "exit code $code" > "qt-$name.code"; })
-                cat "$REF_GUI_BUILD_DIR/tests/qt-$name.txt" 2>&1 || echo "(no log written)"
-                cat "$REF_GUI_BUILD_DIR/tests/qt-$name.code"
+                (cd "$dir" && { "./$name.exe" -o "qt-$name.txt,txt" > /dev/null 2>&1 && code=0 || code=$?; echo "exit code $code" > "qt-$name.code"; })
+                cat "$dir/qt-$name.txt" 2>&1 || echo "(no log written)"
+                cat "$dir/qt-$name.code"
               done < "$failed_list"
             } 2>&1 | tee -a ctest.log
           fi
