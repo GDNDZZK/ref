@@ -339,7 +339,7 @@
   "notifySettings": {
     "title": "通知",
     "enable": "显示系统通知",
-    "permission": "工具需要授权",
+    "permission": "会话在等你（授权或提问）",
     "turnDone": "一轮对话结束",
     "turnError": "一轮对话出错结束",
     "insecure": "此页面不可用：浏览器只在 https 或 localhost 页面显示通知。改为让标签页标题闪烁提醒。",
