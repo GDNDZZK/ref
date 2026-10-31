@@ -72,7 +72,7 @@ The window has a sidebar on the left and the content on the right: one session, 
 
 ## Split view
 
-The split view (Ctrl+Shift+W, the button at the top right, or `ref-gui -w`) shows one tile per background session: the live sessions that no other client has open, plus the current session. Only the focused tile shows its input box (as in the terminal UI), so the others have room for the conversation; they keep the status line and the queue of waiting messages, and a draft, attachments and shell mode survive while the box is hidden. A click focuses a tile and shows its input box, and Alt+arrow keys move the focus; the sidebar selects the session of the focused tile, and marks all tiles with a bar; commands act on the focused tile. Double-click a tile's title bar, or use its zoom button (Ctrl+Shift+Z), to enlarge it. Leave the zoom with Ctrl+Shift+Z or the *Leave zoom* button at the top right. Esc does not leave it, because Esc belongs to the input box and to permission questions. With no background sessions the view says so.
+The split view (Ctrl+Shift+W, the button at the top right, or `ref-gui -w`) shows one tile per background session: the live sessions that no other client has open, plus the current session. Only the focused tile shows its input box (as in the terminal UI), so the others have room for the conversation; they keep the status line and the queue of waiting messages, and a draft, attachments and shell mode survive while the box is hidden. A click focuses a tile and shows its input box, and Alt+arrow keys move the focus; the sidebar selects the session of the focused tile, and marks all tiles with a bar; commands act on the focused tile. Double-click a tile's title bar, or use its zoom button (Ctrl+Shift+Z), to enlarge it. Leave the zoom with Ctrl+Shift+Z or the *Leave zoom* button at the top right. Esc does not leave it, because Esc belongs to the input box, to permission questions and to the model's questions. With no background sessions the view says so.
 
 ## The conversation
 
@@ -82,7 +82,7 @@ The split view (Ctrl+Shift+W, the button at the top right, or `ref-gui -w`) show
 - After a compaction a divider marks where the model's context starts. Messages above it are dimmed: you can still read them, but the model no longer sees them. The divider's summary folds and unfolds.
 - Messages that did not come from you are marked: from another session (*message from "name"*), created by a parent session, a system reminder, or the output of a `!` shell command. When you switch the agent, a reminder tells the model about it.
 - Reasoning blocks open while the model thinks and fold when it is done. Click the header to open or fold one; the commands *Toggle expanded thinking* (Ctrl+Shift+R) and *Toggle expanded tool details* (Ctrl+Shift+O) do all of them at once and override the blocks you opened by hand.
-- The line above the input box shows what the session is doing (Working, Running tools, Compacting context, Waiting for your permission) with the time of the current turn, a countdown when a request is being retried, and a small bar for how full the model's context is. The bar turns yellow when compaction is recommended and red when it will happen by itself; hover for the numbers. The conversation's own errors show at its end until you send the next prompt.
+- The line above the input box shows what the session is doing (Working, Running tools, Compacting context, Waiting for your permission, Waiting for your answer) with the time of the current turn, a countdown when a request is being retried, and a small bar for how full the model's context is. The bar turns yellow when compaction is recommended and red when it will happen by itself; hover for the numbers. The conversation's own errors show at its end until you send the next prompt.
 
 **Tool cards**
 
@@ -94,6 +94,14 @@ The split view (Ctrl+Shift+W, the button at the top right, or `ref-gui -w`) show
 **Permissions**
 
 - A call that needs your permission opens by itself and shows the command or path with three buttons: *Allow* (a), *Allow for session* (s), *Deny* (d). With the session focused you can also press a or Enter, s, d or Esc, also while the cursor is in the input box. The keys only work 350 ms after the request appears, so text you were typing does not answer it by accident; until all requests are answered, letter keys do not go into the input box (Ctrl and Alt shortcuts and editing keys still work). When several calls wait, the oldest is answered first and the card says *+N more waiting*. In the split view the keys go to the focused tile.
+
+**Questions**
+
+- When the model asks you something (the `question` tool), a card appears between the conversation and the status line of that session, in the single view and in every split-view tile, focused or not. Its title is `?` and the short heading of the question, followed by the question and the choices. Each choice has a number and its description, the default one is marked *(default)* and preselected. The card grows with its content and scrolls when the pane is too small. The sidebar, the tile header and the status line show *Waiting for your answer* with a question mark icon.
+- One question with a single answer is a plain list: a click (or Enter) on a choice answers at once. Several questions, or one with several answers, get a tab per question and a last tab *Confirm*. On a single-answer tab a click picks the choice and moves to the next tab; on a multiple-answer tab the choices are check boxes, the defaults ticked. *Confirm* lists the answers and marks questions without one as *Unanswered*; *Submit* (or Enter) sends them, unanswered questions empty.
+- The last choice, *Type your own answer*, is there when the backend takes free text. It turns into a text field: Enter takes the text (empty text takes nothing), Esc goes back to the list. With a single answer the text replaces the picked choice; with several answers it is added, and choosing the row again takes it back.
+- *Dismiss*, or Esc, gives no answer and the model carries on without one. While an answer is on its way the card is dimmed (*Sending…*) and goes when the backend reports the question resolved. If the backend refuses the answer, the reason shows in the session's message at the top and the card stays. If another window or the terminal UI answers first, the card disappears without a message.
+- The keys, as for permissions: ↑ ↓ or j k move the highlight (it stops at the ends), Enter or Space picks or ticks the highlighted choice, 1 to 9 take a choice by its number, ← → and Tab or Shift+Tab switch tabs, Esc dismisses. They work 350 ms after the question appears, with the session focused (in the split view, the focused or zoomed tile), also while the cursor is in the input box. Until the question is answered other typing does not reach the input box (Ctrl and Alt shortcuts and editing keys still work), and a held key does not answer. While you type a custom answer the keys belong to the text field. The mouse works in every tile.
 
 **Images**
 
@@ -129,9 +137,9 @@ On macOS, Ctrl in this table is Cmd.
 
 ## Notifications
 
-The GUI can show a system notification when a session you are not looking at needs a tool permission, finishes a turn, or ends a turn with an error. A session counts as not looked at when it is not on screen, and when the window is not in the foreground. A click on the notification opens the session. The title is the session's title (`ref` when it has none); the text is *Waiting for permission to use {tool}*, *Finished* or *Stopped with an error: {error}*.
+The GUI can show a system notification when a session you are not looking at needs a tool permission, asks a question, finishes a turn, or ends a turn with an error. A session counts as not looked at when it is not on screen, and when the window is not in the foreground. A click on the notification opens the session. The title is the session's title (`ref` when it has none); the text is *Waiting for permission to use {tool}*, *Asks: {question}* (the first question), *Finished* or *Stopped with an error: {error}*.
 
-Under *Settings* a master switch and three kinds (a tool needs permission, a turn finished, a turn ended with an error) choose what is shown. If the system cannot show notifications, the settings say so and the taskbar icon flashes instead.
+Under *Settings* a master switch and three kinds (a session waits for you, for a permission or a question; a turn finished; a turn ended with an error) choose what is shown. If the system cannot show notifications, the settings say so and the taskbar icon flashes instead.
 
 | System | Mechanism |
 |---|---|
