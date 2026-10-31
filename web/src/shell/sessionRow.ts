@@ -1,6 +1,7 @@
 // What a sidebar row or a tile header says about a session, from its SessionInfo.
 
 import { formatElapsed } from '../model/format.ts'
+import { oneLine } from '../model/oneLine.ts'
 import type { SessionInfo, Todo } from '../proto/generated'
 
 export type RowState = 'idle' | 'busy' | 'compacting' | 'retrying' | 'permission' | 'error'
@@ -53,22 +54,14 @@ export function dirName(path: string): string {
   return parts[parts.length - 1] ?? path
 }
 
-// Whitespace runs become one space and control characters vanish, as the TUI's one_line.
-function oneLine(text: string): string {
-  return text
-    .replace(/\p{Cc}/gu, (char) => (/\s/.test(char) ? ' ' : ''))
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
 // A live session is labelled by its name, as in the TUI; the title is secondary.
 export function liveLabel(info: SessionInfo): string {
   return info.name.trim() || oneLine(info.title) || dirName(info.cwd)
 }
 
-// A session from history is labelled by its one-line title.
+// A session from history is labelled by its one-line title, then its name, then its directory.
 export function historyLabel(info: SessionInfo): string {
-  return oneLine(info.title) || info.name
+  return oneLine(info.title) || info.name.trim() || dirName(info.cwd)
 }
 
 const MS_PER_SECOND = 1000

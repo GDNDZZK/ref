@@ -10,6 +10,8 @@ export async function crossfade(change: () => void, speed: 'slow' | 'standard' =
     change()
     await nextTick() // the new DOM must be in place when the snapshot is taken
   })
+  // An aborted transition (timeout, viewport resize) rejects `ready` and `finished` alike.
+  void transition.ready.catch(() => undefined)
   void transition.finished.catch(() => undefined).then(() => delete document.documentElement.dataset['fade'])
   await transition.updateCallbackDone
 }
