@@ -2,7 +2,7 @@
 
 # ref
 
-**用 Rust 编写的终端编程智能体。**
+**用 Rust 编写的编程智能体，可在终端、桌面窗口和浏览器中使用。**
 
 会话运行在后台服务器中，没有打开任何窗口时也会继续工作。
 多个会话可以并行工作，并互相发送消息。
@@ -13,6 +13,12 @@
 ![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
 
 [English](README.md) · **简体中文**
+
+<br>
+
+<img src="docs/images/gui-split-view-zh.png" alt="ref-gui 并排显示四个后台会话" width="720">
+
+<sub>桌面 GUI 的分屏视图中，四个会话同时在工作。</sub>
 
 </div>
 
@@ -29,6 +35,26 @@
 - **适合长会话。** 自动压缩上下文，遇到限流和服务中断时无限重试，并为所有提供商自动缩小图片。
 - **MCP**：支持 stdio 和 Streamable HTTP 两种传输方式的服务器。
 - **Linux、macOS 和 Windows**，支持 x86_64 和 arm64。
+
+## 界面
+
+三种界面显示的是同样的会话，同一个会话可以同时在多个界面中打开。
+
+<div align="center">
+
+<img src="docs/images/gui-permission-card-zh.png" alt="ref-gui：一次编辑正在等待授权" width="720">
+
+<sub><b>桌面 GUI</b>（<code>ref-gui</code>）。工具在等待授权：允许（a）、本会话内允许（s）或拒绝（d）。</sub>
+
+<img src="docs/images/web-split-view-zh.png" alt="ref-web：浏览器中的分屏视图" width="720">
+
+<sub><b>浏览器</b>（<code>ref-web</code>）。同一套界面，这里是分屏视图。</sub>
+
+<img src="docs/images/tui-main.png" alt="终端中的 ref" width="720">
+
+<sub><b>终端</b>（<code>ref</code>）。工具调用、回复和输入框。</sub>
+
+</div>
 
 ## 安装
 
@@ -114,8 +140,8 @@ GUI 用 CMake 和 Qt 单独构建，见[开发](docs/development.zh-CN.md#gui)�
 | [使用 ref](docs/usage.zh-CN.md) | 会话、界面、提示输入、快捷键、斜杠命令、分屏视图、多会话协作 |
 | [配置](docs/configuration.zh-CN.md) | 全部配置项：提供商与模型、智能体、权限、延迟、压缩、MCP、命令、指令和技能 |
 | [工具](docs/tools.zh-CN.md) | 模型能做什么：文件工具、bash、webfetch、图片处理、上下文与跨会话工具 |
-| [桌面 GUI](docs/gui.zh-CN.md) | `ref-gui`：安装、启动、文件 |
-| [Web 界面](docs/web.zh-CN.md) | `ref-web`：启动、登录、向局域网开放、开发页面 |
+| [桌面 GUI](docs/gui.zh-CN.md) | `ref-gui`：安装、启动、窗口、分屏视图、对话、快捷键、设置、通知 |
+| [Web 界面](docs/web.zh-CN.md) | `ref-web`：启动、登录、向局域网开放、使用页面、快捷键、通知、开发页面 |
 | [命令行](docs/cli.zh-CN.md) | `ref`、`ref-gui`、`ref-web` 和 `ref-server` 的选项、远程后端、文件和环境变量 |
 | [开发](docs/development.zh-CN.md) | 构建、测试、crate 结构、CI 和发布 |
 
