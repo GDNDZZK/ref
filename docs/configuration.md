@@ -319,6 +319,8 @@ A pattern ending in ` *` also matches the bare command: `"git *"` matches `git` 
 
 **Tool aliases.** opencode's tool names are mapped to ref's: `edit` covers `edit`, `write` and `delete`; `write`, `patch`, `multiedit` and `apply_patch` cover `write` and `edit`; `glob`, `list` and `ls` mean `find`; `shell` means `bash`; `fetch` and `web_fetch` mean `webfetch`.
 
+**The `question` tool.** Like in opencode, `question` is allowed for the built-in `build` and `plan` agents and denied for every other agent, custom agents included, so those do not get the tool. A `question` rule (or a `"*"` rule) in the global `permission` applies to every agent instead of this default, and a rule in an agent's own `permission` beats both. `"ask"` asks for permission first and then shows the question. For example `"agent": {"general": {"permission": {"question": "allow"}}}` lets `general` ask. See [question](tools.md#question).
+
 **Disabled tools.** When a tool's last `"*"` rule is `deny` and no pattern rule allows or asks for it, the tool is not offered to the model at all. The older form `"tools": {"bash": false}` does the same.
 
 ## Tool delays
