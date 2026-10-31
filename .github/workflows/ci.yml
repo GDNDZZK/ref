@@ -110,9 +110,11 @@ jobs:
           # Git Bash puts its own /usr/bin/link (GNU ln) before the MSVC linker that rustc runs.
           [[ "$RUNNER_OS" == Windows ]] && mv /usr/bin/link.exe /usr/bin/link-gnu.exe
           cargo build -p ref-server --locked
-          suffix=""
-          [[ "$RUNNER_OS" == Windows ]] && suffix=".exe"
-          echo "REF_SERVER_BIN=$PWD/target/debug/ref-server$suffix" >> "$GITHUB_ENV"
+          path="$PWD/target/debug/ref-server"
+          # Git Bash writes /d/a/... for D:\a\...; CMake, the tests and ref-server's launcher need
+          # a path Windows understands (D:/a/...).
+          [[ "$RUNNER_OS" == Windows ]] && path="$(cygpath -m "$path.exe")"
+          echo "REF_SERVER_BIN=$path" >> "$GITHUB_ENV"
 
       - uses: ./.github/actions/gui-build
         with:
@@ -124,8 +126,15 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: |
           set -o pipefail
-          # Windows has no rpath: the DLLs are found through PATH.
-          export PATH="$REF_QT_DIR/bin:$REF_DEPS_DIR/prefix/bin:$PATH"
+          # Windows has no rpath: the DLLs are found through PATH. A path with a drive letter
+          # (D:/a/...) would be split at the colon by bash, so it goes in as /d/a/....
+          qt_bin="$REF_QT_DIR/bin"
+          deps_bin="$REF_DEPS_DIR/prefix/bin"
+          if command -v cygpath > /dev/null; then
+            qt_bin="$(cygpath -u "$qt_bin")"
+            deps_bin="$(cygpath -u "$deps_bin")"
+          fi
+          export PATH="$qt_bin:$deps_bin:$PATH"
           export QML_IMPORT_PATH="$REF_DEPS_DIR/prefix/lib/qml"
           ctest --test-dir "$REF_GUI_BUILD_DIR" --output-on-failure 2>&1 | tee ctest.log
 
