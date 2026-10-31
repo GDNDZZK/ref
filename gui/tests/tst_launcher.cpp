@@ -72,6 +72,10 @@ class TestLauncher : public QObject
 {
 	Q_OBJECT
 
+	// Before the tests that use it: MSVC does not find a member declared later from a function
+	// body that has a lambda in an argument list.
+	StopSource stop; // never requested here
+
 private slots:
 	void stateDirectoryFollowsTheSameRulesAsTheBackend()
 	{
@@ -295,8 +299,6 @@ private slots:
 	}
 
 private:
-	StopSource stop; // never requested here
-
 	static QString writeScript(const QTemporaryDir& directory, const QString& name, const QString& body)
 	{
 		const QString path = directory.filePath(name);
