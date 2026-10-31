@@ -9,8 +9,16 @@ use serde_json::Value;
 use ts_rs::TS;
 
 /// Version of the wire protocol, reported in the `Hello` response (`"protocol"`).
-/// Adding fields or requests does not change it. Version 1 clients are still served.
+/// Adding fields or requests does not change it. The server does not downgrade its frames to
+/// the `version` a client sends in `Hello`: a client built for an older version drops the
+/// frames it cannot parse. Version 3 added questions, so an older client never sees a question
+/// (the session waits for an answer), and a session list or snapshot that holds a
+/// `waiting_question` status does not parse in it. Run all clients from the version of the server.
 pub const PROTOCOL_VERSION: u32 = 3;
+
+/// The error of a `QuestionReply` for a question that is not pending (answered elsewhere
+/// already). Clients compare with it to drop the question silently.
+pub const NO_PENDING_QUESTION: &str = "No pending question with that id.";
 
 fn home() -> std::path::PathBuf {
     std::env::var_os("HOME")

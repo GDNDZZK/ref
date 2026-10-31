@@ -186,3 +186,5 @@ With several questions or a multiple choice, a tab bar shows each question and a
 Options marked `(default)` are ticked at the start of a multiple choice. Tabs you have not answered are dimmed, and **Confirm** lists them as `(not answered)`; you can still send. A click on a row or a tab works like the keys.
 
 When a question allows it, the last row is **Type your own answer**. Choose it to type in the row; `enter` keeps the text (on a lone question it also sends the answer), an empty text cancels, and `esc` leaves the field without dismissing the dialog. On a multiple choice the typed text is added to the ticked options, and choosing the row again takes it back. If another client answers first, the dialog closes by itself.
+
+Run `ref`, the GUI and the web UI from the same version as `ref-server`. An older client cannot show a question, so the session waits until another window answers it or you stop the turn.

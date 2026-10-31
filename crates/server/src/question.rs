@@ -32,7 +32,7 @@ const MAX_ANSWER_CHARS: usize = 2000;
 const NOTIFY_DETAIL_CHARS: usize = 100;
 const UNANSWERED: &str = "Unanswered";
 const DISMISSED_OUTPUT: &str = "The user dismissed the question without answering.";
-const NO_PENDING: &str = "No pending question with that id.";
+const NO_PENDING: &str = ref_proto::NO_PENDING_QUESTION;
 
 /// The reply of a client: the answers per question, or `None` for "dismissed".
 pub type Reply = Option<Vec<Vec<String>>>;
@@ -191,6 +191,7 @@ pub fn reply(s: &Session, call_id: &str, answers: Reply) -> Result<(), String> {
         None => None,
     };
     if let Some(tx) = pending.tx.take() {
+        // The receiver is gone only when the run was cancelled meanwhile: nobody waits for it.
         let _ = tx.send(answers);
     }
     Ok(())
