@@ -149,6 +149,10 @@ export class GuiSession {
     await this.command({ cmd: 'click', x, y })
   }
 
+  async wheel(x: number, y: number, delta: number): Promise<void> {
+    await this.command({ cmd: 'wheel', x, y, delta })
+  }
+
   async hover(x: number, y: number): Promise<void> {
     await this.command({ cmd: 'move', x, y })
   }

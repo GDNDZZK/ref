@@ -1,4 +1,4 @@
-// pnpm capture [web|gui|tui|shared|crew|all] [--only name,name] [--lang en,zh]
+// pnpm capture [web|gui|tui|shared|crew|todo|all] [--only name,name] [--lang en,zh]
 // Records pictures and casts from the mock backend into assets/ (and docs/images/).
 import { spawnSync } from 'node:child_process'
 import { parseArgs } from 'node:util'
@@ -6,6 +6,7 @@ import { LANGS, isLang, type Lang } from '../src/engine/i18n.ts'
 import { captureGui } from './gui.ts'
 import { captureCrew } from './crew.ts'
 import { captureShared } from './shared.ts'
+import { captureTodo } from './todo.ts'
 import { SCENARIOS } from './scenarios.ts'
 import { PRIVATE_BUS_FLAG } from './lib/privateBus.ts'
 import { TUI_CAPTURES, captureTui } from './tui.ts'
@@ -22,7 +23,7 @@ if (process.env[PRIVATE_BUS_FLAG] !== '1') {
   process.exit(rerun.status ?? 1)
 }
 
-const TARGETS = ['web', 'gui', 'tui', 'shared', 'crew'] as const
+const TARGETS = ['web', 'gui', 'tui', 'shared', 'crew', 'todo'] as const
 type Target = (typeof TARGETS)[number]
 
 const { values, positionals } = parseArgs({
@@ -50,6 +51,10 @@ for (const target of targets) {
   }
   if (target === 'shared') {
     await captureShared()
+    continue
+  }
+  if (target === 'todo') {
+    await captureTodo(langs as Lang[])
     continue
   }
   if (target === 'crew') {

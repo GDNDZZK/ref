@@ -15,7 +15,7 @@ import { COMPARE } from './compare.ts'
 import { COPY, HERO_CAPTIONS, HERO_FILM_START } from './copy.ts'
 import { FEATURES } from './features.ts'
 import { RELEASE } from './release.ts'
-import { OUTAGE_CAST, addBrandTitle, crewWindowsCut } from './shared.ts'
+import { OUTAGE_CAST, addBrandTitle, clickedClip, crewWindowsCut } from './shared.ts'
 import { cues, drawnCut, endCut, timelineFilm, type Cut } from './timeline.ts'
 
 const A6_END = 24.4
@@ -63,6 +63,8 @@ const standaloneCut: Cut = {
 // rows under it hold the mock's local address).
 const RETRY_CLOSEUP = { scale: 2, x: 0.2, y: 0.547, rows: 1.3 }
 const FIXTURE_MODEL_DIALOG_CAST_SECONDS = 6
+// f2: Cancel is clicked this long into the cut, after about 2.3 s of countdown.
+const DELAY_CANCEL_AT = 2.6
 const featureCuts: Cut[] = [
   drawnCut(STANDALONE_END, STANDALONE_END + FEATURE_CUT_SECONDS, (shot, seconds) => {
     shot.add(castWindow({ ...OUTAGE_CAST, y: 380, closeup: RETRY_CLOSEUP, castFrom: { mark: 'attempt3', offset: 0.3 }, start: 0, from: -1, to: seconds + 1 }))
@@ -71,7 +73,7 @@ const featureCuts: Cut[] = [
     from: STANDALONE_END + FEATURE_CUT_SECONDS,
     to: STANDALONE_END + 2 * FEATURE_CUT_SECONDS,
     build: (seconds) =>
-      beatShot({ seconds, screens: [{ clip: 'gui-delay' }], looks: [{ at: 0, x: 0.6, y: 0.6, zoom: 1.6 }], windowFrom: -1 }),
+      beatShot({ seconds, ...clickedClip('gui-delay', 'cancel', DELAY_CANCEL_AT), looks: [{ at: 0, x: 0.6, y: 0.4, zoom: 1.7 }], windowFrom: -1 }),
   },
   drawnCut(STANDALONE_END + 2 * FEATURE_CUT_SECONDS, STANDALONE_END + 3 * FEATURE_CUT_SECONDS, (shot, seconds) => {
     shot.add(castWindow({ name: 'tui-fixture-start', title: 'ref', x: 160, y: 120, fontSize: 28, start: -FIXTURE_MODEL_DIALOG_CAST_SECONDS, from: -1, to: seconds }))
