@@ -86,9 +86,21 @@ struct TextItem
 	QRectF rect;
 };
 
-void collectTexts(QQuickItem* item, const QRectF& windowRect, QList<TextItem>& out)
+QRectF sceneRect(const QQuickItem* item)
+{
+	return QRectF(item->mapToScene(QPointF(0, 0)), QSizeF(item->width(), item->height()));
+}
+
+// `visibleArea` is the part of the window that the clipping ancestors leave visible: a text
+// inside a collapsed (zero-height, clipped) section is not on screen.
+void collectTexts(QQuickItem* item, const QRectF& visibleArea, QList<TextItem>& out)
 {
 	if(!item->isVisible() || item->opacity() <= 0.01)
+	{
+		return;
+	}
+	const QRectF area = item->clip() ? visibleArea.intersected(sceneRect(item)) : visibleArea;
+	if(area.isEmpty())
 	{
 		return;
 	}
@@ -99,15 +111,15 @@ void collectTexts(QQuickItem* item, const QRectF& windowRect, QList<TextItem>& o
 	}
 	if(!text.isEmpty() && item->width() > 0 && item->height() > 0 && effectivelyVisible(item))
 	{
-		const QRectF rect(item->mapToScene(QPointF(0, 0)), QSizeF(item->width(), item->height()));
-		if(windowRect.intersects(rect))
+		const QRectF rect = sceneRect(item);
+		if(area.intersects(rect))
 		{
 			out.append({text, rect});
 		}
 	}
 	for(QQuickItem* child : item->childItems())
 	{
-		collectTexts(child, windowRect, out);
+		collectTexts(child, area, out);
 	}
 }
 
@@ -206,7 +218,8 @@ private:
 		}
 		if(name == "click" || name == "move")
 		{
-			return pointer(window, name, QPoint(command.value("x").toInt(), command.value("y").toInt()));
+			// Coordinates may be fractional (text positions); QJsonValue::toInt would turn those into 0.
+			return pointer(window, name, QPointF(command.value("x").toDouble(), command.value("y").toDouble()).toPoint());
 		}
 		if(name == "clickText")
 		{
@@ -260,7 +273,7 @@ private:
 		}
 		if(name == "wheel")
 		{
-			const QPoint position(command.value("x").toInt(), command.value("y").toInt());
+			const QPoint position = QPointF(command.value("x").toDouble(), command.value("y").toDouble()).toPoint();
 			QWheelEvent event(position, window->mapToGlobal(position), QPoint(), QPoint(0, command.value("delta").toInt()), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
 			QGuiApplication::sendEvent(window, &event);
 			return ok();

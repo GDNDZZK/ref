@@ -52,6 +52,8 @@ export interface Ui {
   clickTextBelow(text: string, anchor: string): Promise<void>
   // Moves the pointer to an empty spot so that no row or button shows its hover state (GUI only).
   parkPointer(): Promise<void>
+  // Clicks the title of the split-view tile titled `title` (GUI only).
+  clickTile(title: string): Promise<void>
   // Opens the session whose row in the sidebar is titled `title` (GUI only).
   clickSidebarRow(title: string): Promise<void>
   hasText(text: string): Promise<boolean>

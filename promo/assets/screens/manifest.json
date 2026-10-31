@@ -29,6 +29,16 @@
     "height": 1600,
     "sessionName": "workspace-48bd"
   },
+  "gui-composer-queue": {
+    "width": 2560,
+    "height": 1600,
+    "sessionName": "workspace-4c8d"
+  },
+  "gui-composer-queue-zh": {
+    "width": 2560,
+    "height": 1600,
+    "sessionName": "workspace-a563"
+  },
   "gui-composer-shell": {
     "width": 2560,
     "height": 1600,
@@ -454,6 +464,16 @@
     "height": 2000,
     "sessionName": "workspace-74ed"
   },
+  "web-composer-queue": {
+    "width": 3200,
+    "height": 2000,
+    "sessionName": "workspace-53a8"
+  },
+  "web-composer-queue-zh": {
+    "width": 3200,
+    "height": 2000,
+    "sessionName": "workspace-a921"
+  },
   "web-composer-shell": {
     "width": 3200,
     "height": 2000,
@@ -752,25 +772,5 @@
     "width": 3200,
     "height": 2000,
     "sessionName": "workspace-1cd4"
-  },
-  "gui-composer-queue": {
-    "width": 2560,
-    "height": 1600,
-    "sessionName": "workspace-4c8d"
-  },
-  "gui-composer-queue-zh": {
-    "width": 2560,
-    "height": 1600,
-    "sessionName": "workspace-a563"
-  },
-  "web-composer-queue": {
-    "width": 3200,
-    "height": 2000,
-    "sessionName": "workspace-53a8"
-  },
-  "web-composer-queue-zh": {
-    "width": 3200,
-    "height": 2000,
-    "sessionName": "workspace-a921"
   }
 }
