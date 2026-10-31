@@ -810,8 +810,10 @@ async fn outage_retries_with_growing_waits_and_then_goes_on() {
     assert_eq!(attempts, [1, 2, 3, 4], "{seen:?}");
     assert!(retries[0].1.contains("529") && retries[0].1.contains("Overloaded"));
     assert!(retries[1].1.contains("529"));
+    // Windows words a reset as "An existing connection was forcibly closed" (os error 10054).
+    let reset = retries[2].1.to_lowercase();
     assert!(
-        retries[2].1.to_lowercase().contains("connection reset"),
+        reset.contains("connection reset") || reset.contains("forcibly closed"),
         "{}",
         retries[2].1
     );

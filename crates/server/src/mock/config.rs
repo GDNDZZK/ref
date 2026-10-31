@@ -64,7 +64,7 @@ fn document(llm_port: u16) -> Value {
                 "seq*": "allow",
                 "sleep*": "allow",
                 "printf*": "allow",
-                "sed -i*": "allow",
+                "awk*": "allow",
                 "curl*": "deny",
             },
             "webfetch": "deny",
