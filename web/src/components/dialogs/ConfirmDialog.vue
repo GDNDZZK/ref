@@ -2,7 +2,7 @@
 // Closing a working session and deleting one from history ask first.
 import { onMounted, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { displayTitle } from '../../shell/sessionRow.ts'
+import { historyLabel, liveLabel } from '../../shell/sessionRow.ts'
 import { useDialogsStore } from '../../stores/dialogs.ts'
 import { useNoticesStore } from '../../stores/notices.ts'
 import { useWorkspaceStore } from '../../stores/workspace.ts'
@@ -16,7 +16,8 @@ const workspace = useWorkspaceStore()
 const notices = useNoticesStore()
 
 const info = workspace.infoOf(props.sessionId) ?? workspace.history.find((s) => s.id === props.sessionId)
-const body = t(`dialog.${props.kind}.body`, { title: info ? displayTitle(info) : props.sessionId })
+const label = props.kind === 'closeSession' ? liveLabel : historyLabel
+const body = t(`dialog.${props.kind}.body`, { title: info ? label(info) : props.sessionId })
 
 const confirmButton = useTemplateRef<InstanceType<typeof DialogButton>>('confirm')
 onMounted(() => (confirmButton.value?.$el as HTMLElement | undefined)?.focus())
