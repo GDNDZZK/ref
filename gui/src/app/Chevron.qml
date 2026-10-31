@@ -6,6 +6,10 @@ import RefGui
 // A ">" stroke centered in its box; rotate it to point elsewhere. Drawn rather than
 // typed, so it sits at the geometric center regardless of font metrics.
 //
+// Drawn by the software renderer, into a texture: the nodes of the GPU renderers are not cut by
+// a clipping ancestor that sits inside a rounded clip (ChatView in a tile's frame), so the
+// chevron of a card scrolled out of view showed over the tile's header.
+//
 // The size lives on a plain Item: a Shape sets its own implicit size from the path's
 // bounds, so a path computed from the Shape's size would feed back into itself.
 Item {
@@ -23,7 +27,7 @@ Item {
 
 	Shape {
 		anchors.fill: parent
-		preferredRendererType: Shape.CurveRenderer
+		preferredRendererType: Shape.SoftwareRenderer
 
 		ShapePath {
 			strokeColor: chevron.color
