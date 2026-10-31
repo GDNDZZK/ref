@@ -75,6 +75,7 @@ private slots:
 	void movesInsteadOfRecreating();
 	void filtersIgnoringCase();
 	void derivesRoles();
+	void waitingForAnAnswerNeedsTheUserLikeWaitingForPermission();
 	void historyRowsAreLabelledByTitle();
 	void marksCurrentAndTiles();
 	void directoryLoadsAndFollowsFrames();
@@ -163,6 +164,18 @@ void TstSessionList::filtersIgnoringCase()
 	QVERIFY(model.contains(u"ses_aaa"_s)); // filtered out, not gone
 	model.setFilter({});
 	QCOMPARE(model.count(), 2);
+}
+
+void TstSessionList::waitingForAnAnswerNeedsTheUserLikeWaitingForPermission()
+{
+	SessionListModel model;
+	proto::SessionInfo info = session(u"a"_s, 1);
+	info.status.state = proto::SessionStatus::State::WaitingQuestion;
+	model.setSessions({info});
+
+	const QModelIndex row = model.index(0);
+	QCOMPARE(row.data(SessionListModel::StateRole).toString(), u"waiting_question"_s);
+	QVERIFY(row.data(SessionListModel::HasPermissionRole).toBool());
 }
 
 void TstSessionList::derivesRoles()

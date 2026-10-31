@@ -12,9 +12,10 @@ Item {
 	property bool compact: false
 	readonly property real compactMargin: 10 // below the input box
 	readonly property real compactColumnPadding: 16 // beside the conversation
+	readonly property real questionMaxHeightRatio: 0.8 // of the pane, for the question card
 	readonly property real margin: compact ? compactMargin : Theme.pagePadding
 	readonly property real columnPadding: compact ? compactColumnPadding : Theme.pagePadding
-	// Whether the keys may answer a permission request of this session (one pane at a time has them).
+	// Whether the keys may answer a permission request or question of this session (one pane at a time has them).
 	property bool keysEnabled: true
 	// Whether the input box is there. A hidden one keeps its draft, attachments and queue;
 	// the queue strip stays either way.
@@ -24,9 +25,11 @@ Item {
 		composer.focusInput()
 	}
 
-	// The keyboard goes to the permission keys while they may answer, and back to the input box after.
+	// The keyboard goes to the answer keys while they may answer, and back to the input box after.
 	function updateKeyFocus() {
-		if (keysEnabled && session.permissionKeysActive)
+		if (session.question.editing) // the card's text field has it
+			return
+		if (keysEnabled && session.answerKeysActive)
 			permissionKeys.forceActiveFocus()
 		else if (permissionKeys.activeFocus)
 			focusInput()
@@ -36,7 +39,7 @@ Item {
 
 	ChatView {
 		id: chat
-		anchors { left: parent.left; right: parent.right; top: parent.top; bottom: statusLine.top }
+		anchors { left: parent.left; right: parent.right; top: parent.top; bottom: questionCard.top }
 		model: pane.session.blocks
 		sidePadding: pane.columnPadding
 		turnInProgress: pane.session.busy
@@ -60,14 +63,14 @@ Item {
 		id: permissionKeys
 
 		Keys.onPressed: event => {
-			pane.session.permissionKey(event.key, event.text, event.modifiers, event.isAutoRepeat)
+			pane.session.answerKey(event.key, event.text, event.modifiers, event.isAutoRepeat)
 			event.accepted = true
 		}
 
 		Connections {
 			target: pane.session
 
-			function onToolsChanged() {
+			function onAnswerChanged() {
 				pane.updateKeyFocus()
 			}
 		}
@@ -101,7 +104,7 @@ Item {
 
 		// Stacked above the send button, on its center line.
 		x: composer.x + composer.sendButtonCenterX - width / 2
-		anchors { bottom: statusLine.top; bottomMargin: 4 }
+		anchors { bottom: questionCard.top; bottomMargin: 4 }
 		implicitWidth: 34
 		implicitHeight: 34
 		opacity: shown ? 1 : 0
@@ -167,6 +170,14 @@ Item {
 		}
 	}
 
+	QuestionCard {
+		id: questionCard
+		anchors { horizontalCenter: parent.horizontalCenter; bottom: statusLine.top }
+		width: chat.columnWidth
+		prompt: pane.session.question
+		maxHeight: pane.height * pane.questionMaxHeightRatio
+	}
+
 	StatusLine {
 		id: statusLine
 		session: pane.session
@@ -182,7 +193,7 @@ Item {
 		boxShown: pane.composerShown
 		onSubmitted: chat.following = true
 		// With a request pending, its keys come before the input box, wherever the caret is.
-		onKeyOffered: event => event.accepted = pane.keysEnabled && pane.session.permissionKey(event.key, event.text, event.modifiers, event.isAutoRepeat)
+		onKeyOffered: event => event.accepted = pane.keysEnabled && pane.session.answerKey(event.key, event.text, event.modifiers, event.isAutoRepeat)
 	}
 
 	// The input box's remarks are the window's toasts.

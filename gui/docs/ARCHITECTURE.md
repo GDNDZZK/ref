@@ -274,7 +274,7 @@ Flickable 自带的滚轮动画，每一格都从当前位置重新开始，上�
 
 ### 授权按键
 
-`ChatSession.permissionKeysActive` 在有工具等待授权、且距第一次出现已过 350 ms（`PermissionGuard`）时为真。`SessionPane` 里的 `permissionKeys` 此时抢走焦点，把 a / Enter、s、d / Esc 交给 `ChatSession.answerOldestPermission()`，其他单字符键吞掉；答完把焦点还给输入框。同一个 call id 只回复一次（失败可以重试）。`SessionPane.keysEnabled` 在分屏里由分块是否有焦点决定。
+`ChatSession.answerKeysActive` 在有工具等待授权或模型在提问、且距第一次出现已过 350 ms（`PermissionGuard`）时为真（正在卡片文本框里输入自定义回答时为假）。`SessionPane` 里的 `permissionKeys` 此时抢走焦点，所有按键走 `ChatSession.answerKey()`：有提问时交给 `QuestionPrompt::handleKey`（↑↓/jk、Enter/Space、1–9、←→/Tab、Esc），否则 a / Enter、s、d / Esc 交给 `answerOldestPermission()`；其他单字符键吞掉；答完把焦点还给输入框。同一个 call id 只回复一次（失败可以重试）。提问由 `SessionController` 按 `question`/`question_resolved` 事件和快照的 `pending_questions` 维护，`ChatSession` 把最早的一条交给 `QuestionPrompt`（QML 里的 `QuestionCard`）；答复发出后卡片保持“发送中”，直到服务器报告 resolved；服务器回 “No pending question with that id.”（别处已答）则静默丢掉卡片，其他错误显示在状态栏并保留卡片。`SessionPane.keysEnabled` 在分屏里由分块是否有焦点决定。
 
 ### 来自外部的文字
 
@@ -307,6 +307,7 @@ grabToImage(page) → 截图盖到最上层 → Theme.toggle() → 截图淡出
 
 - 箭头图标统一用 `Chevron.qml` 绘制：90 度尖角、圆角端点，通过旋转改变朝向。不用字符，因为字体度量会让它在垂直方向上对不齐。用 Canvas 绘制而不用 Shape：整个落在祖先裁剪区之外的 Shape 仍会被画出来（所有渲染器都如此，Qt 6.12），滚出聊天区的卡片的箭头会盖在标题栏上。因此 gui/src/app 不 import QtQuick.Shapes，tst_plain_text 检查这一点。
 - 工具和界面里的图标是 `assets/icons/` 的 SVG，经 `IconProvider` 加载：`image://icons/<名字>-<网格>?color=<hex>`，`Icon.qml` 包了一层，名字为空时不加载。
+- 窗口图标（Linux 等 X11/Wayland 桌面）：`main.cpp` 调 `setWindowIcon(refgui::icons::appIcon())`。`app_icon.cpp` 用 QSvgRenderer 把编进程序的 `assets/app/ref-small.svg`（≤48px）和 `ref.svg`（64px 起）画成 ref.ico 的那几个尺寸，不依赖 qsvg 等插件。Windows 的窗口图标来自 exe 里的 IDI_ICON1；macOS 不调用，否则 Dock 里的 ref.icns 会被替换。
 - 滚动条的 handle 自绘，颜色取自 Theme。Basic 风格默认用系统 palette，不跟随主题。
 - 输入框高度随内容增长，最大 220px。
 

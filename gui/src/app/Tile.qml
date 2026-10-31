@@ -150,7 +150,7 @@ Item {
 
 				Icon {
 					anchors.verticalCenter: parent.verticalCenter
-					name: "lock"
+					name: tile.facts.activity === "waiting_question" ? "question" : "lock"
 					size: 16
 					color: Theme.warning
 					visible: tile.hasPermission

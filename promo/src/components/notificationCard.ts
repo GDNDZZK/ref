@@ -1,4 +1,4 @@
-import appIconUrl from '../../../assets/app/png/ref-128.png'
+import appIconUrl from '../../../assets/app/ref.svg'
 import { span } from '../engine/anim.ts'
 import { tr, type Localized } from '../engine/i18n.ts'
 import { element, type Part } from '../engine/part.ts'

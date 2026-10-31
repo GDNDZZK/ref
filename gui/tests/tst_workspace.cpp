@@ -55,6 +55,9 @@ public:
 	// The messages an attach brings for the session.
 	void setMessages(const QString& id, const QJsonArray& messages) { m_messages.insert(id, messages); }
 
+	// While set, a question reply is refused with this text.
+	void failQuestionReply(const QString& error) { m_questionError = error; }
+
 	// While held, a detach is recorded but neither carried out nor answered.
 	void holdDetach(bool hold) { m_holdDetach = hold; }
 
@@ -196,6 +199,10 @@ private:
 			const QJsonObject image{{u"mime"_s, u"image/png"_s}, {u"data"_s, u"YWJj"_s}, {u"name"_s, u"shot.png"_s}};
 			m_fake.respond(request, {{u"text"_s, u"take this back"_s}, {u"images"_s, QJsonArray{image}}});
 		}
+		else if(op == u"question_reply"_s && !m_questionError.isEmpty())
+		{
+			m_fake.fail(request, m_questionError);
+		}
 		else if(op == u"shutdown"_s)
 		{
 			m_fake.respond(request, {});
@@ -209,6 +216,7 @@ private:
 	FakeBackend& m_fake;
 	QMap<QString, QJsonObject> m_sessions;
 	QMap<QString, QJsonArray> m_messages;
+	QString m_questionError;
 	int m_created = 0;
 	int m_protocol = 2;
 	bool m_holdDetach = false;
@@ -224,6 +232,20 @@ QJsonArray awaitingPermission()
 	                       {u"input"_s, QJsonObject()},
 	                       {u"state"_s, u"awaiting_permission"_s}};
 	return {QJsonObject{{u"id"_s, u"msg_1"_s}, {u"role"_s, u"assistant"_s}, {u"time"_s, 1}, {u"parts"_s, QJsonArray{tool}}}};
+}
+
+// The model asks a question with two options (the first is the default) and a custom answer.
+QJsonObject questionEvent()
+{
+	const QJsonArray options{QJsonObject{{u"label"_s, u"Yes"_s}, {u"description"_s, u"Do it"_s}, {u"default"_s, true}},
+	                         QJsonObject{{u"label"_s, u"No"_s}, {u"description"_s, u"Leave it"_s}, {u"default"_s, false}}};
+	const QJsonObject question{{u"question"_s, u"Go on?"_s}, {u"header"_s, u"Go"_s}, {u"options"_s, options}, {u"multiple"_s, false}, {u"custom"_s, true}};
+	const QJsonObject request{{u"session_id"_s, u"ses_a"_s},
+	                          {u"message_id"_s, u"msg_1"_s},
+	                          {u"call_id"_s, u"call_q"_s},
+	                          {u"questions"_s, QJsonArray{question}},
+	                          {u"time"_s, 1}};
+	return {{u"kind"_s, u"event"_s}, {u"session_id"_s, u"ses_a"_s}, {u"event"_s, QJsonObject{{u"type"_s, u"question"_s}, {u"request"_s, request}}}};
 }
 
 // What the sidebar row of a session says (IsCurrentRole, IsTileRole).
@@ -294,6 +316,10 @@ private slots:
 	void anotherTileGetsTheFocusWhenTheFocusedOneCloses();
 	void theSidebarMarksTheFocusedTileAndTheTiles();
 	void permissionKeysComeAfterTheGuardAndTakeTheTyping();
+	void questionKeysComeAfterTheGuardAndAnswerTheCard();
+	void aQuestionAnsweredElsewhereGoesQuietly();
+	void aRefusedAnswerKeepsTheCardAndSaysWhy();
+	void typingACustomAnswerTakesTheKeysAwayFromTheCard();
 	void sessionsHaveTheMethodsCommandsCall();
 	void undoPutsThePromptBackIntoTheInputBox();
 	void oldBackendOffersARestart();
@@ -656,24 +682,101 @@ void TestWorkspace::permissionKeysComeAfterTheGuardAndTakeTheTyping()
 	QTRY_COMPARE(session->permissionCount(), 1);
 	const auto replies = [&] { return f.stub.requests(u"permission_reply"_s); };
 
-	QVERIFY(!session->permissionKeysActive());
-	QVERIFY(!session->permissionKey(Qt::Key_A, u"a"_s, Qt::NoModifier, false)); // typed into the box
-	QTRY_VERIFY(session->permissionKeysActive());
+	QVERIFY(!session->answerKeysActive());
+	QVERIFY(!session->answerKey(Qt::Key_A, u"a"_s, Qt::NoModifier, false)); // typed into the box
+	QTRY_VERIFY(session->answerKeysActive());
 	QCOMPARE(replies().size(), 0);
 
-	QVERIFY(session->permissionKey(Qt::Key_X, u"x"_s, Qt::NoModifier, false)); // not for the box
-	QVERIFY(session->permissionKey(Qt::Key_A, u"A"_s, Qt::ShiftModifier, false)); // shifted letters do not answer
-	QVERIFY(session->permissionKey(Qt::Key_A, u"a"_s, Qt::NoModifier, true) && replies().isEmpty()); // nor a held key
-	QVERIFY(!session->permissionKey(Qt::Key_A, u"\x01"_s, Qt::ControlModifier, false)); // Ctrl+A selects all
-	QVERIFY(!session->permissionKey(Qt::Key_Backspace, u"\b"_s, Qt::NoModifier, false));
-	QVERIFY(!session->permissionKey(Qt::Key_Left, QString(), Qt::NoModifier, false));
+	QVERIFY(session->answerKey(Qt::Key_X, u"x"_s, Qt::NoModifier, false)); // not for the box
+	QVERIFY(session->answerKey(Qt::Key_A, u"A"_s, Qt::ShiftModifier, false)); // shifted letters do not answer
+	QVERIFY(session->answerKey(Qt::Key_A, u"a"_s, Qt::NoModifier, true) && replies().isEmpty()); // nor a held key
+	QVERIFY(!session->answerKey(Qt::Key_A, u"\x01"_s, Qt::ControlModifier, false)); // Ctrl+A selects all
+	QVERIFY(!session->answerKey(Qt::Key_Backspace, u"\b"_s, Qt::NoModifier, false));
+	QVERIFY(!session->answerKey(Qt::Key_Left, QString(), Qt::NoModifier, false));
 	QCOMPARE(replies().size(), 0);
 
-	QVERIFY(session->permissionKey(Qt::Key_S, u"s"_s, Qt::NoModifier, false));
+	QVERIFY(session->answerKey(Qt::Key_S, u"s"_s, Qt::NoModifier, false));
 	QTRY_COMPARE(replies().size(), 1);
 	QVERIFY(replies().first().value(u"allow"_s).toBool());
 	QVERIFY(replies().first().value(u"always"_s).toBool());
 	QCOMPARE(replies().first().value(u"call_id"_s).toString(), u"call_1"_s);
+}
+
+// The card takes the keys by the same route and guard as a permission request.
+void TestWorkspace::questionKeysComeAfterTheGuardAndAnswerTheCard()
+{
+	Fixture f(2);
+	ChatSession* session = f.workspace->current();
+	f.fake.send(questionEvent());
+	QTRY_VERIFY(session->question()->isActive());
+	const auto replies = [&] { return f.stub.requests(u"question_reply"_s); };
+
+	QVERIFY(!session->answerKeysActive());
+	QVERIFY(!session->answerKey(Qt::Key_Down, QString(), Qt::NoModifier, false)); // the input box has the keys meanwhile
+	QTRY_VERIFY(session->answerKeysActive());
+
+	QVERIFY(session->answerKey(Qt::Key_X, u"x"_s, Qt::NoModifier, false)); // typing is the card's
+	QVERIFY(session->answerKey(Qt::Key_Return, QString(), Qt::NoModifier, true) && replies().isEmpty()); // a held key does not answer
+	QVERIFY(!session->answerKey(Qt::Key_Backspace, u"\b"_s, Qt::NoModifier, false));
+	QVERIFY(!session->answerKey(Qt::Key_1, u"1"_s, Qt::ControlModifier, false));
+	QVERIFY(session->answerKey(Qt::Key_Down, QString(), Qt::NoModifier, false));
+	QVERIFY(session->answerKey(Qt::Key_Return, QString(), Qt::NoModifier, false));
+
+	QTRY_COMPARE(replies().size(), 1);
+	QCOMPARE(replies().first().value(u"call_id"_s).toString(), u"call_q"_s);
+	QCOMPARE(replies().first().value(u"answers"_s).toArray(), (QJsonArray{QJsonArray{u"No"_s}}));
+	QVERIFY(session->question()->isBusy()); // until the backend says it is resolved
+	f.fake.send({{u"kind"_s, u"event"_s},
+	             {u"session_id"_s, u"ses_a"_s},
+	             {u"event"_s, QJsonObject{{u"type"_s, u"question_resolved"_s}, {u"call_id"_s, u"call_q"_s}}}});
+	QTRY_VERIFY(!session->question()->isActive());
+	QVERIFY(!session->answerKeysActive());
+}
+
+void TestWorkspace::aQuestionAnsweredElsewhereGoesQuietly()
+{
+	Fixture f(2);
+	f.stub.failQuestionReply(u"No pending question with that id."_s);
+	ChatSession* session = f.workspace->current();
+	f.fake.send(questionEvent());
+	QTRY_VERIFY(session->question()->isActive());
+
+	session->question()->activateRow(0);
+
+	QTRY_VERIFY(!session->question()->isActive());
+	QVERIFY(session->statusText().isEmpty());
+}
+
+void TestWorkspace::aRefusedAnswerKeepsTheCardAndSaysWhy()
+{
+	Fixture f(2);
+	f.stub.failQuestionReply(u"Invalid answers"_s);
+	ChatSession* session = f.workspace->current();
+	f.fake.send(questionEvent());
+	QTRY_VERIFY(session->question()->isActive());
+
+	session->question()->activateRow(0);
+
+	QTRY_COMPARE(session->statusText(), u"Invalid answers"_s);
+	QVERIFY(session->question()->isActive());
+	QVERIFY(!session->question()->isBusy()); // it can be tried again
+}
+
+void TestWorkspace::typingACustomAnswerTakesTheKeysAwayFromTheCard()
+{
+	Fixture f(2);
+	ChatSession* session = f.workspace->current();
+	f.fake.send(questionEvent());
+	QTRY_VERIFY(session->question()->isActive());
+	QTRY_VERIFY(session->answerKeysActive());
+
+	session->question()->activateRow(2); // "Type your own answer"
+
+	QVERIFY(session->question()->isEditing());
+	QVERIFY(!session->answerKeysActive());
+	QVERIFY(!session->answerKey(Qt::Key_A, u"a"_s, Qt::NoModifier, false)); // the text field has them
+	session->question()->cancelCustom();
+	QVERIFY(session->answerKeysActive());
 }
 
 void TestWorkspace::oldBackendOffersARestart()

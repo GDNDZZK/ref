@@ -65,7 +65,7 @@ const elapsed = computed(() => (info.value ? runningTime(info.value, now.value) 
       <span class="title">{{ title }}</span>
       <span v-if="needsAttention(state)" class="mark">
         <Icon v-if="state === 'permission'" icon="lock-16" class="lock" />
-        <Icon v-else-if="state === 'question'" icon="chat-16" class="lock" />
+        <Icon v-else-if="state === 'question'" icon="question-16" class="lock" />
         <AlertBadge v-else :size="BADGE_SIZE" />
       </span>
       <span v-else-if="progress" class="progress" :class="{ complete: progress.complete }">

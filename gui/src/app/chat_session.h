@@ -2,17 +2,22 @@
 #pragma once
 
 #include "app/composer_model_type.h"
+#include "app/question_prompt_type.h"
 #include "client/backend.h"
 #include "composer/composer_model.h"
+#include "session/question_prompt.h"
 #include "session/session_controller.h"
 
 #include <QCoroTask>
+#include <QList>
 #include <QObject>
 #include <QSet>
+#include <QStringList>
 #include <QTimer>
 #include <QtQmlIntegration>
 
 #include <chrono>
+#include <optional>
 
 // One session as the window shows it: the conversation and the actions on it. Workspace
 // creates one for each session opened in the window and keeps it until the session is
@@ -29,7 +34,7 @@ class ChatSession : public QObject
 	Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
 	Q_PROPERTY(QString title READ title NOTIFY titleChanged)
 	Q_PROPERTY(refgui::composer::ComposerModel* composer READ composer CONSTANT)
-	// What the session is doing: "idle", "thinking", "running", "waiting_permission", "retrying" or "compacting".
+	// What the session is doing: "idle", "thinking", "running", "waiting_permission", "waiting_question", "retrying" or "compacting".
 	Q_PROPERTY(QString activity READ activity NOTIFY infoChanged)
 	Q_PROPERTY(qint64 busySince READ busySince NOTIFY infoChanged) // epoch ms, 0 while idle
 	Q_PROPERTY(int retryAttempt READ retryAttempt NOTIFY infoChanged)
@@ -48,11 +53,14 @@ class ChatSession : public QObject
 	Q_PROPERTY(bool lastToolDelayed READ lastToolDelayed NOTIFY toolsChanged)
 	// Tool calls waiting for the user's permission, the oldest first.
 	Q_PROPERTY(int permissionCount READ permissionCount NOTIFY toolsChanged)
-	// The keys a, s, d, Enter and Esc may answer the oldest request: it has been shown for permissionGuard.
-	Q_PROPERTY(bool permissionKeysActive READ permissionKeysActive NOTIFY toolsChanged)
+	// The card for the model's question, if it asks one.
+	Q_PROPERTY(refgui::session::QuestionPrompt* question READ question CONSTANT)
+	// The keys may answer what the user is asked (the question, else the oldest permission request): it has been shown
+	// for PermissionGuard, and the card's text field is not being typed in.
+	Q_PROPERTY(bool answerKeysActive READ answerKeysActive NOTIFY answerChanged)
 
 public:
-	// How long a request is shown before the keys answer it: the user may still be typing.
+	// How long a request or question is shown before the keys answer it: the user may still be typing.
 	static constexpr std::chrono::milliseconds PermissionGuard{350};
 
 	// `backend` is shared by all sessions of the window and outlives them.
@@ -96,7 +104,8 @@ public:
 	bool detailsExpanded() const;
 	bool lastToolDelayed() const;
 	int permissionCount() const;
-	bool permissionKeysActive() const { return m_permissionKeysActive; }
+	refgui::session::QuestionPrompt* question() { return &m_question; }
+	bool answerKeysActive() const { return m_guardPassed && !m_question.isEditing(); }
 
 	// Precondition: !busy and `text` is not blank.
 	Q_INVOKABLE void send(const QString& text);
@@ -104,12 +113,13 @@ public:
 	Q_INVOKABLE void stop();
 	// Answers a tool call that waits for permission.
 	Q_INVOKABLE void permissionReply(const QString& callId, bool allow, bool always);
-	// Answers the oldest request by the keys. Does nothing unless permissionKeysActive.
+	// Answers the oldest request by the keys. Does nothing unless answerKeysActive and no question is asked.
 	Q_INVOKABLE void answerOldestPermission(bool allow, bool always);
-	// Offers a key press to the pending request, as the TUI and the WebUI do: a, Enter, s, d and Esc
-	// answer it, and any other typing is the request's until it is answered. True when the key is used.
+	// Offers a key press to what the user is asked, as the TUI and the WebUI do. For a permission request, a,
+	// Enter, s, d and Esc answer it; for a question, the keys of the card (QuestionPrompt::handleKey) do. Any
+	// other typing is theirs until it is answered. True when the key is used.
 	// Always false while the keys are not active, so the input box takes the typing meanwhile.
-	Q_INVOKABLE bool permissionKey(int key, const QString& text, int modifiers, bool autoRepeat);
+	Q_INVOKABLE bool answerKey(int key, const QString& text, int modifiers, bool autoRepeat);
 	// The same as the Cancel button on a delayed tool call.
 	Q_INVOKABLE void cancelDelayedTool();
 	// Takes back a message of the user and everything after it; the text and pictures return to
@@ -137,6 +147,8 @@ signals:
 	void olderErrorChanged();
 	void expansionChanged();
 	void toolsChanged();
+	// answerKeysActive may have changed.
+	void answerChanged();
 	// The backend reported a problem with the session (an Error event).
 	void errorReported(const QString& text);
 	// Undo took a prompt back: its text and pictures, for the input box.
@@ -149,7 +161,11 @@ private:
 	QCoro::Task<> sendUndo(std::optional<QString> messageId);
 	QCoro::Task<> sendPermission(QString callId, bool allow, bool always);
 	void setFailure(const QString& text);
-	void trackOldestPermission();
+	QCoro::Task<> sendQuestionReply(QString callId, std::optional<QList<QStringList>> answers);
+	void syncQuestion();
+	void trackAnswerTarget();
+	bool permissionKey(int key, const QString& text, Qt::KeyboardModifiers held, bool autoRepeat);
+	bool questionKey(int key, const QString& text, Qt::KeyboardModifiers held, bool autoRepeat);
 
 	refgui::client::Backend& m_backend;
 	QString m_sessionId;
@@ -158,7 +174,8 @@ private:
 	QString m_failure; // the last thing that went wrong, until the next action
 	QString m_olderError;
 	QSet<QString> m_repliedCalls; // permission requests that have an answer on its way
-	QString m_guardedCallId; // the request the guard timer runs for
+	refgui::session::QuestionPrompt m_question;
+	QString m_guardedTarget; // what the guard timer runs for: the question's or the oldest request's call id, tagged
 	QTimer m_permissionGuard;
-	bool m_permissionKeysActive = false;
+	bool m_guardPassed = false;
 };
