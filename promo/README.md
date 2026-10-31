@@ -33,7 +33,7 @@ Rendering runs at about 15 frames per second on a 12-core machine, so a one-minu
 | `src/engine/` | `anim.ts` (progress, key tracks), `shot.ts`, `scene.ts` (timeline and transitions), `player.ts` (`seek`), `i18n.ts` |
 | `src/components/` | Parts shared by scenes: `backdrop`, `titleCard`, `caption`, `appFrame` (window with a camera over a screenshot), `highlight`, `cursor`, `typedText`, `terminalView` (replays a cast), `featureTag`, `textCard`, `notificationCard`, `browserTab`, `serverPill` |
 | `src/shots/` | Shots reused by several scenes (`intro`, `outro`, `beat`) |
-| `src/films/` | The nine feature films and the trailer (see below) |
+| `src/films/` | The hero film `orchestra`, the nine feature films and the trailer (see below) |
 | `src/scenes/` | One file per film, listed in `registry.ts`. `demo.ts` is the pipeline check and uses placeholder material |
 | `scripts/` | `render.ts` and its helpers |
 | `capture/` | `pnpm capture`: screenshots and casts from the mock backend (see below) |
@@ -61,7 +61,7 @@ Rules: times are seconds; a part's `render(t)` must not depend on earlier calls;
 
 ## Capturing screenshots
 
-`pnpm capture [web|gui|tui|shared|all] [--only name,name] [--lang en,zh]` starts everything it needs with a temporary `REF_STATE_DIR` and `REF_DATA_DIR` under `.cache/run/`, on free ports, and stops only the processes it started. The three interfaces run against `ref-server --mock`; the scripts that make it produce a scene are in `docs/development.md#the-mock-backend`.
+`pnpm capture [web|gui|tui|shared|crew|all] [--only name,name] [--lang en,zh]` starts everything it needs with a temporary `REF_STATE_DIR` and `REF_DATA_DIR` under `.cache/run/`, on free ports, and stops only the processes it started. The three interfaces run against `ref-server --mock`; the scripts that make it produce a scene are in `docs/development.md#the-mock-backend`.
 
 | Part | What it does | Output |
 |---|---|---|
@@ -69,6 +69,7 @@ Rules: times are seconds; a part's `render(t)` must not depend on earlier calls;
 | `gui` | the unchanged `ref-gui --mock` with `QT_QPA_PLATFORM=offscreen` and `QT_SCALE_FACTOR=2` (2560×1600 grab); a small Qt plugin (`capture/gui-driver/`) reads commands (click, type, key, grab) from stdin | `assets/screens/gui-<shot>[-zh].png` |
 | `tui` | `ref` in a pseudo terminal; keys are typed, the screen is followed with a headless xterm.js; the output is recorded as an asciicast and rendered as stills | `assets/casts/*.cast`, `assets/screens/tui-*.png`, and `tui-*-clean.png` without the last row (it shows the random mock workspace path); the videos and `docs/images/` use the clean copies |
 | `shared` | one mock backend, with `ref`, `ref-gui` and `ref-web` showing the same session | `tui-shared`, `gui-shared`, `web-shared` |
+| `crew` | the same, for the `orchestrate` script: the terminal starts it, the GUI (split view) and the browser show the crew | `tui-crew`, `gui-crew`, `web-crew` |
 
 The split-view picture in `docs/images/` is the `readme-split` scenario, not `sessions`: only finished sessions and one running tool call (so no streaming caret is caught mid-chase), and a 1280×1120 GUI window so that no card is cut by the top of a tile. The films keep using `sessions`.
 
@@ -95,8 +96,14 @@ export REF_GUI_QML_PATH=$prefix/lib/qml   # QML modules of the dependency prefix
 
 Unverified: the capture was run on one machine (Linux, Debian 13). The drag-and-drop and paste of images into the GUI are not captured; the image shots are from the web page. The desktop notification is drawn by the film (`notificationCard`), because a headless run has none.
 
+### Clips (moving GUI)
+
+A scenario can record the window instead of taking one picture: `await ui.startClip('crowd')` … `await ui.endClip()` (GUI only). The capture plugin photographs the window 15 times a second into JPEG files; `capture/lib/clips.ts` resamples them to an even 15 fps and stores one WebM per clip (`assets/clips/gui-crowd.webm`, VP9 4:4:4, a few MB, plus `manifest.json`). `pnpm render` (and `pnpm clips`) unpacks the WebM files into `.cache/clips/<name>/f0001.jpg ...`, and a beat plays one with `screens: [{ clip: 'gui-crowd' }]`; the page shows the frame for each seek time. Chinese renders take `gui-crowd-zh` when it exists.
+
+The `orchestra-*` scenarios drive the split view with a few GUI-only helpers of `Ui`: `clickSidebarRow(title)` opens a session, `clickTextBelow(text, anchor)` clicks the first `text` under `anchor` (the GUI keeps invisible copies of buttons, so `clickText('Allow')` can hit the wrong one), and `parkPointer()` moves the pointer off any row so no hover state is photographed. Clicking an unfocused tile only focuses it and moves its content, so the script moves focus first (`Alt+Down`) and clicks the button after. The mock's timeline is wall-clock, so a script waits for fixed times after sending the task; `ui.endClip()` takes about 20 s to encode, which is why late pictures (`orchestra-six`) come from a separate scenario.
+
 ## The films
 
-`src/films/` has one file per film (`backend`, `sessions`, `peers`, `permissions`, `edits`, `composer`, `long-sessions`, `setup`, `notify`) and `trailer`. A film is `filmScene(feature, beats)`: a title card, the beats, the closing card. A beat is either `windowBeat` (a captured window, a camera path of `looks`, `marks`, a pointer, captions) or `cardsBeat` (text cards typed out, for config files and the illustration of a rejected edit). Picture coordinates in a beat are fractions (0..1) of the screenshot; a camera look is a point and a zoom (1 = the whole picture fits the window). `backend.ts` has the two custom shots (terminal replay to browser; three windows side by side).
+`src/films/` has one file per film (`orchestra`, `backend`, `sessions`, `peers`, `permissions`, `edits`, `composer`, `long-sessions`, `setup`, `notify`) and `trailer`. A film is `filmScene(feature, beats)`: a title card, the beats, the closing card. A beat is either `windowBeat` (a captured window, a camera path of `looks`, `marks`, a pointer, captions) `cardsBeat` (text cards typed out, for config files and the illustration of a rejected edit) or `shotBeat` (any custom shot, such as the three windows). Picture coordinates in a beat are fractions (0..1) of the screenshot; a camera look is a point and a zoom (1 = the whole picture fits the window). `backend.ts` has the two custom shots (terminal replay to browser; three windows side by side, for the `shared` or the `crew` pictures).
 
 Where a picture would show the random mock path (`/tmp/ref-mock-<hex>/workspace`), the camera looks away from it. Preview one frame of a film with `pnpm render <film> --lang en --still SEC`.

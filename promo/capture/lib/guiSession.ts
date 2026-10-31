@@ -107,6 +107,16 @@ export class GuiSession {
     await this.command({ cmd: 'resize', width, height })
   }
 
+  // Photographs the window `fps` times a second into JPEG files in `dir`.
+  async startRecording(dir: string, fps: number): Promise<void> {
+    await this.command({ cmd: 'record', dir, fps })
+  }
+
+  // Stops the recording; returns the time of each frame in ms since it started.
+  async stopRecording(): Promise<number[]> {
+    return (await this.command({ cmd: 'stop' })).times as number[]
+  }
+
   async texts(): Promise<TextOnScreen[]> {
     return ((await this.command({ cmd: 'texts' })).texts as TextOnScreen[]) ?? []
   }

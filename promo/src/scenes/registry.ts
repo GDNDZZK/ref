@@ -6,6 +6,7 @@ const film = (name: string) => () => import(`../films/${name}.ts`) as Promise<{ 
 export const sceneLoaders: Record<string, () => Promise<{ scene: SceneDefinition }>> = {
   demo: () => import('./demo.ts'),
   trailer: film('trailer'),
+  orchestra: film('orchestra'),
   backend: film('backend'),
   sessions: film('sessions'),
   peers: film('peers'),

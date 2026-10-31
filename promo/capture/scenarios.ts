@@ -5,6 +5,7 @@ import type { WebUi } from './lib/webUi.ts'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { REPO_ROOT } from './lib/binaries.ts'
+import { ORCHESTRA_SCENARIOS } from './orchestra.ts'
 import { shotFileName, type Scenario } from './lib/ui.ts'
 
 const AFTER_CARD_MS = 1200 // a permission card ignores keys for a moment
@@ -12,10 +13,11 @@ const STREAM_MS = 5000
 const DELAY_RING_MS = 3000 // the text, a temporary file and the delete call take about 2 s
 const TOOLS_DONE = 'Done. The edit went through'
 const GUI_README_WIDTH = 1280
-const GUI_README_HEIGHT = 1120
+const GUI_README_HEIGHT = 1344
 const LOGO_PNG = join(REPO_ROOT, 'assets', 'app', 'png', 'ref-256.png')
 
 export const SCENARIOS: Scenario[] = [
+  ...ORCHESTRA_SCENARIOS,
   {
     name: 'running',
     async run(ui) {

@@ -48,12 +48,21 @@ export interface Ui {
   key(chord: string): Promise<void>
   command(id: CommandId): Promise<void>
   clickText(text: string): Promise<void>
+  // Clicks the first `text` under the first `anchor` (GUI only; the GUI keeps clipped copies of buttons that clickText could hit).
+  clickTextBelow(text: string, anchor: string): Promise<void>
+  // Moves the pointer to an empty spot so that no row or button shows its hover state (GUI only).
+  parkPointer(): Promise<void>
+  // Opens the session whose row in the sidebar is titled `title` (GUI only).
+  clickSidebarRow(title: string): Promise<void>
   hasText(text: string): Promise<boolean>
   waitText(text: string, timeoutMs?: number): Promise<void>
   waitNoText(text: string, timeoutMs?: number): Promise<void>
   pause(ms: number): Promise<void>
   // Changes the window (GUI) or viewport (web) size, in logical pixels.
   resize(width: number, height: number): Promise<void>
+  // Records the window as a clip until endClip, saved as <kind>-<name>[-zh] in assets/clips (GUI only).
+  startClip(name: string): Promise<void>
+  endClip(): Promise<void>
   // Saves a picture as <kind>-<name>[-zh].png.
   shot(name: string, options?: ShotOptions): Promise<void>
 }

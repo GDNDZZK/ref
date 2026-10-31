@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { parseArgs } from 'node:util'
 import { LANGS, isLang, type Lang } from '../src/engine/i18n.ts'
 import { captureGui } from './gui.ts'
+import { captureCrew } from './crew.ts'
 import { captureShared } from './shared.ts'
 import { SCENARIOS } from './scenarios.ts'
 import { PRIVATE_BUS_FLAG } from './lib/privateBus.ts'
@@ -21,7 +22,7 @@ if (process.env[PRIVATE_BUS_FLAG] !== '1') {
   process.exit(rerun.status ?? 1)
 }
 
-const TARGETS = ['web', 'gui', 'tui', 'shared'] as const
+const TARGETS = ['web', 'gui', 'tui', 'shared', 'crew'] as const
 type Target = (typeof TARGETS)[number]
 
 const { values, positionals } = parseArgs({
@@ -49,6 +50,10 @@ for (const target of targets) {
   }
   if (target === 'shared') {
     await captureShared()
+    continue
+  }
+  if (target === 'crew') {
+    await captureCrew()
     continue
   }
   const forTarget = selected.filter((scenario) => (scenario.uis ?? ['web', 'gui']).includes(target))

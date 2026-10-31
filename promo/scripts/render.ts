@@ -9,6 +9,7 @@ import { FRAME_HEIGHT, FRAME_WIDTH } from '../src/engine/player.ts'
 import { launchChromium } from './lib/browser.ts'
 import { parseRenderArgs, type RenderArgs } from './lib/cli.ts'
 import { Encoder } from './lib/encoder.ts'
+import { prepareClips } from './clips.ts'
 
 const PAGE_READY_TIMEOUT_MS = 30_000
 const PROGRESS_STEPS = 10
@@ -113,6 +114,7 @@ async function renderScene(browsers: Browser[], baseUrl: string, args: RenderArg
 async function main() {
   const args = parseRenderArgs(process.argv.slice(2))
   mkdirSync(args.outDir, { recursive: true })
+  prepareClips()
 
   const server = await createServer({ logLevel: 'warn', server: { port: 0 } })
   await server.listen()

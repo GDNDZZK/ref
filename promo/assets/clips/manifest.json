@@ -1,0 +1,14 @@
+{
+  "gui-orchestra-crowd": {
+    "frames": 190,
+    "fps": 15,
+    "width": 2560,
+    "height": 2240
+  },
+  "gui-orchestra-crowd-zh": {
+    "frames": 190,
+    "fps": 15,
+    "width": 2560,
+    "height": 2240
+  }
+}

@@ -61,6 +61,18 @@ class WebUi implements Ui {
     await this.page.getByText(text).first().click()
   }
 
+  clickTextBelow(): Promise<void> {
+    throw new Error('clickTextBelow is for the GUI only')
+  }
+
+  parkPointer(): Promise<void> {
+    throw new Error('parkPointer is for the GUI only')
+  }
+
+  clickSidebarRow(): Promise<void> {
+    throw new Error('clickSidebarRow is for the GUI only')
+  }
+
   async hasText(text: string): Promise<boolean> {
     return (await this.page.getByText(text).count()) > 0
   }
@@ -75,6 +87,14 @@ class WebUi implements Ui {
 
   resize(width: number, height: number): Promise<void> {
     return this.page.setViewportSize({ width, height })
+  }
+
+  startClip(): Promise<void> {
+    throw new Error('clips are recorded from the GUI only')
+  }
+
+  endClip(): Promise<void> {
+    throw new Error('clips are recorded from the GUI only')
   }
 
   pause(ms: number): Promise<void> {
