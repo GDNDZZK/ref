@@ -234,6 +234,7 @@ private slots:
 	void aClosedTileKeepsItsSessionUntilItHasLeft();
 	void closingTheCurrentTileSendsNoAttach();
 	void aRevivedTileLeavesOnItsOwnTimer();
+	void anotherTileGetsTheFocusWhenTheFocusedOneCloses();
 	void sessionsHaveTheMethodsCommandsCall();
 	void undoPutsThePromptBackIntoTheInputBox();
 	void oldBackendOffersARestart();
@@ -508,6 +509,21 @@ void TestWorkspace::aRevivedTileLeavesOnItsOwnTimer()
 	QTest::qWait(lingerMs / 2 + lingerMs / 4);
 	QCOMPARE(stage.rowCount(), 1);
 	QTRY_COMPARE(stage.rowCount(), 0);
+}
+
+void TestWorkspace::anotherTileGetsTheFocusWhenTheFocusedOneCloses()
+{
+	Fixture f(2, true);
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
+	f.workspace->toggleSplit();
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	f.workspace->focusTile(u"ses_b"_s);
+	QCOMPARE(f.workspace->focusedTileId(), u"ses_b"_s);
+
+	f.workspace->closeSession(u"ses_b"_s);
+
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
+	QCOMPARE(f.workspace->focusedTileId(), u"ses_a"_s); // the current session's tile
 }
 
 void TestWorkspace::oldBackendOffersARestart()
