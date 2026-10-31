@@ -28,6 +28,8 @@ QString stateName(State state)
 		return QStringLiteral("running");
 	case State::WaitingPermission:
 		return QStringLiteral("waiting_permission");
+	case State::WaitingQuestion:
+		return QStringLiteral("waiting_question");
 	case State::Retrying:
 		return QStringLiteral("retrying");
 	case State::Compacting:
@@ -360,7 +362,7 @@ QVariant SessionListModel::roleData(const Row& row, int role) const
 	case TodoAllDoneRole:
 		return row.todoTotal > 0 && row.todoDone == row.todoTotal;
 	case HasPermissionRole:
-		return row.state == u"waiting_permission"_s;
+		return row.state == u"waiting_permission"_s || row.state == u"waiting_question"_s;
 	case LastErrorRole:
 		return row.lastError;
 	case HasErrorRole:

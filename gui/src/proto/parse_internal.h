@@ -15,6 +15,7 @@ Message readMessage(const Fields& fields);
 QList<Message> readMessages(const Fields& fields, QLatin1StringView key);
 ImageData readImageData(const Fields& fields);
 PermissionRequest readPermissionRequest(const Fields& fields);
+QuestionRequest readQuestionRequest(const Fields& fields);
 NamedImage readNamedImage(const Fields& fields);
 
 } // namespace refgui::proto::json
