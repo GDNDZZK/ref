@@ -8,12 +8,20 @@
 //
 // The state is read through getters, so a template or computed that reads it is tracked.
 
-import { effectScope, markRaw, ref, shallowReactive } from 'vue'
+import { effectScope, markRaw, reactive, ref, shallowReactive } from 'vue'
 import type { EffectScope } from 'vue'
 import { useFrame } from '../motion/useFrame.ts'
 import type { RefApi } from '../net/api.ts'
-import type { Message, NamedImage, PermissionRequest, SessionEvent, SessionInfo } from '../proto/generated'
+import type {
+  Message,
+  NamedImage,
+  PermissionRequest,
+  QuestionRequest,
+  SessionEvent,
+  SessionInfo,
+} from '../proto/generated'
 import type { Block } from './blocks.ts'
+import { QuestionForm } from './questionForm.ts'
 import { Transcript } from './transcript.ts'
 
 // How this window is attached: `foreground` counts as a direct connection, `watching` only
@@ -31,6 +39,13 @@ export interface ChatSessionDeps {
   draftRestored(sessionId: string, text: string, images: NamedImage[]): void
 }
 
+// The backend's answer to a reply for a question nobody waits for any more.
+const NO_PENDING_QUESTION = 'No pending question with that id.'
+
+function isNoPendingQuestion(error: unknown): boolean {
+  return error instanceof Error && error.message === NO_PENDING_QUESTION
+}
+
 export class ChatSession {
   readonly id: string
 
@@ -38,6 +53,8 @@ export class ChatSession {
     blocks: [] as readonly Block[],
     info: undefined as SessionInfo | undefined,
     permissions: [] as PermissionRequest[],
+    questions: [] as QuestionRequest[],
+    sendingAnswers: [] as string[], // call ids whose answer is on its way
     queued: [] as readonly Message[], // waiting for the next safe point, in delivery order
     loaded: false,
     generation: 0, // counts the times the history was loaded
@@ -54,6 +71,7 @@ export class ChatSession {
   private transcript: Transcript
   private readonly flushing = ref(false) // something waits for the next frame
   private readonly images = new Map<string, Promise<string>>() // image id -> data URL
+  private readonly forms = new Map<string, QuestionForm>() // call id -> what the user chose so far
 
   // `info` is what the session list already knows, so the session can be shown before it is attached.
   constructor(id: string, deps: ChatSessionDeps, info?: SessionInfo) {
@@ -142,6 +160,30 @@ export class ChatSession {
 
   get pendingPermission(): PermissionRequest | undefined {
     return this.state.permissions[0]
+  }
+
+  get questions(): readonly QuestionRequest[] {
+    return this.state.questions
+  }
+
+  // The oldest question that still waits for an answer from this window.
+  get pendingQuestion(): QuestionRequest | undefined {
+    return this.state.questions.find((request) => !this.state.sendingAnswers.includes(request.call_id))
+  }
+
+  // Whether the answer for the call is on its way (the inputs of the card are locked).
+  isSendingAnswer(callId: string): boolean {
+    return this.state.sendingAnswers.includes(callId)
+  }
+
+  // The choices of one question call; they live as long as the question is pending.
+  questionForm(request: QuestionRequest): QuestionForm {
+    let form = this.forms.get(request.call_id)
+    if (!form) {
+      form = reactive(new QuestionForm(request)) as QuestionForm
+      this.forms.set(request.call_id, form)
+    }
+    return form
   }
 
   // The defaults of the folds. A block flips against them when the user toggles it.
@@ -292,6 +334,22 @@ export class ChatSession {
     }
   }
 
+  // `answers` has one list per question; null dismisses them. The card stays, locked, until
+  // the backend reports the question resolved. A question that is gone by then (answered in
+  // another window) is dropped without a word; a refused answer unlocks the card and throws.
+  async answerQuestion(callId: string, answers: string[][] | null): Promise<void> {
+    if (this.isSendingAnswer(callId)) return
+    this.state.sendingAnswers = [...this.state.sendingAnswers, callId]
+    try {
+      await this.deps.api().questionReply(this.id, callId, answers)
+    } catch (error) {
+      this.state.sendingAnswers = this.state.sendingAnswers.filter((id) => id !== callId)
+      if (!isNoPendingQuestion(error)) throw error
+      this.transcript.resolveQuestion(callId)
+      this.publish()
+    }
+  }
+
   dispose(): void {
     this.images.clear()
     this.scope.stop()
@@ -310,11 +368,20 @@ export class ChatSession {
     this.publish()
   }
 
+  private forgetAnsweredQuestions(): void {
+    const pending = new Set(this.state.questions.map((request) => request.call_id))
+    for (const callId of this.forms.keys()) if (!pending.has(callId)) this.forms.delete(callId)
+    const sending = this.state.sendingAnswers.filter((callId) => pending.has(callId))
+    if (sending.length !== this.state.sendingAnswers.length) this.state.sendingAnswers = sending
+  }
+
   private publish(): void {
     this.state.info = this.transcript.info
     this.state.moreBefore = this.transcript.moreBefore
     this.state.lastToolDelayed = this.transcript.lastToolDelayed
     this.state.permissions = [...this.transcript.permissions.values()]
+    this.state.questions = [...this.transcript.questions.values()]
+    this.forgetAnsweredQuestions()
     this.state.queued = this.transcript.queued
     this.flushing.value = true
   }

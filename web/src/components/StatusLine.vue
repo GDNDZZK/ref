@@ -71,6 +71,10 @@ const contextTitle = computed(() => {
         <Icon icon="lock-16" class="warning" />
         <span class="label warning">{{ t('status.waitingPermission') }}</span>
       </template>
+      <template v-else-if="activity === 'waiting_question'">
+        <Icon icon="chat-16" class="warning" />
+        <span class="label warning">{{ t('status.waitingQuestion') }}</span>
+      </template>
       <template v-else-if="activity === 'compacting'">
         <StatusDot running :failed="false" />
         <span class="label shimmer accent">{{ t('status.compacting') }}</span>
