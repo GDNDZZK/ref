@@ -21,7 +21,7 @@ export function placeInPane(
 ): PopoverPlacement {
   const minLeft = pane.left + margin
   const maxRight = pane.right - margin
-  const width = clamp(preferredWidth, 0, maxRight - minLeft)
+  const width = clamp(preferredWidth, 0, Math.max(0, maxRight - minLeft))
   const left = clamp(button.right - width, minLeft, maxRight - width)
   return { left, width }
 }
