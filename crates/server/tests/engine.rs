@@ -2,6 +2,7 @@ mod common;
 
 use common::*;
 use ref_proto::{MessageSource, Part, Request, Role, SessionEvent, SessionStatus, ToolState};
+use ref_server::session::PermReply;
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
@@ -159,7 +160,11 @@ async fn permission_ask_then_reply_and_deny() {
         assert_eq!(st.perms[0].request.purpose, "p1");
     }
     let tx = s.lock().perms[0].tx.take().unwrap();
-    tx.send((true, false)).unwrap();
+    tx.send(PermReply {
+        allow: true,
+        always: false,
+    })
+    .unwrap();
     // Second ask: deny.
     let s2 = s.clone();
     wait_until("permission 2", T, move || {
@@ -170,7 +175,11 @@ async fn permission_ask_then_reply_and_deny() {
     })
     .await;
     let tx = s.lock().perms[0].tx.take().unwrap();
-    tx.send((false, false)).unwrap();
+    tx.send(PermReply {
+        allow: false,
+        always: false,
+    })
+    .unwrap();
     wait_idle(&s).await;
     let tools = tool_parts(&s);
     let st: Vec<(ToolState, String)> = tools
@@ -211,7 +220,11 @@ async fn permission_always_allows_rest_of_session() {
     let s2 = s.clone();
     wait_until("permission", T, move || s2.lock().perms.len() == 1).await;
     let tx = s.lock().perms[0].tx.take().unwrap();
-    tx.send((true, true)).unwrap();
+    tx.send(PermReply {
+        allow: true,
+        always: true,
+    })
+    .unwrap();
     wait_idle(&s).await;
     assert!(tool_parts(&s).iter().all(|p| matches!(
         p,

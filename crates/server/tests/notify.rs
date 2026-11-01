@@ -4,7 +4,7 @@ use common::*;
 use ref_proto::{NotifyKind, Request, ServerFrame, SessionStatus};
 use ref_server::api;
 use ref_server::hub::{Conn, Hub};
-use ref_server::session::Session;
+use ref_server::session::{PermReply, Session};
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
@@ -162,7 +162,11 @@ async fn permission_request_notifies_with_the_tool_name() {
     );
 
     let tx = s.lock().perms[0].tx.take().unwrap();
-    tx.send((true, false)).unwrap();
+    tx.send(PermReply {
+        allow: true,
+        always: false,
+    })
+    .unwrap();
     wait_idle(&s).await;
     assert_eq!(notes(&conn), [(NotifyKind::TurnDone, None)]);
 }
