@@ -17,6 +17,11 @@ const WRITE_RACE_RETRIES: u32 = 20;
 const WRITE_RACE_PAUSE: Duration = Duration::from_millis(50);
 #[cfg(unix)]
 const PRIVATE_FILE_MODE: u32 = 0o600;
+/// The permission bits for group and others, and all permission bits of a mode.
+#[cfg(unix)]
+const GROUP_OTHER_BITS: u32 = 0o077;
+#[cfg(unix)]
+const PERMISSION_BITS: u32 = 0o777;
 
 pub fn state_subdir() -> PathBuf {
     ref_proto::state_dir().join("web")
@@ -65,13 +70,13 @@ fn restrict_to_owner(path: &Path) -> anyhow::Result<()> {
         .with_context(|| format!("cannot stat {}", path.display()))?
         .permissions()
         .mode();
-    if mode & 0o077 == 0 {
+    if mode & GROUP_OTHER_BITS == 0 {
         return Ok(());
     }
     eprintln!(
         "ref-web: warning: {} was readable by other users (mode {:o}); changed to {PRIVATE_FILE_MODE:o}",
         path.display(),
-        mode & 0o777
+        mode & PERMISSION_BITS
     );
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(PRIVATE_FILE_MODE))
         .with_context(|| format!("cannot restrict {}", path.display()))
