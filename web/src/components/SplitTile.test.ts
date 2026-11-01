@@ -15,7 +15,13 @@ const PaneStub = {
 function mountTile(options: { focused: boolean; zoomed?: boolean }) {
   const session = { id: 's1', info: info({ id: 's1' }) } as unknown as ChatSession
   return mount(SplitTile, {
-    props: { session, focused: options.focused, zoomed: options.zoomed ?? false, hidden: false },
+    props: {
+      session,
+      focused: options.focused,
+      zoomed: options.zoomed ?? false,
+      hidden: false,
+      clearance: { left: 0, right: 0 },
+    },
     global: { plugins: [createPinia(), createAppI18n(['en'])], stubs: { SessionPane: PaneStub } },
   })
 }
