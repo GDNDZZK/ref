@@ -436,7 +436,11 @@ fn context_notice(hub: &Arc<Hub>, s: &Arc<Session>, prep: &Prep) {
         if !std::mem::take(&mut st.notice_pending) {
             return;
         }
-        if !prep.tools.iter().any(|e| e.def.name == "compact_context") {
+        if !prep
+            .tools
+            .iter()
+            .any(|e| e.def.name == toolset::COMPACT_CONTEXT)
+        {
             return;
         }
         let msg = user_message(
