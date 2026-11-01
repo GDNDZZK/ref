@@ -3,6 +3,7 @@
 use crate::util::lock;
 use ref_config::{Config, McpConfig};
 use ref_mcp::{McpClient, McpTool, ServerConfig, Transport};
+use ref_proto::{MCP_CONNECTED, MCP_CONNECTING, MCP_DISABLED, MCP_FAILED};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -136,7 +137,7 @@ impl McpManager {
         for (name, sc) in &cfg.mcp {
             let mut st = ref_proto::McpServerStatus {
                 name: name.clone(),
-                status: "disabled".into(),
+                status: MCP_DISABLED.into(),
                 error: None,
                 tools: Vec::new(),
             };
@@ -144,7 +145,7 @@ impl McpManager {
                 match servers.iter().find(|s| &s.name == name) {
                     Some(s) => match s.status() {
                         McpStatus::Connected => {
-                            st.status = "connected".into();
+                            st.status = MCP_CONNECTED.into();
                             let mut tools: Vec<String> = s
                                 .tools()
                                 .iter()
@@ -153,13 +154,13 @@ impl McpManager {
                             tools.sort();
                             st.tools = tools;
                         }
-                        McpStatus::Connecting => st.status = "connecting".into(),
+                        McpStatus::Connecting => st.status = MCP_CONNECTING.into(),
                         McpStatus::Failed(e) => {
-                            st.status = "failed".into();
+                            st.status = MCP_FAILED.into();
                             st.error = Some(e);
                         }
                     },
-                    None => st.status = "connecting".into(),
+                    None => st.status = MCP_CONNECTING.into(),
                 }
             }
             out.push(st);
@@ -173,8 +174,8 @@ impl McpManager {
             .into_iter()
             .map(|s| {
                 let text = match (s.status.as_str(), &s.error) {
-                    ("connected", _) => format!("connected ({} tools)", s.tools.len()),
-                    ("failed", Some(e)) => format!("failed: {e}"),
+                    (MCP_CONNECTED, _) => format!("{MCP_CONNECTED} ({} tools)", s.tools.len()),
+                    (MCP_FAILED, Some(e)) => format!("{MCP_FAILED}: {e}"),
                     (other, _) => other.to_string(),
                 };
                 (s.name, text)

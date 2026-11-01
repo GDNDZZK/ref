@@ -642,10 +642,16 @@ pub struct CommandInfo {
     pub source: String,
 }
 
+/// Values of [`McpServerStatus::status`].
+pub const MCP_CONNECTED: &str = "connected";
+pub const MCP_CONNECTING: &str = "connecting";
+pub const MCP_FAILED: &str = "failed";
+pub const MCP_DISABLED: &str = "disabled";
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct McpServerStatus {
     pub name: String,
-    /// "connected" | "connecting" | "failed" | "disabled"
+    /// One of `MCP_CONNECTED`, `MCP_CONNECTING`, `MCP_FAILED`, `MCP_DISABLED`.
     pub status: String,
     #[serde(default)]
     pub error: Option<String>,
