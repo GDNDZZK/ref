@@ -678,7 +678,7 @@ fn skills_paths() {
 #[test]
 #[ignore]
 fn real_config_sanity() {
-    let c = Config::load(Path::new("/home/zzk/app/ref"));
+    let c = Config::load(&std::env::current_dir().unwrap());
     for (id, p) in &c.providers {
         let img = p.models.values().filter(|m| m.images).count();
         let rsn = p.models.values().filter(|m| m.reasoning).count();
