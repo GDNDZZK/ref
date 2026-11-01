@@ -69,7 +69,7 @@ pub fn opt_bool(input: &Value, key: &str) -> Result<Option<bool>> {
             "false" | "no" | "0" | "" => Ok(Some(false)),
             _ => bail!("parameter `{key}` must be a boolean"),
         },
-        Some(Value::Number(n)) => Ok(Some(n.as_f64().unwrap_or(0.0) != 0.0)),
+        Some(Value::Number(n)) => Ok(Some(n.as_f64() != Some(0.0))),
         Some(_) => bail!("parameter `{key}` must be a boolean"),
     }
 }
