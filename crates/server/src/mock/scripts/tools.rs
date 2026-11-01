@@ -385,20 +385,7 @@ fn long(ctx: &Ctx) -> Round {
 mod tests {
     use super::*;
     use crate::mock::script::Step;
-
-    fn ctx(round: usize) -> Ctx {
-        Ctx {
-            prompt: String::new(),
-            args: String::new(),
-            root_prompt: String::new(),
-            peer_reports: 0,
-            typed: vec![],
-            round,
-            session_id: "ses_test".into(),
-            attempt: 1,
-            tool_results: vec![],
-        }
-    }
+    use crate::mock::scripts::tests::ctx;
 
     fn pauses(round: &Round) -> Vec<u64> {
         round
@@ -413,7 +400,7 @@ mod tests {
 
     #[test]
     fn longrun_prints_one_numbered_test_every_ten_seconds_for_200_seconds() {
-        let round = longrun(&ctx(0));
+        let round = longrun(&ctx("longrun", 0));
         let Some(Step::Tool(call)) = round.steps.last() else {
             panic!("a tool call last");
         };
@@ -424,7 +411,7 @@ mod tests {
         assert!(command.contains("sleep 10"));
         let timeout = call.input["timeout"].as_u64().unwrap();
         assert!(timeout > 200, "the command outlives its run: {timeout}");
-        assert_eq!(longrun(&ctx(1)).steps.len(), 1);
+        assert_eq!(longrun(&ctx("longrun", 1)).steps.len(), 1);
     }
 
     #[test]

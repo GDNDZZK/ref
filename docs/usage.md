@@ -152,19 +152,6 @@ Sessions can talk to each other. The model has tools for it (see [Tools](tools.m
 
 Agents with `can_spawn` (the `build` agent by default) can start background sessions, give them a task and close them. Watch them in split view.
 
-## Questions from the model
-
-When the model asks you something with the [`question` tool](tools.md#question), the TUI shows the question with its options, and the session shows "waiting for your answer" in every window until you answer. Background sessions ask too: they show up in the session list like a pending permission and send a notification.
-
-- `↑` `↓` (or `k` `j`) move; the option marked default is selected when the question appears.
-- `1` to `9` pick that row. In a multiple choice they toggle it.
-- `enter` accepts the selected option. In a multiple choice `enter` or `space` toggles it.
-- With several questions, `tab` and `←` `→` switch between them, and the last tab, "Confirm", lists the answers and sends them with `enter`.
-- The last row, "Type your own answer", opens a text field; `enter` sends it, `esc` leaves the field.
-- `esc` dismisses the question: the model is told and continues. Press `esc` again to interrupt the turn.
-
-Like the permission dialog, it ignores keys for a third of a second after it appears, so a key you were typing for the prompt does not answer it. The first answer from any window wins.
-
 ## Permissions and delays
 
 When a tool call needs permission, the TUI shows the call and asks:
@@ -177,7 +164,7 @@ When a tool has a delay, a countdown is shown before it runs, and `esc` cancels 
 
 ## Questions from the model
 
-The model can ask you to choose with the `question` tool. The TUI shows a dialog and the session waits for your answer; a session with an open question shows `? waiting for your answer` in the status line. Like a permission request, the dialog ignores `enter`, digits and `esc` for a moment after it opens, so a key you were typing does not answer it.
+The model can ask you to choose with the [`question` tool](tools.md#question). The TUI shows a dialog and the session waits for your answer; a session with an open question shows `? waiting for your answer` in the status line, in every window. Background sessions ask too: they show up in the session list like a pending permission and send a notification. Like a permission request, the dialog ignores `enter`, digits and `esc` for a moment after it opens, so a key you were typing does not answer it.
 
 For one single-choice question the dialog is a list:
 
@@ -199,3 +186,5 @@ With several questions or a multiple choice, a tab bar shows each question and a
 Options marked `(default)` are ticked at the start of a multiple choice. Tabs you have not answered are dimmed, and **Confirm** lists them as `(not answered)`; you can still send. A click on a row or a tab works like the keys.
 
 When a question allows it, the last row is **Type your own answer**. Choose it to type in the row; `enter` keeps the text (on a lone question it also sends the answer), an empty text cancels, and `esc` leaves the field without dismissing the dialog. On a multiple choice the typed text is added to the ticked options, and choosing the row again takes it back. If another client answers first, the dialog closes by itself.
+
+Run `ref`, the GUI and the web UI from the same version as `ref-server`. An older client cannot show a question, so the session waits until another window answers it or you stop the turn.

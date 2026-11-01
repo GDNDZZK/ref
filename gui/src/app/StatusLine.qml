@@ -1,12 +1,15 @@
 import QtQuick
 import RefGui
 
-// What the session is doing, how long this has gone on, and how full its context window is.
+// What the session is doing, how long this has gone on, how far its to-do list is, and how full its context window is.
 // Always there, empty when idle, so that the conversation above does not shift.
 Item {
 	id: line
 
 	required property ChatSession session
+
+	// The to-do popup was closed by Esc: the keyboard goes back to the pane.
+	signal todoDismissed()
 
 	readonly property int lineHeight: 28
 	readonly property int itemSpacing: 8
@@ -59,7 +62,7 @@ Item {
 	}
 
 	Row {
-		anchors { left: parent.left; right: context.left; rightMargin: line.itemSpacing; verticalCenter: parent.verticalCenter }
+		anchors { left: parent.left; right: trailing.left; rightMargin: line.itemSpacing; verticalCenter: parent.verticalCenter }
 		spacing: line.itemSpacing
 		clip: true
 
@@ -108,42 +111,57 @@ Item {
 		}
 	}
 
+	// The right end: the to-do list and the context meter, as in the terminal UI and the web.
 	Row {
-		id: context
+		id: trailing
 		anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-		spacing: line.itemSpacing
-		visible: line.contextMax > 0
+		spacing: line.itemSpacing * 2
 
-		Text {
-			textFormat: Text.PlainText
+		TodoProgress {
 			anchors.verticalCenter: parent.verticalCenter
-			text: Format.tokens(line.contextUsed) + " / " + Format.tokens(line.contextMax)
-			color: line.contextColor === Theme.accent ? Theme.textMuted : line.contextColor
-			font.pixelSize: Theme.smallFontSize
+			session: line.session
+			maxWidth: line.width / 2
+			bounds: line
+			onDismissed: line.todoDismissed()
 		}
-		Rectangle {
+
+		Row {
+			id: context
 			anchors.verticalCenter: parent.verticalCenter
-			width: line.barWidth
-			height: line.barHeight
-			radius: height / 2
-			color: Theme.border
+			spacing: line.itemSpacing
+			visible: line.contextMax > 0
 
-			Rectangle {
-				width: parent.width * line.contextRatio
-				height: parent.height
-				radius: parent.radius
-				color: line.contextColor
-
-				Behavior on width { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-				Behavior on color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+			Text {
+				textFormat: Text.PlainText
+				anchors.verticalCenter: parent.verticalCenter
+				text: Format.tokens(line.contextUsed) + " / " + Format.tokens(line.contextMax)
+				color: line.contextColor === Theme.accent ? Theme.textMuted : line.contextColor
+				font.pixelSize: Theme.smallFontSize
 			}
-		}
+			Rectangle {
+				anchors.verticalCenter: parent.verticalCenter
+				width: line.barWidth
+				height: line.barHeight
+				radius: height / 2
+				color: Theme.border
 
-		HoverHandler { id: contextHover }
-		PlainToolTip {
-			visible: contextHover.hovered
-			text: qsTr("Context: %1 of %2 tokens. Compaction is recommended at %3 and automatic at %4.")
-				.arg(line.contextUsed).arg(line.contextMax).arg(line.session.contextRecommend).arg(line.session.contextAuto)
+				Rectangle {
+					width: parent.width * line.contextRatio
+					height: parent.height
+					radius: parent.radius
+					color: line.contextColor
+
+					Behavior on width { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+					Behavior on color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+				}
+			}
+
+			HoverHandler { id: contextHover }
+			PlainToolTip {
+				visible: contextHover.hovered
+				text: qsTr("Context: %1 of %2 tokens. Compaction is recommended at %3 and automatic at %4.")
+					.arg(line.contextUsed).arg(line.contextMax).arg(line.session.contextRecommend).arg(line.session.contextAuto)
+			}
 		}
 	}
 }

@@ -515,6 +515,7 @@ void Workspace::dropChat(const QString& sessionId)
 	{
 		syncTiles();
 	}
+	emit sessionDropped(gone);
 	m_stage.deleteWhenLeft(gone); // its tile may still be fading out
 }
 

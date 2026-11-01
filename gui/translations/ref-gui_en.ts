@@ -5,6 +5,7 @@
     <name>BashBody</name>
     <message numerus="yes">
         <location filename="../src/app/BashBody.qml" line="36"/>
+        <location filename="../tests/tst_app_translator.cpp" line="42"/>
         <source>%n earlier line(s)</source>
         <translation>
             <numerusform>%n earlier line</numerusform>
@@ -16,6 +17,7 @@
     <name>FindBody</name>
     <message numerus="yes">
         <location filename="../src/app/FindBody.qml" line="64"/>
+        <location filename="../tests/tst_app_translator.cpp" line="41"/>
         <source>%n result(s)</source>
         <translation>
             <numerusform>%n result</numerusform>
@@ -27,6 +29,7 @@
     <name>GrepBody</name>
     <message numerus="yes">
         <location filename="../src/app/GrepBody.qml" line="63"/>
+        <location filename="../tests/tst_app_translator.cpp" line="15"/>
         <source>%n match(es) in %1</source>
         <translation>
             <numerusform>%n match in %1</numerusform>
@@ -35,6 +38,7 @@
     </message>
     <message numerus="yes">
         <location filename="../src/app/GrepBody.qml" line="63"/>
+        <location filename="../tests/tst_app_translator.cpp" line="16"/>
         <source>%n file(s)</source>
         <translation>
             <numerusform>%n file</numerusform>
@@ -46,6 +50,7 @@
     <name>LineView</name>
     <message numerus="yes">
         <location filename="../src/app/LineView.qml" line="138"/>
+        <location filename="../tests/tst_app_translator.cpp" line="21"/>
         <source>Show %n more line(s)</source>
         <translation>
             <numerusform>Show %n more line</numerusform>

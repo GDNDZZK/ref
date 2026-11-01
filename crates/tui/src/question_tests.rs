@@ -684,3 +684,100 @@ fn small_terminals_and_long_texts_do_not_break_the_layout() {
         render(&mut app, w, h);
     }
 }
+
+/// Drops the connection and brings it back; the attach answers with `pending`.
+fn reconnect(
+    app: &mut App,
+    rx: &mut UnboundedReceiver<ClientFrame>,
+    pending: Vec<QuestionRequest>,
+) {
+    app.on_net(NetEvent::Disconnected("connection closed".into()));
+    reconnect_after_drop(app, rx, pending);
+}
+
+/// The connection is already down: connect again and attach.
+fn reconnect_after_drop(
+    app: &mut App,
+    rx: &mut UnboundedReceiver<ClientFrame>,
+    pending: Vec<QuestionRequest>,
+) {
+    app.on_net(NetEvent::Connected);
+    let attach = sent(rx)
+        .into_iter()
+        .find(|f| matches!(f.req, Request::Attach { .. }))
+        .expect("the session is attached again");
+    let snapshot = SessionSnapshot {
+        info: app.views[SESSION].info.clone(),
+        messages: vec![],
+        more_before: false,
+        pending_permissions: vec![],
+        pending_questions: pending,
+        queued: vec![],
+    };
+    app.on_net(NetEvent::Frame(ServerFrame::Response {
+        id: attach.id.unwrap(),
+        ok: true,
+        result: serde_json::json!({ "snapshot": snapshot }),
+        error: None,
+    }));
+}
+
+#[test]
+fn a_reply_lost_with_the_connection_can_be_sent_again() {
+    let (mut app, mut rx) = open(vec![first_file()]);
+    press(&mut app, KeyCode::Enter);
+    reply(&mut rx);
+    assert!(screen(&mut app).contains("sending…"));
+    app.on_net(NetEvent::Disconnected("connection closed".into()));
+    let s = screen(&mut app);
+    assert!(
+        !s.contains("sending…"),
+        "nothing is in flight any more: {s}"
+    );
+    reconnect_after_drop(&mut app, &mut rx, vec![request(vec![first_file()])]);
+    let s = screen(&mut app);
+    assert!(s.contains("? First file"), "the same question is back: {s}");
+    assert!(s.contains("enter submit  esc dismiss"), "{s}");
+    press(&mut app, KeyCode::Enter);
+    let (id, answers) = reply(&mut rx);
+    assert_eq!(answers, self::answers(&[&["src/parser.rs"]]));
+    respond(&mut app, id, None);
+    assert!(app.active_question().is_none());
+
+    // Esc works as well.
+    let (mut app, mut rx) = open(vec![first_file()]);
+    press(&mut app, KeyCode::Enter);
+    reply(&mut rx);
+    reconnect(&mut app, &mut rx, vec![request(vec![first_file()])]);
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(reply(&mut rx).1, None);
+}
+
+#[test]
+fn a_question_answered_before_the_connection_dropped_is_gone_after_the_snapshot() {
+    let (mut app, mut rx) = open(vec![first_file()]);
+    press(&mut app, KeyCode::Enter);
+    reply(&mut rx);
+    reconnect(&mut app, &mut rx, vec![]);
+    screen(&mut app);
+    assert!(app.active_question().is_none());
+    assert!(app.question.is_none());
+}
+
+#[test]
+fn a_dialog_that_was_not_sending_keeps_its_answers_over_a_reconnect() {
+    let (mut app, mut rx) = open(vec![loop_bound(), checks()]);
+    press(&mut app, KeyCode::Char('2'));
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Enter);
+    reconnect(
+        &mut app,
+        &mut rx,
+        vec![request(vec![loop_bound(), checks()])],
+    );
+    let s = screen(&mut app);
+    assert!(s.contains("› [ ] Clippy"), "the cursor and ticks stay: {s}");
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(reply(&mut rx).1, answers(&[&["Iterator"], &["Unit tests"]]));
+}

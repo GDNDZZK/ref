@@ -85,8 +85,20 @@ The page is the same interface as the [desktop GUI](gui.md). This section lists 
 - Output of bash, read and grep shows 200 lines at most, with *Show N more lines*. A bash call that is still running shows its last 20 lines. Wide cards (560 px and more) also show the time a call took.
 - Under a message: who wrote it, the time and the tokens; *Copy* (the message text) and, on your own messages, *Undo*. Alt+Y copies the last reply, Alt+U undoes the last prompt and puts it back in the input box.
 - When you scroll near the top (about 400 px), older messages load by themselves without moving the view; *Load older messages* does the same on a click.
-- Permission keys: with a request waiting on the focused session (in the split view, on any tile), a or Enter allows once, s allows for the session, d or Esc denies. The keys wait 350 ms after a request appears. After that, other letter keys are not typed into the input box until the request is answered. Open dialogs keep their keys.
+- While the session has a to-do list, its status line (also in every split tile) shows the item being worked on, else the first pending one, and *done/total*, as the terminal UI does; cancelled items count in neither number. When everything is done it shows a tick and *done/total* in green. A click on it opens the whole list in a popover (Esc, a click elsewhere or another session closes it); the list updates while it is open.
+- Permission keys: with a request waiting on the focused session (in the split view, on the focused or zoomed tile only), a or Enter allows once, s allows for the session, d or Esc denies. The keys wait 350 ms after a request appears, and again when the focus moves to a tile that has one. After that, other letter keys are not typed into the input box until the request is answered. Open dialogs keep their keys. A request in another tile is answered with the buttons of its card, or after you focus that tile.
 - Images are shown as thumbnails; a click opens the picture large, Esc closes it. Links open only for http, https and mailto; images in the model's Markdown are shown as links and HTML as text, so a conversation causes no requests by itself.
+
+**Questions from the model**
+
+When the model calls the `question` tool, the questions appear inside the card of that call, which opens for them. The card, the session's row in the sidebar and the status line say *Waiting for your answer* until you answer, and the session's tile header is highlighted as it is for a permission request.
+
+- Each question has a short heading, the question and its options, each with a label and a description. The option the model recommends is preselected and marked *(default)*. A question with one choice and no other question answers at once: a click, a number key 1 to 9, or Enter on the highlighted row (the cursor starts on the default).
+- With several questions, or a question that allows more than one choice, there is a tab per question and a last tab, *Confirm*. Picking in a single choice moves on to the next tab; a multiple choice has checkboxes, with the recommended options checked, and → or Tab goes on to the next tab. *Confirm* lists the answers and marks a question you left alone as *Unanswered*. *Submit* or Enter sends them; an unanswered question is sent as unanswered.
+- When the model allows it, the last row is *Type your own answer*. Choosing it opens a text field: Enter accepts the text (an empty text does not count), Esc leaves the field. In a multiple choice the text is added to the checked options.
+- *Dismiss* or Esc dismisses the questions; the model is told that you did not answer.
+- Keys, as in the terminal UI and the GUI: ↑ and ↓ or k and j move the cursor (it stops at the first and last row), 1 to 9, Space or Enter pick the row, or flip its checkbox in a multiple choice, ← and →, Tab and Shift+Tab change the tab (when there are tabs), Enter on the *Confirm* tab submits, Esc dismisses. The keys follow the rules of the permission keys: they wait 350 ms, other letters are not typed into the input box while a question waits, the text field keeps its own keys, and in the split view they act only on the focused or zoomed tile. A question in another tile is answered with the buttons and rows of its card, or after you focus that tile.
+- When the question was answered in another window first, its card goes away without a message. An answer the backend refuses shows its message in the top right corner and the card stays.
 
 **The input box**
 
@@ -135,11 +147,11 @@ The shortcuts are Alt+letter, matched by the physical key, so they work with any
 
 ## Notifications
 
-The page can show a system notification when a session you are not looking at needs a tool permission, finishes a turn, or ends a turn with an error. The session on screen never notifies. A click on the notification opens the session. The text is *Waiting for permission to use {tool}*, *Finished* or *Stopped with an error: {error}*.
+The page can show a system notification when a session you are not looking at needs a tool permission, asks a question, finishes a turn, or ends a turn with an error. The session on screen never notifies. A click on the notification opens the session. The text is *Waiting for permission to use {tool}*, *Asks: {question}* (the first question), *Finished* or *Stopped with an error: {error}*.
 
 - The browser has to allow it. A bar at the top of the page asks once (*Allow* or *Not now*; the answer to *Not now* is remembered in `localStorage`), and the settings have the same button.
 - Browsers show notifications only on `localhost`, `127.0.0.1` and `https` pages. On a plain `http` address on the network, and when the browser blocks notifications, only the tab title and the tab icon show that something needs attention.
-- The settings have a master switch and three kinds: a tool needs permission, a turn finished, a turn ended with an error. They are all on by default.
+- The settings have a master switch and three kinds: a session waits for you (permission or question), a turn finished, a turn ended with an error. They are all on by default.
 
 ## Settings
 
