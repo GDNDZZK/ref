@@ -304,6 +304,12 @@ impl Hub {
 
     /// Route a session event to subscribed connections. Call while holding the session lock
     /// so that snapshots taken in `Attach` are consistent with the event stream.
+    /// Emits `message` as a `SessionEvent::Message` of the session.
+    pub fn emit_message(&self, session_id: &str, message: &Message) {
+        let message = message.clone();
+        self.emit(session_id, SessionEvent::Message { message });
+    }
+
     pub fn emit(&self, sid: &str, mut event: SessionEvent) {
         // Frontends get image stubs (see `ImageData`).
         match &mut event {
