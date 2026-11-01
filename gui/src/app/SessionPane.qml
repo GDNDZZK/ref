@@ -48,6 +48,11 @@ Item {
 	}
 	onSessionChanged: armKeys()
 
+	// The rows are deleted inside the destructor of the ChatView, when its QML part is already gone, and the rows'
+	// bindings that read the view then run against a half-destroyed object (TypeErrors). Dropping the rows first, while
+	// the view is whole, ends them in the normal way.
+	Component.onDestruction: chat.model = null
+
 	ChatView {
 		id: chat
 		anchors { left: parent.left; right: parent.right; top: parent.top; bottom: questionCard.top }
