@@ -59,7 +59,6 @@ Block {
 					Pulse {
 						target: title
 						running: block.streaming
-						dimmed: 0.5
 						period: Motion.calmPulse
 					}
 				}

@@ -10,7 +10,7 @@ Item {
 
 	required property Item target
 	property bool running: false
-	property real dimmed: 0.5
+	readonly property real dimmed: 0.5 // the lowest opacity of the pulse
 	property int period: Motion.pulse // ms for one dim-and-back cycle
 
 	SequentialAnimation {

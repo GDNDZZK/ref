@@ -82,7 +82,7 @@ Item {
 			radius: width / 2
 			color: Theme.accent
 
-			Pulse { target: dot; running: line.working; dimmed: 0.5 }
+			Pulse { target: dot; running: line.working }
 		}
 		Icon {
 			anchors.verticalCenter: parent.verticalCenter

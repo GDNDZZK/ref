@@ -50,7 +50,7 @@ Item {
 					color: Theme.accent
 					visible: pill.loading
 
-					Pulse { target: dot; running: pill.loading; dimmed: 0.5 }
+					Pulse { target: dot; running: pill.loading }
 				}
 				Icon {
 					name: "history"

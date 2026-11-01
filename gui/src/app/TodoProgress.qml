@@ -58,7 +58,7 @@ Item {
 			border.color: root.working ? Theme.accent : Theme.textMuted
 			border.width: root.working ? 0 : 1
 
-			Pulse { target: marker; running: root.working && root.visible; dimmed: 0.5 }
+			Pulse { target: marker; running: root.working && root.visible }
 		}
 		Text {
 			id: current

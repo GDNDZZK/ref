@@ -76,7 +76,6 @@ Column {
 				Pulse {
 					target: workingDot
 					running: row.active
-					dimmed: 0.5
 				}
 				Rectangle {
 					anchors.fill: parent
