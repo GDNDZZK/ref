@@ -11,6 +11,23 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub const INLINE_OUTPUT_MAX_BYTES: usize = 50 * 1024;
 pub const INLINE_OUTPUT_MAX_LINES: usize = 2000;
 
+pub const KIB: u64 = 1024;
+pub const MIB: u64 = 1024 * KIB;
+
+/// Bytes inspected for a NUL when guessing whether a file is binary.
+const BINARY_SNIFF_BYTES: usize = 8192;
+const SPILL_ID_SEED: u32 = 0;
+
+// Magic bytes of the supported image formats.
+const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+const JPEG_SIGNATURE: &[u8] = &[0xFF, 0xD8, 0xFF];
+const GIF87A_SIGNATURE: &[u8] = b"GIF87a";
+const GIF89A_SIGNATURE: &[u8] = b"GIF89a";
+/// WebP is a RIFF container: `RIFF`, 4 size bytes, then `WEBP`.
+const RIFF_TAG: &[u8] = b"RIFF";
+const WEBP_TAG: &[u8] = b"WEBP";
+const RIFF_HEADER_LEN: usize = 12;
+
 // ---------------------------------------------------------------------------
 // Arguments
 // ---------------------------------------------------------------------------
@@ -280,9 +297,9 @@ pub fn ceil_char_boundary(s: &str, mut i: usize) -> usize {
     i
 }
 
-/// Binary sniff: NUL in the first 8 KiB.
+/// Binary sniff: NUL in the first [`BINARY_SNIFF_BYTES`].
 pub fn looks_binary(bytes: &[u8]) -> bool {
-    bytes[..bytes.len().min(8192)].contains(&0)
+    bytes[..bytes.len().min(BINARY_SNIFF_BYTES)].contains(&0)
 }
 
 static ANSI_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -298,12 +315,12 @@ pub fn strip_ansi(s: &str) -> String {
 }
 
 pub fn human_bytes(n: u64) -> String {
-    if n < 1024 {
+    if n < KIB {
         format!("{n} B")
-    } else if n < 1024 * 1024 {
-        format!("{:.1} KB", n as f64 / 1024.0)
+    } else if n < MIB {
+        format!("{:.1} KB", n as f64 / KIB as f64)
     } else {
-        format!("{:.1} MB", n as f64 / (1024.0 * 1024.0))
+        format!("{:.1} MB", n as f64 / MIB as f64)
     }
 }
 
@@ -361,26 +378,27 @@ pub fn spill_path(ext: &str) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let id = xxhash_rust::xxh32::xxh32(format!("{nanos}-{n}-{}", std::process::id()).as_bytes(), 0);
-    std::env::temp_dir().join("ref-tool-output").join(format!(
-        "{:08x}{:x}.{ext}",
-        id,
-        nanos as u64 & 0xffff_ffff
-    ))
+    let seed = format!("{nanos}-{n}-{}", std::process::id());
+    let id = xxhash_rust::xxh32::xxh32(seed.as_bytes(), SPILL_ID_SEED);
+    // The low 32 bits of the timestamp keep names unique across runs.
+    std::env::temp_dir()
+        .join("ref-tool-output")
+        .join(format!("{:08x}{:x}.{ext}", id, nanos as u32))
 }
 
 /// Detects supported raster images by magic bytes.
 pub fn image_mime(bytes: &[u8]) -> Option<&'static str> {
-    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+    if bytes.starts_with(PNG_SIGNATURE) {
         return Some("image/png");
     }
-    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+    if bytes.starts_with(JPEG_SIGNATURE) {
         return Some("image/jpeg");
     }
-    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+    if bytes.starts_with(GIF87A_SIGNATURE) || bytes.starts_with(GIF89A_SIGNATURE) {
         return Some("image/gif");
     }
-    if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+    let is_riff = bytes.len() >= RIFF_HEADER_LEN && bytes.starts_with(RIFF_TAG);
+    if is_riff && &bytes[8..RIFF_HEADER_LEN] == WEBP_TAG {
         return Some("image/webp");
     }
     None
