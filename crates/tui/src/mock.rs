@@ -1296,9 +1296,9 @@ impl Mock {
             }
             Request::PeerCommand { command, .. } => {
                 let text = match command.as_str() {
-                    "peers" => "You are \"mock\" (ses_mock).\nOther live sessions (1):\n  [idle] worker · \"demo\" · general · background · /tmp · started 2m ago".to_string(),
-                    "peers-inbox" => "Inbox is empty: no messages from other sessions.".to_string(),
-                    "peers-outbox" => "Outbox is empty: this session has not sent any messages.".to_string(),
+                    crate::app::cmd::PEERS => "You are \"mock\" (ses_mock).\nOther live sessions (1):\n  [idle] worker · \"demo\" · general · background · /tmp · started 2m ago".to_string(),
+                    crate::app::cmd::PEERS_INBOX => "Inbox is empty: no messages from other sessions.".to_string(),
+                    crate::app::cmd::PEERS_OUTBOX => "Outbox is empty: this session has not sent any messages.".to_string(),
                     _ => "Current name: \"mock\"".to_string(),
                 };
                 self.ok(id, json!({ "text": text }));

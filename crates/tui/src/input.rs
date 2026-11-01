@@ -7,7 +7,7 @@ use crossterm::event::{
 };
 use ratatui::layout::{Position, Rect};
 
-use crate::app::{AcKind, App, Mode};
+use crate::app::{AcKind, App, COMMANDS, Mode, cmd};
 use crate::render;
 use crate::ui::dialog::{Dialog, Kind};
 use crate::ui::editor::Editor;
@@ -152,6 +152,9 @@ fn scroll_perm(app: &mut App, d: i32) {
     }
 }
 
+/// Prefix of the leader key bindings in `COMMANDS` (`ctrl+x n`, ...).
+const LEADER_PREFIX: &str = "ctrl+x ";
+
 fn exit_or_arm(app: &mut App) {
     if app
         .ctrlc_armed
@@ -164,6 +167,15 @@ fn exit_or_arm(app: &mut App) {
     }
 }
 
+/// The command bound to `ctrl+x <c>` in the `COMMANDS` table (`?` also opens help).
+fn leader_command(c: char) -> Option<&'static str> {
+    if c == '?' {
+        return Some(cmd::HELP);
+    }
+    let key = format!("{LEADER_PREFIX}{c}");
+    COMMANDS.iter().find(|x| x.key == key).map(|x| x.name)
+}
+
 fn leader(app: &mut App, k: KeyEvent) {
     let KeyCode::Char(c) = k.code else {
         return;
@@ -172,23 +184,8 @@ fn leader(app: &mut App, k: KeyEvent) {
         app.close_key();
         return;
     }
-    let cmd = match c.to_ascii_lowercase() {
-        'n' => "new",
-        'l' => "sessions",
-        'm' => "models",
-        'a' => "agents",
-        't' => "thinking",
-        'd' => "details",
-        'c' => "compact",
-        'u' => "undo",
-        'e' => "editor",
-        'x' => "export",
-        'y' => "copy",
-        'w' => "watch",
-        'b' => "sidebar",
-        'h' | '?' => "help",
-        'q' => "exit",
-        _ => return,
+    let Some(cmd) = leader_command(c.to_ascii_lowercase()) else {
+        return;
     };
     app.run_command(cmd, "");
 }
@@ -871,11 +868,11 @@ fn watch_key(app: &mut App, k: KeyEvent) {
                 if let Some(c) = crate::app::find_cmd(name) {
                     let args = args.to_string();
                     match c.name {
-                        "close" => {
+                        cmd::CLOSE => {
                             ed.clear();
                             app.close_session(&f);
                         }
-                        "cd" => {
+                        cmd::CD => {
                             ed.clear();
                             app.change_dir(&f, &args);
                         }

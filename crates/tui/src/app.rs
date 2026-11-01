@@ -153,177 +153,206 @@ pub struct Cmd {
     pub args: bool,
 }
 
+/// Slash-command names, shared by the `COMMANDS` table and everything that dispatches on them.
+pub mod cmd {
+    pub const NEW: &str = "new";
+    pub const SESSIONS: &str = "sessions";
+    pub const MODELS: &str = "models";
+    pub const AGENTS: &str = "agents";
+    pub const VARIANT: &str = "variant";
+    pub const COMPACT: &str = "compact";
+    pub const UNDO: &str = "undo";
+    pub const RENAME: &str = "rename";
+    pub const CD: &str = "cd";
+    pub const CLOSE: &str = "close";
+    pub const CLOSE_SESSION: &str = "close-session";
+    pub const PEERS: &str = "peers";
+    pub const PEERS_NAME: &str = "peers-name";
+    pub const PEERS_INBOX: &str = "peers-inbox";
+    pub const PEERS_OUTBOX: &str = "peers-outbox";
+    pub const EXPORT: &str = "export";
+    pub const COPY: &str = "copy";
+    pub const THINKING: &str = "thinking";
+    pub const DETAILS: &str = "details";
+    pub const WATCH: &str = "watch";
+    pub const SIDEBAR: &str = "sidebar";
+    pub const MCP: &str = "mcp";
+    pub const EDITOR: &str = "editor";
+    pub const HELP: &str = "help";
+    pub const EXIT: &str = "exit";
+}
+
 pub const COMMANDS: &[Cmd] = &[
     Cmd {
-        name: "new",
+        name: cmd::NEW,
         aliases: &["clear"],
         desc: "New session",
         key: "ctrl+x n",
         args: false,
     },
     Cmd {
-        name: "sessions",
+        name: cmd::SESSIONS,
         aliases: &["resume", "continue"],
         desc: "Switch session (live + history)",
         key: "ctrl+x l",
         args: false,
     },
     Cmd {
-        name: "models",
+        name: cmd::MODELS,
         aliases: &[],
         desc: "Switch model (this session only)",
         key: "ctrl+x m",
         args: false,
     },
     Cmd {
-        name: "agents",
+        name: cmd::AGENTS,
         aliases: &[],
         desc: "Switch agent",
         key: "ctrl+x a",
         args: false,
     },
     Cmd {
-        name: "variant",
+        name: cmd::VARIANT,
         aliases: &["variants", "effort"],
         desc: "Set or cycle model variant",
         key: "ctrl+t",
         args: true,
     },
     Cmd {
-        name: "compact",
+        name: cmd::COMPACT,
         aliases: &["summarize"],
         desc: "Compact the conversation",
         key: "ctrl+x c",
         args: false,
     },
     Cmd {
-        name: "undo",
+        name: cmd::UNDO,
         aliases: &[],
         desc: "Undo last prompt",
         key: "ctrl+x u",
         args: false,
     },
     Cmd {
-        name: "rename",
+        name: cmd::RENAME,
         aliases: &[],
         desc: "Rename the session",
         key: "",
         args: true,
     },
     Cmd {
-        name: "cd",
+        name: cmd::CD,
         aliases: &["cwd"],
         desc: "Change this session's working directory",
         key: "",
         args: true,
     },
     Cmd {
-        name: "close",
+        name: cmd::CLOSE,
         aliases: &[],
         desc: "Close this session (go to the next live one, or exit)",
         key: "ctrl+x k",
         args: false,
     },
     Cmd {
-        name: "close-session",
+        name: cmd::CLOSE_SESSION,
         aliases: &["kill"],
         desc: "Close live sessions (picker, or by name / id)",
         key: "",
         args: true,
     },
     Cmd {
-        name: "peers",
+        name: cmd::PEERS,
         aliases: &["list-agents"],
         desc: "List other live sessions you can message",
         key: "",
         args: false,
     },
     Cmd {
-        name: "peers-name",
+        name: cmd::PEERS_NAME,
         aliases: &[],
         desc: "Show or set this session's peer name",
         key: "",
         args: true,
     },
     Cmd {
-        name: "peers-inbox",
+        name: cmd::PEERS_INBOX,
         aliases: &[],
         desc: "Messages received from other sessions",
         key: "",
         args: false,
     },
     Cmd {
-        name: "peers-outbox",
+        name: cmd::PEERS_OUTBOX,
         aliases: &[],
         desc: "Messages sent to other sessions and their status",
         key: "",
         args: false,
     },
     Cmd {
-        name: "export",
+        name: cmd::EXPORT,
         aliases: &[],
         desc: "Export transcript as markdown",
         key: "ctrl+x x",
         args: true,
     },
     Cmd {
-        name: "copy",
+        name: cmd::COPY,
         aliases: &[],
         desc: "Copy last assistant message (raw)",
         key: "ctrl+x y",
         args: false,
     },
     Cmd {
-        name: "thinking",
+        name: cmd::THINKING,
         aliases: &[],
         desc: "Toggle expanded thinking",
         key: "ctrl+x t",
         args: false,
     },
     Cmd {
-        name: "details",
+        name: cmd::DETAILS,
         aliases: &[],
         desc: "Toggle expanded tool details",
         key: "ctrl+x d",
         args: false,
     },
     Cmd {
-        name: "watch",
+        name: cmd::WATCH,
         aliases: &["split"],
         desc: "Split view of background sessions",
         key: "ctrl+x w",
         args: false,
     },
     Cmd {
-        name: "sidebar",
+        name: cmd::SIDEBAR,
         aliases: &[],
         desc: "Toggle sidebar",
         key: "ctrl+x b",
         args: false,
     },
     Cmd {
-        name: "mcp",
+        name: cmd::MCP,
         aliases: &["mcps"],
         desc: "MCP servers: status, errors and tools",
         key: "",
         args: false,
     },
     Cmd {
-        name: "editor",
+        name: cmd::EDITOR,
         aliases: &[],
         desc: "Compose prompt in $EDITOR",
         key: "ctrl+x e",
         args: false,
     },
     Cmd {
-        name: "help",
+        name: cmd::HELP,
         aliases: &[],
         desc: "Keybindings and commands",
         key: "ctrl+x h",
         args: false,
     },
     Cmd {
-        name: "exit",
+        name: cmd::EXIT,
         aliases: &["quit", "q"],
         desc: "Exit",
         key: "ctrl+x q",
@@ -2066,7 +2095,7 @@ impl App {
                 if let Some(name) = key.strip_prefix("srv:") {
                     self.editor.set_text(&format!("/{name} "));
                 } else if let Some(c) = find_cmd(&key) {
-                    if c.args && matches!(c.name, "rename" | "peers-name") {
+                    if c.args && matches!(c.name, cmd::RENAME | cmd::PEERS_NAME) {
                         self.editor.set_text(&format!("/{} ", c.name));
                     } else {
                         self.run_command(c.name, "");
@@ -2361,7 +2390,7 @@ impl App {
         };
         if self.mode == Mode::Chat && self.views.get(&sid).is_some_and(|v| v.closed) {
             // Already gone on the server: just move on to a fresh session.
-            self.run_command("close", "");
+            self.run_command(cmd::CLOSE, "");
             return;
         }
         if self.close_is_armed(&sid) {
@@ -2508,19 +2537,20 @@ impl App {
     pub fn run_command(&mut self, name: &str, args: &str) {
         let args = args.trim();
         // Commands needing backend data run once it has arrived (startup race).
-        let needs_config = matches!(name, "models" | "agents" | "variant");
+        let needs_config = matches!(name, cmd::MODELS | cmd::AGENTS | cmd::VARIANT);
         let needs_session = matches!(
             name,
-            "cd" | "variant"
-                | "compact"
-                | "undo"
-                | "rename"
-                | "export"
-                | "copy"
-                | "peers"
-                | "peers-name"
-                | "peers-inbox"
-                | "peers-outbox"
+            cmd::CD
+                | cmd::VARIANT
+                | cmd::COMPACT
+                | cmd::UNDO
+                | cmd::RENAME
+                | cmd::EXPORT
+                | cmd::COPY
+                | cmd::PEERS
+                | cmd::PEERS_NAME
+                | cmd::PEERS_INBOX
+                | cmd::PEERS_OUTBOX
         );
         if (needs_config && self.config.is_none())
             || (needs_session && self.cur().is_none_or(|v| !v.loaded))
@@ -2534,13 +2564,13 @@ impl App {
         }
         let cur = self.current.clone();
         match name {
-            "new" => {
+            cmd::NEW => {
                 self.create_session(None);
             }
-            "sessions" => self.open_sessions(),
-            "models" => self.open_models(),
-            "agents" => self.open_agents(),
-            "variant" => {
+            cmd::SESSIONS => self.open_sessions(),
+            cmd::MODELS => self.open_models(),
+            cmd::AGENTS => self.open_agents(),
+            cmd::VARIANT => {
                 if args.is_empty() {
                     self.open_variants();
                 } else if let Some(sid) = cur {
@@ -2555,7 +2585,7 @@ impl App {
                     );
                 }
             }
-            "compact" => {
+            cmd::COMPACT => {
                 if let Some(sid) = cur {
                     self.req(
                         Request::Compact { session_id: sid },
@@ -2563,7 +2593,7 @@ impl App {
                     );
                 }
             }
-            "undo" => {
+            cmd::UNDO => {
                 if let Some(sid) = cur {
                     let p = Pending::Undo {
                         sid: sid.clone(),
@@ -2578,9 +2608,9 @@ impl App {
                     );
                 }
             }
-            "rename" => {
+            cmd::RENAME => {
                 if args.is_empty() {
-                    self.editor.set_text("/rename ");
+                    self.editor.set_text(&format!("/{} ", cmd::RENAME));
                 } else if let Some(sid) = cur {
                     self.req(
                         Request::Rename {
@@ -2593,12 +2623,12 @@ impl App {
                     );
                 }
             }
-            "peers" | "peers-name" | "peers-inbox" | "peers-outbox" => {
+            cmd::PEERS | cmd::PEERS_NAME | cmd::PEERS_INBOX | cmd::PEERS_OUTBOX => {
                 if let Some(sid) = cur {
                     let title = match name {
-                        "peers" => "Peers",
-                        "peers-name" => "Peer name",
-                        "peers-inbox" => "Peer inbox",
+                        cmd::PEERS => "Peers",
+                        cmd::PEERS_NAME => "Peer name",
+                        cmd::PEERS_INBOX => "Peer inbox",
                         _ => "Peer outbox",
                     };
                     self.req(
@@ -2613,7 +2643,7 @@ impl App {
                     );
                 }
             }
-            "close" => match cur {
+            cmd::CLOSE => match cur {
                 Some(sid) if self.views.get(&sid).is_some_and(|v| !v.closed) => {
                     self.close_session(&sid)
                 }
@@ -2621,12 +2651,12 @@ impl App {
                 Some(sid) => self.leave_closed_session(&sid, false),
                 None => self.quit = true,
             },
-            "cd" => {
+            cmd::CD => {
                 if let Some(sid) = cur {
                     self.change_dir(&sid, args);
                 }
             }
-            "close-session" => {
+            cmd::CLOSE_SESSION => {
                 if args.is_empty() {
                     self.open_close_picker();
                 } else {
@@ -2639,7 +2669,7 @@ impl App {
                     }
                 }
             }
-            "export" => {
+            cmd::EXPORT => {
                 if let Some(sid) = cur {
                     let p = if args.is_empty() {
                         format!("ref-session-{sid}.md")
@@ -2663,7 +2693,7 @@ impl App {
                     );
                 }
             }
-            "copy" => {
+            cmd::COPY => {
                 let raw = self.cur().and_then(|v| {
                     v.messages
                         .iter()
@@ -2676,19 +2706,19 @@ impl App {
                     None => self.toasts.warn("No assistant message yet"),
                 }
             }
-            "thinking" => self.toggle_thinking(),
-            "details" => self.toggle_details(),
-            "watch" => self.toggle_watch(),
-            "sidebar" => {
+            cmd::THINKING => self.toggle_thinking(),
+            cmd::DETAILS => self.toggle_details(),
+            cmd::WATCH => self.toggle_watch(),
+            cmd::SIDEBAR => {
                 self.sidebar = !self.sidebar;
                 if self.sidebar {
                     self.refresh_mcp();
                 }
             }
-            "editor" => self.run_editor = true,
-            "help" => self.open_help(),
-            "mcp" => self.open_mcp(None),
-            "exit" => self.quit = true,
+            cmd::EDITOR => self.run_editor = true,
+            cmd::HELP => self.open_help(),
+            cmd::MCP => self.open_mcp(None),
+            cmd::EXIT => self.quit = true,
             _ => {}
         }
     }
