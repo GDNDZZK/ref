@@ -290,7 +290,11 @@ impl OutputReader {
                 let mut buf = vec![0u8; READ_BUF_BYTES];
                 loop {
                     match r.read(&mut buf) {
-                        Ok(0) | Err(_) => break,
+                        Ok(0) => break,
+                        Err(e) => {
+                            tracing::warn!("bash: reading command output failed: {e}");
+                            break;
+                        }
                         Ok(n) => {
                             if tx.blocking_send(buf[..n].to_vec()).is_err() {
                                 break;
@@ -471,8 +475,12 @@ fn handle_read(
     eof: &mut bool,
 ) {
     match r {
-        Ok(0) | Err(_) => *eof = true,
+        Ok(0) => *eof = true,
         Ok(n) => col.push(&asm.push(&buf[..n])),
+        Err(e) => {
+            tracing::warn!("bash: reading command output failed: {e}");
+            *eof = true;
+        }
     }
 }
 
