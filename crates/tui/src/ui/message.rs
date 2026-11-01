@@ -15,7 +15,7 @@ use super::{Hit, Row, markdown, theme};
 use crate::util::ABORTED_ERROR;
 
 /// Max output lines shown in an expanded tool block before "show all".
-pub const OUTPUT_PREVIEW_LINES: usize = 200;
+const OUTPUT_PREVIEW_LINES: usize = 200;
 
 pub struct Ctx<'a> {
     pub agents: &'a [AgentInfo],
@@ -44,16 +44,33 @@ impl Ctx<'_> {
     fn expanded(&self, idx: usize, default: bool) -> bool {
         default ^ self.toggled.is_some_and(|t| t.contains(&idx))
     }
-    fn all(&self, idx: usize) -> bool {
+    fn shows_full_output(&self, idx: usize) -> bool {
         self.show_all.is_some_and(|t| t.contains(&idx))
     }
 }
+
+/// Ticks of a shimmer sweep spent off the label, and where the sweep starts relative to it.
+const SHIMMER_PAD: i64 = 8;
+const SHIMMER_LEAD_IN: i64 = 4;
+/// Distance in characters over which the highlight fades out.
+const SHIMMER_RADIUS: f32 = 3.0;
+/// Rows are never laid out narrower than this.
+const MIN_RENDER_WIDTH: usize = 20;
+
+/// Columns a user message needs besides its text: bar, two spaces and a margin.
+const USER_BOX_CHROME: usize = 5;
+/// Columns left of the text in a user bubble: bar and two spaces.
+const BUBBLE_INSET: usize = 3;
+/// Longest image name shown in a badge.
+const IMAGE_NAME_MAX: usize = 30;
+/// Most lines of a user message shown in a split tile.
+const COMPACT_USER_LINES: usize = 6;
 
 /// Left padding of assistant content.
 const PAD: usize = 2;
 
 pub fn render(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
-    let w = w.max(20);
+    let w = w.max(MIN_RENDER_WIDTH);
     let mut rows = match m.role {
         Role::User => render_user(m, cx, w),
         Role::Assistant => render_assistant(m, cx, w),
@@ -65,10 +82,10 @@ pub fn render(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
 }
 
 /// How much text before the last compaction is faded towards the background.
-pub const STALE_DIM: f32 = 0.3;
+const STALE_DIM: f32 = 0.3;
 
 /// Fades foreground colours (backgrounds and click zones are kept).
-pub fn dim_rows(rows: &mut [Row]) {
+fn dim_rows(rows: &mut [Row]) {
     let dark = Color::Rgb(0, 0, 0);
     for r in rows {
         for s in &mut r.line.spans {
@@ -82,14 +99,15 @@ pub fn dim_rows(rows: &mut [Row]) {
 }
 
 /// Text of the hint under the divider where the model's context starts.
-pub const CONTEXT_HINT: &str = "messages above stay visible but are no longer sent to the model";
+pub(crate) const CONTEXT_HINT: &str =
+    "messages above stay visible but are no longer sent to the model";
 
 /// Full-width `──── ◇ Context compacted · 14:02:11 · click to view summary ──── ⧉ copy` row.
 fn compaction_divider(m: &Message, exp: bool, w: usize) -> Row {
-    let total = w.saturating_sub(1).max(20);
+    let total = w.saturating_sub(1).max(MIN_RENDER_WIDTH);
     let bst = theme::fg(theme::BORDER);
     let time = text::fmt_time(m.time);
-    let right = vec![Span::raw(" "), copy_button(false)];
+    let right = vec![Span::raw(" "), copy_button()];
     let rw = text::spans_width(&right);
     let head = |hint: bool| {
         let mut v = vec![
@@ -121,10 +139,10 @@ fn compaction_divider(m: &Message, exp: bool, w: usize) -> Row {
     let mut spans = left;
     spans.push(Span::styled("─".repeat(fill), bst));
     spans.extend(right);
-    let x0 = (total - 6) as u16;
+    let x0 = total as u16 - copy_width();
     Row::new(Line::from(spans))
         .decor()
-        .zone(x0, x0 + 6, Hit::Copy { msg: m.id.clone() })
+        .zone(x0, x0 + copy_width(), Hit::Copy { msg: m.id.clone() })
         .hit(Hit::Toggle {
             msg: m.id.clone(),
             part: 0,
@@ -191,12 +209,19 @@ fn titlecase(s: &str) -> String {
     }
 }
 
-fn copy_button(hover: bool) -> Span<'static> {
-    let _ = hover;
-    Span::styled("⧉ copy", theme::fg(theme::DIM))
+fn copy_button() -> Span<'static> {
+    Span::styled(COPY_LABEL, theme::fg(theme::DIM))
 }
 
-pub const UNDO_LABEL: &str = "↶ undo";
+/// Width of the copy button, for its click zone.
+fn copy_width() -> u16 {
+    width(COPY_LABEL) as u16
+}
+
+const COPY_LABEL: &str = "⧉ copy";
+const UNDO_LABEL: &str = "↶ undo";
+/// Gap between buttons in the meta row.
+const BUTTON_GAP: &str = "  ";
 /// Button on a queued prompt row (removes it from the queue).
 pub const UNQUEUE_LABEL: &str = "✕ remove";
 
@@ -208,14 +233,14 @@ fn undo_button() -> Span<'static> {
 pub fn shimmer(label: &str, tick: u64, base: Color, hi: Color) -> Vec<Span<'static>> {
     let chars: Vec<char> = label.chars().collect();
     let n = chars.len() as i64;
-    let period = n + 8;
-    let pos = (tick as i64 % period) - 4;
+    let period = n + SHIMMER_PAD;
+    let pos = (tick as i64 % period) - SHIMMER_LEAD_IN;
     chars
         .iter()
         .enumerate()
         .map(|(i, c)| {
             let d = (i as i64 - pos).abs() as f32;
-            let t = (1.0 - d / 3.0).max(0.0);
+            let t = (1.0 - d / SHIMMER_RADIUS).max(0.0);
             Span::styled(c.to_string(), Style::new().fg(theme::blend(base, hi, t)))
         })
         .collect()
@@ -234,113 +259,137 @@ fn render_user(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
         MessageSource::Compaction => theme::ACCENT,
         MessageSource::Shell => theme::WARNING,
     };
-    let raw = m.raw_text();
-    let bg = theme::PANEL;
-    let bar = Span::styled("┃", Style::new().fg(bar_color).bg(bg));
-    let time = text::fmt_time(m.time);
-
     if cx.compact {
-        return render_user_compact(m, cx, w, bar_color);
+        return render_user_compact(m, w, bar_color);
     }
-
-    // Compaction: full-width divider (expandable summary below it).
+    let raw = m.raw_text();
     if m.source == MessageSource::Compaction {
-        let exp = cx.expanded(0, false);
-        let mut rows = vec![compaction_divider(m, exp, w)];
-        if cx.context_start {
-            let hint = text::truncate(CONTEXT_HINT, w.saturating_sub(4));
-            let pad = w.saturating_sub(1 + width(&hint)) / 2;
-            rows.push(
-                Row::new(Line::from(vec![
-                    Span::raw(" ".repeat(pad)),
-                    Span::styled(hint, theme::fg(theme::DIM).add_modifier(Modifier::ITALIC)),
-                ]))
-                .decor(),
-            );
-        }
-        if exp {
-            for r in markdown::render(&raw, w.saturating_sub(PAD + 4), theme::muted()) {
-                rows.push(r.indent(vec![
-                    Span::raw(" ".repeat(PAD)),
-                    Span::styled("│ ", theme::fg(theme::ACCENT)),
-                    Span::raw(" "),
-                ]));
-            }
-        }
-        return rows;
+        return compaction_rows(m, cx, &raw, w);
     }
 
-    let inner = w.saturating_sub(5).max(1);
-    let mut rows: Vec<Row> = Vec::new();
-    let pad = |r: Row| -> Row {
+    let bg = theme::PANEL;
+    let bubble = Bubble {
+        bar: Span::styled("┃", Style::new().fg(bar_color).bg(bg)),
+        bg,
+        w,
+    };
+    let inner = w.saturating_sub(USER_BOX_CHROME).max(1);
+    let mut rows = vec![bubble.wrap(Row::new(user_header(&m.source, bg))).decor()];
+    rows.extend(user_body_rows(m, &raw, inner, &bubble));
+    rows.extend(image_badge_row(m, inner, &bubble));
+    rows.push(user_meta_row(m, inner, &bubble));
+    rows
+}
+
+/// Compaction: full-width divider (expandable summary below it).
+fn compaction_rows(m: &Message, cx: &Ctx<'_>, raw: &str, w: usize) -> Vec<Row> {
+    let expanded = cx.expanded(0, false);
+    let mut rows = vec![compaction_divider(m, expanded, w)];
+    if cx.context_start {
+        let hint = text::truncate(CONTEXT_HINT, w.saturating_sub(4));
+        let pad = w.saturating_sub(1 + width(&hint)) / 2;
+        rows.push(
+            Row::new(Line::from(vec![
+                Span::raw(" ".repeat(pad)),
+                Span::styled(hint, theme::fg(theme::DIM).add_modifier(Modifier::ITALIC)),
+            ]))
+            .decor(),
+        );
+    }
+    if expanded {
+        for r in markdown::render(raw, w.saturating_sub(PAD + 4), theme::muted()) {
+            rows.push(r.indent(vec![
+                Span::raw(" ".repeat(PAD)),
+                Span::styled("│ ", theme::fg(theme::ACCENT)),
+                Span::raw(" "),
+            ]));
+        }
+    }
+    rows
+}
+
+/// The coloured bar and background that frame the rows of a user message.
+struct Bubble {
+    bar: Span<'static>,
+    bg: Color,
+    /// Width of the whole message.
+    w: usize,
+}
+
+impl Bubble {
+    /// Indents `r` behind the bar and fills the rest of the row with the background.
+    fn wrap(&self, r: Row) -> Row {
         let lw = text::line_width(&r.line);
-        let mut r = r.indent(vec![bar.clone(), Span::styled("  ", Style::new().bg(bg))]);
+        let bg = Style::new().bg(self.bg);
+        let mut r = r.indent(vec![self.bar.clone(), Span::styled("  ", bg)]);
         r.line.spans.push(Span::styled(
-            " ".repeat(w.saturating_sub(lw + 3)),
-            Style::new().bg(bg),
+            " ".repeat(self.w.saturating_sub(lw + BUBBLE_INSET)),
+            bg,
         ));
-        let e = (3 + lw) as u16;
         if r.end.is_none() {
-            r.end = Some(e);
+            r.end = Some((BUBBLE_INSET + lw) as u16);
         }
         r
-    };
-    // Header / top padding row.
-    let header: Option<Vec<Span<'static>>> = match &m.source {
-        MessageSource::Human => None,
-        MessageSource::Peer { from_name, .. } => Some(vec![Span::styled(
+    }
+}
+
+/// Header line of a message that came from somewhere else; empty for the user's own.
+fn user_header(source: &MessageSource, bg: Color) -> Line<'static> {
+    let header = match source {
+        MessageSource::Human | MessageSource::Compaction => return Line::default(),
+        MessageSource::Peer { from_name, .. } => Span::styled(
             format!("↘ message from \"{from_name}\""),
             theme::bold(theme::INFO).bg(bg),
-        )]),
-        MessageSource::Spawn { from_name, .. } => Some(vec![Span::styled(
+        ),
+        MessageSource::Spawn { from_name, .. } => Span::styled(
             format!("↘ created by \"{from_name}\""),
             theme::bold(theme::INFO).bg(bg),
-        )]),
-        MessageSource::Reminder => Some(vec![Span::styled(
-            "⟳ reminder",
-            theme::bold(theme::WARNING).bg(bg),
-        )]),
-        MessageSource::Shell => Some(vec![Span::styled(
-            "$ shell",
-            theme::bold(theme::WARNING).bg(bg),
-        )]),
-        MessageSource::Compaction => None,
+        ),
+        MessageSource::Reminder => Span::styled("⟳ reminder", theme::bold(theme::WARNING).bg(bg)),
+        MessageSource::Shell => Span::styled("$ shell", theme::bold(theme::WARNING).bg(bg)),
     };
-    match header {
-        Some(h) => rows.push(pad(Row::new(Line::from(h))).decor()),
-        None => rows.push(pad(Row::new(Line::default())).decor()),
-    }
+    Line::from(header)
+}
+
+/// The text of a user message (markdown for shell output), one bubble row per wrapped line.
+fn user_body_rows(m: &Message, raw: &str, inner: usize, bubble: &Bubble) -> Vec<Row> {
+    let bg = bubble.bg;
     let body_style = Style::new().fg(theme::TEXT).bg(bg);
+    let mut rows = Vec::new();
     if m.source == MessageSource::Shell {
-        for r in markdown::render(&raw, inner, body_style) {
-            let mut r = r;
+        for mut r in markdown::render(raw, inner, body_style) {
             for s in &mut r.line.spans {
                 if s.style.bg.is_none() {
                     s.style = s.style.bg(bg);
                 }
             }
-            rows.push(pad(r));
+            rows.push(bubble.wrap(r));
         }
-    } else {
-        let clean = text::sanitize(&raw);
-        let clean = clean.trim_matches('\n');
-        if clean.is_empty() && !m.parts.iter().any(|p| matches!(p, Part::Image { .. })) {
-            rows.push(pad(Row::new(Line::from(Span::styled(
-                "(empty)",
-                theme::muted().bg(bg),
-            )))));
+        return rows;
+    }
+    let clean = text::sanitize(raw);
+    let clean = clean.trim_matches('\n');
+    let has_image = m.parts.iter().any(|p| matches!(p, Part::Image { .. }));
+    if clean.is_empty() {
+        if !has_image {
+            let empty = Span::styled("(empty)", theme::muted().bg(bg));
+            rows.push(bubble.wrap(Row::new(Line::from(empty))));
         }
-        if !clean.is_empty() {
-            for logical in clean.split('\n') {
-                let wrapped =
-                    text::wrap_spans_flags(&[Span::styled(logical.to_string(), body_style)], inner);
-                for (i, (l, sp)) in wrapped.into_iter().enumerate() {
-                    rows.push(pad(Row::new(l).soft_sp(i > 0, sp)));
-                }
-            }
+        return rows;
+    }
+    for logical in clean.split('\n') {
+        let wrapped =
+            text::wrap_spans_flags(&[Span::styled(logical.to_string(), body_style)], inner);
+        for (i, (l, sp)) in wrapped.into_iter().enumerate() {
+            rows.push(bubble.wrap(Row::new(l).soft_sp(i > 0, sp)));
         }
     }
-    // Image badges.
+    rows
+}
+
+/// One row of `image name` badges for the attached images, if any.
+fn image_badge_row(m: &Message, inner: usize, bubble: &Bubble) -> Option<Row> {
+    let bg = bubble.bg;
     let images: Vec<String> = m
         .parts
         .iter()
@@ -349,54 +398,58 @@ fn render_user(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
             _ => None,
         })
         .collect();
-    if !images.is_empty() {
-        let mut spans = Vec::new();
-        for (i, n) in images.iter().enumerate() {
-            spans.push(Span::styled(
-                " image ",
-                Style::new()
-                    .fg(bg)
-                    .bg(theme::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            ));
-            spans.push(Span::styled(
-                format!(" {} ", text::truncate(n, 30)),
-                Style::new().fg(theme::MUTED).bg(theme::PANEL_HOVER),
-            ));
-            if i + 1 < images.len() {
-                spans.push(Span::styled(" ", Style::new().bg(bg)));
-            }
-        }
-        rows.push(pad(
-            Row::new(Line::from(truncate_spans(spans, inner))).decor()
-        ));
+    if images.is_empty() {
+        return None;
     }
-    // Meta row: time + [undo] + copy, right aligned.
-    let gap = || Span::styled("  ", Style::new().bg(bg));
+    let mut spans = Vec::new();
+    for (i, n) in images.iter().enumerate() {
+        spans.push(Span::styled(
+            " image ",
+            Style::new()
+                .fg(bg)
+                .bg(theme::ACCENT)
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            format!(" {} ", text::truncate(n, IMAGE_NAME_MAX)),
+            Style::new().fg(theme::MUTED).bg(theme::PANEL_HOVER),
+        ));
+        if i + 1 < images.len() {
+            spans.push(Span::styled(" ", Style::new().bg(bg)));
+        }
+    }
+    Some(bubble.wrap(Row::new(Line::from(truncate_spans(spans, inner))).decor()))
+}
+
+/// Meta row: time + [undo] + copy, right aligned.
+fn user_meta_row(m: &Message, inner: usize, bubble: &Bubble) -> Row {
+    let bg = bubble.bg;
+    let time = text::fmt_time(m.time);
+    let gap = || Span::styled(BUTTON_GAP, Style::new().bg(bg));
     let human = m.source == MessageSource::Human;
     let mut right = vec![Span::styled(time.clone(), theme::muted().bg(bg)), gap()];
     if human {
         right.push(undo_button());
         right.push(gap());
     }
-    right.push(copy_button(false));
+    right.push(copy_button());
     // One column wider than the body so the button lines up with assistant footers / tool rows.
     let (line, rx) = compose(vec![], right, inner + 1);
-    let mut x0 = (rx + width(&time) + 2) as u16;
+    let mut x0 = (rx + width(&time) + width(BUTTON_GAP)) as u16;
     let mut row = Row::new(line);
     if human {
         let uw = width(UNDO_LABEL) as u16;
         row = row.zone(x0, x0 + uw, Hit::Undo { msg: m.id.clone() });
-        x0 += uw + 2;
+        x0 += uw + width(BUTTON_GAP) as u16;
     }
-    let mut meta = pad(row.zone(x0, x0 + 6, Hit::Copy { msg: m.id.clone() })).decor();
+    let row = row.zone(x0, x0 + copy_width(), Hit::Copy { msg: m.id.clone() });
+    let mut meta = bubble.wrap(row).decor();
     for s in &mut meta.line.spans {
         if s.style.bg.is_none() {
             s.style = s.style.bg(bg);
         }
     }
-    rows.push(meta);
-    rows
+    meta
 }
 
 /// Wraps `text` into rows of `wrap_width` columns, each led by `lead_pad` spaces and a `┃ ` bar.
@@ -421,7 +474,7 @@ pub fn bar_rows(
         .collect()
 }
 
-fn render_user_compact(m: &Message, _cx: &Ctx<'_>, w: usize, color: Color) -> Vec<Row> {
+fn render_user_compact(m: &Message, w: usize, color: Color) -> Vec<Row> {
     if m.source == MessageSource::Compaction {
         // Compact divider: `── ◇ compacted 14:02:11 ─────`.
         let bst = theme::fg(theme::BORDER);
@@ -444,7 +497,7 @@ fn render_user_compact(m: &Message, _cx: &Ctx<'_>, w: usize, color: Color) -> Ve
         MessageSource::Peer { from_name, .. } => format!("from {from_name}"),
         MessageSource::Spawn { from_name, .. } => format!("by {from_name}"),
         MessageSource::Reminder => "reminder".into(),
-        MessageSource::Compaction => "compacted".into(),
+        MessageSource::Compaction => unreachable!("returned above"),
         MessageSource::Shell => "shell".into(),
     };
     let raw = text::sanitize(&m.raw_text());
@@ -456,18 +509,17 @@ fn render_user_compact(m: &Message, _cx: &Ctx<'_>, w: usize, color: Color) -> Ve
     ];
     rows.push(Row::new(Line::from(truncate_spans(head, w))).decor());
     let lines: Vec<&str> = raw.trim().lines().collect();
-    let max = if m.source == MessageSource::Compaction {
-        1
-    } else {
-        6
-    };
-    for l in lines.iter().take(max) {
+    for l in lines.iter().take(COMPACT_USER_LINES) {
         rows.extend(bar_rows(l, theme::text(), color, w.saturating_sub(2), 0));
     }
-    if lines.len() > max {
+    if lines.len() > COMPACT_USER_LINES {
         rows.push(
             Row::new(Line::from(Span::styled(
-                format!("┃ {} {} more lines", text::ELLIPSIS, lines.len() - max),
+                format!(
+                    "┃ {} {} more lines",
+                    text::ELLIPSIS,
+                    lines.len() - COMPACT_USER_LINES
+                ),
                 theme::muted(),
             )))
             .decor(),
@@ -704,11 +756,11 @@ fn render_assistant(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
     if interrupted {
         left.push(Span::styled(" · interrupted", theme::fg(theme::WARNING)));
     }
-    let right = vec![copy_button(false)];
+    let right = vec![copy_button()];
     let (line, rx) = compose(left, right, inner);
     let x0 = rx as u16;
     let foot = Row::new(line)
-        .zone(x0, x0 + 6, Hit::Copy { msg: m.id.clone() })
+        .zone(x0, x0 + copy_width(), Hit::Copy { msg: m.id.clone() })
         .indent(vec![Span::raw(" ".repeat(pad))])
         .decor();
     rows.push(foot);
@@ -782,7 +834,7 @@ fn render_reasoning(
 }
 
 /// One-line summary detail for a tool's input.
-pub fn tool_detail(name: &str, input: &Value) -> String {
+fn tool_detail(name: &str, input: &Value) -> String {
     let s = |k: &str| input.get(k).and_then(Value::as_str).map(str::to_string);
     let base = name.rsplit('_').next().unwrap_or(name);
     let d = match name {
@@ -1066,7 +1118,7 @@ fn render_tool(m: &Message, idx: usize, part: &Part, cx: &Ctx<'_>, w: usize) -> 
         &mut blk,
         input_text.trim_end(),
         theme::fg(theme::INFO),
-        if cx.all(idx) {
+        if cx.shows_full_output(idx) {
             None
         } else {
             Some(OUTPUT_PREVIEW_LINES)
@@ -1101,7 +1153,7 @@ fn render_tool(m: &Message, idx: usize, part: &Part, cx: &Ctx<'_>, w: usize) -> 
         blk.push(section("diff", false));
         let diff = text::sanitize(diff);
         let lines: Vec<&str> = diff.trim_end().split('\n').collect();
-        let limit = if cx.all(idx) {
+        let limit = if cx.shows_full_output(idx) {
             lines.len()
         } else {
             lines.len().min(OUTPUT_PREVIEW_LINES)
@@ -1194,7 +1246,7 @@ fn render_tool(m: &Message, idx: usize, part: &Part, cx: &Ctx<'_>, w: usize) -> 
                 &mut blk,
                 out.trim_end(),
                 st,
-                if cx.all(idx) {
+                if cx.shows_full_output(idx) {
                     None
                 } else {
                     Some(OUTPUT_PREVIEW_LINES)
