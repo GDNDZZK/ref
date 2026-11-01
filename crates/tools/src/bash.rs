@@ -23,21 +23,24 @@ const KILL_GRACE: Duration = Duration::from_secs(2);
 const PENDING_FLUSH: usize = 8 * 1024;
 
 pub fn spec() -> ToolSpec {
+    let inline_kb = util::INLINE_OUTPUT_MAX_BYTES as u64 / util::KIB;
+    let inline_lines = util::INLINE_OUTPUT_MAX_LINES;
     ToolSpec {
         name: "bash",
-        description: "Run a shell command with `bash -c` (non-interactive, stdin closed) and return combined stdout+stderr.\n\
+        description: format!(
+            "Run a shell command with `bash -c` (non-interactive, stdin closed) and return combined stdout+stderr.\n\
 - Each call runs in a fresh shell: use `cwd` instead of `cd`, and `&&` to chain dependent commands.\n\
-- `timeout` in seconds (default 120, max 3600; 0 = no timeout). On timeout the whole process group is killed.\n\
-- Output over 50KB or 2000 lines is truncated in the middle; the full output is saved to a file you can `read`.\n\
+- `timeout` in seconds (default {DEFAULT_TIMEOUT_SECS}, max {MAX_TIMEOUT_SECS}; 0 = no timeout). On timeout the whole process group is killed.\n\
+- Output over {inline_kb}KB or {inline_lines} lines is truncated in the middle; the full output is saved to a file you can `read`.\n\
 - Prefer the dedicated tools for files: `read` (not cat/head/tail), `grep`, `find`, `edit`/`write` (not sed/echo redirection).\n\
 - Non-zero exit codes are reported as `[exit code N]`. Background jobs (`cmd &`) must redirect their output (e.g. `> log 2>&1 &`), otherwise it is lost once the command returns.\n\
 - Color is disabled (NO_COLOR=1, TERM=dumb) and pagers are set to `cat`."
-            .to_string(),
+        ),
         parameters: json!({
             "type": "object",
             "properties": {
                 "command": {"type": "string", "description": "Shell command to execute."},
-                "timeout": {"type": "integer", "minimum": 0, "description": "Timeout in seconds (default 120, max 3600; 0 disables the timeout)."},
+                "timeout": {"type": "integer", "minimum": 0, "description": format!("Timeout in seconds (default {DEFAULT_TIMEOUT_SECS}, max {MAX_TIMEOUT_SECS}; 0 disables the timeout).")},
                 "cwd": {"type": "string", "description": "Working directory, relative to the session directory (default: session directory)."}
             },
             "required": ["command"]

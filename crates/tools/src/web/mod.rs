@@ -35,22 +35,27 @@ const FETCH_IMAGE_BYTES: usize = 300 * 1024;
 const ERROR_BODY_CHARS: usize = 4000;
 
 pub fn spec() -> ToolSpec {
+    let image_mb = MAX_IMAGE_BYTES as u64 / util::MIB;
+    let inline_kb = util::INLINE_OUTPUT_MAX_BYTES as u64 / util::KIB;
+    let inline_lines = util::INLINE_OUTPUT_MAX_LINES;
+    let body_mb = fetch::MAX_BODY as u64 / util::MIB;
     ToolSpec {
         name: "webfetch",
-        description: "Fetch a URL (http/https) and return its content. Read-only; no JavaScript is run.\n\
+        description: format!(
+            "Fetch a URL (http/https) and return its content. Read-only; no JavaScript is run.\n\
 - HTML becomes markdown (default), plain text (`format: \"text\"`) or stays HTML (`format: \"html\"`). For markdown and text, the main content is extracted when the page reads like an article (the header says so); pass `full_page: true` for everything (navigation, sidebars, comments).\n\
-- Markdown / plain text / JSON (pretty-printed) / XML are returned as text, RSS and Atom feeds as a list of entries, images (png, jpeg, gif, webp up to 5MB) as an image you can see. Other binary files (PDFs included) are not shown: download them with bash (`curl -L -o`).\n\
+- Markdown / plain text / JSON (pretty-printed) / XML are returned as text, RSS and Atom feeds as a list of entries, images (png, jpeg, gif, webp up to {image_mb}MB) as an image you can see. Other binary files (PDFs included) are not shown: download them with bash (`curl -L -o`).\n\
 - GitHub file pages return the raw file; GitHub issues and pull requests return the conversation (from the API).\n\
-- Output starts with a header (URL, Content-Type, Title, notes) and `---`. Content over 50KB or 2000 lines is cut; the full content is saved to a file you can `read` with offset/limit or `grep`.\n\
-- `timeout` in seconds (default 30, max 120). Responses over 20MB are refused. HTTP errors return the status and the start of the error page."
-            .to_string(),
+- Output starts with a header (URL, Content-Type, Title, notes) and `---`. Content over {inline_kb}KB or {inline_lines} lines is cut; the full content is saved to a file you can `read` with offset/limit or `grep`.\n\
+- `timeout` in seconds (default {DEFAULT_TIMEOUT_SECS}, max {MAX_TIMEOUT_SECS}). Responses over {body_mb}MB are refused. HTTP errors return the status and the start of the error page."
+        ),
         parameters: json!({
             "type": "object",
             "properties": {
                 "url": {"type": "string", "description": "URL to fetch (http or https; `https://` is assumed when missing)."},
                 "format": {"type": "string", "enum": ["markdown", "text", "html"], "description": "Output format for HTML pages (default markdown)."},
                 "full_page": {"type": "boolean", "description": "Convert the whole page instead of only its main content (default false)."},
-                "timeout": {"type": "integer", "minimum": 1, "maximum": 120, "description": "Timeout in seconds (default 30, max 120)."}
+                "timeout": {"type": "integer", "minimum": 1, "maximum": MAX_TIMEOUT_SECS, "description": format!("Timeout in seconds (default {DEFAULT_TIMEOUT_SECS}, max {MAX_TIMEOUT_SECS}).")}
             },
             "required": ["url"]
         }),

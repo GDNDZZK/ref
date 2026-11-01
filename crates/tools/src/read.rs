@@ -23,25 +23,27 @@ const MAX_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_READ_BYTES: u64 = 64 * 1024 * 1024;
 
 pub fn spec() -> ToolSpec {
+    let page_kb = PAGE_BYTES as u64 / util::KIB;
     ToolSpec {
         name: "read",
-        description: "Read a text file, list a directory, or view an image.\n\
+        description: format!(
+            "Read a text file, list a directory, or view an image.\n\
 \n\
 Text files are returned in hashline format: a header `[path#TAG]` followed by rows `N:content` \
 (N = 1-based line number, no padding; the `N:` prefix is not part of the file). TAG is a 4-hex \
 snapshot id of the whole file; pass it to `edit` together with the line numbers shown.\n\
-- Default page: 500 lines (max `limit` 3000, ~60KB). A trailing notice tells you the `offset` to \
-continue from. Lines over 1000 chars are cut with `…` (those lines cannot be edited until seen whole).\n\
+- Default page: {DEFAULT_LIMIT} lines (max `limit` {MAX_LIMIT}, ~{page_kb}KB). A trailing notice tells you the `offset` to \
+continue from. Lines over {MAX_LINE_CHARS} chars are cut with `…` (those lines cannot be edited until seen whole).\n\
 - `offset`/`limit` select a range; a path suffix also works: `file.rs:50-80`, `file.rs:50+10`, `file.rs:50`.\n\
 - Directories list their entries (subdirectories end with `/`).\n\
 - Images (png, jpg, gif, webp) are returned as images. Binary files are refused."
-            .to_string(),
+        ),
         parameters: json!({
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "File or directory path (relative to the working directory, or absolute)."},
                 "offset": {"type": "integer", "minimum": 1, "description": "1-based line to start from (default 1)."},
-                "limit": {"type": "integer", "minimum": 1, "description": "Maximum number of lines to return (default 500, max 3000)."}
+                "limit": {"type": "integer", "minimum": 1, "description": format!("Maximum number of lines to return (default {DEFAULT_LIMIT}, max {MAX_LIMIT}).")}
             },
             "required": ["path"]
         }),

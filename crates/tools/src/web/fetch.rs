@@ -15,7 +15,7 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 /// Largest response body read.
-const MAX_BODY: usize = 20 * 1024 * 1024;
+pub(super) const MAX_BODY: usize = 20 * 1024 * 1024;
 
 pub struct Fetched {
     /// After redirects.
