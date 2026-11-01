@@ -127,11 +127,11 @@ Rectangle {
 		opacity: card.prompt.busy ? card.busyOpacity : 1
 
 		// Keeps the highlighted row in view when the arrows go beyond the visible rows.
-		function reveal(y, height) {
-			if (y < contentY)
-				contentY = y
-			else if (y + height > contentY + this.height)
-				contentY = y + height - this.height
+		function reveal(rowY, rowHeight) {
+			if (rowY < contentY)
+				contentY = rowY
+			else if (rowY + rowHeight > contentY + height)
+				contentY = rowY + rowHeight - height
 		}
 
 		Column {

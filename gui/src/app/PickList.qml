@@ -75,8 +75,8 @@ Item {
 			Accessible.name: pick.placeholderText
 			Keys.onUpPressed: pick.move(-1)
 			Keys.onDownPressed: pick.move(1)
-			Keys.onReturnPressed: event => pick.activateCurrent()
-			Keys.onEnterPressed: event => pick.activateCurrent()
+			Keys.onReturnPressed: pick.activateCurrent()
+			Keys.onEnterPressed: pick.activateCurrent()
 
 			PlaceholderText {
 				anchors.fill: parent

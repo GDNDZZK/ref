@@ -299,7 +299,6 @@ Block {
 		PermissionSection {
 			id: permission
 			y: header.height + failure.height + body.height
-			toolName: block.toolName
 			input: block.inputObject
 			open: block.awaitingPermission
 			othersWaiting: block.chat.permissionCount - 1
