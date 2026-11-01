@@ -5,7 +5,7 @@
 use crate::LlmError;
 use regex::Regex;
 use reqwest::header::HeaderMap;
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 /// Maximum number of body characters included in error messages.
@@ -34,87 +34,75 @@ impl LlmError {
 }
 
 /// Context-window overflow patterns collected from many providers.
-fn overflow_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(concat!(
-            r"(?i)prompt (is )?too long",
-            r"|prompt exceeds max length|prompt 超长",
-            r"|request_too_large",
-            r"|input is too long",
-            r"|exceeds the context window",
-            r"|exceeds (the )?(model'?s )?maximum context length",
-            r"|maximum context length",
-            r"|context window exceeded|context window exceeds limit",
-            r"|input token count.*exceeds the maximum",
-            r"|maximum prompt length is \d+",
-            r"|reduce the length of the messages",
-            r"|exceeds (the )?maximum allowed input length",
-            r"|is longer than the model'?s context length",
-            r"|exceeds the limit of \d+",
-            r"|exceeds the available context size",
-            r"|greater than the context length",
-            r"|exceeded model token limit",
-            r"|too large for model with \d+ maximum context length",
-            r"|but the configured context size is",
-            r"|model_context_window_exceeded",
-            r"|exceeded (max )?context length",
-            r"|range of input length should be",
-            r"|requested input length \d+ exceeds maximum input length",
-            r"|`inputs` tokens \+ `max_new_tokens` must be",
-            r"|context[_ ]length[_ ]exceeded|too many tokens|token limit exceeded",
-        ))
-        .expect("overflow regex")
-    })
-}
+static OVERFLOW_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(concat!(
+        r"(?i)prompt (is )?too long",
+        r"|prompt exceeds max length|prompt 超长",
+        r"|request_too_large",
+        r"|input is too long",
+        r"|exceeds the context window",
+        r"|exceeds (the )?(model'?s )?maximum context length",
+        r"|maximum context length",
+        r"|context window exceeded|context window exceeds limit",
+        r"|input token count.*exceeds the maximum",
+        r"|maximum prompt length is \d+",
+        r"|reduce the length of the messages",
+        r"|exceeds (the )?maximum allowed input length",
+        r"|is longer than the model'?s context length",
+        r"|exceeds the limit of \d+",
+        r"|exceeds the available context size",
+        r"|greater than the context length",
+        r"|exceeded model token limit",
+        r"|too large for model with \d+ maximum context length",
+        r"|but the configured context size is",
+        r"|model_context_window_exceeded",
+        r"|exceeded (max )?context length",
+        r"|range of input length should be",
+        r"|requested input length \d+ exceeds maximum input length",
+        r"|`inputs` tokens \+ `max_new_tokens` must be",
+        r"|context[_ ]length[_ ]exceeded|too many tokens|token limit exceeded",
+    ))
+    .expect("overflow regex")
+});
 
 /// Messages that look like overflow but are actually throttling / parameter errors.
-fn overflow_exclusion_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(concat!(
-            r"(?i)^(throttling error|service unavailable):",
-            r"|rate.?limit|too many requests",
-            r"|too many tokens(,)?( per day)?(,)? please wait",
-            r"|max[_ ]tokens must be less than",
-        ))
-        .expect("overflow exclusion regex")
-    })
-}
+static OVERFLOW_EXCLUSION_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(concat!(
+        r"(?i)^(throttling error|service unavailable):",
+        r"|rate.?limit|too many requests",
+        r"|too many tokens(,)?( per day)?(,)? please wait",
+        r"|max[_ ]tokens must be less than",
+    ))
+    .expect("overflow exclusion regex")
+});
 
 /// Quota / billing problems: retrying will not help.
-fn quota_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(concat!(
-            r"(?i)insufficient_quota|insufficient balance|quota exceeded|exceeded your current quota",
-            r"|billing|out of budget|usage_not_included|usagelimiterror|monthly usage limit",
-            r"|subscription_sharing_usage_limit_exceeded|payment required",
-        ))
-        .expect("quota regex")
-    })
-}
+static QUOTA_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(concat!(
+        r"(?i)insufficient_quota|insufficient balance|quota exceeded|exceeded your current quota",
+        r"|billing|out of budget|usage_not_included|usagelimiterror|monthly usage limit",
+        r"|subscription_sharing_usage_limit_exceeded|payment required",
+    ))
+    .expect("quota regex")
+});
 
 /// Transient conditions detectable from the error text alone.
-fn retryable_text_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(concat!(
-            r"(?i)overloaded|server_busy|server is busy|rate.?limit|too many requests",
-            r"|try again|retry your request|temporarily unavailable|service.?unavailable",
-            r"|resource.?exhausted",
-        ))
-        .expect("retryable regex")
-    })
-}
+static RETRYABLE_TEXT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(concat!(
+        r"(?i)overloaded|server_busy|server is busy|rate.?limit|too many requests",
+        r"|try again|retry your request|temporarily unavailable|service.?unavailable",
+        r"|resource.?exhausted",
+    ))
+    .expect("retryable regex")
+});
 
 /// Whether an error text indicates that the prompt exceeded the context window.
 pub fn is_context_overflow(text: &str) -> bool {
-    overflow_re().is_match(text) && !overflow_exclusion_re().is_match(text)
+    OVERFLOW_RE.is_match(text) && !OVERFLOW_EXCLUSION_RE.is_match(text)
 }
 
 fn is_quota(text: &str) -> bool {
-    quota_re().is_match(text)
+    QUOTA_RE.is_match(text)
 }
 
 /// Truncate to [`MAX_BODY_CHARS`] characters (on a char boundary).
@@ -154,7 +142,7 @@ pub fn classify_http_error(status: u16, headers: &HeaderMap, body: &str) -> LlmE
         match status {
             408 | 409 | 425 | 429 | 500..=599 => true,
             401 | 403 | 404 | 413 => false,
-            _ => retryable_text_re().is_match(body),
+            _ => RETRYABLE_TEXT_RE.is_match(body),
         }
     };
 
@@ -231,7 +219,7 @@ pub(crate) fn stream_error(code: Option<&str>, message: &str) -> LlmError {
     } else if RETRYABLE_CODES.contains(&code) {
         true
     } else if FATAL_CODES.contains(&code) {
-        retryable_text_re().is_match(message)
+        RETRYABLE_TEXT_RE.is_match(message)
     } else {
         // Unknown in-stream failures are usually transient server-side problems.
         true
