@@ -192,7 +192,7 @@ pub(crate) fn fit(bytes: &[u8], limits: &Limits) -> Result<Fitted, String> {
                 (tw as f64 * scale).round() as u32,
                 (th as f64 * scale).round() as u32,
             );
-            if w < 100 || h < 100 {
+            if w < MIN_RETRY_EDGE || h < MIN_RETRY_EDGE {
                 break;
             }
             let small = resize(&mut resizer, &src, w, h)?;
@@ -299,6 +299,16 @@ fn b64_len(n: usize) -> usize {
 
 /// Re-encode passes allowed to bring one image under the byte budget in [`clamp`].
 const CLAMP_ATTEMPTS: usize = 4;
+/// JPEG quality of the clamp candidate.
+const CLAMP_JPEG_QUALITY: u8 = 85;
+/// Retries stop below this edge length: a smaller image would be unreadable.
+const MIN_RETRY_EDGE: u32 = 100;
+/// Extra area shrink per clamp pass, so the next encode lands under the budget.
+const AREA_SHRINK_MARGIN: f64 = 0.9;
+/// Smallest per-pass scale factor of a clamp retry.
+const MIN_SHRINK_STEP: f64 = 0.25;
+/// `max_dim` goes into the bits above the byte budget, so that the two seed parts do not mix.
+const SEED_DIM_SHIFT: u32 = 40;
 
 /// Request-time cap, modeled on oh-my-pi's Anthropic image contract: an image with a side over
 /// `max_dim` or a base64 size over `max_b64` is resized to fit (PNG or JPEG quality 85, the
@@ -324,7 +334,10 @@ fn clamp(bytes: &[u8], max_dim: u32, max_b64: usize) -> Result<Option<Clamped>, 
         let th = ((h as f64 * scale).round() as u32).clamp(1, max_dim);
         let img = resize(&mut resizer, &src, tw, th)?;
         let png = encode_png(&img)?;
-        let (mime, data) = match lossy.then(|| encode_jpeg(&img, 85)).transpose()? {
+        let (mime, data) = match lossy
+            .then(|| encode_jpeg(&img, CLAMP_JPEG_QUALITY))
+            .transpose()?
+        {
             Some(j) if j.len() < png.len() => (util::MIME_JPEG, j),
             _ => (util::MIME_PNG, png),
         };
@@ -339,7 +352,7 @@ fn clamp(bytes: &[u8], max_dim: u32, max_b64: usize) -> Result<Option<Clamped>, 
             break;
         }
         // Fitting the pixel cap does not imply fitting the byte cap: shrink by the overshoot in area.
-        scale *= ((max_b64 as f64 / enc as f64).sqrt() * 0.9).max(0.25);
+        scale *= ((max_b64 as f64 / enc as f64).sqrt() * AREA_SHRINK_MARGIN).max(MIN_SHRINK_STEP);
     }
     let best = best.expect("at least one pass");
     if !over_dim && b64_len(best.data.len()) >= orig_b64 {
@@ -369,7 +382,7 @@ pub fn clamp_image_data(img: &ImageData, max_dim: u32, max_b64: usize) -> Option
     }
     let key = xxhash_rust::xxh3::xxh3_128_with_seed(
         img.data.as_bytes(),
-        ((max_dim as u64) << 40) ^ max_b64 as u64,
+        ((max_dim as u64) << SEED_DIM_SHIFT) ^ max_b64 as u64,
     );
     if let Some((_, hit)) = CLAMP_CACHE
         .lock()
