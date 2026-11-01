@@ -209,7 +209,10 @@ fn request_id(msg: &Value) -> Option<Value> {
 
 async fn error_body(resp: reqwest::Response) -> String {
     let status = resp.status();
-    let body = resp.text().await.unwrap_or_default();
+    let body = resp.text().await.unwrap_or_else(|e| {
+        tracing::debug!("error response body unreadable: {e}");
+        String::new()
+    });
     let body: String = body.trim().chars().take(500).collect();
     if body.is_empty() {
         format!("HTTP {status}")
@@ -375,8 +378,11 @@ impl HttpTransport {
             if status == StatusCode::ACCEPTED || req_id.is_none() {
                 // Notifications/responses: body (if any) is irrelevant, but dispatch
                 // anything the server chose to send.
-                if req_id.is_none() && status != StatusCode::ACCEPTED {
-                    let _ = pump(&self.shared, resp, None, false).await;
+                if req_id.is_none()
+                    && status != StatusCode::ACCEPTED
+                    && let Err(e) = pump(&self.shared, resp, None, false).await
+                {
+                    tracing::debug!(server = %self.shared.name, "response body error: {e:#}");
                 }
                 return Ok(());
             }
@@ -544,7 +550,9 @@ impl HttpTransport {
                 .headers(self.headers.clone())
                 .header(SESSION_HEADER, sid)
                 .timeout(Duration::from_secs(1));
-            let _ = req.send().await;
+            if let Err(e) = req.send().await {
+                tracing::debug!(server = %self.shared.name, "closing the MCP session failed: {e}");
+            }
         }
     }
 }
@@ -620,8 +628,10 @@ fn on_legacy_event(
     ev: SseEvent,
 ) {
     if ev.event == "endpoint" {
-        if let Some(tx) = tx.take() {
-            let _ = tx.send(ev.data.trim().to_string());
+        if let Some(tx) = tx.take()
+            && tx.send(ev.data.trim().to_string()).is_err()
+        {
+            tracing::debug!(server = %shared.name, "endpoint event after the opener gave up");
         }
     } else if ev.is_message() {
         dispatch_data(shared, &ev.data);
