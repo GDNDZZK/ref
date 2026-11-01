@@ -165,9 +165,9 @@ fn plan_thinking(model: &Model, max_tokens: &mut u64) -> ThinkingPlan {
     let effort = opt_str(opts, &["effort", "reasoningEffort", "reasoning_effort"]);
     let thinking = opts.get("thinking").filter(|t| t.is_object());
 
-    match thinking.and_then(|t| t.get("type")).and_then(Value::as_str) {
-        Some("enabled") => {
-            let t = thinking.unwrap_or(&Value::Null);
+    let kind = thinking.and_then(|t| t.get("type")).and_then(Value::as_str);
+    match thinking.zip(kind) {
+        Some((t, "enabled")) => {
             let budget = opt_u64(t.get("budgetTokens").or_else(|| t.get("budget_tokens")))
                 .or_else(|| effort.and_then(effort_budget))
                 .unwrap_or(DEFAULT_THINKING_BUDGET);
@@ -179,8 +179,8 @@ fn plan_thinking(model: &Model, max_tokens: &mut u64) -> ThinkingPlan {
                 active: true,
             }
         }
-        Some("adaptive") => {
-            let mut out = snake_keys(thinking.unwrap_or(&Value::Null));
+        Some((t, "adaptive")) => {
+            let mut out = snake_keys(t);
             if is_4_7_plus(version) && out.get("display").is_none() {
                 out["display"] = json!("summarized");
             }
@@ -193,7 +193,7 @@ fn plan_thinking(model: &Model, max_tokens: &mut u64) -> ThinkingPlan {
                 active: true,
             }
         }
-        Some("disabled") => ThinkingPlan {
+        Some((_, "disabled")) => ThinkingPlan {
             thinking: Some(json!({"type": "disabled"})),
             effort: None,
             active: false,
