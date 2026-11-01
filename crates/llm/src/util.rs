@@ -17,6 +17,13 @@ use tokio_util::sync::CancellationToken;
 
 pub(crate) const DEFAULT_OPENAI_BASE: &str = "https://api.openai.com/v1";
 pub(crate) const DEFAULT_ANTHROPIC_BASE: &str = "https://api.anthropic.com/v1";
+/// OpenAI caps `prompt_cache_key` at this many characters.
+const MAX_CACHE_KEY_CHARS: usize = 64;
+/// FNV-1a 32-bit offset basis and prime (from the FNV spec).
+const FNV_OFFSET_BASIS: u32 = 0x811c_9dc5;
+const FNV_PRIME: u32 = 0x0100_0193;
+/// Length of the hash suffix of a shortened id: `_` plus 8 hex digits.
+const HASH_SUFFIX_LEN: usize = 9;
 /// Idle timeout used when the provider does not configure one.
 const DEFAULT_CHUNK_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -77,12 +84,12 @@ pub(crate) fn prompt_cache_key(session_id: &str) -> Option<String> {
     if id.is_empty() {
         return None;
     }
-    let id = if id.len() > 64 {
+    let id = if id.len() > MAX_CACHE_KEY_CHARS {
         id.strip_prefix("ses_").unwrap_or(id)
     } else {
         id
     };
-    Some(truncate_chars(id, 64))
+    Some(truncate_chars(id, MAX_CACHE_KEY_CHARS))
 }
 
 pub(crate) fn truncate_chars(s: &str, max: usize) -> String {
@@ -91,8 +98,8 @@ pub(crate) fn truncate_chars(s: &str, max: usize) -> String {
 
 /// 32-bit FNV-1a, used to keep shortened ids unique and deterministic.
 fn fnv1a(s: &str) -> u32 {
-    s.bytes().fold(0x811c_9dc5u32, |h, b| {
-        (h ^ u32::from(b)).wrapping_mul(0x0100_0193)
+    s.bytes().fold(FNV_OFFSET_BASIS, |h, b| {
+        (h ^ u32::from(b)).wrapping_mul(FNV_PRIME)
     })
 }
 
@@ -116,7 +123,7 @@ pub(crate) fn normalize_call_id(id: &str, max: usize) -> String {
     if sanitized.len() <= max {
         return sanitized;
     }
-    let keep = max.saturating_sub(9);
+    let keep = max.saturating_sub(HASH_SUFFIX_LEN);
     format!("{}_{:08x}", &sanitized[..keep], fnv1a(id))
 }
 
