@@ -69,7 +69,7 @@ export function slashItems(commands: readonly SlashCommand[], query: string): Co
   return scored.slice(0, MAX_ITEMS).map((entry) => entry.item)
 }
 
-export function fileItems(files: readonly string[]): CompletionItem[] {
+function fileItems(files: readonly string[]): CompletionItem[] {
   return files.map((file) => ({ value: `@${file} `, label: file, description: '' }))
 }
 
