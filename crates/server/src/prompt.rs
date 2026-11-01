@@ -166,11 +166,7 @@ pub fn instructions(cfg: &Config, cwd: &Path, home: Option<&Path>) -> Vec<(PathB
             continue;
         }
         let expanded = crate::util::expand_home(pat, home);
-        let abs = if expanded.is_absolute() {
-            expanded
-        } else {
-            cwd.join(expanded)
-        };
+        let abs = cwd.join(expanded);
         let s = abs.to_string_lossy().to_string();
         if !s.contains(['*', '?', '[', '{']) {
             push(abs, &mut out);

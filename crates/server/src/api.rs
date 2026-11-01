@@ -485,11 +485,7 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
                 (st.info.clone(), st.messages.clone())
             };
             let p = std::path::PathBuf::from(&path);
-            let p = if p.is_absolute() {
-                p
-            } else {
-                Path::new(&info.cwd).join(p)
-            };
+            let p = Path::new(&info.cwd).join(p);
             let md = export_markdown(&info, &messages);
             std::fs::write(&p, md).map_err(|e| format!("Cannot write {}: {e}", p.display()))?;
             Ok(json!({ "path": p.to_string_lossy() }))
@@ -516,11 +512,7 @@ async fn set_cwd(hub: &Arc<Hub>, s: &Arc<Session>, path: &str) -> Result<(), Str
     }
     let home = hub.opts.home.clone().or_else(dirs::home_dir);
     let p = crate::util::expand_home(path, home.as_deref());
-    let p = if p.is_absolute() {
-        p
-    } else {
-        Path::new(&old).join(p)
-    };
+    let p = Path::new(&old).join(p);
     let new = crate::ops::validate_cwd(&hub.effective_cwd(&p.to_string_lossy()))?;
     if new == old {
         return Ok(());
@@ -556,11 +548,7 @@ async fn list_dirs(hub: &Arc<Hub>, cwd: &str, path: &str) -> R {
     let sandbox = hub.opts.sandbox_cwd.clone();
     let home = sandbox.clone().or_else(|| hub.opts.home.clone());
     let p = crate::util::expand_home(path, home.as_deref());
-    let p = if p.is_absolute() {
-        p
-    } else {
-        Path::new(cwd).join(p)
-    };
+    let p = Path::new(cwd).join(p);
     tokio::task::spawn_blocking(move || {
         let dir = crate::ops::validate_cwd(&p.to_string_lossy())?;
         if sandbox.is_some_and(|root| !Path::new(&dir).starts_with(root)) {

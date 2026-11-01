@@ -477,11 +477,7 @@ async fn create_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Resu
     {
         Some(c) => {
             let p = crate::util::expand_home(c, hub.opts.home.as_deref());
-            let p = if p.is_absolute() {
-                p
-            } else {
-                std::path::Path::new(&my_cwd).join(p)
-            };
+            let p = std::path::Path::new(&my_cwd).join(p);
             let p = dunce::canonicalize(&p)
                 .map_err(|_| format!("Error: directory does not exist: {}", p.display()))?;
             if !p.is_dir() {
