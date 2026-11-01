@@ -125,12 +125,22 @@ fn str_map(v: Option<&Value>) -> BTreeMap<String, String> {
     out
 }
 
+/// The string items of a JSON array; other items are skipped.
+fn strings(items: &[Value]) -> Vec<String> {
+    items
+        .iter()
+        .filter_map(|x| x.as_str().map(str::to_string))
+        .collect()
+}
+
+/// A positive number under an optional JSON value.
+fn positive_f64(v: Option<&Value>) -> Option<f64> {
+    v.and_then(Value::as_f64).filter(|x| *x > 0.0)
+}
+
 fn str_list(v: Option<&Value>) -> Vec<String> {
     match v {
-        Some(Value::Array(a)) => a
-            .iter()
-            .filter_map(|x| x.as_str().map(str::to_string))
-            .collect(),
+        Some(Value::Array(a)) => strings(a),
         Some(Value::String(s)) => vec![s.clone()],
         _ => vec![],
     }
@@ -168,18 +178,10 @@ fn compaction(v: Option<&Value>) -> CompactionConfig {
         if let Some(b) = m.get("auto").and_then(Value::as_bool) {
             c.auto = b;
         }
-        if let Some(x) = m
-            .get("recommend")
-            .and_then(Value::as_f64)
-            .filter(|x| *x > 0.0)
-        {
+        if let Some(x) = positive_f64(m.get("recommend")) {
             c.recommend = x;
         }
-        if let Some(x) = m
-            .get("threshold")
-            .and_then(Value::as_f64)
-            .filter(|x| *x > 0.0)
-        {
+        if let Some(x) = positive_f64(m.get("threshold")) {
             c.threshold = x;
         }
     }
@@ -371,10 +373,7 @@ fn model(key: &str, m: &Map<String, Value>) -> ModelConfig {
             .unwrap_or_default(),
         variants,
         compact_at: lim("compact"),
-        threshold: limit
-            .and_then(|l| l.get("threshold"))
-            .and_then(Value::as_f64)
-            .filter(|x| *x > 0.0),
+        threshold: positive_f64(limit.and_then(|l| l.get("threshold"))),
     }
 }
 
@@ -406,14 +405,11 @@ fn mcp(ctx: &mut Ctx, v: Option<&Value>) -> BTreeMap<String, McpConfig> {
         match ty.as_str() {
             "local" | "stdio" => {
                 let command = match s.get("command") {
-                    Some(Value::Array(a)) => a
-                        .iter()
-                        .filter_map(|x| x.as_str().map(str::to_string))
-                        .collect(),
+                    Some(Value::Array(a)) => strings(a),
                     Some(Value::String(c)) => {
                         let mut v: Vec<String> = c.split_whitespace().map(str::to_string).collect();
                         if let Some(Value::Array(args)) = s.get("args") {
-                            v.extend(args.iter().filter_map(|x| x.as_str().map(str::to_string)));
+                            v.extend(strings(args));
                         }
                         v
                     }
