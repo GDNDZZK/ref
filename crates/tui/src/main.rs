@@ -332,7 +332,7 @@ async fn run(
     // Detach politely (server counts frontends; idle-timeout handles the rest).
     if let Some(sid) = app.current.clone() {
         app.client
-            .send(None, ref_proto::Request::Detach { session_id: sid });
+            .notify(ref_proto::Request::Detach { session_id: sid });
         tokio::time::sleep(Duration::from_millis(30)).await;
     }
     if app.last_title.is_some() {
