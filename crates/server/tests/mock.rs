@@ -1,6 +1,8 @@
 //! End-to-end checks of `ref-server --mock`: the scripts run through the real engine, tools
 //! and LLM client, and nothing outside the temporary directory is touched.
 
+mod common;
+
 use ref_proto::{MessageSource, Part, Request, Role, ServerFrame, SessionStatus, ToolState};
 use ref_server::api;
 use ref_server::hub::{Conn, Hub};
@@ -287,11 +289,7 @@ async fn the_created_session_reports_back() {
             .iter()
             .any(|m| matches!(&m.source, MessageSource::Peer { from_name, .. } if from_name.starts_with("helper")))
     };
-    let start = Instant::now();
-    while !reported() {
-        assert!(start.elapsed() < WAIT, "no report arrived");
-        tokio::time::sleep(POLL).await;
-    }
+    common::wait_until("a report", WAIT, reported).await;
     rig.run(true).await;
     assert!(rig.last_text().contains("Got this message"));
     rig.finish().await;
@@ -434,20 +432,15 @@ async fn orchestrate_directs_a_crew_and_collects_five_reports() {
 impl Rig {
     /// Waits for the model's question and answers it.
     async fn answer_question(&self, answers: Option<Vec<Vec<&str>>>) {
-        let start = Instant::now();
-        let call_id = loop {
-            let pending = self
-                .session
+        let pending = || {
+            self.session
                 .lock()
                 .questions
                 .first()
-                .map(|q| q.request.call_id.clone());
-            if let Some(id) = pending {
-                break id;
-            }
-            assert!(start.elapsed() < WAIT, "no question was asked");
-            tokio::time::sleep(POLL).await;
+                .map(|q| q.request.call_id.clone())
         };
+        common::wait_until("a question", WAIT, || pending().is_some()).await;
+        let call_id = pending().unwrap();
         let answers = answers.map(|a| {
             a.into_iter()
                 .map(|e| e.into_iter().map(String::from).collect())
@@ -586,11 +579,10 @@ async fn the_tester_reports_a_message_typed_to_it() {
 async fn cancel_stops_a_command_that_never_ends() {
     let rig = rig().await;
     rig.prompt("cancel");
-    let start = Instant::now();
-    while !rig.tools().iter().any(|t| t.state == ToolState::Running) {
-        assert!(start.elapsed() < WAIT, "the command never started");
-        tokio::time::sleep(POLL).await;
-    }
+    common::wait_until("the command to start", WAIT, || {
+        rig.tools().iter().any(|t| t.state == ToolState::Running)
+    })
+    .await;
     let req = Request::Abort {
         session_id: rig.session.id.clone(),
     };
@@ -862,18 +854,15 @@ async fn live_output_of(rig: &Rig, session: &Arc<Session>, text: &str) {
 async fn orchestrate_long_helpers_print_their_progress_while_they_work() {
     let rig = rig().await;
     rig.prompt("orchestrate-long fix the parser bug");
-    let start = Instant::now();
-    let mut sessions = Vec::new();
-    while sessions.len() < 4 {
-        assert!(start.elapsed() < WAIT, "the helpers did not start");
-        sessions = rig
-            .hub
+    let helpers = || -> Vec<Arc<Session>> {
+        rig.hub
             .sessions()
             .into_iter()
             .filter(|s| s.id != rig.session.id)
-            .collect();
-        tokio::time::sleep(POLL).await;
-    }
+            .collect()
+    };
+    common::wait_until("the helpers to start", WAIT, || helpers().len() >= 4).await;
+    let sessions = helpers();
     for (name, line) in [
         ("scout", "scout: read 2/40 files"),
         ("fixer", "fixer: patched 0/5 files"),

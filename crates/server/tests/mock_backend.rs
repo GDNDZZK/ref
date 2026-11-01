@@ -1,5 +1,7 @@
 //! `MockBackend` against the real `ref-server --mock`.
 
+mod common;
+
 use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
@@ -10,7 +12,6 @@ use tokio::io::{AsyncBufReadExt as _, BufReader};
 use tokio_tungstenite::tungstenite::Message;
 
 const STEP: Duration = Duration::from_secs(15);
-const POLL: Duration = Duration::from_millis(20);
 
 fn hello_frame() -> String {
     format!(
@@ -60,14 +61,10 @@ async fn exits_when_its_last_client_disconnects() {
     assert!(!mock.has_exited().unwrap());
     drop(ws);
 
-    let deadline = std::time::Instant::now() + STEP;
-    while !mock.has_exited().unwrap() {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the mock stayed up after its last client left"
-        );
-        tokio::time::sleep(POLL).await;
-    }
+    common::wait_until("the mock to exit after its last client left", STEP, || {
+        mock.has_exited().unwrap()
+    })
+    .await;
     mock.shutdown().await.unwrap();
 }
 
