@@ -10,12 +10,15 @@ Rectangle {
 	id: sidebar
 
 	readonly property int contentWidth: Theme.sidebarWidth
-	readonly property int maxMcpDots: 6
-	readonly property real minRunningHeight: Theme.sidebarMinRunningRows * (Theme.sidebarRowHeight + 2)
+	readonly property int newRowHeight: 44
+	readonly property int searchHeight: 32
+	readonly property int historyGap: 8 // between the search field and the history rows
+	readonly property int runningRowSpacing: 2
+	readonly property real minRunningHeight: Theme.sidebarMinRunningRows * (Theme.sidebarRowHeight + runningRowSpacing)
 	readonly property real minHistoryHeight: Theme.sidebarMinHistoryRows * Theme.sidebarHistoryRowHeight
 	// Space for the three lists: what is left of the column after the fixed parts.
 	readonly property real listSpace: fixedSpace - todoSection.height
-	readonly property real fixedSpace: height - Theme.sidebarHeaderHeight - 44 - 2 * Theme.sidebarSectionHeight - 32 - 8 - Theme.sidebarFooterHeight
+	readonly property real fixedSpace: height - Theme.sidebarHeaderHeight - newRowHeight - 2 * Theme.sidebarSectionHeight - searchHeight - historyGap - Theme.sidebarFooterHeight
 
 	// The to-do list of the session in front: the current one, or the focused tile in split view. One value, {items,
 	// done, total}, and nothing else is derived from it by a binding that could be read before it has caught up. The
@@ -25,8 +28,13 @@ Rectangle {
 	property var shownTodo: ({ items: [], done: 0, total: 0 })
 	// Up to a third of the column, and never so much that the lists below lose their minimum.
 	readonly property real todoCap: Math.min(height / 3, fixedSpace - minRunningHeight - minHistoryHeight)
-	readonly property real todoHeight: todo.items.length > 0 && todoCap >= Theme.sidebarSectionHeight + todoList.rowHeight
-		? Math.min(Theme.sidebarSectionHeight + todoList.height, todoCap) : 0
+	readonly property bool todoFits: todo.items.length > 0 && todoCap >= Theme.sidebarSectionHeight + todoList.rowHeight
+	readonly property real todoHeight: todoFits ? Math.min(Theme.sidebarSectionHeight + todoList.height, todoCap) : 0
+	readonly property string emptyHistoryText: {
+		if (!Workspace.historyLoaded)
+			return qsTr("Loading…")
+		return searchInput.text !== "" ? qsTr("No matching sessions") : qsTr("No earlier sessions")
+	}
 	readonly property int lockupWidth: 60 // the lockup is drawn at this size only: its pixels are aligned to it
 	readonly property int lockupHeight: 24
 
@@ -65,23 +73,16 @@ Rectangle {
 				width: sidebar.lockupWidth
 				height: sidebar.lockupHeight
 				sourceSize: Qt.size(width, height)
-				source: "qrc:/app/ref-lockup-small-" + (Theme.dark ? "dark" : "light") + ".svg"
+				source: "qrc:/app/ref-lockup-small-" + (Theme.dark ? ThemeName.dark : ThemeName.light) + ".svg"
 				Accessible.role: Accessible.Graphic
 				Accessible.name: "ref"
 			}
-			CircleButton {
+			IconButton {
 				anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
-				implicitWidth: 32
-				implicitHeight: 32
+				buttonSize: 32
+				iconName: "sidebar"
 				Accessible.name: qsTr("Hide sidebar")
 				onClicked: sidebar.collapseRequested()
-
-				Icon {
-					anchors.centerIn: parent
-					name: "sidebar"
-					size: 20
-					color: Theme.textMuted
-				}
 			}
 		}
 
@@ -89,10 +90,9 @@ Rectangle {
 			id: newRow
 			anchors.top: header.bottom
 			width: parent.width
-			height: 44
+			height: sidebar.newRowHeight
 
 			Rectangle {
-				id: newButton
 				x: Theme.sidebarPadding
 				anchors.verticalCenter: parent.verticalCenter
 				width: parent.width - 2 * Theme.sidebarPadding - folderButton.width - 8
@@ -120,7 +120,7 @@ Rectangle {
 						anchors.verticalCenter: parent.verticalCenter
 						text: qsTr("New session")
 						color: Theme.text
-						font.pixelSize: Theme.smallFontSize + 1
+						font.pixelSize: Theme.captionFontSize
 					}
 				}
 			}
@@ -130,23 +130,16 @@ Rectangle {
 			}
 			TapHandler {
 				id: newTap
-				onTapped: Commands.run("new")
+				onTapped: Commands.run(CommandId.newSession)
 			}
 
-			CircleButton {
+			IconButton {
 				id: folderButton
 				anchors { right: parent.right; rightMargin: Theme.sidebarPadding; verticalCenter: parent.verticalCenter }
-				implicitWidth: 36
-				implicitHeight: 36
+				buttonSize: 36
+				iconName: "folder-open"
 				Accessible.name: qsTr("New session in another folder…")
-				onClicked: Commands.run("new-in")
-
-				Icon {
-					anchors.centerIn: parent
-					name: "folder-open"
-					size: 20
-					color: Theme.textMuted
-				}
+				onClicked: Commands.run(CommandId.newSessionIn)
 			}
 		}
 
@@ -165,6 +158,7 @@ Rectangle {
 
 			SectionLabel {
 				id: todoLabel
+				leftPadding: Theme.listLabelInset
 				text: qsTr("Todo %1/%2").arg(sidebar.shownTodo.done).arg(sidebar.shownTodo.total)
 			}
 
@@ -181,7 +175,7 @@ Rectangle {
 					width: parent.width
 					items: sidebar.shownTodo.items
 					wrap: true
-					leftPad: 18 // in line with the label
+					leftPad: Theme.listLabelInset // in line with the label
 				}
 
 				ScrollBar.vertical: ThemedScrollBar {}
@@ -190,6 +184,7 @@ Rectangle {
 
 		SectionLabel {
 			id: runningLabel
+			leftPadding: Theme.listLabelInset
 			anchors.top: todoSection.bottom
 			text: qsTr("Running")
 		}
@@ -201,7 +196,7 @@ Rectangle {
 			// The rows' own height; scrolls only when the history would get less than its minimum.
 			height: Math.min(contentHeight, Math.max(sidebar.listSpace - sidebar.minHistoryHeight, sidebar.minRunningHeight))
 			model: Workspace.sessions
-			spacing: 2
+			spacing: sidebar.runningRowSpacing
 			clip: true
 			boundsBehavior: Flickable.StopAtBounds
 			delegate: SessionRow {}
@@ -230,6 +225,7 @@ Rectangle {
 
 		SectionLabel {
 			id: historyLabel
+			leftPadding: Theme.listLabelInset
 			anchors.top: running.bottom
 			text: qsTr("History")
 		}
@@ -240,7 +236,7 @@ Rectangle {
 			anchors.top: historyLabel.bottom
 			x: Theme.sidebarPadding
 			width: parent.width - 2 * Theme.sidebarPadding
-			height: 32
+			height: sidebar.searchHeight
 			radius: 16
 			color: Theme.surface
 			border.color: searchInput.activeFocus ? Theme.accent : Theme.border
@@ -260,45 +256,36 @@ Rectangle {
 				color: Theme.text
 				selectionColor: Theme.selection
 				selectedTextColor: Theme.text
-				font.pixelSize: Theme.smallFontSize + 1
+				font.pixelSize: Theme.captionFontSize
 				clip: true
 				Accessible.name: qsTr("Search history")
 				onTextChanged: Workspace.history.filter = text.trim()
 
-				Text {
-					textFormat: Text.PlainText
+				PlaceholderText {
 					anchors.fill: parent
-					verticalAlignment: Text.AlignVCenter
+					textInput: searchInput
 					text: qsTr("Search history")
-					color: Theme.textMuted
-					font.pixelSize: Theme.smallFontSize + 1
-					visible: searchInput.text === "" && searchInput.preeditText === ""
+					font.pixelSize: Theme.captionFontSize
 				}
 			}
-			CircleButton {
+			IconButton {
 				id: clear
 				anchors { right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
-				implicitWidth: 22
-				implicitHeight: 22
+				buttonSize: 22
+				iconName: "close"
+				iconSize: 16
 				opacity: searchInput.text !== "" ? 1 : 0
 				visible: opacity > 0
 				Accessible.name: qsTr("Clear search")
 				onClicked: searchInput.text = ""
 
 				Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
-
-				Icon {
-					anchors.centerIn: parent
-					name: "close"
-					size: 16
-					color: Theme.textMuted
-				}
 			}
 		}
 
 		ListView {
 			id: history
-			anchors { top: search.bottom; topMargin: 8; bottom: footerBar.top }
+			anchors { top: search.bottom; topMargin: sidebar.historyGap; bottom: footerBar.top }
 			width: parent.width
 			model: Workspace.history
 			clip: true
@@ -311,9 +298,9 @@ Rectangle {
 				textFormat: Text.PlainText
 				anchors { horizontalCenter: parent.horizontalCenter; top: parent.top; topMargin: 16 }
 				visible: history.count === 0
-				text: !Workspace.historyLoaded ? qsTr("Loading…") : searchInput.text !== "" ? qsTr("No matching sessions") : qsTr("No earlier sessions")
+				text: sidebar.emptyHistoryText
 				color: Theme.textMuted
-				font.pixelSize: Theme.smallFontSize + 1
+				font.pixelSize: Theme.captionFontSize
 			}
 		}
 
@@ -329,90 +316,18 @@ Rectangle {
 				color: Theme.border
 			}
 
-			Row {
-				id: mcp
+			McpSummary {
 				x: 18
 				anchors.verticalCenter: parent.verticalCenter
-				spacing: 8
-				visible: Workspace.mcpServers.length > 0
-
-				Icon {
-					anchors.verticalCenter: parent.verticalCenter
-					name: "mcp"
-					size: 16
-					color: Theme.textMuted
-				}
-				Text {
-					textFormat: Text.PlainText
-					anchors.verticalCenter: parent.verticalCenter
-					text: "MCP"
-					color: Theme.textMuted
-					font.pixelSize: Theme.smallFontSize + 1
-				}
-				Row {
-					anchors.verticalCenter: parent.verticalCenter
-					spacing: 4
-
-					Repeater {
-						model: Workspace.mcpServers.slice(0, sidebar.maxMcpDots)
-
-						Rectangle {
-							id: dot
-							required property var modelData
-							anchors.verticalCenter: parent.verticalCenter
-							width: 6
-							height: 6
-							radius: 3
-							color: modelData.status === "connected" ? Theme.success
-								: modelData.status === "failed" ? Theme.danger
-								: modelData.status === "connecting" ? Theme.accent
-								: Qt.alpha(Theme.textMuted, 0.5)
-
-							Pulse {
-								target: dot
-								running: dot.modelData.status === "connecting"
-							}
-						}
-					}
-				}
-				Text {
-					textFormat: Text.PlainText
-					anchors.verticalCenter: parent.verticalCenter
-					visible: Workspace.mcpServers.length > sidebar.maxMcpDots
-					text: "+" + (Workspace.mcpServers.length - sidebar.maxMcpDots)
-					color: Theme.textMuted
-					font.pixelSize: Theme.smallFontSize
-				}
-
-				HoverHandler { cursorShape: Qt.PointingHandCursor }
-				TapHandler { onTapped: Commands.run("mcp") }
 			}
 
-			CircleButton {
+			IconButton {
 				anchors { right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
-				implicitWidth: 32
-				implicitHeight: 32
+				buttonSize: 32
+				iconName: "sliders"
 				Accessible.name: qsTr("Settings")
-				onClicked: Commands.run("settings")
-
-				Icon {
-					anchors.centerIn: parent
-					name: "sliders"
-					size: 20
-					color: Theme.textMuted
-				}
+				onClicked: Commands.run(CommandId.settings)
 			}
 		}
-	}
-
-	component SectionLabel: Text {
-
-		textFormat: Text.PlainText
-		width: column.width
-		height: Theme.sidebarSectionHeight
-		leftPadding: 18
-		verticalAlignment: Text.AlignVCenter
-		color: Theme.textMuted
-		font.pixelSize: Theme.smallFontSize
 	}
 }

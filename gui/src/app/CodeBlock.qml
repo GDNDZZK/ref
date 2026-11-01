@@ -33,23 +33,14 @@ Block {
 			TextButton {
 				id: copyButton
 
-				property bool copied: false
-
 				anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
-				text: copied ? qsTr("Copied") : qsTr("Copy")
+				text: copiedFlag.copied ? qsTr("Copied") : qsTr("Copy")
 				onClicked: {
-					source.selectAll()
-					source.copy()
-					source.deselect()
-					copied = true
-					copiedReset.restart()
+					Clipboard.setText(source.text)
+					copiedFlag.flash()
 				}
 
-				Timer {
-					id: copiedReset
-					interval: 1500
-					onTriggered: copyButton.copied = false
-				}
+				CopiedFlag { id: copiedFlag }
 			}
 		}
 

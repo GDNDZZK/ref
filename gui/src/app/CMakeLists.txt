@@ -2,7 +2,7 @@
 qt_add_executable(ref-gui main.cpp)
 
 # Must be set before qt_add_qml_module() reads the files.
-set_source_files_properties(Theme.qml Motion.qml Format.qml Links.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set_source_files_properties(Theme.qml Motion.qml Format.qml Links.qml CompletionKind.qml DialogId.qml ThemeName.qml CommandId.qml McpStatus.qml Activity.qml ToastLevel.qml TodoStatus.qml ToolState.qml MessageSource.qml Fields.qml SessionTools.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 qt_add_qml_module(ref-gui
 	URI RefGui
@@ -15,6 +15,7 @@ qt_add_qml_module(ref-gui
 		chat_image_provider.h
 		chat_session.cpp
 		chat_session.h
+		clipboard.h
 		composer_model_type.h
 		notification_center_type.h
 		question_prompt_type.h
@@ -32,6 +33,34 @@ qt_add_qml_module(ref-gui
 		workspace.h
 	QML_FILES
 		Main.qml
+		CompletionKind.qml
+		DialogId.qml
+		ThemeName.qml
+		CommandId.qml
+		McpStatus.qml
+		Activity.qml
+		ToastLevel.qml
+		TodoStatus.qml
+		ToolState.qml
+		MessageSource.qml
+		Fields.qml
+		SessionTools.qml
+		SessionDialog.qml
+		FieldBody.qml
+		DialogBody.qml
+		CancelButton.qml
+		ScrollHandle.qml
+		IconButton.qml
+		TruncatedChip.qml
+		CopiedFlag.qml
+		HoverCopyButton.qml
+		PlaceholderText.qml
+		SectionLabel.qml
+		Ticker.qml
+		McpServerRow.qml
+		QueueRow.qml
+		McpSummary.qml
+		Toast.qml
 		SessionPane.qml
 		QuestionCard.qml
 		QuestionRow.qml
@@ -54,7 +83,6 @@ qt_add_qml_module(ref-gui
 		DialogButton.qml
 		DialogField.qml
 		Segmented.qml
-		ToggleSwitch.qml
 		KeyChips.qml
 		PickList.qml
 		PickRow.qml

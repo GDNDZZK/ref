@@ -59,7 +59,6 @@ Rectangle {
 	}
 
 	Item {
-		id: labelBox
 		x: chip.paddingX + chip.iconSize + chip.iconGap
 		width: Math.max(0, chip.width - x - chip.paddingX)
 		height: chip.height

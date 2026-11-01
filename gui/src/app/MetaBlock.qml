@@ -21,36 +21,31 @@ Block {
 
 	readonly property bool fromUser: source !== ""
 	readonly property real restingOpacity: 0.6
-	readonly property int rowHeight: 24
+	readonly property int rowHeight: Theme.metaLineHeight
 	readonly property int itemSpacing: 8
 	pullUp: 8 // brings the line closer to its message than rows are apart
 	readonly property real replyTime: timeEnd > 0 ? timeEnd - time : 0
 	readonly property real tokensPerSecond: replyTime > 0 ? tokensOut / (replyTime / Format.msPerSecond) : 0
 	readonly property int maxPlausibleTokensPerSecond: 100000
+	readonly property bool showsRate: tokensOut > 0 && tokensPerSecond > 0 && tokensPerSecond < maxPlausibleTokensPerSecond
+	readonly property int hashMultiplier: 31
+	readonly property int hashModulus: 1000003 // a prime, which keeps the hash small and well spread
 	readonly property bool working: !fromUser && timeEnd === 0 && !errored && !interrupted
 	// The agent's color by its place in the name's hash, until the session knows the agent list.
 	readonly property color agentColor: {
 		let hash = 0
 		for (let i = 0; i < agent.length; ++i)
-			hash = (hash * 31 + agent.charCodeAt(i)) % 1000003
+			hash = (hash * hashMultiplier + agent.charCodeAt(i)) % hashModulus
 		return Theme.agentColor("", hash)
 	}
 	readonly property string agentTitle: agent === "" ? "" : agent.charAt(0).toUpperCase() + agent.slice(1)
 
-	property real now: Date.now()
-	property bool copied: false
-
-	Timer {
+	Ticker {
+		id: ticker
 		interval: Format.msPerSecond
 		running: block.working
-		repeat: true
-		onTriggered: block.now = Date.now()
 	}
-	Timer {
-		id: copiedTimer
-		interval: Motion.slow * 3
-		onTriggered: block.copied = false
-	}
+	CopiedFlag { id: copiedFlag }
 
 	Item {
 		id: row
@@ -79,12 +74,12 @@ Block {
 				Rectangle {
 					id: agentDot
 					anchors.centerIn: parent
-					width: 8
-					height: 8
-					radius: 4
+					width: Theme.statusDotSize
+					height: Theme.statusDotSize
+					radius: width / 2
 					color: block.errored ? Theme.textMuted : block.agentColor
 
-					Pulse { target: agentDot; running: block.working; dimmed: 0.5 }
+					Pulse { target: agentDot; running: block.working }
 				}
 			}
 			MetaText {
@@ -103,10 +98,9 @@ Block {
 				}
 			}
 			MetaText {
-				id: timeText
 				text: block.timeEnd > 0
 					? Format.clock(block.time) + " \u2192 " + Format.clock(block.timeEnd) + " (" + Format.duration(block.replyTime) + ")"
-					: Format.clock(block.time) + " \u00b7 " + Format.elapsed(block.now - block.time)
+					: Format.clock(block.time) + " \u00b7 " + Format.elapsed(ticker.now - block.time)
 				PlainToolTip { text: new Date(block.time).toLocaleString(); visible: timeHover.hovered }
 				HoverHandler { id: timeHover }
 			}
@@ -117,7 +111,7 @@ Block {
 			MetaText {
 				text: Math.round(block.tokensPerSecond) + " tok/s"
 				opacity: block.restingOpacity
-				visible: block.tokensOut > 0 && block.tokensPerSecond > 0 && block.tokensPerSecond < block.maxPlausibleTokensPerSecond
+				visible: block.showsRate
 			}
 			MetaText {
 				text: qsTr("interrupted")
@@ -143,12 +137,11 @@ Block {
 				onTriggered: block.chat.undoRequested(block.messageId)
 			}
 			MetaAction {
-				iconName: block.copied ? "check" : "copy"
+				iconName: copiedFlag.copied ? "check" : "copy"
 				label: qsTr("Copy")
 				onTriggered: {
 					block.chat.copyRequested(block.messageId)
-					block.copied = true
-					copiedTimer.restart()
+					copiedFlag.flash()
 				}
 			}
 		}

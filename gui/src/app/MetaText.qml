@@ -6,6 +6,6 @@ Text {
 	textFormat: Text.PlainText
 	color: Theme.textMuted
 	font.pixelSize: Theme.smallFontSize
-	height: 24
+	height: Theme.metaLineHeight
 	verticalAlignment: Text.AlignVCenter
 }

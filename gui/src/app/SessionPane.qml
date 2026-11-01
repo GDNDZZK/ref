@@ -116,8 +116,6 @@ Item {
 		// Stacked above the send button, on its center line.
 		x: composer.x + composer.sendButtonCenterX - width / 2
 		anchors { bottom: questionCard.top; bottomMargin: 4 }
-		implicitWidth: 34
-		implicitHeight: 34
 		opacity: shown ? 1 : 0
 		visible: opacity > 0
 		transform: Translate {
@@ -212,7 +210,7 @@ Item {
 	Connections {
 		target: pane.session.composer
 		function onToastRequested(level, text) {
-			Workspace.toastRequested(level, text)
+			Workspace.showToast(level, text)
 		}
 	}
 

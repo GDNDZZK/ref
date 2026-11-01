@@ -7,12 +7,16 @@ ToolBodyBase {
 	id: body
 
 	readonly property var meta: call.meta
-	readonly property string command: typeof call.inputObject.command === "string" ? call.inputObject.command : ""
-	readonly property bool running: call.toolState === "running"
+	readonly property string command: Fields.stringOf(call.inputObject, "command")
+	readonly property bool running: call.toolState === ToolState.running
 	readonly property int liveTailLines: 20
 	readonly property var liveLines: call.liveOutput === "" ? [] : call.liveOutput.split("\n")
 	readonly property int earlierLines: Math.max(0, liveLines.length - liveTailLines)
 	readonly property bool hasExit: meta.exit_code !== undefined && meta.exit_code !== null
+	readonly property bool timedOut: meta.timed_out === true
+	readonly property bool cancelled: meta.cancelled === true
+	readonly property bool truncated: meta.truncated === true
+	readonly property bool hasFlags: hasExit || timedOut || cancelled || truncated
 
 	CommandBox {
 		visible: body.command !== ""
@@ -35,7 +39,7 @@ ToolBodyBase {
 				visible: body.earlierLines > 0
 				text: qsTr("%n earlier line(s)", "", body.earlierLines)
 				color: Theme.textMuted
-				font.pixelSize: 11
+				font.pixelSize: Theme.microFontSize
 			}
 			OutputText {
 				text: body.liveLines.slice(body.earlierLines).join("\n")
@@ -55,7 +59,7 @@ ToolBodyBase {
 
 			Row {
 				spacing: 6
-				visible: body.hasExit || body.meta.timed_out === true || body.meta.cancelled === true || body.meta.truncated === true
+				visible: body.hasFlags
 
 				ToolChip {
 					visible: body.hasExit
@@ -63,24 +67,23 @@ ToolBodyBase {
 					tint: body.meta.exit_code === 0 ? Theme.textMuted : Theme.danger
 				}
 				ToolChip {
-					visible: body.meta.timed_out === true
+					visible: body.timedOut
 					text: qsTr("timed out")
 					tint: Theme.warning
 				}
 				ToolChip {
-					visible: body.meta.cancelled === true
+					visible: body.cancelled
 					text: qsTr("cancelled")
 					tint: Theme.warning
 				}
-				ToolChip {
-					visible: body.meta.truncated === true
-					text: qsTr("truncated")
+				TruncatedChip {
+					meta: body.meta
 				}
 			}
 			OutputText {
 				visible: body.call.output !== ""
 				text: body.call.output
-				textColor: body.call.failed || body.call.toolState === "error" ? Theme.danger : Theme.textMuted
+				textColor: body.call.failed || body.call.toolState === ToolState.error ? Theme.danger : Theme.textMuted
 				showAll: body.call.showAll
 				onShowAllRequested: body.showAllRequested()
 			}

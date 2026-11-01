@@ -7,15 +7,24 @@ import RefGui
 Item {
 	id: root
 
-	property string activity: "idle" // idle, thinking, running, waiting_permission, waiting_question, retrying or compacting
+	property string activity: Activity.idle
 	property bool hasError: false
 
-	readonly property bool working: activity !== "idle"
-	readonly property bool needsAttention: activity === "waiting_permission" || activity === "waiting_question" || activity === "retrying"
-	readonly property color dotColor: hasError && !working ? Theme.danger : needsAttention ? Theme.warning : working ? Theme.accent : Qt.alpha(Theme.textMuted, 0.5)
+	readonly property bool working: Activity.isWorking(activity)
+	readonly property color dotColor: colorFor(activity, hasError)
 
-	implicitWidth: 8
-	implicitHeight: 8
+	function colorFor(state, errored) {
+		if (Activity.isFailed(state, errored))
+			return Theme.danger
+		if (Activity.needsAttention(state))
+			return Theme.warning
+		if (Activity.isWorking(state))
+			return Theme.accent
+		return Theme.idleDot
+	}
+
+	implicitWidth: Theme.statusDotSize
+	implicitHeight: Theme.statusDotSize
 
 	Flourish {
 		id: flourish
@@ -35,7 +44,6 @@ Item {
 	Pulse {
 		target: dot
 		running: root.working
-		dimmed: 0.5
 	}
 
 	onWorkingChanged: if (!working && !hasError) flourish.play()

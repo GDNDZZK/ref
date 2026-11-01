@@ -12,9 +12,9 @@ Rectangle {
 	readonly property real targetX: anchorRect.x + 3
 	readonly property real targetY: anchorRect.y + (anchorRect.height - height) / 2
 
-	width: 8
-	height: 8
-	radius: 4
+	width: Theme.statusDotSize
+	height: Theme.statusDotSize
+	radius: width / 2
 	color: Theme.accent
 
 	Component.onCompleted: {

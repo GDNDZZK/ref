@@ -54,12 +54,11 @@ Block {
 					anchors.verticalCenter: parent.verticalCenter
 					text: block.streaming ? qsTr("Thinking") : qsTr("Thought")
 					color: Theme.textMuted
-					font.pixelSize: Theme.smallFontSize + 1
+					font.pixelSize: Theme.captionFontSize
 
 					Pulse {
 						target: title
 						running: block.streaming
-						dimmed: 0.5
 						period: Motion.calmPulse
 					}
 				}
@@ -105,7 +104,7 @@ Block {
 				textFormat: TextEdit.MarkdownText
 				text: block.content
 				color: Theme.textMuted
-				font.pixelSize: Theme.fontSize - 1
+				font.pixelSize: Theme.secondaryFontSize
 			}
 		}
 	}

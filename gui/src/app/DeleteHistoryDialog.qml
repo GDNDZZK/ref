@@ -16,26 +16,22 @@ ModalDialog {
 	onAccepted: remove()
 
 	buttons: [
-		DialogButton {
-			text: qsTr("Cancel")
-			onClicked: dialog.close()
-		},
+		CancelButton {},
 		DialogButton {
 			text: qsTr("Delete")
-			kind: "danger"
+			kind: DialogButton.Danger
 			onClicked: dialog.remove()
 		}
 	]
 
-	Text {
-		textFormat: Text.PlainText
-		x: 22
-		width: parent.width - 2 * 22
-		topPadding: 4
-		bottomPadding: 22
-		text: qsTr("Delete \"%1\" from history? This cannot be undone.").arg(Workspace.dialogArgs.title ?? "")
-		color: Theme.text
-		font.pixelSize: Theme.fontSize - 1
-		wrapMode: Text.Wrap
+	DialogBody {
+		Text {
+			textFormat: Text.PlainText
+			width: parent.width
+			text: qsTr("Delete \"%1\" from history? This cannot be undone.").arg(Workspace.dialogArgs.title ?? "")
+			color: Theme.text
+			font.pixelSize: Theme.secondaryFontSize
+			wrapMode: Text.Wrap
+		}
 	}
 }

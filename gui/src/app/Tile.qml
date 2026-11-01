@@ -10,6 +10,7 @@ Item {
 	required property string sessionId
 	required property bool leaving
 	required property int place
+	required property bool anyZoomed // whether any tile is zoomed
 
 	// Where the grid wants the tile, and whether it is the zoomed one.
 	property rect slot: Qt.rect(0, 0, 0, 0)
@@ -21,15 +22,14 @@ Item {
 	readonly property bool zoomed: Workspace.zoomedId === sessionId
 	readonly property bool expanded: zoomed || takeover || growing
 	readonly property bool fading: leaving && !growing
-	readonly property bool othersZoomed: Workspace.zoomedId !== "" && !zoomed
+	readonly property bool othersZoomed: anyZoomed && !zoomed
 	// Whether the tile moves between its slot and the whole area (slowly) or just reflows.
 	property bool travelling: expanded
 	readonly property int travelDuration: travelling || leaving ? Motion.slow : Motion.standard
 	readonly property bool focused: Workspace.focusedTileId === sessionId
 	readonly property var facts: live.data
 	readonly property bool hasPermission: facts.hasPermission === true
-	readonly property bool failed: facts.hasError === true && facts.activity === "idle"
-	property double now: Date.now()
+	readonly property bool failed: Activity.isFailed(facts.activity, facts.hasError === true)
 
 	function focusPane() {
 		pane.focusInput()
@@ -91,11 +91,10 @@ Item {
 		sessionId: tile.sessionId
 	}
 
-	Timer {
-		interval: 1000
-		repeat: true
+	Ticker {
+		id: ticker
+		interval: Format.msPerSecond
 		running: tile.facts.busySince > 0 && tile.visible
-		onTriggered: tile.now = Date.now()
 	}
 
 	Rectangle {
@@ -130,7 +129,7 @@ Item {
 			SessionDot {
 				x: 12
 				anchors.verticalCenter: parent.verticalCenter
-				activity: tile.facts.activity ?? "idle"
+				activity: tile.facts.activity ?? Activity.idle
 				hasError: tile.facts.hasError ?? false
 			}
 
@@ -139,7 +138,7 @@ Item {
 				anchors { left: parent.left; leftMargin: 30; right: status.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
 				text: tile.facts.displayTitle ?? ""
 				color: Theme.text
-				font.pixelSize: Theme.fontSize - 2
+				font.pixelSize: Theme.compactFontSize
 				elide: Text.ElideRight
 			}
 
@@ -150,7 +149,7 @@ Item {
 
 				Icon {
 					anchors.verticalCenter: parent.verticalCenter
-					name: tile.facts.activity === "waiting_question" ? "question" : "lock"
+					name: tile.facts.activity === Activity.waitingQuestion ? "question" : "lock"
 					size: 16
 					color: Theme.warning
 					visible: tile.hasPermission
@@ -173,26 +172,19 @@ Item {
 					textFormat: Text.PlainText
 					anchors.verticalCenter: parent.verticalCenter
 					visible: tile.facts.busySince > 0
-					text: Format.elapsed(tile.now - tile.facts.busySince)
+					text: Format.elapsed(ticker.now - tile.facts.busySince)
 					color: Theme.textMuted
 					font.pixelSize: Theme.smallFontSize
 				}
 			}
 
-			CircleButton {
+			IconButton {
 				id: zoomButton
 				anchors { right: parent.right; rightMargin: 4; verticalCenter: parent.verticalCenter }
-				implicitWidth: 28
-				implicitHeight: 28
+				buttonSize: 28
+				iconName: "maximize"
 				Accessible.name: qsTr("Zoom in")
 				onClicked: Workspace.zoomTile(tile.sessionId)
-
-				Icon {
-					anchors.centerIn: parent
-					name: "maximize"
-					size: 20
-					color: Theme.textMuted
-				}
 			}
 
 			TapHandler {

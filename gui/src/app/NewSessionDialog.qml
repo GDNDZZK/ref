@@ -6,17 +6,8 @@ import RefGui
 ModalDialog {
 	id: dialog
 
-	property bool gone: false
-
 	function start() {
-		Workspace.newSession(path.text.trim(), (ok, reason) => {
-			if (gone)
-				return
-			if (ok)
-				close()
-			else
-				path.errorText = reason
-		})
+		Workspace.newSession(path.text.trim(), closeOrShowError(path))
 	}
 
 	title: qsTr("New session")
@@ -25,30 +16,20 @@ ModalDialog {
 		path.text = Workspace.cwd
 		path.select()
 	}
-	Component.onDestruction: gone = true
 
 	buttons: [
-		DialogButton {
-			text: qsTr("Cancel")
-			onClicked: dialog.close()
-		},
+		CancelButton {},
 		DialogButton {
 			text: qsTr("Start")
-			kind: "primary"
+			kind: DialogButton.Primary
 			onClicked: dialog.start()
 		}
 	]
 
-	Item {
-		width: parent.width
-		implicitHeight: path.implicitHeight + 2 * 22
-		height: implicitHeight
-
+	FieldBody {
 		PathField {
 			id: path
-			x: 22
-			y: 22
-			width: parent.width - 2 * 22
+			width: parent.width
 			placeholderText: qsTr("Directory")
 			onAccepted: dialog.start()
 			onTextChanged: errorText = ""

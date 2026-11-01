@@ -10,6 +10,7 @@ Item {
 	property string errorText: ""
 	property alias inputItem: input
 	readonly property bool hasError: errorText !== ""
+	readonly property int errorGap: 6 // between the field and its error line
 
 	signal accepted()
 	signal edited()
@@ -22,7 +23,7 @@ Item {
 	}
 
 	implicitWidth: 240
-	implicitHeight: Theme.fieldHeight + (hasError ? errorLabel.implicitHeight + 6 : 0)
+	implicitHeight: Theme.fieldHeight + (hasError ? errorLabel.implicitHeight + errorGap : 0)
 
 	Behavior on implicitHeight { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 
@@ -54,22 +55,18 @@ Item {
 			Accessible.name: field.placeholderText
 		}
 
-		Text {
-			textFormat: Text.PlainText
+		PlaceholderText {
 			anchors { fill: input }
-			verticalAlignment: Text.AlignVCenter
+			textInput: input
 			text: field.placeholderText
-			color: Theme.textMuted
-			font.pixelSize: Theme.fontSize
 			elide: Text.ElideRight
-			visible: input.text === "" && input.preeditText === ""
 		}
 	}
 
 	Text {
 		textFormat: Text.PlainText
 		id: errorLabel
-		anchors { top: box.bottom; topMargin: 6; left: parent.left; right: parent.right }
+		anchors { top: box.bottom; topMargin: field.errorGap; left: parent.left; right: parent.right }
 		text: field.errorText
 		color: Theme.danger
 		font.pixelSize: Theme.smallFontSize

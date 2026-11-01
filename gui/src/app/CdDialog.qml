@@ -3,21 +3,11 @@ import QtQuick.Dialogs
 import RefGui
 
 // Changes the working directory of one session.
-ModalDialog {
+SessionDialog {
 	id: dialog
 
-	readonly property string sessionId: Workspace.dialogArgs.sessionId ?? Workspace.currentId
-	property bool gone: false
-
 	function apply() {
-		Workspace.setSessionCwd(sessionId, path.text.trim(), (ok, reason) => {
-			if (gone)
-				return
-			if (ok)
-				close()
-			else
-				path.errorText = reason
-		})
+		Workspace.setSessionCwd(sessionId, path.text.trim(), closeOrShowError(path))
 	}
 
 	title: qsTr("Change directory")
@@ -26,7 +16,6 @@ ModalDialog {
 		path.text = Workspace.info(sessionId).cwd
 		path.select()
 	}
-	Component.onDestruction: gone = true
 
 	buttons: [
 		DialogButton {
@@ -34,27 +23,18 @@ ModalDialog {
 			visible: Workspace.backendLocal
 			onClicked: folders.open()
 		},
-		DialogButton {
-			text: qsTr("Cancel")
-			onClicked: dialog.close()
-		},
+		CancelButton {},
 		DialogButton {
 			text: qsTr("Change")
-			kind: "primary"
+			kind: DialogButton.Primary
 			onClicked: dialog.apply()
 		}
 	]
 
-	Item {
-		width: parent.width
-		implicitHeight: path.implicitHeight + 2 * 22
-		height: implicitHeight
-
+	FieldBody {
 		PathField {
 			id: path
-			x: 22
-			y: 22
-			width: parent.width - 2 * 22
+			width: parent.width
 			placeholderText: qsTr("Directory")
 			onAccepted: dialog.apply()
 			onTextChanged: errorText = ""

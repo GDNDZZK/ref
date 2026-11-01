@@ -12,6 +12,16 @@ Window {
 	property var shown: null
 	property bool restored: false
 	readonly property bool zoomed: Workspace.zoomedId !== ""
+	// The theme setting decides; "system" follows the system's color scheme.
+	readonly property bool wantsDark: Workspace.settings.theme === ThemeName.dark
+		|| (Workspace.settings.theme === ThemeName.system && Application.styleHints.colorScheme === Qt.Dark)
+
+	// Connection trouble, or why no session could be opened; "" when there is nothing to say.
+	function noticeText() {
+		if (Workspace.connectionText !== "")
+			return Workspace.connectionText
+		return Workspace.current === null ? Workspace.failureText : ""
+	}
 
 	function showSession(session) {
 		if (session === null)
@@ -54,7 +64,7 @@ Window {
 		restored = true
 		showSession(Workspace.current)
 		if (Workspace.settings.loadProblem !== "")
-			Workspace.showToast("warn", Workspace.settings.loadProblem)
+			Workspace.showToast(ToastLevel.warn, Workspace.settings.loadProblem)
 	}
 	onWidthChanged: if (restored && visibility === Window.Windowed) Workspace.settings.windowWidth = width
 	onHeightChanged: if (restored && visibility === Window.Windowed) Workspace.settings.windowHeight = height
@@ -65,11 +75,10 @@ Window {
 		value: window.active
 	}
 
-	// The theme setting decides; "system" follows the system's color scheme.
 	Binding {
 		target: Theme
 		property: "dark"
-		value: Workspace.settings.theme === "dark" || (Workspace.settings.theme === "system" && Application.styleHints.colorScheme === Qt.Dark)
+		value: window.wantsDark
 	}
 
 	Connections {
@@ -140,7 +149,7 @@ Window {
 			id: sidebar
 			height: parent.height
 			width: Workspace.settings.sidebarVisible ? Theme.sidebarWidth : 0
-			onCollapseRequested: Commands.run("sidebar")
+			onCollapseRequested: Commands.run(CommandId.sidebar)
 
 			Behavior on width { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 		}
@@ -186,7 +195,7 @@ Window {
 
 				// Connection trouble, or why no session could be opened, until it is gone.
 				StatusPill {
-					text: Workspace.connectionText !== "" ? Workspace.connectionText : Workspace.current === null ? Workspace.failureText : ""
+					text: window.noticeText()
 				}
 
 				Crossfade {
@@ -205,74 +214,51 @@ Window {
 	}
 
 	// Above the snapshot, so their own morph stays visible during the crossfade.
-	CircleButton {
+	IconButton {
 		id: expand
-		anchors { top: parent.top; left: parent.left; margins: 14 }
+		anchors { top: parent.top; left: parent.left; margins: Theme.windowButtonMargin }
+		iconName: "sidebar"
 		opacity: sidebar.width === 0 ? 1 : 0
 		visible: opacity > 0
 		Accessible.name: qsTr("Show sidebar")
-		onClicked: Commands.run("sidebar")
+		onClicked: Commands.run(CommandId.sidebar)
 
 		Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-
-		Icon {
-			anchors.centerIn: parent
-			name: "sidebar"
-			size: 20
-			color: Theme.textMuted
-		}
 	}
 
-	CircleButton {
-		anchors { top: parent.top; left: expand.right; leftMargin: 8; topMargin: 14 }
+	IconButton {
+		anchors { top: parent.top; left: expand.right; leftMargin: Theme.windowButtonGap; topMargin: Theme.windowButtonMargin }
+		iconName: "plus"
 		opacity: expand.opacity
 		visible: opacity > 0
 		Accessible.name: qsTr("New session")
-		onClicked: Commands.run("new")
-
-		Icon {
-			anchors.centerIn: parent
-			name: "plus"
-			size: 20
-			color: Theme.textMuted
-		}
+		onClicked: Commands.run(CommandId.newSession)
 	}
 
 	ThemeToggle {
 		id: themeToggle
-		anchors { top: parent.top; right: parent.right; margins: 14 }
-		onClicked: Workspace.requestTheme(Theme.dark ? "light" : "dark")
+		anchors { top: parent.top; right: parent.right; margins: Theme.windowButtonMargin }
+		onClicked: Workspace.requestTheme(Theme.dark ? ThemeName.light : ThemeName.dark)
 	}
 
-	CircleButton {
+	IconButton {
 		id: splitButton
-		anchors { top: parent.top; right: themeToggle.left; topMargin: 14; rightMargin: 8 }
+		anchors { top: parent.top; right: themeToggle.left; topMargin: Theme.windowButtonMargin; rightMargin: Theme.windowButtonGap }
+		iconName: "split"
+		iconColor: Workspace.splitView ? Theme.accent : Theme.textMuted
 		Accessible.name: qsTr("Split view")
-		onClicked: Commands.run("watch")
-
-		Icon {
-			anchors.centerIn: parent
-			name: "split"
-			size: 20
-			color: Workspace.splitView ? Theme.accent : Theme.textMuted
-		}
+		onClicked: Commands.run(CommandId.watch)
 	}
 
-	CircleButton {
-		anchors { top: parent.top; right: splitButton.left; topMargin: 14; rightMargin: 8 }
+	IconButton {
+		anchors { top: parent.top; right: splitButton.left; topMargin: Theme.windowButtonMargin; rightMargin: Theme.windowButtonGap }
+		iconName: "restore"
 		opacity: window.zoomed ? 1 : 0
 		visible: opacity > 0
 		Accessible.name: qsTr("Leave zoom")
 		onClicked: Workspace.unzoom()
 
 		Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-
-		Icon {
-			anchors.centerIn: parent
-			name: "restore"
-			size: 20
-			color: Theme.textMuted
-		}
 	}
 
 	DialogHost {

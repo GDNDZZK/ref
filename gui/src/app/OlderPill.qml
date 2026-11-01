@@ -14,41 +14,43 @@ Item {
 	readonly property int pillHeight: 28
 	readonly property int innerPadding: 12
 	readonly property int maxWidth: 480
+	readonly property int iconSlot: 16
+	readonly property int rowSpacing: 6
+	readonly property bool hasError: error !== ""
 
 	implicitWidth: parent ? parent.width : 0
 	implicitHeight: pillHeight
 
 	Rectangle {
-		id: face
 		anchors.horizontalCenter: parent.horizontalCenter
 		width: Math.min(row.width + 2 * pill.innerPadding, pill.maxWidth)
 		height: pill.pillHeight
 		radius: height / 2
 		color: hover.hovered && !pill.loading ? Theme.surfaceHover : Theme.surface
-		border.color: pill.error !== "" ? Qt.alpha(Theme.danger, 0.5) : Theme.border
+		border.color: pill.hasError ? Qt.alpha(Theme.danger, 0.5) : Theme.border
 
 		Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 
 		Row {
 			id: row
 			anchors.centerIn: parent
-			spacing: 6
+			spacing: pill.rowSpacing
 
 			Item {
 				anchors.verticalCenter: parent.verticalCenter
-				width: 16
-				height: 16
+				width: pill.iconSlot
+				height: pill.iconSlot
 
 				Rectangle {
 					id: dot
 					anchors.centerIn: parent
-					width: 8
-					height: 8
-					radius: 4
+					width: Theme.statusDotSize
+					height: Theme.statusDotSize
+					radius: width / 2
 					color: Theme.accent
 					visible: pill.loading
 
-					Pulse { target: dot; running: pill.loading; dimmed: 0.5 }
+					Pulse { target: dot; running: pill.loading }
 				}
 				Icon {
 					name: "history"
@@ -59,10 +61,10 @@ Item {
 			Text {
 				textFormat: Text.PlainText
 				anchors.verticalCenter: parent.verticalCenter
-				width: Math.min(implicitWidth, pill.maxWidth - 2 * pill.innerPadding - 22)
-				text: pill.error !== "" ? pill.error : qsTr("Load older messages")
+				width: Math.min(implicitWidth, pill.maxWidth - 2 * pill.innerPadding - (pill.iconSlot + pill.rowSpacing))
+				text: pill.hasError ? pill.error : qsTr("Load older messages")
 				elide: Text.ElideRight
-				color: pill.error !== "" ? Theme.danger : Theme.textMuted
+				color: pill.hasError ? Theme.danger : Theme.textMuted
 				font.pixelSize: Theme.smallFontSize
 			}
 		}

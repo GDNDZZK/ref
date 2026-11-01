@@ -86,7 +86,7 @@ FocusScope {
 
 		readonly property bool shown: launcher.entered && launcher.open
 
-		width: Math.min(Theme.paletteWidth, launcher.width - 2 * 24)
+		width: Math.min(Theme.paletteWidth, launcher.width - 2 * Theme.overlayEdgeMargin)
 		height: searchRow.height + 1 + (launcher.askingArgument ? description.height : list.implicitHeight)
 		x: Math.round((launcher.width - width) / 2)
 		y: Math.max(48, Math.round(launcher.height * Theme.paletteTopRatio)) - (shown ? 0 : Motion.dialogDrop)
@@ -135,7 +135,7 @@ FocusScope {
 					anchors.centerIn: parent
 					text: launcher.chosen?.title ?? ""
 					color: Theme.text
-					font.pixelSize: Theme.smallFontSize + 1
+					font.pixelSize: Theme.captionFontSize
 				}
 			}
 
@@ -160,14 +160,10 @@ FocusScope {
 					}
 				}
 
-				Text {
-					textFormat: Text.PlainText
+				PlaceholderText {
 					anchors.fill: parent
-					verticalAlignment: Text.AlignVCenter
+					textInput: input
 					text: launcher.askingArgument ? launcher.chosen.hint : qsTr("Type a command…")
-					color: Theme.textMuted
-					font.pixelSize: Theme.fontSize
-					visible: input.text === "" && input.preeditText === ""
 				}
 			}
 		}
@@ -246,7 +242,7 @@ FocusScope {
 			visible: launcher.askingArgument
 			text: qsTr("Type the argument and press Enter to run \"%1\".").arg(launcher.chosen?.title ?? "")
 			color: Theme.textMuted
-			font.pixelSize: Theme.smallFontSize + 1
+			font.pixelSize: Theme.captionFontSize
 			elide: Text.ElideRight
 		}
 	}

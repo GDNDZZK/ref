@@ -32,6 +32,7 @@ const METRIC_UNITLESS = [
   'paletteMaxRows',
   'toastMax',
   'staleOpacity',
+  'disabledOpacity',
 ]
 
 const MOTION_UNITS: Record<string, Unit> = {
@@ -40,12 +41,15 @@ const MOTION_UNITS: Record<string, Unit> = {
   slow: 'ms',
   pulse: 'ms',
   calmPulse: 'ms',
+  copiedFeedbackMs: 'ms',
   enterDrop: 'px',
   followLag: 'ms',
   chaseSnap: 'px',
   interruptWindow: 'ms',
   dialogDrop: 'px',
   popScale: '',
+  pressedScaleButton: '',
+  pressedScaleRow: '',
   tileEnterScale: '',
   tileExitScale: '',
   toastSlide: 'px',

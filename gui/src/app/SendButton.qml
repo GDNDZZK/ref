@@ -15,6 +15,8 @@ Item {
 	signal clicked()
 
 	readonly property bool active: busy || canSend
+	readonly property real hiddenGlyphScale: 0.5 // a glyph shrinks to this as it fades out
+	readonly property int upRotation: -90 // of the chevron that points right, to point up; the stop glyph turns in from it
 
 	width: 32
 	height: 32
@@ -34,7 +36,7 @@ Item {
 			anchors.centerIn: parent
 			width: 16
 			height: 16
-			rotation: -90 // points up
+			rotation: button.upRotation
 			color: button.active ? Theme.onAccent : Theme.textMuted
 			strokeWidth: 2
 
@@ -49,8 +51,8 @@ Item {
 			radius: 2
 			color: Theme.onAccent
 			opacity: 0
-			scale: 0.5
-			rotation: -90
+			scale: button.hiddenGlyphScale
+			rotation: button.upRotation
 		}
 	}
 
@@ -59,7 +61,7 @@ Item {
 		when: button.busy
 		PropertyChanges {
 			arrow.opacity: 0
-			arrow.scale: 0.5
+			arrow.scale: button.hiddenGlyphScale
 			stopGlyph.opacity: 1
 			stopGlyph.scale: 1
 			stopGlyph.rotation: 0

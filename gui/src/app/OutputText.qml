@@ -14,7 +14,6 @@ Item {
 	signal showAllRequested()
 
 	readonly property int previewLines: 200
-	readonly property int lineHeight: 18
 	readonly property var lines: text.split("\n")
 	readonly property int hiddenLines: showAll ? 0 : Math.max(0, lines.length - previewLines)
 	readonly property string shownText: hiddenLines > 0 ? lines.slice(0, previewLines).join("\n") : text
@@ -45,14 +44,9 @@ Item {
 		onClicked: output.showAllRequested()
 	}
 
-	HoverHandler { id: hover }
-
-	CopyButton {
+	HoverCopyButton {
 		anchors { top: parent.top; right: parent.right }
 		visible: output.copyable && output.text !== ""
 		text: output.text
-		opacity: hover.hovered ? 1 : 0
-
-		Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 	}
 }
