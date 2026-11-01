@@ -85,7 +85,7 @@ pub fn image_stub() -> ImageData {
     ImageData {
         mime: "image/png".into(),
         data: String::new(),
-        id: Some(format!("{MESSAGE_ID}:1:0")),
+        id: Some(image_id(MESSAGE_ID, 1, 0)),
         size: Some(48_213),
     }
 }
@@ -238,7 +238,7 @@ pub fn tool_parts() -> Vec<(&'static str, Part)> {
         output: Some("Image: screenshot.png (image/png, 47.1 KB)".into()),
         meta: Some(json!({"path": "/home/user/project/screenshot.png", "image": true})),
         images: vec![ImageData {
-            id: Some(format!("{MESSAGE_ID}:3:0")),
+            id: Some(image_id(MESSAGE_ID, 3, 0)),
             ..image_stub()
         }],
         finished: true,

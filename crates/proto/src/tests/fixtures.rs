@@ -111,7 +111,7 @@ fn requests() -> Samples<ClientFrame> {
                 8,
                 Request::GetImage {
                     session_id: sid(),
-                    image_id: format!("{MESSAGE_ID}:1:0"),
+                    image_id: image_id(MESSAGE_ID, 1, 0),
                 },
             ),
         ),
