@@ -369,6 +369,14 @@ impl ResponsesState {
             .filter(|s| s.kind == kind && !s.done)
     }
 
+    /// Append `delta` to the open slot of `kind` that `ev` addresses.
+    fn delta_to_slot(&mut self, asm: &mut Assembler<'_>, ev: &Value, kind: SlotKind, delta: &str) {
+        if let Some(slot) = self.slot_for(ev, kind) {
+            let block = slot.block;
+            asm.delta(block, delta);
+        }
+    }
+
     fn on_event(&mut self, asm: &mut Assembler<'_>, ev: &Value) -> Result<bool, LlmError> {
         let ty = ev.get("type").and_then(Value::as_str).unwrap_or("");
         let delta = ev.get("delta").and_then(Value::as_str).unwrap_or("");
@@ -394,22 +402,13 @@ impl ResponsesState {
                 }
             }
             "response.reasoning_text.delta" => {
-                if let Some(slot) = self.slot_for(ev, SlotKind::Reasoning) {
-                    let block = slot.block;
-                    asm.delta(block, delta);
-                }
+                self.delta_to_slot(asm, ev, SlotKind::Reasoning, delta);
             }
             "response.output_text.delta" | "response.refusal.delta" => {
-                if let Some(slot) = self.slot_for(ev, SlotKind::Text) {
-                    let block = slot.block;
-                    asm.delta(block, delta);
-                }
+                self.delta_to_slot(asm, ev, SlotKind::Text, delta);
             }
             "response.function_call_arguments.delta" => {
-                if let Some(slot) = self.slot_for(ev, SlotKind::Tool) {
-                    let block = slot.block;
-                    asm.delta(block, delta);
-                }
+                self.delta_to_slot(asm, ev, SlotKind::Tool, delta);
             }
             "response.function_call_arguments.done" => {
                 if let (Some(slot), Some(args)) = (
