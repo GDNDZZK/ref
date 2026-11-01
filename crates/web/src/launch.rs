@@ -56,7 +56,7 @@ fn percent_encode(text: &str) -> String {
 
 pub fn open_browser(url: &str) {
     if let Err(e) = open::that_detached(url) {
-        eprintln!("ref-web: cannot open the browser ({e}); open the login URL above yourself");
+        say_err!("cannot open the browser ({e}); open the login URL above yourself");
     }
 }
 

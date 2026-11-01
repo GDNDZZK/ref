@@ -73,8 +73,8 @@ fn restrict_to_owner(path: &Path) -> anyhow::Result<()> {
     if mode & GROUP_OTHER_BITS == 0 {
         return Ok(());
     }
-    eprintln!(
-        "ref-web: warning: {} was readable by other users (mode {:o}); changed to {PRIVATE_FILE_MODE:o}",
+    say_err!(
+        "warning: {} was readable by other users (mode {:o}); changed to {PRIVATE_FILE_MODE:o}",
         path.display(),
         mode & PERMISSION_BITS
     );
