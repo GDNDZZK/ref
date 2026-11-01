@@ -28,7 +28,7 @@ Item {
 	readonly property bool focused: Workspace.focusedTileId === sessionId
 	readonly property var facts: live.data
 	readonly property bool hasPermission: facts.hasPermission === true
-	readonly property bool failed: facts.hasError === true && facts.activity === Activity.idle
+	readonly property bool failed: Activity.isFailed(facts.activity, facts.hasError === true)
 	property double now: Date.now()
 
 	function focusPane() {

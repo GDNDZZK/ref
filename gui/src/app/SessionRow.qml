@@ -23,8 +23,8 @@ Item {
 
 	property double now: Date.now()
 	property bool renaming: false
-	readonly property bool working: activity !== Activity.idle
-	readonly property bool failed: hasError && !working
+	readonly property bool working: Activity.isWorking(activity)
+	readonly property bool failed: Activity.isFailed(activity, hasError)
 	readonly property bool retrying: activity === Activity.retrying
 	readonly property bool attention: hasPermission || failed
 	readonly property bool hovered: hover.hovered
