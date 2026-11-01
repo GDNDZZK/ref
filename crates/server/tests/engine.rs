@@ -233,6 +233,9 @@ async fn permission_always_allows_rest_of_session() {
     )));
 }
 
+/// Agent-specific delay (seconds) for the bash tool.
+const DELAY: f64 = 0.4;
+
 #[tokio::test]
 async fn agent_permission_overrides_global_and_delay_applies() {
     let m = mock(Arc::new(|n, _| match n {
@@ -248,7 +251,7 @@ async fn agent_permission_overrides_global_and_delay_applies() {
     cfg.permission = perms(json!({"bash": "deny"}));
     cfg.agents.get_mut(BUILD).unwrap().permission = perms(json!({"bash": "allow"}));
     cfg.delay = vec![("bash".into(), 5.0)];
-    cfg.agents.get_mut(BUILD).unwrap().delay = vec![("bash".into(), 0.4)];
+    cfg.agents.get_mut(BUILD).unwrap().delay = vec![("bash".into(), DELAY)];
     let (hub, work) = hub(cfg, "delay");
     let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     let start = std::time::Instant::now();
@@ -270,7 +273,7 @@ async fn agent_permission_overrides_global_and_delay_applies() {
     wait_idle(&s).await;
     let el = start.elapsed();
     assert!(
-        el >= Duration::from_millis(400) && el < Duration::from_secs(4),
+        el >= Duration::from_secs_f64(DELAY) && el < Duration::from_secs(4),
         "{el:?}"
     );
     assert!(matches!(
