@@ -18,13 +18,13 @@ ToolBodyBase {
 		Icon {
 			anchors.verticalCenter: parent.verticalCenter
 			name: SessionTools.iconOf(body.call.toolName)
-			color: Theme.info
+			color: Theme.infoText
 		}
 		Text {
 			textFormat: Text.PlainText
 			anchors.verticalCenter: parent.verticalCenter
 			text: body.who
-			color: Theme.info
+			color: Theme.infoText
 			font.pixelSize: Theme.codeFontSize
 			font.bold: true
 		}

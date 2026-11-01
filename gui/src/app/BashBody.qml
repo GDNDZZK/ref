@@ -65,16 +65,19 @@ ToolBodyBase {
 					visible: body.hasExit
 					text: qsTr("exit %1").arg(body.meta.exit_code)
 					tint: body.meta.exit_code === 0 ? Theme.textMuted : Theme.danger
+					textTint: body.meta.exit_code === 0 ? Theme.textMuted : Theme.dangerText
 				}
 				ToolChip {
 					visible: body.timedOut
 					text: qsTr("timed out")
 					tint: Theme.warning
+					textTint: Theme.warningText
 				}
 				ToolChip {
 					visible: body.cancelled
 					text: qsTr("cancelled")
 					tint: Theme.warning
+					textTint: Theme.warningText
 				}
 				TruncatedChip {
 					meta: body.meta
@@ -83,7 +86,7 @@ ToolBodyBase {
 			OutputText {
 				visible: body.call.output !== ""
 				text: body.call.output
-				textColor: body.call.failed || body.call.toolState === ToolState.error ? Theme.danger : Theme.textMuted
+				textColor: body.call.failed || body.call.toolState === ToolState.error ? Theme.dangerText : Theme.textMuted
 				showAll: body.call.showAll
 				onShowAllRequested: body.showAllRequested()
 			}

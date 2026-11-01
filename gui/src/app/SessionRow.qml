@@ -148,7 +148,7 @@ Item {
 			y: 30
 			width: parent.width - x - 12
 			text: row.subtitle
-			color: row.hasPermission || row.retrying ? Theme.warning : row.failed ? Theme.danger : Theme.textMuted
+			color: row.hasPermission || row.retrying ? Theme.warningText : row.failed ? Theme.dangerText : Theme.textMuted
 			font.pixelSize: Theme.smallFontSize
 			elide: Text.ElideRight
 		}
@@ -172,7 +172,7 @@ Item {
 					anchors.verticalCenter: parent.verticalCenter
 					name: row.activity === Activity.waitingQuestion ? "question" : "lock"
 					size: 16
-					color: Theme.warning
+					color: Theme.warningText
 					visible: row.hasPermission
 				}
 				AlertBadge {
@@ -185,14 +185,14 @@ Item {
 					anchors.verticalCenter: parent.verticalCenter
 					name: "check"
 					size: 16
-					color: Theme.success
+					color: Theme.successText
 					visible: row.todoAllDone && !row.attention
 				}
 				Text {
 					textFormat: Text.PlainText
 					anchors.verticalCenter: parent.verticalCenter
 					text: row.todoDone + "/" + row.todoTotal
-					color: row.todoAllDone ? Theme.success : Theme.textMuted
+					color: row.todoAllDone ? Theme.successText : Theme.textMuted
 					font.pixelSize: Theme.smallFontSize
 					visible: row.todoTotal > 0 && !row.attention
 				}

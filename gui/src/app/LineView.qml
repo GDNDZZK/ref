@@ -33,7 +33,7 @@ Item {
 		"gap": { background: "transparent", color: Theme.textMuted },
 		"added": { background: Theme.diffAddedBackground, color: Theme.diffAdded },
 		"removed": { background: Theme.diffRemovedBackground, color: Theme.diffRemoved },
-		"hunk": { background: Theme.surface, color: Theme.info },
+		"hunk": { background: Theme.surface, color: Theme.infoText },
 		"file": { background: "transparent", color: Theme.textMuted, bold: true }
 	})
 

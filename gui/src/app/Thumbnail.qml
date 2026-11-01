@@ -32,7 +32,7 @@ Item {
 			anchors.centerIn: parent
 			size: 20
 			name: thumbnail.failed ? "error" : "image"
-			color: thumbnail.failed ? Theme.danger : Theme.textMuted
+			color: thumbnail.failed ? Theme.dangerText : Theme.textMuted
 			visible: !thumbnail.ready
 		}
 	}

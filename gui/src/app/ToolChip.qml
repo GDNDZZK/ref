@@ -6,7 +6,8 @@ Rectangle {
 	id: chip
 
 	property alias text: label.text
-	property color tint: Theme.textMuted
+	property color tint: Theme.textMuted // fill and border
+	property color textTint: tint // label
 
 	implicitWidth: label.implicitWidth + 2 * 8
 	implicitHeight: 20
@@ -18,7 +19,7 @@ Rectangle {
 		textFormat: Text.PlainText
 		id: label
 		anchors.centerIn: parent
-		color: chip.tint
+		color: chip.textTint
 		font.family: Theme.monoFamily
 		font.pixelSize: Theme.microFontSize
 	}

@@ -94,7 +94,7 @@ Block {
 				MetaText {
 					anchors.left: parent.right
 					text: block.variant
-					color: Theme.warning
+					color: Theme.warningText
 				}
 			}
 			MetaText {
@@ -115,7 +115,7 @@ Block {
 			}
 			MetaText {
 				text: qsTr("interrupted")
-				color: Theme.warning
+				color: Theme.warningText
 				visible: block.interrupted
 			}
 		}

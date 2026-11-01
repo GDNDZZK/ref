@@ -15,7 +15,7 @@ ToolSection {
 
 	OutputText {
 		text: section.call.output !== "" ? section.call.output : qsTr("(no output)")
-		textColor: section.call.failed || section.call.toolState === ToolState.error ? Theme.danger : Theme.textMuted
+		textColor: section.call.failed || section.call.toolState === ToolState.error ? Theme.dangerText : Theme.textMuted
 		copyable: section.call.output !== ""
 		showAll: section.call.showAll
 		onShowAllRequested: section.showAllRequested()

@@ -35,6 +35,9 @@ Item {
 	readonly property color contextColor: contextLevel === StatusLine.ContextLevel.Auto ? Theme.danger
 		: contextLevel === StatusLine.ContextLevel.Recommend ? Theme.warning
 		: Theme.accent
+	readonly property color contextTextColor: contextLevel === StatusLine.ContextLevel.Auto ? Theme.dangerText
+		: contextLevel === StatusLine.ContextLevel.Recommend ? Theme.warningText
+		: Theme.textMuted
 	readonly property real busyMs: session.busySince > 0 ? ticker.now - session.busySince : 0
 	readonly property real shownFromMs: Format.msPerSecond
 
@@ -88,13 +91,13 @@ Item {
 			anchors.verticalCenter: parent.verticalCenter
 			visible: line.waiting || line.retrying
 			name: line.activity === Activity.waitingQuestion ? "question" : line.waiting ? "lock" : "retry"
-			color: Theme.warning
+			color: Theme.warningText
 		}
 		ShimmerText {
 			anchors.verticalCenter: parent.verticalCenter
 			visible: line.working
 			label: line.activityText
-			color: line.activity === Activity.compacting ? Theme.accent : Theme.textMuted
+			color: line.activity === Activity.compacting ? Theme.accentText : Theme.textMuted
 			running: visible
 			font.pixelSize: Theme.smallFontSize
 		}
@@ -103,7 +106,7 @@ Item {
 			anchors.verticalCenter: parent.verticalCenter
 			visible: line.waiting || line.retrying
 			text: line.activityText
-			color: Theme.warning
+			color: Theme.warningText
 			elide: Text.ElideRight
 			width: Math.min(implicitWidth, line.width / 2)
 			font.pixelSize: Theme.smallFontSize
@@ -142,7 +145,7 @@ Item {
 				textFormat: Text.PlainText
 				anchors.verticalCenter: parent.verticalCenter
 				text: Format.tokens(line.contextUsed) + " / " + Format.tokens(line.contextMax)
-				color: line.contextLevel === StatusLine.ContextLevel.Normal ? Theme.textMuted : line.contextColor
+				color: line.contextTextColor
 				font.pixelSize: Theme.smallFontSize
 			}
 			Rectangle {

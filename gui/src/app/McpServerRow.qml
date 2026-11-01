@@ -46,7 +46,7 @@ Item {
 		height: Theme.sidebarHistoryRowHeight
 		verticalAlignment: Text.AlignVCenter
 		text: server.modelData.status
-		color: server.modelData.status === McpStatus.failed ? Theme.danger : Theme.textMuted
+		color: server.modelData.status === McpStatus.failed ? Theme.dangerText : Theme.textMuted
 		font.pixelSize: Theme.captionFontSize
 	}
 	Chevron {
@@ -80,7 +80,7 @@ Item {
 			width: parent.width
 			visible: server.modelData.error !== ""
 			text: server.modelData.error
-			color: Theme.danger
+			color: Theme.dangerText
 			font { family: Theme.monoFamily; pixelSize: Theme.codeFontSize }
 			wrapMode: Text.Wrap
 		}
