@@ -306,9 +306,13 @@ pub(crate) fn parse_retry_after(headers: &HeaderMap) -> Option<Duration> {
     .max()
 }
 
-/// A duration from seconds; `None` for negative or non-finite values.
+/// A duration from seconds; `None` for negative or non-finite values. Values too large for a
+/// `Duration` saturate to `Duration::MAX`; the retry loop caps the wait at its maximum delay.
 fn secs_to_duration(secs: f64) -> Option<Duration> {
-    (secs.is_finite() && secs >= 0.0).then(|| Duration::from_secs_f64(secs))
+    if !secs.is_finite() || secs < 0.0 {
+        return None;
+    }
+    Some(Duration::try_from_secs_f64(secs).unwrap_or(Duration::MAX))
 }
 
 /// Parse Go-style durations as used by OpenAI rate-limit headers
@@ -435,6 +439,29 @@ mod tests {
         assert!(!e.retryable);
         let e = classify_http_error(400, &headers(&[("x-should-retry", "true")]), "");
         assert!(e.retryable);
+    }
+
+    #[test]
+    fn huge_retry_after_saturates_instead_of_panicking() {
+        // 10^300 hours in Go duration syntax.
+        let go_hours = format!("1{}h", "0".repeat(300));
+        for (name, value) in [
+            ("retry-after-ms", "1e300"),
+            ("retry-after", "1e300"),
+            ("x-ratelimit-reset", "1e300"),
+            ("x-ratelimit-reset-requests", go_hours.as_str()),
+        ] {
+            let e = classify_http_error(429, &headers(&[(name, value)]), "");
+            assert_eq!(e.retry_after, Some(Duration::MAX), "{name}");
+        }
+    }
+
+    #[test]
+    fn invalid_retry_after_is_ignored() {
+        for value in ["-5", "NaN", "inf"] {
+            let e = classify_http_error(429, &headers(&[("retry-after", value)]), "");
+            assert_eq!(e.retry_after, None, "{value}");
+        }
     }
 
     #[test]
