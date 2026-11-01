@@ -29,7 +29,7 @@ const MIN_DETAIL_W: usize = 8;
 const COLLAPSED_ERROR_LINES: usize = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum McpState {
+pub(crate) enum McpState {
     Connected,
     Connecting,
     Failed,
@@ -46,7 +46,7 @@ pub struct McpEntry {
     /// Tool names with the `<server>_` prefix stripped (empty in fallback mode).
     pub tools: Vec<String>,
     /// Number of tools (known even when the names are not).
-    pub n_tools: usize,
+    pub(crate) n_tools: usize,
 }
 
 fn parse_state(s: &str) -> McpState {

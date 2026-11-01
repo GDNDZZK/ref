@@ -58,7 +58,7 @@ pub struct ChatState {
     cache: HashMap<String, Cached>,
     /// Messages laid out (cache misses) so far; tests check what a frame re-renders.
     #[cfg(test)]
-    pub laid_out: usize,
+    pub(crate) laid_out: usize,
     pub toggled: HashMap<String, BTreeSet<usize>>,
     pub show_all: HashMap<String, BTreeSet<usize>>,
     /// Start row of each message block; last element = start of tail rows.
