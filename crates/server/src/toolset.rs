@@ -276,81 +276,85 @@ fn str_field<'a>(input: &'a Value, key: &str) -> Option<&'a str> {
 
 fn harness(hub: &Arc<Hub>, s: &Arc<Session>, name: &str, input: &Value) -> ToolOutput {
     match name {
-        CONTEXT_WINDOW => {
-            let target = match str_field(input, "session").filter(|x| !x.is_empty()) {
-                Some(q) => match crate::peers::resolve(hub, q, None) {
-                    Ok(t) => t,
-                    Err(e) => return ToolOutput::err(e),
-                },
-                None => s.clone(),
-            };
-            let info = target.info();
-            let c = info.context;
-            let pct = |n: u64| {
-                if c.max > 0 {
-                    n as f64 * 100.0 / c.max as f64
-                } else {
-                    0.0
-                }
-            };
-            ToolOutput::ok(format!(
-                "Context window for \"{}\": used {} tokens of {} ({:.0}%). Recommended compaction at {} tokens ({:.0}%). Automatic compaction at {} tokens.",
-                info.name,
-                c.used,
-                c.max,
-                pct(c.used),
-                c.recommend,
-                pct(c.recommend),
-                c.auto
-            ))
-        }
-        TODO => {
-            let Some(items) = input.get("todos").and_then(Value::as_array) else {
-                return ToolOutput::err("Error: `todos` must be an array of {content, status}.");
-            };
-            let mut todos = Vec::with_capacity(items.len());
-            for (i, it) in items.iter().enumerate() {
-                let content = str_field(it, "content").unwrap_or("");
-                if content.is_empty() {
-                    return ToolOutput::err(format!(
-                        "Error: todos[{i}].content must be a non-empty string."
-                    ));
-                }
-                let word = it
-                    .get("status")
-                    .and_then(Value::as_str)
-                    .unwrap_or(TodoStatus::Pending.as_str());
-                let Ok(status) = serde_json::from_value::<TodoStatus>(json!(word)) else {
-                    return ToolOutput::err(format!(
-                        "Error: todos[{i}].status {word:?} is invalid; use {}.",
-                        status_names()
-                    ));
-                };
-                todos.push(Todo {
-                    content: content.to_string(),
-                    status,
-                });
-            }
-            let text = format_todos(&todos);
-            {
-                let mut st = s.lock();
-                st.info.todos = todos;
-                hub.emit_info(&st);
-            }
-            ToolOutput::ok(text)
-        }
-        COMPACT_CONTEXT => {
-            let summary = str_field(input, "summary").unwrap_or("").to_string();
-            if summary.is_empty() {
-                return ToolOutput::err("Error: summary must not be empty.");
-            }
-            s.lock().pending_compact = Some(summary);
-            ToolOutput::ok(
-                "After this batch of tool calls your context will be replaced by your summary.",
-            )
-        }
+        CONTEXT_WINDOW => context_window_tool(hub, s, input),
+        TODO => todo_tool(hub, s, input),
+        COMPACT_CONTEXT => compact_context_tool(s, input),
         _ => ToolOutput::err(format!("Unknown tool: {name}")),
     }
+}
+
+fn context_window_tool(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> ToolOutput {
+    let target = match str_field(input, "session").filter(|x| !x.is_empty()) {
+        Some(q) => match crate::peers::resolve(hub, q, None) {
+            Ok(t) => t,
+            Err(e) => return ToolOutput::err(e),
+        },
+        None => s.clone(),
+    };
+    let info = target.info();
+    let c = info.context;
+    let pct = |n: u64| {
+        if c.max > 0 {
+            n as f64 * 100.0 / c.max as f64
+        } else {
+            0.0
+        }
+    };
+    ToolOutput::ok(format!(
+        "Context window for \"{}\": used {} tokens of {} ({:.0}%). Recommended compaction at {} tokens ({:.0}%). Automatic compaction at {} tokens.",
+        info.name,
+        c.used,
+        c.max,
+        pct(c.used),
+        c.recommend,
+        pct(c.recommend),
+        c.auto
+    ))
+}
+
+fn todo_tool(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> ToolOutput {
+    let Some(items) = input.get("todos").and_then(Value::as_array) else {
+        return ToolOutput::err("Error: `todos` must be an array of {content, status}.");
+    };
+    let mut todos = Vec::with_capacity(items.len());
+    for (i, it) in items.iter().enumerate() {
+        let content = str_field(it, "content").unwrap_or("");
+        if content.is_empty() {
+            return ToolOutput::err(format!(
+                "Error: todos[{i}].content must be a non-empty string."
+            ));
+        }
+        let word = it
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or(TodoStatus::Pending.as_str());
+        let Ok(status) = serde_json::from_value::<TodoStatus>(json!(word)) else {
+            return ToolOutput::err(format!(
+                "Error: todos[{i}].status {word:?} is invalid; use {}.",
+                status_names()
+            ));
+        };
+        todos.push(Todo {
+            content: content.to_string(),
+            status,
+        });
+    }
+    let text = format_todos(&todos);
+    {
+        let mut st = s.lock();
+        st.info.todos = todos;
+        hub.emit_info(&st);
+    }
+    ToolOutput::ok(text)
+}
+
+fn compact_context_tool(s: &Arc<Session>, input: &Value) -> ToolOutput {
+    let summary = str_field(input, "summary").unwrap_or("").to_string();
+    if summary.is_empty() {
+        return ToolOutput::err("Error: summary must not be empty.");
+    }
+    s.lock().pending_compact = Some(summary);
+    ToolOutput::ok("After this batch of tool calls your context will be replaced by your summary.")
 }
 
 /// The todo statuses as prose: "pending, in_progress, completed or cancelled".
