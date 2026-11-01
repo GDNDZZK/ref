@@ -119,11 +119,21 @@ pub fn to_markdown(xml: &str) -> Option<(Option<String>, String)> {
 fn atom_alternate_href(e: &BytesStart) -> Option<String> {
     let mut href = None;
     let mut rel = String::from("alternate");
-    for a in e.attributes().flatten() {
+    for a in e.attributes() {
+        let a = match a {
+            Ok(a) => a,
+            Err(err) => {
+                tracing::debug!("feed: skipping malformed attribute: {err}");
+                continue;
+            }
+        };
         let v = a
             .normalized_value(quick_xml::XmlVersion::Implicit1_0)
             .map(|v| v.to_string())
-            .unwrap_or_default();
+            .unwrap_or_else(|err| {
+                tracing::debug!("feed: undecodable attribute value: {err}");
+                String::new()
+            });
         match a.key.local_name().as_ref() {
             "href" => href = Some(v),
             "rel" => rel = v,
