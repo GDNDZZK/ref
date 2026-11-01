@@ -7,9 +7,12 @@ QtObject {
 	readonly property int secondsPerMinute: 60
 	readonly property int secondsPerHour: 3600
 	readonly property int secondsPerDay: 86400
+	readonly property int minutesPerHour: 60
+	readonly property int padBelow: 10 // a number below this gets a leading zero in "1m 05s"
 	readonly property int wholeSecondFrom: 10000 // ms; below this a duration shows a decimal
 	readonly property int thousand: 1000
 	readonly property int million: 1000000
+	readonly property string fileUrlPrefix: "file:///"
 	readonly property int millionRoundsUpFrom: 999950 // 999.95k shows as 1.0M, not 1000.0k
 
 	// "14:02:11"
@@ -32,10 +35,10 @@ QtObject {
 		const s = Math.floor(Math.max(0, ms) / msPerSecond)
 		if (s < secondsPerMinute)
 			return s + "s"
-		const pad = n => (n < 10 ? "0" : "") + n
+		const pad = n => (n < padBelow ? "0" : "") + n
 		if (s < secondsPerHour)
 			return Math.floor(s / secondsPerMinute) + "m " + pad(s % secondsPerMinute)  + "s"
-		return Math.floor(s / secondsPerHour) + "h " + pad(Math.floor(s / secondsPerMinute) % 60) + "m"
+		return Math.floor(s / secondsPerHour) + "h " + pad(Math.floor(s / secondsPerMinute) % minutesPerHour) + "m"
 	}
 
 	// "950", "12.3k", "1.0M"
@@ -45,6 +48,10 @@ QtObject {
 		if (n >= thousand)
 			return (n / thousand).toFixed(1) + "k"
 		return String(n)
+	}
+
+	function isSameDay(a, b) {
+		return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 	}
 
 	// "just now", "5m ago", "3h ago", "Yesterday", then the date.
@@ -59,7 +66,7 @@ QtObject {
 		if (seconds < secondsPerDay && now.getDate() === then.getDate())
 			return qsTr("%1h ago").arg(Math.floor(seconds / secondsPerHour))
 		const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1)
-		if (then.getFullYear() === yesterday.getFullYear() && then.getMonth() === yesterday.getMonth() && then.getDate() === yesterday.getDate())
+		if (isSameDay(then, yesterday))
 			return qsTr("Yesterday")
 		return then.getFullYear() === now.getFullYear() ? Qt.formatDate(then, "MMM d") : Qt.formatDate(then, "MMM d, yyyy")
 	}
@@ -67,6 +74,9 @@ QtObject {
 	// The local path of a file: URL.
 	function localPath(url) {
 		const text = url.toString()
-		return /^file:\/\/\/[A-Za-z]:/.test(text) ? decodeURIComponent(text.slice(8)) : decodeURIComponent(text.replace(/^file:\/\//, ""))
+		const hasWindowsDrive = /^file:\/\/\/[A-Za-z]:/.test(text)
+		if (hasWindowsDrive)
+			return decodeURIComponent(text.slice(fileUrlPrefix.length)) // "C:/dir", without the slash before the drive
+		return decodeURIComponent(text.replace(/^file:\/\//, ""))
 	}
 }
