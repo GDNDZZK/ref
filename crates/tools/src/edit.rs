@@ -683,11 +683,7 @@ fn build_preview(old: &[&str], new: &[String]) -> (String, Vec<u32>) {
     let mut out = String::new();
     let mut seen = Vec::new();
     let mut prev: Option<usize> = None;
-    let mut rows = 0;
-    for l in show {
-        if l >= total {
-            continue;
-        }
+    for (rows, l) in show.into_iter().enumerate() {
         if rows >= PREVIEW_MAX_ROWS {
             out.push_str("…\n[preview truncated; read the file to see the rest]\n");
             break;
@@ -703,7 +699,6 @@ fn build_preview(old: &[&str], new: &[String]) -> (String, Vec<u32>) {
             seen.push((l + 1) as u32);
         }
         prev = Some(l);
-        rows += 1;
     }
     if out.ends_with('\n') {
         out.pop();
