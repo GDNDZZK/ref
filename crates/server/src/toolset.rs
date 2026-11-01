@@ -64,7 +64,10 @@ pub(crate) fn with_purpose(schema: &Value) -> Value {
     }
     // Rebuild with a stable key order: type, properties, required, then the rest.
     let mut out = Map::new();
-    out.insert("type".into(), obj.remove("type").unwrap_or(json!("object")));
+    out.insert(
+        "type".into(),
+        obj.remove("type").expect("type was inserted above"),
+    );
     obj.remove("properties");
     obj.remove("required");
     out.insert("properties".into(), Value::Object(props));
