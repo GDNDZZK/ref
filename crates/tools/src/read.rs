@@ -58,8 +58,12 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     util::blocking(move || run_sync(&input, &ctx)).await
 }
 
-static RANGE_SUFFIX_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(.+?):(?:(\d+)(?:([-+])(\d*))?|-(\d+))$").expect("valid regex"));
+/// Path suffix forms: `f:50` (from line 50), `f:50-80` (lines 50 to 80), `f:50+10` (10 lines from
+/// 50) and `f:-5` (last 5 lines). `count` is the end line after `-` and the line count after `+`.
+static RANGE_SUFFIX_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(?P<path>.+?):(?:(?P<start>\d+)(?:(?P<sep>[-+])(?P<count>\d*))?|-(?P<last>\d+))$")
+        .expect("valid regex")
+});
 
 /// Line selection derived from offset/limit or a path suffix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,19 +77,19 @@ enum Range {
 /// Splits `path:50-80`-style suffixes when the literal path does not exist.
 fn split_range_suffix(cwd: &Path, raw: &str) -> Option<(PathBuf, Range)> {
     let caps = RANGE_SUFFIX_RE.captures(raw)?;
-    let base = caps.get(1)?.as_str();
+    let base = caps.name("path")?.as_str();
     let base_abs = util::resolve_path(cwd, base);
     if !base_abs.exists() {
         return None;
     }
-    if let Some(last) = caps.get(5) {
+    if let Some(last) = caps.name("last") {
         return Some((base_abs, Range::Last(last.as_str().parse().ok()?)));
     }
-    let start: usize = caps.get(2)?.as_str().parse().ok()?;
+    let start: usize = caps.name("start")?.as_str().parse().ok()?;
     let start = start.max(1);
     let range = match (
-        caps.get(3).map(|m| m.as_str()),
-        caps.get(4).map(|m| m.as_str()),
+        caps.name("sep").map(|m| m.as_str()),
+        caps.name("count").map(|m| m.as_str()),
     ) {
         (None, _) => Range::From(start, None),
         (Some("-"), Some("")) => Range::From(start, None),
