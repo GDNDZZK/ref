@@ -18,10 +18,17 @@ pub struct RunHandle {
     pub id: u64,
 }
 
+/// A client's answer to a permission request.
+#[derive(Debug, Clone, Copy)]
+pub struct PermReply {
+    pub allow: bool,
+    /// Also allow the tool for the rest of the session.
+    pub always: bool,
+}
+
 pub struct PendingPerm {
     pub request: PermissionRequest,
-    /// (allow, always)
-    pub tx: Option<oneshot::Sender<(bool, bool)>>,
+    pub tx: Option<oneshot::Sender<PermReply>>,
 }
 
 /// A `question` call waiting for the user's answer.

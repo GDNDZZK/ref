@@ -4,8 +4,8 @@
 use crate::convert::{parse_tool_input, partial_purpose, to_chat};
 use crate::hub::Hub;
 use crate::session::{
-    PendingPerm, REMINDER_PREFIX, RunHandle, Session, SessionState, cancel_unfinished, new_message,
-    user_message,
+    PendingPerm, PermReply, REMINDER_PREFIX, RunHandle, Session, SessionState, cancel_unfinished,
+    new_message, user_message,
 };
 use crate::toolset::{self, Entry, Kind};
 use crate::util::lock;
@@ -206,7 +206,11 @@ pub fn abort(hub: &Arc<Hub>, s: &Arc<Session>, by_user: bool) {
     let perms: Vec<PendingPerm> = std::mem::take(&mut st.perms);
     for mut p in perms {
         if let Some(tx) = p.tx.take() {
-            let _ = tx.send((false, false));
+            // A gone receiver means the waiting tool call already ended.
+            let _ = tx.send(PermReply {
+                allow: false,
+                always: false,
+            });
         }
         hub.emit(
             &s.id,
@@ -1288,12 +1292,16 @@ async fn run_one(
                         call_id: call.call_id.clone(),
                     },
                 );
-                if let Some((true, true)) = reply {
+                if let Some(PermReply {
+                    allow: true,
+                    always: true,
+                }) = reply
+                {
                     st.always.insert(call.name.clone());
                 }
             }
             match reply {
-                Some((true, _)) => {
+                Some(PermReply { allow: true, .. }) => {
                     // Allowed: the tool may still wait out a delay, but the session no longer
                     // waits for the user.
                     let mut st = s.lock();

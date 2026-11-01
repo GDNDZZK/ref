@@ -1,7 +1,7 @@
 //! Request dispatch for one frontend connection.
 
 use crate::hub::{Conn, Hub};
-use crate::session::{REMINDER_PREFIX, Session, user_message};
+use crate::session::{PermReply, REMINDER_PREFIX, Session, user_message};
 use crate::util::lock;
 use ref_proto::{
     AgentInfo, CommandInfo, Message, MessageSource, ModelInfo, Part, Request, Role,
@@ -277,7 +277,8 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             };
             match tx {
                 Some(tx) => {
-                    let _ = tx.send((allow, always));
+                    // A gone receiver means the waiting tool call already ended.
+                    let _ = tx.send(PermReply { allow, always });
                     Ok(json!({}))
                 }
                 None => Err("No pending permission request with that id.".into()),
