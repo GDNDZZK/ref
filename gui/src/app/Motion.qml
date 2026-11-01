@@ -50,6 +50,6 @@ QtObject {
 	function chase(current, target, frameTime) {
 		if (arrived(current, target))
 			return target
-		return current + (target - current) * (1 - Math.exp(-frameTime * 1000 / followLag))
+		return current + (target - current) * (1 - Math.exp(-frameTime * Format.msPerSecond / followLag))
 	}
 }
