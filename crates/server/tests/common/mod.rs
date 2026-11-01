@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 
 #[derive(Debug, Clone)]
 pub enum Reply {
@@ -86,6 +86,11 @@ fn is_title(body: &Value) -> bool {
     body.to_string().contains(ref_server::title::TITLE_PROMPT)
 }
 
+/// Write to the socket; false when the client has gone (expected on aborts).
+async fn write_or_stop(sock: &mut TcpStream, data: &[u8]) -> bool {
+    sock.write_all(data).await.is_ok()
+}
+
 pub async fn mock(handler: Handler) -> Mock {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
@@ -147,23 +152,32 @@ pub async fn mock(handler: Handler) -> Mock {
                             "HTTP/1.1 {code} Error\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{text}",
                             text.len()
                         );
-                        let _ = sock.write_all(resp.as_bytes()).await;
+                        write_or_stop(&mut sock, resp.as_bytes()).await;
                     }
                     Reply::Hang(t) => {
                         let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
-                        let _ = sock.write_all(head.as_bytes()).await;
+                        if !write_or_stop(&mut sock, head.as_bytes()).await {
+                            return;
+                        }
                         let c = chunk(
                             json!({"choices":[{"index":0,"delta":{"role":"assistant","content":t},"finish_reason":null}]}),
                         );
-                        let _ = sock.write_all(c.as_bytes()).await;
-                        let _ = sock.flush().await;
+                        if !write_or_stop(&mut sock, c.as_bytes()).await
+                            || sock.flush().await.is_err()
+                        {
+                            return;
+                        }
                         tokio::time::sleep(Duration::from_secs(60)).await;
                     }
                     r => {
                         let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n";
-                        let _ = sock.write_all(head.as_bytes()).await;
-                        let _ = sock.write_all(sse(&r).as_bytes()).await;
-                        let _ = sock.shutdown().await;
+                        if !write_or_stop(&mut sock, head.as_bytes()).await {
+                            return;
+                        }
+                        if write_or_stop(&mut sock, sse(&r).as_bytes()).await {
+                            // The client may already be gone; nothing to do then.
+                            sock.shutdown().await.ok();
+                        }
                     }
                 }
             });
