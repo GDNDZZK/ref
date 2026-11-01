@@ -4,6 +4,7 @@ use crate::util;
 use crate::{ToolCtx, ToolOutput, ToolSpec};
 use anyhow::{Result, bail};
 use serde_json::{Value, json};
+use std::path::Path;
 
 pub fn spec() -> ToolSpec {
     ToolSpec {
@@ -27,6 +28,22 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     util::blocking(move || run_sync(&input, &ctx)).await
 }
 
+/// Safeguards: compares both the lexical and the canonical forms of the paths.
+fn is_protected_target(abs: &Path, canon: &Path, is_symlink: bool, ctx: &ToolCtx) -> bool {
+    let cwd_lex = util::normalize_lexical(&ctx.cwd);
+    let cwd_canon = std::fs::canonicalize(&ctx.cwd).unwrap_or_else(|_| cwd_lex.clone());
+    let home = util::home_dir();
+    let home_canon = home.as_deref().map(util::store_key);
+    let protected = |p: &Path| {
+        let is_root = p.parent().is_none();
+        let is_cwd = p == cwd_lex || p == cwd_canon;
+        let is_home = home.as_deref() == Some(p) || home_canon.as_deref() == Some(p);
+        let contains_cwd = cwd_canon.starts_with(p);
+        is_root || is_cwd || is_home || contains_cwd
+    };
+    protected(abs) || (!is_symlink && protected(canon))
+}
+
 fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let raw = util::req_str(input, "path")?;
     let (raw, _) = util::unwrap_header(&raw);
@@ -37,20 +54,7 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let abs = util::resolve_path(&ctx.cwd, &raw);
     let display = util::display_path(&ctx.cwd, &abs);
 
-    // Safeguards: compare both lexical and canonical forms.
     let canon = util::store_key(&abs);
-    let cwd_lex = util::normalize_lexical(&ctx.cwd);
-    let cwd_canon = std::fs::canonicalize(&ctx.cwd).unwrap_or_else(|_| cwd_lex.clone());
-    let home = util::home_dir();
-    let home_canon = home.as_deref().map(util::store_key);
-    let protected = |p: &std::path::Path| {
-        p.parent().is_none()
-            || p == cwd_lex
-            || p == cwd_canon
-            || home.as_deref() == Some(p)
-            || home_canon.as_deref() == Some(p)
-            || cwd_canon.starts_with(p)
-    };
     let link_meta = match std::fs::symlink_metadata(&abs) {
         Ok(m) => m,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -59,7 +63,7 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         Err(e) => bail!("cannot access {display}: {e}"),
     };
     let is_symlink = link_meta.file_type().is_symlink();
-    if protected(&abs) || (!is_symlink && protected(&canon)) {
+    if is_protected_target(&abs, &canon, is_symlink, ctx) {
         return Ok(ToolOutput::err(format!(
             "Refusing to delete {}: it is the working directory, one of its parents, the home directory or the filesystem root.",
             abs.display()
