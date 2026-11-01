@@ -317,11 +317,7 @@ fn truncate_rows(r: &mut FileResult, keep: usize) {
     r.matches = count;
 }
 
-pub(crate) fn collect_files(
-    root: &Path,
-    glob: Option<&str>,
-    ctx: &ToolCtx,
-) -> Result<Vec<PathBuf>> {
+fn collect_files(root: &Path, glob: Option<&str>, ctx: &ToolCtx) -> Result<Vec<PathBuf>> {
     let mut wb = WalkBuilder::new(root);
     wb.hidden(false)
         .git_ignore(true)
