@@ -19,6 +19,12 @@ const MAX_PATHS: usize = 256;
 const MAX_TOTAL_BYTES: usize = 64 * 1024 * 1024;
 /// Files larger than this are never snapshotted.
 const MAX_SNAPSHOT_FILE_BYTES: usize = 4 * 1024 * 1024;
+/// Estimated bookkeeping bytes per snapshot, on top of its text and line set.
+const SNAPSHOT_OVERHEAD_BYTES: usize = 64;
+/// Bits of the XXH32 digest kept as the tag (the low [`TAG_LEN`] hex digits).
+const TAG_MASK: u32 = 0xffff;
+/// Line numbers stored per word of a [`LineSet`].
+const BITS_PER_WORD: usize = u64::BITS as usize;
 
 /// Hex digits in a tag.
 pub const TAG_LEN: usize = 4;
@@ -52,7 +58,7 @@ pub fn file_hash(text: &str) -> String {
         line_start += segment.len();
     }
     hasher.update(&bytes[run_start..]);
-    format!("{:0TAG_LEN$X}", hasher.digest() & 0xffff)
+    format!("{:0TAG_LEN$X}", hasher.digest() & TAG_MASK)
 }
 
 /// `[path#TAG]`
@@ -93,7 +99,7 @@ impl LineSet {
     }
 
     pub fn insert(&mut self, line: u32) {
-        let (w, b) = (line as usize / 64, line as usize % 64);
+        let (w, b) = (line as usize / BITS_PER_WORD, line as usize % BITS_PER_WORD);
         if self.bits.len() <= w {
             self.bits.resize(w + 1, 0);
         }
@@ -101,7 +107,7 @@ impl LineSet {
     }
 
     pub fn contains(&self, line: u32) -> bool {
-        let (w, b) = (line as usize / 64, line as usize % 64);
+        let (w, b) = (line as usize / BITS_PER_WORD, line as usize % BITS_PER_WORD);
         self.bits.get(w).is_some_and(|x| x & (1 << b) != 0)
     }
 
@@ -116,9 +122,9 @@ impl LineSet {
 
     pub fn iter(&self) -> impl Iterator<Item = u32> + '_ {
         self.bits.iter().enumerate().flat_map(|(w, &word)| {
-            (0..64)
+            (0..BITS_PER_WORD)
                 .filter(move |b| word & (1u64 << b) != 0)
-                .map(move |b| (w * 64 + b) as u32)
+                .map(move |b| (w * BITS_PER_WORD + b) as u32)
         })
     }
 
@@ -127,7 +133,7 @@ impl LineSet {
     }
 
     fn bytes(&self) -> usize {
-        self.bits.len() * 8
+        self.bits.len() * std::mem::size_of::<u64>()
     }
 }
 
@@ -188,7 +194,7 @@ pub struct Snapshot {
 
 impl Snapshot {
     fn bytes(&self) -> usize {
-        self.text.len() + self.seen.bytes() + 64
+        self.text.len() + self.seen.bytes() + SNAPSHOT_OVERHEAD_BYTES
     }
 }
 
