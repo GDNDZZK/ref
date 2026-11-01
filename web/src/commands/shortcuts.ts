@@ -28,13 +28,18 @@ function keyName(code: string): string {
   return ARROWS[code] ?? code
 }
 
-// "Alt+N", "Ctrl+P".
-export function formatShortcut(shortcut: Shortcut): string {
+// The keys of a shortcut in the order they are shown: ["Alt", "N"].
+export function shortcutKeys(shortcut: Shortcut): string[] {
   const modifiers = [
     shortcut.ctrl && 'Ctrl',
     shortcut.meta && 'Cmd',
     shortcut.alt && 'Alt',
     shortcut.shift && 'Shift',
   ]
-  return [...modifiers.filter((name): name is string => Boolean(name)), keyName(shortcut.code)].join('+')
+  return [...modifiers.filter((name): name is string => Boolean(name)), keyName(shortcut.code)]
+}
+
+// "Alt+N", "Ctrl+P".
+export function formatShortcut(shortcut: Shortcut): string {
+  return shortcutKeys(shortcut).join('+')
 }
