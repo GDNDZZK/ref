@@ -1,6 +1,7 @@
 //! Scripts that call tools. They run for real in the sample workspace.
 
 use crate::mock::script::{Ctx, Pace, Round, Script};
+use ref_proto::TodoStatus;
 use serde_json::{Value, json};
 
 const ARTICLE: &str = include_str!("../assets/article.md");
@@ -285,7 +286,7 @@ fn cancel(ctx: &Ctx) -> Round {
     }
 }
 
-fn todos(items: &[(&str, &str)]) -> Value {
+fn todos(items: &[(&str, TodoStatus)]) -> Value {
     let list: Vec<Value> = items
         .iter()
         .map(|(content, status)| json!({"content": content, "status": status}))
@@ -295,14 +296,14 @@ fn todos(items: &[(&str, &str)]) -> Value {
 
 /// A todo list over `steps` with the first `done` completed, the next one in progress.
 pub(super) fn plan_todos(steps: &[&str], done: usize) -> Value {
-    let items: Vec<(&str, &str)> = steps
+    let items: Vec<(&str, TodoStatus)> = steps
         .iter()
         .enumerate()
         .map(|(i, step)| {
             let status = match i.cmp(&done) {
-                std::cmp::Ordering::Less => "completed",
-                std::cmp::Ordering::Equal => "in_progress",
-                std::cmp::Ordering::Greater => "pending",
+                std::cmp::Ordering::Less => TodoStatus::Completed,
+                std::cmp::Ordering::Equal => TodoStatus::InProgress,
+                std::cmp::Ordering::Greater => TodoStatus::Pending,
             };
             (*step, status)
         })
