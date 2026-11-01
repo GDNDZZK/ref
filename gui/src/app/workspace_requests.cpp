@@ -178,5 +178,5 @@ void Workspace::restartBackend()
 			toast(refgui::workspace::ToastLevel::Error, payload.toString());
 		}
 	};
-	perform(m_backend.client().shutdown(), reportRefusal, noPayload);
+	perform(m_connection.stopServer(), reportRefusal, noPayload);
 }

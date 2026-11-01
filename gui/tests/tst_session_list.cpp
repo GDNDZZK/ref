@@ -2,6 +2,7 @@
 #include "coro_test.h"
 #include "fake_backend.h"
 #include "workspace/backend_config.h"
+#include "workspace/connection.h"
 #include "workspace/session_directory.h"
 #include "workspace/session_list_model.h"
 
@@ -76,6 +77,7 @@ private slots:
 	void directoryLoadsAndFollowsFrames();
 	void directoryHistoryHidesLiveSessions();
 	void watchAllIsSentAgainAfterAReconnect();
+	void connectionKnowsWhetherTheBackendIsLocal();
 	void configLoadsAgentsModelsAndMcp();
 };
 
@@ -365,6 +367,16 @@ void TstSessionList::watchAllIsSentAgainAfterAReconnect()
 	QTRY_COMPARE_WITH_TIMEOUT(requestsOf(u"list_sessions"_s).size(), listsBefore + 1, ReconnectTimeoutMs);
 	QCOMPARE(requestsOf(u"watch_all"_s).size(), 3);
 	backend.shutdown();
+}
+
+void TstSessionList::connectionKnowsWhetherTheBackendIsLocal()
+{
+	const auto remote = [](const QString& url) { return Backend::Source(Backend::Mode::Remote{{QUrl(url), u"t"_s}}); };
+	QVERIFY(workspace::Connection(Backend::Source(Backend::Mode::Mock{}), u"/work"_s).isLocal());
+	QVERIFY(workspace::Connection(remote(u"ws://127.0.0.1:4000/"_s), u"/work"_s).isLocal());
+	QVERIFY(workspace::Connection(remote(u"ws://localhost:4000/"_s), u"/work"_s).isLocal());
+	QVERIFY(workspace::Connection(remote(u"ws://[::1]:4000/"_s), u"/work"_s).isLocal());
+	QVERIFY(!workspace::Connection(remote(u"ws://remote.test:4000/"_s), u"/work"_s).isLocal());
 }
 
 void TstSessionList::configLoadsAgentsModelsAndMcp()

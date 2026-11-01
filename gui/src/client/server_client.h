@@ -1,6 +1,7 @@
 #pragma once
 
 #include "client/endpoint.h"
+#include "client/result.h"
 #include "proto/types.h"
 
 #include <QCoroTask>
@@ -18,21 +19,6 @@
 
 namespace refgui::client
 {
-
-// The result of a request: the answer, or the reason it failed (the backend's error text,
-// or one of the two below).
-template<typename T>
-using Result = std::expected<T, QString>;
-
-// The errors of a request that got no answer because there was no connection, or it went.
-inline const QString NotConnected = QStringLiteral("not connected");
-inline const QString ConnectionClosed = QStringLiteral("connection closed");
-
-// Whether `error` says the connection is gone, as opposed to the backend refusing.
-inline bool isConnectionLost(const QString& error)
-{
-	return error == NotConnected || error == ConnectionClosed;
-}
 
 // One WebSocket connection to ref-server, speaking the ref protocol.
 //
