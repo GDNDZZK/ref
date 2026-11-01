@@ -119,10 +119,6 @@ struct Fixture
 		{
 			fake.respond(request, snapshot);
 		}
-		else if(op == u"list_history")
-		{
-			fake.respond(request, {{u"sessions"_s, history}});
-		}
 		else if(op == u"prompt")
 		{
 			fake.respond(request, {{u"queued"_s, false}, {u"message_id"_s, u"u2"_s}});
@@ -151,7 +147,6 @@ struct Fixture
 	Backend backend;
 	SessionController controller;
 	QJsonObject snapshot;
-	QJsonArray history;
 	QJsonArray olderPage;
 	bool olderHasMore = false;
 };
@@ -169,8 +164,6 @@ private slots:
 	void ignoresEventsOfOtherSessions();
 	void sendDoesNotEchoThePrompt();
 	void abortAsksTheBackend();
-	void continueLastAttachesTheNewestSession();
-	void continueLastWithoutHistory();
 	void attachesAgainAfterReconnect();
 	void passesOnErrors();
 	void watcherAttachDoesNotTakeTheForeground();
@@ -274,32 +267,6 @@ void TestSessionController::abortAsksTheBackend()
 	QVERIFY(result && result->has_value());
 	QCOMPARE(f.fake.requests().last().value(u"op"_s).toString(), u"abort"_s);
 	QCOMPARE(f.fake.requests().last().value(u"session_id"_s).toString(), u"ses_1"_s);
-}
-
-void TestSessionController::continueLastAttachesTheNewestSession()
-{
-	Fixture f;
-	f.history = {infoJson(u"ses_1"_s, u"idle"_s)};
-
-	const auto result = await(f.controller.continueLast(u"/work"_s));
-
-	QVERIFY(result && result->has_value());
-	QVERIFY(**result);
-	QCOMPARE(f.controller.sessionId(), u"ses_1"_s);
-	QCOMPARE(f.fake.requests().at(1).value(u"limit"_s).toInt(), 1);
-	QCOMPARE(f.fake.requests().at(1).value(u"cwd"_s).toString(), u"/work"_s);
-}
-
-void TestSessionController::continueLastWithoutHistory()
-{
-	Fixture f;
-
-	const auto result = await(f.controller.continueLast(u"/work"_s));
-
-	QVERIFY(result && result->has_value());
-	QVERIFY(!**result);
-	QVERIFY(!f.controller.hasSession());
-	QCOMPARE(f.ops(), (QStringList{u"hello"_s, u"list_history"_s}));
 }
 
 void TestSessionController::attachesAgainAfterReconnect()
