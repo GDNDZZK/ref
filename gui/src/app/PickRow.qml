@@ -12,7 +12,7 @@ Item {
 
 	width: ListView.view ? ListView.view.width : 0
 	height: 44
-	opacity: enabled ? 1 : 0.4
+	opacity: enabled ? 1 : Theme.disabledOpacity
 
 	HoverHandler {
 		enabled: row.enabled
