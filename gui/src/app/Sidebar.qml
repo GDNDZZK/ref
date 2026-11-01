@@ -65,7 +65,7 @@ Rectangle {
 				width: sidebar.lockupWidth
 				height: sidebar.lockupHeight
 				sourceSize: Qt.size(width, height)
-				source: "qrc:/app/ref-lockup-small-" + (Theme.dark ? "dark" : "light") + ".svg"
+				source: "qrc:/app/ref-lockup-small-" + (Theme.dark ? ThemeName.dark : ThemeName.light) + ".svg"
 				Accessible.role: Accessible.Graphic
 				Accessible.name: "ref"
 			}

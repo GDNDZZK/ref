@@ -41,9 +41,9 @@ ModalDialog {
 				anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
 				width: 230
 				model: [
-					{text: qsTr("System"), value: "system"},
-					{text: qsTr("Light"), value: "light"},
-					{text: qsTr("Dark"), value: "dark"}
+					{text: qsTr("System"), value: ThemeName.system},
+					{text: qsTr("Light"), value: ThemeName.light},
+					{text: qsTr("Dark"), value: ThemeName.dark}
 				]
 				value: Workspace.settings.theme
 				onActivated: value => Workspace.requestTheme(value)

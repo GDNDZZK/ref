@@ -69,7 +69,7 @@ Window {
 	Binding {
 		target: Theme
 		property: "dark"
-		value: Workspace.settings.theme === "dark" || (Workspace.settings.theme === "system" && Application.styleHints.colorScheme === Qt.Dark)
+		value: Workspace.settings.theme === ThemeName.dark || (Workspace.settings.theme === ThemeName.system && Application.styleHints.colorScheme === Qt.Dark)
 	}
 
 	Connections {
@@ -241,7 +241,7 @@ Window {
 	ThemeToggle {
 		id: themeToggle
 		anchors { top: parent.top; right: parent.right; margins: Theme.windowButtonMargin }
-		onClicked: Workspace.requestTheme(Theme.dark ? "light" : "dark")
+		onClicked: Workspace.requestTheme(Theme.dark ? ThemeName.light : ThemeName.dark)
 	}
 
 	CircleButton {
