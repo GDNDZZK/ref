@@ -31,7 +31,7 @@ QCoro::Task<> Workspace::enterSplit()
 		const Result<void> demoted = co_await m_current->background();
 		toastFailure(demoted);
 	}
-	const auto watching = co_await m_backend.client().watchAll(true);
+	const Result<void> watching = co_await m_directory.setWatchAll(true);
 	toastFailure(watching);
 	if(!m_split)
 	{
@@ -64,7 +64,7 @@ QCoro::Task<> Workspace::leaveSplit()
 		const Result<void> resumed = co_await m_current->attach(true);
 		toastFailure(resumed);
 	}
-	const auto watching = co_await m_backend.client().watchAll(false);
+	const Result<void> watching = co_await m_directory.setWatchAll(false);
 	toastFailure(watching);
 	// Sessions can be closed while a detach is out, which changes m_chats.
 	QList<QPointer<ChatSession>> others;

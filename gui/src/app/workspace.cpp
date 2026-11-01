@@ -187,11 +187,6 @@ void Workspace::onBackendConnected()
 	{
 		m_started = true;
 		openFirstSession();
-		return;
-	}
-	if(m_split)
-	{
-		m_backend.client().watchAll(true); // the new connection knows nothing of the old subscription
 	}
 }
 
@@ -260,7 +255,6 @@ QCoro::Task<> Workspace::openFirstSession()
 {
 	using Kind = refgui::cli::SessionStart::Kind;
 	const refgui::cli::SessionStart& start = m_options.start;
-	refgui::client::ServerClient& client = m_backend.client();
 
 	const auto fail = [this](const QString& reason) {
 		m_failure = reason;
@@ -271,31 +265,29 @@ QCoro::Task<> Workspace::openFirstSession()
 	QString sessionId = start.sessionId;
 	if(start.kind == Kind::Continue)
 	{
-		constexpr int NewestOnly = 1;
-		const auto history = co_await client.listHistory(m_cwd, NewestOnly);
-		if(!history)
+		const auto newest = co_await m_directory.newestIn(m_cwd);
+		if(!newest)
 		{
-			fail(history.error());
+			fail(newest.error());
 			co_return;
 		}
-		if(history->isEmpty())
+		if(!newest->has_value())
 		{
 			toast(refgui::workspace::ToastLevel::Info, tr("No earlier session in this directory. Started a new one."));
 		}
 		else
 		{
-			sessionId = history->first().id;
+			sessionId = (*newest)->id;
 		}
 	}
 	if(sessionId.isEmpty())
 	{
-		const auto created = co_await client.createSession(m_cwd, start.agent, start.model);
+		const auto created = co_await m_directory.create(m_cwd, start.agent, start.model);
 		if(!created)
 		{
 			fail(created.error());
 			co_return;
 		}
-		m_directory.update(*created);
 		sessionId = created->id;
 	}
 
@@ -451,13 +443,12 @@ void Workspace::newSession(const QString& cwd, const QJSValue& cb)
 
 QCoro::Task<> Workspace::createAndShow(QString cwd, Reply reply)
 {
-	const auto created = co_await m_backend.client().createSession(cwd, std::nullopt, std::nullopt);
+	const auto created = co_await m_directory.create(cwd, std::nullopt, std::nullopt);
 	if(!created)
 	{
 		report(reply, false, created.error());
 		co_return;
 	}
-	m_directory.update(*created);
 	const Result<void> shown = co_await show(created->id);
 	if(!shown)
 	{
@@ -480,7 +471,7 @@ QCoro::Task<> Workspace::closeTask(QString sessionId)
 {
 	const refgui::proto::SessionInfo* info = m_directory.find(sessionId);
 	const QString cwd = info == nullptr ? m_cwd : info->cwd;
-	const Result<void> closed = co_await m_backend.client().closeSession(sessionId);
+	const Result<void> closed = co_await m_directory.close(sessionId);
 	if(toastFailure(closed))
 	{
 		co_return;
