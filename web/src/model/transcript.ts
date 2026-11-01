@@ -40,6 +40,12 @@ const TAIL_ERROR_KEY = 'session:error'
 
 const STREAM_SEPARATOR = '@'
 
+type TextLikePart = Extract<Part, { type: 'text' | 'reasoning' }>
+
+function isTextLike(part: Part | undefined): part is TextLikePart {
+  return part?.type === 'text' || part?.type === 'reasoning'
+}
+
 // A pacer stream is one part of one message: "<part index>@<message id>".
 function streamKey(messageId: string, index: number): string {
   return `${index}${STREAM_SEPARATOR}${messageId}`
@@ -69,7 +75,7 @@ export class Transcript {
   readonly questions = new Map<string, QuestionRequest>()
   queued: Message[] = []
   // The last `Error` event; it stays until the user sends the next prompt.
-  errorText = ''
+  private errorText = ''
 
   constructor(options: TranscriptOptions) {
     this.options = options
@@ -380,8 +386,7 @@ export class Transcript {
       entry.views.set(index, view)
     }
 
-    const previousText =
-      sameKind && (previous?.type === 'text' || previous?.type === 'reasoning') ? previous.text : ''
+    const previousText = sameKind && isTextLike(previous) ? previous.text : ''
     const stream = streamKey(message.id, index)
     const extendsPrevious = part.text.startsWith(previousText)
     if (paceFrom !== undefined && extendsPrevious) {
