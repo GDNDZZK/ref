@@ -1,7 +1,7 @@
 //! Context compaction: model-generated summary (manual / automatic / overflow) or a
 //! summary supplied by the model via `compact_context`.
 
-use crate::engine::{Prep, backoff};
+use crate::engine::{JITTER_FRACTION, Prep, backoff};
 use crate::hub::Hub;
 use crate::session::{Session, user_message};
 use ref_config::COMPACTION_AGENT;
@@ -270,7 +270,7 @@ async fn summarize(
                     attempt,
                     max,
                     e.retry_after,
-                    rand::random_range(-0.2..=0.2),
+                    rand::random_range(-JITTER_FRACTION..=JITTER_FRACTION),
                 );
                 tracing::warn!(session = %s.id, "compaction request failed ({}); retrying in {:?}", e.message, d);
                 tokio::select! {
