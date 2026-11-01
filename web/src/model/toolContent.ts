@@ -10,6 +10,14 @@ import { oneLine } from './oneLine.ts'
 const DETAIL_ARG_MAX_COLUMNS = 40
 const DETAIL_ARG_MAX_COUNT = 3
 
+const SEND_MESSAGE = 'send_message'
+const CREATE_SESSION = 'create_session'
+const READ_SESSION = 'read_session'
+const CLOSE_SESSION = 'close_session'
+const DIRECTORY_PREFIX = 'Directory '
+const NO_FILES_FOUND = 'No files found'
+const KNOWN_TODO_STATUSES: TodoStatus[] = ['in_progress', 'completed', 'cancelled']
+
 const TOOL_ICONS: Record<string, IconKey> = {
   read: 'file-text-16',
   edit: 'pencil-16',
@@ -20,12 +28,12 @@ const TOOL_ICONS: Record<string, IconKey> = {
   find: 'folder-search-16',
   webfetch: 'globe-16',
   todo: 'todo-16',
-  create_session: 'chat-plus-16',
-  send_message: 'chat-send-16',
+  [CREATE_SESSION]: 'chat-plus-16',
+  [SEND_MESSAGE]: 'chat-send-16',
   message_status: 'chat-send-16',
   list_sessions: 'chat-list-16',
-  close_session: 'chat-x-16',
-  read_session: 'chat-16',
+  [CLOSE_SESSION]: 'chat-x-16',
+  [READ_SESSION]: 'chat-16',
 }
 
 export function toolIcon(name: string): IconKey {
@@ -53,61 +61,65 @@ export function parseTodos(input: JsonValue | null | undefined): Todo[] {
     const content = stringArg(item, 'content')?.trim()
     if (!content) return []
     const status = stringArg(item, 'status')
-    const known: TodoStatus[] = ['in_progress', 'completed', 'cancelled']
-    return [{ content, status: known.find((candidate) => candidate === status) ?? 'pending' }]
+    return [{ content, status: KNOWN_TODO_STATUSES.find((candidate) => candidate === status) ?? 'pending' }]
   })
 }
 
 // The one line after the title: command, path, pattern, url, recipient, progress.
 export function toolDetail(name: string, input: JsonValue | null | undefined): string {
-  const arg = (key: string) => stringArg(input, key)
-  const detail = ((): string | undefined => {
-    switch (name) {
-      case 'bash': {
-        const command = arg('command')
-        return command === undefined ? undefined : `$ ${firstLine(command)}`
-      }
-      case 'read':
-      case 'write':
-      case 'delete':
-        return arg('path')
-      case 'edit': {
-        const edits = asObject(input)?.edits
-        const count = Array.isArray(edits) ? edits.length : 0
-        const path = arg('path')
-        return path !== undefined && count > 1 ? `${path} (${count} edits)` : path
-      }
-      case 'grep': {
-        const pattern = arg('pattern')
-        if (pattern === undefined) return undefined
-        const path = arg('path')
-        return path === undefined ? `"${pattern}"` : `"${pattern}" in ${path}`
-      }
-      case 'find':
-        return arg('pattern') ?? arg('path')
-      case 'webfetch': {
-        const url = arg('url')
-        const format = arg('format')
-        return url !== undefined && format !== undefined && format !== 'markdown' ? `${url} (${format})` : url
-      }
-      case 'send_message':
-        return arg('to') === undefined ? undefined : `→ ${arg('to')}`
-      case 'create_session':
-        return arg('name') === undefined ? undefined : `${arg('name')} (${arg('agent') ?? ''})`
-      case 'read_session':
-      case 'close_session':
-      case 'context_window':
-        return arg('session')
-      case 'todo': {
-        const todos = parseTodos(input)
-        if (todos.length === 0) return undefined
-        return `${todos.filter((todo) => todo.status === 'completed').length}/${todos.length} done`
-      }
-      default:
-        return undefined
-    }
-  })()
+  const detail = detailOf(name, input, (key) => stringArg(input, key))
   return detail === undefined ? genericDetail(input) : oneLine(detail)
+}
+
+function detailOf(
+  name: string,
+  input: JsonValue | null | undefined,
+  arg: (key: string) => string | undefined,
+): string | undefined {
+  switch (name) {
+    case 'bash': {
+      const command = arg('command')
+      return command === undefined ? undefined : `$ ${firstLine(command)}`
+    }
+    case 'read':
+    case 'write':
+    case 'delete':
+      return arg('path')
+    case 'edit': {
+      const edits = asObject(input)?.edits
+      const count = Array.isArray(edits) ? edits.length : 0
+      const path = arg('path')
+      return path !== undefined && count > 1 ? `${path} (${count} edits)` : path
+    }
+    case 'grep': {
+      const pattern = arg('pattern')
+      if (pattern === undefined) return undefined
+      const path = arg('path')
+      return path === undefined ? `"${pattern}"` : `"${pattern}" in ${path}`
+    }
+    case 'find':
+      return arg('pattern') ?? arg('path')
+    case 'webfetch': {
+      const url = arg('url')
+      const format = arg('format')
+      return url !== undefined && format !== undefined && format !== 'markdown' ? `${url} (${format})` : url
+    }
+    case SEND_MESSAGE:
+      return arg('to') === undefined ? undefined : `→ ${arg('to')}`
+    case CREATE_SESSION:
+      return arg('name') === undefined ? undefined : `${arg('name')} (${arg('agent') ?? ''})`
+    case READ_SESSION:
+    case CLOSE_SESSION:
+    case 'context_window':
+      return arg('session')
+    case 'todo': {
+      const todos = parseTodos(input)
+      if (todos.length === 0) return undefined
+      return `${todos.filter((todo) => todo.status === 'completed').length}/${todos.length} done`
+    }
+    default:
+      return undefined
+  }
 }
 
 // `key=value` of the first few plain arguments.
@@ -135,9 +147,9 @@ export function isWebUrl(target: string): boolean {
 
 // The session a cross-session tool talks to (or creates).
 export function peerName(name: string, input: JsonValue | null | undefined): string | undefined {
-  if (name === 'send_message') return stringArg(input, 'to')
-  if (name === 'create_session') return stringArg(input, 'name')
-  if (['read_session', 'close_session', 'message_status'].includes(name)) return stringArg(input, 'session')
+  if (name === SEND_MESSAGE) return stringArg(input, 'to')
+  if (name === CREATE_SESSION) return stringArg(input, 'name')
+  if ([READ_SESSION, CLOSE_SESSION, 'message_status'].includes(name)) return stringArg(input, 'session')
   return undefined
 }
 
@@ -216,7 +228,7 @@ function splitNotes(blocks: string[]): { content: string[]; notes: string[] } {
   const content: string[] = []
   const notes: string[] = []
   for (const block of blocks) {
-    if (HEADER.test(firstLine(block)) || block.startsWith('Directory ')) content.push(block)
+    if (HEADER.test(firstLine(block)) || block.startsWith(DIRECTORY_PREFIX)) content.push(block)
     else if (block.startsWith('[')) notes.push(...block.split('\n'))
     else content.push(block)
   }
@@ -246,7 +258,7 @@ export interface FoundPath {
 export function parseFound(output: string): { paths: FoundPath[]; notes: string[] } {
   const [list = '', ...rest] = output.split('\n\n')
   const notes = rest.flatMap((block) => block.split('\n'))
-  if (list.startsWith('No files found')) return { paths: [], notes: [] }
+  if (list.startsWith(NO_FILES_FOUND)) return { paths: [], notes: [] }
   const paths = list.split('\n').map((line): FoundPath => {
     const isDir = line.endsWith('/')
     const trimmed = isDir ? line.slice(0, -1) : line
