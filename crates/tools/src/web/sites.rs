@@ -66,14 +66,15 @@ pub fn github_issue_markdown(issue: &Value, comments: &[Value]) -> (String, Stri
     let number = issue.get("number").and_then(Value::as_u64).unwrap_or(0);
     let title = s(issue, "title");
     let mut state = s(issue, "state");
-    if is_pr
+    let merged = is_pr
         && issue["pull_request"]
             .get("merged_at")
-            .is_some_and(|m| !m.is_null())
-    {
+            .is_some_and(|m| !m.is_null());
+    let close_reason = s(issue, "state_reason");
+    if merged {
         state = "merged".into();
-    } else if !s(issue, "state_reason").is_empty() && state == "closed" {
-        state = format!("closed ({})", s(issue, "state_reason").replace('_', " "));
+    } else if !close_reason.is_empty() && state == "closed" {
+        state = format!("closed ({})", close_reason.replace('_', " "));
     }
     let labels: Vec<String> = issue
         .get("labels")
