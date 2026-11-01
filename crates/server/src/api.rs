@@ -527,8 +527,6 @@ async fn export(hub: &Arc<Hub>, session_id: String, path: String) -> Reply {
     Ok(json!({ "path": p.to_string_lossy() }))
 }
 
-/// Reload the session config before a human prompt; invalidate the cached system prompt
-/// only when the config actually changed (keeps prompt cache hits).
 const BUSY_CWD: &str = "The session is busy; wait for it or interrupt it (esc esc) before changing the working directory.";
 
 /// `/cd`: switch the session to another directory and tell the model with a reminder.
@@ -638,13 +636,19 @@ async fn fit_images(
     .map_err(|_| "Processing the attached images failed.".to_string())
 }
 
+/// Reload the session config before a human prompt; invalidate the cached system prompt
+/// only when the config actually changed (keeps prompt cache hits).
 async fn reload_config(hub: &Arc<Hub>, s: &Arc<Session>) {
     let cwd = s.lock().info.cwd.clone();
-    let Ok(cfg) = crate::ops::load_config(hub, &cwd).await else {
-        return;
+    let cfg = match crate::ops::load_config(hub, &cwd).await {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            tracing::warn!(session = %s.id, "reloading the config failed: {e}");
+            return;
+        }
     };
     let mut st = s.lock();
-    if format!("{:?}", *st.cfg) != format!("{cfg:?}") {
+    if *st.cfg != cfg {
         st.cfg = Arc::new(cfg);
         st.system = None;
         hub.mcp.start_servers(&st.cfg);

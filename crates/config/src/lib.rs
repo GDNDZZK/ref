@@ -54,7 +54,7 @@ pub use markdown::split_frontmatter;
 pub use permission::{Action, PermissionRules, Rule};
 
 /// Fully resolved configuration (for one working directory).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Config {
     pub providers: BTreeMap<String, ProviderConfig>,
     /// Agents by name (built-ins merged with user definitions; disabled ones removed).
@@ -92,7 +92,7 @@ pub struct Config {
     pub warnings: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ProviderConfig {
     pub id: String,
     pub name: String,
@@ -110,7 +110,7 @@ pub struct ProviderConfig {
     pub models: BTreeMap<String, ModelConfig>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ModelConfig {
     /// Key in `models` map.
     pub key: String,
@@ -141,7 +141,7 @@ pub struct ModelConfig {
     pub threshold: Option<f64>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct AgentConfig {
     pub name: String,
     pub description: String,
@@ -169,7 +169,7 @@ pub struct AgentConfig {
     pub hidden: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum McpConfig {
     Local {
         command: Vec<String>,
@@ -194,7 +194,7 @@ impl McpConfig {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct CommandConfig {
     pub name: String,
     /// Template with `$ARGUMENTS`, `$1`..`$9` placeholders.
@@ -204,7 +204,7 @@ pub struct CommandConfig {
     pub model: Option<ModelRef>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CompactionConfig {
     /// Automatically compact when context reaches `threshold` of the window (default true).
     pub auto: bool,
