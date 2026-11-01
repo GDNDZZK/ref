@@ -168,7 +168,10 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         if !wanted {
             continue;
         }
-        let rel = entry.path().strip_prefix(&root).unwrap_or(entry.path());
+        let rel = entry
+            .path()
+            .strip_prefix(&root)
+            .expect("walk entries are under the root");
         if !matcher.is_match(rel) {
             continue;
         }
