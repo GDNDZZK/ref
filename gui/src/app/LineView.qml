@@ -70,10 +70,9 @@ Item {
 			id: sideBar
 			policy: ScrollBar.AlwaysOn
 			visible: size < 1
-			contentItem: Rectangle {
-				implicitHeight: 6
-				radius: height / 2
-				color: sideBar.pressed ? Theme.scrollHandlePressed : Theme.scrollHandle
+			contentItem: ScrollHandle {
+				implicitHeight: thickness
+				pressed: sideBar.pressed
 			}
 		}
 
@@ -87,7 +86,8 @@ Item {
 					id: row
 
 					required property var modelData
-					readonly property var style: view.styles[modelData.kind] ?? view.styles["line"]
+					readonly property var style: view.styles[modelData.kind]
+					readonly property bool isHeader: modelData.kind === "file" || modelData.kind === "hunk"
 
 					width: scroller.contentWidth
 					height: view.rowHeight
@@ -104,7 +104,7 @@ Item {
 						color: Theme.textMuted
 						opacity: view.gutterOpacity
 						font.family: Theme.monoFamily
-						font.pixelSize: 11
+						font.pixelSize: Theme.microFontSize
 					}
 					Text {
 						textFormat: Text.PlainText
@@ -118,7 +118,7 @@ Item {
 					}
 					Text {
 						textFormat: Text.PlainText
-						x: row.modelData.kind === "file" || row.modelData.kind === "hunk" ? view.sidePadding + view.gutterWidth : view.textX // headers start where the sign column does
+						x: row.isHeader ? view.sidePadding + view.gutterWidth : view.textX // headers start where the sign column does
 						anchors.verticalCenter: parent.verticalCenter
 						text: row.modelData.text
 						color: row.style.color
@@ -139,14 +139,9 @@ Item {
 		onClicked: view.showAllRequested()
 	}
 
-	HoverHandler { id: hover }
-
-	CopyButton {
+	HoverCopyButton {
 		anchors { top: parent.top; right: parent.right; margins: 4 }
 		visible: view.copyText !== ""
 		text: view.copyText
-		opacity: hover.hovered ? 1 : 0
-
-		Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 	}
 }

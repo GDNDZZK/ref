@@ -8,10 +8,9 @@ ScrollBar {
 
 	policy: ScrollBar.AsNeeded
 
-	contentItem: Rectangle {
-		implicitWidth: 6
-		radius: width / 2
-		color: bar.pressed ? Theme.scrollHandlePressed : Theme.scrollHandle
+	contentItem: ScrollHandle {
+		implicitWidth: thickness
+		pressed: bar.pressed
 		opacity: (bar.active || bar.hovered) && bar.size < 1 ? 1 : 0
 
 		Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }

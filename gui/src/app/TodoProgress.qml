@@ -28,7 +28,7 @@ Item {
 	readonly property int headerPadding: 6
 	readonly property bool finished: session.todoCurrent === ""
 	readonly property string counts: session.todoDone + "/" + session.todoTotal
-	readonly property bool working: session.todoCurrentStatus === "in_progress"
+	readonly property bool working: session.todoCurrentStatus === TodoStatus.inProgress
 
 	visible: session.todoTotal > 0
 	// The natural width of the parts, not of the row: the item's text is cut to what is left.
@@ -58,7 +58,7 @@ Item {
 			border.color: root.working ? Theme.accent : Theme.textMuted
 			border.width: root.working ? 0 : 1
 
-			Pulse { target: marker; running: root.working && root.visible; dimmed: 0.5 }
+			Pulse { target: marker; running: root.working && root.visible }
 		}
 		Text {
 			id: current
@@ -82,7 +82,7 @@ Item {
 		}
 	}
 
-	HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
+	HoverHandler { cursorShape: Qt.PointingHandCursor }
 	TapHandler { onTapped: popup.visible ? popup.close() : popup.open() }
 	Accessible.role: Accessible.Button
 	Accessible.name: qsTr("Todo %1").arg(root.counts)

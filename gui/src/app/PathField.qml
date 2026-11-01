@@ -15,6 +15,7 @@ Item {
 	property int request: 0
 	readonly property int visibleRows: 6
 	readonly property int rowHeight: 32
+	readonly property int debounceMs: 150 // wait for a pause in typing before listing the directory
 	readonly property bool completing: names.length > 0
 
 	signal accepted()
@@ -51,7 +52,7 @@ Item {
 
 	Timer {
 		id: debounce
-		interval: 150
+		interval: path.debounceMs
 		onTriggered: path.refresh()
 	}
 	Component.onCompleted: refresh()
@@ -112,7 +113,7 @@ Item {
 				anchors { left: parent.left; leftMargin: 38; right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
 				text: row.modelData
 				color: Theme.text
-				font.pixelSize: Theme.fontSize - 1
+				font.pixelSize: Theme.secondaryFontSize
 				elide: Text.ElideRight
 			}
 			HoverHandler {

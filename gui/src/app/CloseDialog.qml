@@ -2,10 +2,8 @@ import QtQuick
 import RefGui
 
 // Asks before closing a session that is still working.
-ModalDialog {
+SessionDialog {
 	id: dialog
-
-	readonly property string sessionId: Workspace.dialogArgs.sessionId ?? Workspace.currentId
 
 	function closeSession() {
 		Workspace.closeSession(sessionId)
@@ -16,26 +14,22 @@ ModalDialog {
 	onAccepted: closeSession()
 
 	buttons: [
-		DialogButton {
-			text: qsTr("Cancel")
-			onClicked: dialog.close()
-		},
+		CancelButton {},
 		DialogButton {
 			text: qsTr("Close")
-			kind: "danger"
+			kind: DialogButton.Danger
 			onClicked: dialog.closeSession()
 		}
 	]
 
-	Text {
-		textFormat: Text.PlainText
-		x: 22
-		width: parent.width - 2 * 22
-		topPadding: 4
-		bottomPadding: 22
-		text: qsTr("This session is still working. Closing it stops the work; the conversation stays in history.")
-		color: Theme.text
-		font.pixelSize: Theme.fontSize - 1
-		wrapMode: Text.Wrap
+	DialogBody {
+		Text {
+			textFormat: Text.PlainText
+			width: parent.width
+			text: qsTr("This session is still working. Closing it stops the work; the conversation stays in history.")
+			color: Theme.text
+			font.pixelSize: Theme.secondaryFontSize
+			wrapMode: Text.Wrap
+		}
 	}
 }

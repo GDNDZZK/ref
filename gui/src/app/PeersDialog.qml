@@ -3,47 +3,49 @@ import RefGui
 
 // What the backend says about the other live sessions: peers, this session's name, and the
 // messages received and sent.
-ModalDialog {
+SessionDialog {
 	id: dialog
 
-	readonly property string sessionId: Workspace.dialogArgs.sessionId ?? Workspace.currentId
-	readonly property var commands: ({peers: "peers", name: "peers-name", inbox: "peers-inbox", outbox: "peers-outbox"})
-	property string tab: Workspace.dialogArgs.tab ?? "peers"
+	// The tabs: what the Segmented shows, and the backend command behind each.
+	readonly property var tabs: [
+		{text: qsTr("Peers"), value: "peers", command: "peers"},
+		{text: qsTr("Name"), value: "name", command: "peers-name"},
+		{text: qsTr("Inbox"), value: "inbox", command: "peers-inbox"},
+		{text: qsTr("Outbox"), value: "outbox", command: "peers-outbox"}
+	]
+	readonly property int outputMinHeight: 200
+	readonly property int outputMaxHeight: 320
+	property string tab: Workspace.dialogArgs.tab ?? tabs[0].value
 	property string result: ""
 	property bool loading: true
-	property bool gone: false
+
+	function commandOf(tab) {
+		return tabs.find(entry => entry.value === tab).command
+	}
 
 	function load() {
 		loading = true
-		Workspace.peerCommand(sessionId, commands[tab], "", (ok, text) => {
-			if (gone)
-				return
+		Workspace.peerCommand(sessionId, commandOf(tab), "", replyWhileOpen((ok, text) => {
 			loading = false
 			result = text
-		})
+		}))
 	}
 
 	function rename() {
-		Workspace.peerCommand(sessionId, "peers-name", nameField.text.trim(), (ok, text) => {
-			if (gone)
-				return
+		Workspace.peerCommand(sessionId, commandOf("name"), nameField.text.trim(), replyWhileOpen((ok, text) => {
 			if (ok)
 				result = text
 			else
 				nameField.errorText = text
-		})
+		}))
 	}
 
 	title: qsTr("Peers")
 	dialogWidth: Theme.dialogWidthWide
 	onTabChanged: load()
 	Component.onCompleted: load()
-	Component.onDestruction: gone = true
 
-	Column {
-		width: parent.width
-		topPadding: 4
-		bottomPadding: 22
+	DialogBody {
 		spacing: 14
 
 		Item {
@@ -51,23 +53,16 @@ ModalDialog {
 			height: 30
 
 			Segmented {
-				x: 22
-				width: parent.width - 2 * 22
-				model: [
-					{text: qsTr("Peers"), value: "peers"},
-					{text: qsTr("Name"), value: "name"},
-					{text: qsTr("Inbox"), value: "inbox"},
-					{text: qsTr("Outbox"), value: "outbox"}
-				]
+				width: parent.width
+				model: dialog.tabs
 				value: dialog.tab
 				onActivated: value => dialog.tab = value
 			}
 		}
 
 		Rectangle {
-			x: 22
-			width: parent.width - 2 * 22
-			height: Math.min(320, Math.max(200, output.contentHeight + 2 * 14))
+			width: parent.width
+			height: Math.min(dialog.outputMaxHeight, Math.max(dialog.outputMinHeight, output.contentHeight + 2 * 14))
 			radius: 10
 			color: Theme.codeBackground
 			border.color: Theme.border
@@ -99,8 +94,7 @@ ModalDialog {
 		}
 
 		Row {
-			x: 22
-			width: parent.width - 2 * 22
+			width: parent.width
 			spacing: 10
 			visible: dialog.tab === "name"
 
@@ -113,7 +107,7 @@ ModalDialog {
 			DialogButton {
 				id: setName
 				text: qsTr("Set name")
-				kind: "primary"
+				kind: DialogButton.Primary
 				onClicked: dialog.rename()
 			}
 		}

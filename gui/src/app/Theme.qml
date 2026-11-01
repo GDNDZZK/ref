@@ -3,14 +3,10 @@ pragma Singleton
 import QtQuick
 import RefGui
 
-// Colors, type and layout metrics. Follows the system color scheme until toggle()
-// is called; from then on the choice is the user's.
+// Colors, type and layout metrics. `dark` follows the system color scheme; Main.qml
+// binds it to the user's choice.
 QtObject {
 	property bool dark: Application.styleHints.colorScheme === Qt.Dark
-
-	function toggle() {
-		dark = !dark
-	}
 
 	readonly property color background: dark ? "#16171a" : "#fafaf9"
 	readonly property color surface: dark ? "#1f2024" : "#f1f1ef"
@@ -34,6 +30,7 @@ QtObject {
 	readonly property color warning: dark ? "#e6b450" : "#b7791f"
 	readonly property color warningSurface: dark ? "#2b2417" : "#fcf4e2"
 	readonly property color warningBorder: dark ? "#5a4723" : "#ecd29a"
+	readonly property color idleDot: dark ? "#808e909a" : "#806b6d75" // textMuted at half opacity: a session or server with nothing going on
 	readonly property color scrim: dark ? "#8c000000" : "#40000000" // behind dialogs
 	// Messages from other sessions, diff hunks, tool input.
 	readonly property color info: dark ? "#6fb7e0" : "#2a7fb5"
@@ -42,6 +39,7 @@ QtObject {
 	readonly property color diffRemoved: dark ? "#ec6f73" : "#b3303f"
 	readonly property color diffRemovedBackground: dark ? "#33202a" : "#fbe6e8"
 	readonly property color matchBackground: dark ? "#3a3420" : "#fff1c2" // grep matches
+	readonly property real disabledOpacity: 0.4 // a control that cannot be used now
 	readonly property real staleOpacity: 0.55 // messages before the last compaction
 	// Composer in shell mode (`!command`): amber, like the TUI's warning color.
 	readonly property color shellSurface: dark ? "#2a2419" : "#fbf3e3"
@@ -63,12 +61,21 @@ QtObject {
 	readonly property int fontSize: 15
 	readonly property int smallFontSize: 12
 	readonly property int codeFontSize: 13
+	// Sizes next to fontSize for text one step below it; written out because the web generator reads literals.
+	readonly property int secondaryFontSize: 14 // fontSize - 1
+	readonly property int compactFontSize: 13 // fontSize - 2
+	readonly property int captionFontSize: 13 // smallFontSize + 1
+	readonly property int microFontSize: 11
 
 	readonly property int radiusSmall: 6
 	readonly property int radius: 10
 	readonly property int radiusLarge: 18
 
+	readonly property int toolBodyPaddingX: 14
+	readonly property int toolBodyPaddingY: 10
+	readonly property int toolBodyBottomExtra: 2 // the body has this much more below than above
 	readonly property int pagePadding: 24
+	readonly property int metaLineHeight: 24 // a line of the meta row under a message
 	readonly property int blockSpacing: 14
 	readonly property int turnGap: 18 // extra space around the divider that opens a turn
 	readonly property int contentWidth: 760 // reading column
@@ -82,11 +89,14 @@ QtObject {
 	readonly property int sidebarRowHeight: 56
 	readonly property int sidebarHistoryRowHeight: 44
 	readonly property int sidebarSectionHeight: 28
+	readonly property int listLabelInset: 18 // of a section label in the sidebar and in pick lists
 	readonly property int sidebarFooterHeight: 44
 	readonly property int sidebarMinRunningRows: 3
 	readonly property int sidebarMinHistoryRows: 3
 	readonly property int buttonHeight: 34
 	readonly property int fieldHeight: 38
+	readonly property int pickRowHeight: 44
+	readonly property int emptyStateHeight: 64
 	readonly property int paletteWidth: 560
 	readonly property int paletteSearchHeight: 52
 	readonly property int paletteRowHeight: 40
@@ -95,6 +105,11 @@ QtObject {
 	readonly property int dialogWidth: 480
 	readonly property int dialogWidthWide: 640
 	readonly property int settingsWidth: 520
+	readonly property int statusDotSize: 8 // the dot of a session, server or activity
+	readonly property int windowButtonMargin: 14 // distance of the corner buttons from the window edge
+	readonly property int windowButtonGap: 8 // between corner buttons
+	readonly property int overlayEdgeMargin: 24 // least distance of the palette and dialogs from the window edge
+	readonly property int dialogPadding: 22 // inset of dialog content from the dialog edge
 	readonly property int dialogHeaderHeight: 56
 	readonly property int dialogFooterHeight: 64
 	readonly property real dialogMaxHeightRatio: 0.8

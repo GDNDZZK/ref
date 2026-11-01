@@ -108,7 +108,7 @@ Rectangle {
 			width: parent.width
 			text: card.prompt.text
 			color: Theme.text
-			font.pixelSize: Theme.fontSize - 1
+			font.pixelSize: Theme.secondaryFontSize
 			wrapMode: Text.Wrap
 		}
 	}
@@ -127,11 +127,11 @@ Rectangle {
 		opacity: card.prompt.busy ? card.busyOpacity : 1
 
 		// Keeps the highlighted row in view when the arrows go beyond the visible rows.
-		function reveal(y, height) {
-			if (y < contentY)
-				contentY = y
-			else if (y + height > contentY + this.height)
-				contentY = y + height - this.height
+		function reveal(rowY, rowHeight) {
+			if (rowY < contentY)
+				contentY = rowY
+			else if (rowY + rowHeight > contentY + height)
+				contentY = rowY + rowHeight - height
 		}
 
 		Column {
@@ -142,7 +142,6 @@ Rectangle {
 				model: card.prompt.rows
 
 				QuestionRow {
-					id: choice
 
 					required property var modelData
 
@@ -184,14 +183,14 @@ Rectangle {
 						textFormat: Text.PlainText
 						text: entry.modelData.header
 						color: Theme.textMuted
-						font.pixelSize: Theme.fontSize - 1
+						font.pixelSize: Theme.secondaryFontSize
 					}
 					Text {
 						textFormat: Text.PlainText
 						width: entry.width - entry.leftPadding - entryHeader.width - entry.spacing
 						text: entry.modelData.answer
 						color: entry.modelData.answered ? Theme.text : Theme.warning
-						font.pixelSize: Theme.fontSize - 1
+						font.pixelSize: Theme.secondaryFontSize
 						wrapMode: Text.Wrap
 					}
 				}
@@ -228,7 +227,7 @@ Rectangle {
 			}
 			DialogButton {
 				small: true
-				kind: "primary"
+				kind: DialogButton.Primary
 				visible: card.prompt.confirming
 				text: qsTr("Submit")
 				enabled: !card.prompt.busy

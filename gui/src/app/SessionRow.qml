@@ -21,13 +21,40 @@ Item {
 	required property bool isCurrent
 	required property bool isTile
 
-	property double now: Date.now()
 	property bool renaming: false
-	readonly property bool working: activity !== "idle"
-	readonly property bool failed: hasError && !working
-	readonly property bool retrying: activity === "retrying"
+	readonly property bool working: Activity.isWorking(activity)
+	readonly property bool failed: Activity.isFailed(activity, hasError)
+	readonly property bool retrying: activity === Activity.retrying
 	readonly property bool attention: hasPermission || failed
 	readonly property bool hovered: hover.hovered
+	readonly property int renameEntry: 0 // index in the context menu
+
+	// What the line under the title says.
+	readonly property string subtitle: {
+		if (activity === Activity.waitingQuestion)
+			return qsTr("Waiting for your answer")
+		if (hasPermission)
+			return qsTr("Needs permission")
+		if (failed)
+			return lastError.split("\n")[0]
+		if (retrying)
+			return qsTr("Retrying")
+		if (activity === Activity.compacting)
+			return qsTr("Compacting")
+		return busySince > 0 ? dirName + " · " + Format.elapsed(ticker.now - busySince) : dirName
+	}
+	readonly property color faceColor: {
+		if (hasPermission)
+			return Theme.warningSurface
+		if (isCurrent)
+			return Theme.userBubble
+		return hover.hovered ? Theme.surfaceHover : "transparent"
+	}
+	readonly property color borderColor: {
+		if (hasPermission)
+			return Theme.warningBorder
+		return isCurrent ? Theme.userBubbleBorder : "transparent"
+	}
 
 	function startRename() {
 		renaming = true
@@ -47,22 +74,18 @@ Item {
 	width: ListView.view ? ListView.view.width : 0
 	height: Theme.sidebarRowHeight
 
-	Timer {
-		interval: 1000
-		repeat: true
+	Ticker {
+		id: ticker
+		interval: Format.msPerSecond
 		running: row.busySince > 0 && row.visible
-		onTriggered: row.now = Date.now()
 	}
 
 	Rectangle {
-		id: face
 		anchors { fill: parent; leftMargin: Theme.sidebarPadding; rightMargin: Theme.sidebarPadding }
 		radius: Theme.radius
-		color: row.hasPermission ? Theme.warningSurface
-			: row.isCurrent ? Theme.userBubble
-			: hover.hovered ? Theme.surfaceHover : "transparent"
-		border.color: row.hasPermission ? Theme.warningBorder : row.isCurrent ? Theme.userBubbleBorder : "transparent"
-		scale: tap.pressed ? 0.98 : 1
+		color: row.faceColor
+		border.color: row.borderColor
+		scale: tap.pressed ? Motion.pressedScaleRow : 1
 
 		Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 		Behavior on border.color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
@@ -97,7 +120,7 @@ Item {
 			verticalAlignment: Text.AlignVCenter
 			text: row.displayTitle
 			color: Theme.text
-			font.pixelSize: Theme.fontSize - 2
+			font.pixelSize: Theme.compactFontSize
 			elide: Text.ElideRight
 			visible: !row.renaming
 		}
@@ -112,7 +135,7 @@ Item {
 			color: Theme.text
 			selectionColor: Theme.selection
 			selectedTextColor: Theme.text
-			font.pixelSize: Theme.fontSize - 2
+			font.pixelSize: Theme.compactFontSize
 			clip: true
 			onAccepted: row.commitRename()
 			onActiveFocusChanged: if (!activeFocus) row.commitRename()
@@ -124,13 +147,7 @@ Item {
 			x: 30
 			y: 30
 			width: parent.width - x - 12
-			text: row.activity === "waiting_question" ? qsTr("Waiting for your answer")
-				: row.hasPermission ? qsTr("Needs permission")
-				: row.failed ? row.lastError.split("\n")[0]
-				: row.retrying ? qsTr("Retrying")
-				: row.activity === "compacting" ? qsTr("Compacting")
-				: row.busySince > 0 ? row.dirName + " · " + Format.elapsed(row.now - row.busySince)
-				: row.dirName
+			text: row.subtitle
 			color: row.hasPermission || row.retrying ? Theme.warning : row.failed ? Theme.danger : Theme.textMuted
 			font.pixelSize: Theme.smallFontSize
 			elide: Text.ElideRight
@@ -153,7 +170,7 @@ Item {
 
 				Icon {
 					anchors.verticalCenter: parent.verticalCenter
-					name: row.activity === "waiting_question" ? "question" : "lock"
+					name: row.activity === Activity.waitingQuestion ? "question" : "lock"
 					size: 16
 					color: Theme.warning
 					visible: row.hasPermission
@@ -181,23 +198,17 @@ Item {
 				}
 			}
 
-			CircleButton {
+			IconButton {
 				anchors.centerIn: parent
-				implicitWidth: 22
-				implicitHeight: 22
+				buttonSize: 22
+				iconName: "close"
+				iconSize: 16
 				opacity: hover.hovered ? 1 : 0
 				visible: opacity > 0
 				Accessible.name: qsTr("Close session")
 				onClicked: Workspace.closeSession(row.sessionId)
 
 				Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
-
-				Icon {
-					anchors.centerIn: parent
-					name: "close"
-					size: 16
-					color: Theme.textMuted
-				}
 			}
 		}
 	}
@@ -219,6 +230,11 @@ Item {
 	ContextMenu {
 		id: menu
 		entries: [{text: qsTr("Rename")}, {text: qsTr("Close"), danger: true}]
-		onTriggered: index => index === 0 ? row.startRename() : Workspace.closeSession(row.sessionId)
+		onTriggered: index => {
+			if (index === row.renameEntry)
+				row.startRename()
+			else
+				Workspace.closeSession(row.sessionId)
+		}
 	}
 }

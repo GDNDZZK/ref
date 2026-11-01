@@ -17,11 +17,31 @@ FocusScope {
 	readonly property bool hasButtons: footerRow.children.length > 0
 	readonly property bool open: Workspace.dialog !== ""
 	property bool entered: false
+	// Set when the dialog is destroyed, so a reply that arrives later does nothing.
+	property bool gone: false
 
 	signal accepted()
 
 	function close() {
 		Workspace.closeDialog()
+	}
+
+	// Wraps the callback of a backend request so that it is skipped once the dialog is gone.
+	function replyWhileOpen(handler) {
+		return (...reply) => {
+			if (!gone)
+				handler(...reply)
+		}
+	}
+
+	// A reply callback (ok, reason) that closes the dialog on success and puts the reason under the field otherwise.
+	function closeOrShowError(field) {
+		return replyWhileOpen((ok, reason) => {
+			if (ok)
+				close()
+			else
+				field.errorText = reason
+		})
 	}
 
 	anchors.fill: parent
@@ -31,6 +51,8 @@ FocusScope {
 		entered = true
 		forceActiveFocus()
 	}
+
+	Component.onDestruction: gone = true
 
 	Keys.onEscapePressed: close()
 	Keys.onReturnPressed: accepted()
@@ -44,10 +66,10 @@ FocusScope {
 	Rectangle {
 		id: panel
 
-		readonly property real wantedY: Math.max(24, (dialog.height - height) / 3)
+		readonly property real wantedY: Math.max(Theme.overlayEdgeMargin, (dialog.height - height) / 3)
 		readonly property bool shown: dialog.entered && dialog.open
 
-		width: Math.min(dialog.dialogWidth, dialog.width - 2 * 24)
+		width: Math.min(dialog.dialogWidth, dialog.width - 2 * Theme.overlayEdgeMargin)
 		height: Math.min(dialog.maxPanelHeight, Theme.dialogHeaderHeight + scroller.contentHeight + (dialog.hasButtons ? Theme.dialogFooterHeight : 0))
 		x: Math.round((dialog.width - width) / 2)
 		y: Math.round(wantedY) - (shown ? 0 : Motion.dialogDrop)
@@ -73,27 +95,20 @@ FocusScope {
 
 			Text {
 				textFormat: Text.PlainText
-				anchors { left: parent.left; leftMargin: 22; right: closeButton.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+				anchors { left: parent.left; leftMargin: Theme.dialogPadding; right: closeButton.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
 				text: dialog.title
 				color: Theme.text
 				font { pixelSize: Theme.fontSize + 1; bold: true }
 				elide: Text.ElideRight
 			}
 
-			CircleButton {
+			IconButton {
 				id: closeButton
 				anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
-				implicitWidth: 28
-				implicitHeight: 28
+				buttonSize: 28
+				iconName: "close"
 				Accessible.name: qsTr("Close")
 				onClicked: dialog.close()
-
-				Icon {
-					anchors.centerIn: parent
-					name: "close"
-					size: 20
-					color: Theme.textMuted
-				}
 			}
 		}
 
@@ -122,7 +137,7 @@ FocusScope {
 
 			Row {
 				id: footerRow
-				anchors { right: parent.right; rightMargin: 22; verticalCenter: parent.verticalCenter }
+				anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
 				spacing: 10
 			}
 		}

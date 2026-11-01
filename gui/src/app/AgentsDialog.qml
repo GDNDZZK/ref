@@ -3,11 +3,9 @@ import QtQuick
 import RefGui
 
 // Picks the agent of one session.
-ModalDialog {
+SessionDialog {
 	id: dialog
 
-	readonly property string sessionId: Workspace.dialogArgs.sessionId ?? Workspace.currentId
-	readonly property var session: Workspace.info(sessionId)
 	readonly property string needle: list.text.trim().toLowerCase()
 	readonly property var shown: {
 		const agents = Workspace.config.agents.map((agent, index) => Object.assign({position: index}, agent))
@@ -25,21 +23,22 @@ ModalDialog {
 		delegate: PickRow {
 			id: row
 			required property var modelData
+			selected: modelData.name === dialog.session.agent
 			onActivated: {
 				Workspace.setAgent(dialog.sessionId, modelData.name)
 				dialog.close()
 			}
 
 			Rectangle {
-				x: 22
+				x: Theme.dialogPadding
 				anchors.verticalCenter: parent.verticalCenter
-				width: 8
-				height: 8
-				radius: 4
+				width: Theme.statusDotSize
+				height: Theme.statusDotSize
+				radius: width / 2
 				color: Theme.agentColor(row.modelData.color, row.modelData.position)
 			}
 			Column {
-				anchors { left: parent.left; leftMargin: 42; right: check.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+				anchors { left: parent.left; leftMargin: Theme.dialogPadding + 20; right: row.check.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
 				spacing: 2
 
 				Text {
@@ -58,14 +57,6 @@ ModalDialog {
 					font.pixelSize: Theme.smallFontSize
 					elide: Text.ElideRight
 				}
-			}
-			Icon {
-				id: check
-				anchors { right: parent.right; rightMargin: 22; verticalCenter: parent.verticalCenter }
-				name: "check"
-				size: 16
-				color: Theme.accent
-				visible: row.modelData.name === dialog.session.agent
 			}
 		}
 	}

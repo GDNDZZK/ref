@@ -6,22 +6,22 @@ ToolBodyBase {
 	id: body
 
 	readonly property var groups: ToolInfo.listing(call.output)
-	readonly property var group: groups.length > 0 ? groups[0] : null
+	readonly property var group: groups.length > 0 ? groups[0] : ({path: "", tag: "", rows: [], notes: []}) // empty while there is no output
 
 	Row {
-		visible: body.group !== null && body.group.path !== ""
+		visible: body.group.path !== ""
 		spacing: 8
 
 		Text {
 			textFormat: Text.PlainText
-			text: body.group ? body.group.path : ""
+			text: body.group.path
 			color: Theme.text
 			font.family: Theme.monoFamily
 			font.pixelSize: Theme.smallFontSize
 		}
 		Text {
 			textFormat: Text.PlainText
-			text: body.group ? "#" + body.group.tag : ""
+			text: "#" + body.group.tag
 			color: Theme.textMuted
 			opacity: 0.7
 			font.family: Theme.monoFamily
@@ -31,17 +31,17 @@ ToolBodyBase {
 
 	LineView {
 		width: body.contentWidth
-		rows: body.group ? body.group.rows : []
-		copyText: body.group ? body.group.rows.map(row => row.text).join("\n") : ""
+		rows: body.group.rows
+		copyText: body.group.rows.map(row => row.text).join("\n")
 		showAll: body.call.showAll
 		onShowAllRequested: body.showAllRequested()
 	}
 
 	Text {
 		textFormat: Text.PlainText
-		visible: body.group !== null && body.group.notes.length > 0
+		visible: body.group.notes.length > 0
 		width: body.contentWidth
-		text: body.group ? body.group.notes.join("\n") : ""
+		text: body.group.notes.join("\n")
 		wrapMode: Text.Wrap
 		color: Theme.textMuted
 		font.family: Theme.monoFamily

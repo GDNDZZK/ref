@@ -3,11 +3,9 @@ import QtQuick
 import RefGui
 
 // Picks the variant (reasoning effort) of the session's model.
-ModalDialog {
+SessionDialog {
 	id: dialog
 
-	readonly property string sessionId: Workspace.dialogArgs.sessionId ?? Workspace.currentId
-	readonly property var session: Workspace.info(sessionId)
 	readonly property var variants: Workspace.config.variantsOf(session.provider, session.modelId)
 
 	title: qsTr("Model variant")
@@ -22,6 +20,7 @@ ModalDialog {
 		delegate: PickRow {
 			id: row
 			required property string modelData
+			selected: modelData === dialog.session.variant
 			onActivated: {
 				Workspace.setVariant(dialog.sessionId, modelData)
 				dialog.close()
@@ -29,19 +28,11 @@ ModalDialog {
 
 			Text {
 				textFormat: Text.PlainText
-				anchors { left: parent.left; leftMargin: 22; right: check.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+				anchors { left: parent.left; leftMargin: Theme.dialogPadding; right: row.check.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
 				text: row.modelData
 				color: Theme.text
 				font.pixelSize: Theme.fontSize
 				elide: Text.ElideRight
-			}
-			Icon {
-				id: check
-				anchors { right: parent.right; rightMargin: 22; verticalCenter: parent.verticalCenter }
-				name: "check"
-				size: 16
-				color: Theme.accent
-				visible: row.modelData === dialog.session.variant
 			}
 		}
 	}

@@ -49,7 +49,7 @@ Item {
 	// Takes the entry selected in the list. Enter on a command that needs no arguments, or that is typed in
 	// full, runs it; otherwise the command is completed.
 	function acceptCompletion(viaEnter) {
-		if (model.completionKind === "file") {
+		if (model.completionKind === CompletionKind.file) {
 			model.acceptFile(popup.currentIndex)
 			return
 		}
@@ -128,7 +128,6 @@ Item {
 		}
 
 		ScrollView {
-			id: scroll
 			anchors {
 				left: parent.left
 				right: parent.right
@@ -161,6 +160,109 @@ Item {
 				onTextChanged: if (!syncing) composer.model.edit(text, cursorPosition)
 				onCursorPositionChanged: if (!syncing) composer.model.moveCursor(cursorPosition)
 
+				// The handlers below return true when the key is theirs, so that the first one that owns the key ends
+				// the search (whether or not it accepts the event).
+
+				// Enter sends, accepts a completion, or (with Shift) is left to the text area; Ctrl+J breaks the line.
+				function handleEnter(event, mods) {
+					if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+						if (mods.shift)
+							return true
+						event.accepted = true
+						if (popup.open)
+							composer.acceptCompletion(true)
+						else
+							composer.submit()
+						return true
+					}
+					if (event.key === Qt.Key_J && mods.ctrl && !mods.shift) {
+						event.accepted = true
+						input.insert(input.cursorPosition, "\n")
+						return true
+					}
+					return false
+				}
+
+				// Tab takes a completion, else switches the agent; Shift+Tab switches back.
+				function handleTab(event, mods) {
+					if (event.key === Qt.Key_Tab && mods.plain) {
+						event.accepted = true
+						if (popup.open)
+							composer.acceptCompletion(false)
+						else
+							Workspace.cycleAgent(composer.session.sessionId, 1)
+						return true
+					}
+					if (event.key === Qt.Key_Backtab) {
+						event.accepted = true
+						Workspace.cycleAgent(composer.session.sessionId, -1)
+						return true
+					}
+					return false
+				}
+
+				// Up, Down, Ctrl+P and Ctrl+N move through an open completion list.
+				function handleCompletionMove(event, mods) {
+					if (!popup.open)
+						return false
+					const movesUp = (event.key === Qt.Key_Up && mods.plain) || (event.key === Qt.Key_P && mods.ctrl)
+					const movesDown = (event.key === Qt.Key_Down && mods.plain) || (event.key === Qt.Key_N && mods.ctrl)
+					if (movesUp || movesDown) {
+						event.accepted = true
+						popup.move(movesUp ? -1 : 1)
+					}
+					return movesUp || movesDown
+				}
+
+				// Up and Down walk the history of sent messages.
+				function handleHistory(event, mods) {
+					if (!mods.plain)
+						return false
+					if (event.key === Qt.Key_Up) {
+						event.accepted = composer.model.historyPrevious()
+						return true
+					}
+					if (event.key === Qt.Key_Down) {
+						event.accepted = composer.model.historyNext()
+						return true
+					}
+					return false
+				}
+
+				// Esc closes what is open, else cancels a delayed tool call.
+				function handleEscape(event) {
+					if (event.key !== Qt.Key_Escape)
+						return false
+					const nothingToClose = composer.model.completionKind === CompletionKind.none && !composer.model.shellMode
+					if (nothingToClose && composer.session.lastToolDelayed) {
+						event.accepted = true
+						composer.session.cancelDelayedTool()
+						Workspace.showToast(ToastLevel.info, qsTr("Cancelled the delayed tool call"))
+					} else {
+						event.accepted = composer.model.escape()
+					}
+					return true
+				}
+
+				// Backspace leaves shell mode, Copy without a selection clears the draft, Paste may take an image.
+				function handleEditing(event) {
+					if (event.key === Qt.Key_Backspace && composer.model.shellMode && input.length === 0) {
+						event.accepted = true
+						composer.model.leaveShell()
+						return true
+					}
+					if (event.matches(StandardKey.Copy) && input.selectedText === "") {
+						event.accepted = true
+						composer.model.clearDraft()
+						return true
+					}
+					if (event.matches(StandardKey.Paste)) {
+						event.accepted = composer.model.pasteFromClipboard()
+						return true
+					}
+					return false
+				}
+
 				Keys.onPressed: event => {
 					if (input.inputMethodComposing)
 						return
@@ -169,57 +271,9 @@ Item {
 						return
 					const shift = (event.modifiers & Qt.ShiftModifier) !== 0
 					const ctrl = (event.modifiers & Qt.ControlModifier) !== 0
-					const plain = !shift && !ctrl && (event.modifiers & ~Qt.KeypadModifier) === 0
-					const listOpen = popup.open
-
-					if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-						if (shift)
-							return
-						event.accepted = true
-						if (listOpen)
-							composer.acceptCompletion(true)
-						else
-							composer.submit()
-					} else if (event.key === Qt.Key_J && ctrl && !shift) {
-						event.accepted = true
-						input.insert(input.cursorPosition, "\n")
-					} else if (event.key === Qt.Key_Tab && plain) {
-						event.accepted = true
-						if (listOpen)
-							composer.acceptCompletion(false)
-						else
-							Workspace.cycleAgent(composer.session.sessionId, 1)
-					} else if (event.key === Qt.Key_Backtab) {
-						event.accepted = true
-						Workspace.cycleAgent(composer.session.sessionId, -1)
-					} else if (listOpen && (event.key === Qt.Key_Up && plain || event.key === Qt.Key_P && ctrl)) {
-						event.accepted = true
-						popup.move(-1)
-					} else if (listOpen && (event.key === Qt.Key_Down && plain || event.key === Qt.Key_N && ctrl)) {
-						event.accepted = true
-						popup.move(1)
-					} else if (event.key === Qt.Key_Up && plain) {
-						event.accepted = composer.model.historyPrevious()
-					} else if (event.key === Qt.Key_Down && plain) {
-						event.accepted = composer.model.historyNext()
-					} else if (event.key === Qt.Key_Escape) {
-						const nothingToClose = composer.model.completionKind === "none" && !composer.model.shellMode
-						if (nothingToClose && composer.session.lastToolDelayed) {
-							event.accepted = true
-							composer.session.cancelDelayedTool()
-							Workspace.toastRequested("info", qsTr("Cancelled the delayed tool call"))
-						} else {
-							event.accepted = composer.model.escape()
-						}
-					} else if (event.key === Qt.Key_Backspace && composer.model.shellMode && input.length === 0) {
-						event.accepted = true
-						composer.model.leaveShell()
-					} else if (event.matches(StandardKey.Copy) && input.selectedText === "") {
-						event.accepted = true
-						composer.model.clearDraft()
-					} else if (event.matches(StandardKey.Paste)) {
-						event.accepted = composer.model.pasteFromClipboard()
-					}
+					const mods = {shift: shift, ctrl: ctrl, plain: !shift && !ctrl && (event.modifiers & ~Qt.KeypadModifier) === 0}
+					handleEnter(event, mods) || handleTab(event, mods) || handleCompletionMove(event, mods) || handleHistory(event, mods)
+						|| handleEscape(event) || handleEditing(event)
 				}
 			}
 		}
@@ -236,9 +290,9 @@ Item {
 				bottomMargin: composer.padding
 			}
 			height: composer.tagRowHeight
-			onAgentClicked: Commands.run("agents", "", composer.session.sessionId)
-			onModelClicked: Commands.run("models", "", composer.session.sessionId)
-			onVariantClicked: Workspace.openDialog("variants", {sessionId: composer.session.sessionId})
+			onAgentClicked: Commands.run(CommandId.agents, "", composer.session.sessionId)
+			onModelClicked: Commands.run(CommandId.models, "", composer.session.sessionId)
+			onVariantClicked: Workspace.openDialog(DialogId.variants, {sessionId: composer.session.sessionId})
 		}
 
 		SendButton {
@@ -282,8 +336,8 @@ Item {
 		id: popup
 		anchors { left: parent.left; right: parent.right; bottom: parent.top; bottomMargin: popupGap }
 		kind: composer.model.completionKind
-		entries: composer.model.completionKind === "file" ? composer.model.files
-			: (composer.model.completionKind === "command" ? Commands.matching(composer.model.completionQuery, true) : [])
+		entries: composer.model.completionKind === CompletionKind.file ? composer.model.files
+			: (composer.model.completionKind === CompletionKind.command ? Commands.matching(composer.model.completionQuery, true) : [])
 		onAccepted: index => {
 			popup.currentIndex = index
 			composer.acceptCompletion(false)

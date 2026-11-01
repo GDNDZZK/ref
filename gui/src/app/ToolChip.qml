@@ -20,6 +20,6 @@ Rectangle {
 		anchors.centerIn: parent
 		color: chip.tint
 		font.family: Theme.monoFamily
-		font.pixelSize: 11
+		font.pixelSize: Theme.microFontSize
 	}
 }

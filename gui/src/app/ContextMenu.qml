@@ -8,6 +8,7 @@ Popup {
 	id: menu
 
 	property var entries: []
+	readonly property int textInset: 14
 
 	signal triggered(int index)
 
@@ -47,7 +48,7 @@ Popup {
 				required property var modelData
 				required property int index
 
-				width: Math.max(150, label.implicitWidth + 2 * 14)
+				width: Math.max(150, label.implicitWidth + 2 * menu.textInset)
 				height: 32
 
 				Rectangle {
@@ -60,10 +61,10 @@ Popup {
 				Text {
 					textFormat: Text.PlainText
 					id: label
-					anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }
+					anchors { left: parent.left; leftMargin: menu.textInset; verticalCenter: parent.verticalCenter }
 					text: entry.modelData.text
 					color: entry.modelData.danger ? Theme.danger : Theme.text
-					font.pixelSize: Theme.fontSize - 1
+					font.pixelSize: Theme.secondaryFontSize
 				}
 				HoverHandler {
 					id: hover

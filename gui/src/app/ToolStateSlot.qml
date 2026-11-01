@@ -10,21 +10,21 @@ Item {
 	required property string toolState
 	property real runAt: 0
 
-	readonly property bool working: toolState === "streaming" || toolState === "running"
-	readonly property bool showsDot: working || toolState === "done" || toolState === "error"
-	readonly property bool showsRing: toolState === "denied" || toolState === "cancelled"
+	readonly property bool working: toolState === ToolState.streaming || toolState === ToolState.running
+	readonly property bool showsDot: working || toolState === ToolState.done || toolState === ToolState.error
+	readonly property bool showsRing: toolState === ToolState.denied || toolState === ToolState.cancelled
 	readonly property int dotSize: 8
 	readonly property real ringStroke: 1.5
 	property string previousState: toolState
 
-	readonly property color dotColor: working ? Theme.accent : toolState === "error" ? Theme.danger : Theme.success
+	readonly property color dotColor: working ? Theme.accent : toolState === ToolState.error ? Theme.danger : Theme.success
 
 	implicitWidth: 16
 	implicitHeight: 16
 
 	onToolStateChanged: {
-		const settles = toolState === "done" || toolState === "error"
-		const wasActive = previousState === "streaming" || previousState === "running" || previousState === "delayed"
+		const settles = toolState === ToolState.done || toolState === ToolState.error
+		const wasActive = ToolState.isActive(previousState)
 		if (settles && wasActive)
 			flourish.play()
 		previousState = toolState
@@ -53,7 +53,6 @@ Item {
 	Pulse {
 		target: dot
 		running: slot.working
-		dimmed: 0.5
 	}
 
 	Rectangle {
@@ -72,7 +71,7 @@ Item {
 	Icon {
 		name: "lock"
 		color: Theme.warning
-		opacity: slot.toolState === "awaiting_permission" ? 1 : 0
+		opacity: slot.toolState === ToolState.awaitingPermission ? 1 : 0
 
 		Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 	}
@@ -80,7 +79,7 @@ Item {
 	CountdownRing {
 		anchors.fill: parent
 		runAt: slot.runAt
-		running: slot.toolState === "delayed"
+		running: slot.toolState === ToolState.delayed
 		opacity: running ? 1 : 0
 
 		Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }

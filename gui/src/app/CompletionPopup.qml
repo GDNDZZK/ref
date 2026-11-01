@@ -16,10 +16,10 @@ Rectangle {
 	readonly property int iconSize: 16
 	readonly property int rowSpacing: 8
 
-	property string kind: "none"
+	property string kind: CompletionKind.none
 	property var entries: []
 	readonly property int count: view.count
-	readonly property bool open: kind !== "none" && count > 0
+	readonly property bool open: kind !== CompletionKind.none && count > 0
 	property alias currentIndex: view.currentIndex
 
 	signal accepted(int index)
@@ -31,7 +31,10 @@ Rectangle {
 
 	// The command map of an entry, for a command list.
 	function commandAt(index) {
-		return kind === "command" && index >= 0 && index < entries.length ? entries[index] : null
+		const isCommandIndex = kind === CompletionKind.command && index >= 0 && index < entries.length
+		if (!isCommandIndex)
+			return null
+		return entries[index]
 	}
 
 	readonly property real shownHeight: Math.min(count, popupMaxRows) * popupRowHeight + 2 * popupPadding
@@ -59,7 +62,7 @@ Rectangle {
 	onEntriesChanged: view.currentIndex = 0
 	onKindChanged: view.currentIndex = 0
 	Connections {
-		target: popup.kind === "file" ? popup.entries : null
+		target: popup.kind === CompletionKind.file ? popup.entries : null
 		function onModelReset() { view.currentIndex = 0 }
 	}
 
@@ -71,7 +74,7 @@ Rectangle {
 		clip: true
 		highlightFollowsCurrentItem: false
 		boundsBehavior: Flickable.StopAtBounds
-		delegate: popup.kind === "file" ? fileRow : commandRow
+		delegate: popup.kind === CompletionKind.file ? fileRow : commandRow
 
 		highlight: Rectangle {
 			y: view.currentItem ? view.currentItem.y : 0

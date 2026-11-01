@@ -6,7 +6,6 @@ import RefGui
 Item {
 	id: section
 
-	required property string toolName
 	required property var input
 	required property bool open
 	required property int othersWaiting
@@ -17,8 +16,11 @@ Item {
 	readonly property int fieldPadding: 8
 	readonly property int fieldPaddingWide: 10
 	readonly property int rowSpacing: 8
-	readonly property string command: typeof input.command === "string" ? input.command : ""
-	readonly property string path: typeof input.path === "string" ? input.path : ""
+	readonly property int dividerHeight: 1
+	readonly property int topGap: 2 // extra room under the divider
+	readonly property int bottomTrim: 4 // of the padding under the buttons
+	readonly property string command: Fields.stringOf(input, "command")
+	readonly property string path: Fields.stringOf(input, "path")
 
 	width: parent.width
 	height: open ? content.y + content.height : 0
@@ -28,16 +30,16 @@ Item {
 
 	Rectangle {
 		width: parent.width
-		height: 1
+		height: section.dividerHeight
 		color: Theme.border
 	}
 
 	Column {
 		id: content
 		x: section.padding
-		y: 1 + section.rowSpacing + 2
+		y: section.dividerHeight + section.rowSpacing + section.topGap
 		width: parent.width - 2 * section.padding
-		bottomPadding: section.padding - 4
+		bottomPadding: section.padding - section.bottomTrim
 		spacing: section.rowSpacing
 
 		Rectangle {

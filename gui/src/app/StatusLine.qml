@@ -6,6 +6,9 @@ import RefGui
 Item {
 	id: line
 
+	// How full the context window is: past the size where compaction is recommended, or where it starts by itself.
+	enum ContextLevel { Normal, Recommend, Auto }
+
 	required property ChatSession session
 
 	// The to-do popup was closed by Esc: the keyboard goes back to the pane.
@@ -16,35 +19,40 @@ Item {
 	readonly property int barWidth: 48
 	readonly property int barHeight: 4
 	readonly property string activity: session.activity
-	readonly property bool working: activity === "thinking" || activity === "running" || activity === "compacting"
-	readonly property bool retrying: activity === "retrying"
-	readonly property bool waiting: activity === "waiting_permission" || activity === "waiting_question"
+	readonly property bool working: activity === Activity.thinking || activity === Activity.running || activity === Activity.compacting
+	readonly property bool retrying: activity === Activity.retrying
+	readonly property bool waiting: activity === Activity.waitingPermission || activity === Activity.waitingQuestion
 	readonly property real contextUsed: session.contextUsed
 	readonly property real contextMax: session.contextMax
 	readonly property real contextRatio: contextMax > 0 ? Math.min(1, contextUsed / contextMax) : 0
-	readonly property color contextColor: session.contextAuto > 0 && contextUsed >= session.contextAuto ? Theme.danger
-		: session.contextRecommend > 0 && contextUsed >= session.contextRecommend ? Theme.warning
+	readonly property int contextLevel: {
+		if (session.contextAuto > 0 && contextUsed >= session.contextAuto)
+			return StatusLine.ContextLevel.Auto
+		if (session.contextRecommend > 0 && contextUsed >= session.contextRecommend)
+			return StatusLine.ContextLevel.Recommend
+		return StatusLine.ContextLevel.Normal
+	}
+	readonly property color contextColor: contextLevel === StatusLine.ContextLevel.Auto ? Theme.danger
+		: contextLevel === StatusLine.ContextLevel.Recommend ? Theme.warning
 		: Theme.accent
-	readonly property real busyMs: session.busySince > 0 ? now - session.busySince : 0
+	readonly property real busyMs: session.busySince > 0 ? ticker.now - session.busySince : 0
 	readonly property real shownFromMs: Format.msPerSecond
-
-	property real now: Date.now()
 
 	readonly property string activityText: {
 		switch (activity) {
-		case "thinking":
+		case Activity.thinking:
 			return qsTr("Working")
-		case "running":
+		case Activity.running:
 			return qsTr("Running tools")
-		case "compacting":
+		case Activity.compacting:
 			return qsTr("Compacting context\u2026")
-		case "waiting_permission":
+		case Activity.waitingPermission:
 			return qsTr("Waiting for your permission")
-		case "waiting_question":
+		case Activity.waitingQuestion:
 			return qsTr("Waiting for your answer")
-		case "retrying":
+		case Activity.retrying:
 			return qsTr("Retrying in %1 (attempt %2): %3")
-				.arg(Format.elapsed(Math.max(0, session.retryAt - now) + Format.msPerSecond - 1))
+				.arg(Format.countdown(session.retryAt - ticker.now))
 				.arg(session.retryAttempt)
 				.arg(ToolInfo.firstLine(session.retryError))
 		default:
@@ -54,11 +62,10 @@ Item {
 
 	height: lineHeight
 
-	Timer {
+	Ticker {
+		id: ticker
 		interval: Format.msPerSecond / 4
-		running: line.activity !== "idle"
-		repeat: true
-		onTriggered: line.now = Date.now()
+		running: line.activity !== Activity.idle
 	}
 
 	Row {
@@ -70,24 +77,24 @@ Item {
 			id: dot
 			anchors.verticalCenter: parent.verticalCenter
 			visible: line.working
-			width: 8
-			height: 8
-			radius: 4
+			width: Theme.statusDotSize
+			height: Theme.statusDotSize
+			radius: width / 2
 			color: Theme.accent
 
-			Pulse { target: dot; running: line.working; dimmed: 0.5 }
+			Pulse { target: dot; running: line.working }
 		}
 		Icon {
 			anchors.verticalCenter: parent.verticalCenter
 			visible: line.waiting || line.retrying
-			name: line.activity === "waiting_question" ? "question" : line.waiting ? "lock" : "retry"
+			name: line.activity === Activity.waitingQuestion ? "question" : line.waiting ? "lock" : "retry"
 			color: Theme.warning
 		}
 		ShimmerText {
 			anchors.verticalCenter: parent.verticalCenter
 			visible: line.working
 			label: line.activityText
-			color: line.activity === "compacting" ? Theme.accent : Theme.textMuted
+			color: line.activity === Activity.compacting ? Theme.accent : Theme.textMuted
 			running: visible
 			font.pixelSize: Theme.smallFontSize
 		}
@@ -104,7 +111,7 @@ Item {
 		Text {
 			textFormat: Text.PlainText
 			anchors.verticalCenter: parent.verticalCenter
-			visible: line.activity !== "idle" && line.busyMs >= line.shownFromMs
+			visible: line.activity !== Activity.idle && line.busyMs >= line.shownFromMs
 			text: "\u00b7 " + Format.elapsed(line.busyMs)
 			color: Theme.textMuted
 			font.pixelSize: Theme.smallFontSize
@@ -135,7 +142,7 @@ Item {
 				textFormat: Text.PlainText
 				anchors.verticalCenter: parent.verticalCenter
 				text: Format.tokens(line.contextUsed) + " / " + Format.tokens(line.contextMax)
-				color: line.contextColor === Theme.accent ? Theme.textMuted : line.contextColor
+				color: line.contextLevel === StatusLine.ContextLevel.Normal ? Theme.textMuted : line.contextColor
 				font.pixelSize: Theme.smallFontSize
 			}
 			Rectangle {

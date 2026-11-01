@@ -7,7 +7,9 @@ import RefGui
 ModalDialog {
 	id: dialog
 
-	readonly property bool closing: Workspace.dialogArgs.mode === "close"
+	readonly property bool closing: Workspace.dialogArgs.mode === DialogId.closeMode
+	// ListView.section turns the isLive bool into a string.
+	readonly property string liveSection: "true"
 
 	title: closing ? qsTr("Close a session") : qsTr("Switch session")
 	onAccepted: list.activateCurrent()
@@ -24,7 +26,7 @@ ModalDialog {
 		width: parent.width
 		placeholderText: qsTr("Search sessions")
 		sectionProperty: "isLive"
-		sectionLabel: section => section === "true" ? qsTr("Running") : qsTr("History")
+		sectionLabel: section => section === dialog.liveSection ? qsTr("Running") : qsTr("History")
 		emptyText: qsTr("No matching sessions")
 		model: Workspace.sessionChoices
 		delegate: PickRow {
@@ -47,14 +49,14 @@ ModalDialog {
 			}
 
 			SessionDot {
-				x: 22
+				x: Theme.dialogPadding
 				anchors.verticalCenter: parent.verticalCenter
 				activity: row.activity
 				hasError: row.hasError
 				visible: row.isLive
 			}
 			Column {
-				anchors { left: parent.left; leftMargin: 42; right: tail.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+				anchors { left: parent.left; leftMargin: Theme.dialogPadding + 20; right: tail.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
 				spacing: 2
 
 				Text {
@@ -62,7 +64,7 @@ ModalDialog {
 					width: parent.width
 					text: row.displayTitle
 					color: Theme.text
-					font { pixelSize: Theme.fontSize - 2; bold: row.isCurrent }
+					font { pixelSize: Theme.compactFontSize; bold: row.isCurrent }
 					elide: Text.ElideRight
 				}
 				Text {
@@ -76,7 +78,7 @@ ModalDialog {
 			}
 			Item {
 				id: tail
-				anchors { right: parent.right; rightMargin: 22; verticalCenter: parent.verticalCenter }
+				anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
 				width: 22
 				height: 22
 
@@ -87,19 +89,14 @@ ModalDialog {
 					color: Theme.accent
 					visible: row.isCurrent && !closeTap.visible
 				}
-				CircleButton {
+				IconButton {
 					id: closeTap
 					anchors.fill: parent
+					iconName: "close"
+					iconSize: 16
 					visible: row.isLive && row.current && !dialog.closing
 					Accessible.name: qsTr("Close session")
 					onClicked: Workspace.closeSession(row.sessionId)
-
-					Icon {
-						anchors.centerIn: parent
-						name: "close"
-						size: 16
-						color: Theme.textMuted
-					}
 				}
 			}
 		}
