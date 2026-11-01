@@ -164,7 +164,8 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
             continue;
         };
         let is_dir = ft.is_dir();
-        if (is_dir && !want_dirs) || (!is_dir && !want_files) {
+        let wanted = if is_dir { want_dirs } else { want_files };
+        if !wanted {
             continue;
         }
         let rel = entry.path().strip_prefix(&root).unwrap_or(entry.path());
