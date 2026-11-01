@@ -194,7 +194,7 @@ fn load_file(ctx: &mut Ctx, path: &Path, layers: &mut Vec<Layer>) {
         Ok(t) => t,
         Err(e) => return ctx.warn(format!("{}: {e}", path.display())),
     };
-    let value = match crate::parse_jsonc(&text) {
+    let mut value = match crate::parse_jsonc(&text) {
         Ok(Value::Object(m)) => m,
         Ok(_) => return ctx.warn(format!("{}: config must be a JSON object", path.display())),
         Err(e) => return ctx.warn(format!("{}: {e}", path.display())),
@@ -203,11 +203,7 @@ fn load_file(ctx: &mut Ctx, path: &Path, layers: &mut Vec<Layer>) {
         .parent()
         .expect("a file path has a parent")
         .to_path_buf();
-    let mut v = Value::Object(value);
-    substitute_value(ctx, &mut v, &base, path);
-    let Value::Object(mut value) = v else {
-        unreachable!()
-    };
+    substitute_map(ctx, &mut value, &base, path);
     normalize_paths(ctx, &mut value, &base);
     layers.push(Layer {
         source: path.to_path_buf(),
@@ -227,11 +223,8 @@ fn load_markdown(ctx: &mut Ctx, dir: &Path, layers: &mut Vec<Layer>) {
             .parent()
             .expect("a file path has a parent")
             .to_path_buf();
-        let mut fm = Value::Object(doc.frontmatter);
-        substitute_value(ctx, &mut fm, &base, &doc.path);
-        let Value::Object(mut fm) = fm else {
-            unreachable!()
-        };
+        let mut fm = doc.frontmatter;
+        substitute_map(ctx, &mut fm, &base, &doc.path);
         fm.remove("name");
         fm.insert("prompt".into(), Value::String(doc.body));
         let key = if doc.legacy_mode {
@@ -254,11 +247,8 @@ fn load_markdown(ctx: &mut Ctx, dir: &Path, layers: &mut Vec<Layer>) {
             .parent()
             .expect("a file path has a parent")
             .to_path_buf();
-        let mut fm = Value::Object(doc.frontmatter);
-        substitute_value(ctx, &mut fm, &base, &doc.path);
-        let Value::Object(mut fm) = fm else {
-            unreachable!()
-        };
+        let mut fm = doc.frontmatter;
+        substitute_map(ctx, &mut fm, &base, &doc.path);
         fm.insert("template".into(), Value::String(doc.body));
         let mut entry = Map::new();
         entry.insert(doc.name, Value::Object(fm));
@@ -325,10 +315,20 @@ pub(crate) fn substitute_value(ctx: &mut Ctx, v: &mut Value, base: &Path, source
         Value::Array(a) => a
             .iter_mut()
             .for_each(|x| substitute_value(ctx, x, base, source)),
-        Value::Object(m) => m
-            .values_mut()
-            .for_each(|x| substitute_value(ctx, x, base, source)),
+        Value::Object(m) => substitute_map(ctx, m, base, source),
         _ => {}
+    }
+}
+
+/// [`substitute_value`] for every value of an object.
+pub(crate) fn substitute_map(
+    ctx: &mut Ctx,
+    m: &mut Map<String, Value>,
+    base: &Path,
+    source: &Path,
+) {
+    for v in m.values_mut() {
+        substitute_value(ctx, v, base, source);
     }
 }
 
