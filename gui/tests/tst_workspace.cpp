@@ -76,6 +76,10 @@ public:
 	// While set, a question reply is refused with this text.
 	void failQuestionReply(const QString& error) { m_questionError = error; }
 
+	// How the stub answers shutdown: with this error, or by closing the connection.
+	void failShutdown(const QString& error) { m_shutdownError = error; }
+	void closeOnShutdown() { m_closeOnShutdown = true; }
+
 	// While held, a detach is recorded but neither carried out nor answered.
 	void holdDetach(bool hold) { m_holdDetach = hold; }
 
@@ -237,6 +241,14 @@ private:
 		{
 			m_fake.fail(request, m_questionError);
 		}
+		else if(op == u"shutdown"_s && m_closeOnShutdown)
+		{
+			m_fake.socket()->close();
+		}
+		else if(op == u"shutdown"_s && !m_shutdownError.isEmpty())
+		{
+			m_fake.fail(request, m_shutdownError);
+		}
 		else if(op == u"shutdown"_s)
 		{
 			m_fake.respond(request, {});
@@ -254,6 +266,8 @@ private:
 	bool m_holdQuestionReply = false;
 	QList<QJsonObject> m_heldQuestionReplies;
 	QString m_questionError;
+	QString m_shutdownError;
+	bool m_closeOnShutdown = false;
 	int m_created = 0;
 	int m_protocol = refgui::proto::ProtocolVersion;
 	bool m_holdDetach = false;
@@ -380,6 +394,8 @@ private slots:
 	void sessionsHaveTheMethodsCommandsCall();
 	void undoPutsThePromptBackIntoTheInputBox();
 	void oldBackendOffersARestart();
+	void refusedRestartIsAToast();
+	void restartClosingTheConnectionIsQuiet();
 	void commandsFollowTheState();
 };
 
@@ -1071,6 +1087,38 @@ void TestWorkspace::oldBackendOffersARestart()
 
 	f.workspace->restartBackend();
 	QTRY_COMPARE(f.stub.requests(u"shutdown"_s).size(), 1);
+}
+
+void TestWorkspace::refusedRestartIsAToast()
+{
+	Fixture f(refgui::proto::ProtocolVersion - 1);
+	QTRY_VERIFY(f.workspace->canRestartBackend());
+	f.stub.failShutdown(u"sessions are busy"_s);
+	QSignalSpy toasts(f.workspace.get(), &Workspace::toastRequested);
+
+	f.workspace->restartBackend();
+
+	QTRY_COMPARE(toasts.count(), 1);
+	QCOMPARE(toasts.first().at(0).toString(), refgui::workspace::ToastLevel::Error);
+	QCOMPARE(toasts.first().at(1).toString(), u"sessions are busy"_s);
+}
+
+// The backend going away is what a restart asks for: the request's "connection closed" is no error.
+void TestWorkspace::restartClosingTheConnectionIsQuiet()
+{
+	Fixture f(refgui::proto::ProtocolVersion - 1);
+	QTRY_VERIFY(f.workspace->canRestartBackend());
+	f.stub.closeOnShutdown();
+	QSignalSpy toasts(f.workspace.get(), &Workspace::toastRequested);
+
+	f.workspace->restartBackend();
+
+	QTRY_COMPARE(f.stub.requests(u"shutdown"_s).size(), 1);
+	QTest::qWait(QuietMs);
+	for(const QList<QVariant>& toast : std::as_const(toasts))
+	{
+		QVERIFY2(toast.at(0).toString() != refgui::workspace::ToastLevel::Error, qPrintable(toast.at(1).toString()));
+	}
 }
 
 void TestWorkspace::commandsFollowTheState()
