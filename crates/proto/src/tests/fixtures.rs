@@ -23,6 +23,13 @@ use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
+const REQUEST_DIR: &str = "request";
+const SERVER_FRAME_DIR: &str = "server_frame";
+const SESSION_EVENT_DIR: &str = "session_event";
+const PART_DIR: &str = "part";
+const TOOL_STATE_DIR: &str = "tool_state";
+const DELTA_DIR: &str = "delta";
+
 /// Version shown in the `response_hello` sample, fixed so version bumps do not touch fixtures.
 const SAMPLE_SERVER_VERSION: &str = "0.2.0";
 /// A 1x1 PNG.
@@ -49,7 +56,7 @@ fn requests() -> Samples<ClientFrame> {
                 Request::Hello {
                     client: "ref-web".into(),
                     version: PROTOCOL_VERSION,
-                    cwd: "/home/user/project".into(),
+                    cwd: PROJECT_DIR.into(),
                     token: Some("3f9c1d2e".into()),
                     notify: vec![
                         NotifyKind::Permission,
@@ -66,7 +73,7 @@ fn requests() -> Samples<ClientFrame> {
             frame(
                 4,
                 Request::ListHistory {
-                    cwd: Some("/home/user/project".into()),
+                    cwd: Some(PROJECT_DIR.into()),
                     limit: Some(50),
                 },
             ),
@@ -76,7 +83,7 @@ fn requests() -> Samples<ClientFrame> {
             frame(
                 5,
                 Request::CreateSession {
-                    cwd: "/home/user/project".into(),
+                    cwd: PROJECT_DIR.into(),
                     agent: Some("build".into()),
                     model: Some(model()),
                     name: Some("parser-fix".into()),
@@ -267,7 +274,7 @@ fn requests() -> Samples<ClientFrame> {
                 Request::ExpandCommand {
                     name: "review".into(),
                     args: "src/parser.rs".into(),
-                    cwd: "/home/user/project".into(),
+                    cwd: PROJECT_DIR.into(),
                 },
             ),
         ),
@@ -276,7 +283,7 @@ fn requests() -> Samples<ClientFrame> {
             frame(
                 27,
                 Request::ListFiles {
-                    cwd: "/home/user/project".into(),
+                    cwd: PROJECT_DIR.into(),
                     query: "pars".into(),
                     limit: Some(20),
                 },
@@ -318,7 +325,7 @@ fn requests() -> Samples<ClientFrame> {
             frame(
                 31,
                 Request::McpStatus {
-                    cwd: Some("/home/user/project".into()),
+                    cwd: Some(PROJECT_DIR.into()),
                 },
             ),
         ),
@@ -382,7 +389,7 @@ fn hello_result() -> Value {
         "server_version": SAMPLE_SERVER_VERSION,
         "protocol": PROTOCOL_VERSION,
         "instance": instance,
-        "cwd": "/home/user/project",
+        "cwd": PROJECT_DIR,
     })
 }
 
@@ -484,7 +491,7 @@ fn server_frames() -> Samples<ServerFrame> {
             "response_list_dirs",
             response(
                 34,
-                json!({"path": "/home/user/project", "dirs": ["benches", "crates", "docs"]}),
+                json!({"path": PROJECT_DIR, "dirs": ["benches", "crates", "docs"]}),
             ),
         ),
         (
@@ -744,12 +751,12 @@ fn add<T: Serialize>(tree: &mut Tree, dir: &str, samples: Samples<T>) {
 
 fn expected() -> Tree {
     let mut tree = Tree::new();
-    add(&mut tree, "request", requests());
-    add(&mut tree, "server_frame", server_frames());
-    add(&mut tree, "session_event", session_events());
-    add(&mut tree, "part", parts());
-    add(&mut tree, "tool_state", tool_states());
-    add(&mut tree, "delta", deltas());
+    add(&mut tree, REQUEST_DIR, requests());
+    add(&mut tree, SERVER_FRAME_DIR, server_frames());
+    add(&mut tree, SESSION_EVENT_DIR, session_events());
+    add(&mut tree, PART_DIR, parts());
+    add(&mut tree, TOOL_STATE_DIR, tool_states());
+    add(&mut tree, DELTA_DIR, deltas());
     tree
 }
 
@@ -773,12 +780,12 @@ fn check_roundtrip<T: Serialize + DeserializeOwned>(dir: &str) {
 
 #[test]
 fn fixtures_parse_as_their_types() {
-    check_roundtrip::<ClientFrame>("request");
-    check_roundtrip::<ServerFrame>("server_frame");
-    check_roundtrip::<SessionEvent>("session_event");
-    check_roundtrip::<Part>("part");
-    check_roundtrip::<ToolState>("tool_state");
-    check_roundtrip::<Delta>("delta");
+    check_roundtrip::<ClientFrame>(REQUEST_DIR);
+    check_roundtrip::<ServerFrame>(SERVER_FRAME_DIR);
+    check_roundtrip::<SessionEvent>(SESSION_EVENT_DIR);
+    check_roundtrip::<Part>(PART_DIR);
+    check_roundtrip::<ToolState>(TOOL_STATE_DIR);
+    check_roundtrip::<Delta>(DELTA_DIR);
 }
 
 /// Every declared variant has a fixture, and each file is named after its variant.
@@ -806,18 +813,18 @@ fn check_variants(dir: &str, tag: Option<&str>, declared: Vec<String>) {
 
 #[test]
 fn every_variant_has_a_fixture() {
-    check_variants("request", Some("op"), declared_variants::<Request>("op"));
+    check_variants(REQUEST_DIR, Some("op"), declared_variants::<Request>("op"));
     check_variants(
-        "server_frame",
+        SERVER_FRAME_DIR,
         Some("kind"),
         declared_variants::<ServerFrame>("kind"),
     );
     check_variants(
-        "session_event",
+        SESSION_EVENT_DIR,
         Some("type"),
         declared_variants::<SessionEvent>("type"),
     );
-    check_variants("part", Some("type"), declared_variants::<Part>("type"));
-    check_variants("tool_state", None, declared_literals::<ToolState>());
-    check_variants("delta", Some("type"), declared_variants::<Delta>("type"));
+    check_variants(PART_DIR, Some("type"), declared_variants::<Part>("type"));
+    check_variants(TOOL_STATE_DIR, None, declared_literals::<ToolState>());
+    check_variants(DELTA_DIR, Some("type"), declared_variants::<Delta>("type"));
 }
