@@ -8,6 +8,8 @@ use serde_json::{Value, json};
 const T0: i64 = 1_760_000_000_000;
 const SECOND: i64 = 1000;
 
+/// Working directory of the sample session.
+pub const PROJECT_DIR: &str = "/home/user/project";
 pub const SESSION_ID: &str = "ses_a1b2c3d4";
 pub const MESSAGE_ID: &str = "msg_0f1e2d3c";
 pub const CALL_ID: &str = "call_9x8y7z";
@@ -49,7 +51,7 @@ pub fn info() -> SessionInfo {
         title: "Fix the failing parser test".into(),
         agent: "build".into(),
         model: model(),
-        cwd: "/home/user/project".into(),
+        cwd: PROJECT_DIR.into(),
         created_at: T0,
         updated_at: T0 + 90 * SECOND,
         status: SessionStatus::Busy,
