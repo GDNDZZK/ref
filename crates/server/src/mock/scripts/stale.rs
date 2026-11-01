@@ -18,8 +18,7 @@ const PULLED: [&str; 3] = [
     "// Rows: label:score.",
     "// Keep it small.",
 ];
-/// The commands use `awk` and `mv`, which behave alike in GNU, BSD (macOS) and Git Bash
-/// environments; `sed -i` does not.
+/// Scratch file of a rewrite.
 const TMP: &str = "scratch/.tmp";
 
 pub(super) const SCRIPTS: &[Script] = &[Script {
@@ -29,7 +28,9 @@ pub(super) const SCRIPTS: &[Script] = &[Script {
     play: stale,
 }];
 
-/// Runs `awk` with `program` over `file` and puts the result back in its place.
+/// Runs `awk` with `program` over `file` and puts the result back in its place. The commands
+/// use `awk` and `mv`, which behave alike in GNU, BSD (macOS) and Git Bash environments;
+/// `sed -i` does not.
 fn rewrite(program: &str, file: &str, then: &str) -> String {
     format!("awk '{program}' {file} > {TMP} && mv {TMP} {file} && echo \"{then}\"")
 }
