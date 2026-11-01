@@ -35,10 +35,10 @@ const THEMED_PREFIX = /^dark\s*\?\s*/
 // Removes a trailing `// comment` that is not inside a string.
 function stripComment(text: string): string {
   let inString = false
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i]
-    if (c === '"') inString = !inString
-    if (!inString && c === '/' && text[i + 1] === '/') return text.slice(0, i).trim()
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index]
+    if (char === '"') inString = !inString
+    if (!inString && char === '/' && text[index + 1] === '/') return text.slice(0, index).trim()
   }
   return text.trim()
 }
