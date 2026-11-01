@@ -3,10 +3,10 @@
 use crate::error::stream_error;
 use crate::sse::{SseEvent, data_values};
 use crate::util::{
-    Assembler, DEFAULT_ANTHROPIC_BASE, IMAGE_OMITTED, StreamEnd, StreamState, build_headers,
-    deep_merge, drive, endpoint, error_fields, json_sse_headers, normalize_call_id,
-    normalize_history, opt_str, opt_u64, parse_arguments, provider_header, ptr_u64, same_origin,
-    session_headers, snake_keys,
+    Assembler, DEFAULT_ANTHROPIC_BASE, IMAGE_OMITTED, NO_TOOL_OUTPUT, SEE_ATTACHED_IMAGE,
+    StreamEnd, StreamState, build_headers, deep_merge, drive, endpoint, error_fields,
+    json_sse_headers, normalize_call_id, normalize_history, opt_str, opt_u64, parse_arguments,
+    provider_header, ptr_u64, same_origin, session_headers, snake_keys,
 };
 use crate::{
     AssistantBlock, BlockKind, ChatMessage, LlmError, Model, Provider, Request, Response,
@@ -437,9 +437,9 @@ fn convert_messages(provider: &Provider, model: &Model, req: &Request) -> Vec<Va
                 if !content.trim().is_empty() {
                     parts.push(json!({"type": "text", "text": content}));
                 } else if images.is_empty() {
-                    parts.push(json!({"type": "text", "text": "(no tool output)"}));
+                    parts.push(json!({"type": "text", "text": NO_TOOL_OUTPUT}));
                 } else {
-                    parts.push(json!({"type": "text", "text": "(see attached image)"}));
+                    parts.push(json!({"type": "text", "text": SEE_ATTACHED_IMAGE}));
                 }
                 parts.extend(images.iter().map(image_block));
                 let mut block = json!({
