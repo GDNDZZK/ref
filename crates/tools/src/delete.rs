@@ -38,13 +38,11 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let display = util::display_path(&ctx.cwd, &abs);
 
     // Safeguards: compare both lexical and canonical forms.
-    let canon = std::fs::canonicalize(&abs).unwrap_or_else(|_| abs.clone());
+    let canon = util::store_key(&abs);
     let cwd_lex = util::normalize_lexical(&ctx.cwd);
     let cwd_canon = std::fs::canonicalize(&ctx.cwd).unwrap_or_else(|_| cwd_lex.clone());
     let home = util::home_dir();
-    let home_canon = home
-        .as_ref()
-        .map(|h| std::fs::canonicalize(h).unwrap_or_else(|_| h.clone()));
+    let home_canon = home.as_deref().map(util::store_key);
     let protected = |p: &std::path::Path| {
         p.parent().is_none()
             || p == cwd_lex
