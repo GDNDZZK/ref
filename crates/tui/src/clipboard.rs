@@ -244,10 +244,7 @@ fn percent_decode(s: &str) -> String {
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
-        if b[i] == b'%'
-            && let Some(&[hi, lo]) = b
-                .get(i + 1..i + 3)
-                .map(|w| <&[u8; 2]>::try_from(w).unwrap())
+        if let [b'%', hi, lo, ..] = b[i..]
             && let (Some(hi), Some(lo)) = (hex_value(hi), hex_value(lo))
         {
             out.push(hi << 4 | lo);
