@@ -14,10 +14,9 @@ import { agentColorByName } from '../theme/agentColor.ts'
 import MetaCopy from './MetaCopy.vue'
 import Icon from './Icon.vue'
 import StatusDot from './StatusDot.vue'
+import { MS_PER_SECOND } from '../time.ts'
 
 const props = defineProps<{ block: MetaBlock }>()
-
-const MS_PER_SECOND = 1000
 
 const { t } = useI18n()
 const session = useChatSession()

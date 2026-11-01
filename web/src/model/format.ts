@@ -1,8 +1,7 @@
 // Numbers and times as the conversation shows them (same rules as the TUI's text.rs).
 
-const MS_PER_SECOND = 1000
-const SECONDS_PER_MINUTE = 60
-const SECONDS_PER_HOUR = 3600
+import { MS_PER_SECOND, SECONDS_PER_HOUR, SECONDS_PER_MINUTE } from '../time.ts'
+
 const TENTH_SECOND_LIMIT_MS = 10_000
 const KILO = 1000
 const MEGA_ROUNDING_LIMIT = 999_950
