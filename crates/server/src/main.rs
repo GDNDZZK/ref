@@ -124,6 +124,39 @@ fn main() {
     std::process::exit(code);
 }
 
+/// Hosts allowed to connect: `--allow-host`, or the loopback names.
+fn allowed_hosts(cli: &Cli) -> Vec<String> {
+    if cli.allow_host.is_empty() {
+        return vec![
+            ref_proto::LOOPBACK_V4.into(),
+            ref_proto::LOOPBACK_V6.into(),
+            ref_proto::LOCALHOST.into(),
+        ];
+    }
+    cli.allow_host
+        .iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// Address to bind: `--host`, else any address when a non-loopback host is allowed.
+fn bind_address(cli: &Cli, allow: &[String]) -> String {
+    match &cli.host {
+        Some(h) => ws::bare_host(h).to_string(),
+        None if allow.iter().any(|h| !is_loopback(h)) => ref_proto::ANY_V4.into(),
+        None => ref_proto::LOOPBACK_V4.into(),
+    }
+}
+
+/// `--port`, or a random free port when it is absent or 0.
+fn pick_or_given_port(cli: &Cli, bind: &str) -> anyhow::Result<u16> {
+    match cli.port {
+        Some(p) if p != 0 => Ok(p),
+        _ => instance::pick_port(bind).ok_or_else(|| anyhow::anyhow!("no free port found")),
+    }
+}
+
 async fn serve(cli: Cli) -> anyhow::Result<()> {
     let pid = std::process::id();
     let log = cli.log.clone().unwrap_or_else(|| {
@@ -134,28 +167,9 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     if let Err(e) = init_logging(&log) {
         eprintln!("ref-server: cannot open log file {}: {e}", log.display());
     }
-    let allow: Vec<String> = if cli.allow_host.is_empty() {
-        vec![
-            ref_proto::LOOPBACK_V4.into(),
-            ref_proto::LOOPBACK_V6.into(),
-            ref_proto::LOCALHOST.into(),
-        ]
-    } else {
-        cli.allow_host
-            .iter()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
-    };
-    let bind = match &cli.host {
-        Some(h) => ws::bare_host(h).to_string(),
-        None if allow.iter().any(|h| !is_loopback(h)) => ref_proto::ANY_V4.into(),
-        None => ref_proto::LOOPBACK_V4.into(),
-    };
-    let port = match cli.port {
-        Some(p) if p != 0 => p,
-        _ => instance::pick_port(&bind).ok_or_else(|| anyhow::anyhow!("no free port found"))?,
-    };
+    let allow = allowed_hosts(&cli);
+    let bind = bind_address(&cli, &allow);
+    let port = pick_or_given_port(&cli, &bind)?;
     let token = cli
         .token
         .clone()
