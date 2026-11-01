@@ -12,6 +12,14 @@ use syntect::parsing::{ParseState, ScopeStack, SyntaxReference, SyntaxSet};
 
 use super::theme;
 
+/// Alpha value of a fully opaque colour.
+const OPAQUE: u8 = 255;
+/// Blocks with more lines, or with a longer line, are not highlighted.
+const MAX_HIGHLIGHT_LINES: usize = 3000;
+const MAX_HIGHLIGHT_LINE_LEN: usize = 4000;
+/// Highlighted blocks kept so a streaming block continues from its saved state.
+const HIGHLIGHT_CACHE_ENTRIES: usize = 24;
+
 fn syntaxes() -> &'static SyntaxSet {
     static S: OnceLock<SyntaxSet> = OnceLock::new();
     S.get_or_init(SyntaxSet::load_defaults_newlines)
@@ -19,7 +27,7 @@ fn syntaxes() -> &'static SyntaxSet {
 
 fn scolor(c: Color) -> SColor {
     match c {
-        Color::Rgb(r, g, b) => SColor { r, g, b, a: 255 },
+        Color::Rgb(r, g, b) => SColor { r, g, b, a: OPAQUE },
         _ => SColor::WHITE,
     }
 }
@@ -68,7 +76,7 @@ fn find_syntax(lang: &str) -> Option<&'static SyntaxReference> {
     let l = l
         .split(|c: char| c == ',' || c.is_whitespace())
         .next()
-        .unwrap_or("");
+        .expect("split yields at least one item");
     if l.is_empty() {
         return None;
     }
@@ -82,14 +90,13 @@ fn find_syntax(lang: &str) -> Option<&'static SyntaxReference> {
         "golang" => "go",
         "md" => "markdown",
         "jsonc" | "json5" => "json",
-        "toml" => "toml",
         other => other,
     };
     ss.find_syntax_by_token(alias)
         .or_else(|| ss.find_syntax_by_extension(alias))
 }
 
-pub type HlLine = Vec<(Style, String)>;
+type HlLine = Vec<(Style, String)>;
 
 struct Entry {
     lang: String,
@@ -119,7 +126,7 @@ fn conv(s: syntect::highlighting::Style) -> Style {
 pub fn highlight(lang: &str, lines: &[&str]) -> Option<Vec<HlLine>> {
     let syntax = find_syntax(lang)?;
     // Very large blocks: skip highlighting for responsiveness.
-    if lines.len() > 3000 || lines.iter().any(|l| l.len() > 4000) {
+    if lines.len() > MAX_HIGHLIGHT_LINES || lines.iter().any(|l| l.len() > MAX_HIGHLIGHT_LINE_LEN) {
         return None;
     }
     let th = hl_theme();
@@ -180,7 +187,7 @@ pub fn highlight(lang: &str, lines: &[&str]) -> Option<Vec<HlLine>> {
     }
     let out = entry.out.clone();
     guard.push(entry);
-    if guard.len() > 24 {
+    if guard.len() > HIGHLIGHT_CACHE_ENTRIES {
         guard.remove(0);
     }
     Some(out)
