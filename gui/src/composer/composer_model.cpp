@@ -594,7 +594,7 @@ bool ComposerModel::pasteFromClipboard()
 	}
 	if(bytes.size() > compose::MaxImageBytes)
 	{
-		emit failed(tr("The image is larger than 20 MiB."));
+		emit failed(tr("The image is larger than %1 MiB.").arg(compose::MaxImageMiB));
 		return true;
 	}
 	attachImage(compose::imageFromBytes(bytes, PngMime, PastedImageName));
