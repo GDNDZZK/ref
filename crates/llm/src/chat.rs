@@ -6,7 +6,7 @@ use crate::sse::{SseEvent, data_values, is_done};
 use crate::util::{
     Assembler, CLIENT_OPTION_KEYS, DEFAULT_OPENAI_BASE, IMAGE_OMITTED, NO_TOOL_OUTPUT,
     SEE_ATTACHED_IMAGE, StreamEnd, StreamState, arguments_string, bearer_header, build_headers,
-    data_url, deep_merge, drive, endpoint, error_fields, has_tool_history, is_official_openai,
+    data_url, drive, endpoint, error_fields, has_tool_history, is_official_openai,
     json_sse_headers, merge_key, normalize_call_id, normalize_history, prompt_cache_key, ptr_u64,
     same_origin, session_headers, snake_keys,
 };
@@ -119,7 +119,7 @@ pub(crate) fn build_body(provider: &Provider, model: &Model, req: &Request) -> V
 /// Map opencode-style options onto the request body. Unknown keys are passed
 /// through verbatim, like `@ai-sdk/openai-compatible` does.
 fn apply_options(provider: &Provider, options: &Map<String, Value>, body: &mut Map<String, Value>) {
-    let mut overlays = Vec::new();
+    let mut overlays: Vec<&Map<String, Value>> = Vec::new();
     for (key, value) in options {
         match key.as_str() {
             "reasoningEffort" | "reasoning_effort" => {
@@ -154,8 +154,8 @@ fn apply_options(provider: &Provider, options: &Map<String, Value>, body: &mut M
                 merge_key(body, "thinking", &converted);
             }
             "extraBody" | "body" => {
-                if value.is_object() {
-                    overlays.push(value.clone());
+                if let Some(overlay) = value.as_object() {
+                    overlays.push(overlay);
                 }
             }
             // opencode / Responses-only keys that chat endpoints do not accept.
@@ -165,12 +165,10 @@ fn apply_options(provider: &Provider, options: &Map<String, Value>, body: &mut M
             k => merge_key(body, k, value),
         }
     }
-    let mut merged = Value::Object(std::mem::take(body));
-    for overlay in &overlays {
-        deep_merge(&mut merged, overlay);
-    }
-    if let Value::Object(map) = merged {
-        *body = map;
+    for overlay in overlays {
+        for (k, v) in overlay {
+            merge_key(body, k, v);
+        }
     }
 }
 
