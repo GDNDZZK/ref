@@ -401,8 +401,6 @@ fn mcp(ctx: &mut Ctx, v: Option<&Value>) -> BTreeMap<String, McpConfig> {
             ctx.warn(format!("mcp.{name}: expected an object"));
             continue;
         };
-        let enabled = s.get("enabled").and_then(Value::as_bool).unwrap_or(true);
-        let timeout_ms = s.get("timeout").and_then(Value::as_u64).filter(|t| *t > 0);
         let ty = get_str(s, "type").unwrap_or_else(|| {
             if s.contains_key("url") {
                 "remote".into()
@@ -412,62 +410,75 @@ fn mcp(ctx: &mut Ctx, v: Option<&Value>) -> BTreeMap<String, McpConfig> {
                 String::new()
             }
         });
-        match ty.as_str() {
-            "local" | "stdio" => {
-                let command = match s.get("command") {
-                    Some(Value::Array(a)) => strings(a),
-                    Some(Value::String(c)) => {
-                        let mut v: Vec<String> = c.split_whitespace().map(str::to_string).collect();
-                        if let Some(Value::Array(args)) = s.get("args") {
-                            v.extend(strings(args));
-                        }
-                        v
-                    }
-                    _ => Vec::new(),
-                };
-                if command.is_empty() {
-                    ctx.warn(format!(
-                        "mcp.{name}: local server requires a non-empty `command`"
-                    ));
-                    continue;
-                }
-                let environment = str_map(s.get("environment").or_else(|| s.get("env")));
-                out.insert(
-                    name.clone(),
-                    McpConfig::Local {
-                        command,
-                        environment,
-                        cwd: get_str(s, "cwd"),
-                        enabled,
-                        timeout_ms,
-                    },
-                );
-            }
-            "remote" | "http" | "sse" | "streamable-http" => {
-                let Some(url) = get_str(s, "url").filter(|u| !u.is_empty()) else {
-                    ctx.warn(format!("mcp.{name}: remote server requires `url`"));
-                    continue;
-                };
-                out.insert(
-                    name.clone(),
-                    McpConfig::Remote {
-                        url,
-                        headers: str_map(s.get("headers")),
-                        enabled,
-                        timeout_ms,
-                    },
-                );
-            }
+        let server = match ty.as_str() {
+            "local" | "stdio" => local_mcp(ctx, name, s),
+            "remote" | "http" | "sse" | "streamable-http" => remote_mcp(ctx, name, s),
             "" => {
                 // Only `{enabled: ..}` toggles (for servers defined elsewhere) are silently ignored.
                 if s.keys().any(|k| k != "enabled") {
                     ctx.warn(format!("mcp.{name}: missing `type` (local/remote)"));
                 }
+                None
             }
-            t => ctx.warn(format!("mcp.{name}: unknown type {t:?}")),
+            t => {
+                ctx.warn(format!("mcp.{name}: unknown type {t:?}"));
+                None
+            }
+        };
+        if let Some(server) = server {
+            out.insert(name.clone(), server);
         }
     }
     out
+}
+
+/// `enabled` (default true) and `timeout` in ms of an MCP server entry.
+fn mcp_common(s: &Map<String, Value>) -> (bool, Option<u64>) {
+    let enabled = s.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+    let timeout_ms = s.get("timeout").and_then(Value::as_u64).filter(|t| *t > 0);
+    (enabled, timeout_ms)
+}
+
+fn local_mcp(ctx: &mut Ctx, name: &str, s: &Map<String, Value>) -> Option<McpConfig> {
+    let (enabled, timeout_ms) = mcp_common(s);
+    let command = match s.get("command") {
+        Some(Value::Array(a)) => strings(a),
+        Some(Value::String(c)) => {
+            let mut v: Vec<String> = c.split_whitespace().map(str::to_string).collect();
+            if let Some(Value::Array(args)) = s.get("args") {
+                v.extend(strings(args));
+            }
+            v
+        }
+        _ => Vec::new(),
+    };
+    if command.is_empty() {
+        ctx.warn(format!(
+            "mcp.{name}: local server requires a non-empty `command`"
+        ));
+        return None;
+    }
+    Some(McpConfig::Local {
+        command,
+        environment: str_map(s.get("environment").or_else(|| s.get("env"))),
+        cwd: get_str(s, "cwd"),
+        enabled,
+        timeout_ms,
+    })
+}
+
+fn remote_mcp(ctx: &mut Ctx, name: &str, s: &Map<String, Value>) -> Option<McpConfig> {
+    let (enabled, timeout_ms) = mcp_common(s);
+    let Some(url) = get_str(s, "url").filter(|u| !u.is_empty()) else {
+        ctx.warn(format!("mcp.{name}: remote server requires `url`"));
+        return None;
+    };
+    Some(McpConfig::Remote {
+        url,
+        headers: str_map(s.get("headers")),
+        enabled,
+        timeout_ms,
+    })
 }
 
 fn commands(ctx: &mut Ctx, v: Option<&Value>) -> BTreeMap<String, CommandConfig> {
