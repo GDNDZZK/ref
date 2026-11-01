@@ -192,10 +192,15 @@ impl LlmError {
     }
 }
 
+/// Time allowed to establish a connection.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long an idle pooled connection is kept.
+const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
+
 fn build_client(direct: bool) -> reqwest::Client {
     let mut builder = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(30))
-        .pool_idle_timeout(Duration::from_secs(90))
+        .connect_timeout(CONNECT_TIMEOUT)
+        .pool_idle_timeout(POOL_IDLE_TIMEOUT)
         .user_agent(concat!("ref/", env!("CARGO_PKG_VERSION")));
     if direct {
         builder = builder.no_proxy();
