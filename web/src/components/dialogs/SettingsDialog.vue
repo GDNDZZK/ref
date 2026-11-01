@@ -3,6 +3,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { setTheme } from '../../composables/useTheme.ts'
+import { protocolOf } from '../../net/connection.ts'
 import type { LanguageChoice, ThemeChoice } from '../../settings/model.ts'
 import { useConnectionStore } from '../../stores/connection.ts'
 import { useDialogsStore } from '../../stores/dialogs.ts'
@@ -10,8 +11,6 @@ import { useSettingsStore } from '../../stores/settings.ts'
 import ModalDialog from '../ModalDialog.vue'
 import NotificationSettings from '../NotificationSettings.vue'
 import Segmented from '../Segmented.vue'
-
-const PROTOCOL_WITHOUT_FIELD = 1
 
 const { t } = useI18n()
 const dialogs = useDialogsStore()
@@ -42,7 +41,7 @@ const languages = computed(() => [
 const about = computed(() =>
   t('dialog.settings.about', {
     version: connection.hello?.server_version ?? '',
-    protocol: connection.hello?.protocol ?? PROTOCOL_WITHOUT_FIELD,
+    protocol: protocolOf(connection.hello),
   }),
 )
 </script>

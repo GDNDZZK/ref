@@ -3,7 +3,6 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { PeersTab } from '../../stores/dialogs.ts'
-import { useConnectionStore } from '../../stores/connection.ts'
 import { useDialogsStore } from '../../stores/dialogs.ts'
 import { useWorkspaceStore } from '../../stores/workspace.ts'
 import DialogButton from '../DialogButton.vue'
@@ -14,7 +13,6 @@ import { describeError } from '../../errorMessage.ts'
 
 const props = defineProps<{ sessionId: string; tab: PeersTab; name?: string }>()
 const { t } = useI18n()
-const connection = useConnectionStore()
 const dialogs = useDialogsStore()
 const workspace = useWorkspaceStore()
 
@@ -39,9 +37,11 @@ async function load(args = ''): Promise<void> {
   text.value = undefined
   failed.value = false
   try {
-    const result = await connection
-      .getApi()
-      .peerCommand(props.sessionId, `peers-${tab.value}`.replace('peers-peers', 'peers'), args)
+    const result = await workspace.peerCommand(
+      props.sessionId,
+      `peers-${tab.value}`.replace('peers-peers', 'peers'),
+      args,
+    )
     if (mine === latest) text.value = result
   } catch (error) {
     if (mine !== latest) return
@@ -58,7 +58,7 @@ async function setName(): Promise<void> {
   if (next === '') return
   nameError.value = ''
   try {
-    await connection.getApi().peerCommand(props.sessionId, 'peers-name', next)
+    await workspace.peerCommand(props.sessionId, 'peers-name', next)
     await load()
   } catch (error) {
     nameError.value = describeError(error)

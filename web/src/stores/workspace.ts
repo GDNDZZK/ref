@@ -12,6 +12,7 @@ import { emitDraftRestored } from '../composer/draftBus.ts'
 import { ChatSession } from '../model/chatSession.ts'
 import type { EventFrame } from '../net/connection.ts'
 import { writeLocation } from '../net/location.ts'
+import { rowState } from '../shell/sessionRow.ts'
 import { neighbor } from '../shell/tileLayout.ts'
 import type { Rect } from '../shell/tileLayout.ts'
 import type { Startup } from '../net/startup.ts'
@@ -234,6 +235,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return connection.getApi().exportTranscript(id, path)
   }
 
+  // Whether any session of the backend is running or waiting for the user.
+  async function hasWorkingSessions(): Promise<boolean> {
+    const sessions = await connection.getApi().listSessions()
+    return sessions.some((info) => rowState(info) !== 'idle' && rowState(info) !== 'error')
+  }
+
+  function peerCommand(sessionId: string, command: string, args?: string): Promise<string> {
+    return connection.getApi().peerCommand(sessionId, command, args)
+  }
+
+  function listDirs(folder: string): Promise<{ path: string; dirs: string[] }> {
+    return connection.getApi().listDirs(folder)
+  }
+
   // Sessions of one directory (or all), newest first. Includes the live ones.
   async function refreshHistory(forCwd?: string): Promise<void> {
     history.value = await connection.getApi().listHistory(forCwd, HISTORY_LIMIT)
@@ -411,6 +426,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     cycleAgent,
     compact,
     exportSession,
+    hasWorkingSessions,
+    peerCommand,
+    listDirs,
     refreshHistory,
     enterSplit,
     leaveSplit,

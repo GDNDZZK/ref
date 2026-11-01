@@ -22,6 +22,13 @@ export interface HelloResult {
   cwd: string
 }
 
+const PROTOCOL_WITHOUT_FIELD = 1 // servers older than protocol 2 do not report theirs
+
+// The protocol version the server speaks (1 while it has not said or not answered yet).
+export function protocolOf(hello: HelloResult | undefined): number {
+  return hello?.protocol ?? PROTOCOL_WITHOUT_FIELD
+}
+
 export class RefError extends Error {}
 
 export interface ConnectionOptions {
