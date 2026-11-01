@@ -102,7 +102,7 @@ impl Shared {
     /// Fail one pending request (no-op if it already completed).
     pub(crate) fn fail_pending(&self, id: &Value, err: &str) {
         if let Some(tx) = self.pending.lock().unwrap().remove(&id_key(id)) {
-            let _ = tx.send(Err(anyhow!("{err}")));
+            self.reply(tx, Err(anyhow!("{err}")));
         }
     }
 
@@ -116,12 +116,21 @@ impl Shared {
             .map(|(_, v)| v)
             .collect();
         for tx in drained {
-            let _ = tx.send(Err(anyhow!("{err}")));
+            self.reply(tx, Err(anyhow!("{err}")));
+        }
+    }
+
+    /// Deliver a response; a dropped receiver means the requester is gone.
+    fn reply(&self, tx: Reply, res: Result<Value>) {
+        if tx.send(res).is_err() {
+            tracing::trace!(server = %self.name, "requester gone");
         }
     }
 
     pub(crate) fn send_async(&self, msg: Value) {
-        let _ = self.out_tx.send(msg);
+        if self.out_tx.send(msg).is_err() {
+            tracing::debug!(server = %self.name, "writer task ended; message dropped");
+        }
     }
 
     /// Handle one incoming message (or batch) from the server.
@@ -153,7 +162,7 @@ impl Shared {
                 } else {
                     Ok(obj.get("result").cloned().unwrap_or(Value::Null))
                 };
-                let _ = tx.send(res);
+                self.reply(tx, res);
             }
             (None, None) => {
                 tracing::debug!(server = %self.name, "ignoring malformed JSON-RPC message")
