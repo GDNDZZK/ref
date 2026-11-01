@@ -2983,7 +2983,6 @@ dependencies = [
  "ref-proto",
  "ref-sys",
  "reqwest",
- "serde",
  "serde_json",
  "tokio",
  "tokio-util",
