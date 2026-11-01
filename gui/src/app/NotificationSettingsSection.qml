@@ -19,8 +19,6 @@ Column {
 	readonly property int knobInset: 2
 	readonly property real disabledOpacity: 0.4
 
-	spacing: 0
-
 	Row {
 		height: section.rowHeight
 		spacing: section.headerGap
