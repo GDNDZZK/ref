@@ -1662,9 +1662,27 @@ fn box_section_with_cjk_label_matches_body_width() {
     assert!(ws.len() >= 4 && ws.iter().all(|&w| w == ws[0]), "{ws:?}");
 }
 
+/// Left click (press and release) at `x`, `y`.
+fn click_at(app: &mut App, x: u16, y: u16) {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    crate::input::handle(app, mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+    crate::input::handle(app, mouse(MouseEventKind::Up(MouseButton::Left), x, y));
+}
+
+fn is_undo(p: &crate::app::Pending) -> bool {
+    matches!(p, crate::app::Pending::Undo { .. })
+}
+
+/// Renders the chat of `app` and returns the position of the first undo button.
+fn undo_button(app: &mut App) -> (u16, u16) {
+    app.screen = ratatui::layout::Rect::new(0, 0, 100, 30);
+    let (term, s) = render(app, 100, 30);
+    let y = s.lines().position(|l| l.contains("↶ undo")).unwrap() as u16;
+    (find_col(&term, y, "↶").unwrap(), y)
+}
+
 #[test]
-fn undo_button_hit_zone_and_flow() {
-    use crate::app::Pending;
+fn undo_button_hit_zone() {
     use crate::ui::Hit;
     let mut app = test_app(false);
     let (term, s) = render(&mut app, 100, 30);
@@ -1676,6 +1694,7 @@ fn undo_button_hit_zone_and_flow() {
     let ux = find_col(&term, uy, "↶").unwrap();
     let cx = find_col(&term, uy, "⧉").unwrap();
     assert_eq!(cx, ux + 8, "undo then two spaces then copy");
+
     // Only the human prompt has an undo button.
     assert_eq!(s.matches("↶ undo").count(), 1);
     let v = app.views.get_mut(TEST_SESSION).unwrap();
@@ -1693,32 +1712,23 @@ fn undo_button_hit_zone_and_flow() {
         v.chat.hit_at(cx + 5, uy),
         Some(Hit::Copy { msg: "m1".into() })
     );
+}
+
+#[test]
+fn undo_click_on_idle_session_sends_request_and_fills_editor() {
+    use crate::app::Pending;
+    let mut app = test_app(false);
+    let (ux, uy) = undo_button(&mut app);
+
     // Click (idle): request sent right away, removing 2 messages.
-    app.screen = ratatui::layout::Rect::new(0, 0, 100, 30);
-    let click = |app: &mut App| {
-        use crossterm::event::{MouseButton, MouseEventKind};
-        crate::input::handle(
-            app,
-            mouse(MouseEventKind::Down(MouseButton::Left), ux + 2, uy),
-        );
-        crate::input::handle(
-            app,
-            mouse(MouseEventKind::Up(MouseButton::Left), ux + 2, uy),
-        );
-    };
-    click(&mut app);
-    let id = *app
-        .pending
-        .iter()
-        .find(|(_, p)| matches!(p, Pending::Undo { count: Some(2), .. }))
-        .map(|(k, _)| k)
-        .expect("undo request");
-    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
-        id,
-        ok: true,
-        result: json!({"text": "Please fix it"}),
-        error: None,
-    }));
+    click_at(&mut app, ux + 2, uy);
+    assert!(
+        app.pending
+            .values()
+            .any(|p| matches!(p, Pending::Undo { count: Some(2), .. })),
+        "undo request"
+    );
+    respond(&mut app, is_undo, json!({"text": "Please fix it"}));
     assert_eq!(app.editor.text, "Please fix it");
     assert!(
         app.toasts
@@ -1726,58 +1736,36 @@ fn undo_button_hit_zone_and_flow() {
             .iter()
             .any(|t| t.text == "Undid 2 messages")
     );
-    // Non-empty editor is kept; the prompt is appended after a blank line.
+}
+
+#[test]
+fn undo_appends_prompt_to_a_non_empty_editor() {
     let mut app = test_app(false);
-    render(&mut app, 100, 30);
-    app.screen = ratatui::layout::Rect::new(0, 0, 100, 30);
+    let (ux, uy) = undo_button(&mut app);
+
+    // Non-empty editor is kept; the prompt is appended after a blank line.
     type_text(&mut app, "draft");
-    click(&mut app);
-    let id = *app
-        .pending
-        .iter()
-        .find(|(_, p)| matches!(p, Pending::Undo { .. }))
-        .map(|(k, _)| k)
-        .unwrap();
-    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
-        id,
-        ok: true,
-        result: json!({"text": "old prompt"}),
-        error: None,
-    }));
+    click_at(&mut app, ux + 2, uy);
+    respond(&mut app, is_undo, json!({"text": "old prompt"}));
     assert_eq!(app.editor.text, "draft\n\nold prompt");
     assert_eq!(app.editor.cursor, app.editor.text.len());
-    // Busy session: the first click only arms a confirmation.
+}
+
+#[test]
+fn undo_on_busy_session_needs_a_second_click() {
     let mut app = test_app(true);
-    render(&mut app, 100, 30);
-    app.screen = ratatui::layout::Rect::new(0, 0, 100, 30);
-    let (term, s) = render(&mut app, 100, 30);
-    let uy2 = s.lines().position(|l| l.contains("↶ undo")).unwrap() as u16;
-    let ux2 = find_col(&term, uy2, "↶").unwrap();
-    let click2 = |app: &mut App| {
-        use crossterm::event::{MouseButton, MouseEventKind};
-        crate::input::handle(
-            app,
-            mouse(MouseEventKind::Down(MouseButton::Left), ux2, uy2),
-        );
-        crate::input::handle(app, mouse(MouseEventKind::Up(MouseButton::Left), ux2, uy2));
-    };
-    click2(&mut app);
-    assert!(
-        !app.pending
-            .values()
-            .any(|p| matches!(p, Pending::Undo { .. }))
-    );
+    let (ux, uy) = undo_button(&mut app);
+
+    // Busy session: the first click only arms a confirmation.
+    click_at(&mut app, ux, uy);
+    assert!(!app.pending.values().any(is_undo));
     assert!(
         app.hint
             .as_ref()
             .is_some_and(|h| h.0.contains("aborts the running turn"))
     );
-    click2(&mut app);
-    assert!(
-        app.pending
-            .values()
-            .any(|p| matches!(p, Pending::Undo { .. }))
-    );
+    click_at(&mut app, ux, uy);
+    assert!(app.pending.values().any(is_undo));
 }
 
 #[test]
@@ -1875,7 +1863,6 @@ fn queue_test_app() -> App {
 /// Clicks the ✕ remove button of the queued row showing `text`.
 fn click_remove(app: &mut App, text: &str) {
     use crate::ui::Hit;
-    use crossterm::event::{MouseButton, MouseEventKind};
     let (term, s) = render(app, 100, 30);
     let y = s
         .lines()
@@ -1892,8 +1879,7 @@ fn click_remove(app: &mut App, text: &str) {
         app.views[TEST_SESSION].chat.hit_at(x, y),
         Some(Hit::Unqueue { key })
     );
-    crate::input::handle(app, mouse(MouseEventKind::Down(MouseButton::Left), x, y));
-    crate::input::handle(app, mouse(MouseEventKind::Up(MouseButton::Left), x, y));
+    click_at(app, x, y);
 }
 
 fn is_prompt(p: &crate::app::Pending) -> bool {
