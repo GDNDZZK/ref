@@ -6,10 +6,12 @@ use ref_proto::{ContextUsage, ModelRef};
 use serde_json::{Map, Value};
 use std::time::Duration;
 
-pub const DEFAULT_CONTEXT: u64 = 128_000;
+const DEFAULT_CONTEXT: u64 = 128_000;
+
+const DEFAULT_CHUNK_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Recursive object merge: objects merged key by key, everything else replaced.
-pub fn deep_merge(base: &mut Map<String, Value>, overlay: &Map<String, Value>) {
+fn deep_merge(base: &mut Map<String, Value>, overlay: &Map<String, Value>) {
     for (k, v) in overlay {
         match (base.get_mut(k), v) {
             (Some(Value::Object(b)), Value::Object(o)) => deep_merge(b, o),
@@ -33,13 +35,19 @@ fn api_kind(api: Option<&str>, npm: Option<&str>) -> ApiKind {
 
 fn host_of(url: &str) -> String {
     let rest = url.split_once("://").map_or(url, |(_, r)| r);
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let authority = rest.find(['/', '?', '#']).map_or(rest, |i| &rest[..i]);
     let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
-    host.split(':').next().unwrap_or("").to_ascii_lowercase()
+    host.find(':')
+        .map_or(host, |i| &host[..i])
+        .to_ascii_lowercase()
 }
 
 /// Build Provider + Model for a session request.
-pub fn resolve(cfg: &Config, r: &ModelRef, agent: &str) -> Result<(Provider, Model), String> {
+pub(crate) fn resolve(
+    cfg: &Config,
+    r: &ModelRef,
+    agent: &str,
+) -> Result<(Provider, Model), String> {
     if r.provider.is_empty() || r.model.is_empty() {
         return Err("No model configured. Add a provider with models to your config (opencode.json / ref.json).".into());
     }
@@ -63,7 +71,7 @@ pub fn resolve(cfg: &Config, r: &ModelRef, agent: &str) -> Result<(Provider, Mod
         .and_then(Value::as_u64)
         .filter(|ms| *ms > 0)
         .map(Duration::from_millis)
-        .unwrap_or(Duration::from_secs(300));
+        .unwrap_or(DEFAULT_CHUNK_TIMEOUT);
     let provider = Provider {
         id: p.id.clone(),
         api,
@@ -99,7 +107,7 @@ pub fn resolve(cfg: &Config, r: &ModelRef, agent: &str) -> Result<(Provider, Mod
 }
 
 /// Context window thresholds for a model (used = 0).
-pub fn context_for(cfg: &Config, r: &ModelRef) -> ContextUsage {
+pub(crate) fn context_for(cfg: &Config, r: &ModelRef) -> ContextUsage {
     let (max, compact_at, threshold) = match cfg.model(r) {
         Some((_, m)) => (
             if m.context > 0 {
@@ -129,14 +137,14 @@ pub fn context_keeping_used(cfg: &Config, r: &ModelRef, used: u64) -> ContextUsa
 }
 
 /// Variant names of a model, sorted.
-pub fn variants(cfg: &Config, r: &ModelRef) -> Vec<String> {
+pub(crate) fn variants(cfg: &Config, r: &ModelRef) -> Vec<String> {
     cfg.model(r)
         .map(|(_, m)| m.variants.keys().cloned().collect())
         .unwrap_or_default()
 }
 
 /// Next variant in the cycle `None -> v0 -> v1 -> ... -> None`.
-pub fn next_variant(list: &[String], cur: Option<&str>) -> Option<String> {
+pub(crate) fn next_variant(list: &[String], cur: Option<&str>) -> Option<String> {
     match cur.and_then(|c| list.iter().position(|v| v == c)) {
         None => list.first().cloned(),
         Some(i) => list.get(i + 1).cloned(),
