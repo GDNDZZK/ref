@@ -50,17 +50,7 @@ QStringList ids(const SessionListModel& model)
 
 QJsonObject infoJson(const QString& id, qint64 created, bool live)
 {
-	return {{u"id"_s, id},
-	        {u"name"_s, u""_s},
-	        {u"title"_s, u"T "_s + id},
-	        {u"agent"_s, u"build"_s},
-	        {u"model"_s, QJsonObject{{u"provider"_s, u"p"_s}, {u"model"_s, u"m"_s}}},
-	        {u"cwd"_s, u"/work"_s},
-	        {u"created_at"_s, created},
-	        {u"updated_at"_s, created},
-	        {u"status"_s, QJsonObject{{u"state"_s, u"idle"_s}}},
-	        {u"attached"_s, 0},
-	        {u"live"_s, live}};
+	return sessionInfoJson(id, {.title = u"T "_s + id, .createdAt = created, .live = live});
 }
 
 } // namespace

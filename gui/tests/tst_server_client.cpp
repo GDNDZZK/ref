@@ -14,6 +14,8 @@ using namespace refgui;
 using namespace refgui::client;
 using refgui::test::await;
 using refgui::test::FakeBackend;
+using refgui::test::FakeServerVersion;
+using refgui::test::sessionInfoJson;
 
 namespace
 {
@@ -28,17 +30,7 @@ QJsonObject promptResult(const QString& messageId)
 // A minimal attach result: one empty session.
 QJsonObject attachResult()
 {
-	const QJsonObject info{{u"id"_s, u"ses_1"_s},
-	                       {u"name"_s, u"one"_s},
-	                       {u"title"_s, u""_s},
-	                       {u"agent"_s, u"build"_s},
-	                       {u"model"_s, QJsonObject{{u"provider"_s, u"p"_s}, {u"model"_s, u"m"_s}}},
-	                       {u"cwd"_s, u"/tmp"_s},
-	                       {u"created_at"_s, 1},
-	                       {u"updated_at"_s, 1},
-	                       {u"status"_s, QJsonObject{{u"state"_s, u"idle"_s}}},
-	                       {u"attached"_s, 1},
-	                       {u"live"_s, true}};
+	const QJsonObject info = sessionInfoJson(u"ses_1"_s, {.name = u"one"_s, .cwd = u"/tmp"_s, .attached = 1});
 	return {{u"snapshot"_s,
 	         QJsonObject{{u"info"_s, info}, {u"messages"_s, QJsonArray()}, {u"pending_permissions"_s, QJsonArray()}}}};
 }
@@ -69,8 +61,8 @@ private slots:
 		const auto hello = open(client, backend);
 
 		QVERIFY(hello.has_value());
-		QCOMPARE(hello->protocol, 2);
-		QCOMPARE(hello->serverVersion, u"0.0.0-test"_s);
+		QCOMPARE(hello->protocol, proto::ProtocolVersion);
+		QCOMPARE(hello->serverVersion, FakeServerVersion);
 		const QJsonObject sent = backend.requests().first();
 		QCOMPARE(sent.value(u"op"_s).toString(), u"hello"_s);
 		QCOMPARE(sent.value(u"version"_s).toInt(), proto::ProtocolVersion);

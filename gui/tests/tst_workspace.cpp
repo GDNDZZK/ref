@@ -34,24 +34,13 @@ public:
 	{
 		fake.onRequest = [this](const QJsonObject& request) { answer(request); };
 		fake.onHello = [this](const QJsonObject& hello) {
-			m_fake.respond(hello, {{u"server_version"_s, u"0.0.0-test"_s}, {u"protocol"_s, m_protocol}});
+			m_fake.respondHello(hello, m_protocol);
 		};
 	}
 
 	void add(const QString& id, qint64 created, const QString& cwd = u"/work"_s)
 	{
-		m_sessions.insert(id,
-		                  {{u"id"_s, id},
-		                   {u"name"_s, QString()},
-		                   {u"title"_s, u"Title "_s + id},
-		                   {u"agent"_s, u"build"_s},
-		                   {u"model"_s, QJsonObject{{u"provider"_s, u"p"_s}, {u"model"_s, u"m"_s}}},
-		                   {u"cwd"_s, cwd},
-		                   {u"created_at"_s, created},
-		                   {u"updated_at"_s, created},
-		                   {u"status"_s, QJsonObject{{u"state"_s, u"idle"_s}}},
-		                   {u"attached"_s, 0},
-		                   {u"live"_s, true}});
+		m_sessions.insert(id, sessionInfoJson(id, {.title = u"Title "_s + id, .cwd = cwd, .createdAt = created}));
 	}
 
 	void setProtocol(int protocol) { m_protocol = protocol; }
@@ -265,7 +254,7 @@ private:
 	QList<QJsonObject> m_heldQuestionReplies;
 	QString m_questionError;
 	int m_created = 0;
-	int m_protocol = 2;
+	int m_protocol = refgui::proto::ProtocolVersion;
 	bool m_holdDetach = false;
 	bool m_holdWatchAll = false;
 	std::optional<QJsonObject> m_heldDetach;
@@ -319,7 +308,7 @@ bool rowFlag(Workspace& workspace, const QString& id, refgui::workspace::Session
 
 struct Fixture
 {
-	explicit Fixture(int protocol = 2, bool withSecond = false, const QJsonArray& messagesOfA = {}, const std::function<void(StubServer&)>& prepare = {})
+	explicit Fixture(int protocol = refgui::proto::ProtocolVersion, bool withSecond = false, const QJsonArray& messagesOfA = {}, const std::function<void(StubServer&)>& prepare = {})
 	{
 		stub.setProtocol(protocol);
 		stub.add(u"ses_a"_s, 1);
@@ -1071,11 +1060,12 @@ void TestWorkspace::destroyingTheWorkspaceWithADetachOutIsSafe()
 
 void TestWorkspace::oldBackendOffersARestart()
 {
-	Fixture f(1);
+	constexpr int OldProtocol = refgui::proto::ProtocolVersion - 1;
+	Fixture f(OldProtocol);
 
 	QVERIFY(f.workspace->isProtocolOutdated());
-	QCOMPARE(f.workspace->protocolVersion(), 1);
-	QCOMPARE(f.workspace->backendVersion(), u"0.0.0-test"_s);
+	QCOMPARE(f.workspace->protocolVersion(), OldProtocol);
+	QCOMPARE(f.workspace->backendVersion(), FakeServerVersion);
 	QTRY_VERIFY(f.workspace->canRestartBackend());
 
 	f.workspace->restartBackend();

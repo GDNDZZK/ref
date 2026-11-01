@@ -1,5 +1,7 @@
 #pragma once
 
+#include "proto/types.h"
+
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QObject>
@@ -11,6 +13,39 @@
 
 namespace refgui::test
 {
+
+// What the fake answers to Hello.
+inline const QString FakeServerVersion = QStringLiteral("0.0.0-test");
+
+// The fields of a session's info JSON the tests vary; the rest is fixed.
+struct SessionJson
+{
+	QString name{};
+	QString title{};
+	QString agent = QStringLiteral("build");
+	QJsonObject model{{QStringLiteral("provider"), QStringLiteral("p")}, {QStringLiteral("model"), QStringLiteral("m")}};
+	QString cwd = QStringLiteral("/work");
+	qint64 createdAt = 1; // also the update time
+	QString state = QStringLiteral("idle");
+	int attached = 0;
+	bool live = true;
+};
+
+// A `SessionInfo` as the backend sends it.
+inline QJsonObject sessionInfoJson(const QString& id, const SessionJson& fields = {})
+{
+	return {{QStringLiteral("id"), id},
+	        {QStringLiteral("name"), fields.name},
+	        {QStringLiteral("title"), fields.title},
+	        {QStringLiteral("agent"), fields.agent},
+	        {QStringLiteral("model"), fields.model},
+	        {QStringLiteral("cwd"), fields.cwd},
+	        {QStringLiteral("created_at"), fields.createdAt},
+	        {QStringLiteral("updated_at"), fields.createdAt},
+	        {QStringLiteral("status"), QJsonObject{{QStringLiteral("state"), fields.state}}},
+	        {QStringLiteral("attached"), fields.attached},
+	        {QStringLiteral("live"), fields.live}};
+}
 
 // A ref-server stand-in on a loopback WebSocket. It records the request frames it gets and
 // leaves answering them to `onRequest`; Hello is answered by default.
@@ -52,6 +87,11 @@ public:
 		      {QStringLiteral("result"), result}});
 	}
 
+	void respondHello(const QJsonObject& hello, int protocol = proto::ProtocolVersion)
+	{
+		respond(hello, {{QStringLiteral("server_version"), FakeServerVersion}, {QStringLiteral("protocol"), protocol}});
+	}
+
 	void fail(const QJsonObject& request, const QString& error)
 	{
 		send({{QStringLiteral("kind"), QStringLiteral("response")},
@@ -82,7 +122,7 @@ private:
 			onHello(request);
 			return;
 		}
-		respond(request, {{QStringLiteral("server_version"), QStringLiteral("0.0.0-test")}, {QStringLiteral("protocol"), 2}});
+		respondHello(request);
 	}
 
 	QWebSocketServer m_server;

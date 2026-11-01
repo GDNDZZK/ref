@@ -29,17 +29,12 @@ namespace
 
 QJsonObject infoJson()
 {
-	return {{u"id"_s, u"ses_1"_s},
-	        {u"name"_s, u"one"_s},
-	        {u"title"_s, u"A title"_s},
-	        {u"agent"_s, u"plan"_s},
-	        {u"model"_s, QJsonObject{{u"provider"_s, u"p"_s}, {u"model"_s, u"m"_s}, {u"variant"_s, u"high"_s}}},
-	        {u"cwd"_s, u"/work"_s},
-	        {u"created_at"_s, 1},
-	        {u"updated_at"_s, 1},
-	        {u"status"_s, QJsonObject{{u"state"_s, u"idle"_s}}},
-	        {u"attached"_s, 1},
-	        {u"live"_s, true}};
+	return sessionInfoJson(u"ses_1"_s,
+	                       {.name = u"one"_s,
+	                        .title = u"A title"_s,
+	                        .agent = u"plan"_s,
+	                        .model = QJsonObject{{u"provider"_s, u"p"_s}, {u"model"_s, u"m"_s}, {u"variant"_s, u"high"_s}},
+	                        .attached = 1});
 }
 
 QJsonObject configJson()
