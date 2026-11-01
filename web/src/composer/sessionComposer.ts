@@ -6,7 +6,7 @@
 
 import { reactive, ref } from 'vue'
 import type { RefApi } from '../net/api.ts'
-import type { NamedImage } from '../proto/generated'
+import type { NamedImage, ToastLevel } from '../proto/generated'
 import { onDraftRestored } from '../stores/draftBus.ts'
 import { CompletionController } from './completion.ts'
 import type { SlashCommand } from './completion.ts'
@@ -24,8 +24,6 @@ import type { PromptHistory } from './history.ts'
 import { readImage, rejectionOf } from './images.ts'
 
 export type ComposerApi = Pick<RefApi, 'prompt' | 'shell' | 'removeQueued' | 'listFiles' | 'expandCommand'>
-
-export type ToastLevel = 'info' | 'warn' | 'error'
 
 export interface ComposerHost {
   sessionId: string

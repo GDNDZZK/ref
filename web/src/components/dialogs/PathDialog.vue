@@ -5,7 +5,6 @@ import { useI18n } from 'vue-i18n'
 import { usePickSelection } from '../../composables/usePickSelection.ts'
 import { useConnectionStore } from '../../stores/connection.ts'
 import { useDialogsStore } from '../../stores/dialogs.ts'
-import { describeError } from '../../stores/notices.ts'
 import { useWorkspaceStore } from '../../stores/workspace.ts'
 import DialogButton from '../DialogButton.vue'
 import Icon from '../Icon.vue'
@@ -13,6 +12,7 @@ import ModalDialog from '../ModalDialog.vue'
 import PickList from '../PickList.vue'
 import TextField from '../TextField.vue'
 import { Key } from '../../keys.ts'
+import { describeError } from '../../errorMessage.ts'
 
 const ROW_HEIGHT_PX = 32
 const MAX_ROWS = 6
