@@ -6,7 +6,7 @@ import { useI18n } from 'vue-i18n'
 import { rankByQuery } from '../commands/fuzzy.ts'
 import { labelText } from '../commands/label.ts'
 import type { Command, CommandGroup } from '../commands/types.ts'
-import { usePickSelection } from '../composables/usePickSelection.ts'
+import { handleListKey, usePickSelection } from '../composables/usePickSelection.ts'
 import type { PickItem } from '../composables/usePickSelection.ts'
 import type { IconKey } from '../icons/generated/icons.ts'
 import { metrics } from '../theme/generated/theme.ts'
@@ -118,11 +118,7 @@ function onKey(event: KeyboardEvent): void {
     event.stopPropagation() // Esc would otherwise close the dialog as well
     return
   }
-  if (event.key === Key.ArrowDown) move(1)
-  else if (event.key === Key.ArrowUp) move(-1)
-  else if (event.key === Key.Enter) pick(selected.value)
-  else return
-  event.preventDefault()
+  handleListKey(event, move, () => pick(selected.value))
 }
 </script>
 
