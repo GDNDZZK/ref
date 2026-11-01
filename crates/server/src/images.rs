@@ -31,11 +31,18 @@ const NO_CAPS: Caps = Caps {
     many_dim: u32::MAX,
     max_b64: usize::MAX,
 };
-/// 10MB of base64, less 10% headroom for the surrounding JSON.
+const BYTES_PER_MB: f64 = 1024.0 * 1024.0;
+
+/// A byte limit less 10% headroom for the JSON around the base64 data.
+const fn with_headroom(bytes: usize) -> usize {
+    bytes / 10 * 9
+}
+
+/// 10MB of base64, less the headroom.
 const CLAUDE_CAPS: Caps = Caps {
     max_dim: 8000,
     many_dim: 2000,
-    max_b64: 10 * 1024 * 1024 / 10 * 9,
+    max_b64: with_headroom(10 * 1024 * 1024),
 };
 
 impl Caps {
@@ -76,11 +83,11 @@ fn caps_from_error(msg: &str) -> Option<Caps> {
         .or_else(|| {
             MB.captures(msg)
                 .and_then(|c| c[1].parse::<f64>().ok())
-                .map(|mb| (mb * 1024.0 * 1024.0) as usize)
+                .map(|mb| (mb * BYTES_PER_MB) as usize)
         });
     if let Some(b) = bytes.filter(|b| *b > 0) {
         return Some(Caps {
-            max_b64: b / 10 * 9,
+            max_b64: with_headroom(b),
             ..NO_CAPS
         });
     }
@@ -101,7 +108,7 @@ fn caps_from_error(msg: &str) -> Option<Caps> {
 
 /// Records the image limit stated in `error` for the provider. True if that is stricter than
 /// what [`clamp_request`] applied, i.e. rebuilding the request and sending it again may succeed.
-pub fn learn(provider: &Provider, model: &Model, error: &str) -> bool {
+pub(crate) fn learn(provider: &Provider, model: &Model, error: &str) -> bool {
     let Some(stated) = caps_from_error(error) else {
         return false;
     };
@@ -144,7 +151,7 @@ fn images_mut(messages: &mut [ChatMessage]) -> impl Iterator<Item = &mut ImageDa
 
 /// Downscales the images of `req` that break the limits known for this provider and model
 /// (Claude's, plus any learned from errors). Without known limits: unchanged.
-pub async fn clamp_request(mut req: Request, provider: &Provider, model: &Model) -> Request {
+pub(crate) async fn clamp_request(mut req: Request, provider: &Provider, model: &Model) -> Request {
     let caps = learned(&provider.id).min(base_caps(provider, model));
     if !model.images || caps == NO_CAPS {
         return req;
@@ -284,7 +291,7 @@ mod tests {
         assert_eq!(
             c,
             Caps {
-                max_b64: 5242880 / 10 * 9,
+                max_b64: with_headroom(5242880),
                 ..NO_CAPS
             }
         );
@@ -292,7 +299,7 @@ mod tests {
             caps_from_error("Image exceeds 3.5 MB limit")
                 .unwrap()
                 .max_b64,
-            (3.5 * 1048576.0) as usize / 10 * 9
+            with_headroom((3.5 * BYTES_PER_MB) as usize)
         );
         let c = caps_from_error(
             "At least one of the image dimensions exceed max allowed size: 8000 pixels",
@@ -334,7 +341,7 @@ mod tests {
         let e = "image exceeds 5 MB maximum: 7009648 bytes > 5242880 bytes";
         assert!(learn(&p, &m, e));
         assert!(!learn(&p, &m, e), "already known");
-        assert_eq!(learned("learn-unit").max_b64, 5242880 / 10 * 9);
+        assert_eq!(learned("learn-unit").max_b64, with_headroom(5242880));
         assert!(!learn(&p, &m, "bad request"));
     }
 }
