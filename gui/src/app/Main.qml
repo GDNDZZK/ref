@@ -140,7 +140,7 @@ Window {
 			id: sidebar
 			height: parent.height
 			width: Workspace.settings.sidebarVisible ? Theme.sidebarWidth : 0
-			onCollapseRequested: Commands.run("sidebar")
+			onCollapseRequested: Commands.run(CommandId.sidebar)
 
 			Behavior on width { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 		}
@@ -211,7 +211,7 @@ Window {
 		opacity: sidebar.width === 0 ? 1 : 0
 		visible: opacity > 0
 		Accessible.name: qsTr("Show sidebar")
-		onClicked: Commands.run("sidebar")
+		onClicked: Commands.run(CommandId.sidebar)
 
 		Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 
@@ -228,7 +228,7 @@ Window {
 		opacity: expand.opacity
 		visible: opacity > 0
 		Accessible.name: qsTr("New session")
-		onClicked: Commands.run("new")
+		onClicked: Commands.run(CommandId.newSession)
 
 		Icon {
 			anchors.centerIn: parent
@@ -248,7 +248,7 @@ Window {
 		id: splitButton
 		anchors { top: parent.top; right: themeToggle.left; topMargin: Theme.windowButtonMargin; rightMargin: Theme.windowButtonGap }
 		Accessible.name: qsTr("Split view")
-		onClicked: Commands.run("watch")
+		onClicked: Commands.run(CommandId.watch)
 
 		Icon {
 			anchors.centerIn: parent
