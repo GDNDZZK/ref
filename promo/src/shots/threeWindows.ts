@@ -8,7 +8,8 @@ export interface WindowPicture {
   // Capture names, by interface. Later pictures fade in over earlier ones at `at`.
   screens: readonly ({ name: string; at?: number } | { clip: string; at?: number })[]
   title: string
-  look: Look
+  // One camera look, or looks over time (a zoom onto a detail).
+  look: Look | readonly Look[]
   marks?: readonly Mark[]
   // N5: the window closes at this time.
   closeAt?: number
@@ -33,7 +34,7 @@ export function threeWindowsShot(seconds: number, windows: readonly WindowPictur
       beatShot({
         seconds,
         screens: window.screens,
-        looks: [window.look],
+        looks: Array.isArray(window.look) ? window.look : [window.look],
         marks: window.marks,
         title: window.title,
         rect: rects[index],

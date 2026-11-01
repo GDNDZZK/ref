@@ -5,8 +5,6 @@ import { releaseCard } from '../components/releaseCard.ts'
 import { serverPill } from '../components/serverPill.ts'
 import { timeSkipChip } from '../components/timeSkipChip.ts'
 import { CLOSE_SECONDS } from '../components/windowClose.ts'
-import { defineShot } from '../engine/shot.ts'
-import { backdrop } from '../components/backdrop.ts'
 import { featureTag } from '../components/featureTag.ts'
 import { beatShot } from '../shots/beat.ts'
 import { castWindow } from '../shots/castWindow.ts'
@@ -22,7 +20,7 @@ import { cues, drawnCut, endCut, timelineFilm, type Cut } from './timeline.ts'
 
 const A6_END = 24.4
 const A7_CLIP_FROM = 21.0
-const HERO_END = 29.4
+const HERO_END = 29.9
 const CARD_END = 38.4
 const CREW_END = 43.4
 const SERVER_START_END = 45.4
@@ -115,37 +113,41 @@ const featureCuts: Cut[] = [
   }),
 ]
 
-// A12: the release list, then the two commands, then ref starting.
+// A12: the release list, then the two commands, then a hard cut to ref starting (a fade would
+// show the typed commands over the splash).
 const START_TYPING_SECONDS = 1.8
 // The real-backend take from just before ref is ready (cast marker "ready"): the end of its start.
 const REF_STARTING = { mark: 'ready', offset: -0.1 }
-const startCut: Cut = {
-  from: RELEASE_END,
-  to: START_END,
-  build: (seconds) =>
-    defineShot(seconds, (shot) => {
-      shot.add(backdrop())
-      shot.add(
-        fakeTerminal({
-          rect: HOOK_RECT,
-          lines: [
-            { at: 0.2, typed: true, prompt: '$ ', text: 'export ANTHROPIC_API_KEY=...', charsPerSecond: 28 },
-            { at: 1.4, typed: true, prompt: '$ ', text: 'ref', charsPerSecond: 10 },
-          ],
-          from: 0,
-          to: START_TYPING_SECONDS + 0.3,
-        }),
-      )
-      shot.add(castWindow({ ...FIXTURE_CAST, castFrom: REF_STARTING, start: START_TYPING_SECONDS, from: START_TYPING_SECONDS, to: seconds + 1 }))
-    }),
-}
+const COMMANDS_END = RELEASE_END + START_TYPING_SECONDS
+const startCuts: Cut[] = [
+  drawnCut(RELEASE_END, COMMANDS_END, (shot, seconds) =>
+    shot.add(
+      fakeTerminal({
+        rect: HOOK_RECT,
+        lines: [
+          { at: 0.2, typed: true, prompt: '$ ', text: 'export ANTHROPIC_API_KEY=...', charsPerSecond: 28 },
+          { at: 1.4, typed: true, prompt: '$ ', text: 'ref', charsPerSecond: 10 },
+        ],
+        from: 0,
+        to: seconds + 1,
+      }),
+    ),
+  ),
+  drawnCut(
+    COMMANDS_END,
+    START_END,
+    (shot, seconds) => shot.add(castWindow({ ...FIXTURE_CAST, castFrom: REF_STARTING, start: 0, from: -1, to: seconds + 1 })),
+    'cut',
+  ),
+]
 
 export const scene = timelineFilm({
   id: 'intro',
   cuts: [
     waitingTabsCut(0, HERO_FILM_START),
     // Hard cut at the Enter: a fade would show the hook terminal through the title card.
-    heroCut(HERO_FILM_START, A6_END, 0, { holdReport: true, enter: 'cut' }),
+    // The report frame holds until its caption ends at 21.9 (the report is at film 19.4).
+    heroCut(HERO_FILM_START, A6_END, 0, { holdReport: 2.6, enter: 'cut' }),
     heroCut(A6_END, HERO_END, A7_CLIP_FROM, { enter: 'cut' }),
     drawnCut(HERO_END, CARD_END, (shot, seconds) => shot.add(compareCard({ ...COMPARE, from: 0, to: seconds + 1 }))),
     crewWindowsCut(CARD_END, CREW_END),
@@ -153,12 +155,12 @@ export const scene = timelineFilm({
     standaloneCut,
     ...featureCuts,
     drawnCut(STANDALONE_END + 3 * FEATURE_CUT_SECONDS, RELEASE_END, (shot, seconds) => shot.add(releaseCard({ ...RELEASE, from: 0, to: seconds + 1 }))),
-    startCut,
+    ...startCuts,
     endCut(START_END, FILM_END, { platforms: true }),
   ],
   captions: cues([
     ...HERO_CAPTIONS,
-    [26.5, 29.4, COPY.finished],
+    [27.4, 29.9, COPY.finished],
     [31.0, 33.9, { en: 'All worker sessions stream in one view.', zh: '所有工作会话在分屏里同时输出。' }],
     [34.7, 38.0, { en: "Answer a worker's permission request in its tile.", zh: '授权请求在它自己的分块里点允许。' }],
     [38.6, 42.2, COPY.sameSessions],

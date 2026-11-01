@@ -34,6 +34,6 @@ export const COMPARE: Omit<CompareCardOptions, 'from' | 'to'> = {
     en: "Source: each project's docs, read 2026-10-30/31. — = not described in the project's docs as of Oct 2026",
     zh: '来源：各项目文档，2026 年 10 月 30-31 日查阅。— = 截至 2026 年 10 月官方文档未说明',
   },
-  headerSeconds: 1.5,
+  headerSeconds: 1.0,
   rowSeconds: 3.7,
 }

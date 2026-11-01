@@ -9,6 +9,8 @@ export interface HighlightOptions {
   width: number
   height: number
   label?: string | Localized
+  // Dims everything around the area, so it is the only text that reads.
+  spotlight?: boolean
   from: number
   to: number
 }
@@ -19,7 +21,7 @@ const ENTER_SCALE = 1.06
 
 // An outlined area with an optional label. Attach it to an appFrame so it follows the camera.
 export function highlight(options: HighlightOptions): Part {
-  const el = element('div', 'part highlight')
+  const el = element('div', `part highlight${options.spotlight ? ' is-spotlight' : ''}`)
   Object.assign(el.style, {
     left: `${options.x * 100}%`,
     top: `${options.y * 100}%`,
