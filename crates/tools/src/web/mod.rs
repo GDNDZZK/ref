@@ -12,8 +12,8 @@ use crate::{ToolCtx, ToolOutput, ToolSpec};
 use anyhow::{Result, anyhow, bail};
 use base64::Engine as _;
 use ref_proto::ImageData;
-use reqwest::Url;
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
+use reqwest::{StatusCode, Url};
 use serde_json::{Value, json};
 use std::time::Duration;
 use tokio::time::Instant;
@@ -31,6 +31,10 @@ const MAX_TIMEOUT_SECS: u64 = 120;
 const MAX_IMAGE_BYTES: usize = 5 * 1024 * 1024;
 /// Target size of a fetched image after downscaling (the value oh-my-pi uses).
 const FETCH_IMAGE_BYTES: usize = 300 * 1024;
+/// Bytes of an error page searched for a Cloudflare challenge.
+const CHALLENGE_SCAN_BYTES: usize = 64 * 1024;
+/// Bytes of the body inspected to tell HTML from other text.
+const CLASSIFY_SNIFF_BYTES: usize = 512;
 /// Body shown with an HTTP error status.
 const ERROR_BODY_CHARS: usize = 4000;
 
@@ -176,9 +180,13 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         raw_bytes: f.body.len(),
         ext: "txt",
     };
+    let is_challenge_status = matches!(
+        f.status,
+        StatusCode::FORBIDDEN | StatusCode::SERVICE_UNAVAILABLE
+    );
     if out.error
-        && (f.status.as_u16() == 403 || f.status.as_u16() == 503)
-        && String::from_utf8_lossy(&f.body[..f.body.len().min(64 * 1024)])
+        && is_challenge_status
+        && String::from_utf8_lossy(&f.body[..f.body.len().min(CHALLENGE_SCAN_BYTES)])
             .contains("challenge-platform")
     {
         out.notes.push("Blocked by a Cloudflare bot check that needs a browser running JavaScript; the page cannot be fetched this way. Look for an API, a raw source or a mirror.".into());
@@ -196,7 +204,7 @@ enum Kind {
 }
 
 fn classify(mime: &str, body: &[u8]) -> Kind {
-    let start = String::from_utf8_lossy(&body[..body.len().min(512)])
+    let start = String::from_utf8_lossy(&body[..body.len().min(CLASSIFY_SNIFF_BYTES)])
         .trim_start()
         .to_ascii_lowercase();
     let sniff_html = start.starts_with("<!doctype html") || start.starts_with("<html");
@@ -206,10 +214,9 @@ fn classify(mime: &str, body: &[u8]) -> Kind {
     if mime == "application/pdf" || body.starts_with(b"%PDF-") {
         return Kind::Binary;
     }
-    if mime == "text/html"
-        || mime == "application/xhtml+xml"
-        || ((mime.is_empty() || mime == "application/octet-stream") && sniff_html)
-    {
+    let declares_html = mime == "text/html" || mime == "application/xhtml+xml";
+    let undeclared_html = (mime.is_empty() || mime == "application/octet-stream") && sniff_html;
+    if declares_html || undeclared_html {
         return Kind::Html;
     }
     if mime == "application/json" || mime == "text/json" || mime.ends_with("+json") {
@@ -233,7 +240,8 @@ fn classify(mime: &str, body: &[u8]) -> Kind {
         ]
         .iter()
         .any(|t| mime.contains(t));
-    if texty || (!body.is_empty() && !util::looks_binary(body)) {
+    let looks_like_text = !body.is_empty() && !util::looks_binary(body);
+    if texty || looks_like_text {
         return Kind::Text;
     }
     Kind::Binary
