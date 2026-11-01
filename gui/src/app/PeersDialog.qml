@@ -10,34 +10,28 @@ SessionDialog {
 	property string tab: Workspace.dialogArgs.tab ?? "peers"
 	property string result: ""
 	property bool loading: true
-	property bool gone: false
 
 	function load() {
 		loading = true
-		Workspace.peerCommand(sessionId, commands[tab], "", (ok, text) => {
-			if (gone)
-				return
+		Workspace.peerCommand(sessionId, commands[tab], "", replyWhileOpen((ok, text) => {
 			loading = false
 			result = text
-		})
+		}))
 	}
 
 	function rename() {
-		Workspace.peerCommand(sessionId, "peers-name", nameField.text.trim(), (ok, text) => {
-			if (gone)
-				return
+		Workspace.peerCommand(sessionId, "peers-name", nameField.text.trim(), replyWhileOpen((ok, text) => {
 			if (ok)
 				result = text
 			else
 				nameField.errorText = text
-		})
+		}))
 	}
 
 	title: qsTr("Peers")
 	dialogWidth: Theme.dialogWidthWide
 	onTabChanged: load()
 	Component.onCompleted: load()
-	Component.onDestruction: gone = true
 
 	Column {
 		width: parent.width
