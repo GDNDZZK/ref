@@ -122,17 +122,20 @@
   line-height: 0;
 }
 
-/* Highlight */
+/* Highlight. Inside a zoomed picture the outline scales with it; past --ring-max-zoom it is
+   thinned again, so it keeps the thickness it has at that zoom. */
 .highlight {
-  border: 3px solid var(--accent);
-  border-radius: 12px;
-  box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 25%, transparent);
+  --ring-max-zoom: 2.4;
+  --ring: min(1, calc(var(--ring-max-zoom) / var(--camera-zoom, 1)));
+  border: calc(3px * var(--ring)) solid var(--accent);
+  border-radius: calc(12px * var(--ring));
+  box-shadow: 0 0 0 calc(6px * var(--ring)) color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 .highlight.is-spotlight {
   box-shadow:
-    0 0 0 6px color-mix(in srgb, var(--accent) 25%, transparent),
-    0 0 0 4000px rgb(0 0 0 / 0.62);
+    0 0 0 calc(6px * var(--ring)) color-mix(in srgb, var(--accent) 25%, transparent),
+    0 0 0 4000px rgb(0 0 0 / 0.94);
 }
 
 .highlight-label {

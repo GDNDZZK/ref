@@ -74,13 +74,13 @@ const standaloneCut: Cut = {
     ),
 }
 
-// A11: three closeups, one feature each. f1 starts on the whole outage take (sidebar in view)
-// and zooms into the row "Retrying in 8s (attempt 3)" (row 17), cut before the rest of the
-// error and above the rows with the mock's local address.
-// The text runs from column 3 (the bar) to 33 (the colon).
-const RETRY_CLOSEUP = { scale: 2.2, x: 18.6 / 150, y: 17.5 / 40, rows: 1.3, cols: 31.4 }
-const RETRY_CLOSEUP_AT = { x: 560, y: 480 }
-const RETRY_ZOOM = { at: 1.0, wide: WIDE_TUI }
+// A11: three closeups, one feature each. f1 is the row "Retrying in 8s (attempt 3)" of the
+// outage take (row 17), cut before the rest of the error and above the rows with the mock's
+// local address. The text runs from column 3 (the bar) to 33 (the colon).
+const RETRY_CLOSEUP = { scale: 2.5, x: 18.6 / 150, y: 17.5 / 40, rows: 1.3, cols: 31.4 }
+const RETRY_CLOSEUP_AT = { x: 520, y: 480 }
+// f2: the delete row with Cancel and its countdown, and the bash row above it.
+const DELAY_ROW_LOOK = { at: 0, x: 0.597, y: 0.29, zoom: 2 }
 // f3: the model dialog of the real-backend take (cast marker "models": ctrl+x m is pressed).
 const MODEL_DIALOG = { mark: 'models', offset: -0.2 }
 const MODEL_MARKS_FROM = 0.7
@@ -94,7 +94,6 @@ const featureCuts: Cut[] = [
         ...WIDE_TUI,
         ...RETRY_CLOSEUP_AT,
         closeup: RETRY_CLOSEUP,
-        zoomIn: RETRY_ZOOM,
         castFrom: { mark: 'attempt3', offset: -0.3 },
         start: 0,
         from: -1,
@@ -106,11 +105,11 @@ const featureCuts: Cut[] = [
     from: STANDALONE_END + FEATURE_CUT_SECONDS,
     to: STANDALONE_END + 2 * FEATURE_CUT_SECONDS,
     build: (seconds) =>
-      beatShot({ seconds, ...clickedClip('gui-delay', 'cancel', DELAY_CANCEL_AT), looks: [{ at: 0, x: 0.6, y: 0.4, zoom: 1.7 }], windowFrom: -1 }),
+      beatShot({ seconds, ...clickedClip('gui-delay', 'cancel', DELAY_CANCEL_AT), looks: [DELAY_ROW_LOOK], windowFrom: -1 }),
   },
   drawnCut(STANDALONE_END + 2 * FEATURE_CUT_SECONDS, STANDALONE_END + 3 * FEATURE_CUT_SECONDS, (shot, seconds) => {
     shot.add(castWindow({ ...FIXTURE_CAST, castFrom: MODEL_DIALOG, marks: opencodeModelMarks(MODEL_MARKS_FROM, seconds + 1), start: 0, from: -1, to: seconds }))
-  }),
+  }, 'quick'),
 ]
 
 // A12: the release list, then the two commands, then a hard cut to ref starting (a fade would
@@ -156,7 +155,7 @@ export const scene = timelineFilm({
     ...featureCuts,
     drawnCut(STANDALONE_END + 3 * FEATURE_CUT_SECONDS, RELEASE_END, (shot, seconds) => shot.add(releaseCard({ ...RELEASE, from: 0, to: seconds + 1 }))),
     ...startCuts,
-    endCut(START_END, FILM_END, { platforms: true }),
+    endCut(START_END, FILM_END, { platforms: true }, 'quick'),
   ],
   captions: cues([
     ...HERO_CAPTIONS,

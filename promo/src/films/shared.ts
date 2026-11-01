@@ -15,8 +15,8 @@ const CREW_ZOOM_AT = 1.6
 const CREW_ZOOM_SECONDS = 0.7
 const CREW_DETAIL = {
   tui: { look: { x: 0.86, y: 0.44, zoom: 2.4 }, mark: { x: 0.772, y: 0.312, width: 0.211, height: 0.182 } },
-  gui: { look: { x: 0.14, y: 0.13, zoom: 3 }, mark: { x: 0.006, y: 0.082, width: 0.192, height: 0.166 } },
-  web: { look: { x: 0.1, y: 0.14, zoom: 3.6 }, mark: { x: 0.003, y: 0.082, width: 0.165, height: 0.176 } },
+  gui: { look: { x: 0.14, y: 0.13, zoom: 3 }, mark: { x: 0.006, y: 0.087, width: 0.198, height: 0.166 } },
+  web: { look: { x: 0.1, y: 0.14, zoom: 3.6 }, mark: { x: 0.003, y: 0.086, width: 0.17, height: 0.176 } },
 }
 
 function crewWindow(name: string, title: string, overview: { x: number; y: number; zoom: number }, detail: (typeof CREW_DETAIL)['tui'], seconds: number) {

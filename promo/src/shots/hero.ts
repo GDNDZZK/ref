@@ -32,15 +32,19 @@ const NOTICE_SECONDS = 3.2
 // docs and later reviewer at the bottom).
 const COMPOSER = { x: 0.6, y: 0.9 }
 const GRID = { x: 0.6, y: 0.5 }
-// The tiles' headers and first lines while they appear; the docs tile (bottom), which opens
-// on the large "Session created by" message, stays out of view.
-const GRID_TOP = { x: 0.6, y: 0.4 }
+// While main starts the workers: the sidebar (its Todo and the Running rows that appear) and
+// main's tile with the create_session calls. The new tiles open on a raw "created by main"
+// message, which stays out of view.
+const MAIN_COLUMN = { x: 0.31, y: 0.25, zoom: 1.6 }
+// The top two rows (main, scout, fixer, tester) before the click on the tester; the docs tile
+// below opens on its raw "created by main" message and stays out of view.
+const GRID_WATCH = { x: 0.6, y: 0.36, zoom: 1 }
 const TESTER_TILE = { x: 0.72, y: 0.52 }
 // The fixer's permission card: its edit header down to the three buttons.
-const FIXER_CARD = { x: 0.41, y: 0.505, zoom: 2.75 }
-// Main's last lines and status line, below the reviewer's message at the start of A7.
-const MAIN_STATUS = { x: 0.47, y: 0.345, zoom: 3.4 }
-const MAIN_SUMMARY = { x: 0.41, y: 0.23, zoom: 2 }
+const FIXER_CARD = { x: 0.41, y: 0.517, zoom: 2.75 }
+// Main's tile from its header to the status line, while the reviewer reports and the summary
+// streams in (A7).
+const MAIN_SUMMARY = { x: 0.41, y: 0.215, zoom: 2 }
 // Main's status-line to-do item once all five are done.
 const MAIN_TODO_DONE = { x: 0.447, y: 0.33, width: 0.033, height: 0.021 }
 const TODO_DONE_MARK_T = 24.8
@@ -52,6 +56,8 @@ const SCRIPTED_REPORT_AT = 16.0
 // The report line on the held frame, measured on both takes; re-measure after a retake (the
 // message above it wraps differently from take to take).
 const REPORT_LINE = { x: 0.246, y: 0.084, width: 0.322, height: 0.028 }
+// The spotlight has faded out this long before the camera leaves the held report frame.
+const SPOTLIGHT_GONE_BEFORE_MOVE = 0.3
 // Right after Allow the edit card shows the absolute mock path for a frame or two; the films
 // show the frame before it instead.
 const PATH_FRAMES = { from: 13.0, to: 13.3 }
@@ -60,20 +66,21 @@ const PATH_FRAMES = { from: 13.0, to: 13.3 }
 const looks = (report: { x: number; y: number }): Look[] => [
   { at: 0, ...COMPOSER, zoom: 1.5 },
   { at: 2.5, ...COMPOSER, zoom: 1.5 },
-  { at: 3.3, ...GRID_TOP, zoom: 1 },
-  { at: 6.7, ...GRID_TOP, zoom: 1 },
+  { at: 3.3, ...MAIN_COLUMN },
+  { at: 5.2, ...MAIN_COLUMN },
+  { at: 5.9, ...GRID_WATCH },
+  { at: 6.7, ...GRID_WATCH },
   { at: 7.3, ...TESTER_TILE, zoom: 1.6 },
   { at: 10.8, ...TESTER_TILE, zoom: 1.6 },
   { at: 11.4, ...FIXER_CARD },
   { at: 14.6, ...FIXER_CARD },
   { at: 15.3, ...report, zoom: 2.6 },
-  { at: 16.0, ...report, zoom: 2.6 },
-  { at: 16.8, ...GRID, zoom: 1 },
+  // Just after the report mark (about 16.0), so a held report frame keeps this look.
+  { at: 16.1, ...report, zoom: 2.6 },
+  { at: 16.9, ...GRID, zoom: 1 },
   { at: 20.6, ...GRID, zoom: 1 },
   // A7 cuts in at 21.0.
-  { at: 21.0, ...MAIN_STATUS },
-  { at: 23.4, ...MAIN_STATUS },
-  { at: 24.2, ...MAIN_SUMMARY },
+  { at: 21.0, ...MAIN_SUMMARY },
 ]
 
 // The recording in mock time: where its Enter is, and its clicks.
@@ -140,7 +147,7 @@ export function heroCut(from: number, to: number, clipFrom: number, options: Her
         windowFrom: -1,
         looks: looks({ x: REPORT_LINE.x + REPORT_LINE.width / 2, y: REPORT_LINE.y + REPORT_LINE.height / 2 }).map((look) => ({ ...look, at: shift(look.at) })),
         marks: [
-          ...(options.holdReport ? [{ ...REPORT_LINE, spotlight: true, from: shift(reportAt) - 0.1, to: shift(reportAt) + hold.seconds }] : []),
+          ...(options.holdReport ? [{ ...REPORT_LINE, spotlight: true, from: shift(reportAt) - 0.1, to: shift(reportAt) + hold.seconds - SPOTLIGHT_GONE_BEFORE_MOVE }] : []),
           { ...MAIN_TODO_DONE, from: shift(TODO_DONE_MARK_T), to: shift(HERO_END_T) + 10 },
         ],
         pointer: {
