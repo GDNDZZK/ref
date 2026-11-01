@@ -329,12 +329,7 @@ impl Message {
 
     /// The image a stub id (see [`ImageData::id`]) of this message points to.
     pub fn image(&self, image_id: &str) -> Option<&ImageData> {
-        let mut it = image_id.rsplitn(3, ':');
-        let (n, part, msg) = (
-            it.next()?.parse::<usize>().ok()?,
-            it.next()?.parse::<usize>().ok()?,
-            it.next()?,
-        );
+        let (msg, part, n) = parse_image_id(image_id)?;
         if msg != self.id {
             return None;
         }
@@ -346,9 +341,35 @@ impl Message {
     }
 }
 
+const BASE64_CHARS_PER_GROUP: usize = 4;
+const BASE64_BYTES_PER_GROUP: usize = 3;
+
+/// Decoded size in bytes of standard base64 text with `=` padding.
+fn base64_decoded_len(data: &str) -> u64 {
+    let pad = data.bytes().rev().take_while(|&b| b == b'=').count();
+    (data.len() / BASE64_CHARS_PER_GROUP * BASE64_BYTES_PER_GROUP).saturating_sub(pad) as u64
+}
+
+/// Separates the fields of an image stub id (see [`ImageData::id`]).
+const IMAGE_ID_SEPARATOR: char = ':';
+
+/// Builds the stub id `<message id>:<part index>:<image index>` (see [`ImageData::id`]).
+pub fn image_id(message_id: &str, part: usize, n: usize) -> String {
+    let sep = IMAGE_ID_SEPARATOR;
+    format!("{message_id}{sep}{part}{sep}{n}")
+}
+
+/// Splits an image stub id into message id, part index and image index.
+pub fn parse_image_id(id: &str) -> Option<(&str, usize, usize)> {
+    let mut it = id.rsplitn(3, IMAGE_ID_SEPARATOR);
+    let n = it.next()?.parse().ok()?;
+    let part = it.next()?.parse().ok()?;
+    Some((it.next()?, part, n))
+}
+
 /// Message id part of an image stub id (see [`ImageData::id`]).
 pub fn image_message_id(image_id: &str) -> Option<&str> {
-    image_id.rsplitn(3, ':').nth(2)
+    image_id.rsplitn(3, IMAGE_ID_SEPARATOR).nth(2)
 }
 
 /// Frontends never receive image bytes in messages: the server replaces each image by a stub
@@ -385,8 +406,7 @@ impl ImageData {
     /// Stub of this image with the given id.
     fn make_stub(&mut self, id: String) {
         if !self.is_stub() {
-            let pad = self.data.bytes().rev().take_while(|&b| b == b'=').count();
-            self.size = Some((self.data.len() / 4 * 3).saturating_sub(pad) as u64);
+            self.size = Some(base64_decoded_len(&self.data));
             self.data = String::new();
         }
         self.id = Some(id);
@@ -490,10 +510,10 @@ impl Part {
     /// Replaces the images of part `index` of message `message_id` by stubs (see [`ImageData`]).
     pub fn strip_image_data(&mut self, message_id: &str, index: usize) {
         match self {
-            Part::Image { image, .. } => image.make_stub(format!("{message_id}:{index}:0")),
+            Part::Image { image, .. } => image.make_stub(image_id(message_id, index, 0)),
             Part::Tool { images, .. } => {
                 for (n, i) in images.iter_mut().enumerate() {
-                    i.make_stub(format!("{message_id}:{index}:{n}"));
+                    i.make_stub(image_id(message_id, index, n));
                 }
             }
             _ => {}
