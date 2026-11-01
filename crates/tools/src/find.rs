@@ -11,6 +11,8 @@ use std::time::SystemTime;
 
 const DEFAULT_LIMIT: usize = 500;
 const MAX_LIMIT: usize = 5000;
+const DEFAULT_PATTERN: &str = "**/*";
+const DEFAULT_KIND: &str = "any";
 
 /// Name the model calls the tool by.
 pub(crate) const NAME: &str = "find";
@@ -18,17 +20,18 @@ pub(crate) const NAME: &str = "find";
 pub fn spec() -> ToolSpec {
     ToolSpec {
         name: NAME,
-        description: "Find files and directories by glob pattern. Respects .gitignore, includes hidden files, skips .git.\n\
+        description: format!(
+            "Find files and directories by glob pattern. Respects .gitignore, includes hidden files, skips .git.\n\
 A pattern without `/` matches the file name at any depth (`*.rs`, `Cargo.toml`); a pattern with `/` matches the path relative to `path` \
-(`src/**/*.ts`, `**/test_*.py`). `{a,b}` alternatives are supported. Default pattern `**/*` lists everything.\n\
+(`src/**/*.ts`, `**/test_*.py`). `{{a,b}}` alternatives are supported. Default pattern `{DEFAULT_PATTERN}` lists everything.\n\
 Results are paths relative to the working directory, newest modification first; directories end with `/`."
-            .to_string(),
+        ),
         parameters: json!({
             "type": "object",
             "properties": {
-                "pattern": {"type": "string", "description": "Glob pattern (default `**/*`)."},
+                "pattern": {"type": "string", "description": format!("Glob pattern (default `{DEFAULT_PATTERN}`).")},
                 "path": {"type": "string", "description": "Directory to search (default: working directory)."},
-                "type": {"type": "string", "enum": ["file", "dir", "any"], "description": "Entry type to return (default `any`)."},
+                "type": {"type": "string", "enum": ["file", "dir", "any"], "description": format!("Entry type to return (default `{DEFAULT_KIND}`).")},
                 "limit": {"type": "integer", "minimum": 1, "description": format!("Maximum results (default {DEFAULT_LIMIT}).")}
             }
         }),
@@ -114,9 +117,9 @@ fn split_patterns(spec: &str) -> Vec<String> {
 fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let pattern = util::opt_str(input, "pattern")?
         .filter(|p| !p.trim().is_empty())
-        .unwrap_or_else(|| "**/*".into());
+        .unwrap_or_else(|| DEFAULT_PATTERN.into());
     let kind = util::opt_str(input, "type")?
-        .unwrap_or_else(|| "any".into())
+        .unwrap_or_else(|| DEFAULT_KIND.into())
         .to_ascii_lowercase();
     let (want_files, want_dirs) = match kind.as_str() {
         "file" | "f" | "files" => (true, false),
@@ -150,7 +153,7 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         .parents(true)
         .require_git(false)
         .follow_links(false)
-        .filter_entry(|e| e.file_name() != ".git");
+        .filter_entry(|e| e.file_name() != util::GIT_DIR_NAME);
     let mut found: Vec<(SystemTime, String)> = Vec::new();
     for entry in wb.build() {
         if ctx.cancel.is_cancelled() {

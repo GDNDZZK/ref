@@ -11,6 +11,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub const INLINE_OUTPUT_MAX_BYTES: usize = 50 * 1024;
 pub const INLINE_OUTPUT_MAX_LINES: usize = 2000;
 
+/// Directory name that find, grep and read never descend into or list.
+pub const GIT_DIR_NAME: &str = ".git";
+
 pub const KIB: u64 = 1024;
 pub const MIB: u64 = 1024 * KIB;
 
