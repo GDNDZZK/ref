@@ -10,6 +10,7 @@ use ref_proto::*;
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 
+use crate::app::cmd;
 use crate::net::NetEvent;
 use crate::util::{ABORTED_ERROR, mcp_status};
 
@@ -279,33 +280,26 @@ impl Mock {
     }
 
     fn set_status(&self, sid: &str, st: SessionStatus) {
-        let info = {
-            let mut w = self.world();
-            let Some(s) = w.sessions.get_mut(sid) else {
-                return;
-            };
+        let info = self.update_info(sid, |info| {
             // Like the server: the run start, kept while busy (Busy / Running / ...).
             if st.is_idle() {
-                s.info.busy_since = None;
-            } else if s.info.status.is_idle() || s.info.busy_since.is_none() {
-                s.info.busy_since = Some(now_ms());
+                info.busy_since = None;
+            } else if info.status.is_idle() || info.busy_since.is_none() {
+                info.busy_since = Some(now_ms());
             }
-            s.info.status = st;
-            s.info.updated_at = now_ms();
-            s.info.clone()
+            info.status = st;
+            info.updated_at = now_ms();
+        });
+        let Some(info) = info else {
+            return;
         };
         self.emit(sid, SessionEvent::Info { info });
         self.broadcast_sessions();
     }
 
     fn add_context(&self, sid: &str, n: u64) {
-        let info = {
-            let mut w = self.world();
-            let Some(s) = w.sessions.get_mut(sid) else {
-                return;
-            };
-            s.info.context.used += n;
-            s.info.clone()
+        let Some(info) = self.update_info(sid, |info| info.context.used += n) else {
+            return;
         };
         self.emit(sid, SessionEvent::Info { info });
     }
@@ -467,6 +461,33 @@ impl Mock {
         !self.aborted(sid)
     }
 }
+
+const PEERS_TEXT: &str = "You are \"mock\" (ses_mock).\nOther live sessions (1):\n  [idle] worker · \"demo\" · general · background · /tmp · started 2m ago";
+const PEERS_INBOX_TEXT: &str = "Inbox is empty: no messages from other sessions.";
+const PEERS_OUTBOX_TEXT: &str = "Outbox is empty: this session has not sent any messages.";
+const PEER_NAME_TEXT: &str = "Current name: \"mock\"";
+const COMPACTION_SUMMARY: &str = "[Context compacted. Summary of the conversation so far:]\n\n## Goal\nFix the parser off-by-one.\n\n## Done\n- Fixed loop bound\n- Tests pass\n\n[Continue from here.]";
+const MOCK_FILES: [&str; 9] = [
+    "src/main.rs",
+    "src/app.rs",
+    "src/parser.rs",
+    "src/ui/",
+    "src/ui/chat.rs",
+    "src/ui/markdown.rs",
+    "Cargo.toml",
+    "README.md",
+    "docs/设计.md",
+];
+/// Context size right after a compaction.
+const COMPACTED_CONTEXT_TOKENS: u64 = 4_000;
+const COMPACT_DELAY: Duration = Duration::from_millis(1500);
+/// The "docs" MCP server finishes connecting this long after the first status request.
+const MCP_CONNECT_DELAY_MS: i64 = 8_000;
+/// A queued prompt waits up to `QUEUE_WAIT_POLLS * QUEUE_POLL` (60 s) for the session to be idle.
+const QUEUE_WAIT_POLLS: u32 = 600;
+const QUEUE_POLL: Duration = Duration::from_millis(100);
+const NAME_HASH_MULTIPLIER: u64 = 7919;
+const NAME_HASH_MODULUS: u64 = 65536;
 
 const REASONING: &str = "The user wants me to look at the parser. First I should read the file to understand the current structure, \
 then find where the off-by-one happens. The loop in `parse_items` iterates with `0..=len`, which reads one element past the end \
@@ -1019,130 +1040,38 @@ impl Mock {
         self.world().sessions.get_mut(sid).map(f)
     }
 
+    /// Edits a session's info and returns the updated copy (None for an unknown session).
+    fn update_info(&self, sid: &str, f: impl FnOnce(&mut SessionInfo)) -> Option<SessionInfo> {
+        self.with_session(sid, |s| {
+            f(&mut s.info);
+            s.info.clone()
+        })
+    }
+
     fn handle(&self, f: ClientFrame) {
         let request_id = f.id;
         match f.req {
             Request::Hello { .. }
             | Request::Ping
             | Request::SetNotify { .. }
-            | Request::SetFocus { .. } => self.ok(request_id, json!({})),
+            | Request::SetFocus { .. }
+            | Request::Shutdown => self.ok(request_id, json!({})),
             Request::ListDirs { .. } => self.err(request_id, "not supported by the mock backend"),
             Request::GetConfig => self.ok(request_id, json!({ "config": config() })),
-            Request::ListSessions => {
-                let w = self.world();
-                let list: Vec<&SessionInfo> = w
-                    .order
-                    .iter()
-                    .filter_map(|i| w.sessions.get(i))
-                    .map(|s| &s.info)
-                    .collect();
-                self.ok(request_id, json!({ "sessions": list }));
-            }
-            Request::ListHistory { .. } => {
-                let w = self.world();
-                let mut list: Vec<SessionInfo> = w.history.clone();
-                list.extend(
-                    w.order
-                        .iter()
-                        .filter_map(|i| w.sessions.get(i))
-                        .map(|s| s.info.clone()),
-                );
-                list.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
-                self.ok(request_id, json!({ "sessions": list }));
-            }
+            Request::ListSessions => self.on_list_sessions(request_id),
+            Request::ListHistory { .. } => self.on_list_history(request_id),
             Request::CreateSession {
                 cwd,
                 agent,
                 name,
                 model,
-            } => {
-                let base = std::path::Path::new(&cwd)
-                    .file_name()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "ref".into());
-                let i = self.create(
-                    &name.unwrap_or_else(|| {
-                        format!("{base}-{:04x}", SEQ.load(Ordering::Relaxed) * 7919 % 65536)
-                    }),
-                    agent.as_deref().unwrap_or("build"),
-                    &cwd,
-                );
-                if let Some(m) = model {
-                    self.with_session(&i.id, |s| s.info.model = m);
-                }
-                let i = self.with_session(&i.id, |s| s.info.clone()).unwrap_or(i);
-                self.ok(request_id, json!({ "session": i }));
-                self.broadcast_sessions();
-            }
+            } => self.on_create_session(request_id, &cwd, agent, name, model),
             Request::Attach {
                 session_id,
                 foreground,
                 ..
-            } => {
-                // History-only session → load it live.
-                let hist = {
-                    let mut w = self.world();
-                    let pos = w.history.iter().position(|h| h.id == session_id);
-                    pos.map(|p| w.history.remove(p))
-                };
-                if let Some(mut h) = hist {
-                    h.live = true;
-                    let msgs = vec![
-                        Message { id: id("msg"), role: Role::User, time: h.created_at, time_end: None, source: MessageSource::Human, parts: vec![Part::Text { text: "Summarise the README".into(), time: h.created_at }], model: None, agent: None, usage: None, error: None },
-                        Message { id: id("msg"), role: Role::Assistant, time: h.created_at + 1000, time_end: Some(h.created_at + 5000), source: MessageSource::Human, parts: vec![Part::Text { text: "The README describes **ref**, a coding agent harness with a TUI frontend and a backend server.".into(), time: h.created_at + 1000 }], model: Some(model()), agent: Some("build".into()), usage: Some(Usage { input: 300, output: 40, ..Default::default() }), error: None },
-                    ];
-                    let mut w = self.world();
-                    w.order.push(h.id.clone());
-                    w.sessions.insert(
-                        h.id.clone(),
-                        MockSession {
-                            info: h,
-                            messages: msgs,
-                            perms: vec![],
-                            abort: Arc::new(AtomicBool::new(false)),
-                            queue: Vec::new(),
-                        },
-                    );
-                }
-                let snap = {
-                    let mut w = self.world();
-                    w.subs.insert(session_id.clone());
-                    match w.sessions.get_mut(&session_id) {
-                        Some(s) => {
-                            if foreground {
-                                s.info.attached += 1;
-                            }
-                            Some(SessionSnapshot {
-                                info: s.info.clone(),
-                                messages: s.messages.clone(),
-                                more_before: false,
-                                pending_permissions: s.perms.clone(),
-                                pending_questions: Vec::new(),
-                                queued: s.queue.clone(),
-                            })
-                        }
-                        None => None,
-                    }
-                };
-                match snap {
-                    Some(s) => {
-                        self.ok(request_id, json!({ "snapshot": s }));
-                        self.broadcast_sessions();
-                    }
-                    None => self.err(request_id, "no such session"),
-                }
-            }
-            Request::Detach { session_id } => {
-                {
-                    let mut w = self.world();
-                    w.subs.remove(&session_id);
-                    if let Some(s) = w.sessions.get_mut(&session_id) {
-                        s.info.attached = s.info.attached.saturating_sub(1);
-                    }
-                }
-                self.ok(request_id, json!({}));
-                self.broadcast_sessions();
-            }
+            } => self.on_attach(request_id, &session_id, foreground),
+            Request::Detach { session_id } => self.on_detach(request_id, &session_id),
             Request::WatchAll { enabled } => {
                 self.world().watch_all = enabled;
                 self.ok(request_id, json!({}));
@@ -1151,74 +1080,11 @@ impl Mock {
                 session_id,
                 text,
                 images,
-            } => {
-                let mid = id("msg");
-                let busy = self.with_session(&session_id, |s| {
-                    s.abort.store(false, Ordering::Relaxed);
-                    let busy = !s.info.status.is_idle();
-                    if busy {
-                        s.queue.push(user_msg(
-                            mid.clone(),
-                            &text,
-                            MessageSource::Human,
-                            images.clone(),
-                        ));
-                    }
-                    busy
-                });
-                self.ok(
-                    request_id,
-                    json!({ "queued": busy == Some(true), "message_id": mid }),
-                );
-                let m = self.clone();
-                tokio::spawn(async move {
-                    // Queued while busy: wait until idle (the client shows it as queued meanwhile).
-                    if busy == Some(true) {
-                        for _ in 0..600 {
-                            tokio::time::sleep(Duration::from_millis(100)).await;
-                            if m.with_session(&session_id, |s| s.info.status.is_idle())
-                                .unwrap_or(true)
-                            {
-                                break;
-                            }
-                        }
-                    }
-                    if busy == Some(true) {
-                        // Withdrawn with `RemoveQueued` meanwhile: never delivered.
-                        let queued = m.with_session(&session_id, |s| {
-                            let i = s.queue.iter().position(|q| q.id == mid);
-                            i.map(|i| s.queue.remove(i)).is_some()
-                        });
-                        if queued != Some(true) {
-                            return;
-                        }
-                    }
-                    m.user_message_id(&session_id, mid, &text, MessageSource::Human, images);
-                    let first = m
-                        .with_session(&session_id, |s| {
-                            s.messages.iter().filter(|x| x.role == Role::User).count() <= 1
-                        })
-                        .unwrap_or(false);
-                    if first || text.contains("demo") {
-                        m.demo_turn(&session_id, &text).await;
-                    } else {
-                        m.reply_turn(&session_id, &text).await;
-                    }
-                });
-            }
+            } => self.on_prompt(request_id, session_id, text, images),
             Request::RemoveQueued {
                 session_id,
                 message_id,
-            } => {
-                let removed = self.with_session(&session_id, |s| {
-                    let i = s.queue.iter().position(|q| q.id == message_id);
-                    i.map(|i| s.queue.remove(i)).is_some()
-                });
-                match removed {
-                    Some(removed) => self.ok(request_id, json!({ "removed": removed })),
-                    None => self.err(request_id, "no such session"),
-                }
-            }
+            } => self.on_remove_queued(request_id, &session_id, &message_id),
             Request::Shell {
                 session_id,
                 command,
@@ -1242,235 +1108,456 @@ impl Mock {
             // The in-process mock asks no questions.
             Request::QuestionReply { .. } => self.ok(request_id, json!({})),
             Request::SetModel { session_id, model } => {
-                let info = self.with_session(&session_id, |s| {
-                    s.info.model = model;
-                    s.info.clone()
-                });
-                if let Some(info) = info {
-                    self.emit(&session_id, SessionEvent::Info { info: info.clone() });
-                    self.ok(request_id, json!({ "session": info }));
-                    self.broadcast_sessions();
+                if let Some(info) = self.update_info(&session_id, |i| i.model = model) {
+                    self.reply_with_session(request_id, &session_id, info);
                 }
             }
             Request::SetAgent { session_id, agent } => {
-                let am = config()
+                let agent_model = config()
                     .agents
                     .iter()
                     .find(|a| a.name == agent)
                     .and_then(|a| a.model.clone());
-                let info = self.with_session(&session_id, |s| {
-                    s.info.agent = agent;
-                    s.info.model = am.unwrap_or_else(model);
-                    s.info.clone()
+                let info = self.update_info(&session_id, |i| {
+                    i.agent = agent;
+                    i.model = agent_model.unwrap_or_else(model);
                 });
                 if let Some(info) = info {
-                    self.emit(&session_id, SessionEvent::Info { info: info.clone() });
-                    self.ok(request_id, json!({ "session": info }));
-                    self.broadcast_sessions();
+                    self.reply_with_session(request_id, &session_id, info);
                 }
             }
             Request::SetVariant {
                 session_id,
                 variant,
-            } => {
-                let cfg = config();
-                let info = self.with_session(&session_id, |s| {
-                    let vs = cfg
-                        .models
-                        .iter()
-                        .find(|m| m.provider == s.info.model.provider && m.id == s.info.model.model)
-                        .map(|m| m.variants.clone())
-                        .unwrap_or_default();
-                    s.info.model.variant = match variant {
-                        Some(v) => Some(v),
-                        None => {
-                            let i = s
-                                .info
-                                .model
-                                .variant
-                                .as_ref()
-                                .and_then(|v| vs.iter().position(|x| x == v));
-                            match i {
-                                None => vs.first().cloned(),
-                                Some(i) if i + 1 < vs.len() => Some(vs[i + 1].clone()),
-                                Some(_) => None,
-                            }
-                        }
-                    };
-                    s.info.clone()
-                });
-                if let Some(info) = info {
-                    self.emit(&session_id, SessionEvent::Info { info: info.clone() });
-                    self.ok(request_id, json!({ "session": info }));
-                }
-            }
+            } => self.on_set_variant(request_id, &session_id, variant),
             Request::PeerCommand { command, .. } => {
                 let text = match command.as_str() {
-                    crate::app::cmd::PEERS => "You are \"mock\" (ses_mock).\nOther live sessions (1):\n  [idle] worker · \"demo\" · general · background · /tmp · started 2m ago".to_string(),
-                    crate::app::cmd::PEERS_INBOX => "Inbox is empty: no messages from other sessions.".to_string(),
-                    crate::app::cmd::PEERS_OUTBOX => "Outbox is empty: this session has not sent any messages.".to_string(),
-                    _ => "Current name: \"mock\"".to_string(),
+                    cmd::PEERS => PEERS_TEXT,
+                    cmd::PEERS_INBOX => PEERS_INBOX_TEXT,
+                    cmd::PEERS_OUTBOX => PEERS_OUTBOX_TEXT,
+                    _ => PEER_NAME_TEXT,
                 };
                 self.ok(request_id, json!({ "text": text }));
             }
             Request::Rename { session_id, name } => {
-                let info = self.with_session(&session_id, |s| {
-                    s.info.name = name;
-                    s.info.clone()
-                });
-                if let Some(info) = info {
+                if let Some(info) = self.update_info(&session_id, |i| i.name = name) {
                     self.emit(&session_id, SessionEvent::Info { info });
                 }
                 self.ok(request_id, json!({}));
                 self.broadcast_sessions();
             }
             Request::SetCwd { session_id, path } => {
-                let info = self.with_session(&session_id, |s| {
-                    let p = std::path::Path::new(&s.info.cwd).join(&path);
-                    s.info.cwd = p.to_string_lossy().into_owned();
-                    s.info.clone()
+                let info = self.update_info(&session_id, |i| {
+                    let joined = std::path::Path::new(&i.cwd).join(&path);
+                    i.cwd = joined.to_string_lossy().into_owned();
                 });
                 match info {
-                    Some(info) => {
-                        self.emit(&session_id, SessionEvent::Info { info: info.clone() });
-                        self.ok(request_id, json!({ "session": info }));
-                        self.broadcast_sessions();
-                    }
+                    Some(info) => self.reply_with_session(request_id, &session_id, info),
                     None => self.err(request_id, "no such session"),
                 }
             }
             Request::Compact { session_id } => {
                 self.ok(request_id, json!({}));
                 let m = self.clone();
-                tokio::spawn(async move {
-                    m.set_status(&session_id, SessionStatus::Compacting);
-                    tokio::time::sleep(Duration::from_millis(1500)).await;
-                    let summary = Message {
-                        id: id("msg"),
-                        role: Role::User,
-                        time: now_ms(),
-                        time_end: None,
-                        source: MessageSource::Compaction,
-                        parts: vec![Part::Text { text: "[Context compacted. Summary of the conversation so far:]\n\n## Goal\nFix the parser off-by-one.\n\n## Done\n- Fixed loop bound\n- Tests pass\n\n[Continue from here.]".into(), time: now_ms() }],
-                        model: None,
-                        agent: None,
-                        usage: None,
-                        error: None,
-                    };
-                    // Append-only: older messages stay visible; the model context starts here.
-                    m.emit(&session_id, SessionEvent::Message { message: summary });
-                    m.with_session(&session_id, |s| s.info.context.used = 4_000);
-                    m.set_status(&session_id, SessionStatus::Idle);
-                });
+                tokio::spawn(async move { m.compact(&session_id).await });
             }
             Request::Undo {
                 session_id,
                 message_id,
-            } => {
-                let r = self.with_session(&session_id, |s| {
-                    let pos = match &message_id {
-                        Some(mid) => s.messages.iter().position(|m| m.id == *mid)?,
-                        None => s.messages.iter().rposition(|m| {
-                            m.role == Role::User && m.source == MessageSource::Human
-                        })?,
-                    };
-                    let text = if s.messages[pos].source == MessageSource::Human {
-                        s.messages[pos].raw_text()
-                    } else {
-                        String::new()
-                    };
-                    s.messages.truncate(pos);
-                    Some((text, s.messages.clone()))
-                });
-                match r.flatten() {
-                    Some((text, msgs)) => {
-                        self.emit(
-                            &session_id,
-                            SessionEvent::Reset {
-                                messages: msgs,
-                                more_before: false,
-                            },
-                        );
-                        self.ok(request_id, json!({ "text": text }));
-                    }
-                    None => self.err(request_id, "nothing to undo"),
-                }
-            }
-            Request::Close { session_id } => {
-                let info = {
-                    let mut w = self.world();
-                    w.order.retain(|x| *x != session_id);
-                    w.sessions.remove(&session_id).map(|s| s.info)
-                };
-                if let Some(mut i) = info {
-                    i.live = false;
-                    i.attached = 0;
-                    self.send(ServerFrame::Event {
-                        session_id: session_id.clone(),
-                        event: SessionEvent::Closed,
-                    });
-                    self.world().history.push(i);
-                }
-                self.ok(request_id, json!({}));
-                self.broadcast_sessions();
-            }
+            } => self.on_undo(request_id, &session_id, message_id.as_deref()),
+            Request::Close { session_id } => self.on_close(request_id, &session_id),
             Request::Delete { session_id } => {
                 self.world().history.retain(|h| h.id != session_id);
                 self.ok(request_id, json!({}));
             }
             Request::ExpandCommand { name, args, .. } => {
-                self.ok(request_id, json!({ "text": format!("(expanded /{name}) Please do the {name} task. {args}") }));
+                self.ok(
+                    request_id,
+                    json!({ "text": format!("(expanded /{name}) Please do the {name} task. {args}") }),
+                );
             }
-            Request::ListFiles { query, .. } => {
-                let all = [
-                    "src/main.rs",
-                    "src/app.rs",
-                    "src/parser.rs",
-                    "src/ui/",
-                    "src/ui/chat.rs",
-                    "src/ui/markdown.rs",
-                    "Cargo.toml",
-                    "README.md",
-                    "docs/设计.md",
-                ];
-                let mut v: Vec<(i64, &str)> = all
-                    .iter()
-                    .filter_map(|f| crate::ui::text::fuzzy_score(f, &query).map(|s| (s, *f)))
-                    .collect();
-                v.sort_by_key(|x| std::cmp::Reverse(x.0));
-                let files: Vec<&str> = v.into_iter().map(|x| x.1).collect();
-                self.ok(request_id, json!({ "files": files }));
-            }
+            Request::ListFiles { query, .. } => self.on_list_files(request_id, &query),
             Request::Export { path, .. } => self.ok(request_id, json!({ "path": path })),
             // The demo sends whole histories with image bytes.
             Request::Messages { .. } => {
                 self.ok(request_id, json!({ "messages": [], "more_before": false }))
             }
             Request::GetImage { .. } => self.err(request_id, "Image not found"),
-            Request::Shutdown => self.ok(request_id, json!({})),
-            Request::McpStatus { .. } => {
-                let started = {
-                    let mut w = self.world();
-                    if w.mcp_started == 0 {
-                        w.mcp_started = now_ms();
-                    }
-                    w.mcp_started
-                };
-                let docs_ready = now_ms() - started > 8_000;
-                let servers = vec![
-                    McpServerStatus { name: "context7".into(), status: mcp_status::CONNECTED.into(), error: None, tools: vec!["context7_resolve-library-id".into(), "context7_get-library-docs".into()] },
-                    McpServerStatus {
-                        name: "docs".into(),
-                        status: if docs_ready { mcp_status::CONNECTED } else { mcp_status::CONNECTING }.into(),
-                        error: None,
-                        tools: if docs_ready { vec!["docs_search".into()] } else { vec![] },
-                    },
-                    McpServerStatus { name: "github".into(), status: mcp_status::FAILED.into(), error: Some("HTTP 401 Unauthorized: missing or invalid bearer token (set GITHUB_TOKEN)".into()), tools: vec![] },
-                    McpServerStatus { name: "sqlite".into(), status: mcp_status::DISABLED.into(), error: None, tools: vec![] },
-                ];
-                self.ok(request_id, json!({ "servers": servers }));
+            Request::McpStatus { .. } => self.on_mcp_status(request_id),
+        }
+    }
+
+    /// Emits the updated info, answers with the session and broadcasts the session list.
+    fn reply_with_session(&self, request_id: Option<u64>, sid: &str, info: SessionInfo) {
+        self.emit(sid, SessionEvent::Info { info: info.clone() });
+        self.ok(request_id, json!({ "session": info }));
+        self.broadcast_sessions();
+    }
+
+    fn on_list_sessions(&self, request_id: Option<u64>) {
+        let w = self.world();
+        let list: Vec<&SessionInfo> = w
+            .order
+            .iter()
+            .filter_map(|i| w.sessions.get(i))
+            .map(|s| &s.info)
+            .collect();
+        self.ok(request_id, json!({ "sessions": list }));
+    }
+
+    fn on_list_history(&self, request_id: Option<u64>) {
+        let w = self.world();
+        let mut list: Vec<SessionInfo> = w.history.clone();
+        list.extend(
+            w.order
+                .iter()
+                .filter_map(|i| w.sessions.get(i))
+                .map(|s| s.info.clone()),
+        );
+        list.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
+        self.ok(request_id, json!({ "sessions": list }));
+    }
+
+    fn on_create_session(
+        &self,
+        request_id: Option<u64>,
+        cwd: &str,
+        agent: Option<String>,
+        name: Option<String>,
+        model: Option<ModelRef>,
+    ) {
+        let base = std::path::Path::new(cwd)
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "ref".into());
+        let name = name.unwrap_or_else(|| {
+            let hash = SEQ.load(Ordering::Relaxed) * NAME_HASH_MULTIPLIER % NAME_HASH_MODULUS;
+            format!("{base}-{hash:04x}")
+        });
+        let mut created = self.create(&name, agent.as_deref().unwrap_or("build"), cwd);
+        if let Some(m) = model {
+            created = self
+                .update_info(&created.id, |i| i.model = m)
+                .expect("session was just created");
+        }
+        self.ok(request_id, json!({ "session": created }));
+        self.broadcast_sessions();
+    }
+
+    fn on_detach(&self, request_id: Option<u64>, sid: &str) {
+        {
+            let mut w = self.world();
+            w.subs.remove(sid);
+            if let Some(s) = w.sessions.get_mut(sid) {
+                s.info.attached = s.info.attached.saturating_sub(1);
             }
         }
+        self.ok(request_id, json!({}));
+        self.broadcast_sessions();
+    }
+
+    /// Moves a history-only session back into the live set, with a short canned transcript.
+    fn revive_from_history(&self, sid: &str) {
+        let hist = {
+            let mut w = self.world();
+            let pos = w.history.iter().position(|h| h.id == sid);
+            pos.map(|p| w.history.remove(p))
+        };
+        let Some(mut h) = hist else {
+            return;
+        };
+        h.live = true;
+        let user = new_message(
+            id("msg"),
+            Role::User,
+            h.created_at,
+            MessageSource::Human,
+            vec![Part::Text {
+                text: "Summarise the README".into(),
+                time: h.created_at,
+            }],
+        );
+        let assistant = Message {
+            time_end: Some(h.created_at + 5000),
+            model: Some(model()),
+            agent: Some("build".into()),
+            usage: Some(Usage {
+                input: 300,
+                output: 40,
+                ..Default::default()
+            }),
+            ..new_message(
+                id("msg"),
+                Role::Assistant,
+                h.created_at + 1000,
+                MessageSource::Human,
+                vec![Part::Text {
+                    text: "The README describes **ref**, a coding agent harness with a TUI frontend and a backend server.".into(),
+                    time: h.created_at + 1000,
+                }],
+            )
+        };
+        let mut w = self.world();
+        w.order.push(h.id.clone());
+        w.sessions.insert(
+            h.id.clone(),
+            MockSession {
+                info: h,
+                messages: vec![user, assistant],
+                perms: vec![],
+                abort: Arc::new(AtomicBool::new(false)),
+                queue: Vec::new(),
+            },
+        );
+    }
+
+    fn on_attach(&self, request_id: Option<u64>, sid: &str, foreground: bool) {
+        // History-only session → load it live.
+        self.revive_from_history(sid);
+        let snap = {
+            let mut w = self.world();
+            w.subs.insert(sid.to_string());
+            w.sessions.get_mut(sid).map(|s| {
+                if foreground {
+                    s.info.attached += 1;
+                }
+                SessionSnapshot {
+                    info: s.info.clone(),
+                    messages: s.messages.clone(),
+                    more_before: false,
+                    pending_permissions: s.perms.clone(),
+                    pending_questions: Vec::new(),
+                    queued: s.queue.clone(),
+                }
+            })
+        };
+        let Some(snap) = snap else {
+            self.err(request_id, "no such session");
+            return;
+        };
+        self.ok(request_id, json!({ "snapshot": snap }));
+        self.broadcast_sessions();
+    }
+
+    fn on_prompt(
+        &self,
+        request_id: Option<u64>,
+        sid: String,
+        text: String,
+        images: Vec<ImageData>,
+    ) {
+        let mid = id("msg");
+        let queued = self.with_session(&sid, |s| {
+            s.abort.store(false, Ordering::Relaxed);
+            let busy = !s.info.status.is_idle();
+            if busy {
+                s.queue.push(user_msg(
+                    mid.clone(),
+                    &text,
+                    MessageSource::Human,
+                    images.clone(),
+                ));
+            }
+            busy
+        }) == Some(true);
+        self.ok(request_id, json!({ "queued": queued, "message_id": mid }));
+        let m = self.clone();
+        tokio::spawn(async move { m.deliver_prompt(&sid, mid, &text, images, queued).await });
+    }
+
+    /// Adds the prompt to the transcript (after the queue wait, if it was queued) and runs the turn.
+    async fn deliver_prompt(
+        &self,
+        sid: &str,
+        mid: String,
+        text: &str,
+        images: Vec<ImageData>,
+        was_queued: bool,
+    ) {
+        if was_queued {
+            // The client shows the prompt as queued meanwhile.
+            self.wait_until_idle(sid).await;
+            // Withdrawn with `RemoveQueued` meanwhile: never delivered.
+            if self.take_queued(sid, &mid) != Some(true) {
+                return;
+            }
+        }
+        self.user_message_id(sid, mid, text, MessageSource::Human, images);
+        let first = self
+            .with_session(sid, |s| {
+                s.messages.iter().filter(|x| x.role == Role::User).count() <= 1
+            })
+            .unwrap_or(false);
+        if first || text.contains("demo") {
+            self.demo_turn(sid, text).await;
+        } else {
+            self.reply_turn(sid, text).await;
+        }
+    }
+
+    async fn wait_until_idle(&self, sid: &str) {
+        for _ in 0..QUEUE_WAIT_POLLS {
+            tokio::time::sleep(QUEUE_POLL).await;
+            if self
+                .with_session(sid, |s| s.info.status.is_idle())
+                .unwrap_or(true)
+            {
+                return;
+            }
+        }
+    }
+
+    /// Removes a queued prompt; Some(true) if it was still queued.
+    fn take_queued(&self, sid: &str, mid: &str) -> Option<bool> {
+        self.with_session(sid, |s| {
+            let i = s.queue.iter().position(|q| q.id == mid);
+            i.map(|i| s.queue.remove(i)).is_some()
+        })
+    }
+
+    fn on_remove_queued(&self, request_id: Option<u64>, sid: &str, mid: &str) {
+        match self.take_queued(sid, mid) {
+            Some(removed) => self.ok(request_id, json!({ "removed": removed })),
+            None => self.err(request_id, "no such session"),
+        }
+    }
+
+    fn on_set_variant(&self, request_id: Option<u64>, sid: &str, variant: Option<String>) {
+        let cfg = config();
+        let info = self.update_info(sid, |i| {
+            let variants = cfg
+                .models
+                .iter()
+                .find(|m| m.provider == i.model.provider && m.id == i.model.model)
+                .map(|m| m.variants.clone())
+                .unwrap_or_default();
+            i.model.variant =
+                variant.or_else(|| next_variant(i.model.variant.as_deref(), &variants));
+        });
+        // Unlike the other session edits, the session list is not re-broadcast.
+        if let Some(info) = info {
+            self.emit(sid, SessionEvent::Info { info: info.clone() });
+            self.ok(request_id, json!({ "session": info }));
+        }
+    }
+
+    /// Compacts the context: a summary message is appended and the context counter drops.
+    async fn compact(&self, sid: &str) {
+        self.set_status(sid, SessionStatus::Compacting);
+        tokio::time::sleep(COMPACT_DELAY).await;
+        let summary = new_message(
+            id("msg"),
+            Role::User,
+            now_ms(),
+            MessageSource::Compaction,
+            vec![Part::Text {
+                text: COMPACTION_SUMMARY.into(),
+                time: now_ms(),
+            }],
+        );
+        // Append-only: older messages stay visible; the model context starts here.
+        self.emit(sid, SessionEvent::Message { message: summary });
+        self.with_session(sid, |s| s.info.context.used = COMPACTED_CONTEXT_TOKENS);
+        self.set_status(sid, SessionStatus::Idle);
+    }
+
+    fn on_undo(&self, request_id: Option<u64>, sid: &str, message_id: Option<&str>) {
+        let undone = self.with_session(sid, |s| {
+            let pos = match message_id {
+                Some(mid) => s.messages.iter().position(|m| m.id == mid)?,
+                None => s
+                    .messages
+                    .iter()
+                    .rposition(|m| m.role == Role::User && m.source == MessageSource::Human)?,
+            };
+            let text = if s.messages[pos].source == MessageSource::Human {
+                s.messages[pos].raw_text()
+            } else {
+                String::new()
+            };
+            s.messages.truncate(pos);
+            Some((text, s.messages.clone()))
+        });
+        let Some((text, messages)) = undone.flatten() else {
+            self.err(request_id, "nothing to undo");
+            return;
+        };
+        self.emit(
+            sid,
+            SessionEvent::Reset {
+                messages,
+                more_before: false,
+            },
+        );
+        self.ok(request_id, json!({ "text": text }));
+    }
+
+    fn on_close(&self, request_id: Option<u64>, sid: &str) {
+        let info = {
+            let mut w = self.world();
+            w.order.retain(|x| x != sid);
+            w.sessions.remove(sid).map(|s| s.info)
+        };
+        if let Some(mut i) = info {
+            i.live = false;
+            i.attached = 0;
+            self.send(ServerFrame::Event {
+                session_id: sid.to_string(),
+                event: SessionEvent::Closed,
+            });
+            self.world().history.push(i);
+        }
+        self.ok(request_id, json!({}));
+        self.broadcast_sessions();
+    }
+
+    fn on_list_files(&self, request_id: Option<u64>, query: &str) {
+        let mut scored: Vec<(i64, &str)> = MOCK_FILES
+            .iter()
+            .filter_map(|f| crate::ui::text::fuzzy_score(f, query).map(|s| (s, *f)))
+            .collect();
+        scored.sort_by_key(|x| std::cmp::Reverse(x.0));
+        let files: Vec<&str> = scored.into_iter().map(|x| x.1).collect();
+        self.ok(request_id, json!({ "files": files }));
+    }
+
+    fn on_mcp_status(&self, request_id: Option<u64>) {
+        let started = {
+            let mut w = self.world();
+            if w.mcp_started == 0 {
+                w.mcp_started = now_ms();
+            }
+            w.mcp_started
+        };
+        let docs_ready = now_ms() - started > MCP_CONNECT_DELAY_MS;
+        let server =
+            |name: &str, status: &str, error: Option<&str>, tools: &[&str]| McpServerStatus {
+                name: name.into(),
+                status: status.into(),
+                error: error.map(Into::into),
+                tools: tools.iter().map(|t| t.to_string()).collect(),
+            };
+        let servers = vec![
+            server(
+                "context7",
+                mcp_status::CONNECTED,
+                None,
+                &["context7_resolve-library-id", "context7_get-library-docs"],
+            ),
+            if docs_ready {
+                server("docs", mcp_status::CONNECTED, None, &["docs_search"])
+            } else {
+                server("docs", mcp_status::CONNECTING, None, &[])
+            },
+            server(
+                "github",
+                mcp_status::FAILED,
+                Some("HTTP 401 Unauthorized: missing or invalid bearer token (set GITHUB_TOKEN)"),
+                &[],
+            ),
+            server("sqlite", mcp_status::DISABLED, None, &[]),
+        ];
+        self.ok(request_id, json!({ "servers": servers }));
     }
 
     /// Seeds background sessions and history.
@@ -1577,6 +1664,38 @@ impl Mock {
             );
             m.set_status(&cid, SessionStatus::Idle);
         });
+    }
+}
+
+/// The variant after `current` in `variants`; None after the last one (back to "default").
+fn next_variant(current: Option<&str>, variants: &[String]) -> Option<String> {
+    let pos = current.and_then(|v| variants.iter().position(|x| x == v));
+    match pos {
+        None => variants.first().cloned(),
+        Some(i) if i + 1 < variants.len() => Some(variants[i + 1].clone()),
+        Some(_) => None,
+    }
+}
+
+/// A message with no end time, model, agent, usage or error; callers set the differing fields.
+fn new_message(
+    id: String,
+    role: Role,
+    time: i64,
+    source: MessageSource,
+    parts: Vec<Part>,
+) -> Message {
+    Message {
+        id,
+        role,
+        time,
+        time_end: None,
+        source,
+        parts,
+        model: None,
+        agent: None,
+        usage: None,
+        error: None,
     }
 }
 
