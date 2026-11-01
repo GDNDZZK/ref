@@ -14,7 +14,6 @@ Column {
 	readonly property int verticalPadding: Theme.toolBodyPaddingY
 	readonly property int sectionSpacing: 12
 	readonly property real contentWidth: width - 2 * horizontalPadding
-	readonly property bool finished: call.toolState === "done" || call.toolState === "error" || call.toolState === "denied" || call.toolState === "cancelled"
 
 	topPadding: verticalPadding
 	bottomPadding: verticalPadding + Theme.toolBodyBottomExtra
