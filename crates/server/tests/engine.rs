@@ -9,9 +9,8 @@ use std::time::Duration;
 
 #[tokio::test]
 async fn basic_turn_and_persistence() {
-    let m = mock(Arc::new(|_, _| Reply::Text("Hello there".into()))).await;
-    let (hub, work) = hub(config(&m.url), "basic");
-    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
+    let (m, hub, _, s) =
+        run_turn(Arc::new(|_, _| Reply::Text("Hello there".into())), "basic").await;
     prompt(&hub, &s, "hi");
     wait_idle(&s).await;
     assert_eq!(last_text(&s), "Hello there");
@@ -41,26 +40,27 @@ async fn basic_turn_and_persistence() {
 
 #[tokio::test]
 async fn tool_loop_errors_do_not_terminate_and_replay_is_stable() {
-    let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Tools(vec![
-            tool(
-                "c1",
-                "read",
-                json!({"purpose": "Read missing file", "path": "nope.txt"}),
-            ),
-            tool("c2", "no_such_tool", json!({"purpose": "x"})),
-            ("c3".into(), "bash".into(), "{not json".into()),
-            tool(
-                "c4",
-                "bash",
-                json!({"purpose": "Say hi", "command": "echo hi"}),
-            ),
-        ]),
-        _ => Reply::Text("done".into()),
-    }))
+    let (m, hub, _, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 => Reply::Tools(vec![
+                tool(
+                    "c1",
+                    "read",
+                    json!({"purpose": "Read missing file", "path": "nope.txt"}),
+                ),
+                tool("c2", "no_such_tool", json!({"purpose": "x"})),
+                ("c3".into(), "bash".into(), "{not json".into()),
+                tool(
+                    "c4",
+                    "bash",
+                    json!({"purpose": "Say hi", "command": "echo hi"}),
+                ),
+            ]),
+            _ => Reply::Text("done".into()),
+        }),
+        "toolloop",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "toolloop");
-    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "go");
     wait_idle(&s).await;
     assert_eq!(last_text(&s), "done");
@@ -365,13 +365,14 @@ async fn abort_during_delay_and_stream() {
 
 #[tokio::test]
 async fn retry_on_500_then_success() {
-    let m = mock(Arc::new(|n, _| match n {
-        0 | 1 => Reply::Status(500, r#"{"error":{"message":"internal"}}"#.into()),
-        _ => Reply::Text("recovered".into()),
-    }))
+    let (m, hub, _, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 | 1 => Reply::Status(500, r#"{"error":{"message":"internal"}}"#.into()),
+            _ => Reply::Text("recovered".into()),
+        }),
+        "retry",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "retry");
-    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "go");
     wait_idle(&s).await;
     assert_eq!(last_text(&s), "recovered");
@@ -382,12 +383,11 @@ async fn retry_on_500_then_success() {
 
 #[tokio::test]
 async fn non_retryable_error_fails_after_three_attempts() {
-    let m = mock(Arc::new(|_, _| {
-        Reply::Status(400, r#"{"error":{"message":"bad request"}}"#.into())
-    }))
+    let (m, hub, _, s) = run_turn(
+        Arc::new(|_, _| Reply::Status(400, r#"{"error":{"message":"bad request"}}"#.into())),
+        "fail",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "fail");
-    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "go");
     wait_idle(&s).await;
     assert_eq!(m.count(), 3);
@@ -428,17 +428,18 @@ fn non_system(body: &serde_json::Value) -> Vec<serde_json::Value> {
 
 #[tokio::test]
 async fn compact_context_tool_keeps_history_but_sends_summary_only() {
-    let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Tools(vec![tool(
-            "c1",
-            "compact_context",
-            json!({"purpose": "p", "summary": "The user wants X. Done Y."}),
-        )]),
-        _ => Reply::Text("continuing".into()),
-    }))
+    let (m, hub, _, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 => Reply::Tools(vec![tool(
+                "c1",
+                "compact_context",
+                json!({"purpose": "p", "summary": "The user wants X. Done Y."}),
+            )]),
+            _ => Reply::Text("continuing".into()),
+        }),
+        "compact",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "compact");
-    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "start");
     wait_idle(&s).await;
     let msgs = messages(&s);
@@ -471,14 +472,15 @@ async fn compact_context_tool_keeps_history_but_sends_summary_only() {
 
 #[tokio::test]
 async fn manual_compaction_uses_model_summary_and_undo_restores_context() {
-    let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Text("first answer".into()),
-        1 => Reply::Text("## Goal\n- summary text".into()),
-        _ => Reply::Text("later".into()),
-    }))
+    let (m, hub, _, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 => Reply::Text("first answer".into()),
+            1 => Reply::Text("## Goal\n- summary text".into()),
+            _ => Reply::Text("later".into()),
+        }),
+        "manualcompact",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "manualcompact");
-    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "q");
     wait_idle(&s).await;
     ref_server::engine::start_custom_run(&hub, &s, ref_server::compaction::manual).unwrap();
@@ -703,14 +705,15 @@ async fn mcp_status_request() {
 
 #[tokio::test]
 async fn context_window_tool() {
-    let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Text("a".into()),
-        1 => Reply::Tools(vec![tool("c1", "context_window", json!({"purpose": "p"}))]),
-        _ => Reply::Text("b".into()),
-    }))
+    let (_m, hub, _, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 => Reply::Text("a".into()),
+            1 => Reply::Tools(vec![tool("c1", "context_window", json!({"purpose": "p"}))]),
+            _ => Reply::Text("b".into()),
+        }),
+        "ctx",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "ctx");
-    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "1");
     wait_idle(&s).await;
     prompt(&hub, &s, "2");
@@ -877,17 +880,18 @@ async fn peer_send_message_between_sessions() {
 
 #[tokio::test]
 async fn queued_message_delivered_after_current_step() {
-    let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Tools(vec![tool(
-            "c1",
-            "bash",
-            json!({"purpose": "p", "command": "sleep 0.5"}),
-        )]),
-        _ => Reply::Text("ok".into()),
-    }))
+    let (m, hub, _, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 => Reply::Tools(vec![tool(
+                "c1",
+                "bash",
+                json!({"purpose": "p", "command": "sleep 0.5"}),
+            )]),
+            _ => Reply::Text("ok".into()),
+        }),
+        "queue",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "queue");
-    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "first");
     wait_tool_state(&s, ToolState::Running).await;
     prompt(&hub, &s, "second while busy");
@@ -903,17 +907,18 @@ async fn queued_message_delivered_after_current_step() {
 
 #[tokio::test]
 async fn remove_queued_message_before_delivery() {
-    let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Tools(vec![tool(
-            "c1",
-            "bash",
-            json!({"purpose": "p", "command": "sleep 0.5"}),
-        )]),
-        _ => Reply::Text("ok".into()),
-    }))
+    let (m, hub, _, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 => Reply::Tools(vec![tool(
+                "c1",
+                "bash",
+                json!({"purpose": "p", "command": "sleep 0.5"}),
+            )]),
+            _ => Reply::Text("ok".into()),
+        }),
+        "unqueue",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "unqueue");
-    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     let conn = hello_conn(&hub);
     let req = |text: &str| ref_proto::Request::Prompt {
         session_id: s.id.clone(),
@@ -997,17 +1002,18 @@ async fn remove_queued_message_before_delivery() {
 
 #[tokio::test]
 async fn remove_queued_after_delivery_removes_nothing() {
-    let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Tools(vec![tool(
-            "c1",
-            "bash",
-            json!({"purpose": "p", "command": "sleep 0.3"}),
-        )]),
-        _ => Reply::Text("ok".into()),
-    }))
+    let (m, hub, _, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 => Reply::Tools(vec![tool(
+                "c1",
+                "bash",
+                json!({"purpose": "p", "command": "sleep 0.3"}),
+            )]),
+            _ => Reply::Text("ok".into()),
+        }),
+        "unqueue-late",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "unqueue-late");
-    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     let conn = hello_conn(&hub);
     prompt(&hub, &s, "first");
     wait_tool_state(&s, ToolState::Running).await;
@@ -1054,17 +1060,18 @@ async fn remove_queued_after_delivery_removes_nothing() {
 
 #[tokio::test]
 async fn busy_since_is_the_run_start_and_cleared_when_idle() {
-    let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Tools(vec![tool(
-            "c1",
-            "bash",
-            json!({"purpose": "p", "command": "sleep 0.3"}),
-        )]),
-        _ => Reply::Text("ok".into()),
-    }))
+    let (_m, hub, _, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 => Reply::Tools(vec![tool(
+                "c1",
+                "bash",
+                json!({"purpose": "p", "command": "sleep 0.3"}),
+            )]),
+            _ => Reply::Text("ok".into()),
+        }),
+        "busy-since",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "busy-since");
-    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     assert_eq!(s.info().busy_since, None);
     let before = ref_proto::now_ms();
     prompt(&hub, &s, "first");
@@ -1085,13 +1092,14 @@ async fn busy_since_is_the_run_start_and_cleared_when_idle() {
 
 #[tokio::test]
 async fn manual_compaction_never_shows_busy_since_while_idle() {
-    let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Text("answer".into()),
-        _ => Reply::Text("## Goal\n- summary".into()),
-    }))
+    let (_m, hub, _, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 => Reply::Text("answer".into()),
+            _ => Reply::Text("## Goal\n- summary".into()),
+        }),
+        "compact-busy",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "compact-busy");
-    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "q");
     wait_idle(&s).await;
     let conn = hello_conn(&hub);
@@ -1261,9 +1269,7 @@ async fn create_session_must_report_and_close_rules() {
 
 #[tokio::test]
 async fn events_reach_attached_connection() {
-    let m = mock(Arc::new(|_, _| Reply::Text("streamed".into()))).await;
-    let (hub, work) = hub(config(&m.url), "events");
-    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
+    let (_m, hub, _, s) = run_turn(Arc::new(|_, _| Reply::Text("streamed".into())), "events").await;
     let conn = hello_conn(&hub);
     conn.lock().fg.insert(s.id.clone());
     prompt(&hub, &s, "hi");
@@ -1289,9 +1295,7 @@ async fn events_reach_attached_connection() {
 
 #[tokio::test]
 async fn load_from_history_marks_unfinished_tools_cancelled() {
-    let m = mock(Arc::new(|_, _| Reply::Text("x".into()))).await;
-    let (hub, work) = hub(config(&m.url), "history");
-    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
+    let (_m, hub, _, s) = run_turn(Arc::new(|_, _| Reply::Text("x".into())), "history").await;
     prompt(&hub, &s, "hi");
     wait_idle(&s).await;
     {
@@ -1384,9 +1388,7 @@ async fn auto_compaction_with(tag: &str, configure: impl FnOnce(&mut ref_config:
 
 #[tokio::test]
 async fn undo_last_prompt_or_from_given_message() {
-    let m = mock(Arc::new(|_, _| Reply::Text("reply".into()))).await;
-    let (hub, work) = hub(config(&m.url), "undo");
-    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
+    let (_m, hub, _, s) = run_turn(Arc::new(|_, _| Reply::Text("reply".into())), "undo").await;
     for p in ["one", "two", "three"] {
         prompt(&hub, &s, p);
         wait_idle(&s).await;
@@ -1409,26 +1411,27 @@ async fn undo_last_prompt_or_from_given_message() {
 
 #[tokio::test]
 async fn todo_tool_replaces_list_and_validates() {
-    let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Tools(vec![tool(
-            "t1",
-            "todo",
-            json!({"purpose": "p", "todos": [
-                {"content": "Read code", "status": "completed"},
-                {"content": "Fix bug", "status": "in_progress"},
-                {"content": "Run tests", "status": "pending"}
-            ]}),
-        )]),
-        1 => Reply::Tools(vec![tool(
-            "t2",
-            "todo",
-            json!({"purpose": "p", "todos": [{"content": "x", "status": "bogus"}]}),
-        )]),
-        _ => Reply::Text("done".into()),
-    }))
+    let (_m, hub, _, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 => Reply::Tools(vec![tool(
+                "t1",
+                "todo",
+                json!({"purpose": "p", "todos": [
+                    {"content": "Read code", "status": "completed"},
+                    {"content": "Fix bug", "status": "in_progress"},
+                    {"content": "Run tests", "status": "pending"}
+                ]}),
+            )]),
+            1 => Reply::Tools(vec![tool(
+                "t2",
+                "todo",
+                json!({"purpose": "p", "todos": [{"content": "x", "status": "bogus"}]}),
+            )]),
+            _ => Reply::Text("done".into()),
+        }),
+        "todo",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "todo");
-    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "go");
     wait_idle(&s).await;
     let todos = s.info().todos;
@@ -1551,13 +1554,14 @@ async fn set_cwd_switches_directory_and_tells_the_model() {
 
 #[tokio::test]
 async fn queue_changes_reach_attached_connection() {
-    let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Hang("working".into()),
-        _ => Reply::Text("done".into()),
-    }))
+    let (_m, hub, work, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 => Reply::Hang("working".into()),
+            _ => Reply::Text("done".into()),
+        }),
+        "queue-ev",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "queue-ev");
-    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     let peer = session(&hub, &work, "worker", "build").await;
     let conn = hello_conn(&hub);
     conn.lock().fg.insert(s.id.clone());
@@ -1750,9 +1754,7 @@ async fn frontends_get_image_stubs_and_undo_returns_the_bytes() {
 
 #[tokio::test]
 async fn history_is_served_in_pages() {
-    let m = mock(Arc::new(|_, _| Reply::Text("ok".into()))).await;
-    let (hub, work) = hub(config(&m.url), "pages");
-    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
+    let (_m, hub, _, s) = run_turn(Arc::new(|_, _| Reply::Text("ok".into())), "pages").await;
     let conn = hello_conn(&hub);
     {
         let mut st = s.lock();
