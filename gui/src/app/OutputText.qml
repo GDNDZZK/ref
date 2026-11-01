@@ -45,14 +45,9 @@ Item {
 		onClicked: output.showAllRequested()
 	}
 
-	HoverHandler { id: hover }
-
-	CopyButton {
+	HoverCopyButton {
 		anchors { top: parent.top; right: parent.right }
 		visible: output.copyable && output.text !== ""
 		text: output.text
-		opacity: hover.hovered ? 1 : 0
-
-		Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 	}
 }

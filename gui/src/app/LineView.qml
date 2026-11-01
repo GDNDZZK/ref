@@ -138,14 +138,9 @@ Item {
 		onClicked: view.showAllRequested()
 	}
 
-	HoverHandler { id: hover }
-
-	CopyButton {
+	HoverCopyButton {
 		anchors { top: parent.top; right: parent.right; margins: 4 }
 		visible: view.copyText !== ""
 		text: view.copyText
-		opacity: hover.hovered ? 1 : 0
-
-		Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 	}
 }
