@@ -18,6 +18,19 @@ use crate::ui::{Hit, chat, split, theme};
 const CTRL: KeyModifiers = KeyModifiers::CONTROL;
 const ALT: KeyModifiers = KeyModifiers::ALT;
 const SHIFT: KeyModifiers = KeyModifiers::SHIFT;
+/// Rows of a page-up / page-down step in dialogs and modals.
+const PAGE_SCROLL_ROWS: i32 = 10;
+/// Rows of one mouse wheel notch.
+const WHEEL_SCROLL_ROWS: i32 = 3;
+/// A cleared draft goes to the prompt history only from this many characters.
+const MIN_DRAFT_CHARS_FOR_HISTORY: usize = 20;
+/// Shortest text that can be an image path (`a.png`).
+const MIN_IMAGE_PATH_LEN: usize = 5;
+const MAX_PASTED_PATHS: usize = 32;
+/// Clicks closer together than this count as a double / triple click.
+const MULTI_CLICK_WINDOW: Duration = Duration::from_millis(450);
+/// Click counts cycle through single, double and triple click.
+const CLICK_COUNT_CYCLE: u8 = 3;
 /// Keys right after a modal opens were meant for the prompt: they are not taken as answers.
 const MODAL_GRACE: Duration = Duration::from_millis(350);
 
@@ -124,8 +137,8 @@ fn key(app: &mut App, k: KeyEvent) {
             }
             KeyCode::Up | KeyCode::Char('k') => scroll_perm(app, -1),
             KeyCode::Down | KeyCode::Char('j') => scroll_perm(app, 1),
-            KeyCode::PageUp => scroll_perm(app, -10),
-            KeyCode::PageDown => scroll_perm(app, 10),
+            KeyCode::PageUp => scroll_perm(app, -PAGE_SCROLL_ROWS),
+            KeyCode::PageDown => scroll_perm(app, PAGE_SCROLL_ROWS),
             _ => {}
         }
         return;
@@ -215,8 +228,8 @@ fn dialog_key(app: &mut App, k: KeyEvent) {
         Some(Dialog::Help(h)) => match k.code {
             KeyCode::Up | KeyCode::Char('k') => h.scroll_by(-1),
             KeyCode::Down | KeyCode::Char('j') => h.scroll_by(1),
-            KeyCode::PageUp => h.scroll_by(-10),
-            KeyCode::PageDown | KeyCode::Char(' ') => h.scroll_by(10),
+            KeyCode::PageUp => h.scroll_by(-PAGE_SCROLL_ROWS),
+            KeyCode::PageDown | KeyCode::Char(' ') => h.scroll_by(PAGE_SCROLL_ROWS),
             _ => app.dialog = None,
         },
         Some(Dialog::Mcp(d)) => {
@@ -229,8 +242,8 @@ fn dialog_key(app: &mut App, k: KeyEvent) {
                 KeyCode::Enter | KeyCode::Char(' ') => d.set_expanded(&app.mcp, None),
                 KeyCode::Right | KeyCode::Char('l') => d.set_expanded(&app.mcp, Some(true)),
                 KeyCode::Left | KeyCode::Char('h') => d.set_expanded(&app.mcp, Some(false)),
-                KeyCode::PageUp => d.scroll_by(-10),
-                KeyCode::PageDown => d.scroll_by(10),
+                KeyCode::PageUp => d.scroll_by(-PAGE_SCROLL_ROWS),
+                KeyCode::PageDown => d.scroll_by(PAGE_SCROLL_ROWS),
                 KeyCode::Char('r') if k.modifiers.is_empty() => app.refresh_mcp(),
                 KeyCode::Esc | KeyCode::Char('q') => app.dialog = None,
                 KeyCode::Char('c') if k.modifiers == CTRL => app.dialog = None,
@@ -365,7 +378,7 @@ fn chat_key(app: &mut App, k: KeyEvent) {
             app.copy_text(&t, "selection");
             app.editor.select_mode(false);
         } else if !app.editor.text.is_empty() || app.shell_mode {
-            if app.editor.text.trim().chars().count() >= 20 {
+            if app.editor.text.trim().chars().count() >= MIN_DRAFT_CHARS_FOR_HISTORY {
                 let t = app.editor.text.clone();
                 app.history.push(&t);
             }
@@ -575,7 +588,7 @@ fn scroll(app: &mut App, f: impl FnOnce(&mut chat::ChatState)) {
 /// If the editor text is exactly a path to an image file, convert it to an attachment.
 fn maybe_image_path(app: &mut App) {
     let t = app.editor.text.trim();
-    if t.len() < 5 || !t.contains('.') || t.contains('\n') {
+    if t.len() < MIN_IMAGE_PATH_LEN || !t.contains('.') || t.contains('\n') {
         return;
     }
     if let Some((img, name)) = crate::clipboard::image_from_path(t) {
@@ -668,7 +681,7 @@ fn paste(app: &mut App, s: String) {
     }
     // One or more image paths.
     let paths: Vec<&str> = s.split_whitespace().collect();
-    if !paths.is_empty() && paths.len() <= 32 {
+    if !paths.is_empty() && paths.len() <= MAX_PASTED_PATHS {
         let imgs: Vec<_> = paths
             .iter()
             .filter_map(|p| crate::clipboard::image_from_path(p))
@@ -932,8 +945,8 @@ fn tile_scroll_key(app: &mut App, k: &KeyEvent) -> bool {
 
 fn click_count(app: &mut App, x: u16, y: u16) -> u8 {
     let n = match app.last_click {
-        Some((t, lx, ly, n)) if t.elapsed() < Duration::from_millis(450) && lx == x && ly == y => {
-            (n % 3) + 1
+        Some((t, lx, ly, n)) if t.elapsed() < MULTI_CLICK_WINDOW && lx == x && ly == y => {
+            (n % CLICK_COUNT_CYCLE) + 1
         }
         _ => 1,
     };
@@ -962,8 +975,8 @@ fn mouse(app: &mut App, me: MouseEvent) {
                     }
                 }
             }
-            MouseEventKind::ScrollUp => scroll_perm(app, -3),
-            MouseEventKind::ScrollDown => scroll_perm(app, 3),
+            MouseEventKind::ScrollUp => scroll_perm(app, -WHEEL_SCROLL_ROWS),
+            MouseEventKind::ScrollDown => scroll_perm(app, WHEEL_SCROLL_ROWS),
             _ => app.dirty = false,
         }
         return;
@@ -1003,8 +1016,8 @@ fn mouse(app: &mut App, me: MouseEvent) {
                     app.dirty = false;
                 }
             }
-            (Dialog::Help(h), MouseEventKind::ScrollUp) => h.scroll_by(-3),
-            (Dialog::Help(h), MouseEventKind::ScrollDown) => h.scroll_by(3),
+            (Dialog::Help(h), MouseEventKind::ScrollUp) => h.scroll_by(-WHEEL_SCROLL_ROWS),
+            (Dialog::Help(h), MouseEventKind::ScrollDown) => h.scroll_by(WHEEL_SCROLL_ROWS),
             (Dialog::Help(_), MouseEventKind::Down(_)) => app.dialog = None,
             (Dialog::Mcp(d), MouseEventKind::Down(MouseButton::Left)) => {
                 if !d.rect.contains(pos) {
@@ -1014,8 +1027,8 @@ fn mouse(app: &mut App, me: MouseEvent) {
                     d.set_expanded(&app.mcp, None);
                 }
             }
-            (Dialog::Mcp(d), MouseEventKind::ScrollUp) => d.scroll_by(-3),
-            (Dialog::Mcp(d), MouseEventKind::ScrollDown) => d.scroll_by(3),
+            (Dialog::Mcp(d), MouseEventKind::ScrollUp) => d.scroll_by(-WHEEL_SCROLL_ROWS),
+            (Dialog::Mcp(d), MouseEventKind::ScrollDown) => d.scroll_by(WHEEL_SCROLL_ROWS),
             _ => app.dirty = false,
         }
         return;
@@ -1063,9 +1076,9 @@ fn mouse(app: &mut App, me: MouseEvent) {
     {
         let before = app.sidebar_scroll;
         app.sidebar_scroll = if me.kind == MouseEventKind::ScrollUp {
-            before.saturating_sub(3)
+            before.saturating_sub(WHEEL_SCROLL_ROWS as usize)
         } else {
-            (before + 3).min(app.sidebar_max_scroll)
+            (before + WHEEL_SCROLL_ROWS as usize).min(app.sidebar_max_scroll)
         };
         app.dirty = app.sidebar_scroll != before;
         return;
@@ -1096,12 +1109,12 @@ fn mouse(app: &mut App, me: MouseEvent) {
     match me.kind {
         MouseEventKind::ScrollUp => {
             if c.contains(x, y) || y < lay.prompt.y {
-                c.scroll_by(-3, false);
+                c.scroll_by(-WHEEL_SCROLL_ROWS, false);
             }
         }
         MouseEventKind::ScrollDown => {
             if c.contains(x, y) || y < lay.prompt.y {
-                c.scroll_by(3, false);
+                c.scroll_by(WHEEL_SCROLL_ROWS, false);
             }
         }
         MouseEventKind::Down(MouseButton::Left) => {
@@ -1199,9 +1212,9 @@ fn watch_mouse(app: &mut App, me: MouseEvent) {
         // The wheel scrolls the tile under the pointer, focused or not.
         MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
             let d = if me.kind == MouseEventKind::ScrollUp {
-                -3
+                -WHEEL_SCROLL_ROWS
             } else {
-                3
+                WHEEL_SCROLL_ROWS
             };
             match tile.and_then(|sid| app.views.get_mut(&sid)) {
                 Some(v) => v.chat.scroll_by(d, false),
