@@ -20,10 +20,11 @@ pub(crate) const PROTOCOL_VERSION: &str = "2025-06-18";
 /// Most `tools/list` pages followed before the list is cut off.
 const MAX_TOOL_PAGES: usize = 1000;
 
-/// JSON-RPC and MCP names that both transports and the client depend on.
-pub(crate) const JSONRPC_VERSION: &str = "2.0";
+/// JSON-RPC version sent in every message.
+const JSONRPC_VERSION: &str = "2.0";
 /// JSON-RPC error code for an unknown method.
 const METHOD_NOT_FOUND: i64 = -32601;
+// MCP method and notification names; the HTTP transport also uses the initialize ones.
 pub(crate) const METHOD_INITIALIZE: &str = "initialize";
 const METHOD_PING: &str = "ping";
 const METHOD_ROOTS_LIST: &str = "roots/list";
