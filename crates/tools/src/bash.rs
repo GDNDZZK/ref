@@ -28,6 +28,7 @@ const READ_BUF_BYTES: usize = 64 * 1024;
 const OUTPUT_CHANNEL_CAPACITY: usize = 16;
 /// The `[wall time ..]` note is added for commands that ran at least this long.
 const WALL_TIME_NOTE_MIN: Duration = Duration::from_secs(1);
+const NO_EXIT_CODE_NOTE: &str = "[terminated without an exit code]";
 
 /// Name the model calls the tool by.
 pub(crate) const NAME: &str = "bash";
@@ -609,8 +610,6 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     };
     Ok(build_output(col, ending, duration, timeout_secs))
 }
-
-const NO_EXIT_CODE_NOTE: &str = "[terminated without an exit code]";
 
 /// Note for a command that ended without an exit code.
 fn killed_note(status: &std::process::ExitStatus) -> String {
