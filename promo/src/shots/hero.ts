@@ -35,13 +35,13 @@ const GRID = { x: 0.6, y: 0.5 }
 // While main starts the workers: the sidebar (its Todo and the Running rows that appear) and
 // main's tile with the create_session calls. The new tiles open on a raw "created by main"
 // message, which stays out of view.
-const MAIN_COLUMN = { x: 0.31, y: 0.25, zoom: 1.6 }
+const MAIN_COLUMN = { x: 0.3, y: 0.25, zoom: 1.68 }
 // The top two rows (main, scout, fixer, tester) before the click on the tester; the docs tile
 // below opens on its raw "created by main" message and stays out of view.
 const GRID_WATCH = { x: 0.6, y: 0.36, zoom: 1 }
 const TESTER_TILE = { x: 0.72, y: 0.52 }
 // The fixer's permission card: its edit header down to the three buttons.
-const FIXER_CARD = { x: 0.41, y: 0.517, zoom: 2.75 }
+const FIXER_CARD = { x: 0.41, y: 0.505, zoom: 2.5 }
 // Main's tile from its header to the status line, while the reviewer reports and the summary
 // streams in (A7).
 const MAIN_SUMMARY = { x: 0.41, y: 0.215, zoom: 2 }
@@ -56,8 +56,13 @@ const SCRIPTED_REPORT_AT = 16.0
 // The report line on the held frame, measured on both takes; re-measure after a retake (the
 // message above it wraps differently from take to take).
 const REPORT_LINE = { x: 0.246, y: 0.084, width: 0.322, height: 0.028 }
-// The spotlight has faded out this long before the camera leaves the held report frame.
-const SPOTLIGHT_GONE_BEFORE_MOVE = 0.3
+// The camera leaves the report here, just after the report mark (about 16.0), so a held report
+// frame keeps the look. The spotlight stays on while the camera pulls out past the raw
+// "[Reply with send_message …]" lines around the report, and fades out over SPOTLIGHT_FADE as
+// the grid comes into view (the pull-out takes 0.8 s).
+const REPORT_LOOK_END_T = 16.1
+const SPOTLIGHT_AFTER_MOVE = 0.7
+const SPOTLIGHT_FADE = 0.3
 // Right after Allow the edit card shows the absolute mock path for a frame or two; the films
 // show the frame before it instead.
 const PATH_FRAMES = { from: 13.0, to: 13.3 }
@@ -75,11 +80,10 @@ const looks = (report: { x: number; y: number }): Look[] => [
   { at: 11.4, ...FIXER_CARD },
   { at: 14.6, ...FIXER_CARD },
   { at: 15.3, ...report, zoom: 2.6 },
-  // Just after the report mark (about 16.0), so a held report frame keeps this look.
-  { at: 16.1, ...report, zoom: 2.6 },
+  { at: REPORT_LOOK_END_T, ...report, zoom: 2.6 },
   { at: 16.9, ...GRID, zoom: 1 },
   { at: 20.6, ...GRID, zoom: 1 },
-  // A7 cuts in at 21.0.
+  // A7 cuts in after this (A7_CLIP_FROM in intro.ts and crew.ts).
   { at: 21.0, ...MAIN_SUMMARY },
 ]
 
@@ -118,7 +122,8 @@ const NOTICES: readonly { at: number; title: string; body: Localized }[] = [
 
 export interface HeroCutOptions {
   enter?: Cut['enter']
-  // Hold the frame with the tester's report this many seconds when the cut reaches it.
+  // Hold the frame with the tester's report this many seconds when the cut reaches it, before the
+  // camera pulls out (the picture stays on it through the pull-out, see heroCut).
   holdReport?: number
 }
 
@@ -126,11 +131,18 @@ export interface HeroCutOptions {
 export function heroCut(from: number, to: number, clipFrom: number, options: HeroCutOptions = {}): Cut {
   const { enterAt, clicks, reportAt } = recording()
   const hold = options.holdReport ? { at: reportAt, seconds: options.holdReport } : { at: Infinity, seconds: 0 }
-  // Shot seconds of mock time `t`, and the other way round.
+  // Shot seconds of mock time `t` for the camera.
   const shift = (t: number) => t - clipFrom + (t > hold.at ? hold.seconds : 0)
+  // The spotlight ends after the camera has pulled out of the report; the picture stays on the
+  // report frame until then, so the spotlight keeps framing the report line, and plays on from
+  // there, `freeze` seconds behind the recording.
+  const spotlightEnd = shift(REPORT_LOOK_END_T) + SPOTLIGHT_AFTER_MOVE
+  const freeze = options.holdReport ? spotlightEnd - shift(reportAt) : 0
+  // Shot seconds of mock time `t` in the picture, and the other way round.
+  const pictureShift = (t: number) => t - clipFrom + (t > hold.at ? freeze : 0)
   const mockTime = (time: number) => {
     const raw = clipFrom + time
-    const held = raw < hold.at ? raw : Math.max(hold.at, raw - hold.seconds)
+    const held = raw < hold.at ? raw : Math.max(hold.at, raw - freeze)
     return held >= PATH_FRAMES.from && held < PATH_FRAMES.to ? PATH_FRAMES.from : held
   }
   return {
@@ -147,8 +159,8 @@ export function heroCut(from: number, to: number, clipFrom: number, options: Her
         windowFrom: -1,
         looks: looks({ x: REPORT_LINE.x + REPORT_LINE.width / 2, y: REPORT_LINE.y + REPORT_LINE.height / 2 }).map((look) => ({ ...look, at: shift(look.at) })),
         marks: [
-          ...(options.holdReport ? [{ ...REPORT_LINE, spotlight: true, from: shift(reportAt) - 0.1, to: shift(reportAt) + hold.seconds - SPOTLIGHT_GONE_BEFORE_MOVE }] : []),
-          { ...MAIN_TODO_DONE, from: shift(TODO_DONE_MARK_T), to: shift(HERO_END_T) + 10 },
+          ...(options.holdReport ? [{ ...REPORT_LINE, spotlight: true, from: shift(reportAt) - 0.1, to: spotlightEnd, exitSeconds: SPOTLIGHT_FADE }] : []),
+          { ...MAIN_TODO_DONE, from: pictureShift(TODO_DONE_MARK_T), to: pictureShift(HERO_END_T) + 10 },
         ],
         pointer: {
           path: pointerPath(clicks).map((key) => ({ ...key, at: shift(key.at) })),
@@ -156,7 +168,7 @@ export function heroCut(from: number, to: number, clipFrom: number, options: Her
         },
         extras: (shot) => {
           for (const notice of NOTICES) {
-            const at = shift(notice.at)
+            const at = pictureShift(notice.at)
             if (at + NOTICE_SECONDS < 0 || at > seconds) continue
             shot.add(notificationCard({ title: notice.title, body: notice.body, from: at, to: at + NOTICE_SECONDS }))
           }

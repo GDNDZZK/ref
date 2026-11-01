@@ -13,6 +13,8 @@ export interface HighlightOptions {
   spotlight?: boolean
   from: number
   to: number
+  // How long it takes to fade out, ending at `to` (default EXIT_SECONDS).
+  exitSeconds?: number
 }
 
 const ENTER_SECONDS = 0.45
@@ -37,7 +39,8 @@ export function highlight(options: HighlightOptions): Part {
     el,
     render(time) {
       const entering = span(time, options.from, ENTER_SECONDS, 'outBack')
-      const leaving = span(time, options.to - EXIT_SECONDS, EXIT_SECONDS, 'inCubic')
+      const exit = options.exitSeconds ?? EXIT_SECONDS
+      const leaving = span(time, options.to - exit, exit, 'inCubic')
       el.style.opacity = String(Math.min(1, entering) * (1 - leaving))
       el.style.transform = `scale(${ENTER_SCALE - (ENTER_SCALE - 1) * entering})`
     },
