@@ -16,6 +16,13 @@ use tokio_util::sync::CancellationToken;
 
 /// Largest response body read.
 pub(super) const MAX_BODY: usize = 20 * 1024 * 1024;
+const MAX_REDIRECTS: usize = 10;
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+/// Request timeout floor, so an expired deadline still fails through the request.
+const MIN_REMAINING: Duration = Duration::from_millis(1);
+/// Bytes of a page searched for a charset declaration.
+const CHARSET_SNIFF_BYTES: usize = 4096;
 
 pub struct Fetched {
     /// After redirects.
@@ -88,9 +95,9 @@ pub fn accept_language_for(loc: &str) -> String {
 
 fn build(direct: bool) -> Result<Client, String> {
     let mut b = Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .connect_timeout(Duration::from_secs(15))
-        .pool_idle_timeout(Duration::from_secs(60));
+        .redirect(reqwest::redirect::Policy::limited(MAX_REDIRECTS))
+        .connect_timeout(CONNECT_TIMEOUT)
+        .pool_idle_timeout(POOL_IDLE_TIMEOUT);
     if direct {
         b = b.no_proxy();
     }
@@ -182,7 +189,7 @@ pub async fn get(
     let send = |ua: String| {
         let left = deadline
             .saturating_duration_since(Instant::now())
-            .max(Duration::from_millis(1));
+            .max(MIN_REMAINING);
         c.get(url.clone())
             .header(USER_AGENT, ua)
             .header(ACCEPT, accept)
@@ -316,7 +323,7 @@ fn meta_charset(bytes: &[u8]) -> Option<String> {
     static XML: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r#"(?i)<\?xml[^>]*encoding\s*=\s*["']([A-Za-z0-9_:.\-]+)"#).unwrap()
     });
-    let head = String::from_utf8_lossy(&bytes[..bytes.len().min(4096)]);
+    let head = String::from_utf8_lossy(&bytes[..bytes.len().min(CHARSET_SNIFF_BYTES)]);
     XML.captures(&head)
         .or_else(|| META.captures(&head))
         .map(|c| c[1].to_string())
