@@ -66,6 +66,9 @@ QtObject {
 	readonly property int radius: 10
 	readonly property int radiusLarge: 18
 
+	readonly property int toolBodyPaddingX: 14
+	readonly property int toolBodyPaddingY: 10
+	readonly property int toolBodyBottomExtra: 2 // the body has this much more below than above
 	readonly property int pagePadding: 24
 	readonly property int metaLineHeight: 24 // a line of the meta row under a message
 	readonly property int blockSpacing: 14

@@ -13,8 +13,8 @@ Item {
 	signal showAllRequested()
 
 	readonly property var meta: call.meta
-	readonly property int horizontalPadding: 14
-	readonly property int verticalPadding: 10
+	readonly property int horizontalPadding: Theme.toolBodyPaddingX
+	readonly property int verticalPadding: Theme.toolBodyPaddingY
 	readonly property bool hasLines: ToolInfo.listing(call.output).some(group => group.rows.length > 0)
 	readonly property string kind: {
 		switch (call.toolName) {
@@ -63,7 +63,7 @@ Item {
 		images: body.call.images
 		sessionId: body.call.chat.sessionId
 		onImageClicked: image => body.call.chat.imageClicked(image)
-		bottomPadding: body.verticalPadding + 2
+		bottomPadding: body.verticalPadding + Theme.toolBodyBottomExtra
 	}
 
 	Loader {
