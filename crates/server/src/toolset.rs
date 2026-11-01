@@ -12,7 +12,7 @@ use serde_json::{Map, Value, json};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
-pub const PURPOSE_DESC: &str = "One short sentence saying why you are calling this tool; shown to the user. Use the language of the user's messages.";
+const PURPOSE_DESC: &str = "One short sentence saying why you are calling this tool; shown to the user. Use the language of the user's messages.";
 
 /// Max MCP text output returned to the model.
 const MCP_MAX_BYTES: usize = 50 * 1024;
@@ -36,7 +36,7 @@ pub struct Entry {
 }
 
 /// Inserts the required `purpose` property as the FIRST property of a JSON schema.
-pub fn with_purpose(schema: &Value) -> Value {
+pub(crate) fn with_purpose(schema: &Value) -> Value {
     let mut obj = schema.as_object().cloned().unwrap_or_default();
     obj.entry("type").or_insert_with(|| json!("object"));
     let mut props = Map::new();
@@ -69,7 +69,7 @@ pub fn with_purpose(schema: &Value) -> Value {
 }
 
 /// `<server>_<tool>` with chars outside `[A-Za-z0-9_-]` replaced by `_`, max 64 chars.
-pub fn mcp_tool_name(server: &str, tool: &str) -> String {
+pub(crate) fn mcp_tool_name(server: &str, tool: &str) -> String {
     let raw = format!("{server}_{tool}");
     raw.chars()
         .map(|c| {
@@ -91,7 +91,7 @@ pub(crate) fn def(name: &str, description: &str, params: Value) -> ToolDef {
     }
 }
 
-pub fn harness_defs() -> Vec<ToolDef> {
+fn harness_defs() -> Vec<ToolDef> {
     vec![
         def(
             "context_window",
@@ -126,7 +126,7 @@ pub fn harness_defs() -> Vec<ToolDef> {
 }
 
 /// Full tool list for a session in fixed order.
-pub fn assemble(cfg: &Config, agent: &str, mcp: &[Arc<McpServer>]) -> Vec<Entry> {
+pub(crate) fn assemble(cfg: &Config, agent: &str, mcp: &[Arc<McpServer>]) -> Vec<Entry> {
     let mut out = Vec::new();
     let push = |d: ToolDef, kind: Kind, out: &mut Vec<Entry>| {
         if !cfg.tool_disabled(agent, &d.name) && !out.iter().any(|e: &Entry| e.def.name == d.name) {
@@ -181,7 +181,7 @@ pub fn assemble(cfg: &Config, agent: &str, mcp: &[Arc<McpServer>]) -> Vec<Entry>
 }
 
 /// Permission subject for a call.
-pub fn subject(tool: &str, input: &Value) -> String {
+pub(crate) fn subject(tool: &str, input: &Value) -> String {
     let get = |k: &str| {
         input
             .get(k)
@@ -200,7 +200,7 @@ pub fn subject(tool: &str, input: &Value) -> String {
 pub type OutputSink = Option<Arc<dyn Fn(&str) + Send + Sync>>;
 
 /// Execute one tool call (permission / delay already handled by the engine).
-pub async fn dispatch(
+pub(crate) async fn dispatch(
     hub: Arc<Hub>,
     s: Arc<Session>,
     kind: Kind,
@@ -350,7 +350,7 @@ fn harness(hub: &Arc<Hub>, s: &Arc<Session>, name: &str, input: &Value) -> ToolO
 }
 
 /// Text echoed to the model after a `todo` update.
-pub fn format_todos(todos: &[Todo]) -> String {
+fn format_todos(todos: &[Todo]) -> String {
     if todos.is_empty() {
         return "Todo list cleared.".into();
     }

@@ -19,7 +19,7 @@ pub mod question;
 pub mod session;
 pub mod store;
 pub mod title;
-pub mod toolset;
+mod toolset;
 pub mod util;
 pub mod ws;
 
