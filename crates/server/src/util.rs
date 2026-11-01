@@ -12,6 +12,19 @@ pub fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 const BASE62: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
+const MSG_PREFIX: &str = "msg";
+const SESSION_PREFIX: &str = "ses";
+
+/// Id of a new message.
+pub fn new_msg_id() -> String {
+    new_id(MSG_PREFIX)
+}
+
+/// Id of a new session.
+pub fn new_session_id() -> String {
+    new_id(SESSION_PREFIX)
+}
+
 /// Time-sortable id: `<prefix>_` + 12 hex digits of epoch millis + 8 random base62 chars.
 pub fn new_id(prefix: &str) -> String {
     let ms = ref_proto::now_ms().max(0) as u64;

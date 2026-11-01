@@ -246,7 +246,7 @@ pub fn user_message(
         });
     }
     Message {
-        id: crate::util::new_id("msg"),
+        id: crate::util::new_msg_id(),
         role: Role::User,
         time: now,
         time_end: None,

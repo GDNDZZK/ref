@@ -54,7 +54,7 @@ fn model() -> ModelRef {
 
 fn message(role: Role, time: i64, parts: Vec<Part>) -> Message {
     Message {
-        id: crate::util::new_id("msg"),
+        id: crate::util::new_msg_id(),
         role,
         time,
         time_end: None,
@@ -166,7 +166,7 @@ pub fn save(store: &Store, cfg: &Config, cwd: &str) -> Result<(), String> {
         let mut context = crate::models::context_for(cfg, &model());
         context.used = USED_TOKENS;
         let info = SessionInfo {
-            id: crate::util::new_id("ses"),
+            id: crate::util::new_session_id(),
             name: old.name.into(),
             title: old.title.into(),
             agent: MOCK_AGENT.into(),
