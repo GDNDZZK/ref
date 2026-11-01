@@ -50,11 +50,10 @@ const HELLO_ID: u64 = u64::MAX;
 const RECONNECT_DELAY: Duration = Duration::from_secs(1);
 
 /// What a text frame from the server means to the transport.
-#[allow(clippy::large_enum_variant)]
 enum Incoming {
     HelloAccepted,
     HelloRejected(String),
-    Frame(ServerFrame),
+    Frame(Box<ServerFrame>),
 }
 
 /// Why `pump` returned.
@@ -88,7 +87,7 @@ fn classify_text_frame(text: &str) -> Option<Incoming> {
         ..
     } = &frame
     else {
-        return Some(Incoming::Frame(frame));
+        return Some(Incoming::Frame(Box::new(frame)));
     };
     if *ok {
         return Some(Incoming::HelloAccepted);
@@ -128,7 +127,7 @@ async fn pump(
                             }
                         }
                         Some(Incoming::Frame(frame)) => {
-                            if events.send(NetEvent::Frame(frame)).is_err() {
+                            if events.send(NetEvent::Frame(*frame)).is_err() {
                                 return PumpExit::Stop;
                             }
                         }

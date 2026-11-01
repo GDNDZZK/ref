@@ -23,6 +23,7 @@ pub const MS_PER_SEC: i64 = 1000;
 const MS_PER_MIN: i64 = 60 * MS_PER_SEC;
 const MS_PER_HOUR: i64 = 60 * MS_PER_MIN;
 const SECS_PER_MIN: i64 = 60;
+const MINS_PER_HOUR: i64 = 60;
 const SECS_PER_HOUR: i64 = 60 * SECS_PER_MIN;
 const SECS_PER_DAY: i64 = 24 * SECS_PER_HOUR;
 /// Durations below this many ms print with one decimal.
@@ -401,7 +402,11 @@ pub fn fmt_dur(ms: i64) -> String {
             (ms / MS_PER_SEC) % SECS_PER_MIN
         )
     } else {
-        format!("{}h {:02}m", ms / MS_PER_HOUR, (ms / MS_PER_MIN) % 60)
+        format!(
+            "{}h {:02}m",
+            ms / MS_PER_HOUR,
+            (ms / MS_PER_MIN) % MINS_PER_HOUR
+        )
     }
 }
 
@@ -413,7 +418,11 @@ pub fn fmt_elapsed(ms: i64) -> String {
     } else if s < SECS_PER_HOUR {
         format!("{}m {:02}s", s / SECS_PER_MIN, s % SECS_PER_MIN)
     } else {
-        format!("{}h {:02}m", s / SECS_PER_HOUR, (s / SECS_PER_MIN) % 60)
+        format!(
+            "{}h {:02}m",
+            s / SECS_PER_HOUR,
+            (s / SECS_PER_MIN) % MINS_PER_HOUR
+        )
     }
 }
 
