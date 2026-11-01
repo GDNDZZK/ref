@@ -117,6 +117,12 @@ const STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 const EXIT_TIMEOUT: Duration = Duration::from_secs(30);
 const EXIT_NOTICED_WITHIN: Duration = Duration::from_secs(20);
 
+/// Test waits: one step of a scenario, the pause before an expected side effect, and the
+/// poll interval while waiting for one.
+const STEP_TIMEOUT: Duration = Duration::from_secs(5);
+const SETTLE: Duration = Duration::from_millis(200);
+const POLL: Duration = Duration::from_millis(20);
+
 fn cfg(env: BTreeMap<String, String>, cwd: Option<String>) -> ServerConfig {
     ServerConfig {
         name: "mock".into(),
@@ -214,7 +220,7 @@ async fn cancellation_sends_notification() {
     let tok = CancellationToken::new();
     let t2 = tok.clone();
     tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        tokio::time::sleep(SETTLE).await;
         t2.cancel();
     });
     let err = c
@@ -234,7 +240,7 @@ async fn cancellation_sends_notification() {
         if seen != "null" {
             break;
         }
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        tokio::time::sleep(POLL).await;
     }
     let v: serde_json::Value = serde_json::from_str(&seen).unwrap();
     assert!(v["requestId"].is_number(), "{seen}");
@@ -249,7 +255,7 @@ async fn notifications_and_server_requests() {
     assert_eq!(*rx.borrow(), 0);
     let tok = CancellationToken::new();
     c.call_tool("notify", json!({}), &tok).await.unwrap();
-    tokio::time::timeout(Duration::from_secs(5), rx.changed())
+    tokio::time::timeout(STEP_TIMEOUT, rx.changed())
         .await
         .unwrap()
         .unwrap();
@@ -304,7 +310,7 @@ async fn spawn_failure_and_early_exit() {
             env: BTreeMap::new(),
             cwd: None,
         },
-        timeout: Duration::from_secs(5),
+        timeout: STEP_TIMEOUT,
     };
     let err = McpClient::connect(&bad).await.err().unwrap();
     assert!(format!("{err:#}").contains("failed to spawn"), "{err:#}");
