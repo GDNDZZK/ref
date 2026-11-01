@@ -31,7 +31,10 @@ Rectangle {
 
 	// The command map of an entry, for a command list.
 	function commandAt(index) {
-		return kind === CompletionKind.command && index >= 0 && index < entries.length ? entries[index] : null
+		const isCommandIndex = kind === CompletionKind.command && index >= 0 && index < entries.length
+		if (!isCommandIndex)
+			return null
+		return entries[index]
 	}
 
 	readonly property real shownHeight: Math.min(count, popupMaxRows) * popupRowHeight + 2 * popupPadding
