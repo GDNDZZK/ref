@@ -194,13 +194,13 @@ fn convert_messages(provider: &Provider, model: &Model, req: &Request) -> Vec<Va
         match msg {
             ChatMessage::User(parts) => {
                 if let Some(m) = user_message(model, parts) {
-                    push_merged(&mut out, m);
+                    push_user(&mut out, m);
                 }
             }
             ChatMessage::Assistant { blocks, origin } => {
                 let replay = same_origin(origin, provider, model);
                 if let Some(m) = assistant_message(blocks, replay, require_reasoning) {
-                    push_merged(&mut out, m);
+                    push_assistant(&mut out, m);
                 }
             }
             ChatMessage::ToolResult {
@@ -280,7 +280,7 @@ fn assistant_message(
     blocks: &[AssistantBlock],
     replay: bool,
     require_reasoning: bool,
-) -> Option<Value> {
+) -> Option<Map<String, Value>> {
     let mut text = String::new();
     let mut reasoning = String::new();
     let mut field: Option<String> = None;
@@ -346,29 +346,28 @@ fn assistant_message(
     if !tool_calls.is_empty() {
         msg.insert("tool_calls".into(), Value::Array(tool_calls));
     }
-    Some(Value::Object(msg))
+    Some(msg)
 }
 
-/// Push a message, merging it into the previous one when both are user
-/// messages (some hosts reject consecutive same-role messages) or both are
-/// assistant messages.
-fn push_merged(out: &mut Vec<Value>, msg: Value) {
-    let role = msg["role"].as_str().unwrap_or("");
-    let Some(prev) = out.last_mut() else {
-        out.push(msg);
+/// Push a user message, merging it into the previous one when that is a user message too
+/// (some hosts reject consecutive same-role messages).
+fn push_user(out: &mut Vec<Value>, msg: Value) {
+    match out.last_mut() {
+        Some(prev) if prev["role"] == "user" => {
+            let a = std::mem::take(&mut prev["content"]);
+            prev["content"] = merge_user_content(a, msg["content"].clone());
+        }
+        _ => out.push(msg),
+    }
+}
+
+/// Push an assistant message, merging it into the previous one when that is an assistant
+/// message too: text / reasoning are concatenated, tool calls appended.
+fn push_assistant(out: &mut Vec<Value>, next: Map<String, Value>) {
+    let Some(prev) = out.last_mut().filter(|p| p["role"] == "assistant") else {
+        out.push(Value::Object(next));
         return;
     };
-    if prev["role"].as_str() != Some(role) || !matches!(role, "user" | "assistant") {
-        out.push(msg);
-        return;
-    }
-    if role == "user" {
-        let a = std::mem::take(&mut prev["content"]);
-        prev["content"] = merge_user_content(a, msg["content"].clone());
-        return;
-    }
-    // Assistant: concatenate text / reasoning, append tool calls.
-    let Value::Object(next) = msg else { return };
     for (k, v) in next {
         match (k.as_str(), prev.get_mut(&k)) {
             ("role", _) => {}
