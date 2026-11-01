@@ -5,6 +5,7 @@ import { castWindow } from '../shots/castWindow.ts'
 import { HOOK_RECT, terminalCut } from '../shots/terminalHook.ts'
 import { FEATURES } from './features.ts'
 import { OPENCODE_JSON } from './opencodeConfig.ts'
+import { FIXTURE_CAST, opencodeModelMarks } from './shared.ts'
 import { cues, drawnCut, endCut, timelineFilm } from './timeline.ts'
 
 const HOOK_END = 3.0
@@ -50,7 +51,6 @@ const API_KEY_LINE = OPENCODE_JSON.findIndex((line) => line.includes('apiKey'))
 const CARD = { x: 360, y: 90, width: 1200 }
 
 // tui-fixture-start (RB1) markers: `cd ~/project` typed, ref ready, ctrl+x m, ctrl+x a.
-const FIXTURE_CAST = { name: 'tui-fixture-start', title: 'ref', x: 200, y: 96, fontSize: 22 }
 const TYPING_FROM = { mark: 'cd', offset: -0.3 }
 // Shot 3 plays the typing a little faster, then cuts over the blank screen while ref starts
 // (cast 4.3 s, after the enter on `ref`) to just before it is ready.
@@ -62,11 +62,31 @@ const AGENTS_CUT = 14.1
 const MODELS_FROM = { mark: 'models', offset: -0.2 }
 const AGENTS_FROM = { mark: 'agents', offset: -0.2 }
 
-function fixtureCut(start: number, end: number, castFrom: { mark: string; offset: number }, speed = 1, enter?: 'cut') {
+interface FixtureCutOptions {
+  speed?: number
+  enter?: 'cut'
+  marks?: boolean
+}
+
+// The models callouts come in once the dialog is up.
+const MODEL_MARKS_FROM = 0.7
+
+function fixtureCut(start: number, end: number, castFrom: { mark: string; offset: number }, { speed = 1, enter, marks = false }: FixtureCutOptions = {}) {
   return drawnCut(
     start,
     end,
-    (shot, seconds) => shot.add(castWindow({ ...FIXTURE_CAST, castFrom, speed, start: 0, from: -1, to: seconds + 1 })),
+    (shot, seconds) =>
+      shot.add(
+        castWindow({
+          ...FIXTURE_CAST,
+          castFrom,
+          speed,
+          marks: marks ? opencodeModelMarks(MODEL_MARKS_FROM, seconds + 1) : undefined,
+          start: 0,
+          from: -1,
+          to: seconds + 1,
+        }),
+      ),
     enter,
   )
 }
@@ -89,10 +109,10 @@ export const scene = timelineFilm({
         }),
       ),
     ),
-    fixtureCut(CONFIG_END, READY_CUT, TYPING_FROM, TYPING_SPEED),
-    fixtureCut(READY_CUT, DIALOGS_START, READY_FROM, 1, 'cut'),
-    fixtureCut(DIALOGS_START, AGENTS_CUT, MODELS_FROM, 1, 'cut'),
-    fixtureCut(AGENTS_CUT, DIALOGS_END, AGENTS_FROM, 1, 'cut'),
+    fixtureCut(CONFIG_END, READY_CUT, TYPING_FROM, { speed: TYPING_SPEED }),
+    fixtureCut(READY_CUT, DIALOGS_START, READY_FROM, { enter: 'cut' }),
+    fixtureCut(DIALOGS_START, AGENTS_CUT, MODELS_FROM, { enter: 'cut', marks: true }),
+    fixtureCut(AGENTS_CUT, DIALOGS_END, AGENTS_FROM, { enter: 'cut' }),
     drawnCut(DIALOGS_END, KEYS_END, (shot, seconds) => {
       shot.add(
         textCard({

@@ -60,9 +60,11 @@ export interface Backend {
 }
 
 // `ref-server --mock`: a scripted fake backend that prints {"port":N,"token":"..."}.
-// It exits when its stdin closes, which is how stop() ends it.
-export async function startMockBackend(isolated: IsolatedEnv): Promise<Backend> {
-  const child = spawn(binary('ref-server'), ['--mock'], {
+// It exits when its stdin closes, which is how stop() ends it. By default it also exits when its
+// last client leaves; `standalone` keeps it running like a backend the user started.
+export async function startMockBackend(isolated: IsolatedEnv, { standalone = false } = {}): Promise<Backend> {
+  const args = standalone ? ['--mock', '--idle-timeout', '-1'] : ['--mock']
+  const child = spawn(binary('ref-server'), args, {
     env: isolated.env,
     stdio: ['pipe', 'pipe', 'inherit'],
   })

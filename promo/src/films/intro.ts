@@ -3,6 +3,8 @@ import { compareCard } from '../components/compareCard.ts'
 import { fakeTerminal } from '../components/fakeTerminal.ts'
 import { releaseCard } from '../components/releaseCard.ts'
 import { serverPill } from '../components/serverPill.ts'
+import { timeSkipChip } from '../components/timeSkipChip.ts'
+import { CLOSE_SECONDS } from '../components/windowClose.ts'
 import { defineShot } from '../engine/shot.ts'
 import { backdrop } from '../components/backdrop.ts'
 import { featureTag } from '../components/featureTag.ts'
@@ -15,7 +17,7 @@ import { COMPARE } from './compare.ts'
 import { COPY, HERO_CAPTIONS, HERO_FILM_START } from './copy.ts'
 import { FEATURES } from './features.ts'
 import { RELEASE } from './release.ts'
-import { OUTAGE_CAST, addBrandTitle, clickedClip, crewWindowsCut } from './shared.ts'
+import { FIXTURE_CAST, OUTAGE_CAST, SERVER_CAST, WIDE_TUI, addBrandTitle, clickedClip, crewWindowsCut, opencodeModelMarks } from './shared.ts'
 import { cues, drawnCut, endCut, timelineFilm, type Cut } from './timeline.ts'
 
 const A6_END = 24.4
@@ -31,20 +33,32 @@ const START_END = 65.6
 const FILM_END = 70.6
 
 // A10: `ref-server` typed in a terminal (RB2), then the three windows of the standalone take (M2)
-// close one second apart. The pill counts from the server start.
+// close one after the other. The pill counts from the server start with no sessions; once the
+// last window is closed it skips (time-skip chip) to the take's uptime and session count.
 const PILL_DELAY_SECONDS = 0.6
 // RB2 from just before `ref-server` is typed (cast marker "typed").
 const SERVER_TYPED = { mark: 'typed', offset: -0.2 }
-const CLOSE_STAGGER_SECONDS = 1
+const CLOSE_STAGGER_SECONDS = 0.8
 const FIRST_CLOSE_SECONDS = 0.6
-// Seconds the standalone server had been up when the windows closed, and the sessions it
-// had then: main and four workers (printed by capture/standalone.ts).
+const WINDOW_COUNT = 3
+// Seconds the standalone server had been up when the windows were photographed, and the
+// sessions it had then: main and four workers (printed by capture/standalone.ts).
 const UPTIME_AT_CLOSE_SECONDS = 35
 const SESSIONS_AT_CLOSE = { en: '5 sessions running', zh: '5 个会话在运行' }
+const PILL_FROM = CREW_END + PILL_DELAY_SECONDS
+const ALL_CLOSED_AT = SERVER_START_END + FIRST_CLOSE_SECONDS + (WINDOW_COUNT - 1) * CLOSE_STAGGER_SECONDS + CLOSE_SECONDS
+const PILL_SKIP_SECONDS = UPTIME_AT_CLOSE_SECONDS - (ALL_CLOSED_AT - PILL_FROM)
+const SKIP_CHIP_AT = { x: 1660, y: 100 }
 
-const serverStartCut: Cut = drawnCut(CREW_END, SERVER_START_END, (shot, seconds) => {
-  shot.add(castWindow({ name: 'tui-server-start', title: '', x: 260, y: 140, fontSize: 24, castFrom: SERVER_TYPED, start: 0, from: 0, to: seconds }))
-})
+// A hard cut: a fade would show the crew windows over the terminal.
+const serverStartCut: Cut = drawnCut(
+  CREW_END,
+  SERVER_START_END,
+  (shot, seconds) => {
+    shot.add(castWindow({ ...SERVER_CAST, x: 260, y: 140, castFrom: SERVER_TYPED, start: 0, from: 0, to: seconds }))
+  },
+  'cut',
+)
 
 const standaloneCut: Cut = {
   from: SERVER_START_END,
@@ -62,16 +76,33 @@ const standaloneCut: Cut = {
     ),
 }
 
-// A11: three closeups, one feature each. f1 is the row "Retrying in 8s (attempt 3)" alone (the
-// rows under it hold the mock's local address).
-const RETRY_CLOSEUP = { scale: 2, x: 0.2, y: 0.547, rows: 1.3 }
+// A11: three closeups, one feature each. f1 starts on the whole outage take (sidebar in view)
+// and zooms into the row "Retrying in 8s (attempt 3)" (row 17), cut before the rest of the
+// error and above the rows with the mock's local address.
+// The text runs from column 3 (the bar) to 33 (the colon).
+const RETRY_CLOSEUP = { scale: 2.2, x: 18.6 / 150, y: 17.5 / 40, rows: 1.3, cols: 31.4 }
+const RETRY_CLOSEUP_AT = { x: 560, y: 480 }
+const RETRY_ZOOM = { at: 1.0, wide: WIDE_TUI }
 // f3: the model dialog of the real-backend take (cast marker "models": ctrl+x m is pressed).
 const MODEL_DIALOG = { mark: 'models', offset: -0.2 }
+const MODEL_MARKS_FROM = 0.7
 // f2: Cancel is clicked this long into the cut, after about 2.3 s of countdown.
 const DELAY_CANCEL_AT = 2.6
 const featureCuts: Cut[] = [
   drawnCut(STANDALONE_END, STANDALONE_END + FEATURE_CUT_SECONDS, (shot, seconds) => {
-    shot.add(castWindow({ ...OUTAGE_CAST, y: 380, closeup: RETRY_CLOSEUP, castFrom: { mark: 'attempt3', offset: 0.3 }, start: 0, from: -1, to: seconds + 1 }))
+    shot.add(
+      castWindow({
+        ...OUTAGE_CAST,
+        ...WIDE_TUI,
+        ...RETRY_CLOSEUP_AT,
+        closeup: RETRY_CLOSEUP,
+        zoomIn: RETRY_ZOOM,
+        castFrom: { mark: 'attempt3', offset: -0.3 },
+        start: 0,
+        from: -1,
+        to: seconds + 1,
+      }),
+    )
   }),
   {
     from: STANDALONE_END + FEATURE_CUT_SECONDS,
@@ -80,7 +111,7 @@ const featureCuts: Cut[] = [
       beatShot({ seconds, ...clickedClip('gui-delay', 'cancel', DELAY_CANCEL_AT), looks: [{ at: 0, x: 0.6, y: 0.4, zoom: 1.7 }], windowFrom: -1 }),
   },
   drawnCut(STANDALONE_END + 2 * FEATURE_CUT_SECONDS, STANDALONE_END + 3 * FEATURE_CUT_SECONDS, (shot, seconds) => {
-    shot.add(castWindow({ name: 'tui-fixture-start', title: 'ref', x: 260, y: 100, fontSize: 22, castFrom: MODEL_DIALOG, start: 0, from: -1, to: seconds }))
+    shot.add(castWindow({ ...FIXTURE_CAST, castFrom: MODEL_DIALOG, marks: opencodeModelMarks(MODEL_MARKS_FROM, seconds + 1), start: 0, from: -1, to: seconds }))
   }),
 ]
 
@@ -105,7 +136,7 @@ const startCut: Cut = {
           to: START_TYPING_SECONDS + 0.3,
         }),
       )
-      shot.add(castWindow({ name: 'tui-fixture-start', title: 'ref', x: 260, y: 100, fontSize: 22, castFrom: REF_STARTING, start: START_TYPING_SECONDS, from: START_TYPING_SECONDS, to: seconds + 1 }))
+      shot.add(castWindow({ ...FIXTURE_CAST, castFrom: REF_STARTING, start: START_TYPING_SECONDS, from: START_TYPING_SECONDS, to: seconds + 1 }))
     }),
 }
 
@@ -113,7 +144,8 @@ export const scene = timelineFilm({
   id: 'intro',
   cuts: [
     waitingTabsCut(0, HERO_FILM_START),
-    heroCut(HERO_FILM_START, A6_END, 0, { holdReport: true }),
+    // Hard cut at the Enter: a fade would show the hook terminal through the title card.
+    heroCut(HERO_FILM_START, A6_END, 0, { holdReport: true, enter: 'cut' }),
     heroCut(A6_END, HERO_END, A7_CLIP_FROM, { enter: 'cut' }),
     drawnCut(HERO_END, CARD_END, (shot, seconds) => shot.add(compareCard({ ...COMPARE, from: 0, to: seconds + 1 }))),
     crewWindowsCut(CARD_END, CREW_END),
@@ -141,18 +173,16 @@ export const scene = timelineFilm({
   ]),
   overlay: (shot) => {
     addBrandTitle(shot, HERO_END)
-    // The cut to the windows skips to just before the take's first close.
-    const pillFrom = CREW_END + PILL_DELAY_SECONDS
-    const uptimeAtCut = UPTIME_AT_CLOSE_SECONDS - FIRST_CLOSE_SECONDS
     shot.add(
       serverPill({
         timerStart: 0,
-        jumps: [{ at: SERVER_START_END, seconds: uptimeAtCut - (SERVER_START_END - pillFrom) }],
-        sessions: { text: SESSIONS_AT_CLOSE, from: SERVER_START_END },
-        from: pillFrom,
+        jumps: [{ at: ALL_CLOSED_AT, seconds: PILL_SKIP_SECONDS }],
+        sessions: { text: SESSIONS_AT_CLOSE, from: ALL_CLOSED_AT },
+        from: PILL_FROM,
         to: STANDALONE_END,
       }),
     )
+    shot.add(timeSkipChip({ text: `+${Math.round(PILL_SKIP_SECONDS)} s`, ...SKIP_CHIP_AT, from: ALL_CLOSED_AT, to: STANDALONE_END }))
     const chips = [FEATURES.retries, FEATURES.delay, FEATURES.opencode]
     chips.forEach((chip, index) => {
       const from = STANDALONE_END + index * FEATURE_CUT_SECONDS

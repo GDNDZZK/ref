@@ -1,11 +1,9 @@
 import lockupUrl from '../../../assets/app/ref-lockup-dark.svg'
 import smallMarkUrl from '../../../assets/app/ref-small.svg'
 import { lerp, span } from '../engine/anim.ts'
-import { tr, type Localized } from '../engine/i18n.ts'
 import { element, type Part } from '../engine/part.ts'
 
 export interface BrandTitleOptions {
-  tagline: string | Localized
   from: number
   // The lockup shrinks into the small corner mark here; the mark stays until `to`.
   shrinkAt: number
@@ -22,7 +20,7 @@ const SHRUNK_SCALE = 0.08
 const MARK_ENTER_SECONDS = 0.3
 const EXIT_SECONDS = 0.3
 
-// N9: the ref lockup and the tagline as a title card over the running picture, which then
+// N9: the ref lockup (mark and wordmark) as a title card over the running picture, which then
 // shrinks to the small `r.` mark in the top-left corner.
 export function brandTitle(options: BrandTitleOptions): Part {
   const el = element('div', 'part brand-title')
@@ -30,7 +28,6 @@ export function brandTitle(options: BrandTitleOptions): Part {
   const group = element('div', 'brand-group', el)
   const lockup = element('img', 'brand-lockup', group)
   lockup.src = lockupUrl
-  element('p', 'brand-tagline', group).textContent = tr(options.tagline)
   const mark = element('img', 'brand-corner-mark', el)
   mark.src = smallMarkUrl
 

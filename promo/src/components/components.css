@@ -381,6 +381,8 @@
 
 .fake-terminal-tab-mark {
   min-width: 1em;
+  font-size: 1.5em;
+  line-height: 1;
   color: #7aa2f7;
 }
 
@@ -428,6 +430,9 @@
 
 .compare-card {
   position: absolute;
+  /* Chinese lines break only at spaces, punctuation and the zero-width spaces between words
+     in the cell texts, never inside a word. */
+  word-break: keep-all;
   transform-origin: 0 0;
   padding: 40px 48px 32px;
   border: 1px solid var(--border);
@@ -600,12 +605,6 @@
   width: 620px;
 }
 
-.brand-tagline {
-  margin: 0;
-  font-size: 50px;
-  font-weight: 600;
-}
-
 .brand-corner-mark {
   position: absolute;
   left: 48px;
@@ -644,10 +643,11 @@
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 48px;
-  font-size: 22px;
+  /* 24px above the caption pill (bottom 72px, about 84px high). */
+  bottom: 180px;
+  font-size: 24px;
   text-align: center;
-  color: var(--text-muted);
+  color: color-mix(in srgb, var(--text) 80%, var(--text-muted));
 }
 
 /* Empty browser window */
