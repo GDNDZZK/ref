@@ -15,6 +15,18 @@ const GLOBAL_FILES: &[&str] = &[
     "ref.jsonc",
 ];
 
+/// Config keys shared between loading (layers) and parsing (typed config).
+pub(crate) const KEY_AGENT: &str = "agent";
+/// Legacy opencode name of `agent`; its entries are always primary agents.
+pub(crate) const KEY_LEGACY_MODE: &str = "mode";
+pub(crate) const KEY_COMMAND: &str = "command";
+pub(crate) const KEY_INSTRUCTIONS: &str = "instructions";
+pub(crate) const KEY_SKILLS: &str = "skills";
+
+/// Openers of the substitution forms `{env:VAR}` and `{file:path}`.
+const ENV_OPEN: &str = "{env:";
+const FILE_OPEN: &str = "{file:";
+
 /// Environment lookup used during loading (injectable for tests).
 pub type EnvFn<'a> = &'a dyn Fn(&str) -> Option<String>;
 
@@ -219,7 +231,11 @@ fn load_markdown(ctx: &mut Ctx, dir: &Path, layers: &mut Vec<Layer>) {
         };
         fm.remove("name");
         fm.insert("prompt".into(), Value::String(doc.body));
-        let key = if doc.legacy_mode { "mode" } else { "agent" };
+        let key = if doc.legacy_mode {
+            KEY_LEGACY_MODE
+        } else {
+            KEY_AGENT
+        };
         let mut entry = Map::new();
         entry.insert(doc.name, Value::Object(fm));
         let mut value = Map::new();
@@ -240,7 +256,7 @@ fn load_markdown(ctx: &mut Ctx, dir: &Path, layers: &mut Vec<Layer>) {
         let mut entry = Map::new();
         entry.insert(doc.name, Value::Object(fm));
         let mut value = Map::new();
-        value.insert("command".into(), Value::Object(entry));
+        value.insert(KEY_COMMAND.into(), Value::Object(entry));
         layers.push(Layer {
             source: doc.path,
             value,
@@ -250,7 +266,7 @@ fn load_markdown(ctx: &mut Ctx, dir: &Path, layers: &mut Vec<Layer>) {
 
 /// Make `skills` paths absolute relative to the config file's directory.
 fn normalize_paths(ctx: &mut Ctx, v: &mut Map<String, Value>, base: &Path) {
-    let Some(skills) = v.get_mut("skills") else {
+    let Some(skills) = v.get_mut(KEY_SKILLS) else {
         return;
     };
     let list = match skills {
@@ -295,7 +311,7 @@ pub(crate) fn expand_home(p: &str, home: Option<&Path>, base: &Path) -> PathBuf 
 pub(crate) fn substitute_value(ctx: &mut Ctx, v: &mut Value, base: &Path, source: &Path) {
     match v {
         Value::String(s) => {
-            if s.contains("{env:") || s.contains("{file:") {
+            if s.contains(ENV_OPEN) || s.contains(FILE_OPEN) {
                 *s = substitute(ctx, s, base, source);
             }
         }
@@ -314,7 +330,7 @@ pub(crate) fn substitute(ctx: &mut Ctx, s: &str, base: &Path, source: &Path) -> 
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
     loop {
-        let next = [rest.find("{env:"), rest.find("{file:")]
+        let next = [rest.find(ENV_OPEN), rest.find(FILE_OPEN)]
             .into_iter()
             .flatten()
             .min();
@@ -327,14 +343,18 @@ pub(crate) fn substitute(ctx: &mut Ctx, s: &str, base: &Path, source: &Path) -> 
             break;
         };
         out.push_str(&rest[..start]);
-        let token = &rest[start + 1..start + end_rel];
-        if let Some(var) = token.strip_prefix("env:") {
+        let token = &rest[start..start + end_rel];
+        if let Some(var) = token.strip_prefix(ENV_OPEN) {
             out.push_str(&(ctx.env)(var.trim()).unwrap_or_default());
-        } else if let Some(p) = token.strip_prefix("file:") {
+        } else if let Some(p) = token.strip_prefix(FILE_OPEN) {
             let path = expand_home(p.trim(), ctx.home, base);
             match std::fs::read_to_string(&path) {
                 Ok(t) => out.push_str(t.trim()),
-                Err(e) => ctx.warn(format!("{}: {{file:{}}}: {e}", source.display(), p.trim())),
+                Err(e) => ctx.warn(format!(
+                    "{}: {FILE_OPEN}{}}}: {e}",
+                    source.display(),
+                    p.trim()
+                )),
             }
         }
         rest = &rest[start + end_rel + 1..];
@@ -390,7 +410,7 @@ pub(crate) fn accumulate(ctx: &mut Ctx, layers: &[Layer]) -> (Map<String, Value>
     for l in layers {
         acc.permission
             .extend(layer_rules(ctx, &l.value, &l.source, "permission"));
-        for key in ["mode", "agent"] {
+        for key in [KEY_LEGACY_MODE, KEY_AGENT] {
             if let Some(Value::Object(agents)) = l.value.get(key) {
                 for (name, a) in agents {
                     if let Value::Object(a) = a {
@@ -403,7 +423,7 @@ pub(crate) fn accumulate(ctx: &mut Ctx, layers: &[Layer]) -> (Map<String, Value>
                 }
             }
         }
-        match l.value.get("instructions") {
+        match l.value.get(KEY_INSTRUCTIONS) {
             Some(Value::Array(a)) => {
                 for x in a {
                     match x.as_str() {
@@ -427,7 +447,7 @@ pub(crate) fn accumulate(ctx: &mut Ctx, layers: &[Layer]) -> (Map<String, Value>
                 l.source.display()
             )),
         }
-        if let Some(Value::Array(a)) = l.value.get("instructions") {
+        if let Some(Value::Array(a)) = l.value.get(KEY_INSTRUCTIONS) {
             // `~` expansion only; relative entries are resolved later against the project.
             for s in a.iter().filter_map(Value::as_str) {
                 if s.starts_with('~') {
@@ -440,7 +460,7 @@ pub(crate) fn accumulate(ctx: &mut Ctx, layers: &[Layer]) -> (Map<String, Value>
                 }
             }
         }
-        if let Some(Value::Array(a)) = l.value.get("skills") {
+        if let Some(Value::Array(a)) = l.value.get(KEY_SKILLS) {
             for p in a.iter().filter_map(|x| x.as_str()) {
                 let p = PathBuf::from(p);
                 if !acc.skills.contains(&p) {
