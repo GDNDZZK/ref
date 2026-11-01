@@ -40,6 +40,10 @@
       }
     }
   },
+  "storage": {
+    "settingsCorrupt": "The saved settings could not be read; defaults are used.",
+    "historyCorrupt": "The saved prompt history could not be read; it starts empty."
+  },
   "code": {
     "plainText": "text",
     "copy": "Copy",

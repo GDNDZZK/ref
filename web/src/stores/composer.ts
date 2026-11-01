@@ -33,6 +33,7 @@ export const useComposerStore = defineStore('composer', () => {
   const notices = useNoticesStore()
 
   const history = new StoredPromptHistory(localStorage)
+  if (history.corruptAtStart) notices.push('warn', translate('storage.historyCorrupt'))
   window.addEventListener('storage', (event) => {
     if (event.key === HISTORY_STORAGE_KEY || event.key === null) history.reload()
   })
