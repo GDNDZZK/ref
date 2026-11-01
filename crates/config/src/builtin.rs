@@ -74,12 +74,10 @@ pub(crate) fn question_defaults(cfg: &mut Config) {
         } else {
             Action::Deny
         };
-        let rule = Rule {
-            tool: QUESTION_TOOL.into(),
-            pattern: ANY.into(),
-            action,
-        };
-        agent.permission.rules.insert(0, rule);
+        agent
+            .permission
+            .rules
+            .insert(0, Rule::new(QUESTION_TOOL, ANY, action));
     }
 }
 
