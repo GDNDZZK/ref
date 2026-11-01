@@ -14,6 +14,9 @@ const FRONTMATTER_FENCE: &str = "---";
 /// Deepest directory level `walk` descends to when collecting agents and commands.
 const MAX_WALK_DEPTH: usize = 16;
 
+/// Letters of `nan`, `inf` and hex numbers: words with them stay strings, not floats.
+const NOT_NUMBER_LETTERS: [char; 6] = ['x', 'X', 'n', 'N', 'i', 'I'];
+
 /// Split a markdown document into (frontmatter map, body). Body is trimmed.
 /// Without a leading `---` line the whole text is the body.
 pub fn split_frontmatter(text: &str) -> (Map<String, Value>, String) {
@@ -94,6 +97,11 @@ fn is_list_item(text: &str) -> bool {
     text.starts_with("- ") || text == "-"
 }
 
+/// Whether `n` starts a list nested deeper than `indent`.
+fn is_nested_list(n: &Line, indent: usize) -> bool {
+    n.indent > indent && is_list_item(n.text)
+}
+
 fn skip_blank(lines: &[Line], i: &mut usize) {
     while *i < lines.len() && lines[*i].blank {
         *i += 1;
@@ -124,7 +132,7 @@ fn parse_map(lines: &[Line], i: &mut usize, indent: usize) -> Map<String, Value>
         let value = if rest.is_empty() {
             skip_blank(lines, i);
             match lines.get(*i) {
-                Some(n) if n.indent > indent && is_list_item(n.text) => {
+                Some(n) if is_nested_list(n, indent) => {
                     let ind = n.indent;
                     parse_list(lines, i, ind)
                 }
@@ -242,9 +250,8 @@ fn split_key(text: &str) -> Option<(String, &str)> {
     }
     let bytes = text.as_bytes();
     for (idx, &b) in bytes.iter().enumerate() {
-        if b == b':'
-            && (idx + 1 == bytes.len() || bytes[idx + 1] == b' ' || bytes[idx + 1] == b'\t')
-        {
+        let ends_key = b == b':' && bytes.get(idx + 1).is_none_or(|n| *n == b' ' || *n == b'\t');
+        if ends_key {
             let k = text[..idx].trim();
             if k.is_empty() {
                 return None;
@@ -324,8 +331,8 @@ pub fn scalar(raw: &str) -> Value {
     if let Ok(n) = s.parse::<i64>() {
         return Value::Number(n.into());
     }
-    if s.chars().any(|c| c.is_ascii_digit())
-        && !s.contains(['x', 'X', 'n', 'N', 'i', 'I'])
+    let looks_numeric = s.chars().any(|c| c.is_ascii_digit()) && !s.contains(NOT_NUMBER_LETTERS);
+    if looks_numeric
         && let Ok(f) = s.parse::<f64>()
         && let Some(n) = Number::from_f64(f)
     {
