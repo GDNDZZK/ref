@@ -556,6 +556,16 @@ pub fn build_request(s: &Arc<Session>, prep: &Prep) -> ref_llm::Request {
 // Streaming + retry
 // ---------------------------------------------------------------------------
 
+const DEFAULT_RETRY_MAX_DELAY_SECS: u64 = 600;
+
+/// Longest wait between retries: the configured `retry_max_delay`, or the default when it is 0.
+pub(crate) fn retry_max_delay(cfg: &Config) -> Duration {
+    match cfg.retry_max_delay {
+        0 => Duration::from_secs(DEFAULT_RETRY_MAX_DELAY_SECS),
+        secs => Duration::from_secs(secs),
+    }
+}
+
 /// Backoff delay before retry `attempt` (1-based): `base * 2^(attempt-1)` capped at `max`,
 /// with `jitter` (within `JITTER_FRACTION` of zero) applied, at least `retry_after`, never above `max`.
 pub fn backoff(
@@ -586,11 +596,7 @@ async fn stream_with_retry(
     let mut attempt: u32 = 0;
     let mut non_retryable: u32 = 0;
     let mut overflow_compacted = false;
-    let max = Duration::from_secs(if prep.cfg.retry_max_delay > 0 {
-        prep.cfg.retry_max_delay
-    } else {
-        600
-    });
+    let max = retry_max_delay(&prep.cfg);
     let mut prep_owned: Option<Prep> = None;
     loop {
         let p = prep_owned.as_ref().unwrap_or(prep);
