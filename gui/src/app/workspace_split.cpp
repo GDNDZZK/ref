@@ -76,7 +76,8 @@ QCoro::Task<> Workspace::leaveSplit()
 	{
 		if(other && other != m_current && other->isAttached())
 		{
-			static_cast<void>(co_await other->detach());
+			const QString otherId = other->sessionId();
+			logDropped(co_await other->detach(), "detach"_L1, otherId);
 		}
 	}
 }
@@ -141,7 +142,9 @@ void Workspace::syncTiles()
 		const bool shouldDetachFromTiles = other->isAttached() && !tiles.contains(other) && other != m_current && !m_leaving.contains(other->sessionId());
 		if(shouldDetachFromTiles)
 		{
-			other->detach();
+			[](QCoro::Task<Result<void>> detaching, QString id) -> QCoro::Task<> {
+				logDropped(co_await std::move(detaching), "detach"_L1, id);
+			}(other->detach(), other->sessionId());
 		}
 	}
 	if(!m_focusedTile.isEmpty() && m_tiles.indexOf(m_focusedTile) < 0)
@@ -200,7 +203,8 @@ QCoro::Task<> Workspace::zoomTask(QString sessionId)
 {
 	if(ChatSession* previous = session(m_zoomed); previous != nullptr && previous->isAttached())
 	{
-		static_cast<void>(co_await previous->background());
+		const QString previousId = previous->sessionId();
+		logDropped(co_await previous->background(), "background"_L1, previousId);
 	}
 	m_zoomed = sessionId;
 	setFocusedTile(sessionId);
@@ -236,7 +240,7 @@ QCoro::Task<> Workspace::unzoomTask()
 		// Until the answer, the backend counts the session as attached in the foreground, and an update of
 		// its session list would take the tile away.
 		m_unzooming.insert(id);
-		static_cast<void>(co_await tile->background());
+		logDropped(co_await tile->background(), "background"_L1, id);
 		m_unzooming.remove(id);
 	}
 }

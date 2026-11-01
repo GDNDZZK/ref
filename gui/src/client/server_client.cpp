@@ -20,8 +20,6 @@ namespace
 Q_LOGGING_CATEGORY(lcClient, "refgui.client")
 
 const QString ClientName = u"ref-gui"_s;
-const QString NotConnected = u"not connected"_s;
-const QString ConnectionClosed = u"connection closed"_s;
 const QString BackendSilent = u"the backend stopped answering"_s;
 
 // The token goes in the URL as well as in Hello, the way ref-server's other clients send it.

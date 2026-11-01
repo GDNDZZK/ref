@@ -3,6 +3,7 @@
 #include "workspace/toast_text.h"
 
 #include <QJSEngine>
+#include <QLoggingCategory>
 
 #include <algorithm>
 #include <utility>
@@ -13,6 +14,8 @@ using namespace Qt::StringLiterals;
 
 namespace
 {
+
+Q_LOGGING_CATEGORY(lcWorkspace, "refgui.app.workspace")
 
 Workspace* theInstance = nullptr;
 
@@ -224,6 +227,14 @@ void Workspace::toastCommandUnavailable()
 	toast(refgui::workspace::ToastLevel::Info, tr("That command is not available now."));
 }
 
+void Workspace::logDropped(const Result<void>& result, QLatin1StringView action, const QString& sessionId)
+{
+	if(!result && !refgui::client::isConnectionLost(result.error()))
+	{
+		qCWarning(lcWorkspace).noquote() << action << "of" << sessionId << "failed:" << result.error();
+	}
+}
+
 void Workspace::openDialog(const QString& id, const QVariantMap& args)
 {
 	m_dialog = id;
@@ -419,7 +430,7 @@ QCoro::Task<Workspace::Done> Workspace::show(QString sessionId)
 	if(supersededByNewerShow)
 	{
 		// The user has moved on to another session meanwhile.
-		static_cast<void>(co_await target.detach());
+		logDropped(co_await target.detach(), "detach"_L1, sessionId);
 		co_return Result<void>();
 	}
 	ChatSession* old = m_current;
@@ -427,7 +438,8 @@ QCoro::Task<Workspace::Done> Workspace::show(QString sessionId)
 	const bool shouldDetachOld = old != nullptr && old != &target && !m_split && old->isAttached() && !m_leaving.contains(old->sessionId());
 	if(shouldDetachOld)
 	{
-		static_cast<void>(co_await old->detach());
+		const QString oldId = old->sessionId();
+		logDropped(co_await old->detach(), "detach"_L1, oldId);
 	}
 	co_return Result<void>();
 }

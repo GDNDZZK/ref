@@ -242,6 +242,9 @@ private:
 		return true;
 	}
 	void toastFrom(const refgui::proto::ServerFrame& frame);
+	// Logs a failed detach or background of `sessionId`. The local state counts it as done
+	// anyway, and with the connection gone the failure is expected, so that is not logged.
+	static void logDropped(const refgui::client::Result<void>& result, QLatin1StringView action, const QString& sessionId);
 	template<typename T, typename OnOk>
 	QCoro::Task<> perform(QCoro::Task<refgui::client::Result<T>> request, Reply reply, OnOk onOk);
 	QVariant applyInfo(const refgui::proto::SessionInfo& info);
