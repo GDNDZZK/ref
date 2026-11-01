@@ -1216,6 +1216,191 @@ async fn execute_batch(
     }
 }
 
+/// One tool call of a batch with what its steps need.
+struct CallCtx<'a> {
+    hub: &'a Arc<Hub>,
+    s: &'a Arc<Session>,
+    msg_id: &'a str,
+    call: &'a Call,
+    cancel: &'a CancellationToken,
+}
+
+impl CallCtx<'_> {
+    /// Ends the call with `state` and `out`.
+    fn finish(&self, state: ToolState, out: ref_tools::ToolOutput) {
+        finish_tool(self.hub, self.s, self.msg_id, self.call.index, state, out);
+    }
+
+    /// Ends the call as cancelled by the user.
+    fn finish_cancelled(&self) {
+        let out = ref_tools::ToolOutput::err(CANCELLED_OUTPUT);
+        self.finish(ToolState::Cancelled, out);
+    }
+
+    fn set_state(&self, new: ToolState, run_at: Option<i64>) {
+        set_state(self.hub, self.s, self.msg_id, self.call.index, new, run_at);
+    }
+
+    /// Applies the permission rules and asks the user when needed. Returns false when the
+    /// call was refused (it is finished then).
+    async fn authorize(&self, prep: &Prep, input: &Value, purpose: &str) -> bool {
+        let call = self.call;
+        let subject = toolset::subject(&call.name, input);
+        let mut action = prep.cfg.permission_for(&prep.agent, &call.name, &subject);
+        if action == Action::Ask && self.s.lock().always.contains(&call.name) {
+            action = Action::Allow;
+        }
+        match action {
+            Action::Allow => true,
+            Action::Deny => {
+                let out = ref_tools::ToolOutput::err(format!(
+                    "Permission denied by configuration for tool {}.",
+                    call.name
+                ));
+                self.finish(ToolState::Denied, out);
+                false
+            }
+            Action::Ask => self.ask_user(input, purpose).await,
+        }
+    }
+
+    /// Asks the user for permission and waits for the answer. Returns false when the call
+    /// was denied or cancelled (it is finished then).
+    async fn ask_user(&self, input: &Value, purpose: &str) -> bool {
+        let (hub, s, call) = (self.hub, self.s, self.call);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        {
+            let mut st = s.lock();
+            let request = PermissionRequest {
+                session_id: s.id.clone(),
+                message_id: self.msg_id.to_string(),
+                call_id: call.call_id.clone(),
+                tool: call.name.clone(),
+                purpose: purpose.to_string(),
+                input: input.clone(),
+                time: now_ms(),
+            };
+            st.perms.push(PendingPerm {
+                request: request.clone(),
+                tx: Some(tx),
+            });
+            hub.set_status(&mut st, SessionStatus::WaitingPermission);
+            hub.emit(&s.id, SessionEvent::Permission { request });
+            hub.notify(&st, NotifyKind::Permission, Some(call.name.clone()));
+        }
+        self.set_state(ToolState::AwaitingPermission, None);
+        let reply = tokio::select! {
+            r = rx => r.ok(),
+            _ = self.cancel.cancelled() => None,
+        };
+        {
+            let mut st = s.lock();
+            st.perms.retain(|p| p.request.call_id != call.call_id);
+            hub.emit(
+                &s.id,
+                SessionEvent::PermissionResolved {
+                    call_id: call.call_id.clone(),
+                },
+            );
+            if let Some(PermReply {
+                allow: true,
+                always: true,
+            }) = reply
+            {
+                st.always.insert(call.name.clone());
+            }
+        }
+        if let Some(PermReply { allow: true, .. }) = reply {
+            // Allowed: the tool may still wait out a delay, but the session no longer waits
+            // for the user.
+            let mut st = s.lock();
+            hub.set_status(&mut st, SessionStatus::Running);
+            return true;
+        }
+        if self.cancel.is_cancelled() {
+            self.finish_cancelled();
+            return false;
+        }
+        let out = ref_tools::ToolOutput::err("The user denied this tool call.");
+        self.finish(ToolState::Denied, out);
+        false
+    }
+
+    /// Waits out the configured pre-execution delay. Returns false when cancelled meanwhile
+    /// (the call is finished then).
+    async fn wait_delay(&self, prep: &Prep) -> bool {
+        let delay = prep.cfg.delay_for(&prep.agent, &self.call.name);
+        if !(delay > 0.0 && delay.is_finite()) {
+            return true;
+        }
+        let d = Duration::from_secs_f64(delay.min(MAX_TOOL_DELAY_SECS));
+        self.set_state(ToolState::Delayed, Some(now_ms() + d.as_millis() as i64));
+        tokio::select! {
+            _ = tokio::time::sleep(d) => true,
+            _ = self.cancel.cancelled() => {
+                self.finish_cancelled();
+                false
+            }
+        }
+    }
+
+    /// Runs the tool and ends the call with its result.
+    async fn execute(&self, entry: &Entry, input: Value) {
+        let (hub, s, call) = (self.hub, self.s, self.call);
+        {
+            let mut st = s.lock();
+            hub.set_status(&mut st, SessionStatus::Running);
+        }
+        self.set_state(ToolState::Running, None);
+        let on_output = live_output_sink(
+            hub,
+            s,
+            self.msg_id,
+            call.index,
+            matches!(entry.kind, Kind::Builtin),
+        );
+        let tool_cancel = self.cancel.child_token();
+        let mut handle = tokio::spawn(toolset::dispatch(
+            hub.clone(),
+            s.clone(),
+            entry.kind.clone(),
+            call.name.clone(),
+            input,
+            tool_cancel.clone(),
+            on_output,
+        ));
+        let res = tokio::select! {
+            r = &mut handle => r,
+            _ = self.cancel.cancelled() => {
+                match tokio::time::timeout(TOOL_CANCEL_GRACE, &mut handle).await {
+                    Ok(r) => r,
+                    Err(_) => { handle.abort(); Ok(ref_tools::ToolOutput::err(CANCELLED_OUTPUT)) }
+                }
+            }
+        };
+        let (state, out) = match res {
+            _ if self.cancel.is_cancelled() => {
+                let mut o = res.unwrap_or_else(|_| ref_tools::ToolOutput::err(CANCELLED_OUTPUT));
+                if o.text.trim().is_empty() {
+                    o.text = CANCELLED_OUTPUT.into();
+                } else if o.text != CANCELLED_OUTPUT {
+                    o.text = format!("{}\n\n{CANCELLED_OUTPUT}", o.text);
+                }
+                (ToolState::Cancelled, o)
+            }
+            Ok(o) if o.is_error => (ToolState::Error, o),
+            Ok(o) => (ToolState::Done, o),
+            Err(e) => (
+                ToolState::Error,
+                ref_tools::ToolOutput::err(format!("Tool crashed: {e}")),
+            ),
+        };
+        self.finish(state, out);
+        let mut st = s.lock();
+        hub.set_status(&mut st, SessionStatus::Busy);
+    }
+}
+
 async fn run_one(
     hub: &Arc<Hub>,
     s: &Arc<Session>,
@@ -1224,188 +1409,40 @@ async fn run_one(
     call: Call,
     cancel: &CancellationToken,
 ) {
-    let idx = call.index;
+    let ctx = CallCtx {
+        hub,
+        s,
+        msg_id,
+        call: &call,
+        cancel,
+    };
     let (input, purpose) = match parse_tool_input(&call.raw) {
         Ok(x) => x,
         Err(e) => {
             let raw = crate::util::truncate_chars(&call.raw, MAX_RAW_ARGS_IN_ERROR);
             let out =
                 ref_tools::ToolOutput::err(format!("Invalid JSON arguments: {e}; raw: {raw}"));
-            finish_tool(hub, s, msg_id, idx, ToolState::Error, out);
+            ctx.finish(ToolState::Error, out);
             return;
         }
     };
-    let Some(entry) = prep.tools.iter().find(|e| e.def.name == call.name).cloned() else {
+    let Some(entry) = prep.tools.iter().find(|e| e.def.name == call.name) else {
         let out = ref_tools::ToolOutput::err(format!("Unknown tool: {}", call.name));
-        finish_tool(hub, s, msg_id, idx, ToolState::Error, out);
+        ctx.finish(ToolState::Error, out);
         return;
     };
-
-    // Permission.
-    let subject = toolset::subject(&call.name, &input);
-    let mut action = prep.cfg.permission_for(&prep.agent, &call.name, &subject);
-    if action == Action::Ask && s.lock().always.contains(&call.name) {
-        action = Action::Allow;
+    if !ctx.authorize(prep, &input, &purpose).await {
+        return;
     }
-    match action {
-        Action::Allow => {}
-        Action::Deny => {
-            let out = ref_tools::ToolOutput::err(format!(
-                "Permission denied by configuration for tool {}.",
-                call.name
-            ));
-            finish_tool(hub, s, msg_id, idx, ToolState::Denied, out);
-            return;
-        }
-        Action::Ask => {
-            let (tx, rx) = tokio::sync::oneshot::channel();
-            {
-                let mut st = s.lock();
-                let request = PermissionRequest {
-                    session_id: s.id.clone(),
-                    message_id: msg_id.to_string(),
-                    call_id: call.call_id.clone(),
-                    tool: call.name.clone(),
-                    purpose: purpose.clone(),
-                    input: input.clone(),
-                    time: now_ms(),
-                };
-                st.perms.push(PendingPerm {
-                    request: request.clone(),
-                    tx: Some(tx),
-                });
-                hub.set_status(&mut st, SessionStatus::WaitingPermission);
-                hub.emit(&s.id, SessionEvent::Permission { request });
-                hub.notify(&st, NotifyKind::Permission, Some(call.name.clone()));
-            }
-            set_state(hub, s, msg_id, idx, ToolState::AwaitingPermission, None);
-            let reply = tokio::select! {
-                r = rx => r.ok(),
-                _ = cancel.cancelled() => None,
-            };
-            {
-                let mut st = s.lock();
-                st.perms.retain(|p| p.request.call_id != call.call_id);
-                hub.emit(
-                    &s.id,
-                    SessionEvent::PermissionResolved {
-                        call_id: call.call_id.clone(),
-                    },
-                );
-                if let Some(PermReply {
-                    allow: true,
-                    always: true,
-                }) = reply
-                {
-                    st.always.insert(call.name.clone());
-                }
-            }
-            match reply {
-                Some(PermReply { allow: true, .. }) => {
-                    // Allowed: the tool may still wait out a delay, but the session no longer
-                    // waits for the user.
-                    let mut st = s.lock();
-                    hub.set_status(&mut st, SessionStatus::Running);
-                }
-                _ if cancel.is_cancelled() => {
-                    finish_tool(
-                        hub,
-                        s,
-                        msg_id,
-                        idx,
-                        ToolState::Cancelled,
-                        ref_tools::ToolOutput::err(CANCELLED_OUTPUT),
-                    );
-                    return;
-                }
-                _ => {
-                    finish_tool(
-                        hub,
-                        s,
-                        msg_id,
-                        idx,
-                        ToolState::Denied,
-                        ref_tools::ToolOutput::err("The user denied this tool call."),
-                    );
-                    return;
-                }
-            }
-        }
+    if !ctx.wait_delay(prep).await {
+        return;
     }
-
-    // Pre-execution delay.
-    let delay = prep.cfg.delay_for(&prep.agent, &call.name);
-    if delay > 0.0 && delay.is_finite() {
-        let d = Duration::from_secs_f64(delay.min(MAX_TOOL_DELAY_SECS));
-        set_state(
-            hub,
-            s,
-            msg_id,
-            idx,
-            ToolState::Delayed,
-            Some(now_ms() + d.as_millis() as i64),
-        );
-        tokio::select! {
-            _ = tokio::time::sleep(d) => {}
-            _ = cancel.cancelled() => {
-                finish_tool(hub, s, msg_id, idx, ToolState::Cancelled, ref_tools::ToolOutput::err(CANCELLED_OUTPUT));
-                return;
-            }
-        }
-    }
-
     // The question tool waits for the user instead of running.
     if call.name == crate::question::TOOL && matches!(entry.kind, Kind::Harness) {
-        crate::question::run(hub, s, msg_id, idx, &call.call_id, &input, cancel).await;
+        crate::question::run(hub, s, msg_id, call.index, &call.call_id, &input, cancel).await;
         return;
     }
-
-    // Execute.
-    {
-        let mut st = s.lock();
-        hub.set_status(&mut st, SessionStatus::Running);
-    }
-    set_state(hub, s, msg_id, idx, ToolState::Running, None);
-    let on_output = live_output_sink(hub, s, msg_id, idx, matches!(entry.kind, Kind::Builtin));
-    let tool_cancel = cancel.child_token();
-    let mut handle = tokio::spawn(toolset::dispatch(
-        hub.clone(),
-        s.clone(),
-        entry.kind.clone(),
-        call.name.clone(),
-        input,
-        tool_cancel.clone(),
-        on_output,
-    ));
-    let res = tokio::select! {
-        r = &mut handle => r,
-        _ = cancel.cancelled() => {
-            match tokio::time::timeout(TOOL_CANCEL_GRACE, &mut handle).await {
-                Ok(r) => r,
-                Err(_) => { handle.abort(); Ok(ref_tools::ToolOutput::err(CANCELLED_OUTPUT)) }
-            }
-        }
-    };
-    let (state, out) = match res {
-        _ if cancel.is_cancelled() => {
-            let mut o = res.unwrap_or_else(|_| ref_tools::ToolOutput::err(CANCELLED_OUTPUT));
-            if o.text.trim().is_empty() {
-                o.text = CANCELLED_OUTPUT.into();
-            } else if o.text != CANCELLED_OUTPUT {
-                o.text = format!("{}\n\n{CANCELLED_OUTPUT}", o.text);
-            }
-            (ToolState::Cancelled, o)
-        }
-        Ok(o) if o.is_error => (ToolState::Error, o),
-        Ok(o) => (ToolState::Done, o),
-        Err(e) => (
-            ToolState::Error,
-            ref_tools::ToolOutput::err(format!("Tool crashed: {e}")),
-        ),
-    };
-    finish_tool(hub, s, msg_id, idx, state, out);
-    let mut st = s.lock();
-    hub.set_status(&mut st, SessionStatus::Busy);
+    ctx.execute(entry, input).await;
 }
 
 /// Throttled live output (bash): updates the part's `meta.live_output` with the output tail.
