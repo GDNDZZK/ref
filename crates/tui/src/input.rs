@@ -7,7 +7,7 @@ use crossterm::event::{
 };
 use ratatui::layout::{Position, Rect};
 
-use crate::app::{AcKind, App, COMMANDS, Mode, cmd};
+use crate::app::{ARMED_KEY_TIMEOUT, AcKind, App, COMMANDS, Mode, cmd};
 use crate::render;
 use crate::ui::dialog::{Dialog, Kind};
 use crate::ui::editor::Editor;
@@ -156,15 +156,33 @@ fn scroll_perm(app: &mut App, d: i32) {
 /// Prefix of the leader key bindings in `COMMANDS` (`ctrl+x n`, ...).
 const LEADER_PREFIX: &str = "ctrl+x ";
 
+/// Second press of a key within `ARMED_KEY_TIMEOUT` confirms (true); otherwise arms it (false).
+fn confirm_or_arm(armed: &mut Option<Instant>) -> bool {
+    if armed.is_some_and(|t| t.elapsed() < ARMED_KEY_TIMEOUT) {
+        *armed = None;
+        return true;
+    }
+    *armed = Some(Instant::now());
+    false
+}
+
 fn exit_or_arm(app: &mut App) {
-    if app
-        .ctrlc_armed
-        .is_some_and(|t| t.elapsed() < Duration::from_millis(1500))
-    {
+    if confirm_or_arm(&mut app.ctrlc_armed) {
         app.quit = true;
-    } else {
-        app.ctrlc_armed = Some(Instant::now());
-        app.set_hint("ctrl+c again to exit", theme::WARNING);
+        return;
+    }
+    app.set_hint("ctrl+c again to exit", theme::WARNING);
+}
+
+/// Esc on a busy chat session: the second press within the window aborts the turn.
+fn interrupt_current(app: &mut App) {
+    if !confirm_or_arm(&mut app.esc_armed) {
+        app.set_hint("esc again to interrupt", theme::WARNING);
+        return;
+    }
+    app.hint = None;
+    if let Some(sid) = app.current.clone() {
+        app.abort(&sid);
     }
 }
 
@@ -418,19 +436,7 @@ fn chat_key(app: &mut App, k: KeyEvent) {
                     app.toasts.info("Cancelled delayed tool call");
                 }
             } else if app.cur().is_some_and(|v| v.is_busy()) {
-                if app
-                    .esc_armed
-                    .is_some_and(|t| t.elapsed() < Duration::from_millis(1500))
-                {
-                    app.esc_armed = None;
-                    app.hint = None;
-                    if let Some(sid) = app.current.clone() {
-                        app.abort(&sid);
-                    }
-                } else {
-                    app.esc_armed = Some(Instant::now());
-                    app.set_hint("esc again to interrupt", theme::WARNING);
-                }
+                interrupt_current(app);
             }
         }
         KeyCode::Enter if m.is_empty() => app.submit(),
@@ -828,26 +834,17 @@ fn watch_key(app: &mut App, k: KeyEvent) {
                     e.clear();
                 }
             } else if busy {
-                if app
-                    .esc_armed
-                    .is_some_and(|t| t.elapsed() < Duration::from_millis(1500))
-                {
-                    app.esc_armed = None;
+                let name = app
+                    .views
+                    .get(&f)
+                    .map(|v| v.info.name.clone())
+                    .unwrap_or_default();
+
+                if confirm_or_arm(&mut app.esc_armed) {
                     app.hint = None;
                     app.abort(&f);
-                    let name = app
-                        .views
-                        .get(&f)
-                        .map(|v| v.info.name.clone())
-                        .unwrap_or_default();
                     app.toasts.info(format!("Interrupted \"{name}\""));
                 } else {
-                    app.esc_armed = Some(Instant::now());
-                    let name = app
-                        .views
-                        .get(&f)
-                        .map(|v| v.info.name.clone())
-                        .unwrap_or_default();
                     app.set_hint(format!("esc again to interrupt \"{name}\""), theme::WARNING);
                 }
             } else {
