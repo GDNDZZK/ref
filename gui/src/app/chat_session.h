@@ -53,6 +53,8 @@ class ChatSession : public QObject
 	Q_PROPERTY(QString todoCurrent READ todoCurrent NOTIFY infoChanged) // empty when nothing is left to do
 	Q_PROPERTY(QString todoCurrentStatus READ todoCurrentStatus NOTIFY infoChanged) // in_progress or pending
 	Q_PROPERTY(QVariantList todoItems READ todoItems NOTIFY infoChanged)
+	// All of it in one value, {items, done, total}, for a view that must not mix two moments of the list.
+	Q_PROPERTY(QVariantMap todo READ todo NOTIFY infoChanged)
 	Q_PROPERTY(bool moreBefore READ hasMoreBefore NOTIFY moreBeforeChanged)
 	Q_PROPERTY(bool loadingOlder READ isLoadingOlder NOTIFY loadingOlderChanged)
 	Q_PROPERTY(QString olderError READ olderError NOTIFY olderErrorChanged) // why the last page did not load
@@ -111,6 +113,7 @@ public:
 	QString todoCurrent() const;
 	QString todoCurrentStatus() const;
 	QVariantList todoItems() const;
+	QVariantMap todo() const;
 	bool hasMoreBefore() const { return m_controller.hasMoreBefore(); }
 	bool isLoadingOlder() const { return m_controller.isLoadingOlder(); }
 	const QString& olderError() const { return m_olderError; }

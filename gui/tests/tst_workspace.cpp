@@ -992,6 +992,11 @@ void TestWorkspace::theSessionInFrontIsTheCurrentOneOrTheFocusedTile()
 	QTRY_COMPARE(a->todoTotal(), 2);
 	QCOMPARE(a->todoDone(), 1);
 	QCOMPARE(a->todoItems().size(), 3); // shown as they are, the cancelled one too
+	// The sidebar reads one value; its parts agree with the separate properties.
+	const auto snapshot = [](ChatSession* session) { return session->todo(); };
+	QCOMPARE(snapshot(a).value(u"items"_s).toList(), a->todoItems());
+	QCOMPARE(snapshot(a).value(u"done"_s).toInt(), 1);
+	QCOMPARE(snapshot(a).value(u"total"_s).toInt(), 2);
 
 	f.workspace->toggleSplit();
 	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
@@ -1002,8 +1007,12 @@ void TestWorkspace::theSessionInFrontIsTheCurrentOneOrTheFocusedTile()
 	QCOMPARE(f.workspace->frontSession(), b);
 	QVERIFY(b->todoItems().isEmpty()); // so the section is hidden
 	QCOMPARE(b->todoTotal(), 0);
+	QVERIFY(snapshot(b).value(u"items"_s).toList().isEmpty());
+	// Back to a session with a list: it is all there at once (the sidebar showed "0/0" and no rows here).
 	f.workspace->focusTile(u"ses_a"_s);
 	QCOMPARE(f.workspace->frontSession(), a);
+	QCOMPARE(snapshot(f.workspace->frontSession()).value(u"items"_s).toList().size(), 3);
+	QCOMPARE(snapshot(f.workspace->frontSession()).value(u"total"_s).toInt(), 2);
 	QCOMPARE(changed.count(), 2);
 	QCOMPARE(f.workspace->currentId(), u"ses_a"_s); // focusing does not change the current session
 
