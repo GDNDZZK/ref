@@ -1865,84 +1865,83 @@ fn undo_puts_prompt_and_images_back_into_editor() {
     assert_eq!(app.editor.images.len(), 1);
 }
 
-#[test]
-fn queued_prompt_remove_button_and_already_sent_race() {
-    use crate::app::Pending;
-    use crate::ui::Hit;
+/// A test app with the layout area set, as clicks need it.
+fn queue_test_app() -> App {
     let mut app = test_app(true);
-    let sid = TEST_SESSION.to_string();
     app.screen = ratatui::layout::Rect::new(0, 0, 100, 30);
-    let respond = |app: &mut App, pred: &dyn Fn(&Pending) -> bool, result: serde_json::Value| {
-        let id = *app
-            .pending
-            .iter()
-            .find(|(_, p)| pred(p))
-            .map(|(k, _)| k)
-            .expect("pending request");
-        app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
-            id,
-            ok: true,
-            result,
-            error: None,
-        }));
-    };
-    let click_remove = |app: &mut App, text: &str| {
-        use crossterm::event::{MouseButton, MouseEventKind};
-        let (term, s) = render(app, 100, 30);
-        let y = s
-            .lines()
-            .position(|l| l.contains(text) && l.contains("✕ remove"))
-            .expect("queued row") as u16;
-        let x = find_col(&term, y, "✕").unwrap();
-        let key = app.views[TEST_SESSION]
-            .queued
-            .iter()
-            .find(|q| q.text == text)
-            .unwrap()
-            .key;
-        assert_eq!(
-            app.views[TEST_SESSION].chat.hit_at(x, y),
-            Some(Hit::Unqueue { key })
-        );
-        crate::input::handle(app, mouse(MouseEventKind::Down(MouseButton::Left), x, y));
-        crate::input::handle(app, mouse(MouseEventKind::Up(MouseButton::Left), x, y));
-    };
+    app
+}
+
+/// Clicks the ✕ remove button of the queued row showing `text`.
+fn click_remove(app: &mut App, text: &str) {
+    use crate::ui::Hit;
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let (term, s) = render(app, 100, 30);
+    let y = s
+        .lines()
+        .position(|l| l.contains(text) && l.contains("✕ remove"))
+        .expect("queued row") as u16;
+    let x = find_col(&term, y, "✕").unwrap();
+    let key = app.views[TEST_SESSION]
+        .queued
+        .iter()
+        .find(|q| q.text == text)
+        .unwrap()
+        .key;
+    assert_eq!(
+        app.views[TEST_SESSION].chat.hit_at(x, y),
+        Some(Hit::Unqueue { key })
+    );
+    crate::input::handle(app, mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+    crate::input::handle(app, mouse(MouseEventKind::Up(MouseButton::Left), x, y));
+}
+
+fn is_prompt(p: &crate::app::Pending) -> bool {
+    matches!(p, crate::app::Pending::Prompt { .. })
+}
+
+fn is_unqueue(p: &crate::app::Pending) -> bool {
+    matches!(p, crate::app::Pending::Unqueue { .. })
+}
+
+#[test]
+fn queued_prompt_removed_before_prompt_response_waits_for_message_id() {
+    let mut app = queue_test_app();
+    let sid = TEST_SESSION.to_string();
+
     // Clicked before the Prompt response: the delete waits for the message id.
     type_text(&mut app, "first queued");
     press(&mut app, KeyCode::Enter);
     click_remove(&mut app, "first queued");
     assert!(app.views[&sid].queued[0].removing);
-    assert!(
-        !app.pending
-            .values()
-            .any(|p| matches!(p, Pending::Unqueue { .. }))
-    );
+    assert!(!app.pending.values().any(is_unqueue));
     let (_, s) = render(&mut app, 100, 30);
     assert!(s.contains("removing…"));
     respond(
         &mut app,
-        &|p| matches!(p, Pending::Prompt { .. }),
+        is_prompt,
         json!({"queued": true, "message_id": "q1"}),
     );
     assert!(
-        app.pending
-            .values()
-            .any(|p| matches!(p, Pending::Unqueue { .. })),
+        app.pending.values().any(is_unqueue),
         "RemoveQueued sent once the id is known"
     );
+
     // Typed meanwhile: the removed prompt is appended after a blank line.
     type_text(&mut app, "draft");
-    respond(
-        &mut app,
-        &|p| matches!(p, Pending::Unqueue { .. }),
-        json!({"removed": true}),
-    );
+    respond(&mut app, is_unqueue, json!({"removed": true}));
     assert!(app.views[&sid].queued.is_empty());
     assert_eq!(app.editor.text, "draft\n\nfirst queued");
     assert_eq!(app.editor.cursor, app.editor.text.len());
     let (_, s) = render(&mut app, 100, 30);
     assert!(!s.contains("queued first queued") && !s.contains("✕ remove"));
-    app.editor.clear();
+}
+
+#[test]
+fn removed_queued_prompt_brings_its_images_back() {
+    let mut app = queue_test_app();
+    let sid = TEST_SESSION.to_string();
+
     // Images come back with it (empty editor: filled).
     let png = ImageData {
         mime: "image/png".into(),
@@ -1952,15 +1951,11 @@ fn queued_prompt_remove_button_and_already_sent_race() {
     app.send_prompt(&sid, "see [Image 1]".into(), vec![png]);
     respond(
         &mut app,
-        &|p| matches!(p, Pending::Prompt { .. }),
+        is_prompt,
         json!({"queued": true, "message_id": "q0"}),
     );
     click_remove(&mut app, "see [Image 1]");
-    respond(
-        &mut app,
-        &|p| matches!(p, Pending::Unqueue { .. }),
-        json!({"removed": true}),
-    );
+    respond(&mut app, is_unqueue, json!({"removed": true}));
     assert_eq!(app.editor.text, "see [Image 1]");
     assert_eq!(
         app.editor
@@ -1970,21 +1965,23 @@ fn queued_prompt_remove_button_and_already_sent_race() {
             .collect::<Vec<_>>(),
         ["iVBO"]
     );
-    app.editor.clear();
+}
+
+#[test]
+fn queued_prompt_already_sent_when_removed_stays_until_its_message_shows() {
+    let mut app = queue_test_app();
+    let sid = TEST_SESSION.to_string();
+
     // Already delivered when the delete arrives: toast, row stays until the message shows up.
     type_text(&mut app, "second queued");
     press(&mut app, KeyCode::Enter);
     respond(
         &mut app,
-        &|p| matches!(p, Pending::Prompt { .. }),
+        is_prompt,
         json!({"queued": true, "message_id": "q2"}),
     );
     click_remove(&mut app, "second queued");
-    respond(
-        &mut app,
-        &|p| matches!(p, Pending::Unqueue { .. }),
-        json!({"removed": false}),
-    );
+    respond(&mut app, is_unqueue, json!({"removed": false}));
     assert!(
         app.toasts
             .items
@@ -1993,6 +1990,7 @@ fn queued_prompt_remove_button_and_already_sent_race() {
     );
     assert_eq!(app.views[&sid].queued.len(), 1);
     assert!(!app.views[&sid].queued[0].removing);
+
     // A user message with the same text but another id doesn't match; the delivered one does.
     let v = app.views.get_mut(&sid).unwrap();
     v.apply(SessionEvent::Message {
@@ -2009,14 +2007,21 @@ fn queued_prompt_remove_button_and_already_sent_race() {
         message: msg("q2", Role::User, MessageSource::Human, 0, "second queued"),
     });
     assert!(v.queued.is_empty());
+}
+
+#[test]
+fn prompt_queued_by_server_while_thought_idle_gets_a_removable_row() {
+    let mut app = queue_test_app();
+    let sid = TEST_SESSION.to_string();
+
     // Sent while we thought it idle but the server queued it: a removable row appears.
-    v.set_info(info());
+    app.views.get_mut(&sid).unwrap().set_info(info());
     type_text(&mut app, "late");
     press(&mut app, KeyCode::Enter);
     assert!(app.views[&sid].queued.is_empty());
     respond(
         &mut app,
-        &|p| matches!(p, Pending::Prompt { .. }),
+        is_prompt,
         json!({"queued": true, "message_id": "q3"}),
     );
     assert_eq!(
