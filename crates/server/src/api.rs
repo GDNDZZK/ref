@@ -847,6 +847,25 @@ fn walk_files(root: &std::path::Path) -> Vec<String> {
     out
 }
 
+/// Points per matched query character.
+const SCORE_MATCH: i64 = 1;
+
+/// Bonus when the match directly follows the previous one.
+const SCORE_ADJACENT: i64 = 5;
+
+/// Bonus for a match inside the file name (after the last `/`).
+const SCORE_IN_BASENAME: i64 = 2;
+
+/// Bonus for a match at the start of a path or after `/`, `_`, `-` or `.`.
+const SCORE_BOUNDARY: i64 = 3;
+
+/// Bonus when the file name starts with the query, or only contains it.
+const SCORE_BASENAME_PREFIX: i64 = 20;
+const SCORE_BASENAME_CONTAINS: i64 = 10;
+
+/// One point is taken off per this many characters of the path.
+const LENGTH_PENALTY_DIVISOR: usize = 10;
+
 /// Fuzzy subsequence score (higher is better); None if `q` is not a subsequence of `path`.
 fn fuzzy_score(path: &str, q: &str) -> Option<i64> {
     if q.is_empty() {
@@ -873,26 +892,26 @@ fn fuzzy_score(path: &str, q: &str) -> Option<i64> {
             pi += 1;
         }
         let i = found?;
-        score += 1;
+        score += SCORE_MATCH;
         if prev == Some(i.wrapping_sub(1)) {
-            score += 5;
+            score += SCORE_ADJACENT;
         }
         if i >= base_start {
-            score += 2;
+            score += SCORE_IN_BASENAME;
         }
         if i == 0 || matches!(p.get(i.wrapping_sub(1)), Some('/' | '_' | '-' | '.')) {
-            score += 3;
+            score += SCORE_BOUNDARY;
         }
         prev = Some(i);
     }
     let base: String = p[base_start.min(p.len())..].iter().collect();
     let ql: String = qc.iter().collect();
     if base.starts_with(&ql) {
-        score += 20;
+        score += SCORE_BASENAME_PREFIX;
     } else if base.contains(&ql) {
-        score += 10;
+        score += SCORE_BASENAME_CONTAINS;
     }
-    score -= (p.len() / 10) as i64;
+    score -= (p.len() / LENGTH_PENALTY_DIVISOR) as i64;
     Some(score)
 }
 
