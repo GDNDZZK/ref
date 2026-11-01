@@ -2,7 +2,7 @@
 #![allow(dead_code)]
 
 use ref_config::{AgentConfig, Config, ModelConfig, PermissionRules, ProviderConfig};
-use ref_proto::{Message, ModelRef, Part, Request, Role, ServerFrame, SessionEvent};
+use ref_proto::{Message, ModelRef, Part, Request, Role, ServerFrame, SessionEvent, ToolState};
 use ref_server::hub::Conn;
 use ref_server::session::Session;
 use ref_server::{Hub, HubOptions};
@@ -338,6 +338,22 @@ pub async fn wait_until(what: &str, timeout: Duration, mut f: impl FnMut() -> bo
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
+}
+
+/// Waits until `f` holds for `s`.
+pub async fn wait_session(s: &Arc<Session>, what: &str, f: impl Fn(&Arc<Session>) -> bool) {
+    wait_until(what, TIMEOUT, || f(s)).await;
+}
+
+/// Waits until some tool part of `s` is in `state`.
+pub async fn wait_tool_state(s: &Arc<Session>, state: ToolState) {
+    let what = format!("tool {state:?}");
+    wait_session(s, &what, |s| {
+        tool_parts(s)
+            .iter()
+            .any(|p| matches!(p, Part::Tool { state: now, .. } if *now == state))
+    })
+    .await;
 }
 
 pub async fn wait_idle(s: &Arc<Session>) {
