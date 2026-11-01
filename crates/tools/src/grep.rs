@@ -18,14 +18,16 @@ const MAX_LINE_CHARS: usize = 500;
 const MAX_OUTPUT_BYTES: usize = 60 * 1024;
 
 pub fn spec() -> ToolSpec {
+    let max_file_mb = MAX_FILE_BYTES / util::MIB;
     ToolSpec {
         name: "grep",
-        description: "Search file contents with a regular expression (Rust regex syntax; set `literal` for plain text). \
-Searches a file or a directory tree; respects .gitignore, includes hidden files, skips .git, binary files and files over 4MB.\n\
+        description: format!(
+            "Search file contents with a regular expression (Rust regex syntax; set `literal` for plain text). \
+Searches a file or a directory tree; respects .gitignore, includes hidden files, skips .git, binary files and files over {max_file_mb}MB.\n\
 Output is grouped by file in hashline format: `[path#TAG]` header, then `*N:line` for matching lines and ` N:line` for context lines, \
 `...` between non-adjacent rows. TAG and line numbers can be used directly with `edit` for the rows shown (no re-read needed).\n\
 `glob` filters files: `*.rs` matches at any depth, `src/**/*.ts` is relative to the search path. Lines are matched one at a time (no multi-line matches)."
-            .to_string(),
+        ),
         parameters: json!({
             "type": "object",
             "properties": {
@@ -34,8 +36,8 @@ Output is grouped by file in hashline format: `[path#TAG]` header, then `*N:line
                 "glob": {"type": "string", "description": "Only search files matching this glob, e.g. `*.rs` or `src/**/*.ts`."},
                 "ignore_case": {"type": "boolean", "description": "Case-insensitive search (default false)."},
                 "literal": {"type": "boolean", "description": "Treat `pattern` as a literal string (default false)."},
-                "context": {"type": "integer", "minimum": 0, "description": "Context lines before and after each match (default 0, max 20)."},
-                "limit": {"type": "integer", "minimum": 1, "description": "Maximum matching lines to return (default 200, max 2000)."}
+                "context": {"type": "integer", "minimum": 0, "description": format!("Context lines before and after each match (default 0, max {MAX_CONTEXT}).")},
+                "limit": {"type": "integer", "minimum": 1, "description": format!("Maximum matching lines to return (default {DEFAULT_LIMIT}, max {MAX_LIMIT}).")}
             },
             "required": ["pattern"]
         }),

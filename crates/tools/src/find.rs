@@ -26,7 +26,7 @@ Results are paths relative to the working directory, newest modification first; 
                 "pattern": {"type": "string", "description": "Glob pattern (default `**/*`)."},
                 "path": {"type": "string", "description": "Directory to search (default: working directory)."},
                 "type": {"type": "string", "enum": ["file", "dir", "any"], "description": "Entry type to return (default `any`)."},
-                "limit": {"type": "integer", "minimum": 1, "description": "Maximum results (default 500)."}
+                "limit": {"type": "integer", "minimum": 1, "description": format!("Maximum results (default {DEFAULT_LIMIT}).")}
             }
         }),
     }
