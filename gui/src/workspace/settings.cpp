@@ -1,5 +1,7 @@
 #include "workspace/settings.h"
 
+#include "proto/notify_kind.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -31,10 +33,7 @@ const QString WindowKey = u"window"_s;
 const QString WidthKey = u"width"_s;
 const QString HeightKey = u"height"_s;
 
-const QString PermissionKind = u"permission"_s;
-const QString TurnDoneKind = u"turn_done"_s;
-const QString TurnErrorKind = u"turn_error"_s;
-const QString QuestionKind = u"question"_s;
+using NotifyKind = proto::NotifyFrame::Kind;
 
 // Collects what was wrong in the file.
 class Problems
@@ -134,16 +133,16 @@ QStringList Settings::notifyKinds() const
 	}
 	if(m_notifyPermission)
 	{
-		kinds.append(PermissionKind);
-		kinds.append(QuestionKind); // the user is needed in both cases, so one switch
+		kinds.append(proto::notifyKindName(NotifyKind::Permission));
+		kinds.append(proto::notifyKindName(NotifyKind::Question)); // the user is needed in both cases, so one switch
 	}
 	if(m_notifyTurnDone)
 	{
-		kinds.append(TurnDoneKind);
+		kinds.append(proto::notifyKindName(NotifyKind::TurnDone));
 	}
 	if(m_notifyTurnError)
 	{
-		kinds.append(TurnErrorKind);
+		kinds.append(proto::notifyKindName(NotifyKind::TurnError));
 	}
 	return kinds;
 }

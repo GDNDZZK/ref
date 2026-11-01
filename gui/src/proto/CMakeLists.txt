@@ -2,6 +2,8 @@
 qt_add_library(refgui_proto STATIC
 	json_reader.cpp
 	json_reader.h
+	notify_kind.cpp
+	notify_kind.h
 	parse.h
 	parse_config.cpp
 	parse_frame.cpp

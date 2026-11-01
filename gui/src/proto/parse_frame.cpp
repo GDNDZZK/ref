@@ -1,4 +1,5 @@
 #include "proto/parse.h"
+#include "proto/notify_kind.h"
 #include "proto/parse_internal.h"
 
 using namespace Qt::StringLiterals;
@@ -119,26 +120,12 @@ NotifyFrame readNotify(const Fields& fields)
 	NotifyFrame notify{.sessionId = fields.string("session_id"_L1),
 	                   .sessionTitle = fields.string("session_title"_L1),
 	                   .detail = fields.optionalString("detail"_L1)};
-	if(kind == "permission"_L1)
-	{
-		notify.kind = NotifyFrame::Kind::Permission;
-	}
-	else if(kind == "turn_done"_L1)
-	{
-		notify.kind = NotifyFrame::Kind::TurnDone;
-	}
-	else if(kind == "turn_error"_L1)
-	{
-		notify.kind = NotifyFrame::Kind::TurnError;
-	}
-	else if(kind == "question"_L1)
-	{
-		notify.kind = NotifyFrame::Kind::Question;
-	}
-	else
+	const std::optional<NotifyFrame::Kind> known = notifyKindFromName(kind);
+	if(!known)
 	{
 		failUnknown(fields.childPath("notify_kind"_L1), u"unknown notification kind \"%1\""_s.arg(kind));
 	}
+	notify.kind = *known;
 	return notify;
 }
 

@@ -1,5 +1,7 @@
 #include "proto/request.h"
 
+#include "proto/notify_kind.h"
+
 #include <QJsonArray>
 
 using namespace Qt::StringLiterals;
@@ -24,28 +26,12 @@ QJsonObject toJson(const ModelRef& model)
 	return json;
 }
 
-QString toJson(NotifyFrame::Kind kind)
-{
-	switch(kind)
-	{
-	case NotifyFrame::Kind::Permission:
-		return u"permission"_s;
-	case NotifyFrame::Kind::TurnDone:
-		return u"turn_done"_s;
-	case NotifyFrame::Kind::TurnError:
-		return u"turn_error"_s;
-	case NotifyFrame::Kind::Question:
-		return u"question"_s;
-	}
-	Q_UNREACHABLE_RETURN(QString());
-}
-
 QJsonArray toJson(const QList<NotifyFrame::Kind>& kinds)
 {
 	QJsonArray json;
 	for(const NotifyFrame::Kind kind : kinds)
 	{
-		json.append(toJson(kind));
+		json.append(notifyKindName(kind));
 	}
 	return json;
 }
