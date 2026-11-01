@@ -9,19 +9,17 @@ QtObject {
 	property string sessionId: ""
 	property var data: Workspace.info(sessionId)
 
-	property Connections updates: Connections {
-	    target: Workspace.sessions
-
-	    function onDataChanged() {
-	        info.data = Workspace.info(info.sessionId)
-	    }
-	    function onModelReset() {
-	        info.data = Workspace.info(info.sessionId)
-	    }
-	    function onRowsInserted() {
-	        info.data = Workspace.info(info.sessionId)
-	    }
+	function refresh() {
+		data = Workspace.info(sessionId)
 	}
 
-	onSessionIdChanged: data = Workspace.info(sessionId)
+	property Connections updates: Connections {
+		target: Workspace.sessions
+
+		function onDataChanged() { info.refresh() }
+		function onModelReset() { info.refresh() }
+		function onRowsInserted() { info.refresh() }
+	}
+
+	onSessionIdChanged: refresh()
 }
