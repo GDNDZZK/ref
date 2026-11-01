@@ -183,9 +183,12 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         }
         let mtime = entry
             .metadata()
-            .ok()
-            .and_then(|m| m.modified().ok())
-            .unwrap_or(SystemTime::UNIX_EPOCH);
+            .map_err(|e| e.to_string())
+            .and_then(|m| m.modified().map_err(|e| e.to_string()))
+            .unwrap_or_else(|e| {
+                tracing::debug!("find: no mtime for {}: {e}", entry.path().display());
+                SystemTime::UNIX_EPOCH
+            });
         let mut shown = util::display_path(&ctx.cwd, entry.path());
         if is_dir {
             shown.push('/');
