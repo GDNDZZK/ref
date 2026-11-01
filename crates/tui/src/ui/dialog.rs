@@ -345,8 +345,8 @@ impl ListDialog {
                         right.push(Span::raw(" "));
                     }
                     // Keep the title readable: shrink the right column first (to at most ~half).
-                    let lw: usize = left.iter().map(|s| width(&s.content)).sum();
-                    let rw: usize = right.iter().map(|s| width(&s.content)).sum();
+                    let lw: usize = text::spans_width(&left);
+                    let rw: usize = text::spans_width(&right);
                     let room = (iw + 2).saturating_sub(lw + 1);
                     let cap = room.max((iw + 2) / 2);
                     if rw > cap {
@@ -392,7 +392,7 @@ impl ListDialog {
 
 /// Truncates the last (longest, free-text) span of a right-aligned group so it fits `max`.
 fn shrink_right(mut spans: Vec<Span<'static>>, max: usize) -> Vec<Span<'static>> {
-    let total: usize = spans.iter().map(|s| width(&s.content)).sum();
+    let total: usize = text::spans_width(&spans);
     if total <= max {
         return spans;
     }
@@ -654,7 +654,7 @@ impl HelpDialog {
     pub fn text(title: &str, body: &str) -> Self {
         let lines: Vec<Line<'static>> = body
             .lines()
-            .map(|l| Line::from(Span::styled(l.replace('\t', "    "), theme::text())))
+            .map(|l| Line::from(Span::styled(text::expand_tabs(l), theme::text())))
             .collect();
         let widest = body.lines().map(width).max().unwrap_or(0) as u16;
         HelpDialog {

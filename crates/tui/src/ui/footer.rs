@@ -44,7 +44,7 @@ pub fn status_label(v: &SessionView, tick: u64, now: i64) -> (String, Color) {
         Retrying {
             next_at, attempt, ..
         } => {
-            let s = ((next_at - now).max(0) + 999) / 1000;
+            let s = text::ceil_secs(next_at - now);
             (
                 format!("{} retrying in {s}s (#{attempt})", theme::spinner(tick)),
                 theme::WARNING,
@@ -191,7 +191,10 @@ pub fn meta_line(
             .add_modifier(Modifier::BOLD),
     )];
     if !model.is_empty() {
-        spans.push(Span::styled(" · ", Style::new().fg(theme::MUTED).bg(bg)));
+        spans.push(Span::styled(
+            text::SEPARATOR,
+            Style::new().fg(theme::MUTED).bg(bg),
+        ));
         spans.push(Span::styled(
             model.to_string(),
             Style::new().fg(theme::TEXT).bg(bg),
@@ -204,7 +207,10 @@ pub fn meta_line(
         }
     }
     if let Some(v) = variant {
-        spans.push(Span::styled(" · ", Style::new().fg(theme::MUTED).bg(bg)));
+        spans.push(Span::styled(
+            text::SEPARATOR,
+            Style::new().fg(theme::MUTED).bg(bg),
+        ));
         spans.push(Span::styled(
             v.to_string(),
             Style::new()

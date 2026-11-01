@@ -84,7 +84,7 @@ pub fn todo_rows(todos: &[Todo], w: usize, max: usize) -> Vec<Row> {
     if todos.len() > max {
         rows.push(
             Row::new(Line::from(Span::styled(
-                format!("… {} more", todos.len() - max),
+                format!("{} {} more", text::ELLIPSIS, todos.len() - max),
                 theme::muted(),
             )))
             .decor(),

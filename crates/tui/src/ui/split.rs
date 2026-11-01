@@ -180,9 +180,9 @@ pub fn draw_frame(
         theme::bold(theme::TEXT)
     };
     put(&v.info.name, name_style, &mut x);
-    put(" · ", theme::muted(), &mut x);
+    put(text::SEPARATOR, theme::muted(), &mut x);
     put(&v.info.agent, theme::fg(ac), &mut x);
-    put(" · ", theme::muted(), &mut x);
+    put(text::SEPARATOR, theme::muted(), &mut x);
     put(&st, Style::new().fg(sc), &mut x);
     if let Some(p) = v.context_pct() {
         put(&format!(" · {p}%"), theme::muted(), &mut x);
@@ -190,7 +190,7 @@ pub fn draw_frame(
     // Current todo item, compactly: ` · ◐ Fix bug · 2/5`.
     let avail = (maxx.saturating_sub(x) as usize).saturating_sub(4);
     if let Some(spans) = super::todo::progress_spans(&v.info.todos, avail) {
-        put(" · ", theme::muted(), &mut x);
+        put(text::SEPARATOR, theme::muted(), &mut x);
         for s in spans {
             put(&s.content, s.style, &mut x);
         }

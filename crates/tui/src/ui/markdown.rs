@@ -199,7 +199,7 @@ impl R {
             for (i, (l, sp)) in wrapped.into_iter().enumerate() {
                 let first = i == 0;
                 let p = self.prefix(true);
-                let pw: usize = p.iter().map(|s| width(&s.content)).sum();
+                let pw: usize = text::spans_width(&p);
                 let mut spans = p;
                 spans.extend(l.spans);
                 let mut row = Row::new(Line::from(spans)).soft_sp(!first, sp);
@@ -539,7 +539,7 @@ impl R {
         if ncols == 0 {
             return;
         }
-        let cell_w = |c: &Vec<Span<'static>>| c.iter().map(|s| width(&s.content)).sum::<usize>();
+        let cell_w = |c: &Vec<Span<'static>>| text::spans_width(c);
         let mut widths = vec![1usize; ncols];
         for r in &t.rows {
             for (i, c) in r.iter().enumerate() {

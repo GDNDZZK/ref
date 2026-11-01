@@ -332,7 +332,11 @@ fn draw_prompt(buf: &mut Buffer, lay: &Layout, app: &mut App, focused: bool) -> 
     };
     let mw = p.width.saturating_sub(5) as usize;
     let mut meta = footer::meta_line(
-        if agent.is_empty() { "…" } else { &agent },
+        if agent.is_empty() {
+            text::ELLIPSIS
+        } else {
+            &agent
+        },
         app.agent_color(&agent),
         &model,
         &provider,
@@ -352,7 +356,10 @@ fn draw_prompt(buf: &mut Buffer, lay: &Layout, app: &mut App, focused: bool) -> 
     if queued > 0 {
         let q = queued;
         if !right.is_empty() {
-            right.push(Span::styled(" · ", Style::new().fg(theme::MUTED).bg(bg)));
+            right.push(Span::styled(
+                text::SEPARATOR,
+                Style::new().fg(theme::MUTED).bg(bg),
+            ));
         }
         right.push(Span::styled(
             format!("{q} queued"),
@@ -360,11 +367,15 @@ fn draw_prompt(buf: &mut Buffer, lay: &Layout, app: &mut App, focused: bool) -> 
         ));
     }
     // Todo progress (current item · done/total), at most ~half the row so the model stays visible.
-    let used: usize = right.iter().map(|s| width(&s.content)).sum();
-    let room = (mw / 2).saturating_sub(used + if used > 0 { 3 } else { 0 });
+    let used: usize = text::spans_width(&right);
+    let separator_w = if used > 0 { width(text::SEPARATOR) } else { 0 };
+    let room = (mw / 2).saturating_sub(used + separator_w);
     if let Some(spans) = todo::progress_spans(&todos, room) {
         if !right.is_empty() {
-            right.insert(0, Span::styled(" · ", Style::new().fg(theme::MUTED).bg(bg)));
+            right.insert(
+                0,
+                Span::styled(text::SEPARATOR, Style::new().fg(theme::MUTED).bg(bg)),
+            );
         }
         for s in spans.into_iter().rev() {
             right.insert(0, s);
@@ -596,7 +607,7 @@ fn draw_sidebar(buf: &mut Buffer, r: Rect, app: &mut App, now: i64, tick: u64) {
         sb(vec![Span::styled(title, theme::bold(theme::TEXT))]),
         sb(vec![
             Span::styled(v.info.agent.clone(), theme::fg(ac)),
-            Span::styled(" · ", theme::muted()),
+            Span::styled(text::SEPARATOR, theme::muted()),
             Span::styled(model, theme::text()),
         ]),
         sb(ctx_spans),

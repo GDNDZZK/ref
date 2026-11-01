@@ -341,7 +341,11 @@ impl McpDialog {
                         Line::from(vec![
                             Span::raw(ind),
                             Span::styled(
-                                format!("… {} more lines (enter to show)", n - cap),
+                                format!(
+                                    "{} {} more lines (enter to show)",
+                                    text::ELLIPSIS,
+                                    n - cap
+                                ),
                                 theme::fg(theme::DIM),
                             ),
                         ]),

@@ -1937,7 +1937,7 @@ impl App {
                 Item {
                     key: format!("{}/{}", m.provider, m.id),
                     title: m.name.clone(),
-                    desc: caps.join(" · "),
+                    desc: caps.join(text::SEPARATOR),
                     right: if m.variants.is_empty() {
                         String::new()
                     } else {

@@ -89,7 +89,7 @@ fn compaction_divider(m: &Message, exp: bool, w: usize) -> Row {
     let bst = theme::fg(theme::BORDER);
     let time = text::fmt_time(m.time);
     let right = vec![Span::raw(" "), copy_button(false)];
-    let rw = spans_width(&right);
+    let rw = text::spans_width(&right);
     let head = |hint: bool| {
         let mut v = vec![
             Span::styled(if exp { "▾ " } else { "▸ " }, theme::fg(theme::DIM)),
@@ -112,11 +112,11 @@ fn compaction_divider(m: &Message, exp: bool, w: usize) -> Row {
         v
     };
     let mut left = head(true);
-    if spans_width(&left) + rw + 4 > total {
+    if text::spans_width(&left) + rw + 4 > total {
         left = head(false);
     }
     let left = truncate_spans(left, total.saturating_sub(rw));
-    let fill = total.saturating_sub(spans_width(&left) + rw);
+    let fill = total.saturating_sub(text::spans_width(&left) + rw);
     let mut spans = left;
     spans.push(Span::styled("─".repeat(fill), bst));
     spans.extend(right);
@@ -140,10 +140,10 @@ pub fn compose(
     right: Vec<Span<'static>>,
     w: usize,
 ) -> (Line<'static>, usize) {
-    let rw: usize = right.iter().map(|s| width(&s.content)).sum();
+    let rw: usize = text::spans_width(&right);
     let avail = w.saturating_sub(rw + if rw > 0 { 1 } else { 0 });
     let mut l = truncate_spans(left, avail);
-    let lw: usize = l.iter().map(|s| width(&s.content)).sum();
+    let lw: usize = text::spans_width(&l);
     let gap = w.saturating_sub(lw + rw);
     let right_x = lw + gap;
     if rw > 0 && rw <= w {
@@ -156,7 +156,7 @@ pub fn compose(
 pub fn truncate_spans(spans: Vec<Span<'static>>, max: usize) -> Vec<Span<'static>> {
     let mut out = Vec::new();
     let mut used = 0;
-    let total: usize = spans.iter().map(|s| width(&s.content)).sum();
+    let total: usize = text::spans_width(&spans);
     if total <= max {
         return spans;
     }
@@ -172,10 +172,6 @@ pub fn truncate_spans(spans: Vec<Span<'static>>, max: usize) -> Vec<Span<'static
         }
     }
     out
-}
-
-fn spans_width(s: &[Span<'_>]) -> usize {
-    s.iter().map(|x| width(&x.content)).sum()
 }
 
 fn model_name(models: &[ModelInfo], m: &ref_proto::ModelRef) -> String {
@@ -415,7 +411,7 @@ fn render_user_compact(m: &Message, _cx: &Ctx<'_>, w: usize, color: Color) -> Ve
             ],
             w,
         );
-        let fill = w.saturating_sub(spans_width(&left));
+        let fill = w.saturating_sub(text::spans_width(&left));
         let mut spans = left;
         spans.push(Span::styled("─".repeat(fill), bst));
         return vec![Row::new(Line::from(spans)).decor()];
@@ -460,7 +456,7 @@ fn render_user_compact(m: &Message, _cx: &Ctx<'_>, w: usize, color: Color) -> Ve
     if lines.len() > max {
         rows.push(
             Row::new(Line::from(Span::styled(
-                format!("┃ … {} more lines", lines.len() - max),
+                format!("┃ {} {} more lines", text::ELLIPSIS, lines.len() - max),
                 theme::muted(),
             )))
             .decor(),
@@ -750,7 +746,7 @@ fn render_reasoning(
     if let Some(d) = dur {
         head.push(Span::styled(format!(" · {d}"), theme::fg(theme::DIM)));
     }
-    let hw = spans_width(&head);
+    let hw = text::spans_width(&head);
     let hit = Hit::Toggle {
         msg: m.id.clone(),
         part: idx,
@@ -957,9 +953,7 @@ fn render_tool(m: &Message, idx: usize, part: &Part, cx: &Ctx<'_>, w: usize) -> 
             theme::fg(theme::WARNING),
         )),
         ToolState::Delayed => {
-            let secs = run_at
-                .map(|r| ((r - cx.now).max(0) + 999) / 1000)
-                .unwrap_or(0);
+            let secs = run_at.map(|r| text::ceil_secs(r - cx.now)).unwrap_or(0);
             right.push(Span::styled(
                 format!("runs in {secs}s · esc to cancel"),
                 theme::fg(theme::WARNING),
@@ -1076,7 +1070,10 @@ fn render_tool(m: &Message, idx: usize, part: &Part, cx: &Ctx<'_>, w: usize) -> 
         blk.push(
             body(
                 vec![Span::styled(
-                    format!("… {in_hidden} more lines (click to show all)"),
+                    format!(
+                        "{} {in_hidden} more lines (click to show all)",
+                        text::ELLIPSIS
+                    ),
                     theme::fg(theme::WARNING),
                 )],
                 false,
@@ -1133,7 +1130,11 @@ fn render_tool(m: &Message, idx: usize, part: &Part, cx: &Ctx<'_>, w: usize) -> 
             blk.push(
                 body(
                     vec![Span::styled(
-                        format!("… {} more lines (click to show all)", lines.len() - limit),
+                        format!(
+                            "{} {} more lines (click to show all)",
+                            text::ELLIPSIS,
+                            lines.len() - limit
+                        ),
                         theme::fg(theme::WARNING),
                     )],
                     false,
@@ -1173,7 +1174,7 @@ fn render_tool(m: &Message, idx: usize, part: &Part, cx: &Ctx<'_>, w: usize) -> 
                 blk.push(
                     body(
                         vec![Span::styled(
-                            format!("… {start} earlier lines"),
+                            format!("{} {start} earlier lines", text::ELLIPSIS),
                             theme::muted(),
                         )],
                         false,
@@ -1197,7 +1198,7 @@ fn render_tool(m: &Message, idx: usize, part: &Part, cx: &Ctx<'_>, w: usize) -> 
                 blk.push(
                     body(
                         vec![Span::styled(
-                            format!("… {hidden} more lines (click to show all)"),
+                            format!("{} {hidden} more lines (click to show all)", text::ELLIPSIS),
                             theme::fg(theme::WARNING),
                         )],
                         false,
