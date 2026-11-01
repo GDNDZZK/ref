@@ -52,7 +52,9 @@ export function usePermissionKeys(): void {
       const session = askingSession()
       return session?.pendingPermission?.call_id ?? session?.pendingQuestion?.call_id
     },
-    (callId) => callId && (armedAt = performance.now() + PERMISSION_GUARD_MS),
+    (callId) => {
+      if (callId) armedAt = performance.now() + PERMISSION_GUARD_MS
+    },
     { immediate: true },
   )
 

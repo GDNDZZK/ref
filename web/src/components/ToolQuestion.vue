@@ -17,7 +17,9 @@ const field = useTemplateRef<HTMLInputElement[]>('field')
 const shown = shallowRef(props.form)
 watch(
   () => props.form,
-  (form) => form && (shown.value = form),
+  (form) => {
+    if (form) shown.value = form
+  },
 )
 
 const current = computed(() => shown.value)

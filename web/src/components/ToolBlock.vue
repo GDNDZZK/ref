@@ -69,15 +69,25 @@ const bodyBuilt = ref(false) // built on first open, so a long list stays cheap
 
 watch(
   () => props.block.permission,
-  (request) => request && (showPermission.value = true),
+  (request) => {
+    if (request) showPermission.value = true
+  },
   { immediate: true },
 )
 watch(
   () => props.block.question,
-  (request) => request && (showQuestion.value = true),
+  (request) => {
+    if (request) showQuestion.value = true
+  },
   { immediate: true },
 )
-watch(expanded, (isExpanded) => isExpanded && (bodyBuilt.value = true), { immediate: true })
+watch(
+  expanded,
+  (isExpanded) => {
+    if (isExpanded) bodyBuilt.value = true
+  },
+  { immediate: true },
+)
 
 const firstErrorLine = computed(() =>
   state.value === 'error' && !expanded.value
