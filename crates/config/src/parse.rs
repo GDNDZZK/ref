@@ -230,7 +230,7 @@ fn providers(ctx: &mut Ctx, merged: &Map<String, Value>) -> BTreeMap<String, Pro
 
 fn provider(ctx: &mut Ctx, id: &str, p: &Map<String, Value>) -> ProviderConfig {
     let defaults = builtin::provider_defaults(id);
-    let npm = get_str(p, "npm").or_else(|| defaults.map(|d| d.0.to_string()));
+    let npm = get_str(p, "npm").or_else(|| defaults.map(|d| d.npm.to_string()));
     let mut base_url = None;
     let mut api = get_str(p, "api");
     // opencode/models.dev use `api` for the base URL.
@@ -244,7 +244,7 @@ fn provider(ctx: &mut Ctx, id: &str, p: &Map<String, Value>) -> ProviderConfig {
     if env.is_empty()
         && let Some(d) = defaults
     {
-        env.push(d.2.to_string());
+        env.push(d.env.to_string());
     }
     let mut options = match p.get("options") {
         Some(Value::Object(o)) => o.clone(),
@@ -270,14 +270,10 @@ fn provider(ctx: &mut Ctx, id: &str, p: &Map<String, Value>) -> ProviderConfig {
         headers = str_map(Some(&h));
     }
     if base_url.is_none() {
-        base_url = defaults.map(|d| d.1.to_string());
+        base_url = defaults.map(|d| d.base_url.to_string());
     }
     if api_key.is_none() {
-        let conventional = match npm.as_deref() {
-            Some("@ai-sdk/anthropic") => Some("ANTHROPIC_API_KEY"),
-            Some("@ai-sdk/openai") => Some("OPENAI_API_KEY"),
-            _ => None,
-        };
+        let conventional = npm.as_deref().and_then(builtin::env_for_npm);
         api_key = env
             .iter()
             .map(String::as_str)
