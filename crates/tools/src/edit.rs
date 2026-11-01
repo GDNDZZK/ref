@@ -21,6 +21,11 @@ const PREVIEW_MAX_ROWS: usize = 200;
 /// Max lines revealed inline by the seen-line guard.
 const REVEAL_MAX_LINES: usize = 40;
 const REVEAL_MAX_CHARS: usize = 512;
+/// Added runs of at least this many lines collapse in the preview.
+const COLLAPSE_RUN_MIN: usize = 6;
+/// Rows kept at the start and at the end of a collapsed run.
+const COLLAPSE_HEAD_ROWS: usize = 3;
+const COLLAPSE_TAIL_ROWS: usize = 2;
 /// Max chars per preview / context row.
 const ROW_MAX_CHARS: usize = 500;
 
@@ -667,11 +672,11 @@ fn build_preview(old: &[&str], new: &[String]) -> (String, Vec<u32>) {
             show.insert(l);
         }
         let len = b - a;
-        if len > 5 {
-            for l in a..a + 3 {
+        if len >= COLLAPSE_RUN_MIN {
+            for l in a..a + COLLAPSE_HEAD_ROWS {
                 show.insert(l);
             }
-            for l in b - 2..b {
+            for l in b - COLLAPSE_TAIL_ROWS..b {
                 show.insert(l);
             }
         } else {
