@@ -17,6 +17,11 @@ pub(crate) const PURPOSE_KEY: &str = "purpose";
 
 const PURPOSE_DESC: &str = "One short sentence saying why you are calling this tool; shown to the user. Use the language of the user's messages.";
 
+/// Names of the harness tools.
+pub(crate) const CONTEXT_WINDOW: &str = "context_window";
+pub(crate) const TODO: &str = "todo";
+pub(crate) const COMPACT_CONTEXT: &str = "compact_context";
+
 /// Longest tool name providers accept.
 const MAX_TOOL_NAME_CHARS: usize = 64;
 
@@ -107,14 +112,14 @@ pub(crate) fn def(name: &str, description: &str, params: Value) -> ToolDef {
 fn harness_defs() -> Vec<ToolDef> {
     vec![
         def(
-            "context_window",
+            CONTEXT_WINDOW,
             "Show how much of the context window is used (tokens used / max), the recommended compaction point and the automatic compaction threshold. Pass `session` (name or id) to inspect another live session.",
             json!({"type": "object", "properties": {
                 "session": {"type": "string", "description": "Name or id of another live session (default: this session)."}
             }}),
         ),
         def(
-            "todo",
+            TODO,
             "Maintain a todo list for multi-step work; the user sees it live. Each call REPLACES the whole list, so always send every item. Keep exactly one item in_progress while working, mark items completed as soon as they are done, and add follow-ups when discovered. Skip it for trivial single-step tasks.",
             json!({"type": "object", "properties": {
                 "todos": {"type": "array", "description": "The complete, updated list.", "items": {
@@ -128,7 +133,7 @@ fn harness_defs() -> Vec<ToolDef> {
             }, "required": ["todos"]}),
         ),
         def(
-            "compact_context",
+            COMPACT_CONTEXT,
             "Drop the conversation history from your context and continue with only the given summary (the user still sees the full transcript). Use when the context is large (see context_window) or the history is no longer relevant. The summary must contain everything needed to continue: the user's goals and constraints, decisions made, current state, files touched, and next steps.",
             json!({"type": "object", "properties": {
                 "summary": {"type": "string", "description": "Complete summary that replaces the conversation history in your context."}
@@ -266,7 +271,7 @@ pub(crate) async fn dispatch(
 
 fn harness(hub: &Arc<Hub>, s: &Arc<Session>, name: &str, input: &Value) -> ToolOutput {
     match name {
-        "context_window" => {
+        CONTEXT_WINDOW => {
             let target = match input
                 .get("session")
                 .and_then(Value::as_str)
@@ -299,7 +304,7 @@ fn harness(hub: &Arc<Hub>, s: &Arc<Session>, name: &str, input: &Value) -> ToolO
                 c.auto
             ))
         }
-        "todo" => {
+        TODO => {
             let Some(items) = input.get("todos").and_then(Value::as_array) else {
                 return ToolOutput::err("Error: `todos` must be an array of {content, status}.");
             };
@@ -343,7 +348,7 @@ fn harness(hub: &Arc<Hub>, s: &Arc<Session>, name: &str, input: &Value) -> ToolO
             }
             ToolOutput::ok(text)
         }
-        "compact_context" => {
+        COMPACT_CONTEXT => {
             let summary = input
                 .get("summary")
                 .and_then(Value::as_str)
