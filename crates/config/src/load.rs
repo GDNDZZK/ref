@@ -172,7 +172,6 @@ pub(crate) fn project_dirs(cwd: &Path, project_root: Option<&Path>) -> Vec<PathB
             .unwrap_or_else(|_| cwd.to_path_buf())
     };
     let mut up = Vec::new();
-    let mut found_root = false;
     for anc in cwd.ancestors() {
         up.push(anc.to_path_buf());
         let is_root = match project_root {
@@ -180,15 +179,11 @@ pub(crate) fn project_dirs(cwd: &Path, project_root: Option<&Path>) -> Vec<PathB
             None => anc.join(".git").exists(),
         };
         if is_root {
-            found_root = true;
-            break;
+            up.reverse();
+            return up;
         }
     }
-    if !found_root {
-        return vec![cwd];
-    }
-    up.reverse();
-    up
+    vec![cwd]
 }
 
 fn load_file(ctx: &mut Ctx, path: &Path, layers: &mut Vec<Layer>) {
