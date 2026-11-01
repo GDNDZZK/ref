@@ -77,16 +77,6 @@ pub fn normalize_tag(raw: &str) -> Option<String> {
     is_tag(t).then(|| t.to_ascii_uppercase())
 }
 
-static SEEN_ROW_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^[ *]?(\d+):").expect("valid regex"));
-
-/// Line numbers of `N:` / `*N:` / ` N:` rows in a hashline-formatted body.
-pub fn seen_lines_from_body(body: &str) -> Vec<u32> {
-    body.split('\n')
-        .filter_map(|row| SEEN_ROW_RE.captures(row).and_then(|c| c[1].parse().ok()))
-        .collect()
-}
-
 /// Compact set of 1-based line numbers.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LineSet {
@@ -126,10 +116,6 @@ impl LineSet {
                 .filter(move |b| word & (1u64 << b) != 0)
                 .map(move |b| (w * BITS_PER_WORD + b) as u32)
         })
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.bits.iter().all(|w| *w == 0)
     }
 
     fn bytes(&self) -> usize {
@@ -349,15 +335,6 @@ impl HashStore {
             .cloned()
     }
 
-    /// Most recently recorded snapshot of `path`.
-    pub fn latest(&self, path: &Path) -> Option<Snapshot> {
-        let k = key(path);
-        self.lock()
-            .paths
-            .get(&k)
-            .and_then(|e| e.versions.first().cloned())
-    }
-
     /// Paths (canonical) that have a snapshot with `tag`.
     pub fn paths_for_tag(&self, tag: &str) -> Vec<PathBuf> {
         let g = self.lock();
@@ -389,6 +366,18 @@ impl HashStore {
     /// Estimated retained bytes.
     pub fn total_bytes(&self) -> usize {
         self.lock().total
+    }
+}
+
+#[cfg(test)]
+impl HashStore {
+    /// Most recently recorded snapshot of `path`.
+    pub fn latest(&self, path: &Path) -> Option<Snapshot> {
+        let k = key(path);
+        self.lock()
+            .paths
+            .get(&k)
+            .and_then(|e| e.versions.first().cloned())
     }
 
     /// Number of paths with snapshots.
@@ -439,14 +428,6 @@ mod tests {
         assert_eq!(normalize_tag("[a.rs#00fF]").as_deref(), Some("00FF"));
         assert_eq!(normalize_tag("XYZ1"), None);
         assert_eq!(normalize_tag("12345"), None);
-    }
-
-    #[test]
-    fn seen_rows() {
-        assert_eq!(
-            seen_lines_from_body("[a#1234]\n1:x\n*12:y\n 13:z\n...\nfoo"),
-            vec![1, 12, 13]
-        );
     }
 
     #[test]
