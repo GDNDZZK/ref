@@ -25,8 +25,8 @@ pub enum Format {
     Html,
 }
 
-pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
-pub const MAX_TIMEOUT_SECS: u64 = 120;
+const DEFAULT_TIMEOUT_SECS: u64 = 30;
+const MAX_TIMEOUT_SECS: u64 = 120;
 /// Images larger than this are not attached (model APIs reject them).
 const MAX_IMAGE_BYTES: usize = 5 * 1024 * 1024;
 /// Target size of a fetched image after downscaling (the value oh-my-pi uses).
@@ -458,7 +458,8 @@ fn finish(mut out: Out, started: std::time::Instant) -> ToolOutput {
     }
     let mut saved = None;
     let cut = !out.error
-        && (total_bytes > crate::bash::MAX_BYTES || total_lines > crate::bash::MAX_LINES);
+        && (total_bytes > util::INLINE_OUTPUT_MAX_BYTES
+            || total_lines > util::INLINE_OUTPUT_MAX_LINES);
     if cut {
         let path = util::spill_path(out.ext);
         let ok = path
@@ -473,10 +474,10 @@ fn finish(mut out: Out, started: std::time::Instant) -> ToolOutput {
                 path.display()
             ),
         }
-        let mut end = util::floor_char_boundary(&out.body, crate::bash::MAX_BYTES);
+        let mut end = util::floor_char_boundary(&out.body, util::INLINE_OUTPUT_MAX_BYTES);
         if let Some((i, _)) = out.body[..end]
             .match_indices('\n')
-            .nth(crate::bash::MAX_LINES - 1)
+            .nth(util::INLINE_OUTPUT_MAX_LINES - 1)
         {
             end = i;
         } else if let Some(i) = out.body[..end].rfind('\n') {

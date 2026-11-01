@@ -9,8 +9,8 @@ use serde_json::{Value, json};
 use std::path::Path;
 use std::time::SystemTime;
 
-pub const DEFAULT_LIMIT: usize = 500;
-pub const MAX_LIMIT: usize = 5000;
+const DEFAULT_LIMIT: usize = 500;
+const MAX_LIMIT: usize = 5000;
 
 pub fn spec() -> ToolSpec {
     ToolSpec {

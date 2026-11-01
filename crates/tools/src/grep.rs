@@ -10,12 +10,12 @@ use serde_json::{Value, json};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-pub const DEFAULT_LIMIT: usize = 200;
-pub const MAX_LIMIT: usize = 2000;
-pub const MAX_CONTEXT: usize = 20;
-pub const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
-pub const MAX_LINE_CHARS: usize = 500;
-pub const MAX_OUTPUT_BYTES: usize = 60 * 1024;
+const DEFAULT_LIMIT: usize = 200;
+const MAX_LIMIT: usize = 2000;
+const MAX_CONTEXT: usize = 20;
+const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
+const MAX_LINE_CHARS: usize = 500;
+const MAX_OUTPUT_BYTES: usize = 60 * 1024;
 
 pub fn spec() -> ToolSpec {
     ToolSpec {
