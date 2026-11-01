@@ -55,7 +55,7 @@ struct Cli {
 }
 
 fn is_loopback(h: &str) -> bool {
-    let h = h.trim().trim_start_matches('[').trim_end_matches(']');
+    let h = ws::bare_host(h);
     h == ref_proto::LOCALHOST
         || h.parse::<std::net::IpAddr>()
             .is_ok_and(|ip| ip.is_loopback())
@@ -148,11 +148,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
             .collect()
     };
     let bind = match &cli.host {
-        Some(h) => h
-            .trim()
-            .trim_start_matches('[')
-            .trim_end_matches(']')
-            .to_string(),
+        Some(h) => ws::bare_host(h).to_string(),
         None if allow.iter().any(|h| !is_loopback(h)) => ref_proto::ANY_V4.into(),
         None => ref_proto::LOOPBACK_V4.into(),
     };

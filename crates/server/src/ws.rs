@@ -36,6 +36,11 @@ impl Auth {
     }
 }
 
+/// A host name or IP without whitespace and the brackets of an IPv6 literal.
+pub fn bare_host(h: &str) -> &str {
+    h.trim().trim_start_matches('[').trim_end_matches(']')
+}
+
 /// Resolve `--allow-host` entries (IPs, hostnames, `*`) into an [`Auth`].
 pub fn resolve_hosts(hosts: &[String], token: String) -> (Auth, Vec<String>) {
     use std::net::ToSocketAddrs;
@@ -45,7 +50,7 @@ pub fn resolve_hosts(hosts: &[String], token: String) -> (Auth, Vec<String>) {
     };
     let mut warnings = Vec::new();
     for h in hosts {
-        let h = h.trim().trim_start_matches('[').trim_end_matches(']');
+        let h = bare_host(h);
         if h.is_empty() {
             continue;
         }
