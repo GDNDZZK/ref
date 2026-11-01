@@ -5,17 +5,32 @@ use ref_config::Config;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-pub struct PromptInput<'a> {
-    pub cfg: &'a Config,
-    pub agent: &'a str,
-    pub cwd: &'a Path,
-    pub home: Option<&'a Path>,
-    pub date: &'a str,
+/// Instruction and skill files above this size are ignored.
+const MAX_INSTRUCTION_BYTES: u64 = 512 * 1024;
+
+/// Directory depth of an instruction glob walk.
+const GLOB_MAX_DEPTH: usize = 8;
+
+/// Files an instruction glob may match.
+const GLOB_MAX_FILES: usize = 100;
+
+/// Directory depth of a skill scan.
+const SKILL_MAX_DEPTH: usize = 6;
+
+/// Characters that make an instruction path a glob pattern.
+const GLOB_CHARS: [char; 4] = ['*', '?', '[', '{'];
+
+pub(crate) struct PromptInput<'a> {
+    pub(crate) cfg: &'a Config,
+    pub(crate) agent: &'a str,
+    pub(crate) cwd: &'a Path,
+    pub(crate) home: Option<&'a Path>,
+    pub(crate) date: &'a str,
     /// (server name, instructions) of connected MCP servers, sorted by name.
-    pub mcp_instructions: Vec<(String, String)>,
+    pub(crate) mcp_instructions: Vec<(String, String)>,
 }
 
-pub fn build(inp: &PromptInput) -> Vec<String> {
+pub(crate) fn build(inp: &PromptInput) -> Vec<String> {
     // No built-in base prompt: tool descriptions carry everything the model needs.
     let mut parts = Vec::new();
     let agent = inp.cfg.agents.get(inp.agent);
@@ -93,7 +108,7 @@ fn xml_escape(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
-pub fn git_root(cwd: &Path) -> Option<PathBuf> {
+fn git_root(cwd: &Path) -> Option<PathBuf> {
     let mut d = Some(cwd);
     while let Some(x) = d {
         if x.join(".git").exists() {
@@ -125,17 +140,39 @@ fn project_dirs(cwd: &Path, project_root: Option<&Path>) -> Vec<PathBuf> {
 }
 
 fn read_text(p: &Path) -> Option<String> {
-    let meta = std::fs::metadata(p).ok()?;
-    if !meta.is_file() || meta.len() > 512 * 1024 {
+    let meta = match std::fs::metadata(p) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) => {
+            tracing::warn!("cannot read {}: {e}", p.display());
+            return None;
+        }
+    };
+    if !meta.is_file() {
         return None;
     }
-    std::fs::read_to_string(p)
-        .ok()
-        .filter(|s| !s.trim().is_empty())
+    if meta.len() > MAX_INSTRUCTION_BYTES {
+        tracing::warn!(
+            "ignoring {}: larger than {MAX_INSTRUCTION_BYTES} bytes",
+            p.display()
+        );
+        return None;
+    }
+    match std::fs::read_to_string(p) {
+        Ok(s) => Some(s).filter(|s| !s.trim().is_empty()),
+        Err(e) => {
+            tracing::warn!("cannot read {}: {e}", p.display());
+            None
+        }
+    }
 }
 
 /// Instruction files in order: global, project (root -> cwd), configured.
-pub fn instructions(cfg: &Config, cwd: &Path, home: Option<&Path>) -> Vec<(PathBuf, String)> {
+pub(crate) fn instructions(
+    cfg: &Config,
+    cwd: &Path,
+    home: Option<&Path>,
+) -> Vec<(PathBuf, String)> {
     let mut out: Vec<(PathBuf, String)> = Vec::new();
     let push = |p: PathBuf, out: &mut Vec<(PathBuf, String)>| {
         let canon = std::fs::canonicalize(&p).unwrap_or(p.clone());
@@ -168,7 +205,7 @@ pub fn instructions(cfg: &Config, cwd: &Path, home: Option<&Path>) -> Vec<(PathB
         let expanded = crate::util::expand_home(pat, home);
         let abs = cwd.join(expanded);
         let s = abs.to_string_lossy().to_string();
-        if !s.contains(['*', '?', '[', '{']) {
+        if !s.contains(GLOB_CHARS) {
             push(abs, &mut out);
             continue;
         }
@@ -181,42 +218,46 @@ pub fn instructions(cfg: &Config, cwd: &Path, home: Option<&Path>) -> Vec<(PathB
 
 /// Expand an absolute glob pattern into matching files (sorted).
 fn glob_files(pattern: &str) -> Vec<PathBuf> {
-    let Ok(glob) = globset::GlobBuilder::new(pattern)
+    let glob = match globset::GlobBuilder::new(pattern)
         .literal_separator(true)
         .build()
-    else {
-        return Vec::new();
+    {
+        Ok(g) => g,
+        Err(e) => {
+            tracing::warn!("invalid instructions pattern {pattern}: {e}");
+            return Vec::new();
+        }
     };
     let m = glob.compile_matcher();
     // Base directory = longest prefix without glob characters.
-    let idx = pattern.find(['*', '?', '[', '{']).unwrap_or(pattern.len());
+    let idx = pattern.find(GLOB_CHARS).unwrap_or(pattern.len());
     let base = match pattern[..idx].rfind('/') {
         Some(i) => &pattern[..i.max(1)],
         None => "/",
     };
     let mut out: Vec<PathBuf> = ignore::WalkBuilder::new(base)
-        .max_depth(Some(8))
+        .max_depth(Some(GLOB_MAX_DEPTH))
         .hidden(false)
         .build()
         .flatten()
         .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
         .map(|e| e.into_path())
         .filter(|p| m.is_match(p))
-        .take(100)
+        .take(GLOB_MAX_FILES)
         .collect();
     out.sort();
     out
 }
 
 #[derive(Debug, Clone)]
-pub struct Skill {
+struct Skill {
     pub name: String,
     pub description: String,
     pub path: PathBuf,
 }
 
 /// Discover skills (later roots override earlier ones by name), sorted by name.
-pub fn skills(cfg: &Config, cwd: &Path, home: Option<&Path>) -> Vec<Skill> {
+fn skills(cfg: &Config, cwd: &Path, home: Option<&Path>) -> Vec<Skill> {
     let mut roots: Vec<PathBuf> = Vec::new();
     let pdirs = project_dirs(cwd, cfg.project_root.as_deref());
     for d in &cfg.config_dirs {
@@ -268,7 +309,7 @@ fn scan_skills(root: &Path) -> Vec<Skill> {
             }
             continue;
         }
-        if depth >= 6 {
+        if depth >= SKILL_MAX_DEPTH {
             continue;
         }
         let Ok(rd) = std::fs::read_dir(&dir) else {
@@ -276,7 +317,6 @@ fn scan_skills(root: &Path) -> Vec<Skill> {
         };
         let mut subs: Vec<PathBuf> = rd
             .flatten()
-            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir() || t.is_symlink()))
             .map(|e| e.path())
             .filter(|p| {
                 let n = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
