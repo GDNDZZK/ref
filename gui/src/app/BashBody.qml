@@ -35,7 +35,7 @@ ToolBodyBase {
 				visible: body.earlierLines > 0
 				text: qsTr("%n earlier line(s)", "", body.earlierLines)
 				color: Theme.textMuted
-				font.pixelSize: 11
+				font.pixelSize: Theme.microFontSize
 			}
 			OutputText {
 				text: body.liveLines.slice(body.earlierLines).join("\n")

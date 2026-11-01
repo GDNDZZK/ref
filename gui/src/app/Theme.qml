@@ -61,6 +61,11 @@ QtObject {
 	readonly property int fontSize: 15
 	readonly property int smallFontSize: 12
 	readonly property int codeFontSize: 13
+	// Sizes next to fontSize for text one step below it; written out because the web generator reads literals.
+	readonly property int secondaryFontSize: 14 // fontSize - 1
+	readonly property int compactFontSize: 13 // fontSize - 2
+	readonly property int captionFontSize: 13 // smallFontSize + 1
+	readonly property int microFontSize: 11
 
 	readonly property int radiusSmall: 6
 	readonly property int radius: 10

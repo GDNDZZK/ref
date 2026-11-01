@@ -67,7 +67,7 @@ ModalDialog {
 					verticalAlignment: Text.AlignVCenter
 					text: server.modelData.status
 					color: server.modelData.status === "failed" ? Theme.danger : Theme.textMuted
-					font.pixelSize: Theme.smallFontSize + 1
+					font.pixelSize: Theme.captionFontSize
 				}
 				Chevron {
 					id: chevron
@@ -142,7 +142,7 @@ ModalDialog {
 			visible: Workspace.mcpServers.length === 0
 			text: qsTr("No MCP servers configured")
 			color: Theme.textMuted
-			font.pixelSize: Theme.fontSize - 1
+			font.pixelSize: Theme.secondaryFontSize
 		}
 	}
 }

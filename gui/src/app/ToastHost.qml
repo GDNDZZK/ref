@@ -159,7 +159,7 @@ Item {
 						width: parent.width - x - 12
 						text: toast.text
 						color: Theme.text
-						font.pixelSize: Theme.smallFontSize + 1
+						font.pixelSize: Theme.captionFontSize
 						wrapMode: Text.Wrap
 						maximumLineCount: 4
 						elide: Text.ElideRight

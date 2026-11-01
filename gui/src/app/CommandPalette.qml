@@ -135,7 +135,7 @@ FocusScope {
 					anchors.centerIn: parent
 					text: launcher.chosen?.title ?? ""
 					color: Theme.text
-					font.pixelSize: Theme.smallFontSize + 1
+					font.pixelSize: Theme.captionFontSize
 				}
 			}
 
@@ -246,7 +246,7 @@ FocusScope {
 			visible: launcher.askingArgument
 			text: qsTr("Type the argument and press Enter to run \"%1\".").arg(launcher.chosen?.title ?? "")
 			color: Theme.textMuted
-			font.pixelSize: Theme.smallFontSize + 1
+			font.pixelSize: Theme.captionFontSize
 			elide: Text.ElideRight
 		}
 	}

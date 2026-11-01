@@ -139,7 +139,7 @@ Item {
 				anchors { left: parent.left; leftMargin: 30; right: status.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
 				text: tile.facts.displayTitle ?? ""
 				color: Theme.text
-				font.pixelSize: Theme.fontSize - 2
+				font.pixelSize: Theme.compactFontSize
 				elide: Text.ElideRight
 			}
 

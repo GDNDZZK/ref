@@ -97,7 +97,7 @@ Item {
 			verticalAlignment: Text.AlignVCenter
 			text: row.displayTitle
 			color: Theme.text
-			font.pixelSize: Theme.fontSize - 2
+			font.pixelSize: Theme.compactFontSize
 			elide: Text.ElideRight
 			visible: !row.renaming
 		}
@@ -112,7 +112,7 @@ Item {
 			color: Theme.text
 			selectionColor: Theme.selection
 			selectedTextColor: Theme.text
-			font.pixelSize: Theme.fontSize - 2
+			font.pixelSize: Theme.compactFontSize
 			clip: true
 			onAccepted: row.commitRename()
 			onActiveFocusChanged: if (!activeFocus) row.commitRename()

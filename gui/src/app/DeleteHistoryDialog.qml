@@ -35,7 +35,7 @@ ModalDialog {
 		bottomPadding: Theme.dialogPadding
 		text: qsTr("Delete \"%1\" from history? This cannot be undone.").arg(Workspace.dialogArgs.title ?? "")
 		color: Theme.text
-		font.pixelSize: Theme.fontSize - 1
+		font.pixelSize: Theme.secondaryFontSize
 		wrapMode: Text.Wrap
 	}
 }

@@ -31,7 +31,7 @@ Item {
 			verticalAlignment: Text.AlignVCenter
 			text: row.displayTitle
 			color: Theme.text
-			font.pixelSize: Theme.fontSize - 2
+			font.pixelSize: Theme.compactFontSize
 			elide: Text.ElideRight
 		}
 		Text {

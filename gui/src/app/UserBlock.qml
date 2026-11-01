@@ -140,7 +140,7 @@ Block {
 						anchors.verticalCenter: parent.verticalCenter
 						text: qsTr("Context compacted")
 						color: Theme.accent
-						font.pixelSize: Theme.fontSize - 2
+						font.pixelSize: Theme.compactFontSize
 						font.bold: true
 					}
 					Text {
@@ -201,7 +201,7 @@ Block {
 				textFormat: TextEdit.MarkdownText
 				text: block.isCompaction ? block.content : ""
 				color: Theme.textMuted
-				font.pixelSize: Theme.fontSize - 2
+				font.pixelSize: Theme.compactFontSize
 			}
 		}
 

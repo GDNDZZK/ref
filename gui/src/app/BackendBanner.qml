@@ -40,7 +40,7 @@ Rectangle {
 		anchors { left: parent.left; leftMargin: 44; right: restart.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
 		text: qsTr("The backend is older than this app (protocol %1, needs %2).").arg(Workspace.protocolVersion).arg(Workspace.requiredProtocol)
 		color: Theme.text
-		font.pixelSize: Theme.smallFontSize + 1
+		font.pixelSize: Theme.captionFontSize
 		elide: Text.ElideRight
 	}
 
