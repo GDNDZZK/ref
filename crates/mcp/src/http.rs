@@ -31,6 +31,13 @@ pub(crate) struct SseEvent {
     pub id: Option<String>,
 }
 
+impl SseEvent {
+    /// Whether the event carries a JSON-RPC message (the default event type).
+    pub(crate) fn is_message(&self) -> bool {
+        self.event.is_empty() || self.event == "message"
+    }
+}
+
 /// Incremental parser following the WHATWG event-stream rules
 /// (CR, LF and CRLF line endings, comments, multi-line data, optional BOM).
 #[derive(Default)]
@@ -477,14 +484,14 @@ impl HttpTransport {
         self.spawn_task(async move {
             let mut tx = Some(tx);
             let res = read_sse(resp, |ev| {
-                match ev.event.as_str() {
-                    "endpoint" => {
-                        if let Some(tx) = tx.take() {
-                            let _ = tx.send(ev.data.trim().to_string());
-                        }
+                if ev.event == "endpoint" {
+                    if let Some(tx) = tx.take() {
+                        let _ = tx.send(ev.data.trim().to_string());
                     }
-                    "" | "message" => dispatch_data(&shared, &ev.data),
-                    other => tracing::trace!(server = %shared.name, "ignoring SSE event {other}"),
+                } else if ev.is_message() {
+                    dispatch_data(&shared, &ev.data);
+                } else {
+                    tracing::trace!(server = %shared.name, "ignoring SSE event {}", ev.event);
                 }
                 true
             })
@@ -588,7 +595,7 @@ impl GetStream {
             }
             let started = std::time::Instant::now();
             let res = read_sse(resp, |ev| {
-                if ev.event.is_empty() || ev.event == "message" {
+                if ev.is_message() {
                     dispatch_data(&shared, &ev.data);
                 }
                 true
@@ -667,7 +674,7 @@ async fn pump(
     };
     if ct.starts_with("text/event-stream") {
         read_sse(resp, |ev| {
-            if !(ev.event.is_empty() || ev.event == "message") || ev.data.trim().is_empty() {
+            if !ev.is_message() || ev.data.trim().is_empty() {
                 return true;
             }
             match serde_json::from_str::<Value>(&ev.data) {
