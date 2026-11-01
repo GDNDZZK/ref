@@ -20,12 +20,8 @@ const ALL: [NotifyKind; 3] = [
 
 /// A connection that finished Hello and asked for `kinds`.
 fn connect(hub: &Arc<Hub>, kinds: &[NotifyKind]) -> Arc<Conn> {
-    let conn = hub.add_conn();
-    {
-        let mut c = conn.lock();
-        c.hello = true;
-        c.notify = kinds.iter().copied().collect();
-    }
+    let conn = hello_conn(hub);
+    conn.lock().notify = kinds.iter().copied().collect();
     conn
 }
 
@@ -339,15 +335,7 @@ async fn a_custom_run_tells_clients_the_error_is_gone() {
     wait_idle(&s).await;
     assert!(s.info().last_error.is_some());
 
-    let conn = hub.add_conn();
-    conn.lock().hello = true;
-    let attach = Request::Attach {
-        session_id: s.id.clone(),
-        foreground: true,
-        limit: None,
-    };
-    api::handle(&hub, &conn, attach).await.unwrap();
-    conn.out.drain();
+    let conn = attached_conn(&hub, &s).await;
 
     ref_server::engine::start_custom_run(&hub, &s, |_, _, cancel| async move {
         cancel.cancelled().await;
