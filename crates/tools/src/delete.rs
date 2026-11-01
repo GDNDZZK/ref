@@ -44,6 +44,45 @@ fn is_protected_target(abs: &Path, canon: &Path, is_symlink: bool, ctx: &ToolCtx
     protected(abs) || (!is_symlink && protected(canon))
 }
 
+/// The refusal to return when `abs` must not be deleted.
+fn check_protected(
+    abs: &Path,
+    canon: &Path,
+    is_symlink: bool,
+    ctx: &ToolCtx,
+) -> Option<ToolOutput> {
+    is_protected_target(abs, canon, is_symlink, ctx).then(|| {
+        ToolOutput::err(format!(
+            "Refusing to delete {}: it is the working directory, one of its parents, the home directory or the filesystem root.",
+            abs.display()
+        ))
+    })
+}
+
+/// Removes the target and returns what it was; `None` for a non-empty directory without `recursive`.
+fn remove_target(
+    abs: &Path,
+    link_meta: &std::fs::Metadata,
+    recursive: bool,
+) -> Result<Option<&'static str>> {
+    let is_symlink = link_meta.file_type().is_symlink();
+    if is_symlink || !link_meta.is_dir() {
+        std::fs::remove_file(abs)?;
+        return Ok(Some(if is_symlink { "symlink" } else { "file" }));
+    }
+
+    let non_empty = std::fs::read_dir(abs)?.next().is_some();
+    if non_empty && !recursive {
+        return Ok(None);
+    }
+    if non_empty {
+        std::fs::remove_dir_all(abs)?
+    } else {
+        std::fs::remove_dir(abs)?
+    }
+    Ok(Some("directory"))
+}
+
 fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let raw = util::req_str(input, "path")?;
     let (raw, _) = util::unwrap_header(&raw);
@@ -63,29 +102,14 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         Err(e) => bail!("cannot access {display}: {e}"),
     };
     let is_symlink = link_meta.file_type().is_symlink();
-    if is_protected_target(&abs, &canon, is_symlink, ctx) {
-        return Ok(ToolOutput::err(format!(
-            "Refusing to delete {}: it is the working directory, one of its parents, the home directory or the filesystem root.",
-            abs.display()
-        )));
+    if let Some(refusal) = check_protected(&abs, &canon, is_symlink, ctx) {
+        return Ok(refusal);
     }
 
-    let what = if is_symlink || !link_meta.is_dir() {
-        std::fs::remove_file(&abs)?;
-        if is_symlink { "symlink" } else { "file" }
-    } else {
-        let non_empty = std::fs::read_dir(&abs)?.next().is_some();
-        if non_empty && !recursive {
-            return Ok(ToolOutput::err(format!(
-                "{display}/ is a non-empty directory. Pass `recursive: true` to delete it and everything inside."
-            )));
-        }
-        if non_empty {
-            std::fs::remove_dir_all(&abs)?
-        } else {
-            std::fs::remove_dir(&abs)?
-        }
-        "directory"
+    let Some(what) = remove_target(&abs, &link_meta, recursive)? else {
+        return Ok(ToolOutput::err(format!(
+            "{display}/ is a non-empty directory. Pass `recursive: true` to delete it and everything inside."
+        )));
     };
     ctx.store.forget(&abs);
     if canon != abs {
