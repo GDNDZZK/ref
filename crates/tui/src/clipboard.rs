@@ -238,16 +238,19 @@ pub fn image_from_path(s: &str) -> Option<(ImageData, String)> {
     ))
 }
 
+/// Decodes `%XX` escapes; malformed ones are kept as they are.
 fn percent_decode(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
         if b[i] == b'%'
-            && i + 2 < b.len()
-            && let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16)
+            && let Some(&[hi, lo]) = b
+                .get(i + 1..i + 3)
+                .map(|w| <&[u8; 2]>::try_from(w).unwrap())
+            && let (Some(hi), Some(lo)) = (hex_value(hi), hex_value(lo))
         {
-            out.push(v);
+            out.push(hi << 4 | lo);
             i += 3;
             continue;
         }
@@ -255,6 +258,10 @@ fn percent_decode(s: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex_value(digit: u8) -> Option<u8> {
+    char::from(digit).to_digit(16).map(|v| v as u8)
 }
 
 #[cfg(test)]
@@ -271,5 +278,23 @@ mod tests {
         assert_eq!(super::percent_decode("a%20b.png"), "a b.png");
         assert!(super::image_from_path("/nonexistent/x.png").is_none());
         assert!(super::image_from_path("hello").is_none());
+    }
+
+    #[test]
+    fn decode_keeps_malformed_escapes_before_multibyte_chars() {
+        // The two bytes after '%' end inside a multi-byte char.
+        assert_eq!(super::percent_decode("%aé"), "%aé");
+        assert_eq!(super::percent_decode("%éa"), "%éa");
+        assert_eq!(super::percent_decode("%é"), "%é");
+        assert_eq!(super::percent_decode("x%日本"), "x%日本");
+    }
+
+    #[test]
+    fn decode_accepts_only_hex_digits() {
+        // `from_str_radix` would take a sign here.
+        assert_eq!(super::percent_decode("%+f"), "%+f");
+        assert_eq!(super::percent_decode("%4"), "%4");
+        assert_eq!(super::percent_decode("%41"), "A");
+        assert_eq!(super::percent_decode("%e6%97%a5"), "日");
     }
 }
