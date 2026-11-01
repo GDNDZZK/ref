@@ -41,6 +41,31 @@ struct Mock {
     tx: mpsc::UnboundedSender<NetEvent>,
 }
 
+/// How a text is streamed: the delta kind, characters per delta and the pause between deltas.
+struct StreamSpec {
+    make_delta: fn(String) -> Delta,
+    chunk: usize,
+    delay_ms: u64,
+}
+
+impl StreamSpec {
+    fn text(chunk: usize, delay_ms: u64) -> Self {
+        StreamSpec {
+            make_delta: |text| Delta::Text { text },
+            chunk,
+            delay_ms,
+        }
+    }
+
+    fn reasoning(chunk: usize, delay_ms: u64) -> Self {
+        StreamSpec {
+            make_delta: |text| Delta::Reasoning { text },
+            chunk,
+            delay_ms,
+        }
+    }
+}
+
 impl Mock {
     /// Locks the world; a poisoned lock means another handler panicked.
     fn world(&self) -> std::sync::MutexGuard<'_, World> {
@@ -411,28 +436,13 @@ impl Mock {
     }
 
     /// Streams `text` as deltas into part `idx`. Returns false if aborted.
-    #[allow(clippy::too_many_arguments)]
-    async fn stream(
-        &self,
-        sid: &str,
-        mid: &str,
-        idx: usize,
-        text: &str,
-        reasoning: bool,
-        chunk: usize,
-        delay: u64,
-    ) -> bool {
+    async fn stream(&self, sid: &str, mid: &str, idx: usize, text: &str, spec: StreamSpec) -> bool {
         let chars: Vec<char> = text.chars().collect();
-        for c in chars.chunks(chunk.max(1)) {
+        for c in chars.chunks(spec.chunk.max(1)) {
             if self.aborted(sid) {
                 return false;
             }
-            let t: String = c.iter().collect();
-            let delta = if reasoning {
-                Delta::Reasoning { text: t }
-            } else {
-                Delta::Text { text: t }
-            };
+            let delta = (spec.make_delta)(c.iter().collect());
             self.emit(
                 sid,
                 SessionEvent::Delta {
@@ -441,7 +451,7 @@ impl Mock {
                     delta,
                 },
             );
-            tokio::time::sleep(Duration::from_millis(delay)).await;
+            tokio::time::sleep(Duration::from_millis(spec.delay_ms)).await;
         }
         true
     }
@@ -636,7 +646,10 @@ impl Mock {
                 provider_data: None,
             },
         );
-        if !self.stream(sid, mid, 0, REASONING, true, 3, 25).await {
+        if !self
+            .stream(sid, mid, 0, REASONING, StreamSpec::reasoning(3, 25))
+            .await
+        {
             return false;
         }
         self.tool_mut(sid, mid, 0, |p| {
@@ -659,7 +672,10 @@ impl Mock {
         } else {
             "Let me look at the parser first."
         };
-        if !self.stream(sid, mid, 1, intro, false, 2, 20).await {
+        if !self
+            .stream(sid, mid, 1, intro, StreamSpec::text(2, 20))
+            .await
+        {
             return false;
         }
         // Tool: read (done).
@@ -835,7 +851,8 @@ impl Mock {
                 time: now_ms(),
             },
         );
-        self.stream(sid, mid, 6, ANSWER, false, 4, 18).await
+        self.stream(sid, mid, 6, ANSWER, StreamSpec::text(4, 18))
+            .await
     }
 
     /// Background worker: loops forever doing small tool calls.
@@ -865,7 +882,9 @@ impl Mock {
             let thought = format!(
                 "Round {round} for {label}: checking the next module, scanning for unused imports and dead code, then running the linter on the changed files to verify."
             );
-            let mut ok = self.stream(&sid, &mid, 0, &thought, true, 2, 40).await;
+            let mut ok = self
+                .stream(&sid, &mid, 0, &thought, StreamSpec::reasoning(2, 40))
+                .await;
             if ok {
                 self.tool_mut(&sid, &mid, 0, |p| {
                     if let Part::Reasoning { time_end, .. } = p {
@@ -910,9 +929,7 @@ impl Mock {
                             &mid,
                             2,
                             &format!("Module #{round} is **clean**. Moving on to the next one."),
-                            false,
-                            3,
-                            40,
+                            StreamSpec::text(3, 40),
                         )
                         .await;
                 }
@@ -956,7 +973,9 @@ impl Mock {
             "Got it: \"{}\". I'll take that into account.",
             crate::ui::text::truncate(&crate::ui::text::one_line(text), 60)
         );
-        let ok = self.stream(sid, &mid, 0, &ans, false, 2, 30).await;
+        let ok = self
+            .stream(sid, &mid, 0, &ans, StreamSpec::text(2, 30))
+            .await;
         self.finish(
             sid,
             &mid,
@@ -1522,9 +1541,7 @@ impl Mock {
                 &mid,
                 0,
                 "I'll write the design document now.",
-                false,
-                3,
-                40,
+                StreamSpec::text(3, 40),
             )
             .await;
             let input = json!({"path": "docs/design.md", "content": "# Design\n\nref consists of a backend server and TUI frontends.\n"});
