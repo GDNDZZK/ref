@@ -11,27 +11,15 @@ namespace json
 namespace
 {
 
-Fields child(const Fields& fields, QLatin1StringView key)
-{
-	return Fields(fields.object(key), fields.childPath(key));
-}
-
 Delta readDelta(const Fields& fields)
 {
-	const QString type = fields.string("type"_L1);
-	if(type == "text"_L1)
-	{
-		return {.kind = Delta::Kind::Text, .text = fields.string("text"_L1)};
-	}
-	if(type == "reasoning"_L1)
-	{
-		return {.kind = Delta::Kind::Reasoning, .text = fields.string("text"_L1)};
-	}
-	if(type == "tool_input"_L1)
-	{
-		return {.kind = Delta::Kind::ToolInput, .text = fields.string("text"_L1)};
-	}
-	failUnknown(fields.childPath("type"_L1), u"unknown delta type \"%1\""_s.arg(type));
+	static constexpr std::array<std::pair<QLatin1StringView, Delta::Kind>, 3> names{{
+		{"text"_L1, Delta::Kind::Text},
+		{"reasoning"_L1, Delta::Kind::Reasoning},
+		{"tool_input"_L1, Delta::Kind::ToolInput},
+	}};
+	const Delta::Kind kind = readEnum(fields.childPath("type"_L1), fields.string("type"_L1), names);
+	return {.kind = kind, .text = fields.string("text"_L1)};
 }
 
 SessionEvent readSessionEvent(const Fields& fields)
@@ -39,23 +27,23 @@ SessionEvent readSessionEvent(const Fields& fields)
 	const QString type = fields.string("type"_L1);
 	if(type == "info"_L1)
 	{
-		return InfoEvent{.info = readSessionInfo(child(fields, "info"_L1))};
+		return InfoEvent{.info = readSessionInfo(fields.child("info"_L1))};
 	}
 	if(type == "message"_L1)
 	{
-		return MessageEvent{.message = readMessage(child(fields, "message"_L1))};
+		return MessageEvent{.message = readMessage(fields.child("message"_L1))};
 	}
 	if(type == "part"_L1)
 	{
 		return PartEvent{.messageId = fields.string("message_id"_L1),
 		                 .index = fields.integer("index"_L1),
-		                 .part = readPart(child(fields, "part"_L1))};
+		                 .part = readPart(fields.child("part"_L1))};
 	}
 	if(type == "delta"_L1)
 	{
 		return DeltaEvent{.messageId = fields.string("message_id"_L1),
 		                  .index = fields.integer("index"_L1),
-		                  .delta = readDelta(child(fields, "delta"_L1))};
+		                  .delta = readDelta(fields.child("delta"_L1))};
 	}
 	if(type == "removed"_L1)
 	{
@@ -67,7 +55,7 @@ SessionEvent readSessionEvent(const Fields& fields)
 	}
 	if(type == "permission"_L1)
 	{
-		return PermissionEvent{.request = readPermissionRequest(child(fields, "request"_L1))};
+		return PermissionEvent{.request = readPermissionRequest(fields.child("request"_L1))};
 	}
 	if(type == "permission_resolved"_L1)
 	{
@@ -75,7 +63,7 @@ SessionEvent readSessionEvent(const Fields& fields)
 	}
 	if(type == "question"_L1)
 	{
-		return QuestionEvent{.request = readQuestionRequest(child(fields, "request"_L1))};
+		return QuestionEvent{.request = readQuestionRequest(fields.child("request"_L1))};
 	}
 	if(type == "question_resolved"_L1)
 	{
@@ -98,20 +86,13 @@ SessionEvent readSessionEvent(const Fields& fields)
 
 ToastFrame readToast(const Fields& fields)
 {
-	const QString level = fields.string("level"_L1);
-	if(level == "info"_L1)
-	{
-		return {.level = ToastFrame::Level::Info, .text = fields.string("text"_L1)};
-	}
-	if(level == "warn"_L1)
-	{
-		return {.level = ToastFrame::Level::Warn, .text = fields.string("text"_L1)};
-	}
-	if(level == "error"_L1)
-	{
-		return {.level = ToastFrame::Level::Error, .text = fields.string("text"_L1)};
-	}
-	failUnknown(fields.childPath("level"_L1), u"unknown toast level \"%1\""_s.arg(level));
+	static constexpr std::array<std::pair<QLatin1StringView, ToastFrame::Level>, 3> names{{
+		{"info"_L1, ToastFrame::Level::Info},
+		{"warn"_L1, ToastFrame::Level::Warn},
+		{"error"_L1, ToastFrame::Level::Error},
+	}};
+	const ToastFrame::Level level = readEnum(fields.childPath("level"_L1), fields.string("level"_L1), names);
+	return {.level = level, .text = fields.string("text"_L1)};
 }
 
 NotifyFrame readNotify(const Fields& fields)
@@ -139,14 +120,14 @@ ServerFrame readServerFrame(const Fields& fields)
 	const QString kind = fields.string("kind"_L1);
 	if(kind == "response"_L1)
 	{
-		ResponseFrame response{.id = static_cast<quint64>(fields.integer("id"_L1)), .ok = fields.booleanOr("ok"_L1, false)};
+		ResponseFrame response{.id = fields.unsignedInteger("id"_L1), .ok = fields.booleanOr("ok"_L1, false)};
 		response.result = fields.optionalObject("result"_L1).value_or(QJsonObject());
 		response.error = fields.optionalString("error"_L1).value_or(QString());
 		return response;
 	}
 	if(kind == "event"_L1)
 	{
-		return EventFrame{.sessionId = fields.string("session_id"_L1), .event = readSessionEvent(child(fields, "event"_L1))};
+		return EventFrame{.sessionId = fields.string("session_id"_L1), .event = readSessionEvent(fields.child("event"_L1))};
 	}
 	if(kind == "sessions"_L1)
 	{
@@ -165,7 +146,7 @@ ServerFrame readServerFrame(const Fields& fields)
 
 SessionSnapshot readSnapshot(const Fields& fields)
 {
-	return {.info = readSessionInfo(child(fields, "info"_L1)),
+	return {.info = readSessionInfo(fields.child("info"_L1)),
 	        .messages = readMessages(fields, "messages"_L1),
 	        .moreBefore = fields.booleanOr("more_before"_L1, false),
 	        .pendingPermissions = fields.listOrEmpty<PermissionRequest>("pending_permissions"_L1, readPermissionRequest),
@@ -201,23 +182,23 @@ Parsed<HelloResult> parseHelloResult(const QJsonObject& result)
 
 Parsed<SessionInfo> parseSessionResult(const QJsonObject& result)
 {
-	return json::guarded([&] { return json::readSessionInfo(json::child(json::Fields(result, u"result"_s), "session"_L1)); });
+	return json::guarded([&] { return json::readSessionInfo(json::resultFields(result).child("session"_L1)); });
 }
 
 Parsed<SessionSnapshot> parseAttachResult(const QJsonObject& result)
 {
-	return json::guarded([&] { return json::readSnapshot(json::child(json::Fields(result, u"result"_s), "snapshot"_L1)); });
+	return json::guarded([&] { return json::readSnapshot(json::resultFields(result).child("snapshot"_L1)); });
 }
 
 Parsed<QList<SessionInfo>> parseSessionsResult(const QJsonObject& result)
 {
-	return json::guarded([&] { return json::readSessions(json::Fields(result, u"result"_s)); });
+	return json::guarded([&] { return json::readSessions(json::resultFields(result)); });
 }
 
 Parsed<PromptResult> parsePromptResult(const QJsonObject& result)
 {
 	return json::guarded([&] {
-		const json::Fields fields(result, u"result"_s);
+		const json::Fields fields = json::resultFields(result);
 		return PromptResult{.queued = fields.booleanOr("queued"_L1, false), .messageId = fields.string("message_id"_L1)};
 	});
 }
@@ -225,7 +206,7 @@ Parsed<PromptResult> parsePromptResult(const QJsonObject& result)
 Parsed<MessagesPage> parseMessagesResult(const QJsonObject& result)
 {
 	return json::guarded([&] {
-		const json::Fields fields(result, u"result"_s);
+		const json::Fields fields = json::resultFields(result);
 		return MessagesPage{.messages = json::readMessages(fields, "messages"_L1), .moreBefore = fields.booleanOr("more_before"_L1, false)};
 	});
 }
@@ -233,7 +214,7 @@ Parsed<MessagesPage> parseMessagesResult(const QJsonObject& result)
 Parsed<RemovedPrompt> parseRemovedPromptResult(const QJsonObject& result)
 {
 	return json::guarded([&] {
-		const json::Fields fields(result, u"result"_s);
+		const json::Fields fields = json::resultFields(result);
 		return RemovedPrompt{.removed = fields.booleanOr("removed"_L1, false),
 		                     .text = fields.optionalString("text"_L1).value_or(QString()),
 		                     .images = fields.listOrEmpty<NamedImage>("images"_L1, json::readNamedImage)};
@@ -253,7 +234,7 @@ Parsed<RemovedPrompt> parseUndoResult(const QJsonObject& result)
 Parsed<QStringList> parseFilesResult(const QJsonObject& result)
 {
 	return json::guarded([&] {
-		const json::Fields fields(result, u"result"_s);
+		const json::Fields fields = json::resultFields(result);
 		QStringList files;
 		for(const QJsonValue& file : fields.array("files"_L1))
 		{
@@ -269,12 +250,12 @@ Parsed<QStringList> parseFilesResult(const QJsonObject& result)
 
 Parsed<QList<NamedImage>> parseNamedImages(const QJsonValue& images)
 {
-	return json::guarded([&] { return json::Fields(QJsonObject{{u"images"_s, images}}, u"result"_s).listOrEmpty<NamedImage>("images"_L1, json::readNamedImage); });
+	return json::guarded([&] { return json::resultFields(QJsonObject{{u"images"_s, images}}).listOrEmpty<NamedImage>("images"_L1, json::readNamedImage); });
 }
 
 Parsed<ImageData> parseImageResult(const QJsonObject& result)
 {
-	return json::guarded([&] { return json::readImageData(json::child(json::Fields(result, u"result"_s), "image"_L1)); });
+	return json::guarded([&] { return json::readImageData(json::resultFields(result).child("image"_L1)); });
 }
 
 } // namespace refgui::proto

@@ -55,6 +55,8 @@ public:
 	qint64 integer(QLatin1StringView key) const;
 	QJsonObject object(QLatin1StringView key) const;
 	QJsonArray array(QLatin1StringView key) const;
+	quint64 unsignedInteger(QLatin1StringView key) const;
+	Fields child(QLatin1StringView key) const; // the object under `key`
 
 	// Optional fields: missing and null both give the default.
 	std::optional<QString> optionalString(QLatin1StringView key) const;
@@ -62,6 +64,8 @@ public:
 	std::optional<QJsonObject> optionalObject(QLatin1StringView key) const;
 	qint64 integerOr(QLatin1StringView key, qint64 fallback) const;
 	bool booleanOr(QLatin1StringView key, bool fallback) const;
+	quint64 unsignedOr(QLatin1StringView key, quint64 fallback) const;
+	std::optional<Fields> optionalChild(QLatin1StringView key) const;
 	QJsonArray arrayOrEmpty(QLatin1StringView key) const;
 	QJsonValue value(QLatin1StringView key) const; // null when missing
 
@@ -80,6 +84,9 @@ public:
 	}
 
 private:
+	// Missing or null.
+	bool isAbsent(QLatin1StringView key) const;
+
 	template<typename T, typename Parse>
 	QList<T> elements(const QJsonArray& array, QLatin1StringView key, Parse& parse) const
 	{
