@@ -314,7 +314,7 @@ async fn convert(
             let page =
                 tokio::task::spawn_blocking(move || html::convert(&text, &url, format, full_page))
                     .await
-                    .map_err(|_| anyhow!("HTML conversion failed"))?;
+                    .map_err(|e| anyhow!("HTML conversion failed: {e}"))?;
             out.title = page.title;
             out.notes.extend(page.note);
             out.body = page.body;
@@ -386,7 +386,7 @@ async fn convert(
                     (bytes, r)
                 })
                 .await
-                .map_err(|_| anyhow!("image conversion failed"))?;
+                .map_err(|e| anyhow!("image conversion failed: {e}"))?;
                 match fitted {
                     Err(e) => {
                         out.body = format!(
@@ -452,10 +452,15 @@ async fn github_issue(
         "X-GitHub-Api-Version",
         HeaderValue::from_static("2022-11-28"),
     );
-    if let Some(t) = sites::github_token()
-        .and_then(|t| HeaderValue::from_str(&format!("Bearer {}", t.trim())).ok())
-    {
-        h.insert(AUTHORIZATION, t);
+    if let Some(t) = sites::github_token() {
+        match HeaderValue::from_str(&format!("Bearer {}", t.trim())) {
+            Ok(v) => {
+                h.insert(AUTHORIZATION, v);
+            }
+            Err(_) => tracing::warn!(
+                "webfetch: the GitHub token is not a valid header value; sending the request anonymously"
+            ),
+        }
     }
     let get = |u: String| {
         let h = h.clone();
