@@ -108,7 +108,7 @@ Item {
 		radius: Theme.radiusLarge
 		color: composer.model.shellMode ? Theme.shellSurface : Theme.surface
 		border.color: composer.model.shellMode ? Theme.shellBorder
-			: (dropping || input.activeFocus ? Theme.accent : Theme.border)
+			: (dropping || input.activeFocus ? Theme.accentText : Theme.border)
 		clip: true
 		opacity: composer.boxShown ? 1 : 0
 		visible: composer.boxShown || height > 0

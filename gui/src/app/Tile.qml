@@ -102,7 +102,7 @@ Item {
 		anchors.fill: parent
 		radius: Theme.radius
 		color: Theme.background
-		border.color: tile.focused || tile.expanded ? Theme.accent : Theme.border
+		border.color: tile.focused || tile.expanded ? Theme.accentText : Theme.border
 		clip: true
 
 		Behavior on border.color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
@@ -151,7 +151,7 @@ Item {
 					anchors.verticalCenter: parent.verticalCenter
 					name: tile.facts.activity === Activity.waitingQuestion ? "question" : "lock"
 					size: 16
-					color: Theme.warning
+					color: Theme.warningText
 					visible: tile.hasPermission
 				}
 				AlertBadge {
@@ -165,7 +165,7 @@ Item {
 					anchors.verticalCenter: parent.verticalCenter
 					visible: tile.facts.todoTotal > 0
 					text: (tile.facts.todoAllDone ? "✓" : "") + tile.facts.todoDone + "/" + tile.facts.todoTotal
-					color: tile.facts.todoAllDone ? Theme.success : Theme.textMuted
+					color: tile.facts.todoAllDone ? Theme.successText : Theme.textMuted
 					font.pixelSize: Theme.smallFontSize
 				}
 				Text {

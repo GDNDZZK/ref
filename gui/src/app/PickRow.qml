@@ -22,7 +22,7 @@ Item {
 		anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
 		name: "check"
 		size: 16
-		color: Theme.accent
+		color: Theme.accentText
 		visible: row.selected
 	}
 

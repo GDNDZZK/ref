@@ -86,7 +86,7 @@ ModalDialog {
 					anchors.centerIn: parent
 					name: "check"
 					size: 16
-					color: Theme.accent
+					color: Theme.accentText
 					visible: row.isCurrent && !closeTap.visible
 				}
 				IconButton {
