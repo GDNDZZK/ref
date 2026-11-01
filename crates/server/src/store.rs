@@ -20,8 +20,23 @@ use std::collections::HashMap;
 use std::hash::Hasher;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
+use std::time::Duration;
 
 const SCHEMA_VERSION: i64 = 1;
+
+/// Database file name inside the data directory.
+const DB_FILE: &str = "ref.db";
+
+/// Longest accepted session id.
+const MAX_ID_LEN: usize = 128;
+
+/// How long SQLite waits for a lock held by another connection.
+const DB_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// SQLite's `LIMIT -1`: no limit.
+const NO_LIMIT: i64 = -1;
+
+const STORE_UNAVAILABLE: &str = "session store is not available";
 
 /// Full persisted state of one session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,7 +84,7 @@ pub struct Store {
 
 fn valid_id(id: &str) -> bool {
     !id.is_empty()
-        && id.len() <= 128
+        && id.len() <= MAX_ID_LEN
         && id
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
@@ -78,7 +93,7 @@ fn valid_id(id: &str) -> bool {
 impl Store {
     /// Opens (or creates) `<data_dir>/ref.db` on a background thread.
     pub fn new(data_dir: PathBuf) -> Store {
-        let path = data_dir.join("ref.db");
+        let path = data_dir.join(DB_FILE);
         let (tx, rx) = mpsc::channel();
         let p2 = path.clone();
         std::thread::Builder::new()
@@ -92,9 +107,8 @@ impl Store {
         let (tx, rx) = mpsc::channel();
         self.tx
             .send(f(tx))
-            .map_err(|_| "session store is not available".to_string())?;
-        rx.recv()
-            .map_err(|_| "session store is not available".to_string())?
+            .map_err(|_| STORE_UNAVAILABLE.to_string())?;
+        rx.recv().map_err(|_| STORE_UNAVAILABLE.to_string())?
     }
 
     /// Queue an incremental save (non-blocking). Sessions without messages that were never
@@ -194,7 +208,7 @@ fn open(data_dir: &Path, path: &Path) -> Result<Connection, String> {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
     }
-    conn.busy_timeout(std::time::Duration::from_secs(5))
+    conn.busy_timeout(DB_BUSY_TIMEOUT)
         .map_err(|e| e.to_string())?;
     conn.pragma_update(None, "journal_mode", "WAL")
         .map_err(|e| e.to_string())?;
@@ -269,7 +283,7 @@ fn db_thread(data_dir: &Path, path: &Path, rx: mpsc::Receiver<Cmd>) {
         let skip = superseded_saves(&batch);
         for (c, skip) in batch.into_iter().zip(skip) {
             let Some(db) = conn.as_mut() else {
-                fail(c, "session store is not available (see server log)");
+                fail(c, &format!("{STORE_UNAVAILABLE} (see server log)"));
                 continue;
             };
             match c {
@@ -488,7 +502,7 @@ fn list(
     cwd: Option<&str>,
     limit: Option<usize>,
 ) -> Result<Vec<SessionInfo>, String> {
-    let limit = limit.map(|l| l as i64).unwrap_or(-1);
+    let limit = limit.map(|l| l as i64).unwrap_or(NO_LIMIT);
     let mut stmt = db
         .prepare_cached(
             "SELECT info FROM sessions WHERE (?1 IS NULL OR cwd = ?1) ORDER BY updated_at DESC LIMIT ?2",
@@ -605,7 +619,7 @@ fn import_json(db: &mut Connection, data_dir: &Path) -> Result<(), String> {
         imported,
         skipped,
         "imported legacy JSON sessions into {}; moved files to {}",
-        "ref.db",
+        DB_FILE,
         target.display()
     );
     Ok(())
