@@ -46,10 +46,7 @@ pub(crate) struct Shared {
 pub(crate) fn id_key(id: &Value) -> String {
     match id {
         Value::String(s) => format!("s:{s}"),
-        Value::Number(n) => match n.as_i64() {
-            Some(i) => format!("n:{i}"),
-            None => format!("n:{n}"),
-        },
+        Value::Number(n) => format!("n:{n}"),
         other => format!("o:{other}"),
     }
 }
