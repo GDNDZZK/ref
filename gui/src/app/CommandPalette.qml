@@ -86,7 +86,7 @@ FocusScope {
 
 		readonly property bool shown: launcher.entered && launcher.open
 
-		width: Math.min(Theme.paletteWidth, launcher.width - 2 * 24)
+		width: Math.min(Theme.paletteWidth, launcher.width - 2 * Theme.overlayEdgeMargin)
 		height: searchRow.height + 1 + (launcher.askingArgument ? description.height : list.implicitHeight)
 		x: Math.round((launcher.width - width) / 2)
 		y: Math.max(48, Math.round(launcher.height * Theme.paletteTopRatio)) - (shown ? 0 : Motion.dialogDrop)

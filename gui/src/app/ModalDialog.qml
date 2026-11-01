@@ -44,10 +44,10 @@ FocusScope {
 	Rectangle {
 		id: panel
 
-		readonly property real wantedY: Math.max(24, (dialog.height - height) / 3)
+		readonly property real wantedY: Math.max(Theme.overlayEdgeMargin, (dialog.height - height) / 3)
 		readonly property bool shown: dialog.entered && dialog.open
 
-		width: Math.min(dialog.dialogWidth, dialog.width - 2 * 24)
+		width: Math.min(dialog.dialogWidth, dialog.width - 2 * Theme.overlayEdgeMargin)
 		height: Math.min(dialog.maxPanelHeight, Theme.dialogHeaderHeight + scroller.contentHeight + (dialog.hasButtons ? Theme.dialogFooterHeight : 0))
 		x: Math.round((dialog.width - width) / 2)
 		y: Math.round(wantedY) - (shown ? 0 : Motion.dialogDrop)

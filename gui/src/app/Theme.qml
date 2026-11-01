@@ -94,6 +94,7 @@ QtObject {
 	readonly property int dialogWidthWide: 640
 	readonly property int settingsWidth: 520
 	readonly property int statusDotSize: 8 // the dot of a session, server or activity
+	readonly property int overlayEdgeMargin: 24 // least distance of the palette and dialogs from the window edge
 	readonly property int dialogPadding: 22 // inset of dialog content from the dialog edge
 	readonly property int dialogHeaderHeight: 56
 	readonly property int dialogFooterHeight: 64
