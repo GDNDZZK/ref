@@ -153,7 +153,7 @@ async fn static_file(headers: HeaderMap, uri: Uri) -> Response {
 }
 
 fn spa_fallback(path: &str) -> Option<&'static Asset> {
-    let last_segment = path.rsplit('/').next().unwrap_or("");
+    let last_segment = path.rsplit_once('/').map_or(path, |(_, last)| last);
     let is_page_route = !last_segment.contains('.')
         && !path.starts_with(API_PREFIX)
         && path != WS_PATH
@@ -198,9 +198,9 @@ fn accepts_encoding(headers: &HeaderMap, coding: &str) -> bool {
         .filter_map(|v| v.to_str().ok())
         .flat_map(|line| line.split(','))
         .any(|item| {
-            let mut parts = item.split(';');
-            let name = parts.next().unwrap_or("").trim();
-            let q_zero = parts.any(|p| {
+            let (name, params) = item.split_once(';').unwrap_or((item, ""));
+            let name = name.trim();
+            let q_zero = params.split(';').any(|p| {
                 p.trim()
                     .strip_prefix("q=")
                     .is_some_and(|q| q.trim().parse::<f32>().is_ok_and(|q| q == 0.0))
