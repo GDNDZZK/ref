@@ -380,5 +380,9 @@
     "hintSingle": "↑↓ or j/k move · 1-9, Space or Enter to pick · Esc dismiss",
     "hintTabbed": "↑↓ or j/k move · 1-9, Space or Enter to pick · ←→ or Tab switch question · Esc dismiss",
     "hintConfirm": "Enter submits · ← back · Esc dismiss"
+  },
+  "todo": {
+    "title": "Todo {done}/{total}",
+    "show": "Show the to-do list"
   }
 }

@@ -45,6 +45,12 @@ export function todoProgress(todos: readonly Todo[] | undefined): TodoProgress |
   return { done, total: counted.length, complete: done === counted.length }
 }
 
+// The item to show as "now": the one in progress, else the first one still pending (as in the TUI).
+export function currentTodo(todos: readonly Todo[] | undefined): Todo | undefined {
+  const list = todos ?? []
+  return list.find((todo) => todo.status === 'in_progress') ?? list.find((todo) => todo.status === 'pending')
+}
+
 // The turn's running time, or undefined while the session is idle.
 export function runningTime(info: SessionInfo, now: number): string | undefined {
   return info.busy_since == null ? undefined : formatElapsed(now - info.busy_since)
