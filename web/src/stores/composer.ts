@@ -75,6 +75,11 @@ export const useComposerStore = defineStore('composer', () => {
     return created
   }
 
+  // The composer of a session that has one (none once the session is gone).
+  function find(sessionId: string): SessionComposer | undefined {
+    return composers.get(sessionId)
+  }
+
   // The session is closed: its draft goes with it.
   function forget(sessionId: string): void {
     composers.get(sessionId)?.dispose()
@@ -83,5 +88,5 @@ export const useComposerStore = defineStore('composer', () => {
 
   workspace.onGone(forget)
 
-  return { of, slashCommands }
+  return { of, find, slashCommands }
 })
