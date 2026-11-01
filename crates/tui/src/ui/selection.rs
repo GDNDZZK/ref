@@ -6,7 +6,7 @@ use super::Row;
 use super::text::gwidth;
 
 /// Position in content coordinates: (global row, column).
-pub type Pos = (usize, u16);
+type Pos = (usize, u16);
 
 #[derive(Debug, Clone, Default)]
 pub struct Selection {
