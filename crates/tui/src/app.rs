@@ -13,11 +13,11 @@ use serde_json::Value;
 
 use crate::net::{Client, NetEvent};
 use crate::state::{Queued, SessionView};
+use crate::text;
 use crate::ui::dialog::{Dialog, HelpDialog, Item, Kind, ListDialog, OPEN_SETTLE};
 use crate::ui::editor::{Editor, History};
 use crate::ui::permission::PermissionView;
 use crate::ui::question::QuestionView;
-use crate::ui::text;
 use crate::ui::theme;
 use crate::ui::toast::Toasts;
 use crate::util::{cmd, placeholder_info};

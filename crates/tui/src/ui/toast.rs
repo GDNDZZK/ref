@@ -7,8 +7,8 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ref_proto::ToastLevel;
 
-use super::text::{self, width};
 use super::theme;
+use crate::text::{self, width};
 
 pub struct Toast {
     pub level: ToastLevel,

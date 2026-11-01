@@ -6,9 +6,9 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use super::message::compose;
-use super::text;
 use super::theme;
 use crate::state::SessionView;
+use crate::text;
 
 /// From this share of the context window used, the usage text switches from muted to normal.
 const CONTEXT_WARM_PCT: u64 = 60;

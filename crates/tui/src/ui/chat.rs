@@ -10,9 +10,9 @@ use ref_proto::{AgentInfo, ModelInfo, SessionStatus};
 
 use super::message::{self, Ctx};
 use super::selection::{self, Selection};
-use super::text::{self, width};
 use super::{Hit, Row, theme};
 use crate::state::SessionView;
+use crate::text::{self, width};
 
 /// Shared rendering environment.
 pub struct Env<'a> {

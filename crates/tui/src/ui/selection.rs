@@ -3,7 +3,7 @@
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::Row;
-use super::text::gwidth;
+use crate::text::gwidth;
 
 /// Position in content coordinates: (global row, column).
 type Pos = (usize, u16);

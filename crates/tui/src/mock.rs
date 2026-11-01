@@ -1041,7 +1041,7 @@ impl Mock {
         self.start_text_part(sid, &mid, 0);
         let ans = format!(
             "Got it: \"{}\". I'll take that into account.",
-            crate::ui::text::truncate(&crate::ui::text::one_line(text), 60)
+            crate::text::truncate(&crate::text::one_line(text), 60)
         );
         let ok = self
             .stream(sid, &mid, 0, &ans, StreamSpec::text(2, 30))
@@ -1557,7 +1557,7 @@ impl Mock {
     fn on_list_files(&self, request_id: Option<u64>, query: &str) {
         let mut scored: Vec<(i64, &str)> = MOCK_FILES
             .iter()
-            .filter_map(|f| crate::ui::text::fuzzy_score(f, query).map(|s| (s, *f)))
+            .filter_map(|f| crate::text::fuzzy_score(f, query).map(|s| (s, *f)))
             .collect();
         scored.sort_by_key(|x| std::cmp::Reverse(x.0));
         let files: Vec<&str> = scored.into_iter().map(|x| x.1).collect();

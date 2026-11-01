@@ -15,8 +15,8 @@ use ref_proto::{Question, QuestionRequest};
 
 use super::dialog::{frame, open_progress};
 use super::editor::Editor;
-use super::text::{self, width};
 use super::theme;
+use crate::text::{self, width};
 
 const CUSTOM_LABEL: &str = "Type your own answer";
 const CONFIRM_LABEL: &str = "Confirm";

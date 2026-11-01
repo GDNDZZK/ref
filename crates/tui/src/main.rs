@@ -7,6 +7,7 @@ mod mock;
 mod net;
 mod render;
 mod state;
+mod text;
 mod ui;
 mod util;
 

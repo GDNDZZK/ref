@@ -10,8 +10,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ref_proto::McpServerStatus;
 
-use super::text::{self, width};
 use super::{dialog, message, theme};
+use crate::text::{self, width};
 use crate::util::mcp_status;
 
 /// The connecting dot pulses once per this many ticks.

@@ -10,12 +10,13 @@ pub mod permission;
 pub mod question;
 pub mod selection;
 pub mod split;
-pub mod text;
 pub mod theme;
 pub mod toast;
 pub mod todo;
 
 use ratatui::text::{Line, Span};
+
+use crate::text;
 
 /// One rendered screen row of transcript content.
 #[derive(Debug, Clone, Default)]

@@ -5,9 +5,9 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 
 use super::dialog::draw_rounded_border;
-use super::text::{self, width};
 use super::theme;
 use crate::state::SessionView;
+use crate::text::{self, width};
 
 const MIN_TILE_W: u16 = 30;
 const MIN_TILE_H: u16 = 8;

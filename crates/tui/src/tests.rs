@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 use crate::app::{App, InitPlan, Mode};
 use crate::net::Client;
 use crate::state::SessionView;
-use crate::ui::text;
+use crate::text;
 
 pub fn dump(term: &Terminal<TestBackend>) -> String {
     let buf = term.backend().buffer();
@@ -4042,7 +4042,7 @@ fn sidebar_live_sessions_truncate_long_names_and_fit_the_width() {
     );
     for r in &all {
         assert!(
-            crate::ui::text::width(r.trim_end()) <= crate::render::SIDEBAR_W as usize,
+            crate::text::width(r.trim_end()) <= crate::render::SIDEBAR_W as usize,
             "{r:?}"
         );
     }
