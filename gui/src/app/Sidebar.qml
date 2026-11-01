@@ -17,26 +17,25 @@ Rectangle {
 	readonly property real listSpace: fixedSpace - todoSection.height
 	readonly property real fixedSpace: height - Theme.sidebarHeaderHeight - 44 - 2 * Theme.sidebarSectionHeight - 32 - 8 - Theme.sidebarFooterHeight
 
-	// The to-do list of the session in front: the current one, or the focused tile in split view. It keeps what it
-	// showed while it closes, and changes only when the list does.
+	// The to-do list of the session in front: the current one, or the focused tile in split view. One value, {items,
+	// done, total}, and nothing else is derived from it by a binding that could be read before it has caught up. The
+	// section keeps what it showed while it closes, and changes only when the list does.
 	readonly property var front: Workspace.frontSession
-	readonly property var todoItems: front ? front.todoItems : []
-	readonly property bool hasTodos: todoItems.length > 0
+	readonly property var todo: front ? front.todo : ({ items: [], done: 0, total: 0 })
 	property var shownTodo: ({ items: [], done: 0, total: 0 })
 	// Up to a third of the column, and never so much that the lists below lose their minimum.
 	readonly property real todoCap: Math.min(height / 3, fixedSpace - minRunningHeight - minHistoryHeight)
-	readonly property real todoHeight: hasTodos && todoCap >= Theme.sidebarSectionHeight + todoList.rowHeight
+	readonly property real todoHeight: todo.items.length > 0 && todoCap >= Theme.sidebarSectionHeight + todoList.rowHeight
 		? Math.min(Theme.sidebarSectionHeight + todoList.height, todoCap) : 0
 	readonly property int lockupWidth: 60 // the lockup is drawn at this size only: its pixels are aligned to it
 	readonly property int lockupHeight: 24
 
 	function keepTodo() {
-		if (!hasTodos || JSON.stringify(todoItems) === JSON.stringify(shownTodo.items))
-			return
-		shownTodo = { items: todoItems, done: front.todoDone, total: front.todoTotal }
+		if (todo.items.length > 0 && JSON.stringify(todo) !== JSON.stringify(shownTodo))
+			shownTodo = todo
 	}
 
-	onTodoItemsChanged: keepTodo()
+	onTodoChanged: keepTodo()
 	Component.onCompleted: keepTodo()
 
 	color: Theme.surface
@@ -158,7 +157,7 @@ Rectangle {
 			width: parent.width
 			height: sidebar.todoHeight
 			clip: true
-			opacity: sidebar.hasTodos ? 1 : 0
+			opacity: sidebar.todo.items.length > 0 ? 1 : 0
 			visible: height > 0
 
 			Behavior on height { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }

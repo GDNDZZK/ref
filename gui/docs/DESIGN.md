@@ -132,7 +132,9 @@ tile's. Hidden (height and opacity animate with `Motion.standard`) while that se
 `wrap: true` (marker, text continuing under itself, completed ones struck through, the one in progress in `accent`),
 inset to x = 18 like the labels. The section is as high as its list, at most a third of the sidebar and never so high
 that Running and History fall below their minimum (3 rows each); above that the list scrolls inside. It keeps showing
-what it showed while it closes and rebuilds only when the list changes.
+what it showed while it closes and rebuilds only when the list changes. It reads one value, `ChatSession.todo`
+({items, done, total}): with the items and the counts in separate bindings, a change of the session in front could be
+handled while one of them still had the old session's value, and the section stayed at "0/0" without rows.
 
 Padding: rows are inset 8px from the sidebar edges (`sidebarPadding`), 2px apart. Section labels start at x = 18.
 
