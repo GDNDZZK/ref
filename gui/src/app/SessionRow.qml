@@ -81,7 +81,6 @@ Item {
 	}
 
 	Rectangle {
-		id: face
 		anchors { fill: parent; leftMargin: Theme.sidebarPadding; rightMargin: Theme.sidebarPadding }
 		radius: Theme.radius
 		color: row.faceColor

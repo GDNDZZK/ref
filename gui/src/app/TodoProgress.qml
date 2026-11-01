@@ -82,7 +82,7 @@ Item {
 		}
 	}
 
-	HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
+	HoverHandler { cursorShape: Qt.PointingHandCursor }
 	TapHandler { onTapped: popup.visible ? popup.close() : popup.open() }
 	Accessible.role: Accessible.Button
 	Accessible.name: qsTr("Todo %1").arg(root.counts)

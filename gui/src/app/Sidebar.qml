@@ -93,7 +93,6 @@ Rectangle {
 			height: sidebar.newRowHeight
 
 			Rectangle {
-				id: newButton
 				x: Theme.sidebarPadding
 				anchors.verticalCenter: parent.verticalCenter
 				width: parent.width - 2 * Theme.sidebarPadding - folderButton.width - 8

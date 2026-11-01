@@ -142,7 +142,6 @@ Rectangle {
 				model: card.prompt.rows
 
 				QuestionRow {
-					id: choice
 
 					required property var modelData
 

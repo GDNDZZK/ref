@@ -47,7 +47,6 @@ Item {
 	}
 
 	Item {
-		id: stage
 		anchors { fill: parent; margins: lightbox.margin; bottomMargin: lightbox.margin + lightbox.captionHeight }
 		scale: lightbox.shown ? 1 : lightbox.closedScale
 
