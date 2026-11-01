@@ -179,6 +179,11 @@ impl McpManager {
         out
     }
 
+    /// Starts connecting the enabled servers of a config; their status is read later.
+    pub(crate) fn start_servers(&self, cfg: &Config) {
+        self.servers_for(cfg);
+    }
+
     /// Detailed status of every configured server (sorted by name), with tool names as
     /// exposed to the model.
     pub fn status(&self, cfg: &Config) -> Vec<ref_proto::McpServerStatus> {
