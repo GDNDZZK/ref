@@ -6,6 +6,9 @@ import RefGui
 Item {
 	id: line
 
+	// How full the context window is: past the size where compaction is recommended, or where it starts by itself.
+	enum ContextLevel { Normal, Recommend, Auto }
+
 	required property ChatSession session
 
 	// The to-do popup was closed by Esc: the keyboard goes back to the pane.
@@ -22,8 +25,15 @@ Item {
 	readonly property real contextUsed: session.contextUsed
 	readonly property real contextMax: session.contextMax
 	readonly property real contextRatio: contextMax > 0 ? Math.min(1, contextUsed / contextMax) : 0
-	readonly property color contextColor: session.contextAuto > 0 && contextUsed >= session.contextAuto ? Theme.danger
-		: session.contextRecommend > 0 && contextUsed >= session.contextRecommend ? Theme.warning
+	readonly property int contextLevel: {
+		if (session.contextAuto > 0 && contextUsed >= session.contextAuto)
+			return StatusLine.ContextLevel.Auto
+		if (session.contextRecommend > 0 && contextUsed >= session.contextRecommend)
+			return StatusLine.ContextLevel.Recommend
+		return StatusLine.ContextLevel.Normal
+	}
+	readonly property color contextColor: contextLevel === StatusLine.ContextLevel.Auto ? Theme.danger
+		: contextLevel === StatusLine.ContextLevel.Recommend ? Theme.warning
 		: Theme.accent
 	readonly property real busyMs: session.busySince > 0 ? ticker.now - session.busySince : 0
 	readonly property real shownFromMs: Format.msPerSecond
@@ -42,7 +52,7 @@ Item {
 			return qsTr("Waiting for your answer")
 		case Activity.retrying:
 			return qsTr("Retrying in %1 (attempt %2): %3")
-				.arg(Format.elapsed(Math.max(0, session.retryAt - ticker.now) + Format.msPerSecond - 1))
+				.arg(Format.countdown(session.retryAt - ticker.now))
 				.arg(session.retryAttempt)
 				.arg(ToolInfo.firstLine(session.retryError))
 		default:
@@ -132,7 +142,7 @@ Item {
 				textFormat: Text.PlainText
 				anchors.verticalCenter: parent.verticalCenter
 				text: Format.tokens(line.contextUsed) + " / " + Format.tokens(line.contextMax)
-				color: line.contextColor === Theme.accent ? Theme.textMuted : line.contextColor
+				color: line.contextLevel === StatusLine.ContextLevel.Normal ? Theme.textMuted : line.contextColor
 				font.pixelSize: Theme.smallFontSize
 			}
 			Rectangle {
