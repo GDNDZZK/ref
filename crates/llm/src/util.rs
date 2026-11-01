@@ -35,12 +35,12 @@ pub(crate) fn endpoint(base_url: &str, default: &str, path: &str) -> String {
 /// Host part of a URL (lower-cased, without port / credentials).
 pub(crate) fn host_of(url: &str) -> String {
     let rest = url.split_once("://").map_or(url, |(_, r)| r);
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let authority = rest.split_once(['/', '?', '#']).map_or(rest, |(a, _)| a);
     let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
     let host = if host.starts_with('[') {
-        host.split_inclusive(']').next().unwrap_or(host)
+        host.find(']').map_or(host, |end| &host[..=end])
     } else {
-        host.split(':').next().unwrap_or(host)
+        host.split_once(':').map_or(host, |(h, _)| h)
     };
     host.to_ascii_lowercase()
 }
