@@ -1,12 +1,12 @@
 <script setup lang="ts">
 // A shortcut as one chip per key: "Alt" "N".
 import { computed } from 'vue'
-import { formatShortcut } from '../commands/shortcuts.ts'
+import { shortcutKeys } from '../commands/shortcuts.ts'
 import type { Shortcut } from '../commands/types.ts'
 
 // `keys` names the chips directly, for keys that are not commands (Esc Esc).
 const props = defineProps<{ shortcut?: Shortcut; keys?: readonly string[] }>()
-const chips = computed(() => props.keys ?? (props.shortcut ? formatShortcut(props.shortcut).split('+') : []))
+const chips = computed(() => props.keys ?? (props.shortcut ? shortcutKeys(props.shortcut) : []))
 </script>
 
 <template>

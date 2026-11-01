@@ -1,32 +1,15 @@
 <script setup lang="ts">
 // Wraps text-like content and adds a copy button in its top right corner, shown on hover.
 // The icon turns into a check for a moment after copying.
-import { onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useNoticesStore } from '../stores/notices.ts'
+import { useCopyFeedback } from '../composables/useCopyFeedback.ts'
 import { motion } from '../theme/generated/motion.ts'
 import Icon from './Icon.vue'
 
 const props = defineProps<{ text: string }>()
 
 const { t } = useI18n()
-const notices = useNoticesStore()
-const copied = ref(false)
-let resetTimer: ReturnType<typeof setTimeout> | undefined
-
-async function copy(): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(props.text)
-  } catch (error) {
-    notices.pushError(error)
-    return
-  }
-  copied.value = true
-  clearTimeout(resetTimer)
-  resetTimer = setTimeout(() => (copied.value = false), motion.slow)
-}
-
-onBeforeUnmount(() => clearTimeout(resetTimer))
+const { copied, copy } = useCopyFeedback(() => navigator.clipboard.writeText(props.text), motion.slow)
 </script>
 
 <template>

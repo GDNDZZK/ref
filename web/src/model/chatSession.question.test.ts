@@ -1,30 +1,19 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { RefApi } from '../net/api.ts'
-import type { QuestionRequest } from '../proto/generated'
 import { ChatSession } from './chatSession.ts'
-import { assistantMessage, info, snapshot, toolPart, userMessage } from './testMessages.ts'
+import {
+  assistantMessage,
+  chatSessionWith,
+  info,
+  questionRequest,
+  snapshot,
+  toolPart,
+  userMessage,
+} from './testMessages.ts'
 
 const FRAME_WAIT_MS = 60 // the session shows changes on the next animation frame
 const afterFrame = () => new Promise((resolve) => setTimeout(resolve, FRAME_WAIT_MS))
 
-const REQUEST: QuestionRequest = {
-  session_id: 'ses_1',
-  message_id: 'a1',
-  call_id: 'c1',
-  time: 1,
-  questions: [
-    {
-      question: 'Which one?',
-      header: 'Pick',
-      multiple: false,
-      custom: true,
-      options: [
-        { label: 'A', description: 'first', default: false },
-        { label: 'B', description: 'second', default: true },
-      ],
-    },
-  ],
-}
+const REQUEST = questionRequest()
 
 async function setup(questionReply = vi.fn().mockResolvedValue(undefined)) {
   const messages = [userMessage('u1', 'hi'), assistantMessage('a1', [toolPart('c1')])]
@@ -33,11 +22,7 @@ async function setup(questionReply = vi.fn().mockResolvedValue(undefined)) {
     detach: vi.fn(),
     questionReply,
   }
-  const session = new ChatSession('ses_1', {
-    api: () => api as unknown as RefApi,
-    notify: vi.fn(),
-    draftRestored: vi.fn(),
-  })
+  const session = chatSessionWith(api)
   await session.attach(true)
   return { api, questionReply, session }
 }

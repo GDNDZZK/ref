@@ -7,6 +7,7 @@
 // After a reconnect the handshake runs again and listeners are told the connection is
 // `open` once more; whatever the upper layer attached is its own to restore.
 
+import { describeError } from '../errorMessage.ts'
 import { PROTOCOL_VERSION } from '../proto/generated'
 import type { JsonValue, NotifyKind, Request, ServerFrame } from '../proto/generated'
 import type { Transport, TransportFactory } from './transport.ts'
@@ -19,6 +20,13 @@ export interface HelloResult {
   server_version: string
   protocol?: number // absent in servers older than protocol 2
   cwd: string
+}
+
+const PROTOCOL_WITHOUT_FIELD = 1 // servers older than protocol 2 do not report theirs
+
+// The protocol version the server speaks (1 while it has not said or not answered yet).
+export function protocolOf(hello: HelloResult | undefined): number {
+  return hello?.protocol ?? PROTOCOL_WITHOUT_FIELD
 }
 
 export class RefError extends Error {}
@@ -140,7 +148,7 @@ export class RefConnection {
       const lostMeanwhile = transport !== this.transport
       if (lostMeanwhile) return // lost() has dealt with it
       // The server refused us (bad token, wrong protocol): retrying would be refused again.
-      this.close(error instanceof Error ? error.message : String(error))
+      this.close(describeError(error))
       return
     }
     this.attempt = 0

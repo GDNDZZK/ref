@@ -6,7 +6,7 @@ import { useI18n } from 'vue-i18n'
 import { rankByQuery } from '../commands/fuzzy.ts'
 import { labelText } from '../commands/label.ts'
 import type { Command, CommandGroup } from '../commands/types.ts'
-import { usePickSelection } from '../composables/usePickSelection.ts'
+import { handleListKey, usePickSelection } from '../composables/usePickSelection.ts'
 import type { PickItem } from '../composables/usePickSelection.ts'
 import type { IconKey } from '../icons/generated/icons.ts'
 import { metrics } from '../theme/generated/theme.ts'
@@ -16,6 +16,7 @@ import { useNoticesStore } from '../stores/notices.ts'
 import Icon from './Icon.vue'
 import PickList from './PickList.vue'
 import ShortcutChips from './ShortcutChips.vue'
+import { Key } from '../keys.ts'
 
 const ROW_HEIGHT_PX = metrics.paletteRowHeight
 const MAX_ROWS = metrics.paletteMaxRows
@@ -109,19 +110,15 @@ function backToList(): void {
 function onKey(event: KeyboardEvent): void {
   if (event.isComposing) return
   if (chosen.value) {
-    const backspaceBack = event.key === 'Backspace' && query.value === ''
-    if (event.key === 'Enter') run(chosen.value, query.value.trim())
-    else if (event.key === 'Escape' || backspaceBack) backToList()
+    const backspaceBack = event.key === Key.Backspace && query.value === ''
+    if (event.key === Key.Enter) run(chosen.value, query.value.trim())
+    else if (event.key === Key.Escape || backspaceBack) backToList()
     else return
     event.preventDefault()
     event.stopPropagation() // Esc would otherwise close the dialog as well
     return
   }
-  if (event.key === 'ArrowDown') move(1)
-  else if (event.key === 'ArrowUp') move(-1)
-  else if (event.key === 'Enter') pick(selected.value)
-  else return
-  event.preventDefault()
+  handleListKey(event, move, () => pick(selected.value))
 }
 </script>
 
