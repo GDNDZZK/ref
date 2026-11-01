@@ -12,7 +12,7 @@ Item {
 
 	readonly property bool working: activity !== "idle"
 	readonly property bool needsAttention: activity === "waiting_permission" || activity === "waiting_question" || activity === "retrying"
-	readonly property color dotColor: hasError && !working ? Theme.danger : needsAttention ? Theme.warning : working ? Theme.accent : Qt.alpha(Theme.textMuted, 0.5)
+	readonly property color dotColor: hasError && !working ? Theme.danger : needsAttention ? Theme.warning : working ? Theme.accent : Theme.idleDot
 
 	implicitWidth: 8
 	implicitHeight: 8

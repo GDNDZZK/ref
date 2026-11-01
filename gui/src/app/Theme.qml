@@ -30,6 +30,7 @@ QtObject {
 	readonly property color warning: dark ? "#e6b450" : "#b7791f"
 	readonly property color warningSurface: dark ? "#2b2417" : "#fcf4e2"
 	readonly property color warningBorder: dark ? "#5a4723" : "#ecd29a"
+	readonly property color idleDot: Qt.alpha(textMuted, 0.5) // a session or server with nothing going on
 	readonly property color scrim: dark ? "#8c000000" : "#40000000" // behind dialogs
 	// Messages from other sessions, diff hunks, tool input.
 	readonly property color info: dark ? "#6fb7e0" : "#2a7fb5"

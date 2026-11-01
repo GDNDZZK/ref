@@ -42,7 +42,7 @@ ModalDialog {
 					color: server.modelData.status === "connected" ? Theme.success
 						: server.modelData.status === "failed" ? Theme.danger
 						: server.modelData.status === "connecting" ? Theme.accent
-						: Qt.alpha(Theme.textMuted, 0.5)
+						: Theme.idleDot
 				}
 				Pulse {
 					target: dot

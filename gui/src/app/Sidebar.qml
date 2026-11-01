@@ -366,7 +366,7 @@ Rectangle {
 							color: modelData.status === "connected" ? Theme.success
 								: modelData.status === "failed" ? Theme.danger
 								: modelData.status === "connecting" ? Theme.accent
-								: Qt.alpha(Theme.textMuted, 0.5)
+								: Theme.idleDot
 
 							Pulse {
 								target: dot
