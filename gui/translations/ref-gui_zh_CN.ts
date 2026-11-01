@@ -4,12 +4,12 @@
 <context>
     <name>AgentsDialog</name>
     <message>
-        <location filename="../src/app/AgentsDialog.qml" line="17"/>
+        <location filename="../src/app/AgentsDialog.qml" line="15"/>
         <source>Switch agent</source>
         <translation>切换智能体</translation>
     </message>
     <message>
-        <location filename="../src/app/AgentsDialog.qml" line="23"/>
+        <location filename="../src/app/AgentsDialog.qml" line="21"/>
         <source>Search agents</source>
         <translation>搜索智能体</translation>
     </message>
@@ -78,29 +78,32 @@
     </message>
 </context>
 <context>
+    <name>CancelButton</name>
+    <message>
+        <location filename="../src/app/CancelButton.qml" line="6"/>
+        <source>Cancel</source>
+        <translation>取消</translation>
+    </message>
+</context>
+<context>
     <name>CdDialog</name>
     <message>
-        <location filename="../src/app/CdDialog.qml" line="23"/>
+        <location filename="../src/app/CdDialog.qml" line="13"/>
         <source>Change directory</source>
         <translation>切换目录</translation>
     </message>
     <message>
-        <location filename="../src/app/CdDialog.qml" line="33"/>
+        <location filename="../src/app/CdDialog.qml" line="22"/>
         <source>Browse…</source>
         <translation>浏览…</translation>
     </message>
     <message>
-        <location filename="../src/app/CdDialog.qml" line="38"/>
-        <source>Cancel</source>
-        <translation>取消</translation>
-    </message>
-    <message>
-        <location filename="../src/app/CdDialog.qml" line="42"/>
+        <location filename="../src/app/CdDialog.qml" line="28"/>
         <source>Change</source>
         <translation>切换</translation>
     </message>
     <message>
-        <location filename="../src/app/CdDialog.qml" line="58"/>
+        <location filename="../src/app/CdDialog.qml" line="38"/>
         <source>Directory</source>
         <translation>目录</translation>
     </message>
@@ -108,7 +111,7 @@
 <context>
     <name>ChatSession</name>
     <message>
-        <location filename="../src/app/chat_session.cpp" line="276"/>
+        <location filename="../src/app/chat_session.cpp" line="282"/>
         <source>Not connected to the ref backend.</source>
         <translation>未连接到 ref 后端。</translation>
     </message>
@@ -116,22 +119,17 @@
 <context>
     <name>CloseDialog</name>
     <message>
-        <location filename="../src/app/CloseDialog.qml" line="15"/>
+        <location filename="../src/app/CloseDialog.qml" line="13"/>
         <source>Close session</source>
         <translation>关闭会话</translation>
     </message>
     <message>
-        <location filename="../src/app/CloseDialog.qml" line="20"/>
-        <source>Cancel</source>
-        <translation>取消</translation>
-    </message>
-    <message>
-        <location filename="../src/app/CloseDialog.qml" line="24"/>
+        <location filename="../src/app/CloseDialog.qml" line="19"/>
         <source>Close</source>
         <translation>关闭</translation>
     </message>
     <message>
-        <location filename="../src/app/CloseDialog.qml" line="36"/>
+        <location filename="../src/app/CloseDialog.qml" line="29"/>
         <source>This session is still working. Closing it stops the work; the conversation stays in history.</source>
         <translation>该会话仍在工作。关闭会停止工作，对话会保留在历史中。</translation>
     </message>
@@ -422,17 +420,12 @@
         <translation>删除会话</translation>
     </message>
     <message>
-        <location filename="../src/app/DeleteHistoryDialog.qml" line="20"/>
-        <source>Cancel</source>
-        <translation>取消</translation>
-    </message>
-    <message>
-        <location filename="../src/app/DeleteHistoryDialog.qml" line="24"/>
+        <location filename="../src/app/DeleteHistoryDialog.qml" line="21"/>
         <source>Delete</source>
         <translation>删除</translation>
     </message>
     <message>
-        <location filename="../src/app/DeleteHistoryDialog.qml" line="36"/>
+        <location filename="../src/app/DeleteHistoryDialog.qml" line="31"/>
         <source>Delete &quot;%1&quot; from history? This cannot be undone.</source>
         <translation>从历史中删除“%1”？此操作无法撤销。</translation>
     </message>
@@ -440,32 +433,27 @@
 <context>
     <name>ExportDialog</name>
     <message>
-        <location filename="../src/app/ExportDialog.qml" line="19"/>
+        <location filename="../src/app/ExportDialog.qml" line="14"/>
         <source>Exported to %1</source>
         <translation>已导出到 %1</translation>
     </message>
     <message>
-        <location filename="../src/app/ExportDialog.qml" line="24"/>
+        <location filename="../src/app/ExportDialog.qml" line="19"/>
         <source>Export transcript</source>
         <translation>导出记录</translation>
     </message>
     <message>
-        <location filename="../src/app/ExportDialog.qml" line="30"/>
-        <source>Cancel</source>
-        <translation>取消</translation>
-    </message>
-    <message>
-        <location filename="../src/app/ExportDialog.qml" line="34"/>
+        <location filename="../src/app/ExportDialog.qml" line="25"/>
         <source>Export</source>
         <translation>导出</translation>
     </message>
     <message>
-        <location filename="../src/app/ExportDialog.qml" line="50"/>
+        <location filename="../src/app/ExportDialog.qml" line="37"/>
         <source>Write the conversation as markdown to this path on the backend&apos;s machine.</source>
         <translation>将对话以 markdown 写入后端所在机器上的此路径。</translation>
     </message>
     <message>
-        <location filename="../src/app/ExportDialog.qml" line="59"/>
+        <location filename="../src/app/ExportDialog.qml" line="46"/>
         <source>Path</source>
         <translation>路径</translation>
     </message>
@@ -667,7 +655,7 @@
         <translation>刷新</translation>
     </message>
     <message>
-        <location filename="../src/app/McpDialog.qml" line="143"/>
+        <location filename="../src/app/McpDialog.qml" line="140"/>
         <source>No MCP servers configured</source>
         <translation>未配置 MCP 服务器</translation>
     </message>
@@ -693,7 +681,7 @@
 <context>
     <name>ModalDialog</name>
     <message>
-        <location filename="../src/app/ModalDialog.qml" line="88"/>
+        <location filename="../src/app/ModalDialog.qml" line="110"/>
         <source>Close</source>
         <translation>关闭</translation>
     </message>
@@ -701,27 +689,27 @@
 <context>
     <name>ModelsDialog</name>
     <message>
-        <location filename="../src/app/ModelsDialog.qml" line="16"/>
+        <location filename="../src/app/ModelsDialog.qml" line="14"/>
         <source>%1 context</source>
         <translation>%1 上下文</translation>
     </message>
     <message>
-        <location filename="../src/app/ModelsDialog.qml" line="18"/>
+        <location filename="../src/app/ModelsDialog.qml" line="16"/>
         <source>reasoning</source>
         <translation>推理</translation>
     </message>
     <message>
-        <location filename="../src/app/ModelsDialog.qml" line="20"/>
+        <location filename="../src/app/ModelsDialog.qml" line="18"/>
         <source>images</source>
         <translation>图片</translation>
     </message>
     <message>
-        <location filename="../src/app/ModelsDialog.qml" line="41"/>
+        <location filename="../src/app/ModelsDialog.qml" line="39"/>
         <source>Switch model</source>
         <translation>切换模型</translation>
     </message>
     <message>
-        <location filename="../src/app/ModelsDialog.qml" line="51"/>
+        <location filename="../src/app/ModelsDialog.qml" line="49"/>
         <source>Search models</source>
         <translation>搜索模型</translation>
     </message>
@@ -729,22 +717,17 @@
 <context>
     <name>NewSessionDialog</name>
     <message>
-        <location filename="../src/app/NewSessionDialog.qml" line="22"/>
+        <location filename="../src/app/NewSessionDialog.qml" line="13"/>
         <source>New session</source>
         <translation>新建会话</translation>
     </message>
     <message>
-        <location filename="../src/app/NewSessionDialog.qml" line="32"/>
-        <source>Cancel</source>
-        <translation>取消</translation>
-    </message>
-    <message>
-        <location filename="../src/app/NewSessionDialog.qml" line="36"/>
+        <location filename="../src/app/NewSessionDialog.qml" line="23"/>
         <source>Start</source>
         <translation>开始</translation>
     </message>
     <message>
-        <location filename="../src/app/NewSessionDialog.qml" line="52"/>
+        <location filename="../src/app/NewSessionDialog.qml" line="33"/>
         <source>Directory</source>
         <translation>目录</translation>
     </message>
@@ -817,38 +800,38 @@
 <context>
     <name>PeersDialog</name>
     <message>
-        <location filename="../src/app/PeersDialog.qml" line="37"/>
-        <location filename="../src/app/PeersDialog.qml" line="57"/>
+        <location filename="../src/app/PeersDialog.qml" line="31"/>
+        <location filename="../src/app/PeersDialog.qml" line="46"/>
         <source>Peers</source>
         <translation>对等会话</translation>
     </message>
     <message>
-        <location filename="../src/app/PeersDialog.qml" line="58"/>
+        <location filename="../src/app/PeersDialog.qml" line="47"/>
         <source>Name</source>
         <translation>名称</translation>
     </message>
     <message>
-        <location filename="../src/app/PeersDialog.qml" line="59"/>
+        <location filename="../src/app/PeersDialog.qml" line="48"/>
         <source>Inbox</source>
         <translation>收件箱</translation>
     </message>
     <message>
-        <location filename="../src/app/PeersDialog.qml" line="60"/>
+        <location filename="../src/app/PeersDialog.qml" line="49"/>
         <source>Outbox</source>
         <translation>发件箱</translation>
     </message>
     <message>
-        <location filename="../src/app/PeersDialog.qml" line="91"/>
+        <location filename="../src/app/PeersDialog.qml" line="79"/>
         <source>Loading…</source>
         <translation>加载中…</translation>
     </message>
     <message>
-        <location filename="../src/app/PeersDialog.qml" line="110"/>
+        <location filename="../src/app/PeersDialog.qml" line="97"/>
         <source>Peer name</source>
         <translation>对等名称</translation>
     </message>
     <message>
-        <location filename="../src/app/PeersDialog.qml" line="115"/>
+        <location filename="../src/app/PeersDialog.qml" line="102"/>
         <source>Set name</source>
         <translation>设置名称</translation>
     </message>
@@ -984,22 +967,17 @@
 <context>
     <name>RenameDialog</name>
     <message>
-        <location filename="../src/app/RenameDialog.qml" line="22"/>
+        <location filename="../src/app/RenameDialog.qml" line="12"/>
         <source>Rename session</source>
         <translation>重命名会话</translation>
     </message>
     <message>
-        <location filename="../src/app/RenameDialog.qml" line="28"/>
-        <source>Cancel</source>
-        <translation>取消</translation>
-    </message>
-    <message>
-        <location filename="../src/app/RenameDialog.qml" line="32"/>
+        <location filename="../src/app/RenameDialog.qml" line="18"/>
         <source>Rename</source>
         <translation>重命名</translation>
     </message>
     <message>
-        <location filename="../src/app/RenameDialog.qml" line="49"/>
+        <location filename="../src/app/RenameDialog.qml" line="29"/>
         <source>Name</source>
         <translation>名称</translation>
     </message>
@@ -1153,22 +1131,22 @@
 <context>
     <name>Sidebar</name>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="77"/>
+        <location filename="../src/app/Sidebar.qml" line="76"/>
         <source>Hide sidebar</source>
         <translation>隐藏侧边栏</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="122"/>
+        <location filename="../src/app/Sidebar.qml" line="121"/>
         <source>New session</source>
         <translation>新建会话</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="142"/>
+        <location filename="../src/app/Sidebar.qml" line="141"/>
         <source>New session in another folder…</source>
         <translation>在其他文件夹新建会话…</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="169"/>
+        <location filename="../src/app/Sidebar.qml" line="168"/>
         <source>Todo %1/%2</source>
         <translation>待办 %1/%2</translation>
     </message>
@@ -1209,7 +1187,7 @@
         <translation>没有更早的会话</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="395"/>
+        <location filename="../src/app/Sidebar.qml" line="392"/>
         <source>Settings</source>
         <translation>设置</translation>
     </message>
@@ -1354,38 +1332,38 @@
 <context>
     <name>UserBlock</name>
     <message>
-        <location filename="../src/app/UserBlock.qml" line="35"/>
+        <location filename="../src/app/UserBlock.qml" line="33"/>
         <source>message from &quot;%1&quot;</source>
         <translation>来自“%1”的消息</translation>
     </message>
     <message>
-        <location filename="../src/app/UserBlock.qml" line="37"/>
+        <location filename="../src/app/UserBlock.qml" line="34"/>
         <source>created by &quot;%1&quot;</source>
         <translation>由“%1”创建</translation>
     </message>
     <message>
-        <location filename="../src/app/UserBlock.qml" line="39"/>
+        <location filename="../src/app/UserBlock.qml" line="35"/>
         <source>shell</source>
         <translation>shell</translation>
     </message>
     <message>
-        <location filename="../src/app/UserBlock.qml" line="41"/>
+        <location filename="../src/app/UserBlock.qml" line="36"/>
         <source>reminder</source>
         <translation>提醒</translation>
     </message>
     <message>
-        <location filename="../src/app/UserBlock.qml" line="141"/>
-        <location filename="../src/app/UserBlock.qml" line="163"/>
+        <location filename="../src/app/UserBlock.qml" line="126"/>
+        <location filename="../src/app/UserBlock.qml" line="148"/>
         <source>Context compacted</source>
         <translation>上下文已压缩</translation>
     </message>
     <message>
-        <location filename="../src/app/UserBlock.qml" line="169"/>
+        <location filename="../src/app/UserBlock.qml" line="154"/>
         <source>Copy</source>
         <translation>复制</translation>
     </message>
     <message>
-        <location filename="../src/app/UserBlock.qml" line="213"/>
+        <location filename="../src/app/UserBlock.qml" line="198"/>
         <source>Messages above stay visible but are no longer sent to the model</source>
         <translation>上方的消息仍可查看，但不再发送给模型</translation>
     </message>
@@ -1393,12 +1371,12 @@
 <context>
     <name>VariantsDialog</name>
     <message>
-        <location filename="../src/app/VariantsDialog.qml" line="13"/>
+        <location filename="../src/app/VariantsDialog.qml" line="11"/>
         <source>Model variant</source>
         <translation>模型变体</translation>
     </message>
     <message>
-        <location filename="../src/app/VariantsDialog.qml" line="20"/>
+        <location filename="../src/app/VariantsDialog.qml" line="18"/>
         <source>This model has no variants</source>
         <translation>此模型没有变体</translation>
     </message>

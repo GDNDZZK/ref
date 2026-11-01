@@ -18,10 +18,7 @@ ModalDialog {
 	}
 
 	buttons: [
-		DialogButton {
-			text: qsTr("Cancel")
-			onClicked: dialog.close()
-		},
+		CancelButton {},
 		DialogButton {
 			text: qsTr("Start")
 			kind: DialogButton.Primary

@@ -14,10 +14,7 @@ SessionDialog {
 	onAccepted: closeSession()
 
 	buttons: [
-		DialogButton {
-			text: qsTr("Cancel")
-			onClicked: dialog.close()
-		},
+		CancelButton {},
 		DialogButton {
 			text: qsTr("Close")
 			kind: DialogButton.Danger
