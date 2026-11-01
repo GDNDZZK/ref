@@ -4,7 +4,7 @@
 import { ref, useTemplateRef } from 'vue'
 import { arrived, chase } from '../motion/chase.ts'
 import { useFrame } from '../motion/useFrame.ts'
-import { usePulse } from '../motion/usePulse.ts'
+import { PULSE_DIMMED, usePulse } from '../motion/usePulse.ts'
 
 export interface CaretAnchor {
   x: number // end of the last character, relative to the caret's parent
@@ -16,7 +16,6 @@ const props = defineProps<{ anchor: () => CaretAnchor | undefined }>()
 
 const DOT_SIZE = 8
 const END_GAP = 3
-const PULSE_DIMMED = 0.5
 
 const dot = useTemplateRef<HTMLElement>('dot')
 const placed = ref(false) // hidden until the end of the text is known
