@@ -96,7 +96,7 @@ fn main() {
         Ok(rt) => rt,
         Err(e) => {
             eprintln!("ref-server: cannot start runtime: {e}");
-            std::process::exit(1);
+            std::process::exit(instance::EXIT_FAILURE);
         }
     };
     let code = rt.block_on(async move {
@@ -112,11 +112,11 @@ fn main() {
             serve(cli).await
         };
         match result {
-            Ok(()) => 0,
+            Ok(()) => instance::EXIT_OK,
             Err(e) => {
                 eprintln!("ref-server: {e:#}");
                 tracing::error!("fatal: {e:#}");
-                1
+                instance::EXIT_FAILURE
             }
         }
     });
