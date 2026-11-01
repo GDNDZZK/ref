@@ -1,4 +1,5 @@
 #include "app/workspace.h"
+#include "coro_test.h"
 #include "fake_backend.h"
 
 #include <QJSEngine>
@@ -75,6 +76,9 @@ public:
 
 	// While set, a question reply is refused with this text.
 	void failQuestionReply(const QString& error) { m_questionError = error; }
+
+	// The base64 text get_image answers with.
+	void setImageData(const QString& data) { m_imageData = data; }
 
 	// How the stub answers shutdown: with this error, or by closing the connection.
 	void failShutdown(const QString& error) { m_shutdownError = error; }
@@ -241,6 +245,10 @@ private:
 		{
 			m_fake.fail(request, m_questionError);
 		}
+		else if(op == u"get_image"_s)
+		{
+			m_fake.respond(request, {{u"image"_s, QJsonObject{{u"mime"_s, u"image/png"_s}, {u"data"_s, m_imageData}}}});
+		}
 		else if(op == u"shutdown"_s && m_closeOnShutdown)
 		{
 			m_fake.socket()->close();
@@ -267,6 +275,7 @@ private:
 	QList<QJsonObject> m_heldQuestionReplies;
 	QString m_questionError;
 	QString m_shutdownError;
+	QString m_imageData;
 	bool m_closeOnShutdown = false;
 	int m_created = 0;
 	int m_protocol = refgui::proto::ProtocolVersion;
@@ -395,6 +404,7 @@ private slots:
 	void undoPutsThePromptBackIntoTheInputBox();
 	void oldBackendOffersARestart();
 	void refusedRestartIsAToast();
+	void invalidImageDataIsAnError();
 	void restartClosingTheConnectionIsQuiet();
 	void commandsFollowTheState();
 };
@@ -1087,6 +1097,23 @@ void TestWorkspace::oldBackendOffersARestart()
 
 	f.workspace->restartBackend();
 	QTRY_COMPARE(f.stub.requests(u"shutdown"_s).size(), 1);
+}
+
+void TestWorkspace::invalidImageDataIsAnError()
+{
+	Fixture f;
+	ChatSession* session = f.workspace->session(u"ses_a"_s);
+	QTRY_VERIFY(session->isAttached());
+
+	f.stub.setImageData(u"not base64!"_s);
+	const auto invalid = await(session->fetchImage(u"img_1"_s));
+	QVERIFY(invalid.has_value() && !invalid->has_value());
+	QCOMPARE(invalid->error(), u"invalid image data"_s);
+
+	f.stub.setImageData(QString::fromLatin1(QByteArray("png bytes").toBase64()));
+	const auto valid = await(session->fetchImage(u"img_1"_s));
+	QVERIFY(valid.has_value() && valid->has_value());
+	QCOMPARE(**valid, QByteArray("png bytes"));
 }
 
 void TestWorkspace::refusedRestartIsAToast()

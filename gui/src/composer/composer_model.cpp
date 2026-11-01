@@ -126,7 +126,7 @@ QString ComposerModel::agentColor() const
 int ComposerModel::agentIndex() const
 {
 	const proto::AgentInfo* agent = agentInfo();
-	return agent ? static_cast<int>(agent - m_config.agents.constData()) : 0;
+	return agent ? static_cast<int>(agent - m_config.agents.constData()) : NoAgentIndex;
 }
 
 QString ComposerModel::modelName() const

@@ -19,14 +19,15 @@ private slots:
 		QTest::addColumn<bool>("valid");
 		QTest::addColumn<int>("grid");
 		QTest::addColumn<QColor>("color");
+		QTest::addColumn<bool>("warns");
 
-		QTest::newRow("plain") << u"check-16"_s << true << 16 << QColor(Qt::black);
-		QTest::newRow("hex without hash") << u"check-20?color=d23f45"_s << true << 20 << QColor(u"#d23f45"_s);
-		QTest::newRow("encoded hash") << u"copy-16?color=%23112233"_s << true << 16 << QColor(u"#112233"_s);
-		QTest::newRow("alpha") << u"copy-16?color=80112233"_s << true << 16 << QColor::fromString(u"#80112233"_s);
-		QTest::newRow("bad colour keeps black") << u"copy-16?color=zzz"_s << true << 16 << QColor(Qt::black);
-		QTest::newRow("no grid") << u"check"_s << false << 0 << QColor(Qt::black);
-		QTest::newRow("grid not a number") << u"check-big"_s << false << 0 << QColor(Qt::black);
+		QTest::newRow("plain") << u"check-16"_s << true << 16 << QColor(Qt::black) << false;
+		QTest::newRow("hex without hash") << u"check-20?color=d23f45"_s << true << 20 << QColor(u"#d23f45"_s) << false;
+		QTest::newRow("encoded hash") << u"copy-16?color=%23112233"_s << true << 16 << QColor(u"#112233"_s) << false;
+		QTest::newRow("alpha") << u"copy-16?color=80112233"_s << true << 16 << QColor::fromString(u"#80112233"_s) << false;
+		QTest::newRow("bad colour keeps black") << u"copy-16?color=zzz"_s << true << 16 << QColor(Qt::black) << true;
+		QTest::newRow("no grid") << u"check"_s << false << 0 << QColor(Qt::black) << false;
+		QTest::newRow("grid not a number") << u"check-big"_s << false << 0 << QColor(Qt::black) << false;
 	}
 
 	void parsesNameGridAndColor()
@@ -35,7 +36,12 @@ private slots:
 		QFETCH(bool, valid);
 		QFETCH(int, grid);
 		QFETCH(QColor, color);
+		QFETCH(bool, warns);
 
+		if(warns)
+		{
+			QTest::ignoreMessage(QtWarningMsg, qPrintable(u"invalid colour in icon request \"%1\""_s.arg(id)));
+		}
 		IconRequest request;
 		QCOMPARE(parseIconRequest(id, request), valid);
 		if(valid)
