@@ -19,6 +19,17 @@ pub struct Selection {
 }
 
 impl Selection {
+    /// A selection at `anchor..head`: `active` for a word / line pick, otherwise a press that
+    /// may still turn into a drag.
+    pub fn at(anchor: Pos, head: Pos, active: bool) -> Self {
+        Self {
+            anchor,
+            head,
+            dragging: !active,
+            active,
+        }
+    }
+
     pub fn range(&self) -> (Pos, Pos) {
         if self.anchor <= self.head {
             (self.anchor, self.head)
