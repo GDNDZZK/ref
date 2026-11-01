@@ -23,10 +23,7 @@ SessionDialog {
 			visible: Workspace.backendLocal
 			onClicked: folders.open()
 		},
-		DialogButton {
-			text: qsTr("Cancel")
-			onClicked: dialog.close()
-		},
+		CancelButton {},
 		DialogButton {
 			text: qsTr("Change")
 			kind: DialogButton.Primary

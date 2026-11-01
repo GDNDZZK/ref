@@ -13,10 +13,7 @@ SessionDialog {
 	onAccepted: rename()
 
 	buttons: [
-		DialogButton {
-			text: qsTr("Cancel")
-			onClicked: dialog.close()
-		},
+		CancelButton {},
 		DialogButton {
 			text: qsTr("Rename")
 			kind: DialogButton.Primary

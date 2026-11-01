@@ -16,10 +16,7 @@ ModalDialog {
 	onAccepted: remove()
 
 	buttons: [
-		DialogButton {
-			text: qsTr("Cancel")
-			onClicked: dialog.close()
-		},
+		CancelButton {},
 		DialogButton {
 			text: qsTr("Delete")
 			kind: DialogButton.Danger

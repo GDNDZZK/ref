@@ -20,10 +20,7 @@ SessionDialog {
 	onAccepted: exportNow()
 
 	buttons: [
-		DialogButton {
-			text: qsTr("Cancel")
-			onClicked: dialog.close()
-		},
+		CancelButton {},
 		DialogButton {
 			text: qsTr("Export")
 			kind: DialogButton.Primary
