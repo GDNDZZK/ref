@@ -3,11 +3,9 @@ import QtQuick
 import RefGui
 
 // Picks the agent of one session.
-ModalDialog {
+SessionDialog {
 	id: dialog
 
-	readonly property string sessionId: Workspace.dialogArgs.sessionId ?? Workspace.currentId
-	readonly property var session: Workspace.info(sessionId)
 	readonly property string needle: list.text.trim().toLowerCase()
 	readonly property var shown: {
 		const agents = Workspace.config.agents.map((agent, index) => Object.assign({position: index}, agent))

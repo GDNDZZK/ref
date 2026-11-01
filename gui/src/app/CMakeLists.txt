@@ -43,6 +43,7 @@ qt_add_qml_module(ref-gui
 		ToolState.qml
 		MessageSource.qml
 		Fields.qml
+		SessionDialog.qml
 		SessionPane.qml
 		QuestionCard.qml
 		QuestionRow.qml

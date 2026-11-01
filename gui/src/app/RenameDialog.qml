@@ -2,10 +2,9 @@ import QtQuick
 import RefGui
 
 // Gives a session a name. Names are unique among live sessions; the backend says if one is taken.
-ModalDialog {
+SessionDialog {
 	id: dialog
 
-	readonly property string sessionId: Workspace.dialogArgs.sessionId ?? Workspace.currentId
 	property bool gone: false
 
 	function rename() {

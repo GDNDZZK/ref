@@ -2,10 +2,9 @@ import QtQuick
 import RefGui
 
 // Writes the conversation as markdown to a path on the backend's machine.
-ModalDialog {
+SessionDialog {
 	id: dialog
 
-	readonly property string sessionId: Workspace.dialogArgs.sessionId ?? Workspace.currentId
 	property bool gone: false
 
 	function exportNow() {
