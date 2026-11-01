@@ -1,9 +1,12 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { createAppI18n } from '../i18n/index.ts'
 import { STORAGE_KEY } from '../settings/model.ts'
+import { useNoticesStore } from './notices.ts'
 import { useSettingsStore } from './settings.ts'
 
 beforeEach(() => {
+  createAppI18n(['en'])
   localStorage.clear()
   setActivePinia(createPinia())
 })
@@ -20,6 +23,14 @@ describe('settings store', () => {
     const store = useSettingsStore()
     expect(store.settings.theme).toBe('dark')
     expect(store.isDark).toBe(true)
+  })
+
+  it('uses the defaults, tells the user once and leaves the stored text alone when it is not JSON', () => {
+    localStorage.setItem(STORAGE_KEY, '{oops')
+    const store = useSettingsStore()
+    expect(store.settings.theme).toBe('system')
+    expect(useNoticesStore().notices.map((notice) => notice.level)).toEqual(['warn'])
+    expect(localStorage.getItem(STORAGE_KEY)).toBe('{oops')
   })
 
   it('follows a change made in another tab', () => {
