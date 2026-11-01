@@ -264,9 +264,7 @@ fn encode_jpeg(img: &DynamicImage, quality: u8) -> Result<Vec<u8>, String> {
 /// [`fit`] with default limits for a base64 image (pasted or attached by the user). Returns
 /// the replacement, or `None` to keep the image (it already fits or cannot be decoded).
 pub fn fit_image_data(img: &ImageData) -> Option<ImageData> {
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(img.data.as_bytes())
-        .ok()?;
+    let bytes = decode_payload(img)?;
     let fitted = guarded(|| fit(&bytes, &Limits::default()))?;
     let data = fitted.data?;
     Some(ImageData::new(
@@ -277,8 +275,24 @@ pub fn fit_image_data(img: &ImageData) -> Option<ImageData> {
 
 /// Runs a decoder step, treating an error or a panic (malformed input) as no result.
 fn guarded<T>(f: impl FnOnce() -> Result<T, String>) -> Option<T> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
-        .ok()?
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(Ok(v)) => Some(v),
+        Ok(Err(e)) => {
+            tracing::debug!("image kept: {e}");
+            None
+        }
+        Err(_) => {
+            tracing::warn!("image kept: the image decoder panicked");
+            None
+        }
+    }
+}
+
+/// Decodes the base64 payload of `img`, logging why an invalid one is kept.
+fn decode_payload(img: &ImageData) -> Option<Vec<u8>> {
+    base64::engine::general_purpose::STANDARD
+        .decode(img.data.as_bytes())
+        .map_err(|e| tracing::debug!("image kept: invalid base64: {e}"))
         .ok()
 }
 
@@ -393,9 +407,7 @@ pub fn clamp_image_data(img: &ImageData, max_dim: u32, max_b64: usize) -> Option
     {
         return hit.clone();
     }
-    let out = base64::engine::general_purpose::STANDARD
-        .decode(img.data.as_bytes())
-        .ok()
+    let out = decode_payload(img)
         .and_then(|b| guarded(|| clamp(&b, max_dim, max_b64)).flatten())
         .map(|c| {
             ImageData::new(
