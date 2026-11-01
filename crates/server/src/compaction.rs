@@ -6,12 +6,12 @@ use crate::hub::Hub;
 use crate::session::{Session, user_message};
 use ref_config::COMPACTION_AGENT;
 use ref_llm::{AssistantBlock, ChatMessage, UserContent};
-use ref_proto::{MessageSource, ModelRef, Role, SessionEvent, SessionStatus};
+use ref_proto::{MessageSource, Role, SessionEvent, SessionStatus};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 /// Text of the compaction summary message.
-pub fn summary_text(summary: &str) -> String {
+fn summary_text(summary: &str) -> String {
     format!(
         "[Context compacted. Summary of the conversation so far:]\n\n{}\n\n[Continue from here.]",
         summary.trim()
@@ -21,16 +21,35 @@ pub fn summary_text(summary: &str) -> String {
 /// Request text appended after the history in a compaction request.
 pub const SUMMARY_REQUEST: &str = "Summarize the conversation above as instructed. Do not call tools; reply with the summary only.";
 
+/// Bytes per token in the rough token estimate.
+const BYTES_PER_TOKEN: usize = 4;
+
+/// Fixed overhead bytes counted for every message.
+const MESSAGE_OVERHEAD_BYTES: usize = 16;
+
+/// Tokens counted for one image.
+const IMAGE_TOKENS: usize = 1500;
+
+/// Tool outputs are cut to this many bytes after a context overflow.
+const OVERFLOW_CLIP_BYTES: usize = 1000;
+
+/// Non-retryable errors in a row after which a summary request gives up.
+const MAX_HARD_FAILURES: u32 = 3;
+
 /// Rough token estimate (≈4 bytes per token, fixed cost per image) of a request.
-pub fn estimate_tokens(system: &[String], tools: &[ref_llm::ToolDef], msgs: &[ChatMessage]) -> u64 {
-    const IMAGE: usize = 4 * 1500;
+pub(crate) fn estimate_tokens(
+    system: &[String],
+    tools: &[ref_llm::ToolDef],
+    msgs: &[ChatMessage],
+) -> u64 {
+    const IMAGE: usize = BYTES_PER_TOKEN * IMAGE_TOKENS;
     let mut bytes: usize = system.iter().map(String::len).sum();
     bytes += tools
         .iter()
         .map(|t| t.name.len() + t.description.len() + t.parameters.to_string().len())
         .sum::<usize>();
     for m in msgs {
-        bytes += 16;
+        bytes += MESSAGE_OVERHEAD_BYTES;
         match m {
             ChatMessage::User(c) => {
                 for x in c {
@@ -56,13 +75,13 @@ pub fn estimate_tokens(system: &[String], tools: &[ref_llm::ToolDef], msgs: &[Ch
             } => bytes += content.len() + images.len() * IMAGE,
         }
     }
-    (bytes / 4) as u64
+    (bytes / BYTES_PER_TOKEN) as u64
 }
 
 /// Insert a compaction summary message at `at` (clamped; `None` = append). The transcript
 /// is never shortened: everything before the summary stays visible but is no longer sent
 /// to the model. Messages after `at` (e.g. the prompt being answered) remain in context.
-pub fn insert_summary(
+pub(crate) fn insert_summary(
     hub: &Arc<Hub>,
     s: &Arc<Session>,
     prep: &Prep,
@@ -94,7 +113,7 @@ pub fn insert_summary(
 
 /// Index after the last assistant message, if there is one in the effective context
 /// (i.e. something new to summarize).
-pub fn compactable_upto(messages: &[ref_proto::Message]) -> Option<usize> {
+pub(crate) fn compactable_upto(messages: &[ref_proto::Message]) -> Option<usize> {
     let start = crate::convert::effective_start(messages);
     let last = messages
         .iter()
@@ -117,7 +136,7 @@ fn clip_outputs(msgs: &mut [ChatMessage], max: usize) {
 }
 
 /// Ask the compaction agent for a summary of the effective history and insert it.
-pub async fn compact(
+pub(crate) async fn compact(
     hub: &Arc<Hub>,
     s: &Arc<Session>,
     prep: &Prep,
@@ -153,14 +172,13 @@ pub async fn compact(
 
 /// Model, provider and system prompt for a compaction request: the hidden `compaction`
 /// agent's prompt / model / variant / options, falling back to the session's model.
-pub struct CompactionSetup {
-    pub provider: ref_llm::Provider,
-    pub model: ref_llm::Model,
-    pub model_ref: ModelRef,
-    pub system: Vec<String>,
+pub(crate) struct CompactionSetup {
+    pub(crate) provider: ref_llm::Provider,
+    pub(crate) model: ref_llm::Model,
+    pub(crate) system: Vec<String>,
 }
 
-pub fn setup(prep: &Prep) -> Result<CompactionSetup, String> {
+pub(crate) fn setup(prep: &Prep) -> Result<CompactionSetup, String> {
     let cfg = &prep.cfg;
     let agent = cfg.agents.get(COMPACTION_AGENT);
     let prompt = agent
@@ -191,7 +209,6 @@ pub fn setup(prep: &Prep) -> Result<CompactionSetup, String> {
     Ok(CompactionSetup {
         provider,
         model,
-        model_ref,
         system: vec![prompt.to_string()],
     })
 }
@@ -250,13 +267,13 @@ async fn summarize(
                     return Err(format!("history too large to summarize: {}", e.message));
                 }
                 clipped = true;
-                clip_outputs(&mut req.messages, 1000);
+                clip_outputs(&mut req.messages, OVERFLOW_CLIP_BYTES);
             }
             Err(e) => {
                 attempt += 1;
                 if !e.retryable {
                     hard_failures += 1;
-                    if hard_failures >= 3 {
+                    if hard_failures >= MAX_HARD_FAILURES {
                         return Err(e.message);
                     }
                 }
