@@ -12,6 +12,16 @@ Window {
 	property var shown: null
 	property bool restored: false
 	readonly property bool zoomed: Workspace.zoomedId !== ""
+	// The theme setting decides; "system" follows the system's color scheme.
+	readonly property bool wantsDark: Workspace.settings.theme === ThemeName.dark
+		|| (Workspace.settings.theme === ThemeName.system && Application.styleHints.colorScheme === Qt.Dark)
+
+	// Connection trouble, or why no session could be opened; "" when there is nothing to say.
+	function noticeText() {
+		if (Workspace.connectionText !== "")
+			return Workspace.connectionText
+		return Workspace.current === null ? Workspace.failureText : ""
+	}
 
 	function showSession(session) {
 		if (session === null)
@@ -65,11 +75,10 @@ Window {
 		value: window.active
 	}
 
-	// The theme setting decides; "system" follows the system's color scheme.
 	Binding {
 		target: Theme
 		property: "dark"
-		value: Workspace.settings.theme === ThemeName.dark || (Workspace.settings.theme === ThemeName.system && Application.styleHints.colorScheme === Qt.Dark)
+		value: window.wantsDark
 	}
 
 	Connections {
@@ -186,7 +195,7 @@ Window {
 
 				// Connection trouble, or why no session could be opened, until it is gone.
 				StatusPill {
-					text: Workspace.connectionText !== "" ? Workspace.connectionText : Workspace.current === null ? Workspace.failureText : ""
+					text: window.noticeText()
 				}
 
 				Crossfade {
