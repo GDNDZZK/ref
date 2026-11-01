@@ -68,6 +68,9 @@ fn key(name: &str, cfg: &McpConfig) -> String {
     format!("{name}\u{0}{cfg:?}")
 }
 
+/// Request timeout of a server whose config sets none.
+const DEFAULT_TIMEOUT_MS: u64 = 30_000;
+
 fn server_config(name: &str, cfg: &McpConfig) -> ServerConfig {
     let (transport, timeout_ms) = match cfg {
         McpConfig::Local {
@@ -100,7 +103,7 @@ fn server_config(name: &str, cfg: &McpConfig) -> ServerConfig {
     ServerConfig {
         name: name.to_string(),
         transport,
-        timeout: Duration::from_millis(timeout_ms.filter(|t| *t > 0).unwrap_or(30_000)),
+        timeout: Duration::from_millis(timeout_ms.filter(|t| *t > 0).unwrap_or(DEFAULT_TIMEOUT_MS)),
     }
 }
 
