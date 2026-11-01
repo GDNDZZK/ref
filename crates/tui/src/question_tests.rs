@@ -7,9 +7,9 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::app::App;
 use crate::net::NetEvent;
-use crate::tests::{TEST_SESSION, mouse, press, render, test_app_with_requests, type_text};
-
-const PAST_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
+use crate::tests::{
+    PAST_GRACE, TEST_SESSION, mouse, press, render, test_app_with_requests, type_text,
+};
 
 fn option(label: &str, description: &str, default: bool) -> QuestionOption {
     QuestionOption {

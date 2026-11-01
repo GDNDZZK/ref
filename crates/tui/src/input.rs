@@ -31,7 +31,7 @@ const MULTI_CLICK_WINDOW: Duration = Duration::from_millis(450);
 /// Click counts cycle through single, double and triple click.
 const CLICK_COUNT_CYCLE: u8 = 3;
 /// Keys right after a modal opens were meant for the prompt: they are not taken as answers.
-const MODAL_GRACE: Duration = Duration::from_millis(350);
+pub(crate) const MODAL_GRACE: Duration = Duration::from_millis(350);
 
 /// Path from `$REF_TUI_LOG`, if set.
 fn log_path() -> Option<&'static std::path::PathBuf> {

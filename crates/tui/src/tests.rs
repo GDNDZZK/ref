@@ -50,6 +50,29 @@ fn ts(h: u32, m: u32, s: u32) -> i64 {
 pub const TEST_SESSION: &str = "ses_test";
 pub const TEST_CWD: &str = "/home/u/proj";
 
+/// Safely past the input grace period of a freshly opened modal.
+pub const PAST_GRACE: std::time::Duration =
+    crate::input::MODAL_GRACE.saturating_add(std::time::Duration::from_millis(50));
+
+/// Pump durations (ms) for the in-process mock backend.
+/// A full mock turn, or startup with an init plan.
+const PUMP_TURN_MS: u64 = 2500;
+/// Tiles of background sessions to appear.
+const PUMP_TILES_MS: u64 = 1500;
+/// The mock backend to connect and send its config.
+const PUMP_CONNECT_MS: u64 = 600;
+/// A reply to a command, such as a session switch.
+const PUMP_REPLY_MS: u64 = 300;
+/// One polling step while waiting for a condition.
+const PUMP_POLL_MS: u64 = 250;
+/// A single request/response round trip.
+const PUMP_ROUNDTRIP_MS: u64 = 200;
+/// One housekeeping tick.
+const PUMP_TICK_MS: u64 = 30;
+
+/// Size of a frame above the transport's usual limits.
+const OVERSIZED_FRAME_BYTES: usize = 20 << 20;
+
 fn info() -> SessionInfo {
     SessionInfo {
         name: "ref-a1b2".into(),
@@ -555,7 +578,7 @@ async fn mock_end_to_end() {
         ..Default::default()
     };
     let mut app = App::new(Client::new(out_tx), TEST_CWD.into(), plan);
-    pump(&mut app, &mut ev_rx, 2500).await;
+    pump(&mut app, &mut ev_rx, PUMP_TURN_MS).await;
     let sid = app.current.clone().expect("session created");
     {
         let v = &app.views[&sid];
@@ -569,15 +592,15 @@ async fn mock_end_to_end() {
         if app.active_permission().is_some() {
             break;
         }
-        pump(&mut app, &mut ev_rx, 250).await;
+        pump(&mut app, &mut ev_rx, PUMP_POLL_MS).await;
     }
     assert!(app.active_permission().is_some(), "permission requested");
     let (_, s) = render(&mut app, 100, 30);
     println!("--- permission ---\n{s}");
     assert!(s.contains("Permission required"));
     assert!(s.contains("Allow once"));
-    // Keys within 350ms of the modal opening are ignored; wait then allow.
-    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    // Keys right after the modal opens are ignored; wait then allow.
+    tokio::time::sleep(PAST_GRACE).await;
     press(&mut app, KeyCode::Char('a'));
     assert!(app.active_permission().is_none());
     // Queue a prompt while busy.
@@ -587,7 +610,7 @@ async fn mock_end_to_end() {
     // Queue another one and remove it with its ✕ button while the turn is still running.
     type_text(&mut app, "never send this");
     press(&mut app, KeyCode::Enter);
-    pump(&mut app, &mut ev_rx, 200).await;
+    pump(&mut app, &mut ev_rx, PUMP_ROUNDTRIP_MS).await;
     assert!(
         app.views[&sid].queued.iter().all(|q| q.id.is_some()),
         "queued rows bound to server ids"
@@ -601,9 +624,9 @@ async fn mock_end_to_end() {
         .map(|s| s.id.clone())
         .expect("another live session");
     app.attach_fg(&other);
-    pump(&mut app, &mut ev_rx, 200).await;
+    pump(&mut app, &mut ev_rx, PUMP_ROUNDTRIP_MS).await;
     app.attach_fg(&sid);
-    pump(&mut app, &mut ev_rx, 200).await;
+    pump(&mut app, &mut ev_rx, PUMP_ROUNDTRIP_MS).await;
     let q: Vec<&str> = app.views[&sid]
         .queued
         .iter()
@@ -633,7 +656,7 @@ async fn mock_end_to_end() {
             mouse(MouseEventKind::Up(MouseButton::Left), qx, qy),
         );
     }
-    pump(&mut app, &mut ev_rx, 200).await;
+    pump(&mut app, &mut ev_rx, PUMP_ROUNDTRIP_MS).await;
     let q: Vec<&str> = app.views[&sid]
         .queued
         .iter()
@@ -655,7 +678,7 @@ async fn mock_end_to_end() {
         {
             break;
         }
-        pump(&mut app, &mut ev_rx, 250).await;
+        pump(&mut app, &mut ev_rx, PUMP_POLL_MS).await;
     }
     let v = &app.views[&sid];
     assert!(!v.is_busy(), "turn finished");
@@ -678,7 +701,7 @@ async fn mock_end_to_end() {
     // Session picker lists live + history.
     press_with(&mut app, KeyCode::Char('x'), KeyModifiers::CONTROL);
     press(&mut app, KeyCode::Char('l'));
-    pump(&mut app, &mut ev_rx, 300).await;
+    pump(&mut app, &mut ev_rx, PUMP_REPLY_MS).await;
     let (_, s) = render(&mut app, 120, 34);
     println!("--- sessions ---\n{s}");
     assert!(s.contains("Live") && s.contains("History"));
@@ -687,7 +710,7 @@ async fn mock_end_to_end() {
     // Watch mode: tiles for the background sessions.
     press_with(&mut app, KeyCode::Char('x'), KeyModifiers::CONTROL);
     press(&mut app, KeyCode::Char('w'));
-    pump(&mut app, &mut ev_rx, 1500).await;
+    pump(&mut app, &mut ev_rx, PUMP_TILES_MS).await;
     let (_, s) = render(&mut app, 140, 36);
     println!("--- watch ---\n{s}");
     assert_eq!(app.mode, Mode::Watch);
@@ -701,7 +724,7 @@ async fn mock_end_to_end() {
     // A background tile asks for permission: the modal names the session; deny it.
     if app.active_permission().is_some() {
         assert!(s.contains("Permission required · docs-写手"));
-        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        tokio::time::sleep(PAST_GRACE).await;
         press(&mut app, KeyCode::Char('d'));
         assert!(app.active_permission().is_none());
     }
@@ -719,13 +742,13 @@ async fn mock_end_to_end() {
     let focus = app.watch.focus.clone().expect("focus");
     type_text(&mut app, "ping");
     press(&mut app, KeyCode::Enter);
-    pump(&mut app, &mut ev_rx, 200).await;
+    pump(&mut app, &mut ev_rx, PUMP_ROUNDTRIP_MS).await;
     assert!(app.watch.inputs.get(&focus).is_none_or(|e| e.is_empty()));
     // Back to chat.
     press_with(&mut app, KeyCode::Char('x'), KeyModifiers::CONTROL);
     press(&mut app, KeyCode::Char('w'));
     assert_eq!(app.mode, Mode::Chat);
-    pump(&mut app, &mut ev_rx, 300).await;
+    pump(&mut app, &mut ev_rx, PUMP_REPLY_MS).await;
     assert_eq!(attached(&app), Some(1), "foreground again");
     assert!(app.views[&sid].foreground);
 }
@@ -745,14 +768,14 @@ async fn permission_modal_keys_then_quit() {
         },
     );
     for _ in 0..60 {
-        pump(&mut app, &mut ev_rx, 250).await;
+        pump(&mut app, &mut ev_rx, PUMP_POLL_MS).await;
         render(&mut app, 100, 30);
         if app.active_permission().is_some() {
             break;
         }
     }
     assert!(app.active_permission().is_some());
-    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    tokio::time::sleep(PAST_GRACE).await;
     for k in [
         key(KeyCode::Char('x'), KeyModifiers::CONTROL),
         key(KeyCode::Char('w'), KeyModifiers::NONE),
@@ -785,13 +808,13 @@ async fn file_mention_autocomplete() {
     let (ev_tx, mut ev_rx) = mpsc::unbounded_channel();
     tokio::spawn(crate::mock::run(TEST_CWD.into(), out_rx, ev_tx));
     let mut app = App::new(Client::new(out_tx), TEST_CWD.into(), InitPlan::default());
-    pump(&mut app, &mut ev_rx, 600).await;
+    pump(&mut app, &mut ev_rx, PUMP_CONNECT_MS).await;
     type_text(&mut app, "look at @src/ma");
     assert!(app.files_due.is_some(), "debounced query pending");
     for _ in 0..10 {
-        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(PUMP_TICK_MS)).await;
         app.housekeeping();
-        pump(&mut app, &mut ev_rx, 30).await;
+        pump(&mut app, &mut ev_rx, PUMP_TICK_MS).await;
     }
     let ac = app.ac.as_ref().expect("file popup");
     assert_eq!(ac.kind, crate::app::AcKind::File);
@@ -826,7 +849,7 @@ async fn dialogs_open_and_render() {
     let (ev_tx, mut ev_rx) = mpsc::unbounded_channel();
     tokio::spawn(crate::mock::run(TEST_CWD.into(), out_rx, ev_tx));
     let mut app = App::new(Client::new(out_tx), TEST_CWD.into(), InitPlan::default());
-    pump(&mut app, &mut ev_rx, 600).await;
+    pump(&mut app, &mut ev_rx, PUMP_CONNECT_MS).await;
     assert!(app.config.is_some());
     press_with(&mut app, KeyCode::Char('x'), KeyModifiers::CONTROL);
     press(&mut app, KeyCode::Char('m'));
@@ -837,7 +860,7 @@ async fn dialogs_open_and_render() {
     assert!(s.contains("Switch model") && s.contains("GPT-6") && s.contains("DGN Gateway"));
     type_text(&mut app, "gpt");
     press(&mut app, KeyCode::Enter);
-    pump(&mut app, &mut ev_rx, 200).await;
+    pump(&mut app, &mut ev_rx, PUMP_ROUNDTRIP_MS).await;
     assert_eq!(app.cur().unwrap().info.model.model, "gpt-6");
     // Help dialog.
     press_with(&mut app, KeyCode::Char('x'), KeyModifiers::CONTROL);
@@ -957,7 +980,7 @@ async fn net_hello_and_frames() {
                 _ => ServerFrame::Response {
                     id,
                     ok: true,
-                    result: json!({"sessions": [], "pad": "x".repeat(20 << 20)}),
+                    result: json!({"sessions": [], "pad": "x".repeat(OVERSIZED_FRAME_BYTES)}),
                     error: None,
                 },
             };
@@ -1014,7 +1037,7 @@ async fn net_hello_and_frames() {
         .await
         .unwrap()
         .unwrap();
-    let ok = matches!(&r, crate::net::NetEvent::Frame(ServerFrame::Response { id: 7, ok: true, result, .. }) if result["pad"].as_str().map(str::len) == Some(20 << 20));
+    let ok = matches!(&r, crate::net::NetEvent::Frame(ServerFrame::Response { id: 7, ok: true, result, .. }) if result["pad"].as_str().map(str::len) == Some(OVERSIZED_FRAME_BYTES));
     assert!(
         ok,
         "{}",
@@ -1361,7 +1384,7 @@ fn keys_typed_as_permission_opens_go_to_editor() {
     );
     assert_eq!(app.editor.text, "ad");
     // After the grace period the modal reacts.
-    app.perm.as_mut().unwrap().opened -= std::time::Duration::from_millis(500);
+    app.perm.as_mut().unwrap().opened -= PAST_GRACE;
     press(&mut app, KeyCode::Char('a'));
     assert!(app.active_permission().is_none());
     assert_eq!(app.editor.text, "ad");
@@ -3121,7 +3144,7 @@ async fn mock_compact_keeps_history() {
         ..Default::default()
     };
     let mut app = App::new(Client::new(out_tx), TEST_CWD.into(), plan);
-    pump(&mut app, &mut ev_rx, 1500).await;
+    pump(&mut app, &mut ev_rx, PUMP_TILES_MS).await;
     assert!(
         app.mcp
             .iter()
@@ -3138,12 +3161,12 @@ async fn mock_compact_keeps_history() {
         {
             break;
         }
-        pump(&mut app, &mut ev_rx, 250).await;
+        pump(&mut app, &mut ev_rx, PUMP_POLL_MS).await;
     }
     let before = app.cur().unwrap().messages.len();
     assert!(before >= 2);
     app.run_command("compact", "");
-    pump(&mut app, &mut ev_rx, 2500).await;
+    pump(&mut app, &mut ev_rx, PUMP_TURN_MS).await;
     let v = app.cur().unwrap();
     assert_eq!(
         v.messages.len(),
