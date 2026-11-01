@@ -19,6 +19,9 @@ const SUMMARY_TIMEOUT_MS = 60_000
 const ALLOW_AT = 10
 const SETTLE_MS = 800
 const TYPING_DELAY_MS = 40
+const MAIN_SESSION = 'main'
+const TESTER_SESSION = 'tester'
+const TILE_FOCUS_MS = 400
 
 async function takeCrew(browser: Browser, lang: Lang): Promise<void> {
   const options: ThreeClientsOptions = { lang, session: 'main', terminal: { cols: TUI_COLS, rows: TUI_ROWS }, gui: { width: 1280, height: 1120 } }
@@ -37,6 +40,13 @@ async function takeCrew(browser: Browser, lang: Lang): Promise<void> {
     await gui.clickTextBelow(gui.text('tool.allow'), APPROVAL_ASKED_FOR)
     await gui.parkPointer()
     await tui.waitForText(SUMMARY_DONE, SUMMARY_TIMEOUT_MS)
+    // The GUI sidebar's Todo section follows the focused tile, which the Allow click made fixer's.
+    // Workaround (gui f284be4): coming from a tile without a list, the section shows "Todo 0/0",
+    // so tester (3/3) is focused on the way to main.
+    await gui.clickTile(TESTER_SESSION)
+    await gui.pause(TILE_FOCUS_MS)
+    await gui.clickTile(MAIN_SESSION)
+    await gui.parkPointer()
     await tui.pause(SETTLE_MS)
     const still = await photograph(clients, 'crew')
     await gui.shot('crew')
