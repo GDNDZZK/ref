@@ -4,9 +4,24 @@
 
 use crate::LlmError;
 use regex::Regex;
+use reqwest::StatusCode;
 use reqwest::header::HeaderMap;
 use std::sync::LazyLock;
 use std::time::Duration;
+
+/// HTTP statuses the classification depends on.
+const PAYLOAD_TOO_LARGE: u16 = StatusCode::PAYLOAD_TOO_LARGE.as_u16();
+const TOO_MANY_REQUESTS: u16 = StatusCode::TOO_MANY_REQUESTS.as_u16();
+const PAYMENT_REQUIRED: u16 = StatusCode::PAYMENT_REQUIRED.as_u16();
+const REQUEST_TIMEOUT: u16 = StatusCode::REQUEST_TIMEOUT.as_u16();
+const CONFLICT: u16 = StatusCode::CONFLICT.as_u16();
+const TOO_EARLY: u16 = StatusCode::TOO_EARLY.as_u16();
+const UNAUTHORIZED: u16 = StatusCode::UNAUTHORIZED.as_u16();
+const FORBIDDEN: u16 = StatusCode::FORBIDDEN.as_u16();
+const NOT_FOUND: u16 = StatusCode::NOT_FOUND.as_u16();
+const INTERNAL_SERVER_ERROR: u16 = StatusCode::INTERNAL_SERVER_ERROR.as_u16();
+/// Last status of the 5xx range.
+const LAST_SERVER_ERROR: u16 = 599;
 
 /// Maximum number of body characters included in error messages.
 const MAX_BODY_CHARS: usize = 2000;
@@ -123,8 +138,9 @@ pub fn classify_http_error(status: u16, headers: &HeaderMap, body: &str) -> LlmE
         format!("HTTP {status}: {trimmed}")
     };
 
-    let context_overflow = status == 413 || (status != 429 && is_context_overflow(body));
-    let quota = status == 402 || is_quota(body);
+    let context_overflow =
+        status == PAYLOAD_TOO_LARGE || (status != TOO_MANY_REQUESTS && is_context_overflow(body));
+    let quota = status == PAYMENT_REQUIRED || is_quota(body);
     let should_retry = headers
         .get("x-should-retry")
         .and_then(|v| v.to_str().ok())
@@ -140,8 +156,12 @@ pub fn classify_http_error(status: u16, headers: &HeaderMap, body: &str) -> LlmE
         hint
     } else {
         match status {
-            408 | 409 | 425 | 429 | 500..=599 => true,
-            401 | 403 | 404 | 413 => false,
+            REQUEST_TIMEOUT
+            | CONFLICT
+            | TOO_EARLY
+            | TOO_MANY_REQUESTS
+            | INTERNAL_SERVER_ERROR..=LAST_SERVER_ERROR => true,
+            UNAUTHORIZED | FORBIDDEN | NOT_FOUND | PAYLOAD_TOO_LARGE => false,
             _ => RETRYABLE_TEXT_RE.is_match(body),
         }
     };
