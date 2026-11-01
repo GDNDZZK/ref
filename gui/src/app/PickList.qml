@@ -78,14 +78,10 @@ Item {
 			Keys.onReturnPressed: event => pick.activateCurrent()
 			Keys.onEnterPressed: event => pick.activateCurrent()
 
-			Text {
-				textFormat: Text.PlainText
+			PlaceholderText {
 				anchors.fill: parent
-				verticalAlignment: Text.AlignVCenter
+				textInput: input
 				text: pick.placeholderText
-				color: Theme.textMuted
-				font.pixelSize: Theme.fontSize
-				visible: input.text === "" && input.preeditText === ""
 			}
 		}
 
