@@ -70,10 +70,9 @@ Item {
 			id: sideBar
 			policy: ScrollBar.AlwaysOn
 			visible: size < 1
-			contentItem: Rectangle {
-				implicitHeight: 6
-				radius: height / 2
-				color: sideBar.pressed ? Theme.scrollHandlePressed : Theme.scrollHandle
+			contentItem: ScrollHandle {
+				implicitHeight: thickness
+				pressed: sideBar.pressed
 			}
 		}
 
