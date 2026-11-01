@@ -141,13 +141,13 @@ pub struct Watch {
     /// Tiles at last draw.
     pub tiles: Vec<(String, Rect)>,
     /// WatchAll state last sent to the server.
-    pub subscribed: bool,
+    subscribed: bool,
 }
 
 #[derive(Clone)]
 pub struct Cmd {
     pub name: &'static str,
-    pub aliases: &'static [&'static str],
+    aliases: &'static [&'static str],
     pub desc: &'static str,
     pub key: &'static str,
     pub args: bool,
@@ -392,9 +392,9 @@ pub struct App {
     /// Status-line hint: (text, colour, expires at).
     pub hint: Option<(String, Color, Instant)>,
     /// Pending "press again" confirmation to close a session: (session id, armed at).
-    pub close_armed: Option<(String, Instant)>,
+    close_armed: Option<(String, Instant)>,
     /// Pending "click again" confirmation to undo from a message of a busy session.
-    pub undo_armed: Option<(String, Instant)>,
+    undo_armed: Option<(String, Instant)>,
     /// Terminal title last sent (main loop only sends changes).
     pub last_title: Option<String>,
     pub connected: bool,
@@ -406,19 +406,19 @@ pub struct App {
     pub ac: Option<Autocomplete>,
     pub watch: Watch,
     pub sidebar: bool,
-    pub init: Option<InitPlan>,
+    init: Option<InitPlan>,
     pub shell_mode: bool,
     pub run_editor: bool,
     pub dirty: bool,
     pub last_click: Option<(Instant, u16, u16, u8)>,
     /// Session id whose transcript holds the active selection.
     pub sel_owner: Option<String>,
-    pub files_inflight: bool,
-    pub files_want: Option<String>,
+    files_inflight: bool,
+    files_want: Option<String>,
     /// Debounced `@` file query: (fire at, query).
     pub files_due: Option<(Instant, String)>,
     /// Sessions we've asked to attach (watch) and are waiting on.
-    pub attaching: HashSet<String>,
+    attaching: HashSet<String>,
     pub screen: Rect,
     /// Sidebar live-session rows at last draw: (y, session id).
     pub sidebar_rows: Vec<(u16, String)>,
@@ -429,7 +429,7 @@ pub struct App {
     /// Full terminal repaint requested (ctrl+l).
     pub force_clear: bool,
     /// Command waiting for config / session snapshot: (name, args, requested at).
-    pub deferred: Option<(String, String, Instant)>,
+    deferred: Option<(String, String, Instant)>,
     /// Autocomplete dismissed with esc until the next edit.
     pub suppress_ac: bool,
     /// MCP servers (sorted by name).
@@ -438,7 +438,7 @@ pub struct App {
     pub mcp_loaded: bool,
     /// The backend answered `McpStatus` with an error: use `GetConfig` status lines instead.
     pub mcp_fallback: bool,
-    pub mcp_inflight: bool,
+    mcp_inflight: bool,
     /// Next status poll while some server is still connecting.
     pub mcp_poll_at: Option<Instant>,
     /// Sidebar MCP rows at last draw: (y, server name).
@@ -602,7 +602,7 @@ impl App {
     }
 
     /// Hint shown in the status line until `dur` has passed.
-    pub fn set_hint_for(&mut self, s: impl Into<String>, c: Color, dur: Duration) {
+    fn set_hint_for(&mut self, s: impl Into<String>, c: Color, dur: Duration) {
         self.hint = Some((s.into(), c, Instant::now() + dur));
     }
 
@@ -1488,12 +1488,7 @@ impl App {
 
     /// Puts a withdrawn / undone prompt back into the input box (the focused tile's input in
     /// split view): fills it when empty, otherwise appends after a blank line.
-    pub fn restore_prompt(
-        &mut self,
-        sid: &str,
-        text: &str,
-        images: Vec<(ImageData, Option<String>)>,
-    ) {
+    fn restore_prompt(&mut self, sid: &str, text: &str, images: Vec<(ImageData, Option<String>)>) {
         let editor = if self.mode == Mode::Watch {
             self.watch.inputs.entry(sid.to_string()).or_default()
         } else {
@@ -1531,7 +1526,7 @@ impl App {
     }
 
     /// Sends to the current session, creating one if needed.
-    pub fn submit_prompt_text(&mut self, text: String, images: Vec<ImageData>) {
+    fn submit_prompt_text(&mut self, text: String, images: Vec<ImageData>) {
         // Typed before the first connection: becomes the startup prompt.
         let before_first_connect = !self.ever_connected;
         if before_first_connect
@@ -1717,7 +1712,7 @@ impl App {
         }
     }
 
-    pub fn toggle_details(&mut self) {
+    fn toggle_details(&mut self) {
         self.details = !self.details;
         self.reset_toggles();
         self.toasts.info(if self.details {
@@ -1727,7 +1722,7 @@ impl App {
         });
     }
 
-    pub fn toggle_thinking(&mut self) {
+    fn toggle_thinking(&mut self) {
         self.thinking = !self.thinking;
         self.reset_toggles();
         self.toasts.info(if self.thinking {
@@ -1990,7 +1985,7 @@ impl App {
         self.dialog = Some(Dialog::List(d));
     }
 
-    pub fn open_agents(&mut self) {
+    fn open_agents(&mut self) {
         let cur = self.cur().map(|v| v.info.agent.clone()).unwrap_or_default();
         let agents = self.agents().to_vec();
         let items: Vec<Item> = agents
@@ -2010,7 +2005,7 @@ impl App {
         self.dialog = Some(Dialog::List(d));
     }
 
-    pub fn open_variants(&mut self) {
+    fn open_variants(&mut self) {
         let Some(v) = self.cur() else { return };
         let m = v.info.model.clone();
         let variants = find_model(self.models(), &m)
@@ -2325,7 +2320,7 @@ impl App {
 
     /// Closes `sid`, asking for a second confirmation when it is open in another frontend.
     /// `again` describes how to confirm (e.g. "run the command again").
-    pub fn close_confirmed(&mut self, sid: &str, again: &str) {
+    fn close_confirmed(&mut self, sid: &str, again: &str) {
         if self.attached_elsewhere(sid) && !self.close_is_armed(sid) {
             self.arm_close(
                 sid,
@@ -2382,7 +2377,7 @@ impl App {
     }
 
     /// `/close-session` without args: picker of live sessions that stays open after each close.
-    pub fn open_close_picker(&mut self) {
+    fn open_close_picker(&mut self) {
         let d = ListDialog::new(Kind::CloseSessions, "Close sessions", Vec::new())
             .with_hint("enter close · stays open to close more · esc done");
         self.dialog = Some(Dialog::List(d));
@@ -3066,7 +3061,7 @@ impl App {
     }
 
     /// Whether the chat-mode sidebar is drawn at the current screen size.
-    pub fn sidebar_shown(&self) -> bool {
+    fn sidebar_shown(&self) -> bool {
         self.mode == Mode::Chat
             && self.sidebar
             && self.screen.width >= crate::render::SIDEBAR_MIN_SCREEN
@@ -3153,7 +3148,7 @@ pub fn match_session<'a>(live: &'a [SessionInfo], q: &str) -> Result<&'a Session
 pub const LOGO: [&str; 3] = ["█▀▀▄ █▀▀▀ █▀▀▀", "█▄▄▀ █▀▀  █▀▀ ", "█  █ █▄▄▄ █   "];
 
 /// Exit screen (opencode style): logo, session line, resume command. ANSI truecolor.
-pub fn epilogue_text(info: &SessionInfo, resumable: bool) -> String {
+fn epilogue_text(info: &SessionInfo, resumable: bool) -> String {
     let ansi = |c: Color| match c {
         Color::Rgb(r, g, b) => format!("\x1b[38;2;{r};{g};{b}m"),
         _ => String::new(),
