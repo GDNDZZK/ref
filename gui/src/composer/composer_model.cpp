@@ -74,20 +74,16 @@ bool ComposerModel::isCompletionOpen() const
 QString ComposerModel::completionKind() const
 {
 	using Kind = compose::CompletionTarget::Kind;
-	if(!isCompletionOpen())
+	switch(isCompletionOpen() ? m_target.kind : Kind::None)
 	{
+	case Kind::None:
 		return u"none"_s;
-	}
-	switch(m_target.kind)
-	{
 	case Kind::Command:
 		return u"command"_s;
 	case Kind::File:
 		return u"file"_s;
-	case Kind::None:
-		break;
 	}
-	return u"none"_s;
+	Q_UNREACHABLE_RETURN(u"none"_s);
 }
 
 void ComposerModel::setInterruptWindow(int milliseconds)
