@@ -23,6 +23,7 @@ SessionDialog {
 		delegate: PickRow {
 			id: row
 			required property var modelData
+			selected: modelData.name === dialog.session.agent
 			onActivated: {
 				Workspace.setAgent(dialog.sessionId, modelData.name)
 				dialog.close()
@@ -37,7 +38,7 @@ SessionDialog {
 				color: Theme.agentColor(row.modelData.color, row.modelData.position)
 			}
 			Column {
-				anchors { left: parent.left; leftMargin: Theme.dialogPadding + 20; right: check.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+				anchors { left: parent.left; leftMargin: Theme.dialogPadding + 20; right: row.check.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
 				spacing: 2
 
 				Text {
@@ -56,14 +57,6 @@ SessionDialog {
 					font.pixelSize: Theme.smallFontSize
 					elide: Text.ElideRight
 				}
-			}
-			Icon {
-				id: check
-				anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
-				name: "check"
-				size: 16
-				color: Theme.accent
-				visible: row.modelData.name === dialog.session.agent
 			}
 		}
 	}

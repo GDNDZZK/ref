@@ -7,12 +7,24 @@ Item {
 
 	required property int index
 	readonly property bool current: ListView.isCurrentItem
+	// Draws the check mark at the right end; content ends at check.left.
+	property bool selected: false
+	readonly property alias check: checkIcon
 
 	signal activated()
 
 	width: ListView.view ? ListView.view.width : 0
 	height: Theme.pickRowHeight
 	opacity: enabled ? 1 : Theme.disabledOpacity
+
+	Icon {
+		id: checkIcon
+		anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
+		name: "check"
+		size: 16
+		color: Theme.accent
+		visible: row.selected
+	}
 
 	HoverHandler {
 		enabled: row.enabled
