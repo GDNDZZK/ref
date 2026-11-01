@@ -8,11 +8,24 @@ import { useConnectionStore } from '../stores/connection.ts'
 import type { Command, CommandSource } from './types.ts'
 
 const SOURCES: readonly CommandSource[] = ['config', 'skill', 'mcp']
+const FALLBACK_SOURCE: CommandSource = 'config'
+
+// A source this version does not know (a newer backend) keeps the command, listed as a config one.
+function knownSource(source: string, warned: Set<string>): CommandSource {
+  const known = SOURCES.find((candidate) => candidate === source)
+  if (known) return known
+  if (!warned.has(source)) {
+    warned.add(source)
+    console.warn(`custom commands from the unknown source "${source}" are listed as ${FALLBACK_SOURCE}`)
+  }
+  return FALLBACK_SOURCE
+}
 
 export function installCustomCommands(): void {
   const connection = useConnectionStore()
   const commands = useCommandsStore()
   const composer = useComposerStore()
+  const warnedSources = new Set<string>()
 
   watch(
     () => connection.config?.commands,
@@ -27,7 +40,7 @@ export function installCustomCommands(): void {
           id: info.name,
           title: { text: info.description || info.name },
           group: 'custom',
-          source: SOURCES.find((source) => source === info.source) ?? 'config',
+          source: knownSource(info.source, warnedSources),
           slash: true,
           args: { usage: '[args]' },
           enabled: (sessionId) => sessionId !== '',
