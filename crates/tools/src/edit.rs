@@ -1,6 +1,6 @@
 //! `edit`: apply line-addressed edits against a hashline snapshot.
 
-use crate::hashline::{self, LineSet, Seen, Snapshot, format_header};
+use crate::hashline::{self, HEADER_RE, LineSet, Seen, Snapshot, format_header};
 use crate::util::{self, TextFile};
 use crate::{ToolCtx, ToolOutput, ToolSpec};
 use anyhow::{Result, anyhow, bail};
@@ -138,8 +138,6 @@ fn range_label(op: &str, s: usize, e: usize) -> String {
 
 static PREFIX_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\s*(?:[*+-]\s*)?(\d+):").expect("valid regex"));
-static HEADER_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\s*\[[^#\r\n]+#[0-9a-fA-F]{4}\]\s*$").expect("valid regex"));
 
 /// Strips `N:` prefixes when the model obviously pasted read output: every non-empty row
 /// carries a prefix and the numbers count up by one (2+ rows), or a single row is numbered
