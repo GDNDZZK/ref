@@ -37,13 +37,10 @@ Block {
 	}
 	readonly property string agentTitle: agent === "" ? "" : agent.charAt(0).toUpperCase() + agent.slice(1)
 
-	property real now: Date.now()
-
-	Timer {
+	Ticker {
+		id: ticker
 		interval: Format.msPerSecond
 		running: block.working
-		repeat: true
-		onTriggered: block.now = Date.now()
 	}
 	CopiedFlag { id: copiedFlag }
 
@@ -101,7 +98,7 @@ Block {
 				id: timeText
 				text: block.timeEnd > 0
 					? Format.clock(block.time) + " \u2192 " + Format.clock(block.timeEnd) + " (" + Format.duration(block.replyTime) + ")"
-					: Format.clock(block.time) + " \u00b7 " + Format.elapsed(block.now - block.time)
+					: Format.clock(block.time) + " \u00b7 " + Format.elapsed(ticker.now - block.time)
 				PlainToolTip { text: new Date(block.time).toLocaleString(); visible: timeHover.hovered }
 				HoverHandler { id: timeHover }
 			}

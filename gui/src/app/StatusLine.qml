@@ -25,10 +25,8 @@ Item {
 	readonly property color contextColor: session.contextAuto > 0 && contextUsed >= session.contextAuto ? Theme.danger
 		: session.contextRecommend > 0 && contextUsed >= session.contextRecommend ? Theme.warning
 		: Theme.accent
-	readonly property real busyMs: session.busySince > 0 ? now - session.busySince : 0
+	readonly property real busyMs: session.busySince > 0 ? ticker.now - session.busySince : 0
 	readonly property real shownFromMs: Format.msPerSecond
-
-	property real now: Date.now()
 
 	readonly property string activityText: {
 		switch (activity) {
@@ -44,7 +42,7 @@ Item {
 			return qsTr("Waiting for your answer")
 		case Activity.retrying:
 			return qsTr("Retrying in %1 (attempt %2): %3")
-				.arg(Format.elapsed(Math.max(0, session.retryAt - now) + Format.msPerSecond - 1))
+				.arg(Format.elapsed(Math.max(0, session.retryAt - ticker.now) + Format.msPerSecond - 1))
 				.arg(session.retryAttempt)
 				.arg(ToolInfo.firstLine(session.retryError))
 		default:
@@ -54,11 +52,10 @@ Item {
 
 	height: lineHeight
 
-	Timer {
+	Ticker {
+		id: ticker
 		interval: Format.msPerSecond / 4
 		running: line.activity !== Activity.idle
-		repeat: true
-		onTriggered: line.now = Date.now()
 	}
 
 	Row {

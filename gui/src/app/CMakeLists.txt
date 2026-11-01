@@ -54,6 +54,7 @@ qt_add_qml_module(ref-gui
 		HoverCopyButton.qml
 		PlaceholderText.qml
 		SectionLabel.qml
+		Ticker.qml
 		SessionPane.qml
 		QuestionCard.qml
 		QuestionRow.qml

@@ -45,7 +45,6 @@ Block {
 	readonly property int tickInterval: 250 // ms between redraws of the clock texts
 	readonly property string firstOutputLine: ToolInfo.firstLine(output)
 
-	property real now: Date.now()
 
 	// What the right end of the header says, and in which color.
 	readonly property string statusText: {
@@ -56,9 +55,9 @@ Block {
 		case ToolState.awaitingPermission:
 			return qsTr("Needs permission")
 		case ToolState.delayed:
-			return qsTr("Runs in %1").arg(Format.elapsed(Math.max(0, runAt - now) + Format.msPerSecond - 1))
+			return qsTr("Runs in %1").arg(Format.elapsed(Math.max(0, runAt - ticker.now) + Format.msPerSecond - 1))
 		case ToolState.running:
-			return qsTr("running %1").arg(Format.elapsed(now - time))
+			return qsTr("running %1").arg(Format.elapsed(ticker.now - time))
 		case ToolState.error:
 			return took === "" ? qsTr("error") : qsTr("error %1").arg(took)
 		case ToolState.denied:
@@ -84,11 +83,10 @@ Block {
 		}
 	}
 
-	Timer {
+	Ticker {
+		id: ticker
 		interval: block.tickInterval
 		running: block.toolState === ToolState.running || block.delayed
-		repeat: true
-		onTriggered: block.now = Date.now()
 	}
 
 	Rectangle {

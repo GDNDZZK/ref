@@ -29,7 +29,6 @@ Item {
 	readonly property var facts: live.data
 	readonly property bool hasPermission: facts.hasPermission === true
 	readonly property bool failed: Activity.isFailed(facts.activity, facts.hasError === true)
-	property double now: Date.now()
 
 	function focusPane() {
 		pane.focusInput()
@@ -91,11 +90,10 @@ Item {
 		sessionId: tile.sessionId
 	}
 
-	Timer {
-		interval: 1000
-		repeat: true
+	Ticker {
+		id: ticker
+		interval: Format.msPerSecond
 		running: tile.facts.busySince > 0 && tile.visible
-		onTriggered: tile.now = Date.now()
 	}
 
 	Rectangle {
@@ -173,7 +171,7 @@ Item {
 					textFormat: Text.PlainText
 					anchors.verticalCenter: parent.verticalCenter
 					visible: tile.facts.busySince > 0
-					text: Format.elapsed(tile.now - tile.facts.busySince)
+					text: Format.elapsed(ticker.now - tile.facts.busySince)
 					color: Theme.textMuted
 					font.pixelSize: Theme.smallFontSize
 				}
