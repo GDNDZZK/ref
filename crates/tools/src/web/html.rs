@@ -44,11 +44,13 @@ pub fn markdown_alternate(html: &str, page: &Url) -> Option<Url> {
                 _ => href = Some(v.trim().to_string()),
             }
         }
-        if rel.split_whitespace().any(|r| r == "alternate")
-            && (ty == "text/markdown" || ty == "text/x-markdown")
+        let is_alternate = rel.split_whitespace().any(|r| r == "alternate");
+        let is_markdown_type = ty == "text/markdown" || ty == "text/x-markdown";
+        if is_alternate
+            && is_markdown_type
             && let Some(u) = href
                 .and_then(|h| page.join(&h).ok())
-                .filter(|u| matches!(u.scheme(), "http" | "https") && u != page)
+                .filter(|u| is_other_http_url(u, page))
         {
             return Some(u);
         }
@@ -62,6 +64,11 @@ fn whole_page(title: Option<String>, body: String) -> Page {
         body,
         note: None,
     }
+}
+
+/// An http(s) URL that differs from the page itself.
+fn is_other_http_url(u: &Url, page: &Url) -> bool {
+    matches!(u.scheme(), "http" | "https") && u != page
 }
 
 /// Converts a page. `full_page = false` extracts the main content when the page reads like an
