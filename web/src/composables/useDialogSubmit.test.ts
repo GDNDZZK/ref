@@ -3,7 +3,7 @@ import { useDialogSubmit } from './useDialogSubmit.ts'
 
 describe('useDialogSubmit', () => {
   it('runs the action once at a time', async () => {
-    let finish: () => void = () => {}
+    let finish!: () => void
     const action = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)))
     const { busy, submit } = useDialogSubmit(action, () => true)
     const first = submit()

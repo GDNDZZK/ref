@@ -5,7 +5,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Chevron from './Chevron.vue'
-import { ICON_SIZE, ICON_STROKE } from './iconMetrics.ts'
+import { ICON_SIZE, ICON_STROKE } from './sharedMetrics.ts'
 
 const props = defineProps<{ busy: boolean; canSend: boolean }>()
 defineEmits<{ click: [] }>()

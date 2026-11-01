@@ -13,7 +13,7 @@ import { chatSessionKey } from '../composables/chatSessionContext.ts'
 import type { ChatSession } from '../model/chatSession.ts'
 import { useComposerStore } from '../stores/composer.ts'
 import { motion } from '../theme/generated/motion.ts'
-import { ALERT_RING_REACH, ICON_SIZE, ICON_STROKE } from './iconMetrics.ts'
+import { ALERT_RING_REACH, ICON_SIZE, ICON_STROKE } from './sharedMetrics.ts'
 
 const { t } = useI18n()
 // `composerShown` is false for a tile that is not focused in split view: the input box folds away

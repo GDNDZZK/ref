@@ -161,7 +161,7 @@ export class QuestionForm {
         this.moveCursor(index, 1)
         return 'handled'
       case Key.Enter:
-      case ' ':
+      case Key.Space:
         return this.pick(index, this.choices[index]!.cursor)
       default:
         return this.pressNumber(key)

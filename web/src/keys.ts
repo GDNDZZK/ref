@@ -1,4 +1,5 @@
-// Names of the keys as `KeyboardEvent.key` reports them.
+// Names of the keys as `KeyboardEvent.key` reports them. Where `KeyboardEvent.code` uses the same
+// name (the arrows), they also match shortcuts.
 
 export const Key = {
   Enter: 'Enter',
