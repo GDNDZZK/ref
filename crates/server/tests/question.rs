@@ -45,7 +45,7 @@ async fn rig_with(handler: Handler, tweak: impl FnOnce(&mut ref_config::Config))
     let mut cfg = config(&mock.url);
     tweak(&mut cfg);
     let (hub, work) = hub(cfg, "question");
-    let session = session(&hub, &work, "main", "build").await;
+    let session = session(&hub, &work, MAIN_SESSION, BUILD).await;
     let conn = hub.add_conn();
     conn.lock().hello = true;
     let attach = Request::Attach {
@@ -281,7 +281,7 @@ async fn a_denying_permission_removes_the_tool() {
     assert!(tool_names(&open).contains(&"question".to_string()));
 
     let closed = rig_with(Arc::new(|_, _| Reply::Text("ok".into())), |cfg| {
-        cfg.agents.get_mut("build").unwrap().permission = perms(json!({"question": "deny"}));
+        cfg.agents.get_mut(BUILD).unwrap().permission = perms(json!({"question": "deny"}));
     })
     .await;
     prompt(&closed.hub, &closed.session, "go");

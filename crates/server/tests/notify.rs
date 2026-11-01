@@ -54,7 +54,7 @@ fn notes(conn: &Arc<Conn>) -> Vec<(NotifyKind, Option<String>)> {
 }
 
 async fn titled_session(hub: &Arc<Hub>, work: &std::path::Path) -> Arc<Session> {
-    let s = session(hub, work, "main", "build").await;
+    let s = session(hub, work, MAIN_SESSION, BUILD).await;
     {
         let mut st = s.lock();
         st.info.title = TITLE.into();
@@ -77,7 +77,7 @@ async fn turn_done_goes_to_the_most_recent_connection_only() {
     assert_eq!(notes(&newer), [(NotifyKind::TurnDone, None)]);
 
     // The older window comes to the front (showing another session): it wins now.
-    let other = session(&hub, &work, "other", "build").await;
+    let other = session(&hub, &work, "other", BUILD).await;
     set_focus(&hub, &older, true, &[&other]).await;
     prompt(&hub, &s, "again");
     wait_idle(&s).await;
