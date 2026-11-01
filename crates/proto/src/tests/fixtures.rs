@@ -84,7 +84,7 @@ fn requests() -> Samples<ClientFrame> {
                 5,
                 Request::CreateSession {
                     cwd: PROJECT_DIR.into(),
-                    agent: Some("build".into()),
+                    agent: Some(AGENT.into()),
                     model: Some(model()),
                     name: Some("parser-fix".into()),
                 },
@@ -273,7 +273,7 @@ fn requests() -> Samples<ClientFrame> {
                 26,
                 Request::ExpandCommand {
                     name: "review".into(),
-                    args: "src/parser.rs".into(),
+                    args: PARSER_FILE.into(),
                     cwd: PROJECT_DIR.into(),
                 },
             ),
@@ -472,7 +472,7 @@ fn server_frames() -> Samples<ServerFrame> {
             "response_list_files",
             response(
                 27,
-                json!({"files": ["src/parser.rs", "src/parser/", "tests/parser.rs"]}),
+                json!({"files": [PARSER_FILE, "src/parser/", "tests/parser.rs"]}),
             ),
         ),
         (
@@ -553,7 +553,7 @@ fn server_frames() -> Samples<ServerFrame> {
                 session_id: SESSION_ID.into(),
                 notify_kind: NotifyKind::TurnError,
                 session_title: "Fix the failing parser test".into(),
-                detail: Some("429 Too Many Requests: rate limit exceeded".into()),
+                detail: Some(RATE_LIMIT_ERROR.into()),
             },
         ),
     ]

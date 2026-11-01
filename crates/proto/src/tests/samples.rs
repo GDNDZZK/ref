@@ -10,6 +10,12 @@ const SECOND: i64 = 1000;
 
 /// Working directory of the sample session.
 pub const PROJECT_DIR: &str = "/home/user/project";
+/// Agent of the sample session.
+pub const AGENT: &str = "build";
+/// File the sample tool calls work on.
+pub const PARSER_FILE: &str = "src/parser.rs";
+/// Provider error shown in the sample message and session.
+pub const RATE_LIMIT_ERROR: &str = "429 Too Many Requests: rate limit exceeded";
 pub const SESSION_ID: &str = "ses_a1b2c3d4";
 pub const MESSAGE_ID: &str = "msg_0f1e2d3c";
 pub const CALL_ID: &str = "call_9x8y7z";
@@ -49,7 +55,7 @@ pub fn info() -> SessionInfo {
         id: SESSION_ID.into(),
         name: "parser-fix".into(),
         title: "Fix the failing parser test".into(),
-        agent: "build".into(),
+        agent: AGENT.into(),
         model: model(),
         cwd: PROJECT_DIR.into(),
         created_at: T0,
@@ -154,7 +160,7 @@ const EDIT_DIFF: &str = "--- a/src/parser.rs\n+++ b/src/parser.rs\n@@ -40,5 +40,
 
 pub fn edit_input() -> Value {
     json!({
-        "path": "src/parser.rs",
+        "path": PARSER_FILE,
         "tag": "a1f3",
         "edits": [{"op": "replace", "start": 42, "end": 42, "lines": ["    for i in 0..items.len() {"]}],
     })
@@ -365,7 +371,7 @@ pub fn assistant_message() -> Message {
     Message {
         time_end: Some(T0 + 22 * SECOND),
         model: Some(model()),
-        agent: Some("build".into()),
+        agent: Some(AGENT.into()),
         usage: Some(Usage {
             input: 1200,
             output: 340,
@@ -386,9 +392,9 @@ pub fn assistant_message() -> Message {
 pub fn failed_message() -> Message {
     Message {
         time_end: Some(T0 + 40 * SECOND),
-        error: Some("429 Too Many Requests: rate limit exceeded".into()),
+        error: Some(RATE_LIMIT_ERROR.into()),
         model: Some(model()),
-        agent: Some("build".into()),
+        agent: Some(AGENT.into()),
         ..message(
             "msg_failed_01",
             Role::Assistant,
@@ -431,7 +437,7 @@ pub fn failed_info() -> SessionInfo {
     SessionInfo {
         status: SessionStatus::Idle,
         busy_since: None,
-        last_error: Some("429 Too Many Requests: rate limit exceeded".into()),
+        last_error: Some(RATE_LIMIT_ERROR.into()),
         ..info()
     }
 }
@@ -442,15 +448,15 @@ pub fn server_config() -> ServerConfigInfo {
         description: description.into(),
         model: None,
         creatable: true,
-        can_spawn: name == "build",
+        can_spawn: name == AGENT,
         color: color.map(str::to_string),
     };
     ServerConfigInfo {
         agents: vec![
-            agent("build", "Writes and changes code", Some("#3b82f6")),
+            agent(AGENT, "Writes and changes code", Some("#3b82f6")),
             agent("plan", "Reads and plans, never edits", None),
         ],
-        default_agent: "build".into(),
+        default_agent: AGENT.into(),
         models: vec![ModelInfo {
             provider: "anthropic".into(),
             provider_name: "Anthropic".into(),
