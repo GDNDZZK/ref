@@ -568,7 +568,7 @@ pub fn backoff(
     let exp = 2f64.powi(attempt.saturating_sub(1).min(MAX_BACKOFF_EXPONENT) as i32);
     let raw = (base.as_secs_f64() * exp).min(max.as_secs_f64());
     let jittered = raw * (1.0 + jitter.clamp(-JITTER_FRACTION, JITTER_FRACTION));
-    let d = Duration::from_secs_f64(jittered.max(0.0));
+    let d = Duration::from_secs_f64(jittered);
     let d = match retry_after {
         Some(r) if r > d => r,
         _ => d,
