@@ -45,6 +45,15 @@ function type(composer: SessionComposer, text: string): void {
   composer.input(text, text.length)
 }
 
+describe('requestFocus', () => {
+  it('counts the requests, which the box watches', () => {
+    const { composer } = setup()
+    composer.requestFocus()
+    composer.requestFocus()
+    expect(composer.focusRequests.value).toBe(2)
+  })
+})
+
 describe('submit', () => {
   it('sends the text as a prompt and empties the box', async () => {
     const { composer, api, pushed } = setup()

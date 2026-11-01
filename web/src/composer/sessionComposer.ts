@@ -48,6 +48,7 @@ export class SessionComposer {
   readonly draft: Draft = reactive(emptyDraft())
   readonly interruptArmed = ref(false) // Esc was pressed once; a second one within INTERRUPT_ARMED_MS aborts
   readonly removingQueued = reactive(new Set<string>()) // message ids being taken back
+  readonly focusRequests = ref(0) // counts the times the box was asked to take the focus
 
   private readonly host: ComposerHost
   private readonly completionController: CompletionController
@@ -76,6 +77,10 @@ export class SessionComposer {
   // Where the caret is (or should be after the composer changed the text).
   get caret(): number {
     return this.cursor
+  }
+
+  requestFocus(): void {
+    this.focusRequests.value++
   }
 
   dispose(): void {

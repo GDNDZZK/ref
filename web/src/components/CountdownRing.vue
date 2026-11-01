@@ -8,6 +8,7 @@ const props = defineProps<{ fraction: number }>()
 
 const SIZE = 16
 const STROKE = 2
+const CENTER = SIZE / 2
 const RADIUS = (SIZE - STROKE) / 2
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS
 
@@ -16,15 +17,15 @@ const dash = computed(() => `${clamp(props.fraction, 0, 1) * CIRCUMFERENCE} ${CI
 
 <template>
   <svg class="ring" :width="SIZE" :height="SIZE" :viewBox="`0 0 ${SIZE} ${SIZE}`" aria-hidden="true">
-    <circle class="track" :cx="SIZE / 2" :cy="SIZE / 2" :r="RADIUS" :stroke-width="STROKE" />
+    <circle class="track" :cx="CENTER" :cy="CENTER" :r="RADIUS" :stroke-width="STROKE" />
     <circle
       class="arc"
-      :cx="SIZE / 2"
-      :cy="SIZE / 2"
+      :cx="CENTER"
+      :cy="CENTER"
       :r="RADIUS"
       :stroke-width="STROKE"
       :stroke-dasharray="dash"
-      :transform="`rotate(-90 ${SIZE / 2} ${SIZE / 2})`"
+      :transform="`rotate(-90 ${CENTER} ${CENTER})`"
     />
   </svg>
 </template>
