@@ -3,11 +3,9 @@ import QtQuick
 import RefGui
 
 // Picks the model of one session, grouped by provider.
-ModalDialog {
+SessionDialog {
 	id: dialog
 
-	readonly property string sessionId: Workspace.dialogArgs.sessionId ?? Workspace.currentId
-	readonly property var session: Workspace.info(sessionId)
 	readonly property string needle: list.text.trim().toLowerCase()
 
 	function details(model) {

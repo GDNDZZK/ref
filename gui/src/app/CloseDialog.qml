@@ -2,10 +2,8 @@ import QtQuick
 import RefGui
 
 // Asks before closing a session that is still working.
-ModalDialog {
+SessionDialog {
 	id: dialog
-
-	readonly property string sessionId: Workspace.dialogArgs.sessionId ?? Workspace.currentId
 
 	function closeSession() {
 		Workspace.closeSession(sessionId)

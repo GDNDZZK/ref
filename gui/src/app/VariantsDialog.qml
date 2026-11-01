@@ -3,11 +3,9 @@ import QtQuick
 import RefGui
 
 // Picks the variant (reasoning effort) of the session's model.
-ModalDialog {
+SessionDialog {
 	id: dialog
 
-	readonly property string sessionId: Workspace.dialogArgs.sessionId ?? Workspace.currentId
-	readonly property var session: Workspace.info(sessionId)
 	readonly property var variants: Workspace.config.variantsOf(session.provider, session.modelId)
 
 	title: qsTr("Model variant")

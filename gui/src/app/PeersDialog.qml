@@ -3,10 +3,9 @@ import RefGui
 
 // What the backend says about the other live sessions: peers, this session's name, and the
 // messages received and sent.
-ModalDialog {
+SessionDialog {
 	id: dialog
 
-	readonly property string sessionId: Workspace.dialogArgs.sessionId ?? Workspace.currentId
 	readonly property var commands: ({peers: "peers", name: "peers-name", inbox: "peers-inbox", outbox: "peers-outbox"})
 	property string tab: Workspace.dialogArgs.tab ?? "peers"
 	property string result: ""
