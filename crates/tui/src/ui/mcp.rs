@@ -12,6 +12,7 @@ use ref_proto::McpServerStatus;
 
 use super::text::{self, width};
 use super::{dialog, message, theme};
+use crate::util::mcp_status;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum McpState {
@@ -36,10 +37,10 @@ pub struct McpEntry {
 
 fn parse_state(s: &str) -> McpState {
     match s.trim().to_ascii_lowercase().as_str() {
-        "connected" => McpState::Connected,
-        "connecting" | "pending" => McpState::Connecting,
-        "failed" | "error" => McpState::Failed,
-        "disabled" => McpState::Disabled,
+        mcp_status::CONNECTED => McpState::Connected,
+        mcp_status::CONNECTING | "pending" => McpState::Connecting,
+        mcp_status::FAILED | "error" => McpState::Failed,
+        mcp_status::DISABLED => McpState::Disabled,
         o => McpState::Other(o.to_string()),
     }
 }
@@ -137,10 +138,10 @@ pub fn status_text(e: &McpEntry) -> (String, Color) {
             e.error
                 .as_deref()
                 .map(text::one_line)
-                .unwrap_or_else(|| "failed".into()),
+                .unwrap_or_else(|| mcp_status::FAILED.into()),
             theme::ERROR,
         ),
-        McpState::Disabled => ("disabled".into(), theme::DIM),
+        McpState::Disabled => (mcp_status::DISABLED.into(), theme::DIM),
         McpState::Other(s) => (s.clone(), theme::MUTED),
     }
 }
@@ -302,7 +303,7 @@ impl McpDialog {
                     format!("connected · {}", tools_label(e.n_tools)),
                     theme::SUCCESS,
                 ),
-                McpState::Failed => ("failed".to_string(), theme::ERROR),
+                McpState::Failed => (mcp_status::FAILED.to_string(), theme::ERROR),
                 _ => status_text(e),
             };
             let (line, _) = message::compose(left, vec![Span::styled(st, theme::fg(color))], iw);

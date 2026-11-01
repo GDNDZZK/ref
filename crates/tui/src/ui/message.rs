@@ -12,6 +12,7 @@ use ref_proto::TodoStatus;
 use super::text::{self, width};
 use super::todo::{parse_todos, todo_rows};
 use super::{Hit, Row, markdown, theme};
+use crate::util::ABORTED_ERROR;
 
 /// Max output lines shown in an expanded tool block before "show all".
 pub const OUTPUT_PREVIEW_LINES: usize = 200;
@@ -591,7 +592,7 @@ fn render_assistant(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
     let interrupted = m
         .error
         .as_deref()
-        .is_some_and(|e| e.eq_ignore_ascii_case("aborted"));
+        .is_some_and(|e| e.eq_ignore_ascii_case(ABORTED_ERROR));
     if let Some(err) = m.error.as_deref().filter(|_| !interrupted) {
         if !rows.is_empty() {
             rows.push(Row::blank());
