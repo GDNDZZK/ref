@@ -16,6 +16,15 @@ use tokio_util::sync::CancellationToken;
 
 const SESSION_HEADER: &str = "mcp-session-id";
 const VERSION_HEADER: &str = "mcp-protocol-version";
+/// Characters of an error response body that go into the error message.
+const ERROR_BODY_CHARS: usize = 500;
+/// Time allowed for the session DELETE when closing.
+const CLOSE_REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
+/// Reconnect delay of the GET stream: first value, cap, and the lifetime after which a
+/// stream counts as stable (the delay resets).
+const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
+const MAX_BACKOFF: Duration = Duration::from_secs(60);
+const STABLE_STREAM_AFTER: Duration = Duration::from_secs(60);
 /// Upper bound for a single buffered SSE event / JSON body.
 const MAX_EVENT: usize = 16 * 1024 * 1024;
 
@@ -213,7 +222,7 @@ async fn error_body(resp: reqwest::Response) -> String {
         tracing::debug!("error response body unreadable: {e}");
         String::new()
     });
-    let body: String = body.trim().chars().take(500).collect();
+    let body: String = body.trim().chars().take(ERROR_BODY_CHARS).collect();
     if body.is_empty() {
         format!("HTTP {status}")
     } else {
@@ -549,7 +558,7 @@ impl HttpTransport {
                 .delete(self.url.clone())
                 .headers(self.headers.clone())
                 .header(SESSION_HEADER, sid)
-                .timeout(Duration::from_secs(1));
+                .timeout(CLOSE_REQUEST_TIMEOUT);
             if let Err(e) = req.send().await {
                 tracing::debug!(server = %self.shared.name, "closing the MCP session failed: {e}");
             }
@@ -573,7 +582,7 @@ struct GetStream {
 
 impl GetStream {
     async fn run(self, shared: Arc<Shared>) {
-        let mut backoff = Duration::from_secs(1);
+        let mut backoff = INITIAL_BACKOFF;
         loop {
             let mut req = self
                 .client
@@ -610,10 +619,10 @@ impl GetStream {
             if let Err(e) = res {
                 tracing::debug!(server = %shared.name, "GET SSE stream error: {e:#}");
             }
-            if started.elapsed() > Duration::from_secs(60) {
-                backoff = Duration::from_secs(1);
+            if started.elapsed() > STABLE_STREAM_AFTER {
+                backoff = INITIAL_BACKOFF;
             } else {
-                backoff = (backoff * 2).min(Duration::from_secs(60));
+                backoff = (backoff * 2).min(MAX_BACKOFF);
             }
             tokio::time::sleep(backoff).await;
         }
