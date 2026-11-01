@@ -15,6 +15,7 @@
 #include <QUrl>
 
 #include <chrono>
+#include <functional>
 #include <optional>
 
 namespace refgui::composer
@@ -54,13 +55,6 @@ class ComposerModel : public QObject
 	Q_PROPERTY(bool variantAvailable READ variantAvailable NOTIFY labelsChanged)
 
 public:
-	// How long the typed `@` query rests before the files are asked for.
-	static constexpr std::chrono::milliseconds FileSearchDelay{80};
-	static constexpr int FileLimit = 50;
-	// A draft this long goes to the history when it is thrown away with Ctrl+C.
-	static constexpr qsizetype DiscardKeepLength = 20;
-	static constexpr int DefaultInterruptWindow = 1500;
-
 	// All of them outlive the model.
 	ComposerModel(client::Backend& backend, session::SessionController& controller, compose::PromptHistory& history, QObject* parent = nullptr);
 
@@ -157,6 +151,14 @@ signals:
 	void toastRequested(const QString& level, const QString& text);
 
 private:
+	// How long the typed `@` query rests before the files are asked for.
+	static constexpr std::chrono::milliseconds FileSearchDelay{80};
+	static constexpr int FileLimit = 50;
+	// A draft this long goes to the history when it is thrown away with Ctrl+C.
+	static constexpr qsizetype DiscardKeepLength = 20;
+	static constexpr int DefaultInterruptWindow = 1500;
+
+	bool isCompletionOpen() const;
 	void updateCompletion();
 	// The draft was changed from here: the text area must show it.
 	void changeDraft();
@@ -168,6 +170,10 @@ private:
 	int attachImageUrls(const QList<QUrl>& urls, bool reportOthers);
 	void attachImage(proto::NamedImage image);
 	void disarmInterrupt();
+	// Awaits a request and emits failed() when it fails, after `onFailure`. False when the request
+	// failed or the model was deleted meanwhile.
+	template<typename T>
+	QCoro::Task<bool> awaitAndReport(QCoro::Task<client::Result<T>> request, std::function<void()> onFailure = {});
 	QCoro::Task<> loadConfig();
 	// With `restoreOnFailure` a prompt that was not accepted goes back into the draft.
 	QCoro::Task<> sendPrompt(QString text, QList<proto::NamedImage> images, bool restoreOnFailure);
