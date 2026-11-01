@@ -322,28 +322,33 @@ fn message_status(hub: &Arc<Hub>, input: &Value) -> Result<String, String> {
     let Some(rec) = rec else {
         return Err(format!("Error: unknown message id \"{id}\"."));
     };
+    let name = hub
+        .session(&rec.to_id)
+        .map_or_else(|| rec.to_name.clone(), |t| t.lock().info.name.clone());
+    let status = delivery_status(hub, &rec, id);
+    Ok(format!("Message {id} to \"{name}\": {status}."))
+}
+
+/// Where a sent message is now, as a phrase (without the final period).
+fn delivery_status(hub: &Arc<Hub>, rec: &PeerRecord, id: &str) -> String {
     let Some(t) = hub.session(&rec.to_id) else {
-        return Ok(format!(
-            "Message {id} to \"{}\": the target session is closed.",
-            rec.to_name
-        ));
+        return "the target session is closed".into();
     };
     let st = t.lock();
-    let status = if st.queue.iter().any(|m| m.id == id) {
-        "queued".to_string()
-    } else if let Some(i) = st.find_message(id) {
-        let responded = st.messages[i + 1..]
-            .iter()
-            .any(|m| m.role == Role::Assistant && m.time_end.is_some());
-        if responded {
-            "read (the recipient has responded since)".into()
-        } else {
-            "delivered (in context)".into()
-        }
-    } else {
-        "delivered (no longer in the recipient's context: compacted or undone)".into()
+    if st.queue.iter().any(|m| m.id == id) {
+        return "queued".into();
+    }
+    let Some(i) = st.find_message(id) else {
+        return "delivered (no longer in the recipient's context: compacted or undone)".into();
     };
-    Ok(format!("Message {id} to \"{}\": {status}.", st.info.name))
+    let responded = st.messages[i + 1..]
+        .iter()
+        .any(|m| m.role == Role::Assistant && m.time_end.is_some());
+    if responded {
+        "read (the recipient has responded since)".into()
+    } else {
+        "delivered (in context)".into()
+    }
 }
 
 fn role_label(m: &Message) -> String {
@@ -776,13 +781,7 @@ fn cmd_outbox(hub: &Arc<Hub>, s: &Arc<Session>) -> String {
         }
     );
     for (id, r) in sent.iter().skip(n.saturating_sub(LIST_LAST)) {
-        let status = message_status(hub, &json!({ "message_id": id }))
-            .ok()
-            .and_then(|t| {
-                t.rsplit_once(": ")
-                    .map(|(_, st)| st.trim_end_matches('.').to_string())
-            })
-            .unwrap_or_else(|| "unknown".into());
+        let status = delivery_status(hub, r, id);
         out.push_str(&format!(
             "  {} · to \"{}\" · {} · {}\n",
             crate::util::fmt_time(r.time),
