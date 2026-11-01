@@ -1,12 +1,15 @@
 import QtQuick
 import RefGui
 
-// What the session is doing, how long this has gone on, and how full its context window is.
+// What the session is doing, how long this has gone on, how far its to-do list is, and how full its context window is.
 // Always there, empty when idle, so that the conversation above does not shift.
 Item {
 	id: line
 
 	required property ChatSession session
+
+	// The to-do popup was closed by Esc: the keyboard goes back to the pane.
+	signal todoDismissed()
 
 	readonly property int lineHeight: 28
 	readonly property int itemSpacing: 8
@@ -105,6 +108,12 @@ Item {
 			text: "\u00b7 " + Format.elapsed(line.busyMs)
 			color: Theme.textMuted
 			font.pixelSize: Theme.smallFontSize
+		}
+		TodoProgress {
+			anchors.verticalCenter: parent.verticalCenter
+			session: line.session
+			maxWidth: line.width / 2
+			onDismissed: line.todoDismissed()
 		}
 	}
 

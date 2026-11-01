@@ -69,6 +69,11 @@ target_link_libraries(tst_question_prompt PRIVATE refgui_session Qt6::Test)
 refgui_configure_target(tst_question_prompt)
 add_test(NAME tst_question_prompt COMMAND tst_question_prompt)
 
+qt_add_executable(tst_todo_progress tst_todo_progress.cpp)
+target_link_libraries(tst_todo_progress PRIVATE refgui_proto Qt6::Test)
+refgui_configure_target(tst_todo_progress)
+add_test(NAME tst_todo_progress COMMAND tst_todo_progress)
+
 qt_add_executable(tst_command_line tst_command_line.cpp)
 target_link_libraries(tst_command_line PRIVATE refgui_cli Qt6::Test)
 refgui_configure_target(tst_command_line)

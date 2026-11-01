@@ -75,6 +75,7 @@ private slots:
 	void movesInsteadOfRecreating();
 	void filtersIgnoringCase();
 	void derivesRoles();
+	void todoBadgeLeavesCancelledItemsOut();
 	void waitingForAnAnswerNeedsTheUserLikeWaitingForPermission();
 	void historyRowsAreLabelledByTitle();
 	void marksCurrentAndTiles();
@@ -176,6 +177,25 @@ void TstSessionList::waitingForAnAnswerNeedsTheUserLikeWaitingForPermission()
 	const QModelIndex row = model.index(0);
 	QCOMPARE(row.data(SessionListModel::StateRole).toString(), u"waiting_question"_s);
 	QVERIFY(row.data(SessionListModel::HasPermissionRole).toBool());
+}
+
+void TstSessionList::todoBadgeLeavesCancelledItemsOut()
+{
+	SessionListModel model;
+	proto::SessionInfo info = session(u"a"_s, 1);
+	info.todos = {{u"x"_s, proto::TodoStatus::Completed}, {u"y"_s, proto::TodoStatus::Cancelled}, {u"z"_s, proto::TodoStatus::Pending}};
+	model.setSessions({info});
+
+	QCOMPARE(model.index(0).data(SessionListModel::TodoDoneRole).toInt(), 1);
+	QCOMPARE(model.index(0).data(SessionListModel::TodoTotalRole).toInt(), 2);
+	QVERIFY(!model.index(0).data(SessionListModel::TodoAllDoneRole).toBool());
+
+	info.todos[2].status = proto::TodoStatus::Cancelled;
+	model.setSessions({info});
+
+	QCOMPARE(model.index(0).data(SessionListModel::TodoDoneRole).toInt(), 1);
+	QCOMPARE(model.index(0).data(SessionListModel::TodoTotalRole).toInt(), 1);
+	QVERIFY(model.index(0).data(SessionListModel::TodoAllDoneRole).toBool());
 }
 
 void TstSessionList::derivesRoles()

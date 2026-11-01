@@ -5,6 +5,7 @@
 #include "app/question_prompt_type.h"
 #include "client/backend.h"
 #include "composer/composer_model.h"
+#include "proto/todo_progress.h"
 #include "session/question_prompt.h"
 #include "session/session_controller.h"
 
@@ -14,6 +15,7 @@
 #include <QSet>
 #include <QStringList>
 #include <QTimer>
+#include <QVariantList>
 #include <QtQmlIntegration>
 
 #include <chrono>
@@ -44,6 +46,13 @@ class ChatSession : public QObject
 	Q_PROPERTY(qint64 contextMax READ contextMax NOTIFY infoChanged)
 	Q_PROPERTY(qint64 contextRecommend READ contextRecommend NOTIFY infoChanged)
 	Q_PROPERTY(qint64 contextAuto READ contextAuto NOTIFY infoChanged)
+	// The to-do list (SessionInfo.todos) as the status line shows it: done and total (cancelled items are in neither),
+	// the item worked on, and all items as {content, status} with the status names of the todo tool.
+	Q_PROPERTY(int todoDone READ todoDone NOTIFY infoChanged)
+	Q_PROPERTY(int todoTotal READ todoTotal NOTIFY infoChanged)
+	Q_PROPERTY(QString todoCurrent READ todoCurrent NOTIFY infoChanged) // empty when nothing is left to do
+	Q_PROPERTY(QString todoCurrentStatus READ todoCurrentStatus NOTIFY infoChanged) // in_progress or pending
+	Q_PROPERTY(QVariantList todoItems READ todoItems NOTIFY infoChanged)
 	Q_PROPERTY(bool moreBefore READ hasMoreBefore NOTIFY moreBeforeChanged)
 	Q_PROPERTY(bool loadingOlder READ isLoadingOlder NOTIFY loadingOlderChanged)
 	Q_PROPERTY(QString olderError READ olderError NOTIFY olderErrorChanged) // why the last page did not load
@@ -97,6 +106,11 @@ public:
 	qint64 contextMax() const;
 	qint64 contextRecommend() const;
 	qint64 contextAuto() const;
+	int todoDone() const { return todoProgress().done; }
+	int todoTotal() const { return todoProgress().total; }
+	QString todoCurrent() const;
+	QString todoCurrentStatus() const;
+	QVariantList todoItems() const;
 	bool hasMoreBefore() const { return m_controller.hasMoreBefore(); }
 	bool isLoadingOlder() const { return m_controller.isLoadingOlder(); }
 	const QString& olderError() const { return m_olderError; }
@@ -161,6 +175,7 @@ private:
 	QCoro::Task<> fetchOlder();
 	QCoro::Task<> sendUndo(std::optional<QString> messageId);
 	QCoro::Task<> sendPermission(QString callId, bool allow, bool always);
+	refgui::proto::TodoProgress todoProgress() const;
 	void setFailure(const QString& text);
 	QCoro::Task<> sendQuestionReply(QString callId, std::optional<QList<QStringList>> answers);
 	// Answers the oldest request by the keys. Does nothing unless answerKeysActive and no question is asked.
