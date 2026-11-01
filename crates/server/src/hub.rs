@@ -36,7 +36,7 @@ pub struct HubOptions {
     /// -1 never, 0 immediately, N seconds after the last frontend leaves.
     pub idle_timeout: i64,
     /// Mock mode: every working directory a client asks for is replaced by this one.
-    pub sandbox_cwd: Option<PathBuf>,
+    pub(crate) sandbox_cwd: Option<PathBuf>,
 }
 
 impl HubOptions {
@@ -110,7 +110,7 @@ impl OutQueue {
     }
 
     /// True if every queued frame is a delta (worth waiting a bit to coalesce more).
-    pub fn only_deltas(&self) -> bool {
+    pub(crate) fn only_deltas(&self) -> bool {
         let q = lock(&self.inner);
         !q.is_empty()
             && q.iter().all(|f| {
@@ -130,7 +130,7 @@ pub struct ConnState {
     pub hello: bool,
     /// Counts for the idle timeout (false for `ref-server --status/--stop` control clients).
     pub frontend: bool,
-    pub authed: bool,
+    pub(crate) authed: bool,
     pub cwd: String,
     pub fg: HashSet<String>,
     pub watch: HashSet<String>,
@@ -143,7 +143,7 @@ pub struct ConnState {
     pub shown: HashSet<String>,
     /// When the window last came to the front, as a hub stamp (see `Hub::next_stamp`); the
     /// connection time until the first `SetFocus`.
-    pub focus_stamp: u64,
+    pub(crate) focus_stamp: u64,
 }
 
 pub struct Conn {
@@ -164,10 +164,10 @@ impl Conn {
 
 /// Bookkeeping for `message_status`.
 #[derive(Debug, Clone)]
-pub struct PeerRecord {
+pub(crate) struct PeerRecord {
     pub from_id: String,
-    pub to_id: String,
-    pub to_name: String,
+    pub(crate) to_id: String,
+    pub(crate) to_name: String,
     /// Epoch ms when sent.
     pub time: i64,
     /// First line of the message (for /peers-outbox).
@@ -213,8 +213,8 @@ pub struct Hub {
     pub shutdown: CancellationToken,
     dirty: Arc<Notify>,
     idle: Mutex<IdleState>,
-    pub peer_msgs: Mutex<HashMap<String, PeerRecord>>,
-    pub files_cache: Mutex<HashMap<String, FileList>>,
+    pub(crate) peer_msgs: Mutex<HashMap<String, PeerRecord>>,
+    pub(crate) files_cache: Mutex<HashMap<String, FileList>>,
     pub instance: Mutex<Option<InstanceInfo>>,
 }
 
@@ -248,11 +248,11 @@ impl Hub {
         }
     }
 
-    pub fn load_config(&self, cwd: &Path) -> Config {
+    pub(crate) fn load_config(&self, cwd: &Path) -> Config {
         (self.opts.config_loader)(cwd)
     }
 
-    pub fn next_run_id(&self) -> u64 {
+    pub(crate) fn next_run_id(&self) -> u64 {
         self.next_run.fetch_add(1, Ordering::Relaxed)
     }
 
@@ -271,7 +271,7 @@ impl Hub {
         lock(&self.sessions).values().cloned().collect()
     }
 
-    pub fn insert_session(&self, s: Arc<Session>) {
+    pub(crate) fn insert_session(&self, s: Arc<Session>) {
         lock(&self.sessions).insert(s.id.clone(), s);
         self.mark_dirty();
     }
@@ -294,7 +294,7 @@ impl Hub {
     }
 
     /// Whether a live session (other than `except`) has this exact name.
-    pub fn name_taken(&self, name: &str, except: Option<&str>) -> bool {
+    pub(crate) fn name_taken(&self, name: &str, except: Option<&str>) -> bool {
         self.sessions()
             .iter()
             .any(|s| Some(s.id.as_str()) != except && s.lock().info.name == name)
@@ -350,7 +350,7 @@ impl Hub {
     }
 
     /// Emit an `Info` event and schedule a session-list broadcast.
-    pub fn emit_info(&self, st: &SessionState) {
+    pub(crate) fn emit_info(&self, st: &SessionState) {
         self.emit(
             &st.info.id,
             SessionEvent::Info {
@@ -385,7 +385,7 @@ impl Hub {
 
     // ----- connections -----
 
-    pub fn conns(&self) -> Vec<Arc<Conn>> {
+    pub(crate) fn conns(&self) -> Vec<Arc<Conn>> {
         lock(&self.conns).values().cloned().collect()
     }
 
