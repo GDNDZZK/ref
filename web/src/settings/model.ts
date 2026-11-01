@@ -21,8 +21,8 @@ export interface Settings {
 
 export const STORAGE_KEY = 'ref.settings'
 
-export const THEME_CHOICES: readonly ThemeChoice[] = ['system', 'light', 'dark']
-export const LANGUAGE_CHOICES: readonly LanguageChoice[] = ['system', 'en', 'zh-CN']
+const THEME_CHOICES: readonly ThemeChoice[] = ['system', 'light', 'dark']
+const LANGUAGE_CHOICES: readonly LanguageChoice[] = ['system', 'en', 'zh-CN']
 
 export function defaultSettings(): Settings {
   return {

@@ -352,7 +352,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   function onSessionEvent(frame: Extract<EventFrame, { kind: 'event' }>): void {
     const { session_id: id, event } = frame
     const session = chats.get(id)
-    if (event.type === 'error' && (mode.value === 'split' || id !== currentId.value)) {
+    const isInBackground = mode.value === 'split' || id !== currentId.value
+    if (event.type === 'error' && isInBackground) {
       notices.push('error', errorToast(session?.info?.name ?? id, event.text))
     }
     session?.applyEvent(event)

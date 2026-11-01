@@ -98,10 +98,10 @@ export const useCommandsStore = defineStore('commands', () => {
   // The enabled command bound to the key press, if any.
   function matchKey(event: KeyboardEvent): Command | undefined {
     const sessionTarget = target('')
-    return commands.value.find(
-      (command) =>
-        command.shortcut && matchesShortcut(command.shortcut, event) && isEnabled(command, sessionTarget),
-    )
+    return commands.value.find((command) => {
+      if (!command.shortcut) return false
+      return matchesShortcut(command.shortcut, event) && isEnabled(command, sessionTarget)
+    })
   }
 
   return { commands, register, replaceCustom, find, run, runSlash, slashEntries, available, listed, matchKey }

@@ -83,5 +83,5 @@ export const useComposerStore = defineStore('composer', () => {
 
   workspace.onGone(forget)
 
-  return { of, forget, slashCommands }
+  return { of, slashCommands }
 })
