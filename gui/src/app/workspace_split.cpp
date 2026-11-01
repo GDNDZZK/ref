@@ -142,9 +142,7 @@ void Workspace::syncTiles()
 		const bool shouldDetachFromTiles = other->isAttached() && !tiles.contains(other) && other != m_current && !m_leaving.contains(other->sessionId());
 		if(shouldDetachFromTiles)
 		{
-			[](QCoro::Task<Result<void>> detaching, QString id) -> QCoro::Task<> {
-				logDropped(co_await std::move(detaching), "detach"_L1, id);
-			}(other->detach(), other->sessionId());
+			detachUnwaited(other);
 		}
 	}
 	if(!m_focusedTile.isEmpty() && m_tiles.indexOf(m_focusedTile) < 0)

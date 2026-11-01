@@ -1,5 +1,6 @@
 #include "app/workspace.h"
 
+#include "client/result.h"
 #include "workspace/toast_text.h"
 
 #include <QJSEngine>
@@ -206,6 +207,12 @@ void Workspace::toast(const QString& level, const QString& text)
 void Workspace::toastCommandUnavailable()
 {
 	toast(refgui::workspace::ToastLevel::Info, tr("That command is not available now."));
+}
+
+QCoro::Task<> Workspace::detachUnwaited(ChatSession* session)
+{
+	const QString id = session->sessionId();
+	logDropped(co_await session->detach(), "detach"_L1, id);
 }
 
 void Workspace::logDropped(const Result<void>& result, QLatin1StringView action, const QString& sessionId)

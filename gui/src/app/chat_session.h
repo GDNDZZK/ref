@@ -4,6 +4,7 @@
 #include "app/composer_model_type.h"
 #include "app/question_prompt_type.h"
 #include "client/backend.h"
+#include "client/result.h"
 #include "composer/composer_model.h"
 #include "proto/todo_progress.h"
 #include "session/question_prompt.h"

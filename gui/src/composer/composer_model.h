@@ -1,5 +1,6 @@
 #pragma once
 
+#include "client/result.h"
 #include "compose/completion_target.h"
 #include "compose/prompt_draft.h"
 #include "compose/prompt_history.h"

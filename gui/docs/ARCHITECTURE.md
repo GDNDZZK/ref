@@ -182,7 +182,7 @@ Delta 指向还没见过的 part 时，按 TUI 的 `apply_delta` 规则补建（
 
 ### ChatSession 与 SystemFonts
 
-- `ChatSession` 是 QML 唯一能直接访问的业务对象，它持有 `SessionController` 和 `ComposerModel`；`Backend` 在 `Workspace` 的 `Connection` 里（`Workspace` 析构时先关闭连接，让挂起的请求先失败，再销毁它们依赖的会话）。`main()` 解析命令行后创建它，通过 `setInitialProperties` 交给 `Main.qml` 的 `required property ChatSession session`。QML 不能自己创建 ChatSession（`QML_UNCREATABLE`）。
+- `ChatSession` 是一个会话给 QML 的门面，它持有 `SessionController` 和 `ComposerModel`；`Backend` 在 `Workspace` 的 `Connection` 里（`Workspace` 析构时先关闭连接，让挂起的请求先失败，再销毁它们依赖的会话）。`main()` 解析命令行后创建 `Workspace`，它在 QML 里是单例 `Workspace`（`QML_SINGLETON`）。`Workspace` 为每个打开的会话创建一个 `ChatSession`，QML 通过 `Workspace.current`、`Workspace.session(id)` 和分屏的 tile 拿到它；QML 不能自己创建 ChatSession（`QML_UNCREATABLE`）。
 - 后端一连上就按命令行打开会话（新建、继续上一个或按 id 附着）；连接状态和失败信息通过 `statusText` 显示在窗口顶部的状态条里，`ready`（已连接且有会话）为假时输入框不能发送。
 - `SystemFonts` 只做一件事：把系统等宽字体告诉 QML。`"monospace"` 这种字体名只是 fontconfig 的别名，在 Windows 和 macOS 上无效，所以要用 `QFontDatabase::systemFont(FixedFont)` 去取。
 

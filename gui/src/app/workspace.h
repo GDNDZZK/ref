@@ -4,6 +4,7 @@
 #include "app/tile_model.h"
 #include "app/tile_stage.h"
 #include "cli/launch_options.h"
+#include "client/result.h"
 #include "workspace/backend_config.h"
 #include "workspace/command_registry.h"
 #include "workspace/connection.h"
@@ -245,6 +246,8 @@ private:
 	// Logs a failed detach or background of `sessionId`. The local state counts it as done
 	// anyway, and with the connection gone the failure is expected, so that is not logged.
 	static void logDropped(const refgui::client::Result<void>& result, QLatin1StringView action, const QString& sessionId);
+	// Detaches `session` with nobody waiting for the answer; a failure is logged.
+	static QCoro::Task<> detachUnwaited(ChatSession* session);
 	template<typename T, typename OnOk>
 	QCoro::Task<> perform(QCoro::Task<refgui::client::Result<T>> request, Reply reply, OnOk onOk);
 	void exportTo(const QString& sessionId, const QString& path, Reply reply);

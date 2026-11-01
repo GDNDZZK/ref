@@ -1,5 +1,6 @@
 #include "composer/composer_model.h"
 
+#include "client/result.h"
 #include "compose/image_file.h"
 #include "workspace/toast_text.h"
 

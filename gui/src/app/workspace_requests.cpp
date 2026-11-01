@@ -1,6 +1,8 @@
 // The requests of Workspace that manage a session: rename, model, agent, export and so on.
 #include "app/workspace.h"
 
+#include "client/result.h"
+
 #include <QJSEngine>
 
 #include <type_traits>
