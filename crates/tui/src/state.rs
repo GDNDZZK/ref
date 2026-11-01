@@ -10,9 +10,14 @@ use ref_proto::{
 
 use crate::ui::chat::ChatState;
 
+/// How many recent messages are compared with queued prompt text.
+const QUEUED_MATCH_WINDOW: usize = 20;
+/// The JSON key whose value `partial_purpose` extracts.
+const PURPOSE_KEY: &str = "\"purpose\"";
+
 static VERSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
-pub fn next_version() -> u64 {
+fn next_version() -> u64 {
     VERSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
@@ -334,7 +339,7 @@ impl SessionView {
             .messages
             .iter()
             .rev()
-            .take(20)
+            .take(QUEUED_MATCH_WINDOW)
             .filter(|m| m.role == Role::User && m.source == MessageSource::Human)
             .map(|m| m.raw_text().trim().to_string())
             .collect();
@@ -478,9 +483,9 @@ pub fn apply_delta(parts: &mut Vec<Part>, index: usize, delta: Delta) {
 }
 
 /// Extracts a (possibly partial) `"purpose": "..."` value from streaming tool JSON.
-pub fn partial_purpose(raw: &str) -> Option<String> {
-    let k = raw.find("\"purpose\"")?;
-    let rest = raw[k + 9..]
+fn partial_purpose(raw: &str) -> Option<String> {
+    let k = raw.find(PURPOSE_KEY)?;
+    let rest = raw[k + PURPOSE_KEY.len()..]
         .trim_start()
         .strip_prefix(':')?
         .trim_start()
