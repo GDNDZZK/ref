@@ -306,6 +306,11 @@ onMounted(() => {
 })
 onBeforeUnmount(() => resizeObserver.disconnect())
 
+watch(
+  () => props.composer.focusRequests.value,
+  () => input.value?.focus(),
+)
+
 defineExpose({ focus: () => input.value?.focus() })
 </script>
 
