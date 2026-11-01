@@ -9,6 +9,7 @@ export const motion = {
   slow: 480,
   pulse: 1100,
   calmPulse: 1800,
+  copiedFeedbackMs: 1500,
   dialogDrop: 16,
   popScale: 0.97,
   pressedScaleButton: 0.94,

@@ -38,7 +38,6 @@ Block {
 	readonly property string agentTitle: agent === "" ? "" : agent.charAt(0).toUpperCase() + agent.slice(1)
 
 	property real now: Date.now()
-	property bool copied: false
 
 	Timer {
 		interval: Format.msPerSecond
@@ -46,11 +45,7 @@ Block {
 		repeat: true
 		onTriggered: block.now = Date.now()
 	}
-	Timer {
-		id: copiedTimer
-		interval: Motion.slow * 3
-		onTriggered: block.copied = false
-	}
+	CopiedFlag { id: copiedFlag }
 
 	Item {
 		id: row
@@ -143,12 +138,11 @@ Block {
 				onTriggered: block.chat.undoRequested(block.messageId)
 			}
 			MetaAction {
-				iconName: block.copied ? "check" : "copy"
+				iconName: copiedFlag.copied ? "check" : "copy"
 				label: qsTr("Copy")
 				onTriggered: {
 					block.chat.copyRequested(block.messageId)
-					block.copied = true
-					copiedTimer.restart()
+					copiedFlag.flash()
 				}
 			}
 		}

@@ -50,6 +50,7 @@ qt_add_qml_module(ref-gui
 		ScrollHandle.qml
 		IconButton.qml
 		TruncatedChip.qml
+		CopiedFlag.qml
 		SessionPane.qml
 		QuestionCard.qml
 		QuestionRow.qml

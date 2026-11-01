@@ -12,6 +12,7 @@ QtObject {
 	readonly property int slow: 480     // theme crossfade, turn divider, releasing held space
 	readonly property int pulse: 1100   // period of the looping "working" pulse
 	readonly property int calmPulse: 1800 // slower pulse for text, where a fast blink is distracting to read
+	readonly property int copiedFeedbackMs: 1500 // how long a copy button shows that it copied
 
 	readonly property int ease: Easing.OutExpo
 	readonly property int emphasisEase: Easing.OutBack
