@@ -3,7 +3,6 @@
 import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { usePickSelection } from '../../composables/usePickSelection.ts'
-import { useConnectionStore } from '../../stores/connection.ts'
 import { useDialogsStore } from '../../stores/dialogs.ts'
 import { useWorkspaceStore } from '../../stores/workspace.ts'
 import DialogButton from '../DialogButton.vue'
@@ -20,7 +19,6 @@ const LOOKUP_DELAY_MS = 120
 
 const props = defineProps<{ mode: 'cd' | 'newSession'; sessionId?: string }>()
 const { t } = useI18n()
-const connection = useConnectionStore()
 const dialogs = useDialogsStore()
 const workspace = useWorkspaceStore()
 
@@ -56,11 +54,14 @@ watch(
   () => split.value.folder,
   (folder) => {
     clearTimeout(lookup)
-    if (folder === '') return void (dirs.value = [])
+    if (folder === '') {
+      dirs.value = []
+      return
+    }
     lookup = setTimeout(async () => {
       const mine = ++lookedUp
       try {
-        const result = await connection.getApi().listDirs(folder)
+        const result = await workspace.listDirs(folder)
         if (mine === lookedUp) dirs.value = result.dirs
       } catch {
         if (mine === lookedUp) dirs.value = [] // a folder that does not exist (yet) has no completions
