@@ -54,15 +54,16 @@ DBusNotifier::DBusNotifier(QDBusConnection connection, QObject* parent)
 	, m_connection(std::move(connection))
 	, m_watcher(Service, m_connection, QDBusServiceWatcher::WatchForOwnerChange)
 {
-	// Without these a click on a notification does nothing, but it is still shown.
-	if(!m_connection.connect(Service, Path, Interface, ActionInvokedSignal, this, SLOT(onActionInvoked(uint,QString))))
-	{
-		qCWarning(lcNotify) << "cannot subscribe to" << ActionInvokedSignal << m_connection.lastError().message();
-	}
-	if(!m_connection.connect(Service, Path, Interface, NotificationClosedSignal, this, SLOT(onNotificationClosed(uint,uint))))
-	{
-		qCWarning(lcNotify) << "cannot subscribe to" << NotificationClosedSignal << m_connection.lastError().message();
-	}
+	// Without these a click on a notification does nothing, but it is still shown. Without a bus at
+	// all nothing is shown, which the probe below reports.
+	const auto subscribe = [this](const QString& signal, const char* slot) {
+		if(!m_connection.connect(Service, Path, Interface, signal, this, slot) && m_connection.isConnected())
+		{
+			qCWarning(lcNotify) << "cannot subscribe to" << signal << m_connection.lastError().message();
+		}
+	};
+	subscribe(ActionInvokedSignal, SLOT(onActionInvoked(uint,QString)));
+	subscribe(NotificationClosedSignal, SLOT(onNotificationClosed(uint,uint)));
 	connect(&m_watcher, &QDBusServiceWatcher::serviceOwnerChanged, this, &DBusNotifier::onServiceOwnerChanged);
 	m_reason = tr("Looking for the desktop notification service…");
 	probe();
