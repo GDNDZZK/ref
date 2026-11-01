@@ -2,7 +2,7 @@
 qt_add_executable(ref-gui main.cpp)
 
 # Must be set before qt_add_qml_module() reads the files.
-set_source_files_properties(Theme.qml Motion.qml Format.qml Links.qml CompletionKind.qml DialogId.qml ThemeName.qml CommandId.qml McpStatus.qml Activity.qml ToastLevel.qml TodoStatus.qml ToolState.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set_source_files_properties(Theme.qml Motion.qml Format.qml Links.qml CompletionKind.qml DialogId.qml ThemeName.qml CommandId.qml McpStatus.qml Activity.qml ToastLevel.qml TodoStatus.qml ToolState.qml MessageSource.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 qt_add_qml_module(ref-gui
 	URI RefGui
@@ -41,6 +41,7 @@ qt_add_qml_module(ref-gui
 		ToastLevel.qml
 		TodoStatus.qml
 		ToolState.qml
+		MessageSource.qml
 		SessionPane.qml
 		QuestionCard.qml
 		QuestionRow.qml
