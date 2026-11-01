@@ -8,6 +8,7 @@ import CircleButton from './components/CircleButton.vue'
 import ConnectionBanner from './components/ConnectionBanner.vue'
 import DialogHost from './components/DialogHost.vue'
 import Icon from './components/Icon.vue'
+import KeyEntry from './components/KeyEntry.vue'
 import NoticeList from './components/NoticeList.vue'
 import NotificationPrompt from './components/NotificationPrompt.vue'
 import SessionPane from './components/SessionPane.vue'
@@ -22,12 +23,14 @@ import { liveLabel } from './shell/sessionRow.ts'
 import { usePermissionKeys } from './composables/usePermissionKeys.ts'
 import { useShortcuts } from './composables/useShortcuts.ts'
 import { useCommandsStore } from './stores/commands.ts'
+import { useConnectionStore } from './stores/connection.ts'
 import { useDialogsStore } from './stores/dialogs.ts'
 import { useLayoutStore } from './stores/layout.ts'
 import { useNoticesStore } from './stores/notices.ts'
 import { useWorkspaceStore } from './stores/workspace.ts'
 
 const { t } = useI18n()
+const connection = useConnectionStore()
 const workspace = useWorkspaceStore()
 const commands = useCommandsStore()
 const dialogs = useDialogsStore()
@@ -69,7 +72,8 @@ function toggleSplit(): void {
 </script>
 
 <template>
-  <div class="app">
+  <KeyEntry v-if="connection.keyRequired" />
+  <div v-else class="app">
     <div class="shell" :inert="dialogs.current !== undefined">
       <Sidebar />
       <Transition name="fade">

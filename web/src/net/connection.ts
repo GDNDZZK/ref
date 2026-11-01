@@ -34,11 +34,11 @@ export class RefError extends Error {}
 export interface ConnectionOptions {
   connect: TransportFactory
   client: string // shown to other clients, e.g. "ref-web"
-  cwd: string
+  cwd?: string // default: the one ref-web reports when the transport opens
   token?: string
   notifyKinds?: () => NotifyKind[] // asked at each handshake, so a reconnect carries the current choice
   retryDelaysMs?: number[] // waits between reconnect attempts; the last one repeats
-  // Asked after each lost connection; true stops the retrying for good (e.g. the login expired).
+  // Asked after each lost connection; true stops the retrying for good (e.g. the key was refused).
   // A rejection is reported as a connection error and the retrying goes on.
   giveUp?: () => Promise<boolean>
 }
@@ -134,8 +134,10 @@ export class RefConnection {
   }
 
   private async handshake(transport: Transport): Promise<void> {
-    const { client, cwd, token, notifyKinds } = this.options
+    const { client, token, notifyKinds } = this.options
+    const cwd = this.options.cwd ?? transport.info?.cwd
     try {
+      if (cwd === undefined) throw new RefError('no working directory for the session')
       const result = await this.send(transport, {
         op: 'hello',
         client,

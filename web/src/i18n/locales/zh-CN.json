@@ -84,8 +84,16 @@
     "connecting": "正在连接…",
     "reconnecting": "连接已断开，正在重连…",
     "closed": "已断开：{reason}",
-    "notLoggedIn": "未登录。请再运行一次 ref-web，它会重新打开登录地址。",
     "noDirectory": "没有工作目录：请通过 ref-web 打开此页面，或在直连 ref-server 时设置 ?cwd=（或 VITE_REF_CWD）。"
+  },
+  "key": {
+    "title": "输入密钥",
+    "label": "密钥",
+    "signIn": "登录",
+    "checking": "正在检查密钥…",
+    "rejected": "密钥未被接受。",
+    "hint": "ref-web 启动时会在打印的地址里给出密钥。使用默认密钥时，它保存在 {file}。",
+    "sentInClear": "此地址以明文发送了密钥。请使用 ref-web 打印的地址（以 #key=… 结尾），或在密钥页面输入密钥。"
   },
   "message": {
     "from": "来自 {name}",
