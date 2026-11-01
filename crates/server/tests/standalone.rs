@@ -13,7 +13,7 @@ type Ws =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 const TOKEN: &str = "token";
-const KEEP_RUNNING: i64 = ref_server::hub::IDLE_NEVER;
+const KEEP_RUNNING: i64 = ref_proto::IDLE_NEVER;
 /// A prompt typed in one window must show up in the others within this time.
 const MIRROR_LIMIT: Duration = Duration::from_secs(1);
 const WAIT: Duration = Duration::from_secs(30);

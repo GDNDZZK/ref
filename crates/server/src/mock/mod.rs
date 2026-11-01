@@ -29,7 +29,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 /// The mock exits as soon as its last client leaves unless told otherwise.
-pub const DEFAULT_IDLE_TIMEOUT: i64 = 0;
+pub const DEFAULT_IDLE_TIMEOUT: i64 = ref_proto::IDLE_EXIT_NOW;
 /// The base delay of the retry backoff in production: waits of 2, 4, 8 and 16 seconds.
 const DEFAULT_RETRY_BASE: Duration = Duration::from_secs(2);
 const ROOT_PREFIX: &str = "ref-mock-";

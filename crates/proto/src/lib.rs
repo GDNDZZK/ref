@@ -68,6 +68,12 @@ pub fn now_ms() -> i64 {
 // Instance discovery
 // ---------------------------------------------------------------------------
 
+/// `InstanceInfo::idle_timeout` that makes the backend exit as soon as the last frontend leaves.
+pub const IDLE_EXIT_NOW: i64 = 0;
+
+/// `InstanceInfo::idle_timeout` that keeps the backend running after its last frontend leaves.
+pub const IDLE_NEVER: i64 = -1;
+
 /// Written by the server to `<state_dir>/instances/<pid>.json`.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct InstanceInfo {
@@ -77,7 +83,7 @@ pub struct InstanceInfo {
     pub bind: String,
     /// Hosts allowed to connect (IPs / hostnames, `*` = any).
     pub allow_hosts: Vec<String>,
-    /// Idle timeout in seconds; 0 = exit as soon as the last frontend leaves, -1 = never.
+    /// Idle timeout in seconds, or `IDLE_EXIT_NOW` / `IDLE_NEVER`.
     pub idle_timeout: i64,
     pub started_at: i64,
     pub version: String,

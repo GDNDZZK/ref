@@ -43,7 +43,8 @@ pub(crate) fn server_binary() -> PathBuf {
 pub(crate) fn spawn_server(port: u16) -> std::io::Result<()> {
     use std::process::{Command, Stdio};
     let mut cmd = Command::new(server_binary());
-    cmd.args(["--port", &port.to_string(), "--idle-timeout", "0"])
+    let idle = ref_proto::IDLE_EXIT_NOW.to_string();
+    cmd.args(["--port", &port.to_string(), "--idle-timeout", &idle])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());

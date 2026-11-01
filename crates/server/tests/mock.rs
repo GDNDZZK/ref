@@ -534,7 +534,7 @@ async fn the_mock_exits_with_its_last_client_unless_an_idle_timeout_says_otherwi
     join_and_leave(&default);
     wait_for_shutdown(&default).await;
 
-    let staying = ref_server::mock::start_with(0, "token".into(), ref_server::hub::IDLE_NEVER)
+    let staying = ref_server::mock::start_with(0, "token".into(), ref_proto::IDLE_NEVER)
         .await
         .unwrap();
     let late = ref_server::mock::start_with(0, "token".into(), LATE_TIMEOUT_SECS)
