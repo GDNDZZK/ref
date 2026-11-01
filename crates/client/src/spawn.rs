@@ -64,26 +64,37 @@ pub(crate) struct SpawnLock {
     _file: std::fs::File,
 }
 
+/// Why a [`SpawnLock`] could not be taken.
+#[derive(Debug)]
+pub(crate) enum SpawnLockError {
+    /// Another frontend held the lock for the whole wait.
+    Timeout,
+    /// The directory, the lock file or the lock itself failed.
+    Io(std::io::Error),
+}
+
 impl SpawnLock {
-    /// Acquires `<dir>/.spawn.lock`, polling until `timeout`. `None` on timeout / IO error
-    /// (callers then proceed unlocked rather than hanging).
-    pub(crate) async fn acquire(dir: &Path, timeout: Duration) -> Option<SpawnLock> {
-        std::fs::create_dir_all(dir).ok()?;
+    /// Acquires `<dir>/.spawn.lock`, polling until `timeout`.
+    pub(crate) async fn acquire(
+        dir: &Path,
+        timeout: Duration,
+    ) -> Result<SpawnLock, SpawnLockError> {
+        std::fs::create_dir_all(dir).map_err(SpawnLockError::Io)?;
         let file = std::fs::OpenOptions::new()
             .create(true)
             .truncate(false)
             .write(true)
             .open(dir.join(SPAWN_LOCK_FILE))
-            .ok()?;
+            .map_err(SpawnLockError::Io)?;
         let start = std::time::Instant::now();
         loop {
             match file.try_lock() {
-                Ok(()) => return Some(SpawnLock { _file: file }),
+                Ok(()) => return Ok(SpawnLock { _file: file }),
                 Err(std::fs::TryLockError::WouldBlock) => {}
-                Err(std::fs::TryLockError::Error(_)) => return None,
+                Err(std::fs::TryLockError::Error(e)) => return Err(SpawnLockError::Io(e)),
             }
             if start.elapsed() > timeout {
-                return None;
+                return Err(SpawnLockError::Timeout);
             }
             tokio::time::sleep(SPAWN_LOCK_POLL).await;
         }
@@ -117,18 +128,18 @@ mod tests {
     async fn spawn_lock_is_exclusive() {
         let dir = std::env::temp_dir().join(format!("ref-client-lock-{}", std::process::id()));
         let a = SpawnLock::acquire(&dir, Duration::from_millis(100)).await;
-        assert!(a.is_some());
+        assert!(a.is_ok());
         // The lock is per open file: a second open in the same process conflicts too.
         assert!(
             SpawnLock::acquire(&dir, Duration::from_millis(120))
                 .await
-                .is_none()
+                .is_err()
         );
         drop(a);
         assert!(
             SpawnLock::acquire(&dir, Duration::from_millis(100))
                 .await
-                .is_some()
+                .is_ok()
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

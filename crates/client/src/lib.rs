@@ -162,7 +162,16 @@ async fn discover(mut on_starting_backend: impl FnMut()) -> Result<(Ws, Endpoint
         return Ok(found);
     }
     // Only one frontend spawns; the others wait for the lock and then find its instance.
-    let _lock = spawn::SpawnLock::acquire(&dir, SPAWN_LOCK_TIMEOUT).await;
+    // Without the lock (timeout or IO error) we proceed unlocked rather than hang: the worst
+    // case is a second backend.
+    let _lock = match spawn::SpawnLock::acquire(&dir, SPAWN_LOCK_TIMEOUT).await {
+        Ok(lock) => Some(lock),
+        Err(spawn::SpawnLockError::Timeout) => None,
+        Err(spawn::SpawnLockError::Io(e)) => {
+            tracing::debug!("cannot take the spawn lock: {e}");
+            None
+        }
+    };
     if let Some(found) = connect_existing(&dir).await {
         return Ok(found);
     }
