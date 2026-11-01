@@ -5,9 +5,10 @@ use crate::error::stream_error;
 use crate::sse::{SseEvent, data_values, is_done};
 use crate::util::{
     Assembler, CLIENT_OPTION_KEYS, DEFAULT_OPENAI_BASE, IMAGE_OMITTED, StreamEnd, StreamState,
-    arguments_string, build_headers, data_url, deep_merge, drive, endpoint, error_fields,
-    has_tool_history, is_official_openai, merge_key, normalize_call_id, normalize_history,
-    prompt_cache_key, ptr_u64, same_origin, session_headers, snake_keys,
+    arguments_string, bearer_header, build_headers, data_url, deep_merge, drive, endpoint,
+    error_fields, has_tool_history, is_official_openai, json_sse_headers, merge_key,
+    normalize_call_id, normalize_history, prompt_cache_key, ptr_u64, same_origin, session_headers,
+    snake_keys,
 };
 use crate::{
     AssistantBlock, BlockKind, ChatMessage, LlmError, Model, Provider, Request, Response,
@@ -47,18 +48,8 @@ pub(crate) async fn stream(
 }
 
 fn request_headers(provider: &Provider, req: &Request) -> reqwest::header::HeaderMap {
-    let mut defaults = vec![
-        ("content-type".to_string(), "application/json".to_string()),
-        ("accept".to_string(), "text/event-stream".to_string()),
-    ];
-    if let Some(key) = provider
-        .api_key
-        .as_deref()
-        .map(str::trim)
-        .filter(|k| !k.is_empty())
-    {
-        defaults.push(("authorization".into(), format!("Bearer {key}")));
-    }
+    let mut defaults = json_sse_headers();
+    defaults.extend(bearer_header(provider));
     defaults.extend(session_headers(
         &req.session_id,
         &["session_id", "x-session-id", "x-session-affinity"],
