@@ -1,6 +1,6 @@
 //! Instance files, port selection, `--status` and `--stop`.
 
-use crate::util::{fmt_duration, fmt_time, pid_alive, write_atomic};
+use crate::util::{fmt_duration, fmt_time, write_atomic};
 use futures_util::{SinkExt, StreamExt};
 use ref_proto::{ClientFrame, IDLE_EXIT_NOW, InstanceInfo, Request, ServerFrame};
 use std::path::{Path, PathBuf};
@@ -37,7 +37,7 @@ pub fn list_instances(dir: &Path) -> Vec<InstanceInfo> {
         }
         let Ok(raw) = std::fs::read(&p) else { continue };
         match serde_json::from_slice::<InstanceInfo>(&raw) {
-            Ok(i) if pid_alive(i.pid) => out.push(i),
+            Ok(i) if ref_sys::pid_alive(i.pid) => out.push(i),
             Ok(_) => {
                 let _ = std::fs::remove_file(&p);
             }
@@ -243,7 +243,7 @@ pub async fn stop(pid: Option<u32>) -> i32 {
             Ok(_) => {
                 let mut gone = false;
                 for _ in 0..100 {
-                    if !pid_alive(i.pid) {
+                    if !ref_sys::pid_alive(i.pid) {
                         gone = true;
                         break;
                     }

@@ -194,11 +194,6 @@ pub fn relative_slash(rel: &Path) -> String {
     parts.join("/")
 }
 
-/// Whether a process with this pid exists.
-pub fn pid_alive(pid: u32) -> bool {
-    ref_sys::pid_alive(pid)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
