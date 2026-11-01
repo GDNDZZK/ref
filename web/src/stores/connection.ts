@@ -3,8 +3,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef } from 'vue'
 import { RefApi } from '../net/api.ts'
-import { RefConnection } from '../net/connection.ts'
-import { protocolOf } from '../net/connection.ts'
+import { RefConnection, protocolOf } from '../net/connection.ts'
 import type { ConnectionState, EventFrame, HelloResult } from '../net/connection.ts'
 import { loginRequired } from '../net/login.ts'
 import { webSocketTransport } from '../net/transport.ts'
@@ -22,9 +21,8 @@ export const useConnectionStore = defineStore('connection', () => {
   const detail = ref('')
   const hello = shallowRef<HelloResult>()
   const config = shallowRef<ServerConfigInfo>()
-  const backendTooOld = computed(
-    () => hello.value !== undefined && protocolOf(hello.value) < PROTOCOL_VERSION,
-  )
+  const protocol = computed(() => protocolOf(hello.value))
+  const backendTooOld = computed(() => hello.value !== undefined && protocol.value < PROTOCOL_VERSION)
   const fatal = ref<string>() // i18n key of an error that stops the app before it connects
   const reconnected = ref(0) // counts the times the connection came back after a loss
 
@@ -100,6 +98,7 @@ export const useConnectionStore = defineStore('connection', () => {
     state,
     detail,
     hello,
+    protocol,
     config,
     backendTooOld,
     reconnected,

@@ -4,7 +4,6 @@
 // connection reconnects by itself and ref-web starts the backend that is installed now.
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { protocolOf } from '../net/connection.ts'
 import { PROTOCOL_VERSION } from '../proto/generated'
 import { useConnectionStore } from '../stores/connection.ts'
 import { useNoticesStore } from '../stores/notices.ts'
@@ -51,7 +50,7 @@ const text = computed(() =>
   restarting.value
     ? t('banner.restarting')
     : t('banner.backendTooOld', {
-        have: protocolOf(connection.hello),
+        have: connection.protocol,
         need: PROTOCOL_VERSION,
       }),
 )
