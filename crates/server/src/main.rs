@@ -218,8 +218,17 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     }
     hub.shutdown.cancel();
     tracing::info!("shutting down");
-    let _ = tokio::time::timeout(SHUTDOWN_TIMEOUT, ops::shutdown_all(&hub)).await;
-    let _ = std::fs::remove_file(&inst_file);
+    if tokio::time::timeout(SHUTDOWN_TIMEOUT, ops::shutdown_all(&hub))
+        .await
+        .is_err()
+    {
+        tracing::warn!("saving the sessions timed out; some may not have been saved");
+    }
+    if let Err(e) = std::fs::remove_file(&inst_file)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!("cannot remove {}: {e}", inst_file.display());
+    }
     running.task.abort();
     tracing::info!("bye");
     Ok(())
@@ -260,7 +269,12 @@ async fn serve_mock(port: Option<u16>, idle_timeout: Option<i64>) -> anyhow::Res
         name = signals.recv() => tracing::info!("{name}"),
     }
     hub.shutdown.cancel();
-    let _ = tokio::time::timeout(SHUTDOWN_TIMEOUT, ops::shutdown_all(&hub)).await;
+    if tokio::time::timeout(SHUTDOWN_TIMEOUT, ops::shutdown_all(&hub))
+        .await
+        .is_err()
+    {
+        tracing::warn!("saving the sessions timed out; some may not have been saved");
+    }
     mock.running.task.abort();
     tracing::info!("bye");
     Ok(())
