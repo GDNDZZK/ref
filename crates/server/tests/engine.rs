@@ -549,8 +549,7 @@ async fn manual_compaction_uses_model_summary_and_undo_restores_context() {
     );
 
     // Undo from the compaction message: the old context becomes effective again.
-    let conn = hub.add_conn();
-    conn.lock().hello = true;
+    let conn = hello_conn(&hub);
     let cid = msgs[2].id.clone();
     ref_server::api::handle(
         &hub,
@@ -617,8 +616,7 @@ async fn compaction_agent_prompt_and_model_from_config() {
     assert_eq!(tail[2]["content"], ref_server::compaction::SUMMARY_REQUEST);
     assert!(messages(&s)[2].raw_text().contains("custom summary"));
     // Hidden agents are not offered to frontends and cannot run sessions.
-    let conn = hub.add_conn();
-    conn.lock().hello = true;
+    let conn = hello_conn(&hub);
     let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::GetConfig)
         .await
         .unwrap();
@@ -725,8 +723,7 @@ async fn mcp_status_request() {
         },
     );
     let (hub, _work) = hub(cfg, "mcpstatus");
-    let conn = hub.add_conn();
-    conn.lock().hello = true;
+    let conn = hello_conn(&hub);
     let r = ref_server::api::handle(
         &hub,
         &conn,
@@ -978,8 +975,7 @@ async fn remove_queued_message_before_delivery() {
     .await;
     let (hub, work) = hub(config(&m.url), "unqueue");
     let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
-    let conn = hub.add_conn();
-    conn.lock().hello = true;
+    let conn = hello_conn(&hub);
     let req = |text: &str| ref_proto::Request::Prompt {
         session_id: s.id.clone(),
         text: text.into(),
@@ -1095,8 +1091,7 @@ async fn remove_queued_after_delivery_removes_nothing() {
     .await;
     let (hub, work) = hub(config(&m.url), "unqueue-late");
     let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
-    let conn = hub.add_conn();
-    conn.lock().hello = true;
+    let conn = hello_conn(&hub);
     prompt(&hub, &s, "first");
     let s2 = s.clone();
     wait_until("running", TIMEOUT, move || {
@@ -1200,12 +1195,8 @@ async fn manual_compaction_never_shows_busy_since_while_idle() {
     let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "q");
     wait_idle(&s).await;
-    let conn = hub.add_conn();
-    {
-        let mut c = conn.lock();
-        c.hello = true;
-        c.fg.insert(s.id.clone());
-    }
+    let conn = hello_conn(&hub);
+    conn.lock().fg.insert(s.id.clone());
     conn.out.drain();
 
     ref_server::engine::start_custom_run(&hub, &s, ref_server::compaction::manual).unwrap();
@@ -1375,12 +1366,8 @@ async fn events_reach_attached_connection() {
     let m = mock(Arc::new(|_, _| Reply::Text("streamed".into()))).await;
     let (hub, work) = hub(config(&m.url), "events");
     let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
-    let conn = hub.add_conn();
-    {
-        let mut c = conn.lock();
-        c.hello = true;
-        c.fg.insert(s.id.clone());
-    }
+    let conn = hello_conn(&hub);
+    conn.lock().fg.insert(s.id.clone());
     prompt(&hub, &s, "hi");
     wait_idle(&s).await;
     let frames = conn.out.drain();
@@ -1507,8 +1494,7 @@ async fn undo_last_prompt_or_from_given_message() {
         wait_idle(&s).await;
     }
     assert_eq!(messages(&s).len(), 6);
-    let conn = hub.add_conn();
-    conn.lock().hello = true;
+    let conn = hello_conn(&hub);
     // Default: the last human prompt and everything after it.
     let r = ref_server::api::handle(
         &hub,
@@ -1616,8 +1602,7 @@ async fn set_cwd_switches_directory_and_tells_the_model() {
     let (hub, work) = hub(config(&m.url), "cwd");
     std::fs::create_dir_all(work.join("sub dir")).unwrap();
     let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
-    let conn = hub.add_conn();
-    conn.lock().hello = true;
+    let conn = hello_conn(&hub);
     let set = |path: &str| ref_proto::Request::SetCwd {
         session_id: s.id.clone(),
         path: path.into(),
@@ -1710,12 +1695,8 @@ async fn queue_changes_reach_attached_connection() {
     let (hub, work) = hub(config(&m.url), "queue-ev");
     let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     let peer = session(&hub, &work, "worker", "build").await;
-    let conn = hub.add_conn();
-    {
-        let mut c = conn.lock();
-        c.hello = true;
-        c.fg.insert(s.id.clone());
-    }
+    let conn = hello_conn(&hub);
+    conn.lock().fg.insert(s.id.clone());
     prompt(&hub, &s, "go");
     let s2 = s.clone();
     wait_until("streaming", TIMEOUT, move || last_text(&s2) == "working").await;
@@ -1795,12 +1776,8 @@ async fn frontends_get_image_stubs_and_undo_returns_the_bytes() {
     png.extend_from_slice(b"tool screenshot bytes");
     std::fs::write(work.join("shot.png"), &png).unwrap();
     let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
-    let conn = hub.add_conn();
-    {
-        let mut c = conn.lock();
-        c.hello = true;
-        c.fg.insert(s.id.clone());
-    }
+    let conn = hello_conn(&hub);
+    conn.lock().fg.insert(s.id.clone());
     let pasted = ref_proto::ImageData {
         mime: "image/png".into(),
         data: "UGFzdGVkSW1hZ2VCeXRlcw==".into(),
@@ -1956,8 +1933,7 @@ async fn history_is_served_in_pages() {
     let m = mock(Arc::new(|_, _| Reply::Text("ok".into()))).await;
     let (hub, work) = hub(config(&m.url), "pages");
     let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
-    let conn = hub.add_conn();
-    conn.lock().hello = true;
+    let conn = hello_conn(&hub);
     {
         let mut st = s.lock();
         for i in 0..250 {
@@ -2083,8 +2059,7 @@ async fn stated_image_limit_is_learned_and_the_request_resent() {
         .images = true;
     let (hub, work) = hub(cfg, "image-limit");
     let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
-    let conn = hub.add_conn();
-    conn.lock().hello = true;
+    let conn = hello_conn(&hub);
     let mut png = Vec::new();
     let img = image::RgbImage::from_fn(1200, 300, |x, y| {
         image::Rgb([(x % 256) as u8, (y % 256) as u8, 7])

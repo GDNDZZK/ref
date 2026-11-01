@@ -2,7 +2,8 @@
 #![allow(dead_code)]
 
 use ref_config::{AgentConfig, Config, ModelConfig, PermissionRules, ProviderConfig};
-use ref_proto::{Message, ModelRef, Part, Role};
+use ref_proto::{Message, ModelRef, Part, Request, Role, ServerFrame, SessionEvent};
+use ref_server::hub::Conn;
 use ref_server::session::Session;
 use ref_server::{Hub, HubOptions};
 use serde_json::{Value, json};
@@ -345,6 +346,38 @@ pub async fn wait_idle(s: &Arc<Session>) {
         s2.lock().run.is_none()
     })
     .await;
+}
+
+/// A connection that finished Hello.
+pub fn hello_conn(hub: &Arc<Hub>) -> Arc<Conn> {
+    let conn = hub.add_conn();
+    conn.lock().hello = true;
+    conn
+}
+
+/// A connection attached to `s` in the foreground, with the attach frames drained.
+pub async fn attached_conn(hub: &Arc<Hub>, s: &Arc<Session>) -> Arc<Conn> {
+    let conn = hello_conn(hub);
+    let attach = Request::Attach {
+        session_id: s.id.clone(),
+        foreground: true,
+        limit: None,
+    };
+    ref_server::api::handle(hub, &conn, attach).await.unwrap();
+    conn.out.drain();
+    conn
+}
+
+/// Drains the connection and keeps the session events.
+pub fn events(conn: &Conn) -> Vec<SessionEvent> {
+    conn.out
+        .drain()
+        .into_iter()
+        .filter_map(|f| match f {
+            ServerFrame::Event { event, .. } => Some(event),
+            _ => None,
+        })
+        .collect()
 }
 
 pub fn messages(s: &Arc<Session>) -> Vec<Message> {

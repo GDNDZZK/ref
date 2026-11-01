@@ -1,7 +1,7 @@
 mod common;
 
 use common::*;
-use ref_proto::{MessageSource, Request, Role, ServerFrame, SessionEvent, ToolState};
+use ref_proto::{MessageSource, Request, Role, SessionEvent, ToolState};
 use ref_server::api;
 use ref_server::hub::{Conn, Hub};
 use ref_server::session::Session;
@@ -30,15 +30,7 @@ async fn rig(handler: Handler) -> Rig {
     );
     let (hub, work) = hub(cfg, "agent-switch");
     let session = session(&hub, &work, MAIN_SESSION, BUILD).await;
-    let conn = hub.add_conn();
-    conn.lock().hello = true;
-    let attach = Request::Attach {
-        session_id: session.id.clone(),
-        foreground: true,
-        limit: None,
-    };
-    api::handle(&hub, &conn, attach).await.unwrap();
-    conn.out.drain();
+    let conn = attached_conn(&hub, &session).await;
     Rig {
         hub,
         conn,
@@ -83,15 +75,7 @@ impl Rig {
     }
 
     fn events(&self) -> Vec<SessionEvent> {
-        self.conn
-            .out
-            .drain()
-            .into_iter()
-            .filter_map(|f| match f {
-                ServerFrame::Event { event, .. } => Some(event),
-                _ => None,
-            })
-            .collect()
+        events(&self.conn)
     }
 
     /// Waits until the bash tool of the first round is running.
