@@ -395,7 +395,7 @@ async fn a_second_start_opens_the_running_instance() {
 #[tokio::test]
 async fn a_port_held_by_another_program_is_an_error() {
     let env = Env::new("busy");
-    let squatter = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let squatter = std::net::TcpListener::bind((LOOPBACK, 0)).unwrap();
     let port = squatter.local_addr().unwrap().port().to_string();
     let output = env.run(&["--no-open", "--port", &port]);
     assert!(!output.status.success());
@@ -478,7 +478,7 @@ async fn two_instances_keep_separate_cookies() {
 
 /// A program that answers every request like a ref-web would, without knowing the login token.
 async fn impostor_ref_web() -> u16 {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = tokio::net::TcpListener::bind((LOOPBACK, 0)).await.unwrap();
     let port = listener.local_addr().unwrap().port();
     tokio::spawn(async move {
         loop {

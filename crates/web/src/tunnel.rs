@@ -255,6 +255,7 @@ mod tests {
     const HEALTHY_FOR: Duration = Duration::from_millis(1500);
 
     /// Enough data to fill the socket buffers of a tab that does not read.
+    const LOOPBACK: &str = "127.0.0.1";
     const FLOOD_MESSAGES: usize = 256;
     const FLOOD_MESSAGE_BYTES: usize = 1 << 20;
     /// How often a busy tab sends something.
@@ -262,7 +263,7 @@ mod tests {
 
     /// A backend that reports (once) when its connection ends.
     async fn upstream_that_reports_close() -> (String, oneshot::Receiver<()>) {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = TcpListener::bind(format!("{LOOPBACK}:0")).await.unwrap();
         let url = format!("ws://{}", listener.local_addr().unwrap());
         let (closed_tx, closed_rx) = oneshot::channel();
         tokio::spawn(async move {
@@ -281,7 +282,7 @@ mod tests {
     /// Like `upstream_that_reports_close`, but the backend also sends `FLOOD_MESSAGES` large
     /// binary frames as soon as the tab connects.
     async fn flooding_upstream_that_reports_close() -> (String, oneshot::Receiver<()>) {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = TcpListener::bind(format!("{LOOPBACK}:0")).await.unwrap();
         let url = format!("ws://{}", listener.local_addr().unwrap());
         let (closed_tx, closed_rx) = oneshot::channel();
         tokio::spawn(async move {
@@ -311,7 +312,7 @@ mod tests {
         let state = Arc::new(AppState {
             login_token: String::new(),
             session: SessionCookie::new(0),
-            hosts: HostPolicy::new("127.0.0.1", 0),
+            hosts: HostPolicy::new(LOOPBACK, 0),
             cwd: String::new(),
             upstream: Upstream::Remote(Target::Explicit {
                 url: upstream_url,
@@ -324,7 +325,7 @@ mod tests {
         let app = Router::new()
             .route("/ws", get(ws_handler))
             .with_state(state);
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = TcpListener::bind(format!("{LOOPBACK}:0")).await.unwrap();
         let address = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         address.to_string()

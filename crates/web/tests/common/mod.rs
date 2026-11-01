@@ -23,6 +23,8 @@ pub type Ws =
 /// Another process may take a port between `free_port` and ref-web binding it.
 const START_ATTEMPTS: u32 = 5;
 const START_TIMEOUT: Duration = Duration::from_secs(15);
+/// The loopback address the tests listen on and connect to.
+pub const LOOPBACK: &str = "127.0.0.1";
 pub const STEP_TIMEOUT: Duration = Duration::from_secs(10);
 /// Poll intervals: for conditions that turn true quickly, and for a process that starts up.
 pub const POLL_FAST: Duration = Duration::from_millis(20);
@@ -42,7 +44,7 @@ pub fn temp_dir(tag: &str) -> PathBuf {
 }
 
 pub fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
+    std::net::TcpListener::bind((LOOPBACK, 0))
         .unwrap()
         .local_addr()
         .unwrap()
@@ -183,7 +185,7 @@ impl Web {
             if let Some(status) = self.child.try_wait().unwrap() {
                 return Some(Err(status));
             }
-            tokio::net::TcpStream::connect(("127.0.0.1", self.port))
+            tokio::net::TcpStream::connect((LOOPBACK, self.port))
                 .await
                 .is_ok()
                 .then_some(Ok(()))
@@ -287,7 +289,7 @@ pub struct FakeUpstream {
 /// A WebSocket server that echoes every text and binary frame unchanged, and closes the
 /// connection when it gets `FAKE_CLOSE_TRIGGER`.
 pub async fn fake_upstream() -> FakeUpstream {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = TcpListener::bind((LOOPBACK, 0)).await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let (query_tx, handshake_query) = tokio::sync::watch::channel(None);
     tokio::spawn(async move {
@@ -338,10 +340,8 @@ pub async fn real_backend(env: &Env, token: &str) -> (ref_server::Running, u16) 
     let mut options = ref_server::HubOptions::new(env.dir.join("server-data"));
     options.home = None;
     options.config_loader = std::sync::Arc::new(|_| ref_config::Config::default());
-    let (auth, _) = ref_server::ws::resolve_hosts(&["127.0.0.1".into()], token.into());
-    let running = ref_server::start(options, "127.0.0.1", 0, auth)
-        .await
-        .unwrap();
+    let (auth, _) = ref_server::ws::resolve_hosts(&[LOOPBACK.into()], token.into());
+    let running = ref_server::start(options, LOOPBACK, 0, auth).await.unwrap();
     let port = running.addr.port();
     (running, port)
 }

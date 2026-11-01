@@ -70,7 +70,7 @@ async fn a_token_file_that_is_being_written_is_waited_for() {
 
 /// Sends raw bytes and returns what the server answers until it closes the connection.
 async fn raw_request(port: u16, request: &str) -> String {
-    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+    let mut stream = tokio::net::TcpStream::connect((LOOPBACK, port))
         .await
         .unwrap();
     stream.write_all(request.as_bytes()).await.unwrap();
