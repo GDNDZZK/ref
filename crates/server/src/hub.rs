@@ -20,6 +20,9 @@ use tokio_util::sync::CancellationToken;
 
 pub type ConfigLoader = Arc<dyn Fn(&Path) -> Config + Send + Sync>;
 
+/// How long the `Sessions` broadcast waits for further changes before it is sent.
+const SESSIONS_DEBOUNCE: Duration = Duration::from_millis(100);
+
 /// Max queued frames per connection before it is dropped as too slow.
 const MAX_QUEUE: usize = 10_000;
 
@@ -472,7 +475,7 @@ async fn broadcaster(hub: Weak<Hub>) {
             _ = dirty.notified() => {}
             _ = shutdown.cancelled() => return,
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(SESSIONS_DEBOUNCE).await;
         let Some(h) = hub.upgrade() else { return };
         let infos = h.infos();
         let key = serde_json::to_string(&infos).unwrap_or_default();
