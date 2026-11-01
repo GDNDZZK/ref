@@ -649,26 +649,9 @@ async fn stream_with_retry(
                     continue;
                 }
                 if e.context_overflow {
-                    if overflow_compacted {
-                        return Err(Outcome::Failed(format!(
-                            "The conversation exceeds the model's context window even after compaction: {}",
-                            e.message
-                        )));
-                    }
-                    overflow_compacted = true;
-                    if let Err(ce) = crate::compaction::compact(hub, s, p, cancel).await {
-                        if cancel.is_cancelled() {
-                            return Err(Outcome::Aborted);
-                        }
-                        return Err(Outcome::Failed(format!(
-                            "Context window exceeded ({}) and compaction failed: {ce}",
-                            e.message
-                        )));
-                    }
-                    match prepare(hub, s, cancel).await {
-                        Ok(np) => prep_owned = Some(np),
-                        Err(pe) => return Err(Outcome::Failed(pe)),
-                    }
+                    let np = recover_from_overflow(hub, s, p, cancel, &mut overflow_compacted, &e)
+                        .await?;
+                    prep_owned = Some(np);
                     continue;
                 }
                 attempt += 1;
@@ -697,6 +680,34 @@ async fn stream_with_retry(
             }
         }
     }
+}
+
+/// The context overflowed: compacts (once per request) and prepares the request again.
+async fn recover_from_overflow(
+    hub: &Arc<Hub>,
+    s: &Arc<Session>,
+    p: &Prep,
+    cancel: &CancellationToken,
+    overflow_compacted: &mut bool,
+    e: &LlmError,
+) -> Result<Prep, Outcome> {
+    if *overflow_compacted {
+        return Err(Outcome::Failed(format!(
+            "The conversation exceeds the model's context window even after compaction: {}",
+            e.message
+        )));
+    }
+    *overflow_compacted = true;
+    if let Err(ce) = crate::compaction::compact(hub, s, p, cancel).await {
+        if cancel.is_cancelled() {
+            return Err(Outcome::Aborted);
+        }
+        return Err(Outcome::Failed(format!(
+            "Context window exceeded ({}) and compaction failed: {ce}",
+            e.message
+        )));
+    }
+    prepare(hub, s, cancel).await.map_err(Outcome::Failed)
 }
 
 fn short_error(e: &LlmError) -> String {
