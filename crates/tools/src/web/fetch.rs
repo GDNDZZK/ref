@@ -87,7 +87,8 @@ pub fn accept_language_for(loc: &str) -> String {
         .split_once('-')
         .map_or(tag.as_str(), |(lang, _)| lang)
         .to_ascii_lowercase();
-    if lang.len() < 2 || lang == "c" || lang == "posix" || lang == "en" {
+    let neutral_locale = matches!(lang.as_str(), "c" | "posix" | "en");
+    if lang.len() < 2 || neutral_locale {
         return "en-US,en;q=0.9".into();
     }
     if tag.contains('-') {
