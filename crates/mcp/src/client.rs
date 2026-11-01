@@ -17,6 +17,9 @@ use tokio_util::sync::CancellationToken;
 
 pub(crate) const PROTOCOL_VERSION: &str = "2025-06-18";
 
+/// Most `tools/list` pages followed before the list is cut off.
+const MAX_TOOL_PAGES: usize = 1000;
+
 /// JSON-RPC and MCP names that both transports and the client depend on.
 pub(crate) const JSONRPC_VERSION: &str = "2.0";
 /// JSON-RPC error code for an unknown method.
@@ -421,7 +424,7 @@ impl McpClient {
     pub async fn list_tools(&self) -> Result<Vec<McpTool>> {
         let mut tools = Vec::new();
         let mut cursor: Option<String> = None;
-        for _page in 0..1000 {
+        for _page in 0..MAX_TOOL_PAGES {
             let params = match &cursor {
                 Some(c) => json!({"cursor": c}),
                 None => json!({}),
@@ -451,6 +454,7 @@ impl McpClient {
                 _ => return Ok(tools),
             }
         }
+        tracing::warn!(server = %self.name, "tools/list has more than {MAX_TOOL_PAGES} pages; list cut off");
         Ok(tools)
     }
 
