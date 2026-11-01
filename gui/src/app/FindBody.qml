@@ -63,9 +63,8 @@ ToolBodyBase {
 		ToolChip {
 			text: qsTr("%n result(s)", "", body.resultCount)
 		}
-		ToolChip {
-			visible: body.meta.truncated === true
-			text: qsTr("truncated")
+		TruncatedChip {
+			meta: body.meta
 		}
 	}
 }
