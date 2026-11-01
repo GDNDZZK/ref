@@ -296,4 +296,14 @@ describe('RefConnection', () => {
     expect(env.sockets).toHaveLength(2)
     expect(env.connection.state).toBe('connecting')
   })
+
+  it('reports a failing give-up check and keeps retrying', async () => {
+    const env = setup([100], undefined, () => Promise.reject(new Error('probe broke')))
+    env.connection.open()
+    env.sockets[0]!.handlers.closed('closed (1006)')
+
+    await vi.advanceTimersByTimeAsync(100)
+    expect(env.errors.map((error) => error.message)).toEqual(['probe broke'])
+    expect(env.sockets).toHaveLength(2)
+  })
 })
