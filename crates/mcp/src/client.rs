@@ -16,6 +16,20 @@ use tokio_util::sync::CancellationToken;
 
 pub(crate) const PROTOCOL_VERSION: &str = "2025-06-18";
 
+/// JSON-RPC and MCP names that both transports and the client depend on.
+pub(crate) const JSONRPC_VERSION: &str = "2.0";
+/// JSON-RPC error code for an unknown method.
+const METHOD_NOT_FOUND: i64 = -32601;
+pub(crate) const METHOD_INITIALIZE: &str = "initialize";
+const METHOD_PING: &str = "ping";
+const METHOD_ROOTS_LIST: &str = "roots/list";
+pub(crate) const NOTIFY_INITIALIZED: &str = "notifications/initialized";
+
+/// A JSON-RPC notification without parameters.
+pub(crate) fn notification(method: &str) -> Value {
+    json!({"jsonrpc": JSONRPC_VERSION, "method": method})
+}
+
 type Reply = oneshot::Sender<Result<Value>>;
 
 /// State shared between the client and its transport's reader tasks.
@@ -152,12 +166,14 @@ impl Shared {
 
     fn handle_server_request(&self, method: &str, id: Value) {
         let reply = match method {
-            "ping" => json!({"jsonrpc": "2.0", "id": id, "result": {}}),
-            "roots/list" => json!({"jsonrpc": "2.0", "id": id, "result": {"roots": []}}),
+            METHOD_PING => json!({"jsonrpc": JSONRPC_VERSION, "id": id, "result": {}}),
+            METHOD_ROOTS_LIST => {
+                json!({"jsonrpc": JSONRPC_VERSION, "id": id, "result": {"roots": []}})
+            }
             _ => json!({
-                "jsonrpc": "2.0",
+                "jsonrpc": JSONRPC_VERSION,
                 "id": id,
-                "error": {"code": -32601, "message": format!("Method not found: {method}")}
+                "error": {"code": METHOD_NOT_FOUND, "message": format!("Method not found: {method}")}
             }),
         };
         self.send_async(reply);
@@ -293,7 +309,7 @@ impl McpClient {
             "clientInfo": {"name": "ref", "version": env!("CARGO_PKG_VERSION")},
         });
         let res = self
-            .request("initialize", params, Some(self.timeout), None)
+            .request(METHOD_INITIALIZE, params, Some(self.timeout), None)
             .await?;
         let version = res
             .get("protocolVersion")
@@ -306,10 +322,10 @@ impl McpClient {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(String::from);
-        let note = json!({"jsonrpc": "2.0", "method": "notifications/initialized"});
+        let note = notification(NOTIFY_INITIALIZED);
         tokio::time::timeout(self.timeout, self.conn.send(&note))
             .await
-            .map_err(|_| anyhow!("timed out sending notifications/initialized"))??;
+            .map_err(|_| anyhow!("timed out sending {NOTIFY_INITIALIZED}"))??;
         self.conn.after_initialized();
         Ok(())
     }
@@ -344,7 +360,7 @@ impl McpClient {
             shared: &self.shared,
             id: id.clone(),
         };
-        let msg = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+        let msg = json!({"jsonrpc": JSONRPC_VERSION, "id": id, "method": method, "params": params});
         let fut = async {
             self.conn.send(&msg).await?;
             rx.await.map_err(|_| anyhow!("MCP connection closed"))?
@@ -355,7 +371,7 @@ impl McpClient {
                     Ok(r) => r,
                     Err(_) => {
                         // The spec forbids cancelling initialize.
-                        if method != "initialize" {
+                        if method != METHOD_INITIALIZE {
                             self.send_cancelled(&id, "timeout");
                         }
                         Err(anyhow!(
@@ -381,7 +397,7 @@ impl McpClient {
 
     fn send_cancelled(&self, id: &Value, reason: &str) {
         self.shared.send_async(json!({
-            "jsonrpc": "2.0",
+            "jsonrpc": JSONRPC_VERSION,
             "method": "notifications/cancelled",
             "params": {"requestId": id, "reason": reason},
         }));
