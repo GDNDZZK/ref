@@ -2,6 +2,7 @@
 // A directory path with completion from the backend's file system: /cd and "new session in…".
 import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useDialogSubmit } from '../../composables/useDialogSubmit.ts'
 import { handleListKey, usePickSelection } from '../../composables/usePickSelection.ts'
 import { useDialogsStore } from '../../stores/dialogs.ts'
 import { useWorkspaceStore } from '../../stores/workspace.ts'
@@ -11,7 +12,6 @@ import ModalDialog from '../ModalDialog.vue'
 import PickList from '../PickList.vue'
 import TextField from '../TextField.vue'
 import { Key } from '../../keys.ts'
-import { describeError } from '../../errorMessage.ts'
 
 const ROW_HEIGHT_PX = 32
 const MAX_ROWS = 6
@@ -24,8 +24,6 @@ const workspace = useWorkspaceStore()
 
 const startPath = (props.sessionId ? workspace.infoOf(props.sessionId)?.cwd : undefined) ?? workspace.cwd
 const path = ref(startPath)
-const error = ref('')
-const busy = ref(false)
 const dirs = ref<string[]>([])
 const field = useTemplateRef<InstanceType<typeof TextField>>('field')
 
@@ -90,20 +88,15 @@ function onKey(event: KeyboardEvent): void {
   handleListKey(event, move)
 }
 
-async function submit(): Promise<void> {
-  const target = path.value.trim()
-  if (target === '' || busy.value) return
-  busy.value = true
-  try {
+const { busy, error, submit } = useDialogSubmit(
+  async () => {
+    const target = path.value.trim()
     if (props.mode === 'cd' && props.sessionId) await workspace.setSessionCwd(props.sessionId, target)
     else await workspace.newSession({ cwd: target })
     dialogs.close()
-  } catch (failure) {
-    error.value = describeError(failure)
-  } finally {
-    busy.value = false
-  }
-}
+  },
+  () => path.value.trim() !== '',
+)
 
 watch(path, () => (error.value = ''))
 </script>
