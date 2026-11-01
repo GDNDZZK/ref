@@ -23,27 +23,33 @@ const REVEAL_MAX_CHARS: usize = 512;
 /// Max chars per preview / context row.
 const ROW_MAX_CHARS: usize = 500;
 
+const OP_REPLACE: &str = "replace";
+const OP_DELETE: &str = "delete";
+const OP_INSERT_BEFORE: &str = "insert_before";
+const OP_INSERT_AFTER: &str = "insert_after";
+
 /// Name the model calls the tool by.
 pub(crate) const NAME: &str = "edit";
 
 pub fn spec() -> ToolSpec {
     ToolSpec {
         name: NAME,
-        description: "Edit an existing text file by line number. Create new files with `write`.\n\
+        description: format!(
+            "Edit an existing text file by line number. Create new files with `write`.\n\
 \n\
 - `tag`: the 4-hex TAG from the `[path#TAG]` header of the LATEST `read`, `grep`, `write` or `edit` output for this file. Never invent it.\n\
 - Line numbers are the `N` of the `N:content` rows in that output, i.e. they refer to the file version identified by `tag`. All edits in one call are applied simultaneously against that version, so never shift numbers to account for earlier edits in the same call.\n\
 - Ops:\n\
-  {\"op\":\"replace\",\"start\":N,\"end\":M,\"lines\":[...]} replaces lines N..M inclusive (omit `end` for one line); `lines` may have any length.\n\
-  {\"op\":\"delete\",\"start\":N,\"end\":M} deletes lines N..M.\n\
-  {\"op\":\"insert_after\",\"line\":N,\"lines\":[...]} inserts after line N (N=0 = top of file).\n\
-  {\"op\":\"insert_before\",\"line\":N,\"lines\":[...]} inserts before line N.\n\
+  {{\"op\":\"{OP_REPLACE}\",\"start\":N,\"end\":M,\"lines\":[...]}} replaces lines N..M inclusive (omit `end` for one line); `lines` may have any length.\n\
+  {{\"op\":\"{OP_DELETE}\",\"start\":N,\"end\":M}} deletes lines N..M.\n\
+  {{\"op\":\"{OP_INSERT_AFTER}\",\"line\":N,\"lines\":[...]}} inserts after line N (N=0 = top of file).\n\
+  {{\"op\":\"{OP_INSERT_BEFORE}\",\"line\":N,\"lines\":[...]}} inserts before line N.\n\
 - `lines` are complete raw lines WITHOUT the `N:` prefix and without trailing newlines; indentation must be exact. Use `[\"\"]` for one blank line.\n\
 - Ranges must not overlap; use one replace per contiguous region and only touch lines you saw in full.\n\
 - On success the output shows the new `[path#TAG]` header and the changed region with new line numbers. Use that new tag (and those numbers) for the next edit; the old tag is stale.\n\
 - If rejected because the file changed, use the current lines shown in the error or re-read the file.\n\
 - Line endings, BOM and the final newline of the file are preserved."
-            .to_string(),
+        ),
         parameters: json!({
             "type": "object",
             "properties": {
@@ -56,7 +62,7 @@ pub fn spec() -> ToolSpec {
                     "items": {
                         "type": "object",
                         "properties": {
-                            "op": {"type": "string", "enum": ["replace", "delete", "insert_before", "insert_after"]},
+                            "op": {"type": "string", "enum": [OP_REPLACE, OP_DELETE, OP_INSERT_BEFORE, OP_INSERT_AFTER]},
                             "start": {"type": "integer", "minimum": 1, "description": "replace/delete: first line of the range."},
                             "end": {"type": "integer", "minimum": 1, "description": "replace/delete: last line of the range, inclusive (default = start)."},
                             "line": {"type": "integer", "minimum": 0, "description": "insert_before/insert_after: anchor line (insert_after 0 = top of file)."},
@@ -118,15 +124,15 @@ impl Op {
     fn describe(&self) -> String {
         match &self.kind {
             Kind::Replace { start, end } if self.lines.is_empty() => {
-                range_label("delete", *start, *end)
+                range_label(OP_DELETE, *start, *end)
             }
-            Kind::Replace { start, end } => range_label("replace", *start, *end),
+            Kind::Replace { start, end } => range_label(OP_REPLACE, *start, *end),
             Kind::Insert {
                 before: true,
                 anchor,
                 ..
-            } => format!("insert_before line {anchor}"),
-            Kind::Insert { anchor, .. } => format!("insert_after line {anchor}"),
+            } => format!("{OP_INSERT_BEFORE} line {anchor}"),
+            Kind::Insert { anchor, .. } => format!("{OP_INSERT_AFTER} line {anchor}"),
         }
     }
 }
@@ -235,7 +241,7 @@ fn parse_edits(input: &Value, warnings: &mut Vec<String>) -> Result<Vec<Op>> {
         };
         let lines = parse_lines(e.get("lines"), idx)?;
         let kind = match op.as_str() {
-            "replace" | "delete" => {
+            OP_REPLACE | OP_DELETE => {
                 let start = num("start")?
                     .or(num("line")?)
                     .ok_or_else(|| anyhow!("edits[{idx}]: `{op}` requires `start`"))?;
@@ -248,14 +254,14 @@ fn parse_edits(input: &Value, warnings: &mut Vec<String>) -> Result<Vec<Op>> {
                 }
                 Kind::Replace { start, end }
             }
-            "insert_before" | "insert_after" => {
+            OP_INSERT_BEFORE | OP_INSERT_AFTER => {
                 let line = num("line")?
                     .or(num("start")?)
                     .ok_or_else(|| anyhow!("edits[{idx}]: `{op}` requires `line`"))?;
-                if op == "insert_before" {
+                if op == OP_INSERT_BEFORE {
                     if line == 0 {
                         bail!(
-                            "edits[{idx}]: insert_before needs line >= 1 (use insert_after with line 0 for the top of the file)"
+                            "edits[{idx}]: {OP_INSERT_BEFORE} needs line >= 1 (use {OP_INSERT_AFTER} with line 0 for the top of the file)"
                         );
                     }
                     Kind::Insert {
@@ -272,14 +278,16 @@ fn parse_edits(input: &Value, warnings: &mut Vec<String>) -> Result<Vec<Op>> {
                 }
             }
             other => bail!(
-                "edits[{idx}]: unknown op \"{other}\" (expected replace, delete, insert_before or insert_after)"
+                "edits[{idx}]: unknown op \"{other}\" (expected {OP_REPLACE}, {OP_DELETE}, {OP_INSERT_BEFORE} or {OP_INSERT_AFTER})"
             ),
         };
         let mut lines = match (&kind, op.as_str(), lines) {
-            (_, "delete", _) => Vec::new(),
+            (_, OP_DELETE, _) => Vec::new(),
             (_, _, Some(l)) => l,
             (Kind::Replace { .. }, _, None) => {
-                bail!("edits[{idx}]: replace requires `lines` (use op \"delete\" to remove lines)")
+                bail!(
+                    "edits[{idx}]: {OP_REPLACE} requires `lines` (use op \"{OP_DELETE}\" to remove lines)"
+                )
             }
             (_, _, None) => bail!("edits[{idx}]: `{op}` requires `lines`"),
         };
