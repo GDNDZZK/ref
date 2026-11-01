@@ -9,6 +9,10 @@ Rectangle {
 
 	readonly property bool shown: Workspace.protocolOutdated
 	readonly property real shownHeight: shown ? Theme.bannerHeight : 0
+	readonly property int edgeInset: 18
+	readonly property int iconSize: 16
+	readonly property int iconGap: 10
+	readonly property int textInset: edgeInset + iconSize + iconGap
 
 	width: parent.width
 	height: Theme.bannerHeight
@@ -28,16 +32,16 @@ Rectangle {
 	}
 
 	Icon {
-		x: 18
+		x: banner.edgeInset
 		anchors.verticalCenter: parent.verticalCenter
 		name: "warning"
-		size: 16
+		size: banner.iconSize
 		color: Theme.warning
 	}
 
 	Text {
 		textFormat: Text.PlainText
-		anchors { left: parent.left; leftMargin: 44; right: restart.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+		anchors { left: parent.left; leftMargin: banner.textInset; right: restart.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
 		text: qsTr("The backend is older than this app (protocol %1, needs %2).").arg(Workspace.protocolVersion).arg(Workspace.requiredProtocol)
 		color: Theme.text
 		font.pixelSize: Theme.captionFontSize
@@ -46,7 +50,7 @@ Rectangle {
 
 	DialogButton {
 		id: restart
-		anchors { right: parent.right; rightMargin: 18; verticalCenter: parent.verticalCenter }
+		anchors { right: parent.right; rightMargin: banner.edgeInset; verticalCenter: parent.verticalCenter }
 		small: true
 		text: qsTr("Restart backend")
 		kind: DialogButton.Primary
