@@ -54,9 +54,9 @@ pub struct SessionState {
     /// reset by compaction).
     pub context_notice: bool,
     /// The notice is due and will be appended at the next safe point.
-    pub notice_pending: bool,
+    pub(crate) notice_pending: bool,
     /// Summary requested by the `compact_context` tool, applied after the current tool batch.
-    pub pending_compact: Option<String>,
+    pub(crate) pending_compact: Option<String>,
     /// Abort requested by a user (do not auto-start a new run for queued messages).
     pub user_aborted: bool,
     pub title_started: bool,
@@ -135,7 +135,7 @@ impl Session {
 
 impl SessionState {
     /// Append a message to the history, updating must_report bookkeeping.
-    pub fn push_message(&mut self, msg: Message) {
+    pub(crate) fn push_message(&mut self, msg: Message) {
         if msg.role == Role::User {
             match &msg.source {
                 MessageSource::Reminder => {}
@@ -158,16 +158,16 @@ impl SessionState {
     }
 
     /// The user aborted the run or closed the session: they know it ended, so no notification.
-    pub fn stopped_by_user(&self) -> bool {
+    pub(crate) fn stopped_by_user(&self) -> bool {
         self.user_aborted || self.closed
     }
 
-    pub fn find_message(&self, id: &str) -> Option<usize> {
+    pub(crate) fn find_message(&self, id: &str) -> Option<usize> {
         self.messages.iter().rposition(|m| m.id == id)
     }
 
     /// `Reset` event with the newest page of messages.
-    pub fn reset_event(&self) -> SessionEvent {
+    pub(crate) fn reset_event(&self) -> SessionEvent {
         let (messages, more_before) = page(&self.messages, self.messages.len(), None);
         SessionEvent::Reset {
             messages,
@@ -177,14 +177,14 @@ impl SessionState {
 }
 
 /// Messages per page when the client does not say (`Attach`, `Messages`, `Reset`).
-pub const PAGE_DEFAULT: usize = 100;
-pub const PAGE_MAX: usize = 1000;
+const PAGE_DEFAULT: usize = 100;
+const PAGE_MAX: usize = 1000;
 /// A page stops growing once its serialized size (images as stubs) reaches this.
-pub const PAGE_BYTES: usize = 1 << 20;
+const PAGE_BYTES: usize = 1 << 20;
 
 /// The newest messages of `messages[..end]` that fit one page, with images as stubs, and
 /// whether older messages remain. At least one message unless `end` is 0.
-pub fn page(messages: &[Message], end: usize, limit: Option<u32>) -> (Vec<Message>, bool) {
+pub(crate) fn page(messages: &[Message], end: usize, limit: Option<u32>) -> (Vec<Message>, bool) {
     let limit = limit.map_or(PAGE_DEFAULT, |l| (l as usize).clamp(1, PAGE_MAX));
     let end = end.min(messages.len());
     let mut out = Vec::new();
@@ -195,7 +195,7 @@ pub fn page(messages: &[Message], end: usize, limit: Option<u32>) -> (Vec<Messag
         }
         let mut m = m.clone();
         m.strip_image_data();
-        bytes += serde_json::to_string(&m).map_or(0, |s| s.len());
+        bytes += serde_json::to_string(&m).expect("Message serializes").len();
         out.push(m);
     }
     out.reverse();
@@ -204,7 +204,7 @@ pub fn page(messages: &[Message], end: usize, limit: Option<u32>) -> (Vec<Messag
 }
 
 /// Marks unfinished tool parts as cancelled (used after loading from disk / abort).
-pub fn cancel_unfinished(messages: &mut [Message], output: &str) -> bool {
+pub(crate) fn cancel_unfinished(messages: &mut [Message], output: &str) -> bool {
     let mut changed = false;
     let now = ref_proto::now_ms();
     for m in messages {
