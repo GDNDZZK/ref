@@ -250,12 +250,12 @@ mod tests {
         ping_interval: Duration::from_millis(50),
         pong_timeout: Duration::from_millis(500),
     };
+    const LOOPBACK: &str = "127.0.0.1";
     const WAIT: Duration = Duration::from_secs(10);
     /// Several pong timeouts: a healthy tab must stay connected for this long.
     const HEALTHY_FOR: Duration = Duration::from_millis(1500);
 
     /// Enough data to fill the socket buffers of a tab that does not read.
-    const LOOPBACK: &str = "127.0.0.1";
     const FLOOD_MESSAGES: usize = 256;
     const FLOOD_MESSAGE_BYTES: usize = 1 << 20;
     /// How often a busy tab sends something.

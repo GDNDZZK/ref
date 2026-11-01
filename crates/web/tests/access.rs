@@ -93,7 +93,7 @@ async fn a_request_without_host_is_refused() {
         "{answer}"
     );
     let with_host = format!(
-        "GET /api/ping?nonce=00 HTTP/1.0\r\nHost: 127.0.0.1:{}\r\n\r\n",
+        "GET /api/ping?nonce=00 HTTP/1.0\r\nHost: {LOOPBACK}:{}\r\n\r\n",
         web.port
     );
     assert!(raw_request(web.port, &with_host).await.contains(" 200 "));
@@ -168,7 +168,7 @@ async fn sigterm_closes_the_tabs_and_exits_successfully() {
 
     let env = Env::new("sigterm");
     let upstream = fake_upstream().await;
-    let server = format!("ws://127.0.0.1:{}/", upstream.port);
+    let server = format!("ws://{LOOPBACK}:{}/", upstream.port);
     let mut web = env.start(&["--server", &server]).await;
     let mut tab = web.ws().await;
     // A round trip proves the tunnel is up before ref-web is told to stop.

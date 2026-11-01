@@ -4,7 +4,6 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 use axum::extract::{Request, State};
-use axum::http::header::{CONTENT_TYPE, COOKIE, HOST};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
@@ -107,7 +106,7 @@ impl SessionCookie {
 
     pub fn is_sent_in(&self, headers: &HeaderMap) -> bool {
         headers
-            .get_all(COOKIE)
+            .get_all(header::COOKIE)
             .iter()
             .filter_map(|v| v.to_str().ok())
             .flat_map(|line| line.split(';'))
@@ -119,14 +118,19 @@ impl SessionCookie {
 }
 
 pub fn text_response(status: StatusCode, text: &'static str) -> Response {
-    (status, [(CONTENT_TYPE, "text/plain; charset=utf-8")], text).into_response()
+    (
+        status,
+        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+        text,
+    )
+        .into_response()
 }
 
 /// Host check for every request, login cookie for everything except the login and ping routes.
 pub async fn guard(State(state): State<Arc<AppState>>, req: Request, next: Next) -> Response {
     let host_ok = req
         .headers()
-        .get(HOST)
+        .get(header::HOST)
         .and_then(|v| v.to_str().ok())
         .is_some_and(|h| state.hosts.allows(h));
     if !host_ok {
@@ -210,7 +214,7 @@ mod tests {
         let cookie = SessionCookie::new(7480);
         let sent = |line: String| {
             let mut h = HeaderMap::new();
-            h.insert(COOKIE, line.parse().unwrap());
+            h.insert(header::COOKIE, line.parse().unwrap());
             cookie.is_sent_in(&h)
         };
         let (name, id) = (cookie.name.clone(), cookie.id.clone());
