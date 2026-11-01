@@ -16,6 +16,13 @@ const MAX_CONTEXT: usize = 20;
 const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_LINE_CHARS: usize = 500;
 const MAX_OUTPUT_BYTES: usize = 60 * 1024;
+/// Compiled-regex size limit; larger patterns are rejected.
+const REGEX_SIZE_LIMIT_BYTES: usize = 64 * 1024 * 1024;
+/// Search threads when the parallelism of the machine is unknown.
+const FALLBACK_THREADS: usize = 4;
+const MAX_THREADS: usize = 16;
+/// Files handed to each thread per batch.
+const FILES_PER_THREAD_BATCH: usize = 16;
 
 /// Name the model calls the tool by.
 pub(crate) const NAME: &str = "grep";
@@ -132,7 +139,7 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     };
     let re = RegexBuilder::new(&src)
         .case_insensitive(ignore_case)
-        .size_limit(64 * 1024 * 1024)
+        .size_limit(REGEX_SIZE_LIMIT_BYTES)
         .build()
         .map_err(|e| {
             anyhow!("Invalid regex: {e}. Set `literal: true` to search for plain text.")
@@ -156,12 +163,12 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     // Search in sorted order, in parallel batches, stopping at the match limit.
     let threads = std::thread::available_parallelism()
         .map(|n| n.get())
-        .unwrap_or(4)
-        .min(16);
+        .unwrap_or(FALLBACK_THREADS)
+        .min(MAX_THREADS);
     let mut results: Vec<FileResult> = Vec::new();
     let mut total_matches = 0usize;
     let mut hit_limit = false;
-    'outer: for batch in files.chunks(threads * 16) {
+    'outer: for batch in files.chunks(threads * FILES_PER_THREAD_BATCH) {
         if ctx.cancel.is_cancelled() {
             bail!("grep cancelled");
         }
