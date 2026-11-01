@@ -7,7 +7,6 @@ use ref_server::hub::{Conn, Hub};
 use ref_server::session::Session;
 use serde_json::json;
 use std::sync::Arc;
-use std::time::Duration;
 
 const MARKER: &str = "The user switched the agent from";
 
@@ -98,7 +97,7 @@ impl Rig {
     /// Waits until the bash tool of the first round is running.
     async fn wait_running(&self) {
         let s = self.session.clone();
-        wait_until("tool running", Duration::from_secs(10), move || {
+        wait_until("tool running", TIMEOUT, move || {
             tool_parts(&s).iter().any(|p| {
                 matches!(
                     p,
@@ -292,7 +291,7 @@ async fn a_switch_just_before_the_run_ends_is_recorded_without_a_new_turn() {
     let rig = rig(Arc::new(|_, _| Reply::Hang("thinking".into()))).await;
     prompt(&rig.hub, &rig.session, "go");
     let m = rig.mock.bodies.clone();
-    wait_until("request sent", Duration::from_secs(10), move || {
+    wait_until("request sent", TIMEOUT, move || {
         !m.lock().unwrap().is_empty()
     })
     .await;
@@ -413,7 +412,7 @@ async fn a_second_switch_in_the_same_run_adds_a_second_reminder() {
     rig.switch(WORKER).await;
     // The first reminder is written before the second request; its tool runs next.
     let s = rig.session.clone();
-    wait_until("first reminder told", Duration::from_secs(10), move || {
+    wait_until("first reminder told", TIMEOUT, move || {
         let msgs = s.lock().messages.clone();
         msgs.iter().any(|m| m.source == MessageSource::Reminder)
             && msgs.iter().any(|m| {

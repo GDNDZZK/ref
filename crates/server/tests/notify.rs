@@ -152,10 +152,7 @@ async fn permission_request_notifies_with_the_tool_name() {
 
     prompt(&hub, &s, "go");
     let s2 = s.clone();
-    wait_until("permission", Duration::from_secs(10), move || {
-        s2.lock().perms.len() == 1
-    })
-    .await;
+    wait_until("permission", TIMEOUT, move || s2.lock().perms.len() == 1).await;
     assert_eq!(
         notes(&conn),
         [(NotifyKind::Permission, Some("bash".into()))]
@@ -230,7 +227,7 @@ async fn user_abort_sends_nothing() {
 
     prompt(&hub, &s, "go");
     let s2 = s.clone();
-    wait_until("streaming", Duration::from_secs(10), move || {
+    wait_until("streaming", TIMEOUT, move || {
         s2.lock().info.status == SessionStatus::Busy && s2.lock().messages.len() >= 2
     })
     .await;
@@ -286,10 +283,7 @@ async fn closing_a_session_sends_nothing() {
 
     prompt(&hub, &s, "go");
     let s2 = s.clone();
-    wait_until("streaming", Duration::from_secs(10), move || {
-        s2.lock().messages.len() >= 2
-    })
-    .await;
+    wait_until("streaming", TIMEOUT, move || s2.lock().messages.len() >= 2).await;
     let req = Request::Close {
         session_id: s.id.clone(),
     };
@@ -324,7 +318,7 @@ async fn a_queued_prompt_restarts_the_run_after_a_final_error() {
 
     prompt(&hub, &s, "go");
     let s2 = s.clone();
-    wait_until("retrying", Duration::from_secs(10), move || {
+    wait_until("retrying", TIMEOUT, move || {
         matches!(s2.lock().info.status, SessionStatus::Retrying { .. })
     })
     .await;
