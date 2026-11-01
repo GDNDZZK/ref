@@ -38,8 +38,8 @@ function place(): void {
   const pane = paneRect ?? { left: 0, right: window.innerWidth }
   const { left, width } = placeInPane(rect, pane, POPOVER_WIDTH, EDGE_MARGIN)
   const bottom = window.innerHeight - rect.top + POPOVER_GAP
-  const current = position.value
-  if (left !== current.left || width !== current.width || bottom !== current.bottom) {
+  const currentPosition = position.value
+  if (left !== currentPosition.left || width !== currentPosition.width || bottom !== currentPosition.bottom) {
     position.value = { left, width, bottom }
   }
 }
