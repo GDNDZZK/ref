@@ -9,7 +9,5 @@ TodoList {
 
 	required property var call
 
-	signal showAllRequested()
-
 	items: ToolInfo.todos(call.inputObject)
 }
