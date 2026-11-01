@@ -5,6 +5,12 @@ use ref_server::{HubOptions, instance, ops, ws};
 use std::path::PathBuf;
 use std::time::Duration;
 
+/// How long to wait for sessions to be saved on shutdown.
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// How long to wait for runtime tasks to finish before the process exits.
+const RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
+
 #[derive(Parser, Debug)]
 #[command(
     name = "ref-server",
@@ -120,7 +126,7 @@ fn main() {
             }
         }
     });
-    rt.shutdown_timeout(Duration::from_secs(2));
+    rt.shutdown_timeout(RUNTIME_SHUTDOWN_TIMEOUT);
     std::process::exit(code);
 }
 
@@ -212,7 +218,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     }
     hub.shutdown.cancel();
     tracing::info!("shutting down");
-    let _ = tokio::time::timeout(Duration::from_secs(15), ops::shutdown_all(&hub)).await;
+    let _ = tokio::time::timeout(SHUTDOWN_TIMEOUT, ops::shutdown_all(&hub)).await;
     let _ = std::fs::remove_file(&inst_file);
     running.task.abort();
     tracing::info!("bye");
@@ -254,7 +260,7 @@ async fn serve_mock(port: Option<u16>, idle_timeout: Option<i64>) -> anyhow::Res
         name = signals.recv() => tracing::info!("{name}"),
     }
     hub.shutdown.cancel();
-    let _ = tokio::time::timeout(Duration::from_secs(15), ops::shutdown_all(&hub)).await;
+    let _ = tokio::time::timeout(SHUTDOWN_TIMEOUT, ops::shutdown_all(&hub)).await;
     mock.running.task.abort();
     tracing::info!("bye");
     Ok(())
