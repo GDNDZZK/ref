@@ -166,13 +166,24 @@ async fn request(
 pub const EXIT_OK: i32 = 0;
 pub const EXIT_FAILURE: i32 = 1;
 
+/// How long `--status` waits for the session count of an instance.
+const STATUS_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// How long `--stop` waits for the answer to the shutdown request.
+const STOP_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// `--stop` polls `STOP_POLL_ATTEMPTS` times, `STOP_POLL_INTERVAL` apart (10 s in all), for the
+/// process to exit.
+const STOP_POLL_ATTEMPTS: u32 = 100;
+const STOP_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
 /// `--status`: exit code 0 if any instance is running.
 pub async fn status(json_out: bool) -> i32 {
     let dir = ref_proto::instances_dir();
     let list = list_instances(&dir);
     let mut rows = Vec::new();
     for i in &list {
-        let sessions = request(i, Request::ListSessions, Duration::from_secs(3))
+        let sessions = request(i, Request::ListSessions, STATUS_TIMEOUT)
             .await
             .ok()
             .and_then(|v| {
@@ -254,15 +265,15 @@ pub async fn stop(pid: Option<u32>) -> i32 {
     }
     let mut code = EXIT_OK;
     for i in list {
-        match request(&i, Request::Shutdown, Duration::from_secs(5)).await {
+        match request(&i, Request::Shutdown, STOP_REQUEST_TIMEOUT).await {
             Ok(_) => {
                 let mut gone = false;
-                for _ in 0..100 {
+                for _ in 0..STOP_POLL_ATTEMPTS {
                     if !ref_sys::pid_alive(i.pid) {
                         gone = true;
                         break;
                     }
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    tokio::time::sleep(STOP_POLL_INTERVAL).await;
                 }
                 if gone {
                     println!("Stopped ref-server pid {}.", i.pid);
