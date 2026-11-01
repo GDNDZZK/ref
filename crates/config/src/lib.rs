@@ -233,9 +233,11 @@ impl CompactionConfig {
             (max as f64 * v) as u64
         }
     }
+
     pub fn recommend_tokens(&self, max: u64, model_override: Option<u64>) -> u64 {
         model_override.unwrap_or_else(|| Self::resolve(self.recommend, max))
     }
+
     pub fn auto_tokens(&self, max: u64, model_override: Option<f64>) -> u64 {
         Self::resolve(model_override.unwrap_or(self.threshold), max)
     }
