@@ -1,7 +1,7 @@
 //! RSS (0.9x / 1.0 / 2.0) and Atom feeds → a markdown list of entries.
 
 use quick_xml::Reader;
-use quick_xml::events::Event;
+use quick_xml::events::{BytesRef, BytesStart, Event};
 
 /// Entry summaries longer than this (chars) are cut.
 const SUMMARY_CHARS: usize = 600;
@@ -58,25 +58,12 @@ pub fn to_markdown(xml: &str) -> Option<(Option<String>, String)> {
                     cur = Some(Entry::default());
                 }
                 // Atom: <link rel="alternate" href="…"/> (no rel = alternate).
-                if name == "link" {
-                    let mut href = None;
-                    let mut rel = String::from("alternate");
-                    for a in e.attributes().flatten() {
-                        let v = a
-                            .normalized_value(quick_xml::XmlVersion::Implicit1_0)
-                            .map(|v| v.to_string())
-                            .unwrap_or_default();
-                        match a.key.local_name().as_ref() {
-                            "href" => href = Some(v),
-                            "rel" => rel = v,
-                            _ => {}
-                        }
-                    }
-                    if let Some(h) = href.filter(|_| rel == "alternate") {
-                        let target = cur.as_mut().unwrap_or(&mut feed);
-                        if target.link.is_empty() {
-                            target.link = h;
-                        }
+                if name == "link"
+                    && let Some(h) = atom_alternate_href(&e)
+                {
+                    let target = cur.as_mut().unwrap_or(&mut feed);
+                    if target.link.is_empty() {
+                        target.link = h;
                     }
                 }
                 if !empty {
@@ -86,22 +73,7 @@ pub fn to_markdown(xml: &str) -> Option<(Option<String>, String)> {
             }
             Event::Text(t) => text.push_str(&t.html_content()),
             Event::CData(c) => text.push_str(&c),
-            Event::GeneralRef(g) => match g.resolve_char_ref() {
-                Ok(Some(c)) => text.push(c),
-                _ => {
-                    let n = g.to_string();
-                    let s = match n.as_str() {
-                        "lt" => "<".to_string(),
-                        "gt" => ">".to_string(),
-                        "amp" => "&".to_string(),
-                        "quot" => "\"".to_string(),
-                        "apos" => "'".to_string(),
-                        // HTML entities in summaries are decoded with the HTML later.
-                        _ => format!("&{n};"),
-                    };
-                    text.push_str(&s);
-                }
-            },
+            Event::GeneralRef(g) => text.push_str(&entity_text(&g)),
             Event::End(_) => {
                 let Some(name) = path.pop() else { continue };
                 if matches!(name.as_str(), "item" | "entry") {
@@ -139,6 +111,46 @@ pub fn to_markdown(xml: &str) -> Option<(Option<String>, String)> {
     if !saw_root {
         return None;
     }
+    Some(render_markdown(&feed, &entries))
+}
+
+/// Atom `<link rel="alternate" href="…"/>` (no `rel` = alternate): the `href` of such a link.
+fn atom_alternate_href(e: &BytesStart) -> Option<String> {
+    let mut href = None;
+    let mut rel = String::from("alternate");
+    for a in e.attributes().flatten() {
+        let v = a
+            .normalized_value(quick_xml::XmlVersion::Implicit1_0)
+            .map(|v| v.to_string())
+            .unwrap_or_default();
+        match a.key.local_name().as_ref() {
+            "href" => href = Some(v),
+            "rel" => rel = v,
+            _ => {}
+        }
+    }
+    href.filter(|_| rel == "alternate")
+}
+
+/// Text of a character or entity reference. Unknown (HTML) entities stay as written; they are
+/// decoded with the HTML later.
+fn entity_text(g: &BytesRef) -> String {
+    if let Ok(Some(c)) = g.resolve_char_ref() {
+        return c.to_string();
+    }
+    let n = g.to_string();
+    match n.as_str() {
+        "lt" => "<".to_string(),
+        "gt" => ">".to_string(),
+        "amp" => "&".to_string(),
+        "quot" => "\"".to_string(),
+        "apos" => "'".to_string(),
+        _ => format!("&{n};"),
+    }
+}
+
+/// `(feed title, markdown)` for the parsed feed header and its entries.
+fn render_markdown(feed: &Entry, entries: &[Entry]) -> (Option<String>, String) {
     let mut md = String::new();
     let title = Some(plain(&feed.title)).filter(|t| !t.is_empty());
     if let Some(t) = &title {
@@ -151,7 +163,7 @@ pub fn to_markdown(xml: &str) -> Option<(Option<String>, String)> {
         md.push_str(&format!("Site: {}\n\n", feed.link.trim()));
     }
     md.push_str(&format!("{} entries\n", entries.len()));
-    for e in &entries {
+    for e in entries {
         let t = Some(plain(&e.title))
             .filter(|t| !t.is_empty())
             .unwrap_or_else(|| "(untitled)".into());
@@ -175,7 +187,7 @@ pub fn to_markdown(xml: &str) -> Option<(Option<String>, String)> {
             md.push_str(&format!("\n{cut}{}\n", if more { "…" } else { "" }));
         }
     }
-    Some((title, md))
+    (title, md)
 }
 
 /// Feed text fields often hold (escaped) HTML: reduce to plain text on one paragraph. Text
