@@ -212,7 +212,7 @@ Item {
 	Connections {
 		target: pane.session.composer
 		function onToastRequested(level, text) {
-			Workspace.toastRequested(level, text)
+			Workspace.showToast(level, text)
 		}
 	}
 
