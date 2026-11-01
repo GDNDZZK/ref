@@ -5,6 +5,8 @@ use super::tools::{TODO_ROUNDS, TOOLS_ROUNDS, bash, image_round, read, todo_roun
 use crate::mock::script::{Ctx, Pace, Round, Script};
 use serde_json::json;
 
+/// What an overloaded provider says.
+const OVERLOADED_MESSAGE: &str = "Overloaded: too many requests, try again later";
 /// The provider answers `retry` with this status (overloaded) until the third attempt.
 const OVERLOADED: u16 = 529;
 const UNAUTHORIZED: u16 = 401;
@@ -79,7 +81,7 @@ pub const SCRIPTS: &[Script] = &[
 
 fn retry(ctx: &Ctx) -> Round {
     if ctx.attempt <= FAILED_ATTEMPTS {
-        return Round::error(OVERLOADED, "Overloaded: too many requests, try again later");
+        return Round::error(OVERLOADED, OVERLOADED_MESSAGE);
     }
     Round::new().text(format!(
         "The provider failed {FAILED_ATTEMPTS} times and answered on attempt {}.",
@@ -90,7 +92,7 @@ fn retry(ctx: &Ctx) -> Round {
 /// The error of failed attempt `attempt` (1-based) of the request that `outage` loses.
 fn outage_error(attempt: u32) -> Round {
     match attempt {
-        1 | 2 => Round::error(OVERLOADED, "Overloaded: too many requests, try again later"),
+        1 | 2 => Round::error(OVERLOADED, OVERLOADED_MESSAGE),
         3 => Round::connection_reset(),
         _ => Round::error(UNAVAILABLE, "Service unavailable"),
     }
