@@ -49,7 +49,7 @@ Item {
 	// Takes the entry selected in the list. Enter on a command that needs no arguments, or that is typed in
 	// full, runs it; otherwise the command is completed.
 	function acceptCompletion(viaEnter) {
-		if (model.completionKind === "file") {
+		if (model.completionKind === CompletionKind.file) {
 			model.acceptFile(popup.currentIndex)
 			return
 		}
@@ -203,7 +203,7 @@ Item {
 					} else if (event.key === Qt.Key_Down && plain) {
 						event.accepted = composer.model.historyNext()
 					} else if (event.key === Qt.Key_Escape) {
-						const nothingToClose = composer.model.completionKind === "none" && !composer.model.shellMode
+						const nothingToClose = composer.model.completionKind === CompletionKind.none && !composer.model.shellMode
 						if (nothingToClose && composer.session.lastToolDelayed) {
 							event.accepted = true
 							composer.session.cancelDelayedTool()
@@ -282,8 +282,8 @@ Item {
 		id: popup
 		anchors { left: parent.left; right: parent.right; bottom: parent.top; bottomMargin: popupGap }
 		kind: composer.model.completionKind
-		entries: composer.model.completionKind === "file" ? composer.model.files
-			: (composer.model.completionKind === "command" ? Commands.matching(composer.model.completionQuery, true) : [])
+		entries: composer.model.completionKind === CompletionKind.file ? composer.model.files
+			: (composer.model.completionKind === CompletionKind.command ? Commands.matching(composer.model.completionQuery, true) : [])
 		onAccepted: index => {
 			popup.currentIndex = index
 			composer.acceptCompletion(false)
