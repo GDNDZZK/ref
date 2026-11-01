@@ -24,6 +24,11 @@ const ANSWERS: Record<string, { allow: boolean; always: boolean }> = {
   [Key.Escape]: { allow: false, always: false },
 }
 
+// A key that types a character has a one-character name; the others are named ("Enter", "F1").
+function isCharacterKey(event: KeyboardEvent): boolean {
+  return event.key.length === 1
+}
+
 function inDialog(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest('[role="dialog"]') !== null
 }
@@ -61,7 +66,7 @@ export function usePermissionKeys(): void {
   function answerQuestion(session: ChatSession, request: QuestionRequest, event: KeyboardEvent): void {
     const outcome = session.questionForm(request).press(event.key, event.shiftKey)
     if (outcome === 'ignored') {
-      if (event.key.length === 1) event.preventDefault() // a letter: not for the composer now
+      if (isCharacterKey(event)) event.preventDefault() // a letter: not for the composer now
       return
     }
     event.preventDefault()
@@ -75,7 +80,9 @@ export function usePermissionKeys(): void {
     const session = askingSession()
     const request = session?.pendingPermission
     const question = session?.pendingQuestion
-    if (!session || performance.now() < armedAt || inDialog(event.target)) return
+    const isGuarded = performance.now() < armedAt
+    const isInDialog = inDialog(event.target)
+    if (!session || isGuarded || isInDialog) return
     if (event.ctrlKey || event.metaKey || event.altKey) return
     if (!request) {
       if (question && !inQuestionField(event.target)) answerQuestion(session, question, event)
@@ -84,7 +91,7 @@ export function usePermissionKeys(): void {
 
     const answer = ANSWERS[event.key]
     if (!answer) {
-      if (event.key.length === 1) event.preventDefault() // a letter: not for the composer now
+      if (isCharacterKey(event)) event.preventDefault() // a letter: not for the composer now
       return
     }
     event.preventDefault()
