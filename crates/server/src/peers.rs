@@ -523,15 +523,13 @@ async fn create_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Resu
         None => my_cwd,
     };
     let base = crate::util::normalize_name(name).map_err(|e| format!("Error: {e}"))?;
+    // Agent's own model wins; otherwise inherit the creator's model (never a random fallback).
+    let has_own_model =
+        cfg.agents.get(&agent).is_some_and(|a| a.model.is_some()) || cfg.model.is_some();
     let opts = crate::ops::CreateOpts {
         cwd: cwd.clone(),
         agent: Some(agent.clone()),
-        // Agent's own model wins; otherwise inherit the creator's model (never a random fallback).
-        model: if cfg.agents.get(&agent).is_some_and(|a| a.model.is_some()) || cfg.model.is_some() {
-            None
-        } else {
-            Some(my_model)
-        },
+        model: if has_own_model { None } else { Some(my_model) },
         name: Some(base),
         unique_suffix: true,
         parent: Some(s.id.clone()),
