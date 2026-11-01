@@ -12,7 +12,8 @@ ToolBodyBase {
 	// The count comes with the finished result; a running call has none.
 	readonly property bool hasCount: Fields.hasNumber(meta, "count")
 	readonly property int resultCount: hasCount ? meta.count : 0 // only shown when hasCount
-	readonly property var paths: call.output.split("\n").filter(line => line !== "" && !line.startsWith("[Showing "))
+	readonly property string truncationNoticePrefix: "[Showing " // starts the backend's note that the list was cut
+	readonly property var paths: call.output.split("\n").filter(line => line !== "" && !line.startsWith(truncationNoticePrefix))
 
 	Column {
 		width: body.contentWidth
