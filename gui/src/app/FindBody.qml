@@ -10,7 +10,7 @@ ToolBodyBase {
 	readonly property var meta: call.meta
 	readonly property int rowHeight: 24
 	// The count comes with the finished result; a running call has none.
-	readonly property bool hasCount: typeof meta.count === "number"
+	readonly property bool hasCount: Fields.hasNumber(meta, "count")
 	readonly property int resultCount: hasCount ? meta.count : 0 // only shown when hasCount
 	readonly property var paths: call.output.split("\n").filter(line => line !== "" && !line.startsWith("[Showing "))
 

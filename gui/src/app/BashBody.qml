@@ -7,7 +7,7 @@ ToolBodyBase {
 	id: body
 
 	readonly property var meta: call.meta
-	readonly property string command: typeof call.inputObject.command === "string" ? call.inputObject.command : ""
+	readonly property string command: Fields.stringOf(call.inputObject, "command")
 	readonly property bool running: call.toolState === ToolState.running
 	readonly property int liveTailLines: 20
 	readonly property var liveLines: call.liveOutput === "" ? [] : call.liveOutput.split("\n")

@@ -20,7 +20,7 @@ Item {
 		switch (call.toolName) {
 		case "edit":
 		case "write":
-			return typeof meta.diff === "string" && meta.diff !== "" ? "diff" : "generic"
+			return Fields.stringOf(meta, "diff") !== "" ? "diff" : "generic"
 		case "bash":
 		case "grep":
 		case "find":

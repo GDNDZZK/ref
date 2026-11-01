@@ -6,7 +6,7 @@ ToolBodyBase {
 	id: body
 
 	readonly property var meta: call.meta
-	readonly property string url: typeof call.inputObject.url === "string" ? call.inputObject.url : ""
+	readonly property string url: Fields.stringOf(call.inputObject, "url")
 
 	Row {
 		visible: body.url !== ""
@@ -49,7 +49,7 @@ ToolBodyBase {
 			tint: body.meta.status >= 400 ? Theme.danger : Theme.textMuted
 		}
 		ToolChip {
-			visible: typeof body.meta.content_type === "string" && body.meta.content_type !== ""
+			visible: Fields.stringOf(body.meta, "content_type") !== ""
 			text: body.meta.content_type ?? ""
 		}
 		ToolChip {
