@@ -282,7 +282,16 @@ fn render_text(ctx: &ToolCtx, abs: &Path, display: &str, text: &str, range: Rang
 fn list_dir(abs: &Path, display: &str) -> Result<ToolOutput> {
     let mut entries: Vec<String> = Vec::new();
     for e in std::fs::read_dir(abs)? {
-        let Ok(e) = e else { continue };
+        let e = match e {
+            Ok(e) => e,
+            Err(err) => {
+                tracing::debug!(
+                    "read: skipping unreadable entry of {}: {err}",
+                    abs.display()
+                );
+                continue;
+            }
+        };
         let name = e.file_name().to_string_lossy().into_owned();
         if name == ".git" {
             continue;

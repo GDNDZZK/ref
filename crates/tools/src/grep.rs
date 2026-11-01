@@ -61,11 +61,15 @@ struct FileResult {
 }
 
 fn search_file(path: &Path, re: &Regex, context: usize, remaining: usize) -> Option<FileResult> {
-    let meta = std::fs::metadata(path).ok()?;
+    let meta = std::fs::metadata(path)
+        .map_err(|e| tracing::debug!("grep: skipping {}: {e}", path.display()))
+        .ok()?;
     if meta.len() > MAX_FILE_BYTES {
         return None;
     }
-    let bytes = std::fs::read(path).ok()?;
+    let bytes = std::fs::read(path)
+        .map_err(|e| tracing::debug!("grep: skipping {}: {e}", path.display()))
+        .ok()?;
     if util::looks_binary(&bytes) {
         return None;
     }
@@ -299,7 +303,13 @@ pub(crate) fn collect_files(
         if ctx.cancel.is_cancelled() {
             bail!("grep cancelled");
         }
-        let Ok(entry) = entry else { continue };
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(e) => {
+                tracing::debug!("grep: skipping unreadable entry: {e}");
+                continue;
+            }
+        };
         if !entry.file_type().is_some_and(|t| t.is_file()) {
             continue;
         }

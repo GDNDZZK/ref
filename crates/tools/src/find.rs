@@ -156,7 +156,13 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         if ctx.cancel.is_cancelled() {
             bail!("find cancelled");
         }
-        let Ok(entry) = entry else { continue };
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(e) => {
+                tracing::debug!("find: skipping unreadable entry: {e}");
+                continue;
+            }
+        };
         if entry.depth() == 0 {
             continue;
         }
