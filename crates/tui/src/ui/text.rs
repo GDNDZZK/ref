@@ -5,6 +5,46 @@ use ratatui::text::{Line, Span};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
+/// The widest grapheme cell count a terminal renders (wide CJK and emoji).
+const MAX_GRAPHEME_WIDTH: usize = 2;
+/// Spaces a tab expands to.
+const TAB_WIDTH: usize = 4;
+/// Delete control character.
+const DEL: u8 = 0x7f;
+/// Upper bound for the up-front allocation in `one_line`.
+const ONE_LINE_PREALLOC: usize = 4096;
+
+/// Marker for cut-off text.
+pub const ELLIPSIS: &str = "…";
+/// Separator between inline metadata items.
+pub const SEPARATOR: &str = " · ";
+
+pub const MS_PER_SEC: i64 = 1000;
+const MS_PER_MIN: i64 = 60 * MS_PER_SEC;
+const MS_PER_HOUR: i64 = 60 * MS_PER_MIN;
+const SECS_PER_MIN: i64 = 60;
+const SECS_PER_HOUR: i64 = 60 * SECS_PER_MIN;
+const SECS_PER_DAY: i64 = 24 * SECS_PER_HOUR;
+/// Durations below this many ms print with one decimal.
+const DECIMAL_SECS_BELOW_MS: i64 = 10 * MS_PER_SEC;
+/// Ages below this many seconds read "just now".
+const JUST_NOW_SECS: i64 = 45;
+/// Ages from this many days on print as a date.
+const RELATIVE_DAYS_LIMIT: i64 = 14;
+const TOKENS_PER_K: u64 = 1000;
+const TOKENS_PER_M: u64 = 1_000_000;
+/// Token counts from here on would round to "1000.0k", so they print in millions.
+const TOKENS_AS_MILLIONS_FROM: u64 = 999_950;
+/// Clock text for a timestamp that does not map to a local time.
+const INVALID_CLOCK: &str = "--:--:--";
+
+const SCORE_PER_MATCH: i64 = 10;
+const SCORE_ADJACENT: i64 = 15;
+const SCORE_WORD_START: i64 = 12;
+const SCORE_PREFIX: i64 = 40;
+/// A gap between matched characters costs `gap / GAP_PENALTY_DIVISOR`.
+const GAP_PENALTY_DIVISOR: i64 = 2;
+
 pub fn width(s: &str) -> usize {
     UnicodeWidthStr::width(s)
 }
@@ -12,50 +52,67 @@ pub fn width(s: &str) -> usize {
 /// Width of one grapheme cluster (control chars count as 0, wide emoji as 2).
 pub fn gwidth(g: &str) -> usize {
     let w = UnicodeWidthStr::width(g);
-    if w > 2 { 2 } else { w }
+    w.min(MAX_GRAPHEME_WIDTH)
 }
 
-/// Strip ANSI escape sequences, expand tabs to 4 spaces, drop other control chars (keeps `\n`).
+/// Replaces each tab with `TAB_WIDTH` spaces.
+pub fn expand_tabs(s: &str) -> String {
+    s.replace('\t', &" ".repeat(TAB_WIDTH))
+}
+
+/// Consumes the rest of an escape sequence after its ESC byte.
+/// CSI: ESC [ ... final byte (0x40..=0x7e); OSC: ESC ] ... BEL | ESC \
+fn skip_escape_sequence(it: &mut std::iter::Peekable<std::str::Chars<'_>>) {
+    match it.peek() {
+        Some('[') => {
+            it.next();
+            skip_csi(it);
+        }
+        Some(']') => {
+            it.next();
+            skip_osc(it);
+        }
+        Some(_) => {
+            it.next();
+        }
+        None => {}
+    }
+}
+
+fn skip_csi(it: &mut std::iter::Peekable<std::str::Chars<'_>>) {
+    for d in it.by_ref() {
+        if ('\x40'..='\x7e').contains(&d) {
+            return;
+        }
+    }
+}
+
+fn skip_osc(it: &mut std::iter::Peekable<std::str::Chars<'_>>) {
+    while let Some(d) = it.next() {
+        if d == '\x07' {
+            return;
+        }
+        if d == '\x1b' {
+            if it.peek() == Some(&'\\') {
+                it.next();
+            }
+            return;
+        }
+    }
+}
+
+/// Strip ANSI escape sequences, expand tabs to `TAB_WIDTH` spaces, drop other control chars (keeps `\n`).
 pub fn sanitize(s: &str) -> String {
-    if !s.bytes().any(|b| b < 0x20 && b != b'\n' || b == 0x7f) {
+    let is_stray_control = |b: u8| (b < 0x20 && b != b'\n') || b == DEL;
+    if !s.bytes().any(is_stray_control) {
         return s.to_string();
     }
     let mut out = String::with_capacity(s.len());
     let mut it = s.chars().peekable();
     while let Some(c) = it.next() {
         match c {
-            '\x1b' => {
-                // CSI: ESC [ ... final byte (0x40..=0x7e); OSC: ESC ] ... BEL | ESC \
-                match it.peek() {
-                    Some('[') => {
-                        it.next();
-                        for d in it.by_ref() {
-                            if ('\x40'..='\x7e').contains(&d) {
-                                break;
-                            }
-                        }
-                    }
-                    Some(']') => {
-                        it.next();
-                        while let Some(d) = it.next() {
-                            if d == '\x07' {
-                                break;
-                            }
-                            if d == '\x1b' {
-                                if it.peek() == Some(&'\\') {
-                                    it.next();
-                                }
-                                break;
-                            }
-                        }
-                    }
-                    Some(_) => {
-                        it.next();
-                    }
-                    None => {}
-                }
-            }
-            '\t' => out.push_str("    "),
+            '\x1b' => skip_escape_sequence(&mut it),
+            '\t' => out.extend(std::iter::repeat_n(' ', TAB_WIDTH)),
             '\n' => out.push('\n'),
             '\r' => {
                 // CRLF → LF; lone CR dropped.
@@ -69,7 +126,7 @@ pub fn sanitize(s: &str) -> String {
 
 /// Single-line version: newlines and tabs become spaces, runs of whitespace collapse.
 pub fn one_line(s: &str) -> String {
-    let mut out = String::with_capacity(s.len().min(4096));
+    let mut out = String::with_capacity(s.len().min(ONE_LINE_PREALLOC));
     let mut space = false;
     for c in s.chars() {
         if c.is_whitespace() {
@@ -106,7 +163,7 @@ pub fn truncate(s: &str, max: usize) -> String {
         w += gw;
         out.push_str(g);
     }
-    out.push('…');
+    out.push_str(ELLIPSIS);
     out
 }
 
@@ -128,13 +185,14 @@ pub fn tail_fit(s: &str, max: usize) -> String {
         w += gw;
         parts.push(g);
     }
-    let mut out = String::from("…");
+    let mut out = String::from(ELLIPSIS);
     for g in parts.iter().rev() {
         out.push_str(g);
     }
     // Avoid starting with a space right after the ellipsis.
-    if out.len() > 3 && out[3..].starts_with(' ') {
-        out = format!("…{}", out[3..].trim_start());
+    let kept = &out[ELLIPSIS.len()..];
+    if kept.starts_with(' ') {
+        out = format!("{ELLIPSIS}{}", kept.trim_start());
     }
     out
 }
@@ -285,7 +343,12 @@ pub fn wrap_hard(spans: &[Span<'_>], width: usize) -> Vec<Line<'static>> {
 
 /// Width of a line in columns.
 pub fn line_width(l: &Line<'_>) -> usize {
-    l.spans.iter().map(|s| width(&s.content)).sum()
+    spans_width(&l.spans)
+}
+
+/// Width of a run of spans in columns.
+pub fn spans_width(spans: &[Span<'_>]) -> usize {
+    spans.iter().map(|s| width(&s.content)).sum()
 }
 
 /// Plain text of a line.
@@ -301,7 +364,7 @@ pub fn line_text(l: &Line<'_>) -> String {
 pub fn fmt_time(ms: i64) -> String {
     use chrono::{Datelike, Local, TimeZone};
     let Some(t) = Local.timestamp_millis_opt(ms).single() else {
-        return "--:--:--".into();
+        return INVALID_CLOCK.into();
     };
     let now = Local::now();
     if t.date_naive() == now.date_naive() {
@@ -318,44 +381,53 @@ pub fn fmt_clock(ms: i64) -> String {
     use chrono::{Local, TimeZone};
     match Local.timestamp_millis_opt(ms).single() {
         Some(t) => t.format("%H:%M:%S").to_string(),
-        None => "--:--:--".into(),
+        None => INVALID_CLOCK.into(),
     }
 }
 
 /// Duration: `850ms`, `1.4s`, `12s`, `2m 03s`, `1h 02m`.
 pub fn fmt_dur(ms: i64) -> String {
     let ms = ms.max(0);
-    if ms < 1000 {
+    if ms < MS_PER_SEC {
         format!("{ms}ms")
-    } else if ms < 10_000 {
-        format!("{:.1}s", ms as f64 / 1000.0)
-    } else if ms < 60_000 {
-        format!("{}s", ms / 1000)
-    } else if ms < 3_600_000 {
-        format!("{}m {:02}s", ms / 60_000, (ms / 1000) % 60)
+    } else if ms < DECIMAL_SECS_BELOW_MS {
+        format!("{:.1}s", ms as f64 / MS_PER_SEC as f64)
+    } else if ms < MS_PER_MIN {
+        format!("{}s", ms / MS_PER_SEC)
+    } else if ms < MS_PER_HOUR {
+        format!(
+            "{}m {:02}s",
+            ms / MS_PER_MIN,
+            (ms / MS_PER_SEC) % SECS_PER_MIN
+        )
     } else {
-        format!("{}h {:02}m", ms / 3_600_000, (ms / 60_000) % 60)
+        format!("{}h {:02}m", ms / MS_PER_HOUR, (ms / MS_PER_MIN) % 60)
     }
 }
 
 /// Coarse elapsed for live counters: `3s`, `1m 05s`.
 pub fn fmt_elapsed(ms: i64) -> String {
-    let s = ms.max(0) / 1000;
-    if s < 60 {
+    let s = ms.max(0) / MS_PER_SEC;
+    if s < SECS_PER_MIN {
         format!("{s}s")
-    } else if s < 3600 {
-        format!("{}m {:02}s", s / 60, s % 60)
+    } else if s < SECS_PER_HOUR {
+        format!("{}m {:02}s", s / SECS_PER_MIN, s % SECS_PER_MIN)
     } else {
-        format!("{}h {:02}m", s / 3600, (s / 60) % 60)
+        format!("{}h {:02}m", s / SECS_PER_HOUR, (s / SECS_PER_MIN) % 60)
     }
+}
+
+/// Whole seconds left for `ms_left` milliseconds, rounded up (never negative).
+pub fn ceil_secs(ms_left: i64) -> u64 {
+    (ms_left.max(0) as u64).div_ceil(MS_PER_SEC as u64)
 }
 
 /// `950`, `12.3k`, `1.0M`.
 pub fn fmt_tokens(n: u64) -> String {
-    if n >= 999_950 {
-        format!("{:.1}M", n as f64 / 1_000_000.0)
-    } else if n >= 1000 {
-        format!("{:.1}k", n as f64 / 1000.0)
+    if n >= TOKENS_AS_MILLIONS_FROM {
+        format!("{:.1}M", n as f64 / TOKENS_PER_M as f64)
+    } else if n >= TOKENS_PER_K {
+        format!("{:.1}k", n as f64 / TOKENS_PER_K as f64)
     } else {
         n.to_string()
     }
@@ -363,15 +435,15 @@ pub fn fmt_tokens(n: u64) -> String {
 
 /// Relative time for lists: `just now`, `5m ago`, `3h ago`, `2d ago`, else date.
 pub fn fmt_ago(ms: i64, now: i64) -> String {
-    let d = (now - ms).max(0) / 1000;
-    if d < 45 {
+    let d = (now - ms).max(0) / MS_PER_SEC;
+    if d < JUST_NOW_SECS {
         "just now".into()
-    } else if d < 3600 {
-        format!("{}m ago", (d / 60).max(1))
-    } else if d < 86_400 {
-        format!("{}h ago", d / 3600)
-    } else if d < 86_400 * 14 {
-        format!("{}d ago", d / 86_400)
+    } else if d < SECS_PER_HOUR {
+        format!("{}m ago", (d / SECS_PER_MIN).max(1))
+    } else if d < SECS_PER_DAY {
+        format!("{}h ago", d / SECS_PER_HOUR)
+    } else if d < SECS_PER_DAY * RELATIVE_DAYS_LIMIT {
+        format!("{}d ago", d / SECS_PER_DAY)
     } else {
         fmt_time(ms)
     }
@@ -423,26 +495,23 @@ pub fn fuzzy_score(hay: &str, needle: &str) -> Option<i64> {
             hi += 1;
         }
         let i = found?;
-        score += 10;
+        score += SCORE_PER_MATCH;
         if let Some(l) = last {
             if i == l + 1 {
-                score += 15;
+                score += SCORE_ADJACENT;
             } else {
-                score -= (i - l) as i64 / 2;
+                score -= (i - l) as i64 / GAP_PENALTY_DIVISOR;
             }
         } else {
             score -= i as i64;
         }
         if i == 0 || matches!(h.get(i.wrapping_sub(1)), Some('/' | '-' | '_' | ' ' | '.')) {
-            score += 12;
+            score += SCORE_WORD_START;
         }
         last = Some(i);
     }
-    if h.iter()
-        .collect::<String>()
-        .starts_with(&n.iter().collect::<String>())
-    {
-        score += 40;
+    if h.starts_with(&n) {
+        score += SCORE_PREFIX;
     }
     Some(score)
 }
