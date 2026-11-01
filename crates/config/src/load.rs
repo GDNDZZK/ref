@@ -199,7 +199,10 @@ fn load_file(ctx: &mut Ctx, path: &Path, layers: &mut Vec<Layer>) {
         Ok(_) => return ctx.warn(format!("{}: config must be a JSON object", path.display())),
         Err(e) => return ctx.warn(format!("{}: {e}", path.display())),
     };
-    let base = path.parent().unwrap_or(Path::new("/")).to_path_buf();
+    let base = path
+        .parent()
+        .expect("a file path has a parent")
+        .to_path_buf();
     let mut v = Value::Object(value);
     substitute_value(ctx, &mut v, &base, path);
     let Value::Object(mut value) = v else {
@@ -219,7 +222,11 @@ fn load_markdown(ctx: &mut Ctx, dir: &Path, layers: &mut Vec<Layer>) {
     ctx.warnings.extend(w1);
     ctx.warnings.extend(w2);
     for doc in agents {
-        let base = doc.path.parent().unwrap_or(dir).to_path_buf();
+        let base = doc
+            .path
+            .parent()
+            .expect("a file path has a parent")
+            .to_path_buf();
         let mut fm = Value::Object(doc.frontmatter);
         substitute_value(ctx, &mut fm, &base, &doc.path);
         let Value::Object(mut fm) = fm else {
@@ -242,7 +249,11 @@ fn load_markdown(ctx: &mut Ctx, dir: &Path, layers: &mut Vec<Layer>) {
         });
     }
     for doc in commands {
-        let base = doc.path.parent().unwrap_or(dir).to_path_buf();
+        let base = doc
+            .path
+            .parent()
+            .expect("a file path has a parent")
+            .to_path_buf();
         let mut fm = Value::Object(doc.frontmatter);
         substitute_value(ctx, &mut fm, &base, &doc.path);
         let Value::Object(mut fm) = fm else {
