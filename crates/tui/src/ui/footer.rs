@@ -10,6 +10,9 @@ use super::text;
 use super::theme;
 use crate::state::SessionView;
 
+/// From this share of the context window used, the usage text switches from muted to normal.
+const CONTEXT_WARM_PCT: u64 = 60;
+
 pub struct StatusCtx<'a> {
     pub view: Option<&'a SessionView>,
     pub cwd: &'a str,
@@ -26,7 +29,7 @@ pub struct StatusCtx<'a> {
     pub page: Option<(usize, usize)>,
 }
 
-pub fn status_label(v: &SessionView, tick: u64, now: i64) -> (String, Color) {
+fn status_label(v: &SessionView, tick: u64, now: i64) -> (String, Color) {
     use ref_proto::SessionStatus::*;
     let el = v.busy_ms(now).map(text::fmt_elapsed).unwrap_or_default();
     match &v.info.status {
@@ -67,7 +70,7 @@ pub fn context_spans(v: &SessionView) -> Vec<Span<'static>> {
         theme::ERROR
     } else if c.recommend > 0 && c.used >= c.recommend {
         theme::WARNING
-    } else if pct >= 60 {
+    } else if pct >= CONTEXT_WARM_PCT {
         theme::TEXT
     } else {
         theme::MUTED
