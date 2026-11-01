@@ -110,6 +110,8 @@
   --motion-calm-pulse: 1800ms;
   --motion-dialog-drop: 16px;
   --motion-pop-scale: 0.97;
+  --motion-pressed-scale-button: 0.94;
+  --motion-pressed-scale-row: 0.98;
   --motion-tile-enter-scale: 0.94;
   --motion-tile-exit-scale: 0.96;
   --motion-toast-slide: 24px;

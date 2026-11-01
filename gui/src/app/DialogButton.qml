@@ -25,7 +25,7 @@ Item {
 		radius: height / 2
 		color: hover.hovered && button.enabled ? (button.filled ? Qt.lighter(button.fill, 1.08) : Theme.surfaceHover) : button.fill
 		border.color: button.filled ? "transparent" : Theme.border
-		scale: tap.pressed && button.enabled ? 0.94 : 1
+		scale: tap.pressed && button.enabled ? Motion.pressedScaleButton : 1
 
 		Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 		Behavior on scale { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }

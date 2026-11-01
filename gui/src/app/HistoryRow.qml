@@ -17,7 +17,7 @@ Item {
 		anchors { fill: parent; leftMargin: Theme.sidebarPadding; rightMargin: Theme.sidebarPadding }
 		radius: Theme.radius
 		color: hover.hovered ? Theme.surfaceHover : "transparent"
-		scale: tap.pressed ? 0.98 : 1
+		scale: tap.pressed ? Motion.pressedScaleRow : 1
 
 		Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 		Behavior on scale { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
