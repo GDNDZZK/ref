@@ -54,15 +54,11 @@ Item {
 			Accessible.name: field.placeholderText
 		}
 
-		Text {
-			textFormat: Text.PlainText
+		PlaceholderText {
 			anchors { fill: input }
-			verticalAlignment: Text.AlignVCenter
+			textInput: input
 			text: field.placeholderText
-			color: Theme.textMuted
-			font.pixelSize: Theme.fontSize
 			elide: Text.ElideRight
-			visible: input.text === "" && input.preeditText === ""
 		}
 	}
 

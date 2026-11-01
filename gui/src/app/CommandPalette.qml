@@ -160,14 +160,10 @@ FocusScope {
 					}
 				}
 
-				Text {
-					textFormat: Text.PlainText
+				PlaceholderText {
 					anchors.fill: parent
-					verticalAlignment: Text.AlignVCenter
+					textInput: input
 					text: launcher.askingArgument ? launcher.chosen.hint : qsTr("Type a command…")
-					color: Theme.textMuted
-					font.pixelSize: Theme.fontSize
-					visible: input.text === "" && input.preeditText === ""
 				}
 			}
 		}

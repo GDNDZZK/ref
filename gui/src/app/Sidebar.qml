@@ -251,14 +251,11 @@ Rectangle {
 				Accessible.name: qsTr("Search history")
 				onTextChanged: Workspace.history.filter = text.trim()
 
-				Text {
-					textFormat: Text.PlainText
+				PlaceholderText {
 					anchors.fill: parent
-					verticalAlignment: Text.AlignVCenter
+					textInput: searchInput
 					text: qsTr("Search history")
-					color: Theme.textMuted
 					font.pixelSize: Theme.captionFontSize
-					visible: searchInput.text === "" && searchInput.preeditText === ""
 				}
 			}
 			IconButton {
