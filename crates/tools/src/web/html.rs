@@ -18,6 +18,16 @@ pub struct Page {
 /// Extracted main content under a quarter of the page text must be at least this long (chars),
 /// else the whole page is converted.
 const MIN_ARTICLE_CHARS: usize = 3000;
+/// ... where "under a quarter" means the extracted text times this is below the page text.
+const MIN_ARTICLE_SHARE_DENOM: usize = 4;
+/// The "main content only" note is added when the extraction keeps less than this share (%).
+const MAIN_ONLY_NOTE_SHARE_PERCENT: usize = 90;
+/// Bytes of the page head searched for alternate links.
+const HEAD_SCAN_BYTES: usize = 256 * 1024;
+/// Levels above a `<pre>` searched for a language attribute or class.
+const CODE_LANG_ANCESTOR_DEPTH: usize = 2;
+/// Longer words next to a `highlight` marker class are not taken as a language.
+const MAX_LANG_CHARS: usize = 20;
 
 /// `<link rel="alternate" type="text/markdown" href=…>`: a markdown version of the page.
 pub fn markdown_alternate(html: &str, page: &Url) -> Option<Url> {
@@ -28,7 +38,9 @@ pub fn markdown_alternate(html: &str, page: &Url) -> Option<Url> {
     // Only the head matters; avoid scanning megabytes of body.
     let head = &html[..crate::util::floor_char_boundary(
         html,
-        html.find("</head").unwrap_or(html.len()).min(256 * 1024),
+        html.find("</head")
+            .unwrap_or(html.len())
+            .min(HEAD_SCAN_BYTES),
     )];
     for tag in LINK.find_iter(head) {
         let (mut rel, mut ty, mut href) = (String::new(), String::new(), None);
@@ -103,13 +115,13 @@ pub fn convert(html: &str, url: &Url, format: Format, full_page: bool) -> Page {
     let body = tidy(&a.text_content);
     let (n, total) = (body.chars().count(), full.chars().count().max(1));
     // A small piece of a big page (portal, listing) is the wrong "main content".
-    if n * 4 < total && n < MIN_ARTICLE_CHARS {
+    if n * MIN_ARTICLE_SHARE_DENOM < total && n < MIN_ARTICLE_CHARS {
         return whole_page(prep.title, full);
     }
     let title = Some(a.title.trim().to_string())
         .filter(|t| !t.is_empty())
         .or(prep.title);
-    let note = (n * 10 < total * 9).then(|| {
+    let note = (n * 100 < total * MAIN_ONLY_NOTE_SHARE_PERCENT).then(|| {
         format!("Main content only ({}% of the page text). Pass full_page: true for the whole page (navigation, sidebars, comments).", (n * 100 / total).max(1))
     });
     Page { title, body, note }
@@ -349,7 +361,7 @@ fn code_lang(pre: &NodeRef) -> Option<String> {
         .filter(|c| c.has_name("code"))
         .collect();
     nodes.insert(0, *pre);
-    nodes.extend(pre.ancestors(Some(2)));
+    nodes.extend(pre.ancestors(Some(CODE_LANG_ANCESTOR_DEPTH)));
     for n in &nodes {
         for a in ["data-lang", "data-language", "lang"] {
             if let Some(v) = n.attr(a).map(|v| clean_lang(&v)).filter(|v| !v.is_empty()) {
@@ -392,7 +404,7 @@ fn code_lang(pre: &NodeRef) -> Option<String> {
                 !SKIP.contains(&w.as_str())
                     && w.chars()
                         .all(|c| c.is_ascii_alphanumeric() || "+#-".contains(c))
-                    && w.len() <= 20
+                    && w.len() <= MAX_LANG_CHARS
             })
         {
             return Some(w.clone());
