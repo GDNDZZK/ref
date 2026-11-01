@@ -172,6 +172,12 @@ QVariantList ChatSession::todoItems() const
 	return items;
 }
 
+QVariantMap ChatSession::todo() const
+{
+	const refgui::proto::TodoProgress progress = todoProgress();
+	return {{u"items"_s, todoItems()}, {u"done"_s, progress.done}, {u"total"_s, progress.total}};
+}
+
 qint64 ChatSession::busySince() const
 {
 	return m_controller.info().busySince.value_or(0);
