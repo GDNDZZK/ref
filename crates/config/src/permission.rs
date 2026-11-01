@@ -94,6 +94,40 @@ fn aliases(key: &str) -> Vec<String> {
     }
 }
 
+impl Rule {
+    pub(crate) fn new(tool: impl Into<String>, pattern: impl Into<String>, action: Action) -> Rule {
+        Rule {
+            tool: tool.into(),
+            pattern: pattern.into(),
+            action,
+        }
+    }
+}
+
+/// Rules for one `permission` entry `key` (already mapped to `tool`): a plain action, a
+/// pattern map or a bool.
+fn push_rules(rules: &mut Vec<Rule>, warns: &mut Vec<String>, key: &str, tool: &str, val: &Value) {
+    match val {
+        Value::String(s) => match Action::parse(s) {
+            Some(a) => rules.push(Rule::new(tool, ANY, a)),
+            None => warns.push(format!("invalid permission action {s:?} for {key}")),
+        },
+        Value::Object(pats) => {
+            for (pat, pv) in pats {
+                match pv.as_str().and_then(Action::parse) {
+                    Some(a) => rules.push(Rule::new(tool, pat.as_str(), a)),
+                    None => warns.push(format!("invalid permission action for {key}.{pat}")),
+                }
+            }
+        }
+        Value::Bool(b) => {
+            let action = if *b { Action::Allow } else { Action::Deny };
+            rules.push(Rule::new(tool, ANY, action));
+        }
+        _ => warns.push(format!("invalid permission value for {key}")),
+    }
+}
+
 impl PermissionRules {
     /// Parse an opencode `permission` value. Unknown action strings are ignored (reported via Err list).
     pub fn from_value(v: &Value) -> (PermissionRules, Vec<String>) {
@@ -101,48 +135,13 @@ impl PermissionRules {
         let mut warns = Vec::new();
         match v {
             Value::String(s) => match Action::parse(s) {
-                Some(a) => rules.push(Rule {
-                    tool: ANY.into(),
-                    pattern: ANY.into(),
-                    action: a,
-                }),
+                Some(a) => rules.push(Rule::new(ANY, ANY, a)),
                 None => warns.push(format!("invalid permission action {s:?}")),
             },
             Value::Object(map) => {
                 for (k, val) in map {
                     for tool in aliases(k) {
-                        match val {
-                            Value::String(s) => match Action::parse(s) {
-                                Some(a) => rules.push(Rule {
-                                    tool: tool.clone(),
-                                    pattern: ANY.into(),
-                                    action: a,
-                                }),
-                                None => {
-                                    warns.push(format!("invalid permission action {s:?} for {k}"))
-                                }
-                            },
-                            Value::Object(pats) => {
-                                for (pat, pv) in pats {
-                                    match pv.as_str().and_then(Action::parse) {
-                                        Some(a) => rules.push(Rule {
-                                            tool: tool.clone(),
-                                            pattern: pat.clone(),
-                                            action: a,
-                                        }),
-                                        None => warns.push(format!(
-                                            "invalid permission action for {k}.{pat}"
-                                        )),
-                                    }
-                                }
-                            }
-                            Value::Bool(b) => rules.push(Rule {
-                                tool: tool.clone(),
-                                pattern: ANY.into(),
-                                action: if *b { Action::Allow } else { Action::Deny },
-                            }),
-                            _ => warns.push(format!("invalid permission value for {k}")),
-                        }
+                        push_rules(&mut rules, &mut warns, k, &tool, val);
                     }
                 }
             }
@@ -159,11 +158,8 @@ impl PermissionRules {
             for (k, val) in map {
                 if let Value::Bool(b) = val {
                     for tool in aliases(k) {
-                        rules.push(Rule {
-                            tool,
-                            pattern: ANY.into(),
-                            action: if *b { Action::Allow } else { Action::Deny },
-                        });
+                        let action = if *b { Action::Allow } else { Action::Deny };
+                        rules.push(Rule::new(tool, ANY, action));
                     }
                 }
             }
