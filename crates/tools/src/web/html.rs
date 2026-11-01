@@ -26,8 +26,8 @@ const MAIN_ONLY_NOTE_SHARE_PERCENT: usize = 90;
 const HEAD_SCAN_BYTES: usize = 256 * 1024;
 /// Levels above a `<pre>` searched for a language attribute or class.
 const CODE_LANG_ANCESTOR_DEPTH: usize = 2;
-/// Longer words next to a `highlight` marker class are not taken as a language.
-const MAX_LANG_CHARS: usize = 20;
+/// Longer words (in bytes) next to a `highlight` marker class are not taken as a language.
+const MAX_LANG_LEN: usize = 20;
 
 /// `<link rel="alternate" type="text/markdown" href=…>`: a markdown version of the page.
 pub fn markdown_alternate(html: &str, page: &Url) -> Option<Url> {
@@ -413,7 +413,7 @@ fn code_lang(pre: &NodeRef) -> Option<String> {
                 !SKIP.contains(&w.as_str())
                     && w.chars()
                         .all(|c| c.is_ascii_alphanumeric() || "+#-".contains(c))
-                    && w.len() <= MAX_LANG_CHARS
+                    && w.len() <= MAX_LANG_LEN
             })
         {
             return Some(w.clone());
