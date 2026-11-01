@@ -10,7 +10,7 @@ use ref_proto::ImageData;
 
 use crate::app::{ARMED_KEY_TIMEOUT, App, COMMANDS, Mode, cmd};
 use crate::render;
-use crate::ui::dialog::{Dialog, Kind};
+use crate::ui::dialog::{Dialog, Kind, PAGE_ROWS};
 use crate::ui::editor::Editor;
 use crate::ui::permission::PermissionAction;
 use crate::ui::question::Outcome;
@@ -19,8 +19,6 @@ use crate::ui::{Hit, chat, split, theme};
 const CTRL: KeyModifiers = KeyModifiers::CONTROL;
 const ALT: KeyModifiers = KeyModifiers::ALT;
 const SHIFT: KeyModifiers = KeyModifiers::SHIFT;
-/// Rows of a page-up / page-down step in dialogs and modals.
-const PAGE_SCROLL_ROWS: i32 = 10;
 /// Rows of one mouse wheel notch.
 const WHEEL_SCROLL_ROWS: i32 = 3;
 /// A cleared draft goes to the prompt history only from this many characters.
@@ -137,8 +135,8 @@ fn key(app: &mut App, k: KeyEvent) {
             }
             KeyCode::Up | KeyCode::Char('k') => scroll_perm(app, -1),
             KeyCode::Down | KeyCode::Char('j') => scroll_perm(app, 1),
-            KeyCode::PageUp => scroll_perm(app, -PAGE_SCROLL_ROWS),
-            KeyCode::PageDown => scroll_perm(app, PAGE_SCROLL_ROWS),
+            KeyCode::PageUp => scroll_perm(app, -PAGE_ROWS),
+            KeyCode::PageDown => scroll_perm(app, PAGE_ROWS),
             _ => {}
         }
         return;
@@ -228,8 +226,8 @@ fn dialog_key(app: &mut App, k: KeyEvent) {
         Some(Dialog::Help(h)) => match k.code {
             KeyCode::Up | KeyCode::Char('k') => h.scroll_by(-1),
             KeyCode::Down | KeyCode::Char('j') => h.scroll_by(1),
-            KeyCode::PageUp => h.scroll_by(-PAGE_SCROLL_ROWS),
-            KeyCode::PageDown | KeyCode::Char(' ') => h.scroll_by(PAGE_SCROLL_ROWS),
+            KeyCode::PageUp => h.scroll_by(-PAGE_ROWS),
+            KeyCode::PageDown | KeyCode::Char(' ') => h.scroll_by(PAGE_ROWS),
             _ => app.dialog = None,
         },
         Some(Dialog::Mcp(d)) => {
@@ -242,8 +240,8 @@ fn dialog_key(app: &mut App, k: KeyEvent) {
                 KeyCode::Enter | KeyCode::Char(' ') => d.set_expanded(&app.mcp, None),
                 KeyCode::Right | KeyCode::Char('l') => d.set_expanded(&app.mcp, Some(true)),
                 KeyCode::Left | KeyCode::Char('h') => d.set_expanded(&app.mcp, Some(false)),
-                KeyCode::PageUp => d.scroll_by(-PAGE_SCROLL_ROWS),
-                KeyCode::PageDown => d.scroll_by(PAGE_SCROLL_ROWS),
+                KeyCode::PageUp => d.scroll_by(-PAGE_ROWS),
+                KeyCode::PageDown => d.scroll_by(PAGE_ROWS),
                 KeyCode::Char('r') if k.modifiers.is_empty() => app.refresh_mcp(),
                 KeyCode::Esc | KeyCode::Char('q') => app.dialog = None,
                 KeyCode::Char('c') if k.modifiers == CTRL => app.dialog = None,
