@@ -4071,16 +4071,15 @@ fn queue_event_shows_messages_from_other_sessions() {
     assert!(app.views[TEST_SESSION].queued.is_empty());
 }
 
-#[test]
-fn history_pages_load_when_scrolled_to_the_top() {
-    use crate::app::Pending;
+/// A session with the newest 40 of 120 messages loaded and more history before them.
+/// Returns the app with the 80 older messages and the 40 newest ones.
+fn history_app() -> (App, Vec<Message>, Vec<Message>) {
     let mut app = test_app(false);
-    let sid = TEST_SESSION;
     let all = long_transcript("h", 60);
     let (old, newest) = all.split_at(80);
-    let inf = app.views[sid].info.clone();
+    let inf = app.views[TEST_SESSION].info.clone();
     app.views
-        .get_mut(sid)
+        .get_mut(TEST_SESSION)
         .unwrap()
         .load_snapshot(SessionSnapshot {
             info: inf,
@@ -4090,24 +4089,53 @@ fn history_pages_load_when_scrolled_to_the_top() {
             pending_questions: vec![],
             queued: vec![],
         });
-    let older = |app: &App| {
-        app.pending.iter().find_map(|(id, p)| match p {
-            Pending::Older { before, .. } => Some((*id, before.clone())),
-            _ => None,
-        })
-    };
-    render(&mut app, 100, 30);
-    app.load_older();
-    assert!(older(&app).is_none(), "at the bottom nothing is requested");
-    // Scrolled to the top: the page before the first loaded message is requested once.
+    (app, old.to_vec(), newest.to_vec())
+}
+
+/// The request id and `before` cursor of the pending older-page request, if any.
+fn older_request(app: &App) -> Option<(u64, String)> {
+    app.pending.iter().find_map(|(id, p)| match p {
+        crate::app::Pending::Older { before, .. } => Some((*id, before.clone())),
+        _ => None,
+    })
+}
+
+/// Scrolls to the top of the transcript and asks the app to load older messages.
+fn scroll_to_top_and_load_older(app: &mut App) {
+    // Scrolling needs the laid out transcript.
+    render(app, 100, 30);
     app.views
-        .get_mut(sid)
+        .get_mut(TEST_SESSION)
         .unwrap()
         .chat
         .scroll_by(-1_000_000, false);
+    render(app, 100, 30);
+    app.load_older();
+}
+
+fn respond_to_older(app: &mut App, id: u64, result: serde_json::Value) {
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id,
+        ok: true,
+        result,
+        error: None,
+    }));
+}
+
+#[test]
+fn history_page_is_requested_once_when_scrolled_to_the_top() {
+    use crate::app::Pending;
+    let (mut app, ..) = history_app();
     render(&mut app, 100, 30);
     app.load_older();
-    let (id, before) = older(&app).expect("older page requested");
+    assert!(
+        older_request(&app).is_none(),
+        "at the bottom nothing is requested"
+    );
+
+    // Scrolled to the top: the page before the first loaded message is requested once.
+    scroll_to_top_and_load_older(&mut app);
+    let (_, before) = older_request(&app).expect("older page requested");
     assert_eq!(before, "hu40");
     app.load_older();
     assert_eq!(
@@ -4117,6 +4145,15 @@ fn history_pages_load_when_scrolled_to_the_top() {
             .count(),
         1
     );
+}
+
+#[test]
+fn history_page_keeps_the_screen_and_the_next_one_needs_another_scroll() {
+    let (mut app, old, _) = history_app();
+    let sid = TEST_SESSION;
+    scroll_to_top_and_load_older(&mut app);
+    let (id, _) = older_request(&app).expect("older page requested");
+
     // Scrollbar column excluded: its thumb moves when content is added above.
     let shown = |app: &mut App| {
         render(app, 100, 30)
@@ -4131,50 +4168,51 @@ fn history_pages_load_when_scrolled_to_the_top() {
         before_screen.iter().any(|l| l.contains("h question 40")),
         "{before_screen:?}"
     );
-    let page = json!({ "messages": old[40..].to_vec(), "more_before": true });
-    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+    respond_to_older(
+        &mut app,
         id,
-        ok: true,
-        result: page,
-        error: None,
-    }));
+        json!({ "messages": old[40..].to_vec(), "more_before": true }),
+    );
     assert_eq!(app.views[sid].messages.len(), 80);
     assert_eq!(app.views[sid].messages[0].id, "hu20");
+
     // The same content stays on screen; no new request until scrolled up again.
     assert_eq!(shown(&mut app), before_screen);
     app.load_older();
-    assert!(older(&app).is_none());
-    app.views
-        .get_mut(sid)
-        .unwrap()
-        .chat
-        .scroll_by(-1_000_000, false);
-    render(&mut app, 100, 30);
-    app.load_older();
-    let (id, before) = older(&app).expect("next page requested");
+    assert!(older_request(&app).is_none());
+    scroll_to_top_and_load_older(&mut app);
+    let (_, before) = older_request(&app).expect("next page requested");
     assert_eq!(before, "hu20");
+}
+
+#[test]
+fn history_page_answered_after_a_reset_is_dropped() {
+    let (mut app, old, newest) = history_app();
+    let sid = TEST_SESSION;
+    scroll_to_top_and_load_older(&mut app);
+    let (id, _) = older_request(&app).expect("older page requested");
+
     // A reset in between makes the answer stale: it is dropped.
     let v = app.views.get_mut(sid).unwrap();
     v.apply(SessionEvent::Reset {
-        messages: newest.to_vec(),
+        messages: newest,
         more_before: true,
     });
-    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+    respond_to_older(
+        &mut app,
         id,
-        ok: true,
-        result: json!({ "messages": old[..40].to_vec(), "more_before": false }),
-        error: None,
-    }));
+        json!({ "messages": old[..40].to_vec(), "more_before": false }),
+    );
     assert_eq!(app.views[sid].messages.len(), 40);
+}
+
+#[test]
+fn history_page_error_stops_further_requests() {
+    let (mut app, ..) = history_app();
+    scroll_to_top_and_load_older(&mut app);
+    let (id, _) = older_request(&app).expect("older page requested");
+
     // An error stops further requests (no retry loop).
-    app.views
-        .get_mut(sid)
-        .unwrap()
-        .chat
-        .scroll_by(-1_000_000, false);
-    render(&mut app, 100, 30);
-    app.load_older();
-    let (id, _) = older(&app).expect("requested after the reset");
     app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
         id,
         ok: false,
@@ -4183,8 +4221,8 @@ fn history_pages_load_when_scrolled_to_the_top() {
     }));
     render(&mut app, 100, 30);
     app.load_older();
-    assert!(older(&app).is_none());
-    assert!(!app.views[sid].more_before);
+    assert!(older_request(&app).is_none());
+    assert!(!app.views[TEST_SESSION].more_before);
 }
 
 const EDITOR_TEXT: &str = "hello brave new world";
