@@ -118,6 +118,6 @@ function onKey(event: KeyboardEvent): void {
 .check {
   flex: none;
   margin-left: auto;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 </style>

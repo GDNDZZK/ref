@@ -258,7 +258,7 @@ function openMenu(event: MouseEvent): void {
 }
 
 .progress.complete {
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .mark {
@@ -267,7 +267,7 @@ function openMenu(event: MouseEvent): void {
 }
 
 .lock {
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .close {
@@ -315,10 +315,10 @@ function openMenu(event: MouseEvent): void {
 }
 
 .subtitle.warning {
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .subtitle.danger {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 </style>

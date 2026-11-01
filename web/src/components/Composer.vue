@@ -422,7 +422,7 @@ defineExpose({ focus: () => input.value?.focus() })
 
 .box:focus-within,
 .box.dragging {
-  box-shadow: inset 0 0 0 1px var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-text);
 }
 
 .box.shell {
