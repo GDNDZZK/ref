@@ -3,14 +3,10 @@ pragma Singleton
 import QtQuick
 import RefGui
 
-// Colors, type and layout metrics. Follows the system color scheme until toggle()
-// is called; from then on the choice is the user's.
+// Colors, type and layout metrics. `dark` follows the system color scheme; Main.qml
+// binds it to the user's choice.
 QtObject {
 	property bool dark: Application.styleHints.colorScheme === Qt.Dark
-
-	function toggle() {
-		dark = !dark
-	}
 
 	readonly property color background: dark ? "#16171a" : "#fafaf9"
 	readonly property color surface: dark ? "#1f2024" : "#f1f1ef"
