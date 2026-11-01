@@ -21,6 +21,9 @@ use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
 pub(crate) const CANCELLED_OUTPUT: &str = "Cancelled by user.";
+
+/// Error text stored on an assistant message whose turn was aborted.
+const ABORTED_ERROR: &str = "Aborted";
 /// Error text of a turn or compaction that was aborted.
 pub(crate) const ABORTED: &str = "aborted";
 const MAX_REMINDERS: u32 = 3;
@@ -28,6 +31,15 @@ const MAX_REMINDERS: u32 = 3;
 /// Characters of the first user line used as the provisional session title.
 const TITLE_MAX_CHARS: usize = 50;
 const NON_RETRYABLE_ATTEMPTS: u32 = 3;
+
+/// Characters of a provider error shown in the retry status.
+const SHORT_ERROR_CHARS: usize = 500;
+
+/// Stop reasons of a finished response (normalized by `ref_llm`).
+const STOP_END: &str = "stop";
+const STOP_TOOL_CALLS: &str = "tool_calls";
+const STOP_END_TURN: &str = "end_turn";
+const STOP_LENGTH: &str = "length";
 /// Largest exponent of the retry backoff, so `2^n` stays finite.
 pub(crate) const MAX_BACKOFF_EXPONENT: u32 = 40;
 /// Largest relative jitter applied to a retry delay.
@@ -205,7 +217,7 @@ async fn run_task(hub: Arc<Hub>, s: Arc<Session>, cancel: CancellationToken, id:
             && m.role == Role::Assistant
             && m.error.is_none()
         {
-            m.error = Some("Aborted".into());
+            m.error = Some(ABORTED_ERROR.into());
             m.time_end.get_or_insert(now_ms());
             hub.emit_message(&s.id, m);
         }
@@ -692,7 +704,7 @@ async fn stream_with_retry(
 }
 
 fn short_error(e: &LlmError) -> String {
-    crate::util::truncate_chars(e.message.trim(), 500)
+    crate::util::truncate_chars(e.message.trim(), SHORT_ERROR_CHARS)
 }
 
 fn remove_message(hub: &Arc<Hub>, s: &Arc<Session>, id: &str) {
@@ -729,7 +741,7 @@ fn keep_aborted_partial(hub: &Arc<Hub>, s: &Arc<Session>, id: &str) {
         return;
     }
     m.time_end = Some(now_ms());
-    m.error = Some("Aborted".into());
+    m.error = Some(ABORTED_ERROR.into());
     for p in &mut m.parts {
         if let Part::Reasoning { time_end, .. } = p
             && time_end.is_none()
@@ -785,10 +797,7 @@ fn finalize_message(hub: &Arc<Hub>, s: &Arc<Session>, p: &Prep, id: &str, resp: 
                     *raw_input = arguments.clone();
                     *provider_data = pd.clone();
                     *call_id = id.clone();
-                    if let Ok((v, pu)) = parse_tool_input(arguments) {
-                        *input = v;
-                        *purpose = pu;
-                    }
+                    apply_parsed_input(arguments, input, purpose);
                 }
                 (None, b) => m.parts.push(block_to_part(b, now)),
                 _ => {}
@@ -797,8 +806,8 @@ fn finalize_message(hub: &Arc<Hub>, s: &Arc<Session>, p: &Prep, id: &str, resp: 
         m.time_end = Some(now);
         m.usage = Some(resp.usage);
         match resp.stop_reason.as_str() {
-            "stop" | "tool_calls" | "end_turn" => {}
-            "length" => {
+            STOP_END | STOP_TOOL_CALLS | STOP_END_TURN => {}
+            STOP_LENGTH => {
                 if !m.parts.iter().any(|p| matches!(p, Part::Tool { .. })) {
                     m.error = Some("The response hit the output token limit.".into());
                 }
@@ -814,12 +823,22 @@ fn finalize_message(hub: &Arc<Hub>, s: &Arc<Session>, p: &Prep, id: &str, resp: 
     // safe point (after the current tool batch).
     // Skipped when automatic compaction is about to run anyway.
     let auto_due = p.cfg.compaction.auto && ctx.auto > 0 && ctx.used >= ctx.auto;
-    if !st.context_notice && !auto_due && ctx.recommend > 0 && ctx.used >= ctx.recommend {
+    let recommend_due = ctx.recommend > 0 && ctx.used >= ctx.recommend;
+    if !st.context_notice && !auto_due && recommend_due {
         st.context_notice = true;
         st.notice_pending = true;
     }
     st.info.updated_at = now;
     hub.emit_info(&st);
+}
+
+/// Sets `input` and `purpose` from raw tool arguments. Malformed arguments leave them as they
+/// are: the call reports the parse error when it executes (see `run_one`).
+fn apply_parsed_input(raw: &str, input: &mut Value, purpose: &mut String) {
+    if let Ok((v, p)) = parse_tool_input(raw) {
+        *input = v;
+        *purpose = p;
+    }
 }
 
 fn block_to_part(b: &AssistantBlock, now: i64) -> Part {
@@ -843,8 +862,9 @@ fn block_to_part(b: &AssistantBlock, now: i64) -> Part {
             arguments,
             provider_data,
         } => {
-            let (input, purpose) =
-                parse_tool_input(arguments).unwrap_or((Value::Null, String::new()));
+            let mut input = Value::Null;
+            let mut purpose = String::new();
+            apply_parsed_input(arguments, &mut input, &mut purpose);
             tool_part(
                 id.clone(),
                 name.clone(),
@@ -1005,10 +1025,7 @@ impl Streamer {
                         purpose,
                         ..
                     } => {
-                        if let Ok((v, p)) = parse_tool_input(raw_input) {
-                            *input = v;
-                            *purpose = p;
-                        }
+                        apply_parsed_input(raw_input, input, purpose);
                     }
                     _ => {}
                 }
