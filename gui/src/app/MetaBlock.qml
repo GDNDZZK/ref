@@ -79,7 +79,7 @@ Block {
 					radius: width / 2
 					color: block.errored ? Theme.textMuted : block.agentColor
 
-					Pulse { target: agentDot; running: block.working; dimmed: 0.5 }
+					Pulse { target: agentDot; running: block.working }
 				}
 			}
 			MetaText {

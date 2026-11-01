@@ -53,7 +53,6 @@ Item {
 	Pulse {
 		target: dot
 		running: slot.working
-		dimmed: 0.5
 	}
 
 	Rectangle {
