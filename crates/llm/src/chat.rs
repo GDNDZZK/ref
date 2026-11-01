@@ -4,11 +4,11 @@
 use crate::error::stream_error;
 use crate::sse::{SseEvent, data_values, is_done};
 use crate::util::{
-    Assembler, CLIENT_OPTION_KEYS, DEFAULT_OPENAI_BASE, IMAGE_OMITTED, StreamEnd, StreamState,
-    arguments_string, bearer_header, build_headers, data_url, deep_merge, drive, endpoint,
-    error_fields, has_tool_history, is_official_openai, json_sse_headers, merge_key,
-    normalize_call_id, normalize_history, prompt_cache_key, ptr_u64, same_origin, session_headers,
-    snake_keys,
+    Assembler, CLIENT_OPTION_KEYS, DEFAULT_OPENAI_BASE, IMAGE_OMITTED, NO_TOOL_OUTPUT,
+    SEE_ATTACHED_IMAGE, StreamEnd, StreamState, arguments_string, bearer_header, build_headers,
+    data_url, deep_merge, drive, endpoint, error_fields, has_tool_history, is_official_openai,
+    json_sse_headers, merge_key, normalize_call_id, normalize_history, prompt_cache_key, ptr_u64,
+    same_origin, session_headers, snake_keys,
 };
 use crate::{
     AssistantBlock, BlockKind, ChatMessage, LlmError, Model, Provider, Request, Response,
@@ -220,9 +220,9 @@ fn convert_messages(provider: &Provider, model: &Model, req: &Request) -> Vec<Va
                     text.push_str(IMAGE_OMITTED);
                 } else if text.trim().is_empty() {
                     text = if images.is_empty() {
-                        "(no tool output)".into()
+                        NO_TOOL_OUTPUT.into()
                     } else {
-                        "(see attached image)".into()
+                        SEE_ATTACHED_IMAGE.into()
                     };
                 }
                 out.push(json!({

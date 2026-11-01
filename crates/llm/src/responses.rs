@@ -4,10 +4,11 @@
 use crate::error::stream_error;
 use crate::sse::{SseEvent, data_values};
 use crate::util::{
-    Assembler, CLIENT_OPTION_KEYS, DEFAULT_OPENAI_BASE, IMAGE_OMITTED, StreamEnd, StreamState,
-    arguments_string, bearer_header, build_headers, camel_to_snake, data_url, deep_merge, drive,
-    endpoint, error_fields, json_sse_headers, merge_key, normalize_call_id, normalize_history,
-    opt_str, prompt_cache_key, ptr_u64, same_origin, session_headers, snake_keys,
+    Assembler, CLIENT_OPTION_KEYS, DEFAULT_OPENAI_BASE, IMAGE_OMITTED, NO_TOOL_OUTPUT, StreamEnd,
+    StreamState, arguments_string, bearer_header, build_headers, camel_to_snake, data_url,
+    deep_merge, drive, endpoint, error_fields, json_sse_headers, merge_key, normalize_call_id,
+    normalize_history, opt_str, prompt_cache_key, ptr_u64, same_origin, session_headers,
+    snake_keys,
 };
 use crate::{
     AssistantBlock, BlockKind, ChatMessage, LlmError, Model, Provider, Request, Response,
@@ -240,7 +241,7 @@ fn convert_input(provider: &Provider, model: &Model, req: &Request) -> Vec<Value
             } => {
                 let output = if images.is_empty() {
                     let text = if content.trim().is_empty() {
-                        "(no tool output)"
+                        NO_TOOL_OUTPUT
                     } else {
                         content.as_str()
                     };

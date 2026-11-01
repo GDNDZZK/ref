@@ -176,6 +176,12 @@ pub(crate) fn session_headers(session_id: &str, names: &[&str]) -> Vec<(String, 
 /// Text used instead of an image for models without vision support.
 pub(crate) const IMAGE_OMITTED: &str = "(image omitted: model does not support images)";
 
+/// Text of a tool result without output or images.
+pub(crate) const NO_TOOL_OUTPUT: &str = "(no tool output)";
+
+/// Text of a tool result without output but with images.
+pub(crate) const SEE_ATTACHED_IMAGE: &str = "(see attached image)";
+
 /// `camelCase` -> `snake_case` (already snake-case keys are unchanged).
 pub(crate) fn camel_to_snake(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 4);
