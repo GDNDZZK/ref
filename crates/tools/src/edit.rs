@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::LazyLock;
+use std::time::{Duration, Instant};
 
 /// Context rows around each change in the success preview.
 const PREVIEW_CONTEXT: usize = 2;
@@ -423,6 +424,14 @@ fn apply(lines: &[&str], ops: &[Op]) -> Vec<String> {
 // Line mapping through diffs
 // ---------------------------------------------------------------------------
 
+/// Line diffs give up on pathological inputs after this long and return a coarser result.
+const DIFF_DEADLINE: Duration = Duration::from_secs(2);
+
+fn diff_ops(old: &[&str], new: &[&str]) -> Vec<similar::DiffOp> {
+    let deadline = Instant::now() + DIFF_DEADLINE;
+    similar::capture_diff_slices_deadline(similar::Algorithm::Myers, old, new, Some(deadline))
+}
+
 /// Maps 1-based lines of `old` to 1-based lines of `new` through unchanged runs.
 struct LineMap {
     map: Vec<Option<usize>>, // index = old line (1-based); [0] unused
@@ -431,13 +440,7 @@ struct LineMap {
 
 impl LineMap {
     fn build(old: &[&str], new: &[&str]) -> LineMap {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        let ops = similar::capture_diff_slices_deadline(
-            similar::Algorithm::Myers,
-            old,
-            new,
-            Some(deadline),
-        );
+        let ops = diff_ops(old, new);
         let mut map = vec![None; old.len() + 1];
         for op in ops {
             if let similar::DiffOp::Equal {
@@ -638,13 +641,7 @@ fn check_seen(
 /// Returns (preview, displayed full rows).
 fn build_preview(old: &[&str], new: &[String]) -> (String, Vec<u32>) {
     let new_refs: Vec<&str> = new.iter().map(String::as_str).collect();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    let ops = similar::capture_diff_slices_deadline(
-        similar::Algorithm::Myers,
-        old,
-        &new_refs,
-        Some(deadline),
-    );
+    let ops = diff_ops(old, &new_refs);
     // Changed regions in new-file coordinates, 0-based half-open.
     let mut regions: Vec<(usize, usize)> = Vec::new();
     for op in ops {
@@ -724,14 +721,8 @@ fn build_preview(old: &[&str], new: &[String]) -> (String, Vec<u32>) {
 /// Lines of `new` that are new content (inserted/replaced), 1-based.
 fn added_lines(old: &[&str], new: &[String]) -> Vec<u32> {
     let new_refs: Vec<&str> = new.iter().map(String::as_str).collect();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     let mut out = Vec::new();
-    for op in similar::capture_diff_slices_deadline(
-        similar::Algorithm::Myers,
-        old,
-        &new_refs,
-        Some(deadline),
-    ) {
+    for op in diff_ops(old, &new_refs) {
         if let similar::DiffOp::Insert {
             new_index, new_len, ..
         }
