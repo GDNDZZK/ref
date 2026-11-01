@@ -54,7 +54,6 @@ qt_add_qml_module(ref-gui
 		DialogButton.qml
 		DialogField.qml
 		Segmented.qml
-		ToggleSwitch.qml
 		KeyChips.qml
 		PickList.qml
 		PickRow.qml
