@@ -100,7 +100,7 @@ export interface Still {
 }
 
 export async function photograph(clients: ThreeClients, name: string): Promise<Still> {
-  return { name, web: await clients.page.screenshot({ type: 'png' }), terminal: clients.tui.outputSoFar() }
+  return { name, web: await clients.page.screenshot({ type: 'png' }), terminal: await clients.tui.settledOutput() }
 }
 
 // Saves the browser stills as web-<name>[-zh] and, in English (the terminal has one language),
