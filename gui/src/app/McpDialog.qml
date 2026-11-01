@@ -136,7 +136,7 @@ ModalDialog {
 		Text {
 			textFormat: Text.PlainText
 			width: parent.width
-			height: 64
+			height: Theme.emptyStateHeight
 			horizontalAlignment: Text.AlignHCenter
 			verticalAlignment: Text.AlignVCenter
 			visible: Workspace.mcpServers.length === 0

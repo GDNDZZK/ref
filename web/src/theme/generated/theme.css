@@ -65,6 +65,8 @@
   --sidebar-min-history-rows: 3;
   --button-height: 34px;
   --field-height: 38px;
+  --pick-row-height: 44px;
+  --empty-state-height: 64px;
   --palette-width: 560px;
   --palette-search-height: 52px;
   --palette-row-height: 40px;
