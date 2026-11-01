@@ -17,6 +17,7 @@ Column {
 	readonly property int switchWidth: 36
 	readonly property int switchHeight: 20
 	readonly property int knobInset: 2
+	readonly property real disabledOpacity: 0.4
 
 	spacing: 0
 
@@ -99,7 +100,7 @@ Column {
 
 		width: section.width
 		height: section.rowHeight
-		opacity: enabled ? 1 : Theme.disabledOpacity
+		opacity: enabled ? 1 : section.disabledOpacity
 
 		Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 
