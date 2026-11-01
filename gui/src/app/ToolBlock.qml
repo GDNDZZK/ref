@@ -30,9 +30,11 @@ Block {
 
 	readonly property var inputObject: ToolInfo.parse(inputJson)
 	readonly property string detail: ToolInfo.detail(toolName, inputObject)
-	readonly property bool hasDetails: !alwaysOpen && (inputJson !== "" || rawInput !== "" || output !== "" || images.length > 0)
+	readonly property bool hasContent: inputJson !== "" || rawInput !== "" || output !== "" || images.length > 0
+	readonly property bool hasDetails: !alwaysOpen && hasContent
 	readonly property bool awaitingPermission: toolState === ToolState.awaitingPermission
 	readonly property bool delayed: toolState === ToolState.delayed
+	readonly property bool needsAttention: awaitingPermission || delayed
 	readonly property bool alwaysOpen: toolName === "todo" && ToolInfo.todos(inputObject).length > 0
 	readonly property bool open: alwaysOpen || ((expanded || awaitingPermission) && hasDetails)
 	readonly property bool inactive: toolState === ToolState.denied || toolState === ToolState.cancelled
@@ -95,7 +97,7 @@ Block {
 		height: header.height + failure.height + body.height + permission.height
 		radius: Theme.radius
 		color: hover.hovered && block.hasDetails ? Theme.surfaceHover : Theme.surface
-		border.color: block.awaitingPermission || block.delayed ? Qt.alpha(Theme.warning, block.attentionBorderOpacity) : Theme.border
+		border.color: block.needsAttention ? Qt.alpha(Theme.warning, block.attentionBorderOpacity) : Theme.border
 
 		Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 		Behavior on border.color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
