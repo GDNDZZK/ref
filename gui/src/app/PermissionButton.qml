@@ -8,7 +8,8 @@ Item {
 	required property string iconName
 	required property string label
 	required property string keyName
-	required property color tint
+	required property color tint // hover and pressed fill, border
+	required property color textTint // icon, key cap
 
 	signal clicked()
 
@@ -40,7 +41,7 @@ Item {
 		Icon {
 			anchors.verticalCenter: parent.verticalCenter
 			name: button.iconName
-			color: button.tint
+			color: button.textTint
 		}
 		Text {
 			textFormat: Text.PlainText
@@ -55,13 +56,13 @@ Item {
 			height: button.keyCapSize
 			radius: 4
 			color: "transparent"
-			border.color: button.tint
+			border.color: button.textTint
 
 			Text {
 				textFormat: Text.PlainText
 				anchors.centerIn: parent
 				text: button.keyName
-				color: button.tint
+				color: button.textTint
 				font.family: Theme.monoFamily
 				font.pixelSize: Theme.microFontSize
 			}

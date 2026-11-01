@@ -77,7 +77,7 @@ Item {
 			textFormat: Text.PlainText
 			anchors.verticalCenter: parent.verticalCenter
 			text: root.finished ? "\u2713 " + root.counts : "\u00b7 " + root.counts
-			color: root.finished ? Theme.success : Theme.textMuted
+			color: root.finished ? Theme.successText : Theme.textMuted
 			font.pixelSize: Theme.smallFontSize
 		}
 	}

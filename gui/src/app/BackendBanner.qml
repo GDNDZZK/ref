@@ -36,7 +36,7 @@ Rectangle {
 		anchors.verticalCenter: parent.verticalCenter
 		name: "warning"
 		size: banner.iconSize
-		color: Theme.warning
+		color: Theme.warningText
 	}
 
 	Text {

@@ -97,7 +97,7 @@ Rectangle {
 			textFormat: Text.PlainText
 			width: parent.width
 			text: "? " + card.prompt.header
-			color: Theme.info
+			color: Theme.infoText
 			font.pixelSize: Theme.fontSize
 			font.bold: true
 			elide: Text.ElideRight
@@ -189,7 +189,7 @@ Rectangle {
 						textFormat: Text.PlainText
 						width: entry.width - entry.leftPadding - entryHeader.width - entry.spacing
 						text: entry.modelData.answer
-						color: entry.modelData.answered ? Theme.text : Theme.warning
+						color: entry.modelData.answered ? Theme.text : Theme.warningText
 						font.pixelSize: Theme.secondaryFontSize
 						wrapMode: Text.Wrap
 					}

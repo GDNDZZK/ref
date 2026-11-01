@@ -31,6 +31,12 @@ QtObject {
 	readonly property color warningSurface: dark ? "#2b2417" : "#fcf4e2"
 	readonly property color warningBorder: dark ? "#5a4723" : "#ecd29a"
 	readonly property color idleDot: dark ? "#808e909a" : "#806b6d75" // textMuted at half opacity: a session or server with nothing going on
+	// Tone colours for text and icons (4.5:1 / 3:1 on background and surface). Fills, dots and bars stay on the tones above.
+	readonly property color accentText: dark ? "#7aa2f7" : "#356889"
+	readonly property color successText: dark ? "#6cc28a" : "#00723a"
+	readonly property color dangerText: dark ? "#ec6f73" : "#ba2632"
+	readonly property color warningText: dark ? "#e6b450" : "#8c5802"
+	readonly property color infoText: dark ? "#6fb7e0" : "#04689d"
 	readonly property color scrim: dark ? "#8c000000" : "#40000000" // behind dialogs
 	// Messages from other sessions, diff hunks, tool input.
 	readonly property color info: dark ? "#6fb7e0" : "#2a7fb5"

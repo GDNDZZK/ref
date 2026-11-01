@@ -69,7 +69,7 @@ Item {
 			visible: section.path !== ""
 			width: parent.width
 			text: section.path
-			color: Theme.info
+			color: Theme.infoText
 			font.family: Theme.monoFamily
 			font.pixelSize: Theme.codeFontSize
 			elide: Text.ElideMiddle
@@ -88,6 +88,7 @@ Item {
 					label: qsTr("Allow")
 					keyName: "a"
 					tint: Theme.success
+					textTint: Theme.successText
 					onClicked: section.answered(true, false)
 				}
 				PermissionButton {
@@ -95,6 +96,7 @@ Item {
 					label: qsTr("Allow for session")
 					keyName: "s"
 					tint: Theme.accent
+					textTint: Theme.accentText
 					onClicked: section.answered(true, true)
 				}
 				PermissionButton {
@@ -102,6 +104,7 @@ Item {
 					label: qsTr("Deny")
 					keyName: "d"
 					tint: Theme.danger
+					textTint: Theme.dangerText
 					onClicked: section.answered(false, false)
 				}
 			}

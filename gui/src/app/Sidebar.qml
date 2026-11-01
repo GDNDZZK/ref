@@ -239,7 +239,7 @@ Rectangle {
 			height: sidebar.searchHeight
 			radius: 16
 			color: Theme.surface
-			border.color: searchInput.activeFocus ? Theme.accent : Theme.border
+			border.color: searchInput.activeFocus ? Theme.accentText : Theme.border
 
 			Behavior on border.color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 
