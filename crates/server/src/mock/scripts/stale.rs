@@ -119,7 +119,6 @@ fn stale(ctx: &Ctx) -> Round {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mock::script::Step;
     use crate::mock::scripts::tests::ctx;
 
     /// The context of `round` after the tool results `results`.
@@ -130,14 +129,7 @@ mod tests {
     }
 
     fn tool(round: &Round) -> (&'static str, Value) {
-        round
-            .steps
-            .iter()
-            .find_map(|s| match s {
-                Step::Tool(c) => Some((c.name, c.input.clone())),
-                _ => None,
-            })
-            .expect("a tool call")
+        round.tool_calls().into_iter().next().expect("a tool call")
     }
 
     const READ: &str = "[scratch/src/parser.rs#AB12]\n1://! Rows.\n12:pub fn parse_line(t: &str) {\n22:    lines.filter_map(parse_line)";

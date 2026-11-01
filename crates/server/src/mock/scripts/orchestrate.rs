@@ -396,17 +396,6 @@ mod tests {
         }
     }
 
-    fn tools(round: &Round) -> Vec<(&'static str, Value)> {
-        round
-            .steps
-            .iter()
-            .filter_map(|s| match s {
-                Step::Tool(c) => Some((c.name, c.input.clone())),
-                _ => None,
-            })
-            .collect()
-    }
-
     fn text(round: &Round) -> String {
         round
             .steps
@@ -431,14 +420,14 @@ mod tests {
     fn the_main_session_plans_then_creates_one_helper_per_round() {
         let plan = orchestrate(&ctx(0, 0, "orchestrate fix it"));
         assert!(text(&plan).starts_with("The parser bug has four parts"));
-        let todo = &tools(&plan)[0];
+        let todo = &plan.tool_calls()[0];
         assert_eq!(todo.0, "todo");
         assert_eq!(todo.1["todos"].as_array().unwrap().len(), 5);
         assert_eq!(statuses(&todo.1)[0], "in_progress");
 
         for (round, (name, agent)) in CREW.iter().enumerate() {
             let r = orchestrate(&ctx(round + 1, 0, "orchestrate fix it"));
-            let calls = tools(&r);
+            let calls = r.tool_calls();
             assert_eq!(calls.len(), 1);
             let (tool, input) = &calls[0];
             assert_eq!(*tool, "create_session");
@@ -449,7 +438,7 @@ mod tests {
             assert_eq!(text(&r), format!("Starting {name}.\n"));
         }
         let last = orchestrate(&ctx(5, 0, "orchestrate fix it"));
-        assert!(tools(&last).is_empty());
+        assert!(last.tool_calls().is_empty());
         assert!(text(&last).contains("Four helpers are working"));
     }
 
@@ -471,14 +460,14 @@ mod tests {
         for k in 1..CREW_REPORTS {
             let first = report(&ctx(0, k, &envelope()));
             assert_eq!(text(&first), format!("Report {k} of 4 from scout.\n"));
-            let todo = &tools(&first)[0];
+            let todo = &first.tool_calls()[0];
             let done = statuses(&todo.1)
                 .iter()
                 .filter(|s| **s == "completed")
                 .count();
             assert_eq!(done, k);
             let closing = report(&ctx(1, k, &envelope()));
-            assert!(tools(&closing).is_empty());
+            assert!(closing.tool_calls().is_empty());
             assert!(
                 text(&closing).contains("still working"),
                 "{}",
@@ -491,7 +480,7 @@ mod tests {
     fn the_fourth_report_orders_the_review() {
         let first = report(&ctx(0, 4, &envelope()));
         assert!(text(&first).starts_with("All four have reported"));
-        let calls = tools(&first);
+        let calls = first.tool_calls();
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].0, "todo");
         assert_eq!(
@@ -518,7 +507,7 @@ mod tests {
     fn the_fifth_report_ends_with_the_summary() {
         let todo = report(&ctx(0, 5, &envelope()));
         assert!(
-            statuses(&tools(&todo)[0].1)
+            statuses(&todo.tool_calls()[0].1)
                 .iter()
                 .all(|s| *s == "completed")
         );
@@ -562,7 +551,7 @@ mod tests {
         for (play, report_round, expected) in workers {
             let mut sent = Vec::new();
             for round in 0..=report_round + 1 {
-                for (tool, input) in tools(&play(&ctx(round, 0, ""))) {
+                for (tool, input) in play(&ctx(round, 0, "")).tool_calls() {
                     if tool == "send_message" {
                         sent.push((round, input));
                     }
@@ -574,7 +563,7 @@ mod tests {
             assert!(sent[0].1["message"].as_str().unwrap().starts_with(expected));
             let after = play(&ctx(report_round + 1, 0, ""));
             assert_eq!(text(&after), "Reported.");
-            assert!(tools(&after).is_empty());
+            assert!(after.tool_calls().is_empty());
         }
     }
 
@@ -613,7 +602,8 @@ mod tests {
     }
 
     fn report_of(round: &Round) -> String {
-        let (name, input) = tools(round)
+        let (name, input) = round
+            .tool_calls()
             .into_iter()
             .find(|(n, _)| *n == "send_message")
             .unwrap();
@@ -657,7 +647,7 @@ mod tests {
         c.tool_results = vec![
             "[src/parser.rs#AB12]\n19:fn parse_items() {\n20:    for i in 0..=items.len() {".into(),
         ];
-        let edit = &tools(&fixer(&c))[0];
+        let edit = &fixer(&c).tool_calls()[0];
         assert_eq!(edit.0, "edit");
         assert_eq!(edit.1["tag"], "AB12");
         assert_eq!(edit.1["edits"][0]["start"], 20);
@@ -700,7 +690,7 @@ mod tests {
                 assert!(text(&round).starts_with(&format!("Report {k} of 4")), "{k}");
                 continue;
             }
-            let calls = tools(&round);
+            let calls = round.tool_calls();
             assert_eq!(
                 calls.last().unwrap().1["name"],
                 "reviewer",
@@ -710,7 +700,7 @@ mod tests {
         users.push(envelope());
         let todo = answer(&users, 0);
         assert!(
-            statuses(&tools(&todo)[0].1)
+            statuses(&todo.tool_calls()[0].1)
                 .iter()
                 .all(|s| *s == "completed")
         );

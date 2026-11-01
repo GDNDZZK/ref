@@ -132,6 +132,20 @@ impl Round {
     }
 }
 
+#[cfg(test)]
+impl Round {
+    /// Name and input of the tool calls of the round, in order.
+    pub(super) fn tool_calls(&self) -> Vec<(&'static str, Value)> {
+        self.steps
+            .iter()
+            .filter_map(|s| match s {
+                Step::Tool(c) => Some((c.name, c.input.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+}
+
 /// Everything a script knows about the request it answers.
 #[derive(Debug, Clone)]
 pub(super) struct Ctx {
