@@ -15,6 +15,7 @@ use ref_proto::ImageData;
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use reqwest::{StatusCode, Url};
 use serde_json::{Value, json};
+use std::path::PathBuf;
 use std::time::Duration;
 use tokio::time::Instant;
 
@@ -536,42 +537,40 @@ async fn github_issue(
 }
 
 /// Header, body (cut to the inline budget, the full text saved to a file) and metadata.
-fn finish(mut out: Out, started: std::time::Instant) -> ToolOutput {
-    let total_bytes = out.body.len();
-    let total_lines = out.body.lines().count();
-    if out.error && out.body.chars().count() > ERROR_BODY_CHARS {
-        let (cut, _) = util::truncate_chars(&out.body, ERROR_BODY_CHARS);
-        out.body = format!("{cut}\n[… error page cut …]");
-    }
-    let mut saved = None;
-    let cut = !out.error
-        && (total_bytes > util::INLINE_OUTPUT_MAX_BYTES
-            || total_lines > util::INLINE_OUTPUT_MAX_LINES);
-    if cut {
-        let path = util::spill_path(out.ext.as_str());
-        let ok = path
-            .parent()
-            .map(std::fs::create_dir_all)
-            .transpose()
-            .and_then(|_| std::fs::write(&path, &out.body));
-        match ok {
-            Ok(_) => saved = Some(path),
-            Err(e) => tracing::warn!(
+/// Saves the full body to a file, then cuts `out.body` to the inline budget (at a line end when
+/// possible). Returns the file, or `None` if it could not be written.
+fn cut_inline(out: &mut Out) -> Option<PathBuf> {
+    let path = util::spill_path(out.ext.as_str());
+    let ok = path
+        .parent()
+        .map(std::fs::create_dir_all)
+        .transpose()
+        .and_then(|_| std::fs::write(&path, &out.body));
+    let saved = match ok {
+        Ok(_) => Some(path),
+        Err(e) => {
+            tracing::warn!(
                 "webfetch: cannot save full content to {}: {e}",
                 path.display()
-            ),
+            );
+            None
         }
-        let mut end = util::floor_char_boundary(&out.body, util::INLINE_OUTPUT_MAX_BYTES);
-        if let Some((i, _)) = out.body[..end]
-            .match_indices('\n')
-            .nth(util::INLINE_OUTPUT_MAX_LINES - 1)
-        {
-            end = i;
-        } else if let Some(i) = out.body[..end].rfind('\n') {
-            end = i;
-        }
-        out.body.truncate(end);
+    };
+    let mut end = util::floor_char_boundary(&out.body, util::INLINE_OUTPUT_MAX_BYTES);
+    if let Some((i, _)) = out.body[..end]
+        .match_indices('\n')
+        .nth(util::INLINE_OUTPUT_MAX_LINES - 1)
+    {
+        end = i;
+    } else if let Some(i) = out.body[..end].rfind('\n') {
+        end = i;
     }
+    out.body.truncate(end);
+    saved
+}
+
+/// The header lines of the result (URL, status, content type, title, notes) and the `---` rule.
+fn header_text(out: &Out) -> String {
     let mut text = String::new();
     if out.url == out.requested {
         text.push_str(&format!("URL: {}\n", out.url));
@@ -599,6 +598,21 @@ fn finish(mut out: Out, started: std::time::Instant) -> ToolOutput {
         text.push_str(&format!("Note: {n}\n"));
     }
     text.push_str("---\n");
+    text
+}
+
+fn finish(mut out: Out, started: std::time::Instant) -> ToolOutput {
+    let total_bytes = out.body.len();
+    let total_lines = out.body.lines().count();
+    if out.error && out.body.chars().count() > ERROR_BODY_CHARS {
+        let (cut, _) = util::truncate_chars(&out.body, ERROR_BODY_CHARS);
+        out.body = format!("{cut}\n[… error page cut …]");
+    }
+    let cut = !out.error
+        && (total_bytes > util::INLINE_OUTPUT_MAX_BYTES
+            || total_lines > util::INLINE_OUTPUT_MAX_LINES);
+    let saved = if cut { cut_inline(&mut out) } else { None };
+    let mut text = header_text(&out);
     text.push_str(if out.body.trim().is_empty() {
         "(no content)"
     } else {
