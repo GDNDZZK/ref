@@ -189,6 +189,7 @@
   "sidebar": {
     "newSession": "新建会话",
     "newSessionIn": "在其他文件夹新建会话…",
+    "todo": "待办",
     "running": "运行中",
     "history": "历史",
     "searchHistory": "搜索历史",
