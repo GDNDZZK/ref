@@ -1,13 +1,13 @@
 //! The question dialog: keys, rendering and the replies it sends.
 
-use crossterm::event::{Event, KeyCode, KeyModifiers, MouseButton, MouseEventKind};
+use crossterm::event::{Event, KeyCode, MouseButton, MouseEventKind};
 use ref_proto::*;
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::app::App;
 use crate::net::NetEvent;
-use crate::tests::{TEST_SESSION, key, mouse, render, test_app_with_requests};
+use crate::tests::{TEST_SESSION, mouse, press, render, test_app_with_requests, type_text};
 
 const PAST_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
 
@@ -90,16 +90,6 @@ fn open(questions: Vec<Question>) -> (App, UnboundedReceiver<ClientFrame>) {
     render(&mut app, 100, 30);
     app.question.as_mut().unwrap().opened -= PAST_GRACE;
     (app, rx)
-}
-
-fn press(app: &mut App, code: KeyCode) {
-    crate::input::handle(app, key(code, KeyModifiers::NONE));
-}
-
-fn type_text(app: &mut App, text: &str) {
-    for c in text.chars() {
-        press(app, KeyCode::Char(c));
-    }
 }
 
 /// Requests sent since the last call.
@@ -668,10 +658,7 @@ fn small_terminals_and_long_texts_do_not_break_the_layout() {
     q.options[1].label = "L".repeat(120);
     let (mut app, _rx) = open(vec![q, checks()]);
     for (w, h) in [(100, 30), (60, 14), (40, 12), (24, 8), (10, 4), (1, 1)] {
-        let (_, s) = render(&mut app, w, h);
-        if w == 40 {
-            println!("{s}");
-        }
+        render(&mut app, w, h);
     }
     // The cursor row stays on screen when the page is taller than the dialog.
     for _ in 0..4 {
