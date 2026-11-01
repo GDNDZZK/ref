@@ -21,55 +21,40 @@ Block {
 	required property bool expanded
 	required property bool contextStart
 
-	readonly property bool opensLaterTurn: opensTurn
-	readonly property bool isCompaction: source === "compaction"
-	readonly property bool hasMarker: source !== "human" && !isCompaction
+	readonly property bool isCompaction: source === MessageSource.compaction
+	readonly property bool isShell: source === MessageSource.shell
+	readonly property bool hasMarker: source !== MessageSource.human && !isCompaction
 	readonly property int markerBarWidth: 3
 	readonly property int markerGap: 10
 	readonly property int headerGap: 6
 
-	// Who the message is from, as its header says it.
-	readonly property string markerTitle: {
-		switch (source) {
-		case "peer":
-			return qsTr("message from \"%1\"").arg(sender)
-		case "spawn":
-			return qsTr("created by \"%1\"").arg(sender)
-		case "shell":
-			return qsTr("shell")
-		case "reminder":
-			return qsTr("reminder")
-		default:
-			return ""
-		}
+	// Who the message is from, as its header says it, by source.
+	readonly property var markers: ({
+		[MessageSource.peer]: { title: qsTr("message from \"%1\"").arg(sender), icon: "chat-send", color: Theme.info },
+		[MessageSource.spawn]: { title: qsTr("created by \"%1\"").arg(sender), icon: "chat-plus", color: Theme.info },
+		[MessageSource.shell]: { title: qsTr("shell"), icon: "terminal", color: Theme.warning },
+		[MessageSource.reminder]: { title: qsTr("reminder"), icon: "retry", color: Theme.warning }
+	})
+	readonly property var marker: markers[source] ?? { title: "", icon: "", color: Theme.warning }
+
+	// The bubble fill by what the message is.
+	function bubbleColor() {
+		if (isShell)
+			return Theme.codeBackground
+		return hasMarker ? Theme.surface : Theme.userBubble
 	}
-	readonly property string markerIcon: {
-		switch (source) {
-		case "peer":
-			return "chat-send"
-		case "spawn":
-			return "chat-plus"
-		case "shell":
-			return "terminal"
-		case "reminder":
-			return "retry"
-		default:
-			return ""
-		}
-	}
-	readonly property color markerColor: source === "peer" || source === "spawn" ? Theme.info : Theme.warning
 
 	// Draws the divider across only for a freshly sent message.
-	onAdded: if (opensLaterTurn) dividerGrow.restart()
+	onAdded: if (opensTurn) dividerGrow.restart()
 
 	Column {
 		width: block.columnWidth
-		topPadding: block.opensLaterTurn ? Theme.turnGap : 0
+		topPadding: block.opensTurn ? Theme.turnGap : 0
 		spacing: Theme.turnGap
 
 		Rectangle {
 			id: divider
-			visible: block.opensLaterTurn
+			visible: block.opensTurn
 			width: parent.width
 			height: 1
 			color: Theme.border
@@ -224,13 +209,13 @@ Block {
 			readonly property int horizontalPadding: 14
 			readonly property int verticalPadding: 9
 			readonly property real markerIndent: block.hasMarker ? block.markerBarWidth + block.markerGap : 0
-			readonly property real textWidth: Math.max(message.width, marker.visible ? marker.width : 0)
+			readonly property real textWidth: Math.max(message.width, markerRow.visible ? markerRow.width : 0)
 
 			visible: !block.isCompaction
 			width: markerIndent + textWidth + 2 * horizontalPadding
-			height: (marker.visible ? marker.height + block.headerGap : 0) + message.height + 2 * verticalPadding
+			height: (markerRow.visible ? markerRow.height + block.headerGap : 0) + message.height + 2 * verticalPadding
 			radius: Theme.radiusLarge
-			color: block.source === "shell" ? Theme.codeBackground : block.hasMarker ? Theme.surface : Theme.userBubble
+			color: block.bubbleColor()
 			border.color: block.hasMarker ? Theme.border : Theme.userBubbleBorder
 
 			Rectangle {
@@ -240,11 +225,11 @@ Block {
 				width: block.markerBarWidth
 				height: bubble.height - 2 * bubble.verticalPadding
 				radius: width / 2
-				color: block.markerColor
+				color: block.marker.color
 			}
 
 			Row {
-				id: marker
+				id: markerRow
 				visible: block.hasMarker
 				x: bubble.horizontalPadding + bubble.markerIndent
 				y: bubble.verticalPadding
@@ -252,15 +237,15 @@ Block {
 
 				Icon {
 					anchors.verticalCenter: parent.verticalCenter
-					name: block.markerIcon
+					name: block.marker.icon
 					size: 16
-					color: block.markerColor
+					color: block.marker.color
 				}
 				Text {
 					textFormat: Text.PlainText
 					anchors.verticalCenter: parent.verticalCenter
-					text: block.markerTitle
-					color: block.markerColor
+					text: block.marker.title
+					color: block.marker.color
 					font.pixelSize: Theme.smallFontSize
 					font.bold: true
 				}
@@ -269,11 +254,11 @@ Block {
 			ProseText {
 				id: message
 				x: bubble.horizontalPadding + bubble.markerIndent
-				y: bubble.verticalPadding + (marker.visible ? marker.height + block.headerGap : 0)
+				y: bubble.verticalPadding + (markerRow.visible ? markerRow.height + block.headerGap : 0)
 				width: Math.min(implicitWidth, block.columnWidth - 2 * bubble.horizontalPadding - bubble.markerIndent)
-				textFormat: block.source === "shell" ? TextEdit.MarkdownText : TextEdit.PlainText
+				textFormat: block.isShell ? TextEdit.MarkdownText : TextEdit.PlainText
 				text: block.content
-				font.family: block.source === "shell" ? Theme.monoFamily : font.family
+				font.family: block.isShell ? Theme.monoFamily : font.family
 			}
 		}
 	}
