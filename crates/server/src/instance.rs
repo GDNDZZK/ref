@@ -197,7 +197,7 @@ pub async fn status(json_out: bool) -> i32 {
         let arr: Vec<serde_json::Value> = rows
             .iter()
             .map(|(i, n)| {
-                let mut v = serde_json::to_value(i).unwrap_or_default();
+                let mut v = serde_json::to_value(i).expect("InstanceInfo serialises");
                 if let Some(o) = v.as_object_mut() {
                     o.insert("sessions".into(), serde_json::json!(n));
                     o.insert("url".into(), serde_json::json!(connect_url(i)));
@@ -207,7 +207,7 @@ pub async fn status(json_out: bool) -> i32 {
             .collect();
         println!(
             "{}",
-            serde_json::to_string_pretty(&arr).unwrap_or_else(|_| "[]".into())
+            serde_json::to_string_pretty(&arr).expect("JSON values serialise")
         );
     } else if rows.is_empty() {
         println!(
