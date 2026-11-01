@@ -11,7 +11,7 @@ Item {
 	signal activated()
 
 	width: ListView.view ? ListView.view.width : 0
-	height: 44
+	height: Theme.pickRowHeight
 	opacity: enabled ? 1 : Theme.disabledOpacity
 
 	HoverHandler {

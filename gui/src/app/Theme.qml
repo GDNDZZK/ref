@@ -86,6 +86,8 @@ QtObject {
 	readonly property int sidebarMinHistoryRows: 3
 	readonly property int buttonHeight: 34
 	readonly property int fieldHeight: 38
+	readonly property int pickRowHeight: 44
+	readonly property int emptyStateHeight: 64
 	readonly property int paletteWidth: 560
 	readonly property int paletteSearchHeight: 52
 	readonly property int paletteRowHeight: 40

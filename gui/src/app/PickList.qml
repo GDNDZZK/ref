@@ -16,7 +16,7 @@ Item {
 	property string sectionProperty: ""
 	// The label of a section from the value of its property.
 	property var sectionLabel: section => section
-	property int visibleHeight: 7 * 44 // the list is this tall at most
+	property int visibleHeight: 7 * Theme.pickRowHeight // the list is this tall at most
 	property string emptyText: qsTr("Nothing found")
 	property bool searchable: true
 	readonly property alias count: view.count
@@ -43,7 +43,7 @@ Item {
 		}
 	}
 
-	implicitHeight: (searchable ? Theme.paletteSearchHeight + 1 : 0) + Math.max(Math.min(view.contentHeight, visibleHeight), view.count === 0 ? 64 : 0)
+	implicitHeight: (searchable ? Theme.paletteSearchHeight + 1 : 0) + Math.max(Math.min(view.contentHeight, visibleHeight), view.count === 0 ? Theme.emptyStateHeight : 0)
 
 	Behavior on implicitHeight { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 

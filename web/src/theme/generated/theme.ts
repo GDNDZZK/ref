@@ -113,6 +113,8 @@ export const metrics = {
   sidebarMinHistoryRows: 3,
   buttonHeight: 34,
   fieldHeight: 38,
+  pickRowHeight: 44,
+  emptyStateHeight: 64,
   paletteWidth: 560,
   paletteSearchHeight: 52,
   paletteRowHeight: 40,
