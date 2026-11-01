@@ -3063,7 +3063,6 @@ dependencies = [
  "ref-sys",
  "regex",
  "reqwest",
- "serde",
  "serde_json",
  "similar",
  "tokio",
