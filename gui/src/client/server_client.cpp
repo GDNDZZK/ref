@@ -171,8 +171,14 @@ void ServerClient::onHeartbeat()
 QCoro::Task<> ServerClient::ping()
 {
 	m_pingOutstanding = true;
-	static_cast<void>(co_await request(proto::request::ping()));
+	const Result<QJsonObject> answer = co_await request(proto::request::ping());
 	m_pingOutstanding = false;
+	// Nothing else to do on failure: the connection is gone already, or the dead-peer check in
+	// onHeartbeat() drops it when the backend stays silent.
+	if(!answer)
+	{
+		qCDebug(lcClient) << "ping failed:" << answer.error();
+	}
 }
 
 void ServerClient::stopHeartbeat()
