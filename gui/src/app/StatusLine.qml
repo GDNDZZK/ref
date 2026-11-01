@@ -62,7 +62,7 @@ Item {
 	}
 
 	Row {
-		anchors { left: parent.left; right: context.left; rightMargin: line.itemSpacing; verticalCenter: parent.verticalCenter }
+		anchors { left: parent.left; right: trailing.left; rightMargin: line.itemSpacing; verticalCenter: parent.verticalCenter }
 		spacing: line.itemSpacing
 		clip: true
 
@@ -109,50 +109,59 @@ Item {
 			color: Theme.textMuted
 			font.pixelSize: Theme.smallFontSize
 		}
+	}
+
+	// The right end: the to-do list and the context meter, as in the terminal UI and the web.
+	Row {
+		id: trailing
+		anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+		spacing: line.itemSpacing * 2
+
 		TodoProgress {
 			anchors.verticalCenter: parent.verticalCenter
 			session: line.session
 			maxWidth: line.width / 2
+			bounds: line
 			onDismissed: line.todoDismissed()
 		}
-	}
 
-	Row {
-		id: context
-		anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-		spacing: line.itemSpacing
-		visible: line.contextMax > 0
-
-		Text {
-			textFormat: Text.PlainText
+		Row {
+			id: context
 			anchors.verticalCenter: parent.verticalCenter
-			text: Format.tokens(line.contextUsed) + " / " + Format.tokens(line.contextMax)
-			color: line.contextColor === Theme.accent ? Theme.textMuted : line.contextColor
-			font.pixelSize: Theme.smallFontSize
-		}
-		Rectangle {
-			anchors.verticalCenter: parent.verticalCenter
-			width: line.barWidth
-			height: line.barHeight
-			radius: height / 2
-			color: Theme.border
+			spacing: line.itemSpacing
+			visible: line.contextMax > 0
 
-			Rectangle {
-				width: parent.width * line.contextRatio
-				height: parent.height
-				radius: parent.radius
-				color: line.contextColor
-
-				Behavior on width { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-				Behavior on color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+			Text {
+				textFormat: Text.PlainText
+				anchors.verticalCenter: parent.verticalCenter
+				text: Format.tokens(line.contextUsed) + " / " + Format.tokens(line.contextMax)
+				color: line.contextColor === Theme.accent ? Theme.textMuted : line.contextColor
+				font.pixelSize: Theme.smallFontSize
 			}
-		}
+			Rectangle {
+				anchors.verticalCenter: parent.verticalCenter
+				width: line.barWidth
+				height: line.barHeight
+				radius: height / 2
+				color: Theme.border
 
-		HoverHandler { id: contextHover }
-		PlainToolTip {
-			visible: contextHover.hovered
-			text: qsTr("Context: %1 of %2 tokens. Compaction is recommended at %3 and automatic at %4.")
-				.arg(line.contextUsed).arg(line.contextMax).arg(line.session.contextRecommend).arg(line.session.contextAuto)
+				Rectangle {
+					width: parent.width * line.contextRatio
+					height: parent.height
+					radius: parent.radius
+					color: line.contextColor
+
+					Behavior on width { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+					Behavior on color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+				}
+			}
+
+			HoverHandler { id: contextHover }
+			PlainToolTip {
+				visible: contextHover.hovered
+				text: qsTr("Context: %1 of %2 tokens. Compaction is recommended at %3 and automatic at %4.")
+					.arg(line.contextUsed).arg(line.contextMax).arg(line.session.contextRecommend).arg(line.session.contextAuto)
+			}
 		}
 	}
 }
