@@ -71,9 +71,6 @@ class ChatSession : public QObject
 	Q_PROPERTY(bool answerKeysActive READ answerKeysActive NOTIFY answerChanged)
 
 public:
-	// How long a request or question is shown before the keys answer it: the user may still be typing.
-	static constexpr std::chrono::milliseconds PermissionGuard{350};
-
 	// `backend` is shared by all sessions of the window and outlives them.
 	ChatSession(refgui::client::Backend& backend, QString sessionId, QObject* parent = nullptr);
 
@@ -173,6 +170,9 @@ signals:
 	void draftRestored(const QString& text, const QList<refgui::proto::NamedImage>& images);
 
 private:
+	// How long a request or question is shown before the keys answer it: the user may still be typing.
+	static constexpr std::chrono::milliseconds PermissionGuard{350};
+
 	QCoro::Task<> sendPrompt(QString text);
 	QCoro::Task<> sendAbort();
 	QCoro::Task<> fetchOlder();

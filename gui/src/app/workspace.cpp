@@ -116,6 +116,12 @@ void Workspace::setWindowActive(bool active)
 	emit windowActiveChanged();
 }
 
+bool Workspace::isProtocolOutdated() const
+{
+	const bool connected = m_backend.state() == refgui::client::Backend::State::Connected;
+	return connected && m_backend.hello().protocol < refgui::proto::ProtocolVersion;
+}
+
 bool Workspace::isBackendLocal() const
 {
 	const auto* remote = std::get_if<Backend::Mode::Remote>(&m_options.source);
@@ -254,7 +260,8 @@ QCoro::Task<> Workspace::openFirstSession()
 	QString sessionId = start.sessionId;
 	if(start.kind == Kind::Continue)
 	{
-		const auto history = co_await client.listHistory(m_cwd, 1);
+		constexpr int NewestOnly = 1;
+		const auto history = co_await client.listHistory(m_cwd, NewestOnly);
 		if(!history)
 		{
 			fail(history.error());
@@ -324,7 +331,15 @@ QString Workspace::nameOf(const QString& sessionId) const
 	{
 		return sessionId;
 	}
-	return !info->name.isEmpty() ? info->name : !info->title.isEmpty() ? info->title : sessionId;
+	if(!info->name.isEmpty())
+	{
+		return info->name;
+	}
+	if(!info->title.isEmpty())
+	{
+		return info->title;
+	}
+	return sessionId;
 }
 
 // The session a command acts on: the one asked for, else the focused tile, else the current one.
@@ -400,7 +415,8 @@ QCoro::Task<Workspace::Done> Workspace::show(QString sessionId)
 	{
 		co_return std::unexpected(attached.error());
 	}
-	if(serial != m_showSerial && &target != m_current && !m_split)
+	const bool supersededByNewerShow = serial != m_showSerial && &target != m_current && !m_split;
+	if(supersededByNewerShow)
 	{
 		// The user has moved on to another session meanwhile.
 		static_cast<void>(co_await target.detach());
@@ -408,7 +424,8 @@ QCoro::Task<Workspace::Done> Workspace::show(QString sessionId)
 	}
 	ChatSession* old = m_current;
 	setCurrent(&target);
-	if(old != nullptr && old != &target && !m_split && old->isAttached() && !m_leaving.contains(old->sessionId()))
+	const bool shouldDetachOld = old != nullptr && old != &target && !m_split && old->isAttached() && !m_leaving.contains(old->sessionId());
+	if(shouldDetachOld)
 	{
 		static_cast<void>(co_await old->detach());
 	}
