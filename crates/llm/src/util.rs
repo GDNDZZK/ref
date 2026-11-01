@@ -408,6 +408,48 @@ pub(crate) enum StreamEnd {
     Eof,
 }
 
+/// Debug aid: dump the request body into `REF_DUMP_REQUESTS` (never headers, which hold
+/// credentials).
+fn dump_request(payload: &[u8]) {
+    let Some(dir) = std::env::var_os(DUMP_REQUESTS_ENV) else {
+        return;
+    };
+    let path = std::path::Path::new(&dir).join(format!(
+        "req-{}.json",
+        chrono::Utc::now().timestamp_millis()
+    ));
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        tracing::warn!(error = %e, "cannot create the request dump directory");
+    }
+    if let Err(e) = std::fs::write(&path, payload) {
+        tracing::warn!(error = %e, path = %path.display(), "cannot dump the request body");
+    }
+}
+
+/// POST `payload` and wait up to `idle` for the response headers.
+async fn send_request(
+    url: &str,
+    headers: HeaderMap,
+    payload: Vec<u8>,
+    idle: Duration,
+    cancel: &CancellationToken,
+) -> Result<reqwest::Response, LlmError> {
+    dump_request(&payload);
+    let request = crate::http_client(url)
+        .post(url)
+        .headers(headers)
+        .body(payload)
+        .send();
+    tokio::select! {
+        _ = cancel.cancelled() => Err(LlmError::cancelled()),
+        r = tokio::time::timeout(idle, request) => match r {
+            Err(_) => Err(LlmError::transient("timed out waiting for response headers")),
+            Ok(Err(e)) => Err(network_error(&e)),
+            Ok(Ok(resp)) => Ok(resp),
+        },
+    }
+}
+
 /// POST `body` to `url` and feed every SSE event to `handle` until it
 /// returns `Ok(true)` (terminal event) or the stream ends.
 ///
@@ -427,33 +469,7 @@ pub(crate) async fn run_sse(
     let payload = serde_json::to_vec(body)
         .map_err(|e| LlmError::fatal(format!("failed to encode request: {e}")))?;
     let idle = chunk_timeout(provider);
-    if let Some(dir) = std::env::var_os(DUMP_REQUESTS_ENV) {
-        // Debug aid: dump request bodies (never headers, which hold credentials).
-        let path = std::path::Path::new(&dir).join(format!(
-            "req-{}.json",
-            chrono::Utc::now().timestamp_millis()
-        ));
-        if let Err(e) = std::fs::create_dir_all(&dir) {
-            tracing::warn!(error = %e, "cannot create the request dump directory");
-        }
-        if let Err(e) = std::fs::write(&path, &payload) {
-            tracing::warn!(error = %e, path = %path.display(), "cannot dump the request body");
-        }
-    }
-    let request = crate::http_client(url)
-        .post(url)
-        .headers(headers)
-        .body(payload)
-        .send();
-
-    let resp = tokio::select! {
-        _ = cancel.cancelled() => return Err(LlmError::cancelled()),
-        r = tokio::time::timeout(idle, request) => match r {
-            Err(_) => return Err(LlmError::transient("timed out waiting for response headers")),
-            Ok(Err(e)) => return Err(network_error(&e)),
-            Ok(Ok(resp)) => resp,
-        },
-    };
+    let resp = send_request(url, headers, payload, idle, cancel).await?;
 
     let status = resp.status();
     if !status.is_success() {
