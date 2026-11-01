@@ -66,21 +66,21 @@ Item {
 
 	function componentFor(id) {
 		return {
-			"palette": paletteDialog,
-			"settings": settings,
-			"sessions": sessions,
-			"models": models,
-			"agents": agents,
-			"variants": variants,
-			"help": help,
-			"mcp": mcp,
-			"peers": peers,
-			"export": exportDialog,
-			"cd": cd,
-			"new-in": newIn,
-			"close": closeDialog,
-			"rename": rename,
-			"delete-history": deleteHistory
+			[DialogId.palette]: paletteDialog,
+			[DialogId.settings]: settings,
+			[DialogId.sessions]: sessions,
+			[DialogId.models]: models,
+			[DialogId.agents]: agents,
+			[DialogId.variants]: variants,
+			[DialogId.help]: help,
+			[DialogId.mcp]: mcp,
+			[DialogId.peers]: peers,
+			[DialogId.exportSession]: exportDialog,
+			[DialogId.cd]: cd,
+			[DialogId.newIn]: newIn,
+			[DialogId.closeSession]: closeDialog,
+			[DialogId.rename]: rename,
+			[DialogId.deleteHistory]: deleteHistory
 		}[id] ?? null
 	}
 

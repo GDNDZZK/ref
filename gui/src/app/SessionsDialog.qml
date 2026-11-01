@@ -7,7 +7,7 @@ import RefGui
 ModalDialog {
 	id: dialog
 
-	readonly property bool closing: Workspace.dialogArgs.mode === "close"
+	readonly property bool closing: Workspace.dialogArgs.mode === DialogId.closeMode
 
 	title: closing ? qsTr("Close a session") : qsTr("Switch session")
 	onAccepted: list.activateCurrent()

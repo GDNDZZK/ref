@@ -238,7 +238,7 @@ Item {
 			height: composer.tagRowHeight
 			onAgentClicked: Commands.run("agents", "", composer.session.sessionId)
 			onModelClicked: Commands.run("models", "", composer.session.sessionId)
-			onVariantClicked: Workspace.openDialog("variants", {sessionId: composer.session.sessionId})
+			onVariantClicked: Workspace.openDialog(DialogId.variants, {sessionId: composer.session.sessionId})
 		}
 
 		SendButton {

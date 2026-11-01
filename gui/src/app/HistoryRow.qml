@@ -62,6 +62,6 @@ Item {
 	ContextMenu {
 		id: menu
 		entries: [{text: qsTr("Delete"), danger: true}]
-		onTriggered: Workspace.openDialog("delete-history", {sessionId: row.sessionId, title: row.displayTitle})
+		onTriggered: Workspace.openDialog(DialogId.deleteHistory, {sessionId: row.sessionId, title: row.displayTitle})
 	}
 }
