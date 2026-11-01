@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
-pub const CANCELLED_OUTPUT: &str = "Cancelled by user.";
+pub(crate) const CANCELLED_OUTPUT: &str = "Cancelled by user.";
 /// Error text of a turn or compaction that was aborted.
 pub(crate) const ABORTED: &str = "aborted";
 const MAX_REMINDERS: u32 = 3;
@@ -34,14 +34,14 @@ pub(crate) const MAX_BACKOFF_EXPONENT: u32 = 40;
 pub(crate) const JITTER_FRACTION: f64 = 0.2;
 
 /// Everything needed for one LLM request.
-pub struct Prep {
-    pub cfg: Arc<Config>,
-    pub provider: Provider,
-    pub model: Model,
-    pub model_ref: ModelRef,
-    pub agent: String,
-    pub system: Vec<String>,
-    pub tools: Vec<Entry>,
+pub(crate) struct Prep {
+    pub(crate) cfg: Arc<Config>,
+    pub(crate) provider: Provider,
+    pub(crate) model: Model,
+    pub(crate) model_ref: ModelRef,
+    pub(crate) agent: String,
+    pub(crate) system: Vec<String>,
+    pub(crate) tools: Vec<Entry>,
 }
 
 enum Outcome {
@@ -78,7 +78,7 @@ pub fn submit(hub: &Arc<Hub>, s: &Arc<Session>, msg: Message) -> bool {
 /// Withdraw a queued message before it is delivered. Returns `None` when it is no longer queued
 /// (already delivered, or unknown). The queue is drained under the same lock, so a message is
 /// either removed here or delivered, never both.
-pub fn remove_queued(hub: &Arc<Hub>, s: &Arc<Session>, message_id: &str) -> Option<Message> {
+pub(crate) fn remove_queued(hub: &Arc<Hub>, s: &Arc<Session>, message_id: &str) -> Option<Message> {
     let removed = {
         let mut st = s.lock();
         let removed = st
@@ -99,7 +99,7 @@ pub fn remove_queued(hub: &Arc<Hub>, s: &Arc<Session>, message_id: &str) -> Opti
 }
 
 /// Append a message without starting a run (shell output on an idle session).
-pub fn append_only(hub: &Arc<Hub>, s: &Arc<Session>, msg: Message) {
+pub(crate) fn append_only(hub: &Arc<Hub>, s: &Arc<Session>, msg: Message) {
     {
         let mut st = s.lock();
         if st.run.is_some() {
@@ -185,7 +185,7 @@ pub fn abort(hub: &Arc<Hub>, s: &Arc<Session>, by_user: bool) {
 }
 
 /// Wait (bounded) until the session has no run.
-pub async fn wait_idle(s: &Arc<Session>, timeout: Duration) -> bool {
+pub(crate) async fn wait_idle(s: &Arc<Session>, timeout: Duration) -> bool {
     let start = Instant::now();
     while s.lock().run.is_some() {
         if start.elapsed() > timeout {
@@ -402,7 +402,7 @@ fn drain_queue(hub: &Arc<Hub>, s: &Arc<Session>) {
 }
 
 /// Tells frontends what is waiting in the queue now.
-pub fn emit_queue(hub: &Arc<Hub>, s: &Arc<Session>, st: &SessionState) {
+pub(crate) fn emit_queue(hub: &Arc<Hub>, s: &Arc<Session>, st: &SessionState) {
     hub.emit(
         &s.id,
         SessionEvent::Queue {
@@ -420,7 +420,7 @@ fn apply_pending_compact(hub: &Arc<Hub>, s: &Arc<Session>, prep: &Prep) {
 }
 
 /// Text of the one-time recommend-compaction notice.
-pub fn context_notice_text(c: &ref_proto::ContextUsage) -> String {
+fn context_notice_text(c: &ref_proto::ContextUsage) -> String {
     let pct = if c.max > 0 {
         c.used as f64 * 100.0 / c.max as f64
     } else {
@@ -489,7 +489,7 @@ fn must_report_reminder(hub: &Arc<Hub>, s: &Arc<Session>) -> bool {
 }
 
 /// Resolve config, model, system prompt (cached) and tools for the next request.
-pub async fn prepare(
+pub(crate) async fn prepare(
     hub: &Arc<Hub>,
     s: &Arc<Session>,
     cancel: &CancellationToken,
@@ -552,7 +552,7 @@ pub async fn prepare(
     })
 }
 
-pub fn build_request(s: &Arc<Session>, prep: &Prep) -> ref_llm::Request {
+fn build_request(s: &Arc<Session>, prep: &Prep) -> ref_llm::Request {
     let st = s.lock();
     ref_llm::Request {
         system: prep.system.clone(),
