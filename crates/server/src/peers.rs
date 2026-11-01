@@ -21,6 +21,10 @@ pub(crate) const READ_SESSION: &str = "read_session";
 pub(crate) const CREATE_SESSION: &str = "create_session";
 pub(crate) const CLOSE_SESSION: &str = "close_session";
 
+/// `read_session` paging: default and largest page size.
+const PAGE_SIZE_DEFAULT: u64 = 10;
+const PAGE_SIZE_MAX: u64 = 50;
+
 /// How the header line of a message from another session starts (see [`peer_header`]).
 pub(crate) const PEER_HEADER_PREFIX: &str = "[Message from session";
 /// How the footer line of a message from another session starts.
@@ -76,7 +80,8 @@ pub(crate) fn peer_defs() -> Vec<ToolDef> {
             json!({"type": "object", "properties": {
                 "session": {"type": "string", "description": "Session name or id."},
                 "page": {"type": "integer", "minimum": 1, "description": "Page number, 1 = newest (default 1)."},
-                "page_size": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Messages per page (default 10, max 50)."}
+                "page_size": {"type": "integer", "minimum": 1, "maximum": PAGE_SIZE_MAX,
+                    "description": format!("Messages per page (default {PAGE_SIZE_DEFAULT}, max {PAGE_SIZE_MAX}).")}
             }, "required": ["session"]}),
         ),
     ]
@@ -373,8 +378,8 @@ fn read_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Result<Strin
     let size = input
         .get("page_size")
         .and_then(Value::as_u64)
-        .unwrap_or(10)
-        .clamp(1, 50) as usize;
+        .unwrap_or(PAGE_SIZE_DEFAULT)
+        .clamp(1, PAGE_SIZE_MAX) as usize;
     let st = target.lock();
     let n = st.messages.len();
     let pages = n.div_ceil(size).max(1);
