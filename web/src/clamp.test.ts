@@ -8,7 +8,8 @@ describe('clamp', () => {
     expect(clamp(12, 0, 10)).toBe(10)
   })
 
-  it('gives the lower bound when the range is empty', () => {
-    expect(clamp(5, 0, -2)).toBe(0)
+  it('gives the upper bound when the range is empty', () => {
+    expect(clamp(5, 0, -2)).toBe(-2)
+    expect(clamp(-5, 0, -2)).toBe(-2)
   })
 })
