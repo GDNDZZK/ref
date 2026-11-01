@@ -269,15 +269,15 @@ pub(crate) async fn dispatch(
     }
 }
 
+/// The string field `key` of a tool input, trimmed.
+fn str_field<'a>(input: &'a Value, key: &str) -> Option<&'a str> {
+    input.get(key).and_then(Value::as_str).map(str::trim)
+}
+
 fn harness(hub: &Arc<Hub>, s: &Arc<Session>, name: &str, input: &Value) -> ToolOutput {
     match name {
         CONTEXT_WINDOW => {
-            let target = match input
-                .get("session")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|x| !x.is_empty())
-            {
+            let target = match str_field(input, "session").filter(|x| !x.is_empty()) {
                 Some(q) => match crate::peers::resolve(hub, q, None) {
                     Ok(t) => t,
                     Err(e) => return ToolOutput::err(e),
@@ -310,11 +310,7 @@ fn harness(hub: &Arc<Hub>, s: &Arc<Session>, name: &str, input: &Value) -> ToolO
             };
             let mut todos = Vec::with_capacity(items.len());
             for (i, it) in items.iter().enumerate() {
-                let content = it
-                    .get("content")
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .unwrap_or("");
+                let content = str_field(it, "content").unwrap_or("");
                 if content.is_empty() {
                     return ToolOutput::err(format!(
                         "Error: todos[{i}].content must be a non-empty string."
@@ -344,12 +340,7 @@ fn harness(hub: &Arc<Hub>, s: &Arc<Session>, name: &str, input: &Value) -> ToolO
             ToolOutput::ok(text)
         }
         COMPACT_CONTEXT => {
-            let summary = input
-                .get("summary")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .trim()
-                .to_string();
+            let summary = str_field(input, "summary").unwrap_or("").to_string();
             if summary.is_empty() {
                 return ToolOutput::err("Error: summary must not be empty.");
             }
