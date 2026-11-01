@@ -5,33 +5,38 @@
 ## 1. 分层
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│ src/app  QML 界面 + ChatSession + main                            │
-│   Main ─ ChatView ─ {User,Image,Markdown,Code,Reasoning,Tool,     │
-│        │            Error}Block                                   │
-│        └ Composer, ThemeToggle, 回到最新按钮, 状态条              │
-│   Theme / Motion (单例)        SystemFonts (C++ 单例)             │
-├────────────────────── ChatSession ───────────────────────────────┤
-│ src/session  与界面框架无关的会话层（不依赖 Gui，可以单测）        │
-│   SessionController ─ ConversationFeed ─ StreamPacer              │
-│                         └ ConversationModel ─ blocks, FenceSplitter│
-├──────────────────────────────────────────────────────────────────┤
-│ src/client  连接后端                                              │
-│   Backend（找到/拉起后端、断线重连）─ ServerClient（一条 WebSocket）│
-│   launcher, instance_files, spawn_lock, process_alive, mock_backend│
-├──────────────────────────────────────────────────────────────────┤
-│ src/proto   ref 线协议：类型、解析、请求构造（只依赖 Qt Core）     │
-├──────────────────────────────────────────────────────────────────┤
-│ src/cli     命令行解析（只产出 LaunchOptions，不碰界面）           │
-└──────────────────────────────────────────────────────────────────┘
+app        QML 界面、Workspace、ChatSession、main
+  │
+composer   输入框
+  │
+session    workspace    notify    cli    compose    icons
+  │
+client     Backend、ServerClient、launcher、instance_files
+  │
+proto      线协议：类型、解析、请求构造（只依赖 Qt Core）
 ```
+
+上面的层依赖下面的层。哪一层可以调用哪一层，以下表为准，表里没有的就是跨层：
+
+| 层 | 可以调用 | 内容 |
+|---|---|---|
+| `app` | composer、session、workspace、notify、icons、cli | QML 界面；`Workspace`（整个窗口）和 `ChatSession`（一个会话给 QML 的门面）；`main` |
+| `composer` | session、workspace、compose | 输入框：草稿、补全、图片、排队的 prompt |
+| `session` | client | 一个会话：`SessionController`、`ConversationModel`、`ConversationFeed`，以及按会话发的请求 |
+| `workspace` | client | 会话以外的东西：`Connection`（窗口到后端的连接）、`SessionDirectory`（会话列表和按 id 管理会话的请求）、`BackendConfig`、设置、命令表 |
+| `notify` | client | 系统通知，以及告诉后端用户在看哪里 |
+| `cli` | client | 命令行解析，只产出 `LaunchOptions` |
+| `compose`、`icons` | 无 | 不碰后端的纯逻辑：图片文件、补全目标、prompt 历史；图标 |
+| `client` | proto | `Backend`（找到或拉起后端、断线重连）和 `ServerClient`（一条 WebSocket） |
+| `proto` | 无 | 协议数据和解析 |
 
 规则如下：
 
-- QML 只能看到 `ChatSession`。它暴露了 `blocks`（`QAbstractItemModel*`）、`busy`、`ready`、`connectionState`、`statusText`、`title`，以及 `send()`、`stop()`、`permissionReply()`。
-- `src/session`、`src/client`、`src/proto` 里的类型不注册给 QML，所以它们的接口改了也不会波及界面。
-- 每一层只调用紧挨着的下一层。`proto` 不知道 Qt 网络；`client` 不知道会话怎么显示。
-- 没有全局状态。每个 `ChatSession` 持有自己的 `Backend` 和 `SessionController`；以后做多 tab 或分屏，就是多建几个。
+- 每一层只调用表里列出的层，不跨层。`app` 不调用 `client`：连接的状态、启停、Hello 信息和 toast 帧都经 `workspace::Connection`；`app` 只把 `Connection::backend()` 交给下层对象的构造函数（接线），自己不调用它。`composer` 也不调用 `client`：按会话的请求走 `SessionController`，配置读 `BackendConfig`。
+- `proto` 的数据类型（以及 `client::Result`）是纯数据，各层都可以用；规则管的是调用。
+- `proto` 不知道 Qt 网络；`client` 不知道会话怎么显示；`session` 和 `workspace` 互不调用。
+- QML 只看到 `app` 注册的类型（`Workspace`、`ChatSession`、`ComposerModel` 等，见 `qml_types.h`）。`session`、`client`、`proto` 里的类型不注册给 QML，所以它们的接口改了也不会波及界面。
+- 没有全局状态。`Workspace` 持有一个 `Connection`（也就有一个 `Backend`），每个 `ChatSession` 持有自己的 `SessionController` 和 `ComposerModel`；分屏就是多建几个 `ChatSession`。
 - 对话内容以服务器为准。发出的 prompt 不会在本地回显，用户的消息在服务器通过 Message 事件宣布后才出现。
 
 ## 2. 构建
