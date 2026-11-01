@@ -138,6 +138,16 @@ impl Collector {
         }
     }
 
+    /// No spill file and no failed spill: all output is still in `mem`.
+    fn is_buffering_in_memory(&self) -> bool {
+        self.spilled.is_none() && !self.spill_failed
+    }
+
+    /// The spill file could not be created and `mem` is not yet split into head and tail.
+    fn needs_head_tail_split(&self) -> bool {
+        self.spill_failed && self.spilled.is_none() && self.head.is_empty()
+    }
+
     fn push(&mut self, piece: &str) {
         if piece.is_empty() {
             return;
@@ -147,7 +157,7 @@ impl Collector {
         }
         self.total_bytes += piece.len();
         self.total_lines += piece.matches('\n').count();
-        if self.spilled.is_none() && !self.spill_failed {
+        if self.is_buffering_in_memory() {
             self.mem.push_str(piece);
             if self.mem.len() > util::INLINE_OUTPUT_MAX_BYTES {
                 self.spill();
@@ -157,7 +167,7 @@ impl Collector {
         if let Some((_, f)) = &mut self.spilled {
             let _ = f.write_all(piece.as_bytes());
         }
-        if self.spill_failed && self.spilled.is_none() && self.head.is_empty() {
+        if self.needs_head_tail_split() {
             // Could not create the file: still keep head/tail.
             self.split_mem();
         }
@@ -197,7 +207,7 @@ impl Collector {
 
     /// Final text and (truncated, saved path).
     fn finish(mut self) -> (String, bool, Option<PathBuf>) {
-        if self.spilled.is_none() && !self.spill_failed && self.head.is_empty() {
+        if self.is_buffering_in_memory() && self.head.is_empty() {
             if self.mem.lines().count() <= util::INLINE_OUTPUT_MAX_LINES {
                 return (self.mem, false, None);
             }
