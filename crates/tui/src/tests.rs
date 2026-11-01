@@ -3064,13 +3064,21 @@ fn compacted_app() -> App {
     app
 }
 
+/// Row index of the compaction divider in a rendered screen.
+fn divider_row(lines: &[&str]) -> usize {
+    lines
+        .iter()
+        .position(|l| l.contains("◇ Context compacted"))
+        .expect("divider")
+}
+
 #[test]
-fn compaction_divider_keeps_old_messages_interactive() {
-    use crate::ui::Hit;
+fn compaction_divider_spans_the_width_and_dims_old_messages() {
     let mut app = compacted_app();
     let (term, s) = render(&mut app, 100, 60);
     println!("{s}");
     let lines: Vec<&str> = s.lines().collect();
+
     // Old messages are all still there.
     assert!(
         s.contains("Please fix the off-by-one")
@@ -3078,11 +3086,9 @@ fn compaction_divider_keeps_old_messages_interactive() {
             && s.contains("Now update the changelog")
             && s.contains("Changelog updated.")
     );
+
     // Divider row across the width.
-    let dy = lines
-        .iter()
-        .position(|l| l.contains("◇ Context compacted"))
-        .expect("divider");
+    let dy = divider_row(&lines);
     let dl = lines[dy];
     assert!(
         dl.contains("──── ◇ Context compacted · 14:05:00 · click to view summary"),
@@ -3100,6 +3106,7 @@ fn compaction_divider_keeps_old_messages_interactive() {
     let old_user = lines.iter().position(|l| l.contains("Please fix")).unwrap();
     let new_user = lines.iter().position(|l| l.contains("Now update")).unwrap();
     assert!(old_user < dy && dy < new_user);
+
     // Old messages are dimmed, new ones are not.
     let buf = term.backend().buffer();
     let fg_at = |y: usize, sym: &str| buf[(find_col(&term, y as u16, sym).unwrap(), y as u16)].fg;
@@ -3113,7 +3120,17 @@ fn compaction_divider_keeps_old_messages_interactive() {
         crate::ui::theme::TEXT,
         "new prompt normal"
     );
-    let _ = buf;
+}
+
+#[test]
+fn compaction_divider_keeps_hit_zones_and_undo_of_old_messages() {
+    use crate::ui::Hit;
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let mut app = compacted_app();
+    let (term, s) = render(&mut app, 100, 60);
+    let lines: Vec<&str> = s.lines().collect();
+    let dy = divider_row(&lines);
+
     // Copy/undo on old messages still work (hit zones unchanged).
     let uy = lines
         .iter()
@@ -3144,9 +3161,9 @@ fn compaction_divider_keeps_old_messages_interactive() {
             })
         );
     }
+
     // Undo before the divider removes 5 messages (incl. the compaction; the server handles it).
     app.screen = ratatui::layout::Rect::new(0, 0, 100, 60);
-    use crossterm::event::{MouseButton, MouseEventKind};
     crate::input::handle(
         &mut app,
         mouse(MouseEventKind::Down(MouseButton::Left), ux + 1, uy),
@@ -3160,6 +3177,13 @@ fn compaction_divider_keeps_old_messages_interactive() {
             .values()
             .any(|p| matches!(p, crate::app::Pending::Undo { count: Some(5), .. }))
     );
+}
+
+#[test]
+fn compaction_divider_expands_summary_and_old_tool_and_fits_narrow() {
+    let mut app = compacted_app();
+    render(&mut app, 100, 60);
+
     // Old tool still expands; the summary expands on click.
     let v = app.views.get_mut(TEST_SESSION).unwrap();
     v.chat.toggle("m2", 2);
@@ -3173,12 +3197,17 @@ fn compaction_divider_keeps_old_messages_interactive() {
         s.contains("click to hide summary") && s.contains("Fix the parser off-by-one."),
         "{s}"
     );
+
     // Narrow: the divider fits.
     let (_, s) = render(&mut app, 40, 30);
     for l in s.lines() {
         assert!(text::width(l) <= 40);
     }
-    // A transcript that STARTS with a compaction (old backend) has no "older messages" hint.
+}
+
+#[test]
+fn transcript_starting_with_a_compaction_has_no_older_messages_hint() {
+    // An old backend's transcript STARTS with a compaction.
     let mut app = test_app(false);
     let v = app.views.get_mut(TEST_SESSION).unwrap();
     let info = v.info.clone();
