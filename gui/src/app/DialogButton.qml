@@ -15,7 +15,15 @@ Item {
 	signal clicked()
 
 	readonly property bool filled: kind !== DialogButton.Secondary
-	readonly property color fill: kind === DialogButton.Danger ? Theme.danger : kind === DialogButton.Primary ? Theme.accent : Theme.surface
+	readonly property color fill: fillFor(kind)
+	readonly property color hoverFill: filled ? Qt.lighter(fill, 1.08) : Theme.surfaceHover
+
+	// The resting fill of a kind.
+	function fillFor(kind) {
+		if (kind === DialogButton.Danger)
+			return Theme.danger
+		return kind === DialogButton.Primary ? Theme.accent : Theme.surface
+	}
 
 	implicitWidth: label.implicitWidth + 2 * 18
 	implicitHeight: small ? 28 : Theme.buttonHeight
@@ -25,7 +33,7 @@ Item {
 		id: face
 		anchors.fill: parent
 		radius: height / 2
-		color: hover.hovered && button.enabled ? (button.filled ? Qt.lighter(button.fill, 1.08) : Theme.surfaceHover) : button.fill
+		color: hover.hovered && button.enabled ? button.hoverFill : button.fill
 		border.color: button.filled ? "transparent" : Theme.border
 		scale: tap.pressed && button.enabled ? Motion.pressedScaleButton : 1
 
