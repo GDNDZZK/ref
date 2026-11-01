@@ -20,7 +20,7 @@ Item {
 		anchors.fill: parent
 		radius: Theme.radiusSmall
 		color: hover.hovered ? Theme.surfaceHover : "transparent"
-		scale: tap.pressed ? 0.94 : 1
+		scale: tap.pressed ? Motion.pressedScaleButton : 1
 
 		Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 		Behavior on scale { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }

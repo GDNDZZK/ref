@@ -11,6 +11,8 @@ export const motion = {
   calmPulse: 1800,
   dialogDrop: 16,
   popScale: 0.97,
+  pressedScaleButton: 0.94,
+  pressedScaleRow: 0.98,
   tileEnterScale: 0.94,
   tileExitScale: 0.96,
   toastSlide: 24,

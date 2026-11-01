@@ -21,6 +21,8 @@ QtObject {
 
 	readonly property int dialogDrop: 16 // px a dialog drops into place
 	readonly property real popScale: 0.97 // dialogs and menus grow from this
+	readonly property real pressedScaleButton: 0.94 // text and dialog buttons while pressed
+	readonly property real pressedScaleRow: 0.98 // list rows while pressed
 	readonly property real tileEnterScale: 0.94
 	readonly property real tileExitScale: 0.96
 	readonly property int toastSlide: 24 // px a toast slides in from the right

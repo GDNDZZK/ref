@@ -62,7 +62,7 @@ Item {
 			: row.isCurrent ? Theme.userBubble
 			: hover.hovered ? Theme.surfaceHover : "transparent"
 		border.color: row.hasPermission ? Theme.warningBorder : row.isCurrent ? Theme.userBubbleBorder : "transparent"
-		scale: tap.pressed ? 0.98 : 1
+		scale: tap.pressed ? Motion.pressedScaleRow : 1
 
 		Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 		Behavior on border.color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
