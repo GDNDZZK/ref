@@ -26,6 +26,8 @@ const OAUTH_BETA: &str = "oauth-2025-04-20";
 /// Used when the model's output limit is unknown (the field is mandatory).
 const DEFAULT_MAX_TOKENS: u64 = 32_000;
 const MIN_THINKING_BUDGET: u64 = 1024;
+/// Thinking budget when neither the options nor the effort give one.
+const DEFAULT_THINKING_BUDGET: u64 = 16_384;
 /// Head-room for the visible answer when the budget is close to `max_tokens`.
 const ANSWER_HEADROOM: u64 = 4096;
 /// Anthropic tool ids: `^[a-zA-Z0-9_-]+$`, at most 64 characters.
@@ -140,11 +142,11 @@ fn adaptive_effort(effort: &str, version: Option<(u32, u32)>) -> Option<&'static
 fn effort_budget(effort: &str) -> Option<u64> {
     Some(match effort.to_ascii_lowercase().as_str() {
         "none" | "off" | "disabled" => return None,
-        "minimal" => 1024,
+        "minimal" => MIN_THINKING_BUDGET,
         "low" => 2048,
         "medium" => 8192,
-        "xhigh" | "max" => 32_000,
-        _ => 16_384,
+        "xhigh" | "max" => DEFAULT_MAX_TOKENS,
+        _ => DEFAULT_THINKING_BUDGET,
     })
 }
 
@@ -168,7 +170,7 @@ fn plan_thinking(model: &Model, max_tokens: &mut u64) -> ThinkingPlan {
             let t = thinking.unwrap_or(&Value::Null);
             let budget = opt_u64(t.get("budgetTokens").or_else(|| t.get("budget_tokens")))
                 .or_else(|| effort.and_then(effort_budget))
-                .unwrap_or(16_384);
+                .unwrap_or(DEFAULT_THINKING_BUDGET);
             let mut out = snake_keys(t);
             out["budget_tokens"] = json!(fit_budget(model, budget, max_tokens));
             ThinkingPlan {
