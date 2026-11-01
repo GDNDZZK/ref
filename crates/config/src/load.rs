@@ -449,7 +449,6 @@ fn collect_instructions(ctx: &mut Ctx, l: &Layer, acc: &mut Accum) {
             for x in a {
                 add_instruction(ctx, l, x, acc);
             }
-            expand_home_instructions(ctx, a, acc);
         }
         Some(Value::String(s)) if !acc.instructions.contains(s) => acc.instructions.push(s.clone()),
         Some(Value::String(_)) | None => {}
@@ -461,29 +460,24 @@ fn collect_instructions(ctx: &mut Ctx, l: &Layer, acc: &mut Accum) {
 }
 
 fn add_instruction(ctx: &mut Ctx, l: &Layer, x: &Value, acc: &mut Accum) {
-    match x.as_str() {
-        Some(s) if !acc.instructions.iter().any(|y| y == s) => acc.instructions.push(s.to_string()),
-        Some(_) => {}
-        None => ctx.warn(format!(
+    let Some(s) = x.as_str() else {
+        ctx.warn(format!(
             "{}: invalid instructions entry {x}",
             l.source.display()
-        )),
-    }
-}
-
-/// `~` expansion only; relative entries are resolved later against the project.
-fn expand_home_instructions(ctx: &Ctx, items: &[Value], acc: &mut Accum) {
-    let tilde = items
-        .iter()
-        .filter_map(Value::as_str)
-        .filter(|s| s.starts_with('~'));
-    for s in tilde {
-        let e = expand_home(s, ctx.home, Path::new(""))
+        ));
+        return;
+    };
+    // `~` expansion only; relative entries are resolved later against the project. It happens
+    // before the duplicate test so that entries of two layers compare in the same form.
+    let entry = if s.starts_with('~') {
+        expand_home(s, ctx.home, Path::new(""))
             .to_string_lossy()
-            .into_owned();
-        if let Some(x) = acc.instructions.iter_mut().find(|x| x.as_str() == s) {
-            *x = e;
-        }
+            .into_owned()
+    } else {
+        s.to_string()
+    };
+    if !acc.instructions.contains(&entry) {
+        acc.instructions.push(entry);
     }
 }
 
