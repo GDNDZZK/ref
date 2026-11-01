@@ -1,6 +1,6 @@
 //! `write`: create or overwrite a file.
 
-use crate::hashline::{Seen, format_header};
+use crate::hashline::{HEADER_RE, Seen, format_header};
 use crate::util::{self, TextFile};
 use crate::{ToolCtx, ToolOutput, ToolSpec};
 use anyhow::{Result, anyhow, bail};
@@ -34,8 +34,6 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
 
 static ROW_PREFIX_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(\d+):").expect("valid regex"));
-static HEADER_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\s*\[[^#\r\n]+#[0-9a-fA-F]{4}\]\s*$").expect("valid regex"));
 
 /// If `content` is pasted read output (`[path#TAG]` header and/or rows `N:` counting up by
 /// one from 1 on every line), returns the stripped text.

@@ -20,6 +20,19 @@ const MAX_TOTAL_BYTES: usize = 64 * 1024 * 1024;
 /// Files larger than this are never snapshotted.
 const MAX_SNAPSHOT_FILE_BYTES: usize = 4 * 1024 * 1024;
 
+/// Hex digits in a tag.
+pub const TAG_LEN: usize = 4;
+
+/// True if `s` is exactly [`TAG_LEN`] hex digits.
+pub fn is_tag(s: &str) -> bool {
+    s.len() == TAG_LEN && s.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Matches a whole line that is a `[path#TAG]` header.
+pub static HEADER_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(r"^\s*\[[^#\r\n]+#[0-9a-fA-F]{{{TAG_LEN}}}\]\s*$")).expect("valid regex")
+});
+
 /// Four-hex uppercase content tag of `text`.
 ///
 /// XXH32 (seed 0) over the text with trailing spaces, tabs and CRs stripped from every
@@ -39,7 +52,7 @@ pub fn file_hash(text: &str) -> String {
         line_start += segment.len();
     }
     hasher.update(&bytes[run_start..]);
-    format!("{:04X}", hasher.digest() & 0xffff)
+    format!("{:0TAG_LEN$X}", hasher.digest() & 0xffff)
 }
 
 /// `[path#TAG]`
@@ -55,7 +68,7 @@ pub fn normalize_tag(raw: &str) -> Option<String> {
         .and_then(|s| s.strip_suffix(']'))
         .unwrap_or(t);
     let t = t.rsplit_once('#').map_or(t, |(_, tag)| tag);
-    (t.len() == 4 && t.chars().all(|c| c.is_ascii_hexdigit())).then(|| t.to_ascii_uppercase())
+    is_tag(t).then(|| t.to_ascii_uppercase())
 }
 
 static SEEN_ROW_RE: LazyLock<Regex> =

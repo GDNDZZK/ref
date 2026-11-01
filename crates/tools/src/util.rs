@@ -112,8 +112,7 @@ pub fn unwrap_header(raw: &str) -> (String, Option<String>) {
     let t = raw.trim();
     if let Some(inner) = t.strip_prefix('[').and_then(|s| s.strip_suffix(']'))
         && let Some((p, tag)) = inner.rsplit_once('#')
-        && tag.len() == 4
-        && tag.chars().all(|c| c.is_ascii_hexdigit())
+        && crate::hashline::is_tag(tag)
     {
         return (p.to_string(), Some(tag.to_ascii_uppercase()));
     }
