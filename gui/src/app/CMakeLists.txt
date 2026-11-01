@@ -49,6 +49,7 @@ qt_add_qml_module(ref-gui
 		CancelButton.qml
 		ScrollHandle.qml
 		IconButton.qml
+		TruncatedChip.qml
 		SessionPane.qml
 		QuestionCard.qml
 		QuestionRow.qml

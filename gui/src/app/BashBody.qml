@@ -72,9 +72,8 @@ ToolBodyBase {
 					text: qsTr("cancelled")
 					tint: Theme.warning
 				}
-				ToolChip {
-					visible: body.meta.truncated === true
-					text: qsTr("truncated")
+				TruncatedChip {
+					meta: body.meta
 				}
 			}
 			OutputText {

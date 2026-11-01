@@ -56,9 +56,8 @@ ToolBodyBase {
 			visible: body.meta.bytes !== undefined
 			text: ToolInfo.sizeText(body.meta.bytes ?? 0)
 		}
-		ToolChip {
-			visible: body.meta.truncated === true
-			text: qsTr("truncated")
+		TruncatedChip {
+			meta: body.meta
 		}
 	}
 

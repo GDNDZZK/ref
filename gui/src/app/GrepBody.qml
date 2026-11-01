@@ -62,9 +62,8 @@ ToolBodyBase {
 			visible: body.hasCounts
 			text: qsTr("%n match(es) in %1", "", body.matchCount).arg(qsTr("%n file(s)", "", body.fileCount))
 		}
-		ToolChip {
-			visible: body.meta.truncated === true
-			text: qsTr("truncated")
+		TruncatedChip {
+			meta: body.meta
 		}
 	}
 }
