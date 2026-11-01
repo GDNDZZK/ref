@@ -11,6 +11,7 @@ use crate::app::{AcKind, App, COMMANDS, Mode, cmd};
 use crate::render;
 use crate::ui::dialog::{Dialog, Kind};
 use crate::ui::editor::Editor;
+use crate::ui::permission::PermissionAction;
 use crate::ui::question::Outcome;
 use crate::ui::{Hit, chat, split, theme};
 
@@ -954,9 +955,15 @@ fn mouse(app: &mut App, me: MouseEvent) {
             MouseEventKind::Down(MouseButton::Left) => {
                 if let Some(a) = app.perm.as_ref().and_then(|p| p.button_at(x, y)) {
                     match a {
-                        0 => app.reply_permission(&sid, &req.call_id, true, false),
-                        1 => app.reply_permission(&sid, &req.call_id, true, true),
-                        _ => app.reply_permission(&sid, &req.call_id, false, false),
+                        PermissionAction::AllowOnce => {
+                            app.reply_permission(&sid, &req.call_id, true, false)
+                        }
+                        PermissionAction::AllowAlways => {
+                            app.reply_permission(&sid, &req.call_id, true, true)
+                        }
+                        PermissionAction::Deny => {
+                            app.reply_permission(&sid, &req.call_id, false, false)
+                        }
                     }
                 }
             }

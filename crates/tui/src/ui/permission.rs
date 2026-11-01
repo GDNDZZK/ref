@@ -13,13 +13,21 @@ use super::dialog::{frame, open_progress};
 use super::text::{self, width};
 use super::theme;
 
+/// What a permission button answers.
+#[derive(Clone, Copy)]
+pub enum PermissionAction {
+    AllowOnce,
+    AllowAlways,
+    Deny,
+}
+
 pub struct PermissionView {
     pub scroll: usize,
     pub opened: Instant,
     pub call_id: String,
     max_scroll: usize,
-    /// Button zones at last draw: (y, x0, x1, action) action: 0 allow, 1 always, 2 deny.
-    pub buttons: Vec<(u16, u16, u16, u8)>,
+    /// Button zones at last draw: (y, x0, x1, action).
+    buttons: Vec<(u16, u16, u16, PermissionAction)>,
     pub rect: Rect,
 }
 
@@ -39,7 +47,7 @@ impl PermissionView {
         self.scroll = (self.scroll as i32 + d).clamp(0, self.max_scroll as i32) as usize;
     }
 
-    pub fn button_at(&self, x: u16, y: u16) -> Option<u8> {
+    pub fn button_at(&self, x: u16, y: u16) -> Option<PermissionAction> {
         self.buttons
             .iter()
             .find(|(by, x0, x1, _)| *by == y && x >= *x0 && x < *x1)
@@ -98,10 +106,20 @@ impl PermissionView {
         let by = inner.y + inner.height.saturating_sub(1);
         self.buttons.clear();
         let mut x = inner.x;
-        let btns: [(&str, &str, u8, ratatui::style::Color); 3] = [
-            (" a ", "Allow once ", 0, theme::SUCCESS),
-            (" s ", "Always allow ", 1, theme::INFO),
-            (" d ", "Deny ", 2, theme::ERROR),
+        let btns: [(&str, &str, PermissionAction, ratatui::style::Color); 3] = [
+            (
+                " a ",
+                "Allow once ",
+                PermissionAction::AllowOnce,
+                theme::SUCCESS,
+            ),
+            (
+                " s ",
+                "Always allow ",
+                PermissionAction::AllowAlways,
+                theme::INFO,
+            ),
+            (" d ", "Deny ", PermissionAction::Deny, theme::ERROR),
         ];
         for (k, label, act, c) in btns {
             let kw = width(k) as u16;
