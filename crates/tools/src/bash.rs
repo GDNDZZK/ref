@@ -470,6 +470,12 @@ impl Drop for GroupGuard {
     }
 }
 
+/// Why the command is being terminated.
+enum StopReason {
+    TimedOut,
+    Cancelled,
+}
+
 enum Ending {
     Exited(std::process::ExitStatus),
     TimedOut(std::process::ExitStatus),
@@ -540,14 +546,14 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     tokio::pin!(sleep_until);
 
     // Phase 1: run until exit, timeout or cancel.
-    let mut stop: Option<bool> = None; // Some(true) = timeout, Some(false) = cancel
+    let mut stop: Option<StopReason> = None;
     let mut status = None;
     while status.is_none() && stop.is_none() {
         tokio::select! {
             r = reader.read(&mut buf), if !eof => handle_read(r, &buf, &mut asm, &mut col, &mut eof),
             s = child.wait() => status = Some(s.map_err(|e| anyhow!("waiting for command failed: {e}"))?),
-            _ = &mut sleep_until => stop = Some(true),
-            _ = ctx.cancel.cancelled() => stop = Some(false),
+            _ = &mut sleep_until => stop = Some(StopReason::TimedOut),
+            _ = ctx.cancel.cancelled() => stop = Some(StopReason::Cancelled),
         }
     }
 
@@ -592,8 +598,8 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let status = status.ok_or_else(|| anyhow!("Command failed: missing exit status"))?;
     let ending = match stop {
         None => Ending::Exited(status),
-        Some(true) => Ending::TimedOut(status),
-        Some(false) => Ending::Cancelled(status),
+        Some(StopReason::TimedOut) => Ending::TimedOut(status),
+        Some(StopReason::Cancelled) => Ending::Cancelled(status),
     };
     Ok(build_output(col, ending, duration, timeout_secs))
 }
