@@ -230,15 +230,9 @@ pub fn analyze(body: &Value, session_id: &str, attempt: u32) -> Task {
         return Task::Summary;
     }
 
-    let (prompt, round, tool_results, typed) = match since_task(messages) {
-        Some(found) => found,
-        None => {
-            let (prompt, round, tool_results) = since_prompt(messages);
-            (prompt, round, tool_results, Vec::new())
-        }
-    };
+    let turn = since_task(messages).unwrap_or_else(|| since_prompt(messages));
     let (root_prompt, peer_reports) = conversation_root(messages);
-    let prompt = task_text(prompt.trim());
+    let prompt = task_text(turn.prompt.trim());
     let args = prompt
         .split_once(char::is_whitespace)
         .map_or("", |(_, rest)| rest.trim())
@@ -248,16 +242,25 @@ pub fn analyze(body: &Value, session_id: &str, attempt: u32) -> Task {
         args,
         root_prompt,
         peer_reports,
-        typed,
-        round,
+        typed: turn.typed,
+        round: turn.round,
         session_id: session_id.to_string(),
         attempt,
-        tool_results,
+        tool_results: turn.tool_results,
     })
 }
 
+/// The part of a conversation a script answers: the prompt, how many answers and tool results
+/// followed it, and what a person typed to a created session after its task.
+struct Turn {
+    prompt: String,
+    round: usize,
+    tool_results: Vec<String>,
+    typed: Vec<String>,
+}
+
 /// Walks back to the user's prompt, counting the model's answers and collecting tool results.
-fn since_prompt(messages: &[Value]) -> (String, usize, Vec<String>) {
+fn since_prompt(messages: &[Value]) -> Turn {
     let mut round = 0;
     let mut tool_results = Vec::new();
     let mut prompt = String::new();
@@ -275,14 +278,19 @@ fn since_prompt(messages: &[Value]) -> (String, usize, Vec<String>) {
         }
     }
     tool_results.reverse();
-    (prompt, round, tool_results)
+    Turn {
+        prompt,
+        round,
+        tool_results,
+        typed: Vec::new(),
+    }
 }
 
 /// For a created session: the task, the answers and tool results since it, and what a person
 /// typed in between. The task stays the prompt, so a typed message does not change the script
 /// or restart its rounds. `None` for other conversations, and once another session has written to
 /// this one (those messages are answered like anywhere else).
-fn since_task(messages: &[Value]) -> Option<(String, usize, Vec<String>, Vec<String>)> {
+fn since_task(messages: &[Value]) -> Option<Turn> {
     let mut users = messages
         .iter()
         .enumerate()
@@ -307,7 +315,12 @@ fn since_task(messages: &[Value]) -> Option<(String, usize, Vec<String>, Vec<Str
             _ => {}
         }
     }
-    Some((task, round, tool_results, typed))
+    Some(Turn {
+        prompt: task,
+        round,
+        tool_results,
+        typed,
+    })
 }
 
 /// The latest prompt that did not come from another session (reminders by the harness do not
