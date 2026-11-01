@@ -44,15 +44,19 @@ impl Fetched {
     }
 }
 
+/// Engine and browser part shared by the user agents of all platforms.
+const CHROME_TAIL: &str = "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
+
 /// A browser user agent: some sites serve bots an error page or a challenge.
-fn browser_ua() -> &'static str {
-    if cfg!(windows) {
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+fn browser_ua() -> String {
+    let platform = if cfg!(windows) {
+        "Windows NT 10.0; Win64; x64"
     } else if cfg!(target_os = "macos") {
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+        "Macintosh; Intel Mac OS X 10_15_7"
     } else {
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
-    }
+        "X11; Linux x86_64"
+    };
+    format!("Mozilla/5.0 ({platform}) {CHROME_TAIL}")
 }
 
 /// Honest user agent, used after a Cloudflare bot challenge (they often let declared bots through).
@@ -198,7 +202,7 @@ pub async fn get(
             .timeout(left)
             .send()
     };
-    let mut resp = cancellable(send(browser_ua().to_string()), cancel)
+    let mut resp = cancellable(send(browser_ua()), cancel)
         .await?
         .map_err(|e| request_error(e, url))?;
     if resp.status() == StatusCode::FORBIDDEN
