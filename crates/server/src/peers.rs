@@ -25,6 +25,13 @@ pub(crate) const CLOSE_SESSION: &str = "close_session";
 const PAGE_SIZE_DEFAULT: u64 = 10;
 const PAGE_SIZE_MAX: u64 = 50;
 
+/// Lengths (in characters) at which texts are cut: previews of messages, text parts and tool
+/// outputs in `read_session`, and session titles in `/peers`.
+const PREVIEW_CHARS: usize = 80;
+const READ_TEXT_CHARS: usize = 4000;
+const READ_TOOL_OUTPUT_CHARS: usize = 300;
+const LIST_TITLE_CHARS: usize = 40;
+
 /// How the header line of a message from another session starts (see [`peer_header`]).
 pub(crate) const PEER_HEADER_PREFIX: &str = "[Message from session";
 /// How the footer line of a message from another session starts.
@@ -276,7 +283,7 @@ pub fn deliver(
             to_id: target.id.clone(),
             to_name: target.lock().info.name.clone(),
             time: ref_proto::now_ms(),
-            preview: preview(text, 80),
+            preview: preview(text, PREVIEW_CHARS),
         },
     );
     let queued = crate::engine::submit(hub, target, msg);
@@ -420,7 +427,7 @@ fn read_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Result<Strin
         for p in &m.parts {
             match p {
                 Part::Text { text, .. } if !text.trim().is_empty() => {
-                    out.push_str(&crate::util::truncate_chars(text.trim(), 4000));
+                    out.push_str(&crate::util::truncate_chars(text.trim(), READ_TEXT_CHARS));
                     out.push('\n');
                 }
                 Part::Image { .. } => out.push_str("[image]\n"),
@@ -438,7 +445,7 @@ fn read_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Result<Strin
                             .trim_matches('"')
                     ));
                     if let Some(o) = output.as_deref().filter(|o| !o.trim().is_empty()) {
-                        let t = crate::util::truncate_chars(o.trim(), 300);
+                        let t = crate::util::truncate_chars(o.trim(), READ_TOOL_OUTPUT_CHARS);
                         for l in t.lines() {
                             out.push_str(&format!("    {l}\n"));
                         }
@@ -652,7 +659,7 @@ fn cmd_peers(hub: &Arc<Hub>, s: &Arc<Session>) -> String {
             "  [{}] {} · \"{}\" · {} · {} · {} · started {}{}\n",
             status_word(&i.status),
             i.name,
-            crate::util::truncate_chars(&i.title, 40),
+            crate::util::truncate_chars(&i.title, LIST_TITLE_CHARS),
             i.agent,
             if i.attached > 0 {
                 "foreground"
@@ -719,7 +726,7 @@ fn cmd_inbox(s: &Arc<Session>) -> String {
                 "  {} · from \"{}\" · {}\n",
                 crate::util::fmt_time(m.time),
                 from(m),
-                preview(&peer_body(m), 80)
+                preview(&peer_body(m), PREVIEW_CHARS)
             ));
         }
     }
@@ -734,7 +741,7 @@ fn cmd_inbox(s: &Arc<Session>) -> String {
                 "  {} · from \"{}\" · {}\n",
                 crate::util::fmt_time(m.time),
                 from(m),
-                preview(&peer_body(m), 80)
+                preview(&peer_body(m), PREVIEW_CHARS)
             ));
         }
     }
