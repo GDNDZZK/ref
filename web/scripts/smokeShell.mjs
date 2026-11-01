@@ -1,5 +1,6 @@
 // The window around the conversation: sidebar, sessions, command palette, dialogs, split view.
 import { join } from 'node:path'
+import { errors } from 'playwright-core'
 import { INPUT, OUT, SEND_IDLE, WAIT_MS, sendPrompt } from './smokeLib.mjs'
 
 const SETTLE_MS = 500
@@ -25,7 +26,10 @@ const VIEWPORT_WIDTH = 980
 const SPLIT_VIEWPORT = { width: 1500, height: 900 }
 const SPLIT_TILES = 4
 const LOCKUP_SIZE = { width: 60, height: 24 }
-const MIN_FOCUS_TILES = 2
+const MIN_FOCUS_TILES = 5
+const CHROME_VIEWPORT = { width: 1440, height: 900 }
+const PROMPT_CLICK_TIMEOUT_MS = 1000
+const META_ROW_PX = 24 // one row under a message
 const ARROW_KEYS = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp']
 const SIZING_HEIGHTS = [900, 600]
 const SIZING_COUNTS = [4, 8]
@@ -386,6 +390,16 @@ async function checkAllowClickInUnfocusedTile(page, problems, card) {
   const tools = page.locator(TILE).nth(0).locator('.permission')
   const toolsBefore = await tools.count()
   const allow = card.locator('button.choice.success')
+  // The buttons are at the end of the card, in view without any scrolling.
+  const scrollerBox = await page.locator(TILE).nth(0).locator('.scroller').boundingBox()
+  const allowBox = await allow.boundingBox()
+  if (
+    !allowBox ||
+    !scrollerBox ||
+    allowBox.y < scrollerBox.y ||
+    allowBox.y + allowBox.height > scrollerBox.y + scrollerBox.height
+  )
+    problems.push('the Allow buttons of a waiting request are not in view')
   const box = await scrollIntoViewByWheel(page, 0, allow)
   if (!box) {
     problems.push('no Allow button in the unfocused tile')
@@ -434,6 +448,42 @@ async function checkPermissionKeyInFocusedTile(page, problems) {
   if (left !== '') problems.push(`the permission key was typed into the box: "${left}"`)
 }
 
+// Three columns at 1440 px with the sidebar hidden: the floating window buttons stay clear of the
+// tile headers, and the line under a reply keeps to one row.
+async function checkTileChrome(page, problems) {
+  await page.setViewportSize(CHROME_VIEWPORT)
+  // The notification prompt pushes the tiles below the buttons; without it they sit at the top.
+  try {
+    await page.locator('button:has-text("Not now")').click({ timeout: PROMPT_CLICK_TIMEOUT_MS })
+  } catch (error) {
+    if (!(error instanceof errors.TimeoutError)) throw error // no prompt: nothing to dismiss
+  }
+  await page.keyboard.press(SHORTCUT.toggleSidebar)
+  await page.waitForTimeout(SETTLE_MS)
+  const report = await page.evaluate((metaRowPx) => {
+    const rect = (element) => element.getBoundingClientRect()
+    const hits = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
+    const buttons = [...document.querySelectorAll('.corner button')].map(rect)
+    const headerParts = '[data-tile] > header .title, [data-tile] > header .mark, [data-tile] > header .zoom'
+    return {
+      covered: [...document.querySelectorAll(headerParts)].filter((part) =>
+        buttons.some((button) => hits(rect(part), button)),
+      ).length,
+      wrapped: [...document.querySelectorAll('[data-tile] .meta')].filter(
+        (row) => rect(row).height > metaRowPx,
+      ).length,
+      columns: new Set(
+        [...document.querySelectorAll('[data-tile]')].map((tile) => Math.round(rect(tile).left)),
+      ).size,
+    }
+  }, META_ROW_PX)
+  console.log('tile chrome:', JSON.stringify(report))
+  if (report.covered > 0) problems.push(`${report.covered} tile header part(s) lie under the window buttons`)
+  if (report.wrapped > 0) problems.push(`${report.wrapped} meta line(s) wrap onto a second row`)
+  await shot(page, 'split-chrome')
+  await page.keyboard.press(SHORTCUT.toggleSidebar)
+}
+
 // Pointer and keyboard in the split view: a press on a button of an unfocused tile reaches the
 // button, the sidebar follows the focus, and the permission keys work as in the single view.
 export async function splitFocusScenario(page, problems) {
@@ -444,6 +494,7 @@ export async function splitFocusScenario(page, problems) {
   await finishTurnByKey(page, problems, 0)
   await checkSidebarFollowsFocus(page, problems)
   await checkPermissionKeyInFocusedTile(page, problems)
+  await checkTileChrome(page, problems)
   await leaveSplit(page, problems)
 }
 
