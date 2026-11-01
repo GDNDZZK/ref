@@ -392,10 +392,10 @@ pub fn collect(root: &Path, subdirs: &[&str]) -> (Vec<MdDoc>, Vec<String>) {
         walk(&base, &mut files, 0);
         files.sort();
         for f in files {
-            let rel = match f.strip_prefix(&base) {
-                Ok(r) => r.with_extension(""),
-                Err(_) => continue,
-            };
+            let rel = f
+                .strip_prefix(&base)
+                .expect("walk yields paths below its root")
+                .with_extension("");
             let name = rel
                 .components()
                 .map(|c| c.as_os_str().to_string_lossy())
