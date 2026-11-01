@@ -2,7 +2,7 @@
 
 export type McpServerStatus = { name: string, 
 /**
- * "connected" | "connecting" | "failed" | "disabled"
+ * One of `MCP_CONNECTED`, `MCP_CONNECTING`, `MCP_FAILED`, `MCP_DISABLED`.
  */
 status: string, error: string | null, 
 /**
