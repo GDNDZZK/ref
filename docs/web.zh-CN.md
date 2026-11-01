@@ -19,10 +19,12 @@
 ## 启动
 
 ```bash
-ref-web                       # 监听 127.0.0.1:7480 并打开浏览器
+ref-web                       # 监听 127.0.0.1（随机端口）并打开浏览器
 ref-web ~/src/project         # 新会话在此目录启动
-ref-web --port 8080 --no-open # 换端口，不打开浏览器
+ref-web --port 8080 --no-open # 固定端口，不打开浏览器
 ```
+
+不带 `--port` 时，`ref-web` 在 10000–65535 中随机选一个空闲端口，并记在 `<state 目录>/web/port` 里，下次启动先试这个端口，所以只要它空闲，地址就不变；被占用时会重新选一个并记下。`--port N` 使用该端口，被其他程序占用时报错退出。
 
 全部选项见[命令行](cli.zh-CN.md#ref-web)。页面把你传入的目录作为新会话的目录；没有传入时使用 `ref-web` 的启动目录。登录地址用 `?dir=` 传递这个目录；地址栏还可以带 `?session=<id>`（打开该会话）和 `?view=split`（分屏视图），并随你切换的会话而变化。
 
@@ -31,10 +33,10 @@ ref-web --port 8080 --no-open # 换端口，不打开浏览器
 启动时，`ref-web` 会打印登录地址并在浏览器中打开：
 
 ```
-http://127.0.0.1:7480/login?token=…&dir=/home/you/src/project
+http://127.0.0.1:<端口>/login?token=…&dir=/home/you/src/project
 ```
 
-打开这个地址会写入 cookie 并跳转到页面，因此 token 不会留在地址栏和浏览器历史中。之后在 cookie 过期前，直接打开 `http://127.0.0.1:7480/` 即可，不需要 token。
+打开这个地址会写入 cookie 并跳转到页面，因此 token 不会留在地址栏和浏览器历史中。之后在 cookie 过期前，直接打开 `http://127.0.0.1:<端口>/` 即可，不需要 token。
 
 - cookie 名为 `ref_web_<端口>`，所以同一主机上的两个 `ref-web` 实例不会互相覆盖。它带 `HttpOnly` 和 `SameSite=Strict`，有效期 30 天。
 - 它的值是保存在 `ref-web` 进程内存里的随机会话 id，不是登录 token：浏览器会把 cookie 发给同一主机的所有端口，如果 cookie 里放着 token，`localhost` 上的其他服务就能读到它。
@@ -42,18 +44,21 @@ http://127.0.0.1:7480/login?token=…&dir=/home/you/src/project
 
 登录 token 在首次启动时生成，保存在 `<state 目录>/web/login-token`（64 位十六进制字符，权限 600；Unix 上发现权限更宽时会改回并提示），所以重启后登录地址不变。文件内容不是这种格式时，`ref-web` 报错 *does not hold a valid login token* 并退出。要换新的 token，先停止 `ref-web`，删除这个文件，再重新启动。用旧 token 登录的浏览器会退出登录。
 
-## 每个端口一个实例
+## 查找已运行的实例
 
-每个端口只运行一个 `ref-web`。该端口已有实例时再次启动，会打印登录地址（带本次的 `DIR`）并打开浏览器，然后以退出码 0 退出。已运行的实例保持它自己的 `--server`、`--mock` 和 `--host`，第二次启动的这些选项不生效。`ref-web` 靠 `/api/ping` 的应答识别自己的实例，应答用登录 token 签名。端口被其他程序占用时，`ref-web` 报错 *port N is in use by another program* 并以退出码 1 退出。
+每个运行中的 `ref-web` 都会在 `<state 目录>/web/instances/<pid>.json` 写一条记录（pid、端口、host、版本和启动时间；不含密钥；权限 600），停止时删除。再次启动 `ref-web` 时会按从新到旧的顺序查看这些记录；如果某条属于登录 token 相同的 `ref-web`，就打印该实例的登录地址（带本次的 `DIR`），打开浏览器，并以退出码 0 退出。带 `--port N` 时只看该端口上的实例。已运行的实例保持它自己的 `--server`、`--mock` 和 `--host`，第二次启动的这些选项不生效，并会有提示。`ref-web` 靠 `/api/ping` 的应答识别自己的实例，应答用登录 token 签名。对应进程已不存在的记录会被删除。
+
+没有匹配的实例时，启动一个新的。带 `--port N` 而端口被其他程序（或登录 token 不同的 `ref-web`）占用时，`ref-web` 报错 *port N is in use by another program or by a ref-web with a different login token* 并以退出码 1 退出。同时发生的两次启动可能各自启动一个实例，这无害。
 
 ## 向局域网开放
 
 `ref-web` 默认只监听 `127.0.0.1`。`--host ADDR` 可以监听其他地址，例如 `--host 0.0.0.0` 向局域网开放，此时会打印警告。
 
-- 请用 **IP 地址**访问，例如 `http://192.168.1.20:7480/`。用主机名访问会被拒绝：`ref-web` 会用已知地址校验 `Host` 头，以防范 DNS rebinding。
+- 请用 **IP 地址**访问，例如 `http://192.168.1.20:<端口>/`。用主机名访问会被拒绝：`ref-web` 会用已知地址校验 `Host` 头，以防范 DNS rebinding。
 - 没有 TLS。cookie 和你输入的所有内容都以明文传输，登录的人可以控制后端，而后端能在这台机器上运行命令。请改用 SSH 隧道，或带 TLS 的反向代理：
 
   ```bash
+  # 在服务器上：ref-web --no-open --port 7480
   ssh -L 7480:127.0.0.1:7480 server
   # 然后在本机打开 http://127.0.0.1:7480/
   ```
@@ -180,4 +185,4 @@ pnpm install
 pnpm dev                  # Vite 开发服务器，127.0.0.1:5173
 ```
 
-`pnpm dev` 把 `/ws`、`/api` 和 `/login` 转发到 `127.0.0.1:7480` 上的 `ref-web`。先启动 `ref-web --no-open`（或 `ref-web --mock --no-open`），再用登录地址中的 token 通过开发服务器登录：`http://127.0.0.1:5173/login?token=…`。全程使用 `127.0.0.1` 而不是 `localhost`，因为 cookie 属于某一个主机名。
+`pnpm dev` 把 `/ws`、`/api` 和 `/login` 转发到 `127.0.0.1:7480` 上的 `ref-web`。先启动 `ref-web --no-open --port 7480`（或 `ref-web --mock --no-open --port 7480`），再用登录地址中的 token 通过开发服务器登录：`http://127.0.0.1:5173/login?token=…`。全程使用 `127.0.0.1` 而不是 `localhost`，因为 cookie 属于某一个主机名。

@@ -19,10 +19,12 @@
 ## Starting
 
 ```bash
-ref-web                       # serve on 127.0.0.1:7480 and open the browser
+ref-web                       # serve on 127.0.0.1 (random port) and open the browser
 ref-web ~/src/project         # new sessions start in this directory
-ref-web --port 8080 --no-open # another port, do not open the browser
+ref-web --port 8080 --no-open # a fixed port, do not open the browser
 ```
+
+Without `--port`, `ref-web` picks a random free port in 10000–65535. It keeps the port in `<state dir>/web/port` and tries it first the next time, so the address stays the same while that port is free; when it is taken, a new one is picked and kept. `--port N` uses that port, or stops with an error if another program has it.
 
 All options are listed in [Command line](cli.md#ref-web). The page uses the directory you pass as the directory for new sessions; without one, it uses the directory `ref-web` was started in. The login address carries it as `?dir=`; the address bar can also hold `?session=<id>` (open that session) and `?view=split` (the split view), and follows the session you switch to.
 
@@ -31,10 +33,10 @@ All options are listed in [Command line](cli.md#ref-web). The page uses the dire
 On start, `ref-web` prints a login address and opens it in the browser:
 
 ```
-http://127.0.0.1:7480/login?token=…&dir=/home/you/src/project
+http://127.0.0.1:<port>/login?token=…&dir=/home/you/src/project
 ```
 
-The address sets a cookie and redirects to the page, so the token does not stay in the address bar or the browser history. After that, `http://127.0.0.1:7480/` works without the token until the cookie expires.
+The address sets a cookie and redirects to the page, so the token does not stay in the address bar or the browser history. After that, `http://127.0.0.1:<port>/` works without the token until the cookie expires.
 
 - The cookie is named `ref_web_<port>`, so two `ref-web` instances on one host do not overwrite each other. It is `HttpOnly` and `SameSite=Strict` and valid for 30 days.
 - Its value is a random session id that lives in the memory of the `ref-web` process. It is not the login token: browsers send a cookie to every port of the same host, so a cookie that held the token could be read by other services on `localhost`.
@@ -42,18 +44,21 @@ The address sets a cookie and redirects to the page, so the token does not stay 
 
 The login token is created on first start and kept in `<state dir>/web/login-token` (64 hexadecimal characters, mode 600; on Unix a wider mode is corrected with a notice), so the login address stays the same after a restart. If the file holds anything else, `ref-web` stops with *does not hold a valid login token*. To get a new token, stop `ref-web`, delete that file and start it again. Browsers signed in with the old token are signed out.
 
-## One instance per port
+## Finding a running instance
 
-Only one `ref-web` runs per port. Starting it again while one is running on that port prints the login address (with the new `DIR`) and opens the browser, then exits with code 0. The running instance keeps its own `--server`, `--mock` and `--host`; the options of the second start are not applied. `ref-web` recognizes its own instance by an answer to `/api/ping` that is signed with the login token. If another program uses the port, `ref-web` reports *port N is in use by another program* and exits with code 1.
+Each running `ref-web` writes a record to `<state dir>/web/instances/<pid>.json` (pid, port, host, version and start time; no secret; mode 600) and removes it when it stops. Starting `ref-web` again looks at these records, newest first. If one of them belongs to a `ref-web` with the same login token, it prints that instance's login address (with the new `DIR`), opens the browser and exits with code 0. With `--port N`, only the instance on that port counts. The running instance keeps its own `--server`, `--mock` and `--host`; the options of the second start are not applied, and a notice says so. `ref-web` recognizes its own instance by an answer to `/api/ping` that is signed with the login token. Records of processes that no longer exist are deleted.
+
+If no instance matches, a new one starts. With `--port N` and the port taken by another program (or by a `ref-web` with a different login token), `ref-web` reports *port N is in use by another program or by a ref-web with a different login token* and exits with code 1. Two starts at the same moment can both start an instance; that does no harm.
 
 ## Opening it to the network
 
 `ref-web` listens on `127.0.0.1` only. `--host ADDR` listens on another address, for example `--host 0.0.0.0` for the local network. It prints a warning when you do.
 
-- Open the page by **IP address**, for example `http://192.168.1.20:7480/`. A host name is rejected: `ref-web` checks the `Host` header against the addresses it knows to prevent DNS rebinding.
+- Open the page by **IP address**, for example `http://192.168.1.20:<port>/`. A host name is rejected: `ref-web` checks the `Host` header against the addresses it knows to prevent DNS rebinding.
 - There is no TLS. The cookie and everything you type travel in plain text, and whoever signs in controls the backend, which can run commands on that machine. Use an SSH tunnel or a reverse proxy with TLS instead:
 
   ```bash
+  # on the server: ref-web --no-open --port 7480
   ssh -L 7480:127.0.0.1:7480 server
   # then open http://127.0.0.1:7480/ on your machine
   ```
@@ -180,4 +185,4 @@ pnpm install
 pnpm dev                  # Vite dev server on 127.0.0.1:5173
 ```
 
-`pnpm dev` forwards `/ws`, `/api` and `/login` to `ref-web` on `127.0.0.1:7480`. Start `ref-web --no-open` (or `ref-web --mock --no-open`) first, then sign in through the dev server with `http://127.0.0.1:5173/login?token=…`, using the token from the login address. Use `127.0.0.1` throughout, not `localhost`, because the cookie belongs to one host name.
+`pnpm dev` forwards `/ws`, `/api` and `/login` to `ref-web` on `127.0.0.1:7480`. Start `ref-web --no-open --port 7480` (or `ref-web --mock --no-open --port 7480`) first, then sign in through the dev server with `http://127.0.0.1:5173/login?token=…`, using the token from the login address. Use `127.0.0.1` throughout, not `localhost`, because the cookie belongs to one host name.

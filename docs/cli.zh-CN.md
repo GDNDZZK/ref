@@ -44,7 +44,7 @@ ref-web [DIR] [选项]
 | 选项 | 含义 |
 |---|---|
 | `DIR` | 新会话的目录（默认：当前目录）。 |
-| `--port N` | 监听端口（1–65535，默认 `7480`）。 |
+| `--port N` | 监听端口（1–65535）。不设置时：在 10000–65535 中随机选一个空闲端口，并先试上次使用的端口，所以地址保持不变。 |
 | `--host ADDR` | 监听地址（默认 `127.0.0.1`）。其他地址会向网络开放 `ref-web`，且没有 TLS；此时会打印警告。 |
 | `--no-open` | 不打开浏览器。 |
 | `--server ws://host:port` | 连接指定的后端，而不是查找或启动后端。 |
@@ -101,6 +101,8 @@ ref --server ws://127.0.0.1:7777 --token <token>
 | `~/.local/state/ref/prompt-history.jsonl` | 提示历史（500 条），`ref` 和 `ref-gui` 共用。 |
 | `~/.local/state/ref/gui.json` | `ref-gui` 的设置（[设置](gui.zh-CN.md#设置)）。 |
 | `~/.local/state/ref/web/login-token` | `ref-web` 的登录 token，仅你本人可读（权限 600）。在 `ref-web` 停止时删除它即可换新 token。 |
+| `~/.local/state/ref/web/port` | `ref-web` 上次使用的端口；未指定 `--port` 时先试它。 |
+| `~/.local/state/ref/web/instances/<pid>.json` | 每个运行中的 `ref-web` 一个文件：端口、host、版本、启动时间。不含密钥，权限 600。 |
 | `~/.local/state/ref/logs/` | 后端日志，包括配置警告。 |
 
 在 Windows 上，`~` 指 `%USERPROFILE%`。
