@@ -7,13 +7,11 @@ import { useChatSession } from '../composables/chatSessionContext.ts'
 import { useStuck } from '../composables/useStuck.ts'
 import { renderMarkdown } from '../markdown/markdown.ts'
 import type { ReasoningBlock } from '../model/blocks.ts'
-import { usePulse } from '../motion/usePulse.ts'
+import { PULSE_DIMMED, usePulse } from '../motion/usePulse.ts'
 import { motion } from '../theme/generated/motion.ts'
 import Chevron from './Chevron.vue'
 
 const props = defineProps<{ block: ReasoningBlock }>()
-
-const PULSE_DIMMED = 0.5
 
 const { t } = useI18n()
 const chatScroll = useChatScroll()

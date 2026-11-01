@@ -2,12 +2,10 @@
 // The status mark of a todo row: ring, ring with a pulsing dot, tick on a disc, or a cross.
 import { computed, useTemplateRef } from 'vue'
 import type { TodoStatus } from '../proto/generated'
-import { usePulse } from '../motion/usePulse.ts'
+import { PULSE_DIMMED, usePulse } from '../motion/usePulse.ts'
 import Icon from './Icon.vue'
 
 const props = defineProps<{ status: TodoStatus }>()
-
-const PULSE_DIMMED = 0.5
 
 const dot = useTemplateRef<HTMLElement>('dot')
 usePulse(

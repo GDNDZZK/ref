@@ -6,6 +6,8 @@ import type { Ref } from 'vue'
 import { cssEasing } from './cssEasing.ts'
 import { motion } from '../theme/generated/motion.ts'
 
+export const PULSE_DIMMED = 0.5 // the opacity most pulses dim to
+
 interface PulseOptions {
   dimmed: number
   period?: number // ms for one dim-and-back cycle
