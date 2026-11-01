@@ -92,13 +92,7 @@ pub fn draw(f: &mut Frame<'_>, app: &mut App) {
         if app.perm.as_ref().is_none_or(|p| p.call_id != req.call_id) {
             app.perm = Some(PermissionView::new(&req.call_id));
         }
-        let name =
-            (app.mode == Mode::Watch || app.current.as_deref() != Some(sid.as_str())).then(|| {
-                app.views
-                    .get(&sid)
-                    .map(|v| v.info.name.clone())
-                    .unwrap_or_default()
-            });
+        let name = app.modal_origin_name(&sid);
         if let Some(p) = app.perm.as_mut() {
             p.draw(buf, area, &req, name.as_deref(), more);
         }
@@ -112,13 +106,7 @@ pub fn draw(f: &mut Frame<'_>, app: &mut App) {
         {
             app.question = Some(QuestionView::new(&req));
         }
-        let name =
-            (app.mode == Mode::Watch || app.current.as_deref() != Some(sid.as_str())).then(|| {
-                app.views
-                    .get(&sid)
-                    .map(|v| v.info.name.clone())
-                    .unwrap_or_default()
-            });
+        let name = app.modal_origin_name(&sid);
         cursor = app.question.as_mut().and_then(|q| {
             q.draw(buf, area, name.as_deref());
             q.cursor_at
@@ -166,16 +154,8 @@ pub fn draw(f: &mut Frame<'_>, app: &mut App) {
 
 fn env<'a>(app: &'a App, now: i64, tick: u64) -> Env<'a> {
     Env {
-        agents: app
-            .config
-            .as_ref()
-            .map(|c| c.agents.as_slice())
-            .unwrap_or(&[]),
-        models: app
-            .config
-            .as_ref()
-            .map(|c| c.models.as_slice())
-            .unwrap_or(&[]),
+        agents: app.agents(),
+        models: app.models(),
         details: app.details,
         thinking: app.thinking,
         tick,

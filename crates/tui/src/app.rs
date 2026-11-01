@@ -561,10 +561,26 @@ impl App {
     }
 
     pub fn agents(&self) -> &[ref_proto::AgentInfo] {
-        self.config
-            .as_ref()
-            .map(|c| c.agents.as_slice())
-            .unwrap_or(&[])
+        config_agents(&self.config)
+    }
+
+    pub fn models(&self) -> &[ref_proto::ModelInfo] {
+        config_models(&self.config)
+    }
+
+    /// Whether `sid` is not the session in the foreground chat view.
+    pub fn is_background_view(&self, sid: &str) -> bool {
+        self.mode == Mode::Watch || self.current.as_deref() != Some(sid)
+    }
+
+    /// Name of the session a modal belongs to, shown only when it is not the one in front.
+    pub fn modal_origin_name(&self, sid: &str) -> Option<String> {
+        self.is_background_view(sid).then(|| {
+            self.views
+                .get(sid)
+                .map(|v| v.info.name.clone())
+                .unwrap_or_default()
+        })
     }
 
     pub fn agent_color(&self, name: &str) -> Color {
@@ -1213,6 +1229,7 @@ impl App {
 
     fn on_event(&mut self, sid: String, ev: SessionEvent) {
         let closed = matches!(ev, SessionEvent::Closed);
+        let in_background = self.is_background_view(&sid);
         let Some(v) = self.views.get_mut(&sid) else {
             return;
         };
@@ -1221,7 +1238,7 @@ impl App {
             return;
         }
         if let SessionEvent::Error { text } = &ev
-            && (self.mode == Mode::Watch || self.current.as_deref() != Some(sid.as_str()))
+            && in_background
         {
             let name = v.info.name.clone();
             self.toasts.error(text::truncate(
@@ -1860,16 +1877,9 @@ impl App {
         }
         let close_only = d.kind == Kind::CloseSessions;
         let now = ref_proto::now_ms();
-        let models = self
-            .config
-            .as_ref()
-            .map(|c| c.models.as_slice())
-            .unwrap_or(&[]);
-        let agents = self
-            .config
-            .as_ref()
-            .map(|c| c.agents.as_slice())
-            .unwrap_or(&[]);
+        // Field-level helpers keep `self.dialog` mutably borrowed alongside.
+        let models = config_models(&self.config);
+        let agents = config_agents(&self.config);
         let mut items = Vec::new();
         let mut live: Vec<&SessionInfo> = self.live.iter().filter(|s| s.live).collect();
         live.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
@@ -3240,6 +3250,14 @@ fn response_images(result: &Value) -> Vec<(ImageData, Option<String>)> {
         .filter(|i| !i.image.is_stub())
         .map(|i| (i.image, i.name))
         .collect()
+}
+
+fn config_agents(config: &Option<ServerConfigInfo>) -> &[ref_proto::AgentInfo] {
+    config.as_ref().map(|c| c.agents.as_slice()).unwrap_or(&[])
+}
+
+fn config_models(config: &Option<ServerConfigInfo>) -> &[ref_proto::ModelInfo] {
+    config.as_ref().map(|c| c.models.as_slice()).unwrap_or(&[])
 }
 
 fn sessions_of(v: &Value) -> Option<Vec<SessionInfo>> {
