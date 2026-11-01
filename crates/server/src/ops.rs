@@ -24,7 +24,7 @@ fn unique_name(hub: &Hub, base: &str, except: Option<&str>) -> String {
     }
     for i in 2.. {
         let suffix = format!("-{i}");
-        let max = 64 - suffix.chars().count();
+        let max = crate::util::MAX_NAME_CHARS - suffix.chars().count();
         let stem: String = base.chars().take(max).collect();
         let cand = format!("{stem}{suffix}");
         if !hub.name_taken(&cand, except) {

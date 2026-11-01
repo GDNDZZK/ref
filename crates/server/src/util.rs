@@ -25,12 +25,30 @@ pub fn new_session_id() -> String {
     new_id(SESSION_PREFIX)
 }
 
+/// Hex digits of the epoch-millis part of an id.
+const ID_TIME_HEX_DIGITS: usize = 12;
+
+/// Random base62 characters at the end of an id.
+const ID_RANDOM_CHARS: usize = 8;
+
+/// Bits of the epoch-millis part of an id.
+const ID_TIME_MASK: u64 = (1 << (ID_TIME_HEX_DIGITS * 4)) - 1;
+
+const HEX: &[u8] = b"0123456789abcdef";
+
+/// Longest accepted peer name, in characters.
+pub(crate) const MAX_NAME_CHARS: usize = 64;
+
 /// Time-sortable id: `<prefix>_` + 12 hex digits of epoch millis + 8 random base62 chars.
-pub fn new_id(prefix: &str) -> String {
+pub(crate) fn new_id(prefix: &str) -> String {
     let ms = ref_proto::now_ms().max(0) as u64;
-    let mut s = format!("{prefix}_{:012x}", ms & 0xffff_ffff_ffff);
+    let mut s = format!(
+        "{prefix}_{:0width$x}",
+        ms & ID_TIME_MASK,
+        width = ID_TIME_HEX_DIGITS
+    );
     let mut rng = rand::rng();
-    for _ in 0..8 {
+    for _ in 0..ID_RANDOM_CHARS {
         s.push(BASE62[rng.random_range(0..BASE62.len())] as char);
     }
     s
@@ -39,19 +57,21 @@ pub fn new_id(prefix: &str) -> String {
 pub fn random_hex(n: usize) -> String {
     let mut rng = rand::rng();
     (0..n)
-        .map(|_| char::from_digit(rng.random_range(0..16u32), 16).unwrap_or('0'))
+        .map(|_| HEX[rng.random_range(0..HEX.len())] as char)
         .collect()
 }
 
 /// Validates and normalizes a peer name: trimmed, 1..=64 chars, no control characters.
-pub fn normalize_name(raw: &str) -> Result<String, String> {
+pub(crate) fn normalize_name(raw: &str) -> Result<String, String> {
     let name = raw.trim();
     let n = name.chars().count();
     if n == 0 {
         return Err("Session name must not be empty.".into());
     }
-    if n > 64 {
-        return Err("Session name must be at most 64 characters.".into());
+    if n > MAX_NAME_CHARS {
+        return Err(format!(
+            "Session name must be at most {MAX_NAME_CHARS} characters."
+        ));
     }
     if name.chars().any(char::is_control) {
         return Err("Session name must not contain control characters.".into());
@@ -68,10 +88,11 @@ pub fn truncate_chars(s: &str, max: usize) -> String {
 }
 
 /// Keeps the head and tail of a long text (byte budget), noting the omission.
-pub fn truncate_middle(s: &str, max_bytes: usize) -> String {
+pub(crate) fn truncate_middle(s: &str, max_bytes: usize) -> String {
     if s.len() <= max_bytes {
         return s.to_string();
     }
+    // The tail gets the larger share: it usually carries the error output.
     let head = floor_boundary(s, max_bytes * 2 / 5);
     let tail = ceil_boundary(s, s.len() - max_bytes * 3 / 5);
     format!(
@@ -83,14 +104,14 @@ pub fn truncate_middle(s: &str, max_bytes: usize) -> String {
 }
 
 /// Last `max_bytes` of a string (char-boundary safe).
-pub fn tail_bytes(s: &str, max_bytes: usize) -> &str {
+pub(crate) fn tail_bytes(s: &str, max_bytes: usize) -> &str {
     if s.len() <= max_bytes {
         return s;
     }
     &s[ceil_boundary(s, s.len() - max_bytes)..]
 }
 
-pub fn floor_boundary(s: &str, mut i: usize) -> usize {
+fn floor_boundary(s: &str, mut i: usize) -> usize {
     i = i.min(s.len());
     while i > 0 && !s.is_char_boundary(i) {
         i -= 1;
@@ -98,7 +119,7 @@ pub fn floor_boundary(s: &str, mut i: usize) -> usize {
     i
 }
 
-pub fn ceil_boundary(s: &str, mut i: usize) -> usize {
+fn ceil_boundary(s: &str, mut i: usize) -> usize {
     while i < s.len() && !s.is_char_boundary(i) {
         i += 1;
     }
@@ -106,7 +127,7 @@ pub fn ceil_boundary(s: &str, mut i: usize) -> usize {
 }
 
 /// Atomic file write: temp file in the same directory + rename. `private` => mode 0600.
-pub fn write_atomic(path: &Path, data: &[u8], private: bool) -> std::io::Result<()> {
+pub(crate) fn write_atomic(path: &Path, data: &[u8], private: bool) -> std::io::Result<()> {
     use std::io::Write;
     // Windows: files under the user profile are already private to the user.
     #[cfg(not(unix))]
@@ -127,18 +148,20 @@ pub fn write_atomic(path: &Path, data: &[u8], private: bool) -> std::io::Result<
         }
         let mut f = opts.open(&tmp)?;
         f.write_all(data)?;
+        // Best effort: the data is already written; a failed sync only weakens crash durability.
         f.sync_all().ok();
         drop(f);
         std::fs::rename(&tmp, path)
     })();
     if res.is_err() {
+        // The write error is the one to report; a failed cleanup adds nothing.
         let _ = std::fs::remove_file(&tmp);
     }
     res
 }
 
 /// `YYYY-MM-DD HH:MM:SS` in local time.
-pub fn fmt_time(ms: i64) -> String {
+pub(crate) fn fmt_time(ms: i64) -> String {
     use chrono::TimeZone;
     match chrono::Local.timestamp_millis_opt(ms).single() {
         Some(t) => t.format("%Y-%m-%d %H:%M:%S").to_string(),
@@ -147,7 +170,7 @@ pub fn fmt_time(ms: i64) -> String {
 }
 
 /// `YYYY-MM-DD` in local time.
-pub fn fmt_date(ms: i64) -> String {
+pub(crate) fn fmt_date(ms: i64) -> String {
     use chrono::TimeZone;
     match chrono::Local.timestamp_millis_opt(ms).single() {
         Some(t) => t.format("%Y-%m-%d").to_string(),
@@ -156,7 +179,7 @@ pub fn fmt_date(ms: i64) -> String {
 }
 
 /// Human duration like `3h 12m` / `45s`.
-pub fn fmt_duration(secs: i64) -> String {
+pub(crate) fn fmt_duration(secs: i64) -> String {
     let s = secs.max(0);
     let (d, h, m, sec) = (s / 86400, s / 3600 % 24, s / 60 % 60, s % 60);
     if d > 0 {
@@ -171,7 +194,7 @@ pub fn fmt_duration(secs: i64) -> String {
 }
 
 /// Expand a leading `~/`.
-pub fn expand_home(p: &str, home: Option<&Path>) -> std::path::PathBuf {
+pub(crate) fn expand_home(p: &str, home: Option<&Path>) -> std::path::PathBuf {
     if p == "~"
         && let Some(h) = home
     {
@@ -186,7 +209,7 @@ pub fn expand_home(p: &str, home: Option<&Path>) -> std::path::PathBuf {
 }
 
 /// A relative path written with `/` on every platform, as clients expect it in the protocol.
-pub fn relative_slash(rel: &Path) -> String {
+pub(crate) fn relative_slash(rel: &Path) -> String {
     let parts: Vec<_> = rel
         .components()
         .map(|c| c.as_os_str().to_string_lossy())
