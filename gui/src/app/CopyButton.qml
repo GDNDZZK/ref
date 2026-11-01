@@ -15,13 +15,6 @@ Item {
 
 	CopiedFlag { id: flag }
 
-	// QML has no clipboard of its own; a TextEdit copies its selection.
-	TextEdit {
-		id: clipboard
-		visible: false
-		textFormat: TextEdit.PlainText
-	}
-
 	Rectangle {
 		anchors.fill: parent
 		radius: Theme.radiusSmall
@@ -37,9 +30,7 @@ Item {
 	HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
 	TapHandler {
 		onTapped: {
-			clipboard.text = button.text
-			clipboard.selectAll()
-			clipboard.copy()
+			Clipboard.setText(button.text)
 			flag.flash()
 		}
 	}
