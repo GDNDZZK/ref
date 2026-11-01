@@ -8,7 +8,6 @@ use ref_proto::ImageData;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::time::Duration;
-use tokio_util::sync::CancellationToken;
 
 mod client;
 mod http;
@@ -55,15 +54,3 @@ pub struct CallResult {
     pub images: Vec<ImageData>,
     pub is_error: bool,
 }
-
-// McpClient API (implemented in client.rs):
-//   pub async fn connect(cfg: &ServerConfig) -> anyhow::Result<McpClient>
-//   pub fn name(&self) -> &str
-//   pub fn instructions(&self) -> Option<String>          // from initialize result
-//   pub async fn list_tools(&self) -> anyhow::Result<Vec<McpTool>>
-//   pub async fn call_tool(&self, name: &str, args: Value, cancel: &CancellationToken) -> anyhow::Result<CallResult>
-//       (on cancel: sends notifications/cancelled and returns Err("cancelled"))
-//   pub fn tools_changed(&self) -> tokio::sync::watch::Receiver<u64>  // bumps on list_changed
-//   pub async fn close(&self)
-#[allow(dead_code)]
-fn _assert_api(_c: &CancellationToken) {}
