@@ -15,10 +15,6 @@ pub enum Upstream {
 }
 
 impl Upstream {
-    pub fn remote(target: Target) -> Self {
-        Upstream::Remote(target)
-    }
-
     pub fn mock() -> Self {
         Upstream::Mock(Box::new(Mutex::new(None)))
     }
