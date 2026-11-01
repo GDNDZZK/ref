@@ -102,7 +102,7 @@ impl ModelRef {
     pub fn key(&self) -> String {
         format!("{}/{}", self.provider, self.model)
     }
-    /// Parses `provider/model[:variant]` or `provider/model#variant`.
+    /// Parses `provider/model` or `provider/model#variant`.
     pub fn parse(s: &str) -> Option<ModelRef> {
         let (pm, variant) = match s.rsplit_once('#') {
             Some((a, b)) => (a, Some(b.to_string())),
