@@ -1,23 +1,23 @@
 //! ref-server library: the backend of the ref coding agent.
 
-pub mod agent_switch;
+mod agent_switch;
 pub mod api;
 pub mod compaction;
-pub mod convert;
+mod convert;
 pub mod engine;
 pub mod hub;
-pub mod images;
+mod images;
 pub mod instance;
-pub mod mcp;
+mod mcp;
 pub mod mock;
-pub mod models;
+mod models;
 mod notify;
 pub mod ops;
 pub mod peers;
-pub mod prompt;
-pub mod question;
+mod prompt;
+mod question;
 pub mod session;
-pub mod store;
+mod store;
 pub mod title;
 mod toolset;
 pub mod util;
