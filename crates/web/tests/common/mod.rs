@@ -194,7 +194,7 @@ impl Web {
     }
 
     pub fn url(&self, path: &str) -> String {
-        format!("http://127.0.0.1:{}{path}", self.port)
+        format!("http://{LOOPBACK}:{}{path}", self.port)
     }
 
     pub fn cookie(&self) -> String {
@@ -218,7 +218,7 @@ impl Web {
     }
 
     pub fn origin(&self) -> String {
-        format!("http://127.0.0.1:{}", self.port)
+        format!("http://{LOOPBACK}:{}", self.port)
     }
 
     /// A GET with the login cookie.
@@ -238,7 +238,7 @@ impl Web {
         origin: Option<String>,
         host: Option<&str>,
     ) -> Result<Ws, tokio_tungstenite::tungstenite::Error> {
-        let mut request = format!("ws://127.0.0.1:{}/ws", self.port)
+        let mut request = format!("ws://{LOOPBACK}:{}/ws", self.port)
             .into_client_request()
             .unwrap();
         let headers = request.headers_mut();

@@ -24,7 +24,7 @@ fn dist_file(name: &str) -> Vec<u8> {
 /// ref-web in front of a fake upstream that echoes frames.
 async fn web_with_fake_upstream(env: &Env) -> (Web, FakeUpstream) {
     let upstream = fake_upstream().await;
-    let server = format!("ws://127.0.0.1:{}/", upstream.port);
+    let server = format!("ws://{LOOPBACK}:{}/", upstream.port);
     let web = env
         .start(&["--server", &server, "--token", BACKEND_TOKEN])
         .await;
@@ -210,7 +210,7 @@ async fn websocket_checks_cookie_origin_and_host() {
     let other_port = web
         .try_ws(
             Some(web.cookie()),
-            Some("http://127.0.0.1:5173".into()),
+            Some(format!("http://{LOOPBACK}:5173")),
             None,
         )
         .await
@@ -307,7 +307,7 @@ async fn upstream_close_is_passed_on() {
 #[tokio::test]
 async fn unreachable_backend_closes_the_tab_with_the_reason() {
     let env = Env::new("down");
-    let dead = format!("ws://127.0.0.1:{}/", free_port());
+    let dead = format!("ws://{LOOPBACK}:{}/", free_port());
     let web = env.start(&["--server", &dead]).await;
     let mut ws = web.ws().await;
     match next_message(&mut ws).await {
@@ -316,7 +316,7 @@ async fn unreachable_backend_closes_the_tab_with_the_reason() {
             assert!(
                 frame
                     .reason
-                    .starts_with("cannot connect to ws://127.0.0.1:"),
+                    .starts_with(&format!("cannot connect to ws://{LOOPBACK}:")),
                 "{}",
                 frame.reason
             );
@@ -330,7 +330,7 @@ async fn a_real_backend_accepts_a_hello_without_token() {
     let env = Env::new("real");
     let (_backend, backend_port) = real_backend(&env, BACKEND_TOKEN).await;
     // No trailing slash: the form users type.
-    let server = format!("ws://127.0.0.1:{backend_port}");
+    let server = format!("ws://{LOOPBACK}:{backend_port}");
     let web = env
         .start(&["--server", &server, "--token", BACKEND_TOKEN])
         .await;
@@ -358,7 +358,7 @@ async fn a_real_backend_accepts_a_hello_without_token() {
 async fn a_wrong_backend_token_is_reported_by_the_backend() {
     let env = Env::new("badtoken");
     let (_backend, backend_port) = real_backend(&env, BACKEND_TOKEN).await;
-    let server = format!("ws://127.0.0.1:{backend_port}/");
+    let server = format!("ws://{LOOPBACK}:{backend_port}/");
     let web = env.start(&["--server", &server, "--token", "wrong"]).await;
     let mut ws = web.ws().await;
     match next_message(&mut ws).await {
@@ -406,7 +406,9 @@ async fn a_port_held_by_another_program_is_an_error() {
 #[tokio::test]
 async fn a_ref_web_with_another_login_token_is_reported_as_such() {
     let first_env = Env::new("token-a");
-    let first = first_env.start(&["--server", "ws://127.0.0.1:1/"]).await;
+    let first = first_env
+        .start(&["--server", &format!("ws://{LOOPBACK}:1/")])
+        .await;
     let second_env = Env::new("token-b");
     let port = first.port.to_string();
     let output = second_env.run(&["--no-open", "--port", &port]);
@@ -427,7 +429,7 @@ async fn the_login_token_survives_a_restart_but_sessions_do_not() {
     drop(first);
 
     let upstream = fake_upstream().await;
-    let server = format!("ws://127.0.0.1:{}/", upstream.port);
+    let server = format!("ws://{LOOPBACK}:{}/", upstream.port);
     let second = env.start_on(port, &["--server", &server]).await;
     assert_eq!(second.token, token);
     assert_ne!(second.cookie(), old_cookie, "a new random session id");
