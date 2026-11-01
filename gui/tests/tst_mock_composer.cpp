@@ -40,8 +40,9 @@ private:
 	struct Session
 	{
 		explicit Session(const QString& cwd)
-			: backend(Backend::Source(Backend::Mode::Mock{}), cwd)
-			, config(backend)
+			: connection(Backend::Source(Backend::Mode::Mock{}), cwd)
+			, backend(connection.backend())
+			, config(connection)
 			, controller(backend)
 			, composer(config, controller, history)
 		{
@@ -62,7 +63,8 @@ private:
 			composer.edit(text, static_cast<int>(text.size()));
 		}
 
-		Backend backend;
+		refgui::workspace::Connection connection;
+		Backend& backend;
 		refgui::workspace::BackendConfig config;
 		SessionController controller;
 		compose::PromptHistory history;

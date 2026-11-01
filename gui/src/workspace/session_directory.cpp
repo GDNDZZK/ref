@@ -1,5 +1,6 @@
 #include "workspace/session_directory.h"
 
+#include <QLoggingCategory>
 #include <QPointer>
 
 #include <algorithm>
@@ -13,24 +14,27 @@ namespace refgui::workspace
 namespace
 {
 
+Q_LOGGING_CATEGORY(lcDirectory, "refgui.workspace.directory")
+
 // Session changes come in bursts (a turn ends, the title changes); fetch the history once.
 constexpr auto HistoryDelay = 1000ms;
 
 } // namespace
 
-SessionDirectory::SessionDirectory(client::Backend& backend, QObject* parent)
+SessionDirectory::SessionDirectory(Connection& connection, QObject* parent)
 	: QObject(parent)
-	, m_backend(backend)
+	, m_backend(connection.backend())
 {
 	m_historyTimer.setSingleShot(true);
 	m_historyTimer.setInterval(HistoryDelay);
 	connect(&m_historyTimer, &QTimer::timeout, this, &SessionDirectory::loadHistory);
-	connect(&m_backend, &client::Backend::connected, this, [this] {
+	// Through the Connection, like the window's other handlers, so they run in the order they were connected.
+	connect(&connection, &Connection::connected, this, [this] {
 		loadLive();
 		loadHistory();
 		if(m_watchAll)
 		{
-			m_backend.client().watchAll(true);
+			resubscribe();
 		}
 	});
 	connect(&m_backend.client(), &client::ServerClient::frameReceived, this, &SessionDirectory::onFrame);
@@ -164,6 +168,15 @@ QCoro::Task<SessionDirectory::Result<void>> SessionDirectory::setWatchAll(bool e
 		co_return std::unexpected(watching.error());
 	}
 	co_return Result<void>();
+}
+
+QCoro::Task<> SessionDirectory::resubscribe()
+{
+	const auto watching = co_await m_backend.client().watchAll(true);
+	if(!watching && !client::isConnectionLost(watching.error()))
+	{
+		qCWarning(lcDirectory).noquote() << "watching all sessions again failed:" << watching.error();
+	}
 }
 
 QCoro::Task<> SessionDirectory::loadLive()

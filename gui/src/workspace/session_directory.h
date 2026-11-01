@@ -1,6 +1,8 @@
 #pragma once
 
 #include "client/backend.h"
+#include "client/result.h"
+#include "workspace/connection.h"
 #include "workspace/session_list_model.h"
 
 #include <QCoroTask>
@@ -26,7 +28,7 @@ public:
 	// How many persisted sessions the sidebar can search.
 	static constexpr int HistoryLimit = 200;
 
-	explicit SessionDirectory(client::Backend& backend, QObject* parent = nullptr);
+	explicit SessionDirectory(Connection& connection, QObject* parent = nullptr);
 
 	// The live sessions, for the sidebar's running list.
 	SessionListModel& live() { return m_live; }
@@ -85,6 +87,8 @@ signals:
 private:
 	// Waits for a request answering with a session's info and takes the info in.
 	QCoro::Task<Result<void>> adopt(QCoro::Task<Result<proto::SessionInfo>> request);
+	// Sends watch_all again on a new connection; nobody waits for it, so a failure is logged.
+	QCoro::Task<> resubscribe();
 	QCoro::Task<> loadLive();
 	QCoro::Task<> loadHistory();
 	void setLive(QList<proto::SessionInfo> sessions);

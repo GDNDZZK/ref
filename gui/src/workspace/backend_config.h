@@ -1,6 +1,7 @@
 #pragma once
 
 #include "client/backend.h"
+#include "workspace/connection.h"
 
 #include <QCoroTask>
 #include <QObject>
@@ -21,7 +22,7 @@ class BackendConfig : public QObject
 	Q_PROPERTY(QVariantList mcpServers READ mcpServers NOTIFY mcpChanged)
 
 public:
-	explicit BackendConfig(client::Backend& backend, QObject* parent = nullptr);
+	explicit BackendConfig(Connection& connection, QObject* parent = nullptr);
 
 	// Agents as maps: name, description, model (the id of the agent's own, or empty), color
 	// (empty for none), creatable, canSpawn.

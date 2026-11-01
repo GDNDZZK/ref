@@ -69,8 +69,9 @@ QJsonObject queuedMessage(const QString& id, const QString& text)
 struct Fixture
 {
 	Fixture()
-		: backend(Backend::Source(Backend::Mode::Remote{{fake.url(), u"token"_s}}), u"/work"_s)
-		, config(backend)
+		: connection(Backend::Source(Backend::Mode::Remote{{fake.url(), u"token"_s}}), u"/work"_s)
+		, backend(connection.backend())
+		, config(connection)
 		, controller(backend)
 		, composer(config, controller, history)
 	{
@@ -175,7 +176,8 @@ struct Fixture
 	}
 
 	FakeBackend fake;
-	Backend backend;
+	workspace::Connection connection;
+	Backend& backend;
 	workspace::BackendConfig config;
 	SessionController controller;
 	compose::PromptHistory history;
