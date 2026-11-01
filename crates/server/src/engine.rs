@@ -22,6 +22,10 @@ use tokio_util::sync::CancellationToken;
 pub const CANCELLED_OUTPUT: &str = "Cancelled by user.";
 const MAX_REMINDERS: u32 = 3;
 const NON_RETRYABLE_ATTEMPTS: u32 = 3;
+/// Largest exponent of the retry backoff, so `2^n` stays finite.
+pub(crate) const MAX_BACKOFF_EXPONENT: u32 = 40;
+/// Largest relative jitter applied to a retry delay.
+pub(crate) const JITTER_FRACTION: f64 = 0.2;
 
 /// Everything needed for one LLM request.
 pub struct Prep {
@@ -553,7 +557,7 @@ pub fn build_request(s: &Arc<Session>, prep: &Prep) -> ref_llm::Request {
 // ---------------------------------------------------------------------------
 
 /// Backoff delay before retry `attempt` (1-based): `base * 2^(attempt-1)` capped at `max`,
-/// with `jitter` in [-0.2, 0.2] applied, at least `retry_after`, never above `max`.
+/// with `jitter` (within `JITTER_FRACTION` of zero) applied, at least `retry_after`, never above `max`.
 pub fn backoff(
     base: Duration,
     attempt: u32,
@@ -561,9 +565,9 @@ pub fn backoff(
     retry_after: Option<Duration>,
     jitter: f64,
 ) -> Duration {
-    let exp = 2f64.powi(attempt.saturating_sub(1).min(40) as i32);
+    let exp = 2f64.powi(attempt.saturating_sub(1).min(MAX_BACKOFF_EXPONENT) as i32);
     let raw = (base.as_secs_f64() * exp).min(max.as_secs_f64());
-    let jittered = raw * (1.0 + jitter.clamp(-0.2, 0.2));
+    let jittered = raw * (1.0 + jitter.clamp(-JITTER_FRACTION, JITTER_FRACTION));
     let d = Duration::from_secs_f64(jittered.max(0.0));
     let d = match retry_after {
         Some(r) if r > d => r,
@@ -650,7 +654,7 @@ async fn stream_with_retry(
                         return Err(Outcome::Failed(e.message.clone()));
                     }
                 }
-                let jitter = rand::random_range(-0.2..=0.2);
+                let jitter = rand::random_range(-JITTER_FRACTION..=JITTER_FRACTION);
                 let delay = backoff(hub.opts.retry_base, attempt, max, e.retry_after, jitter);
                 tracing::warn!(session = %s.id, attempt, "LLM request failed ({}); retrying in {:?}", e.message, delay);
                 {
