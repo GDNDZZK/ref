@@ -604,6 +604,25 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     Ok(build_output(col, ending, duration, timeout_secs))
 }
 
+const NO_EXIT_CODE_NOTE: &str = "[terminated without an exit code]";
+
+/// Note for a command that ended without an exit code.
+fn killed_note(status: &std::process::ExitStatus) -> String {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        match status.signal() {
+            Some(sig) => format!("[killed by signal {sig}]"),
+            None => NO_EXIT_CODE_NOTE.to_string(),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = status;
+        NO_EXIT_CODE_NOTE.to_string()
+    }
+}
+
 fn build_output(
     col: Collector,
     ending: Ending,
@@ -646,16 +665,7 @@ fn build_output(
         match exit_code {
             Some(0) => {}
             Some(c) => notes.push(format!("[exit code {c}]")),
-            None => {
-                #[cfg(unix)]
-                let sig = {
-                    use std::os::unix::process::ExitStatusExt;
-                    status.signal().unwrap_or(0)
-                };
-                #[cfg(not(unix))]
-                let sig = 0;
-                notes.push(format!("[killed by signal {sig}]"));
-            }
+            None => notes.push(killed_note(status)),
         }
     }
     if duration >= WALL_TIME_NOTE_MIN {
