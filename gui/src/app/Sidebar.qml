@@ -363,14 +363,11 @@ Rectangle {
 							width: 6
 							height: 6
 							radius: 3
-							color: modelData.status === "connected" ? Theme.success
-								: modelData.status === "failed" ? Theme.danger
-								: modelData.status === "connecting" ? Theme.accent
-								: Theme.idleDot
+							color: McpStatus.colorOf(modelData.status)
 
 							Pulse {
 								target: dot
-								running: dot.modelData.status === "connecting"
+								running: dot.modelData.status === McpStatus.connecting
 							}
 						}
 					}
