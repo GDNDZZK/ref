@@ -43,16 +43,16 @@ async fn serve(
                 break;
             }
         }
-        let _ = sock.write_all(head.as_bytes()).await;
+        sock.write_all(head.as_bytes()).await.unwrap();
         for c in chunks {
-            let _ = sock
-                .write_all(format!("{:x}\r\n{c}\r\n", c.len()).as_bytes())
-                .await;
-            let _ = sock.flush().await;
+            sock.write_all(format!("{:x}\r\n{c}\r\n", c.len()).as_bytes())
+                .await
+                .unwrap();
+            sock.flush().await.unwrap();
             tokio::time::sleep(delay).await;
         }
         tokio::time::sleep(hold).await;
-        let _ = sock.write_all(b"0\r\n\r\n").await;
+        sock.write_all(b"0\r\n\r\n").await.unwrap();
         String::from_utf8_lossy(&req).to_string()
     });
     (format!("http://{addr}/v1/"), task)
