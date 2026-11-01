@@ -829,9 +829,8 @@ fn watch_key(app: &mut App, k: KeyEvent) {
         }
         // Scroll the focused tile's transcript.
         KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End
-            if app.watch.focus.is_some() && tile_scroll_key(app, &k) => {}
-        KeyCode::Up | KeyCode::Down
-            if m == SHIFT && app.watch.focus.is_some() && tile_scroll_key(app, &k) => {}
+            if tile_scroll_key(app, &k) => {}
+        KeyCode::Up | KeyCode::Down if m == SHIFT && tile_scroll_key(app, &k) => {}
         KeyCode::Esc => {
             let Some(f) = app.watch.focus.clone() else {
                 app.dirty = false;
@@ -863,37 +862,18 @@ fn watch_key(app: &mut App, k: KeyEvent) {
             }
         }
         KeyCode::Enter if m.is_empty() && app.watch.focus.is_some() => {
-            let Some(f) = app.watch.focus.clone() else {
-                return;
-            };
+            let f = app.watch.focus.clone().expect("guarded by arm condition");
             let ed = app.watch.inputs.entry(f.clone()).or_default();
             if ed.is_empty() {
                 app.zoom(&f);
                 return;
             }
-            // Built-in commands typed in a tile act on that tile's session.
-            if let Some(rest) = ed.text.trim().strip_prefix('/') {
-                let (name, args) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
-                if let Some(c) = crate::app::find_cmd(name) {
-                    let args = args.to_string();
-                    match c.name {
-                        cmd::CLOSE => {
-                            ed.clear();
-                            app.close_session(&f);
-                        }
-                        cmd::CD => {
-                            ed.clear();
-                            app.change_dir(&f, &args);
-                        }
-                        other => app.set_hint(
-                            format!("/{other} works in the chat view (ctrl+o opens this session)"),
-                            theme::MUTED,
-                        ),
-                    }
-                    return;
-                }
+
+            if run_tile_command(app, &f) {
+                return;
             }
-            let sub = ed.submit();
+
+            let sub = app.watch.inputs.entry(f.clone()).or_default().submit();
             let images = sub.images.into_iter().map(|(i, _)| i).collect();
             app.send_prompt(&f, sub.text, images);
         }
@@ -915,6 +895,36 @@ fn watch_key(app: &mut App, k: KeyEvent) {
             }
         },
     }
+}
+
+/// Built-in commands typed in a tile act on that tile's session. Returns true if one was handled.
+fn run_tile_command(app: &mut App, tile: &str) -> bool {
+    let Some(ed) = app.watch.inputs.get_mut(tile) else {
+        return false;
+    };
+    let Some(rest) = ed.text.trim().strip_prefix('/') else {
+        return false;
+    };
+    let (name, args) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+    let Some(c) = crate::app::find_cmd(name) else {
+        return false;
+    };
+    let args = args.to_string();
+    match c.name {
+        cmd::CLOSE => {
+            ed.clear();
+            app.close_session(tile);
+        }
+        cmd::CD => {
+            ed.clear();
+            app.change_dir(tile, &args);
+        }
+        other => app.set_hint(
+            format!("/{other} works in the chat view (ctrl+o opens this session)"),
+            theme::MUTED,
+        ),
+    }
+    true
 }
 
 /// PgUp/PgDn/Home/End/shift+↑↓ on the focused tile. Home/End only while its input is empty.
