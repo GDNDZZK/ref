@@ -36,23 +36,20 @@ pub fn opt_u64(input: &Value, key: &str) -> Result<Option<u64>> {
     value_u64(input.get(key), key)
 }
 
+/// Unsigned integer value of a JSON number; integral floats such as `3.0` count.
+fn number_u64(n: &serde_json::Number) -> Option<u64> {
+    if let Some(u) = n.as_u64() {
+        return Some(u);
+    }
+    let f = n.as_f64()?;
+    (f >= 0.0 && f.fract() == 0.0 && f <= u64::MAX as f64).then_some(f as u64)
+}
+
 pub fn value_u64(v: Option<&Value>, key: &str) -> Result<Option<u64>> {
     let bad = || anyhow!("parameter `{key}` must be a non-negative integer");
     match v {
         None | Some(Value::Null) => Ok(None),
-        Some(Value::Number(n)) => {
-            if let Some(u) = n.as_u64() {
-                Ok(Some(u))
-            } else if let Some(f) = n.as_f64() {
-                if f >= 0.0 && f.fract() == 0.0 && f <= u64::MAX as f64 {
-                    Ok(Some(f as u64))
-                } else {
-                    Err(bad())
-                }
-            } else {
-                Err(bad())
-            }
-        }
+        Some(Value::Number(n)) => number_u64(n).map(Some).ok_or_else(bad),
         Some(Value::String(s)) if s.trim().is_empty() => Ok(None),
         Some(Value::String(s)) => s.trim().parse::<u64>().map(Some).map_err(|_| bad()),
         Some(_) => Err(bad()),
