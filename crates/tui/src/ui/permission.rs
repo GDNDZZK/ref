@@ -9,7 +9,7 @@ use ratatui::text::{Line, Span};
 use ref_proto::PermissionRequest;
 use serde_json::Value;
 
-use super::dialog::frame;
+use super::dialog::{frame, open_progress};
 use super::text::{self, width};
 use super::theme;
 
@@ -54,7 +54,7 @@ impl PermissionView {
         session_name: Option<&str>,
         queued: usize,
     ) {
-        let t = (self.opened.elapsed().as_secs_f32() / 0.12).min(1.0);
+        let t = open_progress(self.opened);
         let w = screen.width.saturating_sub(4).clamp(30, 96);
         let title = match session_name {
             Some(n) => format!("△ Permission required · {n}"),

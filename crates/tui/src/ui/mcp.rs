@@ -396,7 +396,7 @@ impl McpDialog {
             self.follow = true;
         }
         self.sel = self.sel.min(entries.len().saturating_sub(1));
-        let t = (self.opened.elapsed().as_secs_f32() / 0.12).min(1.0);
+        let t = dialog::open_progress(self.opened);
         let w = screen.width.saturating_sub(4).clamp(30, 90);
         let iw = w.saturating_sub(4) as usize;
         let (lines, blocks) = self.content(entries, iw, tick, loaded);

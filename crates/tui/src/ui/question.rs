@@ -13,7 +13,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ref_proto::{Question, QuestionRequest};
 
-use super::dialog::frame;
+use super::dialog::{frame, open_progress};
 use super::editor::Editor;
 use super::text::{self, width};
 use super::theme;
@@ -25,7 +25,6 @@ const DEFAULT_TAG: &str = " (default)";
 const TICK: &str = " ✓";
 const POINTER: &str = "› ";
 const NO_POINTER: &str = "  ";
-const OPEN_SECS: f32 = 0.12;
 const MIN_WIDTH: u16 = 30;
 const MAX_WIDTH: u16 = 90;
 /// Borders, the blank row and the hint row around the body.
@@ -313,7 +312,7 @@ struct Body {
 
 impl QuestionView {
     pub fn draw(&mut self, buf: &mut Buffer, screen: Rect, session_name: Option<&str>) {
-        let t = (self.opened.elapsed().as_secs_f32() / OPEN_SECS).min(1.0);
+        let t = open_progress(self.opened);
         let w = screen.width.saturating_sub(4).clamp(MIN_WIDTH, MAX_WIDTH);
         let iw = w.min(screen.width).saturating_sub(4) as usize;
         let title = self.title(session_name);
