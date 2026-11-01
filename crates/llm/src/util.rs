@@ -24,6 +24,8 @@ const FNV_OFFSET_BASIS: u32 = 0x811c_9dc5;
 const FNV_PRIME: u32 = 0x0100_0193;
 /// Length of the hash suffix of a shortened id: `_` plus 8 hex digits.
 const HASH_SUFFIX_LEN: usize = 9;
+/// Env var naming a directory to dump request bodies into (debug aid).
+const DUMP_REQUESTS_ENV: &str = "REF_DUMP_REQUESTS";
 /// Idle timeout used when the provider does not configure one.
 const DEFAULT_CHUNK_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -425,14 +427,18 @@ pub(crate) async fn run_sse(
     let payload = serde_json::to_vec(body)
         .map_err(|e| LlmError::fatal(format!("failed to encode request: {e}")))?;
     let idle = chunk_timeout(provider);
-    if let Some(dir) = std::env::var_os("REF_DUMP_REQUESTS") {
+    if let Some(dir) = std::env::var_os(DUMP_REQUESTS_ENV) {
         // Debug aid: dump request bodies (never headers, which hold credentials).
         let path = std::path::Path::new(&dir).join(format!(
             "req-{}.json",
             chrono::Utc::now().timestamp_millis()
         ));
-        let _ = std::fs::create_dir_all(&dir);
-        let _ = std::fs::write(path, &payload);
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            tracing::warn!(error = %e, "cannot create the request dump directory");
+        }
+        if let Err(e) = std::fs::write(&path, &payload) {
+            tracing::warn!(error = %e, path = %path.display(), "cannot dump the request body");
+        }
     }
     let request = crate::http_client(url)
         .post(url)
