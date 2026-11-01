@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use axum::extract::{Request, State};
 use axum::http::header::{CONTENT_TYPE, COOKIE, HOST};
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use subtle::ConstantTimeEq as _;
@@ -147,9 +147,9 @@ pub async fn security_headers(req: Request, next: Next) -> Response {
     let mut response = next.run(req).await;
     let headers = response.headers_mut();
     for (name, value) in [
-        ("content-security-policy", CONTENT_SECURITY_POLICY),
-        ("x-content-type-options", "nosniff"),
-        ("x-frame-options", "DENY"),
+        (header::CONTENT_SECURITY_POLICY, CONTENT_SECURITY_POLICY),
+        (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        (header::X_FRAME_OPTIONS, "DENY"),
     ] {
         headers.insert(name, HeaderValue::from_static(value));
     }
