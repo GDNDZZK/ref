@@ -223,20 +223,19 @@ impl Inner {
                 .map(|(p, _)| p.clone());
             let Some(victim) = victim else {
                 // Only `keep` remains: trim its older versions.
-                let Some(e) = self.paths.get_mut(keep) else {
-                    return;
-                };
+                let e = self.paths.get_mut(keep).expect("`keep` was just recorded");
                 if e.versions.len() <= 1 {
                     return;
                 }
-                if let Some(s) = e.versions.pop() {
-                    self.total -= s.bytes();
-                }
+                let oldest = e.versions.pop().expect("more than one version");
+                self.total -= oldest.bytes();
                 continue;
             };
-            if let Some(e) = self.paths.remove(&victim) {
-                self.total -= e.versions.iter().map(Snapshot::bytes).sum::<usize>();
-            }
+            let e = self
+                .paths
+                .remove(&victim)
+                .expect("victim is a key of the map");
+            self.total -= e.versions.iter().map(Snapshot::bytes).sum::<usize>();
         }
     }
 }
@@ -310,8 +309,8 @@ impl HashStore {
         };
         inner.total += snap.bytes();
         entry.versions.insert(0, snap);
-        while entry.versions.len() > MAX_VERSIONS_PER_PATH {
-            if let Some(s) = entry.versions.pop() {
+        if entry.versions.len() > MAX_VERSIONS_PER_PATH {
+            for s in entry.versions.drain(MAX_VERSIONS_PER_PATH..) {
                 inner.total -= s.bytes();
             }
         }
@@ -376,17 +375,15 @@ impl HashStore {
     pub fn forget(&self, path: &Path) {
         let k = key(path);
         let mut g = self.lock();
-        let victims: Vec<PathBuf> = g
-            .paths
-            .keys()
-            .filter(|p| p.starts_with(&k) || p.starts_with(path))
-            .cloned()
-            .collect();
-        for v in victims {
-            if let Some(e) = g.paths.remove(&v) {
-                g.total -= e.versions.iter().map(Snapshot::bytes).sum::<usize>();
+        let mut freed = 0;
+        g.paths.retain(|p, e| {
+            let victim = p.starts_with(&k) || p.starts_with(path);
+            if victim {
+                freed += e.versions.iter().map(Snapshot::bytes).sum::<usize>();
             }
-        }
+            !victim
+        });
+        g.total -= freed;
     }
 
     /// Estimated retained bytes.
