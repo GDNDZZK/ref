@@ -86,7 +86,8 @@ Item {
 					id: row
 
 					required property var modelData
-					readonly property var style: view.styles[modelData.kind] ?? view.styles["line"]
+					readonly property var style: view.styles[modelData.kind]
+					readonly property bool isHeader: modelData.kind === "file" || modelData.kind === "hunk"
 
 					width: scroller.contentWidth
 					height: view.rowHeight
@@ -117,7 +118,7 @@ Item {
 					}
 					Text {
 						textFormat: Text.PlainText
-						x: row.modelData.kind === "file" || row.modelData.kind === "hunk" ? view.sidePadding + view.gutterWidth : view.textX // headers start where the sign column does
+						x: row.isHeader ? view.sidePadding + view.gutterWidth : view.textX // headers start where the sign column does
 						anchors.verticalCenter: parent.verticalCenter
 						text: row.modelData.text
 						color: row.style.color
