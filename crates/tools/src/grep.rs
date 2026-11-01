@@ -121,6 +121,39 @@ fn search_file(path: &Path, re: &Regex, context: usize, remaining: usize) -> Opt
     })
 }
 
+/// Searches one batch on `threads` threads (thread `t` takes every `threads`-th file).
+/// Returns the results with their index in the batch, in file order.
+fn search_batch(
+    batch: &[PathBuf],
+    re: &Regex,
+    context: usize,
+    remaining: usize,
+    threads: usize,
+) -> Vec<(usize, FileResult)> {
+    let per_thread: Vec<Vec<(usize, FileResult)>> = std::thread::scope(|s| {
+        let handles: Vec<_> = (0..threads)
+            .map(|t| {
+                s.spawn(move || {
+                    let mut out = Vec::new();
+                    for (i, f) in batch.iter().enumerate().skip(t).step_by(threads) {
+                        if let Some(r) = search_file(f, re, context, remaining) {
+                            out.push((i, r));
+                        }
+                    }
+                    out
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().unwrap_or_default())
+            .collect()
+    });
+    let mut results: Vec<(usize, FileResult)> = per_thread.into_iter().flatten().collect();
+    results.sort_by_key(|(i, _)| *i);
+    results
+}
+
 fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let pattern = util::req_str(input, "pattern")?;
     if pattern.is_empty() {
@@ -173,29 +206,7 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
             bail!("grep cancelled");
         }
         let remaining = limit - total_matches;
-        let per_thread: Vec<Vec<(usize, FileResult)>> = std::thread::scope(|s| {
-            let handles: Vec<_> = (0..threads)
-                .map(|t| {
-                    let re = &re;
-                    s.spawn(move || {
-                        let mut out = Vec::new();
-                        for (i, f) in batch.iter().enumerate().skip(t).step_by(threads) {
-                            if let Some(r) = search_file(f, re, context, remaining) {
-                                out.push((i, r));
-                            }
-                        }
-                        out
-                    })
-                })
-                .collect();
-            handles
-                .into_iter()
-                .map(|h| h.join().unwrap_or_default())
-                .collect()
-        });
-        let mut batch_results: Vec<(usize, FileResult)> =
-            per_thread.into_iter().flatten().collect();
-        batch_results.sort_by_key(|(i, _)| *i);
+        let batch_results = search_batch(batch, &re, context, remaining, threads);
         for (_, mut r) in batch_results {
             let room = limit - total_matches;
             if r.matches > room {
