@@ -1,4 +1,4 @@
-# Adapted from an early version of qutie by LightBlueCube
+# Adapted from an early version of LightBlueCube/qutie
 cmake_minimum_required(VERSION 3.25)
 
 # The GUI is versioned with the rest of ref: the workspace version in the root Cargo.toml.

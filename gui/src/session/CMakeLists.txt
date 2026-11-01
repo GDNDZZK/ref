@@ -1,4 +1,4 @@
-# Adapted from an early version of qutie by LightBlueCube
+# Adapted from an early version of LightBlueCube/qutie
 # The conversation as the QML front end shows it, kept in step with a session on the backend.
 qt_add_library(refgui_session STATIC
 	blocks.cpp

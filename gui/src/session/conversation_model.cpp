@@ -1,4 +1,4 @@
-// Adapted from an early version of qutie by LightBlueCube
+// Adapted from an early version of LightBlueCube/qutie
 #include "session/conversation_model.h"
 
 #include "session/markdown_text.h"
