@@ -13,6 +13,14 @@ use ref_tools::ToolOutput;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
+/// Names of the cross-session tools.
+pub(crate) const LIST_SESSIONS: &str = "list_sessions";
+pub(crate) const SEND_MESSAGE: &str = "send_message";
+pub(crate) const MESSAGE_STATUS: &str = "message_status";
+pub(crate) const READ_SESSION: &str = "read_session";
+pub(crate) const CREATE_SESSION: &str = "create_session";
+pub(crate) const CLOSE_SESSION: &str = "close_session";
+
 /// How the header line of a message from another session starts (see [`peer_header`]).
 pub(crate) const PEER_HEADER_PREFIX: &str = "[Message from session";
 /// How the footer line of a message from another session starts.
@@ -43,12 +51,12 @@ fn def(name: &str, description: &str, params: Value) -> ToolDef {
 pub fn peer_defs() -> Vec<ToolDef> {
     vec![
         def(
-            "list_sessions",
+            LIST_SESSIONS,
             "List the live sessions (other agents) in this backend that you can exchange messages with: name, id, agent, status, foreground/background, directory and title.",
             json!({"type": "object", "properties": {}}),
         ),
         def(
-            "send_message",
+            SEND_MESSAGE,
             "Send a plain-text message to another live session, including while it is busy (it is read after its current step). The message arrives as a user message; the recipient can reply with send_message. Resolve the target with list_sessions first if unsure.",
             json!({"type": "object", "properties": {
                 "to": {"type": "string", "description": "Session name or id (see list_sessions)."},
@@ -56,14 +64,14 @@ pub fn peer_defs() -> Vec<ToolDef> {
             }, "required": ["to", "message"]}),
         ),
         def(
-            "message_status",
+            MESSAGE_STATUS,
             "Check whether a message sent with send_message is still queued, delivered into the recipient's context, or already read (the recipient responded since).",
             json!({"type": "object", "properties": {
                 "message_id": {"type": "string", "description": "Message id returned by send_message."}
             }, "required": ["message_id"]}),
         ),
         def(
-            "read_session",
+            READ_SESSION,
             "Read another live session's messages, newest first, paginated. Tool calls are summarized; reasoning is omitted.",
             json!({"type": "object", "properties": {
                 "session": {"type": "string", "description": "Session name or id."},
@@ -77,7 +85,7 @@ pub fn peer_defs() -> Vec<ToolDef> {
 pub fn spawn_defs() -> Vec<ToolDef> {
     vec![
         def(
-            "create_session",
+            CREATE_SESSION,
             "Create a new background session running another agent (see the list of available agents in the system prompt) and give it a task. It starts working immediately in parallel with you. With must_report (default true) it is required to report its result back to you with send_message.",
             json!({"type": "object", "properties": {
                 "name": {"type": "string", "description": "Peer name for the new session (any language; made unique automatically)."},
@@ -88,7 +96,7 @@ pub fn spawn_defs() -> Vec<ToolDef> {
             }, "required": ["name", "agent", "prompt"]}),
         ),
         def(
-            "close_session",
+            CLOSE_SESSION,
             "Stop and close a background session (for example one you created that has finished). Sessions a user is attached to (foreground) cannot be closed. The session stays in history.",
             json!({"type": "object", "properties": {
                 "session": {"type": "string", "description": "Session name or id."}
@@ -181,12 +189,12 @@ pub fn resolve(hub: &Hub, q: &str, exclude: Option<&str>) -> Result<Arc<Session>
 
 pub async fn run(hub: &Arc<Hub>, s: &Arc<Session>, name: &str, input: &Value) -> ToolOutput {
     let r = match name {
-        "list_sessions" => Ok(list_sessions(hub, s)),
-        "send_message" => send_message(hub, s, input),
-        "message_status" => message_status(hub, input),
-        "read_session" => read_session(hub, s, input),
-        "create_session" => create_session(hub, s, input).await,
-        "close_session" => close_session(hub, s, input).await,
+        LIST_SESSIONS => Ok(list_sessions(hub, s)),
+        SEND_MESSAGE => send_message(hub, s, input),
+        MESSAGE_STATUS => message_status(hub, input),
+        READ_SESSION => read_session(hub, s, input),
+        CREATE_SESSION => create_session(hub, s, input).await,
+        CLOSE_SESSION => close_session(hub, s, input).await,
         _ => Err(format!("Unknown tool: {name}")),
     };
     match r {
