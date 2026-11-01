@@ -13,13 +13,14 @@ use serde_json::Value;
 
 use crate::net::{Client, NetEvent};
 use crate::state::{Queued, SessionView};
-use crate::ui::dialog::{Dialog, HelpDialog, Item, Kind, ListDialog};
+use crate::text;
+use crate::ui::dialog::{Dialog, HelpDialog, Item, Kind, ListDialog, OPEN_SETTLE};
 use crate::ui::editor::{Editor, History};
 use crate::ui::permission::PermissionView;
 use crate::ui::question::QuestionView;
-use crate::ui::text;
 use crate::ui::theme;
 use crate::ui::toast::Toasts;
+use crate::util::{cmd, placeholder_info};
 
 /// What to do at first connect.
 #[derive(Debug, Clone, Default)]
@@ -141,13 +142,13 @@ pub struct Watch {
     /// Tiles at last draw.
     pub tiles: Vec<(String, Rect)>,
     /// WatchAll state last sent to the server.
-    pub subscribed: bool,
+    subscribed: bool,
 }
 
 #[derive(Clone)]
 pub struct Cmd {
     pub name: &'static str,
-    pub aliases: &'static [&'static str],
+    aliases: &'static [&'static str],
     pub desc: &'static str,
     pub key: &'static str,
     pub args: bool,
@@ -155,175 +156,175 @@ pub struct Cmd {
 
 pub const COMMANDS: &[Cmd] = &[
     Cmd {
-        name: "new",
+        name: cmd::NEW,
         aliases: &["clear"],
         desc: "New session",
         key: "ctrl+x n",
         args: false,
     },
     Cmd {
-        name: "sessions",
+        name: cmd::SESSIONS,
         aliases: &["resume", "continue"],
         desc: "Switch session (live + history)",
         key: "ctrl+x l",
         args: false,
     },
     Cmd {
-        name: "models",
+        name: cmd::MODELS,
         aliases: &[],
         desc: "Switch model (this session only)",
         key: "ctrl+x m",
         args: false,
     },
     Cmd {
-        name: "agents",
+        name: cmd::AGENTS,
         aliases: &[],
         desc: "Switch agent",
         key: "ctrl+x a",
         args: false,
     },
     Cmd {
-        name: "variant",
+        name: cmd::VARIANT,
         aliases: &["variants", "effort"],
         desc: "Set or cycle model variant",
         key: "ctrl+t",
         args: true,
     },
     Cmd {
-        name: "compact",
+        name: cmd::COMPACT,
         aliases: &["summarize"],
         desc: "Compact the conversation",
         key: "ctrl+x c",
         args: false,
     },
     Cmd {
-        name: "undo",
+        name: cmd::UNDO,
         aliases: &[],
         desc: "Undo last prompt",
         key: "ctrl+x u",
         args: false,
     },
     Cmd {
-        name: "rename",
+        name: cmd::RENAME,
         aliases: &[],
         desc: "Rename the session",
         key: "",
         args: true,
     },
     Cmd {
-        name: "cd",
+        name: cmd::CD,
         aliases: &["cwd"],
         desc: "Change this session's working directory",
         key: "",
         args: true,
     },
     Cmd {
-        name: "close",
+        name: cmd::CLOSE,
         aliases: &[],
         desc: "Close this session (go to the next live one, or exit)",
         key: "ctrl+x k",
         args: false,
     },
     Cmd {
-        name: "close-session",
+        name: cmd::CLOSE_SESSION,
         aliases: &["kill"],
         desc: "Close live sessions (picker, or by name / id)",
         key: "",
         args: true,
     },
     Cmd {
-        name: "peers",
+        name: cmd::PEERS,
         aliases: &["list-agents"],
         desc: "List other live sessions you can message",
         key: "",
         args: false,
     },
     Cmd {
-        name: "peers-name",
+        name: cmd::PEERS_NAME,
         aliases: &[],
         desc: "Show or set this session's peer name",
         key: "",
         args: true,
     },
     Cmd {
-        name: "peers-inbox",
+        name: cmd::PEERS_INBOX,
         aliases: &[],
         desc: "Messages received from other sessions",
         key: "",
         args: false,
     },
     Cmd {
-        name: "peers-outbox",
+        name: cmd::PEERS_OUTBOX,
         aliases: &[],
         desc: "Messages sent to other sessions and their status",
         key: "",
         args: false,
     },
     Cmd {
-        name: "export",
+        name: cmd::EXPORT,
         aliases: &[],
         desc: "Export transcript as markdown",
         key: "ctrl+x x",
         args: true,
     },
     Cmd {
-        name: "copy",
+        name: cmd::COPY,
         aliases: &[],
         desc: "Copy last assistant message (raw)",
         key: "ctrl+x y",
         args: false,
     },
     Cmd {
-        name: "thinking",
+        name: cmd::THINKING,
         aliases: &[],
         desc: "Toggle expanded thinking",
         key: "ctrl+x t",
         args: false,
     },
     Cmd {
-        name: "details",
+        name: cmd::DETAILS,
         aliases: &[],
         desc: "Toggle expanded tool details",
         key: "ctrl+x d",
         args: false,
     },
     Cmd {
-        name: "watch",
+        name: cmd::WATCH,
         aliases: &["split"],
         desc: "Split view of background sessions",
         key: "ctrl+x w",
         args: false,
     },
     Cmd {
-        name: "sidebar",
+        name: cmd::SIDEBAR,
         aliases: &[],
         desc: "Toggle sidebar",
         key: "ctrl+x b",
         args: false,
     },
     Cmd {
-        name: "mcp",
+        name: cmd::MCP,
         aliases: &["mcps"],
         desc: "MCP servers: status, errors and tools",
         key: "",
         args: false,
     },
     Cmd {
-        name: "editor",
+        name: cmd::EDITOR,
         aliases: &[],
         desc: "Compose prompt in $EDITOR",
         key: "ctrl+x e",
         args: false,
     },
     Cmd {
-        name: "help",
+        name: cmd::HELP,
         aliases: &[],
         desc: "Keybindings and commands",
         key: "ctrl+x h",
         args: false,
     },
     Cmd {
-        name: "exit",
+        name: cmd::EXIT,
         aliases: &["quit", "q"],
         desc: "Exit",
         key: "ctrl+x q",
@@ -363,9 +364,9 @@ pub struct App {
     /// Status-line hint: (text, colour, expires at).
     pub hint: Option<(String, Color, Instant)>,
     /// Pending "press again" confirmation to close a session: (session id, armed at).
-    pub close_armed: Option<(String, Instant)>,
+    close_armed: Option<(String, Instant)>,
     /// Pending "click again" confirmation to undo from a message of a busy session.
-    pub undo_armed: Option<(String, Instant)>,
+    undo_armed: Option<(String, Instant)>,
     /// Terminal title last sent (main loop only sends changes).
     pub last_title: Option<String>,
     pub connected: bool,
@@ -377,19 +378,19 @@ pub struct App {
     pub ac: Option<Autocomplete>,
     pub watch: Watch,
     pub sidebar: bool,
-    pub init: Option<InitPlan>,
+    init: Option<InitPlan>,
     pub shell_mode: bool,
     pub run_editor: bool,
     pub dirty: bool,
     pub last_click: Option<(Instant, u16, u16, u8)>,
     /// Session id whose transcript holds the active selection.
     pub sel_owner: Option<String>,
-    pub files_inflight: bool,
-    pub files_want: Option<String>,
+    files_inflight: bool,
+    files_want: Option<String>,
     /// Debounced `@` file query: (fire at, query).
     pub files_due: Option<(Instant, String)>,
     /// Sessions we've asked to attach (watch) and are waiting on.
-    pub attaching: HashSet<String>,
+    attaching: HashSet<String>,
     pub screen: Rect,
     /// Sidebar live-session rows at last draw: (y, session id).
     pub sidebar_rows: Vec<(u16, String)>,
@@ -400,7 +401,7 @@ pub struct App {
     /// Full terminal repaint requested (ctrl+l).
     pub force_clear: bool,
     /// Command waiting for config / session snapshot: (name, args, requested at).
-    pub deferred: Option<(String, String, Instant)>,
+    deferred: Option<(String, String, Instant)>,
     /// Autocomplete dismissed with esc until the next edit.
     pub suppress_ac: bool,
     /// MCP servers (sorted by name).
@@ -409,7 +410,7 @@ pub struct App {
     pub mcp_loaded: bool,
     /// The backend answered `McpStatus` with an error: use `GetConfig` status lines instead.
     pub mcp_fallback: bool,
-    pub mcp_inflight: bool,
+    mcp_inflight: bool,
     /// Next status poll while some server is still connecting.
     pub mcp_poll_at: Option<Instant>,
     /// Sidebar MCP rows at last draw: (y, server name).
@@ -419,7 +420,49 @@ pub struct App {
 }
 
 /// Poll interval for MCP status while any server is connecting.
-pub const MCP_POLL: Duration = Duration::from_secs(5);
+const MCP_POLL: Duration = Duration::from_secs(5);
+/// Redraw interval while something animates (spinners, pulsing dots).
+const TICK: Duration = Duration::from_millis(80);
+/// Redraw interval during fast animations (scrolling, toasts sliding, dialogs opening).
+const FAST_FRAME: Duration = Duration::from_millis(16);
+/// Poll interval while a deferred command waits for its data.
+const DEFERRED_POLL: Duration = Duration::from_millis(50);
+/// Shortest wait before a timer deadline is re-checked.
+const MIN_DEADLINE_WAIT: Duration = Duration::from_millis(5);
+/// Redraw interval while only a timer (hint, leader, armed key) is pending.
+const IDLE_TIMER_FRAME: Duration = Duration::from_millis(250);
+/// How long a command waits for the backend data it needs before it is dropped.
+const DEFERRED_COMMAND_TTL: Duration = Duration::from_secs(10);
+/// How long the leader key (ctrl+x) waits for its second key.
+const LEADER_TIMEOUT: Duration = Duration::from_secs(2);
+/// "Press again" window of the armed keys (esc to interrupt, ctrl+c to exit).
+pub const ARMED_KEY_TIMEOUT: Duration = Duration::from_millis(1500);
+/// Toast when an action needs the backend while it is unreachable.
+const NOT_CONNECTED: &str = "Not connected to the backend";
+/// Marks the selected row of a dialog.
+const SELECTED_GLYPH: &str = "●";
+/// Row-key prefixes of the dialogs: a live session, a history session, a server command.
+const LIVE_KEY_PREFIX: &str = "live:";
+const HISTORY_KEY_PREFIX: &str = "hist:";
+const SERVER_COMMAND_KEY_PREFIX: &str = "srv:";
+/// How long a hint stays in the footer.
+const HINT_DURATION: Duration = Duration::from_millis(1500);
+/// How long the second press of close / undo confirmation is accepted.
+const CONFIRM_WINDOW: Duration = Duration::from_secs(4);
+/// Debounce before an `@` file query is sent.
+const FILE_QUERY_DEBOUNCE: Duration = Duration::from_millis(80);
+/// Rows of one history page request.
+const HISTORY_LIST_LIMIT: usize = 200;
+const FILE_QUERY_LIMIT: usize = 20;
+const MAX_COMPLETIONS: usize = 50;
+const TOAST_ERROR_MAX_CHARS: usize = 200;
+const SESSION_DESC_MAX_CHARS: usize = 40;
+const TITLE_MAX_CHARS: usize = 80;
+/// Extra score of a canonical command name over its aliases.
+const CANONICAL_NAME_SCORE_BONUS: i64 = 5;
+/// Letters of a logo line printed in the primary colour; the rest is muted.
+const LOGO_PRIMARY_CHARS: usize = 10;
+const EPILOGUE_LABEL_WIDTH: usize = 10;
 
 impl App {
     pub fn new(client: Client, cwd: String, init: InitPlan) -> Self {
@@ -497,7 +540,7 @@ impl App {
             // Requests can't be answered while disconnected; user actions get feedback.
             match p {
                 Pending::Files { .. } => self.files_inflight = false,
-                _ => self.toasts.warn("Not connected to the backend"),
+                _ => self.toasts.warn(NOT_CONNECTED),
             }
             return;
         }
@@ -508,17 +551,30 @@ impl App {
         }
     }
 
+    /// Asks the backend to attach `sid` and marks it as attaching until the answer arrives.
+    fn send_attach(&mut self, sid: String, fg: bool) {
+        self.attaching.insert(sid.clone());
+        self.req(
+            Request::Attach {
+                session_id: sid.clone(),
+                foreground: fg,
+                limit: None,
+            },
+            Pending::Attach { sid, fg },
+        );
+    }
+
     /// Fire-and-forget request; errors are toasted.
     pub fn send(&mut self, req: Request) {
         self.req(req, Pending::Simple { ok: String::new() });
     }
 
     pub fn set_hint(&mut self, s: impl Into<String>, c: Color) {
-        self.set_hint_for(s, c, Duration::from_millis(1500));
+        self.set_hint_for(s, c, HINT_DURATION);
     }
 
     /// Hint shown in the status line until `dur` has passed.
-    pub fn set_hint_for(&mut self, s: impl Into<String>, c: Color, dur: Duration) {
+    fn set_hint_for(&mut self, s: impl Into<String>, c: Color, dur: Duration) {
         self.hint = Some((s.into(), c, Instant::now() + dur));
     }
 
@@ -532,10 +588,26 @@ impl App {
     }
 
     pub fn agents(&self) -> &[ref_proto::AgentInfo] {
-        self.config
-            .as_ref()
-            .map(|c| c.agents.as_slice())
-            .unwrap_or(&[])
+        config_agents(&self.config)
+    }
+
+    pub fn models(&self) -> &[ref_proto::ModelInfo] {
+        config_models(&self.config)
+    }
+
+    /// Whether `sid` is not the session in the foreground chat view.
+    pub fn is_background_view(&self, sid: &str) -> bool {
+        self.mode == Mode::Watch || self.current.as_deref() != Some(sid)
+    }
+
+    /// Name of the session a modal belongs to, shown only when it is not the one in front.
+    pub fn modal_origin_name(&self, sid: &str) -> Option<String> {
+        self.is_background_view(sid).then(|| {
+            self.views
+                .get(sid)
+                .map(|v| v.info.name.clone())
+                .unwrap_or_default()
+        })
     }
 
     pub fn agent_color(&self, name: &str) -> Color {
@@ -573,15 +645,7 @@ impl App {
                         .map(|(k, v)| (k.clone(), v.foreground))
                         .collect();
                     for (sid, fg) in ids {
-                        self.attaching.insert(sid.clone());
-                        self.req(
-                            Request::Attach {
-                                session_id: sid.clone(),
-                                foreground: fg,
-                                limit: None,
-                            },
-                            Pending::Attach { sid, fg },
-                        );
+                        self.send_attach(sid, fg);
                     }
                 } else if let Some(plan) = self.init.take() {
                     self.run_init(plan);
@@ -717,7 +781,6 @@ impl App {
                     v.older_pending = false;
                     v.more_before = false;
                 }
-                let _ = err;
             }
             Pending::Prompt { sid, text, key, .. } => {
                 if let Some(v) = self.views.get_mut(&sid) {
@@ -771,49 +834,14 @@ impl App {
     fn on_response(&mut self, p: Pending, result: Value) {
         match p {
             Pending::Question { sid, call_id } => self.close_question(&sid, &call_id),
-            Pending::Config => {
-                let parsed = result
-                    .get("config")
-                    .map(|c| serde_json::from_value::<ServerConfigInfo>(c.clone()));
-                if let Some(Err(e)) = &parsed {
-                    self.toasts
-                        .error(format!("Malformed config from backend: {e}"));
-                }
-                if let Some(Ok(c)) = parsed {
-                    // TUI passthrough settings.
-                    if let Some(t) = c.tui.get("thinking").and_then(Value::as_bool) {
-                        self.thinking = t;
-                    }
-                    if let Some(t) = c.tui.get("details").and_then(Value::as_bool) {
-                        self.details = t;
-                    }
-                    if let Some(t) = c.tui.get("sidebar").and_then(Value::as_bool) {
-                        self.sidebar = t;
-                    }
-                    if self.mcp_fallback || !self.mcp_loaded {
-                        // Shown until (or instead of) the richer McpStatus answer.
-                        let lines = c.mcp.clone();
-                        self.set_mcp_lines(&lines);
-                    }
-                    self.config = Some(c);
-                    if !self.mcp_fallback {
-                        self.refresh_mcp();
-                    }
-                    for v in self.views.values_mut() {
-                        v.chat.invalidate();
-                    }
-                }
-            }
+            Pending::Config => self.on_config_response(&result),
             Pending::LiveList => {
                 if let Some(s) = sessions_of(&result) {
                     self.on_sessions(s);
                 }
             }
             Pending::Created { prompt } => {
-                let Some(info) = result
-                    .get("session")
-                    .and_then(|s| serde_json::from_value::<SessionInfo>(s.clone()).ok())
-                else {
+                let Some(info) = session_info_of(&result) else {
                     self.toasts.error("Malformed create_session response");
                     return;
                 };
@@ -849,42 +877,9 @@ impl App {
                     self.refresh_session_dialog();
                 }
             }
-            Pending::Continue => {
-                let s = sessions_of(&result).unwrap_or_default();
-                match s.first() {
-                    Some(info) => {
-                        let sid = info.id.clone();
-                        self.views
-                            .entry(sid.clone())
-                            .or_insert_with(|| SessionView::new(info.clone(), true));
-                        self.attach_fg(&sid);
-                        if let Some(p) = self.init.take().and_then(|i| i.prompt) {
-                            self.send_prompt(&sid, p, Vec::new());
-                        }
-                    }
-                    None => {
-                        let plan = self.init.take().unwrap_or_default();
-                        self.toasts
-                            .info("No previous session here — started a new one");
-                        self.req(
-                            Request::CreateSession {
-                                cwd: self.cwd.clone(),
-                                agent: plan.agent,
-                                model: plan.model,
-                                name: None,
-                            },
-                            Pending::Created {
-                                prompt: plan.prompt.map(|p| (p, Vec::new())),
-                            },
-                        );
-                    }
-                }
-            }
+            Pending::Continue => self.on_continue_response(&result),
             Pending::Undo { sid, count } => {
-                let t = result
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
+                let t = text_of(&result).unwrap_or_default();
                 let images = response_images(&result);
                 let what = match count {
                     Some(1) => "Undid 1 message".to_string(),
@@ -914,18 +909,14 @@ impl App {
                     self.req(
                         Request::ListHistory {
                             cwd: None,
-                            limit: Some(200),
+                            limit: Some(HISTORY_LIST_LIMIT),
                         },
                         Pending::HistoryDialog,
                     );
                 }
             }
             Pending::Expand { sid } => {
-                let t = result
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string();
+                let t = text_of(&result).unwrap_or_default().to_string();
                 if t.trim().is_empty() {
                     self.toasts.warn("Command expanded to nothing");
                     return;
@@ -935,53 +926,9 @@ impl App {
                     None => self.create_session(Some((t, Vec::new()))),
                 }
             }
-            Pending::Files { query } => {
-                self.files_inflight = false;
-                let files: Vec<String> = result
-                    .get("files")
-                    .and_then(Value::as_array)
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|x| x.as_str().map(String::from))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                if let Some((start, q)) = self.editor.mention()
-                    && q == query
-                {
-                    let items: Vec<(String, String, String)> = files
-                        .into_iter()
-                        .map(|f| (format!("@{f} "), f, String::new()))
-                        .collect();
-                    if items.is_empty() {
-                        self.ac = None;
-                    } else {
-                        let sel = self
-                            .ac
-                            .as_ref()
-                            .filter(|a| a.kind == AcKind::File)
-                            .map(|a| a.sel)
-                            .unwrap_or(0);
-                        self.ac = Some(Autocomplete {
-                            kind: AcKind::File,
-                            sel: sel.min(items.len() - 1),
-                            items,
-                            start,
-                            rect: Rect::default(),
-                        });
-                    }
-                }
-                if let Some(w) = self.files_want.take()
-                    && w != query
-                {
-                    self.request_files(w);
-                }
-            }
+            Pending::Files { query } => self.on_files_response(&query, &result),
             Pending::Cwd { sid } => {
-                if let Some(info) = result
-                    .get("session")
-                    .and_then(|s| serde_json::from_value::<SessionInfo>(s.clone()).ok())
-                {
+                if let Some(info) = session_info_of(&result) {
                     if self.current.as_deref() == Some(sid.as_str()) {
                         // New sessions, `@` mentions and exports follow the directory.
                         self.cwd = info.cwd.clone();
@@ -994,9 +941,7 @@ impl App {
                 }
             }
             Pending::Simple { ok } => {
-                if let Some(info) = result
-                    .get("session")
-                    .and_then(|s| serde_json::from_value::<SessionInfo>(s.clone()).ok())
+                if let Some(info) = session_info_of(&result)
                     && let Some(v) = self.views.get_mut(&info.id)
                 {
                     v.set_info(info);
@@ -1006,10 +951,7 @@ impl App {
                 }
             }
             Pending::Variant => {
-                if let Some(info) = result
-                    .get("session")
-                    .and_then(|s| serde_json::from_value::<SessionInfo>(s.clone()).ok())
-                {
+                if let Some(info) = session_info_of(&result) {
                     let v = info
                         .model
                         .variant
@@ -1026,10 +968,7 @@ impl App {
                 self.toasts.info(format!("Exported to {p}"));
             }
             Pending::Text { title } => {
-                let text = result
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
+                let text = text_of(&result).unwrap_or_default();
                 self.dialog = Some(Dialog::Help(HelpDialog::text(&title, text)));
             }
             Pending::Prompt {
@@ -1042,59 +981,8 @@ impl App {
                 sid,
                 generation,
                 before,
-            } => {
-                let msgs: Vec<ref_proto::Message> = result
-                    .get("messages")
-                    .and_then(|m| serde_json::from_value(m.clone()).ok())
-                    .unwrap_or_default();
-                let more = result
-                    .get("more_before")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                if let Some(v) = self.views.get_mut(&sid)
-                    && !v.prepend_older(generation, &before, msgs, more)
-                    && v.history_gen == generation
-                {
-                    v.older_pending = false;
-                }
-            }
-            Pending::Unqueue { sid, key } => {
-                let removed = result
-                    .get("removed")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                let Some(v) = self.views.get_mut(&sid) else {
-                    return;
-                };
-                if removed {
-                    // Back into the input box so it can be edited and sent again. The response has
-                    // the image bytes (rows built from server messages only hold stubs).
-                    if let Some(i) = v.queued.iter().position(|q| q.key == key) {
-                        let q = v.queued.remove(i);
-                        let text = result
-                            .get("text")
-                            .and_then(Value::as_str)
-                            .map_or(q.text, str::to_string);
-                        let mut images = response_images(&result);
-                        if images.is_empty() {
-                            images = q
-                                .images
-                                .into_iter()
-                                .filter(|i| !i.is_stub())
-                                .map(|i| (i, None))
-                                .collect();
-                        }
-                        self.restore_prompt(&sid, &text, images);
-                    }
-                } else {
-                    // Delivered first: the row goes away once the message is in the transcript.
-                    if let Some(q) = v.queued_mut(key) {
-                        q.removing = false;
-                    }
-                    self.toasts
-                        .info("Already sent; the prompt can no longer be removed");
-                }
-            }
+            } => self.on_older_response(&sid, generation, &before, &result),
+            Pending::Unqueue { sid, key } => self.on_unqueue_response(&sid, key, &result),
             Pending::Mcp => {
                 self.mcp_inflight = false;
                 let servers = result
@@ -1121,6 +1009,152 @@ impl App {
                 }
             }
         }
+    }
+
+    fn on_config_response(&mut self, result: &Value) {
+        let parsed = result
+            .get("config")
+            .map(|c| serde_json::from_value::<ServerConfigInfo>(c.clone()));
+        if let Some(Err(e)) = &parsed {
+            self.toasts
+                .error(format!("Malformed config from backend: {e}"));
+        }
+        let Some(Ok(c)) = parsed else {
+            return;
+        };
+        // TUI passthrough settings.
+        if let Some(t) = c.tui.get("thinking").and_then(Value::as_bool) {
+            self.thinking = t;
+        }
+        if let Some(t) = c.tui.get("details").and_then(Value::as_bool) {
+            self.details = t;
+        }
+        if let Some(t) = c.tui.get("sidebar").and_then(Value::as_bool) {
+            self.sidebar = t;
+        }
+        if self.mcp_fallback || !self.mcp_loaded {
+            // Shown until (or instead of) the richer McpStatus answer.
+            let lines = c.mcp.clone();
+            self.set_mcp_lines(&lines);
+        }
+        self.config = Some(c);
+        if !self.mcp_fallback {
+            self.refresh_mcp();
+        }
+        for v in self.views.values_mut() {
+            v.chat.invalidate();
+        }
+    }
+
+    /// Answer to `--continue`: attach the newest session here, or start a new one.
+    fn on_continue_response(&mut self, result: &Value) {
+        let s = sessions_of(result).unwrap_or_default();
+        let Some(info) = s.first() else {
+            let plan = self.init.take().unwrap_or_default();
+            self.toasts
+                .info("No previous session here — started a new one");
+            self.req(
+                Request::CreateSession {
+                    cwd: self.cwd.clone(),
+                    agent: plan.agent,
+                    model: plan.model,
+                    name: None,
+                },
+                Pending::Created {
+                    prompt: plan.prompt.map(|p| (p, Vec::new())),
+                },
+            );
+            return;
+        };
+        let sid = info.id.clone();
+        self.views
+            .entry(sid.clone())
+            .or_insert_with(|| SessionView::new(info.clone(), true));
+        self.attach_fg(&sid);
+        if let Some(p) = self.init.take().and_then(|i| i.prompt) {
+            self.send_prompt(&sid, p, Vec::new());
+        }
+    }
+
+    fn on_files_response(&mut self, query: &str, result: &Value) {
+        self.files_inflight = false;
+        let files: Vec<String> = result
+            .get("files")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if let Some((start, q)) = self.editor.mention()
+            && q == query
+        {
+            let items: Vec<(String, String, String)> = files
+                .into_iter()
+                .map(|f| (format!("@{f} "), f, String::new()))
+                .collect();
+            if items.is_empty() {
+                self.ac = None;
+            } else {
+                let sel = self
+                    .ac
+                    .as_ref()
+                    .filter(|a| a.kind == AcKind::File)
+                    .map(|a| a.sel)
+                    .unwrap_or(0);
+                self.ac = Some(Autocomplete {
+                    kind: AcKind::File,
+                    sel: sel.min(items.len() - 1),
+                    items,
+                    start,
+                    rect: Rect::default(),
+                });
+            }
+        }
+        if let Some(w) = self.files_want.take()
+            && w != query
+        {
+            self.request_files(w);
+        }
+    }
+
+    fn on_older_response(&mut self, sid: &str, generation: u64, before: &str, result: &Value) {
+        let msgs: Vec<ref_proto::Message> = result
+            .get("messages")
+            .and_then(|m| serde_json::from_value(m.clone()).ok())
+            .unwrap_or_default();
+        let more = flag_of(result, "more_before");
+        if let Some(v) = self.views.get_mut(sid)
+            && !v.prepend_older(generation, before, msgs, more)
+            && v.history_gen == generation
+        {
+            v.older_pending = false;
+        }
+    }
+
+    fn on_unqueue_response(&mut self, sid: &str, key: u64, result: &Value) {
+        let Some(v) = self.views.get_mut(sid) else {
+            return;
+        };
+        if !flag_of(result, "removed") {
+            // Delivered first: the row goes away once the message is in the transcript.
+            if let Some(q) = v.queued_mut(key) {
+                q.removing = false;
+            }
+            self.toasts
+                .info("Already sent; the prompt can no longer be removed");
+            return;
+        }
+        // Back into the input box so it can be edited and sent again. The response has
+        // the image bytes (rows built from server messages only hold stubs).
+        let Some(i) = v.queued.iter().position(|q| q.key == key) else {
+            return;
+        };
+        let q = v.queued.remove(i);
+        let text = text_of(result).map_or(q.text, str::to_string);
+        let images = restored_images(result, q.images);
+        self.restore_prompt(sid, &text, images);
     }
 
     // -----------------------------------------------------------------------
@@ -1184,6 +1218,7 @@ impl App {
 
     fn on_event(&mut self, sid: String, ev: SessionEvent) {
         let closed = matches!(ev, SessionEvent::Closed);
+        let in_background = self.is_background_view(&sid);
         let Some(v) = self.views.get_mut(&sid) else {
             return;
         };
@@ -1192,12 +1227,12 @@ impl App {
             return;
         }
         if let SessionEvent::Error { text } = &ev
-            && (self.mode == Mode::Watch || self.current.as_deref() != Some(sid.as_str()))
+            && in_background
         {
             let name = v.info.name.clone();
             self.toasts.error(text::truncate(
                 &format!("{name}: {}", text::one_line(text)),
-                200,
+                TOAST_ERROR_MAX_CHARS,
             ));
         }
         v.apply(ev);
@@ -1254,18 +1289,7 @@ impl App {
                     self.views
                         .insert(sid.clone(), SessionView::new(info, false));
                 }
-                self.attaching.insert(sid.clone());
-                self.req(
-                    Request::Attach {
-                        session_id: sid.clone(),
-                        foreground: false,
-                        limit: None,
-                    },
-                    Pending::Attach {
-                        sid: sid.clone(),
-                        fg: false,
-                    },
-                );
+                self.send_attach(sid.clone(), false);
             }
         }
         let drop: Vec<String> = self
@@ -1279,9 +1303,7 @@ impl App {
         for sid in drop {
             self.views.remove(&sid);
             self.watch.inputs.remove(&sid);
-            if self.connected {
-                self.client.send(None, Request::Detach { session_id: sid });
-            }
+            self.client.notify(Request::Detach { session_id: sid });
         }
         // No automatic focus: only drop it when the focused session left the split view.
         if let Some(f) = &self.watch.focus
@@ -1304,7 +1326,7 @@ impl App {
                 v.foreground = false;
             }
             self.views.remove(&old);
-            self.client.send(None, Request::Detach { session_id: old });
+            self.client.notify(Request::Detach { session_id: old });
         }
         if self.current.as_deref() != Some(sid) {
             self.sidebar_scroll = 0;
@@ -1329,18 +1351,7 @@ impl App {
             .or_insert_with(|| SessionView::new(info, true));
         v.foreground = true;
         v.chat.scroll_to_bottom(false);
-        self.attaching.insert(sid.to_string());
-        self.req(
-            Request::Attach {
-                session_id: sid.to_string(),
-                foreground: true,
-                limit: None,
-            },
-            Pending::Attach {
-                sid: sid.to_string(),
-                fg: true,
-            },
-        );
+        self.send_attach(sid.to_string(), true);
         self.perm = None;
         self.question = None;
         self.shell_mode = false;
@@ -1395,10 +1406,7 @@ impl App {
         key: Option<u64>,
         result: &Value,
     ) {
-        let queued = result
-            .get("queued")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
+        let queued = flag_of(result, "queued");
         // Older backends don't return the id: rows are then matched by text only.
         let Some(id) = result
             .get("message_id")
@@ -1416,10 +1424,11 @@ impl App {
             return;
         }
         // Listed under another row already (snapshot after a re-attach): keep that row.
-        if v.queued
+        let listed_elsewhere = v
+            .queued
             .iter()
-            .any(|q| q.id.as_deref() == Some(id.as_str()) && Some(q.key) != key)
-        {
+            .any(|q| q.id.as_deref() == Some(id.as_str()) && Some(q.key) != key);
+        if listed_elsewhere {
             let mut removing = false;
             if let Some(i) = key.and_then(|k| v.queued.iter().position(|q| q.key == k)) {
                 removing = v.queued.remove(i).removing;
@@ -1451,12 +1460,7 @@ impl App {
 
     /// Puts a withdrawn / undone prompt back into the input box (the focused tile's input in
     /// split view): fills it when empty, otherwise appends after a blank line.
-    pub fn restore_prompt(
-        &mut self,
-        sid: &str,
-        text: &str,
-        images: Vec<(ImageData, Option<String>)>,
-    ) {
+    fn restore_prompt(&mut self, sid: &str, text: &str, images: Vec<(ImageData, Option<String>)>) {
         let editor = if self.mode == Mode::Watch {
             self.watch.inputs.entry(sid.to_string()).or_default()
         } else {
@@ -1468,7 +1472,7 @@ impl App {
     /// ✕ on a queued prompt: withdraw it from the server queue before it is sent.
     pub fn unqueue(&mut self, sid: &str, key: u64) {
         if !self.connected {
-            self.toasts.warn("Not connected to the backend");
+            self.toasts.warn(NOT_CONNECTED);
             return;
         }
         let Some(q) = self.views.get_mut(sid).and_then(|v| v.queued_mut(key)) else {
@@ -1494,9 +1498,10 @@ impl App {
     }
 
     /// Sends to the current session, creating one if needed.
-    pub fn submit_prompt_text(&mut self, text: String, images: Vec<ImageData>) {
+    fn submit_prompt_text(&mut self, text: String, images: Vec<ImageData>) {
         // Typed before the first connection: becomes the startup prompt.
-        if !self.ever_connected
+        let before_first_connect = !self.ever_connected;
+        if before_first_connect
             && let Some(plan) = self.init.as_mut()
             && images.is_empty()
         {
@@ -1549,7 +1554,7 @@ impl App {
             if let Some(v) = self.views.get(k)
                 && let Some(p) = v.permissions.first()
             {
-                return Some((k.clone(), p.clone(), total.saturating_sub(1)));
+                return Some((k.clone(), p.clone(), total - 1));
             }
         }
         None
@@ -1559,7 +1564,7 @@ impl App {
     /// the reply, so a refused answer can be corrected.
     pub fn reply_question(&mut self, sid: &str, call_id: &str, answers: Option<Vec<Vec<String>>>) {
         if !self.connected {
-            self.toasts.warn("Not connected to the backend");
+            self.toasts.warn(NOT_CONNECTED);
             return;
         }
         if let Some(q) = self.question.as_mut() {
@@ -1679,7 +1684,7 @@ impl App {
         }
     }
 
-    pub fn toggle_details(&mut self) {
+    fn toggle_details(&mut self) {
         self.details = !self.details;
         self.reset_toggles();
         self.toasts.info(if self.details {
@@ -1689,7 +1694,7 @@ impl App {
         });
     }
 
-    pub fn toggle_thinking(&mut self) {
+    fn toggle_thinking(&mut self) {
         self.thinking = !self.thinking;
         self.reset_toggles();
         self.toasts.info(if self.thinking {
@@ -1773,7 +1778,7 @@ impl App {
         if let Some(cfg) = &self.config {
             for c in &cfg.commands {
                 items.push(Item {
-                    key: format!("srv:{}", c.name),
+                    key: format!("{SERVER_COMMAND_KEY_PREFIX}{}", c.name),
                     title: if c.description.is_empty() {
                         format!("/{}", c.name)
                     } else {
@@ -1804,12 +1809,12 @@ impl App {
         if let Some(c) = &self.current
             && let Some(Dialog::List(d)) = self.dialog.as_mut()
         {
-            d.select_key(&format!("live:{c}"));
+            d.select_key(&live_key(c));
         }
         self.req(
             Request::ListHistory {
                 cwd: None,
-                limit: Some(200),
+                limit: Some(HISTORY_LIST_LIMIT),
             },
             Pending::HistoryDialog,
         );
@@ -1831,24 +1836,15 @@ impl App {
         }
         let close_only = d.kind == Kind::CloseSessions;
         let now = ref_proto::now_ms();
-        let models = self
-            .config
-            .as_ref()
-            .map(|c| c.models.as_slice())
-            .unwrap_or(&[]);
-        let agents = self
-            .config
-            .as_ref()
-            .map(|c| c.agents.as_slice())
-            .unwrap_or(&[]);
+        // Field-level helpers keep `self.dialog` mutably borrowed alongside.
+        let models = config_models(&self.config);
+        let agents = config_agents(&self.config);
         let mut items = Vec::new();
         let mut live: Vec<&SessionInfo> = self.live.iter().filter(|s| s.live).collect();
         live.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
         for s in &live {
             let current = self.current.as_deref() == Some(s.id.as_str());
-            let model = models
-                .iter()
-                .find(|m| m.provider == s.model.provider && m.id == s.model.model)
+            let model = find_model(models, &s.model)
                 .map(|m| m.name.clone())
                 .unwrap_or_else(|| s.model.model.clone());
             let (badge, bc) = if elsewhere.contains(&s.id) {
@@ -1861,10 +1857,10 @@ impl App {
             let desc = if current && close_only {
                 "(current)".to_string()
             } else {
-                text::truncate(&text::one_line(&s.title), 40)
+                text::truncate(&text::one_line(&s.title), SESSION_DESC_MAX_CHARS)
             };
             items.push(Item {
-                key: format!("live:{}", s.id),
+                key: live_key(&s.id),
                 title: s.name.clone(),
                 desc,
                 right: format!("{} · {} · {}", s.agent, model, text::tilde(&s.cwd)),
@@ -1898,7 +1894,7 @@ impl App {
                 text::one_line(&s.title)
             };
             items.push(Item {
-                key: format!("hist:{}", s.id),
+                key: format!("{HISTORY_KEY_PREFIX}{}", s.id),
                 title,
                 desc: s.name.clone(),
                 right: format!(
@@ -1937,7 +1933,7 @@ impl App {
                 Item {
                     key: format!("{}/{}", m.provider, m.id),
                     title: m.name.clone(),
-                    desc: caps.join(" · "),
+                    desc: caps.join(text::SEPARATOR),
                     right: if m.variants.is_empty() {
                         String::new()
                     } else {
@@ -1948,7 +1944,7 @@ impl App {
                     } else {
                         m.provider_name.clone()
                     },
-                    marker: Some((if is_cur { "●".into() } else { " ".into() }, theme::PRIMARY)),
+                    marker: Some(selected_marker(is_cur)),
                     keywords: format!("{} {}", m.provider, m.id),
                     ..Default::default()
                 }
@@ -1961,7 +1957,7 @@ impl App {
         self.dialog = Some(Dialog::List(d));
     }
 
-    pub fn open_agents(&mut self) {
+    fn open_agents(&mut self) {
         let cur = self.cur().map(|v| v.info.agent.clone()).unwrap_or_default();
         let agents = self.agents().to_vec();
         let items: Vec<Item> = agents
@@ -1972,14 +1968,7 @@ impl App {
                 desc: text::one_line(&a.description),
                 right: a.model.as_ref().map(|m| m.key()).unwrap_or_default(),
                 title_color: Some(theme::agent_color(&agents, &a.name)),
-                marker: Some((
-                    if a.name == cur {
-                        "●".into()
-                    } else {
-                        " ".into()
-                    },
-                    theme::PRIMARY,
-                )),
+                marker: Some(selected_marker(a.name == cur)),
                 ..Default::default()
             })
             .collect();
@@ -1988,17 +1977,10 @@ impl App {
         self.dialog = Some(Dialog::List(d));
     }
 
-    pub fn open_variants(&mut self) {
+    fn open_variants(&mut self) {
         let Some(v) = self.cur() else { return };
         let m = v.info.model.clone();
-        let variants = self
-            .config
-            .as_ref()
-            .and_then(|c| {
-                c.models
-                    .iter()
-                    .find(|x| x.provider == m.provider && x.id == m.model)
-            })
+        let variants = find_model(self.models(), &m)
             .map(|x| x.variants.clone())
             .unwrap_or_default();
         if variants.is_empty() {
@@ -2008,14 +1990,7 @@ impl App {
         let mut items = vec![Item {
             key: String::new(),
             title: "default".into(),
-            marker: Some((
-                if m.variant.is_none() {
-                    "●".into()
-                } else {
-                    " ".into()
-                },
-                theme::PRIMARY,
-            )),
+            marker: Some(selected_marker(m.variant.is_none())),
             ..Default::default()
         }];
         for x in variants {
@@ -2023,7 +1998,7 @@ impl App {
             items.push(Item {
                 key: x.clone(),
                 title: x,
-                marker: Some((if is { "●".into() } else { " ".into() }, theme::PRIMARY)),
+                marker: Some(selected_marker(is)),
                 ..Default::default()
             });
         }
@@ -2063,17 +2038,16 @@ impl App {
         self.dialog = None;
         match kind {
             Kind::Palette => {
-                if let Some(name) = key.strip_prefix("srv:") {
+                if let Some(name) = key.strip_prefix(SERVER_COMMAND_KEY_PREFIX) {
                     self.editor.set_text(&format!("/{name} "));
                 } else if let Some(c) = find_cmd(&key) {
-                    if c.args && matches!(c.name, "rename" | "peers-name") {
+                    if c.args && matches!(c.name, cmd::RENAME | cmd::PEERS_NAME) {
                         self.editor.set_text(&format!("/{} ", c.name));
                     } else {
                         self.run_command(c.name, "");
                     }
                 }
             }
-            Kind::CloseSessions => {}
             Kind::Sessions => {
                 let sid = key.split_once(':').map(|x| x.1).unwrap_or(&key).to_string();
                 if self.current.as_deref() != Some(sid.as_str()) {
@@ -2086,16 +2060,9 @@ impl App {
                 if let (Some(sid), Some(mut m)) = (self.current.clone(), ModelRef::parse(&key)) {
                     // Keep the current variant when the new model supports it.
                     let cur_var = self.cur().and_then(|v| v.info.model.variant.clone());
-                    let supports = self
-                        .config
-                        .as_ref()
-                        .and_then(|c| {
-                            c.models
-                                .iter()
-                                .find(|x| x.provider == m.provider && x.id == m.model)
-                        })
+                    let supports_variant = find_model(self.models(), &m)
                         .is_some_and(|x| cur_var.as_ref().is_some_and(|v| x.variants.contains(v)));
-                    if supports {
+                    if supports_variant {
                         m.variant = cur_var;
                     }
                     if let Some(v) = self.views.get_mut(&sid) {
@@ -2136,6 +2103,8 @@ impl App {
                     );
                 }
             }
+            // `CloseSessions` returned above.
+            _ => {}
         }
     }
 
@@ -2155,13 +2124,13 @@ impl App {
             return;
         };
         let elsewhere = key
-            .strip_prefix("live:")
+            .strip_prefix(LIVE_KEY_PREFIX)
             .is_some_and(|s| self.attached_elsewhere(s));
         let Some(Dialog::List(d)) = self.dialog.as_mut() else {
             return;
         };
         if d.confirm.as_deref() != Some(key.as_str()) {
-            d.confirm_text = if key.starts_with("live:") {
+            d.confirm_text = if key.starts_with(LIVE_KEY_PREFIX) {
                 if elsewhere {
                     "open in another frontend · ctrl+d again to close "
                 } else {
@@ -2175,10 +2144,10 @@ impl App {
             return;
         }
         d.confirm = None;
-        if let Some(sid) = key.strip_prefix("live:") {
+        if let Some(sid) = key.strip_prefix(LIVE_KEY_PREFIX) {
             let sid = sid.to_string();
             self.close_session(&sid);
-        } else if let Some(sid) = key.strip_prefix("hist:") {
+        } else if let Some(sid) = key.strip_prefix(HISTORY_KEY_PREFIX) {
             let sid = sid.to_string();
             self.history_list.retain(|s| s.id != sid);
             self.req(
@@ -2230,7 +2199,7 @@ impl App {
             self.hint = None;
         }
         if !self.connected {
-            self.toasts.warn("Not connected to the backend");
+            self.toasts.warn(NOT_CONNECTED);
             return;
         }
         let name = self.session_name(sid);
@@ -2324,7 +2293,7 @@ impl App {
 
     /// Closes `sid`, asking for a second confirmation when it is open in another frontend.
     /// `again` describes how to confirm (e.g. "run the command again").
-    pub fn close_confirmed(&mut self, sid: &str, again: &str) {
+    fn close_confirmed(&mut self, sid: &str, again: &str) {
         if self.attached_elsewhere(sid) && !self.close_is_armed(sid) {
             self.arm_close(
                 sid,
@@ -2341,12 +2310,12 @@ impl App {
     fn close_is_armed(&self, sid: &str) -> bool {
         self.close_armed
             .as_ref()
-            .is_some_and(|(s, t)| s == sid && t.elapsed() < Duration::from_secs(4))
+            .is_some_and(|(s, t)| s == sid && t.elapsed() < CONFIRM_WINDOW)
     }
 
     fn arm_close(&mut self, sid: &str, hint: &str) {
         self.close_armed = Some((sid.to_string(), Instant::now()));
-        self.set_hint_for(hint, theme::WARNING, Duration::from_secs(4));
+        self.set_hint_for(hint, theme::WARNING, CONFIRM_WINDOW);
     }
 
     /// `ctrl+x k`: close the current session (chat) or the focused tile (split view); press twice.
@@ -2361,7 +2330,7 @@ impl App {
         };
         if self.mode == Mode::Chat && self.views.get(&sid).is_some_and(|v| v.closed) {
             // Already gone on the server: just move on to a fresh session.
-            self.run_command("close", "");
+            self.run_command(cmd::CLOSE, "");
             return;
         }
         if self.close_is_armed(&sid) {
@@ -2381,7 +2350,7 @@ impl App {
     }
 
     /// `/close-session` without args: picker of live sessions that stays open after each close.
-    pub fn open_close_picker(&mut self) {
+    fn open_close_picker(&mut self) {
         let d = ListDialog::new(Kind::CloseSessions, "Close sessions", Vec::new())
             .with_hint("enter close · stays open to close more · esc done");
         self.dialog = Some(Dialog::List(d));
@@ -2397,7 +2366,7 @@ impl App {
         let Some(key) = d.selected().map(|i| i.key.clone()) else {
             return;
         };
-        let Some(sid) = key.strip_prefix("live:").map(str::to_string) else {
+        let Some(sid) = key.strip_prefix(LIVE_KEY_PREFIX).map(str::to_string) else {
             return;
         };
         let elsewhere = self.attached_elsewhere(&sid);
@@ -2422,13 +2391,13 @@ impl App {
         let armed = self
             .undo_armed
             .as_ref()
-            .is_some_and(|(m, t)| m == msg && t.elapsed() < Duration::from_secs(4));
+            .is_some_and(|(m, t)| m == msg && t.elapsed() < CONFIRM_WINDOW);
         if busy && !armed {
             self.undo_armed = Some((msg.to_string(), Instant::now()));
             self.set_hint_for(
                 "click ↶ undo again to undo (aborts the running turn)",
                 theme::WARNING,
-                Duration::from_secs(4),
+                CONFIRM_WINDOW,
             );
             return;
         }
@@ -2465,7 +2434,7 @@ impl App {
             })
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "ref".into());
-        format!("R|{}", text::truncate(&label, 80))
+        format!("R|{}", text::truncate(&label, TITLE_MAX_CHARS))
     }
 
     /// Text printed to stdout after the TUI exits (logo + resume hint), if any.
@@ -2476,13 +2445,7 @@ impl App {
     }
 
     pub fn model_display(&self, m: &ModelRef) -> String {
-        self.config
-            .as_ref()
-            .and_then(|c| {
-                c.models
-                    .iter()
-                    .find(|x| x.provider == m.provider && x.id == m.model)
-            })
+        find_model(self.models(), m)
             .map(|x| x.name.clone())
             .unwrap_or_else(|| m.model.clone())
     }
@@ -2508,19 +2471,20 @@ impl App {
     pub fn run_command(&mut self, name: &str, args: &str) {
         let args = args.trim();
         // Commands needing backend data run once it has arrived (startup race).
-        let needs_config = matches!(name, "models" | "agents" | "variant");
+        let needs_config = matches!(name, cmd::MODELS | cmd::AGENTS | cmd::VARIANT);
         let needs_session = matches!(
             name,
-            "cd" | "variant"
-                | "compact"
-                | "undo"
-                | "rename"
-                | "export"
-                | "copy"
-                | "peers"
-                | "peers-name"
-                | "peers-inbox"
-                | "peers-outbox"
+            cmd::CD
+                | cmd::VARIANT
+                | cmd::COMPACT
+                | cmd::UNDO
+                | cmd::RENAME
+                | cmd::EXPORT
+                | cmd::COPY
+                | cmd::PEERS
+                | cmd::PEERS_NAME
+                | cmd::PEERS_INBOX
+                | cmd::PEERS_OUTBOX
         );
         if (needs_config && self.config.is_none())
             || (needs_session && self.cur().is_none_or(|v| !v.loaded))
@@ -2529,18 +2493,18 @@ impl App {
                 self.deferred = Some((name.to_string(), args.to_string(), Instant::now()));
                 return;
             }
-            self.toasts.warn("Not connected to the backend");
+            self.toasts.warn(NOT_CONNECTED);
             return;
         }
         let cur = self.current.clone();
         match name {
-            "new" => {
+            cmd::NEW => {
                 self.create_session(None);
             }
-            "sessions" => self.open_sessions(),
-            "models" => self.open_models(),
-            "agents" => self.open_agents(),
-            "variant" => {
+            cmd::SESSIONS => self.open_sessions(),
+            cmd::MODELS => self.open_models(),
+            cmd::AGENTS => self.open_agents(),
+            cmd::VARIANT => {
                 if args.is_empty() {
                     self.open_variants();
                 } else if let Some(sid) = cur {
@@ -2555,7 +2519,7 @@ impl App {
                     );
                 }
             }
-            "compact" => {
+            cmd::COMPACT => {
                 if let Some(sid) = cur {
                     self.req(
                         Request::Compact { session_id: sid },
@@ -2563,7 +2527,7 @@ impl App {
                     );
                 }
             }
-            "undo" => {
+            cmd::UNDO => {
                 if let Some(sid) = cur {
                     let p = Pending::Undo {
                         sid: sid.clone(),
@@ -2578,9 +2542,9 @@ impl App {
                     );
                 }
             }
-            "rename" => {
+            cmd::RENAME => {
                 if args.is_empty() {
-                    self.editor.set_text("/rename ");
+                    self.editor.set_text(&format!("/{} ", cmd::RENAME));
                 } else if let Some(sid) = cur {
                     self.req(
                         Request::Rename {
@@ -2593,12 +2557,12 @@ impl App {
                     );
                 }
             }
-            "peers" | "peers-name" | "peers-inbox" | "peers-outbox" => {
+            cmd::PEERS | cmd::PEERS_NAME | cmd::PEERS_INBOX | cmd::PEERS_OUTBOX => {
                 if let Some(sid) = cur {
                     let title = match name {
-                        "peers" => "Peers",
-                        "peers-name" => "Peer name",
-                        "peers-inbox" => "Peer inbox",
+                        cmd::PEERS => "Peers",
+                        cmd::PEERS_NAME => "Peer name",
+                        cmd::PEERS_INBOX => "Peer inbox",
                         _ => "Peer outbox",
                     };
                     self.req(
@@ -2613,7 +2577,7 @@ impl App {
                     );
                 }
             }
-            "close" => match cur {
+            cmd::CLOSE => match cur {
                 Some(sid) if self.views.get(&sid).is_some_and(|v| !v.closed) => {
                     self.close_session(&sid)
                 }
@@ -2621,25 +2585,13 @@ impl App {
                 Some(sid) => self.leave_closed_session(&sid, false),
                 None => self.quit = true,
             },
-            "cd" => {
+            cmd::CD => {
                 if let Some(sid) = cur {
                     self.change_dir(&sid, args);
                 }
             }
-            "close-session" => {
-                if args.is_empty() {
-                    self.open_close_picker();
-                } else {
-                    match match_session(&self.live, args) {
-                        Ok(s) => {
-                            let sid = s.id.clone();
-                            self.close_confirmed(&sid, "run the command again");
-                        }
-                        Err(e) => self.toasts.warn(e),
-                    }
-                }
-            }
-            "export" => {
+            cmd::CLOSE_SESSION => self.close_by_name(args),
+            cmd::EXPORT => {
                 if let Some(sid) = cur {
                     let p = if args.is_empty() {
                         format!("ref-session-{sid}.md")
@@ -2663,7 +2615,7 @@ impl App {
                     );
                 }
             }
-            "copy" => {
+            cmd::COPY => {
                 let raw = self.cur().and_then(|v| {
                     v.messages
                         .iter()
@@ -2676,20 +2628,35 @@ impl App {
                     None => self.toasts.warn("No assistant message yet"),
                 }
             }
-            "thinking" => self.toggle_thinking(),
-            "details" => self.toggle_details(),
-            "watch" => self.toggle_watch(),
-            "sidebar" => {
+            cmd::THINKING => self.toggle_thinking(),
+            cmd::DETAILS => self.toggle_details(),
+            cmd::WATCH => self.toggle_watch(),
+            cmd::SIDEBAR => {
                 self.sidebar = !self.sidebar;
                 if self.sidebar {
                     self.refresh_mcp();
                 }
             }
-            "editor" => self.run_editor = true,
-            "help" => self.open_help(),
-            "mcp" => self.open_mcp(None),
-            "exit" => self.quit = true,
+            cmd::EDITOR => self.run_editor = true,
+            cmd::HELP => self.open_help(),
+            cmd::MCP => self.open_mcp(None),
+            cmd::EXIT => self.quit = true,
             _ => {}
+        }
+    }
+
+    /// `/close-session [name or id]`: the picker without an argument, else that session.
+    fn close_by_name(&mut self, args: &str) {
+        if args.is_empty() {
+            self.open_close_picker();
+            return;
+        }
+        match match_session(&self.live, args) {
+            Ok(s) => {
+                let sid = s.id.clone();
+                self.close_confirmed(&sid, "run the command again");
+            }
+            Err(e) => self.toasts.warn(e),
         }
     }
 
@@ -2730,7 +2697,7 @@ impl App {
             i.attached = i.attached.saturating_sub(1);
         }
         if self.connected {
-            self.client.send(None, Request::Detach { session_id: sid });
+            self.client.notify(Request::Detach { session_id: sid });
         }
     }
 
@@ -2748,15 +2715,7 @@ impl App {
                 if let Some(i) = self.live.iter_mut().find(|s| s.id == sid) {
                     i.attached += 1;
                 }
-                self.attaching.insert(sid.clone());
-                self.req(
-                    Request::Attach {
-                        session_id: sid.clone(),
-                        foreground: true,
-                        limit: None,
-                    },
-                    Pending::Attach { sid, fg: true },
-                );
+                self.send_attach(sid, true);
             }
             Some(_) => {}
         }
@@ -2854,42 +2813,7 @@ impl App {
             && !q.contains(char::is_whitespace)
             && self.editor.cursor == t.len()
         {
-            let mut items: Vec<(i64, (String, String, String))> = Vec::new();
-            for c in COMMANDS {
-                // Canonical name wins ties (aliases only shown when they match better).
-                let mut best: Option<(i64, &str)> = None;
-                for n in std::iter::once(c.name).chain(c.aliases.iter().copied()) {
-                    if let Some(s) = text::fuzzy_score(n, q)
-                        && best.is_none_or(|b| s > b.0)
-                    {
-                        best = Some((s, n));
-                    }
-                }
-                if let Some((s, n)) = best {
-                    let label = if n == c.name {
-                        format!("/{}", c.name)
-                    } else {
-                        format!("/{n} → /{}", c.name)
-                    };
-                    items.push((s + 5, (format!("/{} ", c.name), label, c.desc.to_string())));
-                }
-            }
-            if let Some(cfg) = &self.config {
-                for c in &cfg.commands {
-                    if let Some(s) = text::fuzzy_score(&c.name, q) {
-                        items.push((
-                            s,
-                            (
-                                format!("/{} ", c.name),
-                                format!("/{}", c.name),
-                                c.description.clone(),
-                            ),
-                        ));
-                    }
-                }
-            }
-            items.sort_by_key(|x| std::cmp::Reverse(x.0));
-            let items: Vec<_> = items.into_iter().map(|x| x.1).take(50).collect();
+            let items = self.slash_completions(q);
             if items.is_empty() {
                 self.ac = None;
             } else {
@@ -2914,11 +2838,44 @@ impl App {
             if self.ac.as_ref().is_some_and(|a| a.kind == AcKind::Slash) {
                 self.ac = None;
             }
-            self.files_due = Some((Instant::now() + Duration::from_millis(80), q));
+            self.files_due = Some((Instant::now() + FILE_QUERY_DEBOUNCE, q));
             return;
         }
         self.files_due = None;
         self.ac = None;
+    }
+
+    /// Slash commands (built-in and from the backend config) matching `q`, best match first.
+    fn slash_completions(&self, q: &str) -> Vec<(String, String, String)> {
+        let mut items: Vec<(i64, (String, String, String))> = Vec::new();
+        for c in COMMANDS {
+            if let Some((score, label)) = best_command_match(c, q) {
+                items.push((
+                    score + CANONICAL_NAME_SCORE_BONUS,
+                    (format!("/{} ", c.name), label, c.desc.to_string()),
+                ));
+            }
+        }
+        if let Some(cfg) = &self.config {
+            for c in &cfg.commands {
+                if let Some(s) = text::fuzzy_score(&c.name, q) {
+                    items.push((
+                        s,
+                        (
+                            format!("/{} ", c.name),
+                            format!("/{}", c.name),
+                            c.description.clone(),
+                        ),
+                    ));
+                }
+            }
+        }
+        items.sort_by_key(|x| std::cmp::Reverse(x.0));
+        items
+            .into_iter()
+            .map(|x| x.1)
+            .take(MAX_COMPLETIONS)
+            .collect()
     }
 
     fn request_files(&mut self, q: String) {
@@ -2931,7 +2888,7 @@ impl App {
             Request::ListFiles {
                 cwd: self.session_cwd(),
                 query: q.clone(),
-                limit: Some(20),
+                limit: Some(FILE_QUERY_LIMIT),
             },
             Pending::Files { query: q },
         );
@@ -3015,30 +2972,29 @@ impl App {
 
     /// Whether anything needs periodic redraws, and how often.
     pub fn frame_interval(&self) -> Option<Duration> {
-        let fast = self
+        let scroll_animating = self
             .views
             .values()
-            .any(|v| v.chat.scrolling() || v.chat.drag_edge != 0)
-            || self.toasts.animating()
-            || self.dialog.as_ref().is_some_and(|d| d.animating())
+            .any(|v| v.chat.scrolling() || v.chat.drag_edge != 0);
+        let modal_opening = self.dialog.as_ref().is_some_and(|d| d.animating())
             || self
                 .perm
                 .as_ref()
-                .is_some_and(|p| p.opened.elapsed() < Duration::from_millis(150))
+                .is_some_and(|p| p.opened.elapsed() < OPEN_SETTLE)
             || self
                 .question
                 .as_ref()
-                .is_some_and(|q| q.opened.elapsed() < Duration::from_millis(150));
-        if fast {
-            return Some(Duration::from_millis(16));
+                .is_some_and(|q| q.opened.elapsed() < OPEN_SETTLE);
+        if scroll_animating || self.toasts.animating() || modal_opening {
+            return Some(FAST_FRAME);
         }
         if self.deferred.is_some() {
-            return Some(Duration::from_millis(50));
+            return Some(DEFERRED_POLL);
         }
         if let Some((at, _)) = &self.files_due {
             return Some(
                 at.saturating_duration_since(Instant::now())
-                    .max(Duration::from_millis(5)),
+                    .max(MIN_DEADLINE_WAIT),
             );
         }
         // Spinners for sessions we don't hold a view of: the sidebar's live list, split tiles that
@@ -3046,38 +3002,39 @@ impl App {
         let live_list_shown = self.mode == Mode::Watch
             || self.sidebar_shown()
             || matches!(&self.dialog, Some(Dialog::List(d)) if matches!(d.kind, Kind::Sessions | Kind::CloseSessions));
-        let anim = self
+        let any_view_animating = self
             .views
             .values()
-            .any(|v| v.animating() || matches!(v.info.status, SessionStatus::Retrying { .. }))
-            || (live_list_shown && self.live.iter().any(|s| s.live && !s.status.is_idle()))
-            || !self.connected;
+            .any(|v| v.animating() || matches!(v.info.status, SessionStatus::Retrying { .. }));
+        let live_spinner_shown =
+            live_list_shown && self.live.iter().any(|s| s.live && !s.status.is_idle());
+        let anim = any_view_animating || live_spinner_shown || !self.connected;
         // Pulsing "connecting" dot of MCP servers (sidebar / dialog).
         let mcp_shown = self.sidebar_shown() || matches!(self.dialog, Some(Dialog::Mcp(_)));
         if anim || (mcp_shown && self.mcp.iter().any(|e| e.connecting())) {
-            return Some(Duration::from_millis(80));
+            return Some(TICK);
         }
         if let Some(at) = self.mcp_poll_at {
             return Some(
                 at.saturating_duration_since(Instant::now())
-                    .max(Duration::from_millis(5)),
+                    .max(MIN_DEADLINE_WAIT),
             );
         }
         if let Some(d) = self.toasts.next_deadline() {
-            return Some(d.max(Duration::from_millis(16)));
+            return Some(d.max(FAST_FRAME));
         }
-        if self.hint.is_some()
+        let key_timer_armed = self.hint.is_some()
             || self.leader.is_some()
             || self.esc_armed.is_some()
-            || self.ctrlc_armed.is_some()
-        {
-            return Some(Duration::from_millis(250));
+            || self.ctrlc_armed.is_some();
+        if key_timer_armed {
+            return Some(IDLE_TIMER_FRAME);
         }
         None
     }
 
     /// Whether the chat-mode sidebar is drawn at the current screen size.
-    pub fn sidebar_shown(&self) -> bool {
+    fn sidebar_shown(&self) -> bool {
         self.mode == Mode::Chat
             && self.sidebar
             && self.screen.width >= crate::render::SIDEBAR_MIN_SCREEN
@@ -3091,7 +3048,7 @@ impl App {
             if ready {
                 self.run_command(&name, &args);
                 self.dirty = true;
-            } else if at.elapsed() < Duration::from_secs(10) {
+            } else if at.elapsed() < DEFERRED_COMMAND_TTL {
                 self.deferred = Some((name, args, at));
             }
         }
@@ -3099,22 +3056,19 @@ impl App {
             self.hint = None;
             self.dirty = true;
         }
-        if self
-            .leader
-            .is_some_and(|l| l.elapsed() > Duration::from_secs(2))
-        {
+        if self.leader.is_some_and(|l| l.elapsed() > LEADER_TIMEOUT) {
             self.leader = None;
             self.dirty = true;
         }
         if self
             .esc_armed
-            .is_some_and(|l| l.elapsed() > Duration::from_millis(1500))
+            .is_some_and(|l| l.elapsed() > ARMED_KEY_TIMEOUT)
         {
             self.esc_armed = None;
         }
         if self
             .ctrlc_armed
-            .is_some_and(|l| l.elapsed() > Duration::from_millis(1500))
+            .is_some_and(|l| l.elapsed() > ARMED_KEY_TIMEOUT)
         {
             self.ctrlc_armed = None;
         }
@@ -3167,7 +3121,7 @@ pub fn match_session<'a>(live: &'a [SessionInfo], q: &str) -> Result<&'a Session
 pub const LOGO: [&str; 3] = ["█▀▀▄ █▀▀▀ █▀▀▀", "█▄▄▀ █▀▀  █▀▀ ", "█  █ █▄▄▄ █   "];
 
 /// Exit screen (opencode style): logo, session line, resume command. ANSI truecolor.
-pub fn epilogue_text(info: &SessionInfo, resumable: bool) -> String {
+fn epilogue_text(info: &SessionInfo, resumable: bool) -> String {
     let ansi = |c: Color| match c {
         Color::Rgb(r, g, b) => format!("\x1b[38;2;{r};{g};{b}m"),
         _ => String::new(),
@@ -3177,14 +3131,21 @@ pub fn epilogue_text(info: &SessionInfo, resumable: bool) -> String {
     let mut out = String::new();
     for l in LOGO {
         // Left two letters in primary, the last one muted (like opencode's two-tone wordmark).
-        let (a, b) = l.split_at(l.char_indices().nth(10).map(|x| x.0).unwrap_or(l.len()));
+        let split = l
+            .char_indices()
+            .nth(LOGO_PRIMARY_CHARS)
+            .map(|x| x.0)
+            .expect("logo lines are longer than LOGO_PRIMARY_CHARS");
+        let (a, b) = l.split_at(split);
         out.push_str(&format!(
             "  {primary}{a}{reset}{muted}{}{reset}\n",
             b.trim_end()
         ));
     }
     out.push('\n');
-    let row = |label: &str, value: &str| format!("  {muted}{label:<10}{reset}{bold}{value}{reset}");
+    let row = |label: &str, value: &str| {
+        format!("  {muted}{label:<EPILOGUE_LABEL_WIDTH$}{reset}{bold}{value}{reset}")
+    };
     if resumable {
         let title = text::one_line(&info.title);
         let session = match (title.is_empty(), info.name.is_empty()) {
@@ -3200,6 +3161,22 @@ pub fn epilogue_text(info: &SessionInfo, resumable: bool) -> String {
     out
 }
 
+/// Images of a restored prompt: those in the response, else the queued row's own.
+fn restored_images(
+    result: &Value,
+    queued_images: Vec<ImageData>,
+) -> Vec<(ImageData, Option<String>)> {
+    let images = response_images(result);
+    if !images.is_empty() {
+        return images;
+    }
+    queued_images
+        .into_iter()
+        .filter(|i| !i.is_stub())
+        .map(|i| (i, None))
+        .collect()
+}
+
 /// `images` of an `Undo` / `RemoveQueued` response (to put back into the editor).
 fn response_images(result: &Value) -> Vec<(ImageData, Option<String>)> {
     let list: Vec<ref_proto::NamedImage> = result
@@ -3212,29 +3189,68 @@ fn response_images(result: &Value) -> Vec<(ImageData, Option<String>)> {
         .collect()
 }
 
-fn sessions_of(v: &Value) -> Option<Vec<SessionInfo>> {
-    v.get("sessions")
+/// Best fuzzy score of a command's name or aliases against `q`, with the label to show.
+/// The canonical name wins ties (aliases are only shown when they match better).
+fn best_command_match(c: &Cmd, q: &str) -> Option<(i64, String)> {
+    let mut best: Option<(i64, &str)> = None;
+    for n in std::iter::once(c.name).chain(c.aliases.iter().copied()) {
+        if let Some(s) = text::fuzzy_score(n, q)
+            && best.is_none_or(|b| s > b.0)
+        {
+            best = Some((s, n));
+        }
+    }
+    let (score, n) = best?;
+    let label = if n == c.name {
+        format!("/{}", c.name)
+    } else {
+        format!("/{n} → /{}", c.name)
+    };
+    Some((score, label))
+}
+
+fn live_key(sid: &str) -> String {
+    format!("{LIVE_KEY_PREFIX}{sid}")
+}
+
+fn find_model<'a>(
+    models: &'a [ref_proto::ModelInfo],
+    m: &ModelRef,
+) -> Option<&'a ref_proto::ModelInfo> {
+    models
+        .iter()
+        .find(|x| x.provider == m.provider && x.id == m.model)
+}
+
+/// Dialog marker: a filled dot for the selected row, blank otherwise.
+fn selected_marker(on: bool) -> (String, Color) {
+    let glyph = if on { SELECTED_GLYPH } else { " " };
+    (glyph.into(), theme::PRIMARY)
+}
+
+fn config_agents(config: &Option<ServerConfigInfo>) -> &[ref_proto::AgentInfo] {
+    config.as_ref().map(|c| c.agents.as_slice()).unwrap_or(&[])
+}
+
+fn config_models(config: &Option<ServerConfigInfo>) -> &[ref_proto::ModelInfo] {
+    config.as_ref().map(|c| c.models.as_slice()).unwrap_or(&[])
+}
+
+fn session_info_of(result: &Value) -> Option<SessionInfo> {
+    result
+        .get("session")
         .and_then(|s| serde_json::from_value(s.clone()).ok())
 }
 
-pub fn placeholder_info(sid: &str, cwd: &str) -> SessionInfo {
-    SessionInfo {
-        id: sid.to_string(),
-        name: String::new(),
-        title: String::new(),
-        agent: String::new(),
-        model: ModelRef::default(),
-        cwd: cwd.to_string(),
-        created_at: 0,
-        updated_at: 0,
-        status: SessionStatus::Idle,
-        attached: 0,
-        live: true,
-        parent: None,
-        must_report: false,
-        context: Default::default(),
-        todos: Vec::new(),
-        busy_since: None,
-        last_error: None,
-    }
+fn text_of(result: &Value) -> Option<&str> {
+    result.get("text").and_then(Value::as_str)
+}
+
+fn flag_of(result: &Value, key: &str) -> bool {
+    result.get(key).and_then(Value::as_bool).unwrap_or(false)
+}
+
+fn sessions_of(v: &Value) -> Option<Vec<SessionInfo>> {
+    v.get("sessions")
+        .and_then(|s| serde_json::from_value(s.clone()).ok())
 }
