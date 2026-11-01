@@ -4,7 +4,7 @@
 <context>
     <name>BashBody</name>
     <message numerus="yes">
-        <location filename="../src/app/BashBody.qml" line="36"/>
+        <location filename="../src/app/BashBody.qml" line="40"/>
         <location filename="../tests/tst_app_translator.cpp" line="42"/>
         <source>%n earlier line(s)</source>
         <translation>
@@ -16,7 +16,7 @@
 <context>
     <name>FindBody</name>
     <message numerus="yes">
-        <location filename="../src/app/FindBody.qml" line="64"/>
+        <location filename="../src/app/FindBody.qml" line="65"/>
         <location filename="../tests/tst_app_translator.cpp" line="41"/>
         <source>%n result(s)</source>
         <translation>
@@ -61,7 +61,7 @@
 <context>
     <name>OutputText</name>
     <message numerus="yes">
-        <location filename="../src/app/OutputText.qml" line="44"/>
+        <location filename="../src/app/OutputText.qml" line="43"/>
         <source>Show %n more line(s)</source>
         <translation>
             <numerusform>Show %n more line</numerusform>
