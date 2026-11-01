@@ -1,7 +1,7 @@
 //! Context compaction: model-generated summary (manual / automatic / overflow) or a
 //! summary supplied by the model via `compact_context`.
 
-use crate::engine::{JITTER_FRACTION, Prep, backoff, retry_max_delay};
+use crate::engine::{ABORTED, JITTER_FRACTION, Prep, backoff, retry_max_delay};
 use crate::hub::Hub;
 use crate::session::{Session, user_message};
 use ref_config::COMPACTION_AGENT;
@@ -240,7 +240,7 @@ async fn summarize(
                 }
                 return Ok(text.trim().to_string());
             }
-            Err(e) if e.cancelled || cancel.is_cancelled() => return Err("aborted".into()),
+            Err(e) if e.cancelled || cancel.is_cancelled() => return Err(ABORTED.into()),
             // The provider stated a stricter image limit (recorded by `learn`): clamp again and resend.
             Err(e) if crate::images::learn(&cs.provider, &cs.model, &e.message) => {
                 req = crate::images::clamp_request(req, &cs.provider, &cs.model).await;
@@ -270,7 +270,7 @@ async fn summarize(
                 tracing::warn!(session = %s.id, "compaction request failed ({}); retrying in {:?}", e.message, d);
                 tokio::select! {
                     _ = tokio::time::sleep(d) => {}
-                    _ = cancel.cancelled() => return Err("aborted".into()),
+                    _ = cancel.cancelled() => return Err(ABORTED.into()),
                 }
             }
         }

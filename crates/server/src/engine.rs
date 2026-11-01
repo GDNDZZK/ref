@@ -20,6 +20,8 @@ use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
 pub const CANCELLED_OUTPUT: &str = "Cancelled by user.";
+/// Error text of a turn or compaction that was aborted.
+pub(crate) const ABORTED: &str = "aborted";
 const MAX_REMINDERS: u32 = 3;
 const NON_RETRYABLE_ATTEMPTS: u32 = 3;
 /// Largest exponent of the retry backoff, so `2^n` stays finite.
@@ -501,7 +503,7 @@ pub async fn prepare(
     for srv in &servers {
         tokio::select! {
             _ = srv.wait_ready(hub.opts.mcp_wait) => {}
-            _ = cancel.cancelled() => return Err("aborted".into()),
+            _ = cancel.cancelled() => return Err(ABORTED.into()),
         }
     }
     let tools = toolset::assemble(&cfg, &agent, &servers);
