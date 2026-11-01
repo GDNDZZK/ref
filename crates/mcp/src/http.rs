@@ -490,15 +490,7 @@ impl HttpTransport {
         self.spawn_task(async move {
             let mut tx = Some(tx);
             let res = read_sse(resp, |ev| {
-                if ev.event == "endpoint" {
-                    if let Some(tx) = tx.take() {
-                        let _ = tx.send(ev.data.trim().to_string());
-                    }
-                } else if ev.is_message() {
-                    dispatch_data(&shared, &ev.data);
-                } else {
-                    tracing::trace!(server = %shared.name, "ignoring SSE event {}", ev.event);
-                }
+                on_legacy_event(&shared, &mut tx, ev);
                 true
             })
             .await;
@@ -617,6 +609,24 @@ impl GetStream {
             }
             tokio::time::sleep(backoff).await;
         }
+    }
+}
+
+/// Handle one event of the legacy SSE stream: the `endpoint` event goes to `tx` (once),
+/// messages are dispatched.
+fn on_legacy_event(
+    shared: &Shared,
+    tx: &mut Option<tokio::sync::oneshot::Sender<String>>,
+    ev: SseEvent,
+) {
+    if ev.event == "endpoint" {
+        if let Some(tx) = tx.take() {
+            let _ = tx.send(ev.data.trim().to_string());
+        }
+    } else if ev.is_message() {
+        dispatch_data(shared, &ev.data);
+    } else {
+        tracing::trace!(server = %shared.name, "ignoring SSE event {}", ev.event);
     }
 }
 
