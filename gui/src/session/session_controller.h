@@ -1,6 +1,7 @@
 #pragma once
 
 #include "client/backend.h"
+#include "client/result.h"
 #include "proto/types.h"
 #include "session/conversation_feed.h"
 #include "session/conversation_model.h"

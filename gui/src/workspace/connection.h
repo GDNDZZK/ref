@@ -1,6 +1,7 @@
 #pragma once
 
 #include "client/backend.h"
+#include "client/result.h"
 
 #include <QCoroTask>
 #include <QObject>
