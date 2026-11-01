@@ -75,7 +75,8 @@ pub fn to_markdown(xml: &str) -> Option<(Option<String>, String)> {
             Event::CData(c) => text.push_str(&c),
             Event::GeneralRef(g) => text.push_str(&entity_text(&g)),
             Event::End(_) => {
-                let Some(name) = path.pop() else { continue };
+                // quick-xml rejects unmatched end tags, so every `End` closes a pushed `Start`.
+                let name = path.pop().expect("an end tag closes an open element");
                 if matches!(name.as_str(), "item" | "entry") {
                     if let Some(e) = cur.take() {
                         entries.push(e);
