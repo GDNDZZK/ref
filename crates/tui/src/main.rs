@@ -72,6 +72,21 @@ struct Cli {
     mock: bool,
 }
 
+/// Frames are drawn at most this often (~60 fps).
+const MIN_FRAME_INTERVAL: Duration = Duration::from_millis(14);
+/// Pretend the last draw was this long ago so the first frame is drawn at once.
+const FIRST_DRAW_DELAY: Duration = Duration::from_secs(1);
+/// Shortest sleep between loop iterations.
+const MIN_WAIT: Duration = Duration::from_millis(1);
+/// Sleep when nothing is scheduled.
+const IDLE_WAIT: Duration = Duration::from_secs(3600);
+/// Backend frames handled before the next render.
+const MAX_COALESCED_NET_EVENTS: usize = 512;
+/// Time for the Detach frame to leave before the process ends.
+const DETACH_GRACE: Duration = Duration::from_millis(30);
+/// How long background tasks get to finish when the runtime shuts down.
+const RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(200);
+
 fn setup_terminal() -> std::io::Result<()> {
     enable_raw_mode()?;
     let mut out = std::io::stdout();
@@ -83,6 +98,7 @@ fn setup_terminal() -> std::io::Result<()> {
         cursor::SetCursorStyle::SteadyBar
     )?;
     if crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false) {
+        // Best effort: some terminals report support they do not have.
         let _ = execute!(
             out,
             PushKeyboardEnhancementFlags(
@@ -94,10 +110,12 @@ fn setup_terminal() -> std::io::Result<()> {
     Ok(())
 }
 
-fn restore_terminal() {
+/// Undoes `setup_terminal`. Every step runs even if an earlier one fails; the first error is returned.
+fn restore_terminal() -> std::io::Result<()> {
     let mut out = std::io::stdout();
+    // Nothing was pushed on terminals without keyboard enhancement, so a failed pop is expected.
     let _ = execute!(out, PopKeyboardEnhancementFlags);
-    let _ = execute!(
+    let screen = execute!(
         out,
         DisableBracketedPaste,
         DisableMouseCapture,
@@ -105,12 +123,13 @@ fn restore_terminal() {
         cursor::SetCursorStyle::DefaultUserShape,
         cursor::Show
     );
-    let _ = disable_raw_mode();
-    let _ = out.flush();
+    let raw = disable_raw_mode();
+    let flushed = out.flush();
+    screen.and(raw).and(flushed)
 }
 
 /// Suspends the TUI, runs $VISUAL/$EDITOR on the prompt text, returns the edited text.
-fn run_external_editor(initial: &str) -> Option<String> {
+fn run_external_editor(initial: &str) -> std::io::Result<Option<String>> {
     let default = if cfg!(windows) { "notepad" } else { "vi" };
     let editor = std::env::var("VISUAL")
         .or_else(|_| std::env::var("EDITOR"))
@@ -120,16 +139,19 @@ fn run_external_editor(initial: &str) -> Option<String> {
         std::process::id(),
         ref_proto::now_ms()
     ));
-    std::fs::write(&path, initial).ok()?;
-    restore_terminal();
+    if std::fs::write(&path, initial).is_err() {
+        return Ok(None);
+    }
+    restore_terminal()?;
     let status = editor_command(&editor, &path).status();
-    let _ = setup_terminal();
+    setup_terminal()?;
     let out = std::fs::read_to_string(&path).ok();
+    // The temp file is only a scratch copy; a leftover is harmless.
     let _ = std::fs::remove_file(&path);
-    match status {
+    Ok(match status {
         Ok(s) if s.success() => out.map(|s| s.trim_end_matches('\n').to_string()),
         _ => None,
-    }
+    })
 }
 
 /// `$EDITOR` may contain arguments (`code --wait`), so it goes through the shell.
@@ -198,20 +220,23 @@ fn main() -> anyhow::Result<()> {
     // Panic hook: restore the terminal before printing.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        restore_terminal();
+        // Best effort: the panic message matters more than a failed restore.
+        let _ = restore_terminal();
         default_hook(info);
     }));
     setup_terminal()?;
     let res = rt.block_on(run(cli.mock, target, cwd, plan));
-    restore_terminal();
-    rt.shutdown_timeout(Duration::from_millis(200));
+    let restored = restore_terminal();
+    rt.shutdown_timeout(RUNTIME_SHUTDOWN_TIMEOUT);
+    let exit_text = res?;
+    restored?;
     // Exit screen (logo + how to resume), printed to the normal screen like opencode does.
-    if let Ok(Some(text)) = &res {
+    if let Some(text) = exit_text {
         let mut out = std::io::stdout();
-        let _ = out.write_all(text.as_bytes());
-        let _ = out.flush();
+        out.write_all(text.as_bytes())?;
+        out.flush()?;
     }
-    res.map(|_| ())
+    Ok(())
 }
 
 /// Clears the screen and forces a full repaint (without the cursor-position query that
@@ -219,6 +244,21 @@ fn main() -> anyhow::Result<()> {
 fn full_clear(t: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> std::io::Result<()> {
     let (w, h) = crossterm::terminal::size()?;
     t.resize(ratatui::layout::Rect::new(0, 0, w, h))
+}
+
+/// Handles `first` and the backend frames already queued, so a burst renders once.
+fn drain_net_events(
+    app: &mut App,
+    first: net::NetEvent,
+    rx: &mut mpsc::UnboundedReceiver<net::NetEvent>,
+) {
+    app.on_net(first);
+    for _ in 0..MAX_COALESCED_NET_EVENTS {
+        let Ok(e) = rx.try_recv() else {
+            break;
+        };
+        app.on_net(e);
+    }
 }
 
 /// Runs the TUI; returns the exit-screen text to print after the terminal is restored.
@@ -235,32 +275,37 @@ async fn run(
     } else {
         tokio::spawn(net::run(target, cwd.clone(), out_rx, ev_tx));
     }
+
     let mut app = App::new(Client::new(out_tx), cwd, plan);
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
     full_clear(&mut terminal)?;
     let mut events = EventStream::new();
-    let mut last_draw = std::time::Instant::now() - Duration::from_secs(1);
+    let mut last_draw = std::time::Instant::now() - FIRST_DRAW_DELAY;
+
     loop {
         if app.run_editor {
             app.run_editor = false;
             // Stop the terminal reader thread so it doesn't steal the editor's input.
             drop(events);
             let initial = app.editor.text.clone();
-            if let Some(t) = run_external_editor(&initial) {
+            if let Some(t) = run_external_editor(&initial)? {
                 app.editor.set_text(&t);
             }
             events = EventStream::new();
             full_clear(&mut terminal)?;
             app.dirty = true;
         }
+
         if app.force_clear {
             app.force_clear = false;
             full_clear(&mut terminal)?;
             app.dirty = true;
         }
+
         if app.quit {
             break;
         }
+
         let interval = app.frame_interval();
         // Animation frames are due relative to the last draw, so a stream of input / network
         // events (each re-creating the sleep below) can never starve the spinners.
@@ -269,10 +314,11 @@ async fn run(
         {
             app.dirty = true;
         }
+
         if app.dirty {
             // Cap at ~60fps.
             let since = last_draw.elapsed();
-            if since >= Duration::from_millis(14) {
+            if since >= MIN_FRAME_INTERVAL {
                 // Advance scroll easing once per drawn frame.
                 for v in app.views.values_mut() {
                     v.chat.step_anim();
@@ -283,42 +329,30 @@ async fn run(
                 app.load_older();
                 let title = app.terminal_title();
                 if app.last_title.as_deref() != Some(title.as_str()) {
-                    let _ = execute!(std::io::stdout(), crossterm::terminal::SetTitle(&title));
+                    execute!(std::io::stdout(), crossterm::terminal::SetTitle(&title))?;
                     app.last_title = Some(title);
                 }
             }
         }
+
         let wait = if app.dirty {
-            Duration::from_millis(14).saturating_sub(last_draw.elapsed())
+            MIN_FRAME_INTERVAL.saturating_sub(last_draw.elapsed())
         } else {
             interval
-                .map(|iv| {
-                    iv.saturating_sub(last_draw.elapsed())
-                        .max(Duration::from_millis(1))
-                })
-                .unwrap_or(Duration::from_secs(3600))
+                .map(|iv| iv.saturating_sub(last_draw.elapsed()).max(MIN_WAIT))
+                .unwrap_or(IDLE_WAIT)
         };
+
         tokio::select! {
             ev = events.next() => {
                 match ev {
                     Some(Ok(e)) => input::handle(&mut app, e),
                     Some(Err(_)) | None => break,
                 }
-                // Drain any further pending terminal events without redrawing in between.
             }
             ev = ev_rx.recv() => {
                 match ev {
-                    Some(e) => {
-                        app.on_net(e);
-                        // Coalesce bursts of frames into one render.
-                        let mut n = 0;
-                        while n < 512 {
-                            match ev_rx.try_recv() {
-                                Ok(e) => { app.on_net(e); n += 1; }
-                                Err(_) => break,
-                            }
-                        }
-                    }
+                    Some(first) => drain_net_events(&mut app, first, &mut ev_rx),
                     None => break,
                 }
             }
@@ -334,10 +368,11 @@ async fn run(
     if let Some(sid) = app.current.clone() {
         app.client
             .notify(ref_proto::Request::Detach { session_id: sid });
-        tokio::time::sleep(Duration::from_millis(30)).await;
+        tokio::time::sleep(DETACH_GRACE).await;
     }
+
     if app.last_title.is_some() {
-        let _ = execute!(std::io::stdout(), crossterm::terminal::SetTitle(""));
+        execute!(std::io::stdout(), crossterm::terminal::SetTitle(""))?;
     }
     Ok(app.epilogue())
 }
