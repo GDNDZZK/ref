@@ -34,6 +34,8 @@ const GIF89A_SIGNATURE: &[u8] = b"GIF89a";
 /// WebP is a RIFF container: `RIFF`, 4 size bytes, then `WEBP`.
 const RIFF_TAG: &[u8] = b"RIFF";
 const WEBP_TAG: &[u8] = b"WEBP";
+/// Where `WEBP` starts: after `RIFF` and the 4 size bytes.
+const WEBP_TAG_OFFSET: usize = 8;
 const RIFF_HEADER_LEN: usize = 12;
 
 // ---------------------------------------------------------------------------
@@ -411,7 +413,7 @@ pub fn image_mime(bytes: &[u8]) -> Option<&'static str> {
         return Some(MIME_GIF);
     }
     let is_riff = bytes.len() >= RIFF_HEADER_LEN && bytes.starts_with(RIFF_TAG);
-    if is_riff && &bytes[8..RIFF_HEADER_LEN] == WEBP_TAG {
+    if is_riff && &bytes[WEBP_TAG_OFFSET..RIFF_HEADER_LEN] == WEBP_TAG {
         return Some(MIME_WEBP);
     }
     None
