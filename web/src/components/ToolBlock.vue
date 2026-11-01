@@ -20,10 +20,9 @@ import ToolBody from './ToolBody.vue'
 import ToolPermission from './ToolPermission.vue'
 import ToolQuestion from './ToolQuestion.vue'
 import ToolStateMark from './ToolStateMark.vue'
+import { MS_PER_SECOND } from '../time.ts'
 
 const props = defineProps<{ block: ToolBlock }>()
-
-const MS_PER_SECOND = 1000
 
 const { t } = useI18n()
 const chatScroll = useChatScroll()

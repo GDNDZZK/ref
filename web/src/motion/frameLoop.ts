@@ -1,9 +1,9 @@
 // One requestAnimationFrame loop shared by every per-frame animation (FrameAnimation in QML).
 // It runs only while someone is subscribed.
 
-export type FrameCallback = (frameSeconds: number, now: number) => void
+import { MS_PER_SECOND } from '../time.ts'
 
-const MS_PER_SECOND = 1000
+export type FrameCallback = (frameSeconds: number, now: number) => void
 
 const subscribers = new Set<FrameCallback>()
 let handle: number | undefined

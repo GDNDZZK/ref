@@ -4,8 +4,7 @@
 // keeps moving never restarts the motion and the speed does not depend on the frame rate.
 
 import { motion } from '../theme/generated/motion.ts'
-
-const MS_PER_SECOND = 1000
+import { MS_PER_SECOND } from '../time.ts'
 
 export function arrived(current: number, target: number): boolean {
   return Math.abs(target - current) < motion.chaseSnap
