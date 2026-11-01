@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QCoroTask>
 #include <QList>
 #include <QObject>
 #include <QTimer>
@@ -36,6 +37,24 @@ public:
 
 	// `co_await stop.sleep(100ms)` waits that long, or until request().
 	SleepAwaiter sleep(std::chrono::milliseconds duration) { return {*this, duration}; }
+
+	// Asks `done` every `interval` until it says true, `timeout` has passed or a stop is
+	// requested. True when `done` said so.
+	template<typename Predicate>
+	QCoro::Task<bool> pollUntil(std::chrono::milliseconds timeout, std::chrono::milliseconds interval, Predicate done)
+	{
+		std::chrono::milliseconds waited{0};
+		while(waited < timeout && !m_stopped)
+		{
+			if(done())
+			{
+				co_return true;
+			}
+			co_await sleep(interval);
+			waited += interval;
+		}
+		co_return false;
+	}
 
 private:
 	struct Sleeper

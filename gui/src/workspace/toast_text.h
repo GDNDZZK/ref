@@ -5,6 +5,14 @@
 namespace refgui::workspace
 {
 
+// The toast levels, as ToastHost.qml and the backend's toast frame name them.
+namespace ToastLevel
+{
+inline const QString Info = QStringLiteral("info");
+inline const QString Warn = QStringLiteral("warn");
+inline const QString Error = QStringLiteral("error");
+} // namespace ToastLevel
+
 // Text for a toast, as the terminal front end writes it: whitespace runs become one space,
 // control characters go, and the text is cut to `maxChars` Unicode characters with "…".
 inline constexpr int MaxToastChars = 200;

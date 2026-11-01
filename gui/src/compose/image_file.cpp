@@ -68,23 +68,8 @@ QString pathOf(const QString& text)
 	return path;
 }
 
-} // namespace
-
-std::expected<std::optional<proto::NamedImage>, QString> imageFromPath(const QString& text)
-{
-	return imageFromFile(pathOf(text));
-}
-
-std::expected<std::optional<proto::NamedImage>, QString> imageFromUrl(const QUrl& url)
-{
-	if(!url.isLocalFile())
-	{
-		return std::nullopt;
-	}
-	return imageFromFile(url.toLocalFile());
-}
-
-std::expected<std::optional<proto::NamedImage>, QString> imageFromFile(const QString& path)
+// The image of a path exactly as the file system has it (no quotes, `~` or escapes are interpreted).
+ImageResult imageFromFile(const QString& path)
 {
 	const QString mime = mimeOf(path);
 	const QFileInfo info(path);
@@ -103,6 +88,22 @@ std::expected<std::optional<proto::NamedImage>, QString> imageFromFile(const QSt
 		return std::unexpected(QCoreApplication::translate("refgui::compose", "Cannot read %1: %2").arg(info.fileName(), file.errorString()));
 	}
 	return imageFromBytes(file.readAll(), mime, info.fileName());
+}
+
+} // namespace
+
+ImageResult imageFromPath(const QString& text)
+{
+	return imageFromFile(pathOf(text));
+}
+
+ImageResult imageFromUrl(const QUrl& url)
+{
+	if(!url.isLocalFile())
+	{
+		return std::nullopt;
+	}
+	return imageFromFile(url.toLocalFile());
 }
 
 proto::NamedImage imageFromBytes(const QByteArray& bytes, const QString& mime, const QString& name)

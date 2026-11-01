@@ -1,10 +1,9 @@
 #include "workspace/toast_text.h"
 
 #include <QChar>
-#include <QList>
+#include <QList> // toUcs4() returns one
 #include <QStringView>
 #include <QTextBoundaryFinder>
-#include <algorithm>
 #include <string>
 
 namespace refgui::workspace
@@ -12,6 +11,8 @@ namespace refgui::workspace
 
 namespace
 {
+
+constexpr QChar Ellipsis = u'\u2026';
 
 // The length of `text` in Unicode characters.
 qsizetype characterCount(QStringView text)
@@ -70,7 +71,7 @@ QString truncated(const QString& text, int maxChars)
 		}
 		end = next;
 	}
-	return text.left(end) + QChar(0x2026);
+	return text.left(end) + Ellipsis;
 }
 
 } // namespace refgui::workspace

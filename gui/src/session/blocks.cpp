@@ -18,52 +18,6 @@ constexpr QLatin1StringView AbortedError = "aborted"_L1;
 constexpr qsizetype NotAPart = -1; // partIndex of a block that belongs to the message, not to a part
 constexpr QLatin1StringView LiveOutputKey = "live_output"_L1;
 
-QString sourceName(proto::MessageSource::Kind kind)
-{
-	using Kind = proto::MessageSource::Kind;
-	switch(kind)
-	{
-	case Kind::Human:
-		return u"human"_s;
-	case Kind::Peer:
-		return u"peer"_s;
-	case Kind::Spawn:
-		return u"spawn"_s;
-	case Kind::Reminder:
-		return u"reminder"_s;
-	case Kind::Compaction:
-		return u"compaction"_s;
-	case Kind::Shell:
-		return u"shell"_s;
-	}
-	Q_UNREACHABLE_RETURN(QString());
-}
-
-QString toolStateName(proto::ToolState state)
-{
-	using State = proto::ToolState;
-	switch(state)
-	{
-	case State::Streaming:
-		return u"streaming"_s;
-	case State::AwaitingPermission:
-		return u"awaiting_permission"_s;
-	case State::Delayed:
-		return u"delayed"_s;
-	case State::Running:
-		return u"running"_s;
-	case State::Done:
-		return u"done"_s;
-	case State::Error:
-		return u"error"_s;
-	case State::Denied:
-		return u"denied"_s;
-	case State::Cancelled:
-		return u"cancelled"_s;
-	}
-	Q_UNREACHABLE_RETURN(QString());
-}
-
 // A block with the identity fields filled in.
 Block makeBlock(Block::Kind kind, const MessageHeader& header, qsizetype partIndex)
 {
@@ -73,7 +27,7 @@ Block makeBlock(Block::Kind kind, const MessageHeader& header, qsizetype partInd
 		.kind = kind,
 		.messageId = header.id,
 		.partIndex = partIndex,
-		.source = fromUser ? sourceName(header.source.kind) : QString(),
+		.sourceKind = fromUser ? std::optional(header.source.kind) : std::nullopt,
 		.sender = namesSender ? header.source.fromName : QString(),
 		.time = header.time,
 	};
@@ -127,7 +81,7 @@ QList<Block> toolBlocks(const MessageHeader& header, qsizetype index, const prot
 	block.content = tool.purpose.isEmpty() ? tool.name : tool.name + u' ' + tool.purpose;
 	block.toolName = tool.name;
 	block.purpose = tool.purpose;
-	block.toolState = toolStateName(tool.state);
+	block.toolStateKind = tool.state;
 	block.callId = tool.callId;
 	block.output = tool.output.value_or(QString());
 	block.streaming = !proto::isFinal(tool.state);
@@ -195,6 +149,60 @@ QList<Block> reasoningBlocks(const MessageHeader& header, qsizetype index, const
 }
 
 } // namespace
+
+QString sourceName(std::optional<proto::MessageSource::Kind> kind)
+{
+	using Kind = proto::MessageSource::Kind;
+	if(!kind)
+	{
+		return {};
+	}
+	switch(*kind)
+	{
+	case Kind::Human:
+		return u"human"_s;
+	case Kind::Peer:
+		return u"peer"_s;
+	case Kind::Spawn:
+		return u"spawn"_s;
+	case Kind::Reminder:
+		return u"reminder"_s;
+	case Kind::Compaction:
+		return u"compaction"_s;
+	case Kind::Shell:
+		return u"shell"_s;
+	}
+	Q_UNREACHABLE_RETURN(QString());
+}
+
+QString toolStateName(std::optional<proto::ToolState> state)
+{
+	using State = proto::ToolState;
+	if(!state)
+	{
+		return {};
+	}
+	switch(*state)
+	{
+	case State::Streaming:
+		return u"streaming"_s;
+	case State::AwaitingPermission:
+		return u"awaiting_permission"_s;
+	case State::Delayed:
+		return u"delayed"_s;
+	case State::Running:
+		return u"running"_s;
+	case State::Done:
+		return u"done"_s;
+	case State::Error:
+		return u"error"_s;
+	case State::Denied:
+		return u"denied"_s;
+	case State::Cancelled:
+		return u"cancelled"_s;
+	}
+	Q_UNREACHABLE_RETURN(QString());
+}
 
 QString kindName(Block::Kind kind)
 {

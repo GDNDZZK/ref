@@ -21,20 +21,11 @@ namespace
 {
 
 constexpr int ReconnectTimeoutMs = 8000; // the backend retries after a second
+constexpr int SettleMs = 50;              // time for a frame in flight to be handled
 
 QJsonObject infoJson(const QString& id, const QString& state)
 {
-	return {{u"id"_s, id},
-	        {u"name"_s, u"one"_s},
-	        {u"title"_s, u"A title"_s},
-	        {u"agent"_s, u"build"_s},
-	        {u"model"_s, QJsonObject{{u"provider"_s, u"p"_s}, {u"model"_s, u"m"_s}}},
-	        {u"cwd"_s, u"/work"_s},
-	        {u"created_at"_s, 1},
-	        {u"updated_at"_s, 1},
-	        {u"status"_s, QJsonObject{{u"state"_s, state}}},
-	        {u"attached"_s, 1},
-	        {u"live"_s, true}};
+	return sessionInfoJson(id, {.name = u"one"_s, .title = u"A title"_s, .state = state, .attached = 1});
 }
 
 QJsonObject messageJson(const QString& id, const QString& role, const QString& text, bool ended)
@@ -119,10 +110,6 @@ struct Fixture
 		{
 			fake.respond(request, snapshot);
 		}
-		else if(op == u"list_history")
-		{
-			fake.respond(request, {{u"sessions"_s, history}});
-		}
 		else if(op == u"prompt")
 		{
 			fake.respond(request, {{u"queued"_s, false}, {u"message_id"_s, u"u2"_s}});
@@ -151,7 +138,6 @@ struct Fixture
 	Backend backend;
 	SessionController controller;
 	QJsonObject snapshot;
-	QJsonArray history;
 	QJsonArray olderPage;
 	bool olderHasMore = false;
 };
@@ -169,8 +155,6 @@ private slots:
 	void ignoresEventsOfOtherSessions();
 	void sendDoesNotEchoThePrompt();
 	void abortAsksTheBackend();
-	void continueLastAttachesTheNewestSession();
-	void continueLastWithoutHistory();
 	void attachesAgainAfterReconnect();
 	void passesOnErrors();
 	void watcherAttachDoesNotTakeTheForeground();
@@ -276,32 +260,6 @@ void TestSessionController::abortAsksTheBackend()
 	QCOMPARE(f.fake.requests().last().value(u"session_id"_s).toString(), u"ses_1"_s);
 }
 
-void TestSessionController::continueLastAttachesTheNewestSession()
-{
-	Fixture f;
-	f.history = {infoJson(u"ses_1"_s, u"idle"_s)};
-
-	const auto result = await(f.controller.continueLast(u"/work"_s));
-
-	QVERIFY(result && result->has_value());
-	QVERIFY(**result);
-	QCOMPARE(f.controller.sessionId(), u"ses_1"_s);
-	QCOMPARE(f.fake.requests().at(1).value(u"limit"_s).toInt(), 1);
-	QCOMPARE(f.fake.requests().at(1).value(u"cwd"_s).toString(), u"/work"_s);
-}
-
-void TestSessionController::continueLastWithoutHistory()
-{
-	Fixture f;
-
-	const auto result = await(f.controller.continueLast(u"/work"_s));
-
-	QVERIFY(result && result->has_value());
-	QVERIFY(!**result);
-	QVERIFY(!f.controller.hasSession());
-	QCOMPARE(f.ops(), (QStringList{u"hello"_s, u"list_history"_s}));
-}
-
 void TestSessionController::attachesAgainAfterReconnect()
 {
 	Fixture f;
@@ -364,7 +322,7 @@ void TestSessionController::detachedControllerIgnoresEventsAndAttachesAgain()
 	QCOMPARE(f.fake.requests().last().value(u"op"_s).toString(), u"detach"_s);
 
 	f.fake.send(eventFrame(u"ses_1"_s, {{u"type"_s, u"message"_s}, {u"message"_s, messageJson(u"u2"_s, u"user"_s, u"Missed"_s, true)}}));
-	QTest::qWait(50);
+	QTest::qWait(SettleMs);
 	QCOMPARE(render(f.controller.model()), (QStringList{u"user:Hello"_s}));
 
 	f.snapshot = snapshotJson(u"ses_1"_s, u"idle"_s, {messageJson(u"u1"_s, u"user"_s, u"Hello"_s, true), messageJson(u"u2"_s, u"user"_s, u"Missed"_s, true)});

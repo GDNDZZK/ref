@@ -9,6 +9,12 @@ namespace refgui::composer
 namespace
 {
 
+// Keeps the translation context of these strings.
+struct Text
+{
+	Q_DECLARE_TR_FUNCTIONS(refgui::composer)
+};
+
 QString senderOf(const proto::MessageSource& source)
 {
 	using Kind = proto::MessageSource::Kind;
@@ -19,15 +25,15 @@ QString senderOf(const proto::MessageSource& source)
 		return {};
 	case Kind::Peer:
 	case Kind::Spawn:
-		return QCoreApplication::translate("refgui::composer", "from %1").arg(name);
+		return Text::tr("from %1").arg(name);
 	case Kind::Reminder:
-		return QCoreApplication::translate("refgui::composer", "Reminder");
+		return Text::tr("Reminder");
 	case Kind::Compaction:
-		return QCoreApplication::translate("refgui::composer", "Summary");
+		return Text::tr("Summary");
 	case Kind::Shell:
-		return QCoreApplication::translate("refgui::composer", "Shell");
+		return Text::tr("Shell");
 	}
-	return {};
+	Q_UNREACHABLE_RETURN(QString());
 }
 
 } // namespace

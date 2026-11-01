@@ -12,6 +12,13 @@
 
 using namespace Qt::StringLiterals;
 
+namespace
+{
+
+constexpr int LoadWaitMs = 700; // time for a fetch the text would start to reach the server
+
+} // namespace
+
 class TestNetworkPolicy : public QObject
 {
 	Q_OBJECT
@@ -72,7 +79,7 @@ int TestNetworkPolicy::connectionsWhileShowing(const QString& qml, bool withPoli
 	qobject_cast<QQuickItem*>(created.get())->setParentItem(window.contentItem());
 	window.show();
 	m_connections = 0;
-	QTest::qWait(700);
+	QTest::qWait(LoadWaitMs);
 	return m_connections;
 }
 

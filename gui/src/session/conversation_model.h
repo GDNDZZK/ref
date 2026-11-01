@@ -171,6 +171,13 @@ private:
 
 	// Builds the rows of a message, filling in the row counts.
 	static QList<Block> buildRows(MessageNode& node);
+	// The nodes of `messages` and the rows they show.
+	struct Built
+	{
+		QList<MessageNode> nodes;
+		QList<Block> rows;
+	};
+	static Built buildNodes(const QList<proto::Message>& messages);
 	void rebuildPart(qsizetype messageIndex, qsizetype partIndex);
 	void rebuildOwnRows(qsizetype messageIndex);
 	// Rebuilds what a change elsewhere in the message made stale: parts whose
@@ -193,6 +200,7 @@ private:
 	void refreshContext();
 	void refreshTailError();
 	const Block& blockAt(qsizetype row) const;
+	bool isExpandedByDefault(const Block& block) const;
 	bool isExpanded(const Block& block) const;
 	void emitRoleChanged(qsizetype row, int role);
 
