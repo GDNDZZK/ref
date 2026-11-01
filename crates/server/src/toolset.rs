@@ -17,6 +17,9 @@ pub(crate) const PURPOSE_KEY: &str = "purpose";
 
 const PURPOSE_DESC: &str = "One short sentence saying why you are calling this tool; shown to the user. Use the language of the user's messages.";
 
+/// Longest tool name providers accept.
+const MAX_TOOL_NAME_CHARS: usize = 64;
+
 /// Max MCP text output returned to the model.
 const MCP_MAX_BYTES: usize = 50 * 1024;
 
@@ -78,7 +81,7 @@ pub(crate) fn with_purpose(schema: &Value) -> Value {
     Value::Object(out)
 }
 
-/// `<server>_<tool>` with chars outside `[A-Za-z0-9_-]` replaced by `_`, max 64 chars.
+/// `<server>_<tool>` with chars outside `[A-Za-z0-9_-]` replaced by `_`, max `MAX_TOOL_NAME_CHARS`.
 pub(crate) fn mcp_tool_name(server: &str, tool: &str) -> String {
     let raw = format!("{server}_{tool}");
     raw.chars()
@@ -89,7 +92,7 @@ pub(crate) fn mcp_tool_name(server: &str, tool: &str) -> String {
                 '_'
             }
         })
-        .take(64)
+        .take(MAX_TOOL_NAME_CHARS)
         .collect()
 }
 
