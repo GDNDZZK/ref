@@ -40,6 +40,15 @@ pub use jsonc::parse_jsonc;
 /// Name of the hidden built-in agent that writes compaction summaries. It is not a
 /// session agent: it cannot be selected for sessions and is not listed to frontends.
 pub const COMPACTION_AGENT: &str = "compaction";
+
+/// Agent used when `default_agent` is not set or not found.
+pub(crate) const DEFAULT_AGENT: &str = "build";
+
+/// Agent `mode` values (opencode): selectable by the user, only spawned, or both.
+pub(crate) const MODE_PRIMARY: &str = "primary";
+pub(crate) const MODE_SUBAGENT: &str = "subagent";
+pub(crate) const MODE_ALL: &str = "all";
+
 pub use load::{load_in, load_with};
 pub use markdown::split_frontmatter;
 pub use permission::{Action, PermissionRules, Rule};

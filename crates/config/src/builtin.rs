@@ -1,7 +1,10 @@
 //! Built-in agents and the small built-in provider catalog.
 
 use crate::permission::{Action, Rule};
-use crate::{AgentConfig, Config, PermissionRules};
+use crate::{
+    AgentConfig, COMPACTION_AGENT, Config, DEFAULT_AGENT, MODE_PRIMARY, MODE_SUBAGENT,
+    PermissionRules,
+};
 use serde_json::{Value, json};
 
 fn perm(v: Value) -> PermissionRules {
@@ -84,11 +87,11 @@ pub(crate) fn question_defaults(cfg: &mut Config) {
 pub fn agents() -> Vec<AgentConfig> {
     vec![
         AgentConfig {
-            name: "build".into(),
+            name: DEFAULT_AGENT.into(),
             description: "Default agent with full tool access.".into(),
             creatable: true,
             can_spawn: true,
-            mode: "primary".into(),
+            mode: MODE_PRIMARY.into(),
             ..Default::default()
         },
         AgentConfig {
@@ -100,7 +103,7 @@ pub fn agents() -> Vec<AgentConfig> {
             ),
             creatable: true,
             can_spawn: false,
-            mode: "primary".into(),
+            mode: MODE_PRIMARY.into(),
             ..Default::default()
         },
         AgentConfig {
@@ -109,7 +112,7 @@ pub fn agents() -> Vec<AgentConfig> {
                 .into(),
             creatable: true,
             can_spawn: false,
-            mode: "subagent".into(),
+            mode: MODE_SUBAGENT.into(),
             ..Default::default()
         },
         AgentConfig {
@@ -122,18 +125,18 @@ pub fn agents() -> Vec<AgentConfig> {
             permission: perm(json!({"edit": "deny", "write": "deny", "delete": "deny"})),
             creatable: true,
             can_spawn: false,
-            mode: "subagent".into(),
+            mode: MODE_SUBAGENT.into(),
             ..Default::default()
         },
         AgentConfig {
-            name: "compaction".into(),
+            name: COMPACTION_AGENT.into(),
             description:
                 "Summarizes the conversation when the context is compacted (/compact, automatic)."
                     .into(),
             prompt: COMPACTION_PROMPT.into(),
             creatable: false,
             can_spawn: false,
-            mode: "primary".into(),
+            mode: MODE_PRIMARY.into(),
             hidden: true,
             ..Default::default()
         },

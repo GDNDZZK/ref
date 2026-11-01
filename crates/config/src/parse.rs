@@ -3,8 +3,8 @@
 use crate::builtin;
 use crate::load::{Accum, Ctx, Layer, accumulate};
 use crate::{
-    AgentConfig, CommandConfig, CompactionConfig, Config, McpConfig, ModelConfig, PermissionRules,
-    ProviderConfig,
+    AgentConfig, CommandConfig, CompactionConfig, Config, DEFAULT_AGENT, MODE_ALL, MODE_PRIMARY,
+    MODE_SUBAGENT, McpConfig, ModelConfig, PermissionRules, ProviderConfig,
 };
 use ref_proto::ModelRef;
 use serde_json::{Map, Value};
@@ -55,22 +55,22 @@ pub(crate) fn build(ctx: &mut Ctx, layers: &[Layer]) -> Config {
     let wanted = merged
         .get("default_agent")
         .and_then(Value::as_str)
-        .unwrap_or("build");
+        .unwrap_or(DEFAULT_AGENT);
     cfg.default_agent = if cfg.agents.contains_key(wanted) {
         wanted.to_string()
     } else {
         if merged.contains_key("default_agent") {
             ctx.warn(format!("default_agent {wanted:?} not found"));
         }
-        if cfg.agents.contains_key("build") {
-            "build".into()
+        if cfg.agents.contains_key(DEFAULT_AGENT) {
+            DEFAULT_AGENT.into()
         } else {
             cfg.agents
                 .values()
-                .find(|a| a.mode != "subagent" && !a.hidden)
+                .find(|a| a.mode != MODE_SUBAGENT && !a.hidden)
                 .or_else(|| cfg.agents.values().next())
                 .map(|a| a.name.clone())
-                .unwrap_or_else(|| "build".into())
+                .unwrap_or_else(|| DEFAULT_AGENT.into())
         }
     };
     cfg
@@ -544,16 +544,12 @@ fn agents(
                 name: name.clone(),
                 creatable: true,
                 can_spawn: false,
-                mode: if key == "mode" {
-                    "primary".into()
-                } else {
-                    "all".into()
-                },
+                mode: MODE_ALL.into(),
                 ..Default::default()
             });
             apply_agent(ctx, entry, a, &format!("{key}.{name}"));
             if key == "mode" {
-                entry.mode = "primary".into();
+                entry.mode = MODE_PRIMARY.into();
             }
         }
     }
