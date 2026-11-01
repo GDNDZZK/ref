@@ -51,7 +51,7 @@ Item {
 		active: dialogId !== "" && host.visible
 		enabled: !retired
 		opacity: retired ? 0 : 1
-		sourceComponent: host.componentFor(dialogId)
+		sourceComponent: dialogId === "" ? null : host.componentFor(dialogId) // an id without a component is a mistake and logs
 
 		Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 
@@ -81,7 +81,7 @@ Item {
 			[DialogId.closeSession]: closeDialog,
 			[DialogId.rename]: rename,
 			[DialogId.deleteHistory]: deleteHistory
-		}[id] ?? null
+		}[id]
 	}
 
 	Component { id: paletteDialog; CommandPalette {} }
