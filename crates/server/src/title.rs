@@ -4,12 +4,21 @@ use crate::hub::Hub;
 use crate::session::Session;
 use ref_llm::{AssistantBlock, ChatMessage, UserContent};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio_util::sync::CancellationToken;
+
+/// Longest generated title, in characters.
+const MAX_TITLE_CHARS: usize = 100;
+
+/// Characters of the first user text sent to the model.
+const MAX_INPUT_CHARS: usize = 2000;
+
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
 pub const TITLE_PROMPT: &str = "Generate a short title (max 8 words, same language as the user) for this conversation. Reply with the title only.";
 
-/// Clean a model reply into a title: first non-empty line, quotes / label stripped, <= 100 chars.
-pub fn clean_title(raw: &str) -> Option<String> {
+/// Clean a model reply into a title: first non-empty line, quotes / label stripped, <= `MAX_TITLE_CHARS`.
+fn clean_title(raw: &str) -> Option<String> {
     let line = raw.lines().map(str::trim).find(|l| !l.is_empty())?;
     let line = line.strip_prefix("Title:").unwrap_or(line).trim();
     let line = line
@@ -19,20 +28,24 @@ pub fn clean_title(raw: &str) -> Option<String> {
     if line.is_empty() {
         return None;
     }
-    Some(crate::util::truncate_chars(line, 100))
+    Some(crate::util::truncate_chars(line, MAX_TITLE_CHARS))
 }
 
-pub async fn generate(hub: Arc<Hub>, s: Arc<Session>, first_text: String) {
+pub(crate) async fn generate(hub: Arc<Hub>, s: Arc<Session>, first_text: String) {
     let (cfg, agent, model_ref) = {
         let st = s.lock();
         (st.cfg.clone(), st.info.agent.clone(), st.info.model.clone())
     };
     let small = cfg.small_model.clone().filter(|m| cfg.model(m).is_some());
     let mref = small.unwrap_or(model_ref);
-    let Ok((provider, model)) = crate::models::resolve(&cfg, &mref, &agent) else {
-        return;
+    let (provider, model) = match crate::models::resolve(&cfg, &mref, &agent) {
+        Ok(pm) => pm,
+        Err(e) => {
+            tracing::debug!(session = %s.id, error = %e, "title model unavailable");
+            return;
+        }
     };
-    let text = crate::util::truncate_chars(&first_text, 2000);
+    let text = crate::util::truncate_chars(&first_text, MAX_INPUT_CHARS);
     let req = ref_llm::Request {
         system: vec![TITLE_PROMPT.into()],
         messages: vec![ChatMessage::User(vec![UserContent::Text(format!(
@@ -47,7 +60,10 @@ pub async fn generate(hub: Arc<Hub>, s: Arc<Session>, first_text: String) {
     let res = tokio::select! {
         r = ref_llm::stream(&provider, &model, &req, &cancel, &mut sink) => r,
         _ = shutdown.cancelled() => return,
-        _ = tokio::time::sleep(std::time::Duration::from_secs(120)) => return,
+        _ = tokio::time::sleep(REQUEST_TIMEOUT) => {
+            tracing::debug!(session = %s.id, "title generation timed out");
+            return;
+        }
     };
     let Ok(resp) = res else {
         tracing::debug!(session = %s.id, "title generation failed");
@@ -65,6 +81,7 @@ pub async fn generate(hub: Arc<Hub>, s: Arc<Session>, first_text: String) {
         })
         .collect();
     let Some(title) = clean_title(&raw) else {
+        tracing::debug!(session = %s.id, "title reply unusable");
         return;
     };
     {
