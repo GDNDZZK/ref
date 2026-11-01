@@ -717,12 +717,15 @@ async fn mcp_status_request() {
     .unwrap();
     assert_eq!(
         r["servers"],
-        json!([{"name": "off", "status": "disabled", "error": null, "tools": []}])
+        json!([{"name": "off", "status": ref_proto::MCP_DISABLED, "error": null, "tools": []}])
     );
     let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::GetConfig)
         .await
         .unwrap();
-    assert_eq!(r["config"]["mcp"], json!([["off", "disabled"]]));
+    assert_eq!(
+        r["config"]["mcp"],
+        json!([["off", ref_proto::MCP_DISABLED]])
+    );
 }
 
 #[tokio::test]
