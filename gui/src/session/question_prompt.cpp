@@ -3,6 +3,7 @@
 #include <QVariantMap>
 
 #include <algorithm>
+#include <utility>
 
 using namespace Qt::StringLiterals;
 
@@ -18,38 +19,40 @@ void QuestionPrompt::setRequest(const std::optional<proto::QuestionRequest>& req
 {
 	if(!request || request->questions.isEmpty())
 	{
-		if(!m_active)
+		if(m_active)
 		{
-			return;
+			reset({});
 		}
-		m_request = {};
-		m_state.clear();
-		m_active = false;
-		m_editing = false;
-		m_busy = false;
-		m_page = 0;
-		emit changed();
 		return;
 	}
 	if(m_active && request->callId == m_request.callId)
 	{
 		return;
 	}
+	reset(*request);
+}
 
-	m_request = *request;
+QuestionPrompt::PageState QuestionPrompt::initialState(const proto::Question& question)
+{
+	PageState state;
+	for(const proto::QuestionOption& option : question.options)
+	{
+		state.checked.append(option.isDefault);
+	}
+	const auto firstDefault = std::ranges::find_if(question.options, [](const proto::QuestionOption& option) { return option.isDefault; });
+	state.highlighted = firstDefault == question.options.end() ? 0 : static_cast<int>(firstDefault - question.options.begin());
+	return state;
+}
+
+void QuestionPrompt::reset(proto::QuestionRequest request)
+{
+	m_request = std::move(request);
 	m_state.clear();
 	for(const proto::Question& question : m_request.questions)
 	{
-		PageState state;
-		for(const proto::QuestionOption& option : question.options)
-		{
-			state.checked.append(option.isDefault);
-		}
-		const auto firstDefault = std::ranges::find_if(question.options, [](const proto::QuestionOption& option) { return option.isDefault; });
-		state.highlighted = firstDefault == question.options.end() ? 0 : static_cast<int>(firstDefault - question.options.begin());
-		m_state.append(state);
+		m_state.append(initialState(question));
 	}
-	m_active = true;
+	m_active = !m_request.questions.isEmpty();
 	m_editing = false;
 	m_busy = false;
 	m_page = 0;
@@ -225,9 +228,14 @@ QList<QStringList> QuestionPrompt::answers() const
 	return list;
 }
 
+bool QuestionPrompt::canSelectRow(int row) const
+{
+	return onQuestion() && !m_busy && row >= 0 && row < rowCount();
+}
+
 void QuestionPrompt::setHighlight(int row)
 {
-	if(!onQuestion() || m_busy || row < 0 || row >= rowCount() || m_state.at(m_page).highlighted == row)
+	if(!canSelectRow(row) || m_state.at(m_page).highlighted == row)
 	{
 		return;
 	}
@@ -247,7 +255,7 @@ void QuestionPrompt::moveHighlight(int delta)
 
 void QuestionPrompt::activateRow(int row)
 {
-	if(!onQuestion() || m_busy || row < 0 || row >= rowCount())
+	if(!canSelectRow(row))
 	{
 		return;
 	}
@@ -451,11 +459,25 @@ bool QuestionPrompt::handleKey(int key, int modifiers)
 		nextPage();
 		return true;
 	case Qt::Key_Tab:
-		held.testFlag(Qt::ShiftModifier) ? previousPage() : nextPage();
+		if(held.testFlag(Qt::ShiftModifier))
+		{
+			previousPage();
+		}
+		else
+		{
+			nextPage();
+		}
 		return true;
 	case Qt::Key_Return:
 	case Qt::Key_Enter:
-		isConfirming() ? submit() : activateRow(highlighted);
+		if(isConfirming())
+		{
+			submit();
+		}
+		else
+		{
+			activateRow(highlighted);
+		}
 		return true;
 	case Qt::Key_Space:
 		activateRow(highlighted);
