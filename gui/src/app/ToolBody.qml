@@ -28,7 +28,7 @@ Item {
 		case "todo":
 			return call.toolName
 		case "read":
-			return hasLines && !call.failed && call.toolState === "done" ? "read" : "generic"
+			return hasLines && !call.failed && call.toolState === ToolState.done ? "read" : "generic"
 		case "send_message":
 		case "create_session":
 		case "read_session":
