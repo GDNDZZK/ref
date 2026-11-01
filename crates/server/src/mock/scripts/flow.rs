@@ -1,7 +1,7 @@
 //! Scripts about the flow around a conversation: failures, context limits and other sessions.
 
 use super::stale::{PARSER, substitute};
-use super::tools::{TODO_ROUNDS, bash, image_round, read, todo_round, tools_round};
+use super::tools::{TODO_ROUNDS, TOOLS_ROUNDS, bash, image_round, read, todo_round, tools_round};
 use crate::mock::script::{Ctx, Pace, Round, Script};
 use serde_json::json;
 
@@ -16,10 +16,8 @@ const OUTAGE_FAILURES: u32 = 4;
 const LENIENT_SCORE: &str = "score.trim().parse().unwrap_or(0)";
 const STRICT_SCORE: &str = "score.trim().parse().ok()?";
 const FAILED_ATTEMPTS: u32 = 2;
-/// Rounds of `everything`: the `tools` rounds, then the `todo` rounds, then `image`.
 /// How long the created session "works" before it reports.
 const REPORT_DELAY_MS: u64 = 1500;
-const TOOLS_ROUNDS: usize = 4;
 const SUMMARY_FOR_COMPACT: &str = "## Goal\n- Demonstrate compact_context.\n\n## Next steps\n1. Continue with whatever the user asks next.";
 
 pub const SCRIPTS: &[Script] = &[
