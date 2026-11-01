@@ -147,6 +147,10 @@ pub async fn request(
         .map_err(|_| "timed out".to_string())?
 }
 
+/// Process exit codes of `--status` / `--stop` and of the server itself.
+pub const EXIT_OK: i32 = 0;
+pub const EXIT_FAILURE: i32 = 1;
+
 /// `--status`: exit code 0 if any instance is running.
 pub async fn status(json_out: bool) -> i32 {
     let dir = ref_proto::instances_dir();
@@ -212,7 +216,11 @@ pub async fn status(json_out: bool) -> i32 {
             println!("  instance file: {}", instance_path(&dir, i.pid).display());
         }
     }
-    if rows.is_empty() { 1 } else { 0 }
+    if rows.is_empty() {
+        EXIT_FAILURE
+    } else {
+        EXIT_OK
+    }
 }
 
 /// `--stop [PID]`.
@@ -227,9 +235,9 @@ pub async fn stop(pid: Option<u32>) -> i32 {
             Some(p) => eprintln!("No ref-server instance with pid {p}."),
             None => eprintln!("No ref-server instances running."),
         }
-        return 1;
+        return EXIT_FAILURE;
     }
-    let mut code = 0;
+    let mut code = EXIT_OK;
     for i in list {
         match request(&i, Request::Shutdown, Duration::from_secs(5)).await {
             Ok(_) => {
@@ -256,7 +264,7 @@ pub async fn stop(pid: Option<u32>) -> i32 {
                     i.pid
                 );
                 if !ref_sys::terminate(i.pid) {
-                    code = 1;
+                    code = EXIT_FAILURE;
                 }
             }
         }
