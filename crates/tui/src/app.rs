@@ -2845,49 +2845,7 @@ impl App {
             && !q.contains(char::is_whitespace)
             && self.editor.cursor == t.len()
         {
-            let mut items: Vec<(i64, (String, String, String))> = Vec::new();
-            for c in COMMANDS {
-                // Canonical name wins ties (aliases only shown when they match better).
-                let mut best: Option<(i64, &str)> = None;
-                for n in std::iter::once(c.name).chain(c.aliases.iter().copied()) {
-                    if let Some(s) = text::fuzzy_score(n, q)
-                        && best.is_none_or(|b| s > b.0)
-                    {
-                        best = Some((s, n));
-                    }
-                }
-                if let Some((s, n)) = best {
-                    let label = if n == c.name {
-                        format!("/{}", c.name)
-                    } else {
-                        format!("/{n} → /{}", c.name)
-                    };
-                    items.push((
-                        s + CANONICAL_NAME_SCORE_BONUS,
-                        (format!("/{} ", c.name), label, c.desc.to_string()),
-                    ));
-                }
-            }
-            if let Some(cfg) = &self.config {
-                for c in &cfg.commands {
-                    if let Some(s) = text::fuzzy_score(&c.name, q) {
-                        items.push((
-                            s,
-                            (
-                                format!("/{} ", c.name),
-                                format!("/{}", c.name),
-                                c.description.clone(),
-                            ),
-                        ));
-                    }
-                }
-            }
-            items.sort_by_key(|x| std::cmp::Reverse(x.0));
-            let items: Vec<_> = items
-                .into_iter()
-                .map(|x| x.1)
-                .take(MAX_COMPLETIONS)
-                .collect();
+            let items = self.slash_completions(q);
             if items.is_empty() {
                 self.ac = None;
             } else {
@@ -2917,6 +2875,39 @@ impl App {
         }
         self.files_due = None;
         self.ac = None;
+    }
+
+    /// Slash commands (built-in and from the backend config) matching `q`, best match first.
+    fn slash_completions(&self, q: &str) -> Vec<(String, String, String)> {
+        let mut items: Vec<(i64, (String, String, String))> = Vec::new();
+        for c in COMMANDS {
+            if let Some((score, label)) = best_command_match(c, q) {
+                items.push((
+                    score + CANONICAL_NAME_SCORE_BONUS,
+                    (format!("/{} ", c.name), label, c.desc.to_string()),
+                ));
+            }
+        }
+        if let Some(cfg) = &self.config {
+            for c in &cfg.commands {
+                if let Some(s) = text::fuzzy_score(&c.name, q) {
+                    items.push((
+                        s,
+                        (
+                            format!("/{} ", c.name),
+                            format!("/{}", c.name),
+                            c.description.clone(),
+                        ),
+                    ));
+                }
+            }
+        }
+        items.sort_by_key(|x| std::cmp::Reverse(x.0));
+        items
+            .into_iter()
+            .map(|x| x.1)
+            .take(MAX_COMPLETIONS)
+            .collect()
     }
 
     fn request_files(&mut self, q: String) {
@@ -3228,6 +3219,26 @@ fn response_images(result: &Value) -> Vec<(ImageData, Option<String>)> {
         .filter(|i| !i.image.is_stub())
         .map(|i| (i.image, i.name))
         .collect()
+}
+
+/// Best fuzzy score of a command's name or aliases against `q`, with the label to show.
+/// The canonical name wins ties (aliases are only shown when they match better).
+fn best_command_match(c: &Cmd, q: &str) -> Option<(i64, String)> {
+    let mut best: Option<(i64, &str)> = None;
+    for n in std::iter::once(c.name).chain(c.aliases.iter().copied()) {
+        if let Some(s) = text::fuzzy_score(n, q)
+            && best.is_none_or(|b| s > b.0)
+        {
+            best = Some((s, n));
+        }
+    }
+    let (score, n) = best?;
+    let label = if n == c.name {
+        format!("/{}", c.name)
+    } else {
+        format!("/{n} → /{}", c.name)
+    };
+    Some((score, label))
 }
 
 fn live_key(sid: &str) -> String {
