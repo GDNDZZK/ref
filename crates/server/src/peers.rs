@@ -48,7 +48,7 @@ fn def(name: &str, description: &str, params: Value) -> ToolDef {
     }
 }
 
-pub fn peer_defs() -> Vec<ToolDef> {
+pub(crate) fn peer_defs() -> Vec<ToolDef> {
     vec![
         def(
             LIST_SESSIONS,
@@ -82,7 +82,7 @@ pub fn peer_defs() -> Vec<ToolDef> {
     ]
 }
 
-pub fn spawn_defs() -> Vec<ToolDef> {
+pub(crate) fn spawn_defs() -> Vec<ToolDef> {
     vec![
         def(
             CREATE_SESSION,
