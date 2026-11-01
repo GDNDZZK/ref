@@ -143,12 +143,18 @@ fn run_external_editor(initial: &str) -> std::io::Result<Option<String>> {
     if std::fs::write(&path, initial).is_err() {
         return Ok(None);
     }
-    restore_terminal()?;
-    let status = editor_command(&editor, &path).status();
-    setup_terminal()?;
-    let out = std::fs::read_to_string(&path).ok();
-    // The temp file is only a scratch copy; a leftover is harmless.
+    let edited = edit_file(&editor, &path);
+    // The temp file is only a scratch copy; if it cannot be removed, nothing breaks.
     let _ = std::fs::remove_file(&path);
+    edited
+}
+
+/// Runs `editor` on `path` with the terminal restored; returns the file's text if it exited well.
+fn edit_file(editor: &str, path: &std::path::Path) -> std::io::Result<Option<String>> {
+    restore_terminal()?;
+    let status = editor_command(editor, path).status();
+    setup_terminal()?;
+    let out = std::fs::read_to_string(path).ok();
     Ok(match status {
         Ok(s) if s.success() => out.map(|s| s.trim_end_matches('\n').to_string()),
         _ => None,
