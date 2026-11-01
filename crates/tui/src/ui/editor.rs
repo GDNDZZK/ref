@@ -7,8 +7,8 @@ use ratatui::style::{Modifier, Style};
 use ref_proto::ImageData;
 use unicode_segmentation::UnicodeSegmentation;
 
-use super::text::{expand_tabs, gwidth, width};
 use super::theme;
+use crate::text::{expand_tabs, gwidth, width};
 
 /// Most undo snapshots kept.
 const UNDO_LIMIT: usize = 200;
@@ -463,7 +463,7 @@ impl Editor {
     /// Inserts a large paste as a collapsed token (or literally if small).
     pub fn paste(&mut self, s: &str) {
         let s = s.replace("\r\n", "\n").replace('\r', "\n");
-        let s = super::text::sanitize(&s);
+        let s = crate::text::sanitize(&s);
         let lines = s.lines().count();
         if lines >= PASTE_COLLAPSE_LINES || s.chars().count() > PASTE_COLLAPSE_CHARS {
             self.paste_seq += 1;
@@ -782,7 +782,7 @@ impl Editor {
             return None;
         }
         if self.text.is_empty() {
-            let ph = super::text::truncate(placeholder, w.saturating_sub(1));
+            let ph = crate::text::truncate(placeholder, w.saturating_sub(1));
             buf.set_string(area.x, area.y, ph, theme::fg(theme::DIM));
             return focused.then_some((area.x, area.y));
         }

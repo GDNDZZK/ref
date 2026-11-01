@@ -8,8 +8,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use super::editor::Editor;
-use super::text::{self, width};
 use super::theme;
+use crate::text::{self, width};
 
 /// Length of the open animation, in seconds.
 /// Score bonus when the filter matches the title itself.

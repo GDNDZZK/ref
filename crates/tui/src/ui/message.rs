@@ -9,9 +9,9 @@ use serde_json::Value;
 
 use ref_proto::TodoStatus;
 
-use super::text::{self, width};
 use super::todo::{parse_todos, todo_rows};
 use super::{Hit, Row, markdown, theme};
+use crate::text::{self, width};
 use crate::util::ABORTED_ERROR;
 
 /// Max output lines shown in an expanded tool block before "show all".

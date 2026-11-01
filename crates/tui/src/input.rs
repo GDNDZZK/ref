@@ -671,7 +671,7 @@ fn pasted_images(s: &str) -> Vec<(ImageData, String)> {
 
 fn paste(app: &mut App, s: String) {
     if let Some(Dialog::List(d)) = app.dialog.as_mut() {
-        d.filter.insert(&crate::ui::text::one_line(&s));
+        d.filter.insert(&crate::text::one_line(&s));
         d.refilter();
         return;
     }
@@ -680,7 +680,7 @@ fn paste(app: &mut App, s: String) {
     }
     if app.active_question().is_some() {
         if let Some(editor) = app.question.as_mut().and_then(|q| q.edit.as_mut()) {
-            editor.insert(&crate::ui::text::one_line(&s));
+            editor.insert(&crate::text::one_line(&s));
         }
         return;
     }
@@ -707,7 +707,7 @@ fn paste(app: &mut App, s: String) {
         return;
     }
     if app.mode == Mode::Watch {
-        let one = crate::ui::text::one_line(&s);
+        let one = crate::text::one_line(&s);
         target_editor(app).insert(&one);
         return;
     }

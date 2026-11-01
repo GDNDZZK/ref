@@ -5,7 +5,8 @@ use ratatui::text::{Line, Span};
 use ref_proto::{Todo, TodoStatus};
 use serde_json::Value;
 
-use super::{Row, text, theme};
+use super::{Row, theme};
+use crate::text;
 
 // Status strings of the `todo` tool input.
 const STATUS_PENDING: &str = "pending";

@@ -4,8 +4,8 @@ use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, T
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use super::text::{self, width};
 use super::{Row, highlight, theme};
+use crate::text::{self, width};
 
 /// Narrowest width anything is rendered at.
 const MIN_WIDTH: usize = 4;

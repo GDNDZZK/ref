@@ -10,8 +10,8 @@ use ref_proto::PermissionRequest;
 use serde_json::Value;
 
 use super::dialog::{frame, open_progress};
-use super::text::{self, width};
 use super::theme;
+use crate::text::{self, width};
 
 /// What a permission button answers.
 #[derive(Clone, Copy)]

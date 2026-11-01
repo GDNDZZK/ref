@@ -8,13 +8,13 @@ use ratatui::text::{Line, Span};
 
 use crate::app::{AcKind, App, Mode};
 use crate::state::SessionView;
+use crate::text::{self, width};
 use crate::ui::chat::{self, Env};
 use crate::ui::dialog::Dialog;
 use crate::ui::footer::{self, StatusCtx};
 use crate::ui::message;
 use crate::ui::permission::PermissionView;
 use crate::ui::question::QuestionView;
-use crate::ui::text::{self, width};
 use crate::ui::{split, theme, todo};
 
 pub(crate) const SIDEBAR_W: u16 = 32;
