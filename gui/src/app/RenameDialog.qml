@@ -34,16 +34,10 @@ SessionDialog {
 		}
 	]
 
-	Item {
-		width: parent.width
-		implicitHeight: field.implicitHeight + 2 * Theme.dialogPadding
-		height: implicitHeight
-
+	FieldBody {
 		DialogField {
 			id: field
-			x: Theme.dialogPadding
-			y: Theme.dialogPadding
-			width: parent.width - 2 * Theme.dialogPadding
+			width: parent.width
 			text: Workspace.info(dialog.sessionId).name
 			placeholderText: qsTr("Name")
 			onAccepted: dialog.rename()

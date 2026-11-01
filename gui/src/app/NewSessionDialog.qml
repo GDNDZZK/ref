@@ -39,16 +39,10 @@ ModalDialog {
 		}
 	]
 
-	Item {
-		width: parent.width
-		implicitHeight: path.implicitHeight + 2 * Theme.dialogPadding
-		height: implicitHeight
-
+	FieldBody {
 		PathField {
 			id: path
-			x: Theme.dialogPadding
-			y: Theme.dialogPadding
-			width: parent.width - 2 * Theme.dialogPadding
+			width: parent.width
 			placeholderText: qsTr("Directory")
 			onAccepted: dialog.start()
 			onTextChanged: errorText = ""
