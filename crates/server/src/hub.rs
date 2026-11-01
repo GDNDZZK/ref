@@ -325,10 +325,10 @@ impl Hub {
             _ => {}
         }
         let conns = self.conns();
-        let mut frame = Some(ServerFrame::Event {
+        let frame = ServerFrame::Event {
             session_id: sid.to_string(),
             event,
-        });
+        };
         let targets: Vec<&Arc<Conn>> = conns
             .iter()
             .filter(|c| {
@@ -336,16 +336,12 @@ impl Hub {
                 st.hello && (st.watch_all || st.fg.contains(sid) || st.watch.contains(sid))
             })
             .collect();
-        let n = targets.len();
-        for (i, c) in targets.into_iter().enumerate() {
-            let f = if i + 1 == n {
-                frame.take()
-            } else {
-                frame.clone()
-            };
-            if let Some(f) = f {
-                c.send(f);
+        // Clone the frame for every connection but the last, which takes it.
+        if let Some((last, rest)) = targets.split_last() {
+            for c in rest {
+                c.send(frame.clone());
             }
+            last.send(frame);
         }
     }
 
