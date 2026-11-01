@@ -70,6 +70,20 @@ pub fn markdown_alternate(html: &str, page: &Url) -> Option<Url> {
     None
 }
 
+/// The main content of a page that reads like an article; `None` makes the caller convert the
+/// whole page.
+fn extract_article(doc: Document, url: &Url, cfg: Config) -> Option<dom_smoothie::Article> {
+    let mut r = Readability::with_document(doc, Some(url.as_str()), Some(cfg))
+        .map_err(|e| tracing::debug!("webfetch: readability setup failed for {url}: {e}"))
+        .ok()?;
+    let readable = r.is_probably_readable();
+    let article = r
+        .parse()
+        .map_err(|e| tracing::debug!("webfetch: readability extraction failed for {url}: {e}"))
+        .ok()?;
+    readable.then_some(article)
+}
+
 fn whole_page(title: Option<String>, body: String) -> Page {
     Page {
         title,
@@ -103,12 +117,7 @@ pub fn convert(html: &str, url: &Url, format: Format, full_page: bool) -> Page {
         classes_to_preserve: prep2.langs,
         ..Default::default()
     };
-    let article = Readability::with_document(doc2, Some(url.as_str()), Some(cfg))
-        .ok()
-        .and_then(|mut r| {
-            let readable = r.is_probably_readable();
-            r.parse().ok().filter(|_| readable)
-        });
+    let article = extract_article(doc2, url, cfg);
     let Some(a) = article else {
         return whole_page(prep.title, full);
     };
