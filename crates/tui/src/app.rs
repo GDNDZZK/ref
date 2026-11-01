@@ -466,6 +466,10 @@ const LEADER_TIMEOUT: Duration = Duration::from_secs(2);
 /// "Press again" window of the armed keys (esc to interrupt, ctrl+c to exit).
 pub const ARMED_KEY_TIMEOUT: Duration = Duration::from_millis(1500);
 /// How long a hint stays in the footer.
+/// Toast when an action needs the backend while it is unreachable.
+const NOT_CONNECTED: &str = "Not connected to the backend";
+/// Marks the selected row of a dialog.
+const SELECTED_GLYPH: &str = "●";
 const HINT_DURATION: Duration = Duration::from_millis(1500);
 /// How long the second press of close / undo confirmation is accepted.
 const CONFIRM_WINDOW: Duration = Duration::from_secs(4);
@@ -560,7 +564,7 @@ impl App {
             // Requests can't be answered while disconnected; user actions get feedback.
             match p {
                 Pending::Files { .. } => self.files_inflight = false,
-                _ => self.toasts.warn("Not connected to the backend"),
+                _ => self.toasts.warn(NOT_CONNECTED),
             }
             return;
         }
@@ -569,6 +573,19 @@ impl App {
         if self.client.send(Some(id), req) {
             self.pending.insert(id, p);
         }
+    }
+
+    /// Asks the backend to attach `sid` and marks it as attaching until the answer arrives.
+    fn send_attach(&mut self, sid: String, fg: bool) {
+        self.attaching.insert(sid.clone());
+        self.req(
+            Request::Attach {
+                session_id: sid.clone(),
+                foreground: fg,
+                limit: None,
+            },
+            Pending::Attach { sid, fg },
+        );
     }
 
     /// Fire-and-forget request; errors are toasted.
@@ -652,15 +669,7 @@ impl App {
                         .map(|(k, v)| (k.clone(), v.foreground))
                         .collect();
                     for (sid, fg) in ids {
-                        self.attaching.insert(sid.clone());
-                        self.req(
-                            Request::Attach {
-                                session_id: sid.clone(),
-                                foreground: fg,
-                                limit: None,
-                            },
-                            Pending::Attach { sid, fg },
-                        );
+                        self.send_attach(sid, fg);
                     }
                 } else if let Some(plan) = self.init.take() {
                     self.run_init(plan);
@@ -1304,18 +1313,7 @@ impl App {
                     self.views
                         .insert(sid.clone(), SessionView::new(info, false));
                 }
-                self.attaching.insert(sid.clone());
-                self.req(
-                    Request::Attach {
-                        session_id: sid.clone(),
-                        foreground: false,
-                        limit: None,
-                    },
-                    Pending::Attach {
-                        sid: sid.clone(),
-                        fg: false,
-                    },
-                );
+                self.send_attach(sid.clone(), false);
             }
         }
         let drop: Vec<String> = self
@@ -1377,18 +1375,7 @@ impl App {
             .or_insert_with(|| SessionView::new(info, true));
         v.foreground = true;
         v.chat.scroll_to_bottom(false);
-        self.attaching.insert(sid.to_string());
-        self.req(
-            Request::Attach {
-                session_id: sid.to_string(),
-                foreground: true,
-                limit: None,
-            },
-            Pending::Attach {
-                sid: sid.to_string(),
-                fg: true,
-            },
-        );
+        self.send_attach(sid.to_string(), true);
         self.perm = None;
         self.question = None;
         self.shell_mode = false;
@@ -1513,7 +1500,7 @@ impl App {
     /// ✕ on a queued prompt: withdraw it from the server queue before it is sent.
     pub fn unqueue(&mut self, sid: &str, key: u64) {
         if !self.connected {
-            self.toasts.warn("Not connected to the backend");
+            self.toasts.warn(NOT_CONNECTED);
             return;
         }
         let Some(q) = self.views.get_mut(sid).and_then(|v| v.queued_mut(key)) else {
@@ -1604,7 +1591,7 @@ impl App {
     /// the reply, so a refused answer can be corrected.
     pub fn reply_question(&mut self, sid: &str, call_id: &str, answers: Option<Vec<Vec<String>>>) {
         if !self.connected {
-            self.toasts.warn("Not connected to the backend");
+            self.toasts.warn(NOT_CONNECTED);
             return;
         }
         if let Some(q) = self.question.as_mut() {
@@ -1884,9 +1871,7 @@ impl App {
         live.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
         for s in &live {
             let current = self.current.as_deref() == Some(s.id.as_str());
-            let model = models
-                .iter()
-                .find(|m| m.provider == s.model.provider && m.id == s.model.model)
+            let model = find_model(models, &s.model)
                 .map(|m| m.name.clone())
                 .unwrap_or_else(|| s.model.model.clone());
             let (badge, bc) = if elsewhere.contains(&s.id) {
@@ -1986,7 +1971,7 @@ impl App {
                     } else {
                         m.provider_name.clone()
                     },
-                    marker: Some((if is_cur { "●".into() } else { " ".into() }, theme::PRIMARY)),
+                    marker: Some(selected_marker(is_cur)),
                     keywords: format!("{} {}", m.provider, m.id),
                     ..Default::default()
                 }
@@ -2010,14 +1995,7 @@ impl App {
                 desc: text::one_line(&a.description),
                 right: a.model.as_ref().map(|m| m.key()).unwrap_or_default(),
                 title_color: Some(theme::agent_color(&agents, &a.name)),
-                marker: Some((
-                    if a.name == cur {
-                        "●".into()
-                    } else {
-                        " ".into()
-                    },
-                    theme::PRIMARY,
-                )),
+                marker: Some(selected_marker(a.name == cur)),
                 ..Default::default()
             })
             .collect();
@@ -2029,14 +2007,7 @@ impl App {
     pub fn open_variants(&mut self) {
         let Some(v) = self.cur() else { return };
         let m = v.info.model.clone();
-        let variants = self
-            .config
-            .as_ref()
-            .and_then(|c| {
-                c.models
-                    .iter()
-                    .find(|x| x.provider == m.provider && x.id == m.model)
-            })
+        let variants = find_model(self.models(), &m)
             .map(|x| x.variants.clone())
             .unwrap_or_default();
         if variants.is_empty() {
@@ -2046,14 +2017,7 @@ impl App {
         let mut items = vec![Item {
             key: String::new(),
             title: "default".into(),
-            marker: Some((
-                if m.variant.is_none() {
-                    "●".into()
-                } else {
-                    " ".into()
-                },
-                theme::PRIMARY,
-            )),
+            marker: Some(selected_marker(m.variant.is_none())),
             ..Default::default()
         }];
         for x in variants {
@@ -2061,7 +2025,7 @@ impl App {
             items.push(Item {
                 key: x.clone(),
                 title: x,
-                marker: Some((if is { "●".into() } else { " ".into() }, theme::PRIMARY)),
+                marker: Some(selected_marker(is)),
                 ..Default::default()
             });
         }
@@ -2124,14 +2088,7 @@ impl App {
                 if let (Some(sid), Some(mut m)) = (self.current.clone(), ModelRef::parse(&key)) {
                     // Keep the current variant when the new model supports it.
                     let cur_var = self.cur().and_then(|v| v.info.model.variant.clone());
-                    let supports = self
-                        .config
-                        .as_ref()
-                        .and_then(|c| {
-                            c.models
-                                .iter()
-                                .find(|x| x.provider == m.provider && x.id == m.model)
-                        })
+                    let supports = find_model(self.models(), &m)
                         .is_some_and(|x| cur_var.as_ref().is_some_and(|v| x.variants.contains(v)));
                     if supports {
                         m.variant = cur_var;
@@ -2268,7 +2225,7 @@ impl App {
             self.hint = None;
         }
         if !self.connected {
-            self.toasts.warn("Not connected to the backend");
+            self.toasts.warn(NOT_CONNECTED);
             return;
         }
         let name = self.session_name(sid);
@@ -2514,13 +2471,7 @@ impl App {
     }
 
     pub fn model_display(&self, m: &ModelRef) -> String {
-        self.config
-            .as_ref()
-            .and_then(|c| {
-                c.models
-                    .iter()
-                    .find(|x| x.provider == m.provider && x.id == m.model)
-            })
+        find_model(self.models(), m)
             .map(|x| x.name.clone())
             .unwrap_or_else(|| m.model.clone())
     }
@@ -2568,7 +2519,7 @@ impl App {
                 self.deferred = Some((name.to_string(), args.to_string(), Instant::now()));
                 return;
             }
-            self.toasts.warn("Not connected to the backend");
+            self.toasts.warn(NOT_CONNECTED);
             return;
         }
         let cur = self.current.clone();
@@ -2787,15 +2738,7 @@ impl App {
                 if let Some(i) = self.live.iter_mut().find(|s| s.id == sid) {
                     i.attached += 1;
                 }
-                self.attaching.insert(sid.clone());
-                self.req(
-                    Request::Attach {
-                        session_id: sid.clone(),
-                        foreground: true,
-                        limit: None,
-                    },
-                    Pending::Attach { sid, fg: true },
-                );
+                self.send_attach(sid, true);
             }
             Some(_) => {}
         }
@@ -3276,6 +3219,21 @@ fn response_images(result: &Value) -> Vec<(ImageData, Option<String>)> {
         .filter(|i| !i.image.is_stub())
         .map(|i| (i.image, i.name))
         .collect()
+}
+
+fn find_model<'a>(
+    models: &'a [ref_proto::ModelInfo],
+    m: &ModelRef,
+) -> Option<&'a ref_proto::ModelInfo> {
+    models
+        .iter()
+        .find(|x| x.provider == m.provider && x.id == m.model)
+}
+
+/// Dialog marker: a filled dot for the selected row, blank otherwise.
+fn selected_marker(on: bool) -> (String, Color) {
+    let glyph = if on { SELECTED_GLYPH } else { " " };
+    (glyph.into(), theme::PRIMARY)
 }
 
 fn config_agents(config: &Option<ServerConfigInfo>) -> &[ref_proto::AgentInfo] {
