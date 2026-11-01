@@ -92,7 +92,7 @@ private:
 		QString provider;
 		QString modelId;
 		QString variant;
-		QString state;
+		proto::SessionStatus::State state = proto::SessionStatus::State::Idle;
 		qint64 busySince = 0;
 		qint64 updatedAt = 0;
 		qint64 createdAt = 0;
@@ -110,6 +110,10 @@ private:
 	bool matchesFilter(const Row& row) const;
 	bool before(const Row& a, const Row& b) const;
 	void rebuild();
+	QList<Row> selectWanted() const;
+	void removeGone(const QList<Row>& wanted);
+	qsizetype findRowFrom(qsizetype start, const QString& sessionId) const;
+	void placeRow(qsizetype i, const Row& wanted);
 	void emitRowChanged(const QString& id);
 
 	QString m_filter;
