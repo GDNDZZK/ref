@@ -2961,10 +2961,8 @@ dependencies = [
 name = "ref-llm"
 version = "0.2.0"
 dependencies = [
- "anyhow",
  "chrono",
  "futures-util",
- "rand 0.9.5",
  "ref-proto",
  "regex",
  "reqwest",
