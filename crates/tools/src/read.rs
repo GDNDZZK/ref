@@ -1,7 +1,7 @@
 //! `read`: hashline file view, directory listing, images.
 
 use crate::hashline::{Seen, format_header};
-use crate::util::{self, TextFile};
+use crate::util::{self, ImagePayload, TextFile};
 use crate::{ToolCtx, ToolOutput, ToolSpec};
 use anyhow::{Result, bail};
 use base64::Engine;
@@ -157,9 +157,9 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
             "Read image file {display} [{mime}] ({})",
             util::human_bytes(meta.len())
         );
-        let mut sent = (mime.to_string(), bytes);
+        let mut sent = ImagePayload { mime, bytes };
         if ctx.resize_images {
-            let fitted = match crate::imgfit::fit(&sent.1, &crate::imgfit::Limits::default()) {
+            let fitted = match crate::imgfit::fit(&sent.bytes, &crate::imgfit::Limits::default()) {
                 Ok(f) => f,
                 Err(e) => {
                     return Ok(ToolOutput::err(format!(
@@ -176,16 +176,19 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
                     fitted.size.1,
                     util::human_bytes(data.len() as u64)
                 ));
-                sent = (fitted.mime.to_string(), data);
+                sent = ImagePayload {
+                    mime: fitted.mime,
+                    bytes: data,
+                };
             }
             if let Some(n) = note {
                 text.push('\n');
                 text.push_str(&n);
             }
         }
-        let data = base64::engine::general_purpose::STANDARD.encode(&sent.1);
+        let data = base64::engine::general_purpose::STANDARD.encode(&sent.bytes);
         let mut out = ToolOutput::ok(text);
-        out.images.push(ImageData::new(sent.0, data));
+        out.images.push(ImageData::new(sent.mime, data));
         out.meta = Some(json!({"path": abs.to_string_lossy(), "image": true}));
         return Ok(out);
     }

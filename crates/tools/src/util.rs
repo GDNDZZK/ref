@@ -393,6 +393,12 @@ pub fn spill_path(ext: &str) -> PathBuf {
         .join(format!("{:08x}{:x}.{ext}", id, nanos as u32))
 }
 
+/// Image bytes together with the MIME type they are sent as.
+pub struct ImagePayload {
+    pub mime: &'static str,
+    pub bytes: Vec<u8>,
+}
+
 /// Detects supported raster images by magic bytes.
 pub fn image_mime(bytes: &[u8]) -> Option<&'static str> {
     if bytes.starts_with(PNG_SIGNATURE) {
