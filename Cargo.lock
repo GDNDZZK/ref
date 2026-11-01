@@ -2952,12 +2952,9 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "dirs",
- "globset",
  "ref-proto",
- "regex",
  "serde",
  "serde_json",
- "tracing",
 ]
 
 [[package]]
