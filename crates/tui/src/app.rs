@@ -1452,10 +1452,11 @@ impl App {
             return;
         }
         // Listed under another row already (snapshot after a re-attach): keep that row.
-        if v.queued
+        let listed_elsewhere = v
+            .queued
             .iter()
-            .any(|q| q.id.as_deref() == Some(id.as_str()) && Some(q.key) != key)
-        {
+            .any(|q| q.id.as_deref() == Some(id.as_str()) && Some(q.key) != key);
+        if listed_elsewhere {
             let mut removing = false;
             if let Some(i) = key.and_then(|k| v.queued.iter().position(|q| q.key == k)) {
                 removing = v.queued.remove(i).removing;
@@ -1532,7 +1533,8 @@ impl App {
     /// Sends to the current session, creating one if needed.
     pub fn submit_prompt_text(&mut self, text: String, images: Vec<ImageData>) {
         // Typed before the first connection: becomes the startup prompt.
-        if !self.ever_connected
+        let before_first_connect = !self.ever_connected;
+        if before_first_connect
             && let Some(plan) = self.init.as_mut()
             && images.is_empty()
         {
@@ -2092,9 +2094,9 @@ impl App {
                 if let (Some(sid), Some(mut m)) = (self.current.clone(), ModelRef::parse(&key)) {
                     // Keep the current variant when the new model supports it.
                     let cur_var = self.cur().and_then(|v| v.info.model.variant.clone());
-                    let supports = find_model(self.models(), &m)
+                    let supports_variant = find_model(self.models(), &m)
                         .is_some_and(|x| cur_var.as_ref().is_some_and(|v| x.variants.contains(v)));
-                    if supports {
+                    if supports_variant {
                         m.variant = cur_var;
                     }
                     if let Some(v) = self.views.get_mut(&sid) {
@@ -2620,19 +2622,7 @@ impl App {
                     self.change_dir(&sid, args);
                 }
             }
-            cmd::CLOSE_SESSION => {
-                if args.is_empty() {
-                    self.open_close_picker();
-                } else {
-                    match match_session(&self.live, args) {
-                        Ok(s) => {
-                            let sid = s.id.clone();
-                            self.close_confirmed(&sid, "run the command again");
-                        }
-                        Err(e) => self.toasts.warn(e),
-                    }
-                }
-            }
+            cmd::CLOSE_SESSION => self.close_by_name(args),
             cmd::EXPORT => {
                 if let Some(sid) = cur {
                     let p = if args.is_empty() {
@@ -2684,6 +2674,21 @@ impl App {
             cmd::MCP => self.open_mcp(None),
             cmd::EXIT => self.quit = true,
             _ => {}
+        }
+    }
+
+    /// `/close-session [name or id]`: the picker without an argument, else that session.
+    fn close_by_name(&mut self, args: &str) {
+        if args.is_empty() {
+            self.open_close_picker();
+            return;
+        }
+        match match_session(&self.live, args) {
+            Ok(s) => {
+                let sid = s.id.clone();
+                self.close_confirmed(&sid, "run the command again");
+            }
+            Err(e) => self.toasts.warn(e),
         }
     }
 
