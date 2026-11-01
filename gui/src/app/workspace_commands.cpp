@@ -17,7 +17,7 @@ void Workspace::runOnSession(const QString& sessionId, const char* method)
 	ChatSession* target = session(targetId(sessionId));
 	if(target == nullptr || !QMetaObject::invokeMethod(target, method))
 	{
-		toast(u"info"_s, tr("That command is not available now."));
+		toastCommandUnavailable();
 	}
 }
 
@@ -27,7 +27,7 @@ void Workspace::runCustomCommand(const QString& name, const QString& args, const
 	QObject* composer = target == nullptr ? nullptr : target->property("composer").value<QObject*>();
 	if(composer == nullptr || !QMetaObject::invokeMethod(composer, "runCustomCommand", Q_ARG(QString, name), Q_ARG(QString, args)))
 	{
-		toast(u"info"_s, tr("That command is not available now."));
+		toastCommandUnavailable();
 	}
 }
 
@@ -101,7 +101,7 @@ void Workspace::registerCommands()
 				return;
 			}
 		}
-		toast(u"warn"_s, tr("No live session \"%1\".").arg(wanted));
+		toast(refgui::workspace::ToastLevel::Warn, tr("No live session \"%1\".").arg(wanted));
 	});
 
 	const auto peers = [this](const QString& command, const QString& tab) {
@@ -110,7 +110,7 @@ void Workspace::registerCommands()
 			if(command == u"peers-name"_s && !args.trimmed().isEmpty())
 			{
 				peerText(id, command, args.trimmed(), [this](bool ok, const QVariant& text) {
-					toast(ok ? u"info"_s : u"error"_s, text.toString());
+					toast(ok ? refgui::workspace::ToastLevel::Info : refgui::workspace::ToastLevel::Error, text.toString());
 				});
 				return;
 			}
@@ -128,7 +128,7 @@ void Workspace::registerCommands()
 			return;
 		}
 		exportTo(targetId(sessionId), args.trimmed(), [this](bool ok, const QVariant& payload) {
-			toast(ok ? u"info"_s : u"error"_s, ok ? tr("Exported to %1").arg(payload.toString()) : payload.toString());
+			toast(ok ? refgui::workspace::ToastLevel::Info : refgui::workspace::ToastLevel::Error, ok ? tr("Exported to %1").arg(payload.toString()) : payload.toString());
 		});
 	});
 

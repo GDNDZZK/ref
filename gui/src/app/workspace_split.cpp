@@ -29,16 +29,10 @@ QCoro::Task<> Workspace::enterSplit()
 	if(m_current != nullptr && m_current->isAttached())
 	{
 		const Result<void> demoted = co_await m_current->background();
-		if(!demoted)
-		{
-			toast(u"error"_s, demoted.error());
-		}
+		toastFailure(demoted);
 	}
 	const auto watching = co_await m_backend.client().watchAll(true);
-	if(!watching)
-	{
-		toast(u"error"_s, watching.error());
-	}
+	toastFailure(watching);
 	if(!m_split)
 	{
 		co_return; // left again while the requests were out
@@ -68,16 +62,10 @@ QCoro::Task<> Workspace::leaveSplit()
 	if(m_current != nullptr && m_current->isAttached())
 	{
 		const Result<void> resumed = co_await m_current->attach(true);
-		if(!resumed)
-		{
-			toast(u"error"_s, resumed.error());
-		}
+		toastFailure(resumed);
 	}
 	const auto watching = co_await m_backend.client().watchAll(false);
-	if(!watching)
-	{
-		toast(u"error"_s, watching.error());
-	}
+	toastFailure(watching);
 	// Sessions can be closed while a detach is out, which changes m_chats.
 	QList<QPointer<ChatSession>> others;
 	for(ChatSession* other : std::as_const(m_chats))
@@ -175,7 +163,7 @@ QCoro::Task<> Workspace::attachTile(ChatSession* tile)
 	m_tileAttaching.remove(id);
 	if(!attached)
 	{
-		toast(u"error"_s, refgui::workspace::toastText(u"%1: %2"_s.arg(nameOf(id), refgui::workspace::oneLine(attached.error()))));
+		toast(refgui::workspace::ToastLevel::Error, refgui::workspace::toastText(u"%1: %2"_s.arg(nameOf(id), refgui::workspace::oneLine(attached.error()))));
 	}
 }
 
@@ -223,10 +211,7 @@ QCoro::Task<> Workspace::zoomTask(QString sessionId)
 		co_return; // closed meanwhile
 	}
 	const Result<void> attached = co_await zoomed->attach(true);
-	if(!attached)
-	{
-		toast(u"error"_s, attached.error());
-	}
+	toastFailure(attached);
 }
 
 void Workspace::unzoom()
