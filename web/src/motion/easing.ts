@@ -3,6 +3,8 @@
 // QML animation sets them. Every curve maps progress [0, 1] to effective progress;
 // values may leave [0, 1] (overshoot).
 
+import { clamp } from '../clamp.ts'
+
 export type EasingFn = (progress: number) => number
 
 const QT_DEFAULT_ELASTIC_AMPLITUDE = 1
@@ -14,7 +16,7 @@ const OUT_EXPO_SCALE = 1.001
 const OUT_EXPO_RATE = 10
 
 function clampProgress(t: number): number {
-  return Math.min(1, Math.max(0, t))
+  return clamp(t, 0, 1)
 }
 
 const linear: EasingFn = (t) => clampProgress(t)
