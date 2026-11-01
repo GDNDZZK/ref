@@ -1,10 +1,9 @@
 <script setup lang="ts">
 // A fenced code block: language label, copy action and source (CodeBlock.qml).
-import { onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useCopyFeedback } from '../composables/useCopyFeedback.ts'
 import type { CodeBlock } from '../model/blocks.ts'
 import { useHighlight } from '../highlight/useHighlight.ts'
-import { useNoticesStore } from '../stores/notices.ts'
 import TextButton from './TextButton.vue'
 
 const props = defineProps<{ block: CodeBlock }>()
@@ -12,24 +11,11 @@ const props = defineProps<{ block: CodeBlock }>()
 const COPIED_SHOWN_MS = 1500
 
 const { t } = useI18n()
-const notices = useNoticesStore()
-const copied = ref(false)
 const tokens = useHighlight(() => props.block)
-let resetTimer: ReturnType<typeof setTimeout> | undefined
-
-async function copy(): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(props.block.text)
-  } catch (error) {
-    notices.pushError(error)
-    return
-  }
-  copied.value = true
-  clearTimeout(resetTimer)
-  resetTimer = setTimeout(() => (copied.value = false), COPIED_SHOWN_MS)
-}
-
-onBeforeUnmount(() => clearTimeout(resetTimer))
+const { copied, copy } = useCopyFeedback(
+  () => navigator.clipboard.writeText(props.block.text),
+  COPIED_SHOWN_MS,
+)
 </script>
 
 <template>
