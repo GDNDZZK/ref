@@ -11,14 +11,20 @@ use tokio_tungstenite::tungstenite::Message;
 
 const STEP: Duration = Duration::from_secs(15);
 const POLL: Duration = Duration::from_millis(20);
-const HELLO: &str = r#"{"id":1,"op":"hello","client":"ref-client-test","version":2,"cwd":"/tmp"}"#;
+
+fn hello_frame() -> String {
+    format!(
+        r#"{{"id":1,"op":"hello","client":"ref-client-test","version":{},"cwd":"/tmp"}}"#,
+        ref_proto::PROTOCOL_VERSION
+    )
+}
 
 fn ref_server_binary() -> &'static Path {
     Path::new(env!("CARGO_BIN_EXE_ref-server"))
 }
 
 async fn hello(ws: &mut Ws) -> serde_json::Value {
-    ws.send(Message::text(HELLO)).await.unwrap();
+    ws.send(Message::text(hello_frame())).await.unwrap();
     loop {
         let message = tokio::time::timeout(STEP, ws.next())
             .await
