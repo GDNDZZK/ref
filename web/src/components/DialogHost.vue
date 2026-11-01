@@ -41,7 +41,7 @@ const isPalette = computed(() => shown.value?.kind === 'palette')
 dialogs.setOnClosed(() => {
   const id = workspace.focusedId
   if (id === undefined) return
-  void nextTick(() => composers.of(id).requestFocus())
+  void nextTick(() => composers.find(id)?.requestFocus())
 })
 
 function onKeydown(event: KeyboardEvent): void {
