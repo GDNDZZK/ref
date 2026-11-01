@@ -47,14 +47,14 @@ ModalDialog {
 			}
 
 			SessionDot {
-				x: 22
+				x: Theme.dialogPadding
 				anchors.verticalCenter: parent.verticalCenter
 				activity: row.activity
 				hasError: row.hasError
 				visible: row.isLive
 			}
 			Column {
-				anchors { left: parent.left; leftMargin: 42; right: tail.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+				anchors { left: parent.left; leftMargin: Theme.dialogPadding + 20; right: tail.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
 				spacing: 2
 
 				Text {
@@ -76,7 +76,7 @@ ModalDialog {
 			}
 			Item {
 				id: tail
-				anchors { right: parent.right; rightMargin: 22; verticalCenter: parent.verticalCenter }
+				anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
 				width: 22
 				height: 22
 

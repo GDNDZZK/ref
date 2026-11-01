@@ -31,7 +31,7 @@ ModalDialog {
 			}
 
 			Rectangle {
-				x: 22
+				x: Theme.dialogPadding
 				anchors.verticalCenter: parent.verticalCenter
 				width: 8
 				height: 8
@@ -39,7 +39,7 @@ ModalDialog {
 				color: Theme.agentColor(row.modelData.color, row.modelData.position)
 			}
 			Column {
-				anchors { left: parent.left; leftMargin: 42; right: check.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+				anchors { left: parent.left; leftMargin: Theme.dialogPadding + 20; right: check.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
 				spacing: 2
 
 				Text {
@@ -61,7 +61,7 @@ ModalDialog {
 			}
 			Icon {
 				id: check
-				anchors { right: parent.right; rightMargin: 22; verticalCenter: parent.verticalCenter }
+				anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
 				name: "check"
 				size: 16
 				color: Theme.accent

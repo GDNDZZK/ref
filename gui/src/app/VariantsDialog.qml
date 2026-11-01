@@ -29,7 +29,7 @@ ModalDialog {
 
 			Text {
 				textFormat: Text.PlainText
-				anchors { left: parent.left; leftMargin: 22; right: check.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+				anchors { left: parent.left; leftMargin: Theme.dialogPadding; right: check.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
 				text: row.modelData
 				color: Theme.text
 				font.pixelSize: Theme.fontSize
@@ -37,7 +37,7 @@ ModalDialog {
 			}
 			Icon {
 				id: check
-				anchors { right: parent.right; rightMargin: 22; verticalCenter: parent.verticalCenter }
+				anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
 				name: "check"
 				size: 16
 				color: Theme.accent

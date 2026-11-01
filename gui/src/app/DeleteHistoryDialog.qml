@@ -29,10 +29,10 @@ ModalDialog {
 
 	Text {
 		textFormat: Text.PlainText
-		x: 22
-		width: parent.width - 2 * 22
+		x: Theme.dialogPadding
+		width: parent.width - 2 * Theme.dialogPadding
 		topPadding: 4
-		bottomPadding: 22
+		bottomPadding: Theme.dialogPadding
 		text: qsTr("Delete \"%1\" from history? This cannot be undone.").arg(Workspace.dialogArgs.title ?? "")
 		color: Theme.text
 		font.pixelSize: Theme.fontSize - 1

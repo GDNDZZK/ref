@@ -43,7 +43,7 @@ ModalDialog {
 	Column {
 		width: parent.width
 		topPadding: 4
-		bottomPadding: 22
+		bottomPadding: Theme.dialogPadding
 		spacing: 14
 
 		Item {
@@ -51,8 +51,8 @@ ModalDialog {
 			height: 30
 
 			Segmented {
-				x: 22
-				width: parent.width - 2 * 22
+				x: Theme.dialogPadding
+				width: parent.width - 2 * Theme.dialogPadding
 				model: [
 					{text: qsTr("Peers"), value: "peers"},
 					{text: qsTr("Name"), value: "name"},
@@ -65,8 +65,8 @@ ModalDialog {
 		}
 
 		Rectangle {
-			x: 22
-			width: parent.width - 2 * 22
+			x: Theme.dialogPadding
+			width: parent.width - 2 * Theme.dialogPadding
 			height: Math.min(320, Math.max(200, output.contentHeight + 2 * 14))
 			radius: 10
 			color: Theme.codeBackground
@@ -99,8 +99,8 @@ ModalDialog {
 		}
 
 		Row {
-			x: 22
-			width: parent.width - 2 * 22
+			x: Theme.dialogPadding
+			width: parent.width - 2 * Theme.dialogPadding
 			spacing: 10
 			visible: dialog.tab === "name"
 

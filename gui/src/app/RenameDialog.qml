@@ -37,14 +37,14 @@ ModalDialog {
 
 	Item {
 		width: parent.width
-		implicitHeight: field.implicitHeight + 2 * 22
+		implicitHeight: field.implicitHeight + 2 * Theme.dialogPadding
 		height: implicitHeight
 
 		DialogField {
 			id: field
-			x: 22
-			y: 22
-			width: parent.width - 2 * 22
+			x: Theme.dialogPadding
+			y: Theme.dialogPadding
+			width: parent.width - 2 * Theme.dialogPadding
 			text: Workspace.info(dialog.sessionId).name
 			placeholderText: qsTr("Name")
 			onAccepted: dialog.rename()

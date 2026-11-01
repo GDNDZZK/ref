@@ -18,7 +18,7 @@ ModalDialog {
 			textFormat: Text.PlainText
 			width: parent.width
 			height: Theme.sidebarSectionHeight
-			leftPadding: 22
+			leftPadding: Theme.dialogPadding
 			verticalAlignment: Text.AlignVCenter
 			text: qsTr("Appearance")
 			color: Theme.textMuted
@@ -31,14 +31,14 @@ ModalDialog {
 
 			Text {
 				textFormat: Text.PlainText
-				x: 22
+				x: Theme.dialogPadding
 				anchors.verticalCenter: parent.verticalCenter
 				text: qsTr("Theme")
 				color: Theme.text
 				font.pixelSize: Theme.fontSize
 			}
 			Segmented {
-				anchors { right: parent.right; rightMargin: 22; verticalCenter: parent.verticalCenter }
+				anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
 				width: 230
 				model: [
 					{text: qsTr("System"), value: "system"},
@@ -50,7 +50,7 @@ ModalDialog {
 			}
 		}
 
-		Rectangle { x: 22; width: parent.width - 2 * 22; height: 1; color: Theme.border }
+		Rectangle { x: Theme.dialogPadding; width: parent.width - 2 * Theme.dialogPadding; height: 1; color: Theme.border }
 
 		Item {
 			width: parent.width
@@ -58,14 +58,14 @@ ModalDialog {
 
 			Text {
 				textFormat: Text.PlainText
-				x: 22
+				x: Theme.dialogPadding
 				anchors.verticalCenter: parent.verticalCenter
 				text: qsTr("Language")
 				color: Theme.text
 				font.pixelSize: Theme.fontSize
 			}
 			Segmented {
-				anchors { right: parent.right; rightMargin: 22; verticalCenter: parent.verticalCenter }
+				anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
 				width: 280
 				model: [
 					{text: qsTr("System"), value: "system"},
@@ -77,19 +77,19 @@ ModalDialog {
 			}
 		}
 
-		Rectangle { x: 22; width: parent.width - 2 * 22; height: 1; color: Theme.border }
+		Rectangle { x: Theme.dialogPadding; width: parent.width - 2 * Theme.dialogPadding; height: 1; color: Theme.border }
 
 		// The notification switches are the composer's part of the window.
 		NotificationSettingsSection {
-			x: 22
-			width: parent.width - 2 * 22
+			x: Theme.dialogPadding
+			width: parent.width - 2 * Theme.dialogPadding
 			settings: Workspace.settings
 		}
 
 		TextEdit {
 			textFormat: TextEdit.PlainText
-			x: 22
-			width: parent.width - 2 * 22
+			x: Theme.dialogPadding
+			width: parent.width - 2 * Theme.dialogPadding
 			topPadding: 14
 			readOnly: true
 			selectByMouse: true

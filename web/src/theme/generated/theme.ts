@@ -117,6 +117,7 @@ export const metrics = {
   dialogWidth: 480,
   dialogWidthWide: 640,
   settingsWidth: 520,
+  dialogPadding: 22,
   dialogHeaderHeight: 56,
   dialogFooterHeight: 64,
   dialogMaxHeightRatio: 0.8,
