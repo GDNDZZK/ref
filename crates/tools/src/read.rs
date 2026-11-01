@@ -146,51 +146,7 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     }
     let bytes = std::fs::read(&abs)?;
     if let Some(mime) = util::image_mime(&bytes) {
-        if meta.len() > MAX_IMAGE_BYTES {
-            return Ok(ToolOutput::err(format!(
-                "Image file too large: {} exceeds {} limit.",
-                util::human_bytes(meta.len()),
-                util::human_bytes(MAX_IMAGE_BYTES)
-            )));
-        }
-        let mut text = format!(
-            "Read image file {display} [{mime}] ({})",
-            util::human_bytes(meta.len())
-        );
-        let mut sent = ImagePayload { mime, bytes };
-        if ctx.resize_images {
-            let fitted = match crate::imgfit::fit(&sent.bytes, &crate::imgfit::Limits::default()) {
-                Ok(f) => f,
-                Err(e) => {
-                    return Ok(ToolOutput::err(format!(
-                        "Image file {display} could not be decoded ({e}); it was not attached."
-                    )));
-                }
-            };
-            let note = fitted.note();
-            if let Some(data) = fitted.data {
-                text.push_str(&format!(
-                    ", sent as {} {}x{} ({})",
-                    fitted.mime,
-                    fitted.size.0,
-                    fitted.size.1,
-                    util::human_bytes(data.len() as u64)
-                ));
-                sent = ImagePayload {
-                    mime: fitted.mime,
-                    bytes: data,
-                };
-            }
-            if let Some(n) = note {
-                text.push('\n');
-                text.push_str(&n);
-            }
-        }
-        let data = base64::engine::general_purpose::STANDARD.encode(&sent.bytes);
-        let mut out = ToolOutput::ok(text);
-        out.images.push(ImageData::new(sent.mime, data));
-        out.meta = Some(json!({"path": abs.to_string_lossy(), "image": true}));
-        return Ok(out);
+        return read_image(ctx, &abs, &display, mime, bytes, meta.len());
     }
     let text = match (util::looks_binary(&bytes), String::from_utf8(bytes)) {
         (false, Ok(t)) => t,
@@ -204,6 +160,62 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let file = TextFile::decode(&text);
     let mut out = render_text(ctx, &abs, &display, &file.text, range);
     out.meta = Some(json!({"path": abs.to_string_lossy()}));
+    Ok(out)
+}
+
+/// Returns an image file as an attachment, downscaled when `resize_images` is set.
+fn read_image(
+    ctx: &ToolCtx,
+    abs: &Path,
+    display: &str,
+    mime: &'static str,
+    bytes: Vec<u8>,
+    file_len: u64,
+) -> Result<ToolOutput> {
+    if file_len > MAX_IMAGE_BYTES {
+        return Ok(ToolOutput::err(format!(
+            "Image file too large: {} exceeds {} limit.",
+            util::human_bytes(file_len),
+            util::human_bytes(MAX_IMAGE_BYTES)
+        )));
+    }
+    let mut text = format!(
+        "Read image file {display} [{mime}] ({})",
+        util::human_bytes(file_len)
+    );
+    let mut sent = ImagePayload { mime, bytes };
+    if ctx.resize_images {
+        let fitted = match crate::imgfit::fit(&sent.bytes, &crate::imgfit::Limits::default()) {
+            Ok(f) => f,
+            Err(e) => {
+                return Ok(ToolOutput::err(format!(
+                    "Image file {display} could not be decoded ({e}); it was not attached."
+                )));
+            }
+        };
+        let note = fitted.note();
+        if let Some(data) = fitted.data {
+            text.push_str(&format!(
+                ", sent as {} {}x{} ({})",
+                fitted.mime,
+                fitted.size.0,
+                fitted.size.1,
+                util::human_bytes(data.len() as u64)
+            ));
+            sent = ImagePayload {
+                mime: fitted.mime,
+                bytes: data,
+            };
+        }
+        if let Some(n) = note {
+            text.push('\n');
+            text.push_str(&n);
+        }
+    }
+    let data = base64::engine::general_purpose::STANDARD.encode(&sent.bytes);
+    let mut out = ToolOutput::ok(text);
+    out.images.push(ImageData::new(sent.mime, data));
+    out.meta = Some(json!({"path": abs.to_string_lossy(), "image": true}));
     Ok(out)
 }
 
