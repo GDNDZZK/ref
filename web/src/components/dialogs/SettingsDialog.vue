@@ -3,7 +3,6 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { setTheme } from '../../composables/useTheme.ts'
-import { protocolOf } from '../../net/connection.ts'
 import type { LanguageChoice, ThemeChoice } from '../../settings/model.ts'
 import { useConnectionStore } from '../../stores/connection.ts'
 import { useDialogsStore } from '../../stores/dialogs.ts'
@@ -41,7 +40,7 @@ const languages = computed(() => [
 const about = computed(() =>
   t('dialog.settings.about', {
     version: connection.hello?.server_version ?? '',
-    protocol: protocolOf(connection.hello),
+    protocol: connection.protocol,
   }),
 )
 </script>
