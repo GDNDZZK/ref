@@ -987,13 +987,12 @@ fn export_markdown(info: &SessionInfo, messages: &[Message]) -> String {
                     output,
                     ..
                 } => {
-                    let st = serde_json::to_string(state).unwrap_or_default();
+                    let st = serde_json::to_string(state).expect("ToolState serializes");
                     out.push_str(&format!(
                         "**Tool `{name}`** — {purpose} [{}]\n\n",
                         st.trim_matches('"')
                     ));
-                    let inp = serde_json::to_string_pretty(input).unwrap_or_default();
-                    out.push_str(&format!("```json\n{inp}\n```\n\n"));
+                    out.push_str(&format!("```json\n{input:#}\n```\n\n"));
                     if let Some(o) = output {
                         out.push_str(&format!(
                             "```\n{}\n```\n\n",
