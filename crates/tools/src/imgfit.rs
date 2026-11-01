@@ -51,7 +51,9 @@ impl Fitted {
     /// Tells the model how coordinates map back when the dimensions changed.
     pub fn note(&self) -> Option<String> {
         let ((ow, oh), (w, h)) = (self.original, self.size);
-        if self.data.is_none() || (ow, oh) == (w, h) || w == 0 {
+        let kept_original = self.data.is_none();
+        let same_size = (ow, oh) == (w, h);
+        if kept_original || same_size || w == 0 {
             return None;
         }
         Some(format!(
@@ -110,12 +112,9 @@ pub(crate) fn fit(bytes: &[u8], limits: &Limits) -> Result<Fitted, String> {
     let (max_w, max_h) = (limits.max_width.max(1), limits.max_height.max(1));
     let min_dim = limits.min_dimension.min(max_w).min(max_h);
     // Already within the bounds and compact (a quarter of the budget): keep the original bytes.
-    if ow >= min_dim
-        && oh >= min_dim
-        && ow <= max_w
-        && oh <= max_h
-        && bytes.len() <= limits.max_bytes / 4
-    {
+    let within_bounds = ow >= min_dim && oh >= min_dim && ow <= max_w && oh <= max_h;
+    let compact = bytes.len() <= limits.max_bytes / 4;
+    if within_bounds && compact {
         return Ok(Fitted {
             data: None,
             mime,
