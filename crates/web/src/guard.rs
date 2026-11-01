@@ -15,7 +15,7 @@ use crate::token;
 
 const COOKIE_NAME_PREFIX: &str = "ref_web_";
 const COOKIE_MAX_AGE_SECS: u32 = 30 * 24 * 60 * 60;
-const LOCALHOST: &str = "localhost";
+pub(crate) const LOCALHOST: &str = "localhost";
 const DEFAULT_HTTP_PORT: u16 = 80;
 
 /// Only same-origin loads; images may also be `data:` and `blob:` URLs.

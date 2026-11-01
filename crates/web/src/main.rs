@@ -19,14 +19,13 @@ use ref_client::Target;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
-use crate::guard::{HostPolicy, SessionCookie};
+use crate::guard::{HostPolicy, LOCALHOST, SessionCookie};
 use crate::routes::AppState;
 use crate::tunnel::Heartbeat;
 use crate::upstream::Upstream;
 
 const DEFAULT_PORT: u16 = 7480;
 const DEFAULT_HOST: &str = "127.0.0.1";
-const LOCALHOST: &str = "localhost";
 /// How long shutdown waits for tabs to receive their close frame.
 const TUNNEL_CLOSE_GRACE: Duration = Duration::from_secs(3);
 
