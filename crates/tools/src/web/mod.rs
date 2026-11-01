@@ -7,7 +7,7 @@ mod sites;
 #[cfg(test)]
 mod tests;
 
-use crate::util;
+use crate::util::{self, ImagePayload};
 use crate::{ToolCtx, ToolOutput, ToolSpec};
 use anyhow::{Result, anyhow, bail};
 use base64::Engine as _;
@@ -340,10 +340,13 @@ async fn convert(
                 );
                 return Ok(());
             }
-            let mut sent = (m, f.body);
+            let mut sent = ImagePayload {
+                mime: m,
+                bytes: f.body,
+            };
             out.body = format!("Image ({m}, {size}), attached.");
             if ctx.resize_images {
-                let bytes = sent.1;
+                let bytes = sent.bytes;
                 let limits = crate::imgfit::Limits {
                     max_bytes: FETCH_IMAGE_BYTES,
                     ..Default::default()
@@ -372,9 +375,12 @@ async fn convert(
                                     fitted.size.1,
                                     util::human_bytes(d.len() as u64)
                                 );
-                                (fitted.mime, d)
+                                ImagePayload {
+                                    mime: fitted.mime,
+                                    bytes: d,
+                                }
                             }
-                            None => (m, bytes),
+                            None => ImagePayload { mime: m, bytes },
                         };
                         if let Some(n) = note {
                             out.body.push('\n');
@@ -384,8 +390,8 @@ async fn convert(
                 }
             }
             out.images.push(ImageData::new(
-                sent.0,
-                base64::engine::general_purpose::STANDARD.encode(&sent.1),
+                sent.mime,
+                base64::engine::general_purpose::STANDARD.encode(&sent.bytes),
             ));
         }
         Kind::Binary => {
