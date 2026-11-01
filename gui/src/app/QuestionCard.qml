@@ -228,7 +228,7 @@ Rectangle {
 			}
 			DialogButton {
 				small: true
-				kind: "primary"
+				kind: DialogButton.Primary
 				visible: card.prompt.confirming
 				text: qsTr("Submit")
 				enabled: !card.prompt.busy

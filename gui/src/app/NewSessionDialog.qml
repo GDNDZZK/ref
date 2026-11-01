@@ -24,7 +24,7 @@ ModalDialog {
 		},
 		DialogButton {
 			text: qsTr("Start")
-			kind: "primary"
+			kind: DialogButton.Primary
 			onClicked: dialog.start()
 		}
 	]

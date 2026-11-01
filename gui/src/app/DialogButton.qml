@@ -1,19 +1,21 @@
 import QtQuick
 import RefGui
 
-// Button of dialogs and banners. `kind` is "primary", "secondary" or "danger".
+// Button of dialogs and banners. `kind` is one of the Kind values.
 // Only the face shrinks on press; the handlers stay on the unscaled root (see CircleButton).
 Item {
 	id: button
 
-	property string kind: "secondary"
+	enum Kind { Secondary, Primary, Danger }
+
+	property int kind: DialogButton.Secondary
 	property alias text: label.text
 	property bool small: false
 
 	signal clicked()
 
-	readonly property bool filled: kind !== "secondary"
-	readonly property color fill: kind === "danger" ? Theme.danger : kind === "primary" ? Theme.accent : Theme.surface
+	readonly property bool filled: kind !== DialogButton.Secondary
+	readonly property color fill: kind === DialogButton.Danger ? Theme.danger : kind === DialogButton.Primary ? Theme.accent : Theme.surface
 
 	implicitWidth: label.implicitWidth + 2 * 18
 	implicitHeight: small ? 28 : Theme.buttonHeight

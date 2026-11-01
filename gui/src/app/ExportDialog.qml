@@ -26,7 +26,7 @@ SessionDialog {
 		},
 		DialogButton {
 			text: qsTr("Export")
-			kind: "primary"
+			kind: DialogButton.Primary
 			onClicked: dialog.exportNow()
 		}
 	]
