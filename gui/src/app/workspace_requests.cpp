@@ -180,6 +180,12 @@ void Workspace::restartBackend()
 		return;
 	}
 	// The connection drops with the backend and Backend starts a new one; the request then
-	// fails with "connection closed", which is expected.
-	perform(m_backend.client().shutdown(), [](bool, const QVariant&) {}, noPayload);
+	// fails with "connection closed", which is expected. Any other failure is reported.
+	const Reply reportRefusal = [this](bool ok, const QVariant& payload) {
+		if(!ok && !refgui::client::isConnectionLost(payload.toString()))
+		{
+			toast(refgui::workspace::ToastLevel::Error, payload.toString());
+		}
+	};
+	perform(m_backend.client().shutdown(), reportRefusal, noPayload);
 }
