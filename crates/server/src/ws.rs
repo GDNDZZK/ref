@@ -5,7 +5,7 @@ use crate::util::lock;
 use futures_util::{SinkExt, StreamExt};
 use ref_proto::{ClientFrame, Request, ServerFrame};
 use serde_json::{Value, json};
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
@@ -16,10 +16,34 @@ use tokio_tungstenite::tungstenite::handshake::server::{
 use tokio_tungstenite::tungstenite::http::StatusCode;
 
 /// Client name used by `ref-server --status/--stop`; such connections do not count as frontends.
-pub const CONTROL_CLIENT: &str = "ref-server-cli";
+pub(crate) const CONTROL_CLIENT: &str = "ref-server-cli";
 
 /// Largest frame/message accepted from a client.
 const MAX_CLIENT_MESSAGE: usize = 64 << 20;
+
+/// Pause after a failed `accept` before trying again.
+const ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(100);
+
+/// Time allowed to write the 403 answer to a rejected host.
+const REJECT_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Time a client has to finish the WebSocket handshake.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Wait before sending a queue that holds only deltas, so that they go out in one batch.
+const DELTA_COALESCE_WAIT: Duration = Duration::from_millis(30);
+
+/// Pause that lets an error response reach the client before the connection is closed.
+const CLOSE_GRACE: Duration = Duration::from_millis(50);
+
+/// Time the writer task gets to finish after the connection ended.
+const WRITER_JOIN_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// `--allow-host` entry that admits every host.
+const WILDCARD_HOST: &str = "*";
+
+/// Query parameter that carries the token in the handshake URL.
+const TOKEN_PARAM: &str = "token=";
 
 #[derive(Debug, Clone, Default)]
 pub struct Auth {
@@ -30,7 +54,7 @@ pub struct Auth {
 }
 
 impl Auth {
-    pub fn ip_allowed(&self, ip: IpAddr) -> bool {
+    fn ip_allowed(&self, ip: IpAddr) -> bool {
         let ip = ip.to_canonical();
         self.any || self.allowed.iter().any(|a| a.to_canonical() == ip)
     }
@@ -54,7 +78,7 @@ pub fn resolve_hosts(hosts: &[String], token: String) -> (Auth, Vec<String>) {
         if h.is_empty() {
             continue;
         }
-        if h == "*" {
+        if h == WILDCARD_HOST {
             auth.any = true;
             continue;
         }
@@ -77,9 +101,8 @@ pub fn resolve_hosts(hosts: &[String], token: String) -> (Auth, Vec<String>) {
         }
     }
     if hosts.iter().any(|h| h.trim() == ref_proto::LOCALHOST) {
-        auth.allowed.push(IpAddr::from([127, 0, 0, 1]));
-        auth.allowed
-            .push(ref_proto::LOOPBACK_V6.parse().expect("ip"));
+        auth.allowed.push(Ipv4Addr::LOCALHOST.into());
+        auth.allowed.push(Ipv6Addr::LOCALHOST.into());
     }
     (auth, warnings)
 }
@@ -87,7 +110,7 @@ pub fn resolve_hosts(hosts: &[String], token: String) -> (Auth, Vec<String>) {
 fn query_token(uri: &str) -> Option<String> {
     let q = uri.split_once('?')?.1;
     for kv in q.split('&') {
-        if let Some(v) = kv.strip_prefix("token=") {
+        if let Some(v) = kv.strip_prefix(TOKEN_PARAM) {
             return Some(v.to_string());
         }
     }
@@ -101,7 +124,7 @@ fn forbidden(text: &str) -> ErrorResponse {
 }
 
 /// Accept loop; returns when the hub shuts down.
-pub async fn serve(hub: Arc<Hub>, listener: TcpListener, auth: Arc<Auth>) {
+pub(crate) async fn serve(hub: Arc<Hub>, listener: TcpListener, auth: Arc<Auth>) {
     loop {
         let accepted = tokio::select! {
             r = listener.accept() => r,
@@ -114,7 +137,7 @@ pub async fn serve(hub: Arc<Hub>, listener: TcpListener, auth: Arc<Auth>) {
             }
             Err(e) => {
                 tracing::warn!("accept failed: {e}");
-                tokio::time::sleep(Duration::from_millis(100)).await;
+                tokio::time::sleep(ACCEPT_RETRY_DELAY).await;
             }
         }
     }
@@ -124,10 +147,12 @@ async fn reject_raw(mut stream: TcpStream) {
     use tokio::io::AsyncWriteExt;
     let body = "Forbidden: host not allowed\n";
     let resp = format!(
-        "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "HTTP/1.1 {}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        StatusCode::FORBIDDEN,
         body.len()
     );
-    let _ = tokio::time::timeout(Duration::from_secs(2), stream.write_all(resp.as_bytes())).await;
+    // Best effort: the peer is being turned away, a failed write or shutdown changes nothing.
+    let _ = tokio::time::timeout(REJECT_WRITE_TIMEOUT, stream.write_all(resp.as_bytes())).await;
     let _ = stream.shutdown().await;
 }
 
@@ -137,6 +162,7 @@ async fn handle_conn(hub: Arc<Hub>, stream: TcpStream, peer: SocketAddr, auth: A
         reject_raw(stream).await;
         return;
     }
+    // Only a latency tweak; the connection works without it.
     let _ = stream.set_nodelay(true);
     let mut query_ok = false;
     let auth2 = auth.clone();
@@ -160,7 +186,7 @@ async fn handle_conn(hub: Arc<Hub>, stream: TcpStream, peer: SocketAddr, auth: A
         .max_message_size(Some(MAX_CLIENT_MESSAGE))
         .max_frame_size(Some(MAX_CLIENT_MESSAGE));
     let ws = match tokio::time::timeout(
-        Duration::from_secs(10),
+        HANDSHAKE_TIMEOUT,
         tokio_tungstenite::accept_hdr_async_with_config(stream, cb, Some(cfg)),
     )
     .await
@@ -170,7 +196,10 @@ async fn handle_conn(hub: Arc<Hub>, stream: TcpStream, peer: SocketAddr, auth: A
             tracing::debug!(%peer, "websocket handshake failed: {e}");
             return;
         }
-        Err(_) => return,
+        Err(_) => {
+            tracing::debug!(%peer, "websocket handshake timed out");
+            return;
+        }
     };
     let authed = query_ok || auth.token.is_empty();
     let conn = hub.add_conn();
@@ -187,18 +216,17 @@ async fn handle_conn(hub: Arc<Hub>, stream: TcpStream, peer: SocketAddr, auth: A
                 _ = wconn.kill.cancelled() => {}
             }
             if wconn.out.only_deltas() && !wconn.kill.is_cancelled() {
-                tokio::time::sleep(Duration::from_millis(30)).await;
+                tokio::time::sleep(DELTA_COALESCE_WAIT).await;
             }
             if wconn.out.overflow.load(std::sync::atomic::Ordering::SeqCst) {
                 tracing::warn!(conn = wconn.id, "client too slow; dropping connection");
+                // The connection is dropped anyway; a failed close handshake changes nothing.
                 let _ = sink.close().await;
                 wconn.kill.cancel();
                 return;
             }
             for f in wconn.out.drain() {
-                let Ok(txt) = serde_json::to_string(&f) else {
-                    continue;
-                };
+                let txt = serde_json::to_string(&f).expect("ServerFrame serializes");
                 if sink.feed(WsMsg::text(txt)).await.is_err() {
                     wconn.kill.cancel();
                     return;
@@ -209,6 +237,7 @@ async fn handle_conn(hub: Arc<Hub>, stream: TcpStream, peer: SocketAddr, auth: A
                 return;
             }
             if wconn.kill.is_cancelled() {
+                // The connection is going away; a failed close handshake changes nothing.
                 let _ = sink.close().await;
                 return;
             }
@@ -225,7 +254,11 @@ async fn handle_conn(hub: Arc<Hub>, stream: TcpStream, peer: SocketAddr, auth: A
         let text = match msg {
             Some(Ok(WsMsg::Text(t))) => t.to_string(),
             Some(Ok(WsMsg::Binary(b))) => String::from_utf8_lossy(&b).to_string(),
-            Some(Ok(WsMsg::Close(_))) | None | Some(Err(_)) => break,
+            Some(Ok(WsMsg::Close(_))) | None => break,
+            Some(Err(e)) => {
+                tracing::debug!(conn = conn.id, "websocket read failed: {e}");
+                break;
+            }
             Some(Ok(_)) => continue,
         };
         let frame: ClientFrame = match serde_json::from_str(&text) {
@@ -266,7 +299,7 @@ async fn handle_conn(hub: Arc<Hub>, stream: TcpStream, peer: SocketAddr, auth: A
                         if let Some(id) = frame.id {
                             conn.send(err_frame(id, "invalid or missing token".into()));
                         }
-                        tokio::time::sleep(Duration::from_millis(50)).await;
+                        tokio::time::sleep(CLOSE_GRACE).await;
                         break;
                     }
                     {
@@ -307,7 +340,7 @@ async fn handle_conn(hub: Arc<Hub>, stream: TcpStream, peer: SocketAddr, auth: A
                     if let Some(id) = frame.id {
                         conn.send(err_frame(id, "first frame must be hello".into()));
                     }
-                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    tokio::time::sleep(CLOSE_GRACE).await;
                     break;
                 }
             }
@@ -333,7 +366,8 @@ async fn handle_conn(hub: Arc<Hub>, stream: TcpStream, peer: SocketAddr, auth: A
     }
     tracing::info!(conn = conn.id, "connection closed");
     finish(&hub, &conn);
-    let _ = tokio::time::timeout(Duration::from_secs(2), writer).await;
+    // Best effort: a writer that does not finish in time is abandoned with the connection.
+    let _ = tokio::time::timeout(WRITER_JOIN_TIMEOUT, writer).await;
 }
 
 fn finish(hub: &Arc<Hub>, conn: &Arc<Conn>) {
