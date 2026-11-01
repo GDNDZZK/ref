@@ -318,7 +318,10 @@ fn list_dir(abs: &Path, display: &str) -> Result<ToolOutput> {
         // Follow symlinks for the dir check so linked dirs show `/`.
         let is_dir = std::fs::metadata(e.path())
             .map(|m| m.is_dir())
-            .unwrap_or(false);
+            .unwrap_or_else(|err| {
+                tracing::debug!("read: no metadata for {}: {err}", e.path().display());
+                false
+            });
         entries.push(if is_dir { format!("{name}/") } else { name });
     }
     entries.sort();
