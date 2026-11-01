@@ -32,14 +32,22 @@ const NOTICE_SECONDS = 3.2
 // docs and later reviewer at the bottom).
 const COMPOSER = { x: 0.6, y: 0.9 }
 const GRID = { x: 0.6, y: 0.5 }
+// The tiles' headers and first lines while they appear; the docs tile (bottom), which opens
+// on the large "Session created by" message, stays out of view.
+const GRID_TOP = { x: 0.6, y: 0.4 }
 const TESTER_TILE = { x: 0.72, y: 0.52 }
-const FIXER_TILE = { x: 0.45, y: 0.52 }
-const MAIN_TILE = { x: 0.42, y: 0.22 }
+// The fixer's permission card: its edit header down to the three buttons.
+const FIXER_CARD = { x: 0.41, y: 0.505, zoom: 2.75 }
+// Main's last lines and status line, below the reviewer's message at the start of A7.
+const MAIN_STATUS = { x: 0.47, y: 0.345, zoom: 3.4 }
+const MAIN_SUMMARY = { x: 0.41, y: 0.23, zoom: 2 }
+// Main's status-line to-do item once all five are done.
+const MAIN_TODO_DONE = { x: 0.447, y: 0.33, width: 0.033, height: 0.021 }
+const TODO_DONE_MARK_T = 24.8
 
 // The tester's report shows in main's tile from 15.6 until the fixer's report pushes it up at
 // 16.5, too short to read; films that show it hold the frame of the recording's "report" mark
-// (about 16.0) for this long, with a callout on the line.
-const REPORT_HOLD_SECONDS = 2.2
+// (about 16.0), with a spotlight on the line, until their caption about it has ended.
 const SCRIPTED_REPORT_AT = 16.0
 // The report line on the held frame, measured on both takes.
 const REPORT_LINE = { x: 0.246, y: 0.084, width: 0.322, height: 0.028 }
@@ -51,17 +59,20 @@ const PATH_FRAMES = { from: 13.0, to: 13.3 }
 const looks = (report: { x: number; y: number }): Look[] => [
   { at: 0, ...COMPOSER, zoom: 1.5 },
   { at: 2.5, ...COMPOSER, zoom: 1.5 },
-  { at: 3.3, ...GRID, zoom: 1 },
-  { at: 6.7, ...GRID, zoom: 1 },
+  { at: 3.3, ...GRID_TOP, zoom: 1 },
+  { at: 6.7, ...GRID_TOP, zoom: 1 },
   { at: 7.3, ...TESTER_TILE, zoom: 1.6 },
   { at: 10.8, ...TESTER_TILE, zoom: 1.6 },
-  { at: 11.4, ...FIXER_TILE, zoom: 1.6 },
-  { at: 14.6, ...FIXER_TILE, zoom: 1.6 },
-  { at: 15.3, ...report, zoom: 1.9 },
-  { at: 16.0, ...report, zoom: 1.9 },
+  { at: 11.4, ...FIXER_CARD },
+  { at: 14.6, ...FIXER_CARD },
+  { at: 15.3, ...report, zoom: 2.6 },
+  { at: 16.0, ...report, zoom: 2.6 },
   { at: 16.8, ...GRID, zoom: 1 },
   { at: 20.6, ...GRID, zoom: 1 },
-  { at: 21.3, ...MAIN_TILE, zoom: 1.6 },
+  // A7 cuts in at 21.0.
+  { at: 21.0, ...MAIN_STATUS },
+  { at: 23.4, ...MAIN_STATUS },
+  { at: 24.2, ...MAIN_SUMMARY },
 ]
 
 // The recording in mock time: where its Enter is, and its clicks.
@@ -99,14 +110,14 @@ const NOTICES: readonly { at: number; title: string; body: Localized }[] = [
 
 export interface HeroCutOptions {
   enter?: Cut['enter']
-  // Hold the frame with the tester's report (REPORT_HOLD) when the cut reaches it.
-  holdReport?: boolean
+  // Hold the frame with the tester's report this many seconds when the cut reaches it.
+  holdReport?: number
 }
 
 // Film seconds [from, to) showing the recording from mock time `clipFrom` on.
 export function heroCut(from: number, to: number, clipFrom: number, options: HeroCutOptions = {}): Cut {
   const { enterAt, clicks, reportAt } = recording()
-  const hold = options.holdReport ? { at: reportAt, seconds: REPORT_HOLD_SECONDS } : { at: Infinity, seconds: 0 }
+  const hold = options.holdReport ? { at: reportAt, seconds: options.holdReport } : { at: Infinity, seconds: 0 }
   // Shot seconds of mock time `t`, and the other way round.
   const shift = (t: number) => t - clipFrom + (t > hold.at ? hold.seconds : 0)
   const mockTime = (time: number) => {
@@ -126,10 +137,11 @@ export function heroCut(from: number, to: number, clipFrom: number, options: Her
         rect: HERO_RECT,
         title: 'ref',
         windowFrom: -1,
-        looks: looks({ x: REPORT_LINE.x + REPORT_LINE.width / 2, y: REPORT_LINE.y + 0.06 }).map((look) => ({ ...look, at: shift(look.at) })),
-        marks: options.holdReport
-          ? [{ ...REPORT_LINE, from: shift(reportAt) - 0.1, to: shift(reportAt) + hold.seconds }]
-          : [],
+        looks: looks({ x: REPORT_LINE.x + REPORT_LINE.width / 2, y: REPORT_LINE.y + REPORT_LINE.height / 2 }).map((look) => ({ ...look, at: shift(look.at) })),
+        marks: [
+          ...(options.holdReport ? [{ ...REPORT_LINE, spotlight: true, from: shift(reportAt) - 0.1, to: shift(reportAt) + hold.seconds }] : []),
+          { ...MAIN_TODO_DONE, from: shift(TODO_DONE_MARK_T), to: shift(HERO_END_T) + 10 },
+        ],
         pointer: {
           path: pointerPath(clicks).map((key) => ({ ...key, at: shift(key.at) })),
           clicks: clicks.map((click) => shift(click.at)),

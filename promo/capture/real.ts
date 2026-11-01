@@ -9,8 +9,8 @@ import { dirname, join } from 'node:path'
 import { OPENCODE_JSON } from '../src/films/opencodeConfig.ts'
 import { isolatedEnv, type IsolatedEnv } from './lib/backend.ts'
 import { binary } from './lib/binaries.ts'
-import { KEYS, TuiSession } from './lib/tuiSession.ts'
 import { TUI_COLS, TUI_ROWS } from './tui.ts'
+import { KEYS, TuiSession } from './lib/tuiSession.ts'
 
 const CASTS_DIR = join(import.meta.dirname, '..', 'assets', 'casts')
 const PROJECT = 'project'
@@ -22,6 +22,10 @@ const START_TIMEOUT_MS = 30_000
 const LISTENING_TEXT = 'ref-server listening on'
 const DIALOG_SHOWN_MS = 3000
 const BEAT_MS = 800
+// The ref take is wide enough for the session sidebar; the plain shell take keeps the narrow
+// size and larger text.
+const REF_SIZE = { cols: TUI_COLS, rows: TUI_ROWS }
+const SHELL_SIZE = { cols: 110, rows: 32 }
 // Keys the dialogs need to list the providers' models. Made up; nothing is sent with them.
 const DUMMY_KEYS = { ANTHROPIC_API_KEY: 'sk-ant-promo', DEEPSEEK_API_KEY: 'sk-promo', WORK_API_KEY: 'promo' }
 const MODEL_DIALOG_KEYS = `${KEYS.ctrl('x')}m`
@@ -71,11 +75,11 @@ async function stopServer(child: ChildProcess): Promise<void> {
   await exited
 }
 
-async function withShell(body: (shell: TuiSession, home: string, env: NodeJS.ProcessEnv) => Promise<void>): Promise<void> {
+async function withShell(size: { cols: number; rows: number }, body: (shell: TuiSession, home: string, env: NodeJS.ProcessEnv) => Promise<void>): Promise<void> {
   const isolated = isolatedEnv()
   const { home, env } = fixtureHome(isolated)
   try {
-    await body(new TuiSession({ cols: TUI_COLS, rows: TUI_ROWS, command: `bash --noprofile --rcfile ${join(home, SHELL_RC)} -i`, cwd: home }, undefined, { ...isolated, env }), home, env)
+    await body(new TuiSession({ ...size, command: `bash --noprofile --rcfile ${join(home, SHELL_RC)} -i`, cwd: home }, undefined, { ...isolated, env }), home, env)
   } finally {
     isolated.remove()
   }
@@ -89,7 +93,7 @@ async function typeLine(shell: TuiSession, line: string, mark: string): Promise<
 }
 
 async function captureFixtureStart(): Promise<void> {
-  await withShell(async (shell, home, env) => {
+  await withShell(REF_SIZE, async (shell, home, env) => {
     const server = await startRealServer(home, env)
     try {
       await shell.waitForText(PROMPT.trimEnd()) // screen rows lose their trailing spaces
@@ -125,7 +129,7 @@ async function captureFixtureStart(): Promise<void> {
 }
 
 async function captureServerStart(): Promise<void> {
-  await withShell(async (shell) => {
+  await withShell(SHELL_SIZE, async (shell) => {
     try {
       await shell.waitForText(PROMPT.trimEnd()) // screen rows lose their trailing spaces
       await shell.pause(BEAT_MS)

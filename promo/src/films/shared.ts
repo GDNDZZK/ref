@@ -4,36 +4,76 @@ import { clip } from '../engine/clips.ts'
 import type { ShotBuilder } from '../engine/shot.ts'
 import type { Pointer } from '../shots/beat.ts'
 import { threeWindowsShot } from '../shots/threeWindows.ts'
-import { BRAND_TITLE_SECONDS, COPY, HERO_FILM_START } from './copy.ts'
+import { BRAND_TITLE_SECONDS, HERO_FILM_START } from './copy.ts'
 import type { Cut } from './timeline.ts'
 
 // A9, B6: the crew of the hero script in the terminal, the desktop app and the browser at the
-// same moment (capture crew.ts).
+// same moment, after main's summary (capture crew.ts). Each window starts whole, then zooms onto
+// main's finished to-do list, the same detail in all three: the terminal's sidebar, the status
+// line of main's tile and of the browser's conversation.
+const CREW_ZOOM_AT = 1.6
+const CREW_ZOOM_SECONDS = 0.7
+const CREW_DETAIL = {
+  tui: { look: { x: 0.86, y: 0.44, zoom: 2.4 }, mark: { x: 0.778, y: 0.322, width: 0.205, height: 0.16 } },
+  gui: { look: { x: 0.37, y: 0.3, zoom: 2.4 }, mark: { x: 0.446, y: 0.326, width: 0.034, height: 0.023 } },
+  web: { look: { x: 0.56, y: 0.84, zoom: 2 }, mark: { x: 0.702, y: 0.866, width: 0.033, height: 0.023 } },
+}
+
+function crewWindow(name: string, title: string, overview: { x: number; y: number; zoom: number }, detail: (typeof CREW_DETAIL)['tui'], seconds: number) {
+  const zoomed = CREW_ZOOM_AT + CREW_ZOOM_SECONDS
+  return {
+    screens: [{ name }],
+    title,
+    look: [
+      { at: 0, ...overview },
+      { at: CREW_ZOOM_AT, ...overview },
+      { at: zoomed, ...detail.look },
+    ],
+    marks: [{ ...detail.mark, from: zoomed, to: seconds + 1 }],
+  }
+}
+
 export function crewWindowsCut(from: number, to: number): Cut {
   return {
     from,
     to,
     build: (seconds) =>
       threeWindowsShot(seconds, [
-        { screens: [{ name: 'tui-crew-clean' }], title: 'ref', look: { at: 0, x: 0.5, y: 0.5, zoom: 1 } },
-        { screens: [{ name: 'gui-crew' }], title: 'ref-gui', look: { at: 0, x: 0.6, y: 0.4, zoom: 1.3 } },
-        { screens: [{ name: 'web-crew' }], title: 'ref-web', look: { at: 0, x: 0.5, y: 0.3, zoom: 1.02 } },
+        crewWindow('tui-crew-clean', 'ref', { x: 0.5, y: 0.5, zoom: 1 }, CREW_DETAIL.tui, seconds),
+        crewWindow('gui-crew', 'ref-gui', { x: 0.6, y: 0.4, zoom: 1.3 }, CREW_DETAIL.gui, seconds),
+        crewWindow('web-crew', 'ref-web', { x: 0.5, y: 0.6, zoom: 1.02 }, CREW_DETAIL.web, seconds),
       ]),
   }
 }
 
-// A2, B2, C1 shot 2: the lockup and the tagline over the composer, then the corner mark
-// until `markUntil`.
+// A2, B2, C1 shot 2: the lockup over the composer (the tagline is the caption), then the
+// corner mark until `markUntil`.
 export function addBrandTitle(shot: ShotBuilder, markUntil: number) {
   shot.add(
     brandTitle({
-      tagline: COPY.tagline,
       from: HERO_FILM_START,
       shrinkAt: HERO_FILM_START + BRAND_TITLE_SECONDS,
       to: markUntil,
     }),
   )
 }
+
+// A whole 150-column TUI take (the width that shows the session sidebar) across the stage.
+export const WIDE_TUI = { fontSize: 19, x: 90, y: 70 }
+
+// RB1 `ref` starting in ~/project with the fixture opencode.json (capture/real.ts).
+export const FIXTURE_CAST = { name: 'tui-fixture-start', title: 'ref', ...WIDE_TUI }
+// In its model dialog (cast marker "models" + 0.5 s on): the three models of opencode.json.
+export function opencodeModelMarks(from: number, to: number) {
+  return [
+    { row: 11, col: 37, cols: 17 }, // Claude Sonnet 4.5
+    { row: 14, col: 37, cols: 13 }, // DeepSeek Chat
+    { row: 18, col: 37, cols: 11 }, // qwen3-coder
+  ].map((cell) => ({ ...cell, from, to }))
+}
+
+// RB2 `ref-server` in a shell: two lines of output, so only the top rows, with room inside.
+export const SERVER_CAST = { name: 'tui-server-start', title: '', fontSize: 24, topRows: 6, padding: 24 }
 
 // The outage take (M5) as the films show it: the status line is cut off (it has the mock path).
 export const OUTAGE_CAST = { name: 'tui-outage', title: 'ref', fontSize: 24, hideLastRows: 1, x: 168, y: 90 }
