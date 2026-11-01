@@ -108,6 +108,11 @@ private:
 		int highlighted = 0;
 	};
 
+	static PageState initialState(const proto::Question& question);
+	// Shows `request`; one without questions shows nothing.
+	void reset(proto::QuestionRequest request);
+	// A row of the current question that can be highlighted or chosen now.
+	bool canSelectRow(int row) const;
 	int questionCount() const { return static_cast<int>(m_request.questions.size()); }
 	const proto::Question& currentQuestion() const { return m_request.questions.at(m_page); }
 	bool onQuestion() const { return m_active && m_page < questionCount(); }
