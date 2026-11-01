@@ -152,7 +152,9 @@ Keys in the terminal UI:
 
 ## Acknowledgements
 
-The GUI is adapted from an early version of qutie by LightBlueCube.
+- The TUI is modeled on [anomalyco/opencode](https://github.com/anomalyco/opencode).
+- Some tools are modeled on anomalyco/opencode and [can1357/oh-my-pi](https://github.com/can1357/oh-my-pi).
+- The GUI is adapted from an early version of LightBlueCube/qutie.
 
 ## License
 

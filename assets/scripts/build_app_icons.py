@@ -9,6 +9,8 @@ Sources (written from logo.py, committed):
                          attention.
   ref-lockup-dark.svg,   the mark and the word "ref", for dark and light backgrounds (README header,
   ref-lockup-light.svg   title cards).
+  ref-lockup-small-dark.svg,  the small mark (24px) and "ref", set in pixels for the sidebar header
+  ref-lockup-small-light.svg  of the GUI and the web page; 24 and 48px tall fall on whole pixels.
 
 Raster outputs, only where a platform needs them (committed):
   ref.ico                Windows: 16-256, each size rendered on its own (not resampled).
@@ -104,6 +106,8 @@ def write_sources() -> None:
         SMALL_ALERT_SVG: logo.small(alert=True),
         APP_DIR / "ref-lockup-dark.svg": logo.lockup(on_dark=True),
         APP_DIR / "ref-lockup-light.svg": logo.lockup(on_dark=False),
+        APP_DIR / "ref-lockup-small-dark.svg": logo.compact_lockup(on_dark=True),
+        APP_DIR / "ref-lockup-small-light.svg": logo.compact_lockup(on_dark=False),
     }
     for path, text in sources.items():
         path.write_text(text, encoding="utf-8")

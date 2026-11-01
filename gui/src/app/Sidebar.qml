@@ -3,8 +3,8 @@ import QtQuick
 import QtQuick.Controls
 import RefGui
 
-// The sessions of the window: those running, the past ones with a search field, and the MCP
-// status. The content has a fixed width; Main animates the width of the sidebar itself, so
+// The sessions of the window: the to-do list of the session in front, those running, the past ones with a
+// search field, and the MCP status. The content has a fixed width; Main animates the width of the sidebar itself, so
 // the content slides out to the left, clipped.
 Rectangle {
 	id: sidebar
@@ -13,8 +13,31 @@ Rectangle {
 	readonly property int maxMcpDots: 6
 	readonly property real minRunningHeight: Theme.sidebarMinRunningRows * (Theme.sidebarRowHeight + 2)
 	readonly property real minHistoryHeight: Theme.sidebarMinHistoryRows * Theme.sidebarHistoryRowHeight
-	// Space for the two lists: what is left of the column after the fixed parts.
-	readonly property real listSpace: height - Theme.sidebarHeaderHeight - 44 - 2 * Theme.sidebarSectionHeight - 32 - 8 - Theme.sidebarFooterHeight
+	// Space for the three lists: what is left of the column after the fixed parts.
+	readonly property real listSpace: fixedSpace - todoSection.height
+	readonly property real fixedSpace: height - Theme.sidebarHeaderHeight - 44 - 2 * Theme.sidebarSectionHeight - 32 - 8 - Theme.sidebarFooterHeight
+
+	// The to-do list of the session in front: the current one, or the focused tile in split view. It keeps what it
+	// showed while it closes, and changes only when the list does.
+	readonly property var front: Workspace.frontSession
+	readonly property var todoItems: front ? front.todoItems : []
+	readonly property bool hasTodos: todoItems.length > 0
+	property var shownTodo: ({ items: [], done: 0, total: 0 })
+	// Up to a third of the column, and never so much that the lists below lose their minimum.
+	readonly property real todoCap: Math.min(height / 3, fixedSpace - minRunningHeight - minHistoryHeight)
+	readonly property real todoHeight: hasTodos && todoCap >= Theme.sidebarSectionHeight + todoList.rowHeight
+		? Math.min(Theme.sidebarSectionHeight + todoList.height, todoCap) : 0
+	readonly property int lockupWidth: 60 // the lockup is drawn at this size only: its pixels are aligned to it
+	readonly property int lockupHeight: 24
+
+	function keepTodo() {
+		if (!hasTodos || JSON.stringify(todoItems) === JSON.stringify(shownTodo.items))
+			return
+		shownTodo = { items: todoItems, done: front.todoDone, total: front.todoTotal }
+	}
+
+	onTodoItemsChanged: keepTodo()
+	Component.onCompleted: keepTodo()
 
 	color: Theme.surface
 	clip: true
@@ -37,13 +60,15 @@ Rectangle {
 			width: parent.width
 			height: Theme.sidebarHeaderHeight
 
-			Text {
-				textFormat: Text.PlainText
+			Image {
 				x: 18
-				anchors.verticalCenter: parent.verticalCenter
-				text: "ref"
-				color: Theme.text
-				font { pixelSize: Theme.fontSize + 1; bold: true }
+				y: (parent.height - height) / 2
+				width: sidebar.lockupWidth
+				height: sidebar.lockupHeight
+				sourceSize: Qt.size(width, height)
+				source: "qrc:/app/ref-lockup-small-" + (Theme.dark ? "dark" : "light") + ".svg"
+				Accessible.role: Accessible.Graphic
+				Accessible.name: "ref"
 			}
 			CircleButton {
 				anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
@@ -126,9 +151,47 @@ Rectangle {
 			}
 		}
 
+		// The to-do list of the session in front, as the todo call's card shows it. Hidden without items.
+		Item {
+			id: todoSection
+			anchors.top: newRow.bottom
+			width: parent.width
+			height: sidebar.todoHeight
+			clip: true
+			opacity: sidebar.hasTodos ? 1 : 0
+			visible: height > 0
+
+			Behavior on height { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+			Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+
+			SectionLabel {
+				id: todoLabel
+				text: qsTr("Todo %1/%2").arg(sidebar.shownTodo.done).arg(sidebar.shownTodo.total)
+			}
+
+			Flickable {
+				anchors { top: todoLabel.bottom; bottom: parent.bottom }
+				width: parent.width
+				contentWidth: width
+				contentHeight: todoList.height
+				boundsBehavior: Flickable.StopAtBounds
+				clip: true
+
+				TodoList {
+					id: todoList
+					width: parent.width
+					items: sidebar.shownTodo.items
+					wrap: true
+					leftPad: 18 // in line with the label
+				}
+
+				ScrollBar.vertical: ThemedScrollBar {}
+			}
+		}
+
 		SectionLabel {
 			id: runningLabel
-			anchors.top: newRow.bottom
+			anchors.top: todoSection.bottom
 			text: qsTr("Running")
 		}
 

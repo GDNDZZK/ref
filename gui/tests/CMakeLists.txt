@@ -1,4 +1,4 @@
-# Adapted from an early version of qutie by LightBlueCube
+# Adapted from an early version of LightBlueCube/qutie
 # SPDX-License-Identifier: GPL-3.0-or-later
 qt_add_executable(tst_fence_splitter tst_fence_splitter.cpp)
 target_link_libraries(tst_fence_splitter PRIVATE refgui_session Qt6::Test)

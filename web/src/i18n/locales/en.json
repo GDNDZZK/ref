@@ -189,6 +189,7 @@
   "sidebar": {
     "newSession": "New session",
     "newSessionIn": "New session in another folder…",
+    "todo": "Todo",
     "running": "Running",
     "history": "History",
     "searchHistory": "Search history",
