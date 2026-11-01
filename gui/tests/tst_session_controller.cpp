@@ -24,17 +24,7 @@ constexpr int ReconnectTimeoutMs = 8000; // the backend retries after a second
 
 QJsonObject infoJson(const QString& id, const QString& state)
 {
-	return {{u"id"_s, id},
-	        {u"name"_s, u"one"_s},
-	        {u"title"_s, u"A title"_s},
-	        {u"agent"_s, u"build"_s},
-	        {u"model"_s, QJsonObject{{u"provider"_s, u"p"_s}, {u"model"_s, u"m"_s}}},
-	        {u"cwd"_s, u"/work"_s},
-	        {u"created_at"_s, 1},
-	        {u"updated_at"_s, 1},
-	        {u"status"_s, QJsonObject{{u"state"_s, state}}},
-	        {u"attached"_s, 1},
-	        {u"live"_s, true}};
+	return sessionInfoJson(id, {.name = u"one"_s, .title = u"A title"_s, .state = state, .attached = 1});
 }
 
 QJsonObject messageJson(const QString& id, const QString& role, const QString& text, bool ended)
