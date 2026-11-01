@@ -24,6 +24,9 @@ pub const CANCELLED_OUTPUT: &str = "Cancelled by user.";
 /// Error text of a turn or compaction that was aborted.
 pub(crate) const ABORTED: &str = "aborted";
 const MAX_REMINDERS: u32 = 3;
+
+/// Characters of the first user line used as the provisional session title.
+const TITLE_MAX_CHARS: usize = 50;
 const NON_RETRYABLE_ATTEMPTS: u32 = 3;
 /// Largest exponent of the retry backoff, so `2^n` stays finite.
 pub(crate) const MAX_BACKOFF_EXPONENT: u32 = 40;
@@ -1421,7 +1424,7 @@ fn maybe_title(hub: &Arc<Hub>, s: &Arc<Session>, st: &mut SessionState, msg: &Me
         .find(|l| !l.is_empty())
         .unwrap_or("")
         .to_string();
-    st.info.title = crate::util::truncate_chars(&first, 50);
+    st.info.title = crate::util::truncate_chars(&first, TITLE_MAX_CHARS);
     hub.emit_info(st);
     tokio::spawn(crate::title::generate(hub.clone(), s.clone(), text));
 }
