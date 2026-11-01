@@ -27,6 +27,34 @@ Item {
 	readonly property bool retrying: activity === Activity.retrying
 	readonly property bool attention: hasPermission || failed
 	readonly property bool hovered: hover.hovered
+	readonly property int renameEntry: 0 // index in the context menu
+
+	// What the line under the title says.
+	readonly property string subtitle: {
+		if (activity === Activity.waitingQuestion)
+			return qsTr("Waiting for your answer")
+		if (hasPermission)
+			return qsTr("Needs permission")
+		if (failed)
+			return lastError.split("\n")[0]
+		if (retrying)
+			return qsTr("Retrying")
+		if (activity === Activity.compacting)
+			return qsTr("Compacting")
+		return busySince > 0 ? dirName + " · " + Format.elapsed(ticker.now - busySince) : dirName
+	}
+	readonly property color faceColor: {
+		if (hasPermission)
+			return Theme.warningSurface
+		if (isCurrent)
+			return Theme.userBubble
+		return hover.hovered ? Theme.surfaceHover : "transparent"
+	}
+	readonly property color borderColor: {
+		if (hasPermission)
+			return Theme.warningBorder
+		return isCurrent ? Theme.userBubbleBorder : "transparent"
+	}
 
 	function startRename() {
 		renaming = true
@@ -56,10 +84,8 @@ Item {
 		id: face
 		anchors { fill: parent; leftMargin: Theme.sidebarPadding; rightMargin: Theme.sidebarPadding }
 		radius: Theme.radius
-		color: row.hasPermission ? Theme.warningSurface
-			: row.isCurrent ? Theme.userBubble
-			: hover.hovered ? Theme.surfaceHover : "transparent"
-		border.color: row.hasPermission ? Theme.warningBorder : row.isCurrent ? Theme.userBubbleBorder : "transparent"
+		color: row.faceColor
+		border.color: row.borderColor
 		scale: tap.pressed ? Motion.pressedScaleRow : 1
 
 		Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
@@ -122,13 +148,7 @@ Item {
 			x: 30
 			y: 30
 			width: parent.width - x - 12
-			text: row.activity === Activity.waitingQuestion ? qsTr("Waiting for your answer")
-				: row.hasPermission ? qsTr("Needs permission")
-				: row.failed ? row.lastError.split("\n")[0]
-				: row.retrying ? qsTr("Retrying")
-				: row.activity === Activity.compacting ? qsTr("Compacting")
-				: row.busySince > 0 ? row.dirName + " · " + Format.elapsed(ticker.now - row.busySince)
-				: row.dirName
+			text: row.subtitle
 			color: row.hasPermission || row.retrying ? Theme.warning : row.failed ? Theme.danger : Theme.textMuted
 			font.pixelSize: Theme.smallFontSize
 			elide: Text.ElideRight
@@ -211,6 +231,11 @@ Item {
 	ContextMenu {
 		id: menu
 		entries: [{text: qsTr("Rename")}, {text: qsTr("Close"), danger: true}]
-		onTriggered: index => index === 0 ? row.startRename() : Workspace.closeSession(row.sessionId)
+		onTriggered: index => {
+			if (index === row.renameEntry)
+				row.startRename()
+			else
+				Workspace.closeSession(row.sessionId)
+		}
 	}
 }

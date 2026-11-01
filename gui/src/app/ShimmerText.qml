@@ -21,8 +21,10 @@ Text {
 		return String(Qt.tint(color, Qt.alpha(highlight, nearness)))
 	}
 
+	readonly property var htmlEscapes: ({"<": "&lt;", "&": "&amp;", " ": "&nbsp;"})
+
 	function escaped(letter) {
-		return letter === "<" ? "&lt;" : letter === "&" ? "&amp;" : letter === " " ? "&nbsp;" : letter
+		return htmlEscapes[letter] ?? letter
 	}
 
 	textFormat: Text.RichText
