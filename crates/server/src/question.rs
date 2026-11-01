@@ -22,7 +22,7 @@ use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
-pub const TOOL: &str = "question";
+pub(crate) const TOOL: &str = "question";
 
 const MAX_QUESTIONS: usize = 4;
 /// One more row (the custom answer) still fits the number keys 1 to 9.
@@ -37,16 +37,24 @@ const NO_PENDING: &str = ref_proto::NO_PENDING_QUESTION;
 /// The reply of a client: the answers per question, or `None` for "dismissed".
 pub type Reply = Option<Vec<Vec<String>>>;
 
-const DESCRIPTION: &str = "Ask the user one or more questions during execution and wait for the answers. Use it to gather preferences or requirements, clarify ambiguous instructions, get decisions on implementation choices, or offer choices about what direction to take.
+/// Start and end of the tool result that carries the answers (see `format_answers`).
+pub(crate) const ANSWERED_PREFIX: &str = "User has answered your questions: ";
+pub(crate) const ANSWERED_SUFFIX: &str = ". You can now continue with the user's answers in mind.";
+
+fn description() -> String {
+    format!(
+        "Ask the user one or more questions during execution and wait for the answers. Use it to gather preferences or requirements, clarify ambiguous instructions, get decisions on implementation choices, or offer choices about what direction to take.
 
 Usage notes:
 - When `custom` is enabled (the default), a \"Type your own answer\" option is added automatically; don't include \"Other\" or catch-all options
 - Answers come back as the labels the user picked or the text they typed; set `multiple: true` to allow more than one
 - Mark the option you recommend with `default: true`; it is preselected. In a single choice mark at most one
-- Ask at most 4 questions per call, each with at most 8 options
-- The user may dismiss the questions; continue without them then";
+- Ask at most {MAX_QUESTIONS} questions per call, each with at most {MAX_OPTIONS} options
+- The user may dismiss the questions; continue without them then"
+    )
+}
 
-pub fn definition() -> ToolDef {
+pub(crate) fn definition() -> ToolDef {
     let option = json!({"type": "object", "properties": {
         "label": {"type": "string", "description": "Display text (1-5 words, concise)"},
         "description": {"type": "string", "description": "Explanation of choice"},
@@ -54,14 +62,14 @@ pub fn definition() -> ToolDef {
     }, "required": ["label", "description"]});
     let question = json!({"type": "object", "properties": {
         "question": {"type": "string", "description": "Complete question"},
-        "header": {"type": "string", "description": "Very short label (max 30 chars)"},
+        "header": {"type": "string", "description": format!("Very short label (max {MAX_HEADER_CHARS} chars)")},
         "options": {"type": "array", "description": "Available choices", "items": option},
         "multiple": {"type": "boolean", "description": "Allow selecting multiple choices"},
         "custom": {"type": "boolean", "description": "Allow typing a custom answer (default: true)"}
     }, "required": ["question", "header", "options"]});
     def(
         TOOL,
-        DESCRIPTION,
+        &description(),
         json!({"type": "object", "properties": {
             "questions": {"type": "array", "description": "Questions to ask", "items": question}
         }, "required": ["questions"]}),
@@ -69,7 +77,7 @@ pub fn definition() -> ToolDef {
 }
 
 /// The questions of a call, checked. Errors go back to the model as the tool result.
-pub fn parse(input: &Value) -> Result<Vec<Question>, String> {
+pub(crate) fn parse(input: &Value) -> Result<Vec<Question>, String> {
     let list = input
         .get("questions")
         .ok_or("Error: `questions` is required.")?;
@@ -121,7 +129,7 @@ pub fn parse(input: &Value) -> Result<Vec<Question>, String> {
 
 /// Checks a client's answers and trims them: one entry per question, one choice unless
 /// `multiple`, and only listed labels unless `custom`. An empty entry means "not answered".
-pub fn check_answers(
+fn check_answers(
     questions: &[Question],
     answers: Vec<Vec<String>>,
 ) -> Result<Vec<Vec<String>>, String> {
@@ -158,7 +166,7 @@ pub fn check_answers(
 }
 
 /// The tool result for the model.
-pub fn format_answers(questions: &[Question], answers: &[Vec<String>]) -> String {
+fn format_answers(questions: &[Question], answers: &[Vec<String>]) -> String {
     let pairs: Vec<String> = questions
         .iter()
         .zip(answers)
@@ -171,15 +179,12 @@ pub fn format_answers(questions: &[Question], answers: &[Vec<String>]) -> String
             format!("\"{}\"=\"{}\"", q.question, text)
         })
         .collect();
-    format!(
-        "User has answered your questions: {}. You can now continue with the user's answers in mind.",
-        pairs.join(", ")
-    )
+    format!("{ANSWERED_PREFIX}{}{ANSWERED_SUFFIX}", pairs.join(", "))
 }
 
 /// Delivers a client's reply to the waiting call. The first reply wins; an invalid one is
 /// refused and the question stays open.
-pub fn reply(s: &Session, call_id: &str, answers: Reply) -> Result<(), String> {
+pub(crate) fn reply(s: &Session, call_id: &str, answers: Reply) -> Result<(), String> {
     let mut st = s.lock();
     let pending = st
         .questions
@@ -190,15 +195,14 @@ pub fn reply(s: &Session, call_id: &str, answers: Reply) -> Result<(), String> {
         Some(a) => Some(check_answers(&pending.request.questions, a)?),
         None => None,
     };
-    if let Some(tx) = pending.tx.take() {
-        // The receiver is gone only when the run was cancelled meanwhile: nobody waits for it.
-        let _ = tx.send(answers);
-    }
+    let tx = pending.tx.take().expect("selected with tx present");
+    // The receiver is gone only when the run was cancelled meanwhile: nobody waits for it.
+    let _ = tx.send(answers);
     Ok(())
 }
 
 /// Tells the clients that every pending question of the session is over (run ended, abort).
-pub fn clear(hub: &Hub, s: &Session, st: &mut crate::session::SessionState) {
+pub(crate) fn clear(hub: &Hub, s: &Session, st: &mut crate::session::SessionState) {
     for p in std::mem::take(&mut st.questions) {
         hub.emit(
             &s.id,
@@ -210,7 +214,7 @@ pub fn clear(hub: &Hub, s: &Session, st: &mut crate::session::SessionState) {
 }
 
 /// What the call at `index` of message `msg_id` does: asks, waits, and finishes the tool part.
-pub async fn run(
+pub(crate) async fn run(
     hub: &Arc<Hub>,
     s: &Arc<Session>,
     msg_id: &str,
@@ -409,7 +413,9 @@ mod tests {
         ];
         assert_eq!(
             format_answers(&qs, &answers),
-            "User has answered your questions: \"One?\"=\"A\", \"Two?\"=\"X, Y\", \"Three?\"=\"Unanswered\". You can now continue with the user's answers in mind."
+            format!(
+                "{ANSWERED_PREFIX}\"One?\"=\"A\", \"Two?\"=\"X, Y\", \"Three?\"=\"Unanswered\"{ANSWERED_SUFFIX}"
+            )
         );
     }
 }
