@@ -19,12 +19,11 @@ namespace
 const QString NoPendingQuestion = u"No pending question with that id."_s;
 } // namespace
 
-ChatSession::ChatSession(Backend& backend, QString sessionId, QObject* parent)
+ChatSession::ChatSession(Backend& backend, const refgui::workspace::BackendConfig& config, QString sessionId, QObject* parent)
 	: QObject(parent)
-	, m_backend(backend)
 	, m_sessionId(std::move(sessionId))
 	, m_controller(backend)
-	, m_composer(backend, m_controller, refgui::composer::sharedPromptHistory())
+	, m_composer(config, m_controller, refgui::composer::sharedPromptHistory())
 {
 	connect(&m_controller, &refgui::session::SessionController::connectionChanged, this, &ChatSession::readyChanged);
 	connect(&m_controller, &refgui::session::SessionController::turnInProgressChanged, this, &ChatSession::busyChanged);

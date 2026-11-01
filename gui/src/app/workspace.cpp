@@ -322,7 +322,7 @@ ChatSession& Workspace::chat(const QString& sessionId)
 	ChatSession*& slot = m_chats[sessionId];
 	if(slot == nullptr)
 	{
-		slot = new ChatSession(m_backend, sessionId, this);
+		slot = new ChatSession(m_backend, m_config, sessionId, this);
 		connect(slot, &ChatSession::errorReported, this, [this, sessionId](const QString& text) {
 			// The current session draws its errors in the conversation; the others need a toast.
 			if(sessionId == currentId() && !m_split)

@@ -38,9 +38,9 @@ QList<proto::ImageData> imageData(const QList<proto::NamedImage>& images)
 
 } // namespace
 
-ComposerModel::ComposerModel(client::Backend& backend, session::SessionController& controller, compose::PromptHistory& history, QObject* parent)
+ComposerModel::ComposerModel(const workspace::BackendConfig& config, session::SessionController& controller, compose::PromptHistory& history, QObject* parent)
 	: QObject(parent)
-	, m_backend(backend)
+	, m_config(config)
 	, m_controller(controller)
 	, m_history(history)
 	, m_browser(history)
@@ -56,12 +56,8 @@ ComposerModel::ComposerModel(client::Backend& backend, session::SessionControlle
 	connect(&m_controller, &session::SessionController::infoChanged, this, &ComposerModel::labelsChanged);
 	connect(&m_controller, &session::SessionController::turnInProgressChanged, this, &ComposerModel::disarmInterrupt);
 	connect(&m_controller, &session::SessionController::connectionChanged, this, &ComposerModel::readyChanged);
-	connect(&m_backend, &client::Backend::connected, this, [this] { loadConfig(); });
+	connect(&m_config, &workspace::BackendConfig::changed, this, &ComposerModel::labelsChanged);
 	m_queue.setMessages(m_controller.queued());
-	if(m_backend.state() == client::Backend::State::Connected)
-	{
-		loadConfig();
-	}
 }
 
 bool ComposerModel::isReady() const
@@ -101,15 +97,15 @@ void ComposerModel::setInterruptWindow(int milliseconds)
 
 const proto::AgentInfo* ComposerModel::agentInfo() const
 {
-	const auto found = std::ranges::find(m_config.agents, m_controller.info().agent, &proto::AgentInfo::name);
-	return found == m_config.agents.end() ? nullptr : &*found;
+	const auto found = std::ranges::find(m_config.config().agents, m_controller.info().agent, &proto::AgentInfo::name);
+	return found == m_config.config().agents.end() ? nullptr : &*found;
 }
 
 const proto::ModelInfo* ComposerModel::modelInfo() const
 {
 	const proto::ModelRef& ref = m_controller.info().model;
-	const auto found = std::ranges::find_if(m_config.models, [&](const proto::ModelInfo& model) { return model.provider == ref.provider && model.id == ref.model; });
-	return found == m_config.models.end() ? nullptr : &*found;
+	const auto found = std::ranges::find_if(m_config.config().models, [&](const proto::ModelInfo& model) { return model.provider == ref.provider && model.id == ref.model; });
+	return found == m_config.config().models.end() ? nullptr : &*found;
 }
 
 QString ComposerModel::agentName() const
@@ -126,7 +122,7 @@ QString ComposerModel::agentColor() const
 int ComposerModel::agentIndex() const
 {
 	const proto::AgentInfo* agent = agentInfo();
-	return agent ? static_cast<int>(agent - m_config.agents.constData()) : NoAgentIndex;
+	return agent ? static_cast<int>(agent - m_config.config().agents.constData()) : NoAgentIndex;
 }
 
 QString ComposerModel::modelName() const
@@ -154,18 +150,6 @@ bool ComposerModel::variantAvailable() const
 {
 	const proto::ModelInfo* model = modelInfo();
 	return model && !model->variants.isEmpty();
-}
-
-QCoro::Task<> ComposerModel::loadConfig()
-{
-	const QPointer<ComposerModel> self(this); // the model can be gone when the answer arrives
-	const auto config = co_await m_backend.client().getConfig();
-	if(!self || !config)
-	{
-		co_return;
-	}
-	m_config = *config;
-	emit labelsChanged();
 }
 
 void ComposerModel::edit(const QString& text, int cursor)

@@ -70,8 +70,9 @@ struct Fixture
 {
 	Fixture()
 		: backend(Backend::Source(Backend::Mode::Remote{{fake.url(), u"token"_s}}), u"/work"_s)
+		, config(backend)
 		, controller(backend)
-		, composer(backend, controller, history)
+		, composer(config, controller, history)
 	{
 		fake.onRequest = [this](const QJsonObject& request) { answer(request); };
 		backend.start();
@@ -175,6 +176,7 @@ struct Fixture
 
 	FakeBackend fake;
 	Backend backend;
+	workspace::BackendConfig config;
 	SessionController controller;
 	compose::PromptHistory history;
 	ComposerModel composer;
@@ -620,7 +622,7 @@ void TestComposerModel::answersAfterTheModelIsGoneAreIgnored()
 		f.answer(request);
 	};
 	f.queue({queuedMessage(u"q1"_s, u"first"_s)});
-	auto gone = std::make_unique<ComposerModel>(f.backend, f.controller, f.history);
+	auto gone = std::make_unique<ComposerModel>(f.config, f.controller, f.history);
 	QTRY_COMPARE(gone->queue()->rowCount(), 1);
 	gone->edit(u"look at @sr"_s, 11);
 	QTRY_COMPARE(pending.size(), 1); // the file lookup waits a moment before it asks

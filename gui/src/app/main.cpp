@@ -5,10 +5,10 @@
 #include "app/notification_center_type.h"
 #include "app/workspace.h"
 #include "cli/command_line.h"
-#include "client/instance_files.h"
 #include "icons/app_icon.h"
 #include "icons/icon_provider.h"
 #include "notify/notifier.h"
+#include "workspace/state_paths.h"
 
 #include <QDir>
 #include <QGuiApplication>
@@ -119,7 +119,7 @@ int main(int argc, char* argv[])
 	}
 
 	// Outlives the engine, whose window refers to it.
-	Workspace workspace(options, refgui::client::stateDirectory() + u"/gui.json"_s);
+	Workspace workspace(options, refgui::workspace::stateFilePath(u"gui.json"_s));
 	Workspace::setInstance(&workspace);
 
 	// The interface follows the language setting; English is the fallback.

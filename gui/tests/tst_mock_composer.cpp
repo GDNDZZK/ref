@@ -41,8 +41,9 @@ private:
 	{
 		explicit Session(const QString& cwd)
 			: backend(Backend::Source(Backend::Mode::Mock{}), cwd)
+			, config(backend)
 			, controller(backend)
-			, composer(backend, controller, history)
+			, composer(config, controller, history)
 		{
 			backend.start();
 			QTRY_COMPARE_WITH_TIMEOUT(backend.state(), Backend::State::Connected, ReplyTimeoutMs);
@@ -62,6 +63,7 @@ private:
 		}
 
 		Backend backend;
+		refgui::workspace::BackendConfig config;
 		SessionController controller;
 		compose::PromptHistory history;
 		ComposerModel composer;

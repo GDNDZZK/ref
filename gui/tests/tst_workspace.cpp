@@ -696,7 +696,7 @@ void TestWorkspace::aRevivedTileLeavesOnItsOwnTimer()
 	TileStage stage(&tiles);
 	const int lingerMs = 400;
 	stage.setLingerMs(lingerMs);
-	ChatSession session(f.workspace->backend(), u"ses_x"_s);
+	ChatSession session(f.workspace->backend(), *f.workspace->config(), u"ses_x"_s);
 	tiles.setTiles({&session});
 	tiles.setTiles({}); // leaves
 	QTest::qWait(lingerMs / 2);
