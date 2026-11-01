@@ -442,13 +442,6 @@ impl HttpTransport {
             .await
             .map_err(|_| anyhow!("timed out"))??
             .ok_or_else(|| anyhow!("no initialize response"))?;
-        let reply = match reply {
-            Value::Array(items) => items
-                .into_iter()
-                .find(|m| contains_response(m, &id))
-                .unwrap_or(Value::Null),
-            other => other,
-        };
         if let Some(err) = reply.get("error") {
             return Err(rpc_error(err));
         }
@@ -683,9 +676,17 @@ async fn read_sse(
     }
 }
 
+/// The response for `id` in `msg` (a single message or a batch).
+fn find_response(msg: &Value, id: &Value) -> Option<Value> {
+    match msg {
+        Value::Array(items) => items.iter().find_map(|m| find_response(m, id)),
+        _ => contains_response(msg, id).then(|| msg.clone()),
+    }
+}
+
 /// Consume a POST response body (JSON or SSE), dispatching messages to `shared`.
-/// Returns the message containing the response for `id` once seen (reading stops
-/// there). With `intercept`, that message is returned instead of dispatched.
+/// Returns the response for `id` once seen (reading stops there). With `intercept`, the
+/// message holding it is not dispatched.
 async fn pump(
     shared: &Shared,
     resp: reqwest::Response,
@@ -696,12 +697,12 @@ async fn pump(
     let mut found = None;
     let mut handle = |msg: Value| -> bool {
         if let Some(id) = id
-            && contains_response(&msg, id)
+            && let Some(response) = find_response(&msg, id)
         {
             if !intercept {
-                shared.dispatch(msg.clone());
+                shared.dispatch(msg);
             }
-            found = Some(msg);
+            found = Some(response);
             return false;
         }
         shared.dispatch(msg);
