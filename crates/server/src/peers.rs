@@ -25,6 +25,9 @@ pub(crate) const CLOSE_SESSION: &str = "close_session";
 const PAGE_SIZE_DEFAULT: u64 = 10;
 const PAGE_SIZE_MAX: u64 = 50;
 
+/// Largest message `send_message` accepts.
+const MAX_MESSAGE_BYTES: usize = 100_000;
+
 /// Lengths (in characters) at which texts are cut: previews of messages, text parts and tool
 /// outputs in `read_session`, and session titles in `/peers`.
 const PREVIEW_CHARS: usize = 80;
@@ -296,8 +299,8 @@ fn send_message(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Result<Strin
     if text.trim().is_empty() {
         return Err("Error: message must not be empty.".into());
     }
-    if text.len() > 100_000 {
-        return Err("Error: message exceeds 100000 bytes.".into());
+    if text.len() > MAX_MESSAGE_BYTES {
+        return Err(format!("Error: message exceeds {MAX_MESSAGE_BYTES} bytes."));
     }
     let target = resolve(hub, to, Some(&s.id))?;
     let (id, queued) = deliver(hub, s, &target, text);
