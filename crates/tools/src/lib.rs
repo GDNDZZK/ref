@@ -13,7 +13,7 @@ mod delete;
 mod edit;
 mod find;
 mod grep;
-pub mod hashline;
+mod hashline;
 pub mod imgfit;
 mod read;
 mod util;

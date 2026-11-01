@@ -13,7 +13,7 @@ use ref_proto::ImageData;
 use std::io::Cursor;
 
 #[derive(Debug, Clone, Copy)]
-pub struct Limits {
+pub(crate) struct Limits {
     pub max_width: u32,
     pub max_height: u32,
     /// Target size of the encoded image.
@@ -38,7 +38,7 @@ impl Default for Limits {
 
 /// Result of [`fit`].
 #[derive(Debug, Clone)]
-pub struct Fitted {
+pub(crate) struct Fitted {
     /// Re-encoded image, or `None` when the original already fits and is kept as is.
     pub data: Option<Vec<u8>>,
     /// Mime type of `data` (of the original when `data` is `None`).
@@ -105,7 +105,7 @@ fn decode(bytes: &[u8], format: ImageFormat) -> Result<DynamicImage, String> {
 
 /// Fits `bytes` (png, jpeg, gif or webp) into `limits`. Errors if the image cannot be decoded.
 /// Animated GIFs that need re-encoding keep only their first frame.
-pub fn fit(bytes: &[u8], limits: &Limits) -> Result<Fitted, String> {
+pub(crate) fn fit(bytes: &[u8], limits: &Limits) -> Result<Fitted, String> {
     let (format, mime, ow, oh) = probe(bytes)?;
     let (max_w, max_h) = (limits.max_width.max(1), limits.max_height.max(1));
     let min_dim = limits.min_dimension.min(max_w).min(max_h);
@@ -285,9 +285,11 @@ fn guarded<T>(f: impl FnOnce() -> Result<T, String>) -> Option<T> {
 
 /// Result of [`clamp`].
 #[derive(Debug, Clone)]
-pub struct Clamped {
+struct Clamped {
     pub mime: &'static str,
     pub data: Vec<u8>,
+    /// Only the tests read the size.
+    #[cfg(test)]
     pub size: (u32, u32),
 }
 
@@ -303,7 +305,7 @@ const CLAMP_ATTEMPTS: usize = 4;
 /// `max_dim` or a base64 size over `max_b64` is resized to fit (PNG or JPEG quality 85, the
 /// smaller), shrinking by the overshoot for up to 4 passes. Returns `None` when the image already
 /// fits or re-encoding would not make it smaller.
-pub fn clamp(bytes: &[u8], max_dim: u32, max_b64: usize) -> Result<Option<Clamped>, String> {
+fn clamp(bytes: &[u8], max_dim: u32, max_b64: usize) -> Result<Option<Clamped>, String> {
     let (format, _, w, h) = probe(bytes)?;
     let max_dim = max_dim.max(1);
     let over_dim = w > max_dim || h > max_dim;
@@ -331,6 +333,7 @@ pub fn clamp(bytes: &[u8], max_dim: u32, max_b64: usize) -> Result<Option<Clampe
         best = Some(Clamped {
             mime,
             data,
+            #[cfg(test)]
             size: (tw, th),
         });
         if enc <= max_b64 || (tw, th) == (1, 1) {
