@@ -24,6 +24,7 @@ const MAX_BROWSER_MESSAGE: usize = 64 << 20;
 const CLOSE_BACKEND_UNAVAILABLE: u16 = 1011;
 /// "Going away": ref-web is shutting down.
 const CLOSE_GOING_AWAY: u16 = 1001;
+const SHUTDOWN_REASON: &str = "ref-web is shutting down";
 /// A close reason must fit a control frame (125 bytes) next to the 2-byte code.
 const MAX_CLOSE_REASON: usize = 123;
 
@@ -70,7 +71,7 @@ async fn tunnel(state: Arc<AppState>, mut browser: WebSocket) {
     let upstream = tokio::select! {
         r = state.upstream.connect() => r,
         _ = state.shutdown.cancelled() => {
-            close_browser(&mut browser, CLOSE_GOING_AWAY, "ref-web is shutting down").await;
+            close_browser(&mut browser, CLOSE_GOING_AWAY, SHUTDOWN_REASON).await;
             return;
         }
     };
@@ -96,7 +97,7 @@ async fn tunnel(state: Arc<AppState>, mut browser: WebSocket) {
         }
         Ended::Shutdown => {
             let _ = upstream.close(None).await;
-            close_browser(&mut browser, CLOSE_GOING_AWAY, "ref-web is shutting down").await;
+            close_browser(&mut browser, CLOSE_GOING_AWAY, SHUTDOWN_REASON).await;
         }
     }
 }
