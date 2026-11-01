@@ -413,6 +413,9 @@ fn merge_user_content(a: Value, b: Value) -> Value {
 // Streaming
 // ---------------------------------------------------------------------------
 
+/// Slot key base for tool-call deltas without an `index`; chosen above any real provider index.
+const SYNTHETIC_TOOL_KEY_BASE: u64 = 1_000_000;
+
 /// A streamed tool call, keyed by the provider's `index`.
 #[derive(Debug, Default)]
 struct ToolSlot {
@@ -550,7 +553,7 @@ impl ChatState {
             Some(i) => i,
             None => {
                 self.tools.push(ToolSlot {
-                    key: key.or(Some(1_000_000 + pos as u64)),
+                    key: key.or(Some(SYNTHETIC_TOOL_KEY_BASE + pos as u64)),
                     ..Default::default()
                 });
                 self.tools.len() - 1
