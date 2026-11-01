@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message as WsMsg;
 
-pub fn instance_path(dir: &Path, pid: u32) -> PathBuf {
+fn instance_path(dir: &Path, pid: u32) -> PathBuf {
     dir.join(format!("{pid}.json"))
 }
 
@@ -25,7 +25,7 @@ pub fn write_instance(dir: &Path, info: &InstanceInfo) -> std::io::Result<PathBu
 }
 
 /// Live instances (stale files of dead processes are removed), newest first.
-pub fn list_instances(dir: &Path) -> Vec<InstanceInfo> {
+fn list_instances(dir: &Path) -> Vec<InstanceInfo> {
     let mut out = Vec::new();
     let Ok(rd) = std::fs::read_dir(dir) else {
         return out;
@@ -61,7 +61,7 @@ pub fn pick_port(host: &str) -> Option<u16> {
     None
 }
 
-pub fn connect_url(i: &InstanceInfo) -> String {
+fn connect_url(i: &InstanceInfo) -> String {
     let host = match i.bind.as_str() {
         ref_proto::ANY_V4 | "" | "::" | "[::]" => ref_proto::LOOPBACK_V4.to_string(),
         h if h.contains(':') && !h.starts_with('[') => format!("[{h}]"),
@@ -79,7 +79,7 @@ fn idle_meaning(t: i64) -> String {
 }
 
 /// Connects, says Hello, sends `req`, returns the response result.
-pub async fn request(
+async fn request(
     i: &InstanceInfo,
     req: Request,
     timeout: Duration,
