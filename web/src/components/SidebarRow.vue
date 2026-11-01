@@ -19,6 +19,7 @@ import type { MenuItem } from './ContextMenu.vue'
 import Flourish from './Flourish.vue'
 import Icon from './Icon.vue'
 import SessionDot from './SessionDot.vue'
+import { ALERT_RING_REACH } from './iconMetrics.ts'
 
 const props = defineProps<{ info: SessionInfo; current: boolean; tile: boolean }>()
 const emit = defineEmits<{ open: []; close: []; rename: [name: string] }>()
@@ -50,7 +51,7 @@ const note = computed(() => {
       return undefined
   }
 })
-const location = computed(() => {
+const locationLabel = computed(() => {
   const elapsed = runningTime(props.info, now.value)
   return elapsed ? `${dirName(props.info.cwd)} · ${elapsed}` : dirName(props.info.cwd)
 })
@@ -131,7 +132,7 @@ function openMenu(event: MouseEvent): void {
     <span class="aside">
       <span class="status">
         <span v-if="attention" ref="mark" class="mark">
-          <Flourish ref="flourish" :ring-reach="2.5" />
+          <Flourish ref="flourish" :ring-reach="ALERT_RING_REACH" />
           <Icon v-if="state === 'permission'" icon="lock-16" class="lock" />
           <Icon v-else-if="state === 'question'" icon="question-16" class="lock" />
           <AlertBadge v-else :size="BADGE_SIZE" />
@@ -145,7 +146,7 @@ function openMenu(event: MouseEvent): void {
         <Icon icon="close-16" />
       </button>
     </span>
-    <span class="subtitle" :class="note?.tone">{{ note ? note.text : location }}</span>
+    <span class="subtitle" :class="note?.tone">{{ note ? note.text : locationLabel }}</span>
     <ContextMenu v-if="menu" :x="menu.x" :y="menu.y" :items="menuItems" @close="menu = undefined" />
   </div>
 </template>
