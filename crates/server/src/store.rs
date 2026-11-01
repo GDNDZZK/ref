@@ -118,7 +118,9 @@ impl Store {
             tracing::warn!("not persisting session with invalid id {:?}", p.info.id);
             return;
         }
-        let _ = self.tx.send(Cmd::Save(Box::new(p)));
+        if self.tx.send(Cmd::Save(Box::new(p))).is_err() {
+            tracing::warn!("session store is gone; save dropped");
+        }
     }
 
     /// Commits what is queued, then closes the database file for good (later saves are
@@ -140,10 +142,14 @@ impl Store {
     }
 
     pub fn exists(&self, id: &str) -> bool {
-        valid_id(id)
-            && self
-                .call(|r| Cmd::Exists(id.to_string(), r))
-                .unwrap_or(false)
+        if !valid_id(id) {
+            return false;
+        }
+        self.call(|r| Cmd::Exists(id.to_string(), r))
+            .unwrap_or_else(|e| {
+                tracing::error!("checking whether session {id} exists failed: {e}");
+                false
+            })
     }
 
     pub fn delete(&self, id: &str) -> Result<(), String> {
@@ -159,7 +165,7 @@ impl Store {
     }
 
     /// Persisted session infos (optionally only for `cwd`), newest first, at most `limit`.
-    pub fn list_for(&self, cwd: Option<String>, limit: Option<usize>) -> Vec<SessionInfo> {
+    pub(crate) fn list_for(&self, cwd: Option<String>, limit: Option<usize>) -> Vec<SessionInfo> {
         self.call(|reply| Cmd::List { cwd, limit, reply })
             .unwrap_or_else(|e| {
                 tracing::warn!("listing sessions failed: {e}");
@@ -194,7 +200,8 @@ impl std::io::Write for HashWriter {
 
 fn hash_json<T: Serialize>(v: &T) -> u64 {
     let mut w = HashWriter(std::hash::DefaultHasher::new());
-    let _ = serde_json::to_writer(&mut w, v);
+    // `HashWriter::write` never fails and the persisted types serialize infallibly.
+    serde_json::to_writer(&mut w, v).expect("persisted types serialize");
     w.0.finish()
 }
 
@@ -206,7 +213,9 @@ fn open(data_dir: &Path, path: &Path) -> Result<Connection, String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
+            tracing::warn!("cannot restrict permissions of {}: {e}", path.display());
+        }
     }
     conn.busy_timeout(DB_BUSY_TIMEOUT)
         .map_err(|e| e.to_string())?;
@@ -450,9 +459,14 @@ fn load(
     };
     let info: SessionInfo =
         serde_json::from_str(&info).map_err(|e| format!("Session {id} is corrupt: {e}"))?;
-    let extra: Extra = extra
-        .and_then(|x| serde_json::from_str(&x).ok())
-        .unwrap_or_default();
+    let extra: Extra = match extra.map(|x| serde_json::from_str(&x)) {
+        None => Extra::default(),
+        Some(Ok(e)) => e,
+        Some(Err(e)) => {
+            tracing::warn!(session = %id, "corrupt extra, using defaults: {e}");
+            Extra::default()
+        }
+    };
     let mut stmt = db
         .prepare_cached("SELECT seq, data FROM messages WHERE session_id = ?1 ORDER BY seq")
         .map_err(|e| e.to_string())?;
