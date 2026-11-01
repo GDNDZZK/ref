@@ -1280,7 +1280,7 @@ impl App {
             self.views.remove(&sid);
             self.watch.inputs.remove(&sid);
             if self.connected {
-                self.client.send(None, Request::Detach { session_id: sid });
+                self.client.notify(Request::Detach { session_id: sid });
             }
         }
         // No automatic focus: only drop it when the focused session left the split view.
@@ -1304,7 +1304,7 @@ impl App {
                 v.foreground = false;
             }
             self.views.remove(&old);
-            self.client.send(None, Request::Detach { session_id: old });
+            self.client.notify(Request::Detach { session_id: old });
         }
         if self.current.as_deref() != Some(sid) {
             self.sidebar_scroll = 0;
@@ -2730,7 +2730,7 @@ impl App {
             i.attached = i.attached.saturating_sub(1);
         }
         if self.connected {
-            self.client.send(None, Request::Detach { session_id: sid });
+            self.client.notify(Request::Detach { session_id: sid });
         }
     }
 
