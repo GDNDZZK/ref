@@ -4,8 +4,9 @@ use crate::error::stream_error;
 use crate::sse::{SseEvent, data_values};
 use crate::util::{
     Assembler, DEFAULT_ANTHROPIC_BASE, IMAGE_OMITTED, StreamEnd, StreamState, build_headers,
-    deep_merge, drive, endpoint, error_fields, normalize_call_id, normalize_history, opt_str,
-    opt_u64, parse_arguments, provider_header, ptr_u64, same_origin, session_headers, snake_keys,
+    deep_merge, drive, endpoint, error_fields, json_sse_headers, normalize_call_id,
+    normalize_history, opt_str, opt_u64, parse_arguments, provider_header, ptr_u64, same_origin,
+    session_headers, snake_keys,
 };
 use crate::{
     AssistantBlock, BlockKind, ChatMessage, LlmError, Model, Provider, Request, Response,
@@ -55,11 +56,8 @@ pub(crate) async fn stream(
 }
 
 fn request_headers(provider: &Provider, req: &Request) -> reqwest::header::HeaderMap {
-    let mut defaults = vec![
-        ("content-type".to_string(), "application/json".to_string()),
-        ("accept".to_string(), "text/event-stream".to_string()),
-        ("anthropic-version".to_string(), API_VERSION.to_string()),
-    ];
+    let mut defaults = json_sse_headers();
+    defaults.push(("anthropic-version".to_string(), API_VERSION.to_string()));
     let key = provider
         .api_key
         .as_deref()

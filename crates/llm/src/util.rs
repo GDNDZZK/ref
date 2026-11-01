@@ -142,6 +142,24 @@ pub(crate) fn arguments_string(arguments: &str) -> String {
     }
 }
 
+/// Default headers of every streaming request: JSON body, SSE response.
+pub(crate) fn json_sse_headers() -> Vec<(String, String)> {
+    vec![
+        ("content-type".to_string(), "application/json".to_string()),
+        ("accept".to_string(), "text/event-stream".to_string()),
+    ]
+}
+
+/// `authorization: Bearer <key>` when the provider has an API key.
+pub(crate) fn bearer_header(provider: &Provider) -> Option<(String, String)> {
+    let key = provider
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|k| !k.is_empty())?;
+    Some(("authorization".into(), format!("Bearer {key}")))
+}
+
 /// Session-affinity headers so gateways route a conversation to the same
 /// backend (improves prompt cache hits).
 pub(crate) fn session_headers(session_id: &str, names: &[&str]) -> Vec<(String, String)> {
