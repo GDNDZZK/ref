@@ -11,6 +11,9 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::Mutex;
 
+/// Time a server process gets to exit after its stdin is closed, before it is killed.
+const CLOSE_GRACE: Duration = Duration::from_secs(2);
+
 /// Maximum size of one incoming JSON-RPC line.
 const MAX_FRAME: usize = 16 * 1024 * 1024;
 
@@ -79,16 +82,16 @@ impl StdioTransport {
         Ok(())
     }
 
-    /// Close stdin, give the process 2s to exit, then kill it.
+    /// Close stdin, give the process [`CLOSE_GRACE`] to exit, then kill it.
     pub(crate) async fn close(&self) {
         drop(self.stdin.lock().await.take());
-        if let Some(mut child) = self.child.lock().await.take() {
-            match tokio::time::timeout(Duration::from_secs(2), child.wait()).await {
-                Ok(_) => {}
-                Err(_) => {
-                    let _ = child.kill().await;
-                }
-            }
+        if let Some(mut child) = self.child.lock().await.take()
+            && tokio::time::timeout(CLOSE_GRACE, child.wait())
+                .await
+                .is_err()
+            && let Err(e) = child.kill().await
+        {
+            tracing::debug!("killing the MCP server process failed: {e}");
         }
         self.reader.abort();
     }
