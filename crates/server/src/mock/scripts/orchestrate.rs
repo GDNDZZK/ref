@@ -166,7 +166,7 @@ fn reviewer_session(ctx: &Ctx) -> Value {
     json!({
         "name": REVIEWER.0,
         "agent": REVIEWER.1,
-        "prompt": format!("orch-review {}", ctx.session_id),
+        "prompt": format!("{SHORT_PREFIX}-review {}", ctx.session_id),
         "must_report": true,
     })
 }
@@ -504,7 +504,10 @@ mod tests {
         assert_eq!(calls[1].0, "create_session");
         assert_eq!(calls[1].1["name"], "reviewer");
         assert_eq!(calls[1].1["agent"], "reviewer");
-        assert_eq!(calls[1].1["prompt"], format!("orch-review {MAIN}"));
+        assert_eq!(
+            calls[1].1["prompt"],
+            format!("{SHORT_PREFIX}-review {MAIN}")
+        );
         assert_eq!(
             text(&report(&ctx(1, 4, &envelope()))),
             "Waiting for the review."
