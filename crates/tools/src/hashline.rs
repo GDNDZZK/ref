@@ -12,13 +12,13 @@ use std::sync::{Arc, LazyLock, Mutex};
 use xxhash_rust::xxh32::Xxh32;
 
 /// Full-file versions retained per path.
-pub const MAX_VERSIONS_PER_PATH: usize = 4;
+const MAX_VERSIONS_PER_PATH: usize = 4;
 /// Retained path count before LRU eviction.
-pub const MAX_PATHS: usize = 256;
+const MAX_PATHS: usize = 256;
 /// Global ceiling on retained snapshot bytes (estimated).
-pub const MAX_TOTAL_BYTES: usize = 64 * 1024 * 1024;
+const MAX_TOTAL_BYTES: usize = 64 * 1024 * 1024;
 /// Files larger than this are never snapshotted.
-pub const MAX_SNAPSHOT_FILE_BYTES: usize = 4 * 1024 * 1024;
+const MAX_SNAPSHOT_FILE_BYTES: usize = 4 * 1024 * 1024;
 
 /// Four-hex uppercase content tag of `text`.
 ///

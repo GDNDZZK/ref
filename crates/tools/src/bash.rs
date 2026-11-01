@@ -9,13 +9,10 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-pub const DEFAULT_TIMEOUT_SECS: u64 = 120;
-pub const MAX_TIMEOUT_SECS: u64 = 3600;
-/// Inline output budget; above this (or [`MAX_LINES`]) the middle is elided.
-pub const MAX_BYTES: usize = 50 * 1024;
-pub const MAX_LINES: usize = 2000;
-pub const HEAD_BYTES: usize = 20 * 1024;
-pub const TAIL_BYTES: usize = 30 * 1024;
+const DEFAULT_TIMEOUT_SECS: u64 = 120;
+const MAX_TIMEOUT_SECS: u64 = 3600;
+const HEAD_BYTES: usize = 20 * 1024;
+const TAIL_BYTES: usize = 30 * 1024;
 const HEAD_LINES: usize = 800;
 const TAIL_LINES: usize = 1200;
 /// How long to keep reading after the shell exited (background jobs may hold the pipe).
@@ -142,7 +139,7 @@ impl Collector {
         self.total_lines += piece.matches('\n').count();
         if self.spilled.is_none() && !self.spill_failed {
             self.mem.push_str(piece);
-            if self.mem.len() > MAX_BYTES {
+            if self.mem.len() > util::INLINE_OUTPUT_MAX_BYTES {
                 self.spill();
             }
             return;
@@ -191,7 +188,7 @@ impl Collector {
     /// Final text and (truncated, saved path).
     fn finish(mut self) -> (String, bool, Option<PathBuf>) {
         if self.spilled.is_none() && !self.spill_failed && self.head.is_empty() {
-            if self.mem.lines().count() <= MAX_LINES {
+            if self.mem.lines().count() <= util::INLINE_OUTPUT_MAX_LINES {
                 return (self.mem, false, None);
             }
             self.spill();
@@ -749,7 +746,7 @@ mod tests {
             "{}",
             &o.text[o.text.len() - 300..]
         );
-        assert!(o.text.len() < MAX_BYTES + 1024);
+        assert!(o.text.len() < util::INLINE_OUTPUT_MAX_BYTES + 1024);
         let path = m["output_path"].as_str().unwrap();
         let full = std::fs::read_to_string(path).unwrap();
         assert_eq!(full.lines().count(), 100000);
@@ -758,7 +755,7 @@ mod tests {
         // Many short lines under the byte budget: line cap applies.
         let o = bash(&c, json!({"command": "seq 1 3000"})).await;
         assert_eq!(o.meta.as_ref().unwrap()["truncated"], json!(true));
-        assert!(o.text.lines().count() <= MAX_LINES + 10);
+        assert!(o.text.lines().count() <= util::INLINE_OUTPUT_MAX_LINES + 10);
         if let Some(p) = o.meta.as_ref().unwrap()["output_path"].as_str() {
             std::fs::remove_file(p).unwrap();
         }

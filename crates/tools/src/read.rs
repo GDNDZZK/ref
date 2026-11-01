@@ -11,16 +11,16 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-pub const DEFAULT_LIMIT: usize = 500;
-pub const MAX_LIMIT: usize = 3000;
+const DEFAULT_LIMIT: usize = 500;
+const MAX_LIMIT: usize = 3000;
 /// Byte budget for one page of numbered rows.
-pub const PAGE_BYTES: usize = 60 * 1024;
+const PAGE_BYTES: usize = 60 * 1024;
 /// Display cap per line (chars); longer lines end with `…` and are not counted as seen.
-pub const MAX_LINE_CHARS: usize = 1000;
-pub const MAX_DIR_ENTRIES: usize = 500;
-pub const MAX_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
+const MAX_LINE_CHARS: usize = 1000;
+const MAX_DIR_ENTRIES: usize = 500;
+const MAX_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
 /// Larger files are refused (use grep / bash to inspect them).
-pub const MAX_READ_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_READ_BYTES: u64 = 64 * 1024 * 1024;
 
 pub fn spec() -> ToolSpec {
     ToolSpec {

@@ -7,6 +7,10 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+/// Inline output budget of bash and webfetch; above this (or the line limit) the middle is elided.
+pub const INLINE_OUTPUT_MAX_BYTES: usize = 50 * 1024;
+pub const INLINE_OUTPUT_MAX_LINES: usize = 2000;
+
 // ---------------------------------------------------------------------------
 // Arguments
 // ---------------------------------------------------------------------------
