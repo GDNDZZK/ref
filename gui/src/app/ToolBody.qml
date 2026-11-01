@@ -34,7 +34,7 @@ Item {
 			return hasLines && !call.failed && call.toolState === ToolState.done ? "ReadBody.qml" : genericFile
 		if (SessionTools.isSessionTool(toolName))
 			return "SessionBody.qml"
-		return bodyFiles[toolName] ?? genericFile
+		return Fields.has(bodyFiles, toolName) ? bodyFiles[toolName] : genericFile
 	}
 
 	// A body needs `call` as soon as it is made, so it goes in as an initial property.

@@ -17,7 +17,7 @@ ToolBodyBase {
 
 		Icon {
 			anchors.verticalCenter: parent.verticalCenter
-			name: SessionTools.icons[body.call.toolName] ?? "chat"
+			name: SessionTools.iconOf(body.call.toolName)
 			color: Theme.info
 		}
 		Text {

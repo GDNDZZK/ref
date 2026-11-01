@@ -8,6 +8,11 @@ QtObject {
 		return typeof object[key] === "string" ? object[key] : ""
 	}
 
+	// Whether object has the key itself, not from Object.prototype ("constructor", "toString").
+	function has(object, key) {
+		return Object.prototype.hasOwnProperty.call(object, key)
+	}
+
 	function hasNumber(object, key) {
 		return typeof object[key] === "number"
 	}

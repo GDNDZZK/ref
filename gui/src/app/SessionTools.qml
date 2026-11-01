@@ -13,6 +13,11 @@ QtObject {
 	})
 
 	function isSessionTool(toolName) {
-		return icons[toolName] !== undefined
+		return Fields.has(icons, toolName)
+	}
+
+	// The icon of a session tool; the chat icon for any other name.
+	function iconOf(toolName) {
+		return isSessionTool(toolName) ? icons[toolName] : "chat"
 	}
 }
