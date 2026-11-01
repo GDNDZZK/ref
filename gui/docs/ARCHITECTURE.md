@@ -33,7 +33,7 @@ proto      线协议：类型、解析、请求构造（只依赖 Qt Core）
 规则如下：
 
 - 每一层只调用表里列出的层，不跨层。`app` 不调用 `client`：连接的状态、启停、Hello 信息和 toast 帧都经 `workspace::Connection`；`app` 只把 `Connection::backend()` 交给下层对象的构造函数（接线），自己不调用它。`composer` 也不调用 `client`：按会话的请求走 `SessionController`，配置读 `BackendConfig`。
-- `proto` 的数据类型（以及 `client::Result`）是纯数据，各层都可以用；规则管的是调用。
+- `proto` 的数据类型，以及 `client/result.h`（请求结果 `Result` 和表示断线的 `NotConnected`、`ConnectionClosed`、`isConnectionLost`），是纯数据，不做 I/O，各层都可以用；规则管的是调用。
 - `proto` 不知道 Qt 网络；`client` 不知道会话怎么显示；`session` 和 `workspace` 互不调用。
 - QML 只看到 `app` 注册的类型（`Workspace`、`ChatSession`、`ComposerModel` 等，见 `qml_types.h`）。`session`、`client`、`proto` 里的类型不注册给 QML，所以它们的接口改了也不会波及界面。
 - 没有全局状态。`Workspace` 持有一个 `Connection`（也就有一个 `Backend`），每个 `ChatSession` 持有自己的 `SessionController` 和 `ComposerModel`；分屏就是多建几个 `ChatSession`。
@@ -182,7 +182,7 @@ Delta 指向还没见过的 part 时，按 TUI 的 `apply_delta` 规则补建（
 
 ### ChatSession 与 SystemFonts
 
-- `ChatSession` 是 QML 唯一能直接访问的业务对象，它持有 `Backend` 和 `SessionController`（析构时先 `shutdown()`，让挂起的请求先失败，再销毁它们依赖的成员）。`main()` 解析命令行后创建它，通过 `setInitialProperties` 交给 `Main.qml` 的 `required property ChatSession session`。QML 不能自己创建 ChatSession（`QML_UNCREATABLE`）。
+- `ChatSession` 是 QML 唯一能直接访问的业务对象，它持有 `SessionController` 和 `ComposerModel`；`Backend` 在 `Workspace` 的 `Connection` 里（`Workspace` 析构时先关闭连接，让挂起的请求先失败，再销毁它们依赖的会话）。`main()` 解析命令行后创建它，通过 `setInitialProperties` 交给 `Main.qml` 的 `required property ChatSession session`。QML 不能自己创建 ChatSession（`QML_UNCREATABLE`）。
 - 后端一连上就按命令行打开会话（新建、继续上一个或按 id 附着）；连接状态和失败信息通过 `statusText` 显示在窗口顶部的状态条里，`ready`（已连接且有会话）为假时输入框不能发送。
 - `SystemFonts` 只做一件事：把系统等宽字体告诉 QML。`"monospace"` 这种字体名只是 fontconfig 的别名，在 Windows 和 macOS 上无效，所以要用 `QFontDatabase::systemFont(FixedFont)` 去取。
 
