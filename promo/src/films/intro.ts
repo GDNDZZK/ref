@@ -81,8 +81,10 @@ const standaloneCut: Cut = {
 // local address. The text runs from column 3 (the bar) to 33 (the colon).
 const RETRY_CLOSEUP = { scale: 2.5, x: 18.6 / 150, y: 17.5 / 40, rows: 1.3, cols: 31.4 }
 const RETRY_CLOSEUP_AT = { x: 520, y: 480 }
-// f2: the delete row with Cancel and its countdown, and the bash row above it.
-const DELAY_ROW_LOOK = { at: 0, x: 0.585, y: 0.278, zoom: 2 }
+// f2: the delete row with Cancel and its countdown, and the bash row above it; wide enough for
+// the reply's first word on the left and the "12:01:28 Undo Copy" row on the right (picture x
+// 0.306 to 0.896).
+const DELAY_ROW_LOOK = { at: 0, x: 0.6, y: 0.3, zoom: 1.62 }
 // f3: the model dialog of the real-backend take (cast marker "models": ctrl+x m is pressed). The
 // dialog is open for 3.0 s (capture/real.ts); the callouts end as it closes, before the cut's tail.
 const MODEL_DIALOG = { mark: 'models', offset: -0.3 }
