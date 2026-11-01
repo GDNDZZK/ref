@@ -6,6 +6,7 @@ import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 
 import { useI18n } from 'vue-i18n'
 import { oneLine } from '../model/oneLine.ts'
 import type { Todo } from '../proto/generated'
+import { placeInPane } from '../shell/popoverPlacement.ts'
 import { currentTodo, todoProgress } from '../shell/sessionRow.ts'
 import Icon from './Icon.vue'
 import TodoList from './TodoList.vue'
@@ -15,28 +16,31 @@ const props = defineProps<{ sessionId: string; todos: readonly Todo[] | undefine
 
 const POPOVER_GAP = 6 // between the button and the popover
 const POPOVER_WIDTH = 360
-const VIEWPORT_MARGIN = 8
+const EDGE_MARGIN = 8
 
 const { t } = useI18n()
 const button = useTemplateRef<HTMLElement>('button')
 const popover = useTemplateRef<HTMLElement>('popover')
 const open = ref(false)
-const position = ref({ left: 0, bottom: 0 })
+const position = ref({ left: 0, width: POPOVER_WIDTH, bottom: 0 })
 
 const progress = computed(() => todoProgress(props.todos))
 const current = computed(() => currentTodo(props.todos))
 const list = computed(() => [...(props.todos ?? [])])
 const countText = computed(() => (progress.value ? `${progress.value.done}/${progress.value.total}` : ''))
 
+// Inside the pane the button belongs to (a split tile, or the single pane), else the viewport.
 function place(): void {
   const rect = button.value?.getBoundingClientRect()
   if (!rect) return
-  const left = Math.min(rect.left, window.innerWidth - POPOVER_WIDTH - VIEWPORT_MARGIN)
-  const next = {
-    left: Math.max(VIEWPORT_MARGIN, left),
-    bottom: window.innerHeight - rect.top + POPOVER_GAP,
+  const paneRect = button.value?.closest('[data-pane]')?.getBoundingClientRect()
+  const pane = paneRect ?? { left: 0, right: window.innerWidth }
+  const { left, width } = placeInPane(rect, pane, POPOVER_WIDTH, EDGE_MARGIN)
+  const bottom = window.innerHeight - rect.top + POPOVER_GAP
+  const current = position.value
+  if (left !== current.left || width !== current.width || bottom !== current.bottom) {
+    position.value = { left, width, bottom }
   }
-  if (next.left !== position.value.left || next.bottom !== position.value.bottom) position.value = next
 }
 
 // The button moves when the layout around it does (a tile gets the focus and unfolds its input
@@ -120,7 +124,7 @@ onBeforeUnmount(unlisten)
         class="todo-popover"
         role="region"
         :aria-label="t('todo.title', { done: progress.done, total: progress.total })"
-        :style="{ left: `${position.left}px`, bottom: `${position.bottom}px` }"
+        :style="{ left: `${position.left}px`, width: `${position.width}px`, bottom: `${position.bottom}px` }"
       >
         <div class="head">{{ t('todo.title', { done: progress.done, total: progress.total }) }}</div>
         <TodoList :todos="list" />
@@ -175,7 +179,6 @@ onBeforeUnmount(unlisten)
 .todo-popover {
   position: fixed;
   z-index: 20;
-  width: min(360px, calc(100vw - 16px));
   max-height: 50vh;
   overflow-y: auto;
   border-radius: var(--radius);
