@@ -399,6 +399,28 @@ fn render_user(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
     rows
 }
 
+/// Wraps `text` into rows of `wrap_width` columns, each led by `lead_pad` spaces and a `┃ ` bar.
+pub fn bar_rows(
+    text: &str,
+    style: Style,
+    bar: Color,
+    wrap_width: usize,
+    lead_pad: usize,
+) -> Vec<Row> {
+    text::wrap_spans_flags(&[Span::styled(text.to_string(), style)], wrap_width)
+        .into_iter()
+        .enumerate()
+        .map(|(i, (line, soft_space))| {
+            let mut lead = Vec::new();
+            if lead_pad > 0 {
+                lead.push(Span::raw(" ".repeat(lead_pad)));
+            }
+            lead.push(Span::styled("┃ ", theme::fg(bar)));
+            Row::new(line).soft_sp(i > 0, soft_space).indent(lead)
+        })
+        .collect()
+}
+
 fn render_user_compact(m: &Message, _cx: &Ctx<'_>, w: usize, color: Color) -> Vec<Row> {
     if m.source == MessageSource::Compaction {
         // Compact divider: `── ◇ compacted 14:02:11 ─────`.
@@ -440,19 +462,7 @@ fn render_user_compact(m: &Message, _cx: &Ctx<'_>, w: usize, color: Color) -> Ve
         6
     };
     for l in lines.iter().take(max) {
-        for (i, (wl, sp)) in text::wrap_spans_flags(
-            &[Span::styled(l.to_string(), theme::text())],
-            w.saturating_sub(2),
-        )
-        .into_iter()
-        .enumerate()
-        {
-            rows.push(
-                Row::new(wl)
-                    .indent(vec![Span::styled("┃ ", theme::fg(color))])
-                    .soft_sp(i > 0, sp),
-            );
-        }
+        rows.extend(bar_rows(l, theme::text(), color, w.saturating_sub(2), 0));
     }
     if lines.len() > max {
         rows.push(
@@ -604,18 +614,13 @@ fn render_assistant(m: &Message, cx: &Ctx<'_>, w: usize) -> Vec<Row> {
             } else {
                 logical.to_string()
             };
-            for (i, (l, sp)) in text::wrap_spans_flags(
-                &[Span::styled(content, theme::fg(theme::ERROR))],
+            rows.extend(bar_rows(
+                &content,
+                theme::fg(theme::ERROR),
+                theme::ERROR,
                 inner.saturating_sub(2),
-            )
-            .into_iter()
-            .enumerate()
-            {
-                rows.push(Row::new(l).soft_sp(i > 0, sp).indent(vec![
-                    Span::raw(" ".repeat(pad)),
-                    Span::styled("┃ ", theme::fg(theme::ERROR)),
-                ]));
-            }
+                pad,
+            ));
         }
     }
     if cx.compact {

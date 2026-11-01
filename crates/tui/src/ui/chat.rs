@@ -600,18 +600,13 @@ fn tail_rows(view: &SessionView, env: &Env<'_>, w: usize) -> Vec<Row> {
             theme::spinner(env.tick),
             text::one_line(error)
         );
-        for (i, (l, sp)) in text::wrap_spans_flags(
-            &[Span::styled(msg, theme::fg(theme::WARNING))],
+        rows.extend(message::bar_rows(
+            &msg,
+            theme::fg(theme::WARNING),
+            theme::WARNING,
             w.saturating_sub(4),
-        )
-        .into_iter()
-        .enumerate()
-        {
-            rows.push(Row::new(l).soft_sp(i > 0, sp).indent(vec![
-                Span::raw("  "),
-                Span::styled("┃ ", theme::fg(theme::WARNING)),
-            ]));
-        }
+            2,
+        ));
     }
     if let SessionStatus::Compacting = view.info.status {
         rows.push(Row::blank());
@@ -637,18 +632,13 @@ fn tail_rows(view: &SessionView, env: &Env<'_>, w: usize) -> Vec<Row> {
             .is_some_and(|m| m.error.as_deref() == Some(e.as_str()))
     {
         rows.push(Row::blank());
-        for (i, (l, sp)) in text::wrap_spans_flags(
-            &[Span::styled(text::one_line(e), theme::fg(theme::ERROR))],
+        rows.extend(message::bar_rows(
+            &text::one_line(e),
+            theme::fg(theme::ERROR),
+            theme::ERROR,
             w.saturating_sub(4),
-        )
-        .into_iter()
-        .enumerate()
-        {
-            rows.push(Row::new(l).soft_sp(i > 0, sp).indent(vec![
-                Span::raw("  "),
-                Span::styled("┃ ", theme::fg(theme::ERROR)),
-            ]));
-        }
+            2,
+        ));
     }
     if !view.queued.is_empty() {
         rows.push(Row::blank());
