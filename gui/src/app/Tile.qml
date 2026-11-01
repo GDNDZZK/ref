@@ -10,6 +10,7 @@ Item {
 	required property string sessionId
 	required property bool leaving
 	required property int place
+	required property bool anyZoomed // whether any tile is zoomed
 
 	// Where the grid wants the tile, and whether it is the zoomed one.
 	property rect slot: Qt.rect(0, 0, 0, 0)
@@ -21,7 +22,7 @@ Item {
 	readonly property bool zoomed: Workspace.zoomedId === sessionId
 	readonly property bool expanded: zoomed || takeover || growing
 	readonly property bool fading: leaving && !growing
-	readonly property bool othersZoomed: Workspace.zoomedId !== "" && !zoomed
+	readonly property bool othersZoomed: anyZoomed && !zoomed
 	// Whether the tile moves between its slot and the whole area (slowly) or just reflows.
 	property bool travelling: expanded
 	readonly property int travelDuration: travelling || leaving ? Motion.slow : Motion.standard
