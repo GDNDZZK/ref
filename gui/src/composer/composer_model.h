@@ -77,6 +77,8 @@ public:
 	// The color the agent's configuration names, or empty; with the agent's place in the list
 	// the view picks one from the palette.
 	QString agentColor() const;
+	// The agent's place in the config's agent list, NoAgentIndex while it is not there.
+	static constexpr int NoAgentIndex = -1;
 	int agentIndex() const;
 	QString modelName() const;
 	// Provider and model id, for a tooltip.

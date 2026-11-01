@@ -194,6 +194,7 @@ class TestComposerModel : public QObject
 
 private slots:
 	void labelsFollowTheSessionAndTheConfiguration();
+	void agentMissingFromTheConfigurationHasNoIndex();
 	void sendsThePromptAndEmptiesTheDraft();
 	void failedPromptComesBack();
 	void bangStartsShellMode();
@@ -229,6 +230,19 @@ void TestComposerModel::labelsFollowTheSessionAndTheConfiguration()
 	QCOMPARE(f.composer.variant(), u"high"_s);
 	QVERIFY(f.composer.variantAvailable());
 	QVERIFY(f.composer.isReady());
+}
+
+void TestComposerModel::agentMissingFromTheConfigurationHasNoIndex()
+{
+	Fixture f;
+	QJsonObject info = infoJson();
+	info.insert(u"agent"_s, u"ghost"_s);
+
+	f.fake.send({{u"kind"_s, u"event"_s}, {u"session_id"_s, u"ses_1"_s}, {u"event"_s, QJsonObject{{u"type"_s, u"info"_s}, {u"info"_s, info}}}});
+
+	QTRY_COMPARE(f.composer.agentName(), u"ghost"_s);
+	QCOMPARE(f.composer.agentIndex(), ComposerModel::NoAgentIndex);
+	QCOMPARE(f.composer.agentColor(), QString());
 }
 
 void TestComposerModel::sendsThePromptAndEmptiesTheDraft()

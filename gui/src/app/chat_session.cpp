@@ -77,7 +77,12 @@ QCoro::Task<refgui::client::Result<QByteArray>> ChatSession::fetchImage(QString 
 	{
 		co_return std::unexpected(image.error());
 	}
-	co_return QByteArray::fromBase64(image->data.toLatin1());
+	QByteArray::FromBase64Result decoded = QByteArray::fromBase64Encoding(image->data.toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
+	if(!decoded)
+	{
+		co_return std::unexpected(u"invalid image data"_s);
+	}
+	co_return std::move(decoded.decoded);
 }
 
 QCoro::Task<refgui::client::Result<void>> ChatSession::detach()
