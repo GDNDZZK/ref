@@ -1,4 +1,5 @@
 #include "client/backend.h"
+#include "coro_test.h"
 #include "fake_backend.h"
 #include "workspace/backend_config.h"
 #include "workspace/session_directory.h"
@@ -19,7 +20,8 @@ using refgui::workspace::SessionListModel;
 namespace
 {
 
-constexpr int RefetchTimeoutMs = 3000; // the history is refetched a second after a change
+constexpr int RefetchTimeoutMs = 3000;   // the history is refetched a second after a change
+constexpr int ReconnectTimeoutMs = 8000; // the backend retries after a second
 
 proto::SessionInfo session(const QString& id, qint64 created, qint64 updated = 0)
 {
@@ -73,6 +75,7 @@ private slots:
 	void marksCurrentAndTiles();
 	void directoryLoadsAndFollowsFrames();
 	void directoryHistoryHidesLiveSessions();
+	void watchAllIsSentAgainAfterAReconnect();
 	void configLoadsAgentsModelsAndMcp();
 };
 
@@ -321,6 +324,47 @@ void TstSessionList::directoryHistoryHidesLiveSessions()
 	QTRY_COMPARE(directory.history().count(), 1);
 	fake.send({{u"kind"_s, u"sessions"_s}, {u"sessions"_s, QJsonArray()}});
 	QTRY_COMPARE_WITH_TIMEOUT(directory.history().count(), 2, RefetchTimeoutMs);
+}
+
+void TstSessionList::watchAllIsSentAgainAfterAReconnect()
+{
+	FakeBackend fake;
+	fake.onRequest = [&fake](const QJsonObject& request) {
+		const QString op = request.value(u"op"_s).toString();
+		if(op == u"list_sessions"_s || op == u"list_history"_s || op == u"watch_all"_s)
+		{
+			fake.respond(request, {{u"sessions"_s, QJsonArray()}});
+		}
+	};
+	const auto requestsOf = [&fake](const QString& op) {
+		QList<QJsonObject> found;
+		for(const QJsonObject& request : fake.requests())
+		{
+			if(request.value(u"op"_s).toString() == op)
+			{
+				found.append(request);
+			}
+		}
+		return found;
+	};
+	Backend backend(Backend::Source(Backend::Mode::Remote{{fake.url(), u"token"_s}}), u"/work"_s);
+	SessionDirectory directory(backend);
+	backend.start();
+	QTRY_COMPARE(backend.state(), Backend::State::Connected);
+
+	QVERIFY(await(directory.setWatchAll(true)).value().has_value());
+	fake.socket()->close();
+
+	QTRY_COMPARE_WITH_TIMEOUT(requestsOf(u"watch_all"_s).size(), 2, ReconnectTimeoutMs);
+	QVERIFY(requestsOf(u"watch_all"_s).last().value(u"enabled"_s).toBool());
+
+	// Switched off, nothing is sent after the next reconnect.
+	QVERIFY(await(directory.setWatchAll(false)).value().has_value());
+	const qsizetype listsBefore = requestsOf(u"list_sessions"_s).size();
+	fake.socket()->close();
+	QTRY_COMPARE_WITH_TIMEOUT(requestsOf(u"list_sessions"_s).size(), listsBefore + 1, ReconnectTimeoutMs);
+	QCOMPARE(requestsOf(u"watch_all"_s).size(), 3);
+	backend.shutdown();
 }
 
 void TstSessionList::configLoadsAgentsModelsAndMcp()

@@ -247,7 +247,6 @@ private:
 	static void logDropped(const refgui::client::Result<void>& result, QLatin1StringView action, const QString& sessionId);
 	template<typename T, typename OnOk>
 	QCoro::Task<> perform(QCoro::Task<refgui::client::Result<T>> request, Reply reply, OnOk onOk);
-	QVariant applyInfo(const refgui::proto::SessionInfo& info);
 	void exportTo(const QString& sessionId, const QString& path, Reply reply);
 	void peerText(const QString& sessionId, const QString& command, const QString& args, Reply reply);
 
