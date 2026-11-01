@@ -18,18 +18,25 @@ use super::editor::Editor;
 use super::text::{self, width};
 use super::theme;
 
-pub const CUSTOM_LABEL: &str = "Type your own answer";
+const CUSTOM_LABEL: &str = "Type your own answer";
 const CONFIRM_LABEL: &str = "Confirm";
 const NOT_ANSWERED: &str = "(not answered)";
 const DEFAULT_TAG: &str = " (default)";
-const TICK: &str = " ✓";
+/// Marks a chosen answer.
+const CHECK: &str = "✓";
 const POINTER: &str = "› ";
 const NO_POINTER: &str = "  ";
 const MIN_WIDTH: u16 = 30;
 const MAX_WIDTH: u16 = 90;
 /// Borders, the blank row and the hint row around the body.
 const CHROME_ROWS: usize = 4;
+const MIN_TAB_LABEL: usize = 3;
 const MAX_TAB_LABEL: usize = 18;
+/// The dialog height is kept within these rows.
+const MIN_DIALOG_ROWS: u16 = 8;
+const MAX_DIALOG_ROWS: u16 = 36;
+/// Rows of the tab bar and the gap below it.
+const TAB_BAR_ROWS: usize = 2;
 
 /// What a key did to the dialog.
 #[derive(Debug, PartialEq)]
@@ -58,7 +65,6 @@ pub struct QuestionView {
     pub submitting: bool,
     /// Why the backend refused the answers.
     pub error: Option<String>,
-    pub rect: Rect,
     pub(super) questions: Vec<Question>,
     answers: Vec<Answer>,
     /// Current tab; `questions.len()` is the confirm tab.
@@ -94,7 +100,6 @@ impl QuestionView {
             opened: Instant::now(),
             submitting: false,
             error: None,
-            rect: Rect::default(),
             questions: request.questions.clone(),
             answers,
             tab: 0,
@@ -107,7 +112,7 @@ impl QuestionView {
     }
 
     /// One single-choice question: no tabs, choosing submits.
-    pub fn is_simple(&self) -> bool {
+    fn is_simple(&self) -> bool {
         self.questions.len() == 1 && !self.questions[0].multiple
     }
 
@@ -214,7 +219,7 @@ impl QuestionView {
     }
 
     /// Takes row `row` of the current question: picks or toggles an option, or starts typing.
-    pub fn choose(&mut self, row: usize) -> Outcome {
+    fn choose(&mut self, row: usize) -> Outcome {
         let q = self.tab;
         let question = &self.questions[q];
         if row >= question.options.len() {
@@ -250,9 +255,7 @@ impl QuestionView {
     }
 
     fn edit_key(&mut self, k: &KeyEvent) -> Outcome {
-        let Some(editor) = self.edit.as_mut() else {
-            return Outcome::Open;
-        };
+        let editor = self.edit.as_mut().expect("edit_key runs while editing");
         match k.code {
             KeyCode::Esc => self.edit = None,
             KeyCode::Enter => {
@@ -310,6 +313,13 @@ struct Body {
     edit_at: Option<(usize, usize)>,
 }
 
+/// First body line shown: keeps the cursor row in view.
+fn scroll_offset(body: &Body, body_h: usize) -> usize {
+    body.cursor_line
+        .saturating_sub(body_h.saturating_sub(1))
+        .min(body.lines.len().saturating_sub(body_h))
+}
+
 impl QuestionView {
     pub fn draw(&mut self, buf: &mut Buffer, screen: Rect, session_name: Option<&str>) {
         let t = open_progress(self.opened);
@@ -319,11 +329,13 @@ impl QuestionView {
         let body = self.body(iw);
         let tabs = !self.is_simple();
         let extra = usize::from(self.error.is_some());
-        let head = if tabs { 2 } else { 0 };
-        let max_h = screen.height.saturating_sub(2).clamp(8, 36) as usize;
+        let head = if tabs { TAB_BAR_ROWS } else { 0 };
+        let max_h = screen
+            .height
+            .saturating_sub(2)
+            .clamp(MIN_DIALOG_ROWS, MAX_DIALOG_ROWS) as usize;
         let h = (body.lines.len() + head + extra + CHROME_ROWS).min(max_h);
         let r = frame(buf, screen, w, h as u16, &title, t);
-        self.rect = r;
         let inner = Rect::new(
             r.x + 2,
             r.y + 1,
@@ -338,31 +350,13 @@ impl QuestionView {
         }
         let body_y = inner.y + head as u16;
         let body_h = (inner.height as usize).saturating_sub(head + extra + 2);
-        let scroll = body
-            .cursor_line
-            .saturating_sub(body_h.saturating_sub(1))
-            .min(body.lines.len().saturating_sub(body_h));
+        let scroll = scroll_offset(&body, body_h);
         for (i, line) in body.lines.iter().skip(scroll).take(body_h).enumerate() {
             buf.set_line(inner.x, body_y + i as u16, line, inner.width);
         }
-        for (line, row) in &body.row_lines {
-            if *line >= scroll && *line < scroll + body_h {
-                self.row_hits.push((body_y + (*line - scroll) as u16, *row));
-            }
-        }
-        if let Some((line, col)) = body.edit_at
-            && line >= scroll
-            && line < scroll + body_h
-            && let Some(editor) = self.edit.as_mut()
-        {
-            let field = Rect::new(
-                inner.x + col as u16,
-                body_y + (line - scroll) as u16,
-                inner.width.saturating_sub(col as u16),
-                1,
-            );
-            self.cursor_at = editor.draw(buf, field, "your answer", true);
-        }
+        let visible = scroll..scroll + body_h;
+        self.record_hits(&body, &visible, body_y);
+        self.place_editor(buf, &body, &visible, inner, body_y);
         let mut y = inner.y + inner.height.saturating_sub(1);
         buf.set_line(inner.x, y, &self.hint(), inner.width);
         if let Some(e) = &self.error {
@@ -370,6 +364,43 @@ impl QuestionView {
             let msg = text::truncate(e, inner.width as usize);
             buf.set_string(inner.x, y, msg, theme::fg(theme::ERROR));
         }
+    }
+
+    /// Records the click zones of the option rows that are on screen.
+    fn record_hits(&mut self, body: &Body, visible: &std::ops::Range<usize>, body_y: u16) {
+        for (line, row) in &body.row_lines {
+            if visible.contains(line) {
+                self.row_hits
+                    .push((body_y + (*line - visible.start) as u16, *row));
+            }
+        }
+    }
+
+    /// Draws the typing field in place of the custom row and puts the cursor in it.
+    fn place_editor(
+        &mut self,
+        buf: &mut Buffer,
+        body: &Body,
+        visible: &std::ops::Range<usize>,
+        inner: Rect,
+        body_y: u16,
+    ) {
+        let Some((line, col)) = body.edit_at else {
+            return;
+        };
+        if !visible.contains(&line) {
+            return;
+        }
+        let Some(editor) = self.edit.as_mut() else {
+            return;
+        };
+        let field = Rect::new(
+            inner.x + col as u16,
+            body_y + (line - visible.start) as u16,
+            inner.width.saturating_sub(col as u16),
+            1,
+        );
+        self.cursor_at = editor.draw(buf, field, "your answer", true);
     }
 
     fn title(&self, session_name: Option<&str>) -> String {
@@ -387,10 +418,13 @@ impl QuestionView {
     fn draw_tabs(&mut self, buf: &mut Buffer, inner: Rect) {
         let n = self.tab_count();
         let per_tab = (inner.width as usize).saturating_sub(n) / n;
-        let max_label = per_tab.saturating_sub(2).clamp(3, MAX_TAB_LABEL);
+        let max_label = per_tab
+            .saturating_sub(2)
+            .clamp(MIN_TAB_LABEL, MAX_TAB_LABEL);
         self.tab_y = inner.y;
         let mut x = inner.x;
         for i in 0..n {
+            let is_confirm = i == n - 1;
             let label = match self.questions.get(i) {
                 Some(q) => text::truncate(&q.header, max_label),
                 None => CONFIRM_LABEL.to_string(),
@@ -401,7 +435,7 @@ impl QuestionView {
                     .fg(theme::PANEL)
                     .bg(theme::PRIMARY)
                     .add_modifier(Modifier::BOLD)
-            } else if i == n - 1 || self.is_answered(i) {
+            } else if is_confirm || self.is_answered(i) {
                 theme::text()
             } else {
                 theme::fg(theme::DIM)
@@ -476,7 +510,6 @@ impl QuestionView {
             if on_cursor {
                 body.cursor_line = first;
             }
-            let is_custom = row >= question.options.len();
             let (marker, checked) = self.marker(q, row);
             let prefix = format!("{}{marker}", if on_cursor { POINTER } else { NO_POINTER });
             let marker_style = if checked {
@@ -495,47 +528,71 @@ impl QuestionView {
                     if on_cursor { POINTER } else { NO_POINTER },
                     theme::fg(theme::PRIMARY),
                 ),
-                Span::styled(marker.clone(), marker_style),
+                Span::styled(marker, marker_style),
             ];
+            let is_custom = row >= question.options.len();
             if is_custom {
-                match (&self.edit, self.custom_text(q)) {
-                    (Some(_), _) => body.edit_at = Some((first, width(&prefix))),
-                    (None, Some(text)) => {
-                        spans.push(Span::styled(format!("{CUSTOM_LABEL}: "), theme::muted()));
-                        spans.push(Span::styled(text::one_line(text), label_style));
-                    }
-                    (None, None) => spans.push(Span::styled(CUSTOM_LABEL, label_style)),
+                if self.edit.is_some() {
+                    body.edit_at = Some((first, width(&prefix)));
                 }
-                if tick {
-                    spans.push(Span::styled(TICK, theme::fg(theme::SUCCESS)));
-                }
+                self.custom_row(&mut spans, q, label_style, tick);
                 body.lines.push(Line::from(spans));
             } else {
-                let option = &question.options[row];
-                spans.push(Span::styled(option.label.clone(), label_style));
-                if option.default {
-                    spans.push(Span::styled(DEFAULT_TAG, theme::muted()));
-                }
-                if tick {
-                    spans.push(Span::styled(TICK, theme::fg(theme::SUCCESS)));
-                }
-                body.lines.push(Line::from(spans));
-                let indent = " ".repeat(width(&prefix));
-                let room = iw.saturating_sub(width(&prefix));
-                for l in text::wrap_spans(
-                    &[Span::styled(option.description.clone(), theme::muted())],
-                    room,
-                ) {
-                    let mut spans = vec![Span::raw(indent.clone())];
-                    spans.extend(l.spans);
-                    body.lines.push(Line::from(spans));
-                }
+                self.option_rows(&mut body, spans, (q, row), label_style, tick, iw);
             }
             for line in first..body.lines.len() {
                 body.row_lines.push((line, row));
             }
         }
         body
+    }
+
+    /// The custom row: the label, or the typed answer. While typing, only the field is drawn.
+    fn custom_row(&self, spans: &mut Vec<Span<'static>>, q: usize, label_style: Style, tick: bool) {
+        match (&self.edit, self.custom_text(q)) {
+            (Some(_), _) => {}
+            (None, Some(text)) => {
+                spans.push(Span::styled(format!("{CUSTOM_LABEL}: "), theme::muted()));
+                spans.push(Span::styled(text::one_line(text), label_style));
+            }
+            (None, None) => spans.push(Span::styled(CUSTOM_LABEL, label_style)),
+        }
+        if tick {
+            spans.push(Span::styled(format!(" {CHECK}"), theme::fg(theme::SUCCESS)));
+        }
+    }
+
+    /// An option row: the label (with its tags), then the wrapped description below it.
+    fn option_rows(
+        &self,
+        body: &mut Body,
+        mut spans: Vec<Span<'static>>,
+        (q, row): (usize, usize),
+        label_style: Style,
+        tick: bool,
+        iw: usize,
+    ) {
+        let option = &self.questions[q].options[row];
+        // The pointer and the marker already in `spans` are what the description is indented by.
+        let prefix_w = text::spans_width(&spans);
+        spans.push(Span::styled(option.label.clone(), label_style));
+        if option.default {
+            spans.push(Span::styled(DEFAULT_TAG, theme::muted()));
+        }
+        if tick {
+            spans.push(Span::styled(format!(" {CHECK}"), theme::fg(theme::SUCCESS)));
+        }
+        body.lines.push(Line::from(spans));
+        let indent = " ".repeat(prefix_w);
+        let room = iw.saturating_sub(prefix_w);
+        for l in text::wrap_spans(
+            &[Span::styled(option.description.clone(), theme::muted())],
+            room,
+        ) {
+            let mut spans = vec![Span::raw(indent.clone())];
+            spans.extend(l.spans);
+            body.lines.push(Line::from(spans));
+        }
     }
 
     /// The number or checkbox in front of a row, and whether the row is chosen.
@@ -548,7 +605,7 @@ impl QuestionView {
             self.is_picked(q, row)
         };
         if question.multiple {
-            let mark = if checked { "✓" } else { " " };
+            let mark = if checked { CHECK } else { " " };
             (format!("[{mark}] "), checked)
         } else {
             (format!("{}. ", row + 1), checked && !self.is_simple())
@@ -577,7 +634,7 @@ impl QuestionView {
             }
             for a in answer {
                 lines.push(Line::from(vec![
-                    Span::styled("  ✓ ", theme::fg(theme::SUCCESS)),
+                    Span::styled(format!("  {CHECK} "), theme::fg(theme::SUCCESS)),
                     Span::styled(text::one_line(&a), theme::text()),
                 ]));
             }
