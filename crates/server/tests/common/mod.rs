@@ -324,6 +324,15 @@ pub async fn session(
     .unwrap()
 }
 
+/// Set-up of a turn test: a mock with `handler`, a hub with the default config and a
+/// `MAIN_SESSION` session of the `BUILD` agent.
+pub async fn run_turn(handler: Handler, tag: &str) -> (Mock, Arc<Hub>, PathBuf, Arc<Session>) {
+    let m = mock(handler).await;
+    let (hub, work) = hub(config(&m.url), tag);
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
+    (m, hub, work, s)
+}
+
 pub fn prompt(hub: &Arc<Hub>, s: &Arc<Session>, text: &str) {
     let msg =
         ref_server::session::user_message(ref_proto::MessageSource::Human, text.into(), vec![]);
