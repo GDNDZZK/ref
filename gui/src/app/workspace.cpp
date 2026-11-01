@@ -19,7 +19,7 @@ Workspace* theInstance = nullptr;
 // The loopback names under which a backend runs on this machine.
 bool isLoopback(const QString& host)
 {
-	return host == u"localhost"_s || host == u"127.0.0.1"_s || host == u"::1"_s || host == u"[::1]"_s;
+	return host == u"localhost"_s || host == refgui::client::LoopbackHost || host == u"::1"_s || host == u"[::1]"_s;
 }
 
 } // namespace
@@ -468,7 +468,7 @@ QCoro::Task<> Workspace::closeTask(QString sessionId)
 {
 	const refgui::proto::SessionInfo* info = m_directory.find(sessionId);
 	const QString cwd = info == nullptr ? m_cwd : info->cwd;
-	const Result<void> closed = co_await m_backend.client().close(sessionId);
+	const Result<void> closed = co_await m_backend.client().closeSession(sessionId);
 	if(toastFailure(closed))
 	{
 		co_return;

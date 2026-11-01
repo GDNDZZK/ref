@@ -320,7 +320,7 @@ QCoro::Task<Result<void>> ServerClient::compact(QString sessionId)
 	co_return asVoidResult(co_await request(proto::request::compact(sessionId)));
 }
 
-QCoro::Task<Result<void>> ServerClient::close(QString sessionId)
+QCoro::Task<Result<void>> ServerClient::closeSession(QString sessionId)
 {
 	co_return asVoidResult(co_await request(proto::request::close(sessionId)));
 }
@@ -411,10 +411,23 @@ void ServerClient::onTextMessage(const QString& text)
 	emit frameReceived(*frame);
 }
 
+QString ServerClient::disconnectReason() const
+{
+	if(!m_closeReason.isEmpty())
+	{
+		return m_closeReason;
+	}
+	if(!m_socket.closeReason().isEmpty())
+	{
+		return m_socket.closeReason();
+	}
+	return m_socket.errorString();
+}
+
 void ServerClient::onDisconnected()
 {
 	stopHeartbeat();
-	const QString reason = m_closeReason.isEmpty() ? (m_socket.closeReason().isEmpty() ? m_socket.errorString() : m_socket.closeReason()) : m_closeReason;
+	const QString reason = disconnectReason();
 	m_closeReason.clear();
 	failPending(ConnectionClosed);
 	finishConnecting(false);

@@ -42,8 +42,8 @@ Connected stoppedResult()
 	return std::unexpected(u"stopped"_s);
 }
 
-// Connects to the newest live instance that accepts us.
-QCoro::Task<std::optional<Endpoint>> connectExisting(const QString& directory, const TryConnect& tryConnect)
+// Connects to the newest live instance that accepts us. Empty when none did and no stop was requested.
+QCoro::Task<std::optional<Connected>> connectExisting(const QString& directory, const TryConnect& tryConnect, const StopSource& stop)
 {
 	for(const proto::InstanceInfo& instance : liveInstances(directory))
 	{
@@ -53,6 +53,10 @@ QCoro::Task<std::optional<Endpoint>> connectExisting(const QString& directory, c
 			co_return endpoint;
 		}
 	}
+	if(stop.stopped())
+	{
+		co_return stoppedResult();
+	}
 	co_return std::nullopt;
 }
 
@@ -60,22 +64,18 @@ QCoro::Task<std::optional<Endpoint>> connectExisting(const QString& directory, c
 // case the caller carries on unlocked rather than hanging.
 QCoro::Task<std::unique_ptr<SpawnLock>> acquireSpawnLock(const QString& directory, StopSource& stop)
 {
-	std::chrono::milliseconds waited = 0ms;
-	while(!stop.stopped())
-	{
+	std::unique_ptr<SpawnLock> acquired;
+	const auto lockedOrUnavailable = [&] {
 		auto lock = SpawnLock::tryAcquire(directory);
 		if(lock)
 		{
-			co_return std::move(*lock);
+			acquired = std::move(*lock);
+			return true;
 		}
-		if(lock.error() == SpawnLock::Failure::Unavailable || waited > SpawnLockTimeout)
-		{
-			co_return nullptr;
-		}
-		co_await stop.sleep(SpawnLockPoll);
-		waited += SpawnLockPoll;
-	}
-	co_return nullptr;
+		return lock.error() == SpawnLock::Failure::Unavailable;
+	};
+	co_await stop.pollUntil(SpawnLockTimeout, SpawnLockPoll, lockedOrUnavailable);
+	co_return acquired;
 }
 
 QString startFailure(const QProcess& process)
@@ -107,62 +107,28 @@ std::expected<void, QString> spawnServer(quint16 port)
 
 QCoro::Task<std::optional<proto::InstanceInfo>> waitForInstance(const QString& directory, quint16 port, std::chrono::milliseconds timeout, StopSource& stop)
 {
-	std::chrono::milliseconds waited = 0ms;
-	while(waited < timeout && !stop.stopped())
-	{
+	std::optional<proto::InstanceInfo> found;
+	const auto published = [&] {
 		for(const proto::InstanceInfo& instance : liveInstances(directory))
 		{
 			if(instance.port == port)
 			{
-				co_return instance;
+				found = instance;
+				return true;
 			}
 		}
-		co_await stop.sleep(InstancePoll);
-		waited += InstancePoll;
-	}
-	co_return std::nullopt;
+		return false;
+	};
+	co_await stop.pollUntil(timeout, InstancePoll, published);
+	co_return found;
 }
 
-// Starts a backend and connects to it. Only one frontend starts it; the others wait for
-// the lock and then find its instance.
-QCoro::Task<Connected> discover(QString directory, TryConnect tryConnect, std::function<void()> onStartingBackend, StopSource& stop)
+// Waits for the backend we started on `port` to publish its instance file, then connects to it.
+QCoro::Task<Connected> connectToStarted(const QString& directory, quint16 port, const TryConnect& tryConnect, const std::function<void()>& onStartingBackend, StopSource& stop)
 {
-	if(const std::optional<Endpoint> running = co_await connectExisting(directory, tryConnect))
-	{
-		co_return *running;
-	}
-	if(stop.stopped())
-	{
-		co_return stoppedResult();
-	}
-
-	const std::unique_ptr<SpawnLock> lock = co_await acquireSpawnLock(directory, stop);
-	if(stop.stopped())
-	{
-		co_return stoppedResult();
-	}
-	if(const std::optional<Endpoint> startedMeanwhile = co_await connectExisting(directory, tryConnect))
-	{
-		co_return *startedMeanwhile;
-	}
-	if(stop.stopped())
-	{
-		co_return stoppedResult();
-	}
-
-	const quint16 port = pickFreePort();
-	if(port == 0)
-	{
-		co_return std::unexpected(u"no free port"_s);
-	}
-	if(const std::expected<void, QString> spawned = spawnServer(port); !spawned)
-	{
-		co_return std::unexpected(spawned.error());
-	}
-
 	std::chrono::milliseconds waited = 0ms;
-	std::optional<proto::InstanceInfo> instance;
-	while(!(instance = co_await waitForInstance(directory, port, StartingTick, stop)))
+	std::optional<proto::InstanceInfo> instance = co_await waitForInstance(directory, port, StartingTick, stop);
+	while(!instance)
 	{
 		if(stop.stopped())
 		{
@@ -174,6 +140,7 @@ QCoro::Task<Connected> discover(QString directory, TryConnect tryConnect, std::f
 		{
 			co_return std::unexpected(u"backend did not start within %1s"_s.arg(std::chrono::duration_cast<std::chrono::seconds>(BackendStartTimeout).count()));
 		}
+		instance = co_await waitForInstance(directory, port, StartingTick, stop);
 	}
 
 	const Endpoint endpoint = endpointFor(*instance);
@@ -190,6 +157,37 @@ QCoro::Task<Connected> discover(QString directory, TryConnect tryConnect, std::f
 		co_await stop.sleep(NewBackendConnectPause);
 	}
 	co_return std::unexpected(u"could not connect to the new backend"_s);
+}
+
+// Starts a backend and connects to it. Only one frontend starts it; the others wait for
+// the lock and then find its instance.
+QCoro::Task<Connected> discover(QString directory, TryConnect tryConnect, std::function<void()> onStartingBackend, StopSource& stop)
+{
+	if(const std::optional<Connected> running = co_await connectExisting(directory, tryConnect, stop))
+	{
+		co_return *running;
+	}
+
+	const std::unique_ptr<SpawnLock> lock = co_await acquireSpawnLock(directory, stop);
+	if(stop.stopped())
+	{
+		co_return stoppedResult();
+	}
+	if(const std::optional<Connected> startedMeanwhile = co_await connectExisting(directory, tryConnect, stop))
+	{
+		co_return *startedMeanwhile;
+	}
+
+	const quint16 port = pickFreePort();
+	if(port == 0)
+	{
+		co_return std::unexpected(u"no free port"_s);
+	}
+	if(const std::expected<void, QString> spawned = spawnServer(port); !spawned)
+	{
+		co_return std::unexpected(spawned.error());
+	}
+	co_return co_await connectToStarted(directory, port, tryConnect, onStartingBackend, stop);
 }
 
 } // namespace

@@ -6,10 +6,13 @@
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
+#include <QLoggingCategory>
 
 #include <algorithm>
 
 using namespace Qt::StringLiterals;
+
+Q_LOGGING_CATEGORY(lcInstances, "refgui.client.instances")
 
 namespace refgui::client
 {
@@ -75,7 +78,10 @@ QList<proto::InstanceInfo> liveInstances(const QString& directory)
 		}
 		if(!processIsAlive(instance->pid))
 		{
-			QFile::remove(file.absoluteFilePath());
+			if(!QFile::remove(file.absoluteFilePath()))
+			{
+				qCWarning(lcInstances) << "cannot remove the stale instance file" << file.absoluteFilePath();
+			}
 			continue;
 		}
 		live.append(*instance);
@@ -92,7 +98,7 @@ Endpoint endpointFor(const proto::InstanceInfo& instance)
 	QString host = instance.bind;
 	if(wildcard)
 	{
-		host = u"127.0.0.1"_s;
+		host = LoopbackHost;
 	}
 	else if(bareIpv6)
 	{
