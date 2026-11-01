@@ -207,7 +207,7 @@ Window {
 	// Above the snapshot, so their own morph stays visible during the crossfade.
 	CircleButton {
 		id: expand
-		anchors { top: parent.top; left: parent.left; margins: 14 }
+		anchors { top: parent.top; left: parent.left; margins: Theme.windowButtonMargin }
 		opacity: sidebar.width === 0 ? 1 : 0
 		visible: opacity > 0
 		Accessible.name: qsTr("Show sidebar")
@@ -224,7 +224,7 @@ Window {
 	}
 
 	CircleButton {
-		anchors { top: parent.top; left: expand.right; leftMargin: 8; topMargin: 14 }
+		anchors { top: parent.top; left: expand.right; leftMargin: Theme.windowButtonGap; topMargin: Theme.windowButtonMargin }
 		opacity: expand.opacity
 		visible: opacity > 0
 		Accessible.name: qsTr("New session")
@@ -240,13 +240,13 @@ Window {
 
 	ThemeToggle {
 		id: themeToggle
-		anchors { top: parent.top; right: parent.right; margins: 14 }
+		anchors { top: parent.top; right: parent.right; margins: Theme.windowButtonMargin }
 		onClicked: Workspace.requestTheme(Theme.dark ? "light" : "dark")
 	}
 
 	CircleButton {
 		id: splitButton
-		anchors { top: parent.top; right: themeToggle.left; topMargin: 14; rightMargin: 8 }
+		anchors { top: parent.top; right: themeToggle.left; topMargin: Theme.windowButtonMargin; rightMargin: Theme.windowButtonGap }
 		Accessible.name: qsTr("Split view")
 		onClicked: Commands.run("watch")
 
@@ -259,7 +259,7 @@ Window {
 	}
 
 	CircleButton {
-		anchors { top: parent.top; right: splitButton.left; topMargin: 14; rightMargin: 8 }
+		anchors { top: parent.top; right: splitButton.left; topMargin: Theme.windowButtonMargin; rightMargin: Theme.windowButtonGap }
 		opacity: window.zoomed ? 1 : 0
 		visible: opacity > 0
 		Accessible.name: qsTr("Leave zoom")

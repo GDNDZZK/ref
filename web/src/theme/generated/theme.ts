@@ -127,6 +127,8 @@ export const metrics = {
   dialogWidthWide: 640,
   settingsWidth: 520,
   statusDotSize: 8,
+  windowButtonMargin: 14,
+  windowButtonGap: 8,
   overlayEdgeMargin: 24,
   dialogPadding: 22,
   dialogHeaderHeight: 56,
