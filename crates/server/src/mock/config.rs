@@ -4,15 +4,16 @@ use ref_config::Config;
 use serde_json::{Value, json};
 use std::path::Path;
 
-const MOCK_1: &str = "mock-1";
+pub(super) const PROVIDER: &str = "mock";
+pub(super) const MODEL_1: &str = "mock-1";
 const MOCK_FAST: &str = "mock-fast";
-const MOCK_1_CONTEXT: u64 = 200_000;
+const MODEL_1_CONTEXT: u64 = 200_000;
 const MOCK_FAST_CONTEXT: u64 = 64_000;
 
 /// The context window of a mock model.
 pub fn context_window(model: &str) -> Option<u64> {
     match model {
-        MOCK_1 => Some(MOCK_1_CONTEXT),
+        MODEL_1 => Some(MODEL_1_CONTEXT),
         MOCK_FAST => Some(MOCK_FAST_CONTEXT),
         _ => None,
     }
@@ -25,9 +26,9 @@ const DELETE_DELAY_SECS: u32 = 5;
 fn document(llm_port: u16) -> Value {
     let variants = json!({"low": {}, "medium": {}, "high": {}});
     json!({
-        "model": format!("mock/{MOCK_1}"),
+        "model": format!("{PROVIDER}/{MODEL_1}"),
         "provider": {
-            "mock": {
+            PROVIDER: {
                 "name": "Mock",
                 "api": "chat",
                 "options": {
@@ -35,9 +36,9 @@ fn document(llm_port: u16) -> Value {
                     "apiKey": "mock",
                 },
                 "models": {
-                    MOCK_1: {
+                    MODEL_1: {
                         "name": "Mock 1",
-                        "limit": {"context": MOCK_1_CONTEXT, "output": 32_000},
+                        "limit": {"context": MODEL_1_CONTEXT, "output": 32_000},
                         "modalities": {"input": ["text", "image"]},
                         "reasoning": true,
                         "variants": variants,
