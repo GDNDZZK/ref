@@ -1,6 +1,7 @@
 //! Conversion of the stored transcript into provider-neutral chat messages.
 //! Tool call arguments are replayed byte-identically (raw JSON incl. `purpose`) for cache hits.
 
+use crate::toolset::PURPOSE_KEY;
 use ref_llm::{AssistantBlock, ChatMessage, UserContent};
 use ref_proto::{Message, MessageSource, Part, Role, ToolState};
 use serde_json::{Map, Value};
@@ -124,7 +125,7 @@ pub fn parse_tool_input(raw: &str) -> Result<(Value, String), String> {
     }
     match serde_json::from_str::<Value>(raw) {
         Ok(Value::Object(mut o)) => {
-            let purpose = match o.remove("purpose") {
+            let purpose = match o.remove(PURPOSE_KEY) {
                 Some(Value::String(s)) => s,
                 Some(other) if !other.is_null() => other.to_string(),
                 _ => String::new(),
@@ -140,7 +141,7 @@ pub fn parse_tool_input(raw: &str) -> Result<(Value, String), String> {
 pub fn partial_purpose(raw: &str) -> Option<String> {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     let re = RE.get_or_init(|| {
-        regex::Regex::new(r#""purpose"\s*:\s*"((?:[^"\\]|\\.)*)""#).expect("regex")
+        regex::Regex::new(&format!(r#""{PURPOSE_KEY}"\s*:\s*"((?:[^"\\]|\\.)*)""#)).expect("regex")
     });
     let c = re.captures(raw)?;
     let lit = format!("\"{}\"", c.get(1)?.as_str());

@@ -12,6 +12,9 @@ use serde_json::{Map, Value, json};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
+/// Key of the argument every tool call carries to say why it is made.
+pub(crate) const PURPOSE_KEY: &str = "purpose";
+
 const PURPOSE_DESC: &str = "One short sentence saying why you are calling this tool; shown to the user. Use the language of the user's messages.";
 
 /// Max MCP text output returned to the model.
@@ -41,19 +44,23 @@ pub(crate) fn with_purpose(schema: &Value) -> Value {
     obj.entry("type").or_insert_with(|| json!("object"));
     let mut props = Map::new();
     props.insert(
-        "purpose".into(),
+        PURPOSE_KEY.into(),
         json!({"type": "string", "description": PURPOSE_DESC}),
     );
     if let Some(Value::Object(p)) = obj.get("properties") {
         for (k, v) in p {
-            if k != "purpose" {
+            if k != PURPOSE_KEY {
                 props.insert(k.clone(), v.clone());
             }
         }
     }
-    let mut required = vec![json!("purpose")];
+    let mut required = vec![json!(PURPOSE_KEY)];
     if let Some(Value::Array(r)) = obj.get("required") {
-        required.extend(r.iter().filter(|x| x.as_str() != Some("purpose")).cloned());
+        required.extend(
+            r.iter()
+                .filter(|x| x.as_str() != Some(PURPOSE_KEY))
+                .cloned(),
+        );
     }
     // Rebuild with a stable key order: type, properties, required, then the rest.
     let mut out = Map::new();
