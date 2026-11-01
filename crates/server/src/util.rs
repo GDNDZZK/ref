@@ -2,6 +2,13 @@
 
 use rand::Rng;
 use std::path::Path;
+use std::sync::{Mutex, MutexGuard};
+
+/// Locks `m`; a poisoned mutex is recovered because a panicking holder must not take the
+/// whole server down.
+pub fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 const BASE62: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 

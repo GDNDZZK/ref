@@ -4,6 +4,7 @@
 use crate::mcp::McpManager;
 use crate::session::{Session, SessionState};
 use crate::store::Store;
+use crate::util::lock;
 use ref_config::Config;
 use ref_proto::{
     InstanceInfo, Message, NotifyKind, ServerFrame, SessionEvent, SessionInfo, SessionStatus,
@@ -64,7 +65,7 @@ pub struct OutQueue {
 
 impl OutQueue {
     pub fn push(&self, f: ServerFrame) {
-        let mut q = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut q = lock(&self.inner);
         if let ServerFrame::Event {
             session_id,
             event:
@@ -107,16 +108,12 @@ impl OutQueue {
     }
 
     pub fn drain(&self) -> Vec<ServerFrame> {
-        self.inner
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .drain(..)
-            .collect()
+        lock(&self.inner).drain(..).collect()
     }
 
     /// True if every queued frame is a delta (worth waiting a bit to coalesce more).
     pub fn only_deltas(&self) -> bool {
-        let q = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let q = lock(&self.inner);
         !q.is_empty()
             && q.iter().all(|f| {
                 matches!(
@@ -160,7 +157,7 @@ pub struct Conn {
 
 impl Conn {
     pub fn lock(&self) -> MutexGuard<'_, ConnState> {
-        self.st.lock().unwrap_or_else(|e| e.into_inner())
+        lock(&self.st)
     }
     pub fn send(&self, f: ServerFrame) {
         self.out.push(f);
@@ -269,36 +266,20 @@ impl Hub {
     // ----- sessions -----
 
     pub fn session(&self, id: &str) -> Option<Arc<Session>> {
-        self.sessions
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(id)
-            .cloned()
+        lock(&self.sessions).get(id).cloned()
     }
 
     pub fn sessions(&self) -> Vec<Arc<Session>> {
-        self.sessions
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .values()
-            .cloned()
-            .collect()
+        lock(&self.sessions).values().cloned().collect()
     }
 
     pub fn insert_session(&self, s: Arc<Session>) {
-        self.sessions
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(s.id.clone(), s);
+        lock(&self.sessions).insert(s.id.clone(), s);
         self.mark_dirty();
     }
 
     pub fn remove_session(&self, id: &str) -> Option<Arc<Session>> {
-        let r = self
-            .sessions
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(id);
+        let r = lock(&self.sessions).remove(id);
         for c in self.conns() {
             let mut st = c.lock();
             st.fg.remove(id);
@@ -401,12 +382,7 @@ impl Hub {
     // ----- connections -----
 
     pub fn conns(&self) -> Vec<Arc<Conn>> {
-        self.conns
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .values()
-            .cloned()
-            .collect()
+        lock(&self.conns).values().cloned().collect()
     }
 
     pub fn add_conn(&self) -> Arc<Conn> {
@@ -420,10 +396,7 @@ impl Hub {
             }),
             kill: CancellationToken::new(),
         });
-        self.conns
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(id, c.clone());
+        lock(&self.conns).insert(id, c.clone());
         c
     }
 
@@ -433,18 +406,13 @@ impl Hub {
 
     /// Called after a connection completed Hello.
     pub fn frontend_joined(&self) {
-        let mut idle = self.idle.lock().unwrap_or_else(|e| e.into_inner());
+        let mut idle = lock(&self.idle);
         idle.ever = true;
         idle.generation += 1;
     }
 
     pub fn remove_conn(self: &Arc<Self>, id: u64) {
-        let Some(c) = self
-            .conns
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(&id)
-        else {
+        let Some(c) = lock(&self.conns).remove(&id) else {
             return;
         };
         c.kill.cancel();
@@ -466,7 +434,7 @@ impl Hub {
 
     fn check_idle(self: &Arc<Self>) {
         let count = self.frontend_count();
-        let mut idle = self.idle.lock().unwrap_or_else(|e| e.into_inner());
+        let mut idle = lock(&self.idle);
         match idle_action(self.opts.idle_timeout, idle.ever, count) {
             IdleAction::Nothing => {}
             IdleAction::ShutdownNow => {
@@ -480,12 +448,7 @@ impl Hub {
                 tokio::spawn(async move {
                     tokio::time::sleep(Duration::from_secs(secs)).await;
                     let Some(hub) = hub.upgrade() else { return };
-                    let still = hub
-                        .idle
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .generation
-                        == generation;
+                    let still = lock(&hub.idle).generation == generation;
                     if still && hub.frontend_count() == 0 {
                         tracing::info!("idle timeout reached; shutting down");
                         hub.shutdown.cancel();

@@ -1,6 +1,7 @@
 //! WebSocket accept (IP allow-list + token check before upgrade), per-connection reader/writer.
 
 use crate::hub::{Conn, Hub};
+use crate::util::lock;
 use futures_util::{SinkExt, StreamExt};
 use ref_proto::{ClientFrame, Request, ServerFrame};
 use serde_json::{Value, json};
@@ -275,13 +276,8 @@ async fn handle_conn(hub: Arc<Hub>, stream: TcpStream, peer: SocketAddr, auth: A
                     }
                     tracing::info!(conn = conn.id, %client, version, "hello");
                     if let Some(id) = frame.id {
-                        let mut inst = serde_json::to_value(
-                            hub.instance
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner())
-                                .clone(),
-                        )
-                        .unwrap_or(Value::Null);
+                        let mut inst = serde_json::to_value(lock(&hub.instance).clone())
+                            .unwrap_or(Value::Null);
                         if let Some(o) = inst.as_object_mut() {
                             o.remove("token");
                         }

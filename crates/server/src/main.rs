@@ -1,5 +1,6 @@
 use clap::Parser;
 use ref_proto::InstanceInfo;
+use ref_server::util::lock;
 use ref_server::{HubOptions, instance, ops, ws};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -179,11 +180,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         version: env!("CARGO_PKG_VERSION").to_string(),
         token,
     };
-    *running
-        .hub
-        .instance
-        .lock()
-        .unwrap_or_else(|e| e.into_inner()) = Some(info.clone());
+    *lock(&running.hub.instance) = Some(info.clone());
     let dir = ref_proto::instances_dir();
     let inst_file = instance::write_instance(&dir, &info)?;
     tracing::info!(port = info.port, %bind, idle_timeout, "ref-server listening");
