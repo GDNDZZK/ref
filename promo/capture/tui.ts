@@ -12,16 +12,21 @@ import { KEYS, TuiSession } from './lib/tuiSession.ts'
 // Wide enough for the session sidebar (todos, live sessions): it needs 140 columns.
 export const TUI_COLS = 150
 export const TUI_ROWS = 40
+// The README takes: the narrowest size with the sidebar, so the text stays as large as it can
+// at the README's width.
+const README_SIZE = { cols: 140, rows: 36 }
 const CASTS_DIR = join(import.meta.dirname, '..', 'assets', 'casts')
 const TYPING_DELAY_MS = 55
 const DIALOG_SETTLE_MS = 800 // the permission dialog ignores keys for a moment after it opens
 const NEW_SESSION_KEYS = '\x18n' // ctrl+x n
 const SPLIT_KEYS = '\x18w' // ctrl+x w
 
-async function withTui(body: (tui: TuiSession) => Promise<void>): Promise<void> {
+type Size = { cols: number; rows: number }
+
+async function withTui(body: (tui: TuiSession) => Promise<void>, size: Size = { cols: TUI_COLS, rows: TUI_ROWS }): Promise<void> {
   const isolated = isolatedEnv()
   const backend = await startMockBackend(isolated)
-  const tui = new TuiSession({ cols: TUI_COLS, rows: TUI_ROWS }, backend, isolated)
+  const tui = new TuiSession(size, backend, isolated)
   try {
     await tui.waitForText('Build ·')
     await tui.pause(800)
@@ -34,17 +39,22 @@ async function withTui(body: (tui: TuiSession) => Promise<void>): Promise<void> 
 }
 
 // `pathRow`: the last row is the status line with the random mock workspace path (not in the split view).
-async function still(browser: Browser, output: string, name: string, readme: boolean, pathRow = true): Promise<void> {
-  const png = await renderTerminalStill(browser, { cols: TUI_COLS, rows: TUI_ROWS }, output)
+async function still(browser: Browser, output: string, name: string, readme: boolean, pathRow = true, size: Size = README_SIZE): Promise<void> {
+  const png = await renderTerminalStill(browser, size, output)
   if (!pathRow) return publishImage(png, name, { readme })
   // The README shows the copy without the status line.
   await publishImage(png, name, { readme: false })
   await publishWithoutFooter(name, { readme })
 }
 
-// The mock `tools` script: reads, a failing read, grep, find, an edit that needs approval, bash.
+// The mock `tools` script: reads, a failing read, grep, find, an edit that needs approval, bash;
+// after the `todo` script, so the sidebar has a finished to-do list.
 async function captureTools(browser: Browser): Promise<void> {
   await withTui(async (tui) => {
+    await tui.type('todo', TYPING_DELAY_MS)
+    tui.send(KEYS.enter)
+    await tui.waitForText('All steps are done.')
+    await tui.pause(DIALOG_SETTLE_MS)
     await tui.type('tools', TYPING_DELAY_MS)
     tui.send(KEYS.enter)
 
@@ -61,7 +71,7 @@ async function captureTools(browser: Browser): Promise<void> {
     tui.saveCast(join(CASTS_DIR, 'tui-tools.cast'))
     await still(browser, permission, 'tui-permission', true)
     await still(browser, done, 'tui-main', true)
-  })
+  }, README_SIZE)
 }
 
 // Four sessions working, then the split view.
@@ -84,7 +94,7 @@ async function captureSplit(browser: Browser): Promise<void> {
     mkdirSync(CASTS_DIR, { recursive: true })
     tui.saveCast(join(CASTS_DIR, 'tui-split.cast'))
     await still(browser, tui.outputSoFar(), 'tui-split', true, false)
-  })
+  }, README_SIZE)
 }
 
 // M5 `outage`: two tools, four failed requests with growing waits, then the run goes on. A second
