@@ -32,7 +32,7 @@ const limited = computed(() => limitLines(props.text, showAll.value ? undefined 
 }
 
 .info {
-  color: var(--info);
+  color: var(--info-text);
 }
 
 .muted {
@@ -40,12 +40,12 @@ const limited = computed(() => limitLines(props.text, showAll.value ? undefined 
 }
 
 .danger {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .more {
   margin-top: 4px;
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: var(--small-font-size);
 }
 </style>

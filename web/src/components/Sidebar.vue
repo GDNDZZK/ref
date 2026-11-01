@@ -365,7 +365,7 @@ function open(id: string): void {
 }
 
 .search:focus-within {
-  box-shadow: inset 0 0 0 1px var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-text);
 }
 
 .search-icon {

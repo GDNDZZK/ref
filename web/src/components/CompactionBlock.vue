@@ -68,7 +68,7 @@ function toggle(): void {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .title {

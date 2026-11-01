@@ -97,7 +97,7 @@ function caption(image: ImageRef): string {
 }
 
 .failed {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .thumb::after {
