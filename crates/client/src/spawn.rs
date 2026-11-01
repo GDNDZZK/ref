@@ -19,7 +19,7 @@ pub(crate) fn pick_port() -> Option<u16> {
     let mut rng = rand::rng();
     for _ in 0..PORT_ATTEMPTS {
         let p: u16 = rng.random_range(PORT_RANGE);
-        if std::net::TcpListener::bind(("127.0.0.1", p)).is_ok() {
+        if std::net::TcpListener::bind((ref_proto::LOOPBACK_V4, p)).is_ok() {
             return Some(p);
         }
     }

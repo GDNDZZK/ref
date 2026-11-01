@@ -63,7 +63,7 @@ pub fn pick_port(host: &str) -> Option<u16> {
 
 pub fn connect_url(i: &InstanceInfo) -> String {
     let host = match i.bind.as_str() {
-        "0.0.0.0" | "" | "::" | "[::]" => "127.0.0.1".to_string(),
+        ref_proto::ANY_V4 | "" | "::" | "[::]" => ref_proto::LOOPBACK_V4.to_string(),
         h if h.contains(':') && !h.starts_with('[') => format!("[{h}]"),
         h => h.to_string(),
     };

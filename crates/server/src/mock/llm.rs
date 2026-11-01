@@ -30,7 +30,7 @@ pub struct LlmServer {
 }
 
 pub async fn start() -> std::io::Result<LlmServer> {
-    let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
+    let listener = TcpListener::bind((ref_proto::LOOPBACK_V4, 0)).await?;
     let port = listener.local_addr()?.port();
     let attempts: Arc<Attempts> = Arc::default();
     tokio::spawn(async move {

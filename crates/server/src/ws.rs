@@ -71,9 +71,10 @@ pub fn resolve_hosts(hosts: &[String], token: String) -> (Auth, Vec<String>) {
             Err(e) => warnings.push(format!("allow-host {h}: cannot resolve: {e}")),
         }
     }
-    if hosts.iter().any(|h| h.trim() == "localhost") {
+    if hosts.iter().any(|h| h.trim() == ref_proto::LOCALHOST) {
         auth.allowed.push(IpAddr::from([127, 0, 0, 1]));
-        auth.allowed.push("::1".parse().expect("ip"));
+        auth.allowed
+            .push(ref_proto::LOOPBACK_V6.parse().expect("ip"));
     }
     (auth, warnings)
 }

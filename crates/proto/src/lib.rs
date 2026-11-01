@@ -68,6 +68,12 @@ pub fn now_ms() -> i64 {
 // Instance discovery
 // ---------------------------------------------------------------------------
 
+/// Loopback host names and the any-address, as written in `InstanceInfo::bind` / `allow_hosts`.
+pub const LOOPBACK_V4: &str = "127.0.0.1";
+pub const LOOPBACK_V6: &str = "::1";
+pub const LOCALHOST: &str = "localhost";
+pub const ANY_V4: &str = "0.0.0.0";
+
 /// `InstanceInfo::idle_timeout` that makes the backend exit as soon as the last frontend leaves.
 pub const IDLE_EXIT_NOW: i64 = 0;
 
