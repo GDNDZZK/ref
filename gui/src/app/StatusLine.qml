@@ -16,9 +16,9 @@ Item {
 	readonly property int barWidth: 48
 	readonly property int barHeight: 4
 	readonly property string activity: session.activity
-	readonly property bool working: activity === "thinking" || activity === "running" || activity === "compacting"
-	readonly property bool retrying: activity === "retrying"
-	readonly property bool waiting: activity === "waiting_permission" || activity === "waiting_question"
+	readonly property bool working: activity === Activity.thinking || activity === Activity.running || activity === Activity.compacting
+	readonly property bool retrying: activity === Activity.retrying
+	readonly property bool waiting: activity === Activity.waitingPermission || activity === Activity.waitingQuestion
 	readonly property real contextUsed: session.contextUsed
 	readonly property real contextMax: session.contextMax
 	readonly property real contextRatio: contextMax > 0 ? Math.min(1, contextUsed / contextMax) : 0
@@ -32,17 +32,17 @@ Item {
 
 	readonly property string activityText: {
 		switch (activity) {
-		case "thinking":
+		case Activity.thinking:
 			return qsTr("Working")
-		case "running":
+		case Activity.running:
 			return qsTr("Running tools")
-		case "compacting":
+		case Activity.compacting:
 			return qsTr("Compacting context\u2026")
-		case "waiting_permission":
+		case Activity.waitingPermission:
 			return qsTr("Waiting for your permission")
-		case "waiting_question":
+		case Activity.waitingQuestion:
 			return qsTr("Waiting for your answer")
-		case "retrying":
+		case Activity.retrying:
 			return qsTr("Retrying in %1 (attempt %2): %3")
 				.arg(Format.elapsed(Math.max(0, session.retryAt - now) + Format.msPerSecond - 1))
 				.arg(session.retryAttempt)
@@ -56,7 +56,7 @@ Item {
 
 	Timer {
 		interval: Format.msPerSecond / 4
-		running: line.activity !== "idle"
+		running: line.activity !== Activity.idle
 		repeat: true
 		onTriggered: line.now = Date.now()
 	}
@@ -80,14 +80,14 @@ Item {
 		Icon {
 			anchors.verticalCenter: parent.verticalCenter
 			visible: line.waiting || line.retrying
-			name: line.activity === "waiting_question" ? "question" : line.waiting ? "lock" : "retry"
+			name: line.activity === Activity.waitingQuestion ? "question" : line.waiting ? "lock" : "retry"
 			color: Theme.warning
 		}
 		ShimmerText {
 			anchors.verticalCenter: parent.verticalCenter
 			visible: line.working
 			label: line.activityText
-			color: line.activity === "compacting" ? Theme.accent : Theme.textMuted
+			color: line.activity === Activity.compacting ? Theme.accent : Theme.textMuted
 			running: visible
 			font.pixelSize: Theme.smallFontSize
 		}
@@ -104,7 +104,7 @@ Item {
 		Text {
 			textFormat: Text.PlainText
 			anchors.verticalCenter: parent.verticalCenter
-			visible: line.activity !== "idle" && line.busyMs >= line.shownFromMs
+			visible: line.activity !== Activity.idle && line.busyMs >= line.shownFromMs
 			text: "\u00b7 " + Format.elapsed(line.busyMs)
 			color: Theme.textMuted
 			font.pixelSize: Theme.smallFontSize

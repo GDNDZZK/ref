@@ -7,11 +7,11 @@ import RefGui
 Item {
 	id: root
 
-	property string activity: "idle" // idle, thinking, running, waiting_permission, waiting_question, retrying or compacting
+	property string activity: Activity.idle
 	property bool hasError: false
 
-	readonly property bool working: activity !== "idle"
-	readonly property bool needsAttention: activity === "waiting_permission" || activity === "waiting_question" || activity === "retrying"
+	readonly property bool working: activity !== Activity.idle
+	readonly property bool needsAttention: activity === Activity.waitingPermission || activity === Activity.waitingQuestion || activity === Activity.retrying
 	readonly property color dotColor: hasError && !working ? Theme.danger : needsAttention ? Theme.warning : working ? Theme.accent : Theme.idleDot
 
 	implicitWidth: Theme.statusDotSize

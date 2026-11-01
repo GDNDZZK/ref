@@ -23,9 +23,9 @@ Item {
 
 	property double now: Date.now()
 	property bool renaming: false
-	readonly property bool working: activity !== "idle"
+	readonly property bool working: activity !== Activity.idle
 	readonly property bool failed: hasError && !working
-	readonly property bool retrying: activity === "retrying"
+	readonly property bool retrying: activity === Activity.retrying
 	readonly property bool attention: hasPermission || failed
 	readonly property bool hovered: hover.hovered
 
@@ -124,11 +124,11 @@ Item {
 			x: 30
 			y: 30
 			width: parent.width - x - 12
-			text: row.activity === "waiting_question" ? qsTr("Waiting for your answer")
+			text: row.activity === Activity.waitingQuestion ? qsTr("Waiting for your answer")
 				: row.hasPermission ? qsTr("Needs permission")
 				: row.failed ? row.lastError.split("\n")[0]
 				: row.retrying ? qsTr("Retrying")
-				: row.activity === "compacting" ? qsTr("Compacting")
+				: row.activity === Activity.compacting ? qsTr("Compacting")
 				: row.busySince > 0 ? row.dirName + " · " + Format.elapsed(row.now - row.busySince)
 				: row.dirName
 			color: row.hasPermission || row.retrying ? Theme.warning : row.failed ? Theme.danger : Theme.textMuted
@@ -153,7 +153,7 @@ Item {
 
 				Icon {
 					anchors.verticalCenter: parent.verticalCenter
-					name: row.activity === "waiting_question" ? "question" : "lock"
+					name: row.activity === Activity.waitingQuestion ? "question" : "lock"
 					size: 16
 					color: Theme.warning
 					visible: row.hasPermission

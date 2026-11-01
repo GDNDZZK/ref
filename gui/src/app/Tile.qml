@@ -28,7 +28,7 @@ Item {
 	readonly property bool focused: Workspace.focusedTileId === sessionId
 	readonly property var facts: live.data
 	readonly property bool hasPermission: facts.hasPermission === true
-	readonly property bool failed: facts.hasError === true && facts.activity === "idle"
+	readonly property bool failed: facts.hasError === true && facts.activity === Activity.idle
 	property double now: Date.now()
 
 	function focusPane() {
@@ -130,7 +130,7 @@ Item {
 			SessionDot {
 				x: 12
 				anchors.verticalCenter: parent.verticalCenter
-				activity: tile.facts.activity ?? "idle"
+				activity: tile.facts.activity ?? Activity.idle
 				hasError: tile.facts.hasError ?? false
 			}
 
@@ -150,7 +150,7 @@ Item {
 
 				Icon {
 					anchors.verticalCenter: parent.verticalCenter
-					name: tile.facts.activity === "waiting_question" ? "question" : "lock"
+					name: tile.facts.activity === Activity.waitingQuestion ? "question" : "lock"
 					size: 16
 					color: Theme.warning
 					visible: tile.hasPermission
