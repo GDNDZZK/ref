@@ -740,6 +740,109 @@ fn added_lines(old: &[&str], new: &[String]) -> Vec<u32> {
 // Main flow
 // ---------------------------------------------------------------------------
 
+/// The file being edited, as read from disk.
+struct Target<'a> {
+    abs: &'a Path,
+    display: &'a str,
+    /// BOM-stripped, LF-normalized text.
+    current: &'a str,
+    current_tag: &'a str,
+    lines: &'a [&'a str],
+}
+
+/// Resolves `ops` against the current file: validates them, or remaps them from the snapshot
+/// of an older `tag`. Returns the ops and the lines the model has seen, or the rejection.
+fn resolve_ops(
+    ctx: &ToolCtx,
+    t: &Target,
+    tag: &str,
+    ops: Vec<Op>,
+    warnings: &mut Vec<String>,
+) -> Result<(Vec<Op>, Seen), Box<ToolOutput>> {
+    let snapshot = ctx.store.get(t.abs, tag);
+    if tag == t.current_tag {
+        if let Err(msg) = validate(&ops, t.lines.len()) {
+            return Err(Box::new(ToolOutput::err(format!(
+                "Edit rejected for {}: {msg}",
+                t.display
+            ))));
+        }
+        let Some(snap) = &snapshot else {
+            // Tag matches the live content but was not issued in this session (e.g. after
+            // a restart): the content is what the model saw, so allow it.
+            return Ok((ops, Seen::All));
+        };
+        if let Some(rejection) = check_seen(ctx, t.abs, t.display, snap, &ops) {
+            return Err(Box::new(rejection));
+        }
+        return Ok((ops, snap.seen.clone()));
+    }
+
+    let remapped = snapshot
+        .as_ref()
+        .and_then(|snap| try_remap(&snap.text, t.lines, &ops, &snap.seen));
+    match remapped {
+        Some((remapped, seen)) => {
+            warnings.push("Recovered: file changed since read; line numbers remapped.".to_string());
+            Ok((remapped, seen))
+        }
+        None => Err(Box::new(mismatch(
+            ctx,
+            t.abs,
+            t.display,
+            tag,
+            t.current_tag,
+            t.current,
+            &ops,
+            snapshot.as_ref(),
+        ))),
+    }
+}
+
+/// Records the new snapshot of the written file and builds the success output.
+fn record_result(
+    ctx: &ToolCtx,
+    t: &Target,
+    new_lines: &[String],
+    new_text: &str,
+    base_seen: &Seen,
+    warnings: &[String],
+) -> ToolOutput {
+    // New snapshot: previously seen lines carried through the diff + everything displayed or authored now.
+    let map = LineMap::build(
+        t.lines,
+        &new_lines.iter().map(String::as_str).collect::<Vec<_>>(),
+    );
+    let (preview, preview_seen) = build_preview(t.lines, new_lines);
+    let seen = match map.map_seen(base_seen) {
+        Seen::All => Seen::All,
+        Seen::Lines(mut s) => {
+            let extra: LineSet = preview_seen
+                .into_iter()
+                .chain(added_lines(t.lines, new_lines))
+                .collect();
+            s.union_with(&extra);
+            Seen::Lines(s)
+        }
+    };
+    let new_tag = ctx.store.record(t.abs, new_text, seen);
+
+    let (diff, added, removed) = util::unified_diff(t.current, new_text, t.display);
+    let mut text = format!("{}\n{preview}", format_header(t.display, &new_tag));
+    if !warnings.is_empty() {
+        text.push_str("\n\nWarnings:\n");
+        text.push_str(&warnings.join("\n"));
+    }
+    let mut out = ToolOutput::ok(text);
+    out.meta = Some(json!({
+        "path": t.abs.to_string_lossy(),
+        "diff": diff,
+        "added": added,
+        "removed": removed,
+    }));
+    out
+}
+
 fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let raw_path = util::req_str(input, "path")?;
     let (raw_path, header_tag) = util::unwrap_header(&raw_path);
@@ -787,60 +890,16 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         )));
     };
 
-    // Resolve the ops against the current file.
-    let snapshot = ctx.store.get(&abs, &tag);
-    let (ops, base_seen): (Vec<Op>, Seen) = if tag == current_tag {
-        if let Err(msg) = validate(&ops, cur_lines.len()) {
-            return Ok(ToolOutput::err(format!(
-                "Edit rejected for {display}: {msg}"
-            )));
-        }
-        match &snapshot {
-            Some(snap) => {
-                if let Some(rejection) = check_seen(ctx, &abs, &display, snap, &ops) {
-                    return Ok(rejection);
-                }
-                (ops, snap.seen.clone())
-            }
-            // Tag matches the live content but was not issued in this session (e.g. after
-            // a restart): the content is what the model saw, so allow it.
-            None => (ops, Seen::All),
-        }
-    } else {
-        match &snapshot {
-            Some(snap) => match try_remap(&snap.text, &cur_lines, &ops, &snap.seen) {
-                Some((remapped, seen)) => {
-                    warnings.push(
-                        "Recovered: file changed since read; line numbers remapped.".to_string(),
-                    );
-                    (remapped, seen)
-                }
-                None => {
-                    return Ok(mismatch(
-                        ctx,
-                        &abs,
-                        &display,
-                        &tag,
-                        &current_tag,
-                        current,
-                        &ops,
-                        Some(snap),
-                    ));
-                }
-            },
-            None => {
-                return Ok(mismatch(
-                    ctx,
-                    &abs,
-                    &display,
-                    &tag,
-                    &current_tag,
-                    current,
-                    &ops,
-                    None,
-                ));
-            }
-        }
+    let target = Target {
+        abs: &abs,
+        display: &display,
+        current,
+        current_tag: &current_tag,
+        lines: &cur_lines,
+    };
+    let (ops, base_seen) = match resolve_ops(ctx, &target, &tag, ops, &mut warnings) {
+        Ok(resolved) => resolved,
+        Err(rejection) => return Ok(*rejection),
     };
 
     let new_lines = apply(&cur_lines, &ops);
@@ -859,39 +918,9 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     std::fs::write(&abs, file.encode(&new_text))
         .map_err(|e| anyhow!("failed to write {display}: {e}"))?;
 
-    // New snapshot: previously seen lines carried through the diff + everything displayed or authored now.
-    let map = LineMap::build(
-        &cur_lines,
-        &new_lines.iter().map(String::as_str).collect::<Vec<_>>(),
-    );
-    let (preview, preview_seen) = build_preview(&cur_lines, &new_lines);
-    let seen = match map.map_seen(&base_seen) {
-        Seen::All => Seen::All,
-        Seen::Lines(mut s) => {
-            let extra: LineSet = preview_seen
-                .into_iter()
-                .chain(added_lines(&cur_lines, &new_lines))
-                .collect();
-            s.union_with(&extra);
-            Seen::Lines(s)
-        }
-    };
-    let new_tag = ctx.store.record(&abs, &new_text, seen);
-
-    let (diff, added, removed) = util::unified_diff(current, &new_text, &display);
-    let mut text = format!("{}\n{preview}", format_header(&display, &new_tag));
-    if !warnings.is_empty() {
-        text.push_str("\n\nWarnings:\n");
-        text.push_str(&warnings.join("\n"));
-    }
-    let mut out = ToolOutput::ok(text);
-    out.meta = Some(json!({
-        "path": abs.to_string_lossy(),
-        "diff": diff,
-        "added": added,
-        "removed": removed,
-    }));
-    Ok(out)
+    Ok(record_result(
+        ctx, &target, &new_lines, &new_text, &base_seen, &warnings,
+    ))
 }
 
 /// Remaps ops from snapshot text onto the current lines. `None` if any anchor is ambiguous,
