@@ -1,7 +1,9 @@
 //! Streamable HTTP transport (MCP 2025-03-26 / 2025-06-18) with legacy HTTP+SSE
 //! (2024-11-05) fallback, plus a small Server-Sent Events parser.
 
-use crate::client::{Shared, contains_response, rpc_error};
+use crate::client::{
+    METHOD_INITIALIZE, NOTIFY_INITIALIZED, Shared, contains_response, notification, rpc_error,
+};
 use anyhow::{Context, Result, anyhow, bail};
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use reqwest::{StatusCode, Url};
@@ -189,7 +191,7 @@ fn content_type(resp: &reqwest::Response) -> String {
 }
 
 fn is_initialize(msg: &Value) -> bool {
-    msg.get("method").and_then(Value::as_str) == Some("initialize")
+    msg.get("method").and_then(Value::as_str) == Some(METHOD_INITIALIZE)
 }
 
 /// Request id if `msg` is a request (has both method and id).
@@ -428,10 +430,10 @@ impl HttpTransport {
         {
             self.set_protocol_version(v);
         }
-        let note = json!({"jsonrpc": "2.0", "method": "notifications/initialized"});
+        let note = notification(NOTIFY_INITIALIZED);
         let resp = self.post(self.url.clone(), &note).await?;
         if !resp.status().is_success() {
-            bail!("notifications/initialized: {}", error_body(resp).await);
+            bail!("{NOTIFY_INITIALIZED}: {}", error_body(resp).await);
         }
         // The previous GET stream (if any) was bound to the expired session.
         self.start_get_stream();
