@@ -124,6 +124,10 @@ struct Fixture
 				fake.fail(request, shellError);
 			}
 		}
+		else if(op == u"list_files"_s && !filesError.isEmpty())
+		{
+			fake.fail(request, filesError);
+		}
 		else if(op == u"list_files"_s)
 		{
 			fake.respond(request, {{u"files"_s, QJsonArray::fromStringList(files)}});
@@ -175,6 +179,7 @@ struct Fixture
 	compose::PromptHistory history;
 	ComposerModel composer;
 	QStringList files;
+	QString filesError; // when set, list_files is refused with it
 	QString promptError;
 	QString shellError;
 	std::optional<QString> expansion;
@@ -197,6 +202,7 @@ private slots:
 	void historyWalksBackAndForth();
 	void historyKeepsShellLines();
 	void mentionListFollowsTheQueryAndDropsStaleAnswers();
+	void failedFileSearchEmptiesTheList();
 	void acceptingAFileReplacesTheMention();
 	void escapeClosesTheListFirst();
 	void doubleEscapeInterrupts();
@@ -358,6 +364,22 @@ void TestComposerModel::mentionListFollowsTheQueryAndDropsStaleAnswers()
 	QCOMPARE(f.composer.files()->rowCount(), 0);
 	QTest::qWait(SearchSettleMs);
 	QCOMPARE(f.requestsOf(u"list_files"_s).size(), 1);
+}
+
+void TestComposerModel::failedFileSearchEmptiesTheList()
+{
+	Fixture f;
+	f.files = {u"src/main.rs"_s};
+	f.type(u"look at @sr"_s);
+	QTRY_COMPARE(f.composer.files()->rowCount(), 1);
+
+	f.filesError = u"no such directory"_s;
+	QTest::ignoreMessage(QtWarningMsg, "file search failed: \"no such directory\"");
+	f.type(u"look at @src"_s);
+
+	QTRY_COMPARE(f.requestsOf(u"list_files"_s).size(), 2);
+	QTRY_COMPARE(f.composer.files()->rowCount(), 0);
+	QCOMPARE(f.composer.completionKind(), u"file"_s);
 }
 
 void TestComposerModel::acceptingAFileReplacesTheMention()

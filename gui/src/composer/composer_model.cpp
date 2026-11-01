@@ -7,6 +7,7 @@
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QImage>
+#include <QLoggingCategory>
 #include <QMimeData>
 #include <QPointer>
 
@@ -18,6 +19,8 @@ namespace refgui::composer
 {
 namespace
 {
+
+Q_LOGGING_CATEGORY(lcComposer, "refgui.composer")
 
 const QString ShellPrefix = u"!"_s;
 const QString PngMime = u"image/png"_s;
@@ -236,8 +239,18 @@ QCoro::Task<> ComposerModel::findFiles(QString query, quint64 serial)
 {
 	const QPointer<ComposerModel> self(this); // the model can be gone when the answer arrives
 	const auto result = co_await m_backend.client().listFiles(m_controller.info().cwd, std::move(query), FileLimit);
-	if(!self || serial != m_fileSerial || !result)
+	if(!self || serial != m_fileSerial)
 	{
+		co_return;
+	}
+	if(!result)
+	{
+		// No toast: this runs while typing. The list of the previous query would be wrong now.
+		if(!client::isConnectionLost(result.error()))
+		{
+			qCWarning(lcComposer) << "file search failed:" << result.error();
+		}
+		m_files.setPaths({});
 		co_return;
 	}
 	m_files.setPaths(*result);
