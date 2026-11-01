@@ -47,6 +47,8 @@ const MOTION_UNITS: Record<string, Unit> = {
   interruptWindow: 'ms',
   dialogDrop: 'px',
   popScale: '',
+  pressedScaleButton: '',
+  pressedScaleRow: '',
   tileEnterScale: '',
   tileExitScale: '',
   toastSlide: 'px',
