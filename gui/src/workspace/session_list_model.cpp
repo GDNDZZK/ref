@@ -1,5 +1,6 @@
 #include "workspace/session_list_model.h"
 
+#include "proto/todo_progress.h"
 #include "workspace/toast_text.h"
 
 #include <QSet>
@@ -92,14 +93,9 @@ SessionListModel::Row SessionListModel::toRow(const proto::SessionInfo& info)
 	row.busySince = info.busySince.value_or(0);
 	row.updatedAt = info.updatedAt;
 	row.createdAt = info.createdAt;
-	row.todoTotal = int(info.todos.size());
-	for(const proto::Todo& todo : info.todos)
-	{
-		if(todo.status == proto::TodoStatus::Completed || todo.status == proto::TodoStatus::Cancelled)
-		{
-			++row.todoDone;
-		}
-	}
+	const proto::TodoProgress progress = proto::todoProgress(info.todos);
+	row.todoDone = progress.done;
+	row.todoTotal = progress.total;
 	row.lastError = info.lastError.value_or(QString());
 	row.attached = int(info.attached);
 	row.live = info.live;

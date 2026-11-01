@@ -124,6 +124,8 @@ public:
 
 	void broadcast() { m_fake.send({{u"kind"_s, u"sessions"_s}, {u"sessions"_s, list()}}); }
 
+	QJsonObject info(const QString& id) const { return m_sessions.value(id); }
+
 	void remove(const QString& id)
 	{
 		m_sessions.remove(id);
@@ -373,6 +375,7 @@ private slots:
 	void aLostConnectionFreesTheCardAndItCanBeSentAgain();
 	void aReplyThatFailsLateLeavesTheNextQuestionAlone();
 	void gettingTheKeyboardStartsTheGuardAgain();
+	void theTodoListFollowsTheSessionInfo();
 	void typingACustomAnswerTakesTheKeysAwayFromTheCard();
 	void sessionsHaveTheMethodsCommandsCall();
 	void undoPutsThePromptBackIntoTheInputBox();
@@ -908,6 +911,41 @@ void TestWorkspace::gettingTheKeyboardStartsTheGuardAgain()
 	QVERIFY(!session->answerKey(Qt::Key_Return, QString(), Qt::NoModifier, false)); // the default is not taken
 	QCOMPARE(f.stub.requests(u"question_reply"_s).size(), 0);
 	QTRY_VERIFY(session->answerKeysActive());
+}
+
+// The status line item and its popup read these properties; the counting is the terminal UI's.
+void TestWorkspace::theTodoListFollowsTheSessionInfo()
+{
+	Fixture f;
+	ChatSession* session = f.workspace->current();
+	QCOMPARE(session->todoTotal(), 0);
+	QVERIFY(session->todoCurrent().isEmpty());
+	const auto sendTodos = [&](const QJsonArray& todos) {
+		QJsonObject info = f.stub.info(u"ses_a"_s);
+		info[u"todos"_s] = todos;
+		f.fake.send({{u"kind"_s, u"event"_s}, {u"session_id"_s, u"ses_a"_s}, {u"event"_s, QJsonObject{{u"type"_s, u"info"_s}, {u"info"_s, info}}}});
+	};
+	const auto item = [](const QString& content, const QString& status) { return QJsonObject{{u"content"_s, content}, {u"status"_s, status}}; };
+	QSignalSpy changed(session, &ChatSession::infoChanged);
+
+	sendTodos({item(u"Read the parser"_s, u"completed"_s),
+	           item(u"Fix\nthe loop"_s, u"in_progress"_s),
+	           item(u"Skipped"_s, u"cancelled"_s),
+	           item(u"Run tests"_s, u"pending"_s)});
+
+	QTRY_COMPARE(session->todoTotal(), 3);
+	QCOMPARE(session->todoDone(), 1);
+	QCOMPARE(session->todoCurrent(), u"Fix the loop"_s); // on one line
+	QCOMPARE(session->todoCurrentStatus(), u"in_progress"_s);
+	QCOMPARE(session->todoItems().size(), 4); // the popup lists every item, cancelled ones too
+	QCOMPARE(session->todoItems().at(2).toMap().value(u"status"_s).toString(), u"cancelled"_s);
+
+	sendTodos({item(u"Read the parser"_s, u"completed"_s), item(u"Run tests"_s, u"completed"_s)});
+
+	QTRY_COMPARE(session->todoDone(), 2);
+	QVERIFY(session->todoCurrent().isEmpty()); // all done
+	QVERIFY(session->todoCurrentStatus().isEmpty());
+	QVERIFY(changed.count() >= 2);
 }
 
 void TestWorkspace::typingACustomAnswerTakesTheKeysAwayFromTheCard()

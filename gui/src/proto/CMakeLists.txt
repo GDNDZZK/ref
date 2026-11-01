@@ -9,6 +9,8 @@ qt_add_library(refgui_proto STATIC
 	parse_session.cpp
 	request.cpp
 	request.h
+	todo_progress.cpp
+	todo_progress.h
 	types.h
 )
 
