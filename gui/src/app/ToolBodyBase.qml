@@ -10,14 +10,14 @@ Column {
 
 	signal showAllRequested()
 
-	readonly property int horizontalPadding: 14
-	readonly property int verticalPadding: 10
+	readonly property int horizontalPadding: Theme.toolBodyPaddingX
+	readonly property int verticalPadding: Theme.toolBodyPaddingY
 	readonly property int sectionSpacing: 12
 	readonly property real contentWidth: width - 2 * horizontalPadding
 	readonly property bool finished: call.toolState === "done" || call.toolState === "error" || call.toolState === "denied" || call.toolState === "cancelled"
 
 	topPadding: verticalPadding
-	bottomPadding: verticalPadding + 2
+	bottomPadding: verticalPadding + Theme.toolBodyBottomExtra
 	leftPadding: horizontalPadding
 	rightPadding: horizontalPadding
 	spacing: sectionSpacing

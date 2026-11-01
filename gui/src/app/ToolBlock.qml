@@ -39,7 +39,7 @@ Block {
 	readonly property bool showsTime: columnWidth >= timeShownFromWidth
 	readonly property int timeShownFromWidth: 560
 	readonly property int headerHeight: 38
-	readonly property int cardPadding: 14
+	readonly property int cardPadding: Theme.toolBodyPaddingX
 	readonly property int itemSpacing: 10
 	readonly property real attentionBorderOpacity: 0.6
 	readonly property int tickInterval: 250 // ms between redraws of the clock texts

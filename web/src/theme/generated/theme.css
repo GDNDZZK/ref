@@ -47,6 +47,9 @@
   --radius-small: 6px;
   --radius: 10px;
   --radius-large: 18px;
+  --tool-body-padding-x: 14px;
+  --tool-body-padding-y: 10px;
+  --tool-body-bottom-extra: 2px;
   --page-padding: 24px;
   --meta-line-height: 24px;
   --block-spacing: 14px;
