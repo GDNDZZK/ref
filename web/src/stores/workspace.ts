@@ -10,6 +10,7 @@ import { computed, ref, shallowRef, watch } from 'vue'
 import { crossfade } from '../composables/crossfade.ts'
 import { emitDraftRestored } from '../composer/draftBus.ts'
 import { ChatSession } from '../model/chatSession.ts'
+import { collapseWhitespace } from '../model/oneLine.ts'
 import type { EventFrame } from '../net/connection.ts'
 import { writeLocation } from '../net/location.ts'
 import { rowState } from '../shell/sessionRow.ts'
@@ -40,7 +41,7 @@ export function sortLive(sessions: readonly SessionInfo[]): SessionInfo[] {
 // "name: the error on one line", cut at 200 characters with an ellipsis (the TUI's toast for a
 // session in the background: whitespace runs, newlines included, become one space).
 export function errorToast(name: string, text: string): string {
-  const oneLine = text.replace(/\s+/g, ' ').trim()
+  const oneLine = collapseWhitespace(text)
   const characters = Array.from(`${name}: ${oneLine}`)
   if (characters.length <= ERROR_TOAST_MAX_CHARS) return characters.join('')
   return `${characters.slice(0, ERROR_TOAST_MAX_CHARS - 1).join('')}…`
