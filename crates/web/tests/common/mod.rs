@@ -24,6 +24,9 @@ pub type Ws =
 const START_ATTEMPTS: u32 = 5;
 const START_TIMEOUT: Duration = Duration::from_secs(15);
 pub const STEP_TIMEOUT: Duration = Duration::from_secs(10);
+/// Poll intervals: for conditions that turn true quickly, and for a process that starts up.
+pub const POLL_FAST: Duration = Duration::from_millis(20);
+const POLL_SLOW: Duration = Duration::from_millis(50);
 /// Sent by the fake upstream: close the connection with `FAKE_CLOSE_CODE` / `FAKE_CLOSE_REASON`.
 pub const FAKE_CLOSE_TRIGGER: &str = "close-me";
 pub const FAKE_CLOSE_CODE: u16 = 4001;
@@ -163,14 +166,10 @@ impl Web {
 
     /// Waits for the process to exit by itself.
     pub async fn wait_exit(&mut self) -> std::process::ExitStatus {
-        let deadline = std::time::Instant::now() + STEP_TIMEOUT;
-        loop {
-            if let Some(status) = self.child.try_wait().unwrap() {
-                return status;
-            }
-            assert!(std::time::Instant::now() < deadline, "ref-web did not exit");
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+        poll_until("ref-web to exit", STEP_TIMEOUT, POLL_FAST, async || {
+            self.child.try_wait().unwrap()
+        })
+        .await
     }
 
     /// SIGKILL: no chance to clean up.
@@ -180,23 +179,16 @@ impl Web {
     }
 
     async fn wait_until_listening(&mut self) -> Result<(), std::process::ExitStatus> {
-        let deadline = std::time::Instant::now() + START_TIMEOUT;
-        loop {
+        poll_until("ref-web to start", START_TIMEOUT, POLL_SLOW, async || {
             if let Some(status) = self.child.try_wait().unwrap() {
-                return Err(status);
+                return Some(Err(status));
             }
-            if tokio::net::TcpStream::connect(("127.0.0.1", self.port))
+            tokio::net::TcpStream::connect(("127.0.0.1", self.port))
                 .await
                 .is_ok()
-            {
-                return Ok(());
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "ref-web did not start"
-            );
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+                .then_some(Ok(()))
+        })
+        .await
     }
 
     pub fn url(&self, path: &str) -> String {
@@ -392,13 +384,29 @@ pub fn process_gone(pid: u32) -> bool {
         .is_some_and(|rest| rest.trim_start().starts_with('Z'))
 }
 
-pub async fn wait_until(what: &str, mut condition: impl FnMut() -> bool) {
-    let deadline = std::time::Instant::now() + STEP_TIMEOUT;
-    while !condition() {
+/// Polls `check` every `poll` until it returns `Some`; panics after `timeout`.
+async fn poll_until<T>(
+    what: &str,
+    timeout: Duration,
+    poll: Duration,
+    mut check: impl AsyncFnMut() -> Option<T>,
+) -> T {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if let Some(found) = check().await {
+            return found;
+        }
         assert!(
             std::time::Instant::now() < deadline,
             "timed out waiting for {what}"
         );
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        tokio::time::sleep(poll).await;
     }
+}
+
+pub async fn wait_until(what: &str, mut condition: impl FnMut() -> bool) {
+    poll_until(what, STEP_TIMEOUT, POLL_FAST, async || {
+        condition().then_some(())
+    })
+    .await;
 }

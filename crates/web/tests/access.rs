@@ -201,7 +201,7 @@ async fn port_zero_is_rejected_before_anything_starts() {
     let deadline = std::time::Instant::now() + PORT_ZERO_SETTLE;
     let mut exited = false;
     while !exited && std::time::Instant::now() < deadline {
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        tokio::time::sleep(POLL_FAST).await;
         exited = child.try_wait().unwrap().is_some();
     }
     if !exited {
