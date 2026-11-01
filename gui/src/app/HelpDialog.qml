@@ -96,15 +96,4 @@ ModalDialog {
 			}
 		}
 	}
-
-	component SectionLabel: Text {
-
-		textFormat: Text.PlainText
-		width: parent.width
-		height: Theme.sidebarSectionHeight
-		leftPadding: Theme.dialogPadding
-		verticalAlignment: Text.AlignVCenter
-		color: Theme.textMuted
-		font.pixelSize: Theme.smallFontSize
-	}
 }

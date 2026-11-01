@@ -14,16 +14,7 @@ ModalDialog {
 		width: parent.width
 		bottomPadding: 18
 
-		Text {
-			textFormat: Text.PlainText
-			width: parent.width
-			height: Theme.sidebarSectionHeight
-			leftPadding: Theme.dialogPadding
-			verticalAlignment: Text.AlignVCenter
-			text: qsTr("Appearance")
-			color: Theme.textMuted
-			font.pixelSize: Theme.smallFontSize
-		}
+		SectionLabel { text: qsTr("Appearance") }
 
 		Item {
 			width: parent.width

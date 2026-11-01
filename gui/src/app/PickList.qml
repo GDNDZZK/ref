@@ -128,13 +128,10 @@ Item {
 			width: view.width
 			height: Theme.sidebarSectionHeight
 
-			Text {
-				textFormat: Text.PlainText
-				x: 18
-				anchors.verticalCenter: parent.verticalCenter
+			SectionLabel {
+				height: parent.height
+				leftPadding: 18
 				text: pick.sectionLabel(parent.section)
-				color: Theme.textMuted
-				font.pixelSize: Theme.smallFontSize
 			}
 		}
 

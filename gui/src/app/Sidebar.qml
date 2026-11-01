@@ -151,6 +151,7 @@ Rectangle {
 
 			SectionLabel {
 				id: todoLabel
+				leftPadding: 18
 				text: qsTr("Todo %1/%2").arg(sidebar.shownTodo.done).arg(sidebar.shownTodo.total)
 			}
 
@@ -176,6 +177,7 @@ Rectangle {
 
 		SectionLabel {
 			id: runningLabel
+			leftPadding: 18
 			anchors.top: todoSection.bottom
 			text: qsTr("Running")
 		}
@@ -216,6 +218,7 @@ Rectangle {
 
 		SectionLabel {
 			id: historyLabel
+			leftPadding: 18
 			anchors.top: running.bottom
 			text: qsTr("History")
 		}
@@ -370,16 +373,5 @@ Rectangle {
 				onClicked: Commands.run(CommandId.settings)
 			}
 		}
-	}
-
-	component SectionLabel: Text {
-
-		textFormat: Text.PlainText
-		width: column.width
-		height: Theme.sidebarSectionHeight
-		leftPadding: 18
-		verticalAlignment: Text.AlignVCenter
-		color: Theme.textMuted
-		font.pixelSize: Theme.smallFontSize
 	}
 }
