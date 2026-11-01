@@ -705,6 +705,12 @@ pub struct ClientFrame {
     pub req: Request,
 }
 
+/// Values of `Request::PeerCommand.command`.
+pub const PEER_COMMAND_PEERS: &str = "peers";
+pub const PEER_COMMAND_NAME: &str = "peers-name";
+pub const PEER_COMMAND_INBOX: &str = "peers-inbox";
+pub const PEER_COMMAND_OUTBOX: &str = "peers-outbox";
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "op", rename_all = "snake_case")]
 #[ts(optional_fields = nullable)]
@@ -877,7 +883,7 @@ pub enum Request {
         path: String,
     },
     /// Cross-session slash commands run for the user without an LLM turn.
-    /// `command`: "peers" | "peers-name" | "peers-inbox" | "peers-outbox". -> `{text}`
+    /// `command`: one of the `PEER_COMMAND_*` constants. -> `{text}`
     PeerCommand {
         session_id: String,
         command: String,

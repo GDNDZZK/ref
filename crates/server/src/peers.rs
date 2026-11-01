@@ -5,7 +5,10 @@ use crate::hub::{Hub, PeerRecord};
 use crate::session::{Session, user_message};
 use crate::util::lock;
 use ref_llm::ToolDef;
-use ref_proto::{Message, MessageSource, Part, Role, SessionStatus};
+use ref_proto::{
+    Message, MessageSource, PEER_COMMAND_INBOX, PEER_COMMAND_NAME, PEER_COMMAND_OUTBOX,
+    PEER_COMMAND_PEERS, Part, Role, SessionStatus,
+};
 use ref_tools::ToolOutput;
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -601,10 +604,10 @@ pub fn user_command(
     args: &str,
 ) -> Result<String, String> {
     match command {
-        "peers" | "list-agents" => Ok(cmd_peers(hub, s)),
-        "peers-name" => cmd_name(hub, s, args),
-        "peers-inbox" => Ok(cmd_inbox(s)),
-        "peers-outbox" => Ok(cmd_outbox(hub, s)),
+        PEER_COMMAND_PEERS | "list-agents" => Ok(cmd_peers(hub, s)),
+        PEER_COMMAND_NAME => cmd_name(hub, s, args),
+        PEER_COMMAND_INBOX => Ok(cmd_inbox(s)),
+        PEER_COMMAND_OUTBOX => Ok(cmd_outbox(hub, s)),
         other => Err(format!("Unknown peer command /{other}")),
     }
 }
