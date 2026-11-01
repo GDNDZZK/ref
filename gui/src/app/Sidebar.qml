@@ -10,12 +10,15 @@ Rectangle {
 	id: sidebar
 
 	readonly property int contentWidth: Theme.sidebarWidth
-	readonly property int maxMcpDots: 6
-	readonly property real minRunningHeight: Theme.sidebarMinRunningRows * (Theme.sidebarRowHeight + 2)
+	readonly property int newRowHeight: 44
+	readonly property int searchHeight: 32
+	readonly property int historyGap: 8 // between the search field and the history rows
+	readonly property int runningRowSpacing: 2
+	readonly property real minRunningHeight: Theme.sidebarMinRunningRows * (Theme.sidebarRowHeight + runningRowSpacing)
 	readonly property real minHistoryHeight: Theme.sidebarMinHistoryRows * Theme.sidebarHistoryRowHeight
 	// Space for the three lists: what is left of the column after the fixed parts.
 	readonly property real listSpace: fixedSpace - todoSection.height
-	readonly property real fixedSpace: height - Theme.sidebarHeaderHeight - 44 - 2 * Theme.sidebarSectionHeight - 32 - 8 - Theme.sidebarFooterHeight
+	readonly property real fixedSpace: height - Theme.sidebarHeaderHeight - newRowHeight - 2 * Theme.sidebarSectionHeight - searchHeight - historyGap - Theme.sidebarFooterHeight
 
 	// The to-do list of the session in front: the current one, or the focused tile in split view. One value, {items,
 	// done, total}, and nothing else is derived from it by a binding that could be read before it has caught up. The
@@ -25,8 +28,13 @@ Rectangle {
 	property var shownTodo: ({ items: [], done: 0, total: 0 })
 	// Up to a third of the column, and never so much that the lists below lose their minimum.
 	readonly property real todoCap: Math.min(height / 3, fixedSpace - minRunningHeight - minHistoryHeight)
-	readonly property real todoHeight: todo.items.length > 0 && todoCap >= Theme.sidebarSectionHeight + todoList.rowHeight
-		? Math.min(Theme.sidebarSectionHeight + todoList.height, todoCap) : 0
+	readonly property bool todoFits: todo.items.length > 0 && todoCap >= Theme.sidebarSectionHeight + todoList.rowHeight
+	readonly property real todoHeight: todoFits ? Math.min(Theme.sidebarSectionHeight + todoList.height, todoCap) : 0
+	readonly property string emptyHistoryText: {
+		if (!Workspace.historyLoaded)
+			return qsTr("Loading…")
+		return searchInput.text !== "" ? qsTr("No matching sessions") : qsTr("No earlier sessions")
+	}
 	readonly property int lockupWidth: 60 // the lockup is drawn at this size only: its pixels are aligned to it
 	readonly property int lockupHeight: 24
 
@@ -82,7 +90,7 @@ Rectangle {
 			id: newRow
 			anchors.top: header.bottom
 			width: parent.width
-			height: 44
+			height: sidebar.newRowHeight
 
 			Rectangle {
 				id: newButton
@@ -189,7 +197,7 @@ Rectangle {
 			// The rows' own height; scrolls only when the history would get less than its minimum.
 			height: Math.min(contentHeight, Math.max(sidebar.listSpace - sidebar.minHistoryHeight, sidebar.minRunningHeight))
 			model: Workspace.sessions
-			spacing: 2
+			spacing: sidebar.runningRowSpacing
 			clip: true
 			boundsBehavior: Flickable.StopAtBounds
 			delegate: SessionRow {}
@@ -229,7 +237,7 @@ Rectangle {
 			anchors.top: historyLabel.bottom
 			x: Theme.sidebarPadding
 			width: parent.width - 2 * Theme.sidebarPadding
-			height: 32
+			height: sidebar.searchHeight
 			radius: 16
 			color: Theme.surface
 			border.color: searchInput.activeFocus ? Theme.accent : Theme.border
@@ -278,7 +286,7 @@ Rectangle {
 
 		ListView {
 			id: history
-			anchors { top: search.bottom; topMargin: 8; bottom: footerBar.top }
+			anchors { top: search.bottom; topMargin: sidebar.historyGap; bottom: footerBar.top }
 			width: parent.width
 			model: Workspace.history
 			clip: true
@@ -291,7 +299,7 @@ Rectangle {
 				textFormat: Text.PlainText
 				anchors { horizontalCenter: parent.horizontalCenter; top: parent.top; topMargin: 16 }
 				visible: history.count === 0
-				text: !Workspace.historyLoaded ? qsTr("Loading…") : searchInput.text !== "" ? qsTr("No matching sessions") : qsTr("No earlier sessions")
+				text: sidebar.emptyHistoryText
 				color: Theme.textMuted
 				font.pixelSize: Theme.captionFontSize
 			}
@@ -309,60 +317,9 @@ Rectangle {
 				color: Theme.border
 			}
 
-			Row {
-				id: mcp
+			McpSummary {
 				x: 18
 				anchors.verticalCenter: parent.verticalCenter
-				spacing: 8
-				visible: Workspace.mcpServers.length > 0
-
-				Icon {
-					anchors.verticalCenter: parent.verticalCenter
-					name: "mcp"
-					size: 16
-					color: Theme.textMuted
-				}
-				Text {
-					textFormat: Text.PlainText
-					anchors.verticalCenter: parent.verticalCenter
-					text: "MCP"
-					color: Theme.textMuted
-					font.pixelSize: Theme.captionFontSize
-				}
-				Row {
-					anchors.verticalCenter: parent.verticalCenter
-					spacing: 4
-
-					Repeater {
-						model: Workspace.mcpServers.slice(0, sidebar.maxMcpDots)
-
-						Rectangle {
-							id: dot
-							required property var modelData
-							anchors.verticalCenter: parent.verticalCenter
-							width: 6
-							height: 6
-							radius: 3
-							color: McpStatus.colorOf(modelData.status)
-
-							Pulse {
-								target: dot
-								running: dot.modelData.status === McpStatus.connecting
-							}
-						}
-					}
-				}
-				Text {
-					textFormat: Text.PlainText
-					anchors.verticalCenter: parent.verticalCenter
-					visible: Workspace.mcpServers.length > sidebar.maxMcpDots
-					text: "+" + (Workspace.mcpServers.length - sidebar.maxMcpDots)
-					color: Theme.textMuted
-					font.pixelSize: Theme.smallFontSize
-				}
-
-				HoverHandler { cursorShape: Qt.PointingHandCursor }
-				TapHandler { onTapped: Commands.run(CommandId.mcp) }
 			}
 
 			IconButton {
