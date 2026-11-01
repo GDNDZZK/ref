@@ -6,21 +6,33 @@ import RefGui
 SessionDialog {
 	id: dialog
 
-	readonly property var commands: ({peers: "peers", name: "peers-name", inbox: "peers-inbox", outbox: "peers-outbox"})
-	property string tab: Workspace.dialogArgs.tab ?? "peers"
+	// The tabs: what the Segmented shows, and the backend command behind each.
+	readonly property var tabs: [
+		{text: qsTr("Peers"), value: "peers", command: "peers"},
+		{text: qsTr("Name"), value: "name", command: "peers-name"},
+		{text: qsTr("Inbox"), value: "inbox", command: "peers-inbox"},
+		{text: qsTr("Outbox"), value: "outbox", command: "peers-outbox"}
+	]
+	readonly property int outputMinHeight: 200
+	readonly property int outputMaxHeight: 320
+	property string tab: Workspace.dialogArgs.tab ?? tabs[0].value
 	property string result: ""
 	property bool loading: true
 
+	function commandOf(tab) {
+		return tabs.find(entry => entry.value === tab).command
+	}
+
 	function load() {
 		loading = true
-		Workspace.peerCommand(sessionId, commands[tab], "", replyWhileOpen((ok, text) => {
+		Workspace.peerCommand(sessionId, commandOf(tab), "", replyWhileOpen((ok, text) => {
 			loading = false
 			result = text
 		}))
 	}
 
 	function rename() {
-		Workspace.peerCommand(sessionId, "peers-name", nameField.text.trim(), replyWhileOpen((ok, text) => {
+		Workspace.peerCommand(sessionId, commandOf("name"), nameField.text.trim(), replyWhileOpen((ok, text) => {
 			if (ok)
 				result = text
 			else
@@ -42,12 +54,7 @@ SessionDialog {
 
 			Segmented {
 				width: parent.width
-				model: [
-					{text: qsTr("Peers"), value: "peers"},
-					{text: qsTr("Name"), value: "name"},
-					{text: qsTr("Inbox"), value: "inbox"},
-					{text: qsTr("Outbox"), value: "outbox"}
-				]
+				model: dialog.tabs
 				value: dialog.tab
 				onActivated: value => dialog.tab = value
 			}
@@ -55,7 +62,7 @@ SessionDialog {
 
 		Rectangle {
 			width: parent.width
-			height: Math.min(320, Math.max(200, output.contentHeight + 2 * 14))
+			height: Math.min(dialog.outputMaxHeight, Math.max(dialog.outputMinHeight, output.contentHeight + 2 * 14))
 			radius: 10
 			color: Theme.codeBackground
 			border.color: Theme.border
