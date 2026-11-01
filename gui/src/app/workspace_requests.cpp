@@ -36,7 +36,7 @@ void Workspace::report(const Reply& reply, bool ok, const QVariant& payload)
 	}
 	if(!ok)
 	{
-		toast(u"error"_s, payload.toString());
+		toast(refgui::workspace::ToastLevel::Error, payload.toString());
 	}
 }
 
@@ -164,7 +164,7 @@ void Workspace::deleteHistory(const QString& sessionId)
 		m_directory.refreshHistory();
 		if(!ok)
 		{
-			toast(u"error"_s, payload.toString());
+			toast(refgui::workspace::ToastLevel::Error, payload.toString());
 		}
 	};
 	perform(m_backend.client().deleteSession(sessionId), reloaded, [] { return QVariant(); });

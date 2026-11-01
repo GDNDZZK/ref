@@ -9,6 +9,7 @@
 #include "workspace/command_registry.h"
 #include "workspace/session_directory.h"
 #include "workspace/settings.h"
+#include "workspace/toast_text.h"
 
 #include <QCoroTask>
 #include <QHash>
@@ -229,6 +230,18 @@ private:
 	Reply wrap(const QJSValue& cb) const;
 	void report(const Reply& reply, bool ok, const QVariant& payload);
 	void toast(const QString& level, const QString& text);
+	void toastCommandUnavailable();
+	// Toasts the error of a failed request; true when it failed.
+	template<typename T>
+	bool toastFailure(const refgui::client::Result<T>& result)
+	{
+		if(result)
+		{
+			return false;
+		}
+		toast(refgui::workspace::ToastLevel::Error, result.error());
+		return true;
+	}
 	void toastFrom(const refgui::proto::ServerFrame& frame);
 	template<typename T, typename OnOk>
 	QCoro::Task<> perform(QCoro::Task<refgui::client::Result<T>> request, Reply reply, OnOk onOk);

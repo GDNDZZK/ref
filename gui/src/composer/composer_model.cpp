@@ -1,6 +1,7 @@
 #include "composer/composer_model.h"
 
 #include "compose/image_file.h"
+#include "workspace/toast_text.h"
 
 #include <QBuffer>
 #include <QClipboard>
@@ -371,7 +372,7 @@ QCoro::Task<> ComposerModel::expandAndSend(QString name, QString args)
 	}
 	if(expanded->trimmed().isEmpty())
 	{
-		emit toastRequested(u"warn"_s, tr("The command expanded to nothing"));
+		emit toastRequested(workspace::ToastLevel::Warn, tr("The command expanded to nothing"));
 		co_return;
 	}
 	co_await sendPrompt(*expanded, {}, false);
@@ -445,7 +446,7 @@ QCoro::Task<> ComposerModel::removeQueued(QString messageId)
 	}
 	if(!result->removed)
 	{
-		emit toastRequested(u"info"_s, tr("Already sent; the prompt can no longer be removed"));
+		emit toastRequested(workspace::ToastLevel::Info, tr("Already sent; the prompt can no longer be removed"));
 		co_return;
 	}
 	restoreDraft(result->text, result->images);
@@ -616,7 +617,7 @@ int ComposerModel::attachImageUrls(const QList<QUrl>& urls, bool reportOthers)
 		}
 		else if(reportOthers)
 		{
-			emit toastRequested(u"warn"_s, tr("%1 is not a supported image (PNG, JPEG, GIF or WebP)").arg(url.fileName()));
+			emit toastRequested(workspace::ToastLevel::Warn, tr("%1 is not a supported image (PNG, JPEG, GIF or WebP)").arg(url.fileName()));
 		}
 	}
 	return attached;
