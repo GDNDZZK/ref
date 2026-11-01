@@ -55,7 +55,7 @@ ComposerModel::ComposerModel(client::Backend& backend, session::SessionControlle
 	connect(&m_controller, &session::SessionController::queueChanged, this, [this] { m_queue.setMessages(m_controller.queued()); });
 	connect(&m_controller, &session::SessionController::infoChanged, this, &ComposerModel::labelsChanged);
 	connect(&m_controller, &session::SessionController::turnInProgressChanged, this, &ComposerModel::disarmInterrupt);
-	connect(&m_backend, &client::Backend::stateChanged, this, &ComposerModel::readyChanged);
+	connect(&m_controller, &session::SessionController::connectionChanged, this, &ComposerModel::readyChanged);
 	connect(&m_backend, &client::Backend::connected, this, [this] { loadConfig(); });
 	m_queue.setMessages(m_controller.queued());
 	if(m_backend.state() == client::Backend::State::Connected)
@@ -66,7 +66,7 @@ ComposerModel::ComposerModel(client::Backend& backend, session::SessionControlle
 
 bool ComposerModel::isReady() const
 {
-	return m_backend.state() == client::Backend::State::Connected && m_controller.isAttached();
+	return m_controller.isConnected() && m_controller.isAttached();
 }
 
 bool ComposerModel::isCompletionOpen() const
@@ -238,7 +238,7 @@ void ComposerModel::updateCompletion()
 QCoro::Task<> ComposerModel::findFiles(QString query, quint64 serial)
 {
 	const QPointer<ComposerModel> self(this); // the model can be gone when the answer arrives
-	const auto result = co_await m_backend.client().listFiles(m_controller.info().cwd, std::move(query), FileLimit);
+	const auto result = co_await m_controller.listFiles(std::move(query), FileLimit);
 	if(!self || serial != m_fileSerial)
 	{
 		co_return;
@@ -374,7 +374,7 @@ QCoro::Task<> ComposerModel::sendShell(QString command)
 		restoreDraft(command, {});
 		setShellMode(true);
 	};
-	if(co_await awaitAndReport(m_backend.client().shell(m_controller.sessionId(), command), restore))
+	if(co_await awaitAndReport(m_controller.runShell(command), restore))
 	{
 		emit sent();
 	}
@@ -383,7 +383,7 @@ QCoro::Task<> ComposerModel::sendShell(QString command)
 QCoro::Task<> ComposerModel::expandAndSend(QString name, QString args)
 {
 	const QPointer<ComposerModel> self(this); // the model can be gone when the answer arrives
-	const auto expanded = co_await m_backend.client().expandCommand(std::move(name), std::move(args), m_controller.info().cwd);
+	const auto expanded = co_await m_controller.expandCommand(std::move(name), std::move(args));
 	if(!self)
 	{
 		co_return;
@@ -456,7 +456,7 @@ void ComposerModel::withdraw(int row)
 QCoro::Task<> ComposerModel::removeQueued(QString messageId)
 {
 	const QPointer<ComposerModel> self(this); // the model can be gone when the answer arrives
-	const auto result = co_await m_backend.client().removeQueued(m_controller.sessionId(), messageId);
+	const auto result = co_await m_controller.removeQueued(messageId);
 	if(!self)
 	{
 		co_return;

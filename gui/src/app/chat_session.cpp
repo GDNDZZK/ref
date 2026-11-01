@@ -26,7 +26,7 @@ ChatSession::ChatSession(Backend& backend, QString sessionId, QObject* parent)
 	, m_controller(backend)
 	, m_composer(backend, m_controller, refgui::composer::sharedPromptHistory())
 {
-	connect(&m_backend, &Backend::stateChanged, this, &ChatSession::readyChanged);
+	connect(&m_controller, &refgui::session::SessionController::connectionChanged, this, &ChatSession::readyChanged);
 	connect(&m_controller, &refgui::session::SessionController::turnInProgressChanged, this, &ChatSession::busyChanged);
 	connect(&m_controller, &refgui::session::SessionController::infoChanged, this, &ChatSession::titleChanged);
 	connect(&m_controller, &refgui::session::SessionController::infoChanged, this, &ChatSession::infoChanged);
@@ -72,17 +72,7 @@ QCoro::Task<refgui::client::Result<void>> ChatSession::attach(bool foreground)
 
 QCoro::Task<refgui::client::Result<QByteArray>> ChatSession::fetchImage(QString imageId)
 {
-	const auto image = co_await m_backend.client().getImage(m_sessionId, std::move(imageId));
-	if(!image)
-	{
-		co_return std::unexpected(image.error());
-	}
-	QByteArray::FromBase64Result decoded = QByteArray::fromBase64Encoding(image->data.toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
-	if(!decoded)
-	{
-		co_return std::unexpected(u"invalid image data"_s);
-	}
-	co_return std::move(decoded.decoded);
+	co_return co_await m_controller.fetchImage(std::move(imageId));
 }
 
 QCoro::Task<refgui::client::Result<void>> ChatSession::detach()
@@ -114,7 +104,7 @@ bool ChatSession::isBusy() const
 
 bool ChatSession::isReady() const
 {
-	return m_backend.state() == Backend::State::Connected && m_controller.isAttached();
+	return m_controller.isConnected() && m_controller.isAttached();
 }
 
 QString ChatSession::statusText() const
