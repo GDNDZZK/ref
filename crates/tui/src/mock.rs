@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::net::NetEvent;
+use crate::util::{ABORTED_ERROR, mcp_status};
 
 struct MSession {
     info: SessionInfo,
@@ -626,7 +627,7 @@ impl Mock {
             reasoning: 230,
         };
         self.add_context(sid, 45_000);
-        self.finish(sid, &mid, usage, (!ok).then(|| "Aborted".to_string()));
+        self.finish(sid, &mid, usage, (!ok).then(|| ABORTED_ERROR.to_string()));
         self.set_status(sid, SessionStatus::Idle);
     }
 
@@ -936,7 +937,7 @@ impl Mock {
                     cache_write: 0,
                     reasoning: 40,
                 },
-                (!ok).then(|| "Aborted".to_string()),
+                (!ok).then(|| ABORTED_ERROR.to_string()),
             );
             self.set_status(&sid, SessionStatus::Idle);
             if !ok {
@@ -975,7 +976,7 @@ impl Mock {
                 cache_write: 0,
                 reasoning: 0,
             },
-            (!ok).then(|| "Aborted".to_string()),
+            (!ok).then(|| ABORTED_ERROR.to_string()),
         );
         self.set_status(sid, SessionStatus::Idle);
     }
@@ -1451,15 +1452,15 @@ impl Mock {
                 };
                 let docs_ready = now_ms() - started > 8_000;
                 let servers = vec![
-                    McpServerStatus { name: "context7".into(), status: "connected".into(), error: None, tools: vec!["context7_resolve-library-id".into(), "context7_get-library-docs".into()] },
+                    McpServerStatus { name: "context7".into(), status: mcp_status::CONNECTED.into(), error: None, tools: vec!["context7_resolve-library-id".into(), "context7_get-library-docs".into()] },
                     McpServerStatus {
                         name: "docs".into(),
-                        status: if docs_ready { "connected" } else { "connecting" }.into(),
+                        status: if docs_ready { mcp_status::CONNECTED } else { mcp_status::CONNECTING }.into(),
                         error: None,
                         tools: if docs_ready { vec!["docs_search".into()] } else { vec![] },
                     },
-                    McpServerStatus { name: "github".into(), status: "failed".into(), error: Some("HTTP 401 Unauthorized: missing or invalid bearer token (set GITHUB_TOKEN)".into()), tools: vec![] },
-                    McpServerStatus { name: "sqlite".into(), status: "disabled".into(), error: None, tools: vec![] },
+                    McpServerStatus { name: "github".into(), status: mcp_status::FAILED.into(), error: Some("HTTP 401 Unauthorized: missing or invalid bearer token (set GITHUB_TOKEN)".into()), tools: vec![] },
+                    McpServerStatus { name: "sqlite".into(), status: mcp_status::DISABLED.into(), error: None, tools: vec![] },
                 ];
                 self.ok(id, json!({ "servers": servers }));
             }
@@ -1568,7 +1569,7 @@ impl Mock {
                     output: 90,
                     ..Default::default()
                 },
-                r.is_none().then(|| "Aborted".to_string()),
+                r.is_none().then(|| ABORTED_ERROR.to_string()),
             );
             m.set_status(&cid, SessionStatus::Idle);
         });
