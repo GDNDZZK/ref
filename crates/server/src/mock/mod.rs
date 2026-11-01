@@ -59,7 +59,9 @@ impl Mock {
 impl Drop for Mock {
     fn drop(&mut self) {
         // The hub outlives this drop and its session database is open in the directory.
-        let _ = self.running.hub.store.close();
+        if let Err(e) = self.running.hub.store.close() {
+            eprintln!("ref-server: cannot close the session store: {e}");
+        }
         if let Err(e) = std::fs::remove_dir_all(&self.root) {
             eprintln!("ref-server: cannot remove {}: {e}", self.root.display());
         }
@@ -96,7 +98,10 @@ async fn start_all(
     match start_in(&root, port, token, idle_timeout, retry_base).await {
         Ok(running) => Ok(Mock { running, root }),
         Err(e) => {
-            let _ = std::fs::remove_dir_all(&root);
+            // The start error is the one to report; a failed cleanup is only logged.
+            if let Err(clean) = std::fs::remove_dir_all(&root) {
+                eprintln!("ref-server: cannot remove {}: {clean}", root.display());
+            }
             Err(e)
         }
     }
