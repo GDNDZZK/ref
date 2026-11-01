@@ -95,7 +95,8 @@ impl MockBackend {
     }
 
     /// Closes the mock's stdin and waits for it to exit, killing it if that takes too long.
-    pub async fn shutdown(self) {
+    /// Fails if waiting for the process or killing it failed.
+    pub async fn shutdown(self) -> std::io::Result<()> {
         let MockBackend {
             mut child,
             _stdin,
@@ -103,9 +104,9 @@ impl MockBackend {
             ..
         } = self;
         drop(_stdin);
-        let exited = tokio::time::timeout(SHUTDOWN_TIMEOUT, child.wait()).await;
-        if exited.is_err() {
-            let _ = child.kill().await;
+        match tokio::time::timeout(SHUTDOWN_TIMEOUT, child.wait()).await {
+            Ok(status) => status.map(|_| ()),
+            Err(_) => child.kill().await,
         }
     }
 

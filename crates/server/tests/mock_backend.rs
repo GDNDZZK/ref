@@ -43,7 +43,7 @@ async fn announces_an_endpoint_that_accepts_its_token() {
     assert_eq!(response["ok"], true, "{response}");
     // Dropping the handle would kill the mock and leave its temporary directory behind.
     drop(ws);
-    mock.shutdown().await;
+    mock.shutdown().await.unwrap();
 }
 
 #[tokio::test]
@@ -62,7 +62,7 @@ async fn exits_when_its_last_client_disconnects() {
         );
         tokio::time::sleep(POLL).await;
     }
-    mock.shutdown().await;
+    mock.shutdown().await.unwrap();
 }
 
 /// The contract `MockBackend` relies on, checked on the bare process: one JSON line on stdout,

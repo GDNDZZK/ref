@@ -52,6 +52,7 @@ pub(crate) fn spawn_server(port: u16) -> std::io::Result<()> {
     let mut child = cmd.spawn()?;
     // Reap it if it exits while we're alive.
     std::thread::spawn(move || {
+        // Only reaping matters; the exit status of a detached backend is nobody's business.
         let _ = child.wait();
     });
     Ok(())
