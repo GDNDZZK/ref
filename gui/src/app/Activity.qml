@@ -15,6 +15,11 @@ QtObject {
 		return activity !== idle
 	}
 
+	// Waiting for the user, or about to retry.
+	function needsAttention(activity) {
+		return activity === waitingPermission || activity === waitingQuestion || activity === retrying
+	}
+
 	// The last turn failed and nothing is going on now.
 	function isFailed(activity, hasError) {
 		return hasError && !isWorking(activity)

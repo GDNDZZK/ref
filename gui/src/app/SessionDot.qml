@@ -11,8 +11,17 @@ Item {
 	property bool hasError: false
 
 	readonly property bool working: Activity.isWorking(activity)
-	readonly property bool needsAttention: activity === Activity.waitingPermission || activity === Activity.waitingQuestion || activity === Activity.retrying
-	readonly property color dotColor: hasError && !working ? Theme.danger : needsAttention ? Theme.warning : working ? Theme.accent : Theme.idleDot
+	readonly property color dotColor: colorFor(activity, hasError)
+
+	function colorFor(state, errored) {
+		if (Activity.isFailed(state, errored))
+			return Theme.danger
+		if (Activity.needsAttention(state))
+			return Theme.warning
+		if (Activity.isWorking(state))
+			return Theme.accent
+		return Theme.idleDot
+	}
 
 	implicitWidth: Theme.statusDotSize
 	implicitHeight: Theme.statusDotSize
