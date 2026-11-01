@@ -2,7 +2,7 @@
 // The to-do list in the status line (the TUI's progress line): the item being worked on and
 // done/total, or a tick and done/total once everything is done. A click opens the full list in a
 // popover above the button; Esc, a click outside and a change of session close it.
-import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { oneLine } from '../model/oneLine.ts'
 import type { Todo } from '../proto/generated'
@@ -56,12 +56,9 @@ function close(): void {
   open.value = false
 }
 
-async function toggle(): Promise<void> {
+function toggle(): void {
   open.value = !open.value
-  if (open.value) {
-    place()
-    await nextTick()
-  }
+  if (open.value) place()
 }
 
 function onKeydown(event: KeyboardEvent): void {
