@@ -55,9 +55,9 @@ All three show the same sessions, and a session can be open in several of them a
 
 <sub><b>Browser</b> (<code>ref-web</code>). The same interface, here with the split view.</sub>
 
-<img src="docs/images/tui-main.png" alt="ref in the terminal" width="720">
+<img src="docs/images/tui-main.png" alt="ref in the terminal" width="960">
 
-<sub><b>Terminal</b> (<code>ref</code>). Tool calls, replies and the input box.</sub>
+<sub><b>Terminal</b> (<code>ref</code>). Tool calls, replies and the input box; the sidebar shows the session, its to-do list and the live sessions.</sub>
 
 </div>
 

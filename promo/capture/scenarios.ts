@@ -14,6 +14,8 @@ const AFTER_CARD_MS = 1200 // a permission card ignores keys for a moment
 const STREAM_MS = 5000
 const DELAY_RING_MS = 3000 // the text, a temporary file and the delete call take about 2 s
 const TOOLS_DONE = 'Done. The edit went through'
+// The mock `todo` script's last line: its to-do list is complete.
+const TODO_DONE = 'All steps are done.'
 const GUI_README_WIDTH = 1280
 const GUI_README_HEIGHT = 1344
 const LOGO_SVG = join(REPO_ROOT, 'assets', 'app', 'ref.svg')
@@ -85,8 +87,11 @@ export const SCENARIOS: Scenario[] = [
     },
   },
   {
+    // The README main view: a finished to-do list first, so the status line shows its item.
     name: 'tools',
     async run(ui) {
+      await ui.send('todo')
+      await ui.waitText(TODO_DONE)
       await ui.send('tools')
       await ui.waitText(ui.text('status.waitingPermission'))
       await ui.pause(AFTER_CARD_MS)
