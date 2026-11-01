@@ -126,7 +126,7 @@ fn harness_defs() -> Vec<ToolDef> {
                     "type": "object",
                     "properties": {
                         "content": {"type": "string", "description": "Short imperative description."},
-                        "status": {"type": "string", "enum": ["pending", "in_progress", "completed", "cancelled"]}
+                        "status": {"type": "string", "enum": TodoStatus::ALL.map(TodoStatus::as_str)}
                     },
                     "required": ["content", "status"]
                 }}
@@ -320,20 +320,15 @@ fn harness(hub: &Arc<Hub>, s: &Arc<Session>, name: &str, input: &Value) -> ToolO
                         "Error: todos[{i}].content must be a non-empty string."
                     ));
                 }
-                let status = match it
+                let word = it
                     .get("status")
                     .and_then(Value::as_str)
-                    .unwrap_or("pending")
-                {
-                    "pending" => TodoStatus::Pending,
-                    "in_progress" => TodoStatus::InProgress,
-                    "completed" => TodoStatus::Completed,
-                    "cancelled" => TodoStatus::Cancelled,
-                    other => {
-                        return ToolOutput::err(format!(
-                            "Error: todos[{i}].status {other:?} is invalid; use pending, in_progress, completed or cancelled."
-                        ));
-                    }
+                    .unwrap_or(TodoStatus::Pending.as_str());
+                let Ok(status) = serde_json::from_value::<TodoStatus>(json!(word)) else {
+                    return ToolOutput::err(format!(
+                        "Error: todos[{i}].status {word:?} is invalid; use {}.",
+                        status_names()
+                    ));
                 };
                 todos.push(Todo {
                     content: content.to_string(),
@@ -364,6 +359,15 @@ fn harness(hub: &Arc<Hub>, s: &Arc<Session>, name: &str, input: &Value) -> ToolO
             )
         }
         _ => ToolOutput::err(format!("Unknown tool: {name}")),
+    }
+}
+
+/// The todo statuses as prose: "pending, in_progress, completed or cancelled".
+fn status_names() -> String {
+    let names: Vec<&str> = TodoStatus::ALL.iter().map(|s| s.as_str()).collect();
+    match names.split_last() {
+        Some((last, rest)) => format!("{} or {last}", rest.join(", ")),
+        None => String::new(),
     }
 }
 

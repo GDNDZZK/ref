@@ -206,6 +206,26 @@ pub enum TodoStatus {
     Cancelled,
 }
 
+impl TodoStatus {
+    /// Every status, in the order they are shown.
+    pub const ALL: [TodoStatus; 4] = [
+        TodoStatus::Pending,
+        TodoStatus::InProgress,
+        TodoStatus::Completed,
+        TodoStatus::Cancelled,
+    ];
+
+    /// The serialized name of the status.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TodoStatus::Pending => "pending",
+            TodoStatus::InProgress => "in_progress",
+            TodoStatus::Completed => "completed",
+            TodoStatus::Cancelled => "cancelled",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct Todo {
     pub content: String,
