@@ -15,6 +15,7 @@ qt_add_qml_module(ref-gui
 		chat_image_provider.h
 		chat_session.cpp
 		chat_session.h
+		clipboard.h
 		composer_model_type.h
 		notification_center_type.h
 		question_prompt_type.h

@@ -36,9 +36,7 @@ Block {
 				anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
 				text: copiedFlag.copied ? qsTr("Copied") : qsTr("Copy")
 				onClicked: {
-					source.selectAll()
-					source.copy()
-					source.deselect()
+					Clipboard.setText(source.text)
 					copiedFlag.flash()
 				}
 
