@@ -22,6 +22,8 @@ use tokio_util::sync::CancellationToken;
 /// OpenAI limits `call_id` / item ids to 64 characters.
 const MAX_ID: usize = 64;
 const ENCRYPTED_REASONING: &str = "reasoning.encrypted_content";
+/// The Responses API rejects a `max_output_tokens` below this.
+const MIN_OUTPUT_TOKENS: u64 = 16;
 
 pub(crate) async fn stream(
     provider: &Provider,
@@ -91,7 +93,10 @@ pub(crate) fn build_body(provider: &Provider, model: &Model, req: &Request) -> V
     body.insert("stream".into(), json!(true));
     body.insert("store".into(), json!(store));
     if model.output > 0 {
-        body.insert("max_output_tokens".into(), json!(model.output.max(16)));
+        body.insert(
+            "max_output_tokens".into(),
+            json!(model.output.max(MIN_OUTPUT_TOKENS)),
+        );
     }
 
     // Reasoning configuration.
