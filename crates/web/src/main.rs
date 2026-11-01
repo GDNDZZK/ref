@@ -4,8 +4,12 @@
 mod console;
 
 mod assets;
+mod channel;
+#[cfg(test)]
+mod channel_tests;
 mod guard;
 mod instance;
+mod key;
 mod launch;
 mod listen;
 mod ping;
@@ -14,19 +18,21 @@ mod token;
 mod tunnel;
 mod upstream;
 
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context as _;
 use clap::Parser;
 use ref_client::Target;
+use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
-use crate::guard::{HostPolicy, LOCALHOST, SessionCookie};
+use crate::guard::{HostPolicy, LOCALHOST};
+use crate::key::Key;
 use crate::routes::AppState;
-use crate::tunnel::Heartbeat;
+use crate::tunnel::{HANDSHAKE_TIMEOUT, Heartbeat, MAX_HANDSHAKES};
 use crate::upstream::Upstream;
 
 const DEFAULT_HOST: &str = "127.0.0.1";
@@ -39,9 +45,11 @@ const TUNNEL_CLOSE_GRACE: Duration = Duration::from_secs(3);
     version,
     about = "ref-web — web UI for ref-server",
     after_help = "Starting ref-web again opens the browser on the running one (and passes DIR on \
-        to the page) when it has the same login token.\n\n\
-        The login token is created on first start and kept in <state dir>/web/login-token. \
-        Delete that file (while ref-web is stopped) to get a new one."
+        to the page) when it has the same key.\n\n\
+        Without --key, the key is a random login token, created on first start and kept in \
+        <state dir>/web/login-token. Delete that file (while ref-web is stopped) to get a new \
+        one; every browser then has to enter the new key. The address ref-web prints ends with \
+        #key=<key>: the browser never sends that part to a server."
 )]
 struct Cli {
     /// Directory new sessions start in (default: current directory).
@@ -54,13 +62,18 @@ struct Cli {
     /// (no TLS).
     #[arg(long, default_value = DEFAULT_HOST)]
     host: String,
+    /// Key the browser signs in with, at least 16 characters. Default: a random login token
+    /// kept in <state dir>/web/login-token. It shows up in `ps` and the shell history; the
+    /// environment variable REF_WEB_KEY does not.
+    #[arg(long, env = "REF_WEB_KEY", hide_env_values = true)]
+    key: Option<String>,
     /// Do not open the browser.
     #[arg(long)]
     no_open: bool,
     /// Explicit backend URL (ws://host:port); disables auto-spawn.
     #[arg(long, conflicts_with = "mock")]
     server: Option<String>,
-    /// Token for --server.
+    /// Token of the backend given with --server (not the key of the browser, see --key).
     #[arg(long, requires = "server")]
     token: Option<String>,
     /// Use a private fake backend (development).
@@ -117,33 +130,34 @@ fn upstream_for(cli: &Cli) -> Upstream {
 
 async fn run(cli: Cli) -> anyhow::Result<()> {
     let cwd = start_dir(cli.dir.as_deref())?;
-    let login_token = token::load_or_create().await?;
-    if open_running(&cli, &login_token, &cwd).await {
+    let key = key::load(cli.key.as_deref()).await?;
+    if open_running(&cli, &key, &cwd).await? {
         return Ok(());
     }
 
     let listener = listen::bind(&cli.host, cli.port).await?;
     let port = listener.local_addr()?.port();
     let url_host = launch::reachable_host(&cli.host);
-    let login_url = launch::login_url(&url_host, port, &login_token, Some(&cwd));
+    let url = launch::key_url(&url_host, port, key.text(), Some(&cwd));
     let record_path = instance::write(&instance::Record::current(&cli.host, port, false))?;
 
-    say!("{login_url}");
+    say!("{url}");
     if !is_loopback(&cli.host) {
         say_err!(
-            "warning: listening on {}, reachable from the network. Anyone who has the \
-             login URL can run commands as you. Traffic is not encrypted (no TLS).",
+            "warning: listening on {}, reachable from the network. Traffic is encrypted with the \
+             key, but not with TLS. Anyone with the key can run commands as you.",
             cli.host
         );
     }
     if !cli.no_open {
-        launch::open_browser(&login_url);
+        launch::open_browser(&url);
     }
 
     let shutdown = CancellationToken::new();
     let state = Arc::new(AppState {
-        login_token,
-        session: SessionCookie::new(port),
+        key,
+        handshakes: Arc::new(Semaphore::new(MAX_HANDSHAKES)),
+        handshake_timeout: HANDSHAKE_TIMEOUT,
         hosts: HostPolicy::new(&cli.host, port),
         cwd,
         upstream: upstream_for(&cli),
@@ -156,7 +170,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         wait_for_stop_signal().await;
         stop.cancel();
     });
-    let served = axum::serve(listener, routes::router(state.clone()))
+    let app = routes::router(state.clone()).into_make_service_with_connect_info::<SocketAddr>();
+    let served = axum::serve(listener, app)
         .with_graceful_shutdown(async move { shutdown.cancelled().await })
         .await;
     state.tunnels.close();
@@ -171,18 +186,25 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     served.context("server failed")
 }
 
-/// If a ref-web with our login token is running (on `--port` when given), points the browser
-/// at it and returns true.
-async fn open_running(cli: &Cli, login_token: &str, cwd: &str) -> bool {
+/// If a ref-web with our key is running (on `--port` when given), points the browser at it
+/// and returns true. With `--port`, another key on that port is an error.
+async fn open_running(cli: &Cli, key: &Key, cwd: &str) -> anyhow::Result<bool> {
     for record in instance::list_live() {
         if cli.port.is_some_and(|port| port != record.port) {
             continue;
         }
         let host = launch::reachable_host(&record.host);
-        if !ping::is_our_ref_web(&host, record.port, login_token).await {
+        if !ping::is_our_ref_web(&host, record.port, key).await {
+            anyhow::ensure!(
+                cli.port.is_none(),
+                "a ref-web with a different key is running on port {} (pid {}); stop it, or pass \
+                 the same --key",
+                record.port,
+                record.pid
+            );
             continue;
         }
-        let url = launch::login_url(&host, record.port, login_token, Some(cwd));
+        let url = launch::key_url(&host, record.port, key.text(), Some(cwd));
         println!(
             "{} is already running on port {} (pid {}): {url}",
             routes::APP_NAME,
@@ -196,9 +218,9 @@ async fn open_running(cli: &Cli, login_token: &str, cwd: &str) -> bool {
         if !cli.no_open {
             launch::open_browser(&url);
         }
-        return true;
+        return Ok(true);
     }
-    false
+    Ok(false)
 }
 
 #[cfg(unix)]

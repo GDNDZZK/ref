@@ -3,9 +3,7 @@ mod common;
 use std::io::Read as _;
 
 use common::*;
-use futures_util::SinkExt as _;
 use tokio_tungstenite::tungstenite::Error as WsError;
-use tokio_tungstenite::tungstenite::Message;
 
 const BACKEND_TOKEN: &str = "backend-secret";
 
@@ -32,48 +30,12 @@ async fn web_with_fake_upstream(env: &Env) -> (Web, FakeUpstream) {
 }
 
 #[tokio::test]
-async fn login_trades_the_token_for_a_cookie() {
-    let env = Env::new("login");
+async fn pages_are_public_and_carry_the_security_headers() {
+    let env = Env::new("pages");
     let (web, _upstream) = web_with_fake_upstream(&env).await;
 
-    let page = web.http.get(web.url("/")).send().await.unwrap();
-    assert_eq!(page.status(), 401, "pages need a login");
-
-    let wrong = web
-        .http
-        .get(web.url("/login?token=nope"))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(wrong.status(), 403);
-    assert!(wrong.headers().get("set-cookie").is_none());
-
-    let login_url = format!("/login?token={}&dir=/some%20dir", web.token);
-    let login = web.http.get(web.url(&login_url)).send().await.unwrap();
-    assert_eq!(login.status(), 303);
-    let location = login.headers()["location"].to_str().unwrap();
-    assert_eq!(location, "/?dir=/some%20dir");
-    assert!(
-        !location.contains(&web.token),
-        "no token in the address bar"
-    );
-    let cookie = login.headers()["set-cookie"].to_str().unwrap();
-    assert!(
-        cookie.starts_with(&format!("ref_web_{}=", web.port)),
-        "the name carries the port: {cookie}"
-    );
-    assert!(
-        !cookie.contains(&web.token),
-        "the cookie is not the login token: {cookie}"
-    );
-    assert!(
-        cookie.contains("HttpOnly") && cookie.contains("SameSite=Strict"),
-        "{cookie}"
-    );
-    assert_eq!(login.headers()["referrer-policy"], "no-referrer");
-
     let page = web.get("/").await;
-    assert_eq!(page.status(), 200);
+    assert_eq!(page.status(), 200, "no sign-in is needed to load the page");
     assert!(
         page.headers()["content-type"]
             .to_str()
@@ -89,40 +51,73 @@ async fn login_trades_the_token_for_a_cookie() {
     );
     assert!(!csp.contains("unsafe"), "{csp}");
 
-    let info: serde_json::Value = web.get("/api/info").await.json().await.unwrap();
+    // Every response, errors included, keeps the key in a query from travelling on.
+    for path in ["/", "/no/such/file.js", "/api/ping", "/api/ping?nonce=00ff"] {
+        let response = web.get(path).await;
+        assert_eq!(
+            response.headers()["referrer-policy"],
+            "no-referrer",
+            "{path}"
+        );
+        assert!(response.headers().get("set-cookie").is_none(), "{path}");
+    }
+}
+
+#[tokio::test]
+async fn login_and_info_routes_are_gone() {
+    let env = Env::new("gone");
+    let (web, _upstream) = web_with_fake_upstream(&env).await;
+    // An old bookmark falls back to the page, like any path without a file extension.
+    let old_bookmark = web.get(&format!("/login?token={}&dir=/x", web.key)).await;
+    assert_eq!(old_bookmark.status(), 200);
+    assert!(old_bookmark.headers().get("set-cookie").is_none());
+    assert_eq!(web.get("/api/info").await.status(), 404);
+}
+
+#[tokio::test]
+async fn the_ping_proves_the_key_without_revealing_it() {
+    let env = Env::new("ping");
+    let (web, _upstream) = web_with_fake_upstream(&env).await;
+    let ping = |nonce: &'static str| {
+        let web = &web;
+        async move {
+            let response = web.get(&format!("/api/ping?nonce={nonce}")).await;
+            response.json::<serde_json::Value>().await.unwrap()
+        }
+    };
+    let first = ping("00ff").await;
+    assert_eq!(first["app"], "ref-web");
+    assert_eq!(first["proof"].as_str().unwrap().len(), 64, "{first}");
+    assert_ne!(first["proof"], ping("00fe").await["proof"]);
+
+    // The proof is keyed with k_auth, derived from the key and the salt in the state directory.
+    let salt = std::fs::read_to_string(env.state_dir().join("web/salt")).unwrap();
+    let root = channel::Root::derive(
+        web.key.as_bytes(),
+        &channel::from_hex_array(salt.trim()).unwrap(),
+    );
     assert_eq!(
-        info["cwd"],
+        first["proof"].as_str().unwrap(),
+        channel::to_hex(&root.ping_proof("00ff"))
+    );
+    assert!(!first.to_string().contains(&web.key));
+
+    for bad in ["/api/ping", "/api/ping?nonce=", "/api/ping?nonce=zz"] {
+        assert_eq!(web.get(bad).await.status(), 400, "{bad}");
+    }
+}
+
+#[tokio::test]
+async fn frame_zero_tells_the_page_version_cwd_and_mock() {
+    let env = Env::new("frame0");
+    let (web, _upstream) = web_with_fake_upstream(&env).await;
+    let channel = web.channel().await;
+    assert_eq!(channel.info["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(
+        channel.info["cwd"],
         std::env::current_dir().unwrap().to_str().unwrap()
     );
-    assert_eq!(info["mock"], false);
-    let anonymous = web.http.get(web.url("/api/info")).send().await.unwrap();
-    assert_eq!(anonymous.status(), 401);
-
-    let ping: serde_json::Value = web
-        .http
-        .get(web.url("/api/ping?nonce=00ff"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    assert_eq!(ping["app"], "ref-web");
-    assert_eq!(ping["proof"].as_str().unwrap().len(), 64, "{ping}");
-    let other_nonce: serde_json::Value = web
-        .http
-        .get(web.url("/api/ping?nonce=00fe"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    assert_ne!(ping["proof"], other_nonce["proof"]);
-    for bad in ["/api/ping", "/api/ping?nonce=", "/api/ping?nonce=zz"] {
-        let response = web.http.get(web.url(bad)).send().await.unwrap();
-        assert_eq!(response.status(), 400, "{bad}");
-    }
+    assert_eq!(channel.info["mock"], false);
 }
 
 #[tokio::test]
@@ -134,7 +129,6 @@ async fn static_files_are_served_compressed_when_accepted() {
     let plain = web
         .http
         .get(web.url("/index.html"))
-        .header("cookie", web.cookie())
         .header("accept-encoding", "identity")
         .send()
         .await
@@ -145,7 +139,6 @@ async fn static_files_are_served_compressed_when_accepted() {
     let negotiated = web
         .http
         .get(web.url("/index.html"))
-        .header("cookie", web.cookie())
         .header("accept-encoding", "br, gzip")
         .send()
         .await
@@ -181,51 +174,26 @@ async fn static_files_are_served_compressed_when_accepted() {
 }
 
 #[tokio::test]
-async fn websocket_checks_cookie_origin_and_host() {
+async fn websocket_checks_origin_and_host() {
     let env = Env::new("auth");
     let (web, _upstream) = web_with_fake_upstream(&env).await;
 
-    let no_cookie = web
-        .try_ws(None, Some(web.origin()), None)
-        .await
-        .err()
-        .unwrap();
-    assert_eq!(status_of(no_cookie), 401);
-    let bad_cookie = web
-        .try_ws(
-            Some(format!("{}=wrong", web.cookie_name())),
-            Some(web.origin()),
-            None,
-        )
-        .await
-        .err()
-        .unwrap();
-    assert_eq!(status_of(bad_cookie), 401);
     let foreign_origin = web
-        .try_ws(Some(web.cookie()), Some("http://evil.example".into()), None)
+        .try_ws(Some("http://evil.example".into()), None)
         .await
         .err()
         .unwrap();
     assert_eq!(status_of(foreign_origin), 403);
     let other_port = web
-        .try_ws(
-            Some(web.cookie()),
-            Some(format!("http://{LOOPBACK}:5173")),
-            None,
-        )
+        .try_ws(Some(format!("http://{LOOPBACK}:5173")), None)
         .await
         .err()
         .unwrap();
     assert_eq!(status_of(other_port), 403);
-    let no_origin = web
-        .try_ws(Some(web.cookie()), None, None)
-        .await
-        .err()
-        .unwrap();
+    let no_origin = web.try_ws(None, None).await.err().unwrap();
     assert_eq!(status_of(no_origin), 403);
     let rebinding = web
         .try_ws(
-            Some(web.cookie()),
             Some("http://rebind.example:7480".into()),
             Some("rebind.example:7480"),
         )
@@ -236,26 +204,21 @@ async fn websocket_checks_cookie_origin_and_host() {
 
     let wrong_host = web
         .http
-        .get(web.url("/api/info"))
-        .header("cookie", web.cookie())
+        .get(web.url("/api/ping?nonce=00ff"))
         .header("host", "rebind.example")
         .send()
         .await
         .unwrap();
     assert_eq!(wrong_host.status(), 403, "Host is checked on every route");
 
-    assert!(
-        web.try_ws(Some(web.cookie()), Some(web.origin()), None)
-            .await
-            .is_ok()
-    );
+    assert!(web.try_ws(Some(web.origin()), None).await.is_ok());
 }
 
 #[tokio::test]
 async fn frames_are_forwarded_unchanged_and_the_backend_token_is_added() {
     let env = Env::new("forward");
     let (web, upstream) = web_with_fake_upstream(&env).await;
-    let mut ws = web.ws().await;
+    let mut tab = web.channel().await;
 
     let texts = [
         r#"{"id":1,"op":"hello",   "cwd":"/x","caf\u00e9":"\ud83d\ude00","n":1.0}"#,
@@ -264,15 +227,12 @@ async fn frames_are_forwarded_unchanged_and_the_backend_token_is_added() {
         "",
     ];
     for text in texts {
-        ws.send(Message::text(text)).await.unwrap();
-        assert_eq!(next_text(&mut ws).await, text);
+        tab.send_text(text).await;
+        assert_eq!(tab.next_event().await, Event::Text(text.to_string()));
     }
     let binary = vec![0u8, 1, 2, 255];
-    ws.send(Message::binary(binary.clone())).await.unwrap();
-    match next_message(&mut ws).await {
-        Message::Binary(b) => assert_eq!(b.as_ref(), binary.as_slice()),
-        other => panic!("expected binary, got {other:?}"),
-    }
+    tab.send_binary(&binary).await;
+    assert_eq!(tab.next_event().await, Event::Binary(binary));
 
     let query = upstream.handshake_query.borrow().clone().unwrap();
     assert_eq!(query, format!("token={BACKEND_TOKEN}"));
@@ -282,47 +242,33 @@ async fn frames_are_forwarded_unchanged_and_the_backend_token_is_added() {
 async fn each_tab_gets_its_own_upstream_connection() {
     let env = Env::new("tabs");
     let (web, _upstream) = web_with_fake_upstream(&env).await;
-    let (mut first, mut second) = (web.ws().await, web.ws().await);
-    first.send(Message::text("one")).await.unwrap();
-    second.send(Message::text("two")).await.unwrap();
-    assert_eq!(next_text(&mut first).await, "one");
-    assert_eq!(next_text(&mut second).await, "two");
+    let (mut first, mut second) = (web.channel().await, web.channel().await);
+    first.send_text("one").await;
+    second.send_text("two").await;
+    assert_eq!(first.next_text().await, "one");
+    assert_eq!(second.next_text().await, "two");
 }
 
 #[tokio::test]
 async fn upstream_close_is_passed_on() {
     let env = Env::new("close");
     let (web, _upstream) = web_with_fake_upstream(&env).await;
-    let mut ws = web.ws().await;
-    ws.send(Message::text(FAKE_CLOSE_TRIGGER)).await.unwrap();
-    match next_message(&mut ws).await {
-        Message::Close(Some(frame)) => {
-            assert_eq!(u16::from(frame.code), FAKE_CLOSE_CODE);
-            assert_eq!(frame.reason.as_str(), FAKE_CLOSE_REASON);
-        }
-        other => panic!("expected a close frame, got {other:?}"),
-    }
+    let mut tab = web.channel().await;
+    tab.send_text(FAKE_CLOSE_TRIGGER).await;
+    let (code, reason) = tab.next_close().await;
+    assert_eq!(code, FAKE_CLOSE_CODE);
+    assert_eq!(reason, FAKE_CLOSE_REASON);
 }
 
 #[tokio::test]
-async fn unreachable_backend_closes_the_tab_with_the_reason() {
+async fn unreachable_backend_closes_the_tab_with_a_fixed_reason() {
     let env = Env::new("down");
     let dead = format!("ws://{LOOPBACK}:{}/", free_port());
     let web = env.start(&["--server", &dead]).await;
-    let mut ws = web.ws().await;
-    match next_message(&mut ws).await {
-        Message::Close(Some(frame)) => {
-            assert_eq!(u16::from(frame.code), 1011);
-            assert!(
-                frame
-                    .reason
-                    .starts_with(&format!("cannot connect to ws://{LOOPBACK}:")),
-                "{}",
-                frame.reason
-            );
-        }
-        other => panic!("expected a close frame, got {other:?}"),
-    }
+    // The backend is contacted after the key check, so frame 0 never comes.
+    let closed = Channel::sign_in(web.ws().await, &web.key).await.err();
+    // The address of the backend is in the log, not in the close reason.
+    assert_eq!(closed, Some((1011, "backend unavailable".to_string())));
 }
 
 #[tokio::test]
@@ -334,19 +280,17 @@ async fn a_real_backend_accepts_a_hello_without_token() {
     let web = env
         .start(&["--server", &server, "--token", BACKEND_TOKEN])
         .await;
-    let mut ws = web.ws().await;
+    let mut tab = web.channel().await;
 
     let hello = r#"{"id":1,"op":"hello","client":"ref-web","version":2,"cwd":"/tmp"}"#;
-    ws.send(Message::text(hello)).await.unwrap();
-    let response: serde_json::Value = serde_json::from_str(&next_text(&mut ws).await).unwrap();
+    tab.send_text(hello).await;
+    let response: serde_json::Value = serde_json::from_str(&tab.next_text().await).unwrap();
     assert_eq!(response["ok"], true, "{response}");
     assert_eq!(response["result"]["protocol"], ref_proto::PROTOCOL_VERSION);
 
-    ws.send(Message::text(r#"{"id":2,"op":"get_config"}"#))
-        .await
-        .unwrap();
+    tab.send_text(r#"{"id":2,"op":"get_config"}"#).await;
     loop {
-        let frame: serde_json::Value = serde_json::from_str(&next_text(&mut ws).await).unwrap();
+        let frame: serde_json::Value = serde_json::from_str(&tab.next_text().await).unwrap();
         if frame["id"] == 2 {
             assert_eq!(frame["ok"], true, "{frame}");
             break;
@@ -360,11 +304,12 @@ async fn a_wrong_backend_token_is_reported_by_the_backend() {
     let (_backend, backend_port) = real_backend(&env, BACKEND_TOKEN).await;
     let server = format!("ws://{LOOPBACK}:{backend_port}/");
     let web = env.start(&["--server", &server, "--token", "wrong"]).await;
-    let mut ws = web.ws().await;
-    match next_message(&mut ws).await {
-        Message::Close(Some(frame)) => assert_eq!(u16::from(frame.code), 1011),
-        other => panic!("expected a close frame, got {other:?}"),
-    }
+    // Refused while connecting, or right after frame 0, depending on the backend's timing.
+    let code = match Channel::sign_in(web.ws().await, &web.key).await {
+        Err((code, _)) => code,
+        Ok(mut tab) => tab.next_close().await.0,
+    };
+    assert_eq!(code, 1011);
 }
 
 #[tokio::test]
@@ -382,14 +327,20 @@ async fn a_second_start_opens_the_running_instance() {
     let url = out
         .split_whitespace()
         .find(|word| word.starts_with("http://"))
-        .unwrap_or_else(|| panic!("no login URL in {out}"));
-    let query: std::collections::HashMap<_, _> = reqwest::Url::parse(url)
-        .unwrap()
-        .query_pairs()
-        .into_owned()
-        .collect();
-    assert_eq!(query["token"], web.token, "{out}");
+        .unwrap_or_else(|| panic!("no address in {out}"));
+    let url = reqwest::Url::parse(url).unwrap();
+    let query: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
     assert_eq!(query["dir"], other_dir.to_str().unwrap(), "{out}");
+    assert_eq!(url.path(), "/");
+    assert_eq!(
+        url.fragment(),
+        Some(format!("key={}", web.key).as_str()),
+        "the key sits in the fragment, which is never sent"
+    );
+    assert!(
+        !query.contains_key("key") && !query.contains_key("token"),
+        "{out}"
+    );
 }
 
 #[tokio::test]
@@ -404,82 +355,70 @@ async fn a_port_held_by_another_program_is_an_error() {
 }
 
 #[tokio::test]
-async fn a_ref_web_with_another_login_token_is_reported_as_such() {
-    let first_env = Env::new("token-a");
+async fn a_ref_web_with_another_key_is_reported_as_such() {
+    let first_env = Env::new("key-a");
     let first = first_env
         .start(&["--server", &format!("ws://{LOOPBACK}:1/")])
         .await;
-    let second_env = Env::new("token-b");
     let port = first.port.to_string();
+
+    // Another state directory: no record to find, the port is simply taken.
+    let second_env = Env::new("key-b");
     let output = second_env.run(&["--no-open", "--port", &port]);
     assert!(!output.status.success());
     let err = String::from_utf8_lossy(&output.stderr);
     assert!(
-        err.contains("or by a ref-web with a different login token"),
+        err.contains("or by a ref-web with a different key"),
         "{err}"
     );
-    assert!(!err.contains(&first.token), "{err}");
+    assert!(!err.contains(&first.key), "{err}");
+
+    // The same state directory: the record names the instance.
+    let other_key = "another key of enough length";
+    let output = first_env.run(&["--no-open", "--port", &port, "--key", other_key]);
+    assert!(!output.status.success());
+    let err = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        err.contains(&format!(
+            "a ref-web with a different key is running on port {port} (pid {})",
+            first.pid()
+        )),
+        "{err}"
+    );
+    assert!(err.contains("pass the same --key"), "{err}");
+    assert!(
+        !err.contains(&first.key) && !err.contains(other_key),
+        "{err}"
+    );
+
+    // Without --port, a different key starts an instance of its own.
+    let third = first_env.start(&["--key", other_key]).await;
+    assert_ne!(third.port, first.port);
 }
 
 #[tokio::test]
-async fn the_login_token_survives_a_restart_but_sessions_do_not() {
-    let env = Env::new("token");
+async fn the_key_and_the_salt_survive_a_restart() {
+    let env = Env::new("restart");
     let (first, _upstream) = web_with_fake_upstream(&env).await;
-    let (token, port, old_cookie) = (first.token.clone(), first.port, first.cookie());
+    let (key, port) = (first.key.clone(), first.port);
+    let salt = hello_salt(&first).await;
     drop(first);
 
     let upstream = fake_upstream().await;
     let server = format!("ws://{LOOPBACK}:{}/", upstream.port);
     let second = env.start_on(port, &["--server", &server]).await;
-    assert_eq!(second.token, token);
-    assert_ne!(second.cookie(), old_cookie, "a new random session id");
-    let with_old_cookie = second
-        .http
-        .get(second.url("/api/info"))
-        .header("cookie", old_cookie)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        with_old_cookie.status(),
-        401,
-        "sessions end with the process"
-    );
-    assert_eq!(second.get("/api/info").await.status(), 200);
+    assert_eq!(second.key, key);
+    assert_eq!(hello_salt(&second).await, salt, "stored keys stay valid");
+    second.channel().await;
 }
 
-#[tokio::test]
-async fn two_instances_keep_separate_cookies() {
-    // Separate state directories: with one, the second start would find the first instance.
-    let (first_env, second_env) = (Env::new("two-a"), Env::new("two-b"));
-    let (first, _upstream) = web_with_fake_upstream(&first_env).await;
-    let (second, _upstream) = web_with_fake_upstream(&second_env).await;
-    assert_ne!(first.cookie_name(), second.cookie_name());
-
-    // Both cookies sit in one browser jar, which sends them to every port of the host.
-    let both = format!("{}; {}", first.cookie(), second.cookie());
-    for web in [&first, &second] {
-        let response = web
-            .http
-            .get(web.url("/api/info"))
-            .header("cookie", &both)
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(response.status(), 200);
-    }
-    // And one instance does not accept the other's session.
-    let crossed = first
-        .http
-        .get(first.url("/api/info"))
-        .header("cookie", second.cookie())
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(crossed.status(), 401);
+/// The salt in the hello message.
+async fn hello_salt(web: &Web) -> channel::Salt {
+    let mut ws = web.ws().await;
+    channel::parse_hello(&next_text(&mut ws).await).unwrap().0
 }
 
-/// A program that answers every request like a ref-web would, without knowing the login token.
+/// A program that answers every request like a ref-web would, without knowing the key.
 async fn impostor_ref_web() -> u16 {
     let listener = tokio::net::TcpListener::bind((LOOPBACK, 0)).await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -505,7 +444,7 @@ async fn impostor_ref_web() -> u16 {
 
 // Multi-threaded: `env.run` blocks this thread while the impostor has to answer.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_program_that_only_looks_like_ref_web_does_not_get_the_login_token() {
+async fn a_program_that_only_looks_like_ref_web_does_not_get_the_key() {
     let env = Env::new("impostor");
     let port = impostor_ref_web().await.to_string();
     let output = env.run(&["--no-open", "--port", &port]);
@@ -517,5 +456,5 @@ async fn a_program_that_only_looks_like_ref_web_does_not_get_the_login_token() {
     );
     assert!(all.contains("in use by another program"), "{all}");
     let token = std::fs::read_to_string(env.state_dir().join("web/login-token")).unwrap();
-    assert!(!all.contains(token.trim()), "the login URL leaked: {all}");
+    assert!(!all.contains(token.trim()), "the key leaked: {all}");
 }

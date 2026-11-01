@@ -1,16 +1,16 @@
 //! `GET /api/ping`: lets a second ref-web recognise the first one without being fooled by
 //! another program on the port. The caller sends a random nonce; only a process that knows
-//! the login token can answer with its HMAC. Without that check, the login URL (with the
-//! token) would be opened on whatever listens there.
+//! the key can answer with its HMAC. Without that check, the address (with the key) would be
+//! opened on whatever listens there. Only loopback peers get an answer (`routes::ping`).
 
 use std::time::Duration;
 
-use hmac::{Hmac, Mac as _};
 use serde::Deserialize;
-use sha2::Sha256;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
+use crate::channel::{self, Root};
 use crate::guard::constant_time_eq;
+use crate::key::Key;
 use crate::routes::PING_PATH;
 use crate::token;
 
@@ -20,16 +20,9 @@ const MAX_NONCE_LEN: usize = 128;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const HEADERS_END: &str = "\r\n\r\n";
 
-/// Hex HMAC-SHA256 of `nonce`, keyed with the login token.
-pub fn proof(login_token: &str, nonce: &str) -> String {
-    let mut mac = Hmac::<Sha256>::new_from_slice(login_token.as_bytes())
-        .expect("HMAC accepts keys of any length");
-    mac.update(nonce.as_bytes());
-    mac.finalize()
-        .into_bytes()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+/// Hex proof for `nonce`, keyed with the key the channel is made from.
+pub fn proof(root: &Root, nonce: &str) -> String {
+    channel::to_hex(&root.ping_proof(nonce))
 }
 
 pub fn is_valid_nonce(nonce: &str) -> bool {
@@ -44,8 +37,8 @@ struct PingBody {
     proof: String,
 }
 
-/// True when a ref-web that shares our login token answers on `host:port`.
-pub async fn is_our_ref_web(host: &str, port: u16, login_token: &str) -> bool {
+/// True when a ref-web that shares our key answers on `host:port`.
+pub async fn is_our_ref_web(host: &str, port: u16, key: &Key) -> bool {
     let nonce = token::random_hex();
     let probe = async {
         let mut stream = tokio::net::TcpStream::connect(format!("{host}:{port}")).await?;
@@ -69,7 +62,7 @@ pub async fn is_our_ref_web(host: &str, port: u16, login_token: &str) -> bool {
         return false;
     };
     body.app == crate::routes::APP_NAME
-        && constant_time_eq(body.proof.as_bytes(), proof(login_token, &nonce).as_bytes())
+        && constant_time_eq(body.proof.as_bytes(), proof(key.root(), &nonce).as_bytes())
 }
 
 #[cfg(test)]
@@ -77,12 +70,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn proof_depends_on_token_and_nonce() {
-        let p = proof("token", "abcd");
+    fn proof_depends_on_key_and_nonce() {
+        let root = Root::derive(b"a key of some length", &[1; channel::SALT_LEN]);
+        let p = proof(&root, "abcd");
         assert_eq!(p.len(), 64);
-        assert_eq!(p, proof("token", "abcd"));
-        assert_ne!(p, proof("other", "abcd"));
-        assert_ne!(p, proof("token", "abce"));
+        assert_eq!(p, proof(&root, "abcd"));
+        assert_ne!(p, proof(&root, "abce"));
+        let other = Root::derive(b"another key of length", &[1; channel::SALT_LEN]);
+        assert_ne!(p, proof(&other, "abcd"));
     }
 
     #[test]
