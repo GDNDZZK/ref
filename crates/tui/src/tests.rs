@@ -90,7 +90,7 @@ fn info() -> SessionInfo {
             recommend: 600_000,
             auto: 850_000,
         },
-        ..crate::app::placeholder_info(TEST_SESSION, TEST_CWD)
+        ..crate::util::placeholder_info(TEST_SESSION, TEST_CWD)
     }
 }
 

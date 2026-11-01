@@ -10,9 +10,8 @@ use ref_proto::*;
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::app::cmd;
 use crate::net::NetEvent;
-use crate::util::{ABORTED_ERROR, mcp_status};
+use crate::util::{ABORTED_ERROR, cmd, mcp_status, placeholder_info};
 
 struct MockSession {
     info: SessionInfo,
@@ -106,7 +105,7 @@ fn info(name: &str, agent: &str, cwd: &str) -> SessionInfo {
             recommend: 600_000,
             auto: 850_000,
         },
-        ..crate::app::placeholder_info(&id("ses"), cwd)
+        ..placeholder_info(&id("ses"), cwd)
     }
 }
 

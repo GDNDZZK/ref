@@ -8,13 +8,14 @@ use crossterm::event::{
 use ratatui::layout::{Position, Rect};
 use ref_proto::ImageData;
 
-use crate::app::{ARMED_KEY_TIMEOUT, App, COMMANDS, Mode, cmd};
+use crate::app::{ARMED_KEY_TIMEOUT, App, COMMANDS, Mode};
 use crate::render;
 use crate::ui::dialog::{Dialog, Kind, PAGE_ROWS};
 use crate::ui::editor::Editor;
 use crate::ui::permission::PermissionAction;
 use crate::ui::question::Outcome;
 use crate::ui::{Hit, chat, split, theme};
+use crate::util::cmd;
 
 const CTRL: KeyModifiers = KeyModifiers::CONTROL;
 const ALT: KeyModifiers = KeyModifiers::ALT;

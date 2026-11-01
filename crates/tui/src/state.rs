@@ -520,7 +520,7 @@ mod tests {
             name: "n".into(),
             agent: "build".into(),
             attached: 1,
-            ..crate::app::placeholder_info("s", "/")
+            ..crate::util::placeholder_info("s", "/")
         }
     }
 
