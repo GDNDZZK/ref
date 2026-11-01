@@ -14,14 +14,6 @@ use std::time::{Duration, Instant};
 
 type R = Result<Value, String>;
 
-async fn load_cfg(hub: &Arc<Hub>, cwd: &str) -> Result<ref_config::Config, String> {
-    let hub = hub.clone();
-    let cwd = cwd.to_string();
-    tokio::task::spawn_blocking(move || hub.load_config(Path::new(&cwd)))
-        .await
-        .map_err(|e| e.to_string())
-}
-
 fn live(hub: &Arc<Hub>, id: &str) -> Result<Arc<Session>, String> {
     hub.session(id)
         .ok_or_else(|| format!("Session {id} is not live (attach to it first)."))
@@ -64,7 +56,7 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
                 .filter(|c| !c.trim().is_empty())
                 .map(|c| hub.effective_cwd(&c))
                 .unwrap_or_else(|| conn.lock().cwd.clone());
-            let cfg = load_cfg(hub, &cwd).await?;
+            let cfg = crate::ops::load_config(hub, &cwd).await?;
             Ok(json!({ "servers": hub.mcp.status(&cfg) }))
         }
         Request::ListHistory { cwd, limit } => {
@@ -405,7 +397,7 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             let s = live(hub, &session_id)?;
             if s.lock().run.is_some() {
                 crate::engine::abort(hub, &s, true);
-                if !crate::engine::wait_idle(&s, Duration::from_secs(10)).await {
+                if !crate::engine::wait_idle(&s, crate::ops::SESSION_STOP_WAIT).await {
                     return Err("The session did not stop in time.".into());
                 }
             }
@@ -459,7 +451,7 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
         }
         Request::ExpandCommand { name, args, cwd } => {
             let cwd = hub.effective_cwd(&cwd);
-            let cfg = load_cfg(hub, &cwd).await?;
+            let cfg = crate::ops::load_config(hub, &cwd).await?;
             let Some(cmd) = cfg.commands.get(&name) else {
                 return Err(format!("Unknown command: /{name}"));
             };
@@ -516,7 +508,7 @@ async fn set_cwd(hub: &Arc<Hub>, s: &Arc<Session>, path: &str) -> Result<(), Str
         return Ok(());
     }
     // Instructions (AGENTS.md), skills and project config depend on the directory.
-    let cfg = load_cfg(hub, &new).await?;
+    let cfg = crate::ops::load_config(hub, &new).await?;
     {
         let mut st = s.lock();
         if st.run.is_some() {
@@ -604,7 +596,7 @@ async fn fit_images(
 
 async fn reload_config(hub: &Arc<Hub>, s: &Arc<Session>) {
     let cwd = s.lock().info.cwd.clone();
-    let Ok(cfg) = load_cfg(hub, &cwd).await else {
+    let Ok(cfg) = crate::ops::load_config(hub, &cwd).await else {
         return;
     };
     let mut st = s.lock();
@@ -616,7 +608,7 @@ async fn reload_config(hub: &Arc<Hub>, s: &Arc<Session>) {
 }
 
 async fn config_info(hub: &Arc<Hub>, cwd: &str) -> Result<ServerConfigInfo, String> {
-    let cfg = load_cfg(hub, cwd).await?;
+    let cfg = crate::ops::load_config(hub, cwd).await?;
     let agents = cfg
         .agents
         .values()
