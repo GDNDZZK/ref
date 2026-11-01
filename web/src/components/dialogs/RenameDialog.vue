@@ -3,11 +3,11 @@
 import { onMounted, ref, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useDialogsStore } from '../../stores/dialogs.ts'
-import { describeError } from '../../stores/notices.ts'
 import { useWorkspaceStore } from '../../stores/workspace.ts'
 import DialogButton from '../DialogButton.vue'
 import ModalDialog from '../ModalDialog.vue'
 import TextField from '../TextField.vue'
+import { describeError } from '../../errorMessage.ts'
 
 const props = defineProps<{ sessionId: string }>()
 const { t } = useI18n()

@@ -5,12 +5,12 @@ import { useI18n } from 'vue-i18n'
 import type { PeersTab } from '../../stores/dialogs.ts'
 import { useConnectionStore } from '../../stores/connection.ts'
 import { useDialogsStore } from '../../stores/dialogs.ts'
-import { describeError } from '../../stores/notices.ts'
 import { useWorkspaceStore } from '../../stores/workspace.ts'
 import DialogButton from '../DialogButton.vue'
 import ModalDialog from '../ModalDialog.vue'
 import Segmented from '../Segmented.vue'
 import TextField from '../TextField.vue'
+import { describeError } from '../../errorMessage.ts'
 
 const props = defineProps<{ sessionId: string; tab: PeersTab; name?: string }>()
 const { t } = useI18n()

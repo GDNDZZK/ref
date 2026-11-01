@@ -7,6 +7,7 @@
 // After a reconnect the handshake runs again and listeners are told the connection is
 // `open` once more; whatever the upper layer attached is its own to restore.
 
+import { describeError } from '../errorMessage.ts'
 import { PROTOCOL_VERSION } from '../proto/generated'
 import type { JsonValue, NotifyKind, Request, ServerFrame } from '../proto/generated'
 import type { Transport, TransportFactory } from './transport.ts'
@@ -140,7 +141,7 @@ export class RefConnection {
       const lostMeanwhile = transport !== this.transport
       if (lostMeanwhile) return // lost() has dealt with it
       // The server refused us (bad token, wrong protocol): retrying would be refused again.
-      this.close(error instanceof Error ? error.message : String(error))
+      this.close(describeError(error))
       return
     }
     this.attempt = 0

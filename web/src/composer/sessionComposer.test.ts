@@ -4,7 +4,8 @@ import { emitDraftRestored } from '../stores/draftBus.ts'
 import type { SlashCommand } from './completion.ts'
 import { PromptHistory } from './history.ts'
 import { INTERRUPT_ARMED_MS, SessionComposer } from './sessionComposer.ts'
-import type { ComposerApi, ComposerHost, ToastLevel } from './sessionComposer.ts'
+import type { ToastLevel } from '../proto/generated'
+import type { ComposerApi, ComposerHost } from './sessionComposer.ts'
 
 const COMMANDS: SlashCommand[] = [
   { name: 'undo', aliases: [], title: 'Undo', takesArgs: false, custom: false },
