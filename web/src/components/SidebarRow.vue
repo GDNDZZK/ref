@@ -19,7 +19,7 @@ import type { MenuItem } from './ContextMenu.vue'
 import Flourish from './Flourish.vue'
 import Icon from './Icon.vue'
 import SessionDot from './SessionDot.vue'
-import { ALERT_RING_REACH } from './iconMetrics.ts'
+import { ALERT_RING_REACH } from './sharedMetrics.ts'
 
 const props = defineProps<{ info: SessionInfo; current: boolean; tile: boolean }>()
 const emit = defineEmits<{ open: []; close: []; rename: [name: string] }>()

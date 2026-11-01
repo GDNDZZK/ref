@@ -6,7 +6,8 @@ import type { ImageData } from '../proto/generated'
 const IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024
 
-const BASE64_CHUNK_BYTES = 0x8000 // bytes turned into characters at a time, so the call stays within the argument limit
+// Bytes turned into characters per call, to stay within the argument limit.
+const BASE64_CHUNK_BYTES = 0x8000
 
 export type ImageRejection = 'type' | 'size'
 

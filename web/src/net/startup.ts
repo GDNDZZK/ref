@@ -7,6 +7,8 @@ import { SESSION_PARAM, SPLIT_VIEW, VIEW_PARAM } from './location.ts'
 import { UNAUTHORIZED } from './login.ts'
 import { defaultServerUrl, directServerUrl } from './transport.ts'
 
+const INFO_PATH = '/api/info'
+
 export interface Startup {
   url: string
   cwd: string
@@ -56,9 +58,10 @@ export function browserEnvironment(): Environment {
     directUrl: directServerUrl(),
     directCwd: import.meta.env.VITE_REF_CWD as string | undefined,
     async fetchInfo() {
-      const response = await fetch('/api/info')
-      if (response.status === UNAUTHORIZED) throw new StartupError('connection.notLoggedIn', '/api/info: 401')
-      if (!response.ok) throw new StartupError('connection.closed', `/api/info: ${response.status}`)
+      const response = await fetch(INFO_PATH)
+      if (response.status === UNAUTHORIZED)
+        throw new StartupError('connection.notLoggedIn', `${INFO_PATH}: ${UNAUTHORIZED}`)
+      if (!response.ok) throw new StartupError('connection.closed', `${INFO_PATH}: ${response.status}`)
       return (await response.json()) as { cwd: string }
     },
   }

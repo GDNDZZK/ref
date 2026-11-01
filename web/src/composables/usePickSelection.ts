@@ -19,11 +19,16 @@ export function handleListKey(
 ): boolean {
   if (event.key === Key.ArrowDown || event.key === Key.ArrowUp) {
     move(event.key === Key.ArrowDown ? 1 : -1)
-  } else if (event.key === Key.Enter && onPick) {
-    onPick()
-  } else {
-    return false
+    return consume(event)
   }
+  if (event.key === Key.Enter && onPick) {
+    onPick()
+    return consume(event)
+  }
+  return false
+}
+
+function consume(event: KeyboardEvent): true {
   event.preventDefault()
   return true
 }

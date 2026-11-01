@@ -35,7 +35,8 @@ const {
 } = components.composer
 const { thumbSize: THUMB_SIZE } = components.attachmentStrip
 const SEND_BUTTON_SIZE = 32
-const IME_PROCESSING_KEY_CODE = 229 // `keyCode` of a key that the input method is handling (deprecated, but the only signal in some browsers)
+// `keyCode` of a key an input method is handling: deprecated, but some browsers give no other signal
+const IME_PROCESSING_KEY_CODE = 229
 
 const { t } = useI18n()
 const connection = useConnectionStore()
