@@ -280,16 +280,16 @@ pub(crate) fn parse_retry_after(headers: &HeaderMap) -> Option<Duration> {
             .map(str::trim)
     };
 
-    if let Some(ms) = get("retry-after-ms").and_then(|v| v.parse::<f64>().ok())
-        && ms.is_finite()
-        && ms >= 0.0
+    if let Some(d) = get("retry-after-ms")
+        .and_then(|v| v.parse::<f64>().ok())
+        .and_then(|ms| secs_to_duration(ms / 1000.0))
     {
-        return Some(Duration::from_secs_f64(ms / 1000.0));
+        return Some(d);
     }
     if let Some(v) = get("retry-after") {
         if let Ok(secs) = v.parse::<f64>() {
-            if secs.is_finite() && secs >= 0.0 {
-                return Some(Duration::from_secs_f64(secs));
+            if let Some(d) = secs_to_duration(secs) {
+                return Some(d);
             }
         } else if let Ok(date) = chrono::DateTime::parse_from_rfc2822(v) {
             let delta = date.timestamp_millis() - chrono::Utc::now().timestamp_millis();
@@ -306,11 +306,16 @@ pub(crate) fn parse_retry_after(headers: &HeaderMap) -> Option<Duration> {
     .max()
 }
 
+/// A duration from seconds; `None` for negative or non-finite values.
+fn secs_to_duration(secs: f64) -> Option<Duration> {
+    (secs.is_finite() && secs >= 0.0).then(|| Duration::from_secs_f64(secs))
+}
+
 /// Parse Go-style durations as used by OpenAI rate-limit headers
 /// (`"1s"`, `"6m0s"`, `"20ms"`, `"1h2m3.5s"`) or plain seconds.
 fn parse_go_duration(s: &str) -> Option<Duration> {
     if let Ok(secs) = s.parse::<f64>() {
-        return (secs.is_finite() && secs >= 0.0).then(|| Duration::from_secs_f64(secs));
+        return secs_to_duration(secs);
     }
     let mut total = 0f64;
     let mut num = String::new();
@@ -336,7 +341,11 @@ fn parse_go_duration(s: &str) -> Option<Duration> {
         total += value * factor;
         any = true;
     }
-    (any && num.is_empty() && total.is_finite()).then(|| Duration::from_secs_f64(total))
+    if any && num.is_empty() {
+        secs_to_duration(total)
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
