@@ -2048,7 +2048,6 @@ impl App {
                     }
                 }
             }
-            Kind::CloseSessions => {}
             Kind::Sessions => {
                 let sid = key.split_once(':').map(|x| x.1).unwrap_or(&key).to_string();
                 if self.current.as_deref() != Some(sid.as_str()) {
@@ -2104,6 +2103,8 @@ impl App {
                     );
                 }
             }
+            // `CloseSessions` returned above.
+            _ => {}
         }
     }
 
