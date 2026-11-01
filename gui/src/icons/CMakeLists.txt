@@ -16,13 +16,15 @@ qt_add_resources(refgui_icons icon_set
 	FILES ${icon_files}
 )
 
-# ":/app/ref.svg" and ":/app/ref-small.svg".
+# ":/app/ref.svg", ":/app/ref-small.svg" and the sidebar's lockups ":/app/ref-lockup-small-dark.svg" and "-light".
 qt_add_resources(refgui_icons app_icon
 	PREFIX /app
 	BASE ${PROJECT_SOURCE_DIR}/../assets/app
 	FILES
 		${PROJECT_SOURCE_DIR}/../assets/app/ref.svg
 		${PROJECT_SOURCE_DIR}/../assets/app/ref-small.svg
+		${PROJECT_SOURCE_DIR}/../assets/app/ref-lockup-small-dark.svg
+		${PROJECT_SOURCE_DIR}/../assets/app/ref-lockup-small-light.svg
 )
 
 target_include_directories(refgui_icons PUBLIC ${PROJECT_SOURCE_DIR}/src)
