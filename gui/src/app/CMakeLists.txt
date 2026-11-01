@@ -58,6 +58,7 @@ qt_add_qml_module(ref-gui
 		Ticker.qml
 		McpServerRow.qml
 		QueueRow.qml
+		McpSummary.qml
 		SessionPane.qml
 		QuestionCard.qml
 		QuestionRow.qml
