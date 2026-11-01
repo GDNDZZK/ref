@@ -59,6 +59,7 @@ qt_add_qml_module(ref-gui
 		McpServerRow.qml
 		QueueRow.qml
 		McpSummary.qml
+		Toast.qml
 		SessionPane.qml
 		QuestionCard.qml
 		QuestionRow.qml
