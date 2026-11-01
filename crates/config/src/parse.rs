@@ -1,7 +1,7 @@
 //! Turning the merged JSON document into a typed [`Config`].
 
 use crate::builtin;
-use crate::load::{Accum, Ctx, Layer, accumulate};
+use crate::load::{Accum, Ctx, KEY_AGENT, KEY_COMMAND, KEY_LEGACY_MODE, Layer, accumulate};
 use crate::{
     AgentConfig, CommandConfig, CompactionConfig, Config, DEFAULT_AGENT, MODE_ALL, MODE_PRIMARY,
     MODE_SUBAGENT, McpConfig, ModelConfig, PermissionRules, ProviderConfig,
@@ -33,7 +33,7 @@ pub(crate) fn build(ctx: &mut Ctx, layers: &[Layer]) -> Config {
     cfg.small_model = model_ref(ctx, merged.get("small_model"), "small_model");
     cfg.delay = delay_list(ctx, merged.get("delay"), "delay");
     cfg.mcp = mcp(ctx, merged.get("mcp"));
-    cfg.commands = commands(ctx, merged.get("command"));
+    cfg.commands = commands(ctx, merged.get(KEY_COMMAND));
     cfg.compaction = compaction(merged.get("compaction"));
     if let Some(r) = merged.get("retry") {
         match r.get("max_delay").and_then(Value::as_f64) {
@@ -520,7 +520,7 @@ fn agents(
         .into_iter()
         .map(|a| (a.name.clone(), a))
         .collect();
-    for key in ["mode", "agent"] {
+    for key in [KEY_LEGACY_MODE, KEY_AGENT] {
         let Some(v) = merged.get(key) else { continue };
         let Value::Object(m) = v else {
             ctx.warn(format!("{key}: expected an object"));
@@ -548,7 +548,7 @@ fn agents(
                 ..Default::default()
             });
             apply_agent(ctx, entry, a, &format!("{key}.{name}"));
-            if key == "mode" {
+            if key == KEY_LEGACY_MODE {
                 entry.mode = MODE_PRIMARY.into();
             }
         }
