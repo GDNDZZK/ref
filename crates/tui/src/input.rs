@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
+use ratatui::layout::{Position, Rect};
 
 use crate::app::{AcKind, App, Mode};
 use crate::render;
@@ -949,6 +950,7 @@ fn click_count(app: &mut App, x: u16, y: u16) -> u8 {
 
 fn mouse(app: &mut App, me: MouseEvent) {
     let (x, y) = (me.column, me.row);
+    let pos = Position::new(x, y);
     // Permission modal.
     if let Some((sid, req, _)) = app.active_permission() {
         match me.kind {
@@ -981,8 +983,7 @@ fn mouse(app: &mut App, me: MouseEvent) {
         match (d, me.kind) {
             (Dialog::List(d), MouseEventKind::Down(MouseButton::Left)) => {
                 let r = d.rect;
-                let inside = x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
-                if !inside {
+                if !r.contains(pos) {
                     app.dialog = None;
                 } else if d.kind == Kind::CloseSessions {
                     // Destructive: a click only selects; enter closes.
@@ -1007,7 +1008,7 @@ fn mouse(app: &mut App, me: MouseEvent) {
             (Dialog::Help(h), MouseEventKind::ScrollDown) => h.scroll_by(3),
             (Dialog::Help(_), MouseEventKind::Down(_)) => app.dialog = None,
             (Dialog::Mcp(d), MouseEventKind::Down(MouseButton::Left)) => {
-                if !d.contains(x, y) {
+                if !d.rect.contains(pos) {
                     app.dialog = None;
                 } else if let Some(i) = d.server_at(x, y) {
                     d.sel = i;
@@ -1032,7 +1033,7 @@ fn mouse(app: &mut App, me: MouseEvent) {
     // Autocomplete popup.
     if let Some(ac) = app.ac.as_mut() {
         let r = ac.rect;
-        if x >= r.x && x < r.x + r.width && y > r.y && y < r.y + r.height {
+        if r.contains(pos) && y > r.y {
             let n = ac.items.len().min(r.height as usize - 2);
             let start = ac.sel.saturating_sub(n.saturating_sub(1));
             let idx = start + (y - r.y - 1) as usize;
@@ -1187,8 +1188,8 @@ fn mouse(app: &mut App, me: MouseEvent) {
 
 fn watch_mouse(app: &mut App, me: MouseEvent) {
     let (x, y) = (me.column, me.row);
-    let inside =
-        |r: &ratatui::layout::Rect| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
+    let pos = Position::new(x, y);
+    let inside = |r: &Rect| r.contains(pos);
     let tile = app
         .watch
         .tiles

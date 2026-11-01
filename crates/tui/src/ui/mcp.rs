@@ -260,11 +260,6 @@ impl McpDialog {
         self.rows.iter().find(|(ry, _)| *ry == y).map(|(_, i)| *i)
     }
 
-    pub fn contains(&self, x: u16, y: u16) -> bool {
-        let r = self.rect;
-        x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
-    }
-
     /// Content lines for width `iw`: (line, server index for header rows).
     fn content(&self, entries: &[McpEntry], iw: usize, tick: u64, loaded: bool) -> Content {
         let mut out: Vec<(Line<'static>, Option<usize>)> = Vec::new();
