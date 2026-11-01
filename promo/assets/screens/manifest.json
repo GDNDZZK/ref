@@ -130,22 +130,22 @@
   "gui-denied": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-322d"
+    "sessionName": "workspace-2df9"
   },
   "gui-denied-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-2c3b"
+    "sessionName": "workspace-5aa3"
   },
   "gui-edit-diff": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-ab0b"
+    "sessionName": "workspace-2b36"
   },
   "gui-edit-diff-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-c549"
+    "sessionName": "workspace-1422"
   },
   "gui-help": {
     "width": 2560,
@@ -170,12 +170,12 @@
   "gui-main": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-ab0b"
+    "sessionName": "workspace-2b36"
   },
   "gui-main-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-c549"
+    "sessionName": "workspace-1422"
   },
   "gui-mcp-dialog": {
     "width": 2560,
@@ -290,12 +290,12 @@
   "gui-permission-card": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-6153"
+    "sessionName": "workspace-4902"
   },
   "gui-permission-card-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-bf84"
+    "sessionName": "workspace-98e9"
   },
   "gui-retry-done": {
     "width": 2560,
@@ -354,12 +354,12 @@
   "gui-split-readme": {
     "width": 2560,
     "height": 2688,
-    "sessionName": "workspace-abc6"
+    "sessionName": "workspace-b391"
   },
   "gui-split-readme-zh": {
     "width": 2560,
     "height": 2688,
-    "sessionName": "workspace-38cf"
+    "sessionName": "workspace-25f5"
   },
   "gui-split-view": {
     "width": 2560,
@@ -400,12 +400,12 @@
   "gui-tools-permission": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-ab0b"
+    "sessionName": "workspace-2b36"
   },
   "gui-tools-permission-zh": {
     "width": 2560,
     "height": 1600,
-    "sessionName": "workspace-c549"
+    "sessionName": "workspace-1422"
   },
   "tui-crew": {
     "width": 2782,
