@@ -29,10 +29,9 @@ pub struct Fetched {
 impl Fetched {
     /// Media type without parameters, lower case.
     pub fn mime(&self) -> String {
-        self.content_type
-            .split(';')
-            .next()
-            .unwrap_or("")
+        let ct = self.content_type.as_str();
+        ct.split_once(';')
+            .map_or(ct, |(media, _)| media)
             .trim()
             .to_ascii_lowercase()
     }
@@ -69,8 +68,14 @@ pub fn accept_language() -> String {
 
 /// `zh_CN.UTF-8` → `zh-CN,zh;q=0.9,en;q=0.8`.
 pub fn accept_language_for(loc: &str) -> String {
-    let tag = loc.split(['.', '@']).next().unwrap_or("").replace('_', "-");
-    let lang = tag.split('-').next().unwrap_or("").to_ascii_lowercase();
+    let tag = loc
+        .split_once(['.', '@'])
+        .map_or(loc, |(tag, _)| tag)
+        .replace('_', "-");
+    let lang = tag
+        .split_once('-')
+        .map_or(tag.as_str(), |(lang, _)| lang)
+        .to_ascii_lowercase();
     if lang.len() < 2 || lang == "c" || lang == "posix" || lang == "en" {
         return "en-US,en;q=0.9".into();
     }
