@@ -448,7 +448,41 @@ pub struct App {
 }
 
 /// Poll interval for MCP status while any server is connecting.
-pub const MCP_POLL: Duration = Duration::from_secs(5);
+const MCP_POLL: Duration = Duration::from_secs(5);
+/// Redraw interval while something animates (spinners, pulsing dots).
+const TICK: Duration = Duration::from_millis(80);
+/// Redraw interval during fast animations (scrolling, toasts sliding, dialogs opening).
+const FAST_FRAME: Duration = Duration::from_millis(16);
+/// Poll interval while a deferred command waits for its data.
+const DEFERRED_POLL: Duration = Duration::from_millis(50);
+/// Shortest wait before a timer deadline is re-checked.
+const MIN_DEADLINE_WAIT: Duration = Duration::from_millis(5);
+/// Redraw interval while only a timer (hint, leader, armed key) is pending.
+const IDLE_TIMER_FRAME: Duration = Duration::from_millis(250);
+/// How long a command waits for the backend data it needs before it is dropped.
+const DEFERRED_COMMAND_TTL: Duration = Duration::from_secs(10);
+/// How long the leader key (ctrl+x) waits for its second key.
+const LEADER_TIMEOUT: Duration = Duration::from_secs(2);
+/// "Press again" window of the armed keys (esc to interrupt, ctrl+c to exit).
+pub const ARMED_KEY_TIMEOUT: Duration = Duration::from_millis(1500);
+/// How long a hint stays in the footer.
+const HINT_DURATION: Duration = Duration::from_millis(1500);
+/// How long the second press of close / undo confirmation is accepted.
+const CONFIRM_WINDOW: Duration = Duration::from_secs(4);
+/// Debounce before an `@` file query is sent.
+const FILE_QUERY_DEBOUNCE: Duration = Duration::from_millis(80);
+/// Rows of one history page request.
+const HISTORY_LIST_LIMIT: usize = 200;
+const FILE_QUERY_LIMIT: usize = 20;
+const MAX_COMPLETIONS: usize = 50;
+const TOAST_ERROR_MAX_CHARS: usize = 200;
+const SESSION_DESC_MAX_CHARS: usize = 40;
+const TITLE_MAX_CHARS: usize = 80;
+/// Extra score of a canonical command name over its aliases.
+const CANONICAL_NAME_SCORE_BONUS: i64 = 5;
+/// Letters of a logo line printed in the primary colour; the rest is muted.
+const LOGO_PRIMARY_CHARS: usize = 10;
+const EPILOGUE_LABEL_WIDTH: usize = 10;
 
 impl App {
     pub fn new(client: Client, cwd: String, init: InitPlan) -> Self {
@@ -543,7 +577,7 @@ impl App {
     }
 
     pub fn set_hint(&mut self, s: impl Into<String>, c: Color) {
-        self.set_hint_for(s, c, Duration::from_millis(1500));
+        self.set_hint_for(s, c, HINT_DURATION);
     }
 
     /// Hint shown in the status line until `dur` has passed.
@@ -959,7 +993,7 @@ impl App {
                     self.req(
                         Request::ListHistory {
                             cwd: None,
-                            limit: Some(200),
+                            limit: Some(HISTORY_LIST_LIMIT),
                         },
                         Pending::HistoryDialog,
                     );
@@ -1243,7 +1277,7 @@ impl App {
             let name = v.info.name.clone();
             self.toasts.error(text::truncate(
                 &format!("{name}: {}", text::one_line(text)),
-                200,
+                TOAST_ERROR_MAX_CHARS,
             ));
         }
         v.apply(ev);
@@ -1855,7 +1889,7 @@ impl App {
         self.req(
             Request::ListHistory {
                 cwd: None,
-                limit: Some(200),
+                limit: Some(HISTORY_LIST_LIMIT),
             },
             Pending::HistoryDialog,
         );
@@ -1900,7 +1934,7 @@ impl App {
             let desc = if current && close_only {
                 "(current)".to_string()
             } else {
-                text::truncate(&text::one_line(&s.title), 40)
+                text::truncate(&text::one_line(&s.title), SESSION_DESC_MAX_CHARS)
             };
             items.push(Item {
                 key: format!("live:{}", s.id),
@@ -2380,12 +2414,12 @@ impl App {
     fn close_is_armed(&self, sid: &str) -> bool {
         self.close_armed
             .as_ref()
-            .is_some_and(|(s, t)| s == sid && t.elapsed() < Duration::from_secs(4))
+            .is_some_and(|(s, t)| s == sid && t.elapsed() < CONFIRM_WINDOW)
     }
 
     fn arm_close(&mut self, sid: &str, hint: &str) {
         self.close_armed = Some((sid.to_string(), Instant::now()));
-        self.set_hint_for(hint, theme::WARNING, Duration::from_secs(4));
+        self.set_hint_for(hint, theme::WARNING, CONFIRM_WINDOW);
     }
 
     /// `ctrl+x k`: close the current session (chat) or the focused tile (split view); press twice.
@@ -2461,13 +2495,13 @@ impl App {
         let armed = self
             .undo_armed
             .as_ref()
-            .is_some_and(|(m, t)| m == msg && t.elapsed() < Duration::from_secs(4));
+            .is_some_and(|(m, t)| m == msg && t.elapsed() < CONFIRM_WINDOW);
         if busy && !armed {
             self.undo_armed = Some((msg.to_string(), Instant::now()));
             self.set_hint_for(
                 "click ↶ undo again to undo (aborts the running turn)",
                 theme::WARNING,
-                Duration::from_secs(4),
+                CONFIRM_WINDOW,
             );
             return;
         }
@@ -2504,7 +2538,7 @@ impl App {
             })
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "ref".into());
-        format!("R|{}", text::truncate(&label, 80))
+        format!("R|{}", text::truncate(&label, TITLE_MAX_CHARS))
     }
 
     /// Text printed to stdout after the TUI exits (logo + resume hint), if any.
@@ -2911,7 +2945,10 @@ impl App {
                     } else {
                         format!("/{n} → /{}", c.name)
                     };
-                    items.push((s + 5, (format!("/{} ", c.name), label, c.desc.to_string())));
+                    items.push((
+                        s + CANONICAL_NAME_SCORE_BONUS,
+                        (format!("/{} ", c.name), label, c.desc.to_string()),
+                    ));
                 }
             }
             if let Some(cfg) = &self.config {
@@ -2929,7 +2966,11 @@ impl App {
                 }
             }
             items.sort_by_key(|x| std::cmp::Reverse(x.0));
-            let items: Vec<_> = items.into_iter().map(|x| x.1).take(50).collect();
+            let items: Vec<_> = items
+                .into_iter()
+                .map(|x| x.1)
+                .take(MAX_COMPLETIONS)
+                .collect();
             if items.is_empty() {
                 self.ac = None;
             } else {
@@ -2954,7 +2995,7 @@ impl App {
             if self.ac.as_ref().is_some_and(|a| a.kind == AcKind::Slash) {
                 self.ac = None;
             }
-            self.files_due = Some((Instant::now() + Duration::from_millis(80), q));
+            self.files_due = Some((Instant::now() + FILE_QUERY_DEBOUNCE, q));
             return;
         }
         self.files_due = None;
@@ -2971,7 +3012,7 @@ impl App {
             Request::ListFiles {
                 cwd: self.session_cwd(),
                 query: q.clone(),
-                limit: Some(20),
+                limit: Some(FILE_QUERY_LIMIT),
             },
             Pending::Files { query: q },
         );
@@ -3055,12 +3096,11 @@ impl App {
 
     /// Whether anything needs periodic redraws, and how often.
     pub fn frame_interval(&self) -> Option<Duration> {
-        let fast = self
+        let scroll_animating = self
             .views
             .values()
-            .any(|v| v.chat.scrolling() || v.chat.drag_edge != 0)
-            || self.toasts.animating()
-            || self.dialog.as_ref().is_some_and(|d| d.animating())
+            .any(|v| v.chat.scrolling() || v.chat.drag_edge != 0);
+        let modal_opening = self.dialog.as_ref().is_some_and(|d| d.animating())
             || self
                 .perm
                 .as_ref()
@@ -3069,16 +3109,16 @@ impl App {
                 .question
                 .as_ref()
                 .is_some_and(|q| q.opened.elapsed() < OPEN_SETTLE);
-        if fast {
-            return Some(Duration::from_millis(16));
+        if scroll_animating || self.toasts.animating() || modal_opening {
+            return Some(FAST_FRAME);
         }
         if self.deferred.is_some() {
-            return Some(Duration::from_millis(50));
+            return Some(DEFERRED_POLL);
         }
         if let Some((at, _)) = &self.files_due {
             return Some(
                 at.saturating_duration_since(Instant::now())
-                    .max(Duration::from_millis(5)),
+                    .max(MIN_DEADLINE_WAIT),
             );
         }
         // Spinners for sessions we don't hold a view of: the sidebar's live list, split tiles that
@@ -3086,32 +3126,33 @@ impl App {
         let live_list_shown = self.mode == Mode::Watch
             || self.sidebar_shown()
             || matches!(&self.dialog, Some(Dialog::List(d)) if matches!(d.kind, Kind::Sessions | Kind::CloseSessions));
-        let anim = self
+        let any_view_animating = self
             .views
             .values()
-            .any(|v| v.animating() || matches!(v.info.status, SessionStatus::Retrying { .. }))
-            || (live_list_shown && self.live.iter().any(|s| s.live && !s.status.is_idle()))
-            || !self.connected;
+            .any(|v| v.animating() || matches!(v.info.status, SessionStatus::Retrying { .. }));
+        let live_spinner_shown =
+            live_list_shown && self.live.iter().any(|s| s.live && !s.status.is_idle());
+        let anim = any_view_animating || live_spinner_shown || !self.connected;
         // Pulsing "connecting" dot of MCP servers (sidebar / dialog).
         let mcp_shown = self.sidebar_shown() || matches!(self.dialog, Some(Dialog::Mcp(_)));
         if anim || (mcp_shown && self.mcp.iter().any(|e| e.connecting())) {
-            return Some(Duration::from_millis(80));
+            return Some(TICK);
         }
         if let Some(at) = self.mcp_poll_at {
             return Some(
                 at.saturating_duration_since(Instant::now())
-                    .max(Duration::from_millis(5)),
+                    .max(MIN_DEADLINE_WAIT),
             );
         }
         if let Some(d) = self.toasts.next_deadline() {
-            return Some(d.max(Duration::from_millis(16)));
+            return Some(d.max(FAST_FRAME));
         }
-        if self.hint.is_some()
+        let key_timer_armed = self.hint.is_some()
             || self.leader.is_some()
             || self.esc_armed.is_some()
-            || self.ctrlc_armed.is_some()
-        {
-            return Some(Duration::from_millis(250));
+            || self.ctrlc_armed.is_some();
+        if key_timer_armed {
+            return Some(IDLE_TIMER_FRAME);
         }
         None
     }
@@ -3131,7 +3172,7 @@ impl App {
             if ready {
                 self.run_command(&name, &args);
                 self.dirty = true;
-            } else if at.elapsed() < Duration::from_secs(10) {
+            } else if at.elapsed() < DEFERRED_COMMAND_TTL {
                 self.deferred = Some((name, args, at));
             }
         }
@@ -3139,22 +3180,19 @@ impl App {
             self.hint = None;
             self.dirty = true;
         }
-        if self
-            .leader
-            .is_some_and(|l| l.elapsed() > Duration::from_secs(2))
-        {
+        if self.leader.is_some_and(|l| l.elapsed() > LEADER_TIMEOUT) {
             self.leader = None;
             self.dirty = true;
         }
         if self
             .esc_armed
-            .is_some_and(|l| l.elapsed() > Duration::from_millis(1500))
+            .is_some_and(|l| l.elapsed() > ARMED_KEY_TIMEOUT)
         {
             self.esc_armed = None;
         }
         if self
             .ctrlc_armed
-            .is_some_and(|l| l.elapsed() > Duration::from_millis(1500))
+            .is_some_and(|l| l.elapsed() > ARMED_KEY_TIMEOUT)
         {
             self.ctrlc_armed = None;
         }
@@ -3217,14 +3255,21 @@ pub fn epilogue_text(info: &SessionInfo, resumable: bool) -> String {
     let mut out = String::new();
     for l in LOGO {
         // Left two letters in primary, the last one muted (like opencode's two-tone wordmark).
-        let (a, b) = l.split_at(l.char_indices().nth(10).map(|x| x.0).unwrap_or(l.len()));
+        let split = l
+            .char_indices()
+            .nth(LOGO_PRIMARY_CHARS)
+            .map(|x| x.0)
+            .expect("logo lines are longer than LOGO_PRIMARY_CHARS");
+        let (a, b) = l.split_at(split);
         out.push_str(&format!(
             "  {primary}{a}{reset}{muted}{}{reset}\n",
             b.trim_end()
         ));
     }
     out.push('\n');
-    let row = |label: &str, value: &str| format!("  {muted}{label:<10}{reset}{bold}{value}{reset}");
+    let row = |label: &str, value: &str| {
+        format!("  {muted}{label:<EPILOGUE_LABEL_WIDTH$}{reset}{bold}{value}{reset}")
+    };
     if resumable {
         let title = text::one_line(&info.title);
         let session = match (title.is_empty(), info.name.is_empty()) {
