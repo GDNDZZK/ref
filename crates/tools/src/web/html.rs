@@ -273,9 +273,8 @@ fn fix_image(n: &NodeRef, base: &Url) {
             .iter()
             .filter_map(|a| n.attr(a))
             .map(|v| {
-                v.split(',')
-                    .next()
-                    .unwrap_or("")
+                v.split_once(',')
+                    .map_or(&*v, |(first, _)| first)
                     .split_whitespace()
                     .next()
                     .unwrap_or("")
@@ -357,7 +356,7 @@ fn code_lang(pre: &NodeRef) -> Option<String> {
         let class = n.class().unwrap_or_default().to_string();
         if let Some(b) = class
             .split_once("brush:")
-            .map(|(_, b)| clean_lang(b.split(';').next().unwrap_or("")))
+            .map(|(_, b)| clean_lang(b.split_once(';').map_or(b, |(lang, _)| lang)))
             .filter(|b| !b.is_empty())
         {
             return Some(b);

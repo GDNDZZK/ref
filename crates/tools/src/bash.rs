@@ -103,7 +103,7 @@ fn clean(s: &str) -> String {
         let (line, nl) = seg.strip_suffix('\n').map_or((seg, ""), |l| (l, "\n"));
         let line = line.trim_end_matches('\r');
         // `progress 10%\rprogress 20%` -> keep the last redraw.
-        out.push_str(line.rsplit('\r').next().unwrap_or(line));
+        out.push_str(line.rsplit_once('\r').map_or(line, |(_, last)| last));
         out.push_str(nl);
     }
     out
