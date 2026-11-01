@@ -15,7 +15,8 @@ export const scene = timelineFilm({
   id: 'crew',
   cuts: [
     waitingTabsCut(0, HERO_FILM_START),
-    heroCut(HERO_FILM_START, A6_END, 0, { holdReport: true }),
+    // Hard cut at the Enter: a fade would show the hook terminal through the title card.
+    heroCut(HERO_FILM_START, A6_END, 0, { holdReport: true, enter: 'cut' }),
     heroCut(A6_END, HERO_END, A7_CLIP_FROM, { enter: 'cut' }),
     endCut(HERO_END, FILM_END),
   ],

@@ -16,13 +16,19 @@ export const scene = timelineFilm({
   id: 'trailer',
   cuts: [
     waitingTabsCut(0, HERO_FILM_START),
-    heroCut(HERO_FILM_START, FIRST_SLICE_END, 0),
+    // Hard cut at the Enter: a fade would show the hook terminal through the title card.
+    heroCut(HERO_FILM_START, FIRST_SLICE_END, 0, { enter: 'cut' }),
     heroCut(FIRST_SLICE_END, SECOND_SLICE_END, SECOND_SLICE_CLIP_FROM, { enter: 'cut', holdReport: true }),
     crewWindowsCut(SECOND_SLICE_END, WINDOWS_END),
     endCut(WINDOWS_END, FILM_END, { platforms: true }),
   ],
   captions: cues([
-    ...HERO_CAPTIONS,
+    // A's hero captions up to B3; B4's two end with the cut to B5 at 17.0.
+    ...HERO_CAPTIONS.slice(0, 3),
+    [8.9, 11.4, COPY.watchAll],
+    [11.5, 14.0, COPY.clickAndType],
+    [14.1, 17.0, COPY.ownTile],
+    [18.3, 21.9, COPY.picksItUp],
     [23.2, 26.8, COPY.sameSessions],
     [27.2, 30.4, { en: 'Open source on GitHub.', zh: '开源，代码在 GitHub。' }],
   ]),

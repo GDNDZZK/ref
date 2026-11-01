@@ -4,7 +4,7 @@ import { clip } from '../engine/clips.ts'
 import type { ShotBuilder } from '../engine/shot.ts'
 import type { Pointer } from '../shots/beat.ts'
 import { threeWindowsShot } from '../shots/threeWindows.ts'
-import { BRAND_TITLE_SECONDS, COPY, HERO_FILM_START } from './copy.ts'
+import { BRAND_TITLE_SECONDS, HERO_FILM_START } from './copy.ts'
 import type { Cut } from './timeline.ts'
 
 // A9, B6: the crew of the hero script in the terminal, the desktop app and the browser at the
@@ -22,18 +22,34 @@ export function crewWindowsCut(from: number, to: number): Cut {
   }
 }
 
-// A2, B2, C1 shot 2: the lockup and the tagline over the composer, then the corner mark
-// until `markUntil`.
+// A2, B2, C1 shot 2: the lockup over the composer (the tagline is the caption), then the
+// corner mark until `markUntil`.
 export function addBrandTitle(shot: ShotBuilder, markUntil: number) {
   shot.add(
     brandTitle({
-      tagline: COPY.tagline,
       from: HERO_FILM_START,
       shrinkAt: HERO_FILM_START + BRAND_TITLE_SECONDS,
       to: markUntil,
     }),
   )
 }
+
+// A whole 150-column TUI take (the width that shows the session sidebar) across the stage.
+export const WIDE_TUI = { fontSize: 19, x: 90, y: 70 }
+
+// RB1 `ref` starting in ~/project with the fixture opencode.json (capture/real.ts).
+export const FIXTURE_CAST = { name: 'tui-fixture-start', title: 'ref', ...WIDE_TUI }
+// In its model dialog (cast marker "models" + 0.5 s on): the three models of opencode.json.
+export function opencodeModelMarks(from: number, to: number) {
+  return [
+    { row: 11, col: 37, cols: 17 }, // Claude Sonnet 4.5
+    { row: 14, col: 37, cols: 13 }, // DeepSeek Chat
+    { row: 18, col: 37, cols: 11 }, // qwen3-coder
+  ].map((cell) => ({ ...cell, from, to }))
+}
+
+// RB2 `ref-server` in a shell: two lines of output, so only the top rows, with room inside.
+export const SERVER_CAST = { name: 'tui-server-start', title: '', fontSize: 24, topRows: 6, padding: 24 }
 
 // The outage take (M5) as the films show it: the status line is cut off (it has the mock path).
 export const OUTAGE_CAST = { name: 'tui-outage', title: 'ref', fontSize: 24, hideLastRows: 1, x: 168, y: 90 }

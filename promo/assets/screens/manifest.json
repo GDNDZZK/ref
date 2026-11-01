@@ -408,12 +408,12 @@
     "sessionName": "workspace-4310"
   },
   "tui-crew": {
-    "width": 2058,
-    "height": 1224
+    "width": 2782,
+    "height": 1512
   },
   "tui-crew-clean": {
-    "width": 2058,
-    "height": 1144
+    "width": 2782,
+    "height": 1432
   },
   "tui-main": {
     "width": 2058,
@@ -444,52 +444,52 @@
     "height": 1224
   },
   "tui-standalone": {
-    "width": 2058,
-    "height": 1224
+    "width": 2782,
+    "height": 1512
   },
   "tui-standalone-clean": {
-    "width": 2058,
-    "height": 1144
+    "width": 2782,
+    "height": 1432
   },
   "tui-todo-done": {
-    "width": 2058,
-    "height": 1224
+    "width": 2782,
+    "height": 1512
   },
   "tui-todo-done-clean": {
-    "width": 2058,
-    "height": 1144
+    "width": 2782,
+    "height": 1432
   },
   "tui-todo-idle": {
-    "width": 2058,
-    "height": 1224
+    "width": 2782,
+    "height": 1512
   },
   "tui-todo-idle-clean": {
-    "width": 2058,
-    "height": 1144
+    "width": 2782,
+    "height": 1432
   },
   "tui-todo-sent": {
-    "width": 2058,
-    "height": 1224
+    "width": 2782,
+    "height": 1512
   },
   "tui-todo-sent-clean": {
-    "width": 2058,
-    "height": 1144
+    "width": 2782,
+    "height": 1432
   },
   "tui-todo-tick1": {
-    "width": 2058,
-    "height": 1224
+    "width": 2782,
+    "height": 1512
   },
   "tui-todo-tick1-clean": {
-    "width": 2058,
-    "height": 1144
+    "width": 2782,
+    "height": 1432
   },
   "tui-todo-tick2": {
-    "width": 2058,
-    "height": 1224
+    "width": 2782,
+    "height": 1512
   },
   "tui-todo-tick2-clean": {
-    "width": 2058,
-    "height": 1144
+    "width": 2782,
+    "height": 1432
   },
   "web-agents-dialog": {
     "width": 3200,

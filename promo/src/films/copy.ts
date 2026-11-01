@@ -4,8 +4,6 @@ import type { Localized } from '../engine/i18n.ts'
 export const COPY = {
   hook: { en: 'Four agents, four tabs. One waited 14 minutes.', zh: '四个智能体，一个等你 14 分钟了。' },
   whatRefIs: { en: 'ref: a coding agent for terminal, desktop and browser.', zh: 'ref：终端、桌面、浏览器里的编程智能体。' },
-  // The tagline on the brand title card (card text, not a caption).
-  tagline: { en: 'A coding agent for terminal, desktop and browser.', zh: '终端、桌面、浏览器里的编程智能体。' },
   startsWorkers: { en: 'Its main agent starts worker sessions.', zh: '它的主智能体会自己开工作会话。' },
   watchAll: { en: 'Watch all four at once.', zh: '四个同时在跑，一屏看全。' },
   clickAndType: { en: 'Click a worker session and type to it.', zh: '点一个工作会话，直接给它发消息。' },
