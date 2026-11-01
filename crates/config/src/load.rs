@@ -450,8 +450,8 @@ fn collect_instructions(ctx: &mut Ctx, l: &Layer, acc: &mut Accum) {
                 add_instruction(ctx, l, x, acc);
             }
         }
-        Some(Value::String(s)) if !acc.instructions.contains(s) => acc.instructions.push(s.clone()),
-        Some(Value::String(_)) | None => {}
+        Some(v @ Value::String(_)) => add_instruction(ctx, l, v, acc),
+        None => {}
         Some(_) => ctx.warn(format!(
             "{}: `instructions` must be an array of strings",
             l.source.display()
