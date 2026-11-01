@@ -464,7 +464,7 @@ impl Hub {
 
 /// Debounced `Sessions` broadcast.
 async fn broadcaster(hub: Weak<Hub>) {
-    let mut last: Option<String> = None;
+    let mut last: Option<Vec<SessionInfo>> = None;
     loop {
         let (dirty, shutdown) = {
             let Some(h) = hub.upgrade() else { return };
@@ -478,11 +478,10 @@ async fn broadcaster(hub: Weak<Hub>) {
         tokio::time::sleep(SESSIONS_DEBOUNCE).await;
         let Some(h) = hub.upgrade() else { return };
         let infos = h.infos();
-        let key = serde_json::to_string(&infos).unwrap_or_default();
-        if last.as_deref() == Some(key.as_str()) {
+        if last.as_ref() == Some(&infos) {
             continue;
         }
-        last = Some(key);
+        last = Some(infos.clone());
         for c in h.conns() {
             if c.lock().hello {
                 c.send(ServerFrame::Sessions {

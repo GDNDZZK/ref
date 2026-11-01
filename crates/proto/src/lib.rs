@@ -161,7 +161,7 @@ impl SessionStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct SessionInfo {
     pub id: String,
     /// Peer name; arbitrary unicode, unique among live sessions.
