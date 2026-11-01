@@ -25,7 +25,7 @@ const CARD_TOP_PX = 70
 const CARD_WIDTH_PX = 1720
 const ROW_ZOOM = 1.1
 // Stage height at which the active row is centred.
-const ROW_TARGET_Y_PX = 560
+const ROW_TARGET_Y_PX = 530
 const MOVE_SECONDS = 0.6
 const ROW_ENTER_SECONDS = 0.5
 const ROW_RISE_PX = 24

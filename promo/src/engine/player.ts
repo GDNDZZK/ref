@@ -15,8 +15,17 @@ interface MountedStep {
   instance: ShotInstance
 }
 
+// Images already shown once; a picture that appears for the first time (a window sliding in) is
+// decoded but may not be painted yet, so the frame waits for two paints then.
+const shownImages = new WeakSet<HTMLImageElement>()
+
 async function whenImagesDecoded(): Promise<void> {
-  await Promise.all(Array.from(document.images, (image) => image.decode()))
+  const images = Array.from(document.images)
+  await Promise.all(images.map((image) => image.decode()))
+  const firstShown = images.filter((image) => image.offsetParent !== null && !shownImages.has(image))
+  if (firstShown.length === 0) return
+  for (const image of firstShown) shownImages.add(image)
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
 }
 
 export function mountScene(definition: SceneDefinition, stage: HTMLElement): ScenePlayer {

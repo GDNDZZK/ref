@@ -10,6 +10,8 @@ import type { Localized } from '../engine/i18n.ts'
 
 // A cross-fade between cuts; the outgoing cut runs this much longer under the incoming one.
 export const FADE_SECONDS = 0.4
+// A short cross-fade, where a longer one would show the outgoing picture as a ghost.
+const QUICK_FADE_SECONDS = 0.2
 
 export interface Cut {
   // Film seconds. Each cut starts where the one before it ends.
@@ -17,9 +19,14 @@ export interface Cut {
   to: number
   // `seconds` includes the overlap when the next cut fades in.
   build: (seconds: number) => Shot
-  // How the cut comes in over the previous one: a cross-fade (default) or a hard cut, used
-  // between slices of one recording.
-  enter?: 'fade' | 'cut'
+  // How the cut comes in over the previous one: a cross-fade (default), a short one, or a hard
+  // cut, used between slices of one recording.
+  enter?: 'fade' | 'quick' | 'cut'
+}
+
+function fadeSeconds(enter: Cut['enter']): number {
+  if (enter === 'cut') return 0
+  return enter === 'quick' ? QUICK_FADE_SECONDS : FADE_SECONDS
 }
 
 export interface Chip {
@@ -47,9 +54,9 @@ export function timelineFilm(film: TimelineFilm): SceneDefinition {
       throw new Error(`${film.id}: cut ${index} starts at ${cut.from}, the one before ends at ${previous.to}`)
     }
     const next = film.cuts[index + 1]
-    const overlap = next && next.enter !== 'cut' ? FADE_SECONDS : 0
+    const overlap = next ? fadeSeconds(next.enter) : 0
     const fades = index > 0 && cut.enter !== 'cut'
-    return { shot: cut.build(cut.to - cut.from + overlap), enter: fades ? { kind: 'fade', duration: FADE_SECONDS } : undefined }
+    return { shot: cut.build(cut.to - cut.from + overlap), enter: fades ? { kind: 'fade', duration: fadeSeconds(cut.enter) } : undefined }
   })
   const length = film.cuts.at(-1)?.to ?? 0
   const overlay = defineShot(length, (shot) => {
@@ -75,8 +82,8 @@ export function drawnCut(from: number, to: number, draw: (shot: ShotBuilder, sec
 }
 
 // N7 as a cut.
-export function endCut(from: number, to: number, options: Omit<EndCardOptions, 'from' | 'to'> = {}): Cut {
-  return drawnCut(from, to, (shot, seconds) => shot.add(endCard({ ...options, from: 0.1, to: seconds + 1 })))
+export function endCut(from: number, to: number, options: Omit<EndCardOptions, 'from' | 'to'> = {}, enter?: Cut['enter']): Cut {
+  return drawnCut(from, to, (shot, seconds) => shot.add(endCard({ ...options, from: 0.1, to: seconds + 1 })), enter)
 }
 
 // Caption cues from [from, to, text] rows, as the script's tables list them.

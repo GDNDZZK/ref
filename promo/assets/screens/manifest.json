@@ -129,13 +129,11 @@
   },
   "gui-denied": {
     "width": 2560,
-    "height": 1600,
-    "sessionName": "workspace-2df9"
+    "height": 1600
   },
   "gui-denied-zh": {
     "width": 2560,
-    "height": 1600,
-    "sessionName": "workspace-5aa3"
+    "height": 1600
   },
   "gui-edit-diff": {
     "width": 2560,

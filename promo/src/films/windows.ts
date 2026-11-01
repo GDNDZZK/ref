@@ -52,8 +52,9 @@ interface Progress {
 }
 const PROGRESS: Record<'tui' | 'gui' | 'web', Progress> = {
   tui: { look: { x: 0.86, y: 0.42, zoom: 2.4 }, mark: { x: 0.772, y: 0.314, width: 0.211, height: 0.124 } },
-  gui: { look: { x: 0.14, y: 0.17, zoom: 3 }, mark: { x: 0.006, y: 0.118, width: 0.15, height: 0.15 } },
-  web: { look: { x: 0.11, y: 0.14, zoom: 3.6 }, mark: { x: 0.003, y: 0.087, width: 0.13, height: 0.12 } },
+  // Tight enough that only the sidebar shows, not the edge of the conversation.
+  gui: { look: { x: 0.11, y: 0.14, zoom: 4.5 }, mark: { x: 0.006, y: 0.122, width: 0.156, height: 0.15 } },
+  web: { look: { x: 0.09, y: 0.115, zoom: 5.5 }, mark: { x: 0.003, y: 0.095, width: 0.135, height: 0.116 } },
 }
 
 const HOOK_TERMINAL_RECT = { x: 80, y: 120, width: 1060, height: 700 }
