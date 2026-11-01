@@ -93,7 +93,7 @@ fn start_dir(dir: Option<&str>) -> anyhow::Result<String> {
 }
 
 fn is_loopback(host: &str) -> bool {
-    let bare = host.trim_start_matches('[').trim_end_matches(']');
+    let bare = launch::bare_host(host);
     bare.eq_ignore_ascii_case(LOCALHOST) || bare.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
 }
 
@@ -116,7 +116,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     let url_host = launch::reachable_host(&cli.host);
     let login_url = launch::login_url(&url_host, cli.port, &login_token, Some(&cwd));
 
-    let bind_host = cli.host.trim_start_matches('[').trim_end_matches(']');
+    let bind_host = launch::bare_host(&cli.host);
     let listener = match tokio::net::TcpListener::bind((bind_host, cli.port)).await {
         Ok(listener) => listener,
         Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {

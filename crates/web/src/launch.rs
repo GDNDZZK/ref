@@ -7,9 +7,14 @@ use crate::routes::LOGIN_PATH;
 const LOOPBACK_V4: &str = "127.0.0.1";
 const LOOPBACK_V6: &str = "[::1]";
 
+/// A host without the brackets of an IPv6 literal (`[::1]` → `::1`).
+pub(crate) fn bare_host(host: &str) -> &str {
+    host.trim_start_matches('[').trim_end_matches(']')
+}
+
 /// Host to put in URLs and to connect to for a listening address (`0.0.0.0` → loopback).
 pub fn reachable_host(listen_host: &str) -> String {
-    let bare = listen_host.trim_start_matches('[').trim_end_matches(']');
+    let bare = bare_host(listen_host);
     match bare.parse::<IpAddr>() {
         Ok(ip) if ip.is_unspecified() && ip.is_ipv4() => LOOPBACK_V4.to_string(),
         Ok(ip) if ip.is_unspecified() => LOOPBACK_V6.to_string(),
