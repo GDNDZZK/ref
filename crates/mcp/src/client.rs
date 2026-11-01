@@ -8,6 +8,7 @@ use anyhow::{Result, anyhow, bail};
 use ref_proto::ImageData;
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::time::Duration;
@@ -371,24 +372,7 @@ impl McpClient {
             self.conn.send(&msg).await?;
             rx.await.map_err(|_| anyhow!("MCP connection closed"))?
         };
-        let fut = async {
-            match timeout {
-                Some(t) => match tokio::time::timeout(t, fut).await {
-                    Ok(r) => r,
-                    Err(_) => {
-                        // The spec forbids cancelling initialize.
-                        if method != METHOD_INITIALIZE {
-                            self.send_cancelled(&id, "timeout");
-                        }
-                        Err(anyhow!(
-                            "MCP request {method} timed out after {}s",
-                            t.as_secs_f64()
-                        ))
-                    }
-                },
-                None => fut.await,
-            }
-        };
+        let fut = self.with_timeout(method, &id, timeout, fut);
         match cancel {
             Some(cancel) => tokio::select! {
                 r = fut => r,
@@ -399,6 +383,30 @@ impl McpClient {
             },
             None => fut.await,
         }
+    }
+
+    /// Await `fut` for at most `timeout` (if any); on expiry the request is cancelled.
+    async fn with_timeout(
+        &self,
+        method: &str,
+        id: &Value,
+        timeout: Option<Duration>,
+        fut: impl Future<Output = Result<Value>>,
+    ) -> Result<Value> {
+        let Some(t) = timeout else {
+            return fut.await;
+        };
+        if let Ok(r) = tokio::time::timeout(t, fut).await {
+            return r;
+        }
+        // The spec forbids cancelling initialize.
+        if method != METHOD_INITIALIZE {
+            self.send_cancelled(id, "timeout");
+        }
+        Err(anyhow!(
+            "MCP request {method} timed out after {}s",
+            t.as_secs_f64()
+        ))
     }
 
     fn send_cancelled(&self, id: &Value, reason: &str) {
