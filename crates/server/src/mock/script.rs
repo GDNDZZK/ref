@@ -7,6 +7,7 @@
 
 use crate::peers::{PEER_HEADER_PREFIX, REPORT_REMINDER_PREFIX, SPAWN_HEADER_PREFIX};
 use crate::session::REMINDER_PREFIX;
+use crate::toolset::PURPOSE_KEY;
 use serde_json::{Map, Value, json};
 
 /// How fast text and tool arguments stream: `chars` characters every `every_ms`.
@@ -44,7 +45,7 @@ impl ToolCall {
     /// The raw argument JSON as a model would stream it: `purpose` comes first.
     pub fn raw_arguments(&self) -> String {
         let mut args = Map::new();
-        args.insert("purpose".into(), json!(self.purpose));
+        args.insert(PURPOSE_KEY.into(), json!(self.purpose));
         if let Value::Object(input) = &self.input {
             args.extend(input.clone());
         }
