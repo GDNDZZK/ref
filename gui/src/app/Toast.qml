@@ -17,14 +17,15 @@ Item {
 	signal finished()
 
 	readonly property var looks: ({
-		[ToastLevel.error]: {fill: Theme.errorSurface, edge: Theme.errorBorder, tint: Theme.danger, lifetime: Motion.toastErrorMs, icon: "error"},
-		[ToastLevel.warn]: {fill: Theme.warningSurface, edge: Theme.warningBorder, tint: Theme.warning, lifetime: Motion.toastWarnMs, icon: "warning"},
-		[ToastLevel.info]: {fill: Theme.surface, edge: Theme.border, tint: Theme.accent, lifetime: Motion.toastInfoMs, icon: "info"}
+		[ToastLevel.error]: {fill: Theme.errorSurface, edge: Theme.errorBorder, tint: Theme.danger, iconTint: Theme.dangerText, lifetime: Motion.toastErrorMs, icon: "error"},
+		[ToastLevel.warn]: {fill: Theme.warningSurface, edge: Theme.warningBorder, tint: Theme.warning, iconTint: Theme.warningText, lifetime: Motion.toastWarnMs, icon: "warning"},
+		[ToastLevel.info]: {fill: Theme.surface, edge: Theme.border, tint: Theme.accent, iconTint: Theme.accentText, lifetime: Motion.toastInfoMs, icon: "info"}
 	})
 	readonly property var look: looks[level] ?? looks[ToastLevel.info]
 	readonly property color fill: look.fill
 	readonly property color edge: look.edge
 	readonly property color tint: look.tint
+	readonly property color iconTint: look.iconTint
 	readonly property int lifetime: look.lifetime
 	readonly property int cardPaddingX: 12
 	readonly property int cardPaddingY: 10
@@ -97,7 +98,7 @@ Item {
 				id: glyph
 				name: toast.look.icon
 				size: toast.iconSize
-				color: toast.tint
+				color: toast.iconTint
 			}
 		}
 

@@ -74,12 +74,12 @@ Block {
 		switch (toolState) {
 		case ToolState.awaitingPermission:
 		case ToolState.delayed:
-			return Theme.warning
+			return Theme.warningText
 		case ToolState.streaming:
 		case ToolState.running:
-			return Theme.accent
+			return Theme.accentText
 		case ToolState.error:
-			return Theme.danger
+			return Theme.dangerText
 		default:
 			return Theme.textMuted
 		}
@@ -250,7 +250,7 @@ Block {
 				anchors { left: parent.left; leftMargin: block.cardPadding; right: parent.right; rightMargin: block.cardPadding; top: parent.top }
 				text: "\u2514 " + block.firstOutputLine
 				elide: Text.ElideRight
-				color: Theme.danger
+				color: Theme.dangerText
 				font.family: Theme.monoFamily
 				font.pixelSize: Theme.smallFontSize
 			}

@@ -24,7 +24,7 @@ Item {
 	Icon {
 		anchors.centerIn: parent
 		name: button.copied ? "check" : "copy"
-		color: button.copied ? Theme.success : Theme.textMuted
+		color: button.copied ? Theme.successText : Theme.textMuted
 	}
 
 	HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
