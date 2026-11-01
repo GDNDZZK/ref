@@ -8,6 +8,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include <functional>
 #include <optional>
 #include <utility>
 
@@ -54,6 +55,9 @@ public:
 	}
 
 	void setProtocol(int protocol) { m_protocol = protocol; }
+
+	// The to-do list the session's info carries.
+	void setTodos(const QString& id, const QJsonArray& todos) { m_sessions[id][u"todos"_s] = todos; }
 
 	// The messages an attach brings for the session.
 	void setMessages(const QString& id, const QJsonArray& messages) { m_messages.insert(id, messages); }
@@ -315,7 +319,7 @@ bool rowFlag(Workspace& workspace, const QString& id, refgui::workspace::Session
 
 struct Fixture
 {
-	explicit Fixture(int protocol = 2, bool withSecond = false, const QJsonArray& messagesOfA = {})
+	explicit Fixture(int protocol = 2, bool withSecond = false, const QJsonArray& messagesOfA = {}, const std::function<void(StubServer&)>& prepare = {})
 	{
 		stub.setProtocol(protocol);
 		stub.add(u"ses_a"_s, 1);
@@ -323,6 +327,10 @@ struct Fixture
 		if(withSecond)
 		{
 			stub.add(u"ses_b"_s, 2);
+		}
+		if(prepare)
+		{
+			prepare(stub);
 		}
 		refgui::cli::LaunchOptions options;
 		options.directory = u"/work"_s;
@@ -368,6 +376,7 @@ private slots:
 	void theSidebarMarksTheFocusedTileAndTheTiles();
 	void permissionKeysComeAfterTheGuardAndTakeTheTyping();
 	void closingTheCurrentSessionLetsGoOfItBeforeItIsDeleted();
+	void theSessionInFrontIsTheCurrentOneOrTheFocusedTile();
 	void destroyingTheWorkspaceWhileLeavingSplitViewIsSafe();
 	void destroyingTheWorkspaceWithADetachOutIsSafe();
 	void questionKeysComeAfterTheGuardAndAnswerTheCard();
@@ -964,6 +973,44 @@ void TestWorkspace::typingACustomAnswerTakesTheKeysAwayFromTheCard()
 	QVERIFY(!session->answerKey(Qt::Key_A, u"a"_s, Qt::NoModifier, false)); // the text field has them
 	session->question()->cancelCustom();
 	QVERIFY(session->answerKeysActive());
+}
+
+// What the sidebar shows the to-do list of: the session in front, which in split view follows the focus.
+void TestWorkspace::theSessionInFrontIsTheCurrentOneOrTheFocusedTile()
+{
+	const auto todo = [](const QString& content, const QString& status) {
+		return QJsonObject{{u"content"_s, content}, {u"status"_s, status}};
+	};
+	Fixture f(2, true, {}, [&](StubServer& stub) {
+		// Cancelled items count in neither number.
+		stub.setTodos(u"ses_a"_s, {todo(u"Find the bug"_s, u"completed"_s), todo(u"Fix it"_s, u"in_progress"_s), todo(u"Idea"_s, u"cancelled"_s)});
+	});
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
+	QSignalSpy changed(f.workspace.get(), &Workspace::frontSessionChanged);
+	ChatSession* a = f.workspace->session(u"ses_a"_s);
+	QCOMPARE(f.workspace->frontSession(), a);
+	QTRY_COMPARE(a->todoTotal(), 2);
+	QCOMPARE(a->todoDone(), 1);
+	QCOMPARE(a->todoItems().size(), 3); // shown as they are, the cancelled one too
+
+	f.workspace->toggleSplit();
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	ChatSession* b = f.workspace->session(u"ses_b"_s);
+	QTRY_VERIFY(b->isAttached());
+	QCOMPARE(f.workspace->frontSession(), a); // the focused tile
+	f.workspace->focusTile(u"ses_b"_s);
+	QCOMPARE(f.workspace->frontSession(), b);
+	QVERIFY(b->todoItems().isEmpty()); // so the section is hidden
+	QCOMPARE(b->todoTotal(), 0);
+	f.workspace->focusTile(u"ses_a"_s);
+	QCOMPARE(f.workspace->frontSession(), a);
+	QCOMPARE(changed.count(), 2);
+	QCOMPARE(f.workspace->currentId(), u"ses_a"_s); // focusing does not change the current session
+
+	f.workspace->toggleSplit();
+	QTRY_VERIFY(!f.workspace->isSplitView());
+	QTRY_COMPARE(f.stub.requests(u"watch_all"_s).size(), 2);
+	QTRY_COMPARE(f.workspace->tileStage()->rowCount(), 0);
 }
 
 // The window shows the current session under a crossfade that takes a frame or more to start, so it can still show

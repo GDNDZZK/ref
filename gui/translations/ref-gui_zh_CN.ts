@@ -608,13 +608,6 @@
     </message>
 </context>
 <context>
-    <name>ImageBlock</name>
-    <message>
-        <source>Image: %1</source>
-        <translation type="vanished">图片：%1</translation>
-    </message>
-</context>
-<context>
     <name>Lightbox</name>
     <message>
         <location filename="../src/app/Lightbox.qml" line="79"/>
@@ -636,27 +629,27 @@
 <context>
     <name>Main</name>
     <message>
-        <location filename="../src/app/Main.qml" line="84"/>
+        <location filename="../src/app/Main.qml" line="95"/>
         <source>New session in…</source>
         <translation>在其他目录新建会话…</translation>
     </message>
     <message>
-        <location filename="../src/app/Main.qml" line="202"/>
+        <location filename="../src/app/Main.qml" line="213"/>
         <source>Show sidebar</source>
         <translation>显示侧边栏</translation>
     </message>
     <message>
-        <location filename="../src/app/Main.qml" line="219"/>
+        <location filename="../src/app/Main.qml" line="230"/>
         <source>New session</source>
         <translation>新建会话</translation>
     </message>
     <message>
-        <location filename="../src/app/Main.qml" line="239"/>
+        <location filename="../src/app/Main.qml" line="250"/>
         <source>Split view</source>
         <translation>分屏视图</translation>
     </message>
     <message>
-        <location filename="../src/app/Main.qml" line="254"/>
+        <location filename="../src/app/Main.qml" line="265"/>
         <source>Leave zoom</source>
         <translation>退出放大</translation>
     </message>
@@ -682,17 +675,17 @@
 <context>
     <name>MetaBlock</name>
     <message>
-        <location filename="../src/app/MetaBlock.qml" line="114"/>
+        <location filename="../src/app/MetaBlock.qml" line="123"/>
         <source>interrupted</source>
         <translation>已中断</translation>
     </message>
     <message>
-        <location filename="../src/app/MetaBlock.qml" line="132"/>
+        <location filename="../src/app/MetaBlock.qml" line="142"/>
         <source>Undo</source>
         <translation>撤销</translation>
     </message>
     <message>
-        <location filename="../src/app/MetaBlock.qml" line="137"/>
+        <location filename="../src/app/MetaBlock.qml" line="147"/>
         <source>Copy</source>
         <translation>复制</translation>
     </message>
@@ -777,10 +770,6 @@
         <location filename="../src/app/NotificationSettingsSection.qml" line="70"/>
         <source>A session waits for you (permission or question)</source>
         <translation>会话在等你（授权或提问）</translation>
-    </message>
-    <message>
-        <source>A tool needs permission</source>
-        <translation type="vanished">工具需要授权</translation>
     </message>
     <message>
         <location filename="../src/app/NotificationSettingsSection.qml" line="78"/>
@@ -1164,58 +1153,63 @@
 <context>
     <name>Sidebar</name>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="52"/>
+        <location filename="../src/app/Sidebar.qml" line="77"/>
         <source>Hide sidebar</source>
         <translation>隐藏侧边栏</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="97"/>
+        <location filename="../src/app/Sidebar.qml" line="122"/>
         <source>New session</source>
         <translation>新建会话</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="117"/>
+        <location filename="../src/app/Sidebar.qml" line="142"/>
         <source>New session in another folder…</source>
         <translation>在其他文件夹新建会话…</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="132"/>
+        <location filename="../src/app/Sidebar.qml" line="169"/>
+        <source>Todo %1/%2</source>
+        <translation>待办 %1/%2</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Sidebar.qml" line="194"/>
         <source>Running</source>
         <translation>运行中</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="172"/>
+        <location filename="../src/app/Sidebar.qml" line="234"/>
         <source>History</source>
         <translation>历史</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="203"/>
-        <location filename="../src/app/Sidebar.qml" line="210"/>
+        <location filename="../src/app/Sidebar.qml" line="265"/>
+        <location filename="../src/app/Sidebar.qml" line="272"/>
         <source>Search history</source>
         <translation>搜索历史</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="223"/>
+        <location filename="../src/app/Sidebar.qml" line="285"/>
         <source>Clear search</source>
         <translation>清除搜索</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="252"/>
+        <location filename="../src/app/Sidebar.qml" line="314"/>
         <source>Loading…</source>
         <translation>加载中…</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="252"/>
+        <location filename="../src/app/Sidebar.qml" line="314"/>
         <source>No matching sessions</source>
         <translation>没有匹配的会话</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="252"/>
+        <location filename="../src/app/Sidebar.qml" line="314"/>
         <source>No earlier sessions</source>
         <translation>没有更早的会话</translation>
     </message>
     <message>
-        <location filename="../src/app/Sidebar.qml" line="333"/>
+        <location filename="../src/app/Sidebar.qml" line="395"/>
         <source>Settings</source>
         <translation>设置</translation>
     </message>
@@ -1253,7 +1247,7 @@
         <translation>%1 后重试（第 %2 次）：%3</translation>
     </message>
     <message>
-        <location filename="../src/app/StatusLine.qml" line="154"/>
+        <location filename="../src/app/StatusLine.qml" line="162"/>
         <source>Context: %1 of %2 tokens. Compaction is recommended at %3 and automatic at %4.</source>
         <translation>上下文：%1 / %2 tokens。建议在 %3 时压缩，%4 时自动压缩。</translation>
     </message>
@@ -1303,8 +1297,8 @@
 <context>
     <name>TodoProgress</name>
     <message>
-        <location filename="../src/app/TodoProgress.qml" line="86"/>
-        <location filename="../src/app/TodoProgress.qml" line="123"/>
+        <location filename="../src/app/TodoProgress.qml" line="88"/>
+        <location filename="../src/app/TodoProgress.qml" line="126"/>
         <source>Todo %1</source>
         <translation>待办 %1</translation>
     </message>
