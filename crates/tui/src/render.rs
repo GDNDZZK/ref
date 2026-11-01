@@ -17,7 +17,7 @@ use crate::ui::question::QuestionView;
 use crate::ui::text::{self, width};
 use crate::ui::{split, theme, todo};
 
-pub const SIDEBAR_W: u16 = 32;
+pub(crate) const SIDEBAR_W: u16 = 32;
 /// Minimum terminal width at which the sidebar is shown.
 pub const SIDEBAR_MIN_SCREEN: u16 = 140;
 const EDITOR_MAX: usize = 10;
