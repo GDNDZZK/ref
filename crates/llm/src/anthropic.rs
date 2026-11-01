@@ -378,50 +378,7 @@ fn convert_messages(provider: &Provider, model: &Model, req: &Request) -> Vec<Va
             }
             ChatMessage::Assistant { blocks, origin } => {
                 let replay = same_origin(origin, provider, model);
-                let mut content = Vec::new();
-                for block in blocks {
-                    match block {
-                        AssistantBlock::Reasoning {
-                            text,
-                            provider_data,
-                        } => {
-                            if !replay {
-                                continue;
-                            }
-                            let data = provider_data.as_ref();
-                            let signature = data
-                                .and_then(|d| d.get("signature"))
-                                .and_then(Value::as_str);
-                            let redacted =
-                                data.and_then(|d| d.get("redacted")).and_then(Value::as_str);
-                            if let Some(redacted) = redacted.filter(|r| !r.is_empty()) {
-                                content
-                                    .push(json!({"type": "redacted_thinking", "data": redacted}));
-                            } else if let Some(sig) = signature.filter(|s| !s.is_empty()) {
-                                content.push(
-                                    json!({"type": "thinking", "thinking": text, "signature": sig}),
-                                );
-                            }
-                        }
-                        AssistantBlock::Text(t) => {
-                            if !t.trim().is_empty() {
-                                content.push(json!({"type": "text", "text": t}));
-                            }
-                        }
-                        AssistantBlock::ToolCall {
-                            id,
-                            name,
-                            arguments,
-                            ..
-                        } => content.push(json!({
-                            "type": "tool_use",
-                            "id": normalize_call_id(id, MAX_TOOL_ID),
-                            "name": name,
-                            "input": parse_arguments(arguments),
-                        })),
-                    }
-                }
-                push_merged(&mut out, "assistant", content);
+                push_merged(&mut out, "assistant", assistant_content(blocks, replay));
             }
             ChatMessage::ToolResult {
                 call_id,
@@ -430,28 +387,7 @@ fn convert_messages(provider: &Provider, model: &Model, req: &Request) -> Vec<Va
                 is_error,
                 ..
             } => {
-                let images: &[ImageData] = if *is_error || !model.images {
-                    &[]
-                } else {
-                    images
-                };
-                let mut parts = Vec::new();
-                if !content.trim().is_empty() {
-                    parts.push(json!({"type": "text", "text": content}));
-                } else if images.is_empty() {
-                    parts.push(json!({"type": "text", "text": NO_TOOL_OUTPUT}));
-                } else {
-                    parts.push(json!({"type": "text", "text": SEE_ATTACHED_IMAGE}));
-                }
-                parts.extend(images.iter().map(image_block));
-                let mut block = json!({
-                    "type": "tool_result",
-                    "tool_use_id": normalize_call_id(call_id, MAX_TOOL_ID),
-                    "content": parts,
-                });
-                if *is_error {
-                    block["is_error"] = json!(true);
-                }
+                let block = tool_result_block(model, call_id, content, images, *is_error);
                 push_merged(&mut out, "user", vec![block]);
             }
         }
@@ -478,6 +414,89 @@ fn convert_messages(provider: &Provider, model: &Model, req: &Request) -> Vec<Va
         }
     }
     out
+}
+
+/// Wire blocks of an assistant message. Reasoning is replayed only for `replay`.
+fn assistant_content(blocks: &[AssistantBlock], replay: bool) -> Vec<Value> {
+    let mut content = Vec::new();
+    for block in blocks {
+        match block {
+            AssistantBlock::Reasoning {
+                text,
+                provider_data,
+            } => {
+                if replay {
+                    content.extend(reasoning_block(text, provider_data.as_ref()));
+                }
+            }
+            AssistantBlock::Text(t) => {
+                if !t.trim().is_empty() {
+                    content.push(json!({"type": "text", "text": t}));
+                }
+            }
+            AssistantBlock::ToolCall {
+                id,
+                name,
+                arguments,
+                ..
+            } => content.push(json!({
+                "type": "tool_use",
+                "id": normalize_call_id(id, MAX_TOOL_ID),
+                "name": name,
+                "input": parse_arguments(arguments),
+            })),
+        }
+    }
+    content
+}
+
+/// A `redacted_thinking` or signed `thinking` block; reasoning without either is dropped.
+fn reasoning_block(text: &str, provider_data: Option<&Value>) -> Option<Value> {
+    let signature = provider_data
+        .and_then(|d| d.get("signature"))
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty());
+    let redacted = provider_data
+        .and_then(|d| d.get("redacted"))
+        .and_then(Value::as_str)
+        .filter(|r| !r.is_empty());
+    if let Some(redacted) = redacted {
+        return Some(json!({"type": "redacted_thinking", "data": redacted}));
+    }
+    signature.map(|sig| json!({"type": "thinking", "thinking": text, "signature": sig}))
+}
+
+/// A `tool_result` block; images are sent only for successful results of vision models.
+fn tool_result_block(
+    model: &Model,
+    call_id: &str,
+    content: &str,
+    images: &[ImageData],
+    is_error: bool,
+) -> Value {
+    let images: &[ImageData] = if is_error || !model.images {
+        &[]
+    } else {
+        images
+    };
+    let mut parts = Vec::new();
+    if !content.trim().is_empty() {
+        parts.push(json!({"type": "text", "text": content}));
+    } else if images.is_empty() {
+        parts.push(json!({"type": "text", "text": NO_TOOL_OUTPUT}));
+    } else {
+        parts.push(json!({"type": "text", "text": SEE_ATTACHED_IMAGE}));
+    }
+    parts.extend(images.iter().map(image_block));
+    let mut block = json!({
+        "type": "tool_result",
+        "tool_use_id": normalize_call_id(call_id, MAX_TOOL_ID),
+        "content": parts,
+    });
+    if is_error {
+        block["is_error"] = json!(true);
+    }
+    block
 }
 
 /// Append `content` as a `role` message, merging with the previous message
