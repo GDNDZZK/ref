@@ -112,10 +112,8 @@ function measure({ count, RENDER_LIMIT_MS }) {
     return { slowest, p50: percentile(times, 0.5), p95: percentile(times, 0.95), max: times.at(-1) }
   }
 
-  return (async () => {
-    const result = {}
-    while (!store.loaded) await frames() // the session opening would replace the blocks
-    const blocks = makeBlocks()
+  // First render of the synthetic blocks, then the cost of layout.
+  async function measureRender(blocks) {
     const started = performance.now()
     store.generation++
     store.blocks = blocks
@@ -124,19 +122,21 @@ function measure({ count, RENDER_LIMIT_MS }) {
       performance.now() - started < RENDER_LIMIT_MS
     )
       await frames()
-    result.rendered = document.querySelectorAll('.frame').length
-    result.renderMs = performance.now() - started
+    const rendered = document.querySelectorAll('.frame').length
+    const renderMs = performance.now() - started
     const layoutStarted = performance.now()
-    result.scrollHeight = document.querySelector('.scroller').scrollHeight // forces style and layout
-    result.layoutMs = performance.now() - layoutStarted
+    const scrollHeight = document.querySelector('.scroller').scrollHeight // forces style and layout
+    const layoutMs = performance.now() - layoutStarted
     await frames()
-    result.settledMs = performance.now() - started
-    result.domNodes = document.getElementsByTagName('*').length
-    result.heapMB = performance.memory ? performance.memory.usedJSHeapSize / 1048576 : null
+    const settledMs = performance.now() - started
+    const domNodes = document.getElementsByTagName('*').length
+    const heapMB = performance.memory ? performance.memory.usedJSHeapSize / 1048576 : null
+    return { rendered, renderMs, scrollHeight, layoutMs, settledMs, domNodes, heapMB }
+  }
 
-    const scroller = document.querySelector('.scroller')
-    // Reading upwards from the end: a row in view must move exactly as far as the view scrolled.
-    // Rows that change size above it (estimated heights becoming real) show up as drift.
+  // Reading upwards from the end: a row in view must move exactly as far as the view scrolled.
+  // Rows that change size above it (estimated heights becoming real) show up as drift.
+  async function measureScrollUpDrift(scroller) {
     scroller.scrollTop = scroller.scrollHeight
     await frames()
     const STEP = 400
@@ -148,20 +148,35 @@ function measure({ count, RENDER_LIMIT_MS }) {
       await frames()
       drifts.push(Math.abs(probe.getBoundingClientRect().top - (before + STEP)))
     }
-    result.scrollUpDrift = { max: Math.max(...drifts), total: drifts.reduce((a, b) => a + b, 0) }
+    return { max: Math.max(...drifts), total: drifts.reduce((a, b) => a + b, 0) }
+  }
 
+  function measureScrolling(scroller) {
     const stride = scroller.scrollHeight / 200
-    result.scrollFrames = await frameTimes(200, (step) => (scroller.scrollTop = step * stride))
+    return frameTimes(200, (step) => (scroller.scrollTop = step * stride))
+  }
 
+  // The last block grows by a word per frame, as a streaming reply does.
+  async function measureStreaming(blocks, scroller) {
     scroller.scrollTop = scroller.scrollHeight
     await frames()
     let current = blocks
-    result.streamFrames = await frameTimes(120, (step) => {
+    return frameTimes(120, (step) => {
       current = current.slice()
       const last = current.length - 1
       current[last] = { ...current[last], streaming: true, text: current[last].text + `word${step} ` }
       store.blocks = current
     })
+  }
+
+  return (async () => {
+    while (!store.loaded) await frames() // the session opening would replace the blocks
+    const blocks = makeBlocks()
+    const result = await measureRender(blocks)
+    const scroller = document.querySelector('.scroller')
+    result.scrollUpDrift = await measureScrollUpDrift(scroller)
+    result.scrollFrames = await measureScrolling(scroller)
+    result.streamFrames = await measureStreaming(blocks, scroller)
     return result
   })()
 }
