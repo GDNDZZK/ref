@@ -849,49 +849,14 @@ impl App {
     fn on_response(&mut self, p: Pending, result: Value) {
         match p {
             Pending::Question { sid, call_id } => self.close_question(&sid, &call_id),
-            Pending::Config => {
-                let parsed = result
-                    .get("config")
-                    .map(|c| serde_json::from_value::<ServerConfigInfo>(c.clone()));
-                if let Some(Err(e)) = &parsed {
-                    self.toasts
-                        .error(format!("Malformed config from backend: {e}"));
-                }
-                if let Some(Ok(c)) = parsed {
-                    // TUI passthrough settings.
-                    if let Some(t) = c.tui.get("thinking").and_then(Value::as_bool) {
-                        self.thinking = t;
-                    }
-                    if let Some(t) = c.tui.get("details").and_then(Value::as_bool) {
-                        self.details = t;
-                    }
-                    if let Some(t) = c.tui.get("sidebar").and_then(Value::as_bool) {
-                        self.sidebar = t;
-                    }
-                    if self.mcp_fallback || !self.mcp_loaded {
-                        // Shown until (or instead of) the richer McpStatus answer.
-                        let lines = c.mcp.clone();
-                        self.set_mcp_lines(&lines);
-                    }
-                    self.config = Some(c);
-                    if !self.mcp_fallback {
-                        self.refresh_mcp();
-                    }
-                    for v in self.views.values_mut() {
-                        v.chat.invalidate();
-                    }
-                }
-            }
+            Pending::Config => self.on_config_response(&result),
             Pending::LiveList => {
                 if let Some(s) = sessions_of(&result) {
                     self.on_sessions(s);
                 }
             }
             Pending::Created { prompt } => {
-                let Some(info) = result
-                    .get("session")
-                    .and_then(|s| serde_json::from_value::<SessionInfo>(s.clone()).ok())
-                else {
+                let Some(info) = session_info_of(&result) else {
                     self.toasts.error("Malformed create_session response");
                     return;
                 };
@@ -927,42 +892,9 @@ impl App {
                     self.refresh_session_dialog();
                 }
             }
-            Pending::Continue => {
-                let s = sessions_of(&result).unwrap_or_default();
-                match s.first() {
-                    Some(info) => {
-                        let sid = info.id.clone();
-                        self.views
-                            .entry(sid.clone())
-                            .or_insert_with(|| SessionView::new(info.clone(), true));
-                        self.attach_fg(&sid);
-                        if let Some(p) = self.init.take().and_then(|i| i.prompt) {
-                            self.send_prompt(&sid, p, Vec::new());
-                        }
-                    }
-                    None => {
-                        let plan = self.init.take().unwrap_or_default();
-                        self.toasts
-                            .info("No previous session here — started a new one");
-                        self.req(
-                            Request::CreateSession {
-                                cwd: self.cwd.clone(),
-                                agent: plan.agent,
-                                model: plan.model,
-                                name: None,
-                            },
-                            Pending::Created {
-                                prompt: plan.prompt.map(|p| (p, Vec::new())),
-                            },
-                        );
-                    }
-                }
-            }
+            Pending::Continue => self.on_continue_response(&result),
             Pending::Undo { sid, count } => {
-                let t = result
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
+                let t = text_of(&result).unwrap_or_default();
                 let images = response_images(&result);
                 let what = match count {
                     Some(1) => "Undid 1 message".to_string(),
@@ -999,11 +931,7 @@ impl App {
                 }
             }
             Pending::Expand { sid } => {
-                let t = result
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string();
+                let t = text_of(&result).unwrap_or_default().to_string();
                 if t.trim().is_empty() {
                     self.toasts.warn("Command expanded to nothing");
                     return;
@@ -1013,53 +941,9 @@ impl App {
                     None => self.create_session(Some((t, Vec::new()))),
                 }
             }
-            Pending::Files { query } => {
-                self.files_inflight = false;
-                let files: Vec<String> = result
-                    .get("files")
-                    .and_then(Value::as_array)
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|x| x.as_str().map(String::from))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                if let Some((start, q)) = self.editor.mention()
-                    && q == query
-                {
-                    let items: Vec<(String, String, String)> = files
-                        .into_iter()
-                        .map(|f| (format!("@{f} "), f, String::new()))
-                        .collect();
-                    if items.is_empty() {
-                        self.ac = None;
-                    } else {
-                        let sel = self
-                            .ac
-                            .as_ref()
-                            .filter(|a| a.kind == AcKind::File)
-                            .map(|a| a.sel)
-                            .unwrap_or(0);
-                        self.ac = Some(Autocomplete {
-                            kind: AcKind::File,
-                            sel: sel.min(items.len() - 1),
-                            items,
-                            start,
-                            rect: Rect::default(),
-                        });
-                    }
-                }
-                if let Some(w) = self.files_want.take()
-                    && w != query
-                {
-                    self.request_files(w);
-                }
-            }
+            Pending::Files { query } => self.on_files_response(&query, &result),
             Pending::Cwd { sid } => {
-                if let Some(info) = result
-                    .get("session")
-                    .and_then(|s| serde_json::from_value::<SessionInfo>(s.clone()).ok())
-                {
+                if let Some(info) = session_info_of(&result) {
                     if self.current.as_deref() == Some(sid.as_str()) {
                         // New sessions, `@` mentions and exports follow the directory.
                         self.cwd = info.cwd.clone();
@@ -1072,9 +956,7 @@ impl App {
                 }
             }
             Pending::Simple { ok } => {
-                if let Some(info) = result
-                    .get("session")
-                    .and_then(|s| serde_json::from_value::<SessionInfo>(s.clone()).ok())
+                if let Some(info) = session_info_of(&result)
                     && let Some(v) = self.views.get_mut(&info.id)
                 {
                     v.set_info(info);
@@ -1084,10 +966,7 @@ impl App {
                 }
             }
             Pending::Variant => {
-                if let Some(info) = result
-                    .get("session")
-                    .and_then(|s| serde_json::from_value::<SessionInfo>(s.clone()).ok())
-                {
+                if let Some(info) = session_info_of(&result) {
                     let v = info
                         .model
                         .variant
@@ -1104,10 +983,7 @@ impl App {
                 self.toasts.info(format!("Exported to {p}"));
             }
             Pending::Text { title } => {
-                let text = result
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
+                let text = text_of(&result).unwrap_or_default();
                 self.dialog = Some(Dialog::Help(HelpDialog::text(&title, text)));
             }
             Pending::Prompt {
@@ -1120,59 +996,8 @@ impl App {
                 sid,
                 generation,
                 before,
-            } => {
-                let msgs: Vec<ref_proto::Message> = result
-                    .get("messages")
-                    .and_then(|m| serde_json::from_value(m.clone()).ok())
-                    .unwrap_or_default();
-                let more = result
-                    .get("more_before")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                if let Some(v) = self.views.get_mut(&sid)
-                    && !v.prepend_older(generation, &before, msgs, more)
-                    && v.history_gen == generation
-                {
-                    v.older_pending = false;
-                }
-            }
-            Pending::Unqueue { sid, key } => {
-                let removed = result
-                    .get("removed")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                let Some(v) = self.views.get_mut(&sid) else {
-                    return;
-                };
-                if removed {
-                    // Back into the input box so it can be edited and sent again. The response has
-                    // the image bytes (rows built from server messages only hold stubs).
-                    if let Some(i) = v.queued.iter().position(|q| q.key == key) {
-                        let q = v.queued.remove(i);
-                        let text = result
-                            .get("text")
-                            .and_then(Value::as_str)
-                            .map_or(q.text, str::to_string);
-                        let mut images = response_images(&result);
-                        if images.is_empty() {
-                            images = q
-                                .images
-                                .into_iter()
-                                .filter(|i| !i.is_stub())
-                                .map(|i| (i, None))
-                                .collect();
-                        }
-                        self.restore_prompt(&sid, &text, images);
-                    }
-                } else {
-                    // Delivered first: the row goes away once the message is in the transcript.
-                    if let Some(q) = v.queued_mut(key) {
-                        q.removing = false;
-                    }
-                    self.toasts
-                        .info("Already sent; the prompt can no longer be removed");
-                }
-            }
+            } => self.on_older_response(&sid, generation, &before, &result),
+            Pending::Unqueue { sid, key } => self.on_unqueue_response(&sid, key, &result),
             Pending::Mcp => {
                 self.mcp_inflight = false;
                 let servers = result
@@ -1199,6 +1024,152 @@ impl App {
                 }
             }
         }
+    }
+
+    fn on_config_response(&mut self, result: &Value) {
+        let parsed = result
+            .get("config")
+            .map(|c| serde_json::from_value::<ServerConfigInfo>(c.clone()));
+        if let Some(Err(e)) = &parsed {
+            self.toasts
+                .error(format!("Malformed config from backend: {e}"));
+        }
+        let Some(Ok(c)) = parsed else {
+            return;
+        };
+        // TUI passthrough settings.
+        if let Some(t) = c.tui.get("thinking").and_then(Value::as_bool) {
+            self.thinking = t;
+        }
+        if let Some(t) = c.tui.get("details").and_then(Value::as_bool) {
+            self.details = t;
+        }
+        if let Some(t) = c.tui.get("sidebar").and_then(Value::as_bool) {
+            self.sidebar = t;
+        }
+        if self.mcp_fallback || !self.mcp_loaded {
+            // Shown until (or instead of) the richer McpStatus answer.
+            let lines = c.mcp.clone();
+            self.set_mcp_lines(&lines);
+        }
+        self.config = Some(c);
+        if !self.mcp_fallback {
+            self.refresh_mcp();
+        }
+        for v in self.views.values_mut() {
+            v.chat.invalidate();
+        }
+    }
+
+    /// Answer to `--continue`: attach the newest session here, or start a new one.
+    fn on_continue_response(&mut self, result: &Value) {
+        let s = sessions_of(result).unwrap_or_default();
+        let Some(info) = s.first() else {
+            let plan = self.init.take().unwrap_or_default();
+            self.toasts
+                .info("No previous session here — started a new one");
+            self.req(
+                Request::CreateSession {
+                    cwd: self.cwd.clone(),
+                    agent: plan.agent,
+                    model: plan.model,
+                    name: None,
+                },
+                Pending::Created {
+                    prompt: plan.prompt.map(|p| (p, Vec::new())),
+                },
+            );
+            return;
+        };
+        let sid = info.id.clone();
+        self.views
+            .entry(sid.clone())
+            .or_insert_with(|| SessionView::new(info.clone(), true));
+        self.attach_fg(&sid);
+        if let Some(p) = self.init.take().and_then(|i| i.prompt) {
+            self.send_prompt(&sid, p, Vec::new());
+        }
+    }
+
+    fn on_files_response(&mut self, query: &str, result: &Value) {
+        self.files_inflight = false;
+        let files: Vec<String> = result
+            .get("files")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if let Some((start, q)) = self.editor.mention()
+            && q == query
+        {
+            let items: Vec<(String, String, String)> = files
+                .into_iter()
+                .map(|f| (format!("@{f} "), f, String::new()))
+                .collect();
+            if items.is_empty() {
+                self.ac = None;
+            } else {
+                let sel = self
+                    .ac
+                    .as_ref()
+                    .filter(|a| a.kind == AcKind::File)
+                    .map(|a| a.sel)
+                    .unwrap_or(0);
+                self.ac = Some(Autocomplete {
+                    kind: AcKind::File,
+                    sel: sel.min(items.len() - 1),
+                    items,
+                    start,
+                    rect: Rect::default(),
+                });
+            }
+        }
+        if let Some(w) = self.files_want.take()
+            && w != query
+        {
+            self.request_files(w);
+        }
+    }
+
+    fn on_older_response(&mut self, sid: &str, generation: u64, before: &str, result: &Value) {
+        let msgs: Vec<ref_proto::Message> = result
+            .get("messages")
+            .and_then(|m| serde_json::from_value(m.clone()).ok())
+            .unwrap_or_default();
+        let more = flag_of(result, "more_before");
+        if let Some(v) = self.views.get_mut(sid)
+            && !v.prepend_older(generation, before, msgs, more)
+            && v.history_gen == generation
+        {
+            v.older_pending = false;
+        }
+    }
+
+    fn on_unqueue_response(&mut self, sid: &str, key: u64, result: &Value) {
+        let Some(v) = self.views.get_mut(sid) else {
+            return;
+        };
+        if !flag_of(result, "removed") {
+            // Delivered first: the row goes away once the message is in the transcript.
+            if let Some(q) = v.queued_mut(key) {
+                q.removing = false;
+            }
+            self.toasts
+                .info("Already sent; the prompt can no longer be removed");
+            return;
+        }
+        // Back into the input box so it can be edited and sent again. The response has
+        // the image bytes (rows built from server messages only hold stubs).
+        let Some(i) = v.queued.iter().position(|q| q.key == key) else {
+            return;
+        };
+        let q = v.queued.remove(i);
+        let text = text_of(result).map_or(q.text, str::to_string);
+        let images = restored_images(result, q.images);
+        self.restore_prompt(sid, &text, images);
     }
 
     // -----------------------------------------------------------------------
@@ -1472,10 +1443,7 @@ impl App {
         key: Option<u64>,
         result: &Value,
     ) {
-        let queued = result
-            .get("queued")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
+        let queued = flag_of(result, "queued");
         // Older backends don't return the id: rows are then matched by text only.
         let Some(id) = result
             .get("message_id")
@@ -3283,6 +3251,22 @@ pub fn epilogue_text(info: &SessionInfo, resumable: bool) -> String {
 }
 
 /// `images` of an `Undo` / `RemoveQueued` response (to put back into the editor).
+/// Images of a restored prompt: those in the response, else the queued row's own.
+fn restored_images(
+    result: &Value,
+    queued_images: Vec<ImageData>,
+) -> Vec<(ImageData, Option<String>)> {
+    let images = response_images(result);
+    if !images.is_empty() {
+        return images;
+    }
+    queued_images
+        .into_iter()
+        .filter(|i| !i.is_stub())
+        .map(|i| (i, None))
+        .collect()
+}
+
 fn response_images(result: &Value) -> Vec<(ImageData, Option<String>)> {
     let list: Vec<ref_proto::NamedImage> = result
         .get("images")
@@ -3300,6 +3284,20 @@ fn config_agents(config: &Option<ServerConfigInfo>) -> &[ref_proto::AgentInfo] {
 
 fn config_models(config: &Option<ServerConfigInfo>) -> &[ref_proto::ModelInfo] {
     config.as_ref().map(|c| c.models.as_slice()).unwrap_or(&[])
+}
+
+fn session_info_of(result: &Value) -> Option<SessionInfo> {
+    result
+        .get("session")
+        .and_then(|s| serde_json::from_value(s.clone()).ok())
+}
+
+fn text_of(result: &Value) -> Option<&str> {
+    result.get("text").and_then(Value::as_str)
+}
+
+fn flag_of(result: &Value, key: &str) -> bool {
+    result.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
 fn sessions_of(v: &Value) -> Option<Vec<SessionInfo>> {
