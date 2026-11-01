@@ -11,6 +11,20 @@ use crate::state::SessionView;
 
 const MIN_TILE_W: u16 = 30;
 const MIN_TILE_H: u16 = 8;
+/// A terminal cell is about this many times taller than wide.
+const CELL_ASPECT: f64 = 2.0;
+/// Preferred width / height of a tile in pixel terms.
+const TARGET_TILE_ASPECT: f64 = 1.6;
+/// Score cost of each empty cell in the grid.
+const EMPTY_CELL_PENALTY: f64 = 0.35;
+/// Score cost of a grid whose tiles are below the minimum size.
+const UNDERSIZED_TILE_PENALTY: f64 = 100.0;
+/// Weights when picking a neighbour tile: distance across the direction, and distance
+/// along a vertical direction (a row is about twice as tall as a column is wide).
+const OFF_AXIS_WEIGHT: i64 = 3;
+const VERTICAL_WEIGHT: i64 = 2;
+/// Rows the focused tile reserves for its input (separator and one line).
+const TILE_INPUT_ROWS: u16 = 2;
 
 /// Picks (cols, rows) for `n` tiles in a `w`×`h` cell area: target tile aspect ≈1.6 in pixel terms
 /// (cells are ~2:1), with a penalty for empty grid cells.
@@ -24,12 +38,12 @@ pub fn grid(n: usize, w: u16, h: u16) -> (usize, usize) {
         let rows = n.div_ceil(cols);
         let tw = w as f64 / cols as f64;
         let th = h as f64 / rows as f64;
-        let aspect = tw / (th * 2.0);
+        let aspect = tw / (th * CELL_ASPECT);
         let empty = (cols * rows - n) as f64;
-        let mut score = (aspect - 1.6).abs() + empty * 0.35;
+        let mut score = (aspect - TARGET_TILE_ASPECT).abs() + empty * EMPTY_CELL_PENALTY;
         // Tiles below the minimum size are strongly discouraged.
         if tw < MIN_TILE_W as f64 || th < MIN_TILE_H as f64 {
-            score += 100.0;
+            score += UNDERSIZED_TILE_PENALTY;
         }
         if score < best_score {
             best_score = score;
@@ -85,18 +99,15 @@ pub fn neighbor(rects: &[Rect], from: usize, dx: i32, dy: i32) -> Option<usize> 
             r.y as i32 + r.height as i32 / 2,
         );
         let (ddx, ddy) = (bx - ax, by - ay);
-        let ok = (dx > 0 && ddx > 0)
-            || (dx < 0 && ddx < 0)
-            || (dy > 0 && ddy > 0)
-            || (dy < 0 && ddy < 0);
-        if !ok {
+        let in_direction = ddx * dx > 0 || ddy * dy > 0;
+        if !in_direction {
             continue;
         }
         // Penalise off-axis distance.
         let d = if dx != 0 {
-            (ddx.abs() as i64) + 3 * ddy.abs() as i64
+            (ddx.abs() as i64) + OFF_AXIS_WEIGHT * ddy.abs() as i64
         } else {
-            (ddy.abs() as i64) * 2 + 3 * ddx.abs() as i64
+            (ddy.abs() as i64) * VERTICAL_WEIGHT + OFF_AXIS_WEIGHT * ddx.abs() as i64
         };
         if best.is_none_or(|(bd, _)| d < bd) {
             best = Some((d, i));
@@ -196,7 +207,7 @@ pub fn draw_frame(
             theme::fg(theme::DIM).add_modifier(Modifier::ITALIC),
         );
     }
-    let input_h = if focused { 2 } else { 0 };
+    let input_h = if focused { TILE_INPUT_ROWS } else { 0 };
     Rect::new(
         x0 + 1,
         y0 + 1,
@@ -207,7 +218,7 @@ pub fn draw_frame(
 
 /// Draws the focused tile's input separator; returns the input rect.
 pub fn draw_input_sep(buf: &mut Buffer, r: Rect) -> Rect {
-    let y = r.y + r.height - 3;
+    let y = r.y + r.height - (TILE_INPUT_ROWS + 1);
     let st = Style::new().fg(theme::BORDER);
     for x in r.x + 1..r.x + r.width - 1 {
         buf.set_string(x, y, "┄", st);
