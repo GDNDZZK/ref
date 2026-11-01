@@ -6,6 +6,7 @@ import { useI18n } from 'vue-i18n'
 import { useNow } from '../composables/useNow.ts'
 import type { ChatSession } from '../model/chatSession.ts'
 import { formatElapsed, formatTokens, secondsUntil } from '../model/format.ts'
+import { collapseWhitespace } from '../model/oneLine.ts'
 import Icon from './Icon.vue'
 import StatusDot from './StatusDot.vue'
 import StatusTodo from './StatusTodo.vue'
@@ -31,7 +32,7 @@ const retryText = computed(() =>
     ? t('status.retrying', {
         seconds: secondsUntil(retry.value.at, now.value),
         attempt: retry.value.attempt,
-        error: retry.value.error.replace(/\s+/g, ' ').trim(),
+        error: collapseWhitespace(retry.value.error),
       })
     : '',
 )
