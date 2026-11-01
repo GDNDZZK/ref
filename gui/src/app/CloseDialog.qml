@@ -25,15 +25,14 @@ SessionDialog {
 		}
 	]
 
-	Text {
-		textFormat: Text.PlainText
-		x: Theme.dialogPadding
-		width: parent.width - 2 * Theme.dialogPadding
-		topPadding: 4
-		bottomPadding: Theme.dialogPadding
-		text: qsTr("This session is still working. Closing it stops the work; the conversation stays in history.")
-		color: Theme.text
-		font.pixelSize: Theme.secondaryFontSize
-		wrapMode: Text.Wrap
+	DialogBody {
+		Text {
+			textFormat: Text.PlainText
+			width: parent.width
+			text: qsTr("This session is still working. Closing it stops the work; the conversation stays in history.")
+			color: Theme.text
+			font.pixelSize: Theme.secondaryFontSize
+			wrapMode: Text.Wrap
+		}
 	}
 }
