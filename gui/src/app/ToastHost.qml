@@ -77,11 +77,11 @@ Item {
 				required property bool leaving
 
 				readonly property var looks: ({
-					error: {fill: Theme.errorSurface, edge: Theme.errorBorder, tint: Theme.danger, lifetime: Motion.toastErrorMs, icon: "error"},
-					warn: {fill: Theme.warningSurface, edge: Theme.warningBorder, tint: Theme.warning, lifetime: Motion.toastWarnMs, icon: "warning"},
-					info: {fill: Theme.surface, edge: Theme.border, tint: Theme.accent, lifetime: Motion.toastInfoMs, icon: "info"}
+					[ToastLevel.error]: {fill: Theme.errorSurface, edge: Theme.errorBorder, tint: Theme.danger, lifetime: Motion.toastErrorMs, icon: "error"},
+					[ToastLevel.warn]: {fill: Theme.warningSurface, edge: Theme.warningBorder, tint: Theme.warning, lifetime: Motion.toastWarnMs, icon: "warning"},
+					[ToastLevel.info]: {fill: Theme.surface, edge: Theme.border, tint: Theme.accent, lifetime: Motion.toastInfoMs, icon: "info"}
 				})
-				readonly property var look: looks[level] ?? looks.info
+				readonly property var look: looks[level] ?? looks[ToastLevel.info]
 				readonly property color fill: look.fill
 				readonly property color edge: look.edge
 				readonly property color tint: look.tint

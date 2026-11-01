@@ -54,7 +54,7 @@ Window {
 		restored = true
 		showSession(Workspace.current)
 		if (Workspace.settings.loadProblem !== "")
-			Workspace.showToast("warn", Workspace.settings.loadProblem)
+			Workspace.showToast(ToastLevel.warn, Workspace.settings.loadProblem)
 	}
 	onWidthChanged: if (restored && visibility === Window.Windowed) Workspace.settings.windowWidth = width
 	onHeightChanged: if (restored && visibility === Window.Windowed) Workspace.settings.windowHeight = height
