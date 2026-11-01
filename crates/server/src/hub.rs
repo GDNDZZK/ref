@@ -21,7 +21,7 @@ use tokio_util::sync::CancellationToken;
 pub type ConfigLoader = Arc<dyn Fn(&Path) -> Config + Send + Sync>;
 
 /// Max queued frames per connection before it is dropped as too slow.
-pub const MAX_QUEUE: usize = 10_000;
+const MAX_QUEUE: usize = 10_000;
 
 #[derive(Clone)]
 pub struct HubOptions {
@@ -175,14 +175,14 @@ pub struct PeerRecord {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IdleAction {
+enum IdleAction {
     Nothing,
     ShutdownNow,
     ShutdownAfter(u64),
 }
 
 /// Pure idle-timeout decision, evaluated when the number of connected frontends changes.
-pub fn idle_action(timeout: i64, ever_connected: bool, connected: usize) -> IdleAction {
+fn idle_action(timeout: i64, ever_connected: bool, connected: usize) -> IdleAction {
     if !ever_connected || connected > 0 || timeout < 0 {
         IdleAction::Nothing
     } else if timeout == IDLE_EXIT_NOW {
@@ -367,7 +367,7 @@ impl Hub {
         }
     }
 
-    pub fn mark_dirty(&self) {
+    fn mark_dirty(&self) {
         self.dirty.notify_one();
     }
 
