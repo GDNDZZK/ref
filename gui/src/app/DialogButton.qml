@@ -19,10 +19,10 @@ Item {
 	readonly property color hoverFill: filled ? Qt.lighter(fill, 1.08) : Theme.surfaceHover
 
 	// The resting fill of a kind.
-	function fillFor(kind) {
-		if (kind === DialogButton.Danger)
+	function fillFor(buttonKind) {
+		if (buttonKind === DialogButton.Danger)
 			return Theme.danger
-		return kind === DialogButton.Primary ? Theme.accent : Theme.surface
+		return buttonKind === DialogButton.Primary ? Theme.accent : Theme.surface
 	}
 
 	implicitWidth: label.implicitWidth + 2 * 18

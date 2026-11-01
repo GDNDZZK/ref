@@ -129,8 +129,7 @@ Item {
 			height: Theme.sidebarSectionHeight
 
 			SectionLabel {
-				height: parent.height
-				leftPadding: 18
+				leftPadding: Theme.listLabelInset
 				text: pick.sectionLabel(parent.section)
 			}
 		}

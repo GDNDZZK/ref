@@ -12,7 +12,6 @@ QtObject {
 	readonly property int wholeSecondFrom: 10000 // ms; below this a duration shows a decimal
 	readonly property int thousand: 1000
 	readonly property int million: 1000000
-	readonly property string fileUrlPrefix: "file:///"
 	readonly property int millionRoundsUpFrom: 999950 // 999.95k shows as 1.0M, not 1000.0k
 
 	// "14:02:11"
@@ -81,7 +80,7 @@ QtObject {
 		const text = url.toString()
 		const hasWindowsDrive = /^file:\/\/\/[A-Za-z]:/.test(text)
 		if (hasWindowsDrive)
-			return decodeURIComponent(text.slice(fileUrlPrefix.length)) // "C:/dir", without the slash before the drive
+			return decodeURIComponent(text.slice("file:///".length)) // "C:/dir", without the slash before the drive
 		return decodeURIComponent(text.replace(/^file:\/\//, ""))
 	}
 }

@@ -28,6 +28,7 @@ Item {
 	readonly property int lifetime: look.lifetime
 	readonly property int cardPaddingX: 12
 	readonly property int cardPaddingY: 10
+	readonly property int iconSize: 16
 	readonly property int iconGap: 10 // between the glyph and the message
 
 	width: parent.width
@@ -77,8 +78,8 @@ Item {
 			id: icon
 			x: toast.cardPaddingX
 			y: toast.cardPaddingY
-			width: 16
-			height: 16
+			width: toast.iconSize
+			height: toast.iconSize
 
 			function enter() {
 				flourish.enter()
@@ -95,7 +96,7 @@ Item {
 			Icon {
 				id: glyph
 				name: toast.look.icon
-				size: 16
+				size: toast.iconSize
 				color: toast.tint
 			}
 		}
