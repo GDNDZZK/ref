@@ -7,7 +7,9 @@ import { addBrandTitle } from './shared.ts'
 import { cues, endCut, timelineFilm } from './timeline.ts'
 
 const A6_END = 24.4
-const A7_CLIP_FROM = 21.0
+// From after the reviewer's raw message has scrolled away (main's to-do card at the top of the
+// tile); the notification lands at film 26.1.
+const A7_CLIP_FROM = 23.3
 const HERO_END = 29.9
 const FILM_END = 32.4
 
@@ -21,7 +23,7 @@ export const scene = timelineFilm({
     heroCut(A6_END, HERO_END, A7_CLIP_FROM, { enter: 'cut' }),
     endCut(HERO_END, FILM_END),
   ],
-  captions: cues([...HERO_CAPTIONS, [27.4, 29.9, COPY.finished]]),
+  captions: cues([...HERO_CAPTIONS, [26.1, 29.9, COPY.finished]]),
   chip: { ...FEATURES.crew, from: HERO_FILM_START + BRAND_TITLE_SECONDS + 0.4, to: HERO_END },
   overlay: (shot) => addBrandTitle(shot, HERO_END),
 })

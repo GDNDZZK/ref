@@ -19,7 +19,9 @@ import { FIXTURE_CAST, OUTAGE_CAST, SERVER_CAST, WIDE_TUI, addBrandTitle, clicke
 import { cues, drawnCut, endCut, timelineFilm, type Cut } from './timeline.ts'
 
 const A6_END = 24.4
-const A7_CLIP_FROM = 21.0
+// From after the reviewer's raw message has scrolled away (main's to-do card at the top of the
+// tile); the notification lands at film 26.1.
+const A7_CLIP_FROM = 23.3
 const HERO_END = 29.9
 const CARD_END = 38.4
 const CREW_END = 43.4
@@ -80,7 +82,7 @@ const standaloneCut: Cut = {
 const RETRY_CLOSEUP = { scale: 2.5, x: 18.6 / 150, y: 17.5 / 40, rows: 1.3, cols: 31.4 }
 const RETRY_CLOSEUP_AT = { x: 520, y: 480 }
 // f2: the delete row with Cancel and its countdown, and the bash row above it.
-const DELAY_ROW_LOOK = { at: 0, x: 0.597, y: 0.29, zoom: 2 }
+const DELAY_ROW_LOOK = { at: 0, x: 0.585, y: 0.278, zoom: 2 }
 // f3: the model dialog of the real-backend take (cast marker "models": ctrl+x m is pressed). The
 // dialog is open for 3.0 s (capture/real.ts); the callouts end as it closes, before the cut's tail.
 const MODEL_DIALOG = { mark: 'models', offset: -0.3 }
@@ -161,7 +163,7 @@ export const scene = timelineFilm({
   ],
   captions: cues([
     ...HERO_CAPTIONS,
-    [27.4, 29.9, COPY.finished],
+    [26.1, 29.9, COPY.finished],
     [31.0, 33.9, { en: 'All worker sessions stream in one view.', zh: '所有工作会话在分屏里同时输出。' }],
     [34.7, 38.0, { en: "Answer a worker's permission request in its tile.", zh: '授权请求在它自己的分块里点允许。' }],
     [38.6, 42.2, COPY.sameSessions],

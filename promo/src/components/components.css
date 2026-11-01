@@ -258,7 +258,7 @@
   padding: 20px;
   border: 1px solid var(--border);
   border-radius: var(--radius-large);
-  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  background: var(--surface);
   box-shadow: 0 24px 70px rgb(0 0 0 / 0.55);
   z-index: 20;
 }
