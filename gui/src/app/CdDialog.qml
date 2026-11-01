@@ -29,7 +29,7 @@ SessionDialog {
 		},
 		DialogButton {
 			text: qsTr("Change")
-			kind: "primary"
+			kind: DialogButton.Primary
 			onClicked: dialog.apply()
 		}
 	]

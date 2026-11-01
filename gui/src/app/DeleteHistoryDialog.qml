@@ -22,7 +22,7 @@ ModalDialog {
 		},
 		DialogButton {
 			text: qsTr("Delete")
-			kind: "danger"
+			kind: DialogButton.Danger
 			onClicked: dialog.remove()
 		}
 	]

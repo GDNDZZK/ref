@@ -20,7 +20,7 @@ SessionDialog {
 		},
 		DialogButton {
 			text: qsTr("Close")
-			kind: "danger"
+			kind: DialogButton.Danger
 			onClicked: dialog.closeSession()
 		}
 	]

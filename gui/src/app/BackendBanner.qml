@@ -49,7 +49,7 @@ Rectangle {
 		anchors { right: parent.right; rightMargin: 18; verticalCenter: parent.verticalCenter }
 		small: true
 		text: qsTr("Restart backend")
-		kind: "primary"
+		kind: DialogButton.Primary
 		enabled: Workspace.canRestartBackend
 		onClicked: Workspace.restartBackend()
 

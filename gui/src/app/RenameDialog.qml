@@ -19,7 +19,7 @@ SessionDialog {
 		},
 		DialogButton {
 			text: qsTr("Rename")
-			kind: "primary"
+			kind: DialogButton.Primary
 			onClicked: dialog.rename()
 		}
 	]
