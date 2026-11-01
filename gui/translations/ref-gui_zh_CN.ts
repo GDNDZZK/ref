@@ -1465,8 +1465,8 @@
     <name>refgui::compose</name>
     <message>
         <location filename="../src/compose/image_file.cpp" line="97"/>
-        <source>%1 is larger than 20 MiB.</source>
-        <translation>%1 超过 20 MiB。</translation>
+        <source>%1 is larger than %2 MiB.</source>
+        <translation>%1 超过 %2 MiB。</translation>
     </message>
     <message>
         <location filename="../src/compose/image_file.cpp" line="103"/>
@@ -1517,8 +1517,8 @@
     </message>
     <message>
         <location filename="../src/composer/composer_model.cpp" line="589"/>
-        <source>The image is larger than 20 MiB.</source>
-        <translation>图片超过 20 MiB。</translation>
+        <source>The image is larger than %1 MiB.</source>
+        <translation>图片超过 %1 MiB。</translation>
     </message>
     <message>
         <location filename="../src/composer/composer_model.cpp" line="619"/>
