@@ -35,13 +35,36 @@ function stills(kind: 'tui' | 'web', suffix: string, times: readonly number[]) {
 }
 
 // Where each window looks, and its user message (the prompt) once it shows, in picture coordinates.
-const TUI_LOOK = { at: 0, x: 0.5, y: 0.5, zoom: 1.1 }
-const GUI_LOOK = { at: 0, x: 0.55, y: 0.45, zoom: 1.4 }
-const WEB_LOOK = { at: 0, x: 0.55, y: 0.4, zoom: 1.6 }
+const TUI_LOOK = { x: 0.5, y: 0.5, zoom: 1.1 }
+const GUI_LOOK = { x: 0.55, y: 0.45, zoom: 1.4 }
+const WEB_LOOK = { x: 0.55, y: 0.4, zoom: 1.6 }
 const TUI_PROMPT = { x: 0.03, y: 0.2, width: 0.3, height: 0.08 }
 const GUI_PROMPT = { x: 0.295, y: 0.255, width: 0.17, height: 0.06 }
 const WEB_PROMPT = { x: 0.34, y: 0.198, width: 0.135, height: 0.052 }
 const PROMPT_MARK_DELAY = 0.3
+// Shot 4: before the first tick each window zooms onto its to-do progress, the sidebar's Todo
+// section in the terminal and the status-line item in the desktop app and the browser. When the
+// list is done that item shrinks to `✓3/3`, so the callout moves onto it.
+const PROGRESS_ZOOM_LEAD = 0.7
+const PROGRESS_ZOOM_SECONDS = 0.6
+interface Progress {
+  look: { x: number; y: number; zoom: number }
+  mark: typeof GUI_PROMPT
+  done?: typeof GUI_PROMPT
+}
+const PROGRESS: Record<'tui' | 'gui' | 'web', Progress> = {
+  tui: { look: { x: 0.86, y: 0.42, zoom: 2.4 }, mark: { x: 0.772, y: 0.314, width: 0.211, height: 0.124 } },
+  gui: {
+    look: { x: 0.68, y: 0.72, zoom: 2.4 },
+    mark: { x: 0.638, y: 0.825, width: 0.174, height: 0.042 },
+    done: { x: 0.75, y: 0.825, width: 0.054, height: 0.042 },
+  },
+  web: {
+    look: { x: 0.66, y: 0.78, zoom: 2.6 },
+    mark: { x: 0.604, y: 0.858, width: 0.146, height: 0.039 },
+    done: { x: 0.692, y: 0.858, width: 0.051, height: 0.039 },
+  },
+}
 
 const HOOK_TERMINAL_RECT = { x: 80, y: 120, width: 1060, height: 700 }
 
@@ -64,9 +87,9 @@ export const scene = timelineFilm({
       to: IDLE_END,
       build: (seconds) =>
         threeWindowsShot(seconds, [
-          { screens: [{ name: 'tui-todo-idle-clean' }], title: 'ref', look: TUI_LOOK },
-          { screens: [{ name: 'gui-todo-idle' }], title: 'ref-gui', look: GUI_LOOK },
-          { screens: [{ name: 'web-todo-idle' }], title: 'ref-web', look: WEB_LOOK },
+          { screens: [{ name: 'tui-todo-idle-clean' }], title: 'ref', look: { at: 0, ...TUI_LOOK } },
+          { screens: [{ name: 'gui-todo-idle' }], title: 'ref-gui', look: { at: 0, ...GUI_LOOK } },
+          { screens: [{ name: 'web-todo-idle' }], title: 'ref-web', look: { at: 0, ...WEB_LOOK } },
         ]),
     },
     {
@@ -75,14 +98,28 @@ export const scene = timelineFilm({
       enter: 'cut',
       build: (seconds) => {
         const times = stepTimes()
-        // The prompt is called out in all three from when it shows until the first tick.
-        const promptMark = (area: typeof GUI_PROMPT) => [{ ...area, from: times[0]! + PROMPT_MARK_DELAY, to: times[1]! }]
+        const zoomAt = times[1]! - PROGRESS_ZOOM_LEAD
+        const zoomed = zoomAt + PROGRESS_ZOOM_SECONDS
+        // The prompt is called out in all three from when it shows until the zoom.
+        const promptMark = (area: typeof GUI_PROMPT) => ({ ...area, from: times[0]! + PROMPT_MARK_DELAY, to: zoomAt })
+        const window = (overview: typeof GUI_LOOK, prompt: typeof GUI_PROMPT, progress: Progress) => {
+          const doneAt = progress.done ? times[3]! : seconds + 1
+          const doneMarks = progress.done ? [{ ...progress.done, from: doneAt, to: seconds + 1 }] : []
+          return {
+            look: [
+              { at: 0, ...overview },
+              { at: zoomAt, ...overview },
+              { at: zoomed, ...progress.look },
+            ],
+            marks: [promptMark(prompt), { ...progress.mark, from: zoomed, to: doneAt }, ...doneMarks],
+          }
+        }
         return threeWindowsShot(
           seconds,
           [
-            { screens: stills('tui', '-clean', times), title: 'ref', look: TUI_LOOK, marks: promptMark(TUI_PROMPT) },
-            { screens: [{ clip: TODO_CLIP, at: -CLIP_FROM_SECONDS }], title: 'ref-gui', look: GUI_LOOK, marks: promptMark(GUI_PROMPT) },
-            { screens: stills('web', '', times), title: 'ref-web', look: WEB_LOOK, marks: promptMark(WEB_PROMPT) },
+            { screens: stills('tui', '-clean', times), title: 'ref', ...window(TUI_LOOK, TUI_PROMPT, PROGRESS.tui) },
+            { screens: [{ clip: TODO_CLIP, at: -CLIP_FROM_SECONDS }], title: 'ref-gui', ...window(GUI_LOOK, GUI_PROMPT, PROGRESS.gui) },
+            { screens: stills('web', '', times), title: 'ref-web', ...window(WEB_LOOK, WEB_PROMPT, PROGRESS.web) },
           ],
           false,
         )
