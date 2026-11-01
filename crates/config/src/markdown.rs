@@ -8,13 +8,19 @@
 use serde_json::{Map, Number, Value};
 use std::path::{Path, PathBuf};
 
+/// Line that opens and closes the frontmatter.
+const FRONTMATTER_FENCE: &str = "---";
+
+/// Deepest directory level `walk` descends to when collecting agents and commands.
+const MAX_WALK_DEPTH: usize = 16;
+
 /// Split a markdown document into (frontmatter map, body). Body is trimmed.
 /// Without a leading `---` line the whole text is the body.
 pub fn split_frontmatter(text: &str) -> (Map<String, Value>, String) {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let mut lines = text.lines();
     match lines.next() {
-        Some(first) if first.trim_end() == "---" => {}
+        Some(first) if first.trim_end() == FRONTMATTER_FENCE => {}
         _ => return (Map::new(), text.trim().to_string()),
     }
     let mut fm = Vec::new();
@@ -22,7 +28,7 @@ pub fn split_frontmatter(text: &str) -> (Map<String, Value>, String) {
     let mut closed = false;
     for l in lines {
         if !closed {
-            if l.trim_end() == "---" {
+            if l.trim_end() == FRONTMATTER_FENCE {
                 closed = true;
             } else {
                 fm.push(l);
@@ -403,7 +409,7 @@ pub fn collect(root: &Path, subdirs: &[&str]) -> (Vec<MdDoc>, Vec<String>) {
 }
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>, depth: usize) {
-    if depth > 16 {
+    if depth > MAX_WALK_DEPTH {
         return;
     }
     let Ok(rd) = std::fs::read_dir(dir) else {
