@@ -567,120 +567,190 @@ pub fn type_text(app: &mut App, s: &str) {
     }
 }
 
+/// An app wired to the in-process mock backend, with its foreground session.
+struct MockApp {
+    app: App,
+    rx: mpsc::UnboundedReceiver<crate::net::NetEvent>,
+    sid: String,
+}
+
+impl MockApp {
+    /// Starts the app with the demo prompt and waits for its first reply.
+    async fn start() -> Self {
+        let (out_tx, out_rx) = mpsc::unbounded_channel();
+        let (ev_tx, mut rx) = mpsc::unbounded_channel();
+        tokio::spawn(crate::mock::run(TEST_CWD.into(), out_rx, ev_tx));
+        let plan = InitPlan {
+            prompt: Some("hello, run the demo".into()),
+            ..Default::default()
+        };
+        let mut app = App::new(Client::new(out_tx), TEST_CWD.into(), plan);
+        pump(&mut app, &mut rx, PUMP_TURN_MS).await;
+        let sid = app.current.clone().expect("session created");
+        Self { app, rx, sid }
+    }
+
+    async fn pump(&mut self, ms: u64) {
+        pump(&mut self.app, &mut self.rx, ms).await;
+    }
+
+    /// Runs the demo until the permission request appears (drawn once, as keys need the layout).
+    async fn wait_for_permission(&mut self) {
+        for _ in 0..40 {
+            if self.app.active_permission().is_some() {
+                break;
+            }
+            self.pump(PUMP_POLL_MS).await;
+        }
+        assert!(
+            self.app.active_permission().is_some(),
+            "permission requested"
+        );
+        render(&mut self.app, 100, 30);
+    }
+
+    /// Keys right after the modal opens are ignored; wait then answer it.
+    async fn answer_permission(&mut self, key: char) {
+        tokio::time::sleep(PAST_GRACE).await;
+        press(&mut self.app, KeyCode::Char(key));
+        assert!(self.app.active_permission().is_none());
+    }
+
+    /// Runs the demo until its permission request is allowed.
+    async fn start_allowed() -> Self {
+        let mut m = Self::start().await;
+        m.wait_for_permission().await;
+        m.answer_permission('a').await;
+        m
+    }
+
+    /// Waits for the reply to the queued prompt and the end of the turn.
+    async fn wait_for_turn_end(&mut self) {
+        for _ in 0..120 {
+            let v = &self.app.views[&self.sid];
+            if v.messages.iter().any(|m| m.raw_text().contains("Got it")) && !v.is_busy() {
+                break;
+            }
+            self.pump(PUMP_POLL_MS).await;
+        }
+    }
+
+    /// Queues one prompt, lets the turn finish and leaves the chat idle.
+    async fn start_finished() -> Self {
+        let mut m = Self::start_allowed().await;
+        type_text(&mut m.app, "queued question");
+        press(&mut m.app, KeyCode::Enter);
+        m.wait_for_turn_end().await;
+        m
+    }
+
+    fn queued_texts(&self) -> Vec<&str> {
+        self.app.views[&self.sid]
+            .queued
+            .iter()
+            .map(|q| q.text.as_str())
+            .collect()
+    }
+
+    /// Opens the Ctrl+X leader menu and presses `key`.
+    fn leader(&mut self, key: char) {
+        press_with(&mut self.app, KeyCode::Char('x'), KeyModifiers::CONTROL);
+        press(&mut self.app, KeyCode::Char(key));
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn mock_end_to_end() {
-    use crossterm::event::{KeyCode, KeyModifiers};
-    let (out_tx, out_rx) = mpsc::unbounded_channel();
-    let (ev_tx, mut ev_rx) = mpsc::unbounded_channel();
-    tokio::spawn(crate::mock::run(TEST_CWD.into(), out_rx, ev_tx));
-    let plan = InitPlan {
-        prompt: Some("hello, run the demo".into()),
-        ..Default::default()
-    };
-    let mut app = App::new(Client::new(out_tx), TEST_CWD.into(), plan);
-    pump(&mut app, &mut ev_rx, PUMP_TURN_MS).await;
-    let sid = app.current.clone().expect("session created");
+async fn mock_first_turn_streams_and_asks_permission() {
+    let mut m = MockApp::start().await;
     {
-        let v = &app.views[&sid];
+        let v = &m.app.views[&m.sid];
         assert!(v.loaded, "snapshot loaded");
         assert!(v.messages.len() >= 2, "user + assistant");
     }
-    let (_, s) = render(&mut app, 100, 30);
+    let (_, s) = render(&mut m.app, 100, 30);
     println!("--- streaming ---\n{s}");
-    // Run until the permission request appears.
-    for _ in 0..40 {
-        if app.active_permission().is_some() {
-            break;
-        }
-        pump(&mut app, &mut ev_rx, PUMP_POLL_MS).await;
-    }
-    assert!(app.active_permission().is_some(), "permission requested");
-    let (_, s) = render(&mut app, 100, 30);
+
+    m.wait_for_permission().await;
+    let (_, s) = render(&mut m.app, 100, 30);
     println!("--- permission ---\n{s}");
     assert!(s.contains("Permission required"));
     assert!(s.contains("Allow once"));
-    // Keys right after the modal opens are ignored; wait then allow.
-    tokio::time::sleep(PAST_GRACE).await;
-    press(&mut app, KeyCode::Char('a'));
-    assert!(app.active_permission().is_none());
+
+    m.answer_permission('a').await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mock_queued_prompt_survives_reattach_and_can_be_removed() {
+    let mut m = MockApp::start_allowed().await;
+    let sid = m.sid.clone();
+
     // Queue a prompt while busy.
-    type_text(&mut app, "queued question");
-    press(&mut app, KeyCode::Enter);
-    assert_eq!(app.views[&sid].queued.len(), 1);
+    type_text(&mut m.app, "queued question");
+    press(&mut m.app, KeyCode::Enter);
+    assert_eq!(m.app.views[&sid].queued.len(), 1);
+
     // Queue another one and remove it with its ✕ button while the turn is still running.
-    type_text(&mut app, "never send this");
-    press(&mut app, KeyCode::Enter);
-    pump(&mut app, &mut ev_rx, PUMP_ROUNDTRIP_MS).await;
+    type_text(&mut m.app, "never send this");
+    press(&mut m.app, KeyCode::Enter);
+    m.pump(PUMP_ROUNDTRIP_MS).await;
     assert!(
-        app.views[&sid].queued.iter().all(|q| q.id.is_some()),
+        m.app.views[&sid].queued.iter().all(|q| q.id.is_some()),
         "queued rows bound to server ids"
     );
-    assert!(app.views[&sid].is_busy());
+    assert!(m.app.views[&sid].is_busy());
+
     // Switch to another session and back: the rows come back from the snapshot (still removable).
-    let other = app
+    let other = m
+        .app
         .live
         .iter()
         .find(|s| s.id != sid)
         .map(|s| s.id.clone())
         .expect("another live session");
-    app.attach_fg(&other);
-    pump(&mut app, &mut ev_rx, PUMP_ROUNDTRIP_MS).await;
-    app.attach_fg(&sid);
-    pump(&mut app, &mut ev_rx, PUMP_ROUNDTRIP_MS).await;
-    let q: Vec<&str> = app.views[&sid]
-        .queued
-        .iter()
-        .map(|q| q.text.as_str())
-        .collect();
+    m.app.attach_fg(&other);
+    m.pump(PUMP_ROUNDTRIP_MS).await;
+    m.app.attach_fg(&sid);
+    m.pump(PUMP_ROUNDTRIP_MS).await;
     assert_eq!(
-        q,
+        m.queued_texts(),
         ["queued question", "never send this"],
         "queued rows survive re-attach"
     );
-    assert!(app.views[&sid].queued.iter().all(|q| q.id.is_some()));
-    let (term, s) = render(&mut app, 100, 30);
+    assert!(m.app.views[&sid].queued.iter().all(|q| q.id.is_some()));
+
+    let (term, s) = render(&mut m.app, 100, 30);
     let qy = s
         .lines()
         .position(|l| l.contains("never send this") && l.contains("✕ remove"))
         .expect("queued row with remove button") as u16;
     let qx = find_col(&term, qy, "✕").unwrap();
-    app.screen = ratatui::layout::Rect::new(0, 0, 100, 30);
+    m.app.screen = ratatui::layout::Rect::new(0, 0, 100, 30);
     {
         use crossterm::event::{MouseButton, MouseEventKind};
         crate::input::handle(
-            &mut app,
+            &mut m.app,
             mouse(MouseEventKind::Down(MouseButton::Left), qx, qy),
         );
         crate::input::handle(
-            &mut app,
+            &mut m.app,
             mouse(MouseEventKind::Up(MouseButton::Left), qx, qy),
         );
     }
-    pump(&mut app, &mut ev_rx, PUMP_ROUNDTRIP_MS).await;
-    let q: Vec<&str> = app.views[&sid]
-        .queued
-        .iter()
-        .map(|q| q.text.as_str())
-        .collect();
-    assert_eq!(q, ["queued question"], "removed from the queue");
+    m.pump(PUMP_ROUNDTRIP_MS).await;
     assert_eq!(
-        app.editor.text, "never send this",
+        m.queued_texts(),
+        ["queued question"],
+        "removed from the queue"
+    );
+    assert_eq!(
+        m.app.editor.text, "never send this",
         "removed prompt back in the input box"
     );
-    app.editor.clear();
+    m.app.editor.clear();
+
     // Let the turn finish.
-    for _ in 0..120 {
-        if app.views[&sid]
-            .messages
-            .iter()
-            .any(|m| m.raw_text().contains("Got it"))
-            && !app.views[&sid].is_busy()
-        {
-            break;
-        }
-        pump(&mut app, &mut ev_rx, PUMP_POLL_MS).await;
-    }
-    let v = &app.views[&sid];
+    m.wait_for_turn_end().await;
+    let v = &m.app.views[&sid];
     assert!(!v.is_busy(), "turn finished");
     assert!(v.queued.is_empty(), "queued prompt delivered");
     assert!(
@@ -689,68 +759,87 @@ async fn mock_end_to_end() {
             .any(|m| m.raw_text().contains("never send this")),
         "removed prompt never sent"
     );
-    let (_, s) = render(&mut app, 100, 50);
+    let (_, s) = render(&mut m.app, 100, 50);
     println!("--- done ---\n{s}");
     assert!(s.contains("Got it"), "reply to queued prompt");
-    // Slash command via autocomplete: /details toggles tool expansion.
-    type_text(&mut app, "/deta");
-    assert!(app.ac.is_some(), "slash autocomplete");
-    press(&mut app, KeyCode::Enter);
-    assert!(app.details);
-    assert!(app.editor.text.is_empty());
-    // Session picker lists live + history.
-    press_with(&mut app, KeyCode::Char('x'), KeyModifiers::CONTROL);
-    press(&mut app, KeyCode::Char('l'));
-    pump(&mut app, &mut ev_rx, PUMP_REPLY_MS).await;
-    let (_, s) = render(&mut app, 120, 34);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mock_slash_command_via_autocomplete_toggles_details() {
+    let mut m = MockApp::start_finished().await;
+
+    // /details toggles tool expansion.
+    type_text(&mut m.app, "/deta");
+    assert!(m.app.ac.is_some(), "slash autocomplete");
+    press(&mut m.app, KeyCode::Enter);
+    assert!(m.app.details);
+    assert!(m.app.editor.text.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mock_session_picker_lists_live_and_history() {
+    let mut m = MockApp::start_finished().await;
+
+    m.leader('l');
+    m.pump(PUMP_REPLY_MS).await;
+    let (_, s) = render(&mut m.app, 120, 34);
     println!("--- sessions ---\n{s}");
     assert!(s.contains("Live") && s.contains("History"));
     assert!(s.contains("worker-1") && s.contains(" bg ") && s.contains(" fg "));
-    press(&mut app, KeyCode::Esc);
-    // Watch mode: tiles for the background sessions.
-    press_with(&mut app, KeyCode::Char('x'), KeyModifiers::CONTROL);
-    press(&mut app, KeyCode::Char('w'));
-    pump(&mut app, &mut ev_rx, PUMP_TILES_MS).await;
-    let (_, s) = render(&mut app, 140, 36);
+    press(&mut m.app, KeyCode::Esc);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mock_watch_mode_tiles_focus_and_back_to_chat() {
+    let mut m = MockApp::start_finished().await;
+    let sid = m.sid.clone();
+
+    // Tiles for the background sessions.
+    m.leader('w');
+    m.pump(PUMP_TILES_MS).await;
+    let (_, s) = render(&mut m.app, 140, 36);
     println!("--- watch ---\n{s}");
-    assert_eq!(app.mode, Mode::Watch);
+    assert_eq!(m.app.mode, Mode::Watch);
     assert!(s.contains("worker-1") && s.contains("reviewer") && s.contains("docs-写手"));
+
     // The session that was foreground in this frontend is background now, and tiled.
     let attached = |app: &App| app.live.iter().find(|i| i.id == sid).map(|i| i.attached);
-    assert_eq!(attached(&app), Some(0));
-    assert!(!app.views[&sid].foreground);
-    assert!(app.tile_ids().contains(&sid));
-    assert_eq!(app.current.as_deref(), Some(sid.as_str()));
+    assert_eq!(attached(&m.app), Some(0));
+    assert!(!m.app.views[&sid].foreground);
+    assert!(m.app.tile_ids().contains(&sid));
+    assert_eq!(m.app.current.as_deref(), Some(sid.as_str()));
+
     // A background tile asks for permission: the modal names the session; deny it.
-    if app.active_permission().is_some() {
+    if m.app.active_permission().is_some() {
         assert!(s.contains("Permission required · docs-写手"));
-        tokio::time::sleep(PAST_GRACE).await;
-        press(&mut app, KeyCode::Char('d'));
-        assert!(app.active_permission().is_none());
+        m.answer_permission('d').await;
     }
+
     // Nothing is focused on entering the split view; typing only shows a hint.
-    assert!(app.watch.focus.is_none(), "no auto-focus");
-    type_text(&mut app, "x");
-    assert!(app.watch.inputs.values().all(|e| e.is_empty()));
+    assert!(m.app.watch.focus.is_none(), "no auto-focus");
+    type_text(&mut m.app, "x");
+    assert!(m.app.watch.inputs.values().all(|e| e.is_empty()));
     assert!(
-        app.hint
+        m.app
+            .hint
             .as_ref()
             .is_some_and(|h| h.0.contains("click or tab to focus"))
     );
+
     // Tab focuses a tile; message it directly.
-    press(&mut app, KeyCode::Tab);
-    let focus = app.watch.focus.clone().expect("focus");
-    type_text(&mut app, "ping");
-    press(&mut app, KeyCode::Enter);
-    pump(&mut app, &mut ev_rx, PUMP_ROUNDTRIP_MS).await;
-    assert!(app.watch.inputs.get(&focus).is_none_or(|e| e.is_empty()));
+    press(&mut m.app, KeyCode::Tab);
+    let focus = m.app.watch.focus.clone().expect("focus");
+    type_text(&mut m.app, "ping");
+    press(&mut m.app, KeyCode::Enter);
+    m.pump(PUMP_ROUNDTRIP_MS).await;
+    assert!(m.app.watch.inputs.get(&focus).is_none_or(|e| e.is_empty()));
+
     // Back to chat.
-    press_with(&mut app, KeyCode::Char('x'), KeyModifiers::CONTROL);
-    press(&mut app, KeyCode::Char('w'));
-    assert_eq!(app.mode, Mode::Chat);
-    pump(&mut app, &mut ev_rx, PUMP_REPLY_MS).await;
-    assert_eq!(attached(&app), Some(1), "foreground again");
-    assert!(app.views[&sid].foreground);
+    m.leader('w');
+    assert_eq!(m.app.mode, Mode::Chat);
+    m.pump(PUMP_REPLY_MS).await;
+    assert_eq!(attached(&m.app), Some(1), "foreground again");
+    assert!(m.app.views[&sid].foreground);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
