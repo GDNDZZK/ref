@@ -12,6 +12,8 @@ Item {
 	required property ChatSession session
 	// The most of the status line this item may take.
 	property real maxWidth: 0
+	// What the popup stays inside: the status line, which is as wide as the conversation.
+	required property Item bounds
 
 	// The keyboard was given back by Esc in the popup.
 	signal dismissed()
@@ -89,15 +91,16 @@ Item {
 	Popup {
 		id: popup
 
-		// Above the item: the status line sits at the bottom of the pane.
+		// Above the item, its right edge on the item's, and inside `bounds`: the status line is at the bottom of the pane.
 		parent: root
-		x: 0
 		y: -height - root.popupGap
-		width: root.popupWidth
+		width: Math.min(root.popupWidth, root.bounds.width)
 		height: Math.min(header.height + list.contentHeight + 2 * root.popupPadding, root.popupMaxHeight)
 		padding: root.popupPadding
 		focus: true
 		closePolicy: Popup.CloseOnPressOutside
+
+		onAboutToShow: x = Math.max(root.mapFromItem(root.bounds, 0, 0).x, root.width - width)
 
 		background: Rectangle {
 			radius: Theme.radius
