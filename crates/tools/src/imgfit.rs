@@ -394,9 +394,10 @@ pub fn clamp_image_data(img: &ImageData, max_dim: u32, max_b64: usize) -> Option
     c.bytes += out.as_ref().map_or(0, |i| i.data.len());
     c.entries.push_back((key, out.clone()));
     while c.bytes > CLAMP_CACHE_BYTES || c.entries.len() > CLAMP_CACHE_ENTRIES {
-        let Some((_, old)) = c.entries.pop_front() else {
-            break;
-        };
+        let (_, old) = c
+            .entries
+            .pop_front()
+            .expect("entries remain while over a cap");
         c.bytes -= old.map_or(0, |i| i.data.len());
     }
     out
