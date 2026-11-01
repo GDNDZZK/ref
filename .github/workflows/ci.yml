@@ -90,6 +90,11 @@ jobs:
           msg=${msg//'%'/'%25'}; msg=${msg//$'\r'/'%0D'}; msg=${msg//$'\n'/'%0A'}
           echo "::error title=pnpm check::$msg"
 
+      # The page's crypto libraries (@noble/*) and the rest of what ships in the bundle.
+      - name: Audit runtime dependencies
+        working-directory: web
+        run: pnpm audit --prod
+
   gui:
     name: gui (${{ matrix.os }})
     strategy:
