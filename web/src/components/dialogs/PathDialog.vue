@@ -2,7 +2,7 @@
 // A directory path with completion from the backend's file system: /cd and "new session in…".
 import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { usePickSelection } from '../../composables/usePickSelection.ts'
+import { handleListKey, usePickSelection } from '../../composables/usePickSelection.ts'
 import { useDialogsStore } from '../../stores/dialogs.ts'
 import { useWorkspaceStore } from '../../stores/workspace.ts'
 import DialogButton from '../DialogButton.vue'
@@ -82,11 +82,12 @@ function accept(name: string | undefined): void {
 
 function onKey(event: KeyboardEvent): void {
   if (event.isComposing) return
-  if (event.key === Key.Tab && !event.shiftKey && items.value.length > 0) accept(selected.value)
-  else if (event.key === Key.ArrowDown) move(1)
-  else if (event.key === Key.ArrowUp) move(-1)
-  else return
-  event.preventDefault()
+  if (event.key === Key.Tab && !event.shiftKey && items.value.length > 0) {
+    accept(selected.value)
+    event.preventDefault()
+    return
+  }
+  handleListKey(event, move)
 }
 
 async function submit(): Promise<void> {
