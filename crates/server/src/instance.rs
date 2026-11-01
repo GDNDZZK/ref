@@ -2,7 +2,7 @@
 
 use crate::util::{fmt_duration, fmt_time, pid_alive, write_atomic};
 use futures_util::{SinkExt, StreamExt};
-use ref_proto::{ClientFrame, InstanceInfo, Request, ServerFrame};
+use ref_proto::{ClientFrame, IDLE_EXIT_NOW, InstanceInfo, Request, ServerFrame};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message as WsMsg;
@@ -73,7 +73,7 @@ pub fn connect_url(i: &InstanceInfo) -> String {
 fn idle_meaning(t: i64) -> String {
     match t {
         t if t < 0 => "never exits when idle".into(),
-        0 => "exits as soon as the last frontend disconnects".into(),
+        IDLE_EXIT_NOW => "exits as soon as the last frontend disconnects".into(),
         t => format!("exits {t}s after the last frontend disconnects"),
     }
 }

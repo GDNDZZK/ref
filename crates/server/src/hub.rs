@@ -7,7 +7,8 @@ use crate::store::Store;
 use crate::util::lock;
 use ref_config::Config;
 use ref_proto::{
-    InstanceInfo, Message, NotifyKind, ServerFrame, SessionEvent, SessionInfo, SessionStatus,
+    IDLE_EXIT_NOW, IDLE_NEVER, InstanceInfo, Message, NotifyKind, ServerFrame, SessionEvent,
+    SessionInfo, SessionStatus,
 };
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -18,9 +19,6 @@ use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
 pub type ConfigLoader = Arc<dyn Fn(&Path) -> Config + Send + Sync>;
-
-/// `HubOptions::idle_timeout` that keeps the backend running after its last frontend leaves.
-pub const IDLE_NEVER: i64 = -1;
 
 /// Max queued frames per connection before it is dropped as too slow.
 pub const MAX_QUEUE: usize = 10_000;
@@ -187,7 +185,7 @@ pub enum IdleAction {
 pub fn idle_action(timeout: i64, ever_connected: bool, connected: usize) -> IdleAction {
     if !ever_connected || connected > 0 || timeout < 0 {
         IdleAction::Nothing
-    } else if timeout == 0 {
+    } else if timeout == IDLE_EXIT_NOW {
         IdleAction::ShutdownNow
     } else {
         IdleAction::ShutdownAfter(timeout as u64)

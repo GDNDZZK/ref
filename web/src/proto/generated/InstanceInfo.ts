@@ -13,7 +13,7 @@ bind: string,
  */
 allow_hosts: Array<string>, 
 /**
- * Idle timeout in seconds; 0 = exit as soon as the last frontend leaves, -1 = never.
+ * Idle timeout in seconds, or `IDLE_EXIT_NOW` / `IDLE_NEVER`.
  */
 idle_timeout: number, started_at: number, version: string, 
 /**
