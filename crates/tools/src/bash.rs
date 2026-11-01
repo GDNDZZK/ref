@@ -213,14 +213,17 @@ impl Collector {
             }
             self.spill();
         }
+
         let path = self.spilled.take().map(|(p, mut f)| {
             let _ = f.flush();
             p
         });
+
         let head = take_head(&self.head);
         let tail = take_tail(&self.tail);
         let shown = head.matches('\n').count() + tail.matches('\n').count();
         let elided = self.total_lines.saturating_sub(shown);
+
         let mut text = String::with_capacity(head.len() + tail.len() + 64);
         text.push_str(head);
         if !text.is_empty() && !text.ends_with('\n') {
@@ -635,6 +638,7 @@ fn build_output(
     if text.ends_with('\n') {
         text.pop();
     }
+
     let mut notes: Vec<String> = Vec::new();
     if truncated {
         match &path {
@@ -649,6 +653,7 @@ fn build_output(
             )),
         }
     }
+
     let (status, is_error) = match &ending {
         Ending::Exited(s) => (s, false),
         Ending::TimedOut(s) => {
@@ -660,6 +665,7 @@ fn build_output(
             (s, true)
         }
     };
+
     let exit_code = status.code();
     if matches!(ending, Ending::Exited(_)) {
         match exit_code {
@@ -668,9 +674,11 @@ fn build_output(
             None => notes.push(killed_note(status)),
         }
     }
+
     if duration >= WALL_TIME_NOTE_MIN {
         notes.push(format!("[wall time {:.1}s]", duration.as_secs_f64()));
     }
+
     if text.trim().is_empty() {
         text = "(no output)".to_string();
     }
