@@ -486,13 +486,14 @@ async fn impostor_ref_web() -> u16 {
             tokio::spawn(async move {
                 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
                 let mut request = [0u8; 1024];
-                let _ = stream.read(&mut request).await;
+                let read = stream.read(&mut request).await.unwrap();
+                assert!(read > 0, "the client sent a request");
                 let body = r#"{"app":"ref-web","version":"0.1.0","proof":"00"}"#;
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
                 );
-                let _ = stream.write_all(response.as_bytes()).await;
+                stream.write_all(response.as_bytes()).await.unwrap();
             });
         }
     });
