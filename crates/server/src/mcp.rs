@@ -8,6 +8,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+/// How long `close_all` waits for one server to close.
+const CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
+
 #[derive(Debug, Clone)]
 pub enum McpStatus {
     Connecting,
@@ -47,7 +50,12 @@ impl McpServer {
     }
     pub(crate) async fn wait_ready(&self, timeout: Duration) {
         let mut rx = self.ready.subscribe();
-        let _ = tokio::time::timeout(timeout, rx.wait_for(|v| *v)).await;
+        if tokio::time::timeout(timeout, rx.wait_for(|v| *v))
+            .await
+            .is_err()
+        {
+            tracing::warn!(server = %self.name, "MCP server not ready after {timeout:?}");
+        }
     }
 }
 
@@ -186,8 +194,12 @@ impl McpManager {
     pub(crate) async fn close_all(&self) {
         let all: Vec<Arc<McpServer>> = lock(&self.servers).drain().map(|(_, v)| v).collect();
         for s in all {
-            if let Some(c) = s.client() {
-                let _ = tokio::time::timeout(Duration::from_secs(3), c.close()).await;
+            if let Some(c) = s.client()
+                && tokio::time::timeout(CLOSE_TIMEOUT, c.close())
+                    .await
+                    .is_err()
+            {
+                tracing::warn!(server = %s.name, "MCP server did not close in {CLOSE_TIMEOUT:?}");
             }
         }
     }
