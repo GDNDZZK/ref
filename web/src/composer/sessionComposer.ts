@@ -7,7 +7,6 @@
 import { reactive, ref } from 'vue'
 import type { RefApi } from '../net/api.ts'
 import type { NamedImage, ToastLevel } from '../proto/generated'
-import { onDraftRestored } from '../stores/draftBus.ts'
 import { CompletionController } from './completion.ts'
 import type { SlashCommand } from './completion.ts'
 import {
@@ -19,6 +18,7 @@ import {
   submissionOf,
 } from './draft.ts'
 import type { Draft } from './draft.ts'
+import { onDraftRestored } from './draftBus.ts'
 import { HistoryBrowser } from './history.ts'
 import type { PromptHistory } from './history.ts'
 import { readImage, rejectionOf } from './images.ts'

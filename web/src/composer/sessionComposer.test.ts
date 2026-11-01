@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NamedImage } from '../proto/generated'
-import { emitDraftRestored } from '../stores/draftBus.ts'
 import type { SlashCommand } from './completion.ts'
+import { emitDraftRestored } from './draftBus.ts'
 import { PromptHistory } from './history.ts'
 import { INTERRUPT_ARMED_MS, SessionComposer } from './sessionComposer.ts'
 import type { ToastLevel } from '../proto/generated'
