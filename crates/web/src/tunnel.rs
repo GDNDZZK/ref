@@ -24,6 +24,7 @@ const MAX_BROWSER_MESSAGE: usize = 64 << 20;
 const CLOSE_BACKEND_UNAVAILABLE: u16 = 1011;
 /// "Going away": ref-web is shutting down.
 const CLOSE_GOING_AWAY: u16 = 1001;
+const SHUTDOWN_REASON: &str = "ref-web is shutting down";
 /// A close reason must fit a control frame (125 bytes) next to the 2-byte code.
 const MAX_CLOSE_REASON: usize = 123;
 
@@ -70,7 +71,7 @@ async fn tunnel(state: Arc<AppState>, mut browser: WebSocket) {
     let upstream = tokio::select! {
         r = state.upstream.connect() => r,
         _ = state.shutdown.cancelled() => {
-            close_browser(&mut browser, CLOSE_GOING_AWAY, "ref-web is shutting down").await;
+            close_browser(&mut browser, CLOSE_GOING_AWAY, SHUTDOWN_REASON).await;
             return;
         }
     };
@@ -85,7 +86,7 @@ async fn tunnel(state: Arc<AppState>, mut browser: WebSocket) {
     let ended = pump(&state, &mut browser, &mut upstream).await;
     match ended {
         Ended::BrowserClosed => {
-            let _ = upstream.close(None).await;
+            close_upstream(&mut upstream).await;
         }
         Ended::UpstreamClosed(close) => {
             let (code, reason) = close.unwrap_or((
@@ -95,8 +96,8 @@ async fn tunnel(state: Arc<AppState>, mut browser: WebSocket) {
             close_browser(&mut browser, code, &reason).await;
         }
         Ended::Shutdown => {
-            let _ = upstream.close(None).await;
-            close_browser(&mut browser, CLOSE_GOING_AWAY, "ref-web is shutting down").await;
+            close_upstream(&mut upstream).await;
+            close_browser(&mut browser, CLOSE_GOING_AWAY, SHUTDOWN_REASON).await;
         }
     }
 }
@@ -176,11 +177,20 @@ async fn pump(state: &AppState, browser: &mut WebSocket, upstream: &mut Ws) -> E
 async fn send_to_browser(browser: &mut WebSocket, message: Message, heartbeat: Heartbeat) -> bool {
     match tokio::time::timeout(heartbeat.pong_timeout, browser.send(message)).await {
         Ok(Ok(())) => true,
-        Ok(Err(_)) => false,
+        Ok(Err(e)) => {
+            tracing::debug!("browser is gone: {e}");
+            false
+        }
         Err(_) => {
             tracing::debug!("browser does not take data, dropping it");
             false
         }
+    }
+}
+
+async fn close_upstream(upstream: &mut Ws) {
+    if let Err(e) = upstream.close(None).await {
+        tracing::debug!("cannot close the backend connection: {e}");
     }
 }
 
@@ -216,7 +226,9 @@ async fn close_browser(browser: &mut WebSocket, code: u16, reason: &str) {
         code,
         reason: reason.into(),
     };
-    let _ = browser.send(Message::Close(Some(frame))).await;
+    if let Err(e) = browser.send(Message::Close(Some(frame))).await {
+        tracing::debug!("cannot send the close frame to the browser: {e}");
+    }
 }
 
 #[cfg(test)]
@@ -238,6 +250,7 @@ mod tests {
         ping_interval: Duration::from_millis(50),
         pong_timeout: Duration::from_millis(500),
     };
+    const LOOPBACK: &str = "127.0.0.1";
     const WAIT: Duration = Duration::from_secs(10);
     /// Several pong timeouts: a healthy tab must stay connected for this long.
     const HEALTHY_FOR: Duration = Duration::from_millis(1500);
@@ -250,7 +263,7 @@ mod tests {
 
     /// A backend that reports (once) when its connection ends.
     async fn upstream_that_reports_close() -> (String, oneshot::Receiver<()>) {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = TcpListener::bind(format!("{LOOPBACK}:0")).await.unwrap();
         let url = format!("ws://{}", listener.local_addr().unwrap());
         let (closed_tx, closed_rx) = oneshot::channel();
         tokio::spawn(async move {
@@ -261,7 +274,7 @@ mod tests {
                     break;
                 }
             }
-            let _ = closed_tx.send(());
+            closed_tx.send(()).unwrap();
         });
         (url, closed_rx)
     }
@@ -269,7 +282,7 @@ mod tests {
     /// Like `upstream_that_reports_close`, but the backend also sends `FLOOD_MESSAGES` large
     /// binary frames as soon as the tab connects.
     async fn flooding_upstream_that_reports_close() -> (String, oneshot::Receiver<()>) {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = TcpListener::bind(format!("{LOOPBACK}:0")).await.unwrap();
         let url = format!("ws://{}", listener.local_addr().unwrap());
         let (closed_tx, closed_rx) = oneshot::channel();
         tokio::spawn(async move {
@@ -289,7 +302,7 @@ mod tests {
                     break;
                 }
             }
-            let _ = closed_tx.send(());
+            closed_tx.send(()).unwrap();
         });
         (url, closed_rx)
     }
@@ -299,9 +312,9 @@ mod tests {
         let state = Arc::new(AppState {
             login_token: String::new(),
             session: SessionCookie::new(0),
-            hosts: HostPolicy::new("127.0.0.1", 0),
+            hosts: HostPolicy::new(LOOPBACK, 0),
             cwd: String::new(),
-            upstream: Upstream::remote(Target::Explicit {
+            upstream: Upstream::Remote(Target::Explicit {
                 url: upstream_url,
                 token: None,
             }),
@@ -312,7 +325,7 @@ mod tests {
         let app = Router::new()
             .route("/ws", get(ws_handler))
             .with_state(state);
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = TcpListener::bind(format!("{LOOPBACK}:0")).await.unwrap();
         let address = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         address.to_string()
