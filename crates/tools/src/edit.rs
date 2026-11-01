@@ -213,6 +213,79 @@ fn parse_lines(v: Option<&Value>, idx: usize) -> Result<Option<Vec<String>>> {
     }
 }
 
+/// Parses one edit object. Also reports whether `N:` display prefixes were stripped from `lines`.
+fn parse_op(idx: usize, e: &Value) -> Result<(Op, bool)> {
+    if !e.is_object() {
+        bail!("edits[{idx}] must be an object");
+    }
+    let op = util::opt_str(e, "op")?.ok_or_else(|| anyhow!("edits[{idx}]: missing `op`"))?;
+    let op = op.trim().to_ascii_lowercase().replace('-', "_");
+    let num = |k: &str| {
+        util::value_u64(e.get(k), &format!("edits[{idx}].{k}")).map(|v| v.map(|n| n as usize))
+    };
+    let lines = parse_lines(e.get("lines"), idx)?;
+    let kind = match op.as_str() {
+        OP_REPLACE | OP_DELETE => {
+            let start = num("start")?
+                .or(num("line")?)
+                .ok_or_else(|| anyhow!("edits[{idx}]: `{op}` requires `start`"))?;
+            let end = num("end")?.unwrap_or(start);
+            if start == 0 {
+                bail!("edits[{idx}]: line numbers start at 1");
+            }
+            if end < start {
+                bail!("edits[{idx}]: `end` ({end}) is before `start` ({start})");
+            }
+            Kind::Replace { start, end }
+        }
+        OP_INSERT_BEFORE | OP_INSERT_AFTER => {
+            let line = num("line")?
+                .or(num("start")?)
+                .ok_or_else(|| anyhow!("edits[{idx}]: `{op}` requires `line`"))?;
+            if op == OP_INSERT_BEFORE {
+                if line == 0 {
+                    bail!(
+                        "edits[{idx}]: {OP_INSERT_BEFORE} needs line >= 1 (use {OP_INSERT_AFTER} with line 0 for the top of the file)"
+                    );
+                }
+                Kind::Insert {
+                    gap: line - 1,
+                    before: true,
+                    anchor: line,
+                }
+            } else {
+                Kind::Insert {
+                    gap: line,
+                    before: false,
+                    anchor: line,
+                }
+            }
+        }
+        other => bail!(
+            "edits[{idx}]: unknown op \"{other}\" (expected {OP_REPLACE}, {OP_DELETE}, {OP_INSERT_BEFORE} or {OP_INSERT_AFTER})"
+        ),
+    };
+    let mut lines = match (&kind, op.as_str(), lines) {
+        (_, OP_DELETE, _) => Vec::new(),
+        (_, _, Some(l)) => l,
+        (Kind::Replace { .. }, _, None) => {
+            bail!(
+                "edits[{idx}]: {OP_REPLACE} requires `lines` (use op \"{OP_DELETE}\" to remove lines)"
+            )
+        }
+        (_, _, None) => bail!("edits[{idx}]: `{op}` requires `lines`"),
+    };
+    let replace_start = match kind {
+        Kind::Replace { start, .. } => Some(start),
+        _ => None,
+    };
+    let stripped = !lines.is_empty() && strip_pasted_prefixes(&mut lines, replace_start);
+    if matches!(kind, Kind::Insert { .. }) && lines.is_empty() {
+        bail!("edits[{idx}]: `{op}` with empty `lines` does nothing");
+    }
+    Ok((Op { idx, kind, lines }, stripped))
+}
+
 fn parse_edits(input: &Value, warnings: &mut Vec<String>) -> Result<Vec<Op>> {
     let edits = match input.get("edits") {
         Some(Value::String(s)) => serde_json::from_str::<Value>(s)
@@ -231,77 +304,9 @@ fn parse_edits(input: &Value, warnings: &mut Vec<String>) -> Result<Vec<Op>> {
     let mut ops = Vec::new();
     let mut stripped_any = false;
     for (idx, e) in edits.iter().enumerate() {
-        if !e.is_object() {
-            bail!("edits[{idx}] must be an object");
-        }
-        let op = util::opt_str(e, "op")?.ok_or_else(|| anyhow!("edits[{idx}]: missing `op`"))?;
-        let op = op.trim().to_ascii_lowercase().replace('-', "_");
-        let num = |k: &str| {
-            util::value_u64(e.get(k), &format!("edits[{idx}].{k}")).map(|v| v.map(|n| n as usize))
-        };
-        let lines = parse_lines(e.get("lines"), idx)?;
-        let kind = match op.as_str() {
-            OP_REPLACE | OP_DELETE => {
-                let start = num("start")?
-                    .or(num("line")?)
-                    .ok_or_else(|| anyhow!("edits[{idx}]: `{op}` requires `start`"))?;
-                let end = num("end")?.unwrap_or(start);
-                if start == 0 {
-                    bail!("edits[{idx}]: line numbers start at 1");
-                }
-                if end < start {
-                    bail!("edits[{idx}]: `end` ({end}) is before `start` ({start})");
-                }
-                Kind::Replace { start, end }
-            }
-            OP_INSERT_BEFORE | OP_INSERT_AFTER => {
-                let line = num("line")?
-                    .or(num("start")?)
-                    .ok_or_else(|| anyhow!("edits[{idx}]: `{op}` requires `line`"))?;
-                if op == OP_INSERT_BEFORE {
-                    if line == 0 {
-                        bail!(
-                            "edits[{idx}]: {OP_INSERT_BEFORE} needs line >= 1 (use {OP_INSERT_AFTER} with line 0 for the top of the file)"
-                        );
-                    }
-                    Kind::Insert {
-                        gap: line - 1,
-                        before: true,
-                        anchor: line,
-                    }
-                } else {
-                    Kind::Insert {
-                        gap: line,
-                        before: false,
-                        anchor: line,
-                    }
-                }
-            }
-            other => bail!(
-                "edits[{idx}]: unknown op \"{other}\" (expected {OP_REPLACE}, {OP_DELETE}, {OP_INSERT_BEFORE} or {OP_INSERT_AFTER})"
-            ),
-        };
-        let mut lines = match (&kind, op.as_str(), lines) {
-            (_, OP_DELETE, _) => Vec::new(),
-            (_, _, Some(l)) => l,
-            (Kind::Replace { .. }, _, None) => {
-                bail!(
-                    "edits[{idx}]: {OP_REPLACE} requires `lines` (use op \"{OP_DELETE}\" to remove lines)"
-                )
-            }
-            (_, _, None) => bail!("edits[{idx}]: `{op}` requires `lines`"),
-        };
-        let replace_start = match kind {
-            Kind::Replace { start, .. } => Some(start),
-            _ => None,
-        };
-        if !lines.is_empty() && strip_pasted_prefixes(&mut lines, replace_start) {
-            stripped_any = true;
-        }
-        if matches!(kind, Kind::Insert { .. }) && lines.is_empty() {
-            bail!("edits[{idx}]: `{op}` with empty `lines` does nothing");
-        }
-        ops.push(Op { idx, kind, lines });
+        let (op, stripped) = parse_op(idx, e)?;
+        stripped_any |= stripped;
+        ops.push(op);
     }
     if stripped_any {
         warnings.push("Stripped `N:` display prefixes from `lines` (they looked like pasted read output). `lines` must contain raw file content only.".to_string());
