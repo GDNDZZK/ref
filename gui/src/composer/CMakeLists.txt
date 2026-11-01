@@ -13,5 +13,5 @@ qt_add_library(refgui_composer STATIC
 )
 
 target_include_directories(refgui_composer PUBLIC ${PROJECT_SOURCE_DIR}/src)
-target_link_libraries(refgui_composer PUBLIC refgui_compose refgui_session refgui_client Qt6::Gui)
+target_link_libraries(refgui_composer PUBLIC refgui_compose refgui_session refgui_workspace Qt6::Gui)
 refgui_configure_target(refgui_composer)

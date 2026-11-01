@@ -10,6 +10,8 @@ qt_add_library(refgui_workspace STATIC
 	session_list_model.h
 	settings.cpp
 	settings.h
+	state_paths.cpp
+	state_paths.h
 	toast_text.cpp
 	toast_text.h
 )
