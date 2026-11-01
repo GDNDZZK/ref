@@ -293,7 +293,7 @@ fn list_dir(abs: &Path, display: &str) -> Result<ToolOutput> {
             }
         };
         let name = e.file_name().to_string_lossy().into_owned();
-        if name == ".git" {
+        if name == util::GIT_DIR_NAME {
             continue;
         }
         // Follow symlinks for the dir check so linked dirs show `/`.

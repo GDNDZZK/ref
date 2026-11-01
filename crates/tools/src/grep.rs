@@ -296,7 +296,7 @@ pub(crate) fn collect_files(
         .parents(true)
         .require_git(false)
         .follow_links(false)
-        .filter_entry(|e| e.file_name() != ".git");
+        .filter_entry(|e| e.file_name() != util::GIT_DIR_NAME);
     let matcher = glob.map(crate::find::PathMatcher::new).transpose()?;
     let mut files = Vec::new();
     for entry in wb.build() {
