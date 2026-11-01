@@ -330,7 +330,9 @@ async fn convert(
         Kind::Json => {
             let text = fetch::decode(&f.body, &f.content_type, false, host.as_deref());
             out.body = match serde_json::from_str::<Value>(&text) {
-                Ok(v) if format != Format::Html => serde_json::to_string_pretty(&v).unwrap_or(text),
+                Ok(v) if format != Format::Html => {
+                    serde_json::to_string_pretty(&v).expect("a JSON value serializes")
+                }
                 _ => text,
             };
             out.ext = SpillExt::Json;
