@@ -6,6 +6,7 @@
 
 import type { Question, QuestionRequest } from '../proto/generated'
 import { Key } from '../keys.ts'
+import { clamp } from '../clamp.ts'
 
 // What a key asks the owner of the form to do next.
 export type FormOutcome = 'submit' | 'dismiss' | 'handled' | 'ignored'
@@ -80,7 +81,7 @@ export class QuestionForm {
 
   goToTab(tab: number): void {
     this.editing = false
-    this.tab = Math.max(0, Math.min(tab, this.tabCount - 1))
+    this.tab = clamp(tab, 0, this.tabCount - 1)
   }
 
   moveTab(delta: number): void {
@@ -96,7 +97,7 @@ export class QuestionForm {
   moveCursor(index: number, delta: number): void {
     const rows = this.rowCount(index)
     const choice = this.choices[index]
-    if (choice && rows > 0) choice.cursor = Math.max(0, Math.min(choice.cursor + delta, rows - 1))
+    if (choice && rows > 0) choice.cursor = clamp(choice.cursor + delta, 0, rows - 1)
   }
 
   // Chooses a row of a single choice, or flips it in a multiple choice. The custom row starts
