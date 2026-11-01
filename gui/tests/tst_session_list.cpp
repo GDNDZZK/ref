@@ -19,6 +19,8 @@ using refgui::workspace::SessionListModel;
 namespace
 {
 
+constexpr int RefetchTimeoutMs = 3000; // the history is refetched a second after a change
+
 proto::SessionInfo session(const QString& id, qint64 created, qint64 updated = 0)
 {
 	proto::SessionInfo info;
@@ -318,7 +320,7 @@ void TstSessionList::directoryHistoryHidesLiveSessions()
 	fake.send({{u"kind"_s, u"sessions"_s}, {u"sessions"_s, QJsonArray{infoJson(u"s1"_s, 1, true)}}});
 	QTRY_COMPARE(directory.history().count(), 1);
 	fake.send({{u"kind"_s, u"sessions"_s}, {u"sessions"_s, QJsonArray()}});
-	QTRY_COMPARE_WITH_TIMEOUT(directory.history().count(), 2, 3000);
+	QTRY_COMPARE_WITH_TIMEOUT(directory.history().count(), 2, RefetchTimeoutMs);
 }
 
 void TstSessionList::configLoadsAgentsModelsAndMcp()
