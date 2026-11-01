@@ -567,17 +567,18 @@ impl ChatState {
         if slot.name.is_none() {
             slot.name = name.map(str::to_string);
         }
-        if slot.block.is_none() {
-            slot.pending.push_str(args);
-            if slot.name.is_some() {
-                self.start_tool(asm, slot_idx);
+        match slot.block {
+            None => {
+                slot.pending.push_str(args);
+                if let Some(name) = slot.name.clone() {
+                    self.start_tool(asm, slot_idx, name);
+                }
             }
-        } else if let Some(b) = slot.block {
-            asm.delta(b, args);
+            Some(b) => asm.delta(b, args),
         }
     }
 
-    fn start_tool(&mut self, asm: &mut Assembler<'_>, slot_idx: usize) {
+    fn start_tool(&mut self, asm: &mut Assembler<'_>, slot_idx: usize, name: String) {
         self.close_text(asm);
         self.close_reasoning(asm);
         let slot = &mut self.tools[slot_idx];
@@ -586,7 +587,6 @@ impl ChatState {
             .clone()
             .unwrap_or_else(|| format!("call_{slot_idx}"));
         slot.id = Some(id.clone());
-        let name = slot.name.clone().unwrap_or_default();
         let b = asm.start(BlockKind::ToolCall { id, name });
         slot.block = Some(b);
         let pending = std::mem::take(&mut slot.pending);
