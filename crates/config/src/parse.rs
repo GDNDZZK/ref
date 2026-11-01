@@ -55,28 +55,36 @@ pub(crate) fn build(ctx: &mut Ctx, layers: &[Layer]) -> Config {
     cfg.agents = agents(ctx, &merged, agent_permission);
     builtin::question_defaults(&mut cfg);
 
+    cfg.default_agent = default_agent(ctx, &merged, &cfg.agents);
+    cfg
+}
+
+/// The `default_agent` if it exists, else `build`, else the first visible non-subagent, else
+/// any agent.
+fn default_agent(
+    ctx: &mut Ctx,
+    merged: &Map<String, Value>,
+    agents: &BTreeMap<String, AgentConfig>,
+) -> String {
     let wanted = merged
         .get("default_agent")
         .and_then(Value::as_str)
         .unwrap_or(DEFAULT_AGENT);
-    cfg.default_agent = if cfg.agents.contains_key(wanted) {
-        wanted.to_string()
-    } else {
-        if merged.contains_key("default_agent") {
-            ctx.warn(format!("default_agent {wanted:?} not found"));
-        }
-        if cfg.agents.contains_key(DEFAULT_AGENT) {
-            DEFAULT_AGENT.into()
-        } else {
-            cfg.agents
-                .values()
-                .find(|a| a.mode != MODE_SUBAGENT && !a.hidden)
-                .or_else(|| cfg.agents.values().next())
-                .map(|a| a.name.clone())
-                .unwrap_or_else(|| DEFAULT_AGENT.into())
-        }
-    };
-    cfg
+    if agents.contains_key(wanted) {
+        return wanted.to_string();
+    }
+    if merged.contains_key("default_agent") {
+        ctx.warn(format!("default_agent {wanted:?} not found"));
+    }
+    if agents.contains_key(DEFAULT_AGENT) {
+        return DEFAULT_AGENT.into();
+    }
+    agents
+        .values()
+        .find(|a| a.mode != MODE_SUBAGENT && !a.hidden)
+        .or_else(|| agents.values().next())
+        .map(|a| a.name.clone())
+        .unwrap_or_else(|| DEFAULT_AGENT.into())
 }
 
 fn model_ref(ctx: &mut Ctx, v: Option<&Value>, what: &str) -> Option<ModelRef> {
