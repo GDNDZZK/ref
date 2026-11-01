@@ -111,13 +111,13 @@ onMounted(() => {
 .source-peer .bubble,
 .source-spawn .bubble {
   --bar: var(--info);
-  --tone: var(--info);
+  --tone: var(--info-text);
 }
 
 .source-reminder .bubble,
 .source-shell .bubble {
   --bar: var(--warning);
-  --tone: var(--warning);
+  --tone: var(--warning-text);
 }
 
 .source-shell .bubble {

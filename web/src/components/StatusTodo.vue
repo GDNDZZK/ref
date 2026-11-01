@@ -156,7 +156,7 @@ onBeforeUnmount(unlisten)
 }
 
 .summary.complete {
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .current {

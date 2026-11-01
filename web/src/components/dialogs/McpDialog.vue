@@ -128,7 +128,7 @@ function statusText(status: string): string {
 }
 
 .status.failed {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .chevron {
@@ -157,7 +157,7 @@ function statusText(status: string): string {
 
 .error {
   margin: 0 0 8px 18px;
-  color: var(--danger);
+  color: var(--danger-text);
   font: var(--code-font-size) / 1.45 var(--font-mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;

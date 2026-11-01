@@ -28,7 +28,7 @@ defineProps<{ state: ToolState; delayFraction: number }>()
 }
 
 .lock {
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .hollow {

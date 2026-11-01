@@ -324,15 +324,15 @@ function cancel(): void {
 .status.awaiting_permission,
 .status.awaiting-answer,
 .status.delayed {
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .status.running:not(.awaiting-answer) {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .status.error {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .clock {
@@ -367,7 +367,7 @@ function cancel(): void {
 .error-line {
   padding: 0 14px 8px;
   overflow: hidden;
-  color: var(--danger);
+  color: var(--danger-text);
   font: var(--small-font-size) var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;

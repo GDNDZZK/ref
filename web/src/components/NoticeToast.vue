@@ -83,15 +83,15 @@ watch(
 
 .icon {
   display: flex;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .warn .icon {
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .error .icon {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .text {

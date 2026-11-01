@@ -114,7 +114,7 @@ async function restart(): Promise<void> {
 
 .icon {
   flex: none;
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .text {

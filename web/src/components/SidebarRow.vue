@@ -226,7 +226,7 @@ function openMenu(event: MouseEvent): void {
   outline: 0;
   border-radius: var(--radius-small);
   background: var(--background);
-  box-shadow: 0 0 0 2px var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-text); /* the field's focus ring */
   color: var(--text);
   font: inherit;
   font-size: calc(var(--font-size) - 2px);
@@ -258,7 +258,7 @@ function openMenu(event: MouseEvent): void {
 }
 
 .progress.complete {
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .mark {
@@ -267,7 +267,7 @@ function openMenu(event: MouseEvent): void {
 }
 
 .lock {
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .close {
@@ -315,10 +315,10 @@ function openMenu(event: MouseEvent): void {
 }
 
 .subtitle.warning {
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .subtitle.danger {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 </style>

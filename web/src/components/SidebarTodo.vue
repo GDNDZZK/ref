@@ -50,7 +50,7 @@ const list = computed(() => [...(props.todos ?? [])])
 }
 
 .count.complete {
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .todo-section .list {

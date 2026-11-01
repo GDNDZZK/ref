@@ -18,6 +18,6 @@ defineProps<{ danger?: boolean }>()
 
 .danger {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 50%, transparent);
-  color: var(--danger);
+  color: var(--danger-text);
 }
 </style>

@@ -126,7 +126,7 @@ const contextTitle = computed(() => {
 }
 
 .warning {
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 /* A highlight three characters wide sweeps over the label once per period. */
@@ -145,7 +145,7 @@ const contextTitle = computed(() => {
 }
 
 .shimmer.accent {
-  --shimmer-high: var(--accent);
+  --shimmer-high: var(--accent-text);
 }
 
 @keyframes shimmer {
@@ -166,11 +166,11 @@ const contextTitle = computed(() => {
 }
 
 .context.warning {
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .context.danger {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .bar {

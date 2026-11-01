@@ -117,7 +117,7 @@ const elapsed = computed(() => (info.value ? runningTime(info.value, now.value) 
 }
 
 .tile.focused {
-  box-shadow: inset 0 0 0 1px var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-text);
 }
 
 .tile.zoomed {
@@ -183,7 +183,7 @@ const elapsed = computed(() => (info.value ? runningTime(info.value, now.value) 
 }
 
 .progress.complete {
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .mark {
@@ -192,7 +192,7 @@ const elapsed = computed(() => (info.value ? runningTime(info.value, now.value) 
 }
 
 .lock {
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .zoom {
