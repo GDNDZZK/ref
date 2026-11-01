@@ -39,14 +39,11 @@ ModalDialog {
 					width: Theme.statusDotSize
 					height: Theme.statusDotSize
 					radius: width / 2
-					color: server.modelData.status === "connected" ? Theme.success
-						: server.modelData.status === "failed" ? Theme.danger
-						: server.modelData.status === "connecting" ? Theme.accent
-						: Theme.idleDot
+					color: McpStatus.colorOf(server.modelData.status)
 				}
 				Pulse {
 					target: dot
-					running: server.modelData.status === "connecting"
+					running: server.modelData.status === McpStatus.connecting
 				}
 
 				Text {
@@ -66,7 +63,7 @@ ModalDialog {
 					height: Theme.sidebarHistoryRowHeight
 					verticalAlignment: Text.AlignVCenter
 					text: server.modelData.status
-					color: server.modelData.status === "failed" ? Theme.danger : Theme.textMuted
+					color: server.modelData.status === McpStatus.failed ? Theme.danger : Theme.textMuted
 					font.pixelSize: Theme.captionFontSize
 				}
 				Chevron {
