@@ -14,6 +14,23 @@ use std::time::{Duration, Instant};
 
 type Reply = Result<Value, String>;
 
+/// Sessions `ListHistory` returns when the client sets no limit.
+const HISTORY_DEFAULT_LIMIT: usize = 100;
+
+/// Files `ListFiles` returns by default, and at most.
+const FILES_DEFAULT_LIMIT: usize = 50;
+const FILES_MAX_LIMIT: usize = 500;
+
+/// Timeout of a `Shell` request (the `bash` tool takes seconds).
+const SHELL_TIMEOUT_SECS: u64 = 600;
+
+/// Time a ``!`cmd` `` in a command template may run.
+const EXPAND_SHELL_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long a directory's file list is reused, and how many directories are cached.
+const FILES_CACHE_TTL: Duration = Duration::from_secs(10);
+const FILES_CACHE_MAX_DIRS: usize = 32;
+
 fn live(hub: &Arc<Hub>, id: &str) -> Result<Arc<Session>, String> {
     hub.session(id)
         .ok_or_else(|| format!("Session {id} is not live (attach to it first)."))
@@ -285,7 +302,9 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> Reply {
         Request::ListFiles { cwd, query, limit } => {
             let cwd = hub.effective_cwd(&cwd);
             let files = list_files(hub, &cwd).await?;
-            let limit = limit.unwrap_or(50).clamp(1, 500);
+            let limit = limit
+                .unwrap_or(FILES_DEFAULT_LIMIT)
+                .clamp(1, FILES_MAX_LIMIT);
             let res = tokio::task::spawn_blocking(move || fuzzy_filter(&files, &query, limit))
                 .await
                 .map_err(|e| e.to_string())?;
@@ -299,7 +318,7 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> Reply {
 async fn list_history(hub: &Arc<Hub>, cwd: Option<String>, limit: Option<usize>) -> Reply {
     let store = hub.store.clone();
     let cwd = cwd.filter(|c| !c.is_empty());
-    let (c2, limit) = (cwd.clone(), limit.unwrap_or(100));
+    let (c2, limit) = (cwd.clone(), limit.unwrap_or(HISTORY_DEFAULT_LIMIT));
     let mut list = tokio::task::spawn_blocking(move || store.list_for(c2, Some(limit)))
         .await
         .map_err(|e| e.to_string())?;
@@ -692,7 +711,12 @@ async fn run_shell(hub: Arc<Hub>, s: Arc<Session>, command: String) {
         on_output: None,
         resize_images: false,
     };
-    let out = ref_tools::execute("bash", json!({"command": command, "timeout": 600}), &ctx).await;
+    let out = ref_tools::execute(
+        crate::toolset::BASH,
+        json!({"command": command, "timeout": SHELL_TIMEOUT_SECS}),
+        &ctx,
+    )
+    .await;
     let text = format!(
         "I ran this command:\n```\n$ {command}\n{}\n```",
         out.text.trim_end()
@@ -738,7 +762,7 @@ async fn expand_shell(text: &str, cwd: &str) -> String {
         };
         out.push_str(&text[last..m.start()]);
         let res = tokio::time::timeout(
-            Duration::from_secs(30),
+            EXPAND_SHELL_TIMEOUT,
             tokio::process::Command::new(ref_tools::default_shell())
                 .arg("-c")
                 .arg(cmd.as_str())
@@ -763,7 +787,7 @@ async fn expand_shell(text: &str, cwd: &str) -> String {
 
 async fn list_files(hub: &Arc<Hub>, cwd: &str) -> Result<Arc<Vec<String>>, String> {
     if let Some((t, v)) = lock(&hub.files_cache).get(cwd)
-        && t.elapsed() < Duration::from_secs(10)
+        && t.elapsed() < FILES_CACHE_TTL
     {
         return Ok(v.clone());
     }
@@ -776,7 +800,7 @@ async fn list_files(hub: &Arc<Hub>, cwd: &str) -> Result<Arc<Vec<String>>, Strin
         .map_err(|e| e.to_string())?;
     let files = Arc::new(files);
     let mut cache = lock(&hub.files_cache);
-    if cache.len() > 32 {
+    if cache.len() > FILES_CACHE_MAX_DIRS {
         cache.clear();
     }
     cache.insert(cwd.to_string(), (Instant::now(), files.clone()));
