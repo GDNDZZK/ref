@@ -153,10 +153,17 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
 #[cfg(unix)]
 fn make_executable(path: &std::path::Path) {
     use std::os::unix::fs::PermissionsExt;
-    if let Ok(m) = std::fs::metadata(path) {
-        let mut p = m.permissions();
-        p.set_mode(p.mode() | ((p.mode() & 0o444) >> 2));
-        let _ = std::fs::set_permissions(path, p);
+    let m = match std::fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::warn!("write: cannot read permissions of {}: {e}", path.display());
+            return;
+        }
+    };
+    let mut p = m.permissions();
+    p.set_mode(p.mode() | ((p.mode() & 0o444) >> 2));
+    if let Err(e) = std::fs::set_permissions(path, p) {
+        tracing::warn!("write: cannot make {} executable: {e}", path.display());
     }
 }
 
