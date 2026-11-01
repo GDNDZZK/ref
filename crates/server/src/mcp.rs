@@ -45,7 +45,7 @@ impl McpServer {
             .and_then(|c| c.instructions())
             .filter(|s| !s.trim().is_empty())
     }
-    pub async fn wait_ready(&self, timeout: Duration) {
+    pub(crate) async fn wait_ready(&self, timeout: Duration) {
         let mut rx = self.ready.subscribe();
         let _ = tokio::time::timeout(timeout, rx.wait_for(|v| *v)).await;
     }
@@ -98,7 +98,7 @@ fn server_config(name: &str, cfg: &McpConfig) -> ServerConfig {
 
 impl McpManager {
     /// Servers (enabled) for a config, sorted by name; starts connecting new ones in the background.
-    pub fn servers_for(&self, cfg: &Config) -> Vec<Arc<McpServer>> {
+    pub(crate) fn servers_for(&self, cfg: &Config) -> Vec<Arc<McpServer>> {
         let mut out = Vec::new();
         let mut map = lock(&self.servers);
         for (name, sc) in &cfg.mcp {
@@ -169,7 +169,7 @@ impl McpManager {
     }
 
     /// Status lines for GetConfig: (name, status text).
-    pub fn status_lines(&self, cfg: &Config) -> Vec<(String, String)> {
+    pub(crate) fn status_lines(&self, cfg: &Config) -> Vec<(String, String)> {
         self.status(cfg)
             .into_iter()
             .map(|s| {
@@ -183,7 +183,7 @@ impl McpManager {
             .collect()
     }
 
-    pub async fn close_all(&self) {
+    pub(crate) async fn close_all(&self) {
         let all: Vec<Arc<McpServer>> = lock(&self.servers).drain().map(|(_, v)| v).collect();
         for s in all {
             if let Some(c) = s.client() {
