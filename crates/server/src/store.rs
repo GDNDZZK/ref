@@ -304,25 +304,23 @@ fn db_thread(data_dir: &Path, path: &Path, rx: mpsc::Receiver<Cmd>) {
                     }
                 }
                 Cmd::Load(id, r) => {
-                    let _ = r.send(load(db, &mut cache, &id));
+                    answer(r, load(db, &mut cache, &id));
                 }
                 Cmd::Exists(id, r) => {
-                    let _ = r.send(exists(db, &id));
+                    answer(r, exists(db, &id));
                 }
                 Cmd::List { cwd, limit, reply } => {
-                    let _ = reply.send(list(db, cwd.as_deref(), limit));
+                    answer(reply, list(db, cwd.as_deref(), limit));
                 }
                 Cmd::Delete(id, r) => {
                     cache.remove(&id);
-                    let _ = r.send(delete(db, &id));
+                    answer(r, delete(db, &id));
                 }
-                Cmd::Flush(r) => {
-                    let _ = r.send(Ok(()));
-                }
+                Cmd::Flush(r) => answer(r, Ok(())),
                 Cmd::Close(r) => {
                     conn = None;
                     cache.clear();
-                    let _ = r.send(Ok(()));
+                    answer(r, Ok(()));
                 }
             }
         }
@@ -351,25 +349,20 @@ fn superseded_saves(batch: &[Cmd]) -> Vec<bool> {
     skip
 }
 
+/// Sends the result to the caller. A dropped receiver means the caller stopped waiting.
+fn answer<T>(reply: Reply<T>, result: Result<T, String>) {
+    let _ = reply.send(result);
+}
+
 fn fail(c: Cmd, msg: &str) {
     let m = msg.to_string();
     match c {
         Cmd::Save(_) => {}
-        Cmd::Load(_, r) => {
-            let _ = r.send(Err(m));
-        }
-        Cmd::Exists(_, r) => {
-            let _ = r.send(Err(m));
-        }
-        Cmd::List { reply, .. } => {
-            let _ = reply.send(Err(m));
-        }
-        Cmd::Delete(_, r) | Cmd::Flush(r) => {
-            let _ = r.send(Err(m));
-        }
-        Cmd::Close(r) => {
-            let _ = r.send(Ok(()));
-        }
+        Cmd::Load(_, r) => answer(r, Err(m)),
+        Cmd::Exists(_, r) => answer(r, Err(m)),
+        Cmd::List { reply, .. } => answer(reply, Err(m)),
+        Cmd::Delete(_, r) | Cmd::Flush(r) => answer(r, Err(m)),
+        Cmd::Close(r) => answer(r, Ok(())),
     }
 }
 
