@@ -86,7 +86,7 @@ async fn tunnel(state: Arc<AppState>, mut browser: WebSocket) {
     let ended = pump(&state, &mut browser, &mut upstream).await;
     match ended {
         Ended::BrowserClosed => {
-            let _ = upstream.close(None).await;
+            close_upstream(&mut upstream).await;
         }
         Ended::UpstreamClosed(close) => {
             let (code, reason) = close.unwrap_or((
@@ -96,7 +96,7 @@ async fn tunnel(state: Arc<AppState>, mut browser: WebSocket) {
             close_browser(&mut browser, code, &reason).await;
         }
         Ended::Shutdown => {
-            let _ = upstream.close(None).await;
+            close_upstream(&mut upstream).await;
             close_browser(&mut browser, CLOSE_GOING_AWAY, SHUTDOWN_REASON).await;
         }
     }
@@ -177,11 +177,20 @@ async fn pump(state: &AppState, browser: &mut WebSocket, upstream: &mut Ws) -> E
 async fn send_to_browser(browser: &mut WebSocket, message: Message, heartbeat: Heartbeat) -> bool {
     match tokio::time::timeout(heartbeat.pong_timeout, browser.send(message)).await {
         Ok(Ok(())) => true,
-        Ok(Err(_)) => false,
+        Ok(Err(e)) => {
+            tracing::debug!("browser is gone: {e}");
+            false
+        }
         Err(_) => {
             tracing::debug!("browser does not take data, dropping it");
             false
         }
+    }
+}
+
+async fn close_upstream(upstream: &mut Ws) {
+    if let Err(e) = upstream.close(None).await {
+        tracing::debug!("cannot close the backend connection: {e}");
     }
 }
 
@@ -217,7 +226,9 @@ async fn close_browser(browser: &mut WebSocket, code: u16, reason: &str) {
         code,
         reason: reason.into(),
     };
-    let _ = browser.send(Message::Close(Some(frame))).await;
+    if let Err(e) = browser.send(Message::Close(Some(frame))).await {
+        tracing::debug!("cannot send the close frame to the browser: {e}");
+    }
 }
 
 #[cfg(test)]
