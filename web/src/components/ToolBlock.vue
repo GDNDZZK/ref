@@ -184,12 +184,6 @@ function cancel(): void {
       <Chevron class="chevron" :class="{ open: expanded, hidden: !hasContent || awaitingPermission }" />
     </div>
     <TodoList v-if="isTodo" :todos="todos" />
-    <ToolPermission
-      v-if="showPermission"
-      :request="block.permission"
-      :waiting="Math.max(0, session.permissions.length - 1)"
-      @answer="answer"
-    />
     <ToolQuestion
       v-if="showQuestion"
       :form="block.question && session.questionForm(block.question)"
@@ -207,6 +201,13 @@ function cancel(): void {
         <ToolBody v-if="bodyBuilt" :block="block" />
       </div>
     </div>
+    <!-- After the body, as in the GUI: the end of the conversation shows the buttons, not the input. -->
+    <ToolPermission
+      v-if="showPermission"
+      :request="block.permission"
+      :waiting="Math.max(0, session.permissions.length - 1)"
+      @answer="answer"
+    />
     <span class="outline" />
   </div>
 </template>

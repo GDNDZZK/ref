@@ -48,19 +48,19 @@ function undo(): void {
 
 <template>
   <div class="meta" :class="{ lit, user: !assistant }">
-    <template v-if="assistant">
-      <span class="agent" :style="{ '--agent': color }">
+    <div v-if="assistant" class="facts">
+      <span class="fact agent" :style="{ '--agent': color }">
         <StatusDot :running="block.streaming" :failed="false" :color="color" />
         <span class="agent-name">{{ agentName }}</span>
       </span>
-      <template v-if="block.model">
+      <span v-if="block.model" class="fact">
         <span class="sep">·</span>
         <span
           >{{ block.model }}<span v-if="block.variant" class="variant"> {{ block.variant }}</span></span
         >
-      </template>
-      <span class="sep">·</span>
-      <span :title="fullDate">
+      </span>
+      <span class="fact" :title="fullDate">
+        <span class="sep">·</span>
         <template v-if="block.streaming">{{ formatElapsed(now - block.time) }}</template>
         <template v-else
           >{{ formatClock(block.time)
@@ -69,15 +69,15 @@ function undo(): void {
           ></template
         >
       </span>
-      <template v-if="block.tokensIn > 0 || block.tokensOut > 0">
+      <span v-if="block.tokensIn > 0 || block.tokensOut > 0" class="fact">
         <span class="sep">·</span>
         <span>↑ {{ formatTokens(block.tokensIn) }} ↓ {{ formatTokens(block.tokensOut) }}</span>
-      </template>
-      <span v-if="tokensPerSecond > 0" class="rate">{{
+      </span>
+      <span v-if="tokensPerSecond > 0" class="fact rate">{{
         t('meta.tokensPerSecond', { rate: tokensPerSecond })
       }}</span>
-      <span v-if="block.interrupted" class="interrupted">{{ t('meta.interrupted') }}</span>
-    </template>
+      <span v-if="block.interrupted" class="fact interrupted">{{ t('meta.interrupted') }}</span>
+    </div>
     <template v-else>
       <span :title="fullDate">{{ formatClock(block.time) }}</span>
       <template v-if="block.canUndo">
@@ -94,10 +94,13 @@ function undo(): void {
 
 <style scoped>
 .meta {
+  --row-height: 24px;
+
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 24px;
+  min-height: var(--row-height);
+  white-space: nowrap;
   color: var(--text-muted);
   font-size: var(--small-font-size);
   opacity: 0.6;
@@ -112,8 +115,29 @@ function undo(): void {
   justify-content: flex-end;
 }
 
-.meta:not(.user) .copy {
-  margin-left: auto;
+/* The reply's facts, left. A fact that does not fit wraps below the row and is clipped with all
+   that follow it (as in the GUI), so a fact never breaks inside and never runs under the actions. */
+.facts {
+  display: flex;
+  flex: 1 1 0;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  align-items: center;
+  gap: 0 8px;
+  min-width: 0;
+  height: var(--row-height);
+  overflow: hidden;
+}
+
+.fact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--row-height); /* a whole row, so the wrapped part starts below the clip */
+}
+
+.copy {
+  flex: none;
 }
 
 .agent {
