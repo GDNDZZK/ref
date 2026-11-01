@@ -7,7 +7,7 @@ use crossterm::event::{
 };
 use ratatui::layout::{Position, Rect};
 
-use crate::app::{ARMED_KEY_TIMEOUT, AcKind, App, COMMANDS, Mode, cmd};
+use crate::app::{ARMED_KEY_TIMEOUT, App, COMMANDS, Mode, cmd};
 use crate::render;
 use crate::ui::dialog::{Dialog, Kind};
 use crate::ui::editor::Editor;
@@ -21,14 +21,15 @@ const SHIFT: KeyModifiers = KeyModifiers::SHIFT;
 /// Keys right after a modal opens were meant for the prompt: they are not taken as answers.
 const MODAL_GRACE: Duration = Duration::from_millis(350);
 
-/// Appends a line to `$REF_TUI_LOG` (debugging aid; no-op when unset).
+/// Path from `$REF_TUI_LOG`, if set.
 fn log_path() -> Option<&'static std::path::PathBuf> {
     static PATH: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
     PATH.get_or_init(|| std::env::var_os("REF_TUI_LOG").map(Into::into))
         .as_ref()
 }
 
-pub fn debug_log(s: &str) {
+/// Appends a line to `$REF_TUI_LOG` (debugging aid; no-op when unset).
+fn debug_log(s: &str) {
     use std::io::Write;
     if let Some(p) = log_path()
         && let Ok(mut f) = std::fs::OpenOptions::new()
@@ -36,6 +37,7 @@ pub fn debug_log(s: &str) {
             .append(true)
             .open(p)
     {
+        // A failed write must not disturb the UI it is debugging.
         let _ = writeln!(f, "{} {s}", ref_proto::now_ms());
     }
 }
@@ -57,7 +59,6 @@ pub fn handle(app: &mut App, ev: Event) {
         Event::Key(k) if k.kind != KeyEventKind::Release => key(app, k),
         Event::Mouse(m) => mouse(app, m),
         Event::Paste(s) => paste(app, s),
-        Event::Resize(..) => {}
         _ => {}
     }
 }
@@ -401,16 +402,13 @@ fn chat_key(app: &mut App, k: KeyEvent) {
             KeyCode::Char('n') if m == CTRL => return ac_move(app, 1),
             KeyCode::Tab => {
                 app.accept_completion(false);
-                app.update_autocomplete_after_accept();
+                refresh_autocomplete_after_accept(app);
                 return;
             }
             KeyCode::Enter if m.is_empty() => {
-                let is_slash = app.ac.as_ref().is_some_and(|a| a.kind == AcKind::Slash);
-                let ran = app.accept_completion(true);
-                if !ran && is_slash {
-                    // Command with args: completed text stays for the user to type args.
-                }
-                app.update_autocomplete_after_accept();
+                // A command with args stays completed for the user to type them.
+                app.accept_completion(true);
+                refresh_autocomplete_after_accept(app);
                 return;
             }
             KeyCode::Esc => {
@@ -1043,7 +1041,7 @@ fn mouse(app: &mut App, me: MouseEvent) {
                     if idx < ac.items.len() {
                         ac.sel = idx;
                         app.accept_completion(true);
-                        app.update_autocomplete_after_accept();
+                        refresh_autocomplete_after_accept(app);
                     }
                 }
                 MouseEventKind::Moved => {
@@ -1265,19 +1263,14 @@ fn watch_mouse(app: &mut App, me: MouseEvent) {
     }
 }
 
-impl App {
-    pub fn update_autocomplete_after_accept(&mut self) {
-        // After accepting a slash command needing args, or a file, close the popup.
-        if self.ac.is_none()
-            && self.editor.mention().is_none()
-            && !self.editor.text.starts_with('/')
-        {
-            return;
-        }
-        if self.editor.text.ends_with(' ') {
-            self.ac = None;
-        } else {
-            self.update_autocomplete();
-        }
+/// After accepting a slash command needing args, or a file, close the popup.
+fn refresh_autocomplete_after_accept(app: &mut App) {
+    if app.ac.is_none() && app.editor.mention().is_none() && !app.editor.text.starts_with('/') {
+        return;
+    }
+    if app.editor.text.ends_with(' ') {
+        app.ac = None;
+    } else {
+        app.update_autocomplete();
     }
 }
