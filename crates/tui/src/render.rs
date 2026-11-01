@@ -11,7 +11,7 @@ use crate::state::SessionView;
 use crate::text::{self, width};
 use crate::ui::chat::{self, Env};
 use crate::ui::dialog::Dialog;
-use crate::ui::editor::MIN_PROMPT_WIDTH;
+use crate::ui::editor::MIN_EDITOR_COLS;
 use crate::ui::footer::{self, StatusCtx};
 use crate::ui::message;
 use crate::ui::permission::PermissionView;
@@ -28,6 +28,8 @@ const PROMPT_MARGIN_X: u16 = 1;
 const PROMPT_TEXT_INSET: u16 = 3;
 /// Columns taken by the bar and the paddings around the editor text.
 const PROMPT_CHROME_COLS: u16 = 5;
+/// The prompt box is drawn only when it is wider than its chrome.
+const MIN_PROMPT_WIDTH: u16 = PROMPT_CHROME_COLS + 1;
 /// Rows around the editor text: pad, pad, meta row, bottom edge.
 const PROMPT_CHROME_ROWS: u16 = 4;
 /// The prompt box never gets fewer rows than this (pad, editor, meta).
@@ -62,7 +64,7 @@ pub fn chat_layout(app: &App, area: Rect) -> Layout {
     // Prompt box: bar(1) + pad(2) + text + pad(2) inside the side margins.
     let px = main.x + PROMPT_MARGIN_X;
     let pw = main.width.saturating_sub(2 * PROMPT_MARGIN_X);
-    let ew = (pw.saturating_sub(PROMPT_CHROME_COLS) as usize).max(MIN_PROMPT_WIDTH);
+    let ew = (pw.saturating_sub(PROMPT_CHROME_COLS) as usize).max(MIN_EDITOR_COLS);
     let max_h = EDITOR_MAX.min((area.height as usize / 3).max(1));
     let eh = app.editor.height(ew).clamp(1, max_h) as u16;
     let prompt_h = eh + PROMPT_CHROME_ROWS;
@@ -292,7 +294,7 @@ fn fill(buf: &mut Buffer, r: Rect, style: Style) {
 
 fn draw_prompt(buf: &mut Buffer, lay: &Layout, app: &mut App, focused: bool) -> Option<(u16, u16)> {
     let p = lay.prompt;
-    if p.height < MIN_PROMPT_ROWS || p.width < PROMPT_CHROME_COLS + 1 {
+    if p.height < MIN_PROMPT_ROWS || p.width < MIN_PROMPT_WIDTH {
         return None;
     }
     let bg = theme::PANEL;

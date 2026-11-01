@@ -11,8 +11,8 @@ use super::theme;
 use crate::text::{expand_tabs, gwidth, width};
 
 /// Most undo snapshots kept.
-/// The prompt is laid out in at least this many columns, however narrow the screen.
-pub const MIN_PROMPT_WIDTH: usize = 1;
+/// The editor is laid out in at least this many columns, however narrow the screen.
+pub const MIN_EDITOR_COLS: usize = 1;
 const UNDO_LIMIT: usize = 200;
 /// A paste of at least this many lines, or more than `PASTE_COLLAPSE_CHARS` characters, is
 /// collapsed into a token.
@@ -425,7 +425,7 @@ impl Editor {
     }
 
     fn vmove(&mut self, dir: i32) -> bool {
-        let rows = self.layout(self.last_width.max(MIN_PROMPT_WIDTH));
+        let rows = self.layout(self.last_width.max(MIN_EDITOR_COLS));
         let (r, col) = self.cursor_rc(&rows);
         let nr = r as i32 + dir;
         if nr < 0 || nr as usize >= rows.len() {
@@ -451,12 +451,12 @@ impl Editor {
     }
 
     pub fn on_first_row(&self) -> bool {
-        let rows = self.layout(self.last_width.max(MIN_PROMPT_WIDTH));
+        let rows = self.layout(self.last_width.max(MIN_EDITOR_COLS));
         self.cursor_rc(&rows).0 == 0
     }
 
     pub fn on_last_row(&self) -> bool {
-        let rows = self.layout(self.last_width.max(MIN_PROMPT_WIDTH));
+        let rows = self.layout(self.last_width.max(MIN_EDITOR_COLS));
         self.cursor_rc(&rows).0 + 1 >= rows.len()
     }
 
@@ -602,7 +602,7 @@ impl Editor {
     /// Byte offset under screen cell (x, y) for the editor drawn at `area`. Rows above or below
     /// the area map to the row just outside the view, so dragging there scrolls.
     pub fn offset_at(&self, area: Rect, x: u16, y: u16) -> usize {
-        let rows = self.layout((area.width as usize).max(MIN_PROMPT_WIDTH));
+        let rows = self.layout((area.width as usize).max(MIN_EDITOR_COLS));
         let ri = if y < area.y {
             self.scroll.saturating_sub(1)
         } else if y >= area.y + area.height {
