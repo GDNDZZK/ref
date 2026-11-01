@@ -78,6 +78,17 @@ LOCKUP_GAP = 56
 LOCKUP_SCALE = 20
 WORD_OFFSETS = {"r": 0.0, "e": 6.4, "f": 16.3}  # 0.8 u of air between the letters
 
+# Compact lockup: the small mark at 24px and "ref", for the sidebar header. Set in pixels at 1x (2x
+# doubles every number). The letters are the same paths at their own size and weight: 2px stroke, so
+# every straight edge and the e's bar are on whole pixels, and air loosened for the small size.
+COMPACT_HEIGHT = 24  # the mark's size and the height of the file
+COMPACT_SCALE = Fraction(4, 3)  # px per u: x-height 8 between stroke centres, the e's bar at 4
+COMPACT_STROKE = 2
+COMPACT_GAP = 7  # tile edge to the word's r stem
+COMPACT_BASELINE = 18  # the word's baseline edge on the mark's r baseline (ink bottom 24 of 32)
+COMPACT_AIR_R_E = Fraction(5, 3)  # r's arm end to e's bowl; keeps the e's left edge on a pixel
+COMPACT_AIR_E_F = 2  # e's bowl to f's crossbar
+
 
 def svg_doc(width: float, height: float, body: str, defs: str = "") -> str:
     defs_block = f"\n  <defs>{defs}\n  </defs>" if defs else ""
@@ -138,13 +149,16 @@ def large() -> str:
     return svg_doc(TILE, TILE, body, defs)
 
 
-def small(alert: bool = False) -> str:
-    colour = DANGER if alert else ACCENT
-    return svg_doc(SMALL_TILE, SMALL_TILE, "\n".join([
+def small_body(dot_colour: str) -> str:
+    return "\n".join([
         f'  <rect width="{SMALL_TILE}" height="{SMALL_TILE}" rx="{SMALL_TILE_RADIUS}" fill="{TILE_BOTTOM}"/>',
         f'  <path d="{SMALL_R}" fill="none" stroke="{INK}" stroke-width="{SMALL_STROKE}" stroke-linecap="round" stroke-linejoin="round"/>',
-        f'  <circle cx="{SMALL_DOT[0]}" cy="{SMALL_DOT[1]}" r="{SMALL_DOT_RADIUS}" fill="{colour}"/>',
-    ]))
+        f'  <circle cx="{SMALL_DOT[0]}" cy="{SMALL_DOT[1]}" r="{SMALL_DOT_RADIUS}" fill="{dot_colour}"/>',
+    ])
+
+
+def small(alert: bool = False) -> str:
+    return svg_doc(SMALL_TILE, SMALL_TILE, small_body(DANGER if alert else ACCENT))
 
 
 def lockup(on_dark: bool) -> str:
@@ -163,3 +177,25 @@ def lockup(on_dark: bool) -> str:
     word = "\n".join(letter(ch, x0 + WORD_OFFSETS[ch] * k, y0, k, colour) for ch in "ref")
     width = x0 + word_right * k + LOCKUP_PAD
     return svg_doc(round(width), LOCKUP_HEIGHT, mark + "\n" + word, defs)
+
+
+def compact_lockup(on_dark: bool) -> str:
+    """The small mark and "ref" in COMPACT_HEIGHT px, with no padding around the ink."""
+    k, half = COMPACT_SCALE, Fraction(COMPACT_STROKE, 2)
+    r_x = COMPACT_HEIGHT + COMPACT_GAP + half  # stem centre lines
+    e_x = r_x + Fraction(R_ARM_END) * k + half + COMPACT_AIR_R_E + half  # bowl's left centre line
+    f_x = e_x + 6 * k + half + COMPACT_AIR_E_F + half + Fraction(3, 2) * k  # crossbar starts 1.5 u left of the stem
+    width = f_x + 3 * k + half  # the f's hook
+    y = COMPACT_BASELINE - half - X_HEIGHT * k  # x-height centre line
+    # Stems, the e's bowl sides, x-height, the e's bar and the baseline on whole pixels.
+    for edge in (r_x - half, e_x - half, e_x + 6 * k + half, f_x - half, y - half, y + 3 * k - half, width):
+        assert edge.denominator == 1, edge
+
+    colour = INK if on_dark else INK_ON_LIGHT
+    scale = COMPACT_HEIGHT / SMALL_TILE
+    mark = f'  <g transform="scale({scale:g})">\n{small_body(ACCENT)}\n  </g>'
+    word = "\n".join(
+        f'  <path transform="translate({float(x):g} {float(y):g}) scale({float(k):.6f})" d="{LETTERS[ch]}" fill="none" '
+        f'stroke="{colour}" stroke-width="{float(COMPACT_STROKE / k):g}" stroke-linecap="round" stroke-linejoin="round"/>'
+        for ch, x in (("r", r_x), ("e", e_x), ("f", f_x)))
+    return svg_doc(float(width), COMPACT_HEIGHT, mark + "\n" + word)
