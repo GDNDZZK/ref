@@ -23,6 +23,7 @@ export const colors = {
     warning: '#b7791f',
     warningSurface: '#fcf4e2',
     warningBorder: '#ecd29a',
+    idleDot: '#6b6d7580',
     scrim: '#00000040',
     info: '#2a7fb5',
     diffAdded: '#1f7a4d',
@@ -62,6 +63,7 @@ export const colors = {
     warning: '#e6b450',
     warningSurface: '#2b2417',
     warningBorder: '#5a4723',
+    idleDot: '#8e909a80',
     scrim: '#0000008c',
     info: '#6fb7e0',
     diffAdded: '#6cc28a',
@@ -85,6 +87,7 @@ export type ColorName = keyof typeof colors.light
 
 // px, except the ratios and counts in METRIC_UNITLESS of scripts/gen-theme.ts
 export const metrics = {
+  disabledOpacity: 0.4,
   staleOpacity: 0.55,
   fontSize: 15,
   smallFontSize: 12,
@@ -117,6 +120,7 @@ export const metrics = {
   dialogWidth: 480,
   dialogWidthWide: 640,
   settingsWidth: 520,
+  statusDotSize: 8,
   dialogPadding: 22,
   dialogHeaderHeight: 56,
   dialogFooterHeight: 64,

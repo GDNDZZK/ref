@@ -32,6 +32,7 @@ const METRIC_UNITLESS = [
   'paletteMaxRows',
   'toastMax',
   'staleOpacity',
+  'disabledOpacity',
 ]
 
 const MOTION_UNITS: Record<string, Unit> = {
