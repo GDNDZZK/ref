@@ -49,8 +49,9 @@ const TODO_DONE_MARK_T = 24.8
 // 16.5, too short to read; films that show it hold the frame of the recording's "report" mark
 // (about 16.0), with a spotlight on the line, until their caption about it has ended.
 const SCRIPTED_REPORT_AT = 16.0
-// The report line on the held frame, measured on both takes.
-const REPORT_LINE = { x: 0.246, y: 0.101, width: 0.322, height: 0.03 }
+// The report line on the held frame, measured on both takes; re-measure after a retake (the
+// message above it wraps differently from take to take).
+const REPORT_LINE = { x: 0.246, y: 0.084, width: 0.322, height: 0.028 }
 // Right after Allow the edit card shows the absolute mock path for a frame or two; the films
 // show the frame before it instead.
 const PATH_FRAMES = { from: 13.0, to: 13.3 }
