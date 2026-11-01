@@ -273,7 +273,7 @@ mod tests {
                     break;
                 }
             }
-            let _ = closed_tx.send(());
+            closed_tx.send(()).unwrap();
         });
         (url, closed_rx)
     }
@@ -301,7 +301,7 @@ mod tests {
                     break;
                 }
             }
-            let _ = closed_tx.send(());
+            closed_tx.send(()).unwrap();
         });
         (url, closed_rx)
     }
