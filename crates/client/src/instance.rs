@@ -34,7 +34,7 @@ pub(crate) fn instances(dir: &Path) -> Vec<InstanceInfo> {
 
 pub(crate) fn endpoint_for(i: &InstanceInfo) -> Endpoint {
     let host = match i.bind.as_str() {
-        "0.0.0.0" | "" | "::" | "[::]" => "127.0.0.1".to_string(),
+        ref_proto::ANY_V4 | "" | "::" | "[::]" => ref_proto::LOOPBACK_V4.to_string(),
         h if h.contains(':') && !h.starts_with('[') => format!("[{h}]"),
         h => h.to_string(),
     };

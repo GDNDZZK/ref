@@ -56,7 +56,7 @@ struct Cli {
 
 fn is_loopback(h: &str) -> bool {
     let h = h.trim().trim_start_matches('[').trim_end_matches(']');
-    h == "localhost"
+    h == ref_proto::LOCALHOST
         || h.parse::<std::net::IpAddr>()
             .is_ok_and(|ip| ip.is_loopback())
 }
@@ -135,7 +135,11 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         eprintln!("ref-server: cannot open log file {}: {e}", log.display());
     }
     let allow: Vec<String> = if cli.allow_host.is_empty() {
-        vec!["127.0.0.1".into(), "::1".into(), "localhost".into()]
+        vec![
+            ref_proto::LOOPBACK_V4.into(),
+            ref_proto::LOOPBACK_V6.into(),
+            ref_proto::LOCALHOST.into(),
+        ]
     } else {
         cli.allow_host
             .iter()
@@ -149,8 +153,8 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
             .trim_start_matches('[')
             .trim_end_matches(']')
             .to_string(),
-        None if allow.iter().any(|h| !is_loopback(h)) => "0.0.0.0".into(),
-        None => "127.0.0.1".into(),
+        None if allow.iter().any(|h| !is_loopback(h)) => ref_proto::ANY_V4.into(),
+        None => ref_proto::LOOPBACK_V4.into(),
     };
     let port = match cli.port {
         Some(p) if p != 0 => p,

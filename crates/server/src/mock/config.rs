@@ -31,7 +31,7 @@ fn document(llm_port: u16) -> Value {
                 "name": "Mock",
                 "api": "chat",
                 "options": {
-                    "baseURL": format!("http://127.0.0.1:{llm_port}"),
+                    "baseURL": format!("http://{}:{llm_port}", ref_proto::LOOPBACK_V4),
                     "apiKey": "mock",
                 },
                 "models": {

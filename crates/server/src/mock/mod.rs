@@ -131,7 +131,7 @@ async fn start_in(
     opts.idle_timeout = idle_timeout;
     opts.retry_base = retry_base;
     opts.sandbox_cwd = Some(workspace);
-    let allow = vec!["127.0.0.1".to_string()];
+    let allow = vec![ref_proto::LOOPBACK_V4.to_string()];
     let (auth, _) = ws::resolve_hosts(&allow, token);
-    crate::start(opts, "127.0.0.1", port, auth).await
+    crate::start(opts, ref_proto::LOOPBACK_V4, port, auth).await
 }

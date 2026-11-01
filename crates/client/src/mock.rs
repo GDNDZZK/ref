@@ -85,7 +85,7 @@ impl MockBackend {
         })?;
         Ok(MockBackend {
             endpoint: Endpoint {
-                url: format!("ws://127.0.0.1:{}/", announced.port),
+                url: format!("ws://{}:{}/", ref_proto::LOOPBACK_V4, announced.port),
                 token: Some(announced.token),
             },
             child,
