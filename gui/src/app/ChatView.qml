@@ -195,11 +195,10 @@ ListView {
 		}
 
 		// Basic's handle takes the system palette; this one follows Theme.
-		contentItem: Rectangle {
+		contentItem: ScrollHandle {
 			id: handle
-			implicitWidth: 6
-			radius: width / 2
-			color: scrollBar.pressed ? Theme.scrollHandlePressed : Theme.scrollHandle
+			implicitWidth: thickness
+			pressed: scrollBar.pressed
 			opacity: 0
 
 			Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
