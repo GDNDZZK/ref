@@ -13,7 +13,7 @@ use serde_json::Value;
 
 use crate::net::{Client, NetEvent};
 use crate::state::{Queued, SessionView};
-use crate::ui::dialog::{Dialog, HelpDialog, Item, Kind, ListDialog};
+use crate::ui::dialog::{Dialog, HelpDialog, Item, Kind, ListDialog, OPEN_SETTLE};
 use crate::ui::editor::{Editor, History};
 use crate::ui::permission::PermissionView;
 use crate::ui::question::QuestionView;
@@ -3024,11 +3024,11 @@ impl App {
             || self
                 .perm
                 .as_ref()
-                .is_some_and(|p| p.opened.elapsed() < Duration::from_millis(150))
+                .is_some_and(|p| p.opened.elapsed() < OPEN_SETTLE)
             || self
                 .question
                 .as_ref()
-                .is_some_and(|q| q.opened.elapsed() < Duration::from_millis(150));
+                .is_some_and(|q| q.opened.elapsed() < OPEN_SETTLE);
         if fast {
             return Some(Duration::from_millis(16));
         }

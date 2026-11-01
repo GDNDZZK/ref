@@ -1,6 +1,6 @@
 //! Centered overlay dialogs: fuzzy-filtered lists (palette, sessions, models, agents) and help.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -10,6 +10,16 @@ use ratatui::text::{Line, Span};
 use super::editor::Editor;
 use super::text::{self, width};
 use super::theme;
+
+/// Length of the open animation, in seconds.
+pub const OPEN_ANIM_SECS: f32 = 0.12;
+/// How long after opening a dialog still needs redraws (the animation plus a margin).
+pub const OPEN_SETTLE: Duration = Duration::from_millis(150);
+
+/// Open animation progress of an overlay opened at `opened`, from 0 to 1.
+pub fn open_progress(opened: Instant) -> f32 {
+    (opened.elapsed().as_secs_f32() / OPEN_ANIM_SECS).min(1.0)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Kind {
@@ -186,7 +196,7 @@ impl ListDialog {
     pub fn draw(&mut self, buf: &mut Buffer, screen: Rect, tick: u64) {
         let w = (screen.width.saturating_sub(4)).clamp(30, 84);
         let h = screen.height.saturating_sub(4).clamp(8, 28);
-        let t = (self.opened.elapsed().as_secs_f32() / 0.12).min(1.0);
+        let t = open_progress(self.opened);
         let r = frame(buf, screen, w, h, &self.title, t);
         self.rect = r;
         let inner = Rect::new(
@@ -662,7 +672,7 @@ impl HelpDialog {
     }
 
     pub fn draw(&mut self, buf: &mut Buffer, screen: Rect) {
-        let t = (self.opened.elapsed().as_secs_f32() / 0.12).min(1.0);
+        let t = open_progress(self.opened);
         let w = screen
             .width
             .saturating_sub(4)
@@ -718,6 +728,6 @@ impl Dialog {
             Dialog::Help(d) => d.opened,
             Dialog::Mcp(d) => d.opened,
         };
-        o.elapsed().as_secs_f32() < 0.15
+        o.elapsed() < OPEN_SETTLE
     }
 }
