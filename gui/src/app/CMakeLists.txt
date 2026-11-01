@@ -102,6 +102,8 @@ qt_add_qml_module(ref-gui
 		WebfetchBody.qml
 		SessionBody.qml
 		TodoBody.qml
+		TodoList.qml
+		TodoProgress.qml
 		CommandBox.qml
 		LineView.qml
 		ToolChip.qml

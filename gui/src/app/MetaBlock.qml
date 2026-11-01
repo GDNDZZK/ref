@@ -62,21 +62,30 @@ Block {
 
 		HoverHandler { id: hover }
 
-		// The reply's facts, left.
-		Row {
+		// The reply's facts, left. A fact that does not fit before the actions wraps below the line and is
+		// cut off with all that follows it, so the facts never run under the actions.
+		Flow {
 			visible: !block.fromUser
-			anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+			anchors.left: parent.left
+			width: Math.max(0, row.width - actions.width - block.itemSpacing)
+			height: block.rowHeight
 			spacing: block.itemSpacing
+			clip: true
 
-			Rectangle {
-				id: agentDot
-				anchors.verticalCenter: parent.verticalCenter
+			Item {
 				width: 8
-				height: 8
-				radius: 4
-				color: block.errored ? Theme.textMuted : block.agentColor
+				height: block.rowHeight
 
-				Pulse { target: agentDot; running: block.working; dimmed: 0.5 }
+				Rectangle {
+					id: agentDot
+					anchors.centerIn: parent
+					width: 8
+					height: 8
+					radius: 4
+					color: block.errored ? Theme.textMuted : block.agentColor
+
+					Pulse { target: agentDot; running: block.working; dimmed: 0.5 }
+				}
 			}
 			MetaText {
 				text: block.agentTitle
@@ -119,6 +128,7 @@ Block {
 
 		// The actions, right.
 		Row {
+			id: actions
 			anchors { right: parent.right; verticalCenter: parent.verticalCenter }
 			spacing: block.itemSpacing
 

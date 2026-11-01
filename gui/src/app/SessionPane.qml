@@ -194,6 +194,7 @@ Item {
 		session: pane.session
 		anchors { horizontalCenter: parent.horizontalCenter; bottom: composer.top }
 		width: chat.columnWidth
+		onTodoDismissed: pane.focusInput()
 	}
 
 	Composer {
