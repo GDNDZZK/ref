@@ -27,15 +27,15 @@ const TAG_MASK: u32 = 0xffff;
 const BITS_PER_WORD: usize = u64::BITS as usize;
 
 /// Hex digits in a tag.
-pub const TAG_LEN: usize = 4;
+const TAG_LEN: usize = 4;
 
 /// True if `s` is exactly [`TAG_LEN`] hex digits.
-pub fn is_tag(s: &str) -> bool {
+pub(crate) fn is_tag(s: &str) -> bool {
     s.len() == TAG_LEN && s.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// Matches a whole line that is a `[path#TAG]` header.
-pub static HEADER_RE: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static HEADER_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(r"^\s*\[[^#\r\n]+#[0-9a-fA-F]{{{TAG_LEN}}}\]\s*$")).expect("valid regex")
 });
 
