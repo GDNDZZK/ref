@@ -921,7 +921,7 @@ fn try_remap(
             if *og == 0 || *og == old_lines.len() {
                 continue;
             }
-            if *og >= 1 && *og <= old_lines.len() && map.get(*og) != Some(*ng) {
+            if map.get(*og) != Some(*ng) {
                 return None;
             }
             if *og < old_lines.len() && map.get(og + 1) != Some(ng + 1) {
