@@ -6,8 +6,22 @@ import { withMockPage } from './smokeLib.mjs'
 
 const RENDER_LIMIT_MS = 40000
 const COUNT = Number(process.argv[2] ?? 5000)
+const BYTES_PER_MB = 1048576
+const DRIFT_STEPS = 40
+const PROBE_MIN_TOP_PX = 200 // the probe row starts below the top edge, so it stays in view while scrolling up
+const SCROLL_FRAMES = 200
+const STREAM_FRAMES = 120
 
-function measure({ count, RENDER_LIMIT_MS }) {
+// Runs in the page, so it cannot use the module constants: they come in as `settings`.
+function measure({
+  count,
+  RENDER_LIMIT_MS,
+  BYTES_PER_MB,
+  DRIFT_STEPS,
+  PROBE_MIN_TOP_PX,
+  SCROLL_FRAMES,
+  STREAM_FRAMES,
+}) {
   const app = document.querySelector('#app').__vue_app__
   // The synthetic blocks go straight into the session's reactive state (private in TypeScript).
   const store = app.config.globalProperties.$pinia._s.get('workspace').current.state
@@ -130,7 +144,7 @@ function measure({ count, RENDER_LIMIT_MS }) {
     await frames()
     const settledMs = performance.now() - started
     const domNodes = document.getElementsByTagName('*').length
-    const heapMB = performance.memory ? performance.memory.usedJSHeapSize / 1048576 : null
+    const heapMB = performance.memory ? performance.memory.usedJSHeapSize / BYTES_PER_MB : null
     return { rendered, renderMs, scrollHeight, layoutMs, settledMs, domNodes, heapMB }
   }
 
@@ -141,8 +155,10 @@ function measure({ count, RENDER_LIMIT_MS }) {
     await frames()
     const STEP = 400
     const drifts = []
-    for (let step = 0; step < 40; step++) {
-      const probe = [...document.querySelectorAll('.frame')].find((f) => f.getBoundingClientRect().top > 200)
+    for (let step = 0; step < DRIFT_STEPS; step++) {
+      const probe = [...document.querySelectorAll('.frame')].find(
+        (f) => f.getBoundingClientRect().top > PROBE_MIN_TOP_PX,
+      )
       const before = probe.getBoundingClientRect().top
       scroller.scrollTop -= STEP
       await frames()
@@ -152,8 +168,8 @@ function measure({ count, RENDER_LIMIT_MS }) {
   }
 
   function measureScrolling(scroller) {
-    const stride = scroller.scrollHeight / 200
-    return frameTimes(200, (step) => (scroller.scrollTop = step * stride))
+    const stride = scroller.scrollHeight / SCROLL_FRAMES
+    return frameTimes(SCROLL_FRAMES, (step) => (scroller.scrollTop = step * stride))
   }
 
   // The last block grows by a word per frame, as a streaming reply does.
@@ -161,7 +177,7 @@ function measure({ count, RENDER_LIMIT_MS }) {
     scroller.scrollTop = scroller.scrollHeight
     await frames()
     let current = blocks
-    return frameTimes(120, (step) => {
+    return frameTimes(STREAM_FRAMES, (step) => {
       current = current.slice()
       const last = current.length - 1
       current[last] = { ...current[last], streaming: true, text: current[last].text + `word${step} ` }
@@ -182,7 +198,15 @@ function measure({ count, RENDER_LIMIT_MS }) {
 }
 
 const passed = await withMockPage(async (page) => {
-  const result = await page.evaluate(measure, { count: COUNT, RENDER_LIMIT_MS })
+  const result = await page.evaluate(measure, {
+    count: COUNT,
+    RENDER_LIMIT_MS,
+    BYTES_PER_MB,
+    DRIFT_STEPS,
+    PROBE_MIN_TOP_PX,
+    SCROLL_FRAMES,
+    STREAM_FRAMES,
+  })
   console.log(JSON.stringify({ blocks: COUNT, ...result }, null, 2))
 })
 process.exit(passed ? 0 : 1)
