@@ -132,23 +132,22 @@ pub fn resolve(hub: &Hub, q: &str, exclude: Option<&str>) -> Result<Arc<Session>
     let all = hub.sessions();
     let me = |s: &Arc<Session>| Some(s.id.as_str()) == exclude;
     let self_err = || "Error: that is your own session; choose another session.".to_string();
-    if let Some(s) = all.iter().find(|s| s.id == q) {
-        return if me(s) {
+    let accept = |s: &Arc<Session>| {
+        if me(s) {
             Err(self_err())
         } else {
             Ok(s.clone())
-        };
+        }
+    };
+    if let Some(s) = all.iter().find(|s| s.id == q) {
+        return accept(s);
     }
     let infos: Vec<(Arc<Session>, String)> = all
         .iter()
         .map(|s| (s.clone(), s.lock().info.name.clone()))
         .collect();
     if let Some((s, _)) = infos.iter().find(|(_, n)| n == q) {
-        return if me(s) {
-            Err(self_err())
-        } else {
-            Ok(s.clone())
-        };
+        return accept(s);
     }
     let lower = q.to_lowercase();
     let ci: Vec<&(Arc<Session>, String)> = infos
@@ -156,14 +155,7 @@ pub fn resolve(hub: &Hub, q: &str, exclude: Option<&str>) -> Result<Arc<Session>
         .filter(|(_, n)| n.to_lowercase() == lower)
         .collect();
     match ci.len() {
-        1 => {
-            let s = &ci[0].0;
-            if me(s) {
-                Err(self_err())
-            } else {
-                Ok(s.clone())
-            }
-        }
+        1 => accept(&ci[0].0),
         0 => {
             let names: Vec<String> = infos
                 .iter()
