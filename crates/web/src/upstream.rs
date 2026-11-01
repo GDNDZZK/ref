@@ -30,8 +30,10 @@ impl Upstream {
     /// Stops the mock backend, if there is one, so that it cleans up after itself.
     pub async fn shutdown(&self) {
         let Upstream::Mock(slot) = self else { return };
-        if let Some(backend) = slot.lock().await.take() {
-            backend.shutdown().await;
+        if let Some(backend) = slot.lock().await.take()
+            && let Err(e) = backend.shutdown().await
+        {
+            tracing::warn!("stopping the mock backend failed: {e}");
         }
     }
 
@@ -58,8 +60,10 @@ async fn connect_mock(slot: &Mutex<Option<MockBackend>>) -> Result<Ws, ConnectEr
             Ok(ws) => return Ok(ws),
             Err(e) if restarted => return Err(e),
             Err(_) => {
-                if let Some(old) = slot.take() {
-                    old.shutdown().await;
+                if let Some(old) = slot.take()
+                    && let Err(e) = old.shutdown().await
+                {
+                    tracing::warn!("stopping the mock backend failed: {e}");
                 }
                 restarted = true;
             }
