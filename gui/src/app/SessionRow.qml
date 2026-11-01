@@ -21,7 +21,6 @@ Item {
 	required property bool isCurrent
 	required property bool isTile
 
-	property double now: Date.now()
 	property bool renaming: false
 	readonly property bool working: Activity.isWorking(activity)
 	readonly property bool failed: Activity.isFailed(activity, hasError)
@@ -47,11 +46,10 @@ Item {
 	width: ListView.view ? ListView.view.width : 0
 	height: Theme.sidebarRowHeight
 
-	Timer {
-		interval: 1000
-		repeat: true
+	Ticker {
+		id: ticker
+		interval: Format.msPerSecond
 		running: row.busySince > 0 && row.visible
-		onTriggered: row.now = Date.now()
 	}
 
 	Rectangle {
@@ -129,7 +127,7 @@ Item {
 				: row.failed ? row.lastError.split("\n")[0]
 				: row.retrying ? qsTr("Retrying")
 				: row.activity === Activity.compacting ? qsTr("Compacting")
-				: row.busySince > 0 ? row.dirName + " · " + Format.elapsed(row.now - row.busySince)
+				: row.busySince > 0 ? row.dirName + " · " + Format.elapsed(ticker.now - row.busySince)
 				: row.dirName
 			color: row.hasPermission || row.retrying ? Theme.warning : row.failed ? Theme.danger : Theme.textMuted
 			font.pixelSize: Theme.smallFontSize
