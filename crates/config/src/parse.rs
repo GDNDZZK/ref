@@ -10,6 +10,9 @@ use ref_proto::ModelRef;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
+/// Default for `retry.max_delay`: the longest wait between two attempts, in seconds.
+const DEFAULT_RETRY_MAX_DELAY_SECS: u64 = 600;
+
 pub(crate) fn build(ctx: &mut Ctx, layers: &[Layer]) -> Config {
     let (merged, acc) = accumulate(ctx, layers);
     let Accum {
@@ -23,7 +26,7 @@ pub(crate) fn build(ctx: &mut Ctx, layers: &[Layer]) -> Config {
         permission,
         instructions,
         skill_paths: skills,
-        retry_max_delay: 600,
+        retry_max_delay: DEFAULT_RETRY_MAX_DELAY_SECS,
         images_auto_resize: true,
         ..Default::default()
     };
