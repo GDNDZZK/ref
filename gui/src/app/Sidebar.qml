@@ -130,7 +130,7 @@ Rectangle {
 			}
 			TapHandler {
 				id: newTap
-				onTapped: Commands.run("new")
+				onTapped: Commands.run(CommandId.newSession)
 			}
 
 			CircleButton {
@@ -139,7 +139,7 @@ Rectangle {
 				implicitWidth: 36
 				implicitHeight: 36
 				Accessible.name: qsTr("New session in another folder…")
-				onClicked: Commands.run("new-in")
+				onClicked: Commands.run(CommandId.newSessionIn)
 
 				Icon {
 					anchors.centerIn: parent
@@ -385,7 +385,7 @@ Rectangle {
 				}
 
 				HoverHandler { cursorShape: Qt.PointingHandCursor }
-				TapHandler { onTapped: Commands.run("mcp") }
+				TapHandler { onTapped: Commands.run(CommandId.mcp) }
 			}
 
 			CircleButton {
@@ -393,7 +393,7 @@ Rectangle {
 				implicitWidth: 32
 				implicitHeight: 32
 				Accessible.name: qsTr("Settings")
-				onClicked: Commands.run("settings")
+				onClicked: Commands.run(CommandId.settings)
 
 				Icon {
 					anchors.centerIn: parent

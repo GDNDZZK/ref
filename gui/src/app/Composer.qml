@@ -236,8 +236,8 @@ Item {
 				bottomMargin: composer.padding
 			}
 			height: composer.tagRowHeight
-			onAgentClicked: Commands.run("agents", "", composer.session.sessionId)
-			onModelClicked: Commands.run("models", "", composer.session.sessionId)
+			onAgentClicked: Commands.run(CommandId.agents, "", composer.session.sessionId)
+			onModelClicked: Commands.run(CommandId.models, "", composer.session.sessionId)
 			onVariantClicked: Workspace.openDialog(DialogId.variants, {sessionId: composer.session.sessionId})
 		}
 

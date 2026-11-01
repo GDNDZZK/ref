@@ -133,7 +133,7 @@ Item {
 		TextButton {
 			anchors.horizontalCenter: parent.horizontalCenter
 			text: qsTr("New session")
-			onClicked: Commands.run("new")
+			onClicked: Commands.run(CommandId.newSession)
 		}
 	}
 }
