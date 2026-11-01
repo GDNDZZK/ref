@@ -725,15 +725,21 @@ async fn run_shell(hub: Arc<Hub>, s: Arc<Session>, command: String) {
     crate::engine::append_only(&hub, &s, msg);
 }
 
+/// Highest numbered placeholder (`$9`) of a command template.
+const MAX_POSITIONAL: usize = 9;
+
+/// Placeholder for all arguments in a command template.
+const ARGUMENTS_PLACEHOLDER: &str = "$ARGUMENTS";
+
 /// `$ARGUMENTS`, `$1`..`$9` substitution (the last numbered placeholder takes the rest).
-pub fn expand_template(template: &str, args: &str) -> String {
+fn expand_template(template: &str, args: &str) -> String {
     let words: Vec<&str> = args.split_whitespace().collect();
-    let max_n = (1..=9)
+    let max_n = (1..=MAX_POSITIONAL)
         .rev()
         .find(|n| template.contains(&format!("${n}")))
         .unwrap_or(0);
-    let mut out = template.replace("$ARGUMENTS", args.trim());
-    for n in (1..=9).rev() {
+    let mut out = template.replace(ARGUMENTS_PLACEHOLDER, args.trim());
+    for n in (1..=MAX_POSITIONAL).rev() {
         let key = format!("${n}");
         if !out.contains(&key) {
             continue;
@@ -745,7 +751,7 @@ pub fn expand_template(template: &str, args: &str) -> String {
         };
         out = out.replace(&key, &val);
     }
-    if !template.contains("$ARGUMENTS") && max_n == 0 && !args.trim().is_empty() {
+    if !template.contains(ARGUMENTS_PLACEHOLDER) && max_n == 0 && !args.trim().is_empty() {
         out = format!("{}\n\n{}", out.trim_end(), args.trim());
     }
     out
@@ -757,15 +763,15 @@ async fn expand_shell(text: &str, cwd: &str) -> String {
     let mut out = String::new();
     let mut last = 0;
     for c in re.captures_iter(text) {
-        let (Some(m), Some(cmd)) = (c.get(0), c.get(1)) else {
-            continue;
-        };
+        // Group 0 is the whole match; group 1 is not optional in the pattern.
+        let m = c.get(0).expect("whole match");
+        let cmd = &c[1];
         out.push_str(&text[last..m.start()]);
         let res = tokio::time::timeout(
             EXPAND_SHELL_TIMEOUT,
             tokio::process::Command::new(ref_tools::default_shell())
                 .arg("-c")
-                .arg(cmd.as_str())
+                .arg(cmd)
                 .current_dir(cwd)
                 .output(),
         )
@@ -776,8 +782,8 @@ async fn expand_shell(text: &str, cwd: &str) -> String {
                 s.push_str(&String::from_utf8_lossy(&o.stderr));
                 out.push_str(s.trim_end());
             }
-            Ok(Err(e)) => out.push_str(&format!("(failed to run `{}`: {e})", cmd.as_str())),
-            Err(_) => out.push_str(&format!("(`{}` timed out)", cmd.as_str())),
+            Ok(Err(e)) => out.push_str(&format!("(failed to run `{}`: {e})", cmd)),
+            Err(_) => out.push_str(&format!("(`{}` timed out)", cmd)),
         }
         last = m.end();
     }
@@ -842,7 +848,7 @@ fn walk_files(root: &std::path::Path) -> Vec<String> {
 }
 
 /// Fuzzy subsequence score (higher is better); None if `q` is not a subsequence of `path`.
-pub fn fuzzy_score(path: &str, q: &str) -> Option<i64> {
+fn fuzzy_score(path: &str, q: &str) -> Option<i64> {
     if q.is_empty() {
         return Some(-(path.len() as i64));
     }
@@ -908,7 +914,7 @@ fn fuzzy_filter(files: &[String], q: &str, limit: usize) -> Vec<String> {
         .collect()
 }
 
-pub fn export_markdown(info: &SessionInfo, messages: &[Message]) -> String {
+fn export_markdown(info: &SessionInfo, messages: &[Message]) -> String {
     let mut out = format!(
         "# {}\n\nSession `{}` (\"{}\") — agent {} — model {} — {}\n\n",
         if info.title.is_empty() {
