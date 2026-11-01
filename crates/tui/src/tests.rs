@@ -1,5 +1,6 @@
 //! Headless rendering tests (ratatui TestBackend). Run with `--nocapture` to see the screens.
 
+use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ref_proto::*;
@@ -527,15 +528,19 @@ pub fn key(
     crossterm::event::Event::Key(crossterm::event::KeyEvent::new(code, mods))
 }
 
-fn type_str(app: &mut App, s: &str) {
+/// Presses `code` without modifiers.
+pub fn press(app: &mut App, code: KeyCode) {
+    press_with(app, code, KeyModifiers::NONE);
+}
+
+pub fn press_with(app: &mut App, code: KeyCode, mods: KeyModifiers) {
+    crate::input::handle(app, key(code, mods));
+}
+
+/// Types `s` one character at a time.
+pub fn type_text(app: &mut App, s: &str) {
     for c in s.chars() {
-        crate::input::handle(
-            app,
-            key(
-                crossterm::event::KeyCode::Char(c),
-                crossterm::event::KeyModifiers::NONE,
-            ),
-        );
+        press(app, KeyCode::Char(c));
     }
 }
 
@@ -573,15 +578,15 @@ async fn mock_end_to_end() {
     assert!(s.contains("Allow once"));
     // Keys within 350ms of the modal opening are ignored; wait then allow.
     tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-    crate::input::handle(&mut app, key(KeyCode::Char('a'), KeyModifiers::NONE));
+    press(&mut app, KeyCode::Char('a'));
     assert!(app.active_permission().is_none());
     // Queue a prompt while busy.
-    type_str(&mut app, "queued question");
-    crate::input::handle(&mut app, key(KeyCode::Enter, KeyModifiers::NONE));
+    type_text(&mut app, "queued question");
+    press(&mut app, KeyCode::Enter);
     assert_eq!(app.views[&sid].queued.len(), 1);
     // Queue another one and remove it with its ✕ button while the turn is still running.
-    type_str(&mut app, "never send this");
-    crate::input::handle(&mut app, key(KeyCode::Enter, KeyModifiers::NONE));
+    type_text(&mut app, "never send this");
+    press(&mut app, KeyCode::Enter);
     pump(&mut app, &mut ev_rx, 200).await;
     assert!(
         app.views[&sid].queued.iter().all(|q| q.id.is_some()),
@@ -665,23 +670,23 @@ async fn mock_end_to_end() {
     println!("--- done ---\n{s}");
     assert!(s.contains("Got it"), "reply to queued prompt");
     // Slash command via autocomplete: /details toggles tool expansion.
-    type_str(&mut app, "/deta");
+    type_text(&mut app, "/deta");
     assert!(app.ac.is_some(), "slash autocomplete");
-    crate::input::handle(&mut app, key(KeyCode::Enter, KeyModifiers::NONE));
+    press(&mut app, KeyCode::Enter);
     assert!(app.details);
     assert!(app.editor.text.is_empty());
     // Session picker lists live + history.
-    crate::input::handle(&mut app, key(KeyCode::Char('x'), KeyModifiers::CONTROL));
-    crate::input::handle(&mut app, key(KeyCode::Char('l'), KeyModifiers::NONE));
+    press_with(&mut app, KeyCode::Char('x'), KeyModifiers::CONTROL);
+    press(&mut app, KeyCode::Char('l'));
     pump(&mut app, &mut ev_rx, 300).await;
     let (_, s) = render(&mut app, 120, 34);
     println!("--- sessions ---\n{s}");
     assert!(s.contains("Live") && s.contains("History"));
     assert!(s.contains("worker-1") && s.contains(" bg ") && s.contains(" fg "));
-    crate::input::handle(&mut app, key(KeyCode::Esc, KeyModifiers::NONE));
+    press(&mut app, KeyCode::Esc);
     // Watch mode: tiles for the background sessions.
-    crate::input::handle(&mut app, key(KeyCode::Char('x'), KeyModifiers::CONTROL));
-    crate::input::handle(&mut app, key(KeyCode::Char('w'), KeyModifiers::NONE));
+    press_with(&mut app, KeyCode::Char('x'), KeyModifiers::CONTROL);
+    press(&mut app, KeyCode::Char('w'));
     pump(&mut app, &mut ev_rx, 1500).await;
     let (_, s) = render(&mut app, 140, 36);
     println!("--- watch ---\n{s}");
@@ -697,12 +702,12 @@ async fn mock_end_to_end() {
     if app.active_permission().is_some() {
         assert!(s.contains("Permission required · docs-写手"));
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-        crate::input::handle(&mut app, key(KeyCode::Char('d'), KeyModifiers::NONE));
+        press(&mut app, KeyCode::Char('d'));
         assert!(app.active_permission().is_none());
     }
     // Nothing is focused on entering the split view; typing only shows a hint.
     assert!(app.watch.focus.is_none(), "no auto-focus");
-    type_str(&mut app, "x");
+    type_text(&mut app, "x");
     assert!(app.watch.inputs.values().all(|e| e.is_empty()));
     assert!(
         app.hint
@@ -710,15 +715,15 @@ async fn mock_end_to_end() {
             .is_some_and(|h| h.0.contains("click or tab to focus"))
     );
     // Tab focuses a tile; message it directly.
-    crate::input::handle(&mut app, key(KeyCode::Tab, KeyModifiers::NONE));
+    press(&mut app, KeyCode::Tab);
     let focus = app.watch.focus.clone().expect("focus");
-    type_str(&mut app, "ping");
-    crate::input::handle(&mut app, key(KeyCode::Enter, KeyModifiers::NONE));
+    type_text(&mut app, "ping");
+    press(&mut app, KeyCode::Enter);
     pump(&mut app, &mut ev_rx, 200).await;
     assert!(app.watch.inputs.get(&focus).is_none_or(|e| e.is_empty()));
     // Back to chat.
-    crate::input::handle(&mut app, key(KeyCode::Char('x'), KeyModifiers::CONTROL));
-    crate::input::handle(&mut app, key(KeyCode::Char('w'), KeyModifiers::NONE));
+    press_with(&mut app, KeyCode::Char('x'), KeyModifiers::CONTROL);
+    press(&mut app, KeyCode::Char('w'));
     assert_eq!(app.mode, Mode::Chat);
     pump(&mut app, &mut ev_rx, 300).await;
     assert_eq!(attached(&app), Some(1), "foreground again");
@@ -759,13 +764,13 @@ async fn permission_modal_keys_then_quit() {
         app.active_permission().is_some(),
         app.mode
     );
-    crate::input::handle(&mut app, key(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    press_with(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
     println!(
         "after ctrl+c: perm={} quit={}",
         app.active_permission().is_some(),
         app.quit
     );
-    crate::input::handle(&mut app, key(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    press_with(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
     println!(
         "after ctrl+c 2: perm={} quit={}",
         app.active_permission().is_some(),
@@ -781,7 +786,7 @@ async fn file_mention_autocomplete() {
     tokio::spawn(crate::mock::run(TEST_CWD.into(), out_rx, ev_tx));
     let mut app = App::new(Client::new(out_tx), TEST_CWD.into(), InitPlan::default());
     pump(&mut app, &mut ev_rx, 600).await;
-    type_str(&mut app, "look at @src/ma");
+    type_text(&mut app, "look at @src/ma");
     assert!(app.files_due.is_some(), "debounced query pending");
     for _ in 0..10 {
         tokio::time::sleep(std::time::Duration::from_millis(30)).await;
@@ -798,13 +803,7 @@ async fn file_mention_autocomplete() {
     let (_, s) = render(&mut app, 100, 30);
     println!("{s}");
     assert!(s.contains("files") && s.contains("src/main.rs"));
-    crate::input::handle(
-        &mut app,
-        key(
-            crossterm::event::KeyCode::Tab,
-            crossterm::event::KeyModifiers::NONE,
-        ),
-    );
+    press(&mut app, KeyCode::Tab);
     assert!(
         app.editor.text.starts_with("look at @src/"),
         "{}",
@@ -814,7 +813,7 @@ async fn file_mention_autocomplete() {
     assert!(app.ac.is_none());
     // Slash list with empty query: canonical names in declaration order.
     app.editor.clear();
-    type_str(&mut app, "/");
+    type_text(&mut app, "/");
     let ac = app.ac.as_ref().expect("slash popup");
     assert_eq!(ac.items[0].1, "/new");
     assert_eq!(ac.items[1].1, "/sessions");
@@ -829,20 +828,20 @@ async fn dialogs_open_and_render() {
     let mut app = App::new(Client::new(out_tx), TEST_CWD.into(), InitPlan::default());
     pump(&mut app, &mut ev_rx, 600).await;
     assert!(app.config.is_some());
-    crate::input::handle(&mut app, key(KeyCode::Char('x'), KeyModifiers::CONTROL));
-    crate::input::handle(&mut app, key(KeyCode::Char('m'), KeyModifiers::NONE));
+    press_with(&mut app, KeyCode::Char('x'), KeyModifiers::CONTROL);
+    press(&mut app, KeyCode::Char('m'));
     assert!(app.dialog.is_some(), "models dialog");
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     let (_, s) = render(&mut app, 120, 30);
     println!("{s}");
     assert!(s.contains("Switch model") && s.contains("GPT-6") && s.contains("DGN Gateway"));
-    type_str(&mut app, "gpt");
-    crate::input::handle(&mut app, key(KeyCode::Enter, KeyModifiers::NONE));
+    type_text(&mut app, "gpt");
+    press(&mut app, KeyCode::Enter);
     pump(&mut app, &mut ev_rx, 200).await;
     assert_eq!(app.cur().unwrap().info.model.model, "gpt-6");
     // Help dialog.
-    crate::input::handle(&mut app, key(KeyCode::Char('x'), KeyModifiers::CONTROL));
-    crate::input::handle(&mut app, key(KeyCode::Char('h'), KeyModifiers::NONE));
+    press_with(&mut app, KeyCode::Char('x'), KeyModifiers::CONTROL);
+    press(&mut app, KeyCode::Char('h'));
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     let (_, s) = render(&mut app, 120, 30);
     println!("{s}");
@@ -1085,14 +1084,13 @@ fn long_transcript_render_perf() {
 
 #[test]
 fn shell_mode_and_image_token() {
-    use crossterm::event::{KeyCode, KeyModifiers};
     let mut app = test_app(false);
-    type_str(&mut app, "!");
+    type_text(&mut app, "!");
     assert!(app.shell_mode);
-    type_str(&mut app, "ls -la");
+    type_text(&mut app, "ls -la");
     let (_, s) = render(&mut app, 100, 30);
     assert!(s.contains("┃  Shell"), "{s}");
-    crate::input::handle(&mut app, key(KeyCode::Esc, KeyModifiers::NONE));
+    press(&mut app, KeyCode::Esc);
     assert!(!app.shell_mode);
     app.editor.clear();
     app.editor.attach_image(
@@ -1103,7 +1101,7 @@ fn shell_mode_and_image_token() {
         },
         Some("clipboard".into()),
     );
-    type_str(&mut app, "what is this?");
+    type_text(&mut app, "what is this?");
     let (_, s) = render(&mut app, 100, 30);
     assert!(s.contains("[Image 1] what is this?"));
     assert!(s.contains("1 image"));
@@ -1126,7 +1124,7 @@ fn find_col(term: &Terminal<TestBackend>, y: u16, sym: &str) -> Option<u16> {
 
 #[test]
 fn drag_selection_across_wrapped_cjk_lines() {
-    use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEventKind};
+    use crossterm::event::{MouseButton, MouseEventKind};
     let mut app = test_app(false);
     {
         let v = app.views.get_mut(TEST_SESSION).unwrap();
@@ -1174,7 +1172,7 @@ fn drag_selection_across_wrapped_cjk_lines() {
     assert_eq!(crate::clipboard::take_last_copy(), None);
     assert!(app.has_selection());
     // `y` copies (empty prompt); soft-wrapped rows are joined without inserted breaks.
-    crate::input::handle(&mut app, key(KeyCode::Char('y'), KeyModifiers::NONE));
+    press(&mut app, KeyCode::Char('y'));
     let got = crate::clipboard::take_last_copy().expect("copied");
     assert_eq!(
         got,
@@ -1209,7 +1207,7 @@ fn selection_starting_mid_cjk_glyph() {
         &mut app,
         mouse(MouseEventKind::Up(MouseButton::Left), x2 + 1, y),
     );
-    crate::input::handle(&mut app, key(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    press_with(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
     assert_eq!(
         crate::clipboard::take_last_copy().as_deref(),
         Some("顺便检查")
@@ -1316,14 +1314,8 @@ fn reattach_failure_of_empty_session_starts_new_one() {
 fn failed_prompt_text_returns_to_editor() {
     use crate::app::Pending;
     let mut app = test_app(false);
-    type_str(&mut app, "do the thing");
-    crate::input::handle(
-        &mut app,
-        key(
-            crossterm::event::KeyCode::Enter,
-            crossterm::event::KeyModifiers::NONE,
-        ),
-    );
+    type_text(&mut app, "do the thing");
+    press(&mut app, KeyCode::Enter);
     assert!(app.editor.is_empty());
     fail_pending(
         &mut app,
@@ -1341,7 +1333,6 @@ fn failed_prompt_text_returns_to_editor() {
 
 #[test]
 fn keys_typed_as_permission_opens_go_to_editor() {
-    use crossterm::event::{KeyCode, KeyModifiers};
     let mut app = test_app(false);
     let req = PermissionRequest {
         session_id: TEST_SESSION.into(),
@@ -1362,8 +1353,8 @@ fn keys_typed_as_permission_opens_go_to_editor() {
         "{s}"
     );
     // Within the grace period: 'a' / 'd' must not answer the modal; they are typed text.
-    type_str(&mut app, "ad");
-    crate::input::handle(&mut app, key(KeyCode::Enter, KeyModifiers::NONE));
+    type_text(&mut app, "ad");
+    press(&mut app, KeyCode::Enter);
     assert!(
         app.active_permission().is_some(),
         "modal not answered by early keys"
@@ -1371,7 +1362,7 @@ fn keys_typed_as_permission_opens_go_to_editor() {
     assert_eq!(app.editor.text, "ad");
     // After the grace period the modal reacts.
     app.perm.as_mut().unwrap().opened -= std::time::Duration::from_millis(500);
-    crate::input::handle(&mut app, key(KeyCode::Char('a'), KeyModifiers::NONE));
+    press(&mut app, KeyCode::Char('a'));
     assert!(app.active_permission().is_none());
     assert_eq!(app.editor.text, "ad");
     // The modal is sized to its content, not the full screen height.
@@ -1407,7 +1398,7 @@ fn model_filter_shows_provider() {
         c.models.push(m);
     }
     app.open_models();
-    type_str(&mut app, "opus");
+    type_text(&mut app, "opus");
     let (_, s) = render(&mut app, 100, 30);
     assert!(s.contains("claude-opus-5.5  OtherCo"), "{s}");
     assert!(s.contains("claude-opus-5.5  dgn"), "{s}");
@@ -1627,7 +1618,7 @@ fn undo_button_hit_zone_and_flow() {
     let mut app = test_app(false);
     render(&mut app, 100, 30);
     app.screen = ratatui::layout::Rect::new(0, 0, 100, 30);
-    type_str(&mut app, "draft");
+    type_text(&mut app, "draft");
     click(&mut app);
     let id = *app
         .pending
@@ -1720,14 +1711,8 @@ fn undo_puts_prompt_and_images_back_into_editor() {
         }));
     };
     // /undo (= ctrl+x u): the last human prompt, with its image.
-    type_str(&mut app, "/undo");
-    crate::input::handle(
-        &mut app,
-        key(
-            crossterm::event::KeyCode::Enter,
-            crossterm::event::KeyModifiers::NONE,
-        ),
-    );
+    type_text(&mut app, "/undo");
+    press(&mut app, KeyCode::Enter);
     respond(
         &mut app,
         json!({"text": "look at [Image 1]", "images": [{"mime": "image/png", "data": "iVBO", "name": "shot.png"}]}),
@@ -1811,14 +1796,8 @@ fn queued_prompt_remove_button_and_already_sent_race() {
         crate::input::handle(app, mouse(MouseEventKind::Up(MouseButton::Left), x, y));
     };
     // Clicked before the Prompt response: the delete waits for the message id.
-    type_str(&mut app, "first queued");
-    crate::input::handle(
-        &mut app,
-        key(
-            crossterm::event::KeyCode::Enter,
-            crossterm::event::KeyModifiers::NONE,
-        ),
-    );
+    type_text(&mut app, "first queued");
+    press(&mut app, KeyCode::Enter);
     click_remove(&mut app, "first queued");
     assert!(app.views[&sid].queued[0].removing);
     assert!(
@@ -1840,7 +1819,7 @@ fn queued_prompt_remove_button_and_already_sent_race() {
         "RemoveQueued sent once the id is known"
     );
     // Typed meanwhile: the removed prompt is appended after a blank line.
-    type_str(&mut app, "draft");
+    type_text(&mut app, "draft");
     respond(
         &mut app,
         &|p| matches!(p, Pending::Unqueue { .. }),
@@ -1881,14 +1860,8 @@ fn queued_prompt_remove_button_and_already_sent_race() {
     );
     app.editor.clear();
     // Already delivered when the delete arrives: toast, row stays until the message shows up.
-    type_str(&mut app, "second queued");
-    crate::input::handle(
-        &mut app,
-        key(
-            crossterm::event::KeyCode::Enter,
-            crossterm::event::KeyModifiers::NONE,
-        ),
-    );
+    type_text(&mut app, "second queued");
+    press(&mut app, KeyCode::Enter);
     respond(
         &mut app,
         &|p| matches!(p, Pending::Prompt { .. }),
@@ -1926,14 +1899,8 @@ fn queued_prompt_remove_button_and_already_sent_race() {
     assert!(v.queued.is_empty());
     // Sent while we thought it idle but the server queued it: a removable row appears.
     v.set_info(info());
-    type_str(&mut app, "late");
-    crate::input::handle(
-        &mut app,
-        key(
-            crossterm::event::KeyCode::Enter,
-            crossterm::event::KeyModifiers::NONE,
-        ),
-    );
+    type_text(&mut app, "late");
+    press(&mut app, KeyCode::Enter);
     assert!(app.views[&sid].queued.is_empty());
     respond(
         &mut app,
@@ -2048,14 +2015,8 @@ fn close_session_command_and_confirmation() {
         bg_session("ses_fg2", "other-fe", SessionStatus::Idle, 1),
     ];
     // By name: background session closes at once.
-    type_str(&mut app, "/kill worker-1");
-    crate::input::handle(
-        &mut app,
-        key(
-            crossterm::event::KeyCode::Enter,
-            crossterm::event::KeyModifiers::NONE,
-        ),
-    );
+    type_text(&mut app, "/kill worker-1");
+    press(&mut app, KeyCode::Enter);
     assert!(
         app.pending
             .values()
@@ -2100,13 +2061,7 @@ fn close_session_command_and_confirmation() {
         d.select_key("live:ses_x");
     }
     app.pending.clear();
-    crate::input::handle(
-        &mut app,
-        key(
-            crossterm::event::KeyCode::Enter,
-            crossterm::event::KeyModifiers::NONE,
-        ),
-    );
+    press(&mut app, KeyCode::Enter);
     assert!(
         app.pending
             .values()
@@ -2122,13 +2077,7 @@ fn close_session_command_and_confirmation() {
     if let Some(Dialog::List(d)) = app.dialog.as_mut() {
         d.select_key("live:ses_test");
     }
-    crate::input::handle(
-        &mut app,
-        key(
-            crossterm::event::KeyCode::Enter,
-            crossterm::event::KeyModifiers::NONE,
-        ),
-    );
+    press(&mut app, KeyCode::Enter);
     assert_eq!(app.current.as_deref(), Some("ses_y"));
     assert!(
         !app.pending
@@ -2155,7 +2104,7 @@ fn sessions_dialog_ctrl_d_closes_with_confirm() {
         d.select_key("live:ses_bg");
     }
     app.pending.clear();
-    crate::input::handle(&mut app, key(KeyCode::Char('d'), KeyModifiers::CONTROL));
+    press_with(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL);
     let (_, s) = render(&mut app, 120, 34);
     assert!(s.contains("ctrl+d again to close"), "{s}");
     assert!(
@@ -2163,7 +2112,7 @@ fn sessions_dialog_ctrl_d_closes_with_confirm() {
             .values()
             .any(|p| matches!(p, Pending::Closed { .. }))
     );
-    crate::input::handle(&mut app, key(KeyCode::Char('d'), KeyModifiers::CONTROL));
+    press_with(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL);
     assert!(
         app.pending
             .values()
@@ -2179,8 +2128,8 @@ fn leader_k_closes_current_and_focused_tile() {
     use crate::app::Pending;
     use crossterm::event::{KeyCode, KeyModifiers};
     let lk = |app: &mut App| {
-        crate::input::handle(app, key(KeyCode::Char('x'), KeyModifiers::CONTROL));
-        crate::input::handle(app, key(KeyCode::Char('k'), KeyModifiers::NONE));
+        press_with(app, KeyCode::Char('x'), KeyModifiers::CONTROL);
+        press(app, KeyCode::Char('k'));
     };
     let mut app = test_app(false);
     lk(&mut app);
@@ -2853,10 +2802,9 @@ fn mcp_status_fallback_and_polling() {
 
 #[test]
 fn mcp_dialog_render_wrap_cjk_and_tools() {
-    use crossterm::event::{KeyCode, KeyModifiers};
     let mut app = sidebar_app();
-    type_str(&mut app, "/mcp");
-    crate::input::handle(&mut app, key(KeyCode::Enter, KeyModifiers::NONE));
+    type_text(&mut app, "/mcp");
+    press(&mut app, KeyCode::Enter);
     assert!(
         matches!(app.dialog, Some(crate::ui::dialog::Dialog::Mcp(_))),
         "/mcp opens the dialog"
@@ -2896,7 +2844,7 @@ fn mcp_dialog_render_wrap_cjk_and_tools() {
     // Enter expands the selected (first) server's tools.
     let (_, s) = render(&mut app, 100, 30);
     assert!(!s.contains("resolve-library-id"));
-    crate::input::handle(&mut app, key(KeyCode::Enter, KeyModifiers::NONE));
+    press(&mut app, KeyCode::Enter);
     let (_, s) = render(&mut app, 100, 30);
     assert!(
         s.contains("resolve-library-id") && s.contains("get-library-docs"),
@@ -2907,14 +2855,14 @@ fn mcp_dialog_render_wrap_cjk_and_tools() {
         "{s}"
     );
     // ← collapses, ↓ moves, esc closes. Read-only: no requests besides refreshes.
-    crate::input::handle(&mut app, key(KeyCode::Left, KeyModifiers::NONE));
+    press(&mut app, KeyCode::Left);
     let (_, s) = render(&mut app, 100, 30);
     assert!(!s.contains("resolve-library-id"));
-    crate::input::handle(&mut app, key(KeyCode::Down, KeyModifiers::NONE));
-    crate::input::handle(&mut app, key(KeyCode::Esc, KeyModifiers::NONE));
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Esc);
     assert!(app.dialog.is_none());
     // Autocomplete + palette + help list it.
-    type_str(&mut app, "/mc");
+    type_text(&mut app, "/mc");
     assert!(
         app.ac
             .as_ref()
@@ -3356,18 +3304,18 @@ fn split_tile_wheel_scrolls_tile_under_pointer() {
     app.watch.focus = Some("ses_w1".into());
     render(&mut app, 120, 30);
     let bottom = app.views["ses_w1"].chat.top();
-    crate::input::handle(&mut app, key(KeyCode::PageUp, KeyModifiers::NONE));
+    press(&mut app, KeyCode::PageUp);
     render(&mut app, 120, 30);
     assert!(app.views["ses_w1"].chat.top() < bottom);
     let t = app.views["ses_w1"].chat.top();
-    crate::input::handle(&mut app, key(KeyCode::Up, KeyModifiers::SHIFT));
+    press_with(&mut app, KeyCode::Up, KeyModifiers::SHIFT);
     assert_eq!(app.views["ses_w1"].chat.top(), t - 1);
-    crate::input::handle(&mut app, key(KeyCode::End, KeyModifiers::NONE));
+    press(&mut app, KeyCode::End);
     render(&mut app, 120, 30);
     assert_eq!(app.views["ses_w1"].chat.top(), bottom);
     assert!(app.views["ses_w1"].chat.follow);
     // Scrolled to the very top: the first message of the session is reachable.
-    crate::input::handle(&mut app, key(KeyCode::Home, KeyModifiers::NONE));
+    press(&mut app, KeyCode::Home);
     let (_, s) = render(&mut app, 120, 30);
     assert!(s.contains("alpha question 0"), "{s}");
 }
@@ -3386,32 +3334,32 @@ fn split_view_no_default_focus_and_esc_unfocus() {
     assert_ne!(buf[(r.x, r.y)].fg, crate::ui::theme::PRIMARY);
     // Typing / enter with nothing focused: no input, no prompt sent.
     app.pending.clear();
-    type_str(&mut app, "hi");
-    crate::input::handle(&mut app, key(KeyCode::Enter, KeyModifiers::NONE));
+    type_text(&mut app, "hi");
+    press(&mut app, KeyCode::Enter);
     assert!(app.watch.inputs.values().all(|e| e.is_empty()) && app.pending.is_empty());
     // Sessions appearing/disappearing don't auto-focus.
     app.sync_watch();
     assert!(app.watch.focus.is_none());
     // Tab focuses the first tile; esc with text clears it, the next esc unfocuses.
-    crate::input::handle(&mut app, key(KeyCode::Tab, KeyModifiers::NONE));
+    press(&mut app, KeyCode::Tab);
     assert_eq!(app.watch.focus.as_deref(), Some("ses_w1"));
-    type_str(&mut app, "hi");
-    crate::input::handle(&mut app, key(KeyCode::Esc, KeyModifiers::NONE));
+    type_text(&mut app, "hi");
+    press(&mut app, KeyCode::Esc);
     assert_eq!(app.watch.focus.as_deref(), Some("ses_w1"));
     assert!(app.watch.inputs["ses_w1"].is_empty());
-    crate::input::handle(&mut app, key(KeyCode::Esc, KeyModifiers::NONE));
+    press(&mut app, KeyCode::Esc);
     assert!(
         app.watch.focus.is_none(),
         "esc on idle empty tile unfocuses"
     );
     // Shift+tab from nothing: last tile. Busy tile: esc arms, esc aborts, focus kept.
-    crate::input::handle(&mut app, key(KeyCode::BackTab, KeyModifiers::SHIFT));
+    press_with(&mut app, KeyCode::BackTab, KeyModifiers::SHIFT);
     assert_eq!(app.watch.focus.as_deref(), Some("ses_w2"));
     app.views.get_mut("ses_w2").unwrap().info.status = SessionStatus::Busy;
     app.pending.clear();
-    crate::input::handle(&mut app, key(KeyCode::Esc, KeyModifiers::NONE));
+    press(&mut app, KeyCode::Esc);
     assert!(app.esc_armed.is_some() && app.watch.focus.is_some());
-    crate::input::handle(&mut app, key(KeyCode::Esc, KeyModifiers::NONE));
+    press(&mut app, KeyCode::Esc);
     assert_eq!(
         app.watch.focus.as_deref(),
         Some("ses_w2"),
@@ -3644,15 +3592,7 @@ fn current_session_goes_background_in_split_view() {
 #[test]
 fn close_current_goes_to_first_live_session_or_exits() {
     use crate::app::Pending;
-    let enter = |app: &mut App| {
-        crate::input::handle(
-            app,
-            key(
-                crossterm::event::KeyCode::Enter,
-                crossterm::event::KeyModifiers::NONE,
-            ),
-        )
-    };
+    let enter = |app: &mut App| press(app, KeyCode::Enter);
     // Other live sessions: switch to the oldest one (sidebar order), no new session.
     let mut app = test_app(false);
     let cur = app.views[TEST_SESSION].info.clone();
@@ -3661,7 +3601,7 @@ fn close_current_goes_to_first_live_session_or_exits() {
     let mut older = bg_session("ses_old", "older", SessionStatus::Idle, 0);
     older.created_at = 10;
     app.live = vec![cur.clone(), newer, older];
-    type_str(&mut app, "/close");
+    type_text(&mut app, "/close");
     enter(&mut app);
     assert!(
         app.pending
@@ -3686,7 +3626,7 @@ fn close_current_goes_to_first_live_session_or_exits() {
     // shows how to resume the closed session.
     let mut app = test_app(false);
     app.live = vec![cur.clone()];
-    type_str(&mut app, "/close");
+    type_text(&mut app, "/close");
     enter(&mut app);
     assert!(!app.quit, "waits for the Close response");
     respond(&mut app, |p| matches!(p, Pending::Closed { .. }), json!({}));
@@ -3728,14 +3668,8 @@ fn cd_command_changes_session_directory() {
             .any(|t| t.text.contains("Working directory:") && t.text.contains("/cd <dir>")),
         "no argument shows the directory"
     );
-    type_str(&mut app, "/cwd \"../other dir\"");
-    crate::input::handle(
-        &mut app,
-        key(
-            crossterm::event::KeyCode::Enter,
-            crossterm::event::KeyModifiers::NONE,
-        ),
-    );
+    type_text(&mut app, "/cwd \"../other dir\"");
+    press(&mut app, KeyCode::Enter);
     assert!(
         app.pending
             .values()
@@ -3757,14 +3691,8 @@ fn cd_command_changes_session_directory() {
             .any(|t| t.text.contains("other dir"))
     );
     // Errors are shown, nothing changes.
-    type_str(&mut app, "/cd /nope");
-    crate::input::handle(
-        &mut app,
-        key(
-            crossterm::event::KeyCode::Enter,
-            crossterm::event::KeyModifiers::NONE,
-        ),
-    );
+    type_text(&mut app, "/cd /nope");
+    press(&mut app, KeyCode::Enter);
     fail_pending(
         &mut app,
         |p| matches!(p, Pending::Cwd { .. }),
@@ -3782,7 +3710,6 @@ fn cd_command_changes_session_directory() {
 #[test]
 fn split_tile_commands_act_on_that_session() {
     use crate::app::Pending;
-    use crossterm::event::{KeyCode, KeyModifiers};
     let mut app = test_app(false);
     app.mode = Mode::Watch;
     let bg = bg_session("ses_bg", "worker-1", SessionStatus::Idle, 0);
@@ -3792,9 +3719,9 @@ fn split_tile_commands_act_on_that_session() {
     app.watch.focus = Some("ses_bg".into());
     let typed = |app: &mut App, t: &str| {
         for c in t.chars() {
-            crate::input::handle(app, key(KeyCode::Char(c), KeyModifiers::NONE));
+            press(app, KeyCode::Char(c));
         }
-        crate::input::handle(app, key(KeyCode::Enter, KeyModifiers::NONE));
+        press(app, KeyCode::Enter);
     };
     typed(&mut app, "/cd sub");
     assert!(
@@ -3956,14 +3883,8 @@ fn queue_event_shows_messages_from_other_sessions() {
     };
 
     // Our prompt is queued; the Queue event arrives before the Prompt response.
-    type_str(&mut app, "my follow-up");
-    crate::input::handle(
-        &mut app,
-        key(
-            crossterm::event::KeyCode::Enter,
-            crossterm::event::KeyModifiers::NONE,
-        ),
-    );
+    type_text(&mut app, "my follow-up");
+    press(&mut app, KeyCode::Enter);
     assert_eq!(app.views[TEST_SESSION].queued.len(), 1);
     ev(
         &mut app,
@@ -4138,7 +4059,7 @@ fn history_pages_load_when_scrolled_to_the_top() {
 fn editor_mouse_drag_double_and_triple_click_select() {
     use crossterm::event::{MouseButton, MouseEventKind};
     let mut app = test_app(false);
-    type_str(&mut app, "hello brave new world");
+    type_text(&mut app, "hello brave new world");
     let (term, screen) = render(&mut app, 100, 30);
     let y = screen
         .lines()
@@ -4248,7 +4169,7 @@ fn editor_mouse_drag_double_and_triple_click_select() {
         &mut app,
         mouse(MouseEventKind::Up(MouseButton::Left), at(5), y),
     );
-    type_str(&mut app, "bye");
+    type_text(&mut app, "bye");
     assert_eq!(app.editor.text, "bye brave new world");
 }
 
