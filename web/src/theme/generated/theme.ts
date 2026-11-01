@@ -115,6 +115,7 @@ export const metrics = {
   sidebarRowHeight: 56,
   sidebarHistoryRowHeight: 44,
   sidebarSectionHeight: 28,
+  listLabelInset: 18,
   sidebarFooterHeight: 44,
   sidebarMinRunningRows: 3,
   sidebarMinHistoryRows: 3,

@@ -89,6 +89,7 @@ QtObject {
 	readonly property int sidebarRowHeight: 56
 	readonly property int sidebarHistoryRowHeight: 44
 	readonly property int sidebarSectionHeight: 28
+	readonly property int listLabelInset: 18 // of a section label in the sidebar and in pick lists
 	readonly property int sidebarFooterHeight: 44
 	readonly property int sidebarMinRunningRows: 3
 	readonly property int sidebarMinHistoryRows: 3

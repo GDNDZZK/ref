@@ -288,7 +288,7 @@ Flickable 自带的滚轮动画，每一格都从当前位置重新开始，上�
 ### 主题切换
 
 ```
-grabToImage(page) → 截图盖到最上层 → Theme.toggle() → 截图淡出
+grabToImage(page) → 截图盖到最上层 → 改 Theme.dark（Main.qml 的 Binding 跟随设置） → 截图淡出
 ```
 
 所有颜色是同时完成交叉淡化的，不需要给每个元素单独写 `ColorAnimation`。有几个要注意的地方：

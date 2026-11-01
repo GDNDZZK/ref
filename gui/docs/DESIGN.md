@@ -364,7 +364,7 @@ border, segments equally wide, label `smallFontSize+1`; the chosen label is `The
 indicator (`userBubble` fill, `userBubbleBorder` border, radius 13, inset 2px) slides with `x` / `width`
 `Motion.standard` + `Motion.ease`. Clicking a theme segment runs the theme snapshot crossfade.
 
-Switch (`ToggleSwitch.qml`): track 38×22, radius 11, `border` colored when off and `accent` when on (`Motion.quick`);
+Switch (the one in `NotificationSettingsSection.qml`): track 38×22, radius 11, `border` colored when off and `accent` when on (`Motion.quick`);
 knob 16px, inset 3px, `textMuted` when off and `onAccent` when on; `x` moves with `Motion.quick` + `Motion.ease`, no
 overshoot; while pressed the knob is 3px wider (`Motion.quick`).
 

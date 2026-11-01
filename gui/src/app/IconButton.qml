@@ -8,7 +8,7 @@ CircleButton {
 	property string iconName: ""
 	property int iconSize: 20
 	property color iconColor: Theme.textMuted
-	property int buttonSize: 34
+	property int buttonSize: Theme.buttonHeight
 
 	implicitWidth: buttonSize
 	implicitHeight: buttonSize

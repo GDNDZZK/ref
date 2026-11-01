@@ -158,7 +158,7 @@ Rectangle {
 
 			SectionLabel {
 				id: todoLabel
-				leftPadding: 18
+				leftPadding: Theme.listLabelInset
 				text: qsTr("Todo %1/%2").arg(sidebar.shownTodo.done).arg(sidebar.shownTodo.total)
 			}
 
@@ -175,7 +175,7 @@ Rectangle {
 					width: parent.width
 					items: sidebar.shownTodo.items
 					wrap: true
-					leftPad: 18 // in line with the label
+					leftPad: Theme.listLabelInset // in line with the label
 				}
 
 				ScrollBar.vertical: ThemedScrollBar {}
@@ -184,7 +184,7 @@ Rectangle {
 
 		SectionLabel {
 			id: runningLabel
-			leftPadding: 18
+			leftPadding: Theme.listLabelInset
 			anchors.top: todoSection.bottom
 			text: qsTr("Running")
 		}
@@ -225,7 +225,7 @@ Rectangle {
 
 		SectionLabel {
 			id: historyLabel
-			leftPadding: 18
+			leftPadding: Theme.listLabelInset
 			anchors.top: running.bottom
 			text: qsTr("History")
 		}
