@@ -417,65 +417,85 @@ pub(crate) fn accumulate(ctx: &mut Ctx, layers: &[Layer]) -> (Map<String, Value>
     for l in layers {
         acc.permission
             .extend(layer_rules(ctx, &l.value, &l.source, "permission"));
-        for key in [KEY_LEGACY_MODE, KEY_AGENT] {
-            if let Some(Value::Object(agents)) = l.value.get(key) {
-                for (name, a) in agents {
-                    if let Value::Object(a) = a {
-                        let r = layer_rules(ctx, a, &l.source, &format!("agent {name}"));
-                        acc.agent_permission
-                            .entry(name.clone())
-                            .or_default()
-                            .extend(r);
-                    }
-                }
-            }
-        }
-        match l.value.get(KEY_INSTRUCTIONS) {
-            Some(Value::Array(a)) => {
-                for x in a {
-                    match x.as_str() {
-                        Some(s) if !acc.instructions.iter().any(|y| y == s) => {
-                            acc.instructions.push(s.to_string())
-                        }
-                        Some(_) => {}
-                        None => ctx.warn(format!(
-                            "{}: invalid instructions entry {x}",
-                            l.source.display()
-                        )),
-                    }
-                }
-            }
-            Some(Value::String(s)) if !acc.instructions.contains(s) => {
-                acc.instructions.push(s.clone())
-            }
-            Some(Value::String(_)) | None => {}
-            Some(_) => ctx.warn(format!(
-                "{}: `instructions` must be an array of strings",
-                l.source.display()
-            )),
-        }
-        if let Some(Value::Array(a)) = l.value.get(KEY_INSTRUCTIONS) {
-            // `~` expansion only; relative entries are resolved later against the project.
-            for s in a.iter().filter_map(Value::as_str) {
-                if s.starts_with('~') {
-                    let e = expand_home(s, ctx.home, Path::new(""))
-                        .to_string_lossy()
-                        .into_owned();
-                    if let Some(x) = acc.instructions.iter_mut().find(|x| x.as_str() == s) {
-                        *x = e;
-                    }
-                }
-            }
-        }
-        if let Some(Value::Array(a)) = l.value.get(KEY_SKILLS) {
-            for p in a.iter().filter_map(|x| x.as_str()) {
-                let p = PathBuf::from(p);
-                if !acc.skills.contains(&p) {
-                    acc.skills.push(p);
-                }
-            }
-        }
+        collect_agent_permissions(ctx, l, &mut acc);
+        collect_instructions(ctx, l, &mut acc);
+        collect_skills(l, &mut acc);
         deep_merge(&mut merged, &l.value);
     }
     (merged, acc)
+}
+
+/// Permission rules of the agents defined in one layer, kept per agent name.
+fn collect_agent_permissions(ctx: &mut Ctx, l: &Layer, acc: &mut Accum) {
+    for key in [KEY_LEGACY_MODE, KEY_AGENT] {
+        let Some(Value::Object(agents)) = l.value.get(key) else {
+            continue;
+        };
+        for (name, a) in agents {
+            let Value::Object(a) = a else { continue };
+            let r = layer_rules(ctx, a, &l.source, &format!("agent {name}"));
+            acc.agent_permission
+                .entry(name.clone())
+                .or_default()
+                .extend(r);
+        }
+    }
+}
+
+/// Instruction entries of one layer, without duplicates.
+fn collect_instructions(ctx: &mut Ctx, l: &Layer, acc: &mut Accum) {
+    match l.value.get(KEY_INSTRUCTIONS) {
+        Some(Value::Array(a)) => {
+            for x in a {
+                add_instruction(ctx, l, x, acc);
+            }
+            expand_home_instructions(ctx, a, acc);
+        }
+        Some(Value::String(s)) if !acc.instructions.contains(s) => acc.instructions.push(s.clone()),
+        Some(Value::String(_)) | None => {}
+        Some(_) => ctx.warn(format!(
+            "{}: `instructions` must be an array of strings",
+            l.source.display()
+        )),
+    }
+}
+
+fn add_instruction(ctx: &mut Ctx, l: &Layer, x: &Value, acc: &mut Accum) {
+    match x.as_str() {
+        Some(s) if !acc.instructions.iter().any(|y| y == s) => acc.instructions.push(s.to_string()),
+        Some(_) => {}
+        None => ctx.warn(format!(
+            "{}: invalid instructions entry {x}",
+            l.source.display()
+        )),
+    }
+}
+
+/// `~` expansion only; relative entries are resolved later against the project.
+fn expand_home_instructions(ctx: &Ctx, items: &[Value], acc: &mut Accum) {
+    let tilde = items
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|s| s.starts_with('~'));
+    for s in tilde {
+        let e = expand_home(s, ctx.home, Path::new(""))
+            .to_string_lossy()
+            .into_owned();
+        if let Some(x) = acc.instructions.iter_mut().find(|x| x.as_str() == s) {
+            *x = e;
+        }
+    }
+}
+
+/// Extra skill directories of one layer, without duplicates.
+fn collect_skills(l: &Layer, acc: &mut Accum) {
+    let Some(Value::Array(a)) = l.value.get(KEY_SKILLS) else {
+        return;
+    };
+    for p in a.iter().filter_map(|x| x.as_str()) {
+        let p = PathBuf::from(p);
+        if !acc.skills.contains(&p) {
+            acc.skills.push(p);
+        }
+    }
 }
