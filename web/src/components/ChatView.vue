@@ -39,6 +39,7 @@ import { motion, motionEasing } from '../theme/generated/motion.ts'
 import BlockView from './BlockView.vue'
 import OlderMessages from './OlderMessages.vue'
 import { OLDER_TRIGGER_DISTANCE } from './toolLimits.ts'
+import { Key } from '../keys.ts'
 
 const props = defineProps<{ session: ChatSession }>()
 const blocks = computed(() => props.session.blocks)
@@ -242,8 +243,8 @@ function onWheel(event: WheelEvent): void {
   if (event.deltaY < 0) following.value = false
 }
 
-const KEYS_UP = ['PageUp', 'ArrowUp', 'Home']
-const KEYS_SCROLL = [...KEYS_UP, 'PageDown', 'ArrowDown', 'End', ' ']
+const KEYS_UP: readonly string[] = [Key.PageUp, Key.ArrowUp, Key.Home]
+const KEYS_SCROLL: readonly string[] = [...KEYS_UP, Key.PageDown, Key.ArrowDown, Key.End, Key.Space]
 
 // Keys scroll the view when nothing that takes keys has the focus.
 function onKeydown(event: KeyboardEvent): void {
@@ -251,7 +252,7 @@ function onKeydown(event: KeyboardEvent): void {
   const target = event.target
   if (target !== document.body && !(target instanceof Node && scroller.value?.contains(target))) return
   beginGesture()
-  if (KEYS_UP.includes(event.key) || (event.key === ' ' && event.shiftKey)) following.value = false
+  if (KEYS_UP.includes(event.key) || (event.key === Key.Space && event.shiftKey)) following.value = false
 }
 
 function onScroll(): void {

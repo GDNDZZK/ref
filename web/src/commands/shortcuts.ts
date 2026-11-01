@@ -1,10 +1,16 @@
 // Matching and showing keyboard shortcuts.
 
 import type { Shortcut } from './types.ts'
+import { Key } from '../keys.ts'
 
 const KEY_PREFIX = 'Key'
 const DIGIT_PREFIX = 'Digit'
-const ARROWS: Record<string, string> = { ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓' }
+const ARROWS: Record<string, string> = {
+  [Key.ArrowLeft]: '←',
+  [Key.ArrowRight]: '→',
+  [Key.ArrowUp]: '↑',
+  [Key.ArrowDown]: '↓',
+}
 
 export function matchesShortcut(shortcut: Shortcut, event: KeyboardEvent): boolean {
   return (

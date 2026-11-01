@@ -11,6 +11,7 @@ import { currentTodo, todoProgress } from '../shell/sessionRow.ts'
 import Icon from './Icon.vue'
 import TodoList from './TodoList.vue'
 import TodoMarker from './TodoMarker.vue'
+import { Key } from '../keys.ts'
 
 const props = defineProps<{ sessionId: string; todos: readonly Todo[] | undefined }>()
 
@@ -64,7 +65,7 @@ async function toggle(): Promise<void> {
 }
 
 function onKeydown(event: KeyboardEvent): void {
-  if (event.key !== 'Escape') return
+  if (event.key !== Key.Escape) return
   event.preventDefault()
   event.stopPropagation() // not an interrupt, and not for the composer
   close()

@@ -5,6 +5,7 @@
 // confirms. Pure TypeScript: the card and the key handler both work on the same form.
 
 import type { Question, QuestionRequest } from '../proto/generated'
+import { Key } from '../keys.ts'
 
 // What a key asks the owner of the form to do next.
 export type FormOutcome = 'submit' | 'dismiss' | 'handled' | 'ignored'
@@ -141,22 +142,22 @@ export class QuestionForm {
 
   // A key press outside the text field.
   press(key: string, shift = false): FormOutcome {
-    if (key === 'Escape') return 'dismiss'
+    if (key === Key.Escape) return 'dismiss'
     const tabDelta = this.tabbed ? tabDirection(key, shift) : 0
     if (tabDelta !== 0) return this.moveTabBy(tabDelta)
-    if (this.onConfirmTab) return key === 'Enter' ? 'submit' : 'ignored'
+    if (this.onConfirmTab) return key === Key.Enter ? 'submit' : 'ignored'
 
     const index = this.tab
     switch (key) {
-      case 'ArrowUp':
+      case Key.ArrowUp:
       case 'k':
         this.moveCursor(index, -1)
         return 'handled'
-      case 'ArrowDown':
+      case Key.ArrowDown:
       case 'j':
         this.moveCursor(index, 1)
         return 'handled'
-      case 'Enter':
+      case Key.Enter:
       case ' ':
         return this.pick(index, this.choices[index]!.cursor)
       default:
@@ -194,8 +195,8 @@ export class QuestionForm {
 
 // +1 or -1 for the keys that change the tab, else 0.
 function tabDirection(key: string, shift: boolean): number {
-  if (key === 'ArrowRight' || (key === 'Tab' && !shift)) return 1
-  if (key === 'ArrowLeft' || (key === 'Tab' && shift)) return -1
+  if (key === Key.ArrowRight || (key === Key.Tab && !shift)) return 1
+  if (key === Key.ArrowLeft || (key === Key.Tab && shift)) return -1
   return 0
 }
 

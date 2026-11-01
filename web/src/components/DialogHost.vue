@@ -18,6 +18,7 @@ import RenameDialog from './dialogs/RenameDialog.vue'
 import SessionsDialog from './dialogs/SessionsDialog.vue'
 import SettingsDialog from './dialogs/SettingsDialog.vue'
 import VariantsDialog from './dialogs/VariantsDialog.vue'
+import { Key } from '../keys.ts'
 
 const dialogs = useDialogsStore()
 const workspace = useWorkspaceStore()
@@ -42,7 +43,7 @@ dialogs.setOnClosed(() => {
 })
 
 function onKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape' && dialogs.current) {
+  if (event.key === Key.Escape && dialogs.current) {
     event.preventDefault()
     dialogs.close()
   }
