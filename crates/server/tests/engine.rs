@@ -19,7 +19,7 @@ async fn basic_turn_and_persistence() {
     assert_eq!(last_text(&s), "Hello there");
     let msgs = messages(&s);
     assert_eq!(msgs.len(), 2);
-    assert_eq!(msgs[1].usage.unwrap().input, 1000);
+    assert_eq!(msgs[1].usage.unwrap().input, MOCK_PROMPT_TOKENS);
     assert!(s.info().context.used > 0);
     // Tools sent with purpose first, in fixed order.
     let body = &m.bodies()[0];
@@ -528,7 +528,10 @@ async fn manual_compaction_uses_model_summary_and_undo_restores_context() {
     // Context usage estimated from the new effective context (system + tools + summary),
     // not the last reported usage.
     let used = s.info().context.used;
-    assert!(used > 0 && used != 1020, "{used}");
+    assert!(
+        used > 0 && used != MOCK_PROMPT_TOKENS + MOCK_COMPLETION_TOKENS,
+        "{used}"
+    );
     // Compacting again without new assistant output is refused.
     ref_server::engine::start_custom_run(&hub, &s, ref_server::compaction::manual).unwrap();
     wait_idle(&s).await;
@@ -666,7 +669,11 @@ async fn recommend_compaction_notice_once_per_epoch() {
     assert_eq!(msgs.len(), 4, "{msgs:#?}");
     assert_eq!(msgs[2].source, MessageSource::Reminder);
     let text = msgs[2].raw_text();
-    assert!(text.starts_with("[Context notice] This conversation has used 1020 of 10000 tokens (10%), past the recommended compaction point (1000 tokens)."), "{text}");
+    let expected = format!(
+        "[Context notice] This conversation has used {} of {MOCK_CONTEXT} tokens (10%), past the recommended compaction point (1000 tokens).",
+        MOCK_PROMPT_TOKENS + MOCK_COMPLETION_TOKENS
+    );
+    assert!(text.starts_with(&expected), "{text}");
     let b1 = non_system(&m.bodies()[1]);
     assert_eq!(b1[b1.len() - 2]["role"], "tool");
     assert_eq!(b1[b1.len() - 1]["role"], "user");
@@ -761,10 +768,11 @@ async fn context_window_tool() {
         } => o.clone(),
         _ => panic!(),
     };
-    assert!(
-        out.contains("Context window for \"main\": used 1020 tokens of 10000 (10%)"),
-        "{out}"
+    let expected = format!(
+        "Context window for \"main\": used {} tokens of {MOCK_CONTEXT} (10%)",
+        MOCK_PROMPT_TOKENS + MOCK_COMPLETION_TOKENS
     );
+    assert!(out.contains(&expected), "{out}");
     assert!(out.contains("Recommended compaction at 6000"), "{out}");
 }
 

@@ -12,6 +12,12 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
+/// Usage the mock server reports for every non-title reply.
+pub const MOCK_PROMPT_TOKENS: u64 = 1000;
+pub const MOCK_COMPLETION_TOKENS: u64 = 20;
+/// Context window of the mock model.
+pub const MOCK_CONTEXT: u64 = 10_000;
+
 #[derive(Debug, Clone)]
 pub enum Reply {
     Text(String),
@@ -76,7 +82,7 @@ fn sse(reply: &Reply) -> String {
         Reply::Status(..) | Reply::Hang(_) => {}
     }
     s.push_str(&chunk(
-        json!({"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":20}}),
+        json!({"choices":[],"usage":{"prompt_tokens":MOCK_PROMPT_TOKENS,"completion_tokens":MOCK_COMPLETION_TOKENS}}),
     ));
     s.push_str("data: [DONE]\n\n");
     s
@@ -195,7 +201,7 @@ pub fn config(base_url: &str) -> Config {
             key: "m".into(),
             id: "m".into(),
             name: "Mock".into(),
-            context: 10_000,
+            context: MOCK_CONTEXT,
             ..Default::default()
         },
     );
