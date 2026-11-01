@@ -8,7 +8,7 @@ ToolBodyBase {
 
 	readonly property var meta: call.meta
 	readonly property string command: typeof call.inputObject.command === "string" ? call.inputObject.command : ""
-	readonly property bool running: call.toolState === "running"
+	readonly property bool running: call.toolState === ToolState.running
 	readonly property int liveTailLines: 20
 	readonly property var liveLines: call.liveOutput === "" ? [] : call.liveOutput.split("\n")
 	readonly property int earlierLines: Math.max(0, liveLines.length - liveTailLines)
@@ -80,7 +80,7 @@ ToolBodyBase {
 			OutputText {
 				visible: body.call.output !== ""
 				text: body.call.output
-				textColor: body.call.failed || body.call.toolState === "error" ? Theme.danger : Theme.textMuted
+				textColor: body.call.failed || body.call.toolState === ToolState.error ? Theme.danger : Theme.textMuted
 				showAll: body.call.showAll
 				onShowAllRequested: body.showAllRequested()
 			}

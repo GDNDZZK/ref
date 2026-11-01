@@ -10,12 +10,12 @@ ToolSection {
 
 	signal showAllRequested()
 
-	visible: call.output !== "" || call.toolState === "done" || call.toolState === "error"
+	visible: call.output !== "" || call.toolState === ToolState.done || call.toolState === ToolState.error
 	label: qsTr("Output")
 
 	OutputText {
 		text: section.call.output !== "" ? section.call.output : qsTr("(no output)")
-		textColor: section.call.failed || section.call.toolState === "error" ? Theme.danger : Theme.textMuted
+		textColor: section.call.failed || section.call.toolState === ToolState.error ? Theme.danger : Theme.textMuted
 		copyable: section.call.output !== ""
 		showAll: section.call.showAll
 		onShowAllRequested: section.showAllRequested()

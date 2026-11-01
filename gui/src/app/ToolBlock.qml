@@ -31,11 +31,11 @@ Block {
 	readonly property var inputObject: ToolInfo.parse(inputJson)
 	readonly property string detail: ToolInfo.detail(toolName, inputObject)
 	readonly property bool hasDetails: !alwaysOpen && (inputJson !== "" || rawInput !== "" || output !== "" || images.length > 0)
-	readonly property bool awaitingPermission: toolState === "awaiting_permission"
-	readonly property bool delayed: toolState === "delayed"
+	readonly property bool awaitingPermission: toolState === ToolState.awaitingPermission
+	readonly property bool delayed: toolState === ToolState.delayed
 	readonly property bool alwaysOpen: toolName === "todo" && ToolInfo.todos(inputObject).length > 0
 	readonly property bool open: alwaysOpen || ((expanded || awaitingPermission) && hasDetails)
-	readonly property bool inactive: toolState === "denied" || toolState === "cancelled"
+	readonly property bool inactive: toolState === ToolState.denied || toolState === ToolState.cancelled
 	readonly property bool showsTime: columnWidth >= timeShownFromWidth
 	readonly property int timeShownFromWidth: 560
 	readonly property int headerHeight: 38
@@ -51,19 +51,19 @@ Block {
 	readonly property string statusText: {
 		const took = timeEnd > 0 ? Format.duration(timeEnd - time) : ""
 		switch (toolState) {
-		case "streaming":
+		case ToolState.streaming:
 			return qsTr("writing\u2026")
-		case "awaiting_permission":
+		case ToolState.awaitingPermission:
 			return qsTr("Needs permission")
-		case "delayed":
+		case ToolState.delayed:
 			return qsTr("Runs in %1").arg(Format.elapsed(Math.max(0, runAt - now) + Format.msPerSecond - 1))
-		case "running":
+		case ToolState.running:
 			return qsTr("running %1").arg(Format.elapsed(now - time))
-		case "error":
+		case ToolState.error:
 			return took === "" ? qsTr("error") : qsTr("error %1").arg(took)
-		case "denied":
+		case ToolState.denied:
 			return qsTr("denied")
-		case "cancelled":
+		case ToolState.cancelled:
 			return qsTr("cancelled")
 		default:
 			return took
@@ -71,13 +71,13 @@ Block {
 	}
 	readonly property color statusColor: {
 		switch (toolState) {
-		case "awaiting_permission":
-		case "delayed":
+		case ToolState.awaitingPermission:
+		case ToolState.delayed:
 			return Theme.warning
-		case "streaming":
-		case "running":
+		case ToolState.streaming:
+		case ToolState.running:
 			return Theme.accent
-		case "error":
+		case ToolState.error:
 			return Theme.danger
 		default:
 			return Theme.textMuted
@@ -86,7 +86,7 @@ Block {
 
 	Timer {
 		interval: block.tickInterval
-		running: block.toolState === "running" || block.delayed
+		running: block.toolState === ToolState.running || block.delayed
 		repeat: true
 		onTriggered: block.now = Date.now()
 	}
@@ -172,7 +172,7 @@ Block {
 					font.family: Theme.monoFamily
 					font.pixelSize: Theme.codeFontSize
 					font.bold: true
-					font.strikeout: block.toolState === "denied"
+					font.strikeout: block.toolState === ToolState.denied
 				}
 				// The purpose keeps its words; the detail gets what is left.
 				Item {
@@ -187,7 +187,7 @@ Block {
 						width: Math.min(implicitWidth, parent.width)
 						text: block.purpose
 						elide: Text.ElideRight
-						color: block.toolState === "cancelled" ? Theme.textMuted : Theme.text
+						color: block.toolState === ToolState.cancelled ? Theme.textMuted : Theme.text
 						font.pixelSize: Theme.codeFontSize
 					}
 					Text {
@@ -236,7 +236,7 @@ Block {
 		Item {
 			id: failure
 
-			readonly property bool shown: block.toolState === "error" && !block.open && block.firstOutputLine !== ""
+			readonly property bool shown: block.toolState === ToolState.error && !block.open && block.firstOutputLine !== ""
 
 			y: header.height
 			width: parent.width
