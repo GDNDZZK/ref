@@ -1,131 +1,73 @@
 # Adapted from an early version of LightBlueCube/qutie
 # SPDX-License-Identifier: GPL-3.0-or-later
-qt_add_executable(tst_fence_splitter tst_fence_splitter.cpp)
-target_link_libraries(tst_fence_splitter PRIVATE refgui_session Qt6::Test)
-refgui_configure_target(tst_fence_splitter)
-add_test(NAME tst_fence_splitter COMMAND tst_fence_splitter)
 
-qt_add_executable(tst_conversation_model tst_conversation_model.cpp session_test_data.h)
+# One test executable `name` from `name`.cpp and SOURCES, linked to LIBS and Qt6::Test, run by ctest.
+function(refgui_add_test name)
+	cmake_parse_arguments(PARSE_ARGV 1 arg "" "" "SOURCES;LIBS;DEFINITIONS")
+	qt_add_executable(${name} ${name}.cpp ${arg_SOURCES})
+	target_link_libraries(${name} PRIVATE ${arg_LIBS} Qt6::Test)
+	if(arg_DEFINITIONS)
+		target_compile_definitions(${name} PRIVATE ${arg_DEFINITIONS})
+	endif()
+	refgui_configure_target(${name})
+	add_test(NAME ${name} COMMAND ${name})
+endfunction()
+
+refgui_add_test(tst_fence_splitter LIBS refgui_session)
+
 # Gui is only linked so that QAbstractItemModelTester can create the QFont and QBrush values it probes with.
-target_link_libraries(tst_conversation_model PRIVATE refgui_session Qt6::Gui Qt6::Test)
-refgui_configure_target(tst_conversation_model)
-add_test(NAME tst_conversation_model COMMAND tst_conversation_model)
+refgui_add_test(tst_conversation_model SOURCES session_test_data.h LIBS refgui_session Qt6::Gui)
 
-qt_add_executable(tst_stream_pacer tst_stream_pacer.cpp)
-target_link_libraries(tst_stream_pacer PRIVATE refgui_session Qt6::Test)
-refgui_configure_target(tst_stream_pacer)
-add_test(NAME tst_stream_pacer COMMAND tst_stream_pacer)
+refgui_add_test(tst_stream_pacer LIBS refgui_session)
 
-qt_add_executable(tst_proto tst_proto.cpp)
-target_link_libraries(tst_proto PRIVATE refgui_proto Qt6::Test)
-target_compile_definitions(tst_proto PRIVATE REF_FIXTURES_DIR="${PROJECT_SOURCE_DIR}/../crates/proto/fixtures")
-refgui_configure_target(tst_proto)
-add_test(NAME tst_proto COMMAND tst_proto)
+refgui_add_test(tst_proto LIBS refgui_proto DEFINITIONS REF_FIXTURES_DIR="${PROJECT_SOURCE_DIR}/../crates/proto/fixtures")
 
-qt_add_executable(tst_server_client tst_server_client.cpp coro_test.h fake_backend.h)
-target_link_libraries(tst_server_client PRIVATE refgui_client Qt6::Test)
-refgui_configure_target(tst_server_client)
-add_test(NAME tst_server_client COMMAND tst_server_client)
+refgui_add_test(tst_server_client SOURCES coro_test.h fake_backend.h LIBS refgui_client)
 
-qt_add_executable(tst_composer_requests tst_composer_requests.cpp coro_test.h fake_backend.h)
-target_link_libraries(tst_composer_requests PRIVATE refgui_client Qt6::Test)
-refgui_configure_target(tst_composer_requests)
-add_test(NAME tst_composer_requests COMMAND tst_composer_requests)
+refgui_add_test(tst_composer_requests SOURCES coro_test.h fake_backend.h LIBS refgui_client)
 
-qt_add_executable(tst_composer_model tst_composer_model.cpp coro_test.h fake_backend.h)
-target_link_libraries(tst_composer_model PRIVATE refgui_composer Qt6::Test)
-refgui_configure_target(tst_composer_model)
-add_test(NAME tst_composer_model COMMAND tst_composer_model)
+refgui_add_test(tst_composer_model SOURCES coro_test.h fake_backend.h LIBS refgui_composer)
 set_tests_properties(tst_composer_model PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen") # the clipboard needs a platform
 
-qt_add_executable(tst_plain_text tst_plain_text.cpp)
-target_link_libraries(tst_plain_text PRIVATE Qt6::Test)
-target_compile_definitions(tst_plain_text PRIVATE REF_QML_DIR="${PROJECT_SOURCE_DIR}/src/app")
-refgui_configure_target(tst_plain_text)
-add_test(NAME tst_plain_text COMMAND tst_plain_text)
+refgui_add_test(tst_plain_text DEFINITIONS REF_QML_DIR="${PROJECT_SOURCE_DIR}/src/app")
 
-qt_add_executable(tst_backend_shutdown tst_backend_shutdown.cpp)
-target_link_libraries(tst_backend_shutdown PRIVATE refgui_client Qt6::Test)
-refgui_configure_target(tst_backend_shutdown)
-add_test(NAME tst_backend_shutdown COMMAND tst_backend_shutdown)
+refgui_add_test(tst_backend_shutdown LIBS refgui_client)
 
-qt_add_executable(tst_launcher tst_launcher.cpp coro_test.h)
-target_link_libraries(tst_launcher PRIVATE refgui_client Qt6::Test)
-refgui_configure_target(tst_launcher)
-add_test(NAME tst_launcher COMMAND tst_launcher)
+refgui_add_test(tst_launcher SOURCES coro_test.h LIBS refgui_client)
 
-qt_add_executable(tst_conversation_feed tst_conversation_feed.cpp session_test_data.h)
-target_link_libraries(tst_conversation_feed PRIVATE refgui_session Qt6::Test)
-refgui_configure_target(tst_conversation_feed)
-add_test(NAME tst_conversation_feed COMMAND tst_conversation_feed)
+refgui_add_test(tst_conversation_feed SOURCES session_test_data.h LIBS refgui_session)
 
-qt_add_executable(tst_session_controller tst_session_controller.cpp coro_test.h fake_backend.h session_test_data.h)
-target_link_libraries(tst_session_controller PRIVATE refgui_session Qt6::Test)
-refgui_configure_target(tst_session_controller)
-add_test(NAME tst_session_controller COMMAND tst_session_controller)
+refgui_add_test(tst_session_controller SOURCES coro_test.h fake_backend.h session_test_data.h LIBS refgui_session)
 
-qt_add_executable(tst_question_prompt tst_question_prompt.cpp)
-target_link_libraries(tst_question_prompt PRIVATE refgui_session Qt6::Test)
-refgui_configure_target(tst_question_prompt)
-add_test(NAME tst_question_prompt COMMAND tst_question_prompt)
+refgui_add_test(tst_question_prompt LIBS refgui_session)
 
-qt_add_executable(tst_todo_progress tst_todo_progress.cpp)
-target_link_libraries(tst_todo_progress PRIVATE refgui_proto Qt6::Test)
-refgui_configure_target(tst_todo_progress)
-add_test(NAME tst_todo_progress COMMAND tst_todo_progress)
+refgui_add_test(tst_todo_progress LIBS refgui_proto)
 
-qt_add_executable(tst_command_line tst_command_line.cpp)
-target_link_libraries(tst_command_line PRIVATE refgui_cli Qt6::Test)
-refgui_configure_target(tst_command_line)
-add_test(NAME tst_command_line COMMAND tst_command_line)
+refgui_add_test(tst_command_line LIBS refgui_cli)
 
-qt_add_executable(tst_icon_provider tst_icon_provider.cpp)
-target_link_libraries(tst_icon_provider PRIVATE refgui_icons Qt6::Gui Qt6::Test)
-refgui_configure_target(tst_icon_provider)
-add_test(NAME tst_icon_provider COMMAND tst_icon_provider)
+refgui_add_test(tst_icon_provider LIBS refgui_icons Qt6::Gui)
 
-qt_add_executable(tst_settings tst_settings.cpp)
-target_link_libraries(tst_settings PRIVATE refgui_workspace Qt6::Test)
-refgui_configure_target(tst_settings)
-add_test(NAME tst_settings COMMAND tst_settings)
+refgui_add_test(tst_settings LIBS refgui_workspace)
 
-qt_add_executable(tst_command_registry tst_command_registry.cpp)
-target_link_libraries(tst_command_registry PRIVATE refgui_workspace Qt6::Test)
-refgui_configure_target(tst_command_registry)
-add_test(NAME tst_command_registry COMMAND tst_command_registry)
+refgui_add_test(tst_command_registry LIBS refgui_workspace)
 
-qt_add_executable(tst_toast_text tst_toast_text.cpp)
-target_link_libraries(tst_toast_text PRIVATE refgui_workspace Qt6::Test)
-refgui_configure_target(tst_toast_text)
-add_test(NAME tst_toast_text COMMAND tst_toast_text)
+refgui_add_test(tst_toast_text LIBS refgui_workspace)
 
 # Tests against the real backend. Point REF_SERVER at a built ref-server
 # (`cargo build -p ref-server` gives target/debug/ref-server) to enable them.
 set(REF_SERVER "" CACHE FILEPATH "ref-server binary for the tests that run against it")
 if(REF_SERVER)
-	qt_add_executable(tst_mock_session tst_mock_session.cpp coro_test.h session_test_data.h)
-	target_link_libraries(tst_mock_session PRIVATE refgui_session Qt6::Test)
-	target_compile_definitions(tst_mock_session PRIVATE REF_SERVER_BINARY="${REF_SERVER}")
-	refgui_configure_target(tst_mock_session)
-	add_test(NAME tst_mock_session COMMAND tst_mock_session)
+	refgui_add_test(tst_mock_session SOURCES coro_test.h session_test_data.h LIBS refgui_session DEFINITIONS REF_SERVER_BINARY="${REF_SERVER}")
 
-	qt_add_executable(tst_mock_composer tst_mock_composer.cpp coro_test.h session_test_data.h)
-	target_link_libraries(tst_mock_composer PRIVATE refgui_composer Qt6::Test)
-	target_compile_definitions(tst_mock_composer PRIVATE REF_SERVER_BINARY="${REF_SERVER}")
-	refgui_configure_target(tst_mock_composer)
-	add_test(NAME tst_mock_composer COMMAND tst_mock_composer)
+	refgui_add_test(tst_mock_composer SOURCES coro_test.h session_test_data.h LIBS refgui_composer DEFINITIONS REF_SERVER_BINARY="${REF_SERVER}")
 
 	# The whole program, offscreen. ref-gui imports the KSyntaxHighlighting QML plugin at run
 	# time, which lives in the dependency prefix.
-	qt_add_executable(tst_app_smoke tst_app_smoke.cpp)
-	target_link_libraries(tst_app_smoke PRIVATE refgui_client Qt6::Test)
-	target_compile_definitions(tst_app_smoke PRIVATE
+	refgui_add_test(tst_app_smoke LIBS refgui_client DEFINITIONS
 		REF_SERVER_BINARY="${REF_SERVER}"
 		REF_GUI_BINARY="$<TARGET_FILE:ref-gui>"
 	)
 	add_dependencies(tst_app_smoke ref-gui)
-	refgui_configure_target(tst_app_smoke)
-	add_test(NAME tst_app_smoke COMMAND tst_app_smoke)
 	set(qml_import_paths "")
 	foreach(prefix IN LISTS CMAKE_PREFIX_PATH)
 		list(APPEND qml_import_paths "${prefix}/lib/qml")
@@ -140,36 +82,22 @@ if(REF_SERVER)
 endif()
 
 foreach(name tst_prompt_draft tst_completion tst_prompt_history)
-	qt_add_executable(${name} ${name}.cpp)
-	target_link_libraries(${name} PRIVATE refgui_compose Qt6::Test)
-	refgui_configure_target(${name})
-	add_test(NAME ${name} COMMAND ${name})
+	refgui_add_test(${name} LIBS refgui_compose)
 endforeach()
 
-qt_add_executable(tst_notification_text tst_notification_text.cpp)
-target_link_libraries(tst_notification_text PRIVATE refgui_notify Qt6::Test)
-refgui_configure_target(tst_notification_text)
-add_test(NAME tst_notification_text COMMAND tst_notification_text)
+refgui_add_test(tst_notification_text LIBS refgui_notify)
 
-qt_add_executable(tst_notification_center tst_notification_center.cpp fake_backend.h)
-target_link_libraries(tst_notification_center PRIVATE refgui_notify Qt6::Test)
-refgui_configure_target(tst_notification_center)
-add_test(NAME tst_notification_center COMMAND tst_notification_center)
+refgui_add_test(tst_notification_center SOURCES fake_backend.h LIBS refgui_notify)
 
 # Needs `dbus-daemon`; skips itself without it. Never touches the user's session bus.
 if(UNIX AND NOT APPLE)
-	qt_add_executable(tst_dbus_notifier tst_dbus_notifier.cpp)
-	target_link_libraries(tst_dbus_notifier PRIVATE refgui_notify Qt6::Test)
-	refgui_configure_target(tst_dbus_notifier)
-	add_test(NAME tst_dbus_notifier COMMAND tst_dbus_notifier)
+	refgui_add_test(tst_dbus_notifier LIBS refgui_notify)
 endif()
-qt_add_executable(tst_session_list tst_session_list.cpp fake_backend.h)
-target_link_libraries(tst_session_list PRIVATE refgui_workspace Qt6::Test)
-refgui_configure_target(tst_session_list)
-add_test(NAME tst_session_list COMMAND tst_session_list)
+
+refgui_add_test(tst_session_list SOURCES fake_backend.h LIBS refgui_workspace)
 
 # Workspace is part of the program; the test compiles its sources.
-qt_add_executable(tst_workspace tst_workspace.cpp fake_backend.h
+refgui_add_test(tst_workspace SOURCES fake_backend.h
 	${PROJECT_SOURCE_DIR}/src/app/workspace.cpp
 	${PROJECT_SOURCE_DIR}/src/app/workspace_commands.cpp
 	${PROJECT_SOURCE_DIR}/src/app/workspace_requests.cpp
@@ -181,43 +109,29 @@ qt_add_executable(tst_workspace tst_workspace.cpp fake_backend.h
 	${PROJECT_SOURCE_DIR}/src/app/tile_model.h
 	${PROJECT_SOURCE_DIR}/src/app/tile_stage.cpp
 	${PROJECT_SOURCE_DIR}/src/app/tile_stage.h
+	LIBS refgui_workspace refgui_session refgui_composer refgui_cli Qt6::Gui Qt6::Qml
 )
-target_link_libraries(tst_workspace PRIVATE refgui_workspace refgui_session refgui_composer refgui_cli Qt6::Gui Qt6::Qml Qt6::Test)
-refgui_configure_target(tst_workspace)
-add_test(NAME tst_workspace COMMAND tst_workspace)
 
 # The translator is part of the program; the test compiles it and embeds the translations like the program does.
-qt_add_executable(tst_app_translator tst_app_translator.cpp
-	${PROJECT_SOURCE_DIR}/src/app/app_translator.cpp
-	${PROJECT_SOURCE_DIR}/src/app/app_translator.h
+refgui_add_test(tst_app_translator
+	SOURCES ${PROJECT_SOURCE_DIR}/src/app/app_translator.cpp ${PROJECT_SOURCE_DIR}/src/app/app_translator.h
+	LIBS refgui_workspace
 )
 qt_add_lrelease(TS_FILES ${PROJECT_SOURCE_DIR}/translations/ref-gui_zh_CN.ts ${PROJECT_SOURCE_DIR}/translations/ref-gui_en.ts
 	QM_FILES_OUTPUT_VARIABLE translator_test_qm_files)
 qt_add_resources(tst_app_translator translator_test_i18n PREFIX "/i18n" BASE "${CMAKE_CURRENT_BINARY_DIR}" FILES ${translator_test_qm_files})
-target_link_libraries(tst_app_translator PRIVATE refgui_workspace Qt6::Test)
-refgui_configure_target(tst_app_translator)
-add_test(NAME tst_app_translator COMMAND tst_app_translator)
 
-qt_add_executable(tst_markdown_text tst_markdown_text.cpp)
-target_link_libraries(tst_markdown_text PRIVATE refgui_session Qt6::Gui Qt6::Test)
-refgui_configure_target(tst_markdown_text)
-add_test(NAME tst_markdown_text COMMAND tst_markdown_text)
+refgui_add_test(tst_markdown_text LIBS refgui_session Qt6::Gui)
 set_tests_properties(tst_markdown_text PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
-qt_add_executable(tst_tool_content tst_tool_content.cpp)
-target_link_libraries(tst_tool_content PRIVATE refgui_session Qt6::Test)
-refgui_configure_target(tst_tool_content)
-add_test(NAME tst_tool_content COMMAND tst_tool_content)
+refgui_add_test(tst_tool_content LIBS refgui_session)
 
 # Text from the model must not reach the network. Compiles the program's network policy.
-qt_add_executable(tst_network_policy tst_network_policy.cpp
-	${PROJECT_SOURCE_DIR}/src/app/local_only_network.cpp
-	${PROJECT_SOURCE_DIR}/src/app/local_only_network.h
+refgui_add_test(tst_network_policy
+	SOURCES ${PROJECT_SOURCE_DIR}/src/app/local_only_network.cpp ${PROJECT_SOURCE_DIR}/src/app/local_only_network.h
+	LIBS refgui_session Qt6::Network Qt6::Qml Qt6::Quick
+	DEFINITIONS REF_QML_DIR="${PROJECT_SOURCE_DIR}/src/app"
 )
-target_link_libraries(tst_network_policy PRIVATE refgui_session Qt6::Network Qt6::Qml Qt6::Quick Qt6::Test)
-target_compile_definitions(tst_network_policy PRIVATE REF_QML_DIR="${PROJECT_SOURCE_DIR}/src/app")
-refgui_configure_target(tst_network_policy)
-add_test(NAME tst_network_policy COMMAND tst_network_policy)
 set_tests_properties(tst_network_policy PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # No test may reach the session bus of the user's desktop, where a notification would really show.
