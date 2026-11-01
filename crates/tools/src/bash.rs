@@ -462,6 +462,20 @@ enum Ending {
     Cancelled(std::process::ExitStatus),
 }
 
+/// Feeds one pipe read into the assembler and the collector; sets `eof` when the output ended.
+fn handle_read(
+    r: std::io::Result<usize>,
+    buf: &[u8],
+    asm: &mut LineAssembler,
+    col: &mut Collector,
+    eof: &mut bool,
+) {
+    match r {
+        Ok(0) | Err(_) => *eof = true,
+        Ok(n) => col.push(&asm.push(&buf[..n])),
+    }
+}
+
 pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let command = util::req_str(&input, "command")?;
     if command.trim().is_empty() {
@@ -512,10 +526,7 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let mut status = None;
     while status.is_none() && stop.is_none() {
         tokio::select! {
-            r = reader.read(&mut buf), if !eof => match r {
-                Ok(0) | Err(_) => eof = true,
-                Ok(n) => col.push(&asm.push(&buf[..n])),
-            },
+            r = reader.read(&mut buf), if !eof => handle_read(r, &buf, &mut asm, &mut col, &mut eof),
             s = child.wait() => status = Some(s.map_err(|e| anyhow!("waiting for command failed: {e}"))?),
             _ = &mut sleep_until => stop = Some(true),
             _ = ctx.cancel.cancelled() => stop = Some(false),
@@ -529,10 +540,7 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         tokio::pin!(grace);
         loop {
             tokio::select! {
-                r = reader.read(&mut buf), if !eof => match r {
-                    Ok(0) | Err(_) => eof = true,
-                    Ok(n) => col.push(&asm.push(&buf[..n])),
-                },
+                r = reader.read(&mut buf), if !eof => handle_read(r, &buf, &mut asm, &mut col, &mut eof),
                 s = child.wait() => {
                     status = s.ok();
                     break;
@@ -554,10 +562,7 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     tokio::pin!(drain);
     while !eof {
         tokio::select! {
-            r = reader.read(&mut buf) => match r {
-                Ok(0) | Err(_) => eof = true,
-                Ok(n) => col.push(&asm.push(&buf[..n])),
-            },
+            r = reader.read(&mut buf) => handle_read(r, &buf, &mut asm, &mut col, &mut eof),
             _ = &mut drain => break,
         }
     }
