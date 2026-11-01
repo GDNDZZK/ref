@@ -5,6 +5,8 @@
 //! asks again, which is the next round. The round number is the count of assistant messages
 //! after the last user message.
 
+use crate::peers::{PEER_HEADER_PREFIX, REPORT_REMINDER_PREFIX, SPAWN_HEADER_PREFIX};
+use crate::session::REMINDER_PREFIX;
 use serde_json::{Map, Value, json};
 
 /// How fast text and tool arguments stream: `chars` characters every `every_ms`.
@@ -174,15 +176,6 @@ pub enum Task {
 
 /// Marker the LLM client puts before images that came from tool results.
 const TOOL_IMAGES_MARKER: &str = "Attached image(s) from tool result:";
-/// First line of the prompt a session created by `create_session` starts with; the task
-/// follows on the next line.
-const SPAWN_HEADER: &str = "[Session created by";
-/// First line of the reminder appended to a created session's task.
-const REPORT_REMINDER: &str = "[When you finish or get blocked";
-/// How the harness's own reminders start (agent switch, working directory, must_report).
-const HARNESS_REMINDER: &str = "[Reminder]";
-/// How a message from another session starts (see `peers`).
-pub const PEER_MESSAGE: &str = "[Message from session";
 
 fn message_text(message: &Value) -> String {
     match &message["content"] {
@@ -202,13 +195,13 @@ fn role(message: &Value) -> &str {
 
 /// The task of a created session without the header and the report reminder around it.
 fn task_text(prompt: &str) -> String {
-    if !prompt.starts_with(SPAWN_HEADER) {
+    if !prompt.starts_with(SPAWN_HEADER_PREFIX) {
         return prompt.to_string();
     }
     prompt
         .lines()
         .skip(1)
-        .take_while(|l| !l.starts_with(REPORT_REMINDER))
+        .take_while(|l| !l.starts_with(REPORT_REMINDER_PREFIX))
         .collect::<Vec<_>>()
         .join("\n")
         .trim()
@@ -291,7 +284,7 @@ fn since_task(messages: &[Value]) -> Option<(String, usize, Vec<String>, Vec<Str
         .filter(|(_, m)| role(m) == "user");
     let (start, first) = users.next()?;
     let task = message_text(first);
-    if !task.starts_with(SPAWN_HEADER) {
+    if !task.starts_with(SPAWN_HEADER_PREFIX) {
         return None;
     }
     let mut round = 0;
@@ -302,9 +295,9 @@ fn since_task(messages: &[Value]) -> Option<(String, usize, Vec<String>, Vec<Str
         match role(message) {
             "assistant" => round += 1,
             "tool" => tool_results.push(text),
-            "user" if text.starts_with(PEER_MESSAGE) => return None,
-            "user"
-                if text.starts_with(TOOL_IMAGES_MARKER) || text.starts_with(HARNESS_REMINDER) => {}
+            "user" if text.starts_with(PEER_HEADER_PREFIX) => return None,
+            "user" if text.starts_with(TOOL_IMAGES_MARKER) || text.starts_with(REMINDER_PREFIX) => {
+            }
             "user" => typed.push(text.trim().to_string()),
             _ => {}
         }
@@ -323,9 +316,9 @@ fn conversation_root(messages: &[Value]) -> (String, usize) {
         if text.starts_with(TOOL_IMAGES_MARKER) {
             continue;
         }
-        if text.starts_with(PEER_MESSAGE) {
+        if text.starts_with(PEER_HEADER_PREFIX) {
             reports += 1;
-        } else if !text.starts_with(HARNESS_REMINDER) {
+        } else if !text.starts_with(REMINDER_PREFIX) {
             root = task_text(text.trim());
             reports = 0;
         }
@@ -350,7 +343,7 @@ const REPORT_SUFFIX: &str = "-report";
 /// has one, and to `ack` otherwise; anything else gets the default script.
 pub fn select(prompt: &str, root_prompt: &str) -> &'static Script {
     use super::scripts;
-    if prompt.starts_with(PEER_MESSAGE) {
+    if prompt.starts_with(PEER_HEADER_PREFIX) {
         let report = format!("{}{REPORT_SUFFIX}", first_word(root_prompt));
         return scripts::find(&report)
             .or_else(|| scripts::find("ack"))
@@ -362,7 +355,7 @@ pub fn select(prompt: &str, root_prompt: &str) -> &'static Script {
 /// The name of the session that sent a message from another session.
 pub fn sender_name(prompt: &str) -> &str {
     prompt
-        .strip_prefix(PEER_MESSAGE)
+        .strip_prefix(PEER_HEADER_PREFIX)
         .and_then(|rest| rest.trim_start().strip_prefix('"'))
         .and_then(|rest| rest.split('"').next())
         .unwrap_or("")
@@ -472,7 +465,7 @@ mod tests {
         assert_eq!(ctx.root_prompt, "orchestrate fix it");
         assert_eq!(ctx.peer_reports, 2);
         assert_eq!(ctx.round, 0);
-        assert!(ctx.prompt.starts_with(PEER_MESSAGE));
+        assert!(ctx.prompt.starts_with(PEER_HEADER_PREFIX));
     }
 
     #[test]

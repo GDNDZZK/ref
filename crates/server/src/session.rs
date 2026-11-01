@@ -231,6 +231,9 @@ pub fn cancel_unfinished(messages: &mut [Message], output: &str) -> bool {
     changed
 }
 
+/// How the harness's own reminders to the model start.
+pub(crate) const REMINDER_PREFIX: &str = "[Reminder]";
+
 /// New message without model, usage or error, created now.
 pub fn new_message(role: Role, source: MessageSource, parts: Vec<Part>) -> Message {
     Message {
