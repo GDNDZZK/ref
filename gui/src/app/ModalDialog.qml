@@ -102,20 +102,13 @@ FocusScope {
 				elide: Text.ElideRight
 			}
 
-			CircleButton {
+			IconButton {
 				id: closeButton
 				anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
-				implicitWidth: 28
-				implicitHeight: 28
+				buttonSize: 28
+				iconName: "close"
 				Accessible.name: qsTr("Close")
 				onClicked: dialog.close()
-
-				Icon {
-					anchors.centerIn: parent
-					name: "close"
-					size: 20
-					color: Theme.textMuted
-				}
 			}
 		}
 

@@ -69,19 +69,12 @@ Rectangle {
 				Accessible.role: Accessible.Graphic
 				Accessible.name: "ref"
 			}
-			CircleButton {
+			IconButton {
 				anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
-				implicitWidth: 32
-				implicitHeight: 32
+				buttonSize: 32
+				iconName: "sidebar"
 				Accessible.name: qsTr("Hide sidebar")
 				onClicked: sidebar.collapseRequested()
-
-				Icon {
-					anchors.centerIn: parent
-					name: "sidebar"
-					size: 20
-					color: Theme.textMuted
-				}
 			}
 		}
 
@@ -133,20 +126,13 @@ Rectangle {
 				onTapped: Commands.run(CommandId.newSession)
 			}
 
-			CircleButton {
+			IconButton {
 				id: folderButton
 				anchors { right: parent.right; rightMargin: Theme.sidebarPadding; verticalCenter: parent.verticalCenter }
-				implicitWidth: 36
-				implicitHeight: 36
+				buttonSize: 36
+				iconName: "folder-open"
 				Accessible.name: qsTr("New session in another folder…")
 				onClicked: Commands.run(CommandId.newSessionIn)
-
-				Icon {
-					anchors.centerIn: parent
-					name: "folder-open"
-					size: 20
-					color: Theme.textMuted
-				}
 			}
 		}
 
@@ -275,24 +261,18 @@ Rectangle {
 					visible: searchInput.text === "" && searchInput.preeditText === ""
 				}
 			}
-			CircleButton {
+			IconButton {
 				id: clear
 				anchors { right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
-				implicitWidth: 22
-				implicitHeight: 22
+				buttonSize: 22
+				iconName: "close"
+				iconSize: 16
 				opacity: searchInput.text !== "" ? 1 : 0
 				visible: opacity > 0
 				Accessible.name: qsTr("Clear search")
 				onClicked: searchInput.text = ""
 
 				Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
-
-				Icon {
-					anchors.centerIn: parent
-					name: "close"
-					size: 16
-					color: Theme.textMuted
-				}
 			}
 		}
 
@@ -385,19 +365,12 @@ Rectangle {
 				TapHandler { onTapped: Commands.run(CommandId.mcp) }
 			}
 
-			CircleButton {
+			IconButton {
 				anchors { right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
-				implicitWidth: 32
-				implicitHeight: 32
+				buttonSize: 32
+				iconName: "sliders"
 				Accessible.name: qsTr("Settings")
 				onClicked: Commands.run(CommandId.settings)
-
-				Icon {
-					anchors.centerIn: parent
-					name: "sliders"
-					size: 20
-					color: Theme.textMuted
-				}
 			}
 		}
 	}

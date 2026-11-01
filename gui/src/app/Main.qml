@@ -205,37 +205,25 @@ Window {
 	}
 
 	// Above the snapshot, so their own morph stays visible during the crossfade.
-	CircleButton {
+	IconButton {
 		id: expand
 		anchors { top: parent.top; left: parent.left; margins: Theme.windowButtonMargin }
+		iconName: "sidebar"
 		opacity: sidebar.width === 0 ? 1 : 0
 		visible: opacity > 0
 		Accessible.name: qsTr("Show sidebar")
 		onClicked: Commands.run(CommandId.sidebar)
 
 		Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-
-		Icon {
-			anchors.centerIn: parent
-			name: "sidebar"
-			size: 20
-			color: Theme.textMuted
-		}
 	}
 
-	CircleButton {
+	IconButton {
 		anchors { top: parent.top; left: expand.right; leftMargin: Theme.windowButtonGap; topMargin: Theme.windowButtonMargin }
+		iconName: "plus"
 		opacity: expand.opacity
 		visible: opacity > 0
 		Accessible.name: qsTr("New session")
 		onClicked: Commands.run(CommandId.newSession)
-
-		Icon {
-			anchors.centerIn: parent
-			name: "plus"
-			size: 20
-			color: Theme.textMuted
-		}
 	}
 
 	ThemeToggle {
@@ -244,35 +232,24 @@ Window {
 		onClicked: Workspace.requestTheme(Theme.dark ? ThemeName.light : ThemeName.dark)
 	}
 
-	CircleButton {
+	IconButton {
 		id: splitButton
 		anchors { top: parent.top; right: themeToggle.left; topMargin: Theme.windowButtonMargin; rightMargin: Theme.windowButtonGap }
+		iconName: "split"
+		iconColor: Workspace.splitView ? Theme.accent : Theme.textMuted
 		Accessible.name: qsTr("Split view")
 		onClicked: Commands.run(CommandId.watch)
-
-		Icon {
-			anchors.centerIn: parent
-			name: "split"
-			size: 20
-			color: Workspace.splitView ? Theme.accent : Theme.textMuted
-		}
 	}
 
-	CircleButton {
+	IconButton {
 		anchors { top: parent.top; right: splitButton.left; topMargin: Theme.windowButtonMargin; rightMargin: Theme.windowButtonGap }
+		iconName: "restore"
 		opacity: window.zoomed ? 1 : 0
 		visible: opacity > 0
 		Accessible.name: qsTr("Leave zoom")
 		onClicked: Workspace.unzoom()
 
 		Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-
-		Icon {
-			anchors.centerIn: parent
-			name: "restore"
-			size: 20
-			color: Theme.textMuted
-		}
 	}
 
 	DialogHost {
