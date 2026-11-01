@@ -27,6 +27,15 @@ const QString DesktopEntry = u"ref-gui"_s; // lets the desktop group the notific
 const QString DefaultAction = u"default"_s; // what a click on the notification itself invokes
 const QString BodyMarkupCapability = u"body-markup"_s;
 
+// Methods, signals and hints of the specification.
+const QString NotifyMethod = u"Notify"_s;
+const QString GetCapabilitiesMethod = u"GetCapabilities"_s;
+const QString GetServerInformationMethod = u"GetServerInformation"_s;
+const QString ActionInvokedSignal = u"ActionInvoked"_s;
+const QString NotificationClosedSignal = u"NotificationClosed"_s;
+const QString DesktopEntryHint = u"desktop-entry"_s;
+const QString UrgencyHint = u"urgency"_s;
+
 // Urgency levels of the specification.
 constexpr uchar UrgencyNormal = 1;
 constexpr uchar UrgencyCritical = 2;
@@ -38,12 +47,6 @@ QDBusMessage call(const QString& method)
 	return QDBusMessage::createMethodCall(Service, Path, Interface, method);
 }
 
-// What a newer notification replaces: the one of the same session and kind, like the tag of a Web notification.
-QString replaceKey(const Notification& notification)
-{
-	return u"%1:%2"_s.arg(notification.sessionId).arg(static_cast<int>(notification.kind));
-}
-
 } // namespace
 
 DBusNotifier::DBusNotifier(QDBusConnection connection, QObject* parent)
@@ -51,8 +54,15 @@ DBusNotifier::DBusNotifier(QDBusConnection connection, QObject* parent)
 	, m_connection(std::move(connection))
 	, m_watcher(Service, m_connection, QDBusServiceWatcher::WatchForOwnerChange)
 {
-	m_connection.connect(Service, Path, Interface, u"ActionInvoked"_s, this, SLOT(onActionInvoked(uint,QString)));
-	m_connection.connect(Service, Path, Interface, u"NotificationClosed"_s, this, SLOT(onNotificationClosed(uint,uint)));
+	// Without these a click on a notification does nothing, but it is still shown.
+	if(!m_connection.connect(Service, Path, Interface, ActionInvokedSignal, this, SLOT(onActionInvoked(uint,QString))))
+	{
+		qCWarning(lcNotify) << "cannot subscribe to" << ActionInvokedSignal << m_connection.lastError().message();
+	}
+	if(!m_connection.connect(Service, Path, Interface, NotificationClosedSignal, this, SLOT(onNotificationClosed(uint,uint))))
+	{
+		qCWarning(lcNotify) << "cannot subscribe to" << NotificationClosedSignal << m_connection.lastError().message();
+	}
 	connect(&m_watcher, &QDBusServiceWatcher::serviceOwnerChanged, this, &DBusNotifier::onServiceOwnerChanged);
 	m_reason = tr("Looking for the desktop notification service…");
 	probe();
@@ -62,7 +72,7 @@ DBusNotifier::DBusNotifier(QDBusConnection connection, QObject* parent)
 // service can do, so the first notification is already worded for it.
 void DBusNotifier::probe()
 {
-	auto* watcher = new QDBusPendingCallWatcher(m_connection.asyncCall(call(u"GetServerInformation"_s)), this);
+	auto* watcher = new QDBusPendingCallWatcher(m_connection.asyncCall(call(GetServerInformationMethod)), this);
 	connect(watcher, &QDBusPendingCallWatcher::finished, this, [this](QDBusPendingCallWatcher* finished) {
 		finished->deleteLater();
 		if(finished->isError())
@@ -77,7 +87,7 @@ void DBusNotifier::probe()
 
 void DBusNotifier::probeCapabilities()
 {
-	auto* watcher = new QDBusPendingCallWatcher(m_connection.asyncCall(call(u"GetCapabilities"_s)), this);
+	auto* watcher = new QDBusPendingCallWatcher(m_connection.asyncCall(call(GetCapabilitiesMethod)), this);
 	connect(watcher, &QDBusPendingCallWatcher::finished, this, [this](QDBusPendingCallWatcher* finished) {
 		finished->deleteLater();
 		const QDBusPendingReply<QStringList> reply = *finished;
@@ -119,13 +129,13 @@ void DBusNotifier::show(const Notification& notification)
 
 	const bool critical = notification.kind != proto::NotifyFrame::Kind::TurnDone;
 	const QVariantMap hints{
-		{u"desktop-entry"_s, DesktopEntry},
-		{u"urgency"_s, critical ? UrgencyCritical : UrgencyNormal},
+		{DesktopEntryHint, DesktopEntry},
+		{UrgencyHint, critical ? UrgencyCritical : UrgencyNormal},
 	};
 	const QString key = replaceKey(notification);
 	// A service with markup reads the body as markup; the body is text from the conversation.
 	const QString body = m_bodyMarkup ? notification.body.toHtmlEscaped() : notification.body;
-	QDBusMessage message = call(u"Notify"_s);
+	QDBusMessage message = call(NotifyMethod);
 	message << AppName << m_idOf.value(key, NewNotification) << AppIcon << notification.title << body
 	        << QStringList{DefaultAction, tr("Open")} << hints << ServerDefaultTimeout;
 

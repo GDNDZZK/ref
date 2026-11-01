@@ -136,8 +136,7 @@ void ToastNotifier::show(const Notification& notification)
 		texts.Item(1).AppendChild(xml.CreateTextNode(winrt::hstring(notification.body.toStdWString())));
 
 		toast::ToastNotification message{xml};
-		// The kind comes first so that it survives the cut, like the tag of a Web notification.
-		const QString tag = u"%1:%2"_s.arg(static_cast<int>(notification.kind)).arg(notification.sessionId).left(MaxTagLength);
+		const QString tag = replaceKey(notification).left(MaxTagLength);
 		message.Tag(winrt::hstring(tag.toStdWString()));
 
 		// These run on a thread of the Windows runtime; hand over to the main thread.
