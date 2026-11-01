@@ -154,6 +154,75 @@ fn search_batch(
     results
 }
 
+/// Formats the matches as hashline blocks plus notices, and records what the model has seen.
+fn render_results(
+    results: &[FileResult],
+    ctx: &ToolCtx,
+    limit: usize,
+    total_matches: usize,
+    hit_limit: bool,
+) -> ToolOutput {
+    if results.is_empty() {
+        let mut o = ToolOutput::ok("No matches found.");
+        o.meta = Some(json!({"matches": 0, "files": 0}));
+        return o;
+    }
+
+    let mut out = String::new();
+    let mut shown_files = 0;
+    let mut bytes_limited = false;
+    for r in results {
+        let display = util::display_path(&ctx.cwd, &r.path);
+        let tag = file_hash(&r.text);
+        let (lines, _) = util::split_lines(&r.text);
+        let mut block = format_header(&display, &tag);
+        let mut seen = Vec::new();
+        let mut prev = 0;
+        for &(l, is_match) in &r.rows {
+            if prev != 0 && l != prev + 1 {
+                block.push_str("\n...");
+            }
+            let (text, cut) = util::truncate_chars(lines[l - 1], MAX_LINE_CHARS);
+            let _ = write!(block, "\n{}{l}:{text}", if is_match { '*' } else { ' ' });
+            if !cut {
+                seen.push(l as u32);
+            }
+            prev = l;
+        }
+        if !out.is_empty() && out.len() + block.len() > MAX_OUTPUT_BYTES {
+            bytes_limited = true;
+            break;
+        }
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str(&block);
+        ctx.store.record(&r.path, &r.text, Seen::lines(seen));
+        shown_files += 1;
+    }
+    let mut notices = Vec::new();
+    if hit_limit {
+        notices.push(format!(
+            "[Match limit of {limit} reached; results may be incomplete. Narrow `pattern`/`path`/`glob` or raise `limit`.]"
+        ));
+    }
+    if bytes_limited {
+        notices.push(format!(
+            "[Output limit reached: showing {shown_files} of {} files with matches. Narrow the search.]",
+            results.len()
+        ));
+    }
+    if !notices.is_empty() {
+        out.push_str("\n\n");
+        out.push_str(&notices.join("\n"));
+    }
+    let mut o = ToolOutput::ok(out);
+    o.meta = Some(
+        json!({"matches": total_matches, "files": results.len(), "truncated": hit_limit || bytes_limited}),
+    );
+    o
+}
+
 fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let pattern = util::req_str(input, "pattern")?;
     if pattern.is_empty() {
@@ -221,65 +290,13 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         }
     }
 
-    if results.is_empty() {
-        let mut o = ToolOutput::ok("No matches found.");
-        o.meta = Some(json!({"matches": 0, "files": 0}));
-        return Ok(o);
-    }
-
-    let mut out = String::new();
-    let mut shown_files = 0;
-    let mut bytes_limited = false;
-    for r in &results {
-        let display = util::display_path(&ctx.cwd, &r.path);
-        let tag = file_hash(&r.text);
-        let (lines, _) = util::split_lines(&r.text);
-        let mut block = format_header(&display, &tag);
-        let mut seen = Vec::new();
-        let mut prev = 0;
-        for &(l, is_match) in &r.rows {
-            if prev != 0 && l != prev + 1 {
-                block.push_str("\n...");
-            }
-            let (text, cut) = util::truncate_chars(lines[l - 1], MAX_LINE_CHARS);
-            let _ = write!(block, "\n{}{l}:{text}", if is_match { '*' } else { ' ' });
-            if !cut {
-                seen.push(l as u32);
-            }
-            prev = l;
-        }
-        if !out.is_empty() && out.len() + block.len() > MAX_OUTPUT_BYTES {
-            bytes_limited = true;
-            break;
-        }
-        if !out.is_empty() {
-            out.push_str("\n\n");
-        }
-        out.push_str(&block);
-        ctx.store.record(&r.path, &r.text, Seen::lines(seen));
-        shown_files += 1;
-    }
-    let mut notices = Vec::new();
-    if hit_limit {
-        notices.push(format!(
-            "[Match limit of {limit} reached; results may be incomplete. Narrow `pattern`/`path`/`glob` or raise `limit`.]"
-        ));
-    }
-    if bytes_limited {
-        notices.push(format!(
-            "[Output limit reached: showing {shown_files} of {} files with matches. Narrow the search.]",
-            results.len()
-        ));
-    }
-    if !notices.is_empty() {
-        out.push_str("\n\n");
-        out.push_str(&notices.join("\n"));
-    }
-    let mut o = ToolOutput::ok(out);
-    o.meta = Some(
-        json!({"matches": total_matches, "files": results.len(), "truncated": hit_limit || bytes_limited}),
-    );
-    Ok(o)
+    Ok(render_results(
+        &results,
+        ctx,
+        limit,
+        total_matches,
+        hit_limit,
+    ))
 }
 
 /// Keeps only the first `keep` matches (and context up to the last kept match + its context).
