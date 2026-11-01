@@ -181,23 +181,17 @@ Item {
 				}
 			}
 
-			CircleButton {
+			IconButton {
 				anchors.centerIn: parent
-				implicitWidth: 22
-				implicitHeight: 22
+				buttonSize: 22
+				iconName: "close"
+				iconSize: 16
 				opacity: hover.hovered ? 1 : 0
 				visible: opacity > 0
 				Accessible.name: qsTr("Close session")
 				onClicked: Workspace.closeSession(row.sessionId)
 
 				Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
-
-				Icon {
-					anchors.centerIn: parent
-					name: "close"
-					size: 16
-					color: Theme.textMuted
-				}
 			}
 		}
 	}

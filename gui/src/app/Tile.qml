@@ -179,20 +179,13 @@ Item {
 				}
 			}
 
-			CircleButton {
+			IconButton {
 				id: zoomButton
 				anchors { right: parent.right; rightMargin: 4; verticalCenter: parent.verticalCenter }
-				implicitWidth: 28
-				implicitHeight: 28
+				buttonSize: 28
+				iconName: "maximize"
 				Accessible.name: qsTr("Zoom in")
 				onClicked: Workspace.zoomTile(tile.sessionId)
-
-				Icon {
-					anchors.centerIn: parent
-					name: "maximize"
-					size: 20
-					color: Theme.textMuted
-				}
 			}
 
 			TapHandler {

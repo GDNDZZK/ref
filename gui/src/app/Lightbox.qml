@@ -74,16 +74,10 @@ Item {
 		font.pixelSize: Theme.smallFontSize
 	}
 
-	CircleButton {
+	IconButton {
 		anchors { top: parent.top; right: parent.right; margins: 12 }
+		iconName: "close"
 		Accessible.name: qsTr("Close")
 		onClicked: lightbox.close()
-
-		Icon {
-			anchors.centerIn: parent
-			size: 20
-			name: "close"
-			color: Theme.textMuted
-		}
 	}
 }

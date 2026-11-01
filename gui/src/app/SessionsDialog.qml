@@ -87,19 +87,14 @@ ModalDialog {
 					color: Theme.accent
 					visible: row.isCurrent && !closeTap.visible
 				}
-				CircleButton {
+				IconButton {
 					id: closeTap
 					anchors.fill: parent
+					iconName: "close"
+					iconSize: 16
 					visible: row.isLive && row.current && !dialog.closing
 					Accessible.name: qsTr("Close session")
 					onClicked: Workspace.closeSession(row.sessionId)
-
-					Icon {
-						anchors.centerIn: parent
-						name: "close"
-						size: 16
-						color: Theme.textMuted
-					}
 				}
 			}
 		}

@@ -89,11 +89,12 @@ Item {
 			}
 		}
 
-		CircleButton {
+		IconButton {
 			id: clear
 			anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
-			implicitWidth: 24
-			implicitHeight: 24
+			buttonSize: 24
+			iconName: "close"
+			iconSize: 16
 			opacity: input.text !== "" ? 1 : 0
 			visible: opacity > 0
 			Accessible.name: qsTr("Clear search")
@@ -103,13 +104,6 @@ Item {
 			}
 
 			Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
-
-			Icon {
-				anchors.centerIn: parent
-				name: "close"
-				size: 16
-				color: Theme.textMuted
-			}
 		}
 	}
 
