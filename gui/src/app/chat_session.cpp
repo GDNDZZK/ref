@@ -376,20 +376,27 @@ bool ChatSession::answerKey(int key, const QString& text, int modifiers, bool au
 	return permissionKey(key, text, held, autoRepeat);
 }
 
+bool ChatSession::isTypedText(const QString& text)
+{
+	return !text.isEmpty() && text.front().isPrint();
+}
+
 bool ChatSession::questionKey(int key, const QString& text, Qt::KeyboardModifiers held, bool autoRepeat)
 {
 	// A held key moves the highlight, but must not answer, nor answer the next question as well.
-	if(autoRepeat && key != Qt::Key_Up && key != Qt::Key_Down)
+	const bool heldKeyDoesNotMove = autoRepeat && key != Qt::Key_Up && key != Qt::Key_Down;
+	if(heldKeyDoesNotMove)
 	{
 		static const QSet<int> cardKeys{Qt::Key_Return, Qt::Key_Enter, Qt::Key_Escape, Qt::Key_Space, Qt::Key_Left,
 		                                Qt::Key_Right,  Qt::Key_Tab,   Qt::Key_Backtab};
-		return cardKeys.contains(key) || (!text.isEmpty() && text.front().isPrint());
+		const bool isCardKey = cardKeys.contains(key);
+		return isCardKey || isTypedText(text);
 	}
 	if(m_question.handleKey(key, static_cast<int>(held)))
 	{
 		return true;
 	}
-	return !text.isEmpty() && text.front().isPrint();
+	return isTypedText(text);
 }
 
 bool ChatSession::permissionKey(int key, const QString& text, Qt::KeyboardModifiers held, bool autoRepeat)
@@ -425,7 +432,7 @@ bool ChatSession::permissionKey(int key, const QString& text, Qt::KeyboardModifi
 	}
 	if(!answer)
 	{
-		return !text.isEmpty() && text.front().isPrint();
+		return isTypedText(text);
 	}
 	if(!autoRepeat) // a held key must not answer the next request as well
 	{
@@ -480,48 +487,42 @@ void ChatSession::permissionReply(const QString& callId, bool allow, bool always
 	sendPermission(callId, allow, always);
 }
 
+template<typename T>
+QCoro::Task<bool> ChatSession::awaitAndReport(QCoro::Task<refgui::client::Result<T>> request, std::function<void()> onFailure)
+{
+	const QPointer<ChatSession> self(this); // the session can be gone when the answer arrives
+	const auto result = co_await std::move(request);
+	if(!self)
+	{
+		co_return false;
+	}
+	if(result)
+	{
+		co_return true;
+	}
+	if(onFailure)
+	{
+		onFailure();
+	}
+	setFailure(result.error());
+	co_return false;
+}
+
 QCoro::Task<> ChatSession::sendPrompt(QString text)
 {
 	setFailure({});
-	const QPointer<ChatSession> self(this); // the session can be gone when the answer arrives
-	const auto result = co_await m_controller.send(std::move(text));
-	if(!self)
-	{
-		co_return;
-	}
-	if(!result)
-	{
-		setFailure(result.error());
-	}
+	co_await awaitAndReport(m_controller.send(std::move(text)));
 }
 
 QCoro::Task<> ChatSession::sendAbort()
 {
-	const QPointer<ChatSession> self(this); // the session can be gone when the answer arrives
-	const auto result = co_await m_controller.abort();
-	if(!self)
-	{
-		co_return;
-	}
-	if(!result)
-	{
-		setFailure(result.error());
-	}
+	co_await awaitAndReport(m_controller.abort());
 }
 
 QCoro::Task<> ChatSession::sendPermission(QString callId, bool allow, bool always)
 {
-	const QPointer<ChatSession> self(this); // the session can be gone when the answer arrives
-	const auto result = co_await m_controller.permissionReply(callId, allow, always);
-	if(!self)
-	{
-		co_return;
-	}
-	if(!result)
-	{
-		m_repliedCalls.remove(callId); // it may be tried again
-		setFailure(result.error());
-	}
+	const auto mayRetry = [this, callId] { m_repliedCalls.remove(callId); };
+	co_await awaitAndReport(m_controller.permissionReply(callId, allow, always), mayRetry);
 }
 
 QCoro::Task<> ChatSession::sendQuestionReply(QString callId, std::optional<QList<QStringList>> answers)

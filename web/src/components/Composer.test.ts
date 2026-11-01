@@ -17,7 +17,7 @@ const COMMANDS: SlashCommand[] = [
   { name: 'rename', aliases: [], title: 'Rename the session', takesArgs: true, custom: false },
 ]
 
-function setup(options: { busy?: boolean; queued?: Message[]; history?: string[] } = {}) {
+function setup(options: { busy?: boolean; queued?: Message[]; history?: string[]; attached?: boolean } = {}) {
   const api = {
     prompt: vi.fn<ComposerApi['prompt']>(async () => ({ queued: false, message_id: 'm1' })),
     shell: vi.fn<ComposerApi['shell']>(async () => {}),
@@ -49,6 +49,7 @@ function setup(options: { busy?: boolean; queued?: Message[]; history?: string[]
   const wrapper = mount(Composer, {
     props: { session, composer },
     global: { plugins: [createPinia(), createAppI18n(['en'])] },
+    attachTo: options.attached ? document.body : undefined, // focus needs the box in the document
   })
   return { wrapper, api, host, composer }
 }
@@ -71,6 +72,15 @@ function value(wrapper: Wrapper): string {
 }
 
 describe('Composer', () => {
+  it('takes the focus when the composer is asked to', async () => {
+    const { wrapper, composer } = setup({ attached: true })
+    expect(document.activeElement).not.toBe(wrapper.get('textarea').element)
+    composer.requestFocus()
+    await flushPromises()
+    expect(document.activeElement).toBe(wrapper.get('textarea').element)
+    wrapper.unmount()
+  })
+
   it('sends on Enter and clears the input', async () => {
     const { wrapper, api } = setup()
     await type(wrapper, 'hello')

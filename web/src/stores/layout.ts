@@ -5,12 +5,13 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { useSettingsStore } from './settings.ts'
 
-export const NARROW_BELOW_PX = 800
+const NARROW_BELOW_PX = 800
+const FRACTIONAL_PX_EPSILON = 0.02 // so the query does not match at exactly NARROW_BELOW_PX
 
 export const useLayoutStore = defineStore('layout', () => {
   const settings = useSettingsStore()
 
-  const query = window.matchMedia(`(max-width: ${NARROW_BELOW_PX - 0.02}px)`)
+  const query = window.matchMedia(`(max-width: ${NARROW_BELOW_PX - FRACTIONAL_PX_EPSILON}px)`)
   const narrow = ref(query.matches)
   query.addEventListener('change', (event) => (narrow.value = event.matches))
 

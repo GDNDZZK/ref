@@ -12,14 +12,19 @@ function memoryStorage(initial?: string) {
 
 describe('loadHistory', () => {
   it('reads a list of strings', () => {
-    expect(loadHistory(memoryStorage('["a","b"]'))).toEqual(['a', 'b'])
+    expect(loadHistory(memoryStorage('["a","b"]'))).toEqual({ entries: ['a', 'b'], corrupt: false })
   })
 
   it('ignores what is not a list of strings', () => {
-    expect(loadHistory(memoryStorage())).toEqual([])
-    expect(loadHistory(memoryStorage('not json'))).toEqual([])
-    expect(loadHistory(memoryStorage('{"a":1}'))).toEqual([])
-    expect(loadHistory(memoryStorage('["a",3,null,"b"]'))).toEqual(['a', 'b'])
+    expect(loadHistory(memoryStorage())).toEqual({ entries: [], corrupt: false })
+    expect(loadHistory(memoryStorage('{"a":1}'))).toEqual({ entries: [], corrupt: false })
+    expect(loadHistory(memoryStorage('["a",3,null,"b"]'))).toEqual({ entries: ['a', 'b'], corrupt: false })
+  })
+
+  it('flags text that is not JSON', () => {
+    expect(loadHistory(memoryStorage('not json'))).toEqual({ entries: [], corrupt: true })
+    expect(new StoredPromptHistory(memoryStorage('not json')).corruptAtStart).toBe(true)
+    expect(new StoredPromptHistory(memoryStorage('["a"]')).corruptAtStart).toBe(false)
   })
 })
 

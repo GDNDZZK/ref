@@ -22,7 +22,6 @@ public:
 	// Makes the tiles `wanted`, in that order. Tiles that stay are kept.
 	void setTiles(const QList<ChatSession*>& wanted);
 	QList<ChatSession*> tiles() const { return m_tiles; }
-	bool contains(const ChatSession* session) const { return m_tiles.contains(session); }
 	int indexOf(const QString& sessionId) const;
 
 	int rowCount(const QModelIndex& parent = {}) const override;

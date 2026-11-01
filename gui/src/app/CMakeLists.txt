@@ -105,7 +105,6 @@ qt_add_qml_module(ref-gui
 		Icon.qml
 		Theme.qml
 		Motion.qml
-		Format.qml
 		ChatView.qml
 		Block.qml
 		UserBlock.qml

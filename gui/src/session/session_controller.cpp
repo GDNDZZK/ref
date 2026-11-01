@@ -12,7 +12,6 @@ namespace refgui::session
 namespace
 {
 
-constexpr int NewestSessionOnly = 1;
 // Messages asked for at a time when scrolling back; the server caps a page at 1000.
 constexpr int OlderPageSize = 100;
 
@@ -20,6 +19,22 @@ constexpr int OlderPageSize = 100;
 QString destroyedError()
 {
 	return QStringLiteral("The session was closed.");
+}
+
+// The failure to report after an awaited request: the controller is gone or the request failed.
+// None when it went through.
+template<typename T>
+std::optional<SessionController::Result<void>> failureOf(const QPointer<SessionController>& self, const SessionController::Result<T>& result)
+{
+	if(!self)
+	{
+		return std::unexpected(destroyedError());
+	}
+	if(!result)
+	{
+		return std::unexpected(result.error());
+	}
+	return std::nullopt;
 }
 
 } // namespace
@@ -56,13 +71,9 @@ QCoro::Task<SessionController::Result<void>> SessionController::create(QString c
 {
 	const QPointer<SessionController> self(this); // the controller can be gone when the answer arrives
 	const auto created = co_await m_backend.client().createSession(std::move(cwd), std::move(agent), std::move(model));
-	if(!self)
+	if(const std::optional<Result<void>> failed = failureOf(self, created))
 	{
-		co_return std::unexpected(destroyedError());
-	}
-	if(!created)
-	{
-		co_return std::unexpected(created.error());
+		co_return *failed;
 	}
 	co_return co_await attach(created->id);
 }
@@ -72,13 +83,9 @@ QCoro::Task<SessionController::Result<void>> SessionController::attach(QString s
 	const QPointer<SessionController> self(this); // the controller can be gone when the answer arrives
 	const bool onlyModeChanges = m_attached && sessionId == m_sessionId;
 	const auto snapshot = co_await m_backend.client().attach(sessionId, foreground);
-	if(!self)
+	if(const std::optional<Result<void>> failed = failureOf(self, snapshot))
 	{
-		co_return std::unexpected(destroyedError());
-	}
-	if(!snapshot)
-	{
-		co_return std::unexpected(snapshot.error());
+		co_return *failed;
 	}
 	m_foreground = foreground;
 	if(onlyModeChanges)
@@ -106,34 +113,6 @@ QCoro::Task<SessionController::Result<void>> SessionController::background()
 	Q_ASSERT(m_attached);
 	m_foreground = false;
 	co_return co_await m_backend.client().detach(m_sessionId);
-}
-
-QCoro::Task<SessionController::Result<bool>> SessionController::continueLast(QString cwd)
-{
-	const QPointer<SessionController> self(this); // the controller can be gone when the answer arrives
-	const auto history = co_await m_backend.client().listHistory(std::move(cwd), NewestSessionOnly);
-	if(!self)
-	{
-		co_return std::unexpected(destroyedError());
-	}
-	if(!history)
-	{
-		co_return std::unexpected(history.error());
-	}
-	if(history->isEmpty())
-	{
-		co_return false;
-	}
-	const auto attached = co_await attach(history->first().id);
-	if(!self)
-	{
-		co_return std::unexpected(destroyedError());
-	}
-	if(!attached)
-	{
-		co_return std::unexpected(attached.error());
-	}
-	co_return true;
 }
 
 QCoro::Task<SessionController::Result<void>> SessionController::loadOlder()
@@ -251,39 +230,46 @@ void SessionController::onEvent(const proto::SessionEvent& event)
 	if(const auto* info = std::get_if<proto::InfoEvent>(&event))
 	{
 		setInfo(info->info);
+		return;
 	}
-	else if(const auto* queue = std::get_if<proto::QueueEvent>(&event))
+	if(const auto* queue = std::get_if<proto::QueueEvent>(&event))
 	{
 		setQueued(queue->messages);
+		return;
 	}
-	else if(const auto* question = std::get_if<proto::QuestionEvent>(&event))
+	if(const auto* question = std::get_if<proto::QuestionEvent>(&event))
 	{
-		const auto known = std::ranges::any_of(m_questions, [&](const proto::QuestionRequest& request) { return request.callId == question->request.callId; });
-		if(!known)
-		{
-			QList<proto::QuestionRequest> questions = m_questions;
-			questions.append(question->request);
-			setQuestions(std::move(questions));
-		}
+		addQuestion(question->request);
+		return;
 	}
-	else if(const auto* resolved = std::get_if<proto::QuestionResolvedEvent>(&event))
+	if(const auto* resolved = std::get_if<proto::QuestionResolvedEvent>(&event))
 	{
 		dropQuestion(resolved->callId);
+		return;
 	}
-	else if(const auto* error = std::get_if<proto::ErrorEvent>(&event))
+	if(const auto* error = std::get_if<proto::ErrorEvent>(&event))
 	{
 		m_model.setTailError(error->text);
 		emit errorReported(error->text);
+		return;
 	}
-	else if(const auto* reset = std::get_if<proto::ResetEvent>(&event))
+	if(const auto* reset = std::get_if<proto::ResetEvent>(&event))
 	{
 		setMoreBefore(reset->moreBefore);
-		m_feed.apply(event);
 	}
-	else
+	m_feed.apply(event); // ignores permission events: tool parts carry their state
+}
+
+void SessionController::addQuestion(const proto::QuestionRequest& request)
+{
+	const auto known = std::ranges::any_of(m_questions, [&](const proto::QuestionRequest& asked) { return asked.callId == request.callId; });
+	if(known)
 	{
-		m_feed.apply(event); // ignores permission events: tool parts carry their state
+		return;
 	}
+	QList<proto::QuestionRequest> questions = m_questions;
+	questions.append(request);
+	setQuestions(std::move(questions));
 }
 
 void SessionController::setQueued(QList<proto::Message> messages)

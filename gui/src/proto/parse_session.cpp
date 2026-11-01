@@ -32,20 +32,6 @@ namespace json
 namespace
 {
 
-// Maps the wire name of an enum value to the value; unknown names fail as "unknown".
-template<typename Enum, std::size_t N>
-Enum readEnum(const QString& path, const QString& name, const std::array<std::pair<QLatin1StringView, Enum>, N>& names)
-{
-	for(const auto& [wireName, value] : names)
-	{
-		if(name == wireName)
-		{
-			return value;
-		}
-	}
-	failUnknown(path, u"unknown value \"%1\""_s.arg(name));
-}
-
 TodoStatus readTodoStatus(const Fields& fields)
 {
 	static constexpr std::array<std::pair<QLatin1StringView, TodoStatus>, 4> names{{
@@ -81,19 +67,19 @@ SessionStatus readSessionStatus(const Fields& fields)
 
 ContextUsage readContextUsage(const Fields& fields)
 {
-	return {.used = static_cast<quint64>(fields.integerOr("used"_L1, 0)),
-	        .max = static_cast<quint64>(fields.integerOr("max"_L1, 0)),
-	        .recommend = static_cast<quint64>(fields.integerOr("recommend"_L1, 0)),
-	        .autoCompact = static_cast<quint64>(fields.integerOr("auto"_L1, 0))};
+	return {.used = fields.unsignedOr("used"_L1, 0),
+	        .max = fields.unsignedOr("max"_L1, 0),
+	        .recommend = fields.unsignedOr("recommend"_L1, 0),
+	        .autoCompact = fields.unsignedOr("auto"_L1, 0)};
 }
 
 Usage readUsage(const Fields& fields)
 {
-	return {.input = static_cast<quint64>(fields.integer("input"_L1)),
-	        .output = static_cast<quint64>(fields.integer("output"_L1)),
-	        .cacheRead = static_cast<quint64>(fields.integer("cache_read"_L1)),
-	        .cacheWrite = static_cast<quint64>(fields.integer("cache_write"_L1)),
-	        .reasoning = static_cast<quint64>(fields.integerOr("reasoning"_L1, 0))};
+	return {.input = fields.unsignedInteger("input"_L1),
+	        .output = fields.unsignedInteger("output"_L1),
+	        .cacheRead = fields.unsignedInteger("cache_read"_L1),
+	        .cacheWrite = fields.unsignedInteger("cache_write"_L1),
+	        .reasoning = fields.unsignedOr("reasoning"_L1, 0)};
 }
 
 MessageSource readMessageSource(const Fields& fields)
@@ -183,18 +169,18 @@ SessionInfo readSessionInfo(const Fields& fields)
 	info.name = fields.string("name"_L1);
 	info.title = fields.string("title"_L1);
 	info.agent = fields.string("agent"_L1);
-	info.model = readModelRef(Fields(fields.object("model"_L1), fields.childPath("model"_L1)));
+	info.model = readModelRef(fields.child("model"_L1));
 	info.cwd = fields.string("cwd"_L1);
 	info.createdAt = fields.integer("created_at"_L1);
 	info.updatedAt = fields.integer("updated_at"_L1);
-	info.status = readSessionStatus(Fields(fields.object("status"_L1), fields.childPath("status"_L1)));
+	info.status = readSessionStatus(fields.child("status"_L1));
 	info.attached = static_cast<quint32>(fields.integer("attached"_L1));
 	info.live = fields.booleanOr("live"_L1, false);
 	info.parent = fields.optionalString("parent"_L1);
 	info.mustReport = fields.booleanOr("must_report"_L1, false);
-	if(const std::optional<QJsonObject> context = fields.optionalObject("context"_L1))
+	if(const std::optional<Fields> context = fields.optionalChild("context"_L1))
 	{
-		info.context = readContextUsage(Fields(*context, fields.childPath("context"_L1)));
+		info.context = readContextUsage(*context);
 	}
 	info.todos = fields.listOrEmpty<Todo>("todos"_L1, [](const Fields& todo) {
 		return Todo{.content = todo.string("content"_L1), .status = readTodoStatus(todo)};
@@ -240,19 +226,19 @@ Message readMessage(const Fields& fields)
 	message.role = readEnum(fields.childPath("role"_L1), fields.string("role"_L1), roles);
 	message.time = fields.integer("time"_L1);
 	message.timeEnd = fields.optionalInteger("time_end"_L1);
-	if(const std::optional<QJsonObject> source = fields.optionalObject("source"_L1))
+	if(const std::optional<Fields> source = fields.optionalChild("source"_L1))
 	{
-		message.source = readMessageSource(Fields(*source, fields.childPath("source"_L1)));
+		message.source = readMessageSource(*source);
 	}
 	message.parts = fields.list<Part>("parts"_L1, readPart);
-	if(const std::optional<QJsonObject> model = fields.optionalObject("model"_L1))
+	if(const std::optional<Fields> model = fields.optionalChild("model"_L1))
 	{
-		message.model = readModelRef(Fields(*model, fields.childPath("model"_L1)));
+		message.model = readModelRef(*model);
 	}
 	message.agent = fields.optionalString("agent"_L1);
-	if(const std::optional<QJsonObject> usage = fields.optionalObject("usage"_L1))
+	if(const std::optional<Fields> usage = fields.optionalChild("usage"_L1))
 	{
-		message.usage = readUsage(Fields(*usage, fields.childPath("usage"_L1)));
+		message.usage = readUsage(*usage);
 	}
 	message.error = fields.optionalString("error"_L1);
 	return message;

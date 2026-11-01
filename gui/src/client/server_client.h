@@ -97,7 +97,7 @@ public:
 	QCoro::Task<Result<proto::SessionInfo>> rename(QString sessionId, QString name);
 	QCoro::Task<Result<proto::SessionInfo>> setCwd(QString sessionId, QString path);
 	QCoro::Task<Result<void>> compact(QString sessionId);
-	QCoro::Task<Result<void>> close(QString sessionId);
+	QCoro::Task<Result<void>> closeSession(QString sessionId);
 	QCoro::Task<Result<void>> deleteSession(QString sessionId);
 	// The path the transcript was written to, on the backend's machine.
 	QCoro::Task<Result<QString>> exportTranscript(QString sessionId, QString path);
@@ -117,6 +117,9 @@ signals:
 	void closed(const QString& reason);
 
 private:
+	// Why the connection went: the reason we closed it for, else the peer's, else the socket error.
+	QString disconnectReason() const;
+
 	// Suspends the coroutine that awaits it until the response with its id arrives.
 	struct ResponseAwaiter
 	{

@@ -66,8 +66,6 @@ public:
 	// Gives up the foreground but keeps following the session: the backend no longer counts
 	// this window as attached, and the events come on through a WatchAll. Precondition: attached.
 	QCoro::Task<Result<void>> background();
-	// Attaches the newest session of `cwd`. False when it has none.
-	QCoro::Task<Result<bool>> continueLast(QString cwd);
 
 	// Shows streamed text that is still waiting for its turn on screen.
 	void showPendingNow() { m_feed.flush(); }
@@ -108,6 +106,8 @@ private:
 	void adopt(const proto::SessionSnapshot& snapshot);
 	void onFrame(const proto::ServerFrame& frame);
 	void onEvent(const proto::SessionEvent& event);
+	// Adds a question unless it is already asked.
+	void addQuestion(const proto::QuestionRequest& request);
 	void setInfo(const proto::SessionInfo& info);
 	void setQueued(QList<proto::Message> messages);
 	void setQuestions(QList<proto::QuestionRequest> questions);

@@ -1,11 +1,14 @@
 #include "icons/icon_provider.h"
 
 #include <QFile>
+#include <QLoggingCategory>
 #include <QSvgRenderer>
 #include <QPainter>
 #include <QUrlQuery>
 
 using namespace Qt::StringLiterals;
+
+Q_LOGGING_CATEGORY(lcIcons, "refgui.icons")
 
 namespace refgui::icons
 {
@@ -70,16 +73,19 @@ QImage IconProvider::requestImage(const QString& id, QSize* size, const QSize& r
 	IconRequest request;
 	if(!parseIconRequest(id, request))
 	{
+		qCWarning(lcIcons) << "bad icon id" << id;
 		return {};
 	}
 	QFile file(iconPath(request.name));
 	if(!file.open(QIODevice::ReadOnly))
 	{
+		qCWarning(lcIcons) << "no icon" << request.name << "for" << id;
 		return {};
 	}
 	QSvgRenderer renderer(colouredSvg(file.readAll(), request.color));
 	if(!renderer.isValid())
 	{
+		qCWarning(lcIcons) << "invalid SVG for icon" << request.name;
 		return {};
 	}
 

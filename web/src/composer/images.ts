@@ -4,7 +4,10 @@ import type { ImageData } from '../proto/generated'
 
 // Same types and size limit as the TUI accepts.
 const IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
-export const MAX_IMAGE_BYTES = 20 * 1024 * 1024
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024
+
+// Bytes turned into characters per call, to stay within the argument limit.
+const BASE64_CHUNK_BYTES = 0x8000
 
 export type ImageRejection = 'type' | 'size'
 
@@ -25,12 +28,10 @@ export async function readImage(file: File): Promise<ReadImage> {
   return { image: { mime: file.type, data: toBase64(bytes) }, name: file.name || undefined }
 }
 
-const CHUNK = 0x8000
-
 function toBase64(bytes: Uint8Array): string {
   let binary = ''
-  for (let offset = 0; offset < bytes.length; offset += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + CHUNK))
+  for (let offset = 0; offset < bytes.length; offset += BASE64_CHUNK_BYTES) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + BASE64_CHUNK_BYTES))
   }
   return btoa(binary)
 }

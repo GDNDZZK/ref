@@ -22,9 +22,6 @@ public:
 
 	QQuickImageResponse* requestImageResponse(const QString& id, const QSize& requestedSize) override;
 
-	// Splits "<session id>/<image id>". Returns false when there is no slash.
-	static bool parseId(const QString& id, QString& sessionId, QString& imageId);
-
 private:
 	class Host;
 

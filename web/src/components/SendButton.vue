@@ -5,6 +5,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Chevron from './Chevron.vue'
+import { ICON_SIZE, ICON_STROKE } from './sharedMetrics.ts'
 
 const props = defineProps<{ busy: boolean; canSend: boolean }>()
 defineEmits<{ click: [] }>()
@@ -23,7 +24,7 @@ const active = computed(() => props.busy || props.canSend)
     @click="active && $emit('click')"
   >
     <span class="face">
-      <Chevron class="arrow" :size="16" :stroke-width="2" />
+      <Chevron class="arrow" :size="ICON_SIZE" :stroke-width="ICON_STROKE" />
       <span class="stop" />
     </span>
   </button>

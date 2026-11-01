@@ -1,6 +1,8 @@
 // Horizontal placement of a popover opened from a button inside a pane: the popover's right edge
 // lines up with the button's right edge and it stays inside the pane. It narrows only when the
 // pane is narrower than the popover.
+import { clamp } from '../clamp.ts'
+
 export interface HorizontalSpan {
   left: number
   right: number
@@ -19,7 +21,7 @@ export function placeInPane(
 ): PopoverPlacement {
   const minLeft = pane.left + margin
   const maxRight = pane.right - margin
-  const width = Math.max(0, Math.min(preferredWidth, maxRight - minLeft))
-  const left = Math.min(Math.max(button.right - width, minLeft), maxRight - width)
+  const width = clamp(preferredWidth, 0, Math.max(0, maxRight - minLeft))
+  const left = clamp(button.right - width, minLeft, maxRight - width)
   return { left, width }
 }
