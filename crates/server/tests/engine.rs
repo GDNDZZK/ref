@@ -309,7 +309,7 @@ async fn an_allowed_tool_no_longer_shows_waiting_for_permission_during_its_delay
         allow: true,
         always: false,
     };
-    ref_server::api::handle(&hub, &conn, reply).await.unwrap();
+    call(&hub, &conn, reply).await;
 
     // The countdown runs, and the session is no longer waiting for the user.
     wait_tool_state(&s, ToolState::Delayed).await;
@@ -520,16 +520,7 @@ async fn manual_compaction_uses_model_summary_and_undo_restores_context() {
     // Undo from the compaction message: the old context becomes effective again.
     let conn = hello_conn(&hub);
     let cid = msgs[2].id.clone();
-    ref_server::api::handle(
-        &hub,
-        &conn,
-        ref_proto::Request::Undo {
-            session_id: s.id.clone(),
-            message_id: Some(cid),
-        },
-    )
-    .await
-    .unwrap();
+    call(&hub, &conn, undo_request(&s, Some(cid))).await;
     assert_eq!(messages(&s).len(), 2);
     prompt(&hub, &s, "again");
     wait_idle(&s).await;
@@ -586,9 +577,7 @@ async fn compaction_agent_prompt_and_model_from_config() {
     assert!(messages(&s)[2].raw_text().contains("custom summary"));
     // Hidden agents are not offered to frontends and cannot run sessions.
     let conn = hello_conn(&hub);
-    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::GetConfig)
-        .await
-        .unwrap();
+    let r = call(&hub, &conn, ref_proto::Request::GetConfig).await;
     let names: Vec<&str> = r["config"]["agents"]
         .as_array()
         .unwrap()
@@ -693,22 +682,19 @@ async fn mcp_status_request() {
     );
     let (hub, _work) = hub(cfg, "mcpstatus");
     let conn = hello_conn(&hub);
-    let r = ref_server::api::handle(
+    let r = call(
         &hub,
         &conn,
         ref_proto::Request::McpStatus {
             cwd: Some("/".into()),
         },
     )
-    .await
-    .unwrap();
+    .await;
     assert_eq!(
         r["servers"],
         json!([{"name": "off", "status": ref_proto::MCP_DISABLED, "error": null, "tools": []}])
     );
-    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::GetConfig)
-        .await
-        .unwrap();
+    let r = call(&hub, &conn, ref_proto::Request::GetConfig).await;
     assert_eq!(
         r["config"]["mcp"],
         json!([["off", ref_proto::MCP_DISABLED]])
@@ -934,15 +920,11 @@ async fn remove_queued_message_before_delivery() {
         text: text.into(),
         images: vec![],
     };
-    let r = ref_server::api::handle(&hub, &conn, req("first"))
-        .await
-        .unwrap();
+    let r = call(&hub, &conn, req("first")).await;
     assert_eq!(r["queued"], false);
     assert!(r["message_id"].as_str().is_some_and(|id| !id.is_empty()));
     wait_tool_state(&s, ToolState::Running).await;
-    let r = ref_server::api::handle(&hub, &conn, req("withdrawn while busy"))
-        .await
-        .unwrap();
+    let r = call(&hub, &conn, req("withdrawn while busy")).await;
     assert_eq!(r["queued"], true);
     let id = r["message_id"].as_str().unwrap().to_string();
     assert_eq!(
@@ -964,22 +946,18 @@ async fn remove_queued_message_before_delivery() {
         foreground: false,
         limit: None,
     };
-    let snap = ref_server::api::handle(&hub, &conn, attach.clone())
-        .await
-        .unwrap();
+    let snap = call(&hub, &conn, attach.clone()).await;
     assert_eq!(snap["snapshot"]["queued"][0]["id"], id.as_str());
     let remove = |id: &str| ref_proto::Request::RemoveQueued {
         session_id: s.id.clone(),
         message_id: id.into(),
     };
-    let r = ref_server::api::handle(&hub, &conn, remove(&id))
-        .await
-        .unwrap();
+    let r = call(&hub, &conn, remove(&id)).await;
     assert_eq!(r["removed"], true);
     assert_eq!(r["text"], "withdrawn while busy");
     assert_eq!(r["images"], json!([]));
     assert!(s.lock().queue.is_empty());
-    let snap = ref_server::api::handle(&hub, &conn, attach).await.unwrap();
+    let snap = call(&hub, &conn, attach).await;
     assert_eq!(snap["snapshot"]["queued"], json!([]));
     // Not persisted either (saves include the queue).
     assert!(!s.persisted().messages.iter().any(|m| m.id == id));
@@ -992,9 +970,7 @@ async fn remove_queued_message_before_delivery() {
             .any(|m| m.id == id)
     );
     // Removing again: nothing left to remove.
-    let r = ref_server::api::handle(&hub, &conn, remove(&id))
-        .await
-        .unwrap();
+    let r = call(&hub, &conn, remove(&id)).await;
     assert_eq!(r["removed"], false);
     wait_idle(&s).await;
     // The run finishes its tool step and never sends the withdrawn prompt.
@@ -1035,7 +1011,7 @@ async fn remove_queued_after_delivery_removes_nothing() {
     let conn = hello_conn(&hub);
     prompt(&hub, &s, "first");
     wait_tool_state(&s, ToolState::Running).await;
-    let r = ref_server::api::handle(
+    let r = call(
         &hub,
         &conn,
         ref_proto::Request::Prompt {
@@ -1044,14 +1020,13 @@ async fn remove_queued_after_delivery_removes_nothing() {
             images: vec![],
         },
     )
-    .await
-    .unwrap();
+    .await;
     assert_eq!(r["queued"], true);
     let id = r["message_id"].as_str().unwrap().to_string();
     wait_idle(&s).await;
     // Delivered at the safe point after the tool step.
     assert!(messages(&s).iter().any(|m| m.id == id));
-    let r = ref_server::api::handle(
+    let r = call(
         &hub,
         &conn,
         ref_proto::Request::RemoveQueued {
@@ -1059,8 +1034,7 @@ async fn remove_queued_after_delivery_removes_nothing() {
             message_id: id.clone(),
         },
     )
-    .await
-    .unwrap();
+    .await;
     assert_eq!(r["removed"], false);
     // The delivered message stays in the conversation.
     assert_eq!(messages(&s).iter().filter(|m| m.id == id).count(), 1);
@@ -1420,42 +1394,16 @@ async fn undo_last_prompt_or_from_given_message() {
     assert_eq!(messages(&s).len(), 6);
     let conn = hello_conn(&hub);
     // Default: the last human prompt and everything after it.
-    let r = ref_server::api::handle(
-        &hub,
-        &conn,
-        ref_proto::Request::Undo {
-            session_id: s.id.clone(),
-            message_id: None,
-        },
-    )
-    .await
-    .unwrap();
+    let r = call(&hub, &conn, undo_request(&s, None)).await;
     assert_eq!(r["text"], "three");
     assert_eq!(messages(&s).len(), 4);
     // From a specific message: removes it and everything after.
     let first = messages(&s)[0].id.clone();
-    let r = ref_server::api::handle(
-        &hub,
-        &conn,
-        ref_proto::Request::Undo {
-            session_id: s.id.clone(),
-            message_id: Some(first.clone()),
-        },
-    )
-    .await
-    .unwrap();
+    let r = call(&hub, &conn, undo_request(&s, Some(first.clone()))).await;
     assert_eq!(r["text"], "one");
     assert!(messages(&s).is_empty());
     assert!(hub.store.load(&s.id).unwrap().messages.is_empty());
-    let e = ref_server::api::handle(
-        &hub,
-        &conn,
-        ref_proto::Request::Undo {
-            session_id: s.id.clone(),
-            message_id: Some(first),
-        },
-    )
-    .await;
+    let e = ref_server::api::handle(&hub, &conn, undo_request(&s, Some(first))).await;
     assert!(e.is_err());
 }
 
@@ -1546,9 +1494,7 @@ async fn set_cwd_switches_directory_and_tells_the_model() {
     let calls = m.count();
 
     // Relative to the current directory; a reminder is appended without an LLM turn.
-    let r = ref_server::api::handle(&hub, &conn, set("sub dir"))
-        .await
-        .unwrap();
+    let r = call(&hub, &conn, set("sub dir")).await;
     let new = dunce::canonicalize(work.join("sub dir"))
         .unwrap()
         .to_string_lossy()
@@ -1569,9 +1515,7 @@ async fn set_cwd_switches_directory_and_tells_the_model() {
 
     // Same directory again: no second reminder. Missing directory: error.
     let n = messages(&s).len();
-    ref_server::api::handle(&hub, &conn, set("."))
-        .await
-        .unwrap();
+    call(&hub, &conn, set(".")).await;
     assert_eq!(messages(&s).len(), n);
     let e = ref_server::api::handle(&hub, &conn, set("missing"))
         .await
@@ -1651,17 +1595,7 @@ async fn queue_changes_reach_attached_connection() {
     );
     assert_eq!(q[1][1], ("and me".to_string(), MessageSource::Human));
     // The snapshot lists every source too.
-    let r = ref_server::api::handle(
-        &hub,
-        &conn,
-        ref_proto::Request::Attach {
-            session_id: s.id.clone(),
-            foreground: true,
-            limit: None,
-        },
-    )
-    .await
-    .unwrap();
+    let r = call(&hub, &conn, attach_request(&s, None)).await;
     assert_eq!(r["snapshot"]["queued"].as_array().unwrap().len(), 2);
     // Abort: the queue is delivered at the end of the run and announced as empty.
     let _ = conn.out.drain();
@@ -1707,7 +1641,7 @@ async fn frontends_get_image_stubs_and_undo_returns_the_bytes() {
         text: "look [Image 1]".into(),
         images: vec![pasted.clone()],
     };
-    ref_server::api::handle(&hub, &conn, req).await.unwrap();
+    call(&hub, &conn, req).await;
     wait_idle(&s).await;
     // The session keeps the bytes (the model gets them) ...
     let tool_img = tool_parts(&s)
@@ -1729,17 +1663,7 @@ async fn frontends_get_image_stubs_and_undo_returns_the_bytes() {
     let events = serde_json::to_string(&conn.out.drain()).unwrap();
     assert!(events.contains("image/png"), "image stubs are still sent");
     assert!(!events.contains(&pasted.data) && !events.contains(&tool_img.data));
-    let snap = ref_server::api::handle(
-        &hub,
-        &conn,
-        ref_proto::Request::Attach {
-            session_id: s.id.clone(),
-            foreground: true,
-            limit: None,
-        },
-    )
-    .await
-    .unwrap();
+    let snap = call(&hub, &conn, attach_request(&s, None)).await;
     // Stubs carry an id (and the decoded size); GetImage returns the bytes.
     let msgs: Vec<ref_proto::Message> =
         serde_json::from_value(snap["snapshot"]["messages"].clone()).unwrap();
@@ -1761,9 +1685,7 @@ async fn frontends_get_image_stubs_and_undo_returns_the_bytes() {
         image_id: id.into(),
     };
     for (stub, data) in stubs.iter().zip([&pasted.data, &tool_img.data]) {
-        let r = ref_server::api::handle(&hub, &conn, get(stub.id.as_deref().unwrap()))
-            .await
-            .unwrap();
+        let r = call(&hub, &conn, get(stub.id.as_deref().unwrap())).await;
         assert_eq!(r["image"]["data"], data.as_str());
         assert_eq!(r["image"]["mime"], "image/png");
     }
@@ -1795,21 +1717,9 @@ async fn frontends_get_image_stubs_and_undo_returns_the_bytes() {
     // Session closed: the image is read from the store.
     ref_server::ops::close_session(&hub, &s).await;
     assert!(hub.session(&s.id).is_none());
-    let r = ref_server::api::handle(&hub, &conn, get(stubs[1].id.as_deref().unwrap()))
-        .await
-        .unwrap();
+    let r = call(&hub, &conn, get(stubs[1].id.as_deref().unwrap())).await;
     assert_eq!(r["image"]["data"], tool_img.data.as_str());
-    let r = ref_server::api::handle(
-        &hub,
-        &conn,
-        ref_proto::Request::Attach {
-            session_id: s.id.clone(),
-            foreground: true,
-            limit: None,
-        },
-    )
-    .await
-    .unwrap();
+    let r = call(&hub, &conn, attach_request(&s, None)).await;
     assert_eq!(r["snapshot"]["info"]["id"], s.id.as_str());
     let s = hub.session(&s.id).expect("live again");
     // A stub sent back as a prompt image is rejected.
@@ -1830,16 +1740,7 @@ async fn frontends_get_image_stubs_and_undo_returns_the_bytes() {
     .await;
     assert!(e.is_err());
     // Undo returns the prompt with its image bytes.
-    let r = ref_server::api::handle(
-        &hub,
-        &conn,
-        ref_proto::Request::Undo {
-            session_id: s.id.clone(),
-            message_id: None,
-        },
-    )
-    .await
-    .unwrap();
+    let r = call(&hub, &conn, undo_request(&s, None)).await;
     assert_eq!(r["text"], "look [Image 1]");
     assert_eq!(
         r["images"],
@@ -1867,15 +1768,9 @@ async fn history_is_served_in_pages() {
         let msgs: Vec<ref_proto::Message> = serde_json::from_value(v.clone()).unwrap();
         msgs.iter().map(|m| m.raw_text()).collect()
     };
-    let attach = |limit| ref_proto::Request::Attach {
-        session_id: s.id.clone(),
-        foreground: true,
-        limit,
-    };
+    let attach = |limit| attach_request(&s, limit);
     // Newest page first (default 100).
-    let r = ref_server::api::handle(&hub, &conn, attach(None))
-        .await
-        .unwrap();
+    let r = call(&hub, &conn, attach(None)).await;
     let page = texts(&r["snapshot"]["messages"]);
     assert_eq!(
         (page.len(), page[0].as_str(), page[99].as_str()),
@@ -1889,28 +1784,23 @@ async fn history_is_served_in_pages() {
         before,
         limit,
     };
-    let r2 = ref_server::api::handle(
+    let r2 = call(
         &hub,
         &conn,
         older(first_id(&r["snapshot"]["messages"]), None),
     )
-    .await
-    .unwrap();
+    .await;
     let page = texts(&r2["messages"]);
     assert_eq!(
         (page.len(), page[0].as_str(), page[99].as_str()),
         (100, "p50", "p149")
     );
     assert_eq!(r2["more_before"], true);
-    let r3 = ref_server::api::handle(&hub, &conn, older(first_id(&r2["messages"]), Some(500)))
-        .await
-        .unwrap();
+    let r3 = call(&hub, &conn, older(first_id(&r2["messages"]), Some(500))).await;
     assert_eq!(texts(&r3["messages"]).len(), 50);
     assert_eq!(r3["more_before"], false);
     // Limits are clamped; unknown anchors are errors.
-    let r = ref_server::api::handle(&hub, &conn, attach(Some(0)))
-        .await
-        .unwrap();
+    let r = call(&hub, &conn, attach(Some(0))).await;
     assert_eq!(texts(&r["snapshot"]["messages"]), ["p249"]);
     assert!(
         ref_server::api::handle(&hub, &conn, older("nope".into(), None))
@@ -1928,23 +1818,12 @@ async fn history_is_served_in_pages() {
             ));
         }
     }
-    let r = ref_server::api::handle(&hub, &conn, attach(None))
-        .await
-        .unwrap();
+    let r = call(&hub, &conn, attach(None)).await;
     let n = r["snapshot"]["messages"].as_array().unwrap().len();
     assert!((5..=7).contains(&n), "{n}");
     // Reset events (undo) carry the newest page only.
     let _ = conn.out.drain();
-    ref_server::api::handle(
-        &hub,
-        &conn,
-        ref_proto::Request::Undo {
-            session_id: s.id.clone(),
-            message_id: None,
-        },
-    )
-    .await
-    .unwrap();
+    call(&hub, &conn, undo_request(&s, None)).await;
     let reset = conn.out.drain().into_iter().find_map(|f| match f {
         ref_proto::ServerFrame::Event {
             event:
@@ -1995,7 +1874,7 @@ async fn stated_image_limit_is_learned_and_the_request_resent() {
         text: "look".into(),
         images: vec![pasted.clone()],
     };
-    ref_server::api::handle(&hub, &conn, req).await.unwrap();
+    call(&hub, &conn, req).await;
     wait_idle(&s).await;
     assert_eq!(last_text(&s), "seen");
     // Resent at once (no backoff, not counted as a failure) with the image fit to 1000px.
