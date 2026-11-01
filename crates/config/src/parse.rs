@@ -273,14 +273,39 @@ fn provider(ctx: &mut Ctx, id: &str, p: &Map<String, Value>) -> ProviderConfig {
         base_url = defaults.map(|d| d.base_url.to_string());
     }
     if api_key.is_none() {
-        let conventional = npm.as_deref().and_then(builtin::env_for_npm);
-        api_key = env
-            .iter()
-            .map(String::as_str)
-            .chain(conventional)
-            .find_map(|v| ctx.env_nonempty(v));
+        api_key = resolve_api_key(ctx, &env, npm.as_deref());
     }
+    let models = provider_models(ctx, id, p);
 
+    ProviderConfig {
+        id: id.to_string(),
+        name: get_str(p, "name").unwrap_or_else(|| id.to_string()),
+        npm,
+        api,
+        base_url,
+        api_key,
+        env,
+        headers,
+        options,
+        models,
+    }
+}
+
+/// The API key from the first non-empty env var of `env`, then the SDK's conventional one.
+fn resolve_api_key(ctx: &Ctx, env: &[String], npm: Option<&str>) -> Option<String> {
+    let conventional = npm.and_then(builtin::env_for_npm);
+    env.iter()
+        .map(String::as_str)
+        .chain(conventional)
+        .find_map(|v| ctx.env_nonempty(v))
+}
+
+/// The enabled models of a provider after `whitelist` / `blacklist` filtering.
+fn provider_models(
+    ctx: &mut Ctx,
+    id: &str,
+    p: &Map<String, Value>,
+) -> BTreeMap<String, ModelConfig> {
     let whitelist = str_list(p.get("whitelist"));
     let blacklist = str_list(p.get("blacklist"));
     let mut models = BTreeMap::new();
@@ -309,19 +334,7 @@ fn provider(ctx: &mut Ctx, id: &str, p: &Map<String, Value>) -> ProviderConfig {
         None | Some(Value::Null) => {}
         Some(_) => ctx.warn(format!("provider.{id}.models: expected an object")),
     }
-
-    ProviderConfig {
-        id: id.to_string(),
-        name: get_str(p, "name").unwrap_or_else(|| id.to_string()),
-        npm,
-        api,
-        base_url,
-        api_key,
-        env,
-        headers,
-        options,
-        models,
-    }
+    models
 }
 
 fn model(key: &str, m: &Map<String, Value>) -> ModelConfig {
