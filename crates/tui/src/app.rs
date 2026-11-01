@@ -3217,7 +3217,7 @@ fn sessions_of(v: &Value) -> Option<Vec<SessionInfo>> {
         .and_then(|s| serde_json::from_value(s.clone()).ok())
 }
 
-pub fn placeholder_info(sid: &str, cwd: &str) -> SessionInfo {
+pub(crate) fn placeholder_info(sid: &str, cwd: &str) -> SessionInfo {
     SessionInfo {
         id: sid.to_string(),
         name: String::new(),
