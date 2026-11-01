@@ -7,6 +7,7 @@ use crate::session::{
     PendingPerm, RunHandle, Session, SessionState, cancel_unfinished, user_message,
 };
 use crate::toolset::{self, Entry, Kind};
+use crate::util::lock;
 use ref_config::{Action, Config};
 use ref_llm::{AssistantBlock, BlockKind, LlmError, Model, Provider, StreamEvent};
 use ref_proto::{
@@ -1395,7 +1396,7 @@ fn live_output_sink(
     let (hub, s, msg_id) = (Arc::downgrade(hub), Arc::downgrade(s), msg_id.to_string());
     Some(Arc::new(move |chunk: &str| {
         let tail = {
-            let mut b = buf.lock().unwrap_or_else(|e| e.into_inner());
+            let mut b = lock(&buf);
             b.0.push_str(chunk);
             if b.0.len() > 16 * 1024 {
                 let keep = crate::util::tail_bytes(&b.0, 8 * 1024).to_string();

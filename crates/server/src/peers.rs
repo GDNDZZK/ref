@@ -3,6 +3,7 @@
 
 use crate::hub::{Hub, PeerRecord};
 use crate::session::{Session, user_message};
+use crate::util::lock;
 use ref_llm::ToolDef;
 use ref_proto::{Message, MessageSource, Part, Role, SessionStatus};
 use ref_tools::ToolOutput;
@@ -240,19 +241,16 @@ pub fn deliver(
     if let MessageSource::Peer { msg_id, .. } = &mut msg.source {
         *msg_id = id.clone();
     }
-    hub.peer_msgs
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(
-            id.clone(),
-            PeerRecord {
-                from_id,
-                to_id: target.id.clone(),
-                to_name: target.lock().info.name.clone(),
-                time: ref_proto::now_ms(),
-                preview: preview(text, 80),
-            },
-        );
+    lock(&hub.peer_msgs).insert(
+        id.clone(),
+        PeerRecord {
+            from_id,
+            to_id: target.id.clone(),
+            to_name: target.lock().info.name.clone(),
+            time: ref_proto::now_ms(),
+            preview: preview(text, 80),
+        },
+    );
     let queued = crate::engine::submit(hub, target, msg);
     (id, queued)
 }
@@ -279,12 +277,7 @@ fn send_message(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Result<Strin
 
 fn message_status(hub: &Arc<Hub>, input: &Value) -> Result<String, String> {
     let id = str_arg(input, "message_id")?.trim();
-    let rec = hub
-        .peer_msgs
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .get(id)
-        .cloned();
+    let rec = lock(&hub.peer_msgs).get(id).cloned();
     let Some(rec) = rec else {
         return Err(format!("Error: unknown message id \"{id}\"."));
     };
@@ -729,10 +722,7 @@ fn cmd_inbox(s: &Arc<Session>) -> String {
 }
 
 fn cmd_outbox(hub: &Arc<Hub>, s: &Arc<Session>) -> String {
-    let mut sent: Vec<(String, PeerRecord)> = hub
-        .peer_msgs
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
+    let mut sent: Vec<(String, PeerRecord)> = lock(&hub.peer_msgs)
         .iter()
         .filter(|(_, r)| r.from_id == s.id)
         .map(|(k, v)| (k.clone(), v.clone()))

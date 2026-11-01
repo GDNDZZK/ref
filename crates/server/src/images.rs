@@ -7,6 +7,7 @@
 //! This catches what `images.auto_resize` does not cover: MCP images, the setting turned off,
 //! and many-image requests.
 
+use crate::util::lock;
 use ref_llm::{ApiKind, ChatMessage, Model, Provider, Request, UserContent};
 use ref_proto::ImageData;
 use regex::Regex;
@@ -51,12 +52,7 @@ impl Caps {
 static LEARNED: LazyLock<Mutex<HashMap<String, Caps>>> = LazyLock::new(Default::default);
 
 fn learned(provider: &str) -> Caps {
-    LEARNED
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .get(provider)
-        .copied()
-        .unwrap_or(NO_CAPS)
+    lock(&LEARNED).get(provider).copied().unwrap_or(NO_CAPS)
 }
 
 /// The image limit stated in a provider error, as caps. Anthropic / Bedrock word them as
@@ -109,7 +105,7 @@ pub fn learn(provider: &Provider, model: &Model, error: &str) -> bool {
     let Some(stated) = caps_from_error(error) else {
         return false;
     };
-    let mut map = LEARNED.lock().unwrap_or_else(|e| e.into_inner());
+    let mut map = lock(&LEARNED);
     let known = map.get(&provider.id).copied().unwrap_or(NO_CAPS);
     let applied = known.min(base_caps(provider, model));
     if applied.min(stated) == applied {

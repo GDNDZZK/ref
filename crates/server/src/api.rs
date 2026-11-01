@@ -2,6 +2,7 @@
 
 use crate::hub::{Conn, Hub};
 use crate::session::{Session, user_message};
+use crate::util::lock;
 use ref_proto::{
     AgentInfo, CommandInfo, Message, MessageSource, ModelInfo, Part, Request, Role,
     ServerConfigInfo, SessionInfo, SessionSnapshot,
@@ -758,11 +759,7 @@ async fn expand_shell(text: &str, cwd: &str) -> String {
 }
 
 async fn list_files(hub: &Arc<Hub>, cwd: &str) -> Result<Arc<Vec<String>>, String> {
-    if let Some((t, v)) = hub
-        .files_cache
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .get(cwd)
+    if let Some((t, v)) = lock(&hub.files_cache).get(cwd)
         && t.elapsed() < Duration::from_secs(10)
     {
         return Ok(v.clone());
@@ -775,7 +772,7 @@ async fn list_files(hub: &Arc<Hub>, cwd: &str) -> Result<Arc<Vec<String>>, Strin
         .await
         .map_err(|e| e.to_string())?;
     let files = Arc::new(files);
-    let mut cache = hub.files_cache.lock().unwrap_or_else(|e| e.into_inner());
+    let mut cache = lock(&hub.files_cache);
     if cache.len() > 32 {
         cache.clear();
     }

@@ -6,6 +6,7 @@
 //! repeats): a successful answer forgets the count, and so does a pause longer than the
 //! retry backoff.
 
+use crate::util::lock;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -32,7 +33,7 @@ impl Attempts {
     }
 
     fn count_at(&self, session: &str, messages: usize, now: Instant) -> u32 {
-        let mut seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
+        let mut seen = lock(&self.seen);
         let entry = seen.entry((session.to_string(), messages)).or_insert(Seen {
             count: 0,
             last: now,
@@ -47,7 +48,7 @@ impl Attempts {
 
     /// The request was answered: the next identical one starts a new demonstration.
     pub fn forget(&self, session: &str, messages: usize) {
-        let mut seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
+        let mut seen = lock(&self.seen);
         seen.remove(&(session.to_string(), messages));
     }
 }

@@ -1,5 +1,6 @@
 //! MCP manager: one shared client per (server name, config); status tracking; tool lists.
 
+use crate::util::lock;
 use ref_config::{Config, McpConfig};
 use ref_mcp::{McpClient, McpTool, ServerConfig, Transport};
 use std::collections::HashMap;
@@ -27,7 +28,7 @@ pub struct McpServer {
 
 impl McpServer {
     fn lock(&self) -> std::sync::MutexGuard<'_, McpState> {
-        self.state.lock().unwrap_or_else(|e| e.into_inner())
+        lock(&self.state)
     }
     pub fn status(&self) -> McpStatus {
         self.lock().status.clone()
@@ -98,7 +99,7 @@ impl McpManager {
     /// Servers (enabled) for a config, sorted by name; starts connecting new ones in the background.
     pub fn servers_for(&self, cfg: &Config) -> Vec<Arc<McpServer>> {
         let mut out = Vec::new();
-        let mut map = self.servers.lock().unwrap_or_else(|e| e.into_inner());
+        let mut map = lock(&self.servers);
         for (name, sc) in &cfg.mcp {
             if !sc.enabled() {
                 continue;
@@ -182,13 +183,7 @@ impl McpManager {
     }
 
     pub async fn close_all(&self) {
-        let all: Vec<Arc<McpServer>> = self
-            .servers
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .drain()
-            .map(|(_, v)| v)
-            .collect();
+        let all: Vec<Arc<McpServer>> = lock(&self.servers).drain().map(|(_, v)| v).collect();
         for s in all {
             if let Some(c) = s.client() {
                 let _ = tokio::time::timeout(Duration::from_secs(3), c.close()).await;

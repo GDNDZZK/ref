@@ -1,6 +1,7 @@
 //! Live session state and persistence glue.
 
 use crate::store::Persisted;
+use crate::util::lock;
 use ref_config::Config;
 use ref_proto::{
     Message, MessageSource, Part, PermissionRequest, QuestionRequest, Role, SessionEvent,
@@ -106,7 +107,7 @@ impl Session {
     }
 
     pub fn lock(&self) -> MutexGuard<'_, SessionState> {
-        self.state.lock().unwrap_or_else(|e| e.into_inner())
+        lock(&self.state)
     }
 
     pub fn info(&self) -> SessionInfo {
