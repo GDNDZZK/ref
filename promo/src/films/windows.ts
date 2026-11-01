@@ -42,28 +42,18 @@ const TUI_PROMPT = { x: 0.03, y: 0.2, width: 0.3, height: 0.08 }
 const GUI_PROMPT = { x: 0.295, y: 0.255, width: 0.17, height: 0.06 }
 const WEB_PROMPT = { x: 0.34, y: 0.198, width: 0.135, height: 0.052 }
 const PROMPT_MARK_DELAY = 0.3
-// Shot 4: before the first tick each window zooms onto its to-do progress, the sidebar's Todo
-// section in the terminal and the status-line item in the desktop app and the browser. When the
-// list is done that item shrinks to `✓3/3`, so the callout moves onto it.
+// Shot 4: before the first tick each window zooms onto its sidebar's Todo section (in the desktop
+// app and the browser the top of the sidebar, under the header).
 const PROGRESS_ZOOM_LEAD = 0.7
 const PROGRESS_ZOOM_SECONDS = 0.6
 interface Progress {
   look: { x: number; y: number; zoom: number }
   mark: typeof GUI_PROMPT
-  done?: typeof GUI_PROMPT
 }
 const PROGRESS: Record<'tui' | 'gui' | 'web', Progress> = {
   tui: { look: { x: 0.86, y: 0.42, zoom: 2.4 }, mark: { x: 0.772, y: 0.314, width: 0.211, height: 0.124 } },
-  gui: {
-    look: { x: 0.68, y: 0.72, zoom: 2.4 },
-    mark: { x: 0.638, y: 0.825, width: 0.174, height: 0.042 },
-    done: { x: 0.75, y: 0.825, width: 0.054, height: 0.042 },
-  },
-  web: {
-    look: { x: 0.66, y: 0.78, zoom: 2.6 },
-    mark: { x: 0.604, y: 0.858, width: 0.146, height: 0.039 },
-    done: { x: 0.692, y: 0.858, width: 0.051, height: 0.039 },
-  },
+  gui: { look: { x: 0.14, y: 0.17, zoom: 3 }, mark: { x: 0.006, y: 0.118, width: 0.15, height: 0.15 } },
+  web: { look: { x: 0.11, y: 0.14, zoom: 3.6 }, mark: { x: 0.003, y: 0.087, width: 0.13, height: 0.12 } },
 }
 
 const HOOK_TERMINAL_RECT = { x: 80, y: 120, width: 1060, height: 700 }
@@ -102,18 +92,14 @@ export const scene = timelineFilm({
         const zoomed = zoomAt + PROGRESS_ZOOM_SECONDS
         // The prompt is called out in all three from when it shows until the zoom.
         const promptMark = (area: typeof GUI_PROMPT) => ({ ...area, from: times[0]! + PROMPT_MARK_DELAY, to: zoomAt })
-        const window = (overview: typeof GUI_LOOK, prompt: typeof GUI_PROMPT, progress: Progress) => {
-          const doneAt = progress.done ? times[3]! : seconds + 1
-          const doneMarks = progress.done ? [{ ...progress.done, from: doneAt, to: seconds + 1 }] : []
-          return {
-            look: [
-              { at: 0, ...overview },
-              { at: zoomAt, ...overview },
-              { at: zoomed, ...progress.look },
-            ],
-            marks: [promptMark(prompt), { ...progress.mark, from: zoomed, to: doneAt }, ...doneMarks],
-          }
-        }
+        const window = (overview: typeof GUI_LOOK, prompt: typeof GUI_PROMPT, progress: Progress) => ({
+          look: [
+            { at: 0, ...overview },
+            { at: zoomAt, ...overview },
+            { at: zoomed, ...progress.look },
+          ],
+          marks: [promptMark(prompt), { ...progress.mark, from: zoomed, to: seconds + 1 }],
+        })
         return threeWindowsShot(
           seconds,
           [
