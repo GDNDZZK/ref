@@ -42,7 +42,7 @@ async fn shutdown_removes_the_mock_directory() {
     ws.next().await.unwrap().unwrap();
     assert_eq!(mock_dirs(&tmp).len(), 1);
 
-    mock.shutdown().await;
+    mock.shutdown().await.unwrap();
 
     assert_eq!(mock_dirs(&tmp), Vec::<PathBuf>::new());
     drop(ws);
