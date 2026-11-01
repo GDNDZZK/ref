@@ -524,9 +524,11 @@ fn chat_key(app: &mut App, k: KeyEvent) {
                     app.history.reset();
                     app.suppress_ac = false;
                     app.update_autocomplete();
+
                     // Typed / pasted path to an image → attachment.
                     maybe_image_path(app);
                 }
+
                 if app.has_selection() {
                     app.clear_selection();
                 }
@@ -804,6 +806,7 @@ fn watch_key(app: &mut App, k: KeyEvent) {
             }
             let back = k.code == KeyCode::BackTab;
             let n = all.len() as i32;
+
             let i = match app
                 .watch
                 .focus
@@ -822,6 +825,7 @@ fn watch_key(app: &mut App, k: KeyEvent) {
                         .unwrap_or(if back { n - 1 } else { 0 })
                 }
             };
+
             app.watch.focus = Some(all[i as usize].clone());
         }
         // Scroll the focused tile's transcript.
@@ -833,6 +837,7 @@ fn watch_key(app: &mut App, k: KeyEvent) {
                 app.dirty = false;
                 return;
             };
+
             let busy = app.views.get(&f).is_some_and(|v| v.is_busy());
             let has_text = app.watch.inputs.get(&f).is_some_and(|e| !e.is_empty());
             if has_text {
@@ -866,6 +871,7 @@ fn watch_key(app: &mut App, k: KeyEvent) {
                 return;
             }
 
+            // Built-in commands typed in a tile act on that tile's session.
             if run_tile_command(app, &f) {
                 return;
             }
