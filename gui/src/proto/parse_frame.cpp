@@ -11,6 +11,10 @@ namespace json
 namespace
 {
 
+// The error of a failed response that does not say why, so the user never sees an empty one.
+const QString ResponseWithoutOk = u"the backend sent a response without ok"_s;
+const QString ResponseWithoutReason = u"the backend gave no reason"_s;
+
 Delta readDelta(const Fields& fields)
 {
 	static constexpr std::array<std::pair<QLatin1StringView, Delta::Kind>, 3> names{{
@@ -123,6 +127,10 @@ ServerFrame readServerFrame(const Fields& fields)
 		ResponseFrame response{.id = fields.unsignedInteger("id"_L1), .ok = fields.booleanOr("ok"_L1, false)};
 		response.result = fields.optionalObject("result"_L1).value_or(QJsonObject());
 		response.error = fields.optionalString("error"_L1).value_or(QString());
+		if(!response.ok && response.error.isEmpty())
+		{
+			response.error = fields.value("ok"_L1).isNull() ? ResponseWithoutOk : ResponseWithoutReason;
+		}
 		return response;
 	}
 	if(kind == "event"_L1)

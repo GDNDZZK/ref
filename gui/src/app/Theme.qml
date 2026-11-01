@@ -145,6 +145,6 @@ QtObject {
 			return named[key]
 		if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/.test(key))
 			return key
-		return agentPalette[Math.abs(index) % agentPalette.length]
+		return index < 0 ? textMuted : agentPalette[index % agentPalette.length]
 	}
 }
