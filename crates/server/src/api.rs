@@ -12,14 +12,14 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-type R = Result<Value, String>;
+type Reply = Result<Value, String>;
 
 fn live(hub: &Arc<Hub>, id: &str) -> Result<Arc<Session>, String> {
     hub.session(id)
         .ok_or_else(|| format!("Session {id} is not live (attach to it first)."))
 }
 
-pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
+pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> Reply {
     match req {
         Request::Hello { .. } => Err("Hello was already received.".into()),
         Request::Ping => Ok(json!({})),
@@ -59,31 +59,7 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             let cfg = crate::ops::load_config(hub, &cwd).await?;
             Ok(json!({ "servers": hub.mcp.status(&cfg) }))
         }
-        Request::ListHistory { cwd, limit } => {
-            let store = hub.store.clone();
-            let cwd = cwd.filter(|c| !c.is_empty());
-            let (c2, limit) = (cwd.clone(), limit.unwrap_or(100));
-            let mut list = tokio::task::spawn_blocking(move || store.list_for(c2, Some(limit)))
-                .await
-                .map_err(|e| e.to_string())?;
-            let live: Vec<SessionInfo> = hub.infos();
-            for i in &mut list {
-                if let Some(l) = live.iter().find(|l| l.id == i.id) {
-                    *i = l.clone();
-                }
-            }
-            for l in live {
-                if !list.iter().any(|i| i.id == l.id) {
-                    list.push(l);
-                }
-            }
-            if let Some(c) = cwd {
-                list.retain(|i| i.cwd == c);
-            }
-            list.sort_by_key(|i| std::cmp::Reverse(i.updated_at));
-            list.truncate(limit);
-            Ok(json!({ "sessions": list }))
-        }
+        Request::ListHistory { cwd, limit } => list_history(hub, cwd, limit).await,
         Request::CreateSession {
             cwd,
             agent,
@@ -109,37 +85,7 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             session_id,
             foreground,
             limit,
-        } => {
-            let s = crate::ops::get_or_load(hub, &session_id).await?;
-            let snapshot = {
-                let mut st = s.lock();
-                {
-                    let mut c = conn.lock();
-                    if foreground {
-                        c.watch.remove(&session_id);
-                        if c.fg.insert(session_id.clone()) {
-                            st.info.attached += 1;
-                        }
-                    } else if !c.fg.contains(&session_id) {
-                        c.watch.insert(session_id.clone());
-                    }
-                }
-                hub.emit_info(&st);
-                let (messages, more_before) =
-                    crate::session::page(&st.messages, st.messages.len(), limit);
-                let mut queued: Vec<Message> = st.queue.iter().cloned().collect();
-                queued.iter_mut().for_each(Message::strip_image_data);
-                SessionSnapshot {
-                    info: st.info.clone(),
-                    messages,
-                    more_before,
-                    pending_permissions: st.perms.iter().map(|p| p.request.clone()).collect(),
-                    pending_questions: st.questions.iter().map(|p| p.request.clone()).collect(),
-                    queued,
-                }
-            };
-            Ok(json!({ "snapshot": snapshot }))
-        }
+        } => attach(hub, conn, session_id, foreground, limit).await,
         Request::Messages {
             session_id,
             before,
@@ -156,43 +102,7 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
         Request::GetImage {
             session_id,
             image_id,
-        } => {
-            let mid = ref_proto::image_message_id(&image_id)
-                .ok_or_else(|| format!("Invalid image id: {image_id}"))?
-                .to_string();
-            fn find<'a>(
-                mut msgs: impl Iterator<Item = &'a Message>,
-                mid: &str,
-                image_id: &str,
-            ) -> Option<ref_proto::ImageData> {
-                msgs.find(|m| m.id == mid)
-                    .and_then(|m| m.image(image_id))
-                    .filter(|i| !i.is_stub())
-                    .cloned()
-            }
-            let image = match hub.session(&session_id) {
-                Some(s) => {
-                    let st = s.lock();
-                    find(
-                        st.messages.iter().rev().chain(st.queue.iter()),
-                        &mid,
-                        &image_id,
-                    )
-                }
-                None => {
-                    let store = hub.store.clone();
-                    let id = session_id.clone();
-                    let p = tokio::task::spawn_blocking(move || store.load(&id))
-                        .await
-                        .map_err(|e| e.to_string())??;
-                    find(p.messages.iter().rev(), &mid, &image_id)
-                }
-            };
-            let image = image.ok_or_else(|| {
-                "Image not found (the message may have been removed).".to_string()
-            })?;
-            Ok(json!({ "image": image }))
-        }
+        } => get_image(hub, session_id, image_id).await,
         Request::Detach { session_id } => {
             if let Some(s) = hub.session(&session_id) {
                 let mut st = s.lock();
@@ -305,59 +215,11 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             hub.emit_info(&st);
             Ok(json!({ "session": st.info.clone() }))
         }
-        Request::SetAgent { session_id, agent } => {
-            let s = live(hub, &session_id)?;
-            let mut st = s.lock();
-            if agent == ref_config::COMPACTION_AGENT {
-                return Err(format!(
-                    "Agent {agent} is internal and cannot run a session."
-                ));
-            }
-            let Some(a) = st.cfg.agents.get(&agent) else {
-                return Err(format!("Unknown agent: {agent}"));
-            };
-            if a.model.is_some()
-                && let Some(m) = st.cfg.default_model_for(&agent)
-            {
-                st.info.context =
-                    crate::models::context_keeping_used(&st.cfg, &m, st.info.context.used);
-                st.info.model = m;
-            }
-            let old = st.info.agent.clone();
-            let changed = old != agent;
-            if changed {
-                st.info.agent = agent;
-                st.system = None;
-            }
-            if changed {
-                crate::agent_switch::switched(hub, &mut st, &old);
-            }
-            hub.emit_info(&st);
-            drop(st);
-            if changed {
-                crate::ops::persist(hub, &s);
-            }
-            Ok(json!({ "session": s.info() }))
-        }
+        Request::SetAgent { session_id, agent } => set_agent(hub, session_id, agent),
         Request::SetVariant {
             session_id,
             variant,
-        } => {
-            let s = live(hub, &session_id)?;
-            let mut st = s.lock();
-            let list = crate::models::variants(&st.cfg, &st.info.model);
-            let next = match variant {
-                Some(v) if v.is_empty() => None,
-                Some(v) if list.contains(&v) => Some(v),
-                Some(v) => {
-                    return Err(format!("Model {} has no variant {v}.", st.info.model.key()));
-                }
-                None => crate::models::next_variant(&list, st.info.model.variant.as_deref()),
-            };
-            st.info.model.variant = next;
-            hub.emit_info(&st);
-            Ok(json!({ "session": st.info.clone() }))
-        }
+        } => set_variant(hub, session_id, variant),
         Request::Rename { session_id, name } => {
             let s = live(hub, &session_id)?;
             let name = crate::util::normalize_name(&name)?;
@@ -394,47 +256,7 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
         Request::Undo {
             session_id,
             message_id,
-        } => {
-            let s = live(hub, &session_id)?;
-            if s.lock().run.is_some() {
-                crate::engine::abort(hub, &s, true);
-                if !crate::engine::wait_idle(&s, crate::ops::SESSION_STOP_WAIT).await {
-                    return Err("The session did not stop in time.".into());
-                }
-            }
-            let (text, images) = {
-                let mut st = s.lock();
-                let i = match &message_id {
-                    Some(id) => st.find_message(id).ok_or_else(|| {
-                        "That message is no longer in the conversation.".to_string()
-                    })?,
-                    None => st
-                        .messages
-                        .iter()
-                        .rposition(|m| m.role == Role::User && m.source == MessageSource::Human)
-                        .ok_or_else(|| "Nothing to undo.".to_string())?,
-                };
-                // Only human prompts go back into the editor.
-                let m = &st.messages[i];
-                let (text, images) = if m.source == MessageSource::Human {
-                    (m.raw_text(), m.prompt_images())
-                } else {
-                    (String::new(), Vec::new())
-                };
-                st.messages.truncate(i);
-                crate::agent_switch::truncated(&mut st);
-                if !st.queue.is_empty() {
-                    st.queue.clear();
-                    crate::engine::emit_queue(hub, &s, &st);
-                }
-                st.info.updated_at = ref_proto::now_ms();
-                hub.emit(&s.id, st.reset_event());
-                hub.emit_info(&st);
-                (text, images)
-            };
-            crate::ops::persist(hub, &s);
-            Ok(json!({ "text": text, "images": images }))
-        }
+        } => undo(hub, session_id, message_id).await,
         Request::Close { session_id } => {
             let s = live(hub, &session_id)?;
             crate::ops::close_session(hub, &s).await;
@@ -469,19 +291,221 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
                 .map_err(|e| e.to_string())?;
             Ok(json!({ "files": res }))
         }
-        Request::Export { session_id, path } => {
-            let s = crate::ops::get_or_load(hub, &session_id).await?;
-            let (info, messages) = {
-                let st = s.lock();
-                (st.info.clone(), st.messages.clone())
-            };
-            let p = std::path::PathBuf::from(&path);
-            let p = Path::new(&info.cwd).join(p);
-            let md = export_markdown(&info, &messages);
-            std::fs::write(&p, md).map_err(|e| format!("Cannot write {}: {e}", p.display()))?;
-            Ok(json!({ "path": p.to_string_lossy() }))
+        Request::Export { session_id, path } => export(hub, session_id, path).await,
+    }
+}
+
+/// Persisted and live sessions, newest first.
+async fn list_history(hub: &Arc<Hub>, cwd: Option<String>, limit: Option<usize>) -> Reply {
+    let store = hub.store.clone();
+    let cwd = cwd.filter(|c| !c.is_empty());
+    let (c2, limit) = (cwd.clone(), limit.unwrap_or(100));
+    let mut list = tokio::task::spawn_blocking(move || store.list_for(c2, Some(limit)))
+        .await
+        .map_err(|e| e.to_string())?;
+    let live: Vec<SessionInfo> = hub.infos();
+    for i in &mut list {
+        if let Some(l) = live.iter().find(|l| l.id == i.id) {
+            *i = l.clone();
         }
     }
+    for l in live {
+        if !list.iter().any(|i| i.id == l.id) {
+            list.push(l);
+        }
+    }
+    if let Some(c) = cwd {
+        list.retain(|i| i.cwd == c);
+    }
+    list.sort_by_key(|i| std::cmp::Reverse(i.updated_at));
+    list.truncate(limit);
+    Ok(json!({ "sessions": list }))
+}
+
+/// Attaches the connection to a session (loading it if needed) and returns its snapshot.
+async fn attach(
+    hub: &Arc<Hub>,
+    conn: &Arc<Conn>,
+    session_id: String,
+    foreground: bool,
+    limit: Option<u32>,
+) -> Reply {
+    let s = crate::ops::get_or_load(hub, &session_id).await?;
+    let snapshot = {
+        let mut st = s.lock();
+        {
+            let mut c = conn.lock();
+            if foreground {
+                c.watch.remove(&session_id);
+                if c.fg.insert(session_id.clone()) {
+                    st.info.attached += 1;
+                }
+            } else if !c.fg.contains(&session_id) {
+                c.watch.insert(session_id.clone());
+            }
+        }
+        hub.emit_info(&st);
+        let (messages, more_before) = crate::session::page(&st.messages, st.messages.len(), limit);
+        let mut queued: Vec<Message> = st.queue.iter().cloned().collect();
+        queued.iter_mut().for_each(Message::strip_image_data);
+        SessionSnapshot {
+            info: st.info.clone(),
+            messages,
+            more_before,
+            pending_permissions: st.perms.iter().map(|p| p.request.clone()).collect(),
+            pending_questions: st.questions.iter().map(|p| p.request.clone()).collect(),
+            queued,
+        }
+    };
+    Ok(json!({ "snapshot": snapshot }))
+}
+
+/// The full data of an image that history pages carry as a stub.
+async fn get_image(hub: &Arc<Hub>, session_id: String, image_id: String) -> Reply {
+    let mid = ref_proto::image_message_id(&image_id)
+        .ok_or_else(|| format!("Invalid image id: {image_id}"))?
+        .to_string();
+    fn find<'a>(
+        mut msgs: impl Iterator<Item = &'a Message>,
+        mid: &str,
+        image_id: &str,
+    ) -> Option<ref_proto::ImageData> {
+        msgs.find(|m| m.id == mid)
+            .and_then(|m| m.image(image_id))
+            .filter(|i| !i.is_stub())
+            .cloned()
+    }
+    let image = match hub.session(&session_id) {
+        Some(s) => {
+            let st = s.lock();
+            find(
+                st.messages.iter().rev().chain(st.queue.iter()),
+                &mid,
+                &image_id,
+            )
+        }
+        None => {
+            let store = hub.store.clone();
+            let id = session_id.clone();
+            let p = tokio::task::spawn_blocking(move || store.load(&id))
+                .await
+                .map_err(|e| e.to_string())??;
+            find(p.messages.iter().rev(), &mid, &image_id)
+        }
+    };
+    let image =
+        image.ok_or_else(|| "Image not found (the message may have been removed).".to_string())?;
+    Ok(json!({ "image": image }))
+}
+
+/// Switches the agent of a live session.
+fn set_agent(hub: &Arc<Hub>, session_id: String, agent: String) -> Reply {
+    let s = live(hub, &session_id)?;
+    let mut st = s.lock();
+    if agent == ref_config::COMPACTION_AGENT {
+        return Err(format!(
+            "Agent {agent} is internal and cannot run a session."
+        ));
+    }
+    let Some(a) = st.cfg.agents.get(&agent) else {
+        return Err(format!("Unknown agent: {agent}"));
+    };
+    if a.model.is_some()
+        && let Some(m) = st.cfg.default_model_for(&agent)
+    {
+        st.info.context = crate::models::context_keeping_used(&st.cfg, &m, st.info.context.used);
+        st.info.model = m;
+    }
+    let old = st.info.agent.clone();
+    let changed = old != agent;
+    if changed {
+        st.info.agent = agent;
+        st.system = None;
+    }
+    if changed {
+        crate::agent_switch::switched(hub, &mut st, &old);
+    }
+    hub.emit_info(&st);
+    drop(st);
+    if changed {
+        crate::ops::persist(hub, &s);
+    }
+    Ok(json!({ "session": s.info() }))
+}
+
+/// Sets or cycles the model variant of a live session.
+fn set_variant(hub: &Arc<Hub>, session_id: String, variant: Option<String>) -> Reply {
+    let s = live(hub, &session_id)?;
+    let mut st = s.lock();
+    let list = crate::models::variants(&st.cfg, &st.info.model);
+    let next = match variant {
+        Some(v) if v.is_empty() => None,
+        Some(v) if list.contains(&v) => Some(v),
+        Some(v) => {
+            return Err(format!("Model {} has no variant {v}.", st.info.model.key()));
+        }
+        None => crate::models::next_variant(&list, st.info.model.variant.as_deref()),
+    };
+    st.info.model.variant = next;
+    hub.emit_info(&st);
+    Ok(json!({ "session": st.info.clone() }))
+}
+
+/// Drops the conversation from a message on and returns the prompt to edit again.
+async fn undo(hub: &Arc<Hub>, session_id: String, message_id: Option<String>) -> Reply {
+    let s = live(hub, &session_id)?;
+    if s.lock().run.is_some() {
+        crate::engine::abort(hub, &s, true);
+        if !crate::engine::wait_idle(&s, crate::ops::SESSION_STOP_WAIT).await {
+            return Err("The session did not stop in time.".into());
+        }
+    }
+    let (text, images) = {
+        let mut st = s.lock();
+        let i = match &message_id {
+            Some(id) => st
+                .find_message(id)
+                .ok_or_else(|| "That message is no longer in the conversation.".to_string())?,
+            None => st
+                .messages
+                .iter()
+                .rposition(|m| m.role == Role::User && m.source == MessageSource::Human)
+                .ok_or_else(|| "Nothing to undo.".to_string())?,
+        };
+        // Only human prompts go back into the editor.
+        let m = &st.messages[i];
+        let (text, images) = if m.source == MessageSource::Human {
+            (m.raw_text(), m.prompt_images())
+        } else {
+            (String::new(), Vec::new())
+        };
+        st.messages.truncate(i);
+        crate::agent_switch::truncated(&mut st);
+        if !st.queue.is_empty() {
+            st.queue.clear();
+            crate::engine::emit_queue(hub, &s, &st);
+        }
+        st.info.updated_at = ref_proto::now_ms();
+        hub.emit(&s.id, st.reset_event());
+        hub.emit_info(&st);
+        (text, images)
+    };
+    crate::ops::persist(hub, &s);
+    Ok(json!({ "text": text, "images": images }))
+}
+
+/// Writes the session as Markdown to `path` (relative to its working directory).
+async fn export(hub: &Arc<Hub>, session_id: String, path: String) -> Reply {
+    let s = crate::ops::get_or_load(hub, &session_id).await?;
+    let (info, messages) = {
+        let st = s.lock();
+        (st.info.clone(), st.messages.clone())
+    };
+    let p = std::path::PathBuf::from(&path);
+    let p = Path::new(&info.cwd).join(p);
+    let md = export_markdown(&info, &messages);
+    std::fs::write(&p, md).map_err(|e| format!("Cannot write {}: {e}", p.display()))?;
+    Ok(json!({ "path": p.to_string_lossy() }))
 }
 
 /// Reload the session config before a human prompt; invalidate the cached system prompt
@@ -531,7 +555,7 @@ async fn set_cwd(hub: &Arc<Hub>, s: &Arc<Session>, path: &str) -> Result<(), Str
 /// `ListDirs`: the normalized absolute path and the names of its sub-directories (links to
 /// directories included), case-insensitively sorted. In mock mode `~` is the sandbox and
 /// nothing outside it is listed.
-async fn list_dirs(hub: &Arc<Hub>, cwd: &str, path: &str) -> R {
+async fn list_dirs(hub: &Arc<Hub>, cwd: &str, path: &str) -> Reply {
     let path = path.trim();
     if path.is_empty() {
         return Err("Path is empty.".into());
