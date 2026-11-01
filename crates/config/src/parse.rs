@@ -222,9 +222,8 @@ fn providers(ctx: &mut Ctx, merged: &Map<String, Value>) -> BTreeMap<String, Pro
         if out.contains_key(id) || !allowed(id) || ctx.env_nonempty(var).is_none() {
             continue;
         }
-        if let Value::Object(p) = def {
-            out.insert(id.to_string(), provider(ctx, id, &p));
-        }
+        let p = def.as_object().expect("catalog entries are objects");
+        out.insert(id.to_string(), provider(ctx, id, p));
     }
     out
 }
