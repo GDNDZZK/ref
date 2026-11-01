@@ -56,6 +56,7 @@ qt_add_qml_module(ref-gui
 		PlaceholderText.qml
 		SectionLabel.qml
 		Ticker.qml
+		McpServerRow.qml
 		SessionPane.qml
 		QuestionCard.qml
 		QuestionRow.qml
