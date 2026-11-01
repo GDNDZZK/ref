@@ -19,11 +19,15 @@ SessionDialog {
 		return parts.join(" · ")
 	}
 
+	function matchesNeedle(model) {
+		return needle === "" || (model.name + " " + model.id + " " + model.providerName).toLowerCase().includes(needle)
+	}
+
 	// A ListModel, because only a model with roles can be sectioned.
 	function rebuild() {
 		items.clear()
 		for (const model of Workspace.config.models) {
-			if (needle !== "" && !(model.name + " " + model.id + " " + model.providerName).toLowerCase().includes(needle))
+			if (!matchesNeedle(model))
 				continue
 			items.append({
 				provider: model.provider,
