@@ -235,10 +235,10 @@ fn provider(ctx: &mut Ctx, id: &str, p: &Map<String, Value>) -> ProviderConfig {
     let mut base_url = None;
     let mut api = get_str(p, "api");
     // opencode/models.dev use `api` for the base URL.
-    if api
+    let is_url = api
         .as_deref()
-        .is_some_and(|a| a.starts_with("http://") || a.starts_with("https://"))
-    {
+        .is_some_and(|a| a.starts_with("http://") || a.starts_with("https://"));
+    if is_url {
         base_url = api.take();
     }
     let mut env = str_list(p.get("env"));
@@ -292,7 +292,9 @@ fn provider(ctx: &mut Ctx, id: &str, p: &Map<String, Value>) -> ProviderConfig {
     match p.get("models") {
         Some(Value::Object(ms)) => {
             for (key, m) in ms {
-                if (!whitelist.is_empty() && !whitelist.contains(key)) || blacklist.contains(key) {
+                let not_whitelisted = !whitelist.is_empty() && !whitelist.contains(key);
+                let blacklisted = blacklist.contains(key);
+                if not_whitelisted || blacklisted {
                     continue;
                 }
                 match m {
