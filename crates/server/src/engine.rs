@@ -35,6 +35,28 @@ const NON_RETRYABLE_ATTEMPTS: u32 = 3;
 /// Characters of a provider error shown in the retry status.
 const SHORT_ERROR_CHARS: usize = 500;
 
+/// Characters of the raw tool arguments quoted in a parse error.
+const MAX_RAW_ARGS_IN_ERROR: usize = 2000;
+
+/// Longest pre-execution delay of a tool, in seconds.
+const MAX_TOOL_DELAY_SECS: f64 = 86_400.0;
+
+/// How long a cancelled tool gets to finish before it is aborted.
+const TOOL_CANCEL_GRACE: Duration = Duration::from_secs(5);
+
+/// `meta` key that carries the live output of a running tool.
+const LIVE_OUTPUT_KEY: &str = "live_output";
+
+/// The live output buffer is cut to `LIVE_OUTPUT_BUFFER_KEEP` bytes once it grows past this.
+const LIVE_OUTPUT_BUFFER_MAX: usize = 16 * 1024;
+const LIVE_OUTPUT_BUFFER_KEEP: usize = 8 * 1024;
+
+/// Bytes of the output tail shown while a tool runs.
+const LIVE_OUTPUT_TAIL: usize = 4096;
+
+/// Minimum time between two live output updates.
+const LIVE_OUTPUT_INTERVAL: Duration = Duration::from_millis(200);
+
 /// Stop reasons of a finished response (normalized by `ref_llm`).
 const STOP_END: &str = "stop";
 const STOP_TOOL_CALLS: &str = "tool_calls";
@@ -1133,7 +1155,7 @@ pub(crate) fn finish_tool(
             *meta = match (meta.take(), out.meta) {
                 (_, Some(m)) => Some(m),
                 (Some(Value::Object(mut old)), None) => {
-                    old.remove("live_output");
+                    old.remove(LIVE_OUTPUT_KEY);
                     if old.is_empty() {
                         None
                     } else {
@@ -1202,7 +1224,7 @@ async fn run_one(
     let (input, purpose) = match parse_tool_input(&call.raw) {
         Ok(x) => x,
         Err(e) => {
-            let raw = crate::util::truncate_chars(&call.raw, 2000);
+            let raw = crate::util::truncate_chars(&call.raw, MAX_RAW_ARGS_IN_ERROR);
             let out =
                 ref_tools::ToolOutput::err(format!("Invalid JSON arguments: {e}; raw: {raw}"));
             finish_tool(hub, s, msg_id, idx, ToolState::Error, out);
@@ -1306,7 +1328,7 @@ async fn run_one(
     // Pre-execution delay.
     let delay = prep.cfg.delay_for(&prep.agent, &call.name);
     if delay > 0.0 && delay.is_finite() {
-        let d = Duration::from_secs_f64(delay.min(86_400.0));
+        let d = Duration::from_secs_f64(delay.min(MAX_TOOL_DELAY_SECS));
         set_state(
             hub,
             s,
@@ -1350,7 +1372,7 @@ async fn run_one(
     let res = tokio::select! {
         r = &mut handle => r,
         _ = cancel.cancelled() => {
-            match tokio::time::timeout(Duration::from_secs(5), &mut handle).await {
+            match tokio::time::timeout(TOOL_CANCEL_GRACE, &mut handle).await {
                 Ok(r) => r,
                 Err(_) => { handle.abort(); Ok(ref_tools::ToolOutput::err(CANCELLED_OUTPUT)) }
             }
@@ -1378,7 +1400,7 @@ async fn run_one(
     hub.set_status(&mut st, SessionStatus::Busy);
 }
 
-/// Throttled live output (bash): updates the part's `meta.live_output` (tail 4KB) every ~200ms.
+/// Throttled live output (bash): updates the part's `meta.live_output` with the output tail.
 fn live_output_sink(
     hub: &Arc<Hub>,
     s: &Arc<Session>,
@@ -1391,22 +1413,23 @@ fn live_output_sink(
     }
     let buf = Arc::new(Mutex::new((
         String::new(),
-        Instant::now() - Duration::from_secs(1),
+        // As if the last update was a full interval ago: the first chunk goes out at once.
+        Instant::now() - LIVE_OUTPUT_INTERVAL,
     )));
     let (hub, s, msg_id) = (Arc::downgrade(hub), Arc::downgrade(s), msg_id.to_string());
     Some(Arc::new(move |chunk: &str| {
         let tail = {
             let mut b = lock(&buf);
             b.0.push_str(chunk);
-            if b.0.len() > 16 * 1024 {
-                let keep = crate::util::tail_bytes(&b.0, 8 * 1024).to_string();
+            if b.0.len() > LIVE_OUTPUT_BUFFER_MAX {
+                let keep = crate::util::tail_bytes(&b.0, LIVE_OUTPUT_BUFFER_KEEP).to_string();
                 b.0 = keep;
             }
-            if b.1.elapsed() < Duration::from_millis(200) {
+            if b.1.elapsed() < LIVE_OUTPUT_INTERVAL {
                 return;
             }
             b.1 = Instant::now();
-            crate::util::tail_bytes(&b.0, 4096).to_string()
+            crate::util::tail_bytes(&b.0, LIVE_OUTPUT_TAIL).to_string()
         };
         let (Some(hub), Some(s)) = (hub.upgrade(), s.upgrade()) else {
             return;
@@ -1417,7 +1440,7 @@ fn live_output_sink(
                     Some(Value::Object(m)) => m,
                     _ => serde_json::Map::new(),
                 };
-                m.insert("live_output".into(), json!(tail));
+                m.insert(LIVE_OUTPUT_KEY.into(), json!(tail));
                 *meta = Some(Value::Object(m));
             }
         });
