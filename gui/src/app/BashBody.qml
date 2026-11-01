@@ -13,6 +13,10 @@ ToolBodyBase {
 	readonly property var liveLines: call.liveOutput === "" ? [] : call.liveOutput.split("\n")
 	readonly property int earlierLines: Math.max(0, liveLines.length - liveTailLines)
 	readonly property bool hasExit: meta.exit_code !== undefined && meta.exit_code !== null
+	readonly property bool timedOut: meta.timed_out === true
+	readonly property bool cancelled: meta.cancelled === true
+	readonly property bool truncated: meta.truncated === true
+	readonly property bool hasFlags: hasExit || timedOut || cancelled || truncated
 
 	CommandBox {
 		visible: body.command !== ""
@@ -55,7 +59,7 @@ ToolBodyBase {
 
 			Row {
 				spacing: 6
-				visible: body.hasExit || body.meta.timed_out === true || body.meta.cancelled === true || body.meta.truncated === true
+				visible: body.hasFlags
 
 				ToolChip {
 					visible: body.hasExit
@@ -63,12 +67,12 @@ ToolBodyBase {
 					tint: body.meta.exit_code === 0 ? Theme.textMuted : Theme.danger
 				}
 				ToolChip {
-					visible: body.meta.timed_out === true
+					visible: body.timedOut
 					text: qsTr("timed out")
 					tint: Theme.warning
 				}
 				ToolChip {
-					visible: body.meta.cancelled === true
+					visible: body.cancelled
 					text: qsTr("cancelled")
 					tint: Theme.warning
 				}
