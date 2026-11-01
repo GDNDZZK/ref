@@ -241,7 +241,11 @@ async fn stdin_closed() {
     let mut buf = [0u8; 256];
     loop {
         match stdin.read(&mut buf).await {
-            Ok(0) | Err(_) => return,
+            Ok(0) => return,
+            Err(e) => {
+                tracing::debug!("stdin read failed: {e}");
+                return;
+            }
             Ok(_) => {}
         }
     }
