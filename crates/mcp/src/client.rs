@@ -8,6 +8,7 @@ use anyhow::{Result, anyhow, bail};
 use ref_proto::ImageData;
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::time::Duration;
@@ -15,6 +16,23 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio_util::sync::CancellationToken;
 
 pub(crate) const PROTOCOL_VERSION: &str = "2025-06-18";
+
+/// Most `tools/list` pages followed before the list is cut off.
+const MAX_TOOL_PAGES: usize = 1000;
+
+/// JSON-RPC and MCP names that both transports and the client depend on.
+pub(crate) const JSONRPC_VERSION: &str = "2.0";
+/// JSON-RPC error code for an unknown method.
+const METHOD_NOT_FOUND: i64 = -32601;
+pub(crate) const METHOD_INITIALIZE: &str = "initialize";
+const METHOD_PING: &str = "ping";
+const METHOD_ROOTS_LIST: &str = "roots/list";
+pub(crate) const NOTIFY_INITIALIZED: &str = "notifications/initialized";
+
+/// A JSON-RPC notification without parameters.
+pub(crate) fn notification(method: &str) -> Value {
+    json!({"jsonrpc": JSONRPC_VERSION, "method": method})
+}
 
 type Reply = oneshot::Sender<Result<Value>>;
 
@@ -32,10 +50,7 @@ pub(crate) struct Shared {
 pub(crate) fn id_key(id: &Value) -> String {
     match id {
         Value::String(s) => format!("s:{s}"),
-        Value::Number(n) => match n.as_i64() {
-            Some(i) => format!("n:{i}"),
-            None => format!("n:{n}"),
-        },
+        Value::Number(n) => format!("n:{n}"),
         other => format!("o:{other}"),
     }
 }
@@ -91,7 +106,7 @@ impl Shared {
     /// Fail one pending request (no-op if it already completed).
     pub(crate) fn fail_pending(&self, id: &Value, err: &str) {
         if let Some(tx) = self.pending.lock().unwrap().remove(&id_key(id)) {
-            let _ = tx.send(Err(anyhow!("{err}")));
+            self.reply(tx, Err(anyhow!("{err}")));
         }
     }
 
@@ -105,12 +120,21 @@ impl Shared {
             .map(|(_, v)| v)
             .collect();
         for tx in drained {
-            let _ = tx.send(Err(anyhow!("{err}")));
+            self.reply(tx, Err(anyhow!("{err}")));
+        }
+    }
+
+    /// Deliver a response; a dropped receiver means the requester is gone.
+    fn reply(&self, tx: Reply, res: Result<Value>) {
+        if tx.send(res).is_err() {
+            tracing::trace!(server = %self.name, "requester gone");
         }
     }
 
     pub(crate) fn send_async(&self, msg: Value) {
-        let _ = self.out_tx.send(msg);
+        if self.out_tx.send(msg).is_err() {
+            tracing::debug!(server = %self.name, "writer task ended; message dropped");
+        }
     }
 
     /// Handle one incoming message (or batch) from the server.
@@ -142,7 +166,7 @@ impl Shared {
                 } else {
                     Ok(obj.get("result").cloned().unwrap_or(Value::Null))
                 };
-                let _ = tx.send(res);
+                self.reply(tx, res);
             }
             (None, None) => {
                 tracing::debug!(server = %self.name, "ignoring malformed JSON-RPC message")
@@ -152,12 +176,14 @@ impl Shared {
 
     fn handle_server_request(&self, method: &str, id: Value) {
         let reply = match method {
-            "ping" => json!({"jsonrpc": "2.0", "id": id, "result": {}}),
-            "roots/list" => json!({"jsonrpc": "2.0", "id": id, "result": {"roots": []}}),
+            METHOD_PING => json!({"jsonrpc": JSONRPC_VERSION, "id": id, "result": {}}),
+            METHOD_ROOTS_LIST => {
+                json!({"jsonrpc": JSONRPC_VERSION, "id": id, "result": {"roots": []}})
+            }
             _ => json!({
-                "jsonrpc": "2.0",
+                "jsonrpc": JSONRPC_VERSION,
                 "id": id,
-                "error": {"code": -32601, "message": format!("Method not found: {method}")}
+                "error": {"code": METHOD_NOT_FOUND, "message": format!("Method not found: {method}")}
             }),
         };
         self.send_async(reply);
@@ -293,7 +319,7 @@ impl McpClient {
             "clientInfo": {"name": "ref", "version": env!("CARGO_PKG_VERSION")},
         });
         let res = self
-            .request("initialize", params, Some(self.timeout), None)
+            .request(METHOD_INITIALIZE, params, Some(self.timeout), None)
             .await?;
         let version = res
             .get("protocolVersion")
@@ -306,10 +332,10 @@ impl McpClient {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(String::from);
-        let note = json!({"jsonrpc": "2.0", "method": "notifications/initialized"});
+        let note = notification(NOTIFY_INITIALIZED);
         tokio::time::timeout(self.timeout, self.conn.send(&note))
             .await
-            .map_err(|_| anyhow!("timed out sending notifications/initialized"))??;
+            .map_err(|_| anyhow!("timed out sending {NOTIFY_INITIALIZED}"))??;
         self.conn.after_initialized();
         Ok(())
     }
@@ -344,29 +370,12 @@ impl McpClient {
             shared: &self.shared,
             id: id.clone(),
         };
-        let msg = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+        let msg = json!({"jsonrpc": JSONRPC_VERSION, "id": id, "method": method, "params": params});
         let fut = async {
             self.conn.send(&msg).await?;
             rx.await.map_err(|_| anyhow!("MCP connection closed"))?
         };
-        let fut = async {
-            match timeout {
-                Some(t) => match tokio::time::timeout(t, fut).await {
-                    Ok(r) => r,
-                    Err(_) => {
-                        // The spec forbids cancelling initialize.
-                        if method != "initialize" {
-                            self.send_cancelled(&id, "timeout");
-                        }
-                        Err(anyhow!(
-                            "MCP request {method} timed out after {}s",
-                            t.as_secs_f64()
-                        ))
-                    }
-                },
-                None => fut.await,
-            }
-        };
+        let fut = self.with_timeout(method, &id, timeout, fut);
         match cancel {
             Some(cancel) => tokio::select! {
                 r = fut => r,
@@ -379,9 +388,33 @@ impl McpClient {
         }
     }
 
+    /// Await `fut` for at most `timeout` (if any); on expiry the request is cancelled.
+    async fn with_timeout(
+        &self,
+        method: &str,
+        id: &Value,
+        timeout: Option<Duration>,
+        fut: impl Future<Output = Result<Value>>,
+    ) -> Result<Value> {
+        let Some(t) = timeout else {
+            return fut.await;
+        };
+        if let Ok(r) = tokio::time::timeout(t, fut).await {
+            return r;
+        }
+        // The spec forbids cancelling initialize.
+        if method != METHOD_INITIALIZE {
+            self.send_cancelled(id, "timeout");
+        }
+        Err(anyhow!(
+            "MCP request {method} timed out after {}s",
+            t.as_secs_f64()
+        ))
+    }
+
     fn send_cancelled(&self, id: &Value, reason: &str) {
         self.shared.send_async(json!({
-            "jsonrpc": "2.0",
+            "jsonrpc": JSONRPC_VERSION,
             "method": "notifications/cancelled",
             "params": {"requestId": id, "reason": reason},
         }));
@@ -391,7 +424,7 @@ impl McpClient {
     pub async fn list_tools(&self) -> Result<Vec<McpTool>> {
         let mut tools = Vec::new();
         let mut cursor: Option<String> = None;
-        for _page in 0..1000 {
+        for _page in 0..MAX_TOOL_PAGES {
             let params = match &cursor {
                 Some(c) => json!({"cursor": c}),
                 None => json!({}),
@@ -421,6 +454,7 @@ impl McpClient {
                 _ => return Ok(tools),
             }
         }
+        tracing::warn!(server = %self.name, "tools/list has more than {MAX_TOOL_PAGES} pages; list cut off");
         Ok(tools)
     }
 

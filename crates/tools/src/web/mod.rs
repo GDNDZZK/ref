@@ -7,14 +7,15 @@ mod sites;
 #[cfg(test)]
 mod tests;
 
-use crate::util;
+use crate::util::{self, ImagePayload};
 use crate::{ToolCtx, ToolOutput, ToolSpec};
 use anyhow::{Result, anyhow, bail};
 use base64::Engine as _;
 use ref_proto::ImageData;
-use reqwest::Url;
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
+use reqwest::{StatusCode, Url};
 use serde_json::{Value, json};
+use std::path::PathBuf;
 use std::time::Duration;
 use tokio::time::Instant;
 
@@ -25,32 +26,44 @@ pub enum Format {
     Html,
 }
 
-pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
-pub const MAX_TIMEOUT_SECS: u64 = 120;
+const DEFAULT_TIMEOUT_SECS: u64 = 30;
+const MAX_TIMEOUT_SECS: u64 = 120;
 /// Images larger than this are not attached (model APIs reject them).
 const MAX_IMAGE_BYTES: usize = 5 * 1024 * 1024;
 /// Target size of a fetched image after downscaling (the value oh-my-pi uses).
 const FETCH_IMAGE_BYTES: usize = 300 * 1024;
+/// Bytes of an error page searched for a Cloudflare challenge.
+const CHALLENGE_SCAN_BYTES: usize = 64 * 1024;
+/// Bytes of the body inspected to tell HTML from other text.
+const CLASSIFY_SNIFF_BYTES: usize = 512;
 /// Body shown with an HTTP error status.
 const ERROR_BODY_CHARS: usize = 4000;
 
+/// Name the model calls the tool by.
+pub(crate) const NAME: &str = "webfetch";
+
 pub fn spec() -> ToolSpec {
+    let image_mb = MAX_IMAGE_BYTES as u64 / util::MIB;
+    let inline_kb = util::INLINE_OUTPUT_MAX_BYTES as u64 / util::KIB;
+    let inline_lines = util::INLINE_OUTPUT_MAX_LINES;
+    let body_mb = fetch::MAX_BODY as u64 / util::MIB;
     ToolSpec {
-        name: "webfetch",
-        description: "Fetch a URL (http/https) and return its content. Read-only; no JavaScript is run.\n\
+        name: NAME,
+        description: format!(
+            "Fetch a URL (http/https) and return its content. Read-only; no JavaScript is run.\n\
 - HTML becomes markdown (default), plain text (`format: \"text\"`) or stays HTML (`format: \"html\"`). For markdown and text, the main content is extracted when the page reads like an article (the header says so); pass `full_page: true` for everything (navigation, sidebars, comments).\n\
-- Markdown / plain text / JSON (pretty-printed) / XML are returned as text, RSS and Atom feeds as a list of entries, images (png, jpeg, gif, webp up to 5MB) as an image you can see. Other binary files (PDFs included) are not shown: download them with bash (`curl -L -o`).\n\
+- Markdown / plain text / JSON (pretty-printed) / XML are returned as text, RSS and Atom feeds as a list of entries, images (png, jpeg, gif, webp up to {image_mb}MB) as an image you can see. Other binary files (PDFs included) are not shown: download them with bash (`curl -L -o`).\n\
 - GitHub file pages return the raw file; GitHub issues and pull requests return the conversation (from the API).\n\
-- Output starts with a header (URL, Content-Type, Title, notes) and `---`. Content over 50KB or 2000 lines is cut; the full content is saved to a file you can `read` with offset/limit or `grep`.\n\
-- `timeout` in seconds (default 30, max 120). Responses over 20MB are refused. HTTP errors return the status and the start of the error page."
-            .to_string(),
+- Output starts with a header (URL, Content-Type, Title, notes) and `---`. Content over {inline_kb}KB or {inline_lines} lines is cut; the full content is saved to a file you can `read` with offset/limit or `grep`.\n\
+- `timeout` in seconds (default {DEFAULT_TIMEOUT_SECS}, max {MAX_TIMEOUT_SECS}). Responses over {body_mb}MB are refused. HTTP errors return the status and the start of the error page."
+        ),
         parameters: json!({
             "type": "object",
             "properties": {
                 "url": {"type": "string", "description": "URL to fetch (http or https; `https://` is assumed when missing)."},
                 "format": {"type": "string", "enum": ["markdown", "text", "html"], "description": "Output format for HTML pages (default markdown)."},
                 "full_page": {"type": "boolean", "description": "Convert the whole page instead of only its main content (default false)."},
-                "timeout": {"type": "integer", "minimum": 1, "maximum": 120, "description": "Timeout in seconds (default 30, max 120)."}
+                "timeout": {"type": "integer", "minimum": 1, "maximum": MAX_TIMEOUT_SECS, "description": format!("Timeout in seconds (default {DEFAULT_TIMEOUT_SECS}, max {MAX_TIMEOUT_SECS}).")}
             },
             "required": ["url"]
         }),
@@ -80,6 +93,26 @@ fn parse_url(raw: &str) -> Result<Url> {
     Ok(url)
 }
 
+/// File extension of the saved full content.
+#[derive(Clone, Copy)]
+enum SpillExt {
+    Md,
+    Txt,
+    Html,
+    Json,
+}
+
+impl SpillExt {
+    fn as_str(self) -> &'static str {
+        match self {
+            SpillExt::Md => "md",
+            SpillExt::Txt => "txt",
+            SpillExt::Html => "html",
+            SpillExt::Json => "json",
+        }
+    }
+}
+
 /// Result being assembled.
 struct Out {
     requested: Url,
@@ -94,7 +127,7 @@ struct Out {
     /// Size of the response body as received.
     raw_bytes: usize,
     /// Extension of the file the full content is saved to when cut.
-    ext: &'static str,
+    ext: SpillExt,
 }
 
 pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
@@ -136,7 +169,7 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
                         images: vec![],
                         error: false,
                         raw_bytes: 0,
-                        ext: "md",
+                        ext: SpillExt::Md,
                     };
                     return Ok(finish(out, started));
                 }
@@ -166,11 +199,15 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         images: vec![],
         error: !f.status.is_success(),
         raw_bytes: f.body.len(),
-        ext: "txt",
+        ext: SpillExt::Txt,
     };
+    let is_challenge_status = matches!(
+        f.status,
+        StatusCode::FORBIDDEN | StatusCode::SERVICE_UNAVAILABLE
+    );
     if out.error
-        && (f.status.as_u16() == 403 || f.status.as_u16() == 503)
-        && String::from_utf8_lossy(&f.body[..f.body.len().min(64 * 1024)])
+        && is_challenge_status
+        && String::from_utf8_lossy(&f.body[..f.body.len().min(CHALLENGE_SCAN_BYTES)])
             .contains("challenge-platform")
     {
         out.notes.push("Blocked by a Cloudflare bot check that needs a browser running JavaScript; the page cannot be fetched this way. Look for an API, a raw source or a mirror.".into());
@@ -188,7 +225,7 @@ enum Kind {
 }
 
 fn classify(mime: &str, body: &[u8]) -> Kind {
-    let start = String::from_utf8_lossy(&body[..body.len().min(512)])
+    let start = String::from_utf8_lossy(&body[..body.len().min(CLASSIFY_SNIFF_BYTES)])
         .trim_start()
         .to_ascii_lowercase();
     let sniff_html = start.starts_with("<!doctype html") || start.starts_with("<html");
@@ -198,10 +235,9 @@ fn classify(mime: &str, body: &[u8]) -> Kind {
     if mime == "application/pdf" || body.starts_with(b"%PDF-") {
         return Kind::Binary;
     }
-    if mime == "text/html"
-        || mime == "application/xhtml+xml"
-        || ((mime.is_empty() || mime == "application/octet-stream") && sniff_html)
-    {
+    let declares_html = mime == "text/html" || mime == "application/xhtml+xml";
+    let undeclared_html = (mime.is_empty() || mime == "application/octet-stream") && sniff_html;
+    if declares_html || undeclared_html {
         return Kind::Html;
     }
     if mime == "application/json" || mime == "text/json" || mime.ends_with("+json") {
@@ -225,7 +261,8 @@ fn classify(mime: &str, body: &[u8]) -> Kind {
         ]
         .iter()
         .any(|t| mime.contains(t));
-    if texty || (!body.is_empty() && !util::looks_binary(body)) {
+    let looks_like_text = !body.is_empty() && !util::looks_binary(body);
+    if texty || looks_like_text {
         return Kind::Text;
     }
     Kind::Binary
@@ -240,159 +277,205 @@ async fn convert(
     ctx: &ToolCtx,
 ) -> Result<()> {
     let mime = f.mime();
-    let host = f.url.host_str().map(str::to_string);
     match classify(&mime, &f.body) {
-        Kind::Html => {
-            let text = fetch::decode(&f.body, &f.content_type, true, host.as_deref());
-            if format == Format::Html {
-                out.body = text;
-                out.ext = "html";
-                return Ok(());
-            }
-            if !full_page
-                && !out.error
-                && let Some(alt) = html::markdown_alternate(&text, &f.url)
-                && let Ok(m) = fetch::get(
-                    &alt,
-                    "text/markdown, text/plain;q=0.9",
-                    &HeaderMap::new(),
-                    deadline,
-                    &ctx.cancel,
-                )
-                .await
-                && m.status.is_success()
-                && matches!(
-                    m.mime().as_str(),
-                    "text/markdown" | "text/x-markdown" | "text/plain"
-                )
-            {
-                out.body = fetch::decode(&m.body, &m.content_type, false, host.as_deref());
-                out.notes.push(format!(
-                    "The page links a markdown version; this is it: {}",
-                    m.url
-                ));
-                out.ext = "md";
-                return Ok(());
-            }
-            let url = f.url.clone();
-            let page =
-                tokio::task::spawn_blocking(move || html::convert(&text, &url, format, full_page))
-                    .await
-                    .map_err(|_| anyhow!("HTML conversion failed"))?;
-            out.title = page.title;
-            out.notes.extend(page.note);
-            out.body = page.body;
-            out.ext = if format == Format::Markdown {
-                "md"
-            } else {
-                "txt"
-            };
-            if out.body.trim().is_empty() && !out.error {
-                out.notes.push("The page has no text without JavaScript (probably rendered in the browser). Try format: \"html\" to see the raw page, or look for an API / raw source.".into());
-            }
-        }
+        Kind::Html => convert_html(out, &f, format, full_page, deadline, ctx).await,
         Kind::Json => {
-            let text = fetch::decode(&f.body, &f.content_type, false, host.as_deref());
-            out.body = match serde_json::from_str::<Value>(&text) {
-                Ok(v) if format != Format::Html => serde_json::to_string_pretty(&v).unwrap_or(text),
-                _ => text,
-            };
-            out.ext = "json";
+            convert_json(out, &f, format);
+            Ok(())
         }
         Kind::Text => {
-            let text = fetch::decode(
-                &f.body,
-                &f.content_type,
-                mime.contains("xml"),
-                host.as_deref(),
-            );
-            if format != Format::Html
-                && feed::is_feed(&mime, &text)
-                && let Some((title, md)) = feed::to_markdown(&text)
-            {
-                out.title = title;
-                out.notes.push("RSS / Atom feed shown as a list of entries; format: \"html\" returns the raw XML.".into());
-                out.body = md;
-                out.ext = "md";
-                return Ok(());
-            }
-            out.ext = if mime.contains("markdown") {
-                "md"
-            } else {
-                "txt"
-            };
-            out.body = text;
+            convert_text(out, &f, &mime, format);
+            Ok(())
         }
-        Kind::Image(m) => {
-            let size = util::human_bytes(f.body.len() as u64);
-            if f.body.len() > MAX_IMAGE_BYTES {
+        Kind::Image(m) => attach_image(out, f, m, ctx).await,
+        Kind::Binary => {
+            convert_binary(out, &f, &mime);
+            Ok(())
+        }
+    }
+}
+
+async fn convert_html(
+    out: &mut Out,
+    f: &fetch::Fetched,
+    format: Format,
+    full_page: bool,
+    deadline: Instant,
+    ctx: &ToolCtx,
+) -> Result<()> {
+    let host = f.url.host_str();
+    let text = fetch::decode(&f.body, &f.content_type, true, host);
+    if format == Format::Html {
+        out.body = text;
+        out.ext = SpillExt::Html;
+        return Ok(());
+    }
+    if !full_page
+        && !out.error
+        && let Some(alt) = html::markdown_alternate(&text, &f.url)
+        && let Ok(m) = fetch::get(
+            &alt,
+            "text/markdown, text/plain;q=0.9",
+            &HeaderMap::new(),
+            deadline,
+            &ctx.cancel,
+        )
+        .await
+        && m.status.is_success()
+        && matches!(
+            m.mime().as_str(),
+            "text/markdown" | "text/x-markdown" | "text/plain"
+        )
+    {
+        out.body = fetch::decode(&m.body, &m.content_type, false, host);
+        out.notes.push(format!(
+            "The page links a markdown version; this is it: {}",
+            m.url
+        ));
+        out.ext = SpillExt::Md;
+        return Ok(());
+    }
+    let url = f.url.clone();
+    let page = tokio::task::spawn_blocking(move || html::convert(&text, &url, format, full_page))
+        .await
+        .map_err(|e| anyhow!("HTML conversion failed: {e}"))?;
+    out.title = page.title;
+    out.notes.extend(page.note);
+    out.body = page.body;
+    out.ext = if format == Format::Markdown {
+        SpillExt::Md
+    } else {
+        SpillExt::Txt
+    };
+    if out.body.trim().is_empty() && !out.error {
+        out.notes.push("The page has no text without JavaScript (probably rendered in the browser). Try format: \"html\" to see the raw page, or look for an API / raw source.".into());
+    }
+    Ok(())
+}
+
+fn convert_json(out: &mut Out, f: &fetch::Fetched, format: Format) {
+    let text = fetch::decode(&f.body, &f.content_type, false, f.url.host_str());
+    out.body = match serde_json::from_str::<Value>(&text) {
+        Ok(v) if format != Format::Html => {
+            serde_json::to_string_pretty(&v).expect("a JSON value serializes")
+        }
+        _ => text,
+    };
+    out.ext = SpillExt::Json;
+}
+
+fn convert_text(out: &mut Out, f: &fetch::Fetched, mime: &str, format: Format) {
+    let text = fetch::decode(
+        &f.body,
+        &f.content_type,
+        mime.contains("xml"),
+        f.url.host_str(),
+    );
+    if format != Format::Html
+        && feed::is_feed(mime, &text)
+        && let Some((title, md)) = feed::to_markdown(&text)
+    {
+        out.title = title;
+        out.notes.push(
+            "RSS / Atom feed shown as a list of entries; format: \"html\" returns the raw XML."
+                .into(),
+        );
+        out.body = md;
+        out.ext = SpillExt::Md;
+        return;
+    }
+    out.ext = if mime.contains("markdown") {
+        SpillExt::Md
+    } else {
+        SpillExt::Txt
+    };
+    out.body = text;
+}
+
+fn convert_binary(out: &mut Out, f: &fetch::Fetched, mime: &str) {
+    let what = if mime.is_empty() {
+        "unknown type"
+    } else {
+        mime
+    };
+    out.body = format!(
+        "Binary content ({what}, {}) is not shown. Download it with bash, e.g. curl -L -o FILE '{}'.",
+        util::human_bytes(f.body.len() as u64),
+        f.url
+    );
+}
+
+/// Runs the image fitter on the blocking pool. Returns the bytes back with the result.
+async fn fit_blocking(bytes: Vec<u8>) -> Result<(Vec<u8>, Result<crate::imgfit::Fitted, String>)> {
+    let limits = crate::imgfit::Limits {
+        max_bytes: FETCH_IMAGE_BYTES,
+        ..Default::default()
+    };
+    tokio::task::spawn_blocking(move || {
+        let r = crate::imgfit::fit(&bytes, &limits);
+        (bytes, r)
+    })
+    .await
+    .map_err(|e| anyhow!("image conversion failed: {e}"))
+}
+
+/// Attaches a fetched image of type `m`, downscaled when `resize_images` is set.
+async fn attach_image(
+    out: &mut Out,
+    f: fetch::Fetched,
+    m: &'static str,
+    ctx: &ToolCtx,
+) -> Result<()> {
+    let size = util::human_bytes(f.body.len() as u64);
+    if f.body.len() > MAX_IMAGE_BYTES {
+        out.body = format!(
+            "Image ({m}, {size}) is larger than {} and was not attached. Download it with bash (curl -L -o) to inspect it.",
+            util::human_bytes(MAX_IMAGE_BYTES as u64)
+        );
+        return Ok(());
+    }
+    let mut sent = ImagePayload {
+        mime: m,
+        bytes: f.body,
+    };
+    out.body = format!("Image ({m}, {size}), attached.");
+    if ctx.resize_images {
+        let (bytes, fitted) = fit_blocking(sent.bytes).await?;
+        let fitted = match fitted {
+            Ok(fitted) => fitted,
+            Err(e) => {
                 out.body = format!(
-                    "Image ({m}, {size}) is larger than {} and was not attached. Download it with bash (curl -L -o) to inspect it.",
-                    util::human_bytes(MAX_IMAGE_BYTES as u64)
+                    "The content looks like {m} ({size}) but could not be decoded ({e}); not attached."
                 );
                 return Ok(());
             }
-            let mut sent = (m, f.body);
-            out.body = format!("Image ({m}, {size}), attached.");
-            if ctx.resize_images {
-                let bytes = sent.1;
-                let limits = crate::imgfit::Limits {
-                    max_bytes: FETCH_IMAGE_BYTES,
-                    ..Default::default()
-                };
-                let (bytes, fitted) = tokio::task::spawn_blocking(move || {
-                    let r = crate::imgfit::fit(&bytes, &limits);
-                    (bytes, r)
-                })
-                .await
-                .map_err(|_| anyhow!("image conversion failed"))?;
-                match fitted {
-                    Err(e) => {
-                        out.body = format!(
-                            "The content looks like {m} ({size}) but could not be decoded ({e}); not attached."
-                        );
-                        return Ok(());
-                    }
-                    Ok(fitted) => {
-                        let note = fitted.note();
-                        sent = match fitted.data {
-                            Some(d) => {
-                                out.body = format!(
-                                    "Image ({m}, {size}), attached as {} {}x{} ({}).",
-                                    fitted.mime,
-                                    fitted.size.0,
-                                    fitted.size.1,
-                                    util::human_bytes(d.len() as u64)
-                                );
-                                (fitted.mime, d)
-                            }
-                            None => (m, bytes),
-                        };
-                        if let Some(n) = note {
-                            out.body.push('\n');
-                            out.body.push_str(&n);
-                        }
-                    }
+        };
+        let note = fitted.note();
+        sent = match fitted.data {
+            Some(d) => {
+                out.body = format!(
+                    "Image ({m}, {size}), attached as {} {}x{} ({}).",
+                    fitted.mime,
+                    fitted.size.0,
+                    fitted.size.1,
+                    util::human_bytes(d.len() as u64)
+                );
+                ImagePayload {
+                    mime: fitted.mime,
+                    bytes: d,
                 }
             }
-            out.images.push(ImageData::new(
-                sent.0,
-                base64::engine::general_purpose::STANDARD.encode(&sent.1),
-            ));
-        }
-        Kind::Binary => {
-            let what = if mime.is_empty() {
-                "unknown type".to_string()
-            } else {
-                mime.clone()
-            };
-            out.body = format!(
-                "Binary content ({what}, {}) is not shown. Download it with bash, e.g. curl -L -o FILE '{}'.",
-                util::human_bytes(f.body.len() as u64),
-                f.url
-            );
+            None => ImagePayload { mime: m, bytes },
+        };
+        if let Some(n) = note {
+            out.body.push('\n');
+            out.body.push_str(&n);
         }
     }
+    out.images.push(ImageData::new(
+        sent.mime,
+        base64::engine::general_purpose::STANDARD.encode(&sent.bytes),
+    ));
     Ok(())
 }
 
@@ -408,10 +491,15 @@ async fn github_issue(
         "X-GitHub-Api-Version",
         HeaderValue::from_static("2022-11-28"),
     );
-    if let Some(t) = sites::github_token()
-        .and_then(|t| HeaderValue::from_str(&format!("Bearer {}", t.trim())).ok())
-    {
-        h.insert(AUTHORIZATION, t);
+    if let Some(t) = sites::github_token() {
+        match HeaderValue::from_str(&format!("Bearer {}", t.trim())) {
+            Ok(v) => {
+                h.insert(AUTHORIZATION, v);
+            }
+            Err(_) => tracing::warn!(
+                "webfetch: the GitHub token is not a valid header value; sending the request anonymously"
+            ),
+        }
     }
     let get = |u: String| {
         let h = h.clone();
@@ -449,41 +537,40 @@ async fn github_issue(
 }
 
 /// Header, body (cut to the inline budget, the full text saved to a file) and metadata.
-fn finish(mut out: Out, started: std::time::Instant) -> ToolOutput {
-    let total_bytes = out.body.len();
-    let total_lines = out.body.lines().count();
-    if out.error && out.body.chars().count() > ERROR_BODY_CHARS {
-        let (cut, _) = util::truncate_chars(&out.body, ERROR_BODY_CHARS);
-        out.body = format!("{cut}\n[… error page cut …]");
-    }
-    let mut saved = None;
-    let cut = !out.error
-        && (total_bytes > crate::bash::MAX_BYTES || total_lines > crate::bash::MAX_LINES);
-    if cut {
-        let path = util::spill_path(out.ext);
-        let ok = path
-            .parent()
-            .map(std::fs::create_dir_all)
-            .transpose()
-            .and_then(|_| std::fs::write(&path, &out.body));
-        match ok {
-            Ok(_) => saved = Some(path),
-            Err(e) => tracing::warn!(
+/// Saves the full body to a file, then cuts `out.body` to the inline budget (at a line end when
+/// possible). Returns the file, or `None` if it could not be written.
+fn cut_inline(out: &mut Out) -> Option<PathBuf> {
+    let path = util::spill_path(out.ext.as_str());
+    let ok = path
+        .parent()
+        .map(std::fs::create_dir_all)
+        .transpose()
+        .and_then(|_| std::fs::write(&path, &out.body));
+    let saved = match ok {
+        Ok(_) => Some(path),
+        Err(e) => {
+            tracing::warn!(
                 "webfetch: cannot save full content to {}: {e}",
                 path.display()
-            ),
+            );
+            None
         }
-        let mut end = util::floor_char_boundary(&out.body, crate::bash::MAX_BYTES);
-        if let Some((i, _)) = out.body[..end]
-            .match_indices('\n')
-            .nth(crate::bash::MAX_LINES - 1)
-        {
-            end = i;
-        } else if let Some(i) = out.body[..end].rfind('\n') {
-            end = i;
-        }
-        out.body.truncate(end);
+    };
+    let mut end = util::floor_char_boundary(&out.body, util::INLINE_OUTPUT_MAX_BYTES);
+    if let Some((i, _)) = out.body[..end]
+        .match_indices('\n')
+        .nth(util::INLINE_OUTPUT_MAX_LINES - 1)
+    {
+        end = i;
+    } else if let Some(i) = out.body[..end].rfind('\n') {
+        end = i;
     }
+    out.body.truncate(end);
+    saved
+}
+
+/// The header lines of the result (URL, status, content type, title, notes) and the `---` rule.
+fn header_text(out: &Out) -> String {
     let mut text = String::new();
     if out.url == out.requested {
         text.push_str(&format!("URL: {}\n", out.url));
@@ -511,6 +598,21 @@ fn finish(mut out: Out, started: std::time::Instant) -> ToolOutput {
         text.push_str(&format!("Note: {n}\n"));
     }
     text.push_str("---\n");
+    text
+}
+
+fn finish(mut out: Out, started: std::time::Instant) -> ToolOutput {
+    let total_bytes = out.body.len();
+    let total_lines = out.body.lines().count();
+    if out.error && out.body.chars().count() > ERROR_BODY_CHARS {
+        let (cut, _) = util::truncate_chars(&out.body, ERROR_BODY_CHARS);
+        out.body = format!("{cut}\n[… error page cut …]");
+    }
+    let cut = !out.error
+        && (total_bytes > util::INLINE_OUTPUT_MAX_BYTES
+            || total_lines > util::INLINE_OUTPUT_MAX_LINES);
+    let saved = if cut { cut_inline(&mut out) } else { None };
+    let mut text = header_text(&out);
     text.push_str(if out.body.trim().is_empty() {
         "(no content)"
     } else {

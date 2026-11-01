@@ -4,10 +4,14 @@ use crate::util;
 use crate::{ToolCtx, ToolOutput, ToolSpec};
 use anyhow::{Result, bail};
 use serde_json::{Value, json};
+use std::path::Path;
+
+/// Name the model calls the tool by.
+pub(crate) const NAME: &str = "delete";
 
 pub fn spec() -> ToolSpec {
     ToolSpec {
-        name: "delete",
+        name: NAME,
         description: "Delete a file or directory. Non-empty directories require `recursive: true`. \
 Refuses to delete the working directory itself, `/` or the home directory. Symlinks are removed, not followed."
             .to_string(),
@@ -27,6 +31,61 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     util::blocking(move || run_sync(&input, &ctx)).await
 }
 
+/// Safeguards: compares both the lexical and the canonical forms of the paths.
+fn is_protected_target(abs: &Path, canon: &Path, is_symlink: bool, ctx: &ToolCtx) -> bool {
+    let cwd_lex = util::normalize_lexical(&ctx.cwd);
+    let cwd_canon = std::fs::canonicalize(&ctx.cwd).unwrap_or_else(|_| cwd_lex.clone());
+    let home = util::home_dir();
+    let home_canon = home.as_deref().map(util::store_key);
+    let protected = |p: &Path| {
+        let is_root = p.parent().is_none();
+        let is_cwd = p == cwd_lex || p == cwd_canon;
+        let is_home = home.as_deref() == Some(p) || home_canon.as_deref() == Some(p);
+        let contains_cwd = cwd_canon.starts_with(p);
+        is_root || is_cwd || is_home || contains_cwd
+    };
+    protected(abs) || (!is_symlink && protected(canon))
+}
+
+/// The refusal to return when `abs` must not be deleted.
+fn check_protected(
+    abs: &Path,
+    canon: &Path,
+    is_symlink: bool,
+    ctx: &ToolCtx,
+) -> Option<ToolOutput> {
+    is_protected_target(abs, canon, is_symlink, ctx).then(|| {
+        ToolOutput::err(format!(
+            "Refusing to delete {}: it is the working directory, one of its parents, the home directory or the filesystem root.",
+            abs.display()
+        ))
+    })
+}
+
+/// Removes the target and returns what it was; `None` for a non-empty directory without `recursive`.
+fn remove_target(
+    abs: &Path,
+    link_meta: &std::fs::Metadata,
+    recursive: bool,
+) -> Result<Option<&'static str>> {
+    let is_symlink = link_meta.file_type().is_symlink();
+    if is_symlink || !link_meta.is_dir() {
+        std::fs::remove_file(abs)?;
+        return Ok(Some(if is_symlink { "symlink" } else { "file" }));
+    }
+
+    let non_empty = std::fs::read_dir(abs)?.next().is_some();
+    if non_empty && !recursive {
+        return Ok(None);
+    }
+    if non_empty {
+        std::fs::remove_dir_all(abs)?
+    } else {
+        std::fs::remove_dir(abs)?
+    }
+    Ok(Some("directory"))
+}
+
 fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let raw = util::req_str(input, "path")?;
     let (raw, _) = util::unwrap_header(&raw);
@@ -37,22 +96,7 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let abs = util::resolve_path(&ctx.cwd, &raw);
     let display = util::display_path(&ctx.cwd, &abs);
 
-    // Safeguards: compare both lexical and canonical forms.
-    let canon = std::fs::canonicalize(&abs).unwrap_or_else(|_| abs.clone());
-    let cwd_lex = util::normalize_lexical(&ctx.cwd);
-    let cwd_canon = std::fs::canonicalize(&ctx.cwd).unwrap_or_else(|_| cwd_lex.clone());
-    let home = util::home_dir();
-    let home_canon = home
-        .as_ref()
-        .map(|h| std::fs::canonicalize(h).unwrap_or_else(|_| h.clone()));
-    let protected = |p: &std::path::Path| {
-        p.parent().is_none()
-            || p == cwd_lex
-            || p == cwd_canon
-            || home.as_deref() == Some(p)
-            || home_canon.as_deref() == Some(p)
-            || cwd_canon.starts_with(p)
-    };
+    let canon = util::store_key(&abs);
     let link_meta = match std::fs::symlink_metadata(&abs) {
         Ok(m) => m,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -61,29 +105,14 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         Err(e) => bail!("cannot access {display}: {e}"),
     };
     let is_symlink = link_meta.file_type().is_symlink();
-    if protected(&abs) || (!is_symlink && protected(&canon)) {
-        return Ok(ToolOutput::err(format!(
-            "Refusing to delete {}: it is the working directory, one of its parents, the home directory or the filesystem root.",
-            abs.display()
-        )));
+    if let Some(refusal) = check_protected(&abs, &canon, is_symlink, ctx) {
+        return Ok(refusal);
     }
 
-    let what = if is_symlink || !link_meta.is_dir() {
-        std::fs::remove_file(&abs)?;
-        if is_symlink { "symlink" } else { "file" }
-    } else {
-        let non_empty = std::fs::read_dir(&abs)?.next().is_some();
-        if non_empty && !recursive {
-            return Ok(ToolOutput::err(format!(
-                "{display}/ is a non-empty directory. Pass `recursive: true` to delete it and everything inside."
-            )));
-        }
-        if non_empty {
-            std::fs::remove_dir_all(&abs)?
-        } else {
-            std::fs::remove_dir(&abs)?
-        }
-        "directory"
+    let Some(what) = remove_target(&abs, &link_meta, recursive)? else {
+        return Ok(ToolOutput::err(format!(
+            "{display}/ is a non-empty directory. Pass `recursive: true` to delete it and everything inside."
+        )));
     };
     ctx.store.forget(&abs);
     if canon != abs {

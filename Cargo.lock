@@ -2952,22 +2952,17 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "dirs",
- "globset",
  "ref-proto",
- "regex",
  "serde",
  "serde_json",
- "tracing",
 ]
 
 [[package]]
 name = "ref-llm"
 version = "0.2.0"
 dependencies = [
- "anyhow",
  "chrono",
  "futures-util",
- "rand 0.9.5",
  "ref-proto",
  "regex",
  "reqwest",
@@ -2988,7 +2983,6 @@ dependencies = [
  "ref-proto",
  "ref-sys",
  "reqwest",
- "serde",
  "serde_json",
  "tokio",
  "tokio-util",
@@ -3069,7 +3063,6 @@ dependencies = [
  "ref-sys",
  "regex",
  "reqwest",
- "serde",
  "serde_json",
  "similar",
  "tokio",

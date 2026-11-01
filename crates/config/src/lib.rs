@@ -40,6 +40,15 @@ pub use jsonc::parse_jsonc;
 /// Name of the hidden built-in agent that writes compaction summaries. It is not a
 /// session agent: it cannot be selected for sessions and is not listed to frontends.
 pub const COMPACTION_AGENT: &str = "compaction";
+
+/// Agent used when `default_agent` is not set or not found.
+pub(crate) const DEFAULT_AGENT: &str = "build";
+
+/// Agent `mode` values (opencode): selectable by the user, only spawned, or both.
+pub(crate) const MODE_PRIMARY: &str = "primary";
+pub(crate) const MODE_SUBAGENT: &str = "subagent";
+pub(crate) const MODE_ALL: &str = "all";
+
 pub use load::{load_in, load_with};
 pub use markdown::split_frontmatter;
 pub use permission::{Action, PermissionRules, Rule};
@@ -197,7 +206,7 @@ pub struct CommandConfig {
 
 #[derive(Debug, Clone)]
 pub struct CompactionConfig {
-    /// Automatically compact when context reaches `auto_ratio` of the window (default true).
+    /// Automatically compact when context reaches `threshold` of the window (default true).
     pub auto: bool,
     /// Recommended compaction point as fraction of context window (default 0.6) or absolute
     /// tokens if > 1.0. Reported to the model via the `context_window` tool.
@@ -224,9 +233,11 @@ impl CompactionConfig {
             (max as f64 * v) as u64
         }
     }
+
     pub fn recommend_tokens(&self, max: u64, model_override: Option<u64>) -> u64 {
         model_override.unwrap_or_else(|| Self::resolve(self.recommend, max))
     }
+
     pub fn auto_tokens(&self, max: u64, model_override: Option<f64>) -> u64 {
         Self::resolve(model_override.unwrap_or(self.threshold), max)
     }

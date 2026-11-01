@@ -18,6 +18,16 @@ pub struct Page {
 /// Extracted main content under a quarter of the page text must be at least this long (chars),
 /// else the whole page is converted.
 const MIN_ARTICLE_CHARS: usize = 3000;
+/// ... where "under a quarter" means the extracted text times this is below the page text.
+const MIN_ARTICLE_SHARE_DENOM: usize = 4;
+/// The "main content only" note is added when the extraction keeps less than this share (%).
+const MAIN_ONLY_NOTE_SHARE_PERCENT: usize = 90;
+/// Bytes of the page head searched for alternate links.
+const HEAD_SCAN_BYTES: usize = 256 * 1024;
+/// Levels above a `<pre>` searched for a language attribute or class.
+const CODE_LANG_ANCESTOR_DEPTH: usize = 2;
+/// Longer words next to a `highlight` marker class are not taken as a language.
+const MAX_LANG_CHARS: usize = 20;
 
 /// `<link rel="alternate" type="text/markdown" href=…>`: a markdown version of the page.
 pub fn markdown_alternate(html: &str, page: &Url) -> Option<Url> {
@@ -28,7 +38,9 @@ pub fn markdown_alternate(html: &str, page: &Url) -> Option<Url> {
     // Only the head matters; avoid scanning megabytes of body.
     let head = &html[..crate::util::floor_char_boundary(
         html,
-        html.find("</head").unwrap_or(html.len()).min(256 * 1024),
+        html.find("</head")
+            .unwrap_or(html.len())
+            .min(HEAD_SCAN_BYTES),
     )];
     for tag in LINK.find_iter(head) {
         let (mut rel, mut ty, mut href) = (String::new(), String::new(), None);
@@ -44,16 +56,45 @@ pub fn markdown_alternate(html: &str, page: &Url) -> Option<Url> {
                 _ => href = Some(v.trim().to_string()),
             }
         }
-        if rel.split_whitespace().any(|r| r == "alternate")
-            && (ty == "text/markdown" || ty == "text/x-markdown")
+        let is_alternate = rel.split_whitespace().any(|r| r == "alternate");
+        let is_markdown_type = ty == "text/markdown" || ty == "text/x-markdown";
+        if is_alternate
+            && is_markdown_type
             && let Some(u) = href
                 .and_then(|h| page.join(&h).ok())
-                .filter(|u| matches!(u.scheme(), "http" | "https") && u != page)
+                .filter(|u| is_other_http_url(u, page))
         {
             return Some(u);
         }
     }
     None
+}
+
+/// The main content of a page that reads like an article; `None` makes the caller convert the
+/// whole page.
+fn extract_article(doc: Document, url: &Url, cfg: Config) -> Option<dom_smoothie::Article> {
+    let mut r = Readability::with_document(doc, Some(url.as_str()), Some(cfg))
+        .map_err(|e| tracing::debug!("webfetch: readability setup failed for {url}: {e}"))
+        .ok()?;
+    let readable = r.is_probably_readable();
+    let article = r
+        .parse()
+        .map_err(|e| tracing::debug!("webfetch: readability extraction failed for {url}: {e}"))
+        .ok()?;
+    readable.then_some(article)
+}
+
+fn whole_page(title: Option<String>, body: String) -> Page {
+    Page {
+        title,
+        body,
+        note: None,
+    }
+}
+
+/// An http(s) URL that differs from the page itself.
+fn is_other_http_url(u: &Url, page: &Url) -> bool {
+    matches!(u.scheme(), "http" | "https") && u != page
 }
 
 /// Converts a page. `full_page = false` extracts the main content when the page reads like an
@@ -63,11 +104,7 @@ pub fn convert(html: &str, url: &Url, format: Format, full_page: bool) -> Page {
     let prep = prepare(&doc, url);
     let full = render(&doc, format);
     if full_page || format == Format::Html {
-        return Page {
-            title: prep.title,
-            body: full,
-            note: None,
-        };
+        return whole_page(prep.title, full);
     }
     let doc2 = Document::from(html);
     let prep2 = prepare(&doc2, url);
@@ -80,33 +117,20 @@ pub fn convert(html: &str, url: &Url, format: Format, full_page: bool) -> Page {
         classes_to_preserve: prep2.langs,
         ..Default::default()
     };
-    let article = Readability::with_document(doc2, Some(url.as_str()), Some(cfg))
-        .ok()
-        .and_then(|mut r| {
-            let readable = r.is_probably_readable();
-            r.parse().ok().filter(|_| readable)
-        });
+    let article = extract_article(doc2, url, cfg);
     let Some(a) = article else {
-        return Page {
-            title: prep.title,
-            body: full,
-            note: None,
-        };
+        return whole_page(prep.title, full);
     };
     let body = tidy(&a.text_content);
     let (n, total) = (body.chars().count(), full.chars().count().max(1));
     // A small piece of a big page (portal, listing) is the wrong "main content".
-    if n * 4 < total && n < MIN_ARTICLE_CHARS {
-        return Page {
-            title: prep.title,
-            body: full,
-            note: None,
-        };
+    if n * MIN_ARTICLE_SHARE_DENOM < total && n < MIN_ARTICLE_CHARS {
+        return whole_page(prep.title, full);
     }
     let title = Some(a.title.trim().to_string())
         .filter(|t| !t.is_empty())
         .or(prep.title);
-    let note = (n * 10 < total * 9).then(|| {
+    let note = (n * 100 < total * MAIN_ONLY_NOTE_SHARE_PERCENT).then(|| {
         format!("Main content only ({}% of the page text). Pass full_page: true for the whole page (navigation, sidebars, comments).", (n * 100 / total).max(1))
     });
     Page { title, body, note }
@@ -273,9 +297,8 @@ fn fix_image(n: &NodeRef, base: &Url) {
             .iter()
             .filter_map(|a| n.attr(a))
             .map(|v| {
-                v.split(',')
-                    .next()
-                    .unwrap_or("")
+                v.split_once(',')
+                    .map_or(&*v, |(first, _)| first)
                     .split_whitespace()
                     .next()
                     .unwrap_or("")
@@ -347,7 +370,7 @@ fn code_lang(pre: &NodeRef) -> Option<String> {
         .filter(|c| c.has_name("code"))
         .collect();
     nodes.insert(0, *pre);
-    nodes.extend(pre.ancestors(Some(2)));
+    nodes.extend(pre.ancestors(Some(CODE_LANG_ANCESTOR_DEPTH)));
     for n in &nodes {
         for a in ["data-lang", "data-language", "lang"] {
             if let Some(v) = n.attr(a).map(|v| clean_lang(&v)).filter(|v| !v.is_empty()) {
@@ -357,7 +380,7 @@ fn code_lang(pre: &NodeRef) -> Option<String> {
         let class = n.class().unwrap_or_default().to_string();
         if let Some(b) = class
             .split_once("brush:")
-            .map(|(_, b)| clean_lang(b.split(';').next().unwrap_or("")))
+            .map(|(_, b)| clean_lang(b.split_once(';').map_or(b, |(lang, _)| lang)))
             .filter(|b| !b.is_empty())
         {
             return Some(b);
@@ -390,7 +413,7 @@ fn code_lang(pre: &NodeRef) -> Option<String> {
                 !SKIP.contains(&w.as_str())
                     && w.chars()
                         .all(|c| c.is_ascii_alphanumeric() || "+#-".contains(c))
-                    && w.len() <= 20
+                    && w.len() <= MAX_LANG_CHARS
             })
         {
             return Some(w.clone());

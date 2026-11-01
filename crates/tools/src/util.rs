@@ -7,6 +7,35 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+/// Inline output budget of bash and webfetch; above this (or the line limit) the middle is elided.
+pub const INLINE_OUTPUT_MAX_BYTES: usize = 50 * 1024;
+pub const INLINE_OUTPUT_MAX_LINES: usize = 2000;
+
+/// Directory name that find, grep and read never descend into or list.
+pub const GIT_DIR_NAME: &str = ".git";
+
+pub const KIB: u64 = 1024;
+pub const MIB: u64 = 1024 * KIB;
+
+/// Bytes inspected for a NUL when guessing whether a file is binary.
+const BINARY_SNIFF_BYTES: usize = 8192;
+const SPILL_ID_SEED: u32 = 0;
+
+pub const MIME_PNG: &str = "image/png";
+pub const MIME_JPEG: &str = "image/jpeg";
+pub const MIME_GIF: &str = "image/gif";
+pub const MIME_WEBP: &str = "image/webp";
+
+// Magic bytes of the supported image formats.
+const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+const JPEG_SIGNATURE: &[u8] = &[0xFF, 0xD8, 0xFF];
+const GIF87A_SIGNATURE: &[u8] = b"GIF87a";
+const GIF89A_SIGNATURE: &[u8] = b"GIF89a";
+/// WebP is a RIFF container: `RIFF`, 4 size bytes, then `WEBP`.
+const RIFF_TAG: &[u8] = b"RIFF";
+const WEBP_TAG: &[u8] = b"WEBP";
+const RIFF_HEADER_LEN: usize = 12;
+
 // ---------------------------------------------------------------------------
 // Arguments
 // ---------------------------------------------------------------------------
@@ -32,23 +61,20 @@ pub fn opt_u64(input: &Value, key: &str) -> Result<Option<u64>> {
     value_u64(input.get(key), key)
 }
 
+/// Unsigned integer value of a JSON number; integral floats such as `3.0` count.
+fn number_u64(n: &serde_json::Number) -> Option<u64> {
+    if let Some(u) = n.as_u64() {
+        return Some(u);
+    }
+    let f = n.as_f64()?;
+    (f >= 0.0 && f.fract() == 0.0 && f <= u64::MAX as f64).then_some(f as u64)
+}
+
 pub fn value_u64(v: Option<&Value>, key: &str) -> Result<Option<u64>> {
     let bad = || anyhow!("parameter `{key}` must be a non-negative integer");
     match v {
         None | Some(Value::Null) => Ok(None),
-        Some(Value::Number(n)) => {
-            if let Some(u) = n.as_u64() {
-                Ok(Some(u))
-            } else if let Some(f) = n.as_f64() {
-                if f >= 0.0 && f.fract() == 0.0 && f <= u64::MAX as f64 {
-                    Ok(Some(f as u64))
-                } else {
-                    Err(bad())
-                }
-            } else {
-                Err(bad())
-            }
-        }
+        Some(Value::Number(n)) => number_u64(n).map(Some).ok_or_else(bad),
         Some(Value::String(s)) if s.trim().is_empty() => Ok(None),
         Some(Value::String(s)) => s.trim().parse::<u64>().map(Some).map_err(|_| bad()),
         Some(_) => Err(bad()),
@@ -65,7 +91,7 @@ pub fn opt_bool(input: &Value, key: &str) -> Result<Option<bool>> {
             "false" | "no" | "0" | "" => Ok(Some(false)),
             _ => bail!("parameter `{key}` must be a boolean"),
         },
-        Some(Value::Number(n)) => Ok(Some(n.as_f64().unwrap_or(0.0) != 0.0)),
+        Some(Value::Number(n)) => Ok(Some(n.as_f64() != Some(0.0))),
         Some(_) => bail!("parameter `{key}` must be a boolean"),
     }
 }
@@ -89,8 +115,7 @@ pub fn unwrap_header(raw: &str) -> (String, Option<String>) {
     let t = raw.trim();
     if let Some(inner) = t.strip_prefix('[').and_then(|s| s.strip_suffix(']'))
         && let Some((p, tag)) = inner.rsplit_once('#')
-        && tag.len() == 4
-        && tag.chars().all(|c| c.is_ascii_hexdigit())
+        && crate::hashline::is_tag(tag)
     {
         return (p.to_string(), Some(tag.to_ascii_uppercase()));
     }
@@ -279,9 +304,9 @@ pub fn ceil_char_boundary(s: &str, mut i: usize) -> usize {
     i
 }
 
-/// Binary sniff: NUL in the first 8 KiB.
+/// Binary sniff: NUL in the first [`BINARY_SNIFF_BYTES`].
 pub fn looks_binary(bytes: &[u8]) -> bool {
-    bytes[..bytes.len().min(8192)].contains(&0)
+    bytes[..bytes.len().min(BINARY_SNIFF_BYTES)].contains(&0)
 }
 
 static ANSI_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -297,12 +322,12 @@ pub fn strip_ansi(s: &str) -> String {
 }
 
 pub fn human_bytes(n: u64) -> String {
-    if n < 1024 {
+    if n < KIB {
         format!("{n} B")
-    } else if n < 1024 * 1024 {
-        format!("{:.1} KB", n as f64 / 1024.0)
+    } else if n < MIB {
+        format!("{:.1} KB", n as f64 / KIB as f64)
     } else {
-        format!("{:.1} MB", n as f64 / (1024.0 * 1024.0))
+        format!("{:.1} MB", n as f64 / MIB as f64)
     }
 }
 
@@ -360,27 +385,34 @@ pub fn spill_path(ext: &str) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let id = xxhash_rust::xxh32::xxh32(format!("{nanos}-{n}-{}", std::process::id()).as_bytes(), 0);
-    std::env::temp_dir().join("ref-tool-output").join(format!(
-        "{:08x}{:x}.{ext}",
-        id,
-        nanos as u64 & 0xffff_ffff
-    ))
+    let seed = format!("{nanos}-{n}-{}", std::process::id());
+    let id = xxhash_rust::xxh32::xxh32(seed.as_bytes(), SPILL_ID_SEED);
+    // The low 32 bits of the timestamp keep names unique across runs.
+    std::env::temp_dir()
+        .join("ref-tool-output")
+        .join(format!("{:08x}{:x}.{ext}", id, nanos as u32))
+}
+
+/// Image bytes together with the MIME type they are sent as.
+pub struct ImagePayload {
+    pub mime: &'static str,
+    pub bytes: Vec<u8>,
 }
 
 /// Detects supported raster images by magic bytes.
 pub fn image_mime(bytes: &[u8]) -> Option<&'static str> {
-    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-        return Some("image/png");
+    if bytes.starts_with(PNG_SIGNATURE) {
+        return Some(MIME_PNG);
     }
-    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
-        return Some("image/jpeg");
+    if bytes.starts_with(JPEG_SIGNATURE) {
+        return Some(MIME_JPEG);
     }
-    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
-        return Some("image/gif");
+    if bytes.starts_with(GIF87A_SIGNATURE) || bytes.starts_with(GIF89A_SIGNATURE) {
+        return Some(MIME_GIF);
     }
-    if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
-        return Some("image/webp");
+    let is_riff = bytes.len() >= RIFF_HEADER_LEN && bytes.starts_with(RIFF_TAG);
+    if is_riff && &bytes[8..RIFF_HEADER_LEN] == WEBP_TAG {
+        return Some(MIME_WEBP);
     }
     None
 }

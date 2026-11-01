@@ -1,14 +1,17 @@
 //! Turning the merged JSON document into a typed [`Config`].
 
 use crate::builtin;
-use crate::load::{Accum, Ctx, Layer, accumulate};
+use crate::load::{Accum, Ctx, KEY_AGENT, KEY_COMMAND, KEY_LEGACY_MODE, Layer, accumulate};
 use crate::{
-    AgentConfig, CommandConfig, CompactionConfig, Config, McpConfig, ModelConfig, PermissionRules,
-    ProviderConfig,
+    AgentConfig, CommandConfig, CompactionConfig, Config, DEFAULT_AGENT, MODE_ALL, MODE_PRIMARY,
+    MODE_SUBAGENT, McpConfig, ModelConfig, PermissionRules, ProviderConfig,
 };
 use ref_proto::ModelRef;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
+
+/// Default for `retry.max_delay`: the longest wait between two attempts, in seconds.
+const DEFAULT_RETRY_MAX_DELAY_SECS: u64 = 600;
 
 pub(crate) fn build(ctx: &mut Ctx, layers: &[Layer]) -> Config {
     let (merged, acc) = accumulate(ctx, layers);
@@ -23,7 +26,7 @@ pub(crate) fn build(ctx: &mut Ctx, layers: &[Layer]) -> Config {
         permission,
         instructions,
         skill_paths: skills,
-        retry_max_delay: 600,
+        retry_max_delay: DEFAULT_RETRY_MAX_DELAY_SECS,
         images_auto_resize: true,
         ..Default::default()
     };
@@ -33,7 +36,7 @@ pub(crate) fn build(ctx: &mut Ctx, layers: &[Layer]) -> Config {
     cfg.small_model = model_ref(ctx, merged.get("small_model"), "small_model");
     cfg.delay = delay_list(ctx, merged.get("delay"), "delay");
     cfg.mcp = mcp(ctx, merged.get("mcp"));
-    cfg.commands = commands(ctx, merged.get("command"));
+    cfg.commands = commands(ctx, merged.get(KEY_COMMAND));
     cfg.compaction = compaction(merged.get("compaction"));
     if let Some(r) = merged.get("retry") {
         match r.get("max_delay").and_then(Value::as_f64) {
@@ -52,28 +55,36 @@ pub(crate) fn build(ctx: &mut Ctx, layers: &[Layer]) -> Config {
     cfg.agents = agents(ctx, &merged, agent_permission);
     builtin::question_defaults(&mut cfg);
 
+    cfg.default_agent = default_agent(ctx, &merged, &cfg.agents);
+    cfg
+}
+
+/// The `default_agent` if it exists, else `build`, else the first visible non-subagent, else
+/// any agent.
+fn default_agent(
+    ctx: &mut Ctx,
+    merged: &Map<String, Value>,
+    agents: &BTreeMap<String, AgentConfig>,
+) -> String {
     let wanted = merged
         .get("default_agent")
         .and_then(Value::as_str)
-        .unwrap_or("build");
-    cfg.default_agent = if cfg.agents.contains_key(wanted) {
-        wanted.to_string()
-    } else {
-        if merged.contains_key("default_agent") {
-            ctx.warn(format!("default_agent {wanted:?} not found"));
-        }
-        if cfg.agents.contains_key("build") {
-            "build".into()
-        } else {
-            cfg.agents
-                .values()
-                .find(|a| a.mode != "subagent" && !a.hidden)
-                .or_else(|| cfg.agents.values().next())
-                .map(|a| a.name.clone())
-                .unwrap_or_else(|| "build".into())
-        }
-    };
-    cfg
+        .unwrap_or(DEFAULT_AGENT);
+    if agents.contains_key(wanted) {
+        return wanted.to_string();
+    }
+    if merged.contains_key("default_agent") {
+        ctx.warn(format!("default_agent {wanted:?} not found"));
+    }
+    if agents.contains_key(DEFAULT_AGENT) {
+        return DEFAULT_AGENT.into();
+    }
+    agents
+        .values()
+        .find(|a| a.mode != MODE_SUBAGENT && !a.hidden)
+        .or_else(|| agents.values().next())
+        .map(|a| a.name.clone())
+        .unwrap_or_else(|| DEFAULT_AGENT.into())
 }
 
 fn model_ref(ctx: &mut Ctx, v: Option<&Value>, what: &str) -> Option<ModelRef> {
@@ -114,12 +125,22 @@ fn str_map(v: Option<&Value>) -> BTreeMap<String, String> {
     out
 }
 
+/// The string items of a JSON array; other items are skipped.
+fn strings(items: &[Value]) -> Vec<String> {
+    items
+        .iter()
+        .filter_map(|x| x.as_str().map(str::to_string))
+        .collect()
+}
+
+/// A positive number under an optional JSON value.
+fn positive_f64(v: Option<&Value>) -> Option<f64> {
+    v.and_then(Value::as_f64).filter(|x| *x > 0.0)
+}
+
 fn str_list(v: Option<&Value>) -> Vec<String> {
     match v {
-        Some(Value::Array(a)) => a
-            .iter()
-            .filter_map(|x| x.as_str().map(str::to_string))
-            .collect(),
+        Some(Value::Array(a)) => strings(a),
         Some(Value::String(s)) => vec![s.clone()],
         _ => vec![],
     }
@@ -157,18 +178,10 @@ fn compaction(v: Option<&Value>) -> CompactionConfig {
         if let Some(b) = m.get("auto").and_then(Value::as_bool) {
             c.auto = b;
         }
-        if let Some(x) = m
-            .get("recommend")
-            .and_then(Value::as_f64)
-            .filter(|x| *x > 0.0)
-        {
+        if let Some(x) = positive_f64(m.get("recommend")) {
             c.recommend = x;
         }
-        if let Some(x) = m
-            .get("threshold")
-            .and_then(Value::as_f64)
-            .filter(|x| *x > 0.0)
-        {
+        if let Some(x) = positive_f64(m.get("threshold")) {
             c.threshold = x;
         }
     }
@@ -209,30 +222,29 @@ fn providers(ctx: &mut Ctx, merged: &Map<String, Value>) -> BTreeMap<String, Pro
         if out.contains_key(id) || !allowed(id) || ctx.env_nonempty(var).is_none() {
             continue;
         }
-        if let Value::Object(p) = def {
-            out.insert(id.to_string(), provider(ctx, id, &p));
-        }
+        let p = def.as_object().expect("catalog entries are objects");
+        out.insert(id.to_string(), provider(ctx, id, p));
     }
     out
 }
 
 fn provider(ctx: &mut Ctx, id: &str, p: &Map<String, Value>) -> ProviderConfig {
     let defaults = builtin::provider_defaults(id);
-    let npm = get_str(p, "npm").or_else(|| defaults.map(|d| d.0.to_string()));
+    let npm = get_str(p, "npm").or_else(|| defaults.map(|d| d.npm.to_string()));
     let mut base_url = None;
     let mut api = get_str(p, "api");
     // opencode/models.dev use `api` for the base URL.
-    if api
+    let is_url = api
         .as_deref()
-        .is_some_and(|a| a.starts_with("http://") || a.starts_with("https://"))
-    {
+        .is_some_and(|a| a.starts_with("http://") || a.starts_with("https://"));
+    if is_url {
         base_url = api.take();
     }
     let mut env = str_list(p.get("env"));
     if env.is_empty()
         && let Some(d) = defaults
     {
-        env.push(d.2.to_string());
+        env.push(d.env.to_string());
     }
     let mut options = match p.get("options") {
         Some(Value::Object(o)) => o.clone(),
@@ -258,28 +270,51 @@ fn provider(ctx: &mut Ctx, id: &str, p: &Map<String, Value>) -> ProviderConfig {
         headers = str_map(Some(&h));
     }
     if base_url.is_none() {
-        base_url = defaults.map(|d| d.1.to_string());
+        base_url = defaults.map(|d| d.base_url.to_string());
     }
     if api_key.is_none() {
-        let conventional = match npm.as_deref() {
-            Some("@ai-sdk/anthropic") => Some("ANTHROPIC_API_KEY"),
-            Some("@ai-sdk/openai") => Some("OPENAI_API_KEY"),
-            _ => None,
-        };
-        api_key = env
-            .iter()
-            .map(String::as_str)
-            .chain(conventional)
-            .find_map(|v| ctx.env_nonempty(v));
+        api_key = resolve_api_key(ctx, &env, npm.as_deref());
     }
+    let models = provider_models(ctx, id, p);
 
+    ProviderConfig {
+        id: id.to_string(),
+        name: get_str(p, "name").unwrap_or_else(|| id.to_string()),
+        npm,
+        api,
+        base_url,
+        api_key,
+        env,
+        headers,
+        options,
+        models,
+    }
+}
+
+/// The API key from the first non-empty env var of `env`, then the SDK's conventional one.
+fn resolve_api_key(ctx: &Ctx, env: &[String], npm: Option<&str>) -> Option<String> {
+    let conventional = npm.and_then(builtin::env_for_npm);
+    env.iter()
+        .map(String::as_str)
+        .chain(conventional)
+        .find_map(|v| ctx.env_nonempty(v))
+}
+
+/// The enabled models of a provider after `whitelist` / `blacklist` filtering.
+fn provider_models(
+    ctx: &mut Ctx,
+    id: &str,
+    p: &Map<String, Value>,
+) -> BTreeMap<String, ModelConfig> {
     let whitelist = str_list(p.get("whitelist"));
     let blacklist = str_list(p.get("blacklist"));
     let mut models = BTreeMap::new();
     match p.get("models") {
         Some(Value::Object(ms)) => {
             for (key, m) in ms {
-                if (!whitelist.is_empty() && !whitelist.contains(key)) || blacklist.contains(key) {
+                let not_whitelisted = !whitelist.is_empty() && !whitelist.contains(key);
+                let blacklisted = blacklist.contains(key);
+                if not_whitelisted || blacklisted {
                     continue;
                 }
                 match m {
@@ -299,19 +334,7 @@ fn provider(ctx: &mut Ctx, id: &str, p: &Map<String, Value>) -> ProviderConfig {
         None | Some(Value::Null) => {}
         Some(_) => ctx.warn(format!("provider.{id}.models: expected an object")),
     }
-
-    ProviderConfig {
-        id: id.to_string(),
-        name: get_str(p, "name").unwrap_or_else(|| id.to_string()),
-        npm,
-        api,
-        base_url,
-        api_key,
-        env,
-        headers,
-        options,
-        models,
-    }
+    models
 }
 
 fn model(key: &str, m: &Map<String, Value>) -> ModelConfig {
@@ -360,10 +383,7 @@ fn model(key: &str, m: &Map<String, Value>) -> ModelConfig {
             .unwrap_or_default(),
         variants,
         compact_at: lim("compact"),
-        threshold: limit
-            .and_then(|l| l.get("threshold"))
-            .and_then(Value::as_f64)
-            .filter(|x| *x > 0.0),
+        threshold: positive_f64(limit.and_then(|l| l.get("threshold"))),
     }
 }
 
@@ -381,8 +401,6 @@ fn mcp(ctx: &mut Ctx, v: Option<&Value>) -> BTreeMap<String, McpConfig> {
             ctx.warn(format!("mcp.{name}: expected an object"));
             continue;
         };
-        let enabled = s.get("enabled").and_then(Value::as_bool).unwrap_or(true);
-        let timeout_ms = s.get("timeout").and_then(Value::as_u64).filter(|t| *t > 0);
         let ty = get_str(s, "type").unwrap_or_else(|| {
             if s.contains_key("url") {
                 "remote".into()
@@ -392,65 +410,75 @@ fn mcp(ctx: &mut Ctx, v: Option<&Value>) -> BTreeMap<String, McpConfig> {
                 String::new()
             }
         });
-        match ty.as_str() {
-            "local" | "stdio" => {
-                let command = match s.get("command") {
-                    Some(Value::Array(a)) => a
-                        .iter()
-                        .filter_map(|x| x.as_str().map(str::to_string))
-                        .collect(),
-                    Some(Value::String(c)) => {
-                        let mut v: Vec<String> = c.split_whitespace().map(str::to_string).collect();
-                        if let Some(Value::Array(args)) = s.get("args") {
-                            v.extend(args.iter().filter_map(|x| x.as_str().map(str::to_string)));
-                        }
-                        v
-                    }
-                    _ => Vec::new(),
-                };
-                if command.is_empty() {
-                    ctx.warn(format!(
-                        "mcp.{name}: local server requires a non-empty `command`"
-                    ));
-                    continue;
-                }
-                let environment = str_map(s.get("environment").or_else(|| s.get("env")));
-                out.insert(
-                    name.clone(),
-                    McpConfig::Local {
-                        command,
-                        environment,
-                        cwd: get_str(s, "cwd"),
-                        enabled,
-                        timeout_ms,
-                    },
-                );
-            }
-            "remote" | "http" | "sse" | "streamable-http" => {
-                let Some(url) = get_str(s, "url").filter(|u| !u.is_empty()) else {
-                    ctx.warn(format!("mcp.{name}: remote server requires `url`"));
-                    continue;
-                };
-                out.insert(
-                    name.clone(),
-                    McpConfig::Remote {
-                        url,
-                        headers: str_map(s.get("headers")),
-                        enabled,
-                        timeout_ms,
-                    },
-                );
-            }
+        let server = match ty.as_str() {
+            "local" | "stdio" => local_mcp(ctx, name, s),
+            "remote" | "http" | "sse" | "streamable-http" => remote_mcp(ctx, name, s),
             "" => {
                 // Only `{enabled: ..}` toggles (for servers defined elsewhere) are silently ignored.
                 if s.keys().any(|k| k != "enabled") {
                     ctx.warn(format!("mcp.{name}: missing `type` (local/remote)"));
                 }
+                None
             }
-            t => ctx.warn(format!("mcp.{name}: unknown type {t:?}")),
+            t => {
+                ctx.warn(format!("mcp.{name}: unknown type {t:?}"));
+                None
+            }
+        };
+        if let Some(server) = server {
+            out.insert(name.clone(), server);
         }
     }
     out
+}
+
+/// `enabled` (default true) and `timeout` in ms of an MCP server entry.
+fn mcp_common(s: &Map<String, Value>) -> (bool, Option<u64>) {
+    let enabled = s.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+    let timeout_ms = s.get("timeout").and_then(Value::as_u64).filter(|t| *t > 0);
+    (enabled, timeout_ms)
+}
+
+fn local_mcp(ctx: &mut Ctx, name: &str, s: &Map<String, Value>) -> Option<McpConfig> {
+    let (enabled, timeout_ms) = mcp_common(s);
+    let command = match s.get("command") {
+        Some(Value::Array(a)) => strings(a),
+        Some(Value::String(c)) => {
+            let mut v: Vec<String> = c.split_whitespace().map(str::to_string).collect();
+            if let Some(Value::Array(args)) = s.get("args") {
+                v.extend(strings(args));
+            }
+            v
+        }
+        _ => Vec::new(),
+    };
+    if command.is_empty() {
+        ctx.warn(format!(
+            "mcp.{name}: local server requires a non-empty `command`"
+        ));
+        return None;
+    }
+    Some(McpConfig::Local {
+        command,
+        environment: str_map(s.get("environment").or_else(|| s.get("env"))),
+        cwd: get_str(s, "cwd"),
+        enabled,
+        timeout_ms,
+    })
+}
+
+fn remote_mcp(ctx: &mut Ctx, name: &str, s: &Map<String, Value>) -> Option<McpConfig> {
+    let (enabled, timeout_ms) = mcp_common(s);
+    let Some(url) = get_str(s, "url").filter(|u| !u.is_empty()) else {
+        ctx.warn(format!("mcp.{name}: remote server requires `url`"));
+        return None;
+    };
+    Some(McpConfig::Remote {
+        url,
+        headers: str_map(s.get("headers")),
+        enabled,
+        timeout_ms,
+    })
 }
 
 fn commands(ctx: &mut Ctx, v: Option<&Value>) -> BTreeMap<String, CommandConfig> {
@@ -520,7 +548,7 @@ fn agents(
         .into_iter()
         .map(|a| (a.name.clone(), a))
         .collect();
-    for key in ["mode", "agent"] {
+    for key in [KEY_LEGACY_MODE, KEY_AGENT] {
         let Some(v) = merged.get(key) else { continue };
         let Value::Object(m) = v else {
             ctx.warn(format!("{key}: expected an object"));
@@ -544,16 +572,12 @@ fn agents(
                 name: name.clone(),
                 creatable: true,
                 can_spawn: false,
-                mode: if key == "mode" {
-                    "primary".into()
-                } else {
-                    "all".into()
-                },
+                mode: MODE_ALL.into(),
                 ..Default::default()
             });
             apply_agent(ctx, entry, a, &format!("{key}.{name}"));
-            if key == "mode" {
-                entry.mode = "primary".into();
+            if key == KEY_LEGACY_MODE {
+                entry.mode = MODE_PRIMARY.into();
             }
         }
     }

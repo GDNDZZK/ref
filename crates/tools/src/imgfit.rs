@@ -3,6 +3,7 @@
 //! aim for 500KB, lift tiny images to a 200px short edge, and pick the smaller of PNG and JPEG.
 //! Images with translucent pixels stay PNG (JPEG would show the color under the transparency).
 
+use crate::util;
 use base64::Engine as _;
 use fast_image_resize::{Resizer, images::Image};
 use image::codecs::jpeg::JpegEncoder;
@@ -12,7 +13,7 @@ use ref_proto::ImageData;
 use std::io::Cursor;
 
 #[derive(Debug, Clone, Copy)]
-pub struct Limits {
+pub(crate) struct Limits {
     pub max_width: u32,
     pub max_height: u32,
     /// Target size of the encoded image.
@@ -37,7 +38,7 @@ impl Default for Limits {
 
 /// Result of [`fit`].
 #[derive(Debug, Clone)]
-pub struct Fitted {
+pub(crate) struct Fitted {
     /// Re-encoded image, or `None` when the original already fits and is kept as is.
     pub data: Option<Vec<u8>>,
     /// Mime type of `data` (of the original when `data` is `None`).
@@ -50,7 +51,9 @@ impl Fitted {
     /// Tells the model how coordinates map back when the dimensions changed.
     pub fn note(&self) -> Option<String> {
         let ((ow, oh), (w, h)) = (self.original, self.size);
-        if self.data.is_none() || (ow, oh) == (w, h) || w == 0 {
+        let kept_original = self.data.is_none();
+        let same_size = (ow, oh) == (w, h);
+        if kept_original || same_size || w == 0 {
             return None;
         }
         Some(format!(
@@ -65,10 +68,10 @@ const SCALE_STEPS: [f64; 4] = [0.75, 0.5, 0.35, 0.25];
 
 fn mime_of(f: ImageFormat) -> Option<&'static str> {
     Some(match f {
-        ImageFormat::Png => "image/png",
-        ImageFormat::Jpeg => "image/jpeg",
-        ImageFormat::Gif => "image/gif",
-        ImageFormat::WebP => "image/webp",
+        ImageFormat::Png => util::MIME_PNG,
+        ImageFormat::Jpeg => util::MIME_JPEG,
+        ImageFormat::Gif => util::MIME_GIF,
+        ImageFormat::WebP => util::MIME_WEBP,
         _ => return None,
     })
 }
@@ -102,27 +105,8 @@ fn decode(bytes: &[u8], format: ImageFormat) -> Result<DynamicImage, String> {
     })
 }
 
-/// Fits `bytes` (png, jpeg, gif or webp) into `limits`. Errors if the image cannot be decoded.
-/// Animated GIFs that need re-encoding keep only their first frame.
-pub fn fit(bytes: &[u8], limits: &Limits) -> Result<Fitted, String> {
-    let (format, mime, ow, oh) = probe(bytes)?;
-    let (max_w, max_h) = (limits.max_width.max(1), limits.max_height.max(1));
-    let min_dim = limits.min_dimension.min(max_w).min(max_h);
-    // Already within the bounds and compact (a quarter of the budget): keep the original bytes.
-    if ow >= min_dim
-        && oh >= min_dim
-        && ow <= max_w
-        && oh <= max_h
-        && bytes.len() <= limits.max_bytes / 4
-    {
-        return Ok(Fitted {
-            data: None,
-            mime,
-            original: (ow, oh),
-            size: (ow, oh),
-        });
-    }
-
+/// Size to encode at: the original capped to `max`, lifted toward `min_dim` when undersized.
+fn target_size((ow, oh): (u32, u32), (max_w, max_h): (u32, u32), min_dim: u32) -> (u32, u32) {
     let (mut tw, mut th) = (ow as f64, oh as f64);
     if tw > max_w as f64 {
         th = (th * max_w as f64 / tw).round();
@@ -142,9 +126,17 @@ pub fn fit(bytes: &[u8], limits: &Limits) -> Result<Fitted, String> {
             th = (th * up).round().min(max_h as f64);
         }
     }
-    let (tw, th) = ((tw as u32).max(1), (th as u32).max(1));
+    ((tw as u32).max(1), (th as u32).max(1))
+}
 
-    let src = decode(bytes, format)?;
+/// Encodes `src` at `target` size (PNG and JPEG), then at lower JPEG qualities and smaller sizes
+/// until a candidate fits `limits.max_bytes`. Returns the smallest candidate seen.
+fn encode_best(
+    src: &DynamicImage,
+    (ow, oh): (u32, u32),
+    (tw, th): (u32, u32),
+    limits: &Limits,
+) -> Result<Fitted, String> {
     // JPEG has no alpha; translucent images can only shrink by dimensions.
     let lossy = !src.color().has_alpha();
 
@@ -166,21 +158,21 @@ pub fn fit(bytes: &[u8], limits: &Limits) -> Result<Fitted, String> {
         fits
     };
 
-    let target = resize(&mut resizer, &src, tw, th)?;
+    let target = resize(&mut resizer, src, tw, th)?;
     let png = encode_png(&target)?;
     let jpeg = if lossy {
         Some(encode_jpeg(&target, limits.jpeg_quality)?)
     } else {
         None
     };
-    let fits_png = consider(png, "image/png", (tw, th));
+    let fits_png = consider(png, util::MIME_PNG, (tw, th));
     let fits_jpeg = jpeg
-        .map(|j| consider(j, "image/jpeg", (tw, th)))
+        .map(|j| consider(j, util::MIME_JPEG, (tw, th)))
         .unwrap_or(false);
     let mut done = fits_png || fits_jpeg;
     if !done && lossy {
         for q in QUALITY_STEPS {
-            if consider(encode_jpeg(&target, q)?, "image/jpeg", (tw, th)) {
+            if consider(encode_jpeg(&target, q)?, util::MIME_JPEG, (tw, th)) {
                 done = true;
                 break;
             }
@@ -192,24 +184,48 @@ pub fn fit(bytes: &[u8], limits: &Limits) -> Result<Fitted, String> {
                 (tw as f64 * scale).round() as u32,
                 (th as f64 * scale).round() as u32,
             );
-            if w < 100 || h < 100 {
+            if w < MIN_RETRY_EDGE || h < MIN_RETRY_EDGE {
                 break;
             }
-            let small = resize(&mut resizer, &src, w, h)?;
+            let small = resize(&mut resizer, src, w, h)?;
             if !lossy {
-                if consider(encode_png(&small)?, "image/png", (w, h)) {
+                if consider(encode_png(&small)?, util::MIME_PNG, (w, h)) {
                     break;
                 }
                 continue;
             }
             for q in QUALITY_STEPS {
-                if consider(encode_jpeg(&small, q)?, "image/jpeg", (w, h)) {
+                if consider(encode_jpeg(&small, q)?, util::MIME_JPEG, (w, h)) {
                     break 'scales;
                 }
             }
         }
     }
-    let best = best.expect("at least one candidate");
+    Ok(best.expect("at least one candidate"))
+}
+
+/// Fits `bytes` (png, jpeg, gif or webp) into `limits`. Errors if the image cannot be decoded.
+/// Animated GIFs that need re-encoding keep only their first frame.
+pub(crate) fn fit(bytes: &[u8], limits: &Limits) -> Result<Fitted, String> {
+    let (format, mime, ow, oh) = probe(bytes)?;
+    let (max_w, max_h) = (limits.max_width.max(1), limits.max_height.max(1));
+    let min_dim = limits.min_dimension.min(max_w).min(max_h);
+    // Already within the bounds and compact (a quarter of the budget): keep the original bytes.
+    let within_bounds = ow >= min_dim && oh >= min_dim && ow <= max_w && oh <= max_h;
+    let compact = bytes.len() <= limits.max_bytes / 4;
+    if within_bounds && compact {
+        return Ok(Fitted {
+            data: None,
+            mime,
+            original: (ow, oh),
+            size: (ow, oh),
+        });
+    }
+
+    let (tw, th) = target_size((ow, oh), (max_w, max_h), min_dim);
+
+    let src = decode(bytes, format)?;
+    let best = encode_best(&src, (ow, oh), (tw, th), limits)?;
     // Same dimensions and no smaller: re-encoding gained nothing.
     if best.size == (ow, oh) && best.data.as_ref().is_some_and(|d| d.len() >= bytes.len()) {
         return Ok(Fitted {
@@ -264,9 +280,7 @@ fn encode_jpeg(img: &DynamicImage, quality: u8) -> Result<Vec<u8>, String> {
 /// [`fit`] with default limits for a base64 image (pasted or attached by the user). Returns
 /// the replacement, or `None` to keep the image (it already fits or cannot be decoded).
 pub fn fit_image_data(img: &ImageData) -> Option<ImageData> {
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(img.data.as_bytes())
-        .ok()?;
+    let bytes = decode_payload(img)?;
     let fitted = guarded(|| fit(&bytes, &Limits::default()))?;
     let data = fitted.data?;
     Some(ImageData::new(
@@ -277,16 +291,34 @@ pub fn fit_image_data(img: &ImageData) -> Option<ImageData> {
 
 /// Runs a decoder step, treating an error or a panic (malformed input) as no result.
 fn guarded<T>(f: impl FnOnce() -> Result<T, String>) -> Option<T> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
-        .ok()?
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(Ok(v)) => Some(v),
+        Ok(Err(e)) => {
+            tracing::debug!("image kept: {e}");
+            None
+        }
+        Err(_) => {
+            tracing::warn!("image kept: the image decoder panicked");
+            None
+        }
+    }
+}
+
+/// Decodes the base64 payload of `img`, logging why an invalid one is kept.
+fn decode_payload(img: &ImageData) -> Option<Vec<u8>> {
+    base64::engine::general_purpose::STANDARD
+        .decode(img.data.as_bytes())
+        .map_err(|e| tracing::debug!("image kept: invalid base64: {e}"))
         .ok()
 }
 
 /// Result of [`clamp`].
 #[derive(Debug, Clone)]
-pub struct Clamped {
+struct Clamped {
     pub mime: &'static str,
     pub data: Vec<u8>,
+    /// Only the tests read the size.
+    #[cfg(test)]
     pub size: (u32, u32),
 }
 
@@ -297,12 +329,22 @@ fn b64_len(n: usize) -> usize {
 
 /// Re-encode passes allowed to bring one image under the byte budget in [`clamp`].
 const CLAMP_ATTEMPTS: usize = 4;
+/// JPEG quality of the clamp candidate.
+const CLAMP_JPEG_QUALITY: u8 = 85;
+/// Retries stop below this edge length: a smaller image would be unreadable.
+const MIN_RETRY_EDGE: u32 = 100;
+/// Extra area shrink per clamp pass, so the next encode lands under the budget.
+const AREA_SHRINK_MARGIN: f64 = 0.9;
+/// Smallest per-pass scale factor of a clamp retry.
+const MIN_SHRINK_STEP: f64 = 0.25;
+/// `max_dim` goes into the bits above the byte budget, so that the two seed parts do not mix.
+const SEED_DIM_SHIFT: u32 = 40;
 
 /// Request-time cap, modeled on oh-my-pi's Anthropic image contract: an image with a side over
 /// `max_dim` or a base64 size over `max_b64` is resized to fit (PNG or JPEG quality 85, the
 /// smaller), shrinking by the overshoot for up to 4 passes. Returns `None` when the image already
 /// fits or re-encoding would not make it smaller.
-pub fn clamp(bytes: &[u8], max_dim: u32, max_b64: usize) -> Result<Option<Clamped>, String> {
+fn clamp(bytes: &[u8], max_dim: u32, max_b64: usize) -> Result<Option<Clamped>, String> {
     let (format, _, w, h) = probe(bytes)?;
     let max_dim = max_dim.max(1);
     let over_dim = w > max_dim || h > max_dim;
@@ -322,21 +364,25 @@ pub fn clamp(bytes: &[u8], max_dim: u32, max_b64: usize) -> Result<Option<Clampe
         let th = ((h as f64 * scale).round() as u32).clamp(1, max_dim);
         let img = resize(&mut resizer, &src, tw, th)?;
         let png = encode_png(&img)?;
-        let (mime, data) = match lossy.then(|| encode_jpeg(&img, 85)).transpose()? {
-            Some(j) if j.len() < png.len() => ("image/jpeg", j),
-            _ => ("image/png", png),
+        let (mime, data) = match lossy
+            .then(|| encode_jpeg(&img, CLAMP_JPEG_QUALITY))
+            .transpose()?
+        {
+            Some(j) if j.len() < png.len() => (util::MIME_JPEG, j),
+            _ => (util::MIME_PNG, png),
         };
         let enc = b64_len(data.len());
         best = Some(Clamped {
             mime,
             data,
+            #[cfg(test)]
             size: (tw, th),
         });
         if enc <= max_b64 || (tw, th) == (1, 1) {
             break;
         }
         // Fitting the pixel cap does not imply fitting the byte cap: shrink by the overshoot in area.
-        scale *= ((max_b64 as f64 / enc as f64).sqrt() * 0.9).max(0.25);
+        scale *= ((max_b64 as f64 / enc as f64).sqrt() * AREA_SHRINK_MARGIN).max(MIN_SHRINK_STEP);
     }
     let best = best.expect("at least one pass");
     if !over_dim && b64_len(best.data.len()) >= orig_b64 {
@@ -366,7 +412,7 @@ pub fn clamp_image_data(img: &ImageData, max_dim: u32, max_b64: usize) -> Option
     }
     let key = xxhash_rust::xxh3::xxh3_128_with_seed(
         img.data.as_bytes(),
-        ((max_dim as u64) << 40) ^ max_b64 as u64,
+        ((max_dim as u64) << SEED_DIM_SHIFT) ^ max_b64 as u64,
     );
     if let Some((_, hit)) = CLAMP_CACHE
         .lock()
@@ -377,9 +423,7 @@ pub fn clamp_image_data(img: &ImageData, max_dim: u32, max_b64: usize) -> Option
     {
         return hit.clone();
     }
-    let out = base64::engine::general_purpose::STANDARD
-        .decode(img.data.as_bytes())
-        .ok()
+    let out = decode_payload(img)
         .and_then(|b| guarded(|| clamp(&b, max_dim, max_b64)).flatten())
         .map(|c| {
             ImageData::new(
@@ -391,9 +435,10 @@ pub fn clamp_image_data(img: &ImageData, max_dim: u32, max_b64: usize) -> Option
     c.bytes += out.as_ref().map_or(0, |i| i.data.len());
     c.entries.push_back((key, out.clone()));
     while c.bytes > CLAMP_CACHE_BYTES || c.entries.len() > CLAMP_CACHE_ENTRIES {
-        let Some((_, old)) = c.entries.pop_front() else {
-            break;
-        };
+        let (_, old) = c
+            .entries
+            .pop_front()
+            .expect("entries remain while over a cap");
         c.bytes -= old.map_or(0, |i| i.data.len());
     }
     out

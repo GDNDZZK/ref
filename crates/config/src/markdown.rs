@@ -8,13 +8,22 @@
 use serde_json::{Map, Number, Value};
 use std::path::{Path, PathBuf};
 
+/// Line that opens and closes the frontmatter.
+const FRONTMATTER_FENCE: &str = "---";
+
+/// Deepest directory level `walk` descends to when collecting agents and commands.
+const MAX_WALK_DEPTH: usize = 16;
+
+/// Letters of `nan`, `inf` and hex numbers: words with them stay strings, not floats.
+const NOT_NUMBER_LETTERS: [char; 6] = ['x', 'X', 'n', 'N', 'i', 'I'];
+
 /// Split a markdown document into (frontmatter map, body). Body is trimmed.
 /// Without a leading `---` line the whole text is the body.
 pub fn split_frontmatter(text: &str) -> (Map<String, Value>, String) {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let mut lines = text.lines();
     match lines.next() {
-        Some(first) if first.trim_end() == "---" => {}
+        Some(first) if first.trim_end() == FRONTMATTER_FENCE => {}
         _ => return (Map::new(), text.trim().to_string()),
     }
     let mut fm = Vec::new();
@@ -22,7 +31,7 @@ pub fn split_frontmatter(text: &str) -> (Map<String, Value>, String) {
     let mut closed = false;
     for l in lines {
         if !closed {
-            if l.trim_end() == "---" {
+            if l.trim_end() == FRONTMATTER_FENCE {
                 closed = true;
             } else {
                 fm.push(l);
@@ -48,7 +57,7 @@ struct Line<'a> {
 }
 
 /// Parse a frontmatter block into a JSON object.
-pub fn parse_frontmatter(src: &str) -> Map<String, Value> {
+fn parse_frontmatter(src: &str) -> Map<String, Value> {
     let lines: Vec<Line> = src
         .lines()
         .map(|raw| {
@@ -84,6 +93,15 @@ pub fn parse_frontmatter(src: &str) -> Map<String, Value> {
     out
 }
 
+fn is_list_item(text: &str) -> bool {
+    text.starts_with("- ") || text == "-"
+}
+
+/// Whether `n` starts a list nested deeper than `indent`.
+fn is_nested_list(n: &Line, indent: usize) -> bool {
+    n.indent > indent && is_list_item(n.text)
+}
+
 fn skip_blank(lines: &[Line], i: &mut usize) {
     while *i < lines.len() && lines[*i].blank {
         *i += 1;
@@ -101,7 +119,7 @@ fn parse_map(lines: &[Line], i: &mut usize, indent: usize) -> Map<String, Value>
         if l.indent < indent {
             break;
         }
-        if l.indent > indent || l.text.starts_with("- ") || l.text == "-" {
+        if l.indent > indent || is_list_item(l.text) {
             // Unexpected deeper indentation or list item: skip.
             *i += 1;
             continue;
@@ -114,7 +132,7 @@ fn parse_map(lines: &[Line], i: &mut usize, indent: usize) -> Map<String, Value>
         let value = if rest.is_empty() {
             skip_blank(lines, i);
             match lines.get(*i) {
-                Some(n) if n.indent > indent && (n.text.starts_with("- ") || n.text == "-") => {
+                Some(n) if is_nested_list(n, indent) => {
                     let ind = n.indent;
                     parse_list(lines, i, ind)
                 }
@@ -143,7 +161,7 @@ fn parse_list(lines: &[Line], i: &mut usize, indent: usize) -> Value {
     loop {
         skip_blank(lines, i);
         let Some(l) = lines.get(*i) else { break };
-        if l.indent != indent || !(l.text.starts_with("- ") || l.text == "-") {
+        if l.indent != indent || !is_list_item(l.text) {
             break;
         }
         items.push(scalar(l.text[1..].trim()));
@@ -232,9 +250,8 @@ fn split_key(text: &str) -> Option<(String, &str)> {
     }
     let bytes = text.as_bytes();
     for (idx, &b) in bytes.iter().enumerate() {
-        if b == b':'
-            && (idx + 1 == bytes.len() || bytes[idx + 1] == b' ' || bytes[idx + 1] == b'\t')
-        {
+        let ends_key = b == b':' && bytes.get(idx + 1).is_none_or(|n| *n == b' ' || *n == b'\t');
+        if ends_key {
             let k = text[..idx].trim();
             if k.is_empty() {
                 return None;
@@ -276,7 +293,7 @@ fn parse_quoted(s: &str) -> Option<(String, usize)> {
 }
 
 /// Parse a scalar value.
-pub fn scalar(raw: &str) -> Value {
+fn scalar(raw: &str) -> Value {
     let s = raw.trim();
     if s.starts_with('"') || s.starts_with('\'') {
         if let Some((v, used)) = parse_quoted(s) {
@@ -314,8 +331,8 @@ pub fn scalar(raw: &str) -> Value {
     if let Ok(n) = s.parse::<i64>() {
         return Value::Number(n.into());
     }
-    if s.chars().any(|c| c.is_ascii_digit())
-        && !s.contains(['x', 'X', 'n', 'N', 'i', 'I'])
+    let looks_numeric = s.chars().any(|c| c.is_ascii_digit()) && !s.contains(NOT_NUMBER_LETTERS);
+    if looks_numeric
         && let Ok(f) = s.parse::<f64>()
         && let Some(n) = Number::from_f64(f)
     {
@@ -352,18 +369,18 @@ fn split_flow(s: &str) -> Vec<String> {
 }
 
 /// A markdown definition found on disk.
-pub struct MdDoc {
+pub(crate) struct MdDoc {
     /// Name: relative path below the `agent/`-style dir, without `.md`, joined with `/`.
-    pub name: String,
-    pub path: PathBuf,
-    pub frontmatter: Map<String, Value>,
-    pub body: String,
+    pub(crate) name: String,
+    pub(crate) path: PathBuf,
+    pub(crate) frontmatter: Map<String, Value>,
+    pub(crate) body: String,
     /// Found under `mode/` or `modes/`.
-    pub legacy_mode: bool,
+    pub(crate) legacy_mode: bool,
 }
 
 /// Collect `*.md` files (recursively) under `root/<sub>` for each sub dir name.
-pub fn collect(root: &Path, subdirs: &[&str]) -> (Vec<MdDoc>, Vec<String>) {
+pub(crate) fn collect(root: &Path, subdirs: &[&str]) -> (Vec<MdDoc>, Vec<String>) {
     let mut docs = Vec::new();
     let mut warns = Vec::new();
     for sub in subdirs {
@@ -375,10 +392,10 @@ pub fn collect(root: &Path, subdirs: &[&str]) -> (Vec<MdDoc>, Vec<String>) {
         walk(&base, &mut files, 0);
         files.sort();
         for f in files {
-            let rel = match f.strip_prefix(&base) {
-                Ok(r) => r.with_extension(""),
-                Err(_) => continue,
-            };
+            let rel = f
+                .strip_prefix(&base)
+                .expect("walk yields paths below its root")
+                .with_extension("");
             let name = rel
                 .components()
                 .map(|c| c.as_os_str().to_string_lossy())
@@ -403,7 +420,7 @@ pub fn collect(root: &Path, subdirs: &[&str]) -> (Vec<MdDoc>, Vec<String>) {
 }
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>, depth: usize) {
-    if depth > 16 {
+    if depth > MAX_WALK_DEPTH {
         return;
     }
     let Ok(rd) = std::fs::read_dir(dir) else {

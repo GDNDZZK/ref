@@ -10,22 +10,34 @@ use serde_json::{Value, json};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-pub const DEFAULT_LIMIT: usize = 200;
-pub const MAX_LIMIT: usize = 2000;
-pub const MAX_CONTEXT: usize = 20;
-pub const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
-pub const MAX_LINE_CHARS: usize = 500;
-pub const MAX_OUTPUT_BYTES: usize = 60 * 1024;
+const DEFAULT_LIMIT: usize = 200;
+const MAX_LIMIT: usize = 2000;
+const MAX_CONTEXT: usize = 20;
+const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
+const MAX_LINE_CHARS: usize = 500;
+const MAX_OUTPUT_BYTES: usize = 60 * 1024;
+/// Compiled-regex size limit; larger patterns are rejected.
+const REGEX_SIZE_LIMIT_BYTES: usize = 64 * 1024 * 1024;
+/// Search threads when the parallelism of the machine is unknown.
+const FALLBACK_THREADS: usize = 4;
+const MAX_THREADS: usize = 16;
+/// Files handed to each thread per batch.
+const FILES_PER_THREAD_BATCH: usize = 16;
+
+/// Name the model calls the tool by.
+pub(crate) const NAME: &str = "grep";
 
 pub fn spec() -> ToolSpec {
+    let max_file_mb = MAX_FILE_BYTES / util::MIB;
     ToolSpec {
-        name: "grep",
-        description: "Search file contents with a regular expression (Rust regex syntax; set `literal` for plain text). \
-Searches a file or a directory tree; respects .gitignore, includes hidden files, skips .git, binary files and files over 4MB.\n\
+        name: NAME,
+        description: format!(
+            "Search file contents with a regular expression (Rust regex syntax; set `literal` for plain text). \
+Searches a file or a directory tree; respects .gitignore, includes hidden files, skips .git, binary files and files over {max_file_mb}MB.\n\
 Output is grouped by file in hashline format: `[path#TAG]` header, then `*N:line` for matching lines and ` N:line` for context lines, \
 `...` between non-adjacent rows. TAG and line numbers can be used directly with `edit` for the rows shown (no re-read needed).\n\
 `glob` filters files: `*.rs` matches at any depth, `src/**/*.ts` is relative to the search path. Lines are matched one at a time (no multi-line matches)."
-            .to_string(),
+        ),
         parameters: json!({
             "type": "object",
             "properties": {
@@ -34,8 +46,8 @@ Output is grouped by file in hashline format: `[path#TAG]` header, then `*N:line
                 "glob": {"type": "string", "description": "Only search files matching this glob, e.g. `*.rs` or `src/**/*.ts`."},
                 "ignore_case": {"type": "boolean", "description": "Case-insensitive search (default false)."},
                 "literal": {"type": "boolean", "description": "Treat `pattern` as a literal string (default false)."},
-                "context": {"type": "integer", "minimum": 0, "description": "Context lines before and after each match (default 0, max 20)."},
-                "limit": {"type": "integer", "minimum": 1, "description": "Maximum matching lines to return (default 200, max 2000)."}
+                "context": {"type": "integer", "minimum": 0, "description": format!("Context lines before and after each match (default 0, max {MAX_CONTEXT}).")},
+                "limit": {"type": "integer", "minimum": 1, "description": format!("Maximum matching lines to return (default {DEFAULT_LIMIT}, max {MAX_LIMIT}).")}
             },
             "required": ["pattern"]
         }),
@@ -56,11 +68,15 @@ struct FileResult {
 }
 
 fn search_file(path: &Path, re: &Regex, context: usize, remaining: usize) -> Option<FileResult> {
-    let meta = std::fs::metadata(path).ok()?;
+    let meta = std::fs::metadata(path)
+        .map_err(|e| tracing::debug!("grep: skipping {}: {e}", path.display()))
+        .ok()?;
     if meta.len() > MAX_FILE_BYTES {
         return None;
     }
-    let bytes = std::fs::read(path).ok()?;
+    let bytes = std::fs::read(path)
+        .map_err(|e| tracing::debug!("grep: skipping {}: {e}", path.display()))
+        .ok()?;
     if util::looks_binary(&bytes) {
         return None;
     }
@@ -87,7 +103,7 @@ fn search_file(path: &Path, re: &Regex, context: usize, remaining: usize) -> Opt
         let from = h.saturating_sub(context).max(1).max(last + 1);
         let to = (h + context).min(total);
         for l in from..=to {
-            let is_match = l == h || hits.binary_search(&l).is_ok();
+            let is_match = hits.binary_search(&l).is_ok();
             rows.push((l, is_match));
             last = l;
         }
@@ -105,105 +121,57 @@ fn search_file(path: &Path, re: &Regex, context: usize, remaining: usize) -> Opt
     })
 }
 
-fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
-    let pattern = util::req_str(input, "pattern")?;
-    if pattern.is_empty() {
-        bail!("Pattern must not be empty");
-    }
-    let literal = util::opt_bool(input, "literal")?.unwrap_or(false);
-    let ignore_case = util::opt_bool(input, "ignore_case")?.unwrap_or(false);
-    let context = (util::opt_u64(input, "context")?.unwrap_or(0) as usize).min(MAX_CONTEXT);
-    let limit = (util::opt_u64(input, "limit")?.unwrap_or(DEFAULT_LIMIT as u64) as usize)
-        .clamp(1, MAX_LIMIT);
-    let glob = util::opt_str(input, "glob")?.filter(|g| !g.trim().is_empty());
-    let src = if literal {
-        regex::escape(&pattern)
-    } else {
-        pattern.clone()
-    };
-    let re = RegexBuilder::new(&src)
-        .case_insensitive(ignore_case)
-        .size_limit(64 * 1024 * 1024)
-        .build()
-        .map_err(|e| {
-            anyhow!("Invalid regex: {e}. Set `literal: true` to search for plain text.")
-        })?;
-
-    let root = match util::opt_str(input, "path")? {
-        Some(p) if !p.trim().is_empty() => util::resolve_path(&ctx.cwd, &util::unwrap_header(&p).0),
-        _ => ctx.cwd.clone(),
-    };
-    let root_display = util::display_path(&ctx.cwd, &root);
-    if !root.exists() {
-        return Ok(ToolOutput::err(format!("Path not found: {root_display}")));
-    }
-
-    let files: Vec<PathBuf> = if root.is_file() {
-        vec![root.clone()]
-    } else {
-        collect_files(&root, glob.as_deref(), ctx)?
-    };
-
-    // Search in sorted order, in parallel batches, stopping at the match limit.
-    let threads = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
-        .min(16);
-    let mut results: Vec<FileResult> = Vec::new();
-    let mut total_matches = 0usize;
-    let mut hit_limit = false;
-    'outer: for batch in files.chunks(threads * 16) {
-        if ctx.cancel.is_cancelled() {
-            bail!("grep cancelled");
-        }
-        let remaining = limit - total_matches;
-        let per_thread: Vec<Vec<(usize, FileResult)>> = std::thread::scope(|s| {
-            let handles: Vec<_> = (0..threads)
-                .map(|t| {
-                    let re = &re;
-                    s.spawn(move || {
-                        let mut out = Vec::new();
-                        for (i, f) in batch.iter().enumerate().skip(t).step_by(threads) {
-                            if let Some(r) = search_file(f, re, context, remaining) {
-                                out.push((i, r));
-                            }
+/// Searches one batch on `threads` threads (thread `t` takes every `threads`-th file).
+/// Returns the results with their index in the batch, in file order.
+fn search_batch(
+    batch: &[PathBuf],
+    re: &Regex,
+    context: usize,
+    remaining: usize,
+    threads: usize,
+) -> Vec<(usize, FileResult)> {
+    let per_thread: Vec<Vec<(usize, FileResult)>> = std::thread::scope(|s| {
+        let handles: Vec<_> = (0..threads)
+            .map(|t| {
+                s.spawn(move || {
+                    let mut out = Vec::new();
+                    for (i, f) in batch.iter().enumerate().skip(t).step_by(threads) {
+                        if let Some(r) = search_file(f, re, context, remaining) {
+                            out.push((i, r));
                         }
-                        out
-                    })
+                    }
+                    out
                 })
-                .collect();
-            handles
-                .into_iter()
-                .map(|h| h.join().unwrap_or_default())
-                .collect()
-        });
-        let mut batch_results: Vec<(usize, FileResult)> =
-            per_thread.into_iter().flatten().collect();
-        batch_results.sort_by_key(|(i, _)| *i);
-        for (_, mut r) in batch_results {
-            let room = limit - total_matches;
-            if r.matches > room {
-                truncate_rows(&mut r, room);
-            }
-            total_matches += r.matches;
-            results.push(r);
-            if total_matches >= limit {
-                hit_limit = true;
-                break 'outer;
-            }
-        }
-    }
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().unwrap_or_default())
+            .collect()
+    });
+    let mut results: Vec<(usize, FileResult)> = per_thread.into_iter().flatten().collect();
+    results.sort_by_key(|(i, _)| *i);
+    results
+}
 
+/// Formats the matches as hashline blocks plus notices, and records what the model has seen.
+fn render_results(
+    results: &[FileResult],
+    ctx: &ToolCtx,
+    limit: usize,
+    total_matches: usize,
+    hit_limit: bool,
+) -> ToolOutput {
     if results.is_empty() {
         let mut o = ToolOutput::ok("No matches found.");
         o.meta = Some(json!({"matches": 0, "files": 0}));
-        return Ok(o);
+        return o;
     }
 
     let mut out = String::new();
     let mut shown_files = 0;
     let mut bytes_limited = false;
-    for r in &results {
+    for r in results {
         let display = util::display_path(&ctx.cwd, &r.path);
         let tag = file_hash(&r.text);
         let (lines, _) = util::split_lines(&r.text);
@@ -252,7 +220,83 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     o.meta = Some(
         json!({"matches": total_matches, "files": results.len(), "truncated": hit_limit || bytes_limited}),
     );
-    Ok(o)
+    o
+}
+
+fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
+    let pattern = util::req_str(input, "pattern")?;
+    if pattern.is_empty() {
+        bail!("Pattern must not be empty");
+    }
+    let literal = util::opt_bool(input, "literal")?.unwrap_or(false);
+    let ignore_case = util::opt_bool(input, "ignore_case")?.unwrap_or(false);
+    let context = (util::opt_u64(input, "context")?.unwrap_or(0) as usize).min(MAX_CONTEXT);
+    let limit = (util::opt_u64(input, "limit")?.unwrap_or(DEFAULT_LIMIT as u64) as usize)
+        .clamp(1, MAX_LIMIT);
+    let glob = util::opt_str(input, "glob")?.filter(|g| !g.trim().is_empty());
+    let src = if literal {
+        regex::escape(&pattern)
+    } else {
+        pattern.clone()
+    };
+    let re = RegexBuilder::new(&src)
+        .case_insensitive(ignore_case)
+        .size_limit(REGEX_SIZE_LIMIT_BYTES)
+        .build()
+        .map_err(|e| {
+            anyhow!("Invalid regex: {e}. Set `literal: true` to search for plain text.")
+        })?;
+
+    let root = match util::opt_str(input, "path")? {
+        Some(p) if !p.trim().is_empty() => util::resolve_path(&ctx.cwd, &util::unwrap_header(&p).0),
+        _ => ctx.cwd.clone(),
+    };
+    let root_display = util::display_path(&ctx.cwd, &root);
+    if !root.exists() {
+        return Ok(ToolOutput::err(format!("Path not found: {root_display}")));
+    }
+
+    let files: Vec<PathBuf> = if root.is_file() {
+        vec![root.clone()]
+    } else {
+        collect_files(&root, glob.as_deref(), ctx)?
+    };
+
+    // Search in sorted order, in parallel batches, stopping at the match limit.
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(FALLBACK_THREADS)
+        .min(MAX_THREADS);
+    let mut results: Vec<FileResult> = Vec::new();
+    let mut total_matches = 0usize;
+    let mut hit_limit = false;
+    'outer: for batch in files.chunks(threads * FILES_PER_THREAD_BATCH) {
+        if ctx.cancel.is_cancelled() {
+            bail!("grep cancelled");
+        }
+        let remaining = limit - total_matches;
+        let batch_results = search_batch(batch, &re, context, remaining, threads);
+        for (_, mut r) in batch_results {
+            let room = limit - total_matches;
+            if r.matches > room {
+                truncate_rows(&mut r, room);
+            }
+            total_matches += r.matches;
+            results.push(r);
+            if total_matches >= limit {
+                hit_limit = true;
+                break 'outer;
+            }
+        }
+    }
+
+    Ok(render_results(
+        &results,
+        ctx,
+        limit,
+        total_matches,
+        hit_limit,
+    ))
 }
 
 /// Keeps only the first `keep` matches (and context up to the last kept match + its context).
@@ -287,23 +331,33 @@ pub(crate) fn collect_files(
         .parents(true)
         .require_git(false)
         .follow_links(false)
-        .filter_entry(|e| e.file_name() != ".git");
+        .filter_entry(|e| e.file_name() != util::GIT_DIR_NAME);
     let matcher = glob.map(crate::find::PathMatcher::new).transpose()?;
     let mut files = Vec::new();
     for entry in wb.build() {
         if ctx.cancel.is_cancelled() {
             bail!("grep cancelled");
         }
-        let Ok(entry) = entry else { continue };
-        if entry.file_type().is_some_and(|t| t.is_file()) {
-            if let Some(m) = &matcher {
-                let rel = entry.path().strip_prefix(root).unwrap_or(entry.path());
-                if !m.is_match(rel) {
-                    continue;
-                }
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(e) => {
+                tracing::debug!("grep: skipping unreadable entry: {e}");
+                continue;
             }
-            files.push(entry.into_path());
+        };
+        if !entry.file_type().is_some_and(|t| t.is_file()) {
+            continue;
         }
+        if let Some(m) = &matcher {
+            let rel = entry
+                .path()
+                .strip_prefix(root)
+                .expect("walk entries are under the root");
+            if !m.is_match(rel) {
+                continue;
+            }
+        }
+        files.push(entry.into_path());
     }
     files.sort();
     Ok(files)

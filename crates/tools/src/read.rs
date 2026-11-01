@@ -1,7 +1,7 @@
 //! `read`: hashline file view, directory listing, images.
 
 use crate::hashline::{Seen, format_header};
-use crate::util::{self, TextFile};
+use crate::util::{self, ImagePayload, TextFile};
 use crate::{ToolCtx, ToolOutput, ToolSpec};
 use anyhow::{Result, bail};
 use base64::Engine;
@@ -11,37 +11,42 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-pub const DEFAULT_LIMIT: usize = 500;
-pub const MAX_LIMIT: usize = 3000;
+const DEFAULT_LIMIT: usize = 500;
+const MAX_LIMIT: usize = 3000;
 /// Byte budget for one page of numbered rows.
-pub const PAGE_BYTES: usize = 60 * 1024;
+const PAGE_BYTES: usize = 60 * 1024;
 /// Display cap per line (chars); longer lines end with `…` and are not counted as seen.
-pub const MAX_LINE_CHARS: usize = 1000;
-pub const MAX_DIR_ENTRIES: usize = 500;
-pub const MAX_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
+const MAX_LINE_CHARS: usize = 1000;
+const MAX_DIR_ENTRIES: usize = 500;
+const MAX_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
 /// Larger files are refused (use grep / bash to inspect them).
-pub const MAX_READ_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_READ_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Name the model calls the tool by.
+pub(crate) const NAME: &str = "read";
 
 pub fn spec() -> ToolSpec {
+    let page_kb = PAGE_BYTES as u64 / util::KIB;
     ToolSpec {
-        name: "read",
-        description: "Read a text file, list a directory, or view an image.\n\
+        name: NAME,
+        description: format!(
+            "Read a text file, list a directory, or view an image.\n\
 \n\
 Text files are returned in hashline format: a header `[path#TAG]` followed by rows `N:content` \
 (N = 1-based line number, no padding; the `N:` prefix is not part of the file). TAG is a 4-hex \
 snapshot id of the whole file; pass it to `edit` together with the line numbers shown.\n\
-- Default page: 500 lines (max `limit` 3000, ~60KB). A trailing notice tells you the `offset` to \
-continue from. Lines over 1000 chars are cut with `…` (those lines cannot be edited until seen whole).\n\
+- Default page: {DEFAULT_LIMIT} lines (max `limit` {MAX_LIMIT}, ~{page_kb}KB). A trailing notice tells you the `offset` to \
+continue from. Lines over {MAX_LINE_CHARS} chars are cut with `…` (those lines cannot be edited until seen whole).\n\
 - `offset`/`limit` select a range; a path suffix also works: `file.rs:50-80`, `file.rs:50+10`, `file.rs:50`.\n\
 - Directories list their entries (subdirectories end with `/`).\n\
 - Images (png, jpg, gif, webp) are returned as images. Binary files are refused."
-            .to_string(),
+        ),
         parameters: json!({
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "File or directory path (relative to the working directory, or absolute)."},
                 "offset": {"type": "integer", "minimum": 1, "description": "1-based line to start from (default 1)."},
-                "limit": {"type": "integer", "minimum": 1, "description": "Maximum number of lines to return (default 500, max 3000)."}
+                "limit": {"type": "integer", "minimum": 1, "description": format!("Maximum number of lines to return (default {DEFAULT_LIMIT}, max {MAX_LIMIT}).")}
             },
             "required": ["path"]
         }),
@@ -53,8 +58,12 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     util::blocking(move || run_sync(&input, &ctx)).await
 }
 
-static RANGE_SUFFIX_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(.+?):(?:(\d+)(?:([-+])(\d*))?|-(\d+))$").expect("valid regex"));
+/// Path suffix forms: `f:50` (from line 50), `f:50-80` (lines 50 to 80), `f:50+10` (10 lines from
+/// 50) and `f:-5` (last 5 lines). `count` is the end line after `-` and the line count after `+`.
+static RANGE_SUFFIX_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(?P<path>.+?):(?:(?P<start>\d+)(?:(?P<sep>[-+])(?P<count>\d*))?|-(?P<last>\d+))$")
+        .expect("valid regex")
+});
 
 /// Line selection derived from offset/limit or a path suffix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,19 +77,19 @@ enum Range {
 /// Splits `path:50-80`-style suffixes when the literal path does not exist.
 fn split_range_suffix(cwd: &Path, raw: &str) -> Option<(PathBuf, Range)> {
     let caps = RANGE_SUFFIX_RE.captures(raw)?;
-    let base = caps.get(1)?.as_str();
+    let base = caps.name("path")?.as_str();
     let base_abs = util::resolve_path(cwd, base);
     if !base_abs.exists() {
         return None;
     }
-    if let Some(last) = caps.get(5) {
+    if let Some(last) = caps.name("last") {
         return Some((base_abs, Range::Last(last.as_str().parse().ok()?)));
     }
-    let start: usize = caps.get(2)?.as_str().parse().ok()?;
+    let start: usize = caps.name("start")?.as_str().parse().ok()?;
     let start = start.max(1);
     let range = match (
-        caps.get(3).map(|m| m.as_str()),
-        caps.get(4).map(|m| m.as_str()),
+        caps.name("sep").map(|m| m.as_str()),
+        caps.name("count").map(|m| m.as_str()),
     ) {
         (None, _) => Range::From(start, None),
         (Some("-"), Some("")) => Range::From(start, None),
@@ -141,48 +150,7 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     }
     let bytes = std::fs::read(&abs)?;
     if let Some(mime) = util::image_mime(&bytes) {
-        if meta.len() > MAX_IMAGE_BYTES {
-            return Ok(ToolOutput::err(format!(
-                "Image file too large: {} exceeds {} limit.",
-                util::human_bytes(meta.len()),
-                util::human_bytes(MAX_IMAGE_BYTES)
-            )));
-        }
-        let mut text = format!(
-            "Read image file {display} [{mime}] ({})",
-            util::human_bytes(meta.len())
-        );
-        let mut sent = (mime.to_string(), bytes);
-        if ctx.resize_images {
-            let fitted = match crate::imgfit::fit(&sent.1, &crate::imgfit::Limits::default()) {
-                Ok(f) => f,
-                Err(e) => {
-                    return Ok(ToolOutput::err(format!(
-                        "Image file {display} could not be decoded ({e}); it was not attached."
-                    )));
-                }
-            };
-            let note = fitted.note();
-            if let Some(data) = fitted.data {
-                text.push_str(&format!(
-                    ", sent as {} {}x{} ({})",
-                    fitted.mime,
-                    fitted.size.0,
-                    fitted.size.1,
-                    util::human_bytes(data.len() as u64)
-                ));
-                sent = (fitted.mime.to_string(), data);
-            }
-            if let Some(n) = note {
-                text.push('\n');
-                text.push_str(&n);
-            }
-        }
-        let data = base64::engine::general_purpose::STANDARD.encode(&sent.1);
-        let mut out = ToolOutput::ok(text);
-        out.images.push(ImageData::new(sent.0, data));
-        out.meta = Some(json!({"path": abs.to_string_lossy(), "image": true}));
-        return Ok(out);
+        return read_image(ctx, &abs, &display, mime, bytes, meta.len());
     }
     let text = match (util::looks_binary(&bytes), String::from_utf8(bytes)) {
         (false, Ok(t)) => t,
@@ -196,6 +164,62 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let file = TextFile::decode(&text);
     let mut out = render_text(ctx, &abs, &display, &file.text, range);
     out.meta = Some(json!({"path": abs.to_string_lossy()}));
+    Ok(out)
+}
+
+/// Returns an image file as an attachment, downscaled when `resize_images` is set.
+fn read_image(
+    ctx: &ToolCtx,
+    abs: &Path,
+    display: &str,
+    mime: &'static str,
+    bytes: Vec<u8>,
+    file_len: u64,
+) -> Result<ToolOutput> {
+    if file_len > MAX_IMAGE_BYTES {
+        return Ok(ToolOutput::err(format!(
+            "Image file too large: {} exceeds {} limit.",
+            util::human_bytes(file_len),
+            util::human_bytes(MAX_IMAGE_BYTES)
+        )));
+    }
+    let mut text = format!(
+        "Read image file {display} [{mime}] ({})",
+        util::human_bytes(file_len)
+    );
+    let mut sent = ImagePayload { mime, bytes };
+    if ctx.resize_images {
+        let fitted = match crate::imgfit::fit(&sent.bytes, &crate::imgfit::Limits::default()) {
+            Ok(f) => f,
+            Err(e) => {
+                return Ok(ToolOutput::err(format!(
+                    "Image file {display} could not be decoded ({e}); it was not attached."
+                )));
+            }
+        };
+        let note = fitted.note();
+        if let Some(data) = fitted.data {
+            text.push_str(&format!(
+                ", sent as {} {}x{} ({})",
+                fitted.mime,
+                fitted.size.0,
+                fitted.size.1,
+                util::human_bytes(data.len() as u64)
+            ));
+            sent = ImagePayload {
+                mime: fitted.mime,
+                bytes: data,
+            };
+        }
+        if let Some(n) = note {
+            text.push('\n');
+            text.push_str(&n);
+        }
+    }
+    let data = base64::engine::general_purpose::STANDARD.encode(&sent.bytes);
+    let mut out = ToolOutput::ok(text);
+    out.images.push(ImageData::new(sent.mime, data));
+    out.meta = Some(json!({"path": abs.to_string_lossy(), "image": true}));
     Ok(out)
 }
 
@@ -277,15 +301,27 @@ fn render_text(ctx: &ToolCtx, abs: &Path, display: &str, text: &str, range: Rang
 fn list_dir(abs: &Path, display: &str) -> Result<ToolOutput> {
     let mut entries: Vec<String> = Vec::new();
     for e in std::fs::read_dir(abs)? {
-        let Ok(e) = e else { continue };
+        let e = match e {
+            Ok(e) => e,
+            Err(err) => {
+                tracing::debug!(
+                    "read: skipping unreadable entry of {}: {err}",
+                    abs.display()
+                );
+                continue;
+            }
+        };
         let name = e.file_name().to_string_lossy().into_owned();
-        if name == ".git" {
+        if name == util::GIT_DIR_NAME {
             continue;
         }
         // Follow symlinks for the dir check so linked dirs show `/`.
         let is_dir = std::fs::metadata(e.path())
             .map(|m| m.is_dir())
-            .unwrap_or(false);
+            .unwrap_or_else(|err| {
+                tracing::debug!("read: no metadata for {}: {err}", e.path().display());
+                false
+            });
         entries.push(if is_dir { format!("{name}/") } else { name });
     }
     entries.sort();

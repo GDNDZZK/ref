@@ -43,16 +43,16 @@ async fn serve(
                 break;
             }
         }
-        let _ = sock.write_all(head.as_bytes()).await;
+        sock.write_all(head.as_bytes()).await.unwrap();
         for c in chunks {
-            let _ = sock
-                .write_all(format!("{:x}\r\n{c}\r\n", c.len()).as_bytes())
-                .await;
-            let _ = sock.flush().await;
+            sock.write_all(format!("{:x}\r\n{c}\r\n", c.len()).as_bytes())
+                .await
+                .unwrap();
+            sock.flush().await.unwrap();
             tokio::time::sleep(delay).await;
         }
         tokio::time::sleep(hold).await;
-        let _ = sock.write_all(b"0\r\n\r\n").await;
+        sock.write_all(b"0\r\n\r\n").await.unwrap();
         String::from_utf8_lossy(&req).to_string()
     });
     (format!("http://{addr}/v1/"), task)
@@ -96,6 +96,14 @@ fn request() -> Request {
     }
 }
 
+/// Stream one default request from `p` without cancellation.
+async fn run_stream(
+    p: &Provider,
+    sink: &mut (dyn FnMut(StreamEvent) + Send),
+) -> Result<ref_llm::Response, ref_llm::LlmError> {
+    ref_llm::stream(p, &model(), &request(), &CancellationToken::new(), sink).await
+}
+
 #[tokio::test]
 async fn chat_stream_end_to_end() {
     let chunks = vec![
@@ -107,15 +115,7 @@ async fn chat_stream_end_to_end() {
     let p = provider(ApiKind::OpenAIChat, url, Duration::from_secs(5));
     let mut events = Vec::new();
     let mut sink = |e: StreamEvent| events.push(e);
-    let res = ref_llm::stream(
-        &p,
-        &model(),
-        &request(),
-        &CancellationToken::new(),
-        &mut sink,
-    )
-    .await
-    .unwrap();
+    let res = run_stream(&p, &mut sink).await.unwrap();
     assert_eq!(res.stop_reason, "stop");
     assert_eq!(res.usage.input, 10);
     assert!(matches!(&res.blocks[0], ref_llm::AssistantBlock::Text(t) if t == "Hello"));
@@ -137,15 +137,7 @@ async fn http_error_is_classified() {
     let (url, _server) = serve(head, vec![], Duration::ZERO, Duration::ZERO).await;
     let p = provider(ApiKind::Anthropic, url, Duration::from_secs(5));
     let mut sink = |_e: StreamEvent| {};
-    let err = ref_llm::stream(
-        &p,
-        &model(),
-        &request(),
-        &CancellationToken::new(),
-        &mut sink,
-    )
-    .await
-    .unwrap_err();
+    let err = run_stream(&p, &mut sink).await.unwrap_err();
     assert_eq!(err.status, Some(429));
     assert!(err.retryable);
     assert_eq!(err.retry_after, Some(Duration::from_secs(3)));
@@ -158,15 +150,7 @@ async fn idle_timeout_is_retryable() {
     let (url, _server) = serve(sse_head(), chunks, Duration::ZERO, Duration::from_secs(5)).await;
     let p = provider(ApiKind::Anthropic, url, Duration::from_millis(200));
     let mut sink = |_e: StreamEvent| {};
-    let err = ref_llm::stream(
-        &p,
-        &model(),
-        &request(),
-        &CancellationToken::new(),
-        &mut sink,
-    )
-    .await
-    .unwrap_err();
+    let err = run_stream(&p, &mut sink).await.unwrap_err();
     assert!(err.retryable);
     assert!(err.message.contains("idle timeout"), "{}", err.message);
 }
@@ -202,14 +186,6 @@ async fn connection_refused_is_retryable() {
         Duration::from_secs(5),
     );
     let mut sink = |_e: StreamEvent| {};
-    let err = ref_llm::stream(
-        &p,
-        &model(),
-        &request(),
-        &CancellationToken::new(),
-        &mut sink,
-    )
-    .await
-    .unwrap_err();
+    let err = run_stream(&p, &mut sink).await.unwrap_err();
     assert!(err.retryable && !err.cancelled);
 }

@@ -126,7 +126,13 @@ pub(crate) fn data_values(data: &str) -> Vec<Value> {
     data.lines()
         .map(str::trim)
         .filter(|l| !l.is_empty() && *l != "[DONE]")
-        .filter_map(|l| serde_json::from_str(l).ok())
+        .filter_map(|l| match serde_json::from_str(l) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                tracing::debug!(line = l, error = %e, "skipping unparseable SSE data line");
+                None
+            }
+        })
         .collect()
 }
 
