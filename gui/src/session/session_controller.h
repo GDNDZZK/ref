@@ -53,6 +53,8 @@ public:
 	bool isBusy() const;
 	// The user still sees a reply taking shape: busy, or streamed text not shown yet.
 	bool isTurnInProgress() const;
+	// The backend is connected; connectionChanged() says when that may have changed.
+	bool isConnected() const;
 
 	// The backend must be connected for all of these.
 	QCoro::Task<Result<void>> create(QString cwd, std::optional<QString> agent, std::optional<proto::ModelRef> model);
@@ -87,8 +89,19 @@ public:
 	// Takes back a human prompt and what followed (the last one without `messageId`); the answer
 	// has the prompt's text and pictures. The conversation shrinks by a Reset event.
 	QCoro::Task<Result<proto::RemovedPrompt>> undo(std::optional<QString> messageId);
+	// Withdraws a queued prompt of the user; the answer has its text and pictures.
+	QCoro::Task<Result<proto::RemovedPrompt>> removeQueued(QString messageId);
+	// Runs a shell line in the session.
+	QCoro::Task<Result<void>> runShell(QString command);
+	// The files and directories under the session's directory that match `query`, at most `limit`.
+	QCoro::Task<Result<QStringList>> listFiles(QString query, int limit);
+	// The prompt text of the user-defined command `name` with `args`, for the session's directory.
+	QCoro::Task<Result<QString>> expandCommand(QString name, QString args);
+	// The bytes of an image the backend holds for the session.
+	QCoro::Task<Result<QByteArray>> fetchImage(QString imageId);
 
 signals:
+	void connectionChanged();
 	void infoChanged();
 	void busyChanged();
 	void turnInProgressChanged();
