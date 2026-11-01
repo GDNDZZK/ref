@@ -20,8 +20,6 @@ use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 pub type Ws =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
-/// Another process may take a port between `free_port` and ref-web binding it.
-const START_ATTEMPTS: u32 = 5;
 const START_TIMEOUT: Duration = Duration::from_secs(15);
 /// The loopback address the tests listen on and connect to.
 pub const LOOPBACK: &str = "127.0.0.1";
@@ -93,34 +91,35 @@ impl Env {
         self.command(args).output().unwrap()
     }
 
-    /// Starts ref-web in the background on a free port and waits until it listens. Tries
-    /// another port when ref-web exits at once because the port was taken meanwhile.
+    /// Starts ref-web in the background (it picks its own port) and waits until it listens.
     pub async fn start(&self, args: &[&str]) -> Web {
-        for _ in 1..START_ATTEMPTS {
-            if let Ok(web) = self.try_start_on(free_port(), args).await {
-                return web;
-            }
-        }
-        self.start_on(free_port(), args).await
+        self.start_with_port(None, args).await
     }
 
     /// Like `start`, on a given port.
     pub async fn start_on(&self, port: u16, args: &[&str]) -> Web {
-        match self.try_start_on(port, args).await {
+        self.start_with_port(Some(port), args).await
+    }
+
+    async fn start_with_port(&self, port: Option<u16>, args: &[&str]) -> Web {
+        match self.try_start(port, args).await {
             Ok(web) => web,
             Err(status) => panic!("ref-web exited early: {status}"),
         }
     }
 
     /// `Err` holds the exit status of a ref-web that stopped before it listened.
-    async fn try_start_on(
+    async fn try_start(
         &self,
-        port: u16,
+        port: Option<u16>,
         args: &[&str],
     ) -> Result<Web, std::process::ExitStatus> {
-        let port_arg = port.to_string();
-        let mut all = vec!["--no-open", "--port", &port_arg];
-        all.extend_from_slice(args);
+        let mut all = vec!["--no-open".to_string()];
+        if let Some(port) = port {
+            all.extend(["--port".to_string(), port.to_string()]);
+        }
+        all.extend(args.iter().map(|a| a.to_string()));
+        let all: Vec<&str> = all.iter().map(String::as_str).collect();
         let child = self
             .command(&all)
             .stdout(Stdio::null())
@@ -129,7 +128,7 @@ impl Env {
             .unwrap();
         let mut web = Web {
             child,
-            port,
+            port: 0,
             token: String::new(),
             session_cookie: String::new(),
             http: reqwest::Client::builder()
@@ -138,6 +137,7 @@ impl Env {
                 .build()
                 .unwrap(),
         };
+        web.port = web.wait_for_record(&self.state_dir()).await?;
         web.wait_until_listening().await?;
         web.token = std::fs::read_to_string(self.state_dir().join("web/login-token")).unwrap();
         web.session_cookie = web.log_in().await;
@@ -178,6 +178,28 @@ impl Web {
     pub fn kill_hard(&mut self) {
         self.child.kill().unwrap();
         self.child.wait().unwrap();
+    }
+
+    /// The port ref-web chose, from its instance record (written once it has bound).
+    async fn wait_for_record(
+        &mut self,
+        state_dir: &std::path::Path,
+    ) -> Result<u16, std::process::ExitStatus> {
+        let record = state_dir.join(format!("web/instances/{}.json", self.child.id()));
+        poll_until(
+            "ref-web to record its port",
+            START_TIMEOUT,
+            POLL_SLOW,
+            async || {
+                if let Some(status) = self.child.try_wait().unwrap() {
+                    return Some(Err(status));
+                }
+                let text = std::fs::read_to_string(&record).ok()?;
+                let record: serde_json::Value = serde_json::from_str(&text).ok()?;
+                Some(Ok(record["port"].as_u64()? as u16))
+            },
+        )
+        .await
     }
 
     async fn wait_until_listening(&mut self) -> Result<(), std::process::ExitStatus> {

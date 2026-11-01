@@ -450,9 +450,10 @@ async fn the_login_token_survives_a_restart_but_sessions_do_not() {
 
 #[tokio::test]
 async fn two_instances_keep_separate_cookies() {
-    let env = Env::new("two");
-    let (first, _upstream) = web_with_fake_upstream(&env).await;
-    let (second, _upstream) = web_with_fake_upstream(&env).await;
+    // Separate state directories: with one, the second start would find the first instance.
+    let (first_env, second_env) = (Env::new("two-a"), Env::new("two-b"));
+    let (first, _upstream) = web_with_fake_upstream(&first_env).await;
+    let (second, _upstream) = web_with_fake_upstream(&second_env).await;
     assert_ne!(first.cookie_name(), second.cookie_name());
 
     // Both cookies sit in one browser jar, which sends them to every port of the host.
