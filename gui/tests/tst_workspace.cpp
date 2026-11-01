@@ -370,6 +370,7 @@ class TestWorkspace : public QObject
 
 private slots:
 	void opensTheSessionFromTheCommandLine();
+	void firstConnectionAsksForTheListsBeforeAttaching();
 	void newSessionBecomesCurrentAndLetsGoOfTheOld();
 	void openingAnotherSessionSwitches();
 	void closingTheCurrentSessionOpensAnother();
@@ -420,6 +421,21 @@ void TestWorkspace::opensTheSessionFromTheCommandLine()
 	QVERIFY(attaches.first().value(u"foreground"_s).toBool());
 	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 1);
 	QTRY_VERIFY(!f.workspace->config()->agents().isEmpty());
+}
+
+// The lists and the configuration are asked for first; then the session from the command line is attached.
+void TestWorkspace::firstConnectionAsksForTheListsBeforeAttaching()
+{
+	Fixture f;
+	QTRY_VERIFY(f.workspace->current()->isAttached());
+
+	QStringList ops;
+	for(const QJsonObject& request : f.fake.requests())
+	{
+		ops.append(request.value(u"op"_s).toString());
+	}
+	const QStringList expected{u"hello"_s, u"list_sessions"_s, u"list_history"_s, u"get_config"_s, u"mcp_status"_s, u"attach"_s};
+	QCOMPARE(ops.mid(0, expected.size()), expected);
 }
 
 void TestWorkspace::newSessionBecomesCurrentAndLetsGoOfTheOld()

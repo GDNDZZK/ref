@@ -286,8 +286,9 @@ void TstSessionList::directoryLoadsAndFollowsFrames()
 			fake.respond(request, {{u"sessions"_s, QJsonArray{infoJson(u"s1"_s, 1, true), infoJson(u"old"_s, 0, false)}}});
 		}
 	};
-	Backend backend(Backend::Source(Backend::Mode::Remote{{fake.url(), u"token"_s}}), u"/work"_s);
-	SessionDirectory directory(backend);
+	workspace::Connection connection(Backend::Source(Backend::Mode::Remote{{fake.url(), u"token"_s}}), u"/work"_s);
+	Backend& backend = connection.backend();
+	SessionDirectory directory(connection);
 	backend.start();
 
 	QTRY_COMPARE(directory.live().count(), 1);
@@ -316,8 +317,9 @@ void TstSessionList::directoryHistoryHidesLiveSessions()
 			fake.respond(request, {{u"sessions"_s, history}});
 		}
 	};
-	Backend backend(Backend::Source(Backend::Mode::Remote{{fake.url(), u"token"_s}}), u"/work"_s);
-	SessionDirectory directory(backend);
+	workspace::Connection connection(Backend::Source(Backend::Mode::Remote{{fake.url(), u"token"_s}}), u"/work"_s);
+	Backend& backend = connection.backend();
+	SessionDirectory directory(connection);
 	backend.start();
 	QTRY_COMPARE(directory.history().count(), 2);
 
@@ -349,8 +351,9 @@ void TstSessionList::watchAllIsSentAgainAfterAReconnect()
 		}
 		return found;
 	};
-	Backend backend(Backend::Source(Backend::Mode::Remote{{fake.url(), u"token"_s}}), u"/work"_s);
-	SessionDirectory directory(backend);
+	workspace::Connection connection(Backend::Source(Backend::Mode::Remote{{fake.url(), u"token"_s}}), u"/work"_s);
+	Backend& backend = connection.backend();
+	SessionDirectory directory(connection);
 	backend.start();
 	QTRY_COMPARE(backend.state(), Backend::State::Connected);
 
@@ -406,8 +409,9 @@ void TstSessionList::configLoadsAgentsModelsAndMcp()
 			               QJsonArray{QJsonObject{{u"name"_s, u"fs"_s}, {u"status"_s, u"connected"_s}, {u"tools"_s, QJsonArray{u"fs_read"_s}}}}}});
 		}
 	};
-	Backend backend(Backend::Source(Backend::Mode::Remote{{fake.url(), u"token"_s}}), u"/work"_s);
-	BackendConfig config(backend);
+	workspace::Connection connection(Backend::Source(Backend::Mode::Remote{{fake.url(), u"token"_s}}), u"/work"_s);
+	Backend& backend = connection.backend();
+	BackendConfig config(connection);
 	backend.start();
 
 	QTRY_COMPARE(config.agents().size(), 1);

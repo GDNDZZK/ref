@@ -271,8 +271,9 @@ private:
 	refgui::workspace::Settings m_settings;
 	refgui::workspace::CommandRegistry m_commands;
 	refgui::workspace::Connection m_connection;
-	refgui::workspace::SessionDirectory m_directory{m_connection.backend()};
-	refgui::workspace::BackendConfig m_config{m_connection.backend()};
+	// Both handle Connection::connected before the workspace does: it connects to it in its body.
+	refgui::workspace::SessionDirectory m_directory{m_connection};
+	refgui::workspace::BackendConfig m_config{m_connection};
 	QHash<QString, ChatSession*> m_chats;
 	TileModel m_tiles;
 	TileStage m_stage{&m_tiles};
