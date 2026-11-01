@@ -177,12 +177,28 @@ const STOP_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const STOP_POLL_ATTEMPTS: u32 = 100;
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
+/// An instance with the number of its live sessions (`None`: could not ask).
+type Row = (InstanceInfo, Option<usize>);
+
 /// `--status`: exit code 0 if any instance is running.
 pub async fn status(json_out: bool) -> i32 {
     let dir = ref_proto::instances_dir();
-    let list = list_instances(&dir);
+    let rows = collect_rows(&list_instances(&dir)).await;
+    if json_out {
+        print_json(&rows);
+    } else {
+        print_table(&rows, &dir);
+    }
+    if rows.is_empty() {
+        EXIT_FAILURE
+    } else {
+        EXIT_OK
+    }
+}
+
+async fn collect_rows(list: &[InstanceInfo]) -> Vec<Row> {
     let mut rows = Vec::new();
-    for i in &list {
+    for i in list {
         let sessions = request(i, Request::ListSessions, STATUS_TIMEOUT)
             .await
             .ok()
@@ -193,59 +209,60 @@ pub async fn status(json_out: bool) -> i32 {
             });
         rows.push((i.clone(), sessions));
     }
-    if json_out {
-        let arr: Vec<serde_json::Value> = rows
-            .iter()
-            .map(|(i, n)| {
-                let mut v = serde_json::to_value(i).expect("InstanceInfo serialises");
-                if let Some(o) = v.as_object_mut() {
-                    o.insert("sessions".into(), serde_json::json!(n));
-                    o.insert("url".into(), serde_json::json!(connect_url(i)));
-                }
-                v
-            })
-            .collect();
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&arr).expect("JSON values serialise")
-        );
-    } else if rows.is_empty() {
+    rows
+}
+
+fn print_json(rows: &[Row]) {
+    let arr: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|(i, n)| {
+            let mut v = serde_json::to_value(i).expect("InstanceInfo serialises");
+            if let Some(o) = v.as_object_mut() {
+                o.insert("sessions".into(), serde_json::json!(n));
+                o.insert("url".into(), serde_json::json!(connect_url(i)));
+            }
+            v
+        })
+        .collect();
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&arr).expect("JSON values serialise")
+    );
+}
+
+fn print_table(rows: &[Row], dir: &Path) {
+    if rows.is_empty() {
         println!(
             "No ref-server instances running (instances dir: {}).",
             dir.display()
         );
-    } else {
-        let now = ref_proto::now_ms();
-        for (k, (i, n)) in rows.iter().enumerate() {
-            if k > 0 {
-                println!();
-            }
-            println!("ref-server pid {}", i.pid);
-            println!("  url:           {}", connect_url(i));
-            println!("  bind:          {}:{}", i.bind, i.port);
-            println!("  allowed hosts: {}", i.allow_hosts.join(", "));
-            println!(
-                "  idle timeout:  {} ({})",
-                i.idle_timeout,
-                idle_meaning(i.idle_timeout)
-            );
-            println!(
-                "  started:       {} (up {})",
-                fmt_time(i.started_at),
-                fmt_duration((now - i.started_at) / 1000)
-            );
-            println!("  version:       {}", i.version);
-            match n {
-                Some(n) => println!("  live sessions: {n}"),
-                None => println!("  live sessions: unknown (could not connect)"),
-            }
-            println!("  instance file: {}", instance_path(&dir, i.pid).display());
-        }
+        return;
     }
-    if rows.is_empty() {
-        EXIT_FAILURE
-    } else {
-        EXIT_OK
+    let now = ref_proto::now_ms();
+    for (k, (i, n)) in rows.iter().enumerate() {
+        if k > 0 {
+            println!();
+        }
+        println!("ref-server pid {}", i.pid);
+        println!("  url:           {}", connect_url(i));
+        println!("  bind:          {}:{}", i.bind, i.port);
+        println!("  allowed hosts: {}", i.allow_hosts.join(", "));
+        println!(
+            "  idle timeout:  {} ({})",
+            i.idle_timeout,
+            idle_meaning(i.idle_timeout)
+        );
+        println!(
+            "  started:       {} (up {})",
+            fmt_time(i.started_at),
+            fmt_duration((now - i.started_at) / 1000)
+        );
+        println!("  version:       {}", i.version);
+        match n {
+            Some(n) => println!("  live sessions: {n}"),
+            None => println!("  live sessions: unknown (could not connect)"),
+        }
+        println!("  instance file: {}", instance_path(dir, i.pid).display());
     }
 }
 
