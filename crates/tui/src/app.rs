@@ -470,6 +470,10 @@ pub const ARMED_KEY_TIMEOUT: Duration = Duration::from_millis(1500);
 const NOT_CONNECTED: &str = "Not connected to the backend";
 /// Marks the selected row of a dialog.
 const SELECTED_GLYPH: &str = "●";
+/// Row-key prefixes of the dialogs: a live session, a history session, a server command.
+const LIVE_KEY_PREFIX: &str = "live:";
+const HISTORY_KEY_PREFIX: &str = "hist:";
+const SERVER_COMMAND_KEY_PREFIX: &str = "srv:";
 const HINT_DURATION: Duration = Duration::from_millis(1500);
 /// How long the second press of close / undo confirmation is accepted.
 const CONFIRM_WINDOW: Duration = Duration::from_secs(4);
@@ -1805,7 +1809,7 @@ impl App {
         if let Some(cfg) = &self.config {
             for c in &cfg.commands {
                 items.push(Item {
-                    key: format!("srv:{}", c.name),
+                    key: format!("{SERVER_COMMAND_KEY_PREFIX}{}", c.name),
                     title: if c.description.is_empty() {
                         format!("/{}", c.name)
                     } else {
@@ -1836,7 +1840,7 @@ impl App {
         if let Some(c) = &self.current
             && let Some(Dialog::List(d)) = self.dialog.as_mut()
         {
-            d.select_key(&format!("live:{c}"));
+            d.select_key(&live_key(c));
         }
         self.req(
             Request::ListHistory {
@@ -1887,7 +1891,7 @@ impl App {
                 text::truncate(&text::one_line(&s.title), SESSION_DESC_MAX_CHARS)
             };
             items.push(Item {
-                key: format!("live:{}", s.id),
+                key: live_key(&s.id),
                 title: s.name.clone(),
                 desc,
                 right: format!("{} · {} · {}", s.agent, model, text::tilde(&s.cwd)),
@@ -1921,7 +1925,7 @@ impl App {
                 text::one_line(&s.title)
             };
             items.push(Item {
-                key: format!("hist:{}", s.id),
+                key: format!("{HISTORY_KEY_PREFIX}{}", s.id),
                 title,
                 desc: s.name.clone(),
                 right: format!(
@@ -2065,7 +2069,7 @@ impl App {
         self.dialog = None;
         match kind {
             Kind::Palette => {
-                if let Some(name) = key.strip_prefix("srv:") {
+                if let Some(name) = key.strip_prefix(SERVER_COMMAND_KEY_PREFIX) {
                     self.editor.set_text(&format!("/{name} "));
                 } else if let Some(c) = find_cmd(&key) {
                     if c.args && matches!(c.name, cmd::RENAME | cmd::PEERS_NAME) {
@@ -2150,13 +2154,13 @@ impl App {
             return;
         };
         let elsewhere = key
-            .strip_prefix("live:")
+            .strip_prefix(LIVE_KEY_PREFIX)
             .is_some_and(|s| self.attached_elsewhere(s));
         let Some(Dialog::List(d)) = self.dialog.as_mut() else {
             return;
         };
         if d.confirm.as_deref() != Some(key.as_str()) {
-            d.confirm_text = if key.starts_with("live:") {
+            d.confirm_text = if key.starts_with(LIVE_KEY_PREFIX) {
                 if elsewhere {
                     "open in another frontend · ctrl+d again to close "
                 } else {
@@ -2170,10 +2174,10 @@ impl App {
             return;
         }
         d.confirm = None;
-        if let Some(sid) = key.strip_prefix("live:") {
+        if let Some(sid) = key.strip_prefix(LIVE_KEY_PREFIX) {
             let sid = sid.to_string();
             self.close_session(&sid);
-        } else if let Some(sid) = key.strip_prefix("hist:") {
+        } else if let Some(sid) = key.strip_prefix(HISTORY_KEY_PREFIX) {
             let sid = sid.to_string();
             self.history_list.retain(|s| s.id != sid);
             self.req(
@@ -2392,7 +2396,7 @@ impl App {
         let Some(key) = d.selected().map(|i| i.key.clone()) else {
             return;
         };
-        let Some(sid) = key.strip_prefix("live:").map(str::to_string) else {
+        let Some(sid) = key.strip_prefix(LIVE_KEY_PREFIX).map(str::to_string) else {
             return;
         };
         let elsewhere = self.attached_elsewhere(&sid);
@@ -3219,6 +3223,10 @@ fn response_images(result: &Value) -> Vec<(ImageData, Option<String>)> {
         .filter(|i| !i.image.is_stub())
         .map(|i| (i.image, i.name))
         .collect()
+}
+
+fn live_key(sid: &str) -> String {
+    format!("{LIVE_KEY_PREFIX}{sid}")
 }
 
 fn find_model<'a>(
