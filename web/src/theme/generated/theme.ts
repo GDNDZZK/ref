@@ -96,6 +96,7 @@ export const metrics = {
   radius: 10,
   radiusLarge: 18,
   pagePadding: 24,
+  metaLineHeight: 24,
   blockSpacing: 14,
   turnGap: 18,
   contentWidth: 760,
