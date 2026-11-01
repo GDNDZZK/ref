@@ -136,7 +136,7 @@ pub async fn create_session(hub: &Arc<Hub>, o: CreateOpts) -> Result<Arc<Session
     };
     let cfg = Arc::new(cfg);
     // Start connecting MCP servers in the background.
-    let _ = hub.mcp.servers_for(&cfg);
+    hub.mcp.start_servers(&cfg);
     let s = Session::new(info, Vec::new(), cfg, false, false);
     hub.insert_session(s.clone());
     tracing::info!(session = %s.id, "session created");
@@ -170,7 +170,7 @@ pub async fn get_or_load(hub: &Arc<Hub>, id: &str) -> Result<Arc<Session>, Strin
     p.info.name = unique_name(hub, &p.info.name, Some(&p.info.id));
     p.info.context = crate::models::context_keeping_used(&cfg, &p.info.model, p.info.context.used);
     let cfg = Arc::new(cfg);
-    let _ = hub.mcp.servers_for(&cfg);
+    hub.mcp.start_servers(&cfg);
     let s = Session::new(p.info, p.messages, cfg, p.reported, p.context_notice);
     hub.insert_session(s.clone());
     Ok(s)

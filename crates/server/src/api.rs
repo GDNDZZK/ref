@@ -525,7 +525,7 @@ async fn set_cwd(hub: &Arc<Hub>, s: &Arc<Session>, path: &str) -> Result<(), Str
         st.info.cwd = new.clone();
         st.cfg = Arc::new(cfg);
         st.system = None;
-        let _ = hub.mcp.servers_for(&st.cfg);
+        hub.mcp.start_servers(&st.cfg);
         hub.emit_info(&st);
     }
     let text = format!(
@@ -611,7 +611,7 @@ async fn reload_config(hub: &Arc<Hub>, s: &Arc<Session>) {
     if format!("{:?}", *st.cfg) != format!("{cfg:?}") {
         st.cfg = Arc::new(cfg);
         st.system = None;
-        let _ = hub.mcp.servers_for(&st.cfg);
+        hub.mcp.start_servers(&st.cfg);
     }
 }
 
