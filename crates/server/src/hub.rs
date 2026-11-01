@@ -20,6 +20,9 @@ use tokio_util::sync::CancellationToken;
 
 pub type ConfigLoader = Arc<dyn Fn(&Path) -> Config + Send + Sync>;
 
+/// The base delay of the retry backoff in production: waits of 2, 4, 8 and 16 seconds.
+pub const DEFAULT_RETRY_BASE: Duration = Duration::from_secs(2);
+
 /// How long the `Sessions` broadcast waits for further changes before it is sent.
 const SESSIONS_DEBOUNCE: Duration = Duration::from_millis(100);
 
@@ -48,7 +51,7 @@ impl HubOptions {
             data_dir,
             home: dirs::home_dir(),
             config_loader: Arc::new(|cwd: &Path| Config::load(cwd)),
-            retry_base: Duration::from_secs(2),
+            retry_base: DEFAULT_RETRY_BASE,
             mcp_wait: Duration::from_secs(30),
             idle_timeout: IDLE_NEVER,
             sandbox_cwd: None,
