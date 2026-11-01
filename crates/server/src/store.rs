@@ -683,6 +683,15 @@ mod tests {
         }
     }
 
+    fn persisted(id: &str, cwd: &str, updated: i64, messages: Vec<Message>) -> Persisted {
+        Persisted {
+            info: info(id, cwd, updated),
+            messages,
+            reported: false,
+            context_notice: false,
+        }
+    }
+
     fn rows(path: &Path, id: &str) -> Vec<(i64, String)> {
         let c = Connection::open(path).unwrap();
         let mut st = c
@@ -694,8 +703,6 @@ mod tests {
             .collect()
     }
 
-    /// Queued saves "one message" then "no messages" (a session undone to empty) must not
-    /// both be dropped: the empty one alone is not stored when the session was never saved.
     /// Files this process has open below `dir` (Linux only).
     #[cfg(target_os = "linux")]
     fn open_files_below(dir: &Path) -> Vec<PathBuf> {
@@ -711,12 +718,7 @@ mod tests {
     fn close_releases_the_database_so_the_directory_can_be_removed() {
         let dir = tmp();
         let store = Store::new(dir.clone());
-        store.save(Persisted {
-            info: info("ses_abc", "/a", 2),
-            messages: vec![msg("m1", "hi")],
-            reported: false,
-            context_notice: false,
-        });
+        store.save(persisted("ses_abc", "/a", 2, vec![msg("m1", "hi")]));
         store.flush().unwrap();
         #[cfg(target_os = "linux")]
         assert!(!open_files_below(&dir).is_empty());
@@ -731,16 +733,12 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// Queued saves "one message" then "no messages" (a session undone to empty) must not
+    /// both be dropped: the empty one alone is not stored when the session was never saved.
     #[test]
     fn a_save_that_gives_the_session_its_first_row_is_not_coalesced_away() {
-        let save = |id: &str, messages: Vec<Message>| {
-            Cmd::Save(Box::new(Persisted {
-                info: info(id, "/", 1),
-                messages,
-                reported: false,
-                context_notice: false,
-            }))
-        };
+        let save =
+            |id: &str, messages: Vec<Message>| Cmd::Save(Box::new(persisted(id, "/", 1, messages)));
         let batch = [
             save("ses_a", vec![msg("m1", "hi")]),
             save("ses_a", vec![]),
@@ -756,20 +754,17 @@ mod tests {
         let dir = tmp();
         let store = Store::new(dir.clone());
         // Empty, never-saved sessions are not stored.
-        store.save(Persisted {
-            info: info("ses_empty", "/", 1),
-            messages: vec![],
-            reported: false,
-            context_notice: false,
-        });
+        store.save(persisted("ses_empty", "/", 1, vec![]));
         assert!(!store.exists("ses_empty"));
 
-        let mut p = Persisted {
-            info: info("ses_abc", "/a", 2),
-            messages: vec![msg("m1", "hi"), msg("m2", "there"), msg("m3", "x")],
-            reported: true,
-            context_notice: true,
-        };
+        let mut p = persisted(
+            "ses_abc",
+            "/a",
+            2,
+            vec![msg("m1", "hi"), msg("m2", "there"), msg("m3", "x")],
+        );
+        p.reported = true;
+        p.context_notice = true;
         store.save(p.clone());
         let l = store.load("ses_abc").unwrap();
         assert_eq!(l.info.name, "名前");
@@ -786,12 +781,7 @@ mod tests {
         assert_eq!(l.messages[0].raw_text(), "edited");
         assert!(!l.context_notice);
 
-        store.save(Persisted {
-            info: info("ses_b", "/b", 5),
-            messages: vec![msg("x", "y")],
-            reported: false,
-            context_notice: false,
-        });
+        store.save(persisted("ses_b", "/b", 5, vec![msg("x", "y")]));
         let all = store.list();
         assert_eq!(
             all.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
@@ -826,12 +816,13 @@ mod tests {
         let dir = tmp();
         let sessions = dir.join("sessions");
         std::fs::create_dir_all(&sessions).unwrap();
-        let p = Persisted {
-            info: info("ses_old", "/old", 7),
-            messages: vec![msg("m1", "old one"), msg("m2", "old two")],
-            reported: true,
-            context_notice: false,
-        };
+        let mut p = persisted(
+            "ses_old",
+            "/old",
+            7,
+            vec![msg("m1", "old one"), msg("m2", "old two")],
+        );
+        p.reported = true;
         // Legacy files have no `context_notice` key.
         let mut v = serde_json::to_value(&p).unwrap();
         v.as_object_mut().unwrap().remove("context_notice");
