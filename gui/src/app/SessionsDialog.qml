@@ -8,6 +8,8 @@ ModalDialog {
 	id: dialog
 
 	readonly property bool closing: Workspace.dialogArgs.mode === DialogId.closeMode
+	// ListView.section turns the isLive bool into a string.
+	readonly property string liveSection: "true"
 
 	title: closing ? qsTr("Close a session") : qsTr("Switch session")
 	onAccepted: list.activateCurrent()
@@ -24,7 +26,7 @@ ModalDialog {
 		width: parent.width
 		placeholderText: qsTr("Search sessions")
 		sectionProperty: "isLive"
-		sectionLabel: section => section === "true" ? qsTr("Running") : qsTr("History")
+		sectionLabel: section => section === dialog.liveSection ? qsTr("Running") : qsTr("History")
 		emptyText: qsTr("No matching sessions")
 		model: Workspace.sessionChoices
 		delegate: PickRow {
