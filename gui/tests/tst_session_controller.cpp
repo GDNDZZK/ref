@@ -21,6 +21,7 @@ namespace
 {
 
 constexpr int ReconnectTimeoutMs = 8000; // the backend retries after a second
+constexpr int SettleMs = 50;              // time for a frame in flight to be handled
 
 QJsonObject infoJson(const QString& id, const QString& state)
 {
@@ -321,7 +322,7 @@ void TestSessionController::detachedControllerIgnoresEventsAndAttachesAgain()
 	QCOMPARE(f.fake.requests().last().value(u"op"_s).toString(), u"detach"_s);
 
 	f.fake.send(eventFrame(u"ses_1"_s, {{u"type"_s, u"message"_s}, {u"message"_s, messageJson(u"u2"_s, u"user"_s, u"Missed"_s, true)}}));
-	QTest::qWait(50);
+	QTest::qWait(SettleMs);
 	QCOMPARE(render(f.controller.model()), (QStringList{u"user:Hello"_s}));
 
 	f.snapshot = snapshotJson(u"ses_1"_s, u"idle"_s, {messageJson(u"u1"_s, u"user"_s, u"Hello"_s, true), messageJson(u"u2"_s, u"user"_s, u"Missed"_s, true)});

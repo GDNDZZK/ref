@@ -19,6 +19,8 @@ using refgui::test::FakeBackend;
 namespace
 {
 
+constexpr int SettleMs = 100; // time for a frame in flight to be handled
+
 class RecordingNotifier : public Notifier
 {
 	Q_OBJECT
@@ -226,7 +228,7 @@ void TestNotificationCenter::unavailableNotifierFlashesTheWindow()
 	f.connect();
 
 	f.fake.send(notifyFrame(u"turn_done"_s));
-	QTest::qWait(100);
+	QTest::qWait(SettleMs);
 
 	QVERIFY(f.notifier->shown.isEmpty());
 }

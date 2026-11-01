@@ -27,6 +27,9 @@ using refgui::session::SessionController;
 namespace
 {
 
+constexpr int SettleMs = 100;       // time for the messages in flight to be handled
+constexpr int SearchSettleMs = 200; // well past ComposerModel::FileSearchDelay and the answer
+
 QJsonObject infoJson()
 {
 	return sessionInfoJson(u"ses_1"_s,
@@ -353,7 +356,7 @@ void TestComposerModel::mentionListFollowsTheQueryAndDropsStaleAnswers()
 	f.type(u"look at"_s);
 	QCOMPARE(f.composer.completionKind(), u"none"_s);
 	QCOMPARE(f.composer.files()->rowCount(), 0);
-	QTest::qWait(200);
+	QTest::qWait(SearchSettleMs);
 	QCOMPARE(f.requestsOf(u"list_files"_s).size(), 1);
 }
 
@@ -607,7 +610,7 @@ void TestComposerModel::answersAfterTheModelIsGoneAreIgnored()
 		f.fake.respond(request, answer);
 	}
 
-	QTest::qWait(100); // the answers are handled
+	QTest::qWait(SettleMs); // the answers are handled
 	QVERIFY(f.fake.socket()->isValid());
 }
 

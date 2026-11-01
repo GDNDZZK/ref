@@ -21,6 +21,8 @@ namespace
 {
 
 constexpr auto OpenTimeout = 2000ms;
+constexpr auto DropTimeout = 3000ms; // several times the heartbeat deadAfter of the test
+constexpr auto WatchPeriod = 700ms;  // several times what a silent backend gets
 
 QJsonObject promptResult(const QString& messageId)
 {
@@ -212,7 +214,7 @@ private slots:
 		QVERIFY(open(client, backend));
 		QSignalSpy closed(&client, &ServerClient::closed);
 
-		QTRY_COMPARE_WITH_TIMEOUT(closed.size(), 1, 3000);
+		QTRY_COMPARE_WITH_TIMEOUT(closed.size(), 1, DropTimeout);
 
 		QCOMPARE(closed.first().first().toString(), u"the backend stopped answering"_s);
 		QVERIFY(!client.isOpen());
@@ -230,7 +232,7 @@ private slots:
 		QVERIFY(open(client, backend));
 		QSignalSpy closed(&client, &ServerClient::closed);
 
-		QTest::qWait(700); // several times what a silent backend gets
+		QTest::qWait(WatchPeriod);
 
 		QVERIFY(client.isOpen());
 		QCOMPARE(closed.size(), 0);

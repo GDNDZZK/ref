@@ -23,6 +23,7 @@ namespace
 constexpr int ReconnectTimeoutMs = 8000; // the backend retries after a second
 
 constexpr int settleMs = 100; // time for the messages in flight to be handled
+constexpr int QuietMs = 200;  // long enough for a request that should not go out to show
 
 
 // A backend with a few sessions that answers like the real one for what the workspace asks.
@@ -653,7 +654,7 @@ void TestWorkspace::closingTheCurrentTileSendsNoAttach()
 	f.workspace->closeSession(u"ses_a"_s);
 
 	QTRY_COMPARE(f.workspace->currentId(), u"ses_b"_s);
-	QTest::qWait(200);
+	QTest::qWait(QuietMs);
 	const QList<QJsonObject> attaches = f.stub.requests(u"attach"_s);
 	for(qsizetype i = attachesBefore; i < attaches.size(); ++i)
 	{
