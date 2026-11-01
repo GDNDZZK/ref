@@ -202,7 +202,7 @@ export class SessionComposer {
   // The command a line such as "/rename Work" names, if there is one.
   private commandIn(line: string): SlashCommand | undefined {
     if (!line.startsWith(SLASH_PREFIX)) return undefined
-    const typed = (line.slice(SLASH_PREFIX.length).split(/\s+/)[0] ?? '').toLowerCase()
+    const typed = line.slice(SLASH_PREFIX.length).split(/\s+/)[0]!.toLowerCase() // split gives at least one part
     return this.host
       .slashCommands()
       .find((command) => command.name === typed || command.aliases.includes(typed))
