@@ -11,6 +11,7 @@ qt_add_library(refgui_client STATIC
 	mock_backend.h
 	process_alive.cpp
 	process_alive.h
+	result.h
 	server_client.cpp
 	server_client.h
 	spawn_lock.cpp

@@ -180,9 +180,9 @@ private slots:
 	void explicitTargetConnectsOnlyToThatEndpoint()
 	{
 		QList<QUrl> tried;
-		const launcher::TryConnect connect = [&](const Endpoint& endpoint, std::chrono::milliseconds) -> QCoro::Task<bool> {
+		const launcher::TryConnect connect = [&](const Endpoint& endpoint, std::chrono::milliseconds) -> QCoro::Task<launcher::ConnectAttempt> {
 			tried << endpoint.url;
-			co_return true;
+			co_return launcher::ConnectAttempt();
 		};
 		const Endpoint wanted{.url = QUrl(u"ws://remote.test:9/"_s), .token = u"t"_s};
 
@@ -195,12 +195,14 @@ private slots:
 
 	void explicitTargetThatRefusesIsAnError()
 	{
-		const launcher::TryConnect refuse = [](const Endpoint&, std::chrono::milliseconds) -> QCoro::Task<bool> { co_return false; };
+		const launcher::TryConnect refuse = [](const Endpoint&, std::chrono::milliseconds) -> QCoro::Task<launcher::ConnectAttempt> {
+			co_return std::unexpected(u"token rejected"_s);
+		};
 
 		const auto connected = await(launcher::connectTarget(launcher::Explicit{{.url = QUrl(u"ws://remote.test:9/"_s)}}, refuse, [] {}, {}, stop)).value();
 
 		QVERIFY(!connected.has_value());
-		QVERIFY2(connected.error().contains(u"ws://remote.test:9/"_s), qPrintable(connected.error()));
+		QCOMPARE(connected.error(), u"cannot connect to ws://remote.test:9/: token rejected"_s);
 	}
 
 	void autoTargetTriesTheNewestInstanceFirstAndSkipsOnesThatRefuse()
@@ -211,9 +213,13 @@ private slots:
 		writeInstance(directory.path(), u"b"_s, me, 4002, 200);
 		writeInstance(directory.path(), u"c"_s, me, 4003, 300);
 		QList<quint16> tried;
-		const launcher::TryConnect connect = [&](const Endpoint& endpoint, std::chrono::milliseconds) -> QCoro::Task<bool> {
+		const launcher::TryConnect connect = [&](const Endpoint& endpoint, std::chrono::milliseconds) -> QCoro::Task<launcher::ConnectAttempt> {
 			tried << static_cast<quint16>(endpoint.url.port());
-			co_return endpoint.url.port() == 4002; // the newest one is not listening any more
+			if(endpoint.url.port() != 4002) // the newest one is not listening any more
+			{
+				co_return std::unexpected(u"connection refused"_s);
+			}
+			co_return launcher::ConnectAttempt();
 		};
 
 		const auto connected = await(launcher::connectTarget(launcher::Auto{}, connect, [] {}, directory.path(), stop)).value();

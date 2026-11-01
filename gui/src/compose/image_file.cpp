@@ -79,7 +79,7 @@ ImageResult imageFromFile(const QString& path)
 	}
 	if(info.size() > MaxImageBytes)
 	{
-		return std::unexpected(QCoreApplication::translate("refgui::compose", "%1 is larger than 20 MiB.").arg(info.fileName()));
+		return std::unexpected(QCoreApplication::translate("refgui::compose", "%1 is larger than %2 MiB.").arg(info.fileName()).arg(MaxImageMiB));
 	}
 
 	QFile file(path);

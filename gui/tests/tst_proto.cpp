@@ -406,6 +406,16 @@ private slots:
 		QVERIFY2(parsed.error().message.contains(u"message.parts[2].state"_s), qPrintable(parsed.error().message));
 	}
 
+	void failedResponseAlwaysSaysWhy()
+	{
+		const ServerFrame withoutOk = parsedOrFail(parseServerFrame({{u"kind"_s, u"response"_s}, {u"id"_s, 1}}));
+		QCOMPARE(std::get<ResponseFrame>(withoutOk).error, u"the backend sent a response without ok"_s);
+
+		const ServerFrame withoutReason = parsedOrFail(parseServerFrame({{u"kind"_s, u"response"_s}, {u"id"_s, 1}, {u"ok"_s, false}}));
+		QVERIFY(!std::get<ResponseFrame>(withoutReason).ok);
+		QCOMPARE(std::get<ResponseFrame>(withoutReason).error, u"the backend gave no reason"_s);
+	}
+
 	void errorResponseHasNoResult()
 	{
 		const ServerFrame frame = parsedOrFail(parseServerFrame(fixtureObject(u"server_frame"_s, u"response_error"_s)));

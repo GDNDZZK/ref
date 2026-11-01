@@ -5,10 +5,10 @@
 #include "app/notification_center_type.h"
 #include "app/workspace.h"
 #include "cli/command_line.h"
-#include "client/instance_files.h"
 #include "icons/app_icon.h"
 #include "icons/icon_provider.h"
 #include "notify/notifier.h"
+#include "workspace/state_paths.h"
 
 #include <QDir>
 #include <QGuiApplication>
@@ -55,7 +55,7 @@ void exitWhenOpened(Workspace& workspace)
 		QCoreApplication::exit(EXIT_FAILURE);
 	});
 	QObject::connect(&workspace, &Workspace::connectionChanged, &workspace, [&workspace] {
-		if(workspace.backend().state() != refgui::client::Backend::State::Disconnected)
+		if(workspace.connection().state() != refgui::workspace::Connection::State::Disconnected)
 		{
 			return;
 		}
@@ -119,7 +119,7 @@ int main(int argc, char* argv[])
 	}
 
 	// Outlives the engine, whose window refers to it.
-	Workspace workspace(options, refgui::client::stateDirectory() + u"/gui.json"_s);
+	Workspace workspace(options, refgui::workspace::stateFilePath(u"gui.json"_s));
 	Workspace::setInstance(&workspace);
 
 	// The interface follows the language setting; English is the fallback.
@@ -132,7 +132,7 @@ int main(int argc, char* argv[])
 	}
 
 	// Tells the backend where the user looks and shows what it sends. The settings supply the kinds.
-	refgui::notify::NotificationCenter notifications(workspace.backend(), refgui::notify::createPlatformNotifier());
+	refgui::notify::NotificationCenter notifications(workspace.connection().backend(), refgui::notify::createPlatformNotifier());
 	NotificationCenterForeign::instance = &notifications;
 	connectNotifications(workspace, notifications);
 

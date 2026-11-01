@@ -31,7 +31,7 @@ QCoro::Task<> Workspace::enterSplit()
 		const Result<void> demoted = co_await m_current->background();
 		toastFailure(demoted);
 	}
-	const auto watching = co_await m_backend.client().watchAll(true);
+	const Result<void> watching = co_await m_directory.setWatchAll(true);
 	toastFailure(watching);
 	if(!m_split)
 	{
@@ -64,7 +64,7 @@ QCoro::Task<> Workspace::leaveSplit()
 		const Result<void> resumed = co_await m_current->attach(true);
 		toastFailure(resumed);
 	}
-	const auto watching = co_await m_backend.client().watchAll(false);
+	const Result<void> watching = co_await m_directory.setWatchAll(false);
 	toastFailure(watching);
 	// Sessions can be closed while a detach is out, which changes m_chats.
 	QList<QPointer<ChatSession>> others;
@@ -76,7 +76,8 @@ QCoro::Task<> Workspace::leaveSplit()
 	{
 		if(other && other != m_current && other->isAttached())
 		{
-			static_cast<void>(co_await other->detach());
+			const QString otherId = other->sessionId();
+			logDropped(co_await other->detach(), "detach"_L1, otherId);
 		}
 	}
 }
@@ -141,7 +142,7 @@ void Workspace::syncTiles()
 		const bool shouldDetachFromTiles = other->isAttached() && !tiles.contains(other) && other != m_current && !m_leaving.contains(other->sessionId());
 		if(shouldDetachFromTiles)
 		{
-			other->detach();
+			detachUnwaited(other);
 		}
 	}
 	if(!m_focusedTile.isEmpty() && m_tiles.indexOf(m_focusedTile) < 0)
@@ -200,7 +201,8 @@ QCoro::Task<> Workspace::zoomTask(QString sessionId)
 {
 	if(ChatSession* previous = session(m_zoomed); previous != nullptr && previous->isAttached())
 	{
-		static_cast<void>(co_await previous->background());
+		const QString previousId = previous->sessionId();
+		logDropped(co_await previous->background(), "background"_L1, previousId);
 	}
 	m_zoomed = sessionId;
 	setFocusedTile(sessionId);
@@ -236,7 +238,7 @@ QCoro::Task<> Workspace::unzoomTask()
 		// Until the answer, the backend counts the session as attached in the foreground, and an update of
 		// its session list would take the tile away.
 		m_unzooming.insert(id);
-		static_cast<void>(co_await tile->background());
+		logDropped(co_await tile->background(), "background"_L1, id);
 		m_unzooming.remove(id);
 	}
 }

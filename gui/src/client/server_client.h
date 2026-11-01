@@ -1,6 +1,7 @@
 #pragma once
 
 #include "client/endpoint.h"
+#include "client/result.h"
 #include "proto/types.h"
 
 #include <QCoroTask>
@@ -18,11 +19,6 @@
 
 namespace refgui::client
 {
-
-// The result of a request: the answer, or the reason it failed (the backend's error text,
-// or "connection closed").
-template<typename T>
-using Result = std::expected<T, QString>;
 
 // One WebSocket connection to ref-server, speaking the ref protocol.
 //
