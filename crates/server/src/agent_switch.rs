@@ -14,7 +14,7 @@
 //! forgets a switch that was not delivered yet.
 
 use crate::hub::Hub;
-use crate::session::{SessionState, user_message};
+use crate::session::{REMINDER_PREFIX, SessionState, user_message};
 use ref_proto::{MessageSource, Part, Role, SessionEvent, now_ms};
 use std::sync::Arc;
 
@@ -28,7 +28,7 @@ pub struct AgentSwitch {
 
 fn reminder_text(from: &str, to: &str) -> String {
     format!(
-        "[Reminder] The user switched the agent from {from} to {to}. Your instructions and available tools now come from the {to} agent; where earlier messages conflict with them, follow the {to} agent."
+        "{REMINDER_PREFIX} The user switched the agent from {from} to {to}. Your instructions and available tools now come from the {to} agent; where earlier messages conflict with them, follow the {to} agent."
     )
 }
 

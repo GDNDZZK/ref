@@ -13,6 +13,25 @@ use ref_tools::ToolOutput;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
+/// How the header line of a message from another session starts (see [`peer_header`]).
+pub(crate) const PEER_HEADER_PREFIX: &str = "[Message from session";
+/// How the footer line of a message from another session starts.
+pub(crate) const PEER_FOOTER_PREFIX: &str = "[Reply with send_message";
+/// How the header line of the prompt of a created session starts (see [`spawn_header`]).
+pub(crate) const SPAWN_HEADER_PREFIX: &str = "[Session created by";
+/// How the line that asks a created session to report back starts.
+pub(crate) const REPORT_REMINDER_PREFIX: &str = "[When you finish or get blocked";
+
+/// Header line of a message from session `name`.
+pub(crate) fn peer_header(name: &str, id: &str) -> String {
+    format!("{PEER_HEADER_PREFIX} \"{name}\" (id {id})]")
+}
+
+/// Header line of the prompt of a session created by session `name`.
+pub(crate) fn spawn_header(name: &str, id: &str) -> String {
+    format!("{SPAWN_HEADER_PREFIX} \"{name}\" (id {id})]")
+}
+
 fn def(name: &str, description: &str, params: Value) -> ToolDef {
     ToolDef {
         name: name.into(),
@@ -228,7 +247,8 @@ pub fn deliver(
 ) -> (String, bool) {
     let (from_name, from_id) = (from.lock().info.name.clone(), from.id.clone());
     let body = format!(
-        "[Message from session \"{from_name}\" (id {from_id})]\n{text}\n[Reply with send_message to \"{from_id}\" if a reply is needed. Do not reply only to acknowledge.]"
+        "{}\n{text}\n{PEER_FOOTER_PREFIX} to \"{from_id}\" if a reply is needed. Do not reply only to acknowledge.]",
+        peer_header(&from_name, &from_id)
     );
     let msg = user_message(
         MessageSource::Peer {
@@ -503,14 +523,10 @@ async fn create_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Resu
         must_report,
     };
     let child = crate::ops::create_session(hub, opts).await?;
-    let mut text = format!(
-        "[Session created by \"{my_name}\" (id {})]\n{}",
-        s.id,
-        prompt.trim_end()
-    );
+    let mut text = format!("{}\n{}", spawn_header(&my_name, &s.id), prompt.trim_end());
     if must_report {
         text.push_str(&format!(
-            "\n[When you finish or get blocked, report the result to \"{my_name}\" with send_message (to: \"{}\").]",
+            "\n{REPORT_REMINDER_PREFIX}, report the result to \"{my_name}\" with send_message (to: \"{}\").]",
             s.id
         ));
     }
@@ -580,13 +596,13 @@ fn peer_body(m: &Message) -> String {
     let mut lines: Vec<&str> = raw.lines().collect();
     if lines
         .first()
-        .is_some_and(|l| l.starts_with("[Message from session"))
+        .is_some_and(|l| l.starts_with(PEER_HEADER_PREFIX))
     {
         lines.remove(0);
     }
     if lines
         .last()
-        .is_some_and(|l| l.starts_with("[Reply with send_message"))
+        .is_some_and(|l| l.starts_with(PEER_FOOTER_PREFIX))
     {
         lines.pop();
     }

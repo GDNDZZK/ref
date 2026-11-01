@@ -1,7 +1,7 @@
 //! Request dispatch for one frontend connection.
 
 use crate::hub::{Conn, Hub};
-use crate::session::{Session, user_message};
+use crate::session::{REMINDER_PREFIX, Session, user_message};
 use crate::util::lock;
 use ref_proto::{
     AgentInfo, CommandInfo, Message, MessageSource, ModelInfo, Part, Request, Role,
@@ -529,7 +529,7 @@ async fn set_cwd(hub: &Arc<Hub>, s: &Arc<Session>, path: &str) -> Result<(), Str
         hub.emit_info(&st);
     }
     let text = format!(
-        "[Reminder] The user changed the working directory from {old} to {new}. Relative paths and commands now resolve against {new}."
+        "{REMINDER_PREFIX} The user changed the working directory from {old} to {new}. Relative paths and commands now resolve against {new}."
     );
     crate::engine::append_only(hub, s, user_message(MessageSource::Reminder, text, vec![]));
     Ok(())

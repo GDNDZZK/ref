@@ -4,7 +4,8 @@
 use crate::convert::{parse_tool_input, partial_purpose, to_chat};
 use crate::hub::Hub;
 use crate::session::{
-    PendingPerm, RunHandle, Session, SessionState, cancel_unfinished, new_message, user_message,
+    PendingPerm, REMINDER_PREFIX, RunHandle, Session, SessionState, cancel_unfinished, new_message,
+    user_message,
 };
 use crate::toolset::{self, Entry, Kind};
 use crate::util::lock;
@@ -467,7 +468,7 @@ fn must_report_reminder(hub: &Arc<Hub>, s: &Arc<Session>) -> bool {
     };
     let pname = ps.lock().info.name.clone();
     let text = format!(
-        "[Reminder] You stopped without reporting. Send your result (or what blocks you) to \"{pname}\" with send_message (to: \"{parent}\")."
+        "{REMINDER_PREFIX} You stopped without reporting. Send your result (or what blocks you) to \"{pname}\" with send_message (to: \"{parent}\")."
     );
     let msg = user_message(MessageSource::Reminder, text, vec![]);
     {

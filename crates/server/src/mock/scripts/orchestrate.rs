@@ -373,7 +373,11 @@ mod tests {
     use crate::mock::script::Step;
 
     const MAIN: &str = "ses_main";
-    const ENVELOPE: &str = "[Message from session \"scout\" (id ses_s)]\nreport";
+
+    /// A report of the session `scout` as the main session receives it.
+    fn envelope() -> String {
+        format!("{}\nreport", crate::peers::peer_header("scout", "ses_s"))
+    }
 
     fn ctx(round: usize, reports: usize, prompt: &str) -> Ctx {
         Ctx {
@@ -462,7 +466,7 @@ mod tests {
     #[test]
     fn each_of_the_first_three_reports_ticks_one_more_job() {
         for k in 1..CREW_REPORTS {
-            let first = report(&ctx(0, k, ENVELOPE));
+            let first = report(&ctx(0, k, &envelope()));
             assert_eq!(text(&first), format!("Report {k} of 4 from scout.\n"));
             let todo = &tools(&first)[0];
             let done = statuses(&todo.1)
@@ -470,7 +474,7 @@ mod tests {
                 .filter(|s| **s == "completed")
                 .count();
             assert_eq!(done, k);
-            let closing = report(&ctx(1, k, ENVELOPE));
+            let closing = report(&ctx(1, k, &envelope()));
             assert!(tools(&closing).is_empty());
             assert!(
                 text(&closing).contains("still working"),
@@ -482,7 +486,7 @@ mod tests {
 
     #[test]
     fn the_fourth_report_orders_the_review() {
-        let first = report(&ctx(0, 4, ENVELOPE));
+        let first = report(&ctx(0, 4, &envelope()));
         assert!(text(&first).starts_with("All four have reported"));
         let calls = tools(&first);
         assert_eq!(calls.len(), 2);
@@ -499,20 +503,20 @@ mod tests {
         assert_eq!(calls[1].1["agent"], "reviewer");
         assert_eq!(calls[1].1["prompt"], format!("orch-review {MAIN}"));
         assert_eq!(
-            text(&report(&ctx(1, 4, ENVELOPE))),
+            text(&report(&ctx(1, 4, &envelope()))),
             "Waiting for the review."
         );
     }
 
     #[test]
     fn the_fifth_report_ends_with_the_summary() {
-        let todo = report(&ctx(0, 5, ENVELOPE));
+        let todo = report(&ctx(0, 5, &envelope()));
         assert!(
             statuses(&tools(&todo)[0].1)
                 .iter()
                 .all(|s| *s == "completed")
         );
-        let summary = text(&report(&ctx(1, 5, ENVELOPE)));
+        let summary = text(&report(&ctx(1, 5, &envelope())));
         assert!(summary.starts_with("## Done"));
         assert_eq!(summary.lines().filter(|l| l.starts_with("- **")).count(), 5);
         assert!(summary.ends_with("The parser bug is fixed."));
@@ -526,7 +530,7 @@ mod tests {
         }
         for k in 1..=5 {
             for round in 0..2 {
-                spoken += &text(&report(&ctx(round, k, ENVELOPE)));
+                spoken += &text(&report(&ctx(round, k, &envelope())));
             }
         }
         for sentence in [
@@ -572,7 +576,11 @@ mod tests {
     fn tester_round(round: usize, typed: &[&str]) -> Round {
         use serde_json::json;
         let mut messages = vec![json!({"role": "user", "content":
-            format!("[Session created by \"main\" (id {MAIN})]\norch-tester {MAIN}\n[When you finish or get blocked, report]")})];
+        format!(
+            "{}\norch-tester {MAIN}\n{}, report]",
+            crate::peers::spawn_header("main", MAIN),
+            crate::peers::REPORT_REMINDER_PREFIX
+        )})];
         for i in 0..round {
             messages.push(json!({"role": "assistant", "content": "ok"}));
             messages.push(json!({"role": "tool", "tool_call_id": format!("c{i}"), "content": "r"}));
@@ -672,7 +680,7 @@ mod tests {
     #[test]
     fn running_orchestrate_again_in_the_same_conversation_starts_over() {
         let mut users: Vec<String> = vec!["orchestrate first run".into()];
-        users.extend((0..ALL_REPORTS).map(|_| ENVELOPE.to_string()));
+        users.extend((0..ALL_REPORTS).map(|_| envelope()));
         users.push("orchestrate second run".into());
 
         // The plan comes first again, not the summary.
@@ -680,7 +688,7 @@ mod tests {
         assert!(text(&plan).starts_with("The parser bug has four parts"));
 
         for k in 1..=CREW_REPORTS {
-            users.push(ENVELOPE.into());
+            users.push(envelope());
             let round = answer(&users, 0);
             if k < CREW_REPORTS {
                 assert!(text(&round).starts_with(&format!("Report {k} of 4")), "{k}");
@@ -693,7 +701,7 @@ mod tests {
                 "reviewer again"
             );
         }
-        users.push(ENVELOPE.into());
+        users.push(envelope());
         let todo = answer(&users, 0);
         assert!(
             statuses(&tools(&todo)[0].1)
