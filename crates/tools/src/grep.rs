@@ -103,7 +103,7 @@ fn search_file(path: &Path, re: &Regex, context: usize, remaining: usize) -> Opt
         let from = h.saturating_sub(context).max(1).max(last + 1);
         let to = (h + context).min(total);
         for l in from..=to {
-            let is_match = l == h || hits.binary_search(&l).is_ok();
+            let is_match = hits.binary_search(&l).is_ok();
             rows.push((l, is_match));
             last = l;
         }
