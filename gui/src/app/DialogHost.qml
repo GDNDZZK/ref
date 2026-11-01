@@ -65,7 +65,7 @@ Item {
 	Slot { id: slotB }
 
 	function componentFor(id) {
-		return {
+		const components = {
 			[DialogId.palette]: paletteDialog,
 			[DialogId.settings]: settings,
 			[DialogId.sessions]: sessions,
@@ -81,7 +81,12 @@ Item {
 			[DialogId.closeSession]: closeDialog,
 			[DialogId.rename]: rename,
 			[DialogId.deleteHistory]: deleteHistory
-		}[id]
+		}
+		if (!Fields.has(components, id)) {
+			console.error("No dialog for id", id)
+			return null
+		}
+		return components[id]
 	}
 
 	Component { id: paletteDialog; CommandPalette {} }
