@@ -11,6 +11,12 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
+/// Test waits: one step of a scenario, the pause before an expected side effect, and the
+/// poll interval while waiting for one.
+const STEP_TIMEOUT: Duration = Duration::from_secs(5);
+const SETTLE: Duration = Duration::from_millis(200);
+const POLL: Duration = Duration::from_millis(20);
+
 struct Req {
     method: String,
     path: String,
@@ -291,7 +297,7 @@ async fn streamable_conn(mut s: TcpStream, srv: Arc<Streamable>) {
                         &json!({"jsonrpc": "2.0", "id": "p1", "method": "ping"}),
                     )
                     .await;
-                    let reply = tokio::time::timeout(Duration::from_secs(5), replies.recv())
+                    let reply = tokio::time::timeout(STEP_TIMEOUT, replies.recv())
                         .await
                         .unwrap()
                         .unwrap();
@@ -343,7 +349,7 @@ fn remote(url: &str) -> ServerConfig {
             url: url.into(),
             headers: BTreeMap::from([("Authorization".to_string(), "Bearer secret".to_string())]),
         },
-        timeout: Duration::from_secs(5),
+        timeout: STEP_TIMEOUT,
     }
 }
 
@@ -422,7 +428,7 @@ async fn streamable_cancel_and_get_stream() {
     let (url, srv) = start_streamable(true).await;
     let c = McpClient::connect(&remote(&url)).await.unwrap();
     let mut rx = c.tools_changed();
-    tokio::time::timeout(Duration::from_secs(5), rx.changed())
+    tokio::time::timeout(STEP_TIMEOUT, rx.changed())
         .await
         .unwrap()
         .unwrap();
@@ -431,7 +437,7 @@ async fn streamable_cancel_and_get_stream() {
     let tok = CancellationToken::new();
     let t2 = tok.clone();
     tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        tokio::time::sleep(SETTLE).await;
         t2.cancel();
     });
     let err = c.call_tool("slow", json!({}), &tok).await.unwrap_err();
@@ -440,7 +446,7 @@ async fn streamable_cancel_and_get_stream() {
         if !srv.state.lock().unwrap().cancels.is_empty() {
             break;
         }
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        tokio::time::sleep(POLL).await;
     }
     let st = srv.state.lock().unwrap();
     assert_eq!(st.cancels.len(), 1);
