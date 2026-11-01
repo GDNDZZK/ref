@@ -796,7 +796,6 @@ impl App {
                     v.older_pending = false;
                     v.more_before = false;
                 }
-                let _ = err;
             }
             Pending::Prompt { sid, text, key, .. } => {
                 if let Some(v) = self.views.get_mut(&sid) {
@@ -1359,9 +1358,7 @@ impl App {
         for sid in drop {
             self.views.remove(&sid);
             self.watch.inputs.remove(&sid);
-            if self.connected {
-                self.client.notify(Request::Detach { session_id: sid });
-            }
+            self.client.notify(Request::Detach { session_id: sid });
         }
         // No automatic focus: only drop it when the focused session left the split view.
         if let Some(f) = &self.watch.focus
@@ -1629,7 +1626,7 @@ impl App {
             if let Some(v) = self.views.get(k)
                 && let Some(p) = v.permissions.first()
             {
-                return Some((k.clone(), p.clone(), total.saturating_sub(1)));
+                return Some((k.clone(), p.clone(), total - 1));
             }
         }
         None
