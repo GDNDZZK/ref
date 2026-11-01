@@ -13,7 +13,8 @@ export interface PathKey {
   ease?: Key['ease']
 }
 
-const RIPPLE_SECONDS = 0.5
+// The ring grows fast and fades evenly over this time, so it reads at video speed.
+const RIPPLE_SECONDS = 0.7
 const RIPPLE_START_SCALE = 0.2
 const PRESS_SECONDS = 0.16
 const PRESS_SCALE = 0.85
@@ -43,9 +44,10 @@ export function cursor(position: (time: number) => Point, clicks: readonly numbe
       el.style.transform = `translate(${x}px, ${y}px) scale(${pressed ? PRESS_SCALE : 1})`
 
       const lastClick = clicks.filter((click) => click <= time).at(-1)
-      const progress = lastClick === undefined ? 1 : span(time, lastClick, RIPPLE_SECONDS, 'outExpo')
-      ripple.style.opacity = String(progress >= 1 ? 0 : 1 - progress)
-      ripple.style.transform = `translate(-50%, -50%) scale(${RIPPLE_START_SCALE + (1 - RIPPLE_START_SCALE) * progress})`
+      const growth = lastClick === undefined ? 1 : span(time, lastClick, RIPPLE_SECONDS, 'outExpo')
+      const fade = lastClick === undefined ? 1 : span(time, lastClick, RIPPLE_SECONDS)
+      ripple.style.opacity = String(1 - fade)
+      ripple.style.transform = `translate(-50%, -50%) scale(${RIPPLE_START_SCALE + (1 - RIPPLE_START_SCALE) * growth})`
     },
   }
 }

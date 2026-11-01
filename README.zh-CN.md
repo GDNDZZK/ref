@@ -55,9 +55,9 @@
 
 <sub><b>浏览器</b>（<code>ref-web</code>）。同一套界面，这里是分屏视图。</sub>
 
-<img src="docs/images/tui-main.png" alt="终端中的 ref" width="720">
+<img src="docs/images/tui-main.png" alt="终端中的 ref" width="960">
 
-<sub><b>终端</b>（<code>ref</code>）。工具调用、回复和输入框。</sub>
+<sub><b>终端</b>（<code>ref</code>）。工具调用、回复和输入框；侧边栏显示会话信息、待办清单和运行中的会话。</sub>
 
 </div>
 

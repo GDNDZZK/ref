@@ -1,7 +1,7 @@
 import { span } from '../engine/anim.ts'
 import type { Part } from '../engine/part.ts'
 
-const CLOSE_SECONDS = 0.4
+export const CLOSE_SECONDS = 0.4
 const END_SCALE = 0.2
 
 // N5: any window part shrinks to its centre while it fades, from `at` on. The part's own
