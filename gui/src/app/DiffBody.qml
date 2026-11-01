@@ -6,8 +6,8 @@ ToolBodyBase {
 	id: body
 
 	readonly property var meta: call.meta
-	readonly property string diff: typeof meta.diff === "string" ? meta.diff : ""
-	readonly property string path: typeof meta.path === "string" ? meta.path : ""
+	readonly property string diff: Fields.stringOf(meta, "diff")
+	readonly property string path: Fields.stringOf(meta, "path")
 
 	Row {
 		visible: body.path !== ""

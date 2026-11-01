@@ -17,8 +17,8 @@ Item {
 	readonly property int fieldPadding: 8
 	readonly property int fieldPaddingWide: 10
 	readonly property int rowSpacing: 8
-	readonly property string command: typeof input.command === "string" ? input.command : ""
-	readonly property string path: typeof input.path === "string" ? input.path : ""
+	readonly property string command: Fields.stringOf(input, "command")
+	readonly property string path: Fields.stringOf(input, "path")
 
 	width: parent.width
 	height: open ? content.y + content.height : 0
