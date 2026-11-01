@@ -10,6 +10,7 @@ namespace
 {
 
 constexpr qsizetype MaxDetailLength = 200;
+constexpr QChar Ellipsis = u'\u2026';
 
 // Keeps the translation context of these strings.
 struct Text
@@ -23,7 +24,7 @@ QString firstLine(const QString& text)
 	QString line = text.trimmed().section(u'\n', 0, 0).trimmed();
 	if(line.size() > MaxDetailLength)
 	{
-		line = line.left(MaxDetailLength).trimmed() + u"\u2026"_s;
+		line = line.left(MaxDetailLength).trimmed() + Ellipsis;
 	}
 	return line;
 }
