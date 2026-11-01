@@ -10,6 +10,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const TITLE: &str = "Fix it";
+/// Retry base slow enough to queue a prompt between retries.
+const SLOW_RETRY_BASE: Duration = Duration::from_millis(300);
 const ALL: [NotifyKind; 3] = [
     NotifyKind::Permission,
     NotifyKind::TurnDone,
@@ -305,14 +307,9 @@ async fn a_queued_prompt_restarts_the_run_after_a_final_error() {
     .await;
     // Slow retries leave time to queue a prompt after the run took its queue for the last time.
     let cfg = config(&m.url);
-    let dir = temp_dir("restart");
-    let mut opts = ref_server::HubOptions::new(dir.join("data"));
-    opts.home = None;
-    opts.retry_base = Duration::from_millis(300);
-    opts.config_loader = Arc::new(move |_| cfg.clone());
-    let hub = Hub::new(opts);
-    let work = dir.join("work");
-    std::fs::create_dir_all(&work).unwrap();
+    let (hub, work) = hub_with(cfg, "restart", |opts| {
+        opts.retry_base = SLOW_RETRY_BASE;
+    });
     let s = titled_session(&hub, &work).await;
     let conn = connect(&hub, &ALL);
 

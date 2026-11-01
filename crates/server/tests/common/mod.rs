@@ -6,7 +6,7 @@ use ref_proto::{Message, ModelRef, Part, Role};
 use ref_server::session::Session;
 use ref_server::{Hub, HubOptions};
 use serde_json::{Value, json};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -16,6 +16,8 @@ use tokio::net::{TcpListener, TcpStream};
 pub const TIMEOUT: Duration = Duration::from_secs(10);
 /// Limit for a whole turn to finish (`wait_idle`).
 const IDLE_TIMEOUT: Duration = Duration::from_secs(20);
+const RETRY_BASE: Duration = Duration::from_millis(10);
+const MCP_WAIT: Duration = Duration::from_secs(1);
 
 /// Agent and session names that `config()` defines.
 pub const BUILD: &str = "build";
@@ -271,16 +273,32 @@ pub fn temp_dir(tag: &str) -> PathBuf {
     d
 }
 
-pub fn hub(cfg: Config, tag: &str) -> (Arc<Hub>, PathBuf) {
-    let dir = temp_dir(tag);
+/// Hub options with data in `dir/data`, no home directory and fast retries.
+pub fn hub_options(cfg: Config, dir: &Path) -> HubOptions {
     let mut opts = HubOptions::new(dir.join("data"));
     opts.home = None;
-    opts.retry_base = Duration::from_millis(10);
-    opts.mcp_wait = Duration::from_secs(1);
+    opts.retry_base = RETRY_BASE;
+    opts.mcp_wait = MCP_WAIT;
     opts.config_loader = Arc::new(move |_| cfg.clone());
+    opts
+}
+
+/// A hub in a fresh temp dir, with `adjust` applied to its options, and its work dir.
+pub fn hub_with(
+    cfg: Config,
+    tag: &str,
+    adjust: impl FnOnce(&mut HubOptions),
+) -> (Arc<Hub>, PathBuf) {
+    let dir = temp_dir(tag);
+    let mut opts = hub_options(cfg, &dir);
+    adjust(&mut opts);
     let work = dir.join("work");
     std::fs::create_dir_all(&work).unwrap();
     (Hub::new(opts), work)
+}
+
+pub fn hub(cfg: Config, tag: &str) -> (Arc<Hub>, PathBuf) {
+    hub_with(cfg, tag, |_| {})
 }
 
 pub async fn session(
