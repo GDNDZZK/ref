@@ -22,10 +22,13 @@ const MAX_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
 /// Larger files are refused (use grep / bash to inspect them).
 const MAX_READ_BYTES: u64 = 64 * 1024 * 1024;
 
+/// Name the model calls the tool by.
+pub(crate) const NAME: &str = "read";
+
 pub fn spec() -> ToolSpec {
     let page_kb = PAGE_BYTES as u64 / util::KIB;
     ToolSpec {
-        name: "read",
+        name: NAME,
         description: format!(
             "Read a text file, list a directory, or view an image.\n\
 \n\

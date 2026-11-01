@@ -23,9 +23,12 @@ const REVEAL_MAX_CHARS: usize = 512;
 /// Max chars per preview / context row.
 const ROW_MAX_CHARS: usize = 500;
 
+/// Name the model calls the tool by.
+pub(crate) const NAME: &str = "edit";
+
 pub fn spec() -> ToolSpec {
     ToolSpec {
-        name: "edit",
+        name: NAME,
         description: "Edit an existing text file by line number. Create new files with `write`.\n\
 \n\
 - `tag`: the 4-hex TAG from the `[path#TAG]` header of the LATEST `read`, `grep`, `write` or `edit` output for this file. Never invent it.\n\
