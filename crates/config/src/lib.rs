@@ -42,7 +42,7 @@ pub use jsonc::parse_jsonc;
 pub const COMPACTION_AGENT: &str = "compaction";
 
 /// Agent used when `default_agent` is not set or not found.
-pub(crate) const DEFAULT_AGENT: &str = "build";
+pub const DEFAULT_AGENT: &str = "build";
 
 /// Agent `mode` values (opencode): selectable by the user, only spawned, or both.
 pub(crate) const MODE_PRIMARY: &str = "primary";

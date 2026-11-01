@@ -3,6 +3,7 @@
 
 use crate::hub::Hub;
 use crate::session::{Session, cancel_unfinished};
+use ref_config::Config;
 use ref_proto::{ModelRef, SessionEvent, SessionInfo, SessionStatus};
 use std::sync::Arc;
 use std::time::Duration;
@@ -46,73 +47,110 @@ pub(crate) fn validate_cwd(cwd: &str) -> Result<String, String> {
     Ok(c.to_string_lossy().to_string())
 }
 
-pub async fn create_session(hub: &Arc<Hub>, o: CreateOpts) -> Result<Arc<Session>, String> {
-    let cwd = validate_cwd(&hub.effective_cwd(&o.cwd))?;
-    let cfg = {
-        let hub = hub.clone();
-        let cwd = cwd.clone();
-        tokio::task::spawn_blocking(move || hub.load_config(std::path::Path::new(&cwd)))
-            .await
-            .map_err(|e| format!("loading config failed: {e}"))?
-    };
-    for w in &cfg.warnings {
-        tracing::warn!("config: {w}");
-    }
-    let agent = match o.agent.filter(|a| !a.trim().is_empty()) {
+/// Agent used when the config has no usable default.
+const FALLBACK_AGENT: &str = ref_config::DEFAULT_AGENT;
+
+/// Directory name used for the default session name when the cwd has none (`/`).
+const FALLBACK_DIR_NAME: &str = "root";
+
+/// Characters of the directory name kept in a generated session name.
+const DEFAULT_NAME_STEM_CHARS: usize = 50;
+
+/// Random hex digits appended to a generated session name.
+const NAME_SUFFIX_HEX_DIGITS: usize = 4;
+
+/// How long closing a session or undoing waits for the running turn to stop.
+pub(crate) const SESSION_STOP_WAIT: Duration = Duration::from_secs(10);
+
+/// How long shutdown waits for each session to stop.
+const SHUTDOWN_WAIT: Duration = Duration::from_secs(5);
+
+/// Loads the merged config for `cwd` off the async runtime.
+pub(crate) async fn load_config(hub: &Arc<Hub>, cwd: &str) -> Result<Config, String> {
+    let hub = hub.clone();
+    let cwd = cwd.to_string();
+    tokio::task::spawn_blocking(move || hub.load_config(std::path::Path::new(&cwd)))
+        .await
+        .map_err(|e| format!("loading config failed: {e}"))
+}
+
+/// The requested agent if usable, else the config default, else the first visible agent.
+fn resolve_agent(cfg: &Config, requested: Option<String>) -> Result<String, String> {
+    match requested.filter(|a| !a.trim().is_empty()) {
         Some(a) if a == ref_config::COMPACTION_AGENT => {
-            return Err(format!("Agent {a} is internal and cannot run a session."));
+            Err(format!("Agent {a} is internal and cannot run a session."))
         }
-        Some(a) if cfg.agents.contains_key(&a) => a,
-        Some(a) => return Err(format!("Unknown agent: {a}")),
+        Some(a) if cfg.agents.contains_key(&a) => Ok(a),
+        Some(a) => Err(format!("Unknown agent: {a}")),
         None if cfg.default_agent != ref_config::COMPACTION_AGENT
             && cfg.agents.contains_key(&cfg.default_agent) =>
         {
-            cfg.default_agent.clone()
+            Ok(cfg.default_agent.clone())
         }
-        None => cfg
+        None => Ok(cfg
             .agents
             .values()
             .find(|a| !a.hidden && a.name != ref_config::COMPACTION_AGENT)
             .map(|a| a.name.clone())
-            .unwrap_or_else(|| "build".into()),
+            .unwrap_or_else(|| FALLBACK_AGENT.into())),
+    }
+}
+
+/// The requested model if configured, else the agent's default.
+fn resolve_model(
+    cfg: &Config,
+    agent: &str,
+    requested: Option<ModelRef>,
+) -> Result<ModelRef, String> {
+    let Some(m) = requested else {
+        return Ok(cfg.default_model_for(agent).unwrap_or_default());
     };
-    let model = match o.model {
-        Some(m) => {
-            if cfg.model(&m).is_none() {
-                return Err(format!("Model {} is not configured.", m.key()));
-            }
-            m
-        }
-        None => cfg.default_model_for(&agent).unwrap_or_default(),
-    };
-    let name = match o.name {
-        Some(n) => {
-            let n = crate::util::normalize_name(&n)?;
-            if hub.name_taken(&n, None) {
-                if o.unique_suffix {
-                    unique_name(hub, &n, None)
-                } else {
-                    return Err(format!("A live session named \"{n}\" already exists."));
-                }
-            } else {
-                n
-            }
-        }
-        None => {
-            let base = std::path::Path::new(&cwd)
-                .file_name()
-                .and_then(|x| x.to_str())
-                .filter(|x| !x.is_empty())
-                .unwrap_or("root");
-            let base: String = base.chars().take(50).collect();
-            loop {
-                let cand = format!("{base}-{}", crate::util::random_hex(4));
-                if !hub.name_taken(&cand, None) {
-                    break cand;
-                }
+    if cfg.model(&m).is_none() {
+        return Err(format!("Model {} is not configured.", m.key()));
+    }
+    Ok(m)
+}
+
+/// The given name (made unique when allowed), or `<dir>-<hex>` derived from the cwd.
+fn pick_name(
+    hub: &Hub,
+    cwd: &str,
+    name: Option<String>,
+    unique_suffix: bool,
+) -> Result<String, String> {
+    let Some(n) = name else {
+        let base = std::path::Path::new(cwd)
+            .file_name()
+            .and_then(|x| x.to_str())
+            .filter(|x| !x.is_empty())
+            .unwrap_or(FALLBACK_DIR_NAME);
+        let base: String = base.chars().take(DEFAULT_NAME_STEM_CHARS).collect();
+        loop {
+            let cand = format!("{base}-{}", crate::util::random_hex(NAME_SUFFIX_HEX_DIGITS));
+            if !hub.name_taken(&cand, None) {
+                return Ok(cand);
             }
         }
     };
+    let n = crate::util::normalize_name(&n)?;
+    if !hub.name_taken(&n, None) {
+        return Ok(n);
+    }
+    if unique_suffix {
+        return Ok(unique_name(hub, &n, None));
+    }
+    Err(format!("A live session named \"{n}\" already exists."))
+}
+
+pub async fn create_session(hub: &Arc<Hub>, o: CreateOpts) -> Result<Arc<Session>, String> {
+    let cwd = validate_cwd(&hub.effective_cwd(&o.cwd))?;
+    let cfg = load_config(hub, &cwd).await?;
+    for w in &cfg.warnings {
+        tracing::warn!("config: {w}");
+    }
+    let agent = resolve_agent(&cfg, o.agent)?;
+    let model = resolve_model(&cfg, &agent, o.model)?;
+    let name = pick_name(hub, &cwd, o.name, o.unique_suffix)?;
     let now = ref_proto::now_ms();
     let context = crate::models::context_for(&cfg, &model);
     let info = SessionInfo {
@@ -157,13 +195,7 @@ pub async fn get_or_load(hub: &Arc<Hub>, id: &str) -> Result<Arc<Session>, Strin
         return Ok(s);
     }
     cancel_unfinished(&mut p.messages, crate::engine::CANCELLED_OUTPUT);
-    let cwd = p.info.cwd.clone();
-    let cfg = {
-        let hub = hub.clone();
-        tokio::task::spawn_blocking(move || hub.load_config(std::path::Path::new(&cwd)))
-            .await
-            .map_err(|e| format!("loading config failed: {e}"))?
-    };
+    let cfg = load_config(hub, &p.info.cwd).await?;
     p.info.live = true;
     p.info.status = SessionStatus::Idle;
     p.info.attached = 0;
@@ -184,7 +216,7 @@ pub fn persist(hub: &Hub, s: &Session) {
 /// Abort, persist and unload a live session.
 pub async fn close_session(hub: &Arc<Hub>, s: &Arc<Session>) {
     crate::engine::abort(hub, s, true);
-    crate::engine::wait_idle(s, Duration::from_secs(10)).await;
+    crate::engine::wait_idle(s, SESSION_STOP_WAIT).await;
     s.lock().closed = true;
     persist(hub, s);
     hub.emit(&s.id, SessionEvent::Closed);
@@ -199,12 +231,14 @@ pub async fn shutdown_all(hub: &Arc<Hub>) {
         crate::engine::abort(hub, s, true);
     }
     for s in &all {
-        crate::engine::wait_idle(s, Duration::from_secs(5)).await;
+        crate::engine::wait_idle(s, SHUTDOWN_WAIT).await;
         persist(hub, s);
     }
     let store = hub.store.clone();
-    if let Ok(Err(e)) = tokio::task::spawn_blocking(move || store.flush()).await {
-        tracing::warn!("flushing the session store failed: {e}");
+    match tokio::task::spawn_blocking(move || store.flush()).await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => tracing::warn!("flushing the session store failed: {e}"),
+        Err(e) => tracing::warn!("flush task failed: {e}"),
     }
     hub.mcp.close_all().await;
 }
