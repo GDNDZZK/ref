@@ -3,20 +3,28 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import RefGui
 
-// A checklist: a row per item {content, status} with a mark for the status. Used by the todo call's card and by the
-// popup of the status line.
+// A checklist: a row per item {content, status} with a mark for the status. Used by the todo call's card, by the
+// popup of the status line and by the sidebar. Long items are cut by default; with `wrap` they continue on further
+// lines under the text, and the row grows.
 Column {
 	id: body
 
 	required property var items
+	property bool wrap: false
 
 	readonly property int rowHeight: 26
-	readonly property int leftPad: 14
+	readonly property int wrapPadding: 4 // above and below a wrapped item
+	property int leftPad: 14
 	readonly property int markerSize: 16
 	readonly property int verticalPadding: 4
 
 	topPadding: verticalPadding
 	bottomPadding: verticalPadding
+
+	FontMetrics {
+		id: metrics
+		font.pixelSize: Theme.codeFontSize
+	}
 
 	Repeater {
 		model: body.items
@@ -30,12 +38,13 @@ Column {
 			readonly property bool active: modelData.status === "in_progress"
 
 			width: body.width
-			height: body.rowHeight
+			height: body.wrap ? Math.max(body.rowHeight, label.implicitHeight + 2 * body.wrapPadding) : body.rowHeight
 
 			Item {
 				id: marker
 				x: body.leftPad
-				anchors.verticalCenter: parent.verticalCenter
+				// In line with the first line of the text.
+				y: body.wrap ? label.y + (metrics.height - height) / 2 : (row.height - height) / 2
 				width: body.markerSize
 				height: body.markerSize
 
@@ -92,10 +101,12 @@ Column {
 			}
 
 			Text {
+				id: label
 				textFormat: Text.PlainText
 				anchors { left: marker.right; leftMargin: 8; right: parent.right; rightMargin: body.leftPad; verticalCenter: parent.verticalCenter }
 				text: row.modelData.content
-				elide: Text.ElideRight
+				wrapMode: body.wrap ? Text.Wrap : Text.NoWrap
+				elide: body.wrap ? Text.ElideNone : Text.ElideRight
 				color: row.completed || row.cancelled ? Theme.textMuted : Theme.text
 				font.pixelSize: Theme.codeFontSize
 				font.strikeout: row.completed || row.cancelled

@@ -1,4 +1,4 @@
-# Adapted from an early version of qutie by LightBlueCube
+# Adapted from an early version of LightBlueCube/qutie
 add_subdirectory(proto)
 add_subdirectory(client)
 add_subdirectory(cli)

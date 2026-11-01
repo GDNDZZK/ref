@@ -1,4 +1,4 @@
-// Adapted from an early version of qutie by LightBlueCube
+// Adapted from an early version of LightBlueCube/qutie
 #include "app/chat_session.h"
 
 #include "composer/shared_history.h"

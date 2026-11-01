@@ -3,6 +3,9 @@
 // The content keeps its width and is clipped by the frame, so collapsing slides it out to the left.
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import lockupDark from '../../../assets/app/ref-lockup-small-dark.svg'
+import lockupLight from '../../../assets/app/ref-lockup-small-light.svg'
+import { useTheme } from '../composables/useTheme.ts'
 import { matchesQuery } from '../shell/sessionRow.ts'
 import { useCommandsStore } from '../stores/commands.ts'
 import { useDialogsStore } from '../stores/dialogs.ts'
@@ -14,8 +17,13 @@ import HistoryRow from './HistoryRow.vue'
 import Icon from './Icon.vue'
 import McpDots from './McpDots.vue'
 import SidebarRow from './SidebarRow.vue'
+import SidebarTodo from './SidebarTodo.vue'
+
+const LOCKUP_WIDTH = 60
+const LOCKUP_HEIGHT = 24
 
 const { t } = useI18n()
+const { isDark } = useTheme()
 const workspace = useWorkspaceStore()
 const commands = useCommandsStore()
 const dialogs = useDialogsStore()
@@ -24,6 +32,9 @@ const mcp = useMcpStore()
 const notices = useNoticesStore()
 
 const query = ref('')
+
+// The session on screen: the open one, or the focused tile in split view.
+const todos = computed(() => (workspace.focusedId ? workspace.infoOf(workspace.focusedId)?.todos : undefined))
 
 const liveIds = computed(() => new Set(workspace.live.map((session) => session.id)))
 const history = computed(() =>
@@ -45,7 +56,13 @@ function open(id: string): void {
   <aside class="sidebar" :class="{ open: layout.sidebarVisible, drawer: layout.narrow }">
     <div class="content">
       <header class="header">
-        <span class="brand">ref</span>
+        <img
+          class="lockup"
+          :src="isDark ? lockupDark : lockupLight"
+          :width="LOCKUP_WIDTH"
+          :height="LOCKUP_HEIGHT"
+          alt="ref"
+        />
         <button
           type="button"
           class="icon-button"
@@ -74,44 +91,47 @@ function open(id: string): void {
       </div>
 
       <div class="body">
-        <h2 class="section">{{ t('sidebar.running') }}</h2>
-        <TransitionGroup tag="div" name="session" class="running" role="list">
-          <SidebarRow
-            v-for="info in workspace.live"
-            :key="info.id"
-            :info="info"
-            :current="info.id === workspace.focusedId"
-            :tile="workspace.mode === 'split' && workspace.tileIds.includes(info.id)"
-            @open="open(info.id)"
-            @close="report(commands.run('close', '', info.id))"
-            @rename="(name) => report(workspace.renameSession(info.id, name))"
-          />
-        </TransitionGroup>
+        <SidebarTodo :todos="todos" />
+        <div class="lists">
+          <h2 class="section">{{ t('sidebar.running') }}</h2>
+          <TransitionGroup tag="div" name="session" class="running" role="list">
+            <SidebarRow
+              v-for="info in workspace.live"
+              :key="info.id"
+              :info="info"
+              :current="info.id === workspace.focusedId"
+              :tile="workspace.mode === 'split' && workspace.tileIds.includes(info.id)"
+              @open="open(info.id)"
+              @close="report(commands.run('close', '', info.id))"
+              @rename="(name) => report(workspace.renameSession(info.id, name))"
+            />
+          </TransitionGroup>
 
-        <h2 class="section">{{ t('sidebar.history') }}</h2>
-        <label class="search">
-          <Icon icon="search-16" class="search-icon" />
-          <input v-model="query" type="text" :placeholder="t('sidebar.searchHistory')" />
-          <button
-            v-if="query"
-            type="button"
-            class="clear"
-            :aria-label="t('sidebar.clearSearch')"
-            @click="query = ''"
-          >
-            <Icon icon="close-16" />
-          </button>
-        </label>
-        <div class="history" role="list">
-          <HistoryRow
-            v-for="info in history"
-            :key="info.id"
-            :info="info"
-            @open="open(info.id)"
-            @remove="dialogs.open({ kind: 'deleteHistory', sessionId: info.id })"
-          />
-          <p v-if="!workspace.historyLoaded" class="empty">{{ t('sidebar.loading') }}</p>
-          <p v-else-if="history.length === 0" class="empty">{{ t('sidebar.noMatch') }}</p>
+          <h2 class="section">{{ t('sidebar.history') }}</h2>
+          <label class="search">
+            <Icon icon="search-16" class="search-icon" />
+            <input v-model="query" type="text" :placeholder="t('sidebar.searchHistory')" />
+            <button
+              v-if="query"
+              type="button"
+              class="clear"
+              :aria-label="t('sidebar.clearSearch')"
+              @click="query = ''"
+            >
+              <Icon icon="close-16" />
+            </button>
+          </label>
+          <div class="history" role="list">
+            <HistoryRow
+              v-for="info in history"
+              :key="info.id"
+              :info="info"
+              @open="open(info.id)"
+              @remove="dialogs.open({ kind: 'deleteHistory', sessionId: info.id })"
+            />
+            <p v-if="!workspace.historyLoaded" class="empty">{{ t('sidebar.loading') }}</p>
+            <p v-else-if="history.length === 0" class="empty">{{ t('sidebar.noMatch') }}</p>
+          </div>
         </div>
       </div>
 
@@ -189,9 +209,8 @@ function open(id: string): void {
   padding-left: 10px;
 }
 
-.brand {
-  font-size: calc(var(--font-size) + 1px);
-  font-weight: 700;
+.lockup {
+  display: block; /* drawn at exactly its own size: other sizes lose the pixel alignment */
 }
 
 .icon-button {
@@ -260,6 +279,16 @@ function open(id: string): void {
 }
 
 .body {
+  --sidebar-todo-share: 3; /* the Todo section takes at most this fraction of the column */
+
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* What is left under the Todo section: the percentages of Running count against this. */
+.lists {
   --search-height: 32px;
   --search-gap: 4px;
 

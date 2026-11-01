@@ -111,8 +111,10 @@ size does not change. State is kept in `Settings.sidebarVisible`.
 Surface: `Theme.surface`, a 1px `Theme.border` line on the right edge.
 
 ```
-header   52   "ref" (Theme.fontSize+1, bold)                      [sidebar-20 button 32]
+header   52   lockup 60×24 at (18, 14)                              [sidebar-20 button 32]
          44   [ + New session ........................ ]  [ ▾ ]    new = 36px high pill, ▾ = folder-open-20 button
+todo     28   section label "Todo  done/total" (only with a list)
+         ≤ ⅓  the list, see below
 running  28   section label "Running"  (smallFontSize, textMuted)
          56×n session rows (the list is as high as its rows; it scrolls only when the history would get less than 3 rows: max(free height − 3 × 44, 3 rows))
 history  28   section label "History"
@@ -120,6 +122,17 @@ history  28   section label "History"
          44×n history rows
 footer   44   [mcp-16] MCP ●●●● ........................ [sliders-20 button 32]
 ```
+
+Lockup: `assets/app/ref-lockup-small-dark.svg` or `-light.svg` by `Theme.dark`, drawn at exactly 60×24 logical px (its
+pixels are aligned to that size; 48 px high at 2x), accessible name "ref".
+
+Todo: the to-do list of the session in front, `Workspace.frontSession`: the current session, in split view the focused
+tile's. Hidden (height and opacity animate with `Motion.standard`) while that session has no items. The label reads
+"Todo  done/total", the numbers are those of the status line (cancelled items in neither). The rows are `TodoList` with
+`wrap: true` (marker, text continuing under itself, completed ones struck through, the one in progress in `accent`),
+inset to x = 18 like the labels. The section is as high as its list, at most a third of the sidebar and never so high
+that Running and History fall below their minimum (3 rows each); above that the list scrolls inside. It keeps showing
+what it showed while it closes and rebuilds only when the list changes.
 
 Padding: rows are inset 8px from the sidebar edges (`sidebarPadding`), 2px apart. Section labels start at x = 18.
 

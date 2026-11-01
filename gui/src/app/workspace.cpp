@@ -342,6 +342,12 @@ void Workspace::updateHighlight()
 	const QString id = m_split && !m_focusedTile.isEmpty() ? m_focusedTile : currentId();
 	m_directory.live().setCurrentId(id);
 	m_directory.history().setCurrentId(id);
+	if(id == m_frontId)
+	{
+		return;
+	}
+	m_frontId = id;
+	emit frontSessionChanged();
 }
 
 void Workspace::setCurrent(ChatSession* session)

@@ -9,6 +9,7 @@ const DIALOG = '[role="dialog"]'
 const VIEWPORT_WIDTH = 980
 const SPLIT_VIEWPORT = { width: 1500, height: 900 }
 const SPLIT_TILES = 4
+const LOCKUP_SIZE = { width: 60, height: 24 }
 const MIN_FOCUS_TILES = 2
 const ARROW_KEYS = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp']
 const SIZING_HEIGHTS = [900, 600]
@@ -413,4 +414,42 @@ export async function splitFocusScenario(page, problems) {
   if (left !== '') problems.push(`the permission key was typed into the box: "${left}"`)
 
   await leaveSplit(page, problems)
+}
+
+// The sidebar's brand lockup keeps its pixel size and follows the theme.
+async function checkLockup(page, problems) {
+  const lockup = page.locator('.sidebar .lockup')
+  const box = await lockup.boundingBox()
+  if (box?.width !== LOCKUP_SIZE.width || box?.height !== LOCKUP_SIZE.height)
+    problems.push(
+      `the lockup is ${box?.width}x${box?.height}, not ${LOCKUP_SIZE.width}x${LOCKUP_SIZE.height}`,
+    )
+  const light = await lockup.getAttribute('src')
+  await page.keyboard.press('Alt+KeyS')
+  await page.click(`${DIALOG} [role="radio"]:has-text("Dark")`)
+  await page.waitForTimeout(SETTLE_MS)
+  const dark = await lockup.getAttribute('src')
+  if (light === dark) problems.push('the lockup did not change with the theme')
+  await page.click(`${DIALOG} [role="radio"]:has-text("Light")`)
+  await closeDialog(page, problems, 'settings dialog')
+}
+
+// The Todo section shows the list of the session on screen and is gone for a session without one.
+export async function sidebarTodoScenario(page, problems) {
+  await checkLockup(page, problems)
+  await page.fill('textarea', 'todo')
+  await page.keyboard.press('Enter')
+  const section = page.locator('.sidebar .todo-section')
+  try {
+    await section.waitFor({ timeout: WAIT_MS })
+  } catch {
+    problems.push('the Todo section did not appear for a session with a list')
+    return
+  }
+  const heading = (await section.locator('.heading').innerText()).replace(/\s+/g, ' ')
+  if (!/^Todo \d+\/\d+$/.test(heading)) problems.push(`the Todo heading reads "${heading}"`)
+  await shot(page, 'sidebar-todo')
+  await page.keyboard.press('Alt+KeyN')
+  await expectCount(page, problems, '.sidebar .todo-section', 0, 'Todo sections for a session without a list')
+  await page.keyboard.press('Alt+KeyK')
 }
