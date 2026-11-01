@@ -38,7 +38,7 @@ async fn response(
         }
         panic!("socket closed")
     };
-    tokio::time::timeout(Duration::from_secs(10), fut)
+    tokio::time::timeout(TIMEOUT, fut)
         .await
         .expect("response timeout")
 }
@@ -170,9 +170,7 @@ async fn ws_smoke() {
             }
         }
     };
-    let text = tokio::time::timeout(Duration::from_secs(10), got)
-        .await
-        .unwrap();
+    let text = tokio::time::timeout(TIMEOUT, got).await.unwrap();
     assert_eq!(text, "pong");
 
     send(&mut ws, 7, Request::GetConfig).await;
@@ -345,7 +343,7 @@ async fn hello_reports_protocol_and_notifications_follow_focus() {
         }
         panic!("socket closed")
     };
-    let (session_id, kind, detail) = tokio::time::timeout(Duration::from_secs(10), fut)
+    let (session_id, kind, detail) = tokio::time::timeout(TIMEOUT, fut)
         .await
         .expect("notification timeout");
     assert_eq!(

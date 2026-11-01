@@ -12,6 +12,11 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
+/// Default limit for waiting on test conditions.
+pub const TIMEOUT: Duration = Duration::from_secs(10);
+/// Limit for a whole turn to finish (`wait_idle`).
+const IDLE_TIMEOUT: Duration = Duration::from_secs(20);
+
 /// Agent and session names that `config()` defines.
 pub const BUILD: &str = "build";
 pub const WORKER: &str = "worker";
@@ -318,7 +323,7 @@ pub async fn wait_until(what: &str, timeout: Duration, mut f: impl FnMut() -> bo
 
 pub async fn wait_idle(s: &Arc<Session>) {
     let s2 = s.clone();
-    wait_until("session idle", Duration::from_secs(20), move || {
+    wait_until("session idle", IDLE_TIMEOUT, move || {
         s2.lock().run.is_none()
     })
     .await;

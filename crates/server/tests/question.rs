@@ -9,10 +9,8 @@ use ref_server::hub::{Conn, Hub};
 use ref_server::session::Session;
 use serde_json::{Value, json};
 use std::sync::Arc;
-use std::time::Duration;
 
 const CALL: &str = "q1";
-const WAIT: Duration = Duration::from_secs(10);
 
 fn one_question() -> Value {
     json!({"purpose": "ask", "questions": [{
@@ -89,7 +87,7 @@ impl Rig {
     /// Waits until the model's question is pending.
     async fn asked(&self) -> QuestionRequest {
         let s = self.session.clone();
-        wait_until("question pending", WAIT, move || {
+        wait_until("question pending", TIMEOUT, move || {
             !s.lock().questions.is_empty()
         })
         .await;
@@ -326,7 +324,7 @@ async fn a_window_that_is_not_looking_gets_a_notification() {
     away.out.drain();
     rig.mock.bodies.lock().unwrap().clear();
     prompt(&rig.hub, &rig.session, "again");
-    wait_until("asked again", WAIT, {
+    wait_until("asked again", TIMEOUT, {
         let s = rig.session.clone();
         move || s.lock().questions.len() == 1
     })
