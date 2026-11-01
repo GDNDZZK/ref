@@ -129,7 +129,7 @@ fn push_rules(rules: &mut Vec<Rule>, warns: &mut Vec<String>, key: &str, tool: &
 }
 
 impl PermissionRules {
-    /// Parse an opencode `permission` value. Unknown action strings are ignored (reported via Err list).
+    /// Parse an opencode `permission` value. Invalid values are skipped and returned as warnings.
     pub fn from_value(v: &Value) -> (PermissionRules, Vec<String>) {
         let mut rules = Vec::new();
         let mut warns = Vec::new();

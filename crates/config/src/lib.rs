@@ -206,7 +206,7 @@ pub struct CommandConfig {
 
 #[derive(Debug, Clone)]
 pub struct CompactionConfig {
-    /// Automatically compact when context reaches `auto_ratio` of the window (default true).
+    /// Automatically compact when context reaches `threshold` of the window (default true).
     pub auto: bool,
     /// Recommended compaction point as fraction of context window (default 0.6) or absolute
     /// tokens if > 1.0. Reported to the model via the `context_window` tool.
