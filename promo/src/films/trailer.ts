@@ -18,7 +18,8 @@ export const scene = timelineFilm({
     waitingTabsCut(0, HERO_FILM_START),
     // Hard cut at the Enter: a fade would show the hook terminal through the title card.
     heroCut(HERO_FILM_START, FIRST_SLICE_END, 0, { enter: 'cut' }),
-    heroCut(FIRST_SLICE_END, SECOND_SLICE_END, SECOND_SLICE_CLIP_FROM, { enter: 'cut', holdReport: true }),
+    // The report frame holds until its caption ends at 21.9 (the report is at film 18.0).
+    heroCut(FIRST_SLICE_END, SECOND_SLICE_END, SECOND_SLICE_CLIP_FROM, { enter: 'cut', holdReport: 4.0 }),
     crewWindowsCut(SECOND_SLICE_END, WINDOWS_END),
     endCut(WINDOWS_END, FILM_END, { platforms: true }),
   ],

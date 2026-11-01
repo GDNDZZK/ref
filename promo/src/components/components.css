@@ -129,6 +129,12 @@
   box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
+.highlight.is-spotlight {
+  box-shadow:
+    0 0 0 6px color-mix(in srgb, var(--accent) 25%, transparent),
+    0 0 0 4000px rgb(0 0 0 / 0.62);
+}
+
 .highlight-label {
   position: absolute;
   left: -3px;

@@ -31,6 +31,7 @@ export interface Mark {
   width: number
   height: number
   label?: string | Localized
+  spotlight?: boolean
   from: number
   to: number
 }
