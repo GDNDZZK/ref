@@ -2,12 +2,12 @@
 // Rename a session. Names are unique among live sessions: the backend's refusal shows under the field.
 import { onMounted, ref, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useDialogSubmit } from '../../composables/useDialogSubmit.ts'
 import { useDialogsStore } from '../../stores/dialogs.ts'
 import { useWorkspaceStore } from '../../stores/workspace.ts'
 import DialogButton from '../DialogButton.vue'
 import ModalDialog from '../ModalDialog.vue'
 import TextField from '../TextField.vue'
-import { describeError } from '../../errorMessage.ts'
 
 const props = defineProps<{ sessionId: string }>()
 const { t } = useI18n()
@@ -16,24 +16,16 @@ const workspace = useWorkspaceStore()
 
 const info = workspace.infoOf(props.sessionId)
 const name = ref(info?.name ?? '')
-const error = ref('')
-const busy = ref(false)
 const field = useTemplateRef<InstanceType<typeof TextField>>('field')
 onMounted(() => field.value?.select())
 
-async function submit(): Promise<void> {
-  const next = name.value.trim()
-  if (next === '' || busy.value) return
-  busy.value = true
-  try {
-    await workspace.renameSession(props.sessionId, next)
+const { busy, error, submit } = useDialogSubmit(
+  async () => {
+    await workspace.renameSession(props.sessionId, name.value.trim())
     dialogs.close()
-  } catch (failure) {
-    error.value = describeError(failure)
-  } finally {
-    busy.value = false
-  }
-}
+  },
+  () => name.value.trim() !== '',
+)
 </script>
 
 <template>

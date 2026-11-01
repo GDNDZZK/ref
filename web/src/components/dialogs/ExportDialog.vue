@@ -2,13 +2,13 @@
 // Write the transcript as markdown on the backend's machine.
 import { onMounted, ref, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useDialogSubmit } from '../../composables/useDialogSubmit.ts'
 import { useDialogsStore } from '../../stores/dialogs.ts'
 import { useNoticesStore } from '../../stores/notices.ts'
 import { useWorkspaceStore } from '../../stores/workspace.ts'
 import DialogButton from '../DialogButton.vue'
 import ModalDialog from '../ModalDialog.vue'
 import TextField from '../TextField.vue'
-import { describeError } from '../../errorMessage.ts'
 
 const props = defineProps<{ sessionId: string }>()
 const { t } = useI18n()
@@ -17,25 +17,17 @@ const notices = useNoticesStore()
 const workspace = useWorkspaceStore()
 
 const path = ref(`ref-session-${props.sessionId}.md`)
-const error = ref('')
-const busy = ref(false)
 const field = useTemplateRef<InstanceType<typeof TextField>>('field')
 onMounted(() => field.value?.select())
 
-async function submit(): Promise<void> {
-  const target = path.value.trim()
-  if (target === '' || busy.value) return
-  busy.value = true
-  try {
-    const written = await workspace.exportSession(props.sessionId, target)
+const { busy, error, submit } = useDialogSubmit(
+  async () => {
+    const written = await workspace.exportSession(props.sessionId, path.value.trim())
     dialogs.close()
     notices.push('info', t('dialog.export.done', { path: written }))
-  } catch (failure) {
-    error.value = describeError(failure)
-  } finally {
-    busy.value = false
-  }
-}
+  },
+  () => path.value.trim() !== '',
+)
 </script>
 
 <template>
