@@ -14,7 +14,7 @@ use crate::{
     AssistantBlock, BlockKind, ChatMessage, LlmError, Model, Provider, Request, Response,
     StreamEvent, UserContent,
 };
-use ref_proto::Usage;
+use ref_proto::{ImageData, Usage};
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 use tokio_util::sync::CancellationToken;
@@ -165,7 +165,7 @@ pub(crate) fn build_body(provider: &Provider, model: &Model, req: &Request) -> V
     body
 }
 
-fn input_image(model: &Model, img: &ref_proto::ImageData) -> Value {
+fn input_image(model: &Model, img: &ImageData) -> Value {
     if model.images {
         json!({"type": "input_image", "detail": "auto", "image_url": data_url(img)})
     } else {
@@ -192,82 +192,90 @@ fn convert_input(provider: &Provider, model: &Model, req: &Request) -> Vec<Value
             }
             ChatMessage::Assistant { blocks, origin } => {
                 let replay = same_origin(origin, provider, model);
-                for block in blocks {
-                    match block {
-                        AssistantBlock::Reasoning { provider_data, .. } => {
-                            // Encrypted reasoning only round-trips to the model that produced it.
-                            let item = provider_data.as_ref().and_then(|d| d.get("item"));
-                            if replay
-                                && let Some(item) = item.filter(|i| {
-                                    i.get("type").and_then(Value::as_str) == Some("reasoning")
-                                })
-                            {
-                                out.push(item.clone());
-                            }
-                        }
-                        AssistantBlock::Text(t) => {
-                            if !t.trim().is_empty() {
-                                out.push(json!({
-                                    "type": "message", "role": "assistant", "status": "completed",
-                                    "content": [{"type": "output_text", "text": t, "annotations": []}],
-                                }));
-                            }
-                        }
-                        AssistantBlock::ToolCall {
-                            id,
-                            name,
-                            arguments,
-                            provider_data,
-                        } => {
-                            let mut item = Map::new();
-                            item.insert("type".into(), json!("function_call"));
-                            let item_id = provider_data
-                                .as_ref()
-                                .and_then(|d| d.get("id"))
-                                .and_then(Value::as_str)
-                                .filter(|id| id.starts_with("fc_") && id.len() <= MAX_ID);
-                            // The fc_ id pairs with reasoning items; only valid for the same model.
-                            if replay && let Some(item_id) = item_id {
-                                item.insert("id".into(), json!(item_id));
-                            }
-                            item.insert("call_id".into(), json!(normalize_call_id(id, MAX_ID)));
-                            item.insert("name".into(), json!(name));
-                            item.insert("arguments".into(), json!(arguments_string(arguments)));
-                            out.push(Value::Object(item));
-                        }
-                    }
-                }
+                out.extend(assistant_items(blocks, replay));
             }
             ChatMessage::ToolResult {
                 call_id,
                 content,
                 images,
                 ..
+            } => out.push(tool_result_item(model, call_id, content, images)),
+        }
+    }
+    out
+}
+
+/// Input items of an assistant message. Reasoning items and `fc_` ids are replayed only for
+/// `replay`: encrypted reasoning round-trips to the model that produced it.
+fn assistant_items(blocks: &[AssistantBlock], replay: bool) -> Vec<Value> {
+    let mut out = Vec::new();
+    for block in blocks {
+        match block {
+            AssistantBlock::Reasoning { provider_data, .. } => {
+                let item = provider_data.as_ref().and_then(|d| d.get("item"));
+                if replay
+                    && let Some(item) =
+                        item.filter(|i| i.get("type").and_then(Value::as_str) == Some("reasoning"))
+                {
+                    out.push(item.clone());
+                }
+            }
+            AssistantBlock::Text(t) => {
+                if !t.trim().is_empty() {
+                    out.push(json!({
+                        "type": "message", "role": "assistant", "status": "completed",
+                        "content": [{"type": "output_text", "text": t, "annotations": []}],
+                    }));
+                }
+            }
+            AssistantBlock::ToolCall {
+                id,
+                name,
+                arguments,
+                provider_data,
             } => {
-                let output = if images.is_empty() {
-                    let text = if content.trim().is_empty() {
-                        NO_TOOL_OUTPUT
-                    } else {
-                        content.as_str()
-                    };
-                    json!(text)
-                } else {
-                    let mut parts = Vec::new();
-                    if !content.trim().is_empty() {
-                        parts.push(json!({"type": "input_text", "text": content}));
-                    }
-                    parts.extend(images.iter().map(|img| input_image(model, img)));
-                    Value::Array(parts)
-                };
-                out.push(json!({
-                    "type": "function_call_output",
-                    "call_id": normalize_call_id(call_id, MAX_ID),
-                    "output": output,
-                }));
+                let mut item = Map::new();
+                item.insert("type".into(), json!("function_call"));
+                let item_id = provider_data
+                    .as_ref()
+                    .and_then(|d| d.get("id"))
+                    .and_then(Value::as_str)
+                    .filter(|id| id.starts_with("fc_") && id.len() <= MAX_ID);
+                // The fc_ id pairs with reasoning items; only valid for the same model.
+                if replay && let Some(item_id) = item_id {
+                    item.insert("id".into(), json!(item_id));
+                }
+                item.insert("call_id".into(), json!(normalize_call_id(id, MAX_ID)));
+                item.insert("name".into(), json!(name));
+                item.insert("arguments".into(), json!(arguments_string(arguments)));
+                out.push(Value::Object(item));
             }
         }
     }
     out
+}
+
+fn tool_result_item(model: &Model, call_id: &str, content: &str, images: &[ImageData]) -> Value {
+    let output = if images.is_empty() {
+        let text = if content.trim().is_empty() {
+            NO_TOOL_OUTPUT
+        } else {
+            content
+        };
+        json!(text)
+    } else {
+        let mut parts = Vec::new();
+        if !content.trim().is_empty() {
+            parts.push(json!({"type": "input_text", "text": content}));
+        }
+        parts.extend(images.iter().map(|img| input_image(model, img)));
+        Value::Array(parts)
+    };
+    json!({
+        "type": "function_call_output",
+        "call_id": normalize_call_id(call_id, MAX_ID),
+        "output": output,
+    })
 }
 
 // ---------------------------------------------------------------------------
