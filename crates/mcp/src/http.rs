@@ -353,11 +353,11 @@ impl HttpTransport {
                 }
             }
 
-            if status == StatusCode::NOT_FOUND
+            let session_expired = status == StatusCode::NOT_FOUND
                 && sid_used.is_some()
                 && !retried
-                && !is_initialize(msg)
-            {
+                && !is_initialize(msg);
+            if session_expired {
                 tracing::debug!(server = %self.shared.name, "MCP session expired; re-initializing");
                 retried = true;
                 self.reinitialize(sid_used)
@@ -680,7 +680,8 @@ async fn pump(
     };
     if ct.starts_with("text/event-stream") {
         read_sse(resp, |ev| {
-            if !ev.is_message() || ev.data.trim().is_empty() {
+            let skip_event = !ev.is_message() || ev.data.trim().is_empty();
+            if skip_event {
                 return true;
             }
             match serde_json::from_str::<Value>(&ev.data) {
