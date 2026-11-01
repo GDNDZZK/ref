@@ -79,6 +79,8 @@
   --dialog-width-wide: 640px;
   --settings-width: 520px;
   --status-dot-size: 8px;
+  --window-button-margin: 14px;
+  --window-button-gap: 8px;
   --overlay-edge-margin: 24px;
   --dialog-padding: 22px;
   --dialog-header-height: 56px;
