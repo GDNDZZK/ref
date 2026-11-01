@@ -56,6 +56,7 @@ SessionDialog {
 			required property string name
 			required property string summary
 			required property string variants
+			selected: provider === dialog.session.provider && modelId === dialog.session.modelId
 			onActivated: {
 				// The variant stays when the new model has it.
 				const keep = variants.split(",").includes(dialog.session.variant) ? dialog.session.variant : ""
@@ -64,7 +65,7 @@ SessionDialog {
 			}
 
 			Column {
-				anchors { left: parent.left; leftMargin: Theme.dialogPadding; right: check.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+				anchors { left: parent.left; leftMargin: Theme.dialogPadding; right: row.check.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
 				spacing: 2
 
 				Text {
@@ -85,14 +86,6 @@ SessionDialog {
 				}
 			}
 
-			Icon {
-				id: check
-				anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
-				name: "check"
-				size: 16
-				color: Theme.accent
-				visible: row.provider === dialog.session.provider && row.modelId === dialog.session.modelId
-			}
 		}
 	}
 }
