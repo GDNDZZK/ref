@@ -19,9 +19,11 @@ impl TempDir {
         fs::create_dir_all(&p).unwrap();
         TempDir(p.canonicalize().unwrap())
     }
+
     fn path(&self) -> &Path {
         &self.0
     }
+
     fn write(&self, rel: &str, content: &str) -> PathBuf {
         let p = self.0.join(rel);
         fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -55,24 +57,30 @@ impl Fx {
             env: HashMap::new(),
         }
     }
+
     fn home(&self) -> PathBuf {
         self.t.path().join("home")
     }
+
     fn proj(&self) -> PathBuf {
         self.t.path().join("proj")
     }
+
     fn write(&self, rel: &str, content: &str) -> PathBuf {
         self.t.write(rel, content)
     }
+
     fn write_global_config(&self, json: &str) -> PathBuf {
         self.write(GLOBAL_CONFIG, json)
     }
+
     fn load_at(&self, cwd: &Path) -> Config {
         let home = self.home();
         let globals = [home.join(".config/opencode"), home.join(".config/ref")];
         let env = |k: &str| self.env.get(k).cloned();
         load_with(Some(&home), &globals, cwd, &env)
     }
+
     fn load(&self) -> Config {
         self.load_at(&self.proj())
     }
