@@ -9,6 +9,7 @@ Hand-drawn artwork shared by the TUI, GUI and WebUI.
 | `app/ref-small.svg` | Program icon for 16-48px and the favicon: "r." with every straight edge on whole pixels. |
 | `app/ref-small-alert.svg` | The small mark with a red dot: tab icon while a session needs attention. |
 | `app/ref-lockup-dark.svg`, `app/ref-lockup-light.svg` | The large mark and the word "ref" (README header, title cards). |
+| `app/ref-lockup-small-dark.svg`, `app/ref-lockup-small-light.svg` | The small mark and "ref", 60 x 24 with no padding: sidebar header of the GUI and the web page. Show it at 24px (1x) or 48px (2x) tall; other sizes lose the whole-pixel edges. |
 | `app/ref.ico` | Windows: 16, 24, 32, 48, 64, 128, 256, each size rendered separately. |
 | `app/ref.icns`, `app/ref-macos.svg` | macOS: 824px body on a 1024 canvas with the template shadow. |
 | `app/web/` | `favicon.svg`, `favicon-alert.svg`, `favicon.png` (32px, for browser notifications). |
