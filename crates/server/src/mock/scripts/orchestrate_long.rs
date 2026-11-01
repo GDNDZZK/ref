@@ -238,9 +238,7 @@ fn docs(ctx: &Ctx) -> Round {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mock::script::Step;
     use crate::mock::scripts::tests::ctx;
-    use serde_json::Value;
 
     const MAIN: &str = "ses_main";
 
@@ -250,17 +248,6 @@ mod tests {
         c.args = MAIN.into();
         c.session_id = MAIN.into();
         c
-    }
-
-    fn tool_calls(round: &Round) -> Vec<(&'static str, Value)> {
-        round
-            .steps
-            .iter()
-            .filter_map(|s| match s {
-                Step::Tool(c) => Some((c.name, c.input.clone())),
-                _ => None,
-            })
-            .collect()
     }
 
     #[test]
@@ -291,7 +278,7 @@ mod tests {
             let mut long = 0;
             let mut sent = 0;
             for round in 0..=report_round + 1 {
-                for (tool, input) in tool_calls(&play(&at(round))) {
+                for (tool, input) in play(&at(round)).tool_calls() {
                     match tool {
                         "bash" if input["command"].as_str().unwrap().contains("sleep") => {
                             assert!(sent == 0, "the command comes before the report");
@@ -312,7 +299,7 @@ mod tests {
     #[test]
     fn the_main_session_starts_the_long_helpers() {
         let first = directing(&at(2), PREFIX);
-        let calls = tool_calls(&first);
+        let calls = first.tool_calls();
         assert_eq!(calls[0].0, "create_session");
         assert_eq!(calls[0].1["name"], "fixer");
         assert_eq!(calls[0].1["prompt"], format!("orch-long-fixer {MAIN}"));
