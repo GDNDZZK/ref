@@ -315,11 +315,11 @@ fn decode_payload(img: &ImageData) -> Option<Vec<u8>> {
 /// Result of [`clamp`].
 #[derive(Debug, Clone)]
 struct Clamped {
-    pub mime: &'static str,
-    pub data: Vec<u8>,
+    mime: &'static str,
+    data: Vec<u8>,
     /// Only the tests read the size.
     #[cfg(test)]
-    pub size: (u32, u32),
+    size: (u32, u32),
 }
 
 /// Base64 length of `n` bytes (what Claude's size limit measures).
