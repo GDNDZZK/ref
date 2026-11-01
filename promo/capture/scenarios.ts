@@ -14,8 +14,8 @@ const AFTER_CARD_MS = 1200 // a permission card ignores keys for a moment
 const STREAM_MS = 5000
 const DELAY_RING_MS = 3000 // the text, a temporary file and the delete call take about 2 s
 const TOOLS_DONE = 'Done. The edit went through'
-// The mock `todo` script's last line: its to-do list is complete.
-const TODO_DONE = 'All steps are done.'
+// Lets the split view redraw after a tick of the `todo` list (the next tick is 2.3 s later).
+const AFTER_TICK_MS = 800
 const GUI_README_WIDTH = 1280
 const GUI_README_HEIGHT = 1344
 const LOGO_SVG = join(REPO_ROOT, 'assets', 'app', 'ref.svg')
@@ -62,6 +62,23 @@ const CARD_READ_MS = 2500
 const COUNTDOWN_WATCHED_MS = 3300
 const CLIP_HOLD_MS = 3000
 const SESSION_FOR_TAKE = 'parser-fix'
+// The `todo` script's first tick; stopped there, its list stays at 1/3 with step two in progress.
+const TODO_FIRST_TICK = 'Step one is done'
+const BEFORE_STOP_MS = 400
+const DOUBLE_ESC_GAP_MS = 150
+const AFTER_STOP_MS = 800
+
+// For README stills: the sidebar's to-do list in progress (one done, one in progress, one
+// pending). The `todo` turn is stopped with esc esc right after its first tick.
+async function leaveTodoInProgress(ui: Ui): Promise<void> {
+  await ui.send('todo')
+  await ui.waitText(TODO_FIRST_TICK)
+  await ui.pause(BEFORE_STOP_MS)
+  await ui.key('Escape')
+  await ui.pause(DOUBLE_ESC_GAP_MS)
+  await ui.key('Escape')
+  await ui.pause(AFTER_STOP_MS)
+}
 
 // Names the session, types `prompt` and starts the clip `clip`; Enter is the clip mark "enter".
 async function startTakeWithPrompt(ui: Ui, prompt: string, clip: string): Promise<void> {
@@ -87,11 +104,10 @@ export const SCENARIOS: Scenario[] = [
     },
   },
   {
-    // The README main view: a finished to-do list first, so the status line shows its item.
+    // The README main view, with a to-do list in progress in the sidebar and the status line.
     name: 'tools',
     async run(ui) {
-      await ui.send('todo')
-      await ui.waitText(TODO_DONE)
+      await leaveTodoInProgress(ui)
       await ui.send('tools')
       await ui.waitText(ui.text('status.waitingPermission'))
       await ui.pause(AFTER_CARD_MS)
@@ -107,6 +123,7 @@ export const SCENARIOS: Scenario[] = [
   {
     name: 'permission',
     async run(ui) {
+      await leaveTodoInProgress(ui)
       await ui.send('permission')
       await ui.waitText(ui.text('status.waitingPermission'))
       await ui.pause(AFTER_CARD_MS)
@@ -275,22 +292,21 @@ export const SCENARIOS: Scenario[] = [
   {
     // The README still of the split view. Every tile is finished or sits in a running tool call,
     // so no streaming caret is mid-chase, and the window is tall enough for the todo card to show.
+    // The `todo` session goes last, so it is the current one and the sidebar follows its list,
+    // photographed between the first and the second tick (one done, one in progress, one pending).
     name: 'readme-split',
     async run(ui) {
       if (ui.kind === 'gui') await ui.resize(GUI_README_WIDTH, GUI_README_HEIGHT)
+      for (const prompt of ['running', 'denied', 'hello']) {
+        await ui.send(prompt)
+        await ui.command('new')
+        await ui.pause(500)
+      }
       await ui.send('todo')
-      await ui.command('new')
-      await ui.pause(500)
-      await ui.send('running')
-      await ui.command('new')
-      await ui.pause(500)
-      await ui.send('denied')
-      await ui.command('new')
-      await ui.pause(500)
-      await ui.send('hello')
       await ui.pause(800)
       await ui.command('watch')
-      await ui.pause(2500)
+      await ui.waitText(TODO_FIRST_TICK)
+      await ui.pause(AFTER_TICK_MS)
       await ui.shot('split-readme', { readme: true, readmeName: shotFileName(ui.kind, 'split-view', ui.lang) })
     },
   },

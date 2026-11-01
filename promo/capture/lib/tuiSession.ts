@@ -11,6 +11,10 @@ const WAIT_TIMEOUT_MS = 20_000
 const WAIT_POLL_MS = 50
 const QUIT_KEYS = '\x18q' // ctrl+x q
 const QUIT_GRACE_MS = 1500
+// A still waits for this much silence after the last write: the chunks of one frame arrive
+// back to back, frames come 16 ms or more apart.
+const FRAME_QUIET_MS = 10
+const SETTLE_TIMEOUT_MS = 1000
 
 export interface TuiOptions {
   cols: number
@@ -112,6 +116,21 @@ export class TuiSession {
   // Everything the terminal has received so far; a "mark" for rendering a still of this moment.
   outputSoFar(): string {
     return this.events.filter(([, kind]) => kind === 'o').map(([, , text]) => text).join('')
+  }
+
+  // The output once the terminal has been quiet for a moment, so a still never shows half a
+  // redraw (the TUI writes one frame in several chunks).
+  async settledOutput(): Promise<string> {
+    const deadline = performance.now() + SETTLE_TIMEOUT_MS
+    while (performance.now() - this.lastOutputAt() < FRAME_QUIET_MS && performance.now() < deadline) {
+      await sleep(FRAME_QUIET_MS / 2)
+    }
+    return this.outputSoFar()
+  }
+
+  private lastOutputAt(): number {
+    const last = this.events.findLast(([, kind]) => kind === 'o')
+    return last ? this.startedAt + last[0] * 1000 : 0
   }
 
   saveCast(file: string): void {

@@ -65,12 +65,33 @@ async function captureTools(browser: Browser): Promise<void> {
 
     await tui.waitForText('Done.')
     await tui.pause(DIALOG_SETTLE_MS)
-    const done = tui.outputSoFar()
 
     mkdirSync(CASTS_DIR, { recursive: true })
     tui.saveCast(join(CASTS_DIR, 'tui-tools.cast'))
     await still(browser, permission, 'tui-permission', true)
-    await still(browser, done, 'tui-main', true)
+  }, README_SIZE)
+}
+
+// The README's tui-main: the crew of the hero script mid-run, so the sidebar shows main's to-do
+// list in progress (two done, one in progress, two pending) and the five live sessions.
+const CREW_TASK = 'orchestrate: fix the parser bug' // short enough for a whole sidebar title
+const CREW_SESSION = 'main'
+const RENAME_AFTER_MS = 1500
+// main's status-line item while the tester works, about 15 s after the task, for some 3 s.
+const CREW_MID_RUN = 'Test the fix · 2/5'
+const CREW_TIMEOUT_MS = 60_000
+const MID_RUN_SETTLE_MS = 800
+
+async function captureMain(browser: Browser): Promise<void> {
+  await withTui(async (tui) => {
+    await tui.type(CREW_TASK, TYPING_DELAY_MS)
+    tui.send(KEYS.enter)
+    await tui.pause(RENAME_AFTER_MS)
+    await tui.type(`/rename ${CREW_SESSION}`, TYPING_DELAY_MS)
+    tui.send(KEYS.enter)
+    await tui.waitForText(CREW_MID_RUN, CREW_TIMEOUT_MS)
+    await tui.pause(MID_RUN_SETTLE_MS)
+    await still(browser, await tui.settledOutput(), 'tui-main', true)
   }, README_SIZE)
 }
 
@@ -215,6 +236,7 @@ function sleep(ms: number): Promise<void> {
 // TUI captures by name, for `pnpm capture tui --only name`.
 export const TUI_CAPTURES: Record<string, (browser: Browser) => Promise<void>> = {
   tools: captureTools,
+  main: captureMain,
   split: captureSplit,
   outage: captureOutage,
   longrun: captureLongrun,
