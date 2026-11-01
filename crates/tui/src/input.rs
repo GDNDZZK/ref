@@ -11,7 +11,7 @@ use ref_proto::ImageData;
 use crate::app::{ARMED_KEY_TIMEOUT, App, COMMANDS, Mode};
 use crate::render;
 use crate::ui::dialog::{Dialog, Kind, PAGE_ROWS};
-use crate::ui::editor::Editor;
+use crate::ui::editor::{Editor, MIN_PROMPT_WIDTH};
 use crate::ui::permission::PermissionAction;
 use crate::ui::question::Outcome;
 use crate::ui::{Hit, chat, split, theme};
@@ -354,7 +354,11 @@ pub(crate) fn edit_key(e: &mut Editor, k: &KeyEvent, multiline: bool) -> bool {
 
 /// Shift+Up/Down scroll the transcript only while the prompt is one row with no selection.
 fn single_row_editor_without_selection(app: &App) -> bool {
-    app.editor.selection().is_none() && app.editor.height(app.editor.last_width.max(1)) <= 1
+    app.editor.selection().is_none()
+        && app
+            .editor
+            .height(app.editor.last_width.max(MIN_PROMPT_WIDTH))
+            <= 1
 }
 
 /// `!` at the start of an empty prompt switches to shell mode.

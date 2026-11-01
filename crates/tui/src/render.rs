@@ -11,6 +11,7 @@ use crate::state::SessionView;
 use crate::text::{self, width};
 use crate::ui::chat::{self, Env};
 use crate::ui::dialog::Dialog;
+use crate::ui::editor::MIN_PROMPT_WIDTH;
 use crate::ui::footer::{self, StatusCtx};
 use crate::ui::message;
 use crate::ui::permission::PermissionView;
@@ -61,7 +62,7 @@ pub fn chat_layout(app: &App, area: Rect) -> Layout {
     // Prompt box: bar(1) + pad(2) + text + pad(2) inside the side margins.
     let px = main.x + PROMPT_MARGIN_X;
     let pw = main.width.saturating_sub(2 * PROMPT_MARGIN_X);
-    let ew = pw.saturating_sub(PROMPT_CHROME_COLS).max(1) as usize;
+    let ew = (pw.saturating_sub(PROMPT_CHROME_COLS) as usize).max(MIN_PROMPT_WIDTH);
     let max_h = EDITOR_MAX.min((area.height as usize / 3).max(1));
     let eh = app.editor.height(ew).clamp(1, max_h) as u16;
     let prompt_h = eh + PROMPT_CHROME_ROWS;
