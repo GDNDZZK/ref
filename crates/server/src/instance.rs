@@ -57,12 +57,18 @@ fn list_instances(dir: &Path) -> Vec<InstanceInfo> {
     out
 }
 
-/// Random free port in 10000..=65535 (bind-tested on `host`).
+/// Ports `pick_port` chooses from.
+const PORT_RANGE: std::ops::RangeInclusive<u16> = 10_000..=65_535;
+
+/// How many random ports `pick_port` tries before giving up.
+const PORT_ATTEMPTS: u32 = 500;
+
+/// Random free port in `PORT_RANGE` (bind-tested on `host`).
 pub fn pick_port(host: &str) -> Option<u16> {
     use rand::Rng;
     let mut rng = rand::rng();
-    for _ in 0..500 {
-        let p: u16 = rng.random_range(10000..=65535);
+    for _ in 0..PORT_ATTEMPTS {
+        let p: u16 = rng.random_range(PORT_RANGE);
         if std::net::TcpListener::bind((host, p)).is_ok() {
             return Some(p);
         }
