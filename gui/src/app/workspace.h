@@ -59,6 +59,8 @@ class Workspace : public QObject
 	Q_PROPERTY(TileStage* tileStage READ tileStage CONSTANT)
 	Q_PROPERTY(bool splitView READ isSplitView NOTIFY splitViewChanged)
 	Q_PROPERTY(QString focusedTileId READ focusedTileId NOTIFY focusedTileChanged)
+	// The session in front: the focused tile's in split view, else the current one. What the sidebar marks and shows the to-do list of.
+	Q_PROPERTY(ChatSession* frontSession READ frontSession NOTIFY frontSessionChanged)
 	Q_PROPERTY(QString zoomedId READ zoomedId NOTIFY zoomedChanged)
 	// The dialog on screen: "" for none, else palette, settings, sessions, models, agents,
 	// variants, help, mcp, peers, export, cd, new-in, close, rename or delete-history.
@@ -85,6 +87,7 @@ public:
 	// The connection to the backend, which the notification center shares.
 	refgui::client::Backend& backend() { return m_backend; }
 	ChatSession* current() const { return m_current; }
+	ChatSession* frontSession() { return session(m_frontId); }
 	QString currentId() const;
 	// "connecting", "starting", "connected" or "disconnected".
 	QString connectionState() const;
@@ -184,6 +187,7 @@ signals:
 	void historyLoadedChanged();
 	void splitViewChanged();
 	void focusedTileChanged();
+	void frontSessionChanged();
 	// A session is about to be deleted; whoever shows it must let go first. It is no longer current.
 	void sessionDropped(ChatSession* session);
 	void zoomedChanged();
@@ -264,6 +268,7 @@ private:
 	QString m_dialog;
 	QVariantMap m_dialogArgs;
 	QString m_focusedTile;
+	QString m_frontId; // the id behind frontSession
 	QString m_zoomed;
 	QSet<QString> m_tileAttaching;
 	QSet<QString> m_unzooming; // unzoomed sessions whose foreground the backend has not yet been told to give up
