@@ -14,7 +14,7 @@ use crate::{
     AssistantBlock, BlockKind, ChatMessage, LlmError, Model, Provider, Request, Response,
     StreamEvent, UserContent,
 };
-use ref_proto::Usage;
+use ref_proto::{ImageData, Usage};
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 
@@ -209,42 +209,57 @@ fn convert_messages(provider: &Provider, model: &Model, req: &Request) -> Vec<Va
                 images,
                 ..
             } => {
-                let mut text = content.clone();
-                if !model.images && !images.is_empty() {
-                    // No follow-up user message for models that cannot see images; just note it.
-                    if !text.trim().is_empty() {
-                        text.push_str("\n\n");
-                    }
-                    text.push_str(IMAGE_OMITTED);
-                } else if text.trim().is_empty() {
-                    text = if images.is_empty() {
-                        NO_TOOL_OUTPUT.into()
-                    } else {
-                        SEE_ATTACHED_IMAGE.into()
-                    };
-                }
-                out.push(json!({
-                    "role": "tool",
-                    "tool_call_id": normalize_call_id(call_id, MAX_CALL_ID),
-                    "content": text,
-                }));
-                if model.images {
-                    for img in images {
-                        tool_images.push(
-                            json!({"type": "image_url", "image_url": {"url": data_url(img)}}),
-                        );
-                    }
-                }
                 let run_ends = !matches!(history.get(i + 1), Some(ChatMessage::ToolResult { .. }));
-                if run_ends && !tool_images.is_empty() {
-                    let mut content = vec![
-                        json!({"type": "text", "text": "Attached image(s) from tool result:"}),
-                    ];
-                    content.append(&mut tool_images);
-                    out.push(json!({"role": "user", "content": content}));
-                }
+                out.extend(tool_result_messages(
+                    model,
+                    (call_id, content, images),
+                    run_ends,
+                    &mut tool_images,
+                ));
             }
         }
+    }
+    out
+}
+
+/// Lower one tool result to a `tool` message. Images are collected in `tool_images` and
+/// follow as one user message after the last result of a run.
+fn tool_result_messages(
+    model: &Model,
+    (call_id, content, images): (&str, &str, &[ImageData]),
+    run_ends: bool,
+    tool_images: &mut Vec<Value>,
+) -> Vec<Value> {
+    let mut out = Vec::new();
+    let mut text = content.to_string();
+    if !model.images && !images.is_empty() {
+        // No follow-up user message for models that cannot see images; just note it.
+        if !text.trim().is_empty() {
+            text.push_str("\n\n");
+        }
+        text.push_str(IMAGE_OMITTED);
+    } else if text.trim().is_empty() {
+        text = if images.is_empty() {
+            NO_TOOL_OUTPUT.into()
+        } else {
+            SEE_ATTACHED_IMAGE.into()
+        };
+    }
+    out.push(json!({
+        "role": "tool",
+        "tool_call_id": normalize_call_id(call_id, MAX_CALL_ID),
+        "content": text,
+    }));
+    if model.images {
+        for img in images {
+            tool_images.push(json!({"type": "image_url", "image_url": {"url": data_url(img)}}));
+        }
+    }
+    if run_ends && !tool_images.is_empty() {
+        let mut content =
+            vec![json!({"type": "text", "text": "Attached image(s) from tool result:"})];
+        content.append(tool_images);
+        out.push(json!({"role": "user", "content": content}));
     }
     out
 }
