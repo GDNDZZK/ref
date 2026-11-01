@@ -54,7 +54,8 @@ pub const TEST_CWD: &str = "/home/u/proj";
 pub const PAST_GRACE: std::time::Duration =
     crate::input::MODAL_GRACE.saturating_add(std::time::Duration::from_millis(50));
 
-/// Pump durations (ms) for the in-process mock backend.
+// Pump durations (ms) for the in-process mock backend.
+
 /// A full mock turn, or startup with an init plan.
 const PUMP_TURN_MS: u64 = 2500;
 /// Tiles of background sessions to appear.

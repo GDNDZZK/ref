@@ -11,7 +11,6 @@ use super::editor::Editor;
 use super::theme;
 use crate::text::{self, width};
 
-/// Length of the open animation, in seconds.
 /// Score bonus when the filter matches the title itself.
 const TITLE_MATCH_BONUS: i64 = 20;
 /// Rows moved by one page key in a list or text dialog.
@@ -27,7 +26,8 @@ const MIN_W_FOR_ESC_HINT: u16 = 20;
 /// Width of the key column in the help text.
 const KEY_COLUMN_W: usize = 30;
 
-pub const OPEN_ANIM_SECS: f32 = 0.12;
+/// Length of the open animation, in seconds.
+const OPEN_ANIM_SECS: f32 = 0.12;
 /// How long after opening a dialog still needs redraws (the animation plus a margin).
 pub const OPEN_SETTLE: Duration = Duration::from_millis(150);
 

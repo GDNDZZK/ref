@@ -437,7 +437,6 @@ const DEFERRED_COMMAND_TTL: Duration = Duration::from_secs(10);
 const LEADER_TIMEOUT: Duration = Duration::from_secs(2);
 /// "Press again" window of the armed keys (esc to interrupt, ctrl+c to exit).
 pub const ARMED_KEY_TIMEOUT: Duration = Duration::from_millis(1500);
-/// How long a hint stays in the footer.
 /// Toast when an action needs the backend while it is unreachable.
 const NOT_CONNECTED: &str = "Not connected to the backend";
 /// Marks the selected row of a dialog.
@@ -446,6 +445,7 @@ const SELECTED_GLYPH: &str = "●";
 const LIVE_KEY_PREFIX: &str = "live:";
 const HISTORY_KEY_PREFIX: &str = "hist:";
 const SERVER_COMMAND_KEY_PREFIX: &str = "srv:";
+/// How long a hint stays in the footer.
 const HINT_DURATION: Duration = Duration::from_millis(1500);
 /// How long the second press of close / undo confirmation is accepted.
 const CONFIRM_WINDOW: Duration = Duration::from_secs(4);
@@ -3160,7 +3160,6 @@ fn epilogue_text(info: &SessionInfo, resumable: bool) -> String {
     out
 }
 
-/// `images` of an `Undo` / `RemoveQueued` response (to put back into the editor).
 /// Images of a restored prompt: those in the response, else the queued row's own.
 fn restored_images(
     result: &Value,
@@ -3177,6 +3176,7 @@ fn restored_images(
         .collect()
 }
 
+/// `images` of an `Undo` / `RemoveQueued` response (to put back into the editor).
 fn response_images(result: &Value) -> Vec<(ImageData, Option<String>)> {
     let list: Vec<ref_proto::NamedImage> = result
         .get("images")
