@@ -261,6 +261,19 @@ fn substitution_env_and_file() {
     assert!(c.warnings[0].contains("missing.txt"));
 }
 
+// Bug: a `~/` entry in two layers was listed twice, because the second layer compared the
+// unexpanded entry with the already expanded one from the first layer.
+#[test]
+fn home_instruction_in_two_layers_is_listed_once() {
+    let fx = Fx::new();
+    fx.write_global_config(r#"{"instructions": ["~/a.md"]}"#);
+    fx.write("proj/opencode.json", r#"{"instructions": ["~/a.md"]}"#);
+
+    let c = fx.load();
+    let expected = fx.home().join("a.md").to_string_lossy().into_owned();
+    assert_eq!(c.instructions, [expected]);
+}
+
 #[test]
 fn merge_order_and_project_walk() {
     let fx = Fx::new();
