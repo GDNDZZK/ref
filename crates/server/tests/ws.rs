@@ -79,7 +79,7 @@ async fn ws_smoke() {
         1,
         Request::Hello {
             client: "test".into(),
-            version: 1,
+            version: ref_proto::PROTOCOL_VERSION,
             cwd: work.to_string_lossy().into(),
             token: Some("sekret".into()),
             notify: Vec::new(),
@@ -245,7 +245,7 @@ async fn ws_first_frame_must_be_hello_and_idle_zero_shuts_down() {
         1,
         Request::Hello {
             client: "t".into(),
-            version: 1,
+            version: ref_proto::PROTOCOL_VERSION,
             cwd: work.to_string_lossy().into(),
             token: None,
             notify: Vec::new(),
