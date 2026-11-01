@@ -22,15 +22,15 @@ async fn rig(handler: Handler) -> Rig {
     let mock = mock(handler).await;
     let mut cfg = config(&mock.url);
     cfg.agents.insert(
-        "review".into(),
+        REVIEW.into(),
         ref_config::AgentConfig {
-            name: "review".into(),
+            name: REVIEW.into(),
             description: "Reviewer".into(),
             ..Default::default()
         },
     );
     let (hub, work) = hub(cfg, "agent-switch");
-    let session = session(&hub, &work, "main", "build").await;
+    let session = session(&hub, &work, MAIN_SESSION, BUILD).await;
     let conn = hub.add_conn();
     conn.lock().hello = true;
     let attach = Request::Attach {
@@ -141,8 +141,8 @@ async fn an_idle_switch_after_history_adds_one_reminder_and_no_model_turn() {
     prompt(&rig.hub, &rig.session, "first");
     wait_idle(&rig.session).await;
     rig.events();
-    rig.switch("worker").await;
-    assert_eq!(rig.notes(), [from_to("build", "worker")]);
+    rig.switch(WORKER).await;
+    assert_eq!(rig.notes(), [from_to(BUILD, WORKER)]);
     assert!(rig.session.lock().run.is_none());
     assert_eq!(rig.mock.count(), 1, "no LLM request for a reminder");
     let events = rig.events();
@@ -156,15 +156,15 @@ async fn an_idle_switch_after_history_adds_one_reminder_and_no_model_turn() {
     prompt(&rig.hub, &rig.session, "go");
     wait_idle(&rig.session).await;
     let request = rig.mock.bodies()[1].to_string();
-    assert!(request.contains(&from_to("build", "worker")), "{request}");
+    assert!(request.contains(&from_to(BUILD, WORKER)), "{request}");
 }
 
 #[tokio::test]
 async fn switching_an_empty_session_only_changes_the_agent() {
     let rig = rig(text_handler()).await;
-    rig.switch("worker").await;
-    rig.switch("review").await;
-    assert_eq!(rig.session.info().agent, "review");
+    rig.switch(WORKER).await;
+    rig.switch(REVIEW).await;
+    assert_eq!(rig.session.info().agent, REVIEW);
     assert!(messages(&rig.session).is_empty());
     assert!(rig.session.lock().agent_switch.is_none());
     assert!(
@@ -182,20 +182,20 @@ async fn switching_an_empty_session_only_changes_the_agent() {
 #[tokio::test]
 async fn switching_to_the_current_agent_adds_nothing() {
     let rig = rig(text_handler()).await;
-    rig.switch("build").await;
+    rig.switch(BUILD).await;
     assert!(rig.notes().is_empty());
 }
 
 #[tokio::test]
 async fn quick_switches_share_one_reminder() {
     let rig = rig_with_history(text_handler()).await;
-    rig.switch("worker").await;
+    rig.switch(WORKER).await;
     let id = rig.reminder_id();
-    rig.switch("review").await;
-    assert_eq!(rig.notes(), [from_to("build", "review")]);
+    rig.switch(REVIEW).await;
+    assert_eq!(rig.notes(), [from_to(BUILD, REVIEW)]);
     assert_eq!(rig.reminder_id(), id, "updated in place");
     let replaced = rig.events().into_iter().any(|e| {
-        matches!(e, SessionEvent::Message { message } if message.id == id && message.raw_text() == from_to("build", "review"))
+        matches!(e, SessionEvent::Message { message } if message.id == id && message.raw_text() == from_to(BUILD, REVIEW))
     });
     assert!(replaced, "clients get the new text under the same id");
 }
@@ -203,10 +203,10 @@ async fn quick_switches_share_one_reminder() {
 #[tokio::test]
 async fn switching_back_removes_the_reminder() {
     let rig = rig_with_history(text_handler()).await;
-    rig.switch("worker").await;
+    rig.switch(WORKER).await;
     let id = rig.reminder_id();
     rig.events();
-    rig.switch("build").await;
+    rig.switch(BUILD).await;
     assert!(rig.notes().is_empty());
     let removed = rig
         .events()
@@ -218,13 +218,13 @@ async fn switching_back_removes_the_reminder() {
 #[tokio::test]
 async fn an_answered_reminder_is_not_rewritten() {
     let rig = rig_with_history(text_handler()).await;
-    rig.switch("worker").await;
+    rig.switch(WORKER).await;
     prompt(&rig.hub, &rig.session, "go");
     wait_idle(&rig.session).await;
-    rig.switch("review").await;
+    rig.switch(REVIEW).await;
     assert_eq!(
         rig.notes(),
-        [from_to("build", "worker"), from_to("worker", "review")]
+        [from_to(BUILD, WORKER), from_to(WORKER, REVIEW)]
     );
 }
 
@@ -233,17 +233,17 @@ async fn a_switch_during_a_run_is_told_before_the_next_request() {
     let rig = rig(slow_tool_handler()).await;
     prompt(&rig.hub, &rig.session, "go");
     rig.wait_running().await;
-    rig.switch("worker").await;
+    rig.switch(WORKER).await;
     assert!(
         rig.notes().is_empty(),
         "not written while the run is active"
     );
     wait_idle(&rig.session).await;
 
-    assert_eq!(rig.notes(), [from_to("build", "worker")]);
+    assert_eq!(rig.notes(), [from_to(BUILD, WORKER)]);
     let bodies = rig.mock.bodies();
     assert!(!bodies[0].to_string().contains(MARKER));
-    assert!(bodies[1].to_string().contains(&from_to("build", "worker")));
+    assert!(bodies[1].to_string().contains(&from_to(BUILD, WORKER)));
     // The reminder and the new agent's tools reach the model in the same request.
     let has_tool = |body: &serde_json::Value, name: &str| {
         body["tools"]
@@ -272,16 +272,16 @@ async fn quick_switches_during_a_run_leave_one_reminder_or_none() {
     let rig = rig(slow_tool_handler()).await;
     prompt(&rig.hub, &rig.session, "go");
     rig.wait_running().await;
-    rig.switch("worker").await;
-    rig.switch("review").await;
+    rig.switch(WORKER).await;
+    rig.switch(REVIEW).await;
     wait_idle(&rig.session).await;
-    assert_eq!(rig.notes(), [from_to("build", "review")]);
+    assert_eq!(rig.notes(), [from_to(BUILD, REVIEW)]);
 
     let back = self::rig(slow_tool_handler()).await;
     prompt(&back.hub, &back.session, "go");
     back.wait_running().await;
-    back.switch("worker").await;
-    back.switch("build").await;
+    back.switch(WORKER).await;
+    back.switch(BUILD).await;
     wait_idle(&back.session).await;
     assert!(back.notes().is_empty());
     assert!(!back.mock.bodies()[1].to_string().contains(MARKER));
@@ -296,13 +296,13 @@ async fn a_switch_just_before_the_run_ends_is_recorded_without_a_new_turn() {
         !m.lock().unwrap().is_empty()
     })
     .await;
-    rig.switch("worker").await;
+    rig.switch(WORKER).await;
     let abort = Request::Abort {
         session_id: rig.session.id.clone(),
     };
     api::handle(&rig.hub, &rig.conn, abort).await.unwrap();
     wait_idle(&rig.session).await;
-    assert_eq!(rig.notes(), [from_to("build", "worker")]);
+    assert_eq!(rig.notes(), [from_to(BUILD, WORKER)]);
     assert_eq!(
         rig.mock.count(),
         1,
@@ -323,7 +323,7 @@ impl Rig {
 #[tokio::test]
 async fn undoing_the_reminder_makes_the_next_switch_start_from_the_agent_the_model_saw() {
     let rig = rig_with_history(text_handler()).await;
-    rig.switch("worker").await;
+    rig.switch(WORKER).await;
     prompt(&rig.hub, &rig.session, "second");
     wait_idle(&rig.session).await;
     let id = rig.reminder_id();
@@ -331,17 +331,17 @@ async fn undoing_the_reminder_makes_the_next_switch_start_from_the_agent_the_mod
     assert!(rig.notes().is_empty());
 
     // The model last saw the build agent, whatever the agent is now.
-    rig.switch("review").await;
-    assert_eq!(rig.notes(), [from_to("build", "review")]);
+    rig.switch(REVIEW).await;
+    assert_eq!(rig.notes(), [from_to(BUILD, REVIEW)]);
 }
 
 #[tokio::test]
 async fn undoing_back_to_the_agent_the_model_saw_leaves_no_pending_switch() {
     let rig = rig_with_history(text_handler()).await;
-    rig.switch("worker").await;
+    rig.switch(WORKER).await;
     let id = rig.reminder_id();
     rig.undo(Some(id)).await;
-    rig.switch("build").await;
+    rig.switch(BUILD).await;
     assert!(rig.notes().is_empty());
     assert!(rig.session.lock().agent_switch.is_none());
 }
@@ -349,12 +349,12 @@ async fn undoing_back_to_the_agent_the_model_saw_leaves_no_pending_switch() {
 #[tokio::test]
 async fn undoing_the_whole_conversation_forgets_the_switch() {
     let rig = rig_with_history(text_handler()).await;
-    rig.switch("worker").await;
+    rig.switch(WORKER).await;
     rig.undo(None).await;
     assert!(messages(&rig.session).is_empty());
-    rig.switch("review").await;
+    rig.switch(REVIEW).await;
     assert!(rig.notes().is_empty());
-    assert_eq!(rig.session.info().agent, "review");
+    assert_eq!(rig.session.info().agent, REVIEW);
 }
 
 #[tokio::test]
@@ -376,7 +376,7 @@ async fn a_switch_during_manual_compaction_is_told_after_the_summary() {
         },
     )
     .unwrap();
-    rig.switch("worker").await;
+    rig.switch(WORKER).await;
     assert!(
         rig.notes().is_empty(),
         "not written while the run is active"
@@ -387,14 +387,14 @@ async fn a_switch_during_manual_compaction_is_told_after_the_summary() {
     let msgs = messages(&rig.session);
     let last = msgs.last().unwrap();
     assert_eq!(last.source, MessageSource::Reminder);
-    assert_eq!(last.raw_text(), from_to("build", "worker"));
+    assert_eq!(last.raw_text(), from_to(BUILD, WORKER));
     assert_eq!(msgs[msgs.len() - 2].source, MessageSource::Compaction);
     assert_eq!(rig.notes().len(), 1);
 
     prompt(&rig.hub, &rig.session, "next");
     wait_idle(&rig.session).await;
     let request = rig.mock.bodies()[2].to_string();
-    assert!(request.contains("summary") && request.contains(&from_to("build", "worker")));
+    assert!(request.contains("summary") && request.contains(&from_to(BUILD, WORKER)));
 }
 
 #[tokio::test]
@@ -410,7 +410,7 @@ async fn a_second_switch_in_the_same_run_adds_a_second_reminder() {
     .await;
     prompt(&rig.hub, &rig.session, "go");
     rig.wait_running().await;
-    rig.switch("worker").await;
+    rig.switch(WORKER).await;
     // The first reminder is written before the second request; its tool runs next.
     let s = rig.session.clone();
     wait_until("first reminder told", Duration::from_secs(10), move || {
@@ -423,16 +423,16 @@ async fn a_second_switch_in_the_same_run_adds_a_second_reminder() {
             })
     })
     .await;
-    rig.switch("review").await;
+    rig.switch(REVIEW).await;
     wait_idle(&rig.session).await;
     assert_eq!(
         rig.notes(),
-        [from_to("build", "worker"), from_to("worker", "review")]
+        [from_to(BUILD, WORKER), from_to(WORKER, REVIEW)]
     );
     assert!(
         rig.mock.bodies()[2]
             .to_string()
-            .contains(&from_to("worker", "review"))
+            .contains(&from_to(WORKER, REVIEW))
     );
 }
 
@@ -441,12 +441,12 @@ async fn a_pending_switch_is_not_persisted() {
     let rig = rig(slow_tool_handler()).await;
     prompt(&rig.hub, &rig.session, "go");
     rig.wait_running().await;
-    rig.switch("worker").await;
+    rig.switch(WORKER).await;
     assert!(rig.session.lock().agent_switch.is_some());
 
     // What a reload would see: the new agent, but no reminder and no memory of the switch.
     let saved = rig.session.persisted();
-    assert_eq!(saved.info.agent, "worker");
+    assert_eq!(saved.info.agent, WORKER);
     assert!(
         saved
             .messages

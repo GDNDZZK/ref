@@ -105,7 +105,7 @@ async fn ws_smoke() {
     assert!(ok, "{err:?}");
     let sid = res["session"]["id"].as_str().unwrap().to_string();
     assert_eq!(res["session"]["name"], "ワーク");
-    assert_eq!(res["session"]["agent"], "build");
+    assert_eq!(res["session"]["agent"], BUILD);
 
     // Duplicate name from a frontend -> error.
     send(

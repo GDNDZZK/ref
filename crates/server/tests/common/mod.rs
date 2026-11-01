@@ -12,6 +12,12 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
+/// Agent and session names that `config()` defines.
+pub const BUILD: &str = "build";
+pub const WORKER: &str = "worker";
+pub const REVIEW: &str = "review";
+pub const MAIN_SESSION: &str = "main";
+
 /// Usage the mock server reports for every non-title reply.
 pub const MOCK_PROMPT_TOKENS: u64 = 1000;
 pub const MOCK_COMPLETION_TOKENS: u64 = 20;
@@ -222,11 +228,11 @@ pub fn config(base_url: &str) -> Config {
         model: "m".into(),
         variant: None,
     });
-    cfg.default_agent = "build".into();
+    cfg.default_agent = BUILD.into();
     cfg.agents.insert(
-        "build".into(),
+        BUILD.into(),
         AgentConfig {
-            name: "build".into(),
+            name: BUILD.into(),
             description: "Builder".into(),
             creatable: true,
             can_spawn: true,
@@ -234,9 +240,9 @@ pub fn config(base_url: &str) -> Config {
         },
     );
     cfg.agents.insert(
-        "worker".into(),
+        WORKER.into(),
         AgentConfig {
-            name: "worker".into(),
+            name: WORKER.into(),
             description: "Worker".into(),
             creatable: true,
             ..Default::default()

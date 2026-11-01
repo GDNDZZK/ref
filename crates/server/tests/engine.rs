@@ -13,7 +13,7 @@ const T: Duration = Duration::from_secs(10);
 async fn basic_turn_and_persistence() {
     let m = mock(Arc::new(|_, _| Reply::Text("Hello there".into()))).await;
     let (hub, work) = hub(config(&m.url), "basic");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "hi");
     wait_idle(&s).await;
     assert_eq!(last_text(&s), "Hello there");
@@ -63,7 +63,7 @@ async fn tool_loop_errors_do_not_terminate_and_replay_is_stable() {
     }))
     .await;
     let (hub, work) = hub(config(&m.url), "toolloop");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "go");
     wait_idle(&s).await;
     assert_eq!(last_text(&s), "done");
@@ -148,7 +148,7 @@ async fn permission_ask_then_reply_and_deny() {
     let mut cfg = config(&m.url);
     cfg.permission = perms(json!({"bash": "ask", "delete": {"*": "deny", "keep": "allow"}}));
     let (hub, work) = hub(cfg, "perm");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "go");
     // First ask: allow once.
     let s2 = s.clone();
@@ -215,7 +215,7 @@ async fn permission_always_allows_rest_of_session() {
     let mut cfg = config(&m.url);
     cfg.permission = perms(json!({"bash": "ask"}));
     let (hub, work) = hub(cfg, "always");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "go");
     let s2 = s.clone();
     wait_until("permission", T, move || s2.lock().perms.len() == 1).await;
@@ -248,11 +248,11 @@ async fn agent_permission_overrides_global_and_delay_applies() {
     .await;
     let mut cfg = config(&m.url);
     cfg.permission = perms(json!({"bash": "deny"}));
-    cfg.agents.get_mut("build").unwrap().permission = perms(json!({"bash": "allow"}));
+    cfg.agents.get_mut(BUILD).unwrap().permission = perms(json!({"bash": "allow"}));
     cfg.delay = vec![("bash".into(), 5.0)];
-    cfg.agents.get_mut("build").unwrap().delay = vec![("bash".into(), 0.4)];
+    cfg.agents.get_mut(BUILD).unwrap().delay = vec![("bash".into(), 0.4)];
     let (hub, work) = hub(cfg, "delay");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     let start = std::time::Instant::now();
     prompt(&hub, &s, "go");
     let s2 = s.clone();
@@ -299,7 +299,7 @@ async fn an_allowed_tool_no_longer_shows_waiting_for_permission_during_its_delay
     cfg.permission = perms(json!({"bash": "ask"}));
     cfg.delay = vec![("bash".into(), 1.5)];
     let (hub, work) = hub(cfg, "ask-delay");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "go");
     let s2 = s.clone();
     wait_until("waiting", T, move || {
@@ -354,7 +354,7 @@ async fn abort_during_delay_and_stream() {
     let mut cfg = config(&m.url);
     cfg.delay = vec![("bash".into(), 30.0)];
     let (hub, work) = hub(cfg, "abort");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "go");
     let s2 = s.clone();
     wait_until("delayed", T, move || {
@@ -401,7 +401,7 @@ async fn retry_on_500_then_success() {
     }))
     .await;
     let (hub, work) = hub(config(&m.url), "retry");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "go");
     wait_idle(&s).await;
     assert_eq!(last_text(&s), "recovered");
@@ -417,7 +417,7 @@ async fn non_retryable_error_fails_after_three_attempts() {
     }))
     .await;
     let (hub, work) = hub(config(&m.url), "fail");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "go");
     wait_idle(&s).await;
     assert_eq!(m.count(), 3);
@@ -468,7 +468,7 @@ async fn compact_context_tool_keeps_history_but_sends_summary_only() {
     }))
     .await;
     let (hub, work) = hub(config(&m.url), "compact");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "start");
     wait_idle(&s).await;
     let msgs = messages(&s);
@@ -508,7 +508,7 @@ async fn manual_compaction_uses_model_summary_and_undo_restores_context() {
     }))
     .await;
     let (hub, work) = hub(config(&m.url), "manualcompact");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "q");
     wait_idle(&s).await;
     ref_server::engine::start_custom_run(&hub, &s, ref_server::compaction::manual).unwrap();
@@ -602,7 +602,7 @@ async fn compaction_agent_prompt_and_model_from_config() {
         },
     );
     let (hub, work) = hub(cfg, "compactagent");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "q");
     wait_idle(&s).await;
     ref_server::engine::start_custom_run(&hub, &s, ref_server::compaction::manual).unwrap();
@@ -661,7 +661,7 @@ async fn recommend_compaction_notice_once_per_epoch() {
     let mut cfg = config(&m.url);
     cfg.compaction.recommend = 1000.0;
     let (hub, work) = hub(cfg, "notice");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "go");
     wait_idle(&s).await;
     // Injected after the tool batch, before the next request of the same run.
@@ -757,7 +757,7 @@ async fn context_window_tool() {
     }))
     .await;
     let (hub, work) = hub(config(&m.url), "ctx");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "1");
     wait_idle(&s).await;
     prompt(&hub, &s, "2");
@@ -803,8 +803,8 @@ async fn peer_send_message_between_sessions() {
     }))
     .await;
     let (hub, work) = hub(config(&m.url), "peers");
-    let alice = session(&hub, &work, "alice", "build").await;
-    let bob = session(&hub, &work, "ボブ", "build").await;
+    let alice = session(&hub, &work, "alice", BUILD).await;
+    let bob = session(&hub, &work, "ボブ", BUILD).await;
     prompt(&hub, &alice, "ping bob");
     wait_idle(&alice).await;
     let b2 = bob.clone();
@@ -935,7 +935,7 @@ async fn queued_message_delivered_after_current_step() {
     }))
     .await;
     let (hub, work) = hub(config(&m.url), "queue");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "first");
     let s2 = s.clone();
     wait_until("running", T, move || {
@@ -973,7 +973,7 @@ async fn remove_queued_message_before_delivery() {
     }))
     .await;
     let (hub, work) = hub(config(&m.url), "unqueue");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     let conn = hub.add_conn();
     conn.lock().hello = true;
     let req = |text: &str| ref_proto::Request::Prompt {
@@ -1090,7 +1090,7 @@ async fn remove_queued_after_delivery_removes_nothing() {
     }))
     .await;
     let (hub, work) = hub(config(&m.url), "unqueue-late");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     let conn = hub.add_conn();
     conn.lock().hello = true;
     prompt(&hub, &s, "first");
@@ -1162,7 +1162,7 @@ async fn busy_since_is_the_run_start_and_cleared_when_idle() {
     }))
     .await;
     let (hub, work) = hub(config(&m.url), "busy-since");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     assert_eq!(s.info().busy_since, None);
     let before = ref_proto::now_ms();
     prompt(&hub, &s, "first");
@@ -1193,7 +1193,7 @@ async fn manual_compaction_never_shows_busy_since_while_idle() {
     }))
     .await;
     let (hub, work) = hub(config(&m.url), "compact-busy");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "q");
     wait_idle(&s).await;
     let conn = hub.add_conn();
@@ -1258,7 +1258,7 @@ async fn create_session_must_report_and_close_rules() {
     }))
     .await;
     let (hub, work) = hub(config(&m.url), "spawn");
-    let parent = session(&hub, &work, "boss", "build").await;
+    let parent = session(&hub, &work, "boss", BUILD).await;
     prompt(&hub, &parent, "spawn a worker");
     wait_idle(&parent).await;
     let h2 = hub.clone();
@@ -1286,7 +1286,7 @@ async fn create_session_must_report_and_close_rules() {
         let info = child.info();
         assert_eq!(info.parent.as_deref(), Some(parent.id.as_str()));
         assert!(info.must_report);
-        assert_eq!(info.agent, "worker");
+        assert_eq!(info.agent, WORKER);
         assert!(child.lock().reported);
     }
     // Worker agent can't spawn: no spawn tools sent for it.
@@ -1352,7 +1352,7 @@ async fn create_session_must_report_and_close_rules() {
         &hub,
         &parent,
         "create_session",
-        &json!({"name": "boss", "agent": "worker", "prompt": "x", "must_report": false}),
+        &json!({"name": "boss", "agent": WORKER, "prompt": "x", "must_report": false}),
     )
     .await;
     assert!(r.text.contains("\"boss-2\""), "{}", r.text);
@@ -1370,7 +1370,7 @@ async fn create_session_must_report_and_close_rules() {
 async fn events_reach_attached_connection() {
     let m = mock(Arc::new(|_, _| Reply::Text("streamed".into()))).await;
     let (hub, work) = hub(config(&m.url), "events");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     let conn = hub.add_conn();
     {
         let mut c = conn.lock();
@@ -1402,7 +1402,7 @@ async fn events_reach_attached_connection() {
 async fn load_from_history_marks_unfinished_tools_cancelled() {
     let m = mock(Arc::new(|_, _| Reply::Text("x".into()))).await;
     let (hub, work) = hub(config(&m.url), "history");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "hi");
     wait_idle(&s).await;
     {
@@ -1464,7 +1464,7 @@ async fn auto_compaction_with(tag: &str, configure: impl FnOnce(&mut ref_config:
     let mut cfg = config(&m.url);
     configure(&mut cfg);
     let (hub, work) = hub(cfg, tag);
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "one");
     wait_idle(&s).await;
     assert_eq!(s.info().context.auto, 500);
@@ -1497,7 +1497,7 @@ async fn auto_compaction_with(tag: &str, configure: impl FnOnce(&mut ref_config:
 async fn undo_last_prompt_or_from_given_message() {
     let m = mock(Arc::new(|_, _| Reply::Text("reply".into()))).await;
     let (hub, work) = hub(config(&m.url), "undo");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     for p in ["one", "two", "three"] {
         prompt(&hub, &s, p);
         wait_idle(&s).await;
@@ -1566,7 +1566,7 @@ async fn todo_tool_replaces_list_and_validates() {
     }))
     .await;
     let (hub, work) = hub(config(&m.url), "todo");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "go");
     wait_idle(&s).await;
     let todos = s.info().todos;
@@ -1611,7 +1611,7 @@ async fn set_cwd_switches_directory_and_tells_the_model() {
     .await;
     let (hub, work) = hub(config(&m.url), "cwd");
     std::fs::create_dir_all(work.join("sub dir")).unwrap();
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     let conn = hub.add_conn();
     conn.lock().hello = true;
     let set = |path: &str| ref_proto::Request::SetCwd {
@@ -1701,7 +1701,7 @@ async fn queue_changes_reach_attached_connection() {
     }))
     .await;
     let (hub, work) = hub(config(&m.url), "queue-ev");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     let peer = session(&hub, &work, "worker", "build").await;
     let conn = hub.add_conn();
     {
@@ -1787,7 +1787,7 @@ async fn frontends_get_image_stubs_and_undo_returns_the_bytes() {
     let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
     png.extend_from_slice(b"tool screenshot bytes");
     std::fs::write(work.join("shot.png"), &png).unwrap();
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     let conn = hub.add_conn();
     {
         let mut c = conn.lock();
@@ -1948,7 +1948,7 @@ async fn frontends_get_image_stubs_and_undo_returns_the_bytes() {
 async fn history_is_served_in_pages() {
     let m = mock(Arc::new(|_, _| Reply::Text("ok".into()))).await;
     let (hub, work) = hub(config(&m.url), "pages");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     let conn = hub.add_conn();
     conn.lock().hello = true;
     {
@@ -2075,7 +2075,7 @@ async fn stated_image_limit_is_learned_and_the_request_resent() {
         .unwrap()
         .images = true;
     let (hub, work) = hub(cfg, "image-limit");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     let conn = hub.add_conn();
     conn.lock().hello = true;
     let mut png = Vec::new();
