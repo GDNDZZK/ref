@@ -50,7 +50,7 @@ pub struct PermissionRules {
 
 /// Simple glob: `*` matches any sequence (including `/` and spaces), `?` one char.
 /// A pattern ending in `" *"` also matches the bare prefix (so `"git *"` matches `"git"`).
-pub fn glob_match(pattern: &str, text: &str) -> bool {
+pub(crate) fn glob_match(pattern: &str, text: &str) -> bool {
     if let Some(prefix) = pattern.strip_suffix(" *")
         && text == prefix
     {
