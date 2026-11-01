@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::net::NetEvent;
-use crate::util::{ABORTED_ERROR, cmd, mcp_status, placeholder_info};
+use crate::util::{ABORTED_ERROR, apply_delta, cmd, mcp_status, placeholder_info};
 
 struct MockSession {
     info: SessionInfo,
@@ -257,7 +257,7 @@ impl Mock {
                     delta,
                 } => {
                     if let Some(m) = s.messages.iter_mut().find(|m| &m.id == message_id) {
-                        crate::state::apply_delta(&mut m.parts, *index, delta.clone());
+                        apply_delta(&mut m.parts, *index, delta.clone());
                     }
                 }
                 SessionEvent::Removed { message_id } => s.messages.retain(|m| &m.id != message_id),
