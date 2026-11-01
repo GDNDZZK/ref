@@ -4,6 +4,20 @@ use crate::mock::script::{Ctx, Pace, Round, Script};
 use ref_proto::TodoStatus;
 use serde_json::{Value, json};
 
+/// Names of the tools the scripts call.
+pub(super) const TOOL_READ: &str = "read";
+pub(super) const TOOL_EDIT: &str = "edit";
+pub(super) const TOOL_WRITE: &str = "write";
+pub(super) const TOOL_DELETE: &str = "delete";
+pub(super) const TOOL_GREP: &str = "grep";
+pub(super) const TOOL_FIND: &str = "find";
+pub(super) const TOOL_BASH: &str = crate::toolset::BASH;
+pub(super) const TOOL_TODO: &str = crate::toolset::TODO;
+pub(super) const TOOL_COMPACT_CONTEXT: &str = crate::toolset::COMPACT_CONTEXT;
+pub(super) const TOOL_CREATE_SESSION: &str = crate::peers::CREATE_SESSION;
+pub(super) const TOOL_SEND_MESSAGE: &str = crate::peers::SEND_MESSAGE;
+pub(super) const TOOL_QUESTION: &str = crate::question::TOOL;
+
 const ARTICLE: &str = include_str!("../assets/article.md");
 /// The draft written by `stream-args`: long enough to stream for a while.
 const DRAFT_CHARS: usize = 3000;
@@ -149,21 +163,21 @@ pub fn tools_round(ctx: &Ctx, round: usize) -> Round {
         0 => Round::new()
             .reasoning("Let me look at the parser first, and check a file that does not exist.")
             .text("I'll start by reading the parser and searching the workspace.\n")
-            .tool("read", "Read the parser", read("src/parser.rs"))
-            .tool("read", "Read a file that is not there", read("src/missing.rs"))
-            .tool("grep", "Find the users of parse_items", json!({"pattern": "parse_items", "context": 1}))
-            .tool("find", "List the Rust files", json!({"pattern": "**/*.rs", "type": "file"})),
+            .tool(TOOL_READ, "Read the parser", read("src/parser.rs"))
+            .tool(TOOL_READ, "Read a file that is not there", read("src/missing.rs"))
+            .tool(TOOL_GREP, "Find the users of parse_items", json!({"pattern": "parse_items", "context": 1}))
+            .tool(TOOL_FIND, "List the Rust files", json!({"pattern": "**/*.rs", "type": "file"})),
         1 => Round::new()
             .text("The loop runs one step too far: `0..=items.len()` indexes past the end. Fixing it:\n")
             .tool(
-                "edit",
+                TOOL_EDIT,
                 "Fix the off-by-one in parse_items",
                 parser_fix(results),
             ),
         2 => Round::new()
             .text("Now a quick check of the result.\n")
-            .tool("bash", "Print the test result", bash("echo \"cargo test: 12 passed\""))
-            .tool("bash", "Run a command that fails", bash("echo \"error: build failed\" >&2; exit 3")),
+            .tool(TOOL_BASH, "Print the test result", bash("echo \"cargo test: 12 passed\""))
+            .tool(TOOL_BASH, "Run a command that fails", bash("echo \"error: build failed\" >&2; exit 3")),
         _ => Round::new().text(
             "Done. The edit went through, the first `bash` call succeeded and the second one failed with exit code 3, which is how a failing tool looks.",
         ),
@@ -184,7 +198,7 @@ fn stream_args(ctx: &Ctx) -> Round {
             Round::new()
                 .text("Writing a draft. Watch the arguments arrive:\n")
                 .tool(
-                    "write",
+                    TOOL_WRITE,
                     "Write the draft",
                     json!({"path": "scratch/draft.md", "content": &ARTICLE[..end]}),
                 )
@@ -197,13 +211,13 @@ fn permission(ctx: &Ctx) -> Round {
     match ctx.round {
         0 => Round::new()
             .text("I'll improve a doc comment in `src/lib.rs`.\n")
-            .tool("read", "Read the library", read("src/lib.rs")),
+            .tool(TOOL_READ, "Read the library", read("src/lib.rs")),
         1 => {
             let found = tag_and_line(&ctx.tool_results, "src/lib.rs", "/// Greets");
             let polite = ctx.tool_results.iter().any(|r| r.contains(POLITE_DOC));
             let new_line = if polite { SHORT_DOC } else { POLITE_DOC };
             Round::new().text("This edit needs your approval.\n").tool(
-                "edit",
+                TOOL_EDIT,
                 "Reword the doc comment",
                 replace_line("src/lib.rs", found, new_line),
             )
@@ -217,12 +231,12 @@ fn delay(ctx: &Ctx) -> Round {
         0 => Round::new()
             .text("First a temporary file, then I delete it after the configured delay.\n")
             .tool(
-                "bash",
+                TOOL_BASH,
                 "Create a temporary file",
                 bash("echo temporary > scratch/old.txt"),
             ),
         1 => Round::new().tool(
-            "delete",
+            TOOL_DELETE,
             "Delete the temporary file",
             json!({"path": "scratch/old.txt"}),
         ),
@@ -234,7 +248,7 @@ fn running(ctx: &Ctx) -> Round {
     match ctx.round {
         0 => Round::new()
             .text("Running a command that prints once a second.\n")
-            .tool("bash", "Count to eight", bash(RUNNING_COMMAND)),
+            .tool(TOOL_BASH, "Count to eight", bash(RUNNING_COMMAND)),
         _ => Round::new().text("The command finished."),
     }
 }
@@ -250,7 +264,7 @@ fn longrun(ctx: &Ctx) -> Round {
         0 => Round::new()
             .text("I'll run every test in src/, one after the other.\n")
             .tool(
-                "bash",
+                TOOL_BASH,
                 "Run every test",
                 json!({"command": longrun_command(), "timeout": LONGRUN_TIMEOUT_SECS}),
             ),
@@ -261,7 +275,7 @@ fn longrun(ctx: &Ctx) -> Round {
 fn bash_fail(ctx: &Ctx) -> Round {
     match ctx.round {
         0 => Round::new().tool(
-            "bash",
+            TOOL_BASH,
             "Build the project",
             bash("echo \"error: build failed\" >&2; exit 1"),
         ),
@@ -272,7 +286,7 @@ fn bash_fail(ctx: &Ctx) -> Round {
 fn denied(ctx: &Ctx) -> Round {
     match ctx.round {
         0 => Round::new().text("Let me fetch the documentation.\n").tool(
-            "bash",
+            TOOL_BASH,
             "Fetch the docs",
             bash("curl -s https://example.com/docs"),
         ),
@@ -285,7 +299,7 @@ fn cancel(ctx: &Ctx) -> Round {
     match ctx.round {
         0 => Round::new()
             .text("Starting a long job. Press Esc to cancel it.\n")
-            .tool("bash", "Wait for a long time", bash("sleep 300")),
+            .tool(TOOL_BASH, "Wait for a long time", bash("sleep 300")),
         _ => Round::new().text("The job ended."),
     }
 }
@@ -334,22 +348,22 @@ pub fn todo_round(round: usize, first_tick_ms: u64, next_tick_ms: u64) -> Round 
     let plan = |done: usize| plan_todos(&STEPS, done);
     match round {
         0 => Round::new().text("I'll plan this in three steps.\n").tool(
-            "todo",
+            TOOL_TODO,
             "Plan the work",
             plan(0),
         ),
-        1 => Round::new().tool("read", "Read the README", read("README.md")),
+        1 => Round::new().tool(TOOL_READ, "Read the README", read("README.md")),
         2 => Round::new()
             .pause(first_tick_ms)
-            .tool("todo", "Step one is done", plan(1)),
-        3 => Round::new().tool("bash", "Look at the workspace", bash("ls -la")),
+            .tool(TOOL_TODO, "Step one is done", plan(1)),
+        3 => Round::new().tool(TOOL_BASH, "Look at the workspace", bash("ls -la")),
         4 => Round::new()
             .pause(next_tick_ms)
-            .tool("todo", "Step two is done", plan(2)),
+            .tool(TOOL_TODO, "Step two is done", plan(2)),
         5 => Round::new()
             .text("Writing the summary.\n")
             .pause(next_tick_ms)
-            .tool("todo", "Everything is done", plan(STEPS.len())),
+            .tool(TOOL_TODO, "Everything is done", plan(STEPS.len())),
         _ => Round::new()
             .text("All steps are done. The todo list in the sidebar shows them completed."),
     }
@@ -362,7 +376,7 @@ fn todo(ctx: &Ctx) -> Round {
 /// Round 0 of the `image` script.
 pub fn image_round() -> Round {
     Round::new().text("Let me look at the logo.\n").tool(
-        "read",
+        TOOL_READ,
         "Look at the logo",
         read("logo.png"),
     )
@@ -378,7 +392,7 @@ fn image(ctx: &Ctx) -> Round {
 fn long(ctx: &Ctx) -> Round {
     match ctx.round {
         0 => Round::new().text("Printing a lot of lines.\n").tool(
-            "bash",
+            TOOL_BASH,
             "Print the log",
             bash(LOG_COMMAND),
         ),

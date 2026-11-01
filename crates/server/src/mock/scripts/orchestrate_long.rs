@@ -12,7 +12,10 @@ use super::orchestrate::{
     DOCS_THINK_MS, FIXER_THINK_MS, PACE, SCOUT_THINK_MS, TESTER_STEPS, directing, report, reported,
     send_message, step, tester_report,
 };
-use super::tools::{bash, parser_fix, plan_todos, read};
+use super::tools::{
+    TOOL_BASH, TOOL_EDIT, TOOL_READ, TOOL_SEND_MESSAGE, TOOL_TODO, bash, parser_fix, plan_todos,
+    read,
+};
 use crate::mock::script::{Ctx, Round, Script};
 
 /// Scripts of the helpers are named `orch-long-scout`, `orch-long-fixer` and so on.
@@ -89,7 +92,7 @@ impl Job {
         step(
             text,
             RUN_PAUSE_MS,
-            "bash",
+            TOOL_BASH,
             &format!("Work through the {}", self.unit),
             bash(&self.command()),
         )
@@ -141,7 +144,7 @@ fn orchestrate_long(ctx: &Ctx) -> Round {
 
 fn report_round(ctx: &Ctx, label: &str, message: &str) -> Round {
     Round::new().pause(REPORT_PAUSE_MS).tool(
-        "send_message",
+        TOOL_SEND_MESSAGE,
         label,
         send_message(&ctx.args, message),
     )
@@ -152,7 +155,7 @@ fn scout(ctx: &Ctx) -> Round {
         0 => step(
             "Reading the parser.\n",
             SCOUT_THINK_MS,
-            "read",
+            TOOL_READ,
             "Read the parser",
             read("src/parser.rs"),
         ),
@@ -171,14 +174,14 @@ fn fixer(ctx: &Ctx) -> Round {
         0 => step(
             "Reading the parser.\n",
             FIXER_THINK_MS,
-            "read",
+            TOOL_READ,
             "Read the parser",
             read("src/parser.rs"),
         ),
         1 => step(
             "The loop needs one fewer step. Editing it.\n",
             FIXER_EDIT_PAUSE_MS,
-            "edit",
+            TOOL_EDIT,
             "Fix the off-by-one in parse_items",
             parser_fix(&ctx.tool_results),
         ),
@@ -196,16 +199,16 @@ fn tester(ctx: &Ctx) -> Round {
     match ctx.round {
         0 => Round::new()
             .text("I'll record how the tests behave before the fix.\n")
-            .tool("todo", "Plan the test run", plan_todos(&TESTER_STEPS, 0)),
+            .tool(TOOL_TODO, "Plan the test run", plan_todos(&TESTER_STEPS, 0)),
         1 => TESTER.run("Running the baseline.\n"),
         2 => Round::new()
             .tool(
-                "todo",
+                TOOL_TODO,
                 "Everything is done",
                 plan_todos(&TESTER_STEPS, TESTER_STEPS.len()),
             )
             .tool(
-                "send_message",
+                TOOL_SEND_MESSAGE,
                 "Report the baseline",
                 send_message(&ctx.args, tester_report(ctx)),
             ),
@@ -218,7 +221,7 @@ fn docs(ctx: &Ctx) -> Round {
         0 => step(
             "Reading the README.\n",
             DOCS_THINK_MS,
-            "read",
+            TOOL_READ,
             "Read the README",
             read("README.md"),
         ),
