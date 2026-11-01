@@ -3,7 +3,6 @@
 //! Writes `$OUT_DIR/assets.rs`: a table of `Asset { path, mime, raw, br, gz }` that
 //! `src/assets.rs` includes. The build stops when `web/dist/index.html` is missing.
 
-use std::fmt::Write as _;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -71,37 +70,40 @@ fn main() {
 
     let mut table = String::from("&[\n");
     for (n, file) in files.iter().enumerate() {
-        let url_path = url_path(&dist, file);
-        let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("");
-        let raw = std::fs::read(file).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
-        let (br, gz) = if COMPRESSIBLE.contains(&ext) {
-            (
-                smaller(brotli(&raw), raw.len()),
-                smaller(gzip(&raw), raw.len()),
-            )
-        } else {
-            (None, None)
-        };
-        let embed = |bytes: Option<Vec<u8>>, suffix: &str| match bytes {
-            None => "None".to_string(),
-            Some(b) => {
-                let path = out.join(format!("asset-{n}.{suffix}"));
-                std::fs::write(&path, b).expect("write compressed asset");
-                format!("Some(include_bytes!({:?}))", path.display().to_string())
-            }
-        };
-        writeln!(
-            table,
-            "    Asset {{ path: {url_path:?}, mime: {:?}, raw: include_bytes!({:?}), br: {}, gz: {} }},",
-            mime(ext),
-            file.display().to_string(),
-            embed(br, "br"),
-            embed(gz, "gz"),
-        )
-        .expect("write to string");
+        table.push_str(&asset_row(n, &dist, file, &out));
     }
     table.push(']');
     std::fs::write(out.join("assets.rs"), table).expect("write assets.rs");
+}
+
+/// The `Asset { .. }` table row for `file`; compressed copies go to `out/asset-{n}.*`.
+fn asset_row(n: usize, dist: &Path, file: &Path, out: &Path) -> String {
+    let url_path = url_path(dist, file);
+    let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let raw = std::fs::read(file).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
+    let (br, gz) = if COMPRESSIBLE.contains(&ext) {
+        (
+            smaller(brotli(&raw), raw.len()),
+            smaller(gzip(&raw), raw.len()),
+        )
+    } else {
+        (None, None)
+    };
+    let embed = |bytes: Option<Vec<u8>>, suffix: &str| match bytes {
+        None => "None".to_string(),
+        Some(b) => {
+            let path = out.join(format!("asset-{n}.{suffix}"));
+            std::fs::write(&path, b).expect("write compressed asset");
+            format!("Some(include_bytes!({:?}))", path.display().to_string())
+        }
+    };
+    format!(
+        "    Asset {{ path: {url_path:?}, mime: {:?}, raw: include_bytes!({:?}), br: {}, gz: {} }},\n",
+        mime(ext),
+        file.display().to_string(),
+        embed(br, "br"),
+        embed(gz, "gz"),
+    )
 }
 
 /// Files and directories that are not served: hidden ones (`.DS_Store`, Vite's `.vite`
@@ -109,8 +111,8 @@ fn main() {
 fn is_skipped(path: &Path) -> bool {
     let name = path
         .file_name()
-        .map(|n| n.to_string_lossy())
-        .unwrap_or_default();
+        .expect("dir entry has a name")
+        .to_string_lossy();
     name.starts_with('.') || name.ends_with(".map")
 }
 
