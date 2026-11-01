@@ -28,9 +28,9 @@ QStringList readStrings(const Fields& fields, QLatin1StringView key)
 AgentInfo readAgent(const Fields& fields)
 {
 	AgentInfo agent{.name = fields.string("name"_L1), .description = fields.string("description"_L1)};
-	if(const std::optional<QJsonObject> model = fields.optionalObject("model"_L1))
+	if(const std::optional<Fields> model = fields.optionalChild("model"_L1))
 	{
-		agent.model = readModelRef(Fields(*model, fields.childPath("model"_L1)));
+		agent.model = readModelRef(*model);
 	}
 	agent.creatable = fields.booleanOr("creatable"_L1, false);
 	agent.canSpawn = fields.booleanOr("can_spawn"_L1, false);
@@ -44,8 +44,8 @@ ModelInfo readModelInfo(const Fields& fields)
 	        .providerName = fields.string("provider_name"_L1),
 	        .id = fields.string("id"_L1),
 	        .name = fields.string("name"_L1),
-	        .context = static_cast<quint64>(fields.integerOr("context"_L1, 0)),
-	        .output = static_cast<quint64>(fields.integerOr("output"_L1, 0)),
+	        .context = fields.unsignedOr("context"_L1, 0),
+	        .output = fields.unsignedOr("output"_L1, 0),
 	        .images = fields.booleanOr("images"_L1, false),
 	        .reasoning = fields.booleanOr("reasoning"_L1, false),
 	        .variants = readStrings(fields, "variants"_L1)};
@@ -97,32 +97,32 @@ ServerConfig readServerConfig(const Fields& fields)
 Parsed<ServerConfig> parseConfigResult(const QJsonObject& result)
 {
 	return json::guarded([&] {
-		const json::Fields fields(result, u"result"_s);
-		return json::readServerConfig(json::Fields(fields.object("config"_L1), fields.childPath("config"_L1)));
+		const json::Fields fields = json::resultFields(result);
+		return json::readServerConfig(fields.child("config"_L1));
 	});
 }
 
 Parsed<QList<McpServerStatus>> parseMcpResult(const QJsonObject& result)
 {
-	return json::guarded([&] { return json::Fields(result, u"result"_s).list<McpServerStatus>("servers"_L1, json::readMcpServer); });
+	return json::guarded([&] { return json::resultFields(result).list<McpServerStatus>("servers"_L1, json::readMcpServer); });
 }
 
 Parsed<DirListing> parseDirsResult(const QJsonObject& result)
 {
 	return json::guarded([&] {
-		const json::Fields fields(result, u"result"_s);
+		const json::Fields fields = json::resultFields(result);
 		return DirListing{.path = fields.string("path"_L1), .dirs = json::readStrings(fields, "dirs"_L1)};
 	});
 }
 
 Parsed<QString> parseTextResult(const QJsonObject& result)
 {
-	return json::guarded([&] { return json::Fields(result, u"result"_s).string("text"_L1); });
+	return json::guarded([&] { return json::resultFields(result).string("text"_L1); });
 }
 
 Parsed<QString> parsePathResult(const QJsonObject& result)
 {
-	return json::guarded([&] { return json::Fields(result, u"result"_s).string("path"_L1); });
+	return json::guarded([&] { return json::resultFields(result).string("path"_L1); });
 }
 
 } // namespace refgui::proto

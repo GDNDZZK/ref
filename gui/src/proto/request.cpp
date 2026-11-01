@@ -16,6 +16,14 @@ QJsonObject op(const QString& name)
 	return {{u"op"_s, name}};
 }
 
+// An op about one session.
+QJsonObject sessionOp(const QString& name, const QString& sessionId)
+{
+	QJsonObject json = op(name);
+	json.insert(u"session_id"_s, sessionId);
+	return json;
+}
+
 QJsonObject toJson(const ModelRef& model)
 {
 	QJsonObject json{{u"provider"_s, model.provider}, {u"model"_s, model.model}};
@@ -66,17 +74,14 @@ QJsonObject createSession(const QString& cwd, const std::optional<QString>& agen
 
 QJsonObject attach(const QString& sessionId, bool foreground)
 {
-	QJsonObject json = op(u"attach"_s);
-	json.insert(u"session_id"_s, sessionId);
+	QJsonObject json = sessionOp(u"attach"_s, sessionId);
 	json.insert(u"foreground"_s, foreground);
 	return json;
 }
 
 QJsonObject detach(const QString& sessionId)
 {
-	QJsonObject json = op(u"detach"_s);
-	json.insert(u"session_id"_s, sessionId);
-	return json;
+	return sessionOp(u"detach"_s, sessionId);
 }
 
 QJsonObject listSessions()
@@ -99,8 +104,7 @@ QJsonObject prompt(const QString& sessionId, const QString& text, const QList<Im
 	{
 		imagesJson.append(QJsonObject{{u"mime"_s, image.mime}, {u"data"_s, image.data}});
 	}
-	QJsonObject json = op(u"prompt"_s);
-	json.insert(u"session_id"_s, sessionId);
+	QJsonObject json = sessionOp(u"prompt"_s, sessionId);
 	json.insert(u"text"_s, text);
 	json.insert(u"images"_s, imagesJson);
 	return json;
@@ -108,16 +112,14 @@ QJsonObject prompt(const QString& sessionId, const QString& text, const QList<Im
 
 QJsonObject removeQueued(const QString& sessionId, const QString& messageId)
 {
-	QJsonObject json = op(u"remove_queued"_s);
-	json.insert(u"session_id"_s, sessionId);
+	QJsonObject json = sessionOp(u"remove_queued"_s, sessionId);
 	json.insert(u"message_id"_s, messageId);
 	return json;
 }
 
 QJsonObject undo(const QString& sessionId, const std::optional<QString>& messageId)
 {
-	QJsonObject json = op(u"undo"_s);
-	json.insert(u"session_id"_s, sessionId);
+	QJsonObject json = sessionOp(u"undo"_s, sessionId);
 	if(messageId)
 	{
 		json.insert(u"message_id"_s, *messageId);
@@ -127,8 +129,7 @@ QJsonObject undo(const QString& sessionId, const std::optional<QString>& message
 
 QJsonObject shell(const QString& sessionId, const QString& command)
 {
-	QJsonObject json = op(u"shell"_s);
-	json.insert(u"session_id"_s, sessionId);
+	QJsonObject json = sessionOp(u"shell"_s, sessionId);
 	json.insert(u"command"_s, command);
 	return json;
 }
@@ -168,15 +169,12 @@ QJsonObject setFocus(bool focused, const QStringList& sessions)
 
 QJsonObject abort(const QString& sessionId)
 {
-	QJsonObject json = op(u"abort"_s);
-	json.insert(u"session_id"_s, sessionId);
-	return json;
+	return sessionOp(u"abort"_s, sessionId);
 }
 
 QJsonObject permissionReply(const QString& sessionId, const QString& callId, bool allow, bool always)
 {
-	QJsonObject json = op(u"permission_reply"_s);
-	json.insert(u"session_id"_s, sessionId);
+	QJsonObject json = sessionOp(u"permission_reply"_s, sessionId);
 	json.insert(u"call_id"_s, callId);
 	json.insert(u"allow"_s, allow);
 	json.insert(u"always"_s, always);
@@ -185,8 +183,7 @@ QJsonObject permissionReply(const QString& sessionId, const QString& callId, boo
 
 QJsonObject questionReply(const QString& sessionId, const QString& callId, const std::optional<QList<QStringList>>& answers)
 {
-	QJsonObject json = op(u"question_reply"_s);
-	json.insert(u"session_id"_s, sessionId);
+	QJsonObject json = sessionOp(u"question_reply"_s, sessionId);
 	json.insert(u"call_id"_s, callId);
 	if(!answers)
 	{
@@ -216,24 +213,21 @@ QJsonObject watchAll(bool enabled)
 
 QJsonObject setModel(const QString& sessionId, const ModelRef& model)
 {
-	QJsonObject json = op(u"set_model"_s);
-	json.insert(u"session_id"_s, sessionId);
+	QJsonObject json = sessionOp(u"set_model"_s, sessionId);
 	json.insert(u"model"_s, toJson(model));
 	return json;
 }
 
 QJsonObject setAgent(const QString& sessionId, const QString& agent)
 {
-	QJsonObject json = op(u"set_agent"_s);
-	json.insert(u"session_id"_s, sessionId);
+	QJsonObject json = sessionOp(u"set_agent"_s, sessionId);
 	json.insert(u"agent"_s, agent);
 	return json;
 }
 
 QJsonObject setVariant(const QString& sessionId, const std::optional<QString>& variant)
 {
-	QJsonObject json = op(u"set_variant"_s);
-	json.insert(u"session_id"_s, sessionId);
+	QJsonObject json = sessionOp(u"set_variant"_s, sessionId);
 	if(variant)
 	{
 		json.insert(u"variant"_s, *variant);
@@ -243,53 +237,43 @@ QJsonObject setVariant(const QString& sessionId, const std::optional<QString>& v
 
 QJsonObject rename(const QString& sessionId, const QString& name)
 {
-	QJsonObject json = op(u"rename"_s);
-	json.insert(u"session_id"_s, sessionId);
+	QJsonObject json = sessionOp(u"rename"_s, sessionId);
 	json.insert(u"name"_s, name);
 	return json;
 }
 
 QJsonObject setCwd(const QString& sessionId, const QString& path)
 {
-	QJsonObject json = op(u"set_cwd"_s);
-	json.insert(u"session_id"_s, sessionId);
+	QJsonObject json = sessionOp(u"set_cwd"_s, sessionId);
 	json.insert(u"path"_s, path);
 	return json;
 }
 
 QJsonObject compact(const QString& sessionId)
 {
-	QJsonObject json = op(u"compact"_s);
-	json.insert(u"session_id"_s, sessionId);
-	return json;
+	return sessionOp(u"compact"_s, sessionId);
 }
 
 QJsonObject close(const QString& sessionId)
 {
-	QJsonObject json = op(u"close"_s);
-	json.insert(u"session_id"_s, sessionId);
-	return json;
+	return sessionOp(u"close"_s, sessionId);
 }
 
 QJsonObject deleteSession(const QString& sessionId)
 {
-	QJsonObject json = op(u"delete"_s);
-	json.insert(u"session_id"_s, sessionId);
-	return json;
+	return sessionOp(u"delete"_s, sessionId);
 }
 
 QJsonObject exportTranscript(const QString& sessionId, const QString& path)
 {
-	QJsonObject json = op(u"export"_s);
-	json.insert(u"session_id"_s, sessionId);
+	QJsonObject json = sessionOp(u"export"_s, sessionId);
 	json.insert(u"path"_s, path);
 	return json;
 }
 
 QJsonObject peerCommand(const QString& sessionId, const QString& command, const QString& args)
 {
-	QJsonObject json = op(u"peer_command"_s);
-	json.insert(u"session_id"_s, sessionId);
+	QJsonObject json = sessionOp(u"peer_command"_s, sessionId);
 	json.insert(u"command"_s, command);
 	json.insert(u"args"_s, args);
 	return json;
@@ -314,8 +298,7 @@ QJsonObject listDirs(const QString& path)
 
 QJsonObject messages(const QString& sessionId, const QString& before, int limit)
 {
-	QJsonObject json = op(u"messages"_s);
-	json.insert(u"session_id"_s, sessionId);
+	QJsonObject json = sessionOp(u"messages"_s, sessionId);
 	json.insert(u"before"_s, before);
 	json.insert(u"limit"_s, limit);
 	return json;
@@ -323,8 +306,7 @@ QJsonObject messages(const QString& sessionId, const QString& before, int limit)
 
 QJsonObject getImage(const QString& sessionId, const QString& imageId)
 {
-	QJsonObject json = op(u"get_image"_s);
-	json.insert(u"session_id"_s, sessionId);
+	QJsonObject json = sessionOp(u"get_image"_s, sessionId);
 	json.insert(u"image_id"_s, imageId);
 	return json;
 }
