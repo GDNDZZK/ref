@@ -78,8 +78,7 @@ impl Rig {
 
     /// Waits until the model's question is pending.
     async fn asked(&self) -> QuestionRequest {
-        let s = self.session.clone();
-        wait_until("question pending", TIMEOUT, move || {
+        wait_session(&self.session, "question pending", |s| {
             !s.lock().questions.is_empty()
         })
         .await;

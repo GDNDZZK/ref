@@ -80,19 +80,7 @@ impl Rig {
 
     /// Waits until the bash tool of the first round is running.
     async fn wait_running(&self) {
-        let s = self.session.clone();
-        wait_until("tool running", TIMEOUT, move || {
-            tool_parts(&s).iter().any(|p| {
-                matches!(
-                    p,
-                    ref_proto::Part::Tool {
-                        state: ToolState::Running,
-                        ..
-                    }
-                )
-            })
-        })
-        .await;
+        wait_tool_state(&self.session, ToolState::Running).await;
     }
 }
 
@@ -395,8 +383,7 @@ async fn a_second_switch_in_the_same_run_adds_a_second_reminder() {
     rig.wait_running().await;
     rig.switch(WORKER).await;
     // The first reminder is written before the second request; its tool runs next.
-    let s = rig.session.clone();
-    wait_until("first reminder told", TIMEOUT, move || {
+    wait_session(&rig.session, "first reminder told", |s| {
         let msgs = s.lock().messages.clone();
         msgs.iter().any(|m| m.source == MessageSource::Reminder)
             && msgs.iter().any(|m| {

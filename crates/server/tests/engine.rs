@@ -36,8 +36,7 @@ async fn basic_turn_and_persistence() {
     let p = hub.store.load(&s.id).unwrap();
     assert_eq!(p.messages.len(), 2);
     // Title generated asynchronously.
-    let s2 = s.clone();
-    wait_until("title", TIMEOUT, move || s2.info().title == "Mock title").await;
+    wait_session(&s, "title", |s| s.info().title == "Mock title").await;
 }
 
 #[tokio::test]
@@ -149,8 +148,7 @@ async fn permission_ask_then_reply_and_deny() {
     let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "go");
     // First ask: allow once.
-    let s2 = s.clone();
-    wait_until("permission 1", TIMEOUT, move || s2.lock().perms.len() == 1).await;
+    wait_session(&s, "permission 1", |s| s.lock().perms.len() == 1).await;
     {
         let st = s.lock();
         assert_eq!(st.info.status, SessionStatus::WaitingPermission);
@@ -164,9 +162,8 @@ async fn permission_ask_then_reply_and_deny() {
     })
     .unwrap();
     // Second ask: deny.
-    let s2 = s.clone();
-    wait_until("permission 2", TIMEOUT, move || {
-        s2.lock()
+    wait_session(&s, "permission 2", |s| {
+        s.lock()
             .perms
             .first()
             .is_some_and(|p| p.request.call_id == "c2" && p.tx.is_some())
@@ -215,8 +212,7 @@ async fn permission_always_allows_rest_of_session() {
     let (hub, work) = hub(cfg, "always");
     let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "go");
-    let s2 = s.clone();
-    wait_until("permission", TIMEOUT, move || s2.lock().perms.len() == 1).await;
+    wait_session(&s, "permission", |s| s.lock().perms.len() == 1).await;
     let tx = s.lock().perms[0].tx.take().unwrap();
     tx.send(PermReply {
         allow: true,
@@ -256,9 +252,8 @@ async fn agent_permission_overrides_global_and_delay_applies() {
     let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     let start = std::time::Instant::now();
     prompt(&hub, &s, "go");
-    let s2 = s.clone();
-    wait_until("delayed state", TIMEOUT, move || {
-        tool_parts(&s2).iter().any(|p| {
+    wait_session(&s, "delayed state", |s| {
+        tool_parts(s).iter().any(|p| {
             matches!(
                 p,
                 Part::Tool {
@@ -302,9 +297,8 @@ async fn an_allowed_tool_no_longer_shows_waiting_for_permission_during_its_delay
     let (hub, work) = hub(cfg, "ask-delay");
     let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "go");
-    let s2 = s.clone();
-    wait_until("waiting", TIMEOUT, move || {
-        s2.info().status == SessionStatus::WaitingPermission
+    wait_session(&s, "waiting", |s| {
+        s.info().status == SessionStatus::WaitingPermission
     })
     .await;
     let call_id = s.lock().perms[0].request.call_id.clone();
@@ -318,19 +312,7 @@ async fn an_allowed_tool_no_longer_shows_waiting_for_permission_during_its_delay
     ref_server::api::handle(&hub, &conn, reply).await.unwrap();
 
     // The countdown runs, and the session is no longer waiting for the user.
-    let s3 = s.clone();
-    wait_until("delayed", TIMEOUT, move || {
-        tool_parts(&s3).iter().any(|p| {
-            matches!(
-                p,
-                Part::Tool {
-                    state: ToolState::Delayed,
-                    ..
-                }
-            )
-        })
-    })
-    .await;
+    wait_tool_state(&s, ToolState::Delayed).await;
     assert_ne!(s.info().status, SessionStatus::WaitingPermission);
     assert!(
         hub.infos()
@@ -357,19 +339,7 @@ async fn abort_during_delay_and_stream() {
     let (hub, work) = hub(cfg, "abort");
     let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "go");
-    let s2 = s.clone();
-    wait_until("delayed", TIMEOUT, move || {
-        tool_parts(&s2).iter().any(|p| {
-            matches!(
-                p,
-                Part::Tool {
-                    state: ToolState::Delayed,
-                    ..
-                }
-            )
-        })
-    })
-    .await;
+    wait_tool_state(&s, ToolState::Delayed).await;
     ref_server::engine::abort(&hub, &s, true);
     wait_idle(&s).await;
     let tools = tool_parts(&s);
@@ -382,8 +352,7 @@ async fn abort_during_delay_and_stream() {
 
     // Next prompt: the cancelled tool still has a result; then abort mid-stream.
     prompt(&hub, &s, "again");
-    let s2 = s.clone();
-    wait_until("partial text", TIMEOUT, move || last_text(&s2) == "partial").await;
+    wait_session(&s, "partial text", |s| last_text(s) == "partial").await;
     ref_server::engine::abort(&hub, &s, true);
     wait_idle(&s).await;
     let bodies = m.bodies();
@@ -805,11 +774,7 @@ async fn peer_send_message_between_sessions() {
     let bob = session(&hub, &work, "ボブ", BUILD).await;
     prompt(&hub, &alice, "ping bob");
     wait_idle(&alice).await;
-    let b2 = bob.clone();
-    wait_until("bob replied", TIMEOUT, move || {
-        last_text(&b2) == "bob got it"
-    })
-    .await;
+    wait_session(&bob, "bob replied", |s| last_text(s) == "bob got it").await;
     wait_idle(&bob).await;
     let bm = messages(&bob);
     assert!(matches!(&bm[0].source, MessageSource::Peer { from_name, .. } if from_name == "alice"));
@@ -938,19 +903,7 @@ async fn queued_message_delivered_after_current_step() {
     let (hub, work) = hub(config(&m.url), "queue");
     let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "first");
-    let s2 = s.clone();
-    wait_until("running", TIMEOUT, move || {
-        tool_parts(&s2).iter().any(|p| {
-            matches!(
-                p,
-                Part::Tool {
-                    state: ToolState::Running,
-                    ..
-                }
-            )
-        })
-    })
-    .await;
+    wait_tool_state(&s, ToolState::Running).await;
     prompt(&hub, &s, "second while busy");
     assert_eq!(s.lock().queue.len(), 1);
     wait_idle(&s).await;
@@ -986,19 +939,7 @@ async fn remove_queued_message_before_delivery() {
         .unwrap();
     assert_eq!(r["queued"], false);
     assert!(r["message_id"].as_str().is_some_and(|id| !id.is_empty()));
-    let s2 = s.clone();
-    wait_until("running", TIMEOUT, move || {
-        tool_parts(&s2).iter().any(|p| {
-            matches!(
-                p,
-                Part::Tool {
-                    state: ToolState::Running,
-                    ..
-                }
-            )
-        })
-    })
-    .await;
+    wait_tool_state(&s, ToolState::Running).await;
     let r = ref_server::api::handle(&hub, &conn, req("withdrawn while busy"))
         .await
         .unwrap();
@@ -1093,19 +1034,7 @@ async fn remove_queued_after_delivery_removes_nothing() {
     let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     let conn = hello_conn(&hub);
     prompt(&hub, &s, "first");
-    let s2 = s.clone();
-    wait_until("running", TIMEOUT, move || {
-        tool_parts(&s2).iter().any(|p| {
-            matches!(
-                p,
-                Part::Tool {
-                    state: ToolState::Running,
-                    ..
-                }
-            )
-        })
-    })
-    .await;
+    wait_tool_state(&s, ToolState::Running).await;
     let r = ref_server::api::handle(
         &hub,
         &conn,
@@ -1167,11 +1096,7 @@ async fn busy_since_is_the_run_start_and_cleared_when_idle() {
     prompt(&hub, &s, "first");
     let started = s.info().busy_since.expect("set when the run starts");
     assert!(started >= before && started <= ref_proto::now_ms());
-    let s2 = s.clone();
-    wait_until("running", TIMEOUT, move || {
-        s2.info().status == SessionStatus::Running
-    })
-    .await;
+    wait_session(&s, "running", |s| s.info().status == SessionStatus::Running).await;
     // Kept across status changes within the run; visible in the live list; never persisted.
     assert_eq!(s.info().busy_since, Some(started));
     assert!(
@@ -1264,9 +1189,8 @@ async fn create_session_must_report_and_close_rules() {
         .find(|x| x.id != parent.id)
         .unwrap();
     // Child runs, stops without reporting, gets a reminder, then reports.
-    let p2 = parent.clone();
-    wait_until("parent got report", TIMEOUT, move || {
-        messages(&p2)
+    wait_session(&parent, "parent got report", |s| {
+        messages(s)
             .iter()
             .any(|m| m.raw_text().contains("result: 42"))
     })
@@ -1611,11 +1535,7 @@ async fn set_cwd_switches_directory_and_tells_the_model() {
 
     // Busy: rejected, nothing changes.
     prompt(&hub, &s, "go");
-    let s2 = s.clone();
-    wait_until("partial text", TIMEOUT, move || {
-        last_text(&s2) == "thinking"
-    })
-    .await;
+    wait_session(&s, "partial text", |s| last_text(s) == "thinking").await;
     let e = ref_server::api::handle(&hub, &conn, set("sub dir"))
         .await
         .unwrap_err();
@@ -1698,8 +1618,7 @@ async fn queue_changes_reach_attached_connection() {
     let conn = hello_conn(&hub);
     conn.lock().fg.insert(s.id.clone());
     prompt(&hub, &s, "go");
-    let s2 = s.clone();
-    wait_until("streaming", TIMEOUT, move || last_text(&s2) == "working").await;
+    wait_session(&s, "streaming", |s| last_text(s) == "working").await;
     let queues = |conn: &Arc<ref_server::hub::Conn>| -> Vec<Vec<(String, MessageSource)>> {
         conn.out
             .drain()
