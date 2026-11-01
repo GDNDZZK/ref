@@ -90,6 +90,10 @@ pub fn parse_frontmatter(src: &str) -> Map<String, Value> {
     out
 }
 
+fn is_list_item(text: &str) -> bool {
+    text.starts_with("- ") || text == "-"
+}
+
 fn skip_blank(lines: &[Line], i: &mut usize) {
     while *i < lines.len() && lines[*i].blank {
         *i += 1;
@@ -107,7 +111,7 @@ fn parse_map(lines: &[Line], i: &mut usize, indent: usize) -> Map<String, Value>
         if l.indent < indent {
             break;
         }
-        if l.indent > indent || l.text.starts_with("- ") || l.text == "-" {
+        if l.indent > indent || is_list_item(l.text) {
             // Unexpected deeper indentation or list item: skip.
             *i += 1;
             continue;
@@ -120,7 +124,7 @@ fn parse_map(lines: &[Line], i: &mut usize, indent: usize) -> Map<String, Value>
         let value = if rest.is_empty() {
             skip_blank(lines, i);
             match lines.get(*i) {
-                Some(n) if n.indent > indent && (n.text.starts_with("- ") || n.text == "-") => {
+                Some(n) if n.indent > indent && is_list_item(n.text) => {
                     let ind = n.indent;
                     parse_list(lines, i, ind)
                 }
@@ -149,7 +153,7 @@ fn parse_list(lines: &[Line], i: &mut usize, indent: usize) -> Value {
     loop {
         skip_blank(lines, i);
         let Some(l) = lines.get(*i) else { break };
-        if l.indent != indent || !(l.text.starts_with("- ") || l.text == "-") {
+        if l.indent != indent || !is_list_item(l.text) {
             break;
         }
         items.push(scalar(l.text[1..].trim()));
