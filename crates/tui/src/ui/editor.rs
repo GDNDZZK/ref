@@ -10,6 +10,19 @@ use unicode_segmentation::UnicodeSegmentation;
 use super::text::{expand_tabs, gwidth, width};
 use super::theme;
 
+/// Most undo snapshots kept.
+const UNDO_LIMIT: usize = 200;
+/// A paste of at least this many lines, or more than `PASTE_COLLAPSE_CHARS` characters, is
+/// collapsed into a token.
+const PASTE_COLLAPSE_LINES: usize = 3;
+const PASTE_COLLAPSE_CHARS: usize = 150;
+/// Start of the token that stands for an attached image, `[Image N]`.
+const IMAGE_TOKEN_PREFIX: &str = "[Image ";
+
+fn image_token(n: usize) -> String {
+    format!("{IMAGE_TOKEN_PREFIX}{n}]")
+}
+
 #[derive(Debug, Clone)]
 pub struct Paste {
     pub token: String,
@@ -30,7 +43,7 @@ pub struct Editor {
     pub cursor: usize,
     /// Selection anchor (byte offset), when selecting with shift+arrows.
     pub anchor: Option<usize>,
-    pub pastes: Vec<Paste>,
+    pastes: Vec<Paste>,
     pub images: Vec<Attachment>,
     paste_seq: usize,
     image_seq: usize,
@@ -70,7 +83,7 @@ impl Editor {
             return;
         }
         self.undo.push((self.text.clone(), self.cursor));
-        if self.undo.len() > 200 {
+        if self.undo.len() > UNDO_LIMIT {
             self.undo.remove(0);
         }
         self.redo.clear();
@@ -170,7 +183,8 @@ impl Editor {
 
     /// Snapshot only at word boundaries so undo is not per-keystroke.
     fn snapshot_coalesced(&mut self, s: &str) {
-        if s.len() > 1 || s == " " || s == "\n" || self.undo.is_empty() {
+        let at_word_boundary = s.len() > 1 || s == " " || s == "\n";
+        if at_word_boundary || self.undo.is_empty() {
             self.snapshot();
         }
     }
@@ -451,7 +465,7 @@ impl Editor {
         let s = s.replace("\r\n", "\n").replace('\r', "\n");
         let s = super::text::sanitize(&s);
         let lines = s.lines().count();
-        if lines >= 3 || s.chars().count() > 150 {
+        if lines >= PASTE_COLLAPSE_LINES || s.chars().count() > PASTE_COLLAPSE_CHARS {
             self.paste_seq += 1;
             let token = if lines > 1 {
                 format!("[Pasted ~{lines} lines]")
@@ -476,7 +490,7 @@ impl Editor {
 
     pub fn attach_image(&mut self, image: ImageData, name: Option<String>) {
         self.image_seq += 1;
-        let token = format!("[Image {}]", self.image_seq);
+        let token = image_token(self.image_seq);
         self.images.push(Attachment {
             token: token.clone(),
             image,
@@ -508,12 +522,12 @@ impl Editor {
         let mut bound = Vec::new();
         for (i, n) in nums.into_iter().enumerate() {
             let Some(img) = images.next() else { break };
-            restored = restored.replace(&format!("[Image {n}]"), &format!("\u{0}{i}\u{0}"));
+            restored = restored.replace(&image_token(n), &format!("\u{0}{i}\u{0}"));
             bound.push(img);
         }
         for (i, (image, name)) in bound.into_iter().enumerate() {
             self.image_seq += 1;
-            let token = format!("[Image {}]", self.image_seq);
+            let token = image_token(self.image_seq);
             restored = restored.replace(&format!("\u{0}{i}\u{0}"), &token);
             self.images.push(Attachment { token, image, name });
         }
@@ -594,9 +608,8 @@ impl Editor {
         } else {
             self.scroll + (y - area.y) as usize
         };
-        let Some(r) = rows.get(ri.min(rows.len().saturating_sub(1))).copied() else {
-            return 0;
-        };
+        // `layout` yields at least one row (even for empty text).
+        let r = rows[ri.min(rows.len() - 1)];
         let want = x.saturating_sub(area.x) as usize;
         let mut col = 0;
         let mut pos = r.start;
@@ -738,7 +751,7 @@ impl Editor {
     }
 
     /// (visual row, column) of the cursor.
-    pub fn cursor_rc(&self, rows: &[VRow]) -> (usize, usize) {
+    fn cursor_rc(&self, rows: &[VRow]) -> (usize, usize) {
         for (ri, r) in rows.iter().enumerate() {
             let inside = self.cursor >= r.start
                 && (self.cursor < r.end
@@ -955,8 +968,8 @@ impl History {
 fn image_token_numbers(text: &str) -> Vec<usize> {
     let mut out = Vec::new();
     let mut rest = text;
-    while let Some(i) = rest.find("[Image ") {
-        rest = &rest[i + 7..];
+    while let Some(i) = rest.find(IMAGE_TOKEN_PREFIX) {
+        rest = &rest[i + IMAGE_TOKEN_PREFIX.len()..];
         let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
         if digits > 0
             && rest[digits..].starts_with(']')
