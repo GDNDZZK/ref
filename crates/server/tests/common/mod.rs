@@ -384,6 +384,27 @@ pub async fn attached_conn(hub: &Arc<Hub>, s: &Arc<Session>) -> Arc<Conn> {
     conn
 }
 
+/// Sends `req` through the API and returns its result; panics on an error.
+pub async fn call(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> Value {
+    ref_server::api::handle(hub, conn, req).await.unwrap()
+}
+
+pub fn undo_request(s: &Session, message_id: Option<String>) -> Request {
+    Request::Undo {
+        session_id: s.id.clone(),
+        message_id,
+    }
+}
+
+/// Attach to `s` in the foreground.
+pub fn attach_request(s: &Session, limit: Option<u32>) -> Request {
+    Request::Attach {
+        session_id: s.id.clone(),
+        foreground: true,
+        limit,
+    }
+}
+
 /// Drains the connection and keeps the session events.
 pub fn events(conn: &Conn) -> Vec<SessionEvent> {
     conn.out
