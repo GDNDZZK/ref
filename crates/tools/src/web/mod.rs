@@ -276,167 +276,205 @@ async fn convert(
     ctx: &ToolCtx,
 ) -> Result<()> {
     let mime = f.mime();
-    let host = f.url.host_str().map(str::to_string);
     match classify(&mime, &f.body) {
-        Kind::Html => {
-            let text = fetch::decode(&f.body, &f.content_type, true, host.as_deref());
-            if format == Format::Html {
-                out.body = text;
-                out.ext = SpillExt::Html;
-                return Ok(());
-            }
-            if !full_page
-                && !out.error
-                && let Some(alt) = html::markdown_alternate(&text, &f.url)
-                && let Ok(m) = fetch::get(
-                    &alt,
-                    "text/markdown, text/plain;q=0.9",
-                    &HeaderMap::new(),
-                    deadline,
-                    &ctx.cancel,
-                )
-                .await
-                && m.status.is_success()
-                && matches!(
-                    m.mime().as_str(),
-                    "text/markdown" | "text/x-markdown" | "text/plain"
-                )
-            {
-                out.body = fetch::decode(&m.body, &m.content_type, false, host.as_deref());
-                out.notes.push(format!(
-                    "The page links a markdown version; this is it: {}",
-                    m.url
-                ));
-                out.ext = SpillExt::Md;
-                return Ok(());
-            }
-            let url = f.url.clone();
-            let page =
-                tokio::task::spawn_blocking(move || html::convert(&text, &url, format, full_page))
-                    .await
-                    .map_err(|e| anyhow!("HTML conversion failed: {e}"))?;
-            out.title = page.title;
-            out.notes.extend(page.note);
-            out.body = page.body;
-            out.ext = if format == Format::Markdown {
-                SpillExt::Md
-            } else {
-                SpillExt::Txt
-            };
-            if out.body.trim().is_empty() && !out.error {
-                out.notes.push("The page has no text without JavaScript (probably rendered in the browser). Try format: \"html\" to see the raw page, or look for an API / raw source.".into());
-            }
-        }
+        Kind::Html => convert_html(out, &f, format, full_page, deadline, ctx).await,
         Kind::Json => {
-            let text = fetch::decode(&f.body, &f.content_type, false, host.as_deref());
-            out.body = match serde_json::from_str::<Value>(&text) {
-                Ok(v) if format != Format::Html => {
-                    serde_json::to_string_pretty(&v).expect("a JSON value serializes")
-                }
-                _ => text,
-            };
-            out.ext = SpillExt::Json;
+            convert_json(out, &f, format);
+            Ok(())
         }
         Kind::Text => {
-            let text = fetch::decode(
-                &f.body,
-                &f.content_type,
-                mime.contains("xml"),
-                host.as_deref(),
-            );
-            if format != Format::Html
-                && feed::is_feed(&mime, &text)
-                && let Some((title, md)) = feed::to_markdown(&text)
-            {
-                out.title = title;
-                out.notes.push("RSS / Atom feed shown as a list of entries; format: \"html\" returns the raw XML.".into());
-                out.body = md;
-                out.ext = SpillExt::Md;
-                return Ok(());
-            }
-            out.ext = if mime.contains("markdown") {
-                SpillExt::Md
-            } else {
-                SpillExt::Txt
-            };
-            out.body = text;
+            convert_text(out, &f, &mime, format);
+            Ok(())
         }
-        Kind::Image(m) => {
-            let size = util::human_bytes(f.body.len() as u64);
-            if f.body.len() > MAX_IMAGE_BYTES {
+        Kind::Image(m) => attach_image(out, f, m, ctx).await,
+        Kind::Binary => {
+            convert_binary(out, &f, &mime);
+            Ok(())
+        }
+    }
+}
+
+async fn convert_html(
+    out: &mut Out,
+    f: &fetch::Fetched,
+    format: Format,
+    full_page: bool,
+    deadline: Instant,
+    ctx: &ToolCtx,
+) -> Result<()> {
+    let host = f.url.host_str();
+    let text = fetch::decode(&f.body, &f.content_type, true, host);
+    if format == Format::Html {
+        out.body = text;
+        out.ext = SpillExt::Html;
+        return Ok(());
+    }
+    if !full_page
+        && !out.error
+        && let Some(alt) = html::markdown_alternate(&text, &f.url)
+        && let Ok(m) = fetch::get(
+            &alt,
+            "text/markdown, text/plain;q=0.9",
+            &HeaderMap::new(),
+            deadline,
+            &ctx.cancel,
+        )
+        .await
+        && m.status.is_success()
+        && matches!(
+            m.mime().as_str(),
+            "text/markdown" | "text/x-markdown" | "text/plain"
+        )
+    {
+        out.body = fetch::decode(&m.body, &m.content_type, false, host);
+        out.notes.push(format!(
+            "The page links a markdown version; this is it: {}",
+            m.url
+        ));
+        out.ext = SpillExt::Md;
+        return Ok(());
+    }
+    let url = f.url.clone();
+    let page = tokio::task::spawn_blocking(move || html::convert(&text, &url, format, full_page))
+        .await
+        .map_err(|e| anyhow!("HTML conversion failed: {e}"))?;
+    out.title = page.title;
+    out.notes.extend(page.note);
+    out.body = page.body;
+    out.ext = if format == Format::Markdown {
+        SpillExt::Md
+    } else {
+        SpillExt::Txt
+    };
+    if out.body.trim().is_empty() && !out.error {
+        out.notes.push("The page has no text without JavaScript (probably rendered in the browser). Try format: \"html\" to see the raw page, or look for an API / raw source.".into());
+    }
+    Ok(())
+}
+
+fn convert_json(out: &mut Out, f: &fetch::Fetched, format: Format) {
+    let text = fetch::decode(&f.body, &f.content_type, false, f.url.host_str());
+    out.body = match serde_json::from_str::<Value>(&text) {
+        Ok(v) if format != Format::Html => {
+            serde_json::to_string_pretty(&v).expect("a JSON value serializes")
+        }
+        _ => text,
+    };
+    out.ext = SpillExt::Json;
+}
+
+fn convert_text(out: &mut Out, f: &fetch::Fetched, mime: &str, format: Format) {
+    let text = fetch::decode(
+        &f.body,
+        &f.content_type,
+        mime.contains("xml"),
+        f.url.host_str(),
+    );
+    if format != Format::Html
+        && feed::is_feed(mime, &text)
+        && let Some((title, md)) = feed::to_markdown(&text)
+    {
+        out.title = title;
+        out.notes.push(
+            "RSS / Atom feed shown as a list of entries; format: \"html\" returns the raw XML."
+                .into(),
+        );
+        out.body = md;
+        out.ext = SpillExt::Md;
+        return;
+    }
+    out.ext = if mime.contains("markdown") {
+        SpillExt::Md
+    } else {
+        SpillExt::Txt
+    };
+    out.body = text;
+}
+
+fn convert_binary(out: &mut Out, f: &fetch::Fetched, mime: &str) {
+    let what = if mime.is_empty() {
+        "unknown type"
+    } else {
+        mime
+    };
+    out.body = format!(
+        "Binary content ({what}, {}) is not shown. Download it with bash, e.g. curl -L -o FILE '{}'.",
+        util::human_bytes(f.body.len() as u64),
+        f.url
+    );
+}
+
+/// Runs the image fitter on the blocking pool. Returns the bytes back with the result.
+async fn fit_blocking(bytes: Vec<u8>) -> Result<(Vec<u8>, Result<crate::imgfit::Fitted, String>)> {
+    let limits = crate::imgfit::Limits {
+        max_bytes: FETCH_IMAGE_BYTES,
+        ..Default::default()
+    };
+    tokio::task::spawn_blocking(move || {
+        let r = crate::imgfit::fit(&bytes, &limits);
+        (bytes, r)
+    })
+    .await
+    .map_err(|e| anyhow!("image conversion failed: {e}"))
+}
+
+/// Attaches a fetched image of type `m`, downscaled when `resize_images` is set.
+async fn attach_image(
+    out: &mut Out,
+    f: fetch::Fetched,
+    m: &'static str,
+    ctx: &ToolCtx,
+) -> Result<()> {
+    let size = util::human_bytes(f.body.len() as u64);
+    if f.body.len() > MAX_IMAGE_BYTES {
+        out.body = format!(
+            "Image ({m}, {size}) is larger than {} and was not attached. Download it with bash (curl -L -o) to inspect it.",
+            util::human_bytes(MAX_IMAGE_BYTES as u64)
+        );
+        return Ok(());
+    }
+    let mut sent = ImagePayload {
+        mime: m,
+        bytes: f.body,
+    };
+    out.body = format!("Image ({m}, {size}), attached.");
+    if ctx.resize_images {
+        let (bytes, fitted) = fit_blocking(sent.bytes).await?;
+        let fitted = match fitted {
+            Ok(fitted) => fitted,
+            Err(e) => {
                 out.body = format!(
-                    "Image ({m}, {size}) is larger than {} and was not attached. Download it with bash (curl -L -o) to inspect it.",
-                    util::human_bytes(MAX_IMAGE_BYTES as u64)
+                    "The content looks like {m} ({size}) but could not be decoded ({e}); not attached."
                 );
                 return Ok(());
             }
-            let mut sent = ImagePayload {
-                mime: m,
-                bytes: f.body,
-            };
-            out.body = format!("Image ({m}, {size}), attached.");
-            if ctx.resize_images {
-                let bytes = sent.bytes;
-                let limits = crate::imgfit::Limits {
-                    max_bytes: FETCH_IMAGE_BYTES,
-                    ..Default::default()
-                };
-                let (bytes, fitted) = tokio::task::spawn_blocking(move || {
-                    let r = crate::imgfit::fit(&bytes, &limits);
-                    (bytes, r)
-                })
-                .await
-                .map_err(|e| anyhow!("image conversion failed: {e}"))?;
-                match fitted {
-                    Err(e) => {
-                        out.body = format!(
-                            "The content looks like {m} ({size}) but could not be decoded ({e}); not attached."
-                        );
-                        return Ok(());
-                    }
-                    Ok(fitted) => {
-                        let note = fitted.note();
-                        sent = match fitted.data {
-                            Some(d) => {
-                                out.body = format!(
-                                    "Image ({m}, {size}), attached as {} {}x{} ({}).",
-                                    fitted.mime,
-                                    fitted.size.0,
-                                    fitted.size.1,
-                                    util::human_bytes(d.len() as u64)
-                                );
-                                ImagePayload {
-                                    mime: fitted.mime,
-                                    bytes: d,
-                                }
-                            }
-                            None => ImagePayload { mime: m, bytes },
-                        };
-                        if let Some(n) = note {
-                            out.body.push('\n');
-                            out.body.push_str(&n);
-                        }
-                    }
+        };
+        let note = fitted.note();
+        sent = match fitted.data {
+            Some(d) => {
+                out.body = format!(
+                    "Image ({m}, {size}), attached as {} {}x{} ({}).",
+                    fitted.mime,
+                    fitted.size.0,
+                    fitted.size.1,
+                    util::human_bytes(d.len() as u64)
+                );
+                ImagePayload {
+                    mime: fitted.mime,
+                    bytes: d,
                 }
             }
-            out.images.push(ImageData::new(
-                sent.mime,
-                base64::engine::general_purpose::STANDARD.encode(&sent.bytes),
-            ));
-        }
-        Kind::Binary => {
-            let what = if mime.is_empty() {
-                "unknown type".to_string()
-            } else {
-                mime.clone()
-            };
-            out.body = format!(
-                "Binary content ({what}, {}) is not shown. Download it with bash, e.g. curl -L -o FILE '{}'.",
-                util::human_bytes(f.body.len() as u64),
-                f.url
-            );
+            None => ImagePayload { mime: m, bytes },
+        };
+        if let Some(n) = note {
+            out.body.push('\n');
+            out.body.push_str(&n);
         }
     }
+    out.images.push(ImageData::new(
+        sent.mime,
+        base64::engine::general_purpose::STANDARD.encode(&sent.bytes),
+    ));
     Ok(())
 }
 
