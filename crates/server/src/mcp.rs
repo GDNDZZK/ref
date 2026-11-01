@@ -107,6 +107,45 @@ fn server_config(name: &str, cfg: &McpConfig) -> ServerConfig {
     }
 }
 
+/// Status of one configured server; `servers` are the running ones.
+fn server_status(
+    name: &str,
+    sc: &McpConfig,
+    servers: &[Arc<McpServer>],
+) -> ref_proto::McpServerStatus {
+    let mut st = ref_proto::McpServerStatus {
+        name: name.to_string(),
+        status: MCP_DISABLED.into(),
+        error: None,
+        tools: Vec::new(),
+    };
+    if !sc.enabled() {
+        return st;
+    }
+    let Some(s) = servers.iter().find(|s| s.name == name) else {
+        st.status = MCP_CONNECTING.into();
+        return st;
+    };
+    match s.status() {
+        McpStatus::Connected => {
+            st.status = MCP_CONNECTED.into();
+            let mut tools: Vec<String> = s
+                .tools()
+                .iter()
+                .map(|t| crate::toolset::mcp_tool_name(name, &t.name))
+                .collect();
+            tools.sort();
+            st.tools = tools;
+        }
+        McpStatus::Connecting => st.status = MCP_CONNECTING.into(),
+        McpStatus::Failed(e) => {
+            st.status = MCP_FAILED.into();
+            st.error = Some(e);
+        }
+    }
+    st
+}
+
 impl McpManager {
     /// Servers (enabled) for a config, sorted by name; starts connecting new ones in the background.
     pub(crate) fn servers_for(&self, cfg: &Config) -> Vec<Arc<McpServer>> {
@@ -144,39 +183,10 @@ impl McpManager {
     /// exposed to the model.
     pub fn status(&self, cfg: &Config) -> Vec<ref_proto::McpServerStatus> {
         let servers = self.servers_for(cfg);
-        let mut out = Vec::new();
-        for (name, sc) in &cfg.mcp {
-            let mut st = ref_proto::McpServerStatus {
-                name: name.clone(),
-                status: MCP_DISABLED.into(),
-                error: None,
-                tools: Vec::new(),
-            };
-            if sc.enabled() {
-                match servers.iter().find(|s| &s.name == name) {
-                    Some(s) => match s.status() {
-                        McpStatus::Connected => {
-                            st.status = MCP_CONNECTED.into();
-                            let mut tools: Vec<String> = s
-                                .tools()
-                                .iter()
-                                .map(|t| crate::toolset::mcp_tool_name(name, &t.name))
-                                .collect();
-                            tools.sort();
-                            st.tools = tools;
-                        }
-                        McpStatus::Connecting => st.status = MCP_CONNECTING.into(),
-                        McpStatus::Failed(e) => {
-                            st.status = MCP_FAILED.into();
-                            st.error = Some(e);
-                        }
-                    },
-                    None => st.status = MCP_CONNECTING.into(),
-                }
-            }
-            out.push(st);
-        }
-        out
+        cfg.mcp
+            .iter()
+            .map(|(name, sc)| server_status(name, sc, &servers))
+            .collect()
     }
 
     /// Status lines for GetConfig: (name, status text).
