@@ -25,6 +25,9 @@ pub(crate) const CLOSE_SESSION: &str = "close_session";
 const PAGE_SIZE_DEFAULT: u64 = 10;
 const PAGE_SIZE_MAX: u64 = 50;
 
+/// How many of the latest messages `/peers-inbox` and `/peers-outbox` list.
+const LIST_LAST: usize = 20;
+
 /// Largest message `send_message` accepts.
 const MAX_MESSAGE_BYTES: usize = 100_000;
 
@@ -735,9 +738,13 @@ fn cmd_inbox(s: &Arc<Session>) -> String {
         let n = received.len();
         out.push_str(&format!(
             "{n} received{}:\n",
-            if n > 20 { " (last 20)" } else { "" }
+            if n > LIST_LAST {
+                format!(" (last {LIST_LAST})")
+            } else {
+                String::new()
+            }
         ));
-        for m in received.iter().skip(n.saturating_sub(20)) {
+        for m in received.iter().skip(n.saturating_sub(LIST_LAST)) {
             out.push_str(&format!(
                 "  {} · from \"{}\" · {}\n",
                 crate::util::fmt_time(m.time),
@@ -762,9 +769,13 @@ fn cmd_outbox(hub: &Arc<Hub>, s: &Arc<Session>) -> String {
     let n = sent.len();
     let mut out = format!(
         "{n} sent message(s){}:\n",
-        if n > 20 { " (last 20)" } else { "" }
+        if n > LIST_LAST {
+            format!(" (last {LIST_LAST})")
+        } else {
+            String::new()
+        }
     );
-    for (id, r) in sent.iter().skip(n.saturating_sub(20)) {
+    for (id, r) in sent.iter().skip(n.saturating_sub(LIST_LAST)) {
         let status = message_status(hub, &json!({ "message_id": id }))
             .ok()
             .and_then(|t| {
