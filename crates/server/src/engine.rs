@@ -4,7 +4,7 @@
 use crate::convert::{parse_tool_input, partial_purpose, to_chat};
 use crate::hub::Hub;
 use crate::session::{
-    PendingPerm, RunHandle, Session, SessionState, cancel_unfinished, user_message,
+    PendingPerm, RunHandle, Session, SessionState, cancel_unfinished, new_message, user_message,
 };
 use crate::toolset::{self, Entry, Kind};
 use crate::util::lock;
@@ -208,18 +208,11 @@ async fn run_task(hub: Arc<Hub>, s: Arc<Session>, cancel: CancellationToken, id:
             let st = s.lock();
             (st.info.model.clone(), st.info.agent.clone())
         };
-        let m = Message {
-            id: crate::util::new_msg_id(),
-            role: Role::Assistant,
-            time: now_ms(),
-            time_end: Some(now_ms()),
-            source: MessageSource::Human,
-            parts: vec![],
-            model: Some(model),
-            agent: Some(agent),
-            usage: None,
-            error: Some(text.clone()),
-        };
+        let mut m = new_message(Role::Assistant, MessageSource::Human, vec![]);
+        m.time_end = Some(m.time);
+        m.model = Some(model);
+        m.agent = Some(agent);
+        m.error = Some(text.clone());
         let mut st = s.lock();
         hub.emit_message(&s.id, &m);
         st.messages.push(m);
@@ -598,21 +591,12 @@ async fn stream_with_retry(
     loop {
         let p = prep_owned.as_ref().unwrap_or(prep);
         let req = crate::images::clamp_request(build_request(s, p), &p.provider, &p.model).await;
-        let msg_id = crate::util::new_msg_id();
+        let mut m = new_message(Role::Assistant, MessageSource::Human, vec![]);
+        m.model = Some(p.model_ref.clone());
+        m.agent = Some(p.agent.clone());
+        let msg_id = m.id.clone();
         {
             let mut st = s.lock();
-            let m = Message {
-                id: msg_id.clone(),
-                role: Role::Assistant,
-                time: now_ms(),
-                time_end: None,
-                source: MessageSource::Human,
-                parts: vec![],
-                model: Some(p.model_ref.clone()),
-                agent: Some(p.agent.clone()),
-                usage: None,
-                error: None,
-            };
             hub.emit_message(&s.id, &m);
             st.messages.push(m);
             hub.set_status(&mut st, SessionStatus::Busy);

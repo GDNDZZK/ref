@@ -231,6 +231,22 @@ pub fn cancel_unfinished(messages: &mut [Message], output: &str) -> bool {
     changed
 }
 
+/// New message without model, usage or error, created now.
+pub fn new_message(role: Role, source: MessageSource, parts: Vec<Part>) -> Message {
+    Message {
+        id: crate::util::new_msg_id(),
+        role,
+        time: ref_proto::now_ms(),
+        time_end: None,
+        source,
+        parts,
+        model: None,
+        agent: None,
+        usage: None,
+        error: None,
+    }
+}
+
 /// Plain user message.
 pub fn user_message(
     source: MessageSource,
@@ -245,16 +261,7 @@ pub fn user_message(
             name: None,
         });
     }
-    Message {
-        id: crate::util::new_msg_id(),
-        role: Role::User,
-        time: now,
-        time_end: None,
-        source,
-        parts,
-        model: None,
-        agent: None,
-        usage: None,
-        error: None,
-    }
+    let mut message = new_message(Role::User, source, parts);
+    message.time = now;
+    message
 }
