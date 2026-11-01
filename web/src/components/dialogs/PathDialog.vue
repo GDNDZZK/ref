@@ -12,6 +12,7 @@ import Icon from '../Icon.vue'
 import ModalDialog from '../ModalDialog.vue'
 import PickList from '../PickList.vue'
 import TextField from '../TextField.vue'
+import { Key } from '../../keys.ts'
 
 const ROW_HEIGHT_PX = 32
 const MAX_ROWS = 6
@@ -80,9 +81,9 @@ function accept(name: string | undefined): void {
 
 function onKey(event: KeyboardEvent): void {
   if (event.isComposing) return
-  if (event.key === 'Tab' && !event.shiftKey && items.value.length > 0) accept(selected.value)
-  else if (event.key === 'ArrowDown') move(1)
-  else if (event.key === 'ArrowUp') move(-1)
+  if (event.key === Key.Tab && !event.shiftKey && items.value.length > 0) accept(selected.value)
+  else if (event.key === Key.ArrowDown) move(1)
+  else if (event.key === Key.ArrowUp) move(-1)
   else return
   event.preventDefault()
 }

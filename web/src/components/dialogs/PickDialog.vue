@@ -8,6 +8,7 @@ import type { PickItem } from '../../composables/usePickSelection.ts'
 import Icon from '../Icon.vue'
 import ModalDialog from '../ModalDialog.vue'
 import PickList from '../PickList.vue'
+import { Key } from '../../keys.ts'
 
 // Rows of the pick dialogs (models, agents, variants, sessions).
 const PICK_ROW_HEIGHT_PX = 44
@@ -41,9 +42,9 @@ function pick(key: string | undefined): void {
 
 function onKey(event: KeyboardEvent): void {
   if (event.isComposing) return
-  if (event.key === 'ArrowDown') move(1)
-  else if (event.key === 'ArrowUp') move(-1)
-  else if (event.key === 'Enter') pick(selected.value)
+  if (event.key === Key.ArrowDown) move(1)
+  else if (event.key === Key.ArrowUp) move(-1)
+  else if (event.key === Key.Enter) pick(selected.value)
   else return
   event.preventDefault()
 }

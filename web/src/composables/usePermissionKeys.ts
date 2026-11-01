@@ -14,13 +14,14 @@ import type { ChatSession } from '../model/chatSession.ts'
 import type { QuestionRequest } from '../proto/generated'
 import { useNoticesStore } from '../stores/notices.ts'
 import { useWorkspaceStore } from '../stores/workspace.ts'
+import { Key } from '../keys.ts'
 
 const ANSWERS: Record<string, { allow: boolean; always: boolean }> = {
   a: { allow: true, always: false },
-  Enter: { allow: true, always: false },
+  [Key.Enter]: { allow: true, always: false },
   s: { allow: true, always: true },
   d: { allow: false, always: false },
-  Escape: { allow: false, always: false },
+  [Key.Escape]: { allow: false, always: false },
 }
 
 function inDialog(target: EventTarget | null): boolean {

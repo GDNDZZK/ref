@@ -19,6 +19,7 @@ import CompletionPopup from './CompletionPopup.vue'
 import ComposerTags from './ComposerTags.vue'
 import QueueStrip from './QueueStrip.vue'
 import SendButton from './SendButton.vue'
+import { Key } from '../keys.ts'
 
 // `folded`: the input box is folded away (an unfocused split tile); the queue strip stays.
 const props = defineProps<{ session: ChatSession; composer: SessionComposer; folded?: boolean }>()
@@ -114,16 +115,16 @@ function isPlain(event: KeyboardEvent): boolean {
 // Keys while the list is open. Tab inserts the choice, Enter also runs a command.
 function onListKey(event: KeyboardEvent): boolean {
   const ctrlOnly = event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey
-  const up = (isPlain(event) && event.key === 'ArrowUp') || (ctrlOnly && event.key === 'p')
-  const down = (isPlain(event) && event.key === 'ArrowDown') || (ctrlOnly && event.key === 'n')
+  const up = (isPlain(event) && event.key === Key.ArrowUp) || (ctrlOnly && event.key === 'p')
+  const down = (isPlain(event) && event.key === Key.ArrowDown) || (ctrlOnly && event.key === 'n')
   if (up || down) {
     props.composer.moveCompletion(up ? -1 : 1)
     return true
   }
 
-  const isAccept = (event.key === 'Tab' || event.key === 'Enter') && !event.altKey && !event.ctrlKey
+  const isAccept = (event.key === Key.Tab || event.key === Key.Enter) && !event.altKey && !event.ctrlKey
   if (!isAccept || event.metaKey) return false
-  const caret = props.composer.acceptCompletion(event.key === 'Enter')
+  const caret = props.composer.acceptCompletion(event.key === Key.Enter)
   if (caret !== undefined) void showCaret()
   return true
 }
@@ -131,12 +132,12 @@ function onListKey(event: KeyboardEvent): boolean {
 // ↑ walks back through the history from an empty box, from the very start of the text, and while
 // browsing from the first line; ↓ walks forward from the last line while browsing.
 function onHistoryKey(event: KeyboardEvent, area: HTMLTextAreaElement): boolean {
-  const isArrow = event.key === 'ArrowUp' || event.key === 'ArrowDown'
+  const isArrow = event.key === Key.ArrowUp || event.key === Key.ArrowDown
   if (!isArrow || !isPlain(event) || area.selectionStart !== area.selectionEnd) return false
 
   const caret = area.selectionStart
   const browsing = props.composer.browsingHistory
-  if (event.key === 'ArrowUp') {
+  if (event.key === Key.ArrowUp) {
     const onFirstLine = !area.value.slice(0, caret).includes('\n')
     const atStart = caret === 0
     if (area.value !== '' && !atStart && !(browsing && onFirstLine)) return false
@@ -151,13 +152,13 @@ function onHistoryKey(event: KeyboardEvent, area: HTMLTextAreaElement): boolean 
 }
 
 function onEscape(event: KeyboardEvent): boolean {
-  if (event.key !== 'Escape') return false
+  if (event.key !== Key.Escape) return false
   props.composer.escape()
   return true
 }
 
 function onEnter(event: KeyboardEvent): boolean {
-  if (event.key !== 'Enter' || event.shiftKey || event.altKey) return false
+  if (event.key !== Key.Enter || event.shiftKey || event.altKey) return false
   submit()
   return true
 }
@@ -172,7 +173,7 @@ function onLineBreak(event: KeyboardEvent, area: HTMLTextAreaElement): boolean {
 
 function onTab(event: KeyboardEvent): boolean {
   const hasModifier = event.ctrlKey || event.metaKey || event.altKey
-  if (event.key !== 'Tab' || hasModifier) return false
+  if (event.key !== Key.Tab || hasModifier) return false
   workspace.cycleAgent(props.session.id, event.shiftKey ? -1 : 1).catch(notices.pushError)
   return true
 }
@@ -185,7 +186,7 @@ function onShellKey(event: KeyboardEvent): boolean {
     props.composer.enterShell()
     return true
   }
-  if (event.key === 'Backspace' && empty && draft.value.shell) {
+  if (event.key === Key.Backspace && empty && draft.value.shell) {
     props.composer.leaveShell()
     return true
   }
