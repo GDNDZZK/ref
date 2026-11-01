@@ -35,6 +35,7 @@ const {
 } = components.composer
 const { thumbSize: THUMB_SIZE } = components.attachmentStrip
 const SEND_BUTTON_SIZE = 32
+const IME_PROCESSING_KEY_CODE = 229 // `keyCode` of a key that the input method is handling (deprecated, but the only signal in some browsers)
 
 const { t } = useI18n()
 const connection = useConnectionStore()
@@ -140,7 +141,8 @@ function onHistoryKey(event: KeyboardEvent, area: HTMLTextAreaElement): boolean 
   if (event.key === Key.ArrowUp) {
     const onFirstLine = !area.value.slice(0, caret).includes('\n')
     const atStart = caret === 0
-    if (area.value !== '' && !atStart && !(browsing && onFirstLine)) return false
+    const canBrowseHistory = area.value === '' || atStart || (browsing && onFirstLine)
+    if (!canBrowseHistory) return false
     props.composer.historyPrev()
   } else {
     const onLastLine = !area.value.slice(caret).includes('\n')
@@ -182,7 +184,8 @@ function onTab(event: KeyboardEvent): boolean {
 function onShellKey(event: KeyboardEvent): boolean {
   const empty = draft.value.text === ''
   const hasModifier = event.ctrlKey || event.metaKey || event.altKey
-  if (event.key === '!' && !hasModifier && empty && !draft.value.shell) {
+  const startsShellMode = event.key === '!' && !hasModifier && empty && !draft.value.shell
+  if (startsShellMode) {
     props.composer.enterShell()
     return true
   }
@@ -197,15 +200,15 @@ function onShellKey(event: KeyboardEvent): boolean {
 function onClear(event: KeyboardEvent, area: HTMLTextAreaElement): boolean {
   const noSelection = area.selectionStart === area.selectionEnd
   const hasContent = draft.value.text !== '' || draft.value.shell
-  if (!event.ctrlKey || event.key !== 'c' || !noSelection || !hasContent) return false
+  const isCopyShortcut = event.ctrlKey && event.key === 'c'
+  if (!isCopyShortcut || !noSelection || !hasContent) return false
   props.composer.clear()
   return true
 }
 
 function onKeydown(event: KeyboardEvent): void {
   const area = input.value
-  const keyCodeComposing = 229
-  if (!area || event.isComposing || event.keyCode === keyCodeComposing) return
+  if (!area || event.isComposing || event.keyCode === IME_PROCESSING_KEY_CODE) return
   if (props.composer.completion && onListKey(event)) return event.preventDefault()
 
   const handlers: ((event: KeyboardEvent, area: HTMLTextAreaElement) => boolean)[] = [
