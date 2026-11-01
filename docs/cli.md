@@ -44,7 +44,7 @@ ref-web [DIR] [options]
 | Option | Meaning |
 |---|---|
 | `DIR` | Directory for new sessions (default: the current directory). |
-| `--port N` | Port to listen on (1–65535, default `7480`). |
+| `--port N` | Port to listen on (1–65535). Without it: a random free port in 10000–65535; the port of the last run is tried first, so the address stays the same. |
 | `--host ADDR` | Address to listen on (default `127.0.0.1`). Any other address opens `ref-web` to the network, without TLS; a warning is printed. |
 | `--no-open` | Do not open the browser. |
 | `--server ws://host:port` | Connect to this backend instead of finding or starting one. |
@@ -101,6 +101,8 @@ ref --server ws://127.0.0.1:7777 --token <token>
 | `~/.local/state/ref/prompt-history.jsonl` | Prompt history (500 entries), shared by `ref` and `ref-gui`. |
 | `~/.local/state/ref/gui.json` | Settings of `ref-gui` ([Settings](gui.md#settings)). |
 | `~/.local/state/ref/web/login-token` | Login token of `ref-web`. Readable only by you (mode 600). Delete it while `ref-web` is stopped to get a new one. |
+| `~/.local/state/ref/web/port` | The port `ref-web` used last, tried first when no `--port` is given. |
+| `~/.local/state/ref/web/instances/<pid>.json` | One file per running `ref-web`: port, host, version, start time. No secret; mode 600. |
 | `~/.local/state/ref/logs/` | Backend logs, including configuration warnings. |
 
 On Windows, `~` is `%USERPROFILE%`.

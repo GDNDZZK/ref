@@ -2,7 +2,7 @@ import { fileURLToPath, URL } from 'node:url'
 import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vitest/config'
 
-// `pnpm dev` talks to a running ref-web (`ref-web --no-open`); log in once at
+// `pnpm dev` talks to a running ref-web (`ref-web --no-open --port 7480`); log in once at
 // http://127.0.0.1:5173/login?token=T. Use 127.0.0.1 throughout, not localhost.
 const REF_WEB = process.env.REF_WEB_URL ?? 'http://127.0.0.1:7480' // another port: set REF_WEB_URL
 
