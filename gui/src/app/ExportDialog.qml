@@ -16,7 +16,7 @@ ModalDialog {
 				field.errorText = result
 				return
 			}
-			Workspace.showToast("info", qsTr("Exported to %1").arg(result))
+			Workspace.showToast(ToastLevel.info, qsTr("Exported to %1").arg(result))
 			close()
 		})
 	}

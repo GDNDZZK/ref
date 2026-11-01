@@ -207,7 +207,7 @@ Item {
 						if (nothingToClose && composer.session.lastToolDelayed) {
 							event.accepted = true
 							composer.session.cancelDelayedTool()
-							Workspace.showToast("info", qsTr("Cancelled the delayed tool call"))
+							Workspace.showToast(ToastLevel.info, qsTr("Cancelled the delayed tool call"))
 						} else {
 							event.accepted = composer.model.escape()
 						}
