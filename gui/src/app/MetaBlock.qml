@@ -21,7 +21,7 @@ Block {
 
 	readonly property bool fromUser: source !== ""
 	readonly property real restingOpacity: 0.6
-	readonly property int rowHeight: 24
+	readonly property int rowHeight: Theme.metaLineHeight
 	readonly property int itemSpacing: 8
 	pullUp: 8 // brings the line closer to its message than rows are apart
 	readonly property real replyTime: timeEnd > 0 ? timeEnd - time : 0
