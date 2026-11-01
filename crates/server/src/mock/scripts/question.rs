@@ -5,7 +5,7 @@ use crate::mock::script::{Ctx, Pace, Round, Script};
 use crate::question::{ANSWERED_PREFIX, ANSWERED_SUFFIX};
 use serde_json::{Value, json};
 
-pub const SCRIPTS: &[Script] = &[
+pub(super) const SCRIPTS: &[Script] = &[
     Script {
         name: "question",
         about: "Asks two questions (a single and a multiple choice, with defaults) and repeats the answers",

@@ -72,7 +72,7 @@ const TESTER_REPORT_PAUSE_MS: u64 = 1400;
 const TESTER_BASELINE_SECS: u32 = 3;
 const DOCS_REPORT_PAUSE_MS: u64 = 1150;
 
-pub const SCRIPTS: &[Script] = &[
+pub(super) const SCRIPTS: &[Script] = &[
     Script {
         name: "orchestrate",
         about: "A main session creates four helpers (scout, fixer, tester, docs) and a reviewer, and collects their reports",

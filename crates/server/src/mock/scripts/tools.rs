@@ -33,7 +33,7 @@ const LONGRUN_TICK_SECS: u32 = 10;
 const LONGRUN_TIMEOUT_SECS: u32 = 300;
 const RUNNING_COMMAND: &str = "seq 1 8 | while read i; do echo \"step $i of 8\"; sleep 1; done";
 
-pub const SCRIPTS: &[Script] = &[
+pub(super) const SCRIPTS: &[Script] = &[
     Script {
         name: "tools",
         about: "Read, a missing file, grep, find, an approved edit with a diff, bash ok and failing",
@@ -154,10 +154,10 @@ pub(super) fn bash(command: &str) -> Value {
 
 /// Rounds of the `tools` script (`tools_round` implements rounds `0..TOOLS_ROUNDS`); `everything`
 /// continues after them with the `todo` rounds and then `image`.
-pub const TOOLS_ROUNDS: usize = 4;
+pub(super) const TOOLS_ROUNDS: usize = 4;
 
 /// Rounds 0..=3 of the `tools` script; `everything` continues after them.
-pub fn tools_round(ctx: &Ctx, round: usize) -> Round {
+pub(super) fn tools_round(ctx: &Ctx, round: usize) -> Round {
     let results = &ctx.tool_results;
     match round {
         0 => Round::new()
@@ -336,15 +336,15 @@ const STEPS: [&str; 3] = [
 ];
 
 /// Rounds of `todo_round` that change the list; the one after them is the closing sentence.
-pub const TODO_ROUNDS: usize = 6;
+pub(super) const TODO_ROUNDS: usize = 6;
 /// `todo` waits this long before it ticks off the first step and then before each next one, so
 /// the ticks can be watched in every window that shows the session: about 5, 7 and 9 s after
 /// the prompt. `everything` does not wait.
-pub const TODO_FIRST_TICK_MS: u64 = 3800;
-pub const TODO_NEXT_TICK_MS: u64 = 1800;
+const TODO_FIRST_TICK_MS: u64 = 3800;
+const TODO_NEXT_TICK_MS: u64 = 1800;
 
 /// Rounds 0..=6 of the `todo` script: the plan, then work and one update per step.
-pub fn todo_round(round: usize, first_tick_ms: u64, next_tick_ms: u64) -> Round {
+pub(super) fn todo_round(round: usize, first_tick_ms: u64, next_tick_ms: u64) -> Round {
     let plan = |done: usize| plan_todos(&STEPS, done);
     match round {
         0 => Round::new().text("I'll plan this in three steps.\n").tool(
@@ -374,7 +374,7 @@ fn todo(ctx: &Ctx) -> Round {
 }
 
 /// Round 0 of the `image` script.
-pub fn image_round() -> Round {
+pub(super) fn image_round() -> Round {
     Round::new().text("Let me look at the logo.\n").tool(
         TOOL_READ,
         "Look at the logo",

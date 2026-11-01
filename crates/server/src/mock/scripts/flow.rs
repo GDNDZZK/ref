@@ -25,7 +25,7 @@ const FAILED_ATTEMPTS: u32 = 2;
 const REPORT_DELAY_MS: u64 = 1500;
 const SUMMARY_FOR_COMPACT: &str = "## Goal\n- Demonstrate compact_context.\n\n## Next steps\n1. Continue with whatever the user asks next.";
 
-pub const SCRIPTS: &[Script] = &[
+pub(super) const SCRIPTS: &[Script] = &[
     Script {
         name: "retry",
         about: "The provider is overloaded twice (status Retrying), then the answer arrives",

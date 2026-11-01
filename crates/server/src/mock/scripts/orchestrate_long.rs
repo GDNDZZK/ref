@@ -99,7 +99,7 @@ impl Job {
     }
 }
 
-pub const SCRIPTS: &[Script] = &[
+pub(super) const SCRIPTS: &[Script] = &[
     Script {
         name: "orchestrate-long",
         about: "Like `orchestrate`, but each helper works for a minute or more and prints its progress",

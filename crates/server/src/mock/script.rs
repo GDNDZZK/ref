@@ -12,38 +12,38 @@ use serde_json::{Map, Value, json};
 
 /// How fast text and tool arguments stream: `chars` characters every `every_ms`.
 #[derive(Debug, Clone, Copy)]
-pub struct Pace {
-    pub chars: usize,
-    pub every_ms: u64,
+pub(super) struct Pace {
+    pub(super) chars: usize,
+    pub(super) every_ms: u64,
 }
 
 impl Pace {
-    pub const NORMAL: Pace = Pace {
+    pub(super) const NORMAL: Pace = Pace {
         chars: 14,
         every_ms: 25,
     };
-    pub const MEDIUM: Pace = Pace {
+    pub(super) const MEDIUM: Pace = Pace {
         chars: 6,
         every_ms: 30,
     };
     /// A few words per second, for frame-by-frame inspection.
-    pub const SLOW: Pace = Pace {
+    pub(super) const SLOW: Pace = Pace {
         chars: 2,
         every_ms: 70,
     };
 }
 
 #[derive(Debug, Clone)]
-pub struct ToolCall {
-    pub name: &'static str,
-    pub purpose: String,
+pub(super) struct ToolCall {
+    pub(super) name: &'static str,
+    pub(super) purpose: String,
     /// Arguments without `purpose`.
-    pub input: Value,
+    pub(super) input: Value,
 }
 
 impl ToolCall {
     /// The raw argument JSON as a model would stream it: `purpose` comes first.
-    pub fn raw_arguments(&self) -> String {
+    pub(super) fn raw_arguments(&self) -> String {
         let mut args = Map::new();
         args.insert(PURPOSE_KEY.into(), json!(self.purpose));
         if let Value::Object(input) = &self.input {
@@ -54,13 +54,13 @@ impl ToolCall {
 }
 
 #[derive(Debug, Clone)]
-pub struct HttpError {
-    pub status: u16,
-    pub message: String,
+pub(super) struct HttpError {
+    pub(super) status: u16,
+    pub(super) message: String,
 }
 
 #[derive(Debug, Clone)]
-pub enum Step {
+pub(super) enum Step {
     Reasoning(String),
     Text(String),
     Tool(ToolCall),
@@ -69,32 +69,32 @@ pub enum Step {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct Round {
-    pub steps: Vec<Step>,
+pub(super) struct Round {
+    pub(super) steps: Vec<Step>,
     /// Fail the whole request with this HTTP error instead of streaming the steps.
-    pub error: Option<HttpError>,
+    pub(super) error: Option<HttpError>,
     /// Report the context as almost full, so the next prompt triggers automatic compaction.
-    pub fill_context: bool,
+    pub(super) fill_context: bool,
     /// Reset the connection without an answer: the client sees a network error.
-    pub reset: bool,
+    pub(super) reset: bool,
 }
 
 impl Round {
-    pub fn new() -> Round {
+    pub(super) fn new() -> Round {
         Round::default()
     }
 
-    pub fn reasoning(mut self, text: impl Into<String>) -> Round {
+    pub(super) fn reasoning(mut self, text: impl Into<String>) -> Round {
         self.steps.push(Step::Reasoning(text.into()));
         self
     }
 
-    pub fn text(mut self, text: impl Into<String>) -> Round {
+    pub(super) fn text(mut self, text: impl Into<String>) -> Round {
         self.steps.push(Step::Text(text.into()));
         self
     }
 
-    pub fn tool(mut self, name: &'static str, purpose: &str, input: Value) -> Round {
+    pub(super) fn tool(mut self, name: &'static str, purpose: &str, input: Value) -> Round {
         self.steps.push(Step::Tool(ToolCall {
             name,
             purpose: purpose.into(),
@@ -103,12 +103,12 @@ impl Round {
         self
     }
 
-    pub fn pause(mut self, ms: u64) -> Round {
+    pub(super) fn pause(mut self, ms: u64) -> Round {
         self.steps.push(Step::Pause(ms));
         self
     }
 
-    pub fn error(status: u16, message: impl Into<String>) -> Round {
+    pub(super) fn error(status: u16, message: impl Into<String>) -> Round {
         Round {
             error: Some(HttpError {
                 status,
@@ -119,14 +119,14 @@ impl Round {
     }
 
     /// A request that dies on the wire ("connection reset by peer").
-    pub fn connection_reset() -> Round {
+    pub(super) fn connection_reset() -> Round {
         Round {
             reset: true,
             ..Round::default()
         }
     }
 
-    pub fn filling_context(mut self) -> Round {
+    pub(super) fn filling_context(mut self) -> Round {
         self.fill_context = true;
         self
     }
@@ -134,39 +134,39 @@ impl Round {
 
 /// Everything a script knows about the request it answers.
 #[derive(Debug, Clone)]
-pub struct Ctx {
+pub(super) struct Ctx {
     /// Text of the last user message.
-    pub prompt: String,
+    pub(super) prompt: String,
     /// The prompt without its first word (the script name).
-    pub args: String,
+    pub(super) args: String,
     /// The latest user message that is neither from another session nor a harness reminder (a
     /// created session's task without its envelope).
-    pub root_prompt: String,
+    pub(super) root_prompt: String,
     /// How many user messages from other sessions came after `root_prompt`, the current one
     /// included.
-    pub peer_reports: usize,
+    pub(super) peer_reports: usize,
     /// Messages a person typed to a created session after its task. They do not restart the
     /// script: the round keeps counting from the task.
-    pub typed: Vec<String>,
-    pub round: usize,
-    pub session_id: String,
+    pub(super) typed: Vec<String>,
+    pub(super) round: usize,
+    pub(super) session_id: String,
     /// Identical requests seen so far, this one included (a retry repeats its request).
-    pub attempt: u32,
+    pub(super) attempt: u32,
     /// Results of the tools run since the last user message, oldest first.
-    pub tool_results: Vec<String>,
+    pub(super) tool_results: Vec<String>,
 }
 
-pub struct Script {
-    pub name: &'static str,
+pub(super) struct Script {
+    pub(super) name: &'static str,
     /// One line for the `help` table.
-    pub about: &'static str,
-    pub pace: Pace,
-    pub play: fn(&Ctx) -> Round,
+    pub(super) about: &'static str,
+    pub(super) pace: Pace,
+    pub(super) play: fn(&Ctx) -> Round,
 }
 
 /// What a request to the mock provider asks for.
 #[derive(Debug)]
-pub enum Task {
+pub(super) enum Task {
     /// A short conversation title for the given text.
     Title(String),
     /// A summary of the conversation (manual or automatic compaction).
@@ -215,7 +215,7 @@ fn task_text(prompt: &str) -> String {
 }
 
 /// Classifies a chat-completions request body. `attempt` is how often the same request came.
-pub fn analyze(body: &Value, session_id: &str, attempt: u32) -> Task {
+pub(super) fn analyze(body: &Value, session_id: &str, attempt: u32) -> Task {
     let messages = body["messages"].as_array().map_or(&[][..], Vec::as_slice);
     let first = messages.first().map(message_text).unwrap_or_default();
     if first == crate::title::TITLE_PROMPT {
@@ -360,7 +360,7 @@ const REPORT_SUFFIX: &str = "-report";
 /// The script a prompt asks for: its first word, case-insensitive. A message from another
 /// session goes to the `-report` script of the script that started the conversation when it
 /// has one, and to `ack` otherwise; anything else gets the default script.
-pub fn select(prompt: &str, root_prompt: &str) -> &'static Script {
+pub(super) fn select(prompt: &str, root_prompt: &str) -> &'static Script {
     use super::scripts;
     if prompt.starts_with(PEER_HEADER_PREFIX) {
         let report = format!("{}{REPORT_SUFFIX}", first_word(root_prompt));
@@ -372,7 +372,7 @@ pub fn select(prompt: &str, root_prompt: &str) -> &'static Script {
 }
 
 /// The name of the session that sent a message from another session.
-pub fn sender_name(prompt: &str) -> &str {
+pub(super) fn sender_name(prompt: &str) -> &str {
     prompt
         .strip_prefix(PEER_HEADER_PREFIX)
         .and_then(|rest| rest.trim_start().strip_prefix('"'))

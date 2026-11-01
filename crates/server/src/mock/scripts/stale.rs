@@ -22,7 +22,7 @@ const PULLED: [&str; 3] = [
 /// environments; `sed -i` does not.
 const TMP: &str = "scratch/.tmp";
 
-pub const SCRIPTS: &[Script] = &[Script {
+pub(super) const SCRIPTS: &[Script] = &[Script {
     name: "stale",
     about: "A file changes between read and edit: the edit is remapped, then another is rejected",
     pace: Pace::NORMAL,

@@ -11,7 +11,7 @@ mod tools;
 use super::script::Script;
 
 /// Every script, in the order `help` lists them.
-pub fn all() -> Vec<&'static Script> {
+pub(super) fn all() -> Vec<&'static Script> {
     [
         text::SCRIPTS,
         tools::SCRIPTS,
@@ -26,7 +26,7 @@ pub fn all() -> Vec<&'static Script> {
     .collect()
 }
 
-pub fn find(name: &str) -> Option<&'static Script> {
+pub(super) fn find(name: &str) -> Option<&'static Script> {
     all().into_iter().find(|s| s.name == name)
 }
 
