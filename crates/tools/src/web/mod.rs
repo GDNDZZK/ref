@@ -92,6 +92,26 @@ fn parse_url(raw: &str) -> Result<Url> {
     Ok(url)
 }
 
+/// File extension of the saved full content.
+#[derive(Clone, Copy)]
+enum SpillExt {
+    Md,
+    Txt,
+    Html,
+    Json,
+}
+
+impl SpillExt {
+    fn as_str(self) -> &'static str {
+        match self {
+            SpillExt::Md => "md",
+            SpillExt::Txt => "txt",
+            SpillExt::Html => "html",
+            SpillExt::Json => "json",
+        }
+    }
+}
+
 /// Result being assembled.
 struct Out {
     requested: Url,
@@ -106,7 +126,7 @@ struct Out {
     /// Size of the response body as received.
     raw_bytes: usize,
     /// Extension of the file the full content is saved to when cut.
-    ext: &'static str,
+    ext: SpillExt,
 }
 
 pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
@@ -148,7 +168,7 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
                         images: vec![],
                         error: false,
                         raw_bytes: 0,
-                        ext: "md",
+                        ext: SpillExt::Md,
                     };
                     return Ok(finish(out, started));
                 }
@@ -178,7 +198,7 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         images: vec![],
         error: !f.status.is_success(),
         raw_bytes: f.body.len(),
-        ext: "txt",
+        ext: SpillExt::Txt,
     };
     let is_challenge_status = matches!(
         f.status,
@@ -262,7 +282,7 @@ async fn convert(
             let text = fetch::decode(&f.body, &f.content_type, true, host.as_deref());
             if format == Format::Html {
                 out.body = text;
-                out.ext = "html";
+                out.ext = SpillExt::Html;
                 return Ok(());
             }
             if !full_page
@@ -287,7 +307,7 @@ async fn convert(
                     "The page links a markdown version; this is it: {}",
                     m.url
                 ));
-                out.ext = "md";
+                out.ext = SpillExt::Md;
                 return Ok(());
             }
             let url = f.url.clone();
@@ -299,9 +319,9 @@ async fn convert(
             out.notes.extend(page.note);
             out.body = page.body;
             out.ext = if format == Format::Markdown {
-                "md"
+                SpillExt::Md
             } else {
-                "txt"
+                SpillExt::Txt
             };
             if out.body.trim().is_empty() && !out.error {
                 out.notes.push("The page has no text without JavaScript (probably rendered in the browser). Try format: \"html\" to see the raw page, or look for an API / raw source.".into());
@@ -313,7 +333,7 @@ async fn convert(
                 Ok(v) if format != Format::Html => serde_json::to_string_pretty(&v).unwrap_or(text),
                 _ => text,
             };
-            out.ext = "json";
+            out.ext = SpillExt::Json;
         }
         Kind::Text => {
             let text = fetch::decode(
@@ -329,13 +349,13 @@ async fn convert(
                 out.title = title;
                 out.notes.push("RSS / Atom feed shown as a list of entries; format: \"html\" returns the raw XML.".into());
                 out.body = md;
-                out.ext = "md";
+                out.ext = SpillExt::Md;
                 return Ok(());
             }
             out.ext = if mime.contains("markdown") {
-                "md"
+                SpillExt::Md
             } else {
-                "txt"
+                SpillExt::Txt
             };
             out.body = text;
         }
@@ -483,7 +503,7 @@ fn finish(mut out: Out, started: std::time::Instant) -> ToolOutput {
         && (total_bytes > util::INLINE_OUTPUT_MAX_BYTES
             || total_lines > util::INLINE_OUTPUT_MAX_LINES);
     if cut {
-        let path = util::spill_path(out.ext);
+        let path = util::spill_path(out.ext.as_str());
         let ok = path
             .parent()
             .map(std::fs::create_dir_all)
