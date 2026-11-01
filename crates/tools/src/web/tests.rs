@@ -81,9 +81,9 @@ async fn serve(h: impl Fn(&Req) -> Resp + Send + Sync + 'static) -> String {
                     out.push_str(&format!("{k}: {v}\r\n"));
                 }
                 out.push_str("\r\n");
-                let _ = s.write_all(out.as_bytes()).await;
-                let _ = s.write_all(&r.body).await;
-                let _ = s.shutdown().await;
+                s.write_all(out.as_bytes()).await.unwrap();
+                s.write_all(&r.body).await.unwrap();
+                s.shutdown().await.unwrap();
             });
         }
     });
