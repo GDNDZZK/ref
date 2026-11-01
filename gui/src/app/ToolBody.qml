@@ -63,9 +63,14 @@ Item {
 	Loader {
 		id: loader
 		width: parent.width
-		onLoaded: {
-			if (item.showAllRequested)
-				item.showAllRequested.connect(body.showAllRequested)
+	}
+
+	// Only some bodies have the signal.
+	Connections {
+		target: loader.item
+		ignoreUnknownSignals: true
+		function onShowAllRequested() {
+			body.showAllRequested()
 		}
 	}
 }

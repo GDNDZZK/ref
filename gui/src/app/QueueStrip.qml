@@ -1,6 +1,5 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Layouts
 import RefGui
 
 // The prompts that wait for the next safe point, above the input box. Prompts of the user can
