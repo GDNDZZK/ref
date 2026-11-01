@@ -18,6 +18,11 @@ pub const MIB: u64 = 1024 * KIB;
 const BINARY_SNIFF_BYTES: usize = 8192;
 const SPILL_ID_SEED: u32 = 0;
 
+pub const MIME_PNG: &str = "image/png";
+pub const MIME_JPEG: &str = "image/jpeg";
+pub const MIME_GIF: &str = "image/gif";
+pub const MIME_WEBP: &str = "image/webp";
+
 // Magic bytes of the supported image formats.
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 const JPEG_SIGNATURE: &[u8] = &[0xFF, 0xD8, 0xFF];
@@ -389,17 +394,17 @@ pub fn spill_path(ext: &str) -> PathBuf {
 /// Detects supported raster images by magic bytes.
 pub fn image_mime(bytes: &[u8]) -> Option<&'static str> {
     if bytes.starts_with(PNG_SIGNATURE) {
-        return Some("image/png");
+        return Some(MIME_PNG);
     }
     if bytes.starts_with(JPEG_SIGNATURE) {
-        return Some("image/jpeg");
+        return Some(MIME_JPEG);
     }
     if bytes.starts_with(GIF87A_SIGNATURE) || bytes.starts_with(GIF89A_SIGNATURE) {
-        return Some("image/gif");
+        return Some(MIME_GIF);
     }
     let is_riff = bytes.len() >= RIFF_HEADER_LEN && bytes.starts_with(RIFF_TAG);
     if is_riff && &bytes[8..RIFF_HEADER_LEN] == WEBP_TAG {
-        return Some("image/webp");
+        return Some(MIME_WEBP);
     }
     None
 }

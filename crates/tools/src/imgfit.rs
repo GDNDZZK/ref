@@ -3,6 +3,7 @@
 //! aim for 500KB, lift tiny images to a 200px short edge, and pick the smaller of PNG and JPEG.
 //! Images with translucent pixels stay PNG (JPEG would show the color under the transparency).
 
+use crate::util;
 use base64::Engine as _;
 use fast_image_resize::{Resizer, images::Image};
 use image::codecs::jpeg::JpegEncoder;
@@ -65,10 +66,10 @@ const SCALE_STEPS: [f64; 4] = [0.75, 0.5, 0.35, 0.25];
 
 fn mime_of(f: ImageFormat) -> Option<&'static str> {
     Some(match f {
-        ImageFormat::Png => "image/png",
-        ImageFormat::Jpeg => "image/jpeg",
-        ImageFormat::Gif => "image/gif",
-        ImageFormat::WebP => "image/webp",
+        ImageFormat::Png => util::MIME_PNG,
+        ImageFormat::Jpeg => util::MIME_JPEG,
+        ImageFormat::Gif => util::MIME_GIF,
+        ImageFormat::WebP => util::MIME_WEBP,
         _ => return None,
     })
 }
@@ -173,14 +174,14 @@ pub fn fit(bytes: &[u8], limits: &Limits) -> Result<Fitted, String> {
     } else {
         None
     };
-    let fits_png = consider(png, "image/png", (tw, th));
+    let fits_png = consider(png, util::MIME_PNG, (tw, th));
     let fits_jpeg = jpeg
-        .map(|j| consider(j, "image/jpeg", (tw, th)))
+        .map(|j| consider(j, util::MIME_JPEG, (tw, th)))
         .unwrap_or(false);
     let mut done = fits_png || fits_jpeg;
     if !done && lossy {
         for q in QUALITY_STEPS {
-            if consider(encode_jpeg(&target, q)?, "image/jpeg", (tw, th)) {
+            if consider(encode_jpeg(&target, q)?, util::MIME_JPEG, (tw, th)) {
                 done = true;
                 break;
             }
@@ -197,13 +198,13 @@ pub fn fit(bytes: &[u8], limits: &Limits) -> Result<Fitted, String> {
             }
             let small = resize(&mut resizer, &src, w, h)?;
             if !lossy {
-                if consider(encode_png(&small)?, "image/png", (w, h)) {
+                if consider(encode_png(&small)?, util::MIME_PNG, (w, h)) {
                     break;
                 }
                 continue;
             }
             for q in QUALITY_STEPS {
-                if consider(encode_jpeg(&small, q)?, "image/jpeg", (w, h)) {
+                if consider(encode_jpeg(&small, q)?, util::MIME_JPEG, (w, h)) {
                     break 'scales;
                 }
             }
@@ -323,8 +324,8 @@ pub fn clamp(bytes: &[u8], max_dim: u32, max_b64: usize) -> Result<Option<Clampe
         let img = resize(&mut resizer, &src, tw, th)?;
         let png = encode_png(&img)?;
         let (mime, data) = match lossy.then(|| encode_jpeg(&img, 85)).transpose()? {
-            Some(j) if j.len() < png.len() => ("image/jpeg", j),
-            _ => ("image/png", png),
+            Some(j) if j.len() < png.len() => (util::MIME_JPEG, j),
+            _ => (util::MIME_PNG, png),
         };
         let enc = b64_len(data.len());
         best = Some(Clamped {
