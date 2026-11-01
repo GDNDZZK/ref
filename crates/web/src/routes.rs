@@ -9,7 +9,7 @@ use axum::http::header::{
     ACCEPT_ENCODING, CACHE_CONTROL, CONTENT_ENCODING, CONTENT_TYPE, LOCATION, REFERRER_POLICY,
     SET_COOKIE, VARY,
 };
-use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri};
 use axum::middleware;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -35,6 +35,9 @@ pub const APP_NAME: &str = "ref-web";
 const IMMUTABLE: &str = "public, max-age=31536000, immutable";
 const REVALIDATE: &str = "no-cache";
 const NO_STORE: &str = "no-store";
+/// Content codings (RFC 9110), as negotiated and as sent in `Content-Encoding`.
+const BROTLI: &str = "br";
+const GZIP: &str = "gzip";
 
 pub struct AppState {
     /// What `/login?token=` must present.
@@ -161,8 +164,8 @@ fn spa_fallback(path: &str) -> Option<&'static Asset> {
 fn asset_response(asset: &Asset, request_headers: &HeaderMap) -> Response {
     let accepts = |coding: &str| accepts_encoding(request_headers, coding);
     let (body, encoding) = match (asset.br, asset.gz) {
-        (Some(br), _) if accepts("br") => (br, Some("br")),
-        (_, Some(gz)) if accepts("gzip") => (gz, Some("gzip")),
+        (Some(br), _) if accepts(BROTLI) => (br, Some(BROTLI)),
+        (_, Some(gz)) if accepts(GZIP) => (gz, Some(GZIP)),
         _ => (asset.raw, None),
     };
     let cache = if asset.path.starts_with(HASHED_ASSETS_PREFIX) {
@@ -180,10 +183,9 @@ fn asset_response(asset: &Asset, request_headers: &HeaderMap) -> Response {
     )
         .into_response();
     if let Some(encoding) = encoding {
-        response.headers_mut().insert(
-            CONTENT_ENCODING,
-            encoding.parse().expect("static header value"),
-        );
+        response
+            .headers_mut()
+            .insert(CONTENT_ENCODING, HeaderValue::from_static(encoding));
     }
     response
 }
