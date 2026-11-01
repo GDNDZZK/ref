@@ -31,9 +31,14 @@ export function webSocketTransport(url: string): TransportFactory {
   }
 }
 
-// ws(s)://<this host>/ws, which ref-web serves; `VITE_REF_URL` points a dev build at a ref-server directly.
+// The ref-server a dev build talks to directly (`VITE_REF_URL`), if there is one.
+export function directServerUrl(): string | undefined {
+  return import.meta.env.VITE_REF_URL as string | undefined
+}
+
+// ws(s)://<this host>/ws, which ref-web serves, unless a dev build points at a ref-server.
 export function defaultServerUrl(): string {
-  const configured = import.meta.env.VITE_REF_URL as string | undefined
+  const configured = directServerUrl()
   if (configured) return configured
   const scheme = location.protocol === 'https:' ? 'wss' : 'ws'
   return `${scheme}://${location.host}/ws`
