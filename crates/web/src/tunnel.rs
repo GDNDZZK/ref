@@ -301,7 +301,7 @@ mod tests {
             session: SessionCookie::new(0),
             hosts: HostPolicy::new("127.0.0.1", 0),
             cwd: String::new(),
-            upstream: Upstream::remote(Target::Explicit {
+            upstream: Upstream::Remote(Target::Explicit {
                 url: upstream_url,
                 token: None,
             }),

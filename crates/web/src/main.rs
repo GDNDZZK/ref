@@ -102,11 +102,11 @@ fn upstream_for(cli: &Cli) -> Upstream {
         return Upstream::mock();
     }
     match &cli.server {
-        Some(url) => Upstream::remote(Target::Explicit {
+        Some(url) => Upstream::Remote(Target::Explicit {
             url: url.clone(),
             token: cli.token.clone(),
         }),
-        None => Upstream::remote(Target::Auto),
+        None => Upstream::Remote(Target::Auto),
     }
 }
 
