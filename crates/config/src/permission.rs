@@ -31,6 +31,9 @@ impl Action {
     }
 }
 
+/// Pattern that matches any tool or subject.
+pub(crate) const ANY: &str = "*";
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Rule {
     /// Tool name glob.
@@ -99,8 +102,8 @@ impl PermissionRules {
         match v {
             Value::String(s) => match Action::parse(s) {
                 Some(a) => rules.push(Rule {
-                    tool: "*".into(),
-                    pattern: "*".into(),
+                    tool: ANY.into(),
+                    pattern: ANY.into(),
                     action: a,
                 }),
                 None => warns.push(format!("invalid permission action {s:?}")),
@@ -112,7 +115,7 @@ impl PermissionRules {
                             Value::String(s) => match Action::parse(s) {
                                 Some(a) => rules.push(Rule {
                                     tool: tool.clone(),
-                                    pattern: "*".into(),
+                                    pattern: ANY.into(),
                                     action: a,
                                 }),
                                 None => {
@@ -135,7 +138,7 @@ impl PermissionRules {
                             }
                             Value::Bool(b) => rules.push(Rule {
                                 tool: tool.clone(),
-                                pattern: "*".into(),
+                                pattern: ANY.into(),
                                 action: if *b { Action::Allow } else { Action::Deny },
                             }),
                             _ => warns.push(format!("invalid permission value for {k}")),
@@ -158,7 +161,7 @@ impl PermissionRules {
                     for tool in aliases(k) {
                         rules.push(Rule {
                             tool,
-                            pattern: "*".into(),
+                            pattern: ANY.into(),
                             action: if *b { Action::Allow } else { Action::Deny },
                         });
                     }
@@ -176,7 +179,7 @@ impl PermissionRules {
     pub fn evaluate(&self, tool: &str, subject: &str) -> Option<Action> {
         let mut out = None;
         for r in &self.rules {
-            if glob_match(&r.tool, tool) && (r.pattern == "*" || glob_match(&r.pattern, subject)) {
+            if glob_match(&r.tool, tool) && (r.pattern == ANY || glob_match(&r.pattern, subject)) {
                 out = Some(r.action);
             }
         }
@@ -191,7 +194,7 @@ impl PermissionRules {
             if !glob_match(&r.tool, tool) {
                 continue;
             }
-            if r.pattern == "*" {
+            if r.pattern == ANY {
                 out = Some(r.action == Action::Deny);
             } else if r.action != Action::Deny {
                 out = Some(false);

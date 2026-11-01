@@ -1,6 +1,6 @@
 //! Built-in agents and the small built-in provider catalog.
 
-use crate::permission::{Action, Rule};
+use crate::permission::{ANY, Action, Rule};
 use crate::{
     AgentConfig, COMPACTION_AGENT, Config, DEFAULT_AGENT, MODE_PRIMARY, MODE_SUBAGENT,
     PermissionRules,
@@ -76,7 +76,7 @@ pub(crate) fn question_defaults(cfg: &mut Config) {
         };
         let rule = Rule {
             tool: QUESTION_TOOL.into(),
-            pattern: "*".into(),
+            pattern: ANY.into(),
             action,
         };
         agent.permission.rules.insert(0, rule);
