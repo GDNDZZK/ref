@@ -4,10 +4,9 @@ import { defineStore } from 'pinia'
 import { shallowRef } from 'vue'
 import { matchesShortcut } from '../commands/shortcuts.ts'
 import type { Command, SlashEntry } from '../commands/types.ts'
+import { SLASH_PREFIX } from '../composer/completion.ts'
 import { translate } from '../i18n/index.ts'
 import { useWorkspaceStore } from './workspace.ts'
-
-const SLASH_PREFIX = '/'
 
 export class CommandUnavailableError extends Error {}
 
