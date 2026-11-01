@@ -70,9 +70,9 @@ Item {
 			id: dot
 			anchors.verticalCenter: parent.verticalCenter
 			visible: line.working
-			width: 8
-			height: 8
-			radius: 4
+			width: Theme.statusDotSize
+			height: Theme.statusDotSize
+			radius: width / 2
 			color: Theme.accent
 
 			Pulse { target: dot; running: line.working; dimmed: 0.5 }

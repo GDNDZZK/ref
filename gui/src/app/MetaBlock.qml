@@ -79,9 +79,9 @@ Block {
 				Rectangle {
 					id: agentDot
 					anchors.centerIn: parent
-					width: 8
-					height: 8
-					radius: 4
+					width: Theme.statusDotSize
+					height: Theme.statusDotSize
+					radius: width / 2
 					color: block.errored ? Theme.textMuted : block.agentColor
 
 					Pulse { target: agentDot; running: block.working; dimmed: 0.5 }

@@ -36,9 +36,9 @@ ModalDialog {
 					id: dot
 					x: Theme.dialogPadding
 					y: (Theme.sidebarHistoryRowHeight - height) / 2
-					width: 8
-					height: 8
-					radius: 4
+					width: Theme.statusDotSize
+					height: Theme.statusDotSize
+					radius: width / 2
 					color: server.modelData.status === "connected" ? Theme.success
 						: server.modelData.status === "failed" ? Theme.danger
 						: server.modelData.status === "connecting" ? Theme.accent

@@ -33,9 +33,9 @@ ModalDialog {
 			Rectangle {
 				x: Theme.dialogPadding
 				anchors.verticalCenter: parent.verticalCenter
-				width: 8
-				height: 8
-				radius: 4
+				width: Theme.statusDotSize
+				height: Theme.statusDotSize
+				radius: width / 2
 				color: Theme.agentColor(row.modelData.color, row.modelData.position)
 			}
 			Column {
