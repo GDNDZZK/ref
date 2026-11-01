@@ -433,19 +433,7 @@ pub fn frame(buf: &mut Buffer, screen: Rect, w: u16, h: u16, title: &str, t: f32
             }
         }
     }
-    let bst = Style::new().fg(bc).bg(bg);
-    for xx in r.x + 1..r.x + r.width.saturating_sub(1) {
-        buf.set_string(xx, r.y, "─", bst);
-        buf.set_string(xx, r.y + r.height - 1, "─", bst);
-    }
-    for yy in r.y + 1..r.y + r.height.saturating_sub(1) {
-        buf.set_string(r.x, yy, "│", bst);
-        buf.set_string(r.x + r.width - 1, yy, "│", bst);
-    }
-    buf.set_string(r.x, r.y, "╭", bst);
-    buf.set_string(r.x + r.width - 1, r.y, "╮", bst);
-    buf.set_string(r.x, r.y + r.height - 1, "╰", bst);
-    buf.set_string(r.x + r.width - 1, r.y + r.height - 1, "╯", bst);
+    draw_rounded_border(buf, r, Style::new().fg(bc).bg(bg));
     let title = format!(" {title} ");
     buf.set_string(
         r.x + 2,
@@ -466,6 +454,22 @@ pub fn frame(buf: &mut Buffer, screen: Rect, w: u16, h: u16, title: &str, t: f32
         );
     }
     r
+}
+
+/// Draws a one-cell rounded border along the edge of `r`.
+pub fn draw_rounded_border(buf: &mut Buffer, r: Rect, style: Style) {
+    for xx in r.x + 1..r.x + r.width.saturating_sub(1) {
+        buf.set_string(xx, r.y, "─", style);
+        buf.set_string(xx, r.y + r.height - 1, "─", style);
+    }
+    for yy in r.y + 1..r.y + r.height.saturating_sub(1) {
+        buf.set_string(r.x, yy, "│", style);
+        buf.set_string(r.x + r.width - 1, yy, "│", style);
+    }
+    buf.set_string(r.x, r.y, "╭", style);
+    buf.set_string(r.x + r.width - 1, r.y, "╮", style);
+    buf.set_string(r.x, r.y + r.height - 1, "╰", style);
+    buf.set_string(r.x + r.width - 1, r.y + r.height - 1, "╯", style);
 }
 
 /// Before drawing an overlay over `r`: replace wide glyphs (CJK, emoji) that start just left

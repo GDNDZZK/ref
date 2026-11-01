@@ -4,6 +4,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 
+use super::dialog::draw_rounded_border;
 use super::text::{self, width};
 use super::theme;
 use crate::state::SessionView;
@@ -147,18 +148,7 @@ pub fn draw_frame(
     };
     let bst = Style::new().fg(bc);
     let (x0, y0, x1, y1) = (r.x, r.y, r.x + r.width - 1, r.y + r.height - 1);
-    for x in x0 + 1..x1 {
-        buf.set_string(x, y0, "─", bst);
-        buf.set_string(x, y1, "─", bst);
-    }
-    for y in y0 + 1..y1 {
-        buf.set_string(x0, y, "│", bst);
-        buf.set_string(x1, y, "│", bst);
-    }
-    buf.set_string(x0, y0, "╭", bst);
-    buf.set_string(x1, y0, "╮", bst);
-    buf.set_string(x0, y1, "╰", bst);
-    buf.set_string(x1, y1, "╯", bst);
+    draw_rounded_border(buf, r, bst);
     // Title: name · agent · status · ctx%
     let (st, sc) = status_text(v, tick);
     let ac = theme::agent_color(agents, &v.info.agent);
