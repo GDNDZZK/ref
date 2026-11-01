@@ -69,7 +69,9 @@ export class QuestionForm {
   answers(): string[][] {
     return this.questions.map((question, index) => {
       const choice = this.choices[index]!
-      const labels = question.options.filter((_option, row) => choice.picked[row]).map((option) => option.label)
+      const labels = question.options
+        .filter((_option, row) => choice.picked[row])
+        .map((option) => option.label)
       const text = choice.customText.trim()
       return choice.customPicked && text !== '' ? [...labels, text] : labels
     })
