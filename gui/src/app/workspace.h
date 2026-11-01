@@ -43,7 +43,7 @@ class Workspace : public QObject
 	Q_PROPERTY(QString connectionState READ connectionState NOTIFY connectionChanged)
 	Q_PROPERTY(QString connectionText READ connectionText NOTIFY connectionChanged)
 	Q_PROPERTY(QString failureText READ failureText NOTIFY failureTextChanged)
-	Q_PROPERTY(QString cwd READ cwd NOTIFY cwdChanged)
+	Q_PROPERTY(QString cwd READ cwd CONSTANT)
 	Q_PROPERTY(QStringList visibleSessionIds READ visibleSessionIds NOTIFY visibleSessionIdsChanged)
 	Q_PROPERTY(bool windowActive READ isWindowActive WRITE setWindowActive NOTIFY windowActiveChanged)
 	// What the backend offers and the session lists.
@@ -120,7 +120,7 @@ public:
 	const QString& dialog() const { return m_dialog; }
 	const QVariantMap& dialogArgs() const { return m_dialogArgs; }
 	bool isBackendLocal() const;
-	bool isProtocolOutdated() const { return m_backend.hello().protocol < refgui::proto::ProtocolVersion && m_backend.state() == refgui::client::Backend::State::Connected; }
+	bool isProtocolOutdated() const;
 	QString backendVersion() const { return m_backend.hello().serverVersion; }
 	int protocolVersion() const { return m_backend.hello().protocol; }
 	static constexpr int requiredProtocol() { return refgui::proto::ProtocolVersion; }
@@ -181,7 +181,6 @@ signals:
 	void currentChanged();
 	void connectionChanged();
 	void failureTextChanged();
-	void cwdChanged();
 	void visibleSessionIdsChanged();
 	void windowActiveChanged();
 	void mcpServersChanged();

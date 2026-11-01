@@ -74,7 +74,7 @@ void TileStage::sync()
 			continue;
 		}
 		beginInsertRows({}, int(m_rows.size()), int(m_rows.size()));
-		m_rows.append({wanted[place], wanted[place]->sessionId(), false, 0, false, place});
+		m_rows.append({.session = wanted[place], .sessionId = wanted[place]->sessionId(), .place = place});
 		endInsertRows();
 	}
 	setPlaced(int(wanted.size()));
