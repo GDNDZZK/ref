@@ -138,6 +138,10 @@ pub(super) fn bash(command: &str) -> Value {
     json!({ "command": command })
 }
 
+/// Rounds of the `tools` script (`tools_round` implements rounds `0..TOOLS_ROUNDS`); `everything`
+/// continues after them with the `todo` rounds and then `image`.
+pub const TOOLS_ROUNDS: usize = 4;
+
 /// Rounds 0..=3 of the `tools` script; `everything` continues after them.
 pub fn tools_round(ctx: &Ctx, round: usize) -> Round {
     let results = &ctx.tool_results;
