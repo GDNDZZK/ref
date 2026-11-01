@@ -61,28 +61,18 @@ fn model() -> ModelRef {
 fn info(name: &str, agent: &str, cwd: &str) -> SessionInfo {
     let t = now_ms();
     SessionInfo {
-        id: id("ses"),
         name: name.into(),
-        title: String::new(),
         agent: agent.into(),
         model: model(),
-        cwd: cwd.into(),
         created_at: t,
         updated_at: t,
-        status: SessionStatus::Idle,
-        attached: 0,
-        live: true,
-        parent: None,
-        must_report: false,
         context: ContextUsage {
             used: 0,
             max: 1_000_000,
             recommend: 600_000,
             auto: 850_000,
         },
-        todos: Vec::new(),
-        busy_since: None,
-        last_error: None,
+        ..crate::app::placeholder_info(&id("ses"), cwd)
     }
 }
 

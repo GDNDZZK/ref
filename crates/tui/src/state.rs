@@ -512,23 +512,10 @@ mod tests {
 
     fn info() -> SessionInfo {
         SessionInfo {
-            id: "s".into(),
             name: "n".into(),
-            title: String::new(),
             agent: "build".into(),
-            model: Default::default(),
-            cwd: "/".into(),
-            created_at: 0,
-            updated_at: 0,
-            status: Default::default(),
             attached: 1,
-            live: true,
-            parent: None,
-            must_report: false,
-            context: Default::default(),
-            todos: Vec::new(),
-            busy_since: None,
-            last_error: None,
+            ..crate::app::placeholder_info("s", "/")
         }
     }
 
