@@ -39,6 +39,7 @@ QtObject {
 	readonly property color diffRemoved: dark ? "#ec6f73" : "#b3303f"
 	readonly property color diffRemovedBackground: dark ? "#33202a" : "#fbe6e8"
 	readonly property color matchBackground: dark ? "#3a3420" : "#fff1c2" // grep matches
+	readonly property real disabledOpacity: 0.4 // a control that cannot be used now
 	readonly property real staleOpacity: 0.55 // messages before the last compaction
 	// Composer in shell mode (`!command`): amber, like the TUI's warning color.
 	readonly property color shellSurface: dark ? "#2a2419" : "#fbf3e3"

@@ -17,7 +17,7 @@ Item {
 
 	implicitWidth: label.implicitWidth + 2 * 18
 	implicitHeight: small ? 28 : Theme.buttonHeight
-	opacity: enabled ? 1 : 0.4
+	opacity: enabled ? 1 : Theme.disabledOpacity
 
 	Rectangle {
 		id: face
