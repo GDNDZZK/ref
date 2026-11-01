@@ -301,7 +301,7 @@ pub async fn fake_upstream() -> FakeUpstream {
                     |request: &tokio_tungstenite::tungstenite::handshake::server::Request,
                      response| {
                         let query = request.uri().query().map(str::to_string);
-                        let _ = query_tx.send(query);
+                        query_tx.send(query).unwrap();
                         Ok(response)
                     };
                 let mut ws = tokio_tungstenite::accept_hdr_async(stream, callback)
@@ -314,7 +314,7 @@ pub async fn fake_upstream() -> FakeUpstream {
                                 code: CloseCode::from(FAKE_CLOSE_CODE),
                                 reason: FAKE_CLOSE_REASON.into(),
                             };
-                            let _ = ws.send(Message::Close(Some(close))).await;
+                            ws.send(Message::Close(Some(close))).await.unwrap();
                             return;
                         }
                         Message::Text(_) | Message::Binary(_) => message,
