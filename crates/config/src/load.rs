@@ -31,7 +31,7 @@ const FILE_OPEN: &str = "{file:";
 pub type EnvFn<'a> = &'a dyn Fn(&str) -> Option<String>;
 
 /// Load config for `cwd` using the real home directory and process environment.
-pub fn load(cwd: &Path) -> Config {
+pub(crate) fn load(cwd: &Path) -> Config {
     let home = dirs::home_dir();
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .filter(|v| !v.is_empty())
