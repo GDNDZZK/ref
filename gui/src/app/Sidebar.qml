@@ -120,7 +120,7 @@ Rectangle {
 						anchors.verticalCenter: parent.verticalCenter
 						text: qsTr("New session")
 						color: Theme.text
-						font.pixelSize: Theme.smallFontSize + 1
+						font.pixelSize: Theme.captionFontSize
 					}
 				}
 			}
@@ -260,7 +260,7 @@ Rectangle {
 				color: Theme.text
 				selectionColor: Theme.selection
 				selectedTextColor: Theme.text
-				font.pixelSize: Theme.smallFontSize + 1
+				font.pixelSize: Theme.captionFontSize
 				clip: true
 				Accessible.name: qsTr("Search history")
 				onTextChanged: Workspace.history.filter = text.trim()
@@ -271,7 +271,7 @@ Rectangle {
 					verticalAlignment: Text.AlignVCenter
 					text: qsTr("Search history")
 					color: Theme.textMuted
-					font.pixelSize: Theme.smallFontSize + 1
+					font.pixelSize: Theme.captionFontSize
 					visible: searchInput.text === "" && searchInput.preeditText === ""
 				}
 			}
@@ -313,7 +313,7 @@ Rectangle {
 				visible: history.count === 0
 				text: !Workspace.historyLoaded ? qsTr("Loading…") : searchInput.text !== "" ? qsTr("No matching sessions") : qsTr("No earlier sessions")
 				color: Theme.textMuted
-				font.pixelSize: Theme.smallFontSize + 1
+				font.pixelSize: Theme.captionFontSize
 			}
 		}
 
@@ -347,7 +347,7 @@ Rectangle {
 					anchors.verticalCenter: parent.verticalCenter
 					text: "MCP"
 					color: Theme.textMuted
-					font.pixelSize: Theme.smallFontSize + 1
+					font.pixelSize: Theme.captionFontSize
 				}
 				Row {
 					anchors.verticalCenter: parent.verticalCenter

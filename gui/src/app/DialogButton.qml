@@ -35,7 +35,7 @@ Item {
 			id: label
 			anchors.centerIn: parent
 			color: button.filled ? Theme.onAccent : Theme.text
-			font.pixelSize: Theme.fontSize - 1
+			font.pixelSize: Theme.secondaryFontSize
 		}
 	}
 

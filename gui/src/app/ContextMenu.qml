@@ -63,7 +63,7 @@ Popup {
 					anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }
 					text: entry.modelData.text
 					color: entry.modelData.danger ? Theme.danger : Theme.text
-					font.pixelSize: Theme.fontSize - 1
+					font.pixelSize: Theme.secondaryFontSize
 				}
 				HoverHandler {
 					id: hover

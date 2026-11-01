@@ -108,7 +108,7 @@ Rectangle {
 			width: parent.width
 			text: card.prompt.text
 			color: Theme.text
-			font.pixelSize: Theme.fontSize - 1
+			font.pixelSize: Theme.secondaryFontSize
 			wrapMode: Text.Wrap
 		}
 	}
@@ -184,14 +184,14 @@ Rectangle {
 						textFormat: Text.PlainText
 						text: entry.modelData.header
 						color: Theme.textMuted
-						font.pixelSize: Theme.fontSize - 1
+						font.pixelSize: Theme.secondaryFontSize
 					}
 					Text {
 						textFormat: Text.PlainText
 						width: entry.width - entry.leftPadding - entryHeader.width - entry.spacing
 						text: entry.modelData.answer
 						color: entry.modelData.answered ? Theme.text : Theme.warning
-						font.pixelSize: Theme.fontSize - 1
+						font.pixelSize: Theme.secondaryFontSize
 						wrapMode: Text.Wrap
 					}
 				}

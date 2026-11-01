@@ -104,7 +104,7 @@ Item {
 						color: Theme.textMuted
 						opacity: view.gutterOpacity
 						font.family: Theme.monoFamily
-						font.pixelSize: 11
+						font.pixelSize: Theme.microFontSize
 					}
 					Text {
 						textFormat: Text.PlainText

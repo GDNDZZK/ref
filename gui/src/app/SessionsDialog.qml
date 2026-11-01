@@ -62,7 +62,7 @@ ModalDialog {
 					width: parent.width
 					text: row.displayTitle
 					color: Theme.text
-					font { pixelSize: Theme.fontSize - 2; bold: row.isCurrent }
+					font { pixelSize: Theme.compactFontSize; bold: row.isCurrent }
 					elide: Text.ElideRight
 				}
 				Text {

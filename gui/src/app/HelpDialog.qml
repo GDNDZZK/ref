@@ -37,7 +37,7 @@ ModalDialog {
 					anchors.verticalCenter: parent.verticalCenter
 					text: parent.modelData.title
 					color: Theme.text
-					font.pixelSize: Theme.smallFontSize + 1
+					font.pixelSize: Theme.captionFontSize
 				}
 				KeyChips {
 					anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
@@ -60,7 +60,7 @@ ModalDialog {
 					anchors.verticalCenter: parent.verticalCenter
 					text: parent.modelData.title
 					color: Theme.text
-					font.pixelSize: Theme.smallFontSize + 1
+					font.pixelSize: Theme.captionFontSize
 				}
 				KeyChips {
 					anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
@@ -84,7 +84,7 @@ ModalDialog {
 					anchors.verticalCenter: parent.verticalCenter
 					text: row.modelData.title
 					color: Theme.text
-					font.pixelSize: Theme.smallFontSize + 1
+					font.pixelSize: Theme.captionFontSize
 				}
 				Text {
 					textFormat: Text.PlainText

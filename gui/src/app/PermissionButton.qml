@@ -47,7 +47,7 @@ Item {
 			anchors.verticalCenter: parent.verticalCenter
 			text: button.label
 			color: Theme.text
-			font.pixelSize: Theme.fontSize - 2
+			font.pixelSize: Theme.compactFontSize
 		}
 		Rectangle {
 			anchors.verticalCenter: parent.verticalCenter
@@ -63,7 +63,7 @@ Item {
 				text: button.keyName
 				color: button.tint
 				font.family: Theme.monoFamily
-				font.pixelSize: 11
+				font.pixelSize: Theme.microFontSize
 			}
 		}
 	}

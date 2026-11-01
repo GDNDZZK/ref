@@ -35,7 +35,7 @@ ModalDialog {
 		bottomPadding: Theme.dialogPadding
 		text: qsTr("This session is still working. Closing it stops the work; the conversation stays in history.")
 		color: Theme.text
-		font.pixelSize: Theme.fontSize - 1
+		font.pixelSize: Theme.secondaryFontSize
 		wrapMode: Text.Wrap
 	}
 }

@@ -168,7 +168,7 @@ Item {
 		anchors { horizontalCenter: parent.horizontalCenter; top: divider.bottom; topMargin: 22 }
 		text: pick.emptyText
 		color: Theme.textMuted
-		font.pixelSize: Theme.fontSize - 1
+		font.pixelSize: Theme.secondaryFontSize
 		visible: view.count === 0
 	}
 }

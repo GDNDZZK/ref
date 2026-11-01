@@ -64,7 +64,7 @@ Item {
 					anchors.centerIn: parent
 					text: parent.modelData.text
 					color: parent.index === segmented.currentIndex ? Theme.text : Theme.textMuted
-					font.pixelSize: Theme.smallFontSize + 1
+					font.pixelSize: Theme.captionFontSize
 
 					Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 				}
