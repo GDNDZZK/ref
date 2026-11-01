@@ -7,14 +7,14 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ref_proto::ToastLevel;
 
-use super::text::{self, width};
 use super::theme;
+use crate::text::{self, width};
 
 pub struct Toast {
     pub level: ToastLevel,
     pub text: String,
-    pub born: Instant,
-    pub ttl: Duration,
+    born: Instant,
+    ttl: Duration,
 }
 
 #[derive(Default)]
@@ -24,6 +24,22 @@ pub struct Toasts {
 
 const FADE_IN: f32 = 0.15;
 const FADE_OUT: f32 = 0.35;
+/// How long a toast of each level stays.
+const TTL_ERROR: Duration = Duration::from_secs(5);
+const TTL_WARN: Duration = Duration::from_secs(4);
+const TTL_INFO: Duration = Duration::from_secs(3);
+/// Most toasts shown at once, and most lines of one toast.
+const MAX_TOASTS: usize = 4;
+const MAX_TOAST_LINES: usize = 4;
+/// Width range of a toast.
+const MIN_TOAST_W: usize = 10;
+const MAX_TOAST_W: usize = 60;
+/// Columns a toast slides in from the right during the fade-in.
+const SLIDE_COLS: f32 = 4.0;
+/// Background the toast fades in from.
+const TOAST_SHADOW: Color = Color::Rgb(10, 10, 10);
+/// Columns before the text: accent bar, space, label, space.
+const TOAST_TEXT_INSET: usize = 4;
 
 impl Toasts {
     pub fn push(&mut self, level: ToastLevel, text: impl Into<String>) {
@@ -31,9 +47,9 @@ impl Toasts {
         // Replace an identical visible toast instead of stacking duplicates.
         self.items.retain(|t| t.text != text);
         let ttl = match level {
-            ToastLevel::Error => Duration::from_secs(5),
-            ToastLevel::Warn => Duration::from_secs(4),
-            ToastLevel::Info => Duration::from_secs(3),
+            ToastLevel::Error => TTL_ERROR,
+            ToastLevel::Warn => TTL_WARN,
+            ToastLevel::Info => TTL_INFO,
         };
         self.items.push(Toast {
             level,
@@ -41,7 +57,7 @@ impl Toasts {
             born: Instant::now(),
             ttl,
         });
-        if self.items.len() > 4 {
+        if self.items.len() > MAX_TOASTS {
             self.items.remove(0);
         }
     }
@@ -56,10 +72,9 @@ impl Toasts {
         self.push(ToastLevel::Error, t)
     }
 
-    /// Drops expired toasts; returns true if any toast is visible (needs frames).
-    pub fn gc(&mut self) -> bool {
+    /// Drops expired toasts.
+    pub fn gc(&mut self) {
         self.items.retain(|t| t.born.elapsed() < t.ttl);
-        !self.items.is_empty()
     }
 
     /// Whether a fade animation is in progress (needs high frame rate).
@@ -83,7 +98,9 @@ impl Toasts {
 
     pub fn draw(&self, buf: &mut Buffer, area: Rect) {
         let mut y = area.y + 1;
-        let maxw = (area.width as usize).saturating_sub(4).clamp(10, 60);
+        let maxw = (area.width as usize)
+            .saturating_sub(4)
+            .clamp(MIN_TOAST_W, MAX_TOAST_W);
         for t in self.items.iter().rev() {
             let e = t.born.elapsed().as_secs_f32();
             let ttl = t.ttl.as_secs_f32();
@@ -101,19 +118,23 @@ impl Toasts {
             };
             let lines = text::wrap_spans(
                 &[ratatui::text::Span::raw(text::one_line(&t.text))],
-                maxw.saturating_sub(4),
+                maxw.saturating_sub(TOAST_TEXT_INSET),
             );
-            let lines: Vec<String> = lines.iter().take(4).map(text::line_text).collect();
-            let inner_w = lines.iter().map(|l| width(l)).max().unwrap_or(0) + 4;
+            let lines: Vec<String> = lines
+                .iter()
+                .take(MAX_TOAST_LINES)
+                .map(text::line_text)
+                .collect();
+            let inner_w = lines.iter().map(|l| width(l)).max().unwrap_or(0) + TOAST_TEXT_INSET;
             // Slide in from the right during the fade-in.
-            let slide = ((1.0 - alpha.min(1.0)) * 4.0).round() as u16;
+            let slide = ((1.0 - alpha) * SLIDE_COLS).round() as u16;
             let w = inner_w as u16 + 2;
             let x = (area.x + area.width).saturating_sub(w + 1) + slide.min(3);
             let h = lines.len() as u16;
             if y + h > area.y + area.height {
                 break;
             }
-            let bg = theme::blend(Color::Rgb(10, 10, 10), theme::PANEL, alpha);
+            let bg = theme::blend(TOAST_SHADOW, theme::PANEL, alpha);
             let fg = theme::blend(theme::PANEL, theme::TEXT, alpha);
             let ac = theme::blend(theme::PANEL, accent, alpha);
             for (i, l) in lines.iter().enumerate() {
@@ -131,10 +152,10 @@ impl Toasts {
                     buf.set_string(x + 2, yy, label, Style::new().fg(ac).bg(bg));
                 }
                 buf.set_stringn(
-                    x + 4,
+                    x + TOAST_TEXT_INSET as u16,
                     yy,
                     l,
-                    inner_w.saturating_sub(4),
+                    inner_w.saturating_sub(TOAST_TEXT_INSET),
                     Style::new().fg(fg).bg(bg),
                 );
             }

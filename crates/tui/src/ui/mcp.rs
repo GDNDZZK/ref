@@ -10,11 +10,26 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ref_proto::McpServerStatus;
 
-use super::text::{self, width};
 use super::{dialog, message, theme};
+use crate::text::{self, width};
+use crate::util::mcp_status;
+
+/// The connecting dot pulses once per this many ticks.
+const PULSE_PERIOD_TICKS: u64 = 12;
+/// Colour mix of the dimmest point of the pulse (the brightest is 1.0).
+const PULSE_MIN_MIX: f32 = 0.35;
+/// The server name keeps at least this many columns in a sidebar row.
+const MIN_NAME_W: usize = 4;
+/// The status text is shown only with at least this many columns.
+const MIN_STATUS_W: usize = 3;
+/// Indent of the detail lines (error, tools) below a server row.
+const DETAIL_INDENT: &str = "    ";
+const MIN_DETAIL_W: usize = 8;
+/// A collapsed server shows at most this many error lines.
+const COLLAPSED_ERROR_LINES: usize = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum McpState {
+pub(crate) enum McpState {
     Connected,
     Connecting,
     Failed,
@@ -31,15 +46,15 @@ pub struct McpEntry {
     /// Tool names with the `<server>_` prefix stripped (empty in fallback mode).
     pub tools: Vec<String>,
     /// Number of tools (known even when the names are not).
-    pub n_tools: usize,
+    pub(crate) n_tools: usize,
 }
 
 fn parse_state(s: &str) -> McpState {
     match s.trim().to_ascii_lowercase().as_str() {
-        "connected" => McpState::Connected,
-        "connecting" | "pending" => McpState::Connecting,
-        "failed" | "error" => McpState::Failed,
-        "disabled" => McpState::Disabled,
+        mcp_status::CONNECTED => McpState::Connected,
+        mcp_status::CONNECTING | "pending" => McpState::Connecting,
+        mcp_status::FAILED | "error" => McpState::Failed,
+        mcp_status::DISABLED => McpState::Disabled,
         o => McpState::Other(o.to_string()),
     }
 }
@@ -76,7 +91,7 @@ impl McpEntry {
         let word = head
             .split(|c: char| c.is_whitespace() || c == '(')
             .next()
-            .unwrap_or("");
+            .expect("split yields at least one item");
         let state = parse_state(word);
         let n_tools = head
             .split_once('(')
@@ -111,17 +126,28 @@ pub fn dot(state: &McpState, tick: u64) -> Span<'static> {
     match state {
         McpState::Connected => Span::styled("●", theme::fg(theme::SUCCESS)),
         McpState::Connecting => {
-            let phase = (tick % 12) as f32 / 6.0;
+            let phase = (tick % PULSE_PERIOD_TICKS) as f32 / (PULSE_PERIOD_TICKS / 2) as f32;
             let t = (phase - 1.0).abs();
             Span::styled(
                 "◌",
-                theme::fg(theme::blend(theme::DIM, theme::WARNING, 0.35 + 0.65 * t)),
+                theme::fg(theme::blend(
+                    theme::DIM,
+                    theme::WARNING,
+                    PULSE_MIN_MIX + (1.0 - PULSE_MIN_MIX) * t,
+                )),
             )
         }
         McpState::Failed => Span::styled("●", theme::fg(theme::ERROR)),
         McpState::Disabled => Span::styled("○", theme::fg(theme::DIM)),
         McpState::Other(_) => Span::styled("●", theme::fg(theme::MUTED)),
     }
+}
+
+/// A detail line below a server row: indented, and not a header row.
+fn indented(spans: Vec<Span<'static>>) -> (Line<'static>, Option<usize>) {
+    let mut all = vec![Span::raw(DETAIL_INDENT)];
+    all.extend(spans);
+    (Line::from(all), None)
 }
 
 fn tools_label(n: usize) -> String {
@@ -137,10 +163,10 @@ pub fn status_text(e: &McpEntry) -> (String, Color) {
             e.error
                 .as_deref()
                 .map(text::one_line)
-                .unwrap_or_else(|| "failed".into()),
+                .unwrap_or_else(|| mcp_status::FAILED.into()),
             theme::ERROR,
         ),
-        McpState::Disabled => ("disabled".into(), theme::DIM),
+        McpState::Disabled => (mcp_status::DISABLED.into(), theme::DIM),
         McpState::Other(s) => (s.clone(), theme::MUTED),
     }
 }
@@ -164,9 +190,9 @@ pub fn sidebar_line(e: &McpEntry, w: usize, tick: u64) -> Line<'static> {
     let (st, color) = status_text(e);
     let name_w = width(&e.name);
     let avail = w.saturating_sub(2);
-    let min_name = name_w.min(avail.div_ceil(2).max(4));
+    let min_name = name_w.min(avail.div_ceil(2).max(MIN_NAME_W));
     let right_room = avail.saturating_sub(min_name + 1);
-    let right = if right_room >= 3 {
+    let right = if right_room >= MIN_STATUS_W {
         text::truncate(&st, right_room)
     } else {
         String::new()
@@ -204,7 +230,7 @@ pub struct McpDialog {
     /// Keep the selected block visible on the next draw.
     follow: bool,
     /// Server to select once the list arrives.
-    pub want: Option<String>,
+    want: Option<String>,
 }
 
 impl McpDialog {
@@ -260,11 +286,6 @@ impl McpDialog {
         self.rows.iter().find(|(ry, _)| *ry == y).map(|(_, i)| *i)
     }
 
-    pub fn contains(&self, x: u16, y: u16) -> bool {
-        let r = self.rect;
-        x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
-    }
-
     /// Content lines for width `iw`: (line, server index for header rows).
     fn content(&self, entries: &[McpEntry], iw: usize, tick: u64, loaded: bool) -> Content {
         let mut out: Vec<(Line<'static>, Option<usize>)> = Vec::new();
@@ -307,13 +328,12 @@ impl McpDialog {
                     format!("connected · {}", tools_label(e.n_tools)),
                     theme::SUCCESS,
                 ),
-                McpState::Failed => ("failed".to_string(), theme::ERROR),
+                McpState::Failed => (mcp_status::FAILED.to_string(), theme::ERROR),
                 _ => status_text(e),
             };
             let (line, _) = message::compose(left, vec![Span::styled(st, theme::fg(color))], iw);
             out.push((line, Some(i)));
-            let ind = "    ";
-            let body_w = iw.saturating_sub(ind.len()).max(8);
+            let body_w = iw.saturating_sub(DETAIL_INDENT.len()).max(MIN_DETAIL_W);
             if let Some(err) = &e.error {
                 let flat = text::sanitize(err);
                 let mut lines = Vec::new();
@@ -329,46 +349,30 @@ impl McpDialog {
                     ));
                 }
                 // Long errors are capped unless the server is expanded.
-                let cap = if exp { usize::MAX } else { 4 };
+                let cap = if exp {
+                    usize::MAX
+                } else {
+                    COLLAPSED_ERROR_LINES
+                };
                 let n = lines.len();
                 for l in lines.into_iter().take(cap) {
-                    let mut spans = vec![Span::raw(ind)];
-                    spans.extend(l.spans);
-                    out.push((Line::from(spans), None));
+                    out.push(indented(l.spans));
                 }
                 if n > cap {
-                    out.push((
-                        Line::from(vec![
-                            Span::raw(ind),
-                            Span::styled(
-                                format!("… {} more lines (enter to show)", n - cap),
-                                theme::fg(theme::DIM),
-                            ),
-                        ]),
-                        None,
-                    ));
+                    let more = format!("{} {} more lines (enter to show)", text::ELLIPSIS, n - cap);
+                    out.push(indented(vec![Span::styled(more, theme::fg(theme::DIM))]));
                 }
             }
             if exp && has_tools {
                 if e.tools.is_empty() {
-                    out.push((
-                        Line::from(vec![
-                            Span::raw(ind),
-                            Span::styled(
-                                format!(
-                                    "{} (names not reported by this backend)",
-                                    tools_label(e.n_tools)
-                                ),
-                                theme::muted(),
-                            ),
-                        ]),
-                        None,
-                    ));
+                    let note = format!(
+                        "{} (names not reported by this backend)",
+                        tools_label(e.n_tools)
+                    );
+                    out.push(indented(vec![Span::styled(note, theme::muted())]));
                 } else {
                     for l in tool_grid(&e.tools, body_w) {
-                        let mut spans = vec![Span::raw(ind)];
-                        spans.extend(l.spans);
-                        out.push((Line::from(spans), None));
+                        out.push(indented(l.spans));
                     }
                 }
             }
@@ -396,7 +400,7 @@ impl McpDialog {
             self.follow = true;
         }
         self.sel = self.sel.min(entries.len().saturating_sub(1));
-        let t = (self.opened.elapsed().as_secs_f32() / 0.12).min(1.0);
+        let t = dialog::open_progress(self.opened);
         let w = screen.width.saturating_sub(4).clamp(30, 90);
         let iw = w.saturating_sub(4) as usize;
         let (lines, blocks) = self.content(entries, iw, tick, loaded);

@@ -6,9 +6,12 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use super::message::compose;
-use super::text;
 use super::theme;
 use crate::state::SessionView;
+use crate::text;
+
+/// From this share of the context window used, the usage text switches from muted to normal.
+const CONTEXT_WARM_PCT: u64 = 60;
 
 pub struct StatusCtx<'a> {
     pub view: Option<&'a SessionView>,
@@ -26,7 +29,7 @@ pub struct StatusCtx<'a> {
     pub page: Option<(usize, usize)>,
 }
 
-pub fn status_label(v: &SessionView, tick: u64, now: i64) -> (String, Color) {
+fn status_label(v: &SessionView, tick: u64, now: i64) -> (String, Color) {
     use ref_proto::SessionStatus::*;
     let el = v.busy_ms(now).map(text::fmt_elapsed).unwrap_or_default();
     match &v.info.status {
@@ -44,7 +47,7 @@ pub fn status_label(v: &SessionView, tick: u64, now: i64) -> (String, Color) {
         Retrying {
             next_at, attempt, ..
         } => {
-            let s = ((next_at - now).max(0) + 999) / 1000;
+            let s = text::ceil_secs(next_at - now);
             (
                 format!("{} retrying in {s}s (#{attempt})", theme::spinner(tick)),
                 theme::WARNING,
@@ -67,7 +70,7 @@ pub fn context_spans(v: &SessionView) -> Vec<Span<'static>> {
         theme::ERROR
     } else if c.recommend > 0 && c.used >= c.recommend {
         theme::WARNING
-    } else if pct >= 60 {
+    } else if pct >= CONTEXT_WARM_PCT {
         theme::TEXT
     } else {
         theme::MUTED
@@ -191,7 +194,10 @@ pub fn meta_line(
             .add_modifier(Modifier::BOLD),
     )];
     if !model.is_empty() {
-        spans.push(Span::styled(" · ", Style::new().fg(theme::MUTED).bg(bg)));
+        spans.push(Span::styled(
+            text::SEPARATOR,
+            Style::new().fg(theme::MUTED).bg(bg),
+        ));
         spans.push(Span::styled(
             model.to_string(),
             Style::new().fg(theme::TEXT).bg(bg),
@@ -204,7 +210,10 @@ pub fn meta_line(
         }
     }
     if let Some(v) = variant {
-        spans.push(Span::styled(" · ", Style::new().fg(theme::MUTED).bg(bg)));
+        spans.push(Span::styled(
+            text::SEPARATOR,
+            Style::new().fg(theme::MUTED).bg(bg),
+        ));
         spans.push(Span::styled(
             v.to_string(),
             Style::new()

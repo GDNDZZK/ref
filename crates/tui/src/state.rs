@@ -4,15 +4,18 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use ref_proto::{
-    Delta, ImageData, Message, MessageSource, Part, PermissionRequest, QuestionRequest, Role,
-    SessionEvent, SessionInfo, SessionSnapshot, ToolState,
+    ImageData, Message, MessageSource, Part, PermissionRequest, QuestionRequest, Role,
+    SessionEvent, SessionInfo, SessionSnapshot,
 };
 
 use crate::ui::chat::ChatState;
+use crate::util::apply_delta;
 
+/// How many recent messages are compared with queued prompt text.
+const QUEUED_MATCH_WINDOW: usize = 20;
 static VERSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
-pub fn next_version() -> u64 {
+fn next_version() -> u64 {
     VERSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
@@ -334,7 +337,7 @@ impl SessionView {
             .messages
             .iter()
             .rev()
-            .take(20)
+            .take(QUEUED_MATCH_WINDOW)
             .filter(|m| m.role == Role::User && m.source == MessageSource::Human)
             .map(|m| m.raw_text().trim().to_string())
             .collect();
@@ -415,120 +418,18 @@ pub fn message_live(m: &Message) -> bool {
         .any(|p| matches!(p, Part::Tool { state, .. } if !state.is_final()))
 }
 
-pub fn apply_delta(parts: &mut Vec<Part>, index: usize, delta: Delta) {
-    if index >= parts.len() {
-        // Delta for a part we haven't seen: create it.
-        let now = ref_proto::now_ms();
-        let p = match &delta {
-            Delta::Text { .. } => Part::Text {
-                text: String::new(),
-                time: now,
-            },
-            Delta::Reasoning { .. } => Part::Reasoning {
-                text: String::new(),
-                time: now,
-                time_end: None,
-                provider_data: None,
-            },
-            Delta::ToolInput { .. } => Part::Tool {
-                call_id: format!("pending-{index}"),
-                name: String::new(),
-                purpose: String::new(),
-                input: serde_json::Value::Null,
-                raw_input: String::new(),
-                state: ToolState::Streaming,
-                output: None,
-                meta: None,
-                images: Vec::new(),
-                time: now,
-                time_end: None,
-                run_at: None,
-                provider_data: None,
-            },
-        };
-        while parts.len() < index {
-            parts.push(Part::Text {
-                text: String::new(),
-                time: now,
-            });
-        }
-        parts.push(p);
-    }
-    match (&mut parts[index], delta) {
-        (Part::Text { text, .. }, Delta::Text { text: d }) => text.push_str(&d),
-        (Part::Reasoning { text, .. }, Delta::Reasoning { text: d }) => text.push_str(&d),
-        (
-            Part::Tool {
-                raw_input, purpose, ..
-            },
-            Delta::ToolInput { text: d },
-        ) => {
-            raw_input.push_str(&d);
-            if purpose.is_empty()
-                && let Some(p) = partial_purpose(raw_input)
-            {
-                *purpose = p;
-            }
-        }
-        // Mismatched delta type: append text where it makes sense, otherwise ignore.
-        (Part::Text { text, .. }, Delta::Reasoning { text: d }) => text.push_str(&d),
-        (Part::Reasoning { text, .. }, Delta::Text { text: d }) => text.push_str(&d),
-        _ => {}
-    }
-}
-
-/// Extracts a (possibly partial) `"purpose": "..."` value from streaming tool JSON.
-pub fn partial_purpose(raw: &str) -> Option<String> {
-    let k = raw.find("\"purpose\"")?;
-    let rest = raw[k + 9..]
-        .trim_start()
-        .strip_prefix(':')?
-        .trim_start()
-        .strip_prefix('"')?;
-    let mut out = String::new();
-    let mut esc = false;
-    for c in rest.chars() {
-        if esc {
-            out.push(match c {
-                'n' => ' ',
-                't' => ' ',
-                c => c,
-            });
-            esc = false;
-        } else if c == '\\' {
-            esc = true;
-        } else if c == '"' {
-            return Some(out);
-        } else {
-            out.push(c);
-        }
-    }
-    (!out.is_empty()).then_some(out)
-}
-
 #[cfg(test)]
 mod tests {
+    use ref_proto::Delta;
+
     use super::*;
 
     fn info() -> SessionInfo {
         SessionInfo {
-            id: "s".into(),
             name: "n".into(),
-            title: String::new(),
             agent: "build".into(),
-            model: Default::default(),
-            cwd: "/".into(),
-            created_at: 0,
-            updated_at: 0,
-            status: Default::default(),
             attached: 1,
-            live: true,
-            parent: None,
-            must_report: false,
-            context: Default::default(),
-            todos: Vec::new(),
-            busy_since: None,
-            last_error: None,
+            ..crate::util::placeholder_info("s", "/")
         }
     }
 
@@ -686,15 +587,5 @@ mod tests {
             v.queued[1].removing && v.queued[1].key == kept.key,
             "existing row state kept"
         );
-    }
-
-    #[test]
-    fn purpose_extraction() {
-        assert_eq!(
-            partial_purpose(r#"{"purpose":"Read \"x\" file","path":"a"}"#).as_deref(),
-            Some("Read \"x\" file")
-        );
-        assert_eq!(partial_purpose(r#"{"path":"a"}"#), None);
-        assert_eq!(partial_purpose(r#"{"purpose": "#), None);
     }
 }

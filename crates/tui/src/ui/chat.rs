@@ -3,16 +3,16 @@
 use std::collections::{BTreeSet, HashMap};
 
 use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ref_proto::{AgentInfo, ModelInfo, SessionStatus};
 
 use super::message::{self, Ctx};
 use super::selection::{self, Selection};
-use super::text::{self, width};
 use super::{Hit, Row, theme};
 use crate::state::SessionView;
+use crate::text::{self, width};
 
 /// Shared rendering environment.
 pub struct Env<'a> {
@@ -24,6 +24,30 @@ pub struct Env<'a> {
     pub now: i64,
 }
 
+/// FNV-1a parameters of `hash_key`.
+const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+const FNV_PRIME: u64 = 0x100000001b3;
+/// Seed and multiplier of the order-sensitive hash of a toggle set.
+const SET_HASH_SEED: u64 = 7;
+const SET_HASH_MUL: u64 = 31;
+/// Distinguish the compact and the full cache keys of the same message.
+const COMPACT_KEY_SALT: u64 = 11;
+const FULL_KEY_SALT: u64 = 7;
+/// A scroll target this close to the end counts as following.
+const FOLLOW_EPSILON: f64 = 0.01;
+/// The scroll animation stops within this many rows of the target.
+const ANIM_STOP_DISTANCE: f64 = 0.5;
+/// Share of the remaining distance covered per animation frame.
+const EASE_FACTOR: f64 = 0.4;
+/// The welcome screen is skipped on a smaller area.
+const WELCOME_MIN_H: u16 = 6;
+const WELCOME_MIN_W: u16 = 20;
+/// Column widths of the key hints on the welcome screen.
+const HINT_KEY_W: usize = 10;
+const HINT_DESC_W: usize = 20;
+/// Cache entries beyond the message count that are kept before evicting.
+const CACHE_SLACK: usize = 8;
+
 struct Cached {
     key: u64,
     rows: Vec<Row>,
@@ -34,7 +58,7 @@ pub struct ChatState {
     cache: HashMap<String, Cached>,
     /// Messages laid out (cache misses) so far; tests check what a frame re-renders.
     #[cfg(test)]
-    pub laid_out: usize,
+    pub(crate) laid_out: usize,
     pub toggled: HashMap<String, BTreeSet<usize>>,
     pub show_all: HashMap<String, BTreeSet<usize>>,
     /// Start row of each message block; last element = start of tail rows.
@@ -48,11 +72,11 @@ pub struct ChatState {
     /// Stick to the bottom.
     pub follow: bool,
     initialized: bool,
-    pub new_below: bool,
+    new_below: bool,
     last_total: usize,
     /// Last drawn viewport (content area) and its height.
     pub area: Rect,
-    pub content_x: u16,
+    content_x: u16,
     pub sel: Option<Selection>,
     pub hover: Option<(u16, u16)>,
     /// Pending click (row, col) captured at mouse down.
@@ -66,7 +90,7 @@ pub struct ChatState {
     /// The last layout was the compact (split tile) one: rows come from `tile_cache`.
     compact: bool,
     /// Rows added while scrolled away from the bottom (shown in the tile pill).
-    pub new_rows: usize,
+    new_rows: usize,
     /// Screen rect of the "new messages" pill at last draw.
     pub pill: Option<Rect>,
     /// Content width of the last layout (re-wrapping is not "new content").
@@ -90,24 +114,41 @@ struct Hold {
     was_following: bool,
 }
 
-pub fn hash_key(parts: &[u64]) -> u64 {
-    let mut h: u64 = 0xcbf29ce484222325;
+fn hash_key(parts: &[u64]) -> u64 {
+    let mut h: u64 = FNV_OFFSET;
     for p in parts {
         h ^= *p;
-        h = h.wrapping_mul(0x100000001b3);
+        h = h.wrapping_mul(FNV_PRIME);
     }
     h
 }
 
 fn set_hash(s: Option<&BTreeSet<usize>>) -> u64 {
     s.map(|s| {
-        s.iter()
-            .fold(7u64, |a, x| a.wrapping_mul(31).wrapping_add(*x as u64 + 1))
+        s.iter().fold(SET_HASH_SEED, |a, x| {
+            a.wrapping_mul(SET_HASH_MUL).wrapping_add(*x as u64 + 1)
+        })
     })
     .unwrap_or(0)
 }
 
 impl ChatState {
+    fn cache(&self, compact: bool) -> &HashMap<String, Cached> {
+        if compact {
+            &self.tile_cache
+        } else {
+            &self.cache
+        }
+    }
+
+    fn cache_mut(&mut self, compact: bool) -> &mut HashMap<String, Cached> {
+        if compact {
+            &mut self.tile_cache
+        } else {
+            &mut self.cache
+        }
+    }
+
     /// Rows the scroll range spans: the content plus the held blank rows.
     fn scroll_total(&self) -> usize {
         self.total + self.hold.space
@@ -174,7 +215,7 @@ impl ChatState {
         if !animate {
             self.pos = t;
         }
-        self.follow = t >= max - 0.01;
+        self.follow = t >= max - FOLLOW_EPSILON;
         if self.follow {
             self.new_below = false;
             self.new_rows = 0;
@@ -205,18 +246,18 @@ impl ChatState {
     /// Advances the scroll animation. Returns true if still moving.
     pub fn step_anim(&mut self) -> bool {
         let d = self.target - self.pos;
-        if d.abs() < 0.5 {
+        if d.abs() < ANIM_STOP_DISTANCE {
             self.pos = self.target;
             return false;
         }
         // Ease out: cover ~40% of the remaining distance each frame (≈120ms at 60fps).
-        let step = d * 0.4;
+        let step = d * EASE_FACTOR;
         self.pos += if step.abs() < 1.0 { d.signum() } else { step };
         true
     }
 
     pub fn scrolling(&self) -> bool {
-        (self.target - self.pos).abs() >= 0.5
+        (self.target - self.pos).abs() >= ANIM_STOP_DISTANCE
     }
 
     pub fn invalidate(&mut self) {
@@ -235,11 +276,7 @@ impl ChatState {
             Err(k) => k.checked_sub(1)?,
         };
         let id = self.ids.get(k)?;
-        let cache = if self.compact {
-            &self.tile_cache
-        } else {
-            &self.cache
-        };
+        let cache = self.cache(self.compact);
         cache.get(id)?.rows.get(i - self.offsets[k])
     }
 
@@ -263,10 +300,7 @@ impl ChatState {
     }
 
     pub fn contains(&self, x: u16, y: u16) -> bool {
-        x >= self.area.x
-            && x < self.area.x + self.area.width
-            && y >= self.area.y
-            && y < self.area.y + self.area.height
+        self.area.contains(Position::new(x, y))
     }
 
     pub fn hit_at(&self, x: u16, y: u16) -> Option<Hit> {
@@ -287,32 +321,17 @@ impl ChatState {
             2 => {
                 if let Some(row) = self.row(r) {
                     let (a, b) = selection::word_at(row, c);
-                    self.sel = Some(Selection {
-                        anchor: (r, a),
-                        head: (r, b),
-                        dragging: false,
-                        active: true,
-                    });
+                    self.sel = Some(Selection::at((r, a), (r, b), true));
                 }
             }
             3 => {
                 if let Some(row) = self.row(r) {
                     let e = selection::row_end(row);
-                    self.sel = Some(Selection {
-                        anchor: (r, row.skip),
-                        head: (r, e),
-                        dragging: false,
-                        active: true,
-                    });
+                    self.sel = Some(Selection::at((r, row.skip), (r, e), true));
                 }
             }
             _ => {
-                self.sel = Some(Selection {
-                    anchor: (r, c),
-                    head: (r, c),
-                    dragging: true,
-                    active: false,
-                });
+                self.sel = Some(Selection::at((r, c), (r, c), false));
             }
         }
     }
@@ -371,7 +390,7 @@ impl ChatState {
             }
         }
         let (r, c) = self.screen_to_content(x, y)?;
-        if press != Some((r, c)) && press.map(|p| p.0) != Some(r) {
+        if press.map(|p| p.0) != Some(r) {
             return None;
         }
         self.row(r)?.hit_at(c).cloned()
@@ -408,10 +427,67 @@ impl ChatState {
 }
 
 /// Index of the last compaction message: the model's context starts there.
-pub fn last_compaction(messages: &[ref_proto::Message]) -> Option<usize> {
+fn last_compaction(messages: &[ref_proto::Message]) -> Option<usize> {
     messages.iter().rposition(|m| {
         m.role == ref_proto::Role::User && m.source == ref_proto::MessageSource::Compaction
     })
+}
+
+/// What the cache key of one message depends on besides its content.
+struct Slot {
+    index: usize,
+    version: u64,
+    /// The message is still streaming, so its rows change with the tick and the clock.
+    live: bool,
+    /// The message lies before the last compaction.
+    stale: bool,
+    /// The message is the last compaction, where the model's context starts.
+    context_start: bool,
+}
+
+/// Hash of everything that decides how message `id` renders.
+fn cache_key(
+    chat: &ChatState,
+    env: &Env<'_>,
+    id: &str,
+    slot: &Slot,
+    w: usize,
+    compact: bool,
+) -> u64 {
+    let (tog, all) = (chat.toggled.get(id), chat.show_all.get(id));
+    let anim = if slot.live { env.tick } else { 0 };
+    let secs = if slot.live {
+        (env.now / 1000) as u64
+    } else {
+        0
+    };
+    // Tiles expand tool calls on click too (they share the toggles with the chat view).
+    if compact {
+        return hash_key(&[
+            slot.version,
+            w as u64,
+            set_hash(tog),
+            set_hash(all),
+            anim,
+            secs,
+            slot.stale as u64,
+            (slot.index > 0) as u64,
+            COMPACT_KEY_SALT,
+        ]);
+    }
+    hash_key(&[
+        slot.version,
+        w as u64,
+        set_hash(tog),
+        set_hash(all),
+        env.details as u64,
+        env.thinking as u64,
+        anim,
+        secs,
+        slot.stale as u64,
+        slot.context_start as u64,
+        FULL_KEY_SALT,
+    ])
 }
 
 /// Builds (or reuses) cached rows for all messages and the tail, for content width `w`.
@@ -432,62 +508,31 @@ fn layout(view: &mut SessionView, env: &Env<'_>, w: usize, compact: bool) {
     let last_compaction = last_compaction(messages);
     chat.compact = compact;
     for (i, m) in messages.iter().enumerate() {
-        let stale = last_compaction.is_some_and(|c| i < c);
-        let context_start = i > 0 && last_compaction == Some(i);
         // Only the tail of a busy session animates (stale unfinished messages render statically).
         let live = busy && crate::state::message_live(m);
         animating |= live;
-        let ver = versions.get(i).copied().unwrap_or(0);
-        let anim = if live { env.tick } else { 0 };
-        let secs = if live { (env.now / 1000) as u64 } else { 0 };
-        // Tiles expand tool calls on click too (they share the toggles with the chat view).
-        let (tog, all) = (chat.toggled.get(&m.id), chat.show_all.get(&m.id));
-        let key = if compact {
-            hash_key(&[
-                ver,
-                w as u64,
-                set_hash(tog),
-                set_hash(all),
-                anim,
-                secs,
-                stale as u64,
-                (i > 0) as u64,
-                11,
-            ])
-        } else {
-            hash_key(&[
-                ver,
-                w as u64,
-                set_hash(tog),
-                set_hash(all),
-                env.details as u64,
-                env.thinking as u64,
-                anim,
-                secs,
-                stale as u64,
-                context_start as u64,
-                7,
-            ])
+        let slot = Slot {
+            index: i,
+            version: versions.get(i).copied().unwrap_or(0),
+            live,
+            stale: last_compaction.is_some_and(|c| i < c),
+            context_start: i > 0 && last_compaction == Some(i),
         };
-        let cache = if compact {
-            &chat.tile_cache
-        } else {
-            &chat.cache
-        };
-        if !cache.get(&m.id).is_some_and(|c| c.key == key) {
+        let key = cache_key(chat, env, &m.id, &slot, w, compact);
+        if !chat.cache(compact).get(&m.id).is_some_and(|c| c.key == key) {
             let cx = Ctx {
                 agents: env.agents,
                 models: env.models,
-                toggled: tog,
-                show_all: all,
+                toggled: chat.toggled.get(&m.id),
+                show_all: chat.show_all.get(&m.id),
                 details: env.details && !compact,
                 thinking: env.thinking && !compact,
                 now: env.now,
                 tick: env.tick,
                 compact,
                 session_agent: &info.agent,
-                stale,
-                context_start: context_start && !compact,
+                stale: slot.stale,
+                context_start: slot.context_start && !compact,
             };
             // Blank separator above each message (tiles: not above the first one).
             let mut rows = if compact && i == 0 {
@@ -500,58 +545,55 @@ fn layout(view: &mut SessionView, env: &Env<'_>, w: usize, compact: bool) {
             {
                 chat.laid_out += 1;
             }
-            let cache = if compact {
-                &mut chat.tile_cache
-            } else {
-                &mut chat.cache
-            };
-            cache.insert(m.id.clone(), Cached { key, rows });
+            chat.cache_mut(compact)
+                .insert(m.id.clone(), Cached { key, rows });
         }
-        let cache = if compact {
-            &chat.tile_cache
-        } else {
-            &chat.cache
-        };
         offsets.push(total);
         ids.push(m.id.clone());
-        total += cache.get(&m.id).map(|c| c.rows.len()).unwrap_or(0);
+        // The entry exists: it either matched the key or was inserted above.
+        total += chat.cache(compact)[&m.id].rows.len();
     }
-    // Evict cache entries for removed messages.
-    let cache = if compact {
-        &mut chat.tile_cache
-    } else {
-        &mut chat.cache
-    };
-    if cache.len() > ids.len() + 8 {
-        let keep: std::collections::HashSet<&String> = ids.iter().collect();
-        cache.retain(|k, _| keep.contains(k));
-    }
+    evict_stale(chat.cache_mut(compact), &ids);
     offsets.push(total);
-    // Older messages loaded above: keep the same content on screen (tiles have no separator
-    // above the first message, so the old first one gained a row).
+    shift_for_prepended(chat, &ids, &offsets, compact);
+    chat.offsets = offsets;
+    chat.ids = ids;
+    chat.animating = animating;
+    total += chat.tail.len();
+    chat.total = total;
+}
+
+/// Evicts cache entries for removed messages once enough have piled up.
+fn evict_stale(cache: &mut HashMap<String, Cached>, ids: &[String]) {
+    if cache.len() <= ids.len() + CACHE_SLACK {
+        return;
+    }
+    let keep: std::collections::HashSet<&String> = ids.iter().collect();
+    cache.retain(|k, _| keep.contains(k));
+}
+
+/// Older messages loaded above: keep the same content on screen (tiles have no separator
+/// above the first message, so the old first one gained a row).
+fn shift_for_prepended(chat: &mut ChatState, ids: &[String], offsets: &[usize], compact: bool) {
     let shift = chat
         .ids
         .first()
         .and_then(|old| ids.iter().position(|id| id == old))
         .filter(|&k| k > 0)
         .map_or(0, |k| offsets[k] + usize::from(compact));
-    if shift > 0 {
-        chat.pos += shift as f64;
-        chat.target += shift as f64;
-        chat.last_total += shift;
-        if let Some(s) = &mut chat.sel {
-            s.anchor.0 += shift;
-            s.head.0 += shift;
-        }
-        if let Some(p) = &mut chat.press {
-            p.0 += shift;
-        }
+    if shift == 0 {
+        return;
     }
-    chat.offsets = offsets;
-    chat.ids = ids;
-    chat.animating = animating;
-    total += chat.tail.len();
-    chat.total = total;
+    chat.pos += shift as f64;
+    chat.target += shift as f64;
+    chat.last_total += shift;
+    if let Some(s) = &mut chat.sel {
+        s.anchor.0 += shift;
+        s.head.0 += shift;
+    }
+    if let Some(p) = &mut chat.press {
+        p.0 += shift;
+    }
 }
 
 /// Follow / clamp bookkeeping after a layout pass for a viewport of `area`.
@@ -576,7 +618,7 @@ fn settle(chat: &mut ChatState, area: Rect, width_changed: bool, busy: bool) {
     chat.last_total = chat.total;
     if chat.follow {
         // Stick to bottom: jump directly when content grows (streaming must not lag behind).
-        if (chat.target - max).abs() > 0.01 {
+        if (chat.target - max).abs() > FOLLOW_EPSILON {
             chat.target = max;
             if !chat.scrolling() || chat.pos > max {
                 chat.pos = max;
@@ -584,7 +626,7 @@ fn settle(chat: &mut ChatState, area: Rect, width_changed: bool, busy: bool) {
         }
     }
     chat.target = chat.target.clamp(0.0, max);
-    chat.pos = chat.pos.clamp(0.0, max.max(0.0));
+    chat.pos = chat.pos.clamp(0.0, max);
 }
 
 /// Rows shown after the transcript: retry status, error, queued prompts.
@@ -597,24 +639,19 @@ fn tail_rows(view: &SessionView, env: &Env<'_>, w: usize) -> Vec<Row> {
     } = &view.info.status
     {
         rows.push(Row::blank());
-        let secs = ((next_at - env.now).max(0) + 999) / 1000;
+        let secs = text::ceil_secs(next_at - env.now);
         let msg = format!(
             "{} Retrying in {secs}s (attempt {attempt}): {}",
             theme::spinner(env.tick),
             text::one_line(error)
         );
-        for (i, (l, sp)) in text::wrap_spans_flags(
-            &[Span::styled(msg, theme::fg(theme::WARNING))],
+        rows.extend(message::bar_rows(
+            &msg,
+            theme::fg(theme::WARNING),
+            theme::WARNING,
             w.saturating_sub(4),
-        )
-        .into_iter()
-        .enumerate()
-        {
-            rows.push(Row::new(l).soft_sp(i > 0, sp).indent(vec![
-                Span::raw("  "),
-                Span::styled("┃ ", theme::fg(theme::WARNING)),
-            ]));
-        }
+            2,
+        ));
     }
     if let SessionStatus::Compacting = view.info.status {
         rows.push(Row::blank());
@@ -640,18 +677,13 @@ fn tail_rows(view: &SessionView, env: &Env<'_>, w: usize) -> Vec<Row> {
             .is_some_and(|m| m.error.as_deref() == Some(e.as_str()))
     {
         rows.push(Row::blank());
-        for (i, (l, sp)) in text::wrap_spans_flags(
-            &[Span::styled(text::one_line(e), theme::fg(theme::ERROR))],
+        rows.extend(message::bar_rows(
+            &text::one_line(e),
+            theme::fg(theme::ERROR),
+            theme::ERROR,
             w.saturating_sub(4),
-        )
-        .into_iter()
-        .enumerate()
-        {
-            rows.push(Row::new(l).soft_sp(i > 0, sp).indent(vec![
-                Span::raw("  "),
-                Span::styled("┃ ", theme::fg(theme::ERROR)),
-            ]));
-        }
+            2,
+        ));
     }
     if !view.queued.is_empty() {
         rows.push(Row::blank());
@@ -701,7 +733,7 @@ fn queued_rows(view: &SessionView, w: usize) -> Vec<Row> {
 }
 
 fn draw_welcome(buf: &mut Buffer, area: Rect, view: &SessionView, loaded: bool) {
-    if area.height < 6 || area.width < 20 {
+    if area.height < WELCOME_MIN_H || area.width < WELCOME_MIN_W {
         return;
     }
     let mut lines: Vec<Line<'static>> = Vec::new();
@@ -733,8 +765,8 @@ fn draw_welcome(buf: &mut Buffer, area: Rect, view: &SessionView, loaded: bool) 
             ("ctrl+x w", "background sessions"),
         ] {
             lines.push(Line::from(vec![
-                Span::styled(format!("{k:>10}  "), theme::fg(theme::PRIMARY)),
-                Span::styled(format!("{d:<20}"), theme::muted()),
+                Span::styled(format!("{k:>HINT_KEY_W$}  "), theme::fg(theme::PRIMARY)),
+                Span::styled(format!("{d:<HINT_DESC_W$}"), theme::muted()),
             ]));
         }
     }
@@ -785,51 +817,13 @@ pub fn draw(buf: &mut Buffer, area: Rect, view: &mut SessionView, env: &Env<'_>)
         let Some(row) = chat.row(gi) else { break };
         let y = area.y + dy;
         buf.set_line(chat.content_x, y, &row.line, cw as u16);
-        // Hover feedback on click targets.
         if let Some((hr, hc)) = hover
             && hr == gi
-            && let Some(z) = row.hits.iter().find(|z| hc >= z.x0 && hc < z.x1)
         {
-            if z.hit.is_button() {
-                for x in z.x0..z.x1.min(cw as u16) {
-                    if let Some(cell) = buf.cell_mut((chat.content_x + x, y)) {
-                        cell.set_style(
-                            Style::new().fg(theme::PRIMARY).add_modifier(Modifier::BOLD),
-                        );
-                    }
-                }
-            } else {
-                // Brighten the disclosure arrow (first non-blank cell).
-                let lw = (text::line_width(&row.line) as u16).min(cw as u16);
-                if let Some(x) = (0..lw).find(|&x| {
-                    buf.cell((chat.content_x + x, y))
-                        .is_some_and(|c| !c.symbol().trim().is_empty())
-                }) && let Some(c) = buf.cell_mut((chat.content_x + x, y))
-                {
-                    c.set_style(Style::new().fg(theme::PRIMARY).add_modifier(Modifier::BOLD));
-                }
-            }
+            style_hover_target(buf, chat, row, y, hc, cw);
         }
-        // Selection highlight.
         if let Some(sel) = chat.sel.as_ref().filter(|s| s.active) {
-            let ((r0, c0), (r1, c1)) = sel.range();
-            if gi >= r0 && gi <= r1 {
-                let from = if gi == r0 { c0 } else { 0 }.max(row.skip);
-                let lw = text::line_width(&row.line) as u16;
-                let to = if gi == r1 {
-                    c1.min(lw.saturating_sub(1))
-                } else {
-                    lw.saturating_sub(1)
-                };
-                let to = to.min(cw as u16 - 1);
-                if !row.decor && from <= to {
-                    for x in from..=to {
-                        if let Some(cell) = buf.cell_mut((chat.content_x + x, y)) {
-                            cell.set_bg(theme::SELECTION);
-                        }
-                    }
-                }
-            }
+            paint_selection(buf, chat, sel, row, gi, y, cw);
         }
     }
     // Scrollbar.
@@ -848,6 +842,65 @@ pub fn draw(buf: &mut Buffer, area: Rect, view: &mut SessionView, env: &Env<'_>)
     if chat.new_below && !chat.follow {
         let pill = draw_pill(buf, area, " ↓ new messages ");
         view.chat.pill = pill;
+    }
+}
+
+/// Hover feedback on the click target under column `hc` of `row` (drawn at screen row `y`).
+fn style_hover_target(buf: &mut Buffer, chat: &ChatState, row: &Row, y: u16, hc: u16, cw: usize) {
+    let Some(z) = row.hits.iter().find(|z| hc >= z.x0 && hc < z.x1) else {
+        return;
+    };
+    let hover = Style::new().fg(theme::PRIMARY).add_modifier(Modifier::BOLD);
+    if z.hit.is_button() {
+        for x in z.x0..z.x1.min(cw as u16) {
+            if let Some(cell) = buf.cell_mut((chat.content_x + x, y)) {
+                cell.set_style(hover);
+            }
+        }
+        return;
+    }
+    // Brighten the disclosure arrow (first non-blank cell).
+    let lw = (text::line_width(&row.line) as u16).min(cw as u16);
+    let arrow = (0..lw).find(|&x| {
+        buf.cell((chat.content_x + x, y))
+            .is_some_and(|c| !c.symbol().trim().is_empty())
+    });
+    if let Some(x) = arrow
+        && let Some(c) = buf.cell_mut((chat.content_x + x, y))
+    {
+        c.set_style(hover);
+    }
+}
+
+/// Highlights the part of `sel` that falls on row `gi` (drawn at screen row `y`).
+fn paint_selection(
+    buf: &mut Buffer,
+    chat: &ChatState,
+    sel: &Selection,
+    row: &Row,
+    gi: usize,
+    y: u16,
+    cw: usize,
+) {
+    let ((r0, c0), (r1, c1)) = sel.range();
+    if gi < r0 || gi > r1 || row.decor {
+        return;
+    }
+    let from = if gi == r0 { c0 } else { 0 }.max(row.skip);
+    let lw = text::line_width(&row.line) as u16;
+    let to = if gi == r1 {
+        c1.min(lw.saturating_sub(1))
+    } else {
+        lw.saturating_sub(1)
+    };
+    let to = to.min(cw as u16 - 1);
+    if from > to {
+        return;
+    }
+    for x in from..=to {
+        if let Some(cell) = buf.cell_mut((chat.content_x + x, y)) {
+            cell.set_bg(theme::SELECTION);
+        }
     }
 }
 
@@ -967,8 +1020,7 @@ pub fn draw_tile(buf: &mut Buffer, area: Rect, bar_x: u16, view: &mut SessionVie
 
 /// Whether the "new messages" pill (or a tile's "↓" marker) was clicked.
 pub fn pill_hit(chat: &ChatState, x: u16, y: u16) -> bool {
-    chat.pill
-        .is_some_and(|r| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height)
+    chat.pill.is_some_and(|r| r.contains(Position::new(x, y)))
 }
 
 #[cfg(test)]

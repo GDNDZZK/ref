@@ -4,8 +4,18 @@ use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, T
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use super::text::{self, width};
 use super::{Row, highlight, theme};
+use crate::text::{self, width};
+
+/// Narrowest width anything is rendered at.
+const MIN_WIDTH: usize = 4;
+/// Prefix of a quoted line and its width in columns.
+const QUOTE_PREFIX: &str = "│ ";
+const QUOTE_PREFIX_WIDTH: usize = 2;
+/// Table columns are not shrunk below this width.
+const MIN_COLUMN_WIDTH: usize = 2;
+/// List bullets by nesting depth; deeper levels reuse the last one.
+const BULLETS: [&str; 3] = ["• ", "◦ ", "▪ "];
 
 #[derive(Clone)]
 enum Container {
@@ -20,7 +30,7 @@ struct Table {
     cur_row: Vec<Vec<Span<'static>>>,
 }
 
-struct R {
+struct MarkdownRenderer {
     width: usize,
     base: Style,
     rows: Vec<Row>,
@@ -38,13 +48,13 @@ struct R {
 
 /// Renders markdown into rows of at most `width` columns using `base` as the text style.
 pub fn render(src: &str, width: usize, base: Style) -> Vec<Row> {
-    let width = width.max(4);
+    let width = width.max(MIN_WIDTH);
     let src = text::sanitize(src);
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_TABLES);
     opts.insert(Options::ENABLE_STRIKETHROUGH);
     opts.insert(Options::ENABLE_TASKLISTS);
-    let mut r = R {
+    let mut r = MarkdownRenderer {
         width,
         base,
         rows: Vec::new(),
@@ -65,18 +75,17 @@ pub fn render(src: &str, width: usize, base: Style) -> Vec<Row> {
     if let Some((lang, code)) = r.code.take() {
         r.code_block(&lang, &code);
     }
-    while r
-        .rows
-        .last()
-        .is_some_and(|x| text::line_width(&x.line) == 0 && x.hits.is_empty())
-        && r.rows.len() > 1
-    {
+    let is_trailing_blank = |rows: &[Row]| {
+        rows.last()
+            .is_some_and(|x| text::line_width(&x.line) == 0 && x.hits.is_empty())
+    };
+    while is_trailing_blank(&r.rows) && r.rows.len() > 1 {
         r.rows.pop();
     }
     r.rows
 }
 
-impl R {
+impl MarkdownRenderer {
     fn style(&self) -> Style {
         *self.styles.last().unwrap_or(&self.base)
     }
@@ -125,7 +134,9 @@ impl R {
         let n = self.containers.len();
         for i in 0..n {
             match &mut self.containers[i] {
-                Container::Quote => out.push(Span::styled("│ ", theme::fg(theme::MD_QUOTE))),
+                Container::Quote => {
+                    out.push(Span::styled(QUOTE_PREFIX, theme::fg(theme::MD_QUOTE)))
+                }
                 Container::Item { marker, used } => {
                     let w = width(marker);
                     if first && !*used {
@@ -149,7 +160,7 @@ impl R {
         self.containers
             .iter()
             .map(|c| match c {
-                Container::Quote => 2,
+                Container::Quote => QUOTE_PREFIX_WIDTH,
                 Container::Item { marker, .. } => width(marker),
             })
             .sum()
@@ -159,7 +170,7 @@ impl R {
         self.containers
             .iter()
             .map(|c| match c {
-                Container::Quote => Span::styled("│ ", theme::fg(theme::MD_QUOTE)),
+                Container::Quote => Span::styled(QUOTE_PREFIX, theme::fg(theme::MD_QUOTE)),
                 Container::Item { marker, .. } => Span::raw(" ".repeat(width(marker))),
             })
             .collect()
@@ -199,7 +210,7 @@ impl R {
             for (i, (l, sp)) in wrapped.into_iter().enumerate() {
                 let first = i == 0;
                 let p = self.prefix(true);
-                let pw: usize = p.iter().map(|s| width(&s.content)).sum();
+                let pw: usize = text::spans_width(&p);
                 let mut spans = p;
                 spans.extend(l.spans);
                 let mut row = Row::new(Line::from(spans)).soft_sp(!first, sp);
@@ -215,9 +226,8 @@ impl R {
         if self.inline.is_empty() {
             return;
         }
-        let lines = std::mem::take(&mut self.inline);
+        let mut lines = std::mem::take(&mut self.inline);
         // Drop a trailing empty logical line produced by a final newline.
-        let mut lines = lines;
         while lines.len() > 1 && lines.last().is_some_and(|l| l.is_empty()) {
             lines.pop();
         }
@@ -258,7 +268,8 @@ impl R {
             Event::Html(t) | Event::InlineHtml(t) => {
                 let st = theme::muted();
                 self.push_text(t.trim_end_matches('\n'), st);
-                if ev_kind_is_block(&t) {
+                let ends_block = t.ends_with('\n');
+                if ends_block {
                     self.flush();
                 }
             }
@@ -341,11 +352,7 @@ impl R {
                         *n += 1;
                         m
                     }
-                    _ => match depth {
-                        1 => "• ".to_string(),
-                        2 => "◦ ".to_string(),
-                        _ => "▪ ".to_string(),
-                    },
+                    _ => BULLETS[depth.saturating_sub(1).min(BULLETS.len() - 1)].to_string(),
                 };
                 self.containers.push(Container::Item {
                     marker,
@@ -446,7 +453,7 @@ impl R {
             | TagEnd::Subscript => self.pop_style(),
             TagEnd::Link => {
                 self.pop_style();
-                let url = self.link.pop().unwrap_or_default();
+                let url = self.link.pop().expect("a link start pushed its url");
                 let shown: String = self
                     .inline
                     .last()
@@ -516,7 +523,9 @@ impl R {
                 let mut fill = inner.saturating_sub(lw);
                 // Language label on the first row, right aligned, if there's room.
                 let mut label = None;
-                if i == 0 && j == 0 && !lang_label.is_empty() && fill > width(&lang_label) + 2 {
+                let is_first_row = i == 0 && j == 0;
+                let label_fits = fill > width(&lang_label) + 2;
+                if is_first_row && !lang_label.is_empty() && label_fits {
                     fill -= width(&lang_label);
                     label = Some(Span::styled(
                         lang_label.clone(),
@@ -539,49 +548,43 @@ impl R {
         if ncols == 0 {
             return;
         }
-        let cell_w = |c: &Vec<Span<'static>>| c.iter().map(|s| width(&s.content)).sum::<usize>();
         let mut widths = vec![1usize; ncols];
         for r in &t.rows {
             for (i, c) in r.iter().enumerate() {
-                widths[i] = widths[i].max(cell_w(c).max(1));
+                widths[i] = widths[i].max(text::spans_width(c).max(1));
             }
         }
         let pw = self.prefix_width();
-        // Borders: "│ a │ b │" = 3*ncols + 1.
-        let avail = self.width.saturating_sub(pw + 3 * ncols + 1).max(ncols);
-        let total: usize = widths.iter().sum();
-        if total > avail {
-            // Shrink the widest columns first.
-            let mut w = widths.clone();
-            while w.iter().sum::<usize>() > avail {
-                let (mi, _) = w
-                    .iter()
-                    .enumerate()
-                    .max_by_key(|(_, v)| **v)
-                    .unwrap_or((0, &0));
-                if w[mi] <= 2 {
-                    break;
-                }
-                w[mi] -= 1;
-            }
-            widths = w;
+        let chrome = grid_chrome_width(ncols);
+        let avail = self.width.saturating_sub(pw + chrome).max(ncols);
+        let widths = fit_column_widths(widths, avail);
+        let too_narrow_for_grid =
+            widths.iter().sum::<usize>() > avail || self.width < pw + chrome + ncols;
+        if too_narrow_for_grid {
+            self.render_compact_table(&t);
+        } else {
+            self.render_grid_table(&t, &widths);
         }
-        if widths.iter().sum::<usize>() > avail || self.width < pw + 3 * ncols + 1 + ncols {
-            // Too narrow for a grid: one line per row, cells separated by " │ ".
-            for r in &t.rows {
-                let mut spans: Vec<Span<'static>> = Vec::new();
-                for (i, c) in r.iter().enumerate() {
-                    if i > 0 {
-                        spans.push(Span::styled(" │ ", theme::fg(theme::BORDER)));
-                    }
-                    spans.extend(c.iter().cloned());
+    }
+
+    /// Too narrow for a grid: one line per row, cells separated by " │ ".
+    fn render_compact_table(&mut self, t: &Table) {
+        for r in &t.rows {
+            let mut spans: Vec<Span<'static>> = Vec::new();
+            for (i, c) in r.iter().enumerate() {
+                if i > 0 {
+                    spans.push(Span::styled(" │ ", theme::fg(theme::BORDER)));
                 }
-                self.emit_wrapped(vec![spans], false);
+                spans.extend(c.iter().cloned());
             }
-            return;
+            self.emit_wrapped(vec![spans], false);
         }
+    }
+
+    fn render_grid_table(&mut self, t: &Table, widths: &[usize]) {
+        let ncols = widths.len();
         let bst = theme::fg(theme::BORDER);
-        let border = |l: &str, m: &str, r: &str, widths: &[usize]| -> Vec<Span<'static>> {
+        let border = |l: &str, m: &str, r: &str| -> Vec<Span<'static>> {
             let mut s = String::from(l);
             for (i, w) in widths.iter().enumerate() {
                 s.push_str(&"─".repeat(w + 2));
@@ -589,9 +592,8 @@ impl R {
             }
             vec![Span::styled(s, bst)]
         };
-        let top = border("┌", "┬", "┐", &widths);
         let mut p = self.prefix(true);
-        p.extend(top);
+        p.extend(border("┌", "┬", "┐"));
         self.rows.push(Row::new(Line::from(p)).decor());
         for (ri, r) in t.rows.iter().enumerate() {
             let head = ri < t.head_rows;
@@ -606,19 +608,18 @@ impl R {
                     text::wrap_spans(&spans, widths[i])
                 })
                 .collect();
-            let h = cells.iter().map(|c| c.len()).max().unwrap_or(1);
+            let h = cells
+                .iter()
+                .map(|c| c.len())
+                .max()
+                .expect("a table has at least one column");
             for li in 0..h {
                 let mut spans = self.prefix(false);
                 for (ci, c) in cells.iter().enumerate() {
                     spans.push(Span::styled(if ci == 0 { "│ " } else { " │ " }, bst));
                     let line = c.get(li).cloned().unwrap_or_default();
-                    let lw = text::line_width(&line);
-                    let pad = widths[ci].saturating_sub(lw);
-                    let (lp, rp) = match t.aligns.get(ci) {
-                        Some(pulldown_cmark::Alignment::Right) => (pad, 0),
-                        Some(pulldown_cmark::Alignment::Center) => (pad / 2, pad - pad / 2),
-                        _ => (0, pad),
-                    };
+                    let pad = widths[ci].saturating_sub(text::line_width(&line));
+                    let (lp, rp) = align_padding(t.aligns.get(ci), pad);
                     spans.push(Span::raw(" ".repeat(lp)));
                     spans.extend(line.spans);
                     spans.push(Span::raw(" ".repeat(rp)));
@@ -629,18 +630,45 @@ impl R {
             }
             if head && ri + 1 == t.head_rows {
                 let mut p = self.prefix(false);
-                p.extend(border("├", "┼", "┤", &widths));
+                p.extend(border("├", "┼", "┤"));
                 self.rows.push(Row::new(Line::from(p)).decor());
             }
         }
         let mut p = self.prefix(false);
-        p.extend(border("└", "┴", "┘", &widths));
+        p.extend(border("└", "┴", "┘"));
         self.rows.push(Row::new(Line::from(p)).decor());
     }
 }
 
-fn ev_kind_is_block(t: &str) -> bool {
-    t.ends_with('\n')
+/// Columns taken by the borders of a grid table: "│ a │ b │" = 3 per column + 1.
+fn grid_chrome_width(ncols: usize) -> usize {
+    3 * ncols + 1
+}
+
+/// Shrinks the widest columns first until the widths sum to at most `avail`
+/// (or every column is down to `MIN_COLUMN_WIDTH`).
+fn fit_column_widths(mut widths: Vec<usize>, avail: usize) -> Vec<usize> {
+    while widths.iter().sum::<usize>() > avail {
+        let (widest, _) = widths
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, v)| **v)
+            .expect("a table has at least one column");
+        if widths[widest] <= MIN_COLUMN_WIDTH {
+            break;
+        }
+        widths[widest] -= 1;
+    }
+    widths
+}
+
+/// Left and right padding that aligns a cell of `pad` spare columns.
+fn align_padding(align: Option<&pulldown_cmark::Alignment>, pad: usize) -> (usize, usize) {
+    match align {
+        Some(pulldown_cmark::Alignment::Right) => (pad, 0),
+        Some(pulldown_cmark::Alignment::Center) => (pad / 2, pad - pad / 2),
+        _ => (0, pad),
+    }
 }
 
 #[cfg(test)]

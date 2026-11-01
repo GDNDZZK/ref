@@ -1,16 +1,15 @@
 //! The question dialog: keys, rendering and the replies it sends.
 
-use crossterm::event::{Event, KeyCode, KeyModifiers, MouseButton, MouseEventKind};
+use crossterm::event::{Event, KeyCode, MouseButton, MouseEventKind};
 use ref_proto::*;
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::app::App;
 use crate::net::NetEvent;
-use crate::tests::{key, mouse, render, test_app_with_requests};
-
-const SESSION: &str = "ses_test";
-const PAST_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
+use crate::tests::{
+    PAST_GRACE, TEST_SESSION, mouse, press, render, test_app_with_requests, type_text,
+};
 
 fn option(label: &str, description: &str, default: bool) -> QuestionOption {
     QuestionOption {
@@ -71,7 +70,7 @@ fn first_file() -> Question {
 
 fn request(questions: Vec<Question>) -> QuestionRequest {
     QuestionRequest {
-        session_id: SESSION.into(),
+        session_id: TEST_SESSION.into(),
         message_id: "m2".into(),
         call_id: "q1".into(),
         questions,
@@ -83,7 +82,7 @@ fn request(questions: Vec<Question>) -> QuestionRequest {
 fn open(questions: Vec<Question>) -> (App, UnboundedReceiver<ClientFrame>) {
     let (mut app, rx) = test_app_with_requests(false);
     app.views
-        .get_mut(SESSION)
+        .get_mut(TEST_SESSION)
         .unwrap()
         .apply(SessionEvent::Question {
             request: request(questions),
@@ -91,16 +90,6 @@ fn open(questions: Vec<Question>) -> (App, UnboundedReceiver<ClientFrame>) {
     render(&mut app, 100, 30);
     app.question.as_mut().unwrap().opened -= PAST_GRACE;
     (app, rx)
-}
-
-fn press(app: &mut App, code: KeyCode) {
-    crate::input::handle(app, key(code, KeyModifiers::NONE));
-}
-
-fn type_text(app: &mut App, text: &str) {
-    for c in text.chars() {
-        press(app, KeyCode::Char(c));
-    }
 }
 
 /// Requests sent since the last call.
@@ -124,7 +113,10 @@ fn reply(rx: &mut UnboundedReceiver<ClientFrame>) -> (Option<u64>, Option<Vec<Ve
             call_id,
             answers,
         } => {
-            assert_eq!((session_id.as_str(), call_id.as_str()), (SESSION, "q1"));
+            assert_eq!(
+                (session_id.as_str(), call_id.as_str()),
+                (TEST_SESSION, "q1")
+            );
             (frame.id, answers)
         }
         other => panic!("expected a question reply, got {other:?}"),
@@ -512,7 +504,7 @@ fn a_refused_answer_keeps_the_dialog_with_the_reason() {
 fn the_server_resolving_the_question_closes_the_dialog() {
     let (mut app, mut rx) = open(vec![first_file()]);
     app.views
-        .get_mut(SESSION)
+        .get_mut(TEST_SESSION)
         .unwrap()
         .apply(SessionEvent::QuestionResolved {
             call_id: "q1".into(),
@@ -527,7 +519,7 @@ fn the_server_resolving_the_question_closes_the_dialog() {
 #[test]
 fn a_question_is_shown_once_and_restored_from_a_snapshot() {
     let (mut app, _rx) = test_app_with_requests(false);
-    let v = app.views.get_mut(SESSION).unwrap();
+    let v = app.views.get_mut(TEST_SESSION).unwrap();
     v.apply(SessionEvent::Question {
         request: request(vec![first_file()]),
     });
@@ -548,7 +540,7 @@ fn a_question_is_shown_once_and_restored_from_a_snapshot() {
     render(&mut app, 100, 30);
     assert!(screen(&mut app).contains("? Questions"));
     snap.pending_questions.clear();
-    app.views.get_mut(SESSION).unwrap().load_snapshot(snap);
+    app.views.get_mut(TEST_SESSION).unwrap().load_snapshot(snap);
     screen(&mut app);
     assert!(app.question.is_none(), "answered while we were away");
 }
@@ -557,11 +549,11 @@ fn a_question_is_shown_once_and_restored_from_a_snapshot() {
 fn a_permission_request_goes_first() {
     let (mut app, mut rx) = open(vec![first_file()]);
     app.views
-        .get_mut(SESSION)
+        .get_mut(TEST_SESSION)
         .unwrap()
         .apply(SessionEvent::Permission {
             request: PermissionRequest {
-                session_id: SESSION.into(),
+                session_id: TEST_SESSION.into(),
                 message_id: "m2".into(),
                 call_id: "c9".into(),
                 tool: "bash".into(),
@@ -666,10 +658,7 @@ fn small_terminals_and_long_texts_do_not_break_the_layout() {
     q.options[1].label = "L".repeat(120);
     let (mut app, _rx) = open(vec![q, checks()]);
     for (w, h) in [(100, 30), (60, 14), (40, 12), (24, 8), (10, 4), (1, 1)] {
-        let (_, s) = render(&mut app, w, h);
-        if w == 40 {
-            println!("{s}");
-        }
+        render(&mut app, w, h);
     }
     // The cursor row stays on screen when the page is taller than the dialog.
     for _ in 0..4 {
@@ -707,7 +696,7 @@ fn reconnect_after_drop(
         .find(|f| matches!(f.req, Request::Attach { .. }))
         .expect("the session is attached again");
     let snapshot = SessionSnapshot {
-        info: app.views[SESSION].info.clone(),
+        info: app.views[TEST_SESSION].info.clone(),
         messages: vec![],
         more_before: false,
         pending_permissions: vec![],

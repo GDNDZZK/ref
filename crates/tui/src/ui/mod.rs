@@ -10,12 +10,13 @@ pub mod permission;
 pub mod question;
 pub mod selection;
 pub mod split;
-pub mod text;
 pub mod theme;
 pub mod toast;
 pub mod todo;
 
 use ratatui::text::{Line, Span};
+
+use crate::text;
 
 /// One rendered screen row of transcript content.
 #[derive(Debug, Clone, Default)]
@@ -114,8 +115,7 @@ impl Row {
     }
     /// Prepends decorative spans (shifting skip/end/zones).
     pub fn indent(mut self, spans: Vec<Span<'static>>) -> Self {
-        let w: usize = spans.iter().map(|s| text::width(&s.content)).sum();
-        let w = w as u16;
+        let w = text::spans_width(&spans) as u16;
         let mut new = spans;
         new.append(&mut self.line.spans);
         self.line.spans = new;

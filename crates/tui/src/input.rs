@@ -5,28 +5,44 @@ use std::time::{Duration, Instant};
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
+use ratatui::layout::{Position, Rect};
+use ref_proto::ImageData;
 
-use crate::app::{AcKind, App, Mode};
+use crate::app::{ARMED_KEY_TIMEOUT, App, COMMANDS, Mode};
 use crate::render;
-use crate::ui::dialog::{Dialog, Kind};
-use crate::ui::editor::Editor;
+use crate::ui::dialog::{Dialog, Kind, PAGE_ROWS};
+use crate::ui::editor::{Editor, MIN_PROMPT_WIDTH};
+use crate::ui::permission::PermissionAction;
 use crate::ui::question::Outcome;
 use crate::ui::{Hit, chat, split, theme};
+use crate::util::cmd;
 
 const CTRL: KeyModifiers = KeyModifiers::CONTROL;
 const ALT: KeyModifiers = KeyModifiers::ALT;
 const SHIFT: KeyModifiers = KeyModifiers::SHIFT;
+/// Rows of one mouse wheel notch.
+const WHEEL_SCROLL_ROWS: i32 = 3;
+/// A cleared draft goes to the prompt history only from this many characters.
+const MIN_DRAFT_CHARS_FOR_HISTORY: usize = 20;
+/// Shortest text that can be an image path (`a.png`).
+const MIN_IMAGE_PATH_LEN: usize = 5;
+const MAX_PASTED_PATHS: usize = 32;
+/// Clicks closer together than this count as a double / triple click.
+const MULTI_CLICK_WINDOW: Duration = Duration::from_millis(450);
+/// Click counts cycle through single, double and triple click.
+const CLICK_COUNT_CYCLE: u8 = 3;
 /// Keys right after a modal opens were meant for the prompt: they are not taken as answers.
-const MODAL_GRACE: Duration = Duration::from_millis(350);
+pub(crate) const MODAL_GRACE: Duration = Duration::from_millis(350);
 
-/// Appends a line to `$REF_TUI_LOG` (debugging aid; no-op when unset).
+/// Path from `$REF_TUI_LOG`, if set.
 fn log_path() -> Option<&'static std::path::PathBuf> {
     static PATH: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
     PATH.get_or_init(|| std::env::var_os("REF_TUI_LOG").map(Into::into))
         .as_ref()
 }
 
-pub fn debug_log(s: &str) {
+/// Appends a line to `$REF_TUI_LOG` (debugging aid; no-op when unset).
+fn debug_log(s: &str) {
     use std::io::Write;
     if let Some(p) = log_path()
         && let Ok(mut f) = std::fs::OpenOptions::new()
@@ -34,6 +50,7 @@ pub fn debug_log(s: &str) {
             .append(true)
             .open(p)
     {
+        // A failed write must not disturb the UI it is debugging.
         let _ = writeln!(f, "{} {s}", ref_proto::now_ms());
     }
 }
@@ -55,7 +72,6 @@ pub fn handle(app: &mut App, ev: Event) {
         Event::Key(k) if k.kind != KeyEventKind::Release => key(app, k),
         Event::Mouse(m) => mouse(app, m),
         Event::Paste(s) => paste(app, s),
-        Event::Resize(..) => {}
         _ => {}
     }
 }
@@ -72,10 +88,9 @@ fn ctrl_char(k: &KeyEvent, c: char) -> bool {
 
 fn key(app: &mut App, k: KeyEvent) {
     // Copy selection: ctrl+c / ctrl+shift+c / y (when a transcript selection exists).
-    if app.has_selection()
-        && (ctrl_char(&k, 'c')
-            || (is(&k, KeyCode::Char('y'), KeyModifiers::NONE) && app.editor.is_empty()))
-    {
+    let copy_key = ctrl_char(&k, 'c')
+        || (is(&k, KeyCode::Char('y'), KeyModifiers::NONE) && app.editor.is_empty());
+    if app.has_selection() && copy_key {
         app.copy_selection();
         return;
     }
@@ -121,8 +136,8 @@ fn key(app: &mut App, k: KeyEvent) {
             }
             KeyCode::Up | KeyCode::Char('k') => scroll_perm(app, -1),
             KeyCode::Down | KeyCode::Char('j') => scroll_perm(app, 1),
-            KeyCode::PageUp => scroll_perm(app, -10),
-            KeyCode::PageDown => scroll_perm(app, 10),
+            KeyCode::PageUp => scroll_perm(app, -PAGE_ROWS),
+            KeyCode::PageDown => scroll_perm(app, PAGE_ROWS),
             _ => {}
         }
         return;
@@ -151,16 +166,46 @@ fn scroll_perm(app: &mut App, d: i32) {
     }
 }
 
-fn exit_or_arm(app: &mut App) {
-    if app
-        .ctrlc_armed
-        .is_some_and(|t| t.elapsed() < Duration::from_millis(1500))
-    {
-        app.quit = true;
-    } else {
-        app.ctrlc_armed = Some(Instant::now());
-        app.set_hint("ctrl+c again to exit", theme::WARNING);
+/// Prefix of the leader key bindings in `COMMANDS` (`ctrl+x n`, ...).
+const LEADER_PREFIX: &str = "ctrl+x ";
+
+/// Second press of a key within `ARMED_KEY_TIMEOUT` confirms (true); otherwise arms it (false).
+fn confirm_or_arm(armed: &mut Option<Instant>) -> bool {
+    if armed.is_some_and(|t| t.elapsed() < ARMED_KEY_TIMEOUT) {
+        *armed = None;
+        return true;
     }
+    *armed = Some(Instant::now());
+    false
+}
+
+fn exit_or_arm(app: &mut App) {
+    if confirm_or_arm(&mut app.ctrlc_armed) {
+        app.quit = true;
+        return;
+    }
+    app.set_hint("ctrl+c again to exit", theme::WARNING);
+}
+
+/// Esc on a busy chat session: the second press within the window aborts the turn.
+fn interrupt_current(app: &mut App) {
+    if !confirm_or_arm(&mut app.esc_armed) {
+        app.set_hint("esc again to interrupt", theme::WARNING);
+        return;
+    }
+    app.hint = None;
+    if let Some(sid) = app.current.clone() {
+        app.abort(&sid);
+    }
+}
+
+/// The command bound to `ctrl+x <c>` in the `COMMANDS` table (`?` also opens help).
+fn leader_command(c: char) -> Option<&'static str> {
+    if c == '?' {
+        return Some(cmd::HELP);
+    }
+    let key = format!("{LEADER_PREFIX}{c}");
+    COMMANDS.iter().find(|x| x.key == key).map(|x| x.name)
 }
 
 fn leader(app: &mut App, k: KeyEvent) {
@@ -171,23 +216,8 @@ fn leader(app: &mut App, k: KeyEvent) {
         app.close_key();
         return;
     }
-    let cmd = match c.to_ascii_lowercase() {
-        'n' => "new",
-        'l' => "sessions",
-        'm' => "models",
-        'a' => "agents",
-        't' => "thinking",
-        'd' => "details",
-        'c' => "compact",
-        'u' => "undo",
-        'e' => "editor",
-        'x' => "export",
-        'y' => "copy",
-        'w' => "watch",
-        'b' => "sidebar",
-        'h' | '?' => "help",
-        'q' => "exit",
-        _ => return,
+    let Some(cmd) = leader_command(c.to_ascii_lowercase()) else {
+        return;
     };
     app.run_command(cmd, "");
 }
@@ -197,8 +227,8 @@ fn dialog_key(app: &mut App, k: KeyEvent) {
         Some(Dialog::Help(h)) => match k.code {
             KeyCode::Up | KeyCode::Char('k') => h.scroll_by(-1),
             KeyCode::Down | KeyCode::Char('j') => h.scroll_by(1),
-            KeyCode::PageUp => h.scroll_by(-10),
-            KeyCode::PageDown | KeyCode::Char(' ') => h.scroll_by(10),
+            KeyCode::PageUp => h.scroll_by(-PAGE_ROWS),
+            KeyCode::PageDown | KeyCode::Char(' ') => h.scroll_by(PAGE_ROWS),
             _ => app.dialog = None,
         },
         Some(Dialog::Mcp(d)) => {
@@ -211,8 +241,8 @@ fn dialog_key(app: &mut App, k: KeyEvent) {
                 KeyCode::Enter | KeyCode::Char(' ') => d.set_expanded(&app.mcp, None),
                 KeyCode::Right | KeyCode::Char('l') => d.set_expanded(&app.mcp, Some(true)),
                 KeyCode::Left | KeyCode::Char('h') => d.set_expanded(&app.mcp, Some(false)),
-                KeyCode::PageUp => d.scroll_by(-10),
-                KeyCode::PageDown => d.scroll_by(10),
+                KeyCode::PageUp => d.scroll_by(-PAGE_ROWS),
+                KeyCode::PageDown => d.scroll_by(PAGE_ROWS),
                 KeyCode::Char('r') if k.modifiers.is_empty() => app.refresh_mcp(),
                 KeyCode::Esc | KeyCode::Char('q') => app.dialog = None,
                 KeyCode::Char('c') if k.modifiers == CTRL => app.dialog = None,
@@ -257,28 +287,33 @@ fn dialog_key(app: &mut App, k: KeyEvent) {
     }
 }
 
+/// Sets the selection mode, then moves the cursor with `step`.
+fn move_cursor(e: &mut Editor, extend: bool, step: fn(&mut Editor)) {
+    e.select_mode(extend);
+    step(e);
+}
+
+/// Like `move_cursor`, with a coarser step when `coarse` is set (word or buffer).
+fn move_by(
+    e: &mut Editor,
+    extend: bool,
+    coarse: bool,
+    coarse_step: fn(&mut Editor),
+    step: fn(&mut Editor),
+) {
+    move_cursor(e, extend, if coarse { coarse_step } else { step });
+}
+
 /// Generic editing keys. Returns true if the text changed (or cursor moved).
 pub(crate) fn edit_key(e: &mut Editor, k: &KeyEvent, multiline: bool) -> bool {
     let m = k.modifiers;
     let shift = m.contains(SHIFT);
     match k.code {
         KeyCode::Char(c) if m.contains(CTRL) && !m.contains(ALT) => match c.to_ascii_lowercase() {
-            'a' => {
-                e.select_mode(false);
-                e.home()
-            }
-            'e' => {
-                e.select_mode(false);
-                e.end()
-            }
-            'b' => {
-                e.select_mode(false);
-                e.left()
-            }
-            'f' => {
-                e.select_mode(false);
-                e.right()
-            }
+            'a' => move_cursor(e, false, Editor::home),
+            'e' => move_cursor(e, false, Editor::end),
+            'b' => move_cursor(e, false, Editor::left),
+            'f' => move_cursor(e, false, Editor::right),
             'w' | 'h' => e.delete_word_back(),
             'u' => e.kill_to_start(),
             'k' => e.kill_to_end(),
@@ -302,41 +337,47 @@ pub(crate) fn edit_key(e: &mut Editor, k: &KeyEvent, multiline: bool) -> bool {
         KeyCode::Delete if m.intersects(CTRL | ALT) => e.delete_word_forward(),
         KeyCode::Delete => e.delete(),
         KeyCode::Left => {
-            e.select_mode(shift);
-            if m.intersects(CTRL | ALT) {
-                e.word_left()
-            } else {
-                e.left()
-            }
+            let by_word = m.intersects(CTRL | ALT);
+            move_by(e, shift, by_word, Editor::word_left, Editor::left)
         }
         KeyCode::Right => {
-            e.select_mode(shift);
-            if m.intersects(CTRL | ALT) {
-                e.word_right()
-            } else {
-                e.right()
-            }
+            let by_word = m.intersects(CTRL | ALT);
+            move_by(e, shift, by_word, Editor::word_right, Editor::right)
         }
-        KeyCode::Home => {
-            e.select_mode(shift);
-            if m.contains(CTRL) {
-                e.buf_start()
-            } else {
-                e.home()
-            }
-        }
-        KeyCode::End => {
-            e.select_mode(shift);
-            if m.contains(CTRL) {
-                e.buf_end()
-            } else {
-                e.end()
-            }
-        }
+        KeyCode::Home => move_by(e, shift, m.contains(CTRL), Editor::buf_start, Editor::home),
+        KeyCode::End => move_by(e, shift, m.contains(CTRL), Editor::buf_end, Editor::end),
         KeyCode::Enter if multiline && m.intersects(SHIFT | ALT | CTRL) => e.newline(),
         _ => return false,
     }
     true
+}
+
+/// Shift+Up/Down scroll the transcript only while the prompt is one row with no selection.
+fn single_row_editor_without_selection(app: &App) -> bool {
+    app.editor.selection().is_none()
+        && app
+            .editor
+            .height(app.editor.last_width.max(MIN_PROMPT_WIDTH))
+            <= 1
+}
+
+/// `!` at the start of an empty prompt switches to shell mode.
+fn can_enter_shell_mode(app: &App, m: KeyModifiers) -> bool {
+    app.editor.text.is_empty() && !app.shell_mode && m.difference(SHIFT).is_empty()
+}
+
+/// Up on the first prompt row: older history at its boundary, else to the start of the text.
+fn history_prev(app: &mut App) {
+    let at_history_boundary =
+        app.editor.text.is_empty() || app.history.browsing() || app.editor.cursor == 0;
+    if !at_history_boundary {
+        app.editor.buf_start();
+        return;
+    }
+    let cur = app.editor.text.clone();
+    if let Some(h) = app.history.prev(&cur) {
+        set_from_history(app, &h);
+    }
 }
 
 fn chat_key(app: &mut App, k: KeyEvent) {
@@ -347,7 +388,7 @@ fn chat_key(app: &mut App, k: KeyEvent) {
             app.copy_text(&t, "selection");
             app.editor.select_mode(false);
         } else if !app.editor.text.is_empty() || app.shell_mode {
-            if app.editor.text.trim().chars().count() >= 20 {
+            if app.editor.text.trim().chars().count() >= MIN_DRAFT_CHARS_FOR_HISTORY {
                 let t = app.editor.text.clone();
                 app.history.push(&t);
             }
@@ -384,16 +425,13 @@ fn chat_key(app: &mut App, k: KeyEvent) {
             KeyCode::Char('n') if m == CTRL => return ac_move(app, 1),
             KeyCode::Tab => {
                 app.accept_completion(false);
-                app.update_autocomplete_after_accept();
+                refresh_autocomplete_after_accept(app);
                 return;
             }
             KeyCode::Enter if m.is_empty() => {
-                let is_slash = app.ac.as_ref().is_some_and(|a| a.kind == AcKind::Slash);
-                let ran = app.accept_completion(true);
-                if !ran && is_slash {
-                    // Command with args: completed text stays for the user to type args.
-                }
-                app.update_autocomplete_after_accept();
+                // A command with args stays completed for the user to type them.
+                app.accept_completion(true);
+                refresh_autocomplete_after_accept(app);
                 return;
             }
             KeyCode::Esc => {
@@ -419,19 +457,7 @@ fn chat_key(app: &mut App, k: KeyEvent) {
                     app.toasts.info("Cancelled delayed tool call");
                 }
             } else if app.cur().is_some_and(|v| v.is_busy()) {
-                if app
-                    .esc_armed
-                    .is_some_and(|t| t.elapsed() < Duration::from_millis(1500))
-                {
-                    app.esc_armed = None;
-                    app.hint = None;
-                    if let Some(sid) = app.current.clone() {
-                        app.abort(&sid);
-                    }
-                } else {
-                    app.esc_armed = Some(Instant::now());
-                    app.set_hint("esc again to interrupt", theme::WARNING);
-                }
+                interrupt_current(app);
             }
         }
         KeyCode::Enter if m.is_empty() => app.submit(),
@@ -445,32 +471,17 @@ fn chat_key(app: &mut App, k: KeyEvent) {
         KeyCode::Char('e') if m == CTRL | ALT => scroll(app, |c| c.scroll_by(1, false)),
         KeyCode::Char('g') if m == CTRL => scroll(app, |c| c.scroll_to_top()),
         KeyCode::Char('g') if m == CTRL | ALT => scroll(app, |c| c.scroll_to_bottom(true)),
-        KeyCode::Up
-            if m == SHIFT
-                && app.editor.selection().is_none()
-                && app.editor.height(app.editor.last_width.max(1)) <= 1 =>
-        {
+        KeyCode::Up if m == SHIFT && single_row_editor_without_selection(app) => {
             scroll(app, |c| c.scroll_by(-1, false))
         }
-        KeyCode::Down
-            if m == SHIFT
-                && app.editor.selection().is_none()
-                && app.editor.height(app.editor.last_width.max(1)) <= 1 =>
-        {
+        KeyCode::Down if m == SHIFT && single_row_editor_without_selection(app) => {
             scroll(app, |c| c.scroll_by(1, false))
         }
         KeyCode::Home if app.editor.is_empty() => scroll(app, |c| c.scroll_to_top()),
         KeyCode::End if app.editor.is_empty() => scroll(app, |c| c.scroll_to_bottom(true)),
         KeyCode::Up if !m.contains(SHIFT) => {
             if app.editor.on_first_row() {
-                if app.editor.text.is_empty() || app.history.browsing() || app.editor.cursor == 0 {
-                    let cur = app.editor.text.clone();
-                    if let Some(h) = app.history.prev(&cur) {
-                        set_from_history(app, &h);
-                    }
-                } else {
-                    app.editor.buf_start();
-                }
+                history_prev(app);
             } else {
                 app.editor.select_mode(false);
                 app.editor.up();
@@ -502,9 +513,7 @@ fn chat_key(app: &mut App, k: KeyEvent) {
                 app.editor.buf_end();
             }
         }
-        KeyCode::Char('!')
-            if app.editor.text.is_empty() && !app.shell_mode && m.difference(SHIFT).is_empty() =>
-        {
+        KeyCode::Char('!') if can_enter_shell_mode(app, m) => {
             app.shell_mode = true;
             app.ac = None;
         }
@@ -518,9 +527,11 @@ fn chat_key(app: &mut App, k: KeyEvent) {
                     app.history.reset();
                     app.suppress_ac = false;
                     app.update_autocomplete();
+
                     // Typed / pasted path to an image → attachment.
                     maybe_image_path(app);
                 }
+
                 if app.has_selection() {
                     app.clear_selection();
                 }
@@ -572,7 +583,7 @@ fn scroll(app: &mut App, f: impl FnOnce(&mut chat::ChatState)) {
 /// If the editor text is exactly a path to an image file, convert it to an attachment.
 fn maybe_image_path(app: &mut App) {
     let t = app.editor.text.trim();
-    if t.len() < 5 || !t.contains('.') || t.contains('\n') {
+    if t.len() < MIN_IMAGE_PATH_LEN || !t.contains('.') || t.contains('\n') {
         return;
     }
     if let Some((img, name)) = crate::clipboard::image_from_path(t) {
@@ -640,9 +651,31 @@ fn finish_question(app: &mut App, sid: &str, call_id: &str, outcome: Outcome) {
     }
 }
 
+/// Images named by a pasted text: every whitespace-separated path, or the whole text as one
+/// path (names with spaces). Empty when the text is not an image paste.
+fn pasted_images(s: &str) -> Vec<(ImageData, String)> {
+    let paths: Vec<&str> = s.split_whitespace().collect();
+    if paths.is_empty() || paths.len() > MAX_PASTED_PATHS {
+        return Vec::new();
+    }
+    let imgs: Vec<_> = paths
+        .iter()
+        .filter_map(|p| crate::clipboard::image_from_path(p))
+        .collect();
+    let all_paths_are_images = imgs.len() == paths.len();
+    if all_paths_are_images {
+        return imgs;
+    }
+    if imgs.len() != 1 {
+        return Vec::new();
+    }
+    let whole = crate::clipboard::image_from_path(s.trim());
+    whole.into_iter().collect()
+}
+
 fn paste(app: &mut App, s: String) {
     if let Some(Dialog::List(d)) = app.dialog.as_mut() {
-        d.filter.insert(&crate::ui::text::one_line(&s));
+        d.filter.insert(&crate::text::one_line(&s));
         d.refilter();
         return;
     }
@@ -651,7 +684,7 @@ fn paste(app: &mut App, s: String) {
     }
     if app.active_question().is_some() {
         if let Some(editor) = app.question.as_mut().and_then(|q| q.edit.as_mut()) {
-            editor.insert(&crate::ui::text::one_line(&s));
+            editor.insert(&crate::text::one_line(&s));
         }
         return;
     }
@@ -664,36 +697,21 @@ fn paste(app: &mut App, s: String) {
         return;
     }
     // One or more image paths.
-    let paths: Vec<&str> = s.split_whitespace().collect();
-    if !paths.is_empty() && paths.len() <= 32 {
-        let imgs: Vec<_> = paths
-            .iter()
-            .filter_map(|p| crate::clipboard::image_from_path(p))
-            .collect();
-        if imgs.len() == paths.len()
-            || (imgs.len() == 1 && crate::clipboard::image_from_path(s.trim()).is_some())
-        {
-            let imgs = if imgs.len() == paths.len() {
-                imgs
-            } else {
-                crate::clipboard::image_from_path(s.trim())
-                    .into_iter()
-                    .collect()
-            };
-            let n = imgs.len();
-            let ed = target_editor(app);
-            for (img, name) in imgs {
-                ed.attach_image(img, Some(name));
-            }
-            app.toasts.info(format!(
-                "Attached {n} image{}",
-                if n > 1 { "s" } else { "" }
-            ));
-            return;
+    let imgs = pasted_images(&s);
+    if !imgs.is_empty() {
+        let n = imgs.len();
+        let ed = target_editor(app);
+        for (img, name) in imgs {
+            ed.attach_image(img, Some(name));
         }
+        app.toasts.info(format!(
+            "Attached {n} image{}",
+            if n > 1 { "s" } else { "" }
+        ));
+        return;
     }
     if app.mode == Mode::Watch {
-        let one = crate::ui::text::one_line(&s);
+        let one = crate::text::one_line(&s);
         target_editor(app).insert(&one);
         return;
     }
@@ -791,6 +809,7 @@ fn watch_key(app: &mut App, k: KeyEvent) {
             }
             let back = k.code == KeyCode::BackTab;
             let n = all.len() as i32;
+
             let i = match app
                 .watch
                 .focus
@@ -809,18 +828,19 @@ fn watch_key(app: &mut App, k: KeyEvent) {
                         .unwrap_or(if back { n - 1 } else { 0 })
                 }
             };
+
             app.watch.focus = Some(all[i as usize].clone());
         }
         // Scroll the focused tile's transcript.
         KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End
-            if app.watch.focus.is_some() && tile_scroll_key(app, &k) => {}
-        KeyCode::Up | KeyCode::Down
-            if m == SHIFT && app.watch.focus.is_some() && tile_scroll_key(app, &k) => {}
+            if tile_scroll_key(app, &k) => {}
+        KeyCode::Up | KeyCode::Down if m == SHIFT && tile_scroll_key(app, &k) => {}
         KeyCode::Esc => {
             let Some(f) = app.watch.focus.clone() else {
                 app.dirty = false;
                 return;
             };
+
             let busy = app.views.get(&f).is_some_and(|v| v.is_busy());
             let has_text = app.watch.inputs.get(&f).is_some_and(|e| !e.is_empty());
             if has_text {
@@ -829,26 +849,17 @@ fn watch_key(app: &mut App, k: KeyEvent) {
                     e.clear();
                 }
             } else if busy {
-                if app
-                    .esc_armed
-                    .is_some_and(|t| t.elapsed() < Duration::from_millis(1500))
-                {
-                    app.esc_armed = None;
+                let name = app
+                    .views
+                    .get(&f)
+                    .map(|v| v.info.name.clone())
+                    .unwrap_or_default();
+
+                if confirm_or_arm(&mut app.esc_armed) {
                     app.hint = None;
                     app.abort(&f);
-                    let name = app
-                        .views
-                        .get(&f)
-                        .map(|v| v.info.name.clone())
-                        .unwrap_or_default();
                     app.toasts.info(format!("Interrupted \"{name}\""));
                 } else {
-                    app.esc_armed = Some(Instant::now());
-                    let name = app
-                        .views
-                        .get(&f)
-                        .map(|v| v.info.name.clone())
-                        .unwrap_or_default();
                     app.set_hint(format!("esc again to interrupt \"{name}\""), theme::WARNING);
                 }
             } else {
@@ -856,37 +867,19 @@ fn watch_key(app: &mut App, k: KeyEvent) {
             }
         }
         KeyCode::Enter if m.is_empty() && app.watch.focus.is_some() => {
-            let Some(f) = app.watch.focus.clone() else {
-                return;
-            };
+            let f = app.watch.focus.clone().expect("guarded by arm condition");
             let ed = app.watch.inputs.entry(f.clone()).or_default();
             if ed.is_empty() {
                 app.zoom(&f);
                 return;
             }
+
             // Built-in commands typed in a tile act on that tile's session.
-            if let Some(rest) = ed.text.trim().strip_prefix('/') {
-                let (name, args) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
-                if let Some(c) = crate::app::find_cmd(name) {
-                    let args = args.to_string();
-                    match c.name {
-                        "close" => {
-                            ed.clear();
-                            app.close_session(&f);
-                        }
-                        "cd" => {
-                            ed.clear();
-                            app.change_dir(&f, &args);
-                        }
-                        other => app.set_hint(
-                            format!("/{other} works in the chat view (ctrl+o opens this session)"),
-                            theme::MUTED,
-                        ),
-                    }
-                    return;
-                }
+            if run_tile_command(app, &f) {
+                return;
             }
-            let sub = ed.submit();
+
+            let sub = app.watch.inputs.entry(f.clone()).or_default().submit();
             let images = sub.images.into_iter().map(|(i, _)| i).collect();
             app.send_prompt(&f, sub.text, images);
         }
@@ -908,6 +901,36 @@ fn watch_key(app: &mut App, k: KeyEvent) {
             }
         },
     }
+}
+
+/// Built-in commands typed in a tile act on that tile's session. Returns true if one was handled.
+fn run_tile_command(app: &mut App, tile: &str) -> bool {
+    let Some(ed) = app.watch.inputs.get_mut(tile) else {
+        return false;
+    };
+    let Some(rest) = ed.text.trim().strip_prefix('/') else {
+        return false;
+    };
+    let (name, args) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+    let Some(c) = crate::app::find_cmd(name) else {
+        return false;
+    };
+    let args = args.to_string();
+    match c.name {
+        cmd::CLOSE => {
+            ed.clear();
+            app.close_session(tile);
+        }
+        cmd::CD => {
+            ed.clear();
+            app.change_dir(tile, &args);
+        }
+        other => app.set_hint(
+            format!("/{other} works in the chat view (ctrl+o opens this session)"),
+            theme::MUTED,
+        ),
+    }
+    true
 }
 
 /// PgUp/PgDn/Home/End/shift+↑↓ on the focused tile. Home/End only while its input is empty.
@@ -938,8 +961,8 @@ fn tile_scroll_key(app: &mut App, k: &KeyEvent) -> bool {
 
 fn click_count(app: &mut App, x: u16, y: u16) -> u8 {
     let n = match app.last_click {
-        Some((t, lx, ly, n)) if t.elapsed() < Duration::from_millis(450) && lx == x && ly == y => {
-            (n % 3) + 1
+        Some((t, lx, ly, n)) if t.elapsed() < MULTI_CLICK_WINDOW && lx == x && ly == y => {
+            (n % CLICK_COUNT_CYCLE) + 1
         }
         _ => 1,
     };
@@ -949,20 +972,27 @@ fn click_count(app: &mut App, x: u16, y: u16) -> u8 {
 
 fn mouse(app: &mut App, me: MouseEvent) {
     let (x, y) = (me.column, me.row);
+    let pos = Position::new(x, y);
     // Permission modal.
     if let Some((sid, req, _)) = app.active_permission() {
         match me.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 if let Some(a) = app.perm.as_ref().and_then(|p| p.button_at(x, y)) {
                     match a {
-                        0 => app.reply_permission(&sid, &req.call_id, true, false),
-                        1 => app.reply_permission(&sid, &req.call_id, true, true),
-                        _ => app.reply_permission(&sid, &req.call_id, false, false),
+                        PermissionAction::AllowOnce => {
+                            app.reply_permission(&sid, &req.call_id, true, false)
+                        }
+                        PermissionAction::AllowAlways => {
+                            app.reply_permission(&sid, &req.call_id, true, true)
+                        }
+                        PermissionAction::Deny => {
+                            app.reply_permission(&sid, &req.call_id, false, false)
+                        }
                     }
                 }
             }
-            MouseEventKind::ScrollUp => scroll_perm(app, -3),
-            MouseEventKind::ScrollDown => scroll_perm(app, 3),
+            MouseEventKind::ScrollUp => scroll_perm(app, -WHEEL_SCROLL_ROWS),
+            MouseEventKind::ScrollDown => scroll_perm(app, WHEEL_SCROLL_ROWS),
             _ => app.dirty = false,
         }
         return;
@@ -981,8 +1011,7 @@ fn mouse(app: &mut App, me: MouseEvent) {
         match (d, me.kind) {
             (Dialog::List(d), MouseEventKind::Down(MouseButton::Left)) => {
                 let r = d.rect;
-                let inside = x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
-                if !inside {
+                if !r.contains(pos) {
                     app.dialog = None;
                 } else if d.kind == Kind::CloseSessions {
                     // Destructive: a click only selects; enter closes.
@@ -1003,19 +1032,19 @@ fn mouse(app: &mut App, me: MouseEvent) {
                     app.dirty = false;
                 }
             }
-            (Dialog::Help(h), MouseEventKind::ScrollUp) => h.scroll_by(-3),
-            (Dialog::Help(h), MouseEventKind::ScrollDown) => h.scroll_by(3),
+            (Dialog::Help(h), MouseEventKind::ScrollUp) => h.scroll_by(-WHEEL_SCROLL_ROWS),
+            (Dialog::Help(h), MouseEventKind::ScrollDown) => h.scroll_by(WHEEL_SCROLL_ROWS),
             (Dialog::Help(_), MouseEventKind::Down(_)) => app.dialog = None,
             (Dialog::Mcp(d), MouseEventKind::Down(MouseButton::Left)) => {
-                if !d.contains(x, y) {
+                if !d.rect.contains(pos) {
                     app.dialog = None;
                 } else if let Some(i) = d.server_at(x, y) {
                     d.sel = i;
                     d.set_expanded(&app.mcp, None);
                 }
             }
-            (Dialog::Mcp(d), MouseEventKind::ScrollUp) => d.scroll_by(-3),
-            (Dialog::Mcp(d), MouseEventKind::ScrollDown) => d.scroll_by(3),
+            (Dialog::Mcp(d), MouseEventKind::ScrollUp) => d.scroll_by(-WHEEL_SCROLL_ROWS),
+            (Dialog::Mcp(d), MouseEventKind::ScrollDown) => d.scroll_by(WHEEL_SCROLL_ROWS),
             _ => app.dirty = false,
         }
         return;
@@ -1029,32 +1058,8 @@ fn mouse(app: &mut App, me: MouseEvent) {
         return;
     };
     let lay = render::chat_layout(app, app.screen);
-    // Autocomplete popup.
-    if let Some(ac) = app.ac.as_mut() {
-        let r = ac.rect;
-        if x >= r.x && x < r.x + r.width && y > r.y && y < r.y + r.height {
-            let n = ac.items.len().min(r.height as usize - 2);
-            let start = ac.sel.saturating_sub(n.saturating_sub(1));
-            let idx = start + (y - r.y - 1) as usize;
-            match me.kind {
-                MouseEventKind::Down(MouseButton::Left) => {
-                    if idx < ac.items.len() {
-                        ac.sel = idx;
-                        app.accept_completion(true);
-                        app.update_autocomplete_after_accept();
-                    }
-                }
-                MouseEventKind::Moved => {
-                    if idx < ac.items.len() {
-                        ac.sel = idx;
-                    }
-                }
-                MouseEventKind::ScrollUp => ac_move(app, -1),
-                MouseEventKind::ScrollDown => ac_move(app, 1),
-                _ => {}
-            }
-            return;
-        }
+    if autocomplete_mouse(app, me) {
+        return;
     }
     // Wheel over the sidebar scrolls the sidebar (never the chat).
     if let MouseEventKind::ScrollUp | MouseEventKind::ScrollDown = me.kind
@@ -1063,9 +1068,9 @@ fn mouse(app: &mut App, me: MouseEvent) {
     {
         let before = app.sidebar_scroll;
         app.sidebar_scroll = if me.kind == MouseEventKind::ScrollUp {
-            before.saturating_sub(3)
+            before.saturating_sub(WHEEL_SCROLL_ROWS as usize)
         } else {
-            (before + 3).min(app.sidebar_max_scroll)
+            (before + WHEEL_SCROLL_ROWS as usize).min(app.sidebar_max_scroll)
         };
         app.dirty = app.sidebar_scroll != before;
         return;
@@ -1096,12 +1101,12 @@ fn mouse(app: &mut App, me: MouseEvent) {
     match me.kind {
         MouseEventKind::ScrollUp => {
             if c.contains(x, y) || y < lay.prompt.y {
-                c.scroll_by(-3, false);
+                c.scroll_by(-WHEEL_SCROLL_ROWS, false);
             }
         }
         MouseEventKind::ScrollDown => {
             if c.contains(x, y) || y < lay.prompt.y {
-                c.scroll_by(3, false);
+                c.scroll_by(WHEEL_SCROLL_ROWS, false);
             }
         }
         MouseEventKind::Down(MouseButton::Left) => {
@@ -1185,10 +1190,45 @@ fn mouse(app: &mut App, me: MouseEvent) {
     }
 }
 
+/// Mouse over the autocomplete popup: click accepts, hover selects, wheel moves.
+/// Returns true if the popup took the event.
+fn autocomplete_mouse(app: &mut App, me: MouseEvent) -> bool {
+    let Some(ac) = app.ac.as_mut() else {
+        return false;
+    };
+    let (x, y) = (me.column, me.row);
+    let r = ac.rect;
+    if !r.contains(Position::new(x, y)) || y <= r.y {
+        return false;
+    }
+    let n = ac.items.len().min(r.height as usize - 2);
+    let start = ac.sel.saturating_sub(n.saturating_sub(1));
+    let idx = start + (y - r.y - 1) as usize;
+    match me.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            if idx >= ac.items.len() {
+                return true;
+            }
+            ac.sel = idx;
+            app.accept_completion(true);
+            refresh_autocomplete_after_accept(app);
+        }
+        MouseEventKind::Moved => {
+            if idx < ac.items.len() {
+                ac.sel = idx;
+            }
+        }
+        MouseEventKind::ScrollUp => ac_move(app, -1),
+        MouseEventKind::ScrollDown => ac_move(app, 1),
+        _ => {}
+    }
+    true
+}
+
 fn watch_mouse(app: &mut App, me: MouseEvent) {
     let (x, y) = (me.column, me.row);
-    let inside =
-        |r: &ratatui::layout::Rect| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
+    let pos = Position::new(x, y);
+    let inside = |r: &Rect| r.contains(pos);
     let tile = app
         .watch
         .tiles
@@ -1199,9 +1239,9 @@ fn watch_mouse(app: &mut App, me: MouseEvent) {
         // The wheel scrolls the tile under the pointer, focused or not.
         MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
             let d = if me.kind == MouseEventKind::ScrollUp {
-                -3
+                -WHEEL_SCROLL_ROWS
             } else {
-                3
+                WHEEL_SCROLL_ROWS
             };
             match tile.and_then(|sid| app.views.get_mut(&sid)) {
                 Some(v) => v.chat.scroll_by(d, false),
@@ -1263,19 +1303,14 @@ fn watch_mouse(app: &mut App, me: MouseEvent) {
     }
 }
 
-impl App {
-    pub fn update_autocomplete_after_accept(&mut self) {
-        // After accepting a slash command needing args, or a file, close the popup.
-        if self.ac.is_none()
-            && self.editor.mention().is_none()
-            && !self.editor.text.starts_with('/')
-        {
-            return;
-        }
-        if self.editor.text.ends_with(' ') {
-            self.ac = None;
-        } else {
-            self.update_autocomplete();
-        }
+/// After accepting a slash command needing args, or a file, close the popup.
+fn refresh_autocomplete_after_accept(app: &mut App) {
+    if app.ac.is_none() && app.editor.mention().is_none() && !app.editor.text.starts_with('/') {
+        return;
+    }
+    if app.editor.text.ends_with(' ') {
+        app.ac = None;
+    } else {
+        app.update_autocomplete();
     }
 }
