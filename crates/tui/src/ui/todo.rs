@@ -7,6 +7,16 @@ use serde_json::Value;
 
 use super::{Row, text, theme};
 
+// Status strings of the `todo` tool input.
+const STATUS_PENDING: &str = "pending";
+const STATUS_IN_PROGRESS: &str = "in_progress";
+const STATUS_COMPLETED: &str = "completed";
+const STATUS_CANCELLED: &str = "cancelled";
+/// Narrowest text column of a todo row.
+const MIN_TODO_TEXT_W: usize = 4;
+/// The one-line progress is dropped below this width.
+const MIN_PROGRESS_W: usize = 8;
+
 /// Parses the `todos` array of a `todo` tool input (lenient: bad entries are skipped).
 pub fn parse_todos(input: &Value) -> Vec<Todo> {
     let Some(items) = input.get("todos").and_then(Value::as_array) else {
@@ -23,11 +33,11 @@ pub fn parse_todos(input: &Value) -> Vec<Todo> {
             let status = match it
                 .get("status")
                 .and_then(Value::as_str)
-                .unwrap_or("pending")
+                .unwrap_or(STATUS_PENDING)
             {
-                "in_progress" => TodoStatus::InProgress,
-                "completed" => TodoStatus::Completed,
-                "cancelled" => TodoStatus::Cancelled,
+                STATUS_IN_PROGRESS => TodoStatus::InProgress,
+                STATUS_COMPLETED => TodoStatus::Completed,
+                STATUS_CANCELLED => TodoStatus::Cancelled,
                 _ => TodoStatus::Pending,
             };
             Some(Todo {
@@ -65,7 +75,7 @@ pub fn style(s: TodoStatus) -> (Style, Style) {
 /// One row per item (wrapped content is indented under the text), at most `max` items.
 pub fn todo_rows(todos: &[Todo], w: usize, max: usize) -> Vec<Row> {
     let mut rows = Vec::new();
-    let tw = w.saturating_sub(2).max(4);
+    let tw = w.saturating_sub(2).max(MIN_TODO_TEXT_W);
     for t in todos.iter().take(max) {
         let (ist, cst) = style(t.status);
         let content = text::one_line(&t.content);
@@ -123,7 +133,7 @@ pub fn current(todos: &[Todo]) -> Option<&Todo> {
 
 /// Compact one-line progress: `◐ Fix bug · 2/5` truncated to `w` columns. None when nothing is left.
 pub fn progress_spans(todos: &[Todo], w: usize) -> Option<Vec<Span<'static>>> {
-    if !active(todos) || w < 8 {
+    if !active(todos) || w < MIN_PROGRESS_W {
         return None;
     }
     let cur = current(todos)?;
