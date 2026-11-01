@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import QtQuick.Layouts
 import RefGui
 
 // The model's question to the user, above the input box: one list to pick from, or a tab per
@@ -16,6 +17,8 @@ Rectangle {
 	readonly property int spacing: 8
 	readonly property int tabHeight: 26
 	readonly property int tabPadding: 10
+	readonly property int tabSpacing: 6
+	readonly property int tabMinWidth: 56
 	readonly property real borderOpacity: 0.6
 	readonly property real busyOpacity: 0.5
 	readonly property string hint: {
@@ -44,9 +47,12 @@ Rectangle {
 		width: parent.width - 2 * card.padding
 		spacing: card.spacing
 
-		Row {
+		// The tabs share the card's width: a long heading is cut short, not pushed out of a narrow tile.
+		RowLayout {
 			visible: !card.prompt.simple
-			spacing: 6
+			width: parent.width
+			height: card.tabHeight
+			spacing: card.tabSpacing
 
 			Repeater {
 				model: card.prompt.tabs
@@ -57,8 +63,12 @@ Rectangle {
 					required property int index
 					required property var modelData
 
-					width: tabLabel.implicitWidth + 2 * card.tabPadding
-					height: card.tabHeight
+					Layout.preferredWidth: tabLabel.implicitWidth + 2 * card.tabPadding
+					Layout.maximumWidth: Layout.preferredWidth // never wider than its text, only narrower when the row is full
+					Layout.fillWidth: true
+					// A heading shrinks to a stub; the last tab keeps its word.
+					Layout.minimumWidth: modelData.confirm ? Layout.preferredWidth : Math.min(Layout.preferredWidth, card.tabMinWidth)
+					Layout.preferredHeight: card.tabHeight
 					radius: height / 2
 					color: modelData.current ? Theme.accent : "transparent"
 					border.color: modelData.current ? "transparent" : Theme.border
@@ -66,7 +76,10 @@ Rectangle {
 					Text {
 						id: tabLabel
 						textFormat: Text.PlainText
-						anchors.centerIn: parent
+						anchors { fill: parent; leftMargin: card.tabPadding; rightMargin: card.tabPadding }
+						horizontalAlignment: Text.AlignHCenter
+						verticalAlignment: Text.AlignVCenter
+						elide: Text.ElideRight
 						text: (tab.modelData.answered ? "✓ " : "") + tab.modelData.title
 						color: tab.modelData.current ? Theme.onAccent : tab.modelData.answered ? Theme.text : Theme.textMuted
 						font.pixelSize: Theme.smallFontSize

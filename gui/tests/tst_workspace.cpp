@@ -19,6 +19,8 @@ using refgui::client::Backend;
 namespace
 {
 
+constexpr int ReconnectTimeoutMs = 8000; // the backend retries after a second
+
 constexpr int settleMs = 100; // time for the messages in flight to be handled
 
 
@@ -55,6 +57,27 @@ public:
 
 	// The messages an attach brings for the session.
 	void setMessages(const QString& id, const QJsonArray& messages) { m_messages.insert(id, messages); }
+
+	// The questions an attach brings for the session (pending_questions).
+	void setQuestions(const QString& id, const QJsonArray& questions) { m_questions.insert(id, questions); }
+
+	// While held, a question reply is recorded but not answered.
+	void holdQuestionReply(bool hold) { m_holdQuestionReply = hold; }
+
+	// Answers the oldest held question reply (refused when failQuestionReply is set).
+	void releaseQuestionReply()
+	{
+		Q_ASSERT(!m_heldQuestionReplies.isEmpty());
+		const QJsonObject request = m_heldQuestionReplies.takeFirst();
+		if(m_questionError.isEmpty())
+		{
+			m_fake.respond(request, {});
+		}
+		else
+		{
+			m_fake.fail(request, m_questionError);
+		}
+	}
 
 	// While set, a question reply is refused with this text.
 	void failQuestionReply(const QString& error) { m_questionError = error; }
@@ -101,6 +124,8 @@ public:
 
 	void broadcast() { m_fake.send({{u"kind"_s, u"sessions"_s}, {u"sessions"_s, list()}}); }
 
+	QJsonObject info(const QString& id) const { return m_sessions.value(id); }
+
 	void remove(const QString& id)
 	{
 		m_sessions.remove(id);
@@ -139,7 +164,10 @@ private:
 			QJsonObject info = m_sessions.value(id);
 			info[u"attached"_s] = request.value(u"foreground"_s).toBool() ? 1 : 0;
 			m_sessions[id] = info;
-			m_fake.respond(request, {{u"snapshot"_s, QJsonObject{{u"info"_s, info}, {u"messages"_s, m_messages.value(id)}, {u"more_before"_s, false}}}});
+			m_fake.respond(request, {{u"snapshot"_s, QJsonObject{{u"info"_s, info},
+			                                                            {u"messages"_s, m_messages.value(id)},
+			                                                            {u"pending_questions"_s, m_questions.value(id)},
+			                                                            {u"more_before"_s, false}}}});
 			broadcast();
 		}
 		else if(op == u"detach"_s)
@@ -207,6 +235,10 @@ private:
 			const QJsonObject image{{u"mime"_s, u"image/png"_s}, {u"data"_s, u"YWJj"_s}, {u"name"_s, u"shot.png"_s}};
 			m_fake.respond(request, {{u"text"_s, u"take this back"_s}, {u"images"_s, QJsonArray{image}}});
 		}
+		else if(op == u"question_reply"_s && m_holdQuestionReply)
+		{
+			m_heldQuestionReplies.append(request);
+		}
 		else if(op == u"question_reply"_s && !m_questionError.isEmpty())
 		{
 			m_fake.fail(request, m_questionError);
@@ -224,6 +256,9 @@ private:
 	FakeBackend& m_fake;
 	QMap<QString, QJsonObject> m_sessions;
 	QMap<QString, QJsonArray> m_messages;
+	QMap<QString, QJsonArray> m_questions;
+	bool m_holdQuestionReply = false;
+	QList<QJsonObject> m_heldQuestionReplies;
 	QString m_questionError;
 	int m_created = 0;
 	int m_protocol = 2;
@@ -244,7 +279,7 @@ QJsonArray awaitingPermission()
 }
 
 // The model asks a question with two options (the first is the default) and a custom answer.
-QJsonObject questionEvent()
+QJsonObject questionRequest()
 {
 	const QJsonArray options{QJsonObject{{u"label"_s, u"Yes"_s}, {u"description"_s, u"Do it"_s}, {u"default"_s, true}},
 	                         QJsonObject{{u"label"_s, u"No"_s}, {u"description"_s, u"Leave it"_s}, {u"default"_s, false}}};
@@ -254,7 +289,14 @@ QJsonObject questionEvent()
 	                          {u"call_id"_s, u"call_q"_s},
 	                          {u"questions"_s, QJsonArray{question}},
 	                          {u"time"_s, 1}};
-	return {{u"kind"_s, u"event"_s}, {u"session_id"_s, u"ses_a"_s}, {u"event"_s, QJsonObject{{u"type"_s, u"question"_s}, {u"request"_s, request}}}};
+	return request;
+}
+
+QJsonObject questionEvent()
+{
+	return {{u"kind"_s, u"event"_s},
+	        {u"session_id"_s, u"ses_a"_s},
+	        {u"event"_s, QJsonObject{{u"type"_s, u"question"_s}, {u"request"_s, questionRequest()}}}};
 }
 
 // What the sidebar row of a session says (IsCurrentRole, IsTileRole).
@@ -325,11 +367,16 @@ private slots:
 	void anotherTileGetsTheFocusWhenTheFocusedOneCloses();
 	void theSidebarMarksTheFocusedTileAndTheTiles();
 	void permissionKeysComeAfterTheGuardAndTakeTheTyping();
+	void closingTheCurrentSessionLetsGoOfItBeforeItIsDeleted();
 	void destroyingTheWorkspaceWhileLeavingSplitViewIsSafe();
 	void destroyingTheWorkspaceWithADetachOutIsSafe();
 	void questionKeysComeAfterTheGuardAndAnswerTheCard();
 	void aQuestionAnsweredElsewhereGoesQuietly();
 	void aRefusedAnswerKeepsTheCardAndSaysWhy();
+	void aLostConnectionFreesTheCardAndItCanBeSentAgain();
+	void aReplyThatFailsLateLeavesTheNextQuestionAlone();
+	void gettingTheKeyboardStartsTheGuardAgain();
+	void theTodoListFollowsTheSessionInfo();
 	void typingACustomAnswerTakesTheKeysAwayFromTheCard();
 	void sessionsHaveTheMethodsCommandsCall();
 	void undoPutsThePromptBackIntoTheInputBox();
@@ -773,6 +820,135 @@ void TestWorkspace::aRefusedAnswerKeepsTheCardAndSaysWhy()
 	QVERIFY(!session->question()->isBusy()); // it can be tried again
 }
 
+// The reply is on its way when the connection drops: the card is not stuck, keeps its picks, and the question comes
+// back with the snapshot of the new attach.
+void TestWorkspace::aLostConnectionFreesTheCardAndItCanBeSentAgain()
+{
+	Fixture f(2);
+	ChatSession* session = f.workspace->current();
+	f.fake.send(questionEvent());
+	QTRY_VERIFY(session->question()->isActive());
+	const auto replies = [&] { return f.stub.requests(u"question_reply"_s); };
+	f.stub.holdQuestionReply(true);
+	session->question()->activateRow(1); // "No"
+	QTRY_COMPARE(replies().size(), 1);
+	QVERIFY(session->question()->isBusy());
+	f.stub.setQuestions(u"ses_a"_s, QJsonArray{questionRequest()});
+	const qsizetype attaches = f.stub.requests(u"attach"_s).size();
+
+	f.fake.socket()->close();
+
+	QTRY_VERIFY_WITH_TIMEOUT(!session->question()->isBusy(), ReconnectTimeoutMs);
+	QVERIFY(session->question()->isActive());
+	QCOMPARE(session->question()->answers(), (QList<QStringList>{{u"No"_s}})); // the pick stays
+	QVERIFY(!session->statusText().isEmpty());
+	QTRY_COMPARE_WITH_TIMEOUT(f.stub.requests(u"attach"_s).size(), attaches + 1, ReconnectTimeoutMs);
+	QTRY_VERIFY(session->isReady());
+	QVERIFY(session->question()->isActive()); // the snapshot brings the same question back, nothing is reset
+	QCOMPARE(session->question()->answers(), (QList<QStringList>{{u"No"_s}}));
+
+	f.stub.holdQuestionReply(false);
+	session->question()->activateRow(1);
+
+	QTRY_COMPARE(replies().size(), 2);
+	QCOMPARE(replies().last().value(u"answers"_s).toArray(), (QJsonArray{QJsonValue(QJsonArray{u"No"_s})}));
+	QCOMPARE(replies().last().value(u"call_id"_s).toString(), u"call_q"_s);
+}
+
+// Reply A fails after the card has moved on to question B, which is being sent: B stays locked.
+void TestWorkspace::aReplyThatFailsLateLeavesTheNextQuestionAlone()
+{
+	Fixture f(2);
+	ChatSession* session = f.workspace->current();
+	f.fake.send(questionEvent());
+	QTRY_VERIFY(session->question()->isActive());
+	f.stub.failQuestionReply(u"Invalid answers"_s);
+	f.stub.holdQuestionReply(true); // the refusal comes only when released
+	session->question()->activateRow(0);
+	QTRY_COMPARE(f.stub.requests(u"question_reply"_s).size(), 1);
+
+	// The question goes away and another one takes its place; its answer is on its way, too.
+	f.fake.send({{u"kind"_s, u"event"_s},
+	             {u"session_id"_s, u"ses_a"_s},
+	             {u"event"_s, QJsonObject{{u"type"_s, u"question_resolved"_s}, {u"call_id"_s, u"call_q"_s}}}});
+	QTRY_VERIFY(!session->question()->isActive());
+	QJsonObject next = questionRequest();
+	next[u"call_id"_s] = u"call_r"_s;
+	f.fake.send({{u"kind"_s, u"event"_s},
+	             {u"session_id"_s, u"ses_a"_s},
+	             {u"event"_s, QJsonObject{{u"type"_s, u"question"_s}, {u"request"_s, next}}}});
+	QTRY_COMPARE(session->question()->callId(), u"call_r"_s);
+	session->question()->activateRow(0);
+	QTRY_COMPARE(f.stub.requests(u"question_reply"_s).size(), 2);
+	QVERIFY(session->question()->isBusy());
+
+	f.stub.releaseQuestionReply(); // the refusal of the first one
+
+	QTRY_COMPARE(session->statusText(), u"Invalid answers"_s);
+	QCOMPARE(session->question()->callId(), u"call_r"_s);
+	QVERIFY(session->question()->isBusy()); // still waiting for its own answer
+	f.stub.releaseQuestionReply();
+	QTRY_VERIFY(!session->question()->isBusy());
+}
+
+// The guard time starts again when the pane gets the keyboard, for a question and for a permission request.
+void TestWorkspace::gettingTheKeyboardStartsTheGuardAgain()
+{
+	Fixture f(2, false, awaitingPermission());
+	ChatSession* session = f.workspace->current();
+	QTRY_VERIFY(session->answerKeysActive());
+
+	session->restartAnswerGuard();
+
+	QVERIFY(!session->answerKeysActive());
+	QVERIFY(!session->answerKey(Qt::Key_A, u"a"_s, Qt::NoModifier, false));
+	QTRY_VERIFY(session->answerKeysActive());
+
+	f.fake.send(questionEvent());
+	QTRY_VERIFY(session->question()->isActive());
+	QTRY_VERIFY(session->answerKeysActive());
+	session->restartAnswerGuard();
+	QVERIFY(!session->answerKeysActive());
+	QVERIFY(!session->answerKey(Qt::Key_Return, QString(), Qt::NoModifier, false)); // the default is not taken
+	QCOMPARE(f.stub.requests(u"question_reply"_s).size(), 0);
+	QTRY_VERIFY(session->answerKeysActive());
+}
+
+// The status line item and its popup read these properties; the counting is the terminal UI's.
+void TestWorkspace::theTodoListFollowsTheSessionInfo()
+{
+	Fixture f;
+	ChatSession* session = f.workspace->current();
+	QCOMPARE(session->todoTotal(), 0);
+	QVERIFY(session->todoCurrent().isEmpty());
+	const auto sendTodos = [&](const QJsonArray& todos) {
+		QJsonObject info = f.stub.info(u"ses_a"_s);
+		info[u"todos"_s] = todos;
+		f.fake.send({{u"kind"_s, u"event"_s}, {u"session_id"_s, u"ses_a"_s}, {u"event"_s, QJsonObject{{u"type"_s, u"info"_s}, {u"info"_s, info}}}});
+	};
+	const auto item = [](const QString& content, const QString& status) { return QJsonObject{{u"content"_s, content}, {u"status"_s, status}}; };
+	QSignalSpy changed(session, &ChatSession::infoChanged);
+
+	sendTodos({item(u"Read the parser"_s, u"completed"_s),
+	           item(u"Fix\nthe loop"_s, u"in_progress"_s),
+	           item(u"Skipped"_s, u"cancelled"_s),
+	           item(u"Run tests"_s, u"pending"_s)});
+
+	QTRY_COMPARE(session->todoTotal(), 3);
+	QCOMPARE(session->todoDone(), 1);
+	QCOMPARE(session->todoCurrent(), u"Fix the loop"_s); // on one line
+	QCOMPARE(session->todoCurrentStatus(), u"in_progress"_s);
+	QCOMPARE(session->todoItems().size(), 4); // the popup lists every item, cancelled ones too
+	QCOMPARE(session->todoItems().at(2).toMap().value(u"status"_s).toString(), u"cancelled"_s);
+
+	sendTodos({item(u"Read the parser"_s, u"completed"_s), item(u"Run tests"_s, u"completed"_s)});
+
+	QTRY_COMPARE(session->todoDone(), 2);
+	QVERIFY(session->todoCurrent().isEmpty()); // all done
+	QVERIFY(session->todoCurrentStatus().isEmpty());
+	QVERIFY(changed.count() >= 2);
+}
+
 void TestWorkspace::typingACustomAnswerTakesTheKeysAwayFromTheCard()
 {
 	Fixture f(2);
@@ -788,6 +964,26 @@ void TestWorkspace::typingACustomAnswerTakesTheKeysAwayFromTheCard()
 	QVERIFY(!session->answerKey(Qt::Key_A, u"a"_s, Qt::NoModifier, false)); // the text field has them
 	session->question()->cancelCustom();
 	QVERIFY(session->answerKeysActive());
+}
+
+// The window shows the current session under a crossfade that takes a frame or more to start, so it can still show
+// the closed session when that is deleted; its pane then read properties of null. The window gets to move on first.
+void TestWorkspace::closingTheCurrentSessionLetsGoOfItBeforeItIsDeleted()
+{
+	Fixture f(2, true);
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
+	QPointer<ChatSession> closing = f.workspace->current();
+	QVERIFY(closing);
+	bool announcedInTime = false;
+	connect(f.workspace.get(), &Workspace::sessionDropped, this, [&](ChatSession* dropped) {
+		announcedInTime = dropped == closing.data() && f.workspace->current() != dropped;
+	});
+
+	f.workspace->closeSession(u"ses_a"_s);
+
+	QTRY_VERIFY(announcedInTime);
+	QTRY_VERIFY(closing.isNull());
+	QCOMPARE(f.workspace->currentId(), u"ses_b"_s);
 }
 
 // Closing the connection resumes the coroutines whose requests are out. leaveSplit() waits for watch_all and then

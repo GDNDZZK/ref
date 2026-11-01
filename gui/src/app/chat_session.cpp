@@ -5,6 +5,7 @@
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QPointer>
+#include <QVariantMap>
 
 #include <optional>
 #include <utility>
@@ -142,6 +143,33 @@ QString ChatSession::activity() const
 		return u"compacting"_s;
 	}
 	Q_UNREACHABLE_RETURN(QString());
+}
+
+refgui::proto::TodoProgress ChatSession::todoProgress() const
+{
+	return refgui::proto::todoProgress(m_controller.info().todos);
+}
+
+QString ChatSession::todoCurrent() const
+{
+	const auto current = todoProgress().current;
+	return current ? current->content.simplified() : QString(); // on one line, as the terminal UI shows it
+}
+
+QString ChatSession::todoCurrentStatus() const
+{
+	const auto current = todoProgress().current;
+	return current ? refgui::proto::todoStatusName(current->status) : QString();
+}
+
+QVariantList ChatSession::todoItems() const
+{
+	QVariantList items;
+	for(const refgui::proto::Todo& todo : m_controller.info().todos)
+	{
+		items.append(QVariantMap{{u"content"_s, todo.content.simplified()}, {u"status"_s, refgui::proto::todoStatusName(todo.status)}});
+	}
+	return items;
 }
 
 qint64 ChatSession::busySince() const
@@ -295,6 +323,17 @@ void ChatSession::trackAnswerTarget()
 			m_permissionGuard.start();
 		}
 	}
+	emit answerChanged();
+}
+
+void ChatSession::restartAnswerGuard()
+{
+	if(m_guardedTarget.isEmpty())
+	{
+		return;
+	}
+	m_guardPassed = false;
+	m_permissionGuard.start();
 	emit answerChanged();
 }
 
@@ -496,7 +535,10 @@ QCoro::Task<> ChatSession::sendQuestionReply(QString callId, std::optional<QList
 		m_controller.dropQuestion(callId);
 		co_return;
 	}
-	m_question.setBusy(false); // the card stays, to be tried again
+	if(m_question.isActive() && m_question.callId() == callId)
+	{
+		m_question.setBusy(false); // the card stays, to be tried again
+	}
 	setFailure(result.error());
 }
 

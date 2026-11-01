@@ -9,6 +9,7 @@ import {
   relativeTime,
   rowState,
   runningTime,
+  currentTodo,
   todoProgress,
 } from './sessionRow.ts'
 
@@ -50,6 +51,27 @@ describe('todoProgress', () => {
     expect(todoProgress([])).toBeUndefined()
     expect(todoProgress(undefined)).toBeUndefined()
     expect(todoProgress([todo('cancelled')])).toBeUndefined()
+  })
+})
+
+describe('currentTodo', () => {
+  const named = (content: string, status: Todo['status']): Todo => ({ content, status })
+
+  it('is the item in progress, even after pending ones', () => {
+    const todos = [named('a', 'pending'), named('b', 'in_progress'), named('c', 'in_progress')]
+    expect(currentTodo(todos)?.content).toBe('b')
+  })
+
+  it('is the first pending item when none is in progress', () => {
+    const todos = [named('a', 'completed'), named('b', 'pending'), named('c', 'pending')]
+    expect(currentTodo(todos)?.content).toBe('b')
+  })
+
+  it('skips cancelled and completed items, and is absent when nothing is left', () => {
+    expect(currentTodo([named('a', 'cancelled'), named('b', 'pending')])?.content).toBe('b')
+    expect(currentTodo([named('a', 'completed'), named('b', 'cancelled')])).toBeUndefined()
+    expect(currentTodo([])).toBeUndefined()
+    expect(currentTodo(undefined)).toBeUndefined()
   })
 })
 

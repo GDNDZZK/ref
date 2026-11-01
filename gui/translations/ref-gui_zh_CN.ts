@@ -50,6 +50,7 @@
     </message>
     <message numerus="yes">
         <location filename="../src/app/BashBody.qml" line="36"/>
+        <location filename="../tests/tst_app_translator.cpp" line="42"/>
         <source>%n earlier line(s)</source>
         <translation>
             <numerusform>更早的 %n 行</numerusform>
@@ -107,7 +108,7 @@
 <context>
     <name>ChatSession</name>
     <message>
-        <location filename="../src/app/chat_session.cpp" line="248"/>
+        <location filename="../src/app/chat_session.cpp" line="276"/>
         <source>Not connected to the ref backend.</source>
         <translation>未连接到 ref 后端。</translation>
     </message>
@@ -473,6 +474,7 @@
     <name>FindBody</name>
     <message numerus="yes">
         <location filename="../src/app/FindBody.qml" line="64"/>
+        <location filename="../tests/tst_app_translator.cpp" line="41"/>
         <source>%n result(s)</source>
         <translation>
             <numerusform>%n 个结果</numerusform>
@@ -519,6 +521,7 @@
     <name>GrepBody</name>
     <message numerus="yes">
         <location filename="../src/app/GrepBody.qml" line="63"/>
+        <location filename="../tests/tst_app_translator.cpp" line="15"/>
         <source>%n match(es) in %1</source>
         <translation>
             <numerusform>%1中有 %n 处匹配</numerusform>
@@ -526,6 +529,7 @@
     </message>
     <message numerus="yes">
         <location filename="../src/app/GrepBody.qml" line="63"/>
+        <location filename="../tests/tst_app_translator.cpp" line="16"/>
         <source>%n file(s)</source>
         <translation>
             <numerusform>%n 个文件</numerusform>
@@ -622,6 +626,7 @@
     <name>LineView</name>
     <message numerus="yes">
         <location filename="../src/app/LineView.qml" line="138"/>
+        <location filename="../tests/tst_app_translator.cpp" line="21"/>
         <source>Show %n more line(s)</source>
         <translation>
             <numerusform>再显示 %n 行</numerusform>
@@ -903,47 +908,47 @@
 <context>
     <name>QuestionCard</name>
     <message>
-        <location filename="../src/app/QuestionCard.qml" line="23"/>
+        <location filename="../src/app/QuestionCard.qml" line="26"/>
         <source>Sending…</source>
         <translation>正在发送…</translation>
     </message>
     <message>
-        <location filename="../src/app/QuestionCard.qml" line="25"/>
+        <location filename="../src/app/QuestionCard.qml" line="28"/>
         <source>Enter submit · Esc back</source>
         <translation>Enter 提交 · Esc 返回</translation>
     </message>
     <message>
-        <location filename="../src/app/QuestionCard.qml" line="25"/>
+        <location filename="../src/app/QuestionCard.qml" line="28"/>
         <source>Enter done · Esc back</source>
         <translation>Enter 完成 · Esc 返回</translation>
     </message>
     <message>
-        <location filename="../src/app/QuestionCard.qml" line="27"/>
+        <location filename="../src/app/QuestionCard.qml" line="30"/>
         <source>↑↓ select · Enter submit · Esc dismiss</source>
         <translation>↑↓ 选择 · Enter 提交 · Esc 忽略</translation>
     </message>
     <message>
-        <location filename="../src/app/QuestionCard.qml" line="29"/>
+        <location filename="../src/app/QuestionCard.qml" line="32"/>
         <source>←→ tab · Enter submit · Esc dismiss</source>
         <translation>←→ 切换 · Enter 提交 · Esc 忽略</translation>
     </message>
     <message>
-        <location filename="../src/app/QuestionCard.qml" line="30"/>
+        <location filename="../src/app/QuestionCard.qml" line="33"/>
         <source>←→ tab · ↑↓ select · Enter toggle · Esc dismiss</source>
         <translation>←→ 切换 · ↑↓ 选择 · Enter 勾选 · Esc 忽略</translation>
     </message>
     <message>
-        <location filename="../src/app/QuestionCard.qml" line="30"/>
+        <location filename="../src/app/QuestionCard.qml" line="33"/>
         <source>←→ tab · ↑↓ select · Enter select · Esc dismiss</source>
         <translation>←→ 切换 · ↑↓ 选择 · Enter 选择 · Esc 忽略</translation>
     </message>
     <message>
-        <location filename="../src/app/QuestionCard.qml" line="212"/>
+        <location filename="../src/app/QuestionCard.qml" line="225"/>
         <source>Dismiss</source>
         <translation>忽略</translation>
     </message>
     <message>
-        <location filename="../src/app/QuestionCard.qml" line="220"/>
+        <location filename="../src/app/QuestionCard.qml" line="233"/>
         <source>Submit</source>
         <translation>提交</translation>
     </message>
@@ -1026,12 +1031,12 @@
 <context>
     <name>SessionPane</name>
     <message>
-        <location filename="../src/app/SessionPane.qml" line="88"/>
+        <location filename="../src/app/SessionPane.qml" line="99"/>
         <source>What are we building?</source>
         <translation>我们要做点什么？</translation>
     </message>
     <message>
-        <location filename="../src/app/SessionPane.qml" line="116"/>
+        <location filename="../src/app/SessionPane.qml" line="127"/>
         <source>Jump to latest</source>
         <translation>跳到最新</translation>
     </message>
@@ -1218,37 +1223,37 @@
 <context>
     <name>StatusLine</name>
     <message>
-        <location filename="../src/app/StatusLine.qml" line="33"/>
+        <location filename="../src/app/StatusLine.qml" line="36"/>
         <source>Working</source>
         <translation>处理中</translation>
     </message>
     <message>
-        <location filename="../src/app/StatusLine.qml" line="35"/>
+        <location filename="../src/app/StatusLine.qml" line="38"/>
         <source>Running tools</source>
         <translation>正在运行工具</translation>
     </message>
     <message>
-        <location filename="../src/app/StatusLine.qml" line="37"/>
+        <location filename="../src/app/StatusLine.qml" line="40"/>
         <source>Compacting context…</source>
         <translation>正在压缩上下文…</translation>
     </message>
     <message>
-        <location filename="../src/app/StatusLine.qml" line="39"/>
+        <location filename="../src/app/StatusLine.qml" line="42"/>
         <source>Waiting for your permission</source>
         <translation>等待你的授权</translation>
     </message>
     <message>
-        <location filename="../src/app/StatusLine.qml" line="41"/>
+        <location filename="../src/app/StatusLine.qml" line="44"/>
         <source>Waiting for your answer</source>
         <translation>等待你的回答</translation>
     </message>
     <message>
-        <location filename="../src/app/StatusLine.qml" line="43"/>
+        <location filename="../src/app/StatusLine.qml" line="46"/>
         <source>Retrying in %1 (attempt %2): %3</source>
         <translation>%1 后重试（第 %2 次）：%3</translation>
     </message>
     <message>
-        <location filename="../src/app/StatusLine.qml" line="145"/>
+        <location filename="../src/app/StatusLine.qml" line="154"/>
         <source>Context: %1 of %2 tokens. Compaction is recommended at %3 and automatic at %4.</source>
         <translation>上下文：%1 / %2 tokens。建议在 %3 时压缩，%4 时自动压缩。</translation>
     </message>
@@ -1293,6 +1298,15 @@
         <location filename="../src/app/TileGrid.qml" line="135"/>
         <source>New session</source>
         <translation>新建会话</translation>
+    </message>
+</context>
+<context>
+    <name>TodoProgress</name>
+    <message>
+        <location filename="../src/app/TodoProgress.qml" line="86"/>
+        <location filename="../src/app/TodoProgress.qml" line="123"/>
+        <source>Todo %1</source>
+        <translation>待办 %1</translation>
     </message>
 </context>
 <context>
@@ -1423,22 +1437,22 @@
         <translation>该命令当前不可用。</translation>
     </message>
     <message>
-        <location filename="../src/app/workspace.cpp" line="154"/>
+        <location filename="../src/app/workspace.cpp" line="157"/>
         <source>Connecting to the ref backend…</source>
         <translation>正在连接 ref 后端…</translation>
     </message>
     <message>
-        <location filename="../src/app/workspace.cpp" line="156"/>
+        <location filename="../src/app/workspace.cpp" line="159"/>
         <source>Starting the ref backend…</source>
         <translation>正在启动 ref 后端…</translation>
     </message>
     <message>
-        <location filename="../src/app/workspace.cpp" line="158"/>
+        <location filename="../src/app/workspace.cpp" line="161"/>
         <source>Disconnected: %1. Trying again…</source>
         <translation>连接已断开：%1。正在重试…</translation>
     </message>
     <message>
-        <location filename="../src/app/workspace.cpp" line="257"/>
+        <location filename="../src/app/workspace.cpp" line="260"/>
         <source>No earlier session in this directory. Started a new one.</source>
         <translation>此目录下没有更早的会话，已新建一个。</translation>
     </message>
