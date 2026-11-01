@@ -319,7 +319,7 @@ fn validate(ops: &[Op], total: usize) -> Result<(), String> {
     for op in ops {
         let i = op.idx;
         match op.kind {
-            Kind::Replace { start, end } => {
+            Kind::Replace { end, .. } => {
                 if total == 0 {
                     return Err(format!(
                         "edits[{i}]: the file is empty; use insert_after with line 0."
@@ -330,7 +330,6 @@ fn validate(ops: &[Op], total: usize) -> Result<(), String> {
                         "edits[{i}]: line {end} does not exist (file has {total} lines)."
                     ));
                 }
-                let _ = start;
             }
             Kind::Insert {
                 gap,
