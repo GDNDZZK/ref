@@ -108,6 +108,7 @@
   --motion-slow: 480ms;
   --motion-pulse: 1100ms;
   --motion-calm-pulse: 1800ms;
+  --motion-copied-feedback-ms: 1500ms;
   --motion-dialog-drop: 16px;
   --motion-pop-scale: 0.97;
   --motion-pressed-scale-button: 0.94;

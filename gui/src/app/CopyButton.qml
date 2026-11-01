@@ -8,16 +8,12 @@ Item {
 	required property string text
 
 	readonly property int hitSize: 24
-	property bool copied: false
+	readonly property bool copied: flag.copied
 
 	implicitWidth: hitSize
 	implicitHeight: hitSize
 
-	Timer {
-		id: reset
-		interval: Motion.slow * 3
-		onTriggered: button.copied = false
-	}
+	CopiedFlag { id: flag }
 
 	// QML has no clipboard of its own; a TextEdit copies its selection.
 	TextEdit {
@@ -44,8 +40,7 @@ Item {
 			clipboard.text = button.text
 			clipboard.selectAll()
 			clipboard.copy()
-			button.copied = true
-			reset.restart()
+			flag.flash()
 		}
 	}
 	Accessible.role: Accessible.Button

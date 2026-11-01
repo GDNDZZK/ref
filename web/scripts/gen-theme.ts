@@ -41,6 +41,7 @@ const MOTION_UNITS: Record<string, Unit> = {
   slow: 'ms',
   pulse: 'ms',
   calmPulse: 'ms',
+  copiedFeedbackMs: 'ms',
   enterDrop: 'px',
   followLag: 'ms',
   chaseSnap: 'px',
