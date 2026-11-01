@@ -41,6 +41,11 @@ QtObject {
 		return Math.floor(s / secondsPerHour) + "h " + pad(Math.floor(s / secondsPerMinute) % minutesPerHour) + "m"
 	}
 
+	// A countdown as elapsed() writes it, rounded up: with 0.2 s left it still reads "1s", and "0s" only once it is over.
+	function countdown(ms) {
+		return elapsed(Math.max(0, ms) + msPerSecond - 1)
+	}
+
 	// "950", "12.3k", "1.0M"
 	function tokens(n) {
 		if (n >= millionRoundsUpFrom)

@@ -55,7 +55,7 @@ Block {
 		case ToolState.awaitingPermission:
 			return qsTr("Needs permission")
 		case ToolState.delayed:
-			return qsTr("Runs in %1").arg(Format.elapsed(Math.max(0, runAt - ticker.now) + Format.msPerSecond - 1))
+			return qsTr("Runs in %1").arg(Format.countdown(runAt - ticker.now))
 		case ToolState.running:
 			return qsTr("running %1").arg(Format.elapsed(ticker.now - time))
 		case ToolState.error:
