@@ -27,12 +27,15 @@ Block {
 	readonly property real replyTime: timeEnd > 0 ? timeEnd - time : 0
 	readonly property real tokensPerSecond: replyTime > 0 ? tokensOut / (replyTime / Format.msPerSecond) : 0
 	readonly property int maxPlausibleTokensPerSecond: 100000
+	readonly property bool showsRate: tokensOut > 0 && tokensPerSecond > 0 && tokensPerSecond < maxPlausibleTokensPerSecond
+	readonly property int hashMultiplier: 31
+	readonly property int hashModulus: 1000003 // a prime, which keeps the hash small and well spread
 	readonly property bool working: !fromUser && timeEnd === 0 && !errored && !interrupted
 	// The agent's color by its place in the name's hash, until the session knows the agent list.
 	readonly property color agentColor: {
 		let hash = 0
 		for (let i = 0; i < agent.length; ++i)
-			hash = (hash * 31 + agent.charCodeAt(i)) % 1000003
+			hash = (hash * hashMultiplier + agent.charCodeAt(i)) % hashModulus
 		return Theme.agentColor("", hash)
 	}
 	readonly property string agentTitle: agent === "" ? "" : agent.charAt(0).toUpperCase() + agent.slice(1)
@@ -109,7 +112,7 @@ Block {
 			MetaText {
 				text: Math.round(block.tokensPerSecond) + " tok/s"
 				opacity: block.restingOpacity
-				visible: block.tokensOut > 0 && block.tokensPerSecond > 0 && block.tokensPerSecond < block.maxPlausibleTokensPerSecond
+				visible: block.showsRate
 			}
 			MetaText {
 				text: qsTr("interrupted")
