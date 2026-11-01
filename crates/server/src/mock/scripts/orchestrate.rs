@@ -374,6 +374,7 @@ fn review(ctx: &Ctx) -> Round {
 mod tests {
     use super::*;
     use crate::mock::script::Step;
+    use crate::mock::scripts::tests::{play, reply_ctx};
 
     const MAIN: &str = "ses_main";
 
@@ -592,13 +593,10 @@ mod tests {
             }
         }
         let body = json!({"messages": messages, "tools": [{"type": "function"}]});
-        let crate::mock::script::Task::Reply(ctx) = crate::mock::script::analyze(&body, "ses_t", 1)
-        else {
-            panic!("not a reply");
-        };
+        let ctx = reply_ctx(&body, "ses_t");
         assert_eq!(ctx.round, round, "typed messages do not restart the rounds");
         assert_eq!(ctx.prompt, format!("orch-tester {MAIN}"));
-        (crate::mock::script::select(&ctx.prompt, &ctx.root_prompt).play)(&ctx)
+        play(&ctx)
     }
 
     fn report_of(round: &Round) -> String {
@@ -632,11 +630,8 @@ mod tests {
     fn a_typed_message_does_not_restart_or_switch_the_tester() {
         // Whenever it arrives, the script goes on with the same round.
         for round in 0..=5 {
-            let plain = format!("{:?}", tester_round(round, &[]).steps.len());
-            let typed = format!(
-                "{:?}",
-                tester_round(round, &["also cover empty input"]).steps.len()
-            );
+            let plain = tester_round(round, &[]).steps.len();
+            let typed = tester_round(round, &["also cover empty input"]).steps.len();
             assert_eq!(plain, typed, "round {round}");
         }
     }
@@ -666,11 +661,7 @@ mod tests {
             messages.push(serde_json::json!({"role": "assistant", "content": "ok"}));
         }
         let body = serde_json::json!({"messages": messages, "tools": [{"type": "function"}]});
-        let crate::mock::script::Task::Reply(ctx) = crate::mock::script::analyze(&body, MAIN, 1)
-        else {
-            panic!("not a reply");
-        };
-        (crate::mock::script::select(&ctx.prompt, &ctx.root_prompt).play)(&ctx)
+        play(&reply_ctx(&body, MAIN))
     }
 
     #[test]

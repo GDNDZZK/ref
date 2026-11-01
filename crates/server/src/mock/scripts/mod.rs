@@ -33,7 +33,21 @@ pub(super) fn find(name: &str) -> Option<&'static Script> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mock::script::Ctx;
+    use crate::mock::script::{Ctx, Round, Task, analyze, select};
+    use serde_json::Value;
+
+    /// The context a script gets for the request `body` of session `session`.
+    pub(crate) fn reply_ctx(body: &Value, session: &str) -> Ctx {
+        let Task::Reply(ctx) = analyze(body, session, 1) else {
+            panic!("not a reply");
+        };
+        ctx
+    }
+
+    /// The round that the script selected by `ctx` plays.
+    pub(crate) fn play(ctx: &Ctx) -> Round {
+        (select(&ctx.prompt, &ctx.root_prompt).play)(ctx)
+    }
 
     pub(crate) fn ctx(prompt: &str, round: usize) -> Ctx {
         Ctx {
