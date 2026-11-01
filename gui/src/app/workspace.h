@@ -244,6 +244,7 @@ private:
 	void toastFrom(const refgui::proto::ServerFrame& frame);
 	template<typename T, typename OnOk>
 	QCoro::Task<> perform(QCoro::Task<refgui::client::Result<T>> request, Reply reply, OnOk onOk);
+	QVariant applyInfo(const refgui::proto::SessionInfo& info);
 	void exportTo(const QString& sessionId, const QString& path, Reply reply);
 	void peerText(const QString& sessionId, const QString& command, const QString& args, Reply reply);
 
@@ -260,7 +261,7 @@ private:
 	// Commands.
 	void registerCommands();
 	void updateCommandContext();
-	void runOnSession(const QString& sessionId, const char* method);
+	void runOnSession(const QString& sessionId, void (ChatSession::*method)());
 	void runCustomCommand(const QString& name, const QString& args, const QString& sessionId);
 
 	refgui::cli::LaunchOptions m_options;

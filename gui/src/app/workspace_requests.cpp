@@ -3,12 +3,21 @@
 
 #include <QJSEngine>
 
+#include <functional>
 #include <type_traits>
 
 using refgui::client::Result;
 using refgui::proto::ModelRef;
 using refgui::proto::SessionInfo;
 using namespace Qt::StringLiterals;
+
+namespace
+{
+
+// The onOk of a request whose answer the caller does not get.
+constexpr auto noPayload = [] { return QVariant(); };
+
+} // namespace
 
 Workspace::Reply Workspace::wrap(const QJSValue& cb) const
 {
@@ -60,46 +69,38 @@ QCoro::Task<> Workspace::perform(QCoro::Task<Result<T>> request, Reply reply, On
 	}
 }
 
+// The onOk of a request that answers with the session's new info.
+QVariant Workspace::applyInfo(const SessionInfo& info)
+{
+	m_directory.update(info);
+	return {};
+}
+
 void Workspace::renameSession(const QString& sessionId, const QString& name, const QJSValue& cb)
 {
-	perform(m_backend.client().rename(sessionId, name), wrap(cb), [this](const SessionInfo& info) {
-		m_directory.update(info);
-		return QVariant();
-	});
+	perform(m_backend.client().rename(sessionId, name), wrap(cb), std::bind_front(&Workspace::applyInfo, this));
 }
 
 void Workspace::setSessionCwd(const QString& sessionId, const QString& path, const QJSValue& cb)
 {
-	perform(m_backend.client().setCwd(sessionId, path), wrap(cb), [this](const SessionInfo& info) {
-		m_directory.update(info);
-		return QVariant();
-	});
+	perform(m_backend.client().setCwd(sessionId, path), wrap(cb), std::bind_front(&Workspace::applyInfo, this));
 }
 
 void Workspace::setModel(const QString& sessionId, const QString& provider, const QString& model, const QString& variant)
 {
 	ModelRef ref{provider, model, variant.isEmpty() ? std::nullopt : std::optional<QString>(variant)};
-	perform(m_backend.client().setModel(sessionId, std::move(ref)), {}, [this](const SessionInfo& info) {
-		m_directory.update(info);
-		return QVariant();
-	});
+	perform(m_backend.client().setModel(sessionId, std::move(ref)), {}, std::bind_front(&Workspace::applyInfo, this));
 }
 
 void Workspace::setAgent(const QString& sessionId, const QString& agent)
 {
-	perform(m_backend.client().setAgent(sessionId, agent), {}, [this](const SessionInfo& info) {
-		m_directory.update(info);
-		return QVariant();
-	});
+	perform(m_backend.client().setAgent(sessionId, agent), {}, std::bind_front(&Workspace::applyInfo, this));
 }
 
 void Workspace::setVariant(const QString& sessionId, const QString& variant)
 {
 	const std::optional<QString> wanted = variant.isEmpty() ? std::nullopt : std::optional<QString>(variant);
-	perform(m_backend.client().setVariant(sessionId, wanted), {}, [this](const SessionInfo& info) {
-		m_directory.update(info);
-		return QVariant();
-	});
+	perform(m_backend.client().setVariant(sessionId, wanted), {}, std::bind_front(&Workspace::applyInfo, this));
 }
 
 void Workspace::cycleAgent(const QString& sessionId, int direction)
@@ -126,7 +127,7 @@ void Workspace::cycleAgent(const QString& sessionId, int direction)
 
 void Workspace::compact(const QString& sessionId)
 {
-	perform(m_backend.client().compact(sessionId), {}, [] { return QVariant(); });
+	perform(m_backend.client().compact(sessionId), {}, noPayload);
 }
 
 void Workspace::exportTranscript(const QString& sessionId, const QString& path, const QJSValue& cb)
@@ -167,7 +168,7 @@ void Workspace::deleteHistory(const QString& sessionId)
 			toast(refgui::workspace::ToastLevel::Error, payload.toString());
 		}
 	};
-	perform(m_backend.client().deleteSession(sessionId), reloaded, [] { return QVariant(); });
+	perform(m_backend.client().deleteSession(sessionId), reloaded, noPayload);
 }
 
 // ---- Backend --------------------------------------------------------------------------
@@ -180,5 +181,5 @@ void Workspace::restartBackend()
 	}
 	// The connection drops with the backend and Backend starts a new one; the request then
 	// fails with "connection closed", which is expected.
-	perform(m_backend.client().shutdown(), [](bool, const QVariant&) {}, [] { return QVariant(); });
+	perform(m_backend.client().shutdown(), [](bool, const QVariant&) {}, noPayload);
 }
