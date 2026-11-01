@@ -22,7 +22,6 @@ Item {
 	implicitHeight: pillHeight
 
 	Rectangle {
-		id: face
 		anchors.horizontalCenter: parent.horizontalCenter
 		width: Math.min(row.width + 2 * pill.innerPadding, pill.maxWidth)
 		height: pill.pillHeight

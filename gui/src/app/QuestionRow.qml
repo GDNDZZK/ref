@@ -98,7 +98,6 @@ Item {
 			spacing: row.textSpacing
 
 			Text {
-				id: labelText
 				textFormat: Text.PlainText
 				visible: !row.typing
 				width: parent.width

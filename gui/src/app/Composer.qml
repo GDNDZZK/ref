@@ -128,7 +128,6 @@ Item {
 		}
 
 		ScrollView {
-			id: scroll
 			anchors {
 				left: parent.left
 				right: parent.right

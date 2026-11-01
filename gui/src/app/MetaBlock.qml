@@ -98,7 +98,6 @@ Block {
 				}
 			}
 			MetaText {
-				id: timeText
 				text: block.timeEnd > 0
 					? Format.clock(block.time) + " \u2192 " + Format.clock(block.timeEnd) + " (" + Format.duration(block.replyTime) + ")"
 					: Format.clock(block.time) + " \u00b7 " + Format.elapsed(ticker.now - block.time)
