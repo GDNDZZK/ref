@@ -21,6 +21,13 @@ const DRAIN_GRACE: Duration = Duration::from_millis(200);
 const KILL_GRACE: Duration = Duration::from_secs(2);
 /// Partial lines are flushed once they grow beyond this.
 const PENDING_FLUSH: usize = 8 * 1024;
+/// Size of the buffer one pipe read fills.
+const READ_BUF_BYTES: usize = 64 * 1024;
+/// Chunks the Windows reader thread may queue ahead of the consumer.
+#[cfg(not(unix))]
+const OUTPUT_CHANNEL_CAPACITY: usize = 16;
+/// The `[wall time ..]` note is added for commands that ran at least this long.
+const WALL_TIME_NOTE_MIN: Duration = Duration::from_secs(1);
 
 pub fn spec() -> ToolSpec {
     let inline_kb = util::INLINE_OUTPUT_MAX_BYTES as u64 / util::KIB;
@@ -276,11 +283,11 @@ struct OutputReader {
 impl OutputReader {
     fn new(mut r: std::io::PipeReader) -> std::io::Result<Self> {
         use std::io::Read;
-        let (tx, rx) = tokio::sync::mpsc::channel(16);
+        let (tx, rx) = tokio::sync::mpsc::channel(OUTPUT_CHANNEL_CAPACITY);
         std::thread::Builder::new()
             .name("bash-output".into())
             .spawn(move || {
-                let mut buf = vec![0u8; 64 * 1024];
+                let mut buf = vec![0u8; READ_BUF_BYTES];
                 loop {
                     match r.read(&mut buf) {
                         Ok(0) | Err(_) => break,
@@ -487,7 +494,7 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
 
     let mut asm = LineAssembler::default();
     let mut col = Collector::new(ctx.on_output.clone());
-    let mut buf = vec![0u8; 64 * 1024];
+    let mut buf = vec![0u8; READ_BUF_BYTES];
     let mut eof = false;
 
     let deadline =
@@ -622,7 +629,7 @@ fn build_output(
             }
         }
     }
-    if duration >= Duration::from_secs(1) {
+    if duration >= WALL_TIME_NOTE_MIN {
         notes.push(format!("[wall time {:.1}s]", duration.as_secs_f64()));
     }
     if text.trim().is_empty() {
