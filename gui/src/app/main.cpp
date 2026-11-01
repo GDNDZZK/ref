@@ -55,7 +55,7 @@ void exitWhenOpened(Workspace& workspace)
 		QCoreApplication::exit(EXIT_FAILURE);
 	});
 	QObject::connect(&workspace, &Workspace::connectionChanged, &workspace, [&workspace] {
-		if(workspace.connectionState() != u"disconnected"_s)
+		if(workspace.backend().state() != refgui::client::Backend::State::Disconnected)
 		{
 			return;
 		}
@@ -65,9 +65,25 @@ void exitWhenOpened(Workspace& workspace)
 	});
 	QTimer::singleShot(SmokeTimeout, &workspace, [] {
 		QTextStream err(stderr);
-		print(err, u"ref-gui: no session after %1 s\n"_s.arg(SmokeTimeout.count() / 1000));
+		print(err, u"ref-gui: no session after %1 s\n"_s.arg(std::chrono::duration_cast<std::chrono::seconds>(SmokeTimeout).count()));
 		QCoreApplication::exit(EXIT_FAILURE);
 	});
+}
+
+// Tells the backend where the user looks and which kinds the settings want, and opens the
+// session a notification was clicked for.
+void connectNotifications(Workspace& workspace, refgui::notify::NotificationCenter& notifications)
+{
+	const auto reportFocus = [&] { notifications.setFocus(workspace.isWindowActive(), workspace.visibleSessionIds()); };
+	QObject::connect(&workspace, &Workspace::windowActiveChanged, &notifications, reportFocus);
+	QObject::connect(&workspace, &Workspace::visibleSessionIdsChanged, &notifications, reportFocus);
+	reportFocus();
+
+	const auto reportKinds = [&] { notifications.setKinds(workspace.settings()->notifyKinds()); };
+	QObject::connect(workspace.settings(), &refgui::workspace::Settings::notifyKindsChanged, &notifications, reportKinds);
+	reportKinds();
+
+	QObject::connect(&notifications, &refgui::notify::NotificationCenter::sessionRequested, &workspace, &Workspace::openSession);
 }
 
 } // namespace
@@ -90,10 +106,11 @@ int main(int argc, char* argv[])
 	const refgui::cli::ParseResult parsed = refgui::cli::parseCommandLine(QCoreApplication::arguments(), QDir::currentPath(), version);
 	if(const auto* exit = std::get_if<refgui::cli::Exit>(&parsed))
 	{
-		QTextStream stream(exit->code == 0 ? stdout : stderr);
+		QTextStream stream(exit->code == EXIT_SUCCESS ? stdout : stderr);
 		print(stream, exit->text);
 		return exit->code;
 	}
+
 	const auto& options = std::get<refgui::cli::LaunchOptions>(parsed);
 	QTextStream err(stderr);
 	for(const QString& warning : options.warnings)
@@ -108,6 +125,7 @@ int main(int argc, char* argv[])
 	// The interface follows the language setting; English is the fallback.
 	AppTranslator translator;
 	translator.setLanguage(workspace.settings()->language());
+
 	if(options.smoke)
 	{
 		exitWhenOpened(workspace);
@@ -116,20 +134,14 @@ int main(int argc, char* argv[])
 	// Tells the backend where the user looks and shows what it sends. The settings supply the kinds.
 	refgui::notify::NotificationCenter notifications(workspace.backend(), refgui::notify::createPlatformNotifier());
 	NotificationCenterForeign::instance = &notifications;
-	const auto reportFocus = [&] { notifications.setFocus(workspace.isWindowActive(), workspace.visibleSessionIds()); };
-	QObject::connect(&workspace, &Workspace::windowActiveChanged, &notifications, reportFocus);
-	QObject::connect(&workspace, &Workspace::visibleSessionIdsChanged, &notifications, reportFocus);
-	reportFocus();
-	const auto reportKinds = [&] { notifications.setKinds(workspace.settings()->notifyKinds()); };
-	QObject::connect(workspace.settings(), &refgui::workspace::Settings::notifyKindsChanged, &notifications, reportKinds);
-	reportKinds();
-	QObject::connect(&notifications, &refgui::notify::NotificationCenter::sessionRequested, &workspace, &Workspace::openSession);
+	connectNotifications(workspace, notifications);
 
 	// Outlives the engine, which asks it for its network access.
 	LocalOnlyNetworkAccessManagerFactory networkFactory;
 	QQmlApplicationEngine engine;
 	engine.setNetworkAccessManagerFactory(&networkFactory);
 	QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] { QCoreApplication::exit(EXIT_FAILURE); }, Qt::QueuedConnection);
+
 	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
 	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([&workspace](const QString& sessionId) { return workspace.session(sessionId); }));
 	QObject::connect(workspace.settings(), &refgui::workspace::Settings::languageChanged, &app, [&] {
@@ -137,6 +149,7 @@ int main(int argc, char* argv[])
 		engine.retranslate();
 		workspace.retranslate();
 	});
+
 	engine.loadFromModule("RefGui", "Main");
 	if(!engine.rootObjects().isEmpty())
 	{

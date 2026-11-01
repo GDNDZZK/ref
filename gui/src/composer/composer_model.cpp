@@ -1,6 +1,7 @@
 #include "composer/composer_model.h"
 
 #include "compose/image_file.h"
+#include "workspace/toast_text.h"
 
 #include <QBuffer>
 #include <QClipboard>
@@ -65,10 +66,15 @@ bool ComposerModel::isReady() const
 	return m_backend.state() == client::Backend::State::Connected && m_controller.isAttached();
 }
 
+bool ComposerModel::isCompletionOpen() const
+{
+	return !m_completionDismissed && m_target.kind != compose::CompletionTarget::Kind::None;
+}
+
 QString ComposerModel::completionKind() const
 {
 	using Kind = compose::CompletionTarget::Kind;
-	if(m_completionDismissed)
+	if(!isCompletionOpen())
 	{
 		return u"none"_s;
 	}
@@ -317,43 +323,52 @@ void ComposerModel::runCustomCommand(const QString& name, const QString& args)
 	expandAndSend(name, args);
 }
 
-QCoro::Task<> ComposerModel::sendPrompt(QString text, QList<proto::NamedImage> images, bool restoreOnFailure)
+template<typename T>
+QCoro::Task<bool> ComposerModel::awaitAndReport(QCoro::Task<client::Result<T>> request, std::function<void()> onFailure)
 {
 	const QPointer<ComposerModel> self(this); // the model can be gone when the answer arrives
-	const auto result = co_await m_controller.send(text, imageData(images));
+	const auto result = co_await std::move(request);
 	if(!self)
 	{
-		co_return;
+		co_return false;
 	}
 	if(result)
 	{
-		emit sent();
-		co_return;
+		co_return true;
 	}
-	if(restoreOnFailure)
+	if(onFailure)
 	{
-		restoreDraft(text, images);
+		onFailure();
 	}
 	emit failed(result.error());
+	co_return false;
+}
+
+QCoro::Task<> ComposerModel::sendPrompt(QString text, QList<proto::NamedImage> images, bool restoreOnFailure)
+{
+	const auto restore = [&] {
+		if(restoreOnFailure)
+		{
+			restoreDraft(text, images);
+		}
+	};
+	if(co_await awaitAndReport(m_controller.send(text, imageData(images)), restore))
+	{
+		emit sent();
+	}
 }
 
 QCoro::Task<> ComposerModel::sendShell(QString command)
 {
-	const QPointer<ComposerModel> self(this); // the model can be gone when the answer arrives
-	const auto result = co_await m_backend.client().shell(m_controller.sessionId(), command);
-	if(!self)
-	{
-		co_return;
-	}
-	if(result)
+	// Back into the box as a shell line, so nothing typed is lost.
+	const auto restore = [&] {
+		restoreDraft(command, {});
+		setShellMode(true);
+	};
+	if(co_await awaitAndReport(m_backend.client().shell(m_controller.sessionId(), command), restore))
 	{
 		emit sent();
-		co_return;
 	}
-	// Back into the box as a shell line, so nothing typed is lost.
-	restoreDraft(command, {});
-	setShellMode(true);
-	emit failed(result.error());
 }
 
 QCoro::Task<> ComposerModel::expandAndSend(QString name, QString args)
@@ -371,7 +386,7 @@ QCoro::Task<> ComposerModel::expandAndSend(QString name, QString args)
 	}
 	if(expanded->trimmed().isEmpty())
 	{
-		emit toastRequested(u"warn"_s, tr("The command expanded to nothing"));
+		emit toastRequested(workspace::ToastLevel::Warn, tr("The command expanded to nothing"));
 		co_return;
 	}
 	co_await sendPrompt(*expanded, {}, false);
@@ -445,7 +460,7 @@ QCoro::Task<> ComposerModel::removeQueued(QString messageId)
 	}
 	if(!result->removed)
 	{
-		emit toastRequested(u"info"_s, tr("Already sent; the prompt can no longer be removed"));
+		emit toastRequested(workspace::ToastLevel::Info, tr("Already sent; the prompt can no longer be removed"));
 		co_return;
 	}
 	restoreDraft(result->text, result->images);
@@ -453,10 +468,7 @@ QCoro::Task<> ComposerModel::removeQueued(QString messageId)
 
 void ComposerModel::restoreDraft(const QString& text, const QList<proto::NamedImage>& images)
 {
-	if(m_shellMode)
-	{
-		setShellMode(false);
-	}
+	setShellMode(false);
 	m_draft.restore(text, images);
 	m_browser.reset();
 	changeDraft();
@@ -476,7 +488,7 @@ void ComposerModel::clearDraft()
 
 bool ComposerModel::escape()
 {
-	if(completionKind() != u"none"_s)
+	if(isCompletionOpen())
 	{
 		dismissCompletion();
 		return true;
@@ -616,7 +628,7 @@ int ComposerModel::attachImageUrls(const QList<QUrl>& urls, bool reportOthers)
 		}
 		else if(reportOthers)
 		{
-			emit toastRequested(u"warn"_s, tr("%1 is not a supported image (PNG, JPEG, GIF or WebP)").arg(url.fileName()));
+			emit toastRequested(workspace::ToastLevel::Warn, tr("%1 is not a supported image (PNG, JPEG, GIF or WebP)").arg(url.fileName()));
 		}
 	}
 	return attached;

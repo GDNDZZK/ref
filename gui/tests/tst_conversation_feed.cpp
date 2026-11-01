@@ -20,6 +20,7 @@ namespace
 {
 
 constexpr int PaceTimeoutMs = 2000; // the pacer shows text within 200ms of its arrival
+constexpr int LateArrivalMs = 50;   // time for anything still paced to show
 
 DeltaEvent textDelta(const QString& messageId, qsizetype index, const QString& text)
 {
@@ -163,7 +164,7 @@ void TestConversationFeed::removalFlushesFirst()
 
 	QVERIFY(!feed.hasPending());
 	QCOMPARE(render(model), (QStringList{u"user:hi"_s}));
-	QTest::qWait(50); // nothing is left to arrive late
+	QTest::qWait(LateArrivalMs); // nothing is left to arrive late
 	QCOMPARE(render(model), (QStringList{u"user:hi"_s}));
 }
 

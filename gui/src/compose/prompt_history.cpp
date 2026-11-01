@@ -97,7 +97,11 @@ void PromptHistory::rewriteFile()
 	}
 	for(const QString& item : m_items)
 	{
-		file.write(lineOf(item));
+		if(file.write(lineOf(item)) < 0)
+		{
+			qCWarning(lcHistory) << "cannot write" << m_path << file.errorString();
+			return;
+		}
 	}
 }
 

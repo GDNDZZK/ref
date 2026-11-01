@@ -20,7 +20,7 @@ namespace
 {
 
 // The length of the run of `character` that starts at `from`.
-qsizetype runLength(const QString& text, qsizetype from, QChar character)
+qsizetype runLength(QStringView text, qsizetype from, QChar character)
 {
 	qsizetype end = from;
 	while(end < text.size() && text.at(end) == character)
@@ -60,6 +60,27 @@ bool opensTagOrComment(QChar next)
 	return next.isLetter() || next == u'/' || next == u'!' || next == u'?';
 }
 
+// Copies the run of backticks at `from` to `out`: with its code span when the span closes on
+// this line, else escaped where a later run could pair with it. Returns where the text goes on.
+qsizetype escapeBackticks(const QString& markdown, qsizetype from, QString& out)
+{
+	const qsizetype fenceLength = runLength(markdown, from, u'`');
+	const qsizetype end = codeSpanEnd(markdown, from, fenceLength, true);
+	if(end >= 0)
+	{
+		out += markdown.mid(from, end - from);
+		return end;
+	}
+	// No span on this line. The renderer might still pair these with a run further down,
+	// so they are escaped unless nothing is there to pair with.
+	const bool canPair = codeSpanEnd(markdown, from, fenceLength, false) >= 0;
+	for(qsizetype tick = 0; tick < fenceLength; ++tick)
+	{
+		out += canPair ? u"\\`"_s : u"`"_s;
+	}
+	return from + fenceLength;
+}
+
 // Escapes tags and turns images into links in running text; code spans stay as they are.
 QString displayInline(const QString& markdown)
 {
@@ -75,43 +96,29 @@ QString displayInline(const QString& markdown)
 		{
 			out += markdown.mid(i, 2);
 			i += 2;
+			continue;
 		}
-		else if(current == u'`')
+		if(current == u'`')
 		{
-			const qsizetype fenceLength = runLength(markdown, i, u'`');
-			const qsizetype end = codeSpanEnd(markdown, i, fenceLength, true);
-			if(end < 0)
-			{
-				// No span on this line. The renderer might still pair these with a run further down,
-				// so they are escaped unless nothing is there to pair with.
-				const bool canPair = codeSpanEnd(markdown, i, fenceLength, false) >= 0;
-				for(qsizetype tick = 0; tick < fenceLength; ++tick)
-					out += canPair ? u"\\`"_s : u"`"_s;
-				i += fenceLength;
-			}
-			else
-			{
-				out += markdown.mid(i, end - i);
-				i = end;
-			}
+			i = escapeBackticks(markdown, i, out);
+			continue;
 		}
-		else if(current == u'!' && next == u'[')
+		if(current == u'!' && next == u'[')
 		{
 			// The image becomes a link. After another "!", dropping this one would make "![" again.
 			const bool afterBang = out.endsWith(u'!');
 			out += afterBang ? u"\\["_s : u"["_s;
 			i += 2;
+			continue;
 		}
-		else if(current == u'<' && opensTagOrComment(next))
+		if(current == u'<' && opensTagOrComment(next))
 		{
 			out += u"\\<"_s;
 			++i;
+			continue;
 		}
-		else
-		{
-			out += current;
-			++i;
-		}
+		out += current;
+		++i;
 	}
 	return out;
 }
@@ -153,18 +160,16 @@ qsizetype indentOf(QStringView line)
 std::optional<Fence> openingFence(QStringView line)
 {
 	const QStringView content = line.trimmed();
-	if(content.isEmpty() || (content.front() != u'`' && content.front() != u'~'))
+	const bool isFenceChar = !content.isEmpty() && (content.front() == u'`' || content.front() == u'~');
+	if(!isFenceChar)
 	{
 		return std::nullopt;
 	}
 	const QChar marker = content.front();
-	qsizetype length = 0;
-	while(length < content.size() && content.at(length) == marker)
-	{
-		++length;
-	}
+	const qsizetype length = runLength(content, 0, marker);
 	// The info string of a backtick fence has no backtick; otherwise this is a code span.
-	if(length < MinFenceLength || (marker == u'`' && content.mid(length).contains(u'`')))
+	const bool backtickInInfo = marker == u'`' && content.mid(length).contains(u'`');
+	if(length < MinFenceLength || backtickInInfo)
 	{
 		return std::nullopt;
 	}
@@ -174,40 +179,55 @@ std::optional<Fence> openingFence(QStringView line)
 bool closesFence(QStringView line, const Fence& fence)
 {
 	const QStringView content = line.trimmed();
-	qsizetype length = 0;
-	while(length < content.size() && content.at(length) == fence.marker)
-	{
-		++length;
-	}
+	const qsizetype length = runLength(content, 0, fence.marker);
 	return length >= fence.length && length == content.size();
+}
+
+// The length of the bullet (-, * or +) that starts `content`, or 0.
+qsizetype bulletMarkerLength(QStringView content)
+{
+	const bool isBulletMarker = !content.isEmpty() && (content.front() == u'-' || content.front() == u'*' || content.front() == u'+');
+	return isBulletMarker ? 1 : 0;
+}
+
+// The length of the number and its delimiter (`1.` or `1)`) that start `content`, or 0.
+qsizetype numberedMarkerLength(QStringView content)
+{
+	qsizetype digits = 0;
+	while(digits < content.size() && content.at(digits).isDigit())
+	{
+		++digits;
+	}
+	if(digits == 0 || digits == content.size())
+	{
+		return 0;
+	}
+	const QChar delimiter = content.at(digits);
+	const bool isNumberDelimiter = delimiter == u'.' || delimiter == u')';
+	return isNumberDelimiter ? digits + 1 : 0;
 }
 
 // The column at which the content of the list item that starts `line` begins, or -1 when it
 // starts none.
 qsizetype listContentColumn(QStringView line)
 {
-	const qsizetype indent = indentOf(line);
 	const QStringView content = line.trimmed();
-	qsizetype markerLength = 0;
-	if(!content.isEmpty() && (content.front() == u'-' || content.front() == u'*' || content.front() == u'+'))
-	{
-		markerLength = 1;
-	}
-	else
-	{
-		while(markerLength < content.size() && content.at(markerLength).isDigit())
-		{
-			++markerLength;
-		}
-		const bool numbered = markerLength > 0 && markerLength < content.size() && (content.at(markerLength) == u'.' || content.at(markerLength) == u')');
-		markerLength = numbered ? markerLength + 1 : 0;
-	}
+	const qsizetype bullet = bulletMarkerLength(content);
+	const qsizetype markerLength = bullet > 0 ? bullet : numberedMarkerLength(content);
 	if(markerLength == 0)
 	{
 		return -1;
 	}
-	const bool spaced = markerLength == content.size() || content.at(markerLength) == u' ' || content.at(markerLength) == u'\t';
-	return spaced ? indent + markerLength + 1 : -1;
+	if(markerLength < content.size())
+	{
+		const QChar after = content.at(markerLength);
+		const bool followedBySpace = after == u' ' || after == u'\t';
+		if(!followedBySpace)
+		{
+			return -1;
+		}
+	}
+	return indentOf(line) + markerLength + 1;
 }
 
 // Whether the Markdown renderer makes a picture of `markdown`. Parsing loads nothing: pictures
@@ -285,14 +305,16 @@ QList<Segment> splitCode(const QString& markdown)
 				listColumn = -1;
 			}
 			const qsizetype relative = indent - std::max<qsizetype>(listColumn, 0);
-			if(relative >= IndentedCodeIndent && (afterBlank || afterCode))
+			const bool startsIndentedCode = relative >= IndentedCodeIndent && (afterBlank || afterCode);
+			const std::optional<Fence> opening = relative <= MaxFenceIndent ? openingFence(line) : std::nullopt;
+			if(startsIndentedCode)
 			{
 				addSegment(segments, start, end, true);
 				afterCode = true;
 			}
-			else if(relative <= MaxFenceIndent && openingFence(line))
+			else if(opening)
 			{
-				fence = openingFence(line);
+				fence = opening;
 				addSegment(segments, start, end, true);
 				afterCode = false;
 			}

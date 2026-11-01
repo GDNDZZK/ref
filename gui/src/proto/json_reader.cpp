@@ -20,6 +20,12 @@ QString Fields::childPath(QLatin1StringView key) const
 	return m_path.isEmpty() ? QString(key) : m_path + u'.' + key;
 }
 
+bool Fields::isAbsent(QLatin1StringView key) const
+{
+	const QJsonValue found = m_object.value(key);
+	return found.isNull() || found.isUndefined();
+}
+
 QString Fields::string(QLatin1StringView key) const
 {
 	const QJsonValue found = m_object.value(key);
@@ -60,9 +66,19 @@ QJsonArray Fields::array(QLatin1StringView key) const
 	return found.toArray();
 }
 
+quint64 Fields::unsignedInteger(QLatin1StringView key) const
+{
+	return static_cast<quint64>(integer(key));
+}
+
+Fields Fields::child(QLatin1StringView key) const
+{
+	return Fields(object(key), childPath(key));
+}
+
 std::optional<QString> Fields::optionalString(QLatin1StringView key) const
 {
-	if(m_object.value(key).isNull() || m_object.value(key).isUndefined())
+	if(isAbsent(key))
 	{
 		return std::nullopt;
 	}
@@ -71,7 +87,7 @@ std::optional<QString> Fields::optionalString(QLatin1StringView key) const
 
 std::optional<qint64> Fields::optionalInteger(QLatin1StringView key) const
 {
-	if(m_object.value(key).isNull() || m_object.value(key).isUndefined())
+	if(isAbsent(key))
 	{
 		return std::nullopt;
 	}
@@ -80,7 +96,7 @@ std::optional<qint64> Fields::optionalInteger(QLatin1StringView key) const
 
 std::optional<QJsonObject> Fields::optionalObject(QLatin1StringView key) const
 {
-	if(m_object.value(key).isNull() || m_object.value(key).isUndefined())
+	if(isAbsent(key))
 	{
 		return std::nullopt;
 	}
@@ -92,13 +108,27 @@ qint64 Fields::integerOr(QLatin1StringView key, qint64 fallback) const
 	return optionalInteger(key).value_or(fallback);
 }
 
+quint64 Fields::unsignedOr(QLatin1StringView key, quint64 fallback) const
+{
+	return static_cast<quint64>(integerOr(key, static_cast<qint64>(fallback)));
+}
+
+std::optional<Fields> Fields::optionalChild(QLatin1StringView key) const
+{
+	if(isAbsent(key))
+	{
+		return std::nullopt;
+	}
+	return child(key);
+}
+
 bool Fields::booleanOr(QLatin1StringView key, bool fallback) const
 {
-	const QJsonValue found = m_object.value(key);
-	if(found.isNull() || found.isUndefined())
+	if(isAbsent(key))
 	{
 		return fallback;
 	}
+	const QJsonValue found = m_object.value(key);
 	if(!found.isBool())
 	{
 		fail(childPath(key), u"expected a boolean"_s);
@@ -108,8 +138,7 @@ bool Fields::booleanOr(QLatin1StringView key, bool fallback) const
 
 QJsonArray Fields::arrayOrEmpty(QLatin1StringView key) const
 {
-	const QJsonValue found = m_object.value(key);
-	if(found.isNull() || found.isUndefined())
+	if(isAbsent(key))
 	{
 		return {};
 	}

@@ -1,5 +1,6 @@
 #include "session/conversation_feed.h"
 
+#include <algorithm>
 #include <chrono>
 
 using namespace std::chrono_literals;
@@ -103,11 +104,7 @@ bool ConversationFeed::hasPending() const
 void ConversationFeed::applyMessage(proto::Message message)
 {
 	const qsizetype known = m_model.partCount(message.id);
-	bool needsFlush = hasPending() && message.parts.size() != known;
-	for(qsizetype i = 0; !needsFlush && hasPending() && i < message.parts.size() && i < known; ++i)
-	{
-		needsFlush = fitOf(message.id, i, message.parts.at(i)) == Fit::Incompatible;
-	}
+	const bool needsFlush = hasPending() && (message.parts.size() != known || hasIncompatiblePart(message, known));
 	if(needsFlush)
 	{
 		flush();
@@ -128,6 +125,19 @@ void ConversationFeed::applyMessage(proto::Message message)
 	}
 }
 
+bool ConversationFeed::hasIncompatiblePart(const proto::Message& message, qsizetype known) const
+{
+	const qsizetype shared = std::min(message.parts.size(), known);
+	for(qsizetype i = 0; i < shared; ++i)
+	{
+		if(fitOf(message.id, i, message.parts.at(i)) == Fit::Incompatible)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
 void ConversationFeed::applyPart(const proto::PartEvent& event)
 {
 	const qsizetype known = m_model.partCount(event.messageId);
@@ -137,7 +147,8 @@ void ConversationFeed::applyPart(const proto::PartEvent& event)
 	}
 
 	const bool replacesPart = event.index < known;
-	if(hasPending() && (!replacesPart || fitOf(event.messageId, event.index, event.part) == Fit::Incompatible))
+	const bool mustFlush = hasPending() && (!replacesPart || fitOf(event.messageId, event.index, event.part) == Fit::Incompatible);
+	if(mustFlush)
 	{
 		flush();
 	}

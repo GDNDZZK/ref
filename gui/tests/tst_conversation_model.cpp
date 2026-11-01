@@ -9,7 +9,9 @@
 using namespace Qt::StringLiterals;
 using refgui::proto::Delta;
 using refgui::proto::ToolState;
+using refgui::session::Block;
 using refgui::session::ConversationModel;
+using refgui::session::kindName;
 using namespace refgui::test;
 
 namespace
@@ -427,8 +429,8 @@ void TestConversationModel::everyMessageEndsWithAMetaLine()
 	model.setMessage(reply);
 
 	QCOMPARE(model.rowCount(), 4);
-	const int userMeta = rowOfKind(model, u"meta"_s, 0);
-	const int replyMeta = rowOfKind(model, u"meta"_s, 1);
+	const int userMeta = rowOfKind(model, kindName(Block::Kind::Meta), 0);
+	const int replyMeta = rowOfKind(model, kindName(Block::Kind::Meta), 1);
 	QCOMPARE(userMeta, 1);
 	QCOMPARE(replyMeta, 3);
 	QVERIFY(model.index(userMeta).data(ConversationModel::HumanRole).toBool());
@@ -443,7 +445,7 @@ void TestConversationModel::everyMessageEndsWithAMetaLine()
 	refgui::proto::Message stopped = assistant(u"a2"_s, {}, false);
 	stopped.error = u"Aborted"_s;
 	model.setMessage(stopped);
-	const int stoppedMeta = rowOfKind(model, u"meta"_s, 2);
+	const int stoppedMeta = rowOfKind(model, kindName(Block::Kind::Meta), 2);
 	QVERIFY(model.index(stoppedMeta).data(ConversationModel::InterruptedRole).toBool());
 	QVERIFY(!model.index(stoppedMeta).data(ConversationModel::ErroredRole).toBool());
 	QCOMPARE(rowOfKind(model, u"error"_s), -1);
@@ -466,7 +468,7 @@ void TestConversationModel::marksMessagesBeforeTheLastCompaction()
 	QVERIFY(!roleOf(model, 2, ConversationModel::StaleRole).toBool());
 	QVERIFY(roleOf(model, 2, ConversationModel::ContextStartRole).toBool());
 	QVERIFY(!roleOf(model, 3, ConversationModel::StaleRole).toBool());
-	QCOMPARE(rowOfKind(model, u"meta"_s, 2), 6); // the summary has no meta line: its divider says it all
+	QCOMPARE(rowOfKind(model, kindName(Block::Kind::Meta), 2), 6); // the summary has no meta line: its divider says it all
 	QVERIFY(model.index(0).data(ConversationModel::StaleRole).toBool());
 
 	model.removeMessage(u"c1"_s);
@@ -507,7 +509,7 @@ void TestConversationModel::hidesTheTailErrorTheLastMessageShows()
 	model.setMessage(failed);
 	QCOMPARE(model.rowCount(), 4); // the message's own error block and meta line, no tail
 	QCOMPARE(rowOfKind(model, u"error"_s), 2);
-	QCOMPARE(model.index(model.rowCount() - 1).data(ConversationModel::KindRole).toString(), u"meta"_s);
+	QCOMPARE(model.index(model.rowCount() - 1).data(ConversationModel::KindRole).toString(), kindName(Block::Kind::Meta));
 
 	model.setTailError(u"Another"_s);
 	QCOMPARE(model.rowCount(), 5);

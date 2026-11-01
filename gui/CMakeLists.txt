@@ -18,12 +18,13 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(QT_QML_GENERATE_QMLLS_INI ON)
 
 # 6.10 is the floor imposed by KSyntaxHighlighting.
-find_package(Qt6 6.10 REQUIRED COMPONENTS Core Gui Network WebSockets Qml Quick QuickControls2 Svg LinguistTools Test)
+set(REFGUI_QT_MIN 6.10)
+find_package(Qt6 ${REFGUI_QT_MIN} REQUIRED COMPONENTS Core Gui Network WebSockets Qml Quick QuickControls2 Svg LinguistTools Test)
 if(UNIX AND NOT APPLE)
 	# System notifications talk to the desktop over D-Bus.
-	find_package(Qt6 6.10 REQUIRED COMPONENTS DBus)
+	find_package(Qt6 ${REFGUI_QT_MIN} REQUIRED COMPONENTS DBus)
 endif()
-qt_standard_project_setup(REQUIRES 6.10)
+qt_standard_project_setup(REQUIRES ${REFGUI_QT_MIN})
 
 # QCoro::Core brings QCoro::Task. Tested with 0.13.
 find_package(QCoro6 REQUIRED COMPONENTS Core Network WebSockets)

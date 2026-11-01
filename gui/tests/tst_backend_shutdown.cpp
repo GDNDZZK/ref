@@ -23,6 +23,7 @@ namespace
 
 constexpr int StateTimeoutMs = 10000;
 constexpr int AfterwardsMs = 1500; // longer than any pause of the connecting loop
+constexpr int MidStartMs = 300;     // the backend is still starting when it goes
 
 // Puts `directory` first in PATH and points the state directory into it, as the launcher reads them.
 class Environment
@@ -103,7 +104,7 @@ void TestBackendShutdown::whileTheMockStarts()
 
 	auto backend = std::make_unique<Backend>(Backend::Source(Backend::Mode::Mock{}), u"/work"_s);
 	backend->start();
-	QTest::qWait(300);
+	QTest::qWait(MidStartMs);
 
 	backend.reset();
 	QTest::qWait(AfterwardsMs);
@@ -121,7 +122,7 @@ void TestBackendShutdown::whileWaitingForTheSpawnLock()
 
 	auto backend = std::make_unique<Backend>(Backend::Source(Backend::Mode::Shared{}), u"/work"_s);
 	backend->start();
-	QTest::qWait(300);
+	QTest::qWait(MidStartMs);
 
 	backend.reset();
 	QTest::qWait(AfterwardsMs);

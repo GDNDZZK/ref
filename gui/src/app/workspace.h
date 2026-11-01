@@ -9,6 +9,7 @@
 #include "workspace/command_registry.h"
 #include "workspace/session_directory.h"
 #include "workspace/settings.h"
+#include "workspace/toast_text.h"
 
 #include <QCoroTask>
 #include <QHash>
@@ -42,7 +43,7 @@ class Workspace : public QObject
 	Q_PROPERTY(QString connectionState READ connectionState NOTIFY connectionChanged)
 	Q_PROPERTY(QString connectionText READ connectionText NOTIFY connectionChanged)
 	Q_PROPERTY(QString failureText READ failureText NOTIFY failureTextChanged)
-	Q_PROPERTY(QString cwd READ cwd NOTIFY cwdChanged)
+	Q_PROPERTY(QString cwd READ cwd CONSTANT)
 	Q_PROPERTY(QStringList visibleSessionIds READ visibleSessionIds NOTIFY visibleSessionIdsChanged)
 	Q_PROPERTY(bool windowActive READ isWindowActive WRITE setWindowActive NOTIFY windowActiveChanged)
 	// What the backend offers and the session lists.
@@ -119,7 +120,7 @@ public:
 	const QString& dialog() const { return m_dialog; }
 	const QVariantMap& dialogArgs() const { return m_dialogArgs; }
 	bool isBackendLocal() const;
-	bool isProtocolOutdated() const { return m_backend.hello().protocol < refgui::proto::ProtocolVersion && m_backend.state() == refgui::client::Backend::State::Connected; }
+	bool isProtocolOutdated() const;
 	QString backendVersion() const { return m_backend.hello().serverVersion; }
 	int protocolVersion() const { return m_backend.hello().protocol; }
 	static constexpr int requiredProtocol() { return refgui::proto::ProtocolVersion; }
@@ -180,7 +181,6 @@ signals:
 	void currentChanged();
 	void connectionChanged();
 	void failureTextChanged();
-	void cwdChanged();
 	void visibleSessionIdsChanged();
 	void windowActiveChanged();
 	void mcpServersChanged();
@@ -229,9 +229,22 @@ private:
 	Reply wrap(const QJSValue& cb) const;
 	void report(const Reply& reply, bool ok, const QVariant& payload);
 	void toast(const QString& level, const QString& text);
+	void toastCommandUnavailable();
+	// Toasts the error of a failed request; true when it failed.
+	template<typename T>
+	bool toastFailure(const refgui::client::Result<T>& result)
+	{
+		if(result)
+		{
+			return false;
+		}
+		toast(refgui::workspace::ToastLevel::Error, result.error());
+		return true;
+	}
 	void toastFrom(const refgui::proto::ServerFrame& frame);
 	template<typename T, typename OnOk>
 	QCoro::Task<> perform(QCoro::Task<refgui::client::Result<T>> request, Reply reply, OnOk onOk);
+	QVariant applyInfo(const refgui::proto::SessionInfo& info);
 	void exportTo(const QString& sessionId, const QString& path, Reply reply);
 	void peerText(const QString& sessionId, const QString& command, const QString& args, Reply reply);
 
@@ -248,7 +261,7 @@ private:
 	// Commands.
 	void registerCommands();
 	void updateCommandContext();
-	void runOnSession(const QString& sessionId, const char* method);
+	void runOnSession(const QString& sessionId, void (ChatSession::*method)());
 	void runCustomCommand(const QString& name, const QString& args, const QString& sessionId);
 
 	refgui::cli::LaunchOptions m_options;

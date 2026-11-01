@@ -19,6 +19,13 @@ struct Notification
 	QString body;
 };
 
+// What a newer notification replaces: the one of the same session and kind, like the tag of a
+// Web notification. The kind comes first so that it survives a cut to a length limit.
+inline QString replaceKey(const Notification& notification)
+{
+	return QStringLiteral("%1:%2").arg(static_cast<int>(notification.kind)).arg(notification.sessionId);
+}
+
 // Shows system notifications on one platform. When `isAvailable()` is false, `show()` does
 // nothing and the caller falls back to getting the user's attention another way.
 class Notifier : public QObject
