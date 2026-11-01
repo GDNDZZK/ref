@@ -7,6 +7,8 @@ ToolBodyBase {
 
 	readonly property var meta: call.meta
 	readonly property string url: Fields.stringOf(call.inputObject, "url")
+	readonly property int openButtonSize: 24
+	readonly property int httpClientErrorFrom: 400 // status codes from here on are errors
 
 	Row {
 		visible: body.url !== ""
@@ -15,7 +17,7 @@ ToolBodyBase {
 
 		Text {
 			textFormat: Text.PlainText
-			width: parent.width - parent.spacing - 24
+			width: parent.width - parent.spacing - body.openButtonSize
 			anchors.verticalCenter: parent.verticalCenter
 			text: body.url
 			elide: Text.ElideMiddle
@@ -24,8 +26,8 @@ ToolBodyBase {
 			font.pixelSize: Theme.smallFontSize
 		}
 		Item {
-			width: 24
-			height: 24
+			width: body.openButtonSize
+			height: body.openButtonSize
 
 			Icon {
 				anchors.centerIn: parent
@@ -46,7 +48,7 @@ ToolBodyBase {
 		ToolChip {
 			visible: body.meta.status !== undefined
 			text: String(body.meta.status)
-			tint: body.meta.status >= 400 ? Theme.danger : Theme.textMuted
+			tint: body.meta.status >= body.httpClientErrorFrom ? Theme.danger : Theme.textMuted
 		}
 		ToolChip {
 			visible: Fields.stringOf(body.meta, "content_type") !== ""
