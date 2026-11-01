@@ -2,6 +2,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { info, snapshot, userMessage } from '../model/testMessages.ts'
 import type { SessionInfo } from '../proto/generated'
+import { useNoticesStore } from './notices.ts'
 import { errorToast, sortLive, useWorkspaceStore } from './workspace.ts'
 
 const api = {
@@ -168,6 +169,18 @@ describe('closing sessions', () => {
     await workspace.closeSession('ses_1')
     await vi.waitFor(() => expect(workspace.currentId).toBe('ses_2'))
     expect(api.createSession).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('the history list', () => {
+  it('tells the user when it cannot be refreshed after a session is closed', async () => {
+    const workspace = setup([session('ses_1'), session('ses_2')])
+    await workspace.openSession('ses_1')
+    api.listHistory.mockRejectedValue(new Error('history unavailable'))
+    await workspace.closeSession('ses_2')
+    await vi.waitFor(() =>
+      expect(useNoticesStore().notices.map((notice) => notice.text)).toEqual(['history unavailable']),
+    )
   })
 })
 

@@ -19,6 +19,8 @@ using refgui::test::FakeBackend;
 namespace
 {
 
+constexpr int SettleMs = 100; // time for a frame in flight to be handled
+
 class RecordingNotifier : public Notifier
 {
 	Q_OBJECT
@@ -52,7 +54,7 @@ struct Fixture
 		fake.onHello = [this](const QJsonObject& hello)
 		{
 			helloKinds = hello.value(u"notify"_s).toArray();
-			fake.respond(hello, {{u"server_version"_s, u"0.0.0-test"_s}, {u"protocol"_s, 2}});
+			fake.respondHello(hello);
 		};
 	}
 
@@ -136,7 +138,7 @@ void TestNotificationCenter::kindsChangedWhileHelloWasOnItsWayAreSent()
 	QTRY_VERIFY(!pendingHello.isEmpty());
 
 	f.center.setKinds({u"turn_done"_s}); // not connected yet, so nothing is sent
-	f.fake.respond(pendingHello, {{u"server_version"_s, u"0.0.0-test"_s}, {u"protocol"_s, 2}});
+	f.fake.respondHello(pendingHello);
 
 	QTRY_COMPARE(f.backend.state(), Backend::State::Connected);
 	QTRY_COMPARE(f.requestsOf(u"set_notify"_s).size(), 1);
@@ -226,7 +228,7 @@ void TestNotificationCenter::unavailableNotifierFlashesTheWindow()
 	f.connect();
 
 	f.fake.send(notifyFrame(u"turn_done"_s));
-	QTest::qWait(100);
+	QTest::qWait(SettleMs);
 
 	QVERIFY(f.notifier->shown.isEmpty());
 }

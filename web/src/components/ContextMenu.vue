@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // A small menu at the pointer (right click). Closes on a choice, a click elsewhere, Esc or scrolling.
 import { onBeforeUnmount, onMounted, useTemplateRef } from 'vue'
+import { Key } from '../keys.ts'
 
 export interface MenuItem {
   label: string
@@ -29,7 +30,7 @@ function onBlur(): void {
 }
 
 function onKeydown(event: KeyboardEvent): void {
-  if (event.key !== 'Escape') return
+  if (event.key !== Key.Escape) return
   event.stopPropagation()
   emit('close')
 }

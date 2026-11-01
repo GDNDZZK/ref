@@ -17,7 +17,9 @@ const { t } = useI18n()
 const shown = shallowRef(props.request)
 watch(
   () => props.request,
-  (request) => request && (shown.value = request),
+  (request) => {
+    if (request) shown.value = request
+  },
 )
 
 const command = computed(() => stringArg(shown.value?.input, 'command'))

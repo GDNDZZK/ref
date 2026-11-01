@@ -4,8 +4,9 @@
 // keeps moving never restarts the motion and the speed does not depend on the frame rate.
 
 import { motion } from '../theme/generated/motion.ts'
+import { MS_PER_SECOND } from '../time.ts'
 
-const MS_PER_SECOND = 1000
+const SCROLL_SNAP_PX = 1 // scrolling moves in whole pixels
 
 export function arrived(current: number, target: number): boolean {
   return Math.abs(target - current) < motion.chaseSnap
@@ -29,7 +30,7 @@ export function scrollStep(position: number, target: number, frameSeconds: numbe
   return overshoots ? target : step
 }
 
-// Within a pixel of the target counts as there: scrolling moves in whole pixels.
+// Within a pixel of the target counts as there.
 export function scrollArrived(position: number, target: number): boolean {
-  return Math.abs(target - position) < 1
+  return Math.abs(target - position) < SCROLL_SNAP_PX
 }

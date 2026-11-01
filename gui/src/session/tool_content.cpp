@@ -18,6 +18,26 @@ namespace refgui::session::tool_content
 namespace
 {
 
+// Arguments that several tools have.
+const QString PathKey = u"path"_s;
+const QString PatternKey = u"pattern"_s;
+
+// The rows of listing() and diffRows(), as tool_content.h describes them for the views.
+const QString KindKey = u"kind"_s;
+const QString TextKey = u"text"_s;
+const QString NumberKey = u"number"_s;
+const QString ContextKind = u"context"_s;
+const QString FileKind = u"file"_s;
+const QString HunkKind = u"hunk"_s;
+const QString AddedKind = u"added"_s;
+const QString RemovedKind = u"removed"_s;
+const QString MatchKind = u"match"_s;
+const QString LineKind = u"line"_s;
+const QString GapKind = u"gap"_s;
+
+constexpr QChar Ellipsis = u'\u2026';
+constexpr int EllipsisColumns = 1;
+
 // The input's value for `key` when it is a list, else empty.
 QVariantList listArg(const QVariantMap& input, const QString& key)
 {
@@ -51,7 +71,7 @@ std::optional<QString> bashDetail(const QVariantMap& input)
 
 std::optional<QString> editDetail(const QVariantMap& input)
 {
-	const auto path = optionalText(input, u"path"_s);
+	const auto path = optionalText(input, PathKey);
 	if(!path)
 		return std::nullopt;
 	const qsizetype edits = listArg(input, u"edits"_s).size();
@@ -62,10 +82,10 @@ std::optional<QString> editDetail(const QVariantMap& input)
 
 std::optional<QString> grepDetail(const QVariantMap& input)
 {
-	const auto pattern = optionalText(input, u"pattern"_s);
+	const auto pattern = optionalText(input, PatternKey);
 	if(!pattern)
 		return std::nullopt;
-	const auto path = optionalText(input, u"path"_s);
+	const auto path = optionalText(input, PathKey);
 	if(!path)
 		return u"\"%1\""_s.arg(*pattern);
 	return QCoreApplication::translate("refgui::session::tool_content", "\"%1\" in %2").arg(*pattern, *path);
@@ -73,8 +93,8 @@ std::optional<QString> grepDetail(const QVariantMap& input)
 
 std::optional<QString> findDetail(const QVariantMap& input)
 {
-	const auto pattern = optionalText(input, u"pattern"_s);
-	return pattern ? pattern : optionalText(input, u"path"_s);
+	const auto pattern = optionalText(input, PatternKey);
+	return pattern ? pattern : optionalText(input, PathKey);
 }
 
 std::optional<QString> webfetchDetail(const QVariantMap& input)
@@ -120,7 +140,7 @@ std::optional<QString> toolDetail(const QString& toolName, const QVariantMap& in
 	if(toolName == u"bash"_s)
 		return bashDetail(input);
 	if(toolName == u"read"_s || toolName == u"write"_s || toolName == u"delete"_s)
-		return optionalText(input, u"path"_s);
+		return optionalText(input, PathKey);
 	if(toolName == u"edit"_s)
 		return editDetail(input);
 	if(toolName == u"grep"_s)
@@ -200,12 +220,12 @@ QString truncated(const QString& text, int maxColumns)
 	for(const QStringView cluster : clusters)
 	{
 		const int width = clusterColumns(cluster);
-		if(used + width > maxColumns - 1)
+		if(used + width > maxColumns - EllipsisColumns)
 			break;
 		used += width;
 		result += cluster;
 	}
-	return result + u'\u2026';
+	return result + Ellipsis;
 }
 
 // Whitespace runs become one space, control characters go, nothing leads or trails.
@@ -265,23 +285,43 @@ QString genericDetail(const QVariantMap& input)
 	return parts.join(u' ');
 }
 
+// The kind of a listing row from its marker: `*` a match, a space context, none a plain line.
+QString rowKind(const QString& marker)
+{
+	if(marker == u"*"_s)
+		return MatchKind;
+	if(marker == u" "_s)
+		return ContextKind;
+	return LineKind;
+}
+
 // The row of a diff line.
 QVariantMap diffRow(const QString& line)
 {
-	QString kind = u"context"_s;
+	QString kind = ContextKind;
+	bool marked = false; // starts with the sign of an added or removed line
 	if(line.startsWith(u"+++"_s) || line.startsWith(u"---"_s))
-		kind = u"file"_s;
+	{
+		kind = FileKind;
+	}
 	else if(line.startsWith(u"@@"_s))
-		kind = u"hunk"_s;
+	{
+		kind = HunkKind;
+	}
 	else if(line.startsWith(u'+'))
-		kind = u"added"_s;
+	{
+		kind = AddedKind;
+		marked = true;
+	}
 	else if(line.startsWith(u'-'))
-		kind = u"removed"_s;
-	const bool marked = kind == u"added"_s || kind == u"removed"_s;
+	{
+		kind = RemovedKind;
+		marked = true;
+	}
 	return {
-		{u"text"_s, marked ? line.mid(1) : line},
+		{TextKey, marked ? line.mid(1) : line},
 		{u"sign"_s, marked ? line.left(1) : QString()},
-		{u"kind"_s, kind},
+		{KindKey, kind},
 	};
 }
 
@@ -375,12 +415,10 @@ QVariantList listing(const QString& output)
 		const QRegularExpressionMatch row = numbered.match(line);
 		if(row.hasMatch())
 		{
-			const QString marker = row.captured(1);
-			const QString kind = marker == u"*"_s ? u"match"_s : marker == u" "_s ? u"context"_s : u"line"_s;
-			group.rows.append(QVariantMap{{u"number"_s, row.captured(2)}, {u"text"_s, row.captured(3)}, {u"kind"_s, kind}});
+			group.rows.append(QVariantMap{{NumberKey, row.captured(2)}, {TextKey, row.captured(3)}, {KindKey, rowKind(row.captured(1))}});
 		}
 		else if(line == u"..."_s)
-			group.rows.append(QVariantMap{{u"number"_s, QString()}, {u"text"_s, u"\u22ef"_s}, {u"kind"_s, u"gap"_s}});
+			group.rows.append(QVariantMap{{NumberKey, QString()}, {TextKey, u"\u22ef"_s}, {KindKey, GapKind}});
 		else
 			group.notes.append(line);
 	}

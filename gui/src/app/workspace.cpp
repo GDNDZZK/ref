@@ -19,7 +19,7 @@ Workspace* theInstance = nullptr;
 // The loopback names under which a backend runs on this machine.
 bool isLoopback(const QString& host)
 {
-	return host == u"localhost"_s || host == u"127.0.0.1"_s || host == u"::1"_s || host == u"[::1]"_s;
+	return host == u"localhost"_s || host == refgui::client::LoopbackHost || host == u"::1"_s || host == u"[::1]"_s;
 }
 
 } // namespace
@@ -40,16 +40,16 @@ Workspace::Workspace(refgui::cli::LaunchOptions options, QString settingsPath, Q
 	connect(&m_backend.client(), &refgui::client::ServerClient::frameReceived, this, &Workspace::toastFrom);
 	connect(&m_directory, &refgui::workspace::SessionDirectory::liveChanged, this, &Workspace::onLiveChanged);
 	connect(&m_directory, &refgui::workspace::SessionDirectory::historyLoadedChanged, this, &Workspace::historyLoadedChanged);
-	connect(&m_directory, &refgui::workspace::SessionDirectory::failed, this, [this](const QString& reason) { toast(u"error"_s, reason); });
+	connect(&m_directory, &refgui::workspace::SessionDirectory::failed, this, [this](const QString& reason) { toast(refgui::workspace::ToastLevel::Error, reason); });
 	connect(&m_config, &refgui::workspace::BackendConfig::changed, this, [this] {
 		m_commands.setCustomCommands(m_config.config().commands);
 	});
 	connect(&m_config, &refgui::workspace::BackendConfig::mcpChanged, this, &Workspace::mcpServersChanged);
-	connect(&m_config, &refgui::workspace::BackendConfig::failed, this, [this](const QString& reason) { toast(u"error"_s, reason); });
+	connect(&m_config, &refgui::workspace::BackendConfig::failed, this, [this](const QString& reason) { toast(refgui::workspace::ToastLevel::Error, reason); });
 	connect(&m_settings, &refgui::workspace::Settings::saveFailed, this, [this](const QString& reason) {
-		toast(u"warn"_s, tr("Could not save the settings: %1").arg(reason));
+		toast(refgui::workspace::ToastLevel::Warn, tr("Could not save the settings: %1").arg(reason));
 	});
-	connect(&m_commands, &refgui::workspace::CommandRegistry::unavailable, this, [this] { toast(u"info"_s, tr("That command is not available now.")); });
+	connect(&m_commands, &refgui::workspace::CommandRegistry::unavailable, this, [this] { toastCommandUnavailable(); });
 
 	registerCommands();
 	m_backend.start();
@@ -114,6 +114,12 @@ void Workspace::setWindowActive(bool active)
 	}
 	m_windowActive = active;
 	emit windowActiveChanged();
+}
+
+bool Workspace::isProtocolOutdated() const
+{
+	const bool connected = m_backend.state() == refgui::client::Backend::State::Connected;
+	return connected && m_backend.hello().protocol < refgui::proto::ProtocolVersion;
 }
 
 bool Workspace::isBackendLocal() const
@@ -197,13 +203,13 @@ void Workspace::toastFrom(const refgui::proto::ServerFrame& frame)
 	switch(toastFrame->level)
 	{
 	case Level::Info:
-		toast(u"info"_s, toastFrame->text);
+		toast(refgui::workspace::ToastLevel::Info, toastFrame->text);
 		return;
 	case Level::Warn:
-		toast(u"warn"_s, toastFrame->text);
+		toast(refgui::workspace::ToastLevel::Warn, toastFrame->text);
 		return;
 	case Level::Error:
-		toast(u"error"_s, toastFrame->text);
+		toast(refgui::workspace::ToastLevel::Error, toastFrame->text);
 		return;
 	}
 }
@@ -211,6 +217,11 @@ void Workspace::toastFrom(const refgui::proto::ServerFrame& frame)
 void Workspace::toast(const QString& level, const QString& text)
 {
 	emit toastRequested(level, text);
+}
+
+void Workspace::toastCommandUnavailable()
+{
+	toast(refgui::workspace::ToastLevel::Info, tr("That command is not available now."));
 }
 
 void Workspace::openDialog(const QString& id, const QVariantMap& args)
@@ -249,7 +260,8 @@ QCoro::Task<> Workspace::openFirstSession()
 	QString sessionId = start.sessionId;
 	if(start.kind == Kind::Continue)
 	{
-		const auto history = co_await client.listHistory(m_cwd, 1);
+		constexpr int NewestOnly = 1;
+		const auto history = co_await client.listHistory(m_cwd, NewestOnly);
 		if(!history)
 		{
 			fail(history.error());
@@ -257,7 +269,7 @@ QCoro::Task<> Workspace::openFirstSession()
 		}
 		if(history->isEmpty())
 		{
-			toast(u"info"_s, tr("No earlier session in this directory. Started a new one."));
+			toast(refgui::workspace::ToastLevel::Info, tr("No earlier session in this directory. Started a new one."));
 		}
 		else
 		{
@@ -306,7 +318,7 @@ ChatSession& Workspace::chat(const QString& sessionId)
 			{
 				return;
 			}
-			toast(u"error"_s, refgui::workspace::toastText(u"%1: %2"_s.arg(nameOf(sessionId), refgui::workspace::oneLine(text))));
+			toast(refgui::workspace::ToastLevel::Error, refgui::workspace::toastText(u"%1: %2"_s.arg(nameOf(sessionId), refgui::workspace::oneLine(text))));
 		});
 	}
 	return *slot;
@@ -319,7 +331,15 @@ QString Workspace::nameOf(const QString& sessionId) const
 	{
 		return sessionId;
 	}
-	return !info->name.isEmpty() ? info->name : !info->title.isEmpty() ? info->title : sessionId;
+	if(!info->name.isEmpty())
+	{
+		return info->name;
+	}
+	if(!info->title.isEmpty())
+	{
+		return info->title;
+	}
+	return sessionId;
 }
 
 // The session a command acts on: the one asked for, else the focused tile, else the current one.
@@ -381,10 +401,7 @@ void Workspace::openSession(const QString& sessionId)
 	}
 	[](Workspace* self, QString id) -> QCoro::Task<> {
 		const Result<void> shown = co_await self->show(std::move(id));
-		if(!shown)
-		{
-			self->toast(u"error"_s, shown.error());
-		}
+		self->toastFailure(shown);
 	}(this, sessionId);
 }
 
@@ -398,7 +415,8 @@ QCoro::Task<Workspace::Done> Workspace::show(QString sessionId)
 	{
 		co_return std::unexpected(attached.error());
 	}
-	if(serial != m_showSerial && &target != m_current && !m_split)
+	const bool supersededByNewerShow = serial != m_showSerial && &target != m_current && !m_split;
+	if(supersededByNewerShow)
 	{
 		// The user has moved on to another session meanwhile.
 		static_cast<void>(co_await target.detach());
@@ -406,7 +424,8 @@ QCoro::Task<Workspace::Done> Workspace::show(QString sessionId)
 	}
 	ChatSession* old = m_current;
 	setCurrent(&target);
-	if(old != nullptr && old != &target && !m_split && old->isAttached() && !m_leaving.contains(old->sessionId()))
+	const bool shouldDetachOld = old != nullptr && old != &target && !m_split && old->isAttached() && !m_leaving.contains(old->sessionId());
+	if(shouldDetachOld)
 	{
 		static_cast<void>(co_await old->detach());
 	}
@@ -449,10 +468,9 @@ QCoro::Task<> Workspace::closeTask(QString sessionId)
 {
 	const refgui::proto::SessionInfo* info = m_directory.find(sessionId);
 	const QString cwd = info == nullptr ? m_cwd : info->cwd;
-	const Result<void> closed = co_await m_backend.client().close(sessionId);
-	if(!closed)
+	const Result<void> closed = co_await m_backend.client().closeSession(sessionId);
+	if(toastFailure(closed))
 	{
-		toast(u"error"_s, closed.error());
 		co_return;
 	}
 	handleGone(sessionId, cwd);
@@ -493,10 +511,7 @@ QCoro::Task<> Workspace::leaveCurrent(QString closedId, QString cwd)
 	else
 	{
 		const Result<void> shown = co_await show(next);
-		if(!shown)
-		{
-			toast(u"error"_s, shown.error());
-		}
+		toastFailure(shown);
 	}
 	if(currentId() == closedId)
 	{

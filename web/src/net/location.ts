@@ -1,9 +1,9 @@
 // The page's address mirrors what is open, so a reload (or a bookmark) comes back to it:
 // ?session=<id> for the open session, ?view=split in split view. ?dir= stays as it is.
 
-const SESSION_PARAM = 'session'
-const VIEW_PARAM = 'view'
-const SPLIT_VIEW = 'split'
+export const SESSION_PARAM = 'session'
+export const VIEW_PARAM = 'view'
+export const SPLIT_VIEW = 'split'
 
 export interface LocationState {
   sessionId?: string

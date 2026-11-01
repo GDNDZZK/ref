@@ -5,17 +5,17 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { PROTOCOL_VERSION } from '../proto/generated'
-import { rowState } from '../shell/sessionRow.ts'
 import { useConnectionStore } from '../stores/connection.ts'
 import { useNoticesStore } from '../stores/notices.ts'
+import { useWorkspaceStore } from '../stores/workspace.ts'
 import DialogButton from './DialogButton.vue'
 import Icon from './Icon.vue'
 
-const PROTOCOL_WITHOUT_FIELD = 1
 const RECHECK_MS = 3000
 
 const { t } = useI18n()
 const connection = useConnectionStore()
+const workspace = useWorkspaceStore()
 const notices = useNoticesStore()
 
 const working = ref(false) // a session is running or waiting
@@ -25,8 +25,7 @@ let recheck: ReturnType<typeof setInterval> | undefined
 // The workspace is not loaded for an old backend, so ask for the sessions here.
 async function look(): Promise<void> {
   try {
-    const sessions = await connection.getApi().listSessions()
-    working.value = sessions.some((info) => rowState(info) !== 'idle' && rowState(info) !== 'error')
+    working.value = await workspace.hasWorkingSessions()
   } catch (error) {
     notices.pushError(error)
   }
@@ -36,7 +35,10 @@ watch(
   () => connection.backendTooOld,
   (tooOld) => {
     clearInterval(recheck)
-    if (!tooOld) return void (restarting.value = false)
+    if (!tooOld) {
+      restarting.value = false
+      return
+    }
     void look()
     recheck = setInterval(() => void look(), RECHECK_MS)
   },
@@ -48,7 +50,7 @@ const text = computed(() =>
   restarting.value
     ? t('banner.restarting')
     : t('banner.backendTooOld', {
-        have: connection.hello?.protocol ?? PROTOCOL_WITHOUT_FIELD,
+        have: connection.protocol,
         need: PROTOCOL_VERSION,
       }),
 )
@@ -58,10 +60,7 @@ async function restart(): Promise<void> {
   if (working.value) return
   restarting.value = true
   // The connection ends while the backend stops, so the answer may never arrive.
-  await connection
-    .getApi()
-    .shutdown()
-    .catch(() => undefined)
+  await connection.shutdownServer().catch(() => undefined)
 }
 </script>
 

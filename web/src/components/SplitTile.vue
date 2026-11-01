@@ -14,7 +14,13 @@ import SessionPane from './SessionPane.vue'
 const BADGE_SIZE = 14
 const PRESS_TARGETS = 'button, a, summary'
 
-const props = defineProps<{ session: ChatSession; focused: boolean; zoomed: boolean; hidden: boolean }>()
+const props = defineProps<{
+  session: ChatSession
+  focused: boolean
+  zoomed: boolean
+  hidden: boolean
+  clearance: { left: number; right: number } // header room for the floating window buttons
+}>()
 const emit = defineEmits<{ focus: []; zoom: [] }>()
 
 const { t } = useI18n()
@@ -59,6 +65,7 @@ const elapsed = computed(() => (info.value ? runningTime(info.value, now.value) 
     <header
       class="header"
       :class="{ permission: state === 'permission' || state === 'question', error: state === 'error' }"
+      :style="{ '--clear-left': `${clearance.left}px`, '--clear-right': `${clearance.right}px` }"
       @dblclick="emit('zoom')"
     >
       <SessionDot :state="state" />
@@ -130,7 +137,7 @@ const elapsed = computed(() => (info.value ? runningTime(info.value, now.value) 
   align-items: center;
   gap: 10px;
   height: var(--tile-header-height);
-  padding: 0 8px 0 12px;
+  padding: 0 calc(8px + var(--clear-right)) 0 calc(12px + var(--clear-left));
   overflow: hidden;
   background: var(--surface);
   box-shadow: inset 0 -1px 0 var(--border);

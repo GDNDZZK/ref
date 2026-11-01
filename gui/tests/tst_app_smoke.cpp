@@ -18,6 +18,7 @@ namespace
 constexpr int ProgramTimeoutMs = 60000;
 constexpr int ServerStartTimeoutMs = 20000;
 constexpr int ServerExitTimeoutMs = 10000;
+constexpr int PollMs = 50; // between looks at the instance files
 
 struct Run
 {
@@ -135,7 +136,7 @@ std::optional<proto::InstanceInfo> TestAppSmoke::startServer(QProcess& server) c
 				return candidate;
 			}
 		}
-		QTest::qWait(50);
+		QTest::qWait(PollMs);
 	}
 	return std::nullopt;
 }

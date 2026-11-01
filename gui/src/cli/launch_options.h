@@ -6,6 +6,7 @@
 #include <QString>
 #include <QStringList>
 
+#include <cstdlib>
 #include <optional>
 #include <variant>
 
@@ -40,16 +41,13 @@ struct LaunchOptions
 	QStringList warnings{}; // for stderr, e.g. an option that has no effect yet
 };
 
-// The program should print `text` (stdout when `code` is 0, else stderr) and exit.
+// The program should print `text` (stdout when `code` is EXIT_SUCCESS, else stderr) and exit.
 struct Exit
 {
 	QString text;
-	int code = 0;
+	int code = EXIT_SUCCESS;
 };
 
 using ParseResult = std::variant<LaunchOptions, Exit>;
-
-// `arguments` starts with the program name. Relative directories are taken from `currentDirectory`.
-ParseResult parseCommandLine(const QStringList& arguments, const QString& currentDirectory, const QString& version);
 
 } // namespace refgui::cli

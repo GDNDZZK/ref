@@ -20,10 +20,9 @@ import ToolBody from './ToolBody.vue'
 import ToolPermission from './ToolPermission.vue'
 import ToolQuestion from './ToolQuestion.vue'
 import ToolStateMark from './ToolStateMark.vue'
+import { MS_PER_SECOND } from '../time.ts'
 
 const props = defineProps<{ block: ToolBlock }>()
-
-const MS_PER_SECOND = 1000
 
 const { t } = useI18n()
 const chatScroll = useChatScroll()
@@ -53,32 +52,43 @@ const awaitingAnswer = computed(() => props.block.question !== undefined)
 const hasContent = computed(() => {
   const { input, rawInput, output, images } = props.block
   const hasInput = input !== null && !(typeof input === 'object' && Object.keys(input).length === 0)
-  return (
-    !isTodo.value &&
-    (hasInput || rawInput !== '' || !!output || images.length > 0 || !!props.block.permission)
-  )
+  const hasRawInput = rawInput !== ''
+  const hasOutput = !!output || images.length > 0
+  const hasRequest = !!props.block.permission
+  return !isTodo.value && (hasInput || hasRawInput || hasOutput || hasRequest)
 })
 
 // The default comes from the session; a click flips this card against it.
 const flipped = ref(false)
-const expanded = computed(
-  () => hasContent.value && (awaitingPermission.value || session.detailsExpanded !== flipped.value),
-)
+const expanded = computed(() => {
+  const showsDetails = session.detailsExpanded !== flipped.value
+  return hasContent.value && (awaitingPermission.value || showsDetails)
+})
 const showPermission = ref(false) // once a request was there, the section stays to fold away
 const showQuestion = ref(false) // the same for the questions
 const bodyBuilt = ref(false) // built on first open, so a long list stays cheap
 
 watch(
   () => props.block.permission,
-  (request) => request && (showPermission.value = true),
+  (request) => {
+    if (request) showPermission.value = true
+  },
   { immediate: true },
 )
 watch(
   () => props.block.question,
-  (request) => request && (showQuestion.value = true),
+  (request) => {
+    if (request) showQuestion.value = true
+  },
   { immediate: true },
 )
-watch(expanded, (isExpanded) => isExpanded && (bodyBuilt.value = true), { immediate: true })
+watch(
+  expanded,
+  (isExpanded) => {
+    if (isExpanded) bodyBuilt.value = true
+  },
+  { immediate: true },
+)
 
 const firstErrorLine = computed(() =>
   state.value === 'error' && !expanded.value
@@ -174,12 +184,6 @@ function cancel(): void {
       <Chevron class="chevron" :class="{ open: expanded, hidden: !hasContent || awaitingPermission }" />
     </div>
     <TodoList v-if="isTodo" :todos="todos" />
-    <ToolPermission
-      v-if="showPermission"
-      :request="block.permission"
-      :waiting="Math.max(0, session.permissions.length - 1)"
-      @answer="answer"
-    />
     <ToolQuestion
       v-if="showQuestion"
       :form="block.question && session.questionForm(block.question)"
@@ -197,6 +201,13 @@ function cancel(): void {
         <ToolBody v-if="bodyBuilt" :block="block" />
       </div>
     </div>
+    <!-- After the body, as in the GUI: the end of the conversation shows the buttons, not the input. -->
+    <ToolPermission
+      v-if="showPermission"
+      :request="block.permission"
+      :waiting="Math.max(0, session.permissions.length - 1)"
+      @answer="answer"
+    />
     <span class="outline" />
   </div>
 </template>

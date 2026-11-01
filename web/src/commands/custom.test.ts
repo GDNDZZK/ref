@@ -43,6 +43,24 @@ describe('installCustomCommands', () => {
     expect(commands.slashEntries().map((entry) => entry.name)).toEqual(['new', 'review'])
   })
 
+  it('keeps a command from an unknown source and warns about the source once', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const commands = useCommandsStore()
+    const connection = useConnectionStore()
+    installCustomCommands()
+    connection.config = config([
+      { name: 'a', description: '', source: 'plugin' },
+      { name: 'b', description: '', source: 'plugin' },
+    ])
+    await nextTick()
+    connection.config = config([{ name: 'a', description: '', source: 'plugin' }])
+    await nextTick()
+
+    expect(commands.find('a')?.source).toBe('config')
+    expect(warn).toHaveBeenCalledOnce()
+    warn.mockRestore()
+  })
+
   it('follows a changed configuration', async () => {
     const commands = useCommandsStore()
     const connection = useConnectionStore()

@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { nextTick, ref } from 'vue'
-import { usePickSelection } from './usePickSelection.ts'
+import { handleListKey, usePickSelection } from './usePickSelection.ts'
 import type { PickItem } from './usePickSelection.ts'
 
 const items = (...keys: string[]): PickItem[] => keys.map((key) => ({ key }))
@@ -35,5 +35,31 @@ describe('usePickSelection', () => {
     list.value = []
     await nextTick()
     expect(selected.value).toBeUndefined()
+  })
+})
+
+describe('handleListKey', () => {
+  const press = (key: string) => new KeyboardEvent('keydown', { key, cancelable: true })
+
+  it('moves with the arrows and keeps the key from the text field', () => {
+    const move = vi.fn()
+    const down = press('ArrowDown')
+    expect(handleListKey(down, move)).toBe(true)
+    expect(down.defaultPrevented).toBe(true)
+    expect(handleListKey(press('ArrowUp'), move)).toBe(true)
+    expect(move.mock.calls).toEqual([[1], [-1]])
+  })
+
+  it('picks with Enter only when it is asked to', () => {
+    const onPick = vi.fn()
+    expect(handleListKey(press('Enter'), vi.fn())).toBe(false)
+    expect(handleListKey(press('Enter'), vi.fn(), onPick)).toBe(true)
+    expect(onPick).toHaveBeenCalledOnce()
+  })
+
+  it('leaves other keys alone', () => {
+    const event = press('a')
+    expect(handleListKey(event, vi.fn(), vi.fn())).toBe(false)
+    expect(event.defaultPrevented).toBe(false)
   })
 })

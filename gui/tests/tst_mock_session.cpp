@@ -14,7 +14,9 @@ using namespace Qt::StringLiterals;
 using namespace refgui;
 using namespace refgui::test;
 using refgui::client::Backend;
+using refgui::session::Block;
 using refgui::session::ConversationModel;
+using refgui::session::kindName;
 using refgui::session::SessionController;
 
 namespace
@@ -134,9 +136,9 @@ void TestMockSession::streamsMarkdownAndCode()
 
 	QTRY_VERIFY_WITH_TIMEOUT(s.controller.model().rowCount() > 1, ReplyTimeoutMs);
 	QTRY_VERIFY_WITH_TIMEOUT(!s.controller.isTurnInProgress(), ReplyTimeoutMs);
-	QVERIFY(s.hasBlock(u"user"_s));
-	QVERIFY(s.hasBlock(u"markdown"_s));
-	QVERIFY(s.hasBlock(u"code"_s));
+	QVERIFY(s.hasBlock(kindName(Block::Kind::User)));
+	QVERIFY(s.hasBlock(kindName(Block::Kind::Markdown)));
+	QVERIFY(s.hasBlock(kindName(Block::Kind::Code)));
 }
 
 // The script reads, searches and lists, then asks for permission to edit.

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The window (Main.qml): the sidebar beside the content, which is one session or the split view,
 // with the corner buttons, toasts and dialogs on top.
-import { watch } from 'vue'
+import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BackendBanner from './components/BackendBanner.vue'
 import CircleButton from './components/CircleButton.vue'
@@ -17,6 +17,7 @@ import ThemeToggle from './components/ThemeToggle.vue'
 import { registerBuiltinCommands } from './commands/builtin.ts'
 import { installCustomCommands } from './commands/custom.ts'
 import { setBaseTitle } from './composables/useAttention.ts'
+import { APP_TITLE } from './notify/center.ts'
 import { liveLabel } from './shell/sessionRow.ts'
 import { usePermissionKeys } from './composables/usePermissionKeys.ts'
 import { useShortcuts } from './composables/useShortcuts.ts'
@@ -41,7 +42,7 @@ usePermissionKeys()
 // The tab is named after the open session.
 watch(
   () => (workspace.current?.info ? liveLabel(workspace.current.info) : ''),
-  (title) => setBaseTitle(title ? `${title} · ref` : 'ref'),
+  (title) => setBaseTitle(title ? `${title} · ${APP_TITLE}` : APP_TITLE),
   { immediate: true },
 )
 
@@ -53,6 +54,13 @@ watch(
   },
   { immediate: true },
 )
+
+// What the split button does next.
+const splitLabel = computed(() => {
+  if (workspace.zoomedId) return t('split.unzoom')
+  if (workspace.mode === 'split') return t('split.leave')
+  return t('split.enter')
+})
 
 function toggleSplit(): void {
   if (workspace.zoomedId) workspace.unzoom()
@@ -92,17 +100,7 @@ function toggleSplit(): void {
           </div>
         </Transition>
         <div class="corner right">
-          <CircleButton
-            v-if="!layout.narrow"
-            :label="
-              workspace.zoomedId
-                ? t('split.unzoom')
-                : workspace.mode === 'split'
-                  ? t('split.leave')
-                  : t('split.enter')
-            "
-            @click="toggleSplit"
-          >
+          <CircleButton v-if="!layout.narrow" :label="splitLabel" @click="toggleSplit">
             <Icon icon="split-20" />
           </CircleButton>
           <ThemeToggle />

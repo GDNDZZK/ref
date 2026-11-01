@@ -3,9 +3,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h, reactive } from 'vue'
 import { PERMISSION_GUARD_MS } from '../components/toolLimits.ts'
 import { ChatSession } from '../model/chatSession.ts'
-import { assistantMessage, snapshot, toolPart, userMessage } from '../model/testMessages.ts'
-import type { RefApi } from '../net/api.ts'
-import type { Question, QuestionRequest } from '../proto/generated'
+import {
+  assistantMessage,
+  chatSessionWith,
+  question,
+  questionRequest,
+  snapshot,
+  toolPart,
+  userMessage,
+} from '../model/testMessages.ts'
+import type { Question } from '../proto/generated'
 import { usePermissionKeys } from './usePermissionKeys.ts'
 
 const pushError = vi.fn()
@@ -25,20 +32,6 @@ vi.mock('../stores/workspace.ts', () => ({
 }))
 vi.mock('../stores/notices.ts', () => ({ useNoticesStore: () => ({ pushError }) }))
 
-function question(overrides: Partial<Question> = {}): Question {
-  return {
-    question: 'Which one?',
-    header: 'Pick',
-    multiple: false,
-    custom: true,
-    options: [
-      { label: 'A', description: '', default: false },
-      { label: 'B', description: '', default: true },
-    ],
-    ...overrides,
-  }
-}
-
 const KeysHost = defineComponent({
   setup() {
     usePermissionKeys()
@@ -52,13 +45,7 @@ function mountKeys() {
 
 // Opens a session that has a pending question; `id` is where the question is asked.
 async function openSession(id: string, questions: Question[]) {
-  const request: QuestionRequest = {
-    session_id: id,
-    message_id: 'a1',
-    call_id: 'c1',
-    questions,
-    time: 1,
-  }
+  const request = questionRequest(questions, { session_id: id })
   const questionReply = vi.fn().mockResolvedValue(undefined)
   const api = {
     attach: vi.fn().mockResolvedValue(
@@ -68,11 +55,7 @@ async function openSession(id: string, questions: Question[]) {
     ),
     questionReply,
   }
-  const session = new ChatSession(id, {
-    api: () => api as unknown as RefApi,
-    notify: vi.fn(),
-    draftRestored: vi.fn(),
-  })
+  const session = chatSessionWith(api, id)
   await session.attach(true)
   sessions.set(id, session)
   return { questionReply, session }
@@ -225,11 +208,7 @@ describe('keys in split view', () => {
         .mockResolvedValue(snapshot([userMessage('u1', 'hi')], { pending_permissions: [request] })),
       permissionReply,
     }
-    const waiting = new ChatSession('ses_1', {
-      api: () => api as unknown as RefApi,
-      notify: vi.fn(),
-      draftRestored: vi.fn(),
-    })
+    const waiting = chatSessionWith(api)
     await waiting.attach(true)
     sessions.set('ses_1', waiting)
     await openSession('ses_2', [])

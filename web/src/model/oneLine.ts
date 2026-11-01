@@ -9,6 +9,11 @@ function isSpace(character: string): boolean {
   return character === NEXT_LINE || (character !== BYTE_ORDER_MARK && /^\s$/.test(character))
 }
 
+// White space runs become one space; the control characters stay.
+export function collapseWhitespace(text: string): string {
+  return text.replace(/\s+/g, ' ').trim()
+}
+
 export function oneLine(text: string): string {
   let result = ''
   let space = false

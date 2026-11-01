@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { Question, QuestionRequest } from '../proto/generated'
+import type { Question } from '../proto/generated'
 import { QuestionForm } from './questionForm.ts'
+import { question as baseQuestion, questionRequest } from './testMessages.ts'
 
 function question(overrides: Partial<Question> = {}): Question {
-  return {
+  return baseQuestion({
     question: 'How should it be fixed?',
     header: 'Fix',
     options: [
@@ -11,15 +12,12 @@ function question(overrides: Partial<Question> = {}): Question {
       { label: 'Iterator', description: 'iter()', default: true },
       { label: 'Guard', description: 'check', default: false },
     ],
-    multiple: false,
-    custom: true,
     ...overrides,
-  }
+  })
 }
 
 function formOf(...questions: Question[]): QuestionForm {
-  const request: QuestionRequest = { session_id: 's1', message_id: 'm1', call_id: 'c1', questions, time: 0 }
-  return new QuestionForm(request)
+  return new QuestionForm(questionRequest(questions))
 }
 
 describe('a single question with a single choice', () => {

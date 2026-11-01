@@ -2,7 +2,6 @@
 
 #include "app/chat_session.h"
 
-#include <QCoreApplication>
 #include <QImage>
 #include <QQuickTextureFactory>
 #include <QCoroTask>
@@ -15,6 +14,19 @@ namespace
 {
 
 constexpr qsizetype CacheLimitBytes = 64 * 1024 * 1024;
+
+// Splits "<session id>/<image id>". Returns false when there is no slash.
+bool parseId(const QString& id, QString& sessionId, QString& imageId)
+{
+	const qsizetype slash = id.indexOf(u'/');
+	if(slash <= 0 || slash == id.size() - 1)
+	{
+		return false;
+	}
+	sessionId = id.left(slash);
+	imageId = id.mid(slash + 1);
+	return true;
+}
 
 } // namespace
 
@@ -98,11 +110,12 @@ public slots:
 		if(error.isEmpty())
 		{
 			m_image = QImage::fromData(bytes);
+			const bool exceedsRequestedSize = m_requestedSize.isValid() && (m_image.width() > m_requestedSize.width() || m_image.height() > m_requestedSize.height());
 			if(m_image.isNull())
 			{
 				m_error = u"not a picture"_s;
 			}
-			else if(m_requestedSize.isValid() && (m_image.width() > m_requestedSize.width() || m_image.height() > m_requestedSize.height()))
+			else if(exceedsRequestedSize)
 			{
 				m_image = m_image.scaled(m_requestedSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
 			}
@@ -123,24 +136,11 @@ private:
 ChatImageProvider::ChatImageProvider(SessionLookup lookup)
 	: m_host(new Host(std::move(lookup)))
 {
-	m_host->moveToThread(QCoreApplication::instance()->thread());
 }
 
 ChatImageProvider::~ChatImageProvider()
 {
 	m_host->deleteLater();
-}
-
-bool ChatImageProvider::parseId(const QString& id, QString& sessionId, QString& imageId)
-{
-	const qsizetype slash = id.indexOf(u'/');
-	if(slash <= 0 || slash == id.size() - 1)
-	{
-		return false;
-	}
-	sessionId = id.left(slash);
-	imageId = id.mid(slash + 1);
-	return true;
 }
 
 QQuickImageResponse* ChatImageProvider::requestImageResponse(const QString& id, const QSize& requestedSize)

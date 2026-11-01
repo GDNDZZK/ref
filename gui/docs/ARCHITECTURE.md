@@ -161,7 +161,7 @@ Delta 指向还没见过的 part 时，按 TUI 的 `apply_delta` 规则补建（
 
 ### SessionController
 
-一个会话的控制器：`create()`、`attach()`、`continueLast()`、`send()`、`abort()`、`permissionReply()`、`undo()`、`loadOlder()`、`getImage()`。订阅 `ServerClient::frameReceived`，按 session_id 过滤事件。
+一个会话的控制器：`create()`、`attach()`、`send()`、`abort()`、`permissionReply()`、`undo()`、`loadOlder()`、`getImage()`。订阅 `ServerClient::frameReceived`，按 session_id 过滤事件。
 
 - Attach 响应之前到达的事件不缓冲也不处理：它们要么已经在快照里，要么根本不会发来。这一点依赖服务器的行为，没有对着真实服务器的并发场景验证过。
 - 每次 `Backend::connected()` 后，如果已经有会话，自动重新 attach，快照替换整个历史；失败发 `reattachFailed`。

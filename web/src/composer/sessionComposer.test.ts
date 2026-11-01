@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NamedImage } from '../proto/generated'
-import { emitDraftRestored } from '../stores/draftBus.ts'
 import type { SlashCommand } from './completion.ts'
+import { emitDraftRestored } from './draftBus.ts'
 import { PromptHistory } from './history.ts'
 import { INTERRUPT_ARMED_MS, SessionComposer } from './sessionComposer.ts'
-import type { ComposerApi, ComposerHost, ToastLevel } from './sessionComposer.ts'
+import type { ToastLevel } from '../proto/generated'
+import type { ComposerApi, ComposerHost } from './sessionComposer.ts'
 
 const COMMANDS: SlashCommand[] = [
   { name: 'undo', aliases: [], title: 'Undo', takesArgs: false, custom: false },
@@ -43,6 +44,15 @@ function setup(options: { busy?: boolean; delayed?: boolean } = {}) {
 function type(composer: SessionComposer, text: string): void {
   composer.input(text, text.length)
 }
+
+describe('requestFocus', () => {
+  it('counts the requests, which the box watches', () => {
+    const { composer } = setup()
+    composer.requestFocus()
+    composer.requestFocus()
+    expect(composer.focusRequests.value).toBe(2)
+  })
+})
 
 describe('submit', () => {
   it('sends the text as a prompt and empties the box', async () => {

@@ -7,6 +7,7 @@
 // After a reconnect the handshake runs again and listeners are told the connection is
 // `open` once more; whatever the upper layer attached is its own to restore.
 
+import { describeError } from '../errorMessage.ts'
 import { PROTOCOL_VERSION } from '../proto/generated'
 import type { JsonValue, NotifyKind, Request, ServerFrame } from '../proto/generated'
 import type { Transport, TransportFactory } from './transport.ts'
@@ -21,6 +22,13 @@ export interface HelloResult {
   cwd: string
 }
 
+const PROTOCOL_WITHOUT_FIELD = 1 // servers older than protocol 2 do not report theirs
+
+// The protocol version the server speaks (1 while it has not said or not answered yet).
+export function protocolOf(hello: HelloResult | undefined): number {
+  return hello?.protocol ?? PROTOCOL_WITHOUT_FIELD
+}
+
 export class RefError extends Error {}
 
 export interface ConnectionOptions {
@@ -31,6 +39,7 @@ export interface ConnectionOptions {
   notifyKinds?: () => NotifyKind[] // asked at each handshake, so a reconnect carries the current choice
   retryDelaysMs?: number[] // waits between reconnect attempts; the last one repeats
   // Asked after each lost connection; true stops the retrying for good (e.g. the login expired).
+  // A rejection is reported as a connection error and the retrying goes on.
   giveUp?: () => Promise<boolean>
 }
 
@@ -140,7 +149,7 @@ export class RefConnection {
       const lostMeanwhile = transport !== this.transport
       if (lostMeanwhile) return // lost() has dealt with it
       // The server refused us (bad token, wrong protocol): retrying would be refused again.
-      this.close(error instanceof Error ? error.message : String(error))
+      this.close(describeError(error))
       return
     }
     this.attempt = 0
@@ -159,11 +168,11 @@ export class RefConnection {
     this.setState('connecting', `lost (${reason}); retrying`)
     const timer = setTimeout(() => this.dial(), delay)
     this.retryTimer = timer
-    void this.askToGiveUp(timer)
+    this.askToGiveUp(timer).catch((error) => this.reportError(error))
   }
 
   private async askToGiveUp(timer: ReturnType<typeof setTimeout>): Promise<void> {
-    const giveUp = await this.options.giveUp?.().catch(() => false)
+    const giveUp = await this.options.giveUp?.()
     if (giveUp && this.retryTimer === timer) this.close('the connection was refused for good')
   }
 

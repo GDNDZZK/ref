@@ -16,17 +16,19 @@ namespace refgui::session
 namespace
 {
 
-// Source names of the user messages that start a new turn; the others are interjections.
+using SourceKind = proto::MessageSource::Kind;
+
 // Whether the views draw the content as Markdown: they then must not get it raw.
 bool rendersMarkdown(const Block& block)
 {
-	const bool markdownSource = block.kind == Block::Kind::User && (block.source == u"shell"_s || block.source == u"compaction"_s);
+	const bool markdownSource = block.kind == Block::Kind::User && (block.sourceKind == SourceKind::Shell || block.sourceKind == SourceKind::Compaction);
 	return block.kind == Block::Kind::Markdown || block.kind == Block::Kind::Reasoning || markdownSource;
 }
 
 bool opensTurn(const Block& block)
 {
-	const bool isTurnSource = block.source == u"human"_s || block.source == u"peer"_s || block.source == u"spawn"_s;
+	// User messages from these start a new turn; the others are interjections.
+	const bool isTurnSource = block.sourceKind == SourceKind::Human || block.sourceKind == SourceKind::Peer || block.sourceKind == SourceKind::Spawn;
 	return block.kind == Block::Kind::User && isTurnSource;
 }
 
@@ -42,13 +44,13 @@ QList<int> changedRoles(const Block& before, const Block& after)
 		{Role::FailedRole, before.failed != after.failed},
 		{Role::MessageIdRole, before.messageId != after.messageId},
 		{Role::PartIndexRole, before.partIndex != after.partIndex},
-		{Role::SourceRole, before.source != after.source},
+		{Role::SourceRole, before.sourceKind != after.sourceKind},
 		{Role::SenderRole, before.sender != after.sender},
-		{Role::OpensTurnRole, before.kind != after.kind || before.source != after.source},
+		{Role::OpensTurnRole, before.kind != after.kind || before.sourceKind != after.sourceKind},
 		{Role::TimeRole, before.time != after.time},
 		{Role::ToolNameRole, before.toolName != after.toolName},
 		{Role::PurposeRole, before.purpose != after.purpose},
-		{Role::ToolStateRole, before.toolState != after.toolState},
+		{Role::ToolStateRole, before.toolStateKind != after.toolStateKind},
 		{Role::InputJsonRole, before.inputJson != after.inputJson},
 		{Role::RawInputRole, before.rawInput != after.rawInput},
 		{Role::CallIdRole, before.callId != after.callId},
@@ -126,10 +128,23 @@ const Block& ConversationModel::blockAt(qsizetype row) const
 	return row < m_rows.size() ? m_rows.at(row) : m_tailBlock;
 }
 
+bool ConversationModel::isExpandedByDefault(const Block& block) const
+{
+	switch(block.kind)
+	{
+	case Block::Kind::Reasoning:
+		return m_reasoningExpanded;
+	case Block::Kind::Tool:
+		return m_toolsExpanded;
+	default:
+		return false;
+	}
+}
+
 bool ConversationModel::isExpanded(const Block& block) const
 {
-	const bool isCompaction = block.kind == Block::Kind::User && block.source == u"compaction"_s;
-	const bool defaultExpanded = block.kind == Block::Kind::Reasoning ? m_reasoningExpanded : block.kind == Block::Kind::Tool ? m_toolsExpanded : false;
+	const bool isCompaction = block.kind == Block::Kind::User && block.sourceKind == SourceKind::Compaction;
+	const bool defaultExpanded = isExpandedByDefault(block);
 	const bool foldable = isCompaction || block.kind == Block::Kind::Reasoning || block.kind == Block::Kind::Tool;
 	return foldable && defaultExpanded != m_toggled.contains({block.messageId, block.partIndex});
 }
@@ -158,7 +173,7 @@ QVariant ConversationModel::data(const QModelIndex& index, int role) const
 	case PartIndexRole:
 		return static_cast<int>(block.partIndex);
 	case SourceRole:
-		return block.source;
+		return sourceName(block.sourceKind);
 	case SenderRole:
 		return block.sender;
 	case OpensTurnRole:
@@ -170,7 +185,7 @@ QVariant ConversationModel::data(const QModelIndex& index, int role) const
 	case PurposeRole:
 		return block.purpose;
 	case ToolStateRole:
-		return block.toolState;
+		return toolStateName(block.toolStateKind);
 	case InputJsonRole:
 		return block.inputJson;
 	case RawInputRole:
@@ -244,10 +259,10 @@ void ConversationModel::refreshToolSummary()
 		}
 		if(!lastToolSeen)
 		{
-			summary.lastToolDelayed = block.toolState == u"delayed"_s;
+			summary.lastToolDelayed = block.toolStateKind == proto::ToolState::Delayed;
 			lastToolSeen = true;
 		}
-		if(block.toolState == u"awaiting_permission"_s)
+		if(block.toolStateKind == proto::ToolState::AwaitingPermission)
 		{
 			++summary.awaitingPermission;
 			summary.oldestAwaitingCallId = block.callId; // the loop runs backwards: the last one set is the oldest
@@ -302,16 +317,21 @@ QHash<int, QByteArray> ConversationModel::roleNames() const
 	};
 }
 
-void ConversationModel::reset(const QList<proto::Message>& messages)
+ConversationModel::Built ConversationModel::buildNodes(const QList<proto::Message>& messages)
 {
-	QList<MessageNode> nodes;
-	QList<Block> rows;
+	Built built;
 	for(const proto::Message& message : messages)
 	{
 		MessageNode node = makeNode(message);
-		rows += buildRows(node);
-		nodes.append(std::move(node));
+		built.rows += buildRows(node);
+		built.nodes.append(std::move(node));
 	}
+	return built;
+}
+
+void ConversationModel::reset(const QList<proto::Message>& messages)
+{
+	auto [nodes, rows] = buildNodes(messages);
 
 	beginResetModel();
 	m_messages = std::move(nodes);
@@ -322,14 +342,7 @@ void ConversationModel::reset(const QList<proto::Message>& messages)
 
 void ConversationModel::replaceHistory(const QList<proto::Message>& messages)
 {
-	QList<MessageNode> nodes;
-	QList<Block> rows;
-	for(const proto::Message& message : messages)
-	{
-		MessageNode node = makeNode(message);
-		rows += buildRows(node);
-		nodes.append(std::move(node));
-	}
+	auto [nodes, rows] = buildNodes(messages);
 
 	const qsizetype comparable = std::min(m_rows.size(), rows.size());
 	qsizetype kept = 0;
@@ -361,14 +374,7 @@ void ConversationModel::replaceHistory(const QList<proto::Message>& messages)
 
 void ConversationModel::prependMessages(const QList<proto::Message>& older)
 {
-	QList<MessageNode> nodes;
-	QList<Block> rows;
-	for(const proto::Message& message : older)
-	{
-		MessageNode node = makeNode(message);
-		rows += buildRows(node);
-		nodes.append(std::move(node));
-	}
+	auto [nodes, rows] = buildNodes(older);
 	if(rows.isEmpty())
 	{
 		m_messages = nodes + m_messages;

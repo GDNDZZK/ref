@@ -20,6 +20,7 @@ import { useWorkspaceStore } from './workspace.ts'
 
 const NOTIFICATION_ICON = '/favicon.png'
 const PROMPT_DISMISSED_KEY = 'ref.notifyPromptDismissed'
+const PROMPT_DISMISSED_VALUE = '1'
 
 export const useNotificationsStore = defineStore('notifications', () => {
   const connection = useConnectionStore()
@@ -35,7 +36,7 @@ export const useNotificationsStore = defineStore('notifications', () => {
   const availability = notifier.availability
   const permission = ref<NotificationPermissionState>(notifier.permission())
 
-  const promptDismissed = ref(localStorage.getItem(PROMPT_DISMISSED_KEY) === '1')
+  const promptDismissed = ref(localStorage.getItem(PROMPT_DISMISSED_KEY) === PROMPT_DISMISSED_VALUE)
 
   const center = new NotificationCenter({
     notifier,
@@ -75,7 +76,7 @@ export const useNotificationsStore = defineStore('notifications', () => {
 
   function dismissPrompt(): void {
     promptDismissed.value = true
-    localStorage.setItem(PROMPT_DISMISSED_KEY, '1')
+    localStorage.setItem(PROMPT_DISMISSED_KEY, PROMPT_DISMISSED_VALUE)
   }
 
   function start(): void {

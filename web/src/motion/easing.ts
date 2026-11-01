@@ -3,6 +3,8 @@
 // QML animation sets them. Every curve maps progress [0, 1] to effective progress;
 // values may leave [0, 1] (overshoot).
 
+import { clamp } from '../clamp.ts'
+
 export type EasingFn = (progress: number) => number
 
 const QT_DEFAULT_ELASTIC_AMPLITUDE = 1
@@ -13,8 +15,12 @@ const QT_DEFAULT_OVERSHOOT = 1.70158
 const OUT_EXPO_SCALE = 1.001
 const OUT_EXPO_RATE = 10
 
+const ELASTIC_DECAY_RATE = 10
+const ELASTIC_QUARTER_PERIOD = 0.25
+const IN_OUT_SINE_SCALE = -0.5
+
 function clampProgress(t: number): number {
-  return Math.min(1, Math.max(0, t))
+  return clamp(t, 0, 1)
 }
 
 const linear: EasingFn = (t) => clampProgress(t)
@@ -29,7 +35,7 @@ const inCubic: EasingFn = (t) => {
   return p * p * p
 }
 
-const inOutSine: EasingFn = (t) => -0.5 * (Math.cos(Math.PI * clampProgress(t)) - 1)
+const inOutSine: EasingFn = (t) => IN_OUT_SINE_SCALE * (Math.cos(Math.PI * clampProgress(t)) - 1)
 
 const outExpo: EasingFn = (t) => {
   const p = clampProgress(t)
@@ -55,13 +61,17 @@ export function outElastic(
   const target = 1
   const reachesTarget = amplitude >= target
   const a = reachesTarget ? amplitude : target
-  const phase = reachesTarget ? (period / (2 * Math.PI)) * Math.asin(target / a) : period / 4
+  const phase = reachesTarget
+    ? (period / (2 * Math.PI)) * Math.asin(target / a)
+    : period * ELASTIC_QUARTER_PERIOD
 
   return (t) => {
     const p = clampProgress(t)
     if (p === 0) return 0
     if (p === 1) return target
-    return a * Math.pow(2, -10 * p) * Math.sin(((p - phase) * (2 * Math.PI)) / period) + target
+    return (
+      a * Math.pow(2, -ELASTIC_DECAY_RATE * p) * Math.sin(((p - phase) * (2 * Math.PI)) / period) + target
+    )
   }
 }
 
@@ -80,7 +90,7 @@ export type EasingName = keyof typeof plainEasings
 
 export const easings: Record<EasingName, EasingFn> = plainEasings
 
-export function isEasingName(name: string): name is EasingName {
+function isEasingName(name: string): name is EasingName {
   return Object.hasOwn(plainEasings, name)
 }
 
