@@ -3,7 +3,7 @@
 use std::collections::{BTreeSet, HashMap};
 
 use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ref_proto::{AgentInfo, ModelInfo, SessionStatus};
@@ -263,10 +263,7 @@ impl ChatState {
     }
 
     pub fn contains(&self, x: u16, y: u16) -> bool {
-        x >= self.area.x
-            && x < self.area.x + self.area.width
-            && y >= self.area.y
-            && y < self.area.y + self.area.height
+        self.area.contains(Position::new(x, y))
     }
 
     pub fn hit_at(&self, x: u16, y: u16) -> Option<Hit> {
@@ -967,8 +964,7 @@ pub fn draw_tile(buf: &mut Buffer, area: Rect, bar_x: u16, view: &mut SessionVie
 
 /// Whether the "new messages" pill (or a tile's "↓" marker) was clicked.
 pub fn pill_hit(chat: &ChatState, x: u16, y: u16) -> bool {
-    chat.pill
-        .is_some_and(|r| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height)
+    chat.pill.is_some_and(|r| r.contains(Position::new(x, y)))
 }
 
 #[cfg(test)]
