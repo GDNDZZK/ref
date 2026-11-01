@@ -27,15 +27,14 @@ ModalDialog {
 		}
 	]
 
-	Text {
-		textFormat: Text.PlainText
-		x: Theme.dialogPadding
-		width: parent.width - 2 * Theme.dialogPadding
-		topPadding: 4
-		bottomPadding: Theme.dialogPadding
-		text: qsTr("Delete \"%1\" from history? This cannot be undone.").arg(Workspace.dialogArgs.title ?? "")
-		color: Theme.text
-		font.pixelSize: Theme.secondaryFontSize
-		wrapMode: Text.Wrap
+	DialogBody {
+		Text {
+			textFormat: Text.PlainText
+			width: parent.width
+			text: qsTr("Delete \"%1\" from history? This cannot be undone.").arg(Workspace.dialogArgs.title ?? "")
+			color: Theme.text
+			font.pixelSize: Theme.secondaryFontSize
+			wrapMode: Text.Wrap
+		}
 	}
 }

@@ -33,10 +33,7 @@ SessionDialog {
 	onTabChanged: load()
 	Component.onCompleted: load()
 
-	Column {
-		width: parent.width
-		topPadding: 4
-		bottomPadding: Theme.dialogPadding
+	DialogBody {
 		spacing: 14
 
 		Item {
@@ -44,8 +41,7 @@ SessionDialog {
 			height: 30
 
 			Segmented {
-				x: Theme.dialogPadding
-				width: parent.width - 2 * Theme.dialogPadding
+				width: parent.width
 				model: [
 					{text: qsTr("Peers"), value: "peers"},
 					{text: qsTr("Name"), value: "name"},
@@ -58,8 +54,7 @@ SessionDialog {
 		}
 
 		Rectangle {
-			x: Theme.dialogPadding
-			width: parent.width - 2 * Theme.dialogPadding
+			width: parent.width
 			height: Math.min(320, Math.max(200, output.contentHeight + 2 * 14))
 			radius: 10
 			color: Theme.codeBackground
@@ -92,8 +87,7 @@ SessionDialog {
 		}
 
 		Row {
-			x: Theme.dialogPadding
-			width: parent.width - 2 * Theme.dialogPadding
+			width: parent.width
 			spacing: 10
 			visible: dialog.tab === "name"
 

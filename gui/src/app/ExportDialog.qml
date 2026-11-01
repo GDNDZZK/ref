@@ -31,11 +31,7 @@ SessionDialog {
 		}
 	]
 
-	Column {
-		x: Theme.dialogPadding
-		width: parent.width - 2 * Theme.dialogPadding
-		topPadding: 4
-		bottomPadding: Theme.dialogPadding
+	DialogBody {
 		spacing: 12
 
 		Text {
