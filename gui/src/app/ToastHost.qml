@@ -76,10 +76,16 @@ Item {
 				required property int repeats
 				required property bool leaving
 
-				readonly property color fill: level === "error" ? Theme.errorSurface : level === "warn" ? Theme.warningSurface : Theme.surface
-				readonly property color edge: level === "error" ? Theme.errorBorder : level === "warn" ? Theme.warningBorder : Theme.border
-				readonly property color tint: level === "error" ? Theme.danger : level === "warn" ? Theme.warning : Theme.accent
-				readonly property int lifetime: level === "error" ? Motion.toastErrorMs : level === "warn" ? Motion.toastWarnMs : Motion.toastInfoMs
+				readonly property var looks: ({
+					error: {fill: Theme.errorSurface, edge: Theme.errorBorder, tint: Theme.danger, lifetime: Motion.toastErrorMs, icon: "error"},
+					warn: {fill: Theme.warningSurface, edge: Theme.warningBorder, tint: Theme.warning, lifetime: Motion.toastWarnMs, icon: "warning"},
+					info: {fill: Theme.surface, edge: Theme.border, tint: Theme.accent, lifetime: Motion.toastInfoMs, icon: "info"}
+				})
+				readonly property var look: looks[level] ?? looks.info
+				readonly property color fill: look.fill
+				readonly property color edge: look.edge
+				readonly property color tint: look.tint
+				readonly property int lifetime: look.lifetime
 
 				width: parent.width
 				height: leaving ? 0 : card.height + 8
@@ -145,7 +151,7 @@ Item {
 						}
 						Icon {
 							id: glyph
-							name: toast.level === "error" ? "error" : toast.level === "warn" ? "warning" : "info"
+							name: toast.look.icon
 							size: 16
 							color: toast.tint
 						}
