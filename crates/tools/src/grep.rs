@@ -300,15 +300,16 @@ pub(crate) fn collect_files(
             bail!("grep cancelled");
         }
         let Ok(entry) = entry else { continue };
-        if entry.file_type().is_some_and(|t| t.is_file()) {
-            if let Some(m) = &matcher {
-                let rel = entry.path().strip_prefix(root).unwrap_or(entry.path());
-                if !m.is_match(rel) {
-                    continue;
-                }
-            }
-            files.push(entry.into_path());
+        if !entry.file_type().is_some_and(|t| t.is_file()) {
+            continue;
         }
+        if let Some(m) = &matcher {
+            let rel = entry.path().strip_prefix(root).unwrap_or(entry.path());
+            if !m.is_match(rel) {
+                continue;
+            }
+        }
+        files.push(entry.into_path());
     }
     files.sort();
     Ok(files)
