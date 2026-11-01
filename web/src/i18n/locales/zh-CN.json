@@ -40,6 +40,10 @@
       }
     }
   },
+  "storage": {
+    "settingsCorrupt": "无法读取已保存的设置，已使用默认设置。",
+    "historyCorrupt": "无法读取已保存的提示历史，将从空白开始。"
+  },
   "code": {
     "plainText": "文本",
     "copy": "复制",
