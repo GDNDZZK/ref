@@ -114,8 +114,7 @@ impl Row {
     }
     /// Prepends decorative spans (shifting skip/end/zones).
     pub fn indent(mut self, spans: Vec<Span<'static>>) -> Self {
-        let w: usize = spans.iter().map(|s| text::width(&s.content)).sum();
-        let w = w as u16;
+        let w = text::spans_width(&spans) as u16;
         let mut new = spans;
         new.append(&mut self.line.spans);
         self.line.spans = new;

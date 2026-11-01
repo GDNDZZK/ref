@@ -7,7 +7,7 @@ use ratatui::style::{Modifier, Style};
 use ref_proto::ImageData;
 use unicode_segmentation::UnicodeSegmentation;
 
-use super::text::{gwidth, width};
+use super::text::{expand_tabs, gwidth, width};
 use super::theme;
 
 #[derive(Debug, Clone)]
@@ -161,10 +161,8 @@ impl Editor {
         if !self.delete_selection() {
             self.snapshot_coalesced(s);
         }
-        let s = s
-            .replace("\r\n", "\n")
-            .replace('\r', "\n")
-            .replace('\t', "    ");
+        let s = s.replace("\r\n", "\n").replace('\r', "\n");
+        let s = expand_tabs(&s);
         self.text.insert_str(self.cursor, &s);
         self.cursor += s.len();
         self.pref_col = None;

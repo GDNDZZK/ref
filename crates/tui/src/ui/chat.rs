@@ -597,7 +597,7 @@ fn tail_rows(view: &SessionView, env: &Env<'_>, w: usize) -> Vec<Row> {
     } = &view.info.status
     {
         rows.push(Row::blank());
-        let secs = ((next_at - env.now).max(0) + 999) / 1000;
+        let secs = text::ceil_secs(next_at - env.now);
         let msg = format!(
             "{} Retrying in {secs}s (attempt {attempt}): {}",
             theme::spinner(env.tick),
