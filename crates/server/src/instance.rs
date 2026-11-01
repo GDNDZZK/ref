@@ -35,13 +35,22 @@ fn list_instances(dir: &Path) -> Vec<InstanceInfo> {
         if p.extension().and_then(|x| x.to_str()) != Some("json") {
             continue;
         }
-        let Ok(raw) = std::fs::read(&p) else { continue };
+        let raw = match std::fs::read(&p) {
+            Ok(raw) => raw,
+            Err(e) => {
+                tracing::debug!("cannot read instance file {}: {e}", p.display());
+                continue;
+            }
+        };
         match serde_json::from_slice::<InstanceInfo>(&raw) {
             Ok(i) if ref_sys::pid_alive(i.pid) => out.push(i),
             Ok(_) => {
-                let _ = std::fs::remove_file(&p);
+                // Best effort: a stale file left behind is skipped again next time.
+                if let Err(e) = std::fs::remove_file(&p) {
+                    tracing::debug!("cannot remove stale instance file {}: {e}", p.display());
+                }
             }
-            Err(_) => {}
+            Err(e) => tracing::debug!("corrupt instance file {}: {e}", p.display()),
         }
     }
     out.sort_by_key(|i| std::cmp::Reverse(i.started_at));
