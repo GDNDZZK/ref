@@ -16,43 +16,37 @@ Item {
 	readonly property int horizontalPadding: Theme.toolBodyPaddingX
 	readonly property int verticalPadding: Theme.toolBodyPaddingY
 	readonly property bool hasLines: ToolInfo.listing(call.output).some(group => group.rows.length > 0)
-	readonly property string kind: {
-		switch (call.toolName) {
-		case "edit":
-		case "write":
-			return Fields.stringOf(meta, "diff") !== "" ? "diff" : "generic"
-		case "bash":
-		case "grep":
-		case "find":
-		case "webfetch":
-		case "todo":
-			return call.toolName
-		case "read":
-			return hasLines && !call.failed && call.toolState === ToolState.done ? "read" : "generic"
-		case "send_message":
-		case "create_session":
-		case "read_session":
-		case "list_sessions":
-		case "message_status":
-		case "close_session":
-			return "session"
-		default:
-			return "generic"
-		}
+	readonly property string genericFile: "GenericBody.qml"
+	// The body of each tool that has its own; edit, write, read and the session tools are decided in fileFor().
+	readonly property var bodyFiles: ({
+		"bash": "BashBody.qml",
+		"grep": "GrepBody.qml",
+		"find": "FindBody.qml",
+		"webfetch": "WebfetchBody.qml",
+		"todo": "TodoBody.qml"
+	})
+	readonly property string bodyFile: fileFor(call.toolName)
+
+	function fileFor(toolName) {
+		if (toolName === "edit" || toolName === "write")
+			return Fields.stringOf(meta, "diff") !== "" ? "DiffBody.qml" : genericFile
+		if (toolName === "read")
+			return hasLines && !call.failed && call.toolState === ToolState.done ? "ReadBody.qml" : genericFile
+		if (SessionTools.isSessionTool(toolName))
+			return "SessionBody.qml"
+		return bodyFiles[toolName] ?? genericFile
 	}
+
+	// A body needs `call` as soon as it is made, so it goes in as an initial property.
+	function loadBody() {
+		loader.setSource(bodyFile, {call: call})
+	}
+
+	onBodyFileChanged: loadBody()
+	Component.onCompleted: loadBody()
 
 	width: parent ? parent.width : 0
 	height: (loader.item ? (loader.item as Item).height : 0) + (call.images.length > 0 ? pictures.height : 0)
-
-	Component { id: generic; GenericBody { call: body.call; onShowAllRequested: body.showAllRequested() } }
-	Component { id: diff; DiffBody { call: body.call; onShowAllRequested: body.showAllRequested() } }
-	Component { id: bash; BashBody { call: body.call; onShowAllRequested: body.showAllRequested() } }
-	Component { id: read; ReadBody { call: body.call; onShowAllRequested: body.showAllRequested() } }
-	Component { id: grep; GrepBody { call: body.call; onShowAllRequested: body.showAllRequested() } }
-	Component { id: find; FindBody { call: body.call; onShowAllRequested: body.showAllRequested() } }
-	Component { id: webfetch; WebfetchBody { call: body.call; onShowAllRequested: body.showAllRequested() } }
-	Component { id: session; SessionBody { call: body.call; onShowAllRequested: body.showAllRequested() } }
-	Component { id: todo; TodoBody { call: body.call } }
 
 	ImageStrip {
 		id: pictures
@@ -69,18 +63,9 @@ Item {
 	Loader {
 		id: loader
 		width: parent.width
-		sourceComponent: {
-			switch (body.kind) {
-			case "diff": return diff
-			case "bash": return bash
-			case "read": return read
-			case "grep": return grep
-			case "find": return find
-			case "webfetch": return webfetch
-			case "session": return session
-			case "todo": return todo
-			default: return generic
-			}
+		onLoaded: {
+			if (item.showAllRequested)
+				item.showAllRequested.connect(body.showAllRequested)
 		}
 	}
 }
