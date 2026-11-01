@@ -1,14 +1,13 @@
 //! Context compaction: model-generated summary (manual / automatic / overflow) or a
 //! summary supplied by the model via `compact_context`.
 
-use crate::engine::{JITTER_FRACTION, Prep, backoff};
+use crate::engine::{JITTER_FRACTION, Prep, backoff, retry_max_delay};
 use crate::hub::Hub;
 use crate::session::{Session, user_message};
 use ref_config::COMPACTION_AGENT;
 use ref_llm::{AssistantBlock, ChatMessage, UserContent};
 use ref_proto::{MessageSource, ModelRef, Role, SessionEvent, SessionStatus};
 use std::sync::Arc;
-use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 /// Text of the compaction summary message.
@@ -219,11 +218,7 @@ async fn summarize(
         SUMMARY_REQUEST.into(),
     )]));
     let mut req = crate::images::clamp_request(req, &cs.provider, &cs.model).await;
-    let max = Duration::from_secs(if prep.cfg.retry_max_delay > 0 {
-        prep.cfg.retry_max_delay
-    } else {
-        600
-    });
+    let max = retry_max_delay(&prep.cfg);
     let mut attempt = 0u32;
     let mut hard_failures = 0u32;
     let mut clipped = false;
