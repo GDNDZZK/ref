@@ -11,6 +11,14 @@ import Segmented from '../Segmented.vue'
 import TextField from '../TextField.vue'
 import { describeError } from '../../errorMessage.ts'
 
+// The backend command each tab runs.
+const COMMAND_BY_TAB: Record<PeersTab, string> = {
+  peers: 'peers',
+  name: 'peers-name',
+  inbox: 'peers-inbox',
+  outbox: 'peers-outbox',
+}
+
 const props = defineProps<{ sessionId: string; tab: PeersTab; name?: string }>()
 const { t } = useI18n()
 const dialogs = useDialogsStore()
@@ -37,11 +45,7 @@ async function load(args = ''): Promise<void> {
   text.value = undefined
   failed.value = false
   try {
-    const result = await workspace.peerCommand(
-      props.sessionId,
-      `peers-${tab.value}`.replace('peers-peers', 'peers'),
-      args,
-    )
+    const result = await workspace.peerCommand(props.sessionId, COMMAND_BY_TAB[tab.value], args)
     if (mine === latest) text.value = result
   } catch (error) {
     if (mine !== latest) return
@@ -50,7 +54,7 @@ async function load(args = ''): Promise<void> {
   }
 }
 
-watch(tab, () => void load(), { immediate: false })
+watch(tab, () => void load())
 void load(tab.value === 'name' ? (props.name ?? '') : '')
 
 async function setName(): Promise<void> {
@@ -58,7 +62,7 @@ async function setName(): Promise<void> {
   if (next === '') return
   nameError.value = ''
   try {
-    await workspace.peerCommand(props.sessionId, 'peers-name', next)
+    await workspace.peerCommand(props.sessionId, COMMAND_BY_TAB.name, next)
     await load()
   } catch (error) {
     nameError.value = describeError(error)
