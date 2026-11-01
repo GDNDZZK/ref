@@ -55,12 +55,7 @@ pub fn submit(hub: &Arc<Hub>, s: &Arc<Session>, msg: Message) -> bool {
             emit_queue(hub, s, &st);
             true
         } else {
-            hub.emit(
-                &s.id,
-                SessionEvent::Message {
-                    message: msg.clone(),
-                },
-            );
+            hub.emit_message(&s.id, &msg);
             st.push_message(msg);
             start_run_locked(hub, s, &mut st);
             false
@@ -101,12 +96,7 @@ pub fn append_only(hub: &Arc<Hub>, s: &Arc<Session>, msg: Message) {
             st.queue.push_back(msg);
             emit_queue(hub, s, &st);
         } else {
-            hub.emit(
-                &s.id,
-                SessionEvent::Message {
-                    message: msg.clone(),
-                },
-            );
+            hub.emit_message(&s.id, &msg);
             st.push_message(msg);
             hub.emit_info(&st);
         }
@@ -207,8 +197,7 @@ async fn run_task(hub: Arc<Hub>, s: Arc<Session>, cancel: CancellationToken, id:
         {
             m.error = Some("Aborted".into());
             m.time_end.get_or_insert(now_ms());
-            let m = m.clone();
-            hub.emit(&s.id, SessionEvent::Message { message: m });
+            hub.emit_message(&s.id, m);
         }
     }
     if let Outcome::Failed(text) = &outcome {
@@ -232,7 +221,7 @@ async fn run_task(hub: Arc<Hub>, s: Arc<Session>, cancel: CancellationToken, id:
             error: Some(text.clone()),
         };
         let mut st = s.lock();
-        hub.emit(&s.id, SessionEvent::Message { message: m.clone() });
+        hub.emit_message(&s.id, &m);
         st.messages.push(m);
         hub.emit(&s.id, SessionEvent::Error { text: text.clone() });
         st.info.last_error = Some(text.clone());
@@ -255,12 +244,7 @@ fn finish_run(hub: &Arc<Hub>, s: &Arc<Session>, id: u64, completed: bool) {
         if cancel_unfinished(&mut st.messages, CANCELLED_OUTPUT) {
             let msgs = st.messages.clone();
             if let Some(last) = msgs.last().filter(|m| m.role == Role::Assistant) {
-                hub.emit(
-                    &s.id,
-                    SessionEvent::Message {
-                        message: last.clone(),
-                    },
-                );
+                hub.emit_message(&s.id, last);
             }
         }
         crate::agent_switch::deliver(hub, &mut st);
@@ -288,7 +272,7 @@ fn finish_run(hub: &Arc<Hub>, s: &Arc<Session>, id: u64, completed: bool) {
             let has_human = st.queue.iter().any(|m| m.source == MessageSource::Human);
             if st.closed || (st.user_aborted && !has_human) {
                 while let Some(m) = st.queue.pop_front() {
-                    hub.emit(&s.id, SessionEvent::Message { message: m.clone() });
+                    hub.emit_message(&s.id, &m);
                     st.push_message(m);
                 }
                 emit_queue(hub, s, &st);
@@ -404,7 +388,7 @@ fn drain_queue(hub: &Arc<Hub>, s: &Arc<Session>) {
     let mut st = s.lock();
     let mut any = false;
     while let Some(m) = st.queue.pop_front() {
-        hub.emit(&s.id, SessionEvent::Message { message: m.clone() });
+        hub.emit_message(&s.id, &m);
         st.push_message(m);
         any = true;
     }
@@ -460,12 +444,7 @@ fn context_notice(hub: &Arc<Hub>, s: &Arc<Session>, prep: &Prep) {
             context_notice_text(&st.info.context),
             vec![],
         );
-        hub.emit(
-            &s.id,
-            SessionEvent::Message {
-                message: msg.clone(),
-            },
-        );
+        hub.emit_message(&s.id, &msg);
         st.push_message(msg);
         hub.emit_info(&st);
     }
@@ -495,12 +474,7 @@ fn must_report_reminder(hub: &Arc<Hub>, s: &Arc<Session>) -> bool {
     {
         let mut st = s.lock();
         st.reminders += 1;
-        hub.emit(
-            &s.id,
-            SessionEvent::Message {
-                message: msg.clone(),
-            },
-        );
+        hub.emit_message(&s.id, &msg);
         st.push_message(msg);
     }
     crate::ops::persist(hub, s);
@@ -639,7 +613,7 @@ async fn stream_with_retry(
                 usage: None,
                 error: None,
             };
-            hub.emit(&s.id, SessionEvent::Message { message: m.clone() });
+            hub.emit_message(&s.id, &m);
             st.messages.push(m);
             hub.set_status(&mut st, SessionStatus::Busy);
         }
@@ -759,8 +733,7 @@ fn keep_aborted_partial(hub: &Arc<Hub>, s: &Arc<Session>, id: &str) {
             *time_end = Some(now_ms());
         }
     }
-    let msg = m.clone();
-    hub.emit(&s.id, SessionEvent::Message { message: msg });
+    hub.emit_message(&s.id, m);
 }
 
 fn finalize_message(hub: &Arc<Hub>, s: &Arc<Session>, p: &Prep, id: &str, resp: ref_llm::Response) {
@@ -829,8 +802,7 @@ fn finalize_message(hub: &Arc<Hub>, s: &Arc<Session>, p: &Prep, id: &str, resp: 
             other => m.error = Some(format!("Response ended: {other}")),
         }
     }
-    let msg = st.messages[i].clone();
-    hub.emit(&s.id, SessionEvent::Message { message: msg });
+    hub.emit_message(&s.id, &st.messages[i]);
     let mut ctx = crate::models::context_for(&p.cfg, &p.model_ref);
     ctx.used = resp.usage.total_context();
     st.info.context = ctx;

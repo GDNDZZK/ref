@@ -76,7 +76,7 @@ pub fn insert_summary(
     let at = at.unwrap_or(len).min(len);
     st.messages.insert(at, msg.clone());
     if at == len {
-        hub.emit(&s.id, SessionEvent::Message { message: msg });
+        hub.emit_message(&s.id, &msg);
     } else {
         hub.emit(&s.id, st.reset_event());
     }
