@@ -374,16 +374,15 @@ impl Mock {
         let model = self.world().sessions.get(sid).map(|s| s.info.model.clone());
         let mid = id("msg");
         let m = Message {
-            id: mid.clone(),
-            role: Role::Assistant,
-            time: now_ms(),
-            time_end: None,
-            source: MessageSource::Human,
-            parts: vec![],
             model,
             agent: Some(self.agent_of(sid)),
-            usage: None,
-            error: None,
+            ..new_message(
+                mid.clone(),
+                Role::Assistant,
+                now_ms(),
+                MessageSource::Human,
+                vec![],
+            )
         };
         self.emit(sid, SessionEvent::Message { message: m });
         mid
@@ -451,16 +450,85 @@ impl Mock {
     }
 
     async fn sleep_or_abort(&self, sid: &str, ms: u64) -> bool {
-        let steps = ms / 50;
+        let steps = ms / ABORT_POLL_MS;
         for _ in 0..steps.max(1) {
             if self.aborted(sid) {
                 return false;
             }
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            tokio::time::sleep(Duration::from_millis(ABORT_POLL_MS)).await;
         }
         !self.aborted(sid)
     }
 }
+
+/// How often sleeping mock steps check for an abort.
+const ABORT_POLL_MS: u64 = 50;
+const PERMISSION_POLL: Duration = Duration::from_millis(100);
+const STARTUP_DELAY: Duration = Duration::from_millis(150);
+/// Age gap between consecutive seeded history sessions (7 hours).
+const HISTORY_SPACING_MS: i64 = 7 * 3_600_000;
+/// Length of a seeded history session.
+const HISTORY_SESSION_SPAN_MS: i64 = 600_000;
+const SEEDED_WORKER_CONTEXT_TOKENS: u64 = 120_000;
+const DOCS_WRITER_DELAY: Duration = Duration::from_secs(6);
+/// The idle pause between worker rounds, and after an aborted round.
+const WORKER_PAUSE: Duration = Duration::from_secs(4);
+const WORKER_ABORTED_PAUSE: Duration = Duration::from_secs(20);
+const WORKER_TOOL_MS: u64 = 1500;
+const DEMO_TURN_CONTEXT_TOKENS: u64 = 45_000;
+const WORKER_ROUND_CONTEXT_TOKENS: u64 = 3_000;
+const DEMO_USAGE: Usage = Usage {
+    input: 1834,
+    output: 912,
+    cache_read: 40_210,
+    cache_write: 2048,
+    reasoning: 230,
+};
+const WORKER_USAGE: Usage = Usage {
+    input: 500,
+    output: 120,
+    cache_read: 9000,
+    cache_write: 0,
+    reasoning: 40,
+};
+const REPLY_USAGE: Usage = Usage {
+    input: 100,
+    output: 30,
+    cache_read: 0,
+    cache_write: 0,
+    reasoning: 0,
+};
+
+// Part indices of the demo turn.
+const PART_REASONING: usize = 0;
+const PART_INTRO: usize = 1;
+const PART_READ: usize = 2;
+const PART_GREP: usize = 3;
+const PART_EDIT: usize = 4;
+const PART_BASH: usize = 5;
+const PART_ANSWER: usize = 6;
+// Part indices of a worker round (the reasoning part is `PART_REASONING`).
+const WORKER_TOOL_PART: usize = 1;
+const WORKER_TEXT_PART: usize = 2;
+
+// Pauses of the demo turn.
+const THINK_DELAY: Duration = Duration::from_millis(400);
+const READ_MS: u64 = 600;
+const GREP_MS: u64 = 400;
+const EDIT_RUN_MS: u64 = 300;
+const BASH_START_MS: u64 = 2000;
+const BASH_LINE_MS: u64 = 120;
+const TOOL_INPUT_DELAY: Duration = Duration::from_millis(30);
+const TOOL_INPUT_CHUNK_BYTES: usize = 8;
+
+// The file the demo turn reads and edits.
+const PARSER_PATH: &str = "src/parser.rs";
+const PARSER_TAG: &str = "a1f3";
+const BUGGY_LINE: usize = 42;
+const READ_LINES: usize = 260;
+const BASH_TEST_COUNT: usize = 24;
+const EDIT_PURPOSE: &str = "Fix the off-by-one in parse_items";
+const DENIED_OUTPUT: &str = "The user denied this tool call.";
 
 const PEERS_TEXT: &str = "You are \"mock\" (ses_mock).\nOther live sessions (1):\n  [idle] worker · \"demo\" · general · background · /tmp · started 2m ago";
 const PEERS_INBOX_TEXT: &str = "Inbox is empty: no messages from other sessions.";
@@ -549,13 +617,39 @@ impl Mock {
         );
     }
 
-    fn tool_mut(&self, sid: &str, mid: &str, idx: usize, f: impl FnOnce(&mut Part)) {
+    fn part_mut(&self, sid: &str, mid: &str, idx: usize, f: impl FnOnce(&mut Part)) {
         if let Some(m) = self.message(sid, mid)
             && let Some(mut p) = m.parts.get(idx).cloned()
         {
             f(&mut p);
             self.set_part(sid, mid, idx, p);
         }
+    }
+
+    fn start_text_part(&self, sid: &str, mid: &str, idx: usize) {
+        let part = Part::Text {
+            text: String::new(),
+            time: now_ms(),
+        };
+        self.set_part(sid, mid, idx, part);
+    }
+
+    fn start_reasoning_part(&self, sid: &str, mid: &str, idx: usize) {
+        let part = Part::Reasoning {
+            text: String::new(),
+            time: now_ms(),
+            time_end: None,
+            provider_data: None,
+        };
+        self.set_part(sid, mid, idx, part);
+    }
+
+    fn end_reasoning_part(&self, sid: &str, mid: &str, idx: usize) {
+        self.part_mut(sid, mid, idx, |p| {
+            if let Part::Reasoning { time_end, .. } = p {
+                *time_end = Some(now_ms());
+            }
+        });
     }
 
     fn finish_tool(
@@ -567,7 +661,7 @@ impl Mock {
         output: &str,
         meta: Option<Value>,
     ) {
-        self.tool_mut(sid, mid, idx, |p| {
+        self.part_mut(sid, mid, idx, |p| {
             if let Part::Tool {
                 state: s,
                 output: o,
@@ -585,7 +679,7 @@ impl Mock {
     }
 
     fn set_tool_state(&self, sid: &str, mid: &str, idx: usize, state: ToolState) {
-        self.tool_mut(sid, mid, idx, |p| {
+        self.part_mut(sid, mid, idx, |p| {
             if let Part::Tool { state: s, .. } = p {
                 *s = state;
             }
@@ -625,7 +719,7 @@ impl Mock {
         let res = loop {
             tokio::select! {
                 r = &mut rx => break r.ok(),
-                _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                _ = tokio::time::sleep(PERMISSION_POLL) => {
                     if self.aborted(sid) { break None; }
                 }
             }
@@ -641,238 +735,229 @@ impl Mock {
         self.set_status(sid, SessionStatus::Busy);
         let mid = self.new_assistant(sid);
         let ok = self.turn_body(sid, &mid, prompt).await;
-        let usage = Usage {
-            input: 1834,
-            output: 912,
-            cache_read: 40_210,
-            cache_write: 2048,
-            reasoning: 230,
-        };
-        self.add_context(sid, 45_000);
-        self.finish(sid, &mid, usage, (!ok).then(|| ABORTED_ERROR.to_string()));
+        self.add_context(sid, DEMO_TURN_CONTEXT_TOKENS);
+        self.finish(
+            sid,
+            &mid,
+            DEMO_USAGE,
+            (!ok).then(|| ABORTED_ERROR.to_string()),
+        );
         self.set_status(sid, SessionStatus::Idle);
     }
 
+    /// Plays every step in order; each step returns false when aborted.
     async fn turn_body(&self, sid: &str, mid: &str, prompt: &str) -> bool {
-        tokio::time::sleep(Duration::from_millis(400)).await;
-        // Reasoning.
-        self.set_part(
-            sid,
-            mid,
-            0,
-            Part::Reasoning {
-                text: String::new(),
-                time: now_ms(),
-                time_end: None,
-                provider_data: None,
-            },
-        );
-        if !self
-            .stream(sid, mid, 0, REASONING, StreamSpec::reasoning(3, 25))
-            .await
-        {
+        tokio::time::sleep(THINK_DELAY).await;
+        self.reasoning_step(sid, mid).await
+            && self.intro_step(sid, mid, prompt).await
+            && self.read_step(sid, mid).await
+            && self.grep_step(sid, mid).await
+            && self.edit_step(sid, mid).await
+            && self.bash_step(sid, mid).await
+            && self.answer_step(sid, mid).await
+    }
+
+    async fn reasoning_step(&self, sid: &str, mid: &str) -> bool {
+        self.start_reasoning_part(sid, mid, PART_REASONING);
+        let spec = StreamSpec::reasoning(3, 25);
+        if !self.stream(sid, mid, PART_REASONING, REASONING, spec).await {
             return false;
         }
-        self.tool_mut(sid, mid, 0, |p| {
-            if let Part::Reasoning { time_end, .. } = p {
-                *time_end = Some(now_ms());
-            }
-        });
-        // Short text.
-        self.set_part(
-            sid,
-            mid,
-            1,
-            Part::Text {
-                text: String::new(),
-                time: now_ms(),
-            },
-        );
+        self.end_reasoning_part(sid, mid, PART_REASONING);
+        true
+    }
+
+    async fn intro_step(&self, sid: &str, mid: &str, prompt: &str) -> bool {
+        self.start_text_part(sid, mid, PART_INTRO);
         let intro = if prompt.to_lowercase().contains("hello") {
             "Hi! Let me take a look at the project first."
         } else {
             "Let me look at the parser first."
         };
-        if !self
-            .stream(sid, mid, 1, intro, StreamSpec::text(2, 20))
+        self.stream(sid, mid, PART_INTRO, intro, StreamSpec::text(2, 20))
             .await
-        {
-            return false;
-        }
-        // Tool: read (done).
+    }
+
+    /// Tool: read (done).
+    async fn read_step(&self, sid: &str, mid: &str) -> bool {
         self.set_status(sid, SessionStatus::Running);
-        self.set_part(
-            sid,
-            mid,
-            2,
-            tool_part(
-                "call_read",
-                "read",
-                "Read the parser to find the loop bounds",
-                json!({"path": "src/parser.rs", "offset": 1, "limit": 200}),
-                ToolState::Running,
-            ),
+        let input = json!({"path": PARSER_PATH, "offset": 1, "limit": 200});
+        let part = tool_part(
+            "call_read",
+            "read",
+            "Read the parser to find the loop bounds",
+            input,
+            ToolState::Running,
         );
-        if !self.sleep_or_abort(sid, 600).await {
+        self.set_part(sid, mid, PART_READ, part);
+        if !self.sleep_or_abort(sid, READ_MS).await {
             return false;
         }
-        let file: String = (1..=260)
+        let file: String = (1..=READ_LINES)
             .map(|i| {
-                format!(
-                    "{i:>4}│ {}\n",
-                    if i == 42 {
-                        "    for i in 0..=items.len() {"
-                    } else {
-                        "    // ..."
-                    }
-                )
+                let line = if i == BUGGY_LINE {
+                    "    for i in 0..=items.len() {"
+                } else {
+                    "    // ..."
+                };
+                format!("{i:>4}│ {line}\n")
             })
             .collect();
         self.finish_tool(
             sid,
             mid,
-            2,
+            PART_READ,
             ToolState::Done,
-            &format!("[src/parser.rs#a1f3]\n{file}"),
-            Some(json!({"lines": 260})),
+            &format!("[{PARSER_PATH}#{PARSER_TAG}]\n{file}"),
+            Some(json!({"lines": READ_LINES})),
         );
-        // Tool: grep (error).
-        self.set_part(
-            sid,
-            mid,
-            3,
-            tool_part(
-                "call_grep",
-                "grep",
-                "Search for other inclusive ranges",
-                json!({"pattern": "0..=", "path": "src/lib"}),
-                ToolState::Running,
-            ),
+        true
+    }
+
+    /// Tool: grep (error).
+    async fn grep_step(&self, sid: &str, mid: &str) -> bool {
+        let part = tool_part(
+            "call_grep",
+            "grep",
+            "Search for other inclusive ranges",
+            json!({"pattern": "0..=", "path": "src/lib"}),
+            ToolState::Running,
         );
-        if !self.sleep_or_abort(sid, 400).await {
+        self.set_part(sid, mid, PART_GREP, part);
+        if !self.sleep_or_abort(sid, GREP_MS).await {
             return false;
         }
         self.finish_tool(
             sid,
             mid,
-            3,
+            PART_GREP,
             ToolState::Error,
             "Path not found: src/lib\nDid you mean src/?",
             None,
         );
-        // Tool: edit (streaming → permission → done with diff).
-        let edit_input = json!({"path": "src/parser.rs", "tag": "a1f3", "edits": [{"op": "replace", "start": 42, "end": 42, "lines": ["    for i in 0..items.len() {"]}]});
-        let mut p = tool_part("call_edit", "edit", "", Value::Null, ToolState::Streaming);
-        if let Part::Tool { raw_input, .. } = &mut p {
+        true
+    }
+
+    /// Tool: edit (streaming input, then permission, then done with a diff).
+    async fn edit_step(&self, sid: &str, mid: &str) -> bool {
+        let mut part = tool_part("call_edit", "edit", "", Value::Null, ToolState::Streaming);
+        if let Part::Tool { raw_input, .. } = &mut part {
             raw_input.clear();
         }
-        self.set_part(sid, mid, 4, p);
-        let raw = r#"{"purpose": "Fix the off-by-one in parse_items", "path": "src/parser.rs", "tag": "a1f3", "edits": [{"op":"replace","start":42,"end":42,"lines":["    for i in 0..items.len() {"]}]}"#;
-        for c in raw.as_bytes().chunks(8) {
+        self.set_part(sid, mid, PART_EDIT, part);
+        if !self.stream_edit_input(sid, mid).await {
+            return false;
+        }
+        let input = json!({"path": PARSER_PATH, "tag": PARSER_TAG, "edits": [{"op": "replace", "start": BUGGY_LINE, "end": BUGGY_LINE, "lines": ["    for i in 0..items.len() {"]}]});
+        self.part_mut(sid, mid, PART_EDIT, |p| {
+            if let Part::Tool {
+                input: i, purpose, ..
+            } = p
+            {
+                *i = input.clone();
+                *purpose = EDIT_PURPOSE.into();
+            }
+        });
+        let allowed = self
+            .ask_permission(sid, mid, PART_EDIT, "edit", EDIT_PURPOSE, input)
+            .await;
+        match allowed {
+            None => false,
+            Some(false) => {
+                let state = ToolState::Denied;
+                self.finish_tool(sid, mid, PART_EDIT, state, DENIED_OUTPUT, None);
+                true
+            }
+            Some(true) => self.apply_edit(sid, mid).await,
+        }
+    }
+
+    /// Streams the raw JSON input of the edit call in small chunks.
+    async fn stream_edit_input(&self, sid: &str, mid: &str) -> bool {
+        let raw = format!(
+            r#"{{"purpose": "{EDIT_PURPOSE}", "path": "{PARSER_PATH}", "tag": "{PARSER_TAG}", "edits": [{{"op":"replace","start":{BUGGY_LINE},"end":{BUGGY_LINE},"lines":["    for i in 0..items.len() {{"]}}]}}"#
+        );
+        for c in raw.as_bytes().chunks(TOOL_INPUT_CHUNK_BYTES) {
             if self.aborted(sid) {
                 return false;
             }
+            let delta = Delta::ToolInput {
+                text: String::from_utf8_lossy(c).into(),
+            };
             self.emit(
                 sid,
                 SessionEvent::Delta {
                     message_id: mid.into(),
-                    index: 4,
-                    delta: Delta::ToolInput {
-                        text: String::from_utf8_lossy(c).into(),
-                    },
+                    index: PART_EDIT,
+                    delta,
                 },
             );
-            tokio::time::sleep(Duration::from_millis(30)).await;
+            tokio::time::sleep(TOOL_INPUT_DELAY).await;
         }
-        self.tool_mut(sid, mid, 4, |p| {
-            if let Part::Tool { input, purpose, .. } = p {
-                *input = edit_input.clone();
-                *purpose = "Fix the off-by-one in parse_items".into();
-            }
-        });
-        let allowed = self
-            .ask_permission(
-                sid,
-                mid,
-                4,
-                "edit",
-                "Fix the off-by-one in parse_items",
-                edit_input.clone(),
-            )
-            .await;
-        match allowed {
-            None => return false,
-            Some(false) => self.finish_tool(
-                sid,
-                mid,
-                4,
-                ToolState::Denied,
-                "The user denied this tool call.",
-                None,
-            ),
-            Some(true) => {
-                self.set_tool_state(sid, mid, 4, ToolState::Running);
-                if !self.sleep_or_abort(sid, 300).await {
-                    return false;
-                }
-                let diff = "--- a/src/parser.rs\n+++ b/src/parser.rs\n@@ -40,5 +40,5 @@\n fn parse_items(items: &[Item]) -> Result<Vec<Out>> {\n     let mut out = Vec::new();\n-    for i in 0..=items.len() {\n+    for i in 0..items.len() {\n         let item = &items[i];";
-                self.finish_tool(sid, mid, 4, ToolState::Done, "Edited src/parser.rs [src/parser.rs#b7c2]\n  42 |     for i in 0..items.len() {", Some(json!({"path": "src/parser.rs", "diff": diff, "added": 1, "removed": 1})));
-            }
+        true
+    }
+
+    /// Runs the allowed edit and records its diff.
+    async fn apply_edit(&self, sid: &str, mid: &str) -> bool {
+        self.set_tool_state(sid, mid, PART_EDIT, ToolState::Running);
+        if !self.sleep_or_abort(sid, EDIT_RUN_MS).await {
+            return false;
         }
-        // Tool: bash with delay then live output.
-        let bash_input =
+        let diff = format!(
+            "--- a/{PARSER_PATH}\n+++ b/{PARSER_PATH}\n@@ -40,5 +40,5 @@\n fn parse_items(items: &[Item]) -> Result<Vec<Out>> {{\n     let mut out = Vec::new();\n-    for i in 0..=items.len() {{\n+    for i in 0..items.len() {{\n         let item = &items[i];"
+        );
+        let output = format!(
+            "Edited {PARSER_PATH} [{PARSER_PATH}#b7c2]\n  {BUGGY_LINE} |     for i in 0..items.len() {{"
+        );
+        let meta = json!({"path": PARSER_PATH, "diff": diff, "added": 1, "removed": 1});
+        self.finish_tool(sid, mid, PART_EDIT, ToolState::Done, &output, Some(meta));
+        true
+    }
+
+    /// Tool: bash with a start delay, then live output.
+    async fn bash_step(&self, sid: &str, mid: &str) -> bool {
+        let input =
             json!({"command": "cargo test -p parser -- --nocapture\necho done", "timeout": 120});
-        let mut p = tool_part(
+        let mut part = tool_part(
             "call_bash",
             "bash",
             "Run the unit tests",
-            bash_input,
+            input,
             ToolState::Delayed,
         );
-        if let Part::Tool { run_at, .. } = &mut p {
-            *run_at = Some(now_ms() + 2000);
+        if let Part::Tool { run_at, .. } = &mut part {
+            *run_at = Some(now_ms() + BASH_START_MS as i64);
         }
-        self.set_part(sid, mid, 5, p);
-        if !self.sleep_or_abort(sid, 2000).await {
+        self.set_part(sid, mid, PART_BASH, part);
+        if !self.sleep_or_abort(sid, BASH_START_MS).await {
             return false;
         }
-        self.set_tool_state(sid, mid, 5, ToolState::Running);
+        self.set_tool_state(sid, mid, PART_BASH, ToolState::Running);
         let mut out = String::new();
-        for i in 1..=24 {
+        for i in 1..=BASH_TEST_COUNT {
             out.push_str(&format!(
                 "test parser::tests::case_{i:02} ... \x1b[32mok\x1b[0m\n"
             ));
-            let o = out.clone();
-            self.tool_mut(sid, mid, 5, |p| {
+            let live = out.clone();
+            self.part_mut(sid, mid, PART_BASH, |p| {
                 if let Part::Tool { meta, .. } = p {
-                    *meta = Some(json!({"live_output": o}));
+                    *meta = Some(json!({"live_output": live}));
                 }
             });
-            if !self.sleep_or_abort(sid, 120).await {
+            if !self.sleep_or_abort(sid, BASH_LINE_MS).await {
                 return false;
             }
         }
         out.push_str("\ntest result: ok. 42 passed; 0 failed; 0 ignored\ndone\n");
-        self.finish_tool(
-            sid,
-            mid,
-            5,
-            ToolState::Done,
-            &out,
-            Some(json!({"exit_code": 0, "duration_ms": 3120, "truncated": false})),
-        );
-        // Final answer.
+        let meta = json!({"exit_code": 0, "duration_ms": 3120, "truncated": false});
+        self.finish_tool(sid, mid, PART_BASH, ToolState::Done, &out, Some(meta));
+        true
+    }
+
+    async fn answer_step(&self, sid: &str, mid: &str) -> bool {
         self.set_status(sid, SessionStatus::Busy);
-        self.set_part(
-            sid,
-            mid,
-            6,
-            Part::Text {
-                text: String::new(),
-                time: now_ms(),
-            },
-        );
-        self.stream(sid, mid, 6, ANSWER, StreamSpec::text(4, 18))
+        self.start_text_part(sid, mid, PART_ANSWER);
+        self.stream(sid, mid, PART_ANSWER, ANSWER, StreamSpec::text(4, 18))
             .await
     }
 
@@ -887,109 +972,74 @@ impl Mock {
             if let Some(s) = self.world().sessions.get(&sid) {
                 s.abort.store(false, Ordering::Relaxed);
             }
-            self.set_status(&sid, SessionStatus::Busy);
-            let mid = self.new_assistant(&sid);
-            self.set_part(
-                &sid,
-                &mid,
-                0,
-                Part::Reasoning {
-                    text: String::new(),
-                    time: now_ms(),
-                    time_end: None,
-                    provider_data: None,
-                },
-            );
-            let thought = format!(
-                "Round {round} for {label}: checking the next module, scanning for unused imports and dead code, then running the linter on the changed files to verify."
-            );
-            let mut ok = self
-                .stream(&sid, &mid, 0, &thought, StreamSpec::reasoning(2, 40))
-                .await;
-            if ok {
-                self.tool_mut(&sid, &mid, 0, |p| {
-                    if let Part::Reasoning { time_end, .. } = p {
-                        *time_end = Some(now_ms());
-                    }
-                });
-                self.set_status(&sid, SessionStatus::Running);
-                self.set_part(
-                    &sid,
-                    &mid,
-                    1,
-                    tool_part(
-                        &id("call"),
-                        "bash",
-                        &format!("Lint module #{round}"),
-                        json!({"command": format!("cargo clippy -p mod{round}")}),
-                        ToolState::Running,
-                    ),
-                );
-                ok = self.sleep_or_abort(&sid, 1500).await;
-                if ok {
-                    self.finish_tool(
-                        &sid,
-                        &mid,
-                        1,
-                        ToolState::Done,
-                        "Finished: 0 warnings",
-                        Some(json!({"exit_code": 0})),
-                    );
-                    self.set_part(
-                        &sid,
-                        &mid,
-                        2,
-                        Part::Text {
-                            text: String::new(),
-                            time: now_ms(),
-                        },
-                    );
-                    ok = self
-                        .stream(
-                            &sid,
-                            &mid,
-                            2,
-                            &format!("Module #{round} is **clean**. Moving on to the next one."),
-                            StreamSpec::text(3, 40),
-                        )
-                        .await;
-                }
-            }
-            self.add_context(&sid, 3_000);
-            self.finish(
-                &sid,
-                &mid,
-                Usage {
-                    input: 500,
-                    output: 120,
-                    cache_read: 9000,
-                    cache_write: 0,
-                    reasoning: 40,
-                },
-                (!ok).then(|| ABORTED_ERROR.to_string()),
-            );
-            self.set_status(&sid, SessionStatus::Idle);
-            if !ok {
-                // Aborted: wait for a new prompt (handled by Prompt) — idle for a while.
-                tokio::time::sleep(Duration::from_secs(20)).await;
+            let ok = self.worker_round(&sid, label, round).await;
+            // After an abort the worker idles longer, waiting for a new prompt.
+            let pause = if ok {
+                WORKER_PAUSE
             } else {
-                tokio::time::sleep(Duration::from_secs(4)).await;
-            }
+                WORKER_ABORTED_PAUSE
+            };
+            tokio::time::sleep(pause).await;
         }
+    }
+
+    async fn worker_round(&self, sid: &str, label: &str, round: u32) -> bool {
+        self.set_status(sid, SessionStatus::Busy);
+        let mid = self.new_assistant(sid);
+        let ok = self.worker_steps(sid, &mid, label, round).await;
+        self.add_context(sid, WORKER_ROUND_CONTEXT_TOKENS);
+        self.finish(
+            sid,
+            &mid,
+            WORKER_USAGE,
+            (!ok).then(|| ABORTED_ERROR.to_string()),
+        );
+        self.set_status(sid, SessionStatus::Idle);
+        ok
+    }
+
+    /// Reasoning, one bash call, then a short text. Returns false when aborted.
+    async fn worker_steps(&self, sid: &str, mid: &str, label: &str, round: u32) -> bool {
+        self.start_reasoning_part(sid, mid, PART_REASONING);
+        let thought = format!(
+            "Round {round} for {label}: checking the next module, scanning for unused imports and dead code, then running the linter on the changed files to verify."
+        );
+        let spec = StreamSpec::reasoning(2, 40);
+        if !self.stream(sid, mid, PART_REASONING, &thought, spec).await {
+            return false;
+        }
+        self.end_reasoning_part(sid, mid, PART_REASONING);
+        self.set_status(sid, SessionStatus::Running);
+        let tool = tool_part(
+            &id("call"),
+            "bash",
+            &format!("Lint module #{round}"),
+            json!({"command": format!("cargo clippy -p mod{round}")}),
+            ToolState::Running,
+        );
+        self.set_part(sid, mid, WORKER_TOOL_PART, tool);
+        if !self.sleep_or_abort(sid, WORKER_TOOL_MS).await {
+            return false;
+        }
+        let meta = json!({"exit_code": 0});
+        self.finish_tool(
+            sid,
+            mid,
+            WORKER_TOOL_PART,
+            ToolState::Done,
+            "Finished: 0 warnings",
+            Some(meta),
+        );
+        self.start_text_part(sid, mid, WORKER_TEXT_PART);
+        let text = format!("Module #{round} is **clean**. Moving on to the next one.");
+        self.stream(sid, mid, WORKER_TEXT_PART, &text, StreamSpec::text(3, 40))
+            .await
     }
 
     async fn reply_turn(&self, sid: &str, text: &str) {
         self.set_status(sid, SessionStatus::Busy);
         let mid = self.new_assistant(sid);
-        self.set_part(
-            sid,
-            mid.as_str(),
-            0,
-            Part::Text {
-                text: String::new(),
-                time: now_ms(),
-            },
-        );
+        self.start_text_part(sid, &mid, 0);
         let ans = format!(
             "Got it: \"{}\". I'll take that into account.",
             crate::ui::text::truncate(&crate::ui::text::one_line(text), 60)
@@ -1000,13 +1050,7 @@ impl Mock {
         self.finish(
             sid,
             &mid,
-            Usage {
-                input: 100,
-                output: 30,
-                cache_read: 0,
-                cache_write: 0,
-                reasoning: 0,
-            },
+            REPLY_USAGE,
             (!ok).then(|| ABORTED_ERROR.to_string()),
         );
         self.set_status(sid, SessionStatus::Idle);
@@ -1573,7 +1617,7 @@ impl Mock {
             self.with_session(&s.id, |x| {
                 x.info.title = t.into();
                 x.info.parent = Some("ses_parent".into());
-                x.info.context.used = 120_000;
+                x.info.context.used = SEEDED_WORKER_CONTEXT_TOKENS;
             });
         }
         let now = now_ms();
@@ -1588,8 +1632,8 @@ impl Mock {
             let mut h = info(n, "build", cwd);
             h.title = t.to_string();
             h.live = false;
-            h.created_at = now - (i as i64 + 1) * 3_600_000 * 7;
-            h.updated_at = h.created_at + 600_000;
+            h.created_at = now - (i as i64 + 1) * HISTORY_SPACING_MS;
+            h.updated_at = h.created_at + HISTORY_SESSION_SPAN_MS;
             self.world().history.push(h);
         }
         // Peer message into the reviewer.
@@ -1602,7 +1646,7 @@ impl Mock {
         let m = self.clone();
         let cid = c.id.clone();
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(6)).await;
+            tokio::time::sleep(DOCS_WRITER_DELAY).await;
             m.user_message(
                 &cid,
                 "Write docs/design.md describing the architecture",
@@ -1614,15 +1658,7 @@ impl Mock {
             );
             m.set_status(&cid, SessionStatus::Busy);
             let mid = m.new_assistant(&cid);
-            m.set_part(
-                &cid,
-                &mid,
-                0,
-                Part::Text {
-                    text: String::new(),
-                    time: now_ms(),
-                },
-            );
+            m.start_text_part(&cid, &mid, 0);
             m.stream(
                 &cid,
                 &mid,
@@ -1710,18 +1746,7 @@ fn user_msg(mid: String, text: &str, source: MessageSource, images: Vec<ImageDat
             name: Some(format!("image-{}", i + 1)),
         });
     }
-    Message {
-        id: mid,
-        role: Role::User,
-        time: now_ms(),
-        time_end: None,
-        source,
-        parts,
-        model: None,
-        agent: None,
-        usage: None,
-        error: None,
-    }
+    new_message(mid, Role::User, now_ms(), source, parts)
 }
 
 /// Runs the mock backend.
@@ -1735,7 +1760,7 @@ pub async fn run(
         tx: tx.clone(),
     };
     m.seed(&cwd);
-    tokio::time::sleep(Duration::from_millis(150)).await;
+    tokio::time::sleep(STARTUP_DELAY).await;
     let _ = tx.send(NetEvent::Connected);
     while let Some(f) = rx.recv().await {
         m.handle(f);
