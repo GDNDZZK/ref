@@ -23,6 +23,8 @@ interface Fence {
 
 const MAX_FENCE_INDENT = 3
 const MIN_FENCE_LENGTH = 3
+const FENCE_BACKTICK = '`'
+const FENCE_TILDE = '~'
 
 function countLeading(text: string, char: string): number {
   let count = 0
@@ -31,7 +33,7 @@ function countLeading(text: string, char: string): number {
 }
 
 function isFenceMarker(char: string): boolean {
-  return char === '`' || char === '~'
+  return char === FENCE_BACKTICK || char === FENCE_TILDE
 }
 
 // Also accepts '\r', so a fence line ending in CRLF still closes the block.
@@ -49,7 +51,7 @@ function parseOpeningFence(line: string): Fence | undefined {
 
   // Without this rule "```a```" at the start of a line, which is inline code, would open a block.
   const info = line.slice(indent + length).trim()
-  if (marker === '`' && info.includes('`')) return undefined
+  if (marker === FENCE_BACKTICK && info.includes(FENCE_BACKTICK)) return undefined
 
   const language = info.split(/\s/, 1)[0] ?? ''
   return { marker, length, indent, language }
