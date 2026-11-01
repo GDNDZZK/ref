@@ -56,6 +56,14 @@ pub fn markdown_alternate(html: &str, page: &Url) -> Option<Url> {
     None
 }
 
+fn whole_page(title: Option<String>, body: String) -> Page {
+    Page {
+        title,
+        body,
+        note: None,
+    }
+}
+
 /// Converts a page. `full_page = false` extracts the main content when the page reads like an
 /// article and falls back to the whole page otherwise.
 pub fn convert(html: &str, url: &Url, format: Format, full_page: bool) -> Page {
@@ -63,11 +71,7 @@ pub fn convert(html: &str, url: &Url, format: Format, full_page: bool) -> Page {
     let prep = prepare(&doc, url);
     let full = render(&doc, format);
     if full_page || format == Format::Html {
-        return Page {
-            title: prep.title,
-            body: full,
-            note: None,
-        };
+        return whole_page(prep.title, full);
     }
     let doc2 = Document::from(html);
     let prep2 = prepare(&doc2, url);
@@ -87,21 +91,13 @@ pub fn convert(html: &str, url: &Url, format: Format, full_page: bool) -> Page {
             r.parse().ok().filter(|_| readable)
         });
     let Some(a) = article else {
-        return Page {
-            title: prep.title,
-            body: full,
-            note: None,
-        };
+        return whole_page(prep.title, full);
     };
     let body = tidy(&a.text_content);
     let (n, total) = (body.chars().count(), full.chars().count().max(1));
     // A small piece of a big page (portal, listing) is the wrong "main content".
     if n * 4 < total && n < MIN_ARTICLE_CHARS {
-        return Page {
-            title: prep.title,
-            body: full,
-            note: None,
-        };
+        return whole_page(prep.title, full);
     }
     let title = Some(a.title.trim().to_string())
         .filter(|t| !t.is_empty())
