@@ -8,9 +8,12 @@ use regex::Regex;
 use serde_json::{Value, json};
 use std::sync::LazyLock;
 
+/// Name the model calls the tool by.
+pub(crate) const NAME: &str = "write";
+
 pub fn spec() -> ToolSpec {
     ToolSpec {
-        name: "write",
+        name: NAME,
         description: "Create a new file or overwrite an existing one with `content` (parent directories are created). \
 Prefer `edit` for changing existing files; use `write` for new files or full rewrites.\n\
 `content` is the raw file text (no `N:` prefixes). An existing file keeps its line-ending style (CRLF/LF) and BOM.\n\

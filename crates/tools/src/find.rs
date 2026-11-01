@@ -12,9 +12,12 @@ use std::time::SystemTime;
 const DEFAULT_LIMIT: usize = 500;
 const MAX_LIMIT: usize = 5000;
 
+/// Name the model calls the tool by.
+pub(crate) const NAME: &str = "find";
+
 pub fn spec() -> ToolSpec {
     ToolSpec {
-        name: "find",
+        name: NAME,
         description: "Find files and directories by glob pattern. Respects .gitignore, includes hidden files, skips .git.\n\
 A pattern without `/` matches the file name at any depth (`*.rs`, `Cargo.toml`); a pattern with `/` matches the path relative to `path` \
 (`src/**/*.ts`, `**/test_*.py`). `{a,b}` alternatives are supported. Default pattern `**/*` lists everything.\n\

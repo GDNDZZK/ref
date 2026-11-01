@@ -17,10 +17,13 @@ const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_LINE_CHARS: usize = 500;
 const MAX_OUTPUT_BYTES: usize = 60 * 1024;
 
+/// Name the model calls the tool by.
+pub(crate) const NAME: &str = "grep";
+
 pub fn spec() -> ToolSpec {
     let max_file_mb = MAX_FILE_BYTES / util::MIB;
     ToolSpec {
-        name: "grep",
+        name: NAME,
         description: format!(
             "Search file contents with a regular expression (Rust regex syntax; set `literal` for plain text). \
 Searches a file or a directory tree; respects .gitignore, includes hidden files, skips .git, binary files and files over {max_file_mb}MB.\n\

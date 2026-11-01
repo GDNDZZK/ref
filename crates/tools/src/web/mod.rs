@@ -34,13 +34,16 @@ const FETCH_IMAGE_BYTES: usize = 300 * 1024;
 /// Body shown with an HTTP error status.
 const ERROR_BODY_CHARS: usize = 4000;
 
+/// Name the model calls the tool by.
+pub(crate) const NAME: &str = "webfetch";
+
 pub fn spec() -> ToolSpec {
     let image_mb = MAX_IMAGE_BYTES as u64 / util::MIB;
     let inline_kb = util::INLINE_OUTPUT_MAX_BYTES as u64 / util::KIB;
     let inline_lines = util::INLINE_OUTPUT_MAX_LINES;
     let body_mb = fetch::MAX_BODY as u64 / util::MIB;
     ToolSpec {
-        name: "webfetch",
+        name: NAME,
         description: format!(
             "Fetch a URL (http/https) and return its content. Read-only; no JavaScript is run.\n\
 - HTML becomes markdown (default), plain text (`format: \"text\"`) or stays HTML (`format: \"html\"`). For markdown and text, the main content is extracted when the page reads like an article (the header says so); pass `full_page: true` for everything (navigation, sidebars, comments).\n\

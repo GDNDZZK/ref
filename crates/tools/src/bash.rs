@@ -29,11 +29,14 @@ const OUTPUT_CHANNEL_CAPACITY: usize = 16;
 /// The `[wall time ..]` note is added for commands that ran at least this long.
 const WALL_TIME_NOTE_MIN: Duration = Duration::from_secs(1);
 
+/// Name the model calls the tool by.
+pub(crate) const NAME: &str = "bash";
+
 pub fn spec() -> ToolSpec {
     let inline_kb = util::INLINE_OUTPUT_MAX_BYTES as u64 / util::KIB;
     let inline_lines = util::INLINE_OUTPUT_MAX_LINES;
     ToolSpec {
-        name: "bash",
+        name: NAME,
         description: format!(
             "Run a shell command with `bash -c` (non-interactive, stdin closed) and return combined stdout+stderr.\n\
 - Each call runs in a fresh shell: use `cwd` instead of `cd`, and `&&` to chain dependent commands.\n\

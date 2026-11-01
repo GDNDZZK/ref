@@ -6,9 +6,12 @@ use anyhow::{Result, bail};
 use serde_json::{Value, json};
 use std::path::Path;
 
+/// Name the model calls the tool by.
+pub(crate) const NAME: &str = "delete";
+
 pub fn spec() -> ToolSpec {
     ToolSpec {
-        name: "delete",
+        name: NAME,
         description: "Delete a file or directory. Non-empty directories require `recursive: true`. \
 Refuses to delete the working directory itself, `/` or the home directory. Symlinks are removed, not followed."
             .to_string(),
