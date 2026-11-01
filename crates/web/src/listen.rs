@@ -53,8 +53,8 @@ async fn bind_requested(host: &str, port: u16) -> anyhow::Result<TcpListener> {
     match TcpListener::bind((host, port)).await {
         Ok(listener) => Ok(listener),
         Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => anyhow::bail!(
-            "port {port} is in use by another program or by a ref-web with a different login \
-             token (choose another port with --port, or leave --port out)"
+            "port {port} is in use by another program or by a ref-web with a different key \
+             (choose another port with --port, or leave --port out)"
         ),
         Err(e) => Err(e).with_context(|| format!("cannot listen on {host}:{port}")),
     }

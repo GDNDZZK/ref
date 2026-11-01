@@ -27,6 +27,9 @@ dunce.workspace = true
 hmac.workspace = true
 sha2.workspace = true
 subtle.workspace = true
+chacha20poly1305.workspace = true
+hkdf.workspace = true
+scrypt.workspace = true
 serde_json.workspace = true
 tokio-tungstenite.workspace = true
 
