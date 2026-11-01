@@ -474,50 +474,8 @@ impl ChatState {
 
         if let Some(delta) = choice.get("delta").filter(|d| d.is_object()) {
             // Reasoning first: aggregators may send reasoning and content together.
-            let reasoning = REASONING_FIELDS.iter().find_map(|f| {
-                delta
-                    .get(*f)
-                    .and_then(Value::as_str)
-                    .filter(|s| !s.is_empty())
-                    .map(|s| (*f, s))
-            });
-            if let Some((field, text)) = reasoning {
-                let idx = match self.reasoning.filter(|i| asm.is_open(*i)) {
-                    Some(i) => i,
-                    None => {
-                        self.close_text(asm);
-                        let i = asm.start(BlockKind::Reasoning);
-                        self.reasoning = Some(i);
-                        i
-                    }
-                };
-                let field = self
-                    .reasoning_field
-                    .get_or_insert_with(|| field.to_string())
-                    .clone();
-                asm.set_provider_data(idx, json!({"field": field}));
-                asm.delta(idx, text);
-            }
-
-            for key in ["content", "refusal"] {
-                if let Some(text) = delta
-                    .get(key)
-                    .and_then(Value::as_str)
-                    .filter(|s| !s.is_empty())
-                {
-                    let idx = match self.text.filter(|i| asm.is_open(*i)) {
-                        Some(i) => i,
-                        None => {
-                            self.close_reasoning(asm);
-                            let i = asm.start(BlockKind::Text);
-                            self.text = Some(i);
-                            i
-                        }
-                    };
-                    asm.delta(idx, text);
-                }
-            }
-
+            self.on_reasoning_delta(asm, delta);
+            self.on_text_delta(asm, delta);
             if let Some(calls) = delta.get("tool_calls").and_then(Value::as_array) {
                 for (pos, call) in calls.iter().enumerate() {
                     self.on_tool_delta(asm, call, pos);
@@ -533,6 +491,56 @@ impl ChatState {
             self.finish_reason = Some(reason.to_string());
         }
         Ok(())
+    }
+
+    fn on_reasoning_delta(&mut self, asm: &mut Assembler<'_>, delta: &Value) {
+        let reasoning = REASONING_FIELDS.iter().find_map(|f| {
+            delta
+                .get(*f)
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .map(|s| (*f, s))
+        });
+        let Some((field, text)) = reasoning else {
+            return;
+        };
+        let idx = match self.reasoning.filter(|i| asm.is_open(*i)) {
+            Some(i) => i,
+            None => {
+                self.close_text(asm);
+                let i = asm.start(BlockKind::Reasoning);
+                self.reasoning = Some(i);
+                i
+            }
+        };
+        let field = self
+            .reasoning_field
+            .get_or_insert_with(|| field.to_string())
+            .clone();
+        asm.set_provider_data(idx, json!({"field": field}));
+        asm.delta(idx, text);
+    }
+
+    fn on_text_delta(&mut self, asm: &mut Assembler<'_>, delta: &Value) {
+        for key in ["content", "refusal"] {
+            let Some(text) = delta
+                .get(key)
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+            else {
+                continue;
+            };
+            let idx = match self.text.filter(|i| asm.is_open(*i)) {
+                Some(i) => i,
+                None => {
+                    self.close_reasoning(asm);
+                    let i = asm.start(BlockKind::Text);
+                    self.text = Some(i);
+                    i
+                }
+            };
+            asm.delta(idx, text);
+        }
     }
 
     fn on_tool_delta(&mut self, asm: &mut Assembler<'_>, call: &Value, pos: usize) {
