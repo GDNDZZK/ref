@@ -306,9 +306,8 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             if st.cfg.model(&model).is_none() {
                 return Err(format!("Model {} is not configured.", model.key()));
             }
-            let used = st.info.context.used;
-            st.info.context = crate::models::context_for(&st.cfg, &model);
-            st.info.context.used = used;
+            st.info.context =
+                crate::models::context_keeping_used(&st.cfg, &model, st.info.context.used);
             st.info.model = model;
             hub.emit_info(&st);
             Ok(json!({ "session": st.info.clone() }))
@@ -327,9 +326,8 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> R {
             if a.model.is_some()
                 && let Some(m) = st.cfg.default_model_for(&agent)
             {
-                let used = st.info.context.used;
-                st.info.context = crate::models::context_for(&st.cfg, &m);
-                st.info.context.used = used;
+                st.info.context =
+                    crate::models::context_keeping_used(&st.cfg, &m, st.info.context.used);
                 st.info.model = m;
             }
             let old = st.info.agent.clone();

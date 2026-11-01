@@ -168,9 +168,7 @@ pub async fn get_or_load(hub: &Arc<Hub>, id: &str) -> Result<Arc<Session>, Strin
     p.info.status = SessionStatus::Idle;
     p.info.attached = 0;
     p.info.name = unique_name(hub, &p.info.name, Some(&p.info.id));
-    let mut ctx = crate::models::context_for(&cfg, &p.info.model);
-    ctx.used = p.info.context.used;
-    p.info.context = ctx;
+    p.info.context = crate::models::context_keeping_used(&cfg, &p.info.model, p.info.context.used);
     let cfg = Arc::new(cfg);
     let _ = hub.mcp.servers_for(&cfg);
     let s = Session::new(p.info, p.messages, cfg, p.reported, p.context_notice);

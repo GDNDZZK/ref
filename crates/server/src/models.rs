@@ -120,6 +120,14 @@ pub fn context_for(cfg: &Config, r: &ModelRef) -> ContextUsage {
     }
 }
 
+/// Context thresholds for a model, with `used` carried over from the previous model.
+pub fn context_keeping_used(cfg: &Config, r: &ModelRef, used: u64) -> ContextUsage {
+    ContextUsage {
+        used,
+        ..context_for(cfg, r)
+    }
+}
+
 /// Variant names of a model, sorted.
 pub fn variants(cfg: &Config, r: &ModelRef) -> Vec<String> {
     cfg.model(r)
