@@ -185,7 +185,7 @@ fn content(req: &PermissionRequest, iw: usize) -> Vec<Line<'static>> {
         lines.push(Line::default());
     }
     lines.push(Line::from(Span::styled("input", theme::muted())));
-    let pretty = serde_json::to_string_pretty(&req.input).unwrap_or_default();
+    let pretty = serde_json::to_string_pretty(&req.input).expect("a JSON value always serialises");
     for l in text::sanitize(&pretty).lines() {
         for wl in text::wrap_hard(&[Span::styled(l.to_string(), theme::fg(theme::INFO))], iw) {
             lines.push(wl);

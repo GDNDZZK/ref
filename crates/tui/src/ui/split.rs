@@ -9,8 +9,8 @@ use super::text::{self, width};
 use super::theme;
 use crate::state::SessionView;
 
-pub const MIN_TILE_W: u16 = 30;
-pub const MIN_TILE_H: u16 = 8;
+const MIN_TILE_W: u16 = 30;
+const MIN_TILE_H: u16 = 8;
 
 /// Picks (cols, rows) for `n` tiles in a `w`×`h` cell area: target tile aspect ≈1.6 in pixel terms
 /// (cells are ~2:1), with a penalty for empty grid cells.
