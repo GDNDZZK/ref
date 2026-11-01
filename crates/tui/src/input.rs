@@ -6,6 +6,7 @@ use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::layout::{Position, Rect};
+use ref_proto::ImageData;
 
 use crate::app::{ARMED_KEY_TIMEOUT, App, COMMANDS, Mode, cmd};
 use crate::render;
@@ -88,10 +89,9 @@ fn ctrl_char(k: &KeyEvent, c: char) -> bool {
 
 fn key(app: &mut App, k: KeyEvent) {
     // Copy selection: ctrl+c / ctrl+shift+c / y (when a transcript selection exists).
-    if app.has_selection()
-        && (ctrl_char(&k, 'c')
-            || (is(&k, KeyCode::Char('y'), KeyModifiers::NONE) && app.editor.is_empty()))
-    {
+    let copy_key = ctrl_char(&k, 'c')
+        || (is(&k, KeyCode::Char('y'), KeyModifiers::NONE) && app.editor.is_empty());
+    if app.has_selection() && copy_key {
         app.copy_selection();
         return;
     }
@@ -288,28 +288,33 @@ fn dialog_key(app: &mut App, k: KeyEvent) {
     }
 }
 
+/// Sets the selection mode, then moves the cursor with `step`.
+fn move_cursor(e: &mut Editor, extend: bool, step: fn(&mut Editor)) {
+    e.select_mode(extend);
+    step(e);
+}
+
+/// Like `move_cursor`, with a coarser step when `coarse` is set (word or buffer).
+fn move_by(
+    e: &mut Editor,
+    extend: bool,
+    coarse: bool,
+    coarse_step: fn(&mut Editor),
+    step: fn(&mut Editor),
+) {
+    move_cursor(e, extend, if coarse { coarse_step } else { step });
+}
+
 /// Generic editing keys. Returns true if the text changed (or cursor moved).
 pub(crate) fn edit_key(e: &mut Editor, k: &KeyEvent, multiline: bool) -> bool {
     let m = k.modifiers;
     let shift = m.contains(SHIFT);
     match k.code {
         KeyCode::Char(c) if m.contains(CTRL) && !m.contains(ALT) => match c.to_ascii_lowercase() {
-            'a' => {
-                e.select_mode(false);
-                e.home()
-            }
-            'e' => {
-                e.select_mode(false);
-                e.end()
-            }
-            'b' => {
-                e.select_mode(false);
-                e.left()
-            }
-            'f' => {
-                e.select_mode(false);
-                e.right()
-            }
+            'a' => move_cursor(e, false, Editor::home),
+            'e' => move_cursor(e, false, Editor::end),
+            'b' => move_cursor(e, false, Editor::left),
+            'f' => move_cursor(e, false, Editor::right),
             'w' | 'h' => e.delete_word_back(),
             'u' => e.kill_to_start(),
             'k' => e.kill_to_end(),
@@ -333,41 +338,43 @@ pub(crate) fn edit_key(e: &mut Editor, k: &KeyEvent, multiline: bool) -> bool {
         KeyCode::Delete if m.intersects(CTRL | ALT) => e.delete_word_forward(),
         KeyCode::Delete => e.delete(),
         KeyCode::Left => {
-            e.select_mode(shift);
-            if m.intersects(CTRL | ALT) {
-                e.word_left()
-            } else {
-                e.left()
-            }
+            let by_word = m.intersects(CTRL | ALT);
+            move_by(e, shift, by_word, Editor::word_left, Editor::left)
         }
         KeyCode::Right => {
-            e.select_mode(shift);
-            if m.intersects(CTRL | ALT) {
-                e.word_right()
-            } else {
-                e.right()
-            }
+            let by_word = m.intersects(CTRL | ALT);
+            move_by(e, shift, by_word, Editor::word_right, Editor::right)
         }
-        KeyCode::Home => {
-            e.select_mode(shift);
-            if m.contains(CTRL) {
-                e.buf_start()
-            } else {
-                e.home()
-            }
-        }
-        KeyCode::End => {
-            e.select_mode(shift);
-            if m.contains(CTRL) {
-                e.buf_end()
-            } else {
-                e.end()
-            }
-        }
+        KeyCode::Home => move_by(e, shift, m.contains(CTRL), Editor::buf_start, Editor::home),
+        KeyCode::End => move_by(e, shift, m.contains(CTRL), Editor::buf_end, Editor::end),
         KeyCode::Enter if multiline && m.intersects(SHIFT | ALT | CTRL) => e.newline(),
         _ => return false,
     }
     true
+}
+
+/// Shift+Up/Down scroll the transcript only while the prompt is one row with no selection.
+fn single_row_editor_without_selection(app: &App) -> bool {
+    app.editor.selection().is_none() && app.editor.height(app.editor.last_width.max(1)) <= 1
+}
+
+/// `!` at the start of an empty prompt switches to shell mode.
+fn can_enter_shell_mode(app: &App, m: KeyModifiers) -> bool {
+    app.editor.text.is_empty() && !app.shell_mode && m.difference(SHIFT).is_empty()
+}
+
+/// Up on the first prompt row: older history at its boundary, else to the start of the text.
+fn history_prev(app: &mut App) {
+    let at_history_boundary =
+        app.editor.text.is_empty() || app.history.browsing() || app.editor.cursor == 0;
+    if !at_history_boundary {
+        app.editor.buf_start();
+        return;
+    }
+    let cur = app.editor.text.clone();
+    if let Some(h) = app.history.prev(&cur) {
+        set_from_history(app, &h);
+    }
 }
 
 fn chat_key(app: &mut App, k: KeyEvent) {
@@ -461,32 +468,17 @@ fn chat_key(app: &mut App, k: KeyEvent) {
         KeyCode::Char('e') if m == CTRL | ALT => scroll(app, |c| c.scroll_by(1, false)),
         KeyCode::Char('g') if m == CTRL => scroll(app, |c| c.scroll_to_top()),
         KeyCode::Char('g') if m == CTRL | ALT => scroll(app, |c| c.scroll_to_bottom(true)),
-        KeyCode::Up
-            if m == SHIFT
-                && app.editor.selection().is_none()
-                && app.editor.height(app.editor.last_width.max(1)) <= 1 =>
-        {
+        KeyCode::Up if m == SHIFT && single_row_editor_without_selection(app) => {
             scroll(app, |c| c.scroll_by(-1, false))
         }
-        KeyCode::Down
-            if m == SHIFT
-                && app.editor.selection().is_none()
-                && app.editor.height(app.editor.last_width.max(1)) <= 1 =>
-        {
+        KeyCode::Down if m == SHIFT && single_row_editor_without_selection(app) => {
             scroll(app, |c| c.scroll_by(1, false))
         }
         KeyCode::Home if app.editor.is_empty() => scroll(app, |c| c.scroll_to_top()),
         KeyCode::End if app.editor.is_empty() => scroll(app, |c| c.scroll_to_bottom(true)),
         KeyCode::Up if !m.contains(SHIFT) => {
             if app.editor.on_first_row() {
-                if app.editor.text.is_empty() || app.history.browsing() || app.editor.cursor == 0 {
-                    let cur = app.editor.text.clone();
-                    if let Some(h) = app.history.prev(&cur) {
-                        set_from_history(app, &h);
-                    }
-                } else {
-                    app.editor.buf_start();
-                }
+                history_prev(app);
             } else {
                 app.editor.select_mode(false);
                 app.editor.up();
@@ -518,9 +510,7 @@ fn chat_key(app: &mut App, k: KeyEvent) {
                 app.editor.buf_end();
             }
         }
-        KeyCode::Char('!')
-            if app.editor.text.is_empty() && !app.shell_mode && m.difference(SHIFT).is_empty() =>
-        {
+        KeyCode::Char('!') if can_enter_shell_mode(app, m) => {
             app.shell_mode = true;
             app.ac = None;
         }
@@ -656,6 +646,28 @@ fn finish_question(app: &mut App, sid: &str, call_id: &str, outcome: Outcome) {
     }
 }
 
+/// Images named by a pasted text: every whitespace-separated path, or the whole text as one
+/// path (names with spaces). Empty when the text is not an image paste.
+fn pasted_images(s: &str) -> Vec<(ImageData, String)> {
+    let paths: Vec<&str> = s.split_whitespace().collect();
+    if paths.is_empty() || paths.len() > MAX_PASTED_PATHS {
+        return Vec::new();
+    }
+    let imgs: Vec<_> = paths
+        .iter()
+        .filter_map(|p| crate::clipboard::image_from_path(p))
+        .collect();
+    let all_paths_are_images = imgs.len() == paths.len();
+    if all_paths_are_images {
+        return imgs;
+    }
+    if imgs.len() != 1 {
+        return Vec::new();
+    }
+    let whole = crate::clipboard::image_from_path(s.trim());
+    whole.into_iter().collect()
+}
+
 fn paste(app: &mut App, s: String) {
     if let Some(Dialog::List(d)) = app.dialog.as_mut() {
         d.filter.insert(&crate::ui::text::one_line(&s));
@@ -680,33 +692,18 @@ fn paste(app: &mut App, s: String) {
         return;
     }
     // One or more image paths.
-    let paths: Vec<&str> = s.split_whitespace().collect();
-    if !paths.is_empty() && paths.len() <= MAX_PASTED_PATHS {
-        let imgs: Vec<_> = paths
-            .iter()
-            .filter_map(|p| crate::clipboard::image_from_path(p))
-            .collect();
-        if imgs.len() == paths.len()
-            || (imgs.len() == 1 && crate::clipboard::image_from_path(s.trim()).is_some())
-        {
-            let imgs = if imgs.len() == paths.len() {
-                imgs
-            } else {
-                crate::clipboard::image_from_path(s.trim())
-                    .into_iter()
-                    .collect()
-            };
-            let n = imgs.len();
-            let ed = target_editor(app);
-            for (img, name) in imgs {
-                ed.attach_image(img, Some(name));
-            }
-            app.toasts.info(format!(
-                "Attached {n} image{}",
-                if n > 1 { "s" } else { "" }
-            ));
-            return;
+    let imgs = pasted_images(&s);
+    if !imgs.is_empty() {
+        let n = imgs.len();
+        let ed = target_editor(app);
+        for (img, name) in imgs {
+            ed.attach_image(img, Some(name));
         }
+        app.toasts.info(format!(
+            "Attached {n} image{}",
+            if n > 1 { "s" } else { "" }
+        ));
+        return;
     }
     if app.mode == Mode::Watch {
         let one = crate::ui::text::one_line(&s);
@@ -1052,32 +1049,8 @@ fn mouse(app: &mut App, me: MouseEvent) {
         return;
     };
     let lay = render::chat_layout(app, app.screen);
-    // Autocomplete popup.
-    if let Some(ac) = app.ac.as_mut() {
-        let r = ac.rect;
-        if r.contains(pos) && y > r.y {
-            let n = ac.items.len().min(r.height as usize - 2);
-            let start = ac.sel.saturating_sub(n.saturating_sub(1));
-            let idx = start + (y - r.y - 1) as usize;
-            match me.kind {
-                MouseEventKind::Down(MouseButton::Left) => {
-                    if idx < ac.items.len() {
-                        ac.sel = idx;
-                        app.accept_completion(true);
-                        refresh_autocomplete_after_accept(app);
-                    }
-                }
-                MouseEventKind::Moved => {
-                    if idx < ac.items.len() {
-                        ac.sel = idx;
-                    }
-                }
-                MouseEventKind::ScrollUp => ac_move(app, -1),
-                MouseEventKind::ScrollDown => ac_move(app, 1),
-                _ => {}
-            }
-            return;
-        }
+    if autocomplete_mouse(app, me) {
+        return;
     }
     // Wheel over the sidebar scrolls the sidebar (never the chat).
     if let MouseEventKind::ScrollUp | MouseEventKind::ScrollDown = me.kind
@@ -1206,6 +1179,41 @@ fn mouse(app: &mut App, me: MouseEvent) {
         }
         _ => app.dirty = false,
     }
+}
+
+/// Mouse over the autocomplete popup: click accepts, hover selects, wheel moves.
+/// Returns true if the popup took the event.
+fn autocomplete_mouse(app: &mut App, me: MouseEvent) -> bool {
+    let Some(ac) = app.ac.as_mut() else {
+        return false;
+    };
+    let (x, y) = (me.column, me.row);
+    let r = ac.rect;
+    if !r.contains(Position::new(x, y)) || y <= r.y {
+        return false;
+    }
+    let n = ac.items.len().min(r.height as usize - 2);
+    let start = ac.sel.saturating_sub(n.saturating_sub(1));
+    let idx = start + (y - r.y - 1) as usize;
+    match me.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            if idx >= ac.items.len() {
+                return true;
+            }
+            ac.sel = idx;
+            app.accept_completion(true);
+            refresh_autocomplete_after_accept(app);
+        }
+        MouseEventKind::Moved => {
+            if idx < ac.items.len() {
+                ac.sel = idx;
+            }
+        }
+        MouseEventKind::ScrollUp => ac_move(app, -1),
+        MouseEventKind::ScrollDown => ac_move(app, 1),
+        _ => {}
+    }
+    true
 }
 
 fn watch_mouse(app: &mut App, me: MouseEvent) {
