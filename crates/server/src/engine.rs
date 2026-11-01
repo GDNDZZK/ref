@@ -209,7 +209,7 @@ async fn run_task(hub: Arc<Hub>, s: Arc<Session>, cancel: CancellationToken, id:
             (st.info.model.clone(), st.info.agent.clone())
         };
         let m = Message {
-            id: crate::util::new_id("msg"),
+            id: crate::util::new_msg_id(),
             role: Role::Assistant,
             time: now_ms(),
             time_end: Some(now_ms()),
@@ -598,7 +598,7 @@ async fn stream_with_retry(
     loop {
         let p = prep_owned.as_ref().unwrap_or(prep);
         let req = crate::images::clamp_request(build_request(s, p), &p.provider, &p.model).await;
-        let msg_id = crate::util::new_id("msg");
+        let msg_id = crate::util::new_msg_id();
         {
             let mut st = s.lock();
             let m = Message {

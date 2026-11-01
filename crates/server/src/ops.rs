@@ -116,7 +116,7 @@ pub async fn create_session(hub: &Arc<Hub>, o: CreateOpts) -> Result<Arc<Session
     let now = ref_proto::now_ms();
     let context = crate::models::context_for(&cfg, &model);
     let info = SessionInfo {
-        id: crate::util::new_id("ses"),
+        id: crate::util::new_session_id(),
         name,
         title: String::new(),
         agent,
