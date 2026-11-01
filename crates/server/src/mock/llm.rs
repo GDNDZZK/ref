@@ -11,11 +11,19 @@ use tokio::net::{TcpListener, TcpStream};
 
 const CHAT_PATH: &str = "/chat/completions";
 const SESSION_HEADER: &str = "x-session-id";
+/// End of the HTTP header block.
+const HEADER_END: &[u8] = b"\r\n\r\n";
+/// Bytes read from the socket at a time.
+const READ_CHUNK: usize = 8192;
+const HTTP_OK: u16 = 200;
+const HTTP_NOT_FOUND: u16 = 404;
 const MAX_HEADER_BYTES: usize = 64 * 1024;
 const MAX_BODY_BYTES: usize = 64 << 20;
 /// Rough size of a token in request text, to report plausible usage.
 const CHARS_PER_TOKEN: usize = 4;
 const MIN_PROMPT_TOKENS: u64 = 200;
+/// Added to the estimate so that even an empty round reports a completion token.
+const MIN_COMPLETION_TOKENS: u64 = 1;
 /// Share of the prompt the provider reports as served from its cache.
 const CACHED_SHARE: f64 = 0.7;
 /// Context fill reported by `Round::fill_context`; above the automatic compaction threshold.
@@ -64,9 +72,9 @@ struct HttpRequest {
 async fn read_request(stream: &mut TcpStream) -> std::io::Result<HttpRequest> {
     let invalid = |m: &str| std::io::Error::new(std::io::ErrorKind::InvalidData, m.to_string());
     let mut buf = Vec::new();
-    let mut chunk = [0u8; 8192];
+    let mut chunk = [0u8; READ_CHUNK];
     let header_end = loop {
-        if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+        if let Some(i) = buf.windows(HEADER_END.len()).position(|w| w == HEADER_END) {
             break i;
         }
         if buf.len() > MAX_HEADER_BYTES {
@@ -99,7 +107,7 @@ async fn read_request(stream: &mut TcpStream) -> std::io::Result<HttpRequest> {
     if length > MAX_BODY_BYTES {
         return Err(invalid("body too large"));
     }
-    let body_start = header_end + 4;
+    let body_start = header_end + HEADER_END.len();
     while buf.len() < body_start + length {
         let n = stream.read(&mut chunk).await?;
         if n == 0 {
@@ -118,7 +126,7 @@ async fn read_request(stream: &mut TcpStream) -> std::io::Result<HttpRequest> {
 async fn serve(mut stream: TcpStream, attempts: &Attempts) -> std::io::Result<()> {
     let req = read_request(&mut stream).await?;
     if !req.path.ends_with(CHAT_PATH) {
-        return write_error(&mut stream, 404, "unknown path").await;
+        return write_error(&mut stream, HTTP_NOT_FOUND, "unknown path").await;
     }
     let message_count = req.body["messages"].as_array().map_or(0, Vec::len);
     let attempt = attempts.count(&req.session_id, message_count);
@@ -235,7 +243,9 @@ async fn stream_round(
     pace: Pace,
     prompt_tokens: u64,
 ) -> std::io::Result<()> {
-    let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n";
+    let head = format!(
+        "HTTP/1.1 {HTTP_OK} OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n"
+    );
     stream.write_all(head.as_bytes()).await?;
     let mut out = Out { stream };
     out.send(delta(json!({"role": "assistant"}))).await?;
@@ -273,7 +283,7 @@ async fn stream_round(
     let cached = (prompt_tokens as f64 * CACHED_SHARE) as u64;
     let usage = json!({"choices": [], "usage": {
         "prompt_tokens": prompt_tokens,
-        "completion_tokens": (generated / CHARS_PER_TOKEN) as u64 + 1,
+        "completion_tokens": (generated / CHARS_PER_TOKEN) as u64 + MIN_COMPLETION_TOKENS,
         "prompt_tokens_details": {"cached_tokens": cached},
     }});
     out.send(event(usage)).await?;
