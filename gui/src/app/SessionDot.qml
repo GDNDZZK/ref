@@ -14,8 +14,8 @@ Item {
 	readonly property bool needsAttention: activity === "waiting_permission" || activity === "waiting_question" || activity === "retrying"
 	readonly property color dotColor: hasError && !working ? Theme.danger : needsAttention ? Theme.warning : working ? Theme.accent : Theme.idleDot
 
-	implicitWidth: 8
-	implicitHeight: 8
+	implicitWidth: Theme.statusDotSize
+	implicitHeight: Theme.statusDotSize
 
 	Flourish {
 		id: flourish

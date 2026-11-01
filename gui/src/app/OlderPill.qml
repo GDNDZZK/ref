@@ -42,9 +42,9 @@ Item {
 				Rectangle {
 					id: dot
 					anchors.centerIn: parent
-					width: 8
-					height: 8
-					radius: 4
+					width: Theme.statusDotSize
+					height: Theme.statusDotSize
+					radius: width / 2
 					color: Theme.accent
 					visible: pill.loading
 

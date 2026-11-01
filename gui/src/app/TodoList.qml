@@ -65,9 +65,9 @@ Column {
 				Rectangle {
 					id: workingDot
 					anchors.centerIn: parent
-					width: 8
-					height: 8
-					radius: 4
+					width: Theme.statusDotSize
+					height: Theme.statusDotSize
+					radius: width / 2
 					color: Theme.accent
 					opacity: row.active ? 1 : 0
 
