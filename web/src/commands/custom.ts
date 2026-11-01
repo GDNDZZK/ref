@@ -18,7 +18,9 @@ export function installCustomCommands(): void {
     () => connection.config?.commands,
     (infos) => {
       // A built-in command with the same name wins.
-      const taken = new Set(commands.commands.filter((c) => c.source === 'builtin').flatMap(slashNamesOf))
+      const taken = new Set(
+        commands.commands.filter((command) => command.source === 'builtin').flatMap(slashNamesOf),
+      )
       const custom = (infos ?? [])
         .filter((info) => !taken.has(info.name))
         .map((info): Command => ({

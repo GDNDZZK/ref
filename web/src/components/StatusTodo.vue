@@ -2,7 +2,7 @@
 // The to-do list in the status line (the TUI's progress line): the item being worked on and
 // done/total, or a tick and done/total once everything is done. A click opens the full list in a
 // popover above the button; Esc, a click outside and a change of session close it.
-import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { oneLine } from '../model/oneLine.ts'
 import type { Todo } from '../proto/generated'
@@ -11,6 +11,7 @@ import { currentTodo, todoProgress } from '../shell/sessionRow.ts'
 import Icon from './Icon.vue'
 import TodoList from './TodoList.vue'
 import TodoMarker from './TodoMarker.vue'
+import { Key } from '../keys.ts'
 
 const props = defineProps<{ sessionId: string; todos: readonly Todo[] | undefined }>()
 
@@ -37,8 +38,8 @@ function place(): void {
   const pane = paneRect ?? { left: 0, right: window.innerWidth }
   const { left, width } = placeInPane(rect, pane, POPOVER_WIDTH, EDGE_MARGIN)
   const bottom = window.innerHeight - rect.top + POPOVER_GAP
-  const current = position.value
-  if (left !== current.left || width !== current.width || bottom !== current.bottom) {
+  const currentPosition = position.value
+  if (left !== currentPosition.left || width !== currentPosition.width || bottom !== currentPosition.bottom) {
     position.value = { left, width, bottom }
   }
 }
@@ -55,16 +56,13 @@ function close(): void {
   open.value = false
 }
 
-async function toggle(): Promise<void> {
+function toggle(): void {
   open.value = !open.value
-  if (open.value) {
-    place()
-    await nextTick()
-  }
+  if (open.value) place()
 }
 
 function onKeydown(event: KeyboardEvent): void {
-  if (event.key !== 'Escape') return
+  if (event.key !== Key.Escape) return
   event.preventDefault()
   event.stopPropagation() // not an interrupt, and not for the composer
   close()

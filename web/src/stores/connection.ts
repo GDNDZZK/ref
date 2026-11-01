@@ -3,7 +3,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef } from 'vue'
 import { RefApi } from '../net/api.ts'
-import { RefConnection } from '../net/connection.ts'
+import { RefConnection, protocolOf } from '../net/connection.ts'
 import type { ConnectionState, EventFrame, HelloResult } from '../net/connection.ts'
 import { loginRequired } from '../net/login.ts'
 import { webSocketTransport } from '../net/transport.ts'
@@ -13,7 +13,6 @@ import { useNoticesStore } from './notices.ts'
 import { useSettingsStore } from './settings.ts'
 
 const CLIENT_NAME = 'ref-web'
-const PROTOCOL_WITHOUT_FIELD = 1 // servers older than protocol 2 do not report theirs
 
 export const useConnectionStore = defineStore('connection', () => {
   const notices = useNoticesStore()
@@ -22,9 +21,8 @@ export const useConnectionStore = defineStore('connection', () => {
   const detail = ref('')
   const hello = shallowRef<HelloResult>()
   const config = shallowRef<ServerConfigInfo>()
-  const backendTooOld = computed(
-    () => hello.value !== undefined && (hello.value.protocol ?? PROTOCOL_WITHOUT_FIELD) < PROTOCOL_VERSION,
-  )
+  const protocol = computed(() => protocolOf(hello.value))
+  const backendTooOld = computed(() => hello.value !== undefined && protocol.value < PROTOCOL_VERSION)
   const fatal = ref<string>() // i18n key of an error that stops the app before it connects
   const reconnected = ref(0) // counts the times the connection came back after a loss
 
@@ -78,6 +76,11 @@ export const useConnectionStore = defineStore('connection', () => {
     return api
   }
 
+  // Stops the backend; the answer may never arrive, as the connection ends with it.
+  function shutdownServer(): Promise<void> {
+    return getApi().shutdown()
+  }
+
   function onFrame(listener: (frame: EventFrame) => void): void {
     frameListeners.add(listener)
   }
@@ -95,6 +98,7 @@ export const useConnectionStore = defineStore('connection', () => {
     state,
     detail,
     hello,
+    protocol,
     config,
     backendTooOld,
     reconnected,
@@ -103,6 +107,7 @@ export const useConnectionStore = defineStore('connection', () => {
     stop,
     loadConfig,
     getApi,
+    shutdownServer,
     onFrame,
     onOpen,
   }

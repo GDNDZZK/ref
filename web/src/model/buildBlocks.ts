@@ -9,7 +9,15 @@
 
 import type { Message, PermissionRequest, QuestionRequest } from '../proto/generated'
 import { isFinalToolState } from './blocks.ts'
-import type { Block, CompactionBlock, ImageRef, MetaBlock, UserBlock, UserSource } from './blocks.ts'
+import type {
+  Block,
+  CompactionBlock,
+  ImageRef,
+  MetaBlock,
+  ToolBlock,
+  UserBlock,
+  UserSource,
+} from './blocks.ts'
 import type { PartView } from './partView.ts'
 import { partialPurpose } from './toolArgs.ts'
 
@@ -50,7 +58,8 @@ function userBlock(message: Message, context: BuildContext): UserBlock {
   const source = message.source.kind
   const senderName =
     message.source.kind === 'peer' || message.source.kind === 'spawn' ? message.source.from_name : undefined
-  const startsTurn = TURN_OPENING_SOURCES.includes(source) && !(context.isFirst && !context.hasOlderRows)
+  const isOldestRow = context.isFirst && !context.hasOlderRows
+  const startsTurn = TURN_OPENING_SOURCES.includes(source) && !isOldestRow
   return {
     kind: 'user',
     key: `${message.id}:user`,
@@ -106,6 +115,46 @@ function isInterrupted(message: Message): boolean {
   return message.error?.toLowerCase() === INTERRUPTED
 }
 
+type BlockBase = { messageId: string; stale: boolean }
+type ToolPart = Extract<Message['parts'][number], { type: 'tool' }>
+
+function toolBlock(part: ToolPart, key: string, base: BlockBase, context: BuildContext): ToolBlock {
+  return {
+    ...base,
+    kind: 'tool',
+    key,
+    streaming: !isFinalToolState(part.state),
+    callId: part.call_id,
+    name: part.name,
+    purpose: part.purpose || partialPurpose(part.raw_input) || '',
+    state: part.state,
+    input: part.input,
+    rawInput: part.raw_input,
+    output: part.output,
+    meta: part.meta ?? null,
+    time: part.time,
+    timeEnd: part.time_end,
+    runAt: part.run_at ?? null,
+    permission: context.permissions.get(part.call_id),
+    question: context.questions.get(part.call_id),
+    images: (part.images ?? []).map(imageRef),
+  }
+}
+
+function segmentBlocks(view: PartView, key: string, streaming: boolean, base: BlockBase): Block[] {
+  return view.segments.map((segment, segmentIndex) => {
+    const segmentBase = {
+      ...base,
+      key: `${key}:${segmentIndex}`,
+      streaming: streaming && segmentIndex === view.segments.length - 1,
+      text: segment.text,
+    }
+    return segment.kind === 'code'
+      ? { ...segmentBase, kind: 'code', language: segment.language }
+      : { ...segmentBase, kind: 'markdown' }
+  })
+}
+
 function assistantBlocks(entry: MessageEntry, context: BuildContext): Block[] {
   const { message } = entry
   const open = message.time_end === null && message.error === null && context.sessionBusy
@@ -115,28 +164,10 @@ function assistantBlocks(entry: MessageEntry, context: BuildContext): Block[] {
   message.parts.forEach((part, index) => {
     const streaming = context.isPacing(index) || (open && index === lastIndex)
     const base = { messageId: message.id, stale: context.stale }
+    const key = `${message.id}:${index}`
 
     if (part.type === 'tool') {
-      blocks.push({
-        ...base,
-        kind: 'tool',
-        key: `${message.id}:${index}`,
-        streaming: !isFinalToolState(part.state),
-        callId: part.call_id,
-        name: part.name,
-        purpose: part.purpose || partialPurpose(part.raw_input) || '',
-        state: part.state,
-        input: part.input,
-        rawInput: part.raw_input,
-        output: part.output,
-        meta: part.meta ?? null,
-        time: part.time,
-        timeEnd: part.time_end,
-        runAt: part.run_at ?? null,
-        permission: context.permissions.get(part.call_id),
-        question: context.questions.get(part.call_id),
-        images: (part.images ?? []).map(imageRef),
-      })
+      blocks.push(toolBlock(part, key, base, context))
       return
     }
 
@@ -145,30 +176,11 @@ function assistantBlocks(entry: MessageEntry, context: BuildContext): Block[] {
     if (!streaming) view.finish()
 
     if (part.type === 'reasoning') {
-      if (view.shown !== '')
-        blocks.push({
-          ...base,
-          kind: 'reasoning',
-          key: `${message.id}:${index}`,
-          streaming,
-          text: view.shown,
-        })
+      if (view.shown !== '') blocks.push({ ...base, kind: 'reasoning', key, streaming, text: view.shown })
       return
     }
 
-    view.segments.forEach((segment, s) => {
-      const segmentBase = {
-        ...base,
-        key: `${message.id}:${index}:${s}`,
-        streaming: streaming && s === view.segments.length - 1,
-        text: segment.text,
-      }
-      blocks.push(
-        segment.kind === 'code'
-          ? { ...segmentBase, kind: 'code', language: segment.language }
-          : { ...segmentBase, kind: 'markdown' },
-      )
-    })
+    blocks.push(...segmentBlocks(view, key, streaming, base))
   })
 
   const pacing = message.parts.some((_, index) => context.isPacing(index))

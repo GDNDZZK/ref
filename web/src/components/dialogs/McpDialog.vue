@@ -10,6 +10,8 @@ import Chevron from '../Chevron.vue'
 import DialogButton from '../DialogButton.vue'
 import ModalDialog from '../ModalDialog.vue'
 
+const KNOWN_STATUSES = ['connected', 'connecting', 'failed', 'disabled'] // the ones with a translated label
+
 const { t } = useI18n()
 const dialogs = useDialogsStore()
 const mcp = useMcpStore()
@@ -33,8 +35,7 @@ function toggle(server: McpServerStatus): void {
 }
 
 function statusText(status: string): string {
-  const known = ['connected', 'connecting', 'failed', 'disabled']
-  return known.includes(status) ? t(`dialog.mcp.${status}`) : status
+  return KNOWN_STATUSES.includes(status) ? t(`dialog.mcp.${status}`) : status
 }
 </script>
 

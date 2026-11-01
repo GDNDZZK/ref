@@ -29,6 +29,7 @@ import ToolText from './ToolText.vue'
 const props = defineProps<{ block: ToolBlock }>()
 
 const JSON_INDENT = 2
+const HTTP_BAD_REQUEST = 400
 const PEER_ICONS = {
   send_message: 'chat-send-16',
   create_session: 'chat-plus-16',
@@ -140,7 +141,7 @@ function open(target: string): void {
           <button type="button" class="open" :aria-label="t('tool.openUrl')" @click="open(url!)">
             <Icon icon="external-link-16" />
           </button>
-          <ToolChip v-if="status !== undefined" :danger="status >= 400">{{ status }}</ToolChip>
+          <ToolChip v-if="status !== undefined" :danger="status >= HTTP_BAD_REQUEST">{{ status }}</ToolChip>
           <ToolChip v-if="bytes !== undefined">{{ bytes }} B</ToolChip>
         </div>
       </ToolSection>

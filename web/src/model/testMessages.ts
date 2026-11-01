@@ -1,6 +1,16 @@
 // Builders for tests: the smallest valid messages and sessions.
 
-import type { Message, Part, SessionInfo, SessionSnapshot } from '../proto/generated'
+import { vi } from 'vitest'
+import type { RefApi } from '../net/api.ts'
+import type {
+  Message,
+  Part,
+  Question,
+  QuestionRequest,
+  SessionInfo,
+  SessionSnapshot,
+} from '../proto/generated'
+import { ChatSession } from './chatSession.ts'
 
 export function info(overrides: Partial<SessionInfo> = {}): SessionInfo {
   return {
@@ -87,4 +97,34 @@ export function snapshot(messages: Message[], overrides: Partial<SessionSnapshot
     queued: [],
     ...overrides,
   }
+}
+
+export function question(overrides: Partial<Question> = {}): Question {
+  return {
+    question: 'Which one?',
+    header: 'Pick',
+    multiple: false,
+    custom: true,
+    options: [
+      { label: 'A', description: 'first', default: false },
+      { label: 'B', description: 'second', default: true },
+    ],
+    ...overrides,
+  }
+}
+
+export function questionRequest(
+  questions: Question[] = [question()],
+  overrides: Partial<QuestionRequest> = {},
+): QuestionRequest {
+  return { session_id: 'ses_1', message_id: 'a1', call_id: 'c1', time: 1, questions, ...overrides }
+}
+
+// A session on a stubbed api whose callbacks do nothing.
+export function chatSessionWith(api: object, id = 'ses_1'): ChatSession {
+  return new ChatSession(id, {
+    api: () => api as unknown as RefApi,
+    notify: vi.fn(),
+    draftRestored: vi.fn(),
+  })
 }

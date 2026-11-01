@@ -6,9 +6,8 @@
 
 import { reactive, ref } from 'vue'
 import type { RefApi } from '../net/api.ts'
-import type { NamedImage } from '../proto/generated'
-import { onDraftRestored } from '../stores/draftBus.ts'
-import { CompletionController } from './completion.ts'
+import type { NamedImage, ToastLevel } from '../proto/generated'
+import { CompletionController, SLASH_PREFIX } from './completion.ts'
 import type { SlashCommand } from './completion.ts'
 import {
   attachImage,
@@ -19,13 +18,12 @@ import {
   submissionOf,
 } from './draft.ts'
 import type { Draft } from './draft.ts'
+import { onDraftRestored } from './draftBus.ts'
 import { HistoryBrowser } from './history.ts'
 import type { PromptHistory } from './history.ts'
 import { readImage, rejectionOf } from './images.ts'
 
 export type ComposerApi = Pick<RefApi, 'prompt' | 'shell' | 'removeQueued' | 'listFiles' | 'expandCommand'>
-
-export type ToastLevel = 'info' | 'warn' | 'error'
 
 export interface ComposerHost {
   sessionId: string
@@ -50,6 +48,7 @@ export class SessionComposer {
   readonly draft: Draft = reactive(emptyDraft())
   readonly interruptArmed = ref(false) // Esc was pressed once; a second one within INTERRUPT_ARMED_MS aborts
   readonly removingQueued = reactive(new Set<string>()) // message ids being taken back
+  readonly focusRequests = ref(0) // counts the times the box was asked to take the focus
 
   private readonly host: ComposerHost
   private readonly completionController: CompletionController
@@ -78,6 +77,10 @@ export class SessionComposer {
   // Where the caret is (or should be after the composer changed the text).
   get caret(): number {
     return this.cursor
+  }
+
+  requestFocus(): void {
+    this.focusRequests.value++
   }
 
   dispose(): void {
@@ -174,7 +177,7 @@ export class SessionComposer {
   }
 
   private acceptCommand(value: string, run: boolean): number | undefined {
-    const name = value.trim().slice(1)
+    const name = value.trim().slice(SLASH_PREFIX.length)
     const commands = this.host.slashCommands()
     const takesArgs = commands.find((command) => command.name === name)?.takesArgs ?? true
 
@@ -182,15 +185,15 @@ export class SessionComposer {
     const typedCommand = commands.find((c) => c.name === typed || c.aliases.includes(typed))
     const typedFully = (typedCommand?.name ?? typed) === name
     if (run && takesArgs && typedFully) {
-      this.draft.text = `/${name}`
+      this.draft.text = `${SLASH_PREFIX}${name}`
       void this.submit()
       return undefined
     }
     const command = commands.find((candidate) => candidate.name === name)
     if (run && !takesArgs && command) {
-      this.host.history.push(`/${name}`)
+      this.host.history.push(`${SLASH_PREFIX}${name}`)
       clearDraft(this.draft)
-      void this.runCommand(command, `/${name}`)
+      void this.runCommand(command, `${SLASH_PREFIX}${name}`)
       return undefined
     }
     return this.setText(value)
@@ -198,8 +201,9 @@ export class SessionComposer {
 
   // The command a line such as "/rename Work" names, if there is one.
   private commandIn(line: string): SlashCommand | undefined {
-    if (!line.startsWith('/')) return undefined
-    const typed = (line.slice(1).split(/\s+/)[0] ?? '').toLowerCase()
+    if (!line.startsWith(SLASH_PREFIX)) return undefined
+    const words = line.slice(SLASH_PREFIX.length).split(/\s+/) as [string, ...string[]]
+    const typed = words[0].toLowerCase()
     return this.host
       .slashCommands()
       .find((command) => command.name === typed || command.aliases.includes(typed))

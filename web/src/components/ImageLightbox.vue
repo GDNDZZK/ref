@@ -4,6 +4,7 @@ import { onBeforeUnmount, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from './Icon.vue'
 import { LIGHTBOX_MARGIN } from './toolLimits.ts'
+import { Key } from '../keys.ts'
 
 defineProps<{ url: string; caption: string }>()
 const emit = defineEmits<{ close: [] }>()
@@ -11,7 +12,7 @@ const emit = defineEmits<{ close: [] }>()
 const { t } = useI18n()
 
 function onKeydown(event: KeyboardEvent): void {
-  if (event.key !== 'Escape') return
+  if (event.key !== Key.Escape) return
   event.stopPropagation()
   event.preventDefault()
   emit('close')

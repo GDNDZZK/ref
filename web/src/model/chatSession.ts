@@ -10,6 +10,7 @@
 
 import { effectScope, markRaw, reactive, ref, shallowReactive } from 'vue'
 import type { EffectScope } from 'vue'
+import { describeError } from '../errorMessage.ts'
 import { useFrame } from '../motion/useFrame.ts'
 import type { RefApi } from '../net/api.ts'
 import type {
@@ -19,6 +20,7 @@ import type {
   QuestionRequest,
   SessionEvent,
   SessionInfo,
+  ToastLevel,
 } from '../proto/generated'
 import type { Block } from './blocks.ts'
 import { QuestionForm } from './questionForm.ts'
@@ -34,7 +36,7 @@ export type Activity =
 
 export interface ChatSessionDeps {
   api(): RefApi
-  notify(level: 'info' | 'warn' | 'error', text: string): void
+  notify(level: ToastLevel, text: string): void
   // Undo took a prompt back: the composer of the session gets its text and pictures.
   draftRestored(sessionId: string, text: string, images: NamedImage[]): void
 }
@@ -260,7 +262,7 @@ export class ChatSession {
       this.publish()
     } catch (error) {
       if (generation !== this.state.generation) return
-      this.state.olderError = error instanceof Error ? error.message : String(error)
+      this.state.olderError = describeError(error)
     } finally {
       if (generation === this.state.generation) this.state.loadingOlder = false
     }

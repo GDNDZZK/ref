@@ -3,14 +3,13 @@
 // session works, and a turn that finishes plays the flourish in the success color before the dot
 // settles to the idle color.
 import { computed, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
-import { usePulse } from '../motion/usePulse.ts'
+import { PULSE_DIMMED, usePulse } from '../motion/usePulse.ts'
 import { motion } from '../theme/generated/motion.ts'
 import type { RowState } from '../shell/sessionRow.ts'
 import Flourish from './Flourish.vue'
 
 const props = defineProps<{ state: RowState }>()
 
-const PULSE_DIMMED = 0.5
 const WORKING: readonly RowState[] = ['busy', 'compacting', 'retrying', 'permission', 'question']
 
 const dot = useTemplateRef<HTMLElement>('dot')

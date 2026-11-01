@@ -3,6 +3,7 @@
 // taken back; messages from other sessions and reminders only show who sent them.
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { collapseWhitespace } from '../model/oneLine.ts'
 import type { Message } from '../proto/generated'
 import { components } from '../theme/generated/components.ts'
 import Icon from './Icon.vue'
@@ -42,7 +43,7 @@ const rows = computed<Row[]>(() =>
     const text = message.parts.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join('\n\n')
     return {
       id: message.id,
-      text: text.replace(/\s+/g, ' ').trim(),
+      text: collapseWhitespace(text),
       imageCount: message.parts.filter((part) => part.type === 'image').length,
       sender: senderOf(message),
       removable: message.source.kind === 'human',

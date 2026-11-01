@@ -14,6 +14,8 @@
 // Releases end on grapheme boundaries, so an emoji or a combined character never shows half-made.
 // Time is in milliseconds and comes from the caller.
 
+import { clamp } from '../clamp.ts'
+
 // `stream` names what the text belongs to (a message part); adjacent chunks of one stream merge.
 export interface PacedText {
   stream: string
@@ -59,7 +61,7 @@ export class StreamPacer {
     const sameRead = this.lastArrival !== undefined && now - this.lastArrival < BURST_WINDOW_MS
     if (!sameRead) {
       if (this.lastArrival !== undefined) {
-        const gap = Math.min(MAX_LAG_MS, Math.max(MIN_GAP_MS, now - this.lastArrival))
+        const gap = clamp(now - this.lastArrival, MIN_GAP_MS, MAX_LAG_MS)
         this.gap = this.gap === undefined ? gap : this.gap + (gap - this.gap) * GAP_SMOOTHING
       }
       this.lastArrival = now

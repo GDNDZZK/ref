@@ -52,6 +52,7 @@ export function registerBuiltinCommands(): void {
   const notices = useNoticesStore()
   const layout = useLayoutStore()
 
+  const canZoomTile = () => !layout.narrow && workspace.mode === 'split' && workspace.focusedId !== undefined
   const isWorking = (sessionId: string) => {
     const info = workspace.live.find((session) => session.id === sessionId)
     return info !== undefined && rowState(info) !== 'idle' && rowState(info) !== 'error'
@@ -220,7 +221,7 @@ export function registerBuiltinCommands(): void {
       slash: false,
       group: 'view',
       shortcut: altKey('Z'),
-      enabled: () => !layout.narrow && workspace.mode === 'split' && workspace.focusedId !== undefined,
+      enabled: canZoomTile,
       run: (sessionId) => (workspace.zoomedId ? workspace.unzoom() : workspace.zoomTile(sessionId)),
     }),
     define({

@@ -8,6 +8,7 @@ import { useCommandsStore } from '../../stores/commands.ts'
 import { useDialogsStore } from '../../stores/dialogs.ts'
 import ModalDialog from '../ModalDialog.vue'
 import ShortcutChips from '../ShortcutChips.vue'
+import { Key } from '../../keys.ts'
 
 const { t } = useI18n()
 const commands = useCommandsStore()
@@ -22,10 +23,10 @@ const shortcuts = computed(() =>
 const slashes = computed(() => commands.slashEntries())
 
 const writing = computed(() => [
-  { id: 'send', title: t('dialog.help.send'), keys: ['Enter'] },
-  { id: 'newLine', title: t('dialog.help.newLine'), keys: ['Shift', 'Enter'] },
+  { id: 'send', title: t('dialog.help.send'), keys: [Key.Enter] },
+  { id: 'newLine', title: t('dialog.help.newLine'), keys: ['Shift', Key.Enter] },
   { id: 'interrupt', title: t('dialog.help.interrupt'), keys: ['Esc', 'Esc'] },
-  { id: 'cycleAgent', title: t('dialog.help.cycleAgent'), keys: ['Tab'] },
+  { id: 'cycleAgent', title: t('dialog.help.cycleAgent'), keys: [Key.Tab] },
   { id: 'history', title: t('dialog.help.history'), keys: ['↑', '↓'] },
   { id: 'pasteImage', title: t('dialog.help.pasteImage'), keys: ['Ctrl', 'V'] },
   { id: 'moveFocus', title: t('dialog.help.moveFocus'), keys: ['Alt', '←', '→', '↑', '↓'] },

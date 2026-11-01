@@ -3,6 +3,7 @@
 import { formatElapsed } from '../model/format.ts'
 import { oneLine } from '../model/oneLine.ts'
 import type { SessionInfo, Todo } from '../proto/generated'
+import { MS_PER_SECOND, SECONDS_PER_HOUR, SECONDS_PER_MINUTE } from '../time.ts'
 
 export type RowState = 'idle' | 'busy' | 'compacting' | 'retrying' | 'permission' | 'question' | 'error'
 
@@ -72,9 +73,6 @@ export function historyLabel(info: SessionInfo): string {
   return oneLine(info.title) || info.name.trim() || dirName(info.cwd)
 }
 
-const MS_PER_SECOND = 1000
-const SECONDS_PER_MINUTE = 60
-const SECONDS_PER_HOUR = 3600
 const MS_PER_MINUTE = SECONDS_PER_MINUTE * MS_PER_SECOND
 const MS_PER_HOUR = SECONDS_PER_HOUR * MS_PER_SECOND
 

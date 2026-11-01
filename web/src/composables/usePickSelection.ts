@@ -2,11 +2,35 @@
 
 import { ref, watch } from 'vue'
 import type { Ref } from 'vue'
+import { Key } from '../keys.ts'
 
 export interface PickItem {
   key: string
   group?: string // section label above the first row of the group
   disabled?: boolean
+}
+
+// ArrowDown / ArrowUp move the highlight; Enter picks it when `onPick` is given. Returns whether
+// the key was one of those (and so was kept from the text field).
+export function handleListKey(
+  event: KeyboardEvent,
+  move: (delta: 1 | -1) => void,
+  onPick?: () => void,
+): boolean {
+  if (event.key === Key.ArrowDown || event.key === Key.ArrowUp) {
+    move(event.key === Key.ArrowDown ? 1 : -1)
+    return consume(event)
+  }
+  if (event.key === Key.Enter && onPick) {
+    onPick()
+    return consume(event)
+  }
+  return false
+}
+
+function consume(event: KeyboardEvent): true {
+  event.preventDefault()
+  return true
 }
 
 export function usePickSelection(items: Ref<readonly PickItem[]>, preferredKey?: string) {

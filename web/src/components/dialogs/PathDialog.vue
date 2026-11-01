@@ -2,16 +2,16 @@
 // A directory path with completion from the backend's file system: /cd and "new session in…".
 import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { usePickSelection } from '../../composables/usePickSelection.ts'
-import { useConnectionStore } from '../../stores/connection.ts'
+import { useDialogSubmit } from '../../composables/useDialogSubmit.ts'
+import { handleListKey, usePickSelection } from '../../composables/usePickSelection.ts'
 import { useDialogsStore } from '../../stores/dialogs.ts'
-import { describeError } from '../../stores/notices.ts'
 import { useWorkspaceStore } from '../../stores/workspace.ts'
 import DialogButton from '../DialogButton.vue'
 import Icon from '../Icon.vue'
 import ModalDialog from '../ModalDialog.vue'
 import PickList from '../PickList.vue'
 import TextField from '../TextField.vue'
+import { Key } from '../../keys.ts'
 
 const ROW_HEIGHT_PX = 32
 const MAX_ROWS = 6
@@ -19,14 +19,11 @@ const LOOKUP_DELAY_MS = 120
 
 const props = defineProps<{ mode: 'cd' | 'newSession'; sessionId?: string }>()
 const { t } = useI18n()
-const connection = useConnectionStore()
 const dialogs = useDialogsStore()
 const workspace = useWorkspaceStore()
 
 const startPath = (props.sessionId ? workspace.infoOf(props.sessionId)?.cwd : undefined) ?? workspace.cwd
 const path = ref(startPath)
-const error = ref('')
-const busy = ref(false)
 const dirs = ref<string[]>([])
 const field = useTemplateRef<InstanceType<typeof TextField>>('field')
 
@@ -55,11 +52,14 @@ watch(
   () => split.value.folder,
   (folder) => {
     clearTimeout(lookup)
-    if (folder === '') return void (dirs.value = [])
+    if (folder === '') {
+      dirs.value = []
+      return
+    }
     lookup = setTimeout(async () => {
       const mine = ++lookedUp
       try {
-        const result = await connection.getApi().listDirs(folder)
+        const result = await workspace.listDirs(folder)
         if (mine === lookedUp) dirs.value = result.dirs
       } catch {
         if (mine === lookedUp) dirs.value = [] // a folder that does not exist (yet) has no completions
@@ -80,27 +80,23 @@ function accept(name: string | undefined): void {
 
 function onKey(event: KeyboardEvent): void {
   if (event.isComposing) return
-  if (event.key === 'Tab' && !event.shiftKey && items.value.length > 0) accept(selected.value)
-  else if (event.key === 'ArrowDown') move(1)
-  else if (event.key === 'ArrowUp') move(-1)
-  else return
-  event.preventDefault()
+  if (event.key === Key.Tab && !event.shiftKey && items.value.length > 0) {
+    accept(selected.value)
+    event.preventDefault()
+    return
+  }
+  handleListKey(event, move)
 }
 
-async function submit(): Promise<void> {
-  const target = path.value.trim()
-  if (target === '' || busy.value) return
-  busy.value = true
-  try {
+const { busy, error, submit } = useDialogSubmit(
+  async () => {
+    const target = path.value.trim()
     if (props.mode === 'cd' && props.sessionId) await workspace.setSessionCwd(props.sessionId, target)
     else await workspace.newSession({ cwd: target })
     dialogs.close()
-  } catch (failure) {
-    error.value = describeError(failure)
-  } finally {
-    busy.value = false
-  }
-}
+  },
+  () => path.value.trim() !== '',
+)
 
 watch(path, () => (error.value = ''))
 </script>
