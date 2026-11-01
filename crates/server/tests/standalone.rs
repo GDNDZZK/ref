@@ -18,6 +18,8 @@ const KEEP_RUNNING: i64 = ref_proto::IDLE_NEVER;
 const MIRROR_LIMIT: Duration = Duration::from_secs(1);
 const WAIT: Duration = Duration::from_secs(30);
 const POLL: Duration = Duration::from_millis(50);
+/// Working directory the clients report; the mock replaces it with its own workspace.
+const CWD: &str = "/anywhere";
 
 struct Client {
     ws: Ws,
@@ -37,7 +39,7 @@ async fn connect(mock: &Mock) -> Client {
     let hello = Request::Hello {
         client: "test".into(),
         version: ref_proto::PROTOCOL_VERSION,
-        cwd: "/anywhere".into(),
+        cwd: CWD.into(),
         token: Some(TOKEN.into()),
         notify: Vec::new(),
     };
@@ -114,7 +116,7 @@ impl Client {
 
     async fn open_session(&mut self, name: &str) -> String {
         let create = Request::CreateSession {
-            cwd: "/anywhere".into(),
+            cwd: CWD.into(),
             agent: None,
             model: None,
             name: Some(name.into()),
