@@ -216,10 +216,12 @@ pub async fn get(
         .headers()
         .get(CONTENT_LENGTH)
         .and_then(|v| v.to_str().ok()?.parse::<u64>().ok());
-    if declared.is_some_and(|n| n > MAX_BODY as u64) {
+    if let Some(n) = declared
+        && n > MAX_BODY as u64
+    {
         bail!(
             "Response too large: {} (limit {}). Download it with bash (curl -o) instead.",
-            crate::util::human_bytes(declared.unwrap_or(0)),
+            crate::util::human_bytes(n),
             crate::util::human_bytes(MAX_BODY as u64)
         );
     }
