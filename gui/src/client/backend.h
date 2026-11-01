@@ -79,7 +79,7 @@ signals:
 private:
 	QCoro::Task<> run();
 	QCoro::Task<std::expected<Endpoint, QString>> connectOnce();
-	QCoro::Task<bool> tryConnect(const Endpoint& endpoint, std::chrono::milliseconds timeout);
+	QCoro::Task<launcher::ConnectAttempt> tryConnect(const Endpoint& endpoint, std::chrono::milliseconds timeout);
 	QCoro::Task<std::expected<Endpoint, QString>> startMock();
 	void setState(State state, QString reason = {});
 

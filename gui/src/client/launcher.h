@@ -30,7 +30,9 @@ struct Explicit
 using Target = std::variant<Auto, Explicit>;
 
 // Tries to connect to `endpoint` within the timeout and, if that works, stays connected.
-using TryConnect = std::function<QCoro::Task<bool>(const Endpoint&, std::chrono::milliseconds)>;
+// A failed attempt says why.
+using ConnectAttempt = std::expected<void, QString>;
+using TryConnect = std::function<QCoro::Task<ConnectAttempt>(const Endpoint&, std::chrono::milliseconds)>;
 
 // Connects to `target` with `tryConnect` and returns the endpoint that worked, or why none did.
 // `onStartingBackend` is called every few hundred milliseconds while a started backend boots.
