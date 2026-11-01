@@ -105,24 +105,8 @@ fn decode(bytes: &[u8], format: ImageFormat) -> Result<DynamicImage, String> {
     })
 }
 
-/// Fits `bytes` (png, jpeg, gif or webp) into `limits`. Errors if the image cannot be decoded.
-/// Animated GIFs that need re-encoding keep only their first frame.
-pub(crate) fn fit(bytes: &[u8], limits: &Limits) -> Result<Fitted, String> {
-    let (format, mime, ow, oh) = probe(bytes)?;
-    let (max_w, max_h) = (limits.max_width.max(1), limits.max_height.max(1));
-    let min_dim = limits.min_dimension.min(max_w).min(max_h);
-    // Already within the bounds and compact (a quarter of the budget): keep the original bytes.
-    let within_bounds = ow >= min_dim && oh >= min_dim && ow <= max_w && oh <= max_h;
-    let compact = bytes.len() <= limits.max_bytes / 4;
-    if within_bounds && compact {
-        return Ok(Fitted {
-            data: None,
-            mime,
-            original: (ow, oh),
-            size: (ow, oh),
-        });
-    }
-
+/// Size to encode at: the original capped to `max`, lifted toward `min_dim` when undersized.
+fn target_size((ow, oh): (u32, u32), (max_w, max_h): (u32, u32), min_dim: u32) -> (u32, u32) {
     let (mut tw, mut th) = (ow as f64, oh as f64);
     if tw > max_w as f64 {
         th = (th * max_w as f64 / tw).round();
@@ -142,9 +126,17 @@ pub(crate) fn fit(bytes: &[u8], limits: &Limits) -> Result<Fitted, String> {
             th = (th * up).round().min(max_h as f64);
         }
     }
-    let (tw, th) = ((tw as u32).max(1), (th as u32).max(1));
+    ((tw as u32).max(1), (th as u32).max(1))
+}
 
-    let src = decode(bytes, format)?;
+/// Encodes `src` at `target` size (PNG and JPEG), then at lower JPEG qualities and smaller sizes
+/// until a candidate fits `limits.max_bytes`. Returns the smallest candidate seen.
+fn encode_best(
+    src: &DynamicImage,
+    (ow, oh): (u32, u32),
+    (tw, th): (u32, u32),
+    limits: &Limits,
+) -> Result<Fitted, String> {
     // JPEG has no alpha; translucent images can only shrink by dimensions.
     let lossy = !src.color().has_alpha();
 
@@ -166,7 +158,7 @@ pub(crate) fn fit(bytes: &[u8], limits: &Limits) -> Result<Fitted, String> {
         fits
     };
 
-    let target = resize(&mut resizer, &src, tw, th)?;
+    let target = resize(&mut resizer, src, tw, th)?;
     let png = encode_png(&target)?;
     let jpeg = if lossy {
         Some(encode_jpeg(&target, limits.jpeg_quality)?)
@@ -195,7 +187,7 @@ pub(crate) fn fit(bytes: &[u8], limits: &Limits) -> Result<Fitted, String> {
             if w < MIN_RETRY_EDGE || h < MIN_RETRY_EDGE {
                 break;
             }
-            let small = resize(&mut resizer, &src, w, h)?;
+            let small = resize(&mut resizer, src, w, h)?;
             if !lossy {
                 if consider(encode_png(&small)?, util::MIME_PNG, (w, h)) {
                     break;
@@ -209,7 +201,31 @@ pub(crate) fn fit(bytes: &[u8], limits: &Limits) -> Result<Fitted, String> {
             }
         }
     }
-    let best = best.expect("at least one candidate");
+    Ok(best.expect("at least one candidate"))
+}
+
+/// Fits `bytes` (png, jpeg, gif or webp) into `limits`. Errors if the image cannot be decoded.
+/// Animated GIFs that need re-encoding keep only their first frame.
+pub(crate) fn fit(bytes: &[u8], limits: &Limits) -> Result<Fitted, String> {
+    let (format, mime, ow, oh) = probe(bytes)?;
+    let (max_w, max_h) = (limits.max_width.max(1), limits.max_height.max(1));
+    let min_dim = limits.min_dimension.min(max_w).min(max_h);
+    // Already within the bounds and compact (a quarter of the budget): keep the original bytes.
+    let within_bounds = ow >= min_dim && oh >= min_dim && ow <= max_w && oh <= max_h;
+    let compact = bytes.len() <= limits.max_bytes / 4;
+    if within_bounds && compact {
+        return Ok(Fitted {
+            data: None,
+            mime,
+            original: (ow, oh),
+            size: (ow, oh),
+        });
+    }
+
+    let (tw, th) = target_size((ow, oh), (max_w, max_h), min_dim);
+
+    let src = decode(bytes, format)?;
+    let best = encode_best(&src, (ow, oh), (tw, th), limits)?;
     // Same dimensions and no smaller: re-encoding gained nothing.
     if best.size == (ow, oh) && best.data.as_ref().is_some_and(|d| d.len() >= bytes.len()) {
         return Ok(Fitted {
