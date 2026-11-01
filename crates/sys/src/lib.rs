@@ -120,8 +120,15 @@ mod imp {
         PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE, TerminateProcess,
     };
 
+    /// Exit code given to a process that `terminate` kills.
+    const TERMINATED_EXIT_CODE: u32 = 1;
+
+    fn valid(pid: u32) -> bool {
+        pid != 0
+    }
+
     pub fn pid_alive(pid: u32) -> bool {
-        if pid == 0 {
+        if !valid(pid) {
             return false;
         }
         // SAFETY: the handle is checked for null and closed before returning.
@@ -139,7 +146,7 @@ mod imp {
     }
 
     pub fn terminate(pid: u32) -> bool {
-        if pid == 0 {
+        if !valid(pid) {
             return false;
         }
         // SAFETY: the handle is checked for null and closed before returning.
@@ -148,7 +155,7 @@ mod imp {
             if h.is_null() {
                 return false;
             }
-            let ok = TerminateProcess(h, 1) != 0;
+            let ok = TerminateProcess(h, TERMINATED_EXIT_CODE) != 0;
             CloseHandle(h);
             ok
         }
@@ -159,7 +166,7 @@ mod imp {
     }
 
     pub fn kill_tree(pid: u32, _force: bool) {
-        if pid == 0 {
+        if !valid(pid) {
             return;
         }
         // taskkill walks the parent/child relation, which covers what a shell started.
