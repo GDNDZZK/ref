@@ -2106,10 +2106,8 @@ fn close_session_matching() {
     );
 }
 
-#[test]
-fn close_session_command_and_confirmation() {
-    use crate::app::Pending;
-    use crate::ui::dialog::{Dialog, Kind};
+/// An app with the current session, a background one and one foreground in another frontend.
+fn close_session_app() -> App {
     let mut app = test_app(false);
     let cur = app.views[TEST_SESSION].info.clone();
     app.live = vec![
@@ -2117,7 +2115,33 @@ fn close_session_command_and_confirmation() {
         bg_session("ses_bg", "worker-1", SessionStatus::Busy, 0),
         bg_session("ses_fg2", "other-fe", SessionStatus::Idle, 1),
     ];
-    // By name: background session closes at once.
+    app
+}
+
+fn is_closed(p: &crate::app::Pending) -> bool {
+    matches!(p, crate::app::Pending::Closed { .. })
+}
+
+/// Opens the close-session picker, with extra live sessions `x1` and `y1` and a history entry.
+fn open_close_picker(app: &mut App) {
+    app.live
+        .push(bg_session("ses_x", "x1", SessionStatus::Idle, 0));
+    app.live
+        .push(bg_session("ses_y", "y1", SessionStatus::Idle, 0));
+    app.history_list = vec![bg_session("ses_h", "old-history", SessionStatus::Idle, 0)];
+    app.run_command("close-session", "");
+}
+
+fn select_in_list_dialog(app: &mut App, key: &str) {
+    if let Some(crate::ui::dialog::Dialog::List(d)) = app.dialog.as_mut() {
+        d.select_key(key);
+    }
+}
+
+#[test]
+fn close_session_by_name_closes_a_background_session_at_once() {
+    use crate::app::Pending;
+    let mut app = close_session_app();
     type_text(&mut app, "/kill worker-1");
     press(&mut app, KeyCode::Enter);
     assert!(
@@ -2130,8 +2154,11 @@ fn close_session_command_and_confirmation() {
         "list updated right away"
     );
     assert_eq!(app.current.as_deref(), Some(TEST_SESSION));
-    // Foreground in another frontend: confirm first.
-    app.pending.clear();
+}
+
+#[test]
+fn close_session_foreground_elsewhere_needs_the_exact_name() {
+    let mut app = close_session_app();
     app.run_command("close-session", "OTHER-FE");
     assert!(app.pending.is_empty());
     assert!(
@@ -2140,18 +2167,15 @@ fn close_session_command_and_confirmation() {
             .is_some_and(|h| h.0.contains("another frontend"))
     );
     app.run_command("close-session", "other-fe");
-    assert!(
-        app.pending
-            .values()
-            .any(|p| matches!(p, Pending::Closed { .. }))
-    );
-    // Picker: live sessions only, stays open after closing, list refreshes.
-    app.live
-        .push(bg_session("ses_x", "x1", SessionStatus::Idle, 0));
-    app.live
-        .push(bg_session("ses_y", "y1", SessionStatus::Idle, 0));
-    app.history_list = vec![bg_session("ses_h", "old-history", SessionStatus::Idle, 0)];
-    app.run_command("close-session", "");
+    assert!(app.pending.values().any(is_closed));
+}
+
+#[test]
+fn close_session_picker_lists_live_sessions_and_stays_open() {
+    use crate::app::Pending;
+    use crate::ui::dialog::{Dialog, Kind};
+    let mut app = close_session_app();
+    open_close_picker(&mut app);
     let (_, s) = render(&mut app, 120, 34);
     assert!(
         s.contains("Close sessions")
@@ -2160,10 +2184,8 @@ fn close_session_command_and_confirmation() {
             && !s.contains("old-history"),
         "{s}"
     );
-    if let Some(Dialog::List(d)) = app.dialog.as_mut() {
-        d.select_key("live:ses_x");
-    }
-    app.pending.clear();
+
+    select_in_list_dialog(&mut app, "live:ses_x");
     press(&mut app, KeyCode::Enter);
     assert!(
         app.pending
@@ -2176,10 +2198,18 @@ fn close_session_command_and_confirmation() {
     );
     let (_, s) = render(&mut app, 120, 34);
     assert!(!s.contains("x1") && s.contains("y1"), "{s}");
-    // Closing the current session from the picker switches to the remaining live one.
-    if let Some(Dialog::List(d)) = app.dialog.as_mut() {
-        d.select_key("live:ses_test");
-    }
+}
+
+#[test]
+fn close_session_picker_closing_the_current_one_switches_to_the_remaining() {
+    use crate::app::Pending;
+    let mut app = close_session_app();
+    app.live.retain(|s| s.id == TEST_SESSION);
+    open_close_picker(&mut app);
+    app.live.retain(|s| s.id != "ses_x");
+    render(&mut app, 120, 34);
+
+    select_in_list_dialog(&mut app, "live:ses_test");
     press(&mut app, KeyCode::Enter);
     assert_eq!(app.current.as_deref(), Some("ses_y"));
     assert!(
