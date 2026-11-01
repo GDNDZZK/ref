@@ -70,7 +70,7 @@ async fn a_token_file_that_is_being_written_is_waited_for() {
 
 /// Sends raw bytes and returns what the server answers until it closes the connection.
 async fn raw_request(port: u16, request: &str) -> String {
-    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+    let mut stream = tokio::net::TcpStream::connect((LOOPBACK, port))
         .await
         .unwrap();
     stream.write_all(request.as_bytes()).await.unwrap();
@@ -93,7 +93,7 @@ async fn a_request_without_host_is_refused() {
         "{answer}"
     );
     let with_host = format!(
-        "GET /api/ping?nonce=00 HTTP/1.0\r\nHost: 127.0.0.1:{}\r\n\r\n",
+        "GET /api/ping?nonce=00 HTTP/1.0\r\nHost: {LOOPBACK}:{}\r\n\r\n",
         web.port
     );
     assert!(raw_request(web.port, &with_host).await.contains(" 200 "));
@@ -168,7 +168,7 @@ async fn sigterm_closes_the_tabs_and_exits_successfully() {
 
     let env = Env::new("sigterm");
     let upstream = fake_upstream().await;
-    let server = format!("ws://127.0.0.1:{}/", upstream.port);
+    let server = format!("ws://{LOOPBACK}:{}/", upstream.port);
     let mut web = env.start(&["--server", &server]).await;
     let mut tab = web.ws().await;
     // A round trip proves the tunnel is up before ref-web is told to stop.
@@ -201,7 +201,7 @@ async fn port_zero_is_rejected_before_anything_starts() {
     let deadline = std::time::Instant::now() + PORT_ZERO_SETTLE;
     let mut exited = false;
     while !exited && std::time::Instant::now() < deadline {
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        tokio::time::sleep(POLL_FAST).await;
         exited = child.try_wait().unwrap().is_some();
     }
     if !exited {
