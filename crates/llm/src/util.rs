@@ -17,6 +17,15 @@ use tokio_util::sync::CancellationToken;
 
 pub(crate) const DEFAULT_OPENAI_BASE: &str = "https://api.openai.com/v1";
 pub(crate) const DEFAULT_ANTHROPIC_BASE: &str = "https://api.anthropic.com/v1";
+/// OpenAI caps `prompt_cache_key` at this many characters.
+const MAX_CACHE_KEY_CHARS: usize = 64;
+/// FNV-1a 32-bit offset basis and prime (from the FNV spec).
+const FNV_OFFSET_BASIS: u32 = 0x811c_9dc5;
+const FNV_PRIME: u32 = 0x0100_0193;
+/// Length of the hash suffix of a shortened id: `_` plus 8 hex digits.
+const HASH_SUFFIX_LEN: usize = 9;
+/// Env var naming a directory to dump request bodies into (debug aid).
+const DUMP_REQUESTS_ENV: &str = "REF_DUMP_REQUESTS";
 /// Idle timeout used when the provider does not configure one.
 const DEFAULT_CHUNK_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -35,12 +44,12 @@ pub(crate) fn endpoint(base_url: &str, default: &str, path: &str) -> String {
 /// Host part of a URL (lower-cased, without port / credentials).
 pub(crate) fn host_of(url: &str) -> String {
     let rest = url.split_once("://").map_or(url, |(_, r)| r);
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let authority = rest.split_once(['/', '?', '#']).map_or(rest, |(a, _)| a);
     let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
     let host = if host.starts_with('[') {
-        host.split_inclusive(']').next().unwrap_or(host)
+        host.find(']').map_or(host, |end| &host[..=end])
     } else {
-        host.split(':').next().unwrap_or(host)
+        host.split_once(':').map_or(host, |(h, _)| h)
     };
     host.to_ascii_lowercase()
 }
@@ -77,12 +86,12 @@ pub(crate) fn prompt_cache_key(session_id: &str) -> Option<String> {
     if id.is_empty() {
         return None;
     }
-    let id = if id.len() > 64 {
+    let id = if id.len() > MAX_CACHE_KEY_CHARS {
         id.strip_prefix("ses_").unwrap_or(id)
     } else {
         id
     };
-    Some(truncate_chars(id, 64))
+    Some(truncate_chars(id, MAX_CACHE_KEY_CHARS))
 }
 
 pub(crate) fn truncate_chars(s: &str, max: usize) -> String {
@@ -91,8 +100,8 @@ pub(crate) fn truncate_chars(s: &str, max: usize) -> String {
 
 /// 32-bit FNV-1a, used to keep shortened ids unique and deterministic.
 fn fnv1a(s: &str) -> u32 {
-    s.bytes().fold(0x811c_9dc5u32, |h, b| {
-        (h ^ u32::from(b)).wrapping_mul(0x0100_0193)
+    s.bytes().fold(FNV_OFFSET_BASIS, |h, b| {
+        (h ^ u32::from(b)).wrapping_mul(FNV_PRIME)
     })
 }
 
@@ -116,7 +125,7 @@ pub(crate) fn normalize_call_id(id: &str, max: usize) -> String {
     if sanitized.len() <= max {
         return sanitized;
     }
-    let keep = max.saturating_sub(9);
+    let keep = max.saturating_sub(HASH_SUFFIX_LEN);
     format!("{}_{:08x}", &sanitized[..keep], fnv1a(id))
 }
 
@@ -142,6 +151,24 @@ pub(crate) fn arguments_string(arguments: &str) -> String {
     }
 }
 
+/// Default headers of every streaming request: JSON body, SSE response.
+pub(crate) fn json_sse_headers() -> Vec<(String, String)> {
+    vec![
+        ("content-type".to_string(), "application/json".to_string()),
+        ("accept".to_string(), "text/event-stream".to_string()),
+    ]
+}
+
+/// `authorization: Bearer <key>` when the provider has an API key.
+pub(crate) fn bearer_header(provider: &Provider) -> Option<(String, String)> {
+    let key = provider
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|k| !k.is_empty())?;
+    Some(("authorization".into(), format!("Bearer {key}")))
+}
+
 /// Session-affinity headers so gateways route a conversation to the same
 /// backend (improves prompt cache hits).
 pub(crate) fn session_headers(session_id: &str, names: &[&str]) -> Vec<(String, String)> {
@@ -157,6 +184,12 @@ pub(crate) fn session_headers(session_id: &str, names: &[&str]) -> Vec<(String, 
 
 /// Text used instead of an image for models without vision support.
 pub(crate) const IMAGE_OMITTED: &str = "(image omitted: model does not support images)";
+
+/// Text of a tool result without output or images.
+pub(crate) const NO_TOOL_OUTPUT: &str = "(no tool output)";
+
+/// Text of a tool result without output but with images.
+pub(crate) const SEE_ATTACHED_IMAGE: &str = "(see attached image)";
 
 /// `camelCase` -> `snake_case` (already snake-case keys are unchanged).
 pub(crate) fn camel_to_snake(s: &str) -> String {
@@ -375,6 +408,48 @@ pub(crate) enum StreamEnd {
     Eof,
 }
 
+/// Debug aid: dump the request body into `REF_DUMP_REQUESTS` (never headers, which hold
+/// credentials).
+fn dump_request(payload: &[u8]) {
+    let Some(dir) = std::env::var_os(DUMP_REQUESTS_ENV) else {
+        return;
+    };
+    let path = std::path::Path::new(&dir).join(format!(
+        "req-{}.json",
+        chrono::Utc::now().timestamp_millis()
+    ));
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        tracing::warn!(error = %e, "cannot create the request dump directory");
+    }
+    if let Err(e) = std::fs::write(&path, payload) {
+        tracing::warn!(error = %e, path = %path.display(), "cannot dump the request body");
+    }
+}
+
+/// POST `payload` and wait up to `idle` for the response headers.
+async fn send_request(
+    url: &str,
+    headers: HeaderMap,
+    payload: Vec<u8>,
+    idle: Duration,
+    cancel: &CancellationToken,
+) -> Result<reqwest::Response, LlmError> {
+    dump_request(&payload);
+    let request = crate::http_client(url)
+        .post(url)
+        .headers(headers)
+        .body(payload)
+        .send();
+    tokio::select! {
+        _ = cancel.cancelled() => Err(LlmError::cancelled()),
+        r = tokio::time::timeout(idle, request) => match r {
+            Err(_) => Err(LlmError::transient("timed out waiting for response headers")),
+            Ok(Err(e)) => Err(network_error(&e)),
+            Ok(Ok(resp)) => Ok(resp),
+        },
+    }
+}
+
 /// POST `body` to `url` and feed every SSE event to `handle` until it
 /// returns `Ok(true)` (terminal event) or the stream ends.
 ///
@@ -394,29 +469,7 @@ pub(crate) async fn run_sse(
     let payload = serde_json::to_vec(body)
         .map_err(|e| LlmError::fatal(format!("failed to encode request: {e}")))?;
     let idle = chunk_timeout(provider);
-    if let Some(dir) = std::env::var_os("REF_DUMP_REQUESTS") {
-        // Debug aid: dump request bodies (never headers, which hold credentials).
-        let path = std::path::Path::new(&dir).join(format!(
-            "req-{}.json",
-            chrono::Utc::now().timestamp_millis()
-        ));
-        let _ = std::fs::create_dir_all(&dir);
-        let _ = std::fs::write(path, &payload);
-    }
-    let request = crate::http_client(url)
-        .post(url)
-        .headers(headers)
-        .body(payload)
-        .send();
-
-    let resp = tokio::select! {
-        _ = cancel.cancelled() => return Err(LlmError::cancelled()),
-        r = tokio::time::timeout(idle, request) => match r {
-            Err(_) => return Err(LlmError::transient("timed out waiting for response headers")),
-            Ok(Err(e)) => return Err(network_error(&e)),
-            Ok(Ok(resp)) => resp,
-        },
-    };
+    let resp = send_request(url, headers, payload, idle, cancel).await?;
 
     let status = resp.status();
     if !status.is_success() {

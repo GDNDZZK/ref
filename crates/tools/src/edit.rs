@@ -1,6 +1,6 @@
 //! `edit`: apply line-addressed edits against a hashline snapshot.
 
-use crate::hashline::{self, LineSet, Seen, Snapshot, format_header};
+use crate::hashline::{self, HEADER_RE, LineSet, Seen, Snapshot, format_header};
 use crate::util::{self, TextFile};
 use crate::{ToolCtx, ToolOutput, ToolSpec};
 use anyhow::{Result, anyhow, bail};
@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::LazyLock;
+use std::time::{Duration, Instant};
 
 /// Context rows around each change in the success preview.
 const PREVIEW_CONTEXT: usize = 2;
@@ -20,27 +21,41 @@ const PREVIEW_MAX_ROWS: usize = 200;
 /// Max lines revealed inline by the seen-line guard.
 const REVEAL_MAX_LINES: usize = 40;
 const REVEAL_MAX_CHARS: usize = 512;
+/// Added runs of at least this many lines collapse in the preview.
+const COLLAPSE_RUN_MIN: usize = 6;
+/// Rows kept at the start and at the end of a collapsed run.
+const COLLAPSE_HEAD_ROWS: usize = 3;
+const COLLAPSE_TAIL_ROWS: usize = 2;
 /// Max chars per preview / context row.
 const ROW_MAX_CHARS: usize = 500;
 
+const OP_REPLACE: &str = "replace";
+const OP_DELETE: &str = "delete";
+const OP_INSERT_BEFORE: &str = "insert_before";
+const OP_INSERT_AFTER: &str = "insert_after";
+
+/// Name the model calls the tool by.
+pub(crate) const NAME: &str = "edit";
+
 pub fn spec() -> ToolSpec {
     ToolSpec {
-        name: "edit",
-        description: "Edit an existing text file by line number. Create new files with `write`.\n\
+        name: NAME,
+        description: format!(
+            "Edit an existing text file by line number. Create new files with `write`.\n\
 \n\
 - `tag`: the 4-hex TAG from the `[path#TAG]` header of the LATEST `read`, `grep`, `write` or `edit` output for this file. Never invent it.\n\
 - Line numbers are the `N` of the `N:content` rows in that output, i.e. they refer to the file version identified by `tag`. All edits in one call are applied simultaneously against that version, so never shift numbers to account for earlier edits in the same call.\n\
 - Ops:\n\
-  {\"op\":\"replace\",\"start\":N,\"end\":M,\"lines\":[...]} replaces lines N..M inclusive (omit `end` for one line); `lines` may have any length.\n\
-  {\"op\":\"delete\",\"start\":N,\"end\":M} deletes lines N..M.\n\
-  {\"op\":\"insert_after\",\"line\":N,\"lines\":[...]} inserts after line N (N=0 = top of file).\n\
-  {\"op\":\"insert_before\",\"line\":N,\"lines\":[...]} inserts before line N.\n\
+  {{\"op\":\"{OP_REPLACE}\",\"start\":N,\"end\":M,\"lines\":[...]}} replaces lines N..M inclusive (omit `end` for one line); `lines` may have any length.\n\
+  {{\"op\":\"{OP_DELETE}\",\"start\":N,\"end\":M}} deletes lines N..M.\n\
+  {{\"op\":\"{OP_INSERT_AFTER}\",\"line\":N,\"lines\":[...]}} inserts after line N (N=0 = top of file).\n\
+  {{\"op\":\"{OP_INSERT_BEFORE}\",\"line\":N,\"lines\":[...]}} inserts before line N.\n\
 - `lines` are complete raw lines WITHOUT the `N:` prefix and without trailing newlines; indentation must be exact. Use `[\"\"]` for one blank line.\n\
 - Ranges must not overlap; use one replace per contiguous region and only touch lines you saw in full.\n\
 - On success the output shows the new `[path#TAG]` header and the changed region with new line numbers. Use that new tag (and those numbers) for the next edit; the old tag is stale.\n\
 - If rejected because the file changed, use the current lines shown in the error or re-read the file.\n\
 - Line endings, BOM and the final newline of the file are preserved."
-            .to_string(),
+        ),
         parameters: json!({
             "type": "object",
             "properties": {
@@ -53,7 +68,7 @@ pub fn spec() -> ToolSpec {
                     "items": {
                         "type": "object",
                         "properties": {
-                            "op": {"type": "string", "enum": ["replace", "delete", "insert_before", "insert_after"]},
+                            "op": {"type": "string", "enum": [OP_REPLACE, OP_DELETE, OP_INSERT_BEFORE, OP_INSERT_AFTER]},
                             "start": {"type": "integer", "minimum": 1, "description": "replace/delete: first line of the range."},
                             "end": {"type": "integer", "minimum": 1, "description": "replace/delete: last line of the range, inclusive (default = start)."},
                             "line": {"type": "integer", "minimum": 0, "description": "insert_before/insert_after: anchor line (insert_after 0 = top of file)."},
@@ -115,15 +130,15 @@ impl Op {
     fn describe(&self) -> String {
         match &self.kind {
             Kind::Replace { start, end } if self.lines.is_empty() => {
-                range_label("delete", *start, *end)
+                range_label(OP_DELETE, *start, *end)
             }
-            Kind::Replace { start, end } => range_label("replace", *start, *end),
+            Kind::Replace { start, end } => range_label(OP_REPLACE, *start, *end),
             Kind::Insert {
                 before: true,
                 anchor,
                 ..
-            } => format!("insert_before line {anchor}"),
-            Kind::Insert { anchor, .. } => format!("insert_after line {anchor}"),
+            } => format!("{OP_INSERT_BEFORE} line {anchor}"),
+            Kind::Insert { anchor, .. } => format!("{OP_INSERT_AFTER} line {anchor}"),
         }
     }
 }
@@ -138,8 +153,6 @@ fn range_label(op: &str, s: usize, e: usize) -> String {
 
 static PREFIX_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\s*(?:[*+-]\s*)?(\d+):").expect("valid regex"));
-static HEADER_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\s*\[[^#\r\n]+#[0-9a-fA-F]{4}\]\s*$").expect("valid regex"));
 
 /// Strips `N:` prefixes when the model obviously pasted read output: every non-empty row
 /// carries a prefix and the numbers count up by one (2+ rows), or a single row is numbered
@@ -206,6 +219,79 @@ fn parse_lines(v: Option<&Value>, idx: usize) -> Result<Option<Vec<String>>> {
     }
 }
 
+/// Parses one edit object. Also reports whether `N:` display prefixes were stripped from `lines`.
+fn parse_op(idx: usize, e: &Value) -> Result<(Op, bool)> {
+    if !e.is_object() {
+        bail!("edits[{idx}] must be an object");
+    }
+    let op = util::opt_str(e, "op")?.ok_or_else(|| anyhow!("edits[{idx}]: missing `op`"))?;
+    let op = op.trim().to_ascii_lowercase().replace('-', "_");
+    let num = |k: &str| {
+        util::value_u64(e.get(k), &format!("edits[{idx}].{k}")).map(|v| v.map(|n| n as usize))
+    };
+    let lines = parse_lines(e.get("lines"), idx)?;
+    let kind = match op.as_str() {
+        OP_REPLACE | OP_DELETE => {
+            let start = num("start")?
+                .or(num("line")?)
+                .ok_or_else(|| anyhow!("edits[{idx}]: `{op}` requires `start`"))?;
+            let end = num("end")?.unwrap_or(start);
+            if start == 0 {
+                bail!("edits[{idx}]: line numbers start at 1");
+            }
+            if end < start {
+                bail!("edits[{idx}]: `end` ({end}) is before `start` ({start})");
+            }
+            Kind::Replace { start, end }
+        }
+        OP_INSERT_BEFORE | OP_INSERT_AFTER => {
+            let line = num("line")?
+                .or(num("start")?)
+                .ok_or_else(|| anyhow!("edits[{idx}]: `{op}` requires `line`"))?;
+            if op == OP_INSERT_BEFORE {
+                if line == 0 {
+                    bail!(
+                        "edits[{idx}]: {OP_INSERT_BEFORE} needs line >= 1 (use {OP_INSERT_AFTER} with line 0 for the top of the file)"
+                    );
+                }
+                Kind::Insert {
+                    gap: line - 1,
+                    before: true,
+                    anchor: line,
+                }
+            } else {
+                Kind::Insert {
+                    gap: line,
+                    before: false,
+                    anchor: line,
+                }
+            }
+        }
+        other => bail!(
+            "edits[{idx}]: unknown op \"{other}\" (expected {OP_REPLACE}, {OP_DELETE}, {OP_INSERT_BEFORE} or {OP_INSERT_AFTER})"
+        ),
+    };
+    let mut lines = match (&kind, op.as_str(), lines) {
+        (_, OP_DELETE, _) => Vec::new(),
+        (_, _, Some(l)) => l,
+        (Kind::Replace { .. }, _, None) => {
+            bail!(
+                "edits[{idx}]: {OP_REPLACE} requires `lines` (use op \"{OP_DELETE}\" to remove lines)"
+            )
+        }
+        (_, _, None) => bail!("edits[{idx}]: `{op}` requires `lines`"),
+    };
+    let replace_start = match kind {
+        Kind::Replace { start, .. } => Some(start),
+        _ => None,
+    };
+    let stripped = !lines.is_empty() && strip_pasted_prefixes(&mut lines, replace_start);
+    if matches!(kind, Kind::Insert { .. }) && lines.is_empty() {
+        bail!("edits[{idx}]: `{op}` with empty `lines` does nothing");
+    }
+    Ok((Op { idx, kind, lines }, stripped))
+}
+
 fn parse_edits(input: &Value, warnings: &mut Vec<String>) -> Result<Vec<Op>> {
     let edits = match input.get("edits") {
         Some(Value::String(s)) => serde_json::from_str::<Value>(s)
@@ -224,75 +310,9 @@ fn parse_edits(input: &Value, warnings: &mut Vec<String>) -> Result<Vec<Op>> {
     let mut ops = Vec::new();
     let mut stripped_any = false;
     for (idx, e) in edits.iter().enumerate() {
-        if !e.is_object() {
-            bail!("edits[{idx}] must be an object");
-        }
-        let op = util::opt_str(e, "op")?.ok_or_else(|| anyhow!("edits[{idx}]: missing `op`"))?;
-        let op = op.trim().to_ascii_lowercase().replace('-', "_");
-        let num = |k: &str| {
-            util::value_u64(e.get(k), &format!("edits[{idx}].{k}")).map(|v| v.map(|n| n as usize))
-        };
-        let lines = parse_lines(e.get("lines"), idx)?;
-        let kind = match op.as_str() {
-            "replace" | "delete" => {
-                let start = num("start")?
-                    .or(num("line")?)
-                    .ok_or_else(|| anyhow!("edits[{idx}]: `{op}` requires `start`"))?;
-                let end = num("end")?.unwrap_or(start);
-                if start == 0 {
-                    bail!("edits[{idx}]: line numbers start at 1");
-                }
-                if end < start {
-                    bail!("edits[{idx}]: `end` ({end}) is before `start` ({start})");
-                }
-                Kind::Replace { start, end }
-            }
-            "insert_before" | "insert_after" => {
-                let line = num("line")?
-                    .or(num("start")?)
-                    .ok_or_else(|| anyhow!("edits[{idx}]: `{op}` requires `line`"))?;
-                if op == "insert_before" {
-                    if line == 0 {
-                        bail!(
-                            "edits[{idx}]: insert_before needs line >= 1 (use insert_after with line 0 for the top of the file)"
-                        );
-                    }
-                    Kind::Insert {
-                        gap: line - 1,
-                        before: true,
-                        anchor: line,
-                    }
-                } else {
-                    Kind::Insert {
-                        gap: line,
-                        before: false,
-                        anchor: line,
-                    }
-                }
-            }
-            other => bail!(
-                "edits[{idx}]: unknown op \"{other}\" (expected replace, delete, insert_before or insert_after)"
-            ),
-        };
-        let mut lines = match (&kind, op.as_str(), lines) {
-            (_, "delete", _) => Vec::new(),
-            (_, _, Some(l)) => l,
-            (Kind::Replace { .. }, _, None) => {
-                bail!("edits[{idx}]: replace requires `lines` (use op \"delete\" to remove lines)")
-            }
-            (_, _, None) => bail!("edits[{idx}]: `{op}` requires `lines`"),
-        };
-        let replace_start = match kind {
-            Kind::Replace { start, .. } => Some(start),
-            _ => None,
-        };
-        if !lines.is_empty() && strip_pasted_prefixes(&mut lines, replace_start) {
-            stripped_any = true;
-        }
-        if matches!(kind, Kind::Insert { .. }) && lines.is_empty() {
-            bail!("edits[{idx}]: `{op}` with empty `lines` does nothing");
-        }
-        ops.push(Op { idx, kind, lines });
+        let (op, stripped) = parse_op(idx, e)?;
+        stripped_any |= stripped;
+        ops.push(op);
     }
     if stripped_any {
         warnings.push("Stripped `N:` display prefixes from `lines` (they looked like pasted read output). `lines` must contain raw file content only.".to_string());
@@ -305,7 +325,7 @@ fn validate(ops: &[Op], total: usize) -> Result<(), String> {
     for op in ops {
         let i = op.idx;
         match op.kind {
-            Kind::Replace { start, end } => {
+            Kind::Replace { end, .. } => {
                 if total == 0 {
                     return Err(format!(
                         "edits[{i}]: the file is empty; use insert_after with line 0."
@@ -316,7 +336,6 @@ fn validate(ops: &[Op], total: usize) -> Result<(), String> {
                         "edits[{i}]: line {end} does not exist (file has {total} lines)."
                     ));
                 }
-                let _ = start;
             }
             Kind::Insert {
                 gap,
@@ -410,6 +429,14 @@ fn apply(lines: &[&str], ops: &[Op]) -> Vec<String> {
 // Line mapping through diffs
 // ---------------------------------------------------------------------------
 
+/// Line diffs give up on pathological inputs after this long and return a coarser result.
+const DIFF_DEADLINE: Duration = Duration::from_secs(2);
+
+fn diff_ops(old: &[&str], new: &[&str]) -> Vec<similar::DiffOp> {
+    let deadline = Instant::now() + DIFF_DEADLINE;
+    similar::capture_diff_slices_deadline(similar::Algorithm::Myers, old, new, Some(deadline))
+}
+
 /// Maps 1-based lines of `old` to 1-based lines of `new` through unchanged runs.
 struct LineMap {
     map: Vec<Option<usize>>, // index = old line (1-based); [0] unused
@@ -418,13 +445,7 @@ struct LineMap {
 
 impl LineMap {
     fn build(old: &[&str], new: &[&str]) -> LineMap {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        let ops = similar::capture_diff_slices_deadline(
-            similar::Algorithm::Myers,
-            old,
-            new,
-            Some(deadline),
-        );
+        let ops = diff_ops(old, new);
         let mut map = vec![None; old.len() + 1];
         for op in ops {
             if let similar::DiffOp::Equal {
@@ -625,13 +646,7 @@ fn check_seen(
 /// Returns (preview, displayed full rows).
 fn build_preview(old: &[&str], new: &[String]) -> (String, Vec<u32>) {
     let new_refs: Vec<&str> = new.iter().map(String::as_str).collect();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    let ops = similar::capture_diff_slices_deadline(
-        similar::Algorithm::Myers,
-        old,
-        &new_refs,
-        Some(deadline),
-    );
+    let ops = diff_ops(old, &new_refs);
     // Changed regions in new-file coordinates, 0-based half-open.
     let mut regions: Vec<(usize, usize)> = Vec::new();
     for op in ops {
@@ -657,11 +672,11 @@ fn build_preview(old: &[&str], new: &[String]) -> (String, Vec<u32>) {
             show.insert(l);
         }
         let len = b - a;
-        if len > 5 {
-            for l in a..a + 3 {
+        if len >= COLLAPSE_RUN_MIN {
+            for l in a..a + COLLAPSE_HEAD_ROWS {
                 show.insert(l);
             }
-            for l in b - 2..b {
+            for l in b - COLLAPSE_TAIL_ROWS..b {
                 show.insert(l);
             }
         } else {
@@ -673,11 +688,7 @@ fn build_preview(old: &[&str], new: &[String]) -> (String, Vec<u32>) {
     let mut out = String::new();
     let mut seen = Vec::new();
     let mut prev: Option<usize> = None;
-    let mut rows = 0;
-    for l in show {
-        if l >= total {
-            continue;
-        }
+    for (rows, l) in show.into_iter().enumerate() {
         if rows >= PREVIEW_MAX_ROWS {
             out.push_str("…\n[preview truncated; read the file to see the rest]\n");
             break;
@@ -693,7 +704,6 @@ fn build_preview(old: &[&str], new: &[String]) -> (String, Vec<u32>) {
             seen.push((l + 1) as u32);
         }
         prev = Some(l);
-        rows += 1;
     }
     if out.ends_with('\n') {
         out.pop();
@@ -711,14 +721,8 @@ fn build_preview(old: &[&str], new: &[String]) -> (String, Vec<u32>) {
 /// Lines of `new` that are new content (inserted/replaced), 1-based.
 fn added_lines(old: &[&str], new: &[String]) -> Vec<u32> {
     let new_refs: Vec<&str> = new.iter().map(String::as_str).collect();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     let mut out = Vec::new();
-    for op in similar::capture_diff_slices_deadline(
-        similar::Algorithm::Myers,
-        old,
-        &new_refs,
-        Some(deadline),
-    ) {
+    for op in diff_ops(old, &new_refs) {
         if let similar::DiffOp::Insert {
             new_index, new_len, ..
         }
@@ -735,6 +739,109 @@ fn added_lines(old: &[&str], new: &[String]) -> Vec<u32> {
 // ---------------------------------------------------------------------------
 // Main flow
 // ---------------------------------------------------------------------------
+
+/// The file being edited, as read from disk.
+struct Target<'a> {
+    abs: &'a Path,
+    display: &'a str,
+    /// BOM-stripped, LF-normalized text.
+    current: &'a str,
+    current_tag: &'a str,
+    lines: &'a [&'a str],
+}
+
+/// Resolves `ops` against the current file: validates them, or remaps them from the snapshot
+/// of an older `tag`. Returns the ops and the lines the model has seen, or the rejection.
+fn resolve_ops(
+    ctx: &ToolCtx,
+    t: &Target,
+    tag: &str,
+    ops: Vec<Op>,
+    warnings: &mut Vec<String>,
+) -> Result<(Vec<Op>, Seen), Box<ToolOutput>> {
+    let snapshot = ctx.store.get(t.abs, tag);
+    if tag == t.current_tag {
+        if let Err(msg) = validate(&ops, t.lines.len()) {
+            return Err(Box::new(ToolOutput::err(format!(
+                "Edit rejected for {}: {msg}",
+                t.display
+            ))));
+        }
+        let Some(snap) = &snapshot else {
+            // Tag matches the live content but was not issued in this session (e.g. after
+            // a restart): the content is what the model saw, so allow it.
+            return Ok((ops, Seen::All));
+        };
+        if let Some(rejection) = check_seen(ctx, t.abs, t.display, snap, &ops) {
+            return Err(Box::new(rejection));
+        }
+        return Ok((ops, snap.seen.clone()));
+    }
+
+    let remapped = snapshot
+        .as_ref()
+        .and_then(|snap| try_remap(&snap.text, t.lines, &ops, &snap.seen));
+    match remapped {
+        Some((remapped, seen)) => {
+            warnings.push("Recovered: file changed since read; line numbers remapped.".to_string());
+            Ok((remapped, seen))
+        }
+        None => Err(Box::new(mismatch(
+            ctx,
+            t.abs,
+            t.display,
+            tag,
+            t.current_tag,
+            t.current,
+            &ops,
+            snapshot.as_ref(),
+        ))),
+    }
+}
+
+/// Records the new snapshot of the written file and builds the success output.
+fn record_result(
+    ctx: &ToolCtx,
+    t: &Target,
+    new_lines: &[String],
+    new_text: &str,
+    base_seen: &Seen,
+    warnings: &[String],
+) -> ToolOutput {
+    // New snapshot: previously seen lines carried through the diff + everything displayed or authored now.
+    let map = LineMap::build(
+        t.lines,
+        &new_lines.iter().map(String::as_str).collect::<Vec<_>>(),
+    );
+    let (preview, preview_seen) = build_preview(t.lines, new_lines);
+    let seen = match map.map_seen(base_seen) {
+        Seen::All => Seen::All,
+        Seen::Lines(mut s) => {
+            let extra: LineSet = preview_seen
+                .into_iter()
+                .chain(added_lines(t.lines, new_lines))
+                .collect();
+            s.union_with(&extra);
+            Seen::Lines(s)
+        }
+    };
+    let new_tag = ctx.store.record(t.abs, new_text, seen);
+
+    let (diff, added, removed) = util::unified_diff(t.current, new_text, t.display);
+    let mut text = format!("{}\n{preview}", format_header(t.display, &new_tag));
+    if !warnings.is_empty() {
+        text.push_str("\n\nWarnings:\n");
+        text.push_str(&warnings.join("\n"));
+    }
+    let mut out = ToolOutput::ok(text);
+    out.meta = Some(json!({
+        "path": t.abs.to_string_lossy(),
+        "diff": diff,
+        "added": added,
+        "removed": removed,
+    }));
+    out
+}
 
 fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let raw_path = util::req_str(input, "path")?;
@@ -783,60 +890,16 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         )));
     };
 
-    // Resolve the ops against the current file.
-    let snapshot = ctx.store.get(&abs, &tag);
-    let (ops, base_seen): (Vec<Op>, Seen) = if tag == current_tag {
-        if let Err(msg) = validate(&ops, cur_lines.len()) {
-            return Ok(ToolOutput::err(format!(
-                "Edit rejected for {display}: {msg}"
-            )));
-        }
-        match &snapshot {
-            Some(snap) => {
-                if let Some(rejection) = check_seen(ctx, &abs, &display, snap, &ops) {
-                    return Ok(rejection);
-                }
-                (ops, snap.seen.clone())
-            }
-            // Tag matches the live content but was not issued in this session (e.g. after
-            // a restart): the content is what the model saw, so allow it.
-            None => (ops, Seen::All),
-        }
-    } else {
-        match &snapshot {
-            Some(snap) => match try_remap(&snap.text, &cur_lines, &ops, &snap.seen) {
-                Some((remapped, seen)) => {
-                    warnings.push(
-                        "Recovered: file changed since read; line numbers remapped.".to_string(),
-                    );
-                    (remapped, seen)
-                }
-                None => {
-                    return Ok(mismatch(
-                        ctx,
-                        &abs,
-                        &display,
-                        &tag,
-                        &current_tag,
-                        current,
-                        &ops,
-                        Some(snap),
-                    ));
-                }
-            },
-            None => {
-                return Ok(mismatch(
-                    ctx,
-                    &abs,
-                    &display,
-                    &tag,
-                    &current_tag,
-                    current,
-                    &ops,
-                    None,
-                ));
-            }
-        }
+    let target = Target {
+        abs: &abs,
+        display: &display,
+        current,
+        current_tag: &current_tag,
+        lines: &cur_lines,
+    };
+    let (ops, base_seen) = match resolve_ops(ctx, &target, &tag, ops, &mut warnings) {
+        Ok(resolved) => resolved,
+        Err(rejection) => return Ok(*rejection),
     };
 
     let new_lines = apply(&cur_lines, &ops);
@@ -855,39 +918,9 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     std::fs::write(&abs, file.encode(&new_text))
         .map_err(|e| anyhow!("failed to write {display}: {e}"))?;
 
-    // New snapshot: previously seen lines carried through the diff + everything displayed or authored now.
-    let map = LineMap::build(
-        &cur_lines,
-        &new_lines.iter().map(String::as_str).collect::<Vec<_>>(),
-    );
-    let (preview, preview_seen) = build_preview(&cur_lines, &new_lines);
-    let seen = match map.map_seen(&base_seen) {
-        Seen::All => Seen::All,
-        Seen::Lines(mut s) => {
-            let extra: LineSet = preview_seen
-                .into_iter()
-                .chain(added_lines(&cur_lines, &new_lines))
-                .collect();
-            s.union_with(&extra);
-            Seen::Lines(s)
-        }
-    };
-    let new_tag = ctx.store.record(&abs, &new_text, seen);
-
-    let (diff, added, removed) = util::unified_diff(current, &new_text, &display);
-    let mut text = format!("{}\n{preview}", format_header(&display, &new_tag));
-    if !warnings.is_empty() {
-        text.push_str("\n\nWarnings:\n");
-        text.push_str(&warnings.join("\n"));
-    }
-    let mut out = ToolOutput::ok(text);
-    out.meta = Some(json!({
-        "path": abs.to_string_lossy(),
-        "diff": diff,
-        "added": added,
-        "removed": removed,
-    }));
-    Ok(out)
+    Ok(record_result(
+        ctx, &target, &new_lines, &new_text, &base_seen, &warnings,
+    ))
 }
 
 /// Remaps ops from snapshot text onto the current lines. `None` if any anchor is ambiguous,
@@ -922,7 +955,7 @@ fn try_remap(
             if *og == 0 || *og == old_lines.len() {
                 continue;
             }
-            if *og >= 1 && *og <= old_lines.len() && map.get(*og) != Some(*ng) {
+            if map.get(*og) != Some(*ng) {
                 return None;
             }
             if *og < old_lines.len() && map.get(og + 1) != Some(ng + 1) {

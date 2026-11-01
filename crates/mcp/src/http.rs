@@ -1,7 +1,9 @@
 //! Streamable HTTP transport (MCP 2025-03-26 / 2025-06-18) with legacy HTTP+SSE
 //! (2024-11-05) fallback, plus a small Server-Sent Events parser.
 
-use crate::client::{Shared, contains_response, rpc_error};
+use crate::client::{
+    METHOD_INITIALIZE, NOTIFY_INITIALIZED, Shared, contains_response, notification, rpc_error,
+};
 use anyhow::{Context, Result, anyhow, bail};
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use reqwest::{StatusCode, Url};
@@ -14,6 +16,15 @@ use tokio_util::sync::CancellationToken;
 
 const SESSION_HEADER: &str = "mcp-session-id";
 const VERSION_HEADER: &str = "mcp-protocol-version";
+/// Characters of an error response body that go into the error message.
+const ERROR_BODY_CHARS: usize = 500;
+/// Time allowed for the session DELETE when closing.
+const CLOSE_REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
+/// Reconnect delay of the GET stream: first value, cap, and the lifetime after which a
+/// stream counts as stable (the delay resets).
+const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
+const MAX_BACKOFF: Duration = Duration::from_secs(60);
+const STABLE_STREAM_AFTER: Duration = Duration::from_secs(60);
 /// Upper bound for a single buffered SSE event / JSON body.
 const MAX_EVENT: usize = 16 * 1024 * 1024;
 
@@ -27,6 +38,13 @@ pub(crate) struct SseEvent {
     pub event: String,
     pub data: String,
     pub id: Option<String>,
+}
+
+impl SseEvent {
+    /// Whether the event carries a JSON-RPC message (the default event type).
+    pub(crate) fn is_message(&self) -> bool {
+        self.event.is_empty() || self.event == "message"
+    }
 }
 
 /// Incremental parser following the WHATWG event-stream rules
@@ -189,7 +207,7 @@ fn content_type(resp: &reqwest::Response) -> String {
 }
 
 fn is_initialize(msg: &Value) -> bool {
-    msg.get("method").and_then(Value::as_str) == Some("initialize")
+    msg.get("method").and_then(Value::as_str) == Some(METHOD_INITIALIZE)
 }
 
 /// Request id if `msg` is a request (has both method and id).
@@ -200,8 +218,11 @@ fn request_id(msg: &Value) -> Option<Value> {
 
 async fn error_body(resp: reqwest::Response) -> String {
     let status = resp.status();
-    let body = resp.text().await.unwrap_or_default();
-    let body: String = body.trim().chars().take(500).collect();
+    let body = resp.text().await.unwrap_or_else(|e| {
+        tracing::debug!("error response body unreadable: {e}");
+        String::new()
+    });
+    let body: String = body.trim().chars().take(ERROR_BODY_CHARS).collect();
     if body.is_empty() {
         format!("HTTP {status}")
     } else {
@@ -321,7 +342,13 @@ impl HttpTransport {
             let status = resp.status();
 
             if is_initialize(msg) {
-                if matches!(status.as_u16(), 400 | 404 | 405) && sid_used.is_none() {
+                let fallback_status = matches!(
+                    status,
+                    StatusCode::BAD_REQUEST
+                        | StatusCode::NOT_FOUND
+                        | StatusCode::METHOD_NOT_ALLOWED
+                );
+                if fallback_status && sid_used.is_none() {
                     let primary = error_body(resp).await;
                     tracing::debug!(server = %self.shared.name, "streamable HTTP initialize failed ({primary}); trying legacy SSE");
                     let endpoint = self.open_legacy().await.map_err(|e| {
@@ -338,11 +365,11 @@ impl HttpTransport {
                 }
             }
 
-            if status == StatusCode::NOT_FOUND
+            let session_expired = status == StatusCode::NOT_FOUND
                 && sid_used.is_some()
                 && !retried
-                && !is_initialize(msg)
-            {
+                && !is_initialize(msg);
+            if session_expired {
                 tracing::debug!(server = %self.shared.name, "MCP session expired; re-initializing");
                 retried = true;
                 self.reinitialize(sid_used)
@@ -360,8 +387,11 @@ impl HttpTransport {
             if status == StatusCode::ACCEPTED || req_id.is_none() {
                 // Notifications/responses: body (if any) is irrelevant, but dispatch
                 // anything the server chose to send.
-                if req_id.is_none() && status != StatusCode::ACCEPTED {
-                    let _ = pump(&self.shared, resp, None, false).await;
+                if req_id.is_none()
+                    && status != StatusCode::ACCEPTED
+                    && let Err(e) = pump(&self.shared, resp, None, false).await
+                {
+                    tracing::debug!(server = %self.shared.name, "response body error: {e:#}");
                 }
                 return Ok(());
             }
@@ -412,13 +442,6 @@ impl HttpTransport {
             .await
             .map_err(|_| anyhow!("timed out"))??
             .ok_or_else(|| anyhow!("no initialize response"))?;
-        let reply = match reply {
-            Value::Array(items) => items
-                .into_iter()
-                .find(|m| contains_response(m, &id))
-                .unwrap_or(Value::Null),
-            other => other,
-        };
         if let Some(err) = reply.get("error") {
             return Err(rpc_error(err));
         }
@@ -428,10 +451,10 @@ impl HttpTransport {
         {
             self.set_protocol_version(v);
         }
-        let note = json!({"jsonrpc": "2.0", "method": "notifications/initialized"});
+        let note = notification(NOTIFY_INITIALIZED);
         let resp = self.post(self.url.clone(), &note).await?;
         if !resp.status().is_success() {
-            bail!("notifications/initialized: {}", error_body(resp).await);
+            bail!("{NOTIFY_INITIALIZED}: {}", error_body(resp).await);
         }
         // The previous GET stream (if any) was bound to the expired session.
         self.start_get_stream();
@@ -475,15 +498,7 @@ impl HttpTransport {
         self.spawn_task(async move {
             let mut tx = Some(tx);
             let res = read_sse(resp, |ev| {
-                match ev.event.as_str() {
-                    "endpoint" => {
-                        if let Some(tx) = tx.take() {
-                            let _ = tx.send(ev.data.trim().to_string());
-                        }
-                    }
-                    "" | "message" => dispatch_data(&shared, &ev.data),
-                    other => tracing::trace!(server = %shared.name, "ignoring SSE event {other}"),
-                }
+                on_legacy_event(&shared, &mut tx, ev);
                 true
             })
             .await;
@@ -536,8 +551,10 @@ impl HttpTransport {
                 .delete(self.url.clone())
                 .headers(self.headers.clone())
                 .header(SESSION_HEADER, sid)
-                .timeout(Duration::from_secs(1));
-            let _ = req.send().await;
+                .timeout(CLOSE_REQUEST_TIMEOUT);
+            if let Err(e) = req.send().await {
+                tracing::debug!(server = %self.shared.name, "closing the MCP session failed: {e}");
+            }
         }
     }
 }
@@ -558,7 +575,7 @@ struct GetStream {
 
 impl GetStream {
     async fn run(self, shared: Arc<Shared>) {
-        let mut backoff = Duration::from_secs(1);
+        let mut backoff = INITIAL_BACKOFF;
         loop {
             let mut req = self
                 .client
@@ -586,7 +603,7 @@ impl GetStream {
             }
             let started = std::time::Instant::now();
             let res = read_sse(resp, |ev| {
-                if ev.event.is_empty() || ev.event == "message" {
+                if ev.is_message() {
                     dispatch_data(&shared, &ev.data);
                 }
                 true
@@ -595,13 +612,33 @@ impl GetStream {
             if let Err(e) = res {
                 tracing::debug!(server = %shared.name, "GET SSE stream error: {e:#}");
             }
-            if started.elapsed() > Duration::from_secs(60) {
-                backoff = Duration::from_secs(1);
+            if started.elapsed() > STABLE_STREAM_AFTER {
+                backoff = INITIAL_BACKOFF;
             } else {
-                backoff = (backoff * 2).min(Duration::from_secs(60));
+                backoff = (backoff * 2).min(MAX_BACKOFF);
             }
             tokio::time::sleep(backoff).await;
         }
+    }
+}
+
+/// Handle one event of the legacy SSE stream: the `endpoint` event goes to `tx` (once),
+/// messages are dispatched.
+fn on_legacy_event(
+    shared: &Shared,
+    tx: &mut Option<tokio::sync::oneshot::Sender<String>>,
+    ev: SseEvent,
+) {
+    if ev.event == "endpoint" {
+        if let Some(tx) = tx.take()
+            && tx.send(ev.data.trim().to_string()).is_err()
+        {
+            tracing::debug!(server = %shared.name, "endpoint event after the opener gave up");
+        }
+    } else if ev.is_message() {
+        dispatch_data(shared, &ev.data);
+    } else {
+        tracing::trace!(server = %shared.name, "ignoring SSE event {}", ev.event);
     }
 }
 
@@ -639,9 +676,17 @@ async fn read_sse(
     }
 }
 
+/// The response for `id` in `msg` (a single message or a batch).
+fn find_response(msg: &Value, id: &Value) -> Option<Value> {
+    match msg {
+        Value::Array(items) => items.iter().find_map(|m| find_response(m, id)),
+        _ => contains_response(msg, id).then(|| msg.clone()),
+    }
+}
+
 /// Consume a POST response body (JSON or SSE), dispatching messages to `shared`.
-/// Returns the message containing the response for `id` once seen (reading stops
-/// there). With `intercept`, that message is returned instead of dispatched.
+/// Returns the response for `id` once seen (reading stops there). With `intercept`, the
+/// message holding it is not dispatched.
 async fn pump(
     shared: &Shared,
     resp: reqwest::Response,
@@ -652,12 +697,12 @@ async fn pump(
     let mut found = None;
     let mut handle = |msg: Value| -> bool {
         if let Some(id) = id
-            && contains_response(&msg, id)
+            && let Some(response) = find_response(&msg, id)
         {
             if !intercept {
-                shared.dispatch(msg.clone());
+                shared.dispatch(msg);
             }
-            found = Some(msg);
+            found = Some(response);
             return false;
         }
         shared.dispatch(msg);
@@ -665,7 +710,8 @@ async fn pump(
     };
     if ct.starts_with("text/event-stream") {
         read_sse(resp, |ev| {
-            if !(ev.event.is_empty() || ev.event == "message") || ev.data.trim().is_empty() {
+            let skip_event = !ev.is_message() || ev.data.trim().is_empty();
+            if skip_event {
                 return true;
             }
             match serde_json::from_str::<Value>(&ev.data) {

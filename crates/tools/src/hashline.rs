@@ -12,13 +12,32 @@ use std::sync::{Arc, LazyLock, Mutex};
 use xxhash_rust::xxh32::Xxh32;
 
 /// Full-file versions retained per path.
-pub const MAX_VERSIONS_PER_PATH: usize = 4;
+const MAX_VERSIONS_PER_PATH: usize = 4;
 /// Retained path count before LRU eviction.
-pub const MAX_PATHS: usize = 256;
+const MAX_PATHS: usize = 256;
 /// Global ceiling on retained snapshot bytes (estimated).
-pub const MAX_TOTAL_BYTES: usize = 64 * 1024 * 1024;
+const MAX_TOTAL_BYTES: usize = 64 * 1024 * 1024;
 /// Files larger than this are never snapshotted.
-pub const MAX_SNAPSHOT_FILE_BYTES: usize = 4 * 1024 * 1024;
+const MAX_SNAPSHOT_FILE_BYTES: usize = 4 * 1024 * 1024;
+/// Estimated bookkeeping bytes per snapshot, on top of its text and line set.
+const SNAPSHOT_OVERHEAD_BYTES: usize = 64;
+/// Bits of the XXH32 digest kept as the tag (the low [`TAG_LEN`] hex digits).
+const TAG_MASK: u32 = 0xffff;
+/// Line numbers stored per word of a [`LineSet`].
+const BITS_PER_WORD: usize = u64::BITS as usize;
+
+/// Hex digits in a tag.
+pub const TAG_LEN: usize = 4;
+
+/// True if `s` is exactly [`TAG_LEN`] hex digits.
+pub fn is_tag(s: &str) -> bool {
+    s.len() == TAG_LEN && s.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Matches a whole line that is a `[path#TAG]` header.
+pub static HEADER_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(r"^\s*\[[^#\r\n]+#[0-9a-fA-F]{{{TAG_LEN}}}\]\s*$")).expect("valid regex")
+});
 
 /// Four-hex uppercase content tag of `text`.
 ///
@@ -39,7 +58,7 @@ pub fn file_hash(text: &str) -> String {
         line_start += segment.len();
     }
     hasher.update(&bytes[run_start..]);
-    format!("{:04X}", hasher.digest() & 0xffff)
+    format!("{:0TAG_LEN$X}", hasher.digest() & TAG_MASK)
 }
 
 /// `[path#TAG]`
@@ -55,17 +74,7 @@ pub fn normalize_tag(raw: &str) -> Option<String> {
         .and_then(|s| s.strip_suffix(']'))
         .unwrap_or(t);
     let t = t.rsplit_once('#').map_or(t, |(_, tag)| tag);
-    (t.len() == 4 && t.chars().all(|c| c.is_ascii_hexdigit())).then(|| t.to_ascii_uppercase())
-}
-
-static SEEN_ROW_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^[ *]?(\d+):").expect("valid regex"));
-
-/// Line numbers of `N:` / `*N:` / ` N:` rows in a hashline-formatted body.
-pub fn seen_lines_from_body(body: &str) -> Vec<u32> {
-    body.split('\n')
-        .filter_map(|row| SEEN_ROW_RE.captures(row).and_then(|c| c[1].parse().ok()))
-        .collect()
+    is_tag(t).then(|| t.to_ascii_uppercase())
 }
 
 /// Compact set of 1-based line numbers.
@@ -80,7 +89,7 @@ impl LineSet {
     }
 
     pub fn insert(&mut self, line: u32) {
-        let (w, b) = (line as usize / 64, line as usize % 64);
+        let (w, b) = (line as usize / BITS_PER_WORD, line as usize % BITS_PER_WORD);
         if self.bits.len() <= w {
             self.bits.resize(w + 1, 0);
         }
@@ -88,7 +97,7 @@ impl LineSet {
     }
 
     pub fn contains(&self, line: u32) -> bool {
-        let (w, b) = (line as usize / 64, line as usize % 64);
+        let (w, b) = (line as usize / BITS_PER_WORD, line as usize % BITS_PER_WORD);
         self.bits.get(w).is_some_and(|x| x & (1 << b) != 0)
     }
 
@@ -103,18 +112,14 @@ impl LineSet {
 
     pub fn iter(&self) -> impl Iterator<Item = u32> + '_ {
         self.bits.iter().enumerate().flat_map(|(w, &word)| {
-            (0..64)
+            (0..BITS_PER_WORD)
                 .filter(move |b| word & (1u64 << b) != 0)
-                .map(move |b| (w * 64 + b) as u32)
+                .map(move |b| (w * BITS_PER_WORD + b) as u32)
         })
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.bits.iter().all(|w| *w == 0)
-    }
-
     fn bytes(&self) -> usize {
-        self.bits.len() * 8
+        self.bits.len() * std::mem::size_of::<u64>()
     }
 }
 
@@ -175,7 +180,7 @@ pub struct Snapshot {
 
 impl Snapshot {
     fn bytes(&self) -> usize {
-        self.text.len() + self.seen.bytes() + 64
+        self.text.len() + self.seen.bytes() + SNAPSHOT_OVERHEAD_BYTES
     }
 }
 
@@ -204,20 +209,19 @@ impl Inner {
                 .map(|(p, _)| p.clone());
             let Some(victim) = victim else {
                 // Only `keep` remains: trim its older versions.
-                let Some(e) = self.paths.get_mut(keep) else {
-                    return;
-                };
+                let e = self.paths.get_mut(keep).expect("`keep` was just recorded");
                 if e.versions.len() <= 1 {
                     return;
                 }
-                if let Some(s) = e.versions.pop() {
-                    self.total -= s.bytes();
-                }
+                let oldest = e.versions.pop().expect("more than one version");
+                self.total -= oldest.bytes();
                 continue;
             };
-            if let Some(e) = self.paths.remove(&victim) {
-                self.total -= e.versions.iter().map(Snapshot::bytes).sum::<usize>();
-            }
+            let e = self
+                .paths
+                .remove(&victim)
+                .expect("victim is a key of the map");
+            self.total -= e.versions.iter().map(Snapshot::bytes).sum::<usize>();
         }
     }
 }
@@ -291,8 +295,8 @@ impl HashStore {
         };
         inner.total += snap.bytes();
         entry.versions.insert(0, snap);
-        while entry.versions.len() > MAX_VERSIONS_PER_PATH {
-            if let Some(s) = entry.versions.pop() {
+        if entry.versions.len() > MAX_VERSIONS_PER_PATH {
+            for s in entry.versions.drain(MAX_VERSIONS_PER_PATH..) {
                 inner.total -= s.bytes();
             }
         }
@@ -331,15 +335,6 @@ impl HashStore {
             .cloned()
     }
 
-    /// Most recently recorded snapshot of `path`.
-    pub fn latest(&self, path: &Path) -> Option<Snapshot> {
-        let k = key(path);
-        self.lock()
-            .paths
-            .get(&k)
-            .and_then(|e| e.versions.first().cloned())
-    }
-
     /// Paths (canonical) that have a snapshot with `tag`.
     pub fn paths_for_tag(&self, tag: &str) -> Vec<PathBuf> {
         let g = self.lock();
@@ -357,22 +352,32 @@ impl HashStore {
     pub fn forget(&self, path: &Path) {
         let k = key(path);
         let mut g = self.lock();
-        let victims: Vec<PathBuf> = g
-            .paths
-            .keys()
-            .filter(|p| p.starts_with(&k) || p.starts_with(path))
-            .cloned()
-            .collect();
-        for v in victims {
-            if let Some(e) = g.paths.remove(&v) {
-                g.total -= e.versions.iter().map(Snapshot::bytes).sum::<usize>();
+        let mut freed = 0;
+        g.paths.retain(|p, e| {
+            let victim = p.starts_with(&k) || p.starts_with(path);
+            if victim {
+                freed += e.versions.iter().map(Snapshot::bytes).sum::<usize>();
             }
-        }
+            !victim
+        });
+        g.total -= freed;
     }
 
     /// Estimated retained bytes.
     pub fn total_bytes(&self) -> usize {
         self.lock().total
+    }
+}
+
+#[cfg(test)]
+impl HashStore {
+    /// Most recently recorded snapshot of `path`.
+    pub fn latest(&self, path: &Path) -> Option<Snapshot> {
+        let k = key(path);
+        self.lock()
+            .paths
+            .get(&k)
+            .and_then(|e| e.versions.first().cloned())
     }
 
     /// Number of paths with snapshots.
@@ -423,14 +428,6 @@ mod tests {
         assert_eq!(normalize_tag("[a.rs#00fF]").as_deref(), Some("00FF"));
         assert_eq!(normalize_tag("XYZ1"), None);
         assert_eq!(normalize_tag("12345"), None);
-    }
-
-    #[test]
-    fn seen_rows() {
-        assert_eq!(
-            seen_lines_from_body("[a#1234]\n1:x\n*12:y\n 13:z\n...\nfoo"),
-            vec![1, 12, 13]
-        );
     }
 
     #[test]

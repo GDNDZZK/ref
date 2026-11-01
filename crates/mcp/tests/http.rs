@@ -11,6 +11,12 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
+/// Test waits: one step of a scenario, the pause before an expected side effect, and the
+/// poll interval while waiting for one.
+const STEP_TIMEOUT: Duration = Duration::from_secs(5);
+const SETTLE: Duration = Duration::from_millis(200);
+const POLL: Duration = Duration::from_millis(20);
+
 struct Req {
     method: String,
     path: String,
@@ -79,8 +85,8 @@ async fn respond(
     }
     out.push_str("\r\n");
     out.push_str(body);
-    let _ = s.write_all(out.as_bytes()).await;
-    let _ = s.shutdown().await;
+    s.write_all(out.as_bytes()).await.unwrap();
+    s.shutdown().await.unwrap();
 }
 
 async fn sse_head(s: &mut TcpStream, extra: &[(&str, String)]) {
@@ -89,7 +95,7 @@ async fn sse_head(s: &mut TcpStream, extra: &[(&str, String)]) {
         out.push_str(&format!("{k}: {v}\r\n"));
     }
     out.push_str("\r\n");
-    let _ = s.write_all(out.as_bytes()).await;
+    s.write_all(out.as_bytes()).await.unwrap();
 }
 
 async fn sse_send(s: &mut TcpStream, msg: &Value) -> bool {
@@ -146,7 +152,7 @@ async fn streamable_conn(mut s: TcpStream, srv: Arc<Streamable>) {
         }
         srv.state.lock().unwrap().get_streams += 1;
         sse_head(&mut s, &[]).await;
-        let _ = s.write_all(b": keepalive\n\n").await;
+        s.write_all(b": keepalive\n\n").await.unwrap();
         sse_send(
             &mut s,
             &json!({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}),
@@ -218,7 +224,7 @@ async fn streamable_conn(mut s: TcpStream, srv: Arc<Streamable>) {
     }
     if method.is_empty() {
         // Client response to a server request.
-        let _ = srv.replies.send(msg);
+        srv.replies.send(msg).unwrap();
         respond(&mut s, "202 Accepted", &[], "", "").await;
         return;
     }
@@ -238,7 +244,7 @@ async fn streamable_conn(mut s: TcpStream, srv: Arc<Streamable>) {
         "tools/list" => {
             // SSE response with a notification before the result, paginated.
             sse_head(&mut s, &[]).await;
-            let _ = s.write_all(b": comment\r\n\r\n").await;
+            s.write_all(b": comment\r\n\r\n").await.unwrap();
             sse_send(&mut s, &json!({"jsonrpc": "2.0", "method": "notifications/message", "params": {"level": "info"}})).await;
             let page = match msg.pointer("/params/cursor").and_then(Value::as_str) {
                 None => ok(
@@ -250,6 +256,7 @@ async fn streamable_conn(mut s: TcpStream, srv: Arc<Streamable>) {
                 Some(other) => panic!("bad cursor {other}"),
             };
             sse_send(&mut s, &page).await;
+            // The client may close first once it has the result.
             let _ = s.shutdown().await;
         }
         "tools/call" => {
@@ -290,11 +297,12 @@ async fn streamable_conn(mut s: TcpStream, srv: Arc<Streamable>) {
                         &json!({"jsonrpc": "2.0", "id": "p1", "method": "ping"}),
                     )
                     .await;
-                    let reply = tokio::time::timeout(Duration::from_secs(5), replies.recv())
+                    let reply = tokio::time::timeout(STEP_TIMEOUT, replies.recv())
                         .await
                         .unwrap()
                         .unwrap();
                     sse_send(&mut s, &ok(&id, text(&reply.to_string()))).await;
+                    // The client may close first once it has the result.
                     let _ = s.shutdown().await;
                 }
                 "expire" => {
@@ -341,7 +349,7 @@ fn remote(url: &str) -> ServerConfig {
             url: url.into(),
             headers: BTreeMap::from([("Authorization".to_string(), "Bearer secret".to_string())]),
         },
-        timeout: Duration::from_secs(5),
+        timeout: STEP_TIMEOUT,
     }
 }
 
@@ -420,7 +428,7 @@ async fn streamable_cancel_and_get_stream() {
     let (url, srv) = start_streamable(true).await;
     let c = McpClient::connect(&remote(&url)).await.unwrap();
     let mut rx = c.tools_changed();
-    tokio::time::timeout(Duration::from_secs(5), rx.changed())
+    tokio::time::timeout(STEP_TIMEOUT, rx.changed())
         .await
         .unwrap()
         .unwrap();
@@ -429,7 +437,7 @@ async fn streamable_cancel_and_get_stream() {
     let tok = CancellationToken::new();
     let t2 = tok.clone();
     tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        tokio::time::sleep(SETTLE).await;
         t2.cancel();
     });
     let err = c.call_tool("slow", json!({}), &tok).await.unwrap_err();
@@ -438,7 +446,7 @@ async fn streamable_cancel_and_get_stream() {
         if !srv.state.lock().unwrap().cancels.is_empty() {
             break;
         }
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        tokio::time::sleep(POLL).await;
     }
     let st = srv.state.lock().unwrap();
     assert_eq!(st.cancels.len(), 1);
@@ -481,9 +489,9 @@ async fn legacy_conn(mut s: TcpStream, srv: Arc<Legacy>) {
             let (tx, mut rx) = mpsc::unbounded_channel();
             *srv.sse.lock().unwrap() = Some(tx);
             sse_head(&mut s, &[]).await;
-            let _ = s
-                .write_all(b"event: endpoint\ndata: messages?sid=abc\n\n")
-                .await;
+            s.write_all(b"event: endpoint\ndata: messages?sid=abc\n\n")
+                .await
+                .unwrap();
             while let Some(msg) = rx.recv().await {
                 if !sse_send(&mut s, &msg).await {
                     break;
@@ -501,22 +509,25 @@ async fn legacy_conn(mut s: TcpStream, srv: Arc<Legacy>) {
             let id = msg.get("id").cloned().unwrap_or(Value::Null);
             match msg["method"].as_str() {
                 Some("initialize") => {
-                    let _ = tx.send(ok(
+                    tx.send(ok(
                         &id,
                         json!({"protocolVersion": "2024-11-05", "capabilities": {}}),
-                    ));
+                    ))
+                    .unwrap();
                 }
                 Some("tools/list") => {
-                    let _ = tx.send(
+                    tx.send(
                         json!({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}),
-                    );
-                    let _ = tx.send(ok(
+                    )
+                    .unwrap();
+                    tx.send(ok(
                         &id,
                         json!({"tools": [{"name": "legacy_tool", "description": "L"}]}),
-                    ));
+                    ))
+                    .unwrap();
                 }
                 Some("tools/call") => {
-                    let _ = tx.send(ok(&id, text("legacy result")));
+                    tx.send(ok(&id, text("legacy result"))).unwrap();
                 }
                 _ => {}
             }

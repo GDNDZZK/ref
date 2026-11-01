@@ -4,16 +4,17 @@
 use crate::error::stream_error;
 use crate::sse::{SseEvent, data_values};
 use crate::util::{
-    Assembler, CLIENT_OPTION_KEYS, DEFAULT_OPENAI_BASE, IMAGE_OMITTED, StreamEnd, StreamState,
-    arguments_string, build_headers, camel_to_snake, data_url, deep_merge, drive, endpoint,
-    error_fields, merge_key, normalize_call_id, normalize_history, opt_str, prompt_cache_key,
-    ptr_u64, same_origin, session_headers, snake_keys,
+    Assembler, CLIENT_OPTION_KEYS, DEFAULT_OPENAI_BASE, IMAGE_OMITTED, NO_TOOL_OUTPUT, StreamEnd,
+    StreamState, arguments_string, bearer_header, build_headers, camel_to_snake, data_url,
+    deep_merge, drive, endpoint, error_fields, json_sse_headers, merge_key, normalize_call_id,
+    normalize_history, opt_str, prompt_cache_key, ptr_u64, same_origin, session_headers,
+    snake_keys,
 };
 use crate::{
     AssistantBlock, BlockKind, ChatMessage, LlmError, Model, Provider, Request, Response,
     StreamEvent, UserContent,
 };
-use ref_proto::Usage;
+use ref_proto::{ImageData, Usage};
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 use tokio_util::sync::CancellationToken;
@@ -21,6 +22,8 @@ use tokio_util::sync::CancellationToken;
 /// OpenAI limits `call_id` / item ids to 64 characters.
 const MAX_ID: usize = 64;
 const ENCRYPTED_REASONING: &str = "reasoning.encrypted_content";
+/// The Responses API rejects a `max_output_tokens` below this.
+const MIN_OUTPUT_TOKENS: u64 = 16;
 
 pub(crate) async fn stream(
     provider: &Provider,
@@ -45,18 +48,8 @@ pub(crate) async fn stream(
 }
 
 fn request_headers(provider: &Provider, req: &Request) -> reqwest::header::HeaderMap {
-    let mut defaults = vec![
-        ("content-type".to_string(), "application/json".to_string()),
-        ("accept".to_string(), "text/event-stream".to_string()),
-    ];
-    if let Some(key) = provider
-        .api_key
-        .as_deref()
-        .map(str::trim)
-        .filter(|k| !k.is_empty())
-    {
-        defaults.push(("authorization".into(), format!("Bearer {key}")));
-    }
+    let mut defaults = json_sse_headers();
+    defaults.extend(bearer_header(provider));
     defaults.extend(session_headers(
         &req.session_id,
         &["session_id", "x-session-id", "x-session-affinity"],
@@ -100,7 +93,10 @@ pub(crate) fn build_body(provider: &Provider, model: &Model, req: &Request) -> V
     body.insert("stream".into(), json!(true));
     body.insert("store".into(), json!(store));
     if model.output > 0 {
-        body.insert("max_output_tokens".into(), json!(model.output.max(16)));
+        body.insert(
+            "max_output_tokens".into(),
+            json!(model.output.max(MIN_OUTPUT_TOKENS)),
+        );
     }
 
     // Reasoning configuration.
@@ -169,7 +165,7 @@ pub(crate) fn build_body(provider: &Provider, model: &Model, req: &Request) -> V
     body
 }
 
-fn input_image(model: &Model, img: &ref_proto::ImageData) -> Value {
+fn input_image(model: &Model, img: &ImageData) -> Value {
     if model.images {
         json!({"type": "input_image", "detail": "auto", "image_url": data_url(img)})
     } else {
@@ -196,82 +192,90 @@ fn convert_input(provider: &Provider, model: &Model, req: &Request) -> Vec<Value
             }
             ChatMessage::Assistant { blocks, origin } => {
                 let replay = same_origin(origin, provider, model);
-                for block in blocks {
-                    match block {
-                        AssistantBlock::Reasoning { provider_data, .. } => {
-                            // Encrypted reasoning only round-trips to the model that produced it.
-                            let item = provider_data.as_ref().and_then(|d| d.get("item"));
-                            if replay
-                                && let Some(item) = item.filter(|i| {
-                                    i.get("type").and_then(Value::as_str) == Some("reasoning")
-                                })
-                            {
-                                out.push(item.clone());
-                            }
-                        }
-                        AssistantBlock::Text(t) => {
-                            if !t.trim().is_empty() {
-                                out.push(json!({
-                                    "type": "message", "role": "assistant", "status": "completed",
-                                    "content": [{"type": "output_text", "text": t, "annotations": []}],
-                                }));
-                            }
-                        }
-                        AssistantBlock::ToolCall {
-                            id,
-                            name,
-                            arguments,
-                            provider_data,
-                        } => {
-                            let mut item = Map::new();
-                            item.insert("type".into(), json!("function_call"));
-                            let item_id = provider_data
-                                .as_ref()
-                                .and_then(|d| d.get("id"))
-                                .and_then(Value::as_str)
-                                .filter(|id| id.starts_with("fc_") && id.len() <= MAX_ID);
-                            // The fc_ id pairs with reasoning items; only valid for the same model.
-                            if replay && let Some(item_id) = item_id {
-                                item.insert("id".into(), json!(item_id));
-                            }
-                            item.insert("call_id".into(), json!(normalize_call_id(id, MAX_ID)));
-                            item.insert("name".into(), json!(name));
-                            item.insert("arguments".into(), json!(arguments_string(arguments)));
-                            out.push(Value::Object(item));
-                        }
-                    }
-                }
+                out.extend(assistant_items(blocks, replay));
             }
             ChatMessage::ToolResult {
                 call_id,
                 content,
                 images,
                 ..
+            } => out.push(tool_result_item(model, call_id, content, images)),
+        }
+    }
+    out
+}
+
+/// Input items of an assistant message. Reasoning items and `fc_` ids are replayed only for
+/// `replay`: encrypted reasoning round-trips to the model that produced it.
+fn assistant_items(blocks: &[AssistantBlock], replay: bool) -> Vec<Value> {
+    let mut out = Vec::new();
+    for block in blocks {
+        match block {
+            AssistantBlock::Reasoning { provider_data, .. } => {
+                let item = provider_data.as_ref().and_then(|d| d.get("item"));
+                if replay
+                    && let Some(item) =
+                        item.filter(|i| i.get("type").and_then(Value::as_str) == Some("reasoning"))
+                {
+                    out.push(item.clone());
+                }
+            }
+            AssistantBlock::Text(t) => {
+                if !t.trim().is_empty() {
+                    out.push(json!({
+                        "type": "message", "role": "assistant", "status": "completed",
+                        "content": [{"type": "output_text", "text": t, "annotations": []}],
+                    }));
+                }
+            }
+            AssistantBlock::ToolCall {
+                id,
+                name,
+                arguments,
+                provider_data,
             } => {
-                let output = if images.is_empty() {
-                    let text = if content.trim().is_empty() {
-                        "(no tool output)"
-                    } else {
-                        content.as_str()
-                    };
-                    json!(text)
-                } else {
-                    let mut parts = Vec::new();
-                    if !content.trim().is_empty() {
-                        parts.push(json!({"type": "input_text", "text": content}));
-                    }
-                    parts.extend(images.iter().map(|img| input_image(model, img)));
-                    Value::Array(parts)
-                };
-                out.push(json!({
-                    "type": "function_call_output",
-                    "call_id": normalize_call_id(call_id, MAX_ID),
-                    "output": output,
-                }));
+                let mut item = Map::new();
+                item.insert("type".into(), json!("function_call"));
+                let item_id = provider_data
+                    .as_ref()
+                    .and_then(|d| d.get("id"))
+                    .and_then(Value::as_str)
+                    .filter(|id| id.starts_with("fc_") && id.len() <= MAX_ID);
+                // The fc_ id pairs with reasoning items; only valid for the same model.
+                if replay && let Some(item_id) = item_id {
+                    item.insert("id".into(), json!(item_id));
+                }
+                item.insert("call_id".into(), json!(normalize_call_id(id, MAX_ID)));
+                item.insert("name".into(), json!(name));
+                item.insert("arguments".into(), json!(arguments_string(arguments)));
+                out.push(Value::Object(item));
             }
         }
     }
     out
+}
+
+fn tool_result_item(model: &Model, call_id: &str, content: &str, images: &[ImageData]) -> Value {
+    let output = if images.is_empty() {
+        let text = if content.trim().is_empty() {
+            NO_TOOL_OUTPUT
+        } else {
+            content
+        };
+        json!(text)
+    } else {
+        let mut parts = Vec::new();
+        if !content.trim().is_empty() {
+            parts.push(json!({"type": "input_text", "text": content}));
+        }
+        parts.extend(images.iter().map(|img| input_image(model, img)));
+        Value::Array(parts)
+    };
+    json!({
+        "type": "function_call_output",
+        "call_id": normalize_call_id(call_id, MAX_ID),
+        "output": output,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -365,6 +369,14 @@ impl ResponsesState {
             .filter(|s| s.kind == kind && !s.done)
     }
 
+    /// Append `delta` to the open slot of `kind` that `ev` addresses.
+    fn delta_to_slot(&mut self, asm: &mut Assembler<'_>, ev: &Value, kind: SlotKind, delta: &str) {
+        if let Some(slot) = self.slot_for(ev, kind) {
+            let block = slot.block;
+            asm.delta(block, delta);
+        }
+    }
+
     fn on_event(&mut self, asm: &mut Assembler<'_>, ev: &Value) -> Result<bool, LlmError> {
         let ty = ev.get("type").and_then(Value::as_str).unwrap_or("");
         let delta = ev.get("delta").and_then(Value::as_str).unwrap_or("");
@@ -390,22 +402,13 @@ impl ResponsesState {
                 }
             }
             "response.reasoning_text.delta" => {
-                if let Some(slot) = self.slot_for(ev, SlotKind::Reasoning) {
-                    let block = slot.block;
-                    asm.delta(block, delta);
-                }
+                self.delta_to_slot(asm, ev, SlotKind::Reasoning, delta);
             }
             "response.output_text.delta" | "response.refusal.delta" => {
-                if let Some(slot) = self.slot_for(ev, SlotKind::Text) {
-                    let block = slot.block;
-                    asm.delta(block, delta);
-                }
+                self.delta_to_slot(asm, ev, SlotKind::Text, delta);
             }
             "response.function_call_arguments.delta" => {
-                if let Some(slot) = self.slot_for(ev, SlotKind::Tool) {
-                    let block = slot.block;
-                    asm.delta(block, delta);
-                }
+                self.delta_to_slot(asm, ev, SlotKind::Tool, delta);
             }
             "response.function_call_arguments.done" => {
                 if let (Some(slot), Some(args)) = (

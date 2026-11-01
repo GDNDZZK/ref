@@ -4,16 +4,17 @@
 use crate::error::stream_error;
 use crate::sse::{SseEvent, data_values, is_done};
 use crate::util::{
-    Assembler, CLIENT_OPTION_KEYS, DEFAULT_OPENAI_BASE, IMAGE_OMITTED, StreamEnd, StreamState,
-    arguments_string, build_headers, data_url, deep_merge, drive, endpoint, error_fields,
-    has_tool_history, is_official_openai, merge_key, normalize_call_id, normalize_history,
-    prompt_cache_key, ptr_u64, same_origin, session_headers, snake_keys,
+    Assembler, CLIENT_OPTION_KEYS, DEFAULT_OPENAI_BASE, IMAGE_OMITTED, NO_TOOL_OUTPUT,
+    SEE_ATTACHED_IMAGE, StreamEnd, StreamState, arguments_string, bearer_header, build_headers,
+    data_url, drive, endpoint, error_fields, has_tool_history, is_official_openai,
+    json_sse_headers, merge_key, normalize_call_id, normalize_history, prompt_cache_key, ptr_u64,
+    same_origin, session_headers, snake_keys,
 };
 use crate::{
     AssistantBlock, BlockKind, ChatMessage, LlmError, Model, Provider, Request, Response,
     StreamEvent, UserContent,
 };
-use ref_proto::Usage;
+use ref_proto::{ImageData, Usage};
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 
@@ -47,18 +48,8 @@ pub(crate) async fn stream(
 }
 
 fn request_headers(provider: &Provider, req: &Request) -> reqwest::header::HeaderMap {
-    let mut defaults = vec![
-        ("content-type".to_string(), "application/json".to_string()),
-        ("accept".to_string(), "text/event-stream".to_string()),
-    ];
-    if let Some(key) = provider
-        .api_key
-        .as_deref()
-        .map(str::trim)
-        .filter(|k| !k.is_empty())
-    {
-        defaults.push(("authorization".into(), format!("Bearer {key}")));
-    }
+    let mut defaults = json_sse_headers();
+    defaults.extend(bearer_header(provider));
     defaults.extend(session_headers(
         &req.session_id,
         &["session_id", "x-session-id", "x-session-affinity"],
@@ -128,7 +119,7 @@ pub(crate) fn build_body(provider: &Provider, model: &Model, req: &Request) -> V
 /// Map opencode-style options onto the request body. Unknown keys are passed
 /// through verbatim, like `@ai-sdk/openai-compatible` does.
 fn apply_options(provider: &Provider, options: &Map<String, Value>, body: &mut Map<String, Value>) {
-    let mut overlays = Vec::new();
+    let mut overlays: Vec<&Map<String, Value>> = Vec::new();
     for (key, value) in options {
         match key.as_str() {
             "reasoningEffort" | "reasoning_effort" => {
@@ -163,8 +154,8 @@ fn apply_options(provider: &Provider, options: &Map<String, Value>, body: &mut M
                 merge_key(body, "thinking", &converted);
             }
             "extraBody" | "body" => {
-                if value.is_object() {
-                    overlays.push(value.clone());
+                if let Some(overlay) = value.as_object() {
+                    overlays.push(overlay);
                 }
             }
             // opencode / Responses-only keys that chat endpoints do not accept.
@@ -174,12 +165,10 @@ fn apply_options(provider: &Provider, options: &Map<String, Value>, body: &mut M
             k => merge_key(body, k, value),
         }
     }
-    let mut merged = Value::Object(std::mem::take(body));
-    for overlay in &overlays {
-        deep_merge(&mut merged, overlay);
-    }
-    if let Value::Object(map) = merged {
-        *body = map;
+    for overlay in overlays {
+        for (k, v) in overlay {
+            merge_key(body, k, v);
+        }
     }
 }
 
@@ -205,13 +194,13 @@ fn convert_messages(provider: &Provider, model: &Model, req: &Request) -> Vec<Va
         match msg {
             ChatMessage::User(parts) => {
                 if let Some(m) = user_message(model, parts) {
-                    push_merged(&mut out, m);
+                    push_user(&mut out, m);
                 }
             }
             ChatMessage::Assistant { blocks, origin } => {
                 let replay = same_origin(origin, provider, model);
                 if let Some(m) = assistant_message(blocks, replay, require_reasoning) {
-                    push_merged(&mut out, m);
+                    push_assistant(&mut out, m);
                 }
             }
             ChatMessage::ToolResult {
@@ -220,42 +209,57 @@ fn convert_messages(provider: &Provider, model: &Model, req: &Request) -> Vec<Va
                 images,
                 ..
             } => {
-                let mut text = content.clone();
-                if !model.images && !images.is_empty() {
-                    // No follow-up user message for models that cannot see images; just note it.
-                    if !text.trim().is_empty() {
-                        text.push_str("\n\n");
-                    }
-                    text.push_str(IMAGE_OMITTED);
-                } else if text.trim().is_empty() {
-                    text = if images.is_empty() {
-                        "(no tool output)".into()
-                    } else {
-                        "(see attached image)".into()
-                    };
-                }
-                out.push(json!({
-                    "role": "tool",
-                    "tool_call_id": normalize_call_id(call_id, MAX_CALL_ID),
-                    "content": text,
-                }));
-                if model.images {
-                    for img in images {
-                        tool_images.push(
-                            json!({"type": "image_url", "image_url": {"url": data_url(img)}}),
-                        );
-                    }
-                }
                 let run_ends = !matches!(history.get(i + 1), Some(ChatMessage::ToolResult { .. }));
-                if run_ends && !tool_images.is_empty() {
-                    let mut content = vec![
-                        json!({"type": "text", "text": "Attached image(s) from tool result:"}),
-                    ];
-                    content.append(&mut tool_images);
-                    out.push(json!({"role": "user", "content": content}));
-                }
+                out.extend(tool_result_messages(
+                    model,
+                    (call_id, content, images),
+                    run_ends,
+                    &mut tool_images,
+                ));
             }
         }
+    }
+    out
+}
+
+/// Lower one tool result to a `tool` message. Images are collected in `tool_images` and
+/// follow as one user message after the last result of a run.
+fn tool_result_messages(
+    model: &Model,
+    (call_id, content, images): (&str, &str, &[ImageData]),
+    run_ends: bool,
+    tool_images: &mut Vec<Value>,
+) -> Vec<Value> {
+    let mut out = Vec::new();
+    let mut text = content.to_string();
+    if !model.images && !images.is_empty() {
+        // No follow-up user message for models that cannot see images; just note it.
+        if !text.trim().is_empty() {
+            text.push_str("\n\n");
+        }
+        text.push_str(IMAGE_OMITTED);
+    } else if text.trim().is_empty() {
+        text = if images.is_empty() {
+            NO_TOOL_OUTPUT.into()
+        } else {
+            SEE_ATTACHED_IMAGE.into()
+        };
+    }
+    out.push(json!({
+        "role": "tool",
+        "tool_call_id": normalize_call_id(call_id, MAX_CALL_ID),
+        "content": text,
+    }));
+    if model.images {
+        for img in images {
+            tool_images.push(json!({"type": "image_url", "image_url": {"url": data_url(img)}}));
+        }
+    }
+    if run_ends && !tool_images.is_empty() {
+        let mut content =
+            vec![json!({"type": "text", "text": "Attached image(s) from tool result:"})];
+        content.append(tool_images);
+        out.push(json!({"role": "user", "content": content}));
     }
     out
 }
@@ -291,7 +295,7 @@ fn assistant_message(
     blocks: &[AssistantBlock],
     replay: bool,
     require_reasoning: bool,
-) -> Option<Value> {
+) -> Option<Map<String, Value>> {
     let mut text = String::new();
     let mut reasoning = String::new();
     let mut field: Option<String> = None;
@@ -357,29 +361,28 @@ fn assistant_message(
     if !tool_calls.is_empty() {
         msg.insert("tool_calls".into(), Value::Array(tool_calls));
     }
-    Some(Value::Object(msg))
+    Some(msg)
 }
 
-/// Push a message, merging it into the previous one when both are user
-/// messages (some hosts reject consecutive same-role messages) or both are
-/// assistant messages.
-fn push_merged(out: &mut Vec<Value>, msg: Value) {
-    let role = msg["role"].as_str().unwrap_or("");
-    let Some(prev) = out.last_mut() else {
-        out.push(msg);
+/// Push a user message, merging it into the previous one when that is a user message too
+/// (some hosts reject consecutive same-role messages).
+fn push_user(out: &mut Vec<Value>, msg: Value) {
+    match out.last_mut() {
+        Some(prev) if prev["role"] == "user" => {
+            let a = std::mem::take(&mut prev["content"]);
+            prev["content"] = merge_user_content(a, msg["content"].clone());
+        }
+        _ => out.push(msg),
+    }
+}
+
+/// Push an assistant message, merging it into the previous one when that is an assistant
+/// message too: text / reasoning are concatenated, tool calls appended.
+fn push_assistant(out: &mut Vec<Value>, next: Map<String, Value>) {
+    let Some(prev) = out.last_mut().filter(|p| p["role"] == "assistant") else {
+        out.push(Value::Object(next));
         return;
     };
-    if prev["role"].as_str() != Some(role) || !matches!(role, "user" | "assistant") {
-        out.push(msg);
-        return;
-    }
-    if role == "user" {
-        let a = std::mem::take(&mut prev["content"]);
-        prev["content"] = merge_user_content(a, msg["content"].clone());
-        return;
-    }
-    // Assistant: concatenate text / reasoning, append tool calls.
-    let Value::Object(next) = msg else { return };
     for (k, v) in next {
         match (k.as_str(), prev.get_mut(&k)) {
             ("role", _) => {}
@@ -425,6 +428,9 @@ fn merge_user_content(a: Value, b: Value) -> Value {
 // Streaming
 // ---------------------------------------------------------------------------
 
+/// Slot key base for tool-call deltas without an `index`; chosen above any real provider index.
+const SYNTHETIC_TOOL_KEY_BASE: u64 = 1_000_000;
+
 /// A streamed tool call, keyed by the provider's `index`.
 #[derive(Debug, Default)]
 struct ToolSlot {
@@ -468,50 +474,8 @@ impl ChatState {
 
         if let Some(delta) = choice.get("delta").filter(|d| d.is_object()) {
             // Reasoning first: aggregators may send reasoning and content together.
-            let reasoning = REASONING_FIELDS.iter().find_map(|f| {
-                delta
-                    .get(*f)
-                    .and_then(Value::as_str)
-                    .filter(|s| !s.is_empty())
-                    .map(|s| (*f, s))
-            });
-            if let Some((field, text)) = reasoning {
-                let idx = match self.reasoning.filter(|i| asm.is_open(*i)) {
-                    Some(i) => i,
-                    None => {
-                        self.close_text(asm);
-                        let i = asm.start(BlockKind::Reasoning);
-                        self.reasoning = Some(i);
-                        i
-                    }
-                };
-                let field = self
-                    .reasoning_field
-                    .get_or_insert_with(|| field.to_string())
-                    .clone();
-                asm.set_provider_data(idx, json!({"field": field}));
-                asm.delta(idx, text);
-            }
-
-            for key in ["content", "refusal"] {
-                if let Some(text) = delta
-                    .get(key)
-                    .and_then(Value::as_str)
-                    .filter(|s| !s.is_empty())
-                {
-                    let idx = match self.text.filter(|i| asm.is_open(*i)) {
-                        Some(i) => i,
-                        None => {
-                            self.close_reasoning(asm);
-                            let i = asm.start(BlockKind::Text);
-                            self.text = Some(i);
-                            i
-                        }
-                    };
-                    asm.delta(idx, text);
-                }
-            }
-
+            self.on_reasoning_delta(asm, delta);
+            self.on_text_delta(asm, delta);
             if let Some(calls) = delta.get("tool_calls").and_then(Value::as_array) {
                 for (pos, call) in calls.iter().enumerate() {
                     self.on_tool_delta(asm, call, pos);
@@ -527,6 +491,56 @@ impl ChatState {
             self.finish_reason = Some(reason.to_string());
         }
         Ok(())
+    }
+
+    fn on_reasoning_delta(&mut self, asm: &mut Assembler<'_>, delta: &Value) {
+        let reasoning = REASONING_FIELDS.iter().find_map(|f| {
+            delta
+                .get(*f)
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .map(|s| (*f, s))
+        });
+        let Some((field, text)) = reasoning else {
+            return;
+        };
+        let idx = match self.reasoning.filter(|i| asm.is_open(*i)) {
+            Some(i) => i,
+            None => {
+                self.close_text(asm);
+                let i = asm.start(BlockKind::Reasoning);
+                self.reasoning = Some(i);
+                i
+            }
+        };
+        let field = self
+            .reasoning_field
+            .get_or_insert_with(|| field.to_string())
+            .clone();
+        asm.set_provider_data(idx, json!({"field": field}));
+        asm.delta(idx, text);
+    }
+
+    fn on_text_delta(&mut self, asm: &mut Assembler<'_>, delta: &Value) {
+        for key in ["content", "refusal"] {
+            let Some(text) = delta
+                .get(key)
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+            else {
+                continue;
+            };
+            let idx = match self.text.filter(|i| asm.is_open(*i)) {
+                Some(i) => i,
+                None => {
+                    self.close_reasoning(asm);
+                    let i = asm.start(BlockKind::Text);
+                    self.text = Some(i);
+                    i
+                }
+            };
+            asm.delta(idx, text);
+        }
     }
 
     fn on_tool_delta(&mut self, asm: &mut Assembler<'_>, call: &Value, pos: usize) {
@@ -562,7 +576,7 @@ impl ChatState {
             Some(i) => i,
             None => {
                 self.tools.push(ToolSlot {
-                    key: key.or(Some(1_000_000 + pos as u64)),
+                    key: key.or(Some(SYNTHETIC_TOOL_KEY_BASE + pos as u64)),
                     ..Default::default()
                 });
                 self.tools.len() - 1
@@ -576,17 +590,18 @@ impl ChatState {
         if slot.name.is_none() {
             slot.name = name.map(str::to_string);
         }
-        if slot.block.is_none() {
-            slot.pending.push_str(args);
-            if slot.name.is_some() {
-                self.start_tool(asm, slot_idx);
+        match slot.block {
+            None => {
+                slot.pending.push_str(args);
+                if let Some(name) = slot.name.clone() {
+                    self.start_tool(asm, slot_idx, name);
+                }
             }
-        } else if let Some(b) = slot.block {
-            asm.delta(b, args);
+            Some(b) => asm.delta(b, args),
         }
     }
 
-    fn start_tool(&mut self, asm: &mut Assembler<'_>, slot_idx: usize) {
+    fn start_tool(&mut self, asm: &mut Assembler<'_>, slot_idx: usize, name: String) {
         self.close_text(asm);
         self.close_reasoning(asm);
         let slot = &mut self.tools[slot_idx];
@@ -595,7 +610,6 @@ impl ChatState {
             .clone()
             .unwrap_or_else(|| format!("call_{slot_idx}"));
         slot.id = Some(id.clone());
-        let name = slot.name.clone().unwrap_or_default();
         let b = asm.start(BlockKind::ToolCall { id, name });
         slot.block = Some(b);
         let pending = std::mem::take(&mut slot.pending);

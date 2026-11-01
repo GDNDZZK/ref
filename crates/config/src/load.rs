@@ -15,11 +15,23 @@ const GLOBAL_FILES: &[&str] = &[
     "ref.jsonc",
 ];
 
+/// Config keys shared between loading (layers) and parsing (typed config).
+pub(crate) const KEY_AGENT: &str = "agent";
+/// Legacy opencode name of `agent`; its entries are always primary agents.
+pub(crate) const KEY_LEGACY_MODE: &str = "mode";
+pub(crate) const KEY_COMMAND: &str = "command";
+pub(crate) const KEY_INSTRUCTIONS: &str = "instructions";
+pub(crate) const KEY_SKILLS: &str = "skills";
+
+/// Openers of the substitution forms `{env:VAR}` and `{file:path}`.
+const ENV_OPEN: &str = "{env:";
+const FILE_OPEN: &str = "{file:";
+
 /// Environment lookup used during loading (injectable for tests).
 pub type EnvFn<'a> = &'a dyn Fn(&str) -> Option<String>;
 
 /// Load config for `cwd` using the real home directory and process environment.
-pub fn load(cwd: &Path) -> Config {
+pub(crate) fn load(cwd: &Path) -> Config {
     let home = dirs::home_dir();
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .filter(|v| !v.is_empty())
@@ -55,6 +67,7 @@ impl Ctx<'_> {
     pub fn warn(&mut self, msg: impl Into<String>) {
         self.warnings.push(msg.into());
     }
+
     pub fn env_nonempty(&self, k: &str) -> Option<String> {
         (self.env)(k).filter(|v| !v.trim().is_empty())
     }
@@ -159,7 +172,6 @@ pub(crate) fn project_dirs(cwd: &Path, project_root: Option<&Path>) -> Vec<PathB
             .unwrap_or_else(|_| cwd.to_path_buf())
     };
     let mut up = Vec::new();
-    let mut found_root = false;
     for anc in cwd.ancestors() {
         up.push(anc.to_path_buf());
         let is_root = match project_root {
@@ -167,15 +179,11 @@ pub(crate) fn project_dirs(cwd: &Path, project_root: Option<&Path>) -> Vec<PathB
             None => anc.join(".git").exists(),
         };
         if is_root {
-            found_root = true;
-            break;
+            up.reverse();
+            return up;
         }
     }
-    if !found_root {
-        return vec![cwd];
-    }
-    up.reverse();
-    up
+    vec![cwd]
 }
 
 fn load_file(ctx: &mut Ctx, path: &Path, layers: &mut Vec<Layer>) {
@@ -186,17 +194,16 @@ fn load_file(ctx: &mut Ctx, path: &Path, layers: &mut Vec<Layer>) {
         Ok(t) => t,
         Err(e) => return ctx.warn(format!("{}: {e}", path.display())),
     };
-    let value = match crate::parse_jsonc(&text) {
+    let mut value = match crate::parse_jsonc(&text) {
         Ok(Value::Object(m)) => m,
         Ok(_) => return ctx.warn(format!("{}: config must be a JSON object", path.display())),
         Err(e) => return ctx.warn(format!("{}: {e}", path.display())),
     };
-    let base = path.parent().unwrap_or(Path::new("/")).to_path_buf();
-    let mut v = Value::Object(value);
-    substitute_value(ctx, &mut v, &base, path);
-    let Value::Object(mut value) = v else {
-        unreachable!()
-    };
+    let base = path
+        .parent()
+        .expect("a file path has a parent")
+        .to_path_buf();
+    substitute_map(ctx, &mut value, &base, path);
     normalize_paths(ctx, &mut value, &base);
     layers.push(Layer {
         source: path.to_path_buf(),
@@ -211,15 +218,20 @@ fn load_markdown(ctx: &mut Ctx, dir: &Path, layers: &mut Vec<Layer>) {
     ctx.warnings.extend(w1);
     ctx.warnings.extend(w2);
     for doc in agents {
-        let base = doc.path.parent().unwrap_or(dir).to_path_buf();
-        let mut fm = Value::Object(doc.frontmatter);
-        substitute_value(ctx, &mut fm, &base, &doc.path);
-        let Value::Object(mut fm) = fm else {
-            unreachable!()
-        };
+        let base = doc
+            .path
+            .parent()
+            .expect("a file path has a parent")
+            .to_path_buf();
+        let mut fm = doc.frontmatter;
+        substitute_map(ctx, &mut fm, &base, &doc.path);
         fm.remove("name");
         fm.insert("prompt".into(), Value::String(doc.body));
-        let key = if doc.legacy_mode { "mode" } else { "agent" };
+        let key = if doc.legacy_mode {
+            KEY_LEGACY_MODE
+        } else {
+            KEY_AGENT
+        };
         let mut entry = Map::new();
         entry.insert(doc.name, Value::Object(fm));
         let mut value = Map::new();
@@ -230,17 +242,18 @@ fn load_markdown(ctx: &mut Ctx, dir: &Path, layers: &mut Vec<Layer>) {
         });
     }
     for doc in commands {
-        let base = doc.path.parent().unwrap_or(dir).to_path_buf();
-        let mut fm = Value::Object(doc.frontmatter);
-        substitute_value(ctx, &mut fm, &base, &doc.path);
-        let Value::Object(mut fm) = fm else {
-            unreachable!()
-        };
+        let base = doc
+            .path
+            .parent()
+            .expect("a file path has a parent")
+            .to_path_buf();
+        let mut fm = doc.frontmatter;
+        substitute_map(ctx, &mut fm, &base, &doc.path);
         fm.insert("template".into(), Value::String(doc.body));
         let mut entry = Map::new();
         entry.insert(doc.name, Value::Object(fm));
         let mut value = Map::new();
-        value.insert("command".into(), Value::Object(entry));
+        value.insert(KEY_COMMAND.into(), Value::Object(entry));
         layers.push(Layer {
             source: doc.path,
             value,
@@ -250,7 +263,7 @@ fn load_markdown(ctx: &mut Ctx, dir: &Path, layers: &mut Vec<Layer>) {
 
 /// Make `skills` paths absolute relative to the config file's directory.
 fn normalize_paths(ctx: &mut Ctx, v: &mut Map<String, Value>, base: &Path) {
-    let Some(skills) = v.get_mut("skills") else {
+    let Some(skills) = v.get_mut(KEY_SKILLS) else {
         return;
     };
     let list = match skills {
@@ -295,17 +308,27 @@ pub(crate) fn expand_home(p: &str, home: Option<&Path>, base: &Path) -> PathBuf 
 pub(crate) fn substitute_value(ctx: &mut Ctx, v: &mut Value, base: &Path, source: &Path) {
     match v {
         Value::String(s) => {
-            if s.contains("{env:") || s.contains("{file:") {
+            if s.contains(ENV_OPEN) || s.contains(FILE_OPEN) {
                 *s = substitute(ctx, s, base, source);
             }
         }
         Value::Array(a) => a
             .iter_mut()
             .for_each(|x| substitute_value(ctx, x, base, source)),
-        Value::Object(m) => m
-            .values_mut()
-            .for_each(|x| substitute_value(ctx, x, base, source)),
+        Value::Object(m) => substitute_map(ctx, m, base, source),
         _ => {}
+    }
+}
+
+/// [`substitute_value`] for every value of an object.
+pub(crate) fn substitute_map(
+    ctx: &mut Ctx,
+    m: &mut Map<String, Value>,
+    base: &Path,
+    source: &Path,
+) {
+    for v in m.values_mut() {
+        substitute_value(ctx, v, base, source);
     }
 }
 
@@ -314,7 +337,7 @@ pub(crate) fn substitute(ctx: &mut Ctx, s: &str, base: &Path, source: &Path) -> 
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
     loop {
-        let next = [rest.find("{env:"), rest.find("{file:")]
+        let next = [rest.find(ENV_OPEN), rest.find(FILE_OPEN)]
             .into_iter()
             .flatten()
             .min();
@@ -327,14 +350,18 @@ pub(crate) fn substitute(ctx: &mut Ctx, s: &str, base: &Path, source: &Path) -> 
             break;
         };
         out.push_str(&rest[..start]);
-        let token = &rest[start + 1..start + end_rel];
-        if let Some(var) = token.strip_prefix("env:") {
+        let token = &rest[start..start + end_rel];
+        if let Some(var) = token.strip_prefix(ENV_OPEN) {
             out.push_str(&(ctx.env)(var.trim()).unwrap_or_default());
-        } else if let Some(p) = token.strip_prefix("file:") {
+        } else if let Some(p) = token.strip_prefix(FILE_OPEN) {
             let path = expand_home(p.trim(), ctx.home, base);
             match std::fs::read_to_string(&path) {
                 Ok(t) => out.push_str(t.trim()),
-                Err(e) => ctx.warn(format!("{}: {{file:{}}}: {e}", source.display(), p.trim())),
+                Err(e) => ctx.warn(format!(
+                    "{}: {FILE_OPEN}{}}}: {e}",
+                    source.display(),
+                    p.trim()
+                )),
             }
         }
         rest = &rest[start + end_rel + 1..];
@@ -390,65 +417,79 @@ pub(crate) fn accumulate(ctx: &mut Ctx, layers: &[Layer]) -> (Map<String, Value>
     for l in layers {
         acc.permission
             .extend(layer_rules(ctx, &l.value, &l.source, "permission"));
-        for key in ["mode", "agent"] {
-            if let Some(Value::Object(agents)) = l.value.get(key) {
-                for (name, a) in agents {
-                    if let Value::Object(a) = a {
-                        let r = layer_rules(ctx, a, &l.source, &format!("agent {name}"));
-                        acc.agent_permission
-                            .entry(name.clone())
-                            .or_default()
-                            .extend(r);
-                    }
-                }
-            }
-        }
-        match l.value.get("instructions") {
-            Some(Value::Array(a)) => {
-                for x in a {
-                    match x.as_str() {
-                        Some(s) if !acc.instructions.iter().any(|y| y == s) => {
-                            acc.instructions.push(s.to_string())
-                        }
-                        Some(_) => {}
-                        None => ctx.warn(format!(
-                            "{}: invalid instructions entry {x}",
-                            l.source.display()
-                        )),
-                    }
-                }
-            }
-            Some(Value::String(s)) if !acc.instructions.contains(s) => {
-                acc.instructions.push(s.clone())
-            }
-            Some(Value::String(_)) | None => {}
-            Some(_) => ctx.warn(format!(
-                "{}: `instructions` must be an array of strings",
-                l.source.display()
-            )),
-        }
-        if let Some(Value::Array(a)) = l.value.get("instructions") {
-            // `~` expansion only; relative entries are resolved later against the project.
-            for s in a.iter().filter_map(Value::as_str) {
-                if s.starts_with('~') {
-                    let e = expand_home(s, ctx.home, Path::new(""))
-                        .to_string_lossy()
-                        .into_owned();
-                    if let Some(x) = acc.instructions.iter_mut().find(|x| x.as_str() == s) {
-                        *x = e;
-                    }
-                }
-            }
-        }
-        if let Some(Value::Array(a)) = l.value.get("skills") {
-            for p in a.iter().filter_map(|x| x.as_str()) {
-                let p = PathBuf::from(p);
-                if !acc.skills.contains(&p) {
-                    acc.skills.push(p);
-                }
-            }
-        }
+        collect_agent_permissions(ctx, l, &mut acc);
+        collect_instructions(ctx, l, &mut acc);
+        collect_skills(l, &mut acc);
         deep_merge(&mut merged, &l.value);
     }
     (merged, acc)
+}
+
+/// Permission rules of the agents defined in one layer, kept per agent name.
+fn collect_agent_permissions(ctx: &mut Ctx, l: &Layer, acc: &mut Accum) {
+    for key in [KEY_LEGACY_MODE, KEY_AGENT] {
+        let Some(Value::Object(agents)) = l.value.get(key) else {
+            continue;
+        };
+        for (name, a) in agents {
+            let Value::Object(a) = a else { continue };
+            let r = layer_rules(ctx, a, &l.source, &format!("agent {name}"));
+            acc.agent_permission
+                .entry(name.clone())
+                .or_default()
+                .extend(r);
+        }
+    }
+}
+
+/// Instruction entries of one layer, without duplicates.
+fn collect_instructions(ctx: &mut Ctx, l: &Layer, acc: &mut Accum) {
+    match l.value.get(KEY_INSTRUCTIONS) {
+        Some(Value::Array(a)) => {
+            for x in a {
+                add_instruction(ctx, l, x, acc);
+            }
+        }
+        Some(Value::String(s)) if !acc.instructions.contains(s) => acc.instructions.push(s.clone()),
+        Some(Value::String(_)) | None => {}
+        Some(_) => ctx.warn(format!(
+            "{}: `instructions` must be an array of strings",
+            l.source.display()
+        )),
+    }
+}
+
+fn add_instruction(ctx: &mut Ctx, l: &Layer, x: &Value, acc: &mut Accum) {
+    let Some(s) = x.as_str() else {
+        ctx.warn(format!(
+            "{}: invalid instructions entry {x}",
+            l.source.display()
+        ));
+        return;
+    };
+    // `~` expansion only; relative entries are resolved later against the project. It happens
+    // before the duplicate test so that entries of two layers compare in the same form.
+    let entry = if s.starts_with('~') {
+        expand_home(s, ctx.home, Path::new(""))
+            .to_string_lossy()
+            .into_owned()
+    } else {
+        s.to_string()
+    };
+    if !acc.instructions.contains(&entry) {
+        acc.instructions.push(entry);
+    }
+}
+
+/// Extra skill directories of one layer, without duplicates.
+fn collect_skills(l: &Layer, acc: &mut Accum) {
+    let Some(Value::Array(a)) = l.value.get(KEY_SKILLS) else {
+        return;
+    };
+    for p in a.iter().filter_map(|x| x.as_str()) {
+        let p = PathBuf::from(p);
+        if !acc.skills.contains(&p) {
+            acc.skills.push(p);
+        }
+    }
 }

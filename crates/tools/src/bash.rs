@@ -9,13 +9,10 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-pub const DEFAULT_TIMEOUT_SECS: u64 = 120;
-pub const MAX_TIMEOUT_SECS: u64 = 3600;
-/// Inline output budget; above this (or [`MAX_LINES`]) the middle is elided.
-pub const MAX_BYTES: usize = 50 * 1024;
-pub const MAX_LINES: usize = 2000;
-pub const HEAD_BYTES: usize = 20 * 1024;
-pub const TAIL_BYTES: usize = 30 * 1024;
+const DEFAULT_TIMEOUT_SECS: u64 = 120;
+const MAX_TIMEOUT_SECS: u64 = 3600;
+const HEAD_BYTES: usize = 20 * 1024;
+const TAIL_BYTES: usize = 30 * 1024;
 const HEAD_LINES: usize = 800;
 const TAIL_LINES: usize = 1200;
 /// How long to keep reading after the shell exited (background jobs may hold the pipe).
@@ -24,23 +21,36 @@ const DRAIN_GRACE: Duration = Duration::from_millis(200);
 const KILL_GRACE: Duration = Duration::from_secs(2);
 /// Partial lines are flushed once they grow beyond this.
 const PENDING_FLUSH: usize = 8 * 1024;
+/// Size of the buffer one pipe read fills.
+const READ_BUF_BYTES: usize = 64 * 1024;
+/// Chunks the Windows reader thread may queue ahead of the consumer.
+#[cfg(not(unix))]
+const OUTPUT_CHANNEL_CAPACITY: usize = 16;
+/// The `[wall time ..]` note is added for commands that ran at least this long.
+const WALL_TIME_NOTE_MIN: Duration = Duration::from_secs(1);
+
+/// Name the model calls the tool by.
+pub(crate) const NAME: &str = "bash";
 
 pub fn spec() -> ToolSpec {
+    let inline_kb = util::INLINE_OUTPUT_MAX_BYTES as u64 / util::KIB;
+    let inline_lines = util::INLINE_OUTPUT_MAX_LINES;
     ToolSpec {
-        name: "bash",
-        description: "Run a shell command with `bash -c` (non-interactive, stdin closed) and return combined stdout+stderr.\n\
+        name: NAME,
+        description: format!(
+            "Run a shell command with `bash -c` (non-interactive, stdin closed) and return combined stdout+stderr.\n\
 - Each call runs in a fresh shell: use `cwd` instead of `cd`, and `&&` to chain dependent commands.\n\
-- `timeout` in seconds (default 120, max 3600; 0 = no timeout). On timeout the whole process group is killed.\n\
-- Output over 50KB or 2000 lines is truncated in the middle; the full output is saved to a file you can `read`.\n\
+- `timeout` in seconds (default {DEFAULT_TIMEOUT_SECS}, max {MAX_TIMEOUT_SECS}; 0 = no timeout). On timeout the whole process group is killed.\n\
+- Output over {inline_kb}KB or {inline_lines} lines is truncated in the middle; the full output is saved to a file you can `read`.\n\
 - Prefer the dedicated tools for files: `read` (not cat/head/tail), `grep`, `find`, `edit`/`write` (not sed/echo redirection).\n\
 - Non-zero exit codes are reported as `[exit code N]`. Background jobs (`cmd &`) must redirect their output (e.g. `> log 2>&1 &`), otherwise it is lost once the command returns.\n\
 - Color is disabled (NO_COLOR=1, TERM=dumb) and pagers are set to `cat`."
-            .to_string(),
+        ),
         parameters: json!({
             "type": "object",
             "properties": {
                 "command": {"type": "string", "description": "Shell command to execute."},
-                "timeout": {"type": "integer", "minimum": 0, "description": "Timeout in seconds (default 120, max 3600; 0 disables the timeout)."},
+                "timeout": {"type": "integer", "minimum": 0, "description": format!("Timeout in seconds (default {DEFAULT_TIMEOUT_SECS}, max {MAX_TIMEOUT_SECS}; 0 disables the timeout).")},
                 "cwd": {"type": "string", "description": "Working directory, relative to the session directory (default: session directory)."}
             },
             "required": ["command"]
@@ -96,7 +106,7 @@ fn clean(s: &str) -> String {
         let (line, nl) = seg.strip_suffix('\n').map_or((seg, ""), |l| (l, "\n"));
         let line = line.trim_end_matches('\r');
         // `progress 10%\rprogress 20%` -> keep the last redraw.
-        out.push_str(line.rsplit('\r').next().unwrap_or(line));
+        out.push_str(line.rsplit_once('\r').map_or(line, |(_, last)| last));
         out.push_str(nl);
     }
     out
@@ -131,6 +141,16 @@ impl Collector {
         }
     }
 
+    /// No spill file and no failed spill: all output is still in `mem`.
+    fn is_buffering_in_memory(&self) -> bool {
+        self.spilled.is_none() && !self.spill_failed
+    }
+
+    /// The spill file could not be created and `mem` is not yet split into head and tail.
+    fn needs_head_tail_split(&self) -> bool {
+        self.spill_failed && self.spilled.is_none() && self.head.is_empty()
+    }
+
     fn push(&mut self, piece: &str) {
         if piece.is_empty() {
             return;
@@ -140,9 +160,9 @@ impl Collector {
         }
         self.total_bytes += piece.len();
         self.total_lines += piece.matches('\n').count();
-        if self.spilled.is_none() && !self.spill_failed {
+        if self.is_buffering_in_memory() {
             self.mem.push_str(piece);
-            if self.mem.len() > MAX_BYTES {
+            if self.mem.len() > util::INLINE_OUTPUT_MAX_BYTES {
                 self.spill();
             }
             return;
@@ -150,7 +170,7 @@ impl Collector {
         if let Some((_, f)) = &mut self.spilled {
             let _ = f.write_all(piece.as_bytes());
         }
-        if self.spill_failed && self.spilled.is_none() && self.head.is_empty() {
+        if self.needs_head_tail_split() {
             // Could not create the file: still keep head/tail.
             self.split_mem();
         }
@@ -190,20 +210,23 @@ impl Collector {
 
     /// Final text and (truncated, saved path).
     fn finish(mut self) -> (String, bool, Option<PathBuf>) {
-        if self.spilled.is_none() && !self.spill_failed && self.head.is_empty() {
-            if self.mem.lines().count() <= MAX_LINES {
+        if self.is_buffering_in_memory() && self.head.is_empty() {
+            if self.mem.lines().count() <= util::INLINE_OUTPUT_MAX_LINES {
                 return (self.mem, false, None);
             }
             self.spill();
         }
+
         let path = self.spilled.take().map(|(p, mut f)| {
             let _ = f.flush();
             p
         });
+
         let head = take_head(&self.head);
         let tail = take_tail(&self.tail);
         let shown = head.matches('\n').count() + tail.matches('\n').count();
         let elided = self.total_lines.saturating_sub(shown);
+
         let mut text = String::with_capacity(head.len() + tail.len() + 64);
         text.push_str(head);
         if !text.is_empty() && !text.ends_with('\n') {
@@ -276,14 +299,18 @@ struct OutputReader {
 impl OutputReader {
     fn new(mut r: std::io::PipeReader) -> std::io::Result<Self> {
         use std::io::Read;
-        let (tx, rx) = tokio::sync::mpsc::channel(16);
+        let (tx, rx) = tokio::sync::mpsc::channel(OUTPUT_CHANNEL_CAPACITY);
         std::thread::Builder::new()
             .name("bash-output".into())
             .spawn(move || {
-                let mut buf = vec![0u8; 64 * 1024];
+                let mut buf = vec![0u8; READ_BUF_BYTES];
                 loop {
                     match r.read(&mut buf) {
-                        Ok(0) | Err(_) => break,
+                        Ok(0) => break,
+                        Err(e) => {
+                            tracing::warn!("bash: reading command output failed: {e}");
+                            break;
+                        }
                         Ok(n) => {
                             if tx.blocking_send(buf[..n].to_vec()).is_err() {
                                 break;
@@ -449,10 +476,34 @@ impl Drop for GroupGuard {
     }
 }
 
+/// Why the command is being terminated.
+enum StopReason {
+    TimedOut,
+    Cancelled,
+}
+
 enum Ending {
     Exited(std::process::ExitStatus),
     TimedOut(std::process::ExitStatus),
     Cancelled(std::process::ExitStatus),
+}
+
+/// Feeds one pipe read into the assembler and the collector; sets `eof` when the output ended.
+fn handle_read(
+    r: std::io::Result<usize>,
+    buf: &[u8],
+    asm: &mut LineAssembler,
+    col: &mut Collector,
+    eof: &mut bool,
+) {
+    match r {
+        Ok(0) => *eof = true,
+        Ok(n) => col.push(&asm.push(&buf[..n])),
+        Err(e) => {
+            tracing::warn!("bash: reading command output failed: {e}");
+            *eof = true;
+        }
+    }
 }
 
 pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
@@ -487,7 +538,7 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
 
     let mut asm = LineAssembler::default();
     let mut col = Collector::new(ctx.on_output.clone());
-    let mut buf = vec![0u8; 64 * 1024];
+    let mut buf = vec![0u8; READ_BUF_BYTES];
     let mut eof = false;
 
     let deadline =
@@ -501,17 +552,14 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     tokio::pin!(sleep_until);
 
     // Phase 1: run until exit, timeout or cancel.
-    let mut stop: Option<bool> = None; // Some(true) = timeout, Some(false) = cancel
+    let mut stop: Option<StopReason> = None;
     let mut status = None;
     while status.is_none() && stop.is_none() {
         tokio::select! {
-            r = reader.read(&mut buf), if !eof => match r {
-                Ok(0) | Err(_) => eof = true,
-                Ok(n) => col.push(&asm.push(&buf[..n])),
-            },
+            r = reader.read(&mut buf), if !eof => handle_read(r, &buf, &mut asm, &mut col, &mut eof),
             s = child.wait() => status = Some(s.map_err(|e| anyhow!("waiting for command failed: {e}"))?),
-            _ = &mut sleep_until => stop = Some(true),
-            _ = ctx.cancel.cancelled() => stop = Some(false),
+            _ = &mut sleep_until => stop = Some(StopReason::TimedOut),
+            _ = ctx.cancel.cancelled() => stop = Some(StopReason::Cancelled),
         }
     }
 
@@ -522,10 +570,7 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         tokio::pin!(grace);
         loop {
             tokio::select! {
-                r = reader.read(&mut buf), if !eof => match r {
-                    Ok(0) | Err(_) => eof = true,
-                    Ok(n) => col.push(&asm.push(&buf[..n])),
-                },
+                r = reader.read(&mut buf), if !eof => handle_read(r, &buf, &mut asm, &mut col, &mut eof),
                 s = child.wait() => {
                     status = s.ok();
                     break;
@@ -547,10 +592,7 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     tokio::pin!(drain);
     while !eof {
         tokio::select! {
-            r = reader.read(&mut buf) => match r {
-                Ok(0) | Err(_) => eof = true,
-                Ok(n) => col.push(&asm.push(&buf[..n])),
-            },
+            r = reader.read(&mut buf) => handle_read(r, &buf, &mut asm, &mut col, &mut eof),
             _ = &mut drain => break,
         }
     }
@@ -562,10 +604,29 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let status = status.ok_or_else(|| anyhow!("Command failed: missing exit status"))?;
     let ending = match stop {
         None => Ending::Exited(status),
-        Some(true) => Ending::TimedOut(status),
-        Some(false) => Ending::Cancelled(status),
+        Some(StopReason::TimedOut) => Ending::TimedOut(status),
+        Some(StopReason::Cancelled) => Ending::Cancelled(status),
     };
     Ok(build_output(col, ending, duration, timeout_secs))
+}
+
+const NO_EXIT_CODE_NOTE: &str = "[terminated without an exit code]";
+
+/// Note for a command that ended without an exit code.
+fn killed_note(status: &std::process::ExitStatus) -> String {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        match status.signal() {
+            Some(sig) => format!("[killed by signal {sig}]"),
+            None => NO_EXIT_CODE_NOTE.to_string(),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = status;
+        NO_EXIT_CODE_NOTE.to_string()
+    }
 }
 
 fn build_output(
@@ -580,6 +641,7 @@ fn build_output(
     if text.ends_with('\n') {
         text.pop();
     }
+
     let mut notes: Vec<String> = Vec::new();
     if truncated {
         match &path {
@@ -594,6 +656,7 @@ fn build_output(
             )),
         }
     }
+
     let (status, is_error) = match &ending {
         Ending::Exited(s) => (s, false),
         Ending::TimedOut(s) => {
@@ -605,26 +668,20 @@ fn build_output(
             (s, true)
         }
     };
+
     let exit_code = status.code();
     if matches!(ending, Ending::Exited(_)) {
         match exit_code {
             Some(0) => {}
             Some(c) => notes.push(format!("[exit code {c}]")),
-            None => {
-                #[cfg(unix)]
-                let sig = {
-                    use std::os::unix::process::ExitStatusExt;
-                    status.signal().unwrap_or(0)
-                };
-                #[cfg(not(unix))]
-                let sig = 0;
-                notes.push(format!("[killed by signal {sig}]"));
-            }
+            None => notes.push(killed_note(status)),
         }
     }
-    if duration >= Duration::from_secs(1) {
+
+    if duration >= WALL_TIME_NOTE_MIN {
         notes.push(format!("[wall time {:.1}s]", duration.as_secs_f64()));
     }
+
     if text.trim().is_empty() {
         text = "(no output)".to_string();
     }
@@ -749,7 +806,7 @@ mod tests {
             "{}",
             &o.text[o.text.len() - 300..]
         );
-        assert!(o.text.len() < MAX_BYTES + 1024);
+        assert!(o.text.len() < util::INLINE_OUTPUT_MAX_BYTES + 1024);
         let path = m["output_path"].as_str().unwrap();
         let full = std::fs::read_to_string(path).unwrap();
         assert_eq!(full.lines().count(), 100000);
@@ -758,7 +815,7 @@ mod tests {
         // Many short lines under the byte budget: line cap applies.
         let o = bash(&c, json!({"command": "seq 1 3000"})).await;
         assert_eq!(o.meta.as_ref().unwrap()["truncated"], json!(true));
-        assert!(o.text.lines().count() <= MAX_LINES + 10);
+        assert!(o.text.lines().count() <= util::INLINE_OUTPUT_MAX_LINES + 10);
         if let Some(p) = o.meta.as_ref().unwrap()["output_path"].as_str() {
             std::fs::remove_file(p).unwrap();
         }

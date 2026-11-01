@@ -19,9 +19,11 @@ impl TempDir {
         fs::create_dir_all(&p).unwrap();
         TempDir(p.canonicalize().unwrap())
     }
+
     fn path(&self) -> &Path {
         &self.0
     }
+
     fn write(&self, rel: &str, content: &str) -> PathBuf {
         let p = self.0.join(rel);
         fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -35,6 +37,9 @@ impl Drop for TempDir {
         let _ = fs::remove_dir_all(&self.0);
     }
 }
+
+/// The global opencode config file in the fixture, relative to the temp dir.
+const GLOBAL_CONFIG: &str = "home/.config/opencode/opencode.json";
 
 /// Test fixture: `<tmp>/home` (home + `.config/opencode`, `.config/ref`), `<tmp>/proj` (git root).
 struct Fx {
@@ -52,21 +57,30 @@ impl Fx {
             env: HashMap::new(),
         }
     }
+
     fn home(&self) -> PathBuf {
         self.t.path().join("home")
     }
+
     fn proj(&self) -> PathBuf {
         self.t.path().join("proj")
     }
+
     fn write(&self, rel: &str, content: &str) -> PathBuf {
         self.t.write(rel, content)
     }
+
+    fn write_global_config(&self, json: &str) -> PathBuf {
+        self.write(GLOBAL_CONFIG, json)
+    }
+
     fn load_at(&self, cwd: &Path) -> Config {
         let home = self.home();
         let globals = [home.join(".config/opencode"), home.join(".config/ref")];
         let env = |k: &str| self.env.get(k).cloned();
         load_with(Some(&home), &globals, cwd, &env)
     }
+
     fn load(&self) -> Config {
         self.load_at(&self.proj())
     }
@@ -94,9 +108,7 @@ fn empty_config_has_builtins() {
 #[test]
 fn providers_models_variants_images() {
     let fx = Fx::new();
-    fx.write(
-        "home/.config/opencode/opencode.json",
-        r#"{
+    fx.write_global_config(r#"{
   // comment
   "model": "zc/claude",
   "small_model": "hc/gpt-5.5",
@@ -174,9 +186,7 @@ fn providers_models_variants_images() {
 #[test]
 fn api_key_from_env_list_and_conventional() {
     let mut fx = Fx::new();
-    fx.write(
-        "home/.config/opencode/opencode.json",
-        r#"{"provider": {
+    fx.write_global_config(r#"{"provider": {
             "a": {"npm": "@ai-sdk/openai-compatible", "env": ["EMPTY_KEY", "A_KEY"], "models": {"m": {}}},
             "b": {"npm": "@ai-sdk/anthropic", "models": {"m": {}}},
             "c": {"npm": "@ai-sdk/openai", "options": {"apiKey": "{env:MISSING}"}, "models": {"m": {}}}
@@ -216,10 +226,7 @@ fn builtin_catalog_only_with_env() {
     );
 
     // A configured provider with the same id is not replaced.
-    fx.write(
-        "home/.config/opencode/opencode.json",
-        r#"{"provider": {"deepseek": {"models": {"custom": {}}}}}"#,
-    );
+    fx.write_global_config(r#"{"provider": {"deepseek": {"models": {"custom": {}}}}}"#);
     let c = fx.load();
     let ds = &c.providers["deepseek"];
     assert_eq!(ds.models.keys().collect::<Vec<_>>(), ["custom"]);
@@ -236,9 +243,7 @@ fn substitution_env_and_file() {
         "  Review carefully.\n\n",
     );
     fx.write("home/secret.txt", "tok\n");
-    fx.write(
-        "home/.config/opencode/opencode.json",
-        r#"{
+    fx.write_global_config(r#"{
           "agent": {"rev": {"prompt": "{file:./prompts/rev.md}", "description": "by {env:WHO}{env:NOPE}!"}},
           "mcp": {"s": {"url": "https://x", "headers": {"Authorization": "Bearer {file:~/secret.txt}"}},
                   "bad": {"url": "https://y", "headers": {"A": "{file:./missing.txt}"}}}
@@ -256,12 +261,23 @@ fn substitution_env_and_file() {
     assert!(c.warnings[0].contains("missing.txt"));
 }
 
+// Bug: a `~/` entry in two layers was listed twice, because the second layer compared the
+// unexpanded entry with the already expanded one from the first layer.
+#[test]
+fn home_instruction_in_two_layers_is_listed_once() {
+    let fx = Fx::new();
+    fx.write_global_config(r#"{"instructions": ["~/a.md"]}"#);
+    fx.write("proj/opencode.json", r#"{"instructions": ["~/a.md"]}"#);
+
+    let c = fx.load();
+    let expected = fx.home().join("a.md").to_string_lossy().into_owned();
+    assert_eq!(c.instructions, [expected]);
+}
+
 #[test]
 fn merge_order_and_project_walk() {
     let fx = Fx::new();
-    fx.write(
-        "home/.config/opencode/opencode.json",
-        r#"{"model": "a/global", "tui": {"theme": "x", "keep": 1}, "instructions": ["g.md"],
+    fx.write_global_config(r#"{"model": "a/global", "tui": {"theme": "x", "keep": 1}, "instructions": ["g.md"],
             "provider": {"p": {"options": {"baseURL": "https://g"}, "models": {"m1": {}, "m2": {}}}}}"#,
     );
     fx.write("home/.config/ref/ref.json", r#"{"small_model": "a/small"}"#);
@@ -319,7 +335,7 @@ fn no_git_root_uses_only_cwd() {
 #[test]
 fn parse_errors_become_warnings() {
     let fx = Fx::new();
-    fx.write("home/.config/opencode/opencode.json", "{ \"model\": ");
+    fx.write_global_config("{ \"model\": ");
     fx.write("proj/opencode.json", "[1, 2]");
     fx.write(
         "proj/.opencode/opencode.json",
@@ -328,11 +344,7 @@ fn parse_errors_become_warnings() {
     let c = fx.load();
     assert_eq!(c.warnings.len(), 4, "{:?}", c.warnings);
     // Windows paths mix `\` and `/`; compare with one separator.
-    assert!(
-        c.warnings[0]
-            .replace('\\', "/")
-            .contains("home/.config/opencode/opencode.json")
-    );
+    assert!(c.warnings[0].replace('\\', "/").contains(GLOBAL_CONFIG));
     assert!(c.warnings.iter().any(|w| w.contains("JSON object")));
     assert!(c.warnings.iter().any(|w| w.contains("maybe")));
 }
@@ -347,8 +359,7 @@ fn compaction_agent_builtin_and_overrides() {
     assert!(a.model.is_none() && a.variant.is_none());
 
     // JSON override of model / variant / options keeps the built-in prompt and flags.
-    fx.write(
-        "home/.config/opencode/opencode.json",
+    fx.write_global_config(
         r#"{"agent": {"compaction": {"model": "p/small", "variant": "low", "options": {"k": 1}}}}"#,
     );
     let c = fx.load();
@@ -375,9 +386,7 @@ fn compaction_agent_builtin_and_overrides() {
 #[test]
 fn agents_merge_and_disable() {
     let fx = Fx::new();
-    fx.write(
-        "home/.config/opencode/opencode.json",
-        r##"{"agent": {
+    fx.write_global_config(r##"{"agent": {
             "build": {"model": "p/m", "variant": "high", "temperature": 0.2, "reasoningEffort": "low",
                       "options": {"x": 1}},
             "general": {"disable": true},
@@ -479,9 +488,7 @@ fn markdown_agents_and_commands() {
 #[test]
 fn permission_precedence() {
     let fx = Fx::new();
-    fx.write(
-        "home/.config/opencode/opencode.json",
-        r#"{"tools": {"webfetch": false, "bash": false}, "permission": {"bash": "ask", "*": "allow"}}"#,
+    fx.write_global_config(r#"{"tools": {"webfetch": false, "bash": false}, "permission": {"bash": "ask", "*": "allow"}}"#,
     );
     fx.write(
         "proj/opencode.json",
@@ -519,10 +526,7 @@ fn permission_precedence() {
 #[test]
 fn global_permission_string() {
     let fx = Fx::new();
-    fx.write(
-        "home/.config/opencode/opencode.json",
-        r#"{"permission": "ask"}"#,
-    );
+    fx.write_global_config(r#"{"permission": "ask"}"#);
     let c = fx.load();
     assert_eq!(c.permission_for("build", "anything", ""), Action::Ask);
     assert_eq!(c.permission_for("plan", "edit", "x"), Action::Deny);
@@ -531,8 +535,7 @@ fn global_permission_string() {
 #[test]
 fn delay_precedence() {
     let fx = Fx::new();
-    fx.write(
-        "home/.config/opencode/opencode.json",
+    fx.write_global_config(
         r#"{"delay": {"*": 1, "bash": 3, "mcp_*": 2},
             "agent": {"slow": {"delay": {"bash": 10}}, "fast": {"delay": {"*": 0}}}}"#,
     );
@@ -555,8 +558,7 @@ fn compaction_thresholds() {
     assert_eq!(c.compaction.recommend_tokens(100_000, Some(42)), 42);
     assert_eq!(c.compaction.auto_tokens(100_000, None), 90_000);
 
-    fx.write(
-        "home/.config/opencode/opencode.json",
+    fx.write_global_config(
         r#"{"compaction": {"auto": false, "recommend": 50000, "threshold": 0.8}}"#,
     );
     let c = fx.load();
@@ -573,8 +575,7 @@ fn compaction_thresholds() {
 #[test]
 fn model_threshold_overrides_the_global_one() {
     let fx = Fx::new();
-    fx.write(
-        "home/.config/opencode/opencode.json",
+    fx.write_global_config(
         r#"{"compaction": {"threshold": 0.8},
             "provider": {"p": {"models": {
               "ratio": {"limit": {"context": 200000, "threshold": 0.5}},
@@ -629,9 +630,7 @@ fn explicit_project_root_hides_the_directories_above() {
 #[test]
 fn mcp_parsing() {
     let fx = Fx::new();
-    fx.write(
-        "home/.config/opencode/opencode.json",
-        r#"{"mcp": {
+    fx.write_global_config(r#"{"mcp": {
             "loc": {"type": "local", "command": ["npx", "-y", "srv"], "environment": {"A": "1"},
                     "cwd": "tools", "timeout": 5000},
             "inferred": {"command": ["srv"], "env": {"B": "2"}, "enabled": false},
@@ -681,10 +680,7 @@ fn mcp_parsing() {
 #[test]
 fn skills_paths() {
     let fx = Fx::new();
-    fx.write(
-        "home/.config/opencode/opencode.json",
-        r#"{"skills": ["~/sk", "./rel"]}"#,
-    );
+    fx.write_global_config(r#"{"skills": ["~/sk", "./rel"]}"#);
     fx.write("proj/opencode.json", r#"{"skills": {"paths": ["more"]}}"#);
     let c = fx.load();
     assert!(c.warnings.is_empty(), "{:?}", c.warnings);
@@ -703,7 +699,7 @@ fn skills_paths() {
 #[test]
 #[ignore]
 fn real_config_sanity() {
-    let c = Config::load(Path::new("/home/zzk/app/ref"));
+    let c = Config::load(&std::env::current_dir().unwrap());
     for (id, p) in &c.providers {
         let img = p.models.values().filter(|m| m.images).count();
         let rsn = p.models.values().filter(|m| m.reasoning).count();
@@ -747,10 +743,7 @@ fn question_state(c: &Config, agent: &str) -> (bool, Action) {
 #[test]
 fn question_is_allowed_for_build_and_plan_only() {
     let fx = Fx::new();
-    fx.write(
-        "home/.config/opencode/opencode.json",
-        r#"{"agent": {"helper": {"mode": "subagent"}}}"#,
-    );
+    fx.write_global_config(r#"{"agent": {"helper": {"mode": "subagent"}}}"#);
     let c = fx.load();
     assert_eq!(question_state(&c, "build"), (false, Action::Allow));
     assert_eq!(question_state(&c, "plan"), (false, Action::Allow));
@@ -762,22 +755,13 @@ fn question_is_allowed_for_build_and_plan_only() {
 #[test]
 fn a_global_question_rule_applies_to_every_agent() {
     let fx = Fx::new();
-    fx.write(
-        "home/.config/opencode/opencode.json",
-        r#"{"permission": {"question": "allow"}}"#,
-    );
+    fx.write_global_config(r#"{"permission": {"question": "allow"}}"#);
     let c = fx.load();
     assert_eq!(question_state(&c, "general"), (false, Action::Allow));
-    fx.write(
-        "home/.config/opencode/opencode.json",
-        r#"{"permission": {"question": "deny"}}"#,
-    );
+    fx.write_global_config(r#"{"permission": {"question": "deny"}}"#);
     let c = fx.load();
     assert_eq!(question_state(&c, "build"), (true, Action::Deny));
-    fx.write(
-        "home/.config/opencode/opencode.json",
-        r#"{"permission": "allow"}"#,
-    );
+    fx.write_global_config(r#"{"permission": "allow"}"#);
     let c = fx.load();
     assert_eq!(question_state(&c, "explore"), (false, Action::Allow));
 }
@@ -785,8 +769,7 @@ fn a_global_question_rule_applies_to_every_agent() {
 #[test]
 fn an_agent_rule_for_question_wins() {
     let fx = Fx::new();
-    fx.write(
-        "home/.config/opencode/opencode.json",
+    fx.write_global_config(
         r#"{"agent": {
             "general": {"permission": {"question": "allow"}},
             "build": {"permission": {"question": "deny"}},

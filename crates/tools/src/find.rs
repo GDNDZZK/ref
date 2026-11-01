@@ -9,24 +9,30 @@ use serde_json::{Value, json};
 use std::path::Path;
 use std::time::SystemTime;
 
-pub const DEFAULT_LIMIT: usize = 500;
-pub const MAX_LIMIT: usize = 5000;
+const DEFAULT_LIMIT: usize = 500;
+const MAX_LIMIT: usize = 5000;
+const DEFAULT_PATTERN: &str = "**/*";
+const DEFAULT_KIND: &str = "any";
+
+/// Name the model calls the tool by.
+pub(crate) const NAME: &str = "find";
 
 pub fn spec() -> ToolSpec {
     ToolSpec {
-        name: "find",
-        description: "Find files and directories by glob pattern. Respects .gitignore, includes hidden files, skips .git.\n\
+        name: NAME,
+        description: format!(
+            "Find files and directories by glob pattern. Respects .gitignore, includes hidden files, skips .git.\n\
 A pattern without `/` matches the file name at any depth (`*.rs`, `Cargo.toml`); a pattern with `/` matches the path relative to `path` \
-(`src/**/*.ts`, `**/test_*.py`). `{a,b}` alternatives are supported. Default pattern `**/*` lists everything.\n\
+(`src/**/*.ts`, `**/test_*.py`). `{{a,b}}` alternatives are supported. Default pattern `{DEFAULT_PATTERN}` lists everything.\n\
 Results are paths relative to the working directory, newest modification first; directories end with `/`."
-            .to_string(),
+        ),
         parameters: json!({
             "type": "object",
             "properties": {
-                "pattern": {"type": "string", "description": "Glob pattern (default `**/*`)."},
+                "pattern": {"type": "string", "description": format!("Glob pattern (default `{DEFAULT_PATTERN}`).")},
                 "path": {"type": "string", "description": "Directory to search (default: working directory)."},
-                "type": {"type": "string", "enum": ["file", "dir", "any"], "description": "Entry type to return (default `any`)."},
-                "limit": {"type": "integer", "minimum": 1, "description": "Maximum results (default 500)."}
+                "type": {"type": "string", "enum": ["file", "dir", "any"], "description": format!("Entry type to return (default `{DEFAULT_KIND}`).")},
+                "limit": {"type": "integer", "minimum": 1, "description": format!("Maximum results (default {DEFAULT_LIMIT}).")}
             }
         }),
     }
@@ -111,9 +117,9 @@ fn split_patterns(spec: &str) -> Vec<String> {
 fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let pattern = util::opt_str(input, "pattern")?
         .filter(|p| !p.trim().is_empty())
-        .unwrap_or_else(|| "**/*".into());
+        .unwrap_or_else(|| DEFAULT_PATTERN.into());
     let kind = util::opt_str(input, "type")?
-        .unwrap_or_else(|| "any".into())
+        .unwrap_or_else(|| DEFAULT_KIND.into())
         .to_ascii_lowercase();
     let (want_files, want_dirs) = match kind.as_str() {
         "file" | "f" | "files" => (true, false),
@@ -147,13 +153,19 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         .parents(true)
         .require_git(false)
         .follow_links(false)
-        .filter_entry(|e| e.file_name() != ".git");
+        .filter_entry(|e| e.file_name() != util::GIT_DIR_NAME);
     let mut found: Vec<(SystemTime, String)> = Vec::new();
     for entry in wb.build() {
         if ctx.cancel.is_cancelled() {
             bail!("find cancelled");
         }
-        let Ok(entry) = entry else { continue };
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(e) => {
+                tracing::debug!("find: skipping unreadable entry: {e}");
+                continue;
+            }
+        };
         if entry.depth() == 0 {
             continue;
         }
@@ -161,18 +173,25 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
             continue;
         };
         let is_dir = ft.is_dir();
-        if (is_dir && !want_dirs) || (!is_dir && !want_files) {
+        let wanted = if is_dir { want_dirs } else { want_files };
+        if !wanted {
             continue;
         }
-        let rel = entry.path().strip_prefix(&root).unwrap_or(entry.path());
+        let rel = entry
+            .path()
+            .strip_prefix(&root)
+            .expect("walk entries are under the root");
         if !matcher.is_match(rel) {
             continue;
         }
         let mtime = entry
             .metadata()
-            .ok()
-            .and_then(|m| m.modified().ok())
-            .unwrap_or(SystemTime::UNIX_EPOCH);
+            .map_err(|e| e.to_string())
+            .and_then(|m| m.modified().map_err(|e| e.to_string()))
+            .unwrap_or_else(|e| {
+                tracing::debug!("find: no mtime for {}: {e}", entry.path().display());
+                SystemTime::UNIX_EPOCH
+            });
         let mut shown = util::display_path(&ctx.cwd, entry.path());
         if is_dir {
             shown.push('/');

@@ -15,7 +15,14 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 /// Largest response body read.
-pub const MAX_BODY: usize = 20 * 1024 * 1024;
+pub(super) const MAX_BODY: usize = 20 * 1024 * 1024;
+const MAX_REDIRECTS: usize = 10;
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+/// Request timeout floor, so an expired deadline still fails through the request.
+const MIN_REMAINING: Duration = Duration::from_millis(1);
+/// Bytes of a page searched for a charset declaration.
+const CHARSET_SNIFF_BYTES: usize = 4096;
 
 pub struct Fetched {
     /// After redirects.
@@ -29,24 +36,27 @@ pub struct Fetched {
 impl Fetched {
     /// Media type without parameters, lower case.
     pub fn mime(&self) -> String {
-        self.content_type
-            .split(';')
-            .next()
-            .unwrap_or("")
+        let ct = self.content_type.as_str();
+        ct.split_once(';')
+            .map_or(ct, |(media, _)| media)
             .trim()
             .to_ascii_lowercase()
     }
 }
 
+/// Engine and browser part shared by the user agents of all platforms.
+const CHROME_TAIL: &str = "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
+
 /// A browser user agent: some sites serve bots an error page or a challenge.
-fn browser_ua() -> &'static str {
-    if cfg!(windows) {
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+fn browser_ua() -> String {
+    let platform = if cfg!(windows) {
+        "Windows NT 10.0; Win64; x64"
     } else if cfg!(target_os = "macos") {
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+        "Macintosh; Intel Mac OS X 10_15_7"
     } else {
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
-    }
+        "X11; Linux x86_64"
+    };
+    format!("Mozilla/5.0 ({platform}) {CHROME_TAIL}")
 }
 
 /// Honest user agent, used after a Cloudflare bot challenge (they often let declared bots through).
@@ -69,9 +79,16 @@ pub fn accept_language() -> String {
 
 /// `zh_CN.UTF-8` → `zh-CN,zh;q=0.9,en;q=0.8`.
 pub fn accept_language_for(loc: &str) -> String {
-    let tag = loc.split(['.', '@']).next().unwrap_or("").replace('_', "-");
-    let lang = tag.split('-').next().unwrap_or("").to_ascii_lowercase();
-    if lang.len() < 2 || lang == "c" || lang == "posix" || lang == "en" {
+    let tag = loc
+        .split_once(['.', '@'])
+        .map_or(loc, |(tag, _)| tag)
+        .replace('_', "-");
+    let lang = tag
+        .split_once('-')
+        .map_or(tag.as_str(), |(lang, _)| lang)
+        .to_ascii_lowercase();
+    let neutral_locale = matches!(lang.as_str(), "c" | "posix" | "en");
+    if lang.len() < 2 || neutral_locale {
         return "en-US,en;q=0.9".into();
     }
     if tag.contains('-') {
@@ -83,9 +100,9 @@ pub fn accept_language_for(loc: &str) -> String {
 
 fn build(direct: bool) -> Result<Client, String> {
     let mut b = Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .connect_timeout(Duration::from_secs(15))
-        .pool_idle_timeout(Duration::from_secs(60));
+        .redirect(reqwest::redirect::Policy::limited(MAX_REDIRECTS))
+        .connect_timeout(CONNECT_TIMEOUT)
+        .pool_idle_timeout(POOL_IDLE_TIMEOUT);
     if direct {
         b = b.no_proxy();
     }
@@ -177,7 +194,7 @@ pub async fn get(
     let send = |ua: String| {
         let left = deadline
             .saturating_duration_since(Instant::now())
-            .max(Duration::from_millis(1));
+            .max(MIN_REMAINING);
         c.get(url.clone())
             .header(USER_AGENT, ua)
             .header(ACCEPT, accept)
@@ -186,7 +203,7 @@ pub async fn get(
             .timeout(left)
             .send()
     };
-    let mut resp = cancellable(send(browser_ua().to_string()), cancel)
+    let mut resp = cancellable(send(browser_ua()), cancel)
         .await?
         .map_err(|e| request_error(e, url))?;
     if resp.status() == StatusCode::FORBIDDEN
@@ -211,10 +228,12 @@ pub async fn get(
         .headers()
         .get(CONTENT_LENGTH)
         .and_then(|v| v.to_str().ok()?.parse::<u64>().ok());
-    if declared.is_some_and(|n| n > MAX_BODY as u64) {
+    if let Some(n) = declared
+        && n > MAX_BODY as u64
+    {
         bail!(
             "Response too large: {} (limit {}). Download it with bash (curl -o) instead.",
-            crate::util::human_bytes(declared.unwrap_or(0)),
+            crate::util::human_bytes(n),
             crate::util::human_bytes(MAX_BODY as u64)
         );
     }
@@ -309,7 +328,7 @@ fn meta_charset(bytes: &[u8]) -> Option<String> {
     static XML: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r#"(?i)<\?xml[^>]*encoding\s*=\s*["']([A-Za-z0-9_:.\-]+)"#).unwrap()
     });
-    let head = String::from_utf8_lossy(&bytes[..bytes.len().min(4096)]);
+    let head = String::from_utf8_lossy(&bytes[..bytes.len().min(CHARSET_SNIFF_BYTES)]);
     XML.captures(&head)
         .or_else(|| META.captures(&head))
         .map(|c| c[1].to_string())

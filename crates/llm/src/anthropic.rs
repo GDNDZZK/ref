@@ -3,9 +3,10 @@
 use crate::error::stream_error;
 use crate::sse::{SseEvent, data_values};
 use crate::util::{
-    Assembler, DEFAULT_ANTHROPIC_BASE, IMAGE_OMITTED, StreamEnd, StreamState, build_headers,
-    deep_merge, drive, endpoint, error_fields, normalize_call_id, normalize_history, opt_str,
-    opt_u64, parse_arguments, provider_header, ptr_u64, same_origin, session_headers, snake_keys,
+    Assembler, DEFAULT_ANTHROPIC_BASE, IMAGE_OMITTED, NO_TOOL_OUTPUT, SEE_ATTACHED_IMAGE,
+    StreamEnd, StreamState, build_headers, deep_merge, drive, endpoint, error_fields,
+    json_sse_headers, normalize_call_id, normalize_history, opt_str, opt_u64, parse_arguments,
+    provider_header, ptr_u64, same_origin, session_headers, snake_keys,
 };
 use crate::{
     AssistantBlock, BlockKind, ChatMessage, LlmError, Model, Provider, Request, Response,
@@ -25,6 +26,8 @@ const OAUTH_BETA: &str = "oauth-2025-04-20";
 /// Used when the model's output limit is unknown (the field is mandatory).
 const DEFAULT_MAX_TOKENS: u64 = 32_000;
 const MIN_THINKING_BUDGET: u64 = 1024;
+/// Thinking budget when neither the options nor the effort give one.
+const DEFAULT_THINKING_BUDGET: u64 = 16_384;
 /// Head-room for the visible answer when the budget is close to `max_tokens`.
 const ANSWER_HEADROOM: u64 = 4096;
 /// Anthropic tool ids: `^[a-zA-Z0-9_-]+$`, at most 64 characters.
@@ -55,11 +58,8 @@ pub(crate) async fn stream(
 }
 
 fn request_headers(provider: &Provider, req: &Request) -> reqwest::header::HeaderMap {
-    let mut defaults = vec![
-        ("content-type".to_string(), "application/json".to_string()),
-        ("accept".to_string(), "text/event-stream".to_string()),
-        ("anthropic-version".to_string(), API_VERSION.to_string()),
-    ];
+    let mut defaults = json_sse_headers();
+    defaults.push(("anthropic-version".to_string(), API_VERSION.to_string()));
     let key = provider
         .api_key
         .as_deref()
@@ -142,11 +142,11 @@ fn adaptive_effort(effort: &str, version: Option<(u32, u32)>) -> Option<&'static
 fn effort_budget(effort: &str) -> Option<u64> {
     Some(match effort.to_ascii_lowercase().as_str() {
         "none" | "off" | "disabled" => return None,
-        "minimal" => 1024,
+        "minimal" => MIN_THINKING_BUDGET,
         "low" => 2048,
         "medium" => 8192,
-        "xhigh" | "max" => 32_000,
-        _ => 16_384,
+        "xhigh" | "max" => DEFAULT_MAX_TOKENS,
+        _ => DEFAULT_THINKING_BUDGET,
     })
 }
 
@@ -165,12 +165,12 @@ fn plan_thinking(model: &Model, max_tokens: &mut u64) -> ThinkingPlan {
     let effort = opt_str(opts, &["effort", "reasoningEffort", "reasoning_effort"]);
     let thinking = opts.get("thinking").filter(|t| t.is_object());
 
-    match thinking.and_then(|t| t.get("type")).and_then(Value::as_str) {
-        Some("enabled") => {
-            let t = thinking.unwrap_or(&Value::Null);
+    let kind = thinking.and_then(|t| t.get("type")).and_then(Value::as_str);
+    match thinking.zip(kind) {
+        Some((t, "enabled")) => {
             let budget = opt_u64(t.get("budgetTokens").or_else(|| t.get("budget_tokens")))
                 .or_else(|| effort.and_then(effort_budget))
-                .unwrap_or(16_384);
+                .unwrap_or(DEFAULT_THINKING_BUDGET);
             let mut out = snake_keys(t);
             out["budget_tokens"] = json!(fit_budget(model, budget, max_tokens));
             ThinkingPlan {
@@ -179,8 +179,8 @@ fn plan_thinking(model: &Model, max_tokens: &mut u64) -> ThinkingPlan {
                 active: true,
             }
         }
-        Some("adaptive") => {
-            let mut out = snake_keys(thinking.unwrap_or(&Value::Null));
+        Some((t, "adaptive")) => {
+            let mut out = snake_keys(t);
             if is_4_7_plus(version) && out.get("display").is_none() {
                 out["display"] = json!("summarized");
             }
@@ -193,7 +193,7 @@ fn plan_thinking(model: &Model, max_tokens: &mut u64) -> ThinkingPlan {
                 active: true,
             }
         }
-        Some("disabled") => ThinkingPlan {
+        Some((_, "disabled")) => ThinkingPlan {
             thinking: Some(json!({"type": "disabled"})),
             effort: None,
             active: false,
@@ -378,50 +378,7 @@ fn convert_messages(provider: &Provider, model: &Model, req: &Request) -> Vec<Va
             }
             ChatMessage::Assistant { blocks, origin } => {
                 let replay = same_origin(origin, provider, model);
-                let mut content = Vec::new();
-                for block in blocks {
-                    match block {
-                        AssistantBlock::Reasoning {
-                            text,
-                            provider_data,
-                        } => {
-                            if !replay {
-                                continue;
-                            }
-                            let data = provider_data.as_ref();
-                            let signature = data
-                                .and_then(|d| d.get("signature"))
-                                .and_then(Value::as_str);
-                            let redacted =
-                                data.and_then(|d| d.get("redacted")).and_then(Value::as_str);
-                            if let Some(redacted) = redacted.filter(|r| !r.is_empty()) {
-                                content
-                                    .push(json!({"type": "redacted_thinking", "data": redacted}));
-                            } else if let Some(sig) = signature.filter(|s| !s.is_empty()) {
-                                content.push(
-                                    json!({"type": "thinking", "thinking": text, "signature": sig}),
-                                );
-                            }
-                        }
-                        AssistantBlock::Text(t) => {
-                            if !t.trim().is_empty() {
-                                content.push(json!({"type": "text", "text": t}));
-                            }
-                        }
-                        AssistantBlock::ToolCall {
-                            id,
-                            name,
-                            arguments,
-                            ..
-                        } => content.push(json!({
-                            "type": "tool_use",
-                            "id": normalize_call_id(id, MAX_TOOL_ID),
-                            "name": name,
-                            "input": parse_arguments(arguments),
-                        })),
-                    }
-                }
-                push_merged(&mut out, "assistant", content);
+                push_merged(&mut out, "assistant", assistant_content(blocks, replay));
             }
             ChatMessage::ToolResult {
                 call_id,
@@ -430,28 +387,7 @@ fn convert_messages(provider: &Provider, model: &Model, req: &Request) -> Vec<Va
                 is_error,
                 ..
             } => {
-                let images: &[ImageData] = if *is_error || !model.images {
-                    &[]
-                } else {
-                    images
-                };
-                let mut parts = Vec::new();
-                if !content.trim().is_empty() {
-                    parts.push(json!({"type": "text", "text": content}));
-                } else if images.is_empty() {
-                    parts.push(json!({"type": "text", "text": "(no tool output)"}));
-                } else {
-                    parts.push(json!({"type": "text", "text": "(see attached image)"}));
-                }
-                parts.extend(images.iter().map(image_block));
-                let mut block = json!({
-                    "type": "tool_result",
-                    "tool_use_id": normalize_call_id(call_id, MAX_TOOL_ID),
-                    "content": parts,
-                });
-                if *is_error {
-                    block["is_error"] = json!(true);
-                }
+                let block = tool_result_block(model, call_id, content, images, *is_error);
                 push_merged(&mut out, "user", vec![block]);
             }
         }
@@ -480,6 +416,89 @@ fn convert_messages(provider: &Provider, model: &Model, req: &Request) -> Vec<Va
     out
 }
 
+/// Wire blocks of an assistant message. Reasoning is replayed only for `replay`.
+fn assistant_content(blocks: &[AssistantBlock], replay: bool) -> Vec<Value> {
+    let mut content = Vec::new();
+    for block in blocks {
+        match block {
+            AssistantBlock::Reasoning {
+                text,
+                provider_data,
+            } => {
+                if replay {
+                    content.extend(reasoning_block(text, provider_data.as_ref()));
+                }
+            }
+            AssistantBlock::Text(t) => {
+                if !t.trim().is_empty() {
+                    content.push(json!({"type": "text", "text": t}));
+                }
+            }
+            AssistantBlock::ToolCall {
+                id,
+                name,
+                arguments,
+                ..
+            } => content.push(json!({
+                "type": "tool_use",
+                "id": normalize_call_id(id, MAX_TOOL_ID),
+                "name": name,
+                "input": parse_arguments(arguments),
+            })),
+        }
+    }
+    content
+}
+
+/// A `redacted_thinking` or signed `thinking` block; reasoning without either is dropped.
+fn reasoning_block(text: &str, provider_data: Option<&Value>) -> Option<Value> {
+    let signature = provider_data
+        .and_then(|d| d.get("signature"))
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty());
+    let redacted = provider_data
+        .and_then(|d| d.get("redacted"))
+        .and_then(Value::as_str)
+        .filter(|r| !r.is_empty());
+    if let Some(redacted) = redacted {
+        return Some(json!({"type": "redacted_thinking", "data": redacted}));
+    }
+    signature.map(|sig| json!({"type": "thinking", "thinking": text, "signature": sig}))
+}
+
+/// A `tool_result` block; images are sent only for successful results of vision models.
+fn tool_result_block(
+    model: &Model,
+    call_id: &str,
+    content: &str,
+    images: &[ImageData],
+    is_error: bool,
+) -> Value {
+    let images: &[ImageData] = if is_error || !model.images {
+        &[]
+    } else {
+        images
+    };
+    let mut parts = Vec::new();
+    if !content.trim().is_empty() {
+        parts.push(json!({"type": "text", "text": content}));
+    } else if images.is_empty() {
+        parts.push(json!({"type": "text", "text": NO_TOOL_OUTPUT}));
+    } else {
+        parts.push(json!({"type": "text", "text": SEE_ATTACHED_IMAGE}));
+    }
+    parts.extend(images.iter().map(image_block));
+    let mut block = json!({
+        "type": "tool_result",
+        "tool_use_id": normalize_call_id(call_id, MAX_TOOL_ID),
+        "content": parts,
+    });
+    if is_error {
+        block["is_error"] = json!(true);
+    }
+    block
+}
+
 /// Append `content` as a `role` message, merging with the previous message
 /// when it has the same role (the API requires alternating roles).
 fn push_merged(out: &mut Vec<Value>, role: &str, content: Vec<Value>) {
@@ -499,6 +518,11 @@ fn push_merged(out: &mut Vec<Value>, role: &str, content: Vec<Value>) {
 // ---------------------------------------------------------------------------
 // Streaming
 // ---------------------------------------------------------------------------
+
+/// Content block index of a stream event (0 when missing).
+fn content_index(ev: &Value) -> u64 {
+    ev.get("index").and_then(Value::as_u64).unwrap_or(0)
+}
 
 #[derive(Debug, Default)]
 pub(crate) struct AnthropicState {
@@ -541,7 +565,7 @@ impl AnthropicState {
                 }
             }
             "content_block_start" => {
-                let index = ev.get("index").and_then(Value::as_u64).unwrap_or(0);
+                let index = content_index(ev);
                 let Some(cb) = ev.get("content_block") else {
                     return Ok(false);
                 };
@@ -587,7 +611,7 @@ impl AnthropicState {
                 self.blocks.insert(index, block);
             }
             "content_block_delta" => {
-                let index = ev.get("index").and_then(Value::as_u64).unwrap_or(0);
+                let index = content_index(ev);
                 let (Some(&block), Some(delta)) = (self.blocks.get(&index), ev.get("delta")) else {
                     return Ok(false);
                 };
@@ -606,7 +630,7 @@ impl AnthropicState {
                 }
             }
             "content_block_stop" => {
-                let index = ev.get("index").and_then(Value::as_u64).unwrap_or(0);
+                let index = content_index(ev);
                 if let Some(&block) = self.blocks.get(&index) {
                     asm.end(block);
                 }

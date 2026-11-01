@@ -1,7 +1,10 @@
 //! Built-in agents and the small built-in provider catalog.
 
-use crate::permission::{Action, Rule};
-use crate::{AgentConfig, Config, PermissionRules};
+use crate::permission::{ANY, Action, Rule};
+use crate::{
+    AgentConfig, COMPACTION_AGENT, Config, DEFAULT_AGENT, MODE_PRIMARY, MODE_SUBAGENT,
+    PermissionRules,
+};
 use serde_json::{Value, json};
 
 fn perm(v: Value) -> PermissionRules {
@@ -71,24 +74,22 @@ pub(crate) fn question_defaults(cfg: &mut Config) {
         } else {
             Action::Deny
         };
-        let rule = Rule {
-            tool: QUESTION_TOOL.into(),
-            pattern: "*".into(),
-            action,
-        };
-        agent.permission.rules.insert(0, rule);
+        agent
+            .permission
+            .rules
+            .insert(0, Rule::new(QUESTION_TOOL, ANY, action));
     }
 }
 
 /// Built-in agents (before user definitions are merged in).
-pub fn agents() -> Vec<AgentConfig> {
+pub(crate) fn agents() -> Vec<AgentConfig> {
     vec![
         AgentConfig {
-            name: "build".into(),
+            name: DEFAULT_AGENT.into(),
             description: "Default agent with full tool access.".into(),
             creatable: true,
             can_spawn: true,
-            mode: "primary".into(),
+            mode: MODE_PRIMARY.into(),
             ..Default::default()
         },
         AgentConfig {
@@ -100,7 +101,7 @@ pub fn agents() -> Vec<AgentConfig> {
             ),
             creatable: true,
             can_spawn: false,
-            mode: "primary".into(),
+            mode: MODE_PRIMARY.into(),
             ..Default::default()
         },
         AgentConfig {
@@ -109,7 +110,7 @@ pub fn agents() -> Vec<AgentConfig> {
                 .into(),
             creatable: true,
             can_spawn: false,
-            mode: "subagent".into(),
+            mode: MODE_SUBAGENT.into(),
             ..Default::default()
         },
         AgentConfig {
@@ -122,54 +123,81 @@ pub fn agents() -> Vec<AgentConfig> {
             permission: perm(json!({"edit": "deny", "write": "deny", "delete": "deny"})),
             creatable: true,
             can_spawn: false,
-            mode: "subagent".into(),
+            mode: MODE_SUBAGENT.into(),
             ..Default::default()
         },
         AgentConfig {
-            name: "compaction".into(),
+            name: COMPACTION_AGENT.into(),
             description:
                 "Summarizes the conversation when the context is compacted (/compact, automatic)."
                     .into(),
             prompt: COMPACTION_PROMPT.into(),
             creatable: false,
             can_spawn: false,
-            mode: "primary".into(),
+            mode: MODE_PRIMARY.into(),
             hidden: true,
             ..Default::default()
         },
     ]
 }
 
-/// Defaults for a known provider id: (npm, base_url, env var).
-pub fn provider_defaults(id: &str) -> Option<(&'static str, &'static str, &'static str)> {
-    Some(match id {
-        "anthropic" => (
-            "@ai-sdk/anthropic",
-            "https://api.anthropic.com/v1",
-            "ANTHROPIC_API_KEY",
-        ),
-        "openai" => (
-            "@ai-sdk/openai",
-            "https://api.openai.com/v1",
-            "OPENAI_API_KEY",
-        ),
-        "deepseek" => (
-            "@ai-sdk/openai-compatible",
-            "https://api.deepseek.com/v1",
-            "DEEPSEEK_API_KEY",
-        ),
-        "openrouter" => (
-            "@openrouter/ai-sdk-provider",
-            "https://openrouter.ai/api/v1",
-            "OPENROUTER_API_KEY",
-        ),
-        _ => return None,
-    })
+/// Facts about a built-in provider.
+pub(crate) struct ProviderDefaults {
+    id: &'static str,
+    pub(crate) npm: &'static str,
+    pub(crate) base_url: &'static str,
+    pub(crate) env: &'static str,
+    /// Whether the SDK package alone implies `env` for custom providers that use it.
+    conventional_env: bool,
+}
+
+const PROVIDERS: &[ProviderDefaults] = &[
+    ProviderDefaults {
+        id: "anthropic",
+        npm: "@ai-sdk/anthropic",
+        base_url: "https://api.anthropic.com/v1",
+        env: "ANTHROPIC_API_KEY",
+        conventional_env: true,
+    },
+    ProviderDefaults {
+        id: "openai",
+        npm: "@ai-sdk/openai",
+        base_url: "https://api.openai.com/v1",
+        env: "OPENAI_API_KEY",
+        conventional_env: true,
+    },
+    ProviderDefaults {
+        id: "deepseek",
+        npm: "@ai-sdk/openai-compatible",
+        base_url: "https://api.deepseek.com/v1",
+        env: "DEEPSEEK_API_KEY",
+        conventional_env: false,
+    },
+    ProviderDefaults {
+        id: "openrouter",
+        npm: "@openrouter/ai-sdk-provider",
+        base_url: "https://openrouter.ai/api/v1",
+        env: "OPENROUTER_API_KEY",
+        conventional_env: false,
+    },
+];
+
+/// Defaults for a known provider id.
+pub(crate) fn provider_defaults(id: &str) -> Option<&'static ProviderDefaults> {
+    PROVIDERS.iter().find(|p| p.id == id)
+}
+
+/// The conventional API key variable of an SDK package (e.g. `@ai-sdk/anthropic`).
+pub(crate) fn env_for_npm(npm: &str) -> Option<&'static str> {
+    PROVIDERS
+        .iter()
+        .find(|p| p.conventional_env && p.npm == npm)
+        .map(|p| p.env)
 }
 
 /// Built-in provider catalog: (id, env var, opencode-style provider config).
 /// Only added when the env var is set and the provider is not configured.
-pub fn catalog() -> Vec<(&'static str, &'static str, Value)> {
+pub(crate) fn catalog() -> Vec<(&'static str, &'static str, Value)> {
     let anthropic_thinking =
         json!({"high": {"thinking": {"type": "enabled", "budgetTokens": 16000}}});
     let openai_variants = {
@@ -177,15 +205,22 @@ pub fn catalog() -> Vec<(&'static str, &'static str, Value)> {
         json!({"low": v("low"), "medium": v("medium"), "high": v("high")})
     };
     let image = json!({"input": ["text", "image"], "output": ["text"]});
+    let known = |id: &str| provider_defaults(id).expect("built-in provider");
+    let (anthropic, openai, deepseek, openrouter) = (
+        known("anthropic"),
+        known("openai"),
+        known("deepseek"),
+        known("openrouter"),
+    );
     vec![
         (
             "anthropic",
-            "ANTHROPIC_API_KEY",
+            anthropic.env,
             json!({
                 "name": "Anthropic",
-                "npm": "@ai-sdk/anthropic",
-                "env": ["ANTHROPIC_API_KEY"],
-                "options": {"baseURL": "https://api.anthropic.com/v1"},
+                "npm": anthropic.npm,
+                "env": [anthropic.env],
+                "options": {"baseURL": anthropic.base_url},
                 "models": {
                     "claude-sonnet-4-5": {"name": "Claude Sonnet 4.5", "attachment": true, "reasoning": true,
                         "limit": {"context": 200000, "output": 64000}, "variants": anthropic_thinking.clone()},
@@ -198,12 +233,12 @@ pub fn catalog() -> Vec<(&'static str, &'static str, Value)> {
         ),
         (
             "openai",
-            "OPENAI_API_KEY",
+            openai.env,
             json!({
                 "name": "OpenAI",
-                "npm": "@ai-sdk/openai",
-                "env": ["OPENAI_API_KEY"],
-                "options": {"baseURL": "https://api.openai.com/v1"},
+                "npm": openai.npm,
+                "env": [openai.env],
+                "options": {"baseURL": openai.base_url},
                 "models": {
                     "gpt-5": {"name": "GPT-5", "attachment": true, "reasoning": true, "modalities": image.clone(),
                         "limit": {"context": 400000, "input": 272000, "output": 128000},
@@ -216,13 +251,13 @@ pub fn catalog() -> Vec<(&'static str, &'static str, Value)> {
         ),
         (
             "deepseek",
-            "DEEPSEEK_API_KEY",
+            deepseek.env,
             json!({
                 "name": "DeepSeek",
-                "npm": "@ai-sdk/openai-compatible",
+                "npm": deepseek.npm,
                 "api": "chat",
-                "env": ["DEEPSEEK_API_KEY"],
-                "options": {"baseURL": "https://api.deepseek.com/v1"},
+                "env": [deepseek.env],
+                "options": {"baseURL": deepseek.base_url},
                 "models": {
                     "deepseek-chat": {"name": "DeepSeek Chat", "limit": {"context": 128000, "output": 8192}},
                     "deepseek-reasoner": {"name": "DeepSeek Reasoner", "reasoning": true,
@@ -232,13 +267,13 @@ pub fn catalog() -> Vec<(&'static str, &'static str, Value)> {
         ),
         (
             "openrouter",
-            "OPENROUTER_API_KEY",
+            openrouter.env,
             json!({
                 "name": "OpenRouter",
-                "npm": "@openrouter/ai-sdk-provider",
+                "npm": openrouter.npm,
                 "api": "chat",
-                "env": ["OPENROUTER_API_KEY"],
-                "options": {"baseURL": "https://openrouter.ai/api/v1"},
+                "env": [openrouter.env],
+                "options": {"baseURL": openrouter.base_url},
                 "models": {
                     "anthropic/claude-sonnet-4.5": {"name": "Claude Sonnet 4.5", "attachment": true, "reasoning": true,
                         "limit": {"context": 1000000, "output": 64000}},

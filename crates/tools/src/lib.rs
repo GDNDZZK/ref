@@ -13,7 +13,7 @@ mod delete;
 mod edit;
 mod find;
 mod grep;
-pub mod hashline;
+mod hashline;
 pub mod imgfit;
 mod read;
 mod util;
@@ -94,7 +94,14 @@ pub fn specs() -> Vec<ToolSpec> {
 pub fn is_builtin(name: &str) -> bool {
     matches!(
         name,
-        "read" | "edit" | "write" | "delete" | "grep" | "find" | "bash" | "webfetch"
+        read::NAME
+            | edit::NAME
+            | write::NAME
+            | delete::NAME
+            | grep::NAME
+            | find::NAME
+            | bash::NAME
+            | web::NAME
     )
 }
 
@@ -102,14 +109,14 @@ pub fn is_builtin(name: &str) -> bool {
 /// `input` has already had `purpose` removed.
 pub async fn execute(name: &str, input: Value, ctx: &ToolCtx) -> ToolOutput {
     let res = match name {
-        "read" => read::run(input, ctx).await,
-        "edit" => edit::run(input, ctx).await,
-        "write" => write::run(input, ctx).await,
-        "delete" => delete::run(input, ctx).await,
-        "grep" => grep::run(input, ctx).await,
-        "find" => find::run(input, ctx).await,
-        "bash" => bash::run(input, ctx).await,
-        "webfetch" => web::run(input, ctx).await,
+        read::NAME => read::run(input, ctx).await,
+        edit::NAME => edit::run(input, ctx).await,
+        write::NAME => write::run(input, ctx).await,
+        delete::NAME => delete::run(input, ctx).await,
+        grep::NAME => grep::run(input, ctx).await,
+        find::NAME => find::run(input, ctx).await,
+        bash::NAME => bash::run(input, ctx).await,
+        web::NAME => web::run(input, ctx).await,
         _ => Err(anyhow::anyhow!("unknown tool: {name}")),
     };
     match res {

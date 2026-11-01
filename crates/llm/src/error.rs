@@ -4,9 +4,24 @@
 
 use crate::LlmError;
 use regex::Regex;
+use reqwest::StatusCode;
 use reqwest::header::HeaderMap;
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 use std::time::Duration;
+
+/// HTTP statuses the classification depends on.
+const PAYLOAD_TOO_LARGE: u16 = StatusCode::PAYLOAD_TOO_LARGE.as_u16();
+const TOO_MANY_REQUESTS: u16 = StatusCode::TOO_MANY_REQUESTS.as_u16();
+const PAYMENT_REQUIRED: u16 = StatusCode::PAYMENT_REQUIRED.as_u16();
+const REQUEST_TIMEOUT: u16 = StatusCode::REQUEST_TIMEOUT.as_u16();
+const CONFLICT: u16 = StatusCode::CONFLICT.as_u16();
+const TOO_EARLY: u16 = StatusCode::TOO_EARLY.as_u16();
+const UNAUTHORIZED: u16 = StatusCode::UNAUTHORIZED.as_u16();
+const FORBIDDEN: u16 = StatusCode::FORBIDDEN.as_u16();
+const NOT_FOUND: u16 = StatusCode::NOT_FOUND.as_u16();
+const INTERNAL_SERVER_ERROR: u16 = StatusCode::INTERNAL_SERVER_ERROR.as_u16();
+/// Last status of the 5xx range.
+const LAST_SERVER_ERROR: u16 = 599;
 
 /// Maximum number of body characters included in error messages.
 const MAX_BODY_CHARS: usize = 2000;
@@ -34,87 +49,75 @@ impl LlmError {
 }
 
 /// Context-window overflow patterns collected from many providers.
-fn overflow_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(concat!(
-            r"(?i)prompt (is )?too long",
-            r"|prompt exceeds max length|prompt 超长",
-            r"|request_too_large",
-            r"|input is too long",
-            r"|exceeds the context window",
-            r"|exceeds (the )?(model'?s )?maximum context length",
-            r"|maximum context length",
-            r"|context window exceeded|context window exceeds limit",
-            r"|input token count.*exceeds the maximum",
-            r"|maximum prompt length is \d+",
-            r"|reduce the length of the messages",
-            r"|exceeds (the )?maximum allowed input length",
-            r"|is longer than the model'?s context length",
-            r"|exceeds the limit of \d+",
-            r"|exceeds the available context size",
-            r"|greater than the context length",
-            r"|exceeded model token limit",
-            r"|too large for model with \d+ maximum context length",
-            r"|but the configured context size is",
-            r"|model_context_window_exceeded",
-            r"|exceeded (max )?context length",
-            r"|range of input length should be",
-            r"|requested input length \d+ exceeds maximum input length",
-            r"|`inputs` tokens \+ `max_new_tokens` must be",
-            r"|context[_ ]length[_ ]exceeded|too many tokens|token limit exceeded",
-        ))
-        .expect("overflow regex")
-    })
-}
+static OVERFLOW_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(concat!(
+        r"(?i)prompt (is )?too long",
+        r"|prompt exceeds max length|prompt 超长",
+        r"|request_too_large",
+        r"|input is too long",
+        r"|exceeds the context window",
+        r"|exceeds (the )?(model'?s )?maximum context length",
+        r"|maximum context length",
+        r"|context window exceeded|context window exceeds limit",
+        r"|input token count.*exceeds the maximum",
+        r"|maximum prompt length is \d+",
+        r"|reduce the length of the messages",
+        r"|exceeds (the )?maximum allowed input length",
+        r"|is longer than the model'?s context length",
+        r"|exceeds the limit of \d+",
+        r"|exceeds the available context size",
+        r"|greater than the context length",
+        r"|exceeded model token limit",
+        r"|too large for model with \d+ maximum context length",
+        r"|but the configured context size is",
+        r"|model_context_window_exceeded",
+        r"|exceeded (max )?context length",
+        r"|range of input length should be",
+        r"|requested input length \d+ exceeds maximum input length",
+        r"|`inputs` tokens \+ `max_new_tokens` must be",
+        r"|context[_ ]length[_ ]exceeded|too many tokens|token limit exceeded",
+    ))
+    .expect("overflow regex")
+});
 
 /// Messages that look like overflow but are actually throttling / parameter errors.
-fn overflow_exclusion_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(concat!(
-            r"(?i)^(throttling error|service unavailable):",
-            r"|rate.?limit|too many requests",
-            r"|too many tokens(,)?( per day)?(,)? please wait",
-            r"|max[_ ]tokens must be less than",
-        ))
-        .expect("overflow exclusion regex")
-    })
-}
+static OVERFLOW_EXCLUSION_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(concat!(
+        r"(?i)^(throttling error|service unavailable):",
+        r"|rate.?limit|too many requests",
+        r"|too many tokens(,)?( per day)?(,)? please wait",
+        r"|max[_ ]tokens must be less than",
+    ))
+    .expect("overflow exclusion regex")
+});
 
 /// Quota / billing problems: retrying will not help.
-fn quota_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(concat!(
-            r"(?i)insufficient_quota|insufficient balance|quota exceeded|exceeded your current quota",
-            r"|billing|out of budget|usage_not_included|usagelimiterror|monthly usage limit",
-            r"|subscription_sharing_usage_limit_exceeded|payment required",
-        ))
-        .expect("quota regex")
-    })
-}
+static QUOTA_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(concat!(
+        r"(?i)insufficient_quota|insufficient balance|quota exceeded|exceeded your current quota",
+        r"|billing|out of budget|usage_not_included|usagelimiterror|monthly usage limit",
+        r"|subscription_sharing_usage_limit_exceeded|payment required",
+    ))
+    .expect("quota regex")
+});
 
 /// Transient conditions detectable from the error text alone.
-fn retryable_text_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(concat!(
-            r"(?i)overloaded|server_busy|server is busy|rate.?limit|too many requests",
-            r"|try again|retry your request|temporarily unavailable|service.?unavailable",
-            r"|resource.?exhausted",
-        ))
-        .expect("retryable regex")
-    })
-}
+static RETRYABLE_TEXT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(concat!(
+        r"(?i)overloaded|server_busy|server is busy|rate.?limit|too many requests",
+        r"|try again|retry your request|temporarily unavailable|service.?unavailable",
+        r"|resource.?exhausted",
+    ))
+    .expect("retryable regex")
+});
 
 /// Whether an error text indicates that the prompt exceeded the context window.
 pub fn is_context_overflow(text: &str) -> bool {
-    overflow_re().is_match(text) && !overflow_exclusion_re().is_match(text)
+    OVERFLOW_RE.is_match(text) && !OVERFLOW_EXCLUSION_RE.is_match(text)
 }
 
 fn is_quota(text: &str) -> bool {
-    quota_re().is_match(text)
+    QUOTA_RE.is_match(text)
 }
 
 /// Truncate to [`MAX_BODY_CHARS`] characters (on a char boundary).
@@ -135,8 +138,9 @@ pub fn classify_http_error(status: u16, headers: &HeaderMap, body: &str) -> LlmE
         format!("HTTP {status}: {trimmed}")
     };
 
-    let context_overflow = status == 413 || (status != 429 && is_context_overflow(body));
-    let quota = status == 402 || is_quota(body);
+    let context_overflow =
+        status == PAYLOAD_TOO_LARGE || (status != TOO_MANY_REQUESTS && is_context_overflow(body));
+    let quota = status == PAYMENT_REQUIRED || is_quota(body);
     let should_retry = headers
         .get("x-should-retry")
         .and_then(|v| v.to_str().ok())
@@ -152,9 +156,13 @@ pub fn classify_http_error(status: u16, headers: &HeaderMap, body: &str) -> LlmE
         hint
     } else {
         match status {
-            408 | 409 | 425 | 429 | 500..=599 => true,
-            401 | 403 | 404 | 413 => false,
-            _ => retryable_text_re().is_match(body),
+            REQUEST_TIMEOUT
+            | CONFLICT
+            | TOO_EARLY
+            | TOO_MANY_REQUESTS
+            | INTERNAL_SERVER_ERROR..=LAST_SERVER_ERROR => true,
+            UNAUTHORIZED | FORBIDDEN | NOT_FOUND | PAYLOAD_TOO_LARGE => false,
+            _ => RETRYABLE_TEXT_RE.is_match(body),
         }
     };
 
@@ -231,7 +239,7 @@ pub(crate) fn stream_error(code: Option<&str>, message: &str) -> LlmError {
     } else if RETRYABLE_CODES.contains(&code) {
         true
     } else if FATAL_CODES.contains(&code) {
-        retryable_text_re().is_match(message)
+        RETRYABLE_TEXT_RE.is_match(message)
     } else {
         // Unknown in-stream failures are usually transient server-side problems.
         true
@@ -272,16 +280,16 @@ pub(crate) fn parse_retry_after(headers: &HeaderMap) -> Option<Duration> {
             .map(str::trim)
     };
 
-    if let Some(ms) = get("retry-after-ms").and_then(|v| v.parse::<f64>().ok())
-        && ms.is_finite()
-        && ms >= 0.0
+    if let Some(d) = get("retry-after-ms")
+        .and_then(|v| v.parse::<f64>().ok())
+        .and_then(|ms| secs_to_duration(ms / 1000.0))
     {
-        return Some(Duration::from_secs_f64(ms / 1000.0));
+        return Some(d);
     }
     if let Some(v) = get("retry-after") {
         if let Ok(secs) = v.parse::<f64>() {
-            if secs.is_finite() && secs >= 0.0 {
-                return Some(Duration::from_secs_f64(secs));
+            if let Some(d) = secs_to_duration(secs) {
+                return Some(d);
             }
         } else if let Ok(date) = chrono::DateTime::parse_from_rfc2822(v) {
             let delta = date.timestamp_millis() - chrono::Utc::now().timestamp_millis();
@@ -298,11 +306,16 @@ pub(crate) fn parse_retry_after(headers: &HeaderMap) -> Option<Duration> {
     .max()
 }
 
+/// A duration from seconds; `None` for negative or non-finite values.
+fn secs_to_duration(secs: f64) -> Option<Duration> {
+    (secs.is_finite() && secs >= 0.0).then(|| Duration::from_secs_f64(secs))
+}
+
 /// Parse Go-style durations as used by OpenAI rate-limit headers
 /// (`"1s"`, `"6m0s"`, `"20ms"`, `"1h2m3.5s"`) or plain seconds.
 fn parse_go_duration(s: &str) -> Option<Duration> {
     if let Ok(secs) = s.parse::<f64>() {
-        return (secs.is_finite() && secs >= 0.0).then(|| Duration::from_secs_f64(secs));
+        return secs_to_duration(secs);
     }
     let mut total = 0f64;
     let mut num = String::new();
@@ -328,7 +341,11 @@ fn parse_go_duration(s: &str) -> Option<Duration> {
         total += value * factor;
         any = true;
     }
-    (any && num.is_empty() && total.is_finite()).then(|| Duration::from_secs_f64(total))
+    if any && num.is_empty() {
+        secs_to_duration(total)
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]

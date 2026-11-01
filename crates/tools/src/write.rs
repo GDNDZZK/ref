@@ -1,6 +1,6 @@
 //! `write`: create or overwrite a file.
 
-use crate::hashline::{Seen, format_header};
+use crate::hashline::{HEADER_RE, Seen, format_header};
 use crate::util::{self, TextFile};
 use crate::{ToolCtx, ToolOutput, ToolSpec};
 use anyhow::{Result, anyhow, bail};
@@ -8,9 +8,12 @@ use regex::Regex;
 use serde_json::{Value, json};
 use std::sync::LazyLock;
 
+/// Name the model calls the tool by.
+pub(crate) const NAME: &str = "write";
+
 pub fn spec() -> ToolSpec {
     ToolSpec {
-        name: "write",
+        name: NAME,
         description: "Create a new file or overwrite an existing one with `content` (parent directories are created). \
 Prefer `edit` for changing existing files; use `write` for new files or full rewrites.\n\
 `content` is the raw file text (no `N:` prefixes). An existing file keeps its line-ending style (CRLF/LF) and BOM.\n\
@@ -34,8 +37,6 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
 
 static ROW_PREFIX_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(\d+):").expect("valid regex"));
-static HEADER_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\s*\[[^#\r\n]+#[0-9a-fA-F]{4}\]\s*$").expect("valid regex"));
 
 /// If `content` is pasted read output (`[path#TAG]` header and/or rows `N:` counting up by
 /// one from 1 on every line), returns the stripped text.
@@ -152,10 +153,17 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
 #[cfg(unix)]
 fn make_executable(path: &std::path::Path) {
     use std::os::unix::fs::PermissionsExt;
-    if let Ok(m) = std::fs::metadata(path) {
-        let mut p = m.permissions();
-        p.set_mode(p.mode() | ((p.mode() & 0o444) >> 2));
-        let _ = std::fs::set_permissions(path, p);
+    let m = match std::fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::warn!("write: cannot read permissions of {}: {e}", path.display());
+            return;
+        }
+    };
+    let mut p = m.permissions();
+    p.set_mode(p.mode() | ((p.mode() & 0o444) >> 2));
+    if let Err(e) = std::fs::set_permissions(path, p) {
+        tracing::warn!("write: cannot make {} executable: {e}", path.display());
     }
 }
 
