@@ -1,8 +1,23 @@
 // The window around the conversation: sidebar, sessions, command palette, dialogs, split view.
 import { join } from 'node:path'
-import { OUT, WAIT_MS } from './smokeLib.mjs'
+import { INPUT, OUT, SEND_IDLE, WAIT_MS, sendPrompt } from './smokeLib.mjs'
 
 const SETTLE_MS = 500
+const SHORT_SETTLE_MS = SETTLE_MS / 3
+const POLL_MS = SETTLE_MS / 5
+const WHEEL_SETTLE_MS = SETTLE_MS / 10
+const GAP_PROBE_MS = 50
+const TILE = '[data-tile]'
+const SHORTCUT = {
+  newSession: 'Alt+KeyN',
+  closeSession: 'Alt+KeyK',
+  toggleSplit: 'Alt+KeyW',
+  zoom: 'Alt+KeyZ',
+  toggleSidebar: 'Alt+KeyB',
+  models: 'Alt+KeyM',
+  help: 'Alt+KeyH',
+  settings: 'Alt+KeyS',
+}
 const LOGIN_LOST_WATCH_MS = 12000 // longer than the longest retry delay (8 s)
 const ROWS = '.sidebar .running .row'
 const DIALOG = '[role="dialog"]'
@@ -20,6 +35,21 @@ const MIN_RUNNING_ROWS = 3 // Theme.sidebarMinRunningRows
 
 async function count(page, selector) {
   return page.locator(selector).count()
+}
+
+async function clickTileHeader(page, index) {
+  await page.locator(TILE).nth(index).locator(':scope > header .title').click()
+}
+
+function tileInput(page, index) {
+  return page.locator(`${TILE} ${INPUT}`).nth(index)
+}
+
+async function ensureSessionCount(page, wanted) {
+  while ((await count(page, ROWS)) < wanted) {
+    await page.keyboard.press(SHORTCUT.newSession)
+    await page.waitForTimeout(POLL_MS)
+  }
 }
 
 async function expectCount(page, problems, selector, expected, what) {
@@ -48,7 +78,7 @@ export async function shellScenario(page, problems) {
   await expectCount(page, problems, ROWS, 1, 'running sessions at start')
 
   // Alt+N starts a session in the same directory; the sidebar lists both.
-  await page.keyboard.press('Alt+KeyN')
+  await page.keyboard.press(SHORTCUT.newSession)
   await expectCount(page, problems, ROWS, 2, 'Alt+N did not add a session')
   await shot(page, 'two-sessions')
 
@@ -68,19 +98,19 @@ export async function shellScenario(page, problems) {
   await closeDialog(page, problems, 'sessions dialog')
 
   // Models dialog from its shortcut, with the current model checked.
-  await page.keyboard.press('Alt+KeyM')
+  await page.keyboard.press(SHORTCUT.models)
   await page.waitForSelector(`${DIALOG}[aria-label="Switch model"]`, { timeout: WAIT_MS })
   await shot(page, 'models')
   await closeDialog(page, problems, 'models dialog')
 
   // Help is generated from the registry.
-  await page.keyboard.press('Alt+KeyH')
+  await page.keyboard.press(SHORTCUT.help)
   await page.waitForSelector(`${DIALOG}[aria-label="Help"]`, { timeout: WAIT_MS })
   await shot(page, 'help')
   await closeDialog(page, problems, 'help dialog')
 
   // Settings: switching the theme from the segmented control.
-  await page.keyboard.press('Alt+KeyS')
+  await page.keyboard.press(SHORTCUT.settings)
   await page.waitForSelector(`${DIALOG}[aria-label="Settings"]`, { timeout: WAIT_MS })
   await page.click(`${DIALOG} [role="radio"]:has-text("Dark")`)
   await shot(page, 'settings-dark')
@@ -90,20 +120,20 @@ export async function shellScenario(page, problems) {
   await closeDialog(page, problems, 'settings dialog')
 
   // Split view shows a tile per session; Alt+arrows move the focus; zoom and back.
-  await page.keyboard.press('Alt+KeyW')
-  await expectCount(page, problems, '[data-tile]', 2, 'tiles in split view')
+  await page.keyboard.press(SHORTCUT.toggleSplit)
+  await expectCount(page, problems, TILE, 2, 'tiles in split view')
   await shot(page, 'split')
-  await page.keyboard.press('Alt+KeyZ')
+  await page.keyboard.press(SHORTCUT.zoom)
   await shot(page, 'zoom')
-  await page.keyboard.press('Alt+KeyZ')
-  await page.keyboard.press('Alt+KeyW')
-  await expectCount(page, problems, '[data-tile]', 0, 'tiles after leaving split view')
+  await page.keyboard.press(SHORTCUT.zoom)
+  await page.keyboard.press(SHORTCUT.toggleSplit)
+  await expectCount(page, problems, TILE, 0, 'tiles after leaving split view')
 
   // Sidebar toggle and closing a session.
-  await page.keyboard.press('Alt+KeyB')
+  await page.keyboard.press(SHORTCUT.toggleSidebar)
   await shot(page, 'sidebar-hidden')
-  await page.keyboard.press('Alt+KeyB')
-  await page.keyboard.press('Alt+KeyK')
+  await page.keyboard.press(SHORTCUT.toggleSidebar)
+  await page.keyboard.press(SHORTCUT.closeSession)
   await expectCount(page, problems, ROWS, 1, 'Alt+K did not close the session')
   await shot(page, 'closed')
 }
@@ -144,10 +174,7 @@ async function sidebarGeometry(page) {
 // Running keeps its rows until History would get fewer than three rows; below that it scrolls.
 export async function sidebarSizingScenario(page, problems) {
   for (const wanted of SIZING_COUNTS) {
-    while ((await count(page, ROWS)) < wanted) {
-      await page.keyboard.press('Alt+KeyN')
-      await page.waitForTimeout(SETTLE_MS / 5)
-    }
+    await ensureSessionCount(page, wanted)
     for (const height of SIZING_HEIGHTS) {
       await page.setViewportSize({ width: VIEWPORT_WIDTH, height })
       await shot(page, `sidebar-${wanted}-rows-${height}px`)
@@ -199,20 +226,17 @@ async function expectOnlyFocusedComposer(page, problems, what) {
 // In split view only the focused tile has an input box; the drafts of the others stay.
 export async function splitComposerScenario(page, problems) {
   await page.setViewportSize(SPLIT_VIEWPORT)
-  while ((await count(page, ROWS)) < SPLIT_TILES) {
-    await page.keyboard.press('Alt+KeyN')
-    await page.waitForTimeout(SETTLE_MS / 5)
-  }
-  await page.keyboard.press('Alt+KeyW')
-  await expectCount(page, problems, '[data-tile]', SPLIT_TILES, 'tiles for the composer check')
+  await ensureSessionCount(page, SPLIT_TILES)
+  await page.keyboard.press(SHORTCUT.toggleSplit)
+  await expectCount(page, problems, TILE, SPLIT_TILES, 'tiles for the composer check')
   const first = await expectOnlyFocusedComposer(page, problems, 'split view start')
 
   const draft = 'a half-written prompt'
-  await page.locator('[data-tile] textarea').nth(first.focused).fill(draft)
+  await tileInput(page, first.focused).fill(draft)
 
   // A click on another tile's header moves the box there.
   const other = (first.focused + 1) % SPLIT_TILES
-  await page.locator('[data-tile]').nth(other).locator(':scope > header .title').click()
+  await clickTileHeader(page, other)
   const afterClick = await expectOnlyFocusedComposer(page, problems, 'after a click')
   if (afterClick.focused !== other) problems.push(`click focused tile ${afterClick.focused}, wanted ${other}`)
   if (afterClick.tiles[first.focused].draft !== draft)
@@ -233,10 +257,10 @@ export async function splitComposerScenario(page, problems) {
   const draftHolder = tiles.findIndex((tile) => tile.draft === draft)
   if (draftHolder < 0) problems.push('the draft vanished after the focus round trip')
   else if (draftHolder !== focused) problems.push('Alt+arrows did not reach the tile with the draft')
-  else await page.locator('[data-tile] textarea').nth(draftHolder).fill('')
+  else await tileInput(page, draftHolder).fill('')
 
-  await page.keyboard.press('Alt+KeyW')
-  await expectCount(page, problems, '[data-tile]', 0, 'tiles after the composer check')
+  await page.keyboard.press(SHORTCUT.toggleSplit)
+  await expectCount(page, problems, TILE, 0, 'tiles after the composer check')
   await page.setViewportSize({ width: VIEWPORT_WIDTH, height: SIZING_HEIGHTS[0] })
 }
 
@@ -283,29 +307,25 @@ async function highlightedTile(page) {
 
 async function startSplit(page, problems, tiles) {
   await page.setViewportSize(SPLIT_VIEWPORT)
-  while ((await count(page, ROWS)) < tiles) {
-    await page.keyboard.press('Alt+KeyN')
-    await page.waitForTimeout(SETTLE_MS / 5)
-  }
+  await ensureSessionCount(page, tiles)
   const running = await count(page, ROWS)
-  await page.keyboard.press('Alt+KeyW')
-  await expectCount(page, problems, '[data-tile]', running, 'tiles for the split checks')
+  await page.keyboard.press(SHORTCUT.toggleSplit)
+  await expectCount(page, problems, TILE, running, 'tiles for the split checks')
   await page.waitForTimeout(SETTLE_MS)
 }
 
 async function leaveSplit(page, problems) {
-  await page.keyboard.press('Alt+KeyW')
-  await expectCount(page, problems, '[data-tile]', 0, 'tiles after the split checks')
+  await page.keyboard.press(SHORTCUT.toggleSplit)
+  await expectCount(page, problems, TILE, 0, 'tiles after the split checks')
   await page.setViewportSize({ width: VIEWPORT_WIDTH, height: SIZING_HEIGHTS[0] })
 }
 
 // Starts the permission script in tile 0 and moves the focus to tile 1, so that tile 0 asks while unfocused.
 async function askInBackground(page) {
-  await page.locator('[data-tile]').nth(0).locator(':scope > header .title').click()
-  await page.locator('[data-tile] textarea').nth(0).fill('permission')
-  await page.keyboard.press('Enter')
-  await page.locator('[data-tile]').nth(1).locator(':scope > header .title').click()
-  const card = page.locator('[data-tile]').nth(0).locator('.permission.open')
+  await clickTileHeader(page, 0)
+  await sendPrompt(page, 'permission', tileInput(page, 0))
+  await clickTileHeader(page, 1)
+  const card = page.locator(TILE).nth(0).locator('.permission.open')
   await card.waitFor({ timeout: WAIT_MS })
   await page.waitForTimeout(SETTLE_MS)
   return card
@@ -317,7 +337,7 @@ const WHEEL_MAX_STEPS = 30
 // Scrolls tile `index` with the mouse wheel until `target` is inside its conversation, as a user
 // would. Returns the target's box, or undefined when it never comes into view.
 async function scrollIntoViewByWheel(page, index, target) {
-  const scroller = page.locator('[data-tile]').nth(index).locator('.scroller')
+  const scroller = page.locator(TILE).nth(index).locator('.scroller')
   const view = await scroller.boundingBox()
   if (!view) return undefined
   await page.mouse.move(view.x + view.width / 2, view.y + view.height / 2)
@@ -326,16 +346,16 @@ async function scrollIntoViewByWheel(page, index, target) {
     if (!box) return undefined
     if (box.y >= view.y && box.y + box.height <= view.y + view.height) return box
     await page.mouse.wheel(0, box.y < view.y ? -WHEEL_STEP_PX : WHEEL_STEP_PX)
-    await page.waitForTimeout(SETTLE_MS / 10)
+    await page.waitForTimeout(WHEEL_SETTLE_MS)
   }
   return undefined
 }
 
 // Answers the requests of tile `index` with the `a` key, once the guard time has passed, until its turn ends.
 async function finishTurnByKey(page, problems, index) {
-  const tile = page.locator('[data-tile]').nth(index)
+  const tile = page.locator(TILE).nth(index)
   const deadline = Date.now() + WAIT_MS * 2
-  while (!(await tile.locator('button.send:not(.busy)').isVisible())) {
+  while (!(await tile.locator(SEND_IDLE).isVisible())) {
     if (Date.now() > deadline) {
       problems.push('the permission key did not get the turn through')
       return
@@ -344,75 +364,86 @@ async function finishTurnByKey(page, problems, index) {
       await page.waitForTimeout(PERMISSION_GUARD_WAIT_MS)
       await page.keyboard.press('a')
     }
-    await page.waitForTimeout(SETTLE_MS / 5)
+    await page.waitForTimeout(POLL_MS)
   }
+}
+
+// Focusing a tile unfolds its box below a conversation that ends in a request card: the end stays in view.
+async function checkUnfoldOverCard(page, problems) {
+  const gapBefore = (await sampleGapToEnd(page, 0, GAP_PROBE_MS)).at(-1)
+  await clickTileHeader(page, 0)
+  const gaps = await sampleGapToEnd(page, 0, FRAME_SAMPLE_MS)
+  console.log('split unfold: gap before', gapBefore, 'max during', Math.max(...gaps))
+  if (Math.max(...gaps) > gapBefore + END_TOLERANCE_PX)
+    problems.push(`the conversation moved ${Math.max(...gaps)}px off its end while the box unfolded`)
+  await shot(page, 'split-unfolded-over-card')
+}
+
+// Allow in an unfocused tile: the press reaches the button and the tile takes the focus.
+async function checkAllowClickInUnfocusedTile(page, problems, card) {
+  await clickTileHeader(page, 1)
+  await page.waitForTimeout(SETTLE_MS)
+  const tools = page.locator(TILE).nth(0).locator('.permission')
+  const toolsBefore = await tools.count()
+  const allow = card.locator('button.choice.success')
+  const box = await scrollIntoViewByWheel(page, 0, allow)
+  if (!box) {
+    problems.push('no Allow button in the unfocused tile')
+    return
+  }
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.waitForTimeout(PRESS_HOLD_MS)
+  await page.mouse.up()
+  await page.waitForTimeout(SETTLE_MS)
+  if ((await focusedTile(page)) !== 0) problems.push('the click on Allow did not focus the tile')
+  // The script asks again for its next tool: the first request is answered when a next block appears or none asks.
+  const answered = (await tools.count()) > toolsBefore || !(await card.first().isVisible())
+  if (!answered) problems.push('the click on Allow in an unfocused tile did not answer the request')
+  await shot(page, 'split-click-allow')
+}
+
+// Alt+arrow moves the focus and the sidebar highlight with it.
+async function checkSidebarFollowsFocus(page, problems) {
+  for (const key of ['ArrowRight', 'ArrowLeft']) {
+    await page.keyboard.press(`Alt+${key}`)
+    await page.waitForTimeout(SHORT_SETTLE_MS)
+    const focused = await focusedTile(page)
+    const marked = await highlightedTile(page)
+    if (focused !== marked)
+      problems.push(`after Alt+${key} tile ${focused} has the focus, the sidebar marks ${marked}`)
+  }
+  await clickTileHeader(page, 1)
+  await page.waitForTimeout(SHORT_SETTLE_MS)
+  if ((await highlightedTile(page)) !== 1) problems.push('the sidebar does not follow a click on a tile')
+  await shot(page, 'split-sidebar-follows')
+}
+
+// The permission key in the focused tile: after the guard time it answers and is not typed.
+async function checkPermissionKeyInFocusedTile(page, problems) {
+  await clickTileHeader(page, 0)
+  await sendPrompt(page, 'permission', tileInput(page, 0))
+  await page.locator(TILE).nth(0).locator('.permission.open').waitFor({ timeout: WAIT_MS })
+  await page.waitForTimeout(PERMISSION_GUARD_WAIT_MS)
+  await page.keyboard.press('a')
+  await page.waitForTimeout(SHORT_SETTLE_MS)
+  const typed = await tileInput(page, 0).inputValue()
+  if (typed !== '') problems.push(`the permission key was typed into the box: "${typed}"`)
+  await finishTurnByKey(page, problems, 0)
+  const left = await tileInput(page, 0).inputValue()
+  if (left !== '') problems.push(`the permission key was typed into the box: "${left}"`)
 }
 
 // Pointer and keyboard in the split view: a press on a button of an unfocused tile reaches the
 // button, the sidebar follows the focus, and the permission keys work as in the single view.
 export async function splitFocusScenario(page, problems) {
   await startSplit(page, problems, MIN_FOCUS_TILES)
-
-  // 1a. Focusing a tile unfolds its box below a conversation that ends in a request card: the end stays in view.
   const card = await askInBackground(page)
-  const gapBefore = (await sampleGapToEnd(page, 0, 50)).at(-1)
-  await page.locator('[data-tile]').nth(0).locator(':scope > header .title').click()
-  const gaps = await sampleGapToEnd(page, 0, FRAME_SAMPLE_MS)
-  console.log('split unfold: gap before', gapBefore, 'max during', Math.max(...gaps))
-  if (Math.max(...gaps) > gapBefore + END_TOLERANCE_PX)
-    problems.push(`the conversation moved ${Math.max(...gaps)}px off its end while the box unfolded`)
-  await shot(page, 'split-unfolded-over-card')
-
-  // 1b. Allow in an unfocused tile: the press reaches the button and the tile takes the focus.
-  await page.locator('[data-tile]').nth(1).locator(':scope > header .title').click()
-  await page.waitForTimeout(SETTLE_MS)
-  const tools = page.locator('[data-tile]').nth(0).locator('.permission')
-  const toolsBefore = await tools.count()
-  const allow = card.locator('button.choice.success')
-  const box = await scrollIntoViewByWheel(page, 0, allow)
-  if (!box) problems.push('no Allow button in the unfocused tile')
-  else {
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-    await page.mouse.down()
-    await page.waitForTimeout(PRESS_HOLD_MS)
-    await page.mouse.up()
-    await page.waitForTimeout(SETTLE_MS)
-    if ((await focusedTile(page)) !== 0) problems.push('the click on Allow did not focus the tile')
-    // The script asks again for its next tool: the first request is answered when a next block appears or none asks.
-    const answered = (await tools.count()) > toolsBefore || !(await card.first().isVisible())
-    if (!answered) problems.push('the click on Allow in an unfocused tile did not answer the request')
-    await shot(page, 'split-click-allow')
-  }
+  await checkUnfoldOverCard(page, problems)
+  await checkAllowClickInUnfocusedTile(page, problems, card)
   await finishTurnByKey(page, problems, 0)
-
-  // 2. Alt+arrow moves the focus and the sidebar highlight with it.
-  for (const key of ['ArrowRight', 'ArrowLeft']) {
-    await page.keyboard.press(`Alt+${key}`)
-    await page.waitForTimeout(SETTLE_MS / 3)
-    const focused = await focusedTile(page)
-    const marked = await highlightedTile(page)
-    if (focused !== marked)
-      problems.push(`after Alt+${key} tile ${focused} has the focus, the sidebar marks ${marked}`)
-  }
-  await page.locator('[data-tile]').nth(1).locator(':scope > header .title').click()
-  await page.waitForTimeout(SETTLE_MS / 3)
-  if ((await highlightedTile(page)) !== 1) problems.push('the sidebar does not follow a click on a tile')
-  await shot(page, 'split-sidebar-follows')
-
-  // 3. The permission key in the focused tile: after the guard time it answers and is not typed.
-  await page.locator('[data-tile]').nth(0).locator(':scope > header .title').click()
-  await page.locator('[data-tile] textarea').nth(0).fill('permission')
-  await page.keyboard.press('Enter')
-  await page.locator('[data-tile]').nth(0).locator('.permission.open').waitFor({ timeout: WAIT_MS })
-  await page.waitForTimeout(PERMISSION_GUARD_WAIT_MS)
-  await page.keyboard.press('a')
-  await page.waitForTimeout(SETTLE_MS / 3)
-  const typed = await page.locator('[data-tile] textarea').nth(0).inputValue()
-  if (typed !== '') problems.push(`the permission key was typed into the box: "${typed}"`)
-  await finishTurnByKey(page, problems, 0)
-  const left = await page.locator('[data-tile] textarea').nth(0).inputValue()
-  if (left !== '') problems.push(`the permission key was typed into the box: "${left}"`)
-
+  await checkSidebarFollowsFocus(page, problems)
+  await checkPermissionKeyInFocusedTile(page, problems)
   await leaveSplit(page, problems)
 }
 
@@ -425,7 +456,7 @@ async function checkLockup(page, problems) {
       `the lockup is ${box?.width}x${box?.height}, not ${LOCKUP_SIZE.width}x${LOCKUP_SIZE.height}`,
     )
   const light = await lockup.getAttribute('src')
-  await page.keyboard.press('Alt+KeyS')
+  await page.keyboard.press(SHORTCUT.settings)
   await page.click(`${DIALOG} [role="radio"]:has-text("Dark")`)
   await page.waitForTimeout(SETTLE_MS)
   const dark = await lockup.getAttribute('src')
@@ -437,8 +468,7 @@ async function checkLockup(page, problems) {
 // The Todo section shows the list of the session on screen and is gone for a session without one.
 export async function sidebarTodoScenario(page, problems) {
   await checkLockup(page, problems)
-  await page.fill('textarea', 'todo')
-  await page.keyboard.press('Enter')
+  await sendPrompt(page, 'todo')
   const section = page.locator('.sidebar .todo-section')
   try {
     await section.waitFor({ timeout: WAIT_MS })
@@ -449,7 +479,7 @@ export async function sidebarTodoScenario(page, problems) {
   const heading = (await section.locator('.heading').innerText()).replace(/\s+/g, ' ')
   if (!/^Todo \d+\/\d+$/.test(heading)) problems.push(`the Todo heading reads "${heading}"`)
   await shot(page, 'sidebar-todo')
-  await page.keyboard.press('Alt+KeyN')
+  await page.keyboard.press(SHORTCUT.newSession)
   await expectCount(page, problems, '.sidebar .todo-section', 0, 'Todo sections for a session without a list')
-  await page.keyboard.press('Alt+KeyK')
+  await page.keyboard.press(SHORTCUT.closeSession)
 }
