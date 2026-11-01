@@ -5,24 +5,19 @@ import RefGui
 SessionDialog {
 	id: dialog
 
-	property bool gone: false
-
 	function exportNow() {
-		Workspace.exportTranscript(sessionId, field.text.trim(), (ok, result) => {
-			if (gone)
-				return
+		Workspace.exportTranscript(sessionId, field.text.trim(), replyWhileOpen((ok, result) => {
 			if (!ok) {
 				field.errorText = result
 				return
 			}
 			Workspace.showToast(ToastLevel.info, qsTr("Exported to %1").arg(result))
 			close()
-		})
+		}))
 	}
 
 	title: qsTr("Export transcript")
 	onAccepted: exportNow()
-	Component.onDestruction: gone = true
 
 	buttons: [
 		DialogButton {

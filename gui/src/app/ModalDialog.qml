@@ -17,11 +17,31 @@ FocusScope {
 	readonly property bool hasButtons: footerRow.children.length > 0
 	readonly property bool open: Workspace.dialog !== ""
 	property bool entered: false
+	// Set when the dialog is destroyed, so a reply that arrives later does nothing.
+	property bool gone: false
 
 	signal accepted()
 
 	function close() {
 		Workspace.closeDialog()
+	}
+
+	// Wraps the callback of a backend request so that it is skipped once the dialog is gone.
+	function replyWhileOpen(handler) {
+		return (...reply) => {
+			if (!gone)
+				handler(...reply)
+		}
+	}
+
+	// A reply callback (ok, reason) that closes the dialog on success and puts the reason under the field otherwise.
+	function closeOrShowError(field) {
+		return replyWhileOpen((ok, reason) => {
+			if (ok)
+				close()
+			else
+				field.errorText = reason
+		})
 	}
 
 	anchors.fill: parent
@@ -31,6 +51,8 @@ FocusScope {
 		entered = true
 		forceActiveFocus()
 	}
+
+	Component.onDestruction: gone = true
 
 	Keys.onEscapePressed: close()
 	Keys.onReturnPressed: accepted()

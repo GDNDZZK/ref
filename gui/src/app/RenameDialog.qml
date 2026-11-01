@@ -5,22 +5,12 @@ import RefGui
 SessionDialog {
 	id: dialog
 
-	property bool gone: false
-
 	function rename() {
-		Workspace.renameSession(sessionId, field.text.trim(), (ok, reason) => {
-			if (gone)
-				return
-			if (ok)
-				close()
-			else
-				field.errorText = reason
-		})
+		Workspace.renameSession(sessionId, field.text.trim(), closeOrShowError(field))
 	}
 
 	title: qsTr("Rename session")
 	onAccepted: rename()
-	Component.onDestruction: gone = true
 
 	buttons: [
 		DialogButton {

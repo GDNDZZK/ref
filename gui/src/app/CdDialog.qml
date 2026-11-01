@@ -6,17 +6,8 @@ import RefGui
 SessionDialog {
 	id: dialog
 
-	property bool gone: false
-
 	function apply() {
-		Workspace.setSessionCwd(sessionId, path.text.trim(), (ok, reason) => {
-			if (gone)
-				return
-			if (ok)
-				close()
-			else
-				path.errorText = reason
-		})
+		Workspace.setSessionCwd(sessionId, path.text.trim(), closeOrShowError(path))
 	}
 
 	title: qsTr("Change directory")
@@ -25,7 +16,6 @@ SessionDialog {
 		path.text = Workspace.info(sessionId).cwd
 		path.select()
 	}
-	Component.onDestruction: gone = true
 
 	buttons: [
 		DialogButton {
