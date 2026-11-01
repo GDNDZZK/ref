@@ -83,7 +83,7 @@ fn sse(reply: &Reply) -> String {
 }
 
 fn is_title(body: &Value) -> bool {
-    body.to_string().contains("Generate a short title")
+    body.to_string().contains(ref_server::title::TITLE_PROMPT)
 }
 
 pub async fn mock(handler: Handler) -> Mock {
