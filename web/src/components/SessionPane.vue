@@ -13,8 +13,7 @@ import { chatSessionKey } from '../composables/chatSessionContext.ts'
 import type { ChatSession } from '../model/chatSession.ts'
 import { useComposerStore } from '../stores/composer.ts'
 import { motion } from '../theme/generated/motion.ts'
-
-const ALERT_RING_REACH = 2.5
+import { ALERT_RING_REACH, ICON_SIZE, ICON_STROKE } from './iconMetrics.ts'
 
 const { t } = useI18n()
 // `composerShown` is false for a tile that is not focused in split view: the input box folds away
@@ -75,7 +74,7 @@ watch(following, (isFollowing) => {
       <div class="column">
         <div class="jump" :class="{ shown: !following }">
           <CircleButton :label="t('chat.jumpToLatest')" @click="following = true">
-            <Chevron :size="16" :stroke-width="2" class="down" />
+            <Chevron :size="ICON_SIZE" :stroke-width="ICON_STROKE" class="down" />
           </CircleButton>
           <span v-if="alerting" class="alert">
             <Flourish ref="alertFlourish" :ring-reach="ALERT_RING_REACH" />
