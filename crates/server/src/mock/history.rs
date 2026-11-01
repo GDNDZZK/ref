@@ -1,5 +1,6 @@
 //! Sessions that exist before the first start, so lists and history views are not empty.
 
+use super::config;
 use crate::session::new_message;
 use crate::store::{Persisted, Store};
 use ref_config::Config;
@@ -47,8 +48,8 @@ impl Builder {
 
 fn model() -> ModelRef {
     ModelRef {
-        provider: "mock".into(),
-        model: "mock-1".into(),
+        provider: config::PROVIDER.into(),
+        model: config::MODEL_1.into(),
         variant: None,
     }
 }
