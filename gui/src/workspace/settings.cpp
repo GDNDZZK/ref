@@ -63,40 +63,49 @@ void readChoice(const QJsonObject& root, const QString& key, const QStringList& 
 	value = read;
 }
 
-// `path` names the field in messages, e.g. "sidebar.visible".
-void readFlag(const QJsonObject& root, const QString& key, const QString& path, bool& value, Problems& problems)
-{
-	if(!root.contains(key))
-	{
-		return;
-	}
-	if(!root.value(key).isBool())
-	{
-		problems.add(u"%1: expected true or false"_s.arg(path));
-		return;
-	}
-	value = root.value(key).toBool();
-}
-
-void readEdge(const QJsonObject& root, const QString& key, const QString& path, int& value, Problems& problems)
-{
-	if(!root.contains(key))
-	{
-		return;
-	}
-	const int read = root.value(key).toInt(0);
-	if(read < SmallestWindowEdge)
-	{
-		problems.add(u"%1: expected a size in pixels"_s.arg(path));
-		return;
-	}
-	value = read;
-}
-
 // The object under `key`, or an empty one.
 QJsonObject section(const QJsonObject& root, const QString& key)
 {
 	return root.value(key).toObject();
+}
+
+// How messages name `key` of the section `sectionKey`, e.g. "sidebar.visible".
+QString fieldPath(const QString& sectionKey, const QString& key)
+{
+	return sectionKey + u'.' + key;
+}
+
+// Reads `root[sectionKey][key]` as a flag; leaves `value` alone when it is absent.
+void readFlag(const QJsonObject& root, const QString& sectionKey, const QString& key, bool& value, Problems& problems)
+{
+	const QJsonObject fields = section(root, sectionKey);
+	if(!fields.contains(key))
+	{
+		return;
+	}
+	if(!fields.value(key).isBool())
+	{
+		problems.add(u"%1: expected true or false"_s.arg(fieldPath(sectionKey, key)));
+		return;
+	}
+	value = fields.value(key).toBool();
+}
+
+// Reads `root[sectionKey][key]` as a window edge in pixels; leaves `value` alone when it is absent.
+void readEdge(const QJsonObject& root, const QString& sectionKey, const QString& key, int& value, Problems& problems)
+{
+	const QJsonObject fields = section(root, sectionKey);
+	if(!fields.contains(key))
+	{
+		return;
+	}
+	const int read = fields.value(key).toInt(0);
+	if(read < SmallestWindowEdge)
+	{
+		problems.add(u"%1: expected a size in pixels"_s.arg(fieldPath(sectionKey, key)));
+		return;
+	}
+	value = read;
 }
 
 } // namespace
@@ -148,89 +157,62 @@ QStringList Settings::notifyKinds() const
 }
 
 template<typename T>
-bool Settings::assign(T& field, const T& value)
+void Settings::set(T& field, const T& value, void (Settings::*changed)())
 {
 	if(field == value)
 	{
-		return false;
+		return;
 	}
 	field = value;
 	scheduleSave();
-	return true;
+	emit (this->*changed)();
 }
 
 void Settings::setTheme(const QString& theme)
 {
 	Q_ASSERT(theme == System || theme == Light || theme == Dark);
-	if(assign(m_theme, theme))
-	{
-		emit themeChanged();
-	}
+	set(m_theme, theme, &Settings::themeChanged);
 }
 
 void Settings::setLanguage(const QString& language)
 {
 	Q_ASSERT(language == System || language == English || language == ChineseSimplified);
-	if(assign(m_language, language))
-	{
-		emit languageChanged();
-	}
+	set(m_language, language, &Settings::languageChanged);
 }
 
 void Settings::setNotifyEnabled(bool enabled)
 {
-	if(assign(m_notifyEnabled, enabled))
-	{
-		emit notifyKindsChanged();
-	}
+	set(m_notifyEnabled, enabled, &Settings::notifyKindsChanged);
 }
 
 void Settings::setNotifyPermission(bool enabled)
 {
-	if(assign(m_notifyPermission, enabled))
-	{
-		emit notifyKindsChanged();
-	}
+	set(m_notifyPermission, enabled, &Settings::notifyKindsChanged);
 }
 
 void Settings::setNotifyTurnDone(bool enabled)
 {
-	if(assign(m_notifyTurnDone, enabled))
-	{
-		emit notifyKindsChanged();
-	}
+	set(m_notifyTurnDone, enabled, &Settings::notifyKindsChanged);
 }
 
 void Settings::setNotifyTurnError(bool enabled)
 {
-	if(assign(m_notifyTurnError, enabled))
-	{
-		emit notifyKindsChanged();
-	}
+	set(m_notifyTurnError, enabled, &Settings::notifyKindsChanged);
 }
 
 void Settings::setSidebarVisible(bool visible)
 {
-	if(assign(m_sidebarVisible, visible))
-	{
-		emit sidebarVisibleChanged();
-	}
+	set(m_sidebarVisible, visible, &Settings::sidebarVisibleChanged);
 }
 
 void Settings::setWindowWidth(int width)
 {
-	if(assign(m_windowWidth, width))
-	{
-		emit windowSizeChanged();
-	}
+	set(m_windowWidth, width, &Settings::windowSizeChanged);
 }
 
 void Settings::setWindowHeight(int height)
 {
-	if(assign(m_windowHeight, height))
-	{
-		emit windowSizeChanged();
-	}
+	set(m_windowHeight, height, &Settings::windowSizeChanged);
 }
 
 void Settings::scheduleSave()
@@ -276,17 +258,15 @@ void Settings::readFields(const QJsonObject& root)
 	readChoice(root, ThemeKey, {System, Light, Dark}, m_theme, problems);
 	readChoice(root, LanguageKey, {System, English, ChineseSimplified}, m_language, problems);
 
-	const QJsonObject notifications = section(root, NotificationsKey);
-	readFlag(notifications, EnabledKey, u"notifications.enabled"_s, m_notifyEnabled, problems);
-	readFlag(notifications, PermissionKey, u"notifications.permission"_s, m_notifyPermission, problems);
-	readFlag(notifications, TurnDoneKey, u"notifications.turnDone"_s, m_notifyTurnDone, problems);
-	readFlag(notifications, TurnErrorKey, u"notifications.turnError"_s, m_notifyTurnError, problems);
+	readFlag(root, NotificationsKey, EnabledKey, m_notifyEnabled, problems);
+	readFlag(root, NotificationsKey, PermissionKey, m_notifyPermission, problems);
+	readFlag(root, NotificationsKey, TurnDoneKey, m_notifyTurnDone, problems);
+	readFlag(root, NotificationsKey, TurnErrorKey, m_notifyTurnError, problems);
 
-	readFlag(section(root, SidebarKey), VisibleKey, u"sidebar.visible"_s, m_sidebarVisible, problems);
+	readFlag(root, SidebarKey, VisibleKey, m_sidebarVisible, problems);
 
-	const QJsonObject window = section(root, WindowKey);
-	readEdge(window, WidthKey, u"window.width"_s, m_windowWidth, problems);
-	readEdge(window, HeightKey, u"window.height"_s, m_windowHeight, problems);
+	readEdge(root, WindowKey, WidthKey, m_windowWidth, problems);
+	readEdge(root, WindowKey, HeightKey, m_windowHeight, problems);
 
 	if(problems.any())
 	{
