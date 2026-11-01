@@ -332,12 +332,8 @@ async fn run_loop(hub: &Arc<Hub>, s: &Arc<Session>, cancel: &CancellationToken) 
             (st.info.context.used, st.info.context.auto)
         };
         let compactable = crate::compaction::compactable_upto(&s.lock().messages).is_some();
-        if prep.cfg.compaction.auto
-            && auto > 0
-            && used >= auto
-            && compactable
-            && let Err(e) = crate::compaction::compact(hub, s, &prep, cancel).await
-        {
+        let should_compact = prep.cfg.compaction.auto && auto > 0 && used >= auto && compactable;
+        if should_compact && let Err(e) = crate::compaction::compact(hub, s, &prep, cancel).await {
             if cancel.is_cancelled() {
                 return Outcome::Aborted;
             }
@@ -506,7 +502,7 @@ pub(crate) async fn prepare(
     s: &Arc<Session>,
     cancel: &CancellationToken,
 ) -> Result<Prep, String> {
-    let (cfg, agent, cwd, model_ref, has_system, date) = {
+    let (cfg, agent, cwd, model_ref, cached_system, date) = {
         let mut st = s.lock();
         // The agent is read here for the request, so a switch made during the run is told now.
         crate::agent_switch::deliver(hub, &mut st);
@@ -515,7 +511,7 @@ pub(crate) async fn prepare(
             st.info.agent.clone(),
             st.info.cwd.clone(),
             st.info.model.clone(),
-            st.system.is_some(),
+            st.system.clone(),
             st.date.clone(),
         )
     };
@@ -527,8 +523,8 @@ pub(crate) async fn prepare(
         }
     }
     let tools = toolset::assemble(&cfg, &agent, &servers);
-    let system = if has_system {
-        s.lock().system.clone().unwrap_or_default()
+    let system = if let Some(system) = cached_system {
+        system
     } else {
         let mcp_instructions: Vec<(String, String)> = servers
             .iter()
@@ -1431,17 +1427,11 @@ fn maybe_title(hub: &Arc<Hub>, s: &Arc<Session>, st: &mut SessionState, msg: &Me
         return;
     }
     let text = msg.raw_text();
-    if text.trim().is_empty() {
+    let Some(first) = text.lines().map(str::trim).find(|l| !l.is_empty()) else {
         return;
-    }
+    };
     st.title_started = true;
-    let first = text
-        .lines()
-        .map(str::trim)
-        .find(|l| !l.is_empty())
-        .unwrap_or("")
-        .to_string();
-    st.info.title = crate::util::truncate_chars(&first, TITLE_MAX_CHARS);
+    st.info.title = crate::util::truncate_chars(first, TITLE_MAX_CHARS);
     hub.emit_info(st);
     tokio::spawn(crate::title::generate(hub.clone(), s.clone(), text));
 }
