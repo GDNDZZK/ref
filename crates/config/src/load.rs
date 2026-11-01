@@ -67,6 +67,7 @@ impl Ctx<'_> {
     pub fn warn(&mut self, msg: impl Into<String>) {
         self.warnings.push(msg.into());
     }
+
     pub fn env_nonempty(&self, k: &str) -> Option<String> {
         (self.env)(k).filter(|v| !v.trim().is_empty())
     }
