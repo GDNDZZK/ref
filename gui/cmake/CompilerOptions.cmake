@@ -1,4 +1,4 @@
-# Adapted from an early version of qutie by LightBlueCube
+# Adapted from an early version of LightBlueCube/qutie
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Shared compile settings for every ref-gui target (GCC, Clang and MSVC).
 

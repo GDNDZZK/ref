@@ -152,7 +152,7 @@ GUI 用 CMake 和 Qt 单独构建，见[开发](docs/development.zh-CN.md#gui)�
 
 ## 致谢
 
-GUI 改编自 LightBlueCube 的 qutie 早期版本。
+GUI 改编自 LightBlueCube/qutie 的早期版本。
 
 ## 许可证
 

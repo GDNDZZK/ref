@@ -1,4 +1,4 @@
-# Adapted from an early version of qutie by LightBlueCube
+# Adapted from an early version of LightBlueCube/qutie
 qt_add_executable(ref-gui main.cpp)
 
 # Must be set before qt_add_qml_module() reads the files.

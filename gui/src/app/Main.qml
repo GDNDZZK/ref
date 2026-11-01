@@ -1,5 +1,5 @@
 pragma ComponentBehavior: Bound
-// Adapted from an early version of qutie by LightBlueCube
+// Adapted from an early version of LightBlueCube/qutie
 import QtQuick
 import QtQml
 import QtQuick.Dialogs

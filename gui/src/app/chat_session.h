@@ -1,4 +1,4 @@
-// Adapted from an early version of qutie by LightBlueCube
+// Adapted from an early version of LightBlueCube/qutie
 #pragma once
 
 #include "app/composer_model_type.h"

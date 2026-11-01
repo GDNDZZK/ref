@@ -1,4 +1,4 @@
-// Adapted from an early version of qutie by LightBlueCube
+// Adapted from an early version of LightBlueCube/qutie
 #include "app/app_translator.h"
 #include "app/chat_image_provider.h"
 #include "app/local_only_network.h"

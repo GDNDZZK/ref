@@ -152,7 +152,7 @@ Keys in the terminal UI:
 
 ## Acknowledgements
 
-The GUI is adapted from an early version of qutie by LightBlueCube.
+The GUI is adapted from an early version of LightBlueCube/qutie.
 
 ## License
 
