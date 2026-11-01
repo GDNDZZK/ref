@@ -33,14 +33,14 @@ ModalDialog {
 
 				Text {
 					textFormat: Text.PlainText
-					x: 22
+					x: Theme.dialogPadding
 					anchors.verticalCenter: parent.verticalCenter
 					text: parent.modelData.title
 					color: Theme.text
 					font.pixelSize: Theme.smallFontSize + 1
 				}
 				KeyChips {
-					anchors { right: parent.right; rightMargin: 22; verticalCenter: parent.verticalCenter }
+					anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
 					keys: parent.modelData.keys
 				}
 			}
@@ -56,14 +56,14 @@ ModalDialog {
 
 				Text {
 					textFormat: Text.PlainText
-					x: 22
+					x: Theme.dialogPadding
 					anchors.verticalCenter: parent.verticalCenter
 					text: parent.modelData.title
 					color: Theme.text
 					font.pixelSize: Theme.smallFontSize + 1
 				}
 				KeyChips {
-					anchors { right: parent.right; rightMargin: 22; verticalCenter: parent.verticalCenter }
+					anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
 					keys: parent.modelData.keys
 				}
 			}
@@ -80,7 +80,7 @@ ModalDialog {
 
 				Text {
 					textFormat: Text.PlainText
-					x: 22
+					x: Theme.dialogPadding
 					anchors.verticalCenter: parent.verticalCenter
 					text: row.modelData.title
 					color: Theme.text
@@ -88,7 +88,7 @@ ModalDialog {
 				}
 				Text {
 					textFormat: Text.PlainText
-					anchors { right: parent.right; rightMargin: 22; verticalCenter: parent.verticalCenter }
+					anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
 					text: ["/" + row.modelData.slash].concat(row.modelData.aliases.map(alias => "/" + alias)).join(" ") + (row.modelData.hint !== "" ? " " + row.modelData.hint : "")
 					color: Theme.textMuted
 					font { family: Theme.monoFamily; pixelSize: Theme.smallFontSize }
@@ -102,7 +102,7 @@ ModalDialog {
 		textFormat: Text.PlainText
 		width: parent.width
 		height: Theme.sidebarSectionHeight
-		leftPadding: 22
+		leftPadding: Theme.dialogPadding
 		verticalAlignment: Text.AlignVCenter
 		color: Theme.textMuted
 		font.pixelSize: Theme.smallFontSize

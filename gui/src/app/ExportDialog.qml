@@ -38,10 +38,10 @@ ModalDialog {
 	]
 
 	Column {
-		x: 22
-		width: parent.width - 2 * 22
+		x: Theme.dialogPadding
+		width: parent.width - 2 * Theme.dialogPadding
 		topPadding: 4
-		bottomPadding: 22
+		bottomPadding: Theme.dialogPadding
 		spacing: 12
 
 		Text {

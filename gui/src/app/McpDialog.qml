@@ -34,7 +34,7 @@ ModalDialog {
 
 				Rectangle {
 					id: dot
-					x: 22
+					x: Theme.dialogPadding
 					y: (Theme.sidebarHistoryRowHeight - height) / 2
 					width: 8
 					height: 8
@@ -51,7 +51,7 @@ ModalDialog {
 
 				Text {
 					textFormat: Text.PlainText
-					anchors { left: parent.left; leftMargin: 42; right: status.left; rightMargin: 12 }
+					anchors { left: parent.left; leftMargin: Theme.dialogPadding + 20; right: status.left; rightMargin: 12 }
 					height: Theme.sidebarHistoryRowHeight
 					verticalAlignment: Text.AlignVCenter
 					text: server.modelData.name
@@ -90,9 +90,9 @@ ModalDialog {
 
 				Column {
 					id: details
-					x: 42
+					x: Theme.dialogPadding + 20
 					y: Theme.sidebarHistoryRowHeight
-					width: parent.width - 42 - 22
+					width: parent.width - (Theme.dialogPadding + 20) - Theme.dialogPadding
 					spacing: 8
 
 					Text {

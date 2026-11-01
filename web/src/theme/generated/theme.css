@@ -70,6 +70,7 @@
   --dialog-width: 480px;
   --dialog-width-wide: 640px;
   --settings-width: 520px;
+  --dialog-padding: 22px;
   --dialog-header-height: 56px;
   --dialog-footer-height: 64px;
   --dialog-max-height-ratio: 0.8;

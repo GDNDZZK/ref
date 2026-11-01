@@ -73,7 +73,7 @@ FocusScope {
 
 			Text {
 				textFormat: Text.PlainText
-				anchors { left: parent.left; leftMargin: 22; right: closeButton.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+				anchors { left: parent.left; leftMargin: Theme.dialogPadding; right: closeButton.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
 				text: dialog.title
 				color: Theme.text
 				font { pixelSize: Theme.fontSize + 1; bold: true }
@@ -122,7 +122,7 @@ FocusScope {
 
 			Row {
 				id: footerRow
-				anchors { right: parent.right; rightMargin: 22; verticalCenter: parent.verticalCenter }
+				anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
 				spacing: 10
 			}
 		}
