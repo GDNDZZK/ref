@@ -57,7 +57,7 @@ struct Line<'a> {
 }
 
 /// Parse a frontmatter block into a JSON object.
-pub fn parse_frontmatter(src: &str) -> Map<String, Value> {
+fn parse_frontmatter(src: &str) -> Map<String, Value> {
     let lines: Vec<Line> = src
         .lines()
         .map(|raw| {
@@ -293,7 +293,7 @@ fn parse_quoted(s: &str) -> Option<(String, usize)> {
 }
 
 /// Parse a scalar value.
-pub fn scalar(raw: &str) -> Value {
+fn scalar(raw: &str) -> Value {
     let s = raw.trim();
     if s.starts_with('"') || s.starts_with('\'') {
         if let Some((v, used)) = parse_quoted(s) {
@@ -369,18 +369,18 @@ fn split_flow(s: &str) -> Vec<String> {
 }
 
 /// A markdown definition found on disk.
-pub struct MdDoc {
+pub(crate) struct MdDoc {
     /// Name: relative path below the `agent/`-style dir, without `.md`, joined with `/`.
-    pub name: String,
-    pub path: PathBuf,
-    pub frontmatter: Map<String, Value>,
-    pub body: String,
+    pub(crate) name: String,
+    pub(crate) path: PathBuf,
+    pub(crate) frontmatter: Map<String, Value>,
+    pub(crate) body: String,
     /// Found under `mode/` or `modes/`.
-    pub legacy_mode: bool,
+    pub(crate) legacy_mode: bool,
 }
 
 /// Collect `*.md` files (recursively) under `root/<sub>` for each sub dir name.
-pub fn collect(root: &Path, subdirs: &[&str]) -> (Vec<MdDoc>, Vec<String>) {
+pub(crate) fn collect(root: &Path, subdirs: &[&str]) -> (Vec<MdDoc>, Vec<String>) {
     let mut docs = Vec::new();
     let mut warns = Vec::new();
     for sub in subdirs {
