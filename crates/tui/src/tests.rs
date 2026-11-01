@@ -3890,8 +3890,8 @@ fn split_tile_commands_act_on_that_session() {
     assert!(!app.quit_after_close);
 }
 
-#[test]
-fn sidebar_live_sessions_show_todo_count() {
+/// An app whose live sessions all have todo lists of different shapes.
+fn live_sessions_app() -> App {
     let todo = |c: &str, st: TodoStatus| Todo {
         content: c.into(),
         status: st,
@@ -3948,43 +3948,64 @@ fn sidebar_live_sessions_show_todo_count() {
         bg_session("ses_none", "scratch", SessionStatus::Idle, 0),
         long,
     ];
-    let (term, _) = render(&mut app, 150, 50);
+    app
+}
+
+/// All sidebar rows, and those from the live sessions list on.
+fn live_sessions_sidebar(app: &mut App) -> (Vec<String>, Vec<String>) {
+    let (term, _) = render(app, 150, 50);
     let all = sidebar_text(&term, 150);
-    let rows: Vec<String> = all
+    let rows = all
         .iter()
         .skip_while(|l| !l.contains("Live sessions"))
         .cloned()
         .collect();
-    let row = |name: &str| {
-        rows.iter()
-            .find(|l| l.contains(name))
-            .unwrap_or_else(|| panic!("{name}: {rows:#?}"))
-            .trim_end()
-            .to_string()
-    };
+    (all, rows)
+}
+
+/// The trimmed live sessions row containing `name`.
+fn live_row(rows: &[String], name: &str) -> String {
+    rows.iter()
+        .find(|l| l.contains(name))
+        .unwrap_or_else(|| panic!("{name}: {rows:#?}"))
+        .trim_end()
+        .to_string()
+}
+
+#[test]
+fn sidebar_live_sessions_show_todo_count_and_busy_time() {
+    let (_, rows) = live_sessions_sidebar(&mut live_sessions_app());
     assert!(
-        row("ref-a1b2").ends_with("1/5"),
+        live_row(&rows, "ref-a1b2").ends_with("1/5"),
         "current session too: {:?}",
-        row("ref-a1b2")
+        live_row(&rows, "ref-a1b2")
     );
-    let w = row("worker-1");
+    let w = live_row(&rows, "worker-1");
     assert!(
         w.ends_with("✓3/3 1m 05s") || w.ends_with("✓3/3 1m 06s"),
         "{w:?}"
     );
-    assert!(row("pender").ends_with(" 0/2"), "cancelled not counted");
-    assert!(row("reviewer").ends_with("✓1/1"));
     assert!(
-        row("cancelled-only").ends_with("bg"),
+        live_row(&rows, "pender").ends_with(" 0/2"),
+        "cancelled not counted"
+    );
+    assert!(live_row(&rows, "reviewer").ends_with("✓1/1"));
+}
+
+#[test]
+fn sidebar_live_sessions_without_countable_todos_have_no_badge() {
+    let (_, rows) = live_sessions_sidebar(&mut live_sessions_app());
+    assert!(
+        live_row(&rows, "cancelled-only").ends_with("bg"),
         "no countable items: no badge"
     );
-    assert!(row("scratch").ends_with("bg"));
-    let l = rows
-        .iter()
-        .find(|l| l.contains("解析器"))
-        .unwrap()
-        .trim_end()
-        .to_string();
+    assert!(live_row(&rows, "scratch").ends_with("bg"));
+}
+
+#[test]
+fn sidebar_live_sessions_truncate_long_names_and_fit_the_width() {
+    let (all, rows) = live_sessions_sidebar(&mut live_sessions_app());
+    let l = live_row(&rows, "解析器");
     assert!(
         l.contains('…') && (l.ends_with("1/4 12m 03s") || l.ends_with("1/4 12m 04s")),
         "name truncated, count and time whole: {l:?}"
