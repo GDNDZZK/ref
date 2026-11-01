@@ -177,6 +177,11 @@ pub enum Task {
 /// Marker the LLM client puts before images that came from tool results.
 const TOOL_IMAGES_MARKER: &str = "Attached image(s) from tool result:";
 
+/// Roles of the chat-completions messages.
+const ROLE_ASSISTANT: &str = "assistant";
+const ROLE_TOOL: &str = "tool";
+const ROLE_USER: &str = "user";
+
 fn message_text(message: &Value) -> String {
     match &message["content"] {
         Value::String(s) => s.clone(),
@@ -259,10 +264,10 @@ fn since_prompt(messages: &[Value]) -> (String, usize, Vec<String>) {
     for message in messages.iter().rev() {
         let text = message_text(message);
         match role(message) {
-            "assistant" => round += 1,
-            "tool" => tool_results.push(text),
-            "user" if text.starts_with(TOOL_IMAGES_MARKER) => {}
-            "user" => {
+            ROLE_ASSISTANT => round += 1,
+            ROLE_TOOL => tool_results.push(text),
+            ROLE_USER if text.starts_with(TOOL_IMAGES_MARKER) => {}
+            ROLE_USER => {
                 prompt = text;
                 break;
             }
@@ -281,7 +286,7 @@ fn since_task(messages: &[Value]) -> Option<(String, usize, Vec<String>, Vec<Str
     let mut users = messages
         .iter()
         .enumerate()
-        .filter(|(_, m)| role(m) == "user");
+        .filter(|(_, m)| role(m) == ROLE_USER);
     let (start, first) = users.next()?;
     let task = message_text(first);
     if !task.starts_with(SPAWN_HEADER_PREFIX) {
@@ -293,12 +298,12 @@ fn since_task(messages: &[Value]) -> Option<(String, usize, Vec<String>, Vec<Str
     for message in &messages[start + 1..] {
         let text = message_text(message);
         match role(message) {
-            "assistant" => round += 1,
-            "tool" => tool_results.push(text),
-            "user" if text.starts_with(PEER_HEADER_PREFIX) => return None,
-            "user" if text.starts_with(TOOL_IMAGES_MARKER) || text.starts_with(REMINDER_PREFIX) => {
-            }
-            "user" => typed.push(text.trim().to_string()),
+            ROLE_ASSISTANT => round += 1,
+            ROLE_TOOL => tool_results.push(text),
+            ROLE_USER if text.starts_with(PEER_HEADER_PREFIX) => return None,
+            ROLE_USER
+                if text.starts_with(TOOL_IMAGES_MARKER) || text.starts_with(REMINDER_PREFIX) => {}
+            ROLE_USER => typed.push(text.trim().to_string()),
             _ => {}
         }
     }
@@ -311,7 +316,7 @@ fn since_task(messages: &[Value]) -> Option<(String, usize, Vec<String>, Vec<Str
 fn conversation_root(messages: &[Value]) -> (String, usize) {
     let mut root = String::new();
     let mut reports = 0;
-    for message in messages.iter().filter(|m| role(m) == "user") {
+    for message in messages.iter().filter(|m| role(m) == ROLE_USER) {
         let text = message_text(message);
         if text.starts_with(TOOL_IMAGES_MARKER) {
             continue;
