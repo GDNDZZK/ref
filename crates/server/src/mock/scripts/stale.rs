@@ -2,7 +2,7 @@
 //! tool answers: it moves the edit onto the shifted lines, and rejects it when the lines
 //! themselves changed. Everything runs in `scratch/`, where edits need no approval.
 
-use super::tools::{bash, read};
+use super::tools::{TOOL_BASH, TOOL_EDIT, TOOL_READ, bash, read};
 use crate::mock::script::{Ctx, Pace, Round, Script};
 use serde_json::{Value, json};
 
@@ -87,28 +87,28 @@ fn stale(ctx: &Ctx) -> Round {
     match ctx.round {
         0 => Round::new()
             .text("I'll read the parser first. Its tag goes with every edit.\n")
-            .tool("read", "Read the parser", read(PARSER)),
+            .tool(TOOL_READ, "Read the parser", read(PARSER)),
         1 => Round::new()
             .text("Meanwhile the file changes on disk: three lines land at the top.\n")
-            .tool("bash", "Add three lines at the top", bash(&pull_command())),
+            .tool(TOOL_BASH, "Add three lines at the top", bash(&pull_command())),
         2 => Round::new()
             .text("The tag is old now. Renaming with it anyway.\n")
-            .tool("edit", "Rename in the parser", substitute(results, PARSER, RENAME)),
+            .tool(TOOL_EDIT, "Rename in the parser", substitute(results, PARSER, RENAME)),
         3 => Round::new()
             .text("Now the library.\n")
-            .tool("read", "Read the library", read(LIB)),
+            .tool(TOOL_READ, "Read the library", read(LIB)),
         4 => Round::new()
             .text("Another change lands, this time on a line I am about to edit.\n")
-            .tool("bash", "Change a line of the library", bash(&change_command())),
+            .tool(TOOL_BASH, "Change a line of the library", bash(&change_command())),
         5 => Round::new()
             .text("Renaming in the library with the tag I have.\n")
-            .tool("edit", "Rename in the library", substitute(results, LIB, RENAME)),
+            .tool(TOOL_EDIT, "Rename in the library", substitute(results, LIB, RENAME)),
         6 => Round::new()
             .text("The edit was rejected. Reading the file again.\n")
-            .tool("read", "Read the library again", read(LIB)),
+            .tool(TOOL_READ, "Read the library again", read(LIB)),
         7 => Round::new()
             .text("Now the edit uses the current lines.\n")
-            .tool("edit", "Rename in the library", substitute(results, LIB, RENAME)),
+            .tool(TOOL_EDIT, "Rename in the library", substitute(results, LIB, RENAME)),
         _ => Round::new().text(
             "Done. The first edit was moved onto the shifted lines. The second was rejected because its lines had changed, and went through after a fresh read.",
         ),

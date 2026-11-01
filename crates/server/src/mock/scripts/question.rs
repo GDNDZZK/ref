@@ -1,5 +1,6 @@
 //! Scripts that ask the user questions with the `question` tool.
 
+use super::tools::TOOL_QUESTION;
 use crate::mock::script::{Ctx, Pace, Round, Script};
 use serde_json::{Value, json};
 
@@ -47,7 +48,7 @@ fn question(ctx: &Ctx) -> Round {
         0 => Round::new()
             .text("I need two decisions before I continue.\n")
             .tool(
-                "question",
+                TOOL_QUESTION,
                 "Ask how to fix the loop and what to check",
                 json!({"questions": [
                     {
@@ -78,7 +79,7 @@ fn question(ctx: &Ctx) -> Round {
 fn question_one(ctx: &Ctx) -> Round {
     match ctx.round {
         0 => Round::new().text("One quick question.\n").tool(
-            "question",
+            TOOL_QUESTION,
             "Ask which file to change first",
             json!({"questions": [{
                 "question": "Which file should I change first?",

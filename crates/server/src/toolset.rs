@@ -17,6 +17,9 @@ pub(crate) const PURPOSE_KEY: &str = "purpose";
 
 const PURPOSE_DESC: &str = "One short sentence saying why you are calling this tool; shown to the user. Use the language of the user's messages.";
 
+/// Name of the builtin shell tool.
+pub(crate) const BASH: &str = "bash";
+
 /// Names of the harness tools.
 pub(crate) const CONTEXT_WINDOW: &str = "context_window";
 pub(crate) const TODO: &str = "todo";
