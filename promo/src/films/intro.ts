@@ -81,9 +81,11 @@ const RETRY_CLOSEUP = { scale: 2.5, x: 18.6 / 150, y: 17.5 / 40, rows: 1.3, cols
 const RETRY_CLOSEUP_AT = { x: 520, y: 480 }
 // f2: the delete row with Cancel and its countdown, and the bash row above it.
 const DELAY_ROW_LOOK = { at: 0, x: 0.597, y: 0.29, zoom: 2 }
-// f3: the model dialog of the real-backend take (cast marker "models": ctrl+x m is pressed).
-const MODEL_DIALOG = { mark: 'models', offset: -0.2 }
+// f3: the model dialog of the real-backend take (cast marker "models": ctrl+x m is pressed). The
+// dialog is open for 3.0 s (capture/real.ts); the callouts end as it closes, before the cut's tail.
+const MODEL_DIALOG = { mark: 'models', offset: -0.3 }
 const MODEL_MARKS_FROM = 0.7
+const MODEL_MARKS_TO = 3.2
 // f2: Cancel is clicked this long into the cut, after about 2.3 s of countdown.
 const DELAY_CANCEL_AT = 2.6
 const featureCuts: Cut[] = [
@@ -108,7 +110,7 @@ const featureCuts: Cut[] = [
       beatShot({ seconds, ...clickedClip('gui-delay', 'cancel', DELAY_CANCEL_AT), looks: [DELAY_ROW_LOOK], windowFrom: -1 }),
   },
   drawnCut(STANDALONE_END + 2 * FEATURE_CUT_SECONDS, STANDALONE_END + 3 * FEATURE_CUT_SECONDS, (shot, seconds) => {
-    shot.add(castWindow({ ...FIXTURE_CAST, castFrom: MODEL_DIALOG, marks: opencodeModelMarks(MODEL_MARKS_FROM, seconds + 1), start: 0, from: -1, to: seconds }))
+    shot.add(castWindow({ ...FIXTURE_CAST, castFrom: MODEL_DIALOG, marks: opencodeModelMarks(MODEL_MARKS_FROM, MODEL_MARKS_TO), start: 0, from: -1, to: seconds }))
   }, 'quick'),
 ]
 
