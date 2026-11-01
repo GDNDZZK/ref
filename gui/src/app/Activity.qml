@@ -10,4 +10,13 @@ QtObject {
 	readonly property string waitingQuestion: "waiting_question"
 	readonly property string retrying: "retrying"
 	readonly property string compacting: "compacting"
+
+	function isWorking(activity) {
+		return activity !== idle
+	}
+
+	// The last turn failed and nothing is going on now.
+	function isFailed(activity, hasError) {
+		return hasError && !isWorking(activity)
+	}
 }

@@ -10,7 +10,7 @@ Item {
 	property string activity: Activity.idle
 	property bool hasError: false
 
-	readonly property bool working: activity !== Activity.idle
+	readonly property bool working: Activity.isWorking(activity)
 	readonly property bool needsAttention: activity === Activity.waitingPermission || activity === Activity.waitingQuestion || activity === Activity.retrying
 	readonly property color dotColor: hasError && !working ? Theme.danger : needsAttention ? Theme.warning : working ? Theme.accent : Theme.idleDot
 
