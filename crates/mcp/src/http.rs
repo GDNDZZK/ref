@@ -330,7 +330,13 @@ impl HttpTransport {
             let status = resp.status();
 
             if is_initialize(msg) {
-                if matches!(status.as_u16(), 400 | 404 | 405) && sid_used.is_none() {
+                let fallback_status = matches!(
+                    status,
+                    StatusCode::BAD_REQUEST
+                        | StatusCode::NOT_FOUND
+                        | StatusCode::METHOD_NOT_ALLOWED
+                );
+                if fallback_status && sid_used.is_none() {
                     let primary = error_body(resp).await;
                     tracing::debug!(server = %self.shared.name, "streamable HTTP initialize failed ({primary}); trying legacy SSE");
                     let endpoint = self.open_legacy().await.map_err(|e| {
