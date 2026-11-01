@@ -4187,59 +4187,62 @@ fn history_pages_load_when_scrolled_to_the_top() {
     assert!(!app.views[sid].more_before);
 }
 
-#[test]
-fn editor_mouse_drag_double_and_triple_click_select() {
-    use crossterm::event::{MouseButton, MouseEventKind};
+const EDITOR_TEXT: &str = "hello brave new world";
+
+/// An app with `EDITOR_TEXT` in the editor, drawn; returns it with the text's row and a
+/// function giving the screen column of a text column.
+fn editor_mouse_app() -> (App, u16, impl Fn(u16) -> u16) {
     let mut app = test_app(false);
-    type_text(&mut app, "hello brave new world");
+    type_text(&mut app, EDITOR_TEXT);
     let (term, screen) = render(&mut app, 100, 30);
     let y = screen
         .lines()
-        .position(|l| l.contains("hello brave new world"))
+        .position(|l| l.contains(EDITOR_TEXT))
         .expect("editor row") as u16;
     let x0 = (0..100)
         .find(|&x| term.backend().buffer()[(x, y)].symbol() == "h")
         .unwrap();
-    let at = |col: u16| x0 + col;
+    (app, y, move |col| x0 + col)
+}
+
+fn send_mouse(app: &mut App, kind: crossterm::event::MouseEventKind, x: u16, y: u16) {
+    crate::input::handle(app, mouse(kind, x, y));
+}
+
+/// Presses at `from`, drags to `to` and releases there.
+fn drag_select(app: &mut App, y: u16, from: u16, to: u16) {
+    use crossterm::event::{MouseButton, MouseEventKind::*};
+    send_mouse(app, Down(MouseButton::Left), from, y);
+    send_mouse(app, Drag(MouseButton::Left), to, y);
+    send_mouse(app, Up(MouseButton::Left), to, y);
+}
+
+#[test]
+fn editor_mouse_drag_selects_forward_and_backward() {
+    use crossterm::event::{MouseButton, MouseEventKind::*};
+    let (mut app, y, at) = editor_mouse_app();
+
     // Press on "brave", drag to the end of "new": that range is selected.
-    crate::input::handle(
-        &mut app,
-        mouse(MouseEventKind::Down(MouseButton::Left), at(6), y),
-    );
+    send_mouse(&mut app, Down(MouseButton::Left), at(6), y);
     assert_eq!(app.editor.selected_text(), None);
-    crate::input::handle(
-        &mut app,
-        mouse(MouseEventKind::Drag(MouseButton::Left), at(10), y),
-    );
-    crate::input::handle(
-        &mut app,
-        mouse(MouseEventKind::Drag(MouseButton::Left), at(15), y),
-    );
-    crate::input::handle(
-        &mut app,
-        mouse(MouseEventKind::Up(MouseButton::Left), at(15), y),
-    );
+    send_mouse(&mut app, Drag(MouseButton::Left), at(10), y);
+    send_mouse(&mut app, Drag(MouseButton::Left), at(15), y);
+    send_mouse(&mut app, Up(MouseButton::Left), at(15), y);
     assert_eq!(app.editor.selected_text().as_deref(), Some("brave new"));
     assert_eq!(app.editor.cursor, 15);
+
     // Dragging backwards works too.
-    crate::input::handle(
-        &mut app,
-        mouse(MouseEventKind::Down(MouseButton::Left), at(11), y),
-    );
-    crate::input::handle(
-        &mut app,
-        mouse(MouseEventKind::Drag(MouseButton::Left), at(0), y),
-    );
-    crate::input::handle(
-        &mut app,
-        mouse(MouseEventKind::Up(MouseButton::Left), at(0), y),
-    );
+    drag_select(&mut app, y, at(11), at(0));
     assert_eq!(app.editor.selected_text().as_deref(), Some("hello brave"));
-    // Right click copies the editor selection.
-    crate::input::handle(
-        &mut app,
-        mouse(MouseEventKind::Down(MouseButton::Right), at(3), y),
-    );
+}
+
+#[test]
+fn editor_right_click_copies_the_selection() {
+    use crossterm::event::{MouseButton, MouseEventKind::Down};
+    let (mut app, y, at) = editor_mouse_app();
+    drag_select(&mut app, y, at(11), at(0));
+
+    send_mouse(&mut app, Down(MouseButton::Right), at(3), y);
     assert!(
         app.toasts
             .items
@@ -4247,60 +4250,33 @@ fn editor_mouse_drag_double_and_triple_click_select() {
             .any(|t| t.text == "Copied selection (11 chars)")
     );
     assert_eq!(app.editor.selected_text(), None);
+}
+
+#[test]
+fn editor_double_click_selects_word_triple_click_line_plain_click_clears() {
+    use crossterm::event::{MouseButton, MouseEventKind::*};
+    let (mut app, y, at) = editor_mouse_app();
+
     // Double click: the word; triple click: the line. A plain click clears.
-    crate::input::handle(
-        &mut app,
-        mouse(MouseEventKind::Down(MouseButton::Left), at(17), y),
-    );
-    crate::input::handle(
-        &mut app,
-        mouse(MouseEventKind::Up(MouseButton::Left), at(17), y),
-    );
-    crate::input::handle(
-        &mut app,
-        mouse(MouseEventKind::Down(MouseButton::Left), at(17), y),
-    );
+    send_mouse(&mut app, Down(MouseButton::Left), at(17), y);
+    send_mouse(&mut app, Up(MouseButton::Left), at(17), y);
+    send_mouse(&mut app, Down(MouseButton::Left), at(17), y);
     assert_eq!(app.editor.selected_text().as_deref(), Some("world"));
-    crate::input::handle(
-        &mut app,
-        mouse(MouseEventKind::Up(MouseButton::Left), at(17), y),
-    );
-    crate::input::handle(
-        &mut app,
-        mouse(MouseEventKind::Down(MouseButton::Left), at(17), y),
-    );
-    assert_eq!(
-        app.editor.selected_text().as_deref(),
-        Some("hello brave new world")
-    );
-    crate::input::handle(
-        &mut app,
-        mouse(MouseEventKind::Up(MouseButton::Left), at(17), y),
-    );
+    send_mouse(&mut app, Up(MouseButton::Left), at(17), y);
+    send_mouse(&mut app, Down(MouseButton::Left), at(17), y);
+    assert_eq!(app.editor.selected_text().as_deref(), Some(EDITOR_TEXT));
+    send_mouse(&mut app, Up(MouseButton::Left), at(17), y);
     app.last_click = None;
-    crate::input::handle(
-        &mut app,
-        mouse(MouseEventKind::Down(MouseButton::Left), at(2), y),
-    );
-    crate::input::handle(
-        &mut app,
-        mouse(MouseEventKind::Up(MouseButton::Left), at(2), y),
-    );
+    send_mouse(&mut app, Down(MouseButton::Left), at(2), y);
+    send_mouse(&mut app, Up(MouseButton::Left), at(2), y);
     assert_eq!(app.editor.selected_text(), None);
     assert_eq!(app.editor.cursor, 2);
-    // Typing replaces the selection.
-    crate::input::handle(
-        &mut app,
-        mouse(MouseEventKind::Down(MouseButton::Left), at(0), y),
-    );
-    crate::input::handle(
-        &mut app,
-        mouse(MouseEventKind::Drag(MouseButton::Left), at(5), y),
-    );
-    crate::input::handle(
-        &mut app,
-        mouse(MouseEventKind::Up(MouseButton::Left), at(5), y),
-    );
+}
+
+#[test]
+fn typing_replaces_the_editor_mouse_selection() {
+    let (mut app, y, at) = editor_mouse_app();
+    drag_select(&mut app, y, at(0), at(5));
     type_text(&mut app, "bye");
     assert_eq!(app.editor.text, "bye brave new world");
 }
