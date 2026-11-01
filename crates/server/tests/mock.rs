@@ -16,6 +16,10 @@ const WAIT: Duration = Duration::from_secs(40);
 const POLL: Duration = Duration::from_millis(10);
 /// A working directory no client should be able to reach in mock mode.
 const ELSEWHERE: &str = "/nonexistent-elsewhere";
+/// Workspace file the scripted scenarios edit.
+const PARSER: &str = "src/parser.rs";
+/// Prompt that starts the scripted `orchestrate` scenario.
+const ORCHESTRATE_PROMPT: &str = "orchestrate fix the parser bug, test it, update the docs";
 
 struct Rig {
     mock: Mock,
@@ -198,25 +202,19 @@ async fn tools_script_reads_edits_and_fixes_the_bug() {
         "missing file"
     );
     assert_eq!(states(&tools, "edit"), [ToolState::Done]);
-    assert!(
-        rig.workspace_file("src/parser.rs")
-            .contains("0..items.len()")
-    );
-    assert!(
-        !rig.workspace_file("src/parser.rs")
-            .contains("0..=items.len()")
-    );
+    assert!(rig.workspace_file(PARSER).contains("0..items.len()"));
+    assert!(!rig.workspace_file(PARSER).contains("0..=items.len()"));
     rig.finish().await;
 }
 
 #[tokio::test]
 async fn a_denied_permission_leaves_the_file_alone() {
     let rig = rig().await;
-    let before = rig.workspace_file("src/parser.rs");
+    let before = rig.workspace_file(PARSER);
     rig.prompt("permission");
     rig.run(false).await;
     assert_eq!(states(&rig.tools(), "edit"), [ToolState::Denied]);
-    assert_eq!(rig.workspace_file("src/parser.rs"), before);
+    assert_eq!(rig.workspace_file(PARSER), before);
     rig.finish().await;
 }
 
@@ -371,7 +369,7 @@ impl Rig {
 async fn orchestrate_directs_a_crew_and_collects_five_reports() {
     let rig = rig().await;
     let start = Instant::now();
-    rig.prompt("orchestrate fix the parser bug, test it, update the docs");
+    rig.prompt(ORCHESTRATE_PROMPT);
     let mut seen_reports = 0;
     while !rig.main_texts().contains(FINAL_SENTENCE) {
         assert!(
@@ -425,10 +423,7 @@ async fn orchestrate_directs_a_crew_and_collects_five_reports() {
         .filter(|i| i.parent.as_deref() == Some(rig.session.id.as_str()))
         .count();
     assert_eq!(children, REPORTERS.len());
-    assert!(
-        rig.workspace_file("src/parser.rs")
-            .contains("0..items.len()")
-    );
+    assert!(rig.workspace_file(PARSER).contains("0..items.len()"));
     assert!(
         rig.workspace_file("NOTES.txt")
             .contains("Fix off-by-one in parse_items")
@@ -471,14 +466,14 @@ impl Rig {
 async fn question_one_takes_the_default_answer() {
     let rig = rig().await;
     rig.prompt("question-one");
-    rig.answer_question(Some(vec![vec!["src/parser.rs"]])).await;
+    rig.answer_question(Some(vec![vec![PARSER]])).await;
     rig.run(true).await;
     assert!(
         rig.last_text().contains("You chose: "),
         "{}",
         rig.last_text()
     );
-    assert!(rig.last_text().contains("src/parser.rs"));
+    assert!(rig.last_text().contains(PARSER));
     rig.finish().await;
 }
 
@@ -554,7 +549,7 @@ async fn the_mock_exits_with_its_last_client_unless_an_idle_timeout_says_otherwi
 #[tokio::test]
 async fn the_tester_reports_a_message_typed_to_it() {
     let rig = rig().await;
-    rig.prompt("orchestrate fix the parser bug, test it, update the docs");
+    rig.prompt(ORCHESTRATE_PROMPT);
     let start = Instant::now();
     let mut typed = false;
     while !rig.main_texts().contains(FINAL_SENTENCE) {
@@ -643,7 +638,7 @@ fn snapshot(dir: &Path) -> Vec<(PathBuf, u64, std::time::SystemTime)> {
 async fn nothing_outside_the_temporary_directory_changes() {
     let bait = std::env::temp_dir().join(format!("ref-mock-bait-{}", std::process::id()));
     std::fs::create_dir_all(bait.join("src")).unwrap();
-    std::fs::write(bait.join("src/parser.rs"), "for i in 0..=items.len() {\n").unwrap();
+    std::fs::write(bait.join(PARSER), "for i in 0..=items.len() {\n").unwrap();
     let before = snapshot(&bait);
 
     let rig = rig().await;
