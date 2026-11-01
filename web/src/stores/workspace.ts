@@ -163,7 +163,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     chats.delete(id)
     for (const listener of goneListeners) listener(id)
     live.value = live.value.filter((session) => session.id !== id)
-    void refreshHistory()
+    void refreshHistory().catch(notices.pushError)
     if (zoomedId.value === id) zoomedId.value = undefined
     if (currentId.value !== id) return
     currentId.value = undefined
@@ -346,7 +346,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const gone = live.value.some((old) => !sessions.some((session) => session.id === old.id))
     live.value = sortLive(sessions)
     for (const info of sessions) chats.get(info.id)?.setInfo(info)
-    if (gone) void refreshHistory()
+    if (gone) void refreshHistory().catch(notices.pushError)
   }
 
   function onSessionEvent(frame: Extract<EventFrame, { kind: 'event' }>): void {
