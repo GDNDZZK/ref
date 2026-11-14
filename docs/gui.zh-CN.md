@@ -31,7 +31,7 @@
 
 请保持文件夹完整，并从它所在的位置运行程序；整个文件夹可以移动。不需要安装，也不需要管理员权限。除系统自带的库之外，GUI 需要的一切都在文件夹里，所以它不会使用系统上安装的 Qt。
 
-Linux 上程序需要 glibc 2.38 和 GCC 13 的 C++ 运行库（Ubuntu 24.04、Debian 13、Fedora 39、Arch 及更新版本），运行在 X11 上，或通过 XWayland 运行。不包含 Qt 的 Wayland 插件。
+Linux 上程序需要 glibc 2.38 和 GCC 13 的 C++ 运行库（Ubuntu 24.04、Debian 13、Fedora 39、Arch 及更新版本）。在设置 `WAYLAND_DISPLAY` 时它会原生运行在 Wayland 上，否则自动回退到 X11 或 XWayland。
 
 ## 启动
 
@@ -207,6 +207,8 @@ macOS 上表中的 Ctrl 是 Cmd。字母与 [Web 界面](web.zh-CN.md#快捷键)
 - Windows 和 macOS 上的通知还没有在这两个系统上试过。
 - Wayland 下，点击通知后窗口能否前置取决于桌面环境：没有 activation token 时，任务栏图标可能只会闪烁。
 - Linux 上 Ctrl+Shift+U 可能被 IBus 的 Unicode 输入占用。按键没有反应时，请关闭 IBus 的这个按键，或使用消息下方的*撤销*按钮或 `/undo`。
+- **输入法（IME）：** 原生 Wayland 下，桌面输入法（fcitx5、IBus）通过 `zwp_text_input_v3` 工作，无需在包内附带 `fcitx5-qt`。回退到 `xcb`（X11 或 XWayland）时，包内仅附带 Qt 的 `ibus` 和 `compose` 输入法插件；在该模式下使用 fcitx5 需要系统安装 `fcitx5-qt`，并将 `QT_PLUGIN_PATH` 指向其插件目录。
+- **Wayland 窗口图标：** Wayland 合成器按桌面 ID 查找窗口图标，因此需要按[安装](../README.zh-CN.md#安装)说明安装 `ref-gui.desktop` 和 `ref.svg` 后才会显示窗口图标。
 - 在很长的会话中（视图上方或下方超过约 200 条消息），滚动条的长度是估算值，拖动时可能略有变化。
 - 以非 0 退出码结束的 bash 调用，在卡片头里仍显示为完成；退出码在展开的卡片里。
 - 对 GUI 没有专门视图的工具，单行摘要按字母顺序列出前三个普通参数，而终端界面按调用中的顺序。
