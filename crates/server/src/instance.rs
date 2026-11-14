@@ -1,13 +1,13 @@
 //! Instance files, port selection, `--status` and `--stop`.
 
-use crate::util::{fmt_duration, fmt_time, pid_alive, write_atomic};
+use crate::util::{fmt_duration, fmt_time, write_atomic};
 use futures_util::{SinkExt, StreamExt};
-use ref_proto::{ClientFrame, InstanceInfo, Request, ServerFrame};
+use ref_proto::{ClientFrame, IDLE_EXIT_NOW, InstanceInfo, Request, ServerFrame};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message as WsMsg;
 
-pub fn instance_path(dir: &Path, pid: u32) -> PathBuf {
+fn instance_path(dir: &Path, pid: u32) -> PathBuf {
     dir.join(format!("{pid}.json"))
 }
 
@@ -25,7 +25,7 @@ pub fn write_instance(dir: &Path, info: &InstanceInfo) -> std::io::Result<PathBu
 }
 
 /// Live instances (stale files of dead processes are removed), newest first.
-pub fn list_instances(dir: &Path) -> Vec<InstanceInfo> {
+fn list_instances(dir: &Path) -> Vec<InstanceInfo> {
     let mut out = Vec::new();
     let Ok(rd) = std::fs::read_dir(dir) else {
         return out;
@@ -35,25 +35,40 @@ pub fn list_instances(dir: &Path) -> Vec<InstanceInfo> {
         if p.extension().and_then(|x| x.to_str()) != Some("json") {
             continue;
         }
-        let Ok(raw) = std::fs::read(&p) else { continue };
-        match serde_json::from_slice::<InstanceInfo>(&raw) {
-            Ok(i) if pid_alive(i.pid) => out.push(i),
-            Ok(_) => {
-                let _ = std::fs::remove_file(&p);
+        let raw = match std::fs::read(&p) {
+            Ok(raw) => raw,
+            Err(e) => {
+                tracing::debug!("cannot read instance file {}: {e}", p.display());
+                continue;
             }
-            Err(_) => {}
+        };
+        match serde_json::from_slice::<InstanceInfo>(&raw) {
+            Ok(i) if ref_sys::pid_alive(i.pid) => out.push(i),
+            Ok(_) => {
+                // Best effort: a stale file left behind is skipped again next time.
+                if let Err(e) = std::fs::remove_file(&p) {
+                    tracing::debug!("cannot remove stale instance file {}: {e}", p.display());
+                }
+            }
+            Err(e) => tracing::debug!("corrupt instance file {}: {e}", p.display()),
         }
     }
     out.sort_by_key(|i| std::cmp::Reverse(i.started_at));
     out
 }
 
-/// Random free port in 10000..=65535 (bind-tested on `host`).
+/// Ports `pick_port` chooses from.
+const PORT_RANGE: std::ops::RangeInclusive<u16> = 10_000..=65_535;
+
+/// How many random ports `pick_port` tries before giving up.
+const PORT_ATTEMPTS: u32 = 500;
+
+/// Random free port in `PORT_RANGE` (bind-tested on `host`).
 pub fn pick_port(host: &str) -> Option<u16> {
     use rand::Rng;
     let mut rng = rand::rng();
-    for _ in 0..500 {
-        let p: u16 = rng.random_range(10000..=65535);
+    for _ in 0..PORT_ATTEMPTS {
+        let p: u16 = rng.random_range(PORT_RANGE);
         if std::net::TcpListener::bind((host, p)).is_ok() {
             return Some(p);
         }
@@ -61,9 +76,9 @@ pub fn pick_port(host: &str) -> Option<u16> {
     None
 }
 
-pub fn connect_url(i: &InstanceInfo) -> String {
+fn connect_url(i: &InstanceInfo) -> String {
     let host = match i.bind.as_str() {
-        "0.0.0.0" | "" | "::" | "[::]" => "127.0.0.1".to_string(),
+        ref_proto::ANY_V4 | "" | "::" | "[::]" => ref_proto::LOOPBACK_V4.to_string(),
         h if h.contains(':') && !h.starts_with('[') => format!("[{h}]"),
         h => h.to_string(),
     };
@@ -73,13 +88,13 @@ pub fn connect_url(i: &InstanceInfo) -> String {
 fn idle_meaning(t: i64) -> String {
     match t {
         t if t < 0 => "never exits when idle".into(),
-        0 => "exits as soon as the last frontend disconnects".into(),
+        IDLE_EXIT_NOW => "exits as soon as the last frontend disconnects".into(),
         t => format!("exits {t}s after the last frontend disconnects"),
     }
 }
 
 /// Connects, says Hello, sends `req`, returns the response result.
-pub async fn request(
+async fn request(
     i: &InstanceInfo,
     req: Request,
     timeout: Duration,
@@ -147,13 +162,44 @@ pub async fn request(
         .map_err(|_| "timed out".to_string())?
 }
 
+/// Process exit codes of `--status` / `--stop` and of the server itself.
+pub const EXIT_OK: i32 = 0;
+pub const EXIT_FAILURE: i32 = 1;
+
+/// How long `--status` waits for the session count of an instance.
+const STATUS_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// How long `--stop` waits for the answer to the shutdown request.
+const STOP_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// `--stop` polls `STOP_POLL_ATTEMPTS` times, `STOP_POLL_INTERVAL` apart (10 s in all), for the
+/// process to exit.
+const STOP_POLL_ATTEMPTS: u32 = 100;
+const STOP_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+/// An instance with the number of its live sessions (`None`: could not ask).
+type Row = (InstanceInfo, Option<usize>);
+
 /// `--status`: exit code 0 if any instance is running.
 pub async fn status(json_out: bool) -> i32 {
     let dir = ref_proto::instances_dir();
-    let list = list_instances(&dir);
+    let rows = collect_rows(&list_instances(&dir)).await;
+    if json_out {
+        print_json(&rows);
+    } else {
+        print_table(&rows, &dir);
+    }
+    if rows.is_empty() {
+        EXIT_FAILURE
+    } else {
+        EXIT_OK
+    }
+}
+
+async fn collect_rows(list: &[InstanceInfo]) -> Vec<Row> {
     let mut rows = Vec::new();
-    for i in &list {
-        let sessions = request(i, Request::ListSessions, Duration::from_secs(3))
+    for i in list {
+        let sessions = request(i, Request::ListSessions, STATUS_TIMEOUT)
             .await
             .ok()
             .and_then(|v| {
@@ -163,56 +209,61 @@ pub async fn status(json_out: bool) -> i32 {
             });
         rows.push((i.clone(), sessions));
     }
-    if json_out {
-        let arr: Vec<serde_json::Value> = rows
-            .iter()
-            .map(|(i, n)| {
-                let mut v = serde_json::to_value(i).unwrap_or_default();
-                if let Some(o) = v.as_object_mut() {
-                    o.insert("sessions".into(), serde_json::json!(n));
-                    o.insert("url".into(), serde_json::json!(connect_url(i)));
-                }
-                v
-            })
-            .collect();
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&arr).unwrap_or_else(|_| "[]".into())
-        );
-    } else if rows.is_empty() {
+    rows
+}
+
+fn print_json(rows: &[Row]) {
+    let arr: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|(i, n)| {
+            let mut v = serde_json::to_value(i).expect("InstanceInfo serialises");
+            if let Some(o) = v.as_object_mut() {
+                o.insert("sessions".into(), serde_json::json!(n));
+                o.insert("url".into(), serde_json::json!(connect_url(i)));
+            }
+            v
+        })
+        .collect();
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&arr).expect("JSON values serialise")
+    );
+}
+
+fn print_table(rows: &[Row], dir: &Path) {
+    if rows.is_empty() {
         println!(
             "No ref-server instances running (instances dir: {}).",
             dir.display()
         );
-    } else {
-        let now = ref_proto::now_ms();
-        for (k, (i, n)) in rows.iter().enumerate() {
-            if k > 0 {
-                println!();
-            }
-            println!("ref-server pid {}", i.pid);
-            println!("  url:           {}", connect_url(i));
-            println!("  bind:          {}:{}", i.bind, i.port);
-            println!("  allowed hosts: {}", i.allow_hosts.join(", "));
-            println!(
-                "  idle timeout:  {} ({})",
-                i.idle_timeout,
-                idle_meaning(i.idle_timeout)
-            );
-            println!(
-                "  started:       {} (up {})",
-                fmt_time(i.started_at),
-                fmt_duration((now - i.started_at) / 1000)
-            );
-            println!("  version:       {}", i.version);
-            match n {
-                Some(n) => println!("  live sessions: {n}"),
-                None => println!("  live sessions: unknown (could not connect)"),
-            }
-            println!("  instance file: {}", instance_path(&dir, i.pid).display());
-        }
+        return;
     }
-    if rows.is_empty() { 1 } else { 0 }
+    let now = ref_proto::now_ms();
+    for (k, (i, n)) in rows.iter().enumerate() {
+        if k > 0 {
+            println!();
+        }
+        println!("ref-server pid {}", i.pid);
+        println!("  url:           {}", connect_url(i));
+        println!("  bind:          {}:{}", i.bind, i.port);
+        println!("  allowed hosts: {}", i.allow_hosts.join(", "));
+        println!(
+            "  idle timeout:  {} ({})",
+            i.idle_timeout,
+            idle_meaning(i.idle_timeout)
+        );
+        println!(
+            "  started:       {} (up {})",
+            fmt_time(i.started_at),
+            fmt_duration((now - i.started_at) / 1000)
+        );
+        println!("  version:       {}", i.version);
+        match n {
+            Some(n) => println!("  live sessions: {n}"),
+            None => println!("  live sessions: unknown (could not connect)"),
+        }
+        println!("  instance file: {}", instance_path(dir, i.pid).display());
+    }
 }
 
 /// `--stop [PID]`.
@@ -227,19 +278,19 @@ pub async fn stop(pid: Option<u32>) -> i32 {
             Some(p) => eprintln!("No ref-server instance with pid {p}."),
             None => eprintln!("No ref-server instances running."),
         }
-        return 1;
+        return EXIT_FAILURE;
     }
-    let mut code = 0;
+    let mut code = EXIT_OK;
     for i in list {
-        match request(&i, Request::Shutdown, Duration::from_secs(5)).await {
+        match request(&i, Request::Shutdown, STOP_REQUEST_TIMEOUT).await {
             Ok(_) => {
                 let mut gone = false;
-                for _ in 0..100 {
-                    if !pid_alive(i.pid) {
+                for _ in 0..STOP_POLL_ATTEMPTS {
+                    if !ref_sys::pid_alive(i.pid) {
                         gone = true;
                         break;
                     }
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    tokio::time::sleep(STOP_POLL_INTERVAL).await;
                 }
                 if gone {
                     println!("Stopped ref-server pid {}.", i.pid);
@@ -256,7 +307,7 @@ pub async fn stop(pid: Option<u32>) -> i32 {
                     i.pid
                 );
                 if !ref_sys::terminate(i.pid) {
-                    code = 1;
+                    code = EXIT_FAILURE;
                 }
             }
         }

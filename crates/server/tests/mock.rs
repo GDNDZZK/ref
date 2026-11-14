@@ -1,6 +1,8 @@
 //! End-to-end checks of `ref-server --mock`: the scripts run through the real engine, tools
 //! and LLM client, and nothing outside the temporary directory is touched.
 
+mod common;
+
 use ref_proto::{MessageSource, Part, Request, Role, ServerFrame, SessionStatus, ToolState};
 use ref_server::api;
 use ref_server::hub::{Conn, Hub};
@@ -16,6 +18,10 @@ const WAIT: Duration = Duration::from_secs(40);
 const POLL: Duration = Duration::from_millis(10);
 /// A working directory no client should be able to reach in mock mode.
 const ELSEWHERE: &str = "/nonexistent-elsewhere";
+/// Workspace file the scripted scenarios edit.
+const PARSER: &str = "src/parser.rs";
+/// Prompt that starts the scripted `orchestrate` scenario.
+const ORCHESTRATE_PROMPT: &str = "orchestrate fix the parser bug, test it, update the docs";
 
 struct Rig {
     mock: Mock,
@@ -198,25 +204,19 @@ async fn tools_script_reads_edits_and_fixes_the_bug() {
         "missing file"
     );
     assert_eq!(states(&tools, "edit"), [ToolState::Done]);
-    assert!(
-        rig.workspace_file("src/parser.rs")
-            .contains("0..items.len()")
-    );
-    assert!(
-        !rig.workspace_file("src/parser.rs")
-            .contains("0..=items.len()")
-    );
+    assert!(rig.workspace_file(PARSER).contains("0..items.len()"));
+    assert!(!rig.workspace_file(PARSER).contains("0..=items.len()"));
     rig.finish().await;
 }
 
 #[tokio::test]
 async fn a_denied_permission_leaves_the_file_alone() {
     let rig = rig().await;
-    let before = rig.workspace_file("src/parser.rs");
+    let before = rig.workspace_file(PARSER);
     rig.prompt("permission");
     rig.run(false).await;
     assert_eq!(states(&rig.tools(), "edit"), [ToolState::Denied]);
-    assert_eq!(rig.workspace_file("src/parser.rs"), before);
+    assert_eq!(rig.workspace_file(PARSER), before);
     rig.finish().await;
 }
 
@@ -289,11 +289,7 @@ async fn the_created_session_reports_back() {
             .iter()
             .any(|m| matches!(&m.source, MessageSource::Peer { from_name, .. } if from_name.starts_with("helper")))
     };
-    let start = Instant::now();
-    while !reported() {
-        assert!(start.elapsed() < WAIT, "no report arrived");
-        tokio::time::sleep(POLL).await;
-    }
+    common::wait_until("a report", WAIT, reported).await;
     rig.run(true).await;
     assert!(rig.last_text().contains("Got this message"));
     rig.finish().await;
@@ -371,7 +367,7 @@ impl Rig {
 async fn orchestrate_directs_a_crew_and_collects_five_reports() {
     let rig = rig().await;
     let start = Instant::now();
-    rig.prompt("orchestrate fix the parser bug, test it, update the docs");
+    rig.prompt(ORCHESTRATE_PROMPT);
     let mut seen_reports = 0;
     while !rig.main_texts().contains(FINAL_SENTENCE) {
         assert!(
@@ -425,10 +421,7 @@ async fn orchestrate_directs_a_crew_and_collects_five_reports() {
         .filter(|i| i.parent.as_deref() == Some(rig.session.id.as_str()))
         .count();
     assert_eq!(children, REPORTERS.len());
-    assert!(
-        rig.workspace_file("src/parser.rs")
-            .contains("0..items.len()")
-    );
+    assert!(rig.workspace_file(PARSER).contains("0..items.len()"));
     assert!(
         rig.workspace_file("NOTES.txt")
             .contains("Fix off-by-one in parse_items")
@@ -439,20 +432,15 @@ async fn orchestrate_directs_a_crew_and_collects_five_reports() {
 impl Rig {
     /// Waits for the model's question and answers it.
     async fn answer_question(&self, answers: Option<Vec<Vec<&str>>>) {
-        let start = Instant::now();
-        let call_id = loop {
-            let pending = self
-                .session
+        let pending = || {
+            self.session
                 .lock()
                 .questions
                 .first()
-                .map(|q| q.request.call_id.clone());
-            if let Some(id) = pending {
-                break id;
-            }
-            assert!(start.elapsed() < WAIT, "no question was asked");
-            tokio::time::sleep(POLL).await;
+                .map(|q| q.request.call_id.clone())
         };
+        common::wait_until("a question", WAIT, || pending().is_some()).await;
+        let call_id = pending().unwrap();
         let answers = answers.map(|a| {
             a.into_iter()
                 .map(|e| e.into_iter().map(String::from).collect())
@@ -471,14 +459,14 @@ impl Rig {
 async fn question_one_takes_the_default_answer() {
     let rig = rig().await;
     rig.prompt("question-one");
-    rig.answer_question(Some(vec![vec!["src/parser.rs"]])).await;
+    rig.answer_question(Some(vec![vec![PARSER]])).await;
     rig.run(true).await;
     assert!(
         rig.last_text().contains("You chose: "),
         "{}",
         rig.last_text()
     );
-    assert!(rig.last_text().contains("src/parser.rs"));
+    assert!(rig.last_text().contains(PARSER));
     rig.finish().await;
 }
 
@@ -534,7 +522,7 @@ async fn the_mock_exits_with_its_last_client_unless_an_idle_timeout_says_otherwi
     join_and_leave(&default);
     wait_for_shutdown(&default).await;
 
-    let staying = ref_server::mock::start_with(0, "token".into(), ref_server::hub::IDLE_NEVER)
+    let staying = ref_server::mock::start_with(0, "token".into(), ref_proto::IDLE_NEVER)
         .await
         .unwrap();
     let late = ref_server::mock::start_with(0, "token".into(), LATE_TIMEOUT_SECS)
@@ -554,7 +542,7 @@ async fn the_mock_exits_with_its_last_client_unless_an_idle_timeout_says_otherwi
 #[tokio::test]
 async fn the_tester_reports_a_message_typed_to_it() {
     let rig = rig().await;
-    rig.prompt("orchestrate fix the parser bug, test it, update the docs");
+    rig.prompt(ORCHESTRATE_PROMPT);
     let start = Instant::now();
     let mut typed = false;
     while !rig.main_texts().contains(FINAL_SENTENCE) {
@@ -591,11 +579,10 @@ async fn the_tester_reports_a_message_typed_to_it() {
 async fn cancel_stops_a_command_that_never_ends() {
     let rig = rig().await;
     rig.prompt("cancel");
-    let start = Instant::now();
-    while !rig.tools().iter().any(|t| t.state == ToolState::Running) {
-        assert!(start.elapsed() < WAIT, "the command never started");
-        tokio::time::sleep(POLL).await;
-    }
+    common::wait_until("the command to start", WAIT, || {
+        rig.tools().iter().any(|t| t.state == ToolState::Running)
+    })
+    .await;
     let req = Request::Abort {
         session_id: rig.session.id.clone(),
     };
@@ -643,7 +630,7 @@ fn snapshot(dir: &Path) -> Vec<(PathBuf, u64, std::time::SystemTime)> {
 async fn nothing_outside_the_temporary_directory_changes() {
     let bait = std::env::temp_dir().join(format!("ref-mock-bait-{}", std::process::id()));
     std::fs::create_dir_all(bait.join("src")).unwrap();
-    std::fs::write(bait.join("src/parser.rs"), "for i in 0..=items.len() {\n").unwrap();
+    std::fs::write(bait.join(PARSER), "for i in 0..=items.len() {\n").unwrap();
     let before = snapshot(&bait);
 
     let rig = rig().await;
@@ -867,18 +854,15 @@ async fn live_output_of(rig: &Rig, session: &Arc<Session>, text: &str) {
 async fn orchestrate_long_helpers_print_their_progress_while_they_work() {
     let rig = rig().await;
     rig.prompt("orchestrate-long fix the parser bug");
-    let start = Instant::now();
-    let mut sessions = Vec::new();
-    while sessions.len() < 4 {
-        assert!(start.elapsed() < WAIT, "the helpers did not start");
-        sessions = rig
-            .hub
+    let helpers = || -> Vec<Arc<Session>> {
+        rig.hub
             .sessions()
             .into_iter()
             .filter(|s| s.id != rig.session.id)
-            .collect();
-        tokio::time::sleep(POLL).await;
-    }
+            .collect()
+    };
+    common::wait_until("the helpers to start", WAIT, || helpers().len() >= 4).await;
+    let sessions = helpers();
     for (name, line) in [
         ("scout", "scout: read 2/40 files"),
         ("fixer", "fixer: patched 0/5 files"),

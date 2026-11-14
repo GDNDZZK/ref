@@ -68,6 +68,18 @@ pub fn now_ms() -> i64 {
 // Instance discovery
 // ---------------------------------------------------------------------------
 
+/// Loopback host names and the any-address, as written in `InstanceInfo::bind` / `allow_hosts`.
+pub const LOOPBACK_V4: &str = "127.0.0.1";
+pub const LOOPBACK_V6: &str = "::1";
+pub const LOCALHOST: &str = "localhost";
+pub const ANY_V4: &str = "0.0.0.0";
+
+/// `InstanceInfo::idle_timeout` that makes the backend exit as soon as the last frontend leaves.
+pub const IDLE_EXIT_NOW: i64 = 0;
+
+/// `InstanceInfo::idle_timeout` that keeps the backend running after its last frontend leaves.
+pub const IDLE_NEVER: i64 = -1;
+
 /// Written by the server to `<state_dir>/instances/<pid>.json`.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct InstanceInfo {
@@ -77,7 +89,7 @@ pub struct InstanceInfo {
     pub bind: String,
     /// Hosts allowed to connect (IPs / hostnames, `*` = any).
     pub allow_hosts: Vec<String>,
-    /// Idle timeout in seconds; 0 = exit as soon as the last frontend leaves, -1 = never.
+    /// Idle timeout in seconds, or `IDLE_EXIT_NOW` / `IDLE_NEVER`.
     pub idle_timeout: i64,
     pub started_at: i64,
     pub version: String,
@@ -102,7 +114,7 @@ impl ModelRef {
     pub fn key(&self) -> String {
         format!("{}/{}", self.provider, self.model)
     }
-    /// Parses `provider/model[:variant]` or `provider/model#variant`.
+    /// Parses `provider/model` or `provider/model#variant`.
     pub fn parse(s: &str) -> Option<ModelRef> {
         let (pm, variant) = match s.rsplit_once('#') {
             Some((a, b)) => (a, Some(b.to_string())),
@@ -149,7 +161,7 @@ impl SessionStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct SessionInfo {
     pub id: String,
     /// Peer name; arbitrary unicode, unique among live sessions.
@@ -192,6 +204,26 @@ pub enum TodoStatus {
     InProgress,
     Completed,
     Cancelled,
+}
+
+impl TodoStatus {
+    /// Every status, in the order they are shown.
+    pub const ALL: [TodoStatus; 4] = [
+        TodoStatus::Pending,
+        TodoStatus::InProgress,
+        TodoStatus::Completed,
+        TodoStatus::Cancelled,
+    ];
+
+    /// The serialized name of the status.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TodoStatus::Pending => "pending",
+            TodoStatus::InProgress => "in_progress",
+            TodoStatus::Completed => "completed",
+            TodoStatus::Cancelled => "cancelled",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -329,12 +361,7 @@ impl Message {
 
     /// The image a stub id (see [`ImageData::id`]) of this message points to.
     pub fn image(&self, image_id: &str) -> Option<&ImageData> {
-        let mut it = image_id.rsplitn(3, ':');
-        let (n, part, msg) = (
-            it.next()?.parse::<usize>().ok()?,
-            it.next()?.parse::<usize>().ok()?,
-            it.next()?,
-        );
+        let (msg, part, n) = parse_image_id(image_id)?;
         if msg != self.id {
             return None;
         }
@@ -346,9 +373,35 @@ impl Message {
     }
 }
 
+const BASE64_CHARS_PER_GROUP: usize = 4;
+const BASE64_BYTES_PER_GROUP: usize = 3;
+
+/// Decoded size in bytes of standard base64 text with `=` padding.
+fn base64_decoded_len(data: &str) -> u64 {
+    let pad = data.bytes().rev().take_while(|&b| b == b'=').count();
+    (data.len() / BASE64_CHARS_PER_GROUP * BASE64_BYTES_PER_GROUP).saturating_sub(pad) as u64
+}
+
+/// Separates the fields of an image stub id (see [`ImageData::id`]).
+const IMAGE_ID_SEPARATOR: char = ':';
+
+/// Builds the stub id `<message id>:<part index>:<image index>` (see [`ImageData::id`]).
+pub fn image_id(message_id: &str, part: usize, n: usize) -> String {
+    let sep = IMAGE_ID_SEPARATOR;
+    format!("{message_id}{sep}{part}{sep}{n}")
+}
+
+/// Splits an image stub id into message id, part index and image index.
+pub fn parse_image_id(id: &str) -> Option<(&str, usize, usize)> {
+    let mut it = id.rsplitn(3, IMAGE_ID_SEPARATOR);
+    let n = it.next()?.parse().ok()?;
+    let part = it.next()?.parse().ok()?;
+    Some((it.next()?, part, n))
+}
+
 /// Message id part of an image stub id (see [`ImageData::id`]).
 pub fn image_message_id(image_id: &str) -> Option<&str> {
-    image_id.rsplitn(3, ':').nth(2)
+    image_id.rsplitn(3, IMAGE_ID_SEPARATOR).nth(2)
 }
 
 /// Frontends never receive image bytes in messages: the server replaces each image by a stub
@@ -385,8 +438,7 @@ impl ImageData {
     /// Stub of this image with the given id.
     fn make_stub(&mut self, id: String) {
         if !self.is_stub() {
-            let pad = self.data.bytes().rev().take_while(|&b| b == b'=').count();
-            self.size = Some((self.data.len() / 4 * 3).saturating_sub(pad) as u64);
+            self.size = Some(base64_decoded_len(&self.data));
             self.data = String::new();
         }
         self.id = Some(id);
@@ -490,10 +542,10 @@ impl Part {
     /// Replaces the images of part `index` of message `message_id` by stubs (see [`ImageData`]).
     pub fn strip_image_data(&mut self, message_id: &str, index: usize) {
         match self {
-            Part::Image { image, .. } => image.make_stub(format!("{message_id}:{index}:0")),
+            Part::Image { image, .. } => image.make_stub(image_id(message_id, index, 0)),
             Part::Tool { images, .. } => {
                 for (n, i) in images.iter_mut().enumerate() {
-                    i.make_stub(format!("{message_id}:{index}:{n}"));
+                    i.make_stub(image_id(message_id, index, n));
                 }
             }
             _ => {}
@@ -622,10 +674,16 @@ pub struct CommandInfo {
     pub source: String,
 }
 
+/// Values of [`McpServerStatus::status`].
+pub const MCP_CONNECTED: &str = "connected";
+pub const MCP_CONNECTING: &str = "connecting";
+pub const MCP_FAILED: &str = "failed";
+pub const MCP_DISABLED: &str = "disabled";
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct McpServerStatus {
     pub name: String,
-    /// "connected" | "connecting" | "failed" | "disabled"
+    /// One of `MCP_CONNECTED`, `MCP_CONNECTING`, `MCP_FAILED`, `MCP_DISABLED`.
     pub status: String,
     #[serde(default)]
     pub error: Option<String>,
@@ -678,6 +736,12 @@ pub struct ClientFrame {
     #[serde(flatten)]
     pub req: Request,
 }
+
+/// Values of `Request::PeerCommand.command`.
+pub const PEER_COMMAND_PEERS: &str = "peers";
+pub const PEER_COMMAND_NAME: &str = "peers-name";
+pub const PEER_COMMAND_INBOX: &str = "peers-inbox";
+pub const PEER_COMMAND_OUTBOX: &str = "peers-outbox";
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "op", rename_all = "snake_case")]
@@ -851,7 +915,7 @@ pub enum Request {
         path: String,
     },
     /// Cross-session slash commands run for the user without an LLM turn.
-    /// `command`: "peers" | "peers-name" | "peers-inbox" | "peers-outbox". -> `{text}`
+    /// `command`: one of the `PEER_COMMAND_*` constants. -> `{text}`
     PeerCommand {
         session_id: String,
         command: String,

@@ -28,6 +28,8 @@ const DEFAULT_MAX_TOKENS: u64 = 32_000;
 const MIN_THINKING_BUDGET: u64 = 1024;
 /// Thinking budget when neither the options nor the effort give one.
 const DEFAULT_THINKING_BUDGET: u64 = 16_384;
+/// Thinking budget for the `xhigh` and `max` efforts.
+const XHIGH_THINKING_BUDGET: u64 = 32_000;
 /// Head-room for the visible answer when the budget is close to `max_tokens`.
 const ANSWER_HEADROOM: u64 = 4096;
 /// Anthropic tool ids: `^[a-zA-Z0-9_-]+$`, at most 64 characters.
@@ -145,7 +147,7 @@ fn effort_budget(effort: &str) -> Option<u64> {
         "minimal" => MIN_THINKING_BUDGET,
         "low" => 2048,
         "medium" => 8192,
-        "xhigh" | "max" => DEFAULT_MAX_TOKENS,
+        "xhigh" | "max" => XHIGH_THINKING_BUDGET,
         _ => DEFAULT_THINKING_BUDGET,
     })
 }
