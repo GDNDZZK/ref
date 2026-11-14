@@ -52,10 +52,13 @@ bool parseIconRequest(const QString& id, IconRequest& request)
 		hex.prepend(u'#');
 	}
 	const QColor parsed = QColor::fromString(hex);
-	if(parsed.isValid())
+	if(!parsed.isValid())
 	{
-		request.color = parsed;
+		// The colours come from our own QML, so this is a bug there; the icon stays visible in black.
+		qCWarning(lcIcons) << "invalid colour in icon request" << id;
+		return true;
 	}
+	request.color = parsed;
 	return true;
 }
 

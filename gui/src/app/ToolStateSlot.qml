@@ -70,7 +70,7 @@ Item {
 
 	Icon {
 		name: "lock"
-		color: Theme.warning
+		color: Theme.warningText
 		opacity: slot.toolState === ToolState.awaitingPermission ? 1 : 0
 
 		Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }

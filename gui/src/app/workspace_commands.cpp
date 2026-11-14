@@ -5,7 +5,7 @@ using namespace Qt::StringLiterals;
 
 void Workspace::updateCommandContext()
 {
-	m_commands.setContext({.connected = m_backend.state() == refgui::client::Backend::State::Connected,
+	m_commands.setContext({.connected = m_connection.isConnected(),
 	                       .hasSession = m_current != nullptr,
 	                       .liveSessions = int(m_directory.liveSessions().size()),
 	                       .splitView = m_split});

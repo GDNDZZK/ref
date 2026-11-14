@@ -37,6 +37,6 @@ const notifications = useNotificationsStore()
 }
 
 .allow :deep(.face) {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 </style>

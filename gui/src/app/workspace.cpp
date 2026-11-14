@@ -1,26 +1,23 @@
 #include "app/workspace.h"
 
+#include "client/result.h"
 #include "workspace/toast_text.h"
 
 #include <QJSEngine>
+#include <QLoggingCategory>
 
 #include <algorithm>
 #include <utility>
 
-using refgui::client::Backend;
 using refgui::client::Result;
 using namespace Qt::StringLiterals;
 
 namespace
 {
 
-Workspace* theInstance = nullptr;
+Q_LOGGING_CATEGORY(lcWorkspace, "refgui.app.workspace")
 
-// The loopback names under which a backend runs on this machine.
-bool isLoopback(const QString& host)
-{
-	return host == u"localhost"_s || host == refgui::client::LoopbackHost || host == u"::1"_s || host == u"[::1]"_s;
-}
+Workspace* theInstance = nullptr;
 
 } // namespace
 
@@ -29,15 +26,15 @@ Workspace::Workspace(refgui::cli::LaunchOptions options, QString settingsPath, Q
 	, m_options(std::move(options))
 	, m_cwd(m_options.directory)
 	, m_settings(std::move(settingsPath))
-	, m_backend(m_options.source, m_cwd)
+	, m_connection(m_options.source, m_cwd)
 {
-	connect(&m_backend, &Backend::stateChanged, this, [this] {
+	connect(&m_connection, &refgui::workspace::Connection::stateChanged, this, [this] {
 		emit connectionChanged();
 		emit backendChanged();
 		updateCommandContext();
 	});
-	connect(&m_backend, &Backend::connected, this, &Workspace::onBackendConnected);
-	connect(&m_backend.client(), &refgui::client::ServerClient::frameReceived, this, &Workspace::toastFrom);
+	connect(&m_connection, &refgui::workspace::Connection::connected, this, &Workspace::onBackendConnected);
+	connect(&m_connection, &refgui::workspace::Connection::toastReceived, this, &Workspace::toastFrom);
 	connect(&m_directory, &refgui::workspace::SessionDirectory::liveChanged, this, &Workspace::onLiveChanged);
 	connect(&m_directory, &refgui::workspace::SessionDirectory::historyLoadedChanged, this, &Workspace::historyLoadedChanged);
 	connect(&m_directory, &refgui::workspace::SessionDirectory::failed, this, [this](const QString& reason) { toast(refgui::workspace::ToastLevel::Error, reason); });
@@ -52,7 +49,7 @@ Workspace::Workspace(refgui::cli::LaunchOptions options, QString settingsPath, Q
 	connect(&m_commands, &refgui::workspace::CommandRegistry::unavailable, this, [this] { toastCommandUnavailable(); });
 
 	registerCommands();
-	m_backend.start();
+	m_connection.start();
 }
 
 // Closing the connection fails every request that is out and so resumes the coroutines waiting for them
@@ -62,7 +59,7 @@ Workspace::Workspace(refgui::cli::LaunchOptions options, QString settingsPath, Q
 // and goes before the children do, so they are deleted here.
 Workspace::~Workspace()
 {
-	m_backend.shutdown();
+	m_connection.shutdown();
 	qDeleteAll(findChildren<ChatSession*>(Qt::FindDirectChildrenOnly));
 }
 
@@ -118,14 +115,12 @@ void Workspace::setWindowActive(bool active)
 
 bool Workspace::isProtocolOutdated() const
 {
-	const bool connected = m_backend.state() == refgui::client::Backend::State::Connected;
-	return connected && m_backend.hello().protocol < refgui::proto::ProtocolVersion;
+	return m_connection.isProtocolOutdated();
 }
 
 bool Workspace::isBackendLocal() const
 {
-	const auto* remote = std::get_if<Backend::Mode::Remote>(&m_options.source);
-	return remote == nullptr || isLoopback(remote->endpoint.url.host());
+	return m_connection.isLocal();
 }
 
 // Restarting stops every session of the backend, so it waits until none is working.
@@ -141,15 +136,15 @@ bool Workspace::canRestartBackend() const
 
 QString Workspace::connectionState() const
 {
-	switch(m_backend.state())
+	switch(m_connection.state())
 	{
-	case Backend::State::Connecting:
+	case refgui::workspace::Connection::State::Connecting:
 		return u"connecting"_s;
-	case Backend::State::StartingBackend:
+	case refgui::workspace::Connection::State::StartingBackend:
 		return u"starting"_s;
-	case Backend::State::Connected:
+	case refgui::workspace::Connection::State::Connected:
 		return u"connected"_s;
-	case Backend::State::Disconnected:
+	case refgui::workspace::Connection::State::Disconnected:
 		return u"disconnected"_s;
 	}
 	Q_UNREACHABLE_RETURN(QString());
@@ -157,15 +152,15 @@ QString Workspace::connectionState() const
 
 QString Workspace::connectionText() const
 {
-	switch(m_backend.state())
+	switch(m_connection.state())
 	{
-	case Backend::State::Connecting:
+	case refgui::workspace::Connection::State::Connecting:
 		return tr("Connecting to the ref backend…");
-	case Backend::State::StartingBackend:
+	case refgui::workspace::Connection::State::StartingBackend:
 		return tr("Starting the ref backend…");
-	case Backend::State::Disconnected:
-		return tr("Disconnected: %1. Trying again…").arg(m_backend.reason());
-	case Backend::State::Connected:
+	case refgui::workspace::Connection::State::Disconnected:
+		return tr("Disconnected: %1. Trying again…").arg(m_connection.reason());
+	case refgui::workspace::Connection::State::Connected:
 		return {};
 	}
 	Q_UNREACHABLE_RETURN(QString());
@@ -184,32 +179,22 @@ void Workspace::onBackendConnected()
 	{
 		m_started = true;
 		openFirstSession();
-		return;
-	}
-	if(m_split)
-	{
-		m_backend.client().watchAll(true); // the new connection knows nothing of the old subscription
 	}
 }
 
-void Workspace::toastFrom(const refgui::proto::ServerFrame& frame)
+void Workspace::toastFrom(const refgui::proto::ToastFrame& frame)
 {
-	const auto* toastFrame = std::get_if<refgui::proto::ToastFrame>(&frame);
-	if(toastFrame == nullptr)
-	{
-		return;
-	}
 	using Level = refgui::proto::ToastFrame::Level;
-	switch(toastFrame->level)
+	switch(frame.level)
 	{
 	case Level::Info:
-		toast(refgui::workspace::ToastLevel::Info, toastFrame->text);
+		toast(refgui::workspace::ToastLevel::Info, frame.text);
 		return;
 	case Level::Warn:
-		toast(refgui::workspace::ToastLevel::Warn, toastFrame->text);
+		toast(refgui::workspace::ToastLevel::Warn, frame.text);
 		return;
 	case Level::Error:
-		toast(refgui::workspace::ToastLevel::Error, toastFrame->text);
+		toast(refgui::workspace::ToastLevel::Error, frame.text);
 		return;
 	}
 }
@@ -222,6 +207,20 @@ void Workspace::toast(const QString& level, const QString& text)
 void Workspace::toastCommandUnavailable()
 {
 	toast(refgui::workspace::ToastLevel::Info, tr("That command is not available now."));
+}
+
+QCoro::Task<> Workspace::detachUnwaited(ChatSession* session)
+{
+	const QString id = session->sessionId();
+	logDropped(co_await session->detach(), "detach"_L1, id);
+}
+
+void Workspace::logDropped(const Result<void>& result, QLatin1StringView action, const QString& sessionId)
+{
+	if(!result && !refgui::client::isConnectionLost(result.error()))
+	{
+		qCWarning(lcWorkspace).noquote() << action << "of" << sessionId << "failed:" << result.error();
+	}
 }
 
 void Workspace::openDialog(const QString& id, const QVariantMap& args)
@@ -249,7 +248,6 @@ QCoro::Task<> Workspace::openFirstSession()
 {
 	using Kind = refgui::cli::SessionStart::Kind;
 	const refgui::cli::SessionStart& start = m_options.start;
-	refgui::client::ServerClient& client = m_backend.client();
 
 	const auto fail = [this](const QString& reason) {
 		m_failure = reason;
@@ -260,31 +258,29 @@ QCoro::Task<> Workspace::openFirstSession()
 	QString sessionId = start.sessionId;
 	if(start.kind == Kind::Continue)
 	{
-		constexpr int NewestOnly = 1;
-		const auto history = co_await client.listHistory(m_cwd, NewestOnly);
-		if(!history)
+		const auto newest = co_await m_directory.newestIn(m_cwd);
+		if(!newest)
 		{
-			fail(history.error());
+			fail(newest.error());
 			co_return;
 		}
-		if(history->isEmpty())
+		if(!newest->has_value())
 		{
 			toast(refgui::workspace::ToastLevel::Info, tr("No earlier session in this directory. Started a new one."));
 		}
 		else
 		{
-			sessionId = history->first().id;
+			sessionId = (*newest)->id;
 		}
 	}
 	if(sessionId.isEmpty())
 	{
-		const auto created = co_await client.createSession(m_cwd, start.agent, start.model);
+		const auto created = co_await m_directory.create(m_cwd, start.agent, start.model);
 		if(!created)
 		{
 			fail(created.error());
 			co_return;
 		}
-		m_directory.update(*created);
 		sessionId = created->id;
 	}
 
@@ -311,7 +307,7 @@ ChatSession& Workspace::chat(const QString& sessionId)
 	ChatSession*& slot = m_chats[sessionId];
 	if(slot == nullptr)
 	{
-		slot = new ChatSession(m_backend, sessionId, this);
+		slot = new ChatSession(m_connection.backend(), m_config, sessionId, this);
 		connect(slot, &ChatSession::errorReported, this, [this, sessionId](const QString& text) {
 			// The current session draws its errors in the conversation; the others need a toast.
 			if(sessionId == currentId() && !m_split)
@@ -419,7 +415,7 @@ QCoro::Task<Workspace::Done> Workspace::show(QString sessionId)
 	if(supersededByNewerShow)
 	{
 		// The user has moved on to another session meanwhile.
-		static_cast<void>(co_await target.detach());
+		logDropped(co_await target.detach(), "detach"_L1, sessionId);
 		co_return Result<void>();
 	}
 	ChatSession* old = m_current;
@@ -427,7 +423,8 @@ QCoro::Task<Workspace::Done> Workspace::show(QString sessionId)
 	const bool shouldDetachOld = old != nullptr && old != &target && !m_split && old->isAttached() && !m_leaving.contains(old->sessionId());
 	if(shouldDetachOld)
 	{
-		static_cast<void>(co_await old->detach());
+		const QString oldId = old->sessionId();
+		logDropped(co_await old->detach(), "detach"_L1, oldId);
 	}
 	co_return Result<void>();
 }
@@ -439,13 +436,12 @@ void Workspace::newSession(const QString& cwd, const QJSValue& cb)
 
 QCoro::Task<> Workspace::createAndShow(QString cwd, Reply reply)
 {
-	const auto created = co_await m_backend.client().createSession(cwd, std::nullopt, std::nullopt);
+	const auto created = co_await m_directory.create(cwd, std::nullopt, std::nullopt);
 	if(!created)
 	{
 		report(reply, false, created.error());
 		co_return;
 	}
-	m_directory.update(*created);
 	const Result<void> shown = co_await show(created->id);
 	if(!shown)
 	{
@@ -468,7 +464,7 @@ QCoro::Task<> Workspace::closeTask(QString sessionId)
 {
 	const refgui::proto::SessionInfo* info = m_directory.find(sessionId);
 	const QString cwd = info == nullptr ? m_cwd : info->cwd;
-	const Result<void> closed = co_await m_backend.client().closeSession(sessionId);
+	const Result<void> closed = co_await m_directory.close(sessionId);
 	if(toastFailure(closed))
 	{
 		co_return;

@@ -245,7 +245,7 @@ Window {
 		id: splitButton
 		anchors { top: parent.top; right: themeToggle.left; topMargin: Theme.windowButtonMargin; rightMargin: Theme.windowButtonGap }
 		iconName: "split"
-		iconColor: Workspace.splitView ? Theme.accent : Theme.textMuted
+		iconColor: Workspace.splitView ? Theme.accentText : Theme.textMuted
 		Accessible.name: qsTr("Split view")
 		onClicked: Commands.run(CommandId.watch)
 	}

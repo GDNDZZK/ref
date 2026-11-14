@@ -53,6 +53,12 @@ SessionController::SessionController(client::Backend& backend, QObject* parent)
 		}
 	});
 	connect(&m_feed, &ConversationFeed::pendingChanged, this, &SessionController::turnInProgressChanged);
+	connect(&backend, &client::Backend::stateChanged, this, &SessionController::connectionChanged);
+}
+
+bool SessionController::isConnected() const
+{
+	return m_backend.state() == client::Backend::State::Connected;
 }
 
 bool SessionController::isBusy() const
@@ -163,6 +169,41 @@ QCoro::Task<SessionController::Result<proto::RemovedPrompt>> SessionController::
 {
 	Q_ASSERT(hasSession());
 	co_return co_await m_backend.client().undo(m_sessionId, std::move(messageId));
+}
+
+QCoro::Task<SessionController::Result<proto::RemovedPrompt>> SessionController::removeQueued(QString messageId)
+{
+	co_return co_await m_backend.client().removeQueued(m_sessionId, std::move(messageId));
+}
+
+QCoro::Task<SessionController::Result<void>> SessionController::runShell(QString command)
+{
+	co_return co_await m_backend.client().shell(m_sessionId, std::move(command));
+}
+
+QCoro::Task<SessionController::Result<QStringList>> SessionController::listFiles(QString query, int limit)
+{
+	co_return co_await m_backend.client().listFiles(m_info.cwd, std::move(query), limit);
+}
+
+QCoro::Task<SessionController::Result<QString>> SessionController::expandCommand(QString name, QString args)
+{
+	co_return co_await m_backend.client().expandCommand(std::move(name), std::move(args), m_info.cwd);
+}
+
+QCoro::Task<SessionController::Result<QByteArray>> SessionController::fetchImage(QString imageId)
+{
+	const auto image = co_await m_backend.client().getImage(m_sessionId, std::move(imageId));
+	if(!image)
+	{
+		co_return std::unexpected(image.error());
+	}
+	QByteArray::FromBase64Result decoded = QByteArray::fromBase64Encoding(image->data.toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
+	if(!decoded)
+	{
+		co_return std::unexpected(QStringLiteral("invalid image data"));
+	}
+	co_return std::move(decoded.decoded);
 }
 
 QCoro::Task<SessionController::Result<void>> SessionController::permissionReply(QString callId, bool allow, bool always)

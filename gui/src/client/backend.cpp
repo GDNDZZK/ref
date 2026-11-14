@@ -126,15 +126,16 @@ QCoro::Task<std::expected<Endpoint, QString>> Backend::connectOnce()
 		m_stop);
 }
 
-QCoro::Task<bool> Backend::tryConnect(const Endpoint& endpoint, std::chrono::milliseconds timeout)
+QCoro::Task<launcher::ConnectAttempt> Backend::tryConnect(const Endpoint& endpoint, std::chrono::milliseconds timeout)
 {
 	m_helloNotifyKinds = m_notifyKinds;
 	const Result<proto::HelloResult> hello = co_await m_client.open(endpoint, m_cwd, timeout, m_helloNotifyKinds);
-	if(hello)
+	if(!hello)
 	{
-		m_hello = *hello;
+		co_return std::unexpected(hello.error());
 	}
-	co_return hello.has_value();
+	m_hello = *hello;
+	co_return launcher::ConnectAttempt();
 }
 
 // The mock backend is started once and reused by reconnects, unless it died.

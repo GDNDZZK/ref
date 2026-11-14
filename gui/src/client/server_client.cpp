@@ -20,8 +20,6 @@ namespace
 Q_LOGGING_CATEGORY(lcClient, "refgui.client")
 
 const QString ClientName = u"ref-gui"_s;
-const QString NotConnected = u"not connected"_s;
-const QString ConnectionClosed = u"connection closed"_s;
 const QString BackendSilent = u"the backend stopped answering"_s;
 
 // The token goes in the URL as well as in Hello, the way ref-server's other clients send it.
@@ -171,8 +169,14 @@ void ServerClient::onHeartbeat()
 QCoro::Task<> ServerClient::ping()
 {
 	m_pingOutstanding = true;
-	static_cast<void>(co_await request(proto::request::ping()));
+	const Result<QJsonObject> answer = co_await request(proto::request::ping());
 	m_pingOutstanding = false;
+	// Nothing else to do on failure: the connection is gone already, or the dead-peer check in
+	// onHeartbeat() drops it when the backend stays silent.
+	if(!answer)
+	{
+		qCDebug(lcClient) << "ping failed:" << answer.error();
+	}
 }
 
 void ServerClient::stopHeartbeat()

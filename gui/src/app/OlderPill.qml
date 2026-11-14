@@ -64,7 +64,7 @@ Item {
 				width: Math.min(implicitWidth, pill.maxWidth - 2 * pill.innerPadding - (pill.iconSlot + pill.rowSpacing))
 				text: pill.hasError ? pill.error : qsTr("Load older messages")
 				elide: Text.ElideRight
-				color: pill.hasError ? Theme.danger : Theme.textMuted
+				color: pill.hasError ? Theme.dangerText : Theme.textMuted
 				font.pixelSize: Theme.smallFontSize
 			}
 		}

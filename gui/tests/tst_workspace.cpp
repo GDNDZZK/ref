@@ -1,4 +1,5 @@
 #include "app/workspace.h"
+#include "coro_test.h"
 #include "fake_backend.h"
 
 #include <QJSEngine>
@@ -75,6 +76,13 @@ public:
 
 	// While set, a question reply is refused with this text.
 	void failQuestionReply(const QString& error) { m_questionError = error; }
+
+	// The base64 text get_image answers with.
+	void setImageData(const QString& data) { m_imageData = data; }
+
+	// How the stub answers shutdown: with this error, or by closing the connection.
+	void failShutdown(const QString& error) { m_shutdownError = error; }
+	void closeOnShutdown() { m_closeOnShutdown = true; }
 
 	// While held, a detach is recorded but neither carried out nor answered.
 	void holdDetach(bool hold) { m_holdDetach = hold; }
@@ -237,6 +245,18 @@ private:
 		{
 			m_fake.fail(request, m_questionError);
 		}
+		else if(op == u"get_image"_s)
+		{
+			m_fake.respond(request, {{u"image"_s, QJsonObject{{u"mime"_s, u"image/png"_s}, {u"data"_s, m_imageData}}}});
+		}
+		else if(op == u"shutdown"_s && m_closeOnShutdown)
+		{
+			m_fake.socket()->close();
+		}
+		else if(op == u"shutdown"_s && !m_shutdownError.isEmpty())
+		{
+			m_fake.fail(request, m_shutdownError);
+		}
 		else if(op == u"shutdown"_s)
 		{
 			m_fake.respond(request, {});
@@ -254,6 +274,9 @@ private:
 	bool m_holdQuestionReply = false;
 	QList<QJsonObject> m_heldQuestionReplies;
 	QString m_questionError;
+	QString m_shutdownError;
+	QString m_imageData;
+	bool m_closeOnShutdown = false;
 	int m_created = 0;
 	int m_protocol = refgui::proto::ProtocolVersion;
 	bool m_holdDetach = false;
@@ -347,6 +370,7 @@ class TestWorkspace : public QObject
 
 private slots:
 	void opensTheSessionFromTheCommandLine();
+	void firstConnectionAsksForTheListsBeforeAttaching();
 	void newSessionBecomesCurrentAndLetsGoOfTheOld();
 	void openingAnotherSessionSwitches();
 	void closingTheCurrentSessionOpensAnother();
@@ -380,6 +404,9 @@ private slots:
 	void sessionsHaveTheMethodsCommandsCall();
 	void undoPutsThePromptBackIntoTheInputBox();
 	void oldBackendOffersARestart();
+	void refusedRestartIsAToast();
+	void invalidImageDataIsAnError();
+	void restartClosingTheConnectionIsQuiet();
 	void commandsFollowTheState();
 };
 
@@ -394,6 +421,21 @@ void TestWorkspace::opensTheSessionFromTheCommandLine()
 	QVERIFY(attaches.first().value(u"foreground"_s).toBool());
 	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 1);
 	QTRY_VERIFY(!f.workspace->config()->agents().isEmpty());
+}
+
+// The lists and the configuration are asked for first; then the session from the command line is attached.
+void TestWorkspace::firstConnectionAsksForTheListsBeforeAttaching()
+{
+	Fixture f;
+	QTRY_VERIFY(f.workspace->current()->isAttached());
+
+	QStringList ops;
+	for(const QJsonObject& request : f.fake.requests())
+	{
+		ops.append(request.value(u"op"_s).toString());
+	}
+	const QStringList expected{u"hello"_s, u"list_sessions"_s, u"list_history"_s, u"get_config"_s, u"mcp_status"_s, u"attach"_s};
+	QCOMPARE(ops.mid(0, expected.size()), expected);
 }
 
 void TestWorkspace::newSessionBecomesCurrentAndLetsGoOfTheOld()
@@ -670,7 +712,7 @@ void TestWorkspace::aRevivedTileLeavesOnItsOwnTimer()
 	TileStage stage(&tiles);
 	const int lingerMs = 400;
 	stage.setLingerMs(lingerMs);
-	ChatSession session(f.workspace->backend(), u"ses_x"_s);
+	ChatSession session(f.workspace->connection().backend(), *f.workspace->config(), u"ses_x"_s);
 	tiles.setTiles({&session});
 	tiles.setTiles({}); // leaves
 	QTest::qWait(lingerMs / 2);
@@ -1071,6 +1113,55 @@ void TestWorkspace::oldBackendOffersARestart()
 
 	f.workspace->restartBackend();
 	QTRY_COMPARE(f.stub.requests(u"shutdown"_s).size(), 1);
+}
+
+void TestWorkspace::invalidImageDataIsAnError()
+{
+	Fixture f;
+	ChatSession* session = f.workspace->session(u"ses_a"_s);
+	QTRY_VERIFY(session->isAttached());
+
+	f.stub.setImageData(u"not base64!"_s);
+	const auto invalid = await(session->fetchImage(u"img_1"_s));
+	QVERIFY(invalid.has_value() && !invalid->has_value());
+	QCOMPARE(invalid->error(), u"invalid image data"_s);
+
+	f.stub.setImageData(QString::fromLatin1(QByteArray("png bytes").toBase64()));
+	const auto valid = await(session->fetchImage(u"img_1"_s));
+	QVERIFY(valid.has_value() && valid->has_value());
+	QCOMPARE(**valid, QByteArray("png bytes"));
+}
+
+void TestWorkspace::refusedRestartIsAToast()
+{
+	Fixture f(refgui::proto::ProtocolVersion - 1);
+	QTRY_VERIFY(f.workspace->canRestartBackend());
+	f.stub.failShutdown(u"sessions are busy"_s);
+	QSignalSpy toasts(f.workspace.get(), &Workspace::toastRequested);
+
+	f.workspace->restartBackend();
+
+	QTRY_COMPARE(toasts.count(), 1);
+	QCOMPARE(toasts.first().at(0).toString(), refgui::workspace::ToastLevel::Error);
+	QCOMPARE(toasts.first().at(1).toString(), u"sessions are busy"_s);
+}
+
+// The backend going away is what a restart asks for: the request's "connection closed" is no error.
+void TestWorkspace::restartClosingTheConnectionIsQuiet()
+{
+	Fixture f(refgui::proto::ProtocolVersion - 1);
+	QTRY_VERIFY(f.workspace->canRestartBackend());
+	f.stub.closeOnShutdown();
+	QSignalSpy toasts(f.workspace.get(), &Workspace::toastRequested);
+
+	f.workspace->restartBackend();
+
+	QTRY_COMPARE(f.stub.requests(u"shutdown"_s).size(), 1);
+	QTest::qWait(QuietMs);
+	for(const QList<QVariant>& toast : std::as_const(toasts))
+	{
+		QVERIFY2(toast.at(0).toString() != refgui::workspace::ToastLevel::Error, qPrintable(toast.at(1).toString()));
+	}
 }
 
 void TestWorkspace::commandsFollowTheState()

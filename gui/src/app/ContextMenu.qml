@@ -63,7 +63,7 @@ Popup {
 					id: label
 					anchors { left: parent.left; leftMargin: menu.textInset; verticalCenter: parent.verticalCenter }
 					text: entry.modelData.text
-					color: entry.modelData.danger ? Theme.danger : Theme.text
+					color: entry.modelData.danger ? Theme.dangerText : Theme.text
 					font.pixelSize: Theme.secondaryFontSize
 				}
 				HoverHandler {

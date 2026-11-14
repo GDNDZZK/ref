@@ -136,9 +136,15 @@ bool ConversationModel::isExpandedByDefault(const Block& block) const
 		return m_reasoningExpanded;
 	case Block::Kind::Tool:
 		return m_toolsExpanded;
-	default:
+	case Block::Kind::User:
+	case Block::Kind::Markdown:
+	case Block::Kind::Code:
+	case Block::Kind::Error:
+	case Block::Kind::Image:
+	case Block::Kind::Meta:
 		return false;
 	}
+	Q_UNREACHABLE_RETURN(false);
 }
 
 bool ConversationModel::isExpanded(const Block& block) const

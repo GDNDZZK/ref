@@ -4,12 +4,16 @@ qt_add_library(refgui_workspace STATIC
 	backend_config.h
 	command_registry.cpp
 	command_registry.h
+	connection.cpp
+	connection.h
 	session_directory.cpp
 	session_directory.h
 	session_list_model.cpp
 	session_list_model.h
 	settings.cpp
 	settings.h
+	state_paths.cpp
+	state_paths.h
 	toast_text.cpp
 	toast_text.h
 )

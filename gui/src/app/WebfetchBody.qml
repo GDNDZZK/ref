@@ -21,7 +21,7 @@ ToolBodyBase {
 			anchors.verticalCenter: parent.verticalCenter
 			text: body.url
 			elide: Text.ElideMiddle
-			color: Theme.info
+			color: Theme.infoText
 			font.family: Theme.monoFamily
 			font.pixelSize: Theme.smallFontSize
 		}
@@ -49,6 +49,7 @@ ToolBodyBase {
 			visible: body.meta.status !== undefined
 			text: String(body.meta.status)
 			tint: body.meta.status >= body.httpClientErrorFrom ? Theme.danger : Theme.textMuted
+			textTint: body.meta.status >= body.httpClientErrorFrom ? Theme.dangerText : Theme.textMuted
 		}
 		ToolChip {
 			visible: Fields.stringOf(body.meta, "content_type") !== ""

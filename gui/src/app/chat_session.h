@@ -4,6 +4,7 @@
 #include "app/composer_model_type.h"
 #include "app/question_prompt_type.h"
 #include "client/backend.h"
+#include "client/result.h"
 #include "composer/composer_model.h"
 #include "proto/todo_progress.h"
 #include "session/question_prompt.h"
@@ -73,7 +74,7 @@ class ChatSession : public QObject
 
 public:
 	// `backend` is shared by all sessions of the window and outlives them.
-	ChatSession(refgui::client::Backend& backend, QString sessionId, QObject* parent = nullptr);
+	ChatSession(refgui::client::Backend& backend, const refgui::workspace::BackendConfig& config, QString sessionId, QObject* parent = nullptr);
 
 	const QString& sessionId() const { return m_sessionId; }
 	bool isAttached() const { return m_controller.isAttached(); }
@@ -195,7 +196,6 @@ private:
 	// The key press typed a printable character.
 	static bool isTypedText(const QString& text);
 
-	refgui::client::Backend& m_backend;
 	QString m_sessionId;
 	refgui::session::SessionController m_controller;
 	refgui::composer::ComposerModel m_composer;

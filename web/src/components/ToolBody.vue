@@ -187,7 +187,7 @@ function open(target: string): void {
 .url {
   min-width: 0;
   overflow-wrap: anywhere;
-  color: var(--info);
+  color: var(--info-text);
 }
 
 .open {
@@ -218,7 +218,7 @@ function open(target: string): void {
 }
 
 .info {
-  color: var(--info);
+  color: var(--info-text);
 }
 
 .strong {
