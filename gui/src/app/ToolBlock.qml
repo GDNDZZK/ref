@@ -41,8 +41,8 @@ Block {
 	readonly property bool hasDiffPreview: (toolName === "edit" || toolName === "write") && Fields.stringOf(meta, "diff") !== ""
 	readonly property bool hasQuestionSummary: toolName === "question" && ToolInfo.questionSummary(inputObject, meta).length > 0
 	readonly property bool open: alwaysOpen || ((expanded || awaitingPermission) && hasDetails)
+	readonly property bool inactive: toolState === ToolState.denied || toolState === ToolState.cancelled
 	readonly property bool showsTime: columnWidth >= timeShownFromWidth
-	readonly property int timeShownFromWidth: 560
 	readonly property int headerHeight: 38
 	readonly property int cardPadding: Theme.toolBodyPaddingX
 	readonly property int itemSpacing: 10
