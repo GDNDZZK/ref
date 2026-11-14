@@ -106,9 +106,42 @@ export function relativeTime(then: number, now: number): RelativeTime {
   return { kind: 'date', date, withYear: date.getFullYear() !== new Date(now).getFullYear() }
 }
 
-// Case-insensitive search over title, name, directory and id; empty `query` keeps everything.
-export function matchesQuery(info: SessionInfo, query: string): boolean {
+// Walks `parent` up the live session list to find the root task for a spawned session.
+// Returns undefined for user-created sessions (`parent === null`).
+export function rootTaskOf(
+  sessions: readonly SessionInfo[],
+  info: SessionInfo,
+): { id: string; name: string } | undefined {
+  if (!info.parent) return undefined
+  const byId = new Map(sessions.map((session) => [session.id, session]))
+  const visited = new Set<string>([info.id])
+  let current: SessionInfo = info
+  while (current.parent) {
+    if (visited.has(current.parent)) return { id: current.id, name: liveLabel(current) }
+    const parent = byId.get(current.parent)
+    if (!parent) return { id: current.parent, name: current.parent }
+    visited.add(parent.id)
+    current = parent
+  }
+  return { id: current.id, name: liveLabel(current) }
+}
+
+export function creatorLabel(byId: ReadonlyMap<string, SessionInfo>, parentId: string): string {
+  const parent = byId.get(parentId)
+  return parent ? liveLabel(parent) : parentId
+}
+
+export function creatorKeywords(byId: ReadonlyMap<string, SessionInfo>, info: SessionInfo): string {
+  if (!info.parent) return ''
+  const name = creatorLabel(byId, info.parent)
+  return name === info.parent ? info.parent : `${name} ${info.parent}`
+}
+
+// Case-insensitive search over title, name, directory, id and creator; empty `query` keeps everything.
+export function matchesQuery(info: SessionInfo, query: string, creator = ''): boolean {
   const wanted = query.trim().toLowerCase()
   if (wanted === '') return true
-  return [info.title, info.name, info.cwd, info.id].some((field) => field.toLowerCase().includes(wanted))
+  return [info.title, info.name, info.cwd, info.id, info.parent ?? '', creator].some((field) =>
+    field.toLowerCase().includes(wanted),
+  )
 }

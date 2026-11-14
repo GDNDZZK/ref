@@ -5,12 +5,20 @@ import { computed, nextTick, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useNow } from '../composables/useNow.ts'
 import type { ChatSession } from '../model/chatSession.ts'
-import { liveLabel, needsAttention, rowState, runningTime, todoProgress } from '../shell/sessionRow.ts'
+import {
+  liveLabel,
+  needsAttention,
+  rootTaskOf,
+  rowState,
+  runningTime,
+  todoProgress,
+} from '../shell/sessionRow.ts'
+import { useWorkspaceStore } from '../stores/workspace.ts'
+import { paletteColorFor } from '../theme/agentColor.ts'
 import AlertBadge from './AlertBadge.vue'
 import Icon from './Icon.vue'
 import SessionDot from './SessionDot.vue'
 import SessionPane from './SessionPane.vue'
-
 const BADGE_SIZE = 14
 const PRESS_TARGETS = 'button, a, summary'
 const NO_DESELECT_TARGETS = `${PRESS_TARGETS}, input, textarea, [role="button"], .composer-area`
@@ -24,8 +32,8 @@ const props = defineProps<{
 const emit = defineEmits<{ focus: []; unfocus: []; zoom: [] }>()
 
 const { t } = useI18n()
+const workspace = useWorkspaceStore()
 const now = useNow()
-
 // A press on a button focuses the tile only once the click is through: the composer unfolding
 // would move the button from under the pointer, and the click would be lost.
 // The press itself moves the keyboard focus off the box, so a tile that took the focus with this
@@ -59,12 +67,15 @@ const state = computed(() => (info.value ? rowState(info.value) : 'idle'))
 const title = computed(() => (info.value ? liveLabel(info.value) : props.session.id))
 const progress = computed(() => todoProgress(info.value?.todos))
 const elapsed = computed(() => (info.value ? runningTime(info.value, now.value) : undefined))
+const rootTask = computed(() => (info.value ? rootTaskOf(workspace.live, info.value) : undefined))
+const rootTint = computed(() => (rootTask.value ? paletteColorFor(rootTask.value.id) : undefined))
 </script>
 
 <template>
   <div
     class="tile"
-    :class="{ focused, zoomed, hidden }"
+    :class="{ focused, zoomed, hidden, tinted: !!rootTint }"
+    :style="rootTint ? { '--root-tint': rootTint } : undefined"
     :data-tile="session.id"
     @pointerdown.capture="onPointerDown"
     @click="onClick"
@@ -75,8 +86,9 @@ const elapsed = computed(() => (info.value ? runningTime(info.value, now.value) 
       :style="{ '--clear-left': `${clearance.left}px`, '--clear-right': `${clearance.right}px` }"
       @dblclick="emit('zoom')"
     >
-      <SessionDot :state="state" />
+      <SessionDot :state="state" :tint="!focused ? rootTint : undefined" />
       <span class="title">{{ title }}</span>
+      <span v-if="rootTask" class="root-chip" :title="rootTask.name">⟲ {{ rootTask.name }}</span>
       <span v-if="needsAttention(state)" class="mark">
         <Icon v-if="state === 'permission'" icon="lock-16" class="lock" />
         <Icon v-else-if="state === 'question'" icon="question-16" class="lock" />
@@ -121,6 +133,10 @@ const elapsed = computed(() => (info.value ? runningTime(info.value, now.value) 
 
 .tile:not(.zoomed) {
   --page-padding: var(--tile-padding);
+}
+
+.tile.tinted:not(.focused):not(.zoomed) {
+  box-shadow: inset 0 0 0 1px var(--root-tint);
 }
 
 .tile.focused {
@@ -176,6 +192,20 @@ const elapsed = computed(() => (info.value ? runningTime(info.value, now.value) 
   white-space: nowrap;
 }
 
+.root-chip {
+  flex: 0 1 auto;
+  max-width: 120px;
+  overflow: hidden;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--root-tint) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--root-tint) 55%, transparent);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .progress,
 .elapsed {
   flex: none;

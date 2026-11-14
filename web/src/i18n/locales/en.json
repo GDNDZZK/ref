@@ -256,7 +256,13 @@
     },
     "sessions": {
       "title": "Sessions",
-      "search": "Search sessions"
+      "search": "Search sessions",
+      "filterLabel": "Filter by creator",
+      "filterAll": "All",
+      "filterUser": "User-created",
+      "filterByCreator": "By creator",
+      "filterByName": "By {name}",
+      "createdBy": "by {name}"
     },
     "mcp": {
       "title": "MCP servers",
