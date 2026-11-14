@@ -260,14 +260,14 @@ async fn open_running(cli: &Cli, key: &Key, cwd: &str) -> anyhow::Result<bool> {
             continue;
         }
         let url = launch::key_url(&host, record.port, key.text(), Some(cwd), record.tls);
-        if record.tls
-            && let Ok(cert) = tls::cert_path()
-            && let Ok(der) = tls_pin::load_cert_der(&cert)
-        {
-            say!(
-                "certificate SHA-256 {}",
-                tls_pin::cert_fingerprint(der.as_ref())
-            );
+        if record.tls {
+            match tls::cert_path().and_then(|cert| tls_pin::load_cert_der(&cert)) {
+                Ok(der) => say!(
+                    "certificate SHA-256 {}",
+                    tls_pin::cert_fingerprint(der.as_ref())
+                ),
+                Err(err) => say_err!("could not read TLS certificate fingerprint: {err:#}"),
+            }
         }
         println!(
             "{} is already running on port {} (pid {}): {url}",
