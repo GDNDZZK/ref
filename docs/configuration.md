@@ -254,7 +254,7 @@ You can change any built-in agent by defining an agent with the same name; only 
 | `permission` | | Rules evaluated after the global rules, so they take priority. |
 | `delay` | | Delays evaluated before the global ones. |
 | `creatable` | `true` | **ref** Other sessions may create sessions with this agent. |
-| `can_spawn` | `false` (`true` for `build`) | **ref** The agent gets the `create_session` and `close_session` tools. `spawn` also works. |
+| `can_spawn` | `false` (`true` for `build`) | **ref** The agent gets the `create_session`, `resume_session` and `close_session` tools. `spawn` also works. |
 | `color` | | Color of the agent's name in the TUI. |
 | `hidden` | `false` | Not listed in the TUI and not offered to other sessions. |
 | `mode` | | opencode's `primary` / `subagent` / `all`. ref does not restrict agents by mode. It matters only when there is no `build` agent and no valid `default_agent`: the first agent that is not `subagent` and not hidden becomes the default. |

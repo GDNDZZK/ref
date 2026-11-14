@@ -103,11 +103,11 @@
 
 这些工具在后端内部运行，因此会话之间的消息能可靠送达。会话名可以是任意 Unicode 文本。
 
-- `list_sessions`：可以发送消息的运行中会话：名称、id、智能体、状态、前台或后台、目录和标题。
+- `list_sessions`：后端中的会话：名称、id、智能体、状态、前台或后台、目录、标题和创建者。设置 `history: true` 可包含已关闭的历史会话（最新 200 条），或用 `creator` 按 `"user"` 或创建者会话的名称/id 过滤。
 - `send_message`：向另一个会话发送消息。忙碌的会话会在当前步骤结束后读取。
 - `message_status`：已发送的消息是仍在排队、已送达还是已读。
-- `read_session`：分页读取另一个会话的消息，最新的在前。
-- `create_session`、`close_session`：仅供设置了 [`can_spawn`](configuration.zh-CN.md#智能体字段) 的智能体使用。创建的会话在后台运行。使用 `must_report` 时，如果创建的会话停止时没有发送过消息，它会收到提醒去汇报。`close_session` 拒绝关闭前台会话。
+- `read_session`：分页读取另一个会话（运行中或已关闭的历史会话）的消息，最新的在前。
+- `create_session`、`resume_session`、`close_session`：仅供设置了 [`can_spawn`](configuration.zh-CN.md#智能体字段) 的智能体使用。创建的会话在后台运行。使用 `must_report` 时，如果创建的会话停止时没有发送过消息，它会收到提醒去汇报。`resume_session` 会恢复已关闭的历史会话（并可选发送一条提示词消息）。`close_session` 拒绝关闭前台会话。
 
 ## MCP 工具
 

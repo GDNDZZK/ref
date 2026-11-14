@@ -466,6 +466,8 @@ mod tests {
         );
         assert!(a.contains(&"create_session".to_string()));
         assert!(!b.contains(&"create_session".to_string()));
+        assert!(a.contains(&"resume_session".to_string()));
+        assert!(!b.contains(&"resume_session".to_string()));
         assert!(b.contains(&"send_message".to_string()));
     }
 }
