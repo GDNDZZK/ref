@@ -6,12 +6,14 @@ use std::time::Duration;
 
 use axum::Json;
 use axum::Router;
+use axum::extract::connect_info::Connected;
 use axum::extract::{ConnectInfo, Query, State};
 use axum::http::header::{ACCEPT_ENCODING, CACHE_CONTROL, CONTENT_ENCODING, CONTENT_TYPE, VARY};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri};
 use axum::middleware;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
+use axum::serve::IncomingStream;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
@@ -67,6 +69,22 @@ fn is_local_caller(peer: &SocketAddr) -> bool {
     peer.ip().to_canonical().is_loopback()
 }
 
+/// Peer address extracted from any `Listener<Addr = SocketAddr>` (plain TCP or TLS).
+#[derive(Clone, Copy)]
+pub struct ClientAddr(pub SocketAddr);
+
+impl Connected<IncomingStream<'_, tokio::net::TcpListener>> for ClientAddr {
+    fn connect_info(stream: IncomingStream<'_, tokio::net::TcpListener>) -> Self {
+        ClientAddr(*stream.remote_addr())
+    }
+}
+
+impl Connected<IncomingStream<'_, crate::tls::TlsListener>> for ClientAddr {
+    fn connect_info(stream: IncomingStream<'_, crate::tls::TlsListener>) -> Self {
+        ClientAddr(*stream.remote_addr())
+    }
+}
+
 #[derive(Deserialize)]
 struct PingQuery {
     nonce: Option<String>,
@@ -84,7 +102,7 @@ struct Ping {
 /// pairs to collect: it is refused.
 async fn ping(
     State(state): State<Arc<AppState>>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    ConnectInfo(ClientAddr(peer)): ConnectInfo<ClientAddr>,
     Query(query): Query<PingQuery>,
 ) -> Response {
     if !is_local_caller(&peer) {
