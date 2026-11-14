@@ -1065,6 +1065,7 @@ async fn net_hello_and_frames() {
                     ok: true,
                     result: json!({}),
                     error: None,
+                    code: None,
                 },
                 // Bigger than tungstenite's 16 MiB default frame limit (snapshots with many images).
                 _ => ServerFrame::Response {
@@ -1072,6 +1073,7 @@ async fn net_hello_and_frames() {
                     ok: true,
                     result: json!({"sessions": [], "pad": "x".repeat(OVERSIZED_FRAME_BYTES)}),
                     error: None,
+                    code: None,
                 },
             };
             ws.send(M::text(serde_json::to_string(&reply).unwrap()))
@@ -1391,6 +1393,7 @@ fn fail_pending(app: &mut App, pred: impl Fn(&crate::app::Pending) -> bool, err:
         ok: false,
         result: serde_json::Value::Null,
         error: Some(err.into()),
+        code: None,
     }));
 }
 
@@ -1809,6 +1812,7 @@ fn undo_puts_prompt_and_images_back_into_editor() {
             ok: true,
             result,
             error: None,
+            code: None,
         }));
     };
     // /undo (= ctrl+x u): the last human prompt, with its image.
@@ -2664,6 +2668,7 @@ fn answer_mcp(app: &mut App, servers: &[McpServerStatus]) {
         ok: true,
         result: json!({ "servers": servers }),
         error: None,
+        code: None,
     }));
 }
 
@@ -2876,6 +2881,7 @@ fn mcp_status_fallback_and_polling() {
         ok: false,
         result: json!(null),
         error: Some("unknown op".into()),
+        code: None,
     }));
     assert!(
         app.mcp_fallback && app.toasts.items.is_empty(),
@@ -2904,6 +2910,7 @@ fn mcp_status_fallback_and_polling() {
         ok: true,
         result: json!({ "config": cfg }),
         error: None,
+        code: None,
     }));
     assert!(app.mcp_poll_at.is_none(), "all settled: no more polling");
     assert_eq!(app.mcp[2].state, crate::ui::mcp::McpState::Connected);
@@ -3706,6 +3713,7 @@ fn respond(app: &mut App, pred: impl Fn(&crate::app::Pending) -> bool, result: s
         ok: true,
         result,
         error: None,
+        code: None,
     }));
 }
 
@@ -4171,6 +4179,7 @@ fn respond_to_older(app: &mut App, id: u64, result: serde_json::Value) {
         ok: true,
         result,
         error: None,
+        code: None,
     }));
 }
 
@@ -4270,6 +4279,7 @@ fn history_page_error_stops_further_requests() {
         ok: false,
         result: json!(null),
         error: Some("gone".into()),
+        code: None,
     }));
     render(&mut app, 100, 30);
     app.load_older();

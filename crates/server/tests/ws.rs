@@ -22,6 +22,15 @@ async fn response(
     id: u64,
     other: &mut Vec<ServerFrame>,
 ) -> (bool, Value, Option<String>) {
+    let (ok, result, error, _) = response_coded(ws, id, other).await;
+    (ok, result, error)
+}
+
+async fn response_coded(
+    ws: &mut Ws,
+    id: u64,
+    other: &mut Vec<ServerFrame>,
+) -> (bool, Value, Option<String>, Option<String>) {
     let fut = async {
         while let Some(m) = ws.next().await {
             let Ok(WsMsg::Text(t)) = m else { continue };
@@ -32,7 +41,8 @@ async fn response(
                     ok,
                     result,
                     error,
-                } if rid == id => return (ok, result, error),
+                    code,
+                } if rid == id => return (ok, result, error, code),
                 f => other.push(f),
             }
         }
@@ -389,14 +399,20 @@ async fn list_dirs_answers_with_sorted_sub_directories() {
 
     // Without a configured home directory `~` is just a missing name.
     send(&mut ws, 4, Request::ListDirs { path: "~".into() }).await;
-    let (ok, _, err) = response(&mut ws, 4, &mut other).await;
+    let (ok, _, err, code) = response_coded(&mut ws, 4, &mut other).await;
     assert!(!ok && err.is_some());
+    assert_eq!(code.as_deref(), Some(ref_proto::ERR_NOT_FOUND));
 
-    // Errors: missing path, a file, empty path.
-    for (id, path) in [(5, "nowhere"), (6, "file.txt"), (7, "  ")] {
+    // Errors: missing path gets ERR_NOT_FOUND; a file or empty path has no code.
+    for (id, path, expected_code) in [
+        (5, "nowhere", Some(ref_proto::ERR_NOT_FOUND)),
+        (6, "file.txt", None),
+        (7, "  ", None),
+    ] {
         send(&mut ws, id, Request::ListDirs { path: path.into() }).await;
-        let (ok, _, err) = response(&mut ws, id, &mut other).await;
+        let (ok, _, err, code) = response_coded(&mut ws, id, &mut other).await;
         assert!(!ok && err.is_some(), "{path}");
+        assert_eq!(code.as_deref(), expected_code, "{path}");
     }
 }
 

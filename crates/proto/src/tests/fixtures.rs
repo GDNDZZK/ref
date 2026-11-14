@@ -368,6 +368,7 @@ fn response(id: u64, result: Value) -> ServerFrame {
         ok: true,
         result,
         error: None,
+        code: None,
     }
 }
 
@@ -404,6 +405,7 @@ fn server_frames() -> Samples<ServerFrame> {
                 ok: false,
                 result: Value::Null,
                 error: Some("Directory does not exist: /home/user/nowhere".into()),
+                code: Some(ERR_NOT_FOUND.into()),
             },
         ),
         ("response_hello", response(1, hello_result())),

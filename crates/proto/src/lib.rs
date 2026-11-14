@@ -17,8 +17,16 @@ use ts_rs::TS;
 pub const PROTOCOL_VERSION: u32 = 3;
 
 /// The error of a `QuestionReply` for a question that is not pending (answered elsewhere
-/// already). Clients compare with it to drop the question silently.
+/// already). Clients compare with `ERR_NO_PENDING_QUESTION` first, falling back to this text.
 pub const NO_PENDING_QUESTION: &str = "No pending question with that id.";
+
+/// The error of a `PermissionReply` for a request that is not pending.
+pub const NO_PENDING_PERMISSION: &str = "No pending permission request with that id.";
+
+/// Machine-readable error codes carried in `ServerFrame::Response::code`.
+pub const ERR_NO_PENDING_QUESTION: &str = "no_pending_question";
+pub const ERR_NO_PENDING_PERMISSION: &str = "no_pending_permission";
+pub const ERR_NOT_FOUND: &str = "not_found";
 
 fn home() -> std::path::PathBuf {
     std::env::var_os("HOME")
@@ -843,14 +851,13 @@ pub enum Request {
     },
     /// Answer a pending question. `answers` has one entry per question, in order; each entry
     /// lists the chosen labels or the typed text. `None` dismisses the question. The first
-    /// reply wins; a later one fails with "No pending question with that id."
+    /// reply wins; a later one fails with `ERR_NO_PENDING_QUESTION`.
     QuestionReply {
         session_id: String,
         call_id: String,
         #[serde(default)]
         answers: Option<Vec<Vec<String>>>,
     },
-    /// Change model for this session only (not remembered for new sessions).
     SetModel {
         session_id: String,
         model: ModelRef,
@@ -940,11 +947,10 @@ pub enum Request {
     },
     /// Sub-directories of `path` for a directory picker: `~` is expanded and a relative path
     /// is taken from the connection's cwd. -> `{path: <absolute, normalized>, dirs: [String]}`
-    /// (names only, sorted)
+    /// (names only, sorted). A missing directory fails with `ERR_NOT_FOUND`.
     ListDirs {
         path: String,
     },
-    /// Shut the backend down (used by `ref-server --stop`).
     Shutdown,
     Ping,
 }
@@ -966,8 +972,12 @@ pub enum ServerFrame {
         result: Value,
         #[serde(default)]
         error: Option<String>,
+        /// Machine-readable error code (`ERR_*` constants); only on `ok == false`, and not for
+        /// every error.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        code: Option<String>,
     },
-    /// Event scoped to a session the client is attached to / watching.
     Event {
         session_id: String,
         event: SessionEvent,

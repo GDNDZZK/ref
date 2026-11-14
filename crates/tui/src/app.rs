@@ -109,11 +109,35 @@ pub enum Pending {
     Mcp,
     /// `GetConfig` used only to refresh MCP status lines (fallback polling).
     ConfigMcp,
+    /// `PermissionReply`: drops stale-request errors silently.
+    Permission,
     /// `QuestionReply`: closes the dialog, or shows why the answers were refused.
     Question {
         sid: String,
         call_id: String,
     },
+}
+
+/// Error from a `ServerFrame::Response` with `ok: false`.
+#[derive(Debug, Clone)]
+struct ReplyError {
+    message: String,
+    code: Option<String>,
+}
+
+impl std::fmt::Display for ReplyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl From<&str> for ReplyError {
+    fn from(message: &str) -> Self {
+        Self {
+            message: message.to_string(),
+            code: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -718,6 +742,7 @@ impl App {
                 ok,
                 result,
                 error,
+                code,
             } => {
                 let Some(p) = self.pending.remove(&id) else {
                     return;
@@ -725,7 +750,13 @@ impl App {
                 if ok {
                     self.on_response(p, result);
                 } else {
-                    self.on_error(p, error.unwrap_or_else(|| "request failed".into()));
+                    self.on_error(
+                        p,
+                        ReplyError {
+                            message: error.unwrap_or_else(|| "request failed".into()),
+                            code,
+                        },
+                    );
                 }
             }
             ServerFrame::Event { session_id, event } => self.on_event(session_id, event),
@@ -736,7 +767,7 @@ impl App {
         }
     }
 
-    fn on_error(&mut self, p: Pending, err: String) {
+    fn on_error(&mut self, p: Pending, err: ReplyError) {
         if matches!(p, Pending::Closed { .. }) && self.quit_after_close {
             self.quit = true;
             return;
@@ -811,13 +842,23 @@ impl App {
                 }
             }
             Pending::ConfigMcp => self.mcp_inflight = false,
+            Pending::Permission => {
+                let gone = err.code.as_deref() == Some(ref_proto::ERR_NO_PENDING_PERMISSION)
+                    || err.message == ref_proto::NO_PENDING_PERMISSION; // remove fallback with protocol 5
+                if !gone {
+                    self.toasts.error(err.message);
+                }
+            }
             Pending::Question { sid, call_id } => {
-                if err == NO_PENDING_QUESTION {
+                let answered_elsewhere = err.code.as_deref()
+                    == Some(ref_proto::ERR_NO_PENDING_QUESTION)
+                    || err.message == NO_PENDING_QUESTION; // remove fallback with protocol 5
+                if answered_elsewhere {
                     // Answered somewhere else: nothing to say.
                     self.close_question(&sid, &call_id);
                 } else if let Some(q) = self.question.as_mut().filter(|q| q.call_id == call_id) {
                     q.submitting = false;
-                    q.error = Some(err);
+                    q.error = Some(err.message);
                 }
             }
             Pending::Unqueue { sid, key } => {
@@ -827,12 +868,13 @@ impl App {
                 self.toasts
                     .error(format!("Cannot remove queued prompt: {err}"));
             }
-            _ => self.toasts.error(err),
+            _ => self.toasts.error(err.message),
         }
     }
 
     fn on_response(&mut self, p: Pending, result: Value) {
         match p {
+            Pending::Permission => {}
             Pending::Question { sid, call_id } => self.close_question(&sid, &call_id),
             Pending::Config => self.on_config_response(&result),
             Pending::LiveList => {
@@ -1530,12 +1572,15 @@ impl App {
     }
 
     pub fn reply_permission(&mut self, sid: &str, call_id: &str, allow: bool, always: bool) {
-        self.send(Request::PermissionReply {
-            session_id: sid.to_string(),
-            call_id: call_id.to_string(),
-            allow,
-            always,
-        });
+        self.req(
+            Request::PermissionReply {
+                session_id: sid.to_string(),
+                call_id: call_id.to_string(),
+                allow,
+                always,
+            },
+            Pending::Permission,
+        );
         if let Some(v) = self.views.get_mut(sid) {
             v.permissions.retain(|p| p.call_id != call_id);
         }

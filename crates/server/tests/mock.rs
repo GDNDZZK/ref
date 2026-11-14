@@ -714,7 +714,7 @@ async fn directory_listing_stays_inside_the_workspace() {
     for outside in ["/", "..", temp.as_str(), "~/../.."] {
         let err = list(outside).await.unwrap_err();
         assert!(
-            err.contains("outside the mock workspace"),
+            err.message.contains("outside the mock workspace"),
             "{outside}: {err}"
         );
     }

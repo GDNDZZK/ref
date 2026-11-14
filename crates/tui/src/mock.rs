@@ -1064,6 +1064,7 @@ impl Mock {
                 ok: true,
                 result,
                 error: None,
+                code: None,
             });
         }
     }
@@ -1075,6 +1076,7 @@ impl Mock {
                 ok: false,
                 result: Value::Null,
                 error: Some(e.into()),
+                code: None,
             });
         }
     }
