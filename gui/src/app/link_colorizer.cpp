@@ -14,6 +14,15 @@ LinkHighlighter::LinkHighlighter(QTextDocument* document, const QColor& color) :
 	connect(document, &QTextDocument::contentsChanged, this, &LinkHighlighter::scheduleRehighlight);
 }
 
+LinkHighlighter::~LinkHighlighter()
+{
+	if(QTextDocument* doc = document())
+	{
+		disconnect(doc, &QTextDocument::contentsChanged, this, &LinkHighlighter::scheduleRehighlight);
+	}
+	setDocument(nullptr);
+}
+
 void LinkHighlighter::scheduleRehighlight()
 {
 	if(m_pending || m_highlighting)

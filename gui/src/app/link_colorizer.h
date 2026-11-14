@@ -13,7 +13,7 @@ class LinkHighlighter : public QSyntaxHighlighter
 {
 public:
 	LinkHighlighter(QTextDocument* document, const QColor& color);
-
+	~LinkHighlighter() override;
 	void setColor(const QColor& color);
 
 protected:

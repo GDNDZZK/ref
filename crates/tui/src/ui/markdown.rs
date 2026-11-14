@@ -131,9 +131,8 @@ impl MarkdownRenderer {
     /// Prefix spans for the next row; `first` = first row of a block (list marker shown).
     fn prefix(&mut self, first: bool) -> Vec<Span<'static>> {
         let mut out = Vec::new();
-        let n = self.containers.len();
-        for i in 0..n {
-            match &mut self.containers[i] {
+        for container in &mut self.containers {
+            match container {
                 Container::Quote => {
                     out.push(Span::styled(QUOTE_PREFIX, theme::fg(theme::MD_QUOTE)))
                 }
