@@ -341,11 +341,10 @@ mod tests {
     fn neighbors() {
         let rs = layout(4, Rect::new(0, 0, 200, 60));
         let (c, _) = grid(4, 200, 60);
-        if c == 2 {
-            assert_eq!(neighbor(&rs, 0, 1, 0), Some(1));
-            assert_eq!(neighbor(&rs, 0, 0, 1), Some(2));
-            assert_eq!(neighbor(&rs, 3, -1, 0), Some(2));
-        }
+        assert_eq!(c, 2);
+        assert_eq!(neighbor(&rs, 0, 1, 0), Some(1));
+        assert_eq!(neighbor(&rs, 0, 0, 1), Some(2));
+        assert_eq!(neighbor(&rs, 3, -1, 0), Some(2));
         assert_eq!(neighbor(&rs, 0, -1, 0), None);
     }
 
