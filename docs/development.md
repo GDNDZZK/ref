@@ -98,7 +98,7 @@ sleep 3600 | ref-server --mock      # prints {"port":N,"token":"..."} on stdout,
 | `long` | A tool with 400 lines of output, then a long answer |
 | `retry` | Two 529 errors (retrying), then success (about 6 s) |
 | `outage` | Two tools run, then one request fails four times (529, 529, a connection reset, 503) with waits of about 2, 4, 8 and 16 s; then an `edit`, `bash` and the answer (about 30 s) |
-| `fail` | A 401 error; retries, then ends with the error (about 6 s) |
+| `fail` | A 413 context-overflow error; ends the turn with an error |
 | `fill` | Context near 95%; the next prompt compacts first |
 | `compact-tool` | The model calls `compact_context` |
 | `peer` | Creates a `reviewer` session `helper`, which reports back with `send_message` |

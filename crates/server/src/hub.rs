@@ -37,6 +37,9 @@ pub struct HubOptions {
     pub config_loader: ConfigLoader,
     /// Base delay of the LLM retry backoff (2s in production).
     pub retry_base: Duration,
+    /// Maximum failed LLM attempts before giving up; `None` (production and `--mock`) retries
+    /// indefinitely. For test harnesses only.
+    pub retry_limit: Option<u32>,
     /// Max time to wait for MCP servers before the first request.
     pub mcp_wait: Duration,
     /// -1 never, 0 immediately, N seconds after the last frontend leaves.
@@ -52,6 +55,7 @@ impl HubOptions {
             home: dirs::home_dir(),
             config_loader: Arc::new(|cwd: &Path| Config::load(cwd)),
             retry_base: DEFAULT_RETRY_BASE,
+            retry_limit: None,
             mcp_wait: Duration::from_secs(30),
             idle_timeout: IDLE_NEVER,
             sandbox_cwd: None,

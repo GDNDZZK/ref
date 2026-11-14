@@ -30,7 +30,6 @@ const MAX_REMINDERS: u32 = 3;
 
 /// Characters of the first user line used as the provisional session title.
 const TITLE_MAX_CHARS: usize = 50;
-const NON_RETRYABLE_ATTEMPTS: u32 = 3;
 
 /// Characters of a provider error shown in the retry status.
 const SHORT_ERROR_CHARS: usize = 500;
@@ -638,7 +637,6 @@ async fn stream_with_retry(
     cancel: &CancellationToken,
 ) -> Result<String, Outcome> {
     let mut attempt: u32 = 0;
-    let mut non_retryable: u32 = 0;
     let mut overflow_compacted = false;
     let max = retry_max_delay(&prep.cfg);
     let mut prep_owned: Option<Prep> = None;
@@ -681,11 +679,10 @@ async fn stream_with_retry(
                     continue;
                 }
                 attempt += 1;
-                if !e.retryable {
-                    non_retryable += 1;
-                    if non_retryable >= NON_RETRYABLE_ATTEMPTS {
-                        return Err(Outcome::Failed(e.message.clone()));
-                    }
+                if let Some(limit) = hub.opts.retry_limit
+                    && attempt >= limit
+                {
+                    return Err(Outcome::Failed(e.message.clone()));
                 }
                 let jitter = rand::random_range(-JITTER_FRACTION..=JITTER_FRACTION);
                 let delay = backoff(hub.opts.retry_base, attempt, max, e.retry_after, jitter);
