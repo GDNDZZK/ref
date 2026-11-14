@@ -122,6 +122,8 @@ async function captureSplit(browser: Browser): Promise<void> {
 // run of the same prompt is stopped with esc esc while it waits. Markers: enter, attempt1..4,
 // done, again, esc.
 const OUTAGE_PROMPT = 'outage run the tests and fix the failures'
+const OUTAGE_SESSION = 'main'
+const RENAME_SETTLE_MS = 800
 const OUTAGE_DONE = 'All 12 tests pass now.'
 const OUTAGE_ATTEMPTS = 4
 const OUTAGE_WAIT_MS = 90_000
@@ -131,6 +133,10 @@ const BEFORE_ESC_MS = 1200
 
 async function captureOutage(): Promise<void> {
   await withTui(async (tui) => {
+    // Named, so the sidebar shows no generated name; before the films' first frame (mark enter).
+    await tui.type(`/rename ${OUTAGE_SESSION}`, TYPING_DELAY_MS)
+    tui.send(KEYS.enter)
+    await tui.pause(RENAME_SETTLE_MS)
     await tui.type(OUTAGE_PROMPT, TYPING_DELAY_MS)
     tui.mark('enter')
     tui.send(KEYS.enter)

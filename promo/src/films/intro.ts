@@ -19,7 +19,9 @@ import { FIXTURE_CAST, OUTAGE_CAST, SERVER_CAST, WIDE_TUI, addBrandTitle, clicke
 import { cues, drawnCut, endCut, timelineFilm, type Cut } from './timeline.ts'
 
 const A6_END = 24.4
-const A7_CLIP_FROM = 21.0
+// From after the reviewer's raw message has scrolled away (main's to-do card at the top of the
+// tile); the notification lands at film 26.1.
+const A7_CLIP_FROM = 23.3
 const HERO_END = 29.9
 const CARD_END = 38.4
 const CREW_END = 43.4
@@ -74,16 +76,20 @@ const standaloneCut: Cut = {
     ),
 }
 
-// A11: three closeups, one feature each. f1 starts on the whole outage take (sidebar in view)
-// and zooms into the row "Retrying in 8s (attempt 3)" (row 17), cut before the rest of the
-// error and above the rows with the mock's local address.
-// The text runs from column 3 (the bar) to 33 (the colon).
-const RETRY_CLOSEUP = { scale: 2.2, x: 18.6 / 150, y: 17.5 / 40, rows: 1.3, cols: 31.4 }
-const RETRY_CLOSEUP_AT = { x: 560, y: 480 }
-const RETRY_ZOOM = { at: 1.0, wide: WIDE_TUI }
-// f3: the model dialog of the real-backend take (cast marker "models": ctrl+x m is pressed).
-const MODEL_DIALOG = { mark: 'models', offset: -0.2 }
+// A11: three closeups, one feature each. f1 is the row "Retrying in 8s (attempt 3)" of the
+// outage take (row 17), cut before the rest of the error and above the rows with the mock's
+// local address. The text runs from column 3 (the bar) to 33 (the colon).
+const RETRY_CLOSEUP = { scale: 2.5, x: 18.6 / 150, y: 17.5 / 40, rows: 1.3, cols: 31.4 }
+const RETRY_CLOSEUP_AT = { x: 520, y: 480 }
+// f2: the delete row with Cancel and its countdown, and the bash row above it; wide enough for
+// the reply's first word on the left and the "12:01:28 Undo Copy" row on the right (picture x
+// 0.306 to 0.896).
+const DELAY_ROW_LOOK = { at: 0, x: 0.6, y: 0.3, zoom: 1.62 }
+// f3: the model dialog of the real-backend take (cast marker "models": ctrl+x m is pressed). The
+// dialog is open for 3.0 s (capture/real.ts); the callouts end as it closes, before the cut's tail.
+const MODEL_DIALOG = { mark: 'models', offset: -0.3 }
 const MODEL_MARKS_FROM = 0.7
+const MODEL_MARKS_TO = 3.2
 // f2: Cancel is clicked this long into the cut, after about 2.3 s of countdown.
 const DELAY_CANCEL_AT = 2.6
 const featureCuts: Cut[] = [
@@ -94,7 +100,6 @@ const featureCuts: Cut[] = [
         ...WIDE_TUI,
         ...RETRY_CLOSEUP_AT,
         closeup: RETRY_CLOSEUP,
-        zoomIn: RETRY_ZOOM,
         castFrom: { mark: 'attempt3', offset: -0.3 },
         start: 0,
         from: -1,
@@ -106,11 +111,11 @@ const featureCuts: Cut[] = [
     from: STANDALONE_END + FEATURE_CUT_SECONDS,
     to: STANDALONE_END + 2 * FEATURE_CUT_SECONDS,
     build: (seconds) =>
-      beatShot({ seconds, ...clickedClip('gui-delay', 'cancel', DELAY_CANCEL_AT), looks: [{ at: 0, x: 0.6, y: 0.4, zoom: 1.7 }], windowFrom: -1 }),
+      beatShot({ seconds, ...clickedClip('gui-delay', 'cancel', DELAY_CANCEL_AT), looks: [DELAY_ROW_LOOK], windowFrom: -1 }),
   },
   drawnCut(STANDALONE_END + 2 * FEATURE_CUT_SECONDS, STANDALONE_END + 3 * FEATURE_CUT_SECONDS, (shot, seconds) => {
-    shot.add(castWindow({ ...FIXTURE_CAST, castFrom: MODEL_DIALOG, marks: opencodeModelMarks(MODEL_MARKS_FROM, seconds + 1), start: 0, from: -1, to: seconds }))
-  }),
+    shot.add(castWindow({ ...FIXTURE_CAST, castFrom: MODEL_DIALOG, marks: opencodeModelMarks(MODEL_MARKS_FROM, MODEL_MARKS_TO), start: 0, from: -1, to: seconds }))
+  }, 'quick'),
 ]
 
 // A12: the release list, then the two commands, then a hard cut to ref starting (a fade would
@@ -156,11 +161,11 @@ export const scene = timelineFilm({
     ...featureCuts,
     drawnCut(STANDALONE_END + 3 * FEATURE_CUT_SECONDS, RELEASE_END, (shot, seconds) => shot.add(releaseCard({ ...RELEASE, from: 0, to: seconds + 1 }))),
     ...startCuts,
-    endCut(START_END, FILM_END, { platforms: true }),
+    endCut(START_END, FILM_END, { platforms: true }, 'quick'),
   ],
   captions: cues([
     ...HERO_CAPTIONS,
-    [27.4, 29.9, COPY.finished],
+    [26.1, 29.9, COPY.finished],
     [31.0, 33.9, { en: 'All worker sessions stream in one view.', zh: '所有工作会话在分屏里同时输出。' }],
     [34.7, 38.0, { en: "Answer a worker's permission request in its tile.", zh: '授权请求在它自己的分块里点允许。' }],
     [38.6, 42.2, COPY.sameSessions],

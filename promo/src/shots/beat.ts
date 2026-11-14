@@ -34,6 +34,7 @@ export interface Mark {
   spotlight?: boolean
   from: number
   to: number
+  exitSeconds?: number
 }
 
 export interface Pointer {

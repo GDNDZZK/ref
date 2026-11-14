@@ -126,6 +126,8 @@ export function appFrame(options: AppFrameOptions): AppFrame {
       world.style.height = `${worldHeight()}px`
       const offset = cameraOffset(time)
       world.style.transform = `translate(${offset.x}px, ${offset.y}px) scale(${scale(time)})`
+      // Attached outlines read this, so they stop thickening at high zoom (components.css).
+      world.style.setProperty('--camera-zoom', String(scale(time)))
       for (const [index, layer] of options.layers.entries()) {
         const shown = index === 0 ? 1 : span(time, layer.from, LAYER_FADE_SECONDS, 'inOutSine')
         pictures[index]!.style.opacity = String(shown)
