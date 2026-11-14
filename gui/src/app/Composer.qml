@@ -76,6 +76,7 @@ Item {
 		? queueStrip.height + queueGap * Math.min(1, queueStrip.height / queueStrip.queueRowHeight) : 0
 
 	implicitHeight: queueBlock + box.height
+	height: implicitHeight
 	onModelChanged: syncFromModel()
 
 	Component.onCompleted: {
