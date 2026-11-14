@@ -111,10 +111,13 @@ async fn connect_via_loopback(host: &str, port: u16) -> std::io::Result<TcpStrea
     let bare = launch::bare_host(host);
     let mut last_err = None;
     for addr in tokio::net::lookup_host((bare, port)).await? {
-        let res = if addr.ip().is_loopback() {
+        let res = if addr.ip().is_loopback() || cfg!(windows) {
             TcpStream::connect(addr).await
         } else {
-            connect_bound_loopback(addr).await
+            match connect_bound_loopback(addr).await {
+                Ok(stream) => Ok(stream),
+                Err(_) => TcpStream::connect(addr).await,
+            }
         };
         match res {
             Ok(stream) => return Ok(stream),

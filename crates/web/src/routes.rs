@@ -65,23 +65,37 @@ pub fn router(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-fn is_local_caller(peer: &SocketAddr) -> bool {
-    peer.ip().to_canonical().is_loopback()
+fn is_local_caller(peer: &SocketAddr, local: Option<&SocketAddr>) -> bool {
+    let peer_ip = peer.ip().to_canonical();
+    peer_ip.is_loopback()
+        || local.is_some_and(|l| {
+            let local_ip = l.ip().to_canonical();
+            !local_ip.is_unspecified() && peer_ip == local_ip
+        })
 }
 
-/// Peer address extracted from any `Listener<Addr = SocketAddr>` (plain TCP or TLS).
+/// Peer and local addresses extracted from any `Listener<Addr = SocketAddr>`.
 #[derive(Clone, Copy)]
-pub struct ClientAddr(SocketAddr);
+pub struct ClientAddr {
+    peer: SocketAddr,
+    local: Option<SocketAddr>,
+}
 
 impl Connected<IncomingStream<'_, tokio::net::TcpListener>> for ClientAddr {
     fn connect_info(stream: IncomingStream<'_, tokio::net::TcpListener>) -> Self {
-        ClientAddr(*stream.remote_addr())
+        ClientAddr {
+            peer: *stream.remote_addr(),
+            local: stream.io().local_addr().ok(),
+        }
     }
 }
 
 impl Connected<IncomingStream<'_, crate::tls::TlsListener>> for ClientAddr {
     fn connect_info(stream: IncomingStream<'_, crate::tls::TlsListener>) -> Self {
-        ClientAddr(*stream.remote_addr())
+        ClientAddr {
+            peer: *stream.remote_addr(),
+            local: stream.io().get_ref().0.local_addr().ok(),
+        }
     }
 }
 
@@ -102,10 +116,10 @@ struct Ping {
 /// pairs to collect: it is refused.
 async fn ping(
     State(state): State<Arc<AppState>>,
-    ConnectInfo(ClientAddr(peer)): ConnectInfo<ClientAddr>,
+    ConnectInfo(ClientAddr { peer, local }): ConnectInfo<ClientAddr>,
     Query(query): Query<PingQuery>,
 ) -> Response {
-    if !is_local_caller(&peer) {
+    if !is_local_caller(&peer, local.as_ref()) {
         return text_response(StatusCode::FORBIDDEN, "Forbidden: local callers only\n");
     }
     let Some(nonce) = query.nonce.filter(|n| ping::is_valid_nonce(n)) else {
@@ -212,21 +226,40 @@ mod tests {
 
     #[test]
     fn only_loopback_peers_may_ping() {
+        let lan: SocketAddr = "192.168.1.5:7480".parse().unwrap();
         for local in [
             "127.0.0.1:1",
             "[::1]:1",
             "[::ffff:127.0.0.1]:1",
             "127.9.9.9:1",
         ] {
-            assert!(is_local_caller(&local.parse().unwrap()), "{local}");
+            let addr = local.parse().unwrap();
+            assert!(is_local_caller(&addr, None), "{local}");
+            assert!(is_local_caller(&addr, Some(&lan)), "{local}");
         }
+        assert!(is_local_caller(
+            &"192.168.1.5:1".parse().unwrap(),
+            Some(&lan)
+        ));
+        assert!(is_local_caller(
+            &"[::ffff:192.168.1.5]:1".parse().unwrap(),
+            Some(&lan)
+        ));
+        assert!(!is_local_caller(
+            &lan,
+            Some(&"0.0.0.0:7480".parse().unwrap())
+        ));
         for remote in [
             "192.168.1.5:1",
             "[fe80::1]:1",
             "[::ffff:10.0.0.1]:1",
             "8.8.8.8:1",
         ] {
-            assert!(!is_local_caller(&remote.parse().unwrap()), "{remote}");
+            let addr = remote.parse().unwrap();
+            assert!(!is_local_caller(&addr, None), "{remote}");
+            if remote != "192.168.1.5:1" {
+                assert!(!is_local_caller(&addr, Some(&lan)), "{remote}");
+            }
         }
     }
 
