@@ -89,13 +89,13 @@ Block {
 				visible: text !== ""
 			}
 			MetaText {
-				text: block.variant === "" ? block.modelId : block.modelId + " "
+				text: block.modelId
 				visible: block.modelId !== ""
-				MetaText {
-					anchors.left: parent.right
-					text: block.variant
-					color: Theme.warningText
-				}
+			}
+			MetaText {
+				text: block.variant
+				color: Theme.warningText
+				visible: block.variant !== ""
 			}
 			MetaText {
 				text: block.timeEnd > 0
