@@ -142,7 +142,7 @@ QT_QPA_PLATFORM=offscreen QML_IMPORT_PATH=$REF_DEPS_DIR/prefix/lib/qml \
 cmake -S gui -B gui/build -G Ninja -DCMAKE_INSTALL_BINDIR=. -DCMAKE_PREFIX_PATH=… 
 cmake --build gui/build
 cmake --install gui/build --prefix stage
-scripts/package.sh --version v0.2.0 --target x86_64-unknown-linux-gnu \
+scripts/package.sh --version v0.2.1 --target x86_64-unknown-linux-gnu \
   --bin-dir target/release --out dist --gui-dir stage      # needs the Rust build, see above
 ```
 
@@ -184,7 +184,7 @@ Each target gets four archives. Every archive holds one folder of the same name 
 To pack by hand after `cargo build --release`:
 
 ```bash
-scripts/package.sh --version v0.2.0 --target x86_64-unknown-linux-gnu \
+scripts/package.sh --version v0.2.1 --target x86_64-unknown-linux-gnu \
   --bin-dir target/release --out dist [--gui-dir stage]
 ```
 
@@ -195,10 +195,10 @@ To make a release:
 ```bash
 # 1. Set the version in Cargo.toml ([workspace.package] version) and run
 #    `cargo update --workspace` to refresh Cargo.lock (CI builds with --locked).
-#    Write the release text in .github/release-notes/v0.2.0.md. Commit and push.
+#    Write the release text in .github/release-notes/v0.2.1.md. Commit and push.
 # 2. Tag and push the tag:
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.2.1
+git push origin v0.2.1
 ```
 
 The `ref-gui` version, the Windows and macOS metadata and the archive names follow from the tag and `Cargo.toml`. The first job of the workflow fails when the tag and the version in `Cargo.toml` differ. The release text is the file `.github/release-notes/<tag>.md`; when it does not exist, GitHub generates the text from the commits.

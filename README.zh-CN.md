@@ -83,7 +83,7 @@
 | Windows x86_64 | `x86_64-pc-windows-msvc.zip` |
 | Windows arm64 | `aarch64-pc-windows-msvc.zip` |
 
-例如 `ref-tui-v0.2.0-x86_64-unknown-linux-gnu.tar.gz`。解压后，把程序放到 `PATH` 中的**同一个目录**；每个界面都会在自身所在目录查找 `ref-server`：
+例如 `ref-tui-v0.2.1-x86_64-unknown-linux-gnu.tar.gz`。解压后，把程序放到 `PATH` 中的**同一个目录**；每个界面都会在自身所在目录查找 `ref-server`：
 
 ```bash
 tar -xzf ref-tui-*.tar.gz
