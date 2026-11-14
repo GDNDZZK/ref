@@ -913,7 +913,7 @@ fn plan_sync(input: &Value, ctx: &ToolCtx, max_file_bytes: Option<u64>) -> Resul
     let mut warnings = Vec::new();
     let ops = parse_edits(input, &mut warnings)?;
 
-    let abs = util::resolve_path(&ctx.cwd, &raw_path);
+    let abs = util::resolve_path(&ctx.cwd, &raw_path)?;
     let display = util::display_path(&ctx.cwd, &abs);
     let meta = match std::fs::metadata(&abs) {
         Ok(m) => m,

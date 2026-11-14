@@ -168,8 +168,14 @@ impl Collector {
             }
             return;
         }
-        if let Some((_, f)) = &mut self.spilled {
-            let _ = f.write_all(piece.as_bytes());
+        if let Some((path, f)) = &mut self.spilled
+            && let Err(e) = f.write_all(piece.as_bytes())
+        {
+            tracing::warn!("bash: cannot write output file {}: {e}", path.display());
+            let path = path.clone();
+            self.spilled = None;
+            let _ = std::fs::remove_file(&path);
+            self.spill_failed = true;
         }
         if self.needs_head_tail_split() {
             // Could not create the file: still keep head/tail.
@@ -198,8 +204,13 @@ impl Collector {
             .and_then(|_| std::fs::File::create(&path));
         match file {
             Ok(mut f) => {
-                let _ = f.write_all(self.mem.as_bytes());
-                self.spilled = Some((path, f));
+                if let Err(e) = f.write_all(self.mem.as_bytes()) {
+                    tracing::warn!("bash: cannot write output file {}: {e}", path.display());
+                    let _ = std::fs::remove_file(&path);
+                    self.spill_failed = true;
+                } else {
+                    self.spilled = Some((path, f));
+                }
             }
             Err(e) => {
                 tracing::warn!("bash: cannot create output file {}: {e}", path.display());
@@ -218,9 +229,15 @@ impl Collector {
             self.spill();
         }
 
-        let path = self.spilled.take().map(|(p, mut f)| {
-            let _ = f.flush();
-            p
+        let path = self.spilled.take().and_then(|(p, mut f)| {
+            if let Err(e) = f.flush() {
+                tracing::warn!("bash: cannot flush output file {}: {e}", p.display());
+                let _ = std::fs::remove_file(&p);
+                self.spill_failed = true;
+                None
+            } else {
+                Some(p)
+            }
         });
 
         let head = take_head(&self.head);
@@ -342,8 +359,10 @@ impl OutputReader {
 }
 
 fn kill_group(pid: Option<u32>, force: bool) {
-    if let Some(pid) = pid {
-        ref_sys::kill_tree(pid, force);
+    if let Some(pid) = pid
+        && !ref_sys::kill_tree(pid, force)
+    {
+        tracing::debug!(pid, force, "kill_tree did not signal process group");
     }
 }
 
@@ -516,7 +535,7 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         .unwrap_or(DEFAULT_TIMEOUT_SECS)
         .min(MAX_TIMEOUT_SECS);
     let cwd = match util::opt_str(&input, "cwd")? {
-        Some(c) if !c.trim().is_empty() => util::resolve_path(&ctx.cwd, &c),
+        Some(c) if !c.trim().is_empty() => util::resolve_path(&ctx.cwd, &c)?,
         _ => ctx.cwd.clone(),
     };
     if !cwd.is_dir() {
@@ -573,13 +592,20 @@ pub async fn run(input: Value, ctx: &ToolCtx) -> Result<ToolOutput> {
             tokio::select! {
                 r = reader.read(&mut buf), if !eof => handle_read(r, &buf, &mut asm, &mut col, &mut eof),
                 s = child.wait() => {
-                    status = s.ok();
+                    status = Some(s.map_err(|e| anyhow!("waiting for command failed: {e}"))?);
                     break;
                 }
                 _ = &mut grace => {
                     kill_group(pid, true);
-                    let _ = child.start_kill();
-                    status = child.wait().await.ok();
+                    if let Err(e) = child.start_kill() {
+                        tracing::warn!("bash: cannot kill process {pid:?}: {e}");
+                    }
+                    status = Some(
+                        child
+                            .wait()
+                            .await
+                            .map_err(|e| anyhow!("waiting for command failed: {e}"))?,
+                    );
                     break;
                 }
             }
@@ -829,5 +855,24 @@ mod tests {
         let bytes = "héllo\n".as_bytes();
         assert_eq!(asm.push(&bytes[..2]), "");
         assert_eq!(asm.push(&bytes[2..]), "héllo\n");
+    }
+    #[test]
+    fn collector_drops_spill_path_on_write_error() {
+        let d = temp_dir("bash-spill-err");
+        let p = d.join("out.log");
+        std::fs::write(&p, b"").unwrap();
+        // Open read-only so write_all fails portably.
+        let ro = std::fs::File::open(&p).unwrap();
+        let mut col = Collector::new(None);
+        col.spilled = Some((p.clone(), ro));
+        col.head = "head\n".into();
+        col.total_lines = 2;
+        col.push("more\n");
+        assert!(col.spill_failed);
+        assert!(col.spilled.is_none());
+        let (_text, truncated, path) = col.finish();
+        assert!(truncated);
+        assert!(path.is_none());
+        assert!(!p.exists());
     }
 }

@@ -32,7 +32,7 @@ pub(crate) async fn stream(
     cancel: &CancellationToken,
     on_event: &mut (dyn FnMut(StreamEvent) + Send),
 ) -> Result<Response, LlmError> {
-    let body = build_body(provider, model, req);
+    let body = build_body(provider, model, req)?;
     let url = endpoint(&provider.base_url, DEFAULT_OPENAI_BASE, "responses");
     let headers = request_headers(provider, req);
     drive(
@@ -57,7 +57,11 @@ fn request_headers(provider: &Provider, req: &Request) -> reqwest::header::Heade
     build_headers(provider, defaults, &[])
 }
 
-pub(crate) fn build_body(provider: &Provider, model: &Model, req: &Request) -> Value {
+pub(crate) fn build_body(
+    provider: &Provider,
+    model: &Model,
+    req: &Request,
+) -> Result<Value, LlmError> {
     let opts = &model.options;
     let store = opts.get("store").and_then(Value::as_bool).unwrap_or(false);
 
@@ -74,7 +78,7 @@ pub(crate) fn build_body(provider: &Provider, model: &Model, req: &Request) -> V
     }
     body.insert(
         "input".into(),
-        Value::Array(convert_input(provider, model, req)),
+        Value::Array(convert_input(provider, model, req)?),
     );
     if !req.tools.is_empty() {
         let tools: Vec<Value> = req
@@ -162,7 +166,7 @@ pub(crate) fn build_body(provider: &Provider, model: &Model, req: &Request) -> V
     for overlay in &overlays {
         deep_merge(&mut body, overlay);
     }
-    body
+    Ok(body)
 }
 
 fn input_image(model: &Model, img: &ImageData) -> Value {
@@ -173,7 +177,11 @@ fn input_image(model: &Model, img: &ImageData) -> Value {
     }
 }
 
-fn convert_input(provider: &Provider, model: &Model, req: &Request) -> Vec<Value> {
+fn convert_input(
+    provider: &Provider,
+    model: &Model,
+    req: &Request,
+) -> Result<Vec<Value>, LlmError> {
     let mut out = Vec::new();
     for msg in normalize_history(&req.messages) {
         match &msg {
@@ -192,7 +200,7 @@ fn convert_input(provider: &Provider, model: &Model, req: &Request) -> Vec<Value
             }
             ChatMessage::Assistant { blocks, origin } => {
                 let replay = same_origin(origin, provider, model);
-                out.extend(assistant_items(blocks, replay));
+                out.extend(assistant_items(blocks, replay)?);
             }
             ChatMessage::ToolResult {
                 call_id,
@@ -202,12 +210,12 @@ fn convert_input(provider: &Provider, model: &Model, req: &Request) -> Vec<Value
             } => out.push(tool_result_item(model, call_id, content, images)),
         }
     }
-    out
+    Ok(out)
 }
 
 /// Input items of an assistant message. Reasoning items and `fc_` ids are replayed only for
 /// `replay`: encrypted reasoning round-trips to the model that produced it.
-fn assistant_items(blocks: &[AssistantBlock], replay: bool) -> Vec<Value> {
+fn assistant_items(blocks: &[AssistantBlock], replay: bool) -> Result<Vec<Value>, LlmError> {
     let mut out = Vec::new();
     for block in blocks {
         match block {
@@ -252,7 +260,7 @@ fn assistant_items(blocks: &[AssistantBlock], replay: bool) -> Vec<Value> {
             }
         }
     }
-    out
+    Ok(out)
 }
 
 fn tool_result_item(model: &Model, call_id: &str, content: &str, images: &[ImageData]) -> Value {
@@ -321,28 +329,44 @@ fn slot_key(ev: &Value) -> String {
 }
 
 impl ResponsesState {
-    fn open_slot(&mut self, asm: &mut Assembler<'_>, key: String, item: &Value) -> Option<usize> {
+    fn open_slot(
+        &mut self,
+        asm: &mut Assembler<'_>,
+        key: String,
+        item: &Value,
+    ) -> Result<Option<usize>, LlmError> {
         if let Some(slot) = self.slots.get(&key) {
-            return Some(slot.block);
+            return Ok(Some(slot.block));
         }
-        let (kind, block_kind) = match item.get("type").and_then(Value::as_str)? {
+        let Some(ty) = item.get("type").and_then(Value::as_str) else {
+            return Ok(None);
+        };
+        let (kind, block_kind) = match ty {
             "reasoning" => (SlotKind::Reasoning, BlockKind::Reasoning),
             "message" => (SlotKind::Text, BlockKind::Text),
             "function_call" => {
                 let id = item
                     .get("call_id")
-                    .or_else(|| item.get("id"))
                     .and_then(Value::as_str)
-                    .unwrap_or("")
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| {
+                        item.get("id")
+                            .and_then(Value::as_str)
+                            .filter(|s| !s.is_empty())
+                    })
+                    .ok_or_else(|| {
+                        LlmError::fatal("responses stream: function_call missing call_id")
+                    })?
                     .to_string();
                 let name = item
                     .get("name")
                     .and_then(Value::as_str)
-                    .unwrap_or("")
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| LlmError::fatal("responses stream: function_call missing name"))?
                     .to_string();
                 (SlotKind::Tool, BlockKind::ToolCall { id, name })
             }
-            _ => return None,
+            _ => return Ok(None),
         };
         let block = asm.start(block_kind);
         if kind == SlotKind::Tool
@@ -359,7 +383,7 @@ impl ResponsesState {
                 done: false,
             },
         );
-        Some(block)
+        Ok(Some(block))
     }
 
     fn slot_for(&mut self, ev: &Value, kind: SlotKind) -> Option<&mut Slot> {
@@ -383,7 +407,7 @@ impl ResponsesState {
         match ty {
             "response.output_item.added" => {
                 if let Some(item) = ev.get("item") {
-                    self.open_slot(asm, slot_key(ev), item);
+                    self.open_slot(asm, slot_key(ev), item)?;
                 }
             }
             "response.reasoning_summary_text.delta" => {
@@ -421,7 +445,7 @@ impl ResponsesState {
             }
             "response.output_item.done" => {
                 if let Some(item) = ev.get("item") {
-                    self.on_item_done(asm, slot_key(ev), item);
+                    self.on_item_done(asm, slot_key(ev), item)?;
                 }
             }
             "response.completed" | "response.incomplete" => {
@@ -468,9 +492,14 @@ impl ResponsesState {
         Ok(false)
     }
 
-    fn on_item_done(&mut self, asm: &mut Assembler<'_>, key: String, item: &Value) {
-        let Some(block) = self.open_slot(asm, key.clone(), item) else {
-            return;
+    fn on_item_done(
+        &mut self,
+        asm: &mut Assembler<'_>,
+        key: String,
+        item: &Value,
+    ) -> Result<(), LlmError> {
+        let Some(block) = self.open_slot(asm, key.clone(), item)? else {
+            return Ok(());
         };
         let kind = self.slots.get(&key).map(|s| s.kind);
         match kind {
@@ -527,6 +556,7 @@ impl ResponsesState {
             slot.done = true;
         }
         asm.end(block);
+        Ok(())
     }
 
     fn on_terminal(&mut self, asm: &mut Assembler<'_>, resp: &Value) {

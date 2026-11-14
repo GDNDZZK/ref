@@ -22,7 +22,8 @@ pub fn detach(cmd: &mut Command) {
 /// Kills the process tree started as `pid`. On Unix `pid` must lead its own process group
 /// (spawned with `process_group(0)`); `force` selects SIGKILL over SIGTERM. Windows has no
 /// graceful equivalent for console programs, so the tree is always killed forcibly there.
-pub fn kill_tree(pid: u32, force: bool) {
+/// Returns `true` if the signal / taskkill succeeded.
+pub fn kill_tree(pid: u32, force: bool) -> bool {
     imp::kill_tree(pid, force)
 }
 
@@ -97,14 +98,13 @@ mod imp {
         }
     }
 
-    pub fn kill_tree(pid: u32, force: bool) {
-        if valid(pid) {
-            let sig = if force { libc::SIGKILL } else { libc::SIGTERM };
-            // SAFETY: plain syscall; a negative pid targets the process group.
-            unsafe {
-                libc::kill(-(pid as libc::pid_t), sig);
-            }
+    pub fn kill_tree(pid: u32, force: bool) -> bool {
+        if !valid(pid) {
+            return false;
         }
+        let sig = if force { libc::SIGKILL } else { libc::SIGTERM };
+        // SAFETY: plain syscall; a negative pid targets the process group.
+        unsafe { libc::kill(-(pid as libc::pid_t), sig) == 0 }
     }
 }
 
@@ -165,18 +165,19 @@ mod imp {
         cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
     }
 
-    pub fn kill_tree(pid: u32, _force: bool) {
+    pub fn kill_tree(pid: u32, _force: bool) -> bool {
         if !valid(pid) {
-            return;
+            return false;
         }
         // taskkill walks the parent/child relation, which covers what a shell started.
-        let _ = Command::new("taskkill")
+        Command::new("taskkill")
             .args(["/PID", &pid.to_string(), "/T", "/F"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .creation_flags(CREATE_NO_WINDOW)
-            .status();
+            .status()
+            .is_ok_and(|s| s.success())
     }
 }
 
@@ -225,8 +226,9 @@ mod tests {
         };
         let mut child = cmd.spawn().unwrap();
         assert!(pid_alive(child.id()));
-        kill_tree(child.id(), true);
+        assert!(kill_tree(child.id(), true));
         child.wait().unwrap();
+        assert!(!kill_tree(0, true));
 
         let mut child = cmd.spawn().unwrap();
         assert!(terminate(child.id()));

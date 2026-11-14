@@ -492,7 +492,9 @@ const EPILOGUE_LABEL_WIDTH: usize = 10;
 
 impl App {
     pub fn new(client: Client, cwd: String, init: InitPlan) -> Self {
-        let history = History::load(ref_proto::state_dir().join("prompt-history.jsonl"));
+        let history = ref_proto::state_dir()
+            .map(|d| History::load(d.join("prompt-history.jsonl")))
+            .unwrap_or_default();
         let mode = if init.watch { Mode::Watch } else { Mode::Chat };
         App {
             client,

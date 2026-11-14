@@ -254,7 +254,7 @@ ref 支持三种 API。除非设置了 `api`，否则根据 `npm` 选择：
 | `permission` | | 在全局规则之后检查的规则，因此优先级更高。 |
 | `delay` | | 在全局延迟之前检查的延迟。 |
 | `creatable` | `true` | **ref** 允许其他会话创建使用此智能体的会话。 |
-| `can_spawn` | `false`（`build` 为 `true`） | **ref** 为智能体提供 `create_session` 和 `close_session` 工具。也可写 `spawn`。 |
+| `can_spawn` | `false`（`build` 为 `true`） | **ref** 为智能体提供 `create_session`、`resume_session` 和 `close_session` 工具。也可写 `spawn`。 |
 | `color` | | 智能体名称在 TUI 中的颜色。 |
 | `hidden` | `false` | 不在 TUI 中列出，也不提供给其他会话。 |
 | `mode` | | opencode 的 `primary` / `subagent` / `all`。ref 不按 mode 限制智能体。只有在没有 `build` 智能体、也没有有效的 `default_agent` 时才有用：第一个不是 `subagent` 且未隐藏的智能体成为默认智能体。 |

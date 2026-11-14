@@ -29,49 +29,57 @@ pub const NO_PENDING_PERMISSION: &str = "No pending permission request with that
 pub const ERR_NO_PENDING_QUESTION: &str = "no_pending_question";
 pub const ERR_NO_PENDING_PERMISSION: &str = "no_pending_permission";
 pub const ERR_NOT_FOUND: &str = "not_found";
+pub const ERR_DIR_NOT_FOUND: &str = "dir_not_found";
 pub const ERR_PROTOCOL_MISMATCH: &str = "protocol_mismatch";
-fn home() -> std::path::PathBuf {
-    std::env::var_os("HOME")
+fn home_from(
+    home_env: Option<std::ffi::OsString>,
+    os_home: impl FnOnce() -> Option<std::path::PathBuf>,
+) -> Result<std::path::PathBuf, String> {
+    home_env
         .filter(|h| !h.is_empty())
         .map(Into::into)
-        .or_else(dirs::home_dir)
-        .unwrap_or_else(std::env::temp_dir)
+        .or_else(os_home)
+        .ok_or_else(|| "HOME is not set".to_string())
+}
+
+fn home() -> Result<std::path::PathBuf, String> {
+    home_from(std::env::var_os("HOME"), dirs::home_dir)
 }
 
 /// Runtime state dir: `$REF_STATE_DIR` | `$XDG_STATE_HOME/ref` | `~/.local/state/ref`.
 /// Instance files live in `<state_dir>/instances/<pid>.json`.
-pub fn state_dir() -> std::path::PathBuf {
+pub fn state_dir() -> Result<std::path::PathBuf, String> {
     if let Some(d) = std::env::var_os("REF_STATE_DIR") {
-        return d.into();
+        return Ok(d.into());
     }
     match std::env::var_os("XDG_STATE_HOME") {
-        Some(x) if !x.is_empty() => std::path::PathBuf::from(x).join("ref"),
-        _ => home().join(".local/state/ref"),
+        Some(x) if !x.is_empty() => Ok(std::path::PathBuf::from(x).join("ref")),
+        _ => Ok(home()?.join(".local/state/ref")),
     }
 }
 
 /// Persistent data dir: `$REF_DATA_DIR` | `$XDG_DATA_HOME/ref` | `~/.local/share/ref`.
 /// Sessions live in `<data_dir>/sessions/<id>.json`.
-pub fn data_dir() -> std::path::PathBuf {
+pub fn data_dir() -> Result<std::path::PathBuf, String> {
     if let Some(d) = std::env::var_os("REF_DATA_DIR") {
-        return d.into();
+        return Ok(d.into());
     }
     match std::env::var_os("XDG_DATA_HOME") {
-        Some(x) if !x.is_empty() => std::path::PathBuf::from(x).join("ref"),
-        _ => home().join(".local/share/ref"),
+        Some(x) if !x.is_empty() => Ok(std::path::PathBuf::from(x).join("ref")),
+        _ => Ok(home()?.join(".local/share/ref")),
     }
 }
 
-pub fn instances_dir() -> std::path::PathBuf {
-    state_dir().join("instances")
+pub fn instances_dir() -> Result<std::path::PathBuf, String> {
+    Ok(state_dir()?.join("instances"))
 }
 
 /// Epoch milliseconds now.
 pub fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+        .expect("system clock is before 1970")
+        .as_millis() as i64
 }
 
 // ---------------------------------------------------------------------------
@@ -962,7 +970,7 @@ pub enum Request {
     },
     /// Sub-directories of `path` for a directory picker: `~` is expanded and a relative path
     /// is taken from the connection's cwd. -> `{path: <absolute, normalized>, dirs: [String]}`
-    /// (names only, sorted). A missing directory fails with `ERR_NOT_FOUND`.
+    /// (names only, sorted). A missing or non-directory path fails with `ERR_DIR_NOT_FOUND`.
     ListDirs {
         path: String,
     },

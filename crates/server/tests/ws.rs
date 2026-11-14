@@ -401,18 +401,36 @@ async fn list_dirs_answers_with_sorted_sub_directories() {
     send(&mut ws, 4, Request::ListDirs { path: "~".into() }).await;
     let (ok, _, err, code) = response_coded(&mut ws, 4, &mut other).await;
     assert!(!ok && err.is_some());
-    assert_eq!(code.as_deref(), Some(ref_proto::ERR_NOT_FOUND));
+    assert_eq!(code.as_deref(), Some(ref_proto::ERR_DIR_NOT_FOUND));
 
-    // Errors: missing path gets ERR_NOT_FOUND; a file or empty path has no code.
+    // Errors: missing path or non-directory gets ERR_DIR_NOT_FOUND; empty path and other I/O errors have no code.
     for (id, path, expected_code) in [
-        (5, "nowhere", Some(ref_proto::ERR_NOT_FOUND)),
-        (6, "file.txt", None),
+        (5, "nowhere", Some(ref_proto::ERR_DIR_NOT_FOUND)),
+        (6, "file.txt", Some(ref_proto::ERR_DIR_NOT_FOUND)),
         (7, "  ", None),
     ] {
         send(&mut ws, id, Request::ListDirs { path: path.into() }).await;
         let (ok, _, err, code) = response_coded(&mut ws, id, &mut other).await;
         assert!(!ok && err.is_some(), "{path}");
         assert_eq!(code.as_deref(), expected_code, "{path}");
+    }
+
+    // Other canonicalize I/O failure (e.g. ENOTDIR on file.txt/sub): uncoded and does not claim "does not exist".
+    #[cfg(unix)]
+    {
+        send(
+            &mut ws,
+            8,
+            Request::ListDirs {
+                path: "file.txt/sub".into(),
+            },
+        )
+        .await;
+        let (ok, _, err, code) = response_coded(&mut ws, 8, &mut other).await;
+        assert!(!ok);
+        assert_eq!(code, None);
+        let err = err.unwrap();
+        assert!(!err.starts_with("Directory does not exist:"), "{err}");
     }
 }
 

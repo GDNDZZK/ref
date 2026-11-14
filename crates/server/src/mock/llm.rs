@@ -63,6 +63,7 @@ pub async fn start() -> std::io::Result<LlmServer> {
     Ok(LlmServer { port })
 }
 
+#[derive(Debug)]
 struct HttpRequest {
     path: String,
     session_id: String,
@@ -115,7 +116,8 @@ async fn read_request(stream: &mut TcpStream) -> std::io::Result<HttpRequest> {
         }
         buf.extend_from_slice(&chunk[..n]);
     }
-    let body = serde_json::from_slice(&buf[body_start..body_start + length]).unwrap_or(Value::Null);
+    let body = serde_json::from_slice(&buf[body_start..body_start + length])
+        .map_err(|_| invalid("body is not JSON"))?;
     Ok(HttpRequest {
         path,
         session_id: header(SESSION_HEADER).unwrap_or_default(),
@@ -289,4 +291,30 @@ async fn stream_round(
     out.send(event(usage)).await?;
     out.send("data: [DONE]\n\n".into()).await?;
     out.stream.shutdown().await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::{TcpListener, TcpStream};
+
+    #[tokio::test]
+    async fn read_request_rejects_non_json_body() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = tokio::spawn(async move {
+            let mut s = TcpStream::connect(addr).await.unwrap();
+            s.write_all(
+                b"POST /v1/chat/completions HTTP/1.1\r\nContent-Length: 9\r\n\r\nnot-json!",
+            )
+            .await
+            .unwrap();
+        });
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let err = read_request(&mut stream).await.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("body is not JSON"), "{err}");
+        client.await.unwrap();
+    }
 }

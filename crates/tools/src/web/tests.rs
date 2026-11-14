@@ -580,10 +580,23 @@ fn helpers() {
         &[
             json!({"user": {"login": "bob"}, "created_at": "2024-03-02T00:00:00Z", "body": "Fixed."}),
         ],
-    );
+    )
+    .unwrap();
     assert_eq!(t, "Crash");
     assert_eq!(
         md,
         "# Crash (#7)\n\nIssue, closed (completed) · by ann · opened 2024-03-01 · labels: bug · 1 comments\n\nIt crashes.\n\n---\n\n**bob** · 2024-03-02\n\nFixed.\n"
     );
+    let err = sites::github_issue_markdown(&json!({"title": "No num"}), &[]).unwrap_err();
+    assert!(
+        err.to_string().contains("unexpected GitHub response"),
+        "{err}"
+    );
+    let err = sites::github_issue_markdown(&json!({"number": 1}), &[]).unwrap_err();
+    assert!(
+        err.to_string().contains("unexpected GitHub response"),
+        "{err}"
+    );
+    let (_, md) = format_github_issue(&issue, Some(&json!({"unexpected": true}))).unwrap();
+    assert!(md.contains("comments unavailable"), "{md}");
 }

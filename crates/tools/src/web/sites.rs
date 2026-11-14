@@ -61,13 +61,24 @@ pub fn github_token() -> Option<String> {
 
 /// Markdown for an issue / pull request from the `issues/<n>` and `issues/<n>/comments` API
 /// responses. Returns `(title, markdown)`.
-pub fn github_issue_markdown(issue: &Value, comments: &[Value]) -> (String, String) {
+pub fn github_issue_markdown(
+    issue: &Value,
+    comments: &[Value],
+) -> anyhow::Result<(String, String)> {
+    let number = issue
+        .get("number")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| anyhow::anyhow!("unexpected GitHub response: missing issue number"))?;
+    let title = issue
+        .get("title")
+        .and_then(Value::as_str)
+        .filter(|t| !t.trim().is_empty())
+        .ok_or_else(|| anyhow::anyhow!("unexpected GitHub response: missing issue title"))?
+        .to_string();
     let s = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     let user = |v: &Value| v.get("user").map(|u| s(u, "login")).unwrap_or_default();
     let day = |t: String| t.get(..ISO_DATE_LEN).map(str::to_string).unwrap_or(t);
     let is_pr = issue.get("pull_request").is_some_and(|p| !p.is_null());
-    let number = issue.get("number").and_then(Value::as_u64).unwrap_or(0);
-    let title = s(issue, "title");
     let mut state = s(issue, "state");
     let merged = is_pr
         && issue["pull_request"]
@@ -130,5 +141,5 @@ pub fn github_issue_markdown(issue: &Value, comments: &[Value]) -> (String, Stri
             s(issue, "comments_url")
         ));
     }
-    (title, md)
+    Ok((title, md))
 }

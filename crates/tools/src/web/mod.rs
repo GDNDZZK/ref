@@ -523,17 +523,38 @@ async fn github_issue(
         "https://api.github.com/repos/{owner}/{repo}/issues/{number}"
     ))
     .await?;
-    let comments = match issue.get("comments").and_then(Value::as_u64) {
-        Some(n) if n > 0 => get(format!(
-            "https://api.github.com/repos/{owner}/{repo}/issues/{number}/comments?per_page=100"
-        ))
-        .await?
-        .as_array()
-        .cloned()
-        .unwrap_or_default(),
-        _ => Vec::new(),
+    let comments_val = match issue.get("comments").and_then(Value::as_u64) {
+        Some(n) if n > 0 => Some(
+            get(format!(
+                "https://api.github.com/repos/{owner}/{repo}/issues/{number}/comments?per_page=100"
+            ))
+            .await?,
+        ),
+        _ => None,
     };
-    Ok(sites::github_issue_markdown(&issue, &comments))
+    format_github_issue(&issue, comments_val.as_ref())
+}
+
+pub(crate) fn format_github_issue(
+    issue: &Value,
+    comments_val: Option<&Value>,
+) -> Result<(String, String)> {
+    let mut comments_unavailable = false;
+    let comments = match comments_val {
+        Some(v) => match v.as_array() {
+            Some(arr) => arr.clone(),
+            None => {
+                comments_unavailable = true;
+                Vec::new()
+            }
+        },
+        None => Vec::new(),
+    };
+    let (title, mut md) = sites::github_issue_markdown(issue, &comments)?;
+    if comments_unavailable {
+        md.push_str("\n---\n\n(comments unavailable: unexpected GitHub response)\n");
+    }
+    Ok((title, md))
 }
 
 /// Header, body (cut to the inline budget, the full text saved to a file) and metadata.

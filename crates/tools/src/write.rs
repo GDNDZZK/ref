@@ -91,7 +91,7 @@ fn plan_sync(input: &Value, ctx: &ToolCtx, max_file_bytes: Option<u64>) -> Resul
         None | Some(Value::Null) => bail!("missing required parameter `content`"),
         Some(other) => other.to_string(),
     };
-    let abs = util::resolve_path(&ctx.cwd, &raw_path);
+    let abs = util::resolve_path(&ctx.cwd, &raw_path)?;
     let display = util::display_path(&ctx.cwd, &abs);
     if abs.is_dir() {
         return Ok(WriteOutcome::Reject(ToolOutput::err(format!(

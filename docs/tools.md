@@ -103,11 +103,11 @@ Only the `build` and `plan` agents may ask by default; see [the `question` permi
 
 These run inside the backend, so messages between sessions are delivered reliably. Session names can be any Unicode text.
 
-- `list_sessions`: the live sessions you can message: name, id, agent, status, foreground or background, directory and title.
+- `list_sessions`: the sessions in this backend: name, id, agent, status, foreground or background, directory, title and creator. Set `history: true` to include closed history sessions (newest 200), or `creator` to filter by `"user"` or a creator session's name or id.
 - `send_message`: sends a message to another session. A busy session reads it after its current step.
 - `message_status`: whether a sent message is still queued, delivered, or read.
-- `read_session`: another session's messages, newest first, page by page.
-- `create_session`, `close_session`: only for agents with [`can_spawn`](configuration.md#agent-fields). Created sessions run in the background. With `must_report`, a created session that stops without sending a message gets a reminder to report. `close_session` refuses foreground sessions.
+- `read_session`: another session's messages (live or closed history), newest first, page by page.
+- `create_session`, `resume_session`, `close_session`: only for agents with [`can_spawn`](configuration.md#agent-fields). Created sessions run in the background. With `must_report`, a created session that stops without sending a message gets a reminder to report. `resume_session` reloads a closed history session (and can optionally send it a prompt). `close_session` refuses foreground sessions.
 
 ## MCP tools
 

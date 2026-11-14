@@ -243,9 +243,8 @@ fn open(data_dir: &Path, path: &Path) -> DbResult<Connection> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
-            tracing::warn!("cannot restrict permissions of {}: {e}", path.display());
-        }
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("cannot restrict permissions of {}: {e}", path.display()))?;
     }
     conn.busy_timeout(DB_BUSY_TIMEOUT)?;
     conn.pragma_update(None, "journal_mode", "WAL")?;

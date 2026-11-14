@@ -134,11 +134,15 @@ pub(crate) fn ptr_u64(v: &Value, pointer: &str) -> Option<u64> {
     opt_u64(v.pointer(pointer))
 }
 
-/// Parse tool-call arguments into a JSON object (`{}` when invalid / not an object).
-pub(crate) fn parse_arguments(arguments: &str) -> Value {
+/// Parse tool-call arguments into a JSON object (`{}` when empty).
+pub(crate) fn parse_arguments(arguments: &str) -> Result<Value, LlmError> {
+    if arguments.trim().is_empty() {
+        return Ok(Value::Object(Map::new()));
+    }
     match serde_json::from_str::<Value>(arguments) {
-        Ok(v @ Value::Object(_)) => v,
-        _ => Value::Object(Map::new()),
+        Ok(v @ Value::Object(_)) => Ok(v),
+        Ok(_) => Err(LlmError::fatal("tool call arguments must be a JSON object")),
+        Err(e) => Err(LlmError::fatal(format!("invalid tool call arguments: {e}"))),
     }
 }
 
@@ -450,6 +454,22 @@ async fn send_request(
     }
 }
 
+/// Read an HTTP error/JSON body up to `idle`, respecting cancellation.
+async fn read_body(
+    resp: reqwest::Response,
+    idle: Duration,
+    cancel: &CancellationToken,
+) -> Result<String, LlmError> {
+    tokio::select! {
+        _ = cancel.cancelled() => Err(LlmError::cancelled()),
+        r = tokio::time::timeout(idle, resp.text()) => match r {
+            Err(_) => Err(LlmError::transient("timed out reading response body")),
+            Ok(Err(e)) => Err(network_error(&e)),
+            Ok(Ok(text)) => Ok(text),
+        },
+    }
+}
+
 /// POST `body` to `url` and feed every SSE event to `handle` until it
 /// returns `Ok(true)` (terminal event) or the stream ends.
 ///
@@ -474,10 +494,7 @@ pub(crate) async fn run_sse(
     let status = resp.status();
     if !status.is_success() {
         let resp_headers = resp.headers().clone();
-        let text = tokio::select! {
-            _ = cancel.cancelled() => return Err(LlmError::cancelled()),
-            r = tokio::time::timeout(idle, resp.text()) => r.ok().and_then(Result::ok).unwrap_or_default(),
-        };
+        let text = read_body(resp, idle, cancel).await?;
         return Err(classify_http_error(status.as_u16(), &resp_headers, &text));
     }
 
@@ -489,10 +506,7 @@ pub(crate) async fn run_sse(
         .to_ascii_lowercase();
     if content_type.contains("application/json") {
         // Some gateways answer streaming requests with a plain JSON error.
-        let text = tokio::select! {
-            _ = cancel.cancelled() => return Err(LlmError::cancelled()),
-            r = tokio::time::timeout(idle, resp.text()) => r.ok().and_then(Result::ok).unwrap_or_default(),
-        };
+        let text = read_body(resp, idle, cancel).await?;
         return Err(json_body_error(&text));
     }
 
@@ -868,5 +882,20 @@ mod tests {
             matches!(&out[2], ChatMessage::ToolResult { call_id, is_error: true, .. } if call_id == "b")
         );
         assert!(matches!(&out[3], ChatMessage::User(_)));
+    }
+    #[test]
+    fn parse_arguments_validation() {
+        assert_eq!(parse_arguments("").unwrap(), serde_json::json!({}));
+        assert_eq!(parse_arguments("   ").unwrap(), serde_json::json!({}));
+        assert_eq!(
+            parse_arguments(r#"{"path":"a.rs"}"#).unwrap(),
+            serde_json::json!({"path": "a.rs"})
+        );
+        let bad_json = parse_arguments("not json").unwrap_err();
+        assert!(bad_json.message.contains("invalid tool call arguments"));
+        assert!(!bad_json.retryable);
+        let non_obj = parse_arguments("[1]").unwrap_err();
+        assert!(non_obj.message.contains("JSON object"));
+        assert!(!non_obj.retryable);
     }
 }

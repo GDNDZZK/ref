@@ -253,7 +253,7 @@ pub async fn stream(
 }
 
 /// Build the JSON request body without sending (for tests / debugging).
-pub fn build_body(provider: &Provider, model: &Model, req: &Request) -> Value {
+pub fn build_body(provider: &Provider, model: &Model, req: &Request) -> Result<Value, LlmError> {
     match provider.api {
         ApiKind::OpenAIChat => chat::build_body(provider, model, req),
         ApiKind::OpenAIResponses => responses::build_body(provider, model, req),

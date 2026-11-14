@@ -23,7 +23,7 @@ fn body_with_tools_images_and_reasoning_replay() {
         Some(json!({"field": "reasoning_content"})),
         None,
     );
-    let body = build_body(&p, &m, &req);
+    let body = build_body(&p, &m, &req).unwrap();
 
     assert_eq!(body["model"], "deepseek-v4-pro");
     assert_eq!(body["stream"], true);
@@ -71,7 +71,7 @@ fn tool_images_without_vision_are_noted_inline() {
     let mut m = model("deepseek-v4-pro", json!({}));
     m.images = false;
     let req = conversation(("deepseek", "deepseek-v4-pro"), None, None);
-    let body = build_body(&p, &m, &req);
+    let body = build_body(&p, &m, &req).unwrap();
     let msgs = body["messages"].as_array().unwrap();
     // No synthetic "Attached image(s)" user message; the note goes into the tool result.
     assert_eq!(msgs[3]["role"], "tool");
@@ -92,7 +92,7 @@ fn reasoning_dropped_for_foreign_model_but_deepseek_field_kept_empty() {
         Some(json!({"signature": "x"})),
         None,
     );
-    let body = build_body(&p, &m, &req);
+    let body = build_body(&p, &m, &req).unwrap();
     assert_eq!(body["messages"][2]["reasoning_content"], "");
 
     let p = provider(
@@ -101,7 +101,7 @@ fn reasoning_dropped_for_foreign_model_but_deepseek_field_kept_empty() {
         "https://open.bigmodel.cn/api/paas/v4",
     );
     let m = model("glm-5", json!({}));
-    let body = build_body(&p, &m, &req);
+    let body = build_body(&p, &m, &req).unwrap();
     assert!(body["messages"][2].get("reasoning_content").is_none());
 }
 
@@ -118,7 +118,7 @@ fn recorded_reasoning_field_is_reused() {
         Some(json!({"field": "reasoning"})),
         None,
     );
-    let body = build_body(&p, &m, &req);
+    let body = build_body(&p, &m, &req).unwrap();
     assert_eq!(body["messages"][2]["reasoning"], "Let me read the file.");
     assert!(body["messages"][2].get("reasoning_content").is_none());
 }
@@ -139,7 +139,7 @@ fn options_mapping() {
     );
     m.temperature = Some(0.2);
     m.top_p = Some(0.9);
-    let body = build_body(&p, &m, &conversation(("x", "y"), None, None));
+    let body = build_body(&p, &m, &conversation(("x", "y"), None, None)).unwrap();
     assert_eq!(body["verbosity"], "low");
     assert_eq!(body["store"], false);
     assert_eq!(body["prompt_cache_key"], "ses_123");
@@ -168,7 +168,7 @@ fn options_mapping() {
 
     // `store` is only sent to the official OpenAI API.
     let p = deepseek();
-    let body = build_body(&p, &m, &conversation(("x", "y"), None, None));
+    let body = build_body(&p, &m, &conversation(("x", "y"), None, None)).unwrap();
     assert!(body.get("store").is_none());
 }
 
@@ -311,4 +311,23 @@ fn reasoning_field_alias_and_tool_without_index() {
     assert!(
         matches!(&res.blocks[1], AssistantBlock::ToolCall { arguments, .. } if arguments == r#"{"a":1}"#)
     );
+}
+
+#[test]
+fn tool_arguments_empty_and_raw_replay() {
+    let p = deepseek();
+    let m = model("deepseek-v4-pro", json!({}));
+    for (raw, expected) in [("", "{}"), ("{not json", "{not json")] {
+        let mut req = conversation(("deepseek", "deepseek-v4-pro"), None, None);
+        if let ChatMessage::Assistant { blocks, .. } = &mut req.messages[1]
+            && let AssistantBlock::ToolCall { arguments, .. } = &mut blocks[2]
+        {
+            *arguments = raw.into();
+        }
+        let body = build_body(&p, &m, &req).unwrap();
+        assert_eq!(
+            body["messages"][2]["tool_calls"][0]["function"]["arguments"],
+            expected
+        );
+    }
 }

@@ -21,7 +21,7 @@ const LAST_PORT_FILE: &str = "port";
 
 /// Binds `host:port` for `--port`, or a free random port without it.
 pub async fn bind(host: &str, requested: Option<u16>) -> anyhow::Result<TcpListener> {
-    bind_in(&token::state_subdir(), host, requested).await
+    bind_in(&token::state_subdir()?, host, requested).await
 }
 
 async fn bind_in(
