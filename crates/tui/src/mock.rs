@@ -205,8 +205,8 @@ fn config() -> ServerConfigInfo {
 }
 
 impl Mock {
-    fn send(&self, f: ServerFrame) {
-        let _ = self.tx.send(NetEvent::Frame(f));
+    fn send(&self, f: ServerFrame) -> bool {
+        self.tx.send(NetEvent::Frame(f)).is_ok()
     }
 
     fn broadcast_sessions(&self) {
@@ -427,11 +427,11 @@ impl Mock {
         }
     }
 
-    /// Streams `text` as deltas into part `idx`. Returns false if aborted.
+    /// Streams `text` as deltas into part `idx`. Returns false if aborted or disconnected.
     async fn stream(&self, sid: &str, mid: &str, idx: usize, text: &str, spec: StreamSpec) -> bool {
         let chars: Vec<char> = text.chars().collect();
         for c in chars.chunks(spec.chunk.max(1)) {
-            if self.aborted(sid) {
+            if self.tx.is_closed() || self.aborted(sid) {
                 return false;
             }
             let delta = (spec.make_delta)(c.iter().collect());
@@ -445,18 +445,18 @@ impl Mock {
             );
             tokio::time::sleep(Duration::from_millis(spec.delay_ms)).await;
         }
-        true
+        !self.tx.is_closed()
     }
 
     async fn sleep_or_abort(&self, sid: &str, ms: u64) -> bool {
         let steps = ms / ABORT_POLL_MS;
         for _ in 0..steps.max(1) {
-            if self.aborted(sid) {
+            if self.tx.is_closed() || self.aborted(sid) {
                 return false;
             }
             tokio::time::sleep(Duration::from_millis(ABORT_POLL_MS)).await;
         }
-        !self.aborted(sid)
+        !self.tx.is_closed() && !self.aborted(sid)
     }
 }
 
@@ -965,7 +965,7 @@ impl Mock {
     async fn worker_loop(&self, sid: String, label: &'static str) {
         let mut round = 0u32;
         loop {
-            if !self.world().sessions.contains_key(&sid) {
+            if self.tx.is_closed() || !self.world().sessions.contains_key(&sid) {
                 return;
             }
             round += 1;
@@ -1082,6 +1082,18 @@ impl Mock {
         }
     }
 
+    fn err_code(&self, id: Option<u64>, code: &str, e: &str) {
+        if let Some(id) = id {
+            self.send(ServerFrame::Response {
+                id,
+                ok: false,
+                result: Value::Null,
+                error: Some(e.into()),
+                code: Some(code.into()),
+            });
+        }
+    }
+
     fn with_session<R>(&self, sid: &str, f: impl FnOnce(&mut MockSession) -> R) -> Option<R> {
         self.world().sessions.get_mut(sid).map(f)
     }
@@ -1146,8 +1158,13 @@ impl Mock {
                 self.ok(request_id, json!({}));
             }
             Request::PermissionReply { call_id, allow, .. } => {
-                if let Some(tx) = self.world().perm_waiters.remove(&call_id) {
-                    let _ = tx.send(allow);
+                let Some(tx) = self.world().perm_waiters.remove(&call_id) else {
+                    self.err_code(request_id, ERR_NO_PENDING_PERMISSION, NO_PENDING_PERMISSION);
+                    return;
+                };
+                if tx.send(allow).is_err() {
+                    self.err_code(request_id, ERR_NO_PENDING_PERMISSION, NO_PENDING_PERMISSION);
+                    return;
                 }
                 self.ok(request_id, json!({}));
             }
@@ -1763,8 +1780,78 @@ pub async fn run(
     };
     m.seed(&cwd);
     tokio::time::sleep(STARTUP_DELAY).await;
-    let _ = tx.send(NetEvent::Connected);
+    if tx.send(NetEvent::Connected).is_err() {
+        return;
+    }
     while let Some(f) = rx.recv().await {
         m.handle(f);
+        if tx.is_closed() {
+            break;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn run_exits_when_receiver_is_dropped() {
+        let (out_tx, out_rx) = mpsc::unbounded_channel();
+        let (ev_tx, ev_rx) = mpsc::unbounded_channel();
+        drop(ev_rx);
+        let h = tokio::spawn(run("/tmp".into(), out_rx, ev_tx));
+        tokio::time::timeout(Duration::from_secs(2), h)
+            .await
+            .expect("mock::run exits promptly when NetEvent receiver is gone")
+            .expect("task joins cleanly");
+        drop(out_tx);
+    }
+
+    #[test]
+    fn permission_reply_errors_when_waiter_missing_or_dropped() {
+        let (ev_tx, mut ev_rx) = mpsc::unbounded_channel();
+        let m = Mock {
+            world: Arc::new(Mutex::new(World::default())),
+            tx: ev_tx,
+        };
+        let s = m.create("main", "build", "/tmp");
+        m.handle(ClientFrame {
+            id: Some(1),
+            req: Request::PermissionReply {
+                session_id: s.id.clone(),
+                call_id: "missing".into(),
+                allow: true,
+                always: false,
+            },
+        });
+        match ev_rx.try_recv().unwrap() {
+            NetEvent::Frame(ServerFrame::Response { id, ok, code, .. }) => {
+                assert_eq!(id, 1);
+                assert!(!ok);
+                assert_eq!(code.as_deref(), Some(ERR_NO_PENDING_PERMISSION));
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+        let (w_tx, w_rx) = oneshot::channel();
+        drop(w_rx);
+        m.world().perm_waiters.insert("dropped".into(), w_tx);
+        m.handle(ClientFrame {
+            id: Some(2),
+            req: Request::PermissionReply {
+                session_id: s.id,
+                call_id: "dropped".into(),
+                allow: true,
+                always: false,
+            },
+        });
+        match ev_rx.try_recv().unwrap() {
+            NetEvent::Frame(ServerFrame::Response { id, ok, code, .. }) => {
+                assert_eq!(id, 2);
+                assert!(!ok);
+                assert_eq!(code.as_deref(), Some(ERR_NO_PENDING_PERMISSION));
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
     }
 }
