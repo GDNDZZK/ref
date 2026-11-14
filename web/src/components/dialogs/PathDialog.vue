@@ -4,7 +4,9 @@ import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vu
 import { useI18n } from 'vue-i18n'
 import { useDialogSubmit } from '../../composables/useDialogSubmit.ts'
 import { handleListKey, usePickSelection } from '../../composables/usePickSelection.ts'
+import { RefError } from '../../net/connection.ts'
 import { useDialogsStore } from '../../stores/dialogs.ts'
+import { useNoticesStore } from '../../stores/notices.ts'
 import { useWorkspaceStore } from '../../stores/workspace.ts'
 import DialogButton from '../DialogButton.vue'
 import Icon from '../Icon.vue'
@@ -20,8 +22,8 @@ const LOOKUP_DELAY_MS = 120
 const props = defineProps<{ mode: 'cd' | 'newSession'; sessionId?: string }>()
 const { t } = useI18n()
 const dialogs = useDialogsStore()
+const notices = useNoticesStore()
 const workspace = useWorkspaceStore()
-
 const startPath = (props.sessionId ? workspace.infoOf(props.sessionId)?.cwd : undefined) ?? workspace.cwd
 const path = ref(startPath)
 const dirs = ref<string[]>([])
@@ -47,6 +49,13 @@ const { selected, move } = usePickSelection(items)
 let lookup: ReturnType<typeof setTimeout> | undefined
 let lookedUp = 0
 
+function isDirNotFound(err: unknown): boolean {
+  if (err instanceof RefError && err.code === 'dir_not_found') return true
+  if (!(err instanceof Error)) return false
+  // remove with protocol 5
+  return err.message.startsWith('Directory does not exist:') || err.message.startsWith('Not a directory:')
+}
+
 // Asks for the folder's sub-directories shortly after the typing stops.
 watch(
   () => split.value.folder,
@@ -61,8 +70,10 @@ watch(
       try {
         const result = await workspace.listDirs(folder)
         if (mine === lookedUp) dirs.value = result.dirs
-      } catch {
-        if (mine === lookedUp) dirs.value = [] // a folder that does not exist (yet) has no completions
+      } catch (err) {
+        if (mine !== lookedUp) return
+        dirs.value = [] // a folder that does not exist (yet) has no completions
+        if (!isDirNotFound(err)) notices.pushError(err)
       }
     }, LOOKUP_DELAY_MS)
   },
