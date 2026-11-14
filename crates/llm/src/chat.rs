@@ -7,8 +7,8 @@ use crate::util::{
     Assembler, CLIENT_OPTION_KEYS, DEFAULT_OPENAI_BASE, IMAGE_OMITTED, NO_TOOL_OUTPUT,
     SEE_ATTACHED_IMAGE, StreamEnd, StreamState, arguments_string, bearer_header, build_headers,
     data_url, drive, endpoint, error_fields, has_tool_history, is_official_openai,
-    json_sse_headers, merge_key, normalize_call_id, normalize_history, prompt_cache_key, ptr_u64,
-    same_origin, session_headers, snake_keys,
+    json_sse_headers, merge_key, normalize_call_id, normalize_history, parse_arguments,
+    prompt_cache_key, ptr_u64, same_origin, session_headers, snake_keys,
 };
 use crate::{
     AssistantBlock, BlockKind, ChatMessage, LlmError, Model, Provider, Request, Response,
@@ -32,7 +32,7 @@ pub(crate) async fn stream(
     cancel: &CancellationToken,
     on_event: &mut (dyn FnMut(StreamEvent) + Send),
 ) -> Result<Response, LlmError> {
-    let body = build_body(provider, model, req);
+    let body = build_body(provider, model, req)?;
     let url = endpoint(&provider.base_url, DEFAULT_OPENAI_BASE, "chat/completions");
     let headers = request_headers(provider, req);
     drive(
@@ -65,12 +65,16 @@ fn requires_reasoning_content(provider: &Provider, model: &Model) -> bool {
         || model.id.to_ascii_lowercase().contains(needle)
 }
 
-pub(crate) fn build_body(provider: &Provider, model: &Model, req: &Request) -> Value {
+pub(crate) fn build_body(
+    provider: &Provider,
+    model: &Model,
+    req: &Request,
+) -> Result<Value, LlmError> {
     let mut body = Map::new();
     body.insert("model".into(), json!(model.id));
     body.insert(
         "messages".into(),
-        Value::Array(convert_messages(provider, model, req)),
+        Value::Array(convert_messages(provider, model, req)?),
     );
 
     if !req.tools.is_empty() {
@@ -113,7 +117,7 @@ pub(crate) fn build_body(provider: &Provider, model: &Model, req: &Request) -> V
     }
 
     apply_options(provider, &model.options, &mut body);
-    Value::Object(body)
+    Ok(Value::Object(body))
 }
 
 /// Map opencode-style options onto the request body. Unknown keys are passed
@@ -173,7 +177,11 @@ fn apply_options(provider: &Provider, options: &Map<String, Value>, body: &mut M
 }
 
 /// Lower the conversation to chat `messages`.
-fn convert_messages(provider: &Provider, model: &Model, req: &Request) -> Vec<Value> {
+fn convert_messages(
+    provider: &Provider,
+    model: &Model,
+    req: &Request,
+) -> Result<Vec<Value>, LlmError> {
     let mut out: Vec<Value> = Vec::new();
     let system: Vec<&str> = req
         .system
@@ -199,7 +207,7 @@ fn convert_messages(provider: &Provider, model: &Model, req: &Request) -> Vec<Va
             }
             ChatMessage::Assistant { blocks, origin } => {
                 let replay = same_origin(origin, provider, model);
-                if let Some(m) = assistant_message(blocks, replay, require_reasoning) {
+                if let Some(m) = assistant_message(blocks, replay, require_reasoning)? {
                     push_assistant(&mut out, m);
                 }
             }
@@ -219,7 +227,7 @@ fn convert_messages(provider: &Provider, model: &Model, req: &Request) -> Vec<Va
             }
         }
     }
-    out
+    Ok(out)
 }
 
 /// Lower one tool result to a `tool` message. Images are collected in `tool_images` and
@@ -295,7 +303,7 @@ fn assistant_message(
     blocks: &[AssistantBlock],
     replay: bool,
     require_reasoning: bool,
-) -> Option<Map<String, Value>> {
+) -> Result<Option<Map<String, Value>>, LlmError> {
     let mut text = String::new();
     let mut reasoning = String::new();
     let mut field: Option<String> = None;
@@ -330,15 +338,18 @@ fn assistant_message(
                 name,
                 arguments,
                 ..
-            } => tool_calls.push(json!({
-                "id": normalize_call_id(id, MAX_CALL_ID),
-                "type": "function",
-                "function": {"name": name, "arguments": arguments_string(arguments)},
-            })),
+            } => {
+                parse_arguments(arguments)?;
+                tool_calls.push(json!({
+                    "id": normalize_call_id(id, MAX_CALL_ID),
+                    "type": "function",
+                    "function": {"name": name, "arguments": arguments_string(arguments)},
+                }));
+            }
         }
     }
     if text.trim().is_empty() && tool_calls.is_empty() {
-        return None;
+        return Ok(None);
     }
     let mut msg = Map::new();
     msg.insert("role".into(), json!("assistant"));
@@ -361,7 +372,7 @@ fn assistant_message(
     if !tool_calls.is_empty() {
         msg.insert("tool_calls".into(), Value::Array(tool_calls));
     }
-    Some(msg)
+    Ok(Some(msg))
 }
 
 /// Push a user message, merging it into the previous one when that is a user message too
