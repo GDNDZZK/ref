@@ -142,7 +142,7 @@ QT_QPA_PLATFORM=offscreen QML_IMPORT_PATH=$REF_DEPS_DIR/prefix/lib/qml \
 cmake -S gui -B gui/build -G Ninja -DCMAKE_INSTALL_BINDIR=. -DCMAKE_PREFIX_PATH=…
 cmake --build gui/build
 cmake --install gui/build --prefix stage
-scripts/package.sh --version v0.2.0 --target x86_64-unknown-linux-gnu \
+scripts/package.sh --version v0.2.1 --target x86_64-unknown-linux-gnu \
   --bin-dir target/release --out dist --gui-dir stage      # 需要先完成 Rust 构建，见上文
 ```
 
@@ -184,7 +184,7 @@ scripts/package.sh --version v0.2.0 --target x86_64-unknown-linux-gnu \
 在 `cargo build --release` 之后手动打包：
 
 ```bash
-scripts/package.sh --version v0.2.0 --target x86_64-unknown-linux-gnu \
+scripts/package.sh --version v0.2.1 --target x86_64-unknown-linux-gnu \
   --bin-dir target/release --out dist [--gui-dir stage]
 ```
 
@@ -195,10 +195,10 @@ scripts/package.sh --version v0.2.0 --target x86_64-unknown-linux-gnu \
 ```bash
 # 1. 修改 Cargo.toml 中的版本（[workspace.package] version），并运行
 #    `cargo update --workspace` 刷新 Cargo.lock（CI 用 --locked 构建）。
-#    把发布说明写进 .github/release-notes/v0.2.0.md。提交并推送。
+#    把发布说明写进 .github/release-notes/v0.2.1.md。提交并推送。
 # 2. 打标签并推送标签：
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.2.1
+git push origin v0.2.1
 ```
 
 `ref-gui` 的版本、Windows 和 macOS 的元数据以及压缩包名称都由标签和 `Cargo.toml` 决定。标签与 `Cargo.toml` 中的版本不一致时，工作流的第一个任务会失败。发布说明取自文件 `.github/release-notes/<标签>.md`；文件不存在时，由 GitHub 根据提交生成。

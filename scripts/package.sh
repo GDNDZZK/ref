@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Packs the release archives of one platform from already built programs.
 #
-#   scripts/package.sh --version v0.2.0 --target x86_64-unknown-linux-gnu \
+#   scripts/package.sh --version v0.2.1 --target x86_64-unknown-linux-gnu \
 #                      --bin-dir target/x86_64-unknown-linux-gnu/release --out dist \
 #                      [--gui-dir STAGE]
 #
