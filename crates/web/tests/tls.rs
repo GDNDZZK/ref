@@ -131,7 +131,11 @@ async fn missing_name_in_meta_regenerates_certificate() {
         .await;
     let first_fp = cert_fingerprint(&first.cert_path());
     assert!(ref_sys::terminate(first.pid()));
-    assert!(first.wait_exit().await.success());
+    let status = first.wait_exit().await;
+    #[cfg(unix)]
+    assert!(status.success());
+    #[cfg(not(unix))]
+    let _ = status;
 
     // Drop `::1` from meta.json so the next start sees a missing SAN and regenerates.
     let meta_path = env.state_dir().join("web/tls/meta.json");
