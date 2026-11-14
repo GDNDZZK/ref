@@ -44,15 +44,16 @@ ref-web [DIR] [options]
 | Option | Meaning |
 |---|---|
 | `DIR` | Directory for new sessions (default: the current directory). |
-| `--port N` | Port to listen on (1–65535, default `7480`). |
+| `--port N` | Port to listen on (1–65535). Without it: a random free port in 10000–65535; the port of the last run is tried first, so the address stays the same. |
 | `--host ADDR` | Address to listen on (default `127.0.0.1`). Any other address opens `ref-web` to the network, without TLS; a warning is printed. |
+| `--key KEY` | The key browsers sign in with, at least 16 characters; not written to disk. Also read from the environment variable `REF_WEB_KEY`, which keeps it out of the process list. Default: the login token. See [Signing in](web.md#signing-in). |
 | `--no-open` | Do not open the browser. |
 | `--server ws://host:port` | Connect to this backend instead of finding or starting one. |
-| `--token T` | Token for `--server`. Needs `--server`. |
+| `--token T` | Token of the backend given with `--server` (not the browser's key, see `--key`). Needs `--server`. |
 | `--mock` | Use a private fake backend (for development). Cannot be combined with `--server`. |
 | `-V`, `--version`, `-h`, `--help` | Version and help. |
 
-Without `--server`, `ref-web` finds the backend the same way `ref` does. The login token for browsers is kept in `<state dir>/web/login-token`.
+Without `--server`, `ref-web` finds the backend the same way `ref` does. Without `--key`, the key for browsers is the login token kept in `<state dir>/web/login-token`.
 
 ## `ref-server`
 
@@ -100,10 +101,13 @@ ref --server ws://127.0.0.1:7777 --token <token>
 | `~/.local/state/ref/instances/<pid>.json` | One file per running backend: port, token and settings. Readable only by you (mode 600). |
 | `~/.local/state/ref/prompt-history.jsonl` | Prompt history (500 entries), shared by `ref` and `ref-gui`. |
 | `~/.local/state/ref/gui.json` | Settings of `ref-gui` ([Settings](gui.md#settings)). |
-| `~/.local/state/ref/web/login-token` | Login token of `ref-web`. Readable only by you (mode 600). Delete it while `ref-web` is stopped to get a new one. |
+| `~/.local/state/ref/web/login-token` | Login token of `ref-web`, the default key. Readable only by you (mode 600). Delete it while `ref-web` is stopped to get a new one. |
+| `~/.local/state/ref/web/salt` | Salt for the key (16 random bytes as hex, not secret; mode 600). Browsers keep a value derived from the key and the salt; a new salt makes them ask for the key again. |
+| `~/.local/state/ref/web/port` | The port `ref-web` used last, tried first when no `--port` is given. |
+| `~/.local/state/ref/web/instances/<pid>.json` | One file per running `ref-web`: port, host, version, start time. No secret; mode 600. |
 | `~/.local/state/ref/logs/` | Backend logs, including configuration warnings. |
 
-On Windows, `~` is `%USERPROFILE%`.
+On Windows, `~` is `%USERPROFILE%`. The modes (600, and 700 for directories) apply on Unix only; on Windows the files rely on the access rights of the user profile.
 
 ## Environment variables
 
@@ -114,6 +118,7 @@ On Windows, `~` is `%USERPROFILE%`.
 | `OPENCODE_CONFIG_DIR` | Use this directory instead of `~/.config/opencode`. |
 | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` | Replace `~/.config`, `~/.local/share` and `~/.local/state`. |
 | `REF_DATA_DIR`, `REF_STATE_DIR` | Replace the data and state directories directly (`…/share/ref` and `…/state/ref`). |
+| `REF_WEB_KEY` | `--key` of `ref-web`: the key browsers sign in with (at least 16 characters). |
 | `REF_LOG` | Backend log filter, in `tracing` syntax (default `info`; for example `debug` or `ref_llm=trace`). |
 | `REF_DUMP_REQUESTS=DIR` | Write every LLM request body to `DIR` (headers, which hold the API key, are never written). |
 | `REF_TUI_LOG=FILE` | Write the TUI's input debug log to `FILE`. |

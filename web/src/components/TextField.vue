@@ -2,7 +2,7 @@
 // A text field of a dialog (TextField.qml), with an optional error line under it.
 import { useTemplateRef } from 'vue'
 
-defineProps<{ label: string; placeholder?: string; error?: string }>()
+defineProps<{ label: string; placeholder?: string; error?: string; secret?: boolean }>()
 const text = defineModel<string>({ required: true })
 const emit = defineEmits<{ enter: []; keydown: [event: KeyboardEvent] }>()
 
@@ -22,7 +22,7 @@ defineExpose({
     <input
       ref="input"
       v-model="text"
-      type="text"
+      :type="secret ? 'password' : 'text'"
       class="input"
       spellcheck="false"
       autocomplete="off"

@@ -379,7 +379,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       await Promise.all([...chats.values()].map((session) => session.resync()))
       return
     }
-    cwd.value = start.cwd
+    cwd.value = start.cwd ?? connection.hello?.cwd ?? ''
     await connection.loadConfig()
     setLive(await api.listSessions())
     void refreshHistory().catch(notices.pushError)
