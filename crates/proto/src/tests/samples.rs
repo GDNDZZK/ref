@@ -213,6 +213,23 @@ pub fn tool_parts() -> Vec<(&'static str, Part)> {
         finished: true,
         ..edit(ToolState::Done)
     };
+    let done_edit_warnings = ToolSample {
+        output: Some(
+            "Edited src/parser.rs [src/parser.rs#b7c2]\n  42 |     for i in 0..items.len() {\n\nWarnings:\nRecovered: file changed since read; line numbers remapped."
+                .into(),
+        ),
+        meta: Some(
+            json!({
+                "path": "/home/user/project/src/parser.rs",
+                "diff": EDIT_DIFF,
+                "added": 1,
+                "removed": 1,
+                "warnings": ["Recovered: file changed since read; line numbers remapped."],
+            }),
+        ),
+        finished: true,
+        ..edit(ToolState::Done)
+    };
     let done_bash = ToolSample {
         output: Some("running 12 tests\ntest result: ok. 12 passed; 0 failed\n".into()),
         meta: Some(
@@ -266,6 +283,7 @@ pub fn tool_parts() -> Vec<(&'static str, Part)> {
         ("tool_delayed", delayed.part()),
         ("tool_running", running.part()),
         ("tool_done_edit_diff", done_edit.part()),
+        ("tool_done_edit_warnings", done_edit_warnings.part()),
         ("tool_done_bash", done_bash.part()),
         ("tool_error", error.part()),
         ("tool_denied", denied.part()),

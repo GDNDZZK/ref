@@ -4670,3 +4670,64 @@ fn protocol_refusal_and_old_backend_banners_render() {
     assert!(!s.contains("connecting…"), "{s}");
     assert!(!s.contains("reconnecting…"), "{s}");
 }
+
+#[test]
+fn edit_warnings_render_under_diff_from_shared_fixture() {
+    let part: Part = serde_json::from_str(include_str!(
+        "../../proto/fixtures/part/tool_done_edit_warnings.json"
+    ))
+    .unwrap();
+    let msg = Message {
+        id: "m_warn".into(),
+        role: Role::Assistant,
+        time: 0,
+        time_end: Some(1),
+        source: MessageSource::Human,
+        parts: vec![part],
+        model: None,
+        agent: None,
+        usage: None,
+        error: None,
+    };
+    let rows = crate::ui::message::render(&msg, &ctx(true), 100);
+    let rendered: Vec<String> = rows.iter().map(|r| text::line_text(&r.line)).collect();
+    let diff_idx = rendered
+        .iter()
+        .position(|l| l.contains("diff ─"))
+        .expect("diff section");
+    let warn_hdr_idx = rendered
+        .iter()
+        .position(|l| l.contains("warnings ─"))
+        .expect("warnings section");
+    let warn_row_idx = rendered
+        .iter()
+        .position(|l| l.contains("Recovered: file changed since read; line numbers remapped."))
+        .expect("warning line");
+    let out_idx = rendered
+        .iter()
+        .position(|l| l.contains("output ─"))
+        .expect("output section");
+    assert!(diff_idx < warn_hdr_idx && warn_hdr_idx < warn_row_idx && warn_row_idx < out_idx);
+    let has_warning_color = rows[warn_row_idx]
+        .line
+        .spans
+        .iter()
+        .any(|s| s.style.fg == Some(crate::ui::theme::WARNING));
+    assert!(has_warning_color);
+
+    // Without warnings, no warnings section is drawn.
+    let plain: Part = serde_json::from_str(include_str!(
+        "../../proto/fixtures/part/tool_done_edit_diff.json"
+    ))
+    .unwrap();
+    let msg_plain = Message {
+        parts: vec![plain],
+        ..msg
+    };
+    let rows_plain = crate::ui::message::render(&msg_plain, &ctx(true), 100);
+    assert!(
+        !rows_plain
+            .iter()
+            .any(|r| text::line_text(&r.line).contains("warnings ─"))
+    );
+}
