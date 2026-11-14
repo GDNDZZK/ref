@@ -51,6 +51,7 @@
   },
   "tool": {
     "input": "Input",
+    "preview": "Preview",
     "allow": "Allow",
     "allowSession": "Allow for this session",
     "deny": "Deny",
