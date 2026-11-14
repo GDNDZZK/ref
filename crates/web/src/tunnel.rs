@@ -93,7 +93,7 @@ pub async fn ws_handler(State(state): State<Arc<AppState>>, req: Request) -> Res
         .get(ORIGIN)
         .zip(headers.get(HOST))
         .and_then(|(origin, host)| Some((origin.to_str().ok()?, host.to_str().ok()?)))
-        .is_some_and(|(origin, host)| origin_matches_host(origin, host));
+        .is_some_and(|(origin, host)| origin_matches_host(origin, host, state.hosts.tls()));
     if !same_origin {
         return text_response(StatusCode::FORBIDDEN, "Forbidden: origin not allowed\n");
     }
@@ -506,7 +506,7 @@ mod tests {
             key: Key::new(TEST_KEY.to_string(), [3; SALT_LEN]),
             handshakes: Arc::new(Semaphore::new(MAX_HANDSHAKES)),
             handshake_timeout: HANDSHAKE_TIMEOUT,
-            hosts: HostPolicy::new(LOOPBACK, 0),
+            hosts: HostPolicy::new(LOOPBACK, 0, false),
             cwd: String::new(),
             upstream: Upstream::Remote(Target::Explicit {
                 url: upstream_url,
