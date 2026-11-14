@@ -543,7 +543,9 @@ async fn create_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Resu
         parent: Some(s.id.clone()),
         must_report,
     };
-    let child = crate::ops::create_session(hub, opts).await?;
+    let child = crate::ops::create_session(hub, opts)
+        .await
+        .map_err(|e| e.message)?;
     let mut text = format!("{}\n{}", spawn_header(&my_name, &s.id), prompt.trim_end());
     if must_report {
         text.push_str(&format!(

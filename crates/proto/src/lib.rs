@@ -29,6 +29,7 @@ pub const NO_PENDING_PERMISSION: &str = "No pending permission request with that
 pub const ERR_NO_PENDING_QUESTION: &str = "no_pending_question";
 pub const ERR_NO_PENDING_PERMISSION: &str = "no_pending_permission";
 pub const ERR_NOT_FOUND: &str = "not_found";
+pub const ERR_DIR_NOT_FOUND: &str = "dir_not_found";
 pub const ERR_PROTOCOL_MISMATCH: &str = "protocol_mismatch";
 fn home() -> std::path::PathBuf {
     std::env::var_os("HOME")
@@ -962,7 +963,7 @@ pub enum Request {
     },
     /// Sub-directories of `path` for a directory picker: `~` is expanded and a relative path
     /// is taken from the connection's cwd. -> `{path: <absolute, normalized>, dirs: [String]}`
-    /// (names only, sorted). A missing directory fails with `ERR_NOT_FOUND`.
+    /// (names only, sorted). A missing or non-directory path fails with `ERR_DIR_NOT_FOUND`.
     ListDirs {
         path: String,
     },

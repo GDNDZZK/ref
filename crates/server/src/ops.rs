@@ -35,14 +35,23 @@ fn unique_name(hub: &Hub, base: &str, except: Option<&str>) -> String {
     unreachable!()
 }
 
-pub(crate) fn validate_cwd(cwd: &str) -> Result<String, String> {
+pub(crate) fn validate_cwd(cwd: &str) -> Result<String, crate::api::ApiError> {
     let p = std::path::Path::new(cwd);
     if !p.is_absolute() {
-        return Err(format!("Working directory must be absolute: {cwd}"));
+        return Err(format!("Working directory must be absolute: {cwd}").into());
     }
-    let c = dunce::canonicalize(p).map_err(|_| format!("Directory does not exist: {cwd}"))?;
+    let c = dunce::canonicalize(p).map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => crate::api::ApiError::coded(
+            ref_proto::ERR_DIR_NOT_FOUND,
+            format!("Directory does not exist: {cwd}"),
+        ),
+        _ => crate::api::ApiError::from(format!("Cannot access directory {cwd}: {e}")),
+    })?;
     if !c.is_dir() {
-        return Err(format!("Not a directory: {cwd}"));
+        return Err(crate::api::ApiError::coded(
+            ref_proto::ERR_DIR_NOT_FOUND,
+            format!("Not a directory: {cwd}"),
+        ));
     }
     Ok(c.to_string_lossy().to_string())
 }
@@ -142,7 +151,10 @@ fn pick_name(
     Err(format!("A live session named \"{n}\" already exists."))
 }
 
-pub async fn create_session(hub: &Arc<Hub>, o: CreateOpts) -> Result<Arc<Session>, String> {
+pub async fn create_session(
+    hub: &Arc<Hub>,
+    o: CreateOpts,
+) -> Result<Arc<Session>, crate::api::ApiError> {
     let cwd = validate_cwd(&hub.effective_cwd(&o.cwd))?;
     let cfg = load_config(hub, &cwd).await?;
     for w in &cfg.warnings {
