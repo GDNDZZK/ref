@@ -307,15 +307,31 @@ describe('clear', () => {
   })
 })
 
-describe('images', () => {
-  it('attaches pasted images at the caret and skips other files', async () => {
+describe('images and dropped files', () => {
+  it('attaches supported images and inserts absolute paths for unsupported files from text/uri-list', async () => {
     const { composer, toasts } = setup()
     type(composer, 'see ')
     const png = new File([new Uint8Array([1, 2, 3])], 'shot.png', { type: 'image/png' })
     const text = new File(['x'], 'notes.txt', { type: 'text/plain' })
-    await composer.attachFiles([png, text])
-    expect(composer.draft.text).toBe('see [Image 1] ')
+    await composer.attachFiles([png, text], 'file:///work/shot.png\nfile:///work/notes.txt')
+    expect(composer.draft.text).toBe('see [Image 1] /work/notes.txt ')
     expect(composer.draft.attachments[0]!.image).toEqual({ mime: 'image/png', data: 'AQID' })
-    expect(toasts).toEqual([['warn', 'composer.toast.image.type']])
+    expect(toasts).toEqual([])
+  })
+
+  it('falls back to the filename when the browser withholds the path', async () => {
+    const { composer, toasts } = setup()
+    type(composer, 'see')
+    const text = new File(['x'], 'notes.txt', { type: 'text/plain' })
+    await composer.attachFiles([text])
+    expect(composer.draft.text).toBe('see notes.txt ')
+    expect(toasts).toEqual([])
+  })
+
+  it('inserts paths from pasted file:// URIs without File objects', async () => {
+    const { composer, toasts } = setup()
+    await composer.attachFiles([], 'file:///home/me/my%20file.rs\r\n# comment\r\nfile:///home/me/lib.ts')
+    expect(composer.draft.text).toBe('/home/me/my file.rs /home/me/lib.ts ')
+    expect(toasts).toEqual([])
   })
 })

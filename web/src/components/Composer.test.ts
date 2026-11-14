@@ -199,6 +199,26 @@ describe('Composer', () => {
     expect(api.prompt).toHaveBeenCalledWith('s1', '[Image 1] ', [{ mime: 'image/png', data: 'AQID' }])
   })
 
+  it('drops unsupported files and pastes file:// URLs as paths at the caret', async () => {
+    const { wrapper } = setup()
+    const doc = new File(['hello'], 'readme.md', { type: 'text/markdown' })
+    await wrapper.get('.box').trigger('drop', {
+      dataTransfer: {
+        types: ['Files', 'text/uri-list'],
+        files: [doc],
+        getData: (kind: string) => (kind === 'text/uri-list' ? 'file:///work/readme.md' : ''),
+      },
+    })
+    await vi.waitFor(() => expect(value(wrapper)).toBe('/work/readme.md '))
+
+    await wrapper.get('textarea').trigger('paste', {
+      clipboardData: {
+        files: [],
+        getData: (kind: string) => (kind === 'text/plain' ? 'file:///work/main.rs' : ''),
+      },
+    })
+    await vi.waitFor(() => expect(value(wrapper)).toBe('/work/readme.md /work/main.rs '))
+  })
   it('lists the queued prompts; only yours can be taken back', async () => {
     const queued = [
       userMessage('m1', 'mine'),
