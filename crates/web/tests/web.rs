@@ -336,7 +336,10 @@ async fn a_real_backend_accepts_a_hello_without_token() {
         .await;
     let mut ws = web.ws().await;
 
-    let hello = r#"{"id":1,"op":"hello","client":"ref-web","version":2,"cwd":"/tmp"}"#;
+    let hello = format!(
+        r#"{{"id":1,"op":"hello","client":"ref-web","version":{},"cwd":"/tmp"}}"#,
+        ref_proto::PROTOCOL_VERSION
+    );
     ws.send(Message::text(hello)).await.unwrap();
     let response: serde_json::Value = serde_json::from_str(&next_text(&mut ws).await).unwrap();
     assert_eq!(response["ok"], true, "{response}");

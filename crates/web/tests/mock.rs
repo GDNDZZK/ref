@@ -6,12 +6,15 @@ use common::*;
 use futures_util::SinkExt as _;
 use tokio_tungstenite::tungstenite::Message;
 
-const HELLO: &str = r#"{"id":1,"op":"hello","client":"ref-web-test","version":2,"cwd":"/tmp"}"#;
 const MARKER_SESSION: &str = "tab-one-marker";
 
 /// Sends Hello and returns the response and the live session names of the Sessions frame.
 async fn hello(ws: &mut Ws) -> (serde_json::Value, Vec<String>) {
-    ws.send(Message::text(HELLO)).await.unwrap();
+    let frame = format!(
+        r#"{{"id":1,"op":"hello","client":"ref-web-test","version":{},"cwd":"/tmp"}}"#,
+        ref_proto::PROTOCOL_VERSION
+    );
+    ws.send(Message::text(frame)).await.unwrap();
     let mut response = None;
     let mut sessions = None;
     while response.is_none() || sessions.is_none() {

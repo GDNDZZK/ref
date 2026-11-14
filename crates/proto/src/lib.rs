@@ -9,12 +9,14 @@ use serde_json::Value;
 use ts_rs::TS;
 
 /// Version of the wire protocol, reported in the `Hello` response (`"protocol"`).
-/// Adding fields or requests does not change it. The server does not downgrade its frames to
-/// the `version` a client sends in `Hello`: a client built for an older version drops the
-/// frames it cannot parse. Version 3 added questions, so an older client never sees a question
-/// (the session waits for an answer), and a session list or snapshot that holds a
-/// `waiting_question` status does not parse in it. Run all clients from the version of the server.
-pub const PROTOCOL_VERSION: u32 = 3;
+/// Adding fields or requests does not change it, whereas incompatible changes (or a minimum
+/// client/server feature baseline that the server enforces) bump it. The server requires
+/// `Hello.version == PROTOCOL_VERSION` (except for `ref-server-cli`) and does not downgrade its
+/// frames to an older client's version: a client built for another version cannot rely on
+/// matching semantics. Version 3 added questions; version 4 adds structured error codes,
+/// edit/write permission previews, structured edit warnings, and strict version negotiation.
+/// Run all clients from the version of the server.
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// The error of a `QuestionReply` for a question that is not pending (answered elsewhere
 /// already). Clients compare with `ERR_NO_PENDING_QUESTION` first, falling back to this text.
@@ -27,7 +29,7 @@ pub const NO_PENDING_PERMISSION: &str = "No pending permission request with that
 pub const ERR_NO_PENDING_QUESTION: &str = "no_pending_question";
 pub const ERR_NO_PENDING_PERMISSION: &str = "no_pending_permission";
 pub const ERR_NOT_FOUND: &str = "not_found";
-
+pub const ERR_PROTOCOL_MISMATCH: &str = "protocol_mismatch";
 fn home() -> std::path::PathBuf {
     std::env::var_os("HOME")
         .filter(|h| !h.is_empty())

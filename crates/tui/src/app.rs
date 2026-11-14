@@ -396,6 +396,8 @@ pub struct App {
     pub connected: bool,
     pub ever_connected: bool,
     pub net_status: Option<String>,
+    pub refused: Option<String>,
+    pub backend_too_old: Option<u32>,
     pub quit: bool,
     /// The last session was closed: exit once the backend confirmed the close.
     pub quit_after_close: bool,
@@ -522,6 +524,8 @@ impl App {
             connected: false,
             ever_connected: false,
             net_status: None,
+            refused: None,
+            backend_too_old: None,
             quit: false,
             quit_after_close: false,
             ac: None,
@@ -651,6 +655,8 @@ impl App {
                 self.connected = true;
                 self.ever_connected = true;
                 self.net_status = None;
+                self.refused = None;
+                self.backend_too_old = None;
                 self.watch.subscribed = false;
                 // A restarted backend may support McpStatus now.
                 self.mcp_fallback = false;
@@ -675,6 +681,9 @@ impl App {
                     self.run_init(plan);
                 }
             }
+            NetEvent::BackendTooOld { protocol } => {
+                self.backend_too_old = Some(protocol);
+            }
             NetEvent::Disconnected(reason) => {
                 if self.connected {
                     self.toasts.warn(format!("Disconnected: {reason}"));
@@ -686,6 +695,27 @@ impl App {
                 self.pending.clear();
                 // The reply in flight is lost; the snapshot after reconnecting says if the
                 // question is still open.
+                if let Some(q) = self.question.as_mut() {
+                    q.submitting = false;
+                }
+                self.attaching.clear();
+                self.files_inflight = false;
+                self.mcp_inflight = false;
+                self.mcp_poll_at = None;
+                if self.quit_after_close {
+                    self.quit = true;
+                }
+            }
+            NetEvent::Refused(reason) => {
+                if self.connected {
+                    self.toasts.error(reason.clone());
+                }
+                self.connected = false;
+                self.refused = Some(reason.clone());
+                if !self.ever_connected {
+                    self.net_status = Some(reason);
+                }
+                self.pending.clear();
                 if let Some(q) = self.question.as_mut() {
                     q.submitting = false;
                 }
@@ -3053,7 +3083,8 @@ impl App {
             .any(|v| v.animating() || matches!(v.info.status, SessionStatus::Retrying { .. }));
         let live_spinner_shown =
             live_list_shown && self.live.iter().any(|s| s.live && !s.status.is_idle());
-        let anim = any_view_animating || live_spinner_shown || !self.connected;
+        let anim =
+            any_view_animating || live_spinner_shown || (!self.connected && self.refused.is_none());
         // Pulsing "connecting" dot of MCP servers (sidebar / dialog).
         let mcp_shown = self.sidebar_shown() || matches!(self.dialog, Some(Dialog::Mcp(_)));
         if anim || (mcp_shown && self.mcp.iter().any(|e| e.connecting())) {
