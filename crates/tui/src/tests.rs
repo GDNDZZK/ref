@@ -3566,6 +3566,36 @@ fn split_view_no_default_focus_and_esc_unfocus() {
 }
 
 #[test]
+fn split_view_click_focused_tile_deselects_and_double_click_zooms() {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let mut app = watch_app();
+    app.sync_watch();
+    render(&mut app, 120, 30);
+    let r = tile_rect(&app, "ses_w1");
+    // First click focuses the tile.
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Down(MouseButton::Left), r.x + 3, r.y + 3),
+    );
+    assert_eq!(app.watch.focus.as_deref(), Some("ses_w1"));
+    // Clicking the focused tile again (not a hit target, not a double-click) unfocuses it.
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Down(MouseButton::Left), r.x + 4, r.y + 3),
+    );
+    assert!(app.watch.focus.is_none());
+    // Double-clicking a tile still zooms into it.
+    let click = |app: &mut App, x, y| {
+        crate::input::handle(app, mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+    };
+    click(&mut app, r.x + 3, r.y + 3);
+    assert_eq!(app.watch.focus.as_deref(), Some("ses_w1"));
+    click(&mut app, r.x + 3, r.y + 3);
+    assert_eq!(app.mode, Mode::Chat);
+    assert_eq!(app.current.as_deref(), Some("ses_w1"));
+}
+
+#[test]
 fn sidebar_scrolls_and_clicks_map_after_scroll() {
     use crossterm::event::{MouseButton, MouseEventKind};
     let mut app = sidebar_app();
