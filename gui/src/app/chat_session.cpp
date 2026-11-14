@@ -29,6 +29,7 @@ ChatSession::ChatSession(Backend& backend, const refgui::workspace::BackendConfi
 {
 	connect(&m_controller, &refgui::session::SessionController::connectionChanged, this, &ChatSession::readyChanged);
 	connect(&m_controller, &refgui::session::SessionController::turnInProgressChanged, this, &ChatSession::busyChanged);
+	connect(&m_controller, &refgui::session::SessionController::activelyWorkingChanged, this, &ChatSession::activelyWorkingChanged);
 	connect(&m_controller, &refgui::session::SessionController::infoChanged, this, &ChatSession::titleChanged);
 	connect(&m_controller, &refgui::session::SessionController::infoChanged, this, &ChatSession::infoChanged);
 	connect(&m_controller, &refgui::session::SessionController::moreBeforeChanged, this, &ChatSession::moreBeforeChanged);
@@ -101,6 +102,11 @@ QAbstractItemModel* ChatSession::blocks()
 bool ChatSession::isBusy() const
 {
 	return m_controller.isTurnInProgress();
+}
+
+bool ChatSession::isActivelyWorking() const
+{
+	return m_controller.isActivelyWorking();
 }
 
 bool ChatSession::isReady() const

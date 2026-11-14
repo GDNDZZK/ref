@@ -170,6 +170,7 @@ private slots:
 	void showsSessionErrorsAtTheEndUntilTheNextPrompt();
 	void attachAnsweredAfterTheControllerIsGone();
 	void loadOlderAnsweredAfterTheControllerIsGone();
+	void tracksActivelyWorkingAcrossStates();
 };
 
 void TestSessionController::createShowsTheSnapshot()
@@ -510,6 +511,65 @@ void TestSessionController::loadOlderAnsweredAfterTheControllerIsGone()
 
 	QTRY_VERIFY(outcome.has_value());
 	QVERIFY(!*outcome);
+}
+
+void TestSessionController::tracksActivelyWorkingAcrossStates()
+{
+	Fixture f;
+	QVERIFY(await(f.controller.attach(u"ses_1"_s)));
+	QVERIFY(!f.controller.isActivelyWorking());
+	QVERIFY(!f.controller.isBusy());
+
+	QSignalSpy working(&f.controller, &SessionController::activelyWorkingChanged);
+
+	// Idle -> Busy: actively working.
+	f.fake.send(infoFrame(u"ses_1"_s, u"busy"_s));
+	QTRY_VERIFY(f.controller.isActivelyWorking());
+	QCOMPARE(working.count(), 1);
+
+	// Busy -> WaitingPermission: stops actively working while paused on user, though session stays busy.
+	f.fake.send(infoFrame(u"ses_1"_s, u"waiting_permission"_s));
+	QTRY_VERIFY(!f.controller.isActivelyWorking());
+	QVERIFY(f.controller.isBusy());
+	QVERIFY(f.controller.isTurnInProgress());
+	QCOMPARE(working.count(), 2);
+
+	// WaitingPermission -> Running: actively working resumes for tool execution.
+	f.fake.send(infoFrame(u"ses_1"_s, u"running"_s));
+	QTRY_VERIFY(f.controller.isActivelyWorking());
+	QCOMPARE(working.count(), 3);
+
+	// Running -> WaitingQuestion -> Retrying -> Compacting -> Idle.
+	f.fake.send(infoFrame(u"ses_1"_s, u"waiting_question"_s));
+	QTRY_VERIFY(!f.controller.isActivelyWorking());
+	QVERIFY(f.controller.isBusy());
+	QCOMPARE(working.count(), 4);
+
+	f.fake.send(infoFrame(u"ses_1"_s, u"retrying"_s));
+	QTest::qWait(SettleMs);
+	QVERIFY(!f.controller.isActivelyWorking());
+	QVERIFY(f.controller.isBusy());
+	QCOMPARE(working.count(), 4);
+
+	f.fake.send(infoFrame(u"ses_1"_s, u"compacting"_s));
+	QTRY_VERIFY(f.controller.isActivelyWorking());
+	QCOMPARE(working.count(), 5);
+
+	f.fake.send(infoFrame(u"ses_1"_s, u"idle"_s));
+	QTRY_VERIFY(!f.controller.isActivelyWorking());
+	QVERIFY(!f.controller.isBusy());
+	QCOMPARE(working.count(), 6);
+
+	// Pending paced text keeps activelyWorking true until the stream drains.
+	f.fake.send(messageFrame(u"ses_1"_s, messageJson(u"u2"_s, u"user"_s, u"Hi"_s, true)));
+	f.fake.send(infoFrame(u"ses_1"_s, u"busy"_s));
+	f.fake.send(messageFrame(u"ses_1"_s, messageJson(u"a2"_s, u"assistant"_s, QString(), false)));
+	f.fake.send(deltaFrame(u"ses_1"_s, u"a2"_s, 0, QString(200, u'x')));
+	f.fake.send(infoFrame(u"ses_1"_s, u"waiting_permission"_s));
+	QTRY_VERIFY(f.controller.isBusy());
+	QVERIFY(f.controller.isActivelyWorking());
+	QTRY_VERIFY(!f.controller.isActivelyWorking());
+	QVERIFY(f.controller.isBusy());
 }
 
 QTEST_GUILESS_MAIN(TestSessionController)
