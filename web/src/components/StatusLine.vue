@@ -6,6 +6,7 @@ import { useI18n } from 'vue-i18n'
 import { useNow } from '../composables/useNow.ts'
 import type { ChatSession } from '../model/chatSession.ts'
 import { formatElapsed, formatTokens, secondsUntil } from '../model/format.ts'
+import { collapseWhitespace } from '../model/oneLine.ts'
 import Icon from './Icon.vue'
 import StatusDot from './StatusDot.vue'
 import StatusTodo from './StatusTodo.vue'
@@ -31,7 +32,7 @@ const retryText = computed(() =>
     ? t('status.retrying', {
         seconds: secondsUntil(retry.value.at, now.value),
         attempt: retry.value.attempt,
-        error: retry.value.error.replace(/\s+/g, ' ').trim(),
+        error: collapseWhitespace(retry.value.error),
       })
     : '',
 )
@@ -125,7 +126,7 @@ const contextTitle = computed(() => {
 }
 
 .warning {
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 /* A highlight three characters wide sweeps over the label once per period. */
@@ -144,7 +145,7 @@ const contextTitle = computed(() => {
 }
 
 .shimmer.accent {
-  --shimmer-high: var(--accent);
+  --shimmer-high: var(--accent-text);
 }
 
 @keyframes shimmer {
@@ -165,11 +166,11 @@ const contextTitle = computed(() => {
 }
 
 .context.warning {
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .context.danger {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .bar {

@@ -1,12 +1,10 @@
 <script setup lang="ts">
 // Tool status: pulses while running, plays a Flourish in its final color on finishing (StatusDot.qml).
 import { ref, useTemplateRef, watch } from 'vue'
-import { usePulse } from '../motion/usePulse.ts'
+import { PULSE_DIMMED, usePulse } from '../motion/usePulse.ts'
 import Flourish from './Flourish.vue'
 
 const props = defineProps<{ running: boolean; failed: boolean; muted?: boolean; color?: string }>()
-
-const PULSE_DIMMED = 0.5
 
 const dot = useTemplateRef<HTMLElement>('dot')
 const flourish = useTemplateRef<InstanceType<typeof Flourish>>('flourish')

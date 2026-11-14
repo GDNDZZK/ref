@@ -4,9 +4,12 @@
 
 #include <QCoreApplication>
 #include <QLocale>
+#include <QLoggingCategory>
 
 using refgui::workspace::Settings;
 using namespace Qt::StringLiterals;
+
+Q_LOGGING_CATEGORY(lcTranslator, "refgui.app.translator")
 
 AppTranslator::AppTranslator(QObject* parent)
 	: QObject(parent)
@@ -37,7 +40,10 @@ void AppTranslator::setLanguage(const QString& language)
 		}
 	}
 	// English, or a language without a file: the English text only needs its plural forms.
-	install(QLocale(QLocale::English));
+	if(!install(QLocale(QLocale::English)))
+	{
+		qCWarning(lcTranslator) << "cannot load the English translation; plural forms stay unresolved";
+	}
 }
 
 bool AppTranslator::install(const QLocale& locale)

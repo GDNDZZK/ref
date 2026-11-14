@@ -109,23 +109,37 @@ private:
 	{
 		QString id;
 		const char* title; // English source text, translated when shown
-		QStringList slash;
-		const char* hint; // arguments for display, not translated
-		QString shortcut;
+		QStringList slash{};
+		const char* hint = ""; // arguments for display, not translated
+		QString shortcut{};
 		const char* category;
 		QString icon;
 		Needs needs;
-		QString source;
+		QString source{};
 		QString customTitle{}; // user-defined: the description, as the backend gave it
 		Handler handler{};
 		bool enabled = false;
+	};
+
+	// How well a query matches; lower is better. Kept in this order.
+	enum Rank
+	{
+		ExactSlash,
+		SlashPrefix,
+		TitleWordPrefix,
+		Substring,
+		Subsequence,
+		NoMatch,
 	};
 
 	bool isAvailable(const Entry& entry) const;
 	void refreshEnabled();
 	const Entry* find(const QString& id) const;
 	const Entry* findSlash(const QString& name) const;
+	// What the views get for `role` of the entry.
+	QVariant valueOf(const Entry& entry, int role) const;
 	QVariantMap toMap(const Entry& entry) const;
+	Rank rankOf(const Entry& entry, const QString& needle) const;
 	QString titleOf(const Entry& entry) const;
 
 	QList<Entry> m_entries;

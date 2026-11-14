@@ -51,6 +51,8 @@ private:
 		Incompatible, // anything else
 	};
 	Fit fitOf(const QString& messageId, qsizetype index, const proto::Part& part) const;
+	// One of the first `known` parts of `message` does not fit what is shown of it.
+	bool hasIncompatiblePart(const proto::Message& message, qsizetype known) const;
 	// Cuts the text of `part` down to what is shown and returns the rest for the pacer.
 	std::optional<StreamPacer::Chunk> deferText(const QString& messageId, qsizetype index, proto::Part& part) const;
 

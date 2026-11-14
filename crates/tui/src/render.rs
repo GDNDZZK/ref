@@ -8,19 +8,36 @@ use ratatui::text::{Line, Span};
 
 use crate::app::{AcKind, App, Mode};
 use crate::state::SessionView;
+use crate::text::{self, width};
 use crate::ui::chat::{self, Env};
 use crate::ui::dialog::Dialog;
+use crate::ui::editor::MIN_PROMPT_WIDTH;
 use crate::ui::footer::{self, StatusCtx};
 use crate::ui::message;
 use crate::ui::permission::PermissionView;
 use crate::ui::question::QuestionView;
-use crate::ui::text::{self, width};
 use crate::ui::{split, theme, todo};
 
-pub const SIDEBAR_W: u16 = 32;
+pub(crate) const SIDEBAR_W: u16 = 32;
 /// Minimum terminal width at which the sidebar is shown.
 pub const SIDEBAR_MIN_SCREEN: u16 = 140;
 const EDITOR_MAX: usize = 10;
+/// The prompt box leaves this many columns free on each side.
+const PROMPT_MARGIN_X: u16 = 1;
+/// Columns left of the editor text inside the prompt box: bar(1) + pad(2).
+const PROMPT_TEXT_INSET: u16 = 3;
+/// Columns taken by the bar and the paddings around the editor text.
+const PROMPT_CHROME_COLS: u16 = 5;
+/// Rows around the editor text: pad, pad, meta row, bottom edge.
+const PROMPT_CHROME_ROWS: u16 = 4;
+/// The prompt box never gets fewer rows than this (pad, editor, meta).
+const MIN_PROMPT_ROWS: u16 = 3;
+/// The disconnected banner needs a screen taller than this.
+const BANNER_MIN_SCREEN_H: u16 = 4;
+/// Most rows shown in the autocomplete popup.
+const AC_MAX_ROWS: usize = 10;
+/// Minimum column where the autocomplete description starts.
+const AC_MIN_DESC_COL: usize = 24;
 
 pub struct Layout {
     pub chat: Rect,
@@ -42,24 +59,24 @@ pub fn chat_layout(app: &App, area: Rect) -> Layout {
         });
     let main_w = area.width - sidebar.map(|s| s.width + 1).unwrap_or(0);
     let main = Rect::new(area.x, area.y, main_w, area.height);
-    // Prompt box: 1 col margin each side; inner: bar(1) + pad(2) + text + pad(2).
-    let px = main.x + 1;
-    let pw = main.width.saturating_sub(2);
-    let ew = pw.saturating_sub(5).max(1) as usize;
+    // Prompt box: bar(1) + pad(2) + text + pad(2) inside the side margins.
+    let px = main.x + PROMPT_MARGIN_X;
+    let pw = main.width.saturating_sub(2 * PROMPT_MARGIN_X);
+    let ew = (pw.saturating_sub(PROMPT_CHROME_COLS) as usize).max(MIN_PROMPT_WIDTH);
     let max_h = EDITOR_MAX.min((area.height as usize / 3).max(1));
     let eh = app.editor.height(ew).clamp(1, max_h) as u16;
-    let prompt_h = eh + 4; // pad, editor, pad, meta, bottom edge
+    let prompt_h = eh + PROMPT_CHROME_ROWS;
     let status_h = 1u16;
     let avail = main.height.saturating_sub(status_h);
-    let prompt_h = prompt_h.min(avail.saturating_sub(3).max(3));
+    let prompt_h = prompt_h.min(avail.saturating_sub(MIN_PROMPT_ROWS).max(MIN_PROMPT_ROWS));
     let chat_h = avail.saturating_sub(prompt_h);
     let chat = Rect::new(main.x, main.y, main.width, chat_h);
     let prompt = Rect::new(px, main.y + chat_h, pw, prompt_h);
     let editor = Rect::new(
-        px + 3,
+        px + PROMPT_TEXT_INSET,
         prompt.y + 1,
         ew as u16,
-        eh.min(prompt_h.saturating_sub(3)).max(1),
+        eh.min(prompt_h.saturating_sub(MIN_PROMPT_ROWS)).max(1),
     );
     let status = Rect::new(
         main.x,
@@ -81,29 +98,39 @@ pub fn draw(f: &mut Frame<'_>, app: &mut App) {
     app.screen = area;
     let now = ref_proto::now_ms();
     let tick = app.tick();
-    let mut cursor: Option<(u16, u16)> = None;
     let buf = f.buffer_mut();
-    match app.mode {
-        Mode::Chat => cursor = draw_chat_mode(buf, area, app, now, tick),
-        Mode::Watch => cursor = draw_watch_mode(buf, area, app, now, tick).or(cursor),
+    let cursor = match app.mode {
+        Mode::Chat => draw_chat_mode(buf, area, app, now, tick),
+        Mode::Watch => draw_watch_mode(buf, area, app, now, tick),
+    };
+    let cursor = draw_overlays(buf, area, app, tick, cursor);
+    draw_disconnected_banner(buf, area, app, tick);
+    app.toasts.draw(buf, area);
+    if let Some((x, y)) = cursor {
+        f.set_cursor_position((x, y));
     }
-    // Overlays: permission modal > question modal > dialog.
+}
+
+/// Draws the topmost overlay: permission modal > question modal > dialog.
+/// Returns the cursor position, which an overlay replaces or hides.
+fn draw_overlays(
+    buf: &mut Buffer,
+    area: Rect,
+    app: &mut App,
+    tick: u64,
+    cursor: Option<(u16, u16)>,
+) -> Option<(u16, u16)> {
     if let Some((sid, req, more)) = app.active_permission() {
         if app.perm.as_ref().is_none_or(|p| p.call_id != req.call_id) {
             app.perm = Some(PermissionView::new(&req.call_id));
         }
-        let name =
-            (app.mode == Mode::Watch || app.current.as_deref() != Some(sid.as_str())).then(|| {
-                app.views
-                    .get(&sid)
-                    .map(|v| v.info.name.clone())
-                    .unwrap_or_default()
-            });
+        let name = app.modal_origin_name(&sid);
         if let Some(p) = app.perm.as_mut() {
             p.draw(buf, area, &req, name.as_deref(), more);
         }
-        cursor = None;
-    } else if let Some((sid, req)) = app.active_question() {
+        return None;
+    }
+    if let Some((sid, req)) = app.active_question() {
         app.perm = None;
         if app
             .question
@@ -112,70 +139,55 @@ pub fn draw(f: &mut Frame<'_>, app: &mut App) {
         {
             app.question = Some(QuestionView::new(&req));
         }
-        let name =
-            (app.mode == Mode::Watch || app.current.as_deref() != Some(sid.as_str())).then(|| {
-                app.views
-                    .get(&sid)
-                    .map(|v| v.info.name.clone())
-                    .unwrap_or_default()
-            });
-        cursor = app.question.as_mut().and_then(|q| {
+        let name = app.modal_origin_name(&sid);
+        return app.question.as_mut().and_then(|q| {
             q.draw(buf, area, name.as_deref());
             q.cursor_at
         });
-    } else {
-        app.perm = None;
-        app.question = None;
-        match app.dialog.as_mut() {
-            Some(Dialog::List(d)) => {
-                d.draw(buf, area, tick);
-                cursor = Some(d.cursor());
-            }
-            Some(Dialog::Help(h)) => {
-                h.draw(buf, area);
-                cursor = None;
-            }
-            Some(Dialog::Mcp(d)) => {
-                d.draw(buf, area, &app.mcp, tick, app.mcp_loaded);
-                cursor = None;
-            }
-            None => {}
+    }
+    app.perm = None;
+    app.question = None;
+    match app.dialog.as_mut() {
+        Some(Dialog::List(d)) => {
+            d.draw(buf, area, tick);
+            Some(d.cursor())
         }
+        Some(Dialog::Help(h)) => {
+            h.draw(buf, area);
+            None
+        }
+        Some(Dialog::Mcp(d)) => {
+            d.draw(buf, area, &app.mcp, tick, app.mcp_loaded);
+            None
+        }
+        None => cursor,
     }
-    // Disconnected banner (top, full width) after we had a connection.
-    if !app.connected && app.ever_connected && area.height > 4 {
-        let msg = format!(" {} Disconnected — reconnecting… ", theme::spinner(tick));
-        let r = Rect::new(area.x, area.y, area.width, 1);
-        fill(buf, r, Style::new().bg(theme::ERROR));
-        let w = width(&msg) as u16;
-        buf.set_string(
-            area.x + area.width.saturating_sub(w) / 2,
-            area.y,
-            msg,
-            Style::new()
-                .fg(theme::PANEL)
-                .bg(theme::ERROR)
-                .add_modifier(Modifier::BOLD),
-        );
+}
+
+/// Top full-width banner shown when the connection dropped after we had one.
+fn draw_disconnected_banner(buf: &mut Buffer, area: Rect, app: &App, tick: u64) {
+    if app.connected || !app.ever_connected || area.height <= BANNER_MIN_SCREEN_H {
+        return;
     }
-    app.toasts.draw(buf, area);
-    if let Some((x, y)) = cursor {
-        f.set_cursor_position((x, y));
-    }
+    let msg = format!(" {} Disconnected — reconnecting… ", theme::spinner(tick));
+    let r = Rect::new(area.x, area.y, area.width, 1);
+    fill(buf, r, Style::new().bg(theme::ERROR));
+    let w = width(&msg) as u16;
+    buf.set_string(
+        area.x + area.width.saturating_sub(w) / 2,
+        area.y,
+        msg,
+        Style::new()
+            .fg(theme::PANEL)
+            .bg(theme::ERROR)
+            .add_modifier(Modifier::BOLD),
+    );
 }
 
 fn env<'a>(app: &'a App, now: i64, tick: u64) -> Env<'a> {
     Env {
-        agents: app
-            .config
-            .as_ref()
-            .map(|c| c.agents.as_slice())
-            .unwrap_or(&[]),
-        models: app
-            .config
-            .as_ref()
-            .map(|c| c.models.as_slice())
-            .unwrap_or(&[]),
+        agents: app.agents(),
+        models: app.models(),
         details: app.details,
         thinking: app.thinking,
         tick,
@@ -280,7 +292,7 @@ fn fill(buf: &mut Buffer, r: Rect, style: Style) {
 
 fn draw_prompt(buf: &mut Buffer, lay: &Layout, app: &mut App, focused: bool) -> Option<(u16, u16)> {
     let p = lay.prompt;
-    if p.height < 3 || p.width < 6 {
+    if p.height < MIN_PROMPT_ROWS || p.width < PROMPT_CHROME_COLS + 1 {
         return None;
     }
     let bg = theme::PANEL;
@@ -330,9 +342,13 @@ fn draw_prompt(buf: &mut Buffer, lay: &Layout, app: &mut App, focused: bool) -> 
         ),
         None => (String::new(), String::new(), None),
     };
-    let mw = p.width.saturating_sub(5) as usize;
+    let mw = p.width.saturating_sub(PROMPT_CHROME_COLS) as usize;
     let mut meta = footer::meta_line(
-        if agent.is_empty() { "…" } else { &agent },
+        if agent.is_empty() {
+            text::ELLIPSIS
+        } else {
+            &agent
+        },
         app.agent_color(&agent),
         &model,
         &provider,
@@ -350,21 +366,27 @@ fn draw_prompt(buf: &mut Buffer, lay: &Layout, app: &mut App, focused: bool) -> 
         ));
     }
     if queued > 0 {
-        let q = queued;
         if !right.is_empty() {
-            right.push(Span::styled(" · ", Style::new().fg(theme::MUTED).bg(bg)));
+            right.push(Span::styled(
+                text::SEPARATOR,
+                Style::new().fg(theme::MUTED).bg(bg),
+            ));
         }
         right.push(Span::styled(
-            format!("{q} queued"),
+            format!("{queued} queued"),
             Style::new().fg(theme::MUTED).bg(bg),
         ));
     }
     // Todo progress (current item · done/total), at most ~half the row so the model stays visible.
-    let used: usize = right.iter().map(|s| width(&s.content)).sum();
-    let room = (mw / 2).saturating_sub(used + if used > 0 { 3 } else { 0 });
+    let used: usize = text::spans_width(&right);
+    let separator_w = if used > 0 { width(text::SEPARATOR) } else { 0 };
+    let room = (mw / 2).saturating_sub(used + separator_w);
     if let Some(spans) = todo::progress_spans(&todos, room) {
         if !right.is_empty() {
-            right.insert(0, Span::styled(" · ", Style::new().fg(theme::MUTED).bg(bg)));
+            right.insert(
+                0,
+                Span::styled(text::SEPARATOR, Style::new().fg(theme::MUTED).bg(bg)),
+            );
         }
         for s in spans.into_iter().rev() {
             right.insert(0, s);
@@ -379,7 +401,7 @@ fn draw_prompt(buf: &mut Buffer, lay: &Layout, app: &mut App, focused: bool) -> 
             }
         }
     }
-    buf.set_line(p.x + 3, my, &meta, mw as u16);
+    buf.set_line(p.x + PROMPT_TEXT_INSET, my, &meta, mw as u16);
     cursor
 }
 
@@ -388,7 +410,7 @@ fn draw_autocomplete(buf: &mut Buffer, lay: &Layout, app: &mut App) {
     if ac.items.is_empty() {
         return;
     }
-    let max_h = 10usize.min(lay.chat.height.saturating_sub(1) as usize);
+    let max_h = AC_MAX_ROWS.min(lay.chat.height.saturating_sub(1) as usize);
     let n = ac.items.len().min(max_h);
     if n == 0 {
         return;
@@ -431,7 +453,7 @@ fn draw_autocomplete(buf: &mut Buffer, lay: &Layout, app: &mut App) {
                 Modifier::empty()
             }),
         );
-        let dx = (label_w + 2).max(24.min(lw / 2));
+        let dx = (label_w + 2).max(AC_MIN_DESC_COL.min(lw / 2));
         if !desc.is_empty() && dx + 4 < lw {
             buf.set_stringn(
                 r.x + 2 + dx as u16,
@@ -534,14 +556,37 @@ fn draw_sidebar(buf: &mut Buffer, r: Rect, app: &mut App, now: i64, tick: u64) {
     for y in r.y..r.y + r.height {
         buf.set_string(r.x - 1, y, "│", theme::fg(theme::BORDER_SUBTLE));
     }
-    let x = r.x + 1;
     let w = r.width.saturating_sub(2) as usize;
     if w < 4 || r.height < 2 {
         return;
     }
     let h = (r.height - 1) as usize; // top margin
 
-    // --- Session info (full and compact forms).
+    let (full, compact) = session_info_rows(app, v, w);
+    // Display order: MCP, Todo, Live (rows are dropped by priority: Todo, MCP, Live).
+    let secs: Vec<SbSection> = [
+        mcp_section(app, w, tick),
+        todo_section(&v.info.todos, w),
+        live_section(app, v, w, now, tick),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    // Full session info when everything fits; otherwise the compact form.
+    let sec_len: usize = secs.iter().map(SbSection::len).sum();
+    let mut rows = if full.len() + sec_len <= h {
+        full
+    } else {
+        compact
+    };
+    for s in secs {
+        rows.extend(s.render());
+    }
+    paint_sidebar_rows(buf, r, app, rows);
+}
+
+/// The session info block in its full and compact forms.
+fn session_info_rows(app: &App, v: &SessionView, w: usize) -> (Vec<SbRow>, Vec<SbRow>) {
     let title = if v.info.title.trim().is_empty() {
         "New session".to_string()
     } else {
@@ -596,7 +641,7 @@ fn draw_sidebar(buf: &mut Buffer, r: Rect, app: &mut App, now: i64, tick: u64) {
         sb(vec![Span::styled(title, theme::bold(theme::TEXT))]),
         sb(vec![
             Span::styled(v.info.agent.clone(), theme::fg(ac)),
-            Span::styled(" · ", theme::muted()),
+            Span::styled(text::SEPARATOR, theme::muted()),
             Span::styled(model, theme::text()),
         ]),
         sb(ctx_spans),
@@ -604,117 +649,117 @@ fn draw_sidebar(buf: &mut Buffer, r: Rect, app: &mut App, now: i64, tick: u64) {
     if let Some(b) = bar {
         compact.push(sb(b));
     }
+    (full, compact)
+}
 
-    // --- Sections (display order: MCP, Todo, Live; priority: Todo, MCP, Live).
-    let todos = v.info.todos.clone();
-    let todo_sec = (!todos.is_empty()).then(|| {
-        let (done, total) = todo::counts(&todos);
-        let header = vec![
-            Span::styled("Todo", theme::bold(theme::ACCENT)),
-            Span::styled(format!("  {done}/{total}"), theme::muted()),
-        ];
-        let items = todo::todo_rows(&todos, w, usize::MAX)
-            .into_iter()
-            .map(|r| sb(r.line.spans))
-            .collect();
-        SbSection {
-            header,
-            header_click: None,
-            items,
-        }
-    });
-    let mcp_sec = (!app.mcp.is_empty()).then(|| {
-        let sum = crate::ui::mcp::summary(&app.mcp);
-        let header = vec![
-            Span::styled("MCP", theme::bold(theme::ACCENT)),
-            Span::styled(format!("  {sum}"), theme::muted()),
-        ];
-        let items = app
-            .mcp
-            .iter()
-            .map(|e| SbRow {
-                spans: crate::ui::mcp::sidebar_line(e, w, tick).spans,
-                click: Some(SbClick::Mcp(e.name.clone())),
-            })
-            .collect();
-        SbSection {
-            header,
-            header_click: Some(SbClick::Mcp(String::new())),
-            items,
-        }
-    });
-    let mut live: Vec<_> = app.live.iter().filter(|s| s.live).cloned().collect();
-    live.sort_by_key(|s| s.created_at);
-    let live_sec = (!live.is_empty()).then(|| {
-        let header = vec![
-            Span::styled("Live sessions", theme::bold(theme::ACCENT)),
-            Span::styled(format!("  {}", live.len()), theme::muted()),
-        ];
-        let cur_id = v.info.id.clone();
-        let items = live
-            .iter()
-            .map(|s| {
-                let me = s.id == cur_id;
-                let dot = if !s.status.is_idle() {
-                    theme::spinner(tick).to_string()
-                } else {
-                    "○".to_string()
-                };
-                let dc = if !s.status.is_idle() {
-                    theme::PRIMARY
-                } else {
-                    theme::MUTED
-                };
-                let fgbg = if s.attached > 0 { "fg" } else { "bg" };
-                let name_st = if me {
-                    theme::bold(theme::PRIMARY)
-                } else {
-                    theme::text()
-                };
-                let left = vec![
-                    Span::styled(format!("{dot} "), theme::fg(dc)),
-                    Span::styled(s.name.clone(), name_st),
-                    Span::styled(format!(" {fgbg}"), theme::fg(theme::DIM)),
-                ];
-                // Right-aligned: todo count, then the working time of the current run (same source
-                // as the status line). `compose` truncates the name first, these stay whole.
-                let todos = if me { &v.info.todos } else { &s.todos };
-                let mut right: Vec<Span<'static>> =
-                    crate::ui::todo::badge(todos).into_iter().collect();
-                if let Some(ms) = crate::state::busy_ms(s, now) {
-                    if !right.is_empty() {
-                        right.push(Span::raw(" "));
-                    }
-                    right.push(Span::styled(text::fmt_elapsed(ms), theme::fg(theme::MUTED)));
-                }
-                SbRow {
-                    spans: message::compose(left, right, w).0.spans,
-                    click: Some(SbClick::Session(s.id.clone())),
-                }
-            })
-            .collect();
-        SbSection {
-            header,
-            header_click: None,
-            items,
-        }
-    });
-
-    // --- Layout: full session info when everything fits; otherwise the compact form, and the
-    // whole list scrolls (wheel over the sidebar) with a thumb on the separator.
-    let secs: Vec<SbSection> = [mcp_sec, todo_sec, live_sec]
-        .into_iter()
-        .flatten()
-        .collect(); // display order
-    let sec_len: usize = secs.iter().map(SbSection::len).sum();
-    let mut rows = if full.len() + sec_len <= h {
-        full
-    } else {
-        compact
-    };
-    for s in secs {
-        rows.extend(s.render());
+fn todo_section(todos: &[ref_proto::Todo], w: usize) -> Option<SbSection> {
+    if todos.is_empty() {
+        return None;
     }
+    let (done, total) = todo::counts(todos);
+    let header = vec![
+        Span::styled("Todo", theme::bold(theme::ACCENT)),
+        Span::styled(format!("  {done}/{total}"), theme::muted()),
+    ];
+    let items = todo::todo_rows(todos, w, usize::MAX)
+        .into_iter()
+        .map(|r| sb(r.line.spans))
+        .collect();
+    Some(SbSection {
+        header,
+        header_click: None,
+        items,
+    })
+}
+
+fn mcp_section(app: &App, w: usize, tick: u64) -> Option<SbSection> {
+    if app.mcp.is_empty() {
+        return None;
+    }
+    let sum = crate::ui::mcp::summary(&app.mcp);
+    let header = vec![
+        Span::styled("MCP", theme::bold(theme::ACCENT)),
+        Span::styled(format!("  {sum}"), theme::muted()),
+    ];
+    let items = app
+        .mcp
+        .iter()
+        .map(|e| SbRow {
+            spans: crate::ui::mcp::sidebar_line(e, w, tick).spans,
+            click: Some(SbClick::Mcp(e.name.clone())),
+        })
+        .collect();
+    Some(SbSection {
+        header,
+        header_click: Some(SbClick::Mcp(String::new())),
+        items,
+    })
+}
+
+fn live_section(app: &App, v: &SessionView, w: usize, now: i64, tick: u64) -> Option<SbSection> {
+    let mut live: Vec<_> = app.live.iter().filter(|s| s.live).collect();
+    if live.is_empty() {
+        return None;
+    }
+    live.sort_by_key(|s| s.created_at);
+    let header = vec![
+        Span::styled("Live sessions", theme::bold(theme::ACCENT)),
+        Span::styled(format!("  {}", live.len()), theme::muted()),
+    ];
+    let items = live
+        .iter()
+        .map(|s| {
+            let me = s.id == v.info.id;
+            let dot = if !s.status.is_idle() {
+                theme::spinner(tick).to_string()
+            } else {
+                "○".to_string()
+            };
+            let dc = if !s.status.is_idle() {
+                theme::PRIMARY
+            } else {
+                theme::MUTED
+            };
+            let fgbg = if s.attached > 0 { "fg" } else { "bg" };
+            let name_st = if me {
+                theme::bold(theme::PRIMARY)
+            } else {
+                theme::text()
+            };
+            let left = vec![
+                Span::styled(format!("{dot} "), theme::fg(dc)),
+                Span::styled(s.name.clone(), name_st),
+                Span::styled(format!(" {fgbg}"), theme::fg(theme::DIM)),
+            ];
+            // Right-aligned: todo count, then the working time of the current run (same source
+            // as the status line). `compose` truncates the name first, these stay whole.
+            let todos = if me { &v.info.todos } else { &s.todos };
+            let mut right: Vec<Span<'static>> = crate::ui::todo::badge(todos).into_iter().collect();
+            if let Some(ms) = crate::state::busy_ms(s, now) {
+                if !right.is_empty() {
+                    right.push(Span::raw(" "));
+                }
+                right.push(Span::styled(text::fmt_elapsed(ms), theme::fg(theme::MUTED)));
+            }
+            SbRow {
+                spans: message::compose(left, right, w).0.spans,
+                click: Some(SbClick::Session(s.id.clone())),
+            }
+        })
+        .collect();
+    Some(SbSection {
+        header,
+        header_click: None,
+        items,
+    })
+}
+
+/// Paints the rows below the top margin, records their click targets and draws the scrollbar.
+/// The whole list scrolls (wheel over the sidebar) with a thumb in the rightmost column.
+fn paint_sidebar_rows(buf: &mut Buffer, r: Rect, app: &mut App, rows: Vec<SbRow>) {
+    let x = r.x + 1;
+    let w = r.width.saturating_sub(2) as usize;
+    let h = (r.height - 1) as usize;
     let max_scroll = rows.len().saturating_sub(h);
     app.sidebar_max_scroll = max_scroll;
     app.sidebar_scroll = app.sidebar_scroll.min(max_scroll);
@@ -728,7 +773,6 @@ fn draw_sidebar(buf: &mut Buffer, r: Rect, app: &mut App, now: i64, tick: u64) {
             None => {}
         }
     }
-    // Scrollbar in the (otherwise empty) rightmost column.
     if max_scroll > 0 {
         let bar = Rect::new(r.x + r.width - 1, r.y + 1, 1, h as u16);
         chat::draw_scrollbar(

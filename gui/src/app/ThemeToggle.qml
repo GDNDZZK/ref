@@ -13,7 +13,6 @@ CircleButton {
 	Accessible.name: dark ? qsTr("Switch to light theme") : qsTr("Switch to dark theme")
 
 	Item {
-		id: glyph
 		anchors.centerIn: parent
 		width: 16
 		height: 16

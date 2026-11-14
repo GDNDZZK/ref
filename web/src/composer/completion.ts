@@ -8,6 +8,8 @@ import { shallowRef } from 'vue'
 import { fuzzyScore } from './fuzzy.ts'
 import { mentionAt } from './mention.ts'
 
+export const SLASH_PREFIX = '/'
+
 export interface SlashCommand {
   name: string // canonical, without the slash
   aliases: string[]
@@ -53,18 +55,21 @@ export function slashItems(commands: readonly SlashCommand[], query: string): Co
     }
     if (!best) continue
 
-    const label = best.name === command.name ? `/${command.name}` : `/${best.name} → /${command.name}`
+    const label =
+      best.name === command.name
+        ? `${SLASH_PREFIX}${command.name}`
+        : `${SLASH_PREFIX}${best.name} → ${SLASH_PREFIX}${command.name}`
     const bonus = command.custom ? 0 : BUILTIN_BONUS
     scored.push({
       score: best.score + bonus,
-      item: { value: `/${command.name} `, label, description: command.title },
+      item: { value: `${SLASH_PREFIX}${command.name} `, label, description: command.title },
     })
   }
   scored.sort((a, b) => b.score - a.score)
   return scored.slice(0, MAX_ITEMS).map((entry) => entry.item)
 }
 
-export function fileItems(files: readonly string[]): CompletionItem[] {
+function fileItems(files: readonly string[]): CompletionItem[] {
   return files.map((file) => ({ value: `@${file} `, label: file, description: '' }))
 }
 
@@ -97,8 +102,8 @@ export class CompletionController {
     this.mention = undefined
     if (shell || this.suppressed) return this.close()
 
-    const query = text.slice(1)
-    const typingCommand = text.startsWith('/') && !/\s/.test(query) && cursor === text.length
+    const query = text.slice(SLASH_PREFIX.length)
+    const typingCommand = text.startsWith(SLASH_PREFIX) && !/\s/.test(query) && cursor === text.length
     if (typingCommand) return this.showCommands(query)
 
     this.mention = mentionAt(text, cursor)

@@ -1,11 +1,14 @@
 #include "composer/composer_model.h"
 
+#include "client/result.h"
 #include "compose/image_file.h"
+#include "workspace/toast_text.h"
 
 #include <QBuffer>
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QImage>
+#include <QLoggingCategory>
 #include <QMimeData>
 #include <QPointer>
 
@@ -17,6 +20,8 @@ namespace refgui::composer
 {
 namespace
 {
+
+Q_LOGGING_CATEGORY(lcComposer, "refgui.composer")
 
 const QString ShellPrefix = u"!"_s;
 const QString PngMime = u"image/png"_s;
@@ -34,9 +39,9 @@ QList<proto::ImageData> imageData(const QList<proto::NamedImage>& images)
 
 } // namespace
 
-ComposerModel::ComposerModel(client::Backend& backend, session::SessionController& controller, compose::PromptHistory& history, QObject* parent)
+ComposerModel::ComposerModel(const workspace::BackendConfig& config, session::SessionController& controller, compose::PromptHistory& history, QObject* parent)
 	: QObject(parent)
-	, m_backend(backend)
+	, m_config(config)
 	, m_controller(controller)
 	, m_history(history)
 	, m_browser(history)
@@ -51,37 +56,34 @@ ComposerModel::ComposerModel(client::Backend& backend, session::SessionControlle
 	connect(&m_controller, &session::SessionController::queueChanged, this, [this] { m_queue.setMessages(m_controller.queued()); });
 	connect(&m_controller, &session::SessionController::infoChanged, this, &ComposerModel::labelsChanged);
 	connect(&m_controller, &session::SessionController::turnInProgressChanged, this, &ComposerModel::disarmInterrupt);
-	connect(&m_backend, &client::Backend::stateChanged, this, &ComposerModel::readyChanged);
-	connect(&m_backend, &client::Backend::connected, this, [this] { loadConfig(); });
+	connect(&m_controller, &session::SessionController::connectionChanged, this, &ComposerModel::readyChanged);
+	connect(&m_config, &workspace::BackendConfig::changed, this, &ComposerModel::labelsChanged);
 	m_queue.setMessages(m_controller.queued());
-	if(m_backend.state() == client::Backend::State::Connected)
-	{
-		loadConfig();
-	}
 }
 
 bool ComposerModel::isReady() const
 {
-	return m_backend.state() == client::Backend::State::Connected && m_controller.isAttached();
+	return m_controller.isConnected() && m_controller.isAttached();
+}
+
+bool ComposerModel::isCompletionOpen() const
+{
+	return !m_completionDismissed && m_target.kind != compose::CompletionTarget::Kind::None;
 }
 
 QString ComposerModel::completionKind() const
 {
 	using Kind = compose::CompletionTarget::Kind;
-	if(m_completionDismissed)
+	switch(isCompletionOpen() ? m_target.kind : Kind::None)
 	{
+	case Kind::None:
 		return u"none"_s;
-	}
-	switch(m_target.kind)
-	{
 	case Kind::Command:
 		return u"command"_s;
 	case Kind::File:
 		return u"file"_s;
-	case Kind::None:
-		break;
 	}
-	return u"none"_s;
+	Q_UNREACHABLE_RETURN(u"none"_s);
 }
 
 void ComposerModel::setInterruptWindow(int milliseconds)
@@ -96,15 +98,15 @@ void ComposerModel::setInterruptWindow(int milliseconds)
 
 const proto::AgentInfo* ComposerModel::agentInfo() const
 {
-	const auto found = std::ranges::find(m_config.agents, m_controller.info().agent, &proto::AgentInfo::name);
-	return found == m_config.agents.end() ? nullptr : &*found;
+	const auto found = std::ranges::find(m_config.config().agents, m_controller.info().agent, &proto::AgentInfo::name);
+	return found == m_config.config().agents.end() ? nullptr : &*found;
 }
 
 const proto::ModelInfo* ComposerModel::modelInfo() const
 {
 	const proto::ModelRef& ref = m_controller.info().model;
-	const auto found = std::ranges::find_if(m_config.models, [&](const proto::ModelInfo& model) { return model.provider == ref.provider && model.id == ref.model; });
-	return found == m_config.models.end() ? nullptr : &*found;
+	const auto found = std::ranges::find_if(m_config.config().models, [&](const proto::ModelInfo& model) { return model.provider == ref.provider && model.id == ref.model; });
+	return found == m_config.config().models.end() ? nullptr : &*found;
 }
 
 QString ComposerModel::agentName() const
@@ -121,7 +123,7 @@ QString ComposerModel::agentColor() const
 int ComposerModel::agentIndex() const
 {
 	const proto::AgentInfo* agent = agentInfo();
-	return agent ? static_cast<int>(agent - m_config.agents.constData()) : 0;
+	return agent ? static_cast<int>(agent - m_config.config().agents.constData()) : NoAgentIndex;
 }
 
 QString ComposerModel::modelName() const
@@ -149,18 +151,6 @@ bool ComposerModel::variantAvailable() const
 {
 	const proto::ModelInfo* model = modelInfo();
 	return model && !model->variants.isEmpty();
-}
-
-QCoro::Task<> ComposerModel::loadConfig()
-{
-	const QPointer<ComposerModel> self(this); // the model can be gone when the answer arrives
-	const auto config = co_await m_backend.client().getConfig();
-	if(!self || !config)
-	{
-		co_return;
-	}
-	m_config = *config;
-	emit labelsChanged();
 }
 
 void ComposerModel::edit(const QString& text, int cursor)
@@ -233,9 +223,19 @@ void ComposerModel::updateCompletion()
 QCoro::Task<> ComposerModel::findFiles(QString query, quint64 serial)
 {
 	const QPointer<ComposerModel> self(this); // the model can be gone when the answer arrives
-	const auto result = co_await m_backend.client().listFiles(m_controller.info().cwd, std::move(query), FileLimit);
-	if(!self || serial != m_fileSerial || !result)
+	const auto result = co_await m_controller.listFiles(std::move(query), FileLimit);
+	if(!self || serial != m_fileSerial)
 	{
+		co_return;
+	}
+	if(!result)
+	{
+		// No toast: this runs while typing. The list of the previous query would be wrong now.
+		if(!client::isConnectionLost(result.error()))
+		{
+			qCWarning(lcComposer) << "file search failed:" << result.error();
+		}
+		m_files.setPaths({});
 		co_return;
 	}
 	m_files.setPaths(*result);
@@ -317,49 +317,58 @@ void ComposerModel::runCustomCommand(const QString& name, const QString& args)
 	expandAndSend(name, args);
 }
 
-QCoro::Task<> ComposerModel::sendPrompt(QString text, QList<proto::NamedImage> images, bool restoreOnFailure)
+template<typename T>
+QCoro::Task<bool> ComposerModel::awaitAndReport(QCoro::Task<client::Result<T>> request, std::function<void()> onFailure)
 {
 	const QPointer<ComposerModel> self(this); // the model can be gone when the answer arrives
-	const auto result = co_await m_controller.send(text, imageData(images));
+	const auto result = co_await std::move(request);
 	if(!self)
 	{
-		co_return;
+		co_return false;
 	}
 	if(result)
 	{
-		emit sent();
-		co_return;
+		co_return true;
 	}
-	if(restoreOnFailure)
+	if(onFailure)
 	{
-		restoreDraft(text, images);
+		onFailure();
 	}
 	emit failed(result.error());
+	co_return false;
+}
+
+QCoro::Task<> ComposerModel::sendPrompt(QString text, QList<proto::NamedImage> images, bool restoreOnFailure)
+{
+	const auto restore = [&] {
+		if(restoreOnFailure)
+		{
+			restoreDraft(text, images);
+		}
+	};
+	if(co_await awaitAndReport(m_controller.send(text, imageData(images)), restore))
+	{
+		emit sent();
+	}
 }
 
 QCoro::Task<> ComposerModel::sendShell(QString command)
 {
-	const QPointer<ComposerModel> self(this); // the model can be gone when the answer arrives
-	const auto result = co_await m_backend.client().shell(m_controller.sessionId(), command);
-	if(!self)
-	{
-		co_return;
-	}
-	if(result)
+	// Back into the box as a shell line, so nothing typed is lost.
+	const auto restore = [&] {
+		restoreDraft(command, {});
+		setShellMode(true);
+	};
+	if(co_await awaitAndReport(m_controller.runShell(command), restore))
 	{
 		emit sent();
-		co_return;
 	}
-	// Back into the box as a shell line, so nothing typed is lost.
-	restoreDraft(command, {});
-	setShellMode(true);
-	emit failed(result.error());
 }
 
 QCoro::Task<> ComposerModel::expandAndSend(QString name, QString args)
 {
 	const QPointer<ComposerModel> self(this); // the model can be gone when the answer arrives
-	const auto expanded = co_await m_backend.client().expandCommand(std::move(name), std::move(args), m_controller.info().cwd);
+	const auto expanded = co_await m_controller.expandCommand(std::move(name), std::move(args));
 	if(!self)
 	{
 		co_return;
@@ -371,7 +380,7 @@ QCoro::Task<> ComposerModel::expandAndSend(QString name, QString args)
 	}
 	if(expanded->trimmed().isEmpty())
 	{
-		emit toastRequested(u"warn"_s, tr("The command expanded to nothing"));
+		emit toastRequested(workspace::ToastLevel::Warn, tr("The command expanded to nothing"));
 		co_return;
 	}
 	co_await sendPrompt(*expanded, {}, false);
@@ -432,7 +441,7 @@ void ComposerModel::withdraw(int row)
 QCoro::Task<> ComposerModel::removeQueued(QString messageId)
 {
 	const QPointer<ComposerModel> self(this); // the model can be gone when the answer arrives
-	const auto result = co_await m_backend.client().removeQueued(m_controller.sessionId(), messageId);
+	const auto result = co_await m_controller.removeQueued(messageId);
 	if(!self)
 	{
 		co_return;
@@ -445,7 +454,7 @@ QCoro::Task<> ComposerModel::removeQueued(QString messageId)
 	}
 	if(!result->removed)
 	{
-		emit toastRequested(u"info"_s, tr("Already sent; the prompt can no longer be removed"));
+		emit toastRequested(workspace::ToastLevel::Info, tr("Already sent; the prompt can no longer be removed"));
 		co_return;
 	}
 	restoreDraft(result->text, result->images);
@@ -453,10 +462,7 @@ QCoro::Task<> ComposerModel::removeQueued(QString messageId)
 
 void ComposerModel::restoreDraft(const QString& text, const QList<proto::NamedImage>& images)
 {
-	if(m_shellMode)
-	{
-		setShellMode(false);
-	}
+	setShellMode(false);
 	m_draft.restore(text, images);
 	m_browser.reset();
 	changeDraft();
@@ -476,7 +482,7 @@ void ComposerModel::clearDraft()
 
 bool ComposerModel::escape()
 {
-	if(completionKind() != u"none"_s)
+	if(isCompletionOpen())
 	{
 		dismissCompletion();
 		return true;
@@ -586,7 +592,7 @@ bool ComposerModel::pasteFromClipboard()
 	}
 	if(bytes.size() > compose::MaxImageBytes)
 	{
-		emit failed(tr("The image is larger than 20 MiB."));
+		emit failed(tr("The image is larger than %1 MiB.").arg(compose::MaxImageMiB));
 		return true;
 	}
 	attachImage(compose::imageFromBytes(bytes, PngMime, PastedImageName));
@@ -616,7 +622,7 @@ int ComposerModel::attachImageUrls(const QList<QUrl>& urls, bool reportOthers)
 		}
 		else if(reportOthers)
 		{
-			emit toastRequested(u"warn"_s, tr("%1 is not a supported image (PNG, JPEG, GIF or WebP)").arg(url.fileName()));
+			emit toastRequested(workspace::ToastLevel::Warn, tr("%1 is not a supported image (PNG, JPEG, GIF or WebP)").arg(url.fileName()));
 		}
 	}
 	return attached;

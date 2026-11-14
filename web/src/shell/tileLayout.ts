@@ -82,3 +82,18 @@ export function neighbor(rects: readonly Rect[], from: number, dx: number, dy: n
   })
   return best?.index
 }
+
+export interface Band {
+  top: number
+  bottom: number
+  left: number
+  right: number
+}
+
+// How far the content of a tile header has to keep in from its `side` edge so that the floating
+// window buttons in `corner` (same coordinates) do not cover it. `gap` is the room left beside them.
+export function cornerClearance(header: Band, corner: Band, side: 'left' | 'right', gap: number): number {
+  if (header.bottom <= corner.top || header.top >= corner.bottom) return 0
+  const overlap = side === 'right' ? header.right - corner.left : corner.right - header.left
+  return overlap > 0 ? overlap + gap : 0
+}

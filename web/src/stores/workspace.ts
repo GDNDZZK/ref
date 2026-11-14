@@ -8,15 +8,17 @@
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef, watch } from 'vue'
 import { crossfade } from '../composables/crossfade.ts'
+import { emitDraftRestored } from '../composer/draftBus.ts'
 import { ChatSession } from '../model/chatSession.ts'
+import { collapseWhitespace } from '../model/oneLine.ts'
 import type { EventFrame } from '../net/connection.ts'
 import { writeLocation } from '../net/location.ts'
+import { rowState } from '../shell/sessionRow.ts'
 import { neighbor } from '../shell/tileLayout.ts'
 import type { Rect } from '../shell/tileLayout.ts'
 import type { Startup } from '../net/startup.ts'
 import type { ModelRef, SessionInfo } from '../proto/generated'
 import { useConnectionStore } from './connection.ts'
-import { emitDraftRestored } from './draftBus.ts'
 import { useNoticesStore } from './notices.ts'
 
 export type ViewMode = 'single' | 'split'
@@ -39,7 +41,7 @@ export function sortLive(sessions: readonly SessionInfo[]): SessionInfo[] {
 // "name: the error on one line", cut at 200 characters with an ellipsis (the TUI's toast for a
 // session in the background: whitespace runs, newlines included, become one space).
 export function errorToast(name: string, text: string): string {
-  const oneLine = text.replace(/\s+/g, ' ').trim()
+  const oneLine = collapseWhitespace(text)
   const characters = Array.from(`${name}: ${oneLine}`)
   if (characters.length <= ERROR_TOAST_MAX_CHARS) return characters.join('')
   return `${characters.slice(0, ERROR_TOAST_MAX_CHARS - 1).join('')}…`
@@ -161,7 +163,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     chats.delete(id)
     for (const listener of goneListeners) listener(id)
     live.value = live.value.filter((session) => session.id !== id)
-    void refreshHistory()
+    void refreshHistory().catch(notices.pushError)
     if (zoomedId.value === id) zoomedId.value = undefined
     if (currentId.value !== id) return
     currentId.value = undefined
@@ -232,6 +234,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   // Returns the absolute path the backend wrote.
   async function exportSession(id: string, path: string): Promise<string> {
     return connection.getApi().exportTranscript(id, path)
+  }
+
+  // Whether any session of the backend is running or waiting for the user.
+  async function hasWorkingSessions(): Promise<boolean> {
+    const sessions = await connection.getApi().listSessions()
+    return sessions.some((info) => rowState(info) !== 'idle' && rowState(info) !== 'error')
+  }
+
+  function peerCommand(sessionId: string, command: string, args?: string): Promise<string> {
+    return connection.getApi().peerCommand(sessionId, command, args)
+  }
+
+  function listDirs(folder: string): Promise<{ path: string; dirs: string[] }> {
+    return connection.getApi().listDirs(folder)
   }
 
   // Sessions of one directory (or all), newest first. Includes the live ones.
@@ -330,13 +346,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const gone = live.value.some((old) => !sessions.some((session) => session.id === old.id))
     live.value = sortLive(sessions)
     for (const info of sessions) chats.get(info.id)?.setInfo(info)
-    if (gone) void refreshHistory()
+    if (gone) void refreshHistory().catch(notices.pushError)
   }
 
   function onSessionEvent(frame: Extract<EventFrame, { kind: 'event' }>): void {
     const { session_id: id, event } = frame
     const session = chats.get(id)
-    if (event.type === 'error' && (mode.value === 'split' || id !== currentId.value)) {
+    const isInBackground = mode.value === 'split' || id !== currentId.value
+    if (event.type === 'error' && isInBackground) {
       notices.push('error', errorToast(session?.info?.name ?? id, event.text))
     }
     session?.applyEvent(event)
@@ -411,6 +428,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     cycleAgent,
     compact,
     exportSession,
+    hasWorkingSessions,
+    peerCommand,
+    listDirs,
     refreshHistory,
     enterSplit,
     leaveSplit,

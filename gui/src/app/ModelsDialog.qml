@@ -3,11 +3,9 @@ import QtQuick
 import RefGui
 
 // Picks the model of one session, grouped by provider.
-ModalDialog {
+SessionDialog {
 	id: dialog
 
-	readonly property string sessionId: Workspace.dialogArgs.sessionId ?? Workspace.currentId
-	readonly property var session: Workspace.info(sessionId)
 	readonly property string needle: list.text.trim().toLowerCase()
 
 	function details(model) {
@@ -21,11 +19,15 @@ ModalDialog {
 		return parts.join(" · ")
 	}
 
+	function matchesNeedle(model) {
+		return needle === "" || (model.name + " " + model.id + " " + model.providerName).toLowerCase().includes(needle)
+	}
+
 	// A ListModel, because only a model with roles can be sectioned.
 	function rebuild() {
 		items.clear()
 		for (const model of Workspace.config.models) {
-			if (needle !== "" && !(model.name + " " + model.id + " " + model.providerName).toLowerCase().includes(needle))
+			if (!matchesNeedle(model))
 				continue
 			items.append({
 				provider: model.provider,
@@ -58,6 +60,7 @@ ModalDialog {
 			required property string name
 			required property string summary
 			required property string variants
+			selected: provider === dialog.session.provider && modelId === dialog.session.modelId
 			onActivated: {
 				// The variant stays when the new model has it.
 				const keep = variants.split(",").includes(dialog.session.variant) ? dialog.session.variant : ""
@@ -66,7 +69,7 @@ ModalDialog {
 			}
 
 			Column {
-				anchors { left: parent.left; leftMargin: 22; right: check.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+				anchors { left: parent.left; leftMargin: Theme.dialogPadding; right: row.check.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
 				spacing: 2
 
 				Text {
@@ -87,14 +90,6 @@ ModalDialog {
 				}
 			}
 
-			Icon {
-				id: check
-				anchors { right: parent.right; rightMargin: 22; verticalCenter: parent.verticalCenter }
-				name: "check"
-				size: 16
-				color: Theme.accent
-				visible: row.provider === dialog.session.provider && row.modelId === dialog.session.modelId
-			}
 		}
 	}
 }

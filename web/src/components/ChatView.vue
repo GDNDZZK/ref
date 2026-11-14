@@ -39,6 +39,7 @@ import { motion, motionEasing } from '../theme/generated/motion.ts'
 import BlockView from './BlockView.vue'
 import OlderMessages from './OlderMessages.vue'
 import { OLDER_TRIGGER_DISTANCE } from './toolLimits.ts'
+import { Key } from '../keys.ts'
 
 const props = defineProps<{ session: ChatSession }>()
 const blocks = computed(() => props.session.blocks)
@@ -111,7 +112,8 @@ function keepAnchor(): void {
 function loadOlderIfNear(): void {
   const view = scroller.value
   const { session } = props
-  if (!view || !session.moreBefore || session.loadingOlder || session.olderError) return
+  const cannotLoadOlder = !view || !session.moreBefore || session.loadingOlder || session.olderError
+  if (cannotLoadOlder) return
   if (view.scrollTop < OLDER_TRIGGER_DISTANCE) void session.loadOlder()
 }
 
@@ -131,12 +133,12 @@ function jumpToEnd(): void {
 let heldSpace = 0
 let highWater = 0 // furthest natural end of the current turn
 
-function heldEnd(): number {
+function scrollEnd(): number {
   return scroller.value?.scrollHeight ?? 0
 }
 
 function naturalEnd(): number {
-  return heldEnd() - heldSpace
+  return scrollEnd() - heldSpace
 }
 
 function atEnd(): boolean {
@@ -179,7 +181,7 @@ useFrame(chasing, (frameSeconds) => {
 
 watch(following, (isFollowing) => {
   if (!isFollowing) return
-  highWater = heldEnd()
+  highWater = scrollEnd()
   chaseEnd()
 })
 
@@ -189,7 +191,7 @@ watch(
   (inProgress) => {
     cancelRelease?.()
     if (inProgress) {
-      highWater = heldEnd()
+      highWater = scrollEnd()
       holdEnd()
       return
     }
@@ -212,7 +214,8 @@ function pinToEnd(): void {
 
 const sizeObserver = new ResizeObserver((entries) => {
   if (turnInProgress.value && following.value) holdEnd()
-  if (following.value && !gesturing && entries.some((entry) => entry.target === scroller.value)) pinToEnd()
+  const viewportResized = entries.some((entry) => entry.target === scroller.value)
+  if (following.value && !gesturing && viewportResized) pinToEnd()
   else chaseEnd()
 })
 
@@ -242,16 +245,18 @@ function onWheel(event: WheelEvent): void {
   if (event.deltaY < 0) following.value = false
 }
 
-const KEYS_UP = ['PageUp', 'ArrowUp', 'Home']
-const KEYS_SCROLL = [...KEYS_UP, 'PageDown', 'ArrowDown', 'End', ' ']
+const KEYS_UP: readonly string[] = [Key.PageUp, Key.ArrowUp, Key.Home]
+const KEYS_SCROLL: readonly string[] = [...KEYS_UP, Key.PageDown, Key.ArrowDown, Key.End, Key.Space]
 
 // Keys scroll the view when nothing that takes keys has the focus.
 function onKeydown(event: KeyboardEvent): void {
   if (!KEYS_SCROLL.includes(event.key) || event.ctrlKey || event.metaKey || event.altKey) return
-  const target = event.target
-  if (target !== document.body && !(target instanceof Node && scroller.value?.contains(target))) return
+  const { target } = event
+  const isInsideScroller = target instanceof Node && scroller.value?.contains(target)
+  if (target !== document.body && !isInsideScroller) return
   beginGesture()
-  if (KEYS_UP.includes(event.key) || (event.key === ' ' && event.shiftKey)) following.value = false
+  const isScrollUpKey = KEYS_UP.includes(event.key) || (event.key === Key.Space && event.shiftKey)
+  if (isScrollUpKey) following.value = false
 }
 
 function onScroll(): void {

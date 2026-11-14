@@ -22,4 +22,11 @@ describe('placeInPane', () => {
       width: 184,
     })
   })
+
+  it('has no room at all in a pane narrower than its margins: zero width, at the right margin', () => {
+    expect(placeInPane({ left: 505, right: 509 }, { left: 500, right: 510 }, 360, 8)).toEqual({
+      left: 502,
+      width: 0,
+    })
+  })
 })

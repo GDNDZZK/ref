@@ -68,11 +68,11 @@ QVariantList toList(const QList<T>& items)
 
 } // namespace
 
-BackendConfig::BackendConfig(client::Backend& backend, QObject* parent)
+BackendConfig::BackendConfig(Connection& connection, QObject* parent)
 	: QObject(parent)
-	, m_backend(backend)
+	, m_backend(connection.backend())
 {
-	connect(&m_backend, &client::Backend::connected, this, [this] {
+	connect(&connection, &Connection::connected, this, [this] {
 		load();
 		loadMcp();
 	});

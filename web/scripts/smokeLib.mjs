@@ -8,13 +8,27 @@ import { join } from 'node:path'
 import { chromium } from 'playwright-core'
 
 const REF_WEB = process.env.REF_WEB_BIN ?? '../target/debug/ref-web'
-const CHROMIUM = process.env.CHROMIUM ?? '/usr/bin/chromium'
-const PORT = Number(process.env.SMOKE_PORT ?? 17480)
+const DEFAULT_CHROMIUM = '/usr/bin/chromium'
+const DEFAULT_PORT = 17480
+const CHROMIUM = process.env.CHROMIUM ?? DEFAULT_CHROMIUM
+const PORT = Number(process.env.SMOKE_PORT ?? DEFAULT_PORT)
+const VIEWPORT = { width: 980, height: 760 }
+const REPORTED_CONSOLE_TYPES = ['error', 'warning']
+const HTTP_BAD_REQUEST = 400
 const TOKEN_ATTEMPTS = 100
 const TOKEN_RETRY_MS = 100
 
 export const OUT = process.env.SMOKE_OUT ?? '/tmp/ref-web-smoke'
 export const WAIT_MS = 15000
+export const INPUT = 'textarea'
+export const SEND_BUSY = 'button.send.busy'
+export const SEND_IDLE = 'button.send:not(.busy)'
+
+// Types `text` into the input box (the page's only one unless `input` says which) and sends it.
+export async function sendPrompt(page, text, input = page.locator(INPUT)) {
+  await input.fill(text)
+  await page.keyboard.press('Enter')
+}
 
 async function readToken(root) {
   const file = join(root, 'state', 'web', 'login-token')
@@ -64,17 +78,18 @@ export async function withMockPage(body) {
     const token = await readToken(root)
     const browser = await chromium.launch({ executablePath: CHROMIUM, headless: true })
     try {
-      const page = await browser.newPage({ viewport: { width: 980, height: 760 }, locale: 'en-US' })
+      const page = await browser.newPage({ viewport: VIEWPORT, locale: 'en-US' })
       page.on('console', (message) => {
-        if (['error', 'warning'].includes(message.type()))
+        if (REPORTED_CONSOLE_TYPES.includes(message.type()))
           problems.push(`console ${message.type()}: ${message.text()}`)
       })
       page.on('response', (response) => {
-        if (response.status() >= 400) problems.push(`HTTP ${response.status()}: ${response.url()}`)
+        if (response.status() >= HTTP_BAD_REQUEST)
+          problems.push(`HTTP ${response.status()}: ${response.url()}`)
       })
       page.on('pageerror', (error) => problems.push(`page error: ${error.message}`))
       await page.goto(`http://127.0.0.1:${PORT}/login?token=${token}`)
-      await page.waitForSelector('textarea', { timeout: WAIT_MS })
+      await page.waitForSelector(INPUT, { timeout: WAIT_MS })
       await body(page, problems, { restartServer })
     } finally {
       await browser.close()

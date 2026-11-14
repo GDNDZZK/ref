@@ -33,9 +33,9 @@ Column {
 			id: row
 
 			required property var modelData
-			readonly property bool completed: modelData.status === "completed"
-			readonly property bool cancelled: modelData.status === "cancelled"
-			readonly property bool active: modelData.status === "in_progress"
+			readonly property bool completed: modelData.status === TodoStatus.completed
+			readonly property bool cancelled: modelData.status === TodoStatus.cancelled
+			readonly property bool active: modelData.status === TodoStatus.inProgress
 
 			width: body.width
 			height: body.wrap ? Math.max(body.rowHeight, label.implicitHeight + 2 * body.wrapPadding) : body.rowHeight
@@ -65,9 +65,9 @@ Column {
 				Rectangle {
 					id: workingDot
 					anchors.centerIn: parent
-					width: 8
-					height: 8
-					radius: 4
+					width: Theme.statusDotSize
+					height: Theme.statusDotSize
+					radius: width / 2
 					color: Theme.accent
 					opacity: row.active ? 1 : 0
 
@@ -76,7 +76,6 @@ Column {
 				Pulse {
 					target: workingDot
 					running: row.active
-					dimmed: 0.5
 				}
 				Rectangle {
 					anchors.fill: parent

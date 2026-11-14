@@ -19,13 +19,18 @@ const WIDE_RANGES: readonly (readonly [number, number])[] = [
   [0x20000, 0x3fffd],
 ]
 
+const NARROW_CHAR_COLUMNS = 1
+const WIDE_CHAR_COLUMNS = 2
+const ELLIPSIS_COLUMNS = 1
 const ZERO_WIDTH = /^[\p{Mn}\p{Me}\p{Cf}]$/u
 const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
 
 function codePointColumns(character: string): number {
   if (ZERO_WIDTH.test(character)) return 0
   const code = character.codePointAt(0)!
-  return WIDE_RANGES.some(([first, last]) => code >= first && code <= last) ? 2 : 1
+  return WIDE_RANGES.some(([first, last]) => code >= first && code <= last)
+    ? WIDE_CHAR_COLUMNS
+    : NARROW_CHAR_COLUMNS
 }
 
 function clusterColumns(cluster: string): number {
@@ -48,7 +53,7 @@ export function truncateColumns(text: string, max: number): string {
   let used = 0
   for (const { segment } of segmenter.segment(text)) {
     const columns = clusterColumns(segment)
-    if (used + columns > max - 1) break
+    if (used + columns > max - ELLIPSIS_COLUMNS) break
     used += columns
     result += segment
   }

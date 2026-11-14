@@ -18,6 +18,7 @@ Item {
 	required property Item target
 	property color color: Theme.accent
 	property real ringReach: 3 // ring's final diameter, in target diameters
+	readonly property real ringStartOpacity: 0.7
 
 	readonly property real gatheredScale: 0.6
 	readonly property real entryScale: 0.4
@@ -71,7 +72,7 @@ Item {
 				easing.period: flourish.springPeriod
 			}
 			NumberAnimation { target: ring; property: "width"; from: flourish.width; to: flourish.width * flourish.ringReach; duration: Motion.slow; easing.type: Motion.ease }
-			NumberAnimation { target: ring; property: "opacity"; from: 0.7; to: 0; duration: Motion.slow; easing.type: Motion.ease }
+			NumberAnimation { target: ring; property: "opacity"; from: flourish.ringStartOpacity; to: 0; duration: Motion.slow; easing.type: Motion.ease }
 		}
 	}
 
@@ -90,6 +91,6 @@ Item {
 			easing.period: flourish.springPeriod
 		}
 		NumberAnimation { target: ring; property: "width"; from: flourish.width; to: flourish.width * flourish.ringReach; duration: Motion.slow; easing.type: Motion.ease }
-		NumberAnimation { target: ring; property: "opacity"; from: 0.7; to: 0; duration: Motion.slow; easing.type: Motion.ease }
+		NumberAnimation { target: ring; property: "opacity"; from: flourish.ringStartOpacity; to: 0; duration: Motion.slow; easing.type: Motion.ease }
 	}
 }

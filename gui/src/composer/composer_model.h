@@ -1,6 +1,6 @@
 #pragma once
 
-#include "client/backend.h"
+#include "client/result.h"
 #include "compose/completion_target.h"
 #include "compose/prompt_draft.h"
 #include "compose/prompt_history.h"
@@ -8,6 +8,7 @@
 #include "composer/file_model.h"
 #include "composer/queue_model.h"
 #include "session/session_controller.h"
+#include "workspace/backend_config.h"
 
 #include <QCoroTask>
 #include <QObject>
@@ -15,6 +16,7 @@
 #include <QUrl>
 
 #include <chrono>
+#include <functional>
 #include <optional>
 
 namespace refgui::composer
@@ -54,15 +56,8 @@ class ComposerModel : public QObject
 	Q_PROPERTY(bool variantAvailable READ variantAvailable NOTIFY labelsChanged)
 
 public:
-	// How long the typed `@` query rests before the files are asked for.
-	static constexpr std::chrono::milliseconds FileSearchDelay{80};
-	static constexpr int FileLimit = 50;
-	// A draft this long goes to the history when it is thrown away with Ctrl+C.
-	static constexpr qsizetype DiscardKeepLength = 20;
-	static constexpr int DefaultInterruptWindow = 1500;
-
 	// All of them outlive the model.
-	ComposerModel(client::Backend& backend, session::SessionController& controller, compose::PromptHistory& history, QObject* parent = nullptr);
+	ComposerModel(const workspace::BackendConfig& config, session::SessionController& controller, compose::PromptHistory& history, QObject* parent = nullptr);
 
 	const QString& text() const { return m_draft.text(); }
 	int cursor() const { return static_cast<int>(m_draft.cursor()); }
@@ -83,6 +78,8 @@ public:
 	// The color the agent's configuration names, or empty; with the agent's place in the list
 	// the view picks one from the palette.
 	QString agentColor() const;
+	// The agent's place in the config's agent list, NoAgentIndex while it is not there.
+	static constexpr int NoAgentIndex = -1;
 	int agentIndex() const;
 	QString modelName() const;
 	// Provider and model id, for a tooltip.
@@ -157,6 +154,14 @@ signals:
 	void toastRequested(const QString& level, const QString& text);
 
 private:
+	// How long the typed `@` query rests before the files are asked for.
+	static constexpr std::chrono::milliseconds FileSearchDelay{80};
+	static constexpr int FileLimit = 50;
+	// A draft this long goes to the history when it is thrown away with Ctrl+C.
+	static constexpr qsizetype DiscardKeepLength = 20;
+	static constexpr int DefaultInterruptWindow = 1500;
+
+	bool isCompletionOpen() const;
 	void updateCompletion();
 	// The draft was changed from here: the text area must show it.
 	void changeDraft();
@@ -168,7 +173,10 @@ private:
 	int attachImageUrls(const QList<QUrl>& urls, bool reportOthers);
 	void attachImage(proto::NamedImage image);
 	void disarmInterrupt();
-	QCoro::Task<> loadConfig();
+	// Awaits a request and emits failed() when it fails, after `onFailure`. False when the request
+	// failed or the model was deleted meanwhile.
+	template<typename T>
+	QCoro::Task<bool> awaitAndReport(QCoro::Task<client::Result<T>> request, std::function<void()> onFailure = {});
 	// With `restoreOnFailure` a prompt that was not accepted goes back into the draft.
 	QCoro::Task<> sendPrompt(QString text, QList<proto::NamedImage> images, bool restoreOnFailure);
 	QCoro::Task<> sendShell(QString command);
@@ -178,7 +186,7 @@ private:
 	const proto::AgentInfo* agentInfo() const;
 	const proto::ModelInfo* modelInfo() const;
 
-	client::Backend& m_backend;
+	const workspace::BackendConfig& m_config;
 	session::SessionController& m_controller;
 	compose::PromptHistory& m_history;
 	compose::HistoryBrowser m_browser;
@@ -193,7 +201,6 @@ private:
 	std::optional<QString> m_fileQuery; // the query the list is for or is being fetched for
 	quint64 m_fileSerial = 0;
 	QTimer m_interruptTimer;
-	proto::ServerConfig m_config;
 };
 
 } // namespace refgui::composer

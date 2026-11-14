@@ -89,7 +89,7 @@ SessionListModel::Row SessionListModel::toRow(const proto::SessionInfo& info)
 	row.provider = info.model.provider;
 	row.modelId = info.model.model;
 	row.variant = info.model.variant.value_or(QString());
-	row.state = stateName(info.status.state);
+	row.state = info.status.state;
 	row.busySince = info.busySince.value_or(0);
 	row.updatedAt = info.updatedAt;
 	row.createdAt = info.createdAt;
@@ -207,9 +207,8 @@ const proto::SessionInfo* SessionListModel::find(const QString& sessionId) const
 	return it == m_all.constEnd() ? nullptr : &*it;
 }
 
-// Brings m_rows to the wanted list with the fewest row operations: removes what is gone,
-// then goes through the wanted rows in order and moves, inserts or updates each one.
-void SessionListModel::rebuild()
+// The rows that pass the filter, in display order.
+QList<SessionListModel::Row> SessionListModel::selectWanted() const
 {
 	QList<Row> wanted;
 	for(const proto::SessionInfo& info : std::as_const(m_all))
@@ -221,8 +220,11 @@ void SessionListModel::rebuild()
 		}
 	}
 	std::ranges::sort(wanted, [this](const Row& a, const Row& b) { return before(a, b); });
+	return wanted;
+}
 
-	const int oldCount = count();
+void SessionListModel::removeGone(const QList<Row>& wanted)
+{
 	QSet<QString> keep;
 	for(const Row& row : wanted)
 	{
@@ -238,48 +240,63 @@ void SessionListModel::rebuild()
 		m_rows.removeAt(i);
 		endRemoveRows();
 	}
+}
 
-	for(qsizetype i = 0; i < wanted.size(); ++i)
+// The row at or after `start` with `sessionId`, or -1.
+qsizetype SessionListModel::findRowFrom(qsizetype start, const QString& sessionId) const
+{
+	for(qsizetype j = start; j < m_rows.size(); ++j)
 	{
-		if(i < m_rows.size() && m_rows[i].id != wanted[i].id)
+		if(m_rows[j].id == sessionId)
 		{
-			qsizetype from = -1;
-			for(qsizetype j = i + 1; j < m_rows.size(); ++j)
-			{
-				if(m_rows[j].id == wanted[i].id)
-				{
-					from = j;
-					break;
-				}
-			}
-			if(from >= 0)
-			{
-				beginMoveRows({}, int(from), int(from), {}, int(i));
-				m_rows.move(from, i);
-				endMoveRows();
-			}
-			else
-			{
-				beginInsertRows({}, int(i), int(i));
-				m_rows.insert(i, wanted[i]);
-				endInsertRows();
-				continue;
-			}
-		}
-		if(i >= m_rows.size())
-		{
-			beginInsertRows({}, int(i), int(i));
-			m_rows.append(wanted[i]);
-			endInsertRows();
-			continue;
-		}
-		if(m_rows[i] != wanted[i])
-		{
-			m_rows[i] = wanted[i];
-			emit dataChanged(index(int(i)), index(int(i)));
+			return j;
 		}
 	}
+	return -1;
+}
 
+// Makes row `i` show `wanted`: moves it up from further down, inserts it, or updates it.
+void SessionListModel::placeRow(qsizetype i, const Row& wanted)
+{
+	if(i >= m_rows.size())
+	{
+		beginInsertRows({}, int(i), int(i));
+		m_rows.append(wanted);
+		endInsertRows();
+		return;
+	}
+	if(m_rows[i].id != wanted.id)
+	{
+		const qsizetype from = findRowFrom(i + 1, wanted.id);
+		if(from < 0)
+		{
+			beginInsertRows({}, int(i), int(i));
+			m_rows.insert(i, wanted);
+			endInsertRows();
+			return;
+		}
+		beginMoveRows({}, int(from), int(from), {}, int(i));
+		m_rows.move(from, i);
+		endMoveRows();
+	}
+	if(m_rows[i] != wanted)
+	{
+		m_rows[i] = wanted;
+		emit dataChanged(index(int(i)), index(int(i)));
+	}
+}
+
+// Brings m_rows to the wanted list with the fewest row operations: removes what is gone,
+// then goes through the wanted rows in order and moves, inserts or updates each one.
+void SessionListModel::rebuild()
+{
+	const QList<Row> wanted = selectWanted();
+	const int oldCount = count();
+	removeGone(wanted);
+	for(qsizetype i = 0; i < wanted.size(); ++i)
+	{
+		placeRow(i, wanted[i]);
+	}
 	if(count() != oldCount)
 	{
 		emit countChanged();
@@ -344,7 +361,7 @@ QVariant SessionListModel::roleData(const Row& row, int role) const
 	case ModelLabelRole:
 		return row.modelLabel;
 	case StateRole:
-		return row.state;
+		return stateName(row.state);
 	case BusySinceRole:
 		return row.busySince;
 	case UpdatedAtRole:
@@ -358,7 +375,7 @@ QVariant SessionListModel::roleData(const Row& row, int role) const
 	case TodoAllDoneRole:
 		return row.todoTotal > 0 && row.todoDone == row.todoTotal;
 	case HasPermissionRole:
-		return row.state == u"waiting_permission"_s || row.state == u"waiting_question"_s;
+		return row.state == State::WaitingPermission || row.state == State::WaitingQuestion;
 	case LastErrorRole:
 		return row.lastError;
 	case HasErrorRole:

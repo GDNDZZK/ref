@@ -175,7 +175,7 @@ describe('ChatSession', () => {
     await session.attach(true)
     const first = session.answerPermission('c1', true, false)
     expect(session.pendingPermission).toBeUndefined()
-    await session.answerPermission('c1', true, false).catch(() => {})
+    await session.answerPermission('c1', true, false)
     await first
     expect(permissionReply).toHaveBeenCalledTimes(1)
   })

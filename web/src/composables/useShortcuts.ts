@@ -36,8 +36,9 @@ export function useShortcuts(): void {
     if (event.isComposing) return
     const command = commands.matchKey(event)
     // An open dialog owns the keyboard, except for the key that opens (and closes) the palette.
-    if (dialogs.current && command?.id !== PALETTE) return
-    if (command?.id === PALETTE && dialogs.current?.kind === PALETTE) {
+    const isPaletteKey = command?.id === PALETTE
+    if (dialogs.current && !isPaletteKey) return
+    if (isPaletteKey && dialogs.current?.kind === PALETTE) {
       event.preventDefault()
       dialogs.close()
       return

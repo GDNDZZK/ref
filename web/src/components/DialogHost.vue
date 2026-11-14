@@ -2,6 +2,7 @@
 // Shows the open dialog over a scrim (ModalDialog.qml's scrim and entrance). A click on the scrim and
 // Esc close it. Opening one dialog while another is open cross-fades the panels.
 import { computed, nextTick, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
+import { useComposerStore } from '../stores/composer.ts'
 import { useDialogsStore } from '../stores/dialogs.ts'
 import type { DialogRequest } from '../stores/dialogs.ts'
 import { useWorkspaceStore } from '../stores/workspace.ts'
@@ -18,9 +19,11 @@ import RenameDialog from './dialogs/RenameDialog.vue'
 import SessionsDialog from './dialogs/SessionsDialog.vue'
 import SettingsDialog from './dialogs/SettingsDialog.vue'
 import VariantsDialog from './dialogs/VariantsDialog.vue'
+import { Key } from '../keys.ts'
 
 const dialogs = useDialogsStore()
 const workspace = useWorkspaceStore()
+const composers = useComposerStore()
 
 // What stays on screen while the scrim fades out.
 const shown = shallowRef<DialogRequest>()
@@ -38,11 +41,11 @@ const isPalette = computed(() => shown.value?.kind === 'palette')
 dialogs.setOnClosed(() => {
   const id = workspace.focusedId
   if (id === undefined) return
-  void nextTick(() => document.querySelector<HTMLElement>(`[data-pane="${id}"] textarea`)?.focus())
+  void nextTick(() => composers.find(id)?.requestFocus())
 })
 
 function onKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape' && dialogs.current) {
+  if (event.key === Key.Escape && dialogs.current) {
     event.preventDefault()
     dialogs.close()
   }

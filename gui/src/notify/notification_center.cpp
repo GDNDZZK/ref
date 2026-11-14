@@ -1,6 +1,7 @@
 #include "notify/notification_center.h"
 
 #include "notify/notification_text.h"
+#include "proto/notify_kind.h"
 
 #include <QLoggingCategory>
 
@@ -14,27 +15,6 @@ namespace
 {
 
 using Kind = proto::NotifyFrame::Kind;
-
-std::optional<Kind> kindOf(const QString& name)
-{
-	if(name == u"permission"_s)
-	{
-		return Kind::Permission;
-	}
-	if(name == u"question"_s)
-	{
-		return Kind::Question;
-	}
-	if(name == u"turn_done"_s)
-	{
-		return Kind::TurnDone;
-	}
-	if(name == u"turn_error"_s)
-	{
-		return Kind::TurnError;
-	}
-	return std::nullopt;
-}
 
 } // namespace
 
@@ -76,7 +56,7 @@ void NotificationCenter::setKinds(const QStringList& kinds)
 	QList<Kind> parsed;
 	for(const QString& name : kinds)
 	{
-		if(const auto kind = kindOf(name); kind && !parsed.contains(*kind))
+		if(const auto kind = proto::notifyKindFromName(name); kind && !parsed.contains(*kind))
 		{
 			names.append(name);
 			parsed.append(*kind);

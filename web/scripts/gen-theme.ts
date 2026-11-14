@@ -32,6 +32,7 @@ const METRIC_UNITLESS = [
   'paletteMaxRows',
   'toastMax',
   'staleOpacity',
+  'disabledOpacity',
 ]
 
 const MOTION_UNITS: Record<string, Unit> = {
@@ -40,12 +41,15 @@ const MOTION_UNITS: Record<string, Unit> = {
   slow: 'ms',
   pulse: 'ms',
   calmPulse: 'ms',
+  copiedFeedbackMs: 'ms',
   enterDrop: 'px',
   followLag: 'ms',
   chaseSnap: 'px',
   interruptWindow: 'ms',
   dialogDrop: 'px',
   popScale: '',
+  pressedScaleButton: '',
+  pressedScaleRow: '',
   tileEnterScale: '',
   tileExitScale: '',
   toastSlide: 'px',
@@ -155,11 +159,13 @@ function readTheme(): Theme {
       )
     }
   }
+
   for (const [name, names] of theme.lists) {
     const known = theme.colors.light.map(([colorName]) => colorName)
     const missing = names.filter((entry) => !known.includes(entry))
     if (missing.length > 0) throw new Error(`${where}: "${name}" lists unknown colors: ${missing.join(', ')}`)
   }
+
   return theme
 }
 
@@ -184,6 +190,7 @@ function readMotion(): Motion {
     }
     motion.numbers.push([property.name, value.value, unit])
   }
+
   return motion
 }
 
@@ -200,6 +207,7 @@ function readComponents(): ComponentValues {
       return [name, value.value, unit]
     })
   }
+
   return result
 }
 

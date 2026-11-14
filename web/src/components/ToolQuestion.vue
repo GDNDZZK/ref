@@ -17,11 +17,14 @@ const field = useTemplateRef<HTMLInputElement[]>('field')
 const shown = shallowRef(props.form)
 watch(
   () => props.form,
-  (form) => form && (shown.value = form),
+  (form) => {
+    if (form) shown.value = form
+  },
 )
 
 const current = computed(() => shown.value)
 const question = computed(() => current.value?.questions[current.value.tab])
+const choice = computed(() => current.value?.choices[current.value.tab]) // what is chosen for `question`
 const rows = computed(() => {
   const form = current.value
   const item = question.value
@@ -122,7 +125,7 @@ watch(
               v-for="item in rows"
               :key="item.row"
               class="option"
-              :class="{ cursor: current.choices[current.tab]!.cursor === item.row }"
+              :class="{ cursor: choice?.cursor === item.row }"
               :role="question.multiple ? 'checkbox' : 'radio'"
               :aria-checked="current.isChosen(current.tab, item.row)"
               @mouseenter="current.highlight(current.tab, item.row)"
@@ -139,12 +142,12 @@ watch(
               <span v-if="item.isDefault" class="default">{{ t('question.default') }}</span>
               <span v-if="item.description" class="description">{{ item.description }}</span>
               <input
-                v-if="item.custom && current.choices[current.tab]!.customPicked"
+                v-if="item.custom && choice?.customPicked"
                 ref="field"
                 class="field"
                 data-question-field
                 type="text"
-                :value="current.choices[current.tab]!.customText"
+                :value="choice?.customText"
                 :placeholder="t('question.customPlaceholder')"
                 :aria-label="t('question.custom')"
                 @click.stop
@@ -241,7 +244,7 @@ watch(
 }
 
 .title {
-  color: var(--warning);
+  color: var(--warning-text);
   font-weight: 600;
 }
 
@@ -344,7 +347,7 @@ watch(
 }
 
 .field:focus {
-  box-shadow: inset 0 0 0 1px var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-text);
 }
 
 .summary li {
@@ -360,7 +363,7 @@ watch(
 }
 
 .unanswered {
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .footer {

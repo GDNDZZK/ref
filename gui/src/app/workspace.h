@@ -4,11 +4,13 @@
 #include "app/tile_model.h"
 #include "app/tile_stage.h"
 #include "cli/launch_options.h"
-#include "client/backend.h"
+#include "client/result.h"
 #include "workspace/backend_config.h"
 #include "workspace/command_registry.h"
+#include "workspace/connection.h"
 #include "workspace/session_directory.h"
 #include "workspace/settings.h"
+#include "workspace/toast_text.h"
 
 #include <QCoroTask>
 #include <QHash>
@@ -42,7 +44,7 @@ class Workspace : public QObject
 	Q_PROPERTY(QString connectionState READ connectionState NOTIFY connectionChanged)
 	Q_PROPERTY(QString connectionText READ connectionText NOTIFY connectionChanged)
 	Q_PROPERTY(QString failureText READ failureText NOTIFY failureTextChanged)
-	Q_PROPERTY(QString cwd READ cwd NOTIFY cwdChanged)
+	Q_PROPERTY(QString cwd READ cwd CONSTANT)
 	Q_PROPERTY(QStringList visibleSessionIds READ visibleSessionIds NOTIFY visibleSessionIdsChanged)
 	Q_PROPERTY(bool windowActive READ isWindowActive WRITE setWindowActive NOTIFY windowActiveChanged)
 	// What the backend offers and the session lists.
@@ -85,7 +87,7 @@ public:
 	static Workspace* create(QQmlEngine* qmlEngine, QJSEngine* jsEngine);
 
 	// The connection to the backend, which the notification center shares.
-	refgui::client::Backend& backend() { return m_backend; }
+	refgui::workspace::Connection& connection() { return m_connection; }
 	ChatSession* current() const { return m_current; }
 	ChatSession* frontSession() { return session(m_frontId); }
 	QString currentId() const;
@@ -119,9 +121,9 @@ public:
 	const QString& dialog() const { return m_dialog; }
 	const QVariantMap& dialogArgs() const { return m_dialogArgs; }
 	bool isBackendLocal() const;
-	bool isProtocolOutdated() const { return m_backend.hello().protocol < refgui::proto::ProtocolVersion && m_backend.state() == refgui::client::Backend::State::Connected; }
-	QString backendVersion() const { return m_backend.hello().serverVersion; }
-	int protocolVersion() const { return m_backend.hello().protocol; }
+	bool isProtocolOutdated() const;
+	QString backendVersion() const { return m_connection.serverVersion(); }
+	int protocolVersion() const { return m_connection.protocol(); }
 	static constexpr int requiredProtocol() { return refgui::proto::ProtocolVersion; }
 	// Restarting is only offered when no session would lose work.
 	bool canRestartBackend() const;
@@ -180,7 +182,6 @@ signals:
 	void currentChanged();
 	void connectionChanged();
 	void failureTextChanged();
-	void cwdChanged();
 	void visibleSessionIdsChanged();
 	void windowActiveChanged();
 	void mcpServersChanged();
@@ -229,7 +230,24 @@ private:
 	Reply wrap(const QJSValue& cb) const;
 	void report(const Reply& reply, bool ok, const QVariant& payload);
 	void toast(const QString& level, const QString& text);
-	void toastFrom(const refgui::proto::ServerFrame& frame);
+	void toastCommandUnavailable();
+	// Toasts the error of a failed request; true when it failed.
+	template<typename T>
+	bool toastFailure(const refgui::client::Result<T>& result)
+	{
+		if(result)
+		{
+			return false;
+		}
+		toast(refgui::workspace::ToastLevel::Error, result.error());
+		return true;
+	}
+	void toastFrom(const refgui::proto::ToastFrame& frame);
+	// Logs a failed detach or background of `sessionId`. The local state counts it as done
+	// anyway, and with the connection gone the failure is expected, so that is not logged.
+	static void logDropped(const refgui::client::Result<void>& result, QLatin1StringView action, const QString& sessionId);
+	// Detaches `session` with nobody waiting for the answer; a failure is logged.
+	static QCoro::Task<> detachUnwaited(ChatSession* session);
 	template<typename T, typename OnOk>
 	QCoro::Task<> perform(QCoro::Task<refgui::client::Result<T>> request, Reply reply, OnOk onOk);
 	void exportTo(const QString& sessionId, const QString& path, Reply reply);
@@ -248,16 +266,17 @@ private:
 	// Commands.
 	void registerCommands();
 	void updateCommandContext();
-	void runOnSession(const QString& sessionId, const char* method);
+	void runOnSession(const QString& sessionId, void (ChatSession::*method)());
 	void runCustomCommand(const QString& name, const QString& args, const QString& sessionId);
 
 	refgui::cli::LaunchOptions m_options;
 	QString m_cwd;
 	refgui::workspace::Settings m_settings;
 	refgui::workspace::CommandRegistry m_commands;
-	refgui::client::Backend m_backend;
-	refgui::workspace::SessionDirectory m_directory{m_backend};
-	refgui::workspace::BackendConfig m_config{m_backend};
+	refgui::workspace::Connection m_connection;
+	// Both handle Connection::connected before the workspace does: it connects to it in its body.
+	refgui::workspace::SessionDirectory m_directory{m_connection};
+	refgui::workspace::BackendConfig m_config{m_connection};
 	QHash<QString, ChatSession*> m_chats;
 	TileModel m_tiles;
 	TileStage m_stage{&m_tiles};

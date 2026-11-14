@@ -17,7 +17,7 @@ Item {
 		anchors { fill: parent; leftMargin: Theme.sidebarPadding; rightMargin: Theme.sidebarPadding }
 		radius: Theme.radius
 		color: hover.hovered ? Theme.surfaceHover : "transparent"
-		scale: tap.pressed ? 0.98 : 1
+		scale: tap.pressed ? Motion.pressedScaleRow : 1
 
 		Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 		Behavior on scale { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
@@ -31,7 +31,7 @@ Item {
 			verticalAlignment: Text.AlignVCenter
 			text: row.displayTitle
 			color: Theme.text
-			font.pixelSize: Theme.fontSize - 2
+			font.pixelSize: Theme.compactFontSize
 			elide: Text.ElideRight
 		}
 		Text {
@@ -62,6 +62,6 @@ Item {
 	ContextMenu {
 		id: menu
 		entries: [{text: qsTr("Delete"), danger: true}]
-		onTriggered: Workspace.openDialog("delete-history", {sessionId: row.sessionId, title: row.displayTitle})
+		onTriggered: Workspace.openDialog(DialogId.deleteHistory, {sessionId: row.sessionId, title: row.displayTitle})
 	}
 }

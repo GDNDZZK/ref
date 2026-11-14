@@ -13,7 +13,7 @@ Item {
 	signal triggered
 
 	implicitWidth: content.width + 2 * padding
-	implicitHeight: 24
+	implicitHeight: Theme.metaLineHeight
 	anchors.verticalCenter: parent ? parent.verticalCenter : undefined
 
 	readonly property int padding: 4

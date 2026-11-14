@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import RefGui
 
@@ -16,6 +17,13 @@ ModalDialog {
 		{title: qsTr("Move between tiles (split view)"), keys: ["Alt", "←↑↓→"]}
 	]
 
+	// "/name /alias hint", as the user types it.
+	function syntaxOf(command) {
+		const names = ["/" + command.slash].concat(command.aliases.map(alias => "/" + alias))
+		const hint = command.hint !== "" ? " " + command.hint : ""
+		return names.join(" ") + hint
+	}
+
 	title: qsTr("Keybindings and commands")
 	dialogWidth: Theme.dialogWidthWide
 
@@ -26,22 +34,14 @@ ModalDialog {
 		SectionLabel { text: qsTr("Keyboard") }
 		Repeater {
 			model: dialog.commands.filter(command => command.keys.length > 0)
-			delegate: Item {
+			delegate: HelpRow {
+				id: keyRow
 				required property var modelData
-				width: parent.width
-				height: 30
+				title: modelData.title
 
-				Text {
-					textFormat: Text.PlainText
-					x: 22
-					anchors.verticalCenter: parent.verticalCenter
-					text: parent.modelData.title
-					color: Theme.text
-					font.pixelSize: Theme.smallFontSize + 1
-				}
 				KeyChips {
-					anchors { right: parent.right; rightMargin: 22; verticalCenter: parent.verticalCenter }
-					keys: parent.modelData.keys
+					anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
+					keys: keyRow.modelData.keys
 				}
 			}
 		}
@@ -49,22 +49,14 @@ ModalDialog {
 		SectionLabel { text: qsTr("Writing") }
 		Repeater {
 			model: dialog.writing
-			delegate: Item {
+			delegate: HelpRow {
+				id: writeRow
 				required property var modelData
-				width: parent.width
-				height: 30
+				title: modelData.title
 
-				Text {
-					textFormat: Text.PlainText
-					x: 22
-					anchors.verticalCenter: parent.verticalCenter
-					text: parent.modelData.title
-					color: Theme.text
-					font.pixelSize: Theme.smallFontSize + 1
-				}
 				KeyChips {
-					anchors { right: parent.right; rightMargin: 22; verticalCenter: parent.verticalCenter }
-					keys: parent.modelData.keys
+					anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
+					keys: writeRow.modelData.keys
 				}
 			}
 		}
@@ -72,24 +64,15 @@ ModalDialog {
 		SectionLabel { text: qsTr("Commands") }
 		Repeater {
 			model: dialog.commands.filter(command => command.slash !== "")
-			delegate: Item {
-				id: row
+			delegate: HelpRow {
+				id: commandRow
 				required property var modelData
-				width: parent.width
-				height: 30
+				title: modelData.title
 
 				Text {
 					textFormat: Text.PlainText
-					x: 22
-					anchors.verticalCenter: parent.verticalCenter
-					text: row.modelData.title
-					color: Theme.text
-					font.pixelSize: Theme.smallFontSize + 1
-				}
-				Text {
-					textFormat: Text.PlainText
-					anchors { right: parent.right; rightMargin: 22; verticalCenter: parent.verticalCenter }
-					text: ["/" + row.modelData.slash].concat(row.modelData.aliases.map(alias => "/" + alias)).join(" ") + (row.modelData.hint !== "" ? " " + row.modelData.hint : "")
+					anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
+					text: dialog.syntaxOf(commandRow.modelData)
 					color: Theme.textMuted
 					font { family: Theme.monoFamily; pixelSize: Theme.smallFontSize }
 				}
@@ -97,14 +80,20 @@ ModalDialog {
 		}
 	}
 
-	component SectionLabel: Text {
+	// A line of the lists: the title on the left, what goes on the right is the content.
+	component HelpRow: Item {
+		property string title: ""
 
-		textFormat: Text.PlainText
 		width: parent.width
-		height: Theme.sidebarSectionHeight
-		leftPadding: 22
-		verticalAlignment: Text.AlignVCenter
-		color: Theme.textMuted
-		font.pixelSize: Theme.smallFontSize
+		height: 30
+
+		Text {
+			textFormat: Text.PlainText
+			x: Theme.dialogPadding
+			anchors.verticalCenter: parent.verticalCenter
+			text: parent.title
+			color: Theme.text
+			font.pixelSize: Theme.captionFontSize
+		}
 	}
 }

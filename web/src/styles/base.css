@@ -49,7 +49,7 @@ button {
 
 button:focus-visible,
 textarea:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-text);
   outline-offset: 2px;
 }
 
@@ -140,7 +140,7 @@ textarea:focus-visible {
 }
 
 .prose a {
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration: underline;
 }
 

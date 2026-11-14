@@ -10,9 +10,10 @@ ToolBodyBase {
 	readonly property var meta: call.meta
 	readonly property int rowHeight: 24
 	// The count comes with the finished result; a running call has none.
-	readonly property bool hasCount: typeof meta.count === "number"
+	readonly property bool hasCount: Fields.hasNumber(meta, "count")
 	readonly property int resultCount: hasCount ? meta.count : 0 // only shown when hasCount
-	readonly property var paths: call.output.split("\n").filter(line => line !== "" && !line.startsWith("[Showing "))
+	readonly property string truncationNoticePrefix: "[Showing " // starts the backend's note that the list was cut
+	readonly property var paths: call.output.split("\n").filter(line => line !== "" && !line.startsWith(truncationNoticePrefix))
 
 	Column {
 		width: body.contentWidth
@@ -63,9 +64,8 @@ ToolBodyBase {
 		ToolChip {
 			text: qsTr("%n result(s)", "", body.resultCount)
 		}
-		ToolChip {
-			visible: body.meta.truncated === true
-			text: qsTr("truncated")
+		TruncatedChip {
+			meta: body.meta
 		}
 	}
 }

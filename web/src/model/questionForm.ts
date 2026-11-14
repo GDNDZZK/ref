@@ -5,6 +5,8 @@
 // confirms. Pure TypeScript: the card and the key handler both work on the same form.
 
 import type { Question, QuestionRequest } from '../proto/generated'
+import { Key } from '../keys.ts'
+import { clamp } from '../clamp.ts'
 
 // What a key asks the owner of the form to do next.
 export type FormOutcome = 'submit' | 'dismiss' | 'handled' | 'ignored'
@@ -67,7 +69,9 @@ export class QuestionForm {
   answers(): string[][] {
     return this.questions.map((question, index) => {
       const choice = this.choices[index]!
-      const labels = question.options.filter((_option, row) => choice.picked[row]).map((o) => o.label)
+      const labels = question.options
+        .filter((_option, row) => choice.picked[row])
+        .map((option) => option.label)
       const text = choice.customText.trim()
       return choice.customPicked && text !== '' ? [...labels, text] : labels
     })
@@ -79,7 +83,7 @@ export class QuestionForm {
 
   goToTab(tab: number): void {
     this.editing = false
-    this.tab = Math.max(0, Math.min(tab, this.tabCount - 1))
+    this.tab = clamp(tab, 0, this.tabCount - 1)
   }
 
   moveTab(delta: number): void {
@@ -95,7 +99,7 @@ export class QuestionForm {
   moveCursor(index: number, delta: number): void {
     const rows = this.rowCount(index)
     const choice = this.choices[index]
-    if (choice && rows > 0) choice.cursor = Math.max(0, Math.min(choice.cursor + delta, rows - 1))
+    if (choice && rows > 0) choice.cursor = clamp(choice.cursor + delta, 0, rows - 1)
   }
 
   // Chooses a row of a single choice, or flips it in a multiple choice. The custom row starts
@@ -141,23 +145,23 @@ export class QuestionForm {
 
   // A key press outside the text field.
   press(key: string, shift = false): FormOutcome {
-    if (key === 'Escape') return 'dismiss'
+    if (key === Key.Escape) return 'dismiss'
     const tabDelta = this.tabbed ? tabDirection(key, shift) : 0
     if (tabDelta !== 0) return this.moveTabBy(tabDelta)
-    if (this.onConfirmTab) return key === 'Enter' ? 'submit' : 'ignored'
+    if (this.onConfirmTab) return key === Key.Enter ? 'submit' : 'ignored'
 
     const index = this.tab
     switch (key) {
-      case 'ArrowUp':
+      case Key.ArrowUp:
       case 'k':
         this.moveCursor(index, -1)
         return 'handled'
-      case 'ArrowDown':
+      case Key.ArrowDown:
       case 'j':
         this.moveCursor(index, 1)
         return 'handled'
-      case 'Enter':
-      case ' ':
+      case Key.Enter:
+      case Key.Space:
         return this.pick(index, this.choices[index]!.cursor)
       default:
         return this.pressNumber(key)
@@ -194,8 +198,8 @@ export class QuestionForm {
 
 // +1 or -1 for the keys that change the tab, else 0.
 function tabDirection(key: string, shift: boolean): number {
-  if (key === 'ArrowRight' || (key === 'Tab' && !shift)) return 1
-  if (key === 'ArrowLeft' || (key === 'Tab' && shift)) return -1
+  if (key === Key.ArrowRight || (key === Key.Tab && !shift)) return 1
+  if (key === Key.ArrowLeft || (key === Key.Tab && shift)) return -1
   return 0
 }
 

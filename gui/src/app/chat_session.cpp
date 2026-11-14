@@ -19,14 +19,13 @@ namespace
 const QString NoPendingQuestion = u"No pending question with that id."_s;
 } // namespace
 
-ChatSession::ChatSession(Backend& backend, QString sessionId, QObject* parent)
+ChatSession::ChatSession(Backend& backend, const refgui::workspace::BackendConfig& config, QString sessionId, QObject* parent)
 	: QObject(parent)
-	, m_backend(backend)
 	, m_sessionId(std::move(sessionId))
 	, m_controller(backend)
-	, m_composer(backend, m_controller, refgui::composer::sharedPromptHistory())
+	, m_composer(config, m_controller, refgui::composer::sharedPromptHistory())
 {
-	connect(&m_backend, &Backend::stateChanged, this, &ChatSession::readyChanged);
+	connect(&m_controller, &refgui::session::SessionController::connectionChanged, this, &ChatSession::readyChanged);
 	connect(&m_controller, &refgui::session::SessionController::turnInProgressChanged, this, &ChatSession::busyChanged);
 	connect(&m_controller, &refgui::session::SessionController::infoChanged, this, &ChatSession::titleChanged);
 	connect(&m_controller, &refgui::session::SessionController::infoChanged, this, &ChatSession::infoChanged);
@@ -72,12 +71,7 @@ QCoro::Task<refgui::client::Result<void>> ChatSession::attach(bool foreground)
 
 QCoro::Task<refgui::client::Result<QByteArray>> ChatSession::fetchImage(QString imageId)
 {
-	const auto image = co_await m_backend.client().getImage(m_sessionId, std::move(imageId));
-	if(!image)
-	{
-		co_return std::unexpected(image.error());
-	}
-	co_return QByteArray::fromBase64(image->data.toLatin1());
+	co_return co_await m_controller.fetchImage(std::move(imageId));
 }
 
 QCoro::Task<refgui::client::Result<void>> ChatSession::detach()
@@ -109,7 +103,7 @@ bool ChatSession::isBusy() const
 
 bool ChatSession::isReady() const
 {
-	return m_backend.state() == Backend::State::Connected && m_controller.isAttached();
+	return m_controller.isConnected() && m_controller.isAttached();
 }
 
 QString ChatSession::statusText() const
@@ -376,20 +370,27 @@ bool ChatSession::answerKey(int key, const QString& text, int modifiers, bool au
 	return permissionKey(key, text, held, autoRepeat);
 }
 
+bool ChatSession::isTypedText(const QString& text)
+{
+	return !text.isEmpty() && text.front().isPrint();
+}
+
 bool ChatSession::questionKey(int key, const QString& text, Qt::KeyboardModifiers held, bool autoRepeat)
 {
 	// A held key moves the highlight, but must not answer, nor answer the next question as well.
-	if(autoRepeat && key != Qt::Key_Up && key != Qt::Key_Down)
+	const bool heldKeyDoesNotMove = autoRepeat && key != Qt::Key_Up && key != Qt::Key_Down;
+	if(heldKeyDoesNotMove)
 	{
 		static const QSet<int> cardKeys{Qt::Key_Return, Qt::Key_Enter, Qt::Key_Escape, Qt::Key_Space, Qt::Key_Left,
 		                                Qt::Key_Right,  Qt::Key_Tab,   Qt::Key_Backtab};
-		return cardKeys.contains(key) || (!text.isEmpty() && text.front().isPrint());
+		const bool isCardKey = cardKeys.contains(key);
+		return isCardKey || isTypedText(text);
 	}
 	if(m_question.handleKey(key, static_cast<int>(held)))
 	{
 		return true;
 	}
-	return !text.isEmpty() && text.front().isPrint();
+	return isTypedText(text);
 }
 
 bool ChatSession::permissionKey(int key, const QString& text, Qt::KeyboardModifiers held, bool autoRepeat)
@@ -425,7 +426,7 @@ bool ChatSession::permissionKey(int key, const QString& text, Qt::KeyboardModifi
 	}
 	if(!answer)
 	{
-		return !text.isEmpty() && text.front().isPrint();
+		return isTypedText(text);
 	}
 	if(!autoRepeat) // a held key must not answer the next request as well
 	{
@@ -480,48 +481,42 @@ void ChatSession::permissionReply(const QString& callId, bool allow, bool always
 	sendPermission(callId, allow, always);
 }
 
+template<typename T>
+QCoro::Task<bool> ChatSession::awaitAndReport(QCoro::Task<refgui::client::Result<T>> request, std::function<void()> onFailure)
+{
+	const QPointer<ChatSession> self(this); // the session can be gone when the answer arrives
+	const auto result = co_await std::move(request);
+	if(!self)
+	{
+		co_return false;
+	}
+	if(result)
+	{
+		co_return true;
+	}
+	if(onFailure)
+	{
+		onFailure();
+	}
+	setFailure(result.error());
+	co_return false;
+}
+
 QCoro::Task<> ChatSession::sendPrompt(QString text)
 {
 	setFailure({});
-	const QPointer<ChatSession> self(this); // the session can be gone when the answer arrives
-	const auto result = co_await m_controller.send(std::move(text));
-	if(!self)
-	{
-		co_return;
-	}
-	if(!result)
-	{
-		setFailure(result.error());
-	}
+	co_await awaitAndReport(m_controller.send(std::move(text)));
 }
 
 QCoro::Task<> ChatSession::sendAbort()
 {
-	const QPointer<ChatSession> self(this); // the session can be gone when the answer arrives
-	const auto result = co_await m_controller.abort();
-	if(!self)
-	{
-		co_return;
-	}
-	if(!result)
-	{
-		setFailure(result.error());
-	}
+	co_await awaitAndReport(m_controller.abort());
 }
 
 QCoro::Task<> ChatSession::sendPermission(QString callId, bool allow, bool always)
 {
-	const QPointer<ChatSession> self(this); // the session can be gone when the answer arrives
-	const auto result = co_await m_controller.permissionReply(callId, allow, always);
-	if(!self)
-	{
-		co_return;
-	}
-	if(!result)
-	{
-		m_repliedCalls.remove(callId); // it may be tried again
-		setFailure(result.error());
-	}
+	const auto mayRetry = [this, callId] { m_repliedCalls.remove(callId); };
+	co_await awaitAndReport(m_controller.permissionReply(callId, allow, always), mayRetry);
 }
 
 QCoro::Task<> ChatSession::sendQuestionReply(QString callId, std::optional<QList<QStringList>> answers)

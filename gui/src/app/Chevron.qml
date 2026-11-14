@@ -14,7 +14,8 @@ Item {
 	property color color: Theme.textMuted
 	property real strokeWidth: 1.5
 
-	readonly property real halfSpan: Math.min(width, height) * 0.3 // tip to either end, vertically
+	readonly property real spanRatio: 0.3 // of the smaller side, tip to either end
+	readonly property real halfSpan: Math.min(width, height) * spanRatio // tip to either end, vertically
 	readonly property real depth: halfSpan // tip to the ends, horizontally; equal to halfSpan for a right angle at the tip
 	readonly property real endsX: (width - depth) / 2
 

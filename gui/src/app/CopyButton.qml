@@ -8,23 +8,12 @@ Item {
 	required property string text
 
 	readonly property int hitSize: 24
-	property bool copied: false
+	readonly property bool copied: flag.copied
 
 	implicitWidth: hitSize
 	implicitHeight: hitSize
 
-	Timer {
-		id: reset
-		interval: Motion.slow * 3
-		onTriggered: button.copied = false
-	}
-
-	// QML has no clipboard of its own; a TextEdit copies its selection.
-	TextEdit {
-		id: clipboard
-		visible: false
-		textFormat: TextEdit.PlainText
-	}
+	CopiedFlag { id: flag }
 
 	Rectangle {
 		anchors.fill: parent
@@ -35,17 +24,14 @@ Item {
 	Icon {
 		anchors.centerIn: parent
 		name: button.copied ? "check" : "copy"
-		color: button.copied ? Theme.success : Theme.textMuted
+		color: button.copied ? Theme.successText : Theme.textMuted
 	}
 
 	HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
 	TapHandler {
 		onTapped: {
-			clipboard.text = button.text
-			clipboard.selectAll()
-			clipboard.copy()
-			button.copied = true
-			reset.restart()
+			Clipboard.setText(button.text)
+			flag.flash()
 		}
 	}
 	Accessible.role: Accessible.Button

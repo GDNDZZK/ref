@@ -10,6 +10,7 @@ Item {
 	id: grid
 
 	readonly property int count: Workspace.tileStage.placed
+	readonly property bool zoomed: Workspace.zoomedId !== ""
 	// Whether any tile is on screen, also one that is leaving.
 	readonly property bool occupied: repeater.count > 0
 	readonly property int padding: Theme.tilePadding
@@ -44,7 +45,7 @@ Item {
 	// Focuses the nearest tile in the direction (dx, dy), each -1, 0 or 1. Distance counts
 	// twice as much across the direction as along it, so a neighbour in line wins.
 	function moveFocus(dx, dy) {
-		if (Workspace.zoomedId !== "")
+		if (zoomed)
 			return
 		let from = null
 		for (let i = 0; i < repeater.count; ++i) {
@@ -58,12 +59,12 @@ Item {
 		let bestCost = Infinity
 		for (let i = 0; i < repeater.count; ++i) {
 			const tile = repeater.itemAt(i) as Tile
-			const along = ((tile.slot.x + tile.slot.width / 2) - (from.slot.x + from.slot.width / 2)) * dx
-			              + ((tile.slot.y + tile.slot.height / 2) - (from.slot.y + from.slot.height / 2)) * dy
+			const deltaX = (tile.slot.x + tile.slot.width / 2) - (from.slot.x + from.slot.width / 2)
+			const deltaY = (tile.slot.y + tile.slot.height / 2) - (from.slot.y + from.slot.height / 2)
+			const along = deltaX * dx + deltaY * dy
 			if (tile === from || tile.leaving || along <= 0)
 				continue
-			const across = Math.abs(((tile.slot.x + tile.slot.width / 2) - (from.slot.x + from.slot.width / 2)) * dy
-			                        + ((tile.slot.y + tile.slot.height / 2) - (from.slot.y + from.slot.height / 2)) * dx)
+			const across = Math.abs(deltaX * dy + deltaY * dx)
 			const cost = along + crossWeight * across
 			if (cost < bestCost) {
 				best = tile
@@ -78,8 +79,8 @@ Item {
 		id: flick
 		anchors.fill: parent
 		contentWidth: width
-		contentHeight: Workspace.zoomedId === "" ? grid.gridHeight : height
-		interactive: Workspace.zoomedId === ""
+		contentHeight: grid.zoomed ? height : grid.gridHeight
+		interactive: !grid.zoomed
 		boundsBehavior: Flickable.StopAtBounds
 
 		ScrollBar.vertical: ThemedScrollBar {}
@@ -87,7 +88,7 @@ Item {
 		Connections {
 			target: Workspace
 			function onZoomedChanged() {
-				if (Workspace.zoomedId !== "")
+				if (grid.zoomed)
 					flick.contentY = 0
 			}
 			// The tile that grows back to the whole area starts from the top.
@@ -112,6 +113,7 @@ Item {
 				              grid.contentTop + row * (grid.tileHeight + grid.gap),
 				              slotWidth,
 				              grid.tileHeight)
+				anyZoomed: grid.zoomed
 				zoomRect: Qt.rect(0, 0, grid.width, grid.height)
 				takeover: Workspace.tileStage.opening && session === Workspace.current
 			}
@@ -133,7 +135,7 @@ Item {
 		TextButton {
 			anchors.horizontalCenter: parent.horizontalCenter
 			text: qsTr("New session")
-			onClicked: Commands.run("new")
+			onClicked: Commands.run(CommandId.newSession)
 		}
 	}
 }

@@ -150,8 +150,7 @@ void UserNotificationsNotifier::show(const Notification& notification)
 	content.userInfo = @{SessionKey : toNSString(notification.sessionId)};
 	content.threadIdentifier = toNSString(notification.sessionId);
 
-	// Session and kind as identifier: a newer notification of both replaces the older one, as in the Web interface.
-	const QString identifier = u"%1:%2"_s.arg(notification.sessionId).arg(static_cast<int>(notification.kind));
+	const QString identifier = replaceKey(notification);
 	const QPointer<UserNotificationsNotifier> self(this);
 	UNNotificationRequest* request = [UNNotificationRequest requestWithIdentifier:toNSString(identifier)
 	                                                                      content:content

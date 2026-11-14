@@ -11,8 +11,6 @@ import ModalDialog from '../ModalDialog.vue'
 import NotificationSettings from '../NotificationSettings.vue'
 import Segmented from '../Segmented.vue'
 
-const PROTOCOL_WITHOUT_FIELD = 1
-
 const { t } = useI18n()
 const dialogs = useDialogsStore()
 const connection = useConnectionStore()
@@ -42,7 +40,7 @@ const languages = computed(() => [
 const about = computed(() =>
   t('dialog.settings.about', {
     version: connection.hello?.server_version ?? '',
-    protocol: connection.hello?.protocol ?? PROTOCOL_WITHOUT_FIELD,
+    protocol: connection.protocol,
   }),
 )
 </script>

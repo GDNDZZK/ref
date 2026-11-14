@@ -10,6 +10,13 @@ namespace
 {
 
 constexpr qsizetype MaxDetailLength = 200;
+constexpr QChar Ellipsis = u'\u2026';
+
+// Keeps the translation context of these strings.
+struct Text
+{
+	Q_DECLARE_TR_FUNCTIONS(refgui::notify)
+};
 
 // Errors can be long and span lines; a notification has room for the first line.
 QString firstLine(const QString& text)
@@ -17,7 +24,7 @@ QString firstLine(const QString& text)
 	QString line = text.trimmed().section(u'\n', 0, 0).trimmed();
 	if(line.size() > MaxDetailLength)
 	{
-		line = line.left(MaxDetailLength).trimmed() + u"\u2026"_s;
+		line = line.left(MaxDetailLength).trimmed() + Ellipsis;
 	}
 	return line;
 }
@@ -28,13 +35,13 @@ QString bodyOf(const proto::NotifyFrame& frame)
 	switch(frame.kind)
 	{
 	case proto::NotifyFrame::Kind::Permission:
-		return detail.isEmpty() ? QCoreApplication::translate("refgui::notify", "Waiting for permission") : QCoreApplication::translate("refgui::notify", "Waiting for permission to use %1").arg(detail);
+		return detail.isEmpty() ? Text::tr("Waiting for permission") : Text::tr("Waiting for permission to use %1").arg(detail);
 	case proto::NotifyFrame::Kind::Question:
-		return detail.isEmpty() ? QCoreApplication::translate("refgui::notify", "Asks a question") : QCoreApplication::translate("refgui::notify", "Asks: %1").arg(detail);
+		return detail.isEmpty() ? Text::tr("Asks a question") : Text::tr("Asks: %1").arg(detail);
 	case proto::NotifyFrame::Kind::TurnDone:
-		return QCoreApplication::translate("refgui::notify", "Finished");
+		return Text::tr("Finished");
 	case proto::NotifyFrame::Kind::TurnError:
-		return detail.isEmpty() ? QCoreApplication::translate("refgui::notify", "Stopped with an error") : QCoreApplication::translate("refgui::notify", "Stopped with an error: %1").arg(detail);
+		return detail.isEmpty() ? Text::tr("Stopped with an error") : Text::tr("Stopped with an error: %1").arg(detail);
 	}
 	Q_UNREACHABLE_RETURN(QString());
 }

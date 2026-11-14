@@ -89,9 +89,9 @@ private:
 	void load();
 	void readFields(const QJsonObject& root);
 	void scheduleSave();
-	// Marks `field` as changed to `value` and saves later; false when nothing changed.
+	// Changes `field` to `value`, saves later and emits `changed`; nothing when it is unchanged.
 	template<typename T>
-	bool assign(T& field, const T& value);
+	void set(T& field, const T& value, void (Settings::*changed)());
 	QJsonObject toJson() const;
 
 	QString m_path;

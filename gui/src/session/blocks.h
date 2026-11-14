@@ -7,6 +7,8 @@
 #include <QList>
 #include <QString>
 
+#include <optional>
+
 namespace refgui::session
 {
 
@@ -46,14 +48,14 @@ struct Block
 
 	QString messageId{};
 	qsizetype partIndex = 0;
-	QString source{}; // user blocks: "human", "peer", "spawn", "reminder", "compaction" or "shell"
+	std::optional<proto::MessageSource::Kind> sourceKind{}; // user blocks only
 	QString sender{}; // peer and spawn: the name of the session that sent it
 	qint64 time = 0;
 
 	// Tool blocks.
 	QString toolName{};
 	QString purpose{};
-	QString toolState{};
+	std::optional<proto::ToolState> toolStateKind{};
 	QString inputJson{};
 	QString rawInput{}; // only while the arguments are not valid JSON yet
 	QString callId{};
@@ -83,6 +85,10 @@ struct Block
 };
 
 QString kindName(Block::Kind kind);
+// The names the views get: "human", "peer", "spawn", "reminder", "compaction" or "shell"; empty for none.
+QString sourceName(std::optional<proto::MessageSource::Kind> kind);
+// The wire name of the state, e.g. "awaiting_permission"; empty for none.
+QString toolStateName(std::optional<proto::ToolState> state);
 
 // A message without its parts: what the blocks of its parts have in common.
 using MessageHeader = proto::Message;

@@ -23,7 +23,12 @@ pub type Ws =
 /// Another process may take a port between `free_port` and ref-web binding it.
 const START_ATTEMPTS: u32 = 5;
 const START_TIMEOUT: Duration = Duration::from_secs(15);
+/// The loopback address the tests listen on and connect to.
+pub const LOOPBACK: &str = "127.0.0.1";
 pub const STEP_TIMEOUT: Duration = Duration::from_secs(10);
+/// Poll intervals: for conditions that turn true quickly, and for a process that starts up.
+pub const POLL_FAST: Duration = Duration::from_millis(20);
+const POLL_SLOW: Duration = Duration::from_millis(50);
 /// Sent by the fake upstream: close the connection with `FAKE_CLOSE_CODE` / `FAKE_CLOSE_REASON`.
 pub const FAKE_CLOSE_TRIGGER: &str = "close-me";
 pub const FAKE_CLOSE_CODE: u16 = 4001;
@@ -39,7 +44,7 @@ pub fn temp_dir(tag: &str) -> PathBuf {
 }
 
 pub fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
+    std::net::TcpListener::bind((LOOPBACK, 0))
         .unwrap()
         .local_addr()
         .unwrap()
@@ -163,14 +168,10 @@ impl Web {
 
     /// Waits for the process to exit by itself.
     pub async fn wait_exit(&mut self) -> std::process::ExitStatus {
-        let deadline = std::time::Instant::now() + STEP_TIMEOUT;
-        loop {
-            if let Some(status) = self.child.try_wait().unwrap() {
-                return status;
-            }
-            assert!(std::time::Instant::now() < deadline, "ref-web did not exit");
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+        poll_until("ref-web to exit", STEP_TIMEOUT, POLL_FAST, async || {
+            self.child.try_wait().unwrap()
+        })
+        .await
     }
 
     /// SIGKILL: no chance to clean up.
@@ -180,27 +181,20 @@ impl Web {
     }
 
     async fn wait_until_listening(&mut self) -> Result<(), std::process::ExitStatus> {
-        let deadline = std::time::Instant::now() + START_TIMEOUT;
-        loop {
+        poll_until("ref-web to start", START_TIMEOUT, POLL_SLOW, async || {
             if let Some(status) = self.child.try_wait().unwrap() {
-                return Err(status);
+                return Some(Err(status));
             }
-            if tokio::net::TcpStream::connect(("127.0.0.1", self.port))
+            tokio::net::TcpStream::connect((LOOPBACK, self.port))
                 .await
                 .is_ok()
-            {
-                return Ok(());
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "ref-web did not start"
-            );
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+                .then_some(Ok(()))
+        })
+        .await
     }
 
     pub fn url(&self, path: &str) -> String {
-        format!("http://127.0.0.1:{}{path}", self.port)
+        format!("http://{LOOPBACK}:{}{path}", self.port)
     }
 
     pub fn cookie(&self) -> String {
@@ -224,7 +218,7 @@ impl Web {
     }
 
     pub fn origin(&self) -> String {
-        format!("http://127.0.0.1:{}", self.port)
+        format!("http://{LOOPBACK}:{}", self.port)
     }
 
     /// A GET with the login cookie.
@@ -244,7 +238,7 @@ impl Web {
         origin: Option<String>,
         host: Option<&str>,
     ) -> Result<Ws, tokio_tungstenite::tungstenite::Error> {
-        let mut request = format!("ws://127.0.0.1:{}/ws", self.port)
+        let mut request = format!("ws://{LOOPBACK}:{}/ws", self.port)
             .into_client_request()
             .unwrap();
         let headers = request.headers_mut();
@@ -295,7 +289,7 @@ pub struct FakeUpstream {
 /// A WebSocket server that echoes every text and binary frame unchanged, and closes the
 /// connection when it gets `FAKE_CLOSE_TRIGGER`.
 pub async fn fake_upstream() -> FakeUpstream {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = TcpListener::bind((LOOPBACK, 0)).await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let (query_tx, handshake_query) = tokio::sync::watch::channel(None);
     tokio::spawn(async move {
@@ -309,7 +303,7 @@ pub async fn fake_upstream() -> FakeUpstream {
                     |request: &tokio_tungstenite::tungstenite::handshake::server::Request,
                      response| {
                         let query = request.uri().query().map(str::to_string);
-                        let _ = query_tx.send(query);
+                        query_tx.send(query).unwrap();
                         Ok(response)
                     };
                 let mut ws = tokio_tungstenite::accept_hdr_async(stream, callback)
@@ -322,7 +316,7 @@ pub async fn fake_upstream() -> FakeUpstream {
                                 code: CloseCode::from(FAKE_CLOSE_CODE),
                                 reason: FAKE_CLOSE_REASON.into(),
                             };
-                            let _ = ws.send(Message::Close(Some(close))).await;
+                            ws.send(Message::Close(Some(close))).await.unwrap();
                             return;
                         }
                         Message::Text(_) | Message::Binary(_) => message,
@@ -346,10 +340,8 @@ pub async fn real_backend(env: &Env, token: &str) -> (ref_server::Running, u16) 
     let mut options = ref_server::HubOptions::new(env.dir.join("server-data"));
     options.home = None;
     options.config_loader = std::sync::Arc::new(|_| ref_config::Config::default());
-    let (auth, _) = ref_server::ws::resolve_hosts(&["127.0.0.1".into()], token.into());
-    let running = ref_server::start(options, "127.0.0.1", 0, auth)
-        .await
-        .unwrap();
+    let (auth, _) = ref_server::ws::resolve_hosts(&[LOOPBACK.into()], token.into());
+    let running = ref_server::start(options, LOOPBACK, 0, auth).await.unwrap();
     let port = running.addr.port();
     (running, port)
 }
@@ -392,13 +384,29 @@ pub fn process_gone(pid: u32) -> bool {
         .is_some_and(|rest| rest.trim_start().starts_with('Z'))
 }
 
-pub async fn wait_until(what: &str, mut condition: impl FnMut() -> bool) {
-    let deadline = std::time::Instant::now() + STEP_TIMEOUT;
-    while !condition() {
+/// Polls `check` every `poll` until it returns `Some`; panics after `timeout`.
+async fn poll_until<T>(
+    what: &str,
+    timeout: Duration,
+    poll: Duration,
+    mut check: impl AsyncFnMut() -> Option<T>,
+) -> T {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if let Some(found) = check().await {
+            return found;
+        }
         assert!(
             std::time::Instant::now() < deadline,
             "timed out waiting for {what}"
         );
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        tokio::time::sleep(poll).await;
     }
+}
+
+pub async fn wait_until(what: &str, mut condition: impl FnMut() -> bool) {
+    poll_until(what, STEP_TIMEOUT, POLL_FAST, async || {
+        condition().then_some(())
+    })
+    .await;
 }
