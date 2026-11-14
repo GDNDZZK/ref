@@ -4,6 +4,7 @@
 #include "app/composer_model_type.h"
 #include "app/question_prompt_type.h"
 #include "client/backend.h"
+#include "client/result.h"
 #include "composer/composer_model.h"
 #include "proto/todo_progress.h"
 #include "session/question_prompt.h"
@@ -19,6 +20,7 @@
 #include <QtQmlIntegration>
 
 #include <chrono>
+#include <functional>
 #include <optional>
 
 // One session as the window shows it: the conversation and the actions on it. Workspace
@@ -71,11 +73,8 @@ class ChatSession : public QObject
 	Q_PROPERTY(bool answerKeysActive READ answerKeysActive NOTIFY answerChanged)
 
 public:
-	// How long a request or question is shown before the keys answer it: the user may still be typing.
-	static constexpr std::chrono::milliseconds PermissionGuard{350};
-
 	// `backend` is shared by all sessions of the window and outlives them.
-	ChatSession(refgui::client::Backend& backend, QString sessionId, QObject* parent = nullptr);
+	ChatSession(refgui::client::Backend& backend, const refgui::workspace::BackendConfig& config, QString sessionId, QObject* parent = nullptr);
 
 	const QString& sessionId() const { return m_sessionId; }
 	bool isAttached() const { return m_controller.isAttached(); }
@@ -173,6 +172,13 @@ signals:
 	void draftRestored(const QString& text, const QList<refgui::proto::NamedImage>& images);
 
 private:
+	// How long a request or question is shown before the keys answer it: the user may still be typing.
+	static constexpr std::chrono::milliseconds PermissionGuard{350};
+
+	// Awaits a request of this session and shows its failure, after `onFailure`. False when the
+	// request failed or the session was deleted meanwhile.
+	template<typename T>
+	QCoro::Task<bool> awaitAndReport(QCoro::Task<refgui::client::Result<T>> request, std::function<void()> onFailure = {});
 	QCoro::Task<> sendPrompt(QString text);
 	QCoro::Task<> sendAbort();
 	QCoro::Task<> fetchOlder();
@@ -187,8 +193,9 @@ private:
 	void trackAnswerTarget();
 	bool permissionKey(int key, const QString& text, Qt::KeyboardModifiers held, bool autoRepeat);
 	bool questionKey(int key, const QString& text, Qt::KeyboardModifiers held, bool autoRepeat);
+	// The key press typed a printable character.
+	static bool isTypedText(const QString& text);
 
-	refgui::client::Backend& m_backend;
 	QString m_sessionId;
 	refgui::session::SessionController m_controller;
 	refgui::composer::ComposerModel m_composer;

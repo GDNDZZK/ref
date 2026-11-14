@@ -14,7 +14,7 @@ ToolBodyBase {
 
 		OutputText {
 			text: body.input
-			textColor: Theme.info
+			textColor: Theme.infoText
 		}
 	}
 

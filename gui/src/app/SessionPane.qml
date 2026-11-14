@@ -48,6 +48,11 @@ Item {
 	}
 	onSessionChanged: armKeys()
 
+	// The rows are deleted inside the destructor of the ChatView, when its QML part is already gone, and the rows'
+	// bindings that read the view then run against a half-destroyed object (TypeErrors). Dropping the rows first, while
+	// the view is whole, ends them in the normal way.
+	Component.onDestruction: chat.model = null
+
 	ChatView {
 		id: chat
 		anchors { left: parent.left; right: parent.right; top: parent.top; bottom: questionCard.top }
@@ -116,8 +121,6 @@ Item {
 		// Stacked above the send button, on its center line.
 		x: composer.x + composer.sendButtonCenterX - width / 2
 		anchors { bottom: questionCard.top; bottomMargin: 4 }
-		implicitWidth: 34
-		implicitHeight: 34
 		opacity: shown ? 1 : 0
 		visible: opacity > 0
 		transform: Translate {
@@ -212,7 +215,7 @@ Item {
 	Connections {
 		target: pane.session.composer
 		function onToastRequested(level, text) {
-			Workspace.toastRequested(level, text)
+			Workspace.showToast(level, text)
 		}
 	}
 

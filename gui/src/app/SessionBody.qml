@@ -6,14 +6,6 @@ ToolBodyBase {
 	id: body
 
 	readonly property var input: call.inputObject
-	readonly property var icons: ({
-		"send_message": "chat-send",
-		"create_session": "chat-plus",
-		"list_sessions": "chat-list",
-		"message_status": "chat-send",
-		"close_session": "chat-x",
-		"read_session": "chat"
-	})
 	readonly property string who: ToolInfo.firstText(input, ["to", "name", "session"])
 	readonly property string said: ToolInfo.firstText(input, ["message", "prompt"])
 	readonly property int barWidth: 3
@@ -25,14 +17,14 @@ ToolBodyBase {
 
 		Icon {
 			anchors.verticalCenter: parent.verticalCenter
-			name: body.icons[body.call.toolName] ?? "chat"
-			color: Theme.info
+			name: SessionTools.iconOf(body.call.toolName)
+			color: Theme.infoText
 		}
 		Text {
 			textFormat: Text.PlainText
 			anchors.verticalCenter: parent.verticalCenter
 			text: body.who
-			color: Theme.info
+			color: Theme.infoText
 			font.pixelSize: Theme.codeFontSize
 			font.bold: true
 		}

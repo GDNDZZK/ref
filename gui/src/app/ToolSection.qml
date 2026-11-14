@@ -15,7 +15,7 @@ Column {
 		id: caption
 		visible: text !== ""
 		color: Theme.textMuted
-		font.pixelSize: 11
+		font.pixelSize: Theme.microFontSize
 		font.weight: Font.Medium
 	}
 

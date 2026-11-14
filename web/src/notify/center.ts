@@ -32,7 +32,7 @@ export interface CenterDeps {
   reportError(error: unknown): void
 }
 
-const DEFAULT_TITLE = 'ref'
+export const APP_TITLE = 'ref'
 const MAX_DETAIL_CHARS = 300
 
 export class NotificationCenter {
@@ -84,7 +84,7 @@ export class NotificationCenter {
     const { session_id: sessionId, notify_kind: kind } = frame
     try {
       this.deps.notifier.show({
-        title: frame.session_title || DEFAULT_TITLE,
+        title: frame.session_title || APP_TITLE,
         body: this.bodyOf(kind, frame.detail),
         tag: `${sessionId}:${kind}`,
         onClick: () => this.openSession(sessionId),

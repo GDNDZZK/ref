@@ -2,11 +2,14 @@
 // All background sessions at once (SplitView.qml): tiles on a grid that fills the content area.
 // Zooming a tile stretches its frame over the area and fades the others; it is the same pane
 // throughout, so scroll position and streaming text survive.
-import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch, watchEffect } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch, watchEffect } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { motion } from '../theme/generated/motion.ts'
-import { gridHeight, tileRects, TILE_SPEC } from '../shell/tileLayout.ts'
+import { metrics } from '../theme/generated/theme.ts'
+import { cornerClearance, gridHeight, tileRects, TILE_SPEC } from '../shell/tileLayout.ts'
+import type { Band } from '../shell/tileLayout.ts'
 import { useCommandsStore } from '../stores/commands.ts'
+import { useLayoutStore } from '../stores/layout.ts'
 import { useNoticesStore } from '../stores/notices.ts'
 import { useWorkspaceStore } from '../stores/workspace.ts'
 import SplitTile from './SplitTile.vue'
@@ -16,6 +19,7 @@ const { t } = useI18n()
 const workspace = useWorkspaceStore()
 const commands = useCommandsStore()
 const notices = useNoticesStore()
+const layout = useLayoutStore()
 
 const area = useTemplateRef<HTMLElement>('area')
 const size = ref({ width: 0, height: 0 })
@@ -37,6 +41,47 @@ const rects = computed(() =>
 watchEffect(() => workspace.setTileRects(rects.value))
 
 const zoomed = computed(() => workspace.zoomedId !== undefined)
+
+// The floating window buttons sit over the content. The header of a tile under them keeps its
+// buttons and marks out of their way, so no tile loses height (the GUI's TileGrid.topInset).
+interface Clearance {
+  left: number
+  right: number
+}
+const NO_CLEARANCE: Clearance = { left: 0, right: 0 }
+const clearances = ref<Clearance[]>([])
+
+function band(element: Element | null | undefined): Band | undefined {
+  return element?.getBoundingClientRect()
+}
+
+function measureClearances(): void {
+  const element = area.value
+  const areaBand = band(element)
+  const content = element?.parentElement
+  if (!element || !areaBand || zoomed.value) {
+    clearances.value = []
+    return
+  }
+  const left = band(content?.querySelector('.corner.left'))
+  const right = band(content?.querySelector('.corner.right'))
+  clearances.value = rects.value.map((rect) => {
+    const top = areaBand.top + rect.y - element.scrollTop
+    const header = {
+      top,
+      bottom: top + metrics.tileHeaderHeight,
+      left: areaBand.left + rect.x,
+      right: areaBand.left + rect.x + rect.width,
+    }
+    return {
+      left: left ? cornerClearance(header, left, 'left', TILE_SPEC.gap) : 0,
+      right: right ? cornerClearance(header, right, 'right', TILE_SPEC.gap) : 0,
+    }
+  })
+}
+
+watch([rects, zoomed, () => layout.sidebarVisible], () => void nextTick(measureClearances), { flush: 'post' })
+
 // A zoomed tile fills the area; the others keep their slots, faded out.
 function frame(index: number, id: string): Record<string, string> {
   const rect = id === workspace.zoomedId ? { x: 0, y: 0, ...size.value } : rects.value[index]
@@ -67,7 +112,7 @@ function newSession(): void {
 </script>
 
 <template>
-  <div ref="area" class="split" :class="{ zoomed, zooming }">
+  <div ref="area" class="split" :class="{ zoomed, zooming }" @scroll.passive="measureClearances">
     <div v-if="workspace.tileIds.length === 0" class="empty">
       <p>{{ t('split.empty') }}</p>
       <TextButton :label="t('sidebar.newSession')" @click="newSession" />
@@ -82,6 +127,7 @@ function newSession(): void {
         :focused="id === workspace.tileFocusId"
         :zoomed="id === workspace.zoomedId"
         :hidden="zoomed && id !== workspace.zoomedId"
+        :clearance="clearances[index] ?? NO_CLEARANCE"
         @focus="workspace.focusTile(id)"
         @zoom="workspace.zoomedId === id ? workspace.unzoom() : workspace.zoomTile(id)"
       />

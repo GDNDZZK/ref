@@ -63,8 +63,13 @@ pub fn text() -> Style {
     fg(TEXT)
 }
 
+/// Expands a hex nibble to a byte (`0xf` becomes `0xff`).
+const NIBBLE_TO_BYTE: u32 = 0x11;
+/// Multiplier of the polynomial hash that picks an agent colour from its name.
+const NAME_HASH_MULTIPLIER: usize = 31;
+
 /// Parses `#rrggbb` or a few named colours.
-pub fn parse_color(s: &str) -> Option<Color> {
+fn parse_color(s: &str) -> Option<Color> {
     let s = s.trim();
     if let Some(h) = s.strip_prefix('#') {
         if h.len() == 6 {
@@ -73,7 +78,11 @@ pub fn parse_color(s: &str) -> Option<Color> {
         if h.len() == 3 {
             let v = u32::from_str_radix(h, 16).ok()?;
             let (r, g, b) = ((v >> 8) & 0xf, (v >> 4) & 0xf, v & 0xf);
-            return Some(Color::Rgb((r * 17) as u8, (g * 17) as u8, (b * 17) as u8));
+            return Some(Color::Rgb(
+                (r * NIBBLE_TO_BYTE) as u8,
+                (g * NIBBLE_TO_BYTE) as u8,
+                (b * NIBBLE_TO_BYTE) as u8,
+            ));
         }
         return None;
     }
@@ -100,9 +109,10 @@ pub fn agent_color(agents: &[ref_proto::AgentInfo], name: &str) -> Color {
     }
     let i = match idx {
         Some(i) => i,
-        None => name
-            .bytes()
-            .fold(0usize, |a, b| a.wrapping_mul(31).wrapping_add(b as usize)),
+        None => name.bytes().fold(0usize, |a, b| {
+            a.wrapping_mul(NAME_HASH_MULTIPLIER)
+                .wrapping_add(b as usize)
+        }),
     };
     AGENT_PALETTE[i % AGENT_PALETTE.len()]
 }
@@ -125,7 +135,7 @@ pub fn blend(a: Color, b: Color, t: f32) -> Color {
     }
 }
 
-pub const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 pub fn spinner(tick: u64) -> &'static str {
     SPINNER[(tick as usize) % SPINNER.len()]

@@ -1,6 +1,6 @@
 //! Centered overlay dialogs: fuzzy-filtered lists (palette, sessions, models, agents) and help.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -8,8 +8,33 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use super::editor::Editor;
-use super::text::{self, width};
 use super::theme;
+use crate::text::{self, width};
+
+/// Score bonus when the filter matches the title itself.
+const TITLE_MATCH_BONUS: i64 = 20;
+/// Rows moved by one page key in a list or text dialog.
+pub const PAGE_ROWS: i32 = 10;
+/// The dialog frame starts this many columns smaller and grows in.
+const GROW_IN_SHRINK: f32 = 2.0;
+/// How strongly the backdrop is darkened behind a dialog.
+const BACKDROP_DIM: f32 = 0.35;
+/// Foregrounds darken faster than backgrounds by this factor.
+const FG_DIM_FACTOR: f32 = 1.4;
+/// The " esc " hint is drawn only in frames wider than this.
+const MIN_W_FOR_ESC_HINT: u16 = 20;
+/// Width of the key column in the help text.
+const KEY_COLUMN_W: usize = 30;
+
+/// Length of the open animation, in seconds.
+const OPEN_ANIM_SECS: f32 = 0.12;
+/// How long after opening a dialog still needs redraws (the animation plus a margin).
+pub const OPEN_SETTLE: Duration = Duration::from_millis(150);
+
+/// Open animation progress of an overlay opened at `opened`, from 0 to 1.
+pub fn open_progress(opened: Instant) -> f32 {
+    (opened.elapsed().as_secs_f32() / OPEN_ANIM_SECS).min(1.0)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Kind {
@@ -61,6 +86,13 @@ pub struct ListDialog {
     /// Screen rows of items at last draw: (y, visible index).
     rows: Vec<(u16, usize)>,
     pub rect: Rect,
+}
+
+/// A display row of the list: a section header, a gap between sections, or a visible item.
+enum Disp {
+    Gap,
+    Section(String),
+    Item(usize),
 }
 
 impl ListDialog {
@@ -123,7 +155,7 @@ impl ListDialog {
                 .iter()
                 .enumerate()
                 .filter_map(|(i, it)| {
-                    let a = text::fuzzy_score(&it.title, &q).map(|s| s + 20);
+                    let a = text::fuzzy_score(&it.title, &q).map(|s| s + TITLE_MATCH_BONUS);
                     let b = text::fuzzy_score(
                         &format!("{} {} {} {}", it.title, it.desc, it.section, it.keywords),
                         &q,
@@ -160,7 +192,7 @@ impl ListDialog {
         if n == 0 {
             return;
         }
-        self.sel = (self.sel as i32 + d * 10).clamp(0, n - 1) as usize;
+        self.sel = (self.sel as i32 + d * PAGE_ROWS).clamp(0, n - 1) as usize;
     }
 
     /// Item index (in visible list) at a screen row.
@@ -186,7 +218,7 @@ impl ListDialog {
     pub fn draw(&mut self, buf: &mut Buffer, screen: Rect, tick: u64) {
         let w = (screen.width.saturating_sub(4)).clamp(30, 84);
         let h = screen.height.saturating_sub(4).clamp(8, 28);
-        let t = (self.opened.elapsed().as_secs_f32() / 0.12).min(1.0);
+        let t = open_progress(self.opened);
         let r = frame(buf, screen, w, h, &self.title, t);
         self.rect = r;
         let inner = Rect::new(
@@ -207,29 +239,9 @@ impl ListDialog {
         );
         let farea = Rect::new(inner.x + 2, fy, inner.width.saturating_sub(2), 1);
         self.filter.draw(buf, farea, "Search…", false);
-        // Fake cursor in the filter (real cursor handled by caller).
         let list_top = fy + 2;
         let list_h = (inner.y + inner.height).saturating_sub(list_top + 1) as usize;
-        // Build display rows: section headers + items.
-        enum Disp {
-            Gap,
-            Section(String),
-            Item(usize),
-        }
-        let mut disp: Vec<Disp> = Vec::new();
-        let filtering = !self.filter.text.trim().is_empty();
-        let mut last_section: Option<&str> = None;
-        for (vi, &ii) in self.visible.iter().enumerate() {
-            let it = &self.items[ii];
-            if !filtering && !it.section.is_empty() && last_section != Some(it.section.as_str()) {
-                if last_section.is_some() {
-                    disp.push(Disp::Gap);
-                }
-                disp.push(Disp::Section(it.section.clone()));
-                last_section = Some(it.section.as_str());
-            }
-            disp.push(Disp::Item(vi));
-        }
+        let disp = self.display_rows();
         let sel_row = disp
             .iter()
             .position(|d| matches!(d, Disp::Item(v) if *v == self.sel))
@@ -267,106 +279,147 @@ impl ListDialog {
                     );
                 }
                 Disp::Item(vi) => {
-                    let it = &self.items[self.visible[*vi]];
                     let selected = *vi == self.sel;
                     let rbg = if selected { theme::PRIMARY } else { bg };
-                    let fgc = |c: Color| if selected { theme::PANEL } else { fade(c) };
                     let row = Rect::new(inner.x.saturating_sub(1), y, inner.width + 2, 1);
                     buf.set_style(row, Style::new().bg(rbg));
-                    let mut left: Vec<Span<'static>> = vec![Span::raw(" ")];
-                    if it.spinner {
-                        left.push(Span::styled(
-                            format!("{} ", theme::spinner(tick)),
-                            Style::new().fg(fgc(theme::PRIMARY)),
-                        ));
-                    } else if let Some((m, c)) = &it.marker {
-                        left.push(Span::styled(format!("{m} "), Style::new().fg(fgc(*c))));
-                    }
-                    let tstyle = Style::new().fg(fgc(it.title_color.unwrap_or(theme::TEXT)));
-                    left.push(Span::styled(
-                        it.title.clone(),
-                        if selected {
-                            tstyle.add_modifier(Modifier::BOLD)
-                        } else {
-                            tstyle
-                        },
-                    ));
-                    // Section headers are hidden while filtering; keep the provider visible for
-                    // models (the same model id often exists under several providers).
-                    if filtering && self.kind == Kind::Models && !it.section.is_empty() {
-                        left.push(Span::styled(
-                            format!("  {}", it.section),
-                            Style::new().fg(fgc(theme::ACCENT)),
-                        ));
-                    }
-                    if !it.desc.is_empty() {
-                        left.push(Span::styled(
-                            format!("  {}", it.desc),
-                            Style::new().fg(fgc(theme::MUTED)),
-                        ));
-                    }
-                    let mut right: Vec<Span<'static>> = Vec::new();
-                    if self.confirm.as_deref() == Some(it.key.as_str()) && selected {
-                        let t = if self.confirm_text.is_empty() {
-                            "press ctrl+d again to confirm "
-                        } else {
-                            self.confirm_text.as_str()
-                        };
-                        right.push(Span::styled(
-                            t.to_string(),
-                            Style::new().fg(theme::PANEL).add_modifier(Modifier::BOLD),
-                        ));
-                    } else {
-                        if let Some((b, c)) = &it.badge {
-                            right.push(Span::styled(
-                                format!(" {b} "),
-                                Style::new()
-                                    .fg(if selected { *c } else { theme::PANEL })
-                                    .bg(if selected { theme::PANEL } else { fade(*c) }),
-                            ));
-                            right.push(Span::raw(" "));
-                        }
-                        if !it.right.is_empty() {
-                            right.push(Span::styled(
-                                it.right.clone(),
-                                Style::new().fg(fgc(theme::MUTED)),
-                            ));
-                        }
-                        right.push(Span::raw(" "));
-                    }
-                    // Keep the title readable: shrink the right column first (to at most ~half).
-                    let lw: usize = left.iter().map(|s| width(&s.content)).sum();
-                    let rw: usize = right.iter().map(|s| width(&s.content)).sum();
-                    let room = (iw + 2).saturating_sub(lw + 1);
-                    let cap = room.max((iw + 2) / 2);
-                    if rw > cap {
-                        right = shrink_right(right, cap);
-                    }
+                    let (left, right) = self.item_row_spans(*vi, t, tick);
                     let (line, _) = super::message::compose(left, right, iw + 2);
                     buf.set_line(inner.x.saturating_sub(1), y, &line, inner.width + 2);
                     self.rows.push((y, *vi));
                 }
             }
         }
-        // Footer hint.
-        let hint = if self.hint.is_empty() {
-            "↑↓ select · enter confirm · esc close".to_string()
+        self.draw_footer(buf, inner, t);
+    }
+
+    /// Display rows of the visible items: section headers (hidden while filtering) and gaps.
+    fn display_rows(&self) -> Vec<Disp> {
+        let mut disp = Vec::new();
+        let filtering = !self.filter.text.trim().is_empty();
+        let mut last_section: Option<&str> = None;
+        for (vi, &ii) in self.visible.iter().enumerate() {
+            let it = &self.items[ii];
+            if !filtering && !it.section.is_empty() && last_section != Some(it.section.as_str()) {
+                if last_section.is_some() {
+                    disp.push(Disp::Gap);
+                }
+                disp.push(Disp::Section(it.section.clone()));
+                last_section = Some(it.section.as_str());
+            }
+            disp.push(Disp::Item(vi));
+        }
+        disp
+    }
+
+    /// Left and right spans of the visible item `vi`, faded in by the open progress `t`.
+    fn item_row_spans(
+        &self,
+        vi: usize,
+        t: f32,
+        tick: u64,
+    ) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
+        let it = &self.items[self.visible[vi]];
+        let selected = vi == self.sel;
+        let filtering = !self.filter.text.trim().is_empty();
+        let fade = |c: Color| theme::blend(theme::PANEL, c, t);
+        let fgc = |c: Color| if selected { theme::PANEL } else { fade(c) };
+        let iw = self.rect.width.saturating_sub(4) as usize;
+        let mut left: Vec<Span<'static>> = vec![Span::raw(" ")];
+        if it.spinner {
+            left.push(Span::styled(
+                format!("{} ", theme::spinner(tick)),
+                Style::new().fg(fgc(theme::PRIMARY)),
+            ));
+        } else if let Some((m, c)) = &it.marker {
+            left.push(Span::styled(format!("{m} "), Style::new().fg(fgc(*c))));
+        }
+        let tstyle = Style::new().fg(fgc(it.title_color.unwrap_or(theme::TEXT)));
+        left.push(Span::styled(
+            it.title.clone(),
+            if selected {
+                tstyle.add_modifier(Modifier::BOLD)
+            } else {
+                tstyle
+            },
+        ));
+        // Section headers are hidden while filtering; keep the provider visible for
+        // models (the same model id often exists under several providers).
+        if filtering && self.kind == Kind::Models && !it.section.is_empty() {
+            left.push(Span::styled(
+                format!("  {}", it.section),
+                Style::new().fg(fgc(theme::ACCENT)),
+            ));
+        }
+        if !it.desc.is_empty() {
+            left.push(Span::styled(
+                format!("  {}", it.desc),
+                Style::new().fg(fgc(theme::MUTED)),
+            ));
+        }
+        let mut right: Vec<Span<'static>> = Vec::new();
+        if self.confirm.as_deref() == Some(it.key.as_str()) && selected {
+            let t = if self.confirm_text.is_empty() {
+                "press ctrl+d again to confirm "
+            } else {
+                self.confirm_text.as_str()
+            };
+            right.push(Span::styled(
+                t.to_string(),
+                Style::new().fg(theme::PANEL).add_modifier(Modifier::BOLD),
+            ));
         } else {
-            self.hint.clone()
+            if let Some((b, c)) = &it.badge {
+                right.push(Span::styled(
+                    format!(" {b} "),
+                    Style::new()
+                        .fg(if selected { *c } else { theme::PANEL })
+                        .bg(if selected { theme::PANEL } else { fade(*c) }),
+                ));
+                right.push(Span::raw(" "));
+            }
+            if !it.right.is_empty() {
+                right.push(Span::styled(
+                    it.right.clone(),
+                    Style::new().fg(fgc(theme::MUTED)),
+                ));
+            }
+            right.push(Span::raw(" "));
+        }
+        // Keep the title readable: shrink the right column first (to at most ~half).
+        let lw: usize = text::spans_width(&left);
+        let rw: usize = text::spans_width(&right);
+        let room = (iw + 2).saturating_sub(lw + 1);
+        let cap = room.max((iw + 2) / 2);
+        if rw > cap {
+            right = shrink_right(right, cap);
+        }
+        (left, right)
+    }
+
+    /// Footer: the key hint on the left, the visible/total count on the right.
+    fn draw_footer(&self, buf: &mut Buffer, inner: Rect, t: f32) {
+        let bg = theme::PANEL;
+        let iw = inner.width as usize;
+        let hint = if self.hint.is_empty() {
+            "↑↓ select · enter confirm · esc close"
+        } else {
+            self.hint.as_str()
         };
         let hy = inner.y + inner.height.saturating_sub(1);
         let count = format!("{}/{}", self.visible.len(), self.items.len());
+        let style = Style::new().fg(theme::blend(bg, theme::DIM, t)).bg(bg);
         buf.set_string(
             inner.x,
             hy,
-            text::truncate(&hint, iw.saturating_sub(width(&count) + 2)),
-            Style::new().fg(fade(theme::DIM)).bg(bg),
+            text::truncate(hint, iw.saturating_sub(width(&count) + 2)),
+            style,
         );
         buf.set_string(
             inner.x + inner.width.saturating_sub(width(&count) as u16),
             hy,
             &count,
-            Style::new().fg(fade(theme::DIM)).bg(bg),
+            style,
         );
     }
 
@@ -382,7 +435,7 @@ impl ListDialog {
 
 /// Truncates the last (longest, free-text) span of a right-aligned group so it fits `max`.
 fn shrink_right(mut spans: Vec<Span<'static>>, max: usize) -> Vec<Span<'static>> {
-    let total: usize = spans.iter().map(|s| width(&s.content)).sum();
+    let total: usize = text::spans_width(&spans);
     if total <= max {
         return spans;
     }
@@ -403,15 +456,15 @@ fn shrink_right(mut spans: Vec<Span<'static>>, max: usize) -> Vec<Span<'static>>
 
 /// Draws a centered rounded panel (with open animation `t` 0→1); returns its rect.
 pub fn frame(buf: &mut Buffer, screen: Rect, w: u16, h: u16, title: &str, t: f32) -> Rect {
-    // Slight grow-in: start 2 cols/1 row smaller.
-    let shrink = ((1.0 - t) * 2.0).round() as u16;
+    // Slight grow-in: starts smaller by up to `GROW_IN_SHRINK` columns.
+    let shrink = ((1.0 - t) * GROW_IN_SHRINK).round() as u16;
     let w = w.min(screen.width).saturating_sub(shrink * 2);
     let h = h.min(screen.height).saturating_sub(shrink);
     let x = screen.x + (screen.width.saturating_sub(w)) / 2;
     let y = screen.y + (screen.height.saturating_sub(h)) / 3;
     let r = Rect::new(x, y, w, h);
     // Dim the background a little.
-    dim(buf, screen, 0.35 * t);
+    dim(buf, screen, BACKDROP_DIM * t);
     clear_wide_edges(buf, r);
     let bg = theme::PANEL;
     let bc = theme::blend(bg, theme::BORDER_ACTIVE, t);
@@ -423,19 +476,7 @@ pub fn frame(buf: &mut Buffer, screen: Rect, w: u16, h: u16, title: &str, t: f32
             }
         }
     }
-    let bst = Style::new().fg(bc).bg(bg);
-    for xx in r.x + 1..r.x + r.width.saturating_sub(1) {
-        buf.set_string(xx, r.y, "─", bst);
-        buf.set_string(xx, r.y + r.height - 1, "─", bst);
-    }
-    for yy in r.y + 1..r.y + r.height.saturating_sub(1) {
-        buf.set_string(r.x, yy, "│", bst);
-        buf.set_string(r.x + r.width - 1, yy, "│", bst);
-    }
-    buf.set_string(r.x, r.y, "╭", bst);
-    buf.set_string(r.x + r.width - 1, r.y, "╮", bst);
-    buf.set_string(r.x, r.y + r.height - 1, "╰", bst);
-    buf.set_string(r.x + r.width - 1, r.y + r.height - 1, "╯", bst);
+    draw_rounded_border(buf, r, Style::new().fg(bc).bg(bg));
     let title = format!(" {title} ");
     buf.set_string(
         r.x + 2,
@@ -447,7 +488,7 @@ pub fn frame(buf: &mut Buffer, screen: Rect, w: u16, h: u16, title: &str, t: f32
             .add_modifier(Modifier::BOLD),
     );
     let esc = " esc ";
-    if w > 20 {
+    if w > MIN_W_FOR_ESC_HINT {
         buf.set_string(
             r.x + r.width - 2 - esc.len() as u16,
             r.y,
@@ -456,6 +497,22 @@ pub fn frame(buf: &mut Buffer, screen: Rect, w: u16, h: u16, title: &str, t: f32
         );
     }
     r
+}
+
+/// Draws a one-cell rounded border along the edge of `r`.
+pub fn draw_rounded_border(buf: &mut Buffer, r: Rect, style: Style) {
+    for xx in r.x + 1..r.x + r.width.saturating_sub(1) {
+        buf.set_string(xx, r.y, "─", style);
+        buf.set_string(xx, r.y + r.height - 1, "─", style);
+    }
+    for yy in r.y + 1..r.y + r.height.saturating_sub(1) {
+        buf.set_string(r.x, yy, "│", style);
+        buf.set_string(r.x + r.width - 1, yy, "│", style);
+    }
+    buf.set_string(r.x, r.y, "╭", style);
+    buf.set_string(r.x + r.width - 1, r.y, "╮", style);
+    buf.set_string(r.x, r.y + r.height - 1, "╰", style);
+    buf.set_string(r.x + r.width - 1, r.y + r.height - 1, "╯", style);
 }
 
 /// Before drawing an overlay over `r`: replace wide glyphs (CJK, emoji) that start just left
@@ -476,7 +533,7 @@ pub fn clear_wide_edges(buf: &mut Buffer, r: Rect) {
 }
 
 /// Darkens every cell's colours by `amount` (0..1).
-pub fn dim(buf: &mut Buffer, area: Rect, amount: f32) {
+fn dim(buf: &mut Buffer, area: Rect, amount: f32) {
     if amount <= 0.0 {
         return;
     }
@@ -488,7 +545,7 @@ pub fn dim(buf: &mut Buffer, area: Rect, amount: f32) {
                     Color::Reset => theme::TEXT,
                     f => f,
                 };
-                c.fg = theme::blend(fg, dark, amount * 1.4);
+                c.fg = theme::blend(fg, dark, amount * FG_DIM_FACTOR);
                 if let Color::Rgb(..) = c.bg {
                     c.bg = theme::blend(c.bg, dark, amount);
                 }
@@ -511,7 +568,7 @@ pub struct HelpDialog {
     width: u16,
 }
 
-pub const KEYBINDS: &[(&str, &[(&str, &str)])] = &[
+const KEYBINDS: &[(&str, &[(&str, &str)])] = &[
     (
         "General",
         &[
@@ -611,7 +668,7 @@ impl HelpDialog {
             )));
             for (k, d) in *items {
                 lines.push(Line::from(vec![
-                    Span::styled(format!("  {:<30}", k), theme::fg(theme::PRIMARY)),
+                    Span::styled(format!("  {k:<KEY_COLUMN_W$}"), theme::fg(theme::PRIMARY)),
                     Span::styled(d.to_string(), theme::text()),
                 ]));
             }
@@ -624,7 +681,7 @@ impl HelpDialog {
         for (n, d) in commands {
             lines.push(Line::from(vec![
                 Span::styled(
-                    format!("  {:<30}", format!("/{n}")),
+                    format!("  {:<KEY_COLUMN_W$}", format!("/{n}")),
                     theme::fg(theme::PRIMARY),
                 ),
                 Span::styled(d.clone(), theme::text()),
@@ -644,7 +701,7 @@ impl HelpDialog {
     pub fn text(title: &str, body: &str) -> Self {
         let lines: Vec<Line<'static>> = body
             .lines()
-            .map(|l| Line::from(Span::styled(l.replace('\t', "    "), theme::text())))
+            .map(|l| Line::from(Span::styled(text::expand_tabs(l), theme::text())))
             .collect();
         let widest = body.lines().map(width).max().unwrap_or(0) as u16;
         HelpDialog {
@@ -662,7 +719,7 @@ impl HelpDialog {
     }
 
     pub fn draw(&mut self, buf: &mut Buffer, screen: Rect) {
-        let t = (self.opened.elapsed().as_secs_f32() / 0.12).min(1.0);
+        let t = open_progress(self.opened);
         let w = screen
             .width
             .saturating_sub(4)
@@ -718,6 +775,6 @@ impl Dialog {
             Dialog::Help(d) => d.opened,
             Dialog::Mcp(d) => d.opened,
         };
-        o.elapsed().as_secs_f32() < 0.15
+        o.elapsed() < OPEN_SETTLE
     }
 }

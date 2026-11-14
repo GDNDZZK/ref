@@ -21,8 +21,8 @@ export interface Settings {
 
 export const STORAGE_KEY = 'ref.settings'
 
-export const THEME_CHOICES: readonly ThemeChoice[] = ['system', 'light', 'dark']
-export const LANGUAGE_CHOICES: readonly LanguageChoice[] = ['system', 'en', 'zh-CN']
+const THEME_CHOICES: readonly ThemeChoice[] = ['system', 'light', 'dark']
+const LANGUAGE_CHOICES: readonly LanguageChoice[] = ['system', 'en', 'zh-CN']
 
 export function defaultSettings(): Settings {
   return {
@@ -47,19 +47,20 @@ function record(value: unknown): Record<string, unknown> {
 
 // Every field falls back on its own, so one bad value (or a field a newer version added) does not
 // reset the rest.
-export function parseSettings(raw: string | null): Settings {
+// `corrupt` is set when the stored text is not JSON; the caller reports it and leaves the key alone.
+export function parseSettings(raw: string | null): { settings: Settings; corrupt: boolean } {
   const defaults = defaultSettings()
-  if (raw === null) return defaults
+  if (raw === null) return { settings: defaults, corrupt: false }
 
   let stored: Record<string, unknown>
   try {
     stored = record(JSON.parse(raw))
   } catch {
-    return defaults // not JSON: the key is not ours to repair
+    return { settings: defaults, corrupt: true }
   }
 
   const notifications = record(stored['notifications'])
-  return {
+  const settings: Settings = {
     theme: pick(stored['theme'], THEME_CHOICES, defaults.theme),
     language: pick(stored['language'], LANGUAGE_CHOICES, defaults.language),
     notifications: {
@@ -70,6 +71,7 @@ export function parseSettings(raw: string | null): Settings {
     },
     sidebarOpen: flag(stored['sidebarOpen'], defaults.sidebarOpen),
   }
+  return { settings, corrupt: false }
 }
 
 // The notification kinds this browser asks the backend for (Hello.notify, SetNotify).

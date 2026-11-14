@@ -59,7 +59,7 @@ Item {
 			textFormat: Text.PlainText
 			width: row.numberWidth
 			text: row.number
-			color: row.highlighted ? Theme.accent : Theme.textMuted
+			color: row.highlighted ? Theme.accentText : Theme.textMuted
 			font.family: Theme.monoFamily
 			font.pixelSize: Theme.smallFontSize
 			horizontalAlignment: Text.AlignRight
@@ -98,13 +98,12 @@ Item {
 			spacing: row.textSpacing
 
 			Text {
-				id: labelText
 				textFormat: Text.PlainText
 				visible: !row.typing
 				width: parent.width
 				text: row.isDefault ? qsTr("%1 (default)").arg(row.label) : row.label
 				color: row.custom && row.customText === "" ? Theme.textMuted : Theme.text
-				font.pixelSize: Theme.fontSize - 1
+				font.pixelSize: Theme.secondaryFontSize
 				font.italic: row.custom && row.customText === ""
 				wrapMode: Text.Wrap
 			}
@@ -134,7 +133,7 @@ Item {
 					color: Theme.text
 					selectionColor: Theme.selection
 					selectedTextColor: Theme.text
-					font.pixelSize: Theme.fontSize - 1
+					font.pixelSize: Theme.secondaryFontSize
 					clip: true
 					Accessible.name: qsTr("Your answer")
 

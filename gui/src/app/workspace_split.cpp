@@ -29,16 +29,10 @@ QCoro::Task<> Workspace::enterSplit()
 	if(m_current != nullptr && m_current->isAttached())
 	{
 		const Result<void> demoted = co_await m_current->background();
-		if(!demoted)
-		{
-			toast(u"error"_s, demoted.error());
-		}
+		toastFailure(demoted);
 	}
-	const auto watching = co_await m_backend.client().watchAll(true);
-	if(!watching)
-	{
-		toast(u"error"_s, watching.error());
-	}
+	const Result<void> watching = co_await m_directory.setWatchAll(true);
+	toastFailure(watching);
 	if(!m_split)
 	{
 		co_return; // left again while the requests were out
@@ -68,16 +62,10 @@ QCoro::Task<> Workspace::leaveSplit()
 	if(m_current != nullptr && m_current->isAttached())
 	{
 		const Result<void> resumed = co_await m_current->attach(true);
-		if(!resumed)
-		{
-			toast(u"error"_s, resumed.error());
-		}
+		toastFailure(resumed);
 	}
-	const auto watching = co_await m_backend.client().watchAll(false);
-	if(!watching)
-	{
-		toast(u"error"_s, watching.error());
-	}
+	const Result<void> watching = co_await m_directory.setWatchAll(false);
+	toastFailure(watching);
 	// Sessions can be closed while a detach is out, which changes m_chats.
 	QList<QPointer<ChatSession>> others;
 	for(ChatSession* other : std::as_const(m_chats))
@@ -88,7 +76,8 @@ QCoro::Task<> Workspace::leaveSplit()
 	{
 		if(other && other != m_current && other->isAttached())
 		{
-			static_cast<void>(co_await other->detach());
+			const QString otherId = other->sessionId();
+			logDropped(co_await other->detach(), "detach"_L1, otherId);
 		}
 	}
 }
@@ -150,9 +139,10 @@ void Workspace::syncTiles()
 	}
 	for(ChatSession* other : std::as_const(m_chats))
 	{
-		if(other->isAttached() && !tiles.contains(other) && other != m_current && !m_leaving.contains(other->sessionId()))
+		const bool shouldDetachFromTiles = other->isAttached() && !tiles.contains(other) && other != m_current && !m_leaving.contains(other->sessionId());
+		if(shouldDetachFromTiles)
 		{
-			other->detach();
+			detachUnwaited(other);
 		}
 	}
 	if(!m_focusedTile.isEmpty() && m_tiles.indexOf(m_focusedTile) < 0)
@@ -175,7 +165,7 @@ QCoro::Task<> Workspace::attachTile(ChatSession* tile)
 	m_tileAttaching.remove(id);
 	if(!attached)
 	{
-		toast(u"error"_s, refgui::workspace::toastText(u"%1: %2"_s.arg(nameOf(id), refgui::workspace::oneLine(attached.error()))));
+		toast(refgui::workspace::ToastLevel::Error, refgui::workspace::toastText(u"%1: %2"_s.arg(nameOf(id), refgui::workspace::oneLine(attached.error()))));
 	}
 }
 
@@ -211,7 +201,8 @@ QCoro::Task<> Workspace::zoomTask(QString sessionId)
 {
 	if(ChatSession* previous = session(m_zoomed); previous != nullptr && previous->isAttached())
 	{
-		static_cast<void>(co_await previous->background());
+		const QString previousId = previous->sessionId();
+		logDropped(co_await previous->background(), "background"_L1, previousId);
 	}
 	m_zoomed = sessionId;
 	setFocusedTile(sessionId);
@@ -223,10 +214,7 @@ QCoro::Task<> Workspace::zoomTask(QString sessionId)
 		co_return; // closed meanwhile
 	}
 	const Result<void> attached = co_await zoomed->attach(true);
-	if(!attached)
-	{
-		toast(u"error"_s, attached.error());
-	}
+	toastFailure(attached);
 }
 
 void Workspace::unzoom()
@@ -250,7 +238,7 @@ QCoro::Task<> Workspace::unzoomTask()
 		// Until the answer, the backend counts the session as attached in the foreground, and an update of
 		// its session list would take the tile away.
 		m_unzooming.insert(id);
-		static_cast<void>(co_await tile->background());
+		logDropped(co_await tile->background(), "background"_L1, id);
 		m_unzooming.remove(id);
 	}
 }

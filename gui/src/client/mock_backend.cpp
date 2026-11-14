@@ -2,9 +2,12 @@
 
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLoggingCategory>
 
 using namespace Qt::StringLiterals;
 using namespace std::chrono_literals;
+
+Q_LOGGING_CATEGORY(lcMockBackend, "refgui.client.mock")
 
 namespace refgui::client
 {
@@ -35,15 +38,8 @@ QCoro::Task<std::expected<std::unique_ptr<MockBackend>, QString>> MockBackend::s
 
 	// Polled: neither the process starting nor its exit is announced by anything that
 	// still fires when it happens before we start waiting.
-	std::chrono::milliseconds waited = 0ms;
-	const auto announcementPending = [&] {
-		return !process.canReadLine() && process.state() != QProcess::NotRunning && waited < AnnounceTimeout && !stop.stopped();
-	};
-	while(announcementPending())
-	{
-		co_await stop.sleep(AnnouncePoll);
-		waited += AnnouncePoll;
-	}
+	const auto announcedOrExited = [&] { return process.canReadLine() || process.state() == QProcess::NotRunning; };
+	co_await stop.pollUntil(AnnounceTimeout, AnnouncePoll, announcedOrExited);
 	if(stop.stopped())
 	{
 		co_return failure(u"stopped"_s);
@@ -56,7 +52,7 @@ QCoro::Task<std::expected<std::unique_ptr<MockBackend>, QString>> MockBackend::s
 	if(line.isEmpty())
 	{
 		const bool exited = process.state() == QProcess::NotRunning;
-		co_return failure(exited ? u"exited before announcing its port"_s : u"no port announced within 10s"_s);
+		co_return failure(exited ? u"exited before announcing its port"_s : u"no port announced within %1s"_s.arg(std::chrono::duration_cast<std::chrono::seconds>(AnnounceTimeout).count()));
 	}
 	const std::expected<Endpoint, QString> endpoint = parseAnnouncement(line);
 	if(!endpoint)
@@ -76,7 +72,7 @@ std::expected<Endpoint, QString> MockBackend::parseAnnouncement(const QByteArray
 	{
 		return std::unexpected(u"unexpected first line %1"_s.arg(QString::fromUtf8(line.trimmed())));
 	}
-	return Endpoint{.url = QUrl(u"ws://127.0.0.1:%1/"_s.arg(port)), .token = token};
+	return Endpoint{.url = QUrl(u"ws://%1:%2/"_s.arg(LoopbackHost).arg(port)), .token = token};
 }
 
 MockBackend::~MockBackend()
@@ -95,7 +91,10 @@ MockBackend::~MockBackend()
 	if(!wait(KillTimeout))
 	{
 		m_process.kill();
-		wait(KillTimeout);
+		if(!wait(KillTimeout))
+		{
+			qCWarning(lcMockBackend) << "the mock backend did not end after kill; pid" << m_process.processId();
+		}
 	}
 }
 

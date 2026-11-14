@@ -64,7 +64,7 @@ const shown = computed(() => (showAll.value ? rows.value : rows.value.slice(0, P
 
 .hunk {
   background: var(--surface);
-  color: var(--info);
+  color: var(--info-text);
 }
 
 .file {
@@ -73,7 +73,7 @@ const shown = computed(() => (showAll.value ? rows.value : rows.value.slice(0, P
 
 .more {
   margin-top: 4px;
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: var(--small-font-size);
 }
 </style>

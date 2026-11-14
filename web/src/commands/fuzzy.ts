@@ -2,6 +2,8 @@
 
 const CONTIGUOUS_BONUS = 3
 const WORD_START_BONUS = 2
+const NO_PREVIOUS_MATCH = -2 // one below -1, so that no position counts as right after it
+const LENGTH_PENALTY = 0.01 // per character of the text
 
 // Higher is better; undefined when `text` does not contain the query's letters in order.
 export function fuzzyScore(query: string, text: string): number | undefined {
@@ -9,7 +11,7 @@ export function fuzzyScore(query: string, text: string): number | undefined {
   const haystack = text.toLowerCase()
   let score = 0
   let from = 0
-  let previous = -2
+  let previous = NO_PREVIOUS_MATCH
 
   for (const letter of wanted) {
     const at = haystack.indexOf(letter, from)
@@ -21,7 +23,7 @@ export function fuzzyScore(query: string, text: string): number | undefined {
     previous = at
     from = at + 1
   }
-  return score - haystack.length * 0.01 // among equals the shorter text wins
+  return score - haystack.length * LENGTH_PENALTY // among equals the shorter text wins
 }
 
 // The items that match the query, best first. Equal scores keep their order.

@@ -3,27 +3,24 @@ import { describe, expect, it } from 'vitest'
 import { reactive } from 'vue'
 import { createAppI18n } from '../i18n/index.ts'
 import { QuestionForm } from '../model/questionForm.ts'
+import { question as baseQuestion, questionRequest } from '../model/testMessages.ts'
 import type { Question } from '../proto/generated'
 import ToolQuestion from './ToolQuestion.vue'
 
 function question(overrides: Partial<Question> = {}): Question {
-  return {
+  return baseQuestion({
     question: 'How should the loop be fixed?',
     header: 'Loop bound',
-    multiple: false,
-    custom: true,
     options: [
       { label: 'Range', description: 'Use 0..len', default: true },
       { label: 'Iterator', description: 'Use iter()', default: false },
     ],
     ...overrides,
-  }
+  })
 }
 
 function mountCard(...questions: Question[]) {
-  const form = reactive(
-    new QuestionForm({ session_id: 's', message_id: 'm', call_id: 'c', questions, time: 0 }),
-  ) as QuestionForm
+  const form = reactive(new QuestionForm(questionRequest(questions))) as QuestionForm
   const wrapper = mount(ToolQuestion, {
     props: { form, sending: false },
     global: { plugins: [createAppI18n(['en'])] },

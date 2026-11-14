@@ -51,7 +51,7 @@ Item {
 		active: dialogId !== "" && host.visible
 		enabled: !retired
 		opacity: retired ? 0 : 1
-		sourceComponent: host.componentFor(dialogId)
+		sourceComponent: dialogId === "" ? null : host.componentFor(dialogId) // an id without a component is a mistake and logs
 
 		Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 
@@ -65,23 +65,28 @@ Item {
 	Slot { id: slotB }
 
 	function componentFor(id) {
-		return {
-			"palette": paletteDialog,
-			"settings": settings,
-			"sessions": sessions,
-			"models": models,
-			"agents": agents,
-			"variants": variants,
-			"help": help,
-			"mcp": mcp,
-			"peers": peers,
-			"export": exportDialog,
-			"cd": cd,
-			"new-in": newIn,
-			"close": closeDialog,
-			"rename": rename,
-			"delete-history": deleteHistory
-		}[id] ?? null
+		const components = {
+			[DialogId.palette]: paletteDialog,
+			[DialogId.settings]: settings,
+			[DialogId.sessions]: sessions,
+			[DialogId.models]: models,
+			[DialogId.agents]: agents,
+			[DialogId.variants]: variants,
+			[DialogId.help]: help,
+			[DialogId.mcp]: mcp,
+			[DialogId.peers]: peers,
+			[DialogId.exportSession]: exportDialog,
+			[DialogId.cd]: cd,
+			[DialogId.newIn]: newIn,
+			[DialogId.closeSession]: closeDialog,
+			[DialogId.rename]: rename,
+			[DialogId.deleteHistory]: deleteHistory
+		}
+		if (!Fields.has(components, id)) {
+			console.error("No dialog for id", id)
+			return null
+		}
+		return components[id]
 	}
 
 	Component { id: paletteDialog; CommandPalette {} }

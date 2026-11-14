@@ -27,19 +27,17 @@ using refgui::session::SessionController;
 namespace
 {
 
+constexpr int SettleMs = 100;       // time for the messages in flight to be handled
+constexpr int SearchSettleMs = 200; // well past ComposerModel::FileSearchDelay and the answer
+
 QJsonObject infoJson()
 {
-	return {{u"id"_s, u"ses_1"_s},
-	        {u"name"_s, u"one"_s},
-	        {u"title"_s, u"A title"_s},
-	        {u"agent"_s, u"plan"_s},
-	        {u"model"_s, QJsonObject{{u"provider"_s, u"p"_s}, {u"model"_s, u"m"_s}, {u"variant"_s, u"high"_s}}},
-	        {u"cwd"_s, u"/work"_s},
-	        {u"created_at"_s, 1},
-	        {u"updated_at"_s, 1},
-	        {u"status"_s, QJsonObject{{u"state"_s, u"idle"_s}}},
-	        {u"attached"_s, 1},
-	        {u"live"_s, true}};
+	return sessionInfoJson(u"ses_1"_s,
+	                       {.name = u"one"_s,
+	                        .title = u"A title"_s,
+	                        .agent = u"plan"_s,
+	                        .model = QJsonObject{{u"provider"_s, u"p"_s}, {u"model"_s, u"m"_s}, {u"variant"_s, u"high"_s}},
+	                        .attached = 1});
 }
 
 QJsonObject configJson()
@@ -71,9 +69,11 @@ QJsonObject queuedMessage(const QString& id, const QString& text)
 struct Fixture
 {
 	Fixture()
-		: backend(Backend::Source(Backend::Mode::Remote{{fake.url(), u"token"_s}}), u"/work"_s)
+		: connection(Backend::Source(Backend::Mode::Remote{{fake.url(), u"token"_s}}), u"/work"_s)
+		, backend(connection.backend())
+		, config(connection)
 		, controller(backend)
-		, composer(backend, controller, history)
+		, composer(config, controller, history)
 	{
 		fake.onRequest = [this](const QJsonObject& request) { answer(request); };
 		backend.start();
@@ -126,6 +126,10 @@ struct Fixture
 				fake.fail(request, shellError);
 			}
 		}
+		else if(op == u"list_files"_s && !filesError.isEmpty())
+		{
+			fake.fail(request, filesError);
+		}
 		else if(op == u"list_files"_s)
 		{
 			fake.respond(request, {{u"files"_s, QJsonArray::fromStringList(files)}});
@@ -172,11 +176,14 @@ struct Fixture
 	}
 
 	FakeBackend fake;
-	Backend backend;
+	workspace::Connection connection;
+	Backend& backend;
+	workspace::BackendConfig config;
 	SessionController controller;
 	compose::PromptHistory history;
 	ComposerModel composer;
 	QStringList files;
+	QString filesError; // when set, list_files is refused with it
 	QString promptError;
 	QString shellError;
 	std::optional<QString> expansion;
@@ -191,6 +198,7 @@ class TestComposerModel : public QObject
 
 private slots:
 	void labelsFollowTheSessionAndTheConfiguration();
+	void agentMissingFromTheConfigurationHasNoIndex();
 	void sendsThePromptAndEmptiesTheDraft();
 	void failedPromptComesBack();
 	void bangStartsShellMode();
@@ -199,6 +207,7 @@ private slots:
 	void historyWalksBackAndForth();
 	void historyKeepsShellLines();
 	void mentionListFollowsTheQueryAndDropsStaleAnswers();
+	void failedFileSearchEmptiesTheList();
 	void acceptingAFileReplacesTheMention();
 	void escapeClosesTheListFirst();
 	void doubleEscapeInterrupts();
@@ -225,6 +234,19 @@ void TestComposerModel::labelsFollowTheSessionAndTheConfiguration()
 	QCOMPARE(f.composer.variant(), u"high"_s);
 	QVERIFY(f.composer.variantAvailable());
 	QVERIFY(f.composer.isReady());
+}
+
+void TestComposerModel::agentMissingFromTheConfigurationHasNoIndex()
+{
+	Fixture f;
+	QJsonObject info = infoJson();
+	info.insert(u"agent"_s, u"ghost"_s);
+
+	f.fake.send({{u"kind"_s, u"event"_s}, {u"session_id"_s, u"ses_1"_s}, {u"event"_s, QJsonObject{{u"type"_s, u"info"_s}, {u"info"_s, info}}}});
+
+	QTRY_COMPARE(f.composer.agentName(), u"ghost"_s);
+	QCOMPARE(f.composer.agentIndex(), ComposerModel::NoAgentIndex);
+	QCOMPARE(f.composer.agentColor(), QString());
 }
 
 void TestComposerModel::sendsThePromptAndEmptiesTheDraft()
@@ -358,8 +380,24 @@ void TestComposerModel::mentionListFollowsTheQueryAndDropsStaleAnswers()
 	f.type(u"look at"_s);
 	QCOMPARE(f.composer.completionKind(), u"none"_s);
 	QCOMPARE(f.composer.files()->rowCount(), 0);
-	QTest::qWait(200);
+	QTest::qWait(SearchSettleMs);
 	QCOMPARE(f.requestsOf(u"list_files"_s).size(), 1);
+}
+
+void TestComposerModel::failedFileSearchEmptiesTheList()
+{
+	Fixture f;
+	f.files = {u"src/main.rs"_s};
+	f.type(u"look at @sr"_s);
+	QTRY_COMPARE(f.composer.files()->rowCount(), 1);
+
+	f.filesError = u"no such directory"_s;
+	QTest::ignoreMessage(QtWarningMsg, "file search failed: \"no such directory\"");
+	f.type(u"look at @src"_s);
+
+	QTRY_COMPARE(f.requestsOf(u"list_files"_s).size(), 2);
+	QTRY_COMPARE(f.composer.files()->rowCount(), 0);
+	QCOMPARE(f.composer.completionKind(), u"file"_s);
 }
 
 void TestComposerModel::acceptingAFileReplacesTheMention()
@@ -586,7 +624,7 @@ void TestComposerModel::answersAfterTheModelIsGoneAreIgnored()
 		f.answer(request);
 	};
 	f.queue({queuedMessage(u"q1"_s, u"first"_s)});
-	auto gone = std::make_unique<ComposerModel>(f.backend, f.controller, f.history);
+	auto gone = std::make_unique<ComposerModel>(f.config, f.controller, f.history);
 	QTRY_COMPARE(gone->queue()->rowCount(), 1);
 	gone->edit(u"look at @sr"_s, 11);
 	QTRY_COMPARE(pending.size(), 1); // the file lookup waits a moment before it asks
@@ -612,7 +650,7 @@ void TestComposerModel::answersAfterTheModelIsGoneAreIgnored()
 		f.fake.respond(request, answer);
 	}
 
-	QTest::qWait(100); // the answers are handled
+	QTest::qWait(SettleMs); // the answers are handled
 	QVERIFY(f.fake.socket()->isValid());
 }
 

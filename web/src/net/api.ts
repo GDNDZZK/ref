@@ -23,35 +23,21 @@ export class RefApi {
   }
 
   async getConfig(): Promise<ServerConfigInfo> {
-    const result = (await this.connection.request({ op: 'get_config' })) as unknown as {
-      config: ServerConfigInfo
-    }
-    return result.config
+    return this.call({ op: 'get_config' }, 'config')
   }
 
   async listSessions(): Promise<SessionInfo[]> {
-    const result = (await this.connection.request({ op: 'list_sessions' })) as unknown as {
-      sessions: SessionInfo[]
-    }
-    return result.sessions
+    return this.call({ op: 'list_sessions' }, 'sessions')
   }
 
   // Persisted and live sessions, newest first.
   async listHistory(cwd?: string, limit?: number): Promise<SessionInfo[]> {
-    const result = (await this.connection.request({
-      op: 'list_history',
-      cwd: cwd ?? null,
-      limit: limit ?? null,
-    })) as unknown as { sessions: SessionInfo[] }
-    return result.sessions
+    return this.call({ op: 'list_history', cwd: cwd ?? null, limit: limit ?? null }, 'sessions')
   }
 
   // Events of every live session follow until `enabled: false`. Returns the live sessions.
   async watchAll(enabled: boolean): Promise<SessionInfo[]> {
-    const result = (await this.connection.request({ op: 'watch_all', enabled })) as unknown as {
-      sessions: SessionInfo[]
-    }
-    return result.sessions
+    return this.call({ op: 'watch_all', enabled }, 'sessions')
   }
 
   async rename(sessionId: string, name: string): Promise<SessionInfo> {
@@ -91,38 +77,21 @@ export class RefApi {
 
   // Writes the transcript on the backend's machine. Returns the absolute path written.
   async exportTranscript(sessionId: string, path: string): Promise<string> {
-    const result = (await this.connection.request({
-      op: 'export',
-      session_id: sessionId,
-      path,
-    })) as unknown as {
-      path: string
-    }
-    return result.path
+    return this.call({ op: 'export', session_id: sessionId, path }, 'path')
   }
 
   // `command`: "peers" | "peers-name" | "peers-inbox" | "peers-outbox". Returns text to show.
   async peerCommand(sessionId: string, command: string, args = ''): Promise<string> {
-    const result = (await this.connection.request({
-      op: 'peer_command',
-      session_id: sessionId,
-      command,
-      args,
-    })) as unknown as { text: string }
-    return result.text
+    return this.call({ op: 'peer_command', session_id: sessionId, command, args }, 'text')
   }
 
   async mcpStatus(cwd?: string): Promise<McpServerStatus[]> {
-    const result = (await this.connection.request({ op: 'mcp_status', cwd: cwd ?? null })) as unknown as {
-      servers: McpServerStatus[]
-    }
-    return result.servers
+    return this.call({ op: 'mcp_status', cwd: cwd ?? null }, 'servers')
   }
 
   // Sub-directory names of `path`, sorted. `path` comes back absolute and normalized.
   async listDirs(path: string): Promise<{ path: string; dirs: string[] }> {
-    const result = await this.connection.request({ op: 'list_dirs', path })
-    return result as unknown as { path: string; dirs: string[] }
+    return this.callWhole({ op: 'list_dirs', path })
   }
 
   async shutdown(): Promise<void> {
@@ -130,8 +99,17 @@ export class RefApi {
   }
 
   private async sessionResult(request: Request): Promise<SessionInfo> {
-    const result = (await this.connection.request(request)) as unknown as { session: SessionInfo }
-    return result.session
+    return this.call(request, 'session')
+  }
+
+  // The result is an object; `key` picks the field the caller wants.
+  private async call<T>(request: Request, key: string): Promise<T> {
+    const result = await this.callWhole<Record<string, T>>(request)
+    return result[key]!
+  }
+
+  private async callWhole<T>(request: Request): Promise<T> {
+    return (await this.connection.request(request)) as unknown as T
   }
 
   // Does not attach.
@@ -139,24 +117,21 @@ export class RefApi {
     cwd: string,
     options: { agent?: string; model?: ModelRef; name?: string } = {},
   ): Promise<SessionInfo> {
-    const result = (await this.connection.request({
-      op: 'create_session',
-      cwd,
-      agent: options.agent ?? null,
-      model: options.model ?? null,
-      name: options.name ?? null,
-    })) as unknown as { session: SessionInfo }
-    return result.session
+    return this.call(
+      {
+        op: 'create_session',
+        cwd,
+        agent: options.agent ?? null,
+        model: options.model ?? null,
+        name: options.name ?? null,
+      },
+      'session',
+    )
   }
 
   // Events for the session follow the returned snapshot.
   async attach(sessionId: string, foreground: boolean): Promise<SessionSnapshot> {
-    const result = (await this.connection.request({
-      op: 'attach',
-      session_id: sessionId,
-      foreground,
-    })) as unknown as { snapshot: SessionSnapshot }
-    return result.snapshot
+    return this.call({ op: 'attach', session_id: sessionId, foreground }, 'snapshot')
   }
 
   async detach(sessionId: string): Promise<void> {
@@ -169,33 +144,17 @@ export class RefApi {
     before: string,
     limit?: number,
   ): Promise<{ messages: Message[]; more_before: boolean }> {
-    const result = await this.connection.request({
-      op: 'messages',
-      session_id: sessionId,
-      before,
-      limit: limit ?? null,
-    })
-    return result as unknown as { messages: Message[]; more_before: boolean }
+    return this.callWhole({ op: 'messages', session_id: sessionId, before, limit: limit ?? null })
   }
 
   // The bytes of an image the messages only carry as a stub.
   async getImage(sessionId: string, imageId: string): Promise<{ mime: string; data: string }> {
-    const result = (await this.connection.request({
-      op: 'get_image',
-      session_id: sessionId,
-      image_id: imageId,
-    })) as unknown as { image: { mime: string; data: string } }
-    return result.image
+    return this.call({ op: 'get_image', session_id: sessionId, image_id: imageId }, 'image')
   }
 
   // Removes the message and all after it (the last human prompt without `messageId`).
   async undo(sessionId: string, messageId?: string): Promise<{ text: string; images: NamedImage[] }> {
-    const result = await this.connection.request({
-      op: 'undo',
-      session_id: sessionId,
-      message_id: messageId ?? null,
-    })
-    return result as unknown as { text: string; images: NamedImage[] }
+    return this.callWhole({ op: 'undo', session_id: sessionId, message_id: messageId ?? null })
   }
 
   // `queued`: the session was busy, the message waits for the next safe point.
@@ -204,8 +163,7 @@ export class RefApi {
     text: string,
     images: ImageData[] = [],
   ): Promise<{ queued: boolean; message_id: string }> {
-    const result = await this.connection.request({ op: 'prompt', session_id: sessionId, text, images })
-    return result as unknown as { queued: boolean; message_id: string }
+    return this.callWhole({ op: 'prompt', session_id: sessionId, text, images })
   }
 
   async abort(sessionId: string): Promise<void> {
@@ -232,12 +190,7 @@ export class RefApi {
     sessionId: string,
     messageId: string,
   ): Promise<{ removed: boolean; text: string; images: NamedImage[] }> {
-    const result = await this.connection.request({
-      op: 'remove_queued',
-      session_id: sessionId,
-      message_id: messageId,
-    })
-    return result as unknown as { removed: boolean; text: string; images: NamedImage[] }
+    return this.callWhole({ op: 'remove_queued', session_id: sessionId, message_id: messageId })
   }
 
   // The output is added to the conversation as events.
@@ -247,17 +200,11 @@ export class RefApi {
 
   // Relative paths; directories end with `/`.
   async listFiles(cwd: string, query: string, limit: number): Promise<string[]> {
-    const result = (await this.connection.request({ op: 'list_files', cwd, query, limit })) as unknown as {
-      files: string[]
-    }
-    return result.files
+    return this.call({ op: 'list_files', cwd, query, limit }, 'files')
   }
 
   async expandCommand(name: string, args: string, cwd: string): Promise<string> {
-    const result = (await this.connection.request({ op: 'expand_command', name, args, cwd })) as unknown as {
-      text: string
-    }
-    return result.text
+    return this.call({ op: 'expand_command', name, args, cwd }, 'text')
   }
 
   // Replaces the kinds this connection wants; the handshake carries the first choice.

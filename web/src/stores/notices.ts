@@ -4,26 +4,22 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { motion } from '../theme/generated/motion.ts'
 import { metrics } from '../theme/generated/theme.ts'
-
-export type NoticeLevel = 'info' | 'warn' | 'error'
+import { describeError } from '../errorMessage.ts'
+import type { ToastLevel } from '../proto/generated'
 
 export interface Notice {
   id: number
-  level: NoticeLevel
+  level: ToastLevel
   text: string
   repeats: number // grows when the same message arrives again while it shows
 }
 
-const SHOWN_FOR_MS: Record<NoticeLevel, number> = {
+const SHOWN_FOR_MS: Record<ToastLevel, number> = {
   info: motion.toastInfoMs,
   warn: motion.toastWarnMs,
   error: motion.toastErrorMs,
 }
 const MAX_SHOWN = metrics.toastMax
-
-export function describeError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
 
 interface Timer {
   handle: ReturnType<typeof setTimeout>
@@ -61,7 +57,7 @@ export const useNoticesStore = defineStore('notices', () => {
   }
 
   // The same message again restarts the one on screen instead of stacking.
-  function push(level: NoticeLevel, text: string): void {
+  function push(level: ToastLevel, text: string): void {
     const same = notices.value.find((notice) => notice.level === level && notice.text === text)
     if (same) {
       clearTimeout(timers.get(same.id)?.handle)

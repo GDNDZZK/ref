@@ -76,7 +76,8 @@ ListView {
 	property bool wheeling: false // chasing wheelTarget; never while following
 	property real wheelTarget: 0
 	readonly property int wheelNotch: 120 // angleDelta of one notch, per QWheelEvent
-	readonly property real wheelStep: Application.styleHints.wheelScrollLines * 24 // px per notch, as in Flickable
+	readonly property int pixelsPerWheelLine: 24
+	readonly property real wheelStep: Application.styleHints.wheelScrollLines * pixelsPerWheelLine // px per notch, as in Flickable
 
 	// The follow chase below does the gliding.
 	function glideToEnd() {
@@ -147,10 +148,13 @@ ListView {
 	boundsBehavior: Flickable.StopAtBounds
 	acceptedButtons: Qt.NoButton // mouse drags select text; wheel, touchpad and touch still scroll
 
-	// Loads earlier messages when the top is near. A failed load waits for a click.
+	// Whether earlier messages could be asked for now. A failed load waits for a click.
+	readonly property bool canLoadOlder: moreBefore && count > 0 && !loadingOlder && olderError === ""
+
+	// Loads earlier messages when the top is near.
 	function loadOlderIfNear() {
 		const nearTop = contentY - originY < olderTriggerDistance
-		if (moreBefore && count > 0 && !loadingOlder && olderError === "" && nearTop && !following)
+		if (canLoadOlder && nearTop && !following)
 			loadOlderRequested()
 	}
 
@@ -195,11 +199,10 @@ ListView {
 		}
 
 		// Basic's handle takes the system palette; this one follows Theme.
-		contentItem: Rectangle {
+		contentItem: ScrollHandle {
 			id: handle
-			implicitWidth: 6
-			radius: width / 2
-			color: scrollBar.pressed ? Theme.scrollHandlePressed : Theme.scrollHandle
+			implicitWidth: thickness
+			pressed: scrollBar.pressed
 			opacity: 0
 
 			Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }

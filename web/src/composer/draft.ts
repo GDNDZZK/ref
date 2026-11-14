@@ -25,6 +25,10 @@ export interface Submission {
 
 const IMAGE_TOKEN = /\[Image (\d+)\]/g
 const PARAGRAPH_BREAK = '\n\n'
+const IMAGE_PLACEHOLDER = '\u0000' // brackets a number while tokens are renumbered
+
+const imageToken = (number: number) => `[Image ${number}]`
+const placeholder = (index: number) => `${IMAGE_PLACEHOLDER}${index}${IMAGE_PLACEHOLDER}`
 
 export function emptyDraft(): Draft {
   return { text: '', shell: false, attachments: [], imageSeq: 0 }
@@ -43,7 +47,7 @@ export function attachImage(
   cursor: number = draft.text.length,
 ): number {
   draft.imageSeq++
-  const token = `[Image ${draft.imageSeq}]`
+  const token = imageToken(draft.imageSeq)
   draft.attachments.push({ token, image, name })
 
   const before = draft.text.slice(0, cursor)
@@ -76,12 +80,12 @@ export function restoreInto(draft: Draft, text: string, images: readonly NamedIm
   // Two passes through placeholders, so a renumbered token is never renumbered again.
   let restored = text
   bound.forEach((number, index) => {
-    restored = restored.replaceAll(`[Image ${number}]`, `\u0000${index}\u0000`)
+    restored = restored.replaceAll(imageToken(number), placeholder(index))
   })
   bound.forEach((_, index) => {
     draft.imageSeq++
-    const token = `[Image ${draft.imageSeq}]`
-    restored = restored.replaceAll(`\u0000${index}\u0000`, token)
+    const token = imageToken(draft.imageSeq)
+    restored = restored.replaceAll(placeholder(index), token)
     draft.attachments.push(attachmentOf(token, images[index]!))
   })
 

@@ -12,9 +12,11 @@ Item {
 	property alias errorText: field.errorText
 	property var names: []
 	property string listedPath: ""
+	property string listError: "" // why the backend could not list the directory, shown in place of the names
 	property int request: 0
 	readonly property int visibleRows: 6
 	readonly property int rowHeight: 32
+	readonly property int debounceMs: 150 // wait for a pause in typing before listing the directory
 	readonly property bool completing: names.length > 0
 
 	signal accepted()
@@ -33,6 +35,7 @@ Item {
 			if (mine !== request)
 				return
 			listedPath = ok ? listing.path : ""
+			listError = ok ? "" : listing
 			names = ok ? listing.dirs.filter(name => name.toLowerCase().startsWith(prefix)) : []
 			view.currentIndex = names.length > 0 ? 0 : -1
 		})
@@ -45,13 +48,14 @@ Item {
 		refresh()
 	}
 
-	implicitHeight: field.implicitHeight + (completing ? 8 + Math.min(names.length, visibleRows) * rowHeight : 0)
+	implicitHeight: field.implicitHeight + (completing ? 8 + Math.min(names.length, visibleRows) * rowHeight
+		: listError !== "" ? 8 + errorLine.implicitHeight : 0)
 
 	Behavior on implicitHeight { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 
 	Timer {
 		id: debounce
-		interval: 150
+		interval: path.debounceMs
 		onTriggered: path.refresh()
 	}
 	Component.onCompleted: refresh()
@@ -69,6 +73,18 @@ Item {
 		}
 		onDownPressed: if (path.completing) view.currentIndex = Math.min(view.currentIndex + 1, path.names.length - 1)
 		onUpPressed: if (path.completing) view.currentIndex = Math.max(view.currentIndex - 1, 0)
+	}
+
+	Text {
+		id: errorLine
+		textFormat: Text.PlainText
+		y: field.height + 8
+		width: parent.width
+		text: path.listError
+		color: Theme.dangerText
+		font.pixelSize: Theme.smallFontSize
+		wrapMode: Text.Wrap
+		visible: path.listError !== ""
 	}
 
 	ListView {
@@ -112,7 +128,7 @@ Item {
 				anchors { left: parent.left; leftMargin: 38; right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
 				text: row.modelData
 				color: Theme.text
-				font.pixelSize: Theme.fontSize - 1
+				font.pixelSize: Theme.secondaryFontSize
 				elide: Text.ElideRight
 			}
 			HoverHandler {
