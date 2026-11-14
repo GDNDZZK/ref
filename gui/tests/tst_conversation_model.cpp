@@ -2,6 +2,9 @@
 #include "session/conversation_model.h"
 #include "session_test_data.h"
 
+#include "proto/parse.h"
+#include <QFile>
+#include <QJsonDocument>
 #include <QAbstractItemModelTester>
 #include <QSignalSpy>
 #include <QTest>
@@ -62,6 +65,8 @@ private slots:
 	void givesMessageTexts();
 	void summarisesWhatToolsAskOfTheUser();
 	void showsMarkdownWithoutImagesOrTags();
+	void exposesEditWarningsFromFixture();
+	void attachesAndClearsPermissionPreview();
 };
 
 void TestConversationModel::splitsAssistantTextIntoBlocks()
@@ -615,6 +620,49 @@ void TestConversationModel::givesMessageTexts()
 	QCOMPARE(model.lastReplyId(), u"a1"_s);
 	QCOMPARE(model.firstMessageId(), u"u1"_s);
 	QVERIFY(!model.messageText(u"nope"_s));
+}
+void TestConversationModel::exposesEditWarningsFromFixture()
+{
+	const QString path = QStringLiteral(REF_FIXTURES_DIR) + u"/part/tool_done_edit_warnings.json"_s;
+	QFile file(path);
+	QVERIFY2(file.open(QIODevice::ReadOnly), qPrintable(path));
+	const QJsonObject partJson = QJsonDocument::fromJson(file.readAll()).object();
+	const auto part = refgui::proto::parsePart(partJson);
+	QVERIFY(part);
+
+	ConversationModel model;
+	QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
+	model.setMessage(assistant(u"a1"_s, {*part}));
+	QCOMPARE(roleOf(model, 0, ConversationModel::WarningsRole).toStringList(),
+	         (QStringList{u"Recovered: file changed since read; line numbers remapped."_s}));
+}
+
+void TestConversationModel::attachesAndClearsPermissionPreview()
+{
+	ConversationModel model;
+	QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
+	const refgui::proto::ToolPart call{.callId = u"c1"_s, .name = u"edit"_s, .state = ToolState::AwaitingPermission};
+	model.setMessage(assistant(u"a1"_s, {call}, false));
+	QVERIFY(roleOf(model, 0, ConversationModel::PermissionPreviewRole).toMap().isEmpty());
+	const refgui::proto::PermissionRequest request{
+		.sessionId = u"s1"_s,
+		.messageId = u"a1"_s,
+		.callId = u"c1"_s,
+		.tool = u"edit"_s,
+		.purpose = {},
+		.input = {},
+		.time = 1,
+		.preview = refgui::proto::EditPreview{.diff = u"+a\n-b\n"_s, .added = 1, .removed = 1, .truncated = true},
+	};
+	model.setPermission(request);
+	const QVariantMap preview = roleOf(model, 0, ConversationModel::PermissionPreviewRole).toMap();
+	QCOMPARE(preview.value(u"diff"_s).toString(), u"+a\n-b\n"_s);
+	QCOMPARE(preview.value(u"added"_s).toUInt(), 1U);
+	QCOMPARE(preview.value(u"removed"_s).toUInt(), 1U);
+	QVERIFY(preview.value(u"truncated"_s).toBool());
+
+	model.resolvePermission(u"c1"_s);
+	QVERIFY(roleOf(model, 0, ConversationModel::PermissionPreviewRole).toMap().isEmpty());
 }
 
 QTEST_GUILESS_MAIN(TestConversationModel)

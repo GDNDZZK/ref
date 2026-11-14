@@ -17,6 +17,8 @@ namespace
 {
 // What the backend says to an answer for a question that is no longer pending.
 const QString NoPendingQuestion = u"No pending question with that id."_s;
+// What the backend says to an answer for a permission request that is no longer pending.
+const QString NoPendingPermission = u"No pending permission request with that id."_s;
 } // namespace
 
 ChatSession::ChatSession(Backend& backend, const refgui::workspace::BackendConfig& config, QString sessionId, QObject* parent)
@@ -260,7 +262,7 @@ QCoro::Task<> ChatSession::fetchOlder()
 	{
 		co_return;
 	}
-	const QString error = result ? QString() : result.error();
+	const QString error = result ? QString() : result.error().message;
 	if(error != m_olderError)
 	{
 		m_olderError = error;
@@ -515,8 +517,20 @@ QCoro::Task<> ChatSession::sendAbort()
 
 QCoro::Task<> ChatSession::sendPermission(QString callId, bool allow, bool always)
 {
-	const auto mayRetry = [this, callId] { m_repliedCalls.remove(callId); };
-	co_await awaitAndReport(m_controller.permissionReply(callId, allow, always), mayRetry);
+	const QPointer<ChatSession> self(this); // the session can be gone when the answer arrives
+	const auto result = co_await m_controller.permissionReply(callId, allow, always);
+	if(!self || result)
+	{
+		co_return;
+	}
+	// remove with protocol 5
+	const bool noPending = result.error().code == "no_pending_permission"_L1 || result.error().message == NoPendingPermission;
+	if(noPending) // answered elsewhere
+	{
+		co_return;
+	}
+	m_repliedCalls.remove(callId);
+	setFailure(result.error().message);
 }
 
 QCoro::Task<> ChatSession::sendQuestionReply(QString callId, std::optional<QList<QStringList>> answers)
@@ -531,7 +545,9 @@ QCoro::Task<> ChatSession::sendQuestionReply(QString callId, std::optional<QList
 	{
 		co_return; // the card goes when the backend reports the question resolved
 	}
-	if(result.error() == NoPendingQuestion) // answered elsewhere
+	// remove with protocol 5
+	const bool noPending = result.error().code == "no_pending_question"_L1 || result.error().message == NoPendingQuestion;
+	if(noPending) // answered elsewhere
 	{
 		m_controller.dropQuestion(callId);
 		co_return;
@@ -540,7 +556,7 @@ QCoro::Task<> ChatSession::sendQuestionReply(QString callId, std::optional<QList
 	{
 		m_question.setBusy(false); // the card stays, to be tried again
 	}
-	setFailure(result.error());
+	setFailure(result.error().message);
 }
 
 void ChatSession::setFailure(const QString& text)

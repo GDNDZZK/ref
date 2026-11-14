@@ -4,6 +4,7 @@
 #include "client/result.h"
 
 #include <QJSEngine>
+#include <QPointer>
 
 #include <type_traits>
 
@@ -56,7 +57,7 @@ QCoro::Task<> Workspace::perform(QCoro::Task<Result<T>> request, Reply reply, On
 	const Result<T> result = co_await std::move(request);
 	if(!result)
 	{
-		report(reply, false, result.error());
+		report(reply, false, result.error().message);
 		co_return;
 	}
 	if constexpr(std::is_void_v<T>)
@@ -145,9 +146,28 @@ void Workspace::peerText(const QString& sessionId, const QString& command, const
 
 void Workspace::listDirs(const QString& path, const QJSValue& cb)
 {
-	perform(m_directory.listDirs(path), wrap(cb), [](const refgui::proto::DirListing& listing) {
-		return QVariant(QVariantMap{{u"path"_s, listing.path}, {u"dirs"_s, listing.dirs}});
-	});
+	[](QPointer<Workspace> target, QString targetPath, QJSValue callback) -> QCoro::Task<> {
+		const Result<refgui::proto::DirListing> result = co_await target->m_directory.listDirs(std::move(targetPath));
+		if(!target || !callback.isCallable() || target->m_engine == nullptr)
+		{
+			co_return;
+		}
+		QJSValueList args;
+		if(result)
+		{
+			const QVariantMap payload{{u"path"_s, result->path}, {u"dirs"_s, result->dirs}};
+			args = {true, target->m_engine->toScriptValue(QVariant(payload)), QString()};
+		}
+		else
+		{
+			args = {false, result.error().message, result.error().code};
+		}
+		const QJSValue callResult = callback.call(args);
+		if(callResult.isError())
+		{
+			qWarning().noquote() << u"A reply callback failed: %1 (%2:%3)"_s.arg(callResult.property(u"message"_s).toString(), callResult.property(u"fileName"_s).toString(), callResult.property(u"lineNumber"_s).toString());
+		}
+	}(QPointer<Workspace>(this), path, cb);
 }
 
 void Workspace::deleteHistory(const QString& sessionId)

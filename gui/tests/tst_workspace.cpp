@@ -74,8 +74,10 @@ public:
 		}
 	}
 
-	// While set, a question reply is refused with this text.
-	void failQuestionReply(const QString& error) { m_questionError = error; }
+	// While set, a question reply is refused with this text and optional code.
+	void failQuestionReply(const QString& error, const QString& code = {}) { m_questionError = error; m_questionCode = code; }
+	void failPermissionReply(const QString& error, const QString& code = {}) { m_permissionError = error; m_permissionCode = code; }
+	void failListDirs(const QString& error, const QString& code = {}) { m_listDirsError = error; m_listDirsCode = code; }
 
 	// The base64 text get_image answers with.
 	void setImageData(const QString& data) { m_imageData = data; }
@@ -213,6 +215,11 @@ private:
 		}
 		else if(op == u"list_dirs"_s)
 		{
+			if(!m_listDirsError.isEmpty())
+			{
+				m_fake.fail(request, m_listDirsError, m_listDirsCode);
+				return;
+			}
 			m_fake.respond(request, {{u"path"_s, u"/work"_s}, {u"dirs"_s, QJsonArray{u"a"_s, u"b"_s}}});
 		}
 		else if(op == u"get_config"_s)
@@ -243,7 +250,11 @@ private:
 		}
 		else if(op == u"question_reply"_s && !m_questionError.isEmpty())
 		{
-			m_fake.fail(request, m_questionError);
+			m_fake.fail(request, m_questionError, m_questionCode);
+		}
+		else if(op == u"permission_reply"_s && !m_permissionError.isEmpty())
+		{
+			m_fake.fail(request, m_permissionError, m_permissionCode);
 		}
 		else if(op == u"get_image"_s)
 		{
@@ -274,6 +285,11 @@ private:
 	bool m_holdQuestionReply = false;
 	QList<QJsonObject> m_heldQuestionReplies;
 	QString m_questionError;
+	QString m_questionCode;
+	QString m_permissionError;
+	QString m_permissionCode;
+	QString m_listDirsError;
+	QString m_listDirsCode;
 	QString m_shutdownError;
 	QString m_imageData;
 	bool m_closeOnShutdown = false;
@@ -395,6 +411,9 @@ private slots:
 	void destroyingTheWorkspaceWithADetachOutIsSafe();
 	void questionKeysComeAfterTheGuardAndAnswerTheCard();
 	void aQuestionAnsweredElsewhereGoesQuietly();
+	void aCodedQuestionAnsweredElsewhereGoesQuietly();
+	void aPermissionAnsweredElsewhereGoesQuietly();
+	void aPermissionSnapshotPreviewIsAttachedToTheToolRow();
 	void aRefusedAnswerKeepsTheCardAndSaysWhy();
 	void aLostConnectionFreesTheCardAndItCanBeSentAgain();
 	void aReplyThatFailsLateLeavesTheNextQuestionAlone();
@@ -408,6 +427,7 @@ private slots:
 	void invalidImageDataIsAnError();
 	void restartClosingTheConnectionIsQuiet();
 	void commandsFollowTheState();
+	void listDirsPassesErrorCodeToTheCallback();
 };
 
 void TestWorkspace::opensTheSessionFromTheCommandLine()
@@ -506,6 +526,30 @@ void TestWorkspace::renameReportsToTheCallback()
 	QTRY_VERIFY(!engine.globalObject().property(u"answer"_s).isUndefined());
 	QCOMPARE(engine.globalObject().property(u"answer"_s).property(0).toBool(), true);
 	QTRY_COMPARE(f.workspace->sessions()->index(0, 0).data(refgui::workspace::SessionListModel::NameRole).toString(), u"Mine"_s);
+}
+
+void TestWorkspace::listDirsPassesErrorCodeToTheCallback()
+{
+	Fixture f;
+	QJSEngine engine;
+	Workspace::create(nullptr, &engine);
+	const QJSValue callback = engine.evaluate(u"var answer; (function(ok, result, code) { answer = [ok, result, code]; })"_s);
+	QVERIFY2(callback.isCallable(), qPrintable(callback.toString()));
+
+	f.stub.failListDirs(u"Directory does not exist: /missing"_s, u"not_found"_s);
+	f.workspace->listDirs(u"/missing"_s, callback);
+	QTRY_VERIFY(!engine.globalObject().property(u"answer"_s).isUndefined());
+	QCOMPARE(engine.globalObject().property(u"answer"_s).property(0).toBool(), false);
+	QCOMPARE(engine.globalObject().property(u"answer"_s).property(1).toString(), u"Directory does not exist: /missing"_s);
+	QCOMPARE(engine.globalObject().property(u"answer"_s).property(2).toString(), u"not_found"_s);
+
+	engine.globalObject().setProperty(u"answer"_s, QJSValue());
+	f.stub.failListDirs({});
+	f.workspace->listDirs(u"/work"_s, callback);
+	QTRY_VERIFY(!engine.globalObject().property(u"answer"_s).isUndefined());
+	QCOMPARE(engine.globalObject().property(u"answer"_s).property(0).toBool(), true);
+	QCOMPARE(engine.globalObject().property(u"answer"_s).property(1).property(u"path"_s).toString(), u"/work"_s);
+	QCOMPARE(engine.globalObject().property(u"answer"_s).property(2).toString(), QString());
 }
 
 void TestWorkspace::failedRequestsBecomeToasts()
@@ -845,6 +889,58 @@ void TestWorkspace::aQuestionAnsweredElsewhereGoesQuietly()
 	QTRY_VERIFY(!session->question()->isActive());
 	QVERIFY(session->statusText().isEmpty());
 }
+void TestWorkspace::aCodedQuestionAnsweredElsewhereGoesQuietly()
+{
+	Fixture f(2);
+	f.stub.failQuestionReply(u"different server wording"_s, u"no_pending_question"_s);
+	ChatSession* session = f.workspace->current();
+	f.fake.send(questionEvent());
+	QTRY_VERIFY(session->question()->isActive());
+
+	session->question()->activateRow(0);
+
+	QTRY_VERIFY(!session->question()->isActive());
+	QVERIFY(session->statusText().isEmpty());
+}
+
+void TestWorkspace::aPermissionAnsweredElsewhereGoesQuietly()
+{
+	for(const auto& [error, code] : {std::pair{u"different wording"_s, u"no_pending_permission"_s},
+	                                  std::pair{u"No pending permission request with that id."_s, QString()}})
+	{
+		Fixture f(2, false, awaitingPermission());
+		f.stub.failPermissionReply(error, code);
+		ChatSession* session = f.workspace->current();
+		QTRY_COMPARE(session->permissionCount(), 1);
+
+		session->permissionReply(u"call_1"_s, true, false);
+		QTRY_COMPARE(f.stub.requests(u"permission_reply"_s).size(), 1);
+		QTest::qWait(QuietMs);
+		QVERIFY(session->statusText().isEmpty());
+	}
+}
+
+void TestWorkspace::aPermissionSnapshotPreviewIsAttachedToTheToolRow()
+{
+	Fixture f(2, false, awaitingPermission());
+	ChatSession* session = f.workspace->current();
+	QTRY_COMPARE(session->permissionCount(), 1);
+	const QJsonObject preview{{u"diff"_s, u"+new\n-old\n"_s}, {u"added"_s, 1}, {u"removed"_s, 1}, {u"truncated"_s, false}};
+	const QJsonObject request{{u"session_id"_s, u"ses_a"_s},
+	                          {u"message_id"_s, u"msg_1"_s},
+	                          {u"call_id"_s, u"call_1"_s},
+	                          {u"tool"_s, u"edit"_s},
+	                          {u"purpose"_s, u"edit"_s},
+	                          {u"input"_s, QJsonObject()},
+	                          {u"time"_s, 1},
+	                          {u"preview"_s, preview}};
+	f.fake.send({{u"kind"_s, u"event"_s}, {u"session_id"_s, u"ses_a"_s}, {u"event"_s, QJsonObject{{u"type"_s, u"permission"_s}, {u"request"_s, request}}}});
+	QAbstractItemModel* blocks = session->blocks();
+	const int previewRole = blocks->roleNames().key("permissionPreview");
+	QTRY_COMPARE(blocks->index(0, 0).data(previewRole).toMap().value(u"added"_s).toInt(), 1);
+	f.fake.send({{u"kind"_s, u"event"_s}, {u"session_id"_s, u"ses_a"_s}, {u"event"_s, QJsonObject{{u"type"_s, u"permission_resolved"_s}, {u"call_id"_s, u"call_1"_s}}}});
+	QTRY_VERIFY(blocks->index(0, 0).data(previewRole).toMap().isEmpty());
+}
 
 void TestWorkspace::aRefusedAnswerKeepsTheCardAndSaysWhy()
 {
@@ -1124,7 +1220,7 @@ void TestWorkspace::invalidImageDataIsAnError()
 	f.stub.setImageData(u"not base64!"_s);
 	const auto invalid = await(session->fetchImage(u"img_1"_s));
 	QVERIFY(invalid.has_value() && !invalid->has_value());
-	QCOMPARE(invalid->error(), u"invalid image data"_s);
+	QCOMPARE(invalid->error().message, u"invalid image data"_s);
 
 	f.stub.setImageData(QString::fromLatin1(QByteArray("png bytes").toBase64()));
 	const auto valid = await(session->fetchImage(u"img_1"_s));

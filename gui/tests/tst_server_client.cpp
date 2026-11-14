@@ -82,7 +82,7 @@ private slots:
 		const auto hello = open(client, backend);
 
 		QVERIFY(!hello.has_value());
-		QCOMPARE(hello.error(), u"invalid or missing token"_s);
+		QCOMPARE(hello.error().message, u"invalid or missing token"_s);
 		QVERIFY(!client.isOpen());
 	}
 
@@ -91,7 +91,7 @@ private slots:
 		ServerClient client;
 		const auto hello = await(client.open({.url = QUrl(u"ws://127.0.0.1:1/"_s)}, u"/work"_s, OpenTimeout)).value();
 		QVERIFY(!hello.has_value());
-		QVERIFY(!hello.error().isEmpty());
+		QVERIFY(!hello.error().message.isEmpty());
 	}
 
 	void responsesAreMatchedToRequestsById()
@@ -135,7 +135,7 @@ private slots:
 		const auto attached = await(client.attach(u"ses_nope"_s)).value();
 
 		QVERIFY(!attached.has_value());
-		QCOMPARE(attached.error(), u"Session not found"_s);
+		QCOMPARE(attached.error().message, u"Session not found"_s);
 	}
 
 	// The snapshot of an Attach must be applied before the events that follow it, which the
@@ -200,7 +200,7 @@ private slots:
 		const auto result = await(client.prompt(u"ses_1"_s, u"hi"_s)).value();
 
 		QVERIFY(!result.has_value());
-		QCOMPARE(result.error(), u"connection closed"_s);
+		QCOMPARE(result.error().message, u"connection closed"_s);
 		QTRY_COMPARE(closed.size(), 1);
 		QVERIFY(!client.isOpen());
 	}
@@ -244,7 +244,7 @@ private slots:
 		ServerClient client;
 		const auto result = await(client.prompt(u"ses_1"_s, u"hi"_s)).value();
 		QVERIFY(!result.has_value());
-		QCOMPARE(result.error(), u"not connected"_s);
+		QCOMPARE(result.error().message, u"not connected"_s);
 	}
 
 	void closeFailsPendingRequestsAtOnce()
