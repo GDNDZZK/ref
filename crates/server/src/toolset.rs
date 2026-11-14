@@ -347,10 +347,12 @@ fn todo_tool(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> ToolOutput {
                 "Error: todos[{i}].content must be a non-empty string."
             ));
         }
-        let word = it
-            .get("status")
-            .and_then(Value::as_str)
-            .unwrap_or(TodoStatus::Pending.as_str());
+        let Some(word) = it.get("status").and_then(Value::as_str) else {
+            return ToolOutput::err(format!(
+                "Error: todos[{i}].status is missing; use {}.",
+                status_names()
+            ));
+        };
         let Ok(status) = serde_json::from_value::<TodoStatus>(json!(word)) else {
             return ToolOutput::err(format!(
                 "Error: todos[{i}].status {word:?} is invalid; use {}.",
@@ -469,5 +471,47 @@ mod tests {
         assert!(a.contains(&"resume_session".to_string()));
         assert!(!b.contains(&"resume_session".to_string()));
         assert!(b.contains(&"send_message".to_string()));
+    }
+
+    #[tokio::test]
+    async fn todo_missing_status_returns_error() {
+        let dir = std::env::temp_dir().join(format!("ref-toolset-todo-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut opts = crate::HubOptions::new(dir.clone());
+        opts.home = None;
+        let hub = Arc::new(Hub::new(opts));
+        let s = Arc::new(Session::new(
+            ref_proto::SessionInfo {
+                id: "ses_test".into(),
+                name: "test".into(),
+                title: String::new(),
+                agent: "build".into(),
+                model: ref_proto::ModelRef::default(),
+                cwd: "/tmp".into(),
+                created_at: 0,
+                updated_at: 0,
+                status: ref_proto::SessionStatus::Idle,
+                attached: 0,
+                live: true,
+                parent: None,
+                must_report: false,
+                context: Default::default(),
+                todos: Vec::new(),
+                busy_since: None,
+                last_error: None,
+            },
+            Vec::new(),
+            Arc::new(Config::default()),
+            false,
+            false,
+        ));
+        let out = todo_tool(&hub, &s, &json!({"todos": [{"content": "step 1"}]}));
+        assert!(out.is_error, "{}", out.text);
+        assert!(
+            out.text.contains("todos[0].status is missing"),
+            "{}",
+            out.text
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

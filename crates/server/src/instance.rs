@@ -16,7 +16,7 @@ pub fn write_instance(dir: &Path, info: &InstanceInfo) -> std::io::Result<PathBu
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
     }
     let p = instance_path(dir, info.pid);
     let data = serde_json::to_vec_pretty(info).map_err(std::io::Error::other)?;
@@ -109,8 +109,9 @@ async fn request(
             .await
             .map_err(|e| e.to_string())?;
         let cwd = std::env::current_dir()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|_| "/".into());
+            .map_err(|e| format!("cannot read the working directory: {e}"))?
+            .to_string_lossy()
+            .to_string();
         let frames = [
             ClientFrame {
                 id: Some(1),
@@ -129,10 +130,8 @@ async fn request(
             ws.send(WsMsg::text(t)).await.map_err(|e| e.to_string())?;
         }
         while let Some(m) = ws.next().await {
-            let Ok(WsMsg::Text(t)) = m else {
-                if m.is_err() {
-                    break;
-                }
+            let msg = m.map_err(|e| e.to_string())?;
+            let WsMsg::Text(t) = msg else {
                 continue;
             };
             if let Ok(ServerFrame::Response {
@@ -151,7 +150,7 @@ async fn request(
                     return if ok {
                         Ok(result)
                     } else {
-                        Err(error.unwrap_or_default())
+                        Err(error.unwrap_or_else(|| "request failed".into()))
                     };
                 }
             }
@@ -183,7 +182,13 @@ type Row = (InstanceInfo, Option<usize>);
 
 /// `--status`: exit code 0 if any instance is running.
 pub async fn status(json_out: bool) -> i32 {
-    let dir = ref_proto::instances_dir();
+    let dir = match ref_proto::instances_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("ref-server: {e}");
+            return EXIT_FAILURE;
+        }
+    };
     let rows = collect_rows(&list_instances(&dir)).await;
     if json_out {
         print_json(&rows);
@@ -269,7 +274,13 @@ fn print_table(rows: &[Row], dir: &Path) {
 
 /// `--stop [PID]`.
 pub async fn stop(pid: Option<u32>) -> i32 {
-    let dir = ref_proto::instances_dir();
+    let dir = match ref_proto::instances_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("ref-server: {e}");
+            return EXIT_FAILURE;
+        }
+    };
     let list: Vec<InstanceInfo> = list_instances(&dir)
         .into_iter()
         .filter(|i| pid.is_none_or(|p| p == i.pid))
@@ -314,4 +325,74 @@ pub async fn stop(pid: Option<u32>) -> i32 {
         }
     }
     code
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    async fn fake_ws_server(
+        response_after_hello: Option<&'static [u8]>,
+        raw_frame: Option<&'static [u8]>,
+    ) -> InstanceInfo {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            // Read Hello.
+            let _ = ws.next().await;
+            let hello_ok = serde_json::to_string(&ServerFrame::Response {
+                id: 1,
+                ok: true,
+                result: serde_json::json!({"protocol": ref_proto::PROTOCOL_VERSION}),
+                error: None,
+                code: None,
+            })
+            .unwrap();
+            let _ = ws.send(WsMsg::text(hello_ok)).await;
+            // Read request 2.
+            let _ = ws.next().await;
+            if let Some(bytes) = response_after_hello {
+                let text = std::str::from_utf8(bytes).unwrap().to_string();
+                let _ = ws.send(WsMsg::text(text)).await;
+            }
+            if let Some(bad) = raw_frame {
+                let mut tcp = ws.into_inner();
+                let _ = tcp.write_all(bad).await;
+                let _ = tcp.flush().await;
+                let mut buf = [0u8; 8];
+                let _ = tcp.read(&mut buf).await;
+            }
+        });
+        InstanceInfo {
+            pid: std::process::id(),
+            port,
+            bind: "127.0.0.1".into(),
+            allow_hosts: vec!["127.0.0.1".into()],
+            idle_timeout: 0,
+            started_at: 0,
+            version: "0.2.1".into(),
+            token: "t".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn request_propagates_ws_error_and_default_failure_text() {
+        // RUST-203: invalid WebSocket frame bytes fail with the WS error, not "connection closed".
+        let info = fake_ws_server(None, Some(&[0x88, 0x01])).await;
+        let err = request(&info, Request::Ping, Duration::from_secs(5))
+            .await
+            .unwrap_err();
+        assert_ne!(err, "connection closed", "{err}");
+
+        // RUST-204: ok=false with error=None falls back to "request failed".
+        let body = br#"{"kind":"response","id":2,"ok":false,"result":null}"#;
+        let info2 = fake_ws_server(Some(body), None).await;
+        let err2 = request(&info2, Request::Ping, Duration::from_secs(5))
+            .await
+            .unwrap_err();
+        assert_eq!(err2, "request failed");
+    }
 }

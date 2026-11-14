@@ -219,7 +219,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
 /// If a ref-web with our key is running (on `--port` when given), points the browser at it
 /// and returns true. With `--port`, another key on that port is an error.
 async fn open_running(cli: &Cli, key: &Key, cwd: &str) -> anyhow::Result<bool> {
-    for record in instance::list_live() {
+    for record in instance::list_live()? {
         if cli.port.is_some_and(|port| port != record.port) {
             continue;
         }
@@ -236,7 +236,8 @@ async fn open_running(cli: &Cli, key: &Key, cwd: &str) -> anyhow::Result<bool> {
         }
         let url = launch::key_url(&host, record.port, key.text(), Some(cwd), record.tls);
         if record.tls
-            && let Ok(der) = tls_pin::load_cert_der(&tls::cert_path())
+            && let Ok(cert) = tls::cert_path()
+            && let Ok(der) = tls_pin::load_cert_der(&cert)
         {
             say!(
                 "certificate SHA-256 {}",

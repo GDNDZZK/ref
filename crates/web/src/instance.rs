@@ -45,8 +45,8 @@ impl Record {
     }
 }
 
-pub fn instances_dir() -> PathBuf {
-    token::state_subdir().join(INSTANCES_DIR)
+pub fn instances_dir() -> anyhow::Result<PathBuf> {
+    Ok(token::state_subdir()?.join(INSTANCES_DIR))
 }
 
 fn record_path(dir: &Path, pid: u32) -> PathBuf {
@@ -55,7 +55,7 @@ fn record_path(dir: &Path, pid: u32) -> PathBuf {
 
 /// Writes the record atomically (a reader never sees half of it) and returns its path.
 pub fn write(record: &Record) -> anyhow::Result<PathBuf> {
-    write_in(&instances_dir(), record)
+    write_in(&instances_dir()?, record)
 }
 
 fn write_in(dir: &Path, record: &Record) -> anyhow::Result<PathBuf> {
@@ -104,8 +104,8 @@ pub fn remove(path: &Path) {
 
 /// The records of live instances, newest first. Files of dead processes are removed;
 /// files that do not parse are left alone.
-pub fn list_live() -> Vec<Record> {
-    list_live_in(&instances_dir())
+pub fn list_live() -> anyhow::Result<Vec<Record>> {
+    Ok(list_live_in(&instances_dir()?))
 }
 
 fn list_live_in(dir: &Path) -> Vec<Record> {
