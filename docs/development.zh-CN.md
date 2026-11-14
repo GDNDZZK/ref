@@ -93,7 +93,7 @@ sleep 3600 | ref-server --mock      # stdout 只打印一行 {"port":N,"token":"
 | `long` | 输出 400 行的工具，然后是长回答 |
 | `retry` | 两次 529 错误（重试中），然后成功（约 6 秒） |
 | `outage` | 先跑两个工具，然后同一个请求连续失败四次（529、529、连接被重置、503），等待约 2、4、8、16 秒；之后是一次 `edit`、一次 `bash` 和回答（约 30 秒） |
-| `fail` | 401 错误，重试后以错误结束（约 6 秒） |
+| `fail` | 413 上下文溢出错误，直接以错误结束本轮 |
 | `fill` | 上下文接近 95%，下一条提示会先自动压缩 |
 | `compact-tool` | 模型调用 `compact_context` |
 | `peer` | 创建 `reviewer` 会话 `helper`，它用 `send_message` 回报 |

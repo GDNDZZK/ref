@@ -33,9 +33,6 @@ const IMAGE_TOKENS: usize = 1500;
 /// Tool outputs are cut to this many bytes after a context overflow.
 const OVERFLOW_CLIP_BYTES: usize = 1000;
 
-/// Non-retryable errors in a row after which a summary request gives up.
-const MAX_HARD_FAILURES: u32 = 3;
-
 /// Rough token estimate (≈4 bytes per token, fixed cost per image) of a request.
 pub(crate) fn estimate_tokens(
     system: &[String],
@@ -237,7 +234,6 @@ async fn summarize(
     let mut req = crate::images::clamp_request(req, &cs.provider, &cs.model).await;
     let max = retry_max_delay(&prep.cfg);
     let mut attempt = 0u32;
-    let mut hard_failures = 0u32;
     let mut clipped = false;
     loop {
         let mut sink = |_ev: ref_llm::StreamEvent| {};
@@ -271,11 +267,10 @@ async fn summarize(
             }
             Err(e) => {
                 attempt += 1;
-                if !e.retryable {
-                    hard_failures += 1;
-                    if hard_failures >= MAX_HARD_FAILURES {
-                        return Err(e.message);
-                    }
+                if let Some(limit) = hub.opts.retry_limit
+                    && attempt >= limit
+                {
+                    return Err(e.message);
                 }
                 let d = backoff(
                     hub.opts.retry_base,

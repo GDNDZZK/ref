@@ -355,14 +355,16 @@ impl ResponsesState {
                             .filter(|s| !s.is_empty())
                     })
                     .ok_or_else(|| {
-                        LlmError::fatal("responses stream: function_call missing call_id")
+                        LlmError::transient("responses stream: function_call missing call_id")
                     })?
                     .to_string();
                 let name = item
                     .get("name")
                     .and_then(Value::as_str)
                     .filter(|s| !s.is_empty())
-                    .ok_or_else(|| LlmError::fatal("responses stream: function_call missing name"))?
+                    .ok_or_else(|| {
+                        LlmError::transient("responses stream: function_call missing name")
+                    })?
                     .to_string();
                 (SlotKind::Tool, BlockKind::ToolCall { id, name })
             }

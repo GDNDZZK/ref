@@ -357,7 +357,7 @@ The model sees both points through the `context_window` tool and can compact on 
 "tui":    { "sidebar": true, "thinking": false, "details": false }
 ```
 
-- **`retry.max_delay`** (**ref**, default `600`): failed LLM requests that can be retried are retried without limit: HTTP 408, 409, 425, 429 and 5xx, overload messages, network errors and timeouts. The wait starts at 2 s and doubles up to this cap; a `retry-after` header from the provider is respected. `esc esc` stops retrying. Other errors, such as an invalid API key, are tried three times in total, after waits of about 2 s and 4 s, and then end the turn with the error shown.
+- **`retry.max_delay`** (**ref**, default `600`): failed LLM requests — all request, stream and network errors (HTTP 4xx and 5xx, including 400, 401, 429, etc., and timeouts) — are retried without limit. The wait starts at 2 s and doubles up to this cap; a `retry-after` header from the provider is respected. `esc esc` stops retrying. Only local setup failures or a context overflow that remains too large after compaction stop immediately and show the error.
 - **`images.auto_resize`** (**ref**, default `true`): images from `read`, `webfetch` and pasted images are scaled and recompressed to sizes the models handle well. See [Tools](tools.md#images).
 - **`tui`** (**ref**): initial state of three TUI toggles: `sidebar` (default shown), `thinking` (expand reasoning, `ctrl+x t`) and `details` (expand tool calls, `ctrl+x d`).
 
