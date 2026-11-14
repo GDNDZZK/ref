@@ -29,7 +29,14 @@ export function protocolOf(hello: HelloResult | undefined): number {
   return hello?.protocol ?? PROTOCOL_WITHOUT_FIELD
 }
 
-export class RefError extends Error {}
+export class RefError extends Error {
+  readonly code?: string
+
+  constructor(message: string, code?: string | null) {
+    super(message)
+    this.code = code ?? undefined
+  }
+}
 
 export interface ConnectionOptions {
   connect: TransportFactory
@@ -218,7 +225,7 @@ export class RefConnection {
     }
     this.pending.delete(frame.id)
     if (frame.ok) pending.resolve(frame.result)
-    else pending.reject(new RefError(frame.error ?? 'request failed'))
+    else pending.reject(new RefError(frame.error ?? 'request failed', frame.code))
   }
 
   private failPending(error: Error): void {
