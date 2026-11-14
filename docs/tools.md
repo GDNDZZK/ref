@@ -41,8 +41,7 @@ The file tools use hash-tagged line numbers, modeled on [oh-my-pi](https://githu
 
 `read` and `grep` print a `[path#TAG]` header, where `TAG` is a hash of the whole file, followed by `N:content` rows. `edit` takes that tag and line numbers from that version of the file, and applies all its changes (replace, delete, insert before or after) at once, so earlier changes in the same call do not shift later line numbers.
 
-If the file changed since the tag was issued, ref maps the line numbers onto the current file through a diff when it can. Otherwise it rejects the edit and returns the current content around the requested lines, so the model can retry without reading the whole file again.
-
+If the file changed since the tag was issued, ref maps the line numbers onto the current file through a diff when it can, and the tool card notes the remap below the diff. Otherwise it rejects the edit and returns the current content around the requested lines, so the model can retry without reading the whole file again.
 ## bash
 
 Runs a command with `bash -c` in the session directory, with stdout and stderr combined in order.

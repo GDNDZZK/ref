@@ -51,8 +51,13 @@ REF_DUMP_REQUESTS=/tmp/dump ref-server ...                     # 导出 LLM 请�
 
 协议类型在 `crates/proto` 中。由它们生成并提交到仓库的文件有两组：`crates/proto/fixtures/` 中每种帧的 JSON 样例（GUI 和 Web 前端的测试会逐个解析），以及 `web/src/proto/generated/` 中的 TypeScript 类型。文件过期时 `cargo test -p ref-proto` 会失败；`REF_UPDATE_FIXTURES=1 cargo test -p ref-proto` 会重写它们。`.gitattributes` 让这两个目录保持 LF 换行。
 
-TUI 与后端通过 WebSocket 交换 JSON 帧。前端分页获取历史：`Attach` 返回最新的消息（100 条，超过约 1 MiB 时更少），`Messages` 返回指定消息之前的一页，因此 TUI 会在向上滚动时加载更早的页。图片以占位信息发给前端（MIME 类型、尺寸和 `id`，不含字节数据）；`GetImage` 按 id 返回图片字节。
+TUI、GUI 和 Web 前端与后端通过 WebSocket 交换 JSON 帧（当前 `PROTOCOL_VERSION` 为 `4`）。收到 `Hello` 时，服务器要求 `version == PROTOCOL_VERSION`，不匹配会返回 `code: "protocol_mismatch"` 并拒绝连接（供 `--stop` 和 `--status` 使用的 `ref-server-cli` 控制客户端不受此限制）。只有发生不兼容变更或需要强制统一新基线时才递增协议版本号。
 
+`ServerFrame::Response` 在 `ok: false` 时可附带机器可读的 `code` 字段供客户端分支判断（`no_pending_question`、`no_pending_permission`、`protocol_mismatch`、`dir_not_found`）；人类可读的 `error` 文本保持不变以作兜底。前端分页获取历史：`Attach` 返回最新的消息（100 条，超过约 1 MiB 时更少），`Messages` 返回指定消息之前的一页，因此向上滚动时会加载更早的页。图片以占位信息发给前端（MIME 类型、尺寸和 `id`，不含字节数据）；`GetImage` 按 id 返回图片字节。
+
+客户端使用的其他可选元数据：
+- `Part::Tool.meta.warnings`：成功的 `edit` 结果中的警告字符串数组（例如行号已重映射或剥离了 `N:` 前缀）；为空时省略。
+- `PermissionRequest.preview`：内置 `edit` 和 `write` 授权请求中的可选 `EditPreview`（`{ diff, added, removed, truncated }`），在发出授权请求时通过预演计算（diff 文本上限 64 KiB、400 行，源文件上限 2 MiB；失败或超限时省略）。
 ## Mock 后端
 
 `ref-server --mock` 是假后端，用于在没有 LLM 的情况下开发界面。`ref-gui --mock` 和 `ref-web --mock` 通过 `ref-client` 启动私有的 mock 后端。（`ref --mock` 是另一个进程内的假后端，与此无关。）
