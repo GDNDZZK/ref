@@ -1213,7 +1213,11 @@ fn error_preview(t: &ToolCall<'_>, out_text: &str, w: usize) -> Option<Row> {
 
 /// Question tool (Done + `meta.answers`): compact `header = answer` rows under the collapsed header.
 fn question_summary_rows(t: &ToolCall<'_>, w: usize, hit: &Hit) -> Vec<Row> {
-    let Some(answers) = t.meta.and_then(|x| x.get("answers")).and_then(Value::as_array) else {
+    let Some(answers) = t
+        .meta
+        .and_then(|x| x.get("answers"))
+        .and_then(Value::as_array)
+    else {
         return Vec::new();
     };
     let Some(questions) = t.input.get("questions").and_then(Value::as_array) else {
@@ -1301,9 +1305,15 @@ fn diff_preview_rows(t: &ToolCall<'_>, w: usize, hit: &Hit, compact: bool) -> Ve
                 ));
             }
         }
-        hdr.push(Span::styled(format!("+{added}"), theme::fg(theme::DIFF_ADDED)));
+        hdr.push(Span::styled(
+            format!("+{added}"),
+            theme::fg(theme::DIFF_ADDED),
+        ));
         hdr.push(Span::raw(" "));
-        hdr.push(Span::styled(format!("-{removed}"), theme::fg(theme::DIFF_REMOVED)));
+        hdr.push(Span::styled(
+            format!("-{removed}"),
+            theme::fg(theme::DIFF_REMOVED),
+        ));
         rows.push(
             Row::new(Line::from(hdr))
                 .decor()
@@ -1329,19 +1339,20 @@ fn diff_preview_rows(t: &ToolCall<'_>, w: usize, hit: &Hit, compact: bool) -> Ve
             );
         }
     }
-    if let Some(warnings) = t.meta.and_then(|x| x.get("warnings")).and_then(Value::as_array) {
+    if let Some(warnings) = t
+        .meta
+        .and_then(|x| x.get("warnings"))
+        .and_then(Value::as_array)
+    {
         for w_text in warnings
             .iter()
             .filter_map(Value::as_str)
             .map(text::sanitize)
             .filter(|s| !s.is_empty())
         {
-            for (i, wl) in text::wrap_spans(
-                &[Span::styled(w_text, theme::fg(theme::WARNING))],
-                iw,
-            )
-            .into_iter()
-            .enumerate()
+            for (i, wl) in text::wrap_spans(&[Span::styled(w_text, theme::fg(theme::WARNING))], iw)
+                .into_iter()
+                .enumerate()
             {
                 rows.push(
                     Row::new(wl)
