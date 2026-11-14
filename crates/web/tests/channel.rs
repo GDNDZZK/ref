@@ -247,3 +247,79 @@ async fn only_sixteen_handshakes_run_at_once() {
     }
     assert_eq!(signed_in.len(), MAX_HANDSHAKES);
 }
+
+#[tokio::test]
+async fn an_oversized_pre_auth_frame_is_rejected_at_the_transport_before_buffering() {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    let env = Env::new("pre-auth-cap");
+    let (web, upstream) = web_with_fake_upstream(&env).await;
+    let mut stream = tokio::net::TcpStream::connect((LOOPBACK, web.port))
+        .await
+        .unwrap();
+    let upgrade = format!(
+        "GET /ws HTTP/1.1\r\n\
+         Host: {LOOPBACK}:{}\r\n\
+         Origin: {}\r\n\
+         Connection: Upgrade\r\n\
+         Upgrade: websocket\r\n\
+         Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+         Sec-WebSocket-Version: 13\r\n\r\n",
+        web.port,
+        web.origin()
+    );
+    stream.write_all(upgrade.as_bytes()).await.unwrap();
+    let mut buf = Vec::new();
+    let mut tmp = [0u8; 512];
+    let hello_start = loop {
+        let n = stream.read(&mut tmp).await.unwrap();
+        assert!(n > 0);
+        buf.extend_from_slice(&tmp[..n]);
+        if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+            break pos + 4;
+        }
+    };
+    let mut ws = tokio_tungstenite::WebSocketStream::from_partially_read(
+        stream,
+        buf.split_off(hello_start),
+        tokio_tungstenite::tungstenite::protocol::Role::Client,
+        None,
+    )
+    .await;
+    let _hello = ws.next().await.unwrap().unwrap();
+    let mut raw = ws.into_inner();
+
+    // Send only the header + 16 payload bytes of a 1 MiB masked text frame. A server that buffers
+    // 64 MiB before checking the 1 KiB limit waits for the missing megabyte (until the 10 s timeout).
+    let mut header = Vec::new();
+    header.push(0x81); // FIN + text
+    header.push(0x80 | 127); // MASK + 64-bit length
+    header.extend_from_slice(&(1_048_576u64).to_be_bytes());
+    header.extend_from_slice(&[0u8; 4]); // zero mask key
+    header.extend_from_slice(&[b'x'; 16]);
+    raw.write_all(&header).await.unwrap();
+
+    let mut ws = tokio_tungstenite::WebSocketStream::from_raw_socket(
+        raw,
+        tokio_tungstenite::tungstenite::protocol::Role::Client,
+        None,
+    )
+    .await;
+    // Must close promptly (well under the 10 s handshake timeout) with 4400.
+    let frame = tokio::time::timeout(Duration::from_secs(2), ws.next())
+        .await
+        .expect("server stalled waiting for the rest of the 1 MiB frame")
+        .expect("socket ended without close frame")
+        .expect("socket error");
+    match frame {
+        Message::Close(Some(close)) => assert_eq!(u16::from(close.code), BAD_MESSAGE),
+        other => panic!("expected close 4400, got {other:?}"),
+    }
+    assert!(!backend_was_contacted(&upstream));
+
+    // After authentication succeeds, messages larger than 1 KiB are allowed.
+    let mut signed_in = web.channel().await;
+    let big = "a".repeat(4096);
+    signed_in.send_text(&big).await;
+    assert_eq!(signed_in.next_text().await, big);
+}

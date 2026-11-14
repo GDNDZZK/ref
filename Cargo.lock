@@ -3207,6 +3207,8 @@ dependencies = [
  "futures-util",
  "hkdf",
  "hmac",
+ "hyper",
+ "hyper-util",
  "open",
  "rand 0.9.5",
  "ref-client",

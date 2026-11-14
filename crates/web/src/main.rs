@@ -17,6 +17,7 @@ mod routes;
 mod token;
 mod tunnel;
 mod upstream;
+mod ws;
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
