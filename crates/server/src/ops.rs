@@ -112,9 +112,7 @@ fn resolve_model(
     requested: Option<ModelRef>,
 ) -> Result<ModelRef, String> {
     let Some(m) = requested else {
-        return cfg
-            .default_model_for(agent)
-            .ok_or_else(|| crate::models::NO_MODEL_CONFIGURED.to_string());
+        return Ok(cfg.default_model_for(agent).unwrap_or_default());
     };
     if cfg.model(&m).is_none() {
         return Err(format!("Model {} is not configured.", m.key()));
@@ -262,9 +260,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolve_model_without_configured_default_returns_error() {
+    fn resolve_model_without_configured_default_allows_empty_session() {
         let cfg = Config::default();
-        let err = resolve_model(&cfg, ref_config::DEFAULT_AGENT, None).unwrap_err();
-        assert_eq!(err, crate::models::NO_MODEL_CONFIGURED);
+        let model = resolve_model(&cfg, ref_config::DEFAULT_AGENT, None).unwrap();
+        assert_eq!(model, ModelRef::default());
     }
 }
