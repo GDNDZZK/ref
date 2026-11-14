@@ -1040,9 +1040,11 @@ fn render_tool(m: &Message, idx: usize, t: &ToolCall<'_>, cx: &Ctx<'_>, w: usize
     let out_text = t.output.map(text::sanitize).unwrap_or_default();
     if !expanded {
         rows.extend(error_preview(t, &out_text, w));
+        if t.name == "question" && t.state == ToolState::Done {
+            rows.extend(question_summary_rows(t, w, &hit));
+        }
         return rows;
     }
-
     let block = ToolBlock::new(&m.id, idx, cx.shows_full_output(idx), w);
     let mut block_rows = vec![block.section("input", true)];
     block_rows.extend(block.input_rows(t));
@@ -1203,6 +1205,69 @@ fn error_preview(t: &ToolCall<'_>, out_text: &str, w: usize) -> Option<Row> {
         ),
     ]);
     Some(Row::new(l).skip(4))
+}
+
+/// Question tool (Done + `meta.answers`): compact `header = answer` rows under the collapsed header.
+fn question_summary_rows(t: &ToolCall<'_>, w: usize, hit: &Hit) -> Vec<Row> {
+    let Some(answers) = t.meta.and_then(|x| x.get("answers")).and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let Some(questions) = t.input.get("questions").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let iw = w.saturating_sub(2).max(1);
+    let mut rows = Vec::new();
+    for (i, q) in questions.iter().enumerate() {
+        let header = q
+            .get("header")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                q.get("question")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+            });
+        let Some(header) = header else { continue };
+        let chosen: Vec<&str> = answers
+            .get(i)
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let answered = !chosen.is_empty();
+        let ans_text = if answered {
+            chosen.join(", ")
+        } else {
+            "(not answered)".to_string()
+        };
+        let spans = vec![
+            Span::styled(format!("{} = ", text::one_line(header)), theme::muted()),
+            Span::styled(
+                text::one_line(&ans_text),
+                if answered {
+                    theme::text()
+                } else {
+                    theme::fg(theme::WARNING)
+                },
+            ),
+        ];
+        for (li, wl) in text::wrap_spans(&spans, iw).into_iter().enumerate() {
+            rows.push(
+                Row::new(wl)
+                    .soft(li > 0)
+                    .hit(hit.clone())
+                    .indent(vec![Span::raw("  ")]),
+            );
+        }
+    }
+    rows
 }
 
 /// Layout of the expanded block of a tool call. Every row is exactly `bw` columns wide so the
