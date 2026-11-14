@@ -5137,3 +5137,22 @@ fn copy_text_toasts_osc52_warn_and_clipboard_error() {
     assert_eq!(t.level, ToastLevel::Error);
     assert!(t.text.contains("Copy failed: no clipboard tool"), "{}", t.text);
 }
+
+#[test]
+fn pasting_oversized_image_path_toasts_error() {
+    let mut app = test_app(false);
+    let dir = std::env::temp_dir().join(format!("ref-tui-paste-err-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("huge.png");
+    let f = std::fs::File::create(&path).unwrap();
+    f.set_len(21 * 1024 * 1024).unwrap();
+    drop(f);
+    crate::input::handle(
+        &mut app,
+        crossterm::event::Event::Paste(path.to_string_lossy().into_owned()),
+    );
+    assert!(app.editor.text.is_empty());
+    assert!(app.editor.images.is_empty());
+    assert!(app.toasts.items.iter().any(|t| t.text.contains("too large")));
+    let _ = std::fs::remove_dir_all(&dir);
+}

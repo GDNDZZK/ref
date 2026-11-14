@@ -587,23 +587,35 @@ fn maybe_image_path(app: &mut App) {
     if t.len() < MIN_IMAGE_PATH_LEN || !t.contains('.') || t.contains('\n') {
         return;
     }
-    if let Some((img, name)) = crate::clipboard::image_from_path(t) {
-        app.editor.clear();
-        app.editor.attach_image(img, Some(name.clone()));
-        app.toasts.info(format!("Attached image {name}"));
+    match crate::clipboard::image_from_path(t) {
+        Ok(Some((img, name))) => {
+            app.editor.clear();
+            app.editor.attach_image(img, Some(name.clone()));
+            app.toasts.info(format!("Attached image {name}"));
+        }
+        Ok(None) => {}
+        Err(e) => app.toasts.error(e),
     }
 }
 
 fn clipboard_paste(app: &mut App) {
-    if let Some(img) = crate::clipboard::paste_image() {
-        let target = target_editor(app);
-        target.attach_image(img, Some("clipboard".into()));
-        app.toasts.info("Pasted image from clipboard");
-        return;
-    }
+    let img_err = match crate::clipboard::paste_image() {
+        Ok(Some(img)) => {
+            let target = target_editor(app);
+            target.attach_image(img, Some("clipboard".into()));
+            app.toasts.info("Pasted image from clipboard");
+            return;
+        }
+        Ok(None) => None,
+        Err(e) => Some(e),
+    };
     match crate::clipboard::paste_text() {
-        Some(t) if !t.is_empty() => paste(app, t),
-        _ => app.toasts.warn("Clipboard is empty"),
+        Ok(Some(t)) => paste(app, t),
+        Ok(None) => match img_err {
+            Some(e) => app.toasts.error(format!("Clipboard image error: {e}")),
+            None => app.toasts.warn("Clipboard is empty"),
+        },
+        Err(e) => app.toasts.error(format!("Clipboard paste failed: {e}")),
     }
 }
 
@@ -654,24 +666,27 @@ fn finish_question(app: &mut App, sid: &str, call_id: &str, outcome: Outcome) {
 
 /// Images named by a pasted text: every whitespace-separated path, or the whole text as one
 /// path (names with spaces). Empty when the text is not an image paste.
-fn pasted_images(s: &str) -> Vec<(ImageData, String)> {
+fn pasted_images(s: &str) -> Result<Vec<(ImageData, String)>, String> {
     let paths: Vec<&str> = s.split_whitespace().collect();
     if paths.is_empty() || paths.len() > MAX_PASTED_PATHS {
-        return Vec::new();
+        return Ok(Vec::new());
     }
-    let imgs: Vec<_> = paths
-        .iter()
-        .filter_map(|p| crate::clipboard::image_from_path(p))
-        .collect();
+    let mut imgs = Vec::new();
+    for p in &paths {
+        if let Some(img) = crate::clipboard::image_from_path(p)? {
+            imgs.push(img);
+        }
+    }
     let all_paths_are_images = imgs.len() == paths.len();
     if all_paths_are_images {
-        return imgs;
+        return Ok(imgs);
     }
-    if imgs.len() != 1 {
-        return Vec::new();
+    if !imgs.is_empty() {
+        return Ok(Vec::new());
     }
-    let whole = crate::clipboard::image_from_path(s.trim());
-    whole.into_iter().collect()
+    Ok(crate::clipboard::image_from_path(s.trim())?
+        .into_iter()
+        .collect())
 }
 
 fn paste(app: &mut App, s: String) {
@@ -691,25 +706,35 @@ fn paste(app: &mut App, s: String) {
     }
     if s.trim().is_empty() {
         // Empty bracketed paste: often an image-only clipboard.
-        if let Some(img) = crate::clipboard::paste_image() {
-            target_editor(app).attach_image(img, Some("clipboard".into()));
-            app.toasts.info("Pasted image from clipboard");
+        match crate::clipboard::paste_image() {
+            Ok(Some(img)) => {
+                target_editor(app).attach_image(img, Some("clipboard".into()));
+                app.toasts.info("Pasted image from clipboard");
+            }
+            Ok(None) => {}
+            Err(e) => app.toasts.error(format!("Clipboard image error: {e}")),
         }
         return;
     }
     // One or more image paths.
-    let imgs = pasted_images(&s);
-    if !imgs.is_empty() {
-        let n = imgs.len();
-        let ed = target_editor(app);
-        for (img, name) in imgs {
-            ed.attach_image(img, Some(name));
+    match pasted_images(&s) {
+        Ok(imgs) if !imgs.is_empty() => {
+            let n = imgs.len();
+            let ed = target_editor(app);
+            for (img, name) in imgs {
+                ed.attach_image(img, Some(name));
+            }
+            app.toasts.info(format!(
+                "Attached {n} image{}",
+                if n > 1 { "s" } else { "" }
+            ));
+            return;
         }
-        app.toasts.info(format!(
-            "Attached {n} image{}",
-            if n > 1 { "s" } else { "" }
-        ));
-        return;
+        Ok(_) => {}
+        Err(e) => {
+            app.toasts.error(e);
+            return;
+        }
     }
     if app.mode == Mode::Watch {
         let one = crate::text::one_line(&s);
