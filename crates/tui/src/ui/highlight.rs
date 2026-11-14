@@ -1,7 +1,7 @@
 //! Syntax highlighting for code blocks (syntect) with an opencode-like palette and an
 //! incremental cache so growing (streaming) code blocks only highlight new lines.
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock, PoisonError};
 
 use ratatui::style::{Color, Modifier, Style};
 use syntect::highlighting::{
@@ -122,7 +122,8 @@ fn conv(s: syntect::highlighting::Style) -> Style {
     st
 }
 
-/// Highlights `code` (lines without trailing newline). Returns None if the language is unknown.
+/// Highlights `code` (lines without trailing newline). Returns None if the language is unknown,
+/// the block exceeds the size limits, or parsing fails.
 pub fn highlight(lang: &str, lines: &[&str]) -> Option<Vec<HlLine>> {
     let syntax = find_syntax(lang)?;
     // Very large blocks: skip highlighting for responsiveness.
@@ -131,7 +132,7 @@ pub fn highlight(lang: &str, lines: &[&str]) -> Option<Vec<HlLine>> {
     }
     let th = hl_theme();
     let highlighter = Highlighter::new(th);
-    let mut guard = cache().lock().ok()?;
+    let mut guard = cache().lock().unwrap_or_else(PoisonError::into_inner);
     // Best entry: same lang with the longest common prefix.
     let mut best: Option<(usize, usize)> = None;
     for (i, e) in guard.iter().enumerate() {
@@ -172,7 +173,9 @@ pub fn highlight(lang: &str, lines: &[&str]) -> Option<Vec<HlLine>> {
     };
     for line in &lines[common..] {
         let with_nl = format!("{line}\n");
-        let ops = ps.parse_line(&with_nl, syntaxes()).unwrap_or_default();
+        let Ok(ops) = ps.parse_line(&with_nl, syntaxes()) else {
+            return None;
+        };
         let mut hl: HlLine = Vec::new();
         for (style, piece, _) in RangedHighlightIterator::new(&mut hs, &ops, &with_nl, &highlighter)
         {
@@ -203,5 +206,17 @@ mod tests {
         assert_eq!(b.len(), 3);
         assert_eq!(a[0], b[0]);
         assert!(super::highlight("nosuchlang", &["x"]).is_none());
+    }
+
+    #[test]
+    fn recovers_from_poisoned_cache_mutex() {
+        let _ = std::thread::spawn(|| {
+            let _guard = super::cache().lock().unwrap();
+            panic!("intentional poison");
+        })
+        .join();
+        let out = super::highlight("rust", &["let x = 42;"]);
+        assert!(out.is_some());
+        assert_eq!(out.unwrap().len(), 1);
     }
 }
