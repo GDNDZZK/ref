@@ -298,7 +298,7 @@ async fn read_loop(
                     .ok()
                     .and_then(|v| v.get("id").and_then(Value::as_u64));
                 if let Some(id) = id {
-                    conn.send(err_frame(id, format!("Invalid request: {e}")));
+                    conn.send(err_frame(id, format!("Invalid request: {e}").into()));
                 } else {
                     conn.send(ServerFrame::Toast {
                         level: ref_proto::ToastLevel::Error,
@@ -325,13 +325,14 @@ async fn read_loop(
                     ok: true,
                     result,
                     error: None,
+                    code: None,
                 },
                 Err(e) => err_frame(id, e),
             });
         } else if let Err(e) = res {
             conn.send(ServerFrame::Toast {
                 level: ref_proto::ToastLevel::Error,
-                text: e,
+                text: e.message,
             });
         }
     }
@@ -348,14 +349,26 @@ async fn handle_hello(hub: &Arc<Hub>, conn: &Arc<Conn>, auth: &Auth, frame: Clie
         notify,
     } = frame.req
     else {
-        reject_frame(conn, frame.id, "first frame must be hello").await;
+        reject_frame(conn, frame.id, "first frame must be hello".into()).await;
         return false;
     };
     let cwd = hub.effective_cwd(&cwd);
     let ok = conn.lock().authed
         || (!auth.token.is_empty() && token.as_deref() == Some(auth.token.as_str()));
     if !ok {
-        reject_frame(conn, frame.id, "invalid or missing token").await;
+        reject_frame(conn, frame.id, "invalid or missing token".into()).await;
+        return false;
+    }
+    if version != ref_proto::PROTOCOL_VERSION && client != CONTROL_CLIENT {
+        reject_frame(
+            conn,
+            frame.id,
+            crate::api::ApiError::coded(
+                ref_proto::ERR_PROTOCOL_MISMATCH,
+                protocol_mismatch_text(&client, version),
+            ),
+        )
+        .await;
         return false;
     }
     {
@@ -376,6 +389,7 @@ async fn handle_hello(hub: &Arc<Hub>, conn: &Arc<Conn>, auth: &Auth, frame: Clie
             ok: true,
             result: hello_result(hub, &cwd),
             error: None,
+            code: None,
         });
     }
     conn.send(ServerFrame::Sessions {
@@ -385,11 +399,25 @@ async fn handle_hello(hub: &Arc<Hub>, conn: &Arc<Conn>, auth: &Auth, frame: Clie
 }
 
 /// Answers a refused first frame and gives the answer time to arrive before the close.
-async fn reject_frame(conn: &Conn, id: Option<u64>, reason: &str) {
+async fn reject_frame(conn: &Conn, id: Option<u64>, err: crate::api::ApiError) {
     if let Some(id) = id {
-        conn.send(err_frame(id, reason.into()));
+        conn.send(err_frame(id, err));
     }
     tokio::time::sleep(CLOSE_GRACE).await;
+}
+
+fn protocol_mismatch_text(client: &str, version: u32) -> String {
+    let server_ver = env!("CARGO_PKG_VERSION");
+    let proto = ref_proto::PROTOCOL_VERSION;
+    if version < proto {
+        format!(
+            "ref-server {server_ver} speaks protocol {proto}, but this client ({client}) speaks protocol {version}. Update the client to the same version as ref-server."
+        )
+    } else {
+        format!(
+            "ref-server {server_ver} speaks protocol {proto}, but this client ({client}) speaks protocol {version}. Restart the backend with the same version as the client (ref-server --stop, then start ref again)."
+        )
+    }
 }
 
 /// The instance as clients see it: everything but the token.
@@ -434,12 +462,13 @@ fn finish(hub: &Arc<Hub>, conn: &Arc<Conn>) {
     hub.remove_conn(conn.id);
 }
 
-fn err_frame(id: u64, e: String) -> ServerFrame {
+fn err_frame(id: u64, e: crate::api::ApiError) -> ServerFrame {
     ServerFrame::Response {
         id,
         ok: false,
         result: Value::Null,
-        error: Some(e),
+        error: Some(e.message),
+        code: e.code.map(str::to_string),
     }
 }
 

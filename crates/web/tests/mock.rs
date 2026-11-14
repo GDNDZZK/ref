@@ -4,12 +4,15 @@ mod common;
 
 use common::*;
 
-const HELLO: &str = r#"{"id":1,"op":"hello","client":"ref-web-test","version":2,"cwd":"/tmp"}"#;
 const MARKER_SESSION: &str = "tab-one-marker";
 
 /// Sends Hello and returns the response and the live session names of the Sessions frame.
 async fn hello(ws: &mut Channel) -> (serde_json::Value, Vec<String>) {
-    ws.send_text(HELLO).await;
+    let frame = format!(
+        r#"{{"id":1,"op":"hello","client":"ref-web-test","version":{},"cwd":"/tmp"}}"#,
+        ref_proto::PROTOCOL_VERSION
+    );
+    ws.send_text(&frame).await;
     let mut response = None;
     let mut sessions = None;
     while response.is_none() || sessions.is_none() {

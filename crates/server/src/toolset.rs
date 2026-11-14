@@ -272,6 +272,26 @@ pub(crate) async fn dispatch(
     }
 }
 
+/// Dry-run diff preview for a pending built-in `edit`/`write` permission request.
+pub(crate) async fn preview(
+    s: &Arc<Session>,
+    name: &str,
+    input: &Value,
+    cancel: &CancellationToken,
+) -> Option<ref_proto::EditPreview> {
+    let (cwd, resize_images) = {
+        let st = s.lock();
+        (st.info.cwd.clone(), st.cfg.images_auto_resize)
+    };
+    let ctx = ref_tools::ToolCtx {
+        cwd: cwd.into(),
+        store: s.hashes.clone(),
+        cancel: cancel.clone(),
+        on_output: None,
+        resize_images,
+    };
+    ref_tools::preview(name, input.clone(), &ctx).await
+}
 /// The string field `key` of a tool input, trimmed.
 fn str_field<'a>(input: &'a Value, key: &str) -> Option<&'a str> {
     input.get(key).and_then(Value::as_str).map(str::trim)

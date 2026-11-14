@@ -22,6 +22,15 @@ async fn response(
     id: u64,
     other: &mut Vec<ServerFrame>,
 ) -> (bool, Value, Option<String>) {
+    let (ok, result, error, _) = response_coded(ws, id, other).await;
+    (ok, result, error)
+}
+
+async fn response_coded(
+    ws: &mut Ws,
+    id: u64,
+    other: &mut Vec<ServerFrame>,
+) -> (bool, Value, Option<String>, Option<String>) {
     let fut = async {
         while let Some(m) = ws.next().await {
             let Ok(WsMsg::Text(t)) = m else { continue };
@@ -32,7 +41,8 @@ async fn response(
                     ok,
                     result,
                     error,
-                } if rid == id => return (ok, result, error),
+                    code,
+                } if rid == id => return (ok, result, error, code),
                 f => other.push(f),
             }
         }
@@ -389,14 +399,20 @@ async fn list_dirs_answers_with_sorted_sub_directories() {
 
     // Without a configured home directory `~` is just a missing name.
     send(&mut ws, 4, Request::ListDirs { path: "~".into() }).await;
-    let (ok, _, err) = response(&mut ws, 4, &mut other).await;
+    let (ok, _, err, code) = response_coded(&mut ws, 4, &mut other).await;
     assert!(!ok && err.is_some());
+    assert_eq!(code.as_deref(), Some(ref_proto::ERR_NOT_FOUND));
 
-    // Errors: missing path, a file, empty path.
-    for (id, path) in [(5, "nowhere"), (6, "file.txt"), (7, "  ")] {
+    // Errors: missing path gets ERR_NOT_FOUND; a file or empty path has no code.
+    for (id, path, expected_code) in [
+        (5, "nowhere", Some(ref_proto::ERR_NOT_FOUND)),
+        (6, "file.txt", None),
+        (7, "  ", None),
+    ] {
         send(&mut ws, id, Request::ListDirs { path: path.into() }).await;
-        let (ok, _, err) = response(&mut ws, id, &mut other).await;
+        let (ok, _, err, code) = response_coded(&mut ws, id, &mut other).await;
         assert!(!ok && err.is_some(), "{path}");
+        assert_eq!(code.as_deref(), expected_code, "{path}");
     }
 }
 
@@ -473,4 +489,101 @@ async fn list_dirs_skips_names_that_are_not_utf8() {
         .filter(|d| *d == "good" || d.contains("bad") || d.contains('\u{fffd}'))
         .collect();
     assert_eq!(names, ["good"]);
+}
+
+#[tokio::test]
+async fn hello_version_mismatch_is_refused_and_does_not_mark_frontend_joined() {
+    let (r, url, work) = start("sekret", 0).await;
+    let server_ver = env!("CARGO_PKG_VERSION");
+    let proto = ref_proto::PROTOCOL_VERSION;
+
+    // Older and newer clients are refused with ERR_PROTOCOL_MISMATCH and the socket closes.
+    for (bad_ver, client, expect_substr) in [
+        (
+            proto - 1,
+            "ref-gui",
+            "Update the client to the same version as ref-server.",
+        ),
+        (
+            proto + 1,
+            "ref",
+            "Restart the backend with the same version as the client",
+        ),
+    ] {
+        let (mut ws, _) = tokio_tungstenite::connect_async(format!("{url}?token=sekret"))
+            .await
+            .unwrap();
+        send(
+            &mut ws,
+            1,
+            Request::Hello {
+                client: client.into(),
+                version: bad_ver,
+                cwd: work.to_string_lossy().into(),
+                token: None,
+                notify: Vec::new(),
+            },
+        )
+        .await;
+        let (ok, _, err, code) = response_coded(&mut ws, 1, &mut Vec::new()).await;
+        assert!(!ok);
+        assert_eq!(code.as_deref(), Some(ref_proto::ERR_PROTOCOL_MISMATCH));
+        let err = err.unwrap();
+        assert!(err.contains(server_ver), "{err}");
+        assert!(err.contains(&format!("protocol {proto}")), "{err}");
+        assert!(err.contains(&format!("protocol {bad_ver}")), "{err}");
+        assert!(err.contains(&format!("({client})")), "{err}");
+        assert!(err.contains(expect_substr), "{err}");
+        let closed = tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(m) = ws.next().await {
+                if m.is_err() || matches!(m, Ok(WsMsg::Close(_))) {
+                    return;
+                }
+            }
+        })
+        .await;
+        assert!(closed.is_ok(), "server closes the refused connection");
+    }
+
+    // Refused clients did not call frontend_joined, so idle_timeout = 0 did not shut down.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(!r.hub.shutdown.is_cancelled());
+
+    // Bad token still fails before the version check (even with a wrong version).
+    let (mut ws, _) = tokio_tungstenite::connect_async(url.clone()).await.unwrap();
+    send(
+        &mut ws,
+        1,
+        Request::Hello {
+            client: "ref-gui".into(),
+            version: proto - 1,
+            cwd: work.to_string_lossy().into(),
+            token: Some("wrong".into()),
+            notify: Vec::new(),
+        },
+    )
+    .await;
+    let (ok, _, err, code) = response_coded(&mut ws, 1, &mut Vec::new()).await;
+    assert!(!ok);
+    assert_eq!(code, None);
+    assert!(err.unwrap().contains("token"));
+
+    // Control client (`ref-server-cli`) is exempt from the version check.
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!("{url}?token=sekret"))
+        .await
+        .unwrap();
+    send(
+        &mut ws,
+        1,
+        Request::Hello {
+            client: "ref-server-cli".into(),
+            version: proto - 1,
+            cwd: work.to_string_lossy().into(),
+            token: None,
+            notify: Vec::new(),
+        },
+    )
+    .await;
+    let (ok, _, err, code) = response_coded(&mut ws, 1, &mut Vec::new()).await;
+    assert!(ok, "{err:?} {code:?}");
 }

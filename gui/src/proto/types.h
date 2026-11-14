@@ -16,7 +16,7 @@ namespace refgui::proto
 {
 
 // Sent in Hello; the backend answers with its own version.
-constexpr int ProtocolVersion = 3;
+constexpr int ProtocolVersion = 4;
 
 // Written by ref-server to `<state dir>/instances/<pid>.json`.
 struct InstanceInfo

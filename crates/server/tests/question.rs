@@ -58,11 +58,14 @@ async fn rig(handler: Handler) -> Rig {
 }
 
 impl Rig {
-    async fn request(&self, req: Request) -> Result<Value, String> {
+    async fn request(&self, req: Request) -> Result<Value, ref_server::api::ApiError> {
         api::handle(&self.hub, &self.conn, req).await
     }
 
-    async fn answer(&self, answers: Option<Vec<Vec<&str>>>) -> Result<Value, String> {
+    async fn answer(
+        &self,
+        answers: Option<Vec<Vec<&str>>>,
+    ) -> Result<Value, ref_server::api::ApiError> {
         let answers = answers.map(|a| {
             a.into_iter()
                 .map(|e| e.into_iter().map(String::from).collect())
@@ -190,14 +193,16 @@ async fn the_first_valid_reply_wins_and_a_bad_one_changes_nothing() {
     rig.asked().await;
 
     let two = rig.answer(Some(vec![vec!["A", "B"]])).await.unwrap_err();
-    assert!(two.contains("one answer"), "{two}");
+    assert!(two.message.contains("one answer"), "{two}");
+    assert_eq!(two.code, None);
     let count = rig.answer(Some(vec![])).await.unwrap_err();
-    assert!(count.contains("Expected 1"), "{count}");
+    assert!(count.message.contains("Expected 1"), "{count}");
+    assert_eq!(count.code, None);
     assert_eq!(rig.session.lock().questions.len(), 1, "still waiting");
 
     rig.answer(Some(vec![vec!["B"]])).await.unwrap();
     let late = rig.answer(Some(vec![vec!["A"]])).await.unwrap_err();
-    assert!(late.contains("No pending question"), "{late}");
+    assert_eq!(late.code, Some(ref_proto::ERR_NO_PENDING_QUESTION));
     wait_idle(&rig.session).await;
     assert!(rig.result_seen_by_the_model().contains("\"Which?\"=\"B\""));
 }
@@ -217,10 +222,11 @@ async fn an_interrupt_ends_the_wait_and_tells_the_clients() {
     assert!(is_resolved(&rig.events()));
     assert!(rig.session.lock().questions.is_empty());
     let late = rig.answer(None).await.unwrap_err();
-    assert!(late.contains("No pending question"), "{late}");
+    assert_eq!(late.code, Some(ref_proto::ERR_NO_PENDING_QUESTION));
 }
 
 #[tokio::test]
+
 async fn undo_ends_the_wait_too() {
     let rig = rig(asking(one_question())).await;
     prompt(&rig.hub, &rig.session, "go");
@@ -318,4 +324,98 @@ async fn a_window_that_is_not_looking_gets_a_notification() {
             .iter()
             .all(|f| !matches!(f, ServerFrame::Notify { .. }))
     );
+}
+
+#[tokio::test]
+async fn late_permission_reply_has_the_error_code_and_text() {
+    let rig = rig(Arc::new(|_, _| Reply::Text("ok".into()))).await;
+    let err = rig
+        .request(Request::PermissionReply {
+            session_id: rig.session.id.clone(),
+            call_id: "missing".into(),
+            allow: true,
+            always: false,
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(err.message, ref_proto::NO_PENDING_PERMISSION);
+    assert_eq!(err.code, Some(ref_proto::ERR_NO_PENDING_PERMISSION));
+}
+
+#[tokio::test]
+async fn late_question_reply_over_websocket_carries_error_code() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message as WsMsg;
+
+    let m = mock(Arc::new(|_, _| Reply::Text("ok".into()))).await;
+    let dir = temp_dir("q-ws-code");
+    let work = dir.join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let (auth, _) = ref_server::ws::resolve_hosts(&["127.0.0.1".into()], String::new());
+    let r = ref_server::start(hub_options(config(&m.url), &dir), "127.0.0.1", 0, auth)
+        .await
+        .unwrap();
+    let url = format!("ws://127.0.0.1:{}/", r.addr.port());
+    let (mut ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+    type Ws = tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >;
+    async fn send(ws: &mut Ws, id: u64, req: Request) {
+        let t = serde_json::to_string(&ref_proto::ClientFrame { id: Some(id), req }).unwrap();
+        ws.send(WsMsg::text(t)).await.unwrap();
+    }
+    async fn next_resp(ws: &mut Ws, target: u64) -> Value {
+        while let Some(Ok(WsMsg::Text(t))) = ws.next().await {
+            let v: Value = serde_json::from_str(&t).unwrap();
+            if v["kind"] == "response" && v["id"] == target {
+                return v;
+            }
+        }
+        panic!("socket closed before response {target}");
+    }
+    send(
+        &mut ws,
+        1,
+        Request::Hello {
+            client: "test".into(),
+            version: ref_proto::PROTOCOL_VERSION,
+            cwd: work.to_string_lossy().into(),
+            token: None,
+            notify: vec![],
+        },
+    )
+    .await;
+    assert_eq!(next_resp(&mut ws, 1).await["ok"], true);
+
+    send(
+        &mut ws,
+        2,
+        Request::CreateSession {
+            cwd: work.to_string_lossy().into(),
+            agent: None,
+            model: None,
+            name: None,
+        },
+    )
+    .await;
+    let created = next_resp(&mut ws, 2).await;
+    let sid = created["result"]["session"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    send(
+        &mut ws,
+        3,
+        Request::QuestionReply {
+            session_id: sid,
+            call_id: "missing".into(),
+            answers: None,
+        },
+    )
+    .await;
+    let resp = next_resp(&mut ws, 3).await;
+    assert_eq!(resp["ok"], false);
+    assert_eq!(resp["error"], ref_proto::NO_PENDING_QUESTION);
+    assert_eq!(resp["code"], ref_proto::ERR_NO_PENDING_QUESTION);
 }
