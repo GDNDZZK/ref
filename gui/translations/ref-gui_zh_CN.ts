@@ -62,12 +62,12 @@
         <translation>退出码 %1</translation>
     </message>
     <message>
-        <location filename="../src/app/BashBody.qml" line="71"/>
+        <location filename="../src/app/BashBody.qml" line="72"/>
         <source>timed out</source>
         <translation>已超时</translation>
     </message>
     <message>
-        <location filename="../src/app/BashBody.qml" line="76"/>
+        <location filename="../src/app/BashBody.qml" line="78"/>
         <source>cancelled</source>
         <translation>已取消</translation>
     </message>
@@ -106,7 +106,7 @@
 <context>
     <name>ChatSession</name>
     <message>
-        <location filename="../src/app/chat_session.cpp" line="282"/>
+        <location filename="../src/app/chat_session.cpp" line="278"/>
         <source>Not connected to the ref backend.</source>
         <translation>未连接到 ref 后端。</translation>
     </message>
@@ -173,157 +173,157 @@
 <context>
     <name>Commands</name>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="61"/>
+        <location filename="../src/workspace/command_registry.cpp" line="47"/>
         <source>Session</source>
         <translation>会话</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="62"/>
+        <location filename="../src/workspace/command_registry.cpp" line="48"/>
         <source>View</source>
         <translation>视图</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="63"/>
+        <location filename="../src/workspace/command_registry.cpp" line="49"/>
         <source>Help</source>
         <translation>帮助</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="67"/>
+        <location filename="../src/workspace/command_registry.cpp" line="54"/>
         <source>New session</source>
         <translation>新建会话</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="68"/>
+        <location filename="../src/workspace/command_registry.cpp" line="55"/>
         <source>New session in another folder…</source>
         <translation>在其他文件夹新建会话…</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="69"/>
+        <location filename="../src/workspace/command_registry.cpp" line="56"/>
         <source>Switch session (live + history)</source>
         <translation>切换会话（运行中 + 历史）</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="70"/>
+        <location filename="../src/workspace/command_registry.cpp" line="57"/>
         <source>Switch model (this session only)</source>
         <translation>切换模型（仅此会话）</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="71"/>
+        <location filename="../src/workspace/command_registry.cpp" line="58"/>
         <source>Switch agent</source>
         <translation>切换智能体</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="72"/>
+        <location filename="../src/workspace/command_registry.cpp" line="59"/>
         <source>Set or cycle model variant</source>
         <translation>设置或循环切换模型变体</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="73"/>
+        <location filename="../src/workspace/command_registry.cpp" line="60"/>
         <source>Compact the conversation</source>
         <translation>压缩对话</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="74"/>
+        <location filename="../src/workspace/command_registry.cpp" line="61"/>
         <source>Undo last prompt</source>
         <translation>撤销上一条提示</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="75"/>
+        <location filename="../src/workspace/command_registry.cpp" line="62"/>
         <source>Rename the session</source>
         <translation>重命名会话</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="76"/>
+        <location filename="../src/workspace/command_registry.cpp" line="63"/>
         <source>Change this session&apos;s working directory</source>
         <translation>更改此会话的工作目录</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="77"/>
+        <location filename="../src/workspace/command_registry.cpp" line="64"/>
         <source>Close this session</source>
         <translation>关闭此会话</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="78"/>
+        <location filename="../src/workspace/command_registry.cpp" line="65"/>
         <source>Close live sessions (picker, or by name / id)</source>
         <translation>关闭运行中的会话（选择器，或按名称 / id）</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="79"/>
+        <location filename="../src/workspace/command_registry.cpp" line="66"/>
         <source>List other live sessions you can message</source>
         <translation>列出可发送消息的其他运行中会话</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="80"/>
+        <location filename="../src/workspace/command_registry.cpp" line="67"/>
         <source>Show or set this session&apos;s peer name</source>
         <translation>查看或设置此会话的对等名称</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="81"/>
+        <location filename="../src/workspace/command_registry.cpp" line="68"/>
         <source>Messages received from other sessions</source>
         <translation>收到的其他会话消息</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="82"/>
+        <location filename="../src/workspace/command_registry.cpp" line="69"/>
         <source>Messages sent to other sessions and their status</source>
         <translation>发给其他会话的消息及其状态</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="83"/>
+        <location filename="../src/workspace/command_registry.cpp" line="70"/>
         <source>Export transcript as markdown</source>
         <translation>将记录导出为 markdown</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="84"/>
+        <location filename="../src/workspace/command_registry.cpp" line="71"/>
         <source>Copy last assistant message (raw)</source>
         <translation>复制助手最后一条消息（原文）</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="85"/>
+        <location filename="../src/workspace/command_registry.cpp" line="72"/>
         <source>Toggle expanded thinking</source>
         <translation>展开/折叠思考内容</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="86"/>
+        <location filename="../src/workspace/command_registry.cpp" line="73"/>
         <source>Toggle expanded tool details</source>
         <translation>展开/折叠工具详情</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="87"/>
+        <location filename="../src/workspace/command_registry.cpp" line="74"/>
         <source>Split view of background sessions</source>
         <translation>后台会话分屏视图</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="88"/>
+        <location filename="../src/workspace/command_registry.cpp" line="75"/>
         <source>Toggle sidebar</source>
         <translation>显示/隐藏侧边栏</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="89"/>
+        <location filename="../src/workspace/command_registry.cpp" line="76"/>
         <source>Zoom in on the focused tile</source>
         <translation>放大当前分块</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="90"/>
+        <location filename="../src/workspace/command_registry.cpp" line="77"/>
         <source>MCP servers: status, errors and tools</source>
         <translation>MCP 服务器：状态、错误和工具</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="91"/>
+        <location filename="../src/workspace/command_registry.cpp" line="78"/>
         <source>Keybindings and commands</source>
         <translation>快捷键与命令</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="92"/>
+        <location filename="../src/workspace/command_registry.cpp" line="79"/>
         <source>Settings</source>
         <translation>设置</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="93"/>
+        <location filename="../src/workspace/command_registry.cpp" line="80"/>
         <source>Command palette</source>
         <translation>命令面板</translation>
     </message>
     <message>
-        <location filename="../src/workspace/command_registry.cpp" line="133"/>
+        <location filename="../src/workspace/command_registry.cpp" line="126"/>
         <source>Custom</source>
         <translation>自定义</translation>
     </message>
@@ -331,32 +331,32 @@
 <context>
     <name>Composer</name>
     <message>
-        <location filename="../src/app/Composer.qml" line="147"/>
+        <location filename="../src/app/Composer.qml" line="148"/>
         <source>Run a shell command…</source>
         <translation>运行 shell 命令…</translation>
     </message>
     <message>
-        <location filename="../src/app/Composer.qml" line="148"/>
+        <location filename="../src/app/Composer.qml" line="149"/>
         <source>Type to queue a message…</source>
         <translation>输入后加入队列…</translation>
     </message>
     <message>
-        <location filename="../src/app/Composer.qml" line="149"/>
+        <location filename="../src/app/Composer.qml" line="150"/>
         <source>Message ref</source>
         <translation>给 ref 发消息</translation>
     </message>
     <message>
-        <location filename="../src/app/Composer.qml" line="240"/>
+        <location filename="../src/app/Composer.qml" line="241"/>
         <source>Cancelled the delayed tool call</source>
         <translation>已取消延迟中的工具调用</translation>
     </message>
     <message>
-        <location filename="../src/app/Composer.qml" line="328"/>
-        <source>Drop images to attach</source>
-        <translation>拖放图片以附加</translation>
+        <location filename="../src/app/Composer.qml" line="329"/>
+        <source>Drop files here</source>
+        <translation>拖放文件到此处</translation>
     </message>
     <message>
-        <location filename="../src/app/Composer.qml" line="146"/>
+        <location filename="../src/app/Composer.qml" line="147"/>
         <source>Waiting for the ref backend…</source>
         <translation>正在等待 ref 后端…</translation>
     </message>
@@ -426,6 +426,26 @@
     </message>
 </context>
 <context>
+    <name>DiffBody</name>
+    <message>
+        <location filename="../src/app/DiffBody.qml" line="24"/>
+        <source>Input</source>
+        <translation>输入</translation>
+    </message>
+    <message>
+        <location filename="../src/app/DiffBody.qml" line="75"/>
+        <source>+%1 more</source>
+        <translation>还有 %1 行</translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/app/DiffBody.qml" line="75"/>
+        <source>Show %n more line(s)</source>
+        <translation>
+            <numerusform>再显示 %n 行</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
     <name>ExportDialog</name>
     <message>
         <location filename="../src/app/ExportDialog.qml" line="14"/>
@@ -467,22 +487,22 @@
 <context>
     <name>Format</name>
     <message>
-        <location filename="../src/app/Format.qml" line="68"/>
+        <location filename="../src/app/Format.qml" line="67"/>
         <source>just now</source>
         <translation>刚刚</translation>
     </message>
     <message>
-        <location filename="../src/app/Format.qml" line="70"/>
+        <location filename="../src/app/Format.qml" line="69"/>
         <source>%1m ago</source>
         <translation>%1 分钟前</translation>
     </message>
     <message>
-        <location filename="../src/app/Format.qml" line="72"/>
+        <location filename="../src/app/Format.qml" line="71"/>
         <source>%1h ago</source>
         <translation>%1 小时前</translation>
     </message>
     <message>
-        <location filename="../src/app/Format.qml" line="75"/>
+        <location filename="../src/app/Format.qml" line="74"/>
         <source>Yesterday</source>
         <translation>昨天</translation>
     </message>
@@ -517,57 +537,57 @@
 <context>
     <name>HelpDialog</name>
     <message>
-        <location filename="../src/app/HelpDialog.qml" line="10"/>
+        <location filename="../src/app/HelpDialog.qml" line="11"/>
         <source>Send</source>
         <translation>发送</translation>
     </message>
     <message>
-        <location filename="../src/app/HelpDialog.qml" line="11"/>
+        <location filename="../src/app/HelpDialog.qml" line="12"/>
         <source>New line</source>
         <translation>换行</translation>
     </message>
     <message>
-        <location filename="../src/app/HelpDialog.qml" line="12"/>
+        <location filename="../src/app/HelpDialog.qml" line="13"/>
         <source>Interrupt the session</source>
         <translation>中断会话</translation>
     </message>
     <message>
-        <location filename="../src/app/HelpDialog.qml" line="13"/>
+        <location filename="../src/app/HelpDialog.qml" line="14"/>
         <source>Next agent</source>
         <translation>下一个智能体</translation>
     </message>
     <message>
-        <location filename="../src/app/HelpDialog.qml" line="14"/>
+        <location filename="../src/app/HelpDialog.qml" line="15"/>
         <source>Previous agent</source>
         <translation>上一个智能体</translation>
     </message>
     <message>
-        <location filename="../src/app/HelpDialog.qml" line="15"/>
+        <location filename="../src/app/HelpDialog.qml" line="16"/>
         <source>Earlier prompts</source>
         <translation>历史提示</translation>
     </message>
     <message>
-        <location filename="../src/app/HelpDialog.qml" line="16"/>
+        <location filename="../src/app/HelpDialog.qml" line="17"/>
         <source>Move between tiles (split view)</source>
         <translation>在分块间移动（分屏视图）</translation>
     </message>
     <message>
-        <location filename="../src/app/HelpDialog.qml" line="26"/>
+        <location filename="../src/app/HelpDialog.qml" line="27"/>
         <source>Keybindings and commands</source>
         <translation>快捷键与命令</translation>
     </message>
     <message>
-        <location filename="../src/app/HelpDialog.qml" line="33"/>
+        <location filename="../src/app/HelpDialog.qml" line="34"/>
         <source>Keyboard</source>
         <translation>键盘</translation>
     </message>
     <message>
-        <location filename="../src/app/HelpDialog.qml" line="47"/>
+        <location filename="../src/app/HelpDialog.qml" line="49"/>
         <source>Writing</source>
         <translation>输入</translation>
     </message>
     <message>
-        <location filename="../src/app/HelpDialog.qml" line="61"/>
+        <location filename="../src/app/HelpDialog.qml" line="64"/>
         <source>Commands</source>
         <translation>命令</translation>
     </message>
@@ -591,7 +611,7 @@
 <context>
     <name>LineView</name>
     <message numerus="yes">
-        <location filename="../src/app/LineView.qml" line="138"/>
+        <location filename="../src/app/LineView.qml" line="23"/>
         <location filename="../tests/tst_app_translator.cpp" line="21"/>
         <source>Show %n more line(s)</source>
         <translation>
@@ -607,22 +627,22 @@
         <translation>在其他目录新建会话…</translation>
     </message>
     <message>
-        <location filename="../src/app/Main.qml" line="223"/>
+        <location filename="../src/app/Main.qml" line="225"/>
         <source>Show sidebar</source>
         <translation>显示侧边栏</translation>
     </message>
     <message>
-        <location filename="../src/app/Main.qml" line="234"/>
+        <location filename="../src/app/Main.qml" line="236"/>
         <source>New session</source>
         <translation>新建会话</translation>
     </message>
     <message>
-        <location filename="../src/app/Main.qml" line="249"/>
+        <location filename="../src/app/Main.qml" line="251"/>
         <source>Split view</source>
         <translation>分屏视图</translation>
     </message>
     <message>
-        <location filename="../src/app/Main.qml" line="258"/>
+        <location filename="../src/app/Main.qml" line="260"/>
         <source>Leave zoom</source>
         <translation>退出放大</translation>
     </message>
@@ -786,7 +806,7 @@
     <name>PeersDialog</name>
     <message>
         <location filename="../src/app/PeersDialog.qml" line="11"/>
-        <location filename="../src/app/PeersDialog.qml" line="43"/>
+        <location filename="../src/app/PeersDialog.qml" line="47"/>
         <source>Peers</source>
         <translation>对等会话</translation>
     </message>
@@ -806,17 +826,17 @@
         <translation>发件箱</translation>
     </message>
     <message>
-        <location filename="../src/app/PeersDialog.qml" line="86"/>
+        <location filename="../src/app/PeersDialog.qml" line="90"/>
         <source>Loading…</source>
         <translation>加载中…</translation>
     </message>
     <message>
-        <location filename="../src/app/PeersDialog.qml" line="104"/>
+        <location filename="../src/app/PeersDialog.qml" line="108"/>
         <source>Peer name</source>
         <translation>对等名称</translation>
     </message>
     <message>
-        <location filename="../src/app/PeersDialog.qml" line="109"/>
+        <location filename="../src/app/PeersDialog.qml" line="113"/>
         <source>Set name</source>
         <translation>设置名称</translation>
     </message>
@@ -824,22 +844,32 @@
 <context>
     <name>PermissionSection</name>
     <message>
-        <location filename="../src/app/PermissionSection.qml" line="88"/>
+        <location filename="../src/app/PermissionSection.qml" line="94"/>
+        <source>Preview</source>
+        <translation>预览</translation>
+    </message>
+    <message>
+        <location filename="../src/app/PermissionSection.qml" line="118"/>
+        <source>(preview cut)</source>
+        <translation>（预览已截断）</translation>
+    </message>
+    <message>
+        <location filename="../src/app/PermissionSection.qml" line="154"/>
         <source>Allow</source>
         <translation>允许</translation>
     </message>
     <message>
-        <location filename="../src/app/PermissionSection.qml" line="95"/>
+        <location filename="../src/app/PermissionSection.qml" line="162"/>
         <source>Allow for session</source>
         <translation>本会话内允许</translation>
     </message>
     <message>
-        <location filename="../src/app/PermissionSection.qml" line="102"/>
+        <location filename="../src/app/PermissionSection.qml" line="170"/>
         <source>Deny</source>
         <translation>拒绝</translation>
     </message>
     <message>
-        <location filename="../src/app/PermissionSection.qml" line="113"/>
+        <location filename="../src/app/PermissionSection.qml" line="182"/>
         <source>+%1 more waiting</source>
         <translation>另有 %1 个在等待</translation>
     </message>
@@ -857,9 +887,22 @@
         <translation>没有找到</translation>
     </message>
     <message>
-        <location filename="../src/app/PickList.qml" line="96"/>
+        <location filename="../src/app/PickList.qml" line="97"/>
         <source>Clear search</source>
         <translation>清除搜索</translation>
+    </message>
+</context>
+<context>
+    <name>QuestionBody</name>
+    <message>
+        <location filename="../src/app/QuestionBody.qml" line="46"/>
+        <source>Unanswered</source>
+        <translation>未回答</translation>
+    </message>
+    <message>
+        <location filename="../src/app/QuestionBody.qml" line="63"/>
+        <source>Input</source>
+        <translation>输入</translation>
     </message>
 </context>
 <context>
@@ -983,12 +1026,12 @@
 <context>
     <name>SessionPane</name>
     <message>
-        <location filename="../src/app/SessionPane.qml" line="99"/>
+        <location filename="../src/app/SessionPane.qml" line="104"/>
         <source>What are we building?</source>
         <translation>我们要做点什么？</translation>
     </message>
     <message>
-        <location filename="../src/app/SessionPane.qml" line="125"/>
+        <location filename="../src/app/SessionPane.qml" line="130"/>
         <source>Jump to latest</source>
         <translation>跳到最新</translation>
     </message>
@@ -1034,37 +1077,57 @@
 <context>
     <name>SessionsDialog</name>
     <message>
-        <location filename="../src/app/SessionsDialog.qml" line="14"/>
+        <location filename="../src/app/SessionsDialog.qml" line="32"/>
+        <source>All</source>
+        <translation>全部</translation>
+    </message>
+    <message>
+        <location filename="../src/app/SessionsDialog.qml" line="33"/>
+        <source>User-created</source>
+        <translation>用户创建</translation>
+    </message>
+    <message>
+        <location filename="../src/app/SessionsDialog.qml" line="34"/>
+        <source>By %1</source>
+        <translation>来自 %1</translation>
+    </message>
+    <message>
+        <location filename="../src/app/SessionsDialog.qml" line="34"/>
+        <source>By creator</source>
+        <translation>按创建者</translation>
+    </message>
+    <message>
+        <location filename="../src/app/SessionsDialog.qml" line="115"/>
         <source>Close a session</source>
         <translation>关闭会话</translation>
     </message>
     <message>
-        <location filename="../src/app/SessionsDialog.qml" line="14"/>
+        <location filename="../src/app/SessionsDialog.qml" line="115"/>
         <source>Switch session</source>
         <translation>切换会话</translation>
     </message>
     <message>
-        <location filename="../src/app/SessionsDialog.qml" line="27"/>
+        <location filename="../src/app/SessionsDialog.qml" line="168"/>
         <source>Search sessions</source>
         <translation>搜索会话</translation>
     </message>
     <message>
-        <location filename="../src/app/SessionsDialog.qml" line="29"/>
+        <location filename="../src/app/SessionsDialog.qml" line="170"/>
         <source>Running</source>
         <translation>运行中</translation>
     </message>
     <message>
-        <location filename="../src/app/SessionsDialog.qml" line="29"/>
+        <location filename="../src/app/SessionsDialog.qml" line="170"/>
         <source>History</source>
         <translation>历史</translation>
     </message>
     <message>
-        <location filename="../src/app/SessionsDialog.qml" line="30"/>
+        <location filename="../src/app/SessionsDialog.qml" line="171"/>
         <source>No matching sessions</source>
         <translation>没有匹配的会话</translation>
     </message>
     <message>
-        <location filename="../src/app/SessionsDialog.qml" line="98"/>
+        <location filename="../src/app/SessionsDialog.qml" line="109"/>
         <source>Close session</source>
         <translation>关闭会话</translation>
     </message>
@@ -1180,37 +1243,37 @@
 <context>
     <name>StatusLine</name>
     <message>
-        <location filename="../src/app/StatusLine.qml" line="44"/>
+        <location filename="../src/app/StatusLine.qml" line="48"/>
         <source>Working</source>
         <translation>处理中</translation>
     </message>
     <message>
-        <location filename="../src/app/StatusLine.qml" line="46"/>
+        <location filename="../src/app/StatusLine.qml" line="50"/>
         <source>Running tools</source>
         <translation>正在运行工具</translation>
     </message>
     <message>
-        <location filename="../src/app/StatusLine.qml" line="48"/>
+        <location filename="../src/app/StatusLine.qml" line="52"/>
         <source>Compacting context…</source>
         <translation>正在压缩上下文…</translation>
     </message>
     <message>
-        <location filename="../src/app/StatusLine.qml" line="50"/>
+        <location filename="../src/app/StatusLine.qml" line="54"/>
         <source>Waiting for your permission</source>
         <translation>等待你的授权</translation>
     </message>
     <message>
-        <location filename="../src/app/StatusLine.qml" line="52"/>
+        <location filename="../src/app/StatusLine.qml" line="56"/>
         <source>Waiting for your answer</source>
         <translation>等待你的回答</translation>
     </message>
     <message>
-        <location filename="../src/app/StatusLine.qml" line="54"/>
+        <location filename="../src/app/StatusLine.qml" line="58"/>
         <source>Retrying in %1 (attempt %2): %3</source>
         <translation>%1 后重试（第 %2 次）：%3</translation>
     </message>
     <message>
-        <location filename="../src/app/StatusLine.qml" line="169"/>
+        <location filename="../src/app/StatusLine.qml" line="174"/>
         <source>Context: %1 of %2 tokens. Compaction is recommended at %3 and automatic at %4.</source>
         <translation>上下文：%1 / %2 tokens。建议在 %3 时压缩，%4 时自动压缩。</translation>
     </message>
@@ -1239,7 +1302,7 @@
 <context>
     <name>Tile</name>
     <message>
-        <location filename="../src/app/Tile.qml" line="186"/>
+        <location filename="../src/app/Tile.qml" line="214"/>
         <source>Zoom in</source>
         <translation>放大</translation>
     </message>
@@ -1247,12 +1310,12 @@
 <context>
     <name>TileGrid</name>
     <message>
-        <location filename="../src/app/TileGrid.qml" line="131"/>
+        <location filename="../src/app/TileGrid.qml" line="166"/>
         <source>No background sessions</source>
         <translation>没有后台会话</translation>
     </message>
     <message>
-        <location filename="../src/app/TileGrid.qml" line="137"/>
+        <location filename="../src/app/TileGrid.qml" line="172"/>
         <source>New session</source>
         <translation>新建会话</translation>
     </message>
@@ -1269,47 +1332,47 @@
 <context>
     <name>ToolBlock</name>
     <message>
-        <location filename="../src/app/ToolBlock.qml" line="56"/>
+        <location filename="../src/app/ToolBlock.qml" line="59"/>
         <source>writing…</source>
         <translation>正在写入…</translation>
     </message>
     <message>
-        <location filename="../src/app/ToolBlock.qml" line="58"/>
+        <location filename="../src/app/ToolBlock.qml" line="61"/>
         <source>Needs permission</source>
         <translation>需要授权</translation>
     </message>
     <message>
-        <location filename="../src/app/ToolBlock.qml" line="60"/>
+        <location filename="../src/app/ToolBlock.qml" line="63"/>
         <source>Runs in %1</source>
         <translation>%1 后执行</translation>
     </message>
     <message>
-        <location filename="../src/app/ToolBlock.qml" line="62"/>
+        <location filename="../src/app/ToolBlock.qml" line="65"/>
         <source>running %1</source>
         <translation>运行中 %1</translation>
     </message>
     <message>
-        <location filename="../src/app/ToolBlock.qml" line="64"/>
+        <location filename="../src/app/ToolBlock.qml" line="67"/>
         <source>error</source>
         <translation>出错</translation>
     </message>
     <message>
-        <location filename="../src/app/ToolBlock.qml" line="64"/>
+        <location filename="../src/app/ToolBlock.qml" line="67"/>
         <source>error %1</source>
         <translation>出错 %1</translation>
     </message>
     <message>
-        <location filename="../src/app/ToolBlock.qml" line="66"/>
+        <location filename="../src/app/ToolBlock.qml" line="69"/>
         <source>denied</source>
         <translation>已拒绝</translation>
     </message>
     <message>
-        <location filename="../src/app/ToolBlock.qml" line="68"/>
+        <location filename="../src/app/ToolBlock.qml" line="71"/>
         <source>cancelled</source>
         <translation>已取消</translation>
     </message>
     <message>
-        <location filename="../src/app/ToolBlock.qml" line="207"/>
+        <location filename="../src/app/ToolBlock.qml" line="210"/>
         <source>Cancel</source>
         <translation>取消</translation>
     </message>
@@ -1385,39 +1448,37 @@
 <context>
     <name>Workspace</name>
     <message>
-        <location filename="../src/app/workspace.cpp" line="50"/>
+        <location filename="../src/app/workspace.cpp" line="47"/>
         <source>Could not save the settings: %1</source>
         <translation>无法保存设置：%1</translation>
     </message>
     <message>
-        <location filename="../src/app/workspace.cpp" line="52"/>
-        <location filename="../src/app/workspace_commands.cpp" line="20"/>
-        <location filename="../src/app/workspace_commands.cpp" line="30"/>
+        <location filename="../src/app/workspace.cpp" line="209"/>
         <source>That command is not available now.</source>
         <translation>该命令当前不可用。</translation>
     </message>
     <message>
-        <location filename="../src/app/workspace.cpp" line="157"/>
+        <location filename="../src/app/workspace.cpp" line="158"/>
         <source>Connecting to the ref backend…</source>
         <translation>正在连接 ref 后端…</translation>
     </message>
     <message>
-        <location filename="../src/app/workspace.cpp" line="159"/>
+        <location filename="../src/app/workspace.cpp" line="160"/>
         <source>Starting the ref backend…</source>
         <translation>正在启动 ref 后端…</translation>
     </message>
     <message>
-        <location filename="../src/app/workspace.cpp" line="161"/>
+        <location filename="../src/app/workspace.cpp" line="162"/>
         <source>Disconnected: %1. Trying again…</source>
         <translation>连接已断开：%1。正在重试…</translation>
     </message>
     <message>
-        <location filename="../src/app/workspace.cpp" line="260"/>
+        <location filename="../src/app/workspace.cpp" line="269"/>
         <source>No earlier session in this directory. Started a new one.</source>
         <translation>此目录下没有更早的会话，已新建一个。</translation>
     </message>
     <message>
-        <location filename="../src/app/workspace_commands.cpp" line="104"/>
+        <location filename="../src/app/workspace_commands.cpp" line="109"/>
         <source>No live session &quot;%1&quot;.</source>
         <translation>没有运行中的会话“%1”。</translation>
     </message>
@@ -1430,12 +1491,12 @@
 <context>
     <name>refgui::compose</name>
     <message>
-        <location filename="../src/compose/image_file.cpp" line="97"/>
+        <location filename="../src/compose/image_file.cpp" line="82"/>
         <source>%1 is larger than %2 MiB.</source>
         <translation>%1 超过 %2 MiB。</translation>
     </message>
     <message>
-        <location filename="../src/compose/image_file.cpp" line="103"/>
+        <location filename="../src/compose/image_file.cpp" line="88"/>
         <source>Cannot read %1: %2</source>
         <translation>无法读取 %1：%2</translation>
     </message>
@@ -1443,22 +1504,22 @@
 <context>
     <name>refgui::composer</name>
     <message>
-        <location filename="../src/composer/queue_model.cpp" line="22"/>
+        <location filename="../src/composer/queue_model.cpp" line="28"/>
         <source>from %1</source>
         <translation>来自 %1</translation>
     </message>
     <message>
-        <location filename="../src/composer/queue_model.cpp" line="24"/>
+        <location filename="../src/composer/queue_model.cpp" line="30"/>
         <source>Reminder</source>
         <translation>提醒</translation>
     </message>
     <message>
-        <location filename="../src/composer/queue_model.cpp" line="26"/>
+        <location filename="../src/composer/queue_model.cpp" line="32"/>
         <source>Summary</source>
         <translation>摘要</translation>
     </message>
     <message>
-        <location filename="../src/composer/queue_model.cpp" line="28"/>
+        <location filename="../src/composer/queue_model.cpp" line="34"/>
         <source>Shell</source>
         <translation>Shell</translation>
     </message>
@@ -1466,66 +1527,75 @@
 <context>
     <name>refgui::composer::ComposerModel</name>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="273"/>
-        <location filename="../src/composer/composer_model.cpp" line="314"/>
+        <location filename="../src/composer/composer_model.cpp" line="274"/>
+        <location filename="../src/composer/composer_model.cpp" line="315"/>
         <source>Not connected to the ref backend.</source>
         <translation>未连接到 ref 后端。</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="374"/>
+        <location filename="../src/composer/composer_model.cpp" line="384"/>
         <source>The command expanded to nothing</source>
         <translation>命令展开后为空</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="448"/>
+        <location filename="../src/composer/composer_model.cpp" line="458"/>
         <source>Already sent; the prompt can no longer be removed</source>
         <translation>已经发送，无法再撤回该提示</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="589"/>
+        <location filename="../src/composer/composer_model.cpp" line="596"/>
         <source>The image is larger than %1 MiB.</source>
         <translation>图片超过 %1 MiB。</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="619"/>
+        <location filename="../src/composer/composer_model.cpp" line="638"/>
+        <source>File not found: %1</source>
+        <translation>找不到文件：%1</translation>
+    </message>
+    <message>
+        <location filename="../src/composer/composer_model.cpp" line="644"/>
+        <source>%1 is not a local file</source>
+        <translation>%1 不是本地文件</translation>
+    </message>
+    <message>
         <source>%1 is not a supported image (PNG, JPEG, GIF or WebP)</source>
-        <translation>%1 不是支持的图片（PNG、JPEG、GIF 或 WebP）</translation>
+        <translation type="vanished">%1 不是支持的图片（PNG、JPEG、GIF 或 WebP）</translation>
     </message>
 </context>
 <context>
     <name>refgui::notify</name>
     <message>
-        <location filename="../src/notify/notification_text.cpp" line="31"/>
+        <location filename="../src/notify/notification_text.cpp" line="38"/>
         <source>Waiting for permission</source>
         <translation>等待授权</translation>
     </message>
     <message>
-        <location filename="../src/notify/notification_text.cpp" line="31"/>
+        <location filename="../src/notify/notification_text.cpp" line="38"/>
         <source>Waiting for permission to use %1</source>
         <translation>等待授权使用 %1</translation>
     </message>
     <message>
-        <location filename="../src/notify/notification_text.cpp" line="33"/>
+        <location filename="../src/notify/notification_text.cpp" line="40"/>
         <source>Asks a question</source>
         <translation>提了一个问题</translation>
     </message>
     <message>
-        <location filename="../src/notify/notification_text.cpp" line="33"/>
+        <location filename="../src/notify/notification_text.cpp" line="40"/>
         <source>Asks: %1</source>
         <translation>提问：%1</translation>
     </message>
     <message>
-        <location filename="../src/notify/notification_text.cpp" line="35"/>
+        <location filename="../src/notify/notification_text.cpp" line="42"/>
         <source>Finished</source>
         <translation>已完成</translation>
     </message>
     <message>
-        <location filename="../src/notify/notification_text.cpp" line="37"/>
+        <location filename="../src/notify/notification_text.cpp" line="44"/>
         <source>Stopped with an error</source>
         <translation>因错误而停止</translation>
     </message>
     <message>
-        <location filename="../src/notify/notification_text.cpp" line="37"/>
+        <location filename="../src/notify/notification_text.cpp" line="44"/>
         <source>Stopped with an error: %1</source>
         <translation>因错误而停止：%1</translation>
     </message>
@@ -1538,18 +1608,18 @@
 <context>
     <name>refgui::notify::DBusNotifier</name>
     <message>
-        <location filename="../src/notify/dbus_notifier.cpp" line="57"/>
+        <location filename="../src/notify/dbus_notifier.cpp" line="68"/>
         <source>Looking for the desktop notification service…</source>
         <translation>正在查找桌面通知服务…</translation>
     </message>
     <message>
-        <location filename="../src/notify/dbus_notifier.cpp" line="71"/>
-        <location filename="../src/notify/dbus_notifier.cpp" line="107"/>
+        <location filename="../src/notify/dbus_notifier.cpp" line="82"/>
+        <location filename="../src/notify/dbus_notifier.cpp" line="118"/>
         <source>No desktop notification service is running.</source>
         <translation>没有运行中的桌面通知服务。</translation>
     </message>
     <message>
-        <location filename="../src/notify/dbus_notifier.cpp" line="130"/>
+        <location filename="../src/notify/dbus_notifier.cpp" line="141"/>
         <source>Open</source>
         <translation>打开</translation>
     </message>
@@ -1557,23 +1627,23 @@
 <context>
     <name>refgui::session::QuestionPrompt</name>
     <message>
-        <location filename="../src/session/question_prompt.cpp" line="78"/>
-        <location filename="../src/session/question_prompt.cpp" line="88"/>
+        <location filename="../src/session/question_prompt.cpp" line="81"/>
+        <location filename="../src/session/question_prompt.cpp" line="91"/>
         <source>Confirm</source>
         <translation>确认</translation>
     </message>
     <message>
-        <location filename="../src/session/question_prompt.cpp" line="97"/>
+        <location filename="../src/session/question_prompt.cpp" line="100"/>
         <source>Check your answers</source>
         <translation>检查你的回答</translation>
     </message>
     <message>
-        <location filename="../src/session/question_prompt.cpp" line="142"/>
+        <location filename="../src/session/question_prompt.cpp" line="145"/>
         <source>Type your own answer</source>
         <translation>输入你自己的回答</translation>
     </message>
     <message>
-        <location filename="../src/session/question_prompt.cpp" line="164"/>
+        <location filename="../src/session/question_prompt.cpp" line="167"/>
         <source>Unanswered</source>
         <translation>未回答</translation>
     </message>
@@ -1581,17 +1651,17 @@
 <context>
     <name>refgui::session::tool_content</name>
     <message>
-        <location filename="../src/session/tool_content.cpp" line="60"/>
+        <location filename="../src/session/tool_content.cpp" line="80"/>
         <source>%1 (%2 edits)</source>
         <translation>%1（%2 处修改）</translation>
     </message>
     <message>
-        <location filename="../src/session/tool_content.cpp" line="71"/>
+        <location filename="../src/session/tool_content.cpp" line="91"/>
         <source>&quot;%1&quot; in %2</source>
         <translation>“%1”，在 %2</translation>
     </message>
     <message>
-        <location filename="../src/session/tool_content.cpp" line="114"/>
+        <location filename="../src/session/tool_content.cpp" line="134"/>
         <source>%1/%2 done</source>
         <translation>已完成 %1/%2</translation>
     </message>
@@ -1599,38 +1669,38 @@
 <context>
     <name>refgui::workspace::Settings</name>
     <message>
-        <location filename="../src/workspace/settings.cpp" line="252"/>
+        <location filename="../src/workspace/settings.cpp" line="233"/>
         <source>Could not read %1: %2</source>
         <translation>无法读取 %1：%2</translation>
     </message>
     <message>
-        <location filename="../src/workspace/settings.cpp" line="265"/>
+        <location filename="../src/workspace/settings.cpp" line="246"/>
         <source>not a JSON object</source>
         <translation>不是 JSON 对象</translation>
     </message>
     <message>
-        <location filename="../src/workspace/settings.cpp" line="266"/>
+        <location filename="../src/workspace/settings.cpp" line="247"/>
         <source>Could not read %1 (%2). It was kept as %3 and the defaults are used.</source>
         <translation>无法读取 %1（%2）。已另存为 %3，现使用默认设置。</translation>
     </message>
     <message>
-        <location filename="../src/workspace/settings.cpp" line="267"/>
+        <location filename="../src/workspace/settings.cpp" line="248"/>
         <source>Could not read %1 (%2). The defaults are used.</source>
         <translation>无法读取 %1（%2）。使用默认设置。</translation>
     </message>
     <message>
-        <location filename="../src/workspace/settings.cpp" line="294"/>
+        <location filename="../src/workspace/settings.cpp" line="273"/>
         <source>Some settings in %1 were ignored: %2</source>
         <translation>%1 中的部分设置已被忽略：%2</translation>
     </message>
     <message>
-        <location filename="../src/workspace/settings.cpp" line="334"/>
+        <location filename="../src/workspace/settings.cpp" line="313"/>
         <source>Could not create %1.</source>
         <translation>无法创建 %1。</translation>
     </message>
     <message>
-        <location filename="../src/workspace/settings.cpp" line="340"/>
-        <location filename="../src/workspace/settings.cpp" line="346"/>
+        <location filename="../src/workspace/settings.cpp" line="319"/>
+        <location filename="../src/workspace/settings.cpp" line="325"/>
         <source>Could not save %1: %2</source>
         <translation>无法保存 %1：%2</translation>
     </message>
