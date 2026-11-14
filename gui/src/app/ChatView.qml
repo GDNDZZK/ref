@@ -135,12 +135,22 @@ ListView {
 		holdUpdating = true
 		do {
 			holdStale = false
-			highWater = holdResting ? naturalEnd : Math.max(highWater, naturalEnd)
+			const cap = Math.max(0, height - 1)
+			const target = holdResting ? naturalEnd : Math.max(highWater, naturalEnd)
+			highWater = Math.min(target, naturalEnd + cap)
 			heldSpace = highWater - naturalEnd
 		} while (holdStale)
 		holdUpdating = false
 	}
 
+	function resetHold() {
+		release.stop()
+		holdResume.stop()
+		holdResting = false
+		holdStale = false
+		highWater = 0
+		heldSpace = 0
+	}
 	clip: true
 	spacing: Theme.blockSpacing
 	topMargin: Theme.pagePadding
@@ -160,6 +170,7 @@ ListView {
 
 	// The view keeps the rows it shows where they are when earlier ones are added above them.
 	// The end stays on the bottom edge when the view changes height (a tile's input box comes or goes).
+	onSessionIdChanged: resetHold()
 	onHeightChanged: {
 		if (following && previousHeight > 0)
 			contentY -= height - previousHeight
