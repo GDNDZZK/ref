@@ -1,5 +1,5 @@
 //! Cross-session tools (in-process, reliable): list_sessions, send_message, message_status,
-//! read_session; spawn tools: create_session, close_session.
+//! read_session; spawn tools: create_session, resume_session, close_session.
 
 use crate::hub::{Hub, PeerRecord};
 use crate::session::{Session, user_message};
@@ -19,7 +19,11 @@ pub(crate) const SEND_MESSAGE: &str = "send_message";
 pub(crate) const MESSAGE_STATUS: &str = "message_status";
 pub(crate) const READ_SESSION: &str = "read_session";
 pub(crate) const CREATE_SESSION: &str = "create_session";
+pub(crate) const RESUME_SESSION: &str = "resume_session";
 pub(crate) const CLOSE_SESSION: &str = "close_session";
+
+/// Max persisted history sessions merged into `list_sessions` when `history` is true.
+const HISTORY_LIST_MAX: usize = 200;
 
 /// `read_session` paging: default and largest page size.
 const PAGE_SIZE_DEFAULT: u64 = 10;
@@ -69,8 +73,11 @@ pub(crate) fn peer_defs() -> Vec<ToolDef> {
     vec![
         def(
             LIST_SESSIONS,
-            "List the live sessions (other agents) in this backend that you can exchange messages with: name, id, agent, status, foreground/background, directory and title.",
-            json!({"type": "object", "properties": {}}),
+            "List sessions in this backend: name, id, agent, status, foreground/background, directory, title, and creator. By default lists live sessions only; set history: true to include closed history sessions (newest 200), or creator to filter by \"user\" or creator name/id.",
+            json!({"type": "object", "properties": {
+                "history": {"type": "boolean", "description": "Also include closed history sessions (newest 200; live wins on duplicate id)."},
+                "creator": {"type": "string", "description": "Filter by creator: \"user\" for user-created sessions, or a creator session's name or id."}
+            }}),
         ),
         def(
             SEND_MESSAGE,
@@ -89,7 +96,7 @@ pub(crate) fn peer_defs() -> Vec<ToolDef> {
         ),
         def(
             READ_SESSION,
-            "Read another live session's messages, newest first, paginated. Tool calls are summarized; reasoning is omitted.",
+            "Read another session's messages (live or closed history), newest first, paginated. Tool calls are summarized; reasoning is omitted.",
             json!({"type": "object", "properties": {
                 "session": {"type": "string", "description": "Session name or id."},
                 "page": {"type": "integer", "minimum": 1, "description": "Page number, 1 = newest (default 1)."},
@@ -120,6 +127,14 @@ pub(crate) fn spawn_defs() -> Vec<ToolDef> {
                 "session": {"type": "string", "description": "Session name or id."}
             }, "required": ["session"]}),
         ),
+        def(
+            RESUME_SESSION,
+            "Resume a closed history session so it becomes live again (or report its status if already live). Optionally send it a prompt message.",
+            json!({"type": "object", "properties": {
+                "session": {"type": "string", "description": "Session name or id (see list_sessions with history: true)."},
+                "prompt": {"type": "string", "description": "Optional plain-text prompt message to send to the resumed session."}
+            }, "required": ["session"]}),
+        ),
     ]
 }
 
@@ -135,9 +150,7 @@ fn status_word(s: &SessionStatus) -> &'static str {
     }
 }
 
-/// Resolve a session by id, exact name, then unique case-insensitive name.
-/// `exclude` = caller id (the caller cannot target itself).
-pub fn resolve(hub: &Hub, q: &str, exclude: Option<&str>) -> Result<Arc<Session>, String> {
+fn resolve_live(hub: &Hub, q: &str, exclude: Option<&str>) -> Result<Option<Arc<Session>>, String> {
     let q = q.trim();
     if q.is_empty() {
         return Err("Error: session name or id must not be empty.".into());
@@ -149,7 +162,7 @@ pub fn resolve(hub: &Hub, q: &str, exclude: Option<&str>) -> Result<Arc<Session>
         if me(s) {
             Err(self_err())
         } else {
-            Ok(s.clone())
+            Ok(Some(s.clone()))
         }
     };
     if let Some(s) = all.iter().find(|s| s.id == q) {
@@ -169,21 +182,7 @@ pub fn resolve(hub: &Hub, q: &str, exclude: Option<&str>) -> Result<Arc<Session>
         .collect();
     match ci.len() {
         1 => accept(&ci[0].0),
-        0 => {
-            let names: Vec<String> = infos
-                .iter()
-                .filter(|(s, _)| !me(s))
-                .map(|(s, n)| format!("\"{n}\" (id {})", s.id))
-                .collect();
-            let list = if names.is_empty() {
-                "(none)".to_string()
-            } else {
-                names.join(", ")
-            };
-            Err(format!(
-                "Error: no live session named \"{q}\". Live sessions: {list}"
-            ))
-        }
+        0 => Ok(None),
         _ => {
             let c: Vec<String> = ci
                 .iter()
@@ -197,13 +196,83 @@ pub fn resolve(hub: &Hub, q: &str, exclude: Option<&str>) -> Result<Arc<Session>
     }
 }
 
+/// Resolve a live session by id, exact name, then unique case-insensitive name.
+/// `exclude` = caller id (the caller cannot target itself).
+pub fn resolve(hub: &Hub, q: &str, exclude: Option<&str>) -> Result<Arc<Session>, String> {
+    match resolve_live(hub, q, exclude)? {
+        Some(s) => Ok(s),
+        None => {
+            let names: Vec<String> = hub
+                .sessions()
+                .into_iter()
+                .filter(|s| Some(s.id.as_str()) != exclude)
+                .map(|s| format!("\"{}\" (id {})", s.lock().info.name, s.id))
+                .collect();
+            let list = if names.is_empty() {
+                "(none)".to_string()
+            } else {
+                names.join(", ")
+            };
+            Err(format!(
+                "Error: no live session named \"{}\". Live sessions: {list}",
+                q.trim()
+            ))
+        }
+    }
+}
+
+fn resolve_history_id(store: &crate::store::Store, q: &str) -> Result<String, String> {
+    let q = q.trim();
+    let infos = store.list();
+    if let Some(i) = infos.iter().find(|i| i.id == q) {
+        return Ok(i.id.clone());
+    }
+    let exact: Vec<&ref_proto::SessionInfo> = infos.iter().filter(|i| i.name == q).collect();
+    match exact.len() {
+        1 => return Ok(exact[0].id.clone()),
+        n if n > 1 => {
+            let c: Vec<String> = exact
+                .iter()
+                .map(|i| format!("\"{}\" (id {})", i.name, i.id))
+                .collect();
+            return Err(format!(
+                "Error: \"{q}\" matches multiple history sessions. Candidates: {}. Use the id.",
+                c.join(", ")
+            ));
+        }
+        _ => {}
+    }
+    let lower = q.to_lowercase();
+    let ci: Vec<&ref_proto::SessionInfo> = infos
+        .iter()
+        .filter(|i| i.name.to_lowercase() == lower)
+        .collect();
+    match ci.len() {
+        1 => Ok(ci[0].id.clone()),
+        0 => Err(format!(
+            "Error: no live or history session matching \"{q}\"."
+        )),
+        _ => {
+            let c: Vec<String> = ci
+                .iter()
+                .map(|i| format!("\"{}\" (id {})", i.name, i.id))
+                .collect();
+            Err(format!(
+                "Error: \"{q}\" is ambiguous in history. Candidates: {}. Use the id.",
+                c.join(", ")
+            ))
+        }
+    }
+}
+
 pub async fn run(hub: &Arc<Hub>, s: &Arc<Session>, name: &str, input: &Value) -> ToolOutput {
     let r = match name {
-        LIST_SESSIONS => Ok(list_sessions(hub, s)),
+        LIST_SESSIONS => list_sessions(hub, s, input).await,
         SEND_MESSAGE => send_message(hub, s, input),
         MESSAGE_STATUS => message_status(hub, input),
-        READ_SESSION => read_session(hub, s, input),
+        READ_SESSION => read_session(hub, s, input).await,
         CREATE_SESSION => create_session(hub, s, input).await,
+        RESUME_SESSION => resume_session(hub, s, input).await,
         CLOSE_SESSION => close_session(hub, s, input).await,
         _ => Err(format!("Unknown tool: {name}")),
     };
@@ -220,29 +289,90 @@ fn str_arg<'a>(input: &'a Value, k: &str) -> Result<&'a str, String> {
         .ok_or_else(|| format!("Error: missing required string parameter `{k}`."))
 }
 
-fn list_sessions(hub: &Arc<Hub>, s: &Arc<Session>) -> String {
-    let infos = hub.infos();
-    let names: std::collections::HashMap<String, String> = infos
+async fn list_sessions(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Result<String, String> {
+    let include_history = input
+        .get("history")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let creator = input
+        .get("creator")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|c| !c.is_empty());
+    let live_infos = hub.infos();
+    let live_ids: std::collections::HashSet<String> =
+        live_infos.iter().map(|i| i.id.clone()).collect();
+    let hist_infos = if include_history {
+        let store = hub.store.clone();
+        tokio::task::spawn_blocking(move || store.list_for(None, Some(HISTORY_LIST_MAX)))
+            .await
+            .map_err(|e| format!("listing history failed: {e}"))?
+    } else {
+        Vec::new()
+    };
+    let mut names: std::collections::HashMap<String, String> = hist_infos
         .iter()
         .map(|i| (i.id.clone(), i.name.clone()))
         .collect();
-    let mut out = format!("{} live session(s):\n", infos.len());
-    for i in &infos {
-        out.push_str(&format!(
-            "- \"{}\" (id {}){} — agent {} — status {} — {} — cwd {} — title \"{}\"",
-            i.name,
-            i.id,
-            if i.id == s.id { " (you)" } else { "" },
-            i.agent,
-            status_word(&i.status),
-            if i.attached > 0 {
-                "foreground"
-            } else {
-                "background"
-            },
-            i.cwd,
-            i.title
-        ));
+    for i in &live_infos {
+        names.insert(i.id.clone(), i.name.clone());
+    }
+    let mut combined: Vec<(ref_proto::SessionInfo, bool)> =
+        live_infos.into_iter().map(|i| (i, true)).collect();
+    for mut i in hist_infos {
+        if !live_ids.contains(&i.id) {
+            i.live = false;
+            combined.push((i, false));
+        }
+    }
+    if let Some(c) = creator {
+        if c == "user" {
+            combined.retain(|(i, _)| i.parent.is_none());
+        } else {
+            let c_lower = c.to_lowercase();
+            combined.retain(|(i, _)| {
+                i.parent.as_deref().is_some_and(|p| {
+                    p == c
+                        || names
+                            .get(p)
+                            .is_some_and(|n| n == c || n.to_lowercase() == c_lower)
+                })
+            });
+        }
+    }
+    let live_count = combined.iter().filter(|(_, live)| *live).count();
+    let hist_count = combined.len() - live_count;
+    let mut out = if include_history {
+        format!(
+            "{} session(s) ({live_count} live, {hist_count} history):\n",
+            combined.len()
+        )
+    } else {
+        format!("{live_count} live session(s):\n")
+    };
+    for (i, is_live) in &combined {
+        if *is_live {
+            out.push_str(&format!(
+                "- \"{}\" (id {}){} — agent {} — status {} — {} — cwd {} — title \"{}\"",
+                i.name,
+                i.id,
+                if i.id == s.id { " (you)" } else { "" },
+                i.agent,
+                status_word(&i.status),
+                if i.attached > 0 {
+                    "foreground"
+                } else {
+                    "background"
+                },
+                i.cwd,
+                i.title
+            ));
+        } else {
+            out.push_str(&format!(
+                "- \"{}\" (id {}) — agent {} — status closed — history — cwd {} — title \"{}\"",
+                i.name, i.id, i.agent, i.cwd, i.title,
+            ));
+        }
         if let Some(p) = &i.parent {
             match names.get(p) {
                 Some(n) => out.push_str(&format!(" — created by \"{n}\"")),
@@ -253,7 +383,7 @@ fn list_sessions(hub: &Arc<Hub>, s: &Arc<Session>) -> String {
     }
     let me = s.lock().info.name.clone();
     out.push_str(&format!("You are \"{me}\" (id {}).", s.id));
-    out
+    Ok(out)
 }
 
 /// Deliver a peer message from `from` to `target`. Returns (message id, queued).
@@ -373,13 +503,8 @@ fn role_label(m: &Message) -> String {
     }
 }
 
-fn read_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Result<String, String> {
+async fn read_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Result<String, String> {
     let q = str_arg(input, "session")?;
-    let target = if q.trim() == s.id {
-        s.clone()
-    } else {
-        resolve(hub, q, None)?
-    };
     let page = input
         .get("page")
         .and_then(Value::as_u64)
@@ -390,16 +515,40 @@ fn read_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Result<Strin
         .and_then(Value::as_u64)
         .unwrap_or(PAGE_SIZE_DEFAULT)
         .clamp(1, PAGE_SIZE_MAX) as usize;
-    let st = target.lock();
-    let n = st.messages.len();
+    let live_target = if q.trim() == s.id {
+        Some(s.clone())
+    } else {
+        resolve_live(hub, q, None)?
+    };
+    if let Some(target) = live_target {
+        let st = target.lock();
+        return format_session_messages(&st.info.name, &st.messages, page, size);
+    }
+    let store = hub.store.clone();
+    let q = q.to_string();
+    let persisted = tokio::task::spawn_blocking(move || {
+        let id = resolve_history_id(&store, &q)?;
+        store.load(&id)
+    })
+    .await
+    .map_err(|e| format!("reading session failed: {e}"))??;
+    format_session_messages(&persisted.info.name, &persisted.messages, page, size)
+}
+
+fn format_session_messages(
+    name: &str,
+    messages: &[Message],
+    page: usize,
+    size: usize,
+) -> Result<String, String> {
+    let n = messages.len();
     let pages = n.div_ceil(size).max(1);
-    let cstart = crate::convert::effective_start(&st.messages);
-    let compacted = st
-        .messages
+    let cstart = crate::convert::effective_start(messages);
+    let compacted = messages
         .get(cstart)
         .is_some_and(|m| m.source == MessageSource::Compaction);
     if n == 0 {
-        return Ok(format!("Session \"{}\" has no messages.", st.info.name));
+        return Ok(format!("Session \"{name}\" has no messages."));
     }
     if page > pages {
         return Err(format!("Error: page {page} is out of range (1–{pages})."));
@@ -409,7 +558,7 @@ fn read_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Result<Strin
     let lo = hi.saturating_sub(size);
     let mut out = format!(
         "Session \"{}\": messages {}–{} of {} (page {}/{}, newest first)\n",
-        st.info.name,
+        name,
         lo + 1,
         hi,
         n,
@@ -423,7 +572,7 @@ fn read_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Result<Strin
         ));
     }
     for i in (lo..hi).rev() {
-        let m = &st.messages[i];
+        let m = &messages[i];
         let mark = if compacted && i < cstart {
             " (before compaction)"
         } else {
@@ -571,6 +720,87 @@ async fn create_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Resu
         out.push_str("; it will report back via a message.");
     } else {
         out.push('.');
+    }
+    Ok(out)
+}
+async fn resume_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Result<String, String> {
+    let (agent, can_spawn) = {
+        let st = s.lock();
+        let a = st.info.agent.clone();
+        let ok = st.cfg.agents.get(&a).is_some_and(|ag| ag.can_spawn);
+        (a, ok)
+    };
+    if !can_spawn {
+        return Err(format!(
+            "Error: agent \"{agent}\" is not allowed to resume sessions."
+        ));
+    }
+    let q = str_arg(input, "session")?.trim();
+    if q.is_empty() {
+        return Err("Error: session name or id must not be empty.".into());
+    }
+    let prompt = match input.get("prompt") {
+        None | Some(Value::Null) => None,
+        Some(v) => {
+            let text = v
+                .as_str()
+                .ok_or_else(|| "Error: parameter `prompt` must be a string.".to_string())?;
+            if text.trim().is_empty() {
+                None
+            } else {
+                if text.len() > MAX_MESSAGE_BYTES {
+                    return Err(format!("Error: message exceeds {MAX_MESSAGE_BYTES} bytes."));
+                }
+                Some(text)
+            }
+        }
+    };
+    if let Some(target) = resolve_live(hub, q, None)? {
+        let (name, status) = {
+            let st = target.lock();
+            (st.info.name.clone(), st.info.status.clone())
+        };
+        let mut out = format!(
+            "Session \"{name}\" (id {}) is already live (status: {}).",
+            target.id,
+            status_word(&status),
+        );
+        if let Some(text) = prompt {
+            if target.id == s.id {
+                return Err("Error: that is your own session; choose another session.".into());
+            }
+            let (msg_id, queued) = deliver(hub, s, &target, text);
+            out.push_str(&format!(" Delivered prompt (message id {msg_id})."));
+            if queued {
+                out.push_str(" They are busy; it will be read after their current step.");
+            }
+        }
+        return Ok(out);
+    }
+    let store = hub.store.clone();
+    let q_owned = q.to_string();
+    let id = tokio::task::spawn_blocking(move || resolve_history_id(&store, &q_owned))
+        .await
+        .map_err(|e| format!("finding history session failed: {e}"))??;
+    let resumed = crate::ops::get_or_load(hub, &id).await?;
+    let (name, r_agent, cwd) = {
+        let st = resumed.lock();
+        (
+            st.info.name.clone(),
+            st.info.agent.clone(),
+            st.info.cwd.clone(),
+        )
+    };
+    let mut out = format!(
+        "Resumed session \"{name}\" (id {}) (agent {r_agent}, cwd {cwd}).",
+        resumed.id
+    );
+    if let Some(text) = prompt {
+        let (msg_id, queued) = deliver(hub, s, &resumed, text);
+        out.push_str(&format!(" Delivered prompt (message id {msg_id})."));
+        if queued {
+            out.push_str(" They are busy; it will be read after their current step.");
+        }
     }
     Ok(out)
 }

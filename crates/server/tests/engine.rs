@@ -1268,6 +1268,223 @@ async fn create_session_must_report_and_close_rules() {
 }
 
 #[tokio::test]
+async fn history_list_read_and_resume_session() {
+    let m = mock(Arc::new(|_, body| {
+        let last_user = body["messages"]
+            .as_array()
+            .and_then(|arr| arr.iter().rev().find(|x| x["role"] == "user"))
+            .map(|x| x["content"].to_string())
+            .unwrap_or_default();
+        if last_user.contains("follow up") {
+            Reply::Text("resumed ok".into())
+        } else {
+            Reply::Text("done".into())
+        }
+    }))
+    .await;
+    let (hub, work) = hub(config(&m.url), "history-peers");
+    let boss = session(&hub, &work, "boss", BUILD).await;
+    let friend = session(&hub, &work, "friend", BUILD).await;
+    // Create two child sessions under `boss` and one user session `friend`, run turns, then close both children.
+    let r1 = ref_server::peers::run(
+        &hub,
+        &boss,
+        "create_session",
+        &json!({"name": "child-one", "agent": WORKER, "prompt": "first task", "must_report": false}),
+    )
+    .await;
+    assert!(!r1.is_error, "{}", r1.text);
+    let r2 = ref_server::peers::run(
+        &hub,
+        &boss,
+        "create_session",
+        &json!({"name": "child-two", "agent": WORKER, "prompt": "second task", "must_report": false}),
+    )
+    .await;
+    assert!(!r2.is_error, "{}", r2.text);
+    wait_until("all 4 sessions exist", TIMEOUT, || {
+        hub.sessions().len() == 4
+    })
+    .await;
+    let child1 = hub
+        .sessions()
+        .into_iter()
+        .find(|x| x.lock().info.name == "child-one")
+        .unwrap();
+    let child2 = hub
+        .sessions()
+        .into_iter()
+        .find(|x| x.lock().info.name == "child-two")
+        .unwrap();
+    wait_idle(&child1).await;
+    wait_idle(&child2).await;
+    // Persist boss/friend too so history includes live sessions (live must win on duplicate id).
+    ref_server::ops::persist(&hub, &boss);
+    ref_server::ops::persist(&hub, &friend);
+    // Close child1 and child2 so they exist only in history.
+    let c1 = ref_server::peers::run(
+        &hub,
+        &boss,
+        "close_session",
+        &json!({"session": "child-one"}),
+    )
+    .await;
+    assert!(!c1.is_error, "{}", c1.text);
+    let c2 = ref_server::peers::run(
+        &hub,
+        &boss,
+        "close_session",
+        &json!({"session": "child-two"}),
+    )
+    .await;
+    assert!(!c2.is_error, "{}", c2.text);
+    assert_eq!(hub.sessions().len(), 2);
+
+    // list_sessions default: live only.
+    let live_only = ref_server::peers::run(&hub, &boss, "list_sessions", &json!({})).await;
+    assert!(
+        live_only.text.starts_with("2 live session(s):"),
+        "{}",
+        live_only.text
+    );
+    assert!(!live_only.text.contains("child-one"));
+
+    // list_sessions with history: true merges live + history without duplicating live ids.
+    let all = ref_server::peers::run(&hub, &boss, "list_sessions", &json!({"history": true})).await;
+    assert!(!all.is_error, "{}", all.text);
+    assert!(
+        all.text.starts_with("4 session(s) (2 live, 2 history):"),
+        "{}",
+        all.text
+    );
+    assert!(all.text.contains("child-one") && all.text.contains("status closed — history"));
+    assert!(all.text.contains("child-two"));
+    assert_eq!(all.text.matches(&boss.id).count(), 2, "{}", all.text);
+
+    // creator filter: "user", creator name, creator id.
+    let by_user = ref_server::peers::run(
+        &hub,
+        &boss,
+        "list_sessions",
+        &json!({"history": true, "creator": "user"}),
+    )
+    .await;
+    assert!(
+        by_user
+            .text
+            .starts_with("2 session(s) (2 live, 0 history):"),
+        "{}",
+        by_user.text
+    );
+    assert!(by_user.text.contains("boss") && by_user.text.contains("friend"));
+    let by_name = ref_server::peers::run(
+        &hub,
+        &friend,
+        "list_sessions",
+        &json!({"history": true, "creator": "boss"}),
+    )
+    .await;
+    assert!(
+        by_name
+            .text
+            .starts_with("2 session(s) (0 live, 2 history):"),
+        "{}",
+        by_name.text
+    );
+    assert!(by_name.text.contains("child-one") && by_name.text.contains("child-two"));
+    let by_id = ref_server::peers::run(
+        &hub,
+        &friend,
+        "list_sessions",
+        &json!({"history": true, "creator": boss.id}),
+    )
+    .await;
+    assert!(by_id.text.contains("child-one") && by_id.text.contains("child-two"));
+
+    // read_session on a closed history session reads its messages without loading it into hub.
+    let read_closed = ref_server::peers::run(
+        &hub,
+        &boss,
+        "read_session",
+        &json!({"session": "child-one"}),
+    )
+    .await;
+    assert!(!read_closed.is_error, "{}", read_closed.text);
+    assert!(
+        read_closed.text.contains("first task"),
+        "{}",
+        read_closed.text
+    );
+    assert!(read_closed.text.contains("done"), "{}", read_closed.text);
+    assert_eq!(
+        hub.sessions().len(),
+        2,
+        "read_session must not load closed session into hub"
+    );
+
+    // resume_session without prompt reloads child-one.
+    let res1 = ref_server::peers::run(
+        &hub,
+        &friend,
+        "resume_session",
+        &json!({"session": "child-one"}),
+    )
+    .await;
+    assert!(!res1.is_error, "{}", res1.text);
+    assert!(
+        res1.text.contains("Resumed session \"child-one\""),
+        "{}",
+        res1.text
+    );
+    assert_eq!(hub.sessions().len(), 3);
+
+    // Non-can_spawn agent (child-one is WORKER) is rejected.
+    let live_child1 = hub.session(&child1.id).unwrap();
+    let denied = ref_server::peers::run(
+        &hub,
+        &live_child1,
+        "resume_session",
+        &json!({"session": "child-two"}),
+    )
+    .await;
+    assert!(denied.is_error, "{}", denied.text);
+
+    // resume_session on an already-live session reports live status rather than erroring.
+    let already = ref_server::peers::run(
+        &hub,
+        &boss,
+        "resume_session",
+        &json!({"session": "child-one"}),
+    )
+    .await;
+    assert!(!already.is_error, "{}", already.text);
+    assert!(already.text.contains("already live"), "{}", already.text);
+
+    // resume_session with optional prompt reloads child-two and delivers the prompt.
+    let res2 = ref_server::peers::run(
+        &hub,
+        &boss,
+        "resume_session",
+        &json!({"session": child2.id, "prompt": "please follow up"}),
+    )
+    .await;
+    assert!(!res2.is_error, "{}", res2.text);
+    assert!(
+        res2.text.contains("Resumed session \"child-two\"")
+            && res2.text.contains("Delivered prompt"),
+        "{}",
+        res2.text
+    );
+    let live_child2 = hub.session(&child2.id).unwrap();
+    wait_session(&live_child2, "resumed session answers follow-up", |s| {
+        messages(s)
+            .iter()
+            .any(|m| m.raw_text().contains("resumed ok"))
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn events_reach_attached_connection() {
     let (_m, hub, _, s) = run_turn(Arc::new(|_, _| Reply::Text("streamed".into())), "events").await;
     let conn = hello_conn(&hub);
