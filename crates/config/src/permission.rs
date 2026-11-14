@@ -153,18 +153,31 @@ impl PermissionRules {
 
     /// opencode legacy `tools: {"bash": false}` map -> deny rules.
     pub fn from_tools_map(v: &Value) -> PermissionRules {
+        Self::from_tools_map_warn(v).0
+    }
+
+    /// Parse legacy `tools` map and collect warnings for non-bool entries.
+    pub(crate) fn from_tools_map_warn(v: &Value) -> (PermissionRules, Vec<String>) {
         let mut rules = Vec::new();
-        if let Value::Object(map) = v {
-            for (k, val) in map {
-                if let Value::Bool(b) = val {
-                    for tool in aliases(k) {
-                        let action = if *b { Action::Allow } else { Action::Deny };
-                        rules.push(Rule::new(tool, ANY, action));
+        let mut warns = Vec::new();
+        match v {
+            Value::Object(map) => {
+                for (k, val) in map {
+                    match val {
+                        Value::Bool(b) => {
+                            for tool in aliases(k) {
+                                let action = if *b { Action::Allow } else { Action::Deny };
+                                rules.push(Rule::new(tool, ANY, action));
+                            }
+                        }
+                        _ => warns.push(format!("tools.{k}: expected a boolean")),
                     }
                 }
             }
+            Value::Null => {}
+            _ => warns.push("tools: expected an object".into()),
         }
-        PermissionRules { rules }
+        (PermissionRules { rules }, warns)
     }
 
     pub fn extend(&mut self, other: PermissionRules) {

@@ -111,7 +111,7 @@ pub fn load_in(
     // 3. Explicit config files.
     for var in ["OPENCODE_CONFIG", "REF_CONFIG"] {
         if let Some(p) = ctx.env_nonempty(var) {
-            let p = expand_home(&p, home, cwd);
+            let p = expand_home(&mut ctx, &p, cwd);
             if p.is_file() {
                 load_file(&mut ctx, &p, &mut layers);
             } else {
@@ -121,7 +121,7 @@ pub fn load_in(
     }
 
     // 4. Project directories, root-most first.
-    for dir in project_dirs(cwd, project_root) {
+    for dir in project_dirs(&mut ctx, cwd, project_root) {
         push_dir(&mut config_dirs, &dir);
         // Order: opencode.json(c), .opencode/opencode.json(c), ref.json(c), .ref/ref.json(c).
         for (stem, sub) in [("opencode", ".opencode"), ("ref", ".ref")] {
@@ -163,13 +163,29 @@ fn push_dir(list: &mut Vec<PathBuf>, d: &Path) {
 
 /// Directories from the project root down to `cwd`. The root is `project_root` if given, else
 /// the git worktree root (nearest ancestor containing `.git`); just `[cwd]` when there is none.
-pub(crate) fn project_dirs(cwd: &Path, project_root: Option<&Path>) -> Vec<PathBuf> {
+pub(crate) fn project_dirs(ctx: &mut Ctx, cwd: &Path, project_root: Option<&Path>) -> Vec<PathBuf> {
+    project_dirs_with(ctx, cwd, project_root, std::env::current_dir)
+}
+
+pub(crate) fn project_dirs_with(
+    ctx: &mut Ctx,
+    cwd: &Path,
+    project_root: Option<&Path>,
+    current_dir: impl FnOnce() -> std::io::Result<PathBuf>,
+) -> Vec<PathBuf> {
     let cwd = if cwd.is_absolute() {
         cwd.to_path_buf()
     } else {
-        std::env::current_dir()
-            .map(|d| d.join(cwd))
-            .unwrap_or_else(|_| cwd.to_path_buf())
+        match current_dir() {
+            Ok(d) => d.join(cwd),
+            Err(e) => {
+                ctx.warn(format!(
+                    "cannot read current directory ({e}); using relative path {}",
+                    cwd.display()
+                ));
+                cwd.to_path_buf()
+            }
+        }
     };
     let mut up = Vec::new();
     for anc in cwd.ancestors() {
@@ -272,15 +288,23 @@ fn normalize_paths(ctx: &mut Ctx, v: &mut Map<String, Value>, base: &Path) {
         Value::Object(o) => match o.get("paths") {
             Some(Value::Array(a)) => a.clone(),
             Some(s @ Value::String(_)) => vec![s.clone()],
-            _ => vec![],
+            None | Some(Value::Null) => vec![],
+            Some(_) => {
+                ctx.warn("skills.paths: expected a string or array of strings");
+                vec![]
+            }
         },
-        _ => vec![],
+        Value::Null => vec![],
+        _ => {
+            ctx.warn("skills: expected a string, array, or object");
+            vec![]
+        }
     };
     let mut out = Vec::new();
     for item in list {
         match item.as_str() {
             Some(s) if !s.trim().is_empty() => out.push(Value::String(
-                expand_home(s.trim(), ctx.home, base)
+                expand_home(ctx, s.trim(), base)
                     .to_string_lossy()
                     .into_owned(),
             )),
@@ -291,13 +315,17 @@ fn normalize_paths(ctx: &mut Ctx, v: &mut Map<String, Value>, base: &Path) {
 }
 
 /// Expand `~` / `~/x` and resolve relative paths against `base`.
-pub(crate) fn expand_home(p: &str, home: Option<&Path>, base: &Path) -> PathBuf {
-    if let Some(h) = home {
-        if p == "~" {
-            return h.to_path_buf();
-        }
-        if let Some(rest) = p.strip_prefix("~/") {
-            return h.join(rest);
+pub(crate) fn expand_home(ctx: &mut Ctx, p: &str, base: &Path) -> PathBuf {
+    if p == "~" || p.starts_with("~/") {
+        match ctx.home {
+            Some(h) => {
+                return if p == "~" {
+                    h.to_path_buf()
+                } else {
+                    h.join(&p[2..])
+                };
+            }
+            None => ctx.warn(format!("cannot expand `{p}`: no home directory")),
         }
     }
     let pb = PathBuf::from(p);
@@ -354,7 +382,7 @@ pub(crate) fn substitute(ctx: &mut Ctx, s: &str, base: &Path, source: &Path) -> 
         if let Some(var) = token.strip_prefix(ENV_OPEN) {
             out.push_str(&(ctx.env)(var.trim()).unwrap_or_default());
         } else if let Some(p) = token.strip_prefix(FILE_OPEN) {
-            let path = expand_home(p.trim(), ctx.home, base);
+            let path = expand_home(ctx, p.trim(), base);
             match std::fs::read_to_string(&path) {
                 Ok(t) => out.push_str(t.trim()),
                 Err(e) => ctx.warn(format!(
@@ -390,7 +418,11 @@ pub(crate) fn layer_rules(
 ) -> PermissionRules {
     let mut rules = PermissionRules::default();
     if let Some(t) = m.get("tools") {
-        rules.extend(PermissionRules::from_tools_map(t));
+        let (r, w) = PermissionRules::from_tools_map_warn(t);
+        for x in w {
+            ctx.warn(format!("{}: {what}: {x}", source.display()));
+        }
+        rules.extend(r);
     }
     if let Some(p) = m.get("permission") {
         let (r, w) = PermissionRules::from_value(p);
@@ -419,7 +451,7 @@ pub(crate) fn accumulate(ctx: &mut Ctx, layers: &[Layer]) -> (Map<String, Value>
             .extend(layer_rules(ctx, &l.value, &l.source, "permission"));
         collect_agent_permissions(ctx, l, &mut acc);
         collect_instructions(ctx, l, &mut acc);
-        collect_skills(l, &mut acc);
+        collect_skills(ctx, l, &mut acc);
         deep_merge(&mut merged, &l.value);
     }
     (merged, acc)
@@ -470,7 +502,7 @@ fn add_instruction(ctx: &mut Ctx, l: &Layer, x: &Value, acc: &mut Accum) {
     // `~` expansion only; relative entries are resolved later against the project. It happens
     // before the duplicate test so that entries of two layers compare in the same form.
     let entry = if s.starts_with('~') {
-        expand_home(s, ctx.home, Path::new(""))
+        expand_home(ctx, s, Path::new(""))
             .to_string_lossy()
             .into_owned()
     } else {
@@ -482,14 +514,25 @@ fn add_instruction(ctx: &mut Ctx, l: &Layer, x: &Value, acc: &mut Accum) {
 }
 
 /// Extra skill directories of one layer, without duplicates.
-fn collect_skills(l: &Layer, acc: &mut Accum) {
-    let Some(Value::Array(a)) = l.value.get(KEY_SKILLS) else {
-        return;
-    };
-    for p in a.iter().filter_map(|x| x.as_str()) {
-        let p = PathBuf::from(p);
-        if !acc.skills.contains(&p) {
-            acc.skills.push(p);
+fn collect_skills(ctx: &mut Ctx, l: &Layer, acc: &mut Accum) {
+    match l.value.get(KEY_SKILLS) {
+        Some(Value::Array(a)) => {
+            for item in a {
+                match item.as_str() {
+                    Some(p) => {
+                        let p = PathBuf::from(p);
+                        if !acc.skills.contains(&p) {
+                            acc.skills.push(p);
+                        }
+                    }
+                    None => ctx.warn(format!(
+                        "{}: invalid skills path entry {item}",
+                        l.source.display()
+                    )),
+                }
+            }
         }
+        None | Some(Value::Null) => {}
+        Some(_) => ctx.warn(format!("{}: skills: expected an array", l.source.display())),
     }
 }
