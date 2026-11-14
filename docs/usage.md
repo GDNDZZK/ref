@@ -150,7 +150,7 @@ Sessions can talk to each other. The model has tools for it (see [Tools](tools.m
 - `/peers-inbox`: messages received from other sessions, including ones still queued.
 - `/peers-outbox`: messages this session sent, and whether each is queued, delivered or read.
 
-Agents with `can_spawn` (the `build` agent by default) can start background sessions, give them a task and close them. Watch them in split view.
+Agents with `can_spawn` (the `build` agent by default) can start background sessions, resume closed history sessions, give them a task and close them. Watch them in split view.
 
 ## Permissions and delays
 

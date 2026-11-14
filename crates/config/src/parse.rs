@@ -37,7 +37,7 @@ pub(crate) fn build(ctx: &mut Ctx, layers: &[Layer]) -> Config {
     cfg.delay = delay_list(ctx, merged.get("delay"), "delay");
     cfg.mcp = mcp(ctx, merged.get("mcp"));
     cfg.commands = commands(ctx, merged.get(KEY_COMMAND));
-    cfg.compaction = compaction(merged.get("compaction"));
+    cfg.compaction = compaction(ctx, merged.get("compaction"));
     if let Some(r) = merged.get("retry") {
         match r.get("max_delay").and_then(Value::as_f64) {
             Some(s) if s >= 0.0 => cfg.retry_max_delay = s as u64,
@@ -107,30 +107,38 @@ fn model_ref(ctx: &mut Ctx, v: Option<&Value>, what: &str) -> Option<ModelRef> {
     }
 }
 
-fn str_map(v: Option<&Value>) -> BTreeMap<String, String> {
+fn str_map(ctx: &mut Ctx, v: Option<&Value>, what: &str) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
-    if let Some(Value::Object(m)) = v {
-        for (k, v) in m {
-            match v {
-                Value::String(s) => {
-                    out.insert(k.clone(), s.clone());
+    match v {
+        Some(Value::Object(m)) => {
+            for (k, v) in m {
+                match v {
+                    Value::String(s) => {
+                        out.insert(k.clone(), s.clone());
+                    }
+                    Value::Number(_) | Value::Bool(_) => {
+                        out.insert(k.clone(), v.to_string());
+                    }
+                    _ => ctx.warn(format!("{what}.{k}: expected a string, number, or boolean")),
                 }
-                Value::Number(_) | Value::Bool(_) => {
-                    out.insert(k.clone(), v.to_string());
-                }
-                _ => {}
             }
         }
+        None | Some(Value::Null) => {}
+        Some(_) => ctx.warn(format!("{what}: expected an object")),
     }
     out
 }
 
-/// The string items of a JSON array; other items are skipped.
-fn strings(items: &[Value]) -> Vec<String> {
-    items
-        .iter()
-        .filter_map(|x| x.as_str().map(str::to_string))
-        .collect()
+/// The string items of a JSON array; non-string items warn and are skipped.
+fn strings(ctx: &mut Ctx, items: &[Value], what: &str) -> Vec<String> {
+    let mut out = Vec::with_capacity(items.len());
+    for (i, x) in items.iter().enumerate() {
+        match x.as_str() {
+            Some(s) => out.push(s.to_string()),
+            None => ctx.warn(format!("{what}[{i}]: expected a string")),
+        }
+    }
+    out
 }
 
 /// A positive number under an optional JSON value.
@@ -138,11 +146,15 @@ fn positive_f64(v: Option<&Value>) -> Option<f64> {
     v.and_then(Value::as_f64).filter(|x| *x > 0.0)
 }
 
-fn str_list(v: Option<&Value>) -> Vec<String> {
+fn str_list(ctx: &mut Ctx, v: Option<&Value>, what: &str) -> Vec<String> {
     match v {
-        Some(Value::Array(a)) => strings(a),
+        Some(Value::Array(a)) => strings(ctx, a, what),
         Some(Value::String(s)) => vec![s.clone()],
-        _ => vec![],
+        None | Some(Value::Null) => vec![],
+        Some(_) => {
+            ctx.warn(format!("{what}: expected a string or array of strings"));
+            vec![]
+        }
     }
 }
 
@@ -163,7 +175,10 @@ fn delay_list(ctx: &mut Ctx, v: Option<&Value>, what: &str) -> Vec<(String, f64)
                 }
             }
         }
-        Some(Value::Number(n)) => out.push(("*".into(), n.as_f64().unwrap_or(0.0).max(0.0))),
+        Some(Value::Number(n)) => match n.as_f64() {
+            Some(s) if s >= 0.0 => out.push(("*".into(), s)),
+            _ => ctx.warn(format!("{what}: expected a non-negative number of seconds")),
+        },
         None | Some(Value::Null) => {}
         Some(_) => ctx.warn(format!(
             "{what}: expected an object {{\"tool-glob\": seconds}}"
@@ -172,18 +187,32 @@ fn delay_list(ctx: &mut Ctx, v: Option<&Value>, what: &str) -> Vec<(String, f64)
     out
 }
 
-fn compaction(v: Option<&Value>) -> CompactionConfig {
+fn compaction(ctx: &mut Ctx, v: Option<&Value>) -> CompactionConfig {
     let mut c = CompactionConfig::default();
-    if let Some(Value::Object(m)) = v {
-        if let Some(b) = m.get("auto").and_then(Value::as_bool) {
-            c.auto = b;
+    match v {
+        Some(Value::Object(m)) => {
+            if let Some(b) = m.get("auto").and_then(Value::as_bool) {
+                c.auto = b;
+            } else if let Some(val) = m.get("auto")
+                && !val.is_null()
+            {
+                ctx.warn("compaction.auto: expected a boolean");
+            }
+            if let Some(val) = m.get("recommend").filter(|v| !v.is_null()) {
+                match positive_f64(Some(val)) {
+                    Some(x) => c.recommend = x,
+                    None => ctx.warn("compaction.recommend: expected a positive number"),
+                }
+            }
+            if let Some(val) = m.get("threshold").filter(|v| !v.is_null()) {
+                match positive_f64(Some(val)) {
+                    Some(x) => c.threshold = x,
+                    None => ctx.warn("compaction.threshold: expected a positive number"),
+                }
+            }
         }
-        if let Some(x) = positive_f64(m.get("recommend")) {
-            c.recommend = x;
-        }
-        if let Some(x) = positive_f64(m.get("threshold")) {
-            c.threshold = x;
-        }
+        None | Some(Value::Null) => {}
+        Some(_) => ctx.warn("compaction: expected an object"),
     }
     c
 }
@@ -193,13 +222,14 @@ fn compaction(v: Option<&Value>) -> CompactionConfig {
 // ---------------------------------------------------------------------------
 
 fn providers(ctx: &mut Ctx, merged: &Map<String, Value>) -> BTreeMap<String, ProviderConfig> {
-    let disabled = str_list(merged.get("disabled_providers"));
-    let enabled = merged.get("enabled_providers").map(|v| str_list(Some(v)));
+    let disabled = str_list(ctx, merged.get("disabled_providers"), "disabled_providers");
+    let enabled = merged
+        .get("enabled_providers")
+        .map(|v| str_list(ctx, Some(v), "enabled_providers"));
     let allowed = |id: &str| {
         !disabled.iter().any(|d| d == id)
             && enabled.as_ref().is_none_or(|e| e.iter().any(|x| x == id))
     };
-
     let mut out = BTreeMap::new();
     match merged.get("provider") {
         Some(Value::Object(m)) => {
@@ -240,7 +270,7 @@ fn provider(ctx: &mut Ctx, id: &str, p: &Map<String, Value>) -> ProviderConfig {
     if is_url {
         base_url = api.take();
     }
-    let mut env = str_list(p.get("env"));
+    let mut env = str_list(ctx, p.get("env"), &format!("provider.{id}.env"));
     if env.is_empty()
         && let Some(d) = defaults
     {
@@ -248,7 +278,11 @@ fn provider(ctx: &mut Ctx, id: &str, p: &Map<String, Value>) -> ProviderConfig {
     }
     let mut options = match p.get("options") {
         Some(Value::Object(o)) => o.clone(),
-        _ => Map::new(),
+        None | Some(Value::Null) => Map::new(),
+        Some(_) => {
+            ctx.warn(format!("provider.{id}.options: expected an object"));
+            Map::new()
+        }
     };
     let mut api_key = None;
     let mut headers = BTreeMap::new();
@@ -267,7 +301,7 @@ fn provider(ctx: &mut Ctx, id: &str, p: &Map<String, Value>) -> ProviderConfig {
         }
     }
     if let Some(h) = options.remove("headers") {
-        headers = str_map(Some(&h));
+        headers = str_map(ctx, Some(&h), &format!("provider.{id}.options.headers"));
     }
     if base_url.is_none() {
         base_url = defaults.map(|d| d.base_url.to_string());
@@ -306,8 +340,8 @@ fn provider_models(
     id: &str,
     p: &Map<String, Value>,
 ) -> BTreeMap<String, ModelConfig> {
-    let whitelist = str_list(p.get("whitelist"));
-    let blacklist = str_list(p.get("blacklist"));
+    let whitelist = str_list(ctx, p.get("whitelist"), &format!("provider.{id}.whitelist"));
+    let blacklist = str_list(ctx, p.get("blacklist"), &format!("provider.{id}.blacklist"));
     let mut models = BTreeMap::new();
     match p.get("models") {
         Some(Value::Object(ms)) => {
@@ -322,10 +356,10 @@ fn provider_models(
                         if m.get("disabled").and_then(Value::as_bool) == Some(true) {
                             continue;
                         }
-                        models.insert(key.clone(), model(key, m));
+                        models.insert(key.clone(), model(ctx, id, key, m));
                     }
                     Value::Null => {
-                        models.insert(key.clone(), model(key, &Map::new()));
+                        models.insert(key.clone(), model(ctx, id, key, &Map::new()));
                     }
                     _ => ctx.warn(format!("provider.{id}.models.{key}: expected an object")),
                 }
@@ -337,7 +371,8 @@ fn provider_models(
     models
 }
 
-fn model(key: &str, m: &Map<String, Value>) -> ModelConfig {
+fn model(ctx: &mut Ctx, provider_id: &str, key: &str, m: &Map<String, Value>) -> ModelConfig {
+    let what = format!("provider.{provider_id}.models.{key}");
     let limit = m.get("limit");
     let lim = |k: &str| limit.and_then(|l| l.get(k)).and_then(Value::as_u64);
     let images = m
@@ -350,15 +385,42 @@ fn model(key: &str, m: &Map<String, Value>) -> ModelConfig {
             .is_some_and(|a| a.iter().any(|x| x.as_str() == Some("image")));
     let flag = |k: &str| m.get(k).and_then(Value::as_bool).unwrap_or(false);
     let mut variants = BTreeMap::new();
-    if let Some(Value::Object(vs)) = m.get("variants") {
-        for (name, v) in vs {
-            let mut o = v.as_object().cloned().unwrap_or_default();
-            if o.remove("disabled").and_then(|d| d.as_bool()) == Some(true) {
-                continue;
+    match m.get("variants") {
+        Some(Value::Object(vs)) => {
+            for (name, v) in vs {
+                let Some(mut o) = v.as_object().cloned() else {
+                    ctx.warn(format!("{what}.variants.{name}: expected an object"));
+                    continue;
+                };
+                if o.remove("disabled").and_then(|d| d.as_bool()) == Some(true) {
+                    continue;
+                }
+                variants.insert(name.clone(), o);
             }
-            variants.insert(name.clone(), o);
         }
+        None | Some(Value::Null) => {}
+        Some(_) => ctx.warn(format!("{what}.variants: expected an object")),
     }
+    let threshold = match limit.and_then(|l| l.get("threshold")) {
+        Some(val) if !val.is_null() => match positive_f64(Some(val)) {
+            Some(x) => Some(x),
+            None => {
+                ctx.warn(format!(
+                    "{what}.limit.threshold: expected a positive number"
+                ));
+                None
+            }
+        },
+        _ => None,
+    };
+    let options = match m.get("options") {
+        Some(Value::Object(o)) => o.clone(),
+        None | Some(Value::Null) => Map::new(),
+        Some(_) => {
+            ctx.warn(format!("{what}.options: expected an object"));
+            Map::new()
+        }
+    };
     ModelConfig {
         key: key.to_string(),
         id: get_str(m, "id")
@@ -375,15 +437,11 @@ fn model(key: &str, m: &Map<String, Value>) -> ModelConfig {
         // opencode's `temperature: true` is a capability flag; only numbers set a value.
         temperature: m.get("temperature").and_then(Value::as_f64),
         top_p: m.get("top_p").and_then(Value::as_f64),
-        headers: str_map(m.get("headers")),
-        options: m
-            .get("options")
-            .and_then(Value::as_object)
-            .cloned()
-            .unwrap_or_default(),
+        headers: str_map(ctx, m.get("headers"), &format!("{what}.headers")),
+        options,
         variants,
         compact_at: lim("compact"),
-        threshold: positive_f64(limit.and_then(|l| l.get("threshold"))),
+        threshold,
     }
 }
 
@@ -442,15 +500,25 @@ fn mcp_common(s: &Map<String, Value>) -> (bool, Option<u64>) {
 fn local_mcp(ctx: &mut Ctx, name: &str, s: &Map<String, Value>) -> Option<McpConfig> {
     let (enabled, timeout_ms) = mcp_common(s);
     let command = match s.get("command") {
-        Some(Value::Array(a)) => strings(a),
+        Some(Value::Array(a)) => strings(ctx, a, &format!("mcp.{name}.command")),
         Some(Value::String(c)) => {
             let mut v: Vec<String> = c.split_whitespace().map(str::to_string).collect();
             if let Some(Value::Array(args)) = s.get("args") {
-                v.extend(strings(args));
+                v.extend(strings(ctx, args, &format!("mcp.{name}.args")));
+            } else if let Some(args) = s.get("args")
+                && !args.is_null()
+            {
+                ctx.warn(format!("mcp.{name}.args: expected an array of strings"));
             }
             v
         }
-        _ => Vec::new(),
+        None | Some(Value::Null) => Vec::new(),
+        Some(_) => {
+            ctx.warn(format!(
+                "mcp.{name}.command: expected a string or array of strings"
+            ));
+            Vec::new()
+        }
     };
     if command.is_empty() {
         ctx.warn(format!(
@@ -460,7 +528,11 @@ fn local_mcp(ctx: &mut Ctx, name: &str, s: &Map<String, Value>) -> Option<McpCon
     }
     Some(McpConfig::Local {
         command,
-        environment: str_map(s.get("environment").or_else(|| s.get("env"))),
+        environment: str_map(
+            ctx,
+            s.get("environment").or_else(|| s.get("env")),
+            &format!("mcp.{name}.environment"),
+        ),
         cwd: get_str(s, "cwd"),
         enabled,
         timeout_ms,
@@ -475,7 +547,7 @@ fn remote_mcp(ctx: &mut Ctx, name: &str, s: &Map<String, Value>) -> Option<McpCo
     };
     Some(McpConfig::Remote {
         url,
-        headers: str_map(s.get("headers")),
+        headers: str_map(ctx, s.get("headers"), &format!("mcp.{name}.headers")),
         enabled,
         timeout_ms,
     })
@@ -608,8 +680,10 @@ fn apply_agent(ctx: &mut Ctx, a: &mut AgentConfig, m: &Map<String, Value>, what:
     if let Some(x) = m.get("top_p").and_then(Value::as_f64) {
         a.top_p = Some(x);
     }
-    if let Some(Value::Object(o)) = m.get("options") {
-        crate::load::deep_merge(&mut a.options, o);
+    match m.get("options") {
+        Some(Value::Object(o)) => crate::load::deep_merge(&mut a.options, o),
+        None | Some(Value::Null) => {}
+        Some(_) => ctx.warn(format!("{what}.options: expected an object")),
     }
     for (k, v) in m {
         if !AGENT_KEYS.contains(&k.as_str()) {

@@ -389,7 +389,7 @@ pub(crate) fn collect(root: &Path, subdirs: &[&str]) -> (Vec<MdDoc>, Vec<String>
             continue;
         }
         let mut files = Vec::new();
-        walk(&base, &mut files, 0);
+        walk(&base, &mut files, &mut warns, 0);
         files.sort();
         for f in files {
             let rel = f
@@ -419,18 +419,39 @@ pub(crate) fn collect(root: &Path, subdirs: &[&str]) -> (Vec<MdDoc>, Vec<String>
     (docs, warns)
 }
 
-fn walk(dir: &Path, out: &mut Vec<PathBuf>, depth: usize) {
+fn walk(dir: &Path, out: &mut Vec<PathBuf>, warns: &mut Vec<String>, depth: usize) {
     if depth > MAX_WALK_DEPTH {
+        warns.push(format!(
+            "{}: directory depth exceeds {MAX_WALK_DEPTH}; skipping subdirectories",
+            dir.display()
+        ));
         return;
     }
-    let Ok(rd) = std::fs::read_dir(dir) else {
-        return;
+    let rd = match std::fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(e) => {
+            warns.push(format!("{}: {e}", dir.display()));
+            return;
+        }
     };
-    for e in rd.flatten() {
+    for entry in rd {
+        let e = match entry {
+            Ok(e) => e,
+            Err(err) => {
+                warns.push(format!("{}: {err}", dir.display()));
+                continue;
+            }
+        };
         let p = e.path();
-        let Ok(ft) = e.file_type() else { continue };
+        let ft = match e.file_type() {
+            Ok(ft) => ft,
+            Err(err) => {
+                warns.push(format!("{}: {err}", p.display()));
+                continue;
+            }
+        };
         if ft.is_dir() || (ft.is_symlink() && p.is_dir()) {
-            walk(&p, out, depth + 1);
+            walk(&p, out, warns, depth + 1);
         } else if p.extension().is_some_and(|x| x == "md") {
             out.push(p);
         }
@@ -522,5 +543,34 @@ You are in code review mode.
         assert_eq!(scalar("plain text # c"), json!("plain text"));
         assert_eq!(scalar("nan"), json!("nan"));
         assert_eq!(scalar("{\"a\": 1}"), json!({"a": 1}));
+    }
+
+    #[test]
+    fn walk_warns_on_depth_limit_and_unreadable_dir() {
+        let base = std::env::temp_dir().join(format!("ref-cfg-walk-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let mut deep = base.join("agent");
+        for i in 0..=MAX_WALK_DEPTH + 1 {
+            deep = deep.join(format!("d{i}"));
+        }
+        std::fs::create_dir_all(&deep).unwrap();
+        let (_docs, warns) = collect(&base, &["agent"]);
+        assert!(
+            warns.iter().any(|w| w.contains("depth exceeds")),
+            "{warns:?}"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let locked = base.join("agent/locked");
+            std::fs::create_dir_all(&locked).unwrap();
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+            if std::fs::read_dir(&locked).is_err() {
+                let (_docs, warns) = collect(&base, &["agent"]);
+                assert!(warns.iter().any(|w| w.contains("locked")), "{warns:?}");
+            }
+            let _ = std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755));
+        }
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

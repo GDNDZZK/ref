@@ -54,13 +54,15 @@ pub const SALT: Secret = Secret {
     bytes: crate::channel::SALT_LEN,
 };
 
-pub fn state_subdir() -> PathBuf {
-    ref_proto::state_dir().join("web")
+pub fn state_subdir() -> anyhow::Result<PathBuf> {
+    Ok(ref_proto::state_dir()
+        .map_err(anyhow::Error::msg)?
+        .join("web"))
 }
 
 /// Reads the value, creating it when there is none.
 pub async fn load_or_create(secret: Secret) -> anyhow::Result<String> {
-    load_or_create_in(&state_subdir(), secret).await
+    load_or_create_in(&state_subdir()?, secret).await
 }
 
 async fn load_or_create_in(dir: &Path, secret: Secret) -> anyhow::Result<String> {

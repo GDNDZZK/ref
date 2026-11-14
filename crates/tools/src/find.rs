@@ -130,7 +130,7 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let limit = (util::opt_u64(input, "limit")?.unwrap_or(DEFAULT_LIMIT as u64) as usize)
         .clamp(1, MAX_LIMIT);
     let root = match util::opt_str(input, "path")? {
-        Some(p) if !p.trim().is_empty() => util::resolve_path(&ctx.cwd, &p),
+        Some(p) if !p.trim().is_empty() => util::resolve_path(&ctx.cwd, &p)?,
         _ => ctx.cwd.clone(),
     };
     let root_display = util::display_path(&ctx.cwd, &root);
