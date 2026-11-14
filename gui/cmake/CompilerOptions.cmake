@@ -13,7 +13,8 @@ function(refgui_configure_target target)
 		# cache sources), which warnings-as-errors would turn into a failed build. Warnings from
 		# template instantiations are not always held back, so C4702 is also off: MSVC reports
 		# code after a constant `if`/`return` in templates as unreachable.
-		target_compile_options(${target} PRIVATE /W4 /external:W0 /wd4702 /permissive- /Zc:__cplusplus /utf-8 /EHsc)
+		# C4864 is also off: MSVC 14.52 on Windows ARM64 warns inside Windows/Qt macros.
+		target_compile_options(${target} PRIVATE /W4 /external:W0 /wd4702 /wd4864 /permissive- /Zc:__cplusplus /utf-8 /EHsc)
 	else()
 		target_compile_options(${target} PRIVATE
 			-Wall
