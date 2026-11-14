@@ -26,6 +26,8 @@ pub enum NetEvent {
     Refused(String),
     /// Progress text ("starting backend…").
     Status(String),
+    /// Non-fatal transport warning (e.g. malformed server frame).
+    Warn(String),
     Frame(ServerFrame),
 }
 /// Handle used by the app to send frames.
@@ -85,8 +87,18 @@ async fn connect(
 }
 
 /// Parses a server text frame; unknown frame kinds are ignored (forward compat).
-fn classify_text_frame(text: &str) -> Option<Incoming> {
-    let frame: ServerFrame = serde_json::from_str(text).ok()?;
+fn classify_text_frame(text: &str) -> Result<Option<Incoming>, String> {
+    let raw: serde_json::Value =
+        serde_json::from_str(text).map_err(|e| format!("invalid server frame: {e}"))?;
+    let frame: ServerFrame = match serde_json::from_value(raw) {
+        Ok(f) => f,
+        Err(e) => {
+            if e.to_string().contains("unknown variant") {
+                return Ok(None);
+            }
+            return Err(format!("malformed server frame: {e}"));
+        }
+    };
     let ServerFrame::Response {
         id: HELLO_ID,
         ok,
@@ -95,7 +107,7 @@ fn classify_text_frame(text: &str) -> Option<Incoming> {
         code,
     } = &frame
     else {
-        return Some(Incoming::Frame(Box::new(frame)));
+        return Ok(Some(Incoming::Frame(Box::new(frame))));
     };
     if *ok {
         let protocol = result
@@ -103,15 +115,14 @@ fn classify_text_frame(text: &str) -> Option<Incoming> {
             .and_then(|v| v.as_u64())
             .and_then(|v| u32::try_from(v).ok())
             .unwrap_or(1);
-        return Some(Incoming::HelloAccepted { protocol });
+        return Ok(Some(Incoming::HelloAccepted { protocol }));
     }
     let reason = error.clone().unwrap_or_else(|| "hello rejected".into());
     if code.as_deref() == Some(ref_proto::ERR_PROTOCOL_MISMATCH) {
-        return Some(Incoming::HelloMismatch(reason));
+        return Ok(Some(Incoming::HelloMismatch(reason)));
     }
-    Some(Incoming::HelloRejected(reason))
+    Ok(Some(Incoming::HelloRejected(reason)))
 }
-/// Forwards frames between the app and the socket until either side ends.
 async fn pump(
     ws: &mut Ws,
     out: &mut mpsc::UnboundedReceiver<ClientFrame>,
@@ -125,7 +136,26 @@ async fn pump(
                     let _ = ws.close(None).await;
                     return PumpExit::Stop;
                 };
-                let Ok(txt) = serde_json::to_string(&f) else { continue };
+                let txt = match serde_json::to_string(&f) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        let msg = format!("cannot encode request: {e}");
+                        if let Some(id) = f.id {
+                            let frame = ServerFrame::Response {
+                                id,
+                                ok: false,
+                                result: serde_json::Value::Null,
+                                error: Some(msg),
+                                code: None,
+                            };
+                            if events.send(NetEvent::Frame(frame)).is_err() {
+                                return PumpExit::Stop;
+                            }
+                            continue;
+                        }
+                        return PumpExit::Lost(msg);
+                    }
+                };
                 if let Err(e) = ws.send(WsMsg::text(txt)).await {
                     return PumpExit::Lost(e.to_string());
                 }
@@ -133,10 +163,15 @@ async fn pump(
             m = ws.next() => {
                 match m {
                     Some(Ok(WsMsg::Text(t))) => match classify_text_frame(t.as_str()) {
-                        None => {}
-                        Some(Incoming::HelloMismatch(reason)) => return PumpExit::Fatal(reason),
-                        Some(Incoming::HelloRejected(reason)) => return PumpExit::Lost(reason),
-                        Some(Incoming::HelloAccepted { protocol }) => {
+                        Ok(None) => {}
+                        Err(msg) => {
+                            if events.send(NetEvent::Warn(msg)).is_err() {
+                                return PumpExit::Stop;
+                            }
+                        }
+                        Ok(Some(Incoming::HelloMismatch(reason))) => return PumpExit::Fatal(reason),
+                        Ok(Some(Incoming::HelloRejected(reason))) => return PumpExit::Lost(reason),
+                        Ok(Some(Incoming::HelloAccepted { protocol })) => {
                             if events.send(NetEvent::Connected).is_err() {
                                 return PumpExit::Stop;
                             }
@@ -146,7 +181,7 @@ async fn pump(
                                 return PumpExit::Stop;
                             }
                         }
-                        Some(Incoming::Frame(frame)) => {
+                        Ok(Some(Incoming::Frame(frame))) => {
                             if events.send(NetEvent::Frame(*frame)).is_err() {
                                 return PumpExit::Stop;
                             }
@@ -201,10 +236,17 @@ pub async fn run(
                 notify: Vec::new(),
             },
         };
-        let Ok(txt) = serde_json::to_string(&hello) else {
-            return;
+        let txt = match serde_json::to_string(&hello) {
+            Ok(t) => t,
+            Err(e) => {
+                let _ = events.send(NetEvent::Disconnected(format!("cannot encode hello: {e}")));
+                return;
+            }
         };
-        if ws.send(WsMsg::text(txt)).await.is_err() {
+        if let Err(e) = ws.send(WsMsg::text(txt)).await {
+            if events.send(NetEvent::Disconnected(e.to_string())).is_err() {
+                return;
+            }
             tokio::time::sleep(RECONNECT_DELAY).await;
             continue;
         }
@@ -224,5 +266,24 @@ pub async fn run(
         }
         while out.try_recv().is_ok() {}
         tokio::time::sleep(RECONNECT_DELAY).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classify_text_frame_surfaces_invalid_and_ignores_unknown_variant() {
+        assert!(classify_text_frame("not json").is_err());
+        assert!(classify_text_frame(r#"{"kind":"response","id":"bad"}"#).is_err());
+        assert!(matches!(
+            classify_text_frame(r#"{"kind":"future_frame","x":1}"#),
+            Ok(None)
+        ));
+        assert!(matches!(
+            classify_text_frame(r#"{"kind":"toast","level":"info","text":"hi"}"#),
+            Ok(Some(Incoming::Frame(_)))
+        ));
     }
 }
