@@ -17,6 +17,11 @@ TextEdit {
 
 	onLinkActivated: link => Links.open(link)
 
+	LinkColorizer {
+		document: prose.textDocument
+		color: Theme.accentText
+	}
+
 	HoverHandler {
 		cursorShape: prose.hoveredLink ? Qt.PointingHandCursor : Qt.IBeamCursor
 	}

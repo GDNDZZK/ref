@@ -126,6 +126,13 @@ set_tests_properties(tst_markdown_text PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=o
 
 refgui_add_test(tst_tool_content LIBS refgui_session)
 
+refgui_add_test(tst_link_colorizer
+	SOURCES ${PROJECT_SOURCE_DIR}/src/app/link_colorizer.cpp ${PROJECT_SOURCE_DIR}/src/app/link_colorizer.h
+	LIBS Qt6::Gui Qt6::Qml Qt6::Quick
+)
+target_include_directories(tst_link_colorizer PRIVATE ${PROJECT_SOURCE_DIR}/src) # links no library that brings it
+set_tests_properties(tst_link_colorizer PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 # Text from the model must not reach the network. Compiles the program's network policy.
 refgui_add_test(tst_network_policy
 	SOURCES ${PROJECT_SOURCE_DIR}/src/app/local_only_network.cpp ${PROJECT_SOURCE_DIR}/src/app/local_only_network.h
