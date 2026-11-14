@@ -143,7 +143,7 @@ scripts/package.sh --version v0.2.0 --target x86_64-unknown-linux-gnu \
 
 `cmake --install` also removes the Qt Quick Controls styles other than Basic (`gui/cmake/PruneControlsStyles.cmake`): `ref-gui` sets the Basic style, and the scan for QML imports would otherwise deploy all five.
 
-- **Linux**: libraries go in `lib/` and the program has the run path `$ORIGIN/lib`; `qt.conf` points Qt to `plugins/` and `qml/`. Plugins that a desktop does not use (QML debugging, embedded displays, Wayland helpers) are left out.
+- **Linux**: libraries go in `lib/` and the program has the run path `$ORIGIN/lib`; `qt.conf` points Qt to `plugins/` and `qml/`. `qwayland` is included explicitly alongside `libqxcb.so` (with its `wayland-*` helpers) so Qt picks native Wayland when `WAYLAND_DISPLAY` is set and falls back to `xcb`. Plugins that a desktop does not use (QML debugging, embedded displays) are left out.
 - **macOS**: `macdeployqt` builds `ref-gui.app`. `package.sh` renames it to `ref.app`, puts `ref-server` into `Contents/MacOS` and runs `scripts/sign-macos-app.sh`, which signs everything again, inner files first, with an ad-hoc signature (there is no developer certificate) and checks it with `codesign --verify --deep --strict`. The `all` archive links its `ref-server` to the one in the app.
 - **Windows**: `windeployqt` copies the DLLs and the Visual C++ runtime next to `ref-gui.exe`, without the software OpenGL fallback. The program uses the GUI subsystem (no console window) and has an icon and version resource.
 
