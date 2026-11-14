@@ -1,5 +1,14 @@
 // Starts the app: connects, then opens the requested session or a new one.
 
+import { translate } from '../i18n/index.ts'
+import { keys, sentKeyInClear, takeKeyFromAddress } from '../net/keystore.ts'
+import { StartupError, browserEnvironment, resolveStartup } from '../net/startup.ts'
+import { directServerUrl } from '../net/transport.ts'
+import { useConnectionStore } from './connection.ts'
+import { useNoticesStore } from './notices.ts'
+import { useNotificationsStore } from './notifications.ts'
+import { useWorkspaceStore } from './workspace.ts'
+
 // The key in the address (#key=, ?key=, ?token=) is taken into the key store and removed from the
 // address bar. A key in the query went to the server as well; over plain http to another machine
 // that was in clear text, which the user is told.
@@ -13,15 +22,6 @@ function takeKeyFromLocation(): void {
     useNoticesStore().push('warn', translate('key.sentInClear'))
   }
 }
-
-import { translate } from '../i18n/index.ts'
-import { keys, sentKeyInClear, takeKeyFromAddress } from '../net/keystore.ts'
-import { StartupError, browserEnvironment, resolveStartup } from '../net/startup.ts'
-import { directServerUrl } from '../net/transport.ts'
-import { useConnectionStore } from './connection.ts'
-import { useNoticesStore } from './notices.ts'
-import { useNotificationsStore } from './notifications.ts'
-import { useWorkspaceStore } from './workspace.ts'
 
 export async function boot(): Promise<StartupError | undefined> {
   const connection = useConnectionStore()
