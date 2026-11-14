@@ -184,13 +184,19 @@ fn format_answers(questions: &[Question], answers: &[Vec<String>]) -> String {
 
 /// Delivers a client's reply to the waiting call. The first reply wins; an invalid one is
 /// refused and the question stays open.
-pub(crate) fn reply(s: &Session, call_id: &str, answers: Reply) -> Result<(), String> {
+pub(crate) fn reply(
+    s: &Session,
+    call_id: &str,
+    answers: Reply,
+) -> Result<(), crate::api::ApiError> {
     let mut st = s.lock();
     let pending = st
         .questions
         .iter_mut()
         .find(|p| p.request.call_id == call_id && p.tx.is_some())
-        .ok_or(NO_PENDING)?;
+        .ok_or_else(|| {
+            crate::api::ApiError::coded(ref_proto::ERR_NO_PENDING_QUESTION, NO_PENDING)
+        })?;
     let answers = match answers {
         Some(a) => Some(check_answers(&pending.request.questions, a)?),
         None => None,

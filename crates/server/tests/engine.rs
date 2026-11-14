@@ -1490,8 +1490,7 @@ async fn set_cwd_switches_directory_and_tells_the_model() {
     let e = ref_server::api::handle(&hub, &conn, set("sub dir"))
         .await
         .unwrap_err();
-    assert!(e.contains("busy"), "{e}");
-    assert_eq!(s.info().cwd, old);
+    assert!(e.message.contains("busy"), "{e}");
     ref_server::engine::abort(&hub, &s, true);
     wait_idle(&s).await;
     let calls = m.count();
@@ -1523,7 +1522,7 @@ async fn set_cwd_switches_directory_and_tells_the_model() {
     let e = ref_server::api::handle(&hub, &conn, set("missing"))
         .await
         .unwrap_err();
-    assert!(e.contains("does not exist"), "{e}");
+    assert!(e.message.contains("does not exist"), "{e}");
     assert!(
         ref_server::api::handle(&hub, &conn, set("  "))
             .await

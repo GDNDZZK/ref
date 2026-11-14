@@ -5,7 +5,12 @@ import type { SessionInfo } from "./SessionInfo";
 import type { ToastLevel } from "./ToastLevel";
 import type { JsonValue } from "./serde_json/JsonValue";
 
-export type ServerFrame = { "kind": "response", id: number, ok: boolean, result: JsonValue, error: string | null, } | { "kind": "event", session_id: string, event: SessionEvent, } | { "kind": "sessions", sessions: Array<SessionInfo>, } | { "kind": "toast", level: ToastLevel, text: string, } | { "kind": "notify", session_id: string, 
+export type ServerFrame = { "kind": "response", id: number, ok: boolean, result: JsonValue, error: string | null, 
+/**
+ * Machine-readable error code (`ERR_*` constants); only on `ok == false`, and not for
+ * every error.
+ */
+code?: string | null, } | { "kind": "event", session_id: string, event: SessionEvent, } | { "kind": "sessions", sessions: Array<SessionInfo>, } | { "kind": "toast", level: ToastLevel, text: string, } | { "kind": "notify", session_id: string, 
 /**
  * Not called `kind`: that is the tag of `ServerFrame`.
  */

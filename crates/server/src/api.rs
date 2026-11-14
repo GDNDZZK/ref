@@ -12,7 +12,47 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-type Reply = Result<Value, String>;
+type Reply = Result<Value, ApiError>;
+
+/// Error returned by [`handle`] and its helpers. `code` is set only for errors clients branch on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApiError {
+    pub message: String,
+    pub code: Option<&'static str>,
+}
+
+impl ApiError {
+    pub fn coded(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            code: Some(code),
+        }
+    }
+}
+
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl From<String> for ApiError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            code: None,
+        }
+    }
+}
+
+impl From<&str> for ApiError {
+    fn from(message: &str) -> Self {
+        Self {
+            message: message.to_string(),
+            code: None,
+        }
+    }
+}
 
 /// Sessions `ListHistory` returns when the client sets no limit.
 const HISTORY_DEFAULT_LIMIT: usize = 100;
@@ -208,7 +248,10 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> Reply {
                     let _ = tx.send(PermReply { allow, always });
                     Ok(json!({}))
                 }
-                None => Err("No pending permission request with that id.".into()),
+                None => Err(ApiError::coded(
+                    ref_proto::ERR_NO_PENDING_PERMISSION,
+                    ref_proto::NO_PENDING_PERMISSION,
+                )),
             }
         }
         Request::QuestionReply {
@@ -224,7 +267,7 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> Reply {
             let s = live(hub, &session_id)?;
             let mut st = s.lock();
             if st.cfg.model(&model).is_none() {
-                return Err(format!("Model {} is not configured.", model.key()));
+                return Err(format!("Model {} is not configured.", model.key()).into());
             }
             st.info.context =
                 crate::models::context_keeping_used(&st.cfg, &model, st.info.context.used);
@@ -241,7 +284,7 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> Reply {
             let s = live(hub, &session_id)?;
             let name = crate::util::normalize_name(&name)?;
             if hub.name_taken(&name, Some(&session_id)) {
-                return Err(format!("A live session named \"{name}\" already exists."));
+                return Err(format!("A live session named \"{name}\" already exists.").into());
             }
             {
                 let mut st = s.lock();
@@ -293,7 +336,7 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> Reply {
             let cwd = hub.effective_cwd(&cwd);
             let cfg = crate::ops::load_config(hub, &cwd).await?;
             let Some(cmd) = cfg.commands.get(&name) else {
-                return Err(format!("Unknown command: /{name}"));
+                return Err(format!("Unknown command: /{name}").into());
             };
             let text = expand_template(&cmd.template, &args);
             let text = expand_shell(&text, &cwd).await;
@@ -422,12 +465,10 @@ fn set_agent(hub: &Arc<Hub>, session_id: String, agent: String) -> Reply {
     let s = live(hub, &session_id)?;
     let mut st = s.lock();
     if agent == ref_config::COMPACTION_AGENT {
-        return Err(format!(
-            "Agent {agent} is internal and cannot run a session."
-        ));
+        return Err(format!("Agent {agent} is internal and cannot run a session.").into());
     }
     let Some(a) = st.cfg.agents.get(&agent) else {
-        return Err(format!("Unknown agent: {agent}"));
+        return Err(format!("Unknown agent: {agent}").into());
     };
     if a.model.is_some()
         && let Some(m) = st.cfg.default_model_for(&agent)
@@ -461,7 +502,7 @@ fn set_variant(hub: &Arc<Hub>, session_id: String, variant: Option<String>) -> R
         Some(v) if v.is_empty() => None,
         Some(v) if list.contains(&v) => Some(v),
         Some(v) => {
-            return Err(format!("Model {} has no variant {v}.", st.info.model.key()));
+            return Err(format!("Model {} has no variant {v}.", st.info.model.key()).into());
         }
         None => crate::models::next_variant(&list, st.info.model.variant.as_deref()),
     };
@@ -582,18 +623,40 @@ async fn list_dirs(hub: &Arc<Hub>, cwd: &str, path: &str) -> Reply {
     let p = crate::util::expand_home(path, home.as_deref());
     let p = Path::new(cwd).join(p);
     tokio::task::spawn_blocking(move || {
-        let dir = crate::ops::validate_cwd(&p.to_string_lossy())?;
+        let dir = resolve_dir(&p)?;
         if sandbox.is_some_and(|root| !Path::new(&dir).starts_with(root)) {
-            return Err(format!("{dir} is outside the mock workspace."));
+            return Err(format!("{dir} is outside the mock workspace.").into());
         }
-        let entries =
-            std::fs::read_dir(&dir).map_err(|e| format!("Cannot read directory {dir}: {e}"))?;
+        let entries = std::fs::read_dir(&dir).map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => ApiError::coded(
+                ref_proto::ERR_NOT_FOUND,
+                format!("Directory does not exist: {dir}"),
+            ),
+            _ => ApiError::from(format!("Cannot read directory {dir}: {e}")),
+        })?;
         let mut dirs = sub_dir_names(&dir, entries);
         dirs.sort_by_key(|d| (d.to_lowercase(), d.clone()));
         Ok(json!({ "path": dir, "dirs": dirs }))
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+fn resolve_dir(p: &Path) -> Result<String, ApiError> {
+    if !p.is_absolute() {
+        return Err(format!("Working directory must be absolute: {}", p.display()).into());
+    }
+    let c = dunce::canonicalize(p).map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => ApiError::coded(
+            ref_proto::ERR_NOT_FOUND,
+            format!("Directory does not exist: {}", p.display()),
+        ),
+        _ => ApiError::from(format!("Cannot access directory {}: {e}", p.display())),
+    })?;
+    if !c.is_dir() {
+        return Err(format!("Not a directory: {}", p.display()).into());
+    }
+    Ok(c.to_string_lossy().to_string())
 }
 
 /// Names of the directories among `entries` (links to directories included). Unreadable
