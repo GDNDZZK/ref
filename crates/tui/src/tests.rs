@@ -5292,3 +5292,27 @@ fn push_history_toasts_once_on_failure() {
     assert_eq!(warns.len(), 1);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn load_prompt_history_from_warns_on_corrupt_file_and_missing_state_dir() {
+    let dir = std::env::temp_dir().join(format!("ref-tui-hist-load-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("prompt-history.jsonl"), "{corrupt\n").unwrap();
+
+    let mut toasts = crate::ui::toast::Toasts::default();
+    let h = crate::app::load_prompt_history_from(Ok(dir.clone()), &mut toasts);
+    assert!(h.items.is_empty());
+    assert_eq!(toasts.items.len(), 1);
+    assert_eq!(toasts.items[0].level, ToastLevel::Warn);
+    assert!(toasts.items[0].text.contains("Cannot load prompt history"));
+
+    let mut toasts = crate::ui::toast::Toasts::default();
+    let h = crate::app::load_prompt_history_from(Err("no home".into()), &mut toasts);
+    assert!(h.items.is_empty());
+    assert_eq!(toasts.items.len(), 1);
+    assert_eq!(toasts.items[0].level, ToastLevel::Warn);
+    assert!(toasts.items[0].text.contains("Cannot locate state dir"));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
