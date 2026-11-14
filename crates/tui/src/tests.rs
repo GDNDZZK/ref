@@ -1637,6 +1637,92 @@ fn expanded_tool_box_right_borders_align() {
 }
 
 #[test]
+fn write_and_edit_show_collapsed_diff_preview_and_expanded_input_output() {
+    let diff: String = (1..=12)
+        .map(|i| format!("+line {i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut part = tool(
+        "c_edit",
+        "edit",
+        "Update parser",
+        json!({"path": "src/parser.rs", "edits": []}),
+        ToolState::Done,
+        Some("Edited src/parser.rs"),
+        ts(14, 2, 15),
+        Some(ts(14, 2, 16)),
+    );
+    if let Part::Tool { meta, .. } = &mut part {
+        *meta = Some(json!({
+            "path": "src/parser.rs",
+            "diff": diff,
+            "added": 12,
+            "removed": 2,
+            "warnings": ["Recovered: file changed since read"],
+        }));
+    }
+    let msg = Message {
+        id: "m_edit".into(),
+        role: Role::Assistant,
+        time: 0,
+        time_end: Some(1),
+        source: MessageSource::Human,
+        parts: vec![part],
+        model: None,
+        agent: None,
+        usage: None,
+        error: None,
+    };
+    // Collapsed: +12 -2, first 8 diff lines, "… 4 more", and warnings underneath.
+    let collapsed: Vec<String> = crate::ui::message::render(&msg, &ctx(false), 80)
+        .iter()
+        .map(|r| text::line_text(&r.line))
+        .collect();
+    let c_text = collapsed.join("\n");
+    assert!(c_text.contains("+12 -2"), "{c_text}");
+    assert!(c_text.contains("+line 8"), "{c_text}");
+    assert!(!c_text.contains("+line 9"), "capped at 8 lines: {c_text}");
+    assert!(c_text.contains("… 4 more"), "{c_text}");
+    assert!(c_text.contains("Recovered: file changed since read"), "{c_text}");
+    assert!(!c_text.contains("╭─ input"), "{c_text}");
+    assert!(!c_text.contains("Edited src/parser.rs"), "{c_text}");
+    // Warnings appear under the diff preview.
+    let more_pos = collapsed.iter().position(|l| l.contains("… 4 more")).unwrap();
+    let warn_pos = collapsed
+        .iter()
+        .position(|l| l.contains("Recovered: file changed since read"))
+        .unwrap();
+    assert!(warn_pos > more_pos, "{c_text}");
+
+    // Compact (split tile) collapsed: includes path alongside +/- counts.
+    let mut compact_cx = ctx(false);
+    compact_cx.compact = true;
+    let compact_text: String = crate::ui::message::render(&msg, &compact_cx, 60)
+        .iter()
+        .map(|r| text::line_text(&r.line))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(compact_text.contains("src/parser.rs"), "{compact_text}");
+    assert!(compact_text.contains("+12 -2"), "{compact_text}");
+    assert!(compact_text.contains("… 4 more"), "{compact_text}");
+
+    // Expanded: Input + full Diff (all 12 lines) + Warnings + Output.
+    let expanded: String = crate::ui::message::render(&msg, &ctx(true), 80)
+        .iter()
+        .map(|r| text::line_text(&r.line))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(expanded.contains("╭─ input"), "{expanded}");
+    assert!(expanded.contains("\"path\": \"src/parser.rs\""), "{expanded}");
+    assert!(expanded.contains("├─ diff"), "{expanded}");
+    assert!(expanded.contains("+line 12"), "{expanded}");
+    assert!(!expanded.contains("… 4 more"), "{expanded}");
+    assert!(expanded.contains("├─ warnings"), "{expanded}");
+    assert!(expanded.contains("├─ output"), "{expanded}");
+    assert!(expanded.contains("Edited src/parser.rs"), "{expanded}");
+}
+
+#[test]
 fn box_section_with_cjk_label_matches_body_width() {
     let msg = Message {
         id: "m".into(),
