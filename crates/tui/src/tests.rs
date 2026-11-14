@@ -3782,6 +3782,45 @@ fn split_view_click_focused_tile_deselects_and_double_click_zooms() {
 }
 
 #[test]
+fn split_view_root_task_chip_and_border_style() {
+    let mut app = test_app(false);
+    app.mode = Mode::Watch;
+    let mut r1 = bg_session("ses_r1", "alpha-root", SessionStatus::Idle, 1);
+    r1.created_at = 1;
+    let mut u1 = bg_session("ses_u1", "user-tile", SessionStatus::Idle, 0);
+    u1.created_at = 2;
+    let mut c1 = bg_session("ses_c1", "child-1", SessionStatus::Idle, 0);
+    c1.parent = Some("ses_r1".into());
+    c1.created_at = 3;
+    let mut gc1 = bg_session("ses_gc1", "grand-1", SessionStatus::Busy, 0);
+    gc1.parent = Some("ses_c1".into());
+    gc1.created_at = 4;
+    app.current = Some("ses_r1".into());
+    app.live = vec![r1, u1.clone(), c1.clone(), gc1.clone()];
+    app.views.insert("ses_u1".into(), SessionView::new(u1, false));
+    app.views.insert("ses_c1".into(), SessionView::new(c1, false));
+    app.views.insert("ses_gc1".into(), SessionView::new(gc1, false));
+    // Focus gc1 to confirm focus colour still wins over root border pattern.
+    app.watch.focus = Some("ses_gc1".into());
+    let (term, s) = render(&mut app, 140, 36);
+    let buf = term.backend().buffer();
+    let ru = tile_rect(&app, "ses_u1");
+    let rc = tile_rect(&app, "ses_c1");
+    let rg = tile_rect(&app, "ses_gc1");
+    // User-created tile keeps plain rounded border and has no ⟲ chip.
+    assert_eq!(buf[(ru.x, ru.y)].symbol(), "╭");
+    assert!(!s.contains("user-tile ⟲"), "{s}");
+    // Both child and grandchild resolve to alpha-root, share the same root border glyph,
+    // and use a border glyph distinct from user-created rounded borders.
+    assert!(s.contains("child-1 ⟲ alpha-root"), "{s}");
+    assert!(s.contains("grand-1 ⟲ alpha-root"), "{s}");
+    assert_ne!(buf[(rc.x, rc.y)].symbol(), "╭");
+    assert_eq!(buf[(rc.x, rc.y)].symbol(), buf[(rg.x, rg.y)].symbol());
+    assert_eq!(buf[(rg.x, rg.y)].fg, crate::ui::theme::PRIMARY);
+    assert_eq!(buf[(rc.x, rc.y)].fg, crate::ui::theme::BORDER);
+}
+
+#[test]
 fn sidebar_scrolls_and_clicks_map_after_scroll() {
     use crossterm::event::{MouseButton, MouseEventKind};
     let mut app = sidebar_app();

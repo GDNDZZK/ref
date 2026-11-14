@@ -1,8 +1,11 @@
 //! Split view: tiling algorithm and tile chrome.
 
+use std::collections::HashSet;
+
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
+use ref_proto::SessionInfo;
 
 use super::dialog::draw_rounded_border;
 use super::theme;
@@ -25,6 +28,74 @@ const OFF_AXIS_WEIGHT: i64 = 3;
 const VERTICAL_WEIGHT: i64 = 2;
 /// Rows the focused tile reserves for its input (separator and one line).
 const TILE_INPUT_ROWS: u16 = 2;
+const ROOT_CHIP_NAME_MAX: usize = 16;
+
+#[derive(Clone, Copy)]
+struct BorderChars {
+    h: &'static str,
+    v: &'static str,
+    tl: &'static str,
+    tr: &'static str,
+    bl: &'static str,
+    br: &'static str,
+}
+
+const ROOT_BORDERS: [BorderChars; 4] = [
+    BorderChars { h: "═", v: "║", tl: "╔", tr: "╗", bl: "╚", br: "╝" },
+    BorderChars { h: "━", v: "┃", tl: "┏", tr: "┓", bl: "┗", br: "┛" },
+    BorderChars { h: "┄", v: "┆", tl: "┌", tr: "┐", bl: "└", br: "┘" },
+    BorderChars { h: "┈", v: "┊", tl: "┌", tr: "┐", bl: "└", br: "┘" },
+];
+
+fn root_border(root_id: &str) -> BorderChars {
+    let h = root_id.bytes().fold(0usize, |a, b| a.wrapping_mul(31).wrapping_add(b as usize));
+    ROOT_BORDERS[h % ROOT_BORDERS.len()]
+}
+
+fn draw_border(buf: &mut Buffer, r: Rect, style: Style, b: BorderChars) {
+    for xx in r.x + 1..r.x + r.width.saturating_sub(1) {
+        buf.set_string(xx, r.y, b.h, style);
+        buf.set_string(xx, r.y + r.height - 1, b.h, style);
+    }
+    for yy in r.y + 1..r.y + r.height.saturating_sub(1) {
+        buf.set_string(r.x, yy, b.v, style);
+        buf.set_string(r.x + r.width - 1, yy, b.v, style);
+    }
+    buf.set_string(r.x, r.y, b.tl, style);
+    buf.set_string(r.x + r.width - 1, r.y, b.tr, style);
+    buf.set_string(r.x, r.y + r.height - 1, b.bl, style);
+    buf.set_string(r.x + r.width - 1, r.y + r.height - 1, b.br, style);
+}
+
+/// Walks `parent` up the live session list to resolve the root task `(id, name)`.
+/// User-created sessions (no `parent`) return `None`; cycles terminate safely.
+pub fn root_task(info: &SessionInfo, live: &[SessionInfo]) -> Option<(String, String)> {
+    let mut cur = info.parent.as_deref().filter(|p| !p.is_empty())?;
+    let mut visited = HashSet::from([info.id.as_str()]);
+    loop {
+        if !visited.insert(cur) {
+            break;
+        }
+        let Some(ancestor) = live.iter().find(|s| s.id == cur) else {
+            break;
+        };
+        let Some(next) = ancestor.parent.as_deref().filter(|p| !p.is_empty()) else {
+            break;
+        };
+        if visited.contains(next) {
+            break;
+        }
+        cur = next;
+    }
+    let name = live
+        .iter()
+        .find(|s| s.id == cur)
+        .map(|s| s.name.as_str())
+        .filter(|n| !n.is_empty())
+        .unwrap_or(cur)
+        .to_string();
+    Some((cur.to_string(), name))
+}
 
 /// Picks (cols, rows) for `n` tiles in a `w`×`h` cell area: target tile aspect ≈1.6 in pixel terms
 /// (cells are ~2:1), with a penalty for empty grid cells.
@@ -143,6 +214,7 @@ pub fn draw_frame(
     focused: bool,
     tick: u64,
     agents: &[ref_proto::AgentInfo],
+    root: Option<(&str, &str)>,
 ) -> Rect {
     if r.width < 4 || r.height < 3 {
         return Rect::default();
@@ -159,8 +231,10 @@ pub fn draw_frame(
     };
     let bst = Style::new().fg(bc);
     let (x0, y0, x1, y1) = (r.x, r.y, r.x + r.width - 1, r.y + r.height - 1);
-    draw_rounded_border(buf, r, bst);
-    // Title: name · agent · status · ctx%
+    match root {
+        Some((root_id, _)) => draw_border(buf, r, bst, root_border(root_id)),
+        None => draw_rounded_border(buf, r, bst),
+    }
     let (st, sc) = status_text(v, tick);
     let ac = theme::agent_color(agents, &v.info.agent);
     let mut x = x0 + 2;
@@ -181,6 +255,13 @@ pub fn draw_frame(
         theme::bold(theme::TEXT)
     };
     put(&v.info.name, name_style, &mut x);
+    if let Some((_, rname)) = root {
+        let chip = format!(
+            " ⟲ {}",
+            text::truncate(&text::one_line(rname), ROOT_CHIP_NAME_MAX)
+        );
+        put(&chip, theme::fg(theme::ACCENT), &mut x);
+    }
     put(text::SEPARATOR, theme::muted(), &mut x);
     put(&v.info.agent, theme::fg(ac), &mut x);
     put(text::SEPARATOR, theme::muted(), &mut x);
@@ -272,5 +353,30 @@ mod tests {
     fn paging() {
         assert_eq!(per_page(90, 24), 9);
         assert_eq!(per_page(10, 5), 1);
+    }
+
+    #[test]
+    fn root_task_walk_handles_chains_missing_and_cycles() {
+        let mk = |id: &str, name: &str, parent: Option<&str>| SessionInfo {
+            id: id.into(),
+            name: name.into(),
+            parent: parent.map(String::from),
+            ..crate::util::placeholder_info(id, "/tmp")
+        };
+        let live = vec![
+            mk("r", "root-a", None),
+            mk("c", "child-a", Some("r")),
+            mk("g", "grandchild-a", Some("c")),
+            mk("orphan", "orphan", Some("gone")),
+            mk("cyc1", "c1", Some("cyc2")),
+            mk("cyc2", "c2", Some("cyc1")),
+            mk("self", "self", Some("self")),
+        ];
+        assert_eq!(root_task(&live[0], &live), None);
+        assert_eq!(root_task(&live[1], &live), Some(("r".into(), "root-a".into())));
+        assert_eq!(root_task(&live[2], &live), Some(("r".into(), "root-a".into())));
+        assert_eq!(root_task(&live[3], &live), Some(("gone".into(), "gone".into())));
+        assert!(root_task(&live[4], &live).is_some());
+        assert!(root_task(&live[6], &live).is_some());
     }
 }
