@@ -117,8 +117,12 @@ fn list_live_in(dir: &Path) -> Vec<Record> {
         if path.extension().and_then(|e| e.to_str()) != Some(RECORD_EXTENSION) {
             continue;
         }
-        let Ok(raw) = std::fs::read(&path) else {
-            continue;
+        let raw = match std::fs::read(&path) {
+            Ok(raw) => raw,
+            Err(e) => {
+                tracing::debug!("ignoring {}: {e}", path.display());
+                continue;
+            }
         };
         let Ok(record) = serde_json::from_slice::<Record>(&raw) else {
             tracing::debug!("ignoring {}: not a record", path.display());
