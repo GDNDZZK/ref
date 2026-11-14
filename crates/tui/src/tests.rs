@@ -803,20 +803,46 @@ async fn mock_watch_mode_tiles_focus_and_back_to_chat() {
     assert_eq!(m.app.mode, Mode::Watch);
     assert!(s.contains("worker-1") && s.contains("reviewer") && s.contains("docs-写手"));
 
-    // The session that was foreground in this frontend is background now, and tiled.
+    // The session that was foreground in this frontend is background now, and hidden from tiles.
     let attached = |app: &App| app.live.iter().find(|i| i.id == sid).map(|i| i.attached);
     assert_eq!(attached(&m.app), Some(0));
     assert!(!m.app.views[&sid].foreground);
-    assert!(m.app.tile_ids().contains(&sid));
+    assert!(!m.app.tile_ids().contains(&sid));
     assert_eq!(m.app.current.as_deref(), Some(sid.as_str()));
 
     // A background tile asks for permission: the modal names the session; deny it.
-    if m.app.active_permission().is_some() {
-        assert!(s.contains("Permission required · docs-写手"));
-        m.answer_permission('d').await;
+    if m.app.active_permission().is_none() {
+        let docs_id = m
+            .app
+            .live
+            .iter()
+            .find(|i| i.name == "docs-写手")
+            .expect("docs-写手 session")
+            .id
+            .clone();
+        m.app
+            .on_net(crate::net::NetEvent::Frame(ServerFrame::Event {
+                session_id: docs_id.clone(),
+                event: SessionEvent::Permission {
+                    request: PermissionRequest {
+                        session_id: docs_id,
+                        message_id: "m_perm_watch".into(),
+                        call_id: "c_perm_watch".into(),
+                        tool: "write".into(),
+                        purpose: "Create the design document".into(),
+                        input: json!({"path": "docs/design.md"}),
+                        time: 0,
+                        preview: None,
+                    },
+                },
+            }));
     }
-
-    // Nothing is focused on entering the split view; typing only shows a hint.
+    let (_, s_perm) = render(&mut m.app, 140, 36);
+    assert!(
+        s_perm.contains("Permission required · docs-写手"),
+        "{s_perm}"
+    );
+    m.answer_permission('d').await;
     assert!(m.app.watch.focus.is_none(), "no auto-focus");
     type_text(&mut m.app, "x");
     assert!(m.app.watch.inputs.values().all(|e| e.is_empty()));
@@ -1637,6 +1663,101 @@ fn expanded_tool_box_right_borders_align() {
 }
 
 #[test]
+fn write_and_edit_show_collapsed_diff_preview_and_expanded_input_output() {
+    let diff: String = (1..=12)
+        .map(|i| format!("+line {i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut part = tool(
+        "c_edit",
+        "edit",
+        "Update parser",
+        json!({"path": "src/parser.rs", "edits": []}),
+        ToolState::Done,
+        Some("Edited src/parser.rs"),
+        ts(14, 2, 15),
+        Some(ts(14, 2, 16)),
+    );
+    if let Part::Tool { meta, .. } = &mut part {
+        *meta = Some(json!({
+            "path": "src/parser.rs",
+            "diff": diff,
+            "added": 12,
+            "removed": 2,
+            "warnings": ["Recovered: file changed since read"],
+        }));
+    }
+    let msg = Message {
+        id: "m_edit".into(),
+        role: Role::Assistant,
+        time: 0,
+        time_end: Some(1),
+        source: MessageSource::Human,
+        parts: vec![part],
+        model: None,
+        agent: None,
+        usage: None,
+        error: None,
+    };
+    // Collapsed: +12 -2, first 8 diff lines, "… 4 more", and warnings underneath.
+    let collapsed: Vec<String> = crate::ui::message::render(&msg, &ctx(false), 80)
+        .iter()
+        .map(|r| text::line_text(&r.line))
+        .collect();
+    let c_text = collapsed.join("\n");
+    assert!(c_text.contains("+12 -2"), "{c_text}");
+    assert!(c_text.contains("+line 8"), "{c_text}");
+    assert!(!c_text.contains("+line 9"), "capped at 8 lines: {c_text}");
+    assert!(c_text.contains("… 4 more"), "{c_text}");
+    assert!(
+        c_text.contains("Recovered: file changed since read"),
+        "{c_text}"
+    );
+    assert!(!c_text.contains("╭─ input"), "{c_text}");
+    assert!(!c_text.contains("Edited src/parser.rs"), "{c_text}");
+    // Warnings appear under the diff preview.
+    let more_pos = collapsed
+        .iter()
+        .position(|l| l.contains("… 4 more"))
+        .unwrap();
+    let warn_pos = collapsed
+        .iter()
+        .position(|l| l.contains("Recovered: file changed since read"))
+        .unwrap();
+    assert!(warn_pos > more_pos, "{c_text}");
+
+    // Compact (split tile) collapsed: includes path alongside +/- counts.
+    let mut compact_cx = ctx(false);
+    compact_cx.compact = true;
+    let compact_text: String = crate::ui::message::render(&msg, &compact_cx, 60)
+        .iter()
+        .map(|r| text::line_text(&r.line))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(compact_text.contains("src/parser.rs"), "{compact_text}");
+    assert!(compact_text.contains("+12 -2"), "{compact_text}");
+    assert!(compact_text.contains("… 4 more"), "{compact_text}");
+
+    // Expanded: Input + full Diff (all 12 lines) + Warnings + Output.
+    let expanded: String = crate::ui::message::render(&msg, &ctx(true), 80)
+        .iter()
+        .map(|r| text::line_text(&r.line))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(expanded.contains("╭─ input"), "{expanded}");
+    assert!(
+        expanded.contains("\"path\": \"src/parser.rs\""),
+        "{expanded}"
+    );
+    assert!(expanded.contains("├─ diff"), "{expanded}");
+    assert!(expanded.contains("+line 12"), "{expanded}");
+    assert!(!expanded.contains("… 4 more"), "{expanded}");
+    assert!(expanded.contains("├─ warnings"), "{expanded}");
+    assert!(expanded.contains("├─ output"), "{expanded}");
+    assert!(expanded.contains("Edited src/parser.rs"), "{expanded}");
+}
+
+#[test]
 fn box_section_with_cjk_label_matches_body_width() {
     let msg = Message {
         id: "m".into(),
@@ -2264,6 +2385,82 @@ fn sessions_dialog_ctrl_d_closes_with_confirm() {
 }
 
 #[test]
+fn sessions_dialog_creator_filter_keywords_and_badge() {
+    let mut app = test_app(false);
+    let mut main = bg_session("ses_main", "main", SessionStatus::Idle, 1);
+    main.updated_at = 400;
+    let mut w1 = bg_session("ses_w1", "worker-1", SessionStatus::Idle, 0);
+    w1.parent = Some("ses_main".into());
+    w1.updated_at = 300;
+    let mut w2 = bg_session("ses_w2", "worker-2", SessionStatus::Idle, 0);
+    w2.parent = Some("ses_other".into());
+    w2.updated_at = 200;
+    let mut hc = bg_session("ses_hc", "hist-child", SessionStatus::Idle, 0);
+    hc.live = false;
+    hc.parent = Some("ses_main".into());
+    hc.title = "Closed subtask".into();
+    hc.updated_at = 100;
+    app.current = Some("ses_main".into());
+    app.live = vec![main, w1, w2];
+    app.history_list = vec![hc];
+    app.open_sessions();
+
+    let (_, s) = render(&mut app, 120, 34);
+    assert!(s.contains("tab filter"), "{s}");
+    assert!(s.contains(" All "), "{s}");
+    assert!(s.contains("⟲ main"), "creator badge shown: {s}");
+    assert!(
+        s.contains("⟲ ses_other"),
+        "fallback creator id badge shown: {s}"
+    );
+
+    // Search matches creator name and creator id via keywords.
+    type_text(&mut app, "ses_main");
+    let (_, s_kw) = render(&mut app, 120, 34);
+    assert!(
+        s_kw.contains("worker-1") && s_kw.contains("Closed subtask"),
+        "{s_kw}"
+    );
+    assert!(!s_kw.contains("worker-2"), "{s_kw}");
+    // Clear search and select worker-1 (created by ses_main).
+    press_with(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
+    if let Some(crate::ui::dialog::Dialog::List(d)) = app.dialog.as_mut() {
+        d.select_key("live:ses_w1");
+    }
+    // Tab 1: User-created only.
+    press(&mut app, KeyCode::Tab);
+    let (_, s_user) = render(&mut app, 120, 34);
+    assert!(s_user.contains(" User-created "), "{s_user}");
+    assert!(
+        s_user.contains("main")
+            && !s_user.contains("worker-1")
+            && !s_user.contains("worker-2")
+            && !s_user.contains("Closed subtask"),
+        "{s_user}"
+    );
+    // Tab 2: By creator of previously selected row (ses_main).
+    press(&mut app, KeyCode::Tab);
+    let (_, s_by) = render(&mut app, 120, 34);
+    assert!(s_by.contains(" By main "), "{s_by}");
+    assert!(
+        s_by.contains("worker-1") && s_by.contains("Closed subtask"),
+        "{s_by}"
+    );
+    assert!(
+        !s_by.contains("worker-2") && !s_by.contains("● main"),
+        "{s_by}"
+    );
+    assert!(s_by.contains("2/4"), "{s_by}");
+    press(&mut app, KeyCode::Tab);
+    let (_, s_all) = render(&mut app, 120, 34);
+    assert!(s_all.contains(" All "), "{s_all}");
+    assert!(
+        s_all.contains("worker-1") && s_all.contains("worker-2"),
+        "{s_all}"
+    );
+}
+
+#[test]
 fn leader_k_closes_current_and_focused_tile() {
     use crate::app::Pending;
     use crossterm::event::{KeyCode, KeyModifiers};
@@ -2492,6 +2689,70 @@ fn split_tile_shows_queue_and_expands_tools() {
             .values()
             .any(|p| matches!(p, Pending::Unqueue { .. }))
     );
+}
+
+#[test]
+fn split_view_expand_collapse_releases_hold_in_busy_tile() {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let mut app = test_app(false);
+    app.mode = Mode::Watch;
+    let inf = bg_session("ses_bg", "worker-1", SessionStatus::Busy, 0);
+    let mut v = SessionView::new(inf.clone(), false);
+    v.load_snapshot(SessionSnapshot {
+        info: inf.clone(),
+        messages: transcript(false),
+        more_before: false,
+        pending_permissions: vec![],
+        pending_questions: vec![],
+        queued: vec![],
+    });
+    app.views.insert("ses_bg".into(), v);
+    app.live = vec![inf];
+    app.watch.focus = Some("ses_bg".into());
+    let (_, s) = render(&mut app, 100, 22);
+    let base_max = app.views["ses_bg"].chat.max_scroll();
+    let base_top = app.views["ses_bg"].chat.top();
+    let at = |scr: &str, pat: &str| {
+        let (y, line) = scr
+            .lines()
+            .enumerate()
+            .find(|(_, l)| l.contains(pat))
+            .expect(pat);
+        (
+            text::width(&line[..line.find(pat).unwrap()]) as u16,
+            y as u16,
+        )
+    };
+    // Click to expand while following at the bottom of the busy tile.
+    let p = at(&s, "Run the unit tests");
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Down(MouseButton::Left), p.0, p.1),
+    );
+    let (_, expanded_s) = render(&mut app, 100, 22);
+    assert!(
+        expanded_s.contains("▾ ✓ bash") && expanded_s.contains("╭─ input"),
+        "{expanded_s}"
+    );
+    assert!(
+        app.views["ses_bg"].chat.max_scroll() > base_max,
+        "{expanded_s}"
+    );
+    // Click again to collapse while still following: no blank hold rows linger.
+    let p2 = at(&expanded_s, "Run the unit tests");
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Down(MouseButton::Left), p2.0, p2.1),
+    );
+    let (_, collapsed_s) = render(&mut app, 100, 22);
+    assert!(!collapsed_s.contains("╭─ input"), "{collapsed_s}");
+    assert_eq!(
+        app.views["ses_bg"].chat.max_scroll(),
+        base_max,
+        "no blank hold rows:\n{collapsed_s}"
+    );
+    assert_eq!(app.views["ses_bg"].chat.top(), base_top);
+    assert_eq!(collapsed_s, s);
 }
 
 #[test]
@@ -3566,6 +3827,78 @@ fn split_view_no_default_focus_and_esc_unfocus() {
 }
 
 #[test]
+fn split_view_click_focused_tile_deselects_and_double_click_zooms() {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let mut app = watch_app();
+    app.sync_watch();
+    render(&mut app, 120, 30);
+    let r = tile_rect(&app, "ses_w1");
+    // First click focuses the tile.
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Down(MouseButton::Left), r.x + 3, r.y + 3),
+    );
+    assert_eq!(app.watch.focus.as_deref(), Some("ses_w1"));
+    // Clicking the focused tile again (not a hit target, not a double-click) unfocuses it.
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Down(MouseButton::Left), r.x + 4, r.y + 3),
+    );
+    assert!(app.watch.focus.is_none());
+    // Double-clicking a tile still zooms into it.
+    let click = |app: &mut App, x, y| {
+        crate::input::handle(app, mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+    };
+    click(&mut app, r.x + 3, r.y + 3);
+    assert_eq!(app.watch.focus.as_deref(), Some("ses_w1"));
+    click(&mut app, r.x + 3, r.y + 3);
+    assert_eq!(app.mode, Mode::Chat);
+    assert_eq!(app.current.as_deref(), Some("ses_w1"));
+}
+
+#[test]
+fn split_view_root_task_chip_and_border_style() {
+    let mut app = test_app(false);
+    app.mode = Mode::Watch;
+    let mut r1 = bg_session("ses_r1", "alpha-root", SessionStatus::Idle, 1);
+    r1.created_at = 1;
+    let mut u1 = bg_session("ses_u1", "user-tile", SessionStatus::Idle, 0);
+    u1.created_at = 2;
+    let mut c1 = bg_session("ses_c1", "child-1", SessionStatus::Idle, 0);
+    c1.parent = Some("ses_r1".into());
+    c1.created_at = 3;
+    let mut gc1 = bg_session("ses_gc1", "grand-1", SessionStatus::Busy, 0);
+    gc1.parent = Some("ses_c1".into());
+    gc1.created_at = 4;
+    app.current = Some("ses_r1".into());
+    app.live = vec![r1, u1.clone(), c1.clone(), gc1.clone()];
+    app.views
+        .insert("ses_u1".into(), SessionView::new(u1, false));
+    app.views
+        .insert("ses_c1".into(), SessionView::new(c1, false));
+    app.views
+        .insert("ses_gc1".into(), SessionView::new(gc1, false));
+    // Focus gc1 to confirm focus colour still wins over root border pattern.
+    app.watch.focus = Some("ses_gc1".into());
+    let (term, s) = render(&mut app, 140, 36);
+    let buf = term.backend().buffer();
+    let ru = tile_rect(&app, "ses_u1");
+    let rc = tile_rect(&app, "ses_c1");
+    let rg = tile_rect(&app, "ses_gc1");
+    // User-created tile keeps plain rounded border and has no ⟲ chip.
+    assert_eq!(buf[(ru.x, ru.y)].symbol(), "╭");
+    assert!(!s.contains("user-tile ⟲"), "{s}");
+    // Both child and grandchild resolve to alpha-root, share the same root border glyph,
+    // and use a border glyph distinct from user-created rounded borders.
+    assert!(s.contains("child-1 ⟲ alpha-root"), "{s}");
+    assert!(s.contains("grand-1 ⟲ alpha-root"), "{s}");
+    assert_ne!(buf[(rc.x, rc.y)].symbol(), "╭");
+    assert_eq!(buf[(rc.x, rc.y)].symbol(), buf[(rg.x, rg.y)].symbol());
+    assert_eq!(buf[(rg.x, rg.y)].fg, crate::ui::theme::PRIMARY);
+    assert_eq!(buf[(rc.x, rc.y)].fg, crate::ui::theme::BORDER);
+}
+
+#[test]
 fn sidebar_scrolls_and_clicks_map_after_scroll() {
     use crossterm::event::{MouseButton, MouseEventKind};
     let mut app = sidebar_app();
@@ -3729,11 +4062,19 @@ fn current_session_goes_background_in_split_view() {
     let v = &app.views[TEST_SESSION];
     assert!(!v.foreground);
     assert_eq!(app.live[0].attached, 0);
-    assert_eq!(app.tile_ids(), [TEST_SESSION]);
+    assert!(app.tile_ids().is_empty());
+    let (_, empty_screen) = render(&mut app, 100, 30);
+    assert!(
+        empty_screen.contains("No background sessions"),
+        "{empty_screen}"
+    );
+    assert!(
+        empty_screen.contains("ctrl+x w back to chat"),
+        "{empty_screen}"
+    );
     assert!(!app.attached_elsewhere(TEST_SESSION));
     app.sync_watch();
     assert!(app.views.contains_key(TEST_SESSION), "current view kept");
-    // Back to chat: attached as foreground again.
     app.pending.clear();
     app.toggle_watch();
     assert_eq!(app.mode, Mode::Chat);
@@ -4791,4 +5132,163 @@ fn permission_modal_renders_preview_and_truncation_marker() {
     assert!(s.contains("--- a/src/parser.rs"), "{s}");
     assert!(s.contains("-old line 1"), "{s}");
     assert!(s.contains("more lines (preview cut)"), "{s}");
+}
+
+#[test]
+fn malformed_responses_toast_errors_without_fallback() {
+    use crate::app::Pending;
+    let mut app = test_app(false);
+    // Malformed Continue response must not start a new session.
+    app.pending.insert(1, Pending::Continue);
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: 1,
+        ok: true,
+        result: json!({ "sessions": "bad" }),
+        error: None,
+        code: None,
+    }));
+    assert!(app.pending.is_empty(), "did not create a new session");
+    assert!(
+        app.toasts
+            .items
+            .iter()
+            .any(|t| t.text.contains("Malformed continue"))
+    );
+
+    // Malformed Older response must not clear more_before.
+    app.toasts.items.clear();
+    let v = app.views.get_mut(TEST_SESSION).unwrap();
+    v.more_before = true;
+    v.older_pending = true;
+    let hist_gen = v.history_gen;
+    app.pending.insert(
+        2,
+        Pending::Older {
+            sid: TEST_SESSION.into(),
+            generation: hist_gen,
+            before: "m1".into(),
+        },
+    );
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: 2,
+        ok: true,
+        result: json!({ "messages": [] }),
+        error: None,
+        code: None,
+    }));
+    let v = &app.views[TEST_SESSION];
+    assert!(v.more_before && !v.older_pending);
+    assert!(
+        app.toasts
+            .items
+            .iter()
+            .any(|t| t.text.contains("Malformed history page"))
+    );
+
+    // Malformed ConfigMcp and Text responses toast errors and do not open empty dialog.
+    app.toasts.items.clear();
+    app.pending.insert(3, Pending::ConfigMcp);
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: 3,
+        ok: true,
+        result: json!({}),
+        error: None,
+        code: None,
+    }));
+    assert!(
+        app.toasts
+            .items
+            .iter()
+            .any(|t| t.text.contains("Malformed config"))
+    );
+
+    app.toasts.items.clear();
+    app.pending.insert(
+        4,
+        Pending::Text {
+            title: "Peers".into(),
+        },
+    );
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: 4,
+        ok: true,
+        result: json!({}),
+        error: None,
+        code: None,
+    }));
+    assert!(app.dialog.is_none());
+    assert!(
+        app.toasts
+            .items
+            .iter()
+            .any(|t| t.text.contains("Malformed response"))
+    );
+}
+
+#[test]
+fn copy_text_toasts_osc52_warn_and_clipboard_error() {
+    use ref_proto::ToastLevel;
+    let mut app = test_app(false);
+
+    app.copy_text("hello", "selection");
+    assert_eq!(crate::clipboard::take_last_copy().as_deref(), Some("hello"));
+    assert_eq!(app.toasts.items.last().unwrap().level, ToastLevel::Info);
+
+    crate::clipboard::set_next_copy_result(Ok(crate::clipboard::CopyOutcome::Osc52Only));
+    app.copy_text("hello", "selection");
+    let t = app.toasts.items.last().unwrap();
+    assert_eq!(t.level, ToastLevel::Warn);
+    assert!(t.text.contains("OSC 52"), "{}", t.text);
+
+    crate::clipboard::set_next_copy_result(Err("no clipboard tool".into()));
+    app.copy_text("hello", "selection");
+    let t = app.toasts.items.last().unwrap();
+    assert_eq!(t.level, ToastLevel::Error);
+    assert!(
+        t.text.contains("Copy failed: no clipboard tool"),
+        "{}",
+        t.text
+    );
+}
+
+#[test]
+fn pasting_oversized_image_path_toasts_error() {
+    let mut app = test_app(false);
+    let dir = std::env::temp_dir().join(format!("ref-tui-paste-err-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("huge.png");
+    let f = std::fs::File::create(&path).unwrap();
+    f.set_len(21 * 1024 * 1024).unwrap();
+    drop(f);
+    crate::input::handle(
+        &mut app,
+        crossterm::event::Event::Paste(path.to_string_lossy().into_owned()),
+    );
+    assert!(app.editor.text.is_empty());
+    assert!(app.editor.images.is_empty());
+    assert!(
+        app.toasts
+            .items
+            .iter()
+            .any(|t| t.text.contains("too large"))
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn push_history_toasts_once_on_failure() {
+    let mut app = test_app(false);
+    let dir = std::env::temp_dir().join(format!("ref-tui-hist-app-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    app.history = crate::ui::editor::History::with_path(dir.clone());
+    app.push_history("first prompt");
+    app.push_history("second prompt");
+    let warns: Vec<_> = app
+        .toasts
+        .items
+        .iter()
+        .filter(|t| t.text.contains("Cannot save prompt history"))
+        .collect();
+    assert_eq!(warns.len(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
 }

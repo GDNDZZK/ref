@@ -47,6 +47,16 @@ pub enum Kind {
     Variants,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum CreatorFilter {
+    #[default]
+    All,
+    UserCreated,
+    ByCreator {
+        id: String,
+        label: String,
+    },
+}
 #[derive(Debug, Clone, Default)]
 pub struct Item {
     /// Value returned on submit.
@@ -66,8 +76,9 @@ pub struct Item {
     pub spinner: bool,
     /// Extra search text.
     pub keywords: String,
+    /// Creator `(parent_id, creator_name)` for child sessions.
+    pub creator: Option<(String, String)>,
 }
-
 pub struct ListDialog {
     pub kind: Kind,
     pub title: String,
@@ -86,6 +97,9 @@ pub struct ListDialog {
     /// Screen rows of items at last draw: (y, visible index).
     rows: Vec<(u16, usize)>,
     pub rect: Rect,
+    pub creator_filter: CreatorFilter,
+    /// Creator remembered when cycling `All -> UserCreated` so `-> ByCreator` keeps the choice.
+    pending_creator: Option<(String, String)>,
 }
 
 /// A display row of the list: a section header, a gap between sections, or a visible item.
@@ -111,6 +125,8 @@ impl ListDialog {
             confirm_text: String::new(),
             rows: Vec::new(),
             rect: Rect::default(),
+            creator_filter: CreatorFilter::All,
+            pending_creator: None,
         };
         d.refilter();
         d
@@ -145,15 +161,72 @@ impl ListDialog {
         }
     }
 
+    pub fn cycle_creator_filter(&mut self) {
+        if !matches!(self.kind, Kind::Sessions | Kind::CloseSessions) {
+            return;
+        }
+        match &self.creator_filter {
+            CreatorFilter::All => {
+                self.pending_creator = self.selected().and_then(|it| it.creator.clone());
+                self.creator_filter = CreatorFilter::UserCreated;
+            }
+            CreatorFilter::UserCreated => {
+                let target = self
+                    .selected()
+                    .and_then(|it| it.creator.clone())
+                    .or_else(|| self.pending_creator.take());
+                self.creator_filter = match target {
+                    Some((id, label)) => CreatorFilter::ByCreator { id, label },
+                    None => CreatorFilter::All,
+                };
+            }
+            CreatorFilter::ByCreator { .. } => {
+                self.pending_creator = None;
+                self.creator_filter = CreatorFilter::All;
+            }
+        }
+        self.refilter();
+    }
+
+    fn matches_creator(&self, it: &Item) -> bool {
+        match &self.creator_filter {
+            CreatorFilter::All => true,
+            CreatorFilter::UserCreated => it.creator.is_none(),
+            CreatorFilter::ByCreator { id, .. } => {
+                it.creator.as_ref().is_some_and(|(cid, _)| cid == id)
+            }
+        }
+    }
+
+    fn creator_pill(&self) -> Option<(String, bool)> {
+        if !matches!(self.kind, Kind::Sessions | Kind::CloseSessions) {
+            return None;
+        }
+        Some(match &self.creator_filter {
+            CreatorFilter::All => (" All ".to_string(), false),
+            CreatorFilter::UserCreated => (" User-created ".to_string(), true),
+            CreatorFilter::ByCreator { label, .. } => {
+                (format!(" By {} ", text::truncate(label, 16)), true)
+            }
+        })
+    }
+
     pub fn refilter(&mut self) {
         let q = self.filter.text.trim().to_string();
         if q.is_empty() {
-            self.visible = (0..self.items.len()).collect();
+            self.visible = self
+                .items
+                .iter()
+                .enumerate()
+                .filter(|(_, it)| self.matches_creator(it))
+                .map(|(i, _)| i)
+                .collect();
         } else {
             let mut scored: Vec<(i64, usize)> = self
                 .items
                 .iter()
                 .enumerate()
+                .filter(|(_, it)| self.matches_creator(it))
                 .filter_map(|(i, it)| {
                     let a = text::fuzzy_score(&it.title, &q).map(|s| s + TITLE_MATCH_BONUS);
                     let b = text::fuzzy_score(
@@ -237,8 +310,23 @@ impl ListDialog {
             "› ",
             Style::new().fg(fade(theme::PRIMARY)).bg(bg),
         );
-        let farea = Rect::new(inner.x + 2, fy, inner.width.saturating_sub(2), 1);
+        let pill = self.creator_pill();
+        let pill_w = pill.as_ref().map_or(0, |(l, _)| width(l) as u16 + 1);
+        let farea = Rect::new(inner.x + 2, fy, inner.width.saturating_sub(2 + pill_w), 1);
         self.filter.draw(buf, farea, "Search…", false);
+        if let Some((label, active)) = pill {
+            let lw = width(&label) as u16;
+            let px = inner.x + inner.width.saturating_sub(lw);
+            let st = if active {
+                Style::new()
+                    .fg(theme::PANEL)
+                    .bg(fade(theme::ACCENT))
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::new().fg(fade(theme::MUTED)).bg(theme::ELEMENT)
+            };
+            buf.set_string(px, fy, &label, st);
+        }
         let list_top = fy + 2;
         let list_h = (inner.y + inner.height).saturating_sub(list_top + 1) as usize;
         let disp = self.display_rows();
@@ -369,6 +457,24 @@ impl ListDialog {
                 Style::new().fg(theme::PANEL).add_modifier(Modifier::BOLD),
             ));
         } else {
+            if let Some((_, cname)) = &it.creator {
+                let label = format!(" ⟲ {} ", text::truncate(cname, 16));
+                right.push(Span::styled(
+                    label,
+                    Style::new()
+                        .fg(if selected {
+                            theme::ACCENT
+                        } else {
+                            theme::PANEL
+                        })
+                        .bg(if selected {
+                            theme::PANEL
+                        } else {
+                            fade(theme::ACCENT)
+                        }),
+                ));
+                right.push(Span::raw(" "));
+            }
             if let Some((b, c)) = &it.badge {
                 right.push(Span::styled(
                     format!(" {b} "),
@@ -425,9 +531,10 @@ impl ListDialog {
 
     /// Cursor position for the filter input.
     pub fn cursor(&self) -> (u16, u16) {
+        let pill_w = self.creator_pill().map_or(0, |(l, _)| width(&l) as u16 + 1);
         let x = self.rect.x + 4 + width(&self.filter.text[..self.filter.cursor]) as u16;
         (
-            x.min(self.rect.x + self.rect.width.saturating_sub(3)),
+            x.min(self.rect.x + self.rect.width.saturating_sub(3 + pill_w)),
             self.rect.y + 2,
         )
     }

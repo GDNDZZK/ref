@@ -811,3 +811,54 @@ fn a_dialog_that_was_not_sending_keeps_its_answers_over_a_reconnect() {
     press(&mut app, KeyCode::Enter);
     assert_eq!(reply(&mut rx).1, answers(&[&["Iterator"], &["Unit tests"]]));
 }
+
+#[test]
+fn collapsed_question_tool_shows_answers_after_submit() {
+    let (mut app, _) = test_app_with_requests(false);
+    let msg = Message {
+        id: "m_q".into(),
+        role: Role::Assistant,
+        time: 1000,
+        time_end: Some(2000),
+        source: MessageSource::Human,
+        parts: vec![Part::Tool {
+            call_id: "q1".into(),
+            name: "question".into(),
+            purpose: "Ask user".into(),
+            input: serde_json::json!({ "questions": [loop_bound(), checks()] }),
+            raw_input: String::new(),
+            state: ToolState::Done,
+            output: Some("User has answered your questions...".into()),
+            meta: Some(serde_json::json!({
+                "answers": [["Iterator"], ["Unit tests", "Clippy"]]
+            })),
+            images: vec![],
+            time: 1000,
+            time_end: Some(1500),
+            run_at: None,
+            provider_data: None,
+        }],
+        model: None,
+        agent: None,
+        usage: None,
+        error: None,
+    };
+    app.views.get_mut(TEST_SESSION).unwrap().messages = vec![msg.clone()];
+    let s = screen(&mut app);
+    assert!(s.contains("▸ ✓ question"), "{s}");
+    assert!(s.contains("Loop bound = Iterator"), "{s}");
+    assert!(s.contains("Checks = Unit tests, Clippy"), "{s}");
+    assert!(!s.contains("╭─ input"), "still collapsed: {s}");
+
+    // Unanswered slot falls back to (not answered).
+    let mut msg_unanswered = msg;
+    if let Part::Tool { meta, .. } = &mut msg_unanswered.parts[0] {
+        *meta = Some(serde_json::json!({ "answers": [[], ["Clippy"]] }));
+    }
+    let v = app.views.get_mut(TEST_SESSION).unwrap();
+    v.messages = vec![msg_unanswered];
+    v.chat.invalidate();
+    let s = screen(&mut app);
+    assert!(s.contains("Loop bound = (not answered)"), "{s}");
+    assert!(s.contains("Checks = Clippy"), "{s}");
+}

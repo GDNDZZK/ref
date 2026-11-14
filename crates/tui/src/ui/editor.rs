@@ -876,39 +876,61 @@ pub struct History {
 const HISTORY_MAX: usize = 500;
 
 impl History {
-    pub fn load(path: std::path::PathBuf) -> Self {
+    pub fn with_path(path: std::path::PathBuf) -> Self {
+        History {
+            path: Some(path),
+            ..Default::default()
+        }
+    }
+
+    pub fn load(path: std::path::PathBuf) -> std::io::Result<Self> {
         let mut items = Vec::new();
-        if let Ok(s) = std::fs::read_to_string(&path) {
-            for l in s.lines() {
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(l)
-                    && let Some(t) = v.get("text").and_then(|t| t.as_str())
-                {
+        match std::fs::read_to_string(&path) {
+            Ok(s) => {
+                for (idx, l) in s.lines().enumerate() {
+                    if l.trim().is_empty() {
+                        continue;
+                    }
+                    let v: serde_json::Value = serde_json::from_str(l).map_err(|e| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("line {}: {e}", idx + 1),
+                        )
+                    })?;
+                    let t = v.get("text").and_then(|t| t.as_str()).ok_or_else(|| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("line {}: missing text field", idx + 1),
+                        )
+                    })?;
                     items.push(t.to_string());
                 }
             }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
         }
         let n = items.len();
         if n > HISTORY_MAX {
             items.drain(..n - HISTORY_MAX);
         }
-        History {
+        Ok(History {
             items,
             pos: None,
             draft: String::new(),
             path: Some(path),
-        }
+        })
     }
 
-    pub fn push(&mut self, t: &str) {
+    pub fn push(&mut self, t: &str) -> std::io::Result<()> {
         self.pos = None;
         let t = t.trim_end();
         if t.is_empty() || self.items.last().is_some_and(|l| l == t) {
-            return;
+            return Ok(());
         }
         self.items.push(t.to_string());
         if let Some(p) = &self.path {
             if let Some(d) = p.parent() {
-                let _ = std::fs::create_dir_all(d);
+                std::fs::create_dir_all(d)?;
             }
             use std::io::Write;
             let rewrite = self.items.len() > HISTORY_MAX;
@@ -920,15 +942,16 @@ impl History {
                     .iter()
                     .map(|i| format!("{}\n", serde_json::json!({ "text": i })))
                     .collect();
-                let _ = std::fs::write(p, body);
-            } else if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(p)
-            {
-                let _ = writeln!(f, "{}", serde_json::json!({ "text": t }));
+                std::fs::write(p, body)?;
+            } else {
+                let mut f = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(p)?;
+                writeln!(f, "{}", serde_json::json!({ "text": t }))?;
             }
         }
+        Ok(())
     }
 
     pub fn prev(&mut self, current: &str) -> Option<String> {
@@ -1139,12 +1162,31 @@ mod tests {
     #[test]
     fn history_cycle() {
         let mut h = History::default();
-        h.push("one");
-        h.push("two");
+        h.push("one").unwrap();
+        h.push("two").unwrap();
         assert_eq!(h.prev("draft").as_deref(), Some("two"));
         assert_eq!(h.prev("").as_deref(), Some("one"));
         assert_eq!(h.prev(""), None);
         assert_eq!(h.next().as_deref(), Some("two"));
         assert_eq!(h.next().as_deref(), Some("draft"));
+    }
+
+    #[test]
+    fn history_load_and_push_surface_errors() {
+        let dir = std::env::temp_dir().join(format!("ref-tui-hist-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // Missing file is valid (fresh state).
+        let missing = dir.join("missing.jsonl");
+        assert!(History::load(missing).unwrap().items.is_empty());
+        // Malformed line returns InvalidData.
+        let bad = dir.join("bad.jsonl");
+        std::fs::write(&bad, "{not json}\n").unwrap();
+        let err = History::load(bad).err().expect("malformed line errors");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        // Push fails cleanly when target path is an existing directory.
+        let mut h = History::with_path(dir.clone());
+        assert!(h.push("hello").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
