@@ -202,6 +202,11 @@ impl PermissionRules {
     pub fn disabled(&self, tool: &str) -> bool {
         self.disabled_opt(tool).unwrap_or(false)
     }
+
+    /// Whether some rule is about `tool`, whatever its pattern.
+    pub fn mentions(&self, tool: &str) -> bool {
+        self.rules.iter().any(|r| glob_match(&r.tool, tool))
+    }
 }
 
 #[cfg(test)]
@@ -255,5 +260,18 @@ mod tests {
         );
         let (r, _) = PermissionRules::from_value(&json!({"fetch": "deny"}));
         assert!(r.disabled("webfetch"));
+    }
+
+    #[test]
+    fn mentions_matches_any_pattern_and_tool_globs() {
+        let (r, _) = PermissionRules::from_value(&json!({"question": {"ask-*": "allow"}}));
+        assert!(r.mentions("question"));
+        assert!(!r.mentions("bash"));
+
+        let (r, _) = PermissionRules::from_value(&json!({"*": "allow"}));
+        assert!(r.mentions("question"));
+
+        let (r, _) = PermissionRules::from_value(&json!({"que*": "ask"}));
+        assert!(r.mentions("question"));
     }
 }

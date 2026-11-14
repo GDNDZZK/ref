@@ -794,3 +794,47 @@ fn an_agent_rule_for_question_wins() {
     assert_eq!(question_state(&c, "build"), (true, Action::Deny));
     assert_eq!(question_state(&c, "plan"), (false, Action::Ask));
 }
+
+#[test]
+fn global_pattern_only_question_rule_disables_defaults() {
+    let fx = Fx::new();
+    fx.write_global_config(
+        r#"{
+            "permission": {"question": {"ask-*": "allow"}},
+            "agent": {"helper": {"mode": "subagent"}}
+        }"#,
+    );
+    let c = fx.load();
+    for agent in ["build", "explore", "helper"] {
+        assert_eq!(question_state(&c, agent), (false, Action::Allow), "{agent}");
+        assert!(
+            !c.agents[agent]
+                .permission
+                .rules
+                .iter()
+                .any(|r| r.tool == "question"),
+            "unexpected inserted question rule for {agent}"
+        );
+    }
+
+    // Regression: wildcard ask / deny / global "*" still behave as before, and agent rules win.
+    fx.write_global_config(r#"{"permission": {"question": {"*": "ask"}}}"#);
+    let c = fx.load();
+    assert_eq!(question_state(&c, "explore"), (false, Action::Ask));
+    assert_eq!(question_state(&c, "build"), (false, Action::Ask));
+
+    fx.write_global_config(r#"{"permission": {"*": "allow"}}"#);
+    let c = fx.load();
+    assert_eq!(question_state(&c, "explore"), (false, Action::Allow));
+    assert_eq!(question_state(&c, "build"), (false, Action::Allow));
+
+    fx.write_global_config(
+        r#"{
+            "permission": {"question": {"ask-*": "allow"}},
+            "agent": {"helper": {"mode": "subagent", "permission": {"question": "deny"}}}
+        }"#,
+    );
+    let c = fx.load();
+    assert_eq!(question_state(&c, "helper"), (true, Action::Deny));
+    assert_eq!(question_state(&c, "explore"), (false, Action::Allow));
+}
