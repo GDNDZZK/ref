@@ -1,7 +1,9 @@
 //! `GET /api/ping`: lets a second ref-web recognise the first one without being fooled by
 //! another program on the port. The caller sends a random nonce; only a process that knows
 //! the key can answer with its HMAC. Without that check, the address (with the key) would be
-//! opened on whatever listens there. Only loopback peers get an answer (`routes::ping`).
+//! opened on whatever listens there. Only loopback peers get an answer (`routes::ping`), so
+//! remote hosts cannot collect verifiers; local processes on the same machine can still query
+//! `/api/ping` and obtain a `(nonce, proof)` verifier (an offline guess oracle for weak keys).
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
@@ -23,7 +25,8 @@ const MAX_NONCE_LEN: usize = 128;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const HEADERS_END: &str = "\r\n\r\n";
 
-/// Hex proof for `nonce`, keyed with the key the channel is made from.
+/// Hex proof for `nonce`, keyed with the key the channel is made from. Loopback callers can
+/// request one for any nonce (an offline guess oracle for weak `--key` values).
 pub fn proof(root: &Root, nonce: &str) -> String {
     channel::to_hex(&root.ping_proof(nonce))
 }
