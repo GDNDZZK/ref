@@ -283,6 +283,30 @@ describe('RefConnection', () => {
     expect(env.sockets).toHaveLength(1)
   })
 
+  it('stops without reconnecting on protocol_mismatch and keeps the refusal reason', async () => {
+    const env = setup()
+    const details: Array<[ConnectionState, string]> = []
+    env.connection.onState((state, detail) => details.push([state, detail]))
+    const reason =
+      'ref-server 0.2.1 speaks protocol 4, but this client (ref-web-test) speaks protocol 3. Update the client to the same version as ref-server.'
+    env.connection.open()
+    const socket = env.sockets[0]!
+    socket.handlers.opened()
+    socket.serverSends({
+      kind: 'response',
+      id: socket.sent[0]!['id'],
+      ok: false,
+      result: null,
+      error: reason,
+      code: 'protocol_mismatch',
+    })
+
+    await vi.waitFor(() => expect(env.connection.state).toBe('closed'))
+    vi.advanceTimersByTime(60_000)
+    expect(env.sockets).toHaveLength(1)
+    expect(details.at(-1)).toEqual(['closed', reason])
+  })
+
   it('does not reconnect after close()', async () => {
     const env = setup()
     await openFully(env)
