@@ -36,6 +36,7 @@ private slots:
 	void splitsPaths();
 	void sizesReadInTheRightUnit();
 	void picksTextFromInput();
+	void questionSummaryReadsAnswersAndFallbacks();
 };
 
 void TestToolContent::iconsFollowTheTool()
@@ -226,5 +227,34 @@ void TestToolContent::picksTextFromInput()
 	QCOMPARE(firstLine({}), QString());
 }
 
+void TestToolContent::questionSummaryReadsAnswersAndFallbacks()
+{
+	const auto question = [](const QString& header, const QString& text) {
+		return map({{u"header"_s, header}, {u"question"_s, text}});
+	};
+	const QVariantMap input = map({{u"questions"_s, QVariantList{
+		question(u"Auth"_s, u"Which method?"_s),
+		question(u""_s, u"Fallback question"_s),
+		question(u"Skipped"_s, u"Optional?"_s),
+	}}});
+
+	// Without meta.answers (e.g. still pending or dismissed), no summary is shown.
+	QVERIFY(questionSummary(input, {}).isEmpty());
+
+	const QVariantMap meta = map({{u"answers"_s, QVariantList{
+		QVariantList{u"OAuth"_s, u"PKCE"_s},
+		QVariantList{u"Yes"_s},
+		QVariantList{},
+	}}});
+	const QVariantList rows = questionSummary(input, meta);
+	QCOMPARE(rows.size(), 3);
+	QCOMPARE(rows.at(0).toMap().value(u"header"_s).toString(), u"Auth"_s);
+	QCOMPARE(rows.at(0).toMap().value(u"answer"_s).toString(), u"OAuth, PKCE"_s);
+	QVERIFY(rows.at(0).toMap().value(u"answered"_s).toBool());
+	QCOMPARE(rows.at(1).toMap().value(u"header"_s).toString(), u"Fallback question"_s);
+	QCOMPARE(rows.at(1).toMap().value(u"answer"_s).toString(), u"Yes"_s);
+	QVERIFY(!rows.at(2).toMap().value(u"answered"_s).toBool());
+	QCOMPARE(rows.at(2).toMap().value(u"answer"_s).toString(), QString());
+}
 QTEST_APPLESS_MAIN(TestToolContent)
 #include "tst_tool_content.moc"

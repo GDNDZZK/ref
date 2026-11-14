@@ -379,6 +379,44 @@ QVariantList todos(const QVariantMap& input)
 	return result;
 }
 
+QVariantList questionSummary(const QVariantMap& input, const QVariantMap& meta)
+{
+	const QVariant answersValue = meta.value(u"answers"_s);
+	if(answersValue.metaType().id() != QMetaType::QVariantList)
+		return {};
+	const QVariantList answersList = answersValue.toList();
+	const QVariantList questions = listArg(input, u"questions"_s);
+	QVariantList result;
+	for(qsizetype i = 0; i < questions.size(); ++i)
+	{
+		const QVariantMap q = questions.at(i).toMap();
+		const QString header = textArg(q, u"header"_s).trimmed();
+		const QString question = textArg(q, u"question"_s).trimmed();
+		if(header.isEmpty() && question.isEmpty())
+			continue;
+		QStringList chosen;
+		if(i < answersList.size() && answersList.at(i).metaType().id() == QMetaType::QVariantList)
+		{
+			for(const QVariant& entry : answersList.at(i).toList())
+			{
+				if(entry.metaType().id() == QMetaType::QString)
+				{
+					const QString text = entry.toString().trimmed();
+					if(!text.isEmpty())
+						chosen.append(text);
+				}
+			}
+		}
+		result.append(QVariantMap{
+			{u"header"_s, header.isEmpty() ? question : header},
+			{u"question"_s, question},
+			{u"answer"_s, chosen.join(u", "_s)},
+			{u"answered"_s, !chosen.isEmpty()},
+		});
+	}
+	return result;
+}
+
 QString detail(const QString& toolName, const QVariantMap& input)
 {
 	const auto own = toolDetail(toolName, input);
