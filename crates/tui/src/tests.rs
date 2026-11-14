@@ -811,12 +811,37 @@ async fn mock_watch_mode_tiles_focus_and_back_to_chat() {
     assert_eq!(m.app.current.as_deref(), Some(sid.as_str()));
 
     // A background tile asks for permission: the modal names the session; deny it.
-    if m.app.active_permission().is_some() {
-        assert!(s.contains("Permission required · docs-写手"));
-        m.answer_permission('d').await;
+    if m.app.active_permission().is_none() {
+        let docs_id = m
+            .app
+            .live
+            .iter()
+            .find(|i| i.name == "docs-写手")
+            .expect("docs-写手 session")
+            .id
+            .clone();
+        m.app.on_net(crate::net::NetEvent::Frame(ServerFrame::Event {
+            session_id: docs_id.clone(),
+            event: SessionEvent::Permission {
+                request: PermissionRequest {
+                    session_id: docs_id,
+                    message_id: "m_perm_watch".into(),
+                    call_id: "c_perm_watch".into(),
+                    tool: "write".into(),
+                    purpose: "Create the design document".into(),
+                    input: json!({"path": "docs/design.md"}),
+                    time: 0,
+                    preview: None,
+                },
+            },
+        }));
     }
-
-    // Nothing is focused on entering the split view; typing only shows a hint.
+    let (_, s_perm) = render(&mut m.app, 140, 36);
+    assert!(
+        s_perm.contains("Permission required · docs-写手"),
+        "{s_perm}"
+    );
+    m.answer_permission('d').await;
     assert!(m.app.watch.focus.is_none(), "no auto-focus");
     type_text(&mut m.app, "x");
     assert!(m.app.watch.inputs.values().all(|e| e.is_empty()));
