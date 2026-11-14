@@ -1784,6 +1784,7 @@ impl App {
     fn reset_toggles(&mut self) {
         for v in self.views.values_mut() {
             v.chat.toggled.clear();
+            v.chat.release_hold();
         }
     }
 

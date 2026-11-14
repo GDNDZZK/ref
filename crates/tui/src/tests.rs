@@ -2495,6 +2495,51 @@ fn split_tile_shows_queue_and_expands_tools() {
 }
 
 #[test]
+fn split_view_expand_collapse_releases_hold_in_busy_tile() {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let mut app = test_app(false);
+    app.mode = Mode::Watch;
+    let inf = bg_session("ses_bg", "worker-1", SessionStatus::Busy, 0);
+    let mut v = SessionView::new(inf.clone(), false);
+    v.load_snapshot(SessionSnapshot {
+        info: inf.clone(),
+        messages: transcript(false),
+        more_before: false,
+        pending_permissions: vec![],
+        pending_questions: vec![],
+        queued: vec![],
+    });
+    app.views.insert("ses_bg".into(), v);
+    app.live = vec![inf];
+    app.watch.focus = Some("ses_bg".into());
+    let (_, s) = render(&mut app, 100, 22);
+    let base_max = app.views["ses_bg"].chat.max_scroll();
+    let base_top = app.views["ses_bg"].chat.top();
+    let at = |scr: &str, pat: &str| {
+        let (y, line) = scr
+            .lines()
+            .enumerate()
+            .find(|(_, l)| l.contains(pat))
+            .expect(pat);
+        (text::width(&line[..line.find(pat).unwrap()]) as u16, y as u16)
+    };
+    // Click to expand while following at the bottom of the busy tile.
+    let p = at(&s, "Run the unit tests");
+    crate::input::handle(&mut app, mouse(MouseEventKind::Down(MouseButton::Left), p.0, p.1));
+    let (_, expanded_s) = render(&mut app, 100, 22);
+    assert!(expanded_s.contains("▾ ✓ bash") && expanded_s.contains("╭─ input"), "{expanded_s}");
+    assert!(app.views["ses_bg"].chat.max_scroll() > base_max, "{expanded_s}");
+    // Click again to collapse while still following: no blank hold rows linger.
+    let p2 = at(&expanded_s, "Run the unit tests");
+    crate::input::handle(&mut app, mouse(MouseEventKind::Down(MouseButton::Left), p2.0, p2.1));
+    let (_, collapsed_s) = render(&mut app, 100, 22);
+    assert!(!collapsed_s.contains("╭─ input"), "{collapsed_s}");
+    assert_eq!(app.views["ses_bg"].chat.max_scroll(), base_max, "no blank hold rows:\n{collapsed_s}");
+    assert_eq!(app.views["ses_bg"].chat.top(), base_top);
+    assert_eq!(collapsed_s, s);
+}
+
+#[test]
 fn terminal_title_text() {
     let mut app = test_app(false);
     assert_eq!(app.terminal_title(), "R|Fix the parser");
