@@ -58,6 +58,7 @@
     "output": "输出",
     "moreWaiting": "另有 {count} 个等待中",
     "showMore": "显示其余 {count} 行",
+    "moreDiffRows": "还有 {count} 行",
     "earlierLines": "前面还有 {count} 行",
     "noOutput": "（无输出）",
     "timedOut": "已超时",

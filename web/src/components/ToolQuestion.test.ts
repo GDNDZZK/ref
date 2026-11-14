@@ -114,4 +114,22 @@ describe('ToolQuestion', () => {
     await wrapper.get('.action').trigger('click')
     expect(wrapper.emitted('answer')).toEqual([[null]])
   })
+
+  it('renders a compact answered summary when form is gone and answered is provided', () => {
+    const wrapper = mount(ToolQuestion, {
+      props: {
+        form: undefined,
+        sending: false,
+        answered: [
+          { header: 'Loop bound', answer: 'Range' },
+          { header: 'Checks', answer: '' },
+        ],
+      },
+      global: { plugins: [createAppI18n(['en'])] },
+    })
+    expect(wrapper.find('.question.open').exists()).toBe(false)
+    const lines = wrapper.findAll('.summary.answered li')
+    expect(lines.map((line) => line.text())).toEqual(['Loop boundRange', 'ChecksUnanswered'])
+    expect(lines[1]!.classes()).toContain('unanswered')
+  })
 })

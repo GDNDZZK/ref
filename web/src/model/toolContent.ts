@@ -174,6 +174,33 @@ export function metaStrings(meta: JsonValue | null | undefined, key: string): st
   return value.filter((item): item is string => typeof item === 'string')
 }
 
+export interface AnsweredQuestion {
+  header: string
+  answer: string
+}
+
+export function parseQuestionAnswers(
+  input: JsonValue | null | undefined,
+  meta: JsonValue | null | undefined,
+): AnsweredQuestion[] {
+  const rawAnswers = asObject(meta)?.answers
+  if (!Array.isArray(rawAnswers)) return []
+  const rawQuestions = asObject(input)?.questions
+  const questions = Array.isArray(rawQuestions) ? rawQuestions : []
+  const count = Math.max(questions.length, rawAnswers.length)
+  if (count === 0) return []
+  const entries: AnsweredQuestion[] = []
+  for (let index = 0; index < count; index++) {
+    const q = questions[index]
+    const header = stringArg(q, 'header') ?? stringArg(q, 'question') ?? ''
+    const chosen = rawAnswers[index]
+    const answer = Array.isArray(chosen)
+      ? chosen.filter((item): item is string => typeof item === 'string').join(', ')
+      : ''
+    entries.push({ header, answer })
+  }
+  return entries
+}
 // ---- diff -----------------------------------------------------------------------------------
 
 export type DiffKind = 'added' | 'removed' | 'hunk' | 'file' | 'context'

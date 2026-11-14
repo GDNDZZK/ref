@@ -5,9 +5,14 @@
 import { computed, nextTick, shallowRef, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { FormOutcome, QuestionForm } from '../model/questionForm.ts'
+import type { AnsweredQuestion } from '../model/toolContent.ts'
 import Icon from './Icon.vue'
 
-const props = defineProps<{ form: QuestionForm | undefined; sending: boolean }>()
+const props = defineProps<{
+  form: QuestionForm | undefined
+  sending: boolean
+  answered?: AnsweredQuestion[]
+}>()
 const emit = defineEmits<{ answer: [answers: string[][] | null] }>()
 
 const { t } = useI18n()
@@ -185,6 +190,12 @@ watch(
       </div>
     </div>
   </div>
+  <ul v-if="answered && answered.length > 0" class="summary answered">
+    <li v-for="(line, index) in answered" :key="index" :class="{ unanswered: line.answer === '' }">
+      <span class="summary-header">{{ line.header }}</span>
+      <span>{{ line.answer === '' ? t('question.unanswered') : line.answer }}</span>
+    </li>
+  </ul>
 </template>
 
 <style scoped>
@@ -350,12 +361,18 @@ watch(
   box-shadow: inset 0 0 0 1px var(--accent-text);
 }
 
+.summary.answered {
+  margin: 0;
+  padding: 8px 14px 10px;
+  border-top: 1px solid var(--border);
+  list-style: none;
+}
+
 .summary li {
   display: flex;
   gap: 12px;
   padding: 4px 8px;
 }
-
 .summary-header {
   flex: none;
   min-width: 6em;
