@@ -143,7 +143,7 @@ scripts/package.sh --version v0.2.0 --target x86_64-unknown-linux-gnu \
 
 `cmake --install` 还会删掉 Basic 以外的 Qt Quick Controls 样式（`gui/cmake/PruneControlsStyles.cmake`）：`ref-gui` 自己设置 Basic 样式，否则对 QML import 的扫描会把五种样式都部署进去。
 
-- **Linux**：库放在 `lib/`，程序的运行路径是 `$ORIGIN/lib`；`qt.conf` 让 Qt 到 `plugins/` 和 `qml/` 中查找。桌面用不到的插件（QML 调试、嵌入式显示、Wayland 辅助插件）不会部署。
+- **Linux**：库放在 `lib/`，程序的运行路径是 `$ORIGIN/lib`；`qt.conf` 让 Qt 到 `plugins/` 和 `qml/` 中查找。部署时显式包含 `qwayland`（及其 `wayland-*` 辅助插件）与 `libqxcb.so` 一起打包，因此设置 `WAYLAND_DISPLAY` 时 Qt 会自动使用原生 Wayland，否则回退到 `xcb`。桌面用不到的插件（QML 调试、嵌入式显示）不会部署。
 - **macOS**：`macdeployqt` 生成 `ref-gui.app`。`package.sh` 把它改名为 `ref.app`，把 `ref-server` 放进 `Contents/MacOS`，再运行 `scripts/sign-macos-app.sh`：由内向外重新做 ad-hoc 签名（没有开发者证书），并用 `codesign --verify --deep --strict` 检查。`all` 压缩包里的 `ref-server` 是指向 app 内那一份的符号链接。
 - **Windows**：`windeployqt` 把 DLL 和 Visual C++ 运行库复制到 `ref-gui.exe` 旁边，不含软件 OpenGL 后备。程序使用 GUI 子系统（不弹控制台窗口），并带有图标和版本资源。
 
