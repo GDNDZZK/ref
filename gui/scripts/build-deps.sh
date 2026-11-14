@@ -44,18 +44,18 @@ sha256_of() {
 	die "no tool found to compute a SHA-256 (tried shasum, sha256sum, openssl)"
 }
 
-# download URL SHA256 -> path of the verified tarball
+# download URL SHA256 [FILENAME] -> path of the verified tarball
 download() {
-	local url="$1" sha256="$2" file actual
-	file="$work/$(basename "$url")"
+	local url="$1" sha256="$2"
+	local filename="${3:-$(basename "$url")}"
+	local file="$work/$filename" actual
 	if [[ ! -f "$file" ]]; then
-		curl --fail --location --silent --show-error --output "$file" "$url"
+		curl --fail --location --silent --show-error --http1.1 --retry 3 --output "$file" "$url"
 	fi
 	actual="$(sha256_of "$file")"
 	[[ "$actual" == "$sha256" ]] || die "checksum mismatch for $file: expected $sha256, got $actual"
 	echo "$file"
 }
-
 # build_cmake_project NAME TARBALL [cmake args...]
 build_cmake_project() {
 	local name="$1" tarball="$2"
@@ -96,8 +96,19 @@ build_cmake_project qcoro "$qcoro_tarball" \
 	-DQCORO_WITH_QML=OFF \
 	-DQCORO_WITH_QTTEST=OFF
 
-cat <<MSG
+if [[ "$(uname -s)" == Linux ]]; then
+	fcitx5_qt_tarball="$(download "$FCITX5_QT_URL" "$FCITX5_QT_SHA256" "fcitx5-qt-${FCITX5_QT_VERSION}.tar.gz")"
+	build_cmake_project fcitx5-qt "$fcitx5_qt_tarball" \
+		-DENABLE_QT4=OFF \
+		-DENABLE_QT5=OFF \
+		-DENABLE_QT6=ON \
+		-DBUILD_ONLY_PLUGIN=ON \
+		-DENABLE_X11=OFF \
+		-DENABLE_QT6_WAYLAND_WORKAROUND=ON \
+		-DCMAKE_INSTALL_RPATH='$ORIGIN/../../lib'
+fi
 
+cat <<MSG
 Dependencies installed. Configure ref-gui with:
   cmake -S <gui dir> -B <build dir> -G Ninja -DCMAKE_PREFIX_PATH="$qt;$prefix"
 At run time, QML_IMPORT_PATH / QML2_IMPORT_PATH must include $prefix/lib/qml

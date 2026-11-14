@@ -35,6 +35,7 @@ Item {
 		if (toolName === "question")
 			return ToolInfo.questionSummary(call.inputObject, meta).length > 0 ? "QuestionBody.qml" : genericFile
 		if (SessionTools.isSessionTool(toolName))
+			return "SessionBody.qml"
 		return Fields.has(bodyFiles, toolName) ? bodyFiles[toolName] : genericFile
 	}
 

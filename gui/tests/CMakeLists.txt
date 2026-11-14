@@ -53,6 +53,17 @@ refgui_add_test(tst_command_registry LIBS refgui_workspace)
 
 refgui_add_test(tst_toast_text LIBS refgui_workspace)
 
+set(qml_import_paths "")
+foreach(prefix IN LISTS CMAKE_PREFIX_PATH)
+	list(APPEND qml_import_paths "${prefix}/lib/qml")
+endforeach()
+# QML_IMPORT_PATH is a path list; ';' separates the test's environment entries, hence the escape.
+if(WIN32)
+	list(JOIN qml_import_paths "\\;" qml_import_path)
+else()
+	list(JOIN qml_import_paths ":" qml_import_path)
+endif()
+
 # Tests against the real backend. Point REF_SERVER at a built ref-server
 # (`cargo build -p ref-server` gives target/debug/ref-server) to enable them.
 set(REF_SERVER "" CACHE FILEPATH "ref-server binary for the tests that run against it")
@@ -68,16 +79,6 @@ if(REF_SERVER)
 		REF_GUI_BINARY="$<TARGET_FILE:ref-gui>"
 	)
 	add_dependencies(tst_app_smoke ref-gui)
-	set(qml_import_paths "")
-	foreach(prefix IN LISTS CMAKE_PREFIX_PATH)
-		list(APPEND qml_import_paths "${prefix}/lib/qml")
-	endforeach()
-	# QML_IMPORT_PATH is a path list; ';' separates the test's environment entries, hence the escape.
-	if(WIN32)
-		list(JOIN qml_import_paths "\\;" qml_import_path)
-	else()
-		list(JOIN qml_import_paths ":" qml_import_path)
-	endif()
 	set_tests_properties(tst_app_smoke PROPERTIES ENVIRONMENT "QML_IMPORT_PATH=${qml_import_path}")
 endif()
 
@@ -140,6 +141,101 @@ refgui_add_test(tst_network_policy
 	DEFINITIONS REF_QML_DIR="${PROJECT_SOURCE_DIR}/src/app"
 )
 set_tests_properties(tst_network_policy PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+set(tool_block_singletons
+	Theme.qml
+	Motion.qml
+	Format.qml
+	Links.qml
+	ToolState.qml
+	MessageSource.qml
+	Fields.qml
+	SessionTools.qml
+	TodoStatus.qml
+)
+set(tool_block_qml_names
+	${tool_block_singletons}
+	ChatView.qml
+	OlderPill.qml
+	ScrollHandle.qml
+	Block.qml
+	UserBlock.qml
+	ImageBlock.qml
+	ReasoningBlock.qml
+	MarkdownBlock.qml
+	CodeBlock.qml
+	ToolBlock.qml
+	ErrorBlock.qml
+	MetaBlock.qml
+	ProseText.qml
+	StreamCaret.qml
+	ImageStrip.qml
+	Thumbnail.qml
+	MetaText.qml
+	MetaAction.qml
+	CopiedFlag.qml
+	IconButton.qml
+	TextButton.qml
+	PlainToolTip.qml
+	Icon.qml
+	Chevron.qml
+	Pulse.qml
+	Ticker.qml
+	Flourish.qml
+	AlertBadge.qml
+	TruncatedChip.qml
+	ToolStateSlot.qml
+	CountdownRing.qml
+	ToolBody.qml
+	ToolBodyBase.qml
+	GenericBody.qml
+	OutputSection.qml
+	DiffBody.qml
+	BashBody.qml
+	ReadBody.qml
+	GrepBody.qml
+	FindBody.qml
+	WebfetchBody.qml
+	SessionBody.qml
+	QuestionBody.qml
+	TodoBody.qml
+	TodoList.qml
+	TodoProgress.qml
+	CommandBox.qml
+	LineView.qml
+	ToolChip.qml
+	ToolSection.qml
+	OutputText.qml
+	CopyButton.qml
+	HoverCopyButton.qml
+	PermissionSection.qml
+	PermissionButton.qml
+)
+set(tool_block_qml_files "")
+foreach(qml_name IN LISTS tool_block_qml_names)
+	set(qml_path "${PROJECT_SOURCE_DIR}/src/app/${qml_name}")
+	set_source_files_properties("${qml_path}" PROPERTIES QT_RESOURCE_ALIAS "${qml_name}")
+	list(APPEND tool_block_qml_files "${qml_path}")
+endforeach()
+foreach(singleton_name IN LISTS tool_block_singletons)
+	set_source_files_properties("${PROJECT_SOURCE_DIR}/src/app/${singleton_name}" PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+endforeach()
+
+refgui_add_test(tst_tool_block
+	SOURCES session_test_data.h
+		${PROJECT_SOURCE_DIR}/src/app/clipboard.h
+		${PROJECT_SOURCE_DIR}/src/app/link_colorizer.cpp
+		${PROJECT_SOURCE_DIR}/src/app/link_colorizer.h
+		${PROJECT_SOURCE_DIR}/src/app/system_fonts.h
+		${PROJECT_SOURCE_DIR}/src/app/tool_info.h
+	LIBS refgui_session refgui_icons Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2
+)
+qt_add_qml_module(tst_tool_block
+	URI RefGui
+	QML_FILES ${tool_block_qml_files}
+)
+target_include_directories(tst_tool_block PRIVATE ${PROJECT_SOURCE_DIR}/src/app)
+set_tests_properties(tst_tool_block PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QML_IMPORT_PATH=${qml_import_path}")
 
 # No test may reach the session bus of the user's desktop, where a notification would really show.
 # A test that needs a bus starts its own, like tst_dbus_notifier.
