@@ -140,11 +140,16 @@ fn screen(app: &mut App) -> String {
 
 /// The backend's answer to request `id`.
 fn respond(app: &mut App, id: Option<u64>, error: Option<&str>) {
+    respond_coded(app, id, error, None);
+}
+
+fn respond_coded(app: &mut App, id: Option<u64>, error: Option<&str>, code: Option<&str>) {
     app.on_net(NetEvent::Frame(ServerFrame::Response {
         id: id.unwrap(),
         ok: error.is_none(),
         result: Value::Null,
         error: error.map(String::from),
+        code: code.map(String::from),
     }));
 }
 
@@ -470,6 +475,23 @@ fn the_dialog_waits_for_the_backend_before_closing() {
 
 #[test]
 fn an_answer_given_elsewhere_closes_the_dialog_quietly() {
+    // Error code wins even when the message text differs.
+    let (mut app, mut rx) = open(vec![first_file()]);
+    press(&mut app, KeyCode::Enter);
+    let (id, _) = reply(&mut rx);
+    respond_coded(
+        &mut app,
+        id,
+        Some("already answered by another client"),
+        Some(ref_proto::ERR_NO_PENDING_QUESTION),
+    );
+    assert!(app.active_question().is_none());
+    assert!(app.question.is_none());
+    let s = screen(&mut app);
+    assert!(!s.contains("already answered"), "no error: {s}");
+    assert!(app.toasts.items.is_empty(), "no toast either");
+
+    // 0.2.0 fallback: text-only match without code.
     let (mut app, mut rx) = open(vec![first_file()]);
     press(&mut app, KeyCode::Enter);
     let (id, _) = reply(&mut rx);
@@ -479,6 +501,23 @@ fn an_answer_given_elsewhere_closes_the_dialog_quietly() {
     let s = screen(&mut app);
     assert!(!s.contains("No pending question"), "no error: {s}");
     assert!(app.toasts.items.is_empty(), "no toast either");
+}
+
+#[test]
+fn stale_permission_reply_is_ignored_quietly() {
+    let (mut app, mut rx) = test_app_with_requests(false);
+    app.reply_permission(TEST_SESSION, "c_perm", true, false);
+    let frame = sent(&mut rx)
+        .into_iter()
+        .find(|f| matches!(f.req, Request::PermissionReply { .. }))
+        .expect("permission reply sent");
+    respond_coded(
+        &mut app,
+        frame.id,
+        Some("already resolved elsewhere"),
+        Some(ref_proto::ERR_NO_PENDING_PERMISSION),
+    );
+    assert!(app.toasts.items.is_empty(), "no toast for stale permission");
 }
 
 #[test]
@@ -560,6 +599,7 @@ fn a_permission_request_goes_first() {
                 purpose: "List files".into(),
                 input: serde_json::json!({"command": "ls -la"}),
                 time: 0,
+                preview: None,
             },
         });
     let s = screen(&mut app);
@@ -708,6 +748,7 @@ fn reconnect_after_drop(
         ok: true,
         result: serde_json::json!({ "snapshot": snapshot }),
         error: None,
+        code: None,
     }));
 }
 

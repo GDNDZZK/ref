@@ -140,6 +140,7 @@ async fn request(
                 ok,
                 result,
                 error,
+                ..
             }) = serde_json::from_str::<ServerFrame>(&t)
             {
                 if id == 1 && !ok {

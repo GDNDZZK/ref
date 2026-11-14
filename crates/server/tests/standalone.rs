@@ -83,6 +83,7 @@ impl Client {
                     ok,
                     result,
                     error,
+                    ..
                 } if rid == id => {
                     return if ok {
                         Ok(result)

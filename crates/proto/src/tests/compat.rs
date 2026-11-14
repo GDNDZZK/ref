@@ -46,3 +46,74 @@ fn question_defaults() {
     .unwrap();
     assert!(q.custom && !q.multiple && !q.options[0].default);
 }
+
+/// A response from a 0.2.0 server has no `code` field; a coded response round-trips.
+#[test]
+fn response_code_is_optional_and_round_trips() {
+    let legacy: ServerFrame = serde_json::from_value(json!({
+        "kind": "response",
+        "id": 1,
+        "ok": false,
+        "result": null,
+        "error": NO_PENDING_QUESTION,
+    }))
+    .unwrap();
+    match legacy {
+        ServerFrame::Response {
+            ok, error, code, ..
+        } => {
+            assert!(!ok);
+            assert_eq!(error.as_deref(), Some(NO_PENDING_QUESTION));
+            assert_eq!(code, None);
+        }
+        other => panic!("not a response: {other:?}"),
+    }
+
+    let coded = ServerFrame::Response {
+        id: 2,
+        ok: false,
+        result: serde_json::Value::Null,
+        error: Some(NO_PENDING_QUESTION.into()),
+        code: Some(ERR_NO_PENDING_QUESTION.into()),
+    };
+    let json = serde_json::to_string(&coded).unwrap();
+    assert!(json.contains("\"code\":\"no_pending_question\""), "{json}");
+    let back: ServerFrame = serde_json::from_str(&json).unwrap();
+    match back {
+        ServerFrame::Response { code, .. } => {
+            assert_eq!(code.as_deref(), Some(ERR_NO_PENDING_QUESTION));
+        }
+        other => panic!("not a response: {other:?}"),
+    }
+}
+
+/// A `PermissionRequest` from a 0.2.0 server has no `preview`; with `preview` it round-trips.
+#[test]
+fn permission_request_preview_is_optional_and_round_trips() {
+    let legacy: PermissionRequest = serde_json::from_value(json!({
+        "session_id": "s1",
+        "message_id": "m1",
+        "call_id": "c1",
+        "tool": "edit",
+        "purpose": "Fix bug",
+        "input": {"path": "a.rs"},
+        "time": 123,
+    }))
+    .unwrap();
+    assert_eq!(legacy.preview, None);
+    let legacy_json = serde_json::to_string(&legacy).unwrap();
+    assert!(!legacy_json.contains("preview"), "{legacy_json}");
+
+    let with_preview = PermissionRequest {
+        preview: Some(EditPreview {
+            diff: "--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n-old\n+new\n".into(),
+            added: 1,
+            removed: 1,
+            truncated: true,
+        }),
+        ..legacy
+    };
+    let json = serde_json::to_string(&with_preview).unwrap();
+    let back: PermissionRequest = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.preview, with_preview.preview);
+}

@@ -1243,7 +1243,7 @@ impl CallCtx<'_> {
 
     /// Applies the permission rules and asks the user when needed. Returns false when the
     /// call was refused (it is finished then).
-    async fn authorize(&self, prep: &Prep, input: &Value, purpose: &str) -> bool {
+    async fn authorize(&self, prep: &Prep, entry: &Entry, input: &Value, purpose: &str) -> bool {
         let call = self.call;
         let subject = toolset::subject(&call.name, input);
         let mut action = prep.cfg.permission_for(&prep.agent, &call.name, &subject);
@@ -1260,14 +1260,25 @@ impl CallCtx<'_> {
                 self.finish(ToolState::Denied, out);
                 false
             }
-            Action::Ask => self.ask_user(input, purpose).await,
+            Action::Ask => self.ask_user(entry, input, purpose).await,
         }
     }
 
     /// Asks the user for permission and waits for the answer. Returns false when the call
     /// was denied or cancelled (it is finished then).
-    async fn ask_user(&self, input: &Value, purpose: &str) -> bool {
+    async fn ask_user(&self, entry: &Entry, input: &Value, purpose: &str) -> bool {
         let (hub, s, call) = (self.hub, self.s, self.call);
+        let preview = if matches!(entry.kind, Kind::Builtin)
+            && matches!(call.name.as_str(), "edit" | "write")
+        {
+            toolset::preview(s, &call.name, input, self.cancel).await
+        } else {
+            None
+        };
+        if self.cancel.is_cancelled() {
+            self.finish_cancelled();
+            return false;
+        }
         let (tx, rx) = tokio::sync::oneshot::channel();
         {
             let mut st = s.lock();
@@ -1279,6 +1290,7 @@ impl CallCtx<'_> {
                 purpose: purpose.to_string(),
                 input: input.clone(),
                 time: now_ms(),
+                preview,
             };
             st.perms.push(PendingPerm {
                 request: request.clone(),
@@ -1431,7 +1443,7 @@ async fn run_one(
         ctx.finish(ToolState::Error, out);
         return;
     };
-    if !ctx.authorize(prep, &input, &purpose).await {
+    if !ctx.authorize(prep, entry, &input, &purpose).await {
         return;
     }
     if !ctx.wait_delay(prep).await {

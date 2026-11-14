@@ -1063,8 +1063,9 @@ async fn net_hello_and_frames() {
                 Request::Hello { .. } => ServerFrame::Response {
                     id,
                     ok: true,
-                    result: json!({}),
+                    result: json!({ "protocol": PROTOCOL_VERSION }),
                     error: None,
+                    code: None,
                 },
                 // Bigger than tungstenite's 16 MiB default frame limit (snapshots with many images).
                 _ => ServerFrame::Response {
@@ -1072,6 +1073,7 @@ async fn net_hello_and_frames() {
                     ok: true,
                     result: json!({"sessions": [], "pad": "x".repeat(OVERSIZED_FRAME_BYTES)}),
                     error: None,
+                    code: None,
                 },
             };
             ws.send(M::text(serde_json::to_string(&reply).unwrap()))
@@ -1391,6 +1393,7 @@ fn fail_pending(app: &mut App, pred: impl Fn(&crate::app::Pending) -> bool, err:
         ok: false,
         result: serde_json::Value::Null,
         error: Some(err.into()),
+        code: None,
     }));
 }
 
@@ -1455,6 +1458,7 @@ fn keys_typed_as_permission_opens_go_to_editor() {
         purpose: "List files".into(),
         input: json!({"command": "ls -la"}),
         time: 0,
+        preview: None,
     };
     app.views
         .get_mut(TEST_SESSION)
@@ -1488,6 +1492,7 @@ fn keys_typed_as_permission_opens_go_to_editor() {
         purpose: "x".into(),
         input: json!({"command": "ls"}),
         time: 0,
+        preview: None,
     };
     app.views
         .get_mut(TEST_SESSION)
@@ -1809,6 +1814,7 @@ fn undo_puts_prompt_and_images_back_into_editor() {
             ok: true,
             result,
             error: None,
+            code: None,
         }));
     };
     // /undo (= ctrl+x u): the last human prompt, with its image.
@@ -2664,6 +2670,7 @@ fn answer_mcp(app: &mut App, servers: &[McpServerStatus]) {
         ok: true,
         result: json!({ "servers": servers }),
         error: None,
+        code: None,
     }));
 }
 
@@ -2876,6 +2883,7 @@ fn mcp_status_fallback_and_polling() {
         ok: false,
         result: json!(null),
         error: Some("unknown op".into()),
+        code: None,
     }));
     assert!(
         app.mcp_fallback && app.toasts.items.is_empty(),
@@ -2904,6 +2912,7 @@ fn mcp_status_fallback_and_polling() {
         ok: true,
         result: json!({ "config": cfg }),
         error: None,
+        code: None,
     }));
     assert!(app.mcp_poll_at.is_none(), "all settled: no more polling");
     assert_eq!(app.mcp[2].state, crate::ui::mcp::McpState::Connected);
@@ -3706,6 +3715,7 @@ fn respond(app: &mut App, pred: impl Fn(&crate::app::Pending) -> bool, result: s
         ok: true,
         result,
         error: None,
+        code: None,
     }));
 }
 
@@ -4171,6 +4181,7 @@ fn respond_to_older(app: &mut App, id: u64, result: serde_json::Value) {
         ok: true,
         result,
         error: None,
+        code: None,
     }));
 }
 
@@ -4270,6 +4281,7 @@ fn history_page_error_stops_further_requests() {
         ok: false,
         result: json!(null),
         error: Some("gone".into()),
+        code: None,
     }));
     render(&mut app, 100, 30);
     app.load_older();
@@ -4491,4 +4503,292 @@ fn hold_applies_to_split_tiles() {
     set_status(&mut app, "ses_w2", SessionStatus::Idle);
     let (_, s) = render(&mut app, 120, 30);
     assert_eq!(row_of(&s, "beta answer 29"), at_rest, "released");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn net_protocol_mismatch_stops_retrying() {
+    use futures_util::{SinkExt, StreamExt};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio_tungstenite::tungstenite::Message as M;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let accepts = Arc::new(AtomicUsize::new(0));
+    let accepts_srv = accepts.clone();
+    tokio::spawn(async move {
+        while let Ok((sock, _)) = listener.accept().await {
+            accepts_srv.fetch_add(1, Ordering::SeqCst);
+            tokio::spawn(async move {
+                let mut ws = tokio_tungstenite::accept_async(sock).await.unwrap();
+                if let Some(Ok(M::Text(t))) = ws.next().await {
+                    let f: ClientFrame = serde_json::from_str(t.as_str()).unwrap();
+                    let reply = ServerFrame::Response {
+                        id: f.id.unwrap_or(0),
+                        ok: false,
+                        result: json!(null),
+                        error: Some("ref-server 0.2.1 speaks protocol 5, mismatch test".into()),
+                        code: Some(ERR_PROTOCOL_MISMATCH.into()),
+                    };
+                    let _ = ws
+                        .send(M::text(serde_json::to_string(&reply).unwrap()))
+                        .await;
+                }
+            });
+        }
+    });
+
+    let (out_tx, out_rx) = mpsc::unbounded_channel();
+    let (ev_tx, mut ev_rx) = mpsc::unbounded_channel();
+    let target = ref_client::Target::Explicit {
+        url: format!("ws://127.0.0.1:{port}/"),
+        token: None,
+    };
+    let task = tokio::spawn(crate::net::run(target, "/my/cwd".into(), out_rx, ev_tx));
+    let ev = tokio::time::timeout(std::time::Duration::from_secs(3), ev_rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(&ev, crate::net::NetEvent::Refused(msg) if msg.contains("mismatch test")),
+        "{ev:?}"
+    );
+    // Past RECONNECT_DELAY (1s): must not reconnect, and must keep the channel open.
+    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+    assert_eq!(accepts.load(Ordering::SeqCst), 1);
+    assert!(ev_rx.try_recv().is_err());
+
+    drop(out_tx);
+    tokio::time::timeout(std::time::Duration::from_secs(1), task)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn net_old_backend_emits_backend_too_old() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message as M;
+
+    for (hello_result, expect_too_old) in [
+        (
+            json!({ "protocol": PROTOCOL_VERSION - 1 }),
+            Some(PROTOCOL_VERSION - 1),
+        ),
+        (json!({}), Some(1)),
+        (json!({ "protocol": PROTOCOL_VERSION }), None),
+    ] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (sock, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(sock).await.unwrap();
+            while let Some(Ok(M::Text(t))) = ws.next().await {
+                let f: ClientFrame = serde_json::from_str(t.as_str()).unwrap();
+                let reply = ServerFrame::Response {
+                    id: f.id.unwrap_or(0),
+                    ok: true,
+                    result: hello_result.clone(),
+                    error: None,
+                    code: None,
+                };
+                let _ = ws
+                    .send(M::text(serde_json::to_string(&reply).unwrap()))
+                    .await;
+                let toast = ServerFrame::Toast {
+                    level: ToastLevel::Info,
+                    text: "after".into(),
+                };
+                let _ = ws
+                    .send(M::text(serde_json::to_string(&toast).unwrap()))
+                    .await;
+            }
+        });
+        let (out_tx, out_rx) = mpsc::unbounded_channel();
+        let (ev_tx, mut ev_rx) = mpsc::unbounded_channel();
+        let target = ref_client::Target::Explicit {
+            url: format!("ws://127.0.0.1:{port}/"),
+            token: None,
+        };
+        tokio::spawn(crate::net::run(target, "/my/cwd".into(), out_rx, ev_tx));
+        let first = tokio::time::timeout(std::time::Duration::from_secs(3), ev_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(first, crate::net::NetEvent::Connected),
+            "{first:?}"
+        );
+        let second = tokio::time::timeout(std::time::Duration::from_secs(3), ev_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        match expect_too_old {
+            Some(p) => assert!(
+                matches!(second, crate::net::NetEvent::BackendTooOld { protocol } if protocol == p),
+                "{second:?}"
+            ),
+            None => assert!(
+                matches!(
+                    second,
+                    crate::net::NetEvent::Frame(ServerFrame::Toast { .. })
+                ),
+                "{second:?}"
+            ),
+        }
+        drop(out_tx);
+    }
+}
+
+#[test]
+fn protocol_refusal_and_old_backend_banners_render() {
+    let mut app = test_app(false);
+    app.on_net(crate::net::NetEvent::BackendTooOld {
+        protocol: PROTOCOL_VERSION - 1,
+    });
+    let (_, s) = render(&mut app, 110, 30);
+    let expected = format!(
+        "The backend speaks protocol {} but this ref needs {}. Run ref-server --stop and start ref again.",
+        PROTOCOL_VERSION - 1,
+        PROTOCOL_VERSION
+    );
+    assert!(s.contains(&expected), "{s}");
+    // Stays connected and unblocked.
+    assert!(app.connected);
+
+    // Refusal after a session was connected shows the message and drops the spinner.
+    let refusal = "ref-server 0.2.1 speaks protocol 4, mismatch detail";
+    app.on_net(crate::net::NetEvent::Refused(refusal.into()));
+    let (_, s) = render(&mut app, 110, 30);
+    assert!(s.contains(refusal), "{s}");
+    assert!(!s.contains("reconnecting…"), "{s}");
+
+    // Refusal on initial connect also shows the text without "connecting…".
+    let (tx, _) = mpsc::unbounded_channel();
+    let mut fresh = App::new(Client::new(tx), "/work".into(), InitPlan::default());
+    fresh.on_net(crate::net::NetEvent::Refused(refusal.into()));
+    let (_, s) = render(&mut fresh, 100, 30);
+    assert!(s.contains(refusal), "{s}");
+    assert!(!s.contains("connecting…"), "{s}");
+    assert!(!s.contains("reconnecting…"), "{s}");
+}
+
+#[test]
+fn edit_warnings_render_under_diff_from_shared_fixture() {
+    let part: Part = serde_json::from_str(include_str!(
+        "../../proto/fixtures/part/tool_done_edit_warnings.json"
+    ))
+    .unwrap();
+    let msg = Message {
+        id: "m_warn".into(),
+        role: Role::Assistant,
+        time: 0,
+        time_end: Some(1),
+        source: MessageSource::Human,
+        parts: vec![part],
+        model: None,
+        agent: None,
+        usage: None,
+        error: None,
+    };
+    let rows = crate::ui::message::render(&msg, &ctx(true), 100);
+    let rendered: Vec<String> = rows.iter().map(|r| text::line_text(&r.line)).collect();
+    let diff_idx = rendered
+        .iter()
+        .position(|l| l.contains("diff ─"))
+        .expect("diff section");
+    let warn_hdr_idx = rendered
+        .iter()
+        .position(|l| l.contains("warnings ─"))
+        .expect("warnings section");
+    let warn_row_idx = rendered
+        .iter()
+        .position(|l| l.contains("Recovered: file changed since read; line numbers remapped."))
+        .expect("warning line");
+    let out_idx = rendered
+        .iter()
+        .position(|l| l.contains("output ─"))
+        .expect("output section");
+    assert!(diff_idx < warn_hdr_idx && warn_hdr_idx < warn_row_idx && warn_row_idx < out_idx);
+    let has_warning_color = rows[warn_row_idx]
+        .line
+        .spans
+        .iter()
+        .any(|s| s.style.fg == Some(crate::ui::theme::WARNING));
+    assert!(has_warning_color);
+
+    // Without warnings, no warnings section is drawn.
+    let plain: Part = serde_json::from_str(include_str!(
+        "../../proto/fixtures/part/tool_done_edit_diff.json"
+    ))
+    .unwrap();
+    let msg_plain = Message {
+        parts: vec![plain],
+        ..msg
+    };
+    let rows_plain = crate::ui::message::render(&msg_plain, &ctx(true), 100);
+    assert!(
+        !rows_plain
+            .iter()
+            .any(|r| text::line_text(&r.line).contains("warnings ─"))
+    );
+}
+
+#[test]
+fn permission_modal_renders_preview_and_truncation_marker() {
+    let mut app = test_app(false);
+    // Absent preview: no preview section.
+    let no_prev = PermissionRequest {
+        session_id: TEST_SESSION.into(),
+        message_id: "m_p".into(),
+        call_id: "c_p0".into(),
+        tool: "edit".into(),
+        purpose: "Fix parser".into(),
+        input: json!({"path": "src/parser.rs"}),
+        time: 0,
+        preview: None,
+    };
+    app.views
+        .get_mut(TEST_SESSION)
+        .unwrap()
+        .apply(SessionEvent::Permission { request: no_prev });
+    let (_, s) = render(&mut app, 100, 34);
+    assert!(!s.contains("preview"), "{s}");
+
+    app.views
+        .get_mut(TEST_SESSION)
+        .unwrap()
+        .apply(SessionEvent::PermissionResolved {
+            call_id: "c_p0".into(),
+        });
+
+    // With preview (> 12 diff lines + truncated = true): shows diff, counts, marker, and (preview cut).
+    let mut diff = String::from("--- a/src/parser.rs\n+++ b/src/parser.rs\n@@ -1,15 +1,15 @@\n");
+    for i in 1..=15 {
+        diff.push_str(&format!("-old line {i}\n+new line {i}\n"));
+    }
+    let with_prev = PermissionRequest {
+        session_id: TEST_SESSION.into(),
+        message_id: "m_p".into(),
+        call_id: "c_p1".into(),
+        tool: "edit".into(),
+        purpose: "Fix parser".into(),
+        input: json!({"path": "src/parser.rs"}),
+        time: 0,
+        preview: Some(EditPreview {
+            diff,
+            added: 15,
+            removed: 15,
+            truncated: true,
+        }),
+    };
+    app.views
+        .get_mut(TEST_SESSION)
+        .unwrap()
+        .apply(SessionEvent::Permission { request: with_prev });
+    let (_, s) = render(&mut app, 100, 34);
+    assert!(s.contains("preview  +15 -15 (preview cut)"), "{s}");
+    assert!(s.contains("--- a/src/parser.rs"), "{s}");
+    assert!(s.contains("-old line 1"), "{s}");
+    assert!(s.contains("more lines (preview cut)"), "{s}");
 }

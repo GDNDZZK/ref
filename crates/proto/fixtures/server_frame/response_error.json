@@ -3,5 +3,6 @@
   "id": 5,
   "ok": false,
   "result": null,
-  "error": "Directory does not exist: /home/user/nowhere"
+  "error": "Directory does not exist: /home/user/nowhere",
+  "code": "not_found"
 }

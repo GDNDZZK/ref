@@ -22,6 +22,7 @@ pub struct StatusCtx<'a> {
     pub leader: bool,
     pub shell_mode: bool,
     pub connected: bool,
+    pub refused: bool,
     pub watch_mode: bool,
     pub watch_count: usize,
     /// Split view: a tile is focused.
@@ -93,10 +94,12 @@ pub fn draw_status(buf: &mut Buffer, area: Rect, cx: &StatusCtx<'_>) {
     let now = ref_proto::now_ms();
     let mut left: Vec<Span<'static>> = vec![Span::raw(" ")];
     if !cx.connected {
-        left.push(Span::styled(
-            "● disconnected — reconnecting…",
-            theme::fg(theme::ERROR),
-        ));
+        let label = if cx.refused {
+            "● disconnected"
+        } else {
+            "● disconnected — reconnecting…"
+        };
+        left.push(Span::styled(label, theme::fg(theme::ERROR)));
     } else if cx.watch_mode {
         left.push(Span::styled(
             "◫ background sessions",

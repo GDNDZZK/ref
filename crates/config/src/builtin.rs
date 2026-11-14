@@ -65,7 +65,7 @@ const QUESTION_AGENTS: [&str; 2] = ["build", "plan"];
 /// even offered) for every other agent. A rule for it in the global `permission` applies to all
 /// agents; a rule in an agent's own `permission` wins over both. Call after the agents are built.
 pub(crate) fn question_defaults(cfg: &mut Config) {
-    if cfg.permission.evaluate(QUESTION_TOOL, "").is_some() {
+    if cfg.permission.mentions(QUESTION_TOOL) {
         return;
     }
     for (name, agent) in cfg.agents.iter_mut() {

@@ -282,8 +282,11 @@ async fn a_real_backend_accepts_a_hello_without_token() {
         .await;
     let mut tab = web.channel().await;
 
-    let hello = r#"{"id":1,"op":"hello","client":"ref-web","version":2,"cwd":"/tmp"}"#;
-    tab.send_text(hello).await;
+    let hello = format!(
+        r#"{{"id":1,"op":"hello","client":"ref-web","version":{},"cwd":"/tmp"}}"#,
+        ref_proto::PROTOCOL_VERSION
+    );
+    tab.send_text(&hello).await;
     let response: serde_json::Value = serde_json::from_str(&tab.next_text().await).unwrap();
     assert_eq!(response["ok"], true, "{response}");
     assert_eq!(response["result"]["protocol"], ref_proto::PROTOCOL_VERSION);

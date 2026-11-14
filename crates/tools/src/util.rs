@@ -11,6 +11,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub const INLINE_OUTPUT_MAX_BYTES: usize = 50 * 1024;
 pub const INLINE_OUTPUT_MAX_LINES: usize = 2000;
 
+/// Permission preview diff limits (`EditPreview`).
+pub const PREVIEW_MAX_BYTES: usize = 64 * 1024;
+pub const PREVIEW_MAX_LINES: usize = 400;
+pub const PREVIEW_MAX_FILE_BYTES: usize = 2 * 1024 * 1024;
 /// Directory name that find, grep and read never descend into or list.
 pub const GIT_DIR_NAME: &str = ".git";
 
@@ -353,6 +357,36 @@ pub fn unified_diff(old: &str, new: &str, label: &str) -> (String, usize, usize)
     (text, added, removed)
 }
 
+/// Builds a bounded `EditPreview` from `old` and `new` text.
+pub fn edit_preview(old: &str, new: &str, label: &str) -> ref_proto::EditPreview {
+    let (diff, added, removed) = unified_diff(old, new, label);
+    let (diff, truncated) = truncate_diff(&diff, PREVIEW_MAX_BYTES, PREVIEW_MAX_LINES);
+    ref_proto::EditPreview {
+        diff,
+        added: u32::try_from(added).unwrap_or(u32::MAX),
+        removed: u32::try_from(removed).unwrap_or(u32::MAX),
+        truncated,
+    }
+}
+
+/// Cuts `diff` at a line boundary when it exceeds `max_bytes` or `max_lines`.
+pub fn truncate_diff(diff: &str, max_bytes: usize, max_lines: usize) -> (String, bool) {
+    let mut end = 0usize;
+    for (i, line) in diff.split_inclusive('\n').enumerate() {
+        if i >= max_lines {
+            return (diff[..end].to_string(), true);
+        }
+        if end + line.len() > max_bytes {
+            if end == 0 {
+                let cut = floor_char_boundary(line, max_bytes);
+                return (line[..cut].to_string(), true);
+            }
+            return (diff[..end].to_string(), true);
+        }
+        end += line.len();
+    }
+    (diff.to_string(), false)
+}
 /// Formats a sorted list of 1-based line numbers compactly: `5-7, 10`.
 pub fn format_line_list(lines: &[u32]) -> String {
     let mut parts = Vec::new();

@@ -9,17 +9,27 @@ use serde_json::Value;
 use ts_rs::TS;
 
 /// Version of the wire protocol, reported in the `Hello` response (`"protocol"`).
-/// Adding fields or requests does not change it. The server does not downgrade its frames to
-/// the `version` a client sends in `Hello`: a client built for an older version drops the
-/// frames it cannot parse. Version 3 added questions, so an older client never sees a question
-/// (the session waits for an answer), and a session list or snapshot that holds a
-/// `waiting_question` status does not parse in it. Run all clients from the version of the server.
-pub const PROTOCOL_VERSION: u32 = 3;
+/// Adding fields or requests does not change it, whereas incompatible changes (or a minimum
+/// client/server feature baseline that the server enforces) bump it. The server requires
+/// `Hello.version == PROTOCOL_VERSION` (except for `ref-server-cli`) and does not downgrade its
+/// frames to an older client's version: a client built for another version cannot rely on
+/// matching semantics. Version 3 added questions; version 4 adds structured error codes,
+/// edit/write permission previews, structured edit warnings, and strict version negotiation.
+/// Run all clients from the version of the server.
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// The error of a `QuestionReply` for a question that is not pending (answered elsewhere
-/// already). Clients compare with it to drop the question silently.
+/// already). Clients compare with `ERR_NO_PENDING_QUESTION` first, falling back to this text.
 pub const NO_PENDING_QUESTION: &str = "No pending question with that id.";
 
+/// The error of a `PermissionReply` for a request that is not pending.
+pub const NO_PENDING_PERMISSION: &str = "No pending permission request with that id.";
+
+/// Machine-readable error codes carried in `ServerFrame::Response::code`.
+pub const ERR_NO_PENDING_QUESTION: &str = "no_pending_question";
+pub const ERR_NO_PENDING_PERMISSION: &str = "no_pending_permission";
+pub const ERR_NOT_FOUND: &str = "not_found";
+pub const ERR_PROTOCOL_MISMATCH: &str = "protocol_mismatch";
 fn home() -> std::path::PathBuf {
     std::env::var_os("HOME")
         .filter(|h| !h.is_empty())
@@ -520,7 +530,7 @@ pub enum Part {
         state: ToolState,
         #[serde(default)]
         output: Option<String>,
-        /// Extra structured info for display (e.g. diff, exit code).
+        /// Extra structured info for display (e.g. diff, exit code, `warnings: [string]` on `edit`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         meta: Option<Value>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -575,6 +585,17 @@ pub enum NotifyKind {
     TurnError,
 }
 
+/// What an `edit` or `write` would change, computed when permission is asked.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct EditPreview {
+    /// Unified diff in the same format as `meta.diff` of the finished tool.
+    pub diff: String,
+    pub added: u32,
+    pub removed: u32,
+    /// True when `diff` was cut to fit the preview limit; `added`/`removed` still count all lines.
+    pub truncated: bool,
+}
+
 /// Pending permission request shown to the user.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct PermissionRequest {
@@ -586,8 +607,10 @@ pub struct PermissionRequest {
     /// Full input parameters (purpose stripped).
     pub input: Value,
     pub time: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub preview: Option<EditPreview>,
 }
-
 /// One choice of a [`Question`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct QuestionOption {
@@ -843,14 +866,13 @@ pub enum Request {
     },
     /// Answer a pending question. `answers` has one entry per question, in order; each entry
     /// lists the chosen labels or the typed text. `None` dismisses the question. The first
-    /// reply wins; a later one fails with "No pending question with that id."
+    /// reply wins; a later one fails with `ERR_NO_PENDING_QUESTION`.
     QuestionReply {
         session_id: String,
         call_id: String,
         #[serde(default)]
         answers: Option<Vec<Vec<String>>>,
     },
-    /// Change model for this session only (not remembered for new sessions).
     SetModel {
         session_id: String,
         model: ModelRef,
@@ -940,11 +962,10 @@ pub enum Request {
     },
     /// Sub-directories of `path` for a directory picker: `~` is expanded and a relative path
     /// is taken from the connection's cwd. -> `{path: <absolute, normalized>, dirs: [String]}`
-    /// (names only, sorted)
+    /// (names only, sorted). A missing directory fails with `ERR_NOT_FOUND`.
     ListDirs {
         path: String,
     },
-    /// Shut the backend down (used by `ref-server --stop`).
     Shutdown,
     Ping,
 }
@@ -966,8 +987,12 @@ pub enum ServerFrame {
         result: Value,
         #[serde(default)]
         error: Option<String>,
+        /// Machine-readable error code (`ERR_*` constants); only on `ok == false`, and not for
+        /// every error.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        code: Option<String>,
     },
-    /// Event scoped to a session the client is attached to / watching.
     Event {
         session_id: String,
         event: SessionEvent,

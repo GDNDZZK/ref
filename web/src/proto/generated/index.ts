@@ -4,6 +4,7 @@ export type { ClientFrame } from "./ClientFrame";
 export type { CommandInfo } from "./CommandInfo";
 export type { ContextUsage } from "./ContextUsage";
 export type { Delta } from "./Delta";
+export type { EditPreview } from "./EditPreview";
 export type { ImageData } from "./ImageData";
 export type { InstanceInfo } from "./InstanceInfo";
 export type { McpServerStatus } from "./McpServerStatus";
@@ -33,4 +34,4 @@ export type { ToolState } from "./ToolState";
 export type { Usage } from "./Usage";
 export type { JsonValue } from "./serde_json/JsonValue";
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;

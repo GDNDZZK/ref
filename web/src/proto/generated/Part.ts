@@ -29,7 +29,7 @@ input: JsonValue,
  */
 raw_input: string, state: ToolState, output: string | null, 
 /**
- * Extra structured info for display (e.g. diff, exit code).
+ * Extra structured info for display (e.g. diff, exit code, `warnings: [string]` on `edit`).
  */
 meta?: JsonValue | null, images?: Array<ImageData>, time: number, time_end: number | null, 
 /**
