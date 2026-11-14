@@ -118,6 +118,7 @@ sleep 3600 | ref-server --mock      # stdout 只打印一行 {"port":N,"token":"
 ## GUI
 
 `ref-gui` 在 `gui/` 中（C++23、Qt Quick、CMake），与 Rust 工作区分开构建。需要支持 C++23 的编译器（GCC 13、较新的 Clang 或 Visual Studio 2022）、CMake 3.25 和 Ninja。依赖库由 `gui/scripts/` 中的两个脚本安装，CI 也运行它们；版本固定在 `gui/scripts/versions.sh`（Qt 6.12.0 通过 aqtinstall 安装官方预编译包；extra-cmake-modules、KSyntaxHighlighting、QCoro 以及 Linux 下的 `fcitx5-qt` Qt 6 输入法插件从源码编译）：
+
 ```bash
 export REF_DEPS_DIR=$HOME/ref-deps                 # 默认：gui/.deps
 gui/scripts/install-qt.sh
@@ -141,13 +142,14 @@ QT_QPA_PLATFORM=offscreen QML_IMPORT_PATH=$REF_DEPS_DIR/prefix/lib/qml \
 cmake -S gui -B gui/build -G Ninja -DCMAKE_INSTALL_BINDIR=. -DCMAKE_PREFIX_PATH=…
 cmake --build gui/build
 cmake --install gui/build --prefix stage
-scripts/package.sh --version v0.2.1 --target x86_64-unknown-linux-gnu \
+scripts/package.sh --version v0.2.2 --target x86_64-unknown-linux-gnu \
   --bin-dir target/release --out dist --gui-dir stage      # 需要先完成 Rust 构建，见上文
 ```
 
 `cmake --install` 还会删掉 Basic 以外的 Qt Quick Controls 样式（`gui/cmake/PruneControlsStyles.cmake`）：`ref-gui` 自己设置 Basic 样式，否则对 QML import 的扫描会把五种样式都部署进去。
 
 - **Linux**：库放在 `lib/`，程序的运行路径是 `$ORIGIN/lib`；`qt.conf` 让 Qt 到 `plugins/` 和 `qml/` 中查找。部署时显式包含 `qwayland`（及其 `wayland-*` 辅助插件）与 `libqxcb.so` 一起打包，因此设置 `WAYLAND_DISPLAY` 时 Qt 会自动使用原生 Wayland，否则回退到 `xcb`，内置的 `fcitx5-qt` 插件也让 `QT_IM_MODULE=fcitx` 在两种模式下都能工作。桌面用不到的插件（QML 调试、嵌入式显示）不会部署。
+- **macOS**：`macdeployqt` 生成 `ref-gui.app`。`package.sh` 把它改名为 `ref.app`，把 `ref-server` 放进 `Contents/MacOS`，再运行 `scripts/sign-macos-app.sh`：由内向外重新做 ad-hoc 签名（没有开发者证书），并用 `codesign --verify --deep --strict` 检查。`all` 压缩包里的 `ref-server` 是指向 app 内那一份的符号链接。
 - **Windows**：`windeployqt` 把 DLL 和 Visual C++ 运行库复制到 `ref-gui.exe` 旁边，不含软件 OpenGL 后备。程序使用 GUI 子系统（不弹控制台窗口），并带有图标和版本资源。
 
 `scripts/verify-gui-package.sh DIR` 检查解压后的 `ref-gui` 压缩包，必须在它所构建的平台上运行。CI 在打包后运行它。它检查：不依赖构建机的环境时每个库都能找到、KSyntaxHighlighting 模块在包里、Controls 样式只有 Basic、`ref-gui --smoke --mock` 能打开会话（Linux 上在 `xvfb-run` 下）。Linux 上还检查包对系统的要求，macOS 上检查签名以及没有引用 app 之外的路径，Windows 上检查 `ref-gui.exe` 使用 GUI 子系统。
@@ -182,7 +184,7 @@ scripts/package.sh --version v0.2.1 --target x86_64-unknown-linux-gnu \
 在 `cargo build --release` 之后手动打包：
 
 ```bash
-scripts/package.sh --version v0.2.1 --target x86_64-unknown-linux-gnu \
+scripts/package.sh --version v0.2.2 --target x86_64-unknown-linux-gnu \
   --bin-dir target/release --out dist [--gui-dir stage]
 ```
 
@@ -193,10 +195,10 @@ scripts/package.sh --version v0.2.1 --target x86_64-unknown-linux-gnu \
 ```bash
 # 1. 修改 Cargo.toml 中的版本（[workspace.package] version），并运行
 #    `cargo update --workspace` 刷新 Cargo.lock（CI 用 --locked 构建）。
-#    把发布说明写进 .github/release-notes/v0.2.1.md。提交并推送。
+#    把发布说明写进 .github/release-notes/v0.2.2.md。提交并推送。
 # 2. 打标签并推送标签：
-git tag v0.2.1
-git push origin v0.2.1
+git tag v0.2.2
+git push origin v0.2.2
 ```
 
 `ref-gui` 的版本、Windows 和 macOS 的元数据以及压缩包名称都由标签和 `Cargo.toml` 决定。标签与 `Cargo.toml` 中的版本不一致时，工作流的第一个任务会失败。发布说明取自文件 `.github/release-notes/<标签>.md`；文件不存在时，由 GitHub 根据提交生成。

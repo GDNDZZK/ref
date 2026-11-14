@@ -197,9 +197,9 @@ jobs:
           if gh release view "$TAG" > /dev/null 2>&1; then
             # Re-run of the same tag: replace the files, and the text if there is a file for it.
             gh release upload "$TAG" dist/* --clobber
-            if [[ -f "$notes_file" ]]; then gh release edit "$TAG" --notes-file "$notes_file"; fi
+            if [[ -f "$notes_file" ]]; then gh release edit "$TAG" ${prerelease_flag[@]+"${prerelease_flag[@]}"} --notes-file "$notes_file"; fi
           elif [[ -f "$notes_file" ]]; then
-            gh release create "$TAG" dist/* --verify-tag "${prerelease_flag[@]}" --notes-file "$notes_file" --title "$TAG"
+            gh release create "$TAG" dist/* --verify-tag ${prerelease_flag[@]+"${prerelease_flag[@]}"} --notes-file "$notes_file" --title "$TAG"
           else
-            gh release create "$TAG" dist/* --verify-tag "${prerelease_flag[@]}" --generate-notes --title "$TAG"
+            gh release create "$TAG" dist/* --verify-tag ${prerelease_flag[@]+"${prerelease_flag[@]}"} --generate-notes --title "$TAG"
           fi

@@ -83,7 +83,7 @@ Pick an interface, then get the archive for your system from the [latest release
 | Windows x86_64 | `x86_64-pc-windows-msvc.zip` |
 | Windows arm64 | `aarch64-pc-windows-msvc.zip` |
 
-For example, `ref-tui-v0.2.1-x86_64-unknown-linux-gnu.tar.gz`. Unpack it and put the programs **in the same directory** on your `PATH`; each interface looks for `ref-server` next to itself:
+For example, `ref-tui-v0.2.2-x86_64-unknown-linux-gnu.tar.gz`. Unpack it and put the programs **in the same directory** on your `PATH`; each interface looks for `ref-server` next to itself:
 
 ```bash
 tar -xzf ref-tui-*.tar.gz

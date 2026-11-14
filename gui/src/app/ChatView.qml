@@ -16,7 +16,7 @@ import RefGui
 // Holding: while `holding` and following, the end never moves up. Streaming
 // content can briefly take more room than it ends up needing (a line that wraps,
 // then fits); the footer grows by what the content gave back, so the view does not
-// bounce. When the turn ends, the held room is released with an animation.
+// bounce. When active work pauses or ends, the held room is released with an animation.
 //
 // Wheel: each notch moves `wheelTarget` and contentY chases it, so fast notches add
 // up. Flickable's own wheel animation restarts from wherever the previous notch got
