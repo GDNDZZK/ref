@@ -165,11 +165,13 @@ fn pick_or_given_port(cli: &Cli, bind: &str) -> anyhow::Result<u16> {
 
 async fn serve(cli: Cli) -> anyhow::Result<()> {
     let pid = std::process::id();
-    let log = cli.log.clone().unwrap_or_else(|| {
-        ref_proto::state_dir()
+    let log = match cli.log.clone() {
+        Some(p) => p,
+        None => ref_proto::state_dir()
+            .map_err(anyhow::Error::msg)?
             .join("logs")
-            .join(format!("server-{pid}.log"))
-    });
+            .join(format!("server-{pid}.log")),
+    };
     if let Err(e) = init_logging(&log) {
         eprintln!("ref-server: cannot open log file {}: {e}", log.display());
     }
@@ -186,7 +188,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         tracing::warn!("{w}");
         eprintln!("ref-server: warning: {w}");
     }
-    let mut opts = HubOptions::new(ref_proto::data_dir());
+    let mut opts = HubOptions::new(ref_proto::data_dir().map_err(anyhow::Error::msg)?);
     let idle_timeout = cli.idle_timeout.unwrap_or(ref_proto::IDLE_NEVER);
     opts.idle_timeout = idle_timeout;
     let running = ref_server::start(opts, &bind, port, auth).await?;
@@ -201,7 +203,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         token,
     };
     *lock(&running.hub.instance) = Some(info.clone());
-    let dir = ref_proto::instances_dir();
+    let dir = ref_proto::instances_dir().map_err(anyhow::Error::msg)?;
     let inst_file = instance::write_instance(&dir, &info)?;
     tracing::info!(port = info.port, %bind, idle_timeout, "ref-server listening");
     eprintln!(

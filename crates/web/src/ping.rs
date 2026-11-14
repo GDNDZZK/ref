@@ -53,7 +53,10 @@ struct PingBody {
 pub async fn is_our_ref_web(host: &str, port: u16, key: &Key, tls: bool) -> bool {
     let nonce = token::random_hex();
     let expected_der = if tls {
-        let Ok(der) = tls_pin::load_cert_der(&tls::cert_path()) else {
+        let Ok(cert) = tls::cert_path() else {
+            return false;
+        };
+        let Ok(der) = tls_pin::load_cert_der(&cert) else {
             return false;
         };
         Some(der)

@@ -42,6 +42,9 @@ fn host_of(url: &str) -> String {
         .to_ascii_lowercase()
 }
 
+pub(crate) const NO_MODEL_CONFIGURED: &str =
+    "No model configured. Add a provider with models to your config (opencode.json / ref.json).";
+
 /// Build Provider + Model for a session request.
 pub(crate) fn resolve(
     cfg: &Config,
@@ -49,7 +52,7 @@ pub(crate) fn resolve(
     agent: &str,
 ) -> Result<(Provider, Model), String> {
     if r.provider.is_empty() || r.model.is_empty() {
-        return Err("No model configured. Add a provider with models to your config (opencode.json / ref.json).".into());
+        return Err(NO_MODEL_CONFIGURED.into());
     }
     let (p, m) = cfg
         .model(r)

@@ -342,8 +342,10 @@ impl OutputReader {
 }
 
 fn kill_group(pid: Option<u32>, force: bool) {
-    if let Some(pid) = pid {
-        ref_sys::kill_tree(pid, force);
+    if let Some(pid) = pid
+        && !ref_sys::kill_tree(pid, force)
+    {
+        tracing::debug!(pid, force, "kill_tree did not signal process group");
     }
 }
 

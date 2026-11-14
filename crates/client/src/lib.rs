@@ -67,6 +67,8 @@ pub enum ConnectError {
     CannotConnect { url: String, reason: String },
     #[error("cannot start the mock backend: {0}")]
     MockStartFailed(String),
+    #[error("{0}")]
+    StateDir(String),
 }
 
 impl Endpoint {
@@ -157,7 +159,7 @@ async fn connect_existing(dir: &std::path::Path) -> Option<(Ws, Endpoint)> {
 
 /// Discovers a running backend, or launches one.
 async fn discover(mut on_starting_backend: impl FnMut()) -> Result<(Ws, Endpoint), ConnectError> {
-    let dir = ref_proto::instances_dir();
+    let dir = ref_proto::instances_dir().map_err(ConnectError::StateDir)?;
     if let Some(found) = connect_existing(&dir).await {
         return Ok(found);
     }

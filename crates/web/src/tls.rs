@@ -73,12 +73,12 @@ struct CertMeta {
     not_after: i64,
 }
 
-pub fn tls_dir() -> PathBuf {
-    token::state_subdir().join(TLS_DIR)
+pub fn tls_dir() -> anyhow::Result<PathBuf> {
+    Ok(token::state_subdir()?.join(TLS_DIR))
 }
 
-pub fn cert_path() -> PathBuf {
-    tls_dir().join(CERT_FILE)
+pub fn cert_path() -> anyhow::Result<PathBuf> {
+    Ok(tls_dir()?.join(CERT_FILE))
 }
 
 pub fn is_loopback(host: &str) -> bool {
@@ -88,7 +88,7 @@ pub fn is_loopback(host: &str) -> bool {
 
 pub fn load_or_create(listen_host: &str) -> anyhow::Result<LoadedTls> {
     let needed = needed_names(listen_host, primary_outbound_ipv4());
-    load_or_create_in(&tls_dir(), &needed, ref_proto::now_ms())
+    load_or_create_in(&tls_dir()?, &needed, ref_proto::now_ms())
 }
 
 fn load_or_create_in(dir: &Path, needed: &[String], now_ms: i64) -> anyhow::Result<LoadedTls> {
