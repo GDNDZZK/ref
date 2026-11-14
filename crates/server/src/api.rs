@@ -571,7 +571,7 @@ async fn export(hub: &Arc<Hub>, session_id: String, path: String) -> Reply {
 const BUSY_CWD: &str = "The session is busy; wait for it or interrupt it (esc esc) before changing the working directory.";
 
 /// `/cd`: switch the session to another directory and tell the model with a reminder.
-async fn set_cwd(hub: &Arc<Hub>, s: &Arc<Session>, path: &str) -> Result<(), String> {
+async fn set_cwd(hub: &Arc<Hub>, s: &Arc<Session>, path: &str) -> Result<(), ApiError> {
     let path = path.trim();
     if path.is_empty() {
         return Err("Usage: /cd <directory>".into());
@@ -623,40 +623,18 @@ async fn list_dirs(hub: &Arc<Hub>, cwd: &str, path: &str) -> Reply {
     let p = crate::util::expand_home(path, home.as_deref());
     let p = Path::new(cwd).join(p);
     tokio::task::spawn_blocking(move || {
-        let dir = resolve_dir(&p)?;
+        let dir = crate::ops::validate_cwd(&p.to_string_lossy())?;
         if sandbox.is_some_and(|root| !Path::new(&dir).starts_with(root)) {
             return Err(format!("{dir} is outside the mock workspace.").into());
         }
-        let entries = std::fs::read_dir(&dir).map_err(|e| match e.kind() {
-            std::io::ErrorKind::NotFound => ApiError::coded(
-                ref_proto::ERR_NOT_FOUND,
-                format!("Directory does not exist: {dir}"),
-            ),
-            _ => ApiError::from(format!("Cannot read directory {dir}: {e}")),
-        })?;
+        let entries = std::fs::read_dir(&dir)
+            .map_err(|e| ApiError::from(format!("Cannot read directory {dir}: {e}")))?;
         let mut dirs = sub_dir_names(&dir, entries);
         dirs.sort_by_key(|d| (d.to_lowercase(), d.clone()));
         Ok(json!({ "path": dir, "dirs": dirs }))
     })
     .await
     .map_err(|e| e.to_string())?
-}
-
-fn resolve_dir(p: &Path) -> Result<String, ApiError> {
-    if !p.is_absolute() {
-        return Err(format!("Working directory must be absolute: {}", p.display()).into());
-    }
-    let c = dunce::canonicalize(p).map_err(|e| match e.kind() {
-        std::io::ErrorKind::NotFound => ApiError::coded(
-            ref_proto::ERR_NOT_FOUND,
-            format!("Directory does not exist: {}", p.display()),
-        ),
-        _ => ApiError::from(format!("Cannot access directory {}: {e}", p.display())),
-    })?;
-    if !c.is_dir() {
-        return Err(format!("Not a directory: {}", p.display()).into());
-    }
-    Ok(c.to_string_lossy().to_string())
 }
 
 /// Names of the directories among `entries` (links to directories included). Unreadable
