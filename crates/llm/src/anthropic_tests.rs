@@ -387,3 +387,18 @@ fn invalid_tool_arguments_are_rejected() {
         assert!(!err.retryable);
     }
 }
+
+#[test]
+fn content_block_without_index_is_protocol_error() {
+    for ev in [
+        "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+        "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n",
+        "event: content_block_stop\ndata: {\"type\":\"content_block_stop\"}\n\n",
+    ] {
+        let err = replay(AnthropicState::default(), ev.as_bytes())
+            .0
+            .unwrap_err();
+        assert!(!err.retryable);
+        assert!(err.message.contains("index"), "{}", err.message);
+    }
+}

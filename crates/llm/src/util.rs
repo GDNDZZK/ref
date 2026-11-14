@@ -454,6 +454,22 @@ async fn send_request(
     }
 }
 
+/// Read an HTTP error/JSON body up to `idle`, respecting cancellation.
+async fn read_body(
+    resp: reqwest::Response,
+    idle: Duration,
+    cancel: &CancellationToken,
+) -> Result<String, LlmError> {
+    tokio::select! {
+        _ = cancel.cancelled() => Err(LlmError::cancelled()),
+        r = tokio::time::timeout(idle, resp.text()) => match r {
+            Err(_) => Err(LlmError::transient("timed out reading response body")),
+            Ok(Err(e)) => Err(network_error(&e)),
+            Ok(Ok(text)) => Ok(text),
+        },
+    }
+}
+
 /// POST `body` to `url` and feed every SSE event to `handle` until it
 /// returns `Ok(true)` (terminal event) or the stream ends.
 ///
@@ -478,10 +494,7 @@ pub(crate) async fn run_sse(
     let status = resp.status();
     if !status.is_success() {
         let resp_headers = resp.headers().clone();
-        let text = tokio::select! {
-            _ = cancel.cancelled() => return Err(LlmError::cancelled()),
-            r = tokio::time::timeout(idle, resp.text()) => r.ok().and_then(Result::ok).unwrap_or_default(),
-        };
+        let text = read_body(resp, idle, cancel).await?;
         return Err(classify_http_error(status.as_u16(), &resp_headers, &text));
     }
 
@@ -493,10 +506,7 @@ pub(crate) async fn run_sse(
         .to_ascii_lowercase();
     if content_type.contains("application/json") {
         // Some gateways answer streaming requests with a plain JSON error.
-        let text = tokio::select! {
-            _ = cancel.cancelled() => return Err(LlmError::cancelled()),
-            r = tokio::time::timeout(idle, resp.text()) => r.ok().and_then(Result::ok).unwrap_or_default(),
-        };
+        let text = read_body(resp, idle, cancel).await?;
         return Err(json_body_error(&text));
     }
 
