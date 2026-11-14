@@ -109,10 +109,22 @@ const contentHeight = computed(() =>
 function newSession(): void {
   commands.run('new').catch(notices.pushError)
 }
+
+function onBackgroundClick(event: MouseEvent): void {
+  if (zoomed.value) return
+  const target = event.target instanceof Element ? event.target : null
+  if (!target?.closest('[data-tile], button')) workspace.focusTile(undefined)
+}
 </script>
 
 <template>
-  <div ref="area" class="split" :class="{ zoomed, zooming }" @scroll.passive="measureClearances">
+  <div
+    ref="area"
+    class="split"
+    :class="{ zoomed, zooming }"
+    @scroll.passive="measureClearances"
+    @click="onBackgroundClick"
+  >
     <div v-if="workspace.tileIds.length === 0" class="empty">
       <p>{{ t('split.empty') }}</p>
       <TextButton :label="t('sidebar.newSession')" @click="newSession" />
@@ -129,6 +141,7 @@ function newSession(): void {
         :hidden="zoomed && id !== workspace.zoomedId"
         :clearance="clearances[index] ?? NO_CLEARANCE"
         @focus="workspace.focusTile(id)"
+        @unfocus="workspace.focusTile(undefined)"
         @zoom="workspace.zoomedId === id ? workspace.unzoom() : workspace.zoomTile(id)"
       />
     </TransitionGroup>
@@ -155,6 +168,7 @@ function newSession(): void {
 
 .grid {
   position: relative;
+  transition: height var(--geometry-duration) var(--motion-ease);
 }
 
 .slot {
