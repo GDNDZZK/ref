@@ -45,7 +45,8 @@ ref-web [DIR] [选项]
 |---|---|
 | `DIR` | 新会话的目录（默认：当前目录）。 |
 | `--port N` | 监听端口（1–65535）。不设置时：在 10000–65535 中随机选一个空闲端口，并先试上次使用的端口，所以地址保持不变。 |
-| `--host ADDR` | 监听地址（默认 `127.0.0.1`）。其他地址会向网络开放 `ref-web`，且没有 TLS；此时会打印警告。 |
+| `--host ADDR` | 监听地址（默认 `127.0.0.1`）。其他地址会向网络开放 `ref-web`，并默认使用自签名证书启用 HTTPS；加 `--no-tls` 改用普通 HTTP。 |
+| `--no-tls` | 即使在非回环 `--host` 上也只提供普通 `http://`（例如放在反向代理后面时）。在回环 `--host` 上是无提示的空操作。 |
 | `--key KEY` | 浏览器登录用的密钥，至少 16 个字符，不写入磁盘。也可以通过环境变量 `REF_WEB_KEY` 给出，这样它不会出现在进程列表中。默认使用登录 token。见[登录](web.zh-CN.md#登录)。 |
 | `--no-open` | 不打开浏览器。 |
 | `--server ws://host:port` | 连接指定的后端，而不是查找或启动后端。 |
@@ -104,7 +105,8 @@ ref --server ws://127.0.0.1:7777 --token <token>
 | `~/.local/state/ref/web/login-token` | `ref-web` 的登录 token，即默认密钥，仅你本人可读（权限 600）。在 `ref-web` 停止时删除它即可换新 token。 |
 | `~/.local/state/ref/web/salt` | 密钥的 salt（16 个随机字节的十六进制，不是秘密；权限 600）。浏览器保存由密钥和 salt 推导出的值；换了 salt，浏览器会重新询问密钥。 |
 | `~/.local/state/ref/web/port` | `ref-web` 上次使用的端口；未指定 `--port` 时先试它。 |
-| `~/.local/state/ref/web/instances/<pid>.json` | 每个运行中的 `ref-web` 一个文件：端口、host、版本、启动时间。不含密钥，权限 600。 |
+| `~/.local/state/ref/web/instances/<pid>.json` | 每个运行中的 `ref-web` 一个文件：端口、host、tls、版本、启动时间。不含密钥，权限 600。 |
+| `~/.local/state/ref/web/tls/` | 自签名 TLS 证书（`cert.pem`、`meta.json`）与私钥（`key.pem`，权限 600；目录权限 700），在非回环 `--host` 启用 HTTPS 时创建。 |
 | `~/.local/state/ref/logs/` | 后端日志，包括配置警告。 |
 
 在 Windows 上，`~` 指 `%USERPROFILE%`。权限（600，目录为 700）只在 Unix 上设置；在 Windows 上，这些文件依靠用户配置文件目录的访问权限。

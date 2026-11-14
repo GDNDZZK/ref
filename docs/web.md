@@ -60,25 +60,37 @@ A key in the query string can be read in clear by anyone on the path when the pa
 
 ## Finding a running instance
 
-Each running `ref-web` writes a record to `<state dir>/web/instances/<pid>.json` (pid, port, host, version and start time; no secret; mode 600) and removes it when it stops. Starting `ref-web` again looks at these records, newest first. If one of them belongs to a `ref-web` with the same key, it prints that instance's address (with the new `DIR` and the key), opens the browser and exits with code 0. With `--port N`, only the instance on that port counts. The running instance keeps its own `--server`, `--mock` and `--host`; the options of the second start are not applied, and a notice says so. `ref-web` recognizes its own instance by an answer to `/api/ping` that is signed with a key derived from the key; `/api/ping` answers only callers on the same machine. Records of processes that no longer exist are deleted.
+Each running `ref-web` writes a record to `<state dir>/web/instances/<pid>.json` (pid, port, host, tls, version and start time; no secret; mode 600) and removes it when it stops. Starting `ref-web` again looks at these records, newest first. If one of them belongs to a `ref-web` with the same key, it prints that instance's address (with the new `DIR` and the key), and for a TLS instance its `certificate SHA-256` fingerprint first, opens the browser and exits with code 0. With `--port N`, only the instance on that port counts. The running instance keeps its own `--server`, `--mock`, `--host` and `--no-tls`; the options of the second start are not applied, and a notice says so. `ref-web` recognizes its own instance by an answer to `/api/ping` that is signed with a key derived from the key (over pinned TLS when the record says `tls: true`); `/api/ping` answers only callers on the same machine. Records of processes that no longer exist are deleted.
 
 If no instance matches, a new one starts. With `--port N`, a `ref-web` with a different key in the records stops the start with *a ref-web with a different key is running on port N (pid P); stop it, or pass the same --key*. A port taken by another program (or by a `ref-web` of another state directory) gives *port N is in use by another program or by a ref-web with a different key*. Both exit with code 1. Two starts at the same moment can both start an instance; that does no harm.
 
 ## Opening it to the network
 
-`ref-web` listens on `127.0.0.1` only. `--host ADDR` listens on another address, for example `--host 0.0.0.0` for the local network. It prints a warning when you do.
+`ref-web` listens on `127.0.0.1` only (plain `http://`, no certificate warning). `--host ADDR` listens on another address, for example `--host 0.0.0.0` for the local network, and **enables HTTPS by default** with a self-signed certificate kept in `<state dir>/web/tls/`. It prints a warning when you do.
 
-- Open the page by **IP address**, for example `http://192.168.1.20:<port>/`. A host name is rejected: `ref-web` checks the `Host` header against the addresses it knows to prevent DNS rebinding.
-- There is no TLS. The messages are encrypted with the key, but the page and its scripts travel in plain text, so someone on the path can change the page and steal the key (see [Known limits](#known-limits)). Whoever has the key controls the backend, which can run commands on that machine. Use an SSH tunnel or a reverse proxy with TLS instead:
+- **First visit.** A browser does not know the self-signed certificate, so the first time you open the address (`https://…`) it warns you that the connection is not private (e.g. Chrome/Edge: *Your connection is not private* → *Advanced* → *Proceed*; Firefox: *Warning: Potential Security Risk Ahead* → *Advanced…* → *Accept the Risk and Continue*; Safari: *This Connection Is Not Private* → *Show Details* → *visit this website*). Before you continue, compare the fingerprint `ref-web` printed (`ref-web: certificate SHA-256 …`) with the one the browser shows for the certificate; if they are equal, continue. If the fingerprint differs, do not continue: someone else answers on that address. Opening the page with `http://` on the TLS port redirects (`308`) to `https://` without path or query.
+- **Addresses and certificate names.** The certificate covers `localhost`, `127.0.0.1`, `::1` and `--host` (for `0.0.0.0` or `::`, the machine's primary outbound IPv4 address if available). Open the address `ref-web` prints (`https://<address>:<port>/`); other addresses show a name mismatch next to the authority warning. Other hostnames are rejected: `ref-web` checks the `Host` header against the addresses it knows to prevent DNS rebinding. The certificate renews automatically within 30 days of expiry or when `--host` adds a new name.
+- **`--no-tls` and reverse proxies.** `--no-tls` serves plain `http://` on a non-loopback `--host` (on loopback it is a silent no-op). The messages are still encrypted with the key, but the page and its scripts travel in plain text, so someone on the path can change the page and steal the key (see [Known limits](#known-limits)). Use `--no-tls` behind a reverse proxy that terminates TLS, or keep `ref-web` on loopback behind an SSH tunnel or nginx:
 
   ```bash
-  # on the server: ref-web --no-open --port 7480
+  # SSH tunnel: on the server run `ref-web --no-open --port 7480`
   ssh -L 7480:127.0.0.1:7480 server
   # then open http://127.0.0.1:7480/ on your machine
   ```
 
-To use a backend that runs somewhere else, pass `--server ws://host:port --token T` (see [Running the backend on another machine](cli.md#running-the-backend-on-another-machine)). `--token` needs `--server`, and `--server` cannot be combined with `--mock`.
+  ```nginx
+  # nginx in front of `ref-web --no-open --port 7480` (rewrites Host and Origin to match loopback)
+  location / {
+      proxy_pass http://127.0.0.1:7480;
+      proxy_http_version 1.1;
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection "upgrade";
+      proxy_set_header Host 127.0.0.1:7480;
+      proxy_set_header Origin http://127.0.0.1:7480;
+  }
+  ```
 
+To use a backend that runs somewhere else, pass `--server ws://host:port --token T` (see [Running the backend on another machine](cli.md#running-the-backend-on-another-machine)). `--token` needs `--server`, and `--server` cannot be combined with `--mock`.
 ## Using the page
 
 The page is the same interface as the [desktop GUI](gui.md). This section lists what it has and where it differs; the GUI page describes the conversation in more detail, and tool cards, permissions, images, undo and compaction look and work the same.
@@ -192,8 +204,7 @@ Alt+S or the settings button in the sidebar opens them: the theme (System, Light
 
 What the key and its encryption do not protect against:
 
-- **Someone who can change the page.** Over plain `http://` on a network, someone on the path can serve a modified page whose script reads the key as you type it, or the stored value. The encryption cannot prevent this, because the code that encrypts comes over the same connection. On a network you do not trust, use an SSH tunnel or a reverse proxy with a real certificate.
-- **A weak `--key`.** Someone who records one sign-in—or a local process on the same machine querying `/api/ping`—can collect a verifier and test guesses offline. scrypt (N = 2^15, r = 8, p = 1; below OWASP's current minimum of 2^17 because of the cost on phones) makes each guess slower; it does not make a short key safe. Online, a wrong key costs one second per connection, with at most 16 sign-ins in progress at once. Use the default key, or 16 or more random characters.
+- **Someone who can change the page.** Over plain `http://` on a network (`--no-tls`, or an upstream leg without TLS), someone on the path can serve a modified page whose script reads the key as you type it, or the stored value. The encryption cannot prevent this, because the code that encrypts comes over the same connection. With `ref-web`'s own self-signed TLS, this holds unless you compared the SHA-256 fingerprint on the first visit (trust on first use). On a network you do not trust, use an SSH tunnel or a reverse proxy with a real certificate.
 - **Traffic analysis.** The sizes and timing of messages are visible, and without TLS also the path, the `Host` header and the fact that `ref-web` is in use.
 - **The endpoints.** Anyone who can read `ref-web`'s state directory or the browser's profile has the key. A key given with `--key` is visible in the process list and the shell history on that machine.
 - **The backend leg.** `ref-web` talks to `ref-server` over plain `ws://`. On one machine that stays on loopback; with `--server ws://remote` it crosses the network.
@@ -209,4 +220,4 @@ pnpm install
 pnpm dev                  # Vite dev server on 127.0.0.1:5173
 ```
 
-`pnpm dev` forwards `/ws` and `/api` to `ref-web` on `127.0.0.1:7480` (`REF_WEB_URL` sets another address). Start `ref-web --no-open --port 7480` (or `ref-web --mock --no-open --port 7480`) first, then open `http://127.0.0.1:5173/#key=…` with the key from the address `ref-web` prints. The page keeps the key for the dev server's address. Use `127.0.0.1` throughout, not `localhost`: the stored key belongs to one address. A dev build that talks to a `ref-server` directly (`VITE_REF_URL`) uses no key and no encryption.
+`pnpm dev` forwards `/ws` and `/api` to `ref-web` on `127.0.0.1:7480` (`REF_WEB_URL` sets another address, including `https://…` against a TLS `ref-web` — the proxy accepts its self-signed certificate). Start `ref-web --no-open --port 7480` (or `ref-web --mock --no-open --port 7480`) first, then open `http://127.0.0.1:5173/#key=…` with the key from the address `ref-web` prints. The page keeps the key for the dev server's address. Use `127.0.0.1` throughout, not `localhost`: the stored key belongs to one address. A dev build that talks to a `ref-server` directly (`VITE_REF_URL`) uses no key and no encryption.
