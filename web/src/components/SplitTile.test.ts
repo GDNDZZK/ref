@@ -9,7 +9,7 @@ import SplitTile from './SplitTile.vue'
 const PaneStub = {
   props: ['composerShown'],
   methods: { focusComposer() {} },
-  template: '<div class="pane"><button class="allow" /></div>',
+  template: '<div class="pane"><button class="allow" /><div class="composer-area"><textarea /></div></div>',
 }
 
 function mountTile(options: { focused: boolean; zoomed?: boolean }) {
@@ -44,5 +44,16 @@ describe('SplitTile', () => {
     expect(wrapper.emitted('focus')).toHaveLength(1)
     await button.trigger('click')
     expect(wrapper.emitted('focus')).toHaveLength(2)
+  })
+
+  it('emits unfocus when clicking an already-focused tile outside interactive controls', async () => {
+    const wrapper = mountTile({ focused: true })
+    await wrapper.get('.title').trigger('pointerdown')
+    await wrapper.get('.title').trigger('click')
+    expect(wrapper.emitted('unfocus')).toHaveLength(1)
+
+    await wrapper.get('.allow').trigger('click')
+    await wrapper.get('.composer-area textarea').trigger('click')
+    expect(wrapper.emitted('unfocus')).toHaveLength(1)
   })
 })

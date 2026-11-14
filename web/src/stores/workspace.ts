@@ -67,13 +67,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   let latestOpenTarget: string | undefined
   const goneListeners = new Set<(id: string) => void>()
   const attachingTiles = new Set<string>() // tiles whose first Attach has not been answered yet
+  const detachingTiles = new Set<string>()
 
   const current = computed(() => (currentId.value ? chat(currentId.value) : undefined))
-  // Background sessions get a tile: live ones nobody is attached to (the TUI's rule), and the open one,
-  // which is backgrounded while split view is on.
+  // Background sessions get a tile: live ones nobody is attached to, excluding the current foreground session.
   const tileIds = computed(() =>
     live.value
-      .filter((session) => session.live && (session.attached === 0 || session.id === currentId.value))
+      .filter((session) => session.live && session.id !== currentId.value && session.attached === 0)
       .map((session) => session.id),
   )
   // What the window shows now: one session, the zoomed tile, or all tiles.
@@ -258,7 +258,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   // --- Split view
 
-  // Watches the tiles' sessions and lets go of those that no longer have a tile.
+  // Watches the tiles' sessions and lets go of those that no longer have a tile (including the hidden foreground session).
   async function syncTiles(): Promise<void> {
     if (mode.value !== 'split') return
     const wanted = new Set(tileIds.value)
@@ -273,29 +273,36 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       )
     }
     for (const [id, session] of chats) {
-      if (!wanted.has(id) && session.attachment === 'watching') jobs.push(session.detach())
+      if (wanted.has(id) || session.attachment === 'detached' || detachingTiles.has(id)) continue
+      detachingTiles.add(id)
+      jobs.push(session.detach().finally(() => detachingTiles.delete(id)))
     }
-    if (tileFocusId.value === undefined || !wanted.has(tileFocusId.value)) {
-      tileFocusId.value = currentId.value && wanted.has(currentId.value) ? currentId.value : tileIds.value[0]
+    if (tileFocusId.value !== undefined && !wanted.has(tileFocusId.value)) {
+      tileFocusId.value = undefined
     }
     await Promise.all(jobs)
   }
 
   async function enterSplit(): Promise<void> {
     if (mode.value === 'split') return
-    // Subscribing first, so that backgrounding the open session loses none of its events.
+    // Subscribing first, so that entering split view loses none of the background events.
     setLive(await connection.getApi().watchAll(true))
-    mode.value = 'split'
-    tileFocusId.value = currentId.value
-    const open = current.value
-    await Promise.all([open?.setForeground(false), syncTiles()])
+    await crossfade(() => {
+      mode.value = 'split'
+      tileFocusId.value = undefined
+    }, 'standard')
+    await syncTiles()
   }
 
   async function leaveSplit(): Promise<void> {
     if (mode.value === 'single') return
+    await crossfade(() => {
+      if (zoomedId.value) currentId.value = zoomedId.value
+      mode.value = 'single'
+      zoomedId.value = undefined
+      tileFocusId.value = undefined
+    }, 'standard')
     const open = current.value
-    mode.value = 'single'
-    zoomedId.value = undefined
     await connection.getApi().watchAll(false)
     const others = [...chats.values()].filter(
       (session) => session !== open && session.attachment === 'watching',
@@ -310,8 +317,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   // Enlarges a tile; it becomes the session that split view returns to.
   function zoomTile(id: string): void {
-    if (mode.value !== 'split') return
-    currentId.value = id
+    if (mode.value !== 'split' || !tileIds.value.includes(id)) return
     tileFocusId.value = id
     zoomedId.value = id
   }
@@ -320,8 +326,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     zoomedId.value = undefined
   }
 
-  function focusTile(id: string): void {
-    if (tileIds.value.includes(id)) tileFocusId.value = id
+  function focusTile(id: string | undefined): void {
+    tileFocusId.value = id !== undefined && tileIds.value.includes(id) ? id : undefined
   }
 
   // The tile nearest to the focused one in the direction (dx, dy), each -1, 0 or 1.

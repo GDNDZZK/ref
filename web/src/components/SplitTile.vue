@@ -13,7 +13,7 @@ import SessionPane from './SessionPane.vue'
 
 const BADGE_SIZE = 14
 const PRESS_TARGETS = 'button, a, summary'
-
+const NO_DESELECT_TARGETS = `${PRESS_TARGETS}, input, textarea, [role="button"], .composer-area`
 const props = defineProps<{
   session: ChatSession
   focused: boolean
@@ -21,7 +21,7 @@ const props = defineProps<{
   hidden: boolean
   clearance: { left: number; right: number } // header room for the floating window buttons
 }>()
-const emit = defineEmits<{ focus: []; zoom: [] }>()
+const emit = defineEmits<{ focus: []; unfocus: []; zoom: [] }>()
 
 const { t } = useI18n()
 const now = useNow()
@@ -36,15 +36,22 @@ let focusedByPress = false
 function onPointerDown(event: PointerEvent): void {
   focusedByPress = !props.focused
   if (event.target instanceof Element && event.target.closest(PRESS_TARGETS)) return
-  emit('focus')
+  if (!props.focused) emit('focus')
 }
 
-async function onClick(): Promise<void> {
-  emit('focus')
-  if (!focusedByPress) return
-  focusedByPress = false
-  await nextTick()
-  pane.value?.focusComposer()
+async function onClick(event: MouseEvent): Promise<void> {
+  if (focusedByPress) {
+    focusedByPress = false
+    emit('focus')
+    await nextTick()
+    pane.value?.focusComposer()
+    return
+  }
+  if (props.zoomed) return
+  const target = event.target instanceof Element ? event.target : null
+  if (target?.closest(NO_DESELECT_TARGETS)) return
+  if (window.getSelection()?.toString()) return
+  emit('unfocus')
 }
 
 const info = computed(() => props.session.info)
