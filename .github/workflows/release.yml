@@ -29,7 +29,7 @@ jobs:
         shell: bash
         run: |
           cargo_version=$(sed -n 's/^version = "\([0-9.]*\)"$/\1/p' Cargo.toml | head -n 1)
-          if [[ "$GITHUB_REF_NAME" != "v$cargo_version" ]]; then
+          if [[ "$GITHUB_REF_NAME" != "v$cargo_version" && "$GITHUB_REF_NAME" != "v$cargo_version"-* ]]; then
             echo "::error::Tag $GITHUB_REF_NAME does not match version $cargo_version in Cargo.toml"
             exit 1
           fi
@@ -191,12 +191,15 @@ jobs:
         run: |
           set -euo pipefail
           notes_file=".github/release-notes/$TAG.md"
+          if [[ ! -f "$notes_file" && "$TAG" == *-* ]]; then notes_file=".github/release-notes/${TAG%%-*}.md"; fi
+          prerelease_flag=()
+          if [[ "$TAG" == *-* ]]; then prerelease_flag=(--prerelease); fi
           if gh release view "$TAG" > /dev/null 2>&1; then
             # Re-run of the same tag: replace the files, and the text if there is a file for it.
             gh release upload "$TAG" dist/* --clobber
             if [[ -f "$notes_file" ]]; then gh release edit "$TAG" --notes-file "$notes_file"; fi
           elif [[ -f "$notes_file" ]]; then
-            gh release create "$TAG" dist/* --verify-tag --notes-file "$notes_file" --title "$TAG"
+            gh release create "$TAG" dist/* --verify-tag "${prerelease_flag[@]}" --notes-file "$notes_file" --title "$TAG"
           else
-            gh release create "$TAG" dist/* --verify-tag --generate-notes --title "$TAG"
+            gh release create "$TAG" dist/* --verify-tag "${prerelease_flag[@]}" --generate-notes --title "$TAG"
           fi

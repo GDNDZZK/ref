@@ -208,7 +208,7 @@ macOS 上表中的 Ctrl 是 Cmd。字母与 [Web 界面](web.zh-CN.md#快捷键)
 - Windows 和 macOS 上的通知还没有在这两个系统上试过。
 - Wayland 下，点击通知后窗口能否前置取决于桌面环境：没有 activation token 时，任务栏图标可能只会闪烁。
 - Linux 上 Ctrl+Shift+U 可能被 IBus 的 Unicode 输入占用。按键没有反应时，请关闭 IBus 的这个按键，或使用消息下方的*撤销*按钮或 `/undo`。
-- **输入法（IME）：** 原生 Wayland 下，桌面输入法（fcitx5、IBus）通过 `zwp_text_input_v3` 工作，无需在包内附带 `fcitx5-qt`。回退到 `xcb`（X11 或 XWayland）时，包内仅附带 Qt 的 `ibus` 和 `compose` 输入法插件；在该模式下使用 fcitx5 需要系统安装 `fcitx5-qt`，并将 `QT_PLUGIN_PATH` 指向其插件目录。
+- **输入法（IME）：** Linux 安装包除 Qt 自带的 `ibus` 和 `compose` 插件外，还内置了 `fcitx5-qt` 输入法插件，因此 `fcitx5`（`QT_IM_MODULE=fcitx`）和 `IBus` 在原生 Wayland 与 `xcb`（X11/XWayland）下均可直接使用；未设置 `QT_IM_MODULE` 的原生 Wayland 会通过 `zwp_text_input_v3` 工作。
 - **Wayland 窗口图标：** Wayland 合成器按桌面 ID 查找窗口图标，因此需要按[安装](../README.zh-CN.md#安装)说明安装 `ref-gui.desktop` 和 `ref.svg` 后才会显示窗口图标。
 - 在很长的会话中（视图上方或下方超过约 200 条消息），滚动条的长度是估算值，拖动时可能略有变化。
 - 以非 0 退出码结束的 bash 调用，在卡片头里仍显示为完成；退出码在展开的卡片里。

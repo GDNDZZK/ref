@@ -206,7 +206,7 @@ They are saved in `gui.json` in the state directory ([Files and directories](cli
 - Notifications on Windows and macOS have not been tried on those systems yet.
 - On Wayland, whether a click on a notification brings the window to the front depends on the desktop: without an activation token the taskbar entry may only flash.
 - Ctrl+Shift+U can be taken by the IBus Unicode input on Linux. If the key does not respond, turn that IBus key off, or use the *Undo* button under your message or `/undo`.
-- **Input methods (IME):** On native Wayland, desktop input methods (fcitx5, IBus) work over `zwp_text_input_v3` without bundling `fcitx5-qt`. When falling back to `xcb` (X11 or XWayland), the package ships Qt's `ibus` and `compose` input context plugins only; using fcitx5 in that mode requires a system `fcitx5-qt` package and `QT_PLUGIN_PATH` pointing to its plugin directory.
+- **Input methods (IME):** On Linux, the package bundles `fcitx5-qt` alongside Qt's `ibus` and `compose` input context plugins, so `fcitx5` (`QT_IM_MODULE=fcitx`) and `IBus` work out of the box on both native Wayland and `xcb` (X11/XWayland). On native Wayland without `QT_IM_MODULE` set, Qt uses `zwp_text_input_v3`.
 - **Wayland window icon:** Wayland compositors resolve window icons by desktop ID, so installing `ref-gui.desktop` and `ref.svg` (see [Installation](../README.md#installation)) is required for the window icon to appear.
 - In very long sessions (more than about 200 messages above or below the view) the scroll bar length is an estimate, and may shift a little while you drag it.
 - A bash call that exits with a non-zero code still shows as done in the card header; the exit code is in the open card.
