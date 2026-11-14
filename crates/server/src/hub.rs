@@ -4,9 +4,11 @@
 use crate::mcp::McpManager;
 use crate::session::{Session, SessionState};
 use crate::store::Store;
+use crate::util::lock;
 use ref_config::Config;
 use ref_proto::{
-    InstanceInfo, Message, NotifyKind, ServerFrame, SessionEvent, SessionInfo, SessionStatus,
+    IDLE_EXIT_NOW, IDLE_NEVER, InstanceInfo, Message, NotifyKind, ServerFrame, SessionEvent,
+    SessionInfo, SessionStatus,
 };
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -18,11 +20,14 @@ use tokio_util::sync::CancellationToken;
 
 pub type ConfigLoader = Arc<dyn Fn(&Path) -> Config + Send + Sync>;
 
-/// `HubOptions::idle_timeout` that keeps the backend running after its last frontend leaves.
-pub const IDLE_NEVER: i64 = -1;
+/// The base delay of the retry backoff in production: waits of 2, 4, 8 and 16 seconds.
+pub const DEFAULT_RETRY_BASE: Duration = Duration::from_secs(2);
+
+/// How long the `Sessions` broadcast waits for further changes before it is sent.
+const SESSIONS_DEBOUNCE: Duration = Duration::from_millis(100);
 
 /// Max queued frames per connection before it is dropped as too slow.
-pub const MAX_QUEUE: usize = 10_000;
+const MAX_QUEUE: usize = 10_000;
 
 #[derive(Clone)]
 pub struct HubOptions {
@@ -37,7 +42,7 @@ pub struct HubOptions {
     /// -1 never, 0 immediately, N seconds after the last frontend leaves.
     pub idle_timeout: i64,
     /// Mock mode: every working directory a client asks for is replaced by this one.
-    pub sandbox_cwd: Option<PathBuf>,
+    pub(crate) sandbox_cwd: Option<PathBuf>,
 }
 
 impl HubOptions {
@@ -46,7 +51,7 @@ impl HubOptions {
             data_dir,
             home: dirs::home_dir(),
             config_loader: Arc::new(|cwd: &Path| Config::load(cwd)),
-            retry_base: Duration::from_secs(2),
+            retry_base: DEFAULT_RETRY_BASE,
             mcp_wait: Duration::from_secs(30),
             idle_timeout: IDLE_NEVER,
             sandbox_cwd: None,
@@ -64,7 +69,7 @@ pub struct OutQueue {
 
 impl OutQueue {
     pub fn push(&self, f: ServerFrame) {
-        let mut q = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut q = lock(&self.inner);
         if let ServerFrame::Event {
             session_id,
             event:
@@ -107,16 +112,12 @@ impl OutQueue {
     }
 
     pub fn drain(&self) -> Vec<ServerFrame> {
-        self.inner
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .drain(..)
-            .collect()
+        lock(&self.inner).drain(..).collect()
     }
 
     /// True if every queued frame is a delta (worth waiting a bit to coalesce more).
-    pub fn only_deltas(&self) -> bool {
-        let q = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+    pub(crate) fn only_deltas(&self) -> bool {
+        let q = lock(&self.inner);
         !q.is_empty()
             && q.iter().all(|f| {
                 matches!(
@@ -135,7 +136,7 @@ pub struct ConnState {
     pub hello: bool,
     /// Counts for the idle timeout (false for `ref-server --status/--stop` control clients).
     pub frontend: bool,
-    pub authed: bool,
+    pub(crate) authed: bool,
     pub cwd: String,
     pub fg: HashSet<String>,
     pub watch: HashSet<String>,
@@ -148,7 +149,7 @@ pub struct ConnState {
     pub shown: HashSet<String>,
     /// When the window last came to the front, as a hub stamp (see `Hub::next_stamp`); the
     /// connection time until the first `SetFocus`.
-    pub focus_stamp: u64,
+    pub(crate) focus_stamp: u64,
 }
 
 pub struct Conn {
@@ -160,7 +161,7 @@ pub struct Conn {
 
 impl Conn {
     pub fn lock(&self) -> MutexGuard<'_, ConnState> {
-        self.st.lock().unwrap_or_else(|e| e.into_inner())
+        lock(&self.st)
     }
     pub fn send(&self, f: ServerFrame) {
         self.out.push(f);
@@ -169,10 +170,10 @@ impl Conn {
 
 /// Bookkeeping for `message_status`.
 #[derive(Debug, Clone)]
-pub struct PeerRecord {
+pub(crate) struct PeerRecord {
     pub from_id: String,
-    pub to_id: String,
-    pub to_name: String,
+    pub(crate) to_id: String,
+    pub(crate) to_name: String,
     /// Epoch ms when sent.
     pub time: i64,
     /// First line of the message (for /peers-outbox).
@@ -180,17 +181,17 @@ pub struct PeerRecord {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IdleAction {
+enum IdleAction {
     Nothing,
     ShutdownNow,
     ShutdownAfter(u64),
 }
 
 /// Pure idle-timeout decision, evaluated when the number of connected frontends changes.
-pub fn idle_action(timeout: i64, ever_connected: bool, connected: usize) -> IdleAction {
+fn idle_action(timeout: i64, ever_connected: bool, connected: usize) -> IdleAction {
     if !ever_connected || connected > 0 || timeout < 0 {
         IdleAction::Nothing
-    } else if timeout == 0 {
+    } else if timeout == IDLE_EXIT_NOW {
         IdleAction::ShutdownNow
     } else {
         IdleAction::ShutdownAfter(timeout as u64)
@@ -218,8 +219,8 @@ pub struct Hub {
     pub shutdown: CancellationToken,
     dirty: Arc<Notify>,
     idle: Mutex<IdleState>,
-    pub peer_msgs: Mutex<HashMap<String, PeerRecord>>,
-    pub files_cache: Mutex<HashMap<String, FileList>>,
+    pub(crate) peer_msgs: Mutex<HashMap<String, PeerRecord>>,
+    pub(crate) files_cache: Mutex<HashMap<String, FileList>>,
     pub instance: Mutex<Option<InstanceInfo>>,
 }
 
@@ -253,11 +254,11 @@ impl Hub {
         }
     }
 
-    pub fn load_config(&self, cwd: &Path) -> Config {
+    pub(crate) fn load_config(&self, cwd: &Path) -> Config {
         (self.opts.config_loader)(cwd)
     }
 
-    pub fn next_run_id(&self) -> u64 {
+    pub(crate) fn next_run_id(&self) -> u64 {
         self.next_run.fetch_add(1, Ordering::Relaxed)
     }
 
@@ -269,36 +270,20 @@ impl Hub {
     // ----- sessions -----
 
     pub fn session(&self, id: &str) -> Option<Arc<Session>> {
-        self.sessions
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(id)
-            .cloned()
+        lock(&self.sessions).get(id).cloned()
     }
 
     pub fn sessions(&self) -> Vec<Arc<Session>> {
-        self.sessions
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .values()
-            .cloned()
-            .collect()
+        lock(&self.sessions).values().cloned().collect()
     }
 
-    pub fn insert_session(&self, s: Arc<Session>) {
-        self.sessions
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(s.id.clone(), s);
+    pub(crate) fn insert_session(&self, s: Arc<Session>) {
+        lock(&self.sessions).insert(s.id.clone(), s);
         self.mark_dirty();
     }
 
     pub fn remove_session(&self, id: &str) -> Option<Arc<Session>> {
-        let r = self
-            .sessions
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(id);
+        let r = lock(&self.sessions).remove(id);
         for c in self.conns() {
             let mut st = c.lock();
             st.fg.remove(id);
@@ -315,7 +300,7 @@ impl Hub {
     }
 
     /// Whether a live session (other than `except`) has this exact name.
-    pub fn name_taken(&self, name: &str, except: Option<&str>) -> bool {
+    pub(crate) fn name_taken(&self, name: &str, except: Option<&str>) -> bool {
         self.sessions()
             .iter()
             .any(|s| Some(s.id.as_str()) != except && s.lock().info.name == name)
@@ -325,6 +310,12 @@ impl Hub {
 
     /// Route a session event to subscribed connections. Call while holding the session lock
     /// so that snapshots taken in `Attach` are consistent with the event stream.
+    /// Emits `message` as a `SessionEvent::Message` of the session.
+    pub fn emit_message(&self, session_id: &str, message: &Message) {
+        let message = message.clone();
+        self.emit(session_id, SessionEvent::Message { message });
+    }
+
     pub fn emit(&self, sid: &str, mut event: SessionEvent) {
         // Frontends get image stubs (see `ImageData`).
         match &mut event {
@@ -340,10 +331,10 @@ impl Hub {
             _ => {}
         }
         let conns = self.conns();
-        let mut frame = Some(ServerFrame::Event {
+        let frame = ServerFrame::Event {
             session_id: sid.to_string(),
             event,
-        });
+        };
         let targets: Vec<&Arc<Conn>> = conns
             .iter()
             .filter(|c| {
@@ -351,21 +342,17 @@ impl Hub {
                 st.hello && (st.watch_all || st.fg.contains(sid) || st.watch.contains(sid))
             })
             .collect();
-        let n = targets.len();
-        for (i, c) in targets.into_iter().enumerate() {
-            let f = if i + 1 == n {
-                frame.take()
-            } else {
-                frame.clone()
-            };
-            if let Some(f) = f {
-                c.send(f);
+        // Clone the frame for every connection but the last, which takes it.
+        if let Some((last, rest)) = targets.split_last() {
+            for c in rest {
+                c.send(frame.clone());
             }
+            last.send(frame);
         }
     }
 
     /// Emit an `Info` event and schedule a session-list broadcast.
-    pub fn emit_info(&self, st: &SessionState) {
+    pub(crate) fn emit_info(&self, st: &SessionState) {
         self.emit(
             &st.info.id,
             SessionEvent::Info {
@@ -382,7 +369,7 @@ impl Hub {
         }
     }
 
-    pub fn mark_dirty(&self) {
+    fn mark_dirty(&self) {
         self.dirty.notify_one();
     }
 
@@ -400,13 +387,8 @@ impl Hub {
 
     // ----- connections -----
 
-    pub fn conns(&self) -> Vec<Arc<Conn>> {
-        self.conns
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .values()
-            .cloned()
-            .collect()
+    pub(crate) fn conns(&self) -> Vec<Arc<Conn>> {
+        lock(&self.conns).values().cloned().collect()
     }
 
     pub fn add_conn(&self) -> Arc<Conn> {
@@ -420,10 +402,7 @@ impl Hub {
             }),
             kill: CancellationToken::new(),
         });
-        self.conns
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(id, c.clone());
+        lock(&self.conns).insert(id, c.clone());
         c
     }
 
@@ -433,18 +412,13 @@ impl Hub {
 
     /// Called after a connection completed Hello.
     pub fn frontend_joined(&self) {
-        let mut idle = self.idle.lock().unwrap_or_else(|e| e.into_inner());
+        let mut idle = lock(&self.idle);
         idle.ever = true;
         idle.generation += 1;
     }
 
     pub fn remove_conn(self: &Arc<Self>, id: u64) {
-        let Some(c) = self
-            .conns
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(&id)
-        else {
+        let Some(c) = lock(&self.conns).remove(&id) else {
             return;
         };
         c.kill.cancel();
@@ -466,7 +440,7 @@ impl Hub {
 
     fn check_idle(self: &Arc<Self>) {
         let count = self.frontend_count();
-        let mut idle = self.idle.lock().unwrap_or_else(|e| e.into_inner());
+        let mut idle = lock(&self.idle);
         match idle_action(self.opts.idle_timeout, idle.ever, count) {
             IdleAction::Nothing => {}
             IdleAction::ShutdownNow => {
@@ -480,12 +454,7 @@ impl Hub {
                 tokio::spawn(async move {
                     tokio::time::sleep(Duration::from_secs(secs)).await;
                     let Some(hub) = hub.upgrade() else { return };
-                    let still = hub
-                        .idle
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .generation
-                        == generation;
+                    let still = lock(&hub.idle).generation == generation;
                     if still && hub.frontend_count() == 0 {
                         tracing::info!("idle timeout reached; shutting down");
                         hub.shutdown.cancel();
@@ -498,7 +467,7 @@ impl Hub {
 
 /// Debounced `Sessions` broadcast.
 async fn broadcaster(hub: Weak<Hub>) {
-    let mut last: Option<String> = None;
+    let mut last: Option<Vec<SessionInfo>> = None;
     loop {
         let (dirty, shutdown) = {
             let Some(h) = hub.upgrade() else { return };
@@ -509,14 +478,13 @@ async fn broadcaster(hub: Weak<Hub>) {
             _ = dirty.notified() => {}
             _ = shutdown.cancelled() => return,
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(SESSIONS_DEBOUNCE).await;
         let Some(h) = hub.upgrade() else { return };
         let infos = h.infos();
-        let key = serde_json::to_string(&infos).unwrap_or_default();
-        if last.as_deref() == Some(key.as_str()) {
+        if last.as_ref() == Some(&infos) {
             continue;
         }
-        last = Some(key);
+        last = Some(infos.clone());
         for c in h.conns() {
             if c.lock().hello {
                 c.send(ServerFrame::Sessions {

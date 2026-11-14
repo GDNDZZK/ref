@@ -3,6 +3,16 @@
 const SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'];
 const COLOR_TYPE_RGB: u8 = 2;
 const BIT_DEPTH: u8 = 8;
+/// Reflected CRC-32 polynomial.
+const CRC32_POLY: u32 = 0xEDB8_8320;
+/// Largest prime below 2^16: the modulus of the Adler-32 sums.
+const ADLER_MOD: u32 = 65_521;
+/// zlib header: deflate with a 32 KiB window, no preset dictionary, fastest compression.
+const ZLIB_HEADER: [u8; 2] = [0x78, 0x01];
+/// Filter type byte of a scanline: no filtering.
+const FILTER_NONE: u8 = 0;
+/// IHDR tail: compression method (deflate), filter method (adaptive) and interlace (none).
+const IHDR_TAIL: [u8; 3] = [0, 0, 0];
 /// A stored deflate block holds at most 65535 bytes.
 const STORED_BLOCK_MAX: usize = 65_535;
 
@@ -12,7 +22,7 @@ fn crc32(bytes: &[u8]) -> u32 {
         crc ^= byte as u32;
         for _ in 0..8 {
             crc = if crc & 1 == 1 {
-                (crc >> 1) ^ 0xEDB8_8320
+                (crc >> 1) ^ CRC32_POLY
             } else {
                 crc >> 1
             };
@@ -24,8 +34,8 @@ fn crc32(bytes: &[u8]) -> u32 {
 fn adler32(bytes: &[u8]) -> u32 {
     let (mut a, mut b) = (1u32, 0u32);
     for &byte in bytes {
-        a = (a + byte as u32) % 65_521;
-        b = (b + a) % 65_521;
+        a = (a + byte as u32) % ADLER_MOD;
+        b = (b + a) % ADLER_MOD;
     }
     (b << 16) | a
 }
@@ -39,7 +49,7 @@ fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
 }
 
 fn zlib_stored(data: &[u8]) -> Vec<u8> {
-    let mut out = vec![0x78, 0x01];
+    let mut out = ZLIB_HEADER.to_vec();
     let blocks: Vec<&[u8]> = data.chunks(STORED_BLOCK_MAX).collect();
     for (i, block) in blocks.iter().enumerate() {
         let last = i + 1 == blocks.len();
@@ -56,7 +66,7 @@ fn zlib_stored(data: &[u8]) -> Vec<u8> {
 pub fn encode(width: u32, height: u32, pixel: impl Fn(u32, u32) -> [u8; 3]) -> Vec<u8> {
     let mut raw = Vec::new();
     for y in 0..height {
-        raw.push(0); // filter: none
+        raw.push(FILTER_NONE);
         for x in 0..width {
             raw.extend_from_slice(&pixel(x, y));
         }
@@ -64,7 +74,8 @@ pub fn encode(width: u32, height: u32, pixel: impl Fn(u32, u32) -> [u8; 3]) -> V
     let mut header = Vec::new();
     header.extend_from_slice(&width.to_be_bytes());
     header.extend_from_slice(&height.to_be_bytes());
-    header.extend_from_slice(&[BIT_DEPTH, COLOR_TYPE_RGB, 0, 0, 0]);
+    header.extend_from_slice(&[BIT_DEPTH, COLOR_TYPE_RGB]);
+    header.extend_from_slice(&IHDR_TAIL);
     let mut out = SIGNATURE.to_vec();
     chunk(&mut out, b"IHDR", &header);
     chunk(&mut out, b"IDAT", &zlib_stored(&raw));

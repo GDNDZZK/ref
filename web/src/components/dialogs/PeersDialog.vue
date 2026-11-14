@@ -110,7 +110,7 @@ async function setName(): Promise<void> {
 }
 
 .output.failed {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .name {

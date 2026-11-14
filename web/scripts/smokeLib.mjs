@@ -1,8 +1,9 @@
 // Shared by the headless-Chromium checks (smoke.mjs, perf.mjs): a private `ref-web --mock` on
-// temporary state directories, and a browser logged in to it.
+// temporary state directories, and a browser signed in to it with the key.
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright-core'
@@ -30,8 +31,11 @@ export async function sendPrompt(page, text, input = page.locator(INPUT)) {
   await page.keyboard.press('Enter')
 }
 
+const tokenFile = (root) => join(root, 'state', 'web', 'login-token')
+
+// The key: the login token ref-web creates on first start.
 async function readToken(root) {
-  const file = join(root, 'state', 'web', 'login-token')
+  const file = tokenFile(root)
   for (let attempt = 0; attempt < TOKEN_ATTEMPTS; attempt++) {
     try {
       return readFileSync(file, 'utf8').trim()
@@ -65,13 +69,16 @@ export async function withMockPage(body) {
       stdio: ['pipe', 'inherit', 'inherit'], // stdin stays open: closing it stops the mock backend
     })
   let server = start()
-  // Stops the ref-web started above and starts another one: the browser's login is gone then.
-  const restartServer = async () => {
+  // Stops the ref-web started above and starts another one, with a new key when `rotateKey`.
+  // Returns the key.
+  const restartServer = async ({ rotateKey = false } = {}) => {
     server.kill() // only the process started above
     await once(server, 'exit')
+    if (rotateKey) await unlink(tokenFile(root))
     server = start()
-    await readToken(root)
+    const key = await readToken(root)
     await waitForPort()
+    return key
   }
   const problems = []
   try {
@@ -88,7 +95,8 @@ export async function withMockPage(body) {
           problems.push(`HTTP ${response.status()}: ${response.url()}`)
       })
       page.on('pageerror', (error) => problems.push(`page error: ${error.message}`))
-      await page.goto(`http://127.0.0.1:${PORT}/login?token=${token}`)
+      // The key goes in the fragment, as in the address ref-web prints.
+      await page.goto(`http://127.0.0.1:${PORT}/#key=${token}`)
       await page.waitForSelector(INPUT, { timeout: WAIT_MS })
       await body(page, problems, { restartServer })
     } finally {

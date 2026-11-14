@@ -11,7 +11,10 @@ path = "src/main.rs"
 [dependencies]
 ref-client.workspace = true
 ref-proto.workspace = true
+ref-sys.workspace = true
 axum.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 futures-util.workspace = true
@@ -26,6 +29,9 @@ dunce.workspace = true
 hmac.workspace = true
 sha2.workspace = true
 subtle.workspace = true
+chacha20poly1305.workspace = true
+hkdf.workspace = true
+scrypt.workspace = true
 serde_json.workspace = true
 tokio-tungstenite.workspace = true
 
@@ -34,7 +40,6 @@ brotli.workspace = true
 flate2.workspace = true
 
 [dev-dependencies]
-ref-sys.workspace = true
 ref-server.workspace = true
 ref-config.workspace = true
 reqwest.workspace = true

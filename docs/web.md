@@ -4,7 +4,7 @@
 
 - [Starting](#starting)
 - [Signing in](#signing-in)
-- [One instance per port](#one-instance-per-port)
+- [Finding a running instance](#finding-a-running-instance)
 - [Opening it to the network](#opening-it-to-the-network)
 - [Using the page](#using-the-page)
 - [Keyboard shortcuts](#keyboard-shortcuts)
@@ -14,46 +14,65 @@
 - [Known limits](#known-limits)
 - [Developing the page](#developing-the-page)
 
-`ref-web` shows ref in a browser. It is a small web server: it serves the page, signs the browser in, and forwards the browser's WebSocket frames unchanged to `ref-server`. Sessions, tools and permissions all stay in the backend, so a session can be open in the terminal and in a browser tab at the same time. Like `ref`, `ref-web` finds a running backend through the instance files and otherwise starts the `ref-server` next to it; a backend started this way exits when the last client disconnects.
+`ref-web` shows ref in a browser. It is a small web server: it serves the page, signs the browser in with a key, decrypts the browser's WebSocket frames and forwards them unchanged to `ref-server` (and the other way round). Sessions, tools and permissions all stay in the backend, so a session can be open in the terminal and in a browser tab at the same time. Like `ref`, `ref-web` finds a running backend through the instance files and otherwise starts the `ref-server` next to it; a backend started this way exits when the last client disconnects.
 
 ## Starting
 
 ```bash
-ref-web                       # serve on 127.0.0.1:7480 and open the browser
+ref-web                       # serve on 127.0.0.1 (random port) and open the browser
 ref-web ~/src/project         # new sessions start in this directory
-ref-web --port 8080 --no-open # another port, do not open the browser
+ref-web --port 8080 --no-open # a fixed port, do not open the browser
 ```
 
-All options are listed in [Command line](cli.md#ref-web). The page uses the directory you pass as the directory for new sessions; without one, it uses the directory `ref-web` was started in. The login address carries it as `?dir=`; the address bar can also hold `?session=<id>` (open that session) and `?view=split` (the split view), and follows the session you switch to.
+Without `--port`, `ref-web` picks a random free port in 10000–65535. It keeps the port in `<state dir>/web/port` and tries it first the next time, so the address stays the same while that port is free; when it is taken, a new one is picked and kept. `--port N` uses that port, or stops with an error if another program has it.
+
+All options are listed in [Command line](cli.md#ref-web). The page uses the directory you pass as the directory for new sessions; without one, it uses the directory `ref-web` was started in. The address `ref-web` prints carries it as `?dir=`; the address bar can also hold `?session=<id>` (open that session) and `?view=split` (the split view), and follows the session you switch to.
 
 ## Signing in
 
-On start, `ref-web` prints a login address and opens it in the browser:
+On start, `ref-web` prints an address that holds the key and opens it in the browser:
 
 ```
-http://127.0.0.1:7480/login?token=…&dir=/home/you/src/project
+http://127.0.0.1:<port>/?dir=/home/you/src/project#key=…
 ```
 
-The address sets a cookie and redirects to the page, so the token does not stay in the address bar or the browser history. After that, `http://127.0.0.1:7480/` works without the token until the cookie expires.
+The key is in the part after `#` (the fragment). A browser never sends the fragment to a server, so the key is not in any request, `Referer` header or log. The page reads it, removes it from the address bar and signs in. There is no cookie and no login route.
 
-- The cookie is named `ref_web_<port>`, so two `ref-web` instances on one host do not overwrite each other. It is `HttpOnly` and `SameSite=Strict` and valid for 30 days.
-- Its value is a random session id that lives in the memory of the `ref-web` process. It is not the login token: browsers send a cookie to every port of the same host, so a cookie that held the token could be read by other services on `localhost`.
-- After `ref-web` restarts, the old session ids are gone. An open page then gets 401, says *Not logged in. Run ref-web again: it opens the login URL again.* and stops reconnecting. Run `ref-web` again (it opens the login address) and the page works again.
+**The key.** Without `--key`, the key is the login token: 64 hexadecimal characters, created on first start and kept in `<state dir>/web/login-token` (mode 600; on Unix a wider mode is corrected with a notice). If the file holds anything else, `ref-web` stops with *does not hold a valid login token*. `--key KEY`, or the environment variable `REF_WEB_KEY`, sets the key for one run instead. It needs at least 16 characters and is not written to disk; the token file is then neither read nor created. A key on the command line shows up in the process list and the shell history, `REF_WEB_KEY` keeps it out of the process list. The default key is random and long, so prefer it.
 
-The login token is created on first start and kept in `<state dir>/web/login-token` (64 hexadecimal characters, mode 600; on Unix a wider mode is corrected with a notice), so the login address stays the same after a restart. If the file holds anything else, `ref-web` stops with *does not hold a valid login token*. To get a new token, stop `ref-web`, delete that file and start it again. Browsers signed in with the old token are signed out.
+**How the page signs in.** The key itself never travels. When the page opens the WebSocket, `ref-web` sends a fresh random number and a salt. The page answers with its own random number and a proof made from the key, and both sides derive the keys of this one connection from the key and the two numbers. From then on every message in both directions is encrypted and authenticated (XChaCha20-Poly1305). A recorded connection does not sign in again, because the next connection uses new numbers. The salt is 16 random bytes in `<state dir>/web/salt` (mode 600); it is not secret.
 
-## One instance per port
+**Address forms.** The page takes the key from three forms of address:
 
-Only one `ref-web` runs per port. Starting it again while one is running on that port prints the login address (with the new `DIR`) and opens the browser, then exits with code 0. The running instance keeps its own `--server`, `--mock` and `--host`; the options of the second start are not applied. `ref-web` recognizes its own instance by an answer to `/api/ping` that is signed with the login token. If another program uses the port, `ref-web` reports *port N is in use by another program* and exits with code 1.
+| Form | Sent to the server? | Use |
+|---|---|---|
+| `#key=K` | No | what `ref-web` prints and opens |
+| `?key=K` | Yes, in the request line | links that need the key in the query |
+| `?token=K` | Yes | the old name; old `/login?token=…&dir=…` bookmarks also still work, they load the page |
+
+A key in the query string can be read in clear by anyone on the path when the page is served over plain `http://` on a network, by a reverse proxy and its access log (nginx logs the query string by default), and from the browser history until the page removes it. When the key came in the query of a plain `http://` page on another machine, the page shows a notice saying so. Every response has `Referrer-Policy: no-referrer`.
+
+**What the browser keeps.** The page does not store the key. It stores the key stretched with scrypt, together with the salt, in `localStorage` under `ref.web.key`, for this address only (scheme, host and port). With it, each reload and reconnect signs in without asking. Anyone who can read the browser profile, or a script running in the page, can sign in with that value until the key changes. The page's Content-Security-Policy runs only the page's own script files, and model output is shown as text. Without `localStorage` (some private modes) the page keeps the value in memory and asks again after a reload.
+
+**The key-entry page.** The page shows *Enter the key* with a password field and *Sign in* when it has no key, when its stored key was made with another salt, or when `ref-web` refuses the key. *Checking the key…* shows while the page stretches the key (up to a second on a phone). A wrong key gives *The key was not accepted.* The page does not reconnect by itself while it needs a key.
+
+**Restarting and changing the key.** A restarted `ref-web` keeps its key and salt, so open pages reconnect and stay signed in. To change the key, stop `ref-web`, delete `<state dir>/web/login-token` and start it again; with `--key`, start it with another key. Every browser then shows the key-entry page, and the new address `ref-web` prints signs in again. Deleting `<state dir>/web/salt` also makes every browser ask for the key again.
+
+## Finding a running instance
+
+Each running `ref-web` writes a record to `<state dir>/web/instances/<pid>.json` (pid, port, host, version and start time; no secret; mode 600) and removes it when it stops. Starting `ref-web` again looks at these records, newest first. If one of them belongs to a `ref-web` with the same key, it prints that instance's address (with the new `DIR` and the key), opens the browser and exits with code 0. With `--port N`, only the instance on that port counts. The running instance keeps its own `--server`, `--mock` and `--host`; the options of the second start are not applied, and a notice says so. `ref-web` recognizes its own instance by an answer to `/api/ping` that is signed with a key derived from the key; `/api/ping` answers only callers on the same machine. Records of processes that no longer exist are deleted.
+
+If no instance matches, a new one starts. With `--port N`, a `ref-web` with a different key in the records stops the start with *a ref-web with a different key is running on port N (pid P); stop it, or pass the same --key*. A port taken by another program (or by a `ref-web` of another state directory) gives *port N is in use by another program or by a ref-web with a different key*. Both exit with code 1. Two starts at the same moment can both start an instance; that does no harm.
 
 ## Opening it to the network
 
 `ref-web` listens on `127.0.0.1` only. `--host ADDR` listens on another address, for example `--host 0.0.0.0` for the local network. It prints a warning when you do.
 
-- Open the page by **IP address**, for example `http://192.168.1.20:7480/`. A host name is rejected: `ref-web` checks the `Host` header against the addresses it knows to prevent DNS rebinding.
-- There is no TLS. The cookie and everything you type travel in plain text, and whoever signs in controls the backend, which can run commands on that machine. Use an SSH tunnel or a reverse proxy with TLS instead:
+- Open the page by **IP address**, for example `http://192.168.1.20:<port>/`. A host name is rejected: `ref-web` checks the `Host` header against the addresses it knows to prevent DNS rebinding.
+- There is no TLS. The messages are encrypted with the key, but the page and its scripts travel in plain text, so someone on the path can change the page and steal the key (see [Known limits](#known-limits)). Whoever has the key controls the backend, which can run commands on that machine. Use an SSH tunnel or a reverse proxy with TLS instead:
 
   ```bash
+  # on the server: ref-web --no-open --port 7480
   ssh -L 7480:127.0.0.1:7480 server
   # then open http://127.0.0.1:7480/ on your machine
   ```
@@ -160,7 +179,8 @@ Alt+S or the settings button in the sidebar opens them: the theme (System, Light
 ## Connection
 
 - `ref-web` pings the WebSocket of every tab every 30 seconds. When a tab sends nothing at all (no answer to the ping and no other frame) for 60 seconds, or `ref-web` cannot send it a frame for 60 seconds because the browser does not read, the connection of that tab and its connection to the backend are closed. A laptop that sleeps or loses its network therefore leaves no stale session subscriptions in the backend.
-- When the connection is lost the page reconnects by itself. If `ref-web` was restarted, the page asks `/api/info` first; a 401 means the cookie is stale, so the page shows *Not logged in…* instead of retrying (see [Signing in](#signing-in)). While `ref-web` is not running, the page keeps trying.
+- When the connection is lost the page reconnects by itself and signs in again with the stored key. When `ref-web` refuses the key (close code 4401, for example after the key was changed), the page stops retrying and shows the key-entry page (see [Signing in](#signing-in)). While `ref-web` is not running, the page keeps trying.
+- Other close codes of `ref-web`: 4400 for a malformed sign-in or a message that does not decrypt, 4408 when the sign-in does not finish within 10 seconds, 1011 *backend unavailable* when the backend cannot be reached (the details are in `ref-web`'s log).
 
 ## Known limits
 
@@ -169,6 +189,15 @@ Alt+S or the settings button in the sidebar opens them: the theme (System, Light
 - Alt+letter keys can produce special characters on some keyboard layouts; the page matches the physical key and ignores the character.
 - The prompt history and the settings are per browser and are not shared with the terminal UI or the GUI.
 - Tool arguments and output are shown as UTF-8 text.
+
+What the key and its encryption do not protect against:
+
+- **Someone who can change the page.** Over plain `http://` on a network, someone on the path can serve a modified page whose script reads the key as you type it, or the stored value. The encryption cannot prevent this, because the code that encrypts comes over the same connection. On a network you do not trust, use an SSH tunnel or a reverse proxy with a real certificate.
+- **A weak `--key`.** Someone who records one sign-in—or a local process on the same machine querying `/api/ping`—can collect a verifier and test guesses offline. scrypt (N = 2^15, r = 8, p = 1; below OWASP's current minimum of 2^17 because of the cost on phones) makes each guess slower; it does not make a short key safe. Online, a wrong key costs one second per connection, with at most 16 sign-ins in progress at once. Use the default key, or 16 or more random characters.
+- **Traffic analysis.** The sizes and timing of messages are visible, and without TLS also the path, the `Host` header and the fact that `ref-web` is in use.
+- **The endpoints.** Anyone who can read `ref-web`'s state directory or the browser's profile has the key. A key given with `--key` is visible in the process list and the shell history on that machine.
+- **The backend leg.** `ref-web` talks to `ref-server` over plain `ws://`. On one machine that stays on loopback; with `--server ws://remote` it crosses the network.
+- **A key typed into someone else's page.**
 
 ## Developing the page
 
@@ -180,4 +209,4 @@ pnpm install
 pnpm dev                  # Vite dev server on 127.0.0.1:5173
 ```
 
-`pnpm dev` forwards `/ws`, `/api` and `/login` to `ref-web` on `127.0.0.1:7480`. Start `ref-web --no-open` (or `ref-web --mock --no-open`) first, then sign in through the dev server with `http://127.0.0.1:5173/login?token=…`, using the token from the login address. Use `127.0.0.1` throughout, not `localhost`, because the cookie belongs to one host name.
+`pnpm dev` forwards `/ws` and `/api` to `ref-web` on `127.0.0.1:7480` (`REF_WEB_URL` sets another address). Start `ref-web --no-open --port 7480` (or `ref-web --mock --no-open --port 7480`) first, then open `http://127.0.0.1:5173/#key=…` with the key from the address `ref-web` prints. The page keeps the key for the dev server's address. Use `127.0.0.1` throughout, not `localhost`: the stored key belongs to one address. A dev build that talks to a `ref-server` directly (`VITE_REF_URL`) uses no key and no encryption.

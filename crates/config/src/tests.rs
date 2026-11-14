@@ -274,6 +274,19 @@ fn home_instruction_in_two_layers_is_listed_once() {
     assert_eq!(c.instructions, [expected]);
 }
 
+// Bug: the string form `"instructions": "~/a.md"` skipped the `~` expansion that the array form
+// gets, so the entry stayed unexpanded and did not match the same entry given as an array.
+#[test]
+fn home_instruction_in_string_form_is_expanded() {
+    let fx = Fx::new();
+    fx.write_global_config(r#"{"instructions": "~/a.md"}"#);
+    fx.write("proj/opencode.json", r#"{"instructions": ["~/a.md"]}"#);
+
+    let c = fx.load();
+    let expected = fx.home().join("a.md").to_string_lossy().into_owned();
+    assert_eq!(c.instructions, [expected]);
+}
+
 #[test]
 fn merge_order_and_project_walk() {
     let fx = Fx::new();

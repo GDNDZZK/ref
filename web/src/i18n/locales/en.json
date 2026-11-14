@@ -84,8 +84,16 @@
     "connecting": "Connecting…",
     "reconnecting": "Connection lost. Reconnecting…",
     "closed": "Disconnected: {reason}",
-    "notLoggedIn": "Not logged in. Run ref-web again: it opens the login URL again.",
     "noDirectory": "No working directory: open this page through ref-web, or set ?cwd= (or VITE_REF_CWD) when connecting to ref-server directly."
+  },
+  "key": {
+    "title": "Enter the key",
+    "label": "Key",
+    "signIn": "Sign in",
+    "checking": "Checking the key…",
+    "rejected": "The key was not accepted.",
+    "hint": "ref-web prints the key in its address when it starts. With the default key, it is in {file}.",
+    "sentInClear": "This address sent the key in clear text. Use the address ref-web prints (it ends with #key=…) or type the key on the key page."
   },
   "message": {
     "from": "from {name}",

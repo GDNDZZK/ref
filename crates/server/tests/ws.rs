@@ -38,7 +38,7 @@ async fn response(
         }
         panic!("socket closed")
     };
-    tokio::time::timeout(Duration::from_secs(10), fut)
+    tokio::time::timeout(TIMEOUT, fut)
         .await
         .expect("response timeout")
 }
@@ -47,10 +47,8 @@ async fn start(token: &str, idle: i64) -> (ref_server::Running, String, std::pat
     let m = mock(Arc::new(|_, _| Reply::Text("pong".into()))).await;
     let cfg = config(&m.url);
     let dir = temp_dir("ws");
-    let mut opts = ref_server::HubOptions::new(dir.join("data"));
-    opts.home = None;
+    let mut opts = hub_options(cfg, &dir);
     opts.idle_timeout = idle;
-    opts.config_loader = Arc::new(move |_| cfg.clone());
     let (auth, _) = ref_server::ws::resolve_hosts(&["127.0.0.1".into()], token.into());
     let r = ref_server::start(opts, "127.0.0.1", 0, auth).await.unwrap();
     let url = format!("ws://127.0.0.1:{}/", r.addr.port());
@@ -79,7 +77,7 @@ async fn ws_smoke() {
         1,
         Request::Hello {
             client: "test".into(),
-            version: 1,
+            version: ref_proto::PROTOCOL_VERSION,
             cwd: work.to_string_lossy().into(),
             token: Some("sekret".into()),
             notify: Vec::new(),
@@ -105,7 +103,7 @@ async fn ws_smoke() {
     assert!(ok, "{err:?}");
     let sid = res["session"]["id"].as_str().unwrap().to_string();
     assert_eq!(res["session"]["name"], "ワーク");
-    assert_eq!(res["session"]["agent"], "build");
+    assert_eq!(res["session"]["agent"], BUILD);
 
     // Duplicate name from a frontend -> error.
     send(
@@ -170,9 +168,7 @@ async fn ws_smoke() {
             }
         }
     };
-    let text = tokio::time::timeout(Duration::from_secs(10), got)
-        .await
-        .unwrap();
+    let text = tokio::time::timeout(TIMEOUT, got).await.unwrap();
     assert_eq!(text, "pong");
 
     send(&mut ws, 7, Request::GetConfig).await;
@@ -247,7 +243,7 @@ async fn ws_first_frame_must_be_hello_and_idle_zero_shuts_down() {
         1,
         Request::Hello {
             client: "t".into(),
-            version: 1,
+            version: ref_proto::PROTOCOL_VERSION,
             cwd: work.to_string_lossy().into(),
             token: None,
             notify: Vec::new(),
@@ -345,7 +341,7 @@ async fn hello_reports_protocol_and_notifications_follow_focus() {
         }
         panic!("socket closed")
     };
-    let (session_id, kind, detail) = tokio::time::timeout(Duration::from_secs(10), fut)
+    let (session_id, kind, detail) = tokio::time::timeout(TIMEOUT, fut)
         .await
         .expect("notification timeout");
     assert_eq!(
@@ -411,9 +407,8 @@ async fn list_dirs_expands_the_configured_home() {
     let home = dir.join("home");
     std::fs::create_dir_all(home.join("docs")).unwrap();
     let cfg = config(&m.url);
-    let mut opts = ref_server::HubOptions::new(dir.join("data"));
+    let mut opts = hub_options(cfg, &dir);
     opts.home = Some(home.clone());
-    opts.config_loader = Arc::new(move |_| cfg.clone());
     let hub = ref_server::Hub::new(opts);
     let conn = hub.add_conn();
     conn.lock().cwd = dir.to_string_lossy().into();
@@ -465,10 +460,7 @@ async fn list_dirs_skips_names_that_are_not_utf8() {
         return;
     }
     let cfg = config(&m.url);
-    let mut opts = ref_server::HubOptions::new(dir.join("data"));
-    opts.home = None;
-    opts.config_loader = Arc::new(move |_| cfg.clone());
-    let hub = ref_server::Hub::new(opts);
+    let hub = ref_server::Hub::new(hub_options(cfg, &dir));
     let conn = hub.add_conn();
     conn.lock().cwd = dir.to_string_lossy().into();
     let req = Request::ListDirs { path: ".".into() };

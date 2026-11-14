@@ -1,5 +1,6 @@
 //! Test harness: a ref-web process in a private state directory, HTTP and WebSocket clients
-//! that behave like a browser (cookie, Origin), a fake upstream and a real ref-server.
+//! that behave like a browser (Origin, the key handshake), a fake upstream and a real
+//! ref-server.
 
 // Each test file uses a different part of this module.
 #![allow(dead_code)]
@@ -17,11 +18,15 @@ use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 
+/// The page's half of the channel is the code ref-web uses, from the same file.
+#[path = "../../src/channel.rs"]
+pub mod channel;
+
+use channel::{Kind, NONCE_LEN, Nonce, Opener, Root, Sealer};
+
 pub type Ws =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
-/// Another process may take a port between `free_port` and ref-web binding it.
-const START_ATTEMPTS: u32 = 5;
 const START_TIMEOUT: Duration = Duration::from_secs(15);
 /// The loopback address the tests listen on and connect to.
 pub const LOOPBACK: &str = "127.0.0.1";
@@ -93,34 +98,35 @@ impl Env {
         self.command(args).output().unwrap()
     }
 
-    /// Starts ref-web in the background on a free port and waits until it listens. Tries
-    /// another port when ref-web exits at once because the port was taken meanwhile.
+    /// Starts ref-web in the background (it picks its own port) and waits until it listens.
     pub async fn start(&self, args: &[&str]) -> Web {
-        for _ in 1..START_ATTEMPTS {
-            if let Ok(web) = self.try_start_on(free_port(), args).await {
-                return web;
-            }
-        }
-        self.start_on(free_port(), args).await
+        self.start_with_port(None, args).await
     }
 
     /// Like `start`, on a given port.
     pub async fn start_on(&self, port: u16, args: &[&str]) -> Web {
-        match self.try_start_on(port, args).await {
+        self.start_with_port(Some(port), args).await
+    }
+
+    async fn start_with_port(&self, port: Option<u16>, args: &[&str]) -> Web {
+        match self.try_start(port, args).await {
             Ok(web) => web,
             Err(status) => panic!("ref-web exited early: {status}"),
         }
     }
 
     /// `Err` holds the exit status of a ref-web that stopped before it listened.
-    async fn try_start_on(
+    async fn try_start(
         &self,
-        port: u16,
+        port: Option<u16>,
         args: &[&str],
     ) -> Result<Web, std::process::ExitStatus> {
-        let port_arg = port.to_string();
-        let mut all = vec!["--no-open", "--port", &port_arg];
-        all.extend_from_slice(args);
+        let mut all = vec!["--no-open".to_string()];
+        if let Some(port) = port {
+            all.extend(["--port".to_string(), port.to_string()]);
+        }
+        all.extend(args.iter().map(|a| a.to_string()));
+        let all: Vec<&str> = all.iter().map(String::as_str).collect();
         let child = self
             .command(&all)
             .stdout(Stdio::null())
@@ -129,28 +135,37 @@ impl Env {
             .unwrap();
         let mut web = Web {
             child,
-            port,
-            token: String::new(),
-            session_cookie: String::new(),
+            host: LOOPBACK.to_string(),
+            port: 0,
+            key: String::new(),
             http: reqwest::Client::builder()
                 .no_proxy()
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .unwrap(),
         };
+        let (port, host) = web.wait_for_record(&self.state_dir()).await?;
+        web.port = port;
+        web.host = match host.as_str() {
+            "0.0.0.0" => LOOPBACK.to_string(),
+            "::" => "::1".to_string(),
+            _ => host,
+        };
         web.wait_until_listening().await?;
-        web.token = std::fs::read_to_string(self.state_dir().join("web/login-token")).unwrap();
-        web.session_cookie = web.log_in().await;
+        web.key = match args.iter().position(|a| *a == "--key") {
+            Some(i) => args[i + 1].to_string(),
+            None => std::fs::read_to_string(self.state_dir().join("web/login-token")).unwrap(),
+        };
         Ok(web)
     }
 }
 
 pub struct Web {
     child: Child,
+    pub host: String,
     pub port: u16,
-    pub token: String,
-    /// `name=value` of the session cookie that `/login` handed out.
-    session_cookie: String,
+    /// The key the page signs in with: `--key`, or the login token.
+    pub key: String,
     pub http: reqwest::Client,
 }
 
@@ -180,12 +195,36 @@ impl Web {
         self.child.wait().unwrap();
     }
 
+    /// The port and host ref-web chose, from its instance record (written once it has bound).
+    async fn wait_for_record(
+        &mut self,
+        state_dir: &std::path::Path,
+    ) -> Result<(u16, String), std::process::ExitStatus> {
+        let record = state_dir.join(format!("web/instances/{}.json", self.child.id()));
+        poll_until(
+            "ref-web to record its port",
+            START_TIMEOUT,
+            POLL_SLOW,
+            async || {
+                if let Some(status) = self.child.try_wait().unwrap() {
+                    return Some(Err(status));
+                }
+                let text = std::fs::read_to_string(&record).ok()?;
+                let record: serde_json::Value = serde_json::from_str(&text).ok()?;
+                let port = record["port"].as_u64()? as u16;
+                let host = record["host"].as_str()?.to_string();
+                Some(Ok((port, host)))
+            },
+        )
+        .await
+    }
+
     async fn wait_until_listening(&mut self) -> Result<(), std::process::ExitStatus> {
         poll_until("ref-web to start", START_TIMEOUT, POLL_SLOW, async || {
             if let Some(status) = self.child.try_wait().unwrap() {
                 return Some(Err(status));
             }
-            tokio::net::TcpStream::connect((LOOPBACK, self.port))
+            tokio::net::TcpStream::connect((self.host.as_str(), self.port))
                 .await
                 .is_ok()
                 .then_some(Ok(()))
@@ -197,44 +236,17 @@ impl Web {
         format!("http://{LOOPBACK}:{}{path}", self.port)
     }
 
-    pub fn cookie(&self) -> String {
-        self.session_cookie.clone()
-    }
-
-    /// Name of the session cookie.
-    pub fn cookie_name(&self) -> &str {
-        self.session_cookie.split('=').next().unwrap()
-    }
-
-    async fn log_in(&self) -> String {
-        let response = self
-            .http
-            .get(self.url(&format!("/login?token={}", self.token)))
-            .send()
-            .await
-            .unwrap();
-        let set_cookie = response.headers()["set-cookie"].to_str().unwrap();
-        set_cookie.split(';').next().unwrap().to_string()
-    }
-
     pub fn origin(&self) -> String {
         format!("http://{LOOPBACK}:{}", self.port)
     }
 
-    /// A GET with the login cookie.
     pub async fn get(&self, path: &str) -> reqwest::Response {
-        self.http
-            .get(self.url(path))
-            .header("cookie", self.cookie())
-            .send()
-            .await
-            .unwrap()
+        self.http.get(self.url(path)).send().await.unwrap()
     }
 
     /// WebSocket handshake with the given headers (`None` = leave out / keep the default).
     pub async fn try_ws(
         &self,
-        cookie: Option<String>,
         origin: Option<String>,
         host: Option<&str>,
     ) -> Result<Ws, tokio_tungstenite::tungstenite::Error> {
@@ -242,9 +254,6 @@ impl Web {
             .into_client_request()
             .unwrap();
         let headers = request.headers_mut();
-        if let Some(cookie) = cookie {
-            headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
-        }
         if let Some(origin) = origin {
             headers.insert("origin", HeaderValue::from_str(&origin).unwrap());
         }
@@ -256,11 +265,138 @@ impl Web {
             .map(|(ws, _)| ws)
     }
 
-    /// A WebSocket as the page opens it: login cookie and same-origin Origin.
+    /// A WebSocket as the page opens it (same-origin Origin), before any handshake.
     pub async fn ws(&self) -> Ws {
-        self.try_ws(Some(self.cookie()), Some(self.origin()), None)
+        self.try_ws(Some(self.origin()), None).await.unwrap()
+    }
+
+    /// A tab that has signed in with the key.
+    pub async fn channel(&self) -> Channel {
+        match Channel::sign_in(self.ws().await, &self.key).await {
+            Ok(channel) => channel,
+            Err(close) => panic!("the key was refused: {close:?}"),
+        }
+    }
+}
+
+/// What a tab receives.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Event {
+    Text(String),
+    Binary(Vec<u8>),
+    /// Close code and reason (1006 and nothing when the socket ended without a frame).
+    Close(u16, String),
+}
+
+/// A tab as the page is: it did the key handshake and seals what it sends.
+pub struct Channel {
+    pub ws: Ws,
+    sealer: Sealer,
+    opener: Opener,
+    /// Sealed frame 0: version, cwd, mock.
+    pub info: serde_json::Value,
+}
+
+/// Close code and reason.
+pub type Closed = (u16, String);
+
+impl Channel {
+    /// Reads the hello and answers it. `Err` holds the close the server answered with.
+    pub async fn sign_in(mut ws: Ws, key: &str) -> Result<Channel, Closed> {
+        let (root, sn, cn) = Self::start_handshake(&mut ws, key).await;
+        let mac = root.auth_mac(&sn, &cn);
+        ws.send(Message::text(channel::auth_json(&cn, &mac)))
             .await
-            .unwrap()
+            .unwrap();
+        let (sealer, opener) = root.client_channel(&sn, &cn);
+        let mut channel = Channel {
+            ws,
+            sealer,
+            opener,
+            info: serde_json::Value::Null,
+        };
+        match channel.next_event().await {
+            Event::Text(frame_zero) => {
+                channel.info = serde_json::from_str(&frame_zero).unwrap();
+                Ok(channel)
+            }
+            Event::Close(code, reason) => Err((code, reason)),
+            other => panic!("frame 0 should be text, got {other:?}"),
+        }
+    }
+
+    /// Reads the hello; returns the root for `key` and both nonces (the client's is fixed).
+    pub async fn start_handshake(ws: &mut Ws, key: &str) -> (Root, Nonce, Nonce) {
+        let hello = next_text(ws).await;
+        let (salt, sn) = channel::parse_hello(&hello).expect("a hello message");
+        let root = Root::derive(key.as_bytes(), &salt);
+        (root, sn, [0x5a; NONCE_LEN])
+    }
+
+    pub async fn send_text(&mut self, text: &str) {
+        self.send_sealed(Kind::Text, text.as_bytes()).await;
+    }
+
+    pub async fn send_binary(&mut self, data: &[u8]) {
+        self.send_sealed(Kind::Binary, data).await;
+    }
+
+    async fn send_sealed(&mut self, kind: Kind, data: &[u8]) {
+        let wire = self.seal(kind, data);
+        self.send_wire(wire).await;
+    }
+
+    /// Seals the next frame without sending it (to tamper with it, repeat it or reorder it).
+    pub fn seal(&mut self, kind: Kind, data: &[u8]) -> Vec<u8> {
+        self.sealer.seal(kind, data)
+    }
+
+    pub async fn send_wire(&mut self, wire: Vec<u8>) {
+        let _ = self.ws.send(Message::Binary(wire.into())).await;
+    }
+
+    /// The next data frame, opened, or the close.
+    pub async fn next_event(&mut self) -> Event {
+        loop {
+            let message = match tokio::time::timeout(STEP_TIMEOUT, self.ws.next()).await {
+                Err(_) => panic!("timed out waiting for a frame"),
+                Ok(None | Some(Err(_))) => return Event::Close(1006, String::new()),
+                Ok(Some(Ok(message))) => message,
+            };
+            match message {
+                Message::Binary(wire) => {
+                    let (kind, plain) = self.opener.open(&wire).expect("a frame that opens");
+                    return match kind {
+                        Kind::Text => Event::Text(String::from_utf8(plain).unwrap()),
+                        Kind::Binary => Event::Binary(plain),
+                    };
+                }
+                Message::Close(frame) => {
+                    return match frame {
+                        Some(frame) => {
+                            Event::Close(u16::from(frame.code), frame.reason.to_string())
+                        }
+                        None => Event::Close(1005, String::new()),
+                    };
+                }
+                Message::Ping(_) | Message::Pong(_) => {}
+                other => panic!("unexpected plain message after the handshake: {other:?}"),
+            }
+        }
+    }
+
+    pub async fn next_text(&mut self) -> String {
+        match self.next_event().await {
+            Event::Text(text) => text,
+            other => panic!("expected text, got {other:?}"),
+        }
+    }
+
+    pub async fn next_close(&mut self) -> Closed {
+        match self.next_event().await {
+            Event::Close(code, reason) => (code, reason),
+            other => panic!("expected a close, got {other:?}"),
+        }
     }
 }
 

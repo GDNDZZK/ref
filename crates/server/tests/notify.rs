@@ -4,12 +4,14 @@ use common::*;
 use ref_proto::{NotifyKind, Request, ServerFrame, SessionStatus};
 use ref_server::api;
 use ref_server::hub::{Conn, Hub};
-use ref_server::session::Session;
+use ref_server::session::{PermReply, Session};
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
 
 const TITLE: &str = "Fix it";
+/// Retry base slow enough to queue a prompt between retries.
+const SLOW_RETRY_BASE: Duration = Duration::from_millis(300);
 const ALL: [NotifyKind; 3] = [
     NotifyKind::Permission,
     NotifyKind::TurnDone,
@@ -18,12 +20,8 @@ const ALL: [NotifyKind; 3] = [
 
 /// A connection that finished Hello and asked for `kinds`.
 fn connect(hub: &Arc<Hub>, kinds: &[NotifyKind]) -> Arc<Conn> {
-    let conn = hub.add_conn();
-    {
-        let mut c = conn.lock();
-        c.hello = true;
-        c.notify = kinds.iter().copied().collect();
-    }
+    let conn = hello_conn(hub);
+    conn.lock().notify = kinds.iter().copied().collect();
     conn
 }
 
@@ -54,7 +52,7 @@ fn notes(conn: &Arc<Conn>) -> Vec<(NotifyKind, Option<String>)> {
 }
 
 async fn titled_session(hub: &Arc<Hub>, work: &std::path::Path) -> Arc<Session> {
-    let s = session(hub, work, "main", "build").await;
+    let s = session(hub, work, MAIN_SESSION, BUILD).await;
     {
         let mut st = s.lock();
         st.info.title = TITLE.into();
@@ -77,7 +75,7 @@ async fn turn_done_goes_to_the_most_recent_connection_only() {
     assert_eq!(notes(&newer), [(NotifyKind::TurnDone, None)]);
 
     // The older window comes to the front (showing another session): it wins now.
-    let other = session(&hub, &work, "other", "build").await;
+    let other = session(&hub, &work, "other", BUILD).await;
     set_focus(&hub, &older, true, &[&other]).await;
     prompt(&hub, &s, "again");
     wait_idle(&s).await;
@@ -151,18 +149,18 @@ async fn permission_request_notifies_with_the_tool_name() {
     let conn = connect(&hub, &ALL);
 
     prompt(&hub, &s, "go");
-    let s2 = s.clone();
-    wait_until("permission", Duration::from_secs(10), move || {
-        s2.lock().perms.len() == 1
-    })
-    .await;
+    wait_session(&s, "permission", |s| s.lock().perms.len() == 1).await;
     assert_eq!(
         notes(&conn),
         [(NotifyKind::Permission, Some("bash".into()))]
     );
 
     let tx = s.lock().perms[0].tx.take().unwrap();
-    tx.send((true, false)).unwrap();
+    tx.send(PermReply {
+        allow: true,
+        always: false,
+    })
+    .unwrap();
     wait_idle(&s).await;
     assert_eq!(notes(&conn), [(NotifyKind::TurnDone, None)]);
 }
@@ -225,9 +223,8 @@ async fn user_abort_sends_nothing() {
     let conn = connect(&hub, &ALL);
 
     prompt(&hub, &s, "go");
-    let s2 = s.clone();
-    wait_until("streaming", Duration::from_secs(10), move || {
-        s2.lock().info.status == SessionStatus::Busy && s2.lock().messages.len() >= 2
+    wait_session(&s, "streaming", |s| {
+        s.lock().info.status == SessionStatus::Busy && s.lock().messages.len() >= 2
     })
     .await;
     ref_server::engine::abort(&hub, &s, true);
@@ -281,11 +278,7 @@ async fn closing_a_session_sends_nothing() {
     let conn = connect(&hub, &ALL);
 
     prompt(&hub, &s, "go");
-    let s2 = s.clone();
-    wait_until("streaming", Duration::from_secs(10), move || {
-        s2.lock().messages.len() >= 2
-    })
-    .await;
+    wait_session(&s, "streaming", |s| s.lock().messages.len() >= 2).await;
     let req = Request::Close {
         session_id: s.id.clone(),
     };
@@ -307,21 +300,15 @@ async fn a_queued_prompt_restarts_the_run_after_a_final_error() {
     .await;
     // Slow retries leave time to queue a prompt after the run took its queue for the last time.
     let cfg = config(&m.url);
-    let dir = temp_dir("restart");
-    let mut opts = ref_server::HubOptions::new(dir.join("data"));
-    opts.home = None;
-    opts.retry_base = Duration::from_millis(300);
-    opts.config_loader = Arc::new(move |_| cfg.clone());
-    let hub = Hub::new(opts);
-    let work = dir.join("work");
-    std::fs::create_dir_all(&work).unwrap();
+    let (hub, work) = hub_with(cfg, "restart", |opts| {
+        opts.retry_base = SLOW_RETRY_BASE;
+    });
     let s = titled_session(&hub, &work).await;
     let conn = connect(&hub, &ALL);
 
     prompt(&hub, &s, "go");
-    let s2 = s.clone();
-    wait_until("retrying", Duration::from_secs(10), move || {
-        matches!(s2.lock().info.status, SessionStatus::Retrying { .. })
+    wait_session(&s, "retrying", |s| {
+        matches!(s.lock().info.status, SessionStatus::Retrying { .. })
     })
     .await;
     prompt(&hub, &s, "and then this");
@@ -344,15 +331,7 @@ async fn a_custom_run_tells_clients_the_error_is_gone() {
     wait_idle(&s).await;
     assert!(s.info().last_error.is_some());
 
-    let conn = hub.add_conn();
-    conn.lock().hello = true;
-    let attach = Request::Attach {
-        session_id: s.id.clone(),
-        foreground: true,
-        limit: None,
-    };
-    api::handle(&hub, &conn, attach).await.unwrap();
-    conn.out.drain();
+    let conn = attached_conn(&hub, &s).await;
 
     ref_server::engine::start_custom_run(&hub, &s, |_, _, cancel| async move {
         cancel.cancelled().await;

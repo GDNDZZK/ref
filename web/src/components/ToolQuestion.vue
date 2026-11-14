@@ -244,7 +244,7 @@ watch(
 }
 
 .title {
-  color: var(--warning);
+  color: var(--warning-text);
   font-weight: 600;
 }
 
@@ -347,7 +347,7 @@ watch(
 }
 
 .field:focus {
-  box-shadow: inset 0 0 0 1px var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-text);
 }
 
 .summary li {
@@ -363,7 +363,7 @@ watch(
 }
 
 .unanswered {
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .footer {
