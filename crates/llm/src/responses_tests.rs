@@ -243,6 +243,20 @@ fn failures() {
         .0
         .unwrap_err();
     assert!(err.retryable);
+
+    for (code, msg) in [
+        ("invalid_request_error", "bad tool schema"),
+        ("insufficient_quota", "You exceeded your current quota"),
+    ] {
+        let s = format!(
+            "event: error\ndata: {{\"type\":\"error\",\"code\":\"{code}\",\"message\":\"{msg}\"}}\n\n"
+        );
+        let err = replay(ResponsesState::default(), s.as_bytes())
+            .0
+            .unwrap_err();
+        assert!(err.retryable, "{code}");
+        assert!(!err.context_overflow, "{code}");
+    }
 }
 
 #[test]
@@ -282,13 +296,12 @@ fn function_call_without_id_or_name_is_protocol_error() {
     let err = replay(ResponsesState::default(), missing_id.as_bytes())
         .0
         .unwrap_err();
-    assert!(!err.retryable);
+    assert!(err.retryable);
     assert!(err.message.contains("call_id"), "{}", err.message);
 
     let missing_name = "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"arguments\":\"\"}}\n\n";
     let err = replay(ResponsesState::default(), missing_name.as_bytes())
         .0
         .unwrap_err();
-    assert!(!err.retryable);
-    assert!(err.message.contains("name"), "{}", err.message);
+    assert!(err.retryable);
 }

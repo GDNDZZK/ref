@@ -370,6 +370,21 @@ fn stream_errors() {
         .unwrap_err();
     assert!(err.retryable);
     assert!(err.message.contains("stream ended unexpectedly"));
+
+    for (ty, msg) in [
+        ("invalid_request_error", "bad tool schema"),
+        ("insufficient_quota", "You exceeded your current quota"),
+        ("authentication_error", "invalid x-api-key"),
+    ] {
+        let s = format!(
+            "event: error\ndata: {{\"type\":\"error\",\"error\":{{\"type\":\"{ty}\",\"message\":\"{msg}\"}}}}\n\n"
+        );
+        let err = replay(AnthropicState::default(), s.as_bytes())
+            .0
+            .unwrap_err();
+        assert!(err.retryable, "{ty}");
+        assert!(!err.context_overflow, "{ty}");
+    }
 }
 
 #[test]
@@ -398,7 +413,7 @@ fn content_block_without_index_is_protocol_error() {
         let err = replay(AnthropicState::default(), ev.as_bytes())
             .0
             .unwrap_err();
-        assert!(!err.retryable);
+        assert!(err.retryable);
         assert!(err.message.contains("index"), "{}", err.message);
     }
 }

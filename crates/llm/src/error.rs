@@ -12,16 +12,6 @@ use std::time::Duration;
 /// HTTP statuses the classification depends on.
 const PAYLOAD_TOO_LARGE: u16 = StatusCode::PAYLOAD_TOO_LARGE.as_u16();
 const TOO_MANY_REQUESTS: u16 = StatusCode::TOO_MANY_REQUESTS.as_u16();
-const PAYMENT_REQUIRED: u16 = StatusCode::PAYMENT_REQUIRED.as_u16();
-const REQUEST_TIMEOUT: u16 = StatusCode::REQUEST_TIMEOUT.as_u16();
-const CONFLICT: u16 = StatusCode::CONFLICT.as_u16();
-const TOO_EARLY: u16 = StatusCode::TOO_EARLY.as_u16();
-const UNAUTHORIZED: u16 = StatusCode::UNAUTHORIZED.as_u16();
-const FORBIDDEN: u16 = StatusCode::FORBIDDEN.as_u16();
-const NOT_FOUND: u16 = StatusCode::NOT_FOUND.as_u16();
-const INTERNAL_SERVER_ERROR: u16 = StatusCode::INTERNAL_SERVER_ERROR.as_u16();
-/// Last status of the 5xx range.
-const LAST_SERVER_ERROR: u16 = 599;
 
 /// Maximum number of body characters included in error messages.
 const MAX_BODY_CHARS: usize = 2000;
@@ -91,33 +81,9 @@ static OVERFLOW_EXCLUSION_RE: LazyLock<Regex> = LazyLock::new(|| {
     .expect("overflow exclusion regex")
 });
 
-/// Quota / billing problems: retrying will not help.
-static QUOTA_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(concat!(
-        r"(?i)insufficient_quota|insufficient balance|quota exceeded|exceeded your current quota",
-        r"|billing|out of budget|usage_not_included|usagelimiterror|monthly usage limit",
-        r"|subscription_sharing_usage_limit_exceeded|payment required",
-    ))
-    .expect("quota regex")
-});
-
-/// Transient conditions detectable from the error text alone.
-static RETRYABLE_TEXT_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(concat!(
-        r"(?i)overloaded|server_busy|server is busy|rate.?limit|too many requests",
-        r"|try again|retry your request|temporarily unavailable|service.?unavailable",
-        r"|resource.?exhausted",
-    ))
-    .expect("retryable regex")
-});
-
 /// Whether an error text indicates that the prompt exceeded the context window.
 pub fn is_context_overflow(text: &str) -> bool {
     OVERFLOW_RE.is_match(text) && !OVERFLOW_EXCLUSION_RE.is_match(text)
-}
-
-fn is_quota(text: &str) -> bool {
-    QUOTA_RE.is_match(text)
 }
 
 /// Truncate to [`MAX_BODY_CHARS`] characters (on a char boundary).
@@ -140,31 +106,7 @@ pub fn classify_http_error(status: u16, headers: &HeaderMap, body: &str) -> LlmE
 
     let context_overflow =
         status == PAYLOAD_TOO_LARGE || (status != TOO_MANY_REQUESTS && is_context_overflow(body));
-    let quota = status == PAYMENT_REQUIRED || is_quota(body);
-    let should_retry = headers
-        .get("x-should-retry")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| match v.trim() {
-            "true" => Some(true),
-            "false" => Some(false),
-            _ => None,
-        });
-
-    let retryable = if context_overflow || quota {
-        false
-    } else if let Some(hint) = should_retry {
-        hint
-    } else {
-        match status {
-            REQUEST_TIMEOUT
-            | CONFLICT
-            | TOO_EARLY
-            | TOO_MANY_REQUESTS
-            | INTERNAL_SERVER_ERROR..=LAST_SERVER_ERROR => true,
-            UNAUTHORIZED | FORBIDDEN | NOT_FOUND | PAYLOAD_TOO_LARGE => false,
-            _ => RETRYABLE_TEXT_RE.is_match(body),
-        }
-    };
+    let retryable = !context_overflow;
 
     LlmError {
         message,
@@ -179,34 +121,6 @@ pub fn classify_http_error(status: u16, headers: &HeaderMap, body: &str) -> LlmE
         cancelled: false,
     }
 }
-
-/// Error codes / types reported inside a stream that are worth retrying.
-const RETRYABLE_CODES: &[&str] = &[
-    "server_error",
-    "server_is_overloaded",
-    "overloaded_error",
-    "overloaded",
-    "rate_limit_exceeded",
-    "rate_limit_error",
-    "api_error",
-    "internal_error",
-    "internal_server_error",
-    "service_unavailable",
-    "timeout",
-    "slow_down",
-];
-
-/// Error codes that must never be retried.
-const FATAL_CODES: &[&str] = &[
-    "invalid_request_error",
-    "invalid_prompt",
-    "invalid_api_key",
-    "authentication_error",
-    "permission_error",
-    "not_found_error",
-    "model_not_found",
-    "billing_error",
-];
 
 /// Classify an error reported inside the SSE stream (Anthropic `error` event,
 /// Responses `response.failed` / `error`, Chat `{"error": {...}}` chunks).
@@ -230,20 +144,7 @@ pub(crate) fn stream_error(code: Option<&str>, message: &str) -> LlmError {
         code,
         "context_length_exceeded" | "model_context_window_exceeded" | "request_too_large"
     ) || is_context_overflow(message);
-    let quota = matches!(
-        code,
-        "insufficient_quota" | "usage_not_included" | "billing_error"
-    ) || is_quota(message);
-    let retryable = if overflow || quota {
-        false
-    } else if RETRYABLE_CODES.contains(&code) {
-        true
-    } else if FATAL_CODES.contains(&code) {
-        RETRYABLE_TEXT_RE.is_match(message)
-    } else {
-        // Unknown in-stream failures are usually transient server-side problems.
-        true
-    };
+    let retryable = !overflow;
     LlmError {
         context_overflow: overflow,
         retryable,
@@ -370,29 +271,14 @@ mod tests {
 
     #[test]
     fn retryable_statuses() {
-        for s in [408, 409, 425, 429, 500, 502, 503, 529] {
+        for s in [
+            400, 401, 402, 403, 404, 408, 409, 422, 425, 429, 500, 502, 503, 529,
+        ] {
             let e = classify_http_error(s, &HeaderMap::new(), "oops");
             assert!(e.retryable, "{s}");
             assert_eq!(e.status, Some(s));
             assert!(!e.context_overflow);
         }
-        for s in [400, 401, 403, 404, 422] {
-            assert!(
-                !classify_http_error(s, &HeaderMap::new(), "bad").retryable,
-                "{s}"
-            );
-        }
-    }
-
-    #[test]
-    fn overload_text_on_400_is_retryable() {
-        let e = classify_http_error(
-            400,
-            &HeaderMap::new(),
-            r#"{"error":{"message":"Model is overloaded"}}"#,
-        );
-        assert!(e.retryable);
-        assert!(!classify_http_error(401, &HeaderMap::new(), "overloaded").retryable);
     }
 
     #[test]
@@ -407,8 +293,10 @@ mod tests {
             &HeaderMap::new(),
             "This model's maximum context length is 128000 tokens. However, your messages resulted in 130000 tokens.",
         );
-        assert!(e.context_overflow);
-        assert!(classify_http_error(413, &HeaderMap::new(), "").context_overflow);
+        assert!(e.context_overflow && !e.retryable);
+        let e = classify_http_error(413, &headers(&[("retry-after", "10")]), "");
+        assert!(e.context_overflow && !e.retryable);
+        assert_eq!(e.retry_after, None);
         // Throttling that mentions tokens is not overflow.
         let e = classify_http_error(
             429,
@@ -423,20 +311,29 @@ mod tests {
     }
 
     #[test]
-    fn quota_not_retryable() {
+    fn quota_and_billing_are_retryable() {
         let e = classify_http_error(
             429,
-            &HeaderMap::new(),
+            &headers(&[("retry-after", "15")]),
             r#"{"error":{"code":"insufficient_quota"}}"#,
         );
-        assert!(!e.retryable);
-        assert!(!classify_http_error(402, &HeaderMap::new(), "").retryable);
+        assert!(e.retryable && !e.context_overflow);
+        assert_eq!(e.retry_after, Some(Duration::from_secs(15)));
+        let e = classify_http_error(402, &HeaderMap::new(), "billing limit reached");
+        assert!(e.retryable && !e.context_overflow);
     }
 
     #[test]
-    fn should_retry_header_wins() {
-        let e = classify_http_error(500, &headers(&[("x-should-retry", "false")]), "");
-        assert!(!e.retryable);
+    fn should_retry_false_header_is_ignored() {
+        let e = classify_http_error(
+            500,
+            &headers(&[("x-should-retry", "false"), ("retry-after", "5")]),
+            "",
+        );
+        assert!(e.retryable);
+        assert_eq!(e.retry_after, Some(Duration::from_secs(5)));
+        let e = classify_http_error(400, &headers(&[("x-should-retry", "false")]), "");
+        assert!(e.retryable);
         let e = classify_http_error(400, &headers(&[("x-should-retry", "true")]), "");
         assert!(e.retryable);
     }
@@ -503,13 +400,15 @@ mod tests {
         );
         assert!(e.context_overflow && !e.retryable);
         assert!(
-            !stream_error(
+            stream_error(
                 Some("insufficient_quota"),
                 "You exceeded your current quota"
             )
             .retryable
         );
-        assert!(!stream_error(Some("invalid_request_error"), "bad tool schema").retryable);
+        assert!(stream_error(Some("billing_error"), "Billing hard limit").retryable);
+        assert!(stream_error(Some("invalid_request_error"), "bad tool schema").retryable);
+        assert!(stream_error(Some("authentication_error"), "invalid key").retryable);
         assert!(stream_error(None, "something broke").retryable);
     }
 }

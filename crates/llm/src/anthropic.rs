@@ -533,7 +533,7 @@ fn push_merged(out: &mut Vec<Value>, role: &str, content: Vec<Value>) {
 fn content_index(ev: &Value) -> Result<u64, LlmError> {
     ev.get("index")
         .and_then(Value::as_u64)
-        .ok_or_else(|| LlmError::fatal("anthropic stream: content block event missing index"))
+        .ok_or_else(|| LlmError::transient("anthropic stream: content block event missing index"))
 }
 
 #[derive(Debug, Default)]

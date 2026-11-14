@@ -315,7 +315,7 @@ async fn fail_ends_with_an_error() {
     rig.prompt("fail");
     rig.run(true).await;
     let error = rig.session.info().last_error.expect("last_error");
-    assert!(error.contains("Invalid API key"), "{error}");
+    assert!(error.contains("prompt is too long"), "{error}");
     rig.finish().await;
 }
 

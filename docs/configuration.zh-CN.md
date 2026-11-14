@@ -357,7 +357,7 @@ ref 在 `~/.config/opencode/`、`~/.config/ref/` 以及每个项目的 `.opencod
 "tui":    { "sidebar": true, "thinking": false, "details": false }
 ```
 
-- **`retry.max_delay`**（**ref**，默认 `600`）：可重试的 LLM 请求失败后会无限重试：HTTP 408、409、425、429 和 5xx、过载消息、网络错误和超时。等待时间从 2 秒开始，每次翻倍，直到这个上限；会遵守提供商返回的 `retry-after` 头。按 `esc esc` 停止重试。其他错误（例如 API 密钥无效）一共尝试三次，中间分别等待约 2 秒和 4 秒，然后结束本轮并显示错误。
+- **`retry.max_delay`**（**ref**，默认 `600`）：所有请求、流与网络错误（HTTP 4xx 与 5xx，包括 400、401、429 等，以及超时）都会无限重试。等待时间从 2 秒开始，每次翻倍，直到这个上限；会遵守提供商返回的 `retry-after` 头。按 `esc esc` 停止重试。只有本地配置/初始化失败，或上下文溢出在压缩后仍然超出限制时，才会立即停止并显示错误。
 - **`images.auto_resize`**（**ref**，默认 `true`）：来自 `read`、`webfetch` 的图片和粘贴的图片会被缩放并重新压缩到模型处理得好的尺寸。参见[工具](tools.zh-CN.md#图片)。
 - **`tui`**（**ref**）：三个 TUI 开关的初始状态：`sidebar`（默认显示）、`thinking`（展开推理内容，`ctrl+x t`）和 `details`（展开工具调用，`ctrl+x d`）。
 

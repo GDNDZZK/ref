@@ -177,7 +177,7 @@ async fn final_error_notifies_and_is_kept_until_the_next_run() {
         }
     }))
     .await;
-    let (hub, work) = hub(config(&m.url), "error");
+    let (hub, work) = hub_with(config(&m.url), "error", |opts| opts.retry_limit = Some(3));
     let s = titled_session(&hub, &work).await;
     let conn = connect(&hub, &ALL);
 
@@ -254,7 +254,9 @@ async fn a_final_error_after_the_user_stopped_the_run_sends_nothing() {
             Reply::Status(400, r#"{"error":{"message":"bad request"}}"#.into())
         }))
         .await;
-        let (hub, work) = hub(config(&m.url), "stopped-error");
+        let (hub, work) = hub_with(config(&m.url), "stopped-error", |opts| {
+            opts.retry_limit = Some(3);
+        });
         let s = titled_session(&hub, &work).await;
         let conn = connect(&hub, &ALL);
 
@@ -289,7 +291,7 @@ async fn closing_a_session_sends_nothing() {
 
 #[tokio::test]
 async fn a_queued_prompt_restarts_the_run_after_a_final_error() {
-    // The first request fails for good (three non-retryable answers), then all is well.
+    // The first request reaches the test retry limit, then all is well.
     let m = mock(Arc::new(|n, _| {
         if n < 3 {
             Reply::Status(400, r#"{"error":{"message":"bad request"}}"#.into())
@@ -302,6 +304,7 @@ async fn a_queued_prompt_restarts_the_run_after_a_final_error() {
     let cfg = config(&m.url);
     let (hub, work) = hub_with(cfg, "restart", |opts| {
         opts.retry_base = SLOW_RETRY_BASE;
+        opts.retry_limit = Some(3);
     });
     let s = titled_session(&hub, &work).await;
     let conn = connect(&hub, &ALL);
@@ -325,7 +328,9 @@ async fn a_custom_run_tells_clients_the_error_is_gone() {
         Reply::Status(400, r#"{"error":{"message":"bad request"}}"#.into())
     }))
     .await;
-    let (hub, work) = hub(config(&m.url), "custom-run");
+    let (hub, work) = hub_with(config(&m.url), "custom-run", |opts| {
+        opts.retry_limit = Some(3)
+    });
     let s = titled_session(&hub, &work).await;
     prompt(&hub, &s, "go");
     wait_idle(&s).await;

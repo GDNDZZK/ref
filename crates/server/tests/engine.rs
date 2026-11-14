@@ -382,17 +382,59 @@ async fn retry_on_500_then_success() {
 }
 
 #[tokio::test]
-async fn non_retryable_error_fails_after_three_attempts() {
-    let (m, hub, _, s) = run_turn(
-        Arc::new(|_, _| Reply::Status(400, r#"{"error":{"message":"bad request"}}"#.into())),
-        "fail",
-    )
+async fn retry_limit_stops_after_three_attempts() {
+    let m = mock(Arc::new(|_, _| {
+        Reply::Status(400, r#"{"error":{"message":"bad request"}}"#.into())
+    }))
     .await;
+    let (hub, work) = hub_with(config(&m.url), "fail", |opts| opts.retry_limit = Some(3));
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "go");
     wait_idle(&s).await;
     assert_eq!(m.count(), 3);
     let last = messages(&s).last().unwrap().clone();
     assert!(last.error.unwrap().contains("bad request"));
+}
+
+#[tokio::test]
+async fn quota_400_and_401_retry_past_three_attempts_without_limit() {
+    let cases = [
+        (
+            "429-quota",
+            Reply::StatusWithHeaders(
+                429,
+                vec![("retry-after".into(), "0.02".into())],
+                r#"{"error":{"code":"insufficient_quota","message":"You exceeded your current quota"}}"#.into(),
+            ),
+        ),
+        (
+            "400-bad",
+            Reply::Status(400, r#"{"error":{"message":"bad request"}}"#.into()),
+        ),
+        (
+            "401-auth",
+            Reply::Status(401, r#"{"error":{"message":"invalid api key"}}"#.into()),
+        ),
+    ];
+    for (tag, err_reply) in cases {
+        let m = mock(Arc::new(move |n, _| {
+            if n < 4 {
+                err_reply.clone()
+            } else {
+                Reply::Text(format!("recovered-{tag}"))
+            }
+        }))
+        .await;
+        let (hub, work) = hub(config(&m.url), tag);
+        assert_eq!(hub.opts.retry_limit, None);
+        let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
+        prompt(&hub, &s, "go");
+        wait_idle(&s).await;
+        assert_eq!(last_text(&s), format!("recovered-{tag}"), "{tag}");
+        assert_eq!(m.count(), 5, "{tag}");
+        assert!(s.info().last_error.is_none(), "{tag}");
+        assert_eq!(messages(&s).len(), 2, "{tag}");
+    }
 }
 
 #[test]
