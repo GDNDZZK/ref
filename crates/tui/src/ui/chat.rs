@@ -195,7 +195,7 @@ impl ChatState {
     /// Drops the held space after a re-wrap: row counts of the old width mean nothing now.
     /// Removed messages do not release it: a retry removes the unfinished assistant message,
     /// which is exactly the shrinking that the hold absorbs.
-    fn release_hold(&mut self) {
+    pub(crate) fn release_hold(&mut self) {
         self.hold = Hold {
             was_busy: self.hold.was_busy,
             was_following: self.hold.was_following,
@@ -412,8 +412,9 @@ impl ChatState {
             set.insert(part);
         }
         self.sel = None;
-        // The re-layout isn't new content: no "new messages" pill.
+        // The re-layout isn't new content: no "new messages" pill, and no held blank rows.
         self.last_total = 0;
+        self.release_hold();
     }
 
     pub fn show_all(&mut self, msg: &str, part: usize) {
@@ -423,6 +424,7 @@ impl ChatState {
             .insert(part);
         self.sel = None;
         self.last_total = 0;
+        self.release_hold();
     }
 }
 
@@ -1149,5 +1151,17 @@ mod hold_tests {
         assert_eq!(chat.hold.space, 0);
         set_total(&mut chat, 44, true);
         assert_eq!(chat.hold.space, 2);
+    }
+
+    #[test]
+    fn toggling_card_releases_held_space() {
+        let mut chat = mid_turn(20);
+        chat.toggle("m1", 0);
+        set_total(&mut chat, 35, true);
+        assert_eq!(chat.hold.space, 0);
+        chat.toggle("m1", 0);
+        set_total(&mut chat, 20, true);
+        assert_eq!(chat.hold.space, 0);
+        assert_eq!(chat.top(), 10);
     }
 }

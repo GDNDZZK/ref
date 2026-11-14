@@ -16,6 +16,8 @@ use crate::util::ABORTED_ERROR;
 
 /// Max output lines shown in an expanded tool block before "show all".
 const OUTPUT_PREVIEW_LINES: usize = 200;
+/// Max diff lines shown in a collapsed `write`/`edit` preview before `… N more`.
+const DIFF_PREVIEW_LINES: usize = 8;
 
 pub struct Ctx<'a> {
     pub agents: &'a [AgentInfo],
@@ -1040,9 +1042,13 @@ fn render_tool(m: &Message, idx: usize, t: &ToolCall<'_>, cx: &Ctx<'_>, w: usize
     let out_text = t.output.map(text::sanitize).unwrap_or_default();
     if !expanded {
         rows.extend(error_preview(t, &out_text, w));
+        if t.name == "question" && t.state == ToolState::Done {
+            rows.extend(question_summary_rows(t, w, &hit));
+        } else if matches!(t.name, "write" | "edit") {
+            rows.extend(diff_preview_rows(t, w, &hit, cx.compact));
+        }
         return rows;
     }
-
     let block = ToolBlock::new(&m.id, idx, cx.shows_full_output(idx), w);
     let mut block_rows = vec![block.section("input", true)];
     block_rows.extend(block.input_rows(t));
@@ -1203,6 +1209,180 @@ fn error_preview(t: &ToolCall<'_>, out_text: &str, w: usize) -> Option<Row> {
         ),
     ]);
     Some(Row::new(l).skip(4))
+}
+
+/// Question tool (Done + `meta.answers`): compact `header = answer` rows under the collapsed header.
+fn question_summary_rows(t: &ToolCall<'_>, w: usize, hit: &Hit) -> Vec<Row> {
+    let Some(answers) = t
+        .meta
+        .and_then(|x| x.get("answers"))
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+    let Some(questions) = t.input.get("questions").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let iw = w.saturating_sub(2).max(1);
+    let mut rows = Vec::new();
+    for (i, q) in questions.iter().enumerate() {
+        let header = q
+            .get("header")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                q.get("question")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+            });
+        let Some(header) = header else { continue };
+        let chosen: Vec<&str> = answers
+            .get(i)
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let answered = !chosen.is_empty();
+        let ans_text = if answered {
+            chosen.join(", ")
+        } else {
+            "(not answered)".to_string()
+        };
+        let spans = vec![
+            Span::styled(format!("{} = ", text::one_line(header)), theme::muted()),
+            Span::styled(
+                text::one_line(&ans_text),
+                if answered {
+                    theme::text()
+                } else {
+                    theme::fg(theme::WARNING)
+                },
+            ),
+        ];
+        for (li, wl) in text::wrap_spans(&spans, iw).into_iter().enumerate() {
+            rows.push(
+                Row::new(wl)
+                    .soft(li > 0)
+                    .hit(hit.clone())
+                    .indent(vec![Span::raw("  ")]),
+            );
+        }
+    }
+    rows
+}
+
+/// Collapsed `write`/`edit` preview: +/- counts, first `DIFF_PREVIEW_LINES` diff rows, `… N more`,
+/// and any `meta.warnings` underneath.
+fn diff_preview_rows(t: &ToolCall<'_>, w: usize, hit: &Hit, compact: bool) -> Vec<Row> {
+    let iw = w.saturating_sub(2).max(MIN_BLOCK_INNER_WIDTH);
+    let mut rows = Vec::new();
+    if let Some(diff) = t
+        .meta
+        .and_then(|x| x.get("diff"))
+        .and_then(Value::as_str)
+        .filter(|d| !d.trim().is_empty())
+    {
+        let (added, removed) = diff_counts(t.meta, diff);
+        let mut hdr = Vec::new();
+        if compact {
+            let path = t
+                .meta
+                .and_then(|x| x.get("path"))
+                .and_then(Value::as_str)
+                .or_else(|| t.input.get("path").and_then(Value::as_str));
+            if let Some(p) = path.filter(|p| !p.is_empty()) {
+                let max_p = iw.saturating_sub(14);
+                hdr.push(Span::styled(
+                    format!("{}  ", text::truncate(&text::one_line(p), max_p)),
+                    theme::muted(),
+                ));
+            }
+        }
+        hdr.push(Span::styled(
+            format!("+{added}"),
+            theme::fg(theme::DIFF_ADDED),
+        ));
+        hdr.push(Span::raw(" "));
+        hdr.push(Span::styled(
+            format!("-{removed}"),
+            theme::fg(theme::DIFF_REMOVED),
+        ));
+        rows.push(
+            Row::new(Line::from(hdr))
+                .decor()
+                .hit(hit.clone())
+                .indent(vec![Span::raw("  ")]),
+        );
+        let (styled, hidden) = styled_diff_lines(diff, iw, Some(DIFF_PREVIEW_LINES));
+        for (spans, soft) in styled {
+            rows.push(
+                Row::new(Line::from(spans))
+                    .soft(soft)
+                    .hit(hit.clone())
+                    .indent(vec![Span::raw("  ")]),
+            );
+        }
+        if hidden > 0 {
+            let marker = format!("{} {hidden} more", text::ELLIPSIS);
+            rows.push(
+                Row::new(Line::from(Span::styled(marker, theme::fg(theme::WARNING))))
+                    .decor()
+                    .hit(hit.clone())
+                    .indent(vec![Span::raw("  ")]),
+            );
+        }
+    }
+    if let Some(warnings) = t
+        .meta
+        .and_then(|x| x.get("warnings"))
+        .and_then(Value::as_array)
+    {
+        for w_text in warnings
+            .iter()
+            .filter_map(Value::as_str)
+            .map(text::sanitize)
+            .filter(|s| !s.is_empty())
+        {
+            for (i, wl) in text::wrap_spans(&[Span::styled(w_text, theme::fg(theme::WARNING))], iw)
+                .into_iter()
+                .enumerate()
+            {
+                rows.push(
+                    Row::new(wl)
+                        .soft(i > 0)
+                        .hit(hit.clone())
+                        .indent(vec![Span::raw("  ")]),
+                );
+            }
+        }
+    }
+    rows
+}
+
+fn diff_counts(meta: Option<&Value>, diff: &str) -> (u64, u64) {
+    if let (Some(a), Some(r)) = (
+        meta.and_then(|x| x.get("added")).and_then(Value::as_u64),
+        meta.and_then(|x| x.get("removed")).and_then(Value::as_u64),
+    ) {
+        return (a, r);
+    }
+    let mut added = 0u64;
+    let mut removed = 0u64;
+    for l in diff.lines() {
+        if l.starts_with('+') && !l.starts_with("+++") {
+            added += 1;
+        } else if l.starts_with('-') && !l.starts_with("---") {
+            removed += 1;
+        }
+    }
+    (added, removed)
 }
 
 /// Layout of the expanded block of a tool call. Every row is exactly `bw` columns wide so the
