@@ -46,13 +46,14 @@ ref-web [DIR] [选项]
 | `DIR` | 新会话的目录（默认：当前目录）。 |
 | `--port N` | 监听端口（1–65535）。不设置时：在 10000–65535 中随机选一个空闲端口，并先试上次使用的端口，所以地址保持不变。 |
 | `--host ADDR` | 监听地址（默认 `127.0.0.1`）。其他地址会向网络开放 `ref-web`，且没有 TLS；此时会打印警告。 |
+| `--key KEY` | 浏览器登录用的密钥，至少 16 个字符，不写入磁盘。也可以通过环境变量 `REF_WEB_KEY` 给出，这样它不会出现在进程列表中。默认使用登录 token。见[登录](web.zh-CN.md#登录)。 |
 | `--no-open` | 不打开浏览器。 |
 | `--server ws://host:port` | 连接指定的后端，而不是查找或启动后端。 |
-| `--token T` | `--server` 的 token。必须与 `--server` 一起使用。 |
+| `--token T` | `--server` 所指后端的 token（不是浏览器的密钥，见 `--key`）。必须与 `--server` 一起使用。 |
 | `--mock` | 使用私有的假后端（开发用）。不能与 `--server` 同时使用。 |
 | `-V`, `--version`, `-h`, `--help` | 版本和帮助。 |
 
-不带 `--server` 时，`ref-web` 查找后端的方式与 `ref` 相同。浏览器的登录 token 保存在 `<state 目录>/web/login-token`。
+不带 `--server` 时，`ref-web` 查找后端的方式与 `ref` 相同。不带 `--key` 时，浏览器的密钥是保存在 `<state 目录>/web/login-token` 中的登录 token。
 
 ## `ref-server`
 
@@ -100,12 +101,13 @@ ref --server ws://127.0.0.1:7777 --token <token>
 | `~/.local/state/ref/instances/<pid>.json` | 每个运行中的后端一个文件：端口、令牌和设置。只有你自己可读（权限 600）。 |
 | `~/.local/state/ref/prompt-history.jsonl` | 提示历史（500 条），`ref` 和 `ref-gui` 共用。 |
 | `~/.local/state/ref/gui.json` | `ref-gui` 的设置（[设置](gui.zh-CN.md#设置)）。 |
-| `~/.local/state/ref/web/login-token` | `ref-web` 的登录 token，仅你本人可读（权限 600）。在 `ref-web` 停止时删除它即可换新 token。 |
+| `~/.local/state/ref/web/login-token` | `ref-web` 的登录 token，即默认密钥，仅你本人可读（权限 600）。在 `ref-web` 停止时删除它即可换新 token。 |
+| `~/.local/state/ref/web/salt` | 密钥的 salt（16 个随机字节的十六进制，不是秘密；权限 600）。浏览器保存由密钥和 salt 推导出的值；换了 salt，浏览器会重新询问密钥。 |
 | `~/.local/state/ref/web/port` | `ref-web` 上次使用的端口；未指定 `--port` 时先试它。 |
 | `~/.local/state/ref/web/instances/<pid>.json` | 每个运行中的 `ref-web` 一个文件：端口、host、版本、启动时间。不含密钥，权限 600。 |
 | `~/.local/state/ref/logs/` | 后端日志，包括配置警告。 |
 
-在 Windows 上，`~` 指 `%USERPROFILE%`。
+在 Windows 上，`~` 指 `%USERPROFILE%`。权限（600，目录为 700）只在 Unix 上设置；在 Windows 上，这些文件依靠用户配置文件目录的访问权限。
 
 ## 环境变量
 
@@ -116,6 +118,7 @@ ref --server ws://127.0.0.1:7777 --token <token>
 | `OPENCODE_CONFIG_DIR` | 用这个目录代替 `~/.config/opencode`。 |
 | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` | 代替 `~/.config`、`~/.local/share` 和 `~/.local/state`。 |
 | `REF_DATA_DIR`, `REF_STATE_DIR` | 直接代替数据目录和状态目录（`…/share/ref` 和 `…/state/ref`）。 |
+| `REF_WEB_KEY` | `ref-web` 的 `--key`：浏览器登录用的密钥（至少 16 个字符）。 |
 | `REF_LOG` | 后端日志过滤器，使用 `tracing` 语法（默认 `info`；例如 `debug` 或 `ref_llm=trace`）。 |
 | `REF_DUMP_REQUESTS=DIR` | 把每个 LLM 请求体写入 `DIR`（包含 API 密钥的请求头永远不会写入）。 |
 | `REF_TUI_LOG=FILE` | 把 TUI 的输入调试日志写入 `FILE`。 |
