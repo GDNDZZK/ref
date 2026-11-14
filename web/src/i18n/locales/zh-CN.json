@@ -51,6 +51,7 @@
   },
   "tool": {
     "input": "输入",
+    "preview": "预览",
     "allow": "允许",
     "allowSession": "本会话都允许",
     "deny": "拒绝",
