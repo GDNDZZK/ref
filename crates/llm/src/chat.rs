@@ -7,8 +7,8 @@ use crate::util::{
     Assembler, CLIENT_OPTION_KEYS, DEFAULT_OPENAI_BASE, IMAGE_OMITTED, NO_TOOL_OUTPUT,
     SEE_ATTACHED_IMAGE, StreamEnd, StreamState, arguments_string, bearer_header, build_headers,
     data_url, drive, endpoint, error_fields, has_tool_history, is_official_openai,
-    json_sse_headers, merge_key, normalize_call_id, normalize_history, parse_arguments,
-    prompt_cache_key, ptr_u64, same_origin, session_headers, snake_keys,
+    json_sse_headers, merge_key, normalize_call_id, normalize_history, prompt_cache_key, ptr_u64,
+    same_origin, session_headers, snake_keys,
 };
 use crate::{
     AssistantBlock, BlockKind, ChatMessage, LlmError, Model, Provider, Request, Response,
@@ -338,14 +338,11 @@ fn assistant_message(
                 name,
                 arguments,
                 ..
-            } => {
-                parse_arguments(arguments)?;
-                tool_calls.push(json!({
-                    "id": normalize_call_id(id, MAX_CALL_ID),
-                    "type": "function",
-                    "function": {"name": name, "arguments": arguments_string(arguments)},
-                }));
-            }
+            } => tool_calls.push(json!({
+                "id": normalize_call_id(id, MAX_CALL_ID),
+                "type": "function",
+                "function": {"name": name, "arguments": arguments_string(arguments)},
+            })),
         }
     }
     if text.trim().is_empty() && tool_calls.is_empty() {
