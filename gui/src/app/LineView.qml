@@ -19,7 +19,8 @@ Item {
 
 	signal showAllRequested()
 
-	readonly property int previewLines: 200
+	property int previewLines: 200
+	property string moreText: qsTr("Show %n more line(s)", "", hiddenRows)
 	readonly property int rowHeight: 18
 	readonly property int gutterGap: 12
 	readonly property int signWidth: 16
@@ -135,7 +136,7 @@ Item {
 		id: more
 		y: scroller.height
 		visible: view.hiddenRows > 0
-		text: qsTr("Show %n more line(s)", "", view.hiddenRows)
+		text: view.moreText
 		onClicked: view.showAllRequested()
 	}
 

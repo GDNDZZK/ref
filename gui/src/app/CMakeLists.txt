@@ -130,6 +130,7 @@ qt_add_qml_module(ref-gui
 		FindBody.qml
 		WebfetchBody.qml
 		SessionBody.qml
+		QuestionBody.qml
 		TodoBody.qml
 		TodoList.qml
 		TodoProgress.qml
