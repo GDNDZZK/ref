@@ -3,19 +3,17 @@
 mod common;
 
 use common::*;
-use futures_util::SinkExt as _;
-use tokio_tungstenite::tungstenite::Message;
 
 const HELLO: &str = r#"{"id":1,"op":"hello","client":"ref-web-test","version":2,"cwd":"/tmp"}"#;
 const MARKER_SESSION: &str = "tab-one-marker";
 
 /// Sends Hello and returns the response and the live session names of the Sessions frame.
-async fn hello(ws: &mut Ws) -> (serde_json::Value, Vec<String>) {
-    ws.send(Message::text(HELLO)).await.unwrap();
+async fn hello(ws: &mut Channel) -> (serde_json::Value, Vec<String>) {
+    ws.send_text(HELLO).await;
     let mut response = None;
     let mut sessions = None;
     while response.is_none() || sessions.is_none() {
-        let frame: serde_json::Value = serde_json::from_str(&next_text(ws).await).unwrap();
+        let frame: serde_json::Value = serde_json::from_str(&ws.next_text().await).unwrap();
         match frame["kind"].as_str() {
             Some("response") if frame["id"] == 1 => response = Some(frame),
             Some("sessions") => {
@@ -33,11 +31,11 @@ async fn hello(ws: &mut Ws) -> (serde_json::Value, Vec<String>) {
     (response.unwrap(), sessions.unwrap())
 }
 
-async fn create_session(ws: &mut Ws, name: &str) {
+async fn create_session(ws: &mut Channel, name: &str) {
     let request = format!(r#"{{"id":2,"op":"create_session","cwd":"/tmp","name":"{name}"}}"#);
-    ws.send(Message::text(request)).await.unwrap();
+    ws.send_text(&request).await;
     loop {
-        let frame: serde_json::Value = serde_json::from_str(&next_text(ws).await).unwrap();
+        let frame: serde_json::Value = serde_json::from_str(&ws.next_text().await).unwrap();
         if frame["id"] == 2 {
             assert_eq!(frame["ok"], true, "{frame}");
             return;
@@ -50,10 +48,8 @@ async fn mock_mode_serves_tabs_from_a_private_backend() {
     require_ref_server();
     let env = Env::new("mock");
     let web = env.start(&["--mock"]).await;
-    let info: serde_json::Value = web.get("/api/info").await.json().await.unwrap();
-    assert_eq!(info["mock"], true);
-
-    let mut ws = web.ws().await;
+    let mut ws = web.channel().await;
+    assert_eq!(ws.info["mock"], true, "frame 0 says so");
     let (response, _) = hello(&mut ws).await;
     assert_eq!(response["ok"], true, "{response}");
     assert_eq!(response["result"]["protocol"], ref_proto::PROTOCOL_VERSION);
@@ -68,7 +64,7 @@ async fn a_mock_that_exited_is_started_again_for_the_next_tab() {
     let env = Env::new("mock-restart");
     let web = env.start(&["--mock"]).await;
 
-    let mut first_tab = web.ws().await;
+    let mut first_tab = web.channel().await;
     hello(&mut first_tab).await;
     create_session(&mut first_tab, MARKER_SESSION).await;
     let first_mock = child_pids(web.pid());
@@ -82,7 +78,7 @@ async fn a_mock_that_exited_is_started_again_for_the_next_tab() {
     drop(first_tab);
     wait_until("the first mock to exit", || process_gone(first_mock[0])).await;
 
-    let mut second_tab = web.ws().await;
+    let mut second_tab = web.channel().await;
     let (response, sessions) = hello(&mut second_tab).await;
     assert_eq!(response["ok"], true, "{response}");
     assert!(
@@ -103,7 +99,7 @@ async fn the_mock_does_not_outlive_ref_web() {
     require_ref_server();
     let env = Env::new("mock-orphan");
     let mut web = env.start(&["--mock"]).await;
-    let mut tab = web.ws().await;
+    let mut tab = web.channel().await;
     hello(&mut tab).await;
     let mock = child_pids(web.pid());
     assert_eq!(mock.len(), 1, "{mock:?}");
@@ -119,7 +115,7 @@ async fn without_an_explicit_server_ref_web_starts_the_backend_beside_it() {
     require_ref_server();
     let env = Env::new("auto");
     let web = env.start(&[]).await;
-    let mut tab = web.ws().await;
+    let mut tab = web.channel().await;
     let (response, _) = hello(&mut tab).await;
     assert_eq!(response["ok"], true, "{response}");
     // The shared backend announces itself in the state directory (ours is private).
@@ -149,7 +145,7 @@ async fn stopping_ref_web_stops_the_mock_and_removes_its_directory() {
     require_ref_server();
     let env = Env::new("mock-cleanup");
     let mut web = env.start(&["--mock"]).await;
-    let mut tab = web.ws().await;
+    let mut tab = web.channel().await;
     hello(&mut tab).await;
     let mock_dirs = |env: &Env| {
         std::fs::read_dir(env.tmp_dir())

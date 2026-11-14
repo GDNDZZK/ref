@@ -1,32 +1,30 @@
-//! HTTP routes: login, ping, info and the embedded frontend.
+//! HTTP routes: the ping, the WebSocket and the embedded frontend.
 
+use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Json;
 use axum::Router;
-use axum::extract::{Query, State};
-use axum::http::header::{
-    ACCEPT_ENCODING, CACHE_CONTROL, CONTENT_ENCODING, CONTENT_TYPE, LOCATION, REFERRER_POLICY,
-    SET_COOKIE, VARY,
-};
+use axum::extract::{ConnectInfo, Query, State};
+use axum::http::header::{ACCEPT_ENCODING, CACHE_CONTROL, CONTENT_ENCODING, CONTENT_TYPE, VARY};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri};
 use axum::middleware;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde::{Deserialize, Serialize};
+use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use crate::assets::{self, Asset};
-use crate::guard::{self, HostPolicy, SessionCookie, constant_time_eq, text_response};
-use crate::launch;
+use crate::guard::{self, HostPolicy, text_response};
+use crate::key::Key;
 use crate::ping;
 use crate::tunnel;
 use crate::upstream::Upstream;
 
-pub const LOGIN_PATH: &str = "/login";
 pub const PING_PATH: &str = "/api/ping";
-const INFO_PATH: &str = "/api/info";
 const WS_PATH: &str = "/ws";
 const API_PREFIX: &str = "/api/";
 const INDEX_PATH: &str = "/index.html";
@@ -34,15 +32,16 @@ const HASHED_ASSETS_PREFIX: &str = "/assets/";
 pub const APP_NAME: &str = "ref-web";
 const IMMUTABLE: &str = "public, max-age=31536000, immutable";
 const REVALIDATE: &str = "no-cache";
-const NO_STORE: &str = "no-store";
 /// Content codings (RFC 9110), as negotiated and as sent in `Content-Encoding`.
 const BROTLI: &str = "br";
 const GZIP: &str = "gzip";
 
 pub struct AppState {
-    /// What `/login?token=` must present.
-    pub login_token: String,
-    pub session: SessionCookie,
+    /// What a browser must prove it knows before the tunnel opens.
+    pub key: Key,
+    /// Tunnels that have not finished the key handshake yet (bounded, see `tunnel`).
+    pub handshakes: Arc<Semaphore>,
+    pub handshake_timeout: Duration,
     pub hosts: HostPolicy,
     /// Directory new sessions start in ([DIR]).
     pub cwd: String,
@@ -56,9 +55,7 @@ pub struct AppState {
 
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
-        .route(LOGIN_PATH, get(login))
         .route(PING_PATH, get(ping))
-        .route(INFO_PATH, get(info))
         .route(WS_PATH, get(tunnel::ws_handler))
         .fallback(get(static_file))
         .layer(middleware::from_fn_with_state(state.clone(), guard::guard))
@@ -66,33 +63,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-#[derive(Deserialize)]
-struct LoginQuery {
-    token: Option<String>,
-    /// Directory the page should open sessions in; handed on to the page as `?dir=`.
-    dir: Option<String>,
-}
-
-/// Trades the login token for the session cookie and redirects to a URL without the token.
-async fn login(State(state): State<Arc<AppState>>, Query(query): Query<LoginQuery>) -> Response {
-    let token_ok = query
-        .token
-        .as_deref()
-        .is_some_and(|t| constant_time_eq(t.as_bytes(), state.login_token.as_bytes()));
-    if !token_ok {
-        return text_response(StatusCode::FORBIDDEN, "Forbidden: invalid login token\n");
-    }
-    let location = launch::page_path(query.dir.as_deref());
-    (
-        StatusCode::SEE_OTHER,
-        [
-            (LOCATION, location),
-            (SET_COOKIE, state.session.set_cookie()),
-            (CACHE_CONTROL, NO_STORE.to_string()),
-            (REFERRER_POLICY, "no-referrer".to_string()),
-        ],
-    )
-        .into_response()
+fn is_local_caller(peer: &SocketAddr) -> bool {
+    peer.ip().to_canonical().is_loopback()
 }
 
 #[derive(Deserialize)]
@@ -104,12 +76,20 @@ struct PingQuery {
 struct Ping {
     app: &'static str,
     version: &'static str,
-    /// HMAC of the caller's nonce, keyed with the login token.
+    /// HMAC of the caller's nonce, keyed with the key (see `ping`).
     proof: String,
 }
 
-/// Lets a second ref-web recognise this one (see `ping`).
-async fn ping(State(state): State<Arc<AppState>>, Query(query): Query<PingQuery>) -> Response {
+/// Lets a second ref-web recognise this one (see `ping`). A remote host gets no (nonce, proof)
+/// pairs to collect: it is refused.
+async fn ping(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Query(query): Query<PingQuery>,
+) -> Response {
+    if !is_local_caller(&peer) {
+        return text_response(StatusCode::FORBIDDEN, "Forbidden: local callers only\n");
+    }
     let Some(nonce) = query.nonce.filter(|n| ping::is_valid_nonce(n)) else {
         return text_response(
             StatusCode::BAD_REQUEST,
@@ -119,25 +99,9 @@ async fn ping(State(state): State<Arc<AppState>>, Query(query): Query<PingQuery>
     Json(Ping {
         app: APP_NAME,
         version: env!("CARGO_PKG_VERSION"),
-        proof: ping::proof(&state.login_token, &nonce),
+        proof: ping::proof(state.key.root(), &nonce),
     })
     .into_response()
-}
-
-#[derive(Serialize)]
-struct Info {
-    version: &'static str,
-    cwd: String,
-    mock: bool,
-}
-
-async fn info(State(state): State<Arc<AppState>>) -> Response {
-    let info = Info {
-        version: env!("CARGO_PKG_VERSION"),
-        cwd: state.cwd.clone(),
-        mock: state.upstream.is_mock(),
-    };
-    ([(CACHE_CONTROL, NO_STORE)], Json(info)).into_response()
 }
 
 /// Serves an embedded file. Paths without a file extension that match no file are page
@@ -226,6 +190,26 @@ mod tests {
         assert!(!accepts_encoding(&accept("br;q=0, gzip"), "br"));
         assert!(!accepts_encoding(&accept("identity"), "gzip"));
         assert!(!accepts_encoding(&HeaderMap::new(), "br"));
+    }
+
+    #[test]
+    fn only_loopback_peers_may_ping() {
+        for local in [
+            "127.0.0.1:1",
+            "[::1]:1",
+            "[::ffff:127.0.0.1]:1",
+            "127.9.9.9:1",
+        ] {
+            assert!(is_local_caller(&local.parse().unwrap()), "{local}");
+        }
+        for remote in [
+            "192.168.1.5:1",
+            "[fe80::1]:1",
+            "[::ffff:10.0.0.1]:1",
+            "8.8.8.8:1",
+        ] {
+            assert!(!is_local_caller(&remote.parse().unwrap()), "{remote}");
+        }
     }
 
     #[test]

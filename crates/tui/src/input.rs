@@ -11,7 +11,7 @@ use ref_proto::ImageData;
 use crate::app::{ARMED_KEY_TIMEOUT, App, COMMANDS, Mode};
 use crate::render;
 use crate::ui::dialog::{Dialog, Kind, PAGE_ROWS};
-use crate::ui::editor::{Editor, MIN_PROMPT_WIDTH};
+use crate::ui::editor::{Editor, MIN_EDITOR_COLS};
 use crate::ui::permission::PermissionAction;
 use crate::ui::question::Outcome;
 use crate::ui::{Hit, chat, split, theme};
@@ -357,7 +357,7 @@ fn single_row_editor_without_selection(app: &App) -> bool {
     app.editor.selection().is_none()
         && app
             .editor
-            .height(app.editor.last_width.max(MIN_PROMPT_WIDTH))
+            .height(app.editor.last_width.max(MIN_EDITOR_COLS))
             <= 1
 }
 

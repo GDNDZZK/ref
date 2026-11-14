@@ -5,8 +5,9 @@ import { computed, ref, shallowRef } from 'vue'
 import { RefApi } from '../net/api.ts'
 import { RefConnection, protocolOf } from '../net/connection.ts'
 import type { ConnectionState, EventFrame, HelloResult } from '../net/connection.ts'
-import { loginRequired } from '../net/login.ts'
-import { webSocketTransport } from '../net/transport.ts'
+import { channelTransport } from '../net/channel.ts'
+import { keys } from '../net/keystore.ts'
+import { directServerUrl, webSocket, webSocketTransport } from '../net/transport.ts'
 import { PROTOCOL_VERSION } from '../proto/generated'
 import type { ServerConfigInfo } from '../proto/generated'
 import { useNoticesStore } from './notices.ts'
@@ -24,6 +25,7 @@ export const useConnectionStore = defineStore('connection', () => {
   const protocol = computed(() => protocolOf(hello.value))
   const backendTooOld = computed(() => hello.value !== undefined && protocol.value < PROTOCOL_VERSION)
   const fatal = ref<string>() // i18n key of an error that stops the app before it connects
+  const keyRequired = ref(false) // ref-web needs a key we do not have: the key-entry page shows
   const reconnected = ref(0) // counts the times the connection came back after a loss
 
   const frameListeners = new Set<(frame: EventFrame) => void>()
@@ -32,20 +34,38 @@ export const useConnectionStore = defineStore('connection', () => {
   let api: RefApi | undefined
   let opened = false
 
-  // ref-web forgets the browser's login when it restarts: reconnecting would be refused for good.
-  async function giveUpWithoutLogin(): Promise<boolean> {
-    if (!(await loginRequired())) return false
-    fatal.value = 'connection.notLoggedIn'
+  let address: { url: string; cwd: string | undefined } | undefined
+  let keyOutcome: ((accepted: boolean) => void) | undefined
+
+  function settleKey(accepted: boolean): void {
+    keyOutcome?.(accepted)
+    keyOutcome = undefined
+  }
+
+  // A refused key is refused again: stop retrying and ask for a key.
+  async function giveUpWithoutKey(): Promise<boolean> {
+    if (!keys.required) return false
+    keyRequired.value = true
+    settleKey(false)
     return true
   }
 
-  function start(url: string, cwd: string): void {
+  // `cwd`: the directory new sessions start in; ref-web's own is used when there is none.
+  function start(url: string, cwd?: string): void {
+    address = { url, cwd }
+    // A dev build talks to a ref-server directly: no key, no channel.
+    const direct = directServerUrl() !== undefined
+    if (!direct && !keys.hasKey()) {
+      keys.required = true
+      keyRequired.value = true
+      return
+    }
     const created = new RefConnection({
-      connect: webSocketTransport(url),
+      connect: direct ? webSocketTransport(url) : channelTransport(webSocket(url), keys),
       client: CLIENT_NAME,
       cwd,
       notifyKinds: () => settings.notifyKinds,
-      giveUp: giveUpWithoutLogin,
+      giveUp: giveUpWithoutKey,
     })
     connection = created
     api = new RefApi(created)
@@ -54,6 +74,8 @@ export const useConnectionStore = defineStore('connection', () => {
       state.value = next
       detail.value = why
       if (next !== 'open') return
+      keyRequired.value = false
+      settleKey(true)
       hello.value = created.hello
       const isReconnect = opened
       opened = true
@@ -65,6 +87,18 @@ export const useConnectionStore = defineStore('connection', () => {
     })
     created.onError((error) => notices.pushError(error))
     created.open()
+  }
+
+  // The key-entry page: signs in with the typed key. True when ref-web accepted it.
+  function submitKey(key: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      if (!address) return resolve(false)
+      keys.setKey(key)
+      settleKey(false)
+      keyOutcome = resolve
+      connection?.close()
+      start(address.url, address.cwd)
+    })
   }
 
   async function loadConfig(): Promise<void> {
@@ -103,7 +137,9 @@ export const useConnectionStore = defineStore('connection', () => {
     backendTooOld,
     reconnected,
     fatal,
+    keyRequired,
     start,
+    submitKey,
     stop,
     loadConfig,
     getApi,

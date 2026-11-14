@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { errors } from 'playwright-core'
 import { INPUT, OUT, SEND_BUSY, SEND_IDLE, WAIT_MS, sendPrompt, withMockPage } from './smokeLib.mjs'
 import {
-  loginLostScenario,
+  keyRotatedScenario,
   shellScenario,
   sidebarSizingScenario,
   splitComposerScenario,
@@ -178,7 +178,7 @@ const passed = await withMockPage(async (page, problems, { restartServer }) => {
   await splitFocusScenario(page, problems)
   await sidebarTodoScenario(page, problems)
   await sidebarSizingScenario(page, problems)
-  await loginLostScenario(page, problems, restartServer)
+  await keyRotatedScenario(page, problems, restartServer)
 })
 console.log(passed ? `smoke passed, screenshots in ${OUT}` : 'smoke found problems')
 process.exit(passed ? 0 : 1)
