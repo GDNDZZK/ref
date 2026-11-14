@@ -134,11 +134,15 @@ pub(crate) fn ptr_u64(v: &Value, pointer: &str) -> Option<u64> {
     opt_u64(v.pointer(pointer))
 }
 
-/// Parse tool-call arguments into a JSON object (`{}` when invalid / not an object).
-pub(crate) fn parse_arguments(arguments: &str) -> Value {
+/// Parse tool-call arguments into a JSON object (`{}` when empty).
+pub(crate) fn parse_arguments(arguments: &str) -> Result<Value, LlmError> {
+    if arguments.trim().is_empty() {
+        return Ok(Value::Object(Map::new()));
+    }
     match serde_json::from_str::<Value>(arguments) {
-        Ok(v @ Value::Object(_)) => v,
-        _ => Value::Object(Map::new()),
+        Ok(v @ Value::Object(_)) => Ok(v),
+        Ok(_) => Err(LlmError::fatal("tool call arguments must be a JSON object")),
+        Err(e) => Err(LlmError::fatal(format!("invalid tool call arguments: {e}"))),
     }
 }
 
@@ -868,5 +872,20 @@ mod tests {
             matches!(&out[2], ChatMessage::ToolResult { call_id, is_error: true, .. } if call_id == "b")
         );
         assert!(matches!(&out[3], ChatMessage::User(_)));
+    }
+    #[test]
+    fn parse_arguments_validation() {
+        assert_eq!(parse_arguments("").unwrap(), serde_json::json!({}));
+        assert_eq!(parse_arguments("   ").unwrap(), serde_json::json!({}));
+        assert_eq!(
+            parse_arguments(r#"{"path":"a.rs"}"#).unwrap(),
+            serde_json::json!({"path": "a.rs"})
+        );
+        let bad_json = parse_arguments("not json").unwrap_err();
+        assert!(bad_json.message.contains("invalid tool call arguments"));
+        assert!(!bad_json.retryable);
+        let non_obj = parse_arguments("[1]").unwrap_err();
+        assert!(non_obj.message.contains("JSON object"));
+        assert!(!non_obj.retryable);
     }
 }

@@ -25,7 +25,7 @@ fn body_with_replay_tools_and_images() {
         Some(json!({"item": reasoning_item()})),
         Some(json!({"id": "fc_9"})),
     );
-    let body = build_body(&p, &m, &req);
+    let body = build_body(&p, &m, &req).unwrap();
 
     assert_eq!(body["instructions"], "You are a coding agent.\n\ncwd: /tmp");
     assert_eq!(body["store"], false);
@@ -89,7 +89,7 @@ fn foreign_reasoning_and_item_ids_are_dropped() {
         Some(json!({"item": reasoning_item()})),
         Some(json!({"id": "fc_9"})),
     );
-    let body = build_body(&p, &m, &req);
+    let body = build_body(&p, &m, &req).unwrap();
     let input = body["input"].as_array().unwrap();
     assert!(input.iter().all(|i| i["type"] != "reasoning"));
     let call = input.iter().find(|i| i["type"] == "function_call").unwrap();
@@ -107,7 +107,7 @@ fn explicit_store_and_include_and_passthrough() {
         json!({"store": true, "include": ["x"], "maxToolCalls": 3, "metadata": {"fooBar": 1}}),
     );
     m.reasoning = false;
-    let body = build_body(&p, &m, &conversation(("a", "b"), None, None));
+    let body = build_body(&p, &m, &conversation(("a", "b"), None, None)).unwrap();
     assert_eq!(body["store"], true);
     assert_eq!(body["include"], json!(["x"]));
     assert_eq!(body["max_tool_calls"], 3);
@@ -115,7 +115,7 @@ fn explicit_store_and_include_and_passthrough() {
 
     let mut m = model("gpt-4.1", json!({}));
     m.reasoning = false;
-    let body = build_body(&p, &m, &conversation(("a", "b"), None, None));
+    let body = build_body(&p, &m, &conversation(("a", "b"), None, None)).unwrap();
     assert!(body.get("include").is_none());
 }
 
@@ -252,4 +252,34 @@ fn headers() {
     assert_eq!(h["authorization"], "Bearer sk-test");
     assert_eq!(h["session_id"], "ses_123");
     assert_eq!(h["x-session-affinity"], "ses_123");
+}
+
+#[test]
+fn tool_arguments_validation_and_empty_object() {
+    let p = openai();
+    let m = model("gpt-5.5", json!({}));
+    let mut empty_req = conversation(("openai", "gpt-5.5"), None, None);
+    if let ChatMessage::Assistant { blocks, .. } = &mut empty_req.messages[1]
+        && let AssistantBlock::ToolCall { arguments, .. } = &mut blocks[2]
+    {
+        *arguments = "".into();
+    }
+    let body = build_body(&p, &m, &empty_req).unwrap();
+    let call = body["input"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["type"] == "function_call")
+        .unwrap();
+    assert_eq!(call["arguments"], "{}");
+    for bad in ["not json", "[1]"] {
+        let mut req = conversation(("openai", "gpt-5.5"), None, None);
+        if let ChatMessage::Assistant { blocks, .. } = &mut req.messages[1]
+            && let AssistantBlock::ToolCall { arguments, .. } = &mut blocks[2]
+        {
+            *arguments = bad.into();
+        }
+        let err = build_body(&p, &m, &req).unwrap_err();
+        assert!(!err.retryable);
+    }
 }

@@ -44,7 +44,7 @@ pub(crate) async fn stream(
     cancel: &CancellationToken,
     on_event: &mut (dyn FnMut(StreamEvent) + Send),
 ) -> Result<Response, LlmError> {
-    let body = build_body(provider, model, req);
+    let body = build_body(provider, model, req)?;
     let url = endpoint(&provider.base_url, DEFAULT_ANTHROPIC_BASE, "messages");
     let headers = request_headers(provider, req);
     drive(
@@ -250,7 +250,11 @@ fn fit_budget(model: &Model, budget: u64, max_tokens: &mut u64) -> u64 {
     budget
 }
 
-pub(crate) fn build_body(provider: &Provider, model: &Model, req: &Request) -> Value {
+pub(crate) fn build_body(
+    provider: &Provider,
+    model: &Model,
+    req: &Request,
+) -> Result<Value, LlmError> {
     let opts = &model.options;
     let mut max_tokens = if model.output > 0 {
         model.output
@@ -279,7 +283,7 @@ pub(crate) fn build_body(provider: &Provider, model: &Model, req: &Request) -> V
 
     body.insert(
         "messages".into(),
-        Value::Array(convert_messages(provider, model, req)),
+        Value::Array(convert_messages(provider, model, req)?),
     );
 
     if !req.tools.is_empty() {
@@ -353,14 +357,18 @@ pub(crate) fn build_body(provider: &Provider, model: &Model, req: &Request) -> V
             deep_merge(&mut body, overlay);
         }
     }
-    body
+    Ok(body)
 }
 
 fn image_block(img: &ImageData) -> Value {
     json!({"type": "image", "source": {"type": "base64", "media_type": img.mime, "data": img.data}})
 }
 
-fn convert_messages(provider: &Provider, model: &Model, req: &Request) -> Vec<Value> {
+fn convert_messages(
+    provider: &Provider,
+    model: &Model,
+    req: &Request,
+) -> Result<Vec<Value>, LlmError> {
     let mut out: Vec<Value> = Vec::new();
     for msg in normalize_history(&req.messages) {
         match &msg {
@@ -380,7 +388,7 @@ fn convert_messages(provider: &Provider, model: &Model, req: &Request) -> Vec<Va
             }
             ChatMessage::Assistant { blocks, origin } => {
                 let replay = same_origin(origin, provider, model);
-                push_merged(&mut out, "assistant", assistant_content(blocks, replay));
+                push_merged(&mut out, "assistant", assistant_content(blocks, replay)?);
             }
             ChatMessage::ToolResult {
                 call_id,
@@ -415,11 +423,11 @@ fn convert_messages(provider: &Provider, model: &Model, req: &Request) -> Vec<Va
             placed += 1;
         }
     }
-    out
+    Ok(out)
 }
 
 /// Wire blocks of an assistant message. Reasoning is replayed only for `replay`.
-fn assistant_content(blocks: &[AssistantBlock], replay: bool) -> Vec<Value> {
+fn assistant_content(blocks: &[AssistantBlock], replay: bool) -> Result<Vec<Value>, LlmError> {
     let mut content = Vec::new();
     for block in blocks {
         match block {
@@ -445,11 +453,11 @@ fn assistant_content(blocks: &[AssistantBlock], replay: bool) -> Vec<Value> {
                 "type": "tool_use",
                 "id": normalize_call_id(id, MAX_TOOL_ID),
                 "name": name,
-                "input": parse_arguments(arguments),
+                "input": parse_arguments(arguments)?,
             })),
         }
     }
-    content
+    Ok(content)
 }
 
 /// A `redacted_thinking` or signed `thinking` block; reasoning without either is dropped.

@@ -41,7 +41,7 @@ fn body_conversion_and_cache_breakpoints() {
         Some(json!({"signature": "SIG"})),
         None,
     );
-    let body = build_body(&p, &m, &req);
+    let body = build_body(&p, &m, &req).unwrap();
 
     assert_eq!(body["max_tokens"], 8192);
     assert_eq!(body["stream"], true);
@@ -99,7 +99,7 @@ fn foreign_thinking_dropped_and_ids_sanitized() {
         && let AssistantBlock::ToolCall { id, arguments, .. } = &mut blocks[2]
     {
         *id = "call_x|fc_y".into();
-        *arguments = "not json".into();
+        *arguments = "".into();
     }
     if let ChatMessage::ToolResult {
         call_id, is_error, ..
@@ -108,7 +108,7 @@ fn foreign_thinking_dropped_and_ids_sanitized() {
         *call_id = "call_x|fc_y".into();
         *is_error = true;
     }
-    let body = build_body(&p, &m, &req);
+    let body = build_body(&p, &m, &req).unwrap();
     let msgs = body["messages"].as_array().unwrap();
     let asst = msgs[1]["content"].as_array().unwrap();
     assert!(asst.iter().all(|b| b["type"] != "thinking"));
@@ -133,7 +133,7 @@ fn redacted_thinking_replay() {
         Some(json!({"redacted": "OPAQUE"})),
         None,
     );
-    let body = build_body(&p, &m, &req);
+    let body = build_body(&p, &m, &req).unwrap();
     assert_eq!(
         body["messages"][1]["content"][0],
         json!({"type": "redacted_thinking", "data": "OPAQUE"})
@@ -149,7 +149,7 @@ fn budget_thinking() {
     );
     m.output = 64_000;
     m.temperature = Some(0.5);
-    let body = build_body(&p, &m, &conversation(("a", "b"), None, None));
+    let body = build_body(&p, &m, &conversation(("a", "b"), None, None)).unwrap();
     assert_eq!(
         body["thinking"],
         json!({"type": "enabled", "budget_tokens": 16000})
@@ -163,7 +163,7 @@ fn budget_thinking() {
         .as_object()
         .cloned()
         .unwrap();
-    let body = build_body(&p, &m, &conversation(("a", "b"), None, None));
+    let body = build_body(&p, &m, &conversation(("a", "b"), None, None)).unwrap();
     assert_eq!(body["thinking"]["budget_tokens"], 40000);
     assert_eq!(body["max_tokens"], 44096);
 
@@ -172,13 +172,13 @@ fn budget_thinking() {
         .as_object()
         .cloned()
         .unwrap();
-    let body = build_body(&p, &m, &conversation(("a", "b"), None, None));
+    let body = build_body(&p, &m, &conversation(("a", "b"), None, None)).unwrap();
     assert_eq!(body["thinking"]["budget_tokens"], 1024);
 
     // Effort on an older model maps to a budget.
     let mut m = model("claude-sonnet-4-5", json!({"reasoningEffort": "medium"}));
     m.output = 0;
-    let body = build_body(&p, &m, &conversation(("a", "b"), None, None));
+    let body = build_body(&p, &m, &conversation(("a", "b"), None, None)).unwrap();
     assert_eq!(
         body["thinking"],
         json!({"type": "enabled", "budget_tokens": 8192})
@@ -188,7 +188,7 @@ fn budget_thinking() {
 
     // Budget >= the model's output limit: split the limit instead of exceeding it.
     m.output = 8192;
-    let body = build_body(&p, &m, &conversation(("a", "b"), None, None));
+    let body = build_body(&p, &m, &conversation(("a", "b"), None, None)).unwrap();
     assert_eq!(body["thinking"]["budget_tokens"], 4096);
     assert_eq!(body["max_tokens"], 8192);
 }
@@ -198,13 +198,13 @@ fn adaptive_thinking() {
     let p = anthropic();
     let mut m = model("claude-opus-4-6", json!({"reasoningEffort": "xhigh"}));
     m.temperature = Some(0.3);
-    let body = build_body(&p, &m, &conversation(("a", "b"), None, None));
+    let body = build_body(&p, &m, &conversation(("a", "b"), None, None)).unwrap();
     assert_eq!(body["thinking"], json!({"type": "adaptive"}));
     assert_eq!(body["output_config"], json!({"effort": "high"}));
     assert!(body.get("temperature").is_none());
 
     let m = model("claude-opus-5.5", json!({"reasoningEffort": "xhigh"}));
-    let body = build_body(&p, &m, &conversation(("a", "b"), None, None));
+    let body = build_body(&p, &m, &conversation(("a", "b"), None, None)).unwrap();
     assert_eq!(
         body["thinking"],
         json!({"type": "adaptive", "display": "summarized"})
@@ -212,7 +212,7 @@ fn adaptive_thinking() {
     assert_eq!(body["output_config"], json!({"effort": "xhigh"}));
 
     let m = model("claude-sonnet-4.7", json!({"effort": "minimal"}));
-    let body = build_body(&p, &m, &conversation(("a", "b"), None, None));
+    let body = build_body(&p, &m, &conversation(("a", "b"), None, None)).unwrap();
     assert_eq!(body["output_config"]["effort"], "low");
 
     // opencode variant style.
@@ -220,7 +220,7 @@ fn adaptive_thinking() {
         "claude-opus-4-7",
         json!({"thinking": {"type": "adaptive", "display": "summarized"}, "effort": "max"}),
     );
-    let body = build_body(&p, &m, &conversation(("a", "b"), None, None));
+    let body = build_body(&p, &m, &conversation(("a", "b"), None, None)).unwrap();
     assert_eq!(
         body["thinking"],
         json!({"type": "adaptive", "display": "summarized"})
@@ -229,13 +229,13 @@ fn adaptive_thinking() {
 
     // Unknown ids (e.g. Anthropic-compatible hosts) default to adaptive.
     let m = model("some-model", json!({"reasoningEffort": "high"}));
-    let body = build_body(&p, &m, &conversation(("a", "b"), None, None));
+    let body = build_body(&p, &m, &conversation(("a", "b"), None, None)).unwrap();
     assert_eq!(body["thinking"]["type"], "adaptive");
 
     // No options: provider default (thinking off), temperature allowed.
     let mut m = model("claude-sonnet-4-5", json!({}));
     m.temperature = Some(0.3);
-    let body = build_body(&p, &m, &conversation(("a", "b"), None, None));
+    let body = build_body(&p, &m, &conversation(("a", "b"), None, None)).unwrap();
     assert!(body.get("thinking").is_none());
     assert_eq!(body["temperature"], 0.3);
 }
@@ -370,4 +370,20 @@ fn stream_errors() {
         .unwrap_err();
     assert!(err.retryable);
     assert!(err.message.contains("stream ended unexpectedly"));
+}
+
+#[test]
+fn invalid_tool_arguments_are_rejected() {
+    let p = anthropic();
+    let m = model("claude-sonnet-4-5", json!({}));
+    for bad in ["not json", "[1]"] {
+        let mut req = conversation(("anthropic", "claude-sonnet-4-5"), None, None);
+        if let ChatMessage::Assistant { blocks, .. } = &mut req.messages[1]
+            && let AssistantBlock::ToolCall { arguments, .. } = &mut blocks[2]
+        {
+            *arguments = bad.into();
+        }
+        let err = build_body(&p, &m, &req).unwrap_err();
+        assert!(!err.retryable);
+    }
 }

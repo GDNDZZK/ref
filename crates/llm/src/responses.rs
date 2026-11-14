@@ -7,8 +7,8 @@ use crate::util::{
     Assembler, CLIENT_OPTION_KEYS, DEFAULT_OPENAI_BASE, IMAGE_OMITTED, NO_TOOL_OUTPUT, StreamEnd,
     StreamState, arguments_string, bearer_header, build_headers, camel_to_snake, data_url,
     deep_merge, drive, endpoint, error_fields, json_sse_headers, merge_key, normalize_call_id,
-    normalize_history, opt_str, prompt_cache_key, ptr_u64, same_origin, session_headers,
-    snake_keys,
+    normalize_history, opt_str, parse_arguments, prompt_cache_key, ptr_u64, same_origin,
+    session_headers, snake_keys,
 };
 use crate::{
     AssistantBlock, BlockKind, ChatMessage, LlmError, Model, Provider, Request, Response,
@@ -32,7 +32,7 @@ pub(crate) async fn stream(
     cancel: &CancellationToken,
     on_event: &mut (dyn FnMut(StreamEvent) + Send),
 ) -> Result<Response, LlmError> {
-    let body = build_body(provider, model, req);
+    let body = build_body(provider, model, req)?;
     let url = endpoint(&provider.base_url, DEFAULT_OPENAI_BASE, "responses");
     let headers = request_headers(provider, req);
     drive(
@@ -57,7 +57,11 @@ fn request_headers(provider: &Provider, req: &Request) -> reqwest::header::Heade
     build_headers(provider, defaults, &[])
 }
 
-pub(crate) fn build_body(provider: &Provider, model: &Model, req: &Request) -> Value {
+pub(crate) fn build_body(
+    provider: &Provider,
+    model: &Model,
+    req: &Request,
+) -> Result<Value, LlmError> {
     let opts = &model.options;
     let store = opts.get("store").and_then(Value::as_bool).unwrap_or(false);
 
@@ -74,7 +78,7 @@ pub(crate) fn build_body(provider: &Provider, model: &Model, req: &Request) -> V
     }
     body.insert(
         "input".into(),
-        Value::Array(convert_input(provider, model, req)),
+        Value::Array(convert_input(provider, model, req)?),
     );
     if !req.tools.is_empty() {
         let tools: Vec<Value> = req
@@ -162,7 +166,7 @@ pub(crate) fn build_body(provider: &Provider, model: &Model, req: &Request) -> V
     for overlay in &overlays {
         deep_merge(&mut body, overlay);
     }
-    body
+    Ok(body)
 }
 
 fn input_image(model: &Model, img: &ImageData) -> Value {
@@ -173,7 +177,11 @@ fn input_image(model: &Model, img: &ImageData) -> Value {
     }
 }
 
-fn convert_input(provider: &Provider, model: &Model, req: &Request) -> Vec<Value> {
+fn convert_input(
+    provider: &Provider,
+    model: &Model,
+    req: &Request,
+) -> Result<Vec<Value>, LlmError> {
     let mut out = Vec::new();
     for msg in normalize_history(&req.messages) {
         match &msg {
@@ -192,7 +200,7 @@ fn convert_input(provider: &Provider, model: &Model, req: &Request) -> Vec<Value
             }
             ChatMessage::Assistant { blocks, origin } => {
                 let replay = same_origin(origin, provider, model);
-                out.extend(assistant_items(blocks, replay));
+                out.extend(assistant_items(blocks, replay)?);
             }
             ChatMessage::ToolResult {
                 call_id,
@@ -202,12 +210,12 @@ fn convert_input(provider: &Provider, model: &Model, req: &Request) -> Vec<Value
             } => out.push(tool_result_item(model, call_id, content, images)),
         }
     }
-    out
+    Ok(out)
 }
 
 /// Input items of an assistant message. Reasoning items and `fc_` ids are replayed only for
 /// `replay`: encrypted reasoning round-trips to the model that produced it.
-fn assistant_items(blocks: &[AssistantBlock], replay: bool) -> Vec<Value> {
+fn assistant_items(blocks: &[AssistantBlock], replay: bool) -> Result<Vec<Value>, LlmError> {
     let mut out = Vec::new();
     for block in blocks {
         match block {
@@ -234,6 +242,7 @@ fn assistant_items(blocks: &[AssistantBlock], replay: bool) -> Vec<Value> {
                 arguments,
                 provider_data,
             } => {
+                parse_arguments(arguments)?;
                 let mut item = Map::new();
                 item.insert("type".into(), json!("function_call"));
                 let item_id = provider_data
@@ -252,7 +261,7 @@ fn assistant_items(blocks: &[AssistantBlock], replay: bool) -> Vec<Value> {
             }
         }
     }
-    out
+    Ok(out)
 }
 
 fn tool_result_item(model: &Model, call_id: &str, content: &str, images: &[ImageData]) -> Value {
