@@ -71,7 +71,7 @@ fn is_local_caller(peer: &SocketAddr) -> bool {
 
 /// Peer address extracted from any `Listener<Addr = SocketAddr>` (plain TCP or TLS).
 #[derive(Clone, Copy)]
-pub struct ClientAddr(pub SocketAddr);
+pub struct ClientAddr(SocketAddr);
 
 impl Connected<IncomingStream<'_, tokio::net::TcpListener>> for ClientAddr {
     fn connect_info(stream: IncomingStream<'_, tokio::net::TcpListener>) -> Self {

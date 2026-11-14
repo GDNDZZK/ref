@@ -19,13 +19,13 @@ use sha2::{Digest as _, Sha256};
 
 /// Colon-separated uppercase SHA-256 hex digest of a DER certificate (the form browsers show).
 pub fn cert_fingerprint(der: &[u8]) -> String {
+    use std::fmt::Write as _;
     let digest = Sha256::digest(der);
     let mut out = String::with_capacity(digest.len() * 3);
     for (i, byte) in digest.iter().enumerate() {
         if i > 0 {
             out.push(':');
         }
-        use std::fmt::Write as _;
         let _ = write!(out, "{byte:02X}");
     }
     out
