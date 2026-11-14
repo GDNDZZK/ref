@@ -314,28 +314,20 @@ fn reasoning_field_alias_and_tool_without_index() {
 }
 
 #[test]
-fn tool_arguments_validation_and_empty_object() {
+fn tool_arguments_empty_and_raw_replay() {
     let p = deepseek();
     let m = model("deepseek-v4-pro", json!({}));
-    let mut empty_req = conversation(("deepseek", "deepseek-v4-pro"), None, None);
-    if let ChatMessage::Assistant { blocks, .. } = &mut empty_req.messages[1]
-        && let AssistantBlock::ToolCall { arguments, .. } = &mut blocks[2]
-    {
-        *arguments = "".into();
-    }
-    let body = build_body(&p, &m, &empty_req).unwrap();
-    assert_eq!(
-        body["messages"][2]["tool_calls"][0]["function"]["arguments"],
-        "{}"
-    );
-    for bad in ["not json", "[1]"] {
+    for (raw, expected) in [("", "{}"), ("{not json", "{not json")] {
         let mut req = conversation(("deepseek", "deepseek-v4-pro"), None, None);
         if let ChatMessage::Assistant { blocks, .. } = &mut req.messages[1]
             && let AssistantBlock::ToolCall { arguments, .. } = &mut blocks[2]
         {
-            *arguments = bad.into();
+            *arguments = raw.into();
         }
-        let err = build_body(&p, &m, &req).unwrap_err();
-        assert!(!err.retryable);
+        let body = build_body(&p, &m, &req).unwrap();
+        assert_eq!(
+            body["messages"][2]["tool_calls"][0]["function"]["arguments"],
+            expected
+        );
     }
 }

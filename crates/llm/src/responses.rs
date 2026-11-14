@@ -7,8 +7,8 @@ use crate::util::{
     Assembler, CLIENT_OPTION_KEYS, DEFAULT_OPENAI_BASE, IMAGE_OMITTED, NO_TOOL_OUTPUT, StreamEnd,
     StreamState, arguments_string, bearer_header, build_headers, camel_to_snake, data_url,
     deep_merge, drive, endpoint, error_fields, json_sse_headers, merge_key, normalize_call_id,
-    normalize_history, opt_str, parse_arguments, prompt_cache_key, ptr_u64, same_origin,
-    session_headers, snake_keys,
+    normalize_history, opt_str, prompt_cache_key, ptr_u64, same_origin, session_headers,
+    snake_keys,
 };
 use crate::{
     AssistantBlock, BlockKind, ChatMessage, LlmError, Model, Provider, Request, Response,
@@ -242,7 +242,6 @@ fn assistant_items(blocks: &[AssistantBlock], replay: bool) -> Result<Vec<Value>
                 arguments,
                 provider_data,
             } => {
-                parse_arguments(arguments)?;
                 let mut item = Map::new();
                 item.insert("type".into(), json!("function_call"));
                 let item_id = provider_data

@@ -255,32 +255,24 @@ fn headers() {
 }
 
 #[test]
-fn tool_arguments_validation_and_empty_object() {
+fn tool_arguments_empty_and_raw_replay() {
     let p = openai();
     let m = model("gpt-5.5", json!({}));
-    let mut empty_req = conversation(("openai", "gpt-5.5"), None, None);
-    if let ChatMessage::Assistant { blocks, .. } = &mut empty_req.messages[1]
-        && let AssistantBlock::ToolCall { arguments, .. } = &mut blocks[2]
-    {
-        *arguments = "".into();
-    }
-    let body = build_body(&p, &m, &empty_req).unwrap();
-    let call = body["input"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|i| i["type"] == "function_call")
-        .unwrap();
-    assert_eq!(call["arguments"], "{}");
-    for bad in ["not json", "[1]"] {
+    for (raw, expected) in [("", "{}"), ("{not json", "{not json")] {
         let mut req = conversation(("openai", "gpt-5.5"), None, None);
         if let ChatMessage::Assistant { blocks, .. } = &mut req.messages[1]
             && let AssistantBlock::ToolCall { arguments, .. } = &mut blocks[2]
         {
-            *arguments = bad.into();
+            *arguments = raw.into();
         }
-        let err = build_body(&p, &m, &req).unwrap_err();
-        assert!(!err.retryable);
+        let body = build_body(&p, &m, &req).unwrap();
+        let call = body["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["type"] == "function_call")
+            .unwrap();
+        assert_eq!(call["arguments"], expected);
     }
 }
 
