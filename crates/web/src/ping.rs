@@ -3,14 +3,17 @@
 //! the key can answer with its HMAC. Without that check, the address (with the key) would be
 //! opened on whatever listens there. Only loopback peers get an answer (`routes::ping`).
 
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 
 use serde::Deserialize;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use tokio::net::{TcpSocket, TcpStream};
 
 use crate::channel::{self, Root};
 use crate::guard::constant_time_eq;
 use crate::key::Key;
+use crate::launch;
 use crate::routes::PING_PATH;
 use crate::token;
 
@@ -37,11 +40,12 @@ struct PingBody {
     proof: String,
 }
 
-/// True when a ref-web that shares our key answers on `host:port`.
+/// True when a ref-web that shares our key answers on `host:port`. Always probes from a loopback
+/// source address so `routes::ping` accepts the probe even when the instance bound a LAN IP.
 pub async fn is_our_ref_web(host: &str, port: u16, key: &Key) -> bool {
     let nonce = token::random_hex();
     let probe = async {
-        let mut stream = tokio::net::TcpStream::connect(format!("{host}:{port}")).await?;
+        let mut stream = connect_via_loopback(host, port).await?;
         let request = format!(
             "GET {PING_PATH}?{NONCE_PARAM}={nonce} HTTP/1.1\r\nHost: {host}:{port}\r\n\
              Connection: close\r\n\r\n"
@@ -63,6 +67,43 @@ pub async fn is_our_ref_web(host: &str, port: u16, key: &Key) -> bool {
     };
     body.app == crate::routes::APP_NAME
         && constant_time_eq(body.proof.as_bytes(), proof(key.root(), &nonce).as_bytes())
+}
+
+async fn connect_via_loopback(host: &str, port: u16) -> std::io::Result<TcpStream> {
+    let bare = launch::bare_host(host);
+    let mut last_err = None;
+    for addr in tokio::net::lookup_host((bare, port)).await? {
+        let res = if addr.ip().is_loopback() {
+            TcpStream::connect(addr).await
+        } else {
+            connect_bound_loopback(addr).await
+        };
+        match res {
+            Ok(stream) => return Ok(stream),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(last_err.unwrap_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::AddrNotAvailable,
+            "no addresses resolved",
+        )
+    }))
+}
+
+async fn connect_bound_loopback(target: SocketAddr) -> std::io::Result<TcpStream> {
+    let (socket, bind_addr) = match target {
+        SocketAddr::V4(_) => (
+            TcpSocket::new_v4()?,
+            SocketAddr::from((IpAddr::V4(Ipv4Addr::LOCALHOST), 0)),
+        ),
+        SocketAddr::V6(_) => (
+            TcpSocket::new_v6()?,
+            SocketAddr::from((IpAddr::V6(Ipv6Addr::LOCALHOST), 0)),
+        ),
+    };
+    socket.bind(bind_addr)?;
+    socket.connect(target).await
 }
 
 #[cfg(test)]

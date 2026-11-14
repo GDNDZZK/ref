@@ -120,3 +120,52 @@ async fn a_second_start_with_another_port_starts_its_own_instance() {
     assert_eq!(second.port, free);
     assert_ne!(second.pid(), first.pid());
 }
+
+#[tokio::test]
+async fn a_second_start_recognises_a_non_loopback_instance_and_keeps_its_host_in_the_url() {
+    let Some(lan_ip) = std::net::UdpSocket::bind(("0.0.0.0", 0))
+        .ok()
+        .and_then(|s| {
+            s.connect(("192.0.2.1", 9)).ok()?;
+            let ip = s.local_addr().ok()?.ip();
+            (!ip.is_unspecified() && !ip.is_loopback()).then_some(ip.to_string())
+        })
+    else {
+        return;
+    };
+    let env = Env::new("lan-second");
+    let first = env
+        .start(&["--host", &lan_ip, "--server", NO_BACKEND])
+        .await;
+    let port = first.port.to_string();
+
+    let second = env.run(&["--no-open", "--server", NO_BACKEND]);
+    assert!(second.status.success(), "{second:?}");
+    let out = stdout_of(&second);
+    assert!(
+        out.contains(&format!("already running on port {port}")),
+        "{out}"
+    );
+    assert!(out.contains(&format!("://{lan_ip}:{port}/")), "{out}");
+    let records = std::fs::read_dir(env.state_dir().join("web/instances"))
+        .unwrap()
+        .count();
+    assert_eq!(records, 1, "no second instance was started");
+
+    let other = env.run(&[
+        "--no-open",
+        "--port",
+        &port,
+        "--key",
+        "a different key of enough length",
+    ]);
+    assert!(!other.status.success());
+    let err = String::from_utf8_lossy(&other.stderr);
+    assert!(
+        err.contains(&format!(
+            "a ref-web with a different key is running on port {port} (pid {})",
+            first.pid()
+        )),
+        "{err}"
+    );
+}

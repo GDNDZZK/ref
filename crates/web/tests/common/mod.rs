@@ -135,6 +135,7 @@ impl Env {
             .unwrap();
         let mut web = Web {
             child,
+            host: LOOPBACK.to_string(),
             port: 0,
             key: String::new(),
             http: reqwest::Client::builder()
@@ -143,7 +144,13 @@ impl Env {
                 .build()
                 .unwrap(),
         };
-        web.port = web.wait_for_record(&self.state_dir()).await?;
+        let (port, host) = web.wait_for_record(&self.state_dir()).await?;
+        web.port = port;
+        web.host = match host.as_str() {
+            "0.0.0.0" => LOOPBACK.to_string(),
+            "::" => "::1".to_string(),
+            _ => host,
+        };
         web.wait_until_listening().await?;
         web.key = match args.iter().position(|a| *a == "--key") {
             Some(i) => args[i + 1].to_string(),
@@ -155,6 +162,7 @@ impl Env {
 
 pub struct Web {
     child: Child,
+    pub host: String,
     pub port: u16,
     /// The key the page signs in with: `--key`, or the login token.
     pub key: String,
@@ -187,11 +195,11 @@ impl Web {
         self.child.wait().unwrap();
     }
 
-    /// The port ref-web chose, from its instance record (written once it has bound).
+    /// The port and host ref-web chose, from its instance record (written once it has bound).
     async fn wait_for_record(
         &mut self,
         state_dir: &std::path::Path,
-    ) -> Result<u16, std::process::ExitStatus> {
+    ) -> Result<(u16, String), std::process::ExitStatus> {
         let record = state_dir.join(format!("web/instances/{}.json", self.child.id()));
         poll_until(
             "ref-web to record its port",
@@ -203,7 +211,9 @@ impl Web {
                 }
                 let text = std::fs::read_to_string(&record).ok()?;
                 let record: serde_json::Value = serde_json::from_str(&text).ok()?;
-                Some(Ok(record["port"].as_u64()? as u16))
+                let port = record["port"].as_u64()? as u16;
+                let host = record["host"].as_str()?.to_string();
+                Some(Ok((port, host)))
             },
         )
         .await
@@ -214,7 +224,7 @@ impl Web {
             if let Some(status) = self.child.try_wait().unwrap() {
                 return Some(Err(status));
             }
-            tokio::net::TcpStream::connect((LOOPBACK, self.port))
+            tokio::net::TcpStream::connect((self.host.as_str(), self.port))
                 .await
                 .is_ok()
                 .then_some(Ok(()))
