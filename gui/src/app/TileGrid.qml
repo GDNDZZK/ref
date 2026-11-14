@@ -21,8 +21,8 @@ Item {
 	readonly property int fit: Math.max(1, Math.floor((width - 2 * padding + gap) / (Theme.tileMinWidth + gap)))
 	readonly property int columns: Math.max(1, Math.min(Math.ceil(Math.sqrt(count)), fit))
 	readonly property int rows: Math.ceil(count / columns)
-	readonly property real tileHeight: Math.max(Theme.tileMinHeight, (height - contentTop - padding - (rows - 1) * gap) / rows)
-	readonly property real gridHeight: contentTop + padding + rows * tileHeight + (rows - 1) * gap
+	readonly property real tileHeight: rows === 0 ? 0 : Math.max(Theme.tileMinHeight, (height - contentTop - padding - (rows - 1) * gap) / rows)
+	readonly property real gridHeight: rows === 0 ? 0 : contentTop + padding + rows * tileHeight + (rows - 1) * gap
 
 	clip: true
 
@@ -52,8 +52,16 @@ Item {
 			if ((repeater.itemAt(i) as Tile).focused)
 				from = repeater.itemAt(i) as Tile
 		}
-		if (from === null)
+		if (from === null) {
+			for (let i = 0; i < repeater.count; ++i) {
+				const tile = repeater.itemAt(i) as Tile
+				if (!tile.leaving) {
+					Workspace.focusTile(tile.sessionId)
+					return
+				}
+			}
 			return
+		}
 		const crossWeight = 2
 		let best = null
 		let bestCost = Infinity
@@ -85,16 +93,28 @@ Item {
 
 		ScrollBar.vertical: ThemedScrollBar {}
 
+		NumberAnimation {
+			id: zoomScroll
+			target: flick
+			property: "contentY"
+			to: 0
+			duration: Motion.slow
+			easing.type: Motion.ease
+		}
+
 		Connections {
 			target: Workspace
 			function onZoomedChanged() {
 				if (grid.zoomed)
-					flick.contentY = 0
+					zoomScroll.restart()
+				else
+					zoomScroll.stop()
 			}
-			// The tile that grows back to the whole area starts from the top.
 			function onSplitViewChanged() {
-				if (!Workspace.splitView)
+				if (Workspace.splitView) {
+					zoomScroll.stop()
 					flick.contentY = 0
+				}
 			}
 		}
 
@@ -106,7 +126,7 @@ Item {
 				id: tile
 
 				readonly property int row: Math.floor(place / grid.columns)
-				readonly property int inRow: row === grid.rows - 1 ? grid.count - row * grid.columns : grid.columns
+				readonly property int inRow: Math.max(1, row === grid.rows - 1 ? grid.count - row * grid.columns : grid.columns)
 				readonly property real slotWidth: (grid.width - 2 * grid.padding - (inRow - 1) * grid.gap) / inRow
 
 				slot: Qt.rect(grid.padding + (place - row * grid.columns) * (slotWidth + grid.gap),
@@ -115,7 +135,20 @@ Item {
 				              grid.tileHeight)
 				anyZoomed: grid.zoomed
 				zoomRect: Qt.rect(0, 0, grid.width, grid.height)
-				takeover: Workspace.tileStage.opening && session === Workspace.current
+			}
+		}
+
+		TapHandler {
+			acceptedButtons: Qt.LeftButton
+			enabled: Workspace.focusedTileId !== "" && !grid.zoomed
+			onTapped: eventPoint => {
+				const p = flick.mapToItem(flick.contentItem, eventPoint.position)
+				for (let i = 0; i < repeater.count; ++i) {
+					const tile = repeater.itemAt(i) as Tile
+					if (!tile.leaving && p.x >= tile.x && p.x <= tile.x + tile.width && p.y >= tile.y && p.y <= tile.y + tile.height)
+						return
+				}
+				Workspace.focusTile("")
 			}
 		}
 	}
@@ -123,8 +156,10 @@ Item {
 	Column {
 		anchors.centerIn: parent
 		spacing: 12
-		visible: grid.count === 0 && Workspace.splitView && Workspace.current === null
+		opacity: grid.count === 0 && Workspace.splitView ? 1 : 0
+		visible: opacity > 0
 
+		Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 		Text {
 			textFormat: Text.PlainText
 			anchors.horizontalCenter: parent.horizontalCenter

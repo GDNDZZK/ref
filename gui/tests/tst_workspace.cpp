@@ -628,17 +628,23 @@ void TestWorkspace::splitViewWatchesAndComesBack()
 	f.workspace->toggleSplit();
 
 	QTRY_VERIFY(f.workspace->isSplitView());
-	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
 	QTRY_COMPARE(f.stub.requests(u"watch_all"_s).size(), 1);
 	QVERIFY(f.stub.requests(u"watch_all"_s).first().value(u"enabled"_s).toBool());
-	// The current session gave up the foreground; the other one is attached as a watcher.
-	QCOMPARE(f.stub.requests(u"detach"_s).first().value(u"session_id"_s).toString(), u"ses_a"_s);
+	// The foreground session stays hidden; the background session is attached as a watcher.
+	QVERIFY(f.workspace->current()->isForeground());
+	QCOMPARE(f.stub.requests(u"detach"_s).size(), 0);
 	QTRY_VERIFY(f.workspace->session(u"ses_b"_s)->isAttached());
 	QCOMPARE(f.stub.requests(u"attach"_s).last().value(u"session_id"_s).toString(), u"ses_b"_s);
 	QVERIFY(!f.stub.requests(u"attach"_s).last().value(u"foreground"_s).toBool());
-	QCOMPARE(f.workspace->focusedTileId(), u"ses_a"_s);
-	QCOMPARE(f.workspace->visibleSessionIds().size(), 2);
-	QCOMPARE(f.workspace->tileStage()->placed(), 2);
+	QCOMPARE(f.workspace->focusedTileId(), QString());
+	QCOMPARE(f.workspace->visibleSessionIds(), (QStringList{u"ses_b"_s}));
+	QCOMPARE(f.workspace->tileStage()->placed(), 1);
+
+	f.workspace->focusTile(u"ses_b"_s);
+	QCOMPARE(f.workspace->focusedTileId(), u"ses_b"_s);
+	f.workspace->focusTile({});
+	QCOMPARE(f.workspace->focusedTileId(), QString());
 
 	f.workspace->toggleSplit();
 
@@ -649,8 +655,6 @@ void TestWorkspace::splitViewWatchesAndComesBack()
 	QTRY_COMPARE(f.workspace->tileStage()->rowCount(), 0);
 	QTRY_COMPARE(f.stub.requests(u"watch_all"_s).size(), 2);
 	QVERIFY(!f.stub.requests(u"watch_all"_s).last().value(u"enabled"_s).toBool());
-	QTRY_VERIFY(f.stub.requests(u"attach"_s).last().value(u"foreground"_s).toBool());
-	QCOMPARE(f.stub.requests(u"attach"_s).last().value(u"session_id"_s).toString(), u"ses_a"_s);
 	QTRY_VERIFY(!f.workspace->session(u"ses_b"_s)->isAttached());
 	QCOMPARE(f.workspace->visibleSessionIds(), (QStringList{u"ses_a"_s}));
 }
@@ -660,7 +664,7 @@ void TestWorkspace::zoomUpgradesTheTileToTheForeground()
 	Fixture f(2, true);
 	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
 	f.workspace->toggleSplit();
-	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
 	QTRY_VERIFY(f.workspace->session(u"ses_b"_s)->isAttached());
 
 	f.workspace->zoomTile(u"ses_b"_s);
@@ -672,8 +676,9 @@ void TestWorkspace::zoomUpgradesTheTileToTheForeground()
 
 	f.workspace->unzoom();
 	QCOMPARE(f.workspace->zoomedId(), QString());
-	QTRY_COMPARE(f.stub.requests(u"detach"_s).last().value(u"session_id"_s).toString(), u"ses_b"_s);
-	QCOMPARE(f.workspace->visibleSessionIds().size(), 2);
+	QTRY_COMPARE(f.stub.requests(u"detach"_s).size(), 1);
+	QCOMPARE(f.stub.requests(u"detach"_s).last().value(u"session_id"_s).toString(), u"ses_b"_s);
+	QCOMPARE(f.workspace->visibleSessionIds(), (QStringList{u"ses_b"_s}));
 }
 
 // The backend still counts the unzoomed session as attached in the foreground until it has answered the detach;
@@ -683,7 +688,7 @@ void TestWorkspace::unzoomKeepsTheTileWhileItsForegroundIsGivenUp()
 	Fixture f(2, true);
 	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
 	f.workspace->toggleSplit();
-	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
 	QTRY_VERIFY(f.workspace->session(u"ses_b"_s)->isAttached());
 	f.workspace->zoomTile(u"ses_b"_s);
 	QTRY_VERIFY(f.stub.requests(u"attach"_s).last().value(u"foreground"_s).toBool());
@@ -692,18 +697,19 @@ void TestWorkspace::unzoomKeepsTheTileWhileItsForegroundIsGivenUp()
 
 	f.stub.holdDetach(true);
 	f.workspace->unzoom();
-	QTRY_COMPARE(f.stub.requests(u"detach"_s).last().value(u"session_id"_s).toString(), u"ses_b"_s);
+	QTRY_COMPARE(f.stub.requests(u"detach"_s).size(), 1);
+	QCOMPARE(f.stub.requests(u"detach"_s).last().value(u"session_id"_s).toString(), u"ses_b"_s);
 	f.stub.broadcast(); // still counts as attached
 	QTest::qWait(settleMs);
 
-	QCOMPARE(f.workspace->tiles()->rowCount(), 2);
-	QCOMPARE(f.workspace->visibleSessionIds().size(), 2);
+	QCOMPARE(f.workspace->tiles()->rowCount(), 1);
+	QCOMPARE(f.workspace->visibleSessionIds(), (QStringList{u"ses_b"_s}));
 	QVERIFY(f.workspace->session(u"ses_b"_s)->isAttached());
 
 	f.stub.releaseDetach();
-	QTRY_COMPARE(f.workspace->visibleSessionIds().size(), 2);
+	QTRY_COMPARE(f.workspace->visibleSessionIds(), (QStringList{u"ses_b"_s}));
 	QTest::qWait(settleMs);
-	QCOMPARE(f.workspace->tiles()->rowCount(), 2);
+	QCOMPARE(f.workspace->tiles()->rowCount(), 1);
 }
 
 void TestWorkspace::aClosedTileKeepsItsSessionUntilItHasLeft()
@@ -713,26 +719,26 @@ void TestWorkspace::aClosedTileKeepsItsSessionUntilItHasLeft()
 	const int lingerMs = 1000;
 	f.workspace->tileStage()->setLingerMs(lingerMs);
 	f.workspace->toggleSplit();
-	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
 	QPointer<ChatSession> closed = f.workspace->session(u"ses_b"_s);
 	QVERIFY(closed != nullptr);
 
 	f.workspace->closeSession(u"ses_b"_s);
 
-	QTRY_COMPARE(f.workspace->tileStage()->placed(), 1);
-	QCOMPARE(f.workspace->tileStage()->rowCount(), 2); // the closed tile is still on stage
+	QTRY_COMPARE(f.workspace->tileStage()->placed(), 0);
+	QCOMPARE(f.workspace->tileStage()->rowCount(), 1); // the closed tile is still on stage
 	QVERIFY(!closed.isNull());
-	QTRY_COMPARE_WITH_TIMEOUT(f.workspace->tileStage()->rowCount(), 1, 2 * lingerMs);
+	QTRY_COMPARE_WITH_TIMEOUT(f.workspace->tileStage()->rowCount(), 0, 2 * lingerMs);
 	QTRY_VERIFY(closed.isNull());
 }
 
 void TestWorkspace::closingTheCurrentTileSendsNoAttach()
 {
 	Fixture f(2, true);
-	
+
 	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
 	f.workspace->toggleSplit();
-	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
 	QTRY_VERIFY(f.workspace->session(u"ses_b"_s)->isAttached());
 	QSignalSpy toasts(f.workspace.get(), &Workspace::toastRequested);
 	const qsizetype attachesBefore = f.stub.requests(u"attach"_s).size();
@@ -771,8 +777,8 @@ void TestWorkspace::aRevivedTileLeavesOnItsOwnTimer()
 
 void TestWorkspace::anotherTileGetsTheFocusWhenTheFocusedOneCloses()
 {
-	Fixture f(2, true);
-	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
+	Fixture f(2, true, {}, [](StubServer& stub) { stub.add(u"ses_c"_s, 3); });
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 3);
 	f.workspace->toggleSplit();
 	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
 	f.workspace->focusTile(u"ses_b"_s);
@@ -781,7 +787,7 @@ void TestWorkspace::anotherTileGetsTheFocusWhenTheFocusedOneCloses()
 	f.workspace->closeSession(u"ses_b"_s);
 
 	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
-	QCOMPARE(f.workspace->focusedTileId(), u"ses_a"_s); // the current session's tile
+	QCOMPARE(f.workspace->focusedTileId(), QString());
 }
 
 // The highlighted row is the session in front: in split view the one whose tile has the focus, however it got it.
@@ -794,10 +800,10 @@ void TestWorkspace::theSidebarMarksTheFocusedTileAndTheTiles()
 	QVERIFY(!rowFlag(*f.workspace, u"ses_a"_s, Model::IsTileRole));
 
 	f.workspace->toggleSplit();
-	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
 
 	QVERIFY(rowFlag(*f.workspace, u"ses_a"_s, Model::IsCurrentRole));
-	QVERIFY(rowFlag(*f.workspace, u"ses_a"_s, Model::IsTileRole));
+	QVERIFY(!rowFlag(*f.workspace, u"ses_a"_s, Model::IsTileRole));
 	QVERIFY(rowFlag(*f.workspace, u"ses_b"_s, Model::IsTileRole));
 
 	f.workspace->focusTile(u"ses_b"_s); // what a click or Alt+arrow does
@@ -805,10 +811,14 @@ void TestWorkspace::theSidebarMarksTheFocusedTileAndTheTiles()
 	QVERIFY(!rowFlag(*f.workspace, u"ses_a"_s, Model::IsCurrentRole));
 	QCOMPARE(f.workspace->currentId(), u"ses_a"_s); // the session that comes back when split view ends
 
+	f.workspace->focusTile({});
+	QVERIFY(rowFlag(*f.workspace, u"ses_a"_s, Model::IsCurrentRole));
+	QVERIFY(!rowFlag(*f.workspace, u"ses_b"_s, Model::IsCurrentRole));
+
 	f.workspace->toggleSplit();
 	QTRY_VERIFY(!f.workspace->isSplitView());
 	QTRY_COMPARE(f.stub.requests(u"watch_all"_s).size(), 2); // the requests of leaving are answered
-	QTRY_VERIFY(f.stub.requests(u"attach"_s).last().value(u"foreground"_s).toBool());
+	QTRY_VERIFY(f.workspace->current()->isForeground());
 	QTRY_COMPARE(f.workspace->tileStage()->rowCount(), 0);
 	QVERIFY(rowFlag(*f.workspace, u"ses_a"_s, Model::IsCurrentRole));
 	QVERIFY(!rowFlag(*f.workspace, u"ses_b"_s, Model::IsCurrentRole));
@@ -1127,17 +1137,17 @@ void TestWorkspace::theSessionInFrontIsTheCurrentOneOrTheFocusedTile()
 	QCOMPARE(snapshot(a).value(u"total"_s).toInt(), 2);
 
 	f.workspace->toggleSplit();
-	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
 	ChatSession* b = f.workspace->session(u"ses_b"_s);
 	QTRY_VERIFY(b->isAttached());
-	QCOMPARE(f.workspace->frontSession(), a); // the focused tile
+	QCOMPARE(f.workspace->frontSession(), a); // no tile focused yet
 	f.workspace->focusTile(u"ses_b"_s);
 	QCOMPARE(f.workspace->frontSession(), b);
 	QVERIFY(b->todoItems().isEmpty()); // so the section is hidden
 	QCOMPARE(b->todoTotal(), 0);
 	QVERIFY(snapshot(b).value(u"items"_s).toList().isEmpty());
-	// Back to a session with a list: it is all there at once (the sidebar showed "0/0" and no rows here).
-	f.workspace->focusTile(u"ses_a"_s);
+	// Back to no focused tile: the current session's list is back in front.
+	f.workspace->focusTile({});
 	QCOMPARE(f.workspace->frontSession(), a);
 	QCOMPARE(snapshot(f.workspace->frontSession()).value(u"items"_s).toList().size(), 3);
 	QCOMPARE(snapshot(f.workspace->frontSession()).value(u"total"_s).toInt(), 2);
@@ -1178,7 +1188,7 @@ void TestWorkspace::destroyingTheWorkspaceWhileLeavingSplitViewIsSafe()
 	Fixture f(2, true);
 	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
 	f.workspace->toggleSplit();
-	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
 	QTRY_COMPARE(f.stub.requests(u"watch_all"_s).size(), 1);
 
 	f.stub.holdWatchAll(true);

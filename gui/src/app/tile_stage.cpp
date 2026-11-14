@@ -40,8 +40,6 @@ int TileStage::rowOf(const ChatSession* session) const
 void TileStage::sync()
 {
 	const QList<ChatSession*> wanted = m_source->tiles();
-	const bool nothingShown = m_placed == 0;
-
 	for(int i = 0; i < m_rows.size(); ++i)
 	{
 		Row& row = m_rows[i];
@@ -62,11 +60,6 @@ void TileStage::sync()
 		}
 	}
 
-	if(nothingShown && !wanted.isEmpty())
-	{
-		setOpening(true);
-		QTimer::singleShot(m_lingerMs, this, [this] { setOpening(false); });
-	}
 	for(int place = 0; place < wanted.size(); ++place)
 	{
 		if(rowOf(wanted[place]) >= 0)
@@ -119,16 +112,6 @@ void TileStage::deleteWhenLeft(ChatSession* session)
 		return;
 	}
 	m_rows[row].deleteSession = true;
-}
-
-void TileStage::setOpening(bool opening)
-{
-	if(m_opening == opening)
-	{
-		return;
-	}
-	m_opening = opening;
-	emit openingChanged();
 }
 
 void TileStage::setPlaced(int placed)
