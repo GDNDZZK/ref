@@ -145,7 +145,7 @@ describe('channelTransport', () => {
     expect(t.handlers.closed).toHaveBeenCalledOnce()
   })
 
-  it('treats a hello of another version like a changed salt', async () => {
+  it('closes without forgetting the stored key on a malformed or unknown hello', async () => {
     for (const hello of [
       helloText({ v: 2 }),
       helloText({ salt: 'zz' }),
@@ -155,10 +155,40 @@ describe('channelTransport', () => {
       const t = setup()
       t.server.open()
       await t.server.send(hello)
-      expect(t.keys.rejected, hello).toHaveBeenCalledOnce()
+      expect(t.keys.rejected, hello).not.toHaveBeenCalled()
       expect(t.sent, hello).toEqual([])
-      expect(t.handlers.closed, hello).toHaveBeenCalledOnce()
+      expect(t.handlers.closed, hello).toHaveBeenCalledWith('this ref-web speaks another channel version')
     }
+
+    // With a real KeyStore, a stored root survives a bad hello and works on the next connection.
+    const { KeyStore, STORAGE_KEY } = await import('./keystore.ts')
+    let stored = JSON.stringify({ salt: fixture.salt, root: fixture.root })
+    const store = new KeyStore({
+      getItem: (k) => (k === STORAGE_KEY ? stored : null),
+      setItem: (k, v) => {
+        if (k === STORAGE_KEY) stored = v
+      },
+      removeItem: (k) => {
+        if (k === STORAGE_KEY) stored = ''
+      },
+    })
+    let socketHandlers!: SocketHandlers
+    const sent: (string | Uint8Array)[] = []
+    const factory = channelTransport(
+      (given) => {
+        socketHandlers = given
+        return { send: (data) => void sent.push(data), close: vi.fn() }
+      },
+      store,
+      () => hex(fixture.cn, 16),
+    )
+    factory({ opened: vi.fn(), message: vi.fn(), closed: vi.fn() })
+    socketHandlers.opened()
+    socketHandlers.message(helloText({ v: 2 }))
+    await flush()
+    expect(store.required).toBe(false)
+    expect(store.hasKey()).toBe(true)
+    expect(sent).toEqual([])
   })
 
   it('stops on frames that do not open or come out of order', async () => {

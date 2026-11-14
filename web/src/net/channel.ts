@@ -75,8 +75,6 @@ export function channelTransport(
       const salt = hello && fromHex(hello.salt, SALT_BYTES)
       const sn = hello && fromHex(hello.sn, NONCE_BYTES)
       if (!hello || hello.v !== PROTOCOL_VERSION || !salt || !sn) {
-        // A ref-web of another channel version: what is stored cannot be used with it.
-        keys.rejected()
         end('this ref-web speaks another channel version')
         return
       }
