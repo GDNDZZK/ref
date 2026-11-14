@@ -1881,7 +1881,7 @@ impl App {
 
     pub fn open_sessions(&mut self) {
         let d = ListDialog::new(Kind::Sessions, "Sessions", Vec::new())
-            .with_hint("enter open · ctrl+d close live / delete history (press twice) · esc");
+            .with_hint("enter open · tab filter · ctrl+d close live / delete history · esc");
         self.dialog = Some(Dialog::List(d));
         self.refresh_session_dialog();
         if let Some(c) = &self.current
@@ -1917,6 +1917,21 @@ impl App {
         // Field-level helpers keep `self.dialog` mutably borrowed alongside.
         let models = config_models(&self.config);
         let agents = config_agents(&self.config);
+        let creator_of = |parent: Option<&str>| -> Option<(String, String, String)> {
+            let pid = parent.filter(|p| !p.is_empty())?;
+            let info = self
+                .live
+                .iter()
+                .chain(self.history_list.iter())
+                .find(|x| x.id == pid);
+            let name = info
+                .map(|x| x.name.as_str())
+                .filter(|n| !n.is_empty())
+                .unwrap_or(pid)
+                .to_string();
+            let title = info.map(|x| text::one_line(&x.title)).unwrap_or_default();
+            Some((pid.to_string(), name, title))
+        };
         let mut items = Vec::new();
         let mut live: Vec<&SessionInfo> = self.live.iter().filter(|s| s.live).collect();
         live.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
@@ -1936,6 +1951,13 @@ impl App {
                 "(current)".to_string()
             } else {
                 text::truncate(&text::one_line(&s.title), SESSION_DESC_MAX_CHARS)
+            };
+            let creator_info = creator_of(s.parent.as_deref());
+            let keywords = match &creator_info {
+                Some((pid, cname, ctitle)) => {
+                    format!("{} {} {} {} {}", s.id, s.cwd, pid, cname, ctitle)
+                }
+                None => format!("{} {}", s.id, s.cwd),
             };
             items.push(Item {
                 key: live_key(&s.id),
@@ -1960,7 +1982,8 @@ impl App {
                     },
                 )),
                 spinner: !s.status.is_idle() && !current,
-                keywords: format!("{} {}", s.id, s.cwd),
+                keywords,
+                creator: creator_info.map(|(pid, cname, _)| (pid, cname)),
             });
         }
         let live_ids: HashSet<&str> = live.iter().map(|s| s.id.as_str()).collect();
@@ -1970,6 +1993,13 @@ impl App {
                 s.name.clone()
             } else {
                 text::one_line(&s.title)
+            };
+            let creator_info = creator_of(s.parent.as_deref());
+            let keywords = match &creator_info {
+                Some((pid, cname, ctitle)) => {
+                    format!("{} {} {} {} {}", s.id, s.cwd, pid, cname, ctitle)
+                }
+                None => format!("{} {}", s.id, s.cwd),
             };
             items.push(Item {
                 key: format!("{HISTORY_KEY_PREFIX}{}", s.id),
@@ -1981,7 +2011,8 @@ impl App {
                     text::fmt_ago(s.updated_at, now)
                 ),
                 section: "History".into(),
-                keywords: format!("{} {}", s.id, s.cwd),
+                keywords,
+                creator: creator_info.map(|(pid, cname, _)| (pid, cname)),
                 ..Default::default()
             });
         }
@@ -2430,7 +2461,7 @@ impl App {
     /// `/close-session` without args: picker of live sessions that stays open after each close.
     fn open_close_picker(&mut self) {
         let d = ListDialog::new(Kind::CloseSessions, "Close sessions", Vec::new())
-            .with_hint("enter close · stays open to close more · esc done");
+            .with_hint("enter close · tab filter · stays open to close more · esc done");
         self.dialog = Some(Dialog::List(d));
         self.refresh_session_dialog();
         self.req(Request::ListSessions, Pending::LiveList);

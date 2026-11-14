@@ -2350,6 +2350,61 @@ fn sessions_dialog_ctrl_d_closes_with_confirm() {
 }
 
 #[test]
+fn sessions_dialog_creator_filter_keywords_and_badge() {
+    let mut app = test_app(false);
+    let mut main = bg_session("ses_main", "main", SessionStatus::Idle, 1);
+    main.updated_at = 400;
+    let mut w1 = bg_session("ses_w1", "worker-1", SessionStatus::Idle, 0);
+    w1.parent = Some("ses_main".into());
+    w1.updated_at = 300;
+    let mut w2 = bg_session("ses_w2", "worker-2", SessionStatus::Idle, 0);
+    w2.parent = Some("ses_other".into());
+    w2.updated_at = 200;
+    let mut hc = bg_session("ses_hc", "hist-child", SessionStatus::Idle, 0);
+    hc.live = false;
+    hc.parent = Some("ses_main".into());
+    hc.title = "Closed subtask".into();
+    hc.updated_at = 100;
+    app.current = Some("ses_main".into());
+    app.live = vec![main, w1, w2];
+    app.history_list = vec![hc];
+    app.open_sessions();
+
+    let (_, s) = render(&mut app, 120, 34);
+    assert!(s.contains("tab filter"), "{s}");
+    assert!(s.contains(" All "), "{s}");
+    assert!(s.contains("⟲ main"), "creator badge shown: {s}");
+    assert!(s.contains("⟲ ses_other"), "fallback creator id badge shown: {s}");
+
+    // Search matches creator name and creator id via keywords.
+    type_text(&mut app, "ses_main");
+    let (_, s_kw) = render(&mut app, 120, 34);
+    assert!(s_kw.contains("worker-1") && s_kw.contains("Closed subtask"), "{s_kw}");
+    assert!(!s_kw.contains("worker-2"), "{s_kw}");
+    // Clear search and select worker-1 (created by ses_main).
+    press_with(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
+    if let Some(crate::ui::dialog::Dialog::List(d)) = app.dialog.as_mut() {
+        d.select_key("live:ses_w1");
+    }
+    // Tab 1: User-created only.
+    press(&mut app, KeyCode::Tab);
+    let (_, s_user) = render(&mut app, 120, 34);
+    assert!(s_user.contains(" User-created "), "{s_user}");
+    assert!(s_user.contains("main") && !s_user.contains("worker-1") && !s_user.contains("worker-2") && !s_user.contains("Closed subtask"), "{s_user}");
+    // Tab 2: By creator of previously selected row (ses_main).
+    press(&mut app, KeyCode::Tab);
+    let (_, s_by) = render(&mut app, 120, 34);
+    assert!(s_by.contains(" By main "), "{s_by}");
+    assert!(s_by.contains("worker-1") && s_by.contains("Closed subtask"), "{s_by}");
+    assert!(!s_by.contains("worker-2") && !s_by.contains("● main"), "{s_by}");
+    assert!(s_by.contains("2/4"), "{s_by}");
+    press(&mut app, KeyCode::Tab);
+    let (_, s_all) = render(&mut app, 120, 34);
+    assert!(s_all.contains(" All "), "{s_all}");
+    assert!(s_all.contains("worker-1") && s_all.contains("worker-2"), "{s_all}");
+}
+
+#[test]
 fn leader_k_closes_current_and_focused_tile() {
     use crate::app::Pending;
     use crossterm::event::{KeyCode, KeyModifiers};

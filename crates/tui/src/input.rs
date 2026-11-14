@@ -264,6 +264,7 @@ fn dialog_key(app: &mut App, k: KeyEvent) {
             KeyCode::PageUp => d.page(-1),
             KeyCode::PageDown => d.page(1),
             KeyCode::Enter => app.dialog_submit(),
+            KeyCode::Tab => d.cycle_creator_filter(),
             KeyCode::Char('d') if k.modifiers == CTRL => {
                 if matches!(d.kind, Kind::Sessions | Kind::CloseSessions) {
                     app.dialog_delete();
