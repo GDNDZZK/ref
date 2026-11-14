@@ -5181,3 +5181,21 @@ fn pasting_oversized_image_path_toasts_error() {
     assert!(app.toasts.items.iter().any(|t| t.text.contains("too large")));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn push_history_toasts_once_on_failure() {
+    let mut app = test_app(false);
+    let dir = std::env::temp_dir().join(format!("ref-tui-hist-app-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    app.history = crate::ui::editor::History::with_path(dir.clone());
+    app.push_history("first prompt");
+    app.push_history("second prompt");
+    let warns: Vec<_> = app
+        .toasts
+        .items
+        .iter()
+        .filter(|t| t.text.contains("Cannot save prompt history"))
+        .collect();
+    assert_eq!(warns.len(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}

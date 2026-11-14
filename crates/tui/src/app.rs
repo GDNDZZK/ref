@@ -375,6 +375,7 @@ pub struct App {
     pub mode: Mode,
     pub editor: Editor,
     pub history: History,
+    history_warned: bool,
     pub dialog: Option<Dialog>,
     pub perm: Option<PermissionView>,
     pub question: Option<QuestionView>,
@@ -492,9 +493,23 @@ const EPILOGUE_LABEL_WIDTH: usize = 10;
 
 impl App {
     pub fn new(client: Client, cwd: String, init: InitPlan) -> Self {
-        let history = ref_proto::state_dir()
-            .map(|d| History::load(d.join("prompt-history.jsonl")))
-            .unwrap_or_default();
+        let mut toasts = Toasts::default();
+        let history = match ref_proto::state_dir() {
+            Ok(d) => {
+                let path = d.join("prompt-history.jsonl");
+                match History::load(path.clone()) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        toasts.warn(format!("Cannot load prompt history: {e}"));
+                        History::with_path(path)
+                    }
+                }
+            }
+            Err(e) => {
+                toasts.warn(format!("Cannot locate state dir for prompt history: {e}"));
+                History::default()
+            }
+        };
         let mode = if init.watch { Mode::Watch } else { Mode::Chat };
         App {
             client,
@@ -509,10 +524,11 @@ impl App {
             mode,
             editor: Editor::default(),
             history,
+            history_warned: false,
             dialog: None,
             perm: None,
             question: None,
-            toasts: Toasts::default(),
+            toasts,
             details: false,
             thinking: false,
             start: Instant::now(),
@@ -2900,7 +2916,7 @@ impl App {
         }
         if self.shell_mode {
             let cmd = trimmed.to_string();
-            self.history.push(&format!("!{cmd}"));
+            self.push_history(&format!("!{cmd}"));
             self.editor.clear();
             self.shell_mode = false;
             if let Some(sid) = self.current.clone() {
@@ -2921,7 +2937,7 @@ impl App {
         if let Some(rest) = trimmed.strip_prefix('/') {
             let (name, args) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
             if let Some(c) = find_cmd(name) {
-                self.history.push(trimmed);
+                self.push_history(trimmed);
                 self.editor.clear();
                 self.run_command(c.name, args);
                 return;
@@ -2931,7 +2947,7 @@ impl App {
                 .as_ref()
                 .is_some_and(|c| c.commands.iter().any(|x| x.name == name))
             {
-                self.history.push(trimmed);
+                self.push_history(trimmed);
                 let sub = self.editor.submit();
                 let args = sub
                     .text
@@ -2952,12 +2968,21 @@ impl App {
                 return;
             }
         }
-        self.history.push(&raw);
+        self.push_history(&raw);
         let sub = self.editor.submit();
         let images = sub.images.into_iter().map(|(i, _)| i).collect();
         self.submit_prompt_text(sub.text, images);
     }
 
+
+    pub fn push_history(&mut self, t: &str) {
+        if let Err(e) = self.history.push(t)
+            && !self.history_warned
+        {
+            self.history_warned = true;
+            self.toasts.warn(format!("Cannot save prompt history: {e}"));
+        }
+    }
     // -----------------------------------------------------------------------
     // Autocomplete
     // -----------------------------------------------------------------------
@@ -3078,7 +3103,7 @@ impl App {
                 }
                 if run && !takes_args {
                     self.editor.clear();
-                    self.history.push(&format!("/{name}"));
+                    self.push_history(&format!("/{name}"));
                     self.run_command(&name, "");
                     return true;
                 }

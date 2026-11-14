@@ -391,7 +391,7 @@ fn chat_key(app: &mut App, k: KeyEvent) {
         } else if !app.editor.text.is_empty() || app.shell_mode {
             if app.editor.text.trim().chars().count() >= MIN_DRAFT_CHARS_FOR_HISTORY {
                 let t = app.editor.text.clone();
-                app.history.push(&t);
+                app.push_history(&t);
             }
             app.editor.clear();
             app.shell_mode = false;
