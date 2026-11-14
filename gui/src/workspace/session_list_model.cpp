@@ -77,7 +77,7 @@ SessionListModel::SessionListModel(QObject* parent)
 {
 }
 
-SessionListModel::Row SessionListModel::toRow(const proto::SessionInfo& info)
+SessionListModel::Row SessionListModel::toRow(const proto::SessionInfo& info) const
 {
 	Row row;
 	row.id = info.id;
@@ -99,16 +99,62 @@ SessionListModel::Row SessionListModel::toRow(const proto::SessionInfo& info)
 	row.lastError = info.lastError.value_or(QString());
 	row.attached = int(info.attached);
 	row.live = info.live;
+	row.parentId = info.parent.value_or(QString());
+	if(!row.parentId.isEmpty())
+	{
+		if(const proto::SessionInfo* creator = find(row.parentId))
+		{
+			row.creatorName = displayTitle(creator->live, creator->name, creator->title, creator->cwd);
+			row.creatorRawName = creator->name;
+			row.creatorTitle = creator->title;
+		}
+		else
+		{
+			row.creatorName = row.parentId;
+		}
+		QSet<QString> visited{info.id};
+		QString currentId = row.parentId;
+		while(!currentId.isEmpty() && !visited.contains(currentId))
+		{
+			visited.insert(currentId);
+			const proto::SessionInfo* ancestor = find(currentId);
+			if(ancestor == nullptr || !ancestor->parent || ancestor->parent->isEmpty())
+			{
+				break;
+			}
+			currentId = *ancestor->parent;
+		}
+		const proto::SessionInfo* root = find(currentId);
+		row.rootId = currentId;
+		row.rootName = root != nullptr ? displayTitle(root->live, root->name, root->title, root->cwd) : currentId;
+	}
 	return row;
 }
 
 bool SessionListModel::matchesFilter(const Row& row) const
 {
+	switch(m_creatorFilter)
+	{
+	case CreatorFilter::All:
+		break;
+	case CreatorFilter::UserCreated:
+		if(!row.parentId.isEmpty())
+		{
+			return false;
+		}
+		break;
+	case CreatorFilter::ByCreator:
+		if(row.parentId != m_creatorId)
+		{
+			return false;
+		}
+		break;
+	}
 	if(m_filter.isEmpty())
 	{
 		return true;
 	}
-	for(const QString& field : {row.title, row.name, row.cwd, row.id})
+	for(const QString& field : {row.title, row.name, row.cwd, row.id, row.parentId, row.creatorName, row.creatorRawName, row.creatorTitle})
 	{
 		if(field.contains(m_filter, Qt::CaseInsensitive))
 		{
@@ -117,7 +163,6 @@ bool SessionListModel::matchesFilter(const Row& row) const
 	}
 	return false;
 }
-
 bool SessionListModel::before(const Row& a, const Row& b) const
 {
 	if(a.live != b.live)
@@ -154,6 +199,30 @@ void SessionListModel::setFilter(const QString& filter)
 	emit filterChanged();
 }
 
+void SessionListModel::setCreatorFilter(CreatorFilter filter)
+{
+	if(filter == m_creatorFilter)
+	{
+		return;
+	}
+	m_creatorFilter = filter;
+	rebuild();
+	emit creatorFilterChanged();
+}
+
+void SessionListModel::setCreatorId(const QString& id)
+{
+	if(id == m_creatorId)
+	{
+		return;
+	}
+	m_creatorId = id;
+	if(m_creatorFilter == CreatorFilter::ByCreator)
+	{
+		rebuild();
+	}
+	emit creatorIdChanged();
+}
 void SessionListModel::setCurrentId(const QString& id)
 {
 	if(id == m_currentId)
@@ -388,6 +457,14 @@ QVariant SessionListModel::roleData(const Row& row, int role) const
 		return m_tileIds.contains(row.id);
 	case IsLiveRole:
 		return row.live;
+	case ParentIdRole:
+		return row.parentId;
+	case CreatorNameRole:
+		return row.creatorName;
+	case RootIdRole:
+		return row.rootId;
+	case RootNameRole:
+		return row.rootName;
 	default:
 		return {};
 	}
@@ -421,6 +498,10 @@ QHash<int, QByteArray> SessionListModel::roleNames() const
 		{IsCurrentRole, "isCurrent"},
 		{IsTileRole, "isTile"},
 		{IsLiveRole, "isLive"},
+		{ParentIdRole, "parentId"},
+		{CreatorNameRole, "creatorName"},
+		{RootIdRole, "rootId"},
+		{RootNameRole, "rootName"},
 	};
 }
 

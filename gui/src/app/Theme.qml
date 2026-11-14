@@ -147,4 +147,14 @@ QtObject {
 			return key
 		return index < 0 ? textMuted : agentPalette[index % agentPalette.length]
 	}
+
+	// Deterministic palette color from an arbitrary id (root session, agent name).
+	function hashColor(key) {
+		const multiplier = 31
+		const modulus = 1000003
+		let hash = 0
+		for (let i = 0; i < key.length; ++i)
+			hash = (hash * multiplier + key.charCodeAt(i)) % modulus
+		return agentColor("", hash)
+	}
 }

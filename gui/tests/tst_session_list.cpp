@@ -69,6 +69,8 @@ private slots:
 	void keepsRowsOfSessionsThatStay();
 	void movesInsteadOfRecreating();
 	void filtersIgnoringCase();
+	void filtersByCreatorModeAndKeywords();
+	void resolvesRootTaskAcrossParentChain();
 	void derivesRoles();
 	void todoBadgeLeavesCancelledItemsOut();
 	void waitingForAnAnswerNeedsTheUserLikeWaitingForPermission();
@@ -162,6 +164,98 @@ void TstSessionList::filtersIgnoringCase()
 	QVERIFY(model.contains(u"ses_aaa"_s)); // filtered out, not gone
 	model.setFilter({});
 	QCOMPARE(model.count(), 2);
+}
+
+void TstSessionList::filtersByCreatorModeAndKeywords()
+{
+	SessionListModel model;
+	proto::SessionInfo root1 = session(u"ses_root1"_s, 1);
+	root1.name = u"Planner"_s;
+	root1.title = u"Plan refactor"_s;
+	proto::SessionInfo root2 = session(u"ses_root2"_s, 2);
+	root2.name = u"Reviewer"_s;
+	root2.title = u"Code review"_s;
+	proto::SessionInfo child1a = session(u"ses_c1a"_s, 3);
+	child1a.name = u"worker-a"_s;
+	child1a.parent = u"ses_root1"_s;
+	proto::SessionInfo child1b = session(u"ses_c1b"_s, 4);
+	child1b.name = u"worker-b"_s;
+	child1b.parent = u"ses_root1"_s;
+	proto::SessionInfo child2 = session(u"ses_c2"_s, 5);
+	child2.name = u"worker-c"_s;
+	child2.parent = u"ses_root2"_s;
+	proto::SessionInfo oldChild = stored(u"ses_old"_s, 0, 10);
+	oldChild.title = u"Old child"_s;
+	oldChild.parent = u"ses_root1"_s;
+	model.setSessions({root1, root2, child1a, child1b, child2, oldChild});
+
+	QCOMPARE(model.count(), 6);
+	QCOMPARE(model.get(u"ses_root1"_s).value(u"parentId"_s).toString(), QString());
+	QCOMPARE(model.get(u"ses_c1a"_s).value(u"parentId"_s).toString(), u"ses_root1"_s);
+	QCOMPARE(model.get(u"ses_c1a"_s).value(u"creatorName"_s).toString(), u"Planner"_s);
+
+	model.setCreatorFilter(SessionListModel::CreatorFilter::UserCreated);
+	QCOMPARE(ids(model), (QStringList{u"ses_root2"_s, u"ses_root1"_s}));
+
+	model.setCreatorId(u"ses_root1"_s);
+	model.setCreatorFilter(SessionListModel::CreatorFilter::ByCreator);
+	QCOMPARE(ids(model), (QStringList{u"ses_c1b"_s, u"ses_c1a"_s, u"ses_old"_s}));
+
+	// Empty creatorId in ByCreator mode matches user-created sessions.
+	model.setCreatorId({});
+	QCOMPARE(ids(model), (QStringList{u"ses_root2"_s, u"ses_root1"_s}));
+
+	model.setCreatorFilter(SessionListModel::CreatorFilter::All);
+	model.setFilter(u"planner"_s);
+	QCOMPARE(ids(model), (QStringList{u"ses_c1b"_s, u"ses_c1a"_s, u"ses_root1"_s, u"ses_old"_s}));
+	model.setFilter(u"ses_root2"_s);
+	QCOMPARE(ids(model), (QStringList{u"ses_c2"_s, u"ses_root2"_s}));
+	model.setFilter(u"code review"_s);
+	QCOMPARE(ids(model), (QStringList{u"ses_c2"_s, u"ses_root2"_s}));
+
+	model.setCreatorId(u"ses_root1"_s);
+	model.setCreatorFilter(SessionListModel::CreatorFilter::ByCreator);
+	model.setFilter(u"worker-b"_s);
+	QCOMPARE(ids(model), (QStringList{u"ses_c1b"_s}));
+}
+
+void TstSessionList::resolvesRootTaskAcrossParentChain()
+{
+	SessionListModel model;
+	proto::SessionInfo root = session(u"ses_root"_s, 1);
+	root.name = u"Coordinator"_s;
+	proto::SessionInfo child = session(u"ses_child"_s, 2);
+	child.name = u"Sub"_s;
+	child.parent = u"ses_root"_s;
+	proto::SessionInfo grand = session(u"ses_grand"_s, 3);
+	grand.name = u"Leaf"_s;
+	grand.parent = u"ses_child"_s;
+	proto::SessionInfo orphan = session(u"ses_orphan"_s, 4);
+	orphan.name = u"Orphan"_s;
+	orphan.parent = u"ses_gone"_s;
+	proto::SessionInfo cycA = session(u"ses_ca"_s, 5);
+	cycA.parent = u"ses_cb"_s;
+	proto::SessionInfo cycB = session(u"ses_cb"_s, 6);
+	cycB.parent = u"ses_ca"_s;
+	model.setSessions({root, child, grand, orphan, cycA, cycB});
+
+	QCOMPARE(model.get(u"ses_root"_s).value(u"rootId"_s).toString(), QString());
+	QCOMPARE(model.get(u"ses_root"_s).value(u"rootName"_s).toString(), QString());
+	QCOMPARE(model.get(u"ses_child"_s).value(u"rootId"_s).toString(), u"ses_root"_s);
+	QCOMPARE(model.get(u"ses_child"_s).value(u"rootName"_s).toString(), u"Coordinator"_s);
+	QCOMPARE(model.get(u"ses_grand"_s).value(u"rootId"_s).toString(), u"ses_root"_s);
+	QCOMPARE(model.get(u"ses_grand"_s).value(u"rootName"_s).toString(), u"Coordinator"_s);
+	QCOMPARE(model.get(u"ses_orphan"_s).value(u"rootId"_s).toString(), u"ses_gone"_s);
+	QCOMPARE(model.get(u"ses_orphan"_s).value(u"rootName"_s).toString(), u"ses_gone"_s);
+	QVERIFY(!model.get(u"ses_ca"_s).value(u"rootId"_s).toString().isEmpty());
+	QVERIFY(!model.get(u"ses_cb"_s).value(u"rootId"_s).toString().isEmpty());
+
+	// Renaming the root emits dataChanged on descendants and updates rootName.
+	QSignalSpy changed(&model, &QAbstractItemModel::dataChanged);
+	root.name = u"Boss"_s;
+	model.setSessions({root, child, grand, orphan, cycA, cycB});
+	QVERIFY(changed.count() >= 3);
+	QCOMPARE(model.get(u"ses_grand"_s).value(u"rootName"_s).toString(), u"Boss"_s);
 }
 
 void TstSessionList::waitingForAnAnswerNeedsTheUserLikeWaitingForPermission()
