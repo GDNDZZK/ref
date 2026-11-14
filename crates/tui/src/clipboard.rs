@@ -395,7 +395,10 @@ mod tests {
     #[test]
     fn decode() {
         assert_eq!(super::percent_decode("a%20b.png"), "a b.png");
-        assert!(matches!(super::image_from_path("/nonexistent/x.png"), Ok(None)));
+        assert!(matches!(
+            super::image_from_path("/nonexistent/x.png"),
+            Ok(None)
+        ));
         assert!(matches!(super::image_from_path("hello"), Ok(None)));
     }
 

@@ -928,13 +928,16 @@ impl App {
             Pending::Config => self.on_config_response(&result),
             Pending::LiveList => match sessions_of(&result) {
                 Ok(s) => self.on_sessions(s),
-                Err(e) => self.toasts.error(format!("Malformed sessions response: {e}")),
+                Err(e) => self
+                    .toasts
+                    .error(format!("Malformed sessions response: {e}")),
             },
             Pending::Created { prompt } => {
                 let info = match session_info_of(&result) {
                     Ok(i) => i,
                     Err(e) => {
-                        self.toasts.error(format!("Malformed create_session response: {e}"));
+                        self.toasts
+                            .error(format!("Malformed create_session response: {e}"));
                         return;
                     }
                 };
@@ -969,7 +972,9 @@ impl App {
                     self.history_list = s;
                     self.refresh_session_dialog();
                 }
-                Err(e) => self.toasts.error(format!("Malformed history response: {e}")),
+                Err(e) => self
+                    .toasts
+                    .error(format!("Malformed history response: {e}")),
             },
             Pending::Continue => self.on_continue_response(&result),
             Pending::Undo { sid, count } => {
@@ -1045,7 +1050,9 @@ impl App {
                         v.set_info(info);
                     }
                 }
-                Err(e) => self.toasts.error(format!("Malformed set_cwd response: {e}")),
+                Err(e) => self
+                    .toasts
+                    .error(format!("Malformed set_cwd response: {e}")),
             },
             Pending::Simple { ok } => {
                 if result.get("session").is_some() {
@@ -1056,7 +1063,8 @@ impl App {
                             }
                         }
                         Err(e) => {
-                            self.toasts.error(format!("Malformed session response: {e}"));
+                            self.toasts
+                                .error(format!("Malformed session response: {e}"));
                             return;
                         }
                     }
@@ -1077,7 +1085,9 @@ impl App {
                     }
                     self.toasts.info(format!("Variant: {v}"));
                 }
-                Err(e) => self.toasts.error(format!("Malformed set_variant response: {e}")),
+                Err(e) => self
+                    .toasts
+                    .error(format!("Malformed set_variant response: {e}")),
             },
             Pending::Export => match parse_field::<String>(&result, "path") {
                 Ok(p) => self.toasts.info(format!("Exported to {p}")),
@@ -1119,7 +1129,9 @@ impl App {
                 self.mcp_inflight = false;
                 match parse_field::<ServerConfigInfo>(&result, "config") {
                     Ok(c) => self.set_mcp_lines(&c.mcp),
-                    Err(e) => self.toasts.error(format!("Malformed config from backend: {e}")),
+                    Err(e) => self
+                        .toasts
+                        .error(format!("Malformed config from backend: {e}")),
                 }
             }
         }
@@ -1165,7 +1177,8 @@ impl App {
         let s = match sessions_of(result) {
             Ok(s) => s,
             Err(e) => {
-                self.toasts.error(format!("Malformed continue response: {e}"));
+                self.toasts
+                    .error(format!("Malformed continue response: {e}"));
                 return;
             }
         };
@@ -1247,7 +1260,11 @@ impl App {
         let (msgs, more) = match parsed {
             Ok(x) => x,
             Err(e) => {
-                if let Some(v) = self.views.get_mut(sid).filter(|v| v.history_gen == generation) {
+                if let Some(v) = self
+                    .views
+                    .get_mut(sid)
+                    .filter(|v| v.history_gen == generation)
+                {
                     v.older_pending = false;
                 }
                 self.toasts.error(format!("Malformed history page: {e}"));
@@ -2973,7 +2990,6 @@ impl App {
         let images = sub.images.into_iter().map(|(i, _)| i).collect();
         self.submit_prompt_text(sub.text, images);
     }
-
 
     pub fn push_history(&mut self, t: &str) {
         if let Err(e) = self.history.push(t)

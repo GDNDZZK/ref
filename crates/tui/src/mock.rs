@@ -362,10 +362,7 @@ impl Mock {
     }
 
     fn agent_of(&self, sid: &str) -> Option<String> {
-        self.world()
-            .sessions
-            .get(sid)
-            .map(|s| s.info.agent.clone())
+        self.world().sessions.get(sid).map(|s| s.info.agent.clone())
     }
 
     fn new_assistant(&self, sid: &str) -> Option<String> {
@@ -1475,9 +1472,9 @@ impl Mock {
                 return;
             }
         }
-        let Some(first) = self.with_session(sid, |s| {
-            !s.messages.iter().any(|x| x.role == Role::User)
-        }) else {
+        let Some(first) =
+            self.with_session(sid, |s| !s.messages.iter().any(|x| x.role == Role::User))
+        else {
             return;
         };
         self.user_message_id(sid, mid, text, MessageSource::Human, images);
@@ -1900,23 +1897,39 @@ mod tests {
         assert_eq!(m.agent_of("missing"), None);
         assert!(m.new_assistant("missing").is_none());
         let reqs = [
-            Request::Abort { session_id: "missing".into() },
+            Request::Abort {
+                session_id: "missing".into(),
+            },
             Request::PermissionReply {
                 session_id: "missing".into(),
                 call_id: "c1".into(),
                 allow: true,
                 always: false,
             },
-            Request::SetModel { session_id: "missing".into(), model: model() },
-            Request::SetAgent { session_id: "missing".into(), agent: "build".into() },
-            Request::SetVariant { session_id: "missing".into(), variant: None },
-            Request::Rename { session_id: "missing".into(), name: "x".into() },
+            Request::SetModel {
+                session_id: "missing".into(),
+                model: model(),
+            },
+            Request::SetAgent {
+                session_id: "missing".into(),
+                agent: "build".into(),
+            },
+            Request::SetVariant {
+                session_id: "missing".into(),
+                variant: None,
+            },
+            Request::Rename {
+                session_id: "missing".into(),
+                name: "x".into(),
+            },
         ];
         for (idx, req) in reqs.into_iter().enumerate() {
             let id = idx as u64 + 1;
             m.handle(ClientFrame { id: Some(id), req });
             match ev_rx.try_recv().unwrap() {
-                NetEvent::Frame(ServerFrame::Response { id: rid, ok, error, .. }) => {
+                NetEvent::Frame(ServerFrame::Response {
+                    id: rid, ok, error, ..
+                }) => {
                     assert_eq!(rid, id);
                     assert!(!ok);
                     assert_eq!(error.as_deref(), Some("no such session"));

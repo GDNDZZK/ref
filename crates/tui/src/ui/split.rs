@@ -41,14 +41,44 @@ struct BorderChars {
 }
 
 const ROOT_BORDERS: [BorderChars; 4] = [
-    BorderChars { h: "═", v: "║", tl: "╔", tr: "╗", bl: "╚", br: "╝" },
-    BorderChars { h: "━", v: "┃", tl: "┏", tr: "┓", bl: "┗", br: "┛" },
-    BorderChars { h: "┄", v: "┆", tl: "┌", tr: "┐", bl: "└", br: "┘" },
-    BorderChars { h: "┈", v: "┊", tl: "┌", tr: "┐", bl: "└", br: "┘" },
+    BorderChars {
+        h: "═",
+        v: "║",
+        tl: "╔",
+        tr: "╗",
+        bl: "╚",
+        br: "╝",
+    },
+    BorderChars {
+        h: "━",
+        v: "┃",
+        tl: "┏",
+        tr: "┓",
+        bl: "┗",
+        br: "┛",
+    },
+    BorderChars {
+        h: "┄",
+        v: "┆",
+        tl: "┌",
+        tr: "┐",
+        bl: "└",
+        br: "┘",
+    },
+    BorderChars {
+        h: "┈",
+        v: "┊",
+        tl: "┌",
+        tr: "┐",
+        bl: "└",
+        br: "┘",
+    },
 ];
 
 fn root_border(root_id: &str) -> BorderChars {
-    let h = root_id.bytes().fold(0usize, |a, b| a.wrapping_mul(31).wrapping_add(b as usize));
+    let h = root_id
+        .bytes()
+        .fold(0usize, |a, b| a.wrapping_mul(31).wrapping_add(b as usize));
     ROOT_BORDERS[h % ROOT_BORDERS.len()]
 }
 
@@ -372,9 +402,18 @@ mod tests {
             mk("self", "self", Some("self")),
         ];
         assert_eq!(root_task(&live[0], &live), None);
-        assert_eq!(root_task(&live[1], &live), Some(("r".into(), "root-a".into())));
-        assert_eq!(root_task(&live[2], &live), Some(("r".into(), "root-a".into())));
-        assert_eq!(root_task(&live[3], &live), Some(("gone".into(), "gone".into())));
+        assert_eq!(
+            root_task(&live[1], &live),
+            Some(("r".into(), "root-a".into()))
+        );
+        assert_eq!(
+            root_task(&live[2], &live),
+            Some(("r".into(), "root-a".into()))
+        );
+        assert_eq!(
+            root_task(&live[3], &live),
+            Some(("gone".into(), "gone".into()))
+        );
         assert!(root_task(&live[4], &live).is_some());
         assert!(root_task(&live[6], &live).is_some());
     }

@@ -52,7 +52,10 @@ pub enum CreatorFilter {
     #[default]
     All,
     UserCreated,
-    ByCreator { id: String, label: String },
+    ByCreator {
+        id: String,
+        label: String,
+    },
 }
 #[derive(Debug, Clone, Default)]
 pub struct Item {
@@ -459,8 +462,16 @@ impl ListDialog {
                 right.push(Span::styled(
                     label,
                     Style::new()
-                        .fg(if selected { theme::ACCENT } else { theme::PANEL })
-                        .bg(if selected { theme::PANEL } else { fade(theme::ACCENT) }),
+                        .fg(if selected {
+                            theme::ACCENT
+                        } else {
+                            theme::PANEL
+                        })
+                        .bg(if selected {
+                            theme::PANEL
+                        } else {
+                            fade(theme::ACCENT)
+                        }),
                 ));
                 right.push(Span::raw(" "));
             }
