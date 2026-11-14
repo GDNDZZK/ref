@@ -5,6 +5,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QLoggingCategory>
 #include <QProcess>
 #include <QRandomGenerator>
 #include <QTcpServer>
@@ -21,6 +22,8 @@ namespace refgui::client::launcher
 {
 namespace
 {
+
+Q_LOGGING_CATEGORY(lcLauncher, "refgui.client.launcher")
 
 constexpr auto DiscoveredConnectTimeout = 1500ms; // an instance found through its file
 constexpr auto ExplicitConnectTimeout = 3s;
@@ -48,10 +51,13 @@ QCoro::Task<std::optional<Connected>> connectExisting(const QString& directory, 
 	for(const proto::InstanceInfo& instance : liveInstances(directory))
 	{
 		const Endpoint endpoint = endpointFor(instance);
-		if(co_await tryConnect(endpoint, DiscoveredConnectTimeout))
+		const ConnectAttempt attempt = co_await tryConnect(endpoint, DiscoveredConnectTimeout);
+		if(attempt)
 		{
 			co_return endpoint;
 		}
+		// Normal for an instance that is going away: the next one, or a new backend, is tried.
+		qCDebug(lcLauncher) << "instance" << instance.pid << "on port" << instance.port << "refused:" << attempt.error();
 	}
 	if(stop.stopped())
 	{
@@ -144,19 +150,22 @@ QCoro::Task<Connected> connectToStarted(const QString& directory, quint16 port, 
 	}
 
 	const Endpoint endpoint = endpointFor(*instance);
+	QString lastReason;
 	for(int attempt = 0; attempt < NewBackendConnectAttempts; ++attempt)
 	{
-		if(co_await tryConnect(endpoint, DiscoveredConnectTimeout))
+		const ConnectAttempt connected = co_await tryConnect(endpoint, DiscoveredConnectTimeout);
+		if(connected)
 		{
 			co_return endpoint;
 		}
+		lastReason = connected.error();
 		if(stop.stopped())
 		{
 			co_return stoppedResult();
 		}
 		co_await stop.sleep(NewBackendConnectPause);
 	}
-	co_return std::unexpected(u"could not connect to the new backend"_s);
+	co_return std::unexpected(u"could not connect to the new backend: %1"_s.arg(lastReason));
 }
 
 // Starts a backend and connects to it. Only one frontend starts it; the others wait for
@@ -200,11 +209,12 @@ QCoro::Task<std::expected<Endpoint, QString>> connectTarget(Target target,
 {
 	if(const auto* explicitTarget = std::get_if<Explicit>(&target))
 	{
-		if(co_await tryConnect(explicitTarget->endpoint, ExplicitConnectTimeout))
+		const ConnectAttempt attempt = co_await tryConnect(explicitTarget->endpoint, ExplicitConnectTimeout);
+		if(attempt)
 		{
 			co_return explicitTarget->endpoint;
 		}
-		co_return std::unexpected(u"cannot connect to %1"_s.arg(explicitTarget->endpoint.url.toString()));
+		co_return std::unexpected(u"cannot connect to %1: %2"_s.arg(explicitTarget->endpoint.url.toString(), attempt.error()));
 	}
 	co_return co_await discover(std::move(instancesDirectory), std::move(tryConnect), std::move(onStartingBackend), stop);
 }

@@ -33,7 +33,7 @@ Item {
 		height: Theme.fieldHeight
 		radius: 10
 		color: Theme.background
-		border.color: field.hasError ? Theme.danger : input.activeFocus ? Theme.accent : Theme.border
+		border.color: field.hasError ? Theme.dangerText : input.activeFocus ? Theme.accentText : Theme.border
 
 		Behavior on border.color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 
@@ -68,7 +68,7 @@ Item {
 		id: errorLabel
 		anchors { top: box.bottom; topMargin: field.errorGap; left: parent.left; right: parent.right }
 		text: field.errorText
-		color: Theme.danger
+		color: Theme.dangerText
 		font.pixelSize: Theme.smallFontSize
 		wrapMode: Text.Wrap
 		opacity: field.hasError ? 1 : 0

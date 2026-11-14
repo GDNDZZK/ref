@@ -52,7 +52,7 @@ defineExpose({
 }
 
 .input:focus {
-  box-shadow: inset 0 0 0 1px var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-text);
 }
 
 .invalid .input {
@@ -63,7 +63,7 @@ defineExpose({
   margin: 0;
   height: 0;
   overflow: hidden;
-  color: var(--danger);
+  color: var(--danger-text);
   font-size: var(--small-font-size);
   opacity: 0;
   transition:

@@ -59,7 +59,7 @@ Item {
 			textFormat: Text.PlainText
 			width: row.numberWidth
 			text: row.number
-			color: row.highlighted ? Theme.accent : Theme.textMuted
+			color: row.highlighted ? Theme.accentText : Theme.textMuted
 			font.family: Theme.monoFamily
 			font.pixelSize: Theme.smallFontSize
 			horizontalAlignment: Text.AlignRight

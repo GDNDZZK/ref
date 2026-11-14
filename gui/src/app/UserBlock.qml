@@ -30,12 +30,12 @@ Block {
 
 	// Who the message is from, as its header says it, by source.
 	readonly property var markers: ({
-		[MessageSource.peer]: { title: qsTr("message from \"%1\"").arg(sender), icon: "chat-send", color: Theme.info },
-		[MessageSource.spawn]: { title: qsTr("created by \"%1\"").arg(sender), icon: "chat-plus", color: Theme.info },
-		[MessageSource.shell]: { title: qsTr("shell"), icon: "terminal", color: Theme.warning },
-		[MessageSource.reminder]: { title: qsTr("reminder"), icon: "retry", color: Theme.warning }
+		[MessageSource.peer]: { title: qsTr("message from \"%1\"").arg(sender), icon: "chat-send", color: Theme.info, textColor: Theme.infoText },
+		[MessageSource.spawn]: { title: qsTr("created by \"%1\"").arg(sender), icon: "chat-plus", color: Theme.info, textColor: Theme.infoText },
+		[MessageSource.shell]: { title: qsTr("shell"), icon: "terminal", color: Theme.warning, textColor: Theme.warningText },
+		[MessageSource.reminder]: { title: qsTr("reminder"), icon: "retry", color: Theme.warning, textColor: Theme.warningText }
 	})
-	readonly property var marker: markers[source] ?? { title: "", icon: "", color: Theme.warning }
+	readonly property var marker: markers[source] ?? { title: "", icon: "", color: Theme.warning, textColor: Theme.warningText }
 
 	// The bubble fill by what the message is.
 	function bubbleColor() {
@@ -118,13 +118,13 @@ Block {
 						anchors.verticalCenter: parent.verticalCenter
 						name: "history"
 						size: 16
-						color: Theme.accent
+						color: Theme.accentText
 					}
 					Text {
 						textFormat: Text.PlainText
 						anchors.verticalCenter: parent.verticalCenter
 						text: qsTr("Context compacted")
-						color: Theme.accent
+						color: Theme.accentText
 						font.pixelSize: Theme.compactFontSize
 						font.bold: true
 					}
@@ -239,13 +239,13 @@ Block {
 					anchors.verticalCenter: parent.verticalCenter
 					name: block.marker.icon
 					size: 16
-					color: block.marker.color
+					color: block.marker.textColor
 				}
 				Text {
 					textFormat: Text.PlainText
 					anchors.verticalCenter: parent.verticalCenter
 					text: block.marker.title
-					color: block.marker.color
+					color: block.marker.textColor
 					font.pixelSize: Theme.smallFontSize
 					font.bold: true
 				}

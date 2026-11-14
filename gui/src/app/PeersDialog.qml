@@ -18,6 +18,7 @@ SessionDialog {
 	property string tab: Workspace.dialogArgs.tab ?? tabs[0].value
 	property string result: ""
 	property bool loading: true
+	property bool failed: false // the result is the backend's reason the command failed
 
 	function commandOf(tab) {
 		return tabs.find(entry => entry.value === tab).command
@@ -27,16 +28,19 @@ SessionDialog {
 		loading = true
 		Workspace.peerCommand(sessionId, commandOf(tab), "", replyWhileOpen((ok, text) => {
 			loading = false
+			failed = !ok
 			result = text
 		}))
 	}
 
 	function rename() {
 		Workspace.peerCommand(sessionId, commandOf("name"), nameField.text.trim(), replyWhileOpen((ok, text) => {
-			if (ok)
+			if (ok) {
+				failed = false
 				result = text
-			else
+			} else {
 				nameField.errorText = text
+			}
 		}))
 	}
 
@@ -84,7 +88,7 @@ SessionDialog {
 					selectedTextColor: Theme.text
 					wrapMode: TextEdit.Wrap
 					text: dialog.loading ? qsTr("Loading…") : dialog.result
-					color: dialog.loading ? Theme.textMuted : Theme.text
+					color: dialog.loading ? Theme.textMuted : dialog.failed ? Theme.dangerText : Theme.text
 					font { family: Theme.monoFamily; pixelSize: Theme.codeFontSize }
 					opacity: dialog.loading ? 0.6 : 1
 

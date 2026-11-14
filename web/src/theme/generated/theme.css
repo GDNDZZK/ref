@@ -23,6 +23,11 @@
   --warning-surface: #fcf4e2;
   --warning-border: #ecd29a;
   --idle-dot: #6b6d7580;
+  --accent-text: #356889;
+  --success-text: #00723a;
+  --danger-text: #ba2632;
+  --warning-text: #8c5802;
+  --info-text: #04689d;
   --scrim: #00000040;
   --info: #2a7fb5;
   --diff-added: #1f7a4d;
@@ -208,6 +213,11 @@
   --warning-surface: #2b2417;
   --warning-border: #5a4723;
   --idle-dot: #8e909a80;
+  --accent-text: #7aa2f7;
+  --success-text: #6cc28a;
+  --danger-text: #ec6f73;
+  --warning-text: #e6b450;
+  --info-text: #6fb7e0;
   --scrim: #0000008c;
   --info: #6fb7e0;
   --diff-added: #6cc28a;
