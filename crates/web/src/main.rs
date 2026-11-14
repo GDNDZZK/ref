@@ -97,9 +97,31 @@ fn main() -> anyhow::Result<()> {
     runtime.block_on(run(cli))
 }
 
+fn log_filter(
+    var: Result<String, std::env::VarError>,
+) -> (tracing_subscriber::EnvFilter, Option<String>) {
+    let default = || tracing_subscriber::EnvFilter::new("warn");
+    match var {
+        Ok(val) => match tracing_subscriber::EnvFilter::try_new(&val) {
+            Ok(filter) => (filter, None),
+            Err(e) => (
+                default(),
+                Some(format!("invalid REF_LOG={val:?}: {e}; using \"warn\"")),
+            ),
+        },
+        Err(std::env::VarError::NotPresent) => (default(), None),
+        Err(std::env::VarError::NotUnicode(_)) => (
+            default(),
+            Some("invalid REF_LOG: non-UTF-8 value; using \"warn\"".to_string()),
+        ),
+    }
+}
+
 fn init_logging() {
-    let filter =
-        tracing_subscriber::EnvFilter::try_from_env("REF_LOG").unwrap_or_else(|_| "warn".into());
+    let (filter, warning) = log_filter(std::env::var("REF_LOG"));
+    if let Some(w) = warning {
+        say_err!("{w}");
+    }
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(filter)
@@ -137,6 +159,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         return Ok(());
     }
 
+    let stop_signal = stop_signal_future().context("cannot install signal handler")?;
     let use_tls = !tls::is_loopback(&cli.host) && !cli.no_tls;
     let loaded_tls = if use_tls {
         Some(tls::load_or_create(&cli.host)?)
@@ -191,7 +214,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     });
     let stop = shutdown.clone();
     tokio::spawn(async move {
-        wait_for_stop_signal().await;
+        if let Err(e) = stop_signal.await {
+            tracing::warn!("signal handler failed: {e}");
+        }
         stop.cancel();
     });
     let app = routes::router(state.clone()).into_make_service_with_connect_info::<ClientAddr>();
@@ -264,18 +289,20 @@ async fn open_running(cli: &Cli, key: &Key, cwd: &str) -> anyhow::Result<bool> {
 }
 
 #[cfg(unix)]
-async fn wait_for_stop_signal() {
+fn stop_signal_future() -> std::io::Result<impl std::future::Future<Output = std::io::Result<()>>> {
     use tokio::signal::unix::{SignalKind, signal};
-    let mut term = signal(SignalKind::terminate()).expect("install SIGTERM handler");
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => {}
-        _ = term.recv() => {}
-    }
+    let mut term = signal(SignalKind::terminate())?;
+    Ok(async move {
+        tokio::select! {
+            res = tokio::signal::ctrl_c() => res,
+            _ = term.recv() => Ok(()),
+        }
+    })
 }
 
 #[cfg(not(unix))]
-async fn wait_for_stop_signal() {
-    let _ = tokio::signal::ctrl_c().await;
+fn stop_signal_future() -> std::io::Result<impl std::future::Future<Output = std::io::Result<()>>> {
+    Ok(tokio::signal::ctrl_c())
 }
 
 #[cfg(test)]
@@ -296,5 +323,24 @@ mod tests {
         let manifest = format!("{}/Cargo.toml", env!("CARGO_MANIFEST_DIR"));
         assert!(start_dir(Some(&manifest)).is_err());
         assert!(start_dir(Some("/no/such/dir/anywhere")).is_err());
+    }
+
+    #[test]
+    fn log_filter_reports_invalid_ref_log_only_when_set() {
+        let (_f, warn) = log_filter(Err(std::env::VarError::NotPresent));
+        assert!(warn.is_none());
+        let (_f, warn) = log_filter(Ok("info".into()));
+        assert!(warn.is_none());
+        let (_f, warn) = log_filter(Ok("not[valid".into()));
+        assert!(
+            warn.as_deref()
+                .is_some_and(|w| w.contains("invalid REF_LOG"))
+        );
+    }
+
+    #[tokio::test]
+    async fn stop_signal_future_installs_cleanly() {
+        let fut = stop_signal_future().unwrap();
+        drop(fut);
     }
 }
