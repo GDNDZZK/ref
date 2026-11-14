@@ -652,6 +652,7 @@ impl App {
         self.dirty = true;
         match ev {
             NetEvent::Status(s) => self.net_status = Some(s),
+            NetEvent::Warn(msg) => self.toasts.warn(msg),
             NetEvent::Connected => {
                 let reconnect = self.ever_connected;
                 self.connected = true;
