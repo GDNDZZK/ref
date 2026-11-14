@@ -28,8 +28,16 @@ fn is_wayland() -> bool {
     std::env::var_os("WAYLAND_DISPLAY").is_some()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CopyOutcome {
+    /// Copied to the system clipboard (and OSC 52 was emitted if stdout succeeded).
+    Native,
+    /// Native clipboard backends failed; OSC 52 escape sequence was emitted.
+    Osc52Only,
+}
+
 #[cfg(not(test))]
-fn osc52(text: &str) {
+fn osc52(text: &str) -> std::io::Result<()> {
     let b64 = base64_encode(text);
     let seq = if std::env::var_os("TMUX").is_some() {
         format!("\x1bPtmux;\x1b\x1b]52;c;{b64}\x07\x1b\\")
@@ -38,43 +46,46 @@ fn osc52(text: &str) {
     };
     use std::io::Write;
     let mut out = std::io::stdout();
-    let _ = out.write_all(seq.as_bytes());
-    let _ = out.flush();
+    out.write_all(seq.as_bytes())?;
+    out.flush()
 }
 
 #[cfg(not(test))]
-fn pipe_to(cmd: &str, args: &[&str], text: &str) -> bool {
-    let Ok(mut child) = Command::new(cmd)
+fn pipe_to(cmd: &str, args: &[&str], text: &str) -> Result<(), String> {
+    let mut child = Command::new(cmd)
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-    else {
-        return false;
-    };
+        .map_err(|e| format!("{cmd}: {e}"))?;
     if let Some(mut stdin) = child.stdin.take() {
         use std::io::Write;
-        let _ = stdin.write_all(text.as_bytes());
+        stdin
+            .write_all(text.as_bytes())
+            .map_err(|e| format!("{cmd} stdin: {e}"))?;
     }
     // wl-copy forks and stays alive to serve the selection; don't block on it for long.
     for _ in 0..SPAWN_POLL_ATTEMPTS {
         match child.try_wait() {
-            Ok(Some(s)) => return s.success(),
+            Ok(Some(s)) if s.success() => return Ok(()),
+            Ok(Some(s)) => return Err(format!("{cmd} exited with {s}")),
             Ok(None) => std::thread::sleep(SPAWN_POLL_INTERVAL),
-            Err(_) => return false,
+            Err(e) => return Err(format!("{cmd} wait: {e}")),
         }
     }
-    true
+    Ok(())
 }
 
-/// Copies text to the system clipboard. Returns true if a native clipboard accepted it
-/// (OSC 52 is always emitted as well).
-pub fn copy(text: &str) -> bool {
+/// Copies text to the system clipboard and emits OSC 52.
+pub fn copy(text: &str) -> Result<CopyOutcome, String> {
     #[cfg(test)]
     {
         LAST_COPY.with(|c| *c.borrow_mut() = Some(text.to_string()));
-        true
+        if let Some(res) = NEXT_COPY_RESULT.with(|r| r.borrow_mut().take()) {
+            return res;
+        }
+        Ok(CopyOutcome::Native)
     }
     #[cfg(not(test))]
     copy_native(text)
@@ -84,6 +95,9 @@ pub fn copy(text: &str) -> bool {
 thread_local! {
     /// Last text passed to `copy` (tests only; nothing touches the real clipboard).
     static LAST_COPY: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    /// Optional forced return value for the next `copy` call (tests only).
+    static NEXT_COPY_RESULT: std::cell::RefCell<Option<Result<CopyOutcome, String>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// Takes the last copied text (tests only).
@@ -92,26 +106,55 @@ pub(crate) fn take_last_copy() -> Option<String> {
     LAST_COPY.with(|c| c.borrow_mut().take())
 }
 
+/// Forces the outcome of the next `copy` call (tests only).
+#[cfg(test)]
+pub(crate) fn set_next_copy_result(res: Result<CopyOutcome, String>) {
+    NEXT_COPY_RESULT.with(|r| *r.borrow_mut() = Some(res));
+}
+
 #[cfg(not(test))]
-fn copy_native(text: &str) -> bool {
-    osc52(text);
-    let mut ok = false;
-    if let Ok(mut cb) = arboard::Clipboard::new() {
-        ok = cb.set_text(text.to_string()).is_ok();
-        // Keep the clipboard owner alive briefly on X11 so managers can grab the content.
-        if ok {
-            std::thread::spawn(move || {
-                std::thread::sleep(X11_OWNER_KEEP_ALIVE);
-                drop(cb);
-            });
+fn copy_native(text: &str) -> Result<CopyOutcome, String> {
+    let osc = osc52(text);
+    let mut errs = Vec::new();
+    match arboard::Clipboard::new() {
+        Ok(mut cb) => match cb.set_text(text.to_string()) {
+            Ok(()) => {
+                // Keep the clipboard owner alive briefly on X11 so managers can grab the content.
+                std::thread::spawn(move || {
+                    std::thread::sleep(X11_OWNER_KEEP_ALIVE);
+                    drop(cb);
+                });
+                return Ok(CopyOutcome::Native);
+            }
+            Err(e) => errs.push(format!("arboard: {e}")),
+        },
+        Err(e) => errs.push(format!("arboard: {e}")),
+    }
+    let cmds: &[(&str, &[&str])] = if is_wayland() {
+        &[
+            ("wl-copy", &[]),
+            ("xclip", &["-selection", "clipboard"]),
+            ("xsel", &["--clipboard", "--input"]),
+        ]
+    } else {
+        &[
+            ("xclip", &["-selection", "clipboard"]),
+            ("xsel", &["--clipboard", "--input"]),
+        ]
+    };
+    for (cmd, args) in cmds {
+        match pipe_to(cmd, args, text) {
+            Ok(()) => return Ok(CopyOutcome::Native),
+            Err(e) => errs.push(e),
         }
     }
-    if !ok {
-        ok = (is_wayland() && pipe_to("wl-copy", &[], text))
-            || pipe_to("xclip", &["-selection", "clipboard"], text)
-            || pipe_to("xsel", &["--clipboard", "--input"], text);
+    match osc {
+        Ok(()) => Ok(CopyOutcome::Osc52Only),
+        Err(e) => {
+            errs.push(format!("osc52: {e}"));
+            Err(errs.join("; "))
+        }
     }
-    ok
 }
 
 fn encode_png(w: usize, h: usize, rgba: &[u8]) -> Option<Vec<u8>> {

@@ -5115,3 +5115,25 @@ fn malformed_responses_toast_errors_without_fallback() {
     assert!(app.dialog.is_none());
     assert!(app.toasts.items.iter().any(|t| t.text.contains("Malformed response")));
 }
+
+#[test]
+fn copy_text_toasts_osc52_warn_and_clipboard_error() {
+    use ref_proto::ToastLevel;
+    let mut app = test_app(false);
+
+    app.copy_text("hello", "selection");
+    assert_eq!(crate::clipboard::take_last_copy().as_deref(), Some("hello"));
+    assert_eq!(app.toasts.items.last().unwrap().level, ToastLevel::Info);
+
+    crate::clipboard::set_next_copy_result(Ok(crate::clipboard::CopyOutcome::Osc52Only));
+    app.copy_text("hello", "selection");
+    let t = app.toasts.items.last().unwrap();
+    assert_eq!(t.level, ToastLevel::Warn);
+    assert!(t.text.contains("OSC 52"), "{}", t.text);
+
+    crate::clipboard::set_next_copy_result(Err("no clipboard tool".into()));
+    app.copy_text("hello", "selection");
+    let t = app.toasts.items.last().unwrap();
+    assert_eq!(t.level, ToastLevel::Error);
+    assert!(t.text.contains("Copy failed: no clipboard tool"), "{}", t.text);
+}

@@ -1748,8 +1748,19 @@ impl App {
             self.toasts.warn("Nothing to copy");
             return;
         }
-        crate::clipboard::copy(t);
-        self.toasts.info(format!("Copied {what} ({n} chars)"));
+        match crate::clipboard::copy(t) {
+            Ok(crate::clipboard::CopyOutcome::Native) => {
+                self.toasts.info(format!("Copied {what} ({n} chars)"));
+            }
+            Ok(crate::clipboard::CopyOutcome::Osc52Only) => {
+                self.toasts.warn(format!(
+                    "Copied {what} ({n} chars) via OSC 52 only (no native clipboard)"
+                ));
+            }
+            Err(e) => {
+                self.toasts.error(format!("Copy failed: {e}"));
+            }
+        }
     }
 
     pub fn copy_message(&mut self, sid: &str, msg: &str) {
