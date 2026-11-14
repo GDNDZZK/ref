@@ -58,7 +58,7 @@ Item {
 		anchors { left: parent.left; right: parent.right; top: parent.top; bottom: questionCard.top }
 		model: pane.session.blocks
 		sidePadding: pane.columnPadding
-		turnInProgress: pane.session.busy
+		holding: pane.session.activelyWorking
 		sessionId: pane.session.sessionId
 		permissionCount: pane.session.permissionCount
 		moreBefore: pane.session.moreBefore

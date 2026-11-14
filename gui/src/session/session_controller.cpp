@@ -53,6 +53,7 @@ SessionController::SessionController(client::Backend& backend, QObject* parent)
 		}
 	});
 	connect(&m_feed, &ConversationFeed::pendingChanged, this, &SessionController::turnInProgressChanged);
+	connect(&m_feed, &ConversationFeed::pendingChanged, this, &SessionController::activelyWorkingChanged);
 	connect(&backend, &client::Backend::stateChanged, this, &SessionController::connectionChanged);
 }
 
@@ -69,6 +70,14 @@ bool SessionController::isBusy() const
 bool SessionController::isTurnInProgress() const
 {
 	return isBusy() || m_feed.hasPending();
+}
+
+bool SessionController::isActivelyWorking() const
+{
+	using State = proto::SessionStatus::State;
+	const State state = m_info.status.state;
+	const bool activeState = state == State::Busy || state == State::Running || state == State::Compacting;
+	return activeState || m_feed.hasPending();
 }
 
 QCoro::Task<SessionController::Result<void>> SessionController::create(QString cwd,
@@ -358,6 +367,7 @@ void SessionController::setInfo(const proto::SessionInfo& info)
 {
 	const bool wasBusy = isBusy();
 	const bool wasInProgress = isTurnInProgress();
+	const bool wasWorking = isActivelyWorking();
 	m_info = info;
 	emit infoChanged();
 	if(isBusy() != wasBusy)
@@ -367,6 +377,10 @@ void SessionController::setInfo(const proto::SessionInfo& info)
 	if(isTurnInProgress() != wasInProgress)
 	{
 		emit turnInProgressChanged();
+	}
+	if(isActivelyWorking() != wasWorking)
+	{
+		emit activelyWorkingChanged();
 	}
 }
 
