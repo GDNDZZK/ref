@@ -58,6 +58,7 @@
     "output": "Output",
     "moreWaiting": "+{count} more waiting",
     "showMore": "Show {count} more lines",
+    "moreDiffRows": "+{count} more",
     "earlierLines": "{count} earlier lines",
     "noOutput": "(no output)",
     "timedOut": "timed out",

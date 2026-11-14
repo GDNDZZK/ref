@@ -90,6 +90,9 @@ function open(target: string): void {
 <template>
   <div class="body">
     <template v-if="layout === 'diff'">
+      <ToolSection v-if="inputText" :label="t('tool.input')">
+        <ToolText :text="inputText" tone="info" />
+      </ToolSection>
       <ToolSection>
         <div class="path">
           <span class="file">{{ metaString(meta, 'path') }}</span>
@@ -101,7 +104,7 @@ function open(target: string): void {
           <div v-for="(warning, index) in warnings" :key="index" class="warning">{{ warning }}</div>
         </div>
       </ToolSection>
-      <ToolOutput v-if="block.state === 'error'" :block="block" />
+      <ToolOutput :block="block" />
     </template>
 
     <template v-else-if="layout === 'bash'">
