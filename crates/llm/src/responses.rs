@@ -330,28 +330,44 @@ fn slot_key(ev: &Value) -> String {
 }
 
 impl ResponsesState {
-    fn open_slot(&mut self, asm: &mut Assembler<'_>, key: String, item: &Value) -> Option<usize> {
+    fn open_slot(
+        &mut self,
+        asm: &mut Assembler<'_>,
+        key: String,
+        item: &Value,
+    ) -> Result<Option<usize>, LlmError> {
         if let Some(slot) = self.slots.get(&key) {
-            return Some(slot.block);
+            return Ok(Some(slot.block));
         }
-        let (kind, block_kind) = match item.get("type").and_then(Value::as_str)? {
+        let Some(ty) = item.get("type").and_then(Value::as_str) else {
+            return Ok(None);
+        };
+        let (kind, block_kind) = match ty {
             "reasoning" => (SlotKind::Reasoning, BlockKind::Reasoning),
             "message" => (SlotKind::Text, BlockKind::Text),
             "function_call" => {
                 let id = item
                     .get("call_id")
-                    .or_else(|| item.get("id"))
                     .and_then(Value::as_str)
-                    .unwrap_or("")
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| {
+                        item.get("id")
+                            .and_then(Value::as_str)
+                            .filter(|s| !s.is_empty())
+                    })
+                    .ok_or_else(|| {
+                        LlmError::fatal("responses stream: function_call missing call_id")
+                    })?
                     .to_string();
                 let name = item
                     .get("name")
                     .and_then(Value::as_str)
-                    .unwrap_or("")
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| LlmError::fatal("responses stream: function_call missing name"))?
                     .to_string();
                 (SlotKind::Tool, BlockKind::ToolCall { id, name })
             }
-            _ => return None,
+            _ => return Ok(None),
         };
         let block = asm.start(block_kind);
         if kind == SlotKind::Tool
@@ -368,7 +384,7 @@ impl ResponsesState {
                 done: false,
             },
         );
-        Some(block)
+        Ok(Some(block))
     }
 
     fn slot_for(&mut self, ev: &Value, kind: SlotKind) -> Option<&mut Slot> {
@@ -392,7 +408,7 @@ impl ResponsesState {
         match ty {
             "response.output_item.added" => {
                 if let Some(item) = ev.get("item") {
-                    self.open_slot(asm, slot_key(ev), item);
+                    self.open_slot(asm, slot_key(ev), item)?;
                 }
             }
             "response.reasoning_summary_text.delta" => {
@@ -430,7 +446,7 @@ impl ResponsesState {
             }
             "response.output_item.done" => {
                 if let Some(item) = ev.get("item") {
-                    self.on_item_done(asm, slot_key(ev), item);
+                    self.on_item_done(asm, slot_key(ev), item)?;
                 }
             }
             "response.completed" | "response.incomplete" => {
@@ -477,9 +493,14 @@ impl ResponsesState {
         Ok(false)
     }
 
-    fn on_item_done(&mut self, asm: &mut Assembler<'_>, key: String, item: &Value) {
-        let Some(block) = self.open_slot(asm, key.clone(), item) else {
-            return;
+    fn on_item_done(
+        &mut self,
+        asm: &mut Assembler<'_>,
+        key: String,
+        item: &Value,
+    ) -> Result<(), LlmError> {
+        let Some(block) = self.open_slot(asm, key.clone(), item)? else {
+            return Ok(());
         };
         let kind = self.slots.get(&key).map(|s| s.kind);
         match kind {
@@ -536,6 +557,7 @@ impl ResponsesState {
             slot.done = true;
         }
         asm.end(block);
+        Ok(())
     }
 
     fn on_terminal(&mut self, asm: &mut Assembler<'_>, resp: &Value) {

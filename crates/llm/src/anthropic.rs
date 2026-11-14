@@ -529,9 +529,11 @@ fn push_merged(out: &mut Vec<Value>, role: &str, content: Vec<Value>) {
 // Streaming
 // ---------------------------------------------------------------------------
 
-/// Content block index of a stream event (0 when missing).
-fn content_index(ev: &Value) -> u64 {
-    ev.get("index").and_then(Value::as_u64).unwrap_or(0)
+/// Content block index of a stream event.
+fn content_index(ev: &Value) -> Result<u64, LlmError> {
+    ev.get("index")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| LlmError::fatal("anthropic stream: content block event missing index"))
 }
 
 #[derive(Debug, Default)]
@@ -575,7 +577,7 @@ impl AnthropicState {
                 }
             }
             "content_block_start" => {
-                let index = content_index(ev);
+                let index = content_index(ev)?;
                 let Some(cb) = ev.get("content_block") else {
                     return Ok(false);
                 };
@@ -621,7 +623,7 @@ impl AnthropicState {
                 self.blocks.insert(index, block);
             }
             "content_block_delta" => {
-                let index = content_index(ev);
+                let index = content_index(ev)?;
                 let (Some(&block), Some(delta)) = (self.blocks.get(&index), ev.get("delta")) else {
                     return Ok(false);
                 };
@@ -640,7 +642,7 @@ impl AnthropicState {
                 }
             }
             "content_block_stop" => {
-                let index = content_index(ev);
+                let index = content_index(ev)?;
                 if let Some(&block) = self.blocks.get(&index) {
                     asm.end(block);
                 }

@@ -189,3 +189,31 @@ async fn connection_refused_is_retryable() {
     let err = run_stream(&p, &mut sink).await.unwrap_err();
     assert!(err.retryable && !err.cancelled);
 }
+
+#[tokio::test]
+async fn truncated_error_body_surfaces_read_error() {
+    for head in [
+        "HTTP/1.1 500 Internal Server Error\r\ncontent-type: text/plain\r\ncontent-length: 100\r\nconnection: close\r\n\r\npart",
+        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 100\r\nconnection: close\r\n\r\n{\"error\":",
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let head = head.to_string();
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = sock.read(&mut buf).await;
+            sock.write_all(head.as_bytes()).await.unwrap();
+            let _ = sock.shutdown().await;
+        });
+        let p = provider(
+            ApiKind::OpenAIChat,
+            format!("http://{addr}/v1/"),
+            Duration::from_secs(5),
+        );
+        let mut sink = |_e: StreamEvent| {};
+        let err = run_stream(&p, &mut sink).await.unwrap_err();
+        assert!(err.retryable, "{err:?}");
+        assert!(err.message.contains("network error"), "{}", err.message);
+    }
+}

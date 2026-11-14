@@ -283,3 +283,20 @@ fn tool_arguments_validation_and_empty_object() {
         assert!(!err.retryable);
     }
 }
+
+#[test]
+fn function_call_without_id_or_name_is_protocol_error() {
+    let missing_id = "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"name\":\"read\",\"arguments\":\"\"}}\n\n";
+    let err = replay(ResponsesState::default(), missing_id.as_bytes())
+        .0
+        .unwrap_err();
+    assert!(!err.retryable);
+    assert!(err.message.contains("call_id"), "{}", err.message);
+
+    let missing_name = "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"arguments\":\"\"}}\n\n";
+    let err = replay(ResponsesState::default(), missing_name.as_bytes())
+        .0
+        .unwrap_err();
+    assert!(!err.retryable);
+    assert!(err.message.contains("name"), "{}", err.message);
+}
