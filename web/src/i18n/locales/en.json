@@ -15,7 +15,7 @@
     "placeholderQueue": "Type to queue a message…",
     "placeholderShell": "Run a shell command…",
     "interruptHint": "Press Esc again to interrupt",
-    "dropImages": "Drop images to attach",
+    "dropFiles": "Drop files to attach",
     "tags": {
       "agent": "Agent (Tab)",
       "model": "Model",

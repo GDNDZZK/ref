@@ -38,6 +38,16 @@ export function isDraftEmpty(draft: Draft): boolean {
   return draft.text.trim() === '' && draft.attachments.length === 0
 }
 
+// Inserts `token` at `cursor` (space-padded on the left unless the text before it already ends in
+// a space or line break) and returns the cursor after it.
+export function insertToken(draft: Draft, token: string, cursor: number = draft.text.length): number {
+  const before = draft.text.slice(0, cursor)
+  const needsPad = before !== '' && !/[ \n]$/.test(before)
+  const inserted = `${needsPad ? ' ' : ''}${token} `
+  draft.text = before + inserted + draft.text.slice(cursor)
+  return before.length + inserted.length
+}
+
 // Inserts the token for `image` at `cursor` (space-padded on the left unless the text before it
 // already ends in a space or line break) and returns the cursor after it.
 export function attachImage(
@@ -49,12 +59,7 @@ export function attachImage(
   draft.imageSeq++
   const token = imageToken(draft.imageSeq)
   draft.attachments.push({ token, image, name })
-
-  const before = draft.text.slice(0, cursor)
-  const needsPad = before !== '' && !/[ \n]$/.test(before)
-  const inserted = `${needsPad ? ' ' : ''}${token} `
-  draft.text = before + inserted + draft.text.slice(cursor)
-  return before.length + inserted.length
+  return insertToken(draft, token, cursor)
 }
 
 // Drops the attachments whose token was deleted from the text.

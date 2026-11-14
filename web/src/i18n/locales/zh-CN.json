@@ -15,7 +15,7 @@
     "placeholderQueue": "输入后加入队列…",
     "placeholderShell": "运行 shell 命令…",
     "interruptHint": "再按一次 Esc 中断",
-    "dropImages": "拖放图片以附加",
+    "dropFiles": "拖放文件以附加",
     "tags": {
       "agent": "智能体（Tab）",
       "model": "模型",
