@@ -99,9 +99,16 @@ pub fn draw(f: &mut Frame<'_>, app: &mut App) {
     let now = ref_proto::now_ms();
     let tick = app.tick();
     let buf = f.buffer_mut();
+    let banner_h = draw_top_notice(buf, area, app);
+    let content_area = Rect::new(
+        area.x,
+        area.y + banner_h,
+        area.width,
+        area.height.saturating_sub(banner_h),
+    );
     let cursor = match app.mode {
-        Mode::Chat => draw_chat_mode(buf, area, app, now, tick),
-        Mode::Watch => draw_watch_mode(buf, area, app, now, tick),
+        Mode::Chat => draw_chat_mode(buf, content_area, app, now, tick),
+        Mode::Watch => draw_watch_mode(buf, content_area, app, now, tick),
     };
     let cursor = draw_overlays(buf, area, app, tick, cursor);
     draw_disconnected_banner(buf, area, app, tick);
@@ -164,9 +171,71 @@ fn draw_overlays(
     }
 }
 
+/// Persistent top banner for protocol version warnings (when connected to an older backend)
+/// or a refused reconnect (after we were previously connected). Returns the rows consumed.
+fn draw_top_notice(buf: &mut Buffer, area: Rect, app: &App) -> u16 {
+    if area.height <= BANNER_MIN_SCREEN_H || area.width < 4 {
+        return 0;
+    }
+    let (msg, bg) = if app.connected {
+        let Some(p) = app.backend_too_old else {
+            return 0;
+        };
+        (
+            format!(
+                "The backend speaks protocol {p} but this ref needs {}. Run ref-server --stop and start ref again.",
+                ref_proto::PROTOCOL_VERSION
+            ),
+            theme::WARNING,
+        )
+    } else if app.ever_connected {
+        let Some(reason) = &app.refused else {
+            return 0;
+        };
+        (reason.clone(), theme::ERROR)
+    } else {
+        return 0;
+    };
+    let lines = text::wrap_spans(
+        &[Span::raw(text::one_line(&msg))],
+        area.width.saturating_sub(2) as usize,
+    );
+    let rows = (lines.len() as u16).min(area.height.saturating_sub(BANNER_MIN_SCREEN_H));
+    for (i, line) in lines.into_iter().take(rows as usize).enumerate() {
+        let y = area.y + i as u16;
+        fill(
+            buf,
+            Rect::new(area.x, y, area.width, 1),
+            Style::new().bg(bg),
+        );
+        let w = text::line_width(&line) as u16;
+        let x = area.x + area.width.saturating_sub(w) / 2;
+        let styled = Line::from(
+            line.spans
+                .into_iter()
+                .map(|s| {
+                    Span::styled(
+                        s.content,
+                        Style::new()
+                            .fg(theme::PANEL)
+                            .bg(bg)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        );
+        buf.set_line(x, y, &styled, area.width);
+    }
+    rows
+}
+
 /// Top full-width banner shown when the connection dropped after we had one.
 fn draw_disconnected_banner(buf: &mut Buffer, area: Rect, app: &App, tick: u64) {
-    if app.connected || !app.ever_connected || area.height <= BANNER_MIN_SCREEN_H {
+    if app.connected
+        || !app.ever_connected
+        || app.refused.is_some()
+        || area.height <= BANNER_MIN_SCREEN_H
+    {
         return;
     }
     let msg = format!(" {} Disconnected — reconnecting… ", theme::spinner(tick));
@@ -183,7 +252,6 @@ fn draw_disconnected_banner(buf: &mut Buffer, area: Rect, app: &App, tick: u64) 
             .add_modifier(Modifier::BOLD),
     );
 }
-
 fn env<'a>(app: &'a App, now: i64, tick: u64) -> Env<'a> {
     Env {
         agents: app.agents(),
@@ -217,7 +285,7 @@ fn draw_chat_mode(
             }
             app.views.insert(c, v);
         }
-        None => draw_center(buf, lay.chat, &connect_text(app)),
+        None => draw_center(buf, lay.chat, &connect_text(app, lay.chat.width as usize)),
     }
     // Sidebar.
     if let Some(sb) = lay.sidebar {
@@ -245,7 +313,8 @@ fn draw_chat_mode(
         hint,
         leader: app.leader.is_some(),
         shell_mode: app.shell_mode,
-        connected: app.connected || !app.ever_connected,
+        connected: app.connected || (!app.ever_connected && app.refused.is_none()),
+        refused: app.refused.is_some(),
         watch_mode: false,
         watch_count: 0,
         watch_focused: false,
@@ -255,7 +324,25 @@ fn draw_chat_mode(
     cursor
 }
 
-fn connect_text(app: &App) -> Vec<Line<'static>> {
+fn connect_text(app: &App, max_w: usize) -> Vec<Line<'static>> {
+    if let Some(reason) = &app.refused {
+        let mut l = vec![Line::from(Span::styled(
+            "Disconnected",
+            theme::bold(theme::ERROR),
+        ))];
+        for line in text::wrap_spans(
+            &[Span::raw(text::one_line(reason))],
+            max_w.saturating_sub(4).max(10),
+        ) {
+            l.push(Line::from(
+                line.spans
+                    .into_iter()
+                    .map(|s| Span::styled(s.content, theme::fg(theme::TEXT)))
+                    .collect::<Vec<_>>(),
+            ));
+        }
+        return l;
+    }
     let mut l = vec![Line::from(Span::styled(
         format!("{} connecting…", theme::spinner(app.tick())),
         theme::muted(),
@@ -324,6 +411,8 @@ fn draw_prompt(buf: &mut Buffer, lay: &Layout, app: &mut App, focused: bool) -> 
     // Editor.
     let placeholder = if app.shell_mode {
         "Run a shell command…"
+    } else if !app.connected && app.refused.is_some() {
+        "Disconnected"
     } else if !app.connected && app.ever_connected {
         "Disconnected — reconnecting…"
     } else if busy {
@@ -903,7 +992,8 @@ fn draw_watch_mode(
         hint,
         leader: app.leader.is_some(),
         shell_mode: false,
-        connected: app.connected || !app.ever_connected,
+        connected: app.connected || (!app.ever_connected && app.refused.is_none()),
+        refused: app.refused.is_some(),
         watch_mode: true,
         watch_count: ids.len(),
         watch_focused: app.watch.focus.is_some(),

@@ -359,6 +359,18 @@ async fn handle_hello(hub: &Arc<Hub>, conn: &Arc<Conn>, auth: &Auth, frame: Clie
         reject_frame(conn, frame.id, "invalid or missing token".into()).await;
         return false;
     }
+    if version != ref_proto::PROTOCOL_VERSION && client != CONTROL_CLIENT {
+        reject_frame(
+            conn,
+            frame.id,
+            crate::api::ApiError::coded(
+                ref_proto::ERR_PROTOCOL_MISMATCH,
+                protocol_mismatch_text(&client, version),
+            ),
+        )
+        .await;
+        return false;
+    }
     {
         let mut st = conn.lock();
         st.authed = true;
@@ -392,6 +404,20 @@ async fn reject_frame(conn: &Conn, id: Option<u64>, err: crate::api::ApiError) {
         conn.send(err_frame(id, err));
     }
     tokio::time::sleep(CLOSE_GRACE).await;
+}
+
+fn protocol_mismatch_text(client: &str, version: u32) -> String {
+    let server_ver = env!("CARGO_PKG_VERSION");
+    let proto = ref_proto::PROTOCOL_VERSION;
+    if version < proto {
+        format!(
+            "ref-server {server_ver} speaks protocol {proto}, but this client ({client}) speaks protocol {version}. Update the client to the same version as ref-server."
+        )
+    } else {
+        format!(
+            "ref-server {server_ver} speaks protocol {proto}, but this client ({client}) speaks protocol {version}. Restart the backend with the same version as the client (ref-server --stop, then start ref again)."
+        )
+    }
 }
 
 /// The instance as clients see it: everything but the token.

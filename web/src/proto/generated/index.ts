@@ -33,4 +33,4 @@ export type { ToolState } from "./ToolState";
 export type { Usage } from "./Usage";
 export type { JsonValue } from "./serde_json/JsonValue";
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;

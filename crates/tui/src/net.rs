@@ -17,12 +17,17 @@ use ref_client::{Endpoint, Target, Ws};
 pub enum NetEvent {
     /// Connected and Hello acknowledged.
     Connected,
+    /// Backend speaks an older protocol than this client (`protocol < PROTOCOL_VERSION`).
+    BackendTooOld {
+        protocol: u32,
+    },
     Disconnected(String),
+    /// Server refused the handshake due to a protocol version mismatch; do not reconnect.
+    Refused(String),
     /// Progress text ("starting backend…").
     Status(String),
     Frame(ServerFrame),
 }
-
 /// Handle used by the app to send frames.
 #[derive(Clone)]
 pub struct Client {
@@ -51,8 +56,9 @@ const RECONNECT_DELAY: Duration = Duration::from_secs(1);
 
 /// What a text frame from the server means to the transport.
 enum Incoming {
-    HelloAccepted,
+    HelloAccepted { protocol: u32 },
     HelloRejected(String),
+    HelloMismatch(String),
     Frame(Box<ServerFrame>),
 }
 
@@ -62,8 +68,9 @@ enum PumpExit {
     Stop,
     /// The connection broke; reconnect.
     Lost(String),
+    /// Server refused this client's protocol version; stop retrying.
+    Fatal(String),
 }
-
 /// Connects to the backend, reporting progress while one is being started.
 async fn connect(
     target: &Target,
@@ -83,20 +90,27 @@ fn classify_text_frame(text: &str) -> Option<Incoming> {
     let ServerFrame::Response {
         id: HELLO_ID,
         ok,
+        result,
         error,
-        ..
+        code,
     } = &frame
     else {
         return Some(Incoming::Frame(Box::new(frame)));
     };
     if *ok {
-        return Some(Incoming::HelloAccepted);
+        let protocol = result
+            .get("protocol")
+            .and_then(|v| v.as_u64())
+            .and_then(|v| u32::try_from(v).ok())
+            .unwrap_or(1);
+        return Some(Incoming::HelloAccepted { protocol });
     }
-    Some(Incoming::HelloRejected(
-        error.clone().unwrap_or_else(|| "hello rejected".into()),
-    ))
+    let reason = error.clone().unwrap_or_else(|| "hello rejected".into());
+    if code.as_deref() == Some(ref_proto::ERR_PROTOCOL_MISMATCH) {
+        return Some(Incoming::HelloMismatch(reason));
+    }
+    Some(Incoming::HelloRejected(reason))
 }
-
 /// Forwards frames between the app and the socket until either side ends.
 async fn pump(
     ws: &mut Ws,
@@ -120,9 +134,15 @@ async fn pump(
                 match m {
                     Some(Ok(WsMsg::Text(t))) => match classify_text_frame(t.as_str()) {
                         None => {}
+                        Some(Incoming::HelloMismatch(reason)) => return PumpExit::Fatal(reason),
                         Some(Incoming::HelloRejected(reason)) => return PumpExit::Lost(reason),
-                        Some(Incoming::HelloAccepted) => {
+                        Some(Incoming::HelloAccepted { protocol }) => {
                             if events.send(NetEvent::Connected).is_err() {
+                                return PumpExit::Stop;
+                            }
+                            if protocol < PROTOCOL_VERSION
+                                && events.send(NetEvent::BackendTooOld { protocol }).is_err()
+                            {
                                 return PumpExit::Stop;
                             }
                         }
@@ -190,6 +210,13 @@ pub async fn run(
         }
         let reason = match pump(&mut ws, &mut out, &events).await {
             PumpExit::Stop => return,
+            PumpExit::Fatal(reason) => {
+                let _ = events.send(NetEvent::Refused(reason));
+                while out.try_recv().is_ok() {}
+                // Stay alive without reconnecting until the app exits and drops `Client`.
+                while out.recv().await.is_some() {}
+                return;
+            }
             PumpExit::Lost(reason) => reason,
         };
         if events.send(NetEvent::Disconnected(reason)).is_err() {
