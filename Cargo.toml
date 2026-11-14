@@ -17,6 +17,8 @@ ref-sys = { path = "crates/sys" }
 ref-client = { path = "crates/client" }
 ref-server = { path = "crates/server" }
 axum = { version = "0.8", features = ["ws"] }
+hyper = { version = "1", default-features = false, features = ["http1", "server"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 brotli = "9"
 flate2 = "1"
 open = "5"

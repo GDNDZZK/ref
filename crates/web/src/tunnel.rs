@@ -6,26 +6,30 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::body::Bytes;
-use axum::extract::State;
-use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
+use axum::extract::{Request, State};
+use axum::http::StatusCode;
 use axum::http::header::{HOST, ORIGIN};
-use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use futures_util::{SinkExt as _, StreamExt as _};
 use ref_client::Ws;
 use serde::Serialize;
 use tokio::sync::OwnedSemaphorePermit;
 use tokio::time::{Instant, MissedTickBehavior};
+use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::tungstenite::Message as UpMessage;
-use tokio_tungstenite::tungstenite::protocol::CloseFrame as UpCloseFrame;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+use tokio_tungstenite::tungstenite::protocol::{CloseFrame as UpCloseFrame, WebSocketConfig};
 
 use crate::channel::{self, BadFrame, Kind, NONCE_LEN, Opener, Sealer};
 use crate::guard::{origin_matches_host, text_response};
 use crate::routes::AppState;
 use crate::token;
+use crate::ws::{self, BrowserSocket};
 
 /// Same limit as ref-server applies to client messages (prompts carry pasted images).
 const MAX_BROWSER_MESSAGE: usize = 64 << 20;
+/// Pre-auth WebSocket buffer sizes; widened to `MAX_BROWSER_MESSAGE` after the key handshake.
+const PRE_AUTH_BUFFER: usize = 4096;
 /// "Internal error": the backend could not be reached or went away.
 const CLOSE_BACKEND_UNAVAILABLE: u16 = 1011;
 /// "Going away": ref-web is shutting down.
@@ -69,11 +73,22 @@ impl Heartbeat {
     };
 }
 
-pub async fn ws_handler(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    upgrade: WebSocketUpgrade,
-) -> Response {
+fn pre_auth_config() -> WebSocketConfig {
+    WebSocketConfig::default()
+        .read_buffer_size(PRE_AUTH_BUFFER)
+        .write_buffer_size(PRE_AUTH_BUFFER)
+        .max_message_size(Some(MAX_HANDSHAKE_MESSAGE))
+        .max_frame_size(Some(MAX_HANDSHAKE_MESSAGE))
+}
+
+fn post_auth_config() -> WebSocketConfig {
+    WebSocketConfig::default()
+        .max_message_size(Some(MAX_BROWSER_MESSAGE))
+        .max_frame_size(Some(MAX_BROWSER_MESSAGE))
+}
+
+pub async fn ws_handler(State(state): State<Arc<AppState>>, req: Request) -> Response {
+    let headers = req.headers();
     let same_origin = headers
         .get(ORIGIN)
         .zip(headers.get(HOST))
@@ -88,13 +103,17 @@ pub async fn ws_handler(
             "Too many connections are starting\n",
         );
     };
-    upgrade
-        .max_message_size(MAX_BROWSER_MESSAGE)
-        .max_frame_size(MAX_BROWSER_MESSAGE)
-        .on_upgrade(move |browser| {
-            let tunnels = state.tunnels.clone();
-            tunnels.track_future(tunnel(state, browser, permit))
-        })
+    let (response, pending) = match ws::prepare_upgrade(req, pre_auth_config()) {
+        Ok(pair) => pair,
+        Err((status, message)) => return text_response(status, message),
+    };
+    let tunnels = state.tunnels.clone();
+    tunnels.spawn(async move {
+        if let Some(browser) = pending.finish().await {
+            tunnel(state, browser, permit).await;
+        }
+    });
+    response
 }
 
 /// What sealed frame 0 tells the page (it replaces the former `GET /api/info`).
@@ -107,13 +126,14 @@ struct Info {
 
 async fn tunnel(
     state: Arc<AppState>,
-    mut browser: WebSocket,
+    mut browser: BrowserSocket,
     handshake_slot: OwnedSemaphorePermit,
 ) {
     let Some((mut sealer, mut opener)) = authenticate(&state, &mut browser).await else {
         return;
     };
     drop(handshake_slot);
+    browser.set_config(|config| *config = post_auth_config());
     let upstream = tokio::select! {
         r = state.upstream.connect() => r,
         _ = state.shutdown.cancelled() => {
@@ -140,7 +160,7 @@ async fn tunnel(
         mock: state.upstream.is_mock(),
     };
     let info = serde_json::to_vec(&info).expect("plain data serialises");
-    let frame_zero = Message::Binary(sealer.seal(Kind::Text, &info).into());
+    let frame_zero = UpMessage::Binary(sealer.seal(Kind::Text, &info).into());
     if send_to_browser(&mut browser, frame_zero, state.heartbeat).await {
         let ended = pump(
             &state,
@@ -156,7 +176,7 @@ async fn tunnel(
     }
 }
 
-async fn finish(browser: &mut WebSocket, upstream: &mut Ws, ended: Ended) {
+async fn finish(browser: &mut BrowserSocket, upstream: &mut Ws, ended: Ended) {
     match ended {
         Ended::BrowserClosed => {
             close_upstream(upstream).await;
@@ -190,7 +210,7 @@ enum Reject {
 
 /// The key handshake. On success, returns the channel; otherwise the browser has been told
 /// and the tunnel ends. The backend is not touched before this succeeds.
-async fn authenticate(state: &AppState, browser: &mut WebSocket) -> Option<(Sealer, Opener)> {
+async fn authenticate(state: &AppState, browser: &mut BrowserSocket) -> Option<(Sealer, Opener)> {
     let outcome = tokio::select! {
         r = tokio::time::timeout(state.handshake_timeout, handshake(state, browser)) => r,
         _ = state.shutdown.cancelled() => {
@@ -215,19 +235,23 @@ async fn authenticate(state: &AppState, browser: &mut WebSocket) -> Option<(Seal
     None
 }
 
-async fn handshake(state: &AppState, browser: &mut WebSocket) -> Result<(Sealer, Opener), Reject> {
+async fn handshake(
+    state: &AppState,
+    browser: &mut BrowserSocket,
+) -> Result<(Sealer, Opener), Reject> {
     let sn = token::random_bytes::<NONCE_LEN>();
     let hello = channel::hello_json(state.key.salt(), &sn);
     browser
-        .send(Message::text(hello))
+        .send(UpMessage::text(hello))
         .await
         .map_err(|_| Reject::Gone)?;
     let auth = loop {
         match browser.recv().await {
-            Some(Ok(Message::Text(text))) if text.len() <= MAX_HANDSHAKE_MESSAGE => break text,
-            Some(Ok(Message::Ping(_) | Message::Pong(_))) => {}
-            Some(Ok(Message::Close(_)) | Err(_)) | None => return Err(Reject::Gone),
-            Some(Ok(_)) => return Err(Reject::Malformed),
+            Some(Ok(UpMessage::Text(text))) if text.len() <= MAX_HANDSHAKE_MESSAGE => break text,
+            Some(Ok(UpMessage::Ping(_) | UpMessage::Pong(_))) => {}
+            Some(Ok(UpMessage::Close(_))) | None => return Err(Reject::Gone),
+            Some(Err(WsError::Capacity(_))) | Some(Ok(_)) => return Err(Reject::Malformed),
+            Some(Err(_)) => return Err(Reject::Gone),
         }
     };
     let (cn, mac) = channel::parse_auth(auth.as_str()).ok_or(Reject::Malformed)?;
@@ -252,7 +276,7 @@ enum Ended {
 /// the connection itself and not forwarded. The browser is pinged on its own schedule.
 async fn pump(
     state: &AppState,
-    browser: &mut WebSocket,
+    browser: &mut BrowserSocket,
     upstream: &mut Ws,
     sealer: &mut Sealer,
     opener: &mut Opener,
@@ -272,13 +296,13 @@ async fn pump(
                     tracing::debug!("browser went silent, dropping it");
                     return Ended::BrowserClosed;
                 }
-                if !send_to_browser(browser, Message::Ping(Bytes::new()), heartbeat).await {
+                if !send_to_browser(browser, UpMessage::Ping(Bytes::new()), heartbeat).await {
                     return Ended::BrowserClosed;
                 }
             }
             frame = browser.recv() => {
                 let message = match frame {
-                    Some(Ok(Message::Close(_))) | None => return Ended::BrowserClosed,
+                    Some(Ok(UpMessage::Close(_))) | None => return Ended::BrowserClosed,
                     Some(Err(e)) => {
                         tracing::debug!("browser read failed: {e}");
                         return Ended::BrowserClosed;
@@ -287,7 +311,7 @@ async fn pump(
                 };
                 // Any frame shows the tab is alive; a large upload can queue its pong.
                 last_heard = Instant::now();
-                if matches!(message, Message::Pong(_)) {
+                if matches!(message, UpMessage::Pong(_)) {
                     continue;
                 }
                 let forward = match to_upstream(opener, message) {
@@ -323,7 +347,11 @@ async fn pump(
 
 /// False when the tab is gone or does not take the frame within the pong timeout (its
 /// receive buffer is full). Waiting longer would also stop the pings.
-async fn send_to_browser(browser: &mut WebSocket, message: Message, heartbeat: Heartbeat) -> bool {
+async fn send_to_browser(
+    browser: &mut BrowserSocket,
+    message: UpMessage,
+    heartbeat: Heartbeat,
+) -> bool {
     match tokio::time::timeout(heartbeat.pong_timeout, browser.send(message)).await {
         Ok(Ok(())) => true,
         Ok(Err(e)) => {
@@ -344,21 +372,23 @@ async fn close_upstream(upstream: &mut Ws) {
 }
 
 /// Opens what the browser sent. After the handshake every data message is a sealed binary one.
-fn to_upstream(opener: &mut Opener, message: Message) -> Result<Option<UpMessage>, BadFrame> {
+fn to_upstream(opener: &mut Opener, message: UpMessage) -> Result<Option<UpMessage>, BadFrame> {
     match message {
-        Message::Binary(wire) => {
+        UpMessage::Binary(wire) => {
             let (kind, plain) = opener.open(&wire)?;
             Ok(Some(match kind {
                 Kind::Text => UpMessage::text(String::from_utf8(plain).map_err(|_| BadFrame)?),
                 Kind::Binary => UpMessage::Binary(plain.into()),
             }))
         }
-        Message::Text(_) => Err(BadFrame),
-        Message::Ping(_) | Message::Pong(_) | Message::Close(_) => Ok(None),
+        UpMessage::Text(_) => Err(BadFrame),
+        UpMessage::Ping(_) | UpMessage::Pong(_) | UpMessage::Close(_) | UpMessage::Frame(_) => {
+            Ok(None)
+        }
     }
 }
 
-fn to_browser(sealer: &mut Sealer, message: UpMessage) -> Option<Message> {
+fn to_browser(sealer: &mut Sealer, message: UpMessage) -> Option<UpMessage> {
     let wire = match message {
         UpMessage::Text(text) => sealer.seal(Kind::Text, text.as_bytes()),
         UpMessage::Binary(bytes) => sealer.seal(Kind::Binary, &bytes),
@@ -366,14 +396,14 @@ fn to_browser(sealer: &mut Sealer, message: UpMessage) -> Option<Message> {
             return None;
         }
     };
-    Some(Message::Binary(wire.into()))
+    Some(UpMessage::Binary(wire.into()))
 }
 
 fn close_code_and_reason(close: UpCloseFrame) -> (u16, String) {
     (u16::from(close.code), close.reason.to_string())
 }
 
-async fn close_browser(browser: &mut WebSocket, code: u16, reason: &str) {
+async fn close_browser(browser: &mut BrowserSocket, code: u16, reason: &str) {
     let reason: String = reason
         .chars()
         .scan(0, |len, c| {
@@ -381,11 +411,11 @@ async fn close_browser(browser: &mut WebSocket, code: u16, reason: &str) {
             (*len <= MAX_CLOSE_REASON).then_some(c)
         })
         .collect();
-    let frame = CloseFrame {
-        code,
+    let frame = UpCloseFrame {
+        code: CloseCode::from(code),
         reason: reason.into(),
     };
-    if let Err(e) = browser.send(Message::Close(Some(frame))).await {
+    if let Err(e) = browser.send(UpMessage::Close(Some(frame))).await {
         tracing::debug!("cannot send the close frame to the browser: {e}");
     }
 }
