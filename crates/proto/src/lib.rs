@@ -530,7 +530,7 @@ pub enum Part {
         state: ToolState,
         #[serde(default)]
         output: Option<String>,
-        /// Extra structured info for display (e.g. diff, exit code).
+        /// Extra structured info for display (e.g. diff, exit code, `warnings: [string]` on `edit`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         meta: Option<Value>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]

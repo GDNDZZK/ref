@@ -1056,6 +1056,24 @@ fn render_tool(m: &Message, idx: usize, t: &ToolCall<'_>, cx: &Ctx<'_>, w: usize
         block_rows.push(block.section("diff", false));
         block_rows.extend(block.diff_rows(diff));
     }
+    if let Some(warnings) = t
+        .meta
+        .and_then(|x| x.get("warnings"))
+        .and_then(Value::as_array)
+    {
+        let items: Vec<String> = warnings
+            .iter()
+            .filter_map(Value::as_str)
+            .map(text::sanitize)
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !items.is_empty() {
+            block_rows.push(block.section("warnings", false));
+            for w_text in items {
+                block.push_text(&mut block_rows, &w_text, theme::fg(theme::WARNING), None);
+            }
+        }
+    }
     block_rows.extend(block.output_rows(t, &out_text));
     if t.image_count > 0 {
         let note = format!("[{} image(s) attached]", t.image_count);
@@ -1369,7 +1387,7 @@ impl<'a> ToolBlock<'a> {
         };
         let mut bits = Vec::new();
         for (k, v) in obj {
-            if matches!(k.as_str(), "diff" | "live_output") {
+            if matches!(k.as_str(), "diff" | "live_output" | "warnings") {
                 continue;
             }
             let vs = match v {

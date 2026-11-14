@@ -834,12 +834,16 @@ fn record_result(
         text.push_str(&warnings.join("\n"));
     }
     let mut out = ToolOutput::ok(text);
-    out.meta = Some(json!({
+    let mut meta = json!({
         "path": t.abs.to_string_lossy(),
         "diff": diff,
         "added": added,
         "removed": removed,
-    }));
+    });
+    if !warnings.is_empty() {
+        meta["warnings"] = json!(warnings);
+    }
+    out.meta = Some(meta);
     out
 }
 
@@ -1188,6 +1192,12 @@ mod tests {
             o.text
                 .contains("Recovered: file changed since read; line numbers remapped.")
         );
+        assert_eq!(
+            o.meta.as_ref().unwrap().get("warnings"),
+            Some(&json!([
+                "Recovered: file changed since read; line numbers remapped."
+            ]))
+        );
         assert_eq!(file(&d), "zero\none\ntwo\nTHREE\nfour\n");
     }
 
@@ -1203,6 +1213,7 @@ mod tests {
         )
         .await;
         assert!(o.is_error);
+        assert!(o.meta.is_none());
         let cur = file_hash("one\ntwo\nTHREE!\nfour\nfive\nsix\n");
         assert!(o.text.starts_with(&format!(
             "Edit rejected for f.txt: file changed since it was read (tag #{tag}, current #{cur})."
@@ -1332,8 +1343,14 @@ mod tests {
         .await;
         assert!(!o.is_error, "{}", o.text);
         assert!(o.text.contains("Stripped `N:` display prefixes"));
+        assert_eq!(
+            o.meta.as_ref().unwrap().get("warnings"),
+            Some(&json!([
+                "Stripped `N:` display prefixes from `lines` (they looked like pasted read output). `lines` must contain raw file content only."
+            ]))
+        );
         assert_eq!(file(&d), "fn a() {\n    2\n}\n");
-        // A lone `N:`-looking line that is real content is kept.
+        // A lone `N:`-looking line that is real content is kept (and produces no warnings).
         let tag = file_hash(&file(&d));
         let o = edit(
             &c,
@@ -1342,6 +1359,7 @@ mod tests {
         )
         .await;
         assert!(!o.is_error);
+        assert!(o.meta.as_ref().unwrap().get("warnings").is_none());
         assert!(file(&d).ends_with("}\n10:30 meeting\n"));
     }
 

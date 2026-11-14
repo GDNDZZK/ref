@@ -110,12 +110,14 @@ impl Rig {
                     name,
                     state,
                     output,
+                    meta,
                     ..
                 } => Some(Tool {
                     call_id,
                     name,
                     state,
                     output: output.unwrap_or_default(),
+                    meta,
                 }),
                 _ => None,
             })
@@ -150,8 +152,8 @@ struct Tool {
     name: String,
     state: ToolState,
     output: String,
+    meta: Option<serde_json::Value>,
 }
-
 fn states(tools: &[Tool], name: &str) -> Vec<ToolState> {
     tools
         .iter()
@@ -762,7 +764,12 @@ async fn check_stale_run(rig: &Rig, old: &str, new: &str) {
     assert_eq!(edits.len(), 3, "{:?}", rig.last_text());
     assert_eq!(edits[0].state, ToolState::Done);
     assert!(edits[0].output.contains(RECOVERED), "{}", edits[0].output);
+    assert_eq!(
+        edits[0].meta.as_ref().and_then(|m| m.get("warnings")),
+        Some(&json!([RECOVERED]))
+    );
     assert_eq!(edits[1].state, ToolState::Error);
+    assert!(edits[1].meta.is_none());
     assert!(edits[1].output.starts_with(REJECTED), "{}", edits[1].output);
     assert!(
         edits[1]
@@ -770,6 +777,13 @@ async fn check_stale_run(rig: &Rig, old: &str, new: &str) {
             .contains("Current content around your anchors")
     );
     assert_eq!(edits[2].state, ToolState::Done);
+    assert!(
+        edits[2]
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("warnings"))
+            .is_none()
+    );
     for file in ["scratch/src/parser.rs", "scratch/src/lib.rs"] {
         let text = rig.workspace_file(file);
         assert!(text.contains(new) && !text.contains(old), "{file}:\n{text}");
