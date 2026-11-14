@@ -5,13 +5,20 @@
 // Each test file uses a different part of this module.
 #![allow(dead_code)]
 
+use std::io;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::process::{Child, Command, Stdio};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use futures_util::{SinkExt as _, StreamExt as _};
-use tokio::net::TcpListener;
+use rustls::pki_types::ServerName;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::net::{TcpListener, TcpStream};
+use tokio_rustls::TlsConnector;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
@@ -21,12 +28,58 @@ use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 /// The page's half of the channel is the code ref-web uses, from the same file.
 #[path = "../../src/channel.rs"]
 pub mod channel;
+#[path = "../../src/tls_pin.rs"]
+pub mod tls_pin;
 
 use channel::{Kind, NONCE_LEN, Nonce, Opener, Root, Sealer};
 
-pub type Ws =
-    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+#[derive(Debug)]
+pub enum TestStream {
+    Plain(TcpStream),
+    Tls(Box<tokio_rustls::client::TlsStream<TcpStream>>),
+}
 
+impl AsyncRead for TestStream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        match self.get_mut() {
+            TestStream::Plain(s) => Pin::new(s).poll_read(cx, buf),
+            TestStream::Tls(s) => Pin::new(s.as_mut()).poll_read(cx, buf),
+        }
+    }
+}
+
+impl AsyncWrite for TestStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        match self.get_mut() {
+            TestStream::Plain(s) => Pin::new(s).poll_write(cx, buf),
+            TestStream::Tls(s) => Pin::new(s.as_mut()).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        match self.get_mut() {
+            TestStream::Plain(s) => Pin::new(s).poll_flush(cx),
+            TestStream::Tls(s) => Pin::new(s.as_mut()).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        match self.get_mut() {
+            TestStream::Plain(s) => Pin::new(s).poll_shutdown(cx),
+            TestStream::Tls(s) => Pin::new(s.as_mut()).poll_shutdown(cx),
+        }
+    }
+}
+
+pub type Ws = tokio_tungstenite::WebSocketStream<TestStream>;
 const START_TIMEOUT: Duration = Duration::from_secs(15);
 /// The loopback address the tests listen on and connect to.
 pub const LOOPBACK: &str = "127.0.0.1";
@@ -127,25 +180,34 @@ impl Env {
         }
         all.extend(args.iter().map(|a| a.to_string()));
         let all: Vec<&str> = all.iter().map(String::as_str).collect();
+        let log_id = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let stdout_path = self.dir.join(format!("stdout-{log_id}.log"));
+        let stderr_path = self.dir.join(format!("stderr-{log_id}.log"));
         let child = self
             .command(&all)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdout(Stdio::from(std::fs::File::create(&stdout_path).unwrap()))
+            .stderr(Stdio::from(std::fs::File::create(&stderr_path).unwrap()))
             .spawn()
             .unwrap();
         let mut web = Web {
             child,
             host: LOOPBACK.to_string(),
             port: 0,
+            tls: false,
             key: String::new(),
+            state_dir: self.state_dir(),
+            stdout_path,
+            stderr_path,
             http: reqwest::Client::builder()
                 .no_proxy()
+                .danger_accept_invalid_certs(true)
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .unwrap(),
         };
-        let (port, host) = web.wait_for_record(&self.state_dir()).await?;
+        let (port, host, tls) = web.wait_for_record(&self.state_dir()).await?;
         web.port = port;
+        web.tls = tls;
         web.host = match host.as_str() {
             "0.0.0.0" => LOOPBACK.to_string(),
             "::" => "::1".to_string(),
@@ -164,11 +226,14 @@ pub struct Web {
     child: Child,
     pub host: String,
     pub port: u16,
+    pub tls: bool,
     /// The key the page signs in with: `--key`, or the login token.
     pub key: String,
+    state_dir: PathBuf,
+    stdout_path: PathBuf,
+    stderr_path: PathBuf,
     pub http: reqwest::Client,
 }
-
 impl Drop for Web {
     fn drop(&mut self) {
         let _ = self.child.kill();
@@ -195,11 +260,23 @@ impl Web {
         self.child.wait().unwrap();
     }
 
-    /// The port and host ref-web chose, from its instance record (written once it has bound).
+    pub fn cert_path(&self) -> PathBuf {
+        self.state_dir.join("web/tls/cert.pem")
+    }
+
+    pub fn stdout(&self) -> String {
+        std::fs::read_to_string(&self.stdout_path).unwrap_or_default()
+    }
+
+    pub fn stderr(&self) -> String {
+        std::fs::read_to_string(&self.stderr_path).unwrap_or_default()
+    }
+
+    /// The port, host and TLS flag ref-web chose, from its instance record (written once it has bound).
     async fn wait_for_record(
         &mut self,
         state_dir: &std::path::Path,
-    ) -> Result<(u16, String), std::process::ExitStatus> {
+    ) -> Result<(u16, String, bool), std::process::ExitStatus> {
         let record = state_dir.join(format!("web/instances/{}.json", self.child.id()));
         poll_until(
             "ref-web to record its port",
@@ -213,7 +290,8 @@ impl Web {
                 let record: serde_json::Value = serde_json::from_str(&text).ok()?;
                 let port = record["port"].as_u64()? as u16;
                 let host = record["host"].as_str()?.to_string();
-                Some(Ok((port, host)))
+                let tls = record["tls"].as_bool().unwrap_or(false);
+                Some(Ok((port, host, tls)))
             },
         )
         .await
@@ -233,11 +311,13 @@ impl Web {
     }
 
     pub fn url(&self, path: &str) -> String {
-        format!("http://{LOOPBACK}:{}{path}", self.port)
+        let scheme = if self.tls { "https" } else { "http" };
+        format!("{scheme}://{LOOPBACK}:{}{path}", self.port)
     }
 
     pub fn origin(&self) -> String {
-        format!("http://{LOOPBACK}:{}", self.port)
+        let scheme = if self.tls { "https" } else { "http" };
+        format!("{scheme}://{LOOPBACK}:{}", self.port)
     }
 
     pub async fn get(&self, path: &str) -> reqwest::Response {
@@ -250,7 +330,8 @@ impl Web {
         origin: Option<String>,
         host: Option<&str>,
     ) -> Result<Ws, tokio_tungstenite::tungstenite::Error> {
-        let mut request = format!("ws://{LOOPBACK}:{}/ws", self.port)
+        let scheme = if self.tls { "wss" } else { "ws" };
+        let mut request = format!("{scheme}://{LOOPBACK}:{}/ws", self.port)
             .into_client_request()
             .unwrap();
         let headers = request.headers_mut();
@@ -260,11 +341,20 @@ impl Web {
         if let Some(host) = host {
             headers.insert("host", HeaderValue::from_str(host).unwrap());
         }
-        tokio_tungstenite::connect_async(request)
+        let tcp = TcpStream::connect((LOOPBACK, self.port)).await?;
+        let stream = if self.tls {
+            let cert_der = tls_pin::load_cert_der(&self.cert_path()).map_err(io::Error::other)?;
+            let connector = TlsConnector::from(Arc::new(tls_pin::pinned_client_config(cert_der)));
+            let server_name = ServerName::try_from("localhost").unwrap();
+            let tls = connector.connect(server_name, tcp).await?;
+            TestStream::Tls(Box::new(tls))
+        } else {
+            TestStream::Plain(tcp)
+        };
+        tokio_tungstenite::client_async(request, stream)
             .await
             .map(|(ws, _)| ws)
     }
-
     /// A WebSocket as the page opens it (same-origin Origin), before any handshake.
     pub async fn ws(&self) -> Ws {
         self.try_ws(Some(self.origin()), None).await.unwrap()
