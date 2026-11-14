@@ -223,6 +223,78 @@ async fn a_denied_permission_leaves_the_file_alone() {
 }
 
 #[tokio::test]
+async fn permission_request_and_snapshot_carry_preview_matching_done_tool() {
+    let rig = rig().await;
+    rig.conn.lock().hello = true;
+    api::handle(
+        &rig.hub,
+        &rig.conn,
+        Request::Attach {
+            session_id: rig.session.id.clone(),
+            foreground: true,
+            limit: None,
+        },
+    )
+    .await
+    .unwrap();
+    let _ = rig.conn.out.drain();
+
+    rig.prompt("permission");
+    let start = Instant::now();
+    let req = loop {
+        assert!(start.elapsed() < WAIT, "permission event timed out");
+        if let Some(req) = rig.conn.out.drain().into_iter().find_map(|f| match f {
+            ServerFrame::Event {
+                event: ref_proto::SessionEvent::Permission { request },
+                ..
+            } => Some(request),
+            _ => None,
+        }) {
+            break req;
+        }
+        tokio::time::sleep(POLL).await;
+    };
+    let preview = req.preview.expect("edit permission has preview");
+    assert!(preview.added > 0 && preview.removed > 0 && !preview.diff.is_empty());
+    assert!(!preview.truncated);
+
+    // Snapshot pending_permissions carries the same preview for late-attaching windows.
+    let late = rig.hub.add_conn();
+    late.lock().hello = true;
+    let res = api::handle(
+        &rig.hub,
+        &late,
+        Request::Attach {
+            session_id: rig.session.id.clone(),
+            foreground: false,
+            limit: None,
+        },
+    )
+    .await
+    .unwrap();
+    let snap: ref_proto::SessionSnapshot = serde_json::from_value(res["snapshot"].clone()).unwrap();
+    assert_eq!(snap.pending_permissions.len(), 1);
+    assert_eq!(snap.pending_permissions[0].preview.as_ref(), Some(&preview));
+
+    // Allow and verify the finished tool's meta matches the preview.
+    rig.run(true).await;
+    let edit_tool = rig
+        .tools()
+        .into_iter()
+        .find(|t| t.name == "edit")
+        .expect("edit tool");
+    assert_eq!(edit_tool.state, ToolState::Done);
+    let meta = edit_tool.meta.expect("edit meta");
+    assert_eq!(meta["diff"].as_str().unwrap(), preview.diff);
+    assert_eq!(meta["added"].as_u64().unwrap(), u64::from(preview.added));
+    assert_eq!(
+        meta["removed"].as_u64().unwrap(),
+        u64::from(preview.removed)
+    );
+    rig.finish().await;
+}
+
+#[tokio::test]
 async fn retry_shows_the_retrying_status_then_succeeds() {
     let rig = rig().await;
     rig.prompt("retry");
@@ -303,33 +375,35 @@ const FINAL_SENTENCE: &str = "The parser bug is fixed.";
 const REPORTERS: [&str; 5] = ["scout", "fixer", "tester", "docs", "reviewer"];
 
 impl Rig {
-    /// Allows every tool that waits for permission in any session.
-    async fn approve_everywhere(&self) {
+    /// Allows every tool that waits for permission in any session, returning `(tool, has_preview)`.
+    async fn approve_everywhere(&self) -> Vec<(String, bool)> {
+        let mut seen = Vec::new();
         for session in self.hub.sessions() {
-            let waiting: Vec<String> = session
+            let waiting: Vec<(String, String, bool)> = session
                 .lock()
-                .messages
+                .perms
                 .iter()
-                .flat_map(|m| m.parts.iter())
-                .filter_map(|p| match p {
-                    Part::Tool {
-                        call_id,
-                        state: ToolState::AwaitingPermission,
-                        ..
-                    } => Some(call_id.clone()),
-                    _ => None,
+                .map(|p| {
+                    (
+                        p.request.call_id.clone(),
+                        p.request.tool.clone(),
+                        p.request.preview.is_some(),
+                    )
                 })
                 .collect();
-            for call_id in waiting {
+            for (call_id, tool, has_preview) in waiting {
                 let req = Request::PermissionReply {
                     session_id: session.id.clone(),
                     call_id,
                     allow: true,
                     always: false,
                 };
-                api::handle(&self.hub, &self.conn, req).await.unwrap();
+                if api::handle(&self.hub, &self.conn, req).await.is_ok() {
+                    seen.push((tool, has_preview));
+                }
             }
         }
+        seen
     }
 
     /// Names of the sessions that reported to the main session, in arrival order.
@@ -371,13 +445,14 @@ async fn orchestrate_directs_a_crew_and_collects_five_reports() {
     let start = Instant::now();
     rig.prompt(ORCHESTRATE_PROMPT);
     let mut seen_reports = 0;
+    let mut approved_tools = Vec::new();
     while !rig.main_texts().contains(FINAL_SENTENCE) {
         assert!(
             start.elapsed() < ORCHESTRATE_WAIT,
             "no final summary; reports so far: {:?}",
             rig.reporters()
         );
-        rig.approve_everywhere().await;
+        approved_tools.extend(rig.approve_everywhere().await);
         let reports = rig.reporters();
         if reports.len() > seen_reports {
             eprintln!(
@@ -390,6 +465,12 @@ async fn orchestrate_directs_a_crew_and_collects_five_reports() {
         }
         tokio::time::sleep(POLL).await;
     }
+    assert!(
+        approved_tools
+            .iter()
+            .any(|(t, has_preview)| t == "edit" && *has_preview),
+        "fixer edit permission carries preview: {approved_tools:?}"
+    );
     eprintln!(
         "orchestrate: done at {:.1} s",
         start.elapsed().as_secs_f32()

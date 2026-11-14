@@ -10,9 +10,12 @@ use ref_proto::PermissionRequest;
 use serde_json::Value;
 
 use super::dialog::{frame, open_progress};
+use super::message::styled_diff_lines;
 use super::theme;
 use crate::text::{self, width};
 
+/// Most diff lines shown inline in the permission modal before a marker row.
+const PREVIEW_MAX_LINES: usize = 12;
 /// What a permission button answers.
 #[derive(Clone, Copy)]
 pub enum PermissionAction {
@@ -89,7 +92,9 @@ impl PermissionView {
         for (i, l) in lines.iter().skip(self.scroll).take(body_h).enumerate() {
             let mut l = l.clone();
             for s in &mut l.spans {
-                s.style = s.style.bg(bg);
+                if s.style.bg.is_none() {
+                    s.style = s.style.bg(bg);
+                }
             }
             buf.set_line(inner.x, inner.y + i as u16, &l, inner.width);
         }
@@ -182,6 +187,37 @@ fn content(req: &PermissionRequest, iw: usize) -> Vec<Line<'static>> {
             Span::styled("path  ", theme::muted()),
             Span::styled(p, theme::bold(theme::INFO)),
         ]));
+        lines.push(Line::default());
+    }
+    if let Some(preview) = &req.preview {
+        let mut hdr = vec![
+            Span::styled("preview", theme::muted()),
+            Span::styled(
+                format!("  +{}", preview.added),
+                theme::fg(theme::DIFF_ADDED),
+            ),
+            Span::styled(
+                format!(" -{}", preview.removed),
+                theme::fg(theme::DIFF_REMOVED),
+            ),
+        ];
+        if preview.truncated {
+            hdr.push(Span::styled(" (preview cut)", theme::fg(theme::WARNING)));
+        }
+        lines.push(Line::from(hdr));
+        if !preview.diff.trim().is_empty() {
+            let (styled, hidden) = styled_diff_lines(&preview.diff, iw, Some(PREVIEW_MAX_LINES));
+            for (spans, _) in styled {
+                lines.push(Line::from(spans));
+            }
+            if hidden > 0 {
+                let mut marker = format!("… {hidden} more lines");
+                if preview.truncated {
+                    marker.push_str(" (preview cut)");
+                }
+                lines.push(Line::from(Span::styled(marker, theme::fg(theme::WARNING))));
+            }
+        }
         lines.push(Line::default());
     }
     lines.push(Line::from(Span::styled("input", theme::muted())));

@@ -1296,40 +1296,13 @@ impl<'a> ToolBlock<'a> {
     }
 
     fn diff_rows(&self, diff: &str) -> Vec<Row> {
-        let diff = text::sanitize(diff);
-        let lines: Vec<&str> = diff.trim_end().split('\n').collect();
-        let limit = self
-            .preview_limit()
-            .map_or(lines.len(), |l| lines.len().min(l));
-        let mut rows = Vec::new();
-        for l in &lines[..limit] {
-            let st = if l.starts_with("+++") || l.starts_with("---") {
-                theme::bold(theme::MUTED)
-            } else if l.starts_with('+') {
-                Style::new().fg(theme::DIFF_ADDED).bg(theme::DIFF_ADDED_BG)
-            } else if l.starts_with('-') {
-                Style::new()
-                    .fg(theme::DIFF_REMOVED)
-                    .bg(theme::DIFF_REMOVED_BG)
-            } else if l.starts_with("@@") {
-                theme::fg(theme::INFO)
-            } else {
-                theme::fg(theme::DIFF_CONTEXT)
-            };
-            for (i, wl) in text::wrap_hard(&[Span::styled(l.to_string(), st)], self.iw)
-                .into_iter()
-                .enumerate()
-            {
-                let lw = text::line_width(&wl);
-                let mut spans = wl.spans;
-                if st.bg.is_some() {
-                    spans.push(Span::styled(" ".repeat(self.iw.saturating_sub(lw)), st));
-                }
-                rows.push(self.body(spans, i > 0));
-            }
-        }
-        if limit < lines.len() {
-            rows.push(self.show_all_row(lines.len() - limit));
+        let (styled, hidden) = styled_diff_lines(diff, self.iw, self.preview_limit());
+        let mut rows: Vec<Row> = styled
+            .into_iter()
+            .map(|(spans, soft)| self.body(spans, soft))
+            .collect();
+        if hidden > 0 {
+            rows.push(self.show_all_row(hidden));
         }
         rows
     }
@@ -1411,4 +1384,44 @@ impl<'a> ToolBlock<'a> {
         }
         rows
     }
+}
+
+/// Styles and wraps a unified diff into `(spans, is_wrapped_continuation)` rows, optionally
+/// capped to `limit` logical lines. Returns `(rows, hidden_line_count)`.
+pub(crate) fn styled_diff_lines(
+    diff: &str,
+    iw: usize,
+    limit: Option<usize>,
+) -> (Vec<(Vec<Span<'static>>, bool)>, usize) {
+    let diff = text::sanitize(diff);
+    let lines: Vec<&str> = diff.trim_end().split('\n').collect();
+    let shown = limit.map_or(lines.len(), |l| lines.len().min(l));
+    let mut rows = Vec::new();
+    for l in &lines[..shown] {
+        let st = if l.starts_with("+++") || l.starts_with("---") {
+            theme::bold(theme::MUTED)
+        } else if l.starts_with('+') {
+            Style::new().fg(theme::DIFF_ADDED).bg(theme::DIFF_ADDED_BG)
+        } else if l.starts_with('-') {
+            Style::new()
+                .fg(theme::DIFF_REMOVED)
+                .bg(theme::DIFF_REMOVED_BG)
+        } else if l.starts_with("@@") {
+            theme::fg(theme::INFO)
+        } else {
+            theme::fg(theme::DIFF_CONTEXT)
+        };
+        for (i, wl) in text::wrap_hard(&[Span::styled(l.to_string(), st)], iw)
+            .into_iter()
+            .enumerate()
+        {
+            let lw = text::line_width(&wl);
+            let mut spans = wl.spans;
+            if st.bg.is_some() {
+                spans.push(Span::styled(" ".repeat(iw.saturating_sub(lw)), st));
+            }
+            rows.push((spans, i > 0));
+        }
+    }
+    (rows, lines.len() - shown)
 }

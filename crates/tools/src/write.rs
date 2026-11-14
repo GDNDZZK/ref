@@ -64,7 +64,23 @@ fn strip_read_output(content: &str) -> Option<String> {
     Some(util::join_lines(&out, trailing))
 }
 
-fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
+struct WritePlan {
+    abs: std::path::PathBuf,
+    display: String,
+    bytes: Vec<u8>,
+    old_text: String,
+    new_text: String,
+    is_new: bool,
+    notes: Vec<&'static str>,
+}
+
+enum WriteOutcome {
+    Ready(WritePlan),
+    Reject(ToolOutput),
+}
+
+/// Validates and computes a write without touching the filesystem or `ctx.store`.
+fn plan_sync(input: &Value, ctx: &ToolCtx, max_file_bytes: Option<u64>) -> Result<WriteOutcome> {
     let raw_path = util::req_str(input, "path")?;
     let (raw_path, _) = util::unwrap_header(&raw_path);
     if raw_path.is_empty() {
@@ -78,9 +94,23 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let abs = util::resolve_path(&ctx.cwd, &raw_path);
     let display = util::display_path(&ctx.cwd, &abs);
     if abs.is_dir() {
-        return Ok(ToolOutput::err(format!(
+        return Ok(WriteOutcome::Reject(ToolOutput::err(format!(
             "{display} is a directory; cannot write a file there."
-        )));
+        ))));
+    }
+    if let Some(limit) = max_file_bytes {
+        if content.len() as u64 > limit {
+            return Ok(WriteOutcome::Reject(ToolOutput::err(format!(
+                "{display} exceeds preview size limit."
+            ))));
+        }
+        if let Ok(m) = std::fs::metadata(&abs)
+            && m.len() > limit
+        {
+            return Ok(WriteOutcome::Reject(ToolOutput::err(format!(
+                "{display} exceeds preview file size limit."
+            ))));
+        }
     }
 
     // Existing file: keep its conventions, diff against it.
@@ -110,44 +140,80 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
             text: String::new(),
         },
     };
-    let bytes = encoding.encode(&new.text);
+    let bytes = encoding.encode(&new.text).into_bytes();
+    let old_text = old_file.map(|o| o.text).unwrap_or_default();
+    Ok(WriteOutcome::Ready(WritePlan {
+        abs,
+        display,
+        bytes,
+        old_text,
+        new_text: new.text,
+        is_new: old.is_none(),
+        notes,
+    }))
+}
 
-    if let Some(parent) = abs.parent() {
+fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
+    let p = match plan_sync(input, ctx, None)? {
+        WriteOutcome::Ready(p) => p,
+        WriteOutcome::Reject(out) => return Ok(out),
+    };
+
+    if let Some(parent) = p.abs.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| anyhow!("cannot create directory {}: {e}", parent.display()))?;
     }
-    std::fs::write(&abs, &bytes).map_err(|e| anyhow!("failed to write {display}: {e}"))?;
-    if new.text.starts_with("#!") && old.is_none() {
-        make_executable(&abs);
+    std::fs::write(&p.abs, &p.bytes).map_err(|e| anyhow!("failed to write {}: {e}", p.display))?;
+    if p.new_text.starts_with("#!") && p.is_new {
+        make_executable(&p.abs);
     }
 
-    let tag = ctx.store.record(&abs, &new.text, Seen::All);
-    let line_count = util::split_lines(&new.text).0.len();
-    let old_text = old_file.as_ref().map(|o| o.text.as_str()).unwrap_or("");
-    let (diff, added, removed) = util::unified_diff(old_text, &new.text, &display);
-    let verb = if old.is_some() {
-        "Overwrote"
-    } else {
-        "Created"
-    };
+    let tag = ctx.store.record(&p.abs, &p.new_text, Seen::All);
+    let line_count = util::split_lines(&p.new_text).0.len();
+    let (diff, added, removed) = util::unified_diff(&p.old_text, &p.new_text, &p.display);
+    let verb = if p.is_new { "Created" } else { "Overwrote" };
     let mut text = format!(
-        "{}\n{verb} {display}: {line_count} lines ({} bytes).",
-        format_header(&display, &tag),
-        bytes.len()
+        "{}\n{verb} {}: {line_count} lines ({} bytes).",
+        format_header(&p.display, &tag),
+        p.display,
+        p.bytes.len()
     );
-    for n in notes {
+    for n in p.notes {
         text.push('\n');
         text.push_str(n);
     }
     let mut out = ToolOutput::ok(text);
     out.meta = Some(json!({
-        "path": abs.to_string_lossy(),
+        "path": p.abs.to_string_lossy(),
         "diff": diff,
-        "created": old.is_none(),
+        "created": p.is_new,
         "added": added,
         "removed": removed,
     }));
     Ok(out)
+}
+
+/// Dry-run diff preview for a pending permission request. Never writes or touches `ctx.store`.
+pub(crate) async fn preview(input: Value, ctx: &ToolCtx) -> Option<ref_proto::EditPreview> {
+    let ctx = ctx.clone();
+    let res = tokio::task::spawn_blocking(move || {
+        plan_sync(&input, &ctx, Some(util::PREVIEW_MAX_FILE_BYTES as u64))
+    })
+    .await;
+    match res {
+        Ok(Ok(WriteOutcome::Ready(p))) => {
+            Some(util::edit_preview(&p.old_text, &p.new_text, &p.display))
+        }
+        Ok(Ok(WriteOutcome::Reject(_))) => None,
+        Ok(Err(e)) => {
+            tracing::debug!("write preview failed: {e:#}");
+            None
+        }
+        Err(e) => {
+            tracing::debug!("write preview task failed: {e}");
+            None
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -235,6 +301,51 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(d.join("q.txt")).unwrap(),
             "10:00 start\n11:00 end\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn preview_new_and_existing_file_without_touching_disk_or_store() {
+        let d = temp_dir("write-preview");
+        let c = ctx(&d);
+        let new_input = json!({"path": "sub/new.txt", "content": "alpha\nbeta\n"});
+        let p = crate::preview("write", new_input.clone(), &c)
+            .await
+            .unwrap();
+        assert_eq!(p.added, 2);
+        assert_eq!(p.removed, 0);
+        assert!(!p.truncated);
+        assert!(p.diff.contains("+alpha\n+beta"));
+        assert!(
+            !d.join("sub").exists(),
+            "preview does not create dirs or file"
+        );
+        let tag = crate::hashline::file_hash("alpha\nbeta\n");
+        assert!(c.store.get(&d.join("sub/new.txt"), &tag).is_none());
+
+        // Existing file: diff against existing content.
+        std::fs::write(d.join("exist.txt"), "old1\nold2\n").unwrap();
+        let p2 = crate::preview(
+            "write",
+            json!({"path": "exist.txt", "content": "old1\nnew2\n"}),
+            &c,
+        )
+        .await
+        .unwrap();
+        assert_eq!(p2.added, 1);
+        assert_eq!(p2.removed, 1);
+        assert!(p2.diff.contains("-old2\n+new2"));
+        assert_eq!(
+            std::fs::read_to_string(d.join("exist.txt")).unwrap(),
+            "old1\nold2\n"
+        );
+
+        // Reject-style failure (directory) -> None.
+        std::fs::create_dir_all(d.join("adir")).unwrap();
+        assert!(
+            crate::preview("write", json!({"path": "adir", "content": "x"}), &c)
+                .await
+                .is_none()
         );
     }
 }

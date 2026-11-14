@@ -713,6 +713,7 @@ impl Mock {
             purpose: purpose.into(),
             input,
             time: now_ms(),
+            preview: None,
         };
         self.emit(sid, SessionEvent::Permission { request: req });
         let res = loop {

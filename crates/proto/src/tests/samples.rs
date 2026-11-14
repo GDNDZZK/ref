@@ -302,6 +302,12 @@ pub fn permission_request() -> PermissionRequest {
         purpose: EDIT_PURPOSE.into(),
         input: edit_input(),
         time: T0 + 21 * SECOND,
+        preview: Some(EditPreview {
+            diff: EDIT_DIFF.into(),
+            added: 1,
+            removed: 1,
+            truncated: false,
+        }),
     }
 }
 
