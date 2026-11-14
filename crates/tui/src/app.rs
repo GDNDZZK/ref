@@ -910,15 +910,17 @@ impl App {
             Pending::Permission => {}
             Pending::Question { sid, call_id } => self.close_question(&sid, &call_id),
             Pending::Config => self.on_config_response(&result),
-            Pending::LiveList => {
-                if let Some(s) = sessions_of(&result) {
-                    self.on_sessions(s);
-                }
-            }
+            Pending::LiveList => match sessions_of(&result) {
+                Ok(s) => self.on_sessions(s),
+                Err(e) => self.toasts.error(format!("Malformed sessions response: {e}")),
+            },
             Pending::Created { prompt } => {
-                let Some(info) = session_info_of(&result) else {
-                    self.toasts.error("Malformed create_session response");
-                    return;
+                let info = match session_info_of(&result) {
+                    Ok(i) => i,
+                    Err(e) => {
+                        self.toasts.error(format!("Malformed create_session response: {e}"));
+                        return;
+                    }
                 };
                 let sid = info.id.clone();
                 self.views
@@ -946,15 +948,22 @@ impl App {
                     .or_insert_with(|| SessionView::new(snap.info.clone(), fg));
                 v.load_snapshot(snap);
             }
-            Pending::HistoryDialog => {
-                if let Some(s) = sessions_of(&result) {
+            Pending::HistoryDialog => match sessions_of(&result) {
+                Ok(s) => {
                     self.history_list = s;
                     self.refresh_session_dialog();
                 }
-            }
+                Err(e) => self.toasts.error(format!("Malformed history response: {e}")),
+            },
             Pending::Continue => self.on_continue_response(&result),
             Pending::Undo { sid, count } => {
-                let t = text_of(&result).unwrap_or_default();
+                let t = match text_of(&result) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        self.toasts.error(format!("Malformed undo response: {e}"));
+                        return;
+                    }
+                };
                 let images = response_images(&result);
                 let what = match count {
                     Some(1) => "Undid 1 message".to_string(),
@@ -991,7 +1000,13 @@ impl App {
                 }
             }
             Pending::Expand { sid } => {
-                let t = text_of(&result).unwrap_or_default().to_string();
+                let t = match text_of(&result) {
+                    Ok(t) => t.to_string(),
+                    Err(e) => {
+                        self.toasts.error(format!("Malformed expand response: {e}"));
+                        return;
+                    }
+                };
                 if t.trim().is_empty() {
                     self.toasts.warn("Command expanded to nothing");
                     return;
@@ -1002,8 +1017,8 @@ impl App {
                 }
             }
             Pending::Files { query } => self.on_files_response(&query, &result),
-            Pending::Cwd { sid } => {
-                if let Some(info) = session_info_of(&result) {
+            Pending::Cwd { sid } => match session_info_of(&result) {
+                Ok(info) => {
                     if self.current.as_deref() == Some(sid.as_str()) {
                         // New sessions, `@` mentions and exports follow the directory.
                         self.cwd = info.cwd.clone();
@@ -1014,19 +1029,28 @@ impl App {
                         v.set_info(info);
                     }
                 }
-            }
+                Err(e) => self.toasts.error(format!("Malformed set_cwd response: {e}")),
+            },
             Pending::Simple { ok } => {
-                if let Some(info) = session_info_of(&result)
-                    && let Some(v) = self.views.get_mut(&info.id)
-                {
-                    v.set_info(info);
+                if result.get("session").is_some() {
+                    match session_info_of(&result) {
+                        Ok(info) => {
+                            if let Some(v) = self.views.get_mut(&info.id) {
+                                v.set_info(info);
+                            }
+                        }
+                        Err(e) => {
+                            self.toasts.error(format!("Malformed session response: {e}"));
+                            return;
+                        }
+                    }
                 }
                 if !ok.is_empty() {
                     self.toasts.info(ok);
                 }
             }
-            Pending::Variant => {
-                if let Some(info) = session_info_of(&result) {
+            Pending::Variant => match session_info_of(&result) {
+                Ok(info) => {
                     let v = info
                         .model
                         .variant
@@ -1037,15 +1061,16 @@ impl App {
                     }
                     self.toasts.info(format!("Variant: {v}"));
                 }
-            }
-            Pending::Export => {
-                let p = result.get("path").and_then(Value::as_str).unwrap_or("file");
-                self.toasts.info(format!("Exported to {p}"));
-            }
-            Pending::Text { title } => {
-                let text = text_of(&result).unwrap_or_default();
-                self.dialog = Some(Dialog::Help(HelpDialog::text(&title, text)));
-            }
+                Err(e) => self.toasts.error(format!("Malformed set_variant response: {e}")),
+            },
+            Pending::Export => match parse_field::<String>(&result, "path") {
+                Ok(p) => self.toasts.info(format!("Exported to {p}")),
+                Err(e) => self.toasts.error(format!("Malformed export response: {e}")),
+            },
+            Pending::Text { title } => match text_of(&result) {
+                Ok(text) => self.dialog = Some(Dialog::Help(HelpDialog::text(&title, text))),
+                Err(e) => self.toasts.error(format!("Malformed response: {e}")),
+            },
             Pending::Prompt {
                 sid,
                 text,
@@ -1076,11 +1101,9 @@ impl App {
             }
             Pending::ConfigMcp => {
                 self.mcp_inflight = false;
-                if let Some(Ok(c)) = result
-                    .get("config")
-                    .map(|c| serde_json::from_value::<ServerConfigInfo>(c.clone()))
-                {
-                    self.set_mcp_lines(&c.mcp);
+                match parse_field::<ServerConfigInfo>(&result, "config") {
+                    Ok(c) => self.set_mcp_lines(&c.mcp),
+                    Err(e) => self.toasts.error(format!("Malformed config from backend: {e}")),
                 }
             }
         }
@@ -1123,7 +1146,13 @@ impl App {
 
     /// Answer to `--continue`: attach the newest session here, or start a new one.
     fn on_continue_response(&mut self, result: &Value) {
-        let s = sessions_of(result).unwrap_or_default();
+        let s = match sessions_of(result) {
+            Ok(s) => s,
+            Err(e) => {
+                self.toasts.error(format!("Malformed continue response: {e}"));
+                return;
+            }
+        };
         let Some(info) = s.first() else {
             let plan = self.init.take().unwrap_or_default();
             self.toasts
@@ -1153,15 +1182,13 @@ impl App {
 
     fn on_files_response(&mut self, query: &str, result: &Value) {
         self.files_inflight = false;
-        let files: Vec<String> = result
-            .get("files")
-            .and_then(Value::as_array)
-            .map(|a| {
-                a.iter()
-                    .filter_map(|x| x.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let files: Vec<String> = match parse_field(result, "files") {
+            Ok(f) => f,
+            Err(e) => {
+                self.toasts.error(format!("Malformed file list: {e}"));
+                return;
+            }
+        };
         if let Some((start, q)) = self.editor.mention()
             && q == query
         {
@@ -1195,11 +1222,22 @@ impl App {
     }
 
     fn on_older_response(&mut self, sid: &str, generation: u64, before: &str, result: &Value) {
-        let msgs: Vec<ref_proto::Message> = result
-            .get("messages")
-            .and_then(|m| serde_json::from_value(m.clone()).ok())
-            .unwrap_or_default();
-        let more = flag_of(result, "more_before");
+        let parsed = (|| -> Result<(Vec<ref_proto::Message>, bool), String> {
+            Ok((
+                parse_field(result, "messages")?,
+                parse_field(result, "more_before")?,
+            ))
+        })();
+        let (msgs, more) = match parsed {
+            Ok(x) => x,
+            Err(e) => {
+                if let Some(v) = self.views.get_mut(sid).filter(|v| v.history_gen == generation) {
+                    v.older_pending = false;
+                }
+                self.toasts.error(format!("Malformed history page: {e}"));
+                return;
+            }
+        };
         if let Some(v) = self.views.get_mut(sid)
             && !v.prepend_older(generation, before, msgs, more)
             && v.history_gen == generation
@@ -3347,21 +3385,27 @@ fn config_models(config: &Option<ServerConfigInfo>) -> &[ref_proto::ModelInfo] {
     config.as_ref().map(|c| c.models.as_slice()).unwrap_or(&[])
 }
 
-fn session_info_of(result: &Value) -> Option<SessionInfo> {
-    result
-        .get("session")
-        .and_then(|s| serde_json::from_value(s.clone()).ok())
+fn parse_field<T: serde::de::DeserializeOwned>(v: &Value, key: &str) -> Result<T, String> {
+    let field = v.get(key).ok_or_else(|| format!("missing `{key}`"))?;
+    serde_json::from_value(field.clone()).map_err(|e| format!("invalid `{key}`: {e}"))
 }
 
-fn text_of(result: &Value) -> Option<&str> {
-    result.get("text").and_then(Value::as_str)
+fn session_info_of(result: &Value) -> Result<SessionInfo, String> {
+    parse_field(result, "session")
+}
+
+fn text_of(result: &Value) -> Result<&str, String> {
+    result
+        .get("text")
+        .ok_or_else(|| "missing `text`".to_string())?
+        .as_str()
+        .ok_or_else(|| "invalid `text`".to_string())
 }
 
 fn flag_of(result: &Value, key: &str) -> bool {
     result.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
-fn sessions_of(v: &Value) -> Option<Vec<SessionInfo>> {
-    v.get("sessions")
-        .and_then(|s| serde_json::from_value(s.clone()).ok())
+fn sessions_of(v: &Value) -> Result<Vec<SessionInfo>, String> {
+    parse_field(v, "sessions")
 }
