@@ -1,9 +1,10 @@
 // Runs the session layer against the real `ref-server --mock`. Needs the binary: see REF_SERVER in CMake.
 #include "client/backend.h"
+#include "client/mock_backend.h"
+#include "client/stop_source.h"
 #include "coro_test.h"
 #include "session/session_controller.h"
 #include "session_test_data.h"
-
 #include <QDir>
 #include <QFileInfo>
 #include <QSignalSpy>
@@ -23,7 +24,7 @@ namespace
 {
 
 constexpr int ReplyTimeoutMs = 20000;
-
+constexpr int SlowReplyTimeoutMs = 90000; // mock "slow" streams for ~60 s
 // Points the temporary directory of child processes at `path` for its lifetime. Unix programs read
 // TMPDIR; Windows programs (Rust's std::env::temp_dir included) read TMP, then TEMP.
 class TemporaryDirectoryEnvironment
@@ -72,8 +73,8 @@ private slots:
 	void permissionWaitsForTheUser();
 	void deniedPermissionShowsAsFailed();
 	void undoTakesThePromptBack();
+	void twoForegroundClientsReceiveSlowStreamTogether();
 	void mockDirectoryIsRemovedWhenTheBackendIsDestroyed();
-
 private:
 	// A connected backend with a session, and the controller on it.
 	struct Session
@@ -260,6 +261,69 @@ void TestMockSession::mockDirectoryIsRemovedWhenTheBackendIsDestroyed()
 		QVERIFY(!QDir(temporary.path()).entryList({u"ref-mock-*"_s}, QDir::Dirs | QDir::NoDotAndDotDot).isEmpty());
 	}
 	QCOMPARE(QDir(temporary.path()).entryList({u"ref-mock-*"_s}, QDir::Dirs | QDir::NoDotAndDotDot), QStringList());
+}
+
+void TestMockSession::twoForegroundClientsReceiveSlowStreamTogether()
+{
+	refgui::client::StopSource stop;
+	auto started = await(refgui::client::MockBackend::start(QStringLiteral(REF_SERVER_BINARY), stop));
+	QVERIFY(started && started->has_value());
+	const auto mock = std::move(**started);
+
+	Backend backend1(Backend::Source(Backend::Mode::Remote{mock->endpoint()}), QDir::currentPath());
+	Backend backend2(Backend::Source(Backend::Mode::Remote{mock->endpoint()}), QDir::currentPath());
+	SessionController client1(backend1);
+	SessionController client2(backend2);
+
+	backend1.start();
+	backend2.start();
+	QTRY_COMPARE_WITH_TIMEOUT(backend1.state(), Backend::State::Connected, ReplyTimeoutMs);
+	QTRY_COMPARE_WITH_TIMEOUT(backend2.state(), Backend::State::Connected, ReplyTimeoutMs);
+
+	const auto created = await(client1.create(QDir::currentPath(), std::nullopt, std::nullopt));
+	QVERIFY(created && created->has_value());
+	const QString sid = client1.sessionId();
+
+	const auto attached = await(client2.attach(sid, true));
+	QVERIFY(attached && attached->has_value());
+	QVERIFY(client1.isForeground());
+	QVERIFY(client2.isForeground());
+
+	const auto sent = await(client1.send(u"slow"_s, {}));
+	QVERIFY(sent && sent->has_value());
+
+	const auto assistantContent = [](const ConversationModel& model) {
+		for(int row = 0; row < model.rowCount(); ++row)
+		{
+			if(roleOf(model, row, ConversationModel::KindRole).toString() == u"markdown")
+			{
+				return roleOf(model, row, ConversationModel::ContentRole).toString();
+			}
+		}
+		return QString();
+	};
+
+	// Both foreground clients must observe live streaming progress while the turn is active.
+	QTRY_VERIFY_WITH_TIMEOUT(client1.isTurnInProgress() && client2.isTurnInProgress()
+	                             && !assistantContent(client1.model()).isEmpty()
+	                             && !assistantContent(client2.model()).isEmpty(),
+	                         ReplyTimeoutMs);
+	const QString mid1 = assistantContent(client1.model());
+	const QString mid2 = assistantContent(client2.model());
+	QTRY_VERIFY_WITH_TIMEOUT(assistantContent(client1.model()).size() > mid1.size()
+	                             && assistantContent(client2.model()).size() > mid2.size(),
+	                         ReplyTimeoutMs);
+
+	QTRY_VERIFY_WITH_TIMEOUT(!client1.isTurnInProgress() && !client2.isTurnInProgress(), SlowReplyTimeoutMs);
+
+	const QStringList final1 = render(client1.model());
+	const QStringList final2 = render(client2.model());
+	QVERIFY(!final1.isEmpty());
+	QCOMPARE(final2, final1);
+	QVERIFY(final1.filter(u"markdown:"_s).size() >= 1);
+
+	backend1.shutdown();
+	backend2.shutdown();
 }
 
 QTEST_GUILESS_MAIN(TestMockSession)
