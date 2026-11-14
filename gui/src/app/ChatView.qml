@@ -13,7 +13,7 @@ import RefGui
 // touchpad, touch) or dragging the scroll bar releases it, and ending such a gesture
 // at the end re-engages it.
 //
-// Holding: while `turnInProgress` and following, the end never moves up. Streaming
+// Holding: while `holding` and following, the end never moves up. Streaming
 // content can briefly take more room than it ends up needing (a line that wraps,
 // then fits); the footer grows by what the content gave back, so the view does not
 // bounce. When the turn ends, the held room is released with an animation.
@@ -38,7 +38,7 @@ ListView {
 	readonly property real columnWidth: Math.min(width - 2 * sidePadding, Theme.contentWidth)
 	property bool following: true
 	property real previousHeight: 0
-	property bool turnInProgress: false
+	property bool holding: false
 	property string sessionId // the session whose pictures the rows show
 	property bool moreBefore: false // the backend has earlier messages
 	property bool loadingOlder: false
@@ -171,6 +171,12 @@ ListView {
 	// The view keeps the rows it shows where they are when earlier ones are added above them.
 	// The end stays on the bottom edge when the view changes height (a tile's input box comes or goes).
 	onSessionIdChanged: resetHold()
+	Connections {
+		target: view.model ? view.model : null
+		function onModelReset() {
+			view.resetHold()
+		}
+	}
 	onHeightChanged: {
 		if (following && previousHeight > 0)
 			contentY -= height - previousHeight
@@ -281,7 +287,7 @@ ListView {
 	onMovementEnded: following = atYEnd
 
 	// Hold only while following: further up, the end moving is out of sight.
-	onNaturalEndChanged: if (turnInProgress && following) holdEnd()
+	onNaturalEndChanged: if (holding && following) holdEnd()
 	onPermissionCountChanged: {
 		holdResting = true
 		holdResume.restart()
@@ -292,8 +298,8 @@ ListView {
 		wheeling = false
 		highWater = heldEnd
 	}
-	onTurnInProgressChanged: {
-		if (turnInProgress) {
+	onHoldingChanged: {
+		if (holding) {
 			release.stop()
 			highWater = heldEnd // a new turn keeps whatever is still held
 			holdEnd()

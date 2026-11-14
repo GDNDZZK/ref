@@ -34,6 +34,7 @@ class ChatSession : public QObject
 	Q_PROPERTY(QString sessionId READ sessionId CONSTANT)
 	Q_PROPERTY(QAbstractItemModel* blocks READ blocks CONSTANT)
 	Q_PROPERTY(bool busy READ isBusy NOTIFY busyChanged)
+	Q_PROPERTY(bool activelyWorking READ isActivelyWorking NOTIFY activelyWorkingChanged)
 	Q_PROPERTY(bool ready READ isReady NOTIFY readyChanged)
 	Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
 	Q_PROPERTY(QString title READ title NOTIFY titleChanged)
@@ -91,6 +92,8 @@ public:
 	QAbstractItemModel* blocks();
 	// A reply is being produced or still being shown.
 	bool isBusy() const;
+	// The model or tools are actively producing output (excludes paused/waiting/retrying states).
+	bool isActivelyWorking() const;
 	// The backend is reachable and a session is open: prompts can be sent.
 	bool isReady() const;
 	// What the user should be told about this session: the last failure or a remark. Empty when all is well.
@@ -155,6 +158,7 @@ public:
 
 signals:
 	void busyChanged();
+	void activelyWorkingChanged();
 	void readyChanged();
 	void statusTextChanged();
 	void titleChanged();

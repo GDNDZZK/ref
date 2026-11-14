@@ -25,6 +25,7 @@ class SessionController : public QObject
 	Q_OBJECT
 	Q_PROPERTY(bool busy READ isBusy NOTIFY busyChanged)
 	Q_PROPERTY(bool turnInProgress READ isTurnInProgress NOTIFY turnInProgressChanged)
+	Q_PROPERTY(bool activelyWorking READ isActivelyWorking NOTIFY activelyWorkingChanged)
 	Q_PROPERTY(bool moreBefore READ hasMoreBefore NOTIFY moreBeforeChanged)
 	Q_PROPERTY(bool loadingOlder READ isLoadingOlder NOTIFY loadingOlderChanged)
 
@@ -54,6 +55,8 @@ public:
 	bool isBusy() const;
 	// The user still sees a reply taking shape: busy, or streamed text not shown yet.
 	bool isTurnInProgress() const;
+	// The model or tools are actively producing output (excludes paused/waiting/retrying states).
+	bool isActivelyWorking() const;
 	// The backend is connected; connectionChanged() says when that may have changed.
 	bool isConnected() const;
 
@@ -106,6 +109,7 @@ signals:
 	void infoChanged();
 	void busyChanged();
 	void turnInProgressChanged();
+	void activelyWorkingChanged();
 	void queueChanged();
 	void questionsChanged();
 	void moreBeforeChanged();
