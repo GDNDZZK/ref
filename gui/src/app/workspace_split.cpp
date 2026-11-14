@@ -26,20 +26,11 @@ QCoro::Task<> Workspace::enterSplit()
 {
 	m_split = true;
 	emit splitViewChanged();
-	if(m_current != nullptr && m_current->isAttached())
-	{
-		const Result<void> demoted = co_await m_current->background();
-		toastFailure(demoted);
-	}
 	const Result<void> watching = co_await m_directory.setWatchAll(true);
 	toastFailure(watching);
 	if(!m_split)
 	{
 		co_return; // left again while the requests were out
-	}
-	if(m_current != nullptr)
-	{
-		setFocusedTile(m_current->sessionId());
 	}
 	syncTiles();
 	emit visibleSessionIdsChanged();
@@ -59,7 +50,7 @@ QCoro::Task<> Workspace::leaveSplit()
 	emit visibleSessionIdsChanged();
 	updateCommandContext();
 
-	if(m_current != nullptr && m_current->isAttached())
+	if(m_current != nullptr && !m_current->isForeground())
 	{
 		const Result<void> resumed = co_await m_current->attach(true);
 		toastFailure(resumed);
@@ -82,14 +73,18 @@ QCoro::Task<> Workspace::leaveSplit()
 	}
 }
 
-// The sessions to show, oldest first: those no frontend is attached to, and the current one.
+// The sessions to show, oldest first: live background sessions nobody is attached to, excluding the current one.
 QStringList Workspace::wantedTileIds() const
 {
 	QList<const refgui::proto::SessionInfo*> infos;
 	for(const refgui::proto::SessionInfo& info : m_directory.liveSessions())
 	{
-		// The backend counts our own foreground attachment, too, until it has answered the detach.
-		const bool free = info.attached == 0 || info.id == m_zoomed || info.id == currentId() || m_unzooming.contains(info.id);
+		if(info.id == currentId())
+		{
+			continue;
+		}
+		// While unzooming, the backend still counts the session as foreground until detach is answered.
+		const bool free = info.attached == 0 || info.id == m_zoomed || m_unzooming.contains(info.id);
 		if(info.live && free)
 		{
 			infos.append(&info);
@@ -100,10 +95,6 @@ QStringList Workspace::wantedTileIds() const
 	for(const auto* info : infos)
 	{
 		ids.append(info->id);
-	}
-	if(!currentId().isEmpty() && !ids.contains(currentId()))
-	{
-		ids.append(currentId());
 	}
 	return ids;
 }
@@ -149,11 +140,6 @@ void Workspace::syncTiles()
 	{
 		setFocusedTile({});
 	}
-	if(m_focusedTile.isEmpty() && !tiles.isEmpty())
-	{
-		// Only the focused tile has an input box, so one of them always has the focus.
-		setFocusedTile(tiles.contains(m_current) ? m_current->sessionId() : tiles.first()->sessionId());
-	}
 	emit visibleSessionIdsChanged();
 }
 
@@ -182,7 +168,11 @@ void Workspace::setFocusedTile(const QString& sessionId)
 
 void Workspace::focusTile(const QString& sessionId)
 {
-	if(m_split && m_tiles.indexOf(sessionId) >= 0)
+	if(!m_split)
+	{
+		return;
+	}
+	if(sessionId.isEmpty() || m_tiles.indexOf(sessionId) >= 0)
 	{
 		setFocusedTile(sessionId);
 	}

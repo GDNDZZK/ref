@@ -19,8 +19,6 @@ class TileStage : public QAbstractListModel
 	QML_UNCREATABLE("Owned by Workspace.")
 	// Tiles that are not leaving.
 	Q_PROPERTY(int placed READ placed NOTIFY placedChanged)
-	// True while the tiles of a freshly opened split view arrive.
-	Q_PROPERTY(bool opening READ opening NOTIFY openingChanged)
 	Q_PROPERTY(int lingerMs READ lingerMs WRITE setLingerMs NOTIFY lingerMsChanged)
 
 public:
@@ -35,7 +33,6 @@ public:
 	explicit TileStage(const TileModel* source, QObject* parent = nullptr);
 
 	int placed() const { return m_placed; }
-	bool opening() const { return m_opening; }
 	int lingerMs() const { return m_lingerMs; }
 	void setLingerMs(int lingerMs);
 
@@ -48,7 +45,6 @@ public:
 
 signals:
 	void placedChanged();
-	void openingChanged();
 	void lingerMsChanged();
 
 private:
@@ -65,14 +61,12 @@ private:
 	void sync();
 	void markLeaving(int row);
 	void retire(const QString& sessionId, int leaveSerial);
-	void setOpening(bool opening);
 	void setPlaced(int placed);
 	int rowOf(const ChatSession* session) const;
 
 	const TileModel* m_source;
 	QList<Row> m_rows;
 	int m_placed = 0;
-	bool m_opening = false;
 	int m_lingerMs = 0;
 	int m_leaves = 0;
 };

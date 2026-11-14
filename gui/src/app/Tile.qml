@@ -15,13 +15,9 @@ Item {
 	// Where the grid wants the tile, and whether it is the zoomed one.
 	property rect slot: Qt.rect(0, 0, 0, 0)
 	property rect zoomRect: Qt.rect(0, 0, 0, 0)
-	// The tile of the current session starts as the whole area when split view opens, and
-	// grows back to the whole area when it closes, in place of the single pane.
-	property bool takeover: false
-	readonly property bool growing: leaving && !Workspace.splitView && session !== null && session === Workspace.current
 	readonly property bool zoomed: Workspace.zoomedId === sessionId
-	readonly property bool expanded: zoomed || takeover || growing
-	readonly property bool fading: leaving && !growing
+	readonly property bool expanded: zoomed
+	readonly property bool fading: leaving
 	readonly property bool othersZoomed: anyZoomed && !zoomed
 	// Whether the tile moves between its slot and the whole area (slowly) or just reflows.
 	property bool travelling: expanded
@@ -73,13 +69,8 @@ Item {
 		onTriggered: tile.travelling = false
 	}
 
-	// A tile arrives by fading and growing into its slot; the taking-over one by shrinking from the whole area.
-	Component.onCompleted: {
-		if (takeover)
-			Qt.callLater(() => tile.takeover = false)
-		else
-			arrival.start()
-	}
+	// A tile arrives by fading and growing into its slot.
+	Component.onCompleted: arrival.start()
 	ParallelAnimation {
 		id: arrival
 		NumberAnimation { target: frame; property: "opacity"; from: 0; to: 1; duration: Motion.standard; easing.type: Motion.ease }
@@ -102,9 +93,8 @@ Item {
 		anchors.fill: parent
 		radius: Theme.radius
 		color: Theme.background
-		border.color: tile.focused || tile.expanded ? Theme.accentText : Theme.border
+		border.color: tile.leaving ? Theme.background : (tile.focused || tile.expanded ? Theme.accentText : Theme.border)
 		clip: true
-
 		Behavior on border.color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 
 		Rectangle {
@@ -189,7 +179,20 @@ Item {
 
 			TapHandler {
 				acceptedButtons: Qt.LeftButton
-				onDoubleTapped: Workspace.zoomTile(tile.sessionId)
+				onTapped: eventPoint => {
+					if (zoomButton.contains(header.mapToItem(zoomButton, eventPoint.position)))
+						return
+					if (tile.focused) {
+						Workspace.focusTile("")
+					} else {
+						Workspace.focusTile(tile.sessionId)
+						pane.focusInput()
+					}
+				}
+				onDoubleTapped: eventPoint => {
+					if (!zoomButton.contains(header.mapToItem(zoomButton, eventPoint.position)))
+						Workspace.zoomTile(tile.sessionId)
+				}
 			}
 		}
 
@@ -202,13 +205,14 @@ Item {
 			composerShown: tile.focused || tile.expanded
 		}
 
-		// A click anywhere in the tile focuses it, and its input box. The overlay sits in front so that it
-		// sees the press first: selectable text and buttons take the press for themselves, and then no
-		// handler of the items behind them is asked. Passive, so those still get the click as well.
+		// A click anywhere in an unfocused pane focuses the tile, and its input box. The overlay
+		// sits in front so that it sees the press first while letting selectable text and buttons
+		// handle the click as well.
 		Item {
-			anchors.fill: parent
+			anchors.fill: pane
 
 			TapHandler {
+				enabled: !tile.focused
 				acceptedButtons: Qt.LeftButton
 				gesturePolicy: TapHandler.DragThreshold
 				onTapped: {

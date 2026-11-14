@@ -49,7 +49,7 @@ public:
 	// The backend sends this session's events and the snapshot is in the model. False before
 	// the first attach and after detach().
 	bool isAttached() const { return m_attached; }
-
+	bool isForeground() const { return m_attached && m_foreground; }
 	// The session has work going on (an LLM response, tools, a question to the user).
 	bool isBusy() const;
 	// The user still sees a reply taking shape: busy, or streamed text not shown yet.
