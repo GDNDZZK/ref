@@ -599,6 +599,7 @@ fn a_permission_request_goes_first() {
                 purpose: "List files".into(),
                 input: serde_json::json!({"command": "ls -la"}),
                 time: 0,
+                preview: None,
             },
         });
     let s = screen(&mut app);

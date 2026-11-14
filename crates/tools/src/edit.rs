@@ -8,7 +8,7 @@ use regex::Regex;
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
@@ -582,12 +582,11 @@ fn all_anchors(ops: &[Op], total: usize) -> BTreeSet<usize> {
 
 /// Seen-line guard: rejects ops touching lines never displayed from `snap`.
 fn check_seen(
-    ctx: &ToolCtx,
     abs: &Path,
     display: &str,
     snap: &Snapshot,
     ops: &[Op],
-) -> Option<ToolOutput> {
+) -> Option<(ToolOutput, StoreEffect)> {
     let (lines, _) = util::split_lines(&snap.text);
     let mut unseen = BTreeSet::new();
     for op in ops {
@@ -634,8 +633,14 @@ fn check_seen(
     msg.push_str(
         "Verify this is the content you intend to change, then re-issue the same edit with the same tag (a straight retry now succeeds). If it is not, fix your line numbers.",
     );
-    ctx.store.mark_seen(abs, &snap.tag, revealed);
-    Some(ToolOutput::err(msg))
+    Some((
+        ToolOutput::err(msg),
+        StoreEffect::MarkSeen {
+            abs: abs.to_path_buf(),
+            tag: snap.tag.clone(),
+            revealed,
+        },
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -750,30 +755,80 @@ struct Target<'a> {
     lines: &'a [&'a str],
 }
 
+enum StoreEffect {
+    Record {
+        abs: PathBuf,
+        current: String,
+        seen: Seen,
+    },
+    MarkSeen {
+        abs: PathBuf,
+        tag: String,
+        revealed: Vec<u32>,
+    },
+}
+
+impl StoreEffect {
+    fn apply(self, store: &crate::HashStore) {
+        match self {
+            StoreEffect::Record { abs, current, seen } => {
+                store.record(&abs, &current, seen);
+            }
+            StoreEffect::MarkSeen { abs, tag, revealed } => {
+                store.mark_seen(&abs, &tag, revealed);
+            }
+        }
+    }
+}
+
+struct EditPlan {
+    abs: PathBuf,
+    display: String,
+    file: TextFile,
+    current: String,
+    new_lines: Vec<String>,
+    new_text: String,
+    base_seen: Seen,
+    warnings: Vec<String>,
+}
+
+enum PlanOutcome {
+    Ready(EditPlan),
+    Reject(ToolOutput, Option<StoreEffect>),
+}
+
+struct Rejection {
+    out: ToolOutput,
+    effect: Option<StoreEffect>,
+}
+
 /// Resolves `ops` against the current file: validates them, or remaps them from the snapshot
-/// of an older `tag`. Returns the ops and the lines the model has seen, or the rejection.
+/// of an older `tag`. Read-only on `ctx.store`; rejections carry any store update `run` applies.
 fn resolve_ops(
     ctx: &ToolCtx,
     t: &Target,
     tag: &str,
     ops: Vec<Op>,
     warnings: &mut Vec<String>,
-) -> Result<(Vec<Op>, Seen), Box<ToolOutput>> {
+) -> Result<(Vec<Op>, Seen), Box<Rejection>> {
     let snapshot = ctx.store.get(t.abs, tag);
     if tag == t.current_tag {
         if let Err(msg) = validate(&ops, t.lines.len()) {
-            return Err(Box::new(ToolOutput::err(format!(
-                "Edit rejected for {}: {msg}",
-                t.display
-            ))));
+            return Err(Box::new(Rejection {
+                out: ToolOutput::err(format!("Edit rejected for {}: {msg}", t.display)),
+                effect: None,
+            }));
         }
         let Some(snap) = &snapshot else {
             // Tag matches the live content but was not issued in this session (e.g. after
             // a restart): the content is what the model saw, so allow it.
             return Ok((ops, Seen::All));
         };
-        if let Some(rejection) = check_seen(ctx, t.abs, t.display, snap, &ops) {
-            return Err(Box::new(rejection));
+        if let Some((out, effect)) = check_seen(t.abs, t.display, snap, &ops) {
+            return Err(Box::new(Rejection {
+                out,
+                effect: Some(effect),
+            }));
         }
         return Ok((ops, snap.seen.clone()));
     }
@@ -786,68 +841,69 @@ fn resolve_ops(
             warnings.push("Recovered: file changed since read; line numbers remapped.".to_string());
             Ok((remapped, seen))
         }
-        None => Err(Box::new(mismatch(
-            ctx,
-            t.abs,
-            t.display,
-            tag,
-            t.current_tag,
-            t.current,
-            &ops,
-            snapshot.as_ref(),
-        ))),
+        None => {
+            let (out, effect) = mismatch(
+                ctx,
+                t.abs,
+                t.display,
+                tag,
+                t.current_tag,
+                t.current,
+                &ops,
+                snapshot.as_ref(),
+            );
+            Err(Box::new(Rejection {
+                out,
+                effect: Some(effect),
+            }))
+        }
     }
 }
 
 /// Records the new snapshot of the written file and builds the success output.
-fn record_result(
-    ctx: &ToolCtx,
-    t: &Target,
-    new_lines: &[String],
-    new_text: &str,
-    base_seen: &Seen,
-    warnings: &[String],
-) -> ToolOutput {
+fn record_result(ctx: &ToolCtx, p: &EditPlan) -> ToolOutput {
+    let (cur_lines, _) = util::split_lines(&p.current);
     // New snapshot: previously seen lines carried through the diff + everything displayed or authored now.
     let map = LineMap::build(
-        t.lines,
-        &new_lines.iter().map(String::as_str).collect::<Vec<_>>(),
+        &cur_lines,
+        &p.new_lines.iter().map(String::as_str).collect::<Vec<_>>(),
     );
-    let (preview, preview_seen) = build_preview(t.lines, new_lines);
-    let seen = match map.map_seen(base_seen) {
+    let (preview, preview_seen) = build_preview(&cur_lines, &p.new_lines);
+    let seen = match map.map_seen(&p.base_seen) {
         Seen::All => Seen::All,
         Seen::Lines(mut s) => {
             let extra: LineSet = preview_seen
                 .into_iter()
-                .chain(added_lines(t.lines, new_lines))
+                .chain(added_lines(&cur_lines, &p.new_lines))
                 .collect();
             s.union_with(&extra);
             Seen::Lines(s)
         }
     };
-    let new_tag = ctx.store.record(t.abs, new_text, seen);
+    let new_tag = ctx.store.record(&p.abs, &p.new_text, seen);
 
-    let (diff, added, removed) = util::unified_diff(t.current, new_text, t.display);
-    let mut text = format!("{}\n{preview}", format_header(t.display, &new_tag));
-    if !warnings.is_empty() {
+    let (diff, added, removed) = util::unified_diff(&p.current, &p.new_text, &p.display);
+    let mut text = format!("{}\n{preview}", format_header(&p.display, &new_tag));
+    if !p.warnings.is_empty() {
         text.push_str("\n\nWarnings:\n");
-        text.push_str(&warnings.join("\n"));
+        text.push_str(&p.warnings.join("\n"));
     }
     let mut out = ToolOutput::ok(text);
     let mut meta = json!({
-        "path": t.abs.to_string_lossy(),
+        "path": p.abs.to_string_lossy(),
         "diff": diff,
         "added": added,
         "removed": removed,
     });
-    if !warnings.is_empty() {
-        meta["warnings"] = json!(warnings);
+    if !p.warnings.is_empty() {
+        meta["warnings"] = json!(p.warnings);
     }
     out.meta = Some(meta);
     out
 }
 
-fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
+/// Validates and computes an edit without writing files or mutating `ctx.store`.
+fn plan_sync(input: &Value, ctx: &ToolCtx, max_file_bytes: Option<u64>) -> Result<PlanOutcome> {
     let raw_path = util::req_str(input, "path")?;
     let (raw_path, header_tag) = util::unwrap_header(&raw_path);
     if raw_path.is_empty() {
@@ -862,22 +918,35 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let meta = match std::fs::metadata(&abs) {
         Ok(m) => m,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(ToolOutput::err(format!(
-                "File not found: {display}. Use the `write` tool to create new files."
-            )));
+            return Ok(PlanOutcome::Reject(
+                ToolOutput::err(format!(
+                    "File not found: {display}. Use the `write` tool to create new files."
+                )),
+                None,
+            ));
         }
         Err(e) => bail!("cannot access {display}: {e}"),
     };
     if meta.is_dir() {
-        return Ok(ToolOutput::err(format!(
-            "{display} is a directory, not a file."
-        )));
+        return Ok(PlanOutcome::Reject(
+            ToolOutput::err(format!("{display} is a directory, not a file.")),
+            None,
+        ));
+    }
+    if let Some(limit) = max_file_bytes
+        && meta.len() > limit
+    {
+        return Ok(PlanOutcome::Reject(
+            ToolOutput::err(format!("{display} exceeds preview file size limit.")),
+            None,
+        ));
     }
     let bytes = std::fs::read(&abs)?;
     if util::looks_binary(&bytes) {
-        return Ok(ToolOutput::err(format!(
-            "Cannot edit binary file {display}."
-        )));
+        return Ok(PlanOutcome::Reject(
+            ToolOutput::err(format!("Cannot edit binary file {display}.")),
+            None,
+        ));
     }
     let raw = String::from_utf8(bytes)
         .map_err(|_| anyhow!("cannot edit {display}: not valid UTF-8 text"))?;
@@ -888,10 +957,16 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
 
     let Some(tag) = tag_raw.as_deref().and_then(hashline::normalize_tag) else {
         let got = tag_raw.map(|t| format!(" (got {t:?})")).unwrap_or_default();
-        ctx.store.record(&abs, current, Seen::lines([]));
-        return Ok(ToolOutput::err(format!(
-            "Edit rejected for {display}: `tag` must be the 4-hex TAG from the file's [path#TAG] header{got}. Read the file with `read` first and copy the tag from its header; never invent it."
-        )));
+        return Ok(PlanOutcome::Reject(
+            ToolOutput::err(format!(
+                "Edit rejected for {display}: `tag` must be the 4-hex TAG from the file's [path#TAG] header{got}. Read the file with `read` first and copy the tag from its header; never invent it."
+            )),
+            Some(StoreEffect::Record {
+                abs,
+                current: current.to_string(),
+                seen: Seen::lines([]),
+            }),
+        ));
     };
 
     let target = Target {
@@ -903,7 +978,9 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     };
     let (ops, base_seen) = match resolve_ops(ctx, &target, &tag, ops, &mut warnings) {
         Ok(resolved) => resolved,
-        Err(rejection) => return Ok(*rejection),
+        Err(rejection) => {
+            return Ok(PlanOutcome::Reject(rejection.out, rejection.effect));
+        }
     };
 
     let new_lines = apply(&cur_lines, &ops);
@@ -914,17 +991,66 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     };
     let new_text = util::join_lines(&new_lines, new_trailing);
     if new_text == current {
-        ctx.store.record(&abs, current, base_seen);
-        return Ok(ToolOutput::err(format!(
-            "Edits to {display} applied cleanly but produced no change: the new lines are identical to the file at the targeted lines. Re-read the file and verify the line numbers before issuing another edit."
-        )));
+        return Ok(PlanOutcome::Reject(
+            ToolOutput::err(format!(
+                "Edits to {display} applied cleanly but produced no change: the new lines are identical to the file at the targeted lines. Re-read the file and verify the line numbers before issuing another edit."
+            )),
+            Some(StoreEffect::Record {
+                abs,
+                current: current.to_string(),
+                seen: base_seen,
+            }),
+        ));
     }
-    std::fs::write(&abs, file.encode(&new_text))
-        .map_err(|e| anyhow!("failed to write {display}: {e}"))?;
+    let current = current.to_string();
+    Ok(PlanOutcome::Ready(EditPlan {
+        abs,
+        display,
+        file,
+        current,
+        new_lines,
+        new_text,
+        base_seen,
+        warnings,
+    }))
+}
 
-    Ok(record_result(
-        ctx, &target, &new_lines, &new_text, &base_seen, &warnings,
-    ))
+fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
+    let plan = match plan_sync(input, ctx, None)? {
+        PlanOutcome::Ready(p) => p,
+        PlanOutcome::Reject(out, effect) => {
+            if let Some(eff) = effect {
+                eff.apply(&ctx.store);
+            }
+            return Ok(out);
+        }
+    };
+    std::fs::write(&plan.abs, plan.file.encode(&plan.new_text))
+        .map_err(|e| anyhow!("failed to write {}: {e}", plan.display))?;
+    Ok(record_result(ctx, &plan))
+}
+
+/// Dry-run diff preview for a pending permission request. Never writes or touches `ctx.store`.
+pub(crate) async fn preview(input: Value, ctx: &ToolCtx) -> Option<ref_proto::EditPreview> {
+    let ctx = ctx.clone();
+    let res = tokio::task::spawn_blocking(move || {
+        plan_sync(&input, &ctx, Some(util::PREVIEW_MAX_FILE_BYTES as u64))
+    })
+    .await;
+    match res {
+        Ok(Ok(PlanOutcome::Ready(p))) => {
+            Some(util::edit_preview(&p.current, &p.new_text, &p.display))
+        }
+        Ok(Ok(PlanOutcome::Reject(_, _))) => None,
+        Ok(Err(e)) => {
+            tracing::debug!("edit preview failed: {e:#}");
+            None
+        }
+        Err(e) => {
+            tracing::debug!("edit preview task failed: {e}");
+            None
+        }
+    }
 }
 
 /// Remaps ops from snapshot text onto the current lines. `None` if any anchor is ambiguous,
@@ -980,7 +1106,7 @@ fn mismatch(
     current: &str,
     ops: &[Op],
     snap: Option<&Snapshot>,
-) -> ToolOutput {
+) -> (ToolOutput, StoreEffect) {
     let (cur_lines, _) = util::split_lines(current);
     // Anchors in current coordinates: remapped where possible, else the raw numbers.
     let map = snap.map(|s| {
@@ -1002,7 +1128,6 @@ fn mismatch(
         _ => LineSet::new(),
     };
     seen.union_with(&shown.iter().copied().collect());
-    ctx.store.record(abs, current, Seen::Lines(seen));
 
     let mut msg = if snap.is_some() {
         format!(
@@ -1036,7 +1161,14 @@ The changes touch the lines you are editing, so line numbers could not be remapp
         msg,
         "\n\nIf a previous edit in this session changed the file, use the [path#TAG] header from that edit's output. Otherwise re-read the file (or use the current lines above with tag {current_tag}) and retry."
     );
-    ToolOutput::err(msg)
+    (
+        ToolOutput::err(msg),
+        StoreEffect::Record {
+            abs: abs.to_path_buf(),
+            current: current.to_string(),
+            seen: Seen::Lines(seen),
+        },
+    )
 }
 
 #[cfg(test)]
@@ -1397,5 +1529,91 @@ mod tests {
             .collect();
         let (p, _) = build_preview(&old, &new);
         assert_eq!(p, "1:a\n2:n1\n3:n2\n4:n3\n…\n10:n9\n11:n10\n12:b");
+    }
+
+    #[tokio::test]
+    async fn preview_matches_run_and_is_readonly_on_file_and_store() {
+        let (d, c) = setup("one\ntwo\nthree\nfour\n");
+        let tag = read_tag(&c, "f.txt").await;
+        let input = json!({
+            "path": "f.txt",
+            "tag": tag,
+            "edits": [{"op": "replace", "start": 2, "lines": ["TWO"]}],
+        });
+        let p = crate::preview("edit", input.clone(), &c).await.unwrap();
+        assert_eq!(p.added, 1);
+        assert_eq!(p.removed, 1);
+        assert!(!p.truncated);
+        // File and store were untouched: the real run with the same tag still works and produces identical diff.
+        assert_eq!(file(&d), "one\ntwo\nthree\nfour\n");
+        let out = crate::execute("edit", input, &c).await;
+        assert!(!out.is_error, "{}", out.text);
+        let meta = out.meta.unwrap();
+        assert_eq!(p.diff, meta["diff"].as_str().unwrap());
+        assert_eq!(u64::from(p.added), meta["added"].as_u64().unwrap());
+        assert_eq!(u64::from(p.removed), meta["removed"].as_u64().unwrap());
+        // No extra version was recorded by preview: only read's tag and run's new tag exist.
+        assert!(c.store.get(&d.join("f.txt"), &tag).is_some());
+    }
+
+    #[tokio::test]
+    async fn preview_handles_remap_failure_size_limit_and_truncation() {
+        // Stale tag with shifted lines -> preview computes the remapped diff without mutating store.
+        let (d, c) = setup("one\ntwo\nthree\nfour\n");
+        let tag = read_tag(&c, "f.txt").await;
+        std::fs::write(d.join("f.txt"), "zero\none\ntwo\nthree\nfour\n").unwrap();
+        let p = crate::preview(
+            "edit",
+            json!({"path": "f.txt", "tag": tag, "edits": [{"op": "replace", "start": 3, "lines": ["THREE"]}]}),
+            &c,
+        )
+        .await
+        .unwrap();
+        assert!(p.diff.contains("-three\n+THREE"));
+
+        // Stale tag touching changed lines -> None, and store does NOT record the live file's tag.
+        std::fs::write(d.join("f.txt"), "zero\none\ntwo\nCHANGED\nfour\n").unwrap();
+        let cur_tag = file_hash("zero\none\ntwo\nCHANGED\nfour\n");
+        assert!(
+            crate::preview(
+                "edit",
+                json!({"path": "f.txt", "tag": tag, "edits": [{"op": "replace", "start": 3, "lines": ["THREE"]}]}),
+                &c,
+            )
+            .await
+            .is_none()
+        );
+        assert!(c.store.get(&d.join("f.txt"), &cur_tag).is_none());
+
+        // File larger than PREVIEW_MAX_FILE_BYTES -> None.
+        let big = "a\n".repeat(util::PREVIEW_MAX_FILE_BYTES / 2 + 10);
+        std::fs::write(d.join("big.txt"), &big).unwrap();
+        let big_tag = file_hash(&big);
+        assert!(
+            crate::preview(
+                "edit",
+                json!({"path": "big.txt", "tag": big_tag, "edits": [{"op": "replace", "start": 1, "lines": ["b"]}]}),
+                &c,
+            )
+            .await
+            .is_none()
+        );
+
+        // Diff exceeding PREVIEW_MAX_LINES -> truncated = true, real added/removed intact.
+        let many: String = (1..=500).map(|i| format!("line {i}\n")).collect();
+        std::fs::write(d.join("many.txt"), &many).unwrap();
+        let many_tag = read_tag(&c, "many.txt").await;
+        let replacement: Vec<String> = (1..=500).map(|i| format!("new {i}")).collect();
+        let p = crate::preview(
+            "edit",
+            json!({"path": "many.txt", "tag": many_tag, "edits": [{"op": "replace", "start": 1, "end": 500, "lines": replacement}]}),
+            &c,
+        )
+        .await
+        .unwrap();
+        assert!(p.truncated);
+        assert_eq!(p.added, 500);
+        assert_eq!(p.removed, 500);
+        assert!(p.diff.lines().count() <= util::PREVIEW_MAX_LINES);
     }
 }

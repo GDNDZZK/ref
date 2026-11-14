@@ -1458,6 +1458,7 @@ fn keys_typed_as_permission_opens_go_to_editor() {
         purpose: "List files".into(),
         input: json!({"command": "ls -la"}),
         time: 0,
+        preview: None,
     };
     app.views
         .get_mut(TEST_SESSION)
@@ -1491,6 +1492,7 @@ fn keys_typed_as_permission_opens_go_to_editor() {
         purpose: "x".into(),
         input: json!({"command": "ls"}),
         time: 0,
+        preview: None,
     };
     app.views
         .get_mut(TEST_SESSION)
@@ -4730,4 +4732,63 @@ fn edit_warnings_render_under_diff_from_shared_fixture() {
             .iter()
             .any(|r| text::line_text(&r.line).contains("warnings ─"))
     );
+}
+
+#[test]
+fn permission_modal_renders_preview_and_truncation_marker() {
+    let mut app = test_app(false);
+    // Absent preview: no preview section.
+    let no_prev = PermissionRequest {
+        session_id: TEST_SESSION.into(),
+        message_id: "m_p".into(),
+        call_id: "c_p0".into(),
+        tool: "edit".into(),
+        purpose: "Fix parser".into(),
+        input: json!({"path": "src/parser.rs"}),
+        time: 0,
+        preview: None,
+    };
+    app.views
+        .get_mut(TEST_SESSION)
+        .unwrap()
+        .apply(SessionEvent::Permission { request: no_prev });
+    let (_, s) = render(&mut app, 100, 34);
+    assert!(!s.contains("preview"), "{s}");
+
+    app.views
+        .get_mut(TEST_SESSION)
+        .unwrap()
+        .apply(SessionEvent::PermissionResolved {
+            call_id: "c_p0".into(),
+        });
+
+    // With preview (> 12 diff lines + truncated = true): shows diff, counts, marker, and (preview cut).
+    let mut diff = String::from("--- a/src/parser.rs\n+++ b/src/parser.rs\n@@ -1,15 +1,15 @@\n");
+    for i in 1..=15 {
+        diff.push_str(&format!("-old line {i}\n+new line {i}\n"));
+    }
+    let with_prev = PermissionRequest {
+        session_id: TEST_SESSION.into(),
+        message_id: "m_p".into(),
+        call_id: "c_p1".into(),
+        tool: "edit".into(),
+        purpose: "Fix parser".into(),
+        input: json!({"path": "src/parser.rs"}),
+        time: 0,
+        preview: Some(EditPreview {
+            diff,
+            added: 15,
+            removed: 15,
+            truncated: true,
+        }),
+    };
+    app.views
+        .get_mut(TEST_SESSION)
+        .unwrap()
+        .apply(SessionEvent::Permission { request: with_prev });
+    let (_, s) = render(&mut app, 100, 34);
+    assert!(s.contains("preview  +15 -15 (preview cut)"), "{s}");
+    assert!(s.contains("--- a/src/parser.rs"), "{s}");
+    assert!(s.contains("-old line 1"), "{s}");
+    assert!(s.contains("more lines (preview cut)"), "{s}");
 }

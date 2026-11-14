@@ -585,6 +585,17 @@ pub enum NotifyKind {
     TurnError,
 }
 
+/// What an `edit` or `write` would change, computed when permission is asked.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct EditPreview {
+    /// Unified diff in the same format as `meta.diff` of the finished tool.
+    pub diff: String,
+    pub added: u32,
+    pub removed: u32,
+    /// True when `diff` was cut to fit the preview limit; `added`/`removed` still count all lines.
+    pub truncated: bool,
+}
+
 /// Pending permission request shown to the user.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct PermissionRequest {
@@ -596,8 +607,10 @@ pub struct PermissionRequest {
     /// Full input parameters (purpose stripped).
     pub input: Value,
     pub time: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub preview: Option<EditPreview>,
 }
-
 /// One choice of a [`Question`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct QuestionOption {

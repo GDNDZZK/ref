@@ -124,3 +124,13 @@ pub async fn execute(name: &str, input: Value, ctx: &ToolCtx) -> ToolOutput {
         Err(e) => ToolOutput::err(format!("Error: {e:#}")),
     }
 }
+
+/// Computes a dry-run diff preview for built-in `edit` or `write`. Never writes files or
+/// updates the snapshot store; any failure returns `None` without surfacing an error.
+pub async fn preview(name: &str, input: Value, ctx: &ToolCtx) -> Option<ref_proto::EditPreview> {
+    match name {
+        edit::NAME => edit::preview(input, ctx).await,
+        write::NAME => write::preview(input, ctx).await,
+        _ => None,
+    }
+}

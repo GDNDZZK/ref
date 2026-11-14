@@ -4,6 +4,7 @@ export type { ClientFrame } from "./ClientFrame";
 export type { CommandInfo } from "./CommandInfo";
 export type { ContextUsage } from "./ContextUsage";
 export type { Delta } from "./Delta";
+export type { EditPreview } from "./EditPreview";
 export type { ImageData } from "./ImageData";
 export type { InstanceInfo } from "./InstanceInfo";
 export type { McpServerStatus } from "./McpServerStatus";
