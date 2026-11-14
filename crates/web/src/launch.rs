@@ -31,9 +31,10 @@ pub fn page_path(dir: Option<&str>) -> String {
 
 /// The address that signs the browser in. The key sits in the fragment, which a browser never
 /// sends to a server.
-pub fn key_url(host: &str, port: u16, key: &str, dir: Option<&str>) -> String {
+pub fn key_url(host: &str, port: u16, key: &str, dir: Option<&str>, tls: bool) -> String {
+    let scheme = if tls { "https" } else { "http" };
     format!(
-        "http://{host}:{port}{}#key={}",
+        "{scheme}://{host}:{port}{}#key={}",
         page_path(dir),
         percent_encode(key)
     )
@@ -85,12 +86,13 @@ mod tests {
     #[test]
     fn the_key_goes_into_the_fragment_encoded() {
         assert_eq!(
-            key_url("127.0.0.1", 7480, "tok", Some("/a b")),
+            key_url("127.0.0.1", 7480, "tok", Some("/a b"), false),
             "http://127.0.0.1:7480/?dir=/a%20b#key=tok"
         );
-        assert_eq!(key_url("h", 1, "t", None), "http://h:1/#key=t");
+        assert_eq!(key_url("h", 1, "t", None, false), "http://h:1/#key=t");
+        assert_eq!(key_url("h", 1, "t", None, true), "https://h:1/#key=t");
         assert_eq!(
-            key_url("h", 1, "a b&c+d#e", None),
+            key_url("h", 1, "a b&c+d#e", None, false),
             "http://h:1/#key=a%20b%26c%2Bd%23e"
         );
     }

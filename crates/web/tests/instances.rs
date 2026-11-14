@@ -104,7 +104,7 @@ async fn options_of_a_second_start_are_reported_as_ignored() {
     assert!(second.status.success(), "{second:?}");
     let err = String::from_utf8_lossy(&second.stderr);
     assert!(
-        err.contains("keeps its own --server, --mock and --host"),
+        err.contains("keeps its own --server, --mock, --host and --no-tls"),
         "{err}"
     );
 }

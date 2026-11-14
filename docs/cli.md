@@ -45,7 +45,8 @@ ref-web [DIR] [options]
 |---|---|
 | `DIR` | Directory for new sessions (default: the current directory). |
 | `--port N` | Port to listen on (1–65535). Without it: a random free port in 10000–65535; the port of the last run is tried first, so the address stays the same. |
-| `--host ADDR` | Address to listen on (default `127.0.0.1`). Any other address opens `ref-web` to the network, without TLS; a warning is printed. |
+| `--host ADDR` | Address to listen on (default `127.0.0.1`). Any other address opens `ref-web` to the network and enables HTTPS with a self-signed certificate by default; pass `--no-tls` for plain HTTP. |
+| `--no-tls` | Serve plain `http://` even on a non-loopback `--host` (for example behind a reverse proxy). On a loopback `--host` this is a silent no-op. |
 | `--key KEY` | The key browsers sign in with, at least 16 characters; not written to disk. Also read from the environment variable `REF_WEB_KEY`, which keeps it out of the process list. Default: the login token. See [Signing in](web.md#signing-in). |
 | `--no-open` | Do not open the browser. |
 | `--server ws://host:port` | Connect to this backend instead of finding or starting one. |
@@ -104,7 +105,8 @@ ref --server ws://127.0.0.1:7777 --token <token>
 | `~/.local/state/ref/web/login-token` | Login token of `ref-web`, the default key. Readable only by you (mode 600). Delete it while `ref-web` is stopped to get a new one. |
 | `~/.local/state/ref/web/salt` | Salt for the key (16 random bytes as hex, not secret; mode 600). Browsers keep a value derived from the key and the salt; a new salt makes them ask for the key again. |
 | `~/.local/state/ref/web/port` | The port `ref-web` used last, tried first when no `--port` is given. |
-| `~/.local/state/ref/web/instances/<pid>.json` | One file per running `ref-web`: port, host, version, start time. No secret; mode 600. |
+| `~/.local/state/ref/web/instances/<pid>.json` | One file per running `ref-web`: port, host, tls, version, start time. No secret; mode 600. |
+| `~/.local/state/ref/web/tls/` | Self-signed TLS certificate (`cert.pem`, `meta.json`) and private key (`key.pem`, mode 600; directory mode 700), created when a non-loopback `--host` serves HTTPS. |
 | `~/.local/state/ref/logs/` | Backend logs, including configuration warnings. |
 
 On Windows, `~` is `%USERPROFILE%`. The modes (600, and 700 for directories) apply on Unix only; on Windows the files rely on the access rights of the user profile.

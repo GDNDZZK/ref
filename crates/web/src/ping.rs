@@ -6,19 +6,23 @@
 //! `/api/ping` and obtain a `(nonce, proof)` verifier (an offline guess oracle for weak keys).
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::sync::Arc;
 use std::time::Duration;
 
+use rustls::pki_types::ServerName;
 use serde::Deserialize;
-use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use tokio::net::{TcpSocket, TcpStream};
+use tokio_rustls::TlsConnector;
 
 use crate::channel::{self, Root};
 use crate::guard::constant_time_eq;
 use crate::key::Key;
 use crate::launch;
 use crate::routes::PING_PATH;
+use crate::tls;
+use crate::tls_pin;
 use crate::token;
-
 const NONCE_PARAM: &str = "nonce";
 /// Longest nonce the server accepts.
 const MAX_NONCE_LEN: usize = 128;
@@ -45,18 +49,28 @@ struct PingBody {
 
 /// True when a ref-web that shares our key answers on `host:port`. Always probes from a loopback
 /// source address so `routes::ping` accepts the probe even when the instance bound a LAN IP.
-pub async fn is_our_ref_web(host: &str, port: u16, key: &Key) -> bool {
+/// When `tls` is true, connects over TLS using the pinned leaf certificate in `<state dir>/web/tls/cert.pem`.
+pub async fn is_our_ref_web(host: &str, port: u16, key: &Key, tls: bool) -> bool {
     let nonce = token::random_hex();
+    let expected_der = if tls {
+        let Ok(der) = tls_pin::load_cert_der(&tls::cert_path()) else {
+            return false;
+        };
+        Some(der)
+    } else {
+        None
+    };
     let probe = async {
-        let mut stream = connect_via_loopback(host, port).await?;
-        let request = format!(
-            "GET {PING_PATH}?{NONCE_PARAM}={nonce} HTTP/1.1\r\nHost: {host}:{port}\r\n\
-             Connection: close\r\n\r\n"
-        );
-        stream.write_all(request.as_bytes()).await?;
-        let mut response = Vec::new();
-        stream.read_to_end(&mut response).await?;
-        Ok::<_, std::io::Error>(response)
+        let tcp = connect_via_loopback(host, port).await?;
+        if let Some(der) = expected_der {
+            let connector = TlsConnector::from(Arc::new(tls_pin::pinned_client_config(der)));
+            let server_name =
+                ServerName::try_from("localhost").expect("localhost is a valid server name");
+            let stream = connector.connect(server_name, tcp).await?;
+            exchange_ping(stream, host, port, &nonce).await
+        } else {
+            exchange_ping(tcp, host, port, &nonce).await
+        }
     };
     let response = match tokio::time::timeout(PROBE_TIMEOUT, probe).await {
         Ok(Ok(response)) => String::from_utf8_lossy(&response).into_owned(),
@@ -72,6 +86,24 @@ pub async fn is_our_ref_web(host: &str, port: u16, key: &Key) -> bool {
         && constant_time_eq(body.proof.as_bytes(), proof(key.root(), &nonce).as_bytes())
 }
 
+async fn exchange_ping<S>(
+    mut stream: S,
+    host: &str,
+    port: u16,
+    nonce: &str,
+) -> std::io::Result<Vec<u8>>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let request = format!(
+        "GET {PING_PATH}?{NONCE_PARAM}={nonce} HTTP/1.1\r\nHost: {host}:{port}\r\n\
+         Connection: close\r\n\r\n"
+    );
+    stream.write_all(request.as_bytes()).await?;
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await?;
+    Ok(response)
+}
 async fn connect_via_loopback(host: &str, port: u16) -> std::io::Result<TcpStream> {
     let bare = launch::bare_host(host);
     let mut last_err = None;
