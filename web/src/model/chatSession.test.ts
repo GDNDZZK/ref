@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { RefApi } from '../net/api.ts'
+import { RefError } from '../net/connection.ts'
 import { ChatSession } from './chatSession.ts'
 import { assistantMessage, info, snapshot, userMessage } from './testMessages.ts'
 
@@ -196,6 +197,29 @@ describe('ChatSession', () => {
     await session.attach(true)
     await expect(session.answerPermission('c1', true, false)).rejects.toThrow('offline')
     expect(session.pendingPermission?.call_id).toBe('c1')
+  })
+
+  it('ignores a permission already answered elsewhere (coded and text fallback)', async () => {
+    const request = {
+      session_id: 'ses_1',
+      message_id: 'a1',
+      call_id: 'c1',
+      tool: 'bash',
+      purpose: '',
+      input: {},
+      time: 1,
+    }
+    for (const error of [
+      new RefError('already answered elsewhere', 'no_pending_permission'),
+      new Error('No pending permission request with that id.'),
+    ]) {
+      const { api, session } = setup()
+      api.attach.mockResolvedValue(snapshot([userMessage('u1', 'hi')], { pending_permissions: [request] }))
+      Object.assign(api, { permissionReply: vi.fn().mockRejectedValue(error) })
+      await session.attach(true)
+      await expect(session.answerPermission('c1', true, false)).resolves.toBeUndefined()
+      expect(session.pendingPermission).toBeUndefined()
+    }
   })
 
   it('hands the prompt it takes back to the composer', async () => {

@@ -129,7 +129,26 @@ describe('RefConnection', () => {
       error: 'nope',
     })
 
-    await expect(request).rejects.toThrow(new RefError('nope'))
+    await expect(request).rejects.toBeInstanceOf(RefError)
+    await expect(request).rejects.toMatchObject({ message: 'nope', code: undefined })
+  })
+
+  it('attaches the server error code to RefError when present', async () => {
+    const env = setup()
+    const socket = await openFully(env)
+
+    const request = env.connection.request({ op: 'ping' })
+    socket.serverSends({
+      kind: 'response',
+      id: socket.sent[1]!['id'],
+      ok: false,
+      result: null,
+      error: 'gone',
+      code: 'no_pending_question',
+    })
+
+    await expect(request).rejects.toBeInstanceOf(RefError)
+    await expect(request).rejects.toMatchObject({ message: 'gone', code: 'no_pending_question' })
   })
 
   it('rejects requests while not connected', async () => {

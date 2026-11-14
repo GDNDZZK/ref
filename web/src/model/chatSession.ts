@@ -12,6 +12,7 @@ import { effectScope, markRaw, reactive, ref, shallowReactive } from 'vue'
 import type { EffectScope } from 'vue'
 import { describeError } from '../errorMessage.ts'
 import { useFrame } from '../motion/useFrame.ts'
+import { RefError } from '../net/connection.ts'
 import type { RefApi } from '../net/api.ts'
 import type {
   Message,
@@ -41,11 +42,18 @@ export interface ChatSessionDeps {
   draftRestored(sessionId: string, text: string, images: NamedImage[]): void
 }
 
-// The backend's answer to a reply for a question nobody waits for any more.
+// The backend's answer to a reply for a question or permission nobody waits for any more.
 const NO_PENDING_QUESTION = 'No pending question with that id.'
+const NO_PENDING_PERMISSION = 'No pending permission request with that id.'
 
 function isNoPendingQuestion(error: unknown): boolean {
-  return error instanceof Error && error.message === NO_PENDING_QUESTION
+  if (error instanceof RefError && error.code === 'no_pending_question') return true
+  return error instanceof Error && error.message === NO_PENDING_QUESTION // remove with protocol 5
+}
+
+function isNoPendingPermission(error: unknown): boolean {
+  if (error instanceof RefError && error.code === 'no_pending_permission') return true
+  return error instanceof Error && error.message === NO_PENDING_PERMISSION // remove with protocol 5
 }
 
 export class ChatSession {
@@ -326,6 +334,7 @@ export class ChatSession {
     try {
       await this.deps.api().permissionReply(this.id, callId, allow, always)
     } catch (error) {
+      if (isNoPendingPermission(error)) return
       this.transcript.apply({ type: 'permission', request }, performance.now())
       this.publish()
       throw error
