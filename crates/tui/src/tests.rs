@@ -803,11 +803,11 @@ async fn mock_watch_mode_tiles_focus_and_back_to_chat() {
     assert_eq!(m.app.mode, Mode::Watch);
     assert!(s.contains("worker-1") && s.contains("reviewer") && s.contains("docs-写手"));
 
-    // The session that was foreground in this frontend is background now, and tiled.
+    // The session that was foreground in this frontend is background now, and hidden from tiles.
     let attached = |app: &App| app.live.iter().find(|i| i.id == sid).map(|i| i.attached);
     assert_eq!(attached(&m.app), Some(0));
     assert!(!m.app.views[&sid].foreground);
-    assert!(m.app.tile_ids().contains(&sid));
+    assert!(!m.app.tile_ids().contains(&sid));
     assert_eq!(m.app.current.as_deref(), Some(sid.as_str()));
 
     // A background tile asks for permission: the modal names the session; deny it.
@@ -3759,11 +3759,13 @@ fn current_session_goes_background_in_split_view() {
     let v = &app.views[TEST_SESSION];
     assert!(!v.foreground);
     assert_eq!(app.live[0].attached, 0);
-    assert_eq!(app.tile_ids(), [TEST_SESSION]);
+    assert!(app.tile_ids().is_empty());
+    let (_, empty_screen) = render(&mut app, 100, 30);
+    assert!(empty_screen.contains("No background sessions"), "{empty_screen}");
+    assert!(empty_screen.contains("ctrl+x w back to chat"), "{empty_screen}");
     assert!(!app.attached_elsewhere(TEST_SESSION));
     app.sync_watch();
     assert!(app.views.contains_key(TEST_SESSION), "current view kept");
-    // Back to chat: attached as foreground again.
     app.pending.clear();
     app.toggle_watch();
     assert_eq!(app.mode, Mode::Chat);

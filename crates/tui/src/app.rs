@@ -1331,12 +1331,12 @@ impl App {
         self.refresh_session_dialog();
     }
 
-    /// Background sessions shown in split view (the current one too: it is background there).
+    /// Background sessions shown in split view (excluding the current foreground session).
     pub fn tile_ids(&self) -> Vec<String> {
         let mut v: Vec<&SessionInfo> = self
             .live
             .iter()
-            .filter(|s| s.live && s.attached == 0)
+            .filter(|s| s.live && s.attached == 0 && self.current.as_deref() != Some(s.id.as_str()))
             .collect();
         v.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id)));
         v.into_iter().map(|s| s.id.clone()).collect()
