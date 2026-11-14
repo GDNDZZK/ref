@@ -168,6 +168,12 @@ export function metaFlag(meta: JsonValue | null | undefined, key: string): boole
   return asObject(meta)?.[key] === true
 }
 
+export function metaStrings(meta: JsonValue | null | undefined, key: string): string[] {
+  const value = asObject(meta)?.[key]
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is string => typeof item === 'string')
+}
+
 // ---- diff -----------------------------------------------------------------------------------
 
 export type DiffKind = 'added' | 'removed' | 'hunk' | 'file' | 'context'

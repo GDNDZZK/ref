@@ -10,6 +10,7 @@ import {
   metaFlag,
   metaNumber,
   metaString,
+  metaStrings,
   parseFound,
   parseSourceListing,
   peerName,
@@ -78,8 +79,8 @@ const exitCode = computed(() => metaNumber(meta.value, 'exit_code'))
 const bytes = computed(() => metaNumber(meta.value, 'bytes'))
 const status = computed(() => metaNumber(meta.value, 'status'))
 const truncated = computed(() => metaFlag(meta.value, 'truncated'))
+const warnings = computed(() => metaStrings(meta.value, 'warnings'))
 const countOf = (key: string) => metaNumber(meta.value, key) ?? 0
-
 function open(target: string): void {
   if (!isWebUrl(target)) return
   window.open(target, '_blank', 'noopener,noreferrer')
@@ -96,6 +97,9 @@ function open(target: string): void {
           <span class="removed">-{{ countOf('removed') }}</span>
         </div>
         <DiffView :diff="diff!" />
+        <div v-if="warnings.length > 0" class="warnings">
+          <div v-for="(warning, index) in warnings" :key="index" class="warning">{{ warning }}</div>
+        </div>
       </ToolSection>
       <ToolOutput v-if="block.state === 'error'" :block="block" />
     </template>
@@ -204,6 +208,19 @@ function open(target: string): void {
   color: var(--diff-removed);
 }
 
+.warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+}
+
+.warning {
+  color: var(--warning-text);
+  font-size: var(--small-font-size);
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
 .note {
   margin-top: 6px;
   color: var(--text-muted);

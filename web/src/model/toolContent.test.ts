@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   isWebUrl,
   limitLines,
+  metaStrings,
   parseDiff,
   parseFound,
   parseSourceListing,
@@ -175,5 +176,16 @@ describe('isWebUrl', () => {
     expect(isWebUrl('data:text/html,<b>x</b>')).toBe(false)
     expect(isWebUrl('file:///etc/passwd')).toBe(false)
     expect(isWebUrl('not a url')).toBe(false)
+  })
+})
+
+describe('metaStrings', () => {
+  it('returns string entries and ignores non-strings and missing keys', () => {
+    expect(metaStrings({ warnings: ['first', 42, null, { a: 1 }, 'second'] }, 'warnings')).toEqual([
+      'first',
+      'second',
+    ])
+    expect(metaStrings({ warnings: 'not-an-array' }, 'warnings')).toEqual([])
+    expect(metaStrings(null, 'warnings')).toEqual([])
   })
 })
