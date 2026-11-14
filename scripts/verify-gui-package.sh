@@ -100,6 +100,8 @@ verify_linux() {
 
   [[ -f "$PACKAGE/plugins/platforms/libqwayland.so" ]] || fail "plugins/platforms/libqwayland.so is missing"
   pass "Wayland platform plugin"
+  [[ -f "$PACKAGE/plugins/platforminputcontexts/libfcitx5platforminputcontextplugin.so" ]] || fail "plugins/platforminputcontexts/libfcitx5platforminputcontextplugin.so is missing"
+  pass "fcitx5 input context plugin"
   check_syntax_highlighting_module
   check_controls_styles
   smoke "$PACKAGE/ref-gui" xvfb-run -a "${clean_env[@]}"
