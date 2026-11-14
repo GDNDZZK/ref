@@ -20,7 +20,8 @@ Item {
 	property string emptyText: qsTr("Nothing found")
 	property bool searchable: true
 	readonly property alias count: view.count
-
+	readonly property alias currentIndex: view.currentIndex
+	readonly property alias currentItem: view.currentItem
 	function reset() {
 		view.currentIndex = view.count > 0 ? 0 : -1
 	}

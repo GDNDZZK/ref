@@ -26,7 +26,11 @@ Item {
 	readonly property var facts: live.data
 	readonly property bool hasPermission: facts.hasPermission === true
 	readonly property bool failed: Activity.isFailed(facts.activity, facts.hasError === true)
-
+	readonly property string rootId: facts.rootId ?? ""
+	readonly property string rootName: facts.rootName ?? ""
+	readonly property bool hasRoot: rootId !== ""
+	readonly property color rootColor: hasRoot ? Theme.hashColor(rootId) : "transparent"
+	readonly property bool rootTinted: hasRoot && !focused && !expanded
 	function focusPane() {
 		pane.focusInput()
 	}
@@ -93,8 +97,7 @@ Item {
 		anchors.fill: parent
 		radius: Theme.radius
 		color: Theme.background
-		border.color: tile.leaving ? Theme.background : (tile.focused || tile.expanded ? Theme.accentText : Theme.border)
-		clip: true
+		border.color: tile.leaving ? Theme.background : (tile.focused || tile.expanded ? Theme.accentText : (tile.hasRoot ? tile.rootColor : Theme.border))
 		Behavior on border.color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 
 		Rectangle {
@@ -121,17 +124,52 @@ Item {
 				anchors.verticalCenter: parent.verticalCenter
 				activity: tile.facts.activity ?? Activity.idle
 				hasError: tile.facts.hasError ?? false
+				tint: tile.rootTinted ? tile.rootColor : "transparent"
 			}
 
-			Text {
-				textFormat: Text.PlainText
+			Item {
 				anchors { left: parent.left; leftMargin: 30; right: status.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
-				text: tile.facts.displayTitle ?? ""
-				color: Theme.text
-				font.pixelSize: Theme.compactFontSize
-				elide: Text.ElideRight
-			}
+				height: parent.height
 
+				Text {
+					id: titleText
+					textFormat: Text.PlainText
+					anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+					width: rootChip.visible ? Math.min(implicitWidth, Math.max(0, parent.width - rootChip.width - 8)) : parent.width
+					text: tile.facts.displayTitle ?? ""
+					color: Theme.text
+					font.pixelSize: Theme.compactFontSize
+					elide: Text.ElideRight
+				}
+
+				Rectangle {
+					id: rootChip
+					readonly property int maxChipWidth: Math.min(160, Math.floor(parent.width * 0.45))
+					visible: tile.hasRoot && parent.width > 80
+					anchors { left: titleText.right; leftMargin: 8; verticalCenter: parent.verticalCenter }
+					width: Math.min(rootLabel.implicitWidth + 12, maxChipWidth)
+					height: 20
+					radius: 4
+					color: Qt.alpha(tile.rootColor, 0.1)
+					border.color: Qt.alpha(tile.rootColor, 0.35)
+
+					Text {
+						id: rootLabel
+						textFormat: Text.PlainText
+						anchors { left: parent.left; right: parent.right; leftMargin: 6; rightMargin: 6; verticalCenter: parent.verticalCenter }
+						text: "\u27f2 " + tile.rootName
+						color: tile.rootColor
+						font.pixelSize: Theme.microFontSize
+						elide: Text.ElideRight
+					}
+
+					HoverHandler { id: rootHover }
+					PlainToolTip {
+						visible: rootHover.hovered && rootLabel.truncated
+						text: tile.rootName
+					}
+				}
+			}
 			Row {
 				id: status
 				anchors { right: zoomButton.left; rightMargin: 8; verticalCenter: parent.verticalCenter }

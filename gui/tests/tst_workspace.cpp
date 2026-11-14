@@ -40,11 +40,10 @@ public:
 		};
 	}
 
-	void add(const QString& id, qint64 created, const QString& cwd = u"/work"_s)
+	void add(const QString& id, qint64 created, const QString& cwd = u"/work"_s, const std::optional<QString>& parent = std::nullopt)
 	{
-		m_sessions.insert(id, sessionInfoJson(id, {.title = u"Title "_s + id, .cwd = cwd, .createdAt = created}));
+		m_sessions.insert(id, sessionInfoJson(id, {.title = u"Title "_s + id, .cwd = cwd, .createdAt = created, .parent = parent}));
 	}
-
 	void setProtocol(int protocol) { m_protocol = protocol; }
 
 	// The to-do list the session's info carries.
@@ -428,6 +427,7 @@ private slots:
 	void restartClosingTheConnectionIsQuiet();
 	void commandsFollowTheState();
 	void listDirsPassesErrorCodeToTheCallback();
+	void infoResolvesRootTaskFromLiveSessions();
 };
 
 void TestWorkspace::opensTheSessionFromTheCommandLine()
@@ -1314,6 +1314,21 @@ void TestWorkspace::undoPutsThePromptBackIntoTheInputBox()
 	QCOMPARE(session->composer()->attachments()->rowCount(), 1);
 	QVERIFY(!session->composer()->shellMode()); // it was a prompt
 	QVERIFY(f.stub.ops().contains(u"undo"_s));
+}
+
+void TestWorkspace::infoResolvesRootTaskFromLiveSessions()
+{
+	Fixture f(refgui::proto::ProtocolVersion, false, {}, [](StubServer& stub) {
+		stub.add(u"ses_sub"_s, 2, u"/work"_s, u"ses_a"_s);
+		stub.add(u"ses_leaf"_s, 3, u"/work"_s, u"ses_sub"_s);
+	});
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 3);
+	const QVariantMap rootInfo = f.workspace->info(u"ses_a"_s);
+	const QVariantMap leafInfo = f.workspace->info(u"ses_leaf"_s);
+	QCOMPARE(rootInfo.value(u"rootId"_s).toString(), QString());
+	QCOMPARE(leafInfo.value(u"parentId"_s).toString(), u"ses_sub"_s);
+	QCOMPARE(leafInfo.value(u"rootId"_s).toString(), u"ses_a"_s);
+	QCOMPARE(leafInfo.value(u"rootName"_s).toString(), u"Title ses_a"_s);
 }
 
 QTEST_MAIN(TestWorkspace)

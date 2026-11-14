@@ -20,8 +20,18 @@ class SessionListModel : public QAbstractListModel
 	Q_PROPERTY(int count READ count NOTIFY countChanged)
 	// Shows only the sessions whose title, name, directory or id contains it, ignoring case.
 	Q_PROPERTY(QString filter READ filter WRITE setFilter NOTIFY filterChanged)
+	Q_PROPERTY(CreatorFilter creatorFilter READ creatorFilter WRITE setCreatorFilter NOTIFY creatorFilterChanged)
+	Q_PROPERTY(QString creatorId READ creatorId WRITE setCreatorId NOTIFY creatorIdChanged)
 
 public:
+	enum class CreatorFilter
+	{
+		All,
+		UserCreated,
+		ByCreator,
+	};
+	Q_ENUM(CreatorFilter)
+
 	enum Role
 	{
 		SessionIdRole = Qt::UserRole + 1,
@@ -49,8 +59,11 @@ public:
 		IsCurrentRole,
 		IsTileRole,
 		IsLiveRole,
+		ParentIdRole,
+		CreatorNameRole,
+		RootIdRole,
+		RootNameRole,
 	};
-
 	explicit SessionListModel(QObject* parent = nullptr);
 
 	// Replaces the sessions. Live ones come first, the newest created first; the others follow,
@@ -58,7 +71,10 @@ public:
 	void setSessions(const QList<proto::SessionInfo>& sessions);
 	void setFilter(const QString& filter);
 	const QString& filter() const { return m_filter; }
-	// The session shown in the window's main view, and the ones in split view tiles.
+	void setCreatorFilter(CreatorFilter filter);
+	CreatorFilter creatorFilter() const { return m_creatorFilter; }
+	void setCreatorId(const QString& id);
+	const QString& creatorId() const { return m_creatorId; }
 	void setCurrentId(const QString& id);
 	void setTileIds(const QStringList& ids);
 
@@ -78,7 +94,8 @@ public:
 signals:
 	void countChanged();
 	void filterChanged();
-
+	void creatorFilterChanged();
+	void creatorIdChanged();
 private:
 	// What the views show of a session; rows are compared to see whether one changed.
 	struct Row
@@ -101,11 +118,17 @@ private:
 		QString lastError;
 		int attached = 0;
 		bool live = false;
+		QString parentId;
+		QString creatorName;
+		QString creatorRawName;
+		QString creatorTitle;
+		QString rootId;
+		QString rootName;
 
 		bool operator==(const Row&) const = default;
 	};
 
-	static Row toRow(const proto::SessionInfo& info);
+	Row toRow(const proto::SessionInfo& info) const;
 	QVariant roleData(const Row& row, int role) const;
 	bool matchesFilter(const Row& row) const;
 	bool before(const Row& a, const Row& b) const;
@@ -117,6 +140,8 @@ private:
 	void emitRowChanged(const QString& id);
 
 	QString m_filter;
+	CreatorFilter m_creatorFilter = CreatorFilter::All;
+	QString m_creatorId;
 	QString m_currentId;
 	QStringList m_tileIds;
 	QHash<QString, proto::SessionInfo> m_all;

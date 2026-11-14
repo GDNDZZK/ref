@@ -29,24 +29,29 @@ struct SessionJson
 	QString state = QStringLiteral("idle");
 	int attached = 0;
 	bool live = true;
+	std::optional<QString> parent{};
 };
 
 // A `SessionInfo` as the backend sends it.
 inline QJsonObject sessionInfoJson(const QString& id, const SessionJson& fields = {})
 {
-	return {{QStringLiteral("id"), id},
-	        {QStringLiteral("name"), fields.name},
-	        {QStringLiteral("title"), fields.title},
-	        {QStringLiteral("agent"), fields.agent},
-	        {QStringLiteral("model"), fields.model},
-	        {QStringLiteral("cwd"), fields.cwd},
-	        {QStringLiteral("created_at"), fields.createdAt},
-	        {QStringLiteral("updated_at"), fields.createdAt},
-	        {QStringLiteral("status"), QJsonObject{{QStringLiteral("state"), fields.state}}},
-	        {QStringLiteral("attached"), fields.attached},
-	        {QStringLiteral("live"), fields.live}};
+	QJsonObject obj{{QStringLiteral("id"), id},
+	                {QStringLiteral("name"), fields.name},
+	                {QStringLiteral("title"), fields.title},
+	                {QStringLiteral("agent"), fields.agent},
+	                {QStringLiteral("model"), fields.model},
+	                {QStringLiteral("cwd"), fields.cwd},
+	                {QStringLiteral("created_at"), fields.createdAt},
+	                {QStringLiteral("updated_at"), fields.createdAt},
+	                {QStringLiteral("status"), QJsonObject{{QStringLiteral("state"), fields.state}}},
+	                {QStringLiteral("attached"), fields.attached},
+	                {QStringLiteral("live"), fields.live}};
+	if(fields.parent)
+	{
+		obj.insert(QStringLiteral("parent"), *fields.parent);
+	}
+	return obj;
 }
-
 // A ref-server stand-in on a loopback WebSocket. It records the request frames it gets and
 // leaves answering them to `onRequest`; Hello is answered by default.
 class FakeBackend : public QObject

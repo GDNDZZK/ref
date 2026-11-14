@@ -21,5 +21,9 @@ QtObject {
 		function onRowsInserted() { info.refresh() }
 	}
 
+	property Connections historyUpdates: Connections {
+		target: Workspace
+		function onHistoryLoadedChanged() { info.refresh() }
+	}
 	onSessionIdChanged: refresh()
 }
