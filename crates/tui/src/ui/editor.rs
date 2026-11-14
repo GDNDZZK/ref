@@ -948,7 +948,9 @@ impl History {
                     .create(true)
                     .append(true)
                     .open(p)?;
-                writeln!(f, "{}", serde_json::json!({ "text": t }))?;
+                let mut line = serde_json::to_string(&serde_json::json!({ "text": t }))?;
+                line.push('\n');
+                f.write_all(line.as_bytes())?;
             }
         }
         Ok(())

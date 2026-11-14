@@ -491,24 +491,37 @@ const CANONICAL_NAME_SCORE_BONUS: i64 = 5;
 const LOGO_PRIMARY_CHARS: usize = 10;
 const EPILOGUE_LABEL_WIDTH: usize = 10;
 
-impl App {
-    pub fn new(client: Client, cwd: String, init: InitPlan) -> Self {
-        let mut toasts = Toasts::default();
-        let history = match ref_proto::state_dir() {
-            Ok(d) => {
-                let path = d.join("prompt-history.jsonl");
-                match History::load(path.clone()) {
-                    Ok(h) => h,
-                    Err(e) => {
-                        toasts.warn(format!("Cannot load prompt history: {e}"));
-                        History::with_path(path)
-                    }
+pub(crate) fn load_prompt_history_from(
+    dir: Result<std::path::PathBuf, String>,
+    toasts: &mut Toasts,
+) -> History {
+    match dir {
+        Ok(d) => {
+            let path = d.join("prompt-history.jsonl");
+            match History::load(path.clone()) {
+                Ok(h) => h,
+                Err(e) => {
+                    toasts.warn(format!("Cannot load prompt history: {e}"));
+                    History::with_path(path)
                 }
             }
-            Err(e) => {
-                toasts.warn(format!("Cannot locate state dir for prompt history: {e}"));
-                History::default()
-            }
+        }
+        Err(e) => {
+            toasts.warn(format!("Cannot locate state dir for prompt history: {e}"));
+            History::default()
+        }
+    }
+}
+
+impl App {
+    pub fn new(client: Client, cwd: String, init: InitPlan) -> Self {
+        #[cfg(test)]
+        let (toasts, history) = (Toasts::default(), History::default());
+        #[cfg(not(test))]
+        let (toasts, history) = {
+            let mut toasts = Toasts::default();
+            let history = load_prompt_history_from(ref_proto::state_dir(), &mut toasts);
+            (toasts, history)
         };
         let mode = if init.watch { Mode::Watch } else { Mode::Chat };
         App {
