@@ -21,6 +21,10 @@ QVariantMap parseInput(const QString& inputJson);
 // other than in_progress, completed and cancelled reads as pending.
 QVariantList todos(const QVariantMap& input);
 
+// Summary rows for an answered `question` call as [{header, question, answer, answered}].
+// Empty when `meta` does not carry `answers` or `input` has no `questions`.
+QVariantList questionSummary(const QVariantMap& input, const QVariantMap& meta);
+
 // One line from the input that tells calls of the same tool apart: command, path, pattern, url,
 // recipient, progress. A tool without a rule gets `key=value` of its first plain arguments. The
 // rules are the terminal client's (crates/tui, tool_detail).

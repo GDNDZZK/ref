@@ -9,10 +9,26 @@
 namespace refgui::client
 {
 
+// The reason a request failed: the backend's message and optional machine-readable code.
+struct Failure
+{
+	QString message;
+	QString code{};
+
+	Failure() = default;
+	Failure(QString text, QString errorCode = {})
+		: message(std::move(text))
+		, code(std::move(errorCode))
+	{
+	}
+	operator const QString&() const { return message; }
+	bool operator==(const Failure&) const = default;
+};
+
 // The result of a request: the answer, or the reason it failed (the backend's error text,
 // or one of the two below).
 template<typename T>
-using Result = std::expected<T, QString>;
+using Result = std::expected<T, Failure>;
 
 // The errors of a request that got no answer because there was no connection, or it went.
 inline const QString NotConnected = QStringLiteral("not connected");

@@ -372,7 +372,6 @@ void Workspace::setCurrent(ChatSession* session)
 	updateHighlight();
 	if(m_split && session != nullptr)
 	{
-		setFocusedTile(session->sessionId());
 		syncTiles();
 	}
 	emit currentChanged();
@@ -406,7 +405,7 @@ QCoro::Task<Workspace::Done> Workspace::show(QString sessionId)
 {
 	const int serial = ++m_showSerial;
 	ChatSession& target = chat(sessionId);
-	const Result<void> attached = co_await target.attach(!m_split);
+	const Result<void> attached = co_await target.attach(true);
 	if(!attached)
 	{
 		co_return std::unexpected(attached.error());
@@ -420,7 +419,7 @@ QCoro::Task<Workspace::Done> Workspace::show(QString sessionId)
 	}
 	ChatSession* old = m_current;
 	setCurrent(&target);
-	const bool shouldDetachOld = old != nullptr && old != &target && !m_split && old->isAttached() && !m_leaving.contains(old->sessionId());
+	const bool shouldDetachOld = old != nullptr && old != &target && old->isAttached() && !m_leaving.contains(old->sessionId());
 	if(shouldDetachOld)
 	{
 		const QString oldId = old->sessionId();
@@ -439,13 +438,13 @@ QCoro::Task<> Workspace::createAndShow(QString cwd, Reply reply)
 	const auto created = co_await m_directory.create(cwd, std::nullopt, std::nullopt);
 	if(!created)
 	{
-		report(reply, false, created.error());
+		report(reply, false, created.error().message);
 		co_return;
 	}
 	const Result<void> shown = co_await show(created->id);
 	if(!shown)
 	{
-		report(reply, false, shown.error());
+		report(reply, false, shown.error().message);
 		co_return;
 	}
 	report(reply, true, created->id);

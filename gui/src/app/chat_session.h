@@ -78,7 +78,7 @@ public:
 
 	const QString& sessionId() const { return m_sessionId; }
 	bool isAttached() const { return m_controller.isAttached(); }
-
+	bool isForeground() const { return m_controller.isForeground(); }
 	// Shows the session's conversation: it replaces the model with the backend's snapshot.
 	// A tile watches (`foreground` false); the session in the window's main view is in the foreground.
 	QCoro::Task<refgui::client::Result<void>> attach(bool foreground);

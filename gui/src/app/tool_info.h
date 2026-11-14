@@ -16,6 +16,10 @@ public:
 	Q_INVOKABLE QString icon(const QString& toolName) const { return refgui::session::tool_content::iconName(toolName); }
 	Q_INVOKABLE QVariantMap parse(const QString& inputJson) const { return refgui::session::tool_content::parseInput(inputJson); }
 	Q_INVOKABLE QVariantList todos(const QVariantMap& input) const { return refgui::session::tool_content::todos(input); }
+	Q_INVOKABLE QVariantList questionSummary(const QVariantMap& input, const QVariantMap& meta) const
+	{
+		return refgui::session::tool_content::questionSummary(input, meta);
+	}
 	Q_INVOKABLE QString detail(const QString& toolName, const QVariantMap& input) const
 	{
 		return refgui::session::tool_content::detail(toolName, input);

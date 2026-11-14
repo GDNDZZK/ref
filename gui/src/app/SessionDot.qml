@@ -9,18 +9,20 @@ Item {
 
 	property string activity: Activity.idle
 	property bool hasError: false
+	property color tint: "transparent"
 
 	readonly property bool working: Activity.isWorking(activity)
-	readonly property color dotColor: colorFor(activity, hasError)
+	readonly property color dotColor: colorFor(activity, hasError, tint)
 
-	function colorFor(state, errored) {
+	function colorFor(state, errored, tintColor) {
 		if (Activity.isFailed(state, errored))
 			return Theme.danger
 		if (Activity.needsAttention(state))
 			return Theme.warning
+		const hasTint = tintColor !== undefined && tintColor.a > 0
 		if (Activity.isWorking(state))
-			return Theme.accent
-		return Theme.idleDot
+			return hasTint ? tintColor : Theme.accent
+		return hasTint ? Qt.alpha(tintColor, 0.5) : Theme.idleDot
 	}
 
 	implicitWidth: Theme.statusDotSize

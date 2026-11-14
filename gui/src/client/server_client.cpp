@@ -45,7 +45,7 @@ Result<T> asResult(const Result<QJsonObject>& response, proto::Parsed<T> (*parse
 	proto::Parsed<T> parsed = parse(*response);
 	if(!parsed)
 	{
-		return std::unexpected(u"unexpected response: %1"_s.arg(parsed.error().message));
+		return std::unexpected(Failure(u"unexpected response: %1"_s.arg(parsed.error().message)));
 	}
 	return std::move(*parsed);
 }
@@ -408,7 +408,7 @@ void ServerClient::onTextMessage(const QString& text)
 
 	if(const auto* response = std::get_if<proto::ResponseFrame>(&*frame))
 	{
-		Result<QJsonObject> result = response->ok ? Result<QJsonObject>(response->result) : std::unexpected(response->error);
+		Result<QJsonObject> result = response->ok ? Result<QJsonObject>(response->result) : std::unexpected(Failure(response->error, response->code));
 		complete(response->id, std::move(result));
 		return;
 	}

@@ -6,6 +6,7 @@
 #include "session/fence_splitter.h"
 
 #include <QAbstractListModel>
+#include <QHash>
 #include <QSet>
 
 #include <optional>
@@ -61,6 +62,8 @@ public:
 		RunAtRole,     // delayed tool blocks: when the tool starts
 		MetaRole,      // tool blocks: display extras of the tool as a map
 		LiveOutputRole,
+		WarningsRole,
+		PermissionPreviewRole,
 		ImagesRole,    // list of {id, mime, size, name}
 		AgentRole,     // meta blocks from here on
 		ModelIdRole,
@@ -123,6 +126,9 @@ public:
 	// when the message is unknown.
 	bool appendDelta(const QString& messageId, qsizetype index, const proto::Delta& delta);
 	void removeMessage(const QString& messageId);
+	void setPendingPermissions(const QList<proto::PermissionRequest>& requests);
+	void setPermission(const proto::PermissionRequest& request);
+	void resolvePermission(const QString& callId);
 
 	// The message text as the copy button gives it: the text parts, apart by a blank line.
 	std::optional<QString> messageText(const QString& messageId) const;
@@ -214,6 +220,7 @@ private:
 	bool m_tailShown = false;
 	QSet<PartKey> m_toggled;
 	QSet<PartKey> m_shownAll;
+	QHash<QString, proto::EditPreview> m_permissionPreviews;
 	bool m_reasoningExpanded = false;
 	bool m_toolsExpanded = false;
 };

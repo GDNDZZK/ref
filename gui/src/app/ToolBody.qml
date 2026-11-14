@@ -32,8 +32,9 @@ Item {
 			return Fields.stringOf(meta, "diff") !== "" ? "DiffBody.qml" : genericFile
 		if (toolName === "read")
 			return hasLines && !call.failed && call.toolState === ToolState.done ? "ReadBody.qml" : genericFile
+		if (toolName === "question")
+			return ToolInfo.questionSummary(call.inputObject, meta).length > 0 ? "QuestionBody.qml" : genericFile
 		if (SessionTools.isSessionTool(toolName))
-			return "SessionBody.qml"
 		return Fields.has(bodyFiles, toolName) ? bodyFiles[toolName] : genericFile
 	}
 

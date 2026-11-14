@@ -9,6 +9,7 @@ Item {
 	required property var input
 	required property bool open
 	required property int othersWaiting
+	required property var preview
 
 	signal answered(bool allow, bool always)
 
@@ -21,6 +22,12 @@ Item {
 	readonly property int bottomTrim: 4 // of the padding under the buttons
 	readonly property string command: Fields.stringOf(input, "command")
 	readonly property string path: Fields.stringOf(input, "path")
+	readonly property string previewDiff: Fields.stringOf(preview, "diff")
+	readonly property bool hasPreview: previewDiff !== ""
+	readonly property int previewAdded: preview.added ?? 0
+	readonly property int previewRemoved: preview.removed ?? 0
+	readonly property bool previewTruncated: preview.truncated === true
+	readonly property int maxPreviewHeight: 240
 
 	width: parent.width
 	height: open ? content.y + content.height : 0
@@ -73,6 +80,65 @@ Item {
 			font.family: Theme.monoFamily
 			font.pixelSize: Theme.codeFontSize
 			elide: Text.ElideMiddle
+		}
+		Column {
+			visible: section.hasPreview
+			width: parent.width
+			spacing: 6
+
+			Row {
+				spacing: 8
+
+				Text {
+					textFormat: Text.PlainText
+					text: qsTr("Preview")
+					color: Theme.textMuted
+					font.pixelSize: Theme.smallFontSize
+					font.bold: true
+				}
+				Text {
+					textFormat: Text.PlainText
+					visible: section.previewAdded > 0
+					text: "+" + section.previewAdded
+					color: Theme.diffAdded
+					font.family: Theme.monoFamily
+					font.pixelSize: Theme.smallFontSize
+				}
+				Text {
+					textFormat: Text.PlainText
+					visible: section.previewRemoved > 0
+					text: "-" + section.previewRemoved
+					color: Theme.diffRemoved
+					font.family: Theme.monoFamily
+					font.pixelSize: Theme.smallFontSize
+				}
+				Text {
+					textFormat: Text.PlainText
+					visible: section.previewTruncated
+					text: qsTr("(preview cut)")
+					color: Theme.warningText
+					font.pixelSize: Theme.smallFontSize
+				}
+			}
+
+			Flickable {
+				width: parent.width
+				height: Math.min(previewDiffView.height, section.maxPreviewHeight)
+				contentWidth: width
+				contentHeight: previewDiffView.height
+				flickableDirection: Flickable.VerticalFlick
+				interactive: contentHeight > height
+				boundsBehavior: Flickable.StopAtBounds
+				clip: true
+
+				LineView {
+					id: previewDiffView
+					width: parent.width
+					rows: ToolInfo.diffRows(section.previewDiff)
+					showAll: true
+					copyText: section.previewDiff
+				}
+			}
 		}
 
 		Item {

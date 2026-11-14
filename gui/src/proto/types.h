@@ -224,6 +224,16 @@ struct Message
 	std::optional<QString> error{}; // the turn ended with this error or "aborted"
 };
 
+struct EditPreview
+{
+	QString diff;
+	quint32 added = 0;
+	quint32 removed = 0;
+	bool truncated = false;
+
+	bool operator==(const EditPreview&) const = default;
+};
+
 struct PermissionRequest
 {
 	QString sessionId;
@@ -233,8 +243,8 @@ struct PermissionRequest
 	QString purpose;
 	QJsonValue input;
 	qint64 time = 0;
+	std::optional<EditPreview> preview{};
 };
-
 struct QuestionOption
 {
 	QString label;
@@ -422,6 +432,7 @@ struct ResponseFrame
 	bool ok = false;
 	QJsonObject result{}; // empty when the request failed
 	QString error{};      // set when it failed
+	QString code{};       // optional machine-readable error code when it failed
 };
 struct EventFrame
 {

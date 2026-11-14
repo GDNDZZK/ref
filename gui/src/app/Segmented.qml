@@ -61,11 +61,12 @@ Item {
 
 				Text {
 					textFormat: Text.PlainText
-					anchors.centerIn: parent
+					anchors { left: parent.left; right: parent.right; leftMargin: 8; rightMargin: 8; verticalCenter: parent.verticalCenter }
+					horizontalAlignment: Text.AlignHCenter
+					elide: Text.ElideRight
 					text: parent.modelData.text
 					color: parent.index === segmented.currentIndex ? Theme.text : Theme.textMuted
 					font.pixelSize: Theme.captionFontSize
-
 					Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 				}
 

@@ -31,11 +31,13 @@ Item {
 		const directory = slash < 0 ? "." : text.slice(0, slash + 1)
 		const prefix = text.slice(slash + 1).toLowerCase()
 		const mine = ++request
-		Workspace.listDirs(directory, (ok, listing) => {
+		Workspace.listDirs(directory, (ok, listing, code) => {
 			if (mine !== request)
 				return
+			// remove text fallback with protocol 5
+			const notFound = !ok && (code === "not_found" || (code === "" && typeof listing === "string" && listing.startsWith("Directory does not exist")))
 			listedPath = ok ? listing.path : ""
-			listError = ok ? "" : listing
+			listError = ok || notFound ? "" : listing
 			names = ok ? listing.dirs.filter(name => name.toLowerCase().startsWith(prefix)) : []
 			view.currentIndex = names.length > 0 ? 0 : -1
 		})

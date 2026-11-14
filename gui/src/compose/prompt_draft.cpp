@@ -59,6 +59,15 @@ void PromptDraft::attach(proto::NamedImage image)
 	m_cursor += inserted.size();
 }
 
+void PromptDraft::insertPath(const QString& path)
+{
+	const bool followsText = m_cursor > 0 && m_text[m_cursor - 1] != u' ' && m_text[m_cursor - 1] != u'\n';
+	const bool precedesText = m_cursor < m_text.size() && m_text[m_cursor] != u' ' && m_text[m_cursor] != u'\n';
+	const QString inserted = (followsText ? u" "_s : QString()) + path + (precedesText || m_cursor == m_text.size() ? u" "_s : QString());
+	m_text.insert(m_cursor, inserted);
+	m_cursor += inserted.size();
+}
+
 void PromptDraft::removeAttachment(qsizetype index)
 {
 	const QString token = m_attachments.at(index).token;

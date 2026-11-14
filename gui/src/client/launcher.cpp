@@ -56,8 +56,12 @@ QCoro::Task<std::optional<Connected>> connectExisting(const QString& directory, 
 		{
 			co_return endpoint;
 		}
+		if(attempt.error().code == "protocol_mismatch"_L1)
+		{
+			co_return std::unexpected(attempt.error().message);
+		}
 		// Normal for an instance that is going away: the next one, or a new backend, is tried.
-		qCDebug(lcLauncher) << "instance" << instance.pid << "on port" << instance.port << "refused:" << attempt.error();
+		qCDebug(lcLauncher) << "instance" << instance.pid << "on port" << instance.port << "refused:" << attempt.error().message;
 	}
 	if(stop.stopped())
 	{
@@ -158,7 +162,7 @@ QCoro::Task<Connected> connectToStarted(const QString& directory, quint16 port, 
 		{
 			co_return endpoint;
 		}
-		lastReason = connected.error();
+		lastReason = connected.error().message;
 		if(stop.stopped())
 		{
 			co_return stoppedResult();
@@ -214,7 +218,7 @@ QCoro::Task<std::expected<Endpoint, QString>> connectTarget(Target target,
 		{
 			co_return explicitTarget->endpoint;
 		}
-		co_return std::unexpected(u"cannot connect to %1: %2"_s.arg(explicitTarget->endpoint.url.toString(), attempt.error()));
+		co_return std::unexpected(u"cannot connect to %1: %2"_s.arg(explicitTarget->endpoint.url.toString(), attempt.error().message));
 	}
 	co_return co_await discover(std::move(instancesDirectory), std::move(tryConnect), std::move(onStartingBackend), stop);
 }

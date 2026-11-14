@@ -146,7 +146,7 @@ private slots:
 
 		const auto result = await(client.removeQueued(u"nope"_s, u"m"_s)).value();
 		QVERIFY(!result);
-		QCOMPARE(result.error(), u"Session not found"_s);
+		QCOMPARE(result.error().message, u"Session not found"_s);
 	}
 };
 

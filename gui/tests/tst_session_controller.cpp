@@ -195,7 +195,7 @@ void TestSessionController::attachFailureIsReported()
 
 	QVERIFY(result);
 	QVERIFY(!result->has_value());
-	QCOMPARE(result->error(), u"no such session"_s);
+	QCOMPARE(result->error().message, u"no such session"_s);
 	QVERIFY(!f.controller.hasSession());
 }
 

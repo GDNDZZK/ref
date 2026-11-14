@@ -1,6 +1,7 @@
 #pragma once
 
 #include "client/endpoint.h"
+#include "client/result.h"
 #include "client/stop_source.h"
 
 #include <QCoroTask>
@@ -31,7 +32,7 @@ using Target = std::variant<Auto, Explicit>;
 
 // Tries to connect to `endpoint` within the timeout and, if that works, stays connected.
 // A failed attempt says why.
-using ConnectAttempt = std::expected<void, QString>;
+using ConnectAttempt = Result<void>;
 using TryConnect = std::function<QCoro::Task<ConnectAttempt>(const Endpoint&, std::chrono::milliseconds)>;
 
 // Connects to `target` with `tryConnect` and returns the endpoint that worked, or why none did.
