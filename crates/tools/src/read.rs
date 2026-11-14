@@ -78,7 +78,7 @@ enum Range {
 fn split_range_suffix(cwd: &Path, raw: &str) -> Option<(PathBuf, Range)> {
     let caps = RANGE_SUFFIX_RE.captures(raw)?;
     let base = caps.name("path")?.as_str();
-    let base_abs = util::resolve_path(cwd, base);
+    let base_abs = util::resolve_path(cwd, base).ok()?;
     if !base_abs.exists() {
         return None;
     }
@@ -116,7 +116,7 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
     let offset = util::opt_u64(input, "offset")?.map(|v| v as usize);
     let limit = util::opt_u64(input, "limit")?.map(|v| v as usize);
 
-    let mut abs = util::resolve_path(&ctx.cwd, &raw);
+    let mut abs = util::resolve_path(&ctx.cwd, &raw)?;
     let mut suffix_range = None;
     if !abs.exists()
         && let Some((base, range)) = split_range_suffix(&ctx.cwd, &raw)

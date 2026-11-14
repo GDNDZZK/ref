@@ -164,8 +164,13 @@ impl Shared {
                 };
                 let res = if let Some(err) = obj.get("error") {
                     Err(rpc_error(err))
+                } else if let Some(result) = obj.get("result") {
+                    Ok(result.clone())
                 } else {
-                    Ok(obj.get("result").cloned().unwrap_or(Value::Null))
+                    Err(anyhow!(
+                        "MCP server \"{}\" sent JSON-RPC response without `result`",
+                        self.name
+                    ))
                 };
                 self.reply(tx, res);
             }
@@ -613,4 +618,14 @@ mod tests {
         assert!(!contains_response(&json!({"id":3,"method":"ping"}), &id));
         assert!(!contains_response(&json!({"id":"3","result":{}}), &id));
     }
+}
+
+#[test]
+fn response_without_result_is_protocol_error() {
+    let (out_tx, _out_rx) = mpsc::unbounded_channel();
+    let (shared, _tools_rx) = Shared::new("test".into(), out_tx);
+    let rx = shared.register(&json!(1));
+    shared.dispatch(json!({"jsonrpc": "2.0", "id": 1}));
+    let err = rx.blocking_recv().unwrap().unwrap_err();
+    assert!(err.to_string().contains("without `result`"), "{err}");
 }

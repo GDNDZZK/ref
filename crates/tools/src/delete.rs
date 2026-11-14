@@ -93,7 +93,7 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         bail!("`path` must not be empty");
     }
     let recursive = util::opt_bool(input, "recursive")?.unwrap_or(false);
-    let abs = util::resolve_path(&ctx.cwd, &raw);
+    let abs = util::resolve_path(&ctx.cwd, &raw)?;
     let display = util::display_path(&ctx.cwd, &abs);
 
     let canon = util::store_key(&abs);

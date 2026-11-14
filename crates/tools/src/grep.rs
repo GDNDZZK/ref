@@ -129,7 +129,7 @@ fn search_batch(
     context: usize,
     remaining: usize,
     threads: usize,
-) -> Vec<(usize, FileResult)> {
+) -> Result<Vec<(usize, FileResult)>> {
     let per_thread: Vec<Vec<(usize, FileResult)>> = std::thread::scope(|s| {
         let handles: Vec<_> = (0..threads)
             .map(|t| {
@@ -146,12 +146,12 @@ fn search_batch(
             .collect();
         handles
             .into_iter()
-            .map(|h| h.join().unwrap_or_default())
-            .collect()
-    });
+            .map(|h| h.join().map_err(|_| anyhow!("grep worker panicked")))
+            .collect::<Result<Vec<_>>>()
+    })?;
     let mut results: Vec<(usize, FileResult)> = per_thread.into_iter().flatten().collect();
     results.sort_by_key(|(i, _)| *i);
-    results
+    Ok(results)
 }
 
 /// Formats the matches as hashline blocks plus notices, and records what the model has seen.
@@ -248,7 +248,9 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
         })?;
 
     let root = match util::opt_str(input, "path")? {
-        Some(p) if !p.trim().is_empty() => util::resolve_path(&ctx.cwd, &util::unwrap_header(&p).0),
+        Some(p) if !p.trim().is_empty() => {
+            util::resolve_path(&ctx.cwd, &util::unwrap_header(&p).0)?
+        }
         _ => ctx.cwd.clone(),
     };
     let root_display = util::display_path(&ctx.cwd, &root);
@@ -275,7 +277,7 @@ fn run_sync(input: &Value, ctx: &ToolCtx) -> Result<ToolOutput> {
             bail!("grep cancelled");
         }
         let remaining = limit - total_matches;
-        let batch_results = search_batch(batch, &re, context, remaining, threads);
+        let batch_results = search_batch(batch, &re, context, remaining, threads)?;
         for (_, mut r) in batch_results {
             let room = limit - total_matches;
             if r.matches > room {
