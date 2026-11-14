@@ -12,7 +12,7 @@ use serde_json::json;
 const OVERLOADED_MESSAGE: &str = "Overloaded: too many requests, try again later";
 /// The provider answers `retry` with this status (overloaded) until the third attempt.
 const OVERLOADED: u16 = 529;
-const UNAUTHORIZED: u16 = 401;
+const PAYLOAD_TOO_LARGE: u16 = 413;
 const UNAVAILABLE: u16 = 503;
 /// `outage`: the third request fails this often (overloaded, overloaded, reset, unavailable)
 /// and the next attempt succeeds. The waits are the engine's: 2, 4, 8 and 16 seconds.
@@ -40,7 +40,7 @@ pub(super) const SCRIPTS: &[Script] = &[
     },
     Script {
         name: "fail",
-        about: "The provider rejects the request (401), the turn ends with an error",
+        about: "The provider rejects the request as too large (413), the turn ends with an error",
         pace: Pace::NORMAL,
         play: fail,
     },
@@ -129,7 +129,10 @@ fn outage(ctx: &Ctx) -> Round {
 }
 
 fn fail(_: &Ctx) -> Round {
-    Round::error(UNAUTHORIZED, "Invalid API key (this is a mock error)")
+    Round::error(
+        PAYLOAD_TOO_LARGE,
+        "prompt is too long (this is a mock error)",
+    )
 }
 
 fn fill(_: &Ctx) -> Round {

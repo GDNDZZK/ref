@@ -38,6 +38,7 @@ pub enum Reply {
     /// (call id, tool name, raw arguments JSON)
     Tools(Vec<(String, String, String)>),
     Status(u16, String),
+    StatusWithHeaders(u16, Vec<(String, String)>, String),
     /// Send one text delta then stall (for abort tests).
     Hang(String),
 }
@@ -93,7 +94,7 @@ fn sse(reply: &Reply) -> String {
                 json!({"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}),
             ));
         }
-        Reply::Status(..) | Reply::Hang(_) => {}
+        Reply::Status(..) | Reply::StatusWithHeaders(..) | Reply::Hang(_) => {}
     }
     s.push_str(&chunk(
         json!({"choices":[],"usage":{"prompt_tokens":MOCK_PROMPT_TOKENS,"completion_tokens":MOCK_COMPLETION_TOKENS}}),
@@ -173,6 +174,19 @@ pub async fn mock(handler: Handler) -> Mock {
                             text.len()
                         );
                         write_or_stop(&mut sock, resp.as_bytes()).await;
+                    }
+                    Reply::StatusWithHeaders(code, headers, text) => {
+                        let mut head = format!(
+                            "HTTP/1.1 {code} Error\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n",
+                            text.len()
+                        );
+                        for (k, v) in headers {
+                            head.push_str(&format!("{k}: {v}\r\n"));
+                        }
+                        head.push_str("\r\n");
+                        let mut resp = head.into_bytes();
+                        resp.extend_from_slice(text.as_bytes());
+                        write_or_stop(&mut sock, &resp).await;
                     }
                     Reply::Hang(t) => {
                         let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
