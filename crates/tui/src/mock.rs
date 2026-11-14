@@ -361,20 +361,20 @@ impl Mock {
         self.emit(sid, SessionEvent::Message { message: m });
     }
 
-    fn agent_of(&self, sid: &str) -> String {
+    fn agent_of(&self, sid: &str) -> Option<String> {
         self.world()
             .sessions
             .get(sid)
             .map(|s| s.info.agent.clone())
-            .unwrap_or_default()
     }
 
-    fn new_assistant(&self, sid: &str) -> String {
+    fn new_assistant(&self, sid: &str) -> Option<String> {
         let model = self.world().sessions.get(sid).map(|s| s.info.model.clone());
+        let agent = self.agent_of(sid)?;
         let mid = id("msg");
         let m = Message {
             model,
-            agent: Some(self.agent_of(sid)),
+            agent: Some(agent),
             ..new_message(
                 mid.clone(),
                 Role::Assistant,
@@ -384,7 +384,7 @@ impl Mock {
             )
         };
         self.emit(sid, SessionEvent::Message { message: m });
-        mid
+        Some(mid)
     }
 
     fn message(&self, sid: &str, mid: &str) -> Option<Message> {
@@ -733,7 +733,9 @@ impl Mock {
     /// The main demo turn.
     async fn demo_turn(&self, sid: &str, prompt: &str) {
         self.set_status(sid, SessionStatus::Busy);
-        let mid = self.new_assistant(sid);
+        let Some(mid) = self.new_assistant(sid) else {
+            return;
+        };
         let ok = self.turn_body(sid, &mid, prompt).await;
         self.add_context(sid, DEMO_TURN_CONTEXT_TOKENS);
         self.finish(
@@ -985,7 +987,9 @@ impl Mock {
 
     async fn worker_round(&self, sid: &str, label: &str, round: u32) -> bool {
         self.set_status(sid, SessionStatus::Busy);
-        let mid = self.new_assistant(sid);
+        let Some(mid) = self.new_assistant(sid) else {
+            return false;
+        };
         let ok = self.worker_steps(sid, &mid, label, round).await;
         self.add_context(sid, WORKER_ROUND_CONTEXT_TOKENS);
         self.finish(
@@ -1038,7 +1042,9 @@ impl Mock {
 
     async fn reply_turn(&self, sid: &str, text: &str) {
         self.set_status(sid, SessionStatus::Busy);
-        let mid = self.new_assistant(sid);
+        let Some(mid) = self.new_assistant(sid) else {
+            return;
+        };
         self.start_text_part(sid, &mid, 0);
         let ans = format!(
             "Got it: \"{}\". I'll take that into account.",
@@ -1154,10 +1160,25 @@ impl Mock {
                 self.user_message(&session_id, &out, MessageSource::Shell, vec![]);
             }
             Request::Abort { session_id } => {
-                self.with_session(&session_id, |s| s.abort.store(true, Ordering::Relaxed));
-                self.ok(request_id, json!({}));
+                if self
+                    .with_session(&session_id, |s| s.abort.store(true, Ordering::Relaxed))
+                    .is_some()
+                {
+                    self.ok(request_id, json!({}));
+                } else {
+                    self.err(request_id, "no such session");
+                }
             }
-            Request::PermissionReply { call_id, allow, .. } => {
+            Request::PermissionReply {
+                session_id,
+                call_id,
+                allow,
+                ..
+            } => {
+                if !self.world().sessions.contains_key(&session_id) {
+                    self.err(request_id, "no such session");
+                    return;
+                }
                 let Some(tx) = self.world().perm_waiters.remove(&call_id) else {
                     self.err_code(request_id, ERR_NO_PENDING_PERMISSION, NO_PENDING_PERMISSION);
                     return;
@@ -1171,8 +1192,9 @@ impl Mock {
             // The in-process mock asks no questions.
             Request::QuestionReply { .. } => self.ok(request_id, json!({})),
             Request::SetModel { session_id, model } => {
-                if let Some(info) = self.update_info(&session_id, |i| i.model = model) {
-                    self.reply_with_session(request_id, &session_id, info);
+                match self.update_info(&session_id, |i| i.model = model) {
+                    Some(info) => self.reply_with_session(request_id, &session_id, info),
+                    None => self.err(request_id, "no such session"),
                 }
             }
             Request::SetAgent { session_id, agent } => {
@@ -1185,8 +1207,9 @@ impl Mock {
                     i.agent = agent;
                     i.model = agent_model.unwrap_or_else(model);
                 });
-                if let Some(info) = info {
-                    self.reply_with_session(request_id, &session_id, info);
+                match info {
+                    Some(info) => self.reply_with_session(request_id, &session_id, info),
+                    None => self.err(request_id, "no such session"),
                 }
             }
             Request::SetVariant {
@@ -1203,9 +1226,11 @@ impl Mock {
                 self.ok(request_id, json!({ "text": text }));
             }
             Request::Rename { session_id, name } => {
-                if let Some(info) = self.update_info(&session_id, |i| i.name = name) {
-                    self.emit(&session_id, SessionEvent::Info { info });
-                }
+                let Some(info) = self.update_info(&session_id, |i| i.name = name) else {
+                    self.err(request_id, "no such session");
+                    return;
+                };
+                self.emit(&session_id, SessionEvent::Info { info });
                 self.ok(request_id, json!({}));
                 self.broadcast_sessions();
             }
@@ -1410,7 +1435,7 @@ impl Mock {
         images: Vec<ImageData>,
     ) {
         let mid = id("msg");
-        let queued = self.with_session(&sid, |s| {
+        let Some(queued) = self.with_session(&sid, |s| {
             s.abort.store(false, Ordering::Relaxed);
             let busy = !s.info.status.is_idle();
             if busy {
@@ -1422,7 +1447,10 @@ impl Mock {
                 ));
             }
             busy
-        }) == Some(true);
+        }) else {
+            self.err(request_id, "no such session");
+            return;
+        };
         self.ok(request_id, json!({ "queued": queued, "message_id": mid }));
         let m = self.clone();
         tokio::spawn(async move { m.deliver_prompt(&sid, mid, &text, images, queued).await });
@@ -1439,18 +1467,20 @@ impl Mock {
     ) {
         if was_queued {
             // The client shows the prompt as queued meanwhile.
-            self.wait_until_idle(sid).await;
+            if !self.wait_until_idle(sid).await {
+                return;
+            }
             // Withdrawn with `RemoveQueued` meanwhile: never delivered.
             if self.take_queued(sid, &mid) != Some(true) {
                 return;
             }
         }
+        let Some(first) = self.with_session(sid, |s| {
+            !s.messages.iter().any(|x| x.role == Role::User)
+        }) else {
+            return;
+        };
         self.user_message_id(sid, mid, text, MessageSource::Human, images);
-        let first = self
-            .with_session(sid, |s| {
-                s.messages.iter().filter(|x| x.role == Role::User).count() <= 1
-            })
-            .unwrap_or(false);
         if first || text.contains("demo") {
             self.demo_turn(sid, text).await;
         } else {
@@ -1458,16 +1488,16 @@ impl Mock {
         }
     }
 
-    async fn wait_until_idle(&self, sid: &str) {
+    async fn wait_until_idle(&self, sid: &str) -> bool {
         for _ in 0..QUEUE_WAIT_POLLS {
             tokio::time::sleep(QUEUE_POLL).await;
-            if self
-                .with_session(sid, |s| s.info.status.is_idle())
-                .unwrap_or(true)
-            {
-                return;
+            match self.with_session(sid, |s| s.info.status.is_idle()) {
+                Some(true) => return true,
+                Some(false) => {}
+                None => return false,
             }
         }
+        false
     }
 
     /// Removes a queued prompt; Some(true) if it was still queued.
@@ -1498,9 +1528,12 @@ impl Mock {
                 variant.or_else(|| next_variant(i.model.variant.as_deref(), &variants));
         });
         // Unlike the other session edits, the session list is not re-broadcast.
-        if let Some(info) = info {
-            self.emit(sid, SessionEvent::Info { info: info.clone() });
-            self.ok(request_id, json!({ "session": info }));
+        match info {
+            Some(info) => {
+                self.emit(sid, SessionEvent::Info { info: info.clone() });
+                self.ok(request_id, json!({ "session": info }));
+            }
+            None => self.err(request_id, "no such session"),
         }
     }
 
@@ -1676,7 +1709,9 @@ impl Mock {
                 vec![],
             );
             m.set_status(&cid, SessionStatus::Busy);
-            let mid = m.new_assistant(&cid);
+            let Some(mid) = m.new_assistant(&cid) else {
+                return;
+            };
             m.start_text_part(&cid, &mid, 0);
             m.stream(
                 &cid,
@@ -1852,6 +1887,42 @@ mod tests {
                 assert_eq!(code.as_deref(), Some(ERR_NO_PENDING_PERMISSION));
             }
             other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn missing_session_requests_return_no_such_session() {
+        let (ev_tx, mut ev_rx) = mpsc::unbounded_channel();
+        let m = Mock {
+            world: Arc::new(Mutex::new(World::default())),
+            tx: ev_tx,
+        };
+        assert_eq!(m.agent_of("missing"), None);
+        assert!(m.new_assistant("missing").is_none());
+        let reqs = [
+            Request::Abort { session_id: "missing".into() },
+            Request::PermissionReply {
+                session_id: "missing".into(),
+                call_id: "c1".into(),
+                allow: true,
+                always: false,
+            },
+            Request::SetModel { session_id: "missing".into(), model: model() },
+            Request::SetAgent { session_id: "missing".into(), agent: "build".into() },
+            Request::SetVariant { session_id: "missing".into(), variant: None },
+            Request::Rename { session_id: "missing".into(), name: "x".into() },
+        ];
+        for (idx, req) in reqs.into_iter().enumerate() {
+            let id = idx as u64 + 1;
+            m.handle(ClientFrame { id: Some(id), req });
+            match ev_rx.try_recv().unwrap() {
+                NetEvent::Frame(ServerFrame::Response { id: rid, ok, error, .. }) => {
+                    assert_eq!(rid, id);
+                    assert!(!ok);
+                    assert_eq!(error.as_deref(), Some("no such session"));
+                }
+                other => panic!("unexpected event: {other:?}"),
+            }
         }
     }
 }
