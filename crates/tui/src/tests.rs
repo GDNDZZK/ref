@@ -5049,3 +5049,69 @@ fn permission_modal_renders_preview_and_truncation_marker() {
     assert!(s.contains("-old line 1"), "{s}");
     assert!(s.contains("more lines (preview cut)"), "{s}");
 }
+
+#[test]
+fn malformed_responses_toast_errors_without_fallback() {
+    use crate::app::Pending;
+    let mut app = test_app(false);
+    // Malformed Continue response must not start a new session.
+    app.pending.insert(1, Pending::Continue);
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: 1,
+        ok: true,
+        result: json!({ "sessions": "bad" }),
+        error: None,
+        code: None,
+    }));
+    assert!(app.pending.is_empty(), "did not create a new session");
+    assert!(app.toasts.items.iter().any(|t| t.text.contains("Malformed continue")));
+
+    // Malformed Older response must not clear more_before.
+    app.toasts.items.clear();
+    let v = app.views.get_mut(TEST_SESSION).unwrap();
+    v.more_before = true;
+    v.older_pending = true;
+    let hist_gen = v.history_gen;
+    app.pending.insert(
+        2,
+        Pending::Older {
+            sid: TEST_SESSION.into(),
+            generation: hist_gen,
+            before: "m1".into(),
+        },
+    );
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: 2,
+        ok: true,
+        result: json!({ "messages": [] }),
+        error: None,
+        code: None,
+    }));
+    let v = &app.views[TEST_SESSION];
+    assert!(v.more_before && !v.older_pending);
+    assert!(app.toasts.items.iter().any(|t| t.text.contains("Malformed history page")));
+
+    // Malformed ConfigMcp and Text responses toast errors and do not open empty dialog.
+    app.toasts.items.clear();
+    app.pending.insert(3, Pending::ConfigMcp);
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: 3,
+        ok: true,
+        result: json!({}),
+        error: None,
+        code: None,
+    }));
+    assert!(app.toasts.items.iter().any(|t| t.text.contains("Malformed config")));
+
+    app.toasts.items.clear();
+    app.pending.insert(4, Pending::Text { title: "Peers".into() });
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: 4,
+        ok: true,
+        result: json!({}),
+        error: None,
+        code: None,
+    }));
+    assert!(app.dialog.is_none());
+    assert!(app.toasts.items.iter().any(|t| t.text.contains("Malformed response")));
+}
