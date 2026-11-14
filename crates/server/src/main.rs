@@ -1,8 +1,15 @@
 use clap::Parser;
 use ref_proto::InstanceInfo;
+use ref_server::util::lock;
 use ref_server::{HubOptions, instance, ops, ws};
 use std::path::PathBuf;
 use std::time::Duration;
+
+/// How long to wait for sessions to be saved on shutdown.
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// How long to wait for runtime tasks to finish before the process exits.
+const RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Parser, Debug)]
 #[command(
@@ -54,8 +61,8 @@ struct Cli {
 }
 
 fn is_loopback(h: &str) -> bool {
-    let h = h.trim().trim_start_matches('[').trim_end_matches(']');
-    h == "localhost"
+    let h = ws::bare_host(h);
+    h == ref_proto::LOCALHOST
         || h.parse::<std::net::IpAddr>()
             .is_ok_and(|ip| ip.is_loopback())
 }
@@ -95,7 +102,7 @@ fn main() {
         Ok(rt) => rt,
         Err(e) => {
             eprintln!("ref-server: cannot start runtime: {e}");
-            std::process::exit(1);
+            std::process::exit(instance::EXIT_FAILURE);
         }
     };
     let code = rt.block_on(async move {
@@ -111,16 +118,49 @@ fn main() {
             serve(cli).await
         };
         match result {
-            Ok(()) => 0,
+            Ok(()) => instance::EXIT_OK,
             Err(e) => {
                 eprintln!("ref-server: {e:#}");
                 tracing::error!("fatal: {e:#}");
-                1
+                instance::EXIT_FAILURE
             }
         }
     });
-    rt.shutdown_timeout(Duration::from_secs(2));
+    rt.shutdown_timeout(RUNTIME_SHUTDOWN_TIMEOUT);
     std::process::exit(code);
+}
+
+/// Hosts allowed to connect: `--allow-host`, or the loopback names.
+fn allowed_hosts(cli: &Cli) -> Vec<String> {
+    if cli.allow_host.is_empty() {
+        return vec![
+            ref_proto::LOOPBACK_V4.into(),
+            ref_proto::LOOPBACK_V6.into(),
+            ref_proto::LOCALHOST.into(),
+        ];
+    }
+    cli.allow_host
+        .iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// Address to bind: `--host`, else any address when a non-loopback host is allowed.
+fn bind_address(cli: &Cli, allow: &[String]) -> String {
+    match &cli.host {
+        Some(h) => ws::bare_host(h).to_string(),
+        None if allow.iter().any(|h| !is_loopback(h)) => ref_proto::ANY_V4.into(),
+        None => ref_proto::LOOPBACK_V4.into(),
+    }
+}
+
+/// `--port`, or a random free port when it is absent or 0.
+fn pick_or_given_port(cli: &Cli, bind: &str) -> anyhow::Result<u16> {
+    match cli.port {
+        Some(p) if p != 0 => Ok(p),
+        _ => instance::pick_port(bind).ok_or_else(|| anyhow::anyhow!("no free port found")),
+    }
 }
 
 async fn serve(cli: Cli) -> anyhow::Result<()> {
@@ -133,28 +173,9 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     if let Err(e) = init_logging(&log) {
         eprintln!("ref-server: cannot open log file {}: {e}", log.display());
     }
-    let allow: Vec<String> = if cli.allow_host.is_empty() {
-        vec!["127.0.0.1".into(), "::1".into(), "localhost".into()]
-    } else {
-        cli.allow_host
-            .iter()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
-    };
-    let bind = match &cli.host {
-        Some(h) => h
-            .trim()
-            .trim_start_matches('[')
-            .trim_end_matches(']')
-            .to_string(),
-        None if allow.iter().any(|h| !is_loopback(h)) => "0.0.0.0".into(),
-        None => "127.0.0.1".into(),
-    };
-    let port = match cli.port {
-        Some(p) if p != 0 => p,
-        _ => instance::pick_port(&bind).ok_or_else(|| anyhow::anyhow!("no free port found"))?,
-    };
+    let allow = allowed_hosts(&cli);
+    let bind = bind_address(&cli, &allow);
+    let port = pick_or_given_port(&cli, &bind)?;
     let token = cli
         .token
         .clone()
@@ -166,7 +187,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         eprintln!("ref-server: warning: {w}");
     }
     let mut opts = HubOptions::new(ref_proto::data_dir());
-    let idle_timeout = cli.idle_timeout.unwrap_or(ref_server::hub::IDLE_NEVER);
+    let idle_timeout = cli.idle_timeout.unwrap_or(ref_proto::IDLE_NEVER);
     opts.idle_timeout = idle_timeout;
     let running = ref_server::start(opts, &bind, port, auth).await?;
     let info = InstanceInfo {
@@ -179,11 +200,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         version: env!("CARGO_PKG_VERSION").to_string(),
         token,
     };
-    *running
-        .hub
-        .instance
-        .lock()
-        .unwrap_or_else(|e| e.into_inner()) = Some(info.clone());
+    *lock(&running.hub.instance) = Some(info.clone());
     let dir = ref_proto::instances_dir();
     let inst_file = instance::write_instance(&dir, &info)?;
     tracing::info!(port = info.port, %bind, idle_timeout, "ref-server listening");
@@ -201,8 +218,17 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     }
     hub.shutdown.cancel();
     tracing::info!("shutting down");
-    let _ = tokio::time::timeout(Duration::from_secs(15), ops::shutdown_all(&hub)).await;
-    let _ = std::fs::remove_file(&inst_file);
+    if tokio::time::timeout(SHUTDOWN_TIMEOUT, ops::shutdown_all(&hub))
+        .await
+        .is_err()
+    {
+        tracing::warn!("saving the sessions timed out; some may not have been saved");
+    }
+    if let Err(e) = std::fs::remove_file(&inst_file)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!("cannot remove {}: {e}", inst_file.display());
+    }
     running.task.abort();
     tracing::info!("bye");
     Ok(())
@@ -215,7 +241,11 @@ async fn stdin_closed() {
     let mut buf = [0u8; 256];
     loop {
         match stdin.read(&mut buf).await {
-            Ok(0) | Err(_) => return,
+            Ok(0) => return,
+            Err(e) => {
+                tracing::debug!("stdin read failed: {e}");
+                return;
+            }
             Ok(_) => {}
         }
     }
@@ -243,7 +273,12 @@ async fn serve_mock(port: Option<u16>, idle_timeout: Option<i64>) -> anyhow::Res
         name = signals.recv() => tracing::info!("{name}"),
     }
     hub.shutdown.cancel();
-    let _ = tokio::time::timeout(Duration::from_secs(15), ops::shutdown_all(&hub)).await;
+    if tokio::time::timeout(SHUTDOWN_TIMEOUT, ops::shutdown_all(&hub))
+        .await
+        .is_err()
+    {
+        tracing::warn!("saving the sessions timed out; some may not have been saved");
+    }
     mock.running.task.abort();
     tracing::info!("bye");
     Ok(())

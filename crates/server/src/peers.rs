@@ -3,11 +3,59 @@
 
 use crate::hub::{Hub, PeerRecord};
 use crate::session::{Session, user_message};
+use crate::util::lock;
 use ref_llm::ToolDef;
-use ref_proto::{Message, MessageSource, Part, Role, SessionStatus};
+use ref_proto::{
+    Message, MessageSource, PEER_COMMAND_INBOX, PEER_COMMAND_NAME, PEER_COMMAND_OUTBOX,
+    PEER_COMMAND_PEERS, Part, Role, SessionStatus,
+};
 use ref_tools::ToolOutput;
 use serde_json::{Value, json};
 use std::sync::Arc;
+
+/// Names of the cross-session tools.
+pub(crate) const LIST_SESSIONS: &str = "list_sessions";
+pub(crate) const SEND_MESSAGE: &str = "send_message";
+pub(crate) const MESSAGE_STATUS: &str = "message_status";
+pub(crate) const READ_SESSION: &str = "read_session";
+pub(crate) const CREATE_SESSION: &str = "create_session";
+pub(crate) const CLOSE_SESSION: &str = "close_session";
+
+/// `read_session` paging: default and largest page size.
+const PAGE_SIZE_DEFAULT: u64 = 10;
+const PAGE_SIZE_MAX: u64 = 50;
+
+/// How many of the latest messages `/peers-inbox` and `/peers-outbox` list.
+const LIST_LAST: usize = 20;
+
+/// Largest message `send_message` accepts.
+const MAX_MESSAGE_BYTES: usize = 100_000;
+
+/// Lengths (in characters) at which texts are cut: previews of messages, text parts and tool
+/// outputs in `read_session`, and session titles in `/peers`.
+const PREVIEW_CHARS: usize = 80;
+const READ_TEXT_CHARS: usize = 4000;
+const READ_TOOL_OUTPUT_CHARS: usize = 300;
+const LIST_TITLE_CHARS: usize = 40;
+
+/// How the header line of a message from another session starts (see [`peer_header`]).
+pub(crate) const PEER_HEADER_PREFIX: &str = "[Message from session";
+/// How the footer line of a message from another session starts.
+pub(crate) const PEER_FOOTER_PREFIX: &str = "[Reply with send_message";
+/// How the header line of the prompt of a created session starts (see [`spawn_header`]).
+pub(crate) const SPAWN_HEADER_PREFIX: &str = "[Session created by";
+/// How the line that asks a created session to report back starts.
+pub(crate) const REPORT_REMINDER_PREFIX: &str = "[When you finish or get blocked";
+
+/// Header line of a message from session `name`.
+pub(crate) fn peer_header(name: &str, id: &str) -> String {
+    format!("{PEER_HEADER_PREFIX} \"{name}\" (id {id})]")
+}
+
+/// Header line of the prompt of a session created by session `name`.
+pub(crate) fn spawn_header(name: &str, id: &str) -> String {
+    format!("{SPAWN_HEADER_PREFIX} \"{name}\" (id {id})]")
+}
 
 fn def(name: &str, description: &str, params: Value) -> ToolDef {
     ToolDef {
@@ -17,15 +65,15 @@ fn def(name: &str, description: &str, params: Value) -> ToolDef {
     }
 }
 
-pub fn peer_defs() -> Vec<ToolDef> {
+pub(crate) fn peer_defs() -> Vec<ToolDef> {
     vec![
         def(
-            "list_sessions",
+            LIST_SESSIONS,
             "List the live sessions (other agents) in this backend that you can exchange messages with: name, id, agent, status, foreground/background, directory and title.",
             json!({"type": "object", "properties": {}}),
         ),
         def(
-            "send_message",
+            SEND_MESSAGE,
             "Send a plain-text message to another live session, including while it is busy (it is read after its current step). The message arrives as a user message; the recipient can reply with send_message. Resolve the target with list_sessions first if unsure.",
             json!({"type": "object", "properties": {
                 "to": {"type": "string", "description": "Session name or id (see list_sessions)."},
@@ -33,28 +81,29 @@ pub fn peer_defs() -> Vec<ToolDef> {
             }, "required": ["to", "message"]}),
         ),
         def(
-            "message_status",
+            MESSAGE_STATUS,
             "Check whether a message sent with send_message is still queued, delivered into the recipient's context, or already read (the recipient responded since).",
             json!({"type": "object", "properties": {
                 "message_id": {"type": "string", "description": "Message id returned by send_message."}
             }, "required": ["message_id"]}),
         ),
         def(
-            "read_session",
+            READ_SESSION,
             "Read another live session's messages, newest first, paginated. Tool calls are summarized; reasoning is omitted.",
             json!({"type": "object", "properties": {
                 "session": {"type": "string", "description": "Session name or id."},
                 "page": {"type": "integer", "minimum": 1, "description": "Page number, 1 = newest (default 1)."},
-                "page_size": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Messages per page (default 10, max 50)."}
+                "page_size": {"type": "integer", "minimum": 1, "maximum": PAGE_SIZE_MAX,
+                    "description": format!("Messages per page (default {PAGE_SIZE_DEFAULT}, max {PAGE_SIZE_MAX}).")}
             }, "required": ["session"]}),
         ),
     ]
 }
 
-pub fn spawn_defs() -> Vec<ToolDef> {
+pub(crate) fn spawn_defs() -> Vec<ToolDef> {
     vec![
         def(
-            "create_session",
+            CREATE_SESSION,
             "Create a new background session running another agent (see the list of available agents in the system prompt) and give it a task. It starts working immediately in parallel with you. With must_report (default true) it is required to report its result back to you with send_message.",
             json!({"type": "object", "properties": {
                 "name": {"type": "string", "description": "Peer name for the new session (any language; made unique automatically)."},
@@ -65,7 +114,7 @@ pub fn spawn_defs() -> Vec<ToolDef> {
             }, "required": ["name", "agent", "prompt"]}),
         ),
         def(
-            "close_session",
+            CLOSE_SESSION,
             "Stop and close a background session (for example one you created that has finished). Sessions a user is attached to (foreground) cannot be closed. The session stays in history.",
             json!({"type": "object", "properties": {
                 "session": {"type": "string", "description": "Session name or id."}
@@ -96,23 +145,22 @@ pub fn resolve(hub: &Hub, q: &str, exclude: Option<&str>) -> Result<Arc<Session>
     let all = hub.sessions();
     let me = |s: &Arc<Session>| Some(s.id.as_str()) == exclude;
     let self_err = || "Error: that is your own session; choose another session.".to_string();
-    if let Some(s) = all.iter().find(|s| s.id == q) {
-        return if me(s) {
+    let accept = |s: &Arc<Session>| {
+        if me(s) {
             Err(self_err())
         } else {
             Ok(s.clone())
-        };
+        }
+    };
+    if let Some(s) = all.iter().find(|s| s.id == q) {
+        return accept(s);
     }
     let infos: Vec<(Arc<Session>, String)> = all
         .iter()
         .map(|s| (s.clone(), s.lock().info.name.clone()))
         .collect();
     if let Some((s, _)) = infos.iter().find(|(_, n)| n == q) {
-        return if me(s) {
-            Err(self_err())
-        } else {
-            Ok(s.clone())
-        };
+        return accept(s);
     }
     let lower = q.to_lowercase();
     let ci: Vec<&(Arc<Session>, String)> = infos
@@ -120,14 +168,7 @@ pub fn resolve(hub: &Hub, q: &str, exclude: Option<&str>) -> Result<Arc<Session>
         .filter(|(_, n)| n.to_lowercase() == lower)
         .collect();
     match ci.len() {
-        1 => {
-            let s = &ci[0].0;
-            if me(s) {
-                Err(self_err())
-            } else {
-                Ok(s.clone())
-            }
-        }
+        1 => accept(&ci[0].0),
         0 => {
             let names: Vec<String> = infos
                 .iter()
@@ -158,12 +199,12 @@ pub fn resolve(hub: &Hub, q: &str, exclude: Option<&str>) -> Result<Arc<Session>
 
 pub async fn run(hub: &Arc<Hub>, s: &Arc<Session>, name: &str, input: &Value) -> ToolOutput {
     let r = match name {
-        "list_sessions" => Ok(list_sessions(hub, s)),
-        "send_message" => send_message(hub, s, input),
-        "message_status" => message_status(hub, input),
-        "read_session" => read_session(hub, s, input),
-        "create_session" => create_session(hub, s, input).await,
-        "close_session" => close_session(hub, s, input).await,
+        LIST_SESSIONS => Ok(list_sessions(hub, s)),
+        SEND_MESSAGE => send_message(hub, s, input),
+        MESSAGE_STATUS => message_status(hub, input),
+        READ_SESSION => read_session(hub, s, input),
+        CREATE_SESSION => create_session(hub, s, input).await,
+        CLOSE_SESSION => close_session(hub, s, input).await,
         _ => Err(format!("Unknown tool: {name}")),
     };
     match r {
@@ -224,7 +265,8 @@ pub fn deliver(
 ) -> (String, bool) {
     let (from_name, from_id) = (from.lock().info.name.clone(), from.id.clone());
     let body = format!(
-        "[Message from session \"{from_name}\" (id {from_id})]\n{text}\n[Reply with send_message to \"{from_id}\" if a reply is needed. Do not reply only to acknowledge.]"
+        "{}\n{text}\n{PEER_FOOTER_PREFIX} to \"{from_id}\" if a reply is needed. Do not reply only to acknowledge.]",
+        peer_header(&from_name, &from_id)
     );
     let msg = user_message(
         MessageSource::Peer {
@@ -240,19 +282,16 @@ pub fn deliver(
     if let MessageSource::Peer { msg_id, .. } = &mut msg.source {
         *msg_id = id.clone();
     }
-    hub.peer_msgs
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(
-            id.clone(),
-            PeerRecord {
-                from_id,
-                to_id: target.id.clone(),
-                to_name: target.lock().info.name.clone(),
-                time: ref_proto::now_ms(),
-                preview: preview(text, 80),
-            },
-        );
+    lock(&hub.peer_msgs).insert(
+        id.clone(),
+        PeerRecord {
+            from_id,
+            to_id: target.id.clone(),
+            to_name: target.lock().info.name.clone(),
+            time: ref_proto::now_ms(),
+            preview: preview(text, PREVIEW_CHARS),
+        },
+    );
     let queued = crate::engine::submit(hub, target, msg);
     (id, queued)
 }
@@ -263,8 +302,8 @@ fn send_message(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Result<Strin
     if text.trim().is_empty() {
         return Err("Error: message must not be empty.".into());
     }
-    if text.len() > 100_000 {
-        return Err("Error: message exceeds 100000 bytes.".into());
+    if text.len() > MAX_MESSAGE_BYTES {
+        return Err(format!("Error: message exceeds {MAX_MESSAGE_BYTES} bytes."));
     }
     let target = resolve(hub, to, Some(&s.id))?;
     let (id, queued) = deliver(hub, s, &target, text);
@@ -279,37 +318,37 @@ fn send_message(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Result<Strin
 
 fn message_status(hub: &Arc<Hub>, input: &Value) -> Result<String, String> {
     let id = str_arg(input, "message_id")?.trim();
-    let rec = hub
-        .peer_msgs
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .get(id)
-        .cloned();
+    let rec = lock(&hub.peer_msgs).get(id).cloned();
     let Some(rec) = rec else {
         return Err(format!("Error: unknown message id \"{id}\"."));
     };
+    let name = hub
+        .session(&rec.to_id)
+        .map_or_else(|| rec.to_name.clone(), |t| t.lock().info.name.clone());
+    let status = delivery_status(hub, &rec, id);
+    Ok(format!("Message {id} to \"{name}\": {status}."))
+}
+
+/// Where a sent message is now, as a phrase (without the final period).
+fn delivery_status(hub: &Arc<Hub>, rec: &PeerRecord, id: &str) -> String {
     let Some(t) = hub.session(&rec.to_id) else {
-        return Ok(format!(
-            "Message {id} to \"{}\": the target session is closed.",
-            rec.to_name
-        ));
+        return "the target session is closed".into();
     };
     let st = t.lock();
-    let status = if st.queue.iter().any(|m| m.id == id) {
-        "queued".to_string()
-    } else if let Some(i) = st.find_message(id) {
-        let responded = st.messages[i + 1..]
-            .iter()
-            .any(|m| m.role == Role::Assistant && m.time_end.is_some());
-        if responded {
-            "read (the recipient has responded since)".into()
-        } else {
-            "delivered (in context)".into()
-        }
-    } else {
-        "delivered (no longer in the recipient's context: compacted or undone)".into()
+    if st.queue.iter().any(|m| m.id == id) {
+        return "queued".into();
+    }
+    let Some(i) = st.find_message(id) else {
+        return "delivered (no longer in the recipient's context: compacted or undone)".into();
     };
-    Ok(format!("Message {id} to \"{}\": {status}.", st.info.name))
+    let responded = st.messages[i + 1..]
+        .iter()
+        .any(|m| m.role == Role::Assistant && m.time_end.is_some());
+    if responded {
+        "read (the recipient has responded since)".into()
+    } else {
+        "delivered (in context)".into()
+    }
 }
 
 fn role_label(m: &Message) -> String {
@@ -349,8 +388,8 @@ fn read_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Result<Strin
     let size = input
         .get("page_size")
         .and_then(Value::as_u64)
-        .unwrap_or(10)
-        .clamp(1, 50) as usize;
+        .unwrap_or(PAGE_SIZE_DEFAULT)
+        .clamp(1, PAGE_SIZE_MAX) as usize;
     let st = target.lock();
     let n = st.messages.len();
     let pages = n.div_ceil(size).max(1);
@@ -399,7 +438,7 @@ fn read_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Result<Strin
         for p in &m.parts {
             match p {
                 Part::Text { text, .. } if !text.trim().is_empty() => {
-                    out.push_str(&crate::util::truncate_chars(text.trim(), 4000));
+                    out.push_str(&crate::util::truncate_chars(text.trim(), READ_TEXT_CHARS));
                     out.push('\n');
                 }
                 Part::Image { .. } => out.push_str("[image]\n"),
@@ -417,7 +456,7 @@ fn read_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Result<Strin
                             .trim_matches('"')
                     ));
                     if let Some(o) = output.as_deref().filter(|o| !o.trim().is_empty()) {
-                        let t = crate::util::truncate_chars(o.trim(), 300);
+                        let t = crate::util::truncate_chars(o.trim(), READ_TOOL_OUTPUT_CHARS);
                         for l in t.lines() {
                             out.push_str(&format!("    {l}\n"));
                         }
@@ -481,11 +520,7 @@ async fn create_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Resu
     {
         Some(c) => {
             let p = crate::util::expand_home(c, hub.opts.home.as_deref());
-            let p = if p.is_absolute() {
-                p
-            } else {
-                std::path::Path::new(&my_cwd).join(p)
-            };
+            let p = std::path::Path::new(&my_cwd).join(p);
             let p = dunce::canonicalize(&p)
                 .map_err(|_| format!("Error: directory does not exist: {}", p.display()))?;
             if !p.is_dir() {
@@ -496,29 +531,23 @@ async fn create_session(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Resu
         None => my_cwd,
     };
     let base = crate::util::normalize_name(name).map_err(|e| format!("Error: {e}"))?;
+    // Agent's own model wins; otherwise inherit the creator's model (never a random fallback).
+    let has_own_model =
+        cfg.agents.get(&agent).is_some_and(|a| a.model.is_some()) || cfg.model.is_some();
     let opts = crate::ops::CreateOpts {
         cwd: cwd.clone(),
         agent: Some(agent.clone()),
-        // Agent's own model wins; otherwise inherit the creator's model (never a random fallback).
-        model: if cfg.agents.get(&agent).is_some_and(|a| a.model.is_some()) || cfg.model.is_some() {
-            None
-        } else {
-            Some(my_model)
-        },
+        model: if has_own_model { None } else { Some(my_model) },
         name: Some(base),
         unique_suffix: true,
         parent: Some(s.id.clone()),
         must_report,
     };
     let child = crate::ops::create_session(hub, opts).await?;
-    let mut text = format!(
-        "[Session created by \"{my_name}\" (id {})]\n{}",
-        s.id,
-        prompt.trim_end()
-    );
+    let mut text = format!("{}\n{}", spawn_header(&my_name, &s.id), prompt.trim_end());
     if must_report {
         text.push_str(&format!(
-            "\n[When you finish or get blocked, report the result to \"{my_name}\" with send_message (to: \"{}\").]",
+            "\n{REPORT_REMINDER_PREFIX}, report the result to \"{my_name}\" with send_message (to: \"{}\").]",
             s.id
         ));
     }
@@ -588,13 +617,13 @@ fn peer_body(m: &Message) -> String {
     let mut lines: Vec<&str> = raw.lines().collect();
     if lines
         .first()
-        .is_some_and(|l| l.starts_with("[Message from session"))
+        .is_some_and(|l| l.starts_with(PEER_HEADER_PREFIX))
     {
         lines.remove(0);
     }
     if lines
         .last()
-        .is_some_and(|l| l.starts_with("[Reply with send_message"))
+        .is_some_and(|l| l.starts_with(PEER_FOOTER_PREFIX))
     {
         lines.pop();
     }
@@ -608,10 +637,10 @@ pub fn user_command(
     args: &str,
 ) -> Result<String, String> {
     match command {
-        "peers" | "list-agents" => Ok(cmd_peers(hub, s)),
-        "peers-name" => cmd_name(hub, s, args),
-        "peers-inbox" => Ok(cmd_inbox(s)),
-        "peers-outbox" => Ok(cmd_outbox(hub, s)),
+        PEER_COMMAND_PEERS | "list-agents" => Ok(cmd_peers(hub, s)),
+        PEER_COMMAND_NAME => cmd_name(hub, s, args),
+        PEER_COMMAND_INBOX => Ok(cmd_inbox(s)),
+        PEER_COMMAND_OUTBOX => Ok(cmd_outbox(hub, s)),
         other => Err(format!("Unknown peer command /{other}")),
     }
 }
@@ -639,7 +668,7 @@ fn cmd_peers(hub: &Arc<Hub>, s: &Arc<Session>) -> String {
             "  [{}] {} · \"{}\" · {} · {} · {} · started {}{}\n",
             status_word(&i.status),
             i.name,
-            crate::util::truncate_chars(&i.title, 40),
+            crate::util::truncate_chars(&i.title, LIST_TITLE_CHARS),
             i.agent,
             if i.attached > 0 {
                 "foreground"
@@ -706,7 +735,7 @@ fn cmd_inbox(s: &Arc<Session>) -> String {
                 "  {} · from \"{}\" · {}\n",
                 crate::util::fmt_time(m.time),
                 from(m),
-                preview(&peer_body(m), 80)
+                preview(&peer_body(m), PREVIEW_CHARS)
             ));
         }
     }
@@ -714,14 +743,18 @@ fn cmd_inbox(s: &Arc<Session>) -> String {
         let n = received.len();
         out.push_str(&format!(
             "{n} received{}:\n",
-            if n > 20 { " (last 20)" } else { "" }
+            if n > LIST_LAST {
+                format!(" (last {LIST_LAST})")
+            } else {
+                String::new()
+            }
         ));
-        for m in received.iter().skip(n.saturating_sub(20)) {
+        for m in received.iter().skip(n.saturating_sub(LIST_LAST)) {
             out.push_str(&format!(
                 "  {} · from \"{}\" · {}\n",
                 crate::util::fmt_time(m.time),
                 from(m),
-                preview(&peer_body(m), 80)
+                preview(&peer_body(m), PREVIEW_CHARS)
             ));
         }
     }
@@ -729,10 +762,7 @@ fn cmd_inbox(s: &Arc<Session>) -> String {
 }
 
 fn cmd_outbox(hub: &Arc<Hub>, s: &Arc<Session>) -> String {
-    let mut sent: Vec<(String, PeerRecord)> = hub
-        .peer_msgs
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
+    let mut sent: Vec<(String, PeerRecord)> = lock(&hub.peer_msgs)
         .iter()
         .filter(|(_, r)| r.from_id == s.id)
         .map(|(k, v)| (k.clone(), v.clone()))
@@ -744,16 +774,14 @@ fn cmd_outbox(hub: &Arc<Hub>, s: &Arc<Session>) -> String {
     let n = sent.len();
     let mut out = format!(
         "{n} sent message(s){}:\n",
-        if n > 20 { " (last 20)" } else { "" }
+        if n > LIST_LAST {
+            format!(" (last {LIST_LAST})")
+        } else {
+            String::new()
+        }
     );
-    for (id, r) in sent.iter().skip(n.saturating_sub(20)) {
-        let status = message_status(hub, &json!({ "message_id": id }))
-            .ok()
-            .and_then(|t| {
-                t.rsplit_once(": ")
-                    .map(|(_, st)| st.trim_end_matches('.').to_string())
-            })
-            .unwrap_or_else(|| "unknown".into());
+    for (id, r) in sent.iter().skip(n.saturating_sub(LIST_LAST)) {
+        let status = delivery_status(hub, r, id);
         out.push_str(&format!(
             "  {} · to \"{}\" · {} · {}\n",
             crate::util::fmt_time(r.time),

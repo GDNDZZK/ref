@@ -1,13 +1,11 @@
 //! Scripts that ask the user questions with the `question` tool.
 
+use super::tools::TOOL_QUESTION;
 use crate::mock::script::{Ctx, Pace, Round, Script};
+use crate::question::{ANSWERED_PREFIX, ANSWERED_SUFFIX};
 use serde_json::{Value, json};
 
-/// Start and end of the tool result that carries the answers (see `question::format_answers`).
-const ANSWERED_PREFIX: &str = "User has answered your questions: ";
-const ANSWERED_SUFFIX: &str = ". You can now continue";
-
-pub const SCRIPTS: &[Script] = &[
+pub(super) const SCRIPTS: &[Script] = &[
     Script {
         name: "question",
         about: "Asks two questions (a single and a multiple choice, with defaults) and repeats the answers",
@@ -47,7 +45,7 @@ fn question(ctx: &Ctx) -> Round {
         0 => Round::new()
             .text("I need two decisions before I continue.\n")
             .tool(
-                "question",
+                TOOL_QUESTION,
                 "Ask how to fix the loop and what to check",
                 json!({"questions": [
                     {
@@ -78,7 +76,7 @@ fn question(ctx: &Ctx) -> Round {
 fn question_one(ctx: &Ctx) -> Round {
     match ctx.round {
         0 => Round::new().text("One quick question.\n").tool(
-            "question",
+            TOOL_QUESTION,
             "Ask which file to change first",
             json!({"questions": [{
                 "question": "Which file should I change first?",
@@ -115,9 +113,9 @@ mod tests {
     #[test]
     fn the_answer_is_repeated_or_the_dismissal_noted() {
         let mut c = ctx("question-one", 1);
-        c.tool_results = vec![
-            "User has answered your questions: \"Which file should I change first?\"=\"src/lib.rs\". You can now continue with the user's answers in mind.".into(),
-        ];
+        c.tool_results = vec![format!(
+            "{ANSWERED_PREFIX}\"Which file should I change first?\"=\"src/lib.rs\"{ANSWERED_SUFFIX}"
+        )];
         let text = format!("{:?}", question_one(&c).steps);
         assert!(text.contains("src/lib.rs"), "{text}");
         c.tool_results = vec!["The user dismissed the question without answering.".into()];

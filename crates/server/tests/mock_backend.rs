@@ -1,5 +1,7 @@
 //! `MockBackend` against the real `ref-server --mock`.
 
+mod common;
+
 use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
@@ -10,15 +12,20 @@ use tokio::io::{AsyncBufReadExt as _, BufReader};
 use tokio_tungstenite::tungstenite::Message;
 
 const STEP: Duration = Duration::from_secs(15);
-const POLL: Duration = Duration::from_millis(20);
-const HELLO: &str = r#"{"id":1,"op":"hello","client":"ref-client-test","version":2,"cwd":"/tmp"}"#;
+
+fn hello_frame() -> String {
+    format!(
+        r#"{{"id":1,"op":"hello","client":"ref-client-test","version":{},"cwd":"/tmp"}}"#,
+        ref_proto::PROTOCOL_VERSION
+    )
+}
 
 fn ref_server_binary() -> &'static Path {
     Path::new(env!("CARGO_BIN_EXE_ref-server"))
 }
 
 async fn hello(ws: &mut Ws) -> serde_json::Value {
-    ws.send(Message::text(HELLO)).await.unwrap();
+    ws.send(Message::text(hello_frame())).await.unwrap();
     loop {
         let message = tokio::time::timeout(STEP, ws.next())
             .await
@@ -43,7 +50,7 @@ async fn announces_an_endpoint_that_accepts_its_token() {
     assert_eq!(response["ok"], true, "{response}");
     // Dropping the handle would kill the mock and leave its temporary directory behind.
     drop(ws);
-    mock.shutdown().await;
+    mock.shutdown().await.unwrap();
 }
 
 #[tokio::test]
@@ -54,15 +61,11 @@ async fn exits_when_its_last_client_disconnects() {
     assert!(!mock.has_exited().unwrap());
     drop(ws);
 
-    let deadline = std::time::Instant::now() + STEP;
-    while !mock.has_exited().unwrap() {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the mock stayed up after its last client left"
-        );
-        tokio::time::sleep(POLL).await;
-    }
-    mock.shutdown().await;
+    common::wait_until("the mock to exit after its last client left", STEP, || {
+        mock.has_exited().unwrap()
+    })
+    .await;
+    mock.shutdown().await.unwrap();
 }
 
 /// The contract `MockBackend` relies on, checked on the bare process: one JSON line on stdout,

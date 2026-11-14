@@ -7,7 +7,7 @@ const ARTICLE: &str = include_str!("../assets/article.md");
 /// The slow script shows this much of the article, about a minute at `Pace::SLOW`.
 const SLOW_CHARS: usize = 1700;
 
-pub const SCRIPTS: &[Script] = &[
+pub(super) const SCRIPTS: &[Script] = &[
     Script {
         name: "help",
         about: "Lists all scripts",

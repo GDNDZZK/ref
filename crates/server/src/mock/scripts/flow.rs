@@ -1,10 +1,15 @@
 //! Scripts about the flow around a conversation: failures, context limits and other sessions.
 
 use super::stale::{PARSER, substitute};
-use super::tools::{TODO_ROUNDS, bash, image_round, read, todo_round, tools_round};
+use super::tools::{
+    TODO_ROUNDS, TOOL_BASH, TOOL_COMPACT_CONTEXT, TOOL_CREATE_SESSION, TOOL_EDIT, TOOL_READ,
+    TOOL_SEND_MESSAGE, TOOLS_ROUNDS, bash, image_round, read, todo_round, tools_round,
+};
 use crate::mock::script::{Ctx, Pace, Round, Script};
 use serde_json::json;
 
+/// What an overloaded provider says.
+const OVERLOADED_MESSAGE: &str = "Overloaded: too many requests, try again later";
 /// The provider answers `retry` with this status (overloaded) until the third attempt.
 const OVERLOADED: u16 = 529;
 const UNAUTHORIZED: u16 = 401;
@@ -16,13 +21,11 @@ const OUTAGE_FAILURES: u32 = 4;
 const LENIENT_SCORE: &str = "score.trim().parse().unwrap_or(0)";
 const STRICT_SCORE: &str = "score.trim().parse().ok()?";
 const FAILED_ATTEMPTS: u32 = 2;
-/// Rounds of `everything`: the `tools` rounds, then the `todo` rounds, then `image`.
 /// How long the created session "works" before it reports.
 const REPORT_DELAY_MS: u64 = 1500;
-const TOOLS_ROUNDS: usize = 4;
 const SUMMARY_FOR_COMPACT: &str = "## Goal\n- Demonstrate compact_context.\n\n## Next steps\n1. Continue with whatever the user asks next.";
 
-pub const SCRIPTS: &[Script] = &[
+pub(super) const SCRIPTS: &[Script] = &[
     Script {
         name: "retry",
         about: "The provider is overloaded twice (status Retrying), then the answer arrives",
@@ -81,7 +84,7 @@ pub const SCRIPTS: &[Script] = &[
 
 fn retry(ctx: &Ctx) -> Round {
     if ctx.attempt <= FAILED_ATTEMPTS {
-        return Round::error(OVERLOADED, "Overloaded: too many requests, try again later");
+        return Round::error(OVERLOADED, OVERLOADED_MESSAGE);
     }
     Round::new().text(format!(
         "The provider failed {FAILED_ATTEMPTS} times and answered on attempt {}.",
@@ -92,7 +95,7 @@ fn retry(ctx: &Ctx) -> Round {
 /// The error of failed attempt `attempt` (1-based) of the request that `outage` loses.
 fn outage_error(attempt: u32) -> Round {
     match attempt {
-        1 | 2 => Round::error(OVERLOADED, "Overloaded: too many requests, try again later"),
+        1 | 2 => Round::error(OVERLOADED, OVERLOADED_MESSAGE),
         3 => Round::connection_reset(),
         _ => Round::error(UNAVAILABLE, "Service unavailable"),
     }
@@ -101,23 +104,23 @@ fn outage_error(attempt: u32) -> Round {
 fn outage(ctx: &Ctx) -> Round {
     match ctx.round {
         0 => Round::new().text("I'll run the tests first.\n").tool(
-            "bash",
+            TOOL_BASH,
             "Run the tests",
             bash("echo \"cargo test: 1 failed (parser::bad_score), 11 passed\""),
         ),
         1 => Round::new()
             .text("One test fails. Reading the parser.\n")
-            .tool("read", "Read the parser", read(PARSER)),
+            .tool(TOOL_READ, "Read the parser", read(PARSER)),
         2 if ctx.attempt <= OUTAGE_FAILURES => outage_error(ctx.attempt),
         2 => Round::new()
             .text("A bad score should count as zero. Editing it.\n")
             .tool(
-                "edit",
+                TOOL_EDIT,
                 "Make a bad score count as zero",
                 substitute(&ctx.tool_results, PARSER, (STRICT_SCORE, LENIENT_SCORE)),
             ),
         3 => Round::new().text("Running the tests again.\n").tool(
-            "bash",
+            TOOL_BASH,
             "Run the tests again",
             bash("echo \"cargo test: 12 passed\""),
         ),
@@ -138,7 +141,7 @@ fn fill(_: &Ctx) -> Round {
 fn compact_tool(ctx: &Ctx) -> Round {
     match ctx.round {
         0 => Round::new().text("I'll compact my context.\n").tool(
-            "compact_context",
+            TOOL_COMPACT_CONTEXT,
             "Compact the context",
             json!({ "summary": SUMMARY_FOR_COMPACT }),
         ),
@@ -149,7 +152,7 @@ fn compact_tool(ctx: &Ctx) -> Round {
 fn peer(ctx: &Ctx) -> Round {
     match ctx.round {
         0 => Round::new().text("I'll ask a reviewer to look at the workspace.\n").tool(
-            "create_session",
+            TOOL_CREATE_SESSION,
             "Start a reviewer",
             json!({
                 "name": "helper",
@@ -171,7 +174,7 @@ fn peer_child(ctx: &Ctx) -> Round {
             .text("Looking at the workspace.\n")
             .pause(REPORT_DELAY_MS)
             .tool(
-                "send_message",
+                TOOL_SEND_MESSAGE,
                 "Report the findings",
                 json!({
                     "to": ctx.args,

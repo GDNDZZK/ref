@@ -2,15 +2,35 @@
 #![allow(dead_code)]
 
 use ref_config::{AgentConfig, Config, ModelConfig, PermissionRules, ProviderConfig};
-use ref_proto::{Message, ModelRef, Part, Role};
+use ref_proto::{Message, ModelRef, Part, Request, Role, ServerFrame, SessionEvent, ToolState};
+use ref_server::hub::Conn;
 use ref_server::session::Session;
 use ref_server::{Hub, HubOptions};
 use serde_json::{Value, json};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
+
+/// Default limit for waiting on test conditions.
+pub const TIMEOUT: Duration = Duration::from_secs(10);
+/// Limit for a whole turn to finish (`wait_idle`).
+const IDLE_TIMEOUT: Duration = Duration::from_secs(20);
+const RETRY_BASE: Duration = Duration::from_millis(10);
+const MCP_WAIT: Duration = Duration::from_secs(1);
+
+/// Agent and session names that `config()` defines.
+pub const BUILD: &str = "build";
+pub const WORKER: &str = "worker";
+pub const REVIEW: &str = "review";
+pub const MAIN_SESSION: &str = "main";
+
+/// Usage the mock server reports for every non-title reply.
+pub const MOCK_PROMPT_TOKENS: u64 = 1000;
+pub const MOCK_COMPLETION_TOKENS: u64 = 20;
+/// Context window of the mock model.
+pub const MOCK_CONTEXT: u64 = 10_000;
 
 #[derive(Debug, Clone)]
 pub enum Reply {
@@ -76,14 +96,19 @@ fn sse(reply: &Reply) -> String {
         Reply::Status(..) | Reply::Hang(_) => {}
     }
     s.push_str(&chunk(
-        json!({"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":20}}),
+        json!({"choices":[],"usage":{"prompt_tokens":MOCK_PROMPT_TOKENS,"completion_tokens":MOCK_COMPLETION_TOKENS}}),
     ));
     s.push_str("data: [DONE]\n\n");
     s
 }
 
 fn is_title(body: &Value) -> bool {
-    body.to_string().contains("Generate a short title")
+    body.to_string().contains(ref_server::title::TITLE_PROMPT)
+}
+
+/// Write to the socket; false when the client has gone (expected on aborts).
+async fn write_or_stop(sock: &mut TcpStream, data: &[u8]) -> bool {
+    sock.write_all(data).await.is_ok()
 }
 
 pub async fn mock(handler: Handler) -> Mock {
@@ -147,23 +172,32 @@ pub async fn mock(handler: Handler) -> Mock {
                             "HTTP/1.1 {code} Error\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{text}",
                             text.len()
                         );
-                        let _ = sock.write_all(resp.as_bytes()).await;
+                        write_or_stop(&mut sock, resp.as_bytes()).await;
                     }
                     Reply::Hang(t) => {
                         let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
-                        let _ = sock.write_all(head.as_bytes()).await;
+                        if !write_or_stop(&mut sock, head.as_bytes()).await {
+                            return;
+                        }
                         let c = chunk(
                             json!({"choices":[{"index":0,"delta":{"role":"assistant","content":t},"finish_reason":null}]}),
                         );
-                        let _ = sock.write_all(c.as_bytes()).await;
-                        let _ = sock.flush().await;
+                        if !write_or_stop(&mut sock, c.as_bytes()).await
+                            || sock.flush().await.is_err()
+                        {
+                            return;
+                        }
                         tokio::time::sleep(Duration::from_secs(60)).await;
                     }
                     r => {
                         let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n";
-                        let _ = sock.write_all(head.as_bytes()).await;
-                        let _ = sock.write_all(sse(&r).as_bytes()).await;
-                        let _ = sock.shutdown().await;
+                        if !write_or_stop(&mut sock, head.as_bytes()).await {
+                            return;
+                        }
+                        if write_or_stop(&mut sock, sse(&r).as_bytes()).await {
+                            // The client may already be gone; nothing to do then.
+                            sock.shutdown().await.ok();
+                        }
                     }
                 }
             });
@@ -181,7 +215,7 @@ pub fn config(base_url: &str) -> Config {
             key: "m".into(),
             id: "m".into(),
             name: "Mock".into(),
-            context: 10_000,
+            context: MOCK_CONTEXT,
             ..Default::default()
         },
     );
@@ -202,11 +236,11 @@ pub fn config(base_url: &str) -> Config {
         model: "m".into(),
         variant: None,
     });
-    cfg.default_agent = "build".into();
+    cfg.default_agent = BUILD.into();
     cfg.agents.insert(
-        "build".into(),
+        BUILD.into(),
         AgentConfig {
-            name: "build".into(),
+            name: BUILD.into(),
             description: "Builder".into(),
             creatable: true,
             can_spawn: true,
@@ -214,9 +248,9 @@ pub fn config(base_url: &str) -> Config {
         },
     );
     cfg.agents.insert(
-        "worker".into(),
+        WORKER.into(),
         AgentConfig {
-            name: "worker".into(),
+            name: WORKER.into(),
             description: "Worker".into(),
             creatable: true,
             ..Default::default()
@@ -240,16 +274,32 @@ pub fn temp_dir(tag: &str) -> PathBuf {
     d
 }
 
-pub fn hub(cfg: Config, tag: &str) -> (Arc<Hub>, PathBuf) {
-    let dir = temp_dir(tag);
+/// Hub options with data in `dir/data`, no home directory and fast retries.
+pub fn hub_options(cfg: Config, dir: &Path) -> HubOptions {
     let mut opts = HubOptions::new(dir.join("data"));
     opts.home = None;
-    opts.retry_base = Duration::from_millis(10);
-    opts.mcp_wait = Duration::from_secs(1);
+    opts.retry_base = RETRY_BASE;
+    opts.mcp_wait = MCP_WAIT;
     opts.config_loader = Arc::new(move |_| cfg.clone());
+    opts
+}
+
+/// A hub in a fresh temp dir, with `adjust` applied to its options, and its work dir.
+pub fn hub_with(
+    cfg: Config,
+    tag: &str,
+    adjust: impl FnOnce(&mut HubOptions),
+) -> (Arc<Hub>, PathBuf) {
+    let dir = temp_dir(tag);
+    let mut opts = hub_options(cfg, &dir);
+    adjust(&mut opts);
     let work = dir.join("work");
     std::fs::create_dir_all(&work).unwrap();
     (Hub::new(opts), work)
+}
+
+pub fn hub(cfg: Config, tag: &str) -> (Arc<Hub>, PathBuf) {
+    hub_with(cfg, tag, |_| {})
 }
 
 pub async fn session(
@@ -274,6 +324,15 @@ pub async fn session(
     .unwrap()
 }
 
+/// Set-up of a turn test: a mock with `handler`, a hub with the default config and a
+/// `MAIN_SESSION` session of the `BUILD` agent.
+pub async fn run_turn(handler: Handler, tag: &str) -> (Mock, Arc<Hub>, PathBuf, Arc<Session>) {
+    let m = mock(handler).await;
+    let (hub, work) = hub(config(&m.url), tag);
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
+    (m, hub, work, s)
+}
+
 pub fn prompt(hub: &Arc<Hub>, s: &Arc<Session>, text: &str) {
     let msg =
         ref_server::session::user_message(ref_proto::MessageSource::Human, text.into(), vec![]);
@@ -290,12 +349,81 @@ pub async fn wait_until(what: &str, timeout: Duration, mut f: impl FnMut() -> bo
     }
 }
 
+/// Waits until `f` holds for `s`.
+pub async fn wait_session(s: &Arc<Session>, what: &str, f: impl Fn(&Arc<Session>) -> bool) {
+    wait_until(what, TIMEOUT, || f(s)).await;
+}
+
+/// Waits until some tool part of `s` is in `state`.
+pub async fn wait_tool_state(s: &Arc<Session>, state: ToolState) {
+    let what = format!("tool {state:?}");
+    wait_session(s, &what, |s| {
+        tool_parts(s)
+            .iter()
+            .any(|p| matches!(p, Part::Tool { state: now, .. } if *now == state))
+    })
+    .await;
+}
+
 pub async fn wait_idle(s: &Arc<Session>) {
     let s2 = s.clone();
-    wait_until("session idle", Duration::from_secs(20), move || {
+    wait_until("session idle", IDLE_TIMEOUT, move || {
         s2.lock().run.is_none()
     })
     .await;
+}
+
+/// A connection that finished Hello.
+pub fn hello_conn(hub: &Arc<Hub>) -> Arc<Conn> {
+    let conn = hub.add_conn();
+    conn.lock().hello = true;
+    conn
+}
+
+/// A connection attached to `s` in the foreground, with the attach frames drained.
+pub async fn attached_conn(hub: &Arc<Hub>, s: &Arc<Session>) -> Arc<Conn> {
+    let conn = hello_conn(hub);
+    let attach = Request::Attach {
+        session_id: s.id.clone(),
+        foreground: true,
+        limit: None,
+    };
+    ref_server::api::handle(hub, &conn, attach).await.unwrap();
+    conn.out.drain();
+    conn
+}
+
+/// Sends `req` through the API and returns its result; panics on an error.
+pub async fn call(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> Value {
+    ref_server::api::handle(hub, conn, req).await.unwrap()
+}
+
+pub fn undo_request(s: &Session, message_id: Option<String>) -> Request {
+    Request::Undo {
+        session_id: s.id.clone(),
+        message_id,
+    }
+}
+
+/// Attach to `s` in the foreground.
+pub fn attach_request(s: &Session, limit: Option<u32>) -> Request {
+    Request::Attach {
+        session_id: s.id.clone(),
+        foreground: true,
+        limit,
+    }
+}
+
+/// Drains the connection and keeps the session events.
+pub fn events(conn: &Conn) -> Vec<SessionEvent> {
+    conn.out
+        .drain()
+        .into_iter()
+        .filter_map(|f| match f {
+            ServerFrame::Event { event, .. } => Some(event),
+            _ => None,
+        })
+        .collect()
 }
 
 pub fn messages(s: &Arc<Session>) -> Vec<Message> {

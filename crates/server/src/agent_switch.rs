@@ -14,8 +14,8 @@
 //! forgets a switch that was not delivered yet.
 
 use crate::hub::Hub;
-use crate::session::{SessionState, user_message};
-use ref_proto::{Message, MessageSource, Part, Role, SessionEvent, now_ms};
+use crate::session::{REMINDER_PREFIX, SessionState, user_message};
+use ref_proto::{MessageSource, Part, Role, SessionEvent, now_ms};
 use std::sync::Arc;
 
 /// The last switch the model has not answered yet.
@@ -28,7 +28,7 @@ pub struct AgentSwitch {
 
 fn reminder_text(from: &str, to: &str) -> String {
     format!(
-        "[Reminder] The user switched the agent from {from} to {to}. Your instructions and available tools now come from the {to} agent; where earlier messages conflict with them, follow the {to} agent."
+        "{REMINDER_PREFIX} The user switched the agent from {from} to {to}. Your instructions and available tools now come from the {to} agent; where earlier messages conflict with them, follow the {to} agent."
     )
 }
 
@@ -45,11 +45,6 @@ fn take_open(st: &mut SessionState) -> Option<AgentSwitch> {
         .iter()
         .any(|m| m.role == Role::Assistant);
     (!busy && !answered).then_some(note)
-}
-
-fn emit_message(hub: &Arc<Hub>, session_id: &str, message: &Message) {
-    let message = message.clone();
-    hub.emit(session_id, SessionEvent::Message { message });
 }
 
 /// True once the model has been given something to answer: a prompt from a person, a peer or
@@ -151,12 +146,12 @@ fn write_reminder(
             text,
             time: now_ms(),
         }];
-        emit_message(hub, &st.info.id, message);
+        hub.emit_message(&st.info.id, message);
         return message.id.clone();
     }
     let message = user_message(MessageSource::Reminder, text, vec![]);
     let id = message.id.clone();
-    emit_message(hub, &st.info.id, &message);
+    hub.emit_message(&st.info.id, &message);
     st.push_message(message);
     hub.emit_info(st);
     id
