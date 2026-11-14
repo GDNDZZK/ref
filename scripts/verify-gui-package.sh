@@ -98,6 +98,8 @@ verify_linux() {
     pass "$name <= ${!limit_var}"
   done
 
+  [[ -f "$PACKAGE/plugins/platforms/libqwayland.so" ]] || fail "plugins/platforms/libqwayland.so is missing"
+  pass "Wayland platform plugin"
   check_syntax_highlighting_module
   check_controls_styles
   smoke "$PACKAGE/ref-gui" xvfb-run -a "${clean_env[@]}"

@@ -31,6 +31,7 @@ set_target_properties(ref-gui PROPERTIES QT_QML_IMPORT_PATH "${ref_gui_qml_impor
 
 set(ref_gui_deploy_tool_options "")
 set(ref_gui_deploy_exclude_plugin_types "")
+set(ref_gui_deploy_include_plugins "")
 
 if(WIN32)
 	# GUI subsystem: no console window.
@@ -80,12 +81,15 @@ else()
 	set_target_properties(ref-gui PROPERTIES INSTALL_RPATH "$ORIGIN/lib")
 
 	# Plugins of the modules we load that a desktop run does not use: QML debugger and profiler
-	# plugins, the input and display backends of embedded devices, and the helpers of the
-	# Wayland platform plugin, which is not deployed (the xcb plugin runs on XWayland).
+	# plugins and the input and display backends of embedded devices.
 	set(ref_gui_deploy_exclude_plugin_types
 		qmltooling egldeviceintegrations generic
-		wayland-decoration-client wayland-graphics-integration-client wayland-shell-integration
 	)
+
+	# Qt's Gui config records qpa.platforms = [xcb], so qt_deploy_runtime_dependencies only
+	# deploys libqxcb.so unless qwayland is listed explicitly. Qt picks wayland automatically
+	# when WAYLAND_DISPLAY is set and falls back to xcb otherwise.
+	set(ref_gui_deploy_include_plugins qwayland)
 endif()
 
 install(TARGETS ref-gui RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" BUNDLE DESTINATION .)
@@ -97,6 +101,7 @@ qt_generate_deploy_qml_app_script(
 	NO_TRANSLATIONS
 	DEPLOY_TOOL_OPTIONS ${ref_gui_deploy_tool_options}
 	EXCLUDE_PLUGIN_TYPES ${ref_gui_deploy_exclude_plugin_types}
+	INCLUDE_PLUGINS ${ref_gui_deploy_include_plugins}
 )
 install(SCRIPT "${ref_gui_deploy_script}")
 

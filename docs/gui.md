@@ -29,7 +29,7 @@ Download `ref-gui-<version>-<platform>` (or `ref-all-…`) from the [latest rele
 
 Keep the folder together and run the program from where it is; moving the whole folder is fine. No installation or administrator rights are needed. Everything the GUI needs besides the system's own libraries is in the folder, so it does not use a Qt that is installed on the system.
 
-On Linux the program needs glibc 2.38 and the C++ runtime of GCC 13 (Ubuntu 24.04, Debian 13, Fedora 39, Arch and newer), and it runs with X11 or through XWayland. Qt's Wayland plugin is not included.
+On Linux the program needs glibc 2.38 and the C++ runtime of GCC 13 (Ubuntu 24.04, Debian 13, Fedora 39, Arch and newer). It runs natively on Wayland (selected automatically when `WAYLAND_DISPLAY` is set) and falls back to X11 or XWayland.
 
 ## Starting
 
@@ -205,6 +205,8 @@ They are saved in `gui.json` in the state directory ([Files and directories](cli
 - Notifications on Windows and macOS have not been tried on those systems yet.
 - On Wayland, whether a click on a notification brings the window to the front depends on the desktop: without an activation token the taskbar entry may only flash.
 - Ctrl+Shift+U can be taken by the IBus Unicode input on Linux. If the key does not respond, turn that IBus key off, or use the *Undo* button under your message or `/undo`.
+- **Input methods (IME):** On native Wayland, desktop input methods (fcitx5, IBus) work over `zwp_text_input_v3` without bundling `fcitx5-qt`. When falling back to `xcb` (X11 or XWayland), the package ships Qt's `ibus` and `compose` input context plugins only; using fcitx5 in that mode requires a system `fcitx5-qt` package and `QT_PLUGIN_PATH` pointing to its plugin directory.
+- **Wayland window icon:** Wayland compositors resolve window icons by desktop ID, so installing `ref-gui.desktop` and `ref.svg` (see [Installation](../README.md#installation)) is required for the window icon to appear.
 - In very long sessions (more than about 200 messages above or below the view) the scroll bar length is an estimate, and may shift a little while you drag it.
 - A bash call that exits with a non-zero code still shows as done in the card header; the exit code is in the open card.
 - For tools the GUI has no special view for, the one-line summary lists the first three plain arguments in alphabetical order, where the terminal UI uses the order in the call.
