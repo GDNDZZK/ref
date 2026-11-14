@@ -123,9 +123,10 @@ export async function shellScenario(page, problems) {
   await page.click(`${DIALOG} [role="radio"]:has-text("Light")`)
   await closeDialog(page, problems, 'settings dialog')
 
-  // Split view shows a tile per session; Alt+arrows move the focus; zoom and back.
+  // Split view shows background tiles; focusing a tile allows zoom and back.
   await page.keyboard.press(SHORTCUT.toggleSplit)
-  await expectCount(page, problems, TILE, 2, 'tiles in split view')
+  await expectCount(page, problems, TILE, 1, 'tiles in split view')
+  await clickTileHeader(page, 0)
   await shot(page, 'split')
   await page.keyboard.press(SHORTCUT.zoom)
   await shot(page, 'zoom')
@@ -240,10 +241,17 @@ async function expectOnlyFocusedComposer(page, problems, what) {
 // In split view only the focused tile has an input box; the drafts of the others stay.
 export async function splitComposerScenario(page, problems) {
   await page.setViewportSize(SPLIT_VIEWPORT)
-  await ensureSessionCount(page, SPLIT_TILES)
+  await ensureSessionCount(page, SPLIT_TILES + 1)
   await page.keyboard.press(SHORTCUT.toggleSplit)
   await expectCount(page, problems, TILE, SPLIT_TILES, 'tiles for the composer check')
+  if ((await focusedTile(page)) !== -1) problems.push('split view started with a focused tile')
+  await clickTileHeader(page, 0)
   const first = await expectOnlyFocusedComposer(page, problems, 'split view start')
+  await clickTileHeader(page, 0)
+  await page.waitForTimeout(SHORT_SETTLE_MS)
+  if ((await focusedTile(page)) !== -1) problems.push('clicking focused tile again did not deselect it')
+  await clickTileHeader(page, first.focused)
+  await expectOnlyFocusedComposer(page, problems, 'split view re-focused')
 
   const draft = 'a half-written prompt'
   await tileInput(page, first.focused).fill(draft)
@@ -321,10 +329,10 @@ async function highlightedTile(page) {
 
 async function startSplit(page, problems, tiles) {
   await page.setViewportSize(SPLIT_VIEWPORT)
-  await ensureSessionCount(page, tiles)
+  await ensureSessionCount(page, tiles + 1)
   const running = await count(page, ROWS)
   await page.keyboard.press(SHORTCUT.toggleSplit)
-  await expectCount(page, problems, TILE, running, 'tiles for the split checks')
+  await expectCount(page, problems, TILE, running - 1, 'tiles for the split checks')
   await page.waitForTimeout(SETTLE_MS)
 }
 

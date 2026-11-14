@@ -61,6 +61,7 @@ function onKey(event: KeyboardEvent): void {
         @keydown="onKey"
       />
     </label>
+    <slot name="toolbar" :selected="selected" />
     <PickList
       :items="shown"
       :selected="selected"

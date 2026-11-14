@@ -10,9 +10,19 @@ import { useNow } from '../composables/useNow.ts'
 import { useStuck } from '../composables/useStuck.ts'
 import type { ToolBlock } from '../model/blocks.ts'
 import { formatClock, formatDuration, formatElapsed } from '../model/format.ts'
-import { parseTodos, toolDetail, toolIcon } from '../model/toolContent.ts'
+import {
+  metaNumber,
+  metaString,
+  metaStrings,
+  parseQuestionAnswers,
+  parseTodos,
+  stringArg,
+  toolDetail,
+  toolIcon,
+} from '../model/toolContent.ts'
 import { useNoticesStore } from '../stores/notices.ts'
 import Chevron from './Chevron.vue'
+import DiffView from './DiffView.vue'
 import Icon from './Icon.vue'
 import TextButton from './TextButton.vue'
 import TodoList from './TodoList.vue'
@@ -22,8 +32,9 @@ import ToolQuestion from './ToolQuestion.vue'
 import ToolStateMark from './ToolStateMark.vue'
 import { MS_PER_SECOND } from '../time.ts'
 
-const props = defineProps<{ block: ToolBlock }>()
+const COLLAPSED_DIFF_ROWS = 8
 
+const props = defineProps<{ block: ToolBlock }>()
 const { t } = useI18n()
 const chatScroll = useChatScroll()
 const session = useChatSession()
@@ -47,6 +58,15 @@ const delayFraction = computed(() =>
 const isTodo = computed(() => props.block.name === 'todo')
 const todos = computed(() => (isTodo.value ? parseTodos(props.block.input) : []))
 const detail = computed(() => toolDetail(props.block.name, props.block.input))
+const answeredSummary = computed(() =>
+  props.block.name === 'question' ? parseQuestionAnswers(props.block.input, props.block.meta) : [],
+)
+const diff = computed(() => metaString(props.block.meta, 'diff'))
+const showsDiff = computed(() => ['edit', 'write'].includes(props.block.name) && !!diff.value?.trim())
+const diffPath = computed(() => metaString(props.block.meta, 'path') ?? stringArg(props.block.input, 'path'))
+const diffAdded = computed(() => metaNumber(props.block.meta, 'added') ?? 0)
+const diffRemoved = computed(() => metaNumber(props.block.meta, 'removed') ?? 0)
+const diffWarnings = computed(() => metaStrings(props.block.meta, 'warnings'))
 const awaitingPermission = computed(() => state.value === 'awaiting_permission')
 const awaitingAnswer = computed(() => props.block.question !== undefined)
 const hasContent = computed(() => {
@@ -185,12 +205,24 @@ function cancel(): void {
     </div>
     <TodoList v-if="isTodo" :todos="todos" />
     <ToolQuestion
-      v-if="showQuestion"
+      v-if="showQuestion || (!expanded && answeredSummary.length > 0)"
       :form="block.question && session.questionForm(block.question)"
       :sending="session.isSendingAnswer(block.callId)"
+      :answered="!expanded ? answeredSummary : undefined"
       @answer="answerQuestion"
     />
     <div v-if="firstErrorLine" class="error-line">└ {{ firstErrorLine }}</div>
+    <div v-if="!expanded && showsDiff" class="diff-preview">
+      <div class="diff-path">
+        <span class="diff-file">{{ diffPath }}</span>
+        <span class="diff-added">+{{ diffAdded }}</span>
+        <span class="diff-removed">-{{ diffRemoved }}</span>
+      </div>
+      <DiffView :diff="diff!" :max-rows="COLLAPSED_DIFF_ROWS" />
+      <div v-if="diffWarnings.length > 0" class="diff-warnings">
+        <div v-for="(warning, index) in diffWarnings" :key="index" class="diff-warning">{{ warning }}</div>
+      </div>
+    </div>
     <div
       class="body"
       :class="{ open: expanded }"
@@ -386,5 +418,40 @@ function cancel(): void {
 .fold {
   min-height: 0;
   overflow: hidden;
+}
+
+.diff-preview {
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.diff-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font: var(--small-font-size) / 18px var(--font-mono);
+}
+
+.diff-added {
+  color: var(--diff-added);
+}
+
+.diff-removed {
+  color: var(--diff-removed);
+}
+
+.diff-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+}
+
+.diff-warning {
+  color: var(--warning-text);
+  font-size: var(--small-font-size);
+  line-height: 18px;
+  overflow-wrap: anywhere;
 }
 </style>

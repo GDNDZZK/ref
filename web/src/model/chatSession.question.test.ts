@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { RefError } from '../net/connection.ts'
 import { ChatSession } from './chatSession.ts'
 import {
   assistantMessage,
@@ -123,7 +124,17 @@ describe('answering a question', () => {
     expect(api.attach).toHaveBeenCalledTimes(2)
   })
 
-  it('drops a question that was answered elsewhere without a word', async () => {
+  it('drops a question that was answered elsewhere when the error carries the code', async () => {
+    const gone = vi.fn().mockRejectedValue(new RefError('answered elsewhere', 'no_pending_question'))
+    const { session } = await setup(gone)
+    await session.answerQuestion('c1', [['A']])
+    await afterFrame()
+    expect(session.pendingQuestion).toBeUndefined()
+    expect(session.isSendingAnswer('c1')).toBe(false)
+    expect(toolBlockOf(session).question).toBeUndefined()
+  })
+
+  it('drops a question that was answered elsewhere without a word (text fallback)', async () => {
     const gone = vi.fn().mockRejectedValue(new Error('No pending question with that id.'))
     const { session } = await setup(gone)
     await session.answerQuestion('c1', [['A']])

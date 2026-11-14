@@ -6,8 +6,10 @@ import { useI18n } from 'vue-i18n'
 import type { PermissionRequest } from '../proto/generated'
 import { stringArg } from '../model/toolContent.ts'
 import CommandBox from './CommandBox.vue'
+import DiffView from './DiffView.vue'
 import Icon from './Icon.vue'
-
+import ToolChip from './ToolChip.vue'
+import ToolSection from './ToolSection.vue'
 const props = defineProps<{ request: PermissionRequest | undefined; waiting: number }>()
 const emit = defineEmits<{ answer: [allow: boolean, always: boolean] }>()
 
@@ -24,7 +26,7 @@ watch(
 
 const command = computed(() => stringArg(shown.value?.input, 'command'))
 const path = computed(() => stringArg(shown.value?.input, 'path'))
-
+const preview = computed(() => shown.value?.preview ?? undefined)
 const CHOICES = [
   { tone: 'success', icon: 'check-16', label: 'tool.allow', key: 'a', allow: true, always: false },
   { tone: 'accent', icon: 'check-all-16', label: 'tool.allowSession', key: 's', allow: true, always: true },
@@ -38,6 +40,14 @@ const CHOICES = [
       <div class="section">
         <CommandBox v-if="command !== undefined" :command="command" />
         <div v-if="path !== undefined" class="path">{{ path }}</div>
+        <ToolSection v-if="preview" :label="t('tool.preview')">
+          <template #chips>
+            <span class="added">+{{ preview.added }}</span>
+            <span class="removed">-{{ preview.removed }}</span>
+            <ToolChip v-if="preview.truncated">{{ t('tool.truncated') }}</ToolChip>
+          </template>
+          <DiffView v-if="preview.diff" :diff="preview.diff" />
+        </ToolSection>
         <div class="choices">
           <button
             v-for="choice in CHOICES"
@@ -88,6 +98,15 @@ const CHOICES = [
   overflow-wrap: anywhere;
 }
 
+.added {
+  color: var(--diff-added);
+  font: var(--small-font-size) / 18px var(--font-mono);
+}
+
+.removed {
+  color: var(--diff-removed);
+  font: var(--small-font-size) / 18px var(--font-mono);
+}
 .choices {
   display: flex;
   flex-wrap: wrap;

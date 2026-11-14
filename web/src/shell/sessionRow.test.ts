@@ -2,14 +2,16 @@ import { describe, expect, it } from 'vitest'
 import { info } from '../model/testMessages.ts'
 import type { Todo } from '../proto/generated'
 import {
+  creatorKeywords,
+  currentTodo,
   dirName,
   historyLabel,
   liveLabel,
   matchesQuery,
   relativeTime,
+  rootTaskOf,
   rowState,
   runningTime,
-  currentTodo,
   todoProgress,
 } from './sessionRow.ts'
 
@@ -135,5 +137,42 @@ describe('matchesQuery', () => {
 
   it('keeps everything for an empty query', () => {
     expect(matchesQuery(session, '  ')).toBe(true)
+  })
+
+  it('matches creator id and optional creator name', () => {
+    const child = info({ id: 's2', name: 'worker', parent: 'ses_lead' })
+    expect(matchesQuery(child, 'ses_lead')).toBe(true)
+    expect(matchesQuery(child, 'orchestrator', 'orchestrator')).toBe(true)
+  })
+})
+
+describe('rootTaskOf and creatorKeywords', () => {
+  it('walks parent up the live list and returns undefined for user-created sessions', () => {
+    const lead = info({ id: 's_lead', name: 'lead', parent: null })
+    const worker = info({ id: 's_worker', name: 'worker', parent: 's_lead' })
+    const leaf = info({ id: 's_leaf', name: 'leaf', parent: 's_worker' })
+    const orphan = info({ id: 's_orphan', name: 'orphan', parent: 's_gone' })
+    const live = [lead, worker, leaf, orphan]
+
+    expect(rootTaskOf(live, lead)).toBeUndefined()
+    expect(rootTaskOf(live, worker)).toEqual({ id: 's_lead', name: 'lead' })
+    expect(rootTaskOf(live, leaf)).toEqual({ id: 's_lead', name: 'lead' })
+    expect(rootTaskOf(live, orphan)).toEqual({ id: 's_gone', name: 's_gone' })
+  })
+
+  it('guards against cycles in parent references', () => {
+    const a = info({ id: 'a', name: 'alpha', parent: 'b' })
+    const b = info({ id: 'b', name: 'beta', parent: 'a' })
+    expect(rootTaskOf([a, b], a)).toEqual({ id: 'b', name: 'beta' })
+  })
+
+  it('builds creator search keywords with name and id', () => {
+    const lead = info({ id: 's_lead', name: 'lead', parent: null })
+    const child = info({ id: 's_child', name: 'child', parent: 's_lead' })
+    const orphan = info({ id: 's_orphan', name: 'orphan', parent: 's_gone' })
+    const byId = new Map([lead, child, orphan].map((s) => [s.id, s]))
+    expect(creatorKeywords(byId, lead)).toBe('')
+    expect(creatorKeywords(byId, child)).toBe('lead s_lead')
+    expect(creatorKeywords(byId, orphan)).toBe('s_gone')
   })
 })

@@ -1,10 +1,18 @@
 <script setup lang="ts">
 // Switch to a live session or resume one from history (the sessions dialog).
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { SessionInfo } from '../../proto/generated'
 import { relativeTimeText } from '../../shell/relativeTimeText.ts'
-import { dirName, historyLabel, liveLabel, relativeTime, rowState } from '../../shell/sessionRow.ts'
+import {
+  creatorKeywords,
+  creatorLabel,
+  dirName,
+  historyLabel,
+  liveLabel,
+  relativeTime,
+  rowState,
+} from '../../shell/sessionRow.ts'
 import { useCommandsStore } from '../../stores/commands.ts'
 import { useDialogsStore } from '../../stores/dialogs.ts'
 import { useLayoutStore } from '../../stores/layout.ts'
@@ -27,7 +35,18 @@ interface SessionItem {
   info: SessionInfo
 }
 
-const items = computed<SessionItem[]>(() => {
+type CreatorFilter = 'all' | 'user' | 'creator'
+const filter = ref<CreatorFilter>('all')
+const targetCreatorId = ref<string>()
+
+const sessionById = computed(() => {
+  const map = new Map<string, SessionInfo>()
+  for (const info of workspace.history) map.set(info.id, info)
+  for (const info of workspace.live) map.set(info.id, info)
+  return map
+})
+
+const allItems = computed<SessionItem[]>(() => {
   const liveIds = new Set(workspace.live.map((session) => session.id))
   const running = workspace.live.map((info) => ({ key: info.id, group: t('sidebar.running'), info }))
   const past = workspace.history
@@ -36,16 +55,45 @@ const items = computed<SessionItem[]>(() => {
   return [...running, ...past]
 })
 
+const items = computed<SessionItem[]>(() => {
+  if (filter.value === 'user') return allItems.value.filter((item) => !item.info.parent)
+  if (filter.value === 'creator' && targetCreatorId.value) {
+    return allItems.value.filter((item) => item.info.parent === targetCreatorId.value)
+  }
+  return allItems.value
+})
+
 const isLive = (item: SessionItem) => item.info.live || workspace.live.some((s) => s.id === item.key)
 
 const labelOf = (item: SessionItem) => (isLive(item) ? liveLabel(item.info) : historyLabel(item.info))
 
-function subtitle(item: SessionItem): string {
-  if (isLive(item)) return dirName(item.info.cwd)
-  const when = relativeTimeText(relativeTime(item.info.updated_at, Date.now()), t, locale.value)
-  return `${dirName(item.info.cwd)} · ${when}`
+function searchText(item: SessionItem): string {
+  const extra = creatorKeywords(sessionById.value, item.info)
+  return `${labelOf(item)} ${item.info.cwd} ${item.info.id}${extra ? ` ${extra}` : ''}`
+}
+function selectFilter(next: CreatorFilter, selectedKey: string | undefined): void {
+  if (next === 'creator') {
+    const picked =
+      allItems.value.find((item) => item.key === selectedKey) ??
+      items.value.find((item) => item.key === selectedKey)
+    if (!picked) return
+    targetCreatorId.value = picked.info.parent ?? picked.info.id
+  }
+  filter.value = next
 }
 
+const creatorChipLabel = computed(() => {
+  if (filter.value !== 'creator' || !targetCreatorId.value) return t('dialog.sessions.filterByCreator')
+  return t('dialog.sessions.filterByName', { name: creatorLabel(sessionById.value, targetCreatorId.value) })
+})
+
+function subtitle(item: SessionItem): string {
+  const base = isLive(item)
+    ? dirName(item.info.cwd)
+    : `${dirName(item.info.cwd)} · ${relativeTimeText(relativeTime(item.info.updated_at, Date.now()), t, locale.value)}`
+  if (!item.info.parent) return base
+  return `${base} · ${t('dialog.sessions.createdBy', { name: creatorLabel(sessionById.value, item.info.parent) })}`
+}
 function choose(item: SessionItem): void {
   dialogs.close()
   layout.closeDrawer()
@@ -62,12 +110,44 @@ function close(item: SessionItem): void {
     :title="t('dialog.sessions.title')"
     :search-label="t('dialog.sessions.search')"
     :items="items"
-    :text="(item) => `${labelOf(item)} ${item.info.cwd}`"
+    :text="searchText"
     :checked="workspace.focusedId"
     :empty="t('sidebar.noMatch')"
     @pick="choose"
     @close="dialogs.close()"
   >
+    <template #toolbar="{ selected }">
+      <div class="filters" role="group" :aria-label="t('dialog.sessions.filterLabel')">
+        <button
+          type="button"
+          class="filter-chip"
+          :class="{ active: filter === 'all' }"
+          :aria-pressed="filter === 'all'"
+          @click="selectFilter('all', selected)"
+        >
+          {{ t('dialog.sessions.filterAll') }}
+        </button>
+        <button
+          type="button"
+          class="filter-chip"
+          :class="{ active: filter === 'user' }"
+          :aria-pressed="filter === 'user'"
+          @click="selectFilter('user', selected)"
+        >
+          {{ t('dialog.sessions.filterUser') }}
+        </button>
+        <button
+          type="button"
+          class="filter-chip"
+          :class="{ active: filter === 'creator' }"
+          :aria-pressed="filter === 'creator'"
+          :disabled="filter !== 'creator' && !selected"
+          @click="selectFilter('creator', selected)"
+        >
+          {{ creatorChipLabel }}
+        </button>
+      </div>
+    </template>
     <template #row="{ item }">
       <SessionDot v-if="isLive(item)" :state="rowState(item.info)" class="state" />
       <div class="text">
@@ -89,10 +169,44 @@ function close(item: SessionItem): void {
 
 <style scoped src="./pickRow.css"></style>
 <style scoped>
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0;
+}
+
+.filter-chip {
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--text-muted);
+  font-size: var(--small-font-size);
+  transition:
+    background-color var(--motion-quick) var(--motion-ease),
+    color var(--motion-quick) var(--motion-ease);
+}
+
+.filter-chip:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.filter-chip.active {
+  background: var(--accent-surface);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent);
+  color: var(--accent-text);
+}
+
+.filter-chip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .state {
   flex: none;
 }
-
 .close {
   display: flex;
   flex: none;

@@ -15,7 +15,7 @@
     "placeholderQueue": "输入后加入队列…",
     "placeholderShell": "运行 shell 命令…",
     "interruptHint": "再按一次 Esc 中断",
-    "dropImages": "拖放图片以附加",
+    "dropFiles": "拖放文件以附加",
     "tags": {
       "agent": "智能体（Tab）",
       "model": "模型",
@@ -51,12 +51,14 @@
   },
   "tool": {
     "input": "输入",
+    "preview": "预览",
     "allow": "允许",
     "allowSession": "本会话都允许",
     "deny": "拒绝",
     "output": "输出",
     "moreWaiting": "另有 {count} 个等待中",
     "showMore": "显示其余 {count} 行",
+    "moreDiffRows": "还有 {count} 行",
     "earlierLines": "前面还有 {count} 行",
     "noOutput": "（无输出）",
     "timedOut": "已超时",
@@ -254,7 +256,13 @@
     },
     "sessions": {
       "title": "会话",
-      "search": "搜索会话"
+      "search": "搜索会话",
+      "filterLabel": "按创建者筛选",
+      "filterAll": "全部",
+      "filterUser": "用户创建",
+      "filterByCreator": "同创建者",
+      "filterByName": "由 {name} 创建",
+      "createdBy": "由 {name} 创建"
     },
     "mcp": {
       "title": "MCP 服务器",

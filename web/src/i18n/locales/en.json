@@ -15,7 +15,7 @@
     "placeholderQueue": "Type to queue a message…",
     "placeholderShell": "Run a shell command…",
     "interruptHint": "Press Esc again to interrupt",
-    "dropImages": "Drop images to attach",
+    "dropFiles": "Drop files to attach",
     "tags": {
       "agent": "Agent (Tab)",
       "model": "Model",
@@ -51,12 +51,14 @@
   },
   "tool": {
     "input": "Input",
+    "preview": "Preview",
     "allow": "Allow",
     "allowSession": "Allow for this session",
     "deny": "Deny",
     "output": "Output",
     "moreWaiting": "+{count} more waiting",
     "showMore": "Show {count} more lines",
+    "moreDiffRows": "+{count} more",
     "earlierLines": "{count} earlier lines",
     "noOutput": "(no output)",
     "timedOut": "timed out",
@@ -254,7 +256,13 @@
     },
     "sessions": {
       "title": "Sessions",
-      "search": "Search sessions"
+      "search": "Search sessions",
+      "filterLabel": "Filter by creator",
+      "filterAll": "All",
+      "filterUser": "User-created",
+      "filterByCreator": "By creator",
+      "filterByName": "By {name}",
+      "createdBy": "by {name}"
     },
     "mcp": {
       "title": "MCP servers",

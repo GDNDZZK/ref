@@ -22,6 +22,7 @@ function mountSidebar() {
     sessions: [
       info({ id: 's1', name: 'alpha' }),
       info({ id: 's2', name: 'beta', created_at: 2, attached: 0 }),
+      info({ id: 's3', name: 'gamma', created_at: 3, attached: 0 }),
     ],
   })
   const wrapper = mount(Sidebar, {
@@ -38,13 +39,16 @@ describe('Sidebar', () => {
     const { workspace, wrapper } = mountSidebar()
     workspace.currentId = 's1'
     workspace.mode = 'split'
-    workspace.tileFocusId = 's1'
     await nextTick()
-    expect(marked(wrapper)).toEqual(['alpha'])
+    expect(marked(wrapper)).toEqual([])
 
     workspace.focusTile('s2')
     await nextTick()
     expect(marked(wrapper)).toEqual(['beta'])
+
+    workspace.focusTile('s3')
+    await nextTick()
+    expect(marked(wrapper)).toEqual(['gamma'])
   })
 
   describe('Todo section', () => {
@@ -92,10 +96,6 @@ describe('Sidebar', () => {
         sessions: sessions(todos('completed', 'in_progress'), todos('pending', 'pending', 'pending')),
       })
       workspace.mode = 'split'
-      workspace.tileFocusId = 's1'
-      await nextTick()
-      expect(wrapper.get('.todo-section .heading').text()).toBe('Todo 1/2')
-
       workspace.focusTile('s2')
       await nextTick()
       expect(wrapper.get('.todo-section .heading').text()).toBe('Todo 0/3')

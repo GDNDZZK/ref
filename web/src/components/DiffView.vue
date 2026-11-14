@@ -6,16 +6,20 @@ import { parseDiff } from '../model/toolContent.ts'
 import CopyArea from './CopyArea.vue'
 import { PREVIEW_LINES } from './toolLimits.ts'
 
-const props = defineProps<{ diff: string }>()
+const props = defineProps<{ diff: string; maxRows?: number }>()
 
 const { t } = useI18n()
 const showAll = ref(false)
 const rows = computed(() => parseDiff(props.diff))
-const shown = computed(() => (showAll.value ? rows.value : rows.value.slice(0, PREVIEW_LINES)))
+const limit = computed(() => props.maxRows ?? PREVIEW_LINES)
+const shown = computed(() =>
+  showAll.value && props.maxRows === undefined ? rows.value : rows.value.slice(0, limit.value),
+)
+const hidden = computed(() => rows.value.length - shown.value.length)
 </script>
 
 <template>
-  <CopyArea :text="diff">
+  <div v-if="maxRows !== undefined">
     <div class="scroll">
       <div class="rows">
         <div v-for="(row, index) in shown" :key="index" class="row" :class="row.kind">
@@ -24,8 +28,19 @@ const shown = computed(() => (showAll.value ? rows.value : rows.value.slice(0, P
         </div>
       </div>
     </div>
-    <button v-if="shown.length < rows.length" type="button" class="more" @click="showAll = true">
-      {{ t('tool.showMore', { count: rows.length - shown.length }) }}
+    <div v-if="hidden > 0" class="more-note">{{ t('tool.moreDiffRows', { count: hidden }) }}</div>
+  </div>
+  <CopyArea v-else :text="diff">
+    <div class="scroll">
+      <div class="rows">
+        <div v-for="(row, index) in shown" :key="index" class="row" :class="row.kind">
+          <span class="sign">{{ row.sign }}</span>
+          <span class="text">{{ row.text }}</span>
+        </div>
+      </div>
+    </div>
+    <button v-if="hidden > 0" type="button" class="more" @click="showAll = true">
+      {{ t('tool.showMore', { count: hidden }) }}
     </button>
   </CopyArea>
 </template>
@@ -75,5 +90,11 @@ const shown = computed(() => (showAll.value ? rows.value : rows.value.slice(0, P
   margin-top: 4px;
   color: var(--accent-text);
   font-size: var(--small-font-size);
+}
+
+.more-note {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font: var(--small-font-size) var(--font-mono);
 }
 </style>

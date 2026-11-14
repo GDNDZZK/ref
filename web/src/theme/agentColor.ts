@@ -37,11 +37,19 @@ export function agentColor(spec: string, index: number): string {
 
 const HASH_MULTIPLIER = 31
 
+function hashString(value: string): number {
+  return [...value].reduce((hash, char) => (hash * HASH_MULTIPLIER + char.charCodeAt(0)) >>> 0, 0)
+}
+
+// A palette entry from the agent palette hashed deterministically from any string key (e.g. root session id).
+export function paletteColorFor(key: string): string {
+  return `var(--agent-palette-${hashString(key) % agentPalette.length})`
+}
+
 // Position in the agent list, or a hash of the name for an agent the list does not have.
 function paletteIndex(agents: readonly { name: string }[], name: string): number {
   const position = agents.findIndex((agent) => agent.name === name)
-  if (position >= 0) return position
-  return [...name].reduce((hash, char) => (hash * HASH_MULTIPLIER + char.charCodeAt(0)) >>> 0, 0)
+  return position >= 0 ? position : hashString(name)
 }
 
 // The color of the agent called `name`, given the server's agent list.
