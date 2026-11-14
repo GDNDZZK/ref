@@ -117,8 +117,7 @@ sleep 3600 | ref-server --mock      # prints {"port":N,"token":"..."} on stdout,
 
 ## The GUI
 
-`ref-gui` is in `gui/` (C++23, Qt Quick, CMake). It is built apart from the Rust workspace. You need a C++23 compiler (GCC 13, a current Clang or Visual Studio 2022), CMake 3.25 and Ninja. The libraries are installed by two scripts in `gui/scripts/` that CI runs too; the versions are pinned in `gui/scripts/versions.sh` (Qt 6.12.0 from the official binary packages through aqtinstall; extra-cmake-modules, KSyntaxHighlighting and QCoro built from source):
-
+`ref-gui` is in `gui/` (C++23, Qt Quick, CMake). It is built apart from the Rust workspace. You need a C++23 compiler (GCC 13, a current Clang or Visual Studio 2022), CMake 3.25 and Ninja. The libraries are installed by two scripts in `gui/scripts/` that CI runs too; the versions are pinned in `gui/scripts/versions.sh` (Qt 6.12.0 from the official binary packages through aqtinstall; extra-cmake-modules, KSyntaxHighlighting, QCoro, and on Linux the `fcitx5-qt` Qt 6 input context plugin built from source):
 ```bash
 export REF_DEPS_DIR=$HOME/ref-deps                 # default: gui/.deps
 gui/scripts/install-qt.sh
@@ -148,8 +147,7 @@ scripts/package.sh --version v0.2.1 --target x86_64-unknown-linux-gnu \
 
 `cmake --install` also removes the Qt Quick Controls styles other than Basic (`gui/cmake/PruneControlsStyles.cmake`): `ref-gui` sets the Basic style, and the scan for QML imports would otherwise deploy all five.
 
-- **Linux**: libraries go in `lib/` and the program has the run path `$ORIGIN/lib`; `qt.conf` points Qt to `plugins/` and `qml/`. `qwayland` is included explicitly alongside `libqxcb.so` (with its `wayland-*` helpers) so Qt picks native Wayland when `WAYLAND_DISPLAY` is set and falls back to `xcb`. Plugins that a desktop does not use (QML debugging, embedded displays) are left out.
-- **macOS**: `macdeployqt` builds `ref-gui.app`. `package.sh` renames it to `ref.app`, puts `ref-server` into `Contents/MacOS` and runs `scripts/sign-macos-app.sh`, which signs everything again, inner files first, with an ad-hoc signature (there is no developer certificate) and checks it with `codesign --verify --deep --strict`. The `all` archive links its `ref-server` to the one in the app.
+- **Linux**: libraries go in `lib/` and the program has the run path `$ORIGIN/lib`; `qt.conf` points Qt to `plugins/` and `qml/`. `qwayland` is included explicitly alongside `libqxcb.so` (with its `wayland-*` helpers) so Qt picks native Wayland when `WAYLAND_DISPLAY` is set and falls back to `xcb`, and the bundled `fcitx5-qt` plugin lets `QT_IM_MODULE=fcitx` work on both. Plugins that a desktop does not use (QML debugging, embedded displays) are left out.
 - **Windows**: `windeployqt` copies the DLLs and the Visual C++ runtime next to `ref-gui.exe`, without the software OpenGL fallback. The program uses the GUI subsystem (no console window) and has an icon and version resource.
 
 `scripts/verify-gui-package.sh DIR` checks an unpacked `ref-gui` archive and runs on the platform it was built for. CI runs it after packing. It checks that every library resolves without the build machine's environment, that the KSyntaxHighlighting module is there, that the only Controls style is Basic, and that `ref-gui --smoke --mock` opens a session (on Linux under `xvfb-run`). On Linux it also checks what the package asks of the system, and on macOS the signature and that nothing refers to a path outside the app. On Windows it checks that `ref-gui.exe` uses the GUI subsystem.
