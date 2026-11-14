@@ -136,18 +136,25 @@ pub fn home_dir() -> Option<PathBuf> {
 }
 
 /// Resolves a user path: expands `~`, joins relative paths to `cwd`, normalizes `.`/`..` lexically.
-pub fn resolve_path(cwd: &Path, raw: &str) -> PathBuf {
+pub fn resolve_path(cwd: &Path, raw: &str) -> Result<PathBuf> {
+    resolve_path_with(cwd, raw, home_dir)
+}
+
+fn resolve_path_with(
+    cwd: &Path,
+    raw: &str,
+    home: impl FnOnce() -> Option<PathBuf>,
+) -> Result<PathBuf> {
     let raw = raw.trim();
     let expanded: PathBuf = if raw == "~" {
-        home_dir().unwrap_or_else(|| PathBuf::from("~"))
+        home().ok_or_else(|| anyhow!("cannot expand `~`: no home directory"))?
     } else if let Some(rest) = raw
         .strip_prefix("~/")
         .or_else(|| raw.strip_prefix("~\\").filter(|_| cfg!(windows)))
     {
-        match home_dir() {
-            Some(h) => h.join(rest),
-            None => PathBuf::from(raw),
-        }
+        home()
+            .ok_or_else(|| anyhow!("cannot expand `~`: no home directory"))?
+            .join(rest)
     } else {
         PathBuf::from(raw)
     };
@@ -156,7 +163,7 @@ pub fn resolve_path(cwd: &Path, raw: &str) -> PathBuf {
     } else {
         cwd.join(expanded)
     };
-    normalize_lexical(&joined)
+    Ok(normalize_lexical(&joined))
 }
 
 /// Lexical normalization (no filesystem access).
@@ -513,22 +520,29 @@ mod tests {
     fn resolve_and_display() {
         let cwd = Path::new("/work/proj");
         assert_eq!(
-            resolve_path(cwd, "src/../a.rs"),
+            resolve_path(cwd, "src/../a.rs").unwrap(),
             PathBuf::from("/work/proj/a.rs")
         );
         assert_eq!(
-            resolve_path(cwd, "/etc/./hosts"),
+            resolve_path(cwd, "/etc/./hosts").unwrap(),
             PathBuf::from("/etc/hosts")
         );
-        assert_eq!(resolve_path(cwd, "../other"), PathBuf::from("/work/other"));
+        assert_eq!(
+            resolve_path(cwd, "../other").unwrap(),
+            PathBuf::from("/work/other")
+        );
         assert_eq!(
             display_path(cwd, Path::new("/work/proj/src/a.rs")),
             "src/a.rs"
         );
         assert_eq!(display_path(cwd, Path::new("/work/other")), "/work/other");
         if let Some(h) = home_dir() {
-            assert_eq!(resolve_path(cwd, "~/x"), h.join("x"));
+            assert_eq!(resolve_path(cwd, "~/x").unwrap(), h.join("x"));
         }
+        let err = resolve_path_with(cwd, "~", || None).unwrap_err();
+        assert!(err.to_string().contains("no home directory"), "{err}");
+        let err2 = resolve_path_with(cwd, "~/x", || None).unwrap_err();
+        assert!(err2.to_string().contains("no home directory"), "{err2}");
     }
 
     #[test]
