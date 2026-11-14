@@ -838,3 +838,93 @@ fn global_pattern_only_question_rule_disables_defaults() {
     assert_eq!(question_state(&c, "helper"), (true, Action::Deny));
     assert_eq!(question_state(&c, "explore"), (false, Action::Allow));
 }
+
+#[test]
+fn malformed_values_clamps_and_missing_home_emit_warnings() {
+    let fx = Fx::new();
+    fx.write_global_config(
+        r#"{
+            "skills": 123,
+            "disabled_providers": [1],
+            "delay": -1,
+            "compaction": {"recommend": 0, "threshold": -0.5},
+            "tools": {"bash": "nope"},
+            "provider": {
+                "p": {
+                    "options": "bad",
+                    "models": {
+                        "m": {
+                            "options": 5,
+                            "headers": {"x": [1]},
+                            "variants": {"v": 1},
+                            "limit": {"threshold": 0}
+                        }
+                    }
+                }
+            },
+            "agent": {"build": {"options": "bad"}},
+            "mcp": {"s": {"type": "local", "command": 123}}
+        }"#,
+    );
+    let c = fx.load();
+    for expected in [
+        "skills: expected",
+        "disabled_providers[0]: expected a string",
+        "delay: expected a non-negative",
+        "compaction.recommend: expected a positive",
+        "compaction.threshold: expected a positive",
+        "tools.bash: expected a boolean",
+        "provider.p.options: expected an object",
+        "provider.p.models.m.options: expected an object",
+        "provider.p.models.m.headers.x: expected",
+        "provider.p.models.m.variants.v: expected an object",
+        "provider.p.models.m.limit.threshold: expected a positive",
+        "agent.build.options: expected an object",
+        "mcp.s.command: expected",
+    ] {
+        assert!(
+            c.warnings.iter().any(|w| w.contains(expected)),
+            "missing {expected:?} in {:?}",
+            c.warnings
+        );
+    }
+    assert!(c.delay.is_empty());
+
+    // CORE-195: unexpandable ~ warns when home is None.
+    fx.write_global_config(r#"{"instructions": ["~/a.md"], "skills": ["~/sk"]}"#);
+    let env = |_: &str| None;
+    let c_no_home = load_with(
+        None,
+        &[fx.home().join(".config/opencode")],
+        &fx.proj(),
+        &env,
+    );
+    assert!(
+        c_no_home
+            .warnings
+            .iter()
+            .filter(|w| w.contains("no home directory"))
+            .count()
+            >= 2,
+        "{:?}",
+        c_no_home.warnings
+    );
+
+    // CORE-192: current_dir error warns when cwd is relative.
+    let mut ctx = crate::load::Ctx {
+        home: None,
+        env: &env,
+        warnings: Vec::new(),
+    };
+    let dirs = crate::load::project_dirs_with(&mut ctx, Path::new("rel"), None, || {
+        Err(std::io::Error::other("cwd gone"))
+    });
+    assert_eq!(dirs, vec![PathBuf::from("rel")]);
+    assert!(
+        ctx.warnings
+            .iter()
+            .any(|w| w.contains("cannot read current directory")),
+        "{:?}",
+        ctx.warnings
+    );
+}
