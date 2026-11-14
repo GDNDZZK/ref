@@ -83,7 +83,7 @@ const CHOICES = [
 }
 
 .path {
-  color: var(--info);
+  color: var(--info-text);
   font: var(--code-font-size) / 1.45 var(--font-mono);
   overflow-wrap: anywhere;
 }
@@ -96,7 +96,8 @@ const CHOICES = [
 }
 
 .choice {
-  --tone: var(--accent);
+  --tone: var(--accent); /* fills and the 50% border */
+  --tone-text: var(--accent-text); /* label, icon and key: legible on the light surface */
   display: flex;
   align-items: center;
   gap: 6px;
@@ -104,17 +105,19 @@ const CHOICES = [
   padding: 0 10px;
   border-radius: var(--radius-small);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 50%, transparent);
-  color: var(--tone);
+  color: var(--tone-text);
   font-size: var(--small-font-size);
   transition: background-color var(--motion-quick) var(--motion-ease);
 }
 
 .choice.success {
   --tone: var(--success);
+  --tone-text: var(--success-text);
 }
 
 .choice.danger {
   --tone: var(--danger);
+  --tone-text: var(--danger-text);
 }
 
 .choice:hover {
@@ -131,7 +134,7 @@ kbd {
   width: 18px;
   height: 18px;
   border-radius: 4px;
-  box-shadow: inset 0 0 0 1px var(--tone);
+  box-shadow: inset 0 0 0 1px var(--tone-text);
   font: 11px var(--font-mono);
 }
 

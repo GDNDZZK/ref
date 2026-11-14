@@ -9,7 +9,10 @@
 //! last report, reports at 21.3 s and the summary ends at 25.2 s. An earlier approval makes the
 //! fixer report earlier, so the order of the tester and the fixer is not fixed.
 
-use super::tools::{bash, parser_fix, plan_todos, read};
+use super::tools::{
+    TOOL_BASH, TOOL_CREATE_SESSION, TOOL_EDIT, TOOL_FIND, TOOL_GREP, TOOL_READ, TOOL_SEND_MESSAGE,
+    TOOL_TODO, bash, parser_fix, plan_todos, read,
+};
 use crate::mock::script::{Ctx, Pace, Round, Script, sender_name};
 use serde_json::{Value, json};
 
@@ -69,7 +72,7 @@ const TESTER_REPORT_PAUSE_MS: u64 = 1400;
 const TESTER_BASELINE_SECS: u32 = 3;
 const DOCS_REPORT_PAUSE_MS: u64 = 1150;
 
-pub const SCRIPTS: &[Script] = &[
+pub(super) const SCRIPTS: &[Script] = &[
     Script {
         name: "orchestrate",
         about: "A main session creates four helpers (scout, fixer, tester, docs) and a reviewer, and collects their reports",
@@ -130,7 +133,7 @@ fn create(ctx: &Ctx, n: usize, prefix: &str) -> Round {
     } else {
         round.pause(CREATE_PAUSE_MS)
     };
-    round.tool("create_session", &format!("Start {name}"), input)
+    round.tool(TOOL_CREATE_SESSION, &format!("Start {name}"), input)
 }
 
 fn orchestrate(ctx: &Ctx) -> Round {
@@ -142,7 +145,7 @@ pub(super) fn directing(ctx: &Ctx, prefix: &str) -> Round {
     match ctx.round {
         0 => Round::new()
             .text("The parser bug has four parts: find it, fix it, test it, update the docs. I'll hand them out.\n")
-            .tool("todo", "Plan the work", plan_todos(&MAIN_STEPS, 0)),
+            .tool(TOOL_TODO, "Plan the work", plan_todos(&MAIN_STEPS, 0)),
         r if r <= CREW.len() => create(ctx, r, prefix),
         _ => Round::new()
             .pause(WRAP_UP_PAUSE_MS)
@@ -163,7 +166,7 @@ fn reviewer_session(ctx: &Ctx) -> Value {
     json!({
         "name": REVIEWER.0,
         "agent": REVIEWER.1,
-        "prompt": format!("orch-review {}", ctx.session_id),
+        "prompt": format!("{SHORT_PREFIX}-review {}", ctx.session_id),
         "must_report": true,
     })
 }
@@ -182,19 +185,19 @@ pub(super) fn report(ctx: &Ctx) -> Round {
                 "Report {k} of {CREW_REPORTS} from {}.\n",
                 sender_name(&ctx.prompt)
             ))
-            .tool("todo", "Mark the job done", mark_done(k)),
+            .tool(TOOL_TODO, "Mark the job done", mark_done(k)),
         1..CREW_REPORTS => Round::new().text(STILL_WORKING[k - 1]),
         CREW_REPORTS if first_round => Round::new()
             .text("All four have reported. I'll have the change reviewed before I sign off.\n")
-            .tool("todo", "Mark the job done", mark_done(k))
+            .tool(TOOL_TODO, "Mark the job done", mark_done(k))
             .tool(
-                "create_session",
+                TOOL_CREATE_SESSION,
                 "Start the reviewer",
                 reviewer_session(ctx),
             ),
         CREW_REPORTS => Round::new().text("Waiting for the review."),
         _ if first_round => Round::new().pause(REVIEW_READ_PAUSE_MS).tool(
-            "todo",
+            TOOL_TODO,
             "Everything is done",
             mark_done(ALL_REPORTS),
         ),
@@ -230,14 +233,14 @@ fn scout(ctx: &Ctx) -> Round {
         0 => step(
             "Searching for the callers of parse_items.\n",
             SCOUT_THINK_MS,
-            "grep",
+            TOOL_GREP,
             "Find the users of parse_items",
             json!({"pattern": "parse_items", "context": 1}),
         ),
-        1 => step("Listing the Rust files.\n", SCOUT_THINK_MS, "find", "List the Rust files", json!({"pattern": "**/*.rs", "type": "file"})),
-        2 => step("Reading the parser.\n", SCOUT_THINK_MS, "read", "Read the parser", read("src/parser.rs")),
+        1 => step("Listing the Rust files.\n", SCOUT_THINK_MS, TOOL_FIND, "List the Rust files", json!({"pattern": "**/*.rs", "type": "file"})),
+        2 => step("Reading the parser.\n", SCOUT_THINK_MS, TOOL_READ, "Read the parser", read("src/parser.rs")),
         3 => Round::new().pause(SCOUT_REPORT_PAUSE_MS).tool(
-            "send_message",
+            TOOL_SEND_MESSAGE,
             "Report the findings",
             send_message(&ctx.args, "scout: parse_items has 3 callers; only src/parser.rs:20 loops past the end (`0..=items.len()`)."),
         ),
@@ -247,23 +250,23 @@ fn scout(ctx: &Ctx) -> Round {
 
 fn fixer(ctx: &Ctx) -> Round {
     match ctx.round {
-        0 => step("Reading the parser.\n", FIXER_THINK_MS, "read", "Read the parser", read("src/parser.rs")),
+        0 => step("Reading the parser.\n", FIXER_THINK_MS, TOOL_READ, "Read the parser", read("src/parser.rs")),
         1 => step(
             "The loop needs one fewer step. Editing it.\n",
             FIXER_EDIT_PAUSE_MS,
-            "edit",
+            TOOL_EDIT,
             "Fix the off-by-one in parse_items",
             parser_fix(&ctx.tool_results),
         ),
         2 => step(
             "Running the parser tests.\n",
             FIXER_TEST_PAUSE_MS,
-            "bash",
+            TOOL_BASH,
             "Run the parser tests",
             bash("echo \"cargo test parser: 12 passed\""),
         ),
         3 => Round::new().pause(FIXER_REPORT_PAUSE_MS).tool(
-            "send_message",
+            TOOL_SEND_MESSAGE,
             "Report the fix",
             send_message(&ctx.args, "fixer: replaced `0..=items.len()` with `0..items.len()` at src/parser.rs:20; cargo test parser passes."),
         ),
@@ -297,24 +300,24 @@ fn tester(ctx: &Ctx) -> Round {
     match ctx.round {
         0 => Round::new()
             .text("I'll record how the tests behave before the fix.\n")
-            .tool("todo", "Plan the test run", plan(0)),
+            .tool(TOOL_TODO, "Plan the test run", plan(0)),
         r @ (1 | 2) => {
             Round::new()
                 .pause(TESTER_STEP_PAUSE_MS)
-                .tool("todo", "Update the plan", plan(r))
+                .tool(TOOL_TODO, "Update the plan", plan(r))
         }
         3 => step(
             "Running the baseline.\n",
             TESTER_STEP_PAUSE_MS,
-            "bash",
+            TOOL_BASH,
             "Run the tests before the fix",
             bash(&baseline),
         ),
         4 => Round::new()
             .pause(TESTER_REPORT_PAUSE_MS)
-            .tool("todo", "Everything is done", plan(TESTER_STEPS.len()))
+            .tool(TOOL_TODO, "Everything is done", plan(TESTER_STEPS.len()))
             .tool(
-                "send_message",
+                TOOL_SEND_MESSAGE,
                 "Report the baseline",
                 send_message(&ctx.args, tester_report(ctx)),
             ),
@@ -327,26 +330,26 @@ fn docs(ctx: &Ctx) -> Round {
         0 => step(
             "Reading the README.\n",
             DOCS_THINK_MS,
-            "read",
+            TOOL_READ,
             "Read the README",
             read("README.md"),
         ),
         1 => step(
             "Checking where the function is documented.\n",
             DOCS_THINK_MS,
-            "grep",
+            TOOL_GREP,
             "Find the users of parse_items",
             json!({"pattern": "parse_items"}),
         ),
         2 => step(
             "Adding a changelog line.\n",
             DOCS_THINK_MS,
-            "bash",
+            TOOL_BASH,
             "Add the changelog line",
             bash("echo \"- Fix off-by-one in parse_items\" >> NOTES.txt"),
         ),
         3 => Round::new().pause(DOCS_REPORT_PAUSE_MS).tool(
-            "send_message",
+            TOOL_SEND_MESSAGE,
             "Report the docs",
             send_message(&ctx.args, "docs: added a changelog line to NOTES.txt."),
         ),
@@ -356,10 +359,10 @@ fn docs(ctx: &Ctx) -> Round {
 
 fn review(ctx: &Ctx) -> Round {
     match ctx.round {
-        0 => step("Looking at the diff.\n", REVIEW_THINK_MS, "bash", "Show the changed files", bash("echo \"src/parser.rs | 2 +-\"")),
-        1 => step("Reading the fixed code.\n", REVIEW_THINK_MS, "read", "Read the parser", read("src/parser.rs")),
+        0 => step("Looking at the diff.\n", REVIEW_THINK_MS, TOOL_BASH, "Show the changed files", bash("echo \"src/parser.rs | 2 +-\"")),
+        1 => step("Reading the fixed code.\n", REVIEW_THINK_MS, TOOL_READ, "Read the parser", read("src/parser.rs")),
         2 => Round::new().pause(REVIEW_REPORT_PAUSE_MS).tool(
-            "send_message",
+            TOOL_SEND_MESSAGE,
             "Report the review",
             send_message(&ctx.args, "reviewer: the change is minimal and correct; no other call site loops past the end."),
         ),
@@ -371,9 +374,14 @@ fn review(ctx: &Ctx) -> Round {
 mod tests {
     use super::*;
     use crate::mock::script::Step;
+    use crate::mock::scripts::tests::{play, reply_ctx};
 
     const MAIN: &str = "ses_main";
-    const ENVELOPE: &str = "[Message from session \"scout\" (id ses_s)]\nreport";
+
+    /// A report of the session `scout` as the main session receives it.
+    fn envelope() -> String {
+        format!("{}\nreport", crate::peers::peer_header("scout", "ses_s"))
+    }
 
     fn ctx(round: usize, reports: usize, prompt: &str) -> Ctx {
         Ctx {
@@ -387,17 +395,6 @@ mod tests {
             attempt: 1,
             tool_results: vec![],
         }
-    }
-
-    fn tools(round: &Round) -> Vec<(&'static str, Value)> {
-        round
-            .steps
-            .iter()
-            .filter_map(|s| match s {
-                Step::Tool(c) => Some((c.name, c.input.clone())),
-                _ => None,
-            })
-            .collect()
     }
 
     fn text(round: &Round) -> String {
@@ -424,14 +421,14 @@ mod tests {
     fn the_main_session_plans_then_creates_one_helper_per_round() {
         let plan = orchestrate(&ctx(0, 0, "orchestrate fix it"));
         assert!(text(&plan).starts_with("The parser bug has four parts"));
-        let todo = &tools(&plan)[0];
+        let todo = &plan.tool_calls()[0];
         assert_eq!(todo.0, "todo");
         assert_eq!(todo.1["todos"].as_array().unwrap().len(), 5);
         assert_eq!(statuses(&todo.1)[0], "in_progress");
 
         for (round, (name, agent)) in CREW.iter().enumerate() {
             let r = orchestrate(&ctx(round + 1, 0, "orchestrate fix it"));
-            let calls = tools(&r);
+            let calls = r.tool_calls();
             assert_eq!(calls.len(), 1);
             let (tool, input) = &calls[0];
             assert_eq!(*tool, "create_session");
@@ -442,7 +439,7 @@ mod tests {
             assert_eq!(text(&r), format!("Starting {name}.\n"));
         }
         let last = orchestrate(&ctx(5, 0, "orchestrate fix it"));
-        assert!(tools(&last).is_empty());
+        assert!(last.tool_calls().is_empty());
         assert!(text(&last).contains("Four helpers are working"));
     }
 
@@ -462,16 +459,16 @@ mod tests {
     #[test]
     fn each_of_the_first_three_reports_ticks_one_more_job() {
         for k in 1..CREW_REPORTS {
-            let first = report(&ctx(0, k, ENVELOPE));
+            let first = report(&ctx(0, k, &envelope()));
             assert_eq!(text(&first), format!("Report {k} of 4 from scout.\n"));
-            let todo = &tools(&first)[0];
+            let todo = &first.tool_calls()[0];
             let done = statuses(&todo.1)
                 .iter()
                 .filter(|s| **s == "completed")
                 .count();
             assert_eq!(done, k);
-            let closing = report(&ctx(1, k, ENVELOPE));
-            assert!(tools(&closing).is_empty());
+            let closing = report(&ctx(1, k, &envelope()));
+            assert!(closing.tool_calls().is_empty());
             assert!(
                 text(&closing).contains("still working"),
                 "{}",
@@ -482,9 +479,9 @@ mod tests {
 
     #[test]
     fn the_fourth_report_orders_the_review() {
-        let first = report(&ctx(0, 4, ENVELOPE));
+        let first = report(&ctx(0, 4, &envelope()));
         assert!(text(&first).starts_with("All four have reported"));
-        let calls = tools(&first);
+        let calls = first.tool_calls();
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].0, "todo");
         assert_eq!(
@@ -497,22 +494,25 @@ mod tests {
         assert_eq!(calls[1].0, "create_session");
         assert_eq!(calls[1].1["name"], "reviewer");
         assert_eq!(calls[1].1["agent"], "reviewer");
-        assert_eq!(calls[1].1["prompt"], format!("orch-review {MAIN}"));
         assert_eq!(
-            text(&report(&ctx(1, 4, ENVELOPE))),
+            calls[1].1["prompt"],
+            format!("{SHORT_PREFIX}-review {MAIN}")
+        );
+        assert_eq!(
+            text(&report(&ctx(1, 4, &envelope()))),
             "Waiting for the review."
         );
     }
 
     #[test]
     fn the_fifth_report_ends_with_the_summary() {
-        let todo = report(&ctx(0, 5, ENVELOPE));
+        let todo = report(&ctx(0, 5, &envelope()));
         assert!(
-            statuses(&tools(&todo)[0].1)
+            statuses(&todo.tool_calls()[0].1)
                 .iter()
                 .all(|s| *s == "completed")
         );
-        let summary = text(&report(&ctx(1, 5, ENVELOPE)));
+        let summary = text(&report(&ctx(1, 5, &envelope())));
         assert!(summary.starts_with("## Done"));
         assert_eq!(summary.lines().filter(|l| l.starts_with("- **")).count(), 5);
         assert!(summary.ends_with("The parser bug is fixed."));
@@ -526,7 +526,7 @@ mod tests {
         }
         for k in 1..=5 {
             for round in 0..2 {
-                spoken += &text(&report(&ctx(round, k, ENVELOPE)));
+                spoken += &text(&report(&ctx(round, k, &envelope())));
             }
         }
         for sentence in [
@@ -552,7 +552,7 @@ mod tests {
         for (play, report_round, expected) in workers {
             let mut sent = Vec::new();
             for round in 0..=report_round + 1 {
-                for (tool, input) in tools(&play(&ctx(round, 0, ""))) {
+                for (tool, input) in play(&ctx(round, 0, "")).tool_calls() {
                     if tool == "send_message" {
                         sent.push((round, input));
                     }
@@ -564,7 +564,7 @@ mod tests {
             assert!(sent[0].1["message"].as_str().unwrap().starts_with(expected));
             let after = play(&ctx(report_round + 1, 0, ""));
             assert_eq!(text(&after), "Reported.");
-            assert!(tools(&after).is_empty());
+            assert!(after.tool_calls().is_empty());
         }
     }
 
@@ -572,7 +572,11 @@ mod tests {
     fn tester_round(round: usize, typed: &[&str]) -> Round {
         use serde_json::json;
         let mut messages = vec![json!({"role": "user", "content":
-            format!("[Session created by \"main\" (id {MAIN})]\norch-tester {MAIN}\n[When you finish or get blocked, report]")})];
+        format!(
+            "{}\norch-tester {MAIN}\n{}, report]",
+            crate::peers::spawn_header("main", MAIN),
+            crate::peers::REPORT_REMINDER_PREFIX
+        )})];
         for i in 0..round {
             messages.push(json!({"role": "assistant", "content": "ok"}));
             messages.push(json!({"role": "tool", "tool_call_id": format!("c{i}"), "content": "r"}));
@@ -589,17 +593,15 @@ mod tests {
             }
         }
         let body = json!({"messages": messages, "tools": [{"type": "function"}]});
-        let crate::mock::script::Task::Reply(ctx) = crate::mock::script::analyze(&body, "ses_t", 1)
-        else {
-            panic!("not a reply");
-        };
+        let ctx = reply_ctx(&body, "ses_t");
         assert_eq!(ctx.round, round, "typed messages do not restart the rounds");
         assert_eq!(ctx.prompt, format!("orch-tester {MAIN}"));
-        (crate::mock::script::select(&ctx.prompt, &ctx.root_prompt).play)(&ctx)
+        play(&ctx)
     }
 
     fn report_of(round: &Round) -> String {
-        let (name, input) = tools(round)
+        let (name, input) = round
+            .tool_calls()
             .into_iter()
             .find(|(n, _)| *n == "send_message")
             .unwrap();
@@ -628,11 +630,8 @@ mod tests {
     fn a_typed_message_does_not_restart_or_switch_the_tester() {
         // Whenever it arrives, the script goes on with the same round.
         for round in 0..=5 {
-            let plain = format!("{:?}", tester_round(round, &[]).steps.len());
-            let typed = format!(
-                "{:?}",
-                tester_round(round, &["also cover empty input"]).steps.len()
-            );
+            let plain = tester_round(round, &[]).steps.len();
+            let typed = tester_round(round, &["also cover empty input"]).steps.len();
             assert_eq!(plain, typed, "round {round}");
         }
     }
@@ -643,7 +642,7 @@ mod tests {
         c.tool_results = vec![
             "[src/parser.rs#AB12]\n19:fn parse_items() {\n20:    for i in 0..=items.len() {".into(),
         ];
-        let edit = &tools(&fixer(&c))[0];
+        let edit = &fixer(&c).tool_calls()[0];
         assert_eq!(edit.0, "edit");
         assert_eq!(edit.1["tag"], "AB12");
         assert_eq!(edit.1["edits"][0]["start"], 20);
@@ -662,17 +661,13 @@ mod tests {
             messages.push(serde_json::json!({"role": "assistant", "content": "ok"}));
         }
         let body = serde_json::json!({"messages": messages, "tools": [{"type": "function"}]});
-        let crate::mock::script::Task::Reply(ctx) = crate::mock::script::analyze(&body, MAIN, 1)
-        else {
-            panic!("not a reply");
-        };
-        (crate::mock::script::select(&ctx.prompt, &ctx.root_prompt).play)(&ctx)
+        play(&reply_ctx(&body, MAIN))
     }
 
     #[test]
     fn running_orchestrate_again_in_the_same_conversation_starts_over() {
         let mut users: Vec<String> = vec!["orchestrate first run".into()];
-        users.extend((0..ALL_REPORTS).map(|_| ENVELOPE.to_string()));
+        users.extend((0..ALL_REPORTS).map(|_| envelope()));
         users.push("orchestrate second run".into());
 
         // The plan comes first again, not the summary.
@@ -680,23 +675,23 @@ mod tests {
         assert!(text(&plan).starts_with("The parser bug has four parts"));
 
         for k in 1..=CREW_REPORTS {
-            users.push(ENVELOPE.into());
+            users.push(envelope());
             let round = answer(&users, 0);
             if k < CREW_REPORTS {
                 assert!(text(&round).starts_with(&format!("Report {k} of 4")), "{k}");
                 continue;
             }
-            let calls = tools(&round);
+            let calls = round.tool_calls();
             assert_eq!(
                 calls.last().unwrap().1["name"],
                 "reviewer",
                 "reviewer again"
             );
         }
-        users.push(ENVELOPE.into());
+        users.push(envelope());
         let todo = answer(&users, 0);
         assert!(
-            statuses(&tools(&todo)[0].1)
+            statuses(&todo.tool_calls()[0].1)
                 .iter()
                 .all(|s| *s == "completed")
         );

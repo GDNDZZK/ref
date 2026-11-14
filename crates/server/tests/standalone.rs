@@ -1,6 +1,8 @@
 //! A backend that stays up (`--idle-timeout -1`) outlives its windows, and the windows that
 //! share a session see each other's prompts at once. Over real WebSocket connections.
 
+mod common;
+
 use futures_util::{SinkExt, StreamExt};
 use ref_proto::{ClientFrame, Part, Request, Role, ServerFrame, SessionEvent, SessionStatus};
 use ref_server::mock::Mock;
@@ -13,11 +15,12 @@ type Ws =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 const TOKEN: &str = "token";
-const KEEP_RUNNING: i64 = ref_server::hub::IDLE_NEVER;
+const KEEP_RUNNING: i64 = ref_proto::IDLE_NEVER;
 /// A prompt typed in one window must show up in the others within this time.
 const MIRROR_LIMIT: Duration = Duration::from_secs(1);
 const WAIT: Duration = Duration::from_secs(30);
-const POLL: Duration = Duration::from_millis(50);
+/// Working directory the clients report; the mock replaces it with its own workspace.
+const CWD: &str = "/anywhere";
 
 struct Client {
     ws: Ws,
@@ -37,7 +40,7 @@ async fn connect(mock: &Mock) -> Client {
     let hello = Request::Hello {
         client: "test".into(),
         version: ref_proto::PROTOCOL_VERSION,
-        cwd: "/anywhere".into(),
+        cwd: CWD.into(),
         token: Some(TOKEN.into()),
         notify: Vec::new(),
     };
@@ -114,7 +117,7 @@ impl Client {
 
     async fn open_session(&mut self, name: &str) -> String {
         let create = Request::CreateSession {
-            cwd: "/anywhere".into(),
+            cwd: CWD.into(),
             agent: None,
             model: None,
             name: Some(name.into()),
@@ -238,21 +241,15 @@ async fn wait_on_server(
     what: &str,
     done: impl Fn(&Session) -> bool,
 ) {
-    let start = Instant::now();
-    loop {
-        let found = mock
-            .running
+    let found = || {
+        mock.running
             .hub
             .sessions()
             .into_iter()
             .find(|s| s.id == session_id)
-            .is_some_and(|s| done(&s));
-        if found {
-            return;
-        }
-        assert!(start.elapsed() < WAIT, "{what}");
-        tokio::time::sleep(POLL).await;
-    }
+            .is_some_and(|s| done(&s))
+    };
+    common::wait_until(what, WAIT, found).await;
 }
 
 /// Whether a tool of the session has `line` in its live output.

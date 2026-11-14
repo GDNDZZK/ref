@@ -2,23 +2,21 @@ mod common;
 
 use common::*;
 use ref_proto::{MessageSource, Part, Request, Role, SessionEvent, SessionStatus, ToolState};
+use ref_server::session::PermReply;
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
 
-const T: Duration = Duration::from_secs(10);
-
 #[tokio::test]
 async fn basic_turn_and_persistence() {
-    let m = mock(Arc::new(|_, _| Reply::Text("Hello there".into()))).await;
-    let (hub, work) = hub(config(&m.url), "basic");
-    let s = session(&hub, &work, "main", "build").await;
+    let (m, hub, _, s) =
+        run_turn(Arc::new(|_, _| Reply::Text("Hello there".into())), "basic").await;
     prompt(&hub, &s, "hi");
     wait_idle(&s).await;
     assert_eq!(last_text(&s), "Hello there");
     let msgs = messages(&s);
     assert_eq!(msgs.len(), 2);
-    assert_eq!(msgs[1].usage.unwrap().input, 1000);
+    assert_eq!(msgs[1].usage.unwrap().input, MOCK_PROMPT_TOKENS);
     assert!(s.info().context.used > 0);
     // Tools sent with purpose first, in fixed order.
     let body = &m.bodies()[0];
@@ -37,32 +35,32 @@ async fn basic_turn_and_persistence() {
     let p = hub.store.load(&s.id).unwrap();
     assert_eq!(p.messages.len(), 2);
     // Title generated asynchronously.
-    let s2 = s.clone();
-    wait_until("title", T, move || s2.info().title == "Mock title").await;
+    wait_session(&s, "title", |s| s.info().title == "Mock title").await;
 }
 
 #[tokio::test]
 async fn tool_loop_errors_do_not_terminate_and_replay_is_stable() {
-    let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Tools(vec![
-            tool(
-                "c1",
-                "read",
-                json!({"purpose": "Read missing file", "path": "nope.txt"}),
-            ),
-            tool("c2", "no_such_tool", json!({"purpose": "x"})),
-            ("c3".into(), "bash".into(), "{not json".into()),
-            tool(
-                "c4",
-                "bash",
-                json!({"purpose": "Say hi", "command": "echo hi"}),
-            ),
-        ]),
-        _ => Reply::Text("done".into()),
-    }))
+    let (m, hub, _, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 => Reply::Tools(vec![
+                tool(
+                    "c1",
+                    "read",
+                    json!({"purpose": "Read missing file", "path": "nope.txt"}),
+                ),
+                tool("c2", "no_such_tool", json!({"purpose": "x"})),
+                ("c3".into(), "bash".into(), "{not json".into()),
+                tool(
+                    "c4",
+                    "bash",
+                    json!({"purpose": "Say hi", "command": "echo hi"}),
+                ),
+            ]),
+            _ => Reply::Text("done".into()),
+        }),
+        "toolloop",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "toolloop");
-    let s = session(&hub, &work, "main", "build").await;
     prompt(&hub, &s, "go");
     wait_idle(&s).await;
     assert_eq!(last_text(&s), "done");
@@ -147,11 +145,10 @@ async fn permission_ask_then_reply_and_deny() {
     let mut cfg = config(&m.url);
     cfg.permission = perms(json!({"bash": "ask", "delete": {"*": "deny", "keep": "allow"}}));
     let (hub, work) = hub(cfg, "perm");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "go");
     // First ask: allow once.
-    let s2 = s.clone();
-    wait_until("permission 1", T, move || s2.lock().perms.len() == 1).await;
+    wait_session(&s, "permission 1", |s| s.lock().perms.len() == 1).await;
     {
         let st = s.lock();
         assert_eq!(st.info.status, SessionStatus::WaitingPermission);
@@ -159,18 +156,25 @@ async fn permission_ask_then_reply_and_deny() {
         assert_eq!(st.perms[0].request.purpose, "p1");
     }
     let tx = s.lock().perms[0].tx.take().unwrap();
-    tx.send((true, false)).unwrap();
+    tx.send(PermReply {
+        allow: true,
+        always: false,
+    })
+    .unwrap();
     // Second ask: deny.
-    let s2 = s.clone();
-    wait_until("permission 2", T, move || {
-        s2.lock()
+    wait_session(&s, "permission 2", |s| {
+        s.lock()
             .perms
             .first()
             .is_some_and(|p| p.request.call_id == "c2" && p.tx.is_some())
     })
     .await;
     let tx = s.lock().perms[0].tx.take().unwrap();
-    tx.send((false, false)).unwrap();
+    tx.send(PermReply {
+        allow: false,
+        always: false,
+    })
+    .unwrap();
     wait_idle(&s).await;
     let tools = tool_parts(&s);
     let st: Vec<(ToolState, String)> = tools
@@ -206,12 +210,15 @@ async fn permission_always_allows_rest_of_session() {
     let mut cfg = config(&m.url);
     cfg.permission = perms(json!({"bash": "ask"}));
     let (hub, work) = hub(cfg, "always");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "go");
-    let s2 = s.clone();
-    wait_until("permission", T, move || s2.lock().perms.len() == 1).await;
+    wait_session(&s, "permission", |s| s.lock().perms.len() == 1).await;
     let tx = s.lock().perms[0].tx.take().unwrap();
-    tx.send((true, true)).unwrap();
+    tx.send(PermReply {
+        allow: true,
+        always: true,
+    })
+    .unwrap();
     wait_idle(&s).await;
     assert!(tool_parts(&s).iter().all(|p| matches!(
         p,
@@ -221,6 +228,9 @@ async fn permission_always_allows_rest_of_session() {
         }
     )));
 }
+
+/// Agent-specific delay (seconds) for the bash tool.
+const DELAY: f64 = 0.4;
 
 #[tokio::test]
 async fn agent_permission_overrides_global_and_delay_applies() {
@@ -235,16 +245,15 @@ async fn agent_permission_overrides_global_and_delay_applies() {
     .await;
     let mut cfg = config(&m.url);
     cfg.permission = perms(json!({"bash": "deny"}));
-    cfg.agents.get_mut("build").unwrap().permission = perms(json!({"bash": "allow"}));
+    cfg.agents.get_mut(BUILD).unwrap().permission = perms(json!({"bash": "allow"}));
     cfg.delay = vec![("bash".into(), 5.0)];
-    cfg.agents.get_mut("build").unwrap().delay = vec![("bash".into(), 0.4)];
+    cfg.agents.get_mut(BUILD).unwrap().delay = vec![("bash".into(), DELAY)];
     let (hub, work) = hub(cfg, "delay");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     let start = std::time::Instant::now();
     prompt(&hub, &s, "go");
-    let s2 = s.clone();
-    wait_until("delayed state", T, move || {
-        tool_parts(&s2).iter().any(|p| {
+    wait_session(&s, "delayed state", |s| {
+        tool_parts(s).iter().any(|p| {
             matches!(
                 p,
                 Part::Tool {
@@ -259,7 +268,7 @@ async fn agent_permission_overrides_global_and_delay_applies() {
     wait_idle(&s).await;
     let el = start.elapsed();
     assert!(
-        el >= Duration::from_millis(400) && el < Duration::from_secs(4),
+        el >= Duration::from_secs_f64(DELAY) && el < Duration::from_secs(4),
         "{el:?}"
     );
     assert!(matches!(
@@ -286,11 +295,10 @@ async fn an_allowed_tool_no_longer_shows_waiting_for_permission_during_its_delay
     cfg.permission = perms(json!({"bash": "ask"}));
     cfg.delay = vec![("bash".into(), 1.5)];
     let (hub, work) = hub(cfg, "ask-delay");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "go");
-    let s2 = s.clone();
-    wait_until("waiting", T, move || {
-        s2.info().status == SessionStatus::WaitingPermission
+    wait_session(&s, "waiting", |s| {
+        s.info().status == SessionStatus::WaitingPermission
     })
     .await;
     let call_id = s.lock().perms[0].request.call_id.clone();
@@ -301,22 +309,10 @@ async fn an_allowed_tool_no_longer_shows_waiting_for_permission_during_its_delay
         allow: true,
         always: false,
     };
-    ref_server::api::handle(&hub, &conn, reply).await.unwrap();
+    call(&hub, &conn, reply).await;
 
     // The countdown runs, and the session is no longer waiting for the user.
-    let s3 = s.clone();
-    wait_until("delayed", T, move || {
-        tool_parts(&s3).iter().any(|p| {
-            matches!(
-                p,
-                Part::Tool {
-                    state: ToolState::Delayed,
-                    ..
-                }
-            )
-        })
-    })
-    .await;
+    wait_tool_state(&s, ToolState::Delayed).await;
     assert_ne!(s.info().status, SessionStatus::WaitingPermission);
     assert!(
         hub.infos()
@@ -341,21 +337,9 @@ async fn abort_during_delay_and_stream() {
     let mut cfg = config(&m.url);
     cfg.delay = vec![("bash".into(), 30.0)];
     let (hub, work) = hub(cfg, "abort");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "go");
-    let s2 = s.clone();
-    wait_until("delayed", T, move || {
-        tool_parts(&s2).iter().any(|p| {
-            matches!(
-                p,
-                Part::Tool {
-                    state: ToolState::Delayed,
-                    ..
-                }
-            )
-        })
-    })
-    .await;
+    wait_tool_state(&s, ToolState::Delayed).await;
     ref_server::engine::abort(&hub, &s, true);
     wait_idle(&s).await;
     let tools = tool_parts(&s);
@@ -368,8 +352,7 @@ async fn abort_during_delay_and_stream() {
 
     // Next prompt: the cancelled tool still has a result; then abort mid-stream.
     prompt(&hub, &s, "again");
-    let s2 = s.clone();
-    wait_until("partial text", T, move || last_text(&s2) == "partial").await;
+    wait_session(&s, "partial text", |s| last_text(s) == "partial").await;
     ref_server::engine::abort(&hub, &s, true);
     wait_idle(&s).await;
     let bodies = m.bodies();
@@ -382,13 +365,14 @@ async fn abort_during_delay_and_stream() {
 
 #[tokio::test]
 async fn retry_on_500_then_success() {
-    let m = mock(Arc::new(|n, _| match n {
-        0 | 1 => Reply::Status(500, r#"{"error":{"message":"internal"}}"#.into()),
-        _ => Reply::Text("recovered".into()),
-    }))
+    let (m, hub, _, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 | 1 => Reply::Status(500, r#"{"error":{"message":"internal"}}"#.into()),
+            _ => Reply::Text("recovered".into()),
+        }),
+        "retry",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "retry");
-    let s = session(&hub, &work, "main", "build").await;
     prompt(&hub, &s, "go");
     wait_idle(&s).await;
     assert_eq!(last_text(&s), "recovered");
@@ -399,12 +383,11 @@ async fn retry_on_500_then_success() {
 
 #[tokio::test]
 async fn non_retryable_error_fails_after_three_attempts() {
-    let m = mock(Arc::new(|_, _| {
-        Reply::Status(400, r#"{"error":{"message":"bad request"}}"#.into())
-    }))
+    let (m, hub, _, s) = run_turn(
+        Arc::new(|_, _| Reply::Status(400, r#"{"error":{"message":"bad request"}}"#.into())),
+        "fail",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "fail");
-    let s = session(&hub, &work, "main", "build").await;
     prompt(&hub, &s, "go");
     wait_idle(&s).await;
     assert_eq!(m.count(), 3);
@@ -445,17 +428,18 @@ fn non_system(body: &serde_json::Value) -> Vec<serde_json::Value> {
 
 #[tokio::test]
 async fn compact_context_tool_keeps_history_but_sends_summary_only() {
-    let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Tools(vec![tool(
-            "c1",
-            "compact_context",
-            json!({"purpose": "p", "summary": "The user wants X. Done Y."}),
-        )]),
-        _ => Reply::Text("continuing".into()),
-    }))
+    let (m, hub, _, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 => Reply::Tools(vec![tool(
+                "c1",
+                "compact_context",
+                json!({"purpose": "p", "summary": "The user wants X. Done Y."}),
+            )]),
+            _ => Reply::Text("continuing".into()),
+        }),
+        "compact",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "compact");
-    let s = session(&hub, &work, "main", "build").await;
     prompt(&hub, &s, "start");
     wait_idle(&s).await;
     let msgs = messages(&s);
@@ -488,14 +472,15 @@ async fn compact_context_tool_keeps_history_but_sends_summary_only() {
 
 #[tokio::test]
 async fn manual_compaction_uses_model_summary_and_undo_restores_context() {
-    let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Text("first answer".into()),
-        1 => Reply::Text("## Goal\n- summary text".into()),
-        _ => Reply::Text("later".into()),
-    }))
+    let (m, hub, _, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 => Reply::Text("first answer".into()),
+            1 => Reply::Text("## Goal\n- summary text".into()),
+            _ => Reply::Text("later".into()),
+        }),
+        "manualcompact",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "manualcompact");
-    let s = session(&hub, &work, "main", "build").await;
     prompt(&hub, &s, "q");
     wait_idle(&s).await;
     ref_server::engine::start_custom_run(&hub, &s, ref_server::compaction::manual).unwrap();
@@ -515,7 +500,10 @@ async fn manual_compaction_uses_model_summary_and_undo_restores_context() {
     // Context usage estimated from the new effective context (system + tools + summary),
     // not the last reported usage.
     let used = s.info().context.used;
-    assert!(used > 0 && used != 1020, "{used}");
+    assert!(
+        used > 0 && used != MOCK_PROMPT_TOKENS + MOCK_COMPLETION_TOKENS,
+        "{used}"
+    );
     // Compacting again without new assistant output is refused.
     ref_server::engine::start_custom_run(&hub, &s, ref_server::compaction::manual).unwrap();
     wait_idle(&s).await;
@@ -532,19 +520,9 @@ async fn manual_compaction_uses_model_summary_and_undo_restores_context() {
     );
 
     // Undo from the compaction message: the old context becomes effective again.
-    let conn = hub.add_conn();
-    conn.lock().hello = true;
+    let conn = hello_conn(&hub);
     let cid = msgs[2].id.clone();
-    ref_server::api::handle(
-        &hub,
-        &conn,
-        ref_proto::Request::Undo {
-            session_id: s.id.clone(),
-            message_id: Some(cid),
-        },
-    )
-    .await
-    .unwrap();
+    call(&hub, &conn, undo_request(&s, Some(cid))).await;
     assert_eq!(messages(&s).len(), 2);
     prompt(&hub, &s, "again");
     wait_idle(&s).await;
@@ -586,7 +564,7 @@ async fn compaction_agent_prompt_and_model_from_config() {
         },
     );
     let (hub, work) = hub(cfg, "compactagent");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "q");
     wait_idle(&s).await;
     ref_server::engine::start_custom_run(&hub, &s, ref_server::compaction::manual).unwrap();
@@ -600,11 +578,8 @@ async fn compaction_agent_prompt_and_model_from_config() {
     assert_eq!(tail[2]["content"], ref_server::compaction::SUMMARY_REQUEST);
     assert!(messages(&s)[2].raw_text().contains("custom summary"));
     // Hidden agents are not offered to frontends and cannot run sessions.
-    let conn = hub.add_conn();
-    conn.lock().hello = true;
-    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::GetConfig)
-        .await
-        .unwrap();
+    let conn = hello_conn(&hub);
+    let r = call(&hub, &conn, ref_proto::Request::GetConfig).await;
     let names: Vec<&str> = r["config"]["agents"]
         .as_array()
         .unwrap()
@@ -645,7 +620,7 @@ async fn recommend_compaction_notice_once_per_epoch() {
     let mut cfg = config(&m.url);
     cfg.compaction.recommend = 1000.0;
     let (hub, work) = hub(cfg, "notice");
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "go");
     wait_idle(&s).await;
     // Injected after the tool batch, before the next request of the same run.
@@ -653,7 +628,11 @@ async fn recommend_compaction_notice_once_per_epoch() {
     assert_eq!(msgs.len(), 4, "{msgs:#?}");
     assert_eq!(msgs[2].source, MessageSource::Reminder);
     let text = msgs[2].raw_text();
-    assert!(text.starts_with("[Context notice] This conversation has used 1020 of 10000 tokens (10%), past the recommended compaction point (1000 tokens)."), "{text}");
+    let expected = format!(
+        "[Context notice] This conversation has used {} of {MOCK_CONTEXT} tokens (10%), past the recommended compaction point (1000 tokens).",
+        MOCK_PROMPT_TOKENS + MOCK_COMPLETION_TOKENS
+    );
+    assert!(text.starts_with(&expected), "{text}");
     let b1 = non_system(&m.bodies()[1]);
     assert_eq!(b1[b1.len() - 2]["role"], "tool");
     assert_eq!(b1[b1.len() - 1]["role"], "user");
@@ -704,37 +683,37 @@ async fn mcp_status_request() {
         },
     );
     let (hub, _work) = hub(cfg, "mcpstatus");
-    let conn = hub.add_conn();
-    conn.lock().hello = true;
-    let r = ref_server::api::handle(
+    let conn = hello_conn(&hub);
+    let r = call(
         &hub,
         &conn,
         ref_proto::Request::McpStatus {
             cwd: Some("/".into()),
         },
     )
-    .await
-    .unwrap();
+    .await;
     assert_eq!(
         r["servers"],
-        json!([{"name": "off", "status": "disabled", "error": null, "tools": []}])
+        json!([{"name": "off", "status": ref_proto::MCP_DISABLED, "error": null, "tools": []}])
     );
-    let r = ref_server::api::handle(&hub, &conn, ref_proto::Request::GetConfig)
-        .await
-        .unwrap();
-    assert_eq!(r["config"]["mcp"], json!([["off", "disabled"]]));
+    let r = call(&hub, &conn, ref_proto::Request::GetConfig).await;
+    assert_eq!(
+        r["config"]["mcp"],
+        json!([["off", ref_proto::MCP_DISABLED]])
+    );
 }
 
 #[tokio::test]
 async fn context_window_tool() {
-    let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Text("a".into()),
-        1 => Reply::Tools(vec![tool("c1", "context_window", json!({"purpose": "p"}))]),
-        _ => Reply::Text("b".into()),
-    }))
+    let (_m, hub, _, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 => Reply::Text("a".into()),
+            1 => Reply::Tools(vec![tool("c1", "context_window", json!({"purpose": "p"}))]),
+            _ => Reply::Text("b".into()),
+        }),
+        "ctx",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "ctx");
-    let s = session(&hub, &work, "main", "build").await;
     prompt(&hub, &s, "1");
     wait_idle(&s).await;
     prompt(&hub, &s, "2");
@@ -745,10 +724,11 @@ async fn context_window_tool() {
         } => o.clone(),
         _ => panic!(),
     };
-    assert!(
-        out.contains("Context window for \"main\": used 1020 tokens of 10000 (10%)"),
-        "{out}"
+    let expected = format!(
+        "Context window for \"main\": used {} tokens of {MOCK_CONTEXT} (10%)",
+        MOCK_PROMPT_TOKENS + MOCK_COMPLETION_TOKENS
     );
+    assert!(out.contains(&expected), "{out}");
     assert!(out.contains("Recommended compaction at 6000"), "{out}");
 }
 
@@ -779,12 +759,11 @@ async fn peer_send_message_between_sessions() {
     }))
     .await;
     let (hub, work) = hub(config(&m.url), "peers");
-    let alice = session(&hub, &work, "alice", "build").await;
-    let bob = session(&hub, &work, "ボブ", "build").await;
+    let alice = session(&hub, &work, "alice", BUILD).await;
+    let bob = session(&hub, &work, "ボブ", BUILD).await;
     prompt(&hub, &alice, "ping bob");
     wait_idle(&alice).await;
-    let b2 = bob.clone();
-    wait_until("bob replied", T, move || last_text(&b2) == "bob got it").await;
+    wait_session(&bob, "bob replied", |s| last_text(s) == "bob got it").await;
     wait_idle(&bob).await;
     let bm = messages(&bob);
     assert!(matches!(&bm[0].source, MessageSource::Peer { from_name, .. } if from_name == "alice"));
@@ -901,31 +880,20 @@ async fn peer_send_message_between_sessions() {
 
 #[tokio::test]
 async fn queued_message_delivered_after_current_step() {
-    let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Tools(vec![tool(
-            "c1",
-            "bash",
-            json!({"purpose": "p", "command": "sleep 0.5"}),
-        )]),
-        _ => Reply::Text("ok".into()),
-    }))
+    let (m, hub, _, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 => Reply::Tools(vec![tool(
+                "c1",
+                "bash",
+                json!({"purpose": "p", "command": "sleep 0.5"}),
+            )]),
+            _ => Reply::Text("ok".into()),
+        }),
+        "queue",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "queue");
-    let s = session(&hub, &work, "main", "build").await;
     prompt(&hub, &s, "first");
-    let s2 = s.clone();
-    wait_until("running", T, move || {
-        tool_parts(&s2).iter().any(|p| {
-            matches!(
-                p,
-                Part::Tool {
-                    state: ToolState::Running,
-                    ..
-                }
-            )
-        })
-    })
-    .await;
+    wait_tool_state(&s, ToolState::Running).await;
     prompt(&hub, &s, "second while busy");
     assert_eq!(s.lock().queue.len(), 1);
     wait_idle(&s).await;
@@ -939,45 +907,29 @@ async fn queued_message_delivered_after_current_step() {
 
 #[tokio::test]
 async fn remove_queued_message_before_delivery() {
-    let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Tools(vec![tool(
-            "c1",
-            "bash",
-            json!({"purpose": "p", "command": "sleep 0.5"}),
-        )]),
-        _ => Reply::Text("ok".into()),
-    }))
+    let (m, hub, _, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 => Reply::Tools(vec![tool(
+                "c1",
+                "bash",
+                json!({"purpose": "p", "command": "sleep 0.5"}),
+            )]),
+            _ => Reply::Text("ok".into()),
+        }),
+        "unqueue",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "unqueue");
-    let s = session(&hub, &work, "main", "build").await;
-    let conn = hub.add_conn();
-    conn.lock().hello = true;
+    let conn = hello_conn(&hub);
     let req = |text: &str| ref_proto::Request::Prompt {
         session_id: s.id.clone(),
         text: text.into(),
         images: vec![],
     };
-    let r = ref_server::api::handle(&hub, &conn, req("first"))
-        .await
-        .unwrap();
+    let r = call(&hub, &conn, req("first")).await;
     assert_eq!(r["queued"], false);
     assert!(r["message_id"].as_str().is_some_and(|id| !id.is_empty()));
-    let s2 = s.clone();
-    wait_until("running", T, move || {
-        tool_parts(&s2).iter().any(|p| {
-            matches!(
-                p,
-                Part::Tool {
-                    state: ToolState::Running,
-                    ..
-                }
-            )
-        })
-    })
-    .await;
-    let r = ref_server::api::handle(&hub, &conn, req("withdrawn while busy"))
-        .await
-        .unwrap();
+    wait_tool_state(&s, ToolState::Running).await;
+    let r = call(&hub, &conn, req("withdrawn while busy")).await;
     assert_eq!(r["queued"], true);
     let id = r["message_id"].as_str().unwrap().to_string();
     assert_eq!(
@@ -999,22 +951,18 @@ async fn remove_queued_message_before_delivery() {
         foreground: false,
         limit: None,
     };
-    let snap = ref_server::api::handle(&hub, &conn, attach.clone())
-        .await
-        .unwrap();
+    let snap = call(&hub, &conn, attach.clone()).await;
     assert_eq!(snap["snapshot"]["queued"][0]["id"], id.as_str());
     let remove = |id: &str| ref_proto::Request::RemoveQueued {
         session_id: s.id.clone(),
         message_id: id.into(),
     };
-    let r = ref_server::api::handle(&hub, &conn, remove(&id))
-        .await
-        .unwrap();
+    let r = call(&hub, &conn, remove(&id)).await;
     assert_eq!(r["removed"], true);
     assert_eq!(r["text"], "withdrawn while busy");
     assert_eq!(r["images"], json!([]));
     assert!(s.lock().queue.is_empty());
-    let snap = ref_server::api::handle(&hub, &conn, attach).await.unwrap();
+    let snap = call(&hub, &conn, attach).await;
     assert_eq!(snap["snapshot"]["queued"], json!([]));
     // Not persisted either (saves include the queue).
     assert!(!s.persisted().messages.iter().any(|m| m.id == id));
@@ -1027,9 +975,7 @@ async fn remove_queued_message_before_delivery() {
             .any(|m| m.id == id)
     );
     // Removing again: nothing left to remove.
-    let r = ref_server::api::handle(&hub, &conn, remove(&id))
-        .await
-        .unwrap();
+    let r = call(&hub, &conn, remove(&id)).await;
     assert_eq!(r["removed"], false);
     wait_idle(&s).await;
     // The run finishes its tool step and never sends the withdrawn prompt.
@@ -1056,34 +1002,22 @@ async fn remove_queued_message_before_delivery() {
 
 #[tokio::test]
 async fn remove_queued_after_delivery_removes_nothing() {
-    let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Tools(vec![tool(
-            "c1",
-            "bash",
-            json!({"purpose": "p", "command": "sleep 0.3"}),
-        )]),
-        _ => Reply::Text("ok".into()),
-    }))
+    let (m, hub, _, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 => Reply::Tools(vec![tool(
+                "c1",
+                "bash",
+                json!({"purpose": "p", "command": "sleep 0.3"}),
+            )]),
+            _ => Reply::Text("ok".into()),
+        }),
+        "unqueue-late",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "unqueue-late");
-    let s = session(&hub, &work, "main", "build").await;
-    let conn = hub.add_conn();
-    conn.lock().hello = true;
+    let conn = hello_conn(&hub);
     prompt(&hub, &s, "first");
-    let s2 = s.clone();
-    wait_until("running", T, move || {
-        tool_parts(&s2).iter().any(|p| {
-            matches!(
-                p,
-                Part::Tool {
-                    state: ToolState::Running,
-                    ..
-                }
-            )
-        })
-    })
-    .await;
-    let r = ref_server::api::handle(
+    wait_tool_state(&s, ToolState::Running).await;
+    let r = call(
         &hub,
         &conn,
         ref_proto::Request::Prompt {
@@ -1092,14 +1026,13 @@ async fn remove_queued_after_delivery_removes_nothing() {
             images: vec![],
         },
     )
-    .await
-    .unwrap();
+    .await;
     assert_eq!(r["queued"], true);
     let id = r["message_id"].as_str().unwrap().to_string();
     wait_idle(&s).await;
     // Delivered at the safe point after the tool step.
     assert!(messages(&s).iter().any(|m| m.id == id));
-    let r = ref_server::api::handle(
+    let r = call(
         &hub,
         &conn,
         ref_proto::Request::RemoveQueued {
@@ -1107,8 +1040,7 @@ async fn remove_queued_after_delivery_removes_nothing() {
             message_id: id.clone(),
         },
     )
-    .await
-    .unwrap();
+    .await;
     assert_eq!(r["removed"], false);
     // The delivered message stays in the conversation.
     assert_eq!(messages(&s).iter().filter(|m| m.id == id).count(), 1);
@@ -1128,27 +1060,24 @@ async fn remove_queued_after_delivery_removes_nothing() {
 
 #[tokio::test]
 async fn busy_since_is_the_run_start_and_cleared_when_idle() {
-    let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Tools(vec![tool(
-            "c1",
-            "bash",
-            json!({"purpose": "p", "command": "sleep 0.3"}),
-        )]),
-        _ => Reply::Text("ok".into()),
-    }))
+    let (_m, hub, _, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 => Reply::Tools(vec![tool(
+                "c1",
+                "bash",
+                json!({"purpose": "p", "command": "sleep 0.3"}),
+            )]),
+            _ => Reply::Text("ok".into()),
+        }),
+        "busy-since",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "busy-since");
-    let s = session(&hub, &work, "main", "build").await;
     assert_eq!(s.info().busy_since, None);
     let before = ref_proto::now_ms();
     prompt(&hub, &s, "first");
     let started = s.info().busy_since.expect("set when the run starts");
     assert!(started >= before && started <= ref_proto::now_ms());
-    let s2 = s.clone();
-    wait_until("running", T, move || {
-        s2.info().status == SessionStatus::Running
-    })
-    .await;
+    wait_session(&s, "running", |s| s.info().status == SessionStatus::Running).await;
     // Kept across status changes within the run; visible in the live list; never persisted.
     assert_eq!(s.info().busy_since, Some(started));
     assert!(
@@ -1163,21 +1092,18 @@ async fn busy_since_is_the_run_start_and_cleared_when_idle() {
 
 #[tokio::test]
 async fn manual_compaction_never_shows_busy_since_while_idle() {
-    let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Text("answer".into()),
-        _ => Reply::Text("## Goal\n- summary".into()),
-    }))
+    let (_m, hub, _, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 => Reply::Text("answer".into()),
+            _ => Reply::Text("## Goal\n- summary".into()),
+        }),
+        "compact-busy",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "compact-busy");
-    let s = session(&hub, &work, "main", "build").await;
     prompt(&hub, &s, "q");
     wait_idle(&s).await;
-    let conn = hub.add_conn();
-    {
-        let mut c = conn.lock();
-        c.hello = true;
-        c.fg.insert(s.id.clone());
-    }
+    let conn = hello_conn(&hub);
+    conn.lock().fg.insert(s.id.clone());
     conn.out.drain();
 
     ref_server::engine::start_custom_run(&hub, &s, ref_server::compaction::manual).unwrap();
@@ -1234,20 +1160,19 @@ async fn create_session_must_report_and_close_rules() {
     }))
     .await;
     let (hub, work) = hub(config(&m.url), "spawn");
-    let parent = session(&hub, &work, "boss", "build").await;
+    let parent = session(&hub, &work, "boss", BUILD).await;
     prompt(&hub, &parent, "spawn a worker");
     wait_idle(&parent).await;
     let h2 = hub.clone();
-    wait_until("child exists", T, move || h2.sessions().len() == 2).await;
+    wait_until("child exists", TIMEOUT, move || h2.sessions().len() == 2).await;
     let child = hub
         .sessions()
         .into_iter()
         .find(|x| x.id != parent.id)
         .unwrap();
     // Child runs, stops without reporting, gets a reminder, then reports.
-    let p2 = parent.clone();
-    wait_until("parent got report", T, move || {
-        messages(&p2)
+    wait_session(&parent, "parent got report", |s| {
+        messages(s)
             .iter()
             .any(|m| m.raw_text().contains("result: 42"))
     })
@@ -1262,7 +1187,7 @@ async fn create_session_must_report_and_close_rules() {
         let info = child.info();
         assert_eq!(info.parent.as_deref(), Some(parent.id.as_str()));
         assert!(info.must_report);
-        assert_eq!(info.agent, "worker");
+        assert_eq!(info.agent, WORKER);
         assert!(child.lock().reported);
     }
     // Worker agent can't spawn: no spawn tools sent for it.
@@ -1328,7 +1253,7 @@ async fn create_session_must_report_and_close_rules() {
         &hub,
         &parent,
         "create_session",
-        &json!({"name": "boss", "agent": "worker", "prompt": "x", "must_report": false}),
+        &json!({"name": "boss", "agent": WORKER, "prompt": "x", "must_report": false}),
     )
     .await;
     assert!(r.text.contains("\"boss-2\""), "{}", r.text);
@@ -1344,15 +1269,9 @@ async fn create_session_must_report_and_close_rules() {
 
 #[tokio::test]
 async fn events_reach_attached_connection() {
-    let m = mock(Arc::new(|_, _| Reply::Text("streamed".into()))).await;
-    let (hub, work) = hub(config(&m.url), "events");
-    let s = session(&hub, &work, "main", "build").await;
-    let conn = hub.add_conn();
-    {
-        let mut c = conn.lock();
-        c.hello = true;
-        c.fg.insert(s.id.clone());
-    }
+    let (_m, hub, _, s) = run_turn(Arc::new(|_, _| Reply::Text("streamed".into())), "events").await;
+    let conn = hello_conn(&hub);
+    conn.lock().fg.insert(s.id.clone());
     prompt(&hub, &s, "hi");
     wait_idle(&s).await;
     let frames = conn.out.drain();
@@ -1376,9 +1295,7 @@ async fn events_reach_attached_connection() {
 
 #[tokio::test]
 async fn load_from_history_marks_unfinished_tools_cancelled() {
-    let m = mock(Arc::new(|_, _| Reply::Text("x".into()))).await;
-    let (hub, work) = hub(config(&m.url), "history");
-    let s = session(&hub, &work, "main", "build").await;
+    let (_m, hub, _, s) = run_turn(Arc::new(|_, _| Reply::Text("x".into())), "history").await;
     prompt(&hub, &s, "hi");
     wait_idle(&s).await;
     {
@@ -1440,7 +1357,7 @@ async fn auto_compaction_with(tag: &str, configure: impl FnOnce(&mut ref_config:
     let mut cfg = config(&m.url);
     configure(&mut cfg);
     let (hub, work) = hub(cfg, tag);
-    let s = session(&hub, &work, "main", "build").await;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
     prompt(&hub, &s, "one");
     wait_idle(&s).await;
     assert_eq!(s.info().context.auto, 500);
@@ -1471,78 +1388,50 @@ async fn auto_compaction_with(tag: &str, configure: impl FnOnce(&mut ref_config:
 
 #[tokio::test]
 async fn undo_last_prompt_or_from_given_message() {
-    let m = mock(Arc::new(|_, _| Reply::Text("reply".into()))).await;
-    let (hub, work) = hub(config(&m.url), "undo");
-    let s = session(&hub, &work, "main", "build").await;
+    let (_m, hub, _, s) = run_turn(Arc::new(|_, _| Reply::Text("reply".into())), "undo").await;
     for p in ["one", "two", "three"] {
         prompt(&hub, &s, p);
         wait_idle(&s).await;
     }
     assert_eq!(messages(&s).len(), 6);
-    let conn = hub.add_conn();
-    conn.lock().hello = true;
+    let conn = hello_conn(&hub);
     // Default: the last human prompt and everything after it.
-    let r = ref_server::api::handle(
-        &hub,
-        &conn,
-        ref_proto::Request::Undo {
-            session_id: s.id.clone(),
-            message_id: None,
-        },
-    )
-    .await
-    .unwrap();
+    let r = call(&hub, &conn, undo_request(&s, None)).await;
     assert_eq!(r["text"], "three");
     assert_eq!(messages(&s).len(), 4);
     // From a specific message: removes it and everything after.
     let first = messages(&s)[0].id.clone();
-    let r = ref_server::api::handle(
-        &hub,
-        &conn,
-        ref_proto::Request::Undo {
-            session_id: s.id.clone(),
-            message_id: Some(first.clone()),
-        },
-    )
-    .await
-    .unwrap();
+    let r = call(&hub, &conn, undo_request(&s, Some(first.clone()))).await;
     assert_eq!(r["text"], "one");
     assert!(messages(&s).is_empty());
     assert!(hub.store.load(&s.id).unwrap().messages.is_empty());
-    let e = ref_server::api::handle(
-        &hub,
-        &conn,
-        ref_proto::Request::Undo {
-            session_id: s.id.clone(),
-            message_id: Some(first),
-        },
-    )
-    .await;
+    let e = ref_server::api::handle(&hub, &conn, undo_request(&s, Some(first))).await;
     assert!(e.is_err());
 }
 
 #[tokio::test]
 async fn todo_tool_replaces_list_and_validates() {
-    let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Tools(vec![tool(
-            "t1",
-            "todo",
-            json!({"purpose": "p", "todos": [
-                {"content": "Read code", "status": "completed"},
-                {"content": "Fix bug", "status": "in_progress"},
-                {"content": "Run tests", "status": "pending"}
-            ]}),
-        )]),
-        1 => Reply::Tools(vec![tool(
-            "t2",
-            "todo",
-            json!({"purpose": "p", "todos": [{"content": "x", "status": "bogus"}]}),
-        )]),
-        _ => Reply::Text("done".into()),
-    }))
+    let (_m, hub, _, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 => Reply::Tools(vec![tool(
+                "t1",
+                "todo",
+                json!({"purpose": "p", "todos": [
+                    {"content": "Read code", "status": "completed"},
+                    {"content": "Fix bug", "status": "in_progress"},
+                    {"content": "Run tests", "status": "pending"}
+                ]}),
+            )]),
+            1 => Reply::Tools(vec![tool(
+                "t2",
+                "todo",
+                json!({"purpose": "p", "todos": [{"content": "x", "status": "bogus"}]}),
+            )]),
+            _ => Reply::Text("done".into()),
+        }),
+        "todo",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "todo");
-    let s = session(&hub, &work, "main", "build").await;
     prompt(&hub, &s, "go");
     wait_idle(&s).await;
     let todos = s.info().todos;
@@ -1587,9 +1476,8 @@ async fn set_cwd_switches_directory_and_tells_the_model() {
     .await;
     let (hub, work) = hub(config(&m.url), "cwd");
     std::fs::create_dir_all(work.join("sub dir")).unwrap();
-    let s = session(&hub, &work, "main", "build").await;
-    let conn = hub.add_conn();
-    conn.lock().hello = true;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
+    let conn = hello_conn(&hub);
     let set = |path: &str| ref_proto::Request::SetCwd {
         session_id: s.id.clone(),
         path: path.into(),
@@ -1598,8 +1486,7 @@ async fn set_cwd_switches_directory_and_tells_the_model() {
 
     // Busy: rejected, nothing changes.
     prompt(&hub, &s, "go");
-    let s2 = s.clone();
-    wait_until("partial text", T, move || last_text(&s2) == "thinking").await;
+    wait_session(&s, "partial text", |s| last_text(s) == "thinking").await;
     let e = ref_server::api::handle(&hub, &conn, set("sub dir"))
         .await
         .unwrap_err();
@@ -1610,9 +1497,7 @@ async fn set_cwd_switches_directory_and_tells_the_model() {
     let calls = m.count();
 
     // Relative to the current directory; a reminder is appended without an LLM turn.
-    let r = ref_server::api::handle(&hub, &conn, set("sub dir"))
-        .await
-        .unwrap();
+    let r = call(&hub, &conn, set("sub dir")).await;
     let new = dunce::canonicalize(work.join("sub dir"))
         .unwrap()
         .to_string_lossy()
@@ -1633,9 +1518,7 @@ async fn set_cwd_switches_directory_and_tells_the_model() {
 
     // Same directory again: no second reminder. Missing directory: error.
     let n = messages(&s).len();
-    ref_server::api::handle(&hub, &conn, set("."))
-        .await
-        .unwrap();
+    call(&hub, &conn, set(".")).await;
     assert_eq!(messages(&s).len(), n);
     let e = ref_server::api::handle(&hub, &conn, set("missing"))
         .await
@@ -1671,23 +1554,19 @@ async fn set_cwd_switches_directory_and_tells_the_model() {
 
 #[tokio::test]
 async fn queue_changes_reach_attached_connection() {
-    let m = mock(Arc::new(|n, _| match n {
-        0 => Reply::Hang("working".into()),
-        _ => Reply::Text("done".into()),
-    }))
+    let (_m, hub, work, s) = run_turn(
+        Arc::new(|n, _| match n {
+            0 => Reply::Hang("working".into()),
+            _ => Reply::Text("done".into()),
+        }),
+        "queue-ev",
+    )
     .await;
-    let (hub, work) = hub(config(&m.url), "queue-ev");
-    let s = session(&hub, &work, "main", "build").await;
     let peer = session(&hub, &work, "worker", "build").await;
-    let conn = hub.add_conn();
-    {
-        let mut c = conn.lock();
-        c.hello = true;
-        c.fg.insert(s.id.clone());
-    }
+    let conn = hello_conn(&hub);
+    conn.lock().fg.insert(s.id.clone());
     prompt(&hub, &s, "go");
-    let s2 = s.clone();
-    wait_until("streaming", T, move || last_text(&s2) == "working").await;
+    wait_session(&s, "streaming", |s| last_text(s) == "working").await;
     let queues = |conn: &Arc<ref_server::hub::Conn>| -> Vec<Vec<(String, MessageSource)>> {
         conn.out
             .drain()
@@ -1720,17 +1599,7 @@ async fn queue_changes_reach_attached_connection() {
     );
     assert_eq!(q[1][1], ("and me".to_string(), MessageSource::Human));
     // The snapshot lists every source too.
-    let r = ref_server::api::handle(
-        &hub,
-        &conn,
-        ref_proto::Request::Attach {
-            session_id: s.id.clone(),
-            foreground: true,
-            limit: None,
-        },
-    )
-    .await
-    .unwrap();
+    let r = call(&hub, &conn, attach_request(&s, None)).await;
     assert_eq!(r["snapshot"]["queued"].as_array().unwrap().len(), 2);
     // Abort: the queue is delivered at the end of the run and announced as empty.
     let _ = conn.out.drain();
@@ -1763,13 +1632,9 @@ async fn frontends_get_image_stubs_and_undo_returns_the_bytes() {
     let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
     png.extend_from_slice(b"tool screenshot bytes");
     std::fs::write(work.join("shot.png"), &png).unwrap();
-    let s = session(&hub, &work, "main", "build").await;
-    let conn = hub.add_conn();
-    {
-        let mut c = conn.lock();
-        c.hello = true;
-        c.fg.insert(s.id.clone());
-    }
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
+    let conn = hello_conn(&hub);
+    conn.lock().fg.insert(s.id.clone());
     let pasted = ref_proto::ImageData {
         mime: "image/png".into(),
         data: "UGFzdGVkSW1hZ2VCeXRlcw==".into(),
@@ -1780,7 +1645,7 @@ async fn frontends_get_image_stubs_and_undo_returns_the_bytes() {
         text: "look [Image 1]".into(),
         images: vec![pasted.clone()],
     };
-    ref_server::api::handle(&hub, &conn, req).await.unwrap();
+    call(&hub, &conn, req).await;
     wait_idle(&s).await;
     // The session keeps the bytes (the model gets them) ...
     let tool_img = tool_parts(&s)
@@ -1802,17 +1667,7 @@ async fn frontends_get_image_stubs_and_undo_returns_the_bytes() {
     let events = serde_json::to_string(&conn.out.drain()).unwrap();
     assert!(events.contains("image/png"), "image stubs are still sent");
     assert!(!events.contains(&pasted.data) && !events.contains(&tool_img.data));
-    let snap = ref_server::api::handle(
-        &hub,
-        &conn,
-        ref_proto::Request::Attach {
-            session_id: s.id.clone(),
-            foreground: true,
-            limit: None,
-        },
-    )
-    .await
-    .unwrap();
+    let snap = call(&hub, &conn, attach_request(&s, None)).await;
     // Stubs carry an id (and the decoded size); GetImage returns the bytes.
     let msgs: Vec<ref_proto::Message> =
         serde_json::from_value(snap["snapshot"]["messages"].clone()).unwrap();
@@ -1834,9 +1689,7 @@ async fn frontends_get_image_stubs_and_undo_returns_the_bytes() {
         image_id: id.into(),
     };
     for (stub, data) in stubs.iter().zip([&pasted.data, &tool_img.data]) {
-        let r = ref_server::api::handle(&hub, &conn, get(stub.id.as_deref().unwrap()))
-            .await
-            .unwrap();
+        let r = call(&hub, &conn, get(stub.id.as_deref().unwrap())).await;
         assert_eq!(r["image"]["data"], data.as_str());
         assert_eq!(r["image"]["mime"], "image/png");
     }
@@ -1868,21 +1721,9 @@ async fn frontends_get_image_stubs_and_undo_returns_the_bytes() {
     // Session closed: the image is read from the store.
     ref_server::ops::close_session(&hub, &s).await;
     assert!(hub.session(&s.id).is_none());
-    let r = ref_server::api::handle(&hub, &conn, get(stubs[1].id.as_deref().unwrap()))
-        .await
-        .unwrap();
+    let r = call(&hub, &conn, get(stubs[1].id.as_deref().unwrap())).await;
     assert_eq!(r["image"]["data"], tool_img.data.as_str());
-    let r = ref_server::api::handle(
-        &hub,
-        &conn,
-        ref_proto::Request::Attach {
-            session_id: s.id.clone(),
-            foreground: true,
-            limit: None,
-        },
-    )
-    .await
-    .unwrap();
+    let r = call(&hub, &conn, attach_request(&s, None)).await;
     assert_eq!(r["snapshot"]["info"]["id"], s.id.as_str());
     let s = hub.session(&s.id).expect("live again");
     // A stub sent back as a prompt image is rejected.
@@ -1903,16 +1744,7 @@ async fn frontends_get_image_stubs_and_undo_returns_the_bytes() {
     .await;
     assert!(e.is_err());
     // Undo returns the prompt with its image bytes.
-    let r = ref_server::api::handle(
-        &hub,
-        &conn,
-        ref_proto::Request::Undo {
-            session_id: s.id.clone(),
-            message_id: None,
-        },
-    )
-    .await
-    .unwrap();
+    let r = call(&hub, &conn, undo_request(&s, None)).await;
     assert_eq!(r["text"], "look [Image 1]");
     assert_eq!(
         r["images"],
@@ -1922,11 +1754,8 @@ async fn frontends_get_image_stubs_and_undo_returns_the_bytes() {
 
 #[tokio::test]
 async fn history_is_served_in_pages() {
-    let m = mock(Arc::new(|_, _| Reply::Text("ok".into()))).await;
-    let (hub, work) = hub(config(&m.url), "pages");
-    let s = session(&hub, &work, "main", "build").await;
-    let conn = hub.add_conn();
-    conn.lock().hello = true;
+    let (_m, hub, _, s) = run_turn(Arc::new(|_, _| Reply::Text("ok".into())), "pages").await;
+    let conn = hello_conn(&hub);
     {
         let mut st = s.lock();
         for i in 0..250 {
@@ -1941,15 +1770,9 @@ async fn history_is_served_in_pages() {
         let msgs: Vec<ref_proto::Message> = serde_json::from_value(v.clone()).unwrap();
         msgs.iter().map(|m| m.raw_text()).collect()
     };
-    let attach = |limit| ref_proto::Request::Attach {
-        session_id: s.id.clone(),
-        foreground: true,
-        limit,
-    };
+    let attach = |limit| attach_request(&s, limit);
     // Newest page first (default 100).
-    let r = ref_server::api::handle(&hub, &conn, attach(None))
-        .await
-        .unwrap();
+    let r = call(&hub, &conn, attach(None)).await;
     let page = texts(&r["snapshot"]["messages"]);
     assert_eq!(
         (page.len(), page[0].as_str(), page[99].as_str()),
@@ -1963,28 +1786,23 @@ async fn history_is_served_in_pages() {
         before,
         limit,
     };
-    let r2 = ref_server::api::handle(
+    let r2 = call(
         &hub,
         &conn,
         older(first_id(&r["snapshot"]["messages"]), None),
     )
-    .await
-    .unwrap();
+    .await;
     let page = texts(&r2["messages"]);
     assert_eq!(
         (page.len(), page[0].as_str(), page[99].as_str()),
         (100, "p50", "p149")
     );
     assert_eq!(r2["more_before"], true);
-    let r3 = ref_server::api::handle(&hub, &conn, older(first_id(&r2["messages"]), Some(500)))
-        .await
-        .unwrap();
+    let r3 = call(&hub, &conn, older(first_id(&r2["messages"]), Some(500))).await;
     assert_eq!(texts(&r3["messages"]).len(), 50);
     assert_eq!(r3["more_before"], false);
     // Limits are clamped; unknown anchors are errors.
-    let r = ref_server::api::handle(&hub, &conn, attach(Some(0)))
-        .await
-        .unwrap();
+    let r = call(&hub, &conn, attach(Some(0))).await;
     assert_eq!(texts(&r["snapshot"]["messages"]), ["p249"]);
     assert!(
         ref_server::api::handle(&hub, &conn, older("nope".into(), None))
@@ -2002,23 +1820,12 @@ async fn history_is_served_in_pages() {
             ));
         }
     }
-    let r = ref_server::api::handle(&hub, &conn, attach(None))
-        .await
-        .unwrap();
+    let r = call(&hub, &conn, attach(None)).await;
     let n = r["snapshot"]["messages"].as_array().unwrap().len();
     assert!((5..=7).contains(&n), "{n}");
     // Reset events (undo) carry the newest page only.
     let _ = conn.out.drain();
-    ref_server::api::handle(
-        &hub,
-        &conn,
-        ref_proto::Request::Undo {
-            session_id: s.id.clone(),
-            message_id: None,
-        },
-    )
-    .await
-    .unwrap();
+    call(&hub, &conn, undo_request(&s, None)).await;
     let reset = conn.out.drain().into_iter().find_map(|f| match f {
         ref_proto::ServerFrame::Event {
             event:
@@ -2051,9 +1858,8 @@ async fn stated_image_limit_is_learned_and_the_request_resent() {
         .unwrap()
         .images = true;
     let (hub, work) = hub(cfg, "image-limit");
-    let s = session(&hub, &work, "main", "build").await;
-    let conn = hub.add_conn();
-    conn.lock().hello = true;
+    let s = session(&hub, &work, MAIN_SESSION, BUILD).await;
+    let conn = hello_conn(&hub);
     let mut png = Vec::new();
     let img = image::RgbImage::from_fn(1200, 300, |x, y| {
         image::Rgb([(x % 256) as u8, (y % 256) as u8, 7])
@@ -2070,7 +1876,7 @@ async fn stated_image_limit_is_learned_and_the_request_resent() {
         text: "look".into(),
         images: vec![pasted.clone()],
     };
-    ref_server::api::handle(&hub, &conn, req).await.unwrap();
+    call(&hub, &conn, req).await;
     wait_idle(&s).await;
     assert_eq!(last_text(&s), "seen");
     // Resent at once (no backoff, not counted as a failure) with the image fit to 1000px.

@@ -1,4 +1,4 @@
-//! Access control and process behavior of ref-web as a whole: token file, Host and cookie
+//! Access control and process behavior of ref-web as a whole: token file, `--key`, Host
 //! handling on the wire, and stopping on SIGTERM.
 
 mod common;
@@ -10,7 +10,7 @@ use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 const NO_BACKEND: &str = "ws://127.0.0.1:1/";
 const TOKEN_FILE: &str = "web/login-token";
 const VALID_TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-/// Long enough for a ref-web that accepts its arguments to print its login URL.
+/// Long enough for a ref-web that accepts its arguments to print its address.
 const PORT_ZERO_SETTLE: std::time::Duration = std::time::Duration::from_millis(1500);
 /// How long the half-written token stays unfinished in the race test.
 const HALF_WRITTEN_FOR: std::time::Duration = std::time::Duration::from_millis(300);
@@ -42,7 +42,7 @@ async fn the_token_file_is_owner_only_even_when_it_existed_with_wider_rights() {
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
     let web = old.start(&["--server", NO_BACKEND]).await;
     assert_eq!(mode_of(&path), 0o600);
-    assert_eq!(web.token, VALID_TOKEN, "the token itself is kept");
+    assert_eq!(web.key, VALID_TOKEN, "the token itself is kept");
 }
 
 #[tokio::test]
@@ -65,7 +65,7 @@ async fn a_token_file_that_is_being_written_is_waited_for() {
         std::fs::write(&path, VALID_TOKEN).unwrap();
     };
     let (web, ()) = tokio::join!(env.start(&["--server", NO_BACKEND]), finish);
-    assert_eq!(web.token, VALID_TOKEN);
+    assert_eq!(web.key, VALID_TOKEN);
 }
 
 /// Sends raw bytes and returns what the server answers until it closes the connection.
@@ -86,7 +86,7 @@ async fn raw_request(port: u16, request: &str) -> String {
 async fn a_request_without_host_is_refused() {
     let env = Env::new("no-host");
     let web = env.start(&["--server", NO_BACKEND]).await;
-    // The ping route needs no login, so only the Host check can refuse this.
+    // The ping route is open, so only the Host check can refuse this.
     let answer = raw_request(web.port, "GET /api/ping?nonce=00 HTTP/1.0\r\n\r\n").await;
     assert!(
         answer.starts_with("HTTP/1.") && answer.contains(" 403 "),
@@ -99,28 +99,60 @@ async fn a_request_without_host_is_refused() {
     assert!(raw_request(web.port, &with_host).await.contains(" 200 "));
 }
 
+const SPOKEN_KEY: &str = "a key typed on the command line";
+
 #[tokio::test]
-async fn any_matching_cookie_logs_in_when_the_name_is_repeated() {
-    let env = Env::new("cookies");
-    let web = env.start(&["--server", NO_BACKEND]).await;
-    let name = web.cookie_name().to_string();
-    let wrong = format!("{name}=wrong");
-    let status = |cookies: Vec<String>| {
-        let web = &web;
-        async move {
-            let mut request = web.http.get(web.url("/api/info"));
-            for line in cookies {
-                request = request.header("cookie", line);
-            }
-            request.send().await.unwrap().status().as_u16()
+async fn a_key_from_the_command_line_is_used_and_never_written() {
+    let env = Env::new("own-key");
+    let upstream = fake_upstream().await;
+    let server = format!("ws://{LOOPBACK}:{}/", upstream.port);
+    let web = env.start(&["--server", &server, "--key", SPOKEN_KEY]).await;
+    assert_eq!(web.key, SPOKEN_KEY);
+    web.channel().await;
+    let wrong = Channel::sign_in(web.ws().await, "not the key at all, no").await;
+    assert_eq!(wrong.err().map(|(code, _)| code), Some(4401));
+
+    let web_dir = env.state_dir().join("web");
+    assert!(
+        !web_dir.join("login-token").exists(),
+        "the token file is not created"
+    );
+    assert!(web_dir.join("salt").exists());
+    for entry in std::fs::read_dir(&web_dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_file() {
+            let text = std::fs::read(&path).unwrap();
+            let leaked = text
+                .windows(SPOKEN_KEY.len())
+                .any(|w| w == SPOKEN_KEY.as_bytes());
+            assert!(!leaked, "{} holds the key", path.display());
         }
-    };
-    let both_in_one_line = format!("{wrong}; {}", web.cookie());
-    assert_eq!(status(vec![both_in_one_line]).await, 200);
-    assert_eq!(status(vec![wrong.clone(), web.cookie()]).await, 200);
-    assert_eq!(status(vec![web.cookie(), wrong.clone()]).await, 200);
-    assert_eq!(status(vec![wrong.clone(), wrong.clone()]).await, 401);
-    assert_eq!(status(vec![format!("{wrong}; {wrong}")]).await, 401);
+    }
+    #[cfg(unix)]
+    assert_eq!(mode_of(&web_dir.join("salt")), 0o600);
+}
+
+#[tokio::test]
+async fn a_short_key_is_refused_from_the_option_and_from_the_environment() {
+    let env = Env::new("short-key");
+    let output = env.run(&["--no-open", "--server", NO_BACKEND, "--key", "too short"]);
+    assert!(!output.status.success());
+    let err = String::from_utf8_lossy(&output.stderr);
+    assert!(err.contains("at least 16 characters"), "{err}");
+    assert!(err.contains("Leave it out"), "{err}");
+    assert!(!err.contains("too short"), "the key is not echoed: {err}");
+
+    let from_env = std::process::Command::new(env!("CARGO_BIN_EXE_ref-web"))
+        .args(["--no-open", "--server", NO_BACKEND])
+        .env("REF_WEB_KEY", "short")
+        .env("REF_STATE_DIR", env.state_dir())
+        .env("REF_DATA_DIR", env.dir.join("data"))
+        .output()
+        .unwrap();
+    assert!(!from_env.status.success());
+    let err = String::from_utf8_lossy(&from_env.stderr);
+    assert!(err.contains("at least 16 characters"), "{err}");
+    assert!(!env.state_dir().join("web/login-token").exists());
 }
 
 #[tokio::test]
@@ -134,8 +166,7 @@ async fn a_wide_listen_address_still_only_serves_ip_literals_on_its_own_port() {
         let web = &web;
         async move {
             web.http
-                .get(web.url("/api/info"))
-                .header("cookie", web.cookie())
+                .get(web.url("/api/ping?nonce=00ff"))
                 .header("host", host)
                 .send()
                 .await
@@ -164,26 +195,19 @@ async fn a_wide_listen_address_still_only_serves_ip_literals_on_its_own_port() {
 #[cfg(unix)]
 #[tokio::test]
 async fn sigterm_closes_the_tabs_and_exits_successfully() {
-    use tokio_tungstenite::tungstenite::Message;
-
     let env = Env::new("sigterm");
     let upstream = fake_upstream().await;
     let server = format!("ws://{LOOPBACK}:{}/", upstream.port);
     let mut web = env.start(&["--server", &server]).await;
-    let mut tab = web.ws().await;
+    let mut tab = web.channel().await;
     // A round trip proves the tunnel is up before ref-web is told to stop.
-    futures_util::SinkExt::send(&mut tab, Message::text("ping"))
-        .await
-        .unwrap();
-    assert_eq!(next_text(&mut tab).await, "ping");
+    tab.send_text("ping").await;
+    assert_eq!(tab.next_text().await, "ping");
 
     assert!(ref_sys::terminate(web.pid()));
     let status = web.wait_exit().await;
     assert!(status.success(), "{status}");
-    match next_message(&mut tab).await {
-        Message::Close(Some(frame)) => assert_eq!(u16::from(frame.code), 1001),
-        other => panic!("expected a going-away close, got {other:?}"),
-    }
+    assert_eq!(tab.next_close().await.0, 1001);
 }
 
 #[tokio::test]
@@ -214,7 +238,7 @@ async fn port_zero_is_rejected_before_anything_starts() {
     assert!(err.contains("--port"), "{err}");
     assert!(
         output.stdout.is_empty(),
-        "no login URL for port 0: {}",
+        "no address for port 0: {}",
         String::from_utf8_lossy(&output.stdout)
     );
 }

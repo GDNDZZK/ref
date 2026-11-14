@@ -153,7 +153,7 @@ function undo(): void {
 
 .variant,
 .interrupted {
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .rate {

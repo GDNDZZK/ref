@@ -1,10 +1,15 @@
 //! MCP manager: one shared client per (server name, config); status tracking; tool lists.
 
+use crate::util::lock;
 use ref_config::{Config, McpConfig};
 use ref_mcp::{McpClient, McpTool, ServerConfig, Transport};
+use ref_proto::{MCP_CONNECTED, MCP_CONNECTING, MCP_DISABLED, MCP_FAILED};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+/// How long `close_all` waits for one server to close.
+const CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone)]
 pub enum McpStatus {
@@ -27,7 +32,7 @@ pub struct McpServer {
 
 impl McpServer {
     fn lock(&self) -> std::sync::MutexGuard<'_, McpState> {
-        self.state.lock().unwrap_or_else(|e| e.into_inner())
+        lock(&self.state)
     }
     pub fn status(&self) -> McpStatus {
         self.lock().status.clone()
@@ -43,9 +48,14 @@ impl McpServer {
             .and_then(|c| c.instructions())
             .filter(|s| !s.trim().is_empty())
     }
-    pub async fn wait_ready(&self, timeout: Duration) {
+    pub(crate) async fn wait_ready(&self, timeout: Duration) {
         let mut rx = self.ready.subscribe();
-        let _ = tokio::time::timeout(timeout, rx.wait_for(|v| *v)).await;
+        if tokio::time::timeout(timeout, rx.wait_for(|v| *v))
+            .await
+            .is_err()
+        {
+            tracing::warn!(server = %self.name, "MCP server not ready after {timeout:?}");
+        }
     }
 }
 
@@ -57,6 +67,9 @@ pub struct McpManager {
 fn key(name: &str, cfg: &McpConfig) -> String {
     format!("{name}\u{0}{cfg:?}")
 }
+
+/// Request timeout of a server whose config sets none.
+const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 
 fn server_config(name: &str, cfg: &McpConfig) -> ServerConfig {
     let (transport, timeout_ms) = match cfg {
@@ -90,15 +103,54 @@ fn server_config(name: &str, cfg: &McpConfig) -> ServerConfig {
     ServerConfig {
         name: name.to_string(),
         transport,
-        timeout: Duration::from_millis(timeout_ms.filter(|t| *t > 0).unwrap_or(30_000)),
+        timeout: Duration::from_millis(timeout_ms.filter(|t| *t > 0).unwrap_or(DEFAULT_TIMEOUT_MS)),
     }
+}
+
+/// Status of one configured server; `servers` are the running ones.
+fn server_status(
+    name: &str,
+    sc: &McpConfig,
+    servers: &[Arc<McpServer>],
+) -> ref_proto::McpServerStatus {
+    let mut st = ref_proto::McpServerStatus {
+        name: name.to_string(),
+        status: MCP_DISABLED.into(),
+        error: None,
+        tools: Vec::new(),
+    };
+    if !sc.enabled() {
+        return st;
+    }
+    let Some(s) = servers.iter().find(|s| s.name == name) else {
+        st.status = MCP_CONNECTING.into();
+        return st;
+    };
+    match s.status() {
+        McpStatus::Connected => {
+            st.status = MCP_CONNECTED.into();
+            let mut tools: Vec<String> = s
+                .tools()
+                .iter()
+                .map(|t| crate::toolset::mcp_tool_name(name, &t.name))
+                .collect();
+            tools.sort();
+            st.tools = tools;
+        }
+        McpStatus::Connecting => st.status = MCP_CONNECTING.into(),
+        McpStatus::Failed(e) => {
+            st.status = MCP_FAILED.into();
+            st.error = Some(e);
+        }
+    }
+    st
 }
 
 impl McpManager {
     /// Servers (enabled) for a config, sorted by name; starts connecting new ones in the background.
-    pub fn servers_for(&self, cfg: &Config) -> Vec<Arc<McpServer>> {
+    pub(crate) fn servers_for(&self, cfg: &Config) -> Vec<Arc<McpServer>> {
         let mut out = Vec::new();
-        let mut map = self.servers.lock().unwrap_or_else(|e| e.into_inner());
+        let mut map = lock(&self.servers);
         for (name, sc) in &cfg.mcp {
             if !sc.enabled() {
                 continue;
@@ -127,53 +179,29 @@ impl McpManager {
         out
     }
 
+    /// Starts connecting the enabled servers of a config; their status is read later.
+    pub(crate) fn start_servers(&self, cfg: &Config) {
+        self.servers_for(cfg);
+    }
+
     /// Detailed status of every configured server (sorted by name), with tool names as
     /// exposed to the model.
     pub fn status(&self, cfg: &Config) -> Vec<ref_proto::McpServerStatus> {
         let servers = self.servers_for(cfg);
-        let mut out = Vec::new();
-        for (name, sc) in &cfg.mcp {
-            let mut st = ref_proto::McpServerStatus {
-                name: name.clone(),
-                status: "disabled".into(),
-                error: None,
-                tools: Vec::new(),
-            };
-            if sc.enabled() {
-                match servers.iter().find(|s| &s.name == name) {
-                    Some(s) => match s.status() {
-                        McpStatus::Connected => {
-                            st.status = "connected".into();
-                            let mut tools: Vec<String> = s
-                                .tools()
-                                .iter()
-                                .map(|t| crate::toolset::mcp_tool_name(name, &t.name))
-                                .collect();
-                            tools.sort();
-                            st.tools = tools;
-                        }
-                        McpStatus::Connecting => st.status = "connecting".into(),
-                        McpStatus::Failed(e) => {
-                            st.status = "failed".into();
-                            st.error = Some(e);
-                        }
-                    },
-                    None => st.status = "connecting".into(),
-                }
-            }
-            out.push(st);
-        }
-        out
+        cfg.mcp
+            .iter()
+            .map(|(name, sc)| server_status(name, sc, &servers))
+            .collect()
     }
 
     /// Status lines for GetConfig: (name, status text).
-    pub fn status_lines(&self, cfg: &Config) -> Vec<(String, String)> {
+    pub(crate) fn status_lines(&self, cfg: &Config) -> Vec<(String, String)> {
         self.status(cfg)
             .into_iter()
             .map(|s| {
                 let text = match (s.status.as_str(), &s.error) {
-                    ("connected", _) => format!("connected ({} tools)", s.tools.len()),
-                    ("failed", Some(e)) => format!("failed: {e}"),
+                    (MCP_CONNECTED, _) => format!("{MCP_CONNECTED} ({} tools)", s.tools.len()),
+                    (MCP_FAILED, Some(e)) => format!("{MCP_FAILED}: {e}"),
                     (other, _) => other.to_string(),
                 };
                 (s.name, text)
@@ -181,17 +209,15 @@ impl McpManager {
             .collect()
     }
 
-    pub async fn close_all(&self) {
-        let all: Vec<Arc<McpServer>> = self
-            .servers
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .drain()
-            .map(|(_, v)| v)
-            .collect();
+    pub(crate) async fn close_all(&self) {
+        let all: Vec<Arc<McpServer>> = lock(&self.servers).drain().map(|(_, v)| v).collect();
         for s in all {
-            if let Some(c) = s.client() {
-                let _ = tokio::time::timeout(Duration::from_secs(3), c.close()).await;
+            if let Some(c) = s.client()
+                && tokio::time::timeout(CLOSE_TIMEOUT, c.close())
+                    .await
+                    .is_err()
+            {
+                tracing::warn!(server = %s.name, "MCP server did not close in {CLOSE_TIMEOUT:?}");
             }
         }
     }

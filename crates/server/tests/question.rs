@@ -9,10 +9,8 @@ use ref_server::hub::{Conn, Hub};
 use ref_server::session::Session;
 use serde_json::{Value, json};
 use std::sync::Arc;
-use std::time::Duration;
 
 const CALL: &str = "q1";
-const WAIT: Duration = Duration::from_secs(10);
 
 fn one_question() -> Value {
     json!({"purpose": "ask", "questions": [{
@@ -45,16 +43,8 @@ async fn rig_with(handler: Handler, tweak: impl FnOnce(&mut ref_config::Config))
     let mut cfg = config(&mock.url);
     tweak(&mut cfg);
     let (hub, work) = hub(cfg, "question");
-    let session = session(&hub, &work, "main", "build").await;
-    let conn = hub.add_conn();
-    conn.lock().hello = true;
-    let attach = Request::Attach {
-        session_id: session.id.clone(),
-        foreground: true,
-        limit: None,
-    };
-    api::handle(&hub, &conn, attach).await.unwrap();
-    conn.out.drain();
+    let session = session(&hub, &work, MAIN_SESSION, BUILD).await;
+    let conn = attached_conn(&hub, &session).await;
     Rig {
         hub,
         conn,
@@ -88,8 +78,7 @@ impl Rig {
 
     /// Waits until the model's question is pending.
     async fn asked(&self) -> QuestionRequest {
-        let s = self.session.clone();
-        wait_until("question pending", WAIT, move || {
+        wait_session(&self.session, "question pending", |s| {
             !s.lock().questions.is_empty()
         })
         .await;
@@ -104,15 +93,7 @@ impl Rig {
     }
 
     fn events(&self) -> Vec<SessionEvent> {
-        self.conn
-            .out
-            .drain()
-            .into_iter()
-            .filter_map(|f| match f {
-                ServerFrame::Event { event, .. } => Some(event),
-                _ => None,
-            })
-            .collect()
+        events(&self.conn)
     }
 
     /// The result of the question as the model saw it in its next request.
@@ -281,7 +262,7 @@ async fn a_denying_permission_removes_the_tool() {
     assert!(tool_names(&open).contains(&"question".to_string()));
 
     let closed = rig_with(Arc::new(|_, _| Reply::Text("ok".into())), |cfg| {
-        cfg.agents.get_mut("build").unwrap().permission = perms(json!({"question": "deny"}));
+        cfg.agents.get_mut(BUILD).unwrap().permission = perms(json!({"question": "deny"}));
     })
     .await;
     prompt(&closed.hub, &closed.session, "go");
@@ -326,7 +307,7 @@ async fn a_window_that_is_not_looking_gets_a_notification() {
     away.out.drain();
     rig.mock.bodies.lock().unwrap().clear();
     prompt(&rig.hub, &rig.session, "again");
-    wait_until("asked again", WAIT, {
+    wait_until("asked again", TIMEOUT, {
         let s = rig.session.clone();
         move || s.lock().questions.len() == 1
     })

@@ -12,7 +12,21 @@ use serde_json::{Map, Value, json};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
-pub const PURPOSE_DESC: &str = "One short sentence saying why you are calling this tool; shown to the user. Use the language of the user's messages.";
+/// Key of the argument every tool call carries to say why it is made.
+pub(crate) const PURPOSE_KEY: &str = "purpose";
+
+const PURPOSE_DESC: &str = "One short sentence saying why you are calling this tool; shown to the user. Use the language of the user's messages.";
+
+/// Name of the builtin shell tool.
+pub(crate) const BASH: &str = "bash";
+
+/// Names of the harness tools.
+pub(crate) const CONTEXT_WINDOW: &str = "context_window";
+pub(crate) const TODO: &str = "todo";
+pub(crate) const COMPACT_CONTEXT: &str = "compact_context";
+
+/// Longest tool name providers accept.
+const MAX_TOOL_NAME_CHARS: usize = 64;
 
 /// Max MCP text output returned to the model.
 const MCP_MAX_BYTES: usize = 50 * 1024;
@@ -36,28 +50,35 @@ pub struct Entry {
 }
 
 /// Inserts the required `purpose` property as the FIRST property of a JSON schema.
-pub fn with_purpose(schema: &Value) -> Value {
+pub(crate) fn with_purpose(schema: &Value) -> Value {
     let mut obj = schema.as_object().cloned().unwrap_or_default();
     obj.entry("type").or_insert_with(|| json!("object"));
     let mut props = Map::new();
     props.insert(
-        "purpose".into(),
+        PURPOSE_KEY.into(),
         json!({"type": "string", "description": PURPOSE_DESC}),
     );
     if let Some(Value::Object(p)) = obj.get("properties") {
         for (k, v) in p {
-            if k != "purpose" {
+            if k != PURPOSE_KEY {
                 props.insert(k.clone(), v.clone());
             }
         }
     }
-    let mut required = vec![json!("purpose")];
+    let mut required = vec![json!(PURPOSE_KEY)];
     if let Some(Value::Array(r)) = obj.get("required") {
-        required.extend(r.iter().filter(|x| x.as_str() != Some("purpose")).cloned());
+        required.extend(
+            r.iter()
+                .filter(|x| x.as_str() != Some(PURPOSE_KEY))
+                .cloned(),
+        );
     }
     // Rebuild with a stable key order: type, properties, required, then the rest.
     let mut out = Map::new();
-    out.insert("type".into(), obj.remove("type").unwrap_or(json!("object")));
+    out.insert(
+        "type".into(),
+        obj.remove("type").expect("type was inserted above"),
+    );
     obj.remove("properties");
     obj.remove("required");
     out.insert("properties".into(), Value::Object(props));
@@ -68,8 +89,8 @@ pub fn with_purpose(schema: &Value) -> Value {
     Value::Object(out)
 }
 
-/// `<server>_<tool>` with chars outside `[A-Za-z0-9_-]` replaced by `_`, max 64 chars.
-pub fn mcp_tool_name(server: &str, tool: &str) -> String {
+/// `<server>_<tool>` with chars outside `[A-Za-z0-9_-]` replaced by `_`, max `MAX_TOOL_NAME_CHARS`.
+pub(crate) fn mcp_tool_name(server: &str, tool: &str) -> String {
     let raw = format!("{server}_{tool}");
     raw.chars()
         .map(|c| {
@@ -79,7 +100,7 @@ pub fn mcp_tool_name(server: &str, tool: &str) -> String {
                 '_'
             }
         })
-        .take(64)
+        .take(MAX_TOOL_NAME_CHARS)
         .collect()
 }
 
@@ -91,31 +112,31 @@ pub(crate) fn def(name: &str, description: &str, params: Value) -> ToolDef {
     }
 }
 
-pub fn harness_defs() -> Vec<ToolDef> {
+fn harness_defs() -> Vec<ToolDef> {
     vec![
         def(
-            "context_window",
+            CONTEXT_WINDOW,
             "Show how much of the context window is used (tokens used / max), the recommended compaction point and the automatic compaction threshold. Pass `session` (name or id) to inspect another live session.",
             json!({"type": "object", "properties": {
                 "session": {"type": "string", "description": "Name or id of another live session (default: this session)."}
             }}),
         ),
         def(
-            "todo",
+            TODO,
             "Maintain a todo list for multi-step work; the user sees it live. Each call REPLACES the whole list, so always send every item. Keep exactly one item in_progress while working, mark items completed as soon as they are done, and add follow-ups when discovered. Skip it for trivial single-step tasks.",
             json!({"type": "object", "properties": {
                 "todos": {"type": "array", "description": "The complete, updated list.", "items": {
                     "type": "object",
                     "properties": {
                         "content": {"type": "string", "description": "Short imperative description."},
-                        "status": {"type": "string", "enum": ["pending", "in_progress", "completed", "cancelled"]}
+                        "status": {"type": "string", "enum": TodoStatus::ALL.map(TodoStatus::as_str)}
                     },
                     "required": ["content", "status"]
                 }}
             }, "required": ["todos"]}),
         ),
         def(
-            "compact_context",
+            COMPACT_CONTEXT,
             "Drop the conversation history from your context and continue with only the given summary (the user still sees the full transcript). Use when the context is large (see context_window) or the history is no longer relevant. The summary must contain everything needed to continue: the user's goals and constraints, decisions made, current state, files touched, and next steps.",
             json!({"type": "object", "properties": {
                 "summary": {"type": "string", "description": "Complete summary that replaces the conversation history in your context."}
@@ -126,7 +147,7 @@ pub fn harness_defs() -> Vec<ToolDef> {
 }
 
 /// Full tool list for a session in fixed order.
-pub fn assemble(cfg: &Config, agent: &str, mcp: &[Arc<McpServer>]) -> Vec<Entry> {
+pub(crate) fn assemble(cfg: &Config, agent: &str, mcp: &[Arc<McpServer>]) -> Vec<Entry> {
     let mut out = Vec::new();
     let push = |d: ToolDef, kind: Kind, out: &mut Vec<Entry>| {
         if !cfg.tool_disabled(agent, &d.name) && !out.iter().any(|e: &Entry| e.def.name == d.name) {
@@ -181,7 +202,7 @@ pub fn assemble(cfg: &Config, agent: &str, mcp: &[Arc<McpServer>]) -> Vec<Entry>
 }
 
 /// Permission subject for a call.
-pub fn subject(tool: &str, input: &Value) -> String {
+pub(crate) fn subject(tool: &str, input: &Value) -> String {
     let get = |k: &str| {
         input
             .get(k)
@@ -200,7 +221,7 @@ pub fn subject(tool: &str, input: &Value) -> String {
 pub type OutputSink = Option<Arc<dyn Fn(&str) + Send + Sync>>;
 
 /// Execute one tool call (permission / delay already handled by the engine).
-pub async fn dispatch(
+pub(crate) async fn dispatch(
     hub: Arc<Hub>,
     s: Arc<Session>,
     kind: Kind,
@@ -251,106 +272,105 @@ pub async fn dispatch(
     }
 }
 
+/// The string field `key` of a tool input, trimmed.
+fn str_field<'a>(input: &'a Value, key: &str) -> Option<&'a str> {
+    input.get(key).and_then(Value::as_str).map(str::trim)
+}
+
 fn harness(hub: &Arc<Hub>, s: &Arc<Session>, name: &str, input: &Value) -> ToolOutput {
     match name {
-        "context_window" => {
-            let target = match input
-                .get("session")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|x| !x.is_empty())
-            {
-                Some(q) => match crate::peers::resolve(hub, q, None) {
-                    Ok(t) => t,
-                    Err(e) => return ToolOutput::err(e),
-                },
-                None => s.clone(),
-            };
-            let info = target.info();
-            let c = info.context;
-            let pct = |n: u64| {
-                if c.max > 0 {
-                    n as f64 * 100.0 / c.max as f64
-                } else {
-                    0.0
-                }
-            };
-            ToolOutput::ok(format!(
-                "Context window for \"{}\": used {} tokens of {} ({:.0}%). Recommended compaction at {} tokens ({:.0}%). Automatic compaction at {} tokens.",
-                info.name,
-                c.used,
-                c.max,
-                pct(c.used),
-                c.recommend,
-                pct(c.recommend),
-                c.auto
-            ))
-        }
-        "todo" => {
-            let Some(items) = input.get("todos").and_then(Value::as_array) else {
-                return ToolOutput::err("Error: `todos` must be an array of {content, status}.");
-            };
-            let mut todos = Vec::with_capacity(items.len());
-            for (i, it) in items.iter().enumerate() {
-                let content = it
-                    .get("content")
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .unwrap_or("");
-                if content.is_empty() {
-                    return ToolOutput::err(format!(
-                        "Error: todos[{i}].content must be a non-empty string."
-                    ));
-                }
-                let status = match it
-                    .get("status")
-                    .and_then(Value::as_str)
-                    .unwrap_or("pending")
-                {
-                    "pending" => TodoStatus::Pending,
-                    "in_progress" => TodoStatus::InProgress,
-                    "completed" => TodoStatus::Completed,
-                    "cancelled" => TodoStatus::Cancelled,
-                    other => {
-                        return ToolOutput::err(format!(
-                            "Error: todos[{i}].status {other:?} is invalid; use pending, in_progress, completed or cancelled."
-                        ));
-                    }
-                };
-                todos.push(Todo {
-                    content: content.to_string(),
-                    status,
-                });
-            }
-            let text = format_todos(&todos);
-            {
-                let mut st = s.lock();
-                st.info.todos = todos;
-                hub.emit_info(&st);
-            }
-            ToolOutput::ok(text)
-        }
-        "compact_context" => {
-            let summary = input
-                .get("summary")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            if summary.is_empty() {
-                return ToolOutput::err("Error: summary must not be empty.");
-            }
-            s.lock().pending_compact = Some(summary);
-            ToolOutput::ok(
-                "After this batch of tool calls your context will be replaced by your summary.",
-            )
-        }
+        CONTEXT_WINDOW => context_window_tool(hub, s, input),
+        TODO => todo_tool(hub, s, input),
+        COMPACT_CONTEXT => compact_context_tool(s, input),
         _ => ToolOutput::err(format!("Unknown tool: {name}")),
     }
 }
 
+fn context_window_tool(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> ToolOutput {
+    let target = match str_field(input, "session").filter(|x| !x.is_empty()) {
+        Some(q) => match crate::peers::resolve(hub, q, None) {
+            Ok(t) => t,
+            Err(e) => return ToolOutput::err(e),
+        },
+        None => s.clone(),
+    };
+    let info = target.info();
+    let c = info.context;
+    let pct = |n: u64| {
+        if c.max > 0 {
+            n as f64 * 100.0 / c.max as f64
+        } else {
+            0.0
+        }
+    };
+    ToolOutput::ok(format!(
+        "Context window for \"{}\": used {} tokens of {} ({:.0}%). Recommended compaction at {} tokens ({:.0}%). Automatic compaction at {} tokens.",
+        info.name,
+        c.used,
+        c.max,
+        pct(c.used),
+        c.recommend,
+        pct(c.recommend),
+        c.auto
+    ))
+}
+
+fn todo_tool(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> ToolOutput {
+    let Some(items) = input.get("todos").and_then(Value::as_array) else {
+        return ToolOutput::err("Error: `todos` must be an array of {content, status}.");
+    };
+    let mut todos = Vec::with_capacity(items.len());
+    for (i, it) in items.iter().enumerate() {
+        let content = str_field(it, "content").unwrap_or("");
+        if content.is_empty() {
+            return ToolOutput::err(format!(
+                "Error: todos[{i}].content must be a non-empty string."
+            ));
+        }
+        let word = it
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or(TodoStatus::Pending.as_str());
+        let Ok(status) = serde_json::from_value::<TodoStatus>(json!(word)) else {
+            return ToolOutput::err(format!(
+                "Error: todos[{i}].status {word:?} is invalid; use {}.",
+                status_names()
+            ));
+        };
+        todos.push(Todo {
+            content: content.to_string(),
+            status,
+        });
+    }
+    let text = format_todos(&todos);
+    {
+        let mut st = s.lock();
+        st.info.todos = todos;
+        hub.emit_info(&st);
+    }
+    ToolOutput::ok(text)
+}
+
+fn compact_context_tool(s: &Arc<Session>, input: &Value) -> ToolOutput {
+    let summary = str_field(input, "summary").unwrap_or("").to_string();
+    if summary.is_empty() {
+        return ToolOutput::err("Error: summary must not be empty.");
+    }
+    s.lock().pending_compact = Some(summary);
+    ToolOutput::ok("After this batch of tool calls your context will be replaced by your summary.")
+}
+
+/// The todo statuses as prose: "pending, in_progress, completed or cancelled".
+fn status_names() -> String {
+    let names: Vec<&str> = TodoStatus::ALL.iter().map(|s| s.as_str()).collect();
+    match names.split_last() {
+        Some((last, rest)) => format!("{} or {last}", rest.join(", ")),
+        None => String::new(),
+    }
+}
+
 /// Text echoed to the model after a `todo` update.
-pub fn format_todos(todos: &[Todo]) -> String {
+fn format_todos(todos: &[Todo]) -> String {
     if todos.is_empty() {
         return "Todo list cleared.".into();
     }

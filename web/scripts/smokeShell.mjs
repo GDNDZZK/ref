@@ -19,7 +19,7 @@ const SHORTCUT = {
   help: 'Alt+KeyH',
   settings: 'Alt+KeyS',
 }
-const LOGIN_LOST_WATCH_MS = 12000 // longer than the longest retry delay (8 s)
+const KEY_ROTATED_WATCH_MS = 12000 // longer than the longest retry delay (8 s)
 const ROWS = '.sidebar .running .row'
 const DIALOG = '[role="dialog"]'
 const VIEWPORT_WIDTH = 980
@@ -142,24 +142,34 @@ export async function shellScenario(page, problems) {
   await shot(page, 'closed')
 }
 
-// ref-web forgets the browser's login when it restarts: the page says so and stops reconnecting.
-export async function loginLostScenario(page, problems, restartServer) {
+// The key changed while ref-web was stopped: the page shows the key-entry page, stops
+// reconnecting, and signs in with the new key.
+export async function keyRotatedScenario(page, problems, restartServer) {
   const before = problems.length
-  await restartServer()
-  const banner = page.locator('[role="alert"]', { hasText: 'Not logged in' })
-  await banner.waitFor({ timeout: WAIT_MS })
-  await shot(page, 'not-logged-in')
+  const newKey = await restartServer({ rotateKey: true })
+  const heading = page.getByRole('heading', { name: 'Enter the key' })
+  await heading.waitFor({ timeout: WAIT_MS })
+  await shot(page, 'key-entry')
   // The refused reconnects are expected; anything else stays a problem.
-  const expected = /401|WebSocket|ERR_CONNECTION_REFUSED/
+  const expected = /WebSocket|ERR_CONNECTION_REFUSED/
   const kept = problems.slice(before).filter((problem) => !expected.test(problem))
   problems.splice(before, problems.length - before, ...kept)
 
   let attempts = 0
-  page.on('request', (request) => {
+  const countAttempts = (request) => {
     if (request.url().includes('/ws')) attempts++
-  })
-  await page.waitForTimeout(LOGIN_LOST_WATCH_MS)
-  if (attempts > 0) problems.push(`the page kept reconnecting after the login was lost (${attempts} tries)`)
+  }
+  page.on('request', countAttempts)
+  await page.waitForTimeout(KEY_ROTATED_WATCH_MS)
+  page.off('request', countAttempts)
+  if (attempts > 0) problems.push(`the page kept reconnecting after the key changed (${attempts} tries)`)
+
+  await page.locator('input[type="password"]').fill('not the key at all')
+  await page.keyboard.press('Enter')
+  await page.getByText('The key was not accepted.').waitFor({ timeout: WAIT_MS })
+  await page.locator('input[type="password"]').fill(newKey)
+  await page.keyboard.press('Enter')
+  await page.waitForSelector(INPUT, { timeout: WAIT_MS })
 }
 
 async function sidebarGeometry(page) {

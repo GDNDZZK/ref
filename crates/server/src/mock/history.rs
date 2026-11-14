@@ -1,5 +1,7 @@
 //! Sessions that exist before the first start, so lists and history views are not empty.
 
+use super::config;
+use crate::session::new_message;
 use crate::store::{Persisted, Store};
 use ref_config::Config;
 use ref_proto::{
@@ -46,25 +48,16 @@ impl Builder {
 
 fn model() -> ModelRef {
     ModelRef {
-        provider: "mock".into(),
-        model: "mock-1".into(),
+        provider: config::PROVIDER.into(),
+        model: config::MODEL_1.into(),
         variant: None,
     }
 }
 
 fn message(role: Role, time: i64, parts: Vec<Part>) -> Message {
-    Message {
-        id: crate::util::new_id("msg"),
-        role,
-        time,
-        time_end: None,
-        source: MessageSource::Human,
-        parts,
-        model: None,
-        agent: None,
-        usage: None,
-        error: None,
-    }
+    let mut message = new_message(role, MessageSource::Human, parts);
+    message.time = time;
+    message
 }
 
 fn text_part(text: &str, time: i64) -> Part {
@@ -166,7 +159,7 @@ pub fn save(store: &Store, cfg: &Config, cwd: &str) -> Result<(), String> {
         let mut context = crate::models::context_for(cfg, &model());
         context.used = USED_TOKENS;
         let info = SessionInfo {
-            id: crate::util::new_id("ses"),
+            id: crate::util::new_session_id(),
             name: old.name.into(),
             title: old.title.into(),
             agent: MOCK_AGENT.into(),

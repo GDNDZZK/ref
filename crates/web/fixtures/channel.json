@@ -1,0 +1,53 @@
+{
+  "key": "correct horse battery staple",
+  "salt": "000102030405060708090a0b0c0d0e0f",
+  "root": "7a8e34241db898d59175c696538c417467a975ffe569068425f16188d3159c58",
+  "k_auth": "616830ceda3fe227d7808cc377218b3b0d154a0c4a348eafedda927d65c1e1dc",
+  "sn": "101112131415161718191a1b1c1d1e1f",
+  "cn": "202122232425262728292a2b2c2d2e2f",
+  "mac": "1fe6a4c5e8b24a816a77fc70f24caca2407b20640248ccd1df00c88a6b446d1b",
+  "k_c2s": "af2304a97d8b69ecaf78ed1b9bfd6913e3002137f7dc024a1c02b0f7a6c39f07",
+  "k_s2c": "6dbd43ba87559291fc5b629b955dd4fe89d43ca26a6c5ae458b527ec0541f314",
+  "ping_nonce": "00ff00ff",
+  "ping_proof": "3c47f7bbe6b338f0a8da65e85352315030f1fea0a324154ce88cb448c08c2969",
+  "c2s": [
+    {
+      "counter": 0,
+      "kind": "text",
+      "plain": "{\"type\":\"hello\"}",
+      "wire": "95ead81fcce7c7ed8a4474b63d528edccaa3aba026193976c22b37abcf985203"
+    },
+    {
+      "counter": 1,
+      "kind": "binary",
+      "plain": "binary frame é中",
+      "wire": "dc2b96e0fb391837f56623eb6dc89c51737a7ac2a5b6c7fb0363393dd554df4a9b4b"
+    },
+    {
+      "counter": 2,
+      "kind": "text",
+      "plain": "",
+      "wire": "fdb7eac2e54556838542c3f69b3700dc"
+    }
+  ],
+  "s2c": [
+    {
+      "counter": 0,
+      "kind": "text",
+      "plain": "{\"version\":\"0.2.1\",\"cwd\":\"/work\",\"mock\":false}",
+      "wire": "5387cc614484819c0b5c9d6bfb32a9fc3e3b165004561df88d7b0577c2c4653e00e158cfdd1b8d56d8120655e7553321112838bc7b6ce7b81e12a17b1ba5"
+    },
+    {
+      "counter": 1,
+      "kind": "text",
+      "plain": "second",
+      "wire": "d0aaaee7f1ea54aaffde141654d66ff32a52f1a552e1"
+    },
+    {
+      "counter": 2,
+      "kind": "binary",
+      "plain": "third",
+      "wire": "d0fe9d15f277b6447afe42ca1baf2de60d500f1f31"
+    }
+  ]
+}

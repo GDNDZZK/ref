@@ -1,16 +1,21 @@
 //! `GET /api/ping`: lets a second ref-web recognise the first one without being fooled by
 //! another program on the port. The caller sends a random nonce; only a process that knows
-//! the login token can answer with its HMAC. Without that check, the login URL (with the
-//! token) would be opened on whatever listens there.
+//! the key can answer with its HMAC. Without that check, the address (with the key) would be
+//! opened on whatever listens there. Only loopback peers get an answer (`routes::ping`), so
+//! remote hosts cannot collect verifiers; local processes on the same machine can still query
+//! `/api/ping` and obtain a `(nonce, proof)` verifier (an offline guess oracle for weak keys).
 
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 
-use hmac::{Hmac, Mac as _};
 use serde::Deserialize;
-use sha2::Sha256;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use tokio::net::{TcpSocket, TcpStream};
 
+use crate::channel::{self, Root};
 use crate::guard::constant_time_eq;
+use crate::key::Key;
+use crate::launch;
 use crate::routes::PING_PATH;
 use crate::token;
 
@@ -20,16 +25,10 @@ const MAX_NONCE_LEN: usize = 128;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const HEADERS_END: &str = "\r\n\r\n";
 
-/// Hex HMAC-SHA256 of `nonce`, keyed with the login token.
-pub fn proof(login_token: &str, nonce: &str) -> String {
-    let mut mac = Hmac::<Sha256>::new_from_slice(login_token.as_bytes())
-        .expect("HMAC accepts keys of any length");
-    mac.update(nonce.as_bytes());
-    mac.finalize()
-        .into_bytes()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+/// Hex proof for `nonce`, keyed with the key the channel is made from. Loopback callers can
+/// request one for any nonce (an offline guess oracle for weak `--key` values).
+pub fn proof(root: &Root, nonce: &str) -> String {
+    channel::to_hex(&root.ping_proof(nonce))
 }
 
 pub fn is_valid_nonce(nonce: &str) -> bool {
@@ -44,11 +43,12 @@ struct PingBody {
     proof: String,
 }
 
-/// True when a ref-web that shares our login token answers on `host:port`.
-pub async fn is_our_ref_web(host: &str, port: u16, login_token: &str) -> bool {
+/// True when a ref-web that shares our key answers on `host:port`. Always probes from a loopback
+/// source address so `routes::ping` accepts the probe even when the instance bound a LAN IP.
+pub async fn is_our_ref_web(host: &str, port: u16, key: &Key) -> bool {
     let nonce = token::random_hex();
     let probe = async {
-        let mut stream = tokio::net::TcpStream::connect(format!("{host}:{port}")).await?;
+        let mut stream = connect_via_loopback(host, port).await?;
         let request = format!(
             "GET {PING_PATH}?{NONCE_PARAM}={nonce} HTTP/1.1\r\nHost: {host}:{port}\r\n\
              Connection: close\r\n\r\n"
@@ -69,7 +69,44 @@ pub async fn is_our_ref_web(host: &str, port: u16, login_token: &str) -> bool {
         return false;
     };
     body.app == crate::routes::APP_NAME
-        && constant_time_eq(body.proof.as_bytes(), proof(login_token, &nonce).as_bytes())
+        && constant_time_eq(body.proof.as_bytes(), proof(key.root(), &nonce).as_bytes())
+}
+
+async fn connect_via_loopback(host: &str, port: u16) -> std::io::Result<TcpStream> {
+    let bare = launch::bare_host(host);
+    let mut last_err = None;
+    for addr in tokio::net::lookup_host((bare, port)).await? {
+        let res = if addr.ip().is_loopback() {
+            TcpStream::connect(addr).await
+        } else {
+            connect_bound_loopback(addr).await
+        };
+        match res {
+            Ok(stream) => return Ok(stream),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(last_err.unwrap_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::AddrNotAvailable,
+            "no addresses resolved",
+        )
+    }))
+}
+
+async fn connect_bound_loopback(target: SocketAddr) -> std::io::Result<TcpStream> {
+    let (socket, bind_addr) = match target {
+        SocketAddr::V4(_) => (
+            TcpSocket::new_v4()?,
+            SocketAddr::from((IpAddr::V4(Ipv4Addr::LOCALHOST), 0)),
+        ),
+        SocketAddr::V6(_) => (
+            TcpSocket::new_v6()?,
+            SocketAddr::from((IpAddr::V6(Ipv6Addr::LOCALHOST), 0)),
+        ),
+    };
+    socket.bind(bind_addr)?;
+    socket.connect(target).await
 }
 
 #[cfg(test)]
@@ -77,12 +114,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn proof_depends_on_token_and_nonce() {
-        let p = proof("token", "abcd");
+    fn proof_depends_on_key_and_nonce() {
+        let root = Root::derive(b"a key of some length", &[1; channel::SALT_LEN]);
+        let p = proof(&root, "abcd");
         assert_eq!(p.len(), 64);
-        assert_eq!(p, proof("token", "abcd"));
-        assert_ne!(p, proof("other", "abcd"));
-        assert_ne!(p, proof("token", "abce"));
+        assert_eq!(p, proof(&root, "abcd"));
+        assert_ne!(p, proof(&root, "abce"));
+        let other = Root::derive(b"another key of length", &[1; channel::SALT_LEN]);
+        assert_ne!(p, proof(&other, "abcd"));
     }
 
     #[test]

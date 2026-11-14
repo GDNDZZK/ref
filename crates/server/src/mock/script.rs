@@ -5,44 +5,47 @@
 //! asks again, which is the next round. The round number is the count of assistant messages
 //! after the last user message.
 
+use crate::peers::{PEER_HEADER_PREFIX, REPORT_REMINDER_PREFIX, SPAWN_HEADER_PREFIX};
+use crate::session::REMINDER_PREFIX;
+use crate::toolset::PURPOSE_KEY;
 use serde_json::{Map, Value, json};
 
 /// How fast text and tool arguments stream: `chars` characters every `every_ms`.
 #[derive(Debug, Clone, Copy)]
-pub struct Pace {
-    pub chars: usize,
-    pub every_ms: u64,
+pub(super) struct Pace {
+    pub(super) chars: usize,
+    pub(super) every_ms: u64,
 }
 
 impl Pace {
-    pub const NORMAL: Pace = Pace {
+    pub(super) const NORMAL: Pace = Pace {
         chars: 14,
         every_ms: 25,
     };
-    pub const MEDIUM: Pace = Pace {
+    pub(super) const MEDIUM: Pace = Pace {
         chars: 6,
         every_ms: 30,
     };
     /// A few words per second, for frame-by-frame inspection.
-    pub const SLOW: Pace = Pace {
+    pub(super) const SLOW: Pace = Pace {
         chars: 2,
         every_ms: 70,
     };
 }
 
 #[derive(Debug, Clone)]
-pub struct ToolCall {
-    pub name: &'static str,
-    pub purpose: String,
+pub(super) struct ToolCall {
+    pub(super) name: &'static str,
+    pub(super) purpose: String,
     /// Arguments without `purpose`.
-    pub input: Value,
+    pub(super) input: Value,
 }
 
 impl ToolCall {
     /// The raw argument JSON as a model would stream it: `purpose` comes first.
-    pub fn raw_arguments(&self) -> String {
+    pub(super) fn raw_arguments(&self) -> String {
         let mut args = Map::new();
-        args.insert("purpose".into(), json!(self.purpose));
+        args.insert(PURPOSE_KEY.into(), json!(self.purpose));
         if let Value::Object(input) = &self.input {
             args.extend(input.clone());
         }
@@ -51,13 +54,13 @@ impl ToolCall {
 }
 
 #[derive(Debug, Clone)]
-pub struct HttpError {
-    pub status: u16,
-    pub message: String,
+pub(super) struct HttpError {
+    pub(super) status: u16,
+    pub(super) message: String,
 }
 
 #[derive(Debug, Clone)]
-pub enum Step {
+pub(super) enum Step {
     Reasoning(String),
     Text(String),
     Tool(ToolCall),
@@ -66,32 +69,32 @@ pub enum Step {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct Round {
-    pub steps: Vec<Step>,
+pub(super) struct Round {
+    pub(super) steps: Vec<Step>,
     /// Fail the whole request with this HTTP error instead of streaming the steps.
-    pub error: Option<HttpError>,
+    pub(super) error: Option<HttpError>,
     /// Report the context as almost full, so the next prompt triggers automatic compaction.
-    pub fill_context: bool,
+    pub(super) fill_context: bool,
     /// Reset the connection without an answer: the client sees a network error.
-    pub reset: bool,
+    pub(super) reset: bool,
 }
 
 impl Round {
-    pub fn new() -> Round {
+    pub(super) fn new() -> Round {
         Round::default()
     }
 
-    pub fn reasoning(mut self, text: impl Into<String>) -> Round {
+    pub(super) fn reasoning(mut self, text: impl Into<String>) -> Round {
         self.steps.push(Step::Reasoning(text.into()));
         self
     }
 
-    pub fn text(mut self, text: impl Into<String>) -> Round {
+    pub(super) fn text(mut self, text: impl Into<String>) -> Round {
         self.steps.push(Step::Text(text.into()));
         self
     }
 
-    pub fn tool(mut self, name: &'static str, purpose: &str, input: Value) -> Round {
+    pub(super) fn tool(mut self, name: &'static str, purpose: &str, input: Value) -> Round {
         self.steps.push(Step::Tool(ToolCall {
             name,
             purpose: purpose.into(),
@@ -100,12 +103,12 @@ impl Round {
         self
     }
 
-    pub fn pause(mut self, ms: u64) -> Round {
+    pub(super) fn pause(mut self, ms: u64) -> Round {
         self.steps.push(Step::Pause(ms));
         self
     }
 
-    pub fn error(status: u16, message: impl Into<String>) -> Round {
+    pub(super) fn error(status: u16, message: impl Into<String>) -> Round {
         Round {
             error: Some(HttpError {
                 status,
@@ -116,54 +119,68 @@ impl Round {
     }
 
     /// A request that dies on the wire ("connection reset by peer").
-    pub fn connection_reset() -> Round {
+    pub(super) fn connection_reset() -> Round {
         Round {
             reset: true,
             ..Round::default()
         }
     }
 
-    pub fn filling_context(mut self) -> Round {
+    pub(super) fn filling_context(mut self) -> Round {
         self.fill_context = true;
         self
     }
 }
 
-/// Everything a script knows about the request it answers.
-#[derive(Debug, Clone)]
-pub struct Ctx {
-    /// Text of the last user message.
-    pub prompt: String,
-    /// The prompt without its first word (the script name).
-    pub args: String,
-    /// The latest user message that is neither from another session nor a harness reminder (a
-    /// created session's task without its envelope).
-    pub root_prompt: String,
-    /// How many user messages from other sessions came after `root_prompt`, the current one
-    /// included.
-    pub peer_reports: usize,
-    /// Messages a person typed to a created session after its task. They do not restart the
-    /// script: the round keeps counting from the task.
-    pub typed: Vec<String>,
-    pub round: usize,
-    pub session_id: String,
-    /// Identical requests seen so far, this one included (a retry repeats its request).
-    pub attempt: u32,
-    /// Results of the tools run since the last user message, oldest first.
-    pub tool_results: Vec<String>,
+#[cfg(test)]
+impl Round {
+    /// Name and input of the tool calls of the round, in order.
+    pub(super) fn tool_calls(&self) -> Vec<(&'static str, Value)> {
+        self.steps
+            .iter()
+            .filter_map(|s| match s {
+                Step::Tool(c) => Some((c.name, c.input.clone())),
+                _ => None,
+            })
+            .collect()
+    }
 }
 
-pub struct Script {
-    pub name: &'static str,
+/// Everything a script knows about the request it answers.
+#[derive(Debug, Clone)]
+pub(super) struct Ctx {
+    /// Text of the last user message.
+    pub(super) prompt: String,
+    /// The prompt without its first word (the script name).
+    pub(super) args: String,
+    /// The latest user message that is neither from another session nor a harness reminder (a
+    /// created session's task without its envelope).
+    pub(super) root_prompt: String,
+    /// How many user messages from other sessions came after `root_prompt`, the current one
+    /// included.
+    pub(super) peer_reports: usize,
+    /// Messages a person typed to a created session after its task. They do not restart the
+    /// script: the round keeps counting from the task.
+    pub(super) typed: Vec<String>,
+    pub(super) round: usize,
+    pub(super) session_id: String,
+    /// Identical requests seen so far, this one included (a retry repeats its request).
+    pub(super) attempt: u32,
+    /// Results of the tools run since the last user message, oldest first.
+    pub(super) tool_results: Vec<String>,
+}
+
+pub(super) struct Script {
+    pub(super) name: &'static str,
     /// One line for the `help` table.
-    pub about: &'static str,
-    pub pace: Pace,
-    pub play: fn(&Ctx) -> Round,
+    pub(super) about: &'static str,
+    pub(super) pace: Pace,
+    pub(super) play: fn(&Ctx) -> Round,
 }
 
 /// What a request to the mock provider asks for.
 #[derive(Debug)]
-pub enum Task {
+pub(super) enum Task {
     /// A short conversation title for the given text.
     Title(String),
     /// A summary of the conversation (manual or automatic compaction).
@@ -174,15 +191,11 @@ pub enum Task {
 
 /// Marker the LLM client puts before images that came from tool results.
 const TOOL_IMAGES_MARKER: &str = "Attached image(s) from tool result:";
-/// First line of the prompt a session created by `create_session` starts with; the task
-/// follows on the next line.
-const SPAWN_HEADER: &str = "[Session created by";
-/// First line of the reminder appended to a created session's task.
-const REPORT_REMINDER: &str = "[When you finish or get blocked";
-/// How the harness's own reminders start (agent switch, working directory, must_report).
-const HARNESS_REMINDER: &str = "[Reminder]";
-/// How a message from another session starts (see `peers`).
-pub const PEER_MESSAGE: &str = "[Message from session";
+
+/// Roles of the chat-completions messages.
+const ROLE_ASSISTANT: &str = "assistant";
+const ROLE_TOOL: &str = "tool";
+const ROLE_USER: &str = "user";
 
 fn message_text(message: &Value) -> String {
     match &message["content"] {
@@ -202,13 +215,13 @@ fn role(message: &Value) -> &str {
 
 /// The task of a created session without the header and the report reminder around it.
 fn task_text(prompt: &str) -> String {
-    if !prompt.starts_with(SPAWN_HEADER) {
+    if !prompt.starts_with(SPAWN_HEADER_PREFIX) {
         return prompt.to_string();
     }
     prompt
         .lines()
         .skip(1)
-        .take_while(|l| !l.starts_with(REPORT_REMINDER))
+        .take_while(|l| !l.starts_with(REPORT_REMINDER_PREFIX))
         .collect::<Vec<_>>()
         .join("\n")
         .trim()
@@ -216,7 +229,7 @@ fn task_text(prompt: &str) -> String {
 }
 
 /// Classifies a chat-completions request body. `attempt` is how often the same request came.
-pub fn analyze(body: &Value, session_id: &str, attempt: u32) -> Task {
+pub(super) fn analyze(body: &Value, session_id: &str, attempt: u32) -> Task {
     let messages = body["messages"].as_array().map_or(&[][..], Vec::as_slice);
     let first = messages.first().map(message_text).unwrap_or_default();
     if first == crate::title::TITLE_PROMPT {
@@ -232,15 +245,9 @@ pub fn analyze(body: &Value, session_id: &str, attempt: u32) -> Task {
         return Task::Summary;
     }
 
-    let (prompt, round, tool_results, typed) = match since_task(messages) {
-        Some(found) => found,
-        None => {
-            let (prompt, round, tool_results) = since_prompt(messages);
-            (prompt, round, tool_results, Vec::new())
-        }
-    };
+    let turn = since_task(messages).unwrap_or_else(|| since_prompt(messages));
     let (root_prompt, peer_reports) = conversation_root(messages);
-    let prompt = task_text(prompt.trim());
+    let prompt = task_text(turn.prompt.trim());
     let args = prompt
         .split_once(char::is_whitespace)
         .map_or("", |(_, rest)| rest.trim())
@@ -250,26 +257,35 @@ pub fn analyze(body: &Value, session_id: &str, attempt: u32) -> Task {
         args,
         root_prompt,
         peer_reports,
-        typed,
-        round,
+        typed: turn.typed,
+        round: turn.round,
         session_id: session_id.to_string(),
         attempt,
-        tool_results,
+        tool_results: turn.tool_results,
     })
 }
 
+/// The part of a conversation a script answers: the prompt, how many answers and tool results
+/// followed it, and what a person typed to a created session after its task.
+struct Turn {
+    prompt: String,
+    round: usize,
+    tool_results: Vec<String>,
+    typed: Vec<String>,
+}
+
 /// Walks back to the user's prompt, counting the model's answers and collecting tool results.
-fn since_prompt(messages: &[Value]) -> (String, usize, Vec<String>) {
+fn since_prompt(messages: &[Value]) -> Turn {
     let mut round = 0;
     let mut tool_results = Vec::new();
     let mut prompt = String::new();
     for message in messages.iter().rev() {
         let text = message_text(message);
         match role(message) {
-            "assistant" => round += 1,
-            "tool" => tool_results.push(text),
-            "user" if text.starts_with(TOOL_IMAGES_MARKER) => {}
-            "user" => {
+            ROLE_ASSISTANT => round += 1,
+            ROLE_TOOL => tool_results.push(text),
+            ROLE_USER if text.starts_with(TOOL_IMAGES_MARKER) => {}
+            ROLE_USER => {
                 prompt = text;
                 break;
             }
@@ -277,21 +293,26 @@ fn since_prompt(messages: &[Value]) -> (String, usize, Vec<String>) {
         }
     }
     tool_results.reverse();
-    (prompt, round, tool_results)
+    Turn {
+        prompt,
+        round,
+        tool_results,
+        typed: Vec::new(),
+    }
 }
 
 /// For a created session: the task, the answers and tool results since it, and what a person
 /// typed in between. The task stays the prompt, so a typed message does not change the script
 /// or restart its rounds. `None` for other conversations, and once another session has written to
 /// this one (those messages are answered like anywhere else).
-fn since_task(messages: &[Value]) -> Option<(String, usize, Vec<String>, Vec<String>)> {
+fn since_task(messages: &[Value]) -> Option<Turn> {
     let mut users = messages
         .iter()
         .enumerate()
-        .filter(|(_, m)| role(m) == "user");
+        .filter(|(_, m)| role(m) == ROLE_USER);
     let (start, first) = users.next()?;
     let task = message_text(first);
-    if !task.starts_with(SPAWN_HEADER) {
+    if !task.starts_with(SPAWN_HEADER_PREFIX) {
         return None;
     }
     let mut round = 0;
@@ -300,16 +321,21 @@ fn since_task(messages: &[Value]) -> Option<(String, usize, Vec<String>, Vec<Str
     for message in &messages[start + 1..] {
         let text = message_text(message);
         match role(message) {
-            "assistant" => round += 1,
-            "tool" => tool_results.push(text),
-            "user" if text.starts_with(PEER_MESSAGE) => return None,
-            "user"
-                if text.starts_with(TOOL_IMAGES_MARKER) || text.starts_with(HARNESS_REMINDER) => {}
-            "user" => typed.push(text.trim().to_string()),
+            ROLE_ASSISTANT => round += 1,
+            ROLE_TOOL => tool_results.push(text),
+            ROLE_USER if text.starts_with(PEER_HEADER_PREFIX) => return None,
+            ROLE_USER
+                if text.starts_with(TOOL_IMAGES_MARKER) || text.starts_with(REMINDER_PREFIX) => {}
+            ROLE_USER => typed.push(text.trim().to_string()),
             _ => {}
         }
     }
-    Some((task, round, tool_results, typed))
+    Some(Turn {
+        prompt: task,
+        round,
+        tool_results,
+        typed,
+    })
 }
 
 /// The latest prompt that did not come from another session (reminders by the harness do not
@@ -318,14 +344,14 @@ fn since_task(messages: &[Value]) -> Option<(String, usize, Vec<String>, Vec<Str
 fn conversation_root(messages: &[Value]) -> (String, usize) {
     let mut root = String::new();
     let mut reports = 0;
-    for message in messages.iter().filter(|m| role(m) == "user") {
+    for message in messages.iter().filter(|m| role(m) == ROLE_USER) {
         let text = message_text(message);
         if text.starts_with(TOOL_IMAGES_MARKER) {
             continue;
         }
-        if text.starts_with(PEER_MESSAGE) {
+        if text.starts_with(PEER_HEADER_PREFIX) {
             reports += 1;
-        } else if !text.starts_with(HARNESS_REMINDER) {
+        } else if !text.starts_with(REMINDER_PREFIX) {
             root = task_text(text.trim());
             reports = 0;
         }
@@ -348,9 +374,9 @@ const REPORT_SUFFIX: &str = "-report";
 /// The script a prompt asks for: its first word, case-insensitive. A message from another
 /// session goes to the `-report` script of the script that started the conversation when it
 /// has one, and to `ack` otherwise; anything else gets the default script.
-pub fn select(prompt: &str, root_prompt: &str) -> &'static Script {
+pub(super) fn select(prompt: &str, root_prompt: &str) -> &'static Script {
     use super::scripts;
-    if prompt.starts_with(PEER_MESSAGE) {
+    if prompt.starts_with(PEER_HEADER_PREFIX) {
         let report = format!("{}{REPORT_SUFFIX}", first_word(root_prompt));
         return scripts::find(&report)
             .or_else(|| scripts::find("ack"))
@@ -360,9 +386,9 @@ pub fn select(prompt: &str, root_prompt: &str) -> &'static Script {
 }
 
 /// The name of the session that sent a message from another session.
-pub fn sender_name(prompt: &str) -> &str {
+pub(super) fn sender_name(prompt: &str) -> &str {
     prompt
-        .strip_prefix(PEER_MESSAGE)
+        .strip_prefix(PEER_HEADER_PREFIX)
         .and_then(|rest| rest.trim_start().strip_prefix('"'))
         .and_then(|rest| rest.split('"').next())
         .unwrap_or("")
@@ -472,7 +498,7 @@ mod tests {
         assert_eq!(ctx.root_prompt, "orchestrate fix it");
         assert_eq!(ctx.peer_reports, 2);
         assert_eq!(ctx.round, 0);
-        assert!(ctx.prompt.starts_with(PEER_MESSAGE));
+        assert!(ctx.prompt.starts_with(PEER_HEADER_PREFIX));
     }
 
     #[test]
