@@ -1292,11 +1292,13 @@ fn watch_mouse(app: &mut App, me: MouseEvent) {
                 app.watch.focus = Some(sid);
                 return;
             }
-            if app.watch.focus.as_deref() == Some(sid.as_str()) && click_count(app, x, y) == 2 {
+            let clicks = click_count(app, x, y);
+            if clicks == 2 {
                 app.zoom(&sid);
+            } else if app.watch.focus.as_deref() == Some(sid.as_str()) {
+                app.watch.focus = None;
             } else {
                 app.watch.focus = Some(sid);
-                let _ = click_count(app, x, y);
             }
         }
         _ => app.dirty = false,
