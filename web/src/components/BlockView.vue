@@ -23,8 +23,13 @@ const frame = useTemplateRef<InstanceType<typeof BlockFrame>>('frame')
 watch(
   () => props.leaving,
   async (isLeaving) => {
+    if (!isLeaving) return
+    if (document.hidden) {
+      emit('gone')
+      return
+    }
     const element = frame.value?.$el as HTMLElement | undefined
-    if (!isLeaving || !element) return
+    if (!element) return
     const marginTop = getComputedStyle(element).marginTop
     const fade = element.animate([{ opacity: 1 }, { opacity: 0 }], {
       duration: motion.quick,
@@ -41,6 +46,7 @@ watch(
     await close.finished
     emit('gone')
   },
+  { immediate: true, flush: 'post' },
 )
 </script>
 
