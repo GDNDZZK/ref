@@ -101,19 +101,20 @@ The page is the same interface as the [desktop GUI](gui.md). This section lists 
 - Running sessions are labelled with their name, else their title, else the name of their directory. Sessions in the history are labelled with their title (on one line), else their name, else the name of their directory, as in the terminal UI. The *Running* list is as tall as its rows and scrolls only when *History* would get fewer than three rows.
 - *New session* creates a session in the directory of the page. To start one in another directory, use the folder button next to it or the command *New session in another folder…* (no shortcut). It asks for a path; Tab or a click completes sub-directories, which the backend lists.
 - The command palette (Ctrl+P, Cmd+P on macOS) runs any command. Commands without an argument run at once; rename, change directory, export, variant, close a session and the peer name ask for it first. The `/` list in the input box shows the same commands, custom commands included.
+- The sessions dialog (Alt+L or `/sessions`) filters between *All*, *User-created*, and *By creator* of the selected row, and searches creator names and ids alongside session names and directories.
 - Closing the last session starts a new one in the same directory; the page never ends up empty. There is no `/editor` and no `/exit`. `/compact` asks for no confirmation.
 - When the backend is older than the page, a banner at the top offers *Restart backend*. The button is disabled while a session is running or waiting for permission. The restart stops the backend, the page reconnects, and `ref-web` starts the installed, newer one.
 - Errors from sessions you are not looking at (and from any session in the split view) appear as a message in the top right corner, "name: first line of the error". At most four show at once, for 3.5 s (info), 6 s (warning) or 8 s (error); hovering pauses the timer, and a repeated message restarts the timer instead of stacking. The error of the session on screen is shown at the end of its conversation.
 
 **Split view**
 
-- Alt+W or the button at the top right shows one tile per background session: the live sessions that no other client has open, plus the current session. Click a tile, or press Alt+arrow keys, to move the focus; commands act on the focused tile. Zoom a tile with Alt+Z or its button; the button then reads *Back to the split view*.
+- Alt+W or the button at the top right shows one tile per live background session (no other client has open; the current foreground session stays hidden while split view is on and returns when you leave). Split view starts with no tile focused: click a tile or press Alt+arrow keys to focus it; click the focused tile again or the empty grid background to deselect. Commands act on the focused tile. Zoom a tile with Alt+Z or its button; the button then reads *Back to the split view*. Tiles spawned by another session show a `⟲ <root>` chip in the header and tint unfocused borders and status dots by their root task; user-created tiles stay unmarked.
 - Only the focused tile shows its input box. The other tiles fold it away, with the chips and the attachment strip, and keep the status line (state, elapsed time, context meter) and the queue of waiting messages. Draft text, attachments, shell mode and the cursor are kept, and the box unfolds with the cursor in it when the tile gets the focus. A zoomed tile shows its input box as usual.
 
 **The conversation**
 
-- Alt+R opens or folds all reasoning blocks, Alt+O all tool details; clicking a block's header changes only that block. The to-do list of a `todo` call cannot be folded. A card that waits for permission is always open.
-- Output of bash, read and grep shows 200 lines at most, with *Show N more lines*. A bash call that is still running shows its last 20 lines. Wide cards (560 px and more) also show the time a call took.
+- Alt+R opens or folds all reasoning blocks, Alt+O all tool details; clicking a block's header changes only that block. The to-do list of a `todo` call cannot be folded. A card that waits for permission is always open (for `edit` and `write`, it shows a *Preview* diff above the buttons, computed when the request was asked).
+- `edit` and `write` cards show the path, `+`/`-` counts, the first 8 diff rows (with `+N more`), and any edit warnings even when collapsed; expanding shows raw Input, the full diff, and Output. Finished `question` cards show a compact summary of the chosen answers when collapsed. Output of bash, read and grep shows 200 lines at most, with *Show N more lines*. A bash call that is still running shows its last 20 lines. Wide cards (560 px and more) also show the time a call took.
 - Under a message: who wrote it, the time and the tokens; *Copy* (the message text) and, on your own messages, *Undo*. Alt+Y copies the last reply, Alt+U undoes the last prompt and puts it back in the input box.
 - When you scroll near the top (about 400 px), older messages load by themselves without moving the view; *Load older messages* does the same on a click.
 - While the session has a to-do list, its status line (also in every split tile) shows the item being worked on, else the first pending one, and *done/total*, as the terminal UI does; cancelled items count in neither number. When everything is done it shows a tick and *done/total* in green. A click on it opens the whole list in a popover (Esc, a click elsewhere or another session closes it); the list updates while it is open.
@@ -144,7 +145,7 @@ When the model calls the `question` tool, the questions appear inside the card o
 | Ctrl+C | Without a selection, empties the input box; with a selection it copies. |
 | `!` at the start | Shell mode: the line runs as a shell command. Backspace on an empty box or Esc leaves it. |
 
-- Paste an image from the clipboard or drop image files on the box (PNG, JPEG, GIF or WebP, up to 20 MiB each). The text gets an `[Image N]` token, as in the terminal UI. A browser cannot paste the path or `file://` address of a file.
+- Paste an image or drop any file on the box (or paste `file://` URLs): supported images (PNG, JPEG, GIF or WebP, up to 20 MiB each) attach as `[Image N]` tokens, as in the terminal UI; other files insert their path at the caret (or filename when the browser withholds the path).
 - `@` lists files under the session's directory and inserts `@path `.
 - The prompt history (500 entries) is kept in the browser (`localStorage`, key `ref.promptHistory`). It is not shared with the terminal UI or the GUI.
 

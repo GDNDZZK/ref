@@ -160,6 +160,8 @@ When a tool call needs permission, the TUI shows the call and asks:
 - `s`: allow every call of this tool for the rest of the session
 - `d`: deny; the model is told and continues
 
+For `edit` and `write`, the request includes a preview diff of what will change before you answer (computed when the request is created; the file may change if you wait).
+
 When a tool has a delay, a countdown is shown before it runs, and `esc` cancels the call. Both are set in the configuration: see [Permissions](configuration.md#permissions) and [Tool delays](configuration.md#tool-delays).
 
 ## Questions from the model
@@ -187,4 +189,4 @@ Options marked `(default)` are ticked at the start of a multiple choice. Tabs yo
 
 When a question allows it, the last row is **Type your own answer**. Choose it to type in the row; `enter` keeps the text (on a lone question it also sends the answer), an empty text cancels, and `esc` leaves the field without dismissing the dialog. On a multiple choice the typed text is added to the ticked options, and choosing the row again takes it back. If another client answers first, the dialog closes by itself.
 
-Run `ref`, the GUI and the web UI from the same version as `ref-server`. An older client cannot show a question, so the session waits until another window answers it or you stop the turn.
+If a client and `ref-server` speak different protocol versions, `ref-server` refuses the connection with a message saying which side to update or how to restart the backend (`ref-server --stop`, then start again).
