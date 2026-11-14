@@ -148,7 +148,36 @@ impl Env {
 
     /// Runs ref-web to completion (for the "already running" and "port in use" cases).
     pub fn run(&self, args: &[&str]) -> std::process::Output {
-        self.command(args).output().unwrap()
+        let log_id = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let stdout_path = self.dir.join(format!("run-stdout-{log_id}.log"));
+        let stderr_path = self.dir.join(format!("run-stderr-{log_id}.log"));
+        let mut child = self
+            .command(args)
+            .stdout(Stdio::from(std::fs::File::create(&stdout_path).unwrap()))
+            .stderr(Stdio::from(std::fs::File::create(&stderr_path).unwrap()))
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + START_TIMEOUT;
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if std::time::Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                let out = std::fs::read_to_string(&stdout_path).unwrap_or_default();
+                let err = std::fs::read_to_string(&stderr_path).unwrap_or_default();
+                panic!(
+                    "ref-web {args:?} did not exit within {START_TIMEOUT:?}\nstdout: {out}\nstderr: {err}"
+                );
+            }
+            std::thread::sleep(POLL_SLOW);
+        };
+        std::process::Output {
+            status,
+            stdout: std::fs::read(&stdout_path).unwrap_or_default(),
+            stderr: std::fs::read(&stderr_path).unwrap_or_default(),
+        }
     }
 
     /// Starts ref-web in the background (it picks its own port) and waits until it listens.
