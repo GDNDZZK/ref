@@ -5,10 +5,10 @@
 // instead of jumping. Only user gestures change `following`: scrolling (wheel, touch, keys) or
 // dragging the scroll bar releases it, and ending such a gesture at the end re-engages it.
 //
-// Holding: while `turnInProgress` and following, the end never moves up. Streaming content can
-// briefly take more room than it ends up needing (a line that wraps, then fits); the footer
-// grows by what the content gave back, so the view does not bounce. When the turn ends, the
-// held room is released with an animation.
+// Holding: while active generation or execution runs (`thinking`, `running`, `compacting`) and
+// following, the end never moves up. Streaming content can briefly take more room than it ends up
+// needing (a line that wraps, then fits); the footer grows by what the content gave back, so the
+// view does not bounce. When active work pauses or ends, the held room is released with an animation.
 //
 // Older messages: a pill is the first row while more exist, and scrolling near the top loads
 // the next page. The rows above the ones in view are added without moving what the user reads.
@@ -43,7 +43,10 @@ import { Key } from '../keys.ts'
 
 const props = defineProps<{ session: ChatSession }>()
 const blocks = computed(() => props.session.blocks)
-const turnInProgress = computed(() => props.session.busy)
+const holding = computed(() => {
+  const { activity } = props.session
+  return activity === 'thinking' || activity === 'running' || activity === 'compacting'
+})
 const generation = computed(() => props.session.generation) // changes when the history is loaded
 const following = defineModel<boolean>('following', { default: true })
 const emit = defineEmits<{ errorOutOfSight: [] }>()
@@ -124,6 +127,8 @@ watch(
 
 function jumpToEnd(): void {
   if (!scroller.value) return
+  cancelRelease?.()
+  highWater = 0
   following.value = true
   setHeld(0)
   scroller.value.scrollTop = scroller.value.scrollHeight
@@ -133,12 +138,8 @@ function jumpToEnd(): void {
 let heldSpace = 0
 let highWater = 0 // furthest natural end of the current turn
 
-function scrollEnd(): number {
-  return scroller.value?.scrollHeight ?? 0
-}
-
 function naturalEnd(): number {
-  return scrollEnd() - heldSpace
+  return rows.value?.offsetHeight ?? 0
 }
 
 function atEnd(): boolean {
@@ -153,9 +154,10 @@ function setHeld(space: number): void {
 }
 
 function holdEnd(): void {
+  const end = naturalEnd()
   const maxHeld = Math.max(0, (scroller.value?.clientHeight ?? 0) - 1)
-  highWater = Math.max(highWater, naturalEnd())
-  setHeld(Math.min(maxHeld, Math.max(0, highWater - naturalEnd())))
+  highWater = Math.min(Math.max(highWater, end), end + maxHeld)
+  setHeld(highWater - end)
 }
 
 // --- Following.
@@ -182,29 +184,27 @@ useFrame(chasing, (frameSeconds) => {
 
 watch(following, (isFollowing) => {
   if (!isFollowing) return
-  highWater = scrollEnd()
+  highWater = naturalEnd() + heldSpace
   chaseEnd()
 })
 
 let cancelRelease: (() => void) | undefined
-watch(
-  () => turnInProgress.value,
-  (inProgress) => {
-    cancelRelease?.()
-    if (inProgress) {
-      highWater = scrollEnd()
-      holdEnd()
-      return
-    }
-    cancelRelease = tween({
-      from: heldSpace,
-      to: 0,
-      durationMs: motion.slow,
-      easing: motionEasing.ease,
-      update: setHeld,
-    })
-  },
-)
+watch(holding, (isHolding) => {
+  cancelRelease?.()
+  if (isHolding) {
+    highWater = naturalEnd() + heldSpace
+    holdEnd()
+    return
+  }
+  if (heldSpace === 0) return
+  cancelRelease = tween({
+    from: heldSpace,
+    to: 0,
+    durationMs: motion.slow,
+    easing: motionEasing.ease,
+    update: setHeld,
+  })
+})
 
 // A viewport that changes size (the window, or the input box unfolding below) keeps the end in
 // view in the same frame; rows that change size (streaming text, folding bodies) are chased.
@@ -214,7 +214,7 @@ function pinToEnd(): void {
 }
 
 const sizeObserver = new ResizeObserver((entries) => {
-  if (turnInProgress.value && following.value) holdEnd()
+  if (holding.value && following.value) holdEnd()
   const viewportResized = entries.some((entry) => entry.target === scroller.value)
   if (following.value && !gesturing && viewportResized) pinToEnd()
   else chaseEnd()
