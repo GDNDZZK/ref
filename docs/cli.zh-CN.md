@@ -76,6 +76,7 @@ ref-server [options]
 | `--stop [PID]` | 停止所有运行中的后端，或停止指定 PID 的后端。 |
 | `-V`, `--version`, `-h`, `--help` | 版本和帮助。 |
 
+`ref-server --stop` 和 `--status` 支持跨协议版本工作。如果界面客户端与 `ref-server` 的协议版本不一致，`ref-server` 会拒绝握手，并提示你更新客户端，或先运行 `ref-server --stop` 再重新启动。
 ## 在另一台机器上运行后端
 
 ```bash

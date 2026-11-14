@@ -7,6 +7,7 @@
 //   ↑ ↓ history · `/` commands · `@` files · `!` shell · paste or drop images
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { fileUriToPath, parseFileUris } from '../composer/sessionComposer.ts'
 import type { SessionComposer } from '../composer/sessionComposer.ts'
 import type { ChatSession } from '../model/chatSession.ts'
 import { useCommandsStore } from '../stores/commands.ts'
@@ -232,29 +233,48 @@ function onCaretMoved(): void {
 
 // --- images -------------------------------------------------------------------------------
 
-async function attach(files: readonly File[]): Promise<void> {
+async function attach(files: readonly File[], uriList = ''): Promise<void> {
   sync()
-  await props.composer.attachFiles(files)
+  await props.composer.attachFiles(files, uriList)
   input.value?.focus()
   void showCaret()
 }
 
-function imagesOf(files: FileList | undefined): File[] {
-  return [...(files ?? [])].filter((file) => file.type.startsWith('image/'))
+function isFileUriList(text: string): boolean {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== '' && !line.startsWith('#'))
+  return lines.length > 0 && lines.every((line) => fileUriToPath(line) !== undefined)
 }
 
-// An image on the clipboard becomes an attachment; text that comes with it wins, as when
-// copying cells from a spreadsheet.
+// A pasted file or file URL becomes an image attachment or an inserted path; plain non-file text
+// alongside a non-file image (e.g. spreadsheet cells) still wins.
 function onPaste(event: ClipboardEvent): void {
   const data = event.clipboardData
-  const images = imagesOf(data?.files)
-  if (images.length === 0 || data?.getData('text/plain').trim()) return
-  event.preventDefault()
-  void attach(images)
+  const files = [...(data?.files ?? [])]
+  const uriList = data?.getData('text/uri-list') ?? ''
+  const plain = data?.getData('text/plain') ?? ''
+  const hasUriList = parseFileUris(uriList).length > 0
+  const plainIsFileUris = isFileUriList(plain)
+  if (files.length > 0 && !hasUriList && !plainIsFileUris && plain.trim() !== '') return
+  let uris = ''
+  if (hasUriList) uris = uriList
+  else if (plainIsFileUris) uris = plain
+  if (files.length > 0) {
+    event.preventDefault()
+    void attach(files, uris)
+    return
+  }
+  if (uris) {
+    event.preventDefault()
+    void attach([], uris)
+  }
 }
 
 function hasFiles(event: DragEvent): boolean {
-  return event.dataTransfer?.types.includes('Files') ?? false
+  const types = event.dataTransfer?.types
+  return types !== undefined && (types.includes('Files') || types.includes('text/uri-list'))
 }
 
 function onDragEnter(event: DragEvent): void {
@@ -276,7 +296,8 @@ function onDrop(event: DragEvent): void {
   event.preventDefault()
   dragDepth.value = 0
   const files = [...(event.dataTransfer?.files ?? [])]
-  if (files.length > 0) void attach(files)
+  const uriList = event.dataTransfer?.getData('text/uri-list') ?? ''
+  if (files.length > 0 || parseFileUris(uriList).length > 0) void attach(files, uriList)
 }
 
 // --- tags ---------------------------------------------------------------------------------
@@ -366,7 +387,7 @@ defineExpose({ focus: () => input.value?.focus() })
             <span class="hint" :class="{ shown: interruptHint }">{{ t('composer.interruptHint') }}</span>
             <SendButton :busy="session.busy" :can-send="canSend" @click="onSendButton" />
           </div>
-          <div class="drop-veil" :class="{ shown: dragDepth > 0 }">{{ t('composer.dropImages') }}</div>
+          <div class="drop-veil" :class="{ shown: dragDepth > 0 }">{{ t('composer.dropFiles') }}</div>
         </div>
       </div>
     </div>

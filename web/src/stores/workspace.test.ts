@@ -196,11 +196,12 @@ describe('agents', () => {
 })
 
 describe('split view', () => {
-  async function inSplit() {
+  async function inSplit(extraSessions: ReturnType<typeof session>[] = []) {
     const workspace = setup([
       session('ses_1'),
       session('ses_2', { attached: 0 }),
       session('ses_3', { attached: 2 }),
+      ...extraSessions,
     ])
     await workspace.openSession('ses_1')
     api.attach.mockClear()
@@ -213,20 +214,30 @@ describe('split view', () => {
         session('ses_1', { attached: 0 }),
         session('ses_2', { attached: 0 }),
         session('ses_3', { attached: 2 }),
+        ...extraSessions,
       ],
     })
     return workspace
   }
 
-  it('subscribes first, backgrounds the open session and watches the other tiles', async () => {
+  it('hides the current foreground session, watches only background tiles, and starts unfocused', async () => {
     const workspace = await inSplit()
     expect(api.watchAll).toHaveBeenCalledWith(true)
     expect(api.detach).toHaveBeenCalledWith('ses_1')
     expect(api.attach).toHaveBeenCalledWith('ses_2', false)
-    expect(workspace.tileIds).toEqual(['ses_1', 'ses_2']) // ses_3 is open in another window
-    expect(workspace.visibleSessionIds).toEqual(['ses_1', 'ses_2'])
-    expect(workspace.focusedId).toBe('ses_1')
-    expect(workspace.chat('ses_1').attachment).toBe('watching')
+    expect(workspace.tileIds).toEqual(['ses_2']) // ses_1 is hidden foreground, ses_3 is in another window
+    expect(workspace.visibleSessionIds).toEqual(['ses_2'])
+    expect(workspace.focusedId).toBeUndefined()
+    expect(workspace.chat('ses_1').attachment).toBe('detached')
+    expect(workspace.chat('ses_2').attachment).toBe('watching')
+  })
+
+  it('focuses a tile and allows deselecting it', async () => {
+    const workspace = await inSplit()
+    workspace.focusTile('ses_2')
+    expect(workspace.focusedId).toBe('ses_2')
+    workspace.focusTile(undefined)
+    expect(workspace.focusedId).toBeUndefined()
   })
 
   it('zooms a tile and returns to the grid', async () => {
@@ -234,11 +245,12 @@ describe('split view', () => {
     workspace.zoomTile('ses_2')
     expect(workspace.visibleSessionIds).toEqual(['ses_2'])
     expect(workspace.focusedId).toBe('ses_2')
+    expect(workspace.currentId).toBe('ses_1')
     workspace.unzoom()
-    expect(workspace.visibleSessionIds).toEqual(['ses_1', 'ses_2'])
+    expect(workspace.visibleSessionIds).toEqual(['ses_2'])
   })
 
-  it('leaving brings the open session back to the foreground and lets go of the others', async () => {
+  it('leaving brings the zoomed tile (or original open session) back to the foreground', async () => {
     const workspace = await inSplit()
     workspace.zoomTile('ses_2')
     api.attach.mockClear()
@@ -246,14 +258,35 @@ describe('split view', () => {
     await workspace.leaveSplit()
     expect(api.watchAll).toHaveBeenLastCalledWith(false)
     expect(api.attach).toHaveBeenCalledWith('ses_2', true)
-    expect(api.detach).toHaveBeenCalledWith('ses_1')
     expect(workspace.mode).toBe('single')
     expect(workspace.currentId).toBe('ses_2')
     expect(workspace.zoomedId).toBeUndefined()
+    expect(workspace.tileFocusId).toBeUndefined()
+  })
+
+  it('leaving without zoom re-attaches the hidden foreground session and detaches tiles', async () => {
+    const workspace = await inSplit()
+    api.attach.mockClear()
+    api.detach.mockClear()
+    await workspace.leaveSplit()
+    expect(api.attach).toHaveBeenCalledWith('ses_1', true)
+    expect(api.detach).toHaveBeenCalledWith('ses_2')
+    expect(workspace.currentId).toBe('ses_1')
+  })
+
+  it('handles an empty split view when only the foreground session is live', async () => {
+    const workspace = setup([session('ses_1')])
+    await workspace.openSession('ses_1')
+    await workspace.enterSplit()
+    expect(workspace.tileIds).toEqual([])
+    expect(workspace.focusedId).toBeUndefined()
+    expect(workspace.chat('ses_1').attachment).toBe('detached')
+    await workspace.leaveSplit()
+    expect(workspace.chat('ses_1').attachment).toBe('foreground')
   })
 
   it('moves the focus to the neighbouring tile', async () => {
-    const workspace = await inSplit()
+    const workspace = await inSplit([session('ses_4', { attached: 0 })])
     workspace.setTileRects([
       { x: 0, y: 0, width: 100, height: 100 },
       { x: 110, y: 0, width: 100, height: 100 },
@@ -261,6 +294,8 @@ describe('split view', () => {
     workspace.moveTileFocus(1, 0)
     expect(workspace.focusedId).toBe('ses_2')
     workspace.moveTileFocus(1, 0)
-    expect(workspace.focusedId).toBe('ses_2')
+    expect(workspace.focusedId).toBe('ses_4')
+    workspace.moveTileFocus(1, 0)
+    expect(workspace.focusedId).toBe('ses_4')
   })
 })

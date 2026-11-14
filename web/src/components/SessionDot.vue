@@ -8,7 +8,7 @@ import { motion } from '../theme/generated/motion.ts'
 import type { RowState } from '../shell/sessionRow.ts'
 import Flourish from './Flourish.vue'
 
-const props = defineProps<{ state: RowState }>()
+const props = defineProps<{ state: RowState; tint?: string }>()
 
 const WORKING: readonly RowState[] = ['busy', 'compacting', 'retrying', 'permission', 'question']
 
@@ -35,7 +35,11 @@ onBeforeUnmount(() => clearTimeout(settle))
 </script>
 
 <template>
-  <span class="dot-box" :class="[state, { finished }]">
+  <span
+    class="dot-box"
+    :class="[state, { finished, tinted: !!tint }]"
+    :style="tint ? { '--dot-tint': tint } : undefined"
+  >
     <Flourish ref="flourish" />
     <span ref="dot" class="dot" />
   </span>
@@ -56,6 +60,11 @@ onBeforeUnmount(() => clearTimeout(settle))
   --state-color: var(--accent);
 }
 
+.dot-box.tinted,
+.dot-box.tinted.busy,
+.dot-box.tinted.compacting {
+  --state-color: var(--dot-tint);
+}
 .retrying,
 .permission,
 .question {

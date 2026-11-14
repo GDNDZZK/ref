@@ -51,8 +51,13 @@ Some tests start `python3` (a fake MCP server) and `bash`. The end-to-end script
 
 The protocol types are in `crates/proto`. Two sets of files are generated from them and checked into the repository: JSON samples of every frame in `crates/proto/fixtures/` (the GUI and the web frontend parse each one in their tests) and the TypeScript types in `web/src/proto/generated/`. `cargo test -p ref-proto` fails when they are out of date; `REF_UPDATE_FIXTURES=1 cargo test -p ref-proto` rewrites them. Both directories are kept on LF line endings by `.gitattributes`.
 
-The TUI and the backend exchange JSON frames over WebSocket. Frontends get history page by page: `Attach` returns the newest messages (100, or fewer if they exceed about 1 MiB) and `Messages` returns the page before a given message, so the TUI loads older pages as you scroll up. Images reach frontends as stubs (MIME type, size and an `id`, no bytes); `GetImage` returns the bytes for an id.
+The TUI, GUI and web frontend exchange JSON frames over WebSocket (`PROTOCOL_VERSION` is currently `4`). On `Hello`, the server checks `version == PROTOCOL_VERSION` and refuses mismatches with `code: "protocol_mismatch"` (the `ref-server-cli` control client used by `--stop` and `--status` is exempt). The protocol version is bumped only for incompatible changes or when a new baseline is enforced.
 
+`ServerFrame::Response` may carry an optional machine-readable `code` on `ok: false` when clients need to branch on an error (`no_pending_question`, `no_pending_permission`, `protocol_mismatch`, `dir_not_found`); the human-readable `error` text remains as a fallback. Frontends get history page by page: `Attach` returns the newest messages (100, or fewer if they exceed about 1 MiB) and `Messages` returns the page before a given message, so older pages load as you scroll up. Images reach frontends as stubs (MIME type, size and an `id`, no bytes); `GetImage` returns the bytes for an id.
+
+Additional optional metadata used by clients:
+- `Part::Tool.meta.warnings`: array of warning strings on successful `edit` results (e.g. remapped line numbers or stripped `N:` prefixes); omitted when empty.
+- `PermissionRequest.preview`: optional `EditPreview` (`{ diff, added, removed, truncated }`) on built-in `edit` and `write` permission requests, computed by a dry run when asked (capped at 64 KiB diff text, 400 lines, and 2 MiB source file size; omitted on failure or above the limit).
 ## The mock backend
 
 `ref-server --mock` is a fake backend for developing interfaces without an LLM. `ref-gui --mock` and `ref-web --mock` start a private one through `ref-client`. (`ref --mock` is a separate, in-process fake and does not use it.)

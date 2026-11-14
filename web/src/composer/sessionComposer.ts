@@ -14,6 +14,7 @@ import {
   clearDraft,
   dropOrphanAttachments,
   emptyDraft,
+  insertToken,
   restoreInto,
   submissionOf,
 } from './draft.ts'
@@ -355,14 +356,24 @@ export class SessionComposer {
     return this.cursor
   }
 
-  // --- images ---------------------------------------------------------------------------
+  // --- images and files -----------------------------------------------------------------
 
-  // Pasted or dropped files; non-images are skipped with a message. Returns the caret after the tokens.
-  async attachFiles(files: readonly File[]): Promise<number> {
-    for (const file of files) {
+  // Pasted or dropped files / file URIs; images attach, unsupported files insert their path at caret.
+  async attachFiles(files: readonly File[], uriList = ''): Promise<number> {
+    const paths = parseFileUris(uriList)
+    if (files.length === 0) {
+      for (const path of paths) this.cursor = insertToken(this.draft, path, this.cursor)
+      return this.cursor
+    }
+    for (const [index, file] of files.entries()) {
       const rejection = rejectionOf(file)
-      if (rejection) {
-        this.host.toast('warn', `composer.toast.image.${rejection}`, { name: file.name })
+      if (rejection === 'size') {
+        this.host.toast('warn', 'composer.toast.image.size', { name: file.name })
+        continue
+      }
+      if (rejection === 'type') {
+        const path = resolveFilePath(file, index, files.length, paths)
+        if (path) this.cursor = insertToken(this.draft, path, this.cursor)
         continue
       }
       try {
@@ -374,4 +385,39 @@ export class SessionComposer {
     }
     return this.cursor
   }
+}
+
+export function fileUriToPath(raw: string): string | undefined {
+  try {
+    const url = new URL(raw)
+    if (url.protocol !== 'file:') return undefined
+    const decoded = decodeURIComponent(url.pathname)
+    if (/^\/[A-Za-z]:\//.test(decoded)) return decoded.slice(1)
+    if (url.hostname && url.hostname !== 'localhost') return `//${url.hostname}${decoded}`
+    return decoded
+  } catch {
+    return undefined
+  }
+}
+
+export function parseFileUris(uriList: string): string[] {
+  return uriList
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== '' && !line.startsWith('#'))
+    .flatMap((line) => {
+      const path = fileUriToPath(line)
+      return path === undefined ? [] : [path]
+    })
+}
+
+function resolveFilePath(file: File, index: number, total: number, paths: readonly string[]): string {
+  if (paths.length === total && paths[index]) return paths[index]
+  if (file.name) {
+    const matched = paths.find(
+      (candidate) => candidate.endsWith(`/${file.name}`) || candidate.endsWith(`\\${file.name}`),
+    )
+    if (matched) return matched
+  }
+  return file.name
 }

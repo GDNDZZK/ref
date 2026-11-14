@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { agentColor, agentColorByName } from './agentColor.ts'
+import { agentColor, agentColorByName, paletteColorFor } from './agentColor.ts'
 import { agentPalette, colors } from './generated/theme.ts'
 
 describe('agentColor', () => {
@@ -47,5 +47,13 @@ describe('agentColorByName', () => {
     const color = agentColorByName(agents, 'ghost')
     expect(color).toMatch(/^var\(--agent-palette-\d\)$/)
     expect(agentColorByName(agents, 'ghost')).toBe(color)
+  })
+})
+
+describe('paletteColorFor', () => {
+  it('returns a deterministic agent palette color for a session id', () => {
+    const color = paletteColorFor('ses_root_1')
+    expect(color).toMatch(/^var\(--agent-palette-\d+\)$/)
+    expect(paletteColorFor('ses_root_1')).toBe(color)
   })
 })

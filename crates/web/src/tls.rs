@@ -393,6 +393,7 @@ async fn handle_connection(
     if first[0] == TLS_HANDSHAKE_RECORD {
         match acceptor.accept(stream).await {
             Ok(tls_stream) => {
+                // Listener dropped on shutdown; nothing left to accept the stream.
                 let _ = ready_tx.send((tls_stream, addr)).await;
             }
             Err(e) => tracing::debug!("TLS handshake failed from {addr}: {e}"),
@@ -418,6 +419,7 @@ async fn respond_http_redirect(mut stream: TcpStream, hosts: &HostPolicy) {
         }
     }
     let response = http_redirect_response(&buf, hosts);
+    // Best-effort redirect reply on a plain-HTTP probe before closing the socket.
     let _ = stream.write_all(response.as_bytes()).await;
     let _ = stream.shutdown().await;
 }

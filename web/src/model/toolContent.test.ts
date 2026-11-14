@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   isWebUrl,
   limitLines,
+  metaStrings,
   parseDiff,
   parseFound,
+  parseQuestionAnswers,
   parseSourceListing,
   parseTodos,
   peerName,
@@ -175,5 +177,30 @@ describe('isWebUrl', () => {
     expect(isWebUrl('data:text/html,<b>x</b>')).toBe(false)
     expect(isWebUrl('file:///etc/passwd')).toBe(false)
     expect(isWebUrl('not a url')).toBe(false)
+  })
+})
+describe('metaStrings', () => {
+  it('returns string entries and ignores non-strings and missing keys', () => {
+    expect(metaStrings({ warnings: ['first', 42, null, { a: 1 }, 'second'] }, 'warnings')).toEqual([
+      'first',
+      'second',
+    ])
+    expect(metaStrings({ warnings: 'not-an-array' }, 'warnings')).toEqual([])
+    expect(metaStrings(null, 'warnings')).toEqual([])
+  })
+})
+
+describe('parseQuestionAnswers', () => {
+  it('pairs question headers with answers from meta.answers', () => {
+    expect(
+      parseQuestionAnswers(
+        { questions: [{ header: 'Loop', question: 'How?' }, { question: 'Checks?' }] },
+        { answers: [['Range'], ['Tests', 'Fmt']] },
+      ),
+    ).toEqual([
+      { header: 'Loop', answer: 'Range' },
+      { header: 'Checks?', answer: 'Tests, Fmt' },
+    ])
+    expect(parseQuestionAnswers({ questions: [{ header: 'Loop' }] }, null)).toEqual([])
   })
 })

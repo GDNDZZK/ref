@@ -76,6 +76,7 @@ ref-server [options]
 | `--stop [PID]` | Stop all running backends, or the one with this PID. |
 | `-V`, `--version`, `-h`, `--help` | Version and help. |
 
+`ref-server --stop` and `--status` work across protocol versions. If a UI client and `ref-server` speak different protocol versions, `ref-server` refuses the connection with a message telling you whether to update the client or run `ref-server --stop` and start again.
 ## Running the backend on another machine
 
 ```bash

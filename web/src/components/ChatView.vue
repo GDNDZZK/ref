@@ -153,8 +153,9 @@ function setHeld(space: number): void {
 }
 
 function holdEnd(): void {
+  const maxHeld = Math.max(0, (scroller.value?.clientHeight ?? 0) - 1)
   highWater = Math.max(highWater, naturalEnd())
-  setHeld(highWater - naturalEnd())
+  setHeld(Math.min(maxHeld, Math.max(0, highWater - naturalEnd())))
 }
 
 // --- Following.
