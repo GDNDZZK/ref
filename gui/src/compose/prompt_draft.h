@@ -44,6 +44,8 @@ public:
 	// Puts `image` in the text at the cursor as a new token, with a space before it when it
 	// follows other text and one after it.
 	void attach(proto::NamedImage image);
+	// Inserts `path` at the cursor with surrounding spacing like a mention.
+	void insertPath(const QString& path);
 	// Removes the attachment and its token.
 	void removeAttachment(qsizetype index);
 

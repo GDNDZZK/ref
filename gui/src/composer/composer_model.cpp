@@ -6,6 +6,7 @@
 
 #include <QBuffer>
 #include <QClipboard>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QImage>
 #include <QLoggingCategory>
@@ -606,7 +607,8 @@ int ComposerModel::attachUrls(const QList<QUrl>& urls)
 
 int ComposerModel::attachImageUrls(const QList<QUrl>& urls, bool reportOthers)
 {
-	int attached = 0;
+	int handled = 0;
+	bool pathInserted = false;
 	for(const QUrl& url : urls)
 	{
 		const auto file = compose::imageFromUrl(url);
@@ -618,14 +620,35 @@ int ComposerModel::attachImageUrls(const QList<QUrl>& urls, bool reportOthers)
 		if(*file)
 		{
 			attachImage(**file);
-			++attached;
+			++handled;
+			continue;
 		}
-		else if(reportOthers)
+		if(url.isLocalFile())
 		{
-			emit toastRequested(workspace::ToastLevel::Warn, tr("%1 is not a supported image (PNG, JPEG, GIF or WebP)").arg(url.fileName()));
+			const QString localPath = url.toLocalFile();
+			if(QFileInfo::exists(localPath))
+			{
+				m_draft.insertPath(localPath);
+				pathInserted = true;
+				++handled;
+				continue;
+			}
+			if(reportOthers)
+			{
+				emit toastRequested(workspace::ToastLevel::Warn, tr("File not found: %1").arg(localPath));
+			}
+			continue;
+		}
+		if(reportOthers)
+		{
+			emit toastRequested(workspace::ToastLevel::Warn, tr("%1 is not a local file").arg(url.toDisplayString()));
 		}
 	}
-	return attached;
+	if(pathInserted)
+	{
+		changeDraft();
+	}
+	return handled;
 }
 
 void ComposerModel::attachImage(proto::NamedImage image)

@@ -326,7 +326,7 @@ Item {
 			Text {
 				textFormat: Text.PlainText
 				anchors.centerIn: parent
-				text: qsTr("Drop images to attach")
+				text: qsTr("Drop files here")
 				color: Theme.textMuted
 				font.pixelSize: Theme.fontSize
 			}

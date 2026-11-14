@@ -124,7 +124,7 @@ public:
 	// Ctrl+V: attaches an image from the clipboard, or the image file whose path or URL is
 	// there. False when the clipboard holds something the text area should paste itself.
 	Q_INVOKABLE bool pasteFromClipboard();
-	// Dropped files. Returns how many were attached; others are left to the caller.
+	// Dropped files: attaches images and inserts paths of other local files. Returns how many were handled.
 	Q_INVOKABLE int attachUrls(const QList<QUrl>& urls);
 	Q_INVOKABLE void removeAttachment(int row);
 
@@ -169,7 +169,7 @@ private:
 	void draftEdited();
 	void setShellMode(bool shellMode);
 	void fillFromHistory(const QString& entry);
-	// Attaches the image files among `urls`; returns how many. Other files are reported if asked.
+	// Attaches images and inserts paths of other local files among `urls`; returns how many were handled.
 	int attachImageUrls(const QList<QUrl>& urls, bool reportOthers);
 	void attachImage(proto::NamedImage image);
 	void disarmInterrupt();
