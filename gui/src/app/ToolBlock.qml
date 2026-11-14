@@ -43,6 +43,7 @@ Block {
 	readonly property bool open: alwaysOpen || ((expanded || awaitingPermission) && hasDetails)
 	readonly property bool inactive: toolState === ToolState.denied || toolState === ToolState.cancelled
 	readonly property bool showsTime: columnWidth >= timeShownFromWidth
+	readonly property int timeShownFromWidth: 560
 	readonly property int headerHeight: 38
 	readonly property int cardPadding: Theme.toolBodyPaddingX
 	readonly property int itemSpacing: 10
@@ -295,8 +296,9 @@ Block {
 		Item {
 			id: body
 			y: header.height + failure.height + previewBox.height
+			width: parent.width
+			height: block.open && bodyLoader.item ? (bodyLoader.item as Item).height : 0
 			clip: true
-
 			Behavior on height {
 				NumberAnimation {
 					duration: Motion.standard
