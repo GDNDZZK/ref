@@ -200,8 +200,9 @@ The settings button is `sliders-20` in a 32px square face, hover `surfaceHover`.
 
 Replaces the SessionPane in the content area; the sidebar stays and marks the tiles' sessions with a 2px
 `accent` bar at the row's left edge (`isTile`). The selected row (`isCurrent`) is the session of the focused tile, so it
-follows a click, `Alt+arrows` and a click on the row; `Workspace.currentId` (what comes back when split view ends) does not move. Tiles are the live sessions nobody is attached to plus the current
-one (TUI rule). Empty: centred muted text "No background sessions" and a "New session" text button below.
+follows a click, `Alt+arrows` and a click on the row; `Workspace.currentId` (what comes back when split view ends) stays hidden
+from the grid. Tiles are the live background sessions nobody is attached to, excluding the current session (TUI rule). Split view
+starts with no tile focused. Empty: centred muted text "No background sessions" and a "New session" text button below.
 
 Grid. Outer padding `tilePadding` 16, gap `tileGap` 12. With `n` tiles in a content area of width W and height H:
 
@@ -214,23 +215,26 @@ tile height = max(tileMinHeight, (H - 2*pad - (rows-1)*gap) / rows)    // the gr
 Tiles fill rows in `created_at` order. The tiles of a partly filled last row share its width equally. When the
 whole grid is higher than H it scrolls with the themed scroll bar; there are no pages.
 
-Tile: radius `Theme.radius`, `Theme.background` fill, 1px `Theme.border` border (`accent` for the focused tile,
-`Motion.standard`), clipped. Header 36px, `surface` fill, 1px `border` line below:
+Tile: radius `Theme.radius`, `Theme.background` fill, 1px `Theme.border` border (`Theme.accentText` for the focused tile,
+or the root task's `Theme.hashColor(rootId)` palette color on unfocused sub-session tiles; `Theme.background` while leaving so
+the border fades out cleanly on `Motion.standard`), clipped. Header 36px, `surface` fill, 1px `border` line below:
 
 ```
- ● title ................ 2/5  1m 23s  [maximize-20 button 28]     state dot, title (13), todo progress, turn time, zoom
+ ● title  [⟲ root] ...... 2/5  1m 23s  [maximize-20 button 28]     state dot, title (13), root chip, todo progress, turn time, zoom
 ```
 
 The dot, progress, time and the attention treatments are the sidebar row's (permission: header in `warningSurface`
-with `lock-16`; error: `AlertBadge`). The body is a `SessionPane` with `compact: true`: reading column =
+with `lock-16`; error: `AlertBadge`). For sub-sessions (`parent` walked up to the root session), an unfocused tile tints its
+border and non-attention `SessionDot` with the root task's palette color, and the header shows a tinted `⟲ <root name>` chip
+(user-created tiles stay unmarked). The body is a `SessionPane` with `compact: true`: reading column =
 tile width − 2 × 16; the composer's outer margin is 10 instead of `pagePadding`; only the focused (or zoomed) tile
 shows the input box with its chip row and attachment strip (`Composer.boxShown`), as the TUI does: the others hide it
 (height → 0 and opacity → 0 over `Motion.standard`, `Motion.ease`; the draft, attachments, shell mode and caret are kept,
 the item is not destroyed), while the status line and the queue strip stay. The queue strip sits directly above the
 box's place, so only the box's height moves. A tile that follows the end of its conversation keeps the end on the
 bottom edge while its height changes (`ChatView.onHeightChanged`). Focusing a tile (click, `Alt+arrows`, the sidebar)
-shows its box and then gives it the keyboard; if the focused tile goes away, the current session's tile (else the first)
-is focused; the status pill and jump-to-latest
+shows its box and then gives it the keyboard; clicking the focused tile's header or the grid padding deselects it (no `Esc`
+conflict); if the focused tile goes away, the next tile (or none) is focused; the status pill and jump-to-latest
 button are the same, scaled by position only.
 
 Motion:
@@ -243,14 +247,13 @@ Motion:
 | Focus moves | border color `Motion.standard`; focus ring is only the border, nothing grows |
 | Zoom in | the tile's frame animates to the content area's rect (`Motion.slow`, `Motion.ease`), the other tiles fade out and shrink to `tileExitScale` (`Motion.standard`), the header's height 36 → 0 and its opacity → 0 (`Motion.standard`), the pane's margins go from the compact to the full values. When it ends the single-session pane takes over with identical geometry: no visible swap |
 | Zoom out | the reverse: the pane's frame animates from the content rect back to its slot (`Motion.slow`), the others fade in (`Motion.standard`) |
-| Enter / leave split view | the current session's pane shrinks into its tile slot / grows out of it, as zoom; the other tiles fade in / out |
+| Enter / leave split view | the current pane and the split grid cross-fade over `Motion.standard` (`Motion.ease`); single-pane stays borderless |
 
 The zoomed tile is the shared element: it is the same `SessionPane` item during the animation, so scroll position,
 streaming text and Hold survive. Hold (D5) is per pane and keeps working inside tiles.
 Zoom is `Ctrl+Shift+Z` on the focused tile, a click on the maximize button, or a double click on the header.
 Focus moves by clicking a tile, `Alt+arrows` (nearest tile in that direction by centre distance) or `Tab` outside
-the composer. Typing goes to the focused tile's composer; a click on a tile focuses its composer. The click is seen by a passive `TapHandler` on an item in front of the pane: selectable text takes the press for itself and then asks no handler of its ancestors, so a handler behind it never saw clicks on text. Buttons keep their click.
-
+the composer. Typing goes to the focused tile's composer; a click on an unfocused tile focuses its composer. The click is seen by a `TapHandler` on an item in front of the pane: selectable text takes the press for itself and then asks no handler of its ancestors, so a handler behind it never saw clicks on text. Buttons keep their click.
 ## Command palette (Ctrl+P)
 
 ```
@@ -304,9 +307,7 @@ The row of the current choice has `check-16` in `accent` at the right edge.
   `200k context · reasoning · images`. Choosing a model keeps the current variant when the new model has it.
 - Agents: row: `agent-16`, name, description on line 2 (elided); a colored 8px dot at the left when the agent has a color.
 - Variants: row = variant name; the current one is checked.
-- Sessions: Live and History sections with the sidebar's row content (state dot, title, dirname); search over both;
-  Enter opens; the live rows have the hover `close-16` button.
-
+- Sessions: three-state `Segmented` creator filter above the search bar (`All` / `User-created` / `By <creator>` of the selected row); Live and History sections with the sidebar's row content (state dot, title, dirname, `⟲ <creator>` on sub-sessions); search matches title, name, directory, id, and creator name/title/id; Enter opens; the live rows have the hover `close-16` button.
 **MCP** (480): one row per server, 44px: status dot (8px, as in the footer; failed = `danger`), name, status text at
 the right (textMuted; `danger` when failed), chevron (`Chevron`, rotates 90° with `Motion.standard`) when there is
 an error or tools. Expanded: the error in `danger` (`codeFontSize`, mono, wrapped) and the tool names as a wrapped
@@ -558,10 +559,8 @@ every interaction is frequent. Icons come from `assets/icons` through the icon p
   token from the text; deleting a token from the text removes the attachment. Images whose token is gone are not
   sent. A restored draft binds the images to its tokens in numeric order and renumbers them after the box's own;
   images without a token get one at the end.
-- Sources: Ctrl+V with an image on the clipboard, pasting the path or `file://` URL of an image file (png, jpg,
-  gif, webp; at most 20 MiB), dropping image files on the box. Restored drafts (undo, withdrawing a queued
-  prompt) bring their images back as thumbnails.
-- Drag over the box: border `Theme.accent` and a centered label "Drop images to attach" in `Theme.textMuted`
+- Sources: Ctrl+V with an image on the clipboard, pasting the path or `file://` URL of a file, dropping files on the box. Image files (png, jpg, gif, webp; at most 20 MiB) attach as thumbnails; other existing local files insert their plain absolute path at the cursor (matching `@`-mention). Restored drafts (undo, withdrawing a queued prompt) bring their images back as thumbnails.
+- Drag over the box: border `Theme.accentText` and a centered label "Drop files here" in `Theme.textMuted`
   over a `Theme.surface` veil at 90 % opacity, `Motion.quick`.
 
 ### Queue strip
@@ -689,8 +688,7 @@ the number in the text uses `ceil(remaining / 1000)` and ticks each second. Reac
 
 Inside the card, under the details, separated by a 1 divider. Height animates over `Motion.standard`.
 - Prominent fields first, as the TUI does: `command` as `$ cmd` mono 13 bold on `codeBackground` (radius 6, padding 8 x 10, wrapped),
-  `path` as a mono 13 `info` line. The full input follows in the card's body (forced open).
-- Button row, padding 10 x 14, spacing 8, height 30 each (radius `radiusSmall`): icon 16, label 13, key cap on the right.
+  `path` as a mono 13 `info` line, and for `edit`/`write` requests with a server `preview` diff, a `Preview` section (`+added` / `-removed`, diff lines, and `(preview cut)` when truncated). The full input follows in the card's body (forced open).
   **Allow** (`check`, `success`, key `a`), **Allow for session** (`check-all`, `accent`, key `s`), **Deny** (`close`, `danger`, key `d`).
   Style: 1 border in the colour at 50%, icon in the colour, label in `Theme.text`, fill = colour at 12% on hover and 22% pressed.
   Key cap: 18 x 18, radius 4, 1 border in the same colour, mono 11 letter in the colour.
@@ -722,8 +720,7 @@ output area, visible on hover, turns to `check` for `Motion.slow` after copying)
 | Tool | Body |
 |---|---|
 | generic / unknown | "Input" (pretty JSON, `info`) then "Output" (`textMuted`; `danger` when the tool failed; "(no output)" when empty) |
-| `edit`, `write` | Path row (`meta.path`, mono 12 text) with `+added` (`diffAdded`) and `-removed` (`diffRemoved`) counts, then the diff. Without `meta.diff`: generic |
-| `bash` | Command box (`$ cmd`, as in the permission section, with copy); then "Output" with an exit chip: `exit 0` `textMuted`, otherwise `danger`, plus "timed out" / "cancelled" / "truncated" chips from `meta`; while running the live output (`meta.live_output`) as a tail of 20 lines with "N earlier lines" above |
+| `edit`, `write` | Collapsed: preview with path row (`meta.path`), `+added` / `-removed` counts, first 8 diff rows, and `"+N more"` click target to expand. Expanded: "Input" (pretty JSON), full diff (plus any edit warnings), and "Output". Without `meta.diff`: generic |
 | `read` | Path row with the tag dim; lines as gutter + text (below) |
 | `grep` | One group per file: path row (mono 12 bold) and gutter + text lines; match lines (`*`) on `matchBackground`, context lines `textMuted`, `...` rows as a dim "⋯" separator. Footer chip "N matches in M files" (+ "truncated") from `meta` |
 | `find` | One row per path (height 24): `file` or `folder` icon 16 `textMuted`, directory part `textMuted`, name `text`; footer chip "N results" (+ "truncated") |
@@ -731,8 +728,8 @@ output area, visible on hover, turns to `check` for `Motion.slow` after copying)
 | `todo` | Not foldable: the list is always shown under the header (see below) |
 | `send_message`, `create_session` | Recipient row: `chat-send` / `chat-plus` icon 16 `info` + name (`info`, bold 13); the message text (`input.message` / `input.prompt`) in prose 13 on a 3 `info` left bar (padding-left 10); then "Output" |
 | `read_session`, `list_sessions`, `message_status`, `close_session` | Session name row (`chat` / `chat-list` / `chat-send` / `chat-x` icon + name), then "Output" |
+| `question` | Collapsed & expanded: compact question + chosen answer summary (`QuestionBody`); expanded also shows "Input" (pretty JSON) and "Output" |
 | Images (`images` of any tool, e.g. `read` of a picture) | Thumbnail row below the sections (below) |
-
 **Gutter + text** (read, grep): line numbers right aligned in a column as wide as the longest number (mono 11, `textMuted` 70%),
 12 gap, then the text. Not wrapped; the area scrolls horizontally with a thin bar when a line is wider.
 
@@ -799,8 +796,7 @@ A row of height 28 at the bottom of the chat, in the reading column, 12 `textMut
   `retrying` `retry` icon + "Retrying in 4s (attempt 2): <error, one line, elided>" (`warning`; the number counts down each second).
   Then " · 1m 12s" for the run (from `busySince`, each second; hidden under 1 s).
 - Right: context use "12.4k / 200k" with a bar 48 x 4 (radius 2, track `border`, fill `accent`); the fill turns `warning` from `contextRecommend`
-  and `danger` from `contextAuto`; the text is the same colour then. Hidden while `contextMax` is 0. Tooltip: the four numbers.
-- A shimmer is a highlight sweeping over the label: `shimmerPeriod` = 1600 ms for one sweep, highlight width 3 characters, colours `textMuted` to `text`.
+  and `danger` from `contextAuto`; the text is the same colour then. Hidden while `contextMax` is 0. Tooltip: the four numbers (`tipDelay` 600 ms).
 
 ## Errors
 

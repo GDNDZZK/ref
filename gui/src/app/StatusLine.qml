@@ -17,6 +17,7 @@ Item {
 	readonly property int lineHeight: 28
 	readonly property int itemSpacing: 8
 	readonly property int barWidth: 48
+	readonly property int tipDelay: 600
 	readonly property int barHeight: 4
 	readonly property string activity: session.activity
 	readonly property bool working: activity === Activity.thinking || activity === Activity.running || activity === Activity.compacting
@@ -169,8 +170,8 @@ Item {
 			HoverHandler { id: contextHover }
 			PlainToolTip {
 				visible: contextHover.hovered
+				delay: line.tipDelay
 				text: qsTr("Context: %1 of %2 tokens. Compaction is recommended at %3 and automatic at %4.")
-					.arg(line.contextUsed).arg(line.contextMax).arg(line.session.contextRecommend).arg(line.session.contextAuto)
 			}
 		}
 	}

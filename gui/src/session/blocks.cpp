@@ -94,6 +94,17 @@ QList<Block> toolBlocks(const MessageHeader& header, qsizetype index, const prot
 	block.runAt = tool.runAt.value_or(0);
 	block.meta = tool.meta.toObject();
 	block.liveOutput = block.meta.take(LiveOutputKey).toString();
+	const QJsonValue warningsValue = block.meta.value("warnings"_L1);
+	if(warningsValue.isArray())
+	{
+		for(const QJsonValue& item : warningsValue.toArray())
+		{
+			if(item.isString())
+			{
+				block.warnings.append(item.toString());
+			}
+		}
+	}
 	for(const proto::ImageData& image : tool.images)
 	{
 		block.images.append(imageRef(image));

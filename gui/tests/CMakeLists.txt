@@ -16,7 +16,7 @@ endfunction()
 refgui_add_test(tst_fence_splitter LIBS refgui_session)
 
 # Gui is only linked so that QAbstractItemModelTester can create the QFont and QBrush values it probes with.
-refgui_add_test(tst_conversation_model SOURCES session_test_data.h LIBS refgui_session Qt6::Gui)
+refgui_add_test(tst_conversation_model SOURCES session_test_data.h LIBS refgui_session Qt6::Gui DEFINITIONS REF_FIXTURES_DIR="${PROJECT_SOURCE_DIR}/../crates/proto/fixtures")
 
 refgui_add_test(tst_stream_pacer LIBS refgui_session)
 

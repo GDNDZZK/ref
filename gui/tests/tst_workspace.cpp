@@ -40,11 +40,10 @@ public:
 		};
 	}
 
-	void add(const QString& id, qint64 created, const QString& cwd = u"/work"_s)
+	void add(const QString& id, qint64 created, const QString& cwd = u"/work"_s, const std::optional<QString>& parent = std::nullopt)
 	{
-		m_sessions.insert(id, sessionInfoJson(id, {.title = u"Title "_s + id, .cwd = cwd, .createdAt = created}));
+		m_sessions.insert(id, sessionInfoJson(id, {.title = u"Title "_s + id, .cwd = cwd, .createdAt = created, .parent = parent}));
 	}
-
 	void setProtocol(int protocol) { m_protocol = protocol; }
 
 	// The to-do list the session's info carries.
@@ -74,8 +73,10 @@ public:
 		}
 	}
 
-	// While set, a question reply is refused with this text.
-	void failQuestionReply(const QString& error) { m_questionError = error; }
+	// While set, a question reply is refused with this text and optional code.
+	void failQuestionReply(const QString& error, const QString& code = {}) { m_questionError = error; m_questionCode = code; }
+	void failPermissionReply(const QString& error, const QString& code = {}) { m_permissionError = error; m_permissionCode = code; }
+	void failListDirs(const QString& error, const QString& code = {}) { m_listDirsError = error; m_listDirsCode = code; }
 
 	// The base64 text get_image answers with.
 	void setImageData(const QString& data) { m_imageData = data; }
@@ -213,6 +214,11 @@ private:
 		}
 		else if(op == u"list_dirs"_s)
 		{
+			if(!m_listDirsError.isEmpty())
+			{
+				m_fake.fail(request, m_listDirsError, m_listDirsCode);
+				return;
+			}
 			m_fake.respond(request, {{u"path"_s, u"/work"_s}, {u"dirs"_s, QJsonArray{u"a"_s, u"b"_s}}});
 		}
 		else if(op == u"get_config"_s)
@@ -243,7 +249,11 @@ private:
 		}
 		else if(op == u"question_reply"_s && !m_questionError.isEmpty())
 		{
-			m_fake.fail(request, m_questionError);
+			m_fake.fail(request, m_questionError, m_questionCode);
+		}
+		else if(op == u"permission_reply"_s && !m_permissionError.isEmpty())
+		{
+			m_fake.fail(request, m_permissionError, m_permissionCode);
 		}
 		else if(op == u"get_image"_s)
 		{
@@ -274,6 +284,11 @@ private:
 	bool m_holdQuestionReply = false;
 	QList<QJsonObject> m_heldQuestionReplies;
 	QString m_questionError;
+	QString m_questionCode;
+	QString m_permissionError;
+	QString m_permissionCode;
+	QString m_listDirsError;
+	QString m_listDirsCode;
 	QString m_shutdownError;
 	QString m_imageData;
 	bool m_closeOnShutdown = false;
@@ -395,6 +410,9 @@ private slots:
 	void destroyingTheWorkspaceWithADetachOutIsSafe();
 	void questionKeysComeAfterTheGuardAndAnswerTheCard();
 	void aQuestionAnsweredElsewhereGoesQuietly();
+	void aCodedQuestionAnsweredElsewhereGoesQuietly();
+	void aPermissionAnsweredElsewhereGoesQuietly();
+	void aPermissionSnapshotPreviewIsAttachedToTheToolRow();
 	void aRefusedAnswerKeepsTheCardAndSaysWhy();
 	void aLostConnectionFreesTheCardAndItCanBeSentAgain();
 	void aReplyThatFailsLateLeavesTheNextQuestionAlone();
@@ -408,6 +426,8 @@ private slots:
 	void invalidImageDataIsAnError();
 	void restartClosingTheConnectionIsQuiet();
 	void commandsFollowTheState();
+	void listDirsPassesErrorCodeToTheCallback();
+	void infoResolvesRootTaskFromLiveSessions();
 };
 
 void TestWorkspace::opensTheSessionFromTheCommandLine()
@@ -508,6 +528,30 @@ void TestWorkspace::renameReportsToTheCallback()
 	QTRY_COMPARE(f.workspace->sessions()->index(0, 0).data(refgui::workspace::SessionListModel::NameRole).toString(), u"Mine"_s);
 }
 
+void TestWorkspace::listDirsPassesErrorCodeToTheCallback()
+{
+	Fixture f;
+	QJSEngine engine;
+	Workspace::create(nullptr, &engine);
+	const QJSValue callback = engine.evaluate(u"var answer; (function(ok, result, code) { answer = [ok, result, code]; })"_s);
+	QVERIFY2(callback.isCallable(), qPrintable(callback.toString()));
+
+	f.stub.failListDirs(u"Directory does not exist: /missing"_s, u"not_found"_s);
+	f.workspace->listDirs(u"/missing"_s, callback);
+	QTRY_VERIFY(!engine.globalObject().property(u"answer"_s).isUndefined());
+	QCOMPARE(engine.globalObject().property(u"answer"_s).property(0).toBool(), false);
+	QCOMPARE(engine.globalObject().property(u"answer"_s).property(1).toString(), u"Directory does not exist: /missing"_s);
+	QCOMPARE(engine.globalObject().property(u"answer"_s).property(2).toString(), u"not_found"_s);
+
+	engine.globalObject().setProperty(u"answer"_s, QJSValue());
+	f.stub.failListDirs({});
+	f.workspace->listDirs(u"/work"_s, callback);
+	QTRY_VERIFY(!engine.globalObject().property(u"answer"_s).isUndefined());
+	QCOMPARE(engine.globalObject().property(u"answer"_s).property(0).toBool(), true);
+	QCOMPARE(engine.globalObject().property(u"answer"_s).property(1).property(u"path"_s).toString(), u"/work"_s);
+	QCOMPARE(engine.globalObject().property(u"answer"_s).property(2).toString(), QString());
+}
+
 void TestWorkspace::failedRequestsBecomeToasts()
 {
 	Fixture f;
@@ -584,17 +628,23 @@ void TestWorkspace::splitViewWatchesAndComesBack()
 	f.workspace->toggleSplit();
 
 	QTRY_VERIFY(f.workspace->isSplitView());
-	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
 	QTRY_COMPARE(f.stub.requests(u"watch_all"_s).size(), 1);
 	QVERIFY(f.stub.requests(u"watch_all"_s).first().value(u"enabled"_s).toBool());
-	// The current session gave up the foreground; the other one is attached as a watcher.
-	QCOMPARE(f.stub.requests(u"detach"_s).first().value(u"session_id"_s).toString(), u"ses_a"_s);
+	// The foreground session stays hidden; the background session is attached as a watcher.
+	QVERIFY(f.workspace->current()->isForeground());
+	QCOMPARE(f.stub.requests(u"detach"_s).size(), 0);
 	QTRY_VERIFY(f.workspace->session(u"ses_b"_s)->isAttached());
 	QCOMPARE(f.stub.requests(u"attach"_s).last().value(u"session_id"_s).toString(), u"ses_b"_s);
 	QVERIFY(!f.stub.requests(u"attach"_s).last().value(u"foreground"_s).toBool());
-	QCOMPARE(f.workspace->focusedTileId(), u"ses_a"_s);
-	QCOMPARE(f.workspace->visibleSessionIds().size(), 2);
-	QCOMPARE(f.workspace->tileStage()->placed(), 2);
+	QCOMPARE(f.workspace->focusedTileId(), QString());
+	QCOMPARE(f.workspace->visibleSessionIds(), (QStringList{u"ses_b"_s}));
+	QCOMPARE(f.workspace->tileStage()->placed(), 1);
+
+	f.workspace->focusTile(u"ses_b"_s);
+	QCOMPARE(f.workspace->focusedTileId(), u"ses_b"_s);
+	f.workspace->focusTile({});
+	QCOMPARE(f.workspace->focusedTileId(), QString());
 
 	f.workspace->toggleSplit();
 
@@ -605,8 +655,6 @@ void TestWorkspace::splitViewWatchesAndComesBack()
 	QTRY_COMPARE(f.workspace->tileStage()->rowCount(), 0);
 	QTRY_COMPARE(f.stub.requests(u"watch_all"_s).size(), 2);
 	QVERIFY(!f.stub.requests(u"watch_all"_s).last().value(u"enabled"_s).toBool());
-	QTRY_VERIFY(f.stub.requests(u"attach"_s).last().value(u"foreground"_s).toBool());
-	QCOMPARE(f.stub.requests(u"attach"_s).last().value(u"session_id"_s).toString(), u"ses_a"_s);
 	QTRY_VERIFY(!f.workspace->session(u"ses_b"_s)->isAttached());
 	QCOMPARE(f.workspace->visibleSessionIds(), (QStringList{u"ses_a"_s}));
 }
@@ -616,7 +664,7 @@ void TestWorkspace::zoomUpgradesTheTileToTheForeground()
 	Fixture f(2, true);
 	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
 	f.workspace->toggleSplit();
-	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
 	QTRY_VERIFY(f.workspace->session(u"ses_b"_s)->isAttached());
 
 	f.workspace->zoomTile(u"ses_b"_s);
@@ -628,8 +676,9 @@ void TestWorkspace::zoomUpgradesTheTileToTheForeground()
 
 	f.workspace->unzoom();
 	QCOMPARE(f.workspace->zoomedId(), QString());
-	QTRY_COMPARE(f.stub.requests(u"detach"_s).last().value(u"session_id"_s).toString(), u"ses_b"_s);
-	QCOMPARE(f.workspace->visibleSessionIds().size(), 2);
+	QTRY_COMPARE(f.stub.requests(u"detach"_s).size(), 1);
+	QCOMPARE(f.stub.requests(u"detach"_s).last().value(u"session_id"_s).toString(), u"ses_b"_s);
+	QCOMPARE(f.workspace->visibleSessionIds(), (QStringList{u"ses_b"_s}));
 }
 
 // The backend still counts the unzoomed session as attached in the foreground until it has answered the detach;
@@ -639,7 +688,7 @@ void TestWorkspace::unzoomKeepsTheTileWhileItsForegroundIsGivenUp()
 	Fixture f(2, true);
 	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
 	f.workspace->toggleSplit();
-	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
 	QTRY_VERIFY(f.workspace->session(u"ses_b"_s)->isAttached());
 	f.workspace->zoomTile(u"ses_b"_s);
 	QTRY_VERIFY(f.stub.requests(u"attach"_s).last().value(u"foreground"_s).toBool());
@@ -648,18 +697,19 @@ void TestWorkspace::unzoomKeepsTheTileWhileItsForegroundIsGivenUp()
 
 	f.stub.holdDetach(true);
 	f.workspace->unzoom();
-	QTRY_COMPARE(f.stub.requests(u"detach"_s).last().value(u"session_id"_s).toString(), u"ses_b"_s);
+	QTRY_COMPARE(f.stub.requests(u"detach"_s).size(), 1);
+	QCOMPARE(f.stub.requests(u"detach"_s).last().value(u"session_id"_s).toString(), u"ses_b"_s);
 	f.stub.broadcast(); // still counts as attached
 	QTest::qWait(settleMs);
 
-	QCOMPARE(f.workspace->tiles()->rowCount(), 2);
-	QCOMPARE(f.workspace->visibleSessionIds().size(), 2);
+	QCOMPARE(f.workspace->tiles()->rowCount(), 1);
+	QCOMPARE(f.workspace->visibleSessionIds(), (QStringList{u"ses_b"_s}));
 	QVERIFY(f.workspace->session(u"ses_b"_s)->isAttached());
 
 	f.stub.releaseDetach();
-	QTRY_COMPARE(f.workspace->visibleSessionIds().size(), 2);
+	QTRY_COMPARE(f.workspace->visibleSessionIds(), (QStringList{u"ses_b"_s}));
 	QTest::qWait(settleMs);
-	QCOMPARE(f.workspace->tiles()->rowCount(), 2);
+	QCOMPARE(f.workspace->tiles()->rowCount(), 1);
 }
 
 void TestWorkspace::aClosedTileKeepsItsSessionUntilItHasLeft()
@@ -669,26 +719,26 @@ void TestWorkspace::aClosedTileKeepsItsSessionUntilItHasLeft()
 	const int lingerMs = 1000;
 	f.workspace->tileStage()->setLingerMs(lingerMs);
 	f.workspace->toggleSplit();
-	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
 	QPointer<ChatSession> closed = f.workspace->session(u"ses_b"_s);
 	QVERIFY(closed != nullptr);
 
 	f.workspace->closeSession(u"ses_b"_s);
 
-	QTRY_COMPARE(f.workspace->tileStage()->placed(), 1);
-	QCOMPARE(f.workspace->tileStage()->rowCount(), 2); // the closed tile is still on stage
+	QTRY_COMPARE(f.workspace->tileStage()->placed(), 0);
+	QCOMPARE(f.workspace->tileStage()->rowCount(), 1); // the closed tile is still on stage
 	QVERIFY(!closed.isNull());
-	QTRY_COMPARE_WITH_TIMEOUT(f.workspace->tileStage()->rowCount(), 1, 2 * lingerMs);
+	QTRY_COMPARE_WITH_TIMEOUT(f.workspace->tileStage()->rowCount(), 0, 2 * lingerMs);
 	QTRY_VERIFY(closed.isNull());
 }
 
 void TestWorkspace::closingTheCurrentTileSendsNoAttach()
 {
 	Fixture f(2, true);
-	
+
 	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
 	f.workspace->toggleSplit();
-	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
 	QTRY_VERIFY(f.workspace->session(u"ses_b"_s)->isAttached());
 	QSignalSpy toasts(f.workspace.get(), &Workspace::toastRequested);
 	const qsizetype attachesBefore = f.stub.requests(u"attach"_s).size();
@@ -727,8 +777,8 @@ void TestWorkspace::aRevivedTileLeavesOnItsOwnTimer()
 
 void TestWorkspace::anotherTileGetsTheFocusWhenTheFocusedOneCloses()
 {
-	Fixture f(2, true);
-	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
+	Fixture f(2, true, {}, [](StubServer& stub) { stub.add(u"ses_c"_s, 3); });
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 3);
 	f.workspace->toggleSplit();
 	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
 	f.workspace->focusTile(u"ses_b"_s);
@@ -737,7 +787,7 @@ void TestWorkspace::anotherTileGetsTheFocusWhenTheFocusedOneCloses()
 	f.workspace->closeSession(u"ses_b"_s);
 
 	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
-	QCOMPARE(f.workspace->focusedTileId(), u"ses_a"_s); // the current session's tile
+	QCOMPARE(f.workspace->focusedTileId(), QString());
 }
 
 // The highlighted row is the session in front: in split view the one whose tile has the focus, however it got it.
@@ -750,10 +800,10 @@ void TestWorkspace::theSidebarMarksTheFocusedTileAndTheTiles()
 	QVERIFY(!rowFlag(*f.workspace, u"ses_a"_s, Model::IsTileRole));
 
 	f.workspace->toggleSplit();
-	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
 
 	QVERIFY(rowFlag(*f.workspace, u"ses_a"_s, Model::IsCurrentRole));
-	QVERIFY(rowFlag(*f.workspace, u"ses_a"_s, Model::IsTileRole));
+	QVERIFY(!rowFlag(*f.workspace, u"ses_a"_s, Model::IsTileRole));
 	QVERIFY(rowFlag(*f.workspace, u"ses_b"_s, Model::IsTileRole));
 
 	f.workspace->focusTile(u"ses_b"_s); // what a click or Alt+arrow does
@@ -761,10 +811,14 @@ void TestWorkspace::theSidebarMarksTheFocusedTileAndTheTiles()
 	QVERIFY(!rowFlag(*f.workspace, u"ses_a"_s, Model::IsCurrentRole));
 	QCOMPARE(f.workspace->currentId(), u"ses_a"_s); // the session that comes back when split view ends
 
+	f.workspace->focusTile({});
+	QVERIFY(rowFlag(*f.workspace, u"ses_a"_s, Model::IsCurrentRole));
+	QVERIFY(!rowFlag(*f.workspace, u"ses_b"_s, Model::IsCurrentRole));
+
 	f.workspace->toggleSplit();
 	QTRY_VERIFY(!f.workspace->isSplitView());
 	QTRY_COMPARE(f.stub.requests(u"watch_all"_s).size(), 2); // the requests of leaving are answered
-	QTRY_VERIFY(f.stub.requests(u"attach"_s).last().value(u"foreground"_s).toBool());
+	QTRY_VERIFY(f.workspace->current()->isForeground());
 	QTRY_COMPARE(f.workspace->tileStage()->rowCount(), 0);
 	QVERIFY(rowFlag(*f.workspace, u"ses_a"_s, Model::IsCurrentRole));
 	QVERIFY(!rowFlag(*f.workspace, u"ses_b"_s, Model::IsCurrentRole));
@@ -844,6 +898,58 @@ void TestWorkspace::aQuestionAnsweredElsewhereGoesQuietly()
 
 	QTRY_VERIFY(!session->question()->isActive());
 	QVERIFY(session->statusText().isEmpty());
+}
+void TestWorkspace::aCodedQuestionAnsweredElsewhereGoesQuietly()
+{
+	Fixture f(2);
+	f.stub.failQuestionReply(u"different server wording"_s, u"no_pending_question"_s);
+	ChatSession* session = f.workspace->current();
+	f.fake.send(questionEvent());
+	QTRY_VERIFY(session->question()->isActive());
+
+	session->question()->activateRow(0);
+
+	QTRY_VERIFY(!session->question()->isActive());
+	QVERIFY(session->statusText().isEmpty());
+}
+
+void TestWorkspace::aPermissionAnsweredElsewhereGoesQuietly()
+{
+	for(const auto& [error, code] : {std::pair{u"different wording"_s, u"no_pending_permission"_s},
+	                                  std::pair{u"No pending permission request with that id."_s, QString()}})
+	{
+		Fixture f(2, false, awaitingPermission());
+		f.stub.failPermissionReply(error, code);
+		ChatSession* session = f.workspace->current();
+		QTRY_COMPARE(session->permissionCount(), 1);
+
+		session->permissionReply(u"call_1"_s, true, false);
+		QTRY_COMPARE(f.stub.requests(u"permission_reply"_s).size(), 1);
+		QTest::qWait(QuietMs);
+		QVERIFY(session->statusText().isEmpty());
+	}
+}
+
+void TestWorkspace::aPermissionSnapshotPreviewIsAttachedToTheToolRow()
+{
+	Fixture f(2, false, awaitingPermission());
+	ChatSession* session = f.workspace->current();
+	QTRY_COMPARE(session->permissionCount(), 1);
+	const QJsonObject preview{{u"diff"_s, u"+new\n-old\n"_s}, {u"added"_s, 1}, {u"removed"_s, 1}, {u"truncated"_s, false}};
+	const QJsonObject request{{u"session_id"_s, u"ses_a"_s},
+	                          {u"message_id"_s, u"msg_1"_s},
+	                          {u"call_id"_s, u"call_1"_s},
+	                          {u"tool"_s, u"edit"_s},
+	                          {u"purpose"_s, u"edit"_s},
+	                          {u"input"_s, QJsonObject()},
+	                          {u"time"_s, 1},
+	                          {u"preview"_s, preview}};
+	f.fake.send({{u"kind"_s, u"event"_s}, {u"session_id"_s, u"ses_a"_s}, {u"event"_s, QJsonObject{{u"type"_s, u"permission"_s}, {u"request"_s, request}}}});
+	QAbstractItemModel* blocks = session->blocks();
+	const int previewRole = blocks->roleNames().key("permissionPreview");
+	QTRY_COMPARE(blocks->index(0, 0).data(previewRole).toMap().value(u"added"_s).toInt(), 1);
+	f.fake.send({{u"kind"_s, u"event"_s}, {u"session_id"_s, u"ses_a"_s}, {u"event"_s, QJsonObject{{u"type"_s, u"permission_resolved"_s}, {u"call_id"_s, u"call_1"_s}}}});
+	QTRY_VERIFY(blocks->index(0, 0).data(previewRole).toMap().isEmpty());
 }
 
 void TestWorkspace::aRefusedAnswerKeepsTheCardAndSaysWhy()
@@ -1031,17 +1137,17 @@ void TestWorkspace::theSessionInFrontIsTheCurrentOneOrTheFocusedTile()
 	QCOMPARE(snapshot(a).value(u"total"_s).toInt(), 2);
 
 	f.workspace->toggleSplit();
-	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
 	ChatSession* b = f.workspace->session(u"ses_b"_s);
 	QTRY_VERIFY(b->isAttached());
-	QCOMPARE(f.workspace->frontSession(), a); // the focused tile
+	QCOMPARE(f.workspace->frontSession(), a); // no tile focused yet
 	f.workspace->focusTile(u"ses_b"_s);
 	QCOMPARE(f.workspace->frontSession(), b);
 	QVERIFY(b->todoItems().isEmpty()); // so the section is hidden
 	QCOMPARE(b->todoTotal(), 0);
 	QVERIFY(snapshot(b).value(u"items"_s).toList().isEmpty());
-	// Back to a session with a list: it is all there at once (the sidebar showed "0/0" and no rows here).
-	f.workspace->focusTile(u"ses_a"_s);
+	// Back to no focused tile: the current session's list is back in front.
+	f.workspace->focusTile({});
 	QCOMPARE(f.workspace->frontSession(), a);
 	QCOMPARE(snapshot(f.workspace->frontSession()).value(u"items"_s).toList().size(), 3);
 	QCOMPARE(snapshot(f.workspace->frontSession()).value(u"total"_s).toInt(), 2);
@@ -1082,7 +1188,7 @@ void TestWorkspace::destroyingTheWorkspaceWhileLeavingSplitViewIsSafe()
 	Fixture f(2, true);
 	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
 	f.workspace->toggleSplit();
-	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
 	QTRY_COMPARE(f.stub.requests(u"watch_all"_s).size(), 1);
 
 	f.stub.holdWatchAll(true);
@@ -1124,7 +1230,7 @@ void TestWorkspace::invalidImageDataIsAnError()
 	f.stub.setImageData(u"not base64!"_s);
 	const auto invalid = await(session->fetchImage(u"img_1"_s));
 	QVERIFY(invalid.has_value() && !invalid->has_value());
-	QCOMPARE(invalid->error(), u"invalid image data"_s);
+	QCOMPARE(invalid->error().message, u"invalid image data"_s);
 
 	f.stub.setImageData(QString::fromLatin1(QByteArray("png bytes").toBase64()));
 	const auto valid = await(session->fetchImage(u"img_1"_s));
@@ -1208,6 +1314,21 @@ void TestWorkspace::undoPutsThePromptBackIntoTheInputBox()
 	QCOMPARE(session->composer()->attachments()->rowCount(), 1);
 	QVERIFY(!session->composer()->shellMode()); // it was a prompt
 	QVERIFY(f.stub.ops().contains(u"undo"_s));
+}
+
+void TestWorkspace::infoResolvesRootTaskFromLiveSessions()
+{
+	Fixture f(refgui::proto::ProtocolVersion, false, {}, [](StubServer& stub) {
+		stub.add(u"ses_sub"_s, 2, u"/work"_s, u"ses_a"_s);
+		stub.add(u"ses_leaf"_s, 3, u"/work"_s, u"ses_sub"_s);
+	});
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 3);
+	const QVariantMap rootInfo = f.workspace->info(u"ses_a"_s);
+	const QVariantMap leafInfo = f.workspace->info(u"ses_leaf"_s);
+	QCOMPARE(rootInfo.value(u"rootId"_s).toString(), QString());
+	QCOMPARE(leafInfo.value(u"parentId"_s).toString(), u"ses_sub"_s);
+	QCOMPARE(leafInfo.value(u"rootId"_s).toString(), u"ses_a"_s);
+	QCOMPARE(leafInfo.value(u"rootName"_s).toString(), u"Title ses_a"_s);
 }
 
 QTEST_MAIN(TestWorkspace)

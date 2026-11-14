@@ -76,6 +76,7 @@ Item {
 		? queueStrip.height + queueGap * Math.min(1, queueStrip.height / queueStrip.queueRowHeight) : 0
 
 	implicitHeight: queueBlock + box.height
+	height: implicitHeight
 	onModelChanged: syncFromModel()
 
 	Component.onCompleted: {
@@ -325,7 +326,7 @@ Item {
 			Text {
 				textFormat: Text.PlainText
 				anchors.centerIn: parent
-				text: qsTr("Drop images to attach")
+				text: qsTr("Drop files here")
 				color: Theme.textMuted
 				font.pixelSize: Theme.fontSize
 			}

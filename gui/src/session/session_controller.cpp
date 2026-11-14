@@ -248,6 +248,7 @@ QCoro::Task<> SessionController::reattach()
 void SessionController::adopt(const proto::SessionSnapshot& snapshot)
 {
 	m_feed.reset(snapshot.messages);
+	m_model.setPendingPermissions(snapshot.pendingPermissions);
 	setQueued(snapshot.queued);
 	setQuestions(snapshot.pendingQuestions);
 	setMoreBefore(snapshot.moreBefore);
@@ -286,6 +287,16 @@ void SessionController::onEvent(const proto::SessionEvent& event)
 	if(const auto* resolved = std::get_if<proto::QuestionResolvedEvent>(&event))
 	{
 		dropQuestion(resolved->callId);
+		return;
+	}
+	if(const auto* permission = std::get_if<proto::PermissionEvent>(&event))
+	{
+		m_model.setPermission(permission->request);
+		return;
+	}
+	if(const auto* resolved = std::get_if<proto::PermissionResolvedEvent>(&event))
+	{
+		m_model.resolvePermission(resolved->callId);
 		return;
 	}
 	if(const auto* error = std::get_if<proto::ErrorEvent>(&event))

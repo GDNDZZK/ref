@@ -26,6 +26,8 @@ Block {
 	required property bool showAll
 	required property var meta
 	required property string liveOutput
+	required property var warnings
+	required property var permissionPreview
 	required property var images
 
 	readonly property var inputObject: ToolInfo.parse(inputJson)
@@ -36,10 +38,11 @@ Block {
 	readonly property bool delayed: toolState === ToolState.delayed
 	readonly property bool needsAttention: awaitingPermission || delayed
 	readonly property bool alwaysOpen: toolName === "todo" && ToolInfo.todos(inputObject).length > 0
+	readonly property bool hasDiffPreview: (toolName === "edit" || toolName === "write") && Fields.stringOf(meta, "diff") !== ""
+	readonly property bool hasQuestionSummary: toolName === "question" && ToolInfo.questionSummary(inputObject, meta).length > 0
 	readonly property bool open: alwaysOpen || ((expanded || awaitingPermission) && hasDetails)
 	readonly property bool inactive: toolState === ToolState.denied || toolState === ToolState.cancelled
 	readonly property bool showsTime: columnWidth >= timeShownFromWidth
-	readonly property int timeShownFromWidth: 560
 	readonly property int headerHeight: 38
 	readonly property int cardPadding: Theme.toolBodyPaddingX
 	readonly property int itemSpacing: 10
@@ -94,7 +97,7 @@ Block {
 	Rectangle {
 		id: card
 		width: block.columnWidth
-		height: header.height + failure.height + body.height + permission.height
+		height: header.height + failure.height + previewBox.height + body.height + permission.height
 		radius: Theme.radius
 		color: hover.hovered && block.hasDetails ? Theme.surfaceHover : Theme.surface
 		border.color: block.needsAttention ? Qt.alpha(Theme.warning, block.attentionBorderOpacity) : Theme.border
@@ -256,11 +259,42 @@ Block {
 			}
 		}
 
+		// Compact preview for edit/write diffs and answered questions while collapsed.
 		Item {
-			id: body
+			id: previewBox
+
+			readonly property bool shown: !block.open && !block.awaitingPermission && (block.hasDiffPreview || block.hasQuestionSummary)
+
 			y: header.height + failure.height
 			width: parent.width
-			height: block.open && bodyLoader.item ? (bodyLoader.item as Item).height : 0
+			height: shown && previewLoader.item ? (previewLoader.item as Item).height : 0
+			clip: true
+
+			Behavior on height { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+
+			Rectangle {
+				readonly property real cornerRadius: Theme.radius
+				readonly property real belowCornerCenter: Math.max(0, cornerRadius - previewBox.height)
+				readonly property real inset: cornerRadius - Math.sqrt(cornerRadius * cornerRadius - belowCornerCenter * belowCornerCenter)
+
+				visible: body.height === 0
+				x: inset
+				width: parent.width - 2 * inset
+				height: 1
+				color: Theme.border
+			}
+
+			Loader {
+				id: previewLoader
+				width: parent.width
+				active: previewBox.shown || previewBox.height > 0
+				sourceComponent: block.hasDiffPreview ? diffPreviewComponent : (block.hasQuestionSummary ? questionPreviewComponent : null)
+			}
+		}
+
+		Item {
+			id: body
+			y: header.height + failure.height + previewBox.height
 			clip: true
 
 			Behavior on height {
@@ -300,11 +334,31 @@ Block {
 
 		PermissionSection {
 			id: permission
-			y: header.height + failure.height + body.height
+			y: header.height + failure.height + previewBox.height + body.height
 			input: block.inputObject
 			open: block.awaitingPermission
+			preview: block.permissionPreview
 			othersWaiting: block.chat.permissionCount - 1
 			onAnswered: (allow, always) => block.chat.permissionAnswered(block.callId, allow, always)
+		}
+	}
+
+	Component {
+		id: diffPreviewComponent
+
+		DiffBody {
+			call: block
+			preview: true
+			onExpandRequested: if (!block.open && block.hasDetails && !block.awaitingPermission) block.toggleExpanded()
+		}
+	}
+
+	Component {
+		id: questionPreviewComponent
+
+		QuestionBody {
+			call: block
+			preview: true
 		}
 	}
 }

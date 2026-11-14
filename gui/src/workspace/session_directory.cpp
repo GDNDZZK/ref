@@ -222,8 +222,8 @@ void SessionDirectory::setLive(QList<proto::SessionInfo> sessions)
 		info.live = true;
 	}
 	m_liveSessions = sessions;
-	m_live.setSessions(sessions);
 	applyHistory();
+	m_live.setSessions(sessions);
 	emit liveChanged();
 }
 

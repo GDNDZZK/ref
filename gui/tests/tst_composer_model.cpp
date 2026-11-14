@@ -533,14 +533,20 @@ void TestComposerModel::imageFilesAreAttached()
 	QVERIFY(file.open(QIODevice::WriteOnly));
 	file.write("abc");
 	file.close();
+	QFile notes(dir.filePath(u"notes.txt"_s));
+	QVERIFY(notes.open(QIODevice::WriteOnly));
+	notes.write("hello");
+	notes.close();
 	f.type(u"look: "_s);
 
 	QSignalSpy toasts(&f.composer, &ComposerModel::toastRequested);
-	QCOMPARE(f.composer.attachUrls({QUrl::fromLocalFile(file.fileName()), QUrl(u"file:///nowhere/readme.txt"_s)}), 1);
-	QCOMPARE(toasts.count(), 1); // the text file is not an image
+	const QList<QUrl> urls{QUrl::fromLocalFile(file.fileName()), QUrl::fromLocalFile(notes.fileName()), QUrl(u"file:///nowhere/readme.txt"_s)};
+	QCOMPARE(f.composer.attachUrls(urls), 2);
+	QCOMPARE(toasts.count(), 1); // missing local file emits a warning toast
 
 	QCOMPARE(f.composer.attachments()->rowCount(), 1);
 	QVERIFY(f.composer.text().contains(u"[Image 1]"_s));
+	QVERIFY(f.composer.text().contains(notes.fileName()));
 	QCOMPARE(f.composer.attachments()->index(0, 0).data(composer::AttachmentModel::NameRole).toString(), u"shot.png"_s);
 
 	QVERIFY(f.composer.submit());
@@ -577,6 +583,22 @@ void TestComposerModel::clipboardImagePathIsAttachedAndOtherTextIsLeftAlone()
 	QGuiApplication::clipboard()->setText(file.fileName());
 	QVERIFY(f.composer.pasteFromClipboard());
 	QCOMPARE(f.composer.attachments()->rowCount(), 1);
+
+	QFile notes(dir.filePath(u"notes.txt"_s));
+	QVERIFY(notes.open(QIODevice::WriteOnly));
+	notes.write("hello");
+	notes.close();
+	auto* mime = new QMimeData;
+	mime->setUrls({QUrl::fromLocalFile(notes.fileName())});
+	QGuiApplication::clipboard()->setMimeData(mime);
+	QVERIFY(f.composer.pasteFromClipboard());
+	QVERIFY(f.composer.text().contains(notes.fileName()));
+	QCOMPARE(f.composer.attachments()->rowCount(), 1);
+
+	auto* webMime = new QMimeData;
+	webMime->setUrls({QUrl(u"https://example.com"_s)});
+	QGuiApplication::clipboard()->setMimeData(webMime);
+	QVERIFY(!f.composer.pasteFromClipboard());
 
 	QGuiApplication::clipboard()->setText(u"just words"_s);
 	QVERIFY(!f.composer.pasteFromClipboard()); // the text area pastes it
