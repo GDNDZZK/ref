@@ -45,6 +45,25 @@ ToolBodyBase {
 		showAll: body.call.showAll
 		onShowAllRequested: body.showAllRequested()
 	}
+	Column {
+		visible: body.call.warnings.length > 0
+		width: body.contentWidth
+		spacing: 4
+
+		Repeater {
+			model: body.call.warnings
+
+			Text {
+				required property string modelData
+				textFormat: Text.PlainText
+				width: parent.width
+				text: modelData
+				color: Theme.warningText
+				font.pixelSize: Theme.smallFontSize
+				wrapMode: Text.Wrap
+			}
+		}
+	}
 
 	OutputSection {
 		visible: body.call.failed

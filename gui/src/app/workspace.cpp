@@ -439,13 +439,13 @@ QCoro::Task<> Workspace::createAndShow(QString cwd, Reply reply)
 	const auto created = co_await m_directory.create(cwd, std::nullopt, std::nullopt);
 	if(!created)
 	{
-		report(reply, false, created.error());
+		report(reply, false, created.error().message);
 		co_return;
 	}
 	const Result<void> shown = co_await show(created->id);
 	if(!shown)
 	{
-		report(reply, false, shown.error());
+		report(reply, false, shown.error().message);
 		co_return;
 	}
 	report(reply, true, created->id);

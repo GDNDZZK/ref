@@ -127,6 +127,7 @@ ServerFrame readServerFrame(const Fields& fields)
 		ResponseFrame response{.id = fields.unsignedInteger("id"_L1), .ok = fields.booleanOr("ok"_L1, false)};
 		response.result = fields.optionalObject("result"_L1).value_or(QJsonObject());
 		response.error = fields.optionalString("error"_L1).value_or(QString());
+		response.code = fields.optionalString("code"_L1).value_or(QString());
 		if(!response.ok && response.error.isEmpty())
 		{
 			response.error = fields.value("ok"_L1).isNull() ? ResponseWithoutOk : ResponseWithoutReason;

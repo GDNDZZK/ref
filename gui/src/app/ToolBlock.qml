@@ -26,6 +26,8 @@ Block {
 	required property bool showAll
 	required property var meta
 	required property string liveOutput
+	required property var warnings
+	required property var permissionPreview
 	required property var images
 
 	readonly property var inputObject: ToolInfo.parse(inputJson)
@@ -303,6 +305,7 @@ Block {
 			y: header.height + failure.height + body.height
 			input: block.inputObject
 			open: block.awaitingPermission
+			preview: block.permissionPreview
 			othersWaiting: block.chat.permissionCount - 1
 			onAnswered: (allow, always) => block.chat.permissionAnswered(block.callId, allow, always)
 		}

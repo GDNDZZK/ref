@@ -63,6 +63,7 @@ struct Block
 	qint64 runAt = 0;   // Delayed: when execution starts
 	QJsonObject meta{}; // display extras of the tool (diff, exit code, ...), without the live output
 	QString liveOutput{};
+	QStringList warnings{}; // edit warnings from meta.warnings
 
 	// Image blocks have one entry, tool blocks all the images of the result.
 	QList<ImageRef> images{};

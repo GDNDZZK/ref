@@ -92,13 +92,18 @@ public:
 		respond(hello, {{QStringLiteral("server_version"), FakeServerVersion}, {QStringLiteral("protocol"), protocol}});
 	}
 
-	void fail(const QJsonObject& request, const QString& error)
+	void fail(const QJsonObject& request, const QString& error, const QString& code = {})
 	{
-		send({{QStringLiteral("kind"), QStringLiteral("response")},
-		      {QStringLiteral("id"), request.value(QStringLiteral("id"))},
-		      {QStringLiteral("ok"), false},
-		      {QStringLiteral("result"), QJsonValue::Null},
-		      {QStringLiteral("error"), error}});
+		QJsonObject frame{{QStringLiteral("kind"), QStringLiteral("response")},
+		                  {QStringLiteral("id"), request.value(QStringLiteral("id"))},
+		                  {QStringLiteral("ok"), false},
+		                  {QStringLiteral("result"), QJsonValue::Null},
+		                  {QStringLiteral("error"), error}};
+		if(!code.isEmpty())
+		{
+			frame.insert(QStringLiteral("code"), code);
+		}
+		send(frame);
 	}
 
 signals:

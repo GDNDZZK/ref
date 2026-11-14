@@ -254,6 +254,19 @@ NamedImage readNamedImage(const Fields& fields)
 	return {.mime = fields.string("mime"_L1), .data = fields.string("data"_L1), .name = fields.optionalString("name"_L1)};
 }
 
+std::optional<EditPreview> readEditPreview(const Fields& fields)
+{
+	const std::optional<Fields> preview = fields.optionalChild("preview"_L1);
+	if(!preview)
+	{
+		return std::nullopt;
+	}
+	return EditPreview{.diff = preview->string("diff"_L1),
+	                   .added = static_cast<quint32>(preview->unsignedInteger("added"_L1)),
+	                   .removed = static_cast<quint32>(preview->unsignedInteger("removed"_L1)),
+	                   .truncated = preview->booleanOr("truncated"_L1, false)};
+}
+
 PermissionRequest readPermissionRequest(const Fields& fields)
 {
 	return {.sessionId = fields.string("session_id"_L1),
@@ -262,7 +275,8 @@ PermissionRequest readPermissionRequest(const Fields& fields)
 	        .tool = fields.string("tool"_L1),
 	        .purpose = fields.string("purpose"_L1),
 	        .input = fields.value("input"_L1),
-	        .time = fields.integer("time"_L1)};
+	        .time = fields.integer("time"_L1),
+	        .preview = readEditPreview(fields)};
 }
 
 QuestionOption readQuestionOption(const Fields& fields)

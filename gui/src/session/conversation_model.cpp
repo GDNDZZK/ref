@@ -58,6 +58,7 @@ QList<int> changedRoles(const Block& before, const Block& after)
 		{Role::RunAtRole, before.runAt != after.runAt},
 		{Role::MetaRole, before.meta != after.meta},
 		{Role::LiveOutputRole, before.liveOutput != after.liveOutput},
+		{Role::WarningsRole, before.warnings != after.warnings},
 		{Role::ImagesRole, before.images != after.images},
 		{Role::AgentRole, before.agent != after.agent},
 		{Role::ModelIdRole, before.modelId != after.modelId},
@@ -78,6 +79,11 @@ QList<int> changedRoles(const Block& before, const Block& after)
 	}
 	return roles;
 }
+QVariantMap previewToVariant(const proto::EditPreview& preview)
+{
+	return {{u"diff"_s, preview.diff}, {u"added"_s, preview.added}, {u"removed"_s, preview.removed}, {u"truncated"_s, preview.truncated}};
+}
+
 
 QVariantList imagesToVariant(const QList<Block::ImageRef>& images)
 {
@@ -206,6 +212,14 @@ QVariant ConversationModel::data(const QModelIndex& index, int role) const
 		return block.meta.toVariantMap();
 	case LiveOutputRole:
 		return block.liveOutput;
+	case WarningsRole:
+		return block.warnings;
+	case PermissionPreviewRole:
+		if(block.kind == Block::Kind::Tool && block.toolStateKind == proto::ToolState::AwaitingPermission && m_permissionPreviews.contains(block.callId))
+		{
+			return previewToVariant(m_permissionPreviews.value(block.callId));
+		}
+		return QVariantMap();
 	case ImagesRole:
 		return imagesToVariant(block.images);
 	case AgentRole:
@@ -307,6 +321,8 @@ QHash<int, QByteArray> ConversationModel::roleNames() const
 		{RunAtRole, "runAt"},
 		{MetaRole, "meta"},
 		{LiveOutputRole, "liveOutput"},
+		{WarningsRole, "warnings"},
+		{PermissionPreviewRole, "permissionPreview"},
 		{ImagesRole, "images"},
 		{AgentRole, "agent"},
 		{ModelIdRole, "modelId"},
@@ -342,6 +358,7 @@ void ConversationModel::reset(const QList<proto::Message>& messages)
 	beginResetModel();
 	m_messages = std::move(nodes);
 	m_rows = std::move(rows);
+	m_permissionPreviews.clear();
 	endResetModel();
 	refreshDerivedState();
 }
@@ -528,6 +545,59 @@ void ConversationModel::removeMessage(const QString& messageId)
 	}
 	refreshDerivedState();
 }
+void ConversationModel::setPendingPermissions(const QList<proto::PermissionRequest>& requests)
+{
+	m_permissionPreviews.clear();
+	for(const proto::PermissionRequest& request : requests)
+	{
+		if(request.preview)
+		{
+			m_permissionPreviews.insert(request.callId, *request.preview);
+		}
+	}
+	for(qsizetype i = 0; i < m_rows.size(); ++i)
+	{
+		if(m_rows.at(i).kind == Block::Kind::Tool && m_rows.at(i).toolStateKind == proto::ToolState::AwaitingPermission)
+		{
+			emitRoleChanged(i, PermissionPreviewRole);
+		}
+	}
+}
+
+void ConversationModel::setPermission(const proto::PermissionRequest& request)
+{
+	if(request.preview)
+	{
+		m_permissionPreviews.insert(request.callId, *request.preview);
+	}
+	else
+	{
+		m_permissionPreviews.remove(request.callId);
+	}
+	for(qsizetype i = 0; i < m_rows.size(); ++i)
+	{
+		if(m_rows.at(i).kind == Block::Kind::Tool && m_rows.at(i).callId == request.callId)
+		{
+			emitRoleChanged(i, PermissionPreviewRole);
+		}
+	}
+}
+
+void ConversationModel::resolvePermission(const QString& callId)
+{
+	if(!m_permissionPreviews.remove(callId))
+	{
+		return;
+	}
+	for(qsizetype i = 0; i < m_rows.size(); ++i)
+	{
+		if(m_rows.at(i).kind == Block::Kind::Tool && m_rows.at(i).callId == callId)
+		{
+			emitRoleChanged(i, PermissionPreviewRole);
+		}
+	}
+}
+
 
 std::optional<QString> ConversationModel::partText(const QString& messageId, qsizetype index) const
 {

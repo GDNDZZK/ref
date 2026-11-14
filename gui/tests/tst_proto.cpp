@@ -423,6 +423,24 @@ private slots:
 		QVERIFY(!response.ok);
 		QVERIFY(response.result.isEmpty());
 		QVERIFY(!response.error.isEmpty());
+		QCOMPARE(response.code, u"not_found"_s);
+	}
+	void permissionPreviewParsesAndFallsBackWhenAbsent()
+	{
+		const auto event = parsedOrFail(parseSessionEvent(fixtureObject(u"session_event"_s, u"permission"_s)));
+		const PermissionRequest& request = std::get<PermissionEvent>(event).request;
+		QVERIFY(request.preview.has_value());
+		QCOMPARE(request.preview->added, 1U);
+		QCOMPARE(request.preview->removed, 1U);
+		QVERIFY(!request.preview->truncated);
+		QVERIFY(request.preview->diff.contains(u"+    for i in 0..items.len() {"_s));
+
+		QJsonObject withoutPreview = fixtureObject(u"session_event"_s, u"permission"_s);
+		QJsonObject req = withoutPreview.value(u"request"_s).toObject();
+		req.remove(u"preview"_s);
+		withoutPreview.insert(u"request"_s, req);
+		const auto fallback = parsedOrFail(parseSessionEvent(withoutPreview));
+		QVERIFY(!std::get<PermissionEvent>(fallback).request.preview.has_value());
 	}
 };
 

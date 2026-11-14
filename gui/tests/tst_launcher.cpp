@@ -229,6 +229,24 @@ private slots:
 		QCOMPARE(connected->token, u"tok4002"_s);
 		QCOMPARE(tried, (QList<quint16>{4003, 4002}));
 	}
+	void autoTargetStopsOnProtocolMismatchWithoutSpawning()
+	{
+		QTemporaryDir directory;
+		const auto me = static_cast<quint32>(QCoreApplication::applicationPid());
+		writeInstance(directory.path(), u"a"_s, me, 4001, 100);
+		writeInstance(directory.path(), u"b"_s, me, 4002, 200);
+		QList<quint16> tried;
+		const launcher::TryConnect connect = [&](const Endpoint& endpoint, std::chrono::milliseconds) -> QCoro::Task<launcher::ConnectAttempt> {
+			tried << static_cast<quint16>(endpoint.url.port());
+			co_return std::unexpected(Failure(u"ref-server 0.2.1 speaks protocol 4, but this client (ref-gui) speaks protocol 3."_s, u"protocol_mismatch"_s));
+		};
+
+		const auto connected = await(launcher::connectTarget(launcher::Auto{}, connect, [] {}, directory.path(), stop)).value();
+
+		QVERIFY(!connected.has_value());
+		QCOMPARE(connected.error(), u"ref-server 0.2.1 speaks protocol 4, but this client (ref-gui) speaks protocol 3."_s);
+		QCOMPARE(tried, (QList<quint16>{4002}));
+	}
 
 	void announcementGivesTheEndpoint()
 	{
