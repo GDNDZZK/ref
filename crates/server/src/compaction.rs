@@ -265,6 +265,7 @@ async fn summarize(
                 clipped = true;
                 clip_outputs(&mut req.messages, OVERFLOW_CLIP_BYTES);
             }
+            Err(e) if !e.retryable => return Err(e.message),
             Err(e) => {
                 attempt += 1;
                 if let Some(limit) = hub.opts.retry_limit

@@ -678,6 +678,9 @@ async fn stream_with_retry(
                     prep_owned = Some(np);
                     continue;
                 }
+                if !e.retryable {
+                    return Err(Outcome::Failed(e.message.clone()));
+                }
                 attempt += 1;
                 if let Some(limit) = hub.opts.retry_limit
                     && attempt >= limit

@@ -131,7 +131,8 @@ async function checkUndo(page, problems) {
   if ((await footers.count()) === 0) problems.push('messages have no footer')
   const prompts = page.locator('.meta.user')
   const before = await prompts.count()
-  await sendPrompt(page, 'tools')
+  const undoPrompt = 'reasoning'
+  await sendPrompt(page, undoPrompt)
   await waitForBusyIfAny(page)
   await page.waitForSelector(SEND_IDLE, { timeout: WAIT_MS })
   await prompts.last().hover()
@@ -142,7 +143,7 @@ async function checkUndo(page, problems) {
     })
     .catch(() => problems.push('undo did not remove the message'))
   const draft = await page.inputValue(INPUT)
-  if (draft !== 'tools') problems.push(`undo put "${draft}" in the input box, not the prompt`)
+  if (draft !== undoPrompt) problems.push(`undo put "${draft}" in the input box, not the prompt`)
   await page.fill(INPUT, '')
 }
 
