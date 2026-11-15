@@ -111,47 +111,51 @@ Rectangle {
 			width: parent.width
 			height: sidebar.newRowHeight
 
-			Rectangle {
+			Item {
+				id: newButton
 				x: Theme.sidebarPadding
 				anchors.verticalCenter: parent.verticalCenter
 				width: parent.width - 2 * Theme.sidebarPadding - folderButton.width - 8
 				height: 36
-				radius: 18
-				color: newHover.hovered ? Theme.surfaceHover : Theme.surface
-				border.color: Theme.border
-				scale: newTap.pressed ? 0.96 : 1
 
-				Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
-				Behavior on scale { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+				Rectangle {
+					anchors.fill: parent
+					radius: 18
+					color: newHover.hovered ? Theme.surfaceHover : Theme.surface
+					border.color: Theme.border
+					scale: newTap.pressed ? 0.96 : 1
 
-				Row {
-					anchors.centerIn: parent
-					spacing: 8
+					Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+					Behavior on scale { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 
-					Icon {
-						anchors.verticalCenter: parent.verticalCenter
-						name: "chat-plus"
-						size: 16
-						color: Theme.text
-					}
-					Text {
-						textFormat: Text.PlainText
-						anchors.verticalCenter: parent.verticalCenter
-						text: qsTr("New session")
-						color: Theme.text
-						font.pixelSize: Theme.captionFontSize
+					Row {
+						anchors.centerIn: parent
+						spacing: 8
+
+						Icon {
+							anchors.verticalCenter: parent.verticalCenter
+							name: "chat-plus"
+							size: 16
+							color: Theme.text
+						}
+						Text {
+							textFormat: Text.PlainText
+							anchors.verticalCenter: parent.verticalCenter
+							text: qsTr("New session")
+							color: Theme.text
+							font.pixelSize: Theme.captionFontSize
+						}
 					}
 				}
+				HoverHandler {
+					id: newHover
+					cursorShape: Qt.PointingHandCursor
+				}
+				TapHandler {
+					id: newTap
+					onTapped: Commands.run(CommandId.newSession)
+				}
 			}
-			HoverHandler {
-				id: newHover
-				cursorShape: Qt.PointingHandCursor
-			}
-			TapHandler {
-				id: newTap
-				onTapped: Commands.run(CommandId.newSession)
-			}
-
 			IconButton {
 				id: folderButton
 				anchors { right: parent.right; rightMargin: Theme.sidebarPadding; verticalCenter: parent.verticalCenter }

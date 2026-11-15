@@ -117,6 +117,14 @@ private:
 		{
 			m_fake.respond(request, {{u"image"_s, QJsonObject{{u"mime"_s, u"image/png"_s}, {u"data"_s, Png1x1Base64}, {u"id"_s, request.value(u"image_id"_s)}}}});
 		}
+		else if(op == u"create_session"_s)
+		{
+			const QString createdId = u"ses_created_%1"_s.arg(++m_created);
+			QJsonObject info = sessionInfoJson(createdId, {.title = u"Session "_s + createdId, .cwd = request.value(u"cwd"_s).toString(u"/work"_s), .createdAt = 100 + m_created});
+			m_sessions.insert(createdId, info);
+			m_fake.respond(request, {{u"session"_s, info}});
+			m_fake.send({{u"kind"_s, u"sessions"_s}, {u"sessions"_s, list()}});
+		}
 		else
 		{
 			m_fake.respond(request, {});
@@ -126,6 +134,7 @@ private:
 	FakeBackend& m_fake;
 	QMap<QString, QJsonObject> m_sessions;
 	QMap<QString, QJsonArray> m_messages;
+	int m_created = 0;
 };
 
 QJsonArray manyMessagesJson()
@@ -268,6 +277,7 @@ private slots:
 	void mainWindowInstantiatesFramelessAndBlocksModalWheel();
 	void tileHeaderInsetsAndRoundsInsideFrameBorder();
 	void splitViewQuickToggleKeepsTilesOnTheGrid();
+	void sidebarFolderButtonDoesNotTriggerNewSession();
 	void standaloneDialogHostBlocksWheelEvents();
 	void statusLineRetryTooltipShowsFullErrorWithoutWarnings();
 };
@@ -508,6 +518,82 @@ void TestMainWindow::splitViewQuickToggleKeepsTilesOnTheGrid()
 	// on the slot the grid computes for its place.
 	window->resize(window->size() + QSize(320, 120));
 	QTRY_VERIFY(tilesOnTheGrid(window->contentItem(), tileGrid));
+
+	QVERIFY(warningSpy.isEmpty());
+}
+
+void TestMainWindow::sidebarFolderButtonDoesNotTriggerNewSession()
+{
+	MainFixture f;
+
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+
+	QQuickItem* sidebar = findByTypePrefix(window->contentItem(), "Sidebar");
+	QVERIFY(sidebar);
+	QQuickItem* folderButton = findItem(sidebar, [](QQuickItem* item) {
+		return item->property("iconName").toString() == u"folder-open"_s;
+	});
+	QQuickItem* newPill = findItem(sidebar, [](QQuickItem* item) {
+		return QByteArray(item->metaObject()->className()).startsWith("QQuickRectangle")
+		       && qFuzzyCompare(item->property("radius").toReal(), 18.0);
+	});
+	QVERIFY(folderButton);
+	QVERIFY(newPill);
+	const QColor baseColor = newPill->property("color").value<QColor>();
+
+	const auto createCount = [&] {
+		int count = 0;
+		for(const QJsonObject& req : f.fake.requests())
+		{
+			if(req.value(u"op"_s).toString() == u"create_session"_s)
+			{
+				++count;
+			}
+		}
+		return count;
+	};
+
+	QSignalSpy folderSpy(f.workspace.get(), &Workspace::newSessionFolderRequested);
+	const QPoint folderCenter = folderButton->mapToScene(QPointF(folderButton->width() / 2.0, folderButton->height() / 2.0)).toPoint();
+	const QPoint newCenter = newPill->mapToScene(QPointF(newPill->width() / 2.0, newPill->height() / 2.0)).toPoint();
+
+	// Hovering the adjacent folder button must not light up the new-session pill.
+	QTest::mouseMove(window, folderCenter);
+	QTest::qWait(80);
+	QCOMPARE(newPill->property("color").value<QColor>(), baseColor);
+
+	// Hovering and clicking the new-session pill lights it up and creates one session.
+	QTest::mouseMove(window, newCenter);
+	QTRY_VERIFY(newPill->property("color").value<QColor>() != baseColor);
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, newCenter);
+	QTRY_COMPARE(createCount(), 1);
+
+	// Clicking the folder button opens the folder picker without creating an extra session.
+	QTest::mouseMove(window, folderCenter);
+	QTRY_COMPARE(newPill->property("color").value<QColor>(), baseColor);
+	QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, folderCenter);
+	QTRY_COMPARE(folderSpy.count(), 1);
+	QCOMPARE(createCount(), 1);
+	for(QObject* child : window->children())
+	{
+		if(QByteArray(child->metaObject()->className()).contains("FolderDialog"))
+		{
+			QMetaObject::invokeMethod(child, "close");
+		}
+	}
 
 	QVERIFY(warningSpy.isEmpty());
 }
