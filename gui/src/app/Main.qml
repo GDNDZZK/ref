@@ -12,10 +12,14 @@ Window {
 	property var shown: null
 	property bool restored: false
 	readonly property bool zoomed: Workspace.zoomedId !== ""
+	readonly property bool isMac: Qt.platform.os === "osx"
+	readonly property bool showWindowControls: !isMac
+	readonly property int macTrafficLightInset: 76
+	readonly property bool windowBorderShown: !isMac && visibility !== Window.Maximized && visibility !== Window.FullScreen
+	readonly property int topButtonY: Math.round((Theme.sidebarHeaderHeight - Theme.buttonHeight) / 2)
 	// The theme setting decides; "system" follows the system's color scheme.
 	readonly property bool wantsDark: Workspace.settings.theme === ThemeName.dark
 		|| (Workspace.settings.theme === ThemeName.system && Application.styleHints.colorScheme === Qt.Dark)
-
 	// Connection trouble, or why no session could be opened; "" when there is nothing to say.
 	function noticeText() {
 		if (Workspace.connectionText !== "")
@@ -52,12 +56,37 @@ Window {
 			(single.item as SessionPane).focusInput()
 	}
 
+	function toggleMaximized() {
+		if (visibility === Window.Maximized || visibility === Window.FullScreen)
+			showNormal()
+		else
+			showMaximized()
+	}
+
+	function pointInItem(item, scenePos) {
+		if (!item.visible)
+			return false
+		const p = page.mapToItem(item, scenePos.x, scenePos.y)
+		return p.x >= 0 && p.y >= 0 && p.x <= item.width && p.y <= item.height
+	}
+
+	function overTopButtons(scenePos) {
+		return pointInItem(expand, scenePos)
+			|| pointInItem(newSessionButton, scenePos)
+			|| pointInItem(leaveZoomButton, scenePos)
+			|| pointInItem(splitButton, scenePos)
+			|| pointInItem(themeToggle, scenePos)
+			|| pointInItem(windowControls, scenePos)
+	}
+
 	title: "ref"
+	flags: isMac
+		? (Qt.Window | Qt.ExpandedClientAreaHint | Qt.NoTitleBarBackgroundHint)
+		: (Qt.Window | Qt.FramelessWindowHint | Qt.WindowMinMaxButtonsHint | Qt.WindowSystemMenuHint)
 	minimumWidth: Theme.windowMinWidth
 	minimumHeight: Theme.windowMinHeight
 	visible: true
 	color: Theme.background
-
 	Component.onCompleted: {
 		width = Workspace.settings.windowWidth
 		height = Workspace.settings.windowHeight
@@ -138,6 +167,7 @@ Window {
 	Item {
 		id: page
 		anchors.fill: parent
+		enabled: !dialogs.open
 
 		// The window color is not part of a grab.
 		Rectangle {
@@ -149,7 +179,11 @@ Window {
 			id: sidebar
 			height: parent.height
 			width: Workspace.settings.sidebarVisible ? Theme.sidebarWidth : 0
+			headerLeftInset: window.isMac ? window.macTrafficLightInset : 0
+			dragEnabled: !dialogs.visible
 			onCollapseRequested: Commands.run(CommandId.sidebar)
+			onMoveRequested: window.startSystemMove()
+			onToggleMaximizeRequested: window.toggleMaximized()
 
 			Behavior on width { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 		}
@@ -160,48 +194,80 @@ Window {
 			width: parent.width - x
 			height: parent.height
 
-			BackendBanner {
-				id: banner
-			}
-
 			Item {
-				id: content
-				y: banner.shownHeight
+				id: areaBody
+				y: Theme.sidebarHeaderHeight
 				width: parent.width
 				height: parent.height - y
+				clip: true
 
-				Behavior on y { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+				BackendBanner {
+					id: banner
+				}
 
-				Loader {
-					id: single
-					anchors.fill: parent
-					active: window.shown !== null
-					opacity: Workspace.splitView ? 0 : 1
-					visible: opacity > 0
-					enabled: !Workspace.splitView
+				Item {
+					id: content
+					y: banner.shownHeight
+					width: parent.width
+					height: parent.height - y
 
-					Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+					Behavior on y { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 
-					sourceComponent: SessionPane {
-						session: window.shown
+					Loader {
+						id: single
+						anchors.fill: parent
+						active: window.shown !== null
+						opacity: Workspace.splitView ? 0 : 1
+						visible: opacity > 0
+						enabled: !Workspace.splitView
+
+						Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+
+						sourceComponent: SessionPane {
+							session: window.shown
+						}
+					}
+
+					TileGrid {
+						id: tiles
+						anchors.fill: parent
+						topInset: 0
+						visible: (Workspace.splitView || occupied) && opacity > 0
+						enabled: Workspace.splitView
+					}
+
+					// Connection trouble, or why no session could be opened, until it is gone.
+					StatusPill {
+						text: window.noticeText()
+					}
+
+					Crossfade {
+						id: sessionFade
 					}
 				}
+			}
 
-				TileGrid {
-					id: tiles
-					anchors.fill: parent
-					topInset: window.zoomed ? 0 : Math.max(0, themeToggle.y + themeToggle.height - content.y)
-					visible: Workspace.splitView || occupied
-					enabled: Workspace.splitView
+			Rectangle {
+				id: titleBar
+				width: parent.width
+				height: Theme.sidebarHeaderHeight
+				color: Theme.background
+
+				DragHandler {
+					enabled: !dialogs.visible
+					target: null
+					dragThreshold: 4
+					onActiveChanged: {
+						if (active && !window.overTopButtons(centroid.scenePosition))
+							window.startSystemMove()
+					}
 				}
-
-				// Connection trouble, or why no session could be opened, until it is gone.
-				StatusPill {
-					text: window.noticeText()
-				}
-
-				Crossfade {
-					id: sessionFade
+				TapHandler {
+					enabled: !dialogs.visible
+					onDoubleTapped: eventPoint => {
+						if (!window.overTopButtons(eventPoint.scenePosition))
+							window.toggleMaximized()
+					}
 				}
 			}
 
@@ -218,7 +284,12 @@ Window {
 	// Above the snapshot, so their own morph stays visible during the crossfade.
 	IconButton {
 		id: expand
-		anchors { top: parent.top; left: parent.left; margins: Theme.windowButtonMargin }
+		anchors {
+			top: parent.top
+			left: parent.left
+			topMargin: window.topButtonY
+			leftMargin: window.isMac ? window.macTrafficLightInset : Theme.windowButtonMargin
+		}
 		iconName: "sidebar"
 		opacity: sidebar.width === 0 ? 1 : 0
 		visible: opacity > 0
@@ -229,7 +300,13 @@ Window {
 	}
 
 	IconButton {
-		anchors { top: parent.top; left: expand.right; leftMargin: Theme.windowButtonGap; topMargin: Theme.windowButtonMargin }
+		id: newSessionButton
+		anchors {
+			top: parent.top
+			left: expand.right
+			leftMargin: Theme.windowButtonGap
+			topMargin: window.topButtonY
+		}
 		iconName: "plus"
 		opacity: expand.opacity
 		visible: opacity > 0
@@ -237,15 +314,40 @@ Window {
 		onClicked: Commands.run(CommandId.newSession)
 	}
 
+	WindowControls {
+		id: windowControls
+		anchors {
+			top: parent.top
+			right: parent.right
+			topMargin: window.topButtonY
+			rightMargin: Theme.windowButtonMargin
+		}
+		visible: window.showWindowControls
+		maximized: window.visibility === Window.Maximized || window.visibility === Window.FullScreen
+		onMinimizeRequested: window.showMinimized()
+		onMaximizeRequested: window.toggleMaximized()
+		onCloseRequested: window.close()
+	}
+
 	ThemeToggle {
 		id: themeToggle
-		anchors { top: parent.top; right: parent.right; margins: Theme.windowButtonMargin }
+		anchors {
+			top: parent.top
+			right: windowControls.visible ? windowControls.left : parent.right
+			topMargin: window.topButtonY
+			rightMargin: windowControls.visible ? Theme.windowButtonGap : Theme.windowButtonMargin
+		}
 		onClicked: Workspace.requestTheme(Theme.dark ? ThemeName.light : ThemeName.dark)
 	}
 
 	IconButton {
 		id: splitButton
-		anchors { top: parent.top; right: themeToggle.left; topMargin: Theme.windowButtonMargin; rightMargin: Theme.windowButtonGap }
+		anchors {
+			top: parent.top
+			right: themeToggle.left
+			topMargin: window.topButtonY
+			rightMargin: Theme.windowButtonGap
+		}
 		iconName: "split"
 		iconColor: Workspace.splitView ? Theme.accentText : Theme.textMuted
 		Accessible.name: qsTr("Split view")
@@ -253,7 +355,13 @@ Window {
 	}
 
 	IconButton {
-		anchors { top: parent.top; right: splitButton.left; topMargin: Theme.windowButtonMargin; rightMargin: Theme.windowButtonGap }
+		id: leaveZoomButton
+		anchors {
+			top: parent.top
+			right: splitButton.left
+			topMargin: window.topButtonY
+			rightMargin: Theme.windowButtonGap
+		}
 		iconName: "restore"
 		opacity: window.zoomed ? 1 : 0
 		visible: opacity > 0
@@ -264,6 +372,21 @@ Window {
 	}
 
 	DialogHost {
+		id: dialogs
 		anchors.fill: parent
+	}
+
+	WindowResizeHandles {
+		anchors.fill: parent
+		active: !window.isMac && window.visibility === Window.Windowed
+		onResizeRequested: edges => window.startSystemResize(edges)
+	}
+
+	Rectangle {
+		anchors.fill: parent
+		color: "transparent"
+		border.width: 1
+		border.color: Theme.border
+		visible: window.windowBorderShown
 	}
 }

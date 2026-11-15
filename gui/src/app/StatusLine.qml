@@ -111,6 +111,13 @@ Item {
 			elide: Text.ElideRight
 			width: Math.min(implicitWidth, line.width / 2)
 			font.pixelSize: Theme.smallFontSize
+
+			HoverHandler { id: statusHover }
+			PlainToolTip {
+				visible: statusHover.hovered && line.retrying && line.session.retryError !== ""
+				delay: line.tipDelay
+				text: line.session.retryError
+			}
 		}
 		Text {
 			textFormat: Text.PlainText
@@ -172,6 +179,10 @@ Item {
 				visible: contextHover.hovered
 				delay: line.tipDelay
 				text: qsTr("Context: %1 of %2 tokens. Compaction is recommended at %3 and automatic at %4.")
+					.arg(Format.tokens(line.contextUsed))
+					.arg(Format.tokens(line.contextMax))
+					.arg(Format.tokens(line.session.contextRecommend))
+					.arg(Format.tokens(line.session.contextAuto))
 			}
 		}
 	}

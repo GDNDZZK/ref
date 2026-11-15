@@ -6,7 +6,12 @@ import QtQuick.Controls.Basic
 ToolTip {
 	id: tip
 
+	readonly property int maxContentWidth: 420
+
+	implicitWidth: Math.min(tipText.implicitWidth, maxContentWidth) + leftPadding + rightPadding
+
 	contentItem: Text {
+		id: tipText
 		text: tip.text
 		textFormat: Text.PlainText
 		font: tip.font

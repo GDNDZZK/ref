@@ -76,6 +76,18 @@ describe('CompletionController', () => {
     expect(controller.selectedItem?.label).toBe('/undo')
   })
 
+  it('keeps the selection when a non-empty slash query is re-checked without editing, and resets when the query changes', () => {
+    const { controller } = setup()
+    controller.update('/e', 2, false, true)
+    expect(controller.completion?.items.map((item) => item.label)).toEqual(['/new', '/review'])
+    controller.move(1)
+    expect(controller.selectedItem?.label).toBe('/review')
+    controller.update('/e', 2, false, false)
+    expect(controller.selectedItem?.label).toBe('/review')
+    controller.update('/ew', 3, false, true)
+    expect(controller.selectedItem?.label).toBe('/new')
+  })
+
   it('stays closed after Esc until the text changes', () => {
     const { controller } = setup()
     controller.update('/u', 2, false, true)

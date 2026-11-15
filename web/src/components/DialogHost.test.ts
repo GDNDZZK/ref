@@ -55,4 +55,66 @@ describe('DialogHost', () => {
     dialogs.close()
     expect(closed).toHaveBeenCalledOnce()
   })
+
+  it('prevents wheel bleed-through on the scrim and non-scrollable dialog elements', async () => {
+    const { wrapper, dialogs } = mountHost()
+    dialogs.open({ kind: 'help' })
+    await nextTick()
+
+    const scrim = wrapper.get('.scrim').element as HTMLElement
+    const scrimWheel = new WheelEvent('wheel', { deltaY: 80, bubbles: true, cancelable: true })
+    scrim.dispatchEvent(scrimWheel)
+    expect(scrimWheel.defaultPrevented).toBe(true)
+
+    const dialog = wrapper.get('[role="dialog"]').element as HTMLElement
+    const dialogWheel = new WheelEvent('wheel', { deltaY: 80, bubbles: true, cancelable: true })
+    dialog.dispatchEvent(dialogWheel)
+    expect(dialogWheel.defaultPrevented).toBe(true)
+  })
+
+  it('allows wheel inside a scrollable dialog container until it reaches top or bottom', async () => {
+    const { wrapper, dialogs } = mountHost()
+    dialogs.open({ kind: 'help' })
+    await nextTick()
+
+    const content = wrapper.get('[role="dialog"] .content').element as HTMLElement
+    content.style.overflowY = 'auto'
+    let scrollTop = 50
+    Object.defineProperty(content, 'clientHeight', { configurable: true, get: () => 100 })
+    Object.defineProperty(content, 'scrollHeight', { configurable: true, get: () => 300 })
+    Object.defineProperty(content, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value: number) => {
+        scrollTop = value
+      },
+    })
+
+    const child = content.firstElementChild ?? content
+    const midDown = new WheelEvent('wheel', { deltaY: 40, bubbles: true, cancelable: true })
+    child.dispatchEvent(midDown)
+    expect(midDown.defaultPrevented).toBe(false)
+
+    const midUp = new WheelEvent('wheel', { deltaY: -40, bubbles: true, cancelable: true })
+    child.dispatchEvent(midUp)
+    expect(midUp.defaultPrevented).toBe(false)
+
+    scrollTop = 0
+    const topUp = new WheelEvent('wheel', { deltaY: -40, bubbles: true, cancelable: true })
+    child.dispatchEvent(topUp)
+    expect(topUp.defaultPrevented).toBe(true)
+
+    const topDown = new WheelEvent('wheel', { deltaY: 40, bubbles: true, cancelable: true })
+    child.dispatchEvent(topDown)
+    expect(topDown.defaultPrevented).toBe(false)
+
+    scrollTop = 200
+    const bottomDown = new WheelEvent('wheel', { deltaY: 40, bubbles: true, cancelable: true })
+    child.dispatchEvent(bottomDown)
+    expect(bottomDown.defaultPrevented).toBe(true)
+
+    const bottomUp = new WheelEvent('wheel', { deltaY: -40, bubbles: true, cancelable: true })
+    child.dispatchEvent(bottomUp)
+    expect(bottomUp.defaultPrevented).toBe(false)
+  })
 })

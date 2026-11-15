@@ -57,6 +57,7 @@ Item {
 		id: chat
 		anchors { left: parent.left; right: parent.right; top: parent.top; bottom: questionCard.top }
 		model: pane.session.blocks
+		compact: pane.compact
 		sidePadding: pane.columnPadding
 		holding: pane.session.activelyWorking
 		sessionId: pane.session.sessionId

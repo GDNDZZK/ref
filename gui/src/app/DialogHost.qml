@@ -42,6 +42,14 @@ Item {
 		Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 	}
 
+	// Absorb wheel and touchpad events that the dialog's own scrollables did not consume.
+	MouseArea {
+		anchors.fill: parent
+		acceptedButtons: Qt.NoButton
+		enabled: host.visible
+		onWheel: wheel => wheel.accepted = true
+	}
+
 	component Slot: Loader {
 		property string dialogId: ""
 		// Replaced by another dialog: fades out and is dropped.
@@ -63,7 +71,6 @@ Item {
 
 	Slot { id: slotA }
 	Slot { id: slotB }
-
 	function componentFor(id) {
 		const components = {
 			[DialogId.palette]: paletteDialog,

@@ -177,6 +177,23 @@ describe('Composer', () => {
     expect(run).toHaveBeenCalledWith('/undo')
   })
 
+  it('keeps arrow-key selection across keyup when a non-empty slash query is typed', async () => {
+    const { wrapper, host } = setup()
+    const run = vi.spyOn(host, 'runSlash')
+    await type(wrapper, '/n')
+    await wrapper.get('textarea').trigger('input')
+    expect(wrapper.findAll('[role=option]').map((row) => row.text())).toEqual([
+      '/undoUndo the last prompt',
+      '/renameRename the session',
+    ])
+    await press(wrapper, 'ArrowDown')
+    await wrapper.get('textarea').trigger('keyup', { key: 'ArrowDown' })
+    await flushPromises()
+    expect(wrapper.findAll('[role=option]')[1]?.attributes('aria-selected')).toBe('true')
+    await press(wrapper, 'Tab')
+    expect(value(wrapper)).toBe('/rename ')
+    expect(run).not.toHaveBeenCalled()
+  })
   it('closes the list with Esc without leaving shell mode or interrupting', async () => {
     const { wrapper, host } = setup({ busy: true })
     await type(wrapper, '/')

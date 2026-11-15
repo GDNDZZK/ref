@@ -77,6 +77,7 @@ export class CompletionController {
   private readonly deps: CompletionDeps
   private readonly current = shallowRef<Completion | undefined>() // replaced, never edited
   private suppressed = false // Esc closed the list; it stays closed until the text changes
+  private slashQuery: string | undefined
   private fileTimer: ReturnType<typeof setTimeout> | undefined
   private filesInFlight = false
   private wantedQuery: string | undefined // asked for while a request was running
@@ -136,6 +137,7 @@ export class CompletionController {
 
   close(): void {
     this.current.value = undefined
+    this.slashQuery = undefined
   }
 
   private showCommands(query: string): void {
@@ -143,7 +145,8 @@ export class CompletionController {
     if (items.length === 0) return this.close()
 
     const previous = this.current.value
-    const keep = previous?.kind === 'slash' && query === '' ? previous.selected : 0
+    const keep = previous?.kind === 'slash' && this.slashQuery === query ? previous.selected : 0
+    this.slashQuery = query
     this.current.value = { kind: 'slash', items, selected: Math.min(keep, items.length - 1), start: 0 }
   }
 

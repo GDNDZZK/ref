@@ -44,8 +44,12 @@ Item {
 		color: Qt.rgba(0, 0, 0, lightbox.scrimOpacity)
 
 		TapHandler { onTapped: lightbox.close() }
+		MouseArea {
+			anchors.fill: parent
+			acceptedButtons: Qt.NoButton
+			onWheel: wheel => wheel.accepted = true
+		}
 	}
-
 	Item {
 		anchors { fill: parent; margins: lightbox.margin; bottomMargin: lightbox.margin + lightbox.captionHeight }
 		scale: lightbox.shown ? 1 : lightbox.closedScale

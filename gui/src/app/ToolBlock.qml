@@ -43,6 +43,15 @@ Block {
 	readonly property bool open: alwaysOpen || ((expanded || awaitingPermission) && hasDetails)
 	readonly property bool inactive: toolState === ToolState.denied || toolState === ToolState.cancelled
 	readonly property bool showsTime: columnWidth >= timeShownFromWidth
+
+	onOpenChanged: {
+		if (!open && chat)
+			chat.restHold()
+	}
+	onAwaitingPermissionChanged: {
+		if (!awaitingPermission && chat)
+			chat.restHold()
+	}
 	readonly property int timeShownFromWidth: 560
 	readonly property int headerHeight: 38
 	readonly property int cardPadding: Theme.toolBodyPaddingX
@@ -266,6 +275,10 @@ Block {
 
 			readonly property bool shown: !block.open && !block.awaitingPermission && (block.hasDiffPreview || block.hasQuestionSummary)
 
+			onShownChanged: {
+				if (!shown && block.chat)
+					block.chat.restHold()
+			}
 			y: header.height + failure.height
 			width: parent.width
 			height: shown && previewLoader.item ? (previewLoader.item as Item).height : 0

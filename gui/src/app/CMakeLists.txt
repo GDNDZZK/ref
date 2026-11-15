@@ -1,8 +1,10 @@
 # Adapted from an early version of LightBlueCube/qutie
 qt_add_executable(ref-gui main.cpp)
 
+include(qml_files.cmake)
+
 # Must be set before qt_add_qml_module() reads the files.
-set_source_files_properties(Theme.qml Motion.qml Format.qml Links.qml CompletionKind.qml DialogId.qml ThemeName.qml CommandId.qml McpStatus.qml Activity.qml ToastLevel.qml TodoStatus.qml ToolState.qml MessageSource.qml Fields.qml SessionTools.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set_source_files_properties(${REFGUI_APP_SINGLETONS} PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 qt_add_qml_module(ref-gui
 	URI RefGui
@@ -34,143 +36,8 @@ qt_add_qml_module(ref-gui
 		workspace_split.cpp
 		workspace.h
 	QML_FILES
-		Main.qml
-		CompletionKind.qml
-		DialogId.qml
-		ThemeName.qml
-		CommandId.qml
-		McpStatus.qml
-		Activity.qml
-		ToastLevel.qml
-		TodoStatus.qml
-		ToolState.qml
-		MessageSource.qml
-		Fields.qml
-		SessionTools.qml
-		SessionDialog.qml
-		FieldBody.qml
-		DialogBody.qml
-		CancelButton.qml
-		ScrollHandle.qml
-		IconButton.qml
-		TruncatedChip.qml
-		CopiedFlag.qml
-		HoverCopyButton.qml
-		PlaceholderText.qml
-		SectionLabel.qml
-		Ticker.qml
-		McpServerRow.qml
-		QueueRow.qml
-		McpSummary.qml
-		Toast.qml
-		SessionPane.qml
-		QuestionCard.qml
-		QuestionRow.qml
-		StatusPill.qml
-		Sidebar.qml
-		SessionRow.qml
-		HistoryRow.qml
-		SessionDot.qml
-		ContextMenu.qml
-		ThemedScrollBar.qml
-		Crossfade.qml
-		ToastHost.qml
-		BackendBanner.qml
-		TileGrid.qml
-		Tile.qml
-		LiveInfo.qml
-		Format.qml
-		DialogHost.qml
-		ModalDialog.qml
-		DialogButton.qml
-		DialogField.qml
-		Segmented.qml
-		KeyChips.qml
-		PickList.qml
-		PickRow.qml
-		PathField.qml
-		CommandPalette.qml
-		SettingsDialog.qml
-		SessionsDialog.qml
-		ModelsDialog.qml
-		AgentsDialog.qml
-		VariantsDialog.qml
-		McpDialog.qml
-		PeersDialog.qml
-		HelpDialog.qml
-		ExportDialog.qml
-		CdDialog.qml
-		NewSessionDialog.qml
-		CloseDialog.qml
-		RenameDialog.qml
-		DeleteHistoryDialog.qml
-		Icon.qml
-		Theme.qml
-		Motion.qml
-		ChatView.qml
-		Block.qml
-		UserBlock.qml
-		MarkdownBlock.qml
-		CodeBlock.qml
-		ReasoningBlock.qml
-		ToolBlock.qml
-		ProseText.qml
-		StreamCaret.qml
-		ToolStateSlot.qml
-		CountdownRing.qml
-		Links.qml
-		ToolBody.qml
-		ToolBodyBase.qml
-		GenericBody.qml
-		OutputSection.qml
-		DiffBody.qml
-		BashBody.qml
-		ReadBody.qml
-		GrepBody.qml
-		FindBody.qml
-		WebfetchBody.qml
-		SessionBody.qml
-		QuestionBody.qml
-		TodoBody.qml
-		TodoList.qml
-		TodoProgress.qml
-		CommandBox.qml
-		LineView.qml
-		ToolChip.qml
-		ToolSection.qml
-		OutputText.qml
-		CopyButton.qml
-		PermissionSection.qml
-		PermissionButton.qml
-		Composer.qml
-		ComposerChip.qml
-		ComposerTags.qml
-		AttachmentStrip.qml
-		QueueStrip.qml
-		CompletionPopup.qml
-		PlainToolTip.qml
-		NotificationSettingsSection.qml
-		SendButton.qml
-		TextButton.qml
-		CircleButton.qml
-		ThemeToggle.qml
-		Chevron.qml
-		Pulse.qml
-		Flourish.qml
-		AlertBadge.qml
-		ErrorBlock.qml
-		ImageBlock.qml
-		StatusLine.qml
-		OlderPill.qml
-		ShimmerText.qml
-		Thumbnail.qml
-		ImageStrip.qml
-		Lightbox.qml
-		MetaBlock.qml
-		MetaText.qml
-		MetaAction.qml
-)
-
+		${REFGUI_APP_QML_NAMES}
+	)
 # Interface text is English in the sources. The .ts files hold the other languages; their
 # .qm are compiled into the program (resource prefix /i18n). ref-gui_en.ts holds only the plural
 # forms of the English text ("%n line(s)" shows as "1 line" and "2 lines"). `update_translations`

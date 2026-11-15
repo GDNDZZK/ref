@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The model's reasoning: open while it streams, folded away once it ends (ReasoningBlock.qml).
-import { computed, ref, useTemplateRef } from 'vue'
+import { computed, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useChatScroll } from '../composables/chatScroll.ts'
 import { useChatSession } from '../composables/chatSessionContext.ts'
@@ -37,6 +37,13 @@ function toggle(): void {
   flipped.value = !flipped.value
 }
 
+watch(
+  expanded,
+  (isExpanded, wasExpanded) => {
+    if (wasExpanded && !isExpanded) chatScroll.restHold()
+  },
+  { flush: 'pre' },
+)
 function onFolded(event: TransitionEvent): void {
   if (event.propertyName === 'grid-template-rows') chatScroll.releaseHeader()
 }

@@ -37,7 +37,9 @@ Rectangle {
 	}
 	readonly property int lockupWidth: 60 // the lockup is drawn at this size only: its pixels are aligned to it
 	readonly property int lockupHeight: 24
-
+	readonly property int lockupLeftMargin: 18
+	property int headerLeftInset: 0
+	property bool dragEnabled: true
 	function keepTodo() {
 		if (todo.items.length > 0 && JSON.stringify(todo) !== JSON.stringify(shownTodo))
 			shownTodo = todo
@@ -50,7 +52,8 @@ Rectangle {
 	clip: true
 
 	signal collapseRequested()
-
+	signal moveRequested()
+	signal toggleMaximizeRequested()
 	Rectangle {
 		anchors { top: parent.top; bottom: parent.bottom; right: parent.right }
 		width: 1
@@ -67,8 +70,23 @@ Rectangle {
 			width: parent.width
 			height: Theme.sidebarHeaderHeight
 
+			Item {
+				anchors { left: parent.left; right: collapseButton.left; top: parent.top; bottom: parent.bottom }
+
+				DragHandler {
+					enabled: sidebar.dragEnabled
+					target: null
+					dragThreshold: 4
+					onActiveChanged: if (active) sidebar.moveRequested()
+				}
+				TapHandler {
+					enabled: sidebar.dragEnabled
+					onDoubleTapped: sidebar.toggleMaximizeRequested()
+				}
+			}
+
 			Image {
-				x: 18
+				x: sidebar.headerLeftInset > 0 ? sidebar.headerLeftInset : sidebar.lockupLeftMargin
 				y: (parent.height - height) / 2
 				width: sidebar.lockupWidth
 				height: sidebar.lockupHeight
@@ -78,6 +96,7 @@ Rectangle {
 				Accessible.name: "ref"
 			}
 			IconButton {
+				id: collapseButton
 				anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
 				buttonSize: 32
 				iconName: "sidebar"

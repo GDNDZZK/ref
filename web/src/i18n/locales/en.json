@@ -378,8 +378,7 @@
     "tokensPerSecond": "{rate} tok/s"
   },
   "compaction": {
-    "title": "Context compacted",
-    "note": "Messages above stay visible but are no longer sent to the model"
+    "title": "Context compacted"
   },
   "status": {
     "working": "Working",

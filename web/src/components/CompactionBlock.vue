@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The message that summarizes the earlier conversation: a divider with a pill in the middle.
-// A click unfolds the summary. Messages above stay visible but are no longer sent to the model.
+// A click unfolds the summary.
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { renderMarkdown } from '../markdown/markdown.ts'
@@ -43,7 +43,6 @@ function toggle(): void {
         </CopyArea>
       </div>
     </div>
-    <div v-if="block.last" class="note">{{ t('compaction.note') }}</div>
   </div>
 </template>
 
@@ -111,14 +110,5 @@ function toggle(): void {
   border-left: 2px solid var(--accent);
   color: var(--text-muted);
   font-size: 13px;
-}
-
-.note {
-  margin-top: 8px;
-  color: var(--text-muted);
-  font-size: var(--small-font-size);
-  font-style: italic;
-  opacity: 0.7;
-  text-align: center;
 }
 </style>

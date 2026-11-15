@@ -83,7 +83,7 @@ const contextTitle = computed(() => {
       </template>
       <template v-else-if="activity === 'retrying'">
         <Icon icon="retry-16" class="warning" />
-        <span class="label warning">{{ retryText }}</span>
+        <span class="label warning" :title="retry?.error || undefined">{{ retryText }}</span>
       </template>
       <span v-if="elapsed && activity !== 'idle'" class="elapsed">· {{ elapsed }}</span>
     </div>

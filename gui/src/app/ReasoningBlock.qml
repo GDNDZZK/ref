@@ -8,6 +8,10 @@ Block {
 
 	property bool expanded: streaming // follows streaming until the user toggles it
 
+	onExpandedChanged: {
+		if (!expanded && chat)
+			chat.restHold()
+	}
 	Item {
 		width: block.columnWidth
 		height: header.height + body.height
