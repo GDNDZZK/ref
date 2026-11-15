@@ -554,6 +554,8 @@ void TestToolBlock::touchpadCoastInertiaAndBounds()
 	QTRY_VERIFY(!view->property("coasting").toBool());
 
 	// Native ScrollMomentum cancels synthetic coasting immediately.
+	QMetaObject::invokeMethod(view, "scrollTo", Q_ARG(QVariant, midY), Q_ARG(QVariant, false));
+	QCOMPARE(view->property("contentY").toReal(), midY);
 	sendPhase(Qt::ScrollBegin, QPoint());
 	QTest::qWait(16);
 	sendPhase(Qt::ScrollUpdate, QPoint(0, 36));
@@ -565,6 +567,8 @@ void TestToolBlock::touchpadCoastInertiaAndBounds()
 	QVERIFY(!view->property("coasting").toBool());
 
 	// Mouse wheel cancels synthetic coasting immediately.
+	QMetaObject::invokeMethod(view, "scrollTo", Q_ARG(QVariant, midY), Q_ARG(QVariant, false));
+	QCOMPARE(view->property("contentY").toReal(), midY);
 	sendPhase(Qt::ScrollBegin, QPoint());
 	QTest::qWait(16);
 	sendPhase(Qt::ScrollUpdate, QPoint(0, 36));
