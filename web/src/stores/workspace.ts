@@ -287,21 +287,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (mode.value === 'split') return
     // Subscribing first, so that entering split view loses none of the background events.
     setLive(await connection.getApi().watchAll(true))
-    await crossfade(() => {
-      mode.value = 'split'
-      tileFocusId.value = undefined
-    }, 'standard')
+    // Not under a crossfade: mounting every tile's conversation inside a view transition holds
+    // the page frozen for the snapshot. The tiles have their own entrance animation.
+    mode.value = 'split'
+    tileFocusId.value = undefined
     await syncTiles()
   }
 
   async function leaveSplit(): Promise<void> {
     if (mode.value === 'single') return
-    await crossfade(() => {
-      if (zoomedId.value) currentId.value = zoomedId.value
-      mode.value = 'single'
-      zoomedId.value = undefined
-      tileFocusId.value = undefined
-    }, 'standard')
+    if (zoomedId.value) currentId.value = zoomedId.value
+    mode.value = 'single'
+    zoomedId.value = undefined
+    tileFocusId.value = undefined
     const open = current.value
     await connection.getApi().watchAll(false)
     const others = [...chats.values()].filter(

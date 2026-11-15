@@ -84,9 +84,9 @@ ListView {
 	readonly property int minWheelStep: 120
 	readonly property real wheelStep: Math.max(minWheelStep, Application.styleHints.wheelScrollLines * wheelPixelsPerLine)
 	readonly property real wheelLag: 115 // ms; exponential time constant for wheel glide
-	readonly property int wheelBoostWindowMs: 140 // consecutive notches inside this window build speed
-	readonly property real wheelBoostStep: 0.2
-	readonly property real wheelMaxBoost: 1.8
+	readonly property int wheelBoostWindowMs: 200 // consecutive notches inside this window build speed
+	readonly property real wheelBoostStep: 0.4
+	readonly property real wheelMaxBoost: 3.0
 	property real wheelBoost: 1.0
 	property real lastWheelTime: 0
 	property int lastWheelDirection: 0
@@ -418,6 +418,10 @@ ListView {
 				case Qt.ScrollUpdate:
 					if (event.pixelDelta.y !== 0) {
 						const deltaY = -event.pixelDelta.y
+						// Fingers moving against the coast stop it at once, also when the platform
+						// sent no ScrollBegin for this gesture.
+						if (view.coasting && deltaY * view.coastVelocity < 0)
+							view.stopCoast()
 						view.scrollTo(view.contentY + deltaY, false)
 						view.sampleTouchVelocity(deltaY, Date.now())
 					}
@@ -452,8 +456,11 @@ ListView {
 				view.wheelBoost = 1.0
 			}
 			view.lastWheelTime = now
+			// A notch against the running chase starts from where the content is: the remaining
+			// old-direction distance is dropped, so the view turns around at once.
+			const reversed = dir !== view.lastWheelDirection
 			view.lastWheelDirection = dir
-			const start = view.wheeling ? view.wheelTarget : view.contentY
+			const start = view.wheeling && !reversed ? view.wheelTarget : view.contentY
 			view.scrollTo(start - event.angleDelta.y / view.wheelNotch * view.wheelStep * view.wheelBoost, true)
 		}
 	}

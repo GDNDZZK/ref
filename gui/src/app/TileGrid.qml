@@ -76,8 +76,8 @@ Item {
 		let bestCost = Infinity
 		for (let i = 0; i < repeater.count; ++i) {
 			const tile = repeater.itemAt(i) as Tile
-			const deltaX = (tile.slot.x + tile.slot.width / 2) - (from.slot.x + from.slot.width / 2)
-			const deltaY = (tile.slot.y + tile.slot.height / 2) - (from.slot.y + from.slot.height / 2)
+			const deltaX = (tile.placedSlot.x + tile.placedSlot.width / 2) - (from.placedSlot.x + from.placedSlot.width / 2)
+			const deltaY = (tile.placedSlot.y + tile.placedSlot.height / 2) - (from.placedSlot.y + from.placedSlot.height / 2)
 			const along = deltaX * dx + deltaY * dy
 			if (tile === from || tile.leaving || along <= 0)
 				continue

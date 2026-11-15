@@ -35,10 +35,18 @@ onMounted(() => {
 })
 onBeforeUnmount(() => observer?.disconnect())
 
+// No rects before the observer has reported the area size: tiles mounted on the unmeasured 0×0
+// grid would animate left/top/width/height from that degenerate layout into place.
 const rects = computed(() =>
-  tileRects(workspace.tileIds.length, size.value.width, size.value.height, TILE_SPEC),
+  size.value.width === 0
+    ? []
+    : tileRects(workspace.tileIds.length, size.value.width, size.value.height, TILE_SPEC),
 )
 watchEffect(() => workspace.setTileRects(rects.value))
+
+// Which tiles have a rect yet: none until the area is measured, so no tile is ever placed on the
+// degenerate 0×0 grid.
+const laidOutIds = computed(() => (rects.value.length > 0 ? workspace.tileIds : []))
 
 const zoomed = computed(() => workspace.zoomedId !== undefined)
 
@@ -152,7 +160,7 @@ function onBackgroundClick(event: MouseEvent): void {
     </div>
     <TransitionGroup v-else tag="div" name="tile" class="grid" :style="{ height: `${contentHeight}px` }">
       <SplitTile
-        v-for="(id, index) in workspace.tileIds"
+        v-for="(id, index) in laidOutIds"
         :key="id"
         class="slot"
         :style="frame(index, id)"

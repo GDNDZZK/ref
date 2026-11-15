@@ -14,6 +14,10 @@ Item {
 
 	// Where the grid wants the tile, and whether it is the zoomed one.
 	property rect slot: Qt.rect(0, 0, 0, 0)
+	// The slot as it was when the tile started leaving: the tile fades in place while the
+	// others reflow, and once revived it follows the live `slot` again.
+	property rect frozenSlot: Qt.rect(0, 0, 0, 0)
+	readonly property rect placedSlot: leaving ? frozenSlot : slot
 	property rect zoomRect: Qt.rect(0, 0, 0, 0)
 	readonly property bool zoomed: Workspace.zoomedId === sessionId
 	readonly property bool expanded: zoomed
@@ -35,10 +39,10 @@ Item {
 		pane.focusInput()
 	}
 
-	x: expanded ? zoomRect.x : slot.x
-	y: expanded ? zoomRect.y : slot.y
-	width: expanded ? zoomRect.width : slot.width
-	height: expanded ? zoomRect.height : slot.height
+	x: expanded ? zoomRect.x : placedSlot.x
+	y: expanded ? zoomRect.y : placedSlot.y
+	width: expanded ? zoomRect.width : placedSlot.width
+	height: expanded ? zoomRect.height : placedSlot.height
 	z: expanded ? 1 : fading ? -1 : 0
 	opacity: othersZoomed || fading ? 0 : 1
 	scale: othersZoomed || fading ? Motion.tileExitScale : 1
@@ -55,7 +59,7 @@ Item {
 	// A tile that leaves stays where it was while it fades; the others reflow into its slot.
 	onLeavingChanged: {
 		if (leaving)
-			slot = Qt.rect(slot.x, slot.y, slot.width, slot.height)
+			frozenSlot = slot
 	}
 
 	onExpandedChanged: {

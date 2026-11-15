@@ -43,6 +43,9 @@ using refgui::client::Backend;
 namespace
 {
 
+// A 1x1 transparent PNG, the picture the stub serves for every get_image.
+const QString Png1x1Base64 = u"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="_s;
+
 class StubMainServer
 {
 public:
@@ -110,6 +113,10 @@ private:
 		{
 			m_fake.respond(request, {{u"servers"_s, QJsonArray()}});
 		}
+		else if(op == u"get_image"_s)
+		{
+			m_fake.respond(request, {{u"image"_s, QJsonObject{{u"mime"_s, u"image/png"_s}, {u"data"_s, Png1x1Base64}, {u"id"_s, request.value(u"image_id"_s)}}}});
+		}
 		else
 		{
 			m_fake.respond(request, {});
@@ -167,6 +174,54 @@ QQuickItem* findByTypePrefix(QQuickItem* root, const char* prefix)
 	});
 }
 
+void collectTiles(QQuickItem* item, QList<QQuickItem*>& tiles)
+{
+	if(QByteArray(item->metaObject()->className()).startsWith("Tile_QMLTYPE"))
+	{
+		tiles.append(item);
+	}
+	for(QQuickItem* child : item->childItems())
+	{
+		collectTiles(child, tiles);
+	}
+}
+
+// Whether every tile sits on the rect the grid computes for its place, as TileGrid's delegate
+// does; a tile that stopped following its slot (a frozen binding) misses after the grid moved.
+bool tilesOnTheGrid(QQuickItem* windowContent, QQuickItem* grid)
+{
+	constexpr qreal Tolerance = 0.5;
+	QList<QQuickItem*> tiles;
+	collectTiles(windowContent, tiles);
+	bool any = false;
+	for(QQuickItem* tile : tiles)
+	{
+		if(tile->property("leaving").toBool())
+		{
+			continue;
+		}
+		const int columns = grid->property("columns").toInt();
+		const int rows = grid->property("rows").toInt();
+		const int count = grid->property("count").toInt();
+		const qreal padding = grid->property("padding").toReal();
+		const qreal gap = grid->property("gap").toReal();
+		const qreal tileHeight = grid->property("tileHeight").toReal();
+		const int place = tile->property("place").toInt();
+		const int row = place / columns;
+		const int inRow = std::max(1, row == rows - 1 ? count - row * columns : columns);
+		const qreal slotWidth = (grid->width() - 2 * padding - (inRow - 1) * gap) / inRow;
+		const qreal slotX = padding + (place - row * columns) * (slotWidth + gap);
+		const qreal slotY = grid->property("contentTop").toReal() + row * (tileHeight + gap);
+		if(std::abs(tile->x() - slotX) > Tolerance || std::abs(tile->y() - slotY) > Tolerance
+		   || std::abs(tile->width() - slotWidth) > Tolerance || std::abs(tile->height() - tileHeight) > Tolerance)
+		{
+			return false;
+		}
+		any = true;
+	}
+	return any;
+}
+
 struct MainFixture
 {
 	MainFixture()
@@ -212,6 +267,7 @@ private slots:
 	void initTestCase();
 	void mainWindowInstantiatesFramelessAndBlocksModalWheel();
 	void tileHeaderInsetsAndRoundsInsideFrameBorder();
+	void splitViewQuickToggleKeepsTilesOnTheGrid();
 	void standaloneDialogHostBlocksWheelEvents();
 	void statusLineRetryTooltipShowsFullErrorWithoutWarnings();
 };
@@ -312,6 +368,22 @@ void TestMainWindow::mainWindowInstantiatesFramelessAndBlocksModalWheel()
 	QCOMPARE(chatView->property("contentY").toReal(), midY);
 	QVERIFY(!chatView->property("wheeling").toBool());
 
+	// The Lightbox picture loads through the async chatimage provider: the reader thread asks,
+	// the Host answers from the GUI thread. A request still in flight when the engine is
+	// destroyed can never be answered (the reader thread is gone) and never deleted, which
+	// LeakSanitizer reports. Let the round trip finish before the engine goes away.
+	QQuickItem* lightboxPicture = findItem(lightbox, [](QQuickItem* item) {
+		return QByteArray(item->metaObject()->className()).startsWith("QQuickImage")
+		       && item->property("source").toUrl().toString().contains(u"chatimage"_s);
+	});
+	QVERIFY(lightboxPicture);
+	constexpr int imageReady = 1; // QQuickImage::Status; the header is private, values spelled out
+	constexpr int imageError = 3;
+	QTRY_VERIFY([&] {
+		const int status = lightboxPicture->property("status").toInt();
+		return status == imageReady || status == imageError;
+	}());
+
 	QVERIFY(warningSpy.isEmpty());
 }
 
@@ -384,6 +456,59 @@ void TestMainWindow::tileHeaderInsetsAndRoundsInsideFrameBorder()
 	QVERIFY(tileGrid);
 	f.workspace->toggleSplit();
 	QTRY_VERIFY(!tileGrid->isVisible());
+	QVERIFY(warningSpy.isEmpty());
+}
+
+void TestMainWindow::splitViewQuickToggleKeepsTilesOnTheGrid()
+{
+	MainFixture f;
+
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+
+	f.workspace->toggleSplit();
+	QTRY_VERIFY(f.workspace->isSplitView());
+
+	QQuickItem* tileGrid = findByTypePrefix(window->contentItem(), "TileGrid");
+	QVERIFY(tileGrid);
+	QList<QQuickItem*> tiles;
+	QTRY_VERIFY([&] {
+		tiles.clear();
+		collectTiles(window->contentItem(), tiles);
+		return tiles.size() == 1 && !tiles.first()->property("leaving").toBool() && tiles.first()->width() > 100.0;
+	}());
+	QTRY_VERIFY(tilesOnTheGrid(window->contentItem(), tileGrid));
+	const QPointer<QQuickItem> revived = tiles.first();
+
+	// Toggle off and on again while the exit linger still holds the rows: the tile is
+	// revived in place instead of recreated.
+	f.workspace->toggleSplit();
+	f.workspace->toggleSplit();
+	QTRY_VERIFY(f.workspace->isSplitView());
+	QTRY_VERIFY([&] {
+		tiles.clear();
+		collectTiles(window->contentItem(), tiles);
+		return tiles.size() == 1 && !tiles.first()->property("leaving").toBool();
+	}());
+	QVERIFY(revived != nullptr); // the same tile instance came back
+
+	// The revived tile follows the grid again: after the window grows, its geometry settles
+	// on the slot the grid computes for its place.
+	window->resize(window->size() + QSize(320, 120));
+	QTRY_VERIFY(tilesOnTheGrid(window->contentItem(), tileGrid));
+
 	QVERIFY(warningSpy.isEmpty());
 }
 

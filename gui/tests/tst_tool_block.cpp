@@ -53,7 +53,9 @@ private slots:
 	void reasoningAutoCollapseWhileHoldingKeepsZeroHeldSpace();
 	void heldSpaceRespectsViewportRatioCap();
 	void wheelAccumulatesAndBoostsSpeed();
+	void wheelReversalTurnsAroundAtOnce();
 	void touchpadCoastInertiaAndBounds();
+	void touchpadReverseUpdateStopsCoast();
 };
 
 void TestToolBlock::initTestCase()
@@ -427,6 +429,71 @@ void TestToolBlock::wheelAccumulatesAndBoostsSpeed()
 	view->setProperty("model", QVariant::fromValue<QObject*>(nullptr));
 }
 
+void TestToolBlock::wheelReversalTurnsAroundAtOnce()
+{
+	QQmlEngine engine;
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+
+	QList<refgui::proto::Message> messages;
+	for(int i = 0; i < 20; ++i)
+	{
+		messages.append(refgui::test::user(u"u%1"_s.arg(i), u"Question %1 with enough text to fill the view."_s.arg(i)));
+		messages.append(refgui::test::assistant(u"a%1"_s.arg(i), {refgui::test::text(u"Answer %1\nSecond line\nThird line"_s.arg(i))}));
+	}
+
+	ConversationModel model;
+	model.reset(messages);
+
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/ChatView.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+
+	QQuickWindow window;
+	window.resize(WindowWidth, WindowHeight);
+	window.show();
+	QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* view = qobject_cast<QQuickItem*>(created.get());
+	QVERIFY(view);
+	view->setParentItem(window.contentItem());
+	view->setWidth(WindowWidth);
+	view->setHeight(WindowHeight);
+	view->setProperty("model", QVariant::fromValue<QObject*>(&model));
+
+	QTRY_VERIFY(view->property("maxContentY").toReal() > view->property("minContentY").toReal() + 600.0);
+	const qreal minY = view->property("minContentY").toReal();
+	const qreal maxY = view->property("maxContentY").toReal();
+	const qreal midY = std::round((minY + maxY) / 2.0);
+	QMetaObject::invokeMethod(view, "scrollTo", Q_ARG(QVariant, midY), Q_ARG(QVariant, false));
+	QCOMPARE(view->property("contentY").toReal(), midY);
+
+	const QPointF localCenter(WindowWidth / 2.0, WindowHeight / 2.0);
+	const QPointF globalCenter = window.mapToGlobal(localCenter);
+	const auto sendNotch = [&](int angleDeltaY) {
+		QWheelEvent ev(localCenter, globalCenter, QPoint(), QPoint(0, angleDeltaY),
+		               Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+		QCoreApplication::sendEvent(&window, &ev);
+	};
+
+	// A notch up starts the chase; no frame has stepped yet, so the content stands still.
+	sendNotch(120);
+	QVERIFY(view->property("wheeling").toBool());
+	QCOMPARE(view->property("wheelTarget").toReal(), midY - view->property("wheelStep").toReal());
+
+	// A notch down in mid-chase turns the target to the new side of the content at once,
+	// instead of adding it to the far-away old target and travelling on the old way.
+	sendNotch(-120);
+	QVERIFY(view->property("wheeling").toBool());
+	QVERIFY(view->property("wheelTarget").toReal() > view->property("contentY").toReal());
+	QVERIFY(view->property("wheelTarget").toReal() > midY);
+	QCOMPARE(view->property("wheelBoost").toReal(), 1.0); // the reversal reset the boost
+	QTRY_VERIFY(view->property("contentY").toReal() > midY);
+	QTRY_VERIFY(!view->property("wheeling").toBool());
+
+	view->setProperty("model", QVariant::fromValue<QObject*>(nullptr));
+}
+
 void TestToolBlock::touchpadCoastInertiaAndBounds()
 {
 	QQmlEngine engine;
@@ -530,6 +597,71 @@ void TestToolBlock::touchpadCoastInertiaAndBounds()
 	QTRY_VERIFY(!view->property("coasting").toBool());
 	QTRY_VERIFY(view->property("following").toBool());
 	QTRY_VERIFY(std::abs(view->property("contentY").toReal() - view->property("maxContentY").toReal()) < 1.5);
+
+	view->setProperty("model", QVariant::fromValue<QObject*>(nullptr));
+}
+
+void TestToolBlock::touchpadReverseUpdateStopsCoast()
+{
+	QQmlEngine engine;
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+
+	QList<refgui::proto::Message> messages;
+	for(int i = 0; i < 25; ++i)
+	{
+		messages.append(refgui::test::user(u"u%1"_s.arg(i), u"Prompt %1"_s.arg(i)));
+		messages.append(refgui::test::assistant(u"a%1"_s.arg(i), {refgui::test::text(u"Reply %1\nLine two\nLine three"_s.arg(i))}));
+	}
+
+	ConversationModel model;
+	model.reset(messages);
+
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/ChatView.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+
+	QQuickWindow window;
+	window.resize(WindowWidth, WindowHeight);
+	window.show();
+	QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* view = qobject_cast<QQuickItem*>(created.get());
+	QVERIFY(view);
+	view->setParentItem(window.contentItem());
+	view->setWidth(WindowWidth);
+	view->setHeight(WindowHeight);
+	view->setProperty("model", QVariant::fromValue<QObject*>(&model));
+
+	QTRY_VERIFY(view->property("maxContentY").toReal() > view->property("minContentY").toReal() + 800.0);
+	const qreal minY = view->property("minContentY").toReal();
+	const qreal maxY = view->property("maxContentY").toReal();
+	const qreal midY = std::round((minY + maxY) / 2.0);
+	QMetaObject::invokeMethod(view, "scrollTo", Q_ARG(QVariant, midY), Q_ARG(QVariant, false));
+	QCOMPARE(view->property("contentY").toReal(), midY);
+
+	const QPointF localCenter(WindowWidth / 2.0, WindowHeight / 2.0);
+	const QPointF globalCenter = window.mapToGlobal(localCenter);
+	const auto sendPhase = [&](Qt::ScrollPhase phase, const QPoint& pixelDelta) {
+		QWheelEvent ev(localCenter, globalCenter, pixelDelta, QPoint(), Qt::NoButton, Qt::NoModifier, phase, false);
+		QCoreApplication::sendEvent(&window, &ev);
+	};
+
+	// Upward flick starts the synthetic coast.
+	sendPhase(Qt::ScrollBegin, QPoint());
+	QTest::qWait(16);
+	sendPhase(Qt::ScrollUpdate, QPoint(0, 36));
+	QTest::qWait(16);
+	sendPhase(Qt::ScrollUpdate, QPoint(0, 36));
+	sendPhase(Qt::ScrollEnd, QPoint());
+	QVERIFY(view->property("coasting").toBool());
+	QVERIFY(view->property("coastVelocity").toReal() < 0.0);
+
+	// A downward update, with no ScrollBegin ahead of it (a platform that skips Begin),
+	// stops the coast at once instead of letting it move against the fingers.
+	sendPhase(Qt::ScrollUpdate, QPoint(0, -36));
+	QVERIFY(!view->property("coasting").toBool());
+	QCOMPARE(view->property("coastVelocity").toReal(), 0.0);
 
 	view->setProperty("model", QVariant::fromValue<QObject*>(nullptr));
 }

@@ -31,6 +31,54 @@ describe('SplitView', () => {
     expect(wrapper.findAll('[data-tile]')).toHaveLength(0)
   })
 
+  it('places tiles only once the observer reports the area size, never on the 0×0 grid', async () => {
+    // A tile mounted before the area is measured gets the degenerate one-column layout and then
+    // animates left/top/width/height across the content area — the jank of the split toggle.
+    const observers: ResizeObserverCallback[] = []
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          observers.push(callback)
+        }
+        observe() {}
+        disconnect() {}
+      },
+    )
+    try {
+      const pinia = createPinia()
+      setActivePinia(pinia)
+      const workspace = useWorkspaceStore()
+      workspace.onFrame({
+        kind: 'sessions',
+        sessions: [
+          info({ id: 's1', name: 'main' }),
+          info({ id: 's2', name: 'bg', created_at: 2, attached: 0 }),
+          info({ id: 's3', name: 'bg2', created_at: 3, attached: 0 }),
+        ],
+      })
+      workspace.currentId = 's1'
+      workspace.mode = 'split'
+
+      const wrapper = mount(SplitView, {
+        global: { plugins: [pinia, createAppI18n(['en'])], stubs: { SplitTile: TileStub } },
+      })
+      await nextTick()
+      expect(wrapper.findAll('[data-tile]')).toHaveLength(0)
+
+      const entry = { contentRect: { width: 1200, height: 600 } } as ResizeObserverEntry
+      observers[0]!([entry], {} as ResizeObserver)
+      await nextTick()
+      const tiles = wrapper.findAll('[data-tile]')
+      expect(tiles).toHaveLength(2)
+      expect(tiles[0]!.attributes('style')).toContain('left: 16px')
+      expect(tiles[0]!.attributes('style')).toContain('width: 578px')
+      expect(tiles[1]!.attributes('style')).toContain('left: 606px')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('clears the focused tile when clicking the grid background', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
