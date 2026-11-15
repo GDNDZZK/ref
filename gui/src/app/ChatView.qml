@@ -64,10 +64,14 @@ ListView {
 	property bool holdStale: false // the end moved during that write
 	property bool holdResting: false // a permission card is changing; the end follows the content
 
-	readonly property int retainedDistance: 20000 // px above and below the view whose rows stay instantiated, about 200 rows
+	property bool compact: false // narrower cache in a split-view tile
+	readonly property int fullRetainedDistance: 20000 // px above and below the view whose rows stay instantiated, about 200 rows
+	readonly property int compactRetainedDistance: 1600 // smaller cache in split-view tiles so opening many tiles stays fast
+	readonly property int retainedDistance: compact ? compactRetainedDistance : fullRetainedDistance
 	readonly property int olderTriggerDistance: 400 // px from the top at which the next page loads by itself
 	readonly property real minContentY: originY - topMargin
 	readonly property real maxContentY: Math.max(minContentY, originY + contentHeight - height)
+	readonly property real maxHeldViewportRatio: 0.25
 
 	// Flickable clamps contentY to this bound; aiming past it would chase forever.
 	readonly property real boundedEnd: Math.min(heldEnd, originY + contentHeight)
@@ -76,9 +80,29 @@ ListView {
 	property bool wheeling: false // chasing wheelTarget; never while following
 	property real wheelTarget: 0
 	readonly property int wheelNotch: 120 // angleDelta of one notch, per QWheelEvent
-	readonly property int pixelsPerWheelLine: 24
-	readonly property real wheelStep: Application.styleHints.wheelScrollLines * pixelsPerWheelLine // px per notch, as in Flickable
+	readonly property int wheelPixelsPerLine: 40
+	readonly property int minWheelStep: 120
+	readonly property real wheelStep: Math.max(minWheelStep, Application.styleHints.wheelScrollLines * wheelPixelsPerLine)
+	readonly property real wheelLag: 115 // ms; exponential time constant for wheel glide
+	readonly property int wheelBoostWindowMs: 140 // consecutive notches inside this window build speed
+	readonly property real wheelBoostStep: 0.2
+	readonly property real wheelMaxBoost: 1.8
+	property real wheelBoost: 1.0
+	property real lastWheelTime: 0
+	property int lastWheelDirection: 0
 
+	property bool coasting: false
+	property real coastVelocity: 0 // px/s; positive scrolls down
+	property real coastRemainder: 0 // sub-pixel accumulator for whole-pixel contentY steps
+	property real touchVelocity: 0 // smoothed px/s during ScrollUpdate
+	property real pendingTouchDelta: 0
+	property real lastTouchTime: 0
+	readonly property real touchVelocityAlpha: 0.45
+	readonly property int touchMinSampleMs: 4
+	readonly property int touchSampleTimeoutMs: 120
+	readonly property real coastStartMinVelocity: 60 // px/s minimum flick velocity to start coasting
+	readonly property real coastStopVelocity: 15 // px/s below which coasting stops
+	readonly property real coastDecay: 0.32 // s; exponential decay time constant
 	// The follow chase below does the gliding.
 	function glideToEnd() {
 		following = true
@@ -89,9 +113,21 @@ ListView {
 	// contentY (qquickflickable.cpp:537-549). While a row resizes every frame, that
 	// rounding undid sub-pixel steps: the chase stalled a few pixels short and only
 	// finished once the rows settled, as a small late scroll.
-	function scrollStep(target, frameTime) {
+	function wheelChase(current, target, frameTime) {
+		if (Motion.arrived(current, target))
+			return target
+		return current + (target - current) * (1 - Math.exp(-frameTime * Format.msPerSecond / wheelLag))
+	}
+
+	// One frame of a scroll chase toward `target`, in whole pixels and at least one per
+	// frame. Every ListView layout fixes up the position, which rounds a fractional
+	// contentY (qquickflickable.cpp:537-549). While a row resizes every frame, that
+	// rounding undid sub-pixel steps: the chase stalled a few pixels short and only
+	// finished once the rows settled, as a small late scroll.
+	function scrollStep(target, frameTime, forWheel) {
 		const from = Math.round(contentY)
-		const next = Math.round(Motion.chase(contentY, target, frameTime))
+		const raw = forWheel ? wheelChase(contentY, target, frameTime) : Motion.chase(contentY, target, frameTime)
+		const next = Math.round(raw)
 		const step = next !== from ? next : from + Math.sign(target - from)
 		const overshoots = (step - target) * (from - target) < 0 // ends up past a fractional target
 		contentY = overshoots ? target : step
@@ -100,6 +136,98 @@ ListView {
 	// Within a pixel of the target counts as there: scrolling moves in whole pixels.
 	function scrollArrived(target) {
 		return Math.abs(target - contentY) < 1
+	}
+
+	function stopCoast() {
+		coasting = false
+		coastVelocity = 0
+		coastRemainder = 0
+	}
+
+	function resetTouchTracker() {
+		touchVelocity = 0
+		pendingTouchDelta = 0
+		lastTouchTime = Date.now()
+	}
+
+	function sampleTouchVelocity(deltaY, now) {
+		const dtMs = lastTouchTime > 0 ? now - lastTouchTime : 0
+		if (lastTouchTime === 0 || dtMs > touchSampleTimeoutMs) {
+			touchVelocity = 0
+			pendingTouchDelta = deltaY
+			lastTouchTime = now
+			return
+		}
+		pendingTouchDelta += deltaY
+		if (dtMs < touchMinSampleMs)
+			return
+		const instant = pendingTouchDelta / (dtMs / Format.msPerSecond)
+		touchVelocity = touchVelocity === 0
+			? instant
+			: touchVelocity + touchVelocityAlpha * (instant - touchVelocity)
+		pendingTouchDelta = 0
+		lastTouchTime = now
+	}
+
+	function startCoast() {
+		const now = Date.now()
+		if (lastTouchTime > 0 && now - lastTouchTime > touchSampleTimeoutMs) {
+			touchVelocity = 0
+			pendingTouchDelta = 0
+			return
+		}
+		if (pendingTouchDelta !== 0 && lastTouchTime > 0 && now > lastTouchTime) {
+			const dtMs = Math.max(touchMinSampleMs, now - lastTouchTime)
+			const instant = pendingTouchDelta / (dtMs / Format.msPerSecond)
+			touchVelocity = touchVelocity === 0
+				? instant
+				: touchVelocity + touchVelocityAlpha * (instant - touchVelocity)
+			pendingTouchDelta = 0
+		}
+		const velocity = touchVelocity
+		touchVelocity = 0
+		pendingTouchDelta = 0
+		if (Math.abs(velocity) <= coastStartMinVelocity)
+			return
+		if (velocity < 0 && contentY <= minContentY)
+			return
+		if (velocity > 0 && (contentY >= maxContentY || following))
+			return
+		following = false
+		wheeling = false
+		coastVelocity = velocity
+		coastRemainder = 0
+		coasting = true
+		scrollActivity.restart()
+	}
+
+	function coastStep(frameTime) {
+		scrollActivity.restart()
+		const prevVelocity = coastVelocity
+		const decay = Math.exp(-frameTime / coastDecay)
+		coastVelocity = prevVelocity * decay
+		const distance = prevVelocity * coastDecay * (1 - decay)
+		const total = coastRemainder + distance
+		const step = Math.trunc(total)
+		coastRemainder = total - step
+		if (step !== 0) {
+			const next = Math.max(minContentY, Math.min(maxContentY, contentY + step))
+			contentY = next
+			if (next <= minContentY && coastVelocity < 0) {
+				stopCoast()
+				return
+			}
+			if (next >= maxContentY && coastVelocity > 0) {
+				stopCoast()
+				following = true
+				return
+			}
+		}
+		if (Math.abs(coastVelocity) < coastStopVelocity) {
+			stopCoast()
+			if (contentY >= maxContentY)
+				following = true
+		}
 	}
 
 	// A user scroll to `y`: `glide` chases it (wheel notches), otherwise it applies at
@@ -135,12 +263,21 @@ ListView {
 		holdUpdating = true
 		do {
 			holdStale = false
-			const cap = Math.max(0, height - 1)
+			const cap = Math.min(Math.max(0, height - 1), Math.round(height * maxHeldViewportRatio))
 			const target = holdResting ? naturalEnd : Math.max(highWater, naturalEnd)
-			highWater = Math.min(target, naturalEnd + cap)
-			heldSpace = highWater - naturalEnd
+			const held = Math.max(0, Math.min(cap, target - naturalEnd))
+			highWater = naturalEnd + held
+			heldSpace = held
 		} while (holdStale)
 		holdUpdating = false
+	}
+
+	function restHold() {
+		release.stop()
+		holdResting = true
+		holdResume.restart()
+		highWater = naturalEnd
+		heldSpace = 0
 	}
 
 	function resetHold() {
@@ -150,6 +287,17 @@ ListView {
 		holdStale = false
 		highWater = 0
 		heldSpace = 0
+	}
+
+	function stopScrollMotion() {
+		wheeling = false
+		wheelBoost = 1.0
+		lastWheelTime = 0
+		lastWheelDirection = 0
+		stopCoast()
+		touchVelocity = 0
+		pendingTouchDelta = 0
+		lastTouchTime = 0
 	}
 	clip: true
 	spacing: Theme.blockSpacing
@@ -170,10 +318,14 @@ ListView {
 
 	// The view keeps the rows it shows where they are when earlier ones are added above them.
 	// The end stays on the bottom edge when the view changes height (a tile's input box comes or goes).
-	onSessionIdChanged: resetHold()
+	onSessionIdChanged: {
+		stopScrollMotion()
+		resetHold()
+	}
 	Connections {
 		target: view.model ? view.model : null
 		function onModelReset() {
+			view.stopScrollMotion()
 			view.resetHold()
 		}
 	}
@@ -212,6 +364,7 @@ ListView {
 
 		onPressedChanged: {
 			view.wheeling = false
+			view.stopCoast()
 			view.following = !pressed && view.atYEnd
 		}
 
@@ -254,14 +407,54 @@ ListView {
 			// follow the fingers. Its Begin and End carry no delta.
 			const gesture = event.phase !== Qt.NoScrollPhase
 			if (gesture) {
-				if (event.pixelDelta.y !== 0)
-					view.scrollTo(view.contentY - event.pixelDelta.y, false)
+				switch (event.phase) {
+				case Qt.ScrollBegin:
+					view.stopCoast()
+					view.wheeling = false
+					view.resetTouchTracker()
+					if (event.pixelDelta.y !== 0)
+						view.scrollTo(view.contentY - event.pixelDelta.y, false)
+					return
+				case Qt.ScrollUpdate:
+					if (event.pixelDelta.y !== 0) {
+						const deltaY = -event.pixelDelta.y
+						view.scrollTo(view.contentY + deltaY, false)
+						view.sampleTouchVelocity(deltaY, Date.now())
+					}
+					return
+				case Qt.ScrollMomentum:
+					view.stopCoast()
+					view.touchVelocity = 0
+					view.pendingTouchDelta = 0
+					if (event.pixelDelta.y !== 0)
+						view.scrollTo(view.contentY - event.pixelDelta.y, false)
+					return
+				case Qt.ScrollEnd:
+					if (event.pixelDelta.y !== 0) {
+						const deltaY = -event.pixelDelta.y
+						view.scrollTo(view.contentY + deltaY, false)
+						view.sampleTouchVelocity(deltaY, Date.now())
+					}
+					view.startCoast()
+					return
+				}
 				return
 			}
 			if (event.angleDelta.y === 0) // horizontal only
 				return
+			view.stopCoast()
+			const now = Date.now()
+			const dir = Math.sign(event.angleDelta.y)
+			if (dir === view.lastWheelDirection && view.lastWheelTime > 0 && now - view.lastWheelTime <= view.wheelBoostWindowMs) {
+				const notchShare = Math.min(1, Math.abs(event.angleDelta.y) / view.wheelNotch)
+				view.wheelBoost = Math.min(view.wheelMaxBoost, view.wheelBoost + view.wheelBoostStep * notchShare)
+			} else {
+				view.wheelBoost = 1.0
+			}
+			view.lastWheelTime = now
+			view.lastWheelDirection = dir
 			const start = view.wheeling ? view.wheelTarget : view.contentY
-			view.scrollTo(start - event.angleDelta.y / view.wheelNotch * view.wheelStep, true)
+			view.scrollTo(start - event.angleDelta.y / view.wheelNotch * view.wheelStep * view.wheelBoost, true)
 		}
 	}
 
@@ -275,27 +468,33 @@ ListView {
 	FrameAnimation {
 		running: view.wheeling
 		onTriggered: {
-			view.scrollStep(view.wheelTarget, frameTime)
-			view.wheeling = !view.scrollArrived(view.wheelTarget)
+			const target = Math.max(view.minContentY, Math.min(view.maxContentY, view.wheelTarget))
+			view.wheelTarget = target
+			view.scrollStep(target, frameTime, true)
+			view.wheeling = !view.scrollArrived(target)
 		}
+	}
+
+	FrameAnimation {
+		running: view.coasting
+		onTriggered: view.coastStep(frameTime)
 	}
 
 	onMovementStarted: {
 		wheeling = false
+		stopCoast()
 		following = false
 	}
 	onMovementEnded: following = atYEnd
 
 	// Hold only while following: further up, the end moving is out of sight.
 	onNaturalEndChanged: if (holding && following) holdEnd()
-	onPermissionCountChanged: {
-		holdResting = true
-		holdResume.restart()
-	}
+	onPermissionCountChanged: restHold()
 	onFollowingChanged: {
 		if (!following)
 			return
 		wheeling = false
+		stopCoast()
 		highWater = heldEnd
 	}
 	onHoldingChanged: {

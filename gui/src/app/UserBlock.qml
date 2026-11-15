@@ -19,7 +19,6 @@ Block {
 	required property string sender
 	required property real time
 	required property bool expanded
-	required property bool contextStart
 
 	readonly property bool isCompaction: source === MessageSource.compaction
 	readonly property bool isShell: source === MessageSource.shell
@@ -166,7 +165,7 @@ Block {
 			readonly property int barWidth: 2
 			readonly property int textGap: 12
 
-			visible: block.isCompaction
+			visible: block.isCompaction && (block.expanded || height > 0)
 			width: parent.width
 			height: block.expanded ? summaryText.height : 0
 			clip: true
@@ -188,19 +187,6 @@ Block {
 				color: Theme.textMuted
 				font.pixelSize: Theme.compactFontSize
 			}
-		}
-
-		Text {
-			textFormat: Text.PlainText
-			visible: block.isCompaction && block.contextStart
-			width: parent.width
-			horizontalAlignment: Text.AlignHCenter
-			text: qsTr("Messages above stay visible but are no longer sent to the model")
-			color: Theme.textMuted
-			opacity: 0.7
-			font.pixelSize: Theme.smallFontSize
-			font.italic: true
-			wrapMode: Text.Wrap
 		}
 
 		Rectangle {

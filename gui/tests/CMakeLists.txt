@@ -237,7 +237,7 @@ qt_add_qml_module(tst_tool_block
 target_include_directories(tst_tool_block PRIVATE ${PROJECT_SOURCE_DIR}/src/app)
 set_tests_properties(tst_tool_block PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QML_IMPORT_PATH=${qml_import_path}")
 
-# No test may reach the session bus of the user's desktop, where a notification would really show.
+add_subdirectory(main_window)
 # A test that needs a bus starts its own, like tst_dbus_notifier.
 if(UNIX AND NOT APPLE)
 	get_property(refgui_tests DIRECTORY PROPERTY TESTS)

@@ -26,6 +26,7 @@ function mountBlockView(leaving = false) {
           hoveredMessageId: ref(''),
           holdHeader: vi.fn(),
           releaseHeader: vi.fn(),
+          restHold: vi.fn(),
         },
       },
       stubs: { MarkdownBlock: true },

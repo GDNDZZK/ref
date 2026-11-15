@@ -55,7 +55,28 @@ function band(element: Element | null | undefined): Band | undefined {
   return element?.getBoundingClientRect()
 }
 
+let clearanceFrame: number | undefined
+
+function scheduleMeasureClearances(): void {
+  if (clearanceFrame !== undefined) return
+  clearanceFrame = requestAnimationFrame(() => {
+    clearanceFrame = undefined
+    measureClearances()
+  })
+}
+
+onBeforeUnmount(() => {
+  if (clearanceFrame !== undefined) {
+    cancelAnimationFrame(clearanceFrame)
+    clearanceFrame = undefined
+  }
+})
+
 function measureClearances(): void {
+  if (clearanceFrame !== undefined) {
+    cancelAnimationFrame(clearanceFrame)
+    clearanceFrame = undefined
+  }
   const element = area.value
   const areaBand = band(element)
   const content = element?.parentElement
@@ -122,7 +143,7 @@ function onBackgroundClick(event: MouseEvent): void {
     ref="area"
     class="split"
     :class="{ zoomed, zooming }"
-    @scroll.passive="measureClearances"
+    @scroll.passive="scheduleMeasureClearances"
     @click="onBackgroundClick"
   >
     <div v-if="workspace.tileIds.length === 0" class="empty">

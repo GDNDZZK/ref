@@ -25,7 +25,16 @@ Item {
 	readonly property real gridHeight: rows === 0 ? 0 : contentTop + padding + rows * tileHeight + (rows - 1) * gap
 
 	clip: true
+	opacity: Workspace.splitView ? 1 : 0
+	layer.enabled: !Workspace.splitView && visible
+	layer.smooth: true
 
+	Behavior on opacity {
+		NumberAnimation {
+			duration: Motion.standard
+			easing.type: Workspace.splitView ? Motion.ease : Motion.exitEase
+		}
+	}
 	// Tiles that leave stay until their exit animation is over.
 	Binding {
 		target: Workspace.tileStage

@@ -3,6 +3,7 @@
 // Esc close it. Opening one dialog while another is open cross-fades the panels.
 import { computed, nextTick, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
 import { useComposerStore } from '../stores/composer.ts'
+import { containScrimWheel } from '../composables/scrimWheel.ts'
 import { useDialogsStore } from '../stores/dialogs.ts'
 import type { DialogRequest } from '../stores/dialogs.ts'
 import { useWorkspaceStore } from '../stores/workspace.ts'
@@ -57,7 +58,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
 <template>
   <Transition name="scrim" @after-leave="shown = undefined">
-    <div v-if="dialogs.current" class="scrim" :class="{ top: isPalette }" @mousedown.self="dialogs.close()">
+    <div
+      v-if="dialogs.current"
+      class="scrim"
+      :class="{ top: isPalette }"
+      @mousedown.self="dialogs.close()"
+      @wheel="containScrimWheel"
+    >
       <Transition name="panel" mode="out-in" appear>
         <CommandPalette v-if="shown?.kind === 'palette'" key="palette" />
         <ModelsDialog v-else-if="shown?.kind === 'models'" key="models" :session-id="shown.sessionId" />
@@ -98,6 +105,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   align-items: center;
   justify-content: center;
   background: var(--scrim);
+  overscroll-behavior: contain;
 }
 
 .scrim.top {

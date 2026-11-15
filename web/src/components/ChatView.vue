@@ -53,7 +53,7 @@ const emit = defineEmits<{ errorOutOfSight: [] }>()
 
 const GESTURE_IDLE_MS = 150 // without scrolling, a user gesture has ended
 const AT_END_TOLERANCE = 1 // px
-
+const MAX_HELD_VIEWPORT_RATIO = 0.25
 const hoveredMessageId = ref('')
 const scroller = useTemplateRef<HTMLElement>('scroller')
 const rows = useTemplateRef<HTMLElement>('rows')
@@ -87,12 +87,14 @@ watch(
       ? []
       : current.filter((block, i) => !previousKeys.has(block.key) && i >= prepended)
     const staying = leaving.value.filter((row) => !currentKeys.has(row.block.key))
-    leaving.value = isLoad ? [] : [...staying, ...findLeaving(knownBlocks, currentKeys)]
-    knownBlocks = current
+    const addedLeaving = isLoad ? [] : findLeaving(knownBlocks, currentKeys)
+    leaving.value = isLoad ? [] : [...staying, ...addedLeaving]
+    if (holding.value && addedLeaving.length > 0) restHold()
     freshKeys.value = new Set(appeared.map((block) => block.key))
     if (isLoad) void nextTick(jumpToEnd)
     if (prepended > 0) void nextTick(keepAnchor)
     if (!following.value && appeared.some((block) => block.kind === 'error')) emit('errorOutOfSight')
+    knownBlocks = current
   },
   { flush: 'pre' },
 )
@@ -128,6 +130,10 @@ watch(
 function jumpToEnd(): void {
   if (!scroller.value) return
   cancelRelease?.()
+  cancelRelease = undefined
+  clearTimeout(holdRestTimer)
+  holdRestTimer = undefined
+  holdResting = false
   highWater = 0
   following.value = true
   setHeld(0)
@@ -137,6 +143,8 @@ function jumpToEnd(): void {
 // --- Geometry. The footer sits after the last row and carries the held room.
 let heldSpace = 0
 let highWater = 0 // furthest natural end of the current turn
+let holdResting = false
+let holdRestTimer: ReturnType<typeof setTimeout> | undefined
 
 function naturalEnd(): number {
   return rows.value?.offsetHeight ?? 0
@@ -153,10 +161,25 @@ function setHeld(space: number): void {
   chaseEnd()
 }
 
+function restHold(): void {
+  cancelRelease?.()
+  cancelRelease = undefined
+  holdResting = true
+  clearTimeout(holdRestTimer)
+  holdRestTimer = setTimeout(() => {
+    holdResting = false
+    holdRestTimer = undefined
+  }, motion.slow)
+  highWater = naturalEnd()
+  setHeld(0)
+}
+
 function holdEnd(): void {
   const end = naturalEnd()
-  const maxHeld = Math.max(0, (scroller.value?.clientHeight ?? 0) - 1)
-  highWater = Math.min(Math.max(highWater, end), end + maxHeld)
+  const clientHeight = scroller.value?.clientHeight ?? 0
+  const maxHeld = Math.min(Math.max(0, clientHeight - 1), Math.round(clientHeight * MAX_HELD_VIEWPORT_RATIO))
+  const target = holdResting ? end : Math.min(Math.max(highWater, end), end + maxHeld)
+  highWater = target
   setHeld(highWater - end)
 }
 
@@ -306,6 +329,7 @@ provide(chatScrollKey, {
     holdObserver.disconnect()
     held = undefined
   },
+  restHold,
 })
 
 onMounted(() => {
@@ -318,6 +342,7 @@ onBeforeUnmount(() => {
   sizeObserver.disconnect()
   holdObserver.disconnect()
   clearTimeout(gestureTimer)
+  clearTimeout(holdRestTimer)
   cancelRelease?.()
 })
 </script>

@@ -17,7 +17,7 @@ Item {
 	property rect zoomRect: Qt.rect(0, 0, 0, 0)
 	readonly property bool zoomed: Workspace.zoomedId === sessionId
 	readonly property bool expanded: zoomed
-	readonly property bool fading: leaving
+	readonly property bool fading: leaving && Workspace.splitView
 	readonly property bool othersZoomed: anyZoomed && !zoomed
 	// Whether the tile moves between its slot and the whole area (slowly) or just reflows.
 	property bool travelling: expanded
@@ -97,17 +97,23 @@ Item {
 		anchors.fill: parent
 		radius: Theme.radius
 		color: Theme.background
-		border.color: tile.leaving ? Theme.background : (tile.focused || tile.expanded ? Theme.accentText : (tile.hasRoot ? tile.rootColor : Theme.border))
+		border.color: tile.fading ? Theme.background : (tile.focused || tile.expanded ? Theme.accentText : (tile.hasRoot ? tile.rootColor : Theme.border))
+		layer.enabled: !tile.travelling && (arrival.running || tile.fading || tile.othersZoomed)
+		layer.smooth: true
+
 		Behavior on border.color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 
 		Rectangle {
 			id: header
-			width: parent.width
+			x: frame.border.width
+			y: frame.border.width
+			width: parent.width - 2 * frame.border.width
 			height: tile.expanded ? 0 : Theme.tileHeaderHeight
+			topLeftRadius: Math.max(0, frame.radius - frame.border.width)
+			topRightRadius: topLeftRadius
 			color: tile.hasPermission ? Theme.warningSurface : Theme.surface
 			opacity: tile.expanded ? 0 : 1
 			clip: true
-
 			Behavior on height { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 			Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 			Behavior on color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
@@ -233,10 +239,17 @@ Item {
 				}
 			}
 		}
-
 		SessionPane {
 			id: pane
-			anchors { top: header.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
+			anchors {
+				top: header.bottom
+				left: parent.left
+				right: parent.right
+				bottom: parent.bottom
+				leftMargin: frame.border.width
+				rightMargin: frame.border.width
+				bottomMargin: frame.border.width
+			}
 			session: tile.session
 			compact: !tile.expanded
 			keysEnabled: tile.focused || tile.expanded

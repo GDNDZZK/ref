@@ -2,6 +2,7 @@
 // A picture fitted to the window over a scrim (ImageBlock.qml). Esc, the scrim or the button close it.
 import { onBeforeUnmount, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { containScrimWheel } from '../composables/scrimWheel.ts'
 import Icon from './Icon.vue'
 import { LIGHTBOX_MARGIN } from './toolLimits.ts'
 import { Key } from '../keys.ts'
@@ -30,6 +31,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
       :style="{ '--margin': `${LIGHTBOX_MARGIN}px` }"
       role="dialog"
       @click.self="emit('close')"
+      @wheel="containScrimWheel"
     >
       <figure class="figure" @click.self="emit('close')">
         <img class="picture" :src="url" :alt="caption" />
@@ -50,6 +52,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
   display: grid;
   place-items: center;
   background: rgb(0 0 0 / 0.72);
+  overscroll-behavior: contain;
   animation: lightbox-in var(--motion-standard) var(--motion-ease);
 }
 

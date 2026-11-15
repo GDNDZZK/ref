@@ -378,8 +378,7 @@
     "tokensPerSecond": "{rate} 词元/秒"
   },
   "compaction": {
-    "title": "上下文已压缩",
-    "note": "上方的消息仍可查看，但不再发送给模型"
+    "title": "上下文已压缩"
   },
   "status": {
     "working": "处理中",
