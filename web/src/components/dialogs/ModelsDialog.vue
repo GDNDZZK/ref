@@ -3,12 +3,13 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ModelInfo } from '../../proto/generated'
+import { useCommandsStore } from '../../stores/commands.ts'
 import { useConnectionStore } from '../../stores/connection.ts'
 import { useDialogsStore } from '../../stores/dialogs.ts'
 import { useNoticesStore } from '../../stores/notices.ts'
 import { useWorkspaceStore } from '../../stores/workspace.ts'
+import TextButton from '../TextButton.vue'
 import PickDialog from './PickDialog.vue'
-
 const TOKENS_PER_K = 1000
 
 const props = defineProps<{ sessionId: string }>()
@@ -17,6 +18,7 @@ const connection = useConnectionStore()
 const workspace = useWorkspaceStore()
 const dialogs = useDialogsStore()
 const notices = useNoticesStore()
+const commands = useCommandsStore()
 
 interface ModelItem {
   key: string
@@ -54,6 +56,14 @@ function choose({ model }: ModelItem): void {
     .setModel(props.sessionId, { provider: model.provider, model: model.id, variant: kept })
     .catch(notices.pushError)
 }
+
+function openConfiguration(): void {
+  if (commands.find('config')) {
+    commands.run('config').catch(notices.pushError)
+    return
+  }
+  dialogs.open({ kind: 'settings' })
+}
 </script>
 
 <template>
@@ -63,9 +73,14 @@ function choose({ model }: ModelItem): void {
     :items="items"
     :text="(item) => `${item.model.name} ${item.group}`"
     :checked="current"
+    :empty="t('dialog.models.empty')"
+    :no-match="t('dialog.models.noMatch')"
     @pick="choose"
     @close="dialogs.close()"
   >
+    <template #empty-action>
+      <TextButton :label="t('dialog.openConfig')" @click="openConfiguration" />
+    </template>
     <template #row="{ item }">
       <div class="text">
         <span class="name">{{ item.model.name }}</span>

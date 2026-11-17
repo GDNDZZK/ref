@@ -98,7 +98,9 @@ function cancelRename(): void {
 }
 
 // --- Right click.
-const menu = ref<{ x: number; y: number }>()
+const menuCoords = ref({ x: 0, y: 0 })
+const menuOpen = ref(false)
+const menuMounted = ref(false)
 const menuItems = computed<MenuItem[]>(() => [
   { label: t('sidebar.rename'), run: () => void startRename() },
   ...(props.canDetach ? [{ label: t('sidebar.moveToBackground'), run: () => emit('detach') }] : []),
@@ -106,7 +108,9 @@ const menuItems = computed<MenuItem[]>(() => [
 ])
 
 function openMenu(event: MouseEvent): void {
-  menu.value = { x: event.clientX, y: event.clientY }
+  menuCoords.value = { x: event.clientX, y: event.clientY }
+  menuMounted.value = true
+  menuOpen.value = true
 }
 </script>
 
@@ -151,7 +155,14 @@ function openMenu(event: MouseEvent): void {
       </button>
     </span>
     <span class="subtitle" :class="note?.tone">{{ note ? note.text : locationLabel }}</span>
-    <ContextMenu v-if="menu" :x="menu.x" :y="menu.y" :items="menuItems" @close="menu = undefined" />
+    <ContextMenu
+      v-if="menuMounted"
+      :open="menuOpen"
+      :x="menuCoords.x"
+      :y="menuCoords.y"
+      :items="menuItems"
+      @close="menuOpen = false"
+    />
   </div>
 </template>
 

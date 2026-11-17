@@ -31,15 +31,15 @@ describe('PathDialog', () => {
     return { wrapper, workspace, notices }
   }
 
-  it('treats coded dir_not_found silently as an empty completion list', async () => {
-    const { wrapper, notices } = setup(() =>
-      Promise.reject(new RefError('No such folder on disk', 'dir_not_found')),
-    )
-    await vi.advanceTimersByTimeAsync(200)
-
-    expect(notices.notices).toEqual([])
-    expect(wrapper.findAll('.entry')).toHaveLength(0)
-    expect(wrapper.text()).toContain('No sub-directories')
+  it('treats coded not_found and dir_not_found silently as an empty completion list', async () => {
+    for (const code of ['not_found', 'dir_not_found']) {
+      setActivePinia(createPinia())
+      const { wrapper, notices } = setup(() => Promise.reject(new RefError('No such folder on disk', code)))
+      await vi.advanceTimersByTimeAsync(200)
+      expect(notices.notices).toEqual([])
+      expect(wrapper.findAll('.entry')).toHaveLength(0)
+      expect(wrapper.text()).toContain('No sub-directories')
+    }
   })
 
   it('treats 0.2.0 missing-directory text fallback silently as an empty list', async () => {

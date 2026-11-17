@@ -96,4 +96,16 @@ describe('CommandPalette', () => {
     await wrapper.find('input').trigger('keydown', { key: 'Enter' })
     expect(dialogs.current).toEqual({ kind: 'help' })
   })
+
+  it('shows a clear button while query is non-empty and clears on click', async () => {
+    const { wrapper, commands } = mountPalette()
+    commands.register(command('new'))
+    await nextTick()
+    expect(wrapper.find('button.clear').exists()).toBe(false)
+    await wrapper.find('input').setValue('zzz')
+    expect(wrapper.find('button.clear').exists()).toBe(true)
+    await wrapper.find('button.clear').trigger('click')
+    expect((wrapper.find('input').element as HTMLInputElement).value).toBe('')
+    expect(rows(wrapper)).toHaveLength(1)
+  })
 })

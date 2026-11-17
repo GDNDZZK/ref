@@ -84,6 +84,7 @@ const rootTint = computed(() => (rootTask.value ? paletteColorFor(rootTask.value
       class="header"
       :class="{ permission: state === 'permission' || state === 'question', error: state === 'error' }"
       :style="{ '--clear-left': `${clearance.left}px`, '--clear-right': `${clearance.right}px` }"
+      :inert="zoomed || undefined"
       @dblclick="emit('zoom')"
     >
       <SessionDot :state="state" :tint="!focused ? rootTint : undefined" />

@@ -45,6 +45,7 @@ function choose(item: { key: string }): void {
     :items="items"
     :text="(item) => item.label"
     :checked="workspace.infoOf(sessionId)?.model.variant ?? DEFAULT_KEY"
+    :no-match="t('dialog.variants.noMatch')"
     @pick="choose"
     @close="dialogs.close()"
   >

@@ -14,6 +14,7 @@ const api = {
   listHistory: vi.fn(),
   watchAll: vi.fn(),
   setAgent: vi.fn(),
+  setCwd: vi.fn(),
 }
 const connection = {
   getApi: () => api,
@@ -185,8 +186,18 @@ describe('reconnecting', () => {
 
     await workspace.onConnected(true, startup)
 
+    expect(connection.loadConfig).toHaveBeenCalled()
     expect(workspace.live.map((entry) => entry.id)).toEqual(['ses_2'])
     expect(workspace.currentId).toBe('ses_2')
+  })
+
+  it('reloads config when setSessionCwd changes the working directory', async () => {
+    const workspace = setup([session('ses_1', { cwd: '/old' })])
+    connection.loadConfig.mockClear()
+    api.setCwd.mockResolvedValue(session('ses_1', { cwd: '/new' }))
+    await workspace.setSessionCwd('ses_1', '/new')
+    expect(workspace.cwd).toBe('/new')
+    expect(connection.loadConfig).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -419,5 +430,26 @@ describe('split view', () => {
     expect(workspace.focusedId).toBe('ses_4')
     workspace.moveTileFocus(1, 0)
     expect(workspace.focusedId).toBe('ses_4')
+  })
+
+  it('leaves split view and opens the requested live or history session even when another tile is zoomed', async () => {
+    const workspace = await inSplit([session('ses_4', { attached: 0 })])
+    workspace.zoomTile('ses_2')
+    api.attach.mockClear()
+    api.detach.mockClear()
+    const resumedHistory = session('ses_hist', { live: true, attached: 1 })
+    api.attach.mockImplementationOnce(() =>
+      Promise.resolve(snapshot([userMessage('u1', 'old')], { info: resumedHistory })),
+    )
+
+    await workspace.openSession('ses_hist')
+    expect(workspace.mode).toBe('single')
+    expect(workspace.currentId).toBe('ses_hist')
+    expect(workspace.zoomedId).toBeUndefined()
+    expect(workspace.live.some((entry) => entry.id === 'ses_hist')).toBe(true)
+    expect(api.watchAll).toHaveBeenLastCalledWith(false)
+    expect(api.attach).toHaveBeenCalledWith('ses_hist', true)
+    expect(api.detach).toHaveBeenCalledWith('ses_2')
+    expect(api.detach).toHaveBeenCalledWith('ses_4')
   })
 })

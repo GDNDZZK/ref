@@ -6,9 +6,9 @@
 //   enter(): on a target appearing. It fades in from `entryScale` as it springs open.
 import { useTemplateRef } from 'vue'
 import { cssEasing } from '../motion/cssEasing.ts'
+import { prefersReducedMotion } from '../motion/reducedMotion.ts'
 import { motion } from '../theme/generated/motion.ts'
 import { components } from '../theme/generated/components.ts'
-
 const props = withDefaults(defineProps<{ ringReach?: number }>(), { ringReach: 3 }) // ring's final diameter, in target diameters
 
 const RING_START_OPACITY = 0.7
@@ -39,6 +39,7 @@ function sendRing(target: HTMLElement, delayMs: number): void {
 
 function play(target: HTMLElement): void {
   stopAll()
+  if (prefersReducedMotion()) return
   const gather = motion.quick
   const spring = components.flourish.springDuration
   const gathered = components.flourish.gatheredScale
@@ -55,6 +56,7 @@ function play(target: HTMLElement): void {
 
 function enter(target: HTMLElement): void {
   stopAll()
+  if (prefersReducedMotion()) return
   const entryScale = components.flourish.entryScale
   const spring = components.flourish.springDuration
   const quick = motion.quick

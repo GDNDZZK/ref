@@ -115,7 +115,8 @@ function close(item: SessionItem): void {
     :items="items"
     :text="searchText"
     :checked="workspace.focusedId"
-    :empty="t('sidebar.noMatch')"
+    :empty="allItems.length === 0 ? t('dialog.sessions.empty') : t('sidebar.noMatch')"
+    :no-match="t('sidebar.noMatch')"
     @pick="choose"
     @close="dialogs.close()"
   >

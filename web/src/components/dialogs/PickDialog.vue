@@ -19,7 +19,8 @@ const props = defineProps<{
   items: readonly T[]
   text: (item: T) => string // what the search looks at
   checked?: string // key of the current choice
-  empty?: string
+  empty?: string // shown when items is empty
+  noMatch?: string // shown when search filters out all items
 }>()
 const emit = defineEmits<{ pick: [item: T]; close: [] }>()
 
@@ -29,10 +30,19 @@ const searching = computed(() => query.value.trim() !== '')
 const shown = computed(() =>
   searching.value ? rankByQuery(props.items, query.value, props.text) : props.items,
 )
-const { selected, move } = usePickSelection(shown, props.checked)
+const { selected, move } = usePickSelection(shown, () => props.checked)
+const emptyLabel = computed(() => {
+  if (props.items.length === 0) return props.empty ?? t('dialog.noMatch')
+  return props.noMatch ?? t('dialog.noMatch')
+})
 
 const input = useTemplateRef<HTMLInputElement>('input')
 onMounted(() => input.value?.focus())
+
+function clearQuery(): void {
+  query.value = ''
+  input.value?.focus()
+}
 
 function pick(key: string | undefined): void {
   const item = shown.value.find((candidate) => candidate.key === key)
@@ -60,6 +70,15 @@ function onKey(event: KeyboardEvent): void {
         :aria-label="searchLabel"
         @keydown="onKey"
       />
+      <button
+        v-if="query"
+        type="button"
+        class="clear"
+        :aria-label="t('sidebar.clearSearch')"
+        @click="clearQuery"
+      >
+        <Icon icon="close-16" />
+      </button>
     </label>
     <slot name="toolbar" :selected="selected" />
     <PickList
@@ -68,10 +87,13 @@ function onKey(event: KeyboardEvent): void {
       :row-height="PICK_ROW_HEIGHT_PX"
       :max-rows="PICK_MAX_ROWS"
       :grouped="!searching"
-      :empty="empty ?? t('palette.noMatch')"
+      :empty="emptyLabel"
       @hover="selected = $event"
       @pick="pick"
     >
+      <template v-if="items.length === 0 && $slots['empty-action']" #empty-action>
+        <slot name="empty-action" />
+      </template>
       <template #row="{ item }">
         <div class="row">
           <slot name="row" :item="item" />
@@ -106,6 +128,23 @@ function onKey(event: KeyboardEvent): void {
   background: none;
   color: var(--text);
   font: inherit;
+}
+
+.clear {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-small);
+  color: var(--text-muted);
+  transition: background-color var(--motion-quick) var(--motion-ease);
+}
+
+.clear:hover {
+  background: var(--surface-hover);
+  color: var(--text);
 }
 
 .row {

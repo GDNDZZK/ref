@@ -6,6 +6,7 @@ import { createAppI18n } from '../i18n/index.ts'
 import { info } from '../model/testMessages.ts'
 import type { Todo } from '../proto/generated'
 import { useDialogsStore } from '../stores/dialogs.ts'
+import { useLayoutStore } from '../stores/layout.ts'
 import { useWorkspaceStore } from '../stores/workspace.ts'
 import Sidebar from './Sidebar.vue'
 
@@ -181,5 +182,18 @@ describe('Sidebar', () => {
       await nextTick()
       expect(wrapper.get('.todo-section .heading').text()).toBe('Todo 3/3')
     })
+  })
+
+  it('marks sidebar content inert while collapsed so Tab skips hidden controls', async () => {
+    const { wrapper } = mountSidebar()
+    const layout = useLayoutStore()
+    if (!layout.sidebarVisible) layout.toggleSidebar()
+    await nextTick()
+    expect(wrapper.get('.content').attributes('inert')).toBeUndefined()
+
+    layout.toggleSidebar()
+    await nextTick()
+    expect(wrapper.get('.content').attributes('inert')).toBeDefined()
+    wrapper.unmount()
   })
 })

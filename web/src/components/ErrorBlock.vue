@@ -6,6 +6,7 @@
 // covers the card. A card that was there when the session opened starts covered.
 import { onBeforeUnmount, onMounted, useTemplateRef } from 'vue'
 import type { ErrorBlock } from '../model/blocks.ts'
+import { prefersReducedMotion } from '../motion/reducedMotion.ts'
 import { tween } from '../motion/tween.ts'
 import { components } from '../theme/generated/components.ts'
 import { motion } from '../theme/generated/motion.ts'
@@ -41,6 +42,7 @@ function setSpread(
 }
 
 function arrive(element: HTMLElement, dot: HTMLElement): void {
+  if (prefersReducedMotion()) return
   const box = element.getBoundingClientRect()
   const dotBox = dot.getBoundingClientRect()
   const centerX = dotBox.left - box.left + dotBox.width / 2

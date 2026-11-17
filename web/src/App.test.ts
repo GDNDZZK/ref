@@ -66,4 +66,21 @@ describe('App empty workspace state', () => {
     expect(wrapper.find('.empty-workspace').exists()).toBe(false)
     wrapper.unmount()
   })
+
+  it('highlights the split button in split mode and shows a dedicated unzoom button when zoomed', async () => {
+    const { wrapper, workspace } = mountApp()
+    expect(wrapper.find('.split-button').classes()).not.toContain('active')
+    expect(wrapper.find('.unzoom-button').exists()).toBe(false)
+
+    workspace.mode = 'split'
+    workspace.zoomedId = 'ses_2'
+    await nextTick()
+    expect(wrapper.find('.split-button').classes()).toContain('active')
+    const unzoomBtn = wrapper.get('.unzoom-button')
+    await unzoomBtn.trigger('click')
+    expect(workspace.zoomedId).toBeUndefined()
+    await nextTick()
+    expect(wrapper.find('.unzoom-button').exists()).toBe(false)
+    wrapper.unmount()
+  })
 })
