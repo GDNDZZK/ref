@@ -7,6 +7,7 @@ QtObject {
 	readonly property string newSession: "new"
 	readonly property string newSessionIn: "new-in"
 	readonly property string watch: "watch"
+	readonly property string detach: "detach"
 	readonly property string mcp: "mcp"
 	readonly property string settings: "settings"
 	readonly property string agents: "agents"

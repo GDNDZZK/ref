@@ -9,7 +9,7 @@ using namespace refgui::workspace;
 namespace
 {
 
-constexpr CommandContext Idle{.connected = true, .hasSession = true, .liveSessions = 2, .splitView = false};
+constexpr CommandContext Idle{.connected = true, .hasSession = true, .canDetach = true, .liveSessions = 2, .splitView = false};
 
 QStringList ids(const QVariantList& matches)
 {
@@ -120,8 +120,12 @@ void TestCommandRegistry::availabilityFollowsTheContext()
 	f.registry.setContext(Idle);
 	QVERIFY(f.registry.run(u"close-session"_s));
 	QVERIFY(!f.registry.run(u"zoom"_s)); // only in split view
-	f.registry.setContext({.connected = true, .hasSession = true, .liveSessions = 2, .splitView = true});
+	f.registry.setContext({.connected = true, .hasSession = true, .canDetach = false, .liveSessions = 2, .splitView = true});
 	QVERIFY(f.registry.run(u"zoom"_s));
+	QVERIFY(f.registry.run(u"rename"_s, u"x"_s));
+	QVERIFY(!f.registry.run(u"detach"_s));
+	f.registry.setContext({.connected = true, .hasSession = true, .canDetach = true, .liveSessions = 2, .splitView = true});
+	QVERIFY(f.registry.run(u"detach"_s));
 }
 
 void TestCommandRegistry::runPassesArgumentsAndSession()
@@ -141,8 +145,10 @@ void TestCommandRegistry::runSlashKnowsAliases()
 	QVERIFY(f.registry.runSlash(u"/clear"_s));
 	QVERIFY(f.registry.runSlash(u"  /effort   high  "_s, u"ses_3"_s));
 	QVERIFY(f.registry.runSlash(u"/cwd\t~/src"_s));
+	QVERIFY(f.registry.runSlash(u"/background"_s));
+	QVERIFY(f.registry.runSlash(u"/leave"_s));
 
-	QCOMPARE(f.ran, (QStringList{u"new||"_s, u"variant|high|ses_3"_s, u"cd|~/src|"_s}));
+	QCOMPARE(f.ran, (QStringList{u"new||"_s, u"variant|high|ses_3"_s, u"cd|~/src|"_s, u"detach||"_s, u"detach||"_s}));
 }
 
 void TestCommandRegistry::runSlashLeavesOrdinaryTextAlone()

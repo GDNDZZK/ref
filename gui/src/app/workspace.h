@@ -44,7 +44,7 @@ class Workspace : public QObject
 	Q_PROPERTY(QString connectionState READ connectionState NOTIFY connectionChanged)
 	Q_PROPERTY(QString connectionText READ connectionText NOTIFY connectionChanged)
 	Q_PROPERTY(QString failureText READ failureText NOTIFY failureTextChanged)
-	Q_PROPERTY(QString cwd READ cwd CONSTANT)
+	Q_PROPERTY(QString cwd READ cwd NOTIFY cwdChanged)
 	Q_PROPERTY(QStringList visibleSessionIds READ visibleSessionIds NOTIFY visibleSessionIdsChanged)
 	Q_PROPERTY(bool windowActive READ isWindowActive WRITE setWindowActive NOTIFY windowActiveChanged)
 	// What the backend offers and the session lists.
@@ -135,7 +135,9 @@ public:
 	Q_INVOKABLE void openSession(const QString& sessionId);
 	// A new session in `cwd` (the window's directory when empty), made current.
 	Q_INVOKABLE void newSession(const QString& cwd = {}, const QJSValue& cb = {});
-	// Closes the session; its conversation stays in history. Closing the last one opens a new session in its directory.
+	// Moves the open session to the background without closing it.
+	Q_INVOKABLE void detachCurrent();
+	// Closes the session; its conversation stays in history.
 	Q_INVOKABLE void closeSession(const QString& sessionId);
 	// Removes the session from history for good.
 	Q_INVOKABLE void deleteHistory(const QString& sessionId);
@@ -182,6 +184,7 @@ signals:
 	void currentChanged();
 	void connectionChanged();
 	void failureTextChanged();
+	void cwdChanged();
 	void visibleSessionIdsChanged();
 	void windowActiveChanged();
 	void mcpServersChanged();
@@ -215,9 +218,11 @@ private:
 	QCoro::Task<Done> show(QString sessionId);
 	QCoro::Task<> createAndShow(QString cwd, Reply reply);
 	QCoro::Task<> closeTask(QString sessionId);
-	QCoro::Task<> leaveCurrent(QString closedId, QString cwd);
-	void handleGone(const QString& sessionId, const QString& cwd);
+	QCoro::Task<> leaveCurrent(QString closedId);
+	QCoro::Task<> backgroundInSplit(ChatSession* session);
+	void handleGone(const QString& sessionId);
 	void setCurrent(ChatSession* session);
+	void setCwd(const QString& cwd);
 	void updateHighlight();
 	void onLiveChanged();
 	void dropChat(const QString& sessionId);

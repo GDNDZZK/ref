@@ -28,8 +28,15 @@ Window {
 	}
 
 	function showSession(session) {
-		if (session === null)
+		if (session === shown)
 			return
+		if (session === null) {
+			if (Workspace.splitView || !content.visible)
+				shown = null
+			else
+				sessionFade.run(content, () => shown = null)
+			return
+		}
 		if (shown === null || Workspace.splitView || !content.visible) {
 			shown = session
 			return
@@ -225,6 +232,65 @@ Window {
 
 						sourceComponent: SessionPane {
 							session: window.shown
+						}
+					}
+
+					Column {
+						id: emptyState
+						readonly property bool active: window.shown === null
+							&& Workspace.connectionState === "connected"
+							&& Workspace.failureText === ""
+
+						anchors.centerIn: parent
+						width: Math.min(parent.width - 2 * Theme.pagePadding, Theme.contentWidth)
+						spacing: 12
+						opacity: Workspace.splitView ? 0 : 1
+						visible: active && opacity > 0
+						enabled: active && !Workspace.splitView
+						Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+
+						Text {
+							textFormat: Text.PlainText
+							anchors.horizontalCenter: parent.horizontalCenter
+							text: qsTr("No session open")
+							color: Theme.textMuted
+							font.pixelSize: Theme.fontSize
+						}
+
+						Row {
+							anchors.horizontalCenter: parent.horizontalCenter
+							spacing: 8
+
+							TextButton {
+								text: qsTr("New session in folder…")
+								onClicked: Commands.run(CommandId.newSessionIn)
+							}
+
+							TextButton {
+								text: qsTr("New session")
+								onClicked: Commands.run(CommandId.newSession)
+							}
+						}
+
+						Text {
+							id: emptyCwdLabel
+							textFormat: Text.PlainText
+							anchors.horizontalCenter: parent.horizontalCenter
+							width: Math.min(implicitWidth, parent.width)
+							text: Format.dirName(Workspace.cwd) !== Workspace.cwd && Format.dirName(Workspace.cwd) !== ""
+								? Format.dirName(Workspace.cwd) + " · " + Workspace.cwd
+								: Workspace.cwd
+							color: Theme.textMuted
+							font.pixelSize: Theme.smallFontSize
+							font.family: Theme.monoFamily
+							elide: Text.ElideMiddle
+							visible: Workspace.cwd !== ""
+
+							HoverHandler { id: emptyCwdHover }
+							PlainToolTip {
+								visible: emptyCwdHover.hovered && emptyCwdLabel.truncated
+								text: Workspace.cwd
+							}
 						}
 					}
 

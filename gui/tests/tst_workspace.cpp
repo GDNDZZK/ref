@@ -153,8 +153,13 @@ private:
 		if(op == u"create_session"_s)
 		{
 			const QString created = u"ses_new%1"_s.arg(++m_created);
-			add(created, 100 + m_created, request.value(u"cwd"_s).toString());
-			m_fake.respond(request, {{u"session"_s, m_sessions.value(created)}});
+			QJsonObject info = sessionInfoJson(created, {.title = u"Title "_s + created, .cwd = request.value(u"cwd"_s).toString(), .createdAt = 100 + m_created});
+			if(request.contains(u"agent"_s) && request.value(u"agent"_s).isString())
+			{
+				info[u"agent"_s] = request.value(u"agent"_s).toString();
+			}
+			m_sessions.insert(created, info);
+			m_fake.respond(request, {{u"session"_s, info}});
 			broadcast();
 		}
 		else if(op == u"attach"_s)
@@ -208,7 +213,29 @@ private:
 		{
 			return;
 		}
-		else if(op == u"list_sessions"_s || op == u"list_history"_s || op == u"watch_all"_s)
+		else if(op == u"list_history"_s)
+		{
+			const QString cwdFilter = request.value(u"cwd"_s).toString();
+			const int limit = request.value(u"limit"_s).toInt(0);
+			QList<QJsonObject> matching;
+			for(const QJsonObject& info : m_sessions)
+			{
+				if(cwdFilter.isEmpty() || info.value(u"cwd"_s).toString() == cwdFilter)
+				{
+					matching.append(info);
+				}
+			}
+			std::ranges::sort(matching, [](const QJsonObject& a, const QJsonObject& b) {
+				return a.value(u"created_at"_s).toInteger() > b.value(u"created_at"_s).toInteger();
+			});
+			QJsonArray array;
+			for(qsizetype i = 0; i < matching.size() && (limit <= 0 || i < limit); ++i)
+			{
+				array.append(matching.at(i));
+			}
+			m_fake.respond(request, {{u"sessions"_s, array}});
+		}
+		else if(op == u"list_sessions"_s || op == u"watch_all"_s)
 		{
 			m_fake.respond(request, {{u"sessions"_s, list()}});
 		}
@@ -389,7 +416,10 @@ private slots:
 	void newSessionBecomesCurrentAndLetsGoOfTheOld();
 	void openingAnotherSessionSwitches();
 	void closingTheCurrentSessionOpensAnother();
-	void closingTheLastSessionStartsOneInTheSameDirectory();
+	void closingTheLastSessionLeavesWorkspaceEmpty();
+	void startsEmptyByDefaultAndNewSessionUpdatesCwd();
+	void continueOpensNewestOrCreatesFallback();
+	void detachCurrentMovesSessionToBackgroundAndSplitFocusEnablesCommands();
 	void renameReportsToTheCallback();
 	void failedRequestsBecomeToasts();
 	void slashCommandsRunTheirHandlers();
@@ -497,15 +527,156 @@ void TestWorkspace::closingTheCurrentSessionOpensAnother()
 	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 1);
 }
 
-void TestWorkspace::closingTheLastSessionStartsOneInTheSameDirectory()
+void TestWorkspace::closingTheLastSessionLeavesWorkspaceEmpty()
 {
 	Fixture f;
 	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 1);
 
 	f.workspace->closeSession(u"ses_a"_s);
 
-	QTRY_COMPARE(f.workspace->currentId(), u"ses_new1"_s);
-	QCOMPARE(f.stub.requests(u"create_session"_s).last().value(u"cwd"_s).toString(), u"/work"_s);
+	QTRY_VERIFY(f.workspace->current() == nullptr);
+	QCOMPARE(f.workspace->currentId(), QString());
+	QTest::qWait(QuietMs);
+	QCOMPARE(f.stub.requests(u"create_session"_s).size(), 0);
+}
+
+void TestWorkspace::startsEmptyByDefaultAndNewSessionUpdatesCwd()
+{
+	QTemporaryDir dir;
+	FakeBackend fake;
+	StubServer stub(fake);
+	stub.add(u"ses_existing"_s, 1, u"/work"_s);
+
+	refgui::cli::LaunchOptions options;
+	options.directory = u"/initial"_s;
+	options.source = Backend::Mode::Remote{{fake.url(), u"token"_s}};
+	options.start = {.kind = refgui::cli::SessionStart::Kind::None,
+	                 .agent = u"plan"_s,
+	                 .model = refgui::proto::ModelRef{u"anthropic"_s, u"claude-sonnet-4"_s, u"high"_s}};
+	Workspace workspace(options, dir.filePath(u"gui.json"_s));
+	Workspace::setInstance(&workspace);
+	QSignalSpy opened(&workspace, &Workspace::opened);
+	QSignalSpy cwdChanged(&workspace, &Workspace::cwdChanged);
+
+	QTRY_COMPARE(opened.count(), 1);
+	QCOMPARE(opened.first().first().toString(), QString());
+	QCOMPARE(workspace.current(), nullptr);
+	QCOMPARE(workspace.currentId(), QString());
+	QCOMPARE(workspace.cwd(), u"/initial"_s);
+	QCOMPARE(stub.requests(u"create_session"_s).size(), 0);
+	QCOMPARE(stub.requests(u"attach"_s).size(), 0);
+
+	// Manual newSession in a chosen folder updates m_cwd and passes CLI agent/model defaults.
+	workspace.newSession(u"/chosen/project"_s);
+	QTRY_COMPARE(workspace.currentId(), u"ses_new1"_s);
+	QCOMPARE(workspace.cwd(), u"/chosen/project"_s);
+	QCOMPARE(cwdChanged.count(), 1);
+	const QJsonObject firstCreate = stub.requests(u"create_session"_s).first();
+	QCOMPARE(firstCreate.value(u"cwd"_s).toString(), u"/chosen/project"_s);
+	QCOMPARE(firstCreate.value(u"agent"_s).toString(), u"plan"_s);
+	QCOMPARE(firstCreate.value(u"model"_s).toObject().value(u"provider"_s).toString(), u"anthropic"_s);
+	QCOMPARE(firstCreate.value(u"model"_s).toObject().value(u"model"_s).toString(), u"claude-sonnet-4"_s);
+	QCOMPARE(firstCreate.value(u"model"_s).toObject().value(u"variant"_s).toString(), u"high"_s);
+
+	// Subsequent default newSession uses the last chosen project directory.
+	workspace.newSession();
+	QTRY_COMPARE(workspace.currentId(), u"ses_new2"_s);
+	QCOMPARE(stub.requests(u"create_session"_s).last().value(u"cwd"_s).toString(), u"/chosen/project"_s);
+	Workspace::setInstance(nullptr);
+}
+
+void TestWorkspace::continueOpensNewestOrCreatesFallback()
+{
+	QTemporaryDir dir;
+	FakeBackend fake;
+	StubServer stub(fake);
+	stub.add(u"ses_old"_s, 10, u"/work"_s);
+	stub.add(u"ses_newest"_s, 20, u"/work"_s);
+
+	{
+		refgui::cli::LaunchOptions options;
+		options.directory = u"/work"_s;
+		options.source = Backend::Mode::Remote{{fake.url(), u"token"_s}};
+		options.start = {.kind = refgui::cli::SessionStart::Kind::Continue};
+		Workspace workspace(options, dir.filePath(u"gui1.json"_s));
+		Workspace::setInstance(&workspace);
+		QSignalSpy opened(&workspace, &Workspace::opened);
+		QTRY_COMPARE(opened.count(), 1);
+		QCOMPARE(opened.first().first().toString(), u"ses_newest"_s);
+		QCOMPARE(workspace.currentId(), u"ses_newest"_s);
+		QCOMPARE(stub.requests(u"create_session"_s).size(), 0);
+		Workspace::setInstance(nullptr);
+	}
+	{
+		refgui::cli::LaunchOptions options;
+		options.directory = u"/empty_dir"_s;
+		options.source = Backend::Mode::Remote{{fake.url(), u"token"_s}};
+		options.start = {.kind = refgui::cli::SessionStart::Kind::Continue};
+		Workspace workspace(options, dir.filePath(u"gui2.json"_s));
+		Workspace::setInstance(&workspace);
+		QSignalSpy opened(&workspace, &Workspace::opened);
+		QTRY_COMPARE(opened.count(), 1);
+		QCOMPARE(opened.first().first().toString(), u"ses_new1"_s);
+		QCOMPARE(workspace.currentId(), u"ses_new1"_s);
+		QCOMPARE(stub.requests(u"create_session"_s).size(), 1);
+		Workspace::setInstance(nullptr);
+	}
+}
+
+void TestWorkspace::detachCurrentMovesSessionToBackgroundAndSplitFocusEnablesCommands()
+{
+	Fixture f(refgui::proto::ProtocolVersion, true);
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
+	const auto commandEnabled = [&f](const QString& id) {
+		for(const QVariant& entry : f.workspace->commands()->matching({}, false))
+		{
+			if(entry.toMap().value(u"id"_s).toString() == id)
+			{
+				return entry.toMap().value(u"enabled"_s).toBool();
+			}
+		}
+		return false;
+	};
+
+	// Single view: detachCurrent() detaches ses_a and clears current.
+	QVERIFY(commandEnabled(u"detach"_s));
+	QVERIFY(commandEnabled(u"models"_s));
+	f.workspace->detachCurrent();
+	QCOMPARE(f.workspace->current(), nullptr);
+	QCOMPARE(f.workspace->currentId(), QString());
+	QTRY_COMPARE(f.stub.requests(u"detach"_s).size(), 1);
+	QCOMPARE(f.stub.requests(u"detach"_s).last().value(u"session_id"_s).toString(), u"ses_a"_s);
+	QVERIFY(!commandEnabled(u"detach"_s));
+	QVERIFY(!commandEnabled(u"models"_s));
+
+	// Re-open ses_a, enter split view (ses_a hidden as current, ses_b in tiles), then /detach moves ses_a into tiles too.
+	f.workspace->openSession(u"ses_a"_s);
+	QTRY_COMPARE(f.workspace->currentId(), u"ses_a"_s);
+	f.workspace->toggleSplit();
+	QTRY_VERIFY(f.workspace->isSplitView());
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
+	QVERIFY(commandEnabled(u"detach"_s));
+
+	QVERIFY(f.workspace->commands()->runSlash(u"/detach"_s));
+	QCOMPARE(f.workspace->current(), nullptr);
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	QVERIFY(!commandEnabled(u"detach"_s));
+	QVERIFY(!commandEnabled(u"models"_s)); // no focused tile yet
+
+	// Focusing a tile in split view with m_current == nullptr enables session commands on that tile!
+	f.workspace->focusTile(u"ses_b"_s);
+	QVERIFY(commandEnabled(u"models"_s));
+	QVERIFY(commandEnabled(u"rename"_s));
+	QVERIFY(commandEnabled(u"close"_s));
+	QVERIFY(!commandEnabled(u"detach"_s)); // unzoomed tile is already in background
+
+	// Zooming enables detach again, and detachCurrent() unzooms back to grid.
+	f.workspace->zoomTile(u"ses_b"_s);
+	QTRY_COMPARE(f.workspace->zoomedId(), u"ses_b"_s);
+	QVERIFY(commandEnabled(u"detach"_s));
+	f.workspace->detachCurrent();
+	QCOMPARE(f.workspace->zoomedId(), QString());
+	QVERIFY(!commandEnabled(u"detach"_s));
 }
 
 void TestWorkspace::renameReportsToTheCallback()
@@ -745,13 +916,12 @@ void TestWorkspace::closingTheCurrentTileSendsNoAttach()
 
 	f.workspace->closeSession(u"ses_a"_s);
 
-	QTRY_COMPARE(f.workspace->currentId(), u"ses_b"_s);
+	QTRY_VERIFY(f.workspace->current() == nullptr);
+	QCOMPARE(f.workspace->currentId(), QString());
+	QCOMPARE(f.workspace->tiles()->rowCount(), 1);
 	QTest::qWait(QuietMs);
 	const QList<QJsonObject> attaches = f.stub.requests(u"attach"_s);
-	for(qsizetype i = attachesBefore; i < attaches.size(); ++i)
-	{
-		QVERIFY(attaches[i].value(u"session_id"_s).toString() != u"ses_a"_s);
-	}
+	QCOMPARE(attaches.size(), attachesBefore);
 	QCOMPARE(toasts.count(), 0);
 }
 

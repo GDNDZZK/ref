@@ -280,6 +280,7 @@ private slots:
 	void sidebarFolderButtonDoesNotTriggerNewSession();
 	void standaloneDialogHostBlocksWheelEvents();
 	void statusLineRetryTooltipShowsFullErrorWithoutWarnings();
+	void emptyWorkspaceStateAndDetachTransitionCleanly();
 };
 
 void TestMainWindow::initTestCase()
@@ -741,6 +742,46 @@ void TestMainWindow::statusLineRetryTooltipShowsFullErrorWithoutWarnings()
 	QVERIFY(contextTipText.contains(u"200.0k"_s));
 
 	QVERIFY2(warningSpy.isEmpty(), "StatusLine / PlainToolTip emitted QML warnings");
+}
+
+void TestMainWindow::emptyWorkspaceStateAndDetachTransitionCleanly()
+{
+	MainFixture f;
+
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+
+	const auto findText = [window](const QString& expected) {
+		return findItem(window->contentItem(), [&expected](QQuickItem* item) {
+			return QByteArray(item->metaObject()->className()).startsWith("QQuickText")
+			       && item->property("text").toString() == expected;
+		});
+	};
+	QQuickItem* emptyTitle = findText(u"No session open"_s);
+	QVERIFY(emptyTitle);
+	QVERIFY(!emptyTitle->isVisible());
+	QVERIFY(window->property("shown").value<QObject*>() != nullptr);
+
+	// Detaching current session crossfades window.shown to null and reveals the empty state.
+	f.workspace->detachCurrent();
+	QTRY_VERIFY(window->property("shown").isNull() || window->property("shown").value<QObject*>() == nullptr);
+	QTRY_VERIFY(emptyTitle->isVisible());
+	QQuickItem* newInFolderButton = findText(u"New session in folder…"_s);
+	QVERIFY(newInFolderButton && newInFolderButton->isVisible());
+	QVERIFY(findText(u"work · /work"_s) != nullptr);
+	QVERIFY2(warningSpy.isEmpty(), "Empty Workspace State / detachCurrent emitted QML warnings");
 }
 
 QTEST_MAIN(TestMainWindow)

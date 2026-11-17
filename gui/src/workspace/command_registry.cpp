@@ -61,6 +61,7 @@ CommandRegistry::CommandRegistry(QObject* parent)
 		{.id = u"undo"_s, .title = QT_TRANSLATE_NOOP("Commands", "Undo last prompt"), .slash = {u"undo"_s}, .shortcut = u"Ctrl+Shift+U"_s, .category = Session, .icon = u"undo-16"_s, .needs = OnSession},
 		{.id = u"rename"_s, .title = QT_TRANSLATE_NOOP("Commands", "Rename the session"), .slash = {u"rename"_s}, .hint = "NAME", .category = Session, .icon = u"pencil-16"_s, .needs = OnSession},
 		{.id = u"cd"_s, .title = QT_TRANSLATE_NOOP("Commands", "Change this session's working directory"), .slash = {u"cd"_s, u"cwd"_s}, .hint = "[DIR]", .category = Session, .icon = u"folder-16"_s, .needs = OnSession},
+		{.id = u"detach"_s, .title = QT_TRANSLATE_NOOP("Commands", "Move session to background"), .slash = {u"detach"_s, u"background"_s, u"leave"_s}, .category = Session, .icon = u"restore-20"_s, .needs = Connected | Need::Detachable},
 		{.id = u"close"_s, .title = QT_TRANSLATE_NOOP("Commands", "Close this session"), .slash = {u"close"_s}, .shortcut = u"Ctrl+Shift+K"_s, .category = Session, .icon = u"close-16"_s, .needs = OnSession},
 		{.id = u"close-session"_s, .title = QT_TRANSLATE_NOOP("Commands", "Close live sessions (picker, or by name / id)"), .slash = {u"close-session"_s, u"kill"_s}, .hint = "[name or id]", .category = Session, .icon = u"chat-x-16"_s, .needs = Connected | Need::LiveSession},
 		{.id = u"peers"_s, .title = QT_TRANSLATE_NOOP("Commands", "List other live sessions you can message"), .slash = {u"peers"_s, u"list-agents"_s}, .category = Session, .icon = u"chat-list-16"_s, .needs = OnSession},
@@ -159,6 +160,10 @@ bool CommandRegistry::isAvailable(const Entry& entry) const
 		return false;
 	}
 	if(entry.needs.testFlag(Need::LiveSession) && m_context.liveSessions == 0)
+	{
+		return false;
+	}
+	if(entry.needs.testFlag(Need::Detachable) && !m_context.canDetach)
 	{
 		return false;
 	}

@@ -239,6 +239,11 @@
     </message>
     <message>
         <location filename="../src/workspace/command_registry.cpp" line="64"/>
+        <source>Move session to background</source>
+        <translation>将会话挂到后台</translation>
+    </message>
+    <message>
+        <location filename="../src/workspace/command_registry.cpp" line="65"/>
         <source>Close this session</source>
         <translation>关闭此会话</translation>
     </message>
@@ -635,6 +640,16 @@
         <location filename="../src/app/Main.qml" line="236"/>
         <source>New session</source>
         <translation>新建会话</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Main.qml" line="256"/>
+        <source>No session open</source>
+        <translation>未打开会话</translation>
+    </message>
+    <message>
+        <location filename="../src/app/Main.qml" line="266"/>
+        <source>New session in folder…</source>
+        <translation>选择文件夹新建会话…</translation>
     </message>
     <message>
         <location filename="../src/app/Main.qml" line="251"/>
@@ -1067,6 +1082,11 @@
         <location filename="../src/app/SessionRow.qml" line="232"/>
         <source>Rename</source>
         <translation>重命名</translation>
+    </message>
+    <message>
+        <location filename="../src/app/SessionRow.qml" line="240"/>
+        <source>Move to background</source>
+        <translation>挂到后台</translation>
     </message>
     <message>
         <location filename="../src/app/SessionRow.qml" line="232"/>

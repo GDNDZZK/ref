@@ -6,7 +6,8 @@ using namespace Qt::StringLiterals;
 void Workspace::updateCommandContext()
 {
 	m_commands.setContext({.connected = m_connection.isConnected(),
-	                       .hasSession = m_current != nullptr,
+	                       .hasSession = !targetId({}).isEmpty(),
+	                       .canDetach = m_current != nullptr || !m_zoomed.isEmpty(),
 	                       .liveSessions = int(m_directory.liveSessions().size()),
 	                       .splitView = m_split});
 }
@@ -80,6 +81,7 @@ void Workspace::registerCommands()
 
 	on(u"rename"_s, argumentOrDialog(u"rename"_s, [this](const QString& id, const QString& name) { renameSession(id, name); }));
 	on(u"cd"_s, argumentOrDialog(u"cd"_s, [this](const QString& id, const QString& path) { setSessionCwd(id, path); }));
+	on(u"detach"_s, [this](const QString&, const QString&) { detachCurrent(); });
 	on(u"close"_s, [this](const QString&, const QString& sessionId) {
 		const QString id = targetId(sessionId);
 		const refgui::proto::SessionInfo* info = m_directory.find(id);

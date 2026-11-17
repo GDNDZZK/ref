@@ -46,7 +46,7 @@ void exitWhenOpened(Workspace& workspace)
 {
 	QObject::connect(&workspace, &Workspace::opened, &workspace, [](const QString& sessionId) {
 		QTextStream out(stdout);
-		print(out, u"attached %1\n"_s.arg(sessionId));
+		print(out, sessionId.isEmpty() ? u"ready\n"_s : u"attached %1\n"_s.arg(sessionId));
 		QTimer::singleShot(SmokeSettle, [] { QCoreApplication::exit(EXIT_SUCCESS); });
 	});
 	QObject::connect(&workspace, &Workspace::openFailed, &workspace, [](const QString& reason) {
