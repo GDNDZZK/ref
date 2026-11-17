@@ -32,6 +32,12 @@ export function needsAttention(state: RowState): boolean {
   return state === 'permission' || state === 'question' || state === 'error'
 }
 
+export function isWorkingSession(info: SessionInfo | undefined): boolean {
+  if (!info) return false
+  const state = rowState(info)
+  return state !== 'idle' && state !== 'error'
+}
+
 export interface TodoProgress {
   done: number
   total: number

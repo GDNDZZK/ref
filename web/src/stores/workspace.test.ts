@@ -15,7 +15,12 @@ const api = {
   watchAll: vi.fn(),
   setAgent: vi.fn(),
 }
-const connection = { getApi: () => api, config: undefined as unknown, loadConfig: vi.fn() }
+const connection = {
+  getApi: () => api,
+  hello: { cwd: '/server' } as { cwd?: string } | undefined,
+  config: undefined as unknown,
+  loadConfig: vi.fn(),
+}
 
 vi.mock('./connection.ts', () => ({ useConnectionStore: () => connection }))
 
@@ -114,14 +119,59 @@ describe('opening sessions', () => {
     expect(workspace.currentId).toBe('ses_1')
   })
 
-  it('makes a new session and opens it', async () => {
+  it('makes a new session, updates workspace cwd, and opens it', async () => {
     const workspace = setup([])
     workspace.cwd = '/work'
-    api.createSession.mockResolvedValue(session('ses_5'))
-    expect(await workspace.newSession()).toBe('ses_5')
-    expect(api.createSession).toHaveBeenCalledWith('/work', {})
+    api.createSession.mockResolvedValue(session('ses_5', { cwd: '/chosen/dir' }))
+    expect(await workspace.newSession({ cwd: '/chosen/dir' })).toBe('ses_5')
+    expect(api.createSession).toHaveBeenCalledWith('/chosen/dir', { cwd: '/chosen/dir' })
+    expect(workspace.cwd).toBe('/chosen/dir')
     expect(workspace.currentId).toBe('ses_5')
     expect(workspace.live.map((entry) => entry.id)).toEqual(['ses_5'])
+  })
+})
+
+describe('startup onConnected', () => {
+  it('does not auto-create a session when sessionId is undefined', async () => {
+    const workspace = useWorkspaceStore()
+    api.listSessions.mockResolvedValue([session('ses_1', { attached: 0 })])
+    await workspace.onConnected(false, {
+      url: 'ws://x/ws',
+      cwd: '/home/user',
+      sessionId: undefined,
+      split: false,
+    })
+    expect(api.createSession).not.toHaveBeenCalled()
+    expect(api.attach).not.toHaveBeenCalled()
+    expect(workspace.currentId).toBeUndefined()
+    expect(workspace.cwd).toBe('/home/user')
+    expect(workspace.mode).toBe('single')
+  })
+
+  it('enters split view without auto-creating a session when split is true and sessionId is undefined', async () => {
+    const s1 = session('ses_1', { attached: 0 })
+    const workspace = setup([s1])
+    api.listSessions.mockResolvedValue([s1])
+    await workspace.onConnected(false, { url: 'ws://x/ws', cwd: '/work', sessionId: undefined, split: true })
+    expect(api.createSession).not.toHaveBeenCalled()
+    expect(workspace.currentId).toBeUndefined()
+    expect(workspace.mode).toBe('split')
+    expect(workspace.tileIds).toEqual(['ses_1'])
+  })
+
+  it('pushes an error notice and leaves currentId undefined when requested sessionId fails to open', async () => {
+    const workspace = useWorkspaceStore()
+    api.listSessions.mockResolvedValue([])
+    api.attach.mockRejectedValueOnce(new Error('session missing'))
+    await workspace.onConnected(false, {
+      url: 'ws://x/ws',
+      cwd: '/work',
+      sessionId: 'ses_dead',
+      split: false,
+    })
+    expect(api.createSession).not.toHaveBeenCalled()
+    expect(workspace.currentId).toBeUndefined()
+    expect(useNoticesStore().notices.map((n) => n.text)).toEqual(['session missing'])
   })
 })
 
@@ -149,26 +199,98 @@ describe('closing sessions', () => {
     expect(workspace.live.map((entry) => entry.id)).toEqual(['ses_1', 'ses_2'])
   })
 
-  it('starts a new session in the same directory when the last one is closed', async () => {
+  it('leaves currentId undefined in single mode without creating a session when the last one is closed', async () => {
     const workspace = setup([session('ses_1', { cwd: '/proj' })])
     await workspace.openSession('ses_1')
-    api.createSession.mockResolvedValue(session('ses_2', { cwd: '/proj' }))
     await workspace.closeSession('ses_1')
-    expect(api.createSession).toHaveBeenCalledWith('/proj', { cwd: '/proj' })
-    expect(workspace.currentId).toBe('ses_2')
+    expect(api.createSession).not.toHaveBeenCalled()
+    expect(workspace.currentId).toBeUndefined()
+    expect(workspace.mode).toBe('single')
+  })
+
+  it('clears currentId in split mode without stealing the next background tile or leaving split mode', async () => {
+    const workspace = setup([session('ses_1'), session('ses_2', { attached: 0 })])
+    await workspace.openSession('ses_1')
+    await workspace.enterSplit()
+    workspace.onFrame({
+      kind: 'sessions',
+      sessions: [session('ses_1', { attached: 0 }), session('ses_2', { attached: 0 })],
+    })
+    expect(workspace.tileIds).toEqual(['ses_2'])
+
+    await workspace.closeSession('ses_1')
+    expect(workspace.mode).toBe('split')
+    expect(workspace.currentId).toBeUndefined()
+    expect(workspace.tileIds).toEqual(['ses_2'])
+    expect(api.createSession).not.toHaveBeenCalled()
+
+    await workspace.closeSession('ses_2')
+    expect(workspace.mode).toBe('split')
+    expect(workspace.currentId).toBeUndefined()
+    expect(workspace.tileIds).toEqual([])
+    expect(api.createSession).not.toHaveBeenCalled()
   })
 
   it('does not act twice when the closed event comes before the response', async () => {
-    const workspace = setup([session('ses_1', { cwd: '/proj' })])
+    const workspace = setup([session('ses_1'), session('ses_2')])
     await workspace.openSession('ses_1')
-    api.createSession.mockResolvedValue(session('ses_2'))
+    api.attach.mockClear()
     api.close.mockImplementation(() => {
       workspace.onFrame({ kind: 'event', session_id: 'ses_1', event: { type: 'closed' } })
       return Promise.resolve()
     })
     await workspace.closeSession('ses_1')
     await vi.waitFor(() => expect(workspace.currentId).toBe('ses_2'))
-    expect(api.createSession).toHaveBeenCalledTimes(1)
+    expect(api.attach).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('detachCurrent', () => {
+  it('detaches the foreground session in single mode and clears currentId', async () => {
+    const workspace = setup([session('ses_1')])
+    await workspace.openSession('ses_1')
+    api.detach.mockClear()
+    await workspace.detachCurrent()
+    expect(workspace.currentId).toBeUndefined()
+    expect(workspace.current).toBeUndefined()
+    expect(workspace.visibleSessionIds).toEqual([])
+    expect(api.detach).toHaveBeenCalledWith('ses_1')
+  })
+
+  it('cancels an in-flight openSession so it detaches immediately upon settling', async () => {
+    const workspace = setup([session('ses_1')])
+    let resolveAttach!: () => void
+    api.attach.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveAttach = () => resolve(snapshot([userMessage('u1', 'hi')], { info: session('ses_1') }))
+        }),
+    )
+    const opening = workspace.openSession('ses_1')
+    await Promise.resolve() // let openChain begin attach
+    await workspace.detachCurrent()
+    resolveAttach()
+    await opening
+    expect(workspace.currentId).toBeUndefined()
+    expect(api.detach).toHaveBeenCalledWith('ses_1')
+  })
+
+  it('unzooms and returns the hidden foreground session to background tiles in split mode', async () => {
+    const workspace = setup([session('ses_1'), session('ses_2', { attached: 0 })])
+    await workspace.openSession('ses_1')
+    await workspace.enterSplit()
+    workspace.onFrame({
+      kind: 'sessions',
+      sessions: [session('ses_1', { attached: 0 }), session('ses_2', { attached: 0 })],
+    })
+    workspace.zoomTile('ses_2')
+    api.attach.mockClear()
+
+    await workspace.detachCurrent()
+    expect(workspace.zoomedId).toBeUndefined()
+    expect(workspace.currentId).toBeUndefined()
+    expect(workspace.tileIds).toEqual(['ses_1', 'ses_2'])
+    expect(api.attach).toHaveBeenCalledWith('ses_1', false)
   })
 })
 

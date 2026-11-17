@@ -117,7 +117,7 @@
       "title": "New session"
     },
     "new-in": {
-      "title": "New session in another folder…"
+      "title": "New session in folder…"
     },
     "sessions": {
       "title": "Switch session (live + history)"
@@ -142,6 +142,9 @@
     },
     "cd": {
       "title": "Change this session's working directory"
+    },
+    "detach": {
+      "title": "Move session to background"
     },
     "close": {
       "title": "Close this session"
@@ -202,7 +205,7 @@
   },
   "sidebar": {
     "newSession": "New session",
-    "newSessionIn": "New session in another folder…",
+    "newSessionIn": "New session in folder…",
     "todo": "Todo",
     "running": "Running",
     "history": "History",
@@ -214,6 +217,7 @@
     "compacting": "Compacting",
     "retrying": "Retrying",
     "rename": "Rename",
+    "moveToBackground": "Move to background",
     "close": "Close",
     "delete": "Delete",
     "hide": "Hide sidebar",
@@ -222,6 +226,9 @@
     "settings": "Settings",
     "sessions": "Sessions",
     "needsAnswer": "Waiting for your answer"
+  },
+  "workspace": {
+    "empty": "No session open"
   },
   "split": {
     "empty": "No background sessions",

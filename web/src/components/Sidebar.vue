@@ -6,7 +6,7 @@ import { useI18n } from 'vue-i18n'
 import lockupDark from '../../../assets/app/ref-lockup-small-dark.svg'
 import lockupLight from '../../../assets/app/ref-lockup-small-light.svg'
 import { useTheme } from '../composables/useTheme.ts'
-import { matchesQuery } from '../shell/sessionRow.ts'
+import { isWorkingSession, matchesQuery } from '../shell/sessionRow.ts'
 import { useCommandsStore } from '../stores/commands.ts'
 import { useDialogsStore } from '../stores/dialogs.ts'
 import { useLayoutStore } from '../stores/layout.ts'
@@ -47,8 +47,17 @@ function report(promise: Promise<unknown>): void {
 
 function open(id: string): void {
   layout.closeDrawer()
+  if (workspace.mode === 'single' && id === workspace.currentId) {
+    report(workspace.detachCurrent())
+    return
+  }
   if (workspace.mode === 'split' && workspace.tileIds.includes(id)) workspace.focusTile(id)
   else report(workspace.openSession(id))
+}
+
+function close(id: string): void {
+  if (isWorkingSession(workspace.infoOf(id))) dialogs.open({ kind: 'closeSession', sessionId: id })
+  else report(workspace.closeSession(id))
 }
 </script>
 
@@ -101,8 +110,10 @@ function open(id: string): void {
               :info="info"
               :current="info.id === workspace.focusedId"
               :tile="workspace.mode === 'split' && workspace.tileIds.includes(info.id)"
+              :can-detach="workspace.mode === 'single' && info.id === workspace.currentId"
               @open="open(info.id)"
-              @close="report(commands.run('close', '', info.id))"
+              @detach="report(workspace.detachCurrent())"
+              @close="close(info.id)"
               @rename="(name) => report(workspace.renameSession(info.id, name))"
             />
           </TransitionGroup>

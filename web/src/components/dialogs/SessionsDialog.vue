@@ -9,11 +9,11 @@ import {
   creatorLabel,
   dirName,
   historyLabel,
+  isWorkingSession,
   liveLabel,
   relativeTime,
   rowState,
 } from '../../shell/sessionRow.ts'
-import { useCommandsStore } from '../../stores/commands.ts'
 import { useDialogsStore } from '../../stores/dialogs.ts'
 import { useLayoutStore } from '../../stores/layout.ts'
 import { useNoticesStore } from '../../stores/notices.ts'
@@ -24,7 +24,6 @@ import PickDialog from './PickDialog.vue'
 
 const { t, locale } = useI18n()
 const workspace = useWorkspaceStore()
-const commands = useCommandsStore()
 const dialogs = useDialogsStore()
 const layout = useLayoutStore()
 const notices = useNoticesStore()
@@ -101,7 +100,11 @@ function choose(item: SessionItem): void {
 }
 
 function close(item: SessionItem): void {
-  commands.run('close', '', item.key).catch(notices.pushError)
+  if (isWorkingSession(workspace.infoOf(item.key) ?? item.info)) {
+    dialogs.open({ kind: 'closeSession', sessionId: item.key })
+    return
+  }
+  workspace.closeSession(item.key).catch(notices.pushError)
 }
 </script>
 

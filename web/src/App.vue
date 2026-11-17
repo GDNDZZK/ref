@@ -14,6 +14,7 @@ import NotificationPrompt from './components/NotificationPrompt.vue'
 import SessionPane from './components/SessionPane.vue'
 import Sidebar from './components/Sidebar.vue'
 import SplitView from './components/SplitView.vue'
+import TextButton from './components/TextButton.vue'
 import ThemeToggle from './components/ThemeToggle.vue'
 import { registerBuiltinCommands } from './commands/builtin.ts'
 import { installCustomCommands } from './commands/custom.ts'
@@ -89,6 +90,21 @@ function toggleSplit(): void {
         <NotificationPrompt />
         <SplitView v-if="workspace.mode === 'split'" />
         <SessionPane v-else-if="workspace.current" :key="workspace.current.id" :session="workspace.current" />
+        <div v-else-if="connection.state === 'open' && !connection.backendTooOld" class="empty-workspace">
+          <p class="empty-title">{{ t('workspace.empty') }}</p>
+          <div class="empty-actions">
+            <TextButton
+              class="primary-action"
+              :label="t('sidebar.newSessionIn')"
+              @click="dialogs.open({ kind: 'newSession' })"
+            />
+            <TextButton
+              :label="t('sidebar.newSession')"
+              @click="commands.run('new').catch(notices.pushError)"
+            />
+          </div>
+          <p v-if="workspace.cwd" class="empty-cwd">{{ workspace.cwd }}</p>
+        </div>
 
         <Transition name="fade">
           <div v-if="!layout.sidebarVisible" class="corner left">
@@ -138,6 +154,43 @@ function toggleSplit(): void {
   flex: 1;
   flex-direction: column;
   min-width: 0;
+}
+
+.empty-workspace {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: var(--page-padding);
+  color: var(--text-muted);
+}
+
+.empty-title {
+  margin: 0;
+}
+
+.empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.primary-action :deep(.face) {
+  color: var(--accent-text);
+}
+
+.empty-cwd {
+  margin: 0;
+  max-width: min(var(--content-width), 100%);
+  overflow: hidden;
+  font: var(--small-font-size) var(--font-mono);
+  opacity: 0.75;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .corner {

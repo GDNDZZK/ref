@@ -1,10 +1,11 @@
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import { createAppI18n } from '../i18n/index.ts'
 import { info } from '../model/testMessages.ts'
 import type { Todo } from '../proto/generated'
+import { useDialogsStore } from '../stores/dialogs.ts'
 import { useWorkspaceStore } from '../stores/workspace.ts'
 import Sidebar from './Sidebar.vue'
 
@@ -13,6 +14,9 @@ let pinia = createPinia()
 beforeEach(() => {
   pinia = createPinia()
   setActivePinia(pinia)
+})
+afterEach(() => {
+  document.body.innerHTML = ''
 })
 
 function mountSidebar() {
@@ -26,6 +30,7 @@ function mountSidebar() {
     ],
   })
   const wrapper = mount(Sidebar, {
+    attachTo: document.body,
     global: { plugins: [pinia, createAppI18n(['en'])] },
   })
   return { workspace, wrapper }
@@ -49,6 +54,71 @@ describe('Sidebar', () => {
     workspace.focusTile('s3')
     await nextTick()
     expect(marked(wrapper)).toEqual(['gamma'])
+  })
+  it('detaches the active session when clicking the already-current row in single view', async () => {
+    const { workspace, wrapper } = mountSidebar()
+    const detachSpy = vi.spyOn(workspace, 'detachCurrent').mockResolvedValue(undefined)
+    const openSpy = vi.spyOn(workspace, 'openSession').mockResolvedValue(undefined)
+    workspace.currentId = 's1'
+    await nextTick()
+
+    const rows = wrapper.findAll('.running .row')
+    await rows[0]!.trigger('click')
+    expect(detachSpy).toHaveBeenCalledTimes(1)
+    expect(openSpy).not.toHaveBeenCalled()
+
+    await rows[1]!.trigger('click')
+    expect(openSpy).toHaveBeenCalledWith('s2')
+    wrapper.unmount()
+  })
+
+  it('shows Move to background in context menu only for the current row in single view', async () => {
+    const { workspace, wrapper } = mountSidebar()
+    const detachSpy = vi.spyOn(workspace, 'detachCurrent').mockResolvedValue(undefined)
+    workspace.currentId = 's1'
+    await nextTick()
+
+    const rows = wrapper.findAll('.running .row')
+    await rows[0]!.trigger('contextmenu')
+    const currentMenu = [...document.body.querySelectorAll('[role="menuitem"]')].map((el) =>
+      el.textContent?.trim(),
+    )
+    expect(currentMenu).toEqual(['Rename', 'Move to background', 'Close'])
+    ;(document.body.querySelectorAll('[role="menuitem"]')[1] as HTMLElement).click()
+    expect(detachSpy).toHaveBeenCalledTimes(1)
+    await nextTick()
+
+    await rows[1]!.trigger('contextmenu')
+    const otherMenu = [...document.body.querySelectorAll('[role="menuitem"]')].map((el) =>
+      el.textContent?.trim(),
+    )
+    expect(otherMenu).toEqual(['Rename', 'Close'])
+    wrapper.unmount()
+  })
+
+  it('confirms before closing a busy session and closes an idle session directly', async () => {
+    const { workspace, wrapper } = mountSidebar()
+    const dialogs = useDialogsStore()
+    const closeSpy = vi.spyOn(workspace, 'closeSession').mockResolvedValue(undefined)
+    workspace.onFrame({
+      kind: 'sessions',
+      sessions: [
+        info({ id: 's1', name: 'busy-one', status: { state: 'busy' } }),
+        info({ id: 's2', name: 'idle-one', created_at: 2 }),
+      ],
+    })
+    await nextTick()
+
+    const closeButtons = wrapper.findAll('.running .row button.close')
+    await closeButtons[0]!.trigger('click')
+    expect(dialogs.current).toEqual({ kind: 'closeSession', sessionId: 's1' })
+    expect(closeSpy).not.toHaveBeenCalled()
+
+    dialogs.close()
+    await closeButtons[1]!.trigger('click')
+    expect(dialogs.current).toBeUndefined()
+    expect(closeSpy).toHaveBeenCalledWith('s2')
+    wrapper.unmount()
   })
 
   describe('Todo section', () => {
