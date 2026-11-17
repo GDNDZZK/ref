@@ -59,7 +59,6 @@ Item {
 		model: pane.session.blocks
 		compact: pane.compact
 		sidePadding: pane.columnPadding
-		holding: pane.session.activelyWorking
 		sessionId: pane.session.sessionId
 		permissionCount: pane.session.permissionCount
 		moreBefore: pane.session.moreBefore
