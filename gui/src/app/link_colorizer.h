@@ -13,7 +13,7 @@
 class LinkHighlighter : public QSyntaxHighlighter
 {
 public:
-	LinkHighlighter(QTextDocument* document, const QColor& color, bool streaming);
+	LinkHighlighter(QTextDocument* document, const QColor& color, bool streaming = false);
 	~LinkHighlighter() override;
 	void setColor(const QColor& color);
 	void setStreaming(bool streaming);

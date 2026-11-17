@@ -403,9 +403,21 @@ void Workspace::openSession(const QString& sessionId)
 	{
 		return;
 	}
-	if(m_split && m_tiles.indexOf(sessionId) >= 0)
+	if(m_split)
 	{
-		focusTile(sessionId);
+		if(m_tiles.indexOf(sessionId) >= 0)
+		{
+			if(!m_zoomed.isEmpty() && m_zoomed != sessionId)
+			{
+				zoomTile(sessionId);
+			}
+			else
+			{
+				focusTile(sessionId);
+			}
+			return;
+		}
+		leaveSplit(false, sessionId);
 		return;
 	}
 	if(sessionId == currentId())
@@ -518,6 +530,22 @@ QCoro::Task<> Workspace::createAndShow(QString cwd, Reply reply)
 		co_return;
 	}
 	report(reply, true, created->id);
+}
+
+void Workspace::requestCloseSession(const QString& sessionId)
+{
+	if(sessionId.isEmpty())
+	{
+		return;
+	}
+	const refgui::proto::SessionInfo* info = m_directory.find(sessionId);
+	const bool working = info != nullptr && info->status.state != refgui::proto::SessionStatus::State::Idle;
+	if(working)
+	{
+		openDialog(u"close"_s, {{u"sessionId"_s, sessionId}});
+		return;
+	}
+	closeSession(sessionId);
 }
 
 void Workspace::closeSession(const QString& sessionId)

@@ -19,9 +19,10 @@ Item {
 
 	signal activated(var value)
 
+	property bool ready: false
 	implicitWidth: 300
 	implicitHeight: 30
-
+	Component.onCompleted: ready = true
 	Rectangle {
 		anchors.fill: parent
 		radius: height / 2
@@ -31,7 +32,8 @@ Item {
 
 	Rectangle {
 		readonly property real segment: (segmented.width - 4) / Math.max(1, segmented.model.length)
-		x: 2 + Math.max(0, segmented.currentIndex) * segment
+		property real indicatorPosition: Math.max(0, segmented.currentIndex)
+		x: 2 + indicatorPosition * segment
 		y: 2
 		width: segment
 		height: segmented.height - 4
@@ -40,8 +42,10 @@ Item {
 		border.color: Theme.userBubbleBorder
 		visible: segmented.currentIndex >= 0
 
-		Behavior on x { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-		Behavior on width { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+		Behavior on indicatorPosition {
+			enabled: segmented.ready
+			NumberAnimation { duration: Motion.standard; easing.type: Motion.ease }
+		}
 	}
 
 	Row {

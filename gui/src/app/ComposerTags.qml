@@ -15,6 +15,7 @@ Item {
 	signal variantClicked()
 
 	implicitHeight: 28
+	clip: true
 
 	Row {
 		id: row
@@ -22,6 +23,7 @@ Item {
 		height: parent.height
 
 		ComposerChip {
+			id: shellChip
 			anchors.verticalCenter: parent.verticalCenter
 			iconName: "terminal"
 			iconColor: Theme.shellBorder
@@ -31,6 +33,7 @@ Item {
 		}
 
 		ComposerChip {
+			id: agentChip
 			anchors.verticalCenter: parent.verticalCenter
 			iconName: "agent"
 			iconColor: Theme.agentColor(tags.model.agentColor, tags.model.agentIndex)
@@ -40,14 +43,17 @@ Item {
 		}
 
 		ComposerChip {
+			id: modelChip
 			anchors.verticalCenter: parent.verticalCenter
 			iconName: "model"
 			label: tags.model.agentName === "" ? "" : tags.model.modelName
 			tip: tags.model.modelDescription === "" ? qsTr("Model") : qsTr("Model: %1").arg(tags.model.modelDescription)
+			widthLimit: Math.min(maxWidth, Math.max(96, Math.floor(tags.width - shellChip.implicitWidth - agentChip.implicitWidth - variantChip.implicitWidth - 3 * tags.chipGap)))
 			onClicked: tags.modelClicked()
 		}
 
 		ComposerChip {
+			id: variantChip
 			anchors.verticalCenter: parent.verticalCenter
 			iconName: "variant"
 			label: tags.model.variantAvailable ? (tags.model.variant === "" ? qsTr("default") : tags.model.variant) : ""

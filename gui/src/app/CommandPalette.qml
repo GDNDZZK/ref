@@ -45,8 +45,9 @@ FocusScope {
 	}
 
 	function run(command, args) {
-		close()
 		Commands.run(command, args)
+		if (Workspace.dialog === DialogId.palette)
+			close()
 	}
 
 	function choose(command) {
@@ -93,11 +94,13 @@ FocusScope {
 		id: panel
 
 		readonly property bool shown: launcher.entered && launcher.open
+		property bool heightReady: false
+		property real dropOffset: shown ? 0 : Motion.dialogDrop
 
 		width: Math.min(Theme.paletteWidth, launcher.width - 2 * Theme.overlayEdgeMargin)
 		height: searchRow.height + 1 + (launcher.askingArgument ? description.height : list.implicitHeight)
 		x: Math.round((launcher.width - width) / 2)
-		y: Math.max(48, Math.round(launcher.height * Theme.paletteTopRatio)) - (shown ? 0 : Motion.dialogDrop)
+		y: Math.max(48, Math.round(launcher.height * Theme.paletteTopRatio) - Math.round(dropOffset))
 		radius: Theme.radiusLarge
 		color: Theme.surface
 		border.color: Theme.border
@@ -105,11 +108,19 @@ FocusScope {
 		opacity: shown ? 1 : 0
 		scale: shown ? 1 : Motion.popScale
 
-		Behavior on y { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+		Timer {
+			interval: 0
+			running: launcher.entered && launcher.height > 0 && !panel.heightReady
+			onTriggered: panel.heightReady = true
+		}
+
+		Behavior on dropOffset { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 		Behavior on opacity { NumberAnimation { duration: panel.shown ? Motion.standard : Motion.quick; easing.type: Motion.ease } }
 		Behavior on scale { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-		Behavior on height { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-
+		Behavior on height {
+			enabled: panel.heightReady
+			NumberAnimation { duration: Motion.standard; easing.type: Motion.ease }
+		}
 		TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds }
 
 		Item {
@@ -128,9 +139,10 @@ FocusScope {
 
 			Rectangle {
 				id: chip
+				readonly property int maxChipWidth: Math.max(80, Math.floor(searchRow.width * 0.45))
 				x: 14
 				anchors.verticalCenter: parent.verticalCenter
-				width: chipLabel.implicitWidth + 2 * 10
+				width: Math.min(chipLabel.implicitWidth + 2 * 10, maxChipWidth)
 				height: 26
 				radius: 13
 				color: Theme.userBubble
@@ -140,10 +152,11 @@ FocusScope {
 				Text {
 					textFormat: Text.PlainText
 					id: chipLabel
-					anchors.centerIn: parent
+					anchors { left: parent.left; right: parent.right; leftMargin: 10; rightMargin: 10; verticalCenter: parent.verticalCenter }
 					text: launcher.chosen?.title ?? ""
 					color: Theme.text
 					font.pixelSize: Theme.captionFontSize
+					elide: Text.ElideRight
 				}
 			}
 
@@ -220,9 +233,11 @@ FocusScope {
 					textFormat: Text.PlainText
 					id: titleLabel
 					anchors { left: parent.left; leftMargin: 46; verticalCenter: parent.verticalCenter }
+					width: Math.min(implicitWidth, Math.max(0, chips.x - 46 - (chips.width > 0 ? 8 : 0)))
 					text: row.title
 					color: Theme.text
 					font.pixelSize: Theme.fontSize
+					elide: Text.ElideRight
 				}
 				Text {
 					textFormat: Text.PlainText

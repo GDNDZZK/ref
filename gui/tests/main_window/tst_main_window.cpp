@@ -281,6 +281,7 @@ private slots:
 	void standaloneDialogHostBlocksWheelEvents();
 	void statusLineRetryTooltipShowsFullErrorWithoutWarnings();
 	void emptyWorkspaceStateAndDetachTransitionCleanly();
+	void tileZoomRemovesBorderRepeatsSlowTravelAndCompensatesScroll();
 };
 
 void TestMainWindow::initTestCase()
@@ -782,6 +783,88 @@ void TestMainWindow::emptyWorkspaceStateAndDetachTransitionCleanly()
 	QVERIFY(newInFolderButton && newInFolderButton->isVisible());
 	QVERIFY(findText(u"work · /work"_s) != nullptr);
 	QVERIFY2(warningSpy.isEmpty(), "Empty Workspace State / detachCurrent emitted QML warnings");
+}
+
+void TestMainWindow::tileZoomRemovesBorderRepeatsSlowTravelAndCompensatesScroll()
+{
+	MainFixture f;
+	for(int i = 0; i < 5; ++i)
+	{
+		f.stub.add(u"ses_extra_%1"_s.arg(i), 10 + i);
+	}
+
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	window->resize(900, 460);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+
+	f.workspace->toggleSplit();
+	QTRY_VERIFY(f.workspace->isSplitView());
+	QQuickItem* tileGrid = findByTypePrefix(window->contentItem(), "TileGrid");
+	QVERIFY(tileGrid);
+	QQuickItem* flick = findByTypePrefix(tileGrid, "QQuickFlickable");
+	QVERIFY(flick);
+	QQuickItem* tileB = nullptr;
+	QTRY_VERIFY([&] {
+		QList<QQuickItem*> tiles;
+		collectTiles(tileGrid, tiles);
+		for(QQuickItem* candidate : tiles)
+		{
+			if(candidate->property("sessionId").toString() == u"ses_b"_s && candidate->width() > 100.0)
+			{
+				tileB = candidate;
+			}
+		}
+		return tileB != nullptr && flick->property("contentHeight").toReal() > flick->height() + 100.0;
+	}());
+
+	flick->setProperty("contentY", 100.0);
+	QCOMPARE(flick->property("contentY").toReal(), 100.0);
+
+	// 1st zoom: travelling is true immediately (Motion.slow = 480ms), zoomed pane fills viewport at (0, 0) without 1px border inset.
+	f.workspace->zoomTile(u"ses_b"_s);
+	QVERIFY(tileB->property("travelling").toBool());
+	QCOMPARE(tileB->property("travelDuration").toInt(), 480);
+	QQuickItem* pane = findByTypePrefix(tileB, "SessionPane");
+	QVERIFY(pane);
+	QTRY_VERIFY(qFuzzyCompare(tileB->width(), tileGrid->width()) && qFuzzyCompare(tileB->height(), tileGrid->height()));
+	const QPointF viewportOrigin = tileB->mapToItem(tileGrid, QPointF(0.0, 0.0));
+	QVERIFY(qAbs(viewportOrigin.x()) < 0.5 && qAbs(viewportOrigin.y()) < 0.5);
+	QCOMPARE(pane->x(), 0.0);
+	QTRY_COMPARE(pane->y(), 0.0);
+	QVERIFY(qFuzzyCompare(pane->width(), tileGrid->width()));
+	QVERIFY(qFuzzyCompare(pane->height(), tileGrid->height()));
+	QCOMPARE(flick->property("contentY").toReal(), 100.0);
+
+	// Unzoom preserves scroll offset and settles travelling back to false.
+	f.workspace->unzoom();
+	QVERIFY(tileB->property("travelling").toBool());
+	QTRY_VERIFY_WITH_TIMEOUT(!tileB->property("travelling").toBool(), 2000);
+	QCOMPARE(flick->property("contentY").toReal(), 100.0);
+
+	// 2nd zoom: declarative travelling binding still activates immediately (Motion.slow = 480ms).
+	f.workspace->zoomTile(u"ses_b"_s);
+	QVERIFY(tileB->property("travelling").toBool());
+	QCOMPARE(tileB->property("travelDuration").toInt(), 480);
+	QTRY_VERIFY(qFuzzyCompare(tileB->width(), tileGrid->width()));
+
+	// Leaving split view while zoomed hands over cleanly to ses_b in single view.
+	f.workspace->toggleSplit();
+	QCOMPARE(f.workspace->currentId(), u"ses_b"_s);
+	QCOMPARE(window->property("shown").value<QObject*>(), f.workspace->session(u"ses_b"_s));
+	QTRY_VERIFY(!tileGrid->isVisible());
+	QVERIFY2(warningSpy.isEmpty(), "Tile zoom / handover emitted QML warnings");
 }
 
 QTEST_MAIN(TestMainWindow)
