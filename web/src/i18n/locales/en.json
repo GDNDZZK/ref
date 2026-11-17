@@ -419,5 +419,52 @@
   "todo": {
     "title": "Todo {done}/{total}",
     "show": "Show the to-do list"
+  },
+  "config": {
+    "reset": "Reset",
+    "clear": "Clear",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
+    "remove": "Remove",
+    "secret": {
+      "show": "Show",
+      "hide": "Hide",
+      "envSet": "{name} set",
+      "envUnset": "{name} unset"
+    },
+    "list": {
+      "add": "Add",
+      "placeholder": "Add item…"
+    },
+    "kv": {
+      "add": "Add entry",
+      "keyPlaceholder": "Key",
+      "valuePlaceholder": "Value"
+    },
+    "permission": {
+      "modeLabel": "Permission mode",
+      "modeUnset": "Default",
+      "modeGlobal": "Global",
+      "modeRules": "Rules",
+      "globalAction": "Global action",
+      "allow": "Allow",
+      "ask": "Ask",
+      "deny": "Deny",
+      "toolPlaceholder": "Tool (e.g. bash, mcp_*)",
+      "patternPlaceholder": "Pattern (e.g. *, git *)",
+      "addRule": "Add rule",
+      "emptyRules": "No rules yet"
+    },
+    "color": {
+      "default": "Auto",
+      "hexPlaceholder": "#rrggbb",
+      "orange": "Orange",
+      "blue": "Blue",
+      "purple": "Purple",
+      "red": "Red",
+      "yellow": "Yellow",
+      "green": "Green",
+      "cyan": "Cyan"
+    }
   }
 }
