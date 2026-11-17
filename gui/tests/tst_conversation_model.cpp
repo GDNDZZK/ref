@@ -543,6 +543,21 @@ void TestConversationModel::togglesFoldingAgainstTheDefault()
 	// A flip stays with the part when the message is replaced.
 	model.setMessage(assistant(u"a1"_s, {reasoning(u"hmm"_s), tool(u"bash"_s, u"x"_s, ToolState::Done)}));
 	QVERIFY(!roleOf(model, 1, ConversationModel::ExpandedRole).toBool());
+
+	// Ctrl+Shift+R (setDefaultExpansion(true, ...)) expands finished reasoning rows,
+	// and manually collapsing a streaming reasoning row stays collapsed after stream end.
+	model.setDefaultExpansion(true, false);
+	QVERIFY(roleOf(model, 0, ConversationModel::ExpandedRole).toBool());
+	model.setDefaultExpansion(false, false);
+	QVERIFY(!roleOf(model, 0, ConversationModel::ExpandedRole).toBool());
+
+	model.setMessage(assistant(u"a2"_s, {reasoning(u"live"_s, false)}, false));
+	const int liveModelRow = model.rowCount() - 2; // before a2's meta row
+	QVERIFY(model.index(liveModelRow).data(ConversationModel::ExpandedRole).toBool());
+	model.toggleExpanded(liveModelRow);
+	QVERIFY(!model.index(liveModelRow).data(ConversationModel::ExpandedRole).toBool());
+	model.setPart(u"a2"_s, 0, reasoning(u"done"_s, true));
+	QVERIFY(!model.index(liveModelRow).data(ConversationModel::ExpandedRole).toBool());
 }
 
 void TestConversationModel::carriesToolMetaAndImages()

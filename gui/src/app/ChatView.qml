@@ -30,7 +30,8 @@ ListView {
 	id: view
 
 	property real sidePadding: Theme.pagePadding // narrower in a split-view tile
-	readonly property real columnWidth: Math.min(width - 2 * sidePadding, Theme.contentWidth)
+	property real layoutWidth: width
+	readonly property real columnWidth: Math.max(0, Math.min(layoutWidth - 2 * sidePadding, Theme.contentWidth))
 	property bool following: true
 	property real previousHeight: 0
 	property string sessionId // the session whose pictures the rows show

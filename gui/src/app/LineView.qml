@@ -16,6 +16,7 @@ Item {
 	required property var rows
 	property bool showAll: false
 	property string copyText: ""
+	property bool expandable: true
 
 	signal showAllRequested()
 
@@ -48,7 +49,7 @@ Item {
 	readonly property real fullWidth: textX + textChars * metrics.charWidth + sidePadding
 
 	width: parent.width
-	height: scroller.height + (hiddenRows > 0 ? more.height : 0)
+	height: scroller.height + (hiddenRows > 0 ? (expandable ? more.height : cappedNote.height) : 0)
 
 	FontMetrics {
 		id: metrics
@@ -135,9 +136,22 @@ Item {
 	TextButton {
 		id: more
 		y: scroller.height
-		visible: view.hiddenRows > 0
+		visible: view.hiddenRows > 0 && view.expandable
 		text: view.moreText
 		onClicked: view.showAllRequested()
+	}
+
+	Text {
+		id: cappedNote
+		textFormat: Text.PlainText
+		y: scroller.height
+		x: view.sidePadding
+		topPadding: 4
+		visible: view.hiddenRows > 0 && !view.expandable
+		text: qsTr("+%1 more lines").arg(view.hiddenRows)
+		color: Theme.textMuted
+		font.family: Theme.monoFamily
+		font.pixelSize: Theme.smallFontSize
 	}
 
 	HoverCopyButton {

@@ -31,13 +31,16 @@ Window {
 		if (session === shown)
 			return
 		if (session === null) {
-			if (Workspace.splitView || !content.visible)
+			if (Workspace.splitView || !content.visible) {
+				sessionFade.cancel()
 				shown = null
-			else
+			} else {
 				sessionFade.run(content, () => shown = null)
+			}
 			return
 		}
 		if (shown === null || Workspace.splitView || !content.visible) {
+			sessionFade.cancel()
 			shown = session
 			return
 		}
@@ -50,8 +53,10 @@ Window {
 		target: Workspace
 
 		function onSessionDropped(session) {
-			if (window.shown === session)
+			if (window.shown === session) {
+				sessionFade.cancel()
 				window.shown = Workspace.current
+			}
 		}
 	}
 
@@ -192,7 +197,7 @@ Window {
 			onMoveRequested: window.startSystemMove()
 			onToggleMaximizeRequested: window.toggleMaximized()
 
-			Behavior on width { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+			Behavior on width { NumberAnimation { id: sidebarWidthAnim; duration: Motion.standard; easing.type: Motion.ease } }
 		}
 
 		Item {
@@ -232,6 +237,7 @@ Window {
 
 						sourceComponent: SessionPane {
 							session: window.shown
+							layoutWidth: sidebarWidthAnim.running ? Math.max(0, page.width - Theme.sidebarWidth) : width
 						}
 					}
 
@@ -298,6 +304,8 @@ Window {
 						id: tiles
 						anchors.fill: parent
 						topInset: 0
+						sidebarAnimating: sidebarWidthAnim.running
+						minAreaWidth: Math.max(0, page.width - Theme.sidebarWidth)
 						visible: (Workspace.splitView || occupied) && opacity > 0
 						enabled: Workspace.splitView
 					}

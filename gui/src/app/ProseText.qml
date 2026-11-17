@@ -6,6 +6,8 @@ import RefGui
 TextEdit {
 	id: prose
 
+	property bool streaming: false
+
 	readOnly: true
 	textFormat: TextEdit.PlainText // Markdown items say so; text from outside is never read as markup
 	selectByMouse: true
@@ -20,6 +22,7 @@ TextEdit {
 	LinkColorizer {
 		document: prose.textDocument
 		color: Theme.accentText
+		streaming: prose.streaming
 	}
 
 	HoverHandler {

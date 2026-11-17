@@ -34,9 +34,10 @@ Item {
 	readonly property real naturalHeight: column.childrenRect.height - pullUp
 	property real easedHeight: 0
 	property bool easing: false // from the start of streaming until caught up after it ends
+	property bool folding: false // child fold animation owns height directly to avoid double-easing
 
 	width: chat.width
-	height: easing ? easedHeight : naturalHeight
+	height: easing && !folding ? easedHeight : naturalHeight
 	clip: pullUp === 0
 	transform: Translate { id: entryShift }
 
@@ -111,7 +112,10 @@ Item {
 	FrameAnimation {
 		running: block.easing
 		onTriggered: {
-			block.easedHeight = Motion.chase(block.easedHeight, block.naturalHeight, frameTime)
+			if (block.folding)
+				block.easedHeight = block.naturalHeight
+			else
+				block.easedHeight = Motion.chase(block.easedHeight, block.naturalHeight, frameTime)
 			block.easing = block.streaming || !Motion.arrived(block.easedHeight, block.naturalHeight)
 		}
 	}

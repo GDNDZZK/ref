@@ -121,7 +121,10 @@ FocusScope {
 			input.forceActiveFocus()
 		else if (focus)
 			forceActiveFocus()
-		Qt.callLater(() => { ready = true })
+		Qt.callLater(() => {
+			if (pick)
+				pick.ready = true
+		})
 	}
 
 	PointerMoveGuard { id: hoverGuard }

@@ -82,6 +82,15 @@ struct Block
 	bool stale = false;        // before the last compaction: no longer sent to the model
 	bool contextStart = false; // the last compaction, with older messages above it
 
+	struct MarkdownCache
+	{
+		mutable QString source{};
+		mutable QString rendered{};
+
+		bool operator==(const MarkdownCache&) const { return true; }
+	};
+	MarkdownCache markdownCache{};
+
 	bool operator==(const Block&) const = default;
 };
 

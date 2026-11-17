@@ -28,13 +28,21 @@ Item {
 	readonly property int previewRemoved: preview.removed ?? 0
 	readonly property bool previewTruncated: preview.truncated === true
 	readonly property int maxPreviewHeight: 240
+	readonly property int maxPreviewLines: 80
+	property bool ready: false
+	property real openProgress: open ? 1 : 0
+	readonly property bool animating: openAnim.running
+	readonly property real contentHeight: content.y + content.height
 
 	width: parent.width
-	height: open ? content.y + content.height : 0
+	height: openProgress === 1 ? contentHeight : Math.round(contentHeight * openProgress)
 	clip: true
+	Component.onCompleted: ready = true
 
-	Behavior on height { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-
+	Behavior on openProgress {
+		enabled: section.ready
+		NumberAnimation { id: openAnim; duration: Motion.standard; easing.type: Motion.ease }
+	}
 	Rectangle {
 		width: parent.width
 		height: section.dividerHeight
@@ -135,7 +143,8 @@ Item {
 					id: previewDiffView
 					width: parent.width
 					rows: ToolInfo.diffRows(section.previewDiff)
-					showAll: true
+					previewLines: section.maxPreviewLines
+					expandable: false
 					copyText: section.previewDiff
 				}
 			}
