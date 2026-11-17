@@ -22,13 +22,13 @@ pub(crate) const CREATE_SESSION: &str = "create_session";
 pub(crate) const RESUME_SESSION: &str = "resume_session";
 pub(crate) const CLOSE_SESSION: &str = "close_session";
 
-/// Max persisted history sessions merged into `list_sessions` when `history` is true.
-const HISTORY_LIST_MAX: usize = 200;
+/// `list_sessions` paging: default and largest page size.
+const LIST_PAGE_SIZE_DEFAULT: u64 = 50;
+const LIST_PAGE_SIZE_MAX: u64 = 100;
 
 /// `read_session` paging: default and largest page size.
 const PAGE_SIZE_DEFAULT: u64 = 10;
 const PAGE_SIZE_MAX: u64 = 50;
-
 /// How many of the latest messages `/peers-inbox` and `/peers-outbox` list.
 const LIST_LAST: usize = 20;
 
@@ -40,7 +40,7 @@ const MAX_MESSAGE_BYTES: usize = 100_000;
 const PREVIEW_CHARS: usize = 80;
 const READ_TEXT_CHARS: usize = 4000;
 const READ_TOOL_OUTPUT_CHARS: usize = 300;
-const LIST_TITLE_CHARS: usize = 40;
+const LIST_TITLE_CHARS: usize = 80;
 
 /// How the header line of a message from another session starts (see [`peer_header`]).
 pub(crate) const PEER_HEADER_PREFIX: &str = "[Message from session";
@@ -73,10 +73,13 @@ pub(crate) fn peer_defs() -> Vec<ToolDef> {
     vec![
         def(
             LIST_SESSIONS,
-            "List sessions in this backend: name, id, agent, status, foreground/background, directory, title, and creator. By default lists live sessions only; set history: true to include closed history sessions (newest 200), or creator to filter by \"user\" or creator name/id.",
+            "List sessions in this backend: name, id, agent, status, foreground/background, directory, title, and creator. By default lists live sessions only; set history: true to include closed history sessions, creator to filter by \"user\" or creator name/id, and page/page_size to paginate.",
             json!({"type": "object", "properties": {
-                "history": {"type": "boolean", "description": "Also include closed history sessions (newest 200; live wins on duplicate id)."},
-                "creator": {"type": "string", "description": "Filter by creator: \"user\" for user-created sessions, or a creator session's name or id."}
+                "history": {"type": "boolean", "description": "Also include closed history sessions (newest first; live wins on duplicate id)."},
+                "creator": {"type": "string", "description": "Filter by creator: \"user\" for user-created sessions, or a creator session's name or id."},
+                "page": {"type": "integer", "minimum": 1, "description": "Page number, 1-based (default 1)."},
+                "page_size": {"type": "integer", "minimum": 1, "maximum": LIST_PAGE_SIZE_MAX,
+                    "description": format!("Sessions per page (default {LIST_PAGE_SIZE_DEFAULT}, max {LIST_PAGE_SIZE_MAX}).")}
             }}),
         ),
         def(
@@ -299,12 +302,43 @@ async fn list_sessions(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Resul
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|c| !c.is_empty());
+    let page = match input.get("page") {
+        None | Some(Value::Null) => 1usize,
+        Some(v) => {
+            let Some(n) = v.as_u64() else {
+                return Err("Error: parameter `page` must be an integer >= 1.".into());
+            };
+            if n < 1 {
+                return Err("Error: parameter `page` must be >= 1.".into());
+            }
+            n as usize
+        }
+    };
+    let page_size = match input.get("page_size") {
+        None | Some(Value::Null) => LIST_PAGE_SIZE_DEFAULT as usize,
+        Some(v) => {
+            let Some(n) = v.as_u64() else {
+                return Err(format!(
+                    "Error: parameter `page_size` must be an integer between 1 and {LIST_PAGE_SIZE_MAX}."
+                ));
+            };
+            if !(1..=LIST_PAGE_SIZE_MAX).contains(&n) {
+                return Err(format!(
+                    "Error: parameter `page_size` must be between 1 and {LIST_PAGE_SIZE_MAX}."
+                ));
+            }
+            n as usize
+        }
+    };
+
     let live_infos = hub.infos();
     let live_ids: std::collections::HashSet<String> =
         live_infos.iter().map(|i| i.id.clone()).collect();
-    let hist_infos = if include_history {
+    let need_store =
+        include_history || creator.is_some() || live_infos.iter().any(|i| i.parent.is_some());
+    let hist_infos = if need_store {
         let store = hub.store.clone();
-        tokio::task::spawn_blocking(move || store.list_for(None, Some(HISTORY_LIST_MAX)))
+        tokio::task::spawn_blocking(move || store.list())
             .await
             .map_err(|e| format!("listing history failed: {e}"))?
     } else {
@@ -319,10 +353,12 @@ async fn list_sessions(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Resul
     }
     let mut combined: Vec<(ref_proto::SessionInfo, bool)> =
         live_infos.into_iter().map(|i| (i, true)).collect();
-    for mut i in hist_infos {
-        if !live_ids.contains(&i.id) {
-            i.live = false;
-            combined.push((i, false));
+    if include_history {
+        for mut i in hist_infos {
+            if !live_ids.contains(&i.id) {
+                i.live = false;
+                combined.push((i, false));
+            }
         }
     }
     if let Some(c) = creator {
@@ -340,17 +376,41 @@ async fn list_sessions(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Resul
             });
         }
     }
+
+    let total = combined.len();
     let live_count = combined.iter().filter(|(_, live)| *live).count();
-    let hist_count = combined.len() - live_count;
-    let mut out = if include_history {
-        format!(
-            "{} session(s) ({live_count} live, {hist_count} history):\n",
-            combined.len()
-        )
+    let hist_count = total - live_count;
+    let pages = total.div_ceil(page_size).max(1);
+    if page > pages {
+        return Err(format!("Error: page {page} is out of range (1–{pages})."));
+    }
+    let start = (page - 1) * page_size;
+    let end = (start + page_size).min(total);
+    let mut out = if pages == 1 {
+        if include_history {
+            format!("{total} session(s) ({live_count} live, {hist_count} history):\n")
+        } else {
+            format!("{live_count} live session(s):\n")
+        }
     } else {
-        format!("{live_count} live session(s):\n")
+        let counts = if include_history {
+            format!("{live_count} live, {hist_count} history")
+        } else {
+            format!("{live_count} live")
+        };
+        let page_info = if page < pages {
+            format!("page {page}/{pages}, pass page: {} for more", page + 1)
+        } else {
+            format!("page {page}/{pages}")
+        };
+        format!(
+            "Showing {}–{} of {total} session(s) ({counts}; {page_info}):\n",
+            start + 1,
+            end
+        )
     };
-    for (i, is_live) in &combined {
+    for (i, is_live) in &combined[start..end] {
+        let title = preview(&i.title, LIST_TITLE_CHARS);
         if *is_live {
             out.push_str(&format!(
                 "- \"{}\" (id {}){} — agent {} — status {} — {} — cwd {} — title \"{}\"",
@@ -365,12 +425,12 @@ async fn list_sessions(hub: &Arc<Hub>, s: &Arc<Session>, input: &Value) -> Resul
                     "background"
                 },
                 i.cwd,
-                i.title
+                title
             ));
         } else {
             out.push_str(&format!(
                 "- \"{}\" (id {}) — agent {} — status closed — history — cwd {} — title \"{}\"",
-                i.name, i.id, i.agent, i.cwd, i.title,
+                i.name, i.id, i.agent, i.cwd, title,
             ));
         }
         if let Some(p) = &i.parent {
@@ -900,7 +960,7 @@ fn cmd_peers(hub: &Arc<Hub>, s: &Arc<Session>) -> String {
             "  [{}] {} · \"{}\" · {} · {} · {} · started {}{}\n",
             status_word(&i.status),
             i.name,
-            crate::util::truncate_chars(&i.title, LIST_TITLE_CHARS),
+            preview(&i.title, LIST_TITLE_CHARS),
             i.agent,
             if i.attached > 0 {
                 "foreground"
