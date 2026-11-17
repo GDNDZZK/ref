@@ -1,0 +1,6 @@
+{
+  "kind": "config_changed",
+  "warnings": [
+    "default_agent \"custom\" not found"
+  ]
+}

@@ -117,3 +117,30 @@ fn permission_request_preview_is_optional_and_round_trips() {
     let back: PermissionRequest = serde_json::from_str(&json).unwrap();
     assert_eq!(back.preview, with_preview.preview);
 }
+
+/// Bare `get_config` and `list_dirs` without v5 optional fields still parse.
+#[test]
+fn bare_get_config_and_list_dirs_still_parse() {
+    let gc: ClientFrame = serde_json::from_value(json!({"id": 2, "op": "get_config"})).unwrap();
+    match &gc.req {
+        Request::GetConfig { cwd } => assert_eq!(cwd, &None),
+        other => panic!("not get_config: {other:?}"),
+    }
+    let gc_json = serde_json::to_value(&gc).unwrap();
+    assert_eq!(gc_json, json!({"id": 2, "op": "get_config"}));
+
+    let ld: ClientFrame =
+        serde_json::from_value(json!({"id": 3, "op": "list_dirs", "path": "."})).unwrap();
+    match ld.req {
+        Request::ListDirs {
+            path,
+            cwd,
+            include_files,
+        } => {
+            assert_eq!(path, ".");
+            assert_eq!(cwd, None);
+            assert!(!include_files);
+        }
+        other => panic!("not list_dirs: {other:?}"),
+    }
+}

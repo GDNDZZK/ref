@@ -66,7 +66,15 @@ fn requests() -> Samples<ClientFrame> {
                 },
             ),
         ),
-        ("get_config", frame(2, Request::GetConfig)),
+        (
+            "get_config",
+            frame(
+                2,
+                Request::GetConfig {
+                    cwd: Some(PROJECT_DIR.into()),
+                },
+            ),
+        ),
         ("list_sessions", frame(3, Request::ListSessions)),
         (
             "list_history",
@@ -354,11 +362,87 @@ fn requests() -> Samples<ClientFrame> {
                 34,
                 Request::ListDirs {
                     path: "~/pro".into(),
+                    cwd: Some(PROJECT_DIR.into()),
+                    include_files: true,
                 },
             ),
         ),
         ("shutdown", frame(35, Request::Shutdown)),
         ("ping", frame(36, Request::Ping)),
+        (
+            "reload_config",
+            frame(
+                37,
+                Request::ReloadConfig {
+                    cwd: Some(PROJECT_DIR.into()),
+                },
+            ),
+        ),
+        (
+            "get_config_files",
+            frame(
+                38,
+                Request::GetConfigFiles {
+                    file: None,
+                    cwd: Some(PROJECT_DIR.into()),
+                },
+            ),
+        ),
+        (
+            "save_config_file",
+            frame(
+                39,
+                Request::SaveConfigFile {
+                    file: "ref.json".into(),
+                    content:
+                        "{\n  \"$name\": \"Work\",\n  \"model\": \"anthropic/claude-sonnet-4\"\n}\n"
+                            .into(),
+                    cwd: Some(PROJECT_DIR.into()),
+                },
+            ),
+        ),
+        (
+            "create_config_file",
+            frame(
+                40,
+                Request::CreateConfigFile {
+                    label: Some("Experiment".into()),
+                    clone_current: true,
+                    content: None,
+                    cwd: Some(PROJECT_DIR.into()),
+                },
+            ),
+        ),
+        (
+            "select_config_file",
+            frame(
+                41,
+                Request::SelectConfigFile {
+                    file: "ref.json.1.bak".into(),
+                    cwd: Some(PROJECT_DIR.into()),
+                },
+            ),
+        ),
+        (
+            "delete_config_file",
+            frame(
+                42,
+                Request::DeleteConfigFile {
+                    file: "ref.json.1.bak".into(),
+                    cwd: Some(PROJECT_DIR.into()),
+                },
+            ),
+        ),
+        (
+            "list_binaries",
+            frame(
+                43,
+                Request::ListBinaries {
+                    query: "car".into(),
+                    limit: Some(20),
+                },
+            ),
+        ),
     ]
 }
 
@@ -493,7 +577,53 @@ fn server_frames() -> Samples<ServerFrame> {
             "response_list_dirs",
             response(
                 34,
-                json!({"path": PROJECT_DIR, "dirs": ["benches", "crates", "docs"]}),
+                json!({"path": PROJECT_DIR, "dirs": ["benches", "crates", "docs"], "files": ["Cargo.toml", "README.md"]}),
+            ),
+        ),
+        (
+            "response_reload_config",
+            response(37, json!({"config": server_config(), "warnings": []})),
+        ),
+        (
+            "response_get_config_files",
+            response(
+                38,
+                serde_json::to_value(config_files_info()).expect("config_files_info"),
+            ),
+        ),
+        (
+            "response_save_config_file",
+            response(
+                39,
+                serde_json::to_value(config_files_info()).expect("config_files_info"),
+            ),
+        ),
+        (
+            "response_create_config_file",
+            response(
+                40,
+                serde_json::to_value(config_files_info()).expect("config_files_info"),
+            ),
+        ),
+        (
+            "response_select_config_file",
+            response(
+                41,
+                serde_json::to_value(config_files_info()).expect("config_files_info"),
+            ),
+        ),
+        (
+            "response_delete_config_file",
+            response(
+                42,
+                serde_json::to_value(config_files_info()).expect("config_files_info"),
+            ),
+        ),
+        (
+            "response_list_binaries",
+            response(
+                43,
+                json!({"binaries": ["cargo", "cargo-clippy", "cargo-fmt"]}),
             ),
         ),
         (
@@ -556,6 +686,12 @@ fn server_frames() -> Samples<ServerFrame> {
                 notify_kind: NotifyKind::TurnError,
                 session_title: "Fix the failing parser test".into(),
                 detail: Some(RATE_LIMIT_ERROR.into()),
+            },
+        ),
+        (
+            "config_changed",
+            ServerFrame::ConfigChanged {
+                warnings: vec!["default_agent \"custom\" not found".into()],
             },
         ),
     ]

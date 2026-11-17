@@ -1,0 +1,7 @@
+{
+  "id": 40,
+  "op": "create_config_file",
+  "label": "Experiment",
+  "clone_current": true,
+  "cwd": "/home/user/project"
+}

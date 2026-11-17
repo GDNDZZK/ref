@@ -18,6 +18,7 @@ fn export(cfg: &Config) {
     ServerFrame::export_all(cfg).expect("ServerFrame");
     SessionSnapshot::export_all(cfg).expect("SessionSnapshot");
     ServerConfigInfo::export_all(cfg).expect("ServerConfigInfo");
+    ConfigFilesInfo::export_all(cfg).expect("ConfigFilesInfo");
     McpServerStatus::export_all(cfg).expect("McpServerStatus");
     NamedImage::export_all(cfg).expect("NamedImage");
     InstanceInfo::export_all(cfg).expect("InstanceInfo");

@@ -1,0 +1,5 @@
+{
+  "id": 38,
+  "op": "get_config_files",
+  "cwd": "/home/user/project"
+}

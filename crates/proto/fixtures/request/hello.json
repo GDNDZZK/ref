@@ -2,7 +2,7 @@
   "id": 1,
   "op": "hello",
   "client": "ref-web",
-  "version": 4,
+  "version": 5,
   "cwd": "/home/user/project",
   "token": "3f9c1d2e",
   "notify": [

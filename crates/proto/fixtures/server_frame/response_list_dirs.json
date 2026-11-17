@@ -8,6 +8,10 @@
       "benches",
       "crates",
       "docs"
+    ],
+    "files": [
+      "Cargo.toml",
+      "README.md"
     ]
   },
   "error": null

@@ -2,6 +2,8 @@
 export type { AgentInfo } from "./AgentInfo";
 export type { ClientFrame } from "./ClientFrame";
 export type { CommandInfo } from "./CommandInfo";
+export type { ConfigFileEntry } from "./ConfigFileEntry";
+export type { ConfigFilesInfo } from "./ConfigFilesInfo";
 export type { ContextUsage } from "./ContextUsage";
 export type { Delta } from "./Delta";
 export type { EditPreview } from "./EditPreview";
@@ -34,4 +36,4 @@ export type { ToolState } from "./ToolState";
 export type { Usage } from "./Usage";
 export type { JsonValue } from "./serde_json/JsonValue";
 
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;

@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use ts_rs::TS;
 
 /// Version of the wire protocol, reported in the `Hello` response (`"protocol"`).
@@ -13,10 +14,11 @@ use ts_rs::TS;
 /// client/server feature baseline that the server enforces) bump it. The server requires
 /// `Hello.version == PROTOCOL_VERSION` (except for `ref-server-cli`) and does not downgrade its
 /// frames to an older client's version: a client built for another version cannot rely on
-/// matching semantics. Version 3 added questions; version 4 adds structured error codes,
-/// edit/write permission previews, structured edit warnings, and strict version negotiation.
+/// matching semantics. Version 3 added questions; version 4 added structured error codes,
+/// edit/write permission previews, structured edit warnings, and strict version negotiation;
+/// version 5 adds config profile management, hot reload, binary completions, and `ListDirs` files.
 /// Run all clients from the version of the server.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// The error of a `QuestionReply` for a question that is not pending (answered elsewhere
 /// already). Clients compare with `ERR_NO_PENDING_QUESTION` first, falling back to this text.
@@ -735,6 +737,57 @@ pub struct ServerConfigInfo {
     /// TUI-related settings passed through from config (`tui` key), free-form.
     #[serde(default)]
     pub tui: Value,
+    /// Non-fatal problems found while loading the merged config.
+    #[serde(default)]
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ConfigFileEntry {
+    /// File name in the global config directory: `"ref.json"` or `"ref.json.<num>.bak"`.
+    pub file: String,
+    /// True for `"ref.json"`.
+    pub active: bool,
+    /// False only when `"ref.json"` has not been created on disk yet.
+    pub exists: bool,
+    /// Optional human label from top-level `"$name"` in the JSON object.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub label: Option<String>,
+    /// Short summary, e.g. `"2 providers · anthropic/claude-sonnet-4-5"`.
+    pub summary: String,
+    pub modified_at: i64,
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ConfigFilesInfo {
+    /// Directory holding `ref.json` and `ref.json.<num>.bak`.
+    pub config_dir: String,
+    /// All profiles: `"ref.json"` first, then `"ref.json.<num>.bak"` ordered by `num` ascending.
+    pub files: Vec<ConfigFileEntry>,
+    /// Which file's content is returned below.
+    pub selected_file: String,
+    /// Raw UTF-8 text of `selected_file` (`"{}\n"` when `ref.json` does not exist yet).
+    pub raw_text: String,
+    /// Parsed raw JSON object (WITHOUT `{env:...}` or `{file:...}` expansion!), or `Null` on syntax error.
+    pub parsed: Value,
+    /// Syntax error if `raw_text` is not valid JSONC object.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub parse_error: Option<String>,
+    /// For every `{env:VAR}` referenced in `parsed`, whether `VAR` is currently non-empty in server env (never leaks values).
+    pub env_status: BTreeMap<String, bool>,
+    /// True if `ref.jsonc` exists in `config_dir` (which loads after `ref.json`).
+    pub has_jsonc_override: bool,
+    /// `$REF_CONFIG` or `$OPENCODE_CONFIG` path if set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub env_config_override: Option<String>,
+    /// Active project-level config files for the queried `cwd`, if any.
+    pub project_overrides: Vec<String>,
+    /// Non-fatal warnings from loading the effective merged config.
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -790,7 +843,11 @@ pub enum Request {
         notify: Vec<NotifyKind>,
     },
     /// -> `{config: ServerConfigInfo}`
-    GetConfig,
+    GetConfig {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        cwd: Option<String>,
+    },
     /// Live sessions. -> `{sessions: [SessionInfo]}`
     ListSessions,
     /// Persisted sessions (newest first). -> `{sessions: [SessionInfo]}`
@@ -968,11 +1025,75 @@ pub enum Request {
         focused: bool,
         sessions: Vec<String>,
     },
-    /// Sub-directories of `path` for a directory picker: `~` is expanded and a relative path
-    /// is taken from the connection's cwd. -> `{path: <absolute, normalized>, dirs: [String]}`
-    /// (names only, sorted). A missing or non-directory path fails with `ERR_DIR_NOT_FOUND`.
+    /// Sub-directories (and optionally files) of `path` for a picker: `~` is expanded and a
+    /// relative path is taken from `cwd` (or the connection's cwd).
+    /// -> `{path: <absolute, normalized>, dirs: [String], files: [String]}` (names only, sorted).
+    /// A missing or non-directory path fails with `ERR_DIR_NOT_FOUND`.
     ListDirs {
         path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        cwd: Option<String>,
+        #[serde(default)]
+        include_files: bool,
+    },
+    /// Reload configuration across all live sessions and MCP servers. -> `{config: ServerConfigInfo, warnings: [String]}`
+    ReloadConfig {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        cwd: Option<String>,
+    },
+    /// Read global config profiles (`ref.json` and `ref.json.<num>.bak`). -> `ConfigFilesInfo`
+    GetConfigFiles {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        file: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        cwd: Option<String>,
+    },
+    /// Save a global config profile via atomic copy-on-write. -> `ConfigFilesInfo`
+    SaveConfigFile {
+        file: String,
+        content: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        cwd: Option<String>,
+    },
+    /// Back up existing `ref.json` and create a new active `ref.json`. -> `ConfigFilesInfo`
+    CreateConfigFile {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        label: Option<String>,
+        #[serde(default)]
+        clone_current: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        content: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        cwd: Option<String>,
+    },
+    /// Swap `ref.json.<num>.bak` into `ref.json`, backing up current `ref.json`. -> `ConfigFilesInfo`
+    SelectConfigFile {
+        file: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        cwd: Option<String>,
+    },
+    /// Delete a backup profile or `ref.json` (promoting newest `.bak` if present). -> `ConfigFilesInfo`
+    DeleteConfigFile {
+        file: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        cwd: Option<String>,
+    },
+    /// Executable names on `$PATH` + shell builtins matching `query`. -> `{binaries: [String]}`
+    ListBinaries {
+        query: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        limit: Option<usize>,
     },
     Shutdown,
     Ping,
@@ -1018,6 +1139,11 @@ pub enum ServerFrame {
         notify_kind: NotifyKind,
         session_title: String,
         detail: Option<String>,
+    },
+    /// Configuration was reloaded or modified; clients should refresh their config view.
+    ConfigChanged {
+        #[serde(default)]
+        warnings: Vec<String>,
     },
 }
 
