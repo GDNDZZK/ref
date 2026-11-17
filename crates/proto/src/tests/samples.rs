@@ -499,6 +499,53 @@ pub fn server_config() -> ServerConfigInfo {
         }],
         mcp: vec![("github".into(), "connected (12 tools)".into())],
         tui: Value::Null,
+        warnings: vec![],
+    }
+}
+
+pub fn config_files_info() -> ConfigFilesInfo {
+    let parsed = json!({
+        "$name": "Work",
+        "model": "anthropic/claude-sonnet-4",
+        "provider": {
+            "anthropic": {
+                "options": { "apiKey": "{env:ANTHROPIC_API_KEY}" }
+            }
+        }
+    });
+    let mut raw_text = serde_json::to_string_pretty(&parsed).expect("serialize config");
+    raw_text.push('\n');
+    ConfigFilesInfo {
+        config_dir: "/home/user/.config/ref".into(),
+        files: vec![
+            ConfigFileEntry {
+                file: "ref.json".into(),
+                active: true,
+                exists: true,
+                label: Some("Work".into()),
+                summary: "1 provider · anthropic/claude-sonnet-4".into(),
+                modified_at: T0 + 60 * SECOND,
+                size: raw_text.len() as u64,
+            },
+            ConfigFileEntry {
+                file: "ref.json.1.bak".into(),
+                active: false,
+                exists: true,
+                label: None,
+                summary: "2 providers · openai/gpt-5".into(),
+                modified_at: T0,
+                size: 312,
+            },
+        ],
+        selected_file: "ref.json".into(),
+        raw_text,
+        parsed,
+        parse_error: None,
+        env_status: std::collections::BTreeMap::from([("ANTHROPIC_API_KEY".into(), true)]),
+        has_jsonc_override: false,
+        env_config_override: None,
+        project_overrides: vec!["/home/user/project/.ref/ref.json".into()],
+        warnings: vec![],
     }
 }
 

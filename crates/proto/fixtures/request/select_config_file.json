@@ -1,0 +1,6 @@
+{
+  "id": 41,
+  "op": "select_config_file",
+  "file": "ref.json.1.bak",
+  "cwd": "/home/user/project"
+}

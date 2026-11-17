@@ -1,5 +1,7 @@
 {
   "id": 34,
   "op": "list_dirs",
-  "path": "~/pro"
+  "path": "~/pro",
+  "cwd": "/home/user/project",
+  "include_files": true
 }

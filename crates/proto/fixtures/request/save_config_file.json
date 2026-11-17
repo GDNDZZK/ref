@@ -1,0 +1,7 @@
+{
+  "id": 39,
+  "op": "save_config_file",
+  "file": "ref.json",
+  "content": "{\n  \"$name\": \"Work\",\n  \"model\": \"anthropic/claude-sonnet-4\"\n}\n",
+  "cwd": "/home/user/project"
+}

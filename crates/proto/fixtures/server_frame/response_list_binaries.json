@@ -1,0 +1,13 @@
+{
+  "kind": "response",
+  "id": 43,
+  "ok": true,
+  "result": {
+    "binaries": [
+      "cargo",
+      "cargo-clippy",
+      "cargo-fmt"
+    ]
+  },
+  "error": null
+}

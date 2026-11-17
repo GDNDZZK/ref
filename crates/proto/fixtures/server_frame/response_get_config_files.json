@@ -1,0 +1,49 @@
+{
+  "kind": "response",
+  "id": 38,
+  "ok": true,
+  "result": {
+    "config_dir": "/home/user/.config/ref",
+    "files": [
+      {
+        "file": "ref.json",
+        "active": true,
+        "exists": true,
+        "label": "Work",
+        "summary": "1 provider · anthropic/claude-sonnet-4",
+        "modified_at": 1760000060000,
+        "size": 179
+      },
+      {
+        "file": "ref.json.1.bak",
+        "active": false,
+        "exists": true,
+        "summary": "2 providers · openai/gpt-5",
+        "modified_at": 1760000000000,
+        "size": 312
+      }
+    ],
+    "selected_file": "ref.json",
+    "raw_text": "{\n  \"$name\": \"Work\",\n  \"model\": \"anthropic/claude-sonnet-4\",\n  \"provider\": {\n    \"anthropic\": {\n      \"options\": {\n        \"apiKey\": \"{env:ANTHROPIC_API_KEY}\"\n      }\n    }\n  }\n}\n",
+    "parsed": {
+      "$name": "Work",
+      "model": "anthropic/claude-sonnet-4",
+      "provider": {
+        "anthropic": {
+          "options": {
+            "apiKey": "{env:ANTHROPIC_API_KEY}"
+          }
+        }
+      }
+    },
+    "env_status": {
+      "ANTHROPIC_API_KEY": true
+    },
+    "has_jsonc_override": false,
+    "project_overrides": [
+      "/home/user/project/.ref/ref.json"
+    ],
+    "warnings": []
+  },
+  "error": null
+}

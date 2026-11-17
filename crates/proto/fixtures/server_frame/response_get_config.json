@@ -53,7 +53,8 @@
           "connected (12 tools)"
         ]
       ],
-      "tui": null
+      "tui": null,
+      "warnings": []
     }
   },
   "error": null

@@ -16,4 +16,8 @@ mcp: Array<[string, string]>,
 /**
  * TUI-related settings passed through from config (`tui` key), free-form.
  */
-tui: JsonValue, };
+tui: JsonValue, 
+/**
+ * Non-fatal problems found while loading the merged config.
+ */
+warnings: Array<string>, };

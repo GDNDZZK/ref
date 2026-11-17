@@ -1,0 +1,6 @@
+{
+  "id": 42,
+  "op": "delete_config_file",
+  "file": "ref.json.1.bak",
+  "cwd": "/home/user/project"
+}
