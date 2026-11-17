@@ -82,17 +82,7 @@ void Workspace::registerCommands()
 	on(u"rename"_s, argumentOrDialog(u"rename"_s, [this](const QString& id, const QString& name) { renameSession(id, name); }));
 	on(u"cd"_s, argumentOrDialog(u"cd"_s, [this](const QString& id, const QString& path) { setSessionCwd(id, path); }));
 	on(u"detach"_s, [this](const QString&, const QString&) { detachCurrent(); });
-	on(u"close"_s, [this](const QString&, const QString& sessionId) {
-		const QString id = targetId(sessionId);
-		const refgui::proto::SessionInfo* info = m_directory.find(id);
-		const bool working = info != nullptr && info->status.state != refgui::proto::SessionStatus::State::Idle;
-		if(working)
-		{
-			openDialog(u"close"_s, {{u"sessionId"_s, id}});
-			return;
-		}
-		closeSession(id);
-	});
+	on(u"close"_s, [this](const QString&, const QString& sessionId) { requestCloseSession(targetId(sessionId)); });
 	on(u"close-session"_s, [this](const QString& args, const QString&) {
 		const QString wanted = args.trimmed();
 		if(wanted.isEmpty())

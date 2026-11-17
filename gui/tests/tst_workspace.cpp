@@ -44,6 +44,15 @@ public:
 	{
 		m_sessions.insert(id, sessionInfoJson(id, {.title = u"Title "_s + id, .cwd = cwd, .createdAt = created, .parent = parent}));
 	}
+	void addHistory(const QString& id, qint64 created, const QString& cwd = u"/work"_s)
+	{
+		m_sessions.insert(id, sessionInfoJson(id, {.title = u"Title "_s + id, .cwd = cwd, .createdAt = created, .live = false}));
+	}
+	void setState(const QString& id, const QString& state)
+	{
+		m_sessions[id][u"status"_s] = QJsonObject{{u"state"_s, state}};
+		broadcast();
+	}
 	void setProtocol(int protocol) { m_protocol = protocol; }
 
 	// The to-do list the session's info carries.
@@ -141,7 +150,10 @@ private:
 		QJsonArray array;
 		for(const QJsonObject& info : m_sessions)
 		{
-			array.append(info);
+			if(info.value(u"live"_s).toBool(true))
+			{
+				array.append(info);
+			}
 		}
 		return array;
 	}
@@ -170,6 +182,7 @@ private:
 				return;
 			}
 			QJsonObject info = m_sessions.value(id);
+			info[u"live"_s] = true;
 			info[u"attached"_s] = request.value(u"foreground"_s).toBool() ? 1 : 0;
 			m_sessions[id] = info;
 			m_fake.respond(request, {{u"snapshot"_s, QJsonObject{{u"info"_s, info},
@@ -458,6 +471,9 @@ private slots:
 	void commandsFollowTheState();
 	void listDirsPassesErrorCodeToTheCallback();
 	void infoResolvesRootTaskFromLiveSessions();
+	void leavingSplitWhileZoomedPromotesZoomedSession();
+	void openingNonTileInSplitViewExitsSplitAndShowsTarget();
+	void requestCloseSessionConfirmsWhenBusyAndClosesWhenIdle();
 };
 
 void TestWorkspace::opensTheSessionFromTheCommandLine()
@@ -1499,6 +1515,84 @@ void TestWorkspace::infoResolvesRootTaskFromLiveSessions()
 	QCOMPARE(leafInfo.value(u"parentId"_s).toString(), u"ses_sub"_s);
 	QCOMPARE(leafInfo.value(u"rootId"_s).toString(), u"ses_a"_s);
 	QCOMPARE(leafInfo.value(u"rootName"_s).toString(), u"Title ses_a"_s);
+}
+
+void TestWorkspace::leavingSplitWhileZoomedPromotesZoomedSession()
+{
+	Fixture f(refgui::proto::ProtocolVersion, true);
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
+	ChatSession* sessionA = f.workspace->session(u"ses_a"_s);
+	QVERIFY(sessionA != nullptr && sessionA->isForeground());
+
+	f.workspace->toggleSplit();
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
+	ChatSession* sessionB = f.workspace->session(u"ses_b"_s);
+	QTRY_VERIFY(sessionB != nullptr && sessionB->isAttached());
+
+	f.workspace->zoomTile(u"ses_b"_s);
+	QTRY_VERIFY(sessionB->isForeground());
+	QCOMPARE(f.workspace->zoomedId(), u"ses_b"_s);
+
+	f.workspace->toggleSplit();
+	QVERIFY(!f.workspace->isSplitView());
+	QCOMPARE(f.workspace->zoomedId(), QString());
+	QCOMPARE(f.workspace->currentId(), u"ses_b"_s);
+	QCOMPARE(f.workspace->visibleSessionIds(), (QStringList{u"ses_b"_s}));
+	QTRY_VERIFY(sessionB->isForeground());
+	QTRY_VERIFY(!sessionA->isAttached());
+}
+
+void TestWorkspace::openingNonTileInSplitViewExitsSplitAndShowsTarget()
+{
+	Fixture f(refgui::proto::ProtocolVersion, true, {}, [](StubServer& stub) { stub.addHistory(u"ses_hist"_s, 3); });
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
+
+	// 1) Clicking the hidden current session in the sidebar leaves split view for ses_a even if ses_b was zoomed.
+	f.workspace->toggleSplit();
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
+	f.workspace->zoomTile(u"ses_b"_s);
+	QTRY_VERIFY(f.workspace->session(u"ses_b"_s)->isForeground());
+
+	f.workspace->openSession(u"ses_a"_s);
+	QVERIFY(!f.workspace->isSplitView());
+	QCOMPARE(f.workspace->zoomedId(), QString());
+	QCOMPARE(f.workspace->currentId(), u"ses_a"_s);
+	QTRY_VERIFY(f.workspace->session(u"ses_a"_s)->isForeground());
+	QTRY_VERIFY(!f.workspace->session(u"ses_b"_s)->isAttached());
+
+	// 2) Clicking a history session while in split view leaves split view and attaches the history session in front.
+	f.workspace->toggleSplit();
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
+	QTRY_VERIFY(f.workspace->session(u"ses_b"_s)->isAttached());
+
+	f.workspace->openSession(u"ses_hist"_s);
+	QVERIFY(!f.workspace->isSplitView());
+	QTRY_COMPARE(f.workspace->currentId(), u"ses_hist"_s);
+	QTRY_VERIFY(f.workspace->session(u"ses_hist"_s)->isForeground());
+	QTRY_VERIFY(!f.workspace->session(u"ses_a"_s)->isAttached());
+	QTRY_VERIFY(!f.workspace->session(u"ses_b"_s)->isAttached());
+}
+
+void TestWorkspace::requestCloseSessionConfirmsWhenBusyAndClosesWhenIdle()
+{
+	Fixture f(refgui::proto::ProtocolVersion, true);
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 2);
+	f.stub.setState(u"ses_b"_s, u"running"_s);
+	QTRY_COMPARE(f.workspace->info(u"ses_b"_s).value(u"activity"_s).toString(), u"running"_s);
+
+	f.workspace->requestCloseSession(u"ses_b"_s);
+	QCOMPARE(f.workspace->dialog(), u"close"_s);
+	QCOMPARE(f.workspace->dialogArgs().value(u"sessionId"_s).toString(), u"ses_b"_s);
+	QCOMPARE(f.stub.requests(u"close"_s).size(), 0);
+
+	f.workspace->closeDialog();
+	f.stub.setState(u"ses_b"_s, u"idle"_s);
+	QTRY_COMPARE(f.workspace->info(u"ses_b"_s).value(u"activity"_s).toString(), u"idle"_s);
+
+	f.workspace->requestCloseSession(u"ses_b"_s);
+	QCOMPARE(f.workspace->dialog(), QString());
+	QTRY_COMPARE(f.stub.requests(u"close"_s).size(), 1);
+	QCOMPARE(f.stub.requests(u"close"_s).first().value(u"session_id"_s).toString(), u"ses_b"_s);
 }
 
 QTEST_MAIN(TestWorkspace)

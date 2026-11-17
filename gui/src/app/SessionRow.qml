@@ -206,7 +206,7 @@ Item {
 				opacity: hover.hovered ? 1 : 0
 				visible: opacity > 0
 				Accessible.name: qsTr("Close session")
-				onClicked: Workspace.closeSession(row.sessionId)
+				onClicked: Workspace.requestCloseSession(row.sessionId)
 
 				Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 			}
@@ -245,7 +245,7 @@ Item {
 			else if (row.canDetach && index === 1)
 				Workspace.detachCurrent()
 			else
-				Workspace.closeSession(row.sessionId)
+				Workspace.requestCloseSession(row.sessionId)
 		}
 	}
 }

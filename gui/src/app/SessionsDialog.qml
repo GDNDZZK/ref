@@ -52,11 +52,14 @@ ModalDialog {
 		}
 		enabled: !dialog.closing || isLive
 		onActivated: {
-			if (dialog.closing)
-				Workspace.closeSession(sessionId)
-			else
+			if (dialog.closing) {
+				Workspace.requestCloseSession(sessionId)
+				if (Workspace.dialog === DialogId.sessions)
+					dialog.close()
+			} else {
 				Workspace.openSession(sessionId)
-			dialog.close()
+				dialog.close()
+			}
 		}
 
 		SessionDot {
@@ -107,7 +110,7 @@ ModalDialog {
 				iconSize: 16
 				visible: row.isLive && row.current && !dialog.closing
 				Accessible.name: qsTr("Close session")
-				onClicked: Workspace.closeSession(row.sessionId)
+				onClicked: Workspace.requestCloseSession(row.sessionId)
 			}
 		}
 	}

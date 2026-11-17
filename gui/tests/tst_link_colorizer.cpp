@@ -24,6 +24,7 @@ private slots:
 	void coloursTextAddedLater();
 	void settlesAfterItsOwnPass();
 	void followsTheBoundColourInQml();
+	void throttlesWhileStreamingAndFlushesOnEnd();
 };
 
 namespace
@@ -129,6 +130,21 @@ void TestLinkColorizer::followsTheBoundColourInQml()
 
 	root->setProperty("tone", QColor(u"#7aa2f7"_s));
 	QCOMPARE(colourAt(*document, 0), QColor(u"#7aa2f7"_s));
+}
+
+void TestLinkColorizer::throttlesWhileStreamingAndFlushesOnEnd()
+{
+	QTextDocument document;
+	LinkHighlighter highlighter(&document, QColor(u"#356889"_s), true);
+	QCoreApplication::processEvents();
+	document.setMarkdown(u"streamed [link](https://example.com)"_s);
+	QCoreApplication::processEvents();
+	// Throttled while streaming: immediate event loop turn has not rehighlighted yet.
+	const int pos = static_cast<int>(document.toPlainText().indexOf(u"link"_s));
+	QVERIFY(!colourAt(document, pos).isValid());
+	// Ending streaming flushes the pending rehighlight immediately.
+	highlighter.setStreaming(false);
+	QCOMPARE(colourAt(document, pos), QColor(u"#356889"_s));
 }
 
 QTEST_MAIN(TestLinkColorizer)

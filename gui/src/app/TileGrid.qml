@@ -10,7 +10,9 @@ Item {
 	id: grid
 
 	readonly property int count: Workspace.tileStage.placed
-	readonly property bool zoomed: Workspace.zoomedId !== ""
+	property string lastZoomedId: ""
+	readonly property string activeZoomedId: Workspace.splitView ? Workspace.zoomedId : lastZoomedId
+	readonly property bool zoomed: activeZoomedId !== ""
 	// Whether any tile is on screen, also one that is leaving.
 	readonly property bool occupied: repeater.count > 0
 	readonly property int padding: Theme.tilePadding
@@ -95,36 +97,29 @@ Item {
 			Workspace.focusTile(best.sessionId)
 	}
 
+	Component.onCompleted: lastZoomedId = Workspace.zoomedId
+
 	Flickable {
 		id: flick
 		anchors.fill: parent
 		contentWidth: width
-		contentHeight: grid.zoomed ? height : grid.gridHeight
+		contentHeight: grid.zoomed ? Math.max(grid.gridHeight, flick.contentY + height) : grid.gridHeight
 		interactive: !grid.zoomed
 		boundsBehavior: Flickable.StopAtBounds
 
-		ScrollBar.vertical: ThemedScrollBar {}
-
-		NumberAnimation {
-			id: zoomScroll
-			target: flick
-			property: "contentY"
-			to: 0
-			duration: Motion.slow
-			easing.type: Motion.ease
-		}
+		ScrollBar.vertical: ThemedScrollBar { visible: !grid.zoomed }
 
 		Connections {
 			target: Workspace
 			function onZoomedChanged() {
-				if (grid.zoomed)
-					zoomScroll.restart()
-				else
-					zoomScroll.stop()
+				if (Workspace.splitView)
+					grid.lastZoomedId = Workspace.zoomedId
+				if (!grid.zoomed)
+					flick.contentY = Math.min(flick.contentY, Math.max(0, grid.gridHeight - flick.height))
 			}
 			function onSplitViewChanged() {
 				if (Workspace.splitView) {
-					zoomScroll.stop()
+					grid.lastZoomedId = Workspace.zoomedId
 					flick.contentY = 0
 				}
 			}
@@ -151,10 +146,11 @@ Item {
 				              grid.contentTop + row * (grid.tileHeight + grid.gap),
 				              slotWidth,
 				              grid.tileHeight)
+				zoomed: grid.activeZoomedId === tile.sessionId
 				anyZoomed: grid.zoomed
 				sidebarAnimating: grid.sidebarAnimating
 				stableWidth: tile.expanded ? grid.stableWidth : stableSlotWidth
-				zoomRect: Qt.rect(0, 0, grid.width, grid.height)
+				zoomRect: Qt.rect(0, flick.contentY, grid.width, grid.height)
 			}
 		}
 

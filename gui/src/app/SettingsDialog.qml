@@ -22,13 +22,14 @@ ModalDialog {
 
 			Text {
 				textFormat: Text.PlainText
-				x: Theme.dialogPadding
-				anchors.verticalCenter: parent.verticalCenter
+				anchors { left: parent.left; leftMargin: Theme.dialogPadding; right: themeTabs.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
 				text: qsTr("Theme")
 				color: Theme.text
 				font.pixelSize: Theme.fontSize
+				elide: Text.ElideRight
 			}
 			Segmented {
+				id: themeTabs
 				anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
 				width: 230
 				model: [
@@ -49,13 +50,14 @@ ModalDialog {
 
 			Text {
 				textFormat: Text.PlainText
-				x: Theme.dialogPadding
-				anchors.verticalCenter: parent.verticalCenter
+				anchors { left: parent.left; leftMargin: Theme.dialogPadding; right: langTabs.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
 				text: qsTr("Language")
 				color: Theme.text
 				font.pixelSize: Theme.fontSize
+				elide: Text.ElideRight
 			}
 			Segmented {
+				id: langTabs
 				anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
 				width: 280
 				model: [

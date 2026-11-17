@@ -137,7 +137,9 @@ public:
 	Q_INVOKABLE void newSession(const QString& cwd = {}, const QJSValue& cb = {});
 	// Moves the open session to the background without closing it.
 	Q_INVOKABLE void detachCurrent();
-	// Closes the session; its conversation stays in history.
+	// Closes the session, asking first in CloseDialog when the session is still working.
+	Q_INVOKABLE void requestCloseSession(const QString& sessionId);
+	// Closes the session unconditionally; its conversation stays in history.
 	Q_INVOKABLE void closeSession(const QString& sessionId);
 	// Removes the session from history for good.
 	Q_INVOKABLE void deleteHistory(const QString& sessionId);
@@ -260,7 +262,7 @@ private:
 
 	// Split view.
 	QCoro::Task<> enterSplit();
-	QCoro::Task<> leaveSplit();
+	QCoro::Task<> leaveSplit(bool adoptZoomed = true, QString openId = {});
 	QCoro::Task<> attachTile(ChatSession* tile);
 	QCoro::Task<> zoomTask(QString sessionId);
 	QCoro::Task<> unzoomTask();
