@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import { createAppI18n } from '../../i18n/index.ts'
 import { info } from '../../model/testMessages.ts'
+import { useDialogsStore } from '../../stores/dialogs.ts'
 import { useWorkspaceStore } from '../../stores/workspace.ts'
 import SessionsDialog from './SessionsDialog.vue'
 
@@ -66,5 +67,29 @@ describe('SessionsDialog', () => {
 
     await input.setValue('ses_lead')
     expect(rowNames(wrapper)).toEqual(['lead', 'worker-1', 'worker-2'])
+  })
+
+  it('opens closeSession confirmation for working sessions and closes idle ones directly', async () => {
+    const { wrapper, workspace } = mountSessionsDialog()
+    const dialogs = useDialogsStore()
+    const closeSpy = vi.spyOn(workspace, 'closeSession').mockResolvedValue(undefined)
+    workspace.onFrame({
+      kind: 'sessions',
+      sessions: [
+        info({ id: 'ses_busy', name: 'busy', status: { state: 'running' }, created_at: 1 }),
+        info({ id: 'ses_idle', name: 'idle', status: { state: 'idle' }, created_at: 2 }),
+      ],
+    })
+    await nextTick()
+
+    const closeButtons = wrapper.findAll('[role="option"] button.close')
+    await closeButtons[0]!.trigger('click')
+    expect(dialogs.current).toEqual({ kind: 'closeSession', sessionId: 'ses_busy' })
+    expect(closeSpy).not.toHaveBeenCalled()
+
+    dialogs.close()
+    await closeButtons[1]!.trigger('click')
+    expect(dialogs.current).toBeUndefined()
+    expect(closeSpy).toHaveBeenCalledWith('ses_idle')
   })
 })

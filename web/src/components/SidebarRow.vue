@@ -21,8 +21,11 @@ import Icon from './Icon.vue'
 import SessionDot from './SessionDot.vue'
 import { ALERT_RING_REACH } from './sharedMetrics.ts'
 
-const props = defineProps<{ info: SessionInfo; current: boolean; tile: boolean }>()
-const emit = defineEmits<{ open: []; close: []; rename: [name: string] }>()
+const props = withDefaults(
+  defineProps<{ info: SessionInfo; current: boolean; tile: boolean; canDetach?: boolean }>(),
+  { canDetach: false },
+)
+const emit = defineEmits<{ open: []; detach: []; close: []; rename: [name: string] }>()
 
 const BADGE_SIZE = 14
 
@@ -98,6 +101,7 @@ function cancelRename(): void {
 const menu = ref<{ x: number; y: number }>()
 const menuItems = computed<MenuItem[]>(() => [
   { label: t('sidebar.rename'), run: () => void startRename() },
+  ...(props.canDetach ? [{ label: t('sidebar.moveToBackground'), run: () => emit('detach') }] : []),
   { label: t('sidebar.close'), danger: true, run: () => emit('close') },
 ])
 

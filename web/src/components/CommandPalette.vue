@@ -34,6 +34,7 @@ const ICONS: Record<string, IconKey> = {
   undo: 'undo-16',
   rename: 'pencil-16',
   cd: 'folder-16',
+  detach: 'undo-16',
   close: 'chat-x-16',
   'close-session': 'chat-x-16',
   export: 'file-text-16',
