@@ -116,13 +116,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   // Opens run one after the other. Of several quick clicks only the last one counts: the earlier
   // ones either do not start or undo their own attach, so no session stays attached by mistake.
   function openSession(id: string): Promise<void> {
-    if (mode.value === 'split') {
-      currentId.value = id
-      return leaveSplit()
-    }
     const mine = ++latestOpen
     latestOpenTarget = id
-    const run = openChain.then(() => openOne(id, mine))
+    const run = openChain.then(() => (mode.value === 'split' ? openFromSplit(id, mine) : openOne(id, mine)))
     openChain = run.catch(() => undefined)
     return run
   }
@@ -136,10 +132,36 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (!stillWanted) await session.detach()
       return
     }
+    if (session.info?.live) showInfo(session.info)
     const previousId = currentId.value
     await crossfade(() => (currentId.value = id), 'standard')
     if (previousId === undefined || previousId === id) return
     await chat(previousId).detach()
+  }
+
+  async function openFromSplit(id: string, mine: number): Promise<void> {
+    if (mine !== latestOpen) return
+    const session = chat(id)
+    await session.setForeground(true)
+    if (mine !== latestOpen) {
+      const stillWanted = id === latestOpenTarget || id === currentId.value
+      if (!stillWanted) await session.detach()
+      return
+    }
+    if (session.info?.live) showInfo(session.info)
+    const previousId = currentId.value
+    currentId.value = id
+    mode.value = 'single'
+    zoomedId.value = undefined
+    tileFocusId.value = undefined
+    await connection.getApi().watchAll(false)
+    const others = [...chats.values()].filter(
+      (candidate) =>
+        candidate !== session &&
+        (candidate.attachment === 'watching' ||
+          (candidate.id === previousId && candidate.attachment !== 'detached')),
+    )
+    await Promise.all(others.map((candidate) => candidate.detach()))
   }
 
   async function newSession(options: NewSessionOptions = {}): Promise<string> {
@@ -213,6 +235,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const info = await connection.getApi().setCwd(id, path)
     showInfo(info)
     cwd.value = info.cwd // new sessions of this window start there too
+    await connection.loadConfig()
   }
 
   async function setModel(id: string, model: ModelRef): Promise<void> {
@@ -313,15 +336,23 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function leaveSplit(): Promise<void> {
     if (mode.value === 'single') return
     if (zoomedId.value) currentId.value = zoomedId.value
+    const targetId = currentId.value
+    const mine = ++latestOpen
+    latestOpenTarget = targetId
     mode.value = 'single'
     zoomedId.value = undefined
     tileFocusId.value = undefined
-    const open = current.value
-    await connection.getApi().watchAll(false)
-    const others = [...chats.values()].filter(
-      (session) => session !== open && session.attachment === 'watching',
-    )
-    await Promise.all([open?.setForeground(true), ...others.map((session) => session.detach())])
+    const run = openChain.then(async () => {
+      const open = targetId ? chat(targetId) : undefined
+      await connection.getApi().watchAll(false)
+      const others = [...chats.values()].filter(
+        (session) => session !== open && session.attachment === 'watching',
+      )
+      const attachOpen = open && mine === latestOpen ? open.setForeground(true) : Promise.resolve()
+      await Promise.all([attachOpen, ...others.map((session) => session.detach())])
+    })
+    openChain = run.catch(() => undefined)
+    return run
   }
 
   async function toggleSplit(): Promise<void> {
@@ -389,6 +420,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function onConnected(isReconnect: boolean, start: Startup): Promise<void> {
     const api = connection.getApi()
     if (isReconnect) {
+      await connection.loadConfig()
       const sessions = mode.value === 'split' ? await api.watchAll(true) : await api.listSessions()
       setLive(sessions)
       // A session closed while the connection was down never sent its `closed` event.

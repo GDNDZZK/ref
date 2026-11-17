@@ -15,7 +15,7 @@
 // Time is in milliseconds and comes from the caller.
 
 import { clamp } from '../clamp.ts'
-
+import { prefersReducedMotion } from '../motion/reducedMotion.ts'
 // `stream` names what the text belongs to (a message part); adjacent chunks of one stream merge.
 export interface PacedText {
   stream: string
@@ -72,8 +72,8 @@ export class StreamPacer {
 
   // What is due by `now`, in arrival order, adjacent chunks of a stream merged.
   take(now: number): PacedText[] {
+    if (prefersReducedMotion()) return this.takeAll()
     this.accrue(now)
-
     const due: PacedText[] = []
     while (this.pending.length > 0) {
       const first = this.pending[0]!

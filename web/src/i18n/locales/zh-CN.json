@@ -246,24 +246,32 @@
   "dialog": {
     "cancel": "取消",
     "close": "关闭",
+    "noMatch": "没有匹配项",
+    "openConfig": "打开配置…",
     "models": {
       "title": "切换模型",
       "search": "搜索模型",
+      "empty": "未配置模型",
+      "noMatch": "没有匹配的模型",
       "context": "{size} 上下文",
       "reasoning": "推理",
       "images": "图片"
     },
     "agents": {
       "title": "切换 agent",
-      "search": "搜索 agent"
+      "search": "搜索 agent",
+      "empty": "未配置 agent",
+      "noMatch": "没有匹配的 agent"
     },
     "variants": {
       "title": "模型变体",
-      "default": "默认"
+      "default": "默认",
+      "noMatch": "没有匹配的变体"
     },
     "sessions": {
       "title": "会话",
       "search": "搜索会话",
+      "empty": "暂无会话",
       "filterLabel": "按创建者筛选",
       "filterAll": "全部",
       "filterUser": "用户创建",

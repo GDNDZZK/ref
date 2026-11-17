@@ -157,4 +157,90 @@ describe('SplitView', () => {
       cancelSpy.mockRestore()
     }
   })
+
+  it('keeps TransitionGroup grid mounted when empty and freezes focus on leave', async () => {
+    const observers: ResizeObserverCallback[] = []
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          observers.push(callback)
+        }
+        observe() {}
+        disconnect() {}
+      },
+    )
+    try {
+      const pinia = createPinia()
+      setActivePinia(pinia)
+      const workspace = useWorkspaceStore()
+      workspace.onFrame({
+        kind: 'sessions',
+        sessions: [info({ id: 's2', name: 'bg', created_at: 2, attached: 0 })],
+      })
+      workspace.mode = 'split'
+      workspace.focusTile('s2')
+
+      const wrapper = mount(SplitView, {
+        global: { plugins: [pinia, createAppI18n(['en'])], stubs: { SplitTile: TileStub } },
+      })
+      observers[0]!(
+        [{ contentRect: { width: 900, height: 600 } } as ResizeObserverEntry],
+        {} as ResizeObserver,
+      )
+      await nextTick()
+      expect(wrapper.get('[data-tile="s2"]').classes()).toContain('focused')
+      expect(wrapper.find('.grid').exists()).toBe(true)
+
+      // Leaving split clears store focus, but leaving SplitView keeps visual focus frozen.
+      workspace.mode = 'single'
+      workspace.focusTile(undefined)
+      await nextTick()
+      expect(wrapper.get('[data-tile="s2"]').classes()).toContain('focused')
+
+      // Re-enter split and remove last tile: .grid remains mounted alongside .empty.
+      workspace.mode = 'split'
+      workspace.onFrame({ kind: 'sessions', sessions: [] })
+      await nextTick()
+      expect(wrapper.find('.grid').exists()).toBe(true)
+      expect(wrapper.find('.empty').exists()).toBe(true)
+      wrapper.unmount()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('tweens scrollTop to 0 when zooming a tile from a scrolled grid', async () => {
+    const rafQueue: FrameRequestCallback[] = []
+    const rafSpy = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+      rafQueue.push(cb)
+      return rafQueue.length
+    })
+    try {
+      const pinia = createPinia()
+      setActivePinia(pinia)
+      const workspace = useWorkspaceStore()
+      workspace.onFrame({
+        kind: 'sessions',
+        sessions: [info({ id: 's2', name: 'bg', created_at: 2, attached: 0 })],
+      })
+      workspace.mode = 'split'
+      const wrapper = mount(SplitView, {
+        global: { plugins: [pinia, createAppI18n(['en'])], stubs: { SplitTile: TileStub } },
+      })
+      const splitEl = wrapper.get('.split').element as HTMLElement
+      splitEl.scrollTop = 240
+      workspace.zoomTile('s2')
+      await nextTick()
+      // Advance frameLoop past motion.slow (480ms).
+      const first = rafQueue.shift()
+      first?.(100)
+      const second = rafQueue.shift()
+      second?.(700)
+      expect(splitEl.scrollTop).toBe(0)
+      wrapper.unmount()
+    } finally {
+      rafSpy.mockRestore()
+    }
+  })
 })

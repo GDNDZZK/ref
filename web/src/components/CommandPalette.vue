@@ -108,6 +108,11 @@ function backToList(): void {
   query.value = ''
 }
 
+function clearQuery(): void {
+  query.value = ''
+  input.value?.focus()
+}
+
 function onKey(event: KeyboardEvent): void {
   if (event.isComposing) return
   if (chosen.value) {
@@ -139,6 +144,15 @@ function onKey(event: KeyboardEvent): void {
         :aria-label="t('palette.placeholder')"
         @keydown="onKey"
       />
+      <button
+        v-if="query"
+        type="button"
+        class="clear"
+        :aria-label="t('sidebar.clearSearch')"
+        @click="clearQuery"
+      >
+        <Icon icon="close-16" />
+      </button>
     </div>
     <div class="body">
       <p v-if="chosen" class="hint">
@@ -208,6 +222,23 @@ function onKey(event: KeyboardEvent): void {
   background: none;
   color: var(--text);
   font: inherit;
+}
+
+.clear {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-small);
+  color: var(--text-muted);
+  transition: background-color var(--motion-quick) var(--motion-ease);
+}
+
+.clear:hover {
+  background: var(--surface-hover);
+  color: var(--text);
 }
 
 .body {

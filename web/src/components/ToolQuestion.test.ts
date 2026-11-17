@@ -132,4 +132,20 @@ describe('ToolQuestion', () => {
     expect(lines.map((line) => line.text())).toEqual(['Loop boundRange', 'ChecksUnanswered'])
     expect(lines[1]!.classes()).toContain('unanswered')
   })
+
+  it('ignores stationary mousemove events so keyboard cursor is not hijacked', async () => {
+    const { wrapper, form } = mountCard(question())
+    const options = wrapper.findAll('.option')
+    await options[1]!.trigger('mousemove', { clientX: 50, clientY: 60 })
+    expect(form.choices[0]!.cursor).toBe(1)
+    form.highlight(0, 2) // moves cursor to row 2 via keyboard
+    expect(form.choices[0]!.cursor).toBe(2)
+    // Stationary mousemove at same coordinates does not pull cursor back to row 1.
+    await options[1]!.trigger('mousemove', { clientX: 50, clientY: 60 })
+    expect(form.choices[0]!.cursor).toBe(2)
+    // Genuine movement updates cursor.
+    await options[1]!.trigger('mousemove', { clientX: 55, clientY: 62 })
+    expect(form.choices[0]!.cursor).toBe(1)
+    wrapper.unmount()
+  })
 })

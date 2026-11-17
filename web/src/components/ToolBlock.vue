@@ -211,17 +211,25 @@ function cancel(): void {
       @answer="answerQuestion"
     />
     <div v-if="firstErrorLine" class="error-line">└ {{ firstErrorLine }}</div>
-    <div v-if="!expanded && showsDiff" class="diff-preview">
-      <div class="diff-path">
-        <span class="diff-file">{{ diffPath }}</span>
-        <span class="diff-added">+{{ diffAdded }}</span>
-        <span class="diff-removed">-{{ diffRemoved }}</span>
+    <Transition name="diff-fold">
+      <div v-if="!expanded && showsDiff" class="diff-slot">
+        <div class="fold">
+          <div class="diff-preview">
+            <div class="diff-path">
+              <span class="diff-file">{{ diffPath }}</span>
+              <span class="diff-added">+{{ diffAdded }}</span>
+              <span class="diff-removed">-{{ diffRemoved }}</span>
+            </div>
+            <DiffView :diff="diff!" :max-rows="COLLAPSED_DIFF_ROWS" />
+            <div v-if="diffWarnings.length > 0" class="diff-warnings">
+              <div v-for="(warning, index) in diffWarnings" :key="index" class="diff-warning">
+                {{ warning }}
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
-      <DiffView :diff="diff!" :max-rows="COLLAPSED_DIFF_ROWS" />
-      <div v-if="diffWarnings.length > 0" class="diff-warnings">
-        <div v-for="(warning, index) in diffWarnings" :key="index" class="diff-warning">{{ warning }}</div>
-      </div>
-    </div>
+    </Transition>
     <div
       class="body"
       :class="{ open: expanded }"
@@ -417,6 +425,20 @@ function cancel(): void {
 .fold {
   min-height: 0;
   overflow: hidden;
+}
+
+.diff-slot {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows var(--motion-standard) var(--motion-ease),
+    opacity var(--motion-standard) var(--motion-ease);
+}
+
+.diff-fold-enter-from,
+.diff-fold-leave-to {
+  grid-template-rows: 0fr;
+  opacity: 0;
 }
 
 .diff-preview {

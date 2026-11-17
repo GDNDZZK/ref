@@ -10,19 +10,38 @@ const notifications = useNotificationsStore()
 </script>
 
 <template>
-  <div
-    v-if="notifications.promptVisible"
-    class="prompt"
-    role="region"
-    :aria-label="t('notifySettings.title')"
-  >
-    <span>{{ t('notifySettings.prompt') }}</span>
-    <TextButton class="allow" :label="t('notifySettings.allow')" @click="notifications.requestPermission()" />
-    <TextButton :label="t('notifySettings.later')" @click="notifications.dismissPrompt()" />
-  </div>
+  <Transition name="banner" appear>
+    <div v-if="notifications.promptVisible" class="slot">
+      <div class="fold">
+        <div class="prompt" role="region" :aria-label="t('notifySettings.title')">
+          <span>{{ t('notifySettings.prompt') }}</span>
+          <TextButton
+            class="allow"
+            :label="t('notifySettings.allow')"
+            @click="notifications.requestPermission()"
+          />
+          <TextButton :label="t('notifySettings.later')" @click="notifications.dismissPrompt()" />
+        </div>
+      </div>
+    </div>
+  </Transition>
 </template>
 
 <style scoped>
+.slot {
+  display: grid;
+  flex: none;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows var(--motion-standard) var(--motion-ease),
+    opacity var(--motion-standard) var(--motion-ease);
+}
+
+.fold {
+  min-height: 0;
+  overflow: hidden;
+}
+
 .prompt {
   display: flex;
   align-items: center;
@@ -38,5 +57,11 @@ const notifications = useNotificationsStore()
 
 .allow :deep(.face) {
   color: var(--accent-text);
+}
+
+.banner-enter-from,
+.banner-leave-to {
+  grid-template-rows: 0fr;
+  opacity: 0;
 }
 </style>

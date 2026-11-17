@@ -1,10 +1,11 @@
 import { nextTick } from 'vue'
+import { prefersReducedMotion } from '../motion/reducedMotion.ts'
 
 // Runs `change` under a snapshot of the old look and fades the snapshot out (base.css), so every
 // color crossfades at once without per-element transitions. Used for the theme and for switching
-// the shown session. Without view transitions the change applies at once.
+// the shown session. Without view transitions or under reduced motion the change applies at once.
 export async function crossfade(change: () => void, speed: 'slow' | 'standard' = 'slow'): Promise<void> {
-  if (!document.startViewTransition) return change()
+  if (!document.startViewTransition || prefersReducedMotion()) return change()
   document.documentElement.dataset['fade'] = speed
   const transition = document.startViewTransition(async () => {
     change()

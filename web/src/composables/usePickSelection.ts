@@ -33,17 +33,27 @@ function consume(event: KeyboardEvent): true {
   return true
 }
 
-export function usePickSelection(items: Ref<readonly PickItem[]>, preferredKey?: string) {
-  const selected = ref<string | undefined>(preferredKey)
+export function usePickSelection(
+  items: Ref<readonly PickItem[]>,
+  preferredKey?: string | (() => string | undefined),
+) {
+  const resolvePreferred = () => (typeof preferredKey === 'function' ? preferredKey() : preferredKey)
+  const selected = ref<string | undefined>(resolvePreferred())
 
   const enabled = () => items.value.filter((item) => !item.disabled)
 
-  // The list changed (typing): keep the highlight if its row is still there.
+  // The list changed (typing or async load): keep the highlight if its row is still there, else prefer checked.
   watch(
     items,
     () => {
-      if (enabled().some((item) => item.key === selected.value)) return
-      selected.value = enabled()[0]?.key
+      const rows = enabled()
+      if (rows.some((item) => item.key === selected.value)) return
+      const preferred = resolvePreferred()
+      if (preferred !== undefined && rows.some((item) => item.key === preferred)) {
+        selected.value = preferred
+        return
+      }
+      selected.value = rows[0]?.key
     },
     { immediate: true },
   )

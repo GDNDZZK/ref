@@ -63,7 +63,7 @@ function close(id: string): void {
 
 <template>
   <aside class="sidebar" :class="{ open: layout.sidebarVisible, drawer: layout.narrow }">
-    <div class="content">
+    <div class="content" :inert="!layout.sidebarVisible || undefined">
       <header class="header">
         <img
           class="lockup"
