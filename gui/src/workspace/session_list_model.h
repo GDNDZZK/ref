@@ -79,7 +79,8 @@ public:
 	void setTileIds(const QStringList& ids);
 
 	// The row of the session, or -1 when it is not listed (also when filtered out).
-	int indexOf(const QString& sessionId) const;
+	Q_INVOKABLE int indexOf(const QString& sessionId) const;
+	Q_INVOKABLE bool isLiveAt(int row) const;
 	// Whether the unfiltered list has the session.
 	bool contains(const QString& sessionId) const { return m_all.contains(sessionId); }
 	const proto::SessionInfo* find(const QString& sessionId) const;

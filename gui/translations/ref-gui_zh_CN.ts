@@ -1456,6 +1456,11 @@
         <source>This model has no variants</source>
         <translation>此模型没有变体</translation>
     </message>
+    <message>
+        <location filename="../src/app/VariantsDialog.qml" line="16"/>
+        <source>default</source>
+        <translation>默认</translation>
+    </message>
 </context>
 <context>
     <name>WebfetchBody</name>

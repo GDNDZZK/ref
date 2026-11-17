@@ -57,6 +57,7 @@ void QuestionPrompt::reset(proto::QuestionRequest request)
 	m_busy = false;
 	m_page = 0;
 	emit changed();
+	emit highlightChanged();
 }
 
 bool QuestionPrompt::isSimple() const
@@ -117,6 +118,11 @@ int QuestionPrompt::rowCount() const
 		return 0;
 	}
 	return customRow() + (currentQuestion().custom ? 1 : 0);
+}
+
+int QuestionPrompt::highlightedRow() const
+{
+	return onQuestion() ? m_state.at(m_page).highlighted : -1;
 }
 
 QVariantList QuestionPrompt::rows() const
@@ -240,7 +246,7 @@ void QuestionPrompt::setHighlight(int row)
 		return;
 	}
 	m_state[m_page].highlighted = row;
-	emit changed();
+	emit highlightChanged();
 }
 
 void QuestionPrompt::moveHighlight(int delta)
@@ -259,7 +265,11 @@ void QuestionPrompt::activateRow(int row)
 	{
 		return;
 	}
-	m_state[m_page].highlighted = row;
+	if(m_state.at(m_page).highlighted != row)
+	{
+		m_state[m_page].highlighted = row;
+		emit highlightChanged();
+	}
 	if(isMultiple())
 	{
 		toggleRow(row);
@@ -369,6 +379,7 @@ void QuestionPrompt::goToPage(int page)
 	m_page = target;
 	m_editing = false;
 	emit changed();
+	emit highlightChanged();
 }
 
 void QuestionPrompt::nextPage()

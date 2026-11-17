@@ -22,11 +22,22 @@ Rectangle {
 	readonly property bool open: kind !== CompletionKind.none && count > 0
 	property alias currentIndex: view.currentIndex
 
+	property bool animateHighlight: false
+
 	signal accepted(int index)
 
+	function resetSelection() {
+		animateHighlight = false
+		hoverGuard.reset()
+		view.currentIndex = 0
+		view.positionViewAtBeginning()
+	}
+
 	function move(delta) {
-		if (count > 0)
+		if (count > 0) {
+			animateHighlight = true
 			view.currentIndex = (view.currentIndex + delta + count) % count
+		}
 	}
 
 	// The command map of an entry, for a command list.
@@ -59,13 +70,14 @@ Rectangle {
 	}
 
 	// A new result list starts at its best entry.
-	onEntriesChanged: view.currentIndex = 0
-	onKindChanged: view.currentIndex = 0
+	onEntriesChanged: resetSelection()
+	onKindChanged: resetSelection()
+	onOpenChanged: if (!open) hoverGuard.reset()
+	PointerMoveGuard { id: hoverGuard }
 	Connections {
 		target: popup.kind === CompletionKind.file ? popup.entries : null
-		function onModelReset() { view.currentIndex = 0 }
+		function onModelReset() { popup.resetSelection() }
 	}
-
 	ListView {
 		id: view
 		anchors { fill: parent; margins: popup.popupPadding }
@@ -83,10 +95,25 @@ Rectangle {
 			radius: Theme.radiusSmall
 			color: Theme.surfaceHover
 
-			Behavior on y { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+			Behavior on y {
+				enabled: popup.animateHighlight
+				NumberAnimation { duration: Motion.quick; easing.type: Motion.ease }
+			}
 		}
 
 		onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
+
+		HoverHandler {
+			onPointChanged: {
+				if (!hovered || !hoverGuard.movedTo(point.scenePosition))
+					return
+				const index = view.indexAt(point.position.x + view.contentX, point.position.y + view.contentY)
+				if (index >= 0) {
+					popup.animateHighlight = true
+					view.currentIndex = index
+				}
+			}
+		}
 	}
 
 	Component {
@@ -144,7 +171,7 @@ Rectangle {
 				elide: Text.ElideRight
 			}
 
-			HoverHandler { onHoveredChanged: if (hovered) view.currentIndex = row.index }
+			HoverHandler { cursorShape: Qt.PointingHandCursor }
 			TapHandler { onTapped: popup.accepted(row.index) }
 		}
 	}
@@ -199,7 +226,7 @@ Rectangle {
 				}
 			}
 
-			HoverHandler { onHoveredChanged: if (hovered) view.currentIndex = row.index }
+			HoverHandler { cursorShape: Qt.PointingHandCursor }
 			TapHandler { onTapped: popup.accepted(row.index) }
 		}
 	}

@@ -79,6 +79,14 @@ FocusScope {
 	// A click outside the panel closes the launcher.
 	TapHandler { onTapped: launcher.close() }
 
+	Connections {
+		target: Commands
+		function onModelReset() { launcher.rebuild() }
+		function onRowsInserted() { launcher.rebuild() }
+		function onRowsRemoved() { launcher.rebuild() }
+		function onDataChanged() { launcher.rebuild() }
+	}
+
 	ListModel { id: items }
 
 	Rectangle {
@@ -148,6 +156,7 @@ FocusScope {
 				font.pixelSize: Theme.fontSize
 				clip: true
 				Accessible.name: qsTr("Command")
+				focus: true
 				onTextChanged: launcher.rebuild()
 				Keys.onUpPressed: list.move(-1)
 				Keys.onDownPressed: list.move(1)
@@ -186,6 +195,7 @@ FocusScope {
 			sectionProperty: input.text.trim() === "" ? "category" : ""
 			emptyText: qsTr("No matching commands")
 			model: items
+			rowEnabled: index => index >= 0 && index < items.count && items.get(index).usable
 			delegate: PickRow {
 				id: row
 				required property string commandId
