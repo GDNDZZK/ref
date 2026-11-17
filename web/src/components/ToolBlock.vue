@@ -109,15 +109,6 @@ watch(
   },
   { immediate: true },
 )
-watch(
-  [expanded, awaitingPermission, awaitingAnswer],
-  ([isExpanded, isPerm, isAnswer], [wasExpanded, wasPerm, wasAnswer]) => {
-    const collapsed = wasExpanded && !isExpanded
-    const closedPrompt = (wasPerm && !isPerm) || (wasAnswer && !isAnswer)
-    if (collapsed || closedPrompt) chatScroll.restHold()
-  },
-  { flush: 'pre' },
-)
 const firstErrorLine = computed(() =>
   state.value === 'error' && !expanded.value
     ? props.block.output
