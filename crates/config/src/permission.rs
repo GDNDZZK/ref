@@ -21,7 +21,7 @@ pub enum Action {
 }
 
 impl Action {
-    pub fn parse(s: &str) -> Option<Action> {
+    pub(crate) fn parse(s: &str) -> Option<Action> {
         match s.trim().to_ascii_lowercase().as_str() {
             "allow" | "auto" | "yes" | "true" => Some(Action::Allow),
             "ask" | "confirm" | "prompt" => Some(Action::Ask),
@@ -35,17 +35,17 @@ impl Action {
 pub(crate) const ANY: &str = "*";
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Rule {
+pub(crate) struct Rule {
     /// Tool name glob.
-    pub tool: String,
+    pub(crate) tool: String,
     /// Subject glob (bash command, path); "*" for any.
-    pub pattern: String,
-    pub action: Action,
+    pub(crate) pattern: String,
+    pub(crate) action: Action,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PermissionRules {
-    pub rules: Vec<Rule>,
+    pub(crate) rules: Vec<Rule>,
 }
 
 /// Simple glob: `*` matches any sequence (including `/` and spaces), `?` one char.
@@ -151,11 +151,6 @@ impl PermissionRules {
         (PermissionRules { rules }, warns)
     }
 
-    /// opencode legacy `tools: {"bash": false}` map -> deny rules.
-    pub fn from_tools_map(v: &Value) -> PermissionRules {
-        Self::from_tools_map_warn(v).0
-    }
-
     /// Parse legacy `tools` map and collect warnings for non-bool entries.
     pub(crate) fn from_tools_map_warn(v: &Value) -> (PermissionRules, Vec<String>) {
         let mut rules = Vec::new();
@@ -180,12 +175,12 @@ impl PermissionRules {
         (PermissionRules { rules }, warns)
     }
 
-    pub fn extend(&mut self, other: PermissionRules) {
+    pub(crate) fn extend(&mut self, other: PermissionRules) {
         self.rules.extend(other.rules);
     }
 
     /// Last matching rule's action, if any.
-    pub fn evaluate(&self, tool: &str, subject: &str) -> Option<Action> {
+    pub(crate) fn evaluate(&self, tool: &str, subject: &str) -> Option<Action> {
         let mut out = None;
         for r in &self.rules {
             if glob_match(&r.tool, tool) && (r.pattern == ANY || glob_match(&r.pattern, subject)) {
@@ -197,7 +192,7 @@ impl PermissionRules {
 
     /// `Some(true)` if the last rule for this tool with pattern "*" is Deny and no later
     /// pattern-specific rule allows/asks. `None` if no rule mentions the tool.
-    pub fn disabled_opt(&self, tool: &str) -> Option<bool> {
+    pub(crate) fn disabled_opt(&self, tool: &str) -> Option<bool> {
         let mut out = None;
         for r in &self.rules {
             if !glob_match(&r.tool, tool) {
@@ -212,12 +207,12 @@ impl PermissionRules {
         out
     }
 
-    pub fn disabled(&self, tool: &str) -> bool {
+    pub(crate) fn disabled(&self, tool: &str) -> bool {
         self.disabled_opt(tool).unwrap_or(false)
     }
 
     /// Whether some rule is about `tool`, whatever its pattern.
-    pub fn mentions(&self, tool: &str) -> bool {
+    pub(crate) fn mentions(&self, tool: &str) -> bool {
         self.rules.iter().any(|r| glob_match(&r.tool, tool))
     }
 }

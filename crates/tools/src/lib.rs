@@ -91,20 +91,6 @@ pub fn specs() -> Vec<ToolSpec> {
     ]
 }
 
-pub fn is_builtin(name: &str) -> bool {
-    matches!(
-        name,
-        read::NAME
-            | edit::NAME
-            | write::NAME
-            | delete::NAME
-            | grep::NAME
-            | find::NAME
-            | bash::NAME
-            | web::NAME
-    )
-}
-
 /// Execute a built-in tool. Never panics; all failures become `ToolOutput { is_error: true }`.
 /// `input` has already had `purpose` removed.
 pub async fn execute(name: &str, input: Value, ctx: &ToolCtx) -> ToolOutput {
