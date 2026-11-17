@@ -237,7 +237,8 @@ async fn start_in(
     workspace::create(&workspace)?;
 
     let llm = llm::start().await?;
-    let cfg = config::load(&root.join("config"), &workspace, llm.port)?;
+    let config_dir = root.join("config");
+    let cfg = config::load(&config_dir, &workspace, llm.port)?;
 
     let data_dir = root.join("data");
     std::fs::create_dir_all(&data_dir)?;
@@ -247,7 +248,17 @@ async fn start_in(
 
     let mut opts = HubOptions::new(data_dir);
     opts.home = None;
-    opts.config_loader = Arc::new(move |_| cfg.clone());
+    opts.config_dir = Some(config_dir.clone());
+    let workspace_for_loader = workspace.clone();
+    opts.config_loader = Arc::new(move |cwd| {
+        ref_config::load_in(
+            None,
+            std::slice::from_ref(&config_dir),
+            Some(&workspace_for_loader),
+            cwd,
+            &|_| None,
+        )
+    });
     opts.idle_timeout = idle_timeout;
     opts.retry_base = retry_base;
     opts.sandbox_cwd = Some(workspace);

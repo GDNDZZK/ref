@@ -49,6 +49,9 @@ pub struct Persisted {
     /// The recommend-compaction notice was already injected in the current context epoch.
     #[serde(default)]
     pub context_notice: bool,
+    /// Whether the session's model was explicitly chosen rather than inherited from defaults.
+    #[serde(default)]
+    pub model_explicit: bool,
 }
 
 /// Session state besides info/messages, stored as JSON in `sessions.extra`.
@@ -58,6 +61,8 @@ struct Extra {
     reported: bool,
     #[serde(default)]
     context_notice: bool,
+    #[serde(default)]
+    model_explicit: bool,
 }
 
 /// Error of a database operation; it reaches callers as its message.
@@ -403,6 +408,7 @@ fn save(db: &mut Connection, cache: &mut HashMap<String, Cached>, p: &Persisted)
     let extra = Extra {
         reported: p.reported,
         context_notice: p.context_notice,
+        model_explicit: p.model_explicit,
     };
     let info_hash = hash_json(&(&p.info, &extra));
     let known = cache.contains_key(id);
@@ -493,11 +499,13 @@ fn load(db: &Connection, cache: &mut HashMap<String, Cached>, id: &str) -> DbRes
         messages,
         reported: extra.reported,
         context_notice: extra.context_notice,
+        model_explicit: extra.model_explicit,
     };
     if contiguous {
         let e = Extra {
             reported: p.reported,
             context_notice: p.context_notice,
+            model_explicit: p.model_explicit,
         };
         cache.insert(
             id.to_string(),
@@ -589,6 +597,7 @@ fn import_json(db: &mut Connection, data_dir: &Path) -> DbResult<()> {
         let extra = Extra {
             reported: p.reported,
             context_notice: false,
+            model_explicit: p.model_explicit,
         };
         tx.execute(
             "INSERT INTO sessions (id, info, cwd, title, name, created_at, updated_at, extra)
@@ -688,6 +697,7 @@ mod tests {
             messages,
             reported: false,
             context_notice: false,
+            model_explicit: false,
         }
     }
 

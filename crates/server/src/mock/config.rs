@@ -86,7 +86,8 @@ fn document(llm_port: u16) -> Value {
 /// outside leaks in (the temporary directory may lie inside a git repository).
 pub fn load(config_dir: &Path, workspace: &Path, llm_port: u16) -> std::io::Result<Config> {
     std::fs::create_dir_all(config_dir)?;
-    let text = serde_json::to_string_pretty(&document(llm_port)).expect("config serializes");
+    let mut text = serde_json::to_string_pretty(&document(llm_port)).expect("config serializes");
+    text.push('\n');
     std::fs::write(config_dir.join("ref.json"), text)?;
     let dirs = [config_dir.to_path_buf()];
     Ok(ref_config::load_in(

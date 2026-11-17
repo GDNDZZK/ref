@@ -258,6 +258,7 @@ pub fn test_app_with_requests(streaming: bool) -> (App, mpsc::UnboundedReceiver<
         commands: vec![],
         mcp: vec![],
         tui: serde_json::Value::Null,
+        warnings: vec![],
     });
     let mut i = info();
     if streaming {
