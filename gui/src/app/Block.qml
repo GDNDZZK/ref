@@ -48,11 +48,7 @@ Item {
 	}
 
 	// A removed row (undo, a rewritten history) fades out, then its space closes.
-	ListView.onRemove: {
-		if (chat)
-			chat.restHold()
-		exit.start()
-	}
+	ListView.onRemove: exit.start()
 
 	function toggleExpanded() {
 		chat.model.toggleExpanded(index)
