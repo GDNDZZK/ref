@@ -5,11 +5,6 @@
 // instead of jumping. Only user gestures change `following`: scrolling (wheel, touch, keys) or
 // dragging the scroll bar releases it, and ending such a gesture at the end re-engages it.
 //
-// Holding: while active generation or execution runs (`thinking`, `running`, `compacting`) and
-// following, the end never moves up. Streaming content can briefly take more room than it ends up
-// needing (a line that wraps, then fits); the footer grows by what the content gave back, so the
-// view does not bounce. When active work pauses or ends, the held room is released with an animation.
-//
 // Older messages: a pill is the first row while more exist, and scrolling near the top loads
 // the next page. The rows above the ones in view are added without moving what the user reads.
 //
@@ -33,9 +28,7 @@ import type { ChatSession } from '../model/chatSession.ts'
 import { findLeaving, prependedCount, withLeaving } from '../model/rowDiff.ts'
 import type { LeavingRow } from '../model/rowDiff.ts'
 import { scrollArrived, scrollStep } from '../motion/chase.ts'
-import { tween } from '../motion/tween.ts'
 import { useFrame } from '../motion/useFrame.ts'
-import { motion, motionEasing } from '../theme/generated/motion.ts'
 import BlockView from './BlockView.vue'
 import OlderMessages from './OlderMessages.vue'
 import { OLDER_TRIGGER_DISTANCE } from './toolLimits.ts'
@@ -43,21 +36,15 @@ import { Key } from '../keys.ts'
 
 const props = defineProps<{ session: ChatSession }>()
 const blocks = computed(() => props.session.blocks)
-const holding = computed(() => {
-  const { activity } = props.session
-  return activity === 'thinking' || activity === 'running' || activity === 'compacting'
-})
 const generation = computed(() => props.session.generation) // changes when the history is loaded
 const following = defineModel<boolean>('following', { default: true })
 const emit = defineEmits<{ errorOutOfSight: [] }>()
 
 const GESTURE_IDLE_MS = 150 // without scrolling, a user gesture has ended
 const AT_END_TOLERANCE = 1 // px
-const MAX_HELD_VIEWPORT_RATIO = 0.25
 const hoveredMessageId = ref('')
 const scroller = useTemplateRef<HTMLElement>('scroller')
 const rows = useTemplateRef<HTMLElement>('rows')
-const footer = useTemplateRef<HTMLElement>('footer')
 
 // --- Rows that appeared after the history was loaded play their entrance; rows that went away
 // play their exit and are kept until it is over.
@@ -89,7 +76,6 @@ watch(
     const staying = leaving.value.filter((row) => !currentKeys.has(row.block.key))
     const addedLeaving = isLoad ? [] : findLeaving(knownBlocks, currentKeys)
     leaving.value = isLoad ? [] : [...staying, ...addedLeaving]
-    if (holding.value && addedLeaving.length > 0) restHold()
     freshKeys.value = new Set(appeared.map((block) => block.key))
     if (isLoad) void nextTick(jumpToEnd)
     if (prepended > 0) void nextTick(keepAnchor)
@@ -129,60 +115,14 @@ watch(
 
 function jumpToEnd(): void {
   if (!scroller.value) return
-  cancelRelease?.()
-  cancelRelease = undefined
-  clearTimeout(holdRestTimer)
-  holdRestTimer = undefined
-  holdResting = false
-  highWater = 0
   following.value = true
-  setHeld(0)
   scroller.value.scrollTop = scroller.value.scrollHeight
-}
-
-// --- Geometry. The footer sits after the last row and carries the held room.
-let heldSpace = 0
-let highWater = 0 // furthest natural end of the current turn
-let holdResting = false
-let holdRestTimer: ReturnType<typeof setTimeout> | undefined
-
-function naturalEnd(): number {
-  return rows.value?.offsetHeight ?? 0
 }
 
 function atEnd(): boolean {
   const view = scroller.value
   return view !== null && view.scrollHeight - view.clientHeight - view.scrollTop < AT_END_TOLERANCE
 }
-
-function setHeld(space: number): void {
-  heldSpace = space
-  if (footer.value) footer.value.style.height = `calc(var(--page-padding) + ${space}px)`
-  chaseEnd()
-}
-
-function restHold(): void {
-  cancelRelease?.()
-  cancelRelease = undefined
-  holdResting = true
-  clearTimeout(holdRestTimer)
-  holdRestTimer = setTimeout(() => {
-    holdResting = false
-    holdRestTimer = undefined
-  }, motion.slow)
-  highWater = naturalEnd()
-  setHeld(0)
-}
-
-function holdEnd(): void {
-  const end = naturalEnd()
-  const clientHeight = scroller.value?.clientHeight ?? 0
-  const maxHeld = Math.min(Math.max(0, clientHeight - 1), Math.round(clientHeight * MAX_HELD_VIEWPORT_RATIO))
-  const target = holdResting ? end : Math.min(Math.max(highWater, end), end + maxHeld)
-  highWater = target
-  setHeld(highWater - end)
-}
-
 // --- Following.
 const chasing = ref(false)
 let gesturing = false
@@ -206,27 +146,7 @@ useFrame(chasing, (frameSeconds) => {
 })
 
 watch(following, (isFollowing) => {
-  if (!isFollowing) return
-  highWater = naturalEnd() + heldSpace
-  chaseEnd()
-})
-
-let cancelRelease: (() => void) | undefined
-watch(holding, (isHolding) => {
-  cancelRelease?.()
-  if (isHolding) {
-    highWater = naturalEnd() + heldSpace
-    holdEnd()
-    return
-  }
-  if (heldSpace === 0) return
-  cancelRelease = tween({
-    from: heldSpace,
-    to: 0,
-    durationMs: motion.slow,
-    easing: motionEasing.ease,
-    update: setHeld,
-  })
+  if (isFollowing) chaseEnd()
 })
 
 // A viewport that changes size (the window, or the input box unfolding below) keeps the end in
@@ -237,7 +157,6 @@ function pinToEnd(): void {
 }
 
 const sizeObserver = new ResizeObserver((entries) => {
-  if (holding.value && following.value) holdEnd()
   const viewportResized = entries.some((entry) => entry.target === scroller.value)
   if (following.value && !gesturing && viewportResized) pinToEnd()
   else chaseEnd()
@@ -329,7 +248,6 @@ provide(chatScrollKey, {
     holdObserver.disconnect()
     held = undefined
   },
-  restHold,
 })
 
 onMounted(() => {
@@ -342,8 +260,6 @@ onBeforeUnmount(() => {
   sizeObserver.disconnect()
   holdObserver.disconnect()
   clearTimeout(gestureTimer)
-  clearTimeout(holdRestTimer)
-  cancelRelease?.()
 })
 </script>
 
@@ -374,7 +290,7 @@ onBeforeUnmount(() => {
         @gone="onGone(row.block.key)"
       />
     </div>
-    <div ref="footer" class="footer" />
+    <div class="footer" />
   </div>
 </template>
 

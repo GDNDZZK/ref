@@ -20,7 +20,6 @@ function makeBlock(streaming: boolean): ReasoningBlockModel {
 }
 
 function mountReasoningBlock(options: { streaming?: boolean; thinkingExpanded?: boolean } = {}) {
-  const restHold = vi.fn()
   const session = shallowReactive({
     thinkingExpanded: options.thinkingExpanded ?? false,
   })
@@ -35,38 +34,39 @@ function mountReasoningBlock(options: { streaming?: boolean; thinkingExpanded?: 
           hoveredMessageId: ref(''),
           holdHeader: vi.fn(),
           releaseHeader: vi.fn(),
-          restHold,
         },
       },
     },
   })
-  return { wrapper, restHold, session }
+  return { wrapper, session }
 }
 
 describe('ReasoningBlock', () => {
-  it('calls chatScroll.restHold when streaming ends and auto-collapses', async () => {
-    const { wrapper, restHold } = mountReasoningBlock({ streaming: true })
-    expect(restHold).not.toHaveBeenCalled()
+  it('stays expanded while streaming and auto-collapses when streaming ends', async () => {
+    const { wrapper } = mountReasoningBlock({ streaming: true })
+    expect(wrapper.get('.body').classes()).toContain('open')
 
     await wrapper.setProps({ block: makeBlock(false) })
-    expect(restHold).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('.body').classes()).not.toContain('open')
     wrapper.unmount()
   })
 
-  it('calls chatScroll.restHold when user clicks to collapse', async () => {
-    const { wrapper, restHold } = mountReasoningBlock({ streaming: true })
+  it('toggles open state when clicking the header', async () => {
+    const { wrapper } = mountReasoningBlock({ streaming: false })
+    expect(wrapper.get('.body').classes()).not.toContain('open')
+
     await wrapper.get('button.header').trigger('click')
-    expect(restHold).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('.body').classes()).toContain('open')
     wrapper.unmount()
   })
 
-  it('calls chatScroll.restHold when session.thinkingExpanded closes', async () => {
-    const { wrapper, restHold, session } = mountReasoningBlock({ streaming: false, thinkingExpanded: true })
-    expect(restHold).not.toHaveBeenCalled()
+  it('follows session.thinkingExpanded when not manually flipped', async () => {
+    const { wrapper, session } = mountReasoningBlock({ streaming: false, thinkingExpanded: true })
+    expect(wrapper.get('.body').classes()).toContain('open')
 
     session.thinkingExpanded = false
     await nextTick()
-    expect(restHold).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('.body').classes()).not.toContain('open')
     wrapper.unmount()
   })
 })
