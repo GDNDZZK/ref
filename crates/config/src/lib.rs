@@ -49,9 +49,9 @@ pub(crate) const MODE_PRIMARY: &str = "primary";
 pub(crate) const MODE_SUBAGENT: &str = "subagent";
 pub(crate) const MODE_ALL: &str = "all";
 
-pub use load::load_in;
 #[cfg(test)]
 use load::load_with;
+pub use load::{load_in, project_config_files};
 pub use markdown::split_frontmatter;
 pub use permission::{Action, PermissionRules};
 
