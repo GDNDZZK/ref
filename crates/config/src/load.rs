@@ -52,30 +52,35 @@ pub(crate) fn load(cwd: &Path) -> Config {
 
 /// One config document (a JSON file or a converted markdown file).
 pub(crate) struct Layer {
-    pub source: PathBuf,
-    pub value: Map<String, Value>,
+    pub(crate) source: PathBuf,
+    pub(crate) value: Map<String, Value>,
 }
 
 /// Loading context: environment, home dir, warnings sink.
 pub(crate) struct Ctx<'a> {
-    pub home: Option<&'a Path>,
-    pub env: EnvFn<'a>,
-    pub warnings: Vec<String>,
+    pub(crate) home: Option<&'a Path>,
+    pub(crate) env: EnvFn<'a>,
+    pub(crate) warnings: Vec<String>,
 }
 
 impl Ctx<'_> {
-    pub fn warn(&mut self, msg: impl Into<String>) {
+    pub(crate) fn warn(&mut self, msg: impl Into<String>) {
         self.warnings.push(msg.into());
     }
 
-    pub fn env_nonempty(&self, k: &str) -> Option<String> {
+    pub(crate) fn env_nonempty(&self, k: &str) -> Option<String> {
         (self.env)(k).filter(|v| !v.trim().is_empty())
     }
 }
 
 /// Testable loader. `home` is used for `~` expansion; `global_dirs` are the global config
 /// directories (e.g. `~/.config/opencode`, `~/.config/ref`); `env` provides env vars.
-pub fn load_with(home: Option<&Path>, global_dirs: &[PathBuf], cwd: &Path, env: EnvFn) -> Config {
+pub(crate) fn load_with(
+    home: Option<&Path>,
+    global_dirs: &[PathBuf],
+    cwd: &Path,
+    env: EnvFn,
+) -> Config {
     load_in(home, global_dirs, None, cwd, env)
 }
 
@@ -437,10 +442,10 @@ pub(crate) fn layer_rules(
 /// Accumulated per-document data that must not be deep-merged.
 #[derive(Default)]
 pub(crate) struct Accum {
-    pub permission: PermissionRules,
-    pub agent_permission: BTreeMap<String, PermissionRules>,
-    pub instructions: Vec<String>,
-    pub skills: Vec<PathBuf>,
+    pub(crate) permission: PermissionRules,
+    pub(crate) agent_permission: BTreeMap<String, PermissionRules>,
+    pub(crate) instructions: Vec<String>,
+    pub(crate) skills: Vec<PathBuf>,
 }
 
 pub(crate) fn accumulate(ctx: &mut Ctx, layers: &[Layer]) -> (Map<String, Value>, Accum) {
