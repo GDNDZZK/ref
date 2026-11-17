@@ -1,8 +1,8 @@
 import QtQuick
+import QtQuick.Effects
 import RefGui
 
-// Text with a highlight that sweeps over it, for something that goes on. Each letter takes
-// a color between `color` and `highlight` by its distance from the highlight's center.
+// Text with a highlight band that sweeps across the glyphs on the GPU while work continues.
 Text {
 	id: shimmer
 
@@ -11,27 +11,52 @@ Text {
 	property bool running: true
 
 	readonly property int shimmerPeriod: 1600 // ms for one sweep
-	readonly property real highlightWidth: 3 // letters
-	property real phase: 0 // 0..1 along the sweep
+	readonly property real bandRatio: 0.45
+	readonly property real bandWidth: Math.max(24, width * bandRatio)
+	property real phase: 0
 
-	function letterColor(index) {
-		const length = label.length
-		const center = -highlightWidth + phase * (length + 2 * highlightWidth)
-		const nearness = Math.max(0, 1 - Math.abs(index - center) / highlightWidth)
-		return String(Qt.tint(color, Qt.alpha(highlight, nearness)))
-	}
-
-	readonly property var htmlEscapes: ({"<": "&lt;", "&": "&amp;", " ": "&nbsp;"})
-
-	function escaped(letter) {
-		return htmlEscapes[letter] ?? letter
-	}
-
-	textFormat: Text.RichText
-	text: Array.from(label, (letter, index) => "<span style=\"color:" + letterColor(index) + "\">" + escaped(letter) + "</span>").join("")
+	textFormat: Text.PlainText
+	text: label
 
 	FrameAnimation {
-		running: shimmer.running
+		running: shimmer.running && shimmer.visible && shimmer.width > 0
 		onTriggered: shimmer.phase = (shimmer.phase + frameTime * Format.msPerSecond / shimmer.shimmerPeriod) % 1
+	}
+
+	Item {
+		id: maskItem
+		anchors.fill: parent
+		layer.enabled: shimmer.running && shimmer.visible && shimmer.width > 0
+		visible: false
+
+		Rectangle {
+			x: -shimmer.bandWidth + shimmer.phase * (shimmer.width + 2 * shimmer.bandWidth)
+			width: shimmer.bandWidth
+			height: parent.height
+			gradient: Gradient {
+				orientation: Gradient.Horizontal
+				GradientStop { position: 0.0; color: "transparent" }
+				GradientStop { position: 0.5; color: "white" }
+				GradientStop { position: 1.0; color: "transparent" }
+			}
+		}
+	}
+
+	Text {
+		id: brightText
+		anchors.fill: parent
+		textFormat: Text.PlainText
+		text: shimmer.label
+		font: shimmer.font
+		color: shimmer.highlight
+		visible: false
+	}
+
+	MultiEffect {
+		anchors.fill: parent
+		visible: shimmer.running && shimmer.width > 0
+		source: brightText
+		maskEnabled: true
+		maskSource: maskItem
 	}
 }

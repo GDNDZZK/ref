@@ -623,6 +623,11 @@
             <numerusform>再显示 %n 行</numerusform>
         </translation>
     </message>
+    <message>
+        <location filename="../src/app/LineView.qml" line="151"/>
+        <source>+%1 more lines</source>
+        <translation>还有 %1 行</translation>
+    </message>
 </context>
 <context>
     <name>Main</name>

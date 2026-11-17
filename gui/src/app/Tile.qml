@@ -12,6 +12,8 @@ Item {
 	required property int place
 	required property bool anyZoomed // whether any tile is zoomed
 
+	property bool sidebarAnimating: false
+	property real stableWidth: width
 	// Where the grid wants the tile, and whether it is the zoomed one.
 	property rect slot: Qt.rect(0, 0, 0, 0)
 	// The slot as it was when the tile started leaving: the tile fades in place while the
@@ -39,9 +41,12 @@ Item {
 		pane.focusInput()
 	}
 
+	readonly property real targetWidth: expanded ? zoomRect.width : placedSlot.width
+	property real widthFloor: targetWidth
+
 	x: expanded ? zoomRect.x : placedSlot.x
 	y: expanded ? zoomRect.y : placedSlot.y
-	width: expanded ? zoomRect.width : placedSlot.width
+	width: targetWidth
 	height: expanded ? zoomRect.height : placedSlot.height
 	z: expanded ? 1 : fading ? -1 : 0
 	opacity: othersZoomed || fading ? 0 : 1
@@ -51,7 +56,8 @@ Item {
 
 	Behavior on x { NumberAnimation { duration: tile.travelDuration; easing.type: Motion.ease } }
 	Behavior on y { NumberAnimation { duration: tile.travelDuration; easing.type: Motion.ease } }
-	Behavior on width { NumberAnimation { duration: tile.travelDuration; easing.type: Motion.ease } }
+	Behavior on width { NumberAnimation { id: widthAnim; duration: tile.travelDuration; easing.type: Motion.ease } }
+	onTargetWidthChanged: widthFloor = width > 0 ? Math.min(width, targetWidth) : targetWidth
 	Behavior on height { NumberAnimation { duration: tile.travelDuration; easing.type: Motion.ease } }
 	Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: tile.fading ? Motion.exitEase : Motion.ease } }
 	Behavior on scale { NumberAnimation { duration: Motion.standard; easing.type: tile.fading ? Motion.exitEase : Motion.ease } }
@@ -256,6 +262,15 @@ Item {
 			}
 			session: tile.session
 			compact: !tile.expanded
+			layoutCompact: widthAnim.running ? true : !tile.expanded
+			layoutWidth: {
+				const inset = anchors.leftMargin + anchors.rightMargin
+				if (tile.sidebarAnimating)
+					return Math.max(0, tile.stableWidth - inset)
+				if (widthAnim.running)
+					return Math.max(0, tile.widthFloor - inset)
+				return width
+			}
 			keysEnabled: tile.focused || tile.expanded
 			composerShown: tile.focused || tile.expanded
 		}

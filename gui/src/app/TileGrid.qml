@@ -18,6 +18,9 @@ Item {
 	// Room kept free at the top for the window buttons.
 	property int topInset: 0
 	readonly property int contentTop: padding + topInset
+	property bool sidebarAnimating: false
+	property real minAreaWidth: width
+	readonly property real stableWidth: sidebarAnimating ? minAreaWidth : width
 	readonly property int fit: Math.max(1, Math.floor((width - 2 * padding + gap) / (Theme.tileMinWidth + gap)))
 	readonly property int columns: Math.max(1, Math.min(Math.ceil(Math.sqrt(count)), fit))
 	readonly property int rows: Math.ceil(count / columns)
@@ -137,12 +140,20 @@ Item {
 				readonly property int row: Math.floor(place / grid.columns)
 				readonly property int inRow: Math.max(1, row === grid.rows - 1 ? grid.count - row * grid.columns : grid.columns)
 				readonly property real slotWidth: (grid.width - 2 * grid.padding - (inRow - 1) * grid.gap) / inRow
+				readonly property int stableFit: Math.max(1, Math.floor((grid.stableWidth - 2 * grid.padding + grid.gap) / (Theme.tileMinWidth + grid.gap)))
+				readonly property int stableColumns: Math.max(1, Math.min(Math.ceil(Math.sqrt(grid.count)), stableFit))
+				readonly property int stableRows: Math.ceil(grid.count / stableColumns)
+				readonly property int stableRow: Math.floor(place / stableColumns)
+				readonly property int stableInRow: Math.max(1, stableRow === stableRows - 1 ? grid.count - stableRow * stableColumns : stableColumns)
+				readonly property real stableSlotWidth: (grid.stableWidth - 2 * grid.padding - (stableInRow - 1) * grid.gap) / stableInRow
 
 				slot: Qt.rect(grid.padding + (place - row * grid.columns) * (slotWidth + grid.gap),
 				              grid.contentTop + row * (grid.tileHeight + grid.gap),
 				              slotWidth,
 				              grid.tileHeight)
 				anyZoomed: grid.zoomed
+				sidebarAnimating: grid.sidebarAnimating
+				stableWidth: tile.expanded ? grid.stableWidth : stableSlotWidth
 				zoomRect: Qt.rect(0, 0, grid.width, grid.height)
 			}
 		}

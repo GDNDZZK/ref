@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 // Adapted from an early version of LightBlueCube/qutie
 import QtQuick
 import RefGui
@@ -6,7 +7,11 @@ import RefGui
 Block {
 	id: block
 
-	property bool expanded: streaming // follows streaming until the user toggles it
+	required property bool expanded
+	property bool ready: false
+
+	folding: foldAnim.running
+	Component.onCompleted: ready = true
 
 	Item {
 		width: block.columnWidth
@@ -69,42 +74,60 @@ Block {
 				onTapped: {
 					if (block.expanded && header.offset > 0)
 						block.holdHeader(header.height)
-					block.expanded = !block.expanded
+					block.toggleExpanded()
 				}
 			}
 		}
 
 		Item {
 			id: body
+
+			property real openProgress: block.expanded ? 1 : 0
+			readonly property real contentHeight: bodyLoader.item ? (bodyLoader.item as Item).height + 6 : 0
+
 			y: header.height
 			width: parent.width
-			height: block.expanded ? thoughts.height + 6 : 0
+			height: openProgress === 1 ? contentHeight : Math.round(contentHeight * openProgress)
 			clip: true
 
-			Behavior on height {
+			Behavior on openProgress {
+				enabled: block.ready
 				NumberAnimation {
+					id: foldAnim
 					duration: Motion.standard
 					easing.type: Motion.ease
 					onRunningChanged: if (!running) block.releaseHeader()
 				}
 			}
 
-			Rectangle {
-				x: 5
-				width: 2
-				height: thoughts.height
-				radius: 1
-				color: Theme.border
-			}
+			Loader {
+				id: bodyLoader
+				width: parent.width
+				active: block.expanded || body.openProgress > 0
 
-			ProseText {
-				id: thoughts
-				x: 18
-				width: parent.width - x
-				textFormat: TextEdit.MarkdownText
-				text: block.content
-				color: Theme.textMuted
-				font.pixelSize: Theme.secondaryFontSize
+				sourceComponent: Item {
+					width: bodyLoader.width
+					height: thoughts.height
+
+					Rectangle {
+						x: 5
+						width: 2
+						height: thoughts.height
+						radius: 1
+						color: Theme.border
+					}
+
+					ProseText {
+						id: thoughts
+						x: 18
+						width: parent.width - x
+						streaming: block.streaming
+						textFormat: TextEdit.MarkdownText
+						text: block.content
+						color: Theme.textMuted
+						font.pixelSize: Theme.secondaryFontSize
+					}
+				}
 			}
 		}
 	}
