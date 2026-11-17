@@ -26,9 +26,9 @@ class TestCommandLine : public QObject
 
 private slots:
 	void initTestCase();
-	void defaultsToANewSessionInTheCurrentDirectory();
+	void defaultsToNoSessionInTheCurrentDirectory();
 	void directoryIsCheckedAndMadeCanonical();
-	void sessionBeatsContinueBeatsNew();
+	void sessionBeatsContinueBeatsNone();
 	void watchStartsSplitView();
 	void readsAgentAndModel();
 	void rejectsMalformedModels_data();
@@ -53,13 +53,13 @@ void TestCommandLine::initTestCase()
 	m_root = QDir(m_directory.path()).canonicalPath();
 }
 
-void TestCommandLine::defaultsToANewSessionInTheCurrentDirectory()
+void TestCommandLine::defaultsToNoSessionInTheCurrentDirectory()
 {
 	const ParseResult result = parse({}, m_root);
 
 	const auto& options = std::get<LaunchOptions>(result);
 	QCOMPARE(options.directory, m_root);
-	QCOMPARE(options.start.kind, SessionStart::Kind::New);
+	QCOMPARE(options.start.kind, SessionStart::Kind::None);
 	QVERIFY(std::holds_alternative<Backend::Mode::Shared>(options.source));
 	QVERIFY(!options.smoke);
 	QVERIFY(options.warnings.isEmpty());
@@ -78,7 +78,7 @@ void TestCommandLine::directoryIsCheckedAndMadeCanonical()
 	QCOMPARE(twice.code, 2);
 }
 
-void TestCommandLine::sessionBeatsContinueBeatsNew()
+void TestCommandLine::sessionBeatsContinueBeatsNone()
 {
 	const auto continued = std::get<LaunchOptions>(parse({u"-c"_s}, m_root));
 	QCOMPARE(continued.start.kind, SessionStart::Kind::Continue);
@@ -95,7 +95,7 @@ void TestCommandLine::watchStartsSplitView()
 {
 	const auto options = std::get<LaunchOptions>(parse({u"-w"_s}, m_root));
 
-	QCOMPARE(options.start.kind, SessionStart::Kind::New);
+	QCOMPARE(options.start.kind, SessionStart::Kind::None);
 	QVERIFY(options.watch);
 	QVERIFY(options.warnings.isEmpty());
 	QVERIFY(!std::get<LaunchOptions>(parse({}, m_root)).watch);
@@ -105,6 +105,7 @@ void TestCommandLine::readsAgentAndModel()
 {
 	const auto options = std::get<LaunchOptions>(parse({u"--agent"_s, u"plan"_s, u"--model"_s, u"anthropic/claude-sonnet-4#high"_s}, m_root));
 
+	QCOMPARE(options.start.kind, SessionStart::Kind::None);
 	QCOMPARE(options.start.agent, u"plan"_s);
 	QVERIFY(options.start.model);
 	QCOMPARE(options.start.model->provider, u"anthropic"_s);

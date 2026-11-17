@@ -164,6 +164,7 @@ void Workspace::setFocusedTile(const QString& sessionId)
 	m_focusedTile = sessionId;
 	updateHighlight();
 	emit focusedTileChanged();
+	updateCommandContext();
 }
 
 void Workspace::focusTile(const QString& sessionId)
@@ -198,6 +199,7 @@ QCoro::Task<> Workspace::zoomTask(QString sessionId)
 	setFocusedTile(sessionId);
 	emit zoomedChanged();
 	emit visibleSessionIdsChanged();
+	updateCommandContext();
 	ChatSession* zoomed = session(sessionId);
 	if(zoomed == nullptr)
 	{
@@ -222,6 +224,7 @@ QCoro::Task<> Workspace::unzoomTask()
 	const QString id = std::exchange(m_zoomed, QString());
 	emit zoomedChanged();
 	emit visibleSessionIdsChanged();
+	updateCommandContext();
 	ChatSession* tile = session(id);
 	if(tile != nullptr && tile->isAttached())
 	{

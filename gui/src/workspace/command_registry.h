@@ -21,7 +21,8 @@ enum class Need
 	Connected = 1 << 0, // the backend is reachable
 	Session = 1 << 1,   // there is a session to act on
 	LiveSession = 1 << 2, // at least one live session exists
-	SplitView = 1 << 3, // split view is on
+	SplitView = 1 << 3,   // split view is on
+	Detachable = 1 << 4,  // a session is open in the foreground (current or zoomed)
 };
 Q_DECLARE_FLAGS(Needs, Need)
 Q_DECLARE_OPERATORS_FOR_FLAGS(Needs)
@@ -31,6 +32,7 @@ struct CommandContext
 {
 	bool connected = false;
 	bool hasSession = false;
+	bool canDetach = false;
 	int liveSessions = 0;
 	bool splitView = false;
 };

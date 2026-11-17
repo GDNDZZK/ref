@@ -83,4 +83,16 @@ QtObject {
 			return decodeURIComponent(text.slice("file:///".length)) // "C:/dir", without the slash before the drive
 		return decodeURIComponent(text.replace(/^file:\/\//, ""))
 	}
+
+	// Last path segment of a directory ("/home/user/app" -> "app", "/" -> "/").
+	function dirName(path) {
+		if (!path)
+			return ""
+		const trimmed = path.replace(/[\/\\]+$/, "")
+		if (trimmed === "")
+			return path
+		const slash = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"))
+		const name = trimmed.slice(slash + 1)
+		return name === "" ? trimmed : name
+	}
 }
