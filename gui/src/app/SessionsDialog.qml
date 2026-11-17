@@ -169,6 +169,13 @@ ModalDialog {
 			sectionProperty: "isLive"
 			sectionLabel: section => section === dialog.liveSection ? qsTr("Running") : qsTr("History")
 			emptyText: qsTr("No matching sessions")
+			initialIndex: {
+				if (dialog.closing)
+					return -1
+				void Workspace.sessionChoices.count
+				return Workspace.sessionChoices.indexOf(Workspace.currentId)
+			}
+			rowEnabled: index => !dialog.closing || Workspace.sessionChoices.isLiveAt(index)
 			model: Workspace.sessionChoices
 			delegate: SessionPickRow {}
 		}

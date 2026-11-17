@@ -32,6 +32,7 @@ class QuestionPrompt : public QObject
 	Q_PROPERTY(QString text READ text NOTIFY changed)
 	Q_PROPERTY(bool multiple READ isMultiple NOTIFY changed)
 	Q_PROPERTY(QVariantList rows READ rows NOTIFY changed)
+	Q_PROPERTY(int highlightedRow READ highlightedRow NOTIFY highlightChanged)
 	Q_PROPERTY(QVariantList summary READ summary NOTIFY changed)
 	Q_PROPERTY(bool editing READ isEditing NOTIFY changed)
 	Q_PROPERTY(QString customText READ customText NOTIFY changed)
@@ -60,6 +61,7 @@ public:
 	// The rows of the page: an option each, then the custom answer. Entries: label, description,
 	// isDefault, checked, highlighted, number, custom.
 	QVariantList rows() const;
+	int highlightedRow() const;
 	// On the confirming page, an entry per question: header, answer, answered.
 	QVariantList summary() const;
 	// Typing a custom answer; the card has a text field then and the keys are the field's.
@@ -96,6 +98,7 @@ public:
 
 signals:
 	void changed();
+	void highlightChanged();
 	// The answers are ready; one list per question (empty: not answered).
 	void submitRequested(const QString& callId, const QList<QStringList>& answers);
 	void dismissRequested(const QString& callId);

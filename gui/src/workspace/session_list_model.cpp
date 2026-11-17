@@ -270,6 +270,12 @@ int SessionListModel::indexOf(const QString& sessionId) const
 	return -1;
 }
 
+
+bool SessionListModel::isLiveAt(int row) const
+{
+	return row >= 0 && row < m_rows.size() && m_rows[row].live;
+}
+
 const proto::SessionInfo* SessionListModel::find(const QString& sessionId) const
 {
 	const auto it = m_all.constFind(sessionId);

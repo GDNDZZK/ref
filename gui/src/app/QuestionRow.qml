@@ -22,7 +22,7 @@ Item {
 	required property bool busy
 
 	signal activated()
-	signal hovered()
+	signal hovered(point scenePos)
 	signal committed(string text)
 	signal cancelled()
 
@@ -157,7 +157,7 @@ Item {
 	HoverHandler {
 		cursorShape: Qt.PointingHandCursor
 		enabled: !row.typing
-		onHoveredChanged: if (hovered) row.hovered()
+		onPointChanged: if (hovered) row.hovered(point.scenePosition)
 	}
 	TapHandler {
 		enabled: !row.typing

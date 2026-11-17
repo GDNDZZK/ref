@@ -73,6 +73,7 @@ set(REFGUI_APP_QML_NAMES
 	PickList.qml
 	PickRow.qml
 	PathField.qml
+	PointerMoveGuard.qml
 	CommandPalette.qml
 	SettingsDialog.qml
 	SessionsDialog.qml
