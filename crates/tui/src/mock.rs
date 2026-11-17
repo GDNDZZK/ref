@@ -201,6 +201,7 @@ fn config() -> ServerConfigInfo {
         ],
         mcp: vec![("context7".into(), "connected (2 tools)".into())],
         tui: Value::Null,
+        warnings: vec![],
     }
 }
 
@@ -1117,8 +1118,17 @@ impl Mock {
             | Request::SetNotify { .. }
             | Request::SetFocus { .. }
             | Request::Shutdown => self.ok(request_id, json!({})),
-            Request::ListDirs { .. } => self.err(request_id, "not supported by the mock backend"),
-            Request::GetConfig => self.ok(request_id, json!({ "config": config() })),
+            Request::ListDirs { .. }
+            | Request::ReloadConfig { .. }
+            | Request::GetConfigFiles { .. }
+            | Request::SaveConfigFile { .. }
+            | Request::CreateConfigFile { .. }
+            | Request::SelectConfigFile { .. }
+            | Request::DeleteConfigFile { .. }
+            | Request::ListBinaries { .. } => {
+                self.err(request_id, "not supported by the mock backend")
+            }
+            Request::GetConfig { .. } => self.ok(request_id, json!({ "config": config() })),
             Request::ListSessions => self.on_list_sessions(request_id),
             Request::ListHistory { .. } => self.on_list_history(request_id),
             Request::CreateSession {

@@ -658,7 +658,7 @@ async fn stream_with_retry(
         let res = ref_llm::stream(&p.provider, &p.model, &req, cancel, &mut on_event).await;
         match res {
             Ok(resp) => {
-                finalize_message(hub, s, p, &msg_id, resp);
+                finalize_message(hub, s, &msg_id, resp);
                 crate::ops::persist(hub, s);
                 return Ok(msg_id);
             }
@@ -785,7 +785,7 @@ fn keep_aborted_partial(hub: &Arc<Hub>, s: &Arc<Session>, id: &str) {
     hub.emit_message(&s.id, m);
 }
 
-fn finalize_message(hub: &Arc<Hub>, s: &Arc<Session>, p: &Prep, id: &str, resp: ref_llm::Response) {
+fn finalize_message(hub: &Arc<Hub>, s: &Arc<Session>, id: &str, resp: ref_llm::Response) {
     let mut st = s.lock();
     let Some(i) = st.find_message(id) else { return };
     let now = now_ms();
@@ -849,13 +849,13 @@ fn finalize_message(hub: &Arc<Hub>, s: &Arc<Session>, p: &Prep, id: &str, resp: 
         }
     }
     hub.emit_message(&s.id, &st.messages[i]);
-    let mut ctx = crate::models::context_for(&p.cfg, &p.model_ref);
+    let mut ctx = crate::models::context_for(&st.cfg, &st.info.model);
     ctx.used = resp.usage.total_context();
     st.info.context = ctx;
     // First time per context epoch past the recommended point: notify the model at the next
     // safe point (after the current tool batch).
     // Skipped when automatic compaction is about to run anyway.
-    let auto_due = p.cfg.compaction.auto && ctx.auto > 0 && ctx.used >= ctx.auto;
+    let auto_due = st.cfg.compaction.auto && ctx.auto > 0 && ctx.used >= ctx.auto;
     let recommend_due = ctx.recommend > 0 && ctx.used >= ctx.recommend;
     if !st.context_notice && !auto_due && recommend_due {
         st.context_notice = true;

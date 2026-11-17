@@ -182,6 +182,7 @@ pub fn save(store: &Store, cfg: &Config, cwd: &str) -> Result<(), String> {
             messages: builder.messages,
             reported: false,
             context_notice: false,
+            model_explicit: false,
         });
     }
     store.flush()

@@ -22,10 +22,12 @@ struct McpState {
     status: McpStatus,
     client: Option<Arc<McpClient>>,
     tools: Vec<McpTool>,
+    closed: bool,
 }
 
 pub struct McpServer {
     pub name: String,
+    pub cfg: McpConfig,
     state: Mutex<McpState>,
     ready: tokio::sync::watch::Sender<bool>,
 }
@@ -163,10 +165,12 @@ impl McpManager {
             let (tx, _) = tokio::sync::watch::channel(false);
             let server = Arc::new(McpServer {
                 name: name.clone(),
+                cfg: sc.clone(),
                 state: Mutex::new(McpState {
                     status: McpStatus::Connecting,
                     client: None,
                     tools: Vec::new(),
+                    closed: false,
                 }),
                 ready: tx,
             });
@@ -209,17 +213,62 @@ impl McpManager {
             .collect()
     }
 
+    /// Reconciles running MCP servers against the active `configs`:
+    /// removes and asynchronously closes servers that were removed, disabled, modified,
+    /// or are in `McpStatus::Failed`, then starts connecting enabled servers.
+    pub(crate) fn reconcile(&self, configs: &[Config]) {
+        let mut to_close = Vec::new();
+        {
+            let mut map = lock(&self.servers);
+            map.retain(|_, s| {
+                if matches!(s.status(), McpStatus::Failed(_)) {
+                    to_close.push(s.clone());
+                    return false;
+                }
+                let wanted = configs.iter().any(|cfg| {
+                    cfg.mcp
+                        .get(&s.name)
+                        .is_some_and(|sc| sc.enabled() && sc == &s.cfg)
+                });
+                if !wanted {
+                    to_close.push(s.clone());
+                }
+                wanted
+            });
+        }
+        for s in to_close {
+            if let Some(client) = take_for_close(&s) {
+                let name = s.name.clone();
+                tokio::spawn(async move { close_client(&name, client).await });
+            }
+        }
+        for cfg in configs {
+            self.start_servers(cfg);
+        }
+    }
+
     pub(crate) async fn close_all(&self) {
         let all: Vec<Arc<McpServer>> = lock(&self.servers).drain().map(|(_, v)| v).collect();
         for s in all {
-            if let Some(c) = s.client()
-                && tokio::time::timeout(CLOSE_TIMEOUT, c.close())
-                    .await
-                    .is_err()
-            {
-                tracing::warn!(server = %s.name, "MCP server did not close in {CLOSE_TIMEOUT:?}");
+            if let Some(c) = take_for_close(&s) {
+                close_client(&s.name, c).await;
             }
         }
+    }
+}
+
+fn take_for_close(server: &McpServer) -> Option<Arc<McpClient>> {
+    let mut st = server.lock();
+    st.closed = true;
+    st.client.take()
+}
+
+async fn close_client(name: &str, client: Arc<McpClient>) {
+    if tokio::time::timeout(CLOSE_TIMEOUT, client.close())
+        .await
+        .is_err()
+    {
+        tracing::warn!(server = %name, "MCP server did not close in {CLOSE_TIMEOUT:?}");
     }
 }
 
@@ -234,13 +283,22 @@ async fn connect(server: Arc<McpServer>, conf: ServerConfig) {
         Ok((client, tools)) => {
             let client = Arc::new(client);
             let mut rx = client.tools_changed();
-            {
+            let was_closed = {
                 let mut st = server.lock();
-                st.status = McpStatus::Connected;
-                st.client = Some(client.clone());
-                st.tools = tools;
-            }
+                if st.closed {
+                    true
+                } else {
+                    st.status = McpStatus::Connected;
+                    st.client = Some(client.clone());
+                    st.tools = tools;
+                    false
+                }
+            };
             server.ready.send_replace(true);
+            if was_closed {
+                close_client(&server.name, client).await;
+                return;
+            }
             tracing::info!(server = %server.name, "MCP server connected");
             let weak = Arc::downgrade(&client);
             drop(client);

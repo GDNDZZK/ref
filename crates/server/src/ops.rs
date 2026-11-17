@@ -160,6 +160,7 @@ pub async fn create_session(
     for w in &cfg.warnings {
         tracing::warn!("config: {w}");
     }
+    let model_explicit = o.model.is_some();
     let agent = resolve_agent(&cfg, o.agent)?;
     let model = resolve_model(&cfg, &agent, o.model)?;
     let name = pick_name(hub, &cwd, o.name, o.unique_suffix)?;
@@ -188,6 +189,7 @@ pub async fn create_session(
     // Start connecting MCP servers in the background.
     hub.mcp.start_servers(&cfg);
     let s = Session::new(info, Vec::new(), cfg, false, false);
+    s.lock().model_explicit = model_explicit;
     hub.insert_session(s.clone());
     tracing::info!(session = %s.id, "session created");
     Ok(s)
@@ -216,6 +218,7 @@ pub async fn get_or_load(hub: &Arc<Hub>, id: &str) -> Result<Arc<Session>, Strin
     let cfg = Arc::new(cfg);
     hub.mcp.start_servers(&cfg);
     let s = Session::new(p.info, p.messages, cfg, p.reported, p.context_notice);
+    s.lock().model_explicit = p.model_explicit;
     hub.insert_session(s.clone());
     Ok(s)
 }
@@ -253,6 +256,123 @@ pub async fn shutdown_all(hub: &Arc<Hub>) {
         Err(e) => tracing::warn!("flush task failed: {e}"),
     }
     hub.mcp.close_all().await;
+}
+
+fn push_unique_warnings(dst: &mut Vec<String>, src: &[String]) {
+    for w in src {
+        if !dst.contains(w) {
+            tracing::warn!("config: {w}");
+            dst.push(w.clone());
+        }
+    }
+}
+
+/// Applies a freshly loaded `new_cfg` to `st` (session lock held).
+/// Returns `(info_changed, explicit_changed)`.
+pub(crate) fn apply_reloaded_config(
+    hub: &Arc<Hub>,
+    st: &mut crate::session::SessionState,
+    new_cfg: Config,
+) -> (bool, bool) {
+    let old_info = st.info.clone();
+    let old_explicit = st.model_explicit;
+    let mut switched_from = None;
+
+    if st.info.agent == ref_config::COMPACTION_AGENT || !new_cfg.agents.contains_key(&st.info.agent)
+    {
+        let fallback = resolve_agent(&new_cfg, None).unwrap_or_else(|_| FALLBACK_AGENT.into());
+        if st.info.agent != fallback {
+            switched_from = Some(std::mem::replace(&mut st.info.agent, fallback));
+        }
+    }
+
+    let use_default_model = !st.model_explicit
+        || st.info.model.provider.is_empty()
+        || new_cfg.model(&st.info.model).is_none();
+    if use_default_model {
+        st.info.model = new_cfg
+            .default_model_for(&st.info.agent)
+            .unwrap_or_default();
+        st.model_explicit = false;
+    } else if let Some(ref v) = st.info.model.variant {
+        let valid = crate::models::variants(&new_cfg, &st.info.model);
+        if !valid.contains(v) {
+            st.info.model.variant = None;
+        }
+    }
+
+    st.info.context =
+        crate::models::context_keeping_used(&new_cfg, &st.info.model, st.info.context.used);
+    st.cfg = Arc::new(new_cfg);
+    st.system = None;
+
+    if let Some(old_agent) = switched_from {
+        crate::agent_switch::switched(hub, st, &old_agent);
+    }
+
+    let info_changed = st.info != old_info;
+    let explicit_changed = st.model_explicit != old_explicit;
+    if info_changed {
+        hub.emit_info(st);
+    }
+    (info_changed, explicit_changed)
+}
+
+/// Reloads configuration across all live sessions and reconciles MCP servers.
+/// Broadcasts `ServerFrame::ConfigChanged` to connected frontends and returns deduplicated warnings.
+pub async fn reload_all(hub: &Arc<Hub>, trigger_cwd: Option<&str>) -> Result<Vec<String>, String> {
+    let sessions = hub.sessions();
+    let mut cwds = Vec::new();
+    if let Some(c) = trigger_cwd.map(str::trim).filter(|c| !c.is_empty()) {
+        cwds.push(hub.effective_cwd(c));
+    }
+    for s in &sessions {
+        let c = s.lock().info.cwd.clone();
+        if !cwds.contains(&c) {
+            cwds.push(c);
+        }
+    }
+    if cwds.is_empty()
+        && let Ok(cur) = std::env::current_dir()
+    {
+        cwds.push(hub.effective_cwd(&cur.to_string_lossy()));
+    }
+
+    let mut configs = std::collections::HashMap::new();
+    let mut warnings = Vec::new();
+    for cwd in &cwds {
+        let cfg = load_config(hub, cwd).await?;
+        push_unique_warnings(&mut warnings, &cfg.warnings);
+        configs.insert(cwd.clone(), cfg);
+    }
+
+    for s in &sessions {
+        let cwd = s.lock().info.cwd.clone();
+        let cfg = match configs.get(&cwd) {
+            Some(c) => c.clone(),
+            None => {
+                let c = load_config(hub, &cwd).await?;
+                push_unique_warnings(&mut warnings, &c.warnings);
+                configs.insert(cwd.clone(), c.clone());
+                c
+            }
+        };
+        let (info_changed, explicit_changed) = {
+            let mut st = s.lock();
+            apply_reloaded_config(hub, &mut st, cfg)
+        };
+        if info_changed || explicit_changed {
+            persist(hub, s);
+        }
+    }
+
+    let active_configs: Vec<Config> = cwds
+        .iter()
+        .filter_map(|c| configs.get(c).cloned())
+        .collect();
+    hub.mcp.reconcile(&active_configs);
+    hub.broadcast_config_changed(warnings.clone());
+    Ok(warnings)
 }
 
 #[cfg(test)]

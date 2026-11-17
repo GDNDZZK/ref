@@ -784,7 +784,11 @@ async fn directory_listing_stays_inside_the_workspace() {
     rig.conn.lock().cwd = rig.mock.workspace().to_string_lossy().into();
     let workspace = dunce::canonicalize(rig.mock.workspace()).unwrap();
     let list = |path: &str| {
-        let req = Request::ListDirs { path: path.into() };
+        let req = Request::ListDirs {
+            path: path.into(),
+            cwd: None,
+            include_files: false,
+        };
         api::handle(&rig.hub, &rig.conn, req)
     };
 

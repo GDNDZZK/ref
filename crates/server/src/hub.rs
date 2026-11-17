@@ -11,6 +11,7 @@ use ref_proto::{
     SessionInfo, SessionStatus,
 };
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
@@ -34,6 +35,8 @@ pub struct HubOptions {
     pub data_dir: PathBuf,
     /// Home dir for global instructions / skills discovery (None in tests).
     pub home: Option<PathBuf>,
+    /// Global ref config directory holding `ref.json` and backups (`None` in tests unless set).
+    pub config_dir: Option<PathBuf>,
     pub config_loader: ConfigLoader,
     /// Base delay of the LLM retry backoff (2s in production).
     pub retry_base: Duration,
@@ -53,6 +56,7 @@ impl HubOptions {
         HubOptions {
             data_dir,
             home: dirs::home_dir(),
+            config_dir: None,
             config_loader: Arc::new(|cwd: &Path| Config::load(cwd)),
             retry_base: DEFAULT_RETRY_BASE,
             retry_limit: None,
@@ -61,6 +65,14 @@ impl HubOptions {
             sandbox_cwd: None,
         }
     }
+}
+
+/// Default global ref config directory: `$XDG_CONFIG_HOME/ref` (non-empty) or `~/.config/ref`.
+pub fn default_config_dir() -> Option<PathBuf> {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|v| !v.is_empty())
+        .map(|v| PathBuf::from(v).join("ref"))
+        .or_else(|| dirs::home_dir().map(|h| h.join(".config/ref")))
 }
 
 /// Outgoing frame queue of one connection (coalesces consecutive deltas).
@@ -204,6 +216,7 @@ fn idle_action(timeout: i64, ever_connected: bool, connected: usize) -> IdleActi
 
 /// A cached file list for `files_cache`, with the time it was built.
 pub type FileList = (Instant, Arc<Vec<String>>);
+pub(crate) type BinariesCache = Option<(OsString, Instant, Arc<Vec<String>>)>;
 
 #[derive(Default)]
 struct IdleState {
@@ -225,11 +238,16 @@ pub struct Hub {
     idle: Mutex<IdleState>,
     pub(crate) peer_msgs: Mutex<HashMap<String, PeerRecord>>,
     pub(crate) files_cache: Mutex<HashMap<String, FileList>>,
+    pub(crate) binaries_cache: Mutex<BinariesCache>,
+    pub(crate) config_files_lock: tokio::sync::Mutex<()>,
     pub instance: Mutex<Option<InstanceInfo>>,
 }
 
 impl Hub {
     pub fn new(opts: HubOptions) -> Arc<Hub> {
+        if let Some(dir) = opts.config_dir.as_deref().filter(|d| d.exists()) {
+            crate::config_files::cleanup_incomplete(dir);
+        }
         let hub = Arc::new(Hub {
             store: Store::new(opts.data_dir.clone()),
             opts,
@@ -244,6 +262,8 @@ impl Hub {
             idle: Mutex::new(IdleState::default()),
             peer_msgs: Mutex::new(HashMap::new()),
             files_cache: Mutex::new(HashMap::new()),
+            binaries_cache: Mutex::new(None),
+            config_files_lock: tokio::sync::Mutex::new(()),
             instance: Mutex::new(None),
         });
         tokio::spawn(broadcaster(Arc::downgrade(&hub)));
@@ -384,6 +404,16 @@ impl Hub {
                 c.send(ServerFrame::Toast {
                     level,
                     text: text.clone(),
+                });
+            }
+        }
+    }
+
+    pub fn broadcast_config_changed(&self, warnings: Vec<String>) {
+        for c in self.conns() {
+            if c.lock().hello {
+                c.send(ServerFrame::ConfigChanged {
+                    warnings: warnings.clone(),
                 });
             }
         }

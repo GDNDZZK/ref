@@ -70,6 +70,8 @@ pub struct SessionState {
     pub closed: bool,
     /// The agent switch the model was or will be told about (see `agent_switch`).
     pub agent_switch: Option<crate::agent_switch::AgentSwitch>,
+    /// Whether the session's model was explicitly chosen rather than inherited from agent/config default.
+    pub model_explicit: bool,
 }
 
 pub struct Session {
@@ -109,6 +111,7 @@ impl Session {
                 user_aborted: false,
                 closed: false,
                 agent_switch: None,
+                model_explicit: false,
             }),
         })
     }
@@ -136,6 +139,7 @@ impl Session {
             messages,
             reported: st.reported,
             context_notice: st.context_notice,
+            model_explicit: st.model_explicit,
         }
     }
 }

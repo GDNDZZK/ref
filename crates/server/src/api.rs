@@ -61,6 +61,15 @@ const HISTORY_DEFAULT_LIMIT: usize = 100;
 const FILES_DEFAULT_LIMIT: usize = 50;
 const FILES_MAX_LIMIT: usize = 500;
 
+/// Binaries `ListBinaries` returns by default, and at most.
+const BINARIES_DEFAULT_LIMIT: usize = 50;
+const BINARIES_MAX_LIMIT: usize = 200;
+const BINARIES_CACHE_TTL: Duration = Duration::from_secs(30);
+
+const SHELL_BUILTINS: &[&str] = &[
+    "alias", "bg", "cd", "echo", "exit", "export", "false", "fg", "jobs", "kill", "pwd", "source",
+    "test", "true", "type", "unset", "wait", "which",
+];
 /// Timeout of a `Shell` request (the `bash` tool takes seconds).
 const SHELL_TIMEOUT_SECS: u64 = 600;
 
@@ -74,6 +83,12 @@ const FILES_CACHE_MAX_DIRS: usize = 32;
 fn live(hub: &Arc<Hub>, id: &str) -> Result<Arc<Session>, String> {
     hub.session(id)
         .ok_or_else(|| format!("Session {id} is not live (attach to it first)."))
+}
+
+fn resolve_req_cwd(hub: &Hub, conn: &Conn, cwd: Option<String>) -> String {
+    cwd.filter(|c| !c.trim().is_empty())
+        .map(|c| hub.effective_cwd(c.trim()))
+        .unwrap_or_else(|| conn.lock().cwd.clone())
 }
 
 pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> Reply {
@@ -94,25 +109,58 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> Reply {
             }
             Ok(json!({}))
         }
-        Request::ListDirs { path } => {
-            let cwd = conn.lock().cwd.clone();
-            list_dirs(hub, &cwd, &path).await
+        Request::ListDirs {
+            path,
+            cwd,
+            include_files,
+        } => {
+            let base_cwd = resolve_req_cwd(hub, conn, cwd);
+            list_dirs(hub, &base_cwd, &path, include_files).await
         }
         Request::Shutdown => {
             tracing::info!("shutdown requested by a client");
             hub.shutdown.cancel();
             Ok(json!({}))
         }
-        Request::GetConfig => {
-            let cwd = conn.lock().cwd.clone();
+        Request::GetConfig { cwd } => {
+            let cwd = resolve_req_cwd(hub, conn, cwd);
             Ok(json!({ "config": config_info(hub, &cwd).await? }))
         }
+        Request::ReloadConfig { cwd } => {
+            let cwd = resolve_req_cwd(hub, conn, cwd);
+            let warnings = crate::ops::reload_all(hub, Some(&cwd)).await?;
+            let config = config_info(hub, &cwd).await?;
+            Ok(json!({ "config": config, "warnings": warnings }))
+        }
+        Request::GetConfigFiles { file, cwd } => {
+            let cwd = resolve_req_cwd(hub, conn, cwd);
+            crate::config_files::get_config_files(hub, file, cwd).await
+        }
+        Request::SaveConfigFile { file, content, cwd } => {
+            let cwd = resolve_req_cwd(hub, conn, cwd);
+            crate::config_files::save_config_file(hub, file, content, cwd).await
+        }
+        Request::CreateConfigFile {
+            label,
+            clone_current,
+            content,
+            cwd,
+        } => {
+            let cwd = resolve_req_cwd(hub, conn, cwd);
+            crate::config_files::create_config_file(hub, label, clone_current, content, cwd).await
+        }
+        Request::SelectConfigFile { file, cwd } => {
+            let cwd = resolve_req_cwd(hub, conn, cwd);
+            crate::config_files::select_config_file(hub, file, cwd).await
+        }
+        Request::DeleteConfigFile { file, cwd } => {
+            let cwd = resolve_req_cwd(hub, conn, cwd);
+            crate::config_files::delete_config_file(hub, file, cwd).await
+        }
+        Request::ListBinaries { query, limit } => list_binaries(hub, &query, limit).await,
         Request::ListSessions => Ok(json!({ "sessions": hub.infos() })),
         Request::McpStatus { cwd } => {
-            let cwd = cwd
-                .filter(|c| !c.trim().is_empty())
-                .map(|c| hub.effective_cwd(&c))
-                .unwrap_or_else(|| conn.lock().cwd.clone());
+            let cwd = resolve_req_cwd(hub, conn, cwd);
             let cfg = crate::ops::load_config(hub, &cwd).await?;
             Ok(json!({ "servers": hub.mcp.status(&cfg) }))
         }
@@ -265,15 +313,20 @@ pub async fn handle(hub: &Arc<Hub>, conn: &Arc<Conn>, req: Request) -> Reply {
         }
         Request::SetModel { session_id, model } => {
             let s = live(hub, &session_id)?;
-            let mut st = s.lock();
-            if st.cfg.model(&model).is_none() {
-                return Err(format!("Model {} is not configured.", model.key()).into());
-            }
-            st.info.context =
-                crate::models::context_keeping_used(&st.cfg, &model, st.info.context.used);
-            st.info.model = model;
-            hub.emit_info(&st);
-            Ok(json!({ "session": st.info.clone() }))
+            let info = {
+                let mut st = s.lock();
+                if st.cfg.model(&model).is_none() {
+                    return Err(format!("Model {} is not configured.", model.key()).into());
+                }
+                st.info.context =
+                    crate::models::context_keeping_used(&st.cfg, &model, st.info.context.used);
+                st.info.model = model;
+                st.model_explicit = true;
+                hub.emit_info(&st);
+                st.info.clone()
+            };
+            crate::ops::persist(hub, &s);
+            Ok(json!({ "session": info }))
         }
         Request::SetAgent { session_id, agent } => set_agent(hub, session_id, agent),
         Request::SetVariant {
@@ -475,6 +528,7 @@ fn set_agent(hub: &Arc<Hub>, session_id: String, agent: String) -> Reply {
     {
         st.info.context = crate::models::context_keeping_used(&st.cfg, &m, st.info.context.used);
         st.info.model = m;
+        st.model_explicit = false;
     }
     let old = st.info.agent.clone();
     let changed = old != agent;
@@ -610,10 +664,10 @@ async fn set_cwd(hub: &Arc<Hub>, s: &Arc<Session>, path: &str) -> Result<(), Api
     Ok(())
 }
 
-/// `ListDirs`: the normalized absolute path and the names of its sub-directories (links to
-/// directories included), case-insensitively sorted. In mock mode `~` is the sandbox and
+/// `ListDirs`: the normalized absolute path, its sub-directories (links to directories included),
+/// and optionally regular files, case-insensitively sorted. In mock mode `~` is the sandbox and
 /// nothing outside it is listed.
-async fn list_dirs(hub: &Arc<Hub>, cwd: &str, path: &str) -> Reply {
+async fn list_dirs(hub: &Arc<Hub>, cwd: &str, path: &str, include_files: bool) -> Reply {
     let path = path.trim();
     if path.is_empty() {
         return Err("Path is empty.".into());
@@ -629,18 +683,24 @@ async fn list_dirs(hub: &Arc<Hub>, cwd: &str, path: &str) -> Reply {
         }
         let entries = std::fs::read_dir(&dir)
             .map_err(|e| ApiError::from(format!("Cannot read directory {dir}: {e}")))?;
-        let mut dirs = sub_dir_names(&dir, entries);
+        let (mut dirs, mut files) = dir_entries(&dir, entries, include_files);
         dirs.sort_by_key(|d| (d.to_lowercase(), d.clone()));
-        Ok(json!({ "path": dir, "dirs": dirs }))
+        files.sort_by_key(|f| (f.to_lowercase(), f.clone()));
+        Ok(json!({ "path": dir, "dirs": dirs, "files": files }))
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
-/// Names of the directories among `entries` (links to directories included). Unreadable
-/// entries and names that are not valid UTF-8 (JSON cannot carry them as they are) are skipped.
-fn sub_dir_names(dir: &str, entries: std::fs::ReadDir) -> Vec<String> {
-    let mut names = Vec::new();
+/// Names of directories (and optionally files) among `entries`. Unreadable entries and names that
+/// are not valid UTF-8 are skipped.
+fn dir_entries(
+    dir: &str,
+    entries: std::fs::ReadDir,
+    include_files: bool,
+) -> (Vec<String>, Vec<String>) {
+    let mut dirs = Vec::new();
+    let mut files = Vec::new();
     for entry in entries {
         let entry = match entry {
             Ok(entry) => entry,
@@ -649,15 +709,127 @@ fn sub_dir_names(dir: &str, entries: std::fs::ReadDir) -> Vec<String> {
                 continue;
             }
         };
-        if !entry.path().is_dir() {
+        let path = entry.path();
+        let is_dir = path.is_dir();
+        let is_file = !is_dir && include_files && path.is_file();
+        if !is_dir && !is_file {
             continue;
         }
-        match entry.file_name().into_string() {
-            Ok(name) => names.push(name),
-            Err(name) => tracing::debug!("ListDirs: skipping {name:?} in {dir}: not UTF-8"),
+        let name = match entry.file_name().into_string() {
+            Ok(name) => name,
+            Err(name) => {
+                tracing::debug!("ListDirs: skipping {name:?} in {dir}: not UTF-8");
+                continue;
+            }
+        };
+        if is_dir {
+            dirs.push(name);
+        } else {
+            files.push(name);
         }
     }
-    names
+    (dirs, files)
+}
+
+async fn list_binaries(hub: &Arc<Hub>, query: &str, limit: Option<usize>) -> Reply {
+    let limit = limit
+        .unwrap_or(BINARIES_DEFAULT_LIMIT)
+        .clamp(1, BINARIES_MAX_LIMIT);
+    let path_os = std::env::var_os("PATH").unwrap_or_default();
+    let cached = {
+        let guard = lock(&hub.binaries_cache);
+        guard.as_ref().and_then(|(cached_path, at, list)| {
+            (cached_path == &path_os && at.elapsed() < BINARIES_CACHE_TTL).then(|| list.clone())
+        })
+    };
+    let binaries = match cached {
+        Some(list) => list,
+        None => {
+            let path_for_scan = path_os.clone();
+            let scanned = tokio::task::spawn_blocking(move || collect_binaries(&path_for_scan))
+                .await
+                .map_err(|e| e.to_string())?;
+            let list = Arc::new(scanned);
+            *lock(&hub.binaries_cache) = Some((path_os, Instant::now(), list.clone()));
+            list
+        }
+    };
+    let query = query.to_string();
+    let matched = tokio::task::spawn_blocking(move || filter_binaries(&binaries, &query, limit))
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(json!({ "binaries": matched }))
+}
+
+fn is_executable(path: &Path) -> bool {
+    let Ok(meta) = path.metadata() else {
+        return false;
+    };
+    if !meta.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        meta.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(windows)]
+    {
+        path.extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|ext| {
+                matches!(
+                    ext.to_ascii_lowercase().as_str(),
+                    "exe" | "cmd" | "bat" | "com"
+                )
+            })
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        true
+    }
+}
+
+fn collect_binaries(path_env: &std::ffi::OsStr) -> Vec<String> {
+    let mut set: std::collections::BTreeSet<String> =
+        SHELL_BUILTINS.iter().map(|s| (*s).to_string()).collect();
+    for dir in std::env::split_paths(path_env) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !is_executable(&path) {
+                continue;
+            }
+            if let Ok(name) = entry.file_name().into_string()
+                && !name.is_empty()
+            {
+                set.insert(name);
+            }
+        }
+    }
+    let mut list: Vec<String> = set.into_iter().collect();
+    list.sort_by_key(|b| (b.to_lowercase(), b.clone()));
+    list
+}
+
+fn filter_binaries(all: &[String], query: &str, limit: usize) -> Vec<String> {
+    let q = query.trim().to_lowercase();
+    if q.is_empty() {
+        return all.iter().take(limit).cloned().collect();
+    }
+    let mut prefix = Vec::new();
+    let mut substring = Vec::new();
+    for name in all {
+        let lower = name.to_lowercase();
+        if lower.starts_with(&q) {
+            prefix.push(name.clone());
+        } else if lower.contains(&q) {
+            substring.push(name.clone());
+        }
+    }
+    prefix.into_iter().chain(substring).take(limit).collect()
 }
 
 /// Downscales / recompresses prompt images (`images.auto_resize`); undecodable ones are kept.
@@ -744,6 +916,7 @@ async fn config_info(hub: &Arc<Hub>, cwd: &str) -> Result<ServerConfigInfo, Stri
         commands,
         mcp,
         tui: cfg.tui.clone(),
+        warnings: cfg.warnings,
     })
 }
 
@@ -1101,5 +1274,41 @@ mod tests {
         assert!(!r.contains(&"Cargo.toml".to_string()));
         assert_eq!(fuzzy_filter(&files, "eng", 10)[0], "src/engine.rs");
         assert_eq!(fuzzy_filter(&files, "", 2).len(), 2);
+    }
+
+    #[test]
+    fn binary_completions_include_builtins_and_rank_prefix_before_substring() {
+        let dir = std::env::temp_dir().join(format!("ref-bin-{}", crate::util::random_hex(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe_1 = dir.join("git-custom");
+        let exe_2 = dir.join("my-git-helper");
+        let non_exe = dir.join("git-not-executable");
+        std::fs::write(&exe_1, "#!/bin/sh\n").unwrap();
+        std::fs::write(&exe_2, "#!/bin/sh\n").unwrap();
+        std::fs::write(&non_exe, "plain text").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&exe_1, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::fs::set_permissions(&exe_2, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::fs::set_permissions(&non_exe, std::fs::Permissions::from_mode(0o644)).unwrap();
+        }
+        let all = collect_binaries(dir.as_os_str());
+        std::fs::remove_dir_all(&dir).unwrap();
+        for builtin in SHELL_BUILTINS {
+            assert!(
+                all.iter().any(|b| b == builtin),
+                "missing builtin {builtin}"
+            );
+        }
+        #[cfg(unix)]
+        {
+            assert!(all.contains(&"git-custom".to_string()));
+            assert!(all.contains(&"my-git-helper".to_string()));
+            assert!(!all.contains(&"git-not-executable".to_string()));
+            let git_matches = filter_binaries(&all, "git", 50);
+            assert_eq!(git_matches, vec!["git-custom", "my-git-helper"]);
+            assert_eq!(filter_binaries(&all, "git", 1), vec!["git-custom"]);
+        }
     }
 }

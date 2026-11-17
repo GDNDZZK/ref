@@ -621,7 +621,7 @@ async fn compaction_agent_prompt_and_model_from_config() {
     assert!(messages(&s)[2].raw_text().contains("custom summary"));
     // Hidden agents are not offered to frontends and cannot run sessions.
     let conn = hello_conn(&hub);
-    let r = call(&hub, &conn, ref_proto::Request::GetConfig).await;
+    let r = call(&hub, &conn, ref_proto::Request::GetConfig { cwd: None }).await;
     let names: Vec<&str> = r["config"]["agents"]
         .as_array()
         .unwrap()
@@ -738,7 +738,7 @@ async fn mcp_status_request() {
         r["servers"],
         json!([{"name": "off", "status": ref_proto::MCP_DISABLED, "error": null, "tools": []}])
     );
-    let r = call(&hub, &conn, ref_proto::Request::GetConfig).await;
+    let r = call(&hub, &conn, ref_proto::Request::GetConfig { cwd: None }).await;
     assert_eq!(
         r["config"]["mcp"],
         json!([["off", ref_proto::MCP_DISABLED]])

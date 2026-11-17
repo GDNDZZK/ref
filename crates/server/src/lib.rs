@@ -3,6 +3,7 @@
 mod agent_switch;
 pub mod api;
 pub mod compaction;
+pub(crate) mod config_files;
 mod convert;
 pub mod engine;
 pub mod hub;
@@ -26,7 +27,7 @@ pub mod ws;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-pub use hub::{Hub, HubOptions};
+pub use hub::{Hub, HubOptions, default_config_dir};
 
 /// A running server (hub + listener task).
 pub struct Running {

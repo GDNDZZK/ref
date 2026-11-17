@@ -181,7 +181,7 @@ async fn ws_smoke() {
     let text = tokio::time::timeout(TIMEOUT, got).await.unwrap();
     assert_eq!(text, "pong");
 
-    send(&mut ws, 7, Request::GetConfig).await;
+    send(&mut ws, 7, Request::GetConfig { cwd: None }).await;
     let (ok, res, _) = response(&mut ws, 7, &mut other).await;
     assert!(ok);
     assert_eq!(res["config"]["models"][0]["id"], "m");
@@ -373,7 +373,16 @@ async fn list_dirs_answers_with_sorted_sub_directories() {
     let canonical = dunce::canonicalize(&work).unwrap();
 
     // Relative to the connection's cwd.
-    send(&mut ws, 2, Request::ListDirs { path: ".".into() }).await;
+    send(
+        &mut ws,
+        2,
+        Request::ListDirs {
+            path: ".".into(),
+            cwd: None,
+            include_files: false,
+        },
+    )
+    .await;
     let (ok, res, err) = response(&mut ws, 2, &mut other).await;
     assert!(ok, "{err:?}");
     assert_eq!(res["path"], canonical.to_string_lossy().as_ref());
@@ -384,7 +393,16 @@ async fn list_dirs_answers_with_sorted_sub_directories() {
 
     // Absolute and normalized.
     let messy = format!("{}/gamma/../gamma/inner", work.display());
-    send(&mut ws, 3, Request::ListDirs { path: messy }).await;
+    send(
+        &mut ws,
+        3,
+        Request::ListDirs {
+            path: messy,
+            cwd: None,
+            include_files: false,
+        },
+    )
+    .await;
     let (ok, res, _) = response(&mut ws, 3, &mut other).await;
     assert!(ok);
     assert_eq!(
@@ -398,7 +416,16 @@ async fn list_dirs_answers_with_sorted_sub_directories() {
     assert_eq!(res["dirs"], serde_json::json!([]));
 
     // Without a configured home directory `~` is just a missing name.
-    send(&mut ws, 4, Request::ListDirs { path: "~".into() }).await;
+    send(
+        &mut ws,
+        4,
+        Request::ListDirs {
+            path: "~".into(),
+            cwd: None,
+            include_files: false,
+        },
+    )
+    .await;
     let (ok, _, err, code) = response_coded(&mut ws, 4, &mut other).await;
     assert!(!ok && err.is_some());
     assert_eq!(code.as_deref(), Some(ref_proto::ERR_DIR_NOT_FOUND));
@@ -409,7 +436,16 @@ async fn list_dirs_answers_with_sorted_sub_directories() {
         (6, "file.txt", Some(ref_proto::ERR_DIR_NOT_FOUND)),
         (7, "  ", None),
     ] {
-        send(&mut ws, id, Request::ListDirs { path: path.into() }).await;
+        send(
+            &mut ws,
+            id,
+            Request::ListDirs {
+                path: path.into(),
+                cwd: None,
+                include_files: false,
+            },
+        )
+        .await;
         let (ok, _, err, code) = response_coded(&mut ws, id, &mut other).await;
         assert!(!ok && err.is_some(), "{path}");
         assert_eq!(code.as_deref(), expected_code, "{path}");
@@ -423,6 +459,8 @@ async fn list_dirs_answers_with_sorted_sub_directories() {
             8,
             Request::ListDirs {
                 path: "file.txt/sub".into(),
+                cwd: None,
+                include_files: false,
             },
         )
         .await;
@@ -447,7 +485,11 @@ async fn list_dirs_expands_the_configured_home() {
     let conn = hub.add_conn();
     conn.lock().cwd = dir.to_string_lossy().into();
     for path in ["~", "~/"] {
-        let req = Request::ListDirs { path: path.into() };
+        let req = Request::ListDirs {
+            path: path.into(),
+            cwd: None,
+            include_files: false,
+        };
         let res = ref_server::api::handle(&hub, &conn, req).await.unwrap();
         let canonical = dunce::canonicalize(&home).unwrap();
         assert_eq!(res["path"], canonical.to_string_lossy().as_ref(), "{path}");
@@ -497,7 +539,11 @@ async fn list_dirs_skips_names_that_are_not_utf8() {
     let hub = ref_server::Hub::new(hub_options(cfg, &dir));
     let conn = hub.add_conn();
     conn.lock().cwd = dir.to_string_lossy().into();
-    let req = Request::ListDirs { path: ".".into() };
+    let req = Request::ListDirs {
+        path: ".".into(),
+        cwd: None,
+        include_files: false,
+    };
     let res = ref_server::api::handle(&hub, &conn, req).await.unwrap();
     let names: Vec<&str> = res["dirs"]
         .as_array()

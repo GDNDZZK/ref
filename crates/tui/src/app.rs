@@ -694,7 +694,7 @@ impl App {
                 self.mcp_fallback = false;
                 self.mcp_inflight = false;
                 self.mcp_poll_at = None;
-                self.req(Request::GetConfig, Pending::Config);
+                self.req(Request::GetConfig { cwd: None }, Pending::Config);
                 self.req(Request::ListSessions, Pending::LiveList);
                 self.refresh_mcp();
                 self.update_autocomplete();
@@ -825,7 +825,7 @@ impl App {
             ServerFrame::Sessions { sessions } => self.on_sessions(sessions),
             ServerFrame::Toast { level, text } => self.toasts.push(level, text),
             // The TUI does not ask for notifications (Hello.notify is empty).
-            ServerFrame::Notify { .. } => {}
+            ServerFrame::Notify { .. } | ServerFrame::ConfigChanged { .. } => {}
         }
     }
 
@@ -1334,7 +1334,7 @@ impl App {
         self.mcp_inflight = true;
         self.mcp_poll_at = None;
         if self.mcp_fallback {
-            self.req(Request::GetConfig, Pending::ConfigMcp);
+            self.req(Request::GetConfig { cwd: None }, Pending::ConfigMcp);
         } else {
             let cwd = self
                 .cur()

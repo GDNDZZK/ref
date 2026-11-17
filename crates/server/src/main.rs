@@ -189,6 +189,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         eprintln!("ref-server: warning: {w}");
     }
     let mut opts = HubOptions::new(ref_proto::data_dir().map_err(anyhow::Error::msg)?);
+    opts.config_dir = ref_server::default_config_dir();
     let idle_timeout = cli.idle_timeout.unwrap_or(ref_proto::IDLE_NEVER);
     opts.idle_timeout = idle_timeout;
     let running = ref_server::start(opts, &bind, port, auth).await?;
