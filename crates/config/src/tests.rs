@@ -928,3 +928,23 @@ fn malformed_values_clamps_and_missing_home_emit_warnings() {
         ctx.warnings
     );
 }
+
+#[test]
+fn project_config_files_lists_layers_and_excludes_global_dirs() {
+    let fx = Fx::new();
+    let global_ref = fx.home().join(".config/ref");
+    fs::create_dir_all(&global_ref).unwrap();
+    fx.write("home/.config/ref/ref.json", "{}");
+    let p_oc = fx.write("proj/opencode.json", "{}");
+    let p_ref_dir = fx.write("proj/.ref/ref.jsonc", "{}");
+    let sub_ref = fx.write("proj/sub/ref.json", "{}");
+    let sub = fx.proj().join("sub");
+    let globals = [fx.home().join(".config/opencode"), global_ref.clone()];
+
+    let found = project_config_files(Some(&fx.home()), &globals, None, &sub);
+    assert_eq!(found, vec![p_oc, p_ref_dir, sub_ref]);
+
+    let in_global =
+        project_config_files(Some(&fx.home()), &globals, Some(&global_ref), &global_ref);
+    assert!(in_global.is_empty());
+}

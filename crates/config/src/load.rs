@@ -153,6 +153,46 @@ pub fn load_in(
     cfg
 }
 
+fn push_existing_files(out: &mut Vec<PathBuf>, dir: &Path, names: &[String]) {
+    for n in names {
+        let p = dir.join(n);
+        if p.is_file() {
+            out.push(p);
+        }
+    }
+}
+
+/// Existing project-level JSON(C) config files discovered for `cwd` (root-most first),
+/// excluding any directory matching `global_dirs`.
+pub fn project_config_files(
+    home: Option<&Path>,
+    global_dirs: &[PathBuf],
+    project_root: Option<&Path>,
+    cwd: &Path,
+) -> Vec<PathBuf> {
+    let mut ctx = Ctx {
+        home,
+        env: &|_| None,
+        warnings: Vec::new(),
+    };
+    let mut out = Vec::new();
+    let is_global = |d: &Path| global_dirs.iter().any(|g| same_dir(g, d));
+    for dir in project_dirs(&mut ctx, cwd, project_root) {
+        let dir_is_global = is_global(&dir);
+        for (stem, sub) in [("opencode", ".opencode"), ("ref", ".ref")] {
+            let names = [format!("{stem}.json"), format!("{stem}.jsonc")];
+            if !dir_is_global {
+                push_existing_files(&mut out, &dir, &names);
+            }
+            let d = dir.join(sub);
+            if d.is_dir() && !is_global(&d) {
+                push_existing_files(&mut out, &d, &names);
+            }
+        }
+    }
+    out
+}
+
 fn same_dir(a: &Path, b: &Path) -> bool {
     match (a.canonicalize(), b.canonicalize()) {
         (Ok(x), Ok(y)) => x == y,
