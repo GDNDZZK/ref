@@ -40,6 +40,7 @@ pub mod cmd {
     pub const EDITOR: &str = "editor";
     pub const HELP: &str = "help";
     pub const EXIT: &str = "exit";
+    pub const RELOAD: &str = "reload";
 }
 
 /// Session info for a session the client has not heard about yet.

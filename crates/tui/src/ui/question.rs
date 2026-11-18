@@ -78,6 +78,11 @@ pub struct QuestionView {
     pub(super) tab_y: u16,
     /// Where the terminal cursor goes while typing.
     pub cursor_at: Option<(u16, u16)>,
+    pub rect: Rect,
+    pub(crate) scroll: usize,
+    max_scroll: usize,
+    follow_cursor: bool,
+    edit_rect: Option<Rect>,
 }
 
 impl QuestionView {
@@ -108,6 +113,11 @@ impl QuestionView {
             tab_hits: Vec::new(),
             tab_y: 0,
             cursor_at: None,
+            rect: Rect::default(),
+            scroll: 0,
+            max_scroll: 0,
+            follow_cursor: true,
+            edit_rect: None,
         }
     }
 
@@ -171,6 +181,8 @@ impl QuestionView {
     fn move_tab(&mut self, delta: isize) {
         let n = self.tab_count() as isize;
         self.tab = (self.tab as isize + delta).rem_euclid(n) as usize;
+        self.scroll = 0;
+        self.follow_cursor = true;
     }
 
     fn move_cursor(&mut self, delta: isize) {
@@ -178,6 +190,19 @@ impl QuestionView {
         let n = self.row_count(q) as isize;
         let c = self.answers[q].cursor as isize + delta;
         self.answers[q].cursor = c.clamp(0, n - 1) as usize;
+        self.follow_cursor = true;
+    }
+
+    pub fn scroll_by(&mut self, delta: i32) {
+        self.scroll = (self.scroll as i32 + delta).clamp(0, self.max_scroll as i32) as usize;
+        self.follow_cursor = false;
+    }
+
+    pub fn wheel(&mut self, delta: i32) {
+        if self.submitting {
+            return;
+        }
+        self.scroll_by(delta);
     }
 
     pub fn key(&mut self, k: &KeyEvent) -> Outcome {
@@ -195,13 +220,26 @@ impl QuestionView {
             KeyCode::BackTab if !self.is_simple() => self.move_tab(-1),
             KeyCode::Right if !self.is_simple() => self.move_tab(1),
             KeyCode::Left if !self.is_simple() => self.move_tab(-1),
-            _ if self.on_confirm_tab() => {
-                if k.code == KeyCode::Enter {
-                    return Outcome::Submit(self.all_answers());
+            _ if self.on_confirm_tab() => match k.code {
+                KeyCode::Enter => return Outcome::Submit(self.all_answers()),
+                KeyCode::Up | KeyCode::Char('k') if plain => self.scroll_by(-1),
+                KeyCode::Down | KeyCode::Char('j') if plain => self.scroll_by(1),
+                KeyCode::PageUp => self.scroll_by(-super::dialog::PAGE_ROWS),
+                KeyCode::PageDown | KeyCode::Char(' ') => self.scroll_by(super::dialog::PAGE_ROWS),
+                KeyCode::Home | KeyCode::Char('g') if plain => {
+                    self.scroll = 0;
+                    self.follow_cursor = false;
                 }
-            }
+                KeyCode::End | KeyCode::Char('G') => {
+                    self.scroll = self.max_scroll;
+                    self.follow_cursor = false;
+                }
+                _ => {}
+            },
             KeyCode::Up | KeyCode::Char('k') if plain => self.move_cursor(-1),
             KeyCode::Down | KeyCode::Char('j') if plain => self.move_cursor(1),
+            KeyCode::PageUp => self.move_cursor(-super::dialog::PAGE_ROWS as isize),
+            KeyCode::PageDown => self.move_cursor(super::dialog::PAGE_ROWS as isize),
             KeyCode::Enter | KeyCode::Char(' ') => {
                 let row = self.answers[self.tab].cursor;
                 return self.choose(row);
@@ -210,6 +248,7 @@ impl QuestionView {
                 let row = c as usize - '1' as usize;
                 if row < self.row_count(self.tab) {
                     self.answers[self.tab].cursor = row;
+                    self.follow_cursor = true;
                     return self.choose(row);
                 }
             }
@@ -251,6 +290,8 @@ impl QuestionView {
             return Outcome::Submit(self.all_answers());
         }
         self.tab += 1;
+        self.scroll = 0;
+        self.follow_cursor = true;
         Outcome::Open
     }
 
@@ -281,7 +322,19 @@ impl QuestionView {
 
     /// A click on a row or a tab.
     pub fn click(&mut self, x: u16, y: u16) -> Outcome {
-        if self.submitting || self.edit.is_some() {
+        if self.submitting {
+            return Outcome::Open;
+        }
+        if let Some(editor) = self.edit.as_mut() {
+            if let Some(er) = self.edit_rect
+                && y == er.y
+                && x >= er.x
+                && x < er.x + er.width
+            {
+                let off = editor.offset_at_single_line(er, x);
+                editor.mouse_down(off, 1);
+                editor.mouse_up();
+            }
             return Outcome::Open;
         }
         self.error = None;
@@ -289,6 +342,8 @@ impl QuestionView {
             && let Some((_, _, tab)) = self.tab_hits.iter().find(|(x0, x1, _)| x >= *x0 && x < *x1)
         {
             self.tab = *tab;
+            self.scroll = 0;
+            self.follow_cursor = true;
             return Outcome::Open;
         }
         let Some((_, row)) = self.row_hits.iter().find(|(ry, _)| *ry == y).copied() else {
@@ -298,6 +353,7 @@ impl QuestionView {
             return Outcome::Open;
         }
         self.answers[self.tab].cursor = row;
+        self.follow_cursor = true;
         self.choose(row)
     }
 }
@@ -313,18 +369,23 @@ struct Body {
     edit_at: Option<(usize, usize)>,
 }
 
-/// First body line shown: keeps the cursor row in view.
-fn scroll_offset(body: &Body, body_h: usize) -> usize {
-    body.cursor_line
-        .saturating_sub(body_h.saturating_sub(1))
-        .min(body.lines.len().saturating_sub(body_h))
-}
-
 impl QuestionView {
     pub fn draw(&mut self, buf: &mut Buffer, screen: Rect, session_name: Option<&str>) {
+        self.tab_hits.clear();
+        self.row_hits.clear();
+        self.cursor_at = None;
+        self.edit_rect = None;
+        if screen.width < 6 || screen.height < 4 {
+            self.rect = Rect::default();
+            return;
+        }
         let t = open_progress(self.opened);
-        let w = screen.width.saturating_sub(4).clamp(MIN_WIDTH, MAX_WIDTH);
-        let iw = w.min(screen.width).saturating_sub(4) as usize;
+        let w = screen
+            .width
+            .saturating_sub(4)
+            .clamp(MIN_WIDTH.min(screen.width), MAX_WIDTH)
+            .min(screen.width);
+        let iw = w.saturating_sub(4).max(1) as usize;
         let title = self.title(session_name);
         let body = self.body(iw);
         let tabs = !self.is_simple();
@@ -333,36 +394,64 @@ impl QuestionView {
         let max_h = screen
             .height
             .saturating_sub(2)
-            .clamp(MIN_DIALOG_ROWS, MAX_DIALOG_ROWS) as usize;
-        let h = (body.lines.len() + head + extra + CHROME_ROWS).min(max_h);
+            .clamp(MIN_DIALOG_ROWS.min(screen.height), MAX_DIALOG_ROWS)
+            .min(screen.height) as usize;
+        let h = (body.lines.len() + head + extra + CHROME_ROWS)
+            .clamp(4, max_h.max(4))
+            .min(screen.height as usize);
         let r = frame(buf, screen, w, h as u16, &title, t);
+        self.rect = r;
+        if r.width < 6 || r.height < 4 {
+            return;
+        }
         let inner = Rect::new(
             r.x + 2,
             r.y + 1,
             r.width.saturating_sub(4),
             r.height.saturating_sub(2),
         );
-        self.tab_hits.clear();
-        self.row_hits.clear();
-        self.cursor_at = None;
-        if tabs {
+        if tabs && inner.height > 0 && inner.width > 0 {
             self.draw_tabs(buf, inner);
         }
-        let body_y = inner.y + head as u16;
+        let body_y = inner.y.saturating_add(head as u16);
         let body_h = (inner.height as usize).saturating_sub(head + extra + 2);
-        let scroll = scroll_offset(&body, body_h);
+        self.max_scroll = body.lines.len().saturating_sub(body_h);
+        if self.follow_cursor && !self.on_confirm_tab() && body_h > 0 {
+            if body.cursor_line < self.scroll {
+                self.scroll = body.cursor_line;
+            } else if body.cursor_line >= self.scroll + body_h {
+                self.scroll = body.cursor_line + 1 - body_h;
+            }
+        }
+        self.scroll = self.scroll.min(self.max_scroll);
+        let scroll = self.scroll;
         for (i, line) in body.lines.iter().skip(scroll).take(body_h).enumerate() {
             buf.set_line(inner.x, body_y + i as u16, line, inner.width);
+        }
+        if self.max_scroll > 0 && body_h > 0 {
+            super::chat::draw_scrollbar(
+                buf,
+                Rect::new(r.x + r.width - 2, body_y, 1, body_h as u16),
+                body.lines.len(),
+                scroll as f64,
+                self.max_scroll as f64,
+                ("┃", theme::BORDER_ACTIVE),
+                Some(("│", theme::BORDER_SUBTLE)),
+            );
         }
         let visible = scroll..scroll + body_h;
         self.record_hits(&body, &visible, body_y);
         self.place_editor(buf, &body, &visible, inner, body_y);
-        let mut y = inner.y + inner.height.saturating_sub(1);
-        buf.set_line(inner.x, y, &self.hint(), inner.width);
-        if let Some(e) = &self.error {
-            y = y.saturating_sub(2);
-            let msg = text::truncate(e, inner.width as usize);
-            buf.set_string(inner.x, y, msg, theme::fg(theme::ERROR));
+        if inner.height > 0 && inner.width > 0 {
+            let mut y = inner.y + inner.height - 1;
+            buf.set_line(inner.x, y, &self.hint(), inner.width);
+            if let Some(e) = &self.error {
+                y = y.saturating_sub(2);
+                if y >= inner.y {
+                    let msg = text::truncate(e, inner.width as usize);
+                    buf.set_string(inner.x, y, msg, theme::fg(theme::ERROR));
+                }
+            }
         }
     }
 
@@ -390,19 +479,20 @@ impl QuestionView {
         };
         if !visible.contains(&line) {
             return;
-        }
+        };
         let Some(editor) = self.edit.as_mut() else {
             return;
         };
         let field = Rect::new(
-            inner.x + col as u16,
+            inner.x.saturating_add(col as u16),
             body_y + (line - visible.start) as u16,
             inner.width.saturating_sub(col as u16),
             1,
         );
-        self.cursor_at = editor.draw(buf, field, "your answer", true);
+        self.edit_rect = Some(field);
+        self.cursor_at =
+            editor.draw_single_line(buf, field, Some(theme::PANEL), "your answer", true);
     }
-
     fn title(&self, session_name: Option<&str>) -> String {
         let base = if self.is_simple() {
             format!("? {}", self.questions[0].header)
@@ -423,13 +513,17 @@ impl QuestionView {
             .clamp(MIN_TAB_LABEL, MAX_TAB_LABEL);
         self.tab_y = inner.y;
         let mut x = inner.x;
+        let right = inner.x.saturating_add(inner.width);
         for i in 0..n {
+            if x >= right {
+                break;
+            }
             let is_confirm = i == n - 1;
             let label = match self.questions.get(i) {
                 Some(q) => text::truncate(&q.header, max_label),
                 None => CONFIRM_LABEL.to_string(),
             };
-            let label = format!(" {label} ");
+            let label = text::truncate(&format!(" {label} "), (right - x) as usize);
             let style = if i == self.tab {
                 Style::new()
                     .fg(theme::PANEL)
@@ -441,9 +535,12 @@ impl QuestionView {
                 theme::fg(theme::DIM)
             };
             let w = width(&label) as u16;
+            if w == 0 {
+                break;
+            }
             buf.set_string(x, inner.y, &label, style);
             self.tab_hits.push((x, x + w, i));
-            x += w + 1;
+            x = x.saturating_add(w + 1);
         }
     }
 

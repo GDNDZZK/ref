@@ -57,8 +57,12 @@ pub struct Editor {
     pub last_width: usize,
     /// Scroll offset of visible rows.
     pub scroll: usize,
+    /// Horizontal column scroll offset when drawn as a single-line input.
+    pub hscroll: usize,
     /// A single-click press is being dragged (mouse selection).
     pub dragging: bool,
+    /// Raw byte offset of the initial mouse-down (before token-boundary snapping).
+    press_off: Option<usize>,
 }
 
 /// A visual row: byte range `[start, end)` of `text`.
@@ -115,6 +119,7 @@ impl Editor {
         self.cursor = self.text.len();
         self.anchor = None;
         self.pref_col = None;
+        self.hscroll = 0;
         self.gc_tokens();
     }
 
@@ -127,6 +132,8 @@ impl Editor {
         self.images.clear();
         self.pref_col = None;
         self.scroll = 0;
+        self.hscroll = 0;
+        self.press_off = None;
     }
 
     // -- selection ----------------------------------------------------------
@@ -232,6 +239,21 @@ impl Editor {
         None
     }
 
+    /// Token range `(s, e)` strictly containing byte offset `i` (`s < i < e`).
+    fn token_containing(&self, i: usize) -> Option<(usize, usize)> {
+        self.token_ranges()
+            .into_iter()
+            .find(|&(s, e)| i > s && i < e)
+    }
+
+    /// Snaps `i` to the nearer boundary when it falls strictly inside a paste/image token.
+    fn snap_out_of_token(&self, i: usize) -> usize {
+        match self.token_containing(i) {
+            Some((s, e)) if i - s <= e - i => s,
+            Some((_, e)) => e,
+            None => i,
+        }
+    }
     pub fn backspace(&mut self) {
         if self.delete_selection() {
             return;
@@ -267,7 +289,17 @@ impl Editor {
     }
 
     fn word_left_pos(&self) -> usize {
+        if let Some((s, _)) = self.token_around(self.cursor) {
+            return s;
+        }
         let before = &self.text[..self.cursor];
+        // Skip trailing whitespace and check if a token ends right before it.
+        let trimmed_len = before.trim_end_matches(char::is_whitespace).len();
+        if trimmed_len > 0
+            && let Some((s, _)) = self.token_around(trimmed_len)
+        {
+            return s;
+        }
         let mut idx = self.cursor;
         let mut seen_word = false;
         for (i, w) in before.split_word_bound_indices().rev() {
@@ -286,11 +318,20 @@ impl Editor {
                 break;
             }
         }
-        idx
+        self.token_containing(idx).map_or(idx, |(s, _)| s)
     }
 
     fn word_right_pos(&self) -> usize {
         let after = &self.text[self.cursor..];
+        let ws_bytes: usize = after
+            .chars()
+            .take_while(|c| c.is_whitespace())
+            .map(char::len_utf8)
+            .sum();
+        let next_non_ws = self.cursor + ws_bytes;
+        if let Some(&(_, e)) = self.token_ranges().iter().find(|&&(s, _)| s == next_non_ws) {
+            return e;
+        }
         let mut idx = self.cursor;
         let mut seen_word = false;
         for (i, w) in after.split_word_bound_indices() {
@@ -306,7 +347,7 @@ impl Editor {
                 }
             }
         }
-        idx
+        self.token_containing(idx).map_or(idx, |(_, e)| e)
     }
 
     pub fn delete_word_back(&mut self) {
@@ -378,23 +419,37 @@ impl Editor {
     // -- movement ------------------------------------------------------------
 
     pub fn left(&mut self) {
-        self.cursor = self.prev_boundary(self.cursor);
+        let p = self.prev_boundary(self.cursor);
+        self.cursor = self.token_containing(p).map_or(p, |(s, _)| s);
         self.pref_col = None;
+        if self.anchor.is_some() {
+            self.snap_selection();
+        }
     }
 
     pub fn right(&mut self) {
-        self.cursor = self.next_boundary(self.cursor);
+        let p = self.next_boundary(self.cursor);
+        self.cursor = self.token_containing(p).map_or(p, |(_, e)| e);
         self.pref_col = None;
+        if self.anchor.is_some() {
+            self.snap_selection();
+        }
     }
 
     pub fn word_left(&mut self) {
         self.cursor = self.word_left_pos();
         self.pref_col = None;
+        if self.anchor.is_some() {
+            self.snap_selection();
+        }
     }
 
     pub fn word_right(&mut self) {
         self.cursor = self.word_right_pos();
         self.pref_col = None;
+        if self.anchor.is_some() {
+            self.snap_selection();
+        }
     }
 
     pub fn home(&mut self) {
@@ -446,7 +501,10 @@ impl Editor {
             x += w;
             pos = row.start + i + g.len();
         }
-        self.cursor = pos;
+        self.cursor = self.snap_out_of_token(pos);
+        if self.anchor.is_some() {
+            self.snap_selection();
+        }
         true
     }
 
@@ -632,16 +690,26 @@ impl Editor {
         let off = off.min(self.text.len());
         self.pref_col = None;
         self.dragging = clicks <= 1;
+        self.press_off = (clicks <= 1).then_some(off);
         match clicks {
             2 => {
-                let (a, b) = self
-                    .text
-                    .split_word_bound_indices()
-                    .map(|(i, w)| (i, i + w.len()))
-                    .find(|&(a, b)| off >= a && off < b)
-                    .unwrap_or((off, off));
-                self.anchor = Some(a);
-                self.cursor = b;
+                if let Some((s, e)) = self
+                    .token_ranges()
+                    .into_iter()
+                    .find(|&(s, e)| off >= s && off < e)
+                {
+                    self.anchor = Some(s);
+                    self.cursor = e;
+                } else {
+                    let (a, b) = self
+                        .text
+                        .split_word_bound_indices()
+                        .map(|(i, w)| (i, i + w.len()))
+                        .find(|&(a, b)| off >= a && off < b)
+                        .unwrap_or((off, off));
+                    self.anchor = Some(a);
+                    self.cursor = b;
+                }
             }
             3 => {
                 self.anchor = Some(self.text[..off].rfind('\n').map_or(0, |i| i + 1));
@@ -651,7 +719,7 @@ impl Editor {
             }
             _ => {
                 self.anchor = None;
-                self.cursor = off;
+                self.cursor = self.snap_out_of_token(off);
             }
         }
         self.snap_selection();
@@ -663,7 +731,7 @@ impl Editor {
             return;
         }
         if self.anchor.is_none() {
-            self.anchor = Some(self.cursor);
+            self.anchor = Some(self.press_off.unwrap_or(self.cursor));
         }
         self.cursor = off.min(self.text.len());
         self.snap_selection();
@@ -671,6 +739,7 @@ impl Editor {
 
     pub fn mouse_up(&mut self) {
         self.dragging = false;
+        self.press_off = None;
         if self.anchor == Some(self.cursor) {
             self.anchor = None;
         }
@@ -834,6 +903,112 @@ impl Editor {
         ))
     }
 
+    /// Draws a horizontally scrolling single-line input into `area`; returns cursor `(x, y)`.
+    pub fn draw_single_line(
+        &mut self,
+        buf: &mut Buffer,
+        area: Rect,
+        bg: Option<ratatui::style::Color>,
+        placeholder: &str,
+        focused: bool,
+    ) -> Option<(u16, u16)> {
+        let w = area.width as usize;
+        self.last_width = w;
+        if area.height == 0 || w == 0 {
+            return None;
+        }
+        let with_bg = |st: Style| match bg {
+            Some(c) => st.bg(c),
+            None => st,
+        };
+        if self.text.is_empty() {
+            self.hscroll = 0;
+            let ph = crate::text::truncate(placeholder, w.saturating_sub(1));
+            buf.set_string(area.x, area.y, ph, with_bg(theme::fg(theme::DIM)));
+            return focused.then_some((area.x, area.y));
+        }
+        let mut cursor_col = 0usize;
+        let mut total_col = 0usize;
+        for (gi, g) in self.text.grapheme_indices(true) {
+            let gw = if g == "\n" { 1 } else { gwidth(g) };
+            if gi < self.cursor {
+                cursor_col += gw;
+            }
+            total_col += gw;
+        }
+        let avail = w.saturating_sub(1);
+        if cursor_col < self.hscroll || avail == 0 {
+            self.hscroll = cursor_col;
+        } else if cursor_col > self.hscroll + avail {
+            self.hscroll = cursor_col - avail;
+        }
+        let max_hscroll = (total_col + 1).saturating_sub(w);
+        self.hscroll = self.hscroll.min(max_hscroll);
+
+        let sel = self.selection();
+        let toks = self.token_ranges();
+        let base = with_bg(theme::text());
+        let mut col = 0usize;
+        let mut x = area.x;
+        let right = area.x.saturating_add(area.width);
+        for (gi, g) in self.text.grapheme_indices(true) {
+            let disp = if g == "\n" { " " } else { g };
+            let gw = if g == "\n" { 1 } else { gwidth(g) };
+            if gw == 0 {
+                continue;
+            }
+            if col + gw <= self.hscroll {
+                col += gw;
+                continue;
+            }
+            if col < self.hscroll {
+                // Wide glyph straddling left scroll edge: pad with space.
+                if x < right {
+                    buf.set_string(x, area.y, " ", base);
+                    x += 1;
+                }
+                col += gw;
+                continue;
+            }
+            if x.saturating_add(gw as u16) > right {
+                break;
+            }
+            let mut st = base;
+            if toks.iter().any(|(a, b)| gi >= *a && gi < *b) {
+                st = with_bg(Style::new().fg(theme::ACCENT).add_modifier(Modifier::BOLD));
+            }
+            if sel.is_some_and(|(a, b)| gi >= a && gi < b) {
+                st = st.bg(theme::SELECTION);
+            }
+            buf.set_string(x, area.y, disp, st);
+            x += gw as u16;
+            col += gw;
+        }
+        if !focused {
+            return None;
+        }
+        let cx = cursor_col.saturating_sub(self.hscroll);
+        Some((
+            (area.x.saturating_add(cx as u16)).min(right.saturating_sub(1)),
+            area.y,
+        ))
+    }
+
+    /// Byte offset under screen column `x` for a single-line editor drawn at `area`.
+    pub fn offset_at_single_line(&self, area: Rect, x: u16) -> usize {
+        let want = self.hscroll + x.saturating_sub(area.x) as usize;
+        let mut col = 0usize;
+        let mut pos = 0usize;
+        for (i, g) in self.text.grapheme_indices(true) {
+            let gw = if g == "\n" { 1 } else { gwidth(g) };
+            if col + gw > want {
+                break;
+            }
+            col += gw;
+            pos = i + g.len();
+        }
+        pos
+    }
     /// The `@word` being typed at the cursor: (byte start of `@`, query).
     pub fn mention(&self) -> Option<(usize, String)> {
         let before = &self.text[..self.cursor];
@@ -870,6 +1045,8 @@ pub struct History {
     /// Index while browsing (None = editing a fresh draft).
     pos: Option<usize>,
     draft: String,
+    draft_shell: bool,
+    shell_only: bool,
     path: Option<std::path::PathBuf>,
 }
 
@@ -917,12 +1094,15 @@ impl History {
             items,
             pos: None,
             draft: String::new(),
+            draft_shell: false,
+            shell_only: false,
             path: Some(path),
         })
     }
 
     pub fn push(&mut self, t: &str) -> std::io::Result<()> {
         self.pos = None;
+        self.shell_only = false;
         let t = t.trim_end();
         if t.is_empty() || self.items.last().is_some_and(|l| l == t) {
             return Ok(());
@@ -956,34 +1136,72 @@ impl History {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn prev(&mut self, current: &str) -> Option<String> {
+        self.prev_mode(current, false)
+    }
+
+    #[cfg(test)]
+    pub fn next(&mut self) -> Option<String> {
+        self.next_mode().map(|(s, _)| s)
+    }
+
+    /// Steps backward in history; when `shell_mode` starts browsing, filters to `!`-prefixed entries.
+    pub fn prev_mode(&mut self, current: &str, shell_mode: bool) -> Option<String> {
         if self.items.is_empty() {
             return None;
         }
-        let i = match self.pos {
-            None => {
-                self.draft = current.to_string();
-                self.items.len() - 1
-            }
-            Some(0) => return None,
-            Some(i) => i - 1,
+        let shell_filter = if self.pos.is_none() {
+            shell_mode
+        } else {
+            self.shell_only
         };
-        self.pos = Some(i);
-        self.items.get(i).cloned()
+        let search_end = match self.pos {
+            None => self.items.len(),
+            Some(0) => return None,
+            Some(i) => i,
+        };
+        let found = (0..search_end)
+            .rev()
+            .find(|&idx| !shell_filter || self.items[idx].starts_with('!'))?;
+        if self.pos.is_none() {
+            self.draft = current.to_string();
+            self.draft_shell = shell_mode;
+            self.shell_only = shell_mode;
+        }
+        self.pos = Some(found);
+        self.items.get(found).cloned()
     }
 
-    pub fn next(&mut self) -> Option<String> {
+    /// Steps forward in history; returns `(entry_text, restore_shell_mode)`.
+    pub fn next_mode(&mut self) -> Option<(String, bool)> {
         let i = self.pos?;
-        if i + 1 >= self.items.len() {
-            self.pos = None;
-            return Some(std::mem::take(&mut self.draft));
+        let shell_filter = self.shell_only;
+        if let Some(found) = ((i + 1)..self.items.len())
+            .find(|&idx| !shell_filter || self.items[idx].starts_with('!'))
+        {
+            self.pos = Some(found);
+            let entry = self.items[found].clone();
+            let is_shell = entry.starts_with('!');
+            return Some((entry, is_shell));
         }
-        self.pos = Some(i + 1);
-        self.items.get(i + 1).cloned()
+        self.pos = None;
+        let restore_shell = self.draft_shell;
+        self.draft_shell = false;
+        self.shell_only = false;
+        let draft = std::mem::take(&mut self.draft);
+        let text = if restore_shell {
+            format!("!{draft}")
+        } else {
+            draft
+        };
+        Some((text, restore_shell))
     }
 
     pub fn reset(&mut self) {
         self.pos = None;
+        self.shell_only = false;
+        self.draft_shell = false;
     }
 
     pub fn browsing(&self) -> bool {

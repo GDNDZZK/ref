@@ -1,3 +1,4 @@
+pub mod autocomplete;
 pub mod chat;
 pub mod dialog;
 pub mod editor;

@@ -33,6 +33,8 @@ struct World {
     history: Vec<SessionInfo>,
     /// When the first MCP status was asked for (simulates a slow-connecting server).
     mcp_started: i64,
+    /// Root workspace directory passed to `run` / `seed`.
+    root_cwd: String,
 }
 
 #[derive(Clone)]
@@ -543,6 +545,61 @@ const MOCK_FILES: [&str; 9] = [
     "README.md",
     "docs/设计.md",
 ];
+const MOCK_BINARIES: &[&str] = &[
+    "alias",
+    "cargo",
+    "cat",
+    "cd",
+    "chmod",
+    "cp",
+    "curl",
+    "diff",
+    "echo",
+    "env",
+    "exit",
+    "export",
+    "false",
+    "find",
+    "git",
+    "grep",
+    "head",
+    "jq",
+    "kill",
+    "ls",
+    "make",
+    "mkdir",
+    "mv",
+    "node",
+    "npm",
+    "npx",
+    "pwd",
+    "python3",
+    "ref",
+    "ref-server",
+    "rg",
+    "rm",
+    "rustc",
+    "rustfmt",
+    "sed",
+    "sh",
+    "sort",
+    "source",
+    "tail",
+    "tar",
+    "test",
+    "touch",
+    "tr",
+    "true",
+    "uname",
+    "uniq",
+    "unset",
+    "vim",
+    "wait",
+    "wc",
+    "which",
+];
+const MOCK_BINARIES_DEFAULT_LIMIT: usize = 50;
+const MOCK_BINARIES_MAX_LIMIT: usize = 200;
 /// Context size right after a compaction.
 const COMPACTED_CONTEXT_TOKENS: u64 = 4_000;
 const COMPACT_DELAY: Duration = Duration::from_millis(1500);
@@ -1118,15 +1175,28 @@ impl Mock {
             | Request::SetNotify { .. }
             | Request::SetFocus { .. }
             | Request::Shutdown => self.ok(request_id, json!({})),
-            Request::ListDirs { .. }
-            | Request::ReloadConfig { .. }
-            | Request::GetConfigFiles { .. }
+            Request::GetConfigFiles { .. }
             | Request::SaveConfigFile { .. }
             | Request::CreateConfigFile { .. }
             | Request::SelectConfigFile { .. }
-            | Request::DeleteConfigFile { .. }
-            | Request::ListBinaries { .. } => {
+            | Request::DeleteConfigFile { .. } => {
                 self.err(request_id, "not supported by the mock backend")
+            }
+            Request::ReloadConfig { .. } => {
+                let cfg = config();
+                let warnings = cfg.warnings.clone();
+                self.send(ServerFrame::ConfigChanged {
+                    warnings: warnings.clone(),
+                });
+                self.ok(request_id, json!({ "config": cfg, "warnings": warnings }));
+            }
+            Request::ListDirs {
+                path,
+                cwd,
+                include_files,
+            } => self.on_list_dirs(request_id, &path, cwd.as_deref(), include_files),
+            Request::ListBinaries { query, limit } => {
+                self.on_list_binaries(request_id, &query, limit)
             }
             Request::GetConfig { .. } => self.ok(request_id, json!({ "config": config() })),
             Request::ListSessions => self.on_list_sessions(request_id),
@@ -1242,9 +1312,18 @@ impl Mock {
                 self.broadcast_sessions();
             }
             Request::SetCwd { session_id, path } => {
+                let root = {
+                    let w = self.world();
+                    w.root_cwd.clone()
+                };
                 let info = self.update_info(&session_id, |i| {
-                    let joined = std::path::Path::new(&i.cwd).join(&path);
-                    i.cwd = joined.to_string_lossy().into_owned();
+                    let home = if root.is_empty() {
+                        i.cwd.as_str()
+                    } else {
+                        root.as_str()
+                    };
+                    let expanded = expand_mock_tilde(&path, home);
+                    i.cwd = normalize_lexical_path(&i.cwd, &expanded);
                 });
                 match info {
                     Some(info) => self.reply_with_session(request_id, &session_id, info),
@@ -1531,8 +1610,11 @@ impl Mock {
                 .find(|m| m.provider == i.model.provider && m.id == i.model.model)
                 .map(|m| m.variants.clone())
                 .unwrap_or_default();
-            i.model.variant =
-                variant.or_else(|| next_variant(i.model.variant.as_deref(), &variants));
+            i.model.variant = match variant {
+                Some(v) if v.is_empty() => None,
+                Some(v) => Some(v),
+                None => next_variant(i.model.variant.as_deref(), &variants),
+            };
         });
         // Unlike the other session edits, the session list is not re-broadcast.
         match info {
@@ -1624,6 +1706,63 @@ impl Mock {
         self.ok(request_id, json!({ "files": files }));
     }
 
+    fn on_list_binaries(&self, request_id: Option<u64>, query: &str, limit: Option<usize>) {
+        let limit = limit
+            .unwrap_or(MOCK_BINARIES_DEFAULT_LIMIT)
+            .clamp(1, MOCK_BINARIES_MAX_LIMIT);
+        let q = query.trim().to_ascii_lowercase();
+        let mut prefix = Vec::new();
+        let mut substr = Vec::new();
+        for &b in MOCK_BINARIES {
+            let lb = b.to_ascii_lowercase();
+            if q.is_empty() || lb.starts_with(&q) {
+                prefix.push(b);
+            } else if lb.contains(&q) {
+                substr.push(b);
+            }
+        }
+        let binaries: Vec<&str> = prefix.into_iter().chain(substr).take(limit).collect();
+        self.ok(request_id, json!({ "binaries": binaries }));
+    }
+
+    fn on_list_dirs(
+        &self,
+        request_id: Option<u64>,
+        path: &str,
+        cwd: Option<&str>,
+        include_files: bool,
+    ) {
+        let raw = path.trim();
+        if raw.is_empty() {
+            self.err(request_id, "Path is empty.");
+            return;
+        }
+        let root = {
+            let w = self.world();
+            if w.root_cwd.is_empty() {
+                cwd.filter(|c| !c.is_empty()).unwrap_or("/tmp").to_string()
+            } else {
+                w.root_cwd.clone()
+            }
+        };
+        let root_norm = normalize_lexical_path("/", &root);
+        let base = cwd.filter(|c| !c.is_empty()).unwrap_or(&root_norm);
+        let expanded = expand_mock_tilde(raw, &root_norm);
+        let dir = normalize_lexical_path(base, &expanded);
+        let Some((dirs, files)) = mock_dir_entries(&root_norm, &dir, include_files) else {
+            self.err_code(
+                request_id,
+                ERR_DIR_NOT_FOUND,
+                &format!("Directory does not exist: {dir}"),
+            );
+            return;
+        };
+        self.ok(
+            request_id,
+            json!({ "path": dir, "dirs": dirs, "files": files }),
+        );
+    }
+
     fn on_mcp_status(&self, request_id: Option<u64>) {
         let started = {
             let mut w = self.world();
@@ -1665,6 +1804,7 @@ impl Mock {
 
     /// Seeds background sessions and history.
     fn seed(&self, cwd: &str) {
+        self.world().root_cwd = cwd.to_string();
         let a = self.create("worker-1", "build", cwd);
         let b = self.create("reviewer", "review", cwd);
         let c = self.create("docs-写手", "plan", cwd);
@@ -1774,6 +1914,105 @@ fn next_variant(current: Option<&str>, variants: &[String]) -> Option<String> {
     }
 }
 
+fn expand_mock_tilde(path: &str, home: &str) -> String {
+    if path == "~" {
+        return home.to_string();
+    }
+    if let Some(rest) = path.strip_prefix("~/") {
+        return format!("{}/{rest}", home.trim_end_matches('/'));
+    }
+    path.to_string()
+}
+
+fn normalize_lexical_path(base: &str, target: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    if !target.starts_with('/') {
+        for seg in base.split('/') {
+            if !seg.is_empty() && seg != "." {
+                parts.push(seg);
+            }
+        }
+    }
+    for seg in target.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            s => parts.push(s),
+        }
+    }
+    if parts.is_empty() {
+        "/".to_string()
+    } else {
+        format!("/{}", parts.join("/"))
+    }
+}
+
+/// Virtual directory listing derived from `MOCK_FILES` rooted at `root`.
+fn mock_dir_entries(
+    root: &str,
+    dir: &str,
+    include_files: bool,
+) -> Option<(Vec<String>, Vec<String>)> {
+    let root_trim = root.trim_end_matches('/');
+    let dir_trim = dir.trim_end_matches('/');
+    if dir_trim != root_trim {
+        let prefix = if dir_trim.is_empty() { "/" } else { dir_trim };
+        // Ancestor of `root`: expose the next path component leading to `root`.
+        if let Some(rest) = root_trim.strip_prefix(prefix)
+            && (dir_trim.is_empty() || rest.starts_with('/'))
+            && let Some(next) = rest.trim_start_matches('/').split('/').next()
+            && !next.is_empty()
+        {
+            return Some((vec![next.to_string()], Vec::new()));
+        }
+    }
+    let rel = if dir_trim == root_trim {
+        ""
+    } else {
+        let pfx = format!("{root_trim}/");
+        dir_trim.strip_prefix(&pfx)?
+    };
+    let mut dirs = std::collections::BTreeSet::new();
+    let mut files = std::collections::BTreeSet::new();
+    let mut dir_exists = rel.is_empty();
+    let rel_pfx = if rel.is_empty() {
+        String::new()
+    } else {
+        format!("{rel}/")
+    };
+    for &entry in &MOCK_FILES {
+        if entry.trim_end_matches('/') == rel {
+            dir_exists = true;
+        }
+        let Some(sub) = entry.strip_prefix(&rel_pfx) else {
+            continue;
+        };
+        if sub.is_empty() {
+            dir_exists = true;
+            continue;
+        }
+        dir_exists = true;
+        match sub.split_once('/') {
+            Some((d, _)) => {
+                dirs.insert(d.to_string());
+            }
+            None if include_files => {
+                files.insert(sub.to_string());
+            }
+            None => {}
+        }
+    }
+    if !dir_exists {
+        return None;
+    }
+    let mut dirs: Vec<String> = dirs.into_iter().collect();
+    let mut files: Vec<String> = files.into_iter().collect();
+    dirs.sort_by_key(|d| (d.to_lowercase(), d.clone()));
+    files.sort_by_key(|f| (f.to_lowercase(), f.clone()));
+    Some((dirs, files))
+}
 /// A message with no end time, model, agent, usage or error; callers set the differing fields.
 fn new_message(
     id: String,
