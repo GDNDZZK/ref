@@ -8,6 +8,8 @@
 #include <QJsonObject>
 #include <QSignalSpy>
 #include <QtTest>
+#include <optional>
+#include <utility>
 
 using namespace Qt::StringLiterals;
 using namespace refgui;
@@ -36,6 +38,18 @@ public:
 	bool m_activeExists = true;
 	QStringList m_warnings;
 	QList<QJsonObject> m_requests;
+	bool m_holdReload = false;
+	std::optional<QJsonObject> m_heldReload;
+
+	void releaseReload()
+	{
+		m_holdReload = false;
+		const std::optional<QJsonObject> held = std::exchange(m_heldReload, std::nullopt);
+		if(held)
+		{
+			answer(*held);
+		}
+	}
 
 private:
 	QJsonObject buildFilesResponse(const QString& selected) const
@@ -172,6 +186,11 @@ private:
 		}
 		else if(op == u"reload_config"_s)
 		{
+			if(m_holdReload)
+			{
+				m_heldReload = request;
+				return;
+			}
 			m_fake.respond(request, {{u"config"_s, QJsonObject{
 				{u"default_agent"_s, u"build"_s},
 				{u"agents"_s, QJsonArray()},
@@ -330,6 +349,122 @@ private slots:
 		const QString err = f.editor.setSerializedJsonAt({u"permission"_s}, u"{\"bash\": {\"*\": \"ask\"}}"_s);
 		QVERIFY(err.isEmpty());
 		QCOMPARE(f.editor.valueAt({u"permission"_s, u"bash"_s, u"*"_s}).toString(), u"ask"_s);
+	}
+
+	void preservesKeyOrderOrderedEntriesAndOrderedPermissions()
+	{
+		EditorFixture f;
+		f.stub.m_activeRaw = u"{\n"
+		                     "  \"zebra\": true,\n"
+		                     "  \"permission\": {\n"
+		                     "    \"edit\": {\n"
+		                     "      \"*.lock\": \"deny\",\n"
+		                     "      \"src/**\": \"allow\",\n"
+		                     "      \"*\": \"ask\"\n"
+		                     "    },\n"
+		                     "    \"bash\": \"ask\"\n"
+		                     "  },\n"
+		                     "  \"provider\": {\n"
+		                     "    \"openai\": {\n"
+		                     "      \"options\": {\n"
+		                     "        \"extraBody\": {\n"
+		                     "          \"numeric_text\": \"123\",\n"
+		                     "          \"count\": 123,\n"
+		                     "          \"tier\": \"flex\"\n"
+		                     "        }\n"
+		                     "      }\n"
+		                     "    }\n"
+		                     "  },\n"
+		                     "  \"alpha\": 1\n"
+		                     "}\n"_s;
+		QTRY_VERIFY(f.connection.isConnected());
+		f.editor.open(u"/work"_s);
+		QTRY_VERIFY(!f.editor.isLoading());
+
+		// Baseline key order comes from rawText even though QJsonObject sorted `parsed` alphabetically.
+		QCOMPARE(f.editor.keysAt({}), (QStringList{u"zebra"_s, u"permission"_s, u"provider"_s, u"alpha"_s}));
+		QVERIFY(!f.editor.isDirty());
+
+		const QStringList extraBodyPath{u"provider"_s, u"openai"_s, u"options"_s, u"extraBody"_s};
+		const QVariantList entries = f.editor.orderedEntriesAt(extraBodyPath);
+		QCOMPARE(entries.size(), 3);
+		QCOMPARE(entries.at(0).toMap().value(u"key"_s).toString(), u"numeric_text"_s);
+		QCOMPARE(entries.at(0).toMap().value(u"json"_s).toString(), u"\"123\""_s);
+		QCOMPARE(entries.at(1).toMap().value(u"key"_s).toString(), u"count"_s);
+		QCOMPARE(entries.at(1).toMap().value(u"json"_s).toString(), u"123"_s);
+		QCOMPARE(entries.at(2).toMap().value(u"key"_s).toString(), u"tier"_s);
+		QCOMPARE(entries.at(2).toMap().value(u"json"_s).toString(), u"\"flex\""_s);
+
+		// Writing back identical ordered entries is a no-op; reordering keys marks dirty and keeps types.
+		f.editor.setOrderedObjectAt(extraBodyPath, entries, true, false);
+		QVERIFY(!f.editor.isDirty());
+		const QVariantList reorderedEntries{entries.at(2), entries.at(0), entries.at(1)};
+		f.editor.setOrderedObjectAt(extraBodyPath, reorderedEntries, true, false);
+		QVERIFY(f.editor.isDirty());
+		QCOMPARE(f.editor.keysAt(extraBodyPath), (QStringList{u"tier"_s, u"numeric_text"_s, u"count"_s}));
+		QCOMPARE(f.editor.valueAt({u"provider"_s, u"openai"_s, u"options"_s, u"extraBody"_s, u"numeric_text"_s}).metaType().id(),
+		         QMetaType::QString);
+		QCOMPARE(f.editor.valueAt({u"provider"_s, u"openai"_s, u"options"_s, u"extraBody"_s, u"count"_s}).toInt(), 123);
+		f.editor.discard();
+		QVERIFY(!f.editor.isDirty());
+		QCOMPARE(f.editor.keysAt(extraBodyPath), (QStringList{u"numeric_text"_s, u"count"_s, u"tier"_s}));
+
+		// Ordered permission rules preserve both outer tool order and inner multi-pattern order.
+		const QVariantList rules = f.editor.permissionAt({u"permission"_s}).toList();
+		QCOMPARE(rules.size(), 4);
+		QCOMPARE(rules.at(0).toMap().value(u"tool"_s).toString(), u"edit"_s);
+		QCOMPARE(rules.at(0).toMap().value(u"pattern"_s).toString(), u"*.lock"_s);
+		QCOMPARE(rules.at(1).toMap().value(u"pattern"_s).toString(), u"src/**"_s);
+		QCOMPARE(rules.at(2).toMap().value(u"pattern"_s).toString(), u"*"_s);
+		QCOMPARE(rules.at(3).toMap().value(u"tool"_s).toString(), u"bash"_s);
+		QCOMPARE(rules.at(3).toMap().value(u"pattern"_s).toString(), QString());
+
+		const QVariantList reorderedRules{rules.at(3), rules.at(1), rules.at(0), rules.at(2)};
+		f.editor.setPermissionAt({u"permission"_s}, reorderedRules);
+		QVERIFY(f.editor.isDirty());
+		QCOMPARE(f.editor.keysAt({u"permission"_s}), (QStringList{u"bash"_s, u"edit"_s}));
+		QCOMPARE(f.editor.keysAt({u"permission"_s, u"edit"_s}), (QStringList{u"src/**"_s, u"*.lock"_s, u"*"_s}));
+	}
+
+	void reloadFromDiskGuardsReloadingFlagAndAbortsStaleReloadOnLoadFile()
+	{
+		EditorFixture f;
+		QTRY_VERIFY(f.connection.isConnected());
+		f.editor.open(u"/work"_s);
+		QTRY_VERIFY(!f.editor.isLoading());
+		QCOMPARE(f.editor.selectedFile(), u"ref.json"_s);
+
+		f.stub.m_holdReload = true;
+		f.editor.reloadFromDisk();
+		QVERIFY(f.editor.isLoading());
+		QVERIFY(f.backendConfig.isReloading());
+		QTRY_VERIFY(f.stub.m_heldReload.has_value());
+
+		// Switching profile mid-reload supersedes the in-flight reloadTask without issuing a stale get_config_files.
+		const auto countConfigFilesOps = [&] {
+			qsizetype count = 0;
+			for(const QJsonObject& req : std::as_const(f.stub.m_requests))
+			{
+				if(req.value(u"op"_s).toString() == u"get_config_files"_s)
+				{
+					++count;
+				}
+			}
+			return count;
+		};
+		const qsizetype filesOpsBeforeSwitch = countConfigFilesOps();
+		f.editor.loadFile(u"ref.json.1.bak"_s);
+		QTRY_VERIFY(!f.editor.isLoading());
+		QCOMPARE(f.editor.selectedFile(), u"ref.json.1.bak"_s);
+		QCOMPARE(f.editor.valueAt({u"model"_s}).toString(), u"openai/gpt-5"_s);
+		QCOMPARE(countConfigFilesOps(), filesOpsBeforeSwitch + 1);
+
+		f.stub.releaseReload();
+		QTRY_VERIFY(!f.backendConfig.isReloading());
+		QTest::qWait(50);
+		QCOMPARE(countConfigFilesOps(), filesOpsBeforeSwitch + 1);
+		QCOMPARE(f.editor.selectedFile(), u"ref.json.1.bak"_s);
+		QCOMPARE(f.editor.valueAt({u"model"_s}).toString(), u"openai/gpt-5"_s);
 	}
 };
 

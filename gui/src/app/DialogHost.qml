@@ -11,6 +11,20 @@ Item {
 	readonly property bool open: Workspace.dialog !== ""
 	property var front: slotA // the slot of the dialog on screen, also while it fades out
 
+	signal quitWindowConfirmed()
+
+	function requestWindowClose() {
+		if (Workspace.dialog === DialogId.config && front && front.item) {
+			const cfg = front.item as ConfigDialog
+			if (cfg)
+				return cfg.requestQuitWindow()
+		}
+		if (Workspace.configEditor.dirty) {
+			Workspace.openDialog(DialogId.config, { confirmQuitWindow: true })
+			return false
+		}
+		return true
+	}
 	visible: open || scrim.opacity > 0
 
 	onVisibleChanged: {
@@ -110,7 +124,7 @@ Item {
 
 	Component { id: paletteDialog; CommandPalette {} }
 	Component { id: settings; SettingsDialog {} }
-	Component { id: configDialog; ConfigDialog {} }
+	Component { id: configDialog; ConfigDialog { onQuitWindowConfirmed: host.quitWindowConfirmed() } }
 	Component { id: sessions; SessionsDialog {} }
 	Component { id: models; ModelsDialog {} }
 	Component { id: agents; AgentsDialog {} }

@@ -14,6 +14,7 @@ Item {
 
 	signal accepted()
 	signal edited()
+	signal editingFinished()
 	signal tabPressed()
 	signal upPressed()
 	signal downPressed()
@@ -49,6 +50,7 @@ Item {
 			focus: true
 			onAccepted: field.accepted()
 			onTextEdited: field.edited()
+			onEditingFinished: field.editingFinished()
 			Keys.onTabPressed: event => { field.tabPressed(); event.accepted = true }
 			Keys.onUpPressed: event => { field.upPressed(); event.accepted = true }
 			Keys.onDownPressed: event => { field.downPressed(); event.accepted = true }

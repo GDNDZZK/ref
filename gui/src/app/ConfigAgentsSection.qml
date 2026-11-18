@@ -13,6 +13,7 @@ Column {
 	property var customAgentKeys: []
 	property var modelOpts: []
 	property var expandedMap: ({})
+	property int cardsRevision: 0
 
 	readonly property var builtinAgents: [
 		{ name: "build", summary: qsTr("Default agent with full tool access and session spawning.") },
@@ -22,6 +23,42 @@ Column {
 		{ name: "compaction", summary: qsTr("Hidden summarizer used during context compaction.") }
 	]
 	readonly property var builtinNames: ["build", "plan", "general", "explore", "compaction"]
+
+	readonly property bool hasValidationError: {
+		void cardsRevision
+		void customAgentKeys
+		if (newAgentField.hasError)
+			return true
+		for (let i = 0; i < builtinRepeater.count; ++i) {
+			const c = builtinRepeater.itemAt(i) as AgentCard
+			if (c && c.hasValidationError)
+				return true
+		}
+		for (let i = 0; i < customRepeater.count; ++i) {
+			const c = customRepeater.itemAt(i) as AgentCard
+			if (c && c.hasValidationError)
+				return true
+		}
+		return false
+	}
+
+	readonly property bool hasPendingChanges: {
+		void cardsRevision
+		void customAgentKeys
+		if (newAgentField.text.trim() !== "")
+			return true
+		for (let i = 0; i < builtinRepeater.count; ++i) {
+			const c = builtinRepeater.itemAt(i) as AgentCard
+			if (c && c.hasPendingChanges)
+				return true
+		}
+		for (let i = 0; i < customRepeater.count; ++i) {
+			const c = customRepeater.itemAt(i) as AgentCard
+			if (c && c.hasPendingChanges)
+				return true
+		}
+		return false
+	}
 
 	function sameKeys(a, b) {
 		if (a.length !== b.length)
@@ -51,19 +88,29 @@ Column {
 		expandedMap = next
 	}
 
+	function renameCustomExpanded(oldName, newName) {
+		const oldKey = "custom:" + oldName
+		const newKey = "custom:" + newName
+		const next = Object.assign({}, expandedMap)
+		const wasOpen = Boolean(next[oldKey])
+		delete next[oldKey]
+		next[newKey] = wasOpen
+		expandedMap = next
+	}
+
 	function addCustomAgent() {
 		const name = newAgentField.text.trim()
 		if (name === "") {
 			newAgentField.errorText = qsTr("Enter an agent name.")
-			return
+			return false
 		}
 		if (builtinNames.includes(name)) {
 			newAgentField.errorText = qsTr("\"%1\" is a built-in agent — customize it above.").arg(name)
-			return
+			return false
 		}
 		if (editor.keysAt(["agent"]).includes(name)) {
 			newAgentField.errorText = qsTr("Agent \"%1\" already exists.").arg(name)
-			return
+			return false
 		}
 		newAgentField.errorText = ""
 		newAgentField.text = ""
@@ -72,6 +119,39 @@ Column {
 			description: "",
 			prompt: ""
 		})
+		return true
+	}
+
+	function commitPending() {
+		if (newAgentField.text.trim() !== "" && !addCustomAgent())
+			return false
+		for (let i = 0; i < builtinRepeater.count; ++i) {
+			const c = builtinRepeater.itemAt(i) as AgentCard
+			if (c && !c.commitPending())
+				return false
+		}
+		for (let i = 0; i < customRepeater.count; ++i) {
+			const c = customRepeater.itemAt(i) as AgentCard
+			if (c && !c.commitPending())
+				return false
+		}
+		return !hasValidationError
+	}
+
+	function resetSubEditors() {
+		newAgentField.text = ""
+		newAgentField.errorText = ""
+		for (let i = 0; i < builtinRepeater.count; ++i) {
+			const c = builtinRepeater.itemAt(i) as AgentCard
+			if (c)
+				c.resetCardState()
+		}
+		for (let i = 0; i < customRepeater.count; ++i) {
+			const c = customRepeater.itemAt(i) as AgentCard
+			if (c)
+				c.resetCardState()
+		}
+		syncSection()
 	}
 
 	width: parent ? parent.width : 560
@@ -104,6 +184,24 @@ Column {
 		// "inherit" | "number" | "map"
 		property string delayMode: "inherit"
 
+		readonly property string pendingRenameTarget: isBuiltin ? "" : renameInput.text.trim()
+		readonly property bool hasValidationError: (!isBuiltin && renameInput.hasError)
+			|| colorPicker.hasValidationError
+			|| tempField.hasValidationError
+			|| topPField.hasValidationError
+			|| optionsEditor.hasValidationError
+			|| agentPermEditor.hasValidationError
+			|| (delayMode === "number" && agentDelayNumber.hasValidationError)
+			|| (delayMode === "map" && agentDelayMap.hasValidationError)
+		readonly property bool hasPendingChanges: (!isBuiltin && pendingRenameTarget !== "" && pendingRenameTarget !== agentName)
+			|| colorPicker.hasUncommittedEdit
+			|| tempField.hasUncommittedEdit
+			|| topPField.hasUncommittedEdit
+			|| optionsEditor.hasUncommittedEdit
+			|| agentPermEditor.hasUncommittedEdit
+			|| (delayMode === "number" && agentDelayNumber.hasUncommittedEdit)
+			|| (delayMode === "map" && agentDelayMap.hasUncommittedEdit)
+
 		function cardMutate(fn) {
 			cardMutating = true
 			section.mutating = true
@@ -127,6 +225,23 @@ Column {
 			return typeof v === "boolean" ? v : fallback
 		}
 
+		function boolFieldWithAlias(primaryKey, aliasKey, fallback) {
+			const primary = section.editor.valueAt(["agent", agentName, primaryKey])
+			if (typeof primary === "boolean")
+				return primary
+			const alias = section.editor.valueAt(["agent", agentName, aliasKey])
+			if (typeof alias === "boolean")
+				return alias
+			return fallback
+		}
+
+		function setAgentStringField(key, val) {
+			if (val === "")
+				section.editor.removeAt(["agent", agentName, key], isBuiltin)
+			else
+				section.editor.setValueAt(["agent", agentName, key], val)
+		}
+
 		function syncCard() {
 			if (!isBuiltin) {
 				renameInput.text = agentName
@@ -141,49 +256,108 @@ Column {
 			topPField.value = numField("top_p")
 			promptField.text = strField("prompt")
 
-			const opts = section.editor.valueAt(["agent", agentName, "options"])
-			optionsEditor.loadFromMap(opts && typeof opts === "object" && !Array.isArray(opts) ? opts : {})
-
-			agentPermEditor.loadFromValue(section.editor.valueAt(["agent", agentName, "permission"]))
+			optionsEditor.loadFromEntries(section.editor.orderedEntriesAt(["agent", agentName, "options"]))
+			agentPermEditor.loadFromValue(section.editor.permissionAt(["agent", agentName, "permission"]))
 
 			const rawDelay = section.editor.valueAt(["agent", agentName, "delay"])
 			if (rawDelay === undefined || rawDelay === null) {
 				delayMode = "inherit"
 				agentDelayNumber.value = undefined
-				agentDelayMap.loadFromMap({})
+				agentDelayMap.loadFromEntries([])
 			} else if (typeof rawDelay === "number" && Number.isFinite(rawDelay)) {
 				delayMode = "number"
 				agentDelayNumber.value = rawDelay
-				agentDelayMap.loadFromMap({})
-			} else if (typeof rawDelay === "object" && !Array.isArray(rawDelay)) {
+				agentDelayMap.loadFromEntries([])
+			} else if (typeof rawDelay === "object" && !Fields.isArray(rawDelay)) {
 				delayMode = "map"
 				agentDelayNumber.value = undefined
-				agentDelayMap.loadFromMap(rawDelay)
+				agentDelayMap.loadFromEntries(section.editor.orderedEntriesAt(["agent", agentName, "delay"]))
 			} else {
 				delayMode = "inherit"
 				agentDelayNumber.value = undefined
-				agentDelayMap.loadFromMap({})
+				agentDelayMap.loadFromEntries([])
 			}
 		}
 
-		function commitRename() {
+		function validateRenameLive() {
+			if (isBuiltin)
+				return
 			const target = renameInput.text.trim()
 			if (target === "" || target === agentName) {
-				renameInput.text = agentName
 				renameInput.errorText = ""
 				return
 			}
-			if (section.builtinNames.includes(target) || !section.editor.renameKeyAt(["agent"], agentName, target)) {
+			if (section.builtinNames.includes(target)) {
+				renameInput.errorText = qsTr("\"%1\" is a built-in agent — customize it above.").arg(target)
+				return
+			}
+			if (section.editor.keysAt(["agent"]).includes(target)) {
 				renameInput.errorText = qsTr("Agent \"%1\" already exists.").arg(target)
 				return
 			}
 			renameInput.errorText = ""
-			section.setExpanded("custom:" + target, true)
+		}
+
+		function commitRename() {
+			if (isBuiltin)
+				return true
+			const target = renameInput.text.trim()
+			if (target === "" || target === agentName) {
+				renameInput.text = agentName
+				renameInput.errorText = ""
+				return true
+			}
+			if (section.builtinNames.includes(target)) {
+				renameInput.errorText = qsTr("\"%1\" is a built-in agent — customize it above.").arg(target)
+				return false
+			}
+			if (section.editor.keysAt(["agent"]).includes(target)) {
+				renameInput.errorText = qsTr("Agent \"%1\" already exists.").arg(target)
+				return false
+			}
+			renameInput.errorText = ""
+			section.renameCustomExpanded(agentName, target)
+			section.editor.renameKeyAt(["agent"], agentName, target)
+			return true
+		}
+
+		function commitPending() {
+			const trimmedDesc = descField.text.trim()
+			if (descField.text !== trimmedDesc) {
+				descField.text = trimmedDesc
+				cardMutate(() => setAgentStringField("description", trimmedDesc))
+			}
+			if (!optionsEditor.commitPending() || !agentPermEditor.commitPending())
+				return false
+			if (delayMode === "map" && !agentDelayMap.commitPending())
+				return false
+			if (hasValidationError)
+				return false
+			return commitRename()
+		}
+
+		function resetCardState() {
+			colorPicker.resetState()
+			tempField.resetState()
+			topPField.resetState()
+			optionsEditor.resetState()
+			agentPermEditor.resetState()
+			agentDelayNumber.resetState()
+			agentDelayMap.resetState()
+			syncCard()
 		}
 
 		function resetKey(key) {
 			section.forceActiveFocus()
 			section.editor.removeAt(["agent", agentName, key], isBuiltin)
+		}
+
+		function resetKeyAndAlias(primaryKey, aliasKey) {
+			section.forceActiveFocus()
+			section.editor.removeAt(["agent", agentName, aliasKey], false)
+			section.editor.removeAt(["agent", agentName, primaryKey], isBuiltin)
+			if (isBuiltin && section.editor.keysAt(["agent", agentName]).length === 0)
+				section.editor.removeAt(["agent", agentName], true)
 		}
 
 		width: section.width
@@ -295,6 +469,7 @@ Column {
 					text: qsTr("Reset override")
 					onClicked: {
 						section.forceActiveFocus()
+						card.resetCardState()
 						section.editor.removeAt(["agent", card.agentName])
 					}
 				}
@@ -333,16 +508,20 @@ Column {
 
 					DialogField {
 						id: renameInput
+						objectName: "agentRenameField_" + card.agentName
 						width: parent.width - renameBtn.width - 6
 						placeholderText: qsTr("Agent name")
-						onEdited: errorText = ""
+						onEdited: card.validateRenameLive()
 						onAccepted: card.commitRename()
+						onEditingFinished: card.commitRename()
 					}
 
 					DialogButton {
 						id: renameBtn
 						text: qsTr("Rename")
-						enabled: renameInput.text.trim() !== "" && renameInput.text.trim() !== card.agentName
+						enabled: card.pendingRenameTarget !== ""
+							&& card.pendingRenameTarget !== card.agentName
+							&& !renameInput.hasError
 						onClicked: card.commitRename()
 					}
 				}
@@ -359,7 +538,13 @@ Column {
 					id: descField
 					width: parent.width
 					placeholderText: card.isBuiltin ? card.builtinSummary : qsTr("Shown in agent picker and spawn descriptions")
-					onEdited: card.cardMutate(() => section.editor.setStringAt(["agent", card.agentName, "description"], text))
+					onEdited: card.cardMutate(() => card.setAgentStringField("description", text.trim() === "" ? "" : text))
+					onEditingFinished: {
+						const trimmed = text.trim()
+						if (text !== trimmed)
+							text = trimmed
+						card.cardMutate(() => card.setAgentStringField("description", trimmed))
+					}
 				}
 			}
 
@@ -377,7 +562,7 @@ Column {
 					clearable: true
 					options: section.modelOpts
 					placeholderText: qsTr("Inherit top-level model")
-					onActivated: val => card.cardMutate(() => section.editor.setStringAt(["agent", card.agentName, "model"], val))
+					onActivated: val => card.cardMutate(() => card.setAgentStringField("model", val))
 				}
 			}
 
@@ -392,7 +577,13 @@ Column {
 					id: variantField
 					width: parent.width
 					placeholderText: qsTr("e.g. high")
-					onEdited: card.cardMutate(() => section.editor.setStringAt(["agent", card.agentName, "variant"], text))
+					onEdited: card.cardMutate(() => card.setAgentStringField("variant", text.trim()))
+					onEditingFinished: {
+						const trimmed = text.trim()
+						if (text !== trimmed)
+							text = trimmed
+						card.cardMutate(() => card.setAgentStringField("variant", trimmed))
+					}
 				}
 			}
 
@@ -415,7 +606,7 @@ Column {
 						{ label: "all", value: "all" }
 					]
 					placeholderText: qsTr("Default")
-					onActivated: val => card.cardMutate(() => section.editor.setStringAt(["agent", card.agentName, "mode"], val))
+					onActivated: val => card.cardMutate(() => card.setAgentStringField("mode", val))
 				}
 			}
 
@@ -425,11 +616,15 @@ Column {
 				stacked: true
 				showDivider: true
 				showReset: { void section.editor.revision; return section.editor.contains(["agent", card.agentName, "color"]) }
-				onResetClicked: card.resetKey("color")
+				onResetClicked: {
+					colorPicker.resetState()
+					card.resetKey("color")
+				}
 
 				ColorSwatchPicker {
 					id: colorPicker
-					onValueModified: val => card.cardMutate(() => section.editor.setStringAt(["agent", card.agentName, "color"], val))
+					objectName: "agentColorPicker_" + card.agentName
+					onValueModified: val => card.cardMutate(() => card.setAgentStringField("color", val))
 				}
 			}
 
@@ -455,13 +650,24 @@ Column {
 				description: qsTr("Grants create_session, resume_session, and close_session tools.")
 				controlWidth: 0
 				showDivider: true
-				showReset: { void section.editor.revision; return section.editor.contains(["agent", card.agentName, "can_spawn"]) }
-				onResetClicked: card.resetKey("can_spawn")
+				showReset: {
+					void section.editor.revision
+					return section.editor.contains(["agent", card.agentName, "can_spawn"])
+						|| section.editor.contains(["agent", card.agentName, "spawn"])
+				}
+				onResetClicked: card.resetKeyAndAlias("can_spawn", "spawn")
 
 				Switch {
+					objectName: "agentCanSpawnSwitch_" + card.agentName
 					accessibleName: qsTr("Can spawn sessions")
-					checked: { void section.editor.revision; return card.boolField("can_spawn", card.agentName === "build") }
-					onToggled: val => card.cardMutate(() => section.editor.setValueAt(["agent", card.agentName, "can_spawn"], val))
+					checked: {
+						void section.editor.revision
+						return card.boolFieldWithAlias("can_spawn", "spawn", card.agentName === "build")
+					}
+					onToggled: val => card.cardMutate(() => {
+						section.editor.removeAt(["agent", card.agentName, "spawn"], false)
+						section.editor.setValueAt(["agent", card.agentName, "can_spawn"], val)
+					})
 				}
 			}
 
@@ -487,13 +693,24 @@ Column {
 				description: qsTr("Remove this agent from runtime availability.")
 				controlWidth: 0
 				showDivider: true
-				showReset: { void section.editor.revision; return section.editor.contains(["agent", card.agentName, "disable"]) }
-				onResetClicked: card.resetKey("disable")
+				showReset: {
+					void section.editor.revision
+					return section.editor.contains(["agent", card.agentName, "disable"])
+						|| section.editor.contains(["agent", card.agentName, "disabled"])
+				}
+				onResetClicked: card.resetKeyAndAlias("disable", "disabled")
 
 				Switch {
+					objectName: "agentDisableSwitch_" + card.agentName
 					accessibleName: qsTr("Disable agent")
-					checked: { void section.editor.revision; return card.boolField("disable", false) }
-					onToggled: val => card.cardMutate(() => section.editor.setValueAt(["agent", card.agentName, "disable"], val))
+					checked: {
+						void section.editor.revision
+						return card.boolFieldWithAlias("disable", "disabled", false)
+					}
+					onToggled: val => card.cardMutate(() => {
+						section.editor.removeAt(["agent", card.agentName, "disabled"], false)
+						section.editor.setValueAt(["agent", card.agentName, "disable"], val)
+					})
 				}
 			}
 
@@ -503,7 +720,10 @@ Column {
 				controlWidth: 180
 				showDivider: true
 				showReset: { void section.editor.revision; return section.editor.contains(["agent", card.agentName, "temperature"]) }
-				onResetClicked: card.resetKey("temperature")
+				onResetClicked: {
+					tempField.resetState()
+					card.resetKey("temperature")
+				}
 
 				NumberField {
 					id: tempField
@@ -513,7 +733,12 @@ Column {
 					maximum: 2
 					step: 0.1
 					placeholderText: qsTr("Model default")
-					onValueModified: val => card.cardMutate(() => section.editor.setValueAt(["agent", card.agentName, "temperature"], val))
+					onValueModified: val => card.cardMutate(() => {
+						if (val === undefined)
+							section.editor.removeAt(["agent", card.agentName, "temperature"], card.isBuiltin)
+						else
+							section.editor.setValueAt(["agent", card.agentName, "temperature"], val)
+					})
 				}
 			}
 
@@ -523,7 +748,10 @@ Column {
 				controlWidth: 180
 				showDivider: true
 				showReset: { void section.editor.revision; return section.editor.contains(["agent", card.agentName, "top_p"]) }
-				onResetClicked: card.resetKey("top_p")
+				onResetClicked: {
+					topPField.resetState()
+					card.resetKey("top_p")
+				}
 
 				NumberField {
 					id: topPField
@@ -533,7 +761,12 @@ Column {
 					maximum: 1
 					step: 0.05
 					placeholderText: qsTr("Model default")
-					onValueModified: val => card.cardMutate(() => section.editor.setValueAt(["agent", card.agentName, "top_p"], val))
+					onValueModified: val => card.cardMutate(() => {
+						if (val === undefined)
+							section.editor.removeAt(["agent", card.agentName, "top_p"], card.isBuiltin)
+						else
+							section.editor.setValueAt(["agent", card.agentName, "top_p"], val)
+					})
 				}
 			}
 
@@ -551,7 +784,7 @@ Column {
 					width: parent.width
 					minHeight: 100
 					placeholderText: qsTr("Agent instructions or {file:./prompts/agent.md}")
-					onEdited: card.cardMutate(() => section.editor.setStringAt(["agent", card.agentName, "prompt"], text))
+					onEdited: card.cardMutate(() => card.setAgentStringField("prompt", text))
 				}
 			}
 
@@ -562,20 +795,21 @@ Column {
 				stacked: true
 				showDivider: true
 				showReset: { void section.editor.revision; return section.editor.contains(["agent", card.agentName, "options"]) }
-				onResetClicked: card.resetKey("options")
+				onResetClicked: {
+					optionsEditor.resetState()
+					card.resetKey("options")
+				}
 
 				KeyValueEditor {
 					id: optionsEditor
+					objectName: "agentOptionsEditor_" + card.agentName
 					width: parent.width
 					valueMode: "json"
 					keyPlaceholder: qsTr("Key (e.g. reasoningEffort)")
 					valuePlaceholder: qsTr("JSON value (e.g. \"high\")")
 					emptyText: qsTr("No extra request options")
-					onMapModified: newMap => card.cardMutate(() => {
-						if (Object.keys(newMap).length === 0)
-							section.editor.removeAt(["agent", card.agentName, "options"], card.isBuiltin)
-						else
-							section.editor.setValueAt(["agent", card.agentName, "options"], newMap)
+					onEntriesModified: nextEntries => card.cardMutate(() => {
+						section.editor.setOrderedObjectAt(["agent", card.agentName, "options"], nextEntries, true, card.isBuiltin)
 					})
 				}
 			}
@@ -587,22 +821,18 @@ Column {
 				stacked: true
 				showDivider: true
 				showReset: { void section.editor.revision; return section.editor.contains(["agent", card.agentName, "permission"]) }
-				onResetClicked: card.resetKey("permission")
+				onResetClicked: {
+					agentPermEditor.resetState()
+					card.resetKey("permission")
+				}
 
 				PermissionRulesEditor {
 					id: agentPermEditor
+					objectName: "agentPermissionEditor_" + card.agentName
 					width: parent.width
 					allowInherit: true
-					onPermissionModified: newPerm => card.cardMutate(() => {
-						if (newPerm === undefined || newPerm === null) {
-							section.editor.removeAt(["agent", card.agentName, "permission"], card.isBuiltin)
-							return
-						}
-						if (typeof newPerm === "object" && !Array.isArray(newPerm) && Object.keys(newPerm).length === 0) {
-							section.editor.removeAt(["agent", card.agentName, "permission"], card.isBuiltin)
-							return
-						}
-						section.editor.setValueAt(["agent", card.agentName, "permission"], newPerm)
+					onOrderedPermissionModified: ordPerm => card.cardMutate(() => {
+						section.editor.setPermissionAt(["agent", card.agentName, "permission"], ordPerm, card.isBuiltin)
 					})
 				}
 			}
@@ -613,7 +843,11 @@ Column {
 				description: qsTr("Checked before global delays.")
 				stacked: true
 				showReset: { void section.editor.revision; return section.editor.contains(["agent", card.agentName, "delay"]) }
-				onResetClicked: card.resetKey("delay")
+				onResetClicked: {
+					agentDelayNumber.resetState()
+					agentDelayMap.resetState()
+					card.resetKey("delay")
+				}
 
 				Column {
 					width: parent.width
@@ -639,9 +873,9 @@ Column {
 									agentDelayNumber.value = 1
 									section.editor.setValueAt(["agent", card.agentName, "delay"], 1)
 								} else {
-									const init = { "bash": 1 }
-									agentDelayMap.loadFromMap(init)
-									section.editor.setValueAt(["agent", card.agentName, "delay"], init)
+									const init = [{ key: "bash", value: 1 }]
+									agentDelayMap.loadFromEntries(init)
+									section.editor.setOrderedObjectAt(["agent", card.agentName, "delay"], init, true, card.isBuiltin)
 								}
 							})
 						}
@@ -666,16 +900,16 @@ Column {
 
 					KeyValueEditor {
 						id: agentDelayMap
+						objectName: "agentDelayMap_" + card.agentName
 						visible: card.delayMode === "map"
 						width: parent.width
 						valueMode: "number"
+						allowReorder: true
+						minimum: 0
 						keyPlaceholder: qsTr("Tool glob (e.g. bash)")
 						valuePlaceholder: qsTr("Seconds")
-						onMapModified: newMap => card.cardMutate(() => {
-							if (Object.keys(newMap).length === 0)
-								section.editor.removeAt(["agent", card.agentName, "delay"], card.isBuiltin)
-							else
-								section.editor.setValueAt(["agent", card.agentName, "delay"], newMap)
+						onEntriesModified: nextEntries => card.cardMutate(() => {
+							section.editor.setOrderedObjectAt(["agent", card.agentName, "delay"], nextEntries, true, card.isBuiltin)
 						})
 					}
 				}
@@ -701,7 +935,10 @@ Column {
 	}
 
 	Repeater {
+		id: builtinRepeater
 		model: section.builtinAgents
+		onItemAdded: section.cardsRevision++
+		onItemRemoved: section.cardsRevision++
 
 		delegate: AgentCard {
 			required property var modelData
@@ -755,7 +992,10 @@ Column {
 	}
 
 	Repeater {
+		id: customRepeater
 		model: section.customAgentKeys
+		onItemAdded: section.cardsRevision++
+		onItemRemoved: section.cardsRevision++
 
 		delegate: AgentCard {
 			required property string modelData

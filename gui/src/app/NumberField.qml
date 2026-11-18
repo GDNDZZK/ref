@@ -10,20 +10,39 @@ FocusScope {
 	property var value: undefined
 	property real minimum: -Infinity
 	property real maximum: Infinity
+	property bool exclusiveMinimum: false
 	property real step: 1
 	property bool decimals: false
 	property string suffix: ""
 	property string placeholderText: ""
 	property string errorText: ""
+	property string inputText: ""
 	property bool outOfRange: false
+	property bool invalidSyntax: false
 
 	signal valueModified(var newValue)
 
 	readonly property bool hasValue: typeof value === "number" && Number.isFinite(value)
+	readonly property string rangeErrorText: {
+		if (!outOfRange)
+			return ""
+		if (exclusiveMinimum && maximum === Infinity)
+			return qsTr("Must be greater than %1").arg(formatBound(minimum))
+		if (!exclusiveMinimum && maximum === Infinity)
+			return qsTr("Must be at least %1").arg(formatBound(minimum))
+		if (exclusiveMinimum)
+			return qsTr("Must be greater than %1 and at most %2").arg(formatBound(minimum)).arg(formatBound(maximum))
+		return qsTr("Must be between %1 and %2").arg(formatBound(minimum)).arg(formatBound(maximum))
+	}
+	readonly property string syntaxErrorText: invalidSyntax
+		? (decimals ? qsTr("Enter a valid number") : qsTr("Enter a whole number"))
+		: ""
 	readonly property string effectiveError: errorText !== ""
 		? errorText
-		: (outOfRange ? qsTr("Must be between %1 and %2").arg(formatBound(minimum)).arg(formatBound(maximum)) : "")
+		: (syntaxErrorText !== "" ? syntaxErrorText : rangeErrorText)
 	readonly property bool hasError: effectiveError !== ""
+	readonly property bool hasValidationError: hasError
+	readonly property bool hasUncommittedEdit: inputText.trim() !== formatValue(value)
 
 	function formatBound(bound) {
 		if (bound === -Infinity)
@@ -39,17 +58,33 @@ FocusScope {
 		return decimals ? String(Math.round(val * 1000000) / 1000000) : String(Math.trunc(val))
 	}
 
+	function isOutOfBounds(parsed) {
+		const belowMin = exclusiveMinimum ? (parsed <= minimum) : (parsed < minimum)
+		return belowMin || parsed > maximum
+	}
+
 	function syncFromValue() {
 		const formatted = formatValue(value)
 		if (input.text !== formatted)
 			input.text = formatted
+		inputText = formatted
+		invalidSyntax = false
 		outOfRange = false
 	}
 
-	function parseAndEmit(commitClamp) {
+	function resetState() {
+		syncFromValue()
+	}
+
+	function parseAndEmit(normalizeText) {
+		inputText = input.text
 		const raw = input.text.trim()
 		if (raw === "") {
+			invalidSyntax = false
 			outOfRange = false
+			if (normalizeText && input.text !== "")
+				input.text = ""
+			inputText = input.text
 			if (value !== undefined) {
 				value = undefined
 				valueModified(undefined)
@@ -58,24 +93,28 @@ FocusScope {
 		}
 		const pattern = decimals ? /^-?(?:\d+\.?\d*|\.\d+)$/ : /^-?\d+$/
 		if (!pattern.test(raw)) {
-			if (commitClamp)
-				syncFromValue()
+			invalidSyntax = true
+			outOfRange = false
 			return
 		}
-		let parsed = decimals ? parseFloat(raw) : parseInt(raw, 10)
-		if (!Number.isFinite(parsed))
-			return
-		if (parsed < minimum || parsed > maximum) {
-			if (commitClamp) {
-				parsed = Math.min(maximum, Math.max(minimum, parsed))
-				outOfRange = false
-				input.text = formatValue(parsed)
-			} else {
-				outOfRange = true
-				return
-			}
-		} else {
+		const parsed = decimals ? parseFloat(raw) : parseInt(raw, 10)
+		if (!Number.isFinite(parsed)) {
+			invalidSyntax = true
 			outOfRange = false
+			return
+		}
+		if (isOutOfBounds(parsed)) {
+			invalidSyntax = false
+			outOfRange = true
+			return
+		}
+		invalidSyntax = false
+		outOfRange = false
+		if (normalizeText) {
+			const formatted = formatValue(parsed)
+			if (input.text !== formatted)
+				input.text = formatted
+			inputText = formatted
 		}
 		if (value !== parsed) {
 			value = parsed
@@ -86,16 +125,22 @@ FocusScope {
 	function stepBy(direction) {
 		if (!enabled)
 			return
-		const base = hasValue ? value : (Number.isFinite(minimum) && minimum > 0 ? minimum : 0)
+		const minAllowed = exclusiveMinimum
+			? (Number.isFinite(minimum) ? minimum + step : -Infinity)
+			: minimum
+		const base = hasValue ? value : (Number.isFinite(minAllowed) && minAllowed > 0 ? minAllowed : 0)
 		let next = base + direction * step
 		if (decimals)
 			next = Math.round(next * 1000000) / 1000000
 		else
 			next = Math.round(next)
-		next = Math.min(maximum, Math.max(minimum, next))
+		next = Math.min(maximum, Math.max(minAllowed, next))
+		invalidSyntax = false
 		outOfRange = false
 		value = next
-		input.text = formatValue(next)
+		const formatted = formatValue(next)
+		input.text = formatted
+		inputText = formatted
 		valueModified(next)
 	}
 

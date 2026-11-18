@@ -65,6 +65,7 @@ public:
 
 	void setMessages(const QString& id, const QJsonArray& messages) { m_messages.insert(id, messages); }
 	QString savedConfigRawText() const { return m_configRawText; }
+	void setConfigRawText(const QString& text) { m_configRawText = text; }
 	int saveConfigCalls() const { return m_saveConfigCalls; }
 	int setAgentCalls() const { return m_setAgentCalls; }
 	QStringList shellCommands() const { return m_shellCommands; }
@@ -354,6 +355,8 @@ private slots:
 	void reusableConfigFormControlsInstantiateAndOperateWithoutWarnings();
 	void configDialogSwitchesCategoriesEditsVisualAndJsoncAndGuardsDirtyClose();
 	void paletteAndComposerCompletionsAndShellModeOperateWithoutWarnings();
+	void configControlsValidateStrictInputsAndPreserveJsonStrings();
+	void configDialogSupportsOpencodeAliasesInlineRenameTopBarLockAndQuitGuard();
 };
 
 void TestMainWindow::initTestCase()
@@ -1302,6 +1305,282 @@ void TestMainWindow::paletteAndComposerCompletionsAndShellModeOperateWithoutWarn
 	QTRY_COMPARE(f.stub.shellCommands(), (QStringList{u"ca"_s}));
 	QVERIFY(!composerModel->shellMode());
 	QVERIFY2(warningSpy.isEmpty(), "Palette, PathField, and Composer completions emitted QML warnings");
+}
+
+void TestMainWindow::configControlsValidateStrictInputsAndPreserveJsonStrings()
+{
+	MainFixture f;
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+
+	QQuickWindow window;
+	window.resize(900, 700);
+	window.show();
+	QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+	QQmlComponent component(&engine);
+	component.setData(R"qml(
+		import QtQuick
+		import RefGui
+		Column {
+			width: 520
+			spacing: 8
+			NumberField {
+				objectName: "strictRatio"
+				decimals: true
+				minimum: 0
+				maximum: 1
+				exclusiveMinimum: true
+				value: 0.6
+			}
+			KeyValueEditor {
+				objectName: "jsonKv"
+				valueMode: "json"
+				allowReorder: true
+			}
+			ColorSwatchPicker {
+				objectName: "strictSwatch"
+				value: "#336699"
+			}
+		}
+	)qml", QUrl(u"qrc:/qt/qml/RefGui/StrictControls.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* root = qobject_cast<QQuickItem*>(created.get());
+	QVERIFY(root);
+	root->setParentItem(window.contentItem());
+
+	// 1) NumberField rejects non-numeric text and `0` under `exclusiveMinimum: true` without silent clamping.
+	auto* ratio = root->findChild<QQuickItem*>(u"strictRatio"_s);
+	QVERIFY(ratio);
+	auto* ratioInput = findByTypePrefix(ratio, "QQuickTextInput");
+	QVERIFY(ratioInput);
+	ratioInput->setProperty("text", u"abc"_s);
+	QMetaObject::invokeMethod(ratio, "parseAndEmit", Q_ARG(QVariant, false));
+	QVERIFY(ratio->property("hasValidationError").toBool());
+	QVERIFY(ratio->property("invalidSyntax").toBool());
+	QCOMPARE(ratio->property("value").toDouble(), 0.6);
+
+	ratioInput->setProperty("text", u"0"_s);
+	QMetaObject::invokeMethod(ratio, "parseAndEmit", Q_ARG(QVariant, false));
+	QVERIFY(ratio->property("hasValidationError").toBool());
+	QVERIFY(ratio->property("outOfRange").toBool());
+	QCOMPARE(ratio->property("value").toDouble(), 0.6);
+	QMetaObject::invokeMethod(ratio, "resetState");
+	QVERIFY(!ratio->property("hasValidationError").toBool());
+	QCOMPARE(ratioInput->property("text").toString(), u"0.6"_s);
+
+	// 2) KeyValueEditor in "json" mode preserves quotes on strings, flags malformed JSON, and commits pending drafts.
+	auto* jsonKv = root->findChild<QQuickItem*>(u"jsonKv"_s);
+	QVERIFY(jsonKv);
+	const QVariantList initialEntries{
+		QVariantMap{{u"key"_s, u"code"_s}, {u"value"_s, u"123"_s}, {u"json"_s, u"\"123\""_s}},
+		QVariantMap{{u"key"_s, u"tier"_s}, {u"value"_s, u"high"_s}, {u"json"_s, u"\"high\""_s}},
+	};
+	QMetaObject::invokeMethod(jsonKv, "loadFromEntries", Q_ARG(QVariant, initialEntries));
+	QVariant formattedCode;
+	QMetaObject::invokeMethod(jsonKv, "formatEntryValue", Q_RETURN_ARG(QVariant, formattedCode), Q_ARG(QVariant, initialEntries.at(0)));
+	QCOMPARE(formattedCode.toString(), u"\"123\""_s);
+
+	QMetaObject::invokeMethod(jsonKv, "onRowEdited", Q_ARG(QVariant, 0), Q_ARG(QVariant, u"code"_s), Q_ARG(QVariant, u"{bad"_s));
+	QVERIFY(jsonKv->property("hasValidationError").toBool());
+	QVariant commitResult;
+	QMetaObject::invokeMethod(jsonKv, "commitPending", Q_RETURN_ARG(QVariant, commitResult));
+	QVERIFY(!commitResult.toBool());
+	QMetaObject::invokeMethod(jsonKv, "resetState");
+	QVERIFY(!jsonKv->property("hasValidationError").toBool());
+
+	// Pending bottom draft commits via commitPending() and reordering works.
+	QList<QQuickItem*> kvInputs;
+	findItem(jsonKv, [&](QQuickItem* item) {
+		if(QByteArray(item->metaObject()->className()).startsWith("QQuickTextInput"))
+		{
+			kvInputs.append(item);
+		}
+		return false;
+	});
+	QVERIFY(kvInputs.size() >= 6); // 2 rows * 2 inputs + 2 bottom draft inputs
+	QQuickItem* draftKeyInput = kvInputs.at(kvInputs.size() - 2);
+	QQuickItem* draftValInput = kvInputs.at(kvInputs.size() - 1);
+	draftKeyInput->setProperty("text", u"extra"_s);
+	draftValInput->setProperty("text", u"\"quoted\""_s);
+	QMetaObject::invokeMethod(jsonKv, "updateDraftValidation");
+	QVERIFY(jsonKv->property("hasUncommittedEdit").toBool());
+	QMetaObject::invokeMethod(jsonKv, "commitPending", Q_RETURN_ARG(QVariant, commitResult));
+	QVERIFY(commitResult.toBool());
+	QCOMPARE(jsonKv->property("entries").toList().size(), 3);
+	QMetaObject::invokeMethod(jsonKv, "moveRow", Q_ARG(QVariant, 2), Q_ARG(QVariant, -1));
+	QCOMPARE(jsonKv->property("entries").toList().at(1).toMap().value(u"key"_s).toString(), u"extra"_s);
+
+	// 3) ColorSwatchPicker keeps `value` intact when invalid `#zzzzzz` is typed into the hex input.
+	auto* swatch = root->findChild<QQuickItem*>(u"strictSwatch"_s);
+	QVERIFY(swatch);
+	auto* hexInput = findByTypePrefix(swatch, "QQuickTextInput");
+	QVERIFY(hexInput);
+	hexInput->forceActiveFocus();
+	hexInput->setProperty("text", u"#zzzzzz"_s);
+	QMetaObject::invokeMethod(hexInput, "textEdited");
+	QVERIFY(swatch->property("hasValidationError").toBool());
+	QCOMPARE(swatch->property("value").toString(), u"#336699"_s);
+	QMetaObject::invokeMethod(swatch, "resetState");
+	QVERIFY(!swatch->property("hasValidationError").toBool());
+	QCOMPARE(hexInput->property("text").toString(), u"#336699"_s);
+	QVERIFY2(warningSpy.isEmpty(), "Strict config controls emitted QML warnings");
+}
+
+void TestMainWindow::configDialogSupportsOpencodeAliasesInlineRenameTopBarLockAndQuitGuard()
+{
+	MainFixture f;
+	f.stub.setConfigRawText(u"{\n"
+	                        "  \"provider\": {\n"
+	                        "    \"legacy\": {\n"
+	                        "      \"options\": {\n"
+	                        "        \"api_key\": \"{env:LEGACY_KEY}\",\n"
+	                        "        \"base_url\": \"https://legacy.example.com/v1\"\n"
+	                        "      },\n"
+	                        "      \"models\": {\n"
+	                        "        \"vision-pro\": {\n"
+	                        "          \"thinking\": true,\n"
+	                        "          \"modalities\": { \"input\": [\"image\", \"pdf\"] }\n"
+	                        "        }\n"
+	                        "      }\n"
+	                        "    }\n"
+	                        "  },\n"
+	                        "  \"agent\": {\n"
+	                        "    \"helper\": {\n"
+	                        "      \"spawn\": false,\n"
+	                        "      \"disabled\": true\n"
+	                        "    }\n"
+	                        "  },\n"
+	                        "  \"mcp\": {\n"
+	                        "    \"local-srv\": {\n"
+	                        "      \"command\": \"npx\",\n"
+	                        "      \"args\": [\"-y\", \"mcp-server\"],\n"
+	                        "      \"env\": { \"MCP_TOKEN\": \"secret\" }\n"
+	                        "    }\n"
+	                        "  },\n"
+	                        "  \"permission\": {\n"
+	                        "    \"edit\": { \"*.env\": \"deny\", \"*\": \"allow\" },\n"
+	                        "    \"bash\": \"ask\"\n"
+	                        "  }\n"
+	                        "}\n"_s);
+
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+	window->requestActivate();
+
+	const auto findByName = [](QQuickItem* root, const QString& name) {
+		return findItem(root, [&name](QQuickItem* item) { return item->objectName() == name; });
+	};
+	auto* themeToggle = findByTypePrefix(window->contentItem(), "ThemeToggle");
+	auto* splitBtn = findItem(window->contentItem(), [](QQuickItem* item) {
+		return item->property("iconName").toString() == u"split"_s;
+	});
+	QVERIFY(themeToggle && splitBtn);
+	QVERIFY(themeToggle->isEnabled() && splitBtn->isEnabled());
+
+	// 1) Opening ConfigDialog disables top-bar buttons while `dialogs.open` is true.
+	f.workspace->commands()->run(u"config"_s);
+	QQuickItem* configDialog = nullptr;
+	QTRY_VERIFY([&] {
+		configDialog = findByName(window->contentItem(), u"configDialog"_s);
+		return configDialog != nullptr && !f.workspace->configEditor()->isLoading();
+	}());
+	QVERIFY(!themeToggle->isEnabled());
+	QVERIFY(!splitBtn->isEnabled());
+
+	// 2) Opencode schema aliases populate Providers, Agents, and MCP sections accurately.
+	QMetaObject::invokeMethod(configDialog, "selectCategory", Q_ARG(QVariant, u"providers"_s));
+	QCoreApplication::processEvents();
+	auto* provSection = findByName(configDialog, u"configProvidersSection"_s);
+	QVERIFY(provSection);
+	QMetaObject::invokeMethod(provSection, "setProviderExpanded", Q_ARG(QVariant, u"legacy"_s), Q_ARG(QVariant, true));
+	QMetaObject::invokeMethod(provSection, "setModelExpanded", Q_ARG(QVariant, u"legacy"_s), Q_ARG(QVariant, u"vision-pro"_s), Q_ARG(QVariant, true));
+	QCoreApplication::processEvents();
+	QCOMPARE(findByName(provSection, u"providerBaseUrl_legacy"_s)->property("text").toString(), u"https://legacy.example.com/v1"_s);
+	QCOMPARE(findByName(provSection, u"providerApiKey_legacy"_s)->property("text").toString(), u"{env:LEGACY_KEY}"_s);
+	QVERIFY(findByName(provSection, u"modelReasoningSwitch_legacy_vision-pro"_s)->property("checked").toBool());
+	auto* attachSw = findByName(provSection, u"modelAttachmentSwitch_legacy_vision-pro"_s);
+	QVERIFY(attachSw && attachSw->property("checked").toBool());
+	// Toggling attachment off removes "image" from modalities.input while preserving "pdf".
+	QMetaObject::invokeMethod(attachSw, "toggled", Q_ARG(bool, false));
+	QCOMPARE(f.workspace->configEditor()->valueAt({u"provider"_s, u"legacy"_s, u"models"_s, u"vision-pro"_s, u"modalities"_s, u"input"_s}).toStringList(),
+	         (QStringList{u"pdf"_s}));
+	f.workspace->configEditor()->discard();
+
+	QMetaObject::invokeMethod(configDialog, "selectCategory", Q_ARG(QVariant, u"agents"_s));
+	QCoreApplication::processEvents();
+	auto* agentsSection = findByName(configDialog, u"configAgentsSection"_s);
+	QVERIFY(agentsSection);
+	QMetaObject::invokeMethod(agentsSection, "setExpanded", Q_ARG(QVariant, u"helper"_s), Q_ARG(QVariant, true));
+	QCoreApplication::processEvents();
+	QVERIFY(!findByName(agentsSection, u"agentCanSpawnSwitch_helper"_s)->property("checked").toBool());
+	QVERIFY(findByName(agentsSection, u"agentDisableSwitch_helper"_s)->property("checked").toBool());
+
+	QMetaObject::invokeMethod(configDialog, "selectCategory", Q_ARG(QVariant, u"mcp"_s));
+	QCoreApplication::processEvents();
+	auto* mcpSection = findByName(configDialog, u"configMcpSection"_s);
+	QVERIFY(mcpSection);
+	QMetaObject::invokeMethod(mcpSection, "setExpanded", Q_ARG(QVariant, u"local-srv"_s), Q_ARG(QVariant, true));
+	QCoreApplication::processEvents();
+	QCOMPARE(findByName(mcpSection, u"mcpCommandEditor_local-srv"_s)->property("values").toStringList(),
+	         (QStringList{u"npx"_s, u"-y"_s, u"mcp-server"_s}));
+	QCOMPARE(findByName(mcpSection, u"mcpEnvEditor_local-srv"_s)->property("entries").toList().size(), 1);
+
+	QMetaObject::invokeMethod(configDialog, "selectCategory", Q_ARG(QVariant, u"permissions"_s));
+	QCoreApplication::processEvents();
+	auto* permEditor = findByName(configDialog, u"globalPermissionEditor"_s);
+	QVERIFY(permEditor);
+	const QVariantList loadedRules = permEditor->property("rules").toList();
+	QCOMPARE(loadedRules.size(), 3);
+	QCOMPARE(loadedRules.at(0).toMap().value(u"pattern"_s).toString(), u"*.env"_s);
+	QCOMPARE(loadedRules.at(1).toMap().value(u"pattern"_s).toString(), u"*"_s);
+	QCOMPARE(loadedRules.at(2).toMap().value(u"tool"_s).toString(), u"bash"_s);
+	// 3) Inline rename commits on triggerSave() via focusSink without pressing Enter or Rename.
+	QMetaObject::invokeMethod(configDialog, "selectCategory", Q_ARG(QVariant, u"providers"_s));
+	QCoreApplication::processEvents();
+	provSection = findByName(configDialog, u"configProvidersSection"_s);
+	QMetaObject::invokeMethod(provSection, "setProviderExpanded", Q_ARG(QVariant, u"legacy"_s), Q_ARG(QVariant, true));
+	QCoreApplication::processEvents();
+	auto* renameField = findByName(provSection, u"providerRenameField_legacy"_s);
+	QVERIFY(renameField);
+	auto* renameInput = qobject_cast<QQuickItem*>(renameField->property("inputItem").value<QObject*>());
+	QVERIFY(renameInput);
+	renameInput->forceActiveFocus();
+	renameField->setProperty("text", u"renamed-prov"_s);
+	QMetaObject::invokeMethod(renameField, "edited");
+	QVERIFY(findByName(configDialog, u"configSaveButton"_s)->isEnabled());
+	QMetaObject::invokeMethod(configDialog, "triggerSave");
+	QTRY_COMPARE(f.stub.saveConfigCalls(), 1);
+	QVERIFY(f.stub.savedConfigRawText().contains(u"\"renamed-prov\""_s));
+	QVERIFY(!f.stub.savedConfigRawText().contains(u"\"legacy\""_s));
+
+	// 4) Closing the window while ConfigDialog has unsaved changes prompts `quitWindow` confirmation.
+	f.workspace->configEditor()->setStringAt({u"$name"_s}, u"Unsaved Edit"_s);
+	QVERIFY(f.workspace->configEditor()->isDirty());
+	QVERIFY(!window->close());
+	QVERIFY(window->isVisible());
+	auto* dirtyBar = findByName(configDialog, u"configDirtyConfirmBar"_s);
+	QVERIFY(dirtyBar && dirtyBar->isVisible());
+	QCOMPARE(configDialog->property("pendingDirtyAction").toMap().value(u"type"_s).toString(), u"quitWindow"_s);
+	auto* dirtyDiscardBtn = findByName(configDialog, u"configDirtyDiscardButton"_s);
+	QVERIFY(dirtyDiscardBtn);
+	QMetaObject::invokeMethod(dirtyDiscardBtn, "clicked");
+	QTRY_VERIFY(!window->isVisible());
+	QVERIFY2(warningSpy.isEmpty(), "ConfigDialog aliases, inline rename, and quit guard emitted QML warnings");
 }
 
 QTEST_MAIN(TestMainWindow)

@@ -21,8 +21,9 @@ struct CompletionTarget
 	Kind kind = Kind::None;
 	QString command{};   // canonical slash command name for CommandArg
 	QString query{};     // what was typed in the active token up to `cursor`
-	qsizetype start = 0; // start offset in `text` of the token being replaced
-	qsizetype end = 0;   // end offset in `text` of the token being replaced
+	qsizetype start = 0;     // start offset in `text` of the token being replaced
+	qsizetype end = 0;       // end offset in `text` of the token being replaced
+	bool atLineStart = false; // true only when replacing the sole token from offset 0 in shell mode
 };
 
 // Finds the completion target at `cursor`.

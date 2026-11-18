@@ -13,6 +13,15 @@ Column {
 	property var modelOpts: []
 	property var agentOpts: []
 
+	readonly property bool hasValidationError: compactionRecommendField.hasValidationError
+		|| compactionThresholdField.hasValidationError
+		|| retryMaxDelayField.hasValidationError
+	readonly property bool hasPendingChanges: compactionRecommendField.hasUncommittedEdit
+		|| compactionThresholdField.hasUncommittedEdit
+		|| retryMaxDelayField.hasUncommittedEdit
+		|| enabledProvidersEditor.hasUncommittedEdit
+		|| disabledProvidersEditor.hasUncommittedEdit
+
 	function mutate(fn) {
 		mutating = true
 		fn()
@@ -36,9 +45,7 @@ Column {
 
 	function listAt(path) {
 		const v = editor.valueAt(path)
-		if (!Array.isArray(v))
-			return []
-		return v.map(item => String(item ?? ""))
+		return Fields.isArray(v) ? Fields.toArray(v).map(item => String(item ?? "")) : []
 	}
 
 	function resetPath(path) {
@@ -58,6 +65,26 @@ Column {
 		retryMaxDelayField.value = numAt(["retry", "max_delay"])
 		enabledProvidersEditor.values = listAt(["enabled_providers"])
 		disabledProvidersEditor.values = listAt(["disabled_providers"])
+	}
+
+	function commitPending() {
+		const trimmedName = nameField.text.trim()
+		if (nameField.text !== trimmedName) {
+			nameField.text = trimmedName
+			mutate(() => editor.setStringAt(["$name"], trimmedName))
+		}
+		const okEnabled = enabledProvidersEditor.commitPending()
+		const okDisabled = disabledProvidersEditor.commitPending()
+		return okEnabled && okDisabled && !hasValidationError
+	}
+
+	function resetSubEditors() {
+		compactionRecommendField.resetState()
+		compactionThresholdField.resetState()
+		retryMaxDelayField.resetState()
+		enabledProvidersEditor.resetState()
+		disabledProvidersEditor.resetState()
+		syncControls()
 	}
 
 	width: parent ? parent.width : 560
@@ -107,7 +134,13 @@ Column {
 			objectName: "generalProfileNameField"
 			width: parent.width
 			placeholderText: qsTr("e.g. Work Anthropic, Local Ollama")
-			onEdited: section.mutate(() => section.editor.setStringAt(["$name"], text))
+			onEdited: section.mutate(() => section.editor.setStringAt(["$name"], text.trim() === "" ? "" : text))
+			onEditingFinished: {
+				const trimmed = text.trim()
+				if (text !== trimmed)
+					text = trimmed
+				section.mutate(() => section.editor.setStringAt(["$name"], trimmed))
+			}
 		}
 	}
 
@@ -209,9 +242,11 @@ Column {
 
 		NumberField {
 			id: compactionRecommendField
+			objectName: "compactionRecommendField"
 			width: parent.width
 			decimals: true
 			minimum: 0
+			exclusiveMinimum: true
 			step: 0.05
 			placeholderText: "0.6"
 			onValueModified: val => section.mutate(() => section.editor.setValueAt(["compaction", "recommend"], val))
@@ -229,9 +264,11 @@ Column {
 
 		NumberField {
 			id: compactionThresholdField
+			objectName: "compactionThresholdField"
 			width: parent.width
 			decimals: true
 			minimum: 0
+			exclusiveMinimum: true
 			step: 0.05
 			placeholderText: "0.9"
 			onValueModified: val => section.mutate(() => section.editor.setValueAt(["compaction", "threshold"], val))
@@ -259,6 +296,7 @@ Column {
 
 		NumberField {
 			id: retryMaxDelayField
+			objectName: "retryMaxDelayField"
 			width: parent.width
 			minimum: 0
 			step: 10
@@ -353,6 +391,7 @@ Column {
 
 		StringListEditor {
 			id: enabledProvidersEditor
+			objectName: "enabledProvidersEditor"
 			width: parent.width
 			monospace: true
 			placeholderText: qsTr("Provider ID (e.g. anthropic)")
@@ -371,6 +410,7 @@ Column {
 
 		StringListEditor {
 			id: disabledProvidersEditor
+			objectName: "disabledProvidersEditor"
 			width: parent.width
 			monospace: true
 			placeholderText: qsTr("Provider ID to disable")

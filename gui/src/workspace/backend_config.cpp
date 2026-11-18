@@ -1,5 +1,6 @@
 #include "workspace/backend_config.h"
 
+#include <QPointer>
 #include <QVariantMap>
 
 using namespace Qt::StringLiterals;
@@ -129,8 +130,15 @@ void BackendConfig::apply(proto::ServerConfig config)
 
 QCoro::Task<client::Result<proto::ReloadConfigResult>> BackendConfig::reload(std::optional<QString> cwdOverride)
 {
+	const QPointer<BackendConfig> self(this);
 	const std::optional<QString> targetCwd = cwdOverride ? std::move(cwdOverride) : optionalCwd();
+	++m_reloadsInFlight;
 	const auto result = co_await m_backend.client().reloadConfig(targetCwd);
+	if(!self)
+	{
+		co_return result;
+	}
+	--m_reloadsInFlight;
 	if(result)
 	{
 		apply(result->config);

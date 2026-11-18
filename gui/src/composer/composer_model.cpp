@@ -41,46 +41,59 @@ QList<proto::ImageData> imageData(const QList<proto::NamedImage>& images)
 	return result;
 }
 
+bool isAsciiDriveLetter(QChar c)
+{
+	return (c >= u'a' && c <= u'z') || (c >= u'A' && c <= u'Z');
+}
+
+bool isBareDrive(const QString& query)
+{
+	return query.size() == 2 && isAsciiDriveLetter(query[0]) && query[1] == u':';
+}
+
 struct SplitPath
 {
 	QString dirToRequest;
 	QString typedPrefix;
 	QString leafPrefix;
+	QChar separator = u'/';
 };
 
 SplitPath splitPathQuery(const QString& query)
 {
 	if(query == u"~"_s)
 	{
-		return {.dirToRequest = u"~"_s, .typedPrefix = u"~/"_s, .leafPrefix = {}};
+		return {.dirToRequest = u"~"_s, .typedPrefix = u"~/"_s, .leafPrefix = {}, .separator = u'/'};
 	}
-	const qsizetype slash = query.lastIndexOf(u'/');
+	if(isBareDrive(query))
+	{
+		const QString root = query + u'\\';
+		return {.dirToRequest = root, .typedPrefix = root, .leafPrefix = {}, .separator = u'\\'};
+	}
+	const qsizetype slash = std::max(query.lastIndexOf(u'/'), query.lastIndexOf(u'\\'));
 	if(slash < 0)
 	{
-		return {.dirToRequest = u"."_s, .typedPrefix = {}, .leafPrefix = query};
+		return {.dirToRequest = u"."_s, .typedPrefix = {}, .leafPrefix = query, .separator = u'/'};
 	}
+	const QChar sep = query[slash];
 	const QString prefix = query.left(slash + 1);
 	QString dir = prefix;
-	if(prefix == u"./"_s)
+	if(prefix == u"./"_s || prefix == u".\\"_s)
 	{
 		dir = u"."_s;
 	}
-	else if(prefix == u"~/"_s)
+	else if(prefix == u"~/"_s || prefix == u"~\\"_s)
 	{
 		dir = u"~"_s;
 	}
-	return {.dirToRequest = dir, .typedPrefix = prefix, .leafPrefix = query.mid(slash + 1)};
+	return {.dirToRequest = dir, .typedPrefix = prefix, .leafPrefix = query.mid(slash + 1), .separator = sep};
 }
 
-QString sessionTokenValue(const proto::SessionInfo& info)
+QString sessionTokenValue(const proto::SessionInfo& info, bool uniqueName)
 {
-	if(!info.name.isEmpty() && !std::ranges::any_of(info.name, [](QChar c) { return c.isSpace(); }))
-	{
-		return info.name;
-	}
-	return info.id;
+	const bool canUseName = uniqueName && !info.name.isEmpty() && !std::ranges::any_of(info.name, [](QChar c) { return c.isSpace(); });
+	return canUseName ? info.name : info.id;
 }
-
 QString sessionDetail(const proto::SessionInfo& info)
 {
 	if(!info.title.isEmpty())
@@ -292,13 +305,15 @@ void ComposerModel::edit(const QString& text, int cursor)
 	{
 		setShellMode(true);
 		changeDraft(); // the text area drops the `!`
+		emit userEdited();
 		return;
 	}
 	if(text == m_draft.text() && cursor == m_draft.cursor())
 	{
 		return;
 	}
-	if(text != m_draft.text())
+	const bool textChanged = text != m_draft.text();
+	if(textChanged)
 	{
 		m_forceShellEmpty = false;
 		m_completionDismissed = false;
@@ -306,6 +321,10 @@ void ComposerModel::edit(const QString& text, int cursor)
 	}
 	m_draft.setText(text, cursor);
 	draftEdited();
+	if(textChanged)
+	{
+		emit userEdited();
+	}
 }
 
 void ComposerModel::moveCursor(int cursor)
@@ -357,7 +376,7 @@ void ComposerModel::cancelBinarySearch()
 void ComposerModel::triggerCompletion()
 {
 	m_completionDismissed = false;
-	if(m_shellMode && m_draft.text().trimmed().isEmpty())
+	if(m_shellMode)
 	{
 		m_forceShellEmpty = true;
 	}
@@ -429,7 +448,6 @@ void ComposerModel::updateArgCompletion()
 {
 	const QString& cmd = m_target.command;
 	const QString query = m_target.query.trimmed();
-
 	if(cmd == u"cd"_s)
 	{
 		updatePathCompletion(false, false);
@@ -440,180 +458,213 @@ void ComposerModel::updateArgCompletion()
 		updatePathCompletion(true, true);
 		return;
 	}
+	if(cmd == u"variant"_s)
+	{
+		updateVariantArgCompletion(query);
+		return;
+	}
+	if(cmd == u"models"_s)
+	{
+		updateModelArgCompletion(query);
+		return;
+	}
+	if(cmd == u"agents"_s)
+	{
+		updateAgentArgCompletion(query);
+		return;
+	}
+	if(cmd == u"sessions"_s || cmd == u"close-session"_s)
+	{
+		updateSessionArgCompletion(query, cmd == u"close-session"_s);
+		return;
+	}
+	m_completions.setEntries({});
+}
+
+void ComposerModel::updateVariantArgCompletion(const QString& query)
+{
+	QList<CompletionEntry> prefixHits;
+	QList<CompletionEntry> subHits;
+	const proto::ModelInfo* model = modelInfo();
+	const QStringList rawVariants = model ? model->variants : QStringList();
+	const QString cur = variant();
+	const QString defaultLabel = tr("default");
+	if(query.isEmpty() || u"default"_s.startsWith(query, Qt::CaseInsensitive) || defaultLabel.startsWith(query, Qt::CaseInsensitive))
+	{
+		prefixHits.append({.value = u"default"_s,
+		                   .label = defaultLabel,
+		                   .detail = cur.isEmpty() ? tr("active") : QString(),
+		                   .icon = u"variant"_s,
+		                   .mono = true});
+	}
+	for(const QString& v : rawVariants)
+	{
+		const CompletionEntry entry{.value = v,
+		                            .label = v,
+		                            .detail = cur == v ? tr("active") : QString(),
+		                            .icon = u"variant"_s,
+		                            .mono = true};
+		if(v.startsWith(query, Qt::CaseInsensitive))
+		{
+			prefixHits.append(entry);
+		}
+		else if(v.contains(query, Qt::CaseInsensitive))
+		{
+			subHits.append(entry);
+		}
+	}
+	m_completions.setEntries(prefixHits + subHits);
+}
+
+void ComposerModel::updateModelArgCompletion(const QString& query)
+{
+	QList<CompletionEntry> prefixHits;
+	QList<CompletionEntry> subHits;
+	const qsizetype hash = query.lastIndexOf(u'#');
+	const QString modelFilter = hash >= 0 ? query.left(hash) : query;
+	const std::optional<QString> variantFilter = hash >= 0 ? std::optional<QString>(query.mid(hash + 1)) : std::nullopt;
+	const proto::ModelRef& curRef = m_controller.info().model;
+
+	for(const proto::ModelInfo& m : m_config.config().models)
+	{
+		const QString fullId = m.provider + u"/"_s + m.id;
+		const bool isPrefix = fullId.startsWith(modelFilter, Qt::CaseInsensitive)
+		                      || m.id.startsWith(modelFilter, Qt::CaseInsensitive)
+		                      || m.name.startsWith(modelFilter, Qt::CaseInsensitive);
+		const bool isSub = isPrefix
+		                   || fullId.contains(modelFilter, Qt::CaseInsensitive)
+		                   || m.name.contains(modelFilter, Qt::CaseInsensitive)
+		                   || m.providerName.contains(modelFilter, Qt::CaseInsensitive);
+		if(!isSub)
+		{
+			continue;
+		}
+		const QString detailBase = m.providerName + (m.name.isEmpty() || m.name == m.id ? QString() : u" · "_s + m.name);
+		if(!variantFilter)
+		{
+			const bool active = curRef.provider == m.provider && curRef.model == m.id;
+			(isPrefix ? prefixHits : subHits)
+				.append({.value = fullId,
+				         .label = fullId,
+				         .detail = active ? detailBase + u" · "_s + tr("active") : detailBase,
+				         .icon = u"model"_s,
+				         .mono = true});
+			continue;
+		}
+		for(const QString& v : m.variants)
+		{
+			const bool varPrefix = v.startsWith(*variantFilter, Qt::CaseInsensitive);
+			if(!varPrefix && !v.contains(*variantFilter, Qt::CaseInsensitive))
+			{
+				continue;
+			}
+			const QString spec = fullId + u"#"_s + v;
+			(varPrefix ? prefixHits : subHits)
+				.append({.value = spec, .label = spec, .detail = detailBase, .icon = u"model"_s, .mono = true});
+		}
+	}
+	m_completions.setEntries(prefixHits + subHits);
+}
+
+void ComposerModel::updateAgentArgCompletion(const QString& query)
+{
+	QList<CompletionEntry> prefixHits;
+	QList<CompletionEntry> subHits;
+	const QString cur = agentName();
+	for(const proto::AgentInfo& a : m_config.config().agents)
+	{
+		const bool isPrefix = a.name.startsWith(query, Qt::CaseInsensitive);
+		const bool isSub = isPrefix || a.name.contains(query, Qt::CaseInsensitive) || a.description.contains(query, Qt::CaseInsensitive);
+		if(!isSub)
+		{
+			continue;
+		}
+		QString detail = a.description;
+		if(a.name == cur)
+		{
+			detail = detail.isEmpty() ? tr("active") : detail + u" · "_s + tr("active");
+		}
+		(isPrefix ? prefixHits : subHits)
+			.append({.value = a.name, .label = a.name, .detail = detail, .icon = u"agent"_s, .mono = true});
+	}
+	m_completions.setEntries(prefixHits + subHits);
+}
+
+void ComposerModel::updateSessionArgCompletion(const QString& query, bool closeMode)
+{
+	if(!m_directory)
+	{
+		m_completions.setEntries({});
+		return;
+	}
+	QSet<QString> alreadyPicked;
+	if(closeMode)
+	{
+		const QString& fullText = m_draft.text();
+		qsizetype spaceIdx = 0;
+		while(spaceIdx < fullText.size() && fullText[spaceIdx].isSpace())
+		{
+			++spaceIdx;
+		}
+		while(spaceIdx < fullText.size() && !fullText[spaceIdx].isSpace())
+		{
+			++spaceIdx;
+		}
+		const QString earlier = fullText.mid(spaceIdx, m_target.start - spaceIdx);
+		for(const QString& tok : earlier.split(u' ', Qt::SkipEmptyParts))
+		{
+			alreadyPicked.insert(tok.toLower());
+		}
+	}
+
+	const QList<proto::SessionInfo> list = closeMode ? m_directory->liveSessions() : m_directory->allSessions();
+	QHash<QString, int> nameCounts;
+	for(const proto::SessionInfo& s : list)
+	{
+		if(!s.name.isEmpty())
+		{
+			++nameCounts[s.name.toLower()];
+		}
+	}
 
 	QList<CompletionEntry> prefixHits;
 	QList<CompletionEntry> subHits;
-
-	if(cmd == u"variant"_s)
+	for(const proto::SessionInfo& s : list)
 	{
-		const proto::ModelInfo* model = modelInfo();
-		const QStringList rawVariants = model ? model->variants : QStringList();
-		const QString cur = variant();
-		const QString defaultLabel = tr("default");
-		if(query.isEmpty() || u"default"_s.startsWith(query, Qt::CaseInsensitive) || defaultLabel.startsWith(query, Qt::CaseInsensitive))
+		const int sameNameCount = s.name.isEmpty() ? 0 : nameCounts.value(s.name.toLower());
+		const bool uniqueName = sameNameCount == 1;
+		const bool pickedById = alreadyPicked.contains(s.id.toLower());
+		const bool pickedByName = uniqueName && alreadyPicked.contains(s.name.toLower());
+		if(closeMode && (pickedById || pickedByName))
 		{
-			prefixHits.append({.value = u"default"_s,
-			                   .label = defaultLabel,
-			                   .detail = cur.isEmpty() ? tr("active") : QString(),
-			                   .icon = u"variant"_s,
-			                   .mono = true});
+			continue;
 		}
-		for(const QString& v : rawVariants)
+		const QString baseLabel = !s.name.isEmpty() ? s.name : s.id;
+		const QString label = sameNameCount > 1 ? u"%1 (%2)"_s.arg(s.name, s.id) : baseLabel;
+		const bool isPrefix = baseLabel.startsWith(query, Qt::CaseInsensitive) || s.id.startsWith(query, Qt::CaseInsensitive);
+		const bool isSub = isPrefix
+		                   || baseLabel.contains(query, Qt::CaseInsensitive)
+		                   || s.id.contains(query, Qt::CaseInsensitive)
+		                   || s.title.contains(query, Qt::CaseInsensitive);
+		if(!isSub)
 		{
-			const CompletionEntry entry{.value = v,
-			                            .label = v,
-			                            .detail = cur == v ? tr("active") : QString(),
-			                            .icon = u"variant"_s,
-			                            .mono = true};
-			if(v.startsWith(query, Qt::CaseInsensitive))
-			{
-				prefixHits.append(entry);
-			}
-			else if(v.contains(query, Qt::CaseInsensitive))
-			{
-				subHits.append(entry);
-			}
+			continue;
 		}
-		m_completions.setEntries(prefixHits + subHits);
-		return;
+		QString detail = sessionDetail(s);
+		if(!closeMode)
+		{
+			const QString stateTag = s.live ? tr("live") : tr("history");
+			detail = detail.isEmpty() ? stateTag : detail + u" · "_s + stateTag;
+		}
+		(isPrefix ? prefixHits : subHits)
+			.append({.value = sessionTokenValue(s, uniqueName),
+			         .label = label,
+			         .detail = detail,
+			         .icon = u"chat"_s,
+			         .mono = true,
+			         .trailingSpace = closeMode});
 	}
-
-	if(cmd == u"models"_s)
-	{
-		const qsizetype hash = query.lastIndexOf(u'#');
-		const QString modelFilter = hash >= 0 ? query.left(hash) : query;
-		const std::optional<QString> variantFilter = hash >= 0 ? std::optional<QString>(query.mid(hash + 1)) : std::nullopt;
-		const proto::ModelRef& curRef = m_controller.info().model;
-
-		for(const proto::ModelInfo& m : m_config.config().models)
-		{
-			const QString fullId = m.provider + u"/"_s + m.id;
-			const bool isPrefix = fullId.startsWith(modelFilter, Qt::CaseInsensitive)
-			                      || m.id.startsWith(modelFilter, Qt::CaseInsensitive)
-			                      || m.name.startsWith(modelFilter, Qt::CaseInsensitive);
-			const bool isSub = isPrefix
-			                   || fullId.contains(modelFilter, Qt::CaseInsensitive)
-			                   || m.name.contains(modelFilter, Qt::CaseInsensitive)
-			                   || m.providerName.contains(modelFilter, Qt::CaseInsensitive);
-			if(!isSub)
-			{
-				continue;
-			}
-			const QString detailBase = m.providerName + (m.name.isEmpty() || m.name == m.id ? QString() : u" · "_s + m.name);
-			if(variantFilter)
-			{
-				for(const QString& v : m.variants)
-				{
-					if(v.startsWith(*variantFilter, Qt::CaseInsensitive) || v.contains(*variantFilter, Qt::CaseInsensitive))
-					{
-						const QString spec = fullId + u"#"_s + v;
-						(v.startsWith(*variantFilter, Qt::CaseInsensitive) ? prefixHits : subHits)
-							.append({.value = spec, .label = spec, .detail = detailBase, .icon = u"model"_s, .mono = true});
-					}
-				}
-			}
-			else
-			{
-				const bool active = curRef.provider == m.provider && curRef.model == m.id;
-				(isPrefix ? prefixHits : subHits)
-					.append({.value = fullId,
-					         .label = fullId,
-					         .detail = active ? detailBase + u" · "_s + tr("active") : detailBase,
-					         .icon = u"model"_s,
-					         .mono = true});
-			}
-		}
-		m_completions.setEntries(prefixHits + subHits);
-		return;
-	}
-
-	if(cmd == u"agents"_s)
-	{
-		const QString cur = agentName();
-		for(const proto::AgentInfo& a : m_config.config().agents)
-		{
-			const bool isPrefix = a.name.startsWith(query, Qt::CaseInsensitive);
-			const bool isSub = isPrefix || a.name.contains(query, Qt::CaseInsensitive) || a.description.contains(query, Qt::CaseInsensitive);
-			if(!isSub)
-			{
-				continue;
-			}
-			QString detail = a.description;
-			if(a.name == cur)
-			{
-				detail = detail.isEmpty() ? tr("active") : detail + u" · "_s + tr("active");
-			}
-			(isPrefix ? prefixHits : subHits)
-				.append({.value = a.name, .label = a.name, .detail = detail, .icon = u"agent"_s, .mono = true});
-		}
-		m_completions.setEntries(prefixHits + subHits);
-		return;
-	}
-
-	if(cmd == u"sessions"_s || cmd == u"close-session"_s)
-	{
-		if(!m_directory)
-		{
-			m_completions.setEntries({});
-			return;
-		}
-		const bool closeMode = cmd == u"close-session"_s;
-		QSet<QString> alreadyPicked;
-		if(closeMode)
-		{
-			const QString& fullText = m_draft.text();
-			qsizetype spaceIdx = 0;
-			while(spaceIdx < fullText.size() && fullText[spaceIdx].isSpace())
-			{
-				++spaceIdx;
-			}
-			while(spaceIdx < fullText.size() && !fullText[spaceIdx].isSpace())
-			{
-				++spaceIdx;
-			}
-			const QString earlier = fullText.mid(spaceIdx, m_target.start - spaceIdx);
-			for(const QString& tok : earlier.split(u' ', Qt::SkipEmptyParts))
-			{
-				alreadyPicked.insert(tok.toLower());
-			}
-		}
-
-		const QList<proto::SessionInfo> list = closeMode ? m_directory->liveSessions() : m_directory->allSessions();
-		for(const proto::SessionInfo& s : list)
-		{
-			if(closeMode && (alreadyPicked.contains(s.id.toLower()) || (!s.name.isEmpty() && alreadyPicked.contains(s.name.toLower()))))
-			{
-				continue;
-			}
-			const QString label = !s.name.isEmpty() ? s.name : s.id;
-			const bool isPrefix = label.startsWith(query, Qt::CaseInsensitive) || s.id.startsWith(query, Qt::CaseInsensitive);
-			const bool isSub = isPrefix
-			                   || label.contains(query, Qt::CaseInsensitive)
-			                   || s.id.contains(query, Qt::CaseInsensitive)
-			                   || s.title.contains(query, Qt::CaseInsensitive);
-			if(!isSub)
-			{
-				continue;
-			}
-			QString detail = sessionDetail(s);
-			if(!closeMode)
-			{
-				const QString stateTag = s.live ? tr("live") : tr("history");
-				detail = detail.isEmpty() ? stateTag : detail + u" · "_s + stateTag;
-			}
-			(isPrefix ? prefixHits : subHits)
-				.append({.value = sessionTokenValue(s),
-				         .label = label,
-				         .detail = detail,
-				         .icon = u"chat"_s,
-				         .mono = true,
-				         .trailingSpace = closeMode});
-		}
-		m_completions.setEntries(prefixHits + subHits);
-		return;
-	}
-
-	m_completions.setEntries({});
+	m_completions.setEntries(prefixHits + subHits);
 }
 
 void ComposerModel::updatePathCompletion(bool includeFiles, bool isExport)
@@ -627,13 +678,13 @@ void ComposerModel::updatePathCompletion(bool includeFiles, bool isExport)
 	   && (m_dirCache.includeFiles == includeFiles || (!includeFiles && m_dirCache.includeFiles)))
 	{
 		cancelDirSearch();
-		m_completions.setEntries(buildPathEntries(split.typedPrefix, split.leafPrefix, m_dirCache.dirs, m_dirCache.files, includeFiles, isExport));
+		m_completions.setEntries(buildPathEntries(split.typedPrefix, split.leafPrefix, m_dirCache.dirs, m_dirCache.files, includeFiles, isExport, split.separator));
 		return;
 	}
 
 	if(isExport)
 	{
-		m_completions.setEntries(buildPathEntries(split.typedPrefix, split.leafPrefix, {}, {}, includeFiles, true));
+		m_completions.setEntries(buildPathEntries(split.typedPrefix, split.leafPrefix, {}, {}, includeFiles, true, split.separator));
 	}
 	else if(!m_dirCache.valid || m_dirCache.dir != split.dirToRequest)
 	{
@@ -657,7 +708,8 @@ QList<CompletionEntry> ComposerModel::buildPathEntries(const QString& typedPrefi
                                                        const QStringList& dirs,
                                                        const QStringList& files,
                                                        bool includeFiles,
-                                                       bool isExport) const
+                                                       bool isExport,
+                                                       QChar separator) const
 {
 	QList<CompletionEntry> result;
 	QString defaultExportName;
@@ -688,8 +740,7 @@ QList<CompletionEntry> ComposerModel::buildPathEntries(const QString& typedPrefi
 		{
 			continue;
 		}
-		result.append({.value = typedPrefix + dir + u"/"_s,
-		               .label = dir,
+		result.append({.value = typedPrefix + dir + separator,
 		               .prefixLabel = typedPrefix,
 		               .detail = {},
 		               .icon = u"folder"_s,
@@ -763,47 +814,46 @@ void ComposerModel::updateShellCommandCompletion()
 
 QList<CompletionEntry> ComposerModel::buildShellCommandEntries(const QString& query, const QStringList& binaries) const
 {
-	QList<CompletionEntry> historyPrefix;
-	QList<CompletionEntry> historySub;
+	QList<CompletionEntry> result;
 	QSet<QString> seenHistory;
-	const QStringList& allHistory = m_history.items();
-	for(qsizetype idx = allHistory.size() - 1; idx >= 0; --idx)
+	if(m_target.atLineStart)
 	{
-		const QString& raw = allHistory.at(idx);
-		if(!raw.startsWith(ShellPrefix))
+		QList<CompletionEntry> historyPrefix;
+		QList<CompletionEntry> historySub;
+		const QStringList& allHistory = m_history.items();
+		for(qsizetype idx = allHistory.size() - 1; idx >= 0; --idx)
 		{
-			continue;
+			const QString& raw = allHistory.at(idx);
+			if(!raw.startsWith(ShellPrefix))
+			{
+				continue;
+			}
+			const QString cmdLine = raw.mid(ShellPrefix.size()).trimmed();
+			if(cmdLine.isEmpty() || seenHistory.contains(cmdLine))
+			{
+				continue;
+			}
+			seenHistory.insert(cmdLine);
+			const CompletionEntry entry{.value = cmdLine,
+			                            .label = cmdLine,
+			                            .detail = tr("history"),
+			                            .icon = u"history"_s,
+			                            .mono = true,
+			                            .trailingSpace = false};
+			if(query.isEmpty() || cmdLine.startsWith(query, Qt::CaseInsensitive))
+			{
+				historyPrefix.append(entry);
+			}
+			else if(cmdLine.contains(query, Qt::CaseInsensitive))
+			{
+				historySub.append(entry);
+			}
 		}
-		const QString cmdLine = raw.mid(ShellPrefix.size()).trimmed();
-		if(cmdLine.isEmpty() || seenHistory.contains(cmdLine))
+		result = historyPrefix + historySub;
+		if(result.size() > MaxShellHistoryMatches)
 		{
-			continue;
+			result.resize(MaxShellHistoryMatches);
 		}
-		seenHistory.insert(cmdLine);
-		if(query.isEmpty() || cmdLine.startsWith(query, Qt::CaseInsensitive))
-		{
-			historyPrefix.append({.value = cmdLine,
-			                      .label = cmdLine,
-			                      .detail = tr("history"),
-			                      .icon = u"history"_s,
-			                      .mono = true,
-			                      .trailingSpace = false});
-		}
-		else if(cmdLine.contains(query, Qt::CaseInsensitive))
-		{
-			historySub.append({.value = cmdLine,
-			                   .label = cmdLine,
-			                   .detail = tr("history"),
-			                   .icon = u"history"_s,
-			                   .mono = true,
-			                   .trailingSpace = false});
-		}
-	}
-
-	QList<CompletionEntry> result = historyPrefix + historySub;
-	if(result.size() > MaxShellHistoryMatches)
-	{
-		result.resize(MaxShellHistoryMatches);
 	}
 
 	for(const QString& bin : binaries)
@@ -857,7 +907,7 @@ QCoro::Task<> ComposerModel::findDirs(QString cwd, QString dir, bool includeFile
 	if(!result)
 	{
 		m_dirCache = {};
-		m_completions.setEntries(isExport ? buildPathEntries(split.typedPrefix, split.leafPrefix, {}, {}, includeFiles, true) : QList<CompletionEntry>{});
+		m_completions.setEntries(isExport ? buildPathEntries(split.typedPrefix, split.leafPrefix, {}, {}, includeFiles, true, split.separator) : QList<CompletionEntry>{});
 		co_return;
 	}
 	m_dirCache = {.cwd = std::move(cwd),
@@ -868,7 +918,7 @@ QCoro::Task<> ComposerModel::findDirs(QString cwd, QString dir, bool includeFile
 	              .valid = true};
 	if(split.dirToRequest == m_dirCache.dir)
 	{
-		m_completions.setEntries(buildPathEntries(split.typedPrefix, split.leafPrefix, m_dirCache.dirs, m_dirCache.files, includeFiles, isExport));
+		m_completions.setEntries(buildPathEntries(split.typedPrefix, split.leafPrefix, m_dirCache.dirs, m_dirCache.files, includeFiles, isExport, split.separator));
 	}
 }
 
@@ -1159,7 +1209,8 @@ bool ComposerModel::escape()
 	}
 	if(m_shellMode)
 	{
-		leaveShell();
+		setShellMode(false);
+		updateCompletion();
 		return true;
 	}
 	if(!m_controller.isTurnInProgress())
@@ -1263,6 +1314,10 @@ bool ComposerModel::acceptCompletionItem(int row, bool viaEnter)
 
 bool ComposerModel::pasteFromClipboard()
 {
+	if(m_shellMode)
+	{
+		return false;
+	}
 	const QMimeData* data = QGuiApplication::clipboard()->mimeData();
 	if(!data)
 	{

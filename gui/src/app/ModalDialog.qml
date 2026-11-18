@@ -60,6 +60,7 @@ FocusScope {
 
 	// A click outside the panel closes the dialog.
 	TapHandler {
+		gesturePolicy: TapHandler.ReleaseWithinBounds
 		onTapped: dialog.close()
 	}
 

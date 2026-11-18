@@ -186,13 +186,11 @@ void Workspace::reloadConfig(const QJSValue& cb)
 		{
 			co_return;
 		}
-		++target->m_localReloadsInFlight;
 		const Result<refgui::proto::ReloadConfigResult> result = co_await target->m_config.reload(std::move(targetCwd));
 		if(!target)
 		{
 			co_return;
 		}
-		--target->m_localReloadsInFlight;
 		if(!result)
 		{
 			target->report(callback, false, result.error().message);

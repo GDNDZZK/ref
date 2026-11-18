@@ -243,7 +243,7 @@ void Workspace::toastWarnings(const QStringList& warnings)
 
 void Workspace::onConfigChanged(const QStringList& warnings)
 {
-	if(m_localReloadsInFlight > 0)
+	if(m_config.isReloading())
 	{
 		// ReloadConfig's own response brings both the refreshed config and warnings.
 		return;

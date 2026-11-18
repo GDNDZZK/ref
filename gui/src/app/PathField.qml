@@ -70,13 +70,48 @@ Item {
 			view.positionViewAtBeginning()
 	}
 
-	// The part up to the last slash is the directory to list; the rest is what its names must start with.
+	function lastSlashIndex(str) {
+		return Math.max(str.lastIndexOf("/"), str.lastIndexOf("\\"))
+	}
+
+	function preferredSeparator(str) {
+		const idx = lastSlashIndex(str)
+		if (idx >= 0)
+			return str[idx]
+		return /^[A-Za-z]:/.test(str) ? "\\" : "/"
+	}
+
+	function isAbsOrHomePath(str) {
+		return str.startsWith("/")
+			|| str.startsWith("\\")
+			|| /^[A-Za-z]:/.test(str)
+			|| str === "~"
+			|| str.startsWith("~/")
+			|| str.startsWith("~\\")
+	}
+
+	function parseDirectoryAndPrefix(str) {
+		if (str === "~")
+			return { directory: "~", prefix: "" }
+		if (/^[A-Za-z]:$/.test(str))
+			return { directory: str + "\\", prefix: "" }
+		const slash = lastSlashIndex(str)
+		if (slash < 0)
+			return { directory: ".", prefix: str.toLowerCase() }
+		const rawDir = str.slice(0, slash + 1)
+		let directory = rawDir
+		if (rawDir === "./" || rawDir === ".\\")
+			directory = "."
+		else if (rawDir === "~/" || rawDir === "~\\")
+			directory = "~"
+		return { directory: directory, prefix: str.slice(slash + 1).toLowerCase() }
+	}
+
+	// The part up to the last slash/backslash is the directory to list; the rest filters its names.
 	function refresh() {
-		const isHomeBare = text === "~"
-		const slash = text.lastIndexOf("/")
-		const rawDir = isHomeBare ? "~" : (slash < 0 ? "." : text.slice(0, slash + 1))
-		const directory = rawDir === "./" ? "." : (rawDir === "~/" ? "~" : rawDir)
-		const prefix = isHomeBare ? "" : text.slice(slash + 1).toLowerCase()
+		const parsed = parseDirectoryAndPrefix(text)
+		const directory = parsed.directory
+		const prefix = parsed.prefix
 		const key = cwd + "\0" + directory + "\0" + (includeFiles ? "1" : "0")
 
 		if (cachedKey === key && listError === "") {
@@ -106,14 +141,18 @@ Item {
 			return
 		const name = typeof entry === "string" ? entry : entry.name
 		const isDir = typeof entry === "string" ? true : entry.isDirectory
-		const isAbsOrHome = text.startsWith("/") || text === "~" || text.startsWith("~/")
-		if (isAbsOrHome && listedPath !== "") {
-			const base = listedPath === "/" ? "" : listedPath
-			text = base + "/" + name + (isDir ? "/" : "")
+		const sep = preferredSeparator(text)
+		const trail = isDir ? sep : ""
+		if (isAbsOrHomePath(text) && listedPath !== "") {
+			const normBase = sep === "\\" ? listedPath.replace(/\//g, "\\") : listedPath.replace(/\\/g, "/")
+			const strippedBase = (normBase === "/" || normBase === "\\") ? "" : normBase.replace(/[\\/]+$/, "")
+			text = strippedBase + sep + name + trail
 		} else {
-			const slash = text.lastIndexOf("/")
-			const relPrefix = text === "~" ? "~/" : (slash < 0 ? "" : text.slice(0, slash + 1))
-			text = relPrefix + name + (isDir ? "/" : "")
+			const slash = lastSlashIndex(text)
+			const relPrefix = text === "~"
+				? ("~" + sep)
+				: (/^[A-Za-z]:$/.test(text) ? (text + sep) : (slash < 0 ? "" : text.slice(0, slash + 1)))
+			text = relPrefix + name + trail
 		}
 		field.inputItem.cursorPosition = text.length
 		if (isDir)
@@ -153,9 +192,7 @@ Item {
 		width: parent.width
 		onAccepted: path.accepted()
 		onEdited: {
-			const slash = text.lastIndexOf("/")
-			const rawDir = text === "~" ? "~" : (slash < 0 ? "." : text.slice(0, slash + 1))
-			const directory = rawDir === "./" ? "." : (rawDir === "~/" ? "~" : rawDir)
+			const directory = path.parseDirectoryAndPrefix(text).directory
 			const key = path.cwd + "\0" + directory + "\0" + (path.includeFiles ? "1" : "0")
 			if (path.cachedKey === key && path.listError === "") {
 				debounce.stop()
@@ -238,7 +275,7 @@ Item {
 			Text {
 				textFormat: Text.PlainText
 				anchors { left: parent.left; leftMargin: 38; right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
-				text: row.modelData.name + (row.modelData.isDirectory ? "/" : "")
+				text: row.modelData.name + (row.modelData.isDirectory ? path.preferredSeparator(path.text) : "")
 				color: Theme.text
 				font.pixelSize: Theme.secondaryFontSize
 				elide: Text.ElideRight

@@ -87,6 +87,7 @@ public:
 	void failPermissionReply(const QString& error, const QString& code = {}) { m_permissionError = error; m_permissionCode = code; }
 	void failListDirs(const QString& error, const QString& code = {}) { m_listDirsError = error; m_listDirsCode = code; }
 
+	void failAttach(const QString& sessionId, const QString& error) { m_failAttachId = sessionId; m_failAttachError = error; }
 	// The base64 text get_image answers with.
 	void setImageData(const QString& data) { m_imageData = data; }
 
@@ -178,6 +179,11 @@ private:
 		}
 		else if(op == u"attach"_s)
 		{
+			if(id == m_failAttachId && !m_failAttachError.isEmpty())
+			{
+				m_fake.fail(request, m_failAttachError);
+				return;
+			}
 			if(!m_sessions.contains(id))
 			{
 				m_fake.fail(request, u"no such session"_s);
@@ -284,6 +290,14 @@ private:
 			                {u"mcp_servers"_s, QJsonArray()},
 			                {u"warnings"_s, m_configWarnings}});
 		}
+		else if(op == u"get_config_files"_s)
+		{
+			m_fake.respond(request, {{u"config_dir"_s, u"/work/.ref"_s},
+			                         {u"files"_s, QJsonArray()},
+			                         {u"selected_file"_s, u"ref.json"_s},
+			                         {u"raw_text"_s, u"{\n}\n"_s},
+			                         {u"parsed"_s, QJsonObject()}});
+		}
 		else if(op == u"mcp_status"_s)
 		{
 			m_fake.respond(request, {{u"servers"_s, QJsonArray()}});
@@ -365,6 +379,8 @@ private:
 	QString m_listDirsError;
 	QString m_listDirsCode;
 	QString m_shutdownError;
+	QString m_failAttachId;
+	QString m_failAttachError;
 	QString m_imageData;
 	bool m_closeOnShutdown = false;
 	int m_created = 0;
@@ -513,6 +529,8 @@ private slots:
 	void requestCloseSessionConfirmsWhenBusyAndClosesWhenIdle();
 	void reloadAndConfigCommandsUpdateStateAndDeduplicateBroadcast();
 	void directArgumentsForModelsAgentsVariantsSessionsAndMultiClose();
+	void closingOrRemovingZoomedTileClearsZoomAndShowsRemainingTiles();
+	void zoomingTileRemovedBeforeAttachFinishesLeavesNoDanglingZoom();
 };
 
 void TestWorkspace::opensTheSessionFromTheCommandLine()
@@ -1673,6 +1691,12 @@ void TestWorkspace::reloadAndConfigCommandsUpdateStateAndDeduplicateBroadcast()
 	QTRY_COMPARE(f.workspace->config()->models().first().toMap().value(u"id"_s).toString(), u"gpt-5"_s);
 	QTRY_COMPARE(toasts.count(), 1);
 	QCOMPARE(toasts.at(0).at(0).toString(), refgui::workspace::ToastLevel::Warn);
+	// ConfigEditorController::reloadFromDisk() also suppresses duplicate get_config on config_changed broadcast.
+	const qsizetype getConfigsBeforeEditorReload = f.stub.requests(u"get_config"_s).size();
+	f.workspace->configEditor()->reloadFromDisk();
+	QTRY_VERIFY(!f.workspace->configEditor()->isLoading());
+	QCOMPARE(f.stub.requests(u"reload_config"_s).size(), 2);
+	QCOMPARE(f.stub.requests(u"get_config"_s).size(), getConfigsBeforeEditorReload);
 }
 
 void TestWorkspace::directArgumentsForModelsAgentsVariantsSessionsAndMultiClose()
@@ -1739,6 +1763,70 @@ void TestWorkspace::directArgumentsForModelsAgentsVariantsSessionsAndMultiClose(
 	QTRY_COMPARE(f.stub.requests(u"close"_s).size(), 2);
 	QCOMPARE(toasts.count(), 1);
 	QVERIFY(toasts.last().at(1).toString().contains(u"nope_ses"_s));
+}
+
+void TestWorkspace::closingOrRemovingZoomedTileClearsZoomAndShowsRemainingTiles()
+{
+	Fixture f(refgui::proto::ProtocolVersion, true, {}, [](StubServer& stub) { stub.add(u"ses_c"_s, 3); });
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 3);
+	f.workspace->toggleSplit();
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	QTRY_VERIFY(f.workspace->session(u"ses_b"_s)->isAttached());
+	QTRY_VERIFY(f.workspace->session(u"ses_c"_s)->isAttached());
+
+	QSignalSpy zoomedSpy(f.workspace.get(), &Workspace::zoomedChanged);
+	f.workspace->zoomTile(u"ses_b"_s);
+	QTRY_VERIFY(f.workspace->session(u"ses_b"_s)->isForeground());
+	QCOMPARE(f.workspace->zoomedId(), u"ses_b"_s);
+	QCOMPARE(f.workspace->visibleSessionIds(), (QStringList{u"ses_b"_s}));
+	zoomedSpy.clear();
+
+	// Closing the zoomed tile clears zoomedId and makes the remaining tile visible again.
+	f.workspace->closeSession(u"ses_b"_s);
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
+	QCOMPARE(f.workspace->zoomedId(), QString());
+	QVERIFY(zoomedSpy.count() >= 1);
+	QCOMPARE(f.workspace->visibleSessionIds(), (QStringList{u"ses_c"_s}));
+
+	// External removal of a zoomed session also clears zoomedId via syncTiles().
+	f.workspace->zoomTile(u"ses_c"_s);
+	QTRY_COMPARE(f.workspace->zoomedId(), u"ses_c"_s);
+	zoomedSpy.clear();
+	f.stub.remove(u"ses_c"_s);
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 0);
+	QCOMPARE(f.workspace->zoomedId(), QString());
+	QVERIFY(zoomedSpy.count() >= 1);
+}
+
+void TestWorkspace::zoomingTileRemovedBeforeAttachFinishesLeavesNoDanglingZoom()
+{
+	Fixture f(refgui::proto::ProtocolVersion, true, {}, [](StubServer& stub) { stub.add(u"ses_c"_s, 3); });
+	QTRY_COMPARE(f.workspace->sessions()->rowCount(), 3);
+	f.workspace->toggleSplit();
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 2);
+	QTRY_VERIFY(f.workspace->session(u"ses_b"_s)->isAttached());
+	QTRY_VERIFY(f.workspace->session(u"ses_c"_s)->isAttached());
+
+	// 1) Target tile closes while the previously zoomed tile is giving up the foreground.
+	f.workspace->zoomTile(u"ses_b"_s);
+	QTRY_VERIFY(f.workspace->session(u"ses_b"_s)->isForeground());
+	QCOMPARE(f.workspace->zoomedId(), u"ses_b"_s);
+
+	f.stub.holdDetach(true);
+	f.workspace->zoomTile(u"ses_c"_s);
+	QTRY_COMPARE(f.stub.requests(u"detach"_s).size(), 1);
+	f.stub.remove(u"ses_c"_s);
+	QTRY_COMPARE(f.workspace->tiles()->rowCount(), 1);
+	f.stub.releaseDetach();
+	QTRY_COMPARE(f.workspace->zoomedId(), QString());
+	QCOMPARE(f.workspace->visibleSessionIds(), (QStringList{u"ses_b"_s}));
+	QTRY_VERIFY(!f.workspace->session(u"ses_b"_s)->isForeground());
+
+	// 2) Foreground attach fails because the session vanished right before attach arrived.
+	f.stub.failAttach(u"ses_b"_s, u"no such session"_s);
+	f.workspace->zoomTile(u"ses_b"_s);
+	QTRY_COMPARE(f.workspace->zoomedId(), QString());
+	QCOMPARE(f.workspace->visibleSessionIds(), (QStringList{u"ses_b"_s}));
 }
 
 QTEST_MAIN(TestWorkspace)

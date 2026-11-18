@@ -18,6 +18,14 @@ Column {
 		{ text: qsTr("All tools"), value: "number" },
 		{ text: qsTr("Per-tool rules"), value: "map" }
 	]
+	readonly property bool hasValidationError: permEditor.hasValidationError
+		|| (delayMode === "number" && globalDelayField.hasValidationError)
+		|| (delayMode === "map" && delayMapEditor.hasValidationError)
+		|| legacyToolsEditor.hasValidationError
+	readonly property bool hasPendingChanges: permEditor.hasUncommittedEdit
+		|| (delayMode === "number" && globalDelayField.hasUncommittedEdit)
+		|| (delayMode === "map" && delayMapEditor.hasUncommittedEdit)
+		|| legacyToolsEditor.hasUncommittedEdit
 
 	function mutate(fn) {
 		mutating = true
@@ -26,43 +34,43 @@ Column {
 	}
 
 	function syncControls() {
-		permEditor.loadFromValue(editor.valueAt(["permission"]))
+		permEditor.loadFromValue(editor.permissionAt(["permission"]))
 
 		const rawDelay = editor.valueAt(["delay"])
 		if (rawDelay === undefined || rawDelay === null) {
 			delayMode = "none"
 			globalDelayField.value = undefined
-			delayMapEditor.loadFromMap({})
+			delayMapEditor.loadFromEntries([])
 		} else if (typeof rawDelay === "number" && Number.isFinite(rawDelay)) {
 			delayMode = "number"
 			globalDelayField.value = rawDelay
-			delayMapEditor.loadFromMap({})
-		} else if (typeof rawDelay === "object" && !Array.isArray(rawDelay)) {
+			delayMapEditor.loadFromEntries([])
+		} else if (typeof rawDelay === "object" && !Fields.isArray(rawDelay)) {
 			delayMode = "map"
 			globalDelayField.value = undefined
-			delayMapEditor.loadFromMap(rawDelay)
+			delayMapEditor.loadFromEntries(editor.orderedEntriesAt(["delay"]))
 		} else {
 			delayMode = "none"
 			globalDelayField.value = undefined
-			delayMapEditor.loadFromMap({})
+			delayMapEditor.loadFromEntries([])
 		}
 
-		const rawTools = editor.valueAt(["tools"])
-		legacyToolsEditor.loadFromMap(typeof rawTools === "object" && rawTools !== null && !Array.isArray(rawTools) ? rawTools : {})
+		legacyToolsEditor.loadFromEntries(editor.orderedEntriesAt(["tools"]))
 	}
 
-	function applyPermission(newVal) {
-		mutate(() => {
-			if (newVal === undefined || newVal === null) {
-				editor.removeAt(["permission"])
-				return
-			}
-			if (typeof newVal === "object" && !Array.isArray(newVal) && Object.keys(newVal).length === 0) {
-				editor.removeAt(["permission"])
-				return
-			}
-			editor.setValueAt(["permission"], newVal)
-		})
+	function commitPending() {
+		const okPerm = permEditor.commitPending()
+		const okDelay = delayMode !== "map" || delayMapEditor.commitPending()
+		const okLegacy = !editor.contains(["tools"]) || legacyToolsEditor.commitPending()
+		return okPerm && okDelay && okLegacy && !hasValidationError
+	}
+
+	function resetSubEditors() {
+		permEditor.resetState()
+		globalDelayField.resetState()
+		delayMapEditor.resetState()
+		legacyToolsEditor.resetState()
+		syncControls()
 	}
 
 	function switchDelayMode(targetMode) {
@@ -73,15 +81,15 @@ Column {
 		mutate(() => {
 			if (targetMode === "none") {
 				globalDelayField.value = undefined
-				delayMapEditor.loadFromMap({})
+				delayMapEditor.loadFromEntries([])
 				editor.removeAt(["delay"])
 			} else if (targetMode === "number") {
 				globalDelayField.value = 2
 				editor.setValueAt(["delay"], 2)
 			} else {
-				const initial = { "bash": 2 }
-				delayMapEditor.loadFromMap(initial)
-				editor.setValueAt(["delay"], initial)
+				const initial = [{ key: "bash", value: 2 }]
+				delayMapEditor.loadFromEntries(initial)
+				editor.setOrderedObjectAt(["delay"], initial, true, true)
 			}
 		})
 	}
@@ -124,6 +132,7 @@ Column {
 		showReset: { void section.editor.revision; return section.editor.contains(["permission"]) }
 		onResetClicked: {
 			section.forceActiveFocus()
+			permEditor.resetState()
 			section.editor.removeAt(["permission"])
 		}
 
@@ -132,7 +141,7 @@ Column {
 			objectName: "globalPermissionEditor"
 			width: parent.width
 			allowInherit: false
-			onPermissionModified: newPerm => section.applyPermission(newPerm)
+			onOrderedPermissionModified: ordPerm => section.mutate(() => section.editor.setPermissionAt(["permission"], ordPerm, true))
 		}
 	}
 
@@ -162,6 +171,8 @@ Column {
 		showReset: { void section.editor.revision; return section.editor.contains(["delay"]) }
 		onResetClicked: {
 			section.forceActiveFocus()
+			globalDelayField.resetState()
+			delayMapEditor.resetState()
 			section.editor.removeAt(["delay"])
 		}
 
@@ -184,6 +195,7 @@ Column {
 
 				NumberField {
 					id: globalDelayField
+					objectName: "globalDelayField"
 					width: parent.width
 					decimals: true
 					minimum: 0
@@ -201,17 +213,17 @@ Column {
 
 			KeyValueEditor {
 				id: delayMapEditor
+				objectName: "globalDelayMapEditor"
 				visible: section.delayMode === "map"
 				width: parent.width
 				valueMode: "number"
+				allowReorder: true
+				minimum: 0
 				keyPlaceholder: qsTr("Tool glob (e.g. bash, delete, mcp_*)")
 				valuePlaceholder: qsTr("Seconds (e.g. 2)")
 				emptyText: qsTr("No per-tool delays")
-				onMapModified: newMap => section.mutate(() => {
-					if (Object.keys(newMap).length === 0)
-						section.editor.removeAt(["delay"])
-					else
-						section.editor.setValueAt(["delay"], newMap)
+				onEntriesModified: nextEntries => section.mutate(() => {
+					section.editor.setOrderedObjectAt(["delay"], nextEntries, true, true)
 				})
 			}
 		}
@@ -227,20 +239,19 @@ Column {
 		resetText: qsTr("Remove legacy map")
 		onResetClicked: {
 			section.forceActiveFocus()
+			legacyToolsEditor.resetState()
 			section.editor.removeAt(["tools"])
 		}
 
 		KeyValueEditor {
 			id: legacyToolsEditor
+			objectName: "legacyToolsEditor"
 			width: parent.width
 			valueMode: "json"
 			keyPlaceholder: qsTr("Tool name")
 			valuePlaceholder: "false"
-			onMapModified: newMap => section.mutate(() => {
-				if (Object.keys(newMap).length === 0)
-					section.editor.removeAt(["tools"])
-				else
-					section.editor.setValueAt(["tools"], newMap)
+			onEntriesModified: nextEntries => section.mutate(() => {
+				section.editor.setOrderedObjectAt(["tools"], nextEntries, true, true)
 			})
 		}
 	}

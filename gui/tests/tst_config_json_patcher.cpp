@@ -17,6 +17,8 @@ private slots:
 	void mutatesNestedPathsLosslesslyPreservingSiblingsAndSpecialKeys();
 	void renamesKeysLosslesslyAndRejectsCollisions();
 	void scansEnvReferencesAndDetectsInterpolations();
+	void preservesExactInsertionOrderAndDetectsKeyReordering();
+	void preserves64BitIntegersShortestFloatsSurrogatesAndStrictSyntax();
 };
 
 void TestConfigJsonPatcher::parsesJsoncCommentsAndTrailingCommasPreservingTokens()
@@ -155,6 +157,101 @@ void TestConfigJsonPatcher::scansEnvReferencesAndDetectsInterpolations()
 	QVERIFY(!ConfigJsonPatcher::hasInterpolation(u"sk-proj-literal-secret"_s));
 	QVERIFY(!ConfigJsonPatcher::hasInterpolation(u"{env:}"_s));
 	QVERIFY(!ConfigJsonPatcher::hasInterpolation(u"{env:UNCLOSED"_s));
+}
+
+void TestConfigJsonPatcher::preservesExactInsertionOrderAndDetectsKeyReordering()
+{
+	const auto parsed = ConfigJsonPatcher::parseJsonc(uR"({
+		"zebra": 1,
+		"permission": {
+			"edit": {
+				"*.env": "deny",
+				"src/**": "allow",
+				"*": "ask"
+			},
+			"bash": "ask"
+		},
+		"alpha": 2
+	})"_s);
+	QVERIFY2(parsed.has_value(), parsed ? "" : qPrintable(parsed.error().message));
+	ConfigJsonPatcher patcher = *parsed;
+
+	QCOMPARE(patcher.orderedRoot().keys(), (QStringList{u"zebra"_s, u"permission"_s, u"alpha"_s}));
+	QCOMPARE(patcher.orderedValueAt({u"permission"_s}).toObject().keys(), (QStringList{u"edit"_s, u"bash"_s}));
+	QCOMPARE(patcher.orderedValueAt({u"permission"_s, u"edit"_s}).toObject().keys(),
+	         (QStringList{u"*.env"_s, u"src/**"_s, u"*"_s}));
+
+	// Updating an existing key keeps its position; adding a new key appends at end.
+	patcher.setValueAt({u"permission"_s, u"edit"_s, u"src/**"_s}, u"deny"_s);
+	QCOMPARE(patcher.orderedValueAt({u"permission"_s, u"edit"_s}).toObject().keys(),
+	         (QStringList{u"*.env"_s, u"src/**"_s, u"*"_s}));
+	patcher.setValueAt({u"middle"_s}, true);
+	QCOMPARE(patcher.orderedRoot().keys(), (QStringList{u"zebra"_s, u"permission"_s, u"alpha"_s, u"middle"_s}));
+
+	// Renaming mutates the key in place without moving it to the end.
+	QVERIFY(patcher.renameKeyAt({}, u"zebra"_s, u"omega"_s));
+	QCOMPARE(patcher.orderedRoot().keys(), (QStringList{u"omega"_s, u"permission"_s, u"alpha"_s, u"middle"_s}));
+	patcher.removeAt({u"alpha"_s});
+	QCOMPARE(patcher.orderedRoot().keys(), (QStringList{u"omega"_s, u"permission"_s, u"middle"_s}));
+
+	const QString serialized = patcher.toJson();
+	QVERIFY(serialized.indexOf(u"\"*.env\""_s) < serialized.indexOf(u"\"src/**\""_s));
+	QVERIFY(serialized.indexOf(u"\"src/**\""_s) < serialized.indexOf(u"\"*\""_s));
+	QVERIFY(serialized.indexOf(u"\"omega\""_s) < serialized.indexOf(u"\"permission\""_s));
+	QVERIFY(serialized.indexOf(u"\"permission\""_s) < serialized.indexOf(u"\"middle\""_s));
+
+	// OrderedJsonObject::operator== compares exact key order as well as values.
+	const auto firstOrder = ConfigJsonPatcher::parseJsonc(uR"({"a": 1, "b": 2})"_s);
+	const auto secondOrder = ConfigJsonPatcher::parseJsonc(uR"({"b": 2, "a": 1})"_s);
+	QVERIFY(firstOrder.has_value() && secondOrder.has_value());
+	QVERIFY(firstOrder->orderedRoot() != secondOrder->orderedRoot());
+}
+
+void TestConfigJsonPatcher::preserves64BitIntegersShortestFloatsSurrogatesAndStrictSyntax()
+{
+	constexpr qint64 ExactIntBeyondDouble = 9007199254740993LL; // 2^53 + 1
+	constexpr int ExcessiveJsonDepth = 130;
+	constexpr int AllowedJsonDepth = 64;
+
+	const auto parsed = ConfigJsonPatcher::parseJsonc(uR"({
+		"context": 200000,
+		"largeId": 9007199254740993,
+		"negLargeId": -9007199254740993,
+		"threshold": 0.6,
+		"emoji": "\uD83D\uDE80"
+	})"_s);
+	QVERIFY2(parsed.has_value(), parsed ? "" : qPrintable(parsed.error().message));
+	const ConfigJsonPatcher& patcher = *parsed;
+
+	QVERIFY(patcher.orderedValueAt({u"context"_s}).isInt());
+	QCOMPARE(patcher.orderedValueAt({u"context"_s}).toInt(), 200000);
+	QVERIFY(patcher.orderedValueAt({u"largeId"_s}).isInt());
+	QCOMPARE(patcher.orderedValueAt({u"largeId"_s}).toInt64(), ExactIntBeyondDouble);
+	QCOMPARE(patcher.orderedValueAt({u"negLargeId"_s}).toInt64(), -ExactIntBeyondDouble);
+	QVERIFY(patcher.orderedValueAt({u"threshold"_s}).isDouble());
+	QCOMPARE(patcher.orderedValueAt({u"threshold"_s}).toDouble(), 0.6);
+	QCOMPARE(patcher.orderedValueAt({u"emoji"_s}).toString(), u"🚀"_s);
+
+	const QString serialized = patcher.toJson();
+	QVERIFY(serialized.contains(u"\"context\": 200000"_s));
+	QVERIFY(serialized.contains(u"\"largeId\": 9007199254740993"_s));
+	QVERIFY(serialized.contains(u"\"negLargeId\": -9007199254740993"_s));
+	QVERIFY(serialized.contains(u"\"threshold\": 0.6"_s));
+
+	// Leading commas, lone commas, double commas, and unpaired UTF-16 surrogates are rejected.
+	QVERIFY(!ConfigJsonPatcher::parseJsoncValue(u"[,1]"_s).has_value());
+	QVERIFY(!ConfigJsonPatcher::parseJsoncValue(u"[ , ]"_s).has_value());
+	QVERIFY(!ConfigJsonPatcher::parseJsonc(u"{,\"a\": 1}"_s).has_value());
+	QVERIFY(!ConfigJsonPatcher::parseJsonc(u"{ , }"_s).has_value());
+	QVERIFY(!ConfigJsonPatcher::parseJsonc(u"{\"a\": 1,,}"_s).has_value());
+	QVERIFY(!ConfigJsonPatcher::parseJsonc(u"{\"bad\": \"\\uD800\"}"_s).has_value());
+	QVERIFY(!ConfigJsonPatcher::parseJsonc(u"{\"bad\": \"\\uDC00\"}"_s).has_value());
+	QVERIFY(!ConfigJsonPatcher::parseJsonc(u"{\"bad\": \"\\uD800x\"}"_s).has_value());
+
+	const QString okDepth = u"{\"x\": "_s + QString(AllowedJsonDepth, u'[') + u'1' + QString(AllowedJsonDepth, u']') + u'}';
+	QVERIFY(ConfigJsonPatcher::parseJsonc(okDepth).has_value());
+	const QString tooDeep = u"{\"x\": "_s + QString(ExcessiveJsonDepth, u'[') + u'1' + QString(ExcessiveJsonDepth, u']') + u'}';
+	QVERIFY(!ConfigJsonPatcher::parseJsonc(tooDeep).has_value());
 }
 
 QTEST_GUILESS_MAIN(TestConfigJsonPatcher)

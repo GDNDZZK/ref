@@ -90,7 +90,10 @@ FocusScope {
 	}
 
 	// A click outside the panel closes the launcher.
-	TapHandler { onTapped: launcher.close() }
+	TapHandler {
+		gesturePolicy: TapHandler.ReleaseWithinBounds
+		onTapped: launcher.close()
+	}
 
 	Connections {
 		target: Commands

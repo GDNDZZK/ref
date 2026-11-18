@@ -11,6 +11,32 @@ Column {
 	property bool mutating: false
 	property var commandKeys: []
 	property var expandedMap: ({})
+	property int cardsRevision: 0
+
+	readonly property bool hasValidationError: {
+		void cardsRevision
+		void commandKeys
+		if (newCommandField.hasError)
+			return true
+		for (let i = 0; i < cmdRepeater.count; ++i) {
+			const c = cmdRepeater.itemAt(i) as CommandCard
+			if (c && c.hasValidationError)
+				return true
+		}
+		return false
+	}
+	readonly property bool hasPendingChanges: {
+		void cardsRevision
+		void commandKeys
+		if (newCommandField.text.trim() !== "" || instructionsEditor.hasUncommittedEdit || skillsEditor.hasUncommittedEdit)
+			return true
+		for (let i = 0; i < cmdRepeater.count; ++i) {
+			const c = cmdRepeater.itemAt(i) as CommandCard
+			if (c && c.hasPendingChanges)
+				return true
+		}
+		return false
+	}
 
 	function sameKeys(a, b) {
 		if (a.length !== b.length)
@@ -28,35 +54,44 @@ Column {
 		mutating = false
 	}
 
+	function normalizeCommandName(rawText) {
+		let trimmed = String(rawText ?? "").trim()
+		if (trimmed.startsWith("/"))
+			trimmed = trimmed.slice(1).trim()
+		return trimmed
+	}
+
 	function listAt(path) {
 		const v = editor.valueAt(path)
-		if (!Array.isArray(v))
-			return []
-		return v.map(item => String(item ?? ""))
+		return Fields.isArray(v) ? Fields.toArray(v).map(item => String(item ?? "")) : []
 	}
 
 	function readSkillsList() {
 		const raw = editor.valueAt(["skills"])
-		if (Array.isArray(raw))
-			return raw.map(item => String(item ?? ""))
-		if (raw !== null && typeof raw === "object" && Array.isArray(raw.paths))
-			return raw.paths.map(item => String(item ?? ""))
+		if (Fields.isArray(raw))
+			return Fields.toArray(raw).map(item => String(item ?? ""))
+		if (raw !== null && typeof raw === "object" && Fields.isArray(raw.paths))
+			return Fields.toArray(raw.paths).map(item => String(item ?? ""))
 		return []
+	}
+
+	function updateSkillsObject(raw, vals) {
+		if (vals.length > 0) {
+			editor.setStringListAt(["skills", "paths"], vals, false)
+			return
+		}
+		const extraKeys = Object.keys(raw).filter(k => k !== "paths")
+		if (extraKeys.length === 0)
+			editor.removeAt(["skills"])
+		else
+			editor.removeAt(["skills", "paths"], false)
 	}
 
 	function writeSkillsList(vals) {
 		mutate(() => {
 			const raw = editor.valueAt(["skills"])
-			if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
-				if (vals.length === 0) {
-					const extraKeys = Object.keys(raw).filter(k => k !== "paths")
-					if (extraKeys.length === 0)
-						editor.removeAt(["skills"])
-					else
-						editor.removeAt(["skills", "paths"], false)
-				} else {
-					editor.setStringListAt(["skills", "paths"], vals, false)
-				}
+			if (raw !== null && typeof raw === "object" && !Fields.isArray(raw)) {
+				updateSkillsObject(raw, vals)
 				return
 			}
 			editor.setStringListAt(["skills"], vals, true)
@@ -81,17 +116,23 @@ Column {
 		expandedMap = next
 	}
 
+	function renameExpanded(oldName, newName) {
+		const next = Object.assign({}, expandedMap)
+		const wasOpen = Boolean(next[oldName])
+		delete next[oldName]
+		next[newName] = wasOpen
+		expandedMap = next
+	}
+
 	function addCommand() {
-		let rawName = newCommandField.text.trim()
-		if (rawName.startsWith("/"))
-			rawName = rawName.slice(1).trim()
+		const rawName = normalizeCommandName(newCommandField.text)
 		if (rawName === "") {
 			newCommandField.errorText = qsTr("Enter a command name.")
-			return
+			return false
 		}
 		if (editor.keysAt(["command"]).includes(rawName)) {
 			newCommandField.errorText = qsTr("Command /%1 already exists.").arg(rawName)
-			return
+			return false
 		}
 		newCommandField.errorText = ""
 		newCommandField.text = ""
@@ -100,6 +141,33 @@ Column {
 			description: "",
 			template: "$ARGUMENTS"
 		})
+		return true
+	}
+
+	function commitPending() {
+		if (newCommandField.text.trim() !== "" && !addCommand())
+			return false
+		for (let i = 0; i < cmdRepeater.count; ++i) {
+			const c = cmdRepeater.itemAt(i) as CommandCard
+			if (c && !c.commitPending())
+				return false
+		}
+		const okInst = instructionsEditor.commitPending()
+		const okSkills = skillsEditor.commitPending()
+		return okInst && okSkills && !hasValidationError
+	}
+
+	function resetSubEditors() {
+		newCommandField.text = ""
+		newCommandField.errorText = ""
+		instructionsEditor.resetState()
+		skillsEditor.resetState()
+		for (let i = 0; i < cmdRepeater.count; ++i) {
+			const c = cmdRepeater.itemAt(i) as CommandCard
+			if (c)
+				c.resetCardState()
+		}
+		syncControls()
 	}
 
 	width: parent ? parent.width : 560
@@ -116,6 +184,240 @@ Column {
 				const nextKeys = section.editor.keysAt(["command"])
 				if (!section.sameKeys(section.commandKeys, nextKeys))
 					section.commandKeys = nextKeys
+			}
+		}
+	}
+
+	component CommandCard: Rectangle {
+		id: cmdCard
+		required property string modelData
+		readonly property string cmdName: modelData
+		readonly property bool expanded: section.isExpanded(cmdName)
+		property bool cardMutating: false
+
+		readonly property string pendingRenameTarget: section.normalizeCommandName(renameInput.text)
+		readonly property bool hasValidationError: renameInput.hasError
+		readonly property bool hasPendingChanges: pendingRenameTarget !== "" && pendingRenameTarget !== cmdName
+
+		function cardMutate(fn) {
+			cardMutating = true
+			section.mutating = true
+			fn()
+			section.mutating = false
+			cardMutating = false
+		}
+
+		function syncCard() {
+			renameInput.text = cmdName
+			renameInput.errorText = ""
+			const desc = section.editor.valueAt(["command", cmdName, "description"])
+			descField.text = typeof desc === "string" ? desc : ""
+			const tmpl = section.editor.valueAt(["command", cmdName, "template"])
+			templateField.text = typeof tmpl === "string" ? tmpl : ""
+		}
+
+		function validateRenameLive() {
+			const target = section.normalizeCommandName(renameInput.text)
+			if (target !== "" && target !== cmdName && section.editor.keysAt(["command"]).includes(target))
+				renameInput.errorText = qsTr("Command /%1 already exists.").arg(target)
+			else
+				renameInput.errorText = ""
+		}
+
+		function commitRename() {
+			const target = section.normalizeCommandName(renameInput.text)
+			if (target === "" || target === cmdName) {
+				renameInput.text = cmdName
+				renameInput.errorText = ""
+				return true
+			}
+			if (section.editor.keysAt(["command"]).includes(target)) {
+				renameInput.errorText = qsTr("Command /%1 already exists.").arg(target)
+				return false
+			}
+			renameInput.errorText = ""
+			section.renameExpanded(cmdName, target)
+			section.editor.renameKeyAt(["command"], cmdName, target)
+			return true
+		}
+
+		function commitPending() {
+			const trimmedDesc = descField.text.trim()
+			if (descField.text !== trimmedDesc) {
+				descField.text = trimmedDesc
+				cardMutate(() => {
+					if (trimmedDesc === "")
+						section.editor.removeAt(["command", cmdName, "description"], false)
+					else
+						section.editor.setValueAt(["command", cmdName, "description"], trimmedDesc)
+				})
+			}
+			return commitRename()
+		}
+
+		function resetCardState() {
+			syncCard()
+		}
+
+		width: section.width
+		implicitHeight: cardHeader.height + (expanded ? cardBody.implicitHeight + 16 : 0)
+		radius: Theme.radius
+		color: Theme.background
+		border.color: Theme.border
+		clip: true
+
+		Component.onCompleted: syncCard()
+
+		Connections {
+			target: section.editor
+			function onParsedChanged() {
+				if (!cmdCard.cardMutating)
+					cmdCard.syncCard()
+			}
+		}
+
+		Item {
+			id: cardHeader
+			width: parent.width
+			height: 44
+
+			Item {
+				anchors { left: parent.left; right: deleteCmdBtn.left; top: parent.top; bottom: parent.bottom }
+
+				Chevron {
+					id: chev
+					x: 14
+					anchors.verticalCenter: parent.verticalCenter
+					rotation: cmdCard.expanded ? 90 : 0
+					color: Theme.textMuted
+					Behavior on rotation { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+				}
+
+				Text {
+					id: cmdTitle
+					textFormat: Text.PlainText
+					anchors { left: chev.right; leftMargin: 10; verticalCenter: parent.verticalCenter }
+					text: "/" + cmdCard.cmdName
+					color: Theme.text
+					font { family: Theme.monoFamily; pixelSize: Theme.secondaryFontSize; bold: true }
+				}
+
+				Text {
+					textFormat: Text.PlainText
+					anchors { left: cmdTitle.right; leftMargin: 10; right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
+					text: {
+						void section.editor.revision
+						const d = section.editor.valueAt(["command", cmdCard.cmdName, "description"])
+						return typeof d === "string" ? d : ""
+					}
+					color: Theme.textMuted
+					font.pixelSize: Theme.smallFontSize
+					elide: Text.ElideRight
+				}
+
+				HoverHandler { cursorShape: Qt.PointingHandCursor }
+				TapHandler { onTapped: section.setExpanded(cmdCard.cmdName, !cmdCard.expanded) }
+			}
+			IconButton {
+				id: deleteCmdBtn
+				anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
+				buttonSize: 28
+				iconName: "trash"
+				iconSize: 16
+				tooltipText: qsTr("Delete command")
+				Accessible.name: qsTr("Delete command")
+				onClicked: section.editor.removeAt(["command", cmdCard.cmdName])
+			}
+		}
+
+		Column {
+			id: cardBody
+			visible: cmdCard.expanded
+			y: cardHeader.height
+			x: 14
+			width: parent.width - 28
+			spacing: 4
+
+			Rectangle { width: parent.width; height: 1; color: Theme.border }
+
+			FormRow {
+				label: qsTr("Command name")
+				description: qsTr("Slash name typed after '/'.")
+				showDivider: true
+
+				Row {
+					width: parent.width
+					spacing: 6
+
+					DialogField {
+						id: renameInput
+						objectName: "commandRenameField_" + cmdCard.cmdName
+						width: parent.width - renameBtn.width - 6
+						placeholderText: qsTr("Command name")
+						onEdited: cmdCard.validateRenameLive()
+						onAccepted: cmdCard.commitRename()
+						onEditingFinished: cmdCard.commitRename()
+					}
+
+					DialogButton {
+						id: renameBtn
+						text: qsTr("Rename")
+						enabled: cmdCard.pendingRenameTarget !== ""
+							&& cmdCard.pendingRenameTarget !== cmdCard.cmdName
+							&& !renameInput.hasError
+						onClicked: cmdCard.commitRename()
+					}
+				}
+			}
+
+			FormRow {
+				label: qsTr("Description")
+				badge: "description"
+				showDivider: true
+				showReset: { void section.editor.revision; return section.editor.contains(["command", cmdCard.cmdName, "description"]) }
+				onResetClicked: {
+					section.forceActiveFocus()
+					section.editor.removeAt(["command", cmdCard.cmdName, "description"], false)
+				}
+
+				DialogField {
+					id: descField
+					width: parent.width
+					placeholderText: qsTr("Short summary shown in completion list")
+					onEdited: cmdCard.cardMutate(() => {
+						if (text.trim() === "")
+							section.editor.removeAt(["command", cmdCard.cmdName, "description"], false)
+						else
+							section.editor.setValueAt(["command", cmdCard.cmdName, "description"], text)
+					})
+					onEditingFinished: {
+						const trimmed = text.trim()
+						if (text !== trimmed)
+							text = trimmed
+						cmdCard.cardMutate(() => {
+							if (trimmed === "")
+								section.editor.removeAt(["command", cmdCard.cmdName, "description"], false)
+							else
+								section.editor.setValueAt(["command", cmdCard.cmdName, "description"], trimmed)
+						})
+					}
+				}
+			}
+
+			FormRow {
+				label: qsTr("Prompt template")
+				badge: "template"
+				description: qsTr("Expanded and sent as the user prompt when the command runs.")
+				stacked: true
+
+				MultilineField {
+					id: templateField
+					width: parent.width
+					monospace: true
+					minHeight: 110
+					placeholderText: qsTr("Review this diff:\n\n!`git diff`\n\n$ARGUMENTS")
+					onEdited: cmdCard.cardMutate(() => section.editor.setStringAt(["command", cmdCard.cmdName, "template"], text, false))
+				}
 			}
 		}
 	}
@@ -172,191 +474,12 @@ Column {
 	}
 
 	Repeater {
+		id: cmdRepeater
 		model: section.commandKeys
+		onItemAdded: section.cardsRevision++
+		onItemRemoved: section.cardsRevision++
 
-		delegate: Rectangle {
-			id: cmdCard
-			required property string modelData
-			readonly property string cmdName: modelData
-			readonly property bool expanded: section.isExpanded(cmdName)
-			property bool cardMutating: false
-
-			function cardMutate(fn) {
-				cardMutating = true
-				section.mutating = true
-				fn()
-				section.mutating = false
-				cardMutating = false
-			}
-
-			function syncCard() {
-				renameInput.text = cmdName
-				renameInput.errorText = ""
-				const desc = section.editor.valueAt(["command", cmdName, "description"])
-				descField.text = typeof desc === "string" ? desc : ""
-				const tmpl = section.editor.valueAt(["command", cmdName, "template"])
-				templateField.text = typeof tmpl === "string" ? tmpl : ""
-			}
-
-			function commitRename() {
-				let target = renameInput.text.trim()
-				if (target.startsWith("/"))
-					target = target.slice(1).trim()
-				if (target === "" || target === cmdName) {
-					renameInput.text = cmdName
-					renameInput.errorText = ""
-					return
-				}
-				if (!section.editor.renameKeyAt(["command"], cmdName, target)) {
-					renameInput.errorText = qsTr("Command /%1 already exists.").arg(target)
-					return
-				}
-				renameInput.errorText = ""
-				section.setExpanded(target, true)
-			}
-
-			width: section.width
-			implicitHeight: cardHeader.height + (expanded ? cardBody.implicitHeight + 16 : 0)
-			radius: Theme.radius
-			color: Theme.background
-			border.color: Theme.border
-			clip: true
-
-			Component.onCompleted: syncCard()
-
-			Connections {
-				target: section.editor
-				function onParsedChanged() {
-					if (!cmdCard.cardMutating)
-						cmdCard.syncCard()
-				}
-			}
-
-			Item {
-				id: cardHeader
-				width: parent.width
-				height: 44
-
-				Item {
-					anchors { left: parent.left; right: deleteCmdBtn.left; top: parent.top; bottom: parent.bottom }
-
-					Chevron {
-						id: chev
-						x: 14
-						anchors.verticalCenter: parent.verticalCenter
-						rotation: cmdCard.expanded ? 90 : 0
-						color: Theme.textMuted
-						Behavior on rotation { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
-					}
-
-					Text {
-						id: cmdTitle
-						textFormat: Text.PlainText
-						anchors { left: chev.right; leftMargin: 10; verticalCenter: parent.verticalCenter }
-						text: "/" + cmdCard.cmdName
-						color: Theme.text
-						font { family: Theme.monoFamily; pixelSize: Theme.secondaryFontSize; bold: true }
-					}
-
-					Text {
-						textFormat: Text.PlainText
-						anchors { left: cmdTitle.right; leftMargin: 10; right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
-						text: {
-							void section.editor.revision
-							const d = section.editor.valueAt(["command", cmdCard.cmdName, "description"])
-							return typeof d === "string" ? d : ""
-						}
-						color: Theme.textMuted
-						font.pixelSize: Theme.smallFontSize
-						elide: Text.ElideRight
-					}
-
-					HoverHandler { cursorShape: Qt.PointingHandCursor }
-					TapHandler { onTapped: section.setExpanded(cmdCard.cmdName, !cmdCard.expanded) }
-				}
-				IconButton {
-					id: deleteCmdBtn
-					anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
-					buttonSize: 28
-					iconName: "trash"
-					iconSize: 16
-					tooltipText: qsTr("Delete command")
-					Accessible.name: qsTr("Delete command")
-					onClicked: section.editor.removeAt(["command", cmdCard.cmdName])
-				}
-			}
-
-			Column {
-				id: cardBody
-				visible: cmdCard.expanded
-				y: cardHeader.height
-				x: 14
-				width: parent.width - 28
-				spacing: 4
-
-				Rectangle { width: parent.width; height: 1; color: Theme.border }
-
-				FormRow {
-					label: qsTr("Command name")
-					description: qsTr("Slash name typed after '/'.")
-					showDivider: true
-
-					Row {
-						width: parent.width
-						spacing: 6
-
-						DialogField {
-							id: renameInput
-							width: parent.width - renameBtn.width - 6
-							placeholderText: qsTr("Command name")
-							onEdited: errorText = ""
-							onAccepted: cmdCard.commitRename()
-						}
-
-						DialogButton {
-							id: renameBtn
-							text: qsTr("Rename")
-							enabled: renameInput.text.trim() !== "" && renameInput.text.trim() !== cmdCard.cmdName
-							onClicked: cmdCard.commitRename()
-						}
-					}
-				}
-
-				FormRow {
-					label: qsTr("Description")
-					badge: "description"
-					showDivider: true
-					showReset: { void section.editor.revision; return section.editor.contains(["command", cmdCard.cmdName, "description"]) }
-					onResetClicked: {
-						section.forceActiveFocus()
-						section.editor.removeAt(["command", cmdCard.cmdName, "description"])
-					}
-
-					DialogField {
-						id: descField
-						width: parent.width
-						placeholderText: qsTr("Short summary shown in completion list")
-						onEdited: cmdCard.cardMutate(() => section.editor.setStringAt(["command", cmdCard.cmdName, "description"], text))
-					}
-				}
-
-				FormRow {
-					label: qsTr("Prompt template")
-					badge: "template"
-					description: qsTr("Expanded and sent as the user prompt when the command runs.")
-					stacked: true
-
-					MultilineField {
-						id: templateField
-						width: parent.width
-						monospace: true
-						minHeight: 110
-						placeholderText: qsTr("Review this diff:\n\n!`git diff`\n\n$ARGUMENTS")
-						onEdited: cmdCard.cardMutate(() => section.editor.setStringAt(["command", cmdCard.cmdName, "template"], text, false))
-					}
-				}
-			}
-		}
+		delegate: CommandCard {}
 	}
 
 	Rectangle { width: parent.width; height: 1; color: Theme.border }
@@ -379,11 +502,13 @@ Column {
 		showReset: { void section.editor.revision; return section.editor.contains(["instructions"]) }
 		onResetClicked: {
 			section.forceActiveFocus()
+			instructionsEditor.resetState()
 			section.editor.removeAt(["instructions"])
 		}
 
 		StringListEditor {
 			id: instructionsEditor
+			objectName: "instructionsEditor"
 			width: parent.width
 			monospace: true
 			placeholderText: qsTr("docs/CONTRIBUTING.md or ~/notes/*.md")
@@ -400,11 +525,13 @@ Column {
 		showReset: { void section.editor.revision; return section.editor.contains(["skills"]) }
 		onResetClicked: {
 			section.forceActiveFocus()
+			skillsEditor.resetState()
 			section.editor.removeAt(["skills"])
 		}
 
 		StringListEditor {
 			id: skillsEditor
+			objectName: "skillsEditor"
 			width: parent.width
 			monospace: true
 			placeholderText: qsTr("./skills or ~/my-skills")

@@ -264,6 +264,7 @@ private slots:
 	void unknownSingleSlashTokenWarnsAndKeepsDraft();
 	void slashArgumentCompletionsCoverPathsModelsAgentsVariantsAndSessions();
 	void shellModeCompletionsAndHistoryFilterWork();
+	void shellEscapeClipboardPipelinesDuplicateSessionsAndBackslashPathsWork();
 };
 
 void TestComposerModel::labelsFollowTheSessionAndTheConfiguration()
@@ -473,6 +474,7 @@ void TestComposerModel::escapeClosesTheListFirst()
 	QVERIFY(f.composer.shellMode());
 	QVERIFY(f.composer.escape());
 	QVERIFY(!f.composer.shellMode());
+	QCOMPARE(f.composer.text(), u"ls"_s); // Escape leaves shell mode while keeping draft text
 	QVERIFY(!f.composer.escape()); // nothing running, nothing to do
 }
 
@@ -869,6 +871,92 @@ void TestComposerModel::shellModeCompletionsAndHistoryFilterWork()
 	QVERIFY(!f.composer.acceptCompletionItem(1, true)); // accepting Cargo.toml never auto-submits shell!
 	QCOMPARE(f.composer.text(), u"cat Cargo.toml "_s);
 	QVERIFY(f.requestsOf(u"shell"_s).isEmpty());
+}
+
+void TestComposerModel::shellEscapeClipboardPipelinesDuplicateSessionsAndBackslashPathsWork()
+{
+	Fixture f;
+	f.history.push(u"!cargo check --workspace"_s);
+	f.binaries = {u"cargo"_s, u"rg"_s};
+	f.dirMap.insert(u"src\\"_s, QJsonObject{{u"path"_s, u"/work/src"_s}, {u"dirs"_s, QJsonArray{u"bin"_s}}, {u"files"_s, QJsonArray{u"main.rs"_s}}});
+
+	// 1) Escape exits shell mode while preserving draft text; leaveShell() (empty Backspace) clears and exits.
+	f.type(u"!"_s);
+	f.type(u"cargo test --lib"_s);
+	QVERIFY(f.composer.shellMode());
+	QVERIFY(f.composer.escape());
+	QVERIFY(!f.composer.shellMode());
+	QCOMPARE(f.composer.text(), u"cargo test --lib"_s);
+	f.composer.clearDraft();
+	f.type(u"!"_s);
+	QVERIFY(f.composer.shellMode());
+	f.composer.leaveShell();
+	QVERIFY(!f.composer.shellMode());
+	QCOMPARE(f.composer.text(), QString());
+
+	// 2) pasteFromClipboard() returns false in shell mode without attaching images; works again outside shell mode.
+	QImage image(4, 4, QImage::Format_RGB32);
+	image.fill(Qt::blue);
+	QGuiApplication::clipboard()->setImage(image);
+	f.type(u"!"_s);
+	QVERIFY(!f.composer.pasteFromClipboard());
+	QCOMPARE(f.composer.attachments()->rowCount(), 0);
+	QCOMPARE(f.composer.text(), QString());
+	QVERIFY(f.composer.escape());
+	QVERIFY(f.composer.pasteFromClipboard());
+	QCOMPARE(f.composer.attachments()->rowCount(), 1);
+	f.composer.clearDraft();
+
+	// 3) `!` history entries are excluded after `|` (`atLineStart == false`), and Tab opens completions after `| `.
+	f.type(u"!"_s);
+	f.type(u"echo hi | "_s);
+	QCOMPARE(f.composer.completionKind(), u"none"_s);
+	f.composer.triggerCompletion();
+	QCOMPARE(f.composer.completionKind(), u"shellCommand"_s);
+	QTRY_COMPARE(f.composer.completions()->rowCount(), 2); // cargo and rg only (no !history after pipe)
+	QCOMPARE(f.composer.completions()->index(0, 0).data(composer::CompletionItemModel::ValueRole).toString(), u"cargo"_s);
+	QCOMPARE(f.composer.completions()->index(1, 0).data(composer::CompletionItemModel::ValueRole).toString(), u"rg"_s);
+	QVERIFY(!f.composer.acceptCompletionItem(1, false));
+	QCOMPARE(f.composer.text(), u"echo hi | rg "_s);
+	f.composer.clearDraft();
+	f.composer.leaveShell();
+
+	// 4) Duplicate session names in /close-session disambiguate via session ID without hiding the sibling.
+	proto::SessionInfo dupA;
+	dupA.id = u"ses_dup_1"_s;
+	dupA.name = u"worker"_s;
+	dupA.title = u"First Worker"_s;
+	dupA.cwd = u"/work"_s;
+	dupA.live = true;
+	f.directory.update(dupA);
+	proto::SessionInfo dupB = dupA;
+	dupB.id = u"ses_dup_2"_s;
+	dupB.title = u"Second Worker"_s;
+	f.directory.update(dupB);
+
+	f.type(u"/close-session work"_s);
+	QCOMPARE(f.composer.completions()->rowCount(), 2);
+	QCOMPARE(f.composer.completions()->index(0, 0).data(composer::CompletionItemModel::ValueRole).toString(), u"ses_dup_1"_s);
+	QCOMPARE(f.composer.completions()->index(0, 0).data(composer::CompletionItemModel::LabelRole).toString(), u"worker (ses_dup_1)"_s);
+	QCOMPARE(f.composer.completions()->index(1, 0).data(composer::CompletionItemModel::ValueRole).toString(), u"ses_dup_2"_s);
+	QCOMPARE(f.composer.completions()->index(1, 0).data(composer::CompletionItemModel::LabelRole).toString(), u"worker (ses_dup_2)"_s);
+	QVERIFY(!f.composer.acceptCompletionItem(0, false));
+	QCOMPARE(f.composer.text(), u"/close-session ses_dup_1 "_s);
+	QCOMPARE(f.composer.completions()->rowCount(), 1);
+	QCOMPARE(f.composer.completions()->index(0, 0).data(composer::CompletionItemModel::ValueRole).toString(), u"ses_dup_2"_s);
+	f.composer.clearDraft();
+
+	// 5) Windows backslash path completion preserves `\` separator for files and subdirectories.
+	f.type(u"!"_s);
+	f.type(u"type src\\ma"_s);
+	QCOMPARE(f.composer.completionKind(), u"shellPath"_s);
+	QTRY_COMPARE(f.composer.completions()->rowCount(), 1);
+	QCOMPARE(f.composer.completions()->index(0, 0).data(composer::CompletionItemModel::ValueRole).toString(), u"src\\main.rs"_s);
+	QVERIFY(!f.composer.acceptCompletionItem(0, false));
+	QCOMPARE(f.composer.text(), u"type src\\main.rs "_s);
+	f.type(u"type src\\bi"_s);
+	QCOMPARE(f.composer.completions()->rowCount(), 1);
+	QCOMPARE(f.composer.completions()->index(0, 0).data(composer::CompletionItemModel::ValueRole).toString(), u"src\\bin\\"_s);
 }
 
 QTEST_MAIN(TestComposerModel)

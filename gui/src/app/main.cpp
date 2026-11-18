@@ -11,10 +11,12 @@
 #include "workspace/state_paths.h"
 
 #include <QDir>
+#include <QEvent>
 #include <QGuiApplication>
 #include <QLocale>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
+#include <QScopeGuard>
 #include <QWindow>
 #include <QTextStream>
 #include <QTimer>
@@ -118,43 +120,51 @@ int main(int argc, char* argv[])
 		print(err, u"ref-gui: %1\n"_s.arg(warning));
 	}
 
-	// Outlives the engine, whose window refers to it.
-	Workspace workspace(options, refgui::workspace::stateFilePath(u"gui.json"_s));
-	Workspace::setInstance(&workspace);
-
-	// The interface follows the language setting; English is the fallback.
-	AppTranslator translator;
-	translator.setLanguage(workspace.settings()->language());
-
-	if(options.smoke)
+	int exitCode = EXIT_FAILURE;
 	{
-		exitWhenOpened(workspace);
-	}
+		// Outlives the engine, whose window refers to it.
+		Workspace workspace(options, refgui::workspace::stateFilePath(u"gui.json"_s));
+		Workspace::setInstance(&workspace);
+		const auto resetWorkspace = qScopeGuard([] { Workspace::setInstance(nullptr); });
 
-	// Tells the backend where the user looks and shows what it sends. The settings supply the kinds.
-	refgui::notify::NotificationCenter notifications(workspace.connection().backend(), refgui::notify::createPlatformNotifier());
-	NotificationCenterForeign::instance = &notifications;
-	connectNotifications(workspace, notifications);
-
-	// Outlives the engine, which asks it for its network access.
-	LocalOnlyNetworkAccessManagerFactory networkFactory;
-	QQmlApplicationEngine engine;
-	engine.setNetworkAccessManagerFactory(&networkFactory);
-	QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] { QCoreApplication::exit(EXIT_FAILURE); }, Qt::QueuedConnection);
-
-	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
-	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([&workspace](const QString& sessionId) { return workspace.session(sessionId); }));
-	QObject::connect(workspace.settings(), &refgui::workspace::Settings::languageChanged, &app, [&] {
+		// The interface follows the language setting; English is the fallback.
+		AppTranslator translator;
 		translator.setLanguage(workspace.settings()->language());
-		engine.retranslate();
-		workspace.retranslate();
-	});
 
-	engine.loadFromModule("RefGui", "Main");
-	if(!engine.rootObjects().isEmpty())
-	{
-		notifications.setWindow(qobject_cast<QWindow*>(engine.rootObjects().first()));
+		if(options.smoke)
+		{
+			exitWhenOpened(workspace);
+		}
+
+		// Tells the backend where the user looks and shows what it sends. The settings supply the kinds.
+		refgui::notify::NotificationCenter notifications(workspace.connection().backend(), refgui::notify::createPlatformNotifier());
+		NotificationCenterForeign::instance = &notifications;
+		const auto resetNotifications = qScopeGuard([] { NotificationCenterForeign::instance = nullptr; });
+		connectNotifications(workspace, notifications);
+
+		// Outlives the engine, which asks it for its network access.
+		LocalOnlyNetworkAccessManagerFactory networkFactory;
+		QQmlApplicationEngine engine;
+		engine.setNetworkAccessManagerFactory(&networkFactory);
+		QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] { QCoreApplication::exit(EXIT_FAILURE); }, Qt::QueuedConnection);
+
+		engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+		engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([&workspace](const QString& sessionId) { return workspace.session(sessionId); }));
+		QObject::connect(workspace.settings(), &refgui::workspace::Settings::languageChanged, &app, [&] {
+			translator.setLanguage(workspace.settings()->language());
+			engine.retranslate();
+			workspace.retranslate();
+		});
+
+		engine.loadFromModule("RefGui", "Main");
+		if(!engine.rootObjects().isEmpty())
+		{
+			notifications.setWindow(qobject_cast<QWindow*>(engine.rootObjects().first()));
+		}
+
+		exitCode = QGuiApplication::exec();
 	}
-
-	return QGuiApplication::exec();
+	// Flush deleteLater() events queued during QQmlApplicationEngine teardown (e.g. QQuickCanvasItem contexts).
+	QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+	return exitCode;
 }

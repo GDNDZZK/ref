@@ -11,6 +11,7 @@ Window {
 	// The session the content area shows. It follows Workspace.current under a crossfade.
 	property var shown: null
 	property bool restored: false
+	property bool allowDirtyWindowClose: false
 	readonly property bool zoomed: Workspace.zoomedId !== ""
 	readonly property bool isMac: Qt.platform.os === "osx"
 	readonly property bool showWindowControls: !isMac
@@ -109,6 +110,12 @@ Window {
 	}
 	onWidthChanged: if (restored && visibility === Window.Windowed) Workspace.settings.windowWidth = width
 	onHeightChanged: if (restored && visibility === Window.Windowed) Workspace.settings.windowHeight = height
+	onClosing: close => {
+		if (Workspace.smoke || window.allowDirtyWindowClose)
+			return
+		if (!dialogs.requestWindowClose())
+			close.accepted = false
+	}
 
 	Binding {
 		target: Workspace
@@ -372,6 +379,7 @@ Window {
 		iconName: "sidebar"
 		opacity: sidebar.width === 0 ? 1 : 0
 		visible: opacity > 0
+		enabled: !dialogs.open
 		Accessible.name: qsTr("Show sidebar")
 		onClicked: Commands.run(CommandId.sidebar)
 
@@ -389,6 +397,7 @@ Window {
 		iconName: "plus"
 		opacity: expand.opacity
 		visible: opacity > 0
+		enabled: !dialogs.open
 		Accessible.name: qsTr("New session")
 		onClicked: Commands.run(CommandId.newSession)
 	}
@@ -416,6 +425,7 @@ Window {
 			topMargin: window.topButtonY
 			rightMargin: windowControls.visible ? Theme.windowButtonGap : Theme.windowButtonMargin
 		}
+		enabled: !dialogs.open
 		onClicked: Workspace.requestTheme(Theme.dark ? ThemeName.light : ThemeName.dark)
 	}
 
@@ -429,6 +439,7 @@ Window {
 		}
 		iconName: "split"
 		iconColor: Workspace.splitView ? Theme.accentText : Theme.textMuted
+		enabled: !dialogs.open
 		Accessible.name: qsTr("Split view")
 		onClicked: Commands.run(CommandId.watch)
 	}
@@ -444,6 +455,7 @@ Window {
 		iconName: "restore"
 		opacity: window.zoomed ? 1 : 0
 		visible: opacity > 0
+		enabled: !dialogs.open
 		Accessible.name: qsTr("Leave zoom")
 		onClicked: Workspace.unzoom()
 
@@ -453,6 +465,10 @@ Window {
 	DialogHost {
 		id: dialogs
 		anchors.fill: parent
+		onQuitWindowConfirmed: {
+			window.allowDirtyWindowClose = true
+			window.close()
+		}
 	}
 
 	WindowResizeHandles {

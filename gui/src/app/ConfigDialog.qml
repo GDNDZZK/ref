@@ -14,10 +14,20 @@ FocusScope {
 	property string selectedCategory: "general"
 	property bool creatingNew: false
 	property bool confirmingDelete: false
-	// `{ type: "close" | "load" | "new" | "activate" | "reload", file?: string }` or null
+	// `{ type: "close" | "quitWindow" | "load" | "new" | "activate" | "reload", file?: string }` or null
 	property var pendingDirtyAction: null
 	property var continueAfterSave: null
 	property bool rawMutating: false
+	property bool sectionHasError: false
+	property bool sectionHasPending: false
+
+	signal quitWindowConfirmed()
+
+	readonly property bool effectiveDirty: editor.dirty
+		|| (editor.mode === "visual" && (sectionHasPending || sectionHasError))
+	readonly property bool hasBlockingError: editor.mode === "json"
+		? (editor.parseError !== "")
+		: sectionHasError
 
 	readonly property var categories: [
 		{ id: "general", title: qsTr("General"), icon: "file-text" },
@@ -57,6 +67,32 @@ FocusScope {
 		return lines.join("\n")
 	}
 
+	function commitSectionPending() {
+		if (editor.mode !== "visual" || !sectionLoader.item)
+			return true
+		switch (selectedCategory) {
+		case "providers": return (sectionLoader.item as ConfigProvidersSection).commitPending()
+		case "agents": return (sectionLoader.item as ConfigAgentsSection).commitPending()
+		case "permissions": return (sectionLoader.item as ConfigPermissionsSection).commitPending()
+		case "mcp": return (sectionLoader.item as ConfigMcpSection).commitPending()
+		case "commands": return (sectionLoader.item as ConfigCommandsSection).commitPending()
+		default: return (sectionLoader.item as ConfigGeneralSection).commitPending()
+		}
+	}
+
+	function resetSectionSubEditors() {
+		if (!sectionLoader.item)
+			return
+		switch (selectedCategory) {
+		case "providers": (sectionLoader.item as ConfigProvidersSection).resetSubEditors(); break
+		case "agents": (sectionLoader.item as ConfigAgentsSection).resetSubEditors(); break
+		case "permissions": (sectionLoader.item as ConfigPermissionsSection).resetSubEditors(); break
+		case "mcp": (sectionLoader.item as ConfigMcpSection).resetSubEditors(); break
+		case "commands": (sectionLoader.item as ConfigCommandsSection).resetSubEditors(); break
+		default: (sectionLoader.item as ConfigGeneralSection).resetSubEditors(); break
+		}
+	}
+
 	function closeImmediate() {
 		Workspace.closeDialog()
 	}
@@ -64,12 +100,16 @@ FocusScope {
 	function executeAction(action) {
 		if (!action)
 			return
-		dialog.forceActiveFocus()
+		focusSink.forceActiveFocus()
 		if (action.type === "close") {
 			closeImmediate()
+		} else if (action.type === "quitWindow") {
+			closeImmediate()
+			quitWindowConfirmed()
 		} else if (action.type === "load") {
 			creatingNew = false
 			confirmingDelete = false
+			resetSectionSubEditors()
 			editor.loadFile(action.file)
 		} else if (action.type === "new") {
 			confirmingDelete = false
@@ -80,16 +120,19 @@ FocusScope {
 		} else if (action.type === "activate") {
 			creatingNew = false
 			confirmingDelete = false
+			resetSectionSubEditors()
 			editor.activateProfile(action.file)
 		} else if (action.type === "reload") {
 			creatingNew = false
 			confirmingDelete = false
+			resetSectionSubEditors()
 			editor.reloadFromDisk()
 		}
 	}
 
 	function guardOrRun(action) {
-		if (editor.dirty) {
+		focusSink.forceActiveFocus()
+		if (effectiveDirty) {
 			creatingNew = false
 			confirmingDelete = false
 			pendingDirtyAction = action
@@ -103,13 +146,28 @@ FocusScope {
 		guardOrRun({ type: "close" })
 	}
 
+	function requestQuitWindow() {
+		focusSink.forceActiveFocus()
+		if (effectiveDirty) {
+			creatingNew = false
+			confirmingDelete = false
+			pendingDirtyAction = { type: "quitWindow" }
+			return false
+		}
+		pendingDirtyAction = null
+		return true
+	}
+
 	function triggerSave() {
 		if (editor.busy)
-			return
-		if (editor.mode === "json" && editor.parseError !== "")
-			return
-		dialog.forceActiveFocus()
+			return false
+		focusSink.forceActiveFocus()
+		if (editor.mode === "visual" && !commitSectionPending())
+			return false
+		if (hasBlockingError)
+			return false
 		editor.save()
+		return true
 	}
 
 	function categoryBadge(catId) {
@@ -136,6 +194,9 @@ FocusScope {
 	function selectCategory(catId) {
 		if (selectedCategory === catId)
 			return
+		focusSink.forceActiveFocus()
+		if (!commitSectionPending() || sectionHasError)
+			return
 		selectedCategory = catId
 		sectionScroller.contentY = 0
 	}
@@ -143,14 +204,22 @@ FocusScope {
 	anchors.fill: parent
 	focus: true
 
+	// Sibling focus target outside `panel` so `focusSink.forceActiveFocus()` blurs active TextInputs.
+	Item {
+		id: focusSink
+	}
+
 	Component.onCompleted: {
 		entered = true
-		forceActiveFocus()
-		editor.open(Workspace.effectiveCwd)
+		focusSink.forceActiveFocus()
+		if (!editor.dirty)
+			editor.open(Workspace.effectiveCwd)
 		profileSelect.value = editor.selectedFile
 		rawMutating = true
 		rawEditor.text = editor.rawText
 		rawMutating = false
+		if (Boolean(Workspace.dialogArgs.confirmQuitWindow) && editor.dirty)
+			pendingDirtyAction = { type: "quitWindow" }
 	}
 
 	Keys.onPressed: event => {
@@ -160,7 +229,7 @@ FocusScope {
 			return
 		}
 		if (event.key === Qt.Key_Escape) {
-			if (dialog.pendingDirtyAction !== null) {
+			if (Boolean(dialog.pendingDirtyAction)) {
 				dialog.pendingDirtyAction = null
 				event.accepted = true
 				return
@@ -181,6 +250,7 @@ FocusScope {
 	}
 
 	TapHandler {
+		gesturePolicy: TapHandler.ReleaseWithinBounds
 		onTapped: dialog.requestClose()
 	}
 
@@ -207,27 +277,57 @@ FocusScope {
 
 	Component {
 		id: generalComp
-		ConfigGeneralSection { editor: dialog.editor }
+		ConfigGeneralSection {
+			id: genSec
+			editor: dialog.editor
+			Binding { target: dialog; property: "sectionHasError"; value: genSec.hasValidationError }
+			Binding { target: dialog; property: "sectionHasPending"; value: genSec.hasPendingChanges }
+		}
 	}
 	Component {
 		id: providersComp
-		ConfigProvidersSection { editor: dialog.editor }
+		ConfigProvidersSection {
+			id: provSec
+			editor: dialog.editor
+			Binding { target: dialog; property: "sectionHasError"; value: provSec.hasValidationError }
+			Binding { target: dialog; property: "sectionHasPending"; value: provSec.hasPendingChanges }
+		}
 	}
 	Component {
 		id: agentsComp
-		ConfigAgentsSection { editor: dialog.editor }
+		ConfigAgentsSection {
+			id: agSec
+			editor: dialog.editor
+			Binding { target: dialog; property: "sectionHasError"; value: agSec.hasValidationError }
+			Binding { target: dialog; property: "sectionHasPending"; value: agSec.hasPendingChanges }
+		}
 	}
 	Component {
 		id: permissionsComp
-		ConfigPermissionsSection { editor: dialog.editor }
+		ConfigPermissionsSection {
+			id: permSec
+			editor: dialog.editor
+			Binding { target: dialog; property: "sectionHasError"; value: permSec.hasValidationError }
+			Binding { target: dialog; property: "sectionHasPending"; value: permSec.hasPendingChanges }
+		}
 	}
 	Component {
 		id: mcpComp
-		ConfigMcpSection { editor: dialog.editor }
+		ConfigMcpSection {
+			id: mcpSec
+			editor: dialog.editor
+			Binding { target: dialog; property: "sectionHasError"; value: mcpSec.hasValidationError }
+			Binding { target: dialog; property: "sectionHasPending"; value: mcpSec.hasPendingChanges }
+		}
 	}
 	Component {
 		id: commandsComp
-		ConfigCommandsSection { editor: dialog.editor }
+		ConfigCommandsSection {
+			id: cmdSec
+			editor: dialog.editor
+			Binding { target: dialog; property: "sectionHasError"; value: cmdSec.hasValidationError }
+			Binding { target: dialog; property: "sectionHasPending"; value: cmdSec.hasPendingChanges }
+		}
 	}
 
 	component StatusBanner: Rectangle {
@@ -333,7 +433,7 @@ FocusScope {
 					}
 
 					Rectangle {
-						visible: dialog.editor.dirty
+						visible: dialog.effectiveDirty
 						anchors.verticalCenter: parent.verticalCenter
 						width: dirtyBadgeText.implicitWidth + 12
 						height: 20
@@ -396,7 +496,8 @@ FocusScope {
 					onActivated: targetFile => {
 						if (targetFile === "" || targetFile === dialog.editor.selectedFile)
 							return
-						if (dialog.editor.dirty) {
+						focusSink.forceActiveFocus()
+						if (dialog.effectiveDirty) {
 							profileSelect.value = dialog.editor.selectedFile
 							dialog.guardOrRun({ type: "load", file: targetFile })
 							return
@@ -476,8 +577,15 @@ FocusScope {
 						]
 						value: dialog.editor.mode
 						onActivated: targetMode => {
-							dialog.forceActiveFocus()
-							dialog.editor.setMode(targetMode)
+							if (targetMode === dialog.editor.mode)
+								return
+							focusSink.forceActiveFocus()
+							if (dialog.editor.mode === "visual") {
+								if (!dialog.commitSectionPending() || dialog.hasBlockingError)
+									return
+							}
+							if (dialog.editor.setMode(targetMode) && targetMode === "visual")
+								dialog.resetSectionSubEditors()
 						}
 					}
 				}
@@ -585,6 +693,7 @@ FocusScope {
 							text: qsTr("Delete")
 							onClicked: {
 								dialog.confirmingDelete = false
+								dialog.resetSectionSubEditors()
 								dialog.editor.deleteProfile(dialog.editor.selectedFile)
 							}
 						}
@@ -875,7 +984,7 @@ FocusScope {
 			// Unsaved changes guard bar
 			Rectangle {
 				objectName: "configDirtyConfirmBar"
-				visible: dialog.pendingDirtyAction !== null
+				visible: Boolean(dialog.pendingDirtyAction)
 				width: parent.width
 				height: visible ? 50 : 0
 				color: Theme.warningSurface
@@ -913,8 +1022,9 @@ FocusScope {
 							onClicked: {
 								const act = dialog.pendingDirtyAction
 								dialog.pendingDirtyAction = null
-								dialog.forceActiveFocus()
+								focusSink.forceActiveFocus()
 								dialog.editor.discard()
+								dialog.resetSectionSubEditors()
 								dialog.executeAction(act)
 							}
 						}
@@ -923,12 +1033,14 @@ FocusScope {
 							objectName: "configDirtySaveButton"
 							small: true
 							kind: DialogButton.Primary
-							enabled: !dialog.editor.busy && (dialog.editor.mode !== "json" || dialog.editor.parseError === "")
+							enabled: !dialog.editor.busy && !dialog.hasBlockingError
 							text: qsTr("Save & Continue")
 							onClicked: {
-								dialog.continueAfterSave = dialog.pendingDirtyAction
+								const act = dialog.pendingDirtyAction
 								dialog.pendingDirtyAction = null
-								dialog.triggerSave()
+								dialog.continueAfterSave = act
+								if (!dialog.triggerSave())
+									dialog.continueAfterSave = null
 							}
 						}
 					}
@@ -959,11 +1071,13 @@ FocusScope {
 								return qsTr("Saving…")
 							if (dialog.editor.loading)
 								return qsTr("Loading…")
-							if (dialog.editor.dirty)
+							if (dialog.hasBlockingError && dialog.editor.mode === "visual")
+								return qsTr("Fix highlighted validation errors before saving")
+							if (dialog.effectiveDirty)
 								return qsTr("Modified — save to apply across live sessions")
 							return qsTr("Changes apply live on save")
 						}
-						color: Theme.textMuted
+						color: (dialog.hasBlockingError && dialog.editor.mode === "visual") ? Theme.dangerText : Theme.textMuted
 						font.pixelSize: Theme.smallFontSize
 					}
 				}
@@ -975,11 +1089,12 @@ FocusScope {
 					DialogButton {
 						objectName: "configDiscardButton"
 						text: qsTr("Discard")
-						enabled: dialog.editor.dirty && !dialog.editor.busy
+						enabled: dialog.effectiveDirty && !dialog.editor.busy
 						onClicked: {
 							dialog.pendingDirtyAction = null
-							dialog.forceActiveFocus()
+							focusSink.forceActiveFocus()
 							dialog.editor.discard()
+							dialog.resetSectionSubEditors()
 						}
 					}
 
@@ -988,8 +1103,8 @@ FocusScope {
 						kind: DialogButton.Primary
 						text: dialog.editor.saving ? qsTr("Saving…") : qsTr("Save")
 						enabled: !dialog.editor.busy
-							&& (dialog.editor.dirty || !dialog.editor.selectedFileExists)
-							&& (dialog.editor.mode !== "json" || dialog.editor.parseError === "")
+							&& (dialog.effectiveDirty || !dialog.editor.selectedFileExists)
+							&& !dialog.hasBlockingError
 						onClicked: dialog.triggerSave()
 					}
 				}
