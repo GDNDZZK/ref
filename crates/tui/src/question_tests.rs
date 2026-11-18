@@ -862,3 +862,59 @@ fn collapsed_question_tool_shows_answers_after_submit() {
     assert!(s.contains("Loop bound = (not answered)"), "{s}");
     assert!(s.contains("Checks = Clippy"), "{s}");
 }
+
+#[test]
+fn wheel_and_confirm_tab_scroll_long_questions() {
+    let many: Vec<Question> = (1..=8)
+        .map(|i| Question {
+            question: format!(
+                "Question {i}: {}",
+                "long detailed context line for scrolling ".repeat(8)
+            ),
+            header: format!("Q{i}"),
+            options: vec![
+                option(&format!("Opt {i}A"), "First choice description", true),
+                option(&format!("Opt {i}B"), "Second choice description", false),
+                option(&format!("Opt {i}C"), "Third choice description", false),
+            ],
+            multiple: true,
+            custom: true,
+        })
+        .collect();
+    let (mut app, mut rx) = open(many);
+    render(&mut app, 70, 14);
+    app.question.as_mut().unwrap().opened -= PAST_GRACE;
+    render(&mut app, 70, 14);
+    let init_scroll = app.question.as_ref().unwrap().scroll;
+
+    // Mouse wheel scrolls the question body down and all the way back up to 0.
+    crate::input::handle(&mut app, mouse(MouseEventKind::ScrollDown, 35, 7));
+    render(&mut app, 70, 14);
+    assert!(app.question.as_ref().unwrap().scroll > init_scroll);
+    for _ in 0..10 {
+        crate::input::handle(&mut app, mouse(MouseEventKind::ScrollUp, 35, 7));
+    }
+    render(&mut app, 70, 14);
+    assert_eq!(app.question.as_ref().unwrap().scroll, 0);
+
+    // Jump to Confirm tab (BackTab from Q1) and scroll review summary via keys + wheel.
+    press(&mut app, KeyCode::BackTab);
+    let (_, s0) = render(&mut app, 70, 14);
+    assert!(s0.contains("Review your answers"), "{s0}");
+    press(&mut app, KeyCode::Down);
+    render(&mut app, 70, 14);
+    assert_eq!(app.question.as_ref().unwrap().scroll, 1);
+    press(&mut app, KeyCode::Char('j'));
+    render(&mut app, 70, 14);
+    assert_eq!(app.question.as_ref().unwrap().scroll, 2);
+    press(&mut app, KeyCode::End);
+    let (_, s_end) = render(&mut app, 70, 14);
+    let end_scroll = app.question.as_ref().unwrap().scroll;
+    assert!(end_scroll > 2, "{s_end}");
+    assert!(s_end.contains("Opt 8A"), "{s_end}");
+    press(&mut app, KeyCode::Home);
+    render(&mut app, 70, 14);
+    assert_eq!(app.question.as_ref().unwrap().scroll, 0);
+    press(&mut app, KeyCode::Enter);
+    assert!(reply(&mut rx).1.is_some());
+}
