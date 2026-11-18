@@ -102,7 +102,7 @@ Only the `build` and `plan` agents may ask by default; see [the `question` permi
 
 These run inside the backend, so messages between sessions are delivered reliably. Session names can be any Unicode text.
 
-- `list_sessions`: the sessions in this backend: name, id, agent, status, foreground or background, directory, title and creator. Set `history: true` to include closed history sessions (newest 200), or `creator` to filter by `"user"` or a creator session's name or id.
+- `list_sessions`: the sessions in this backend: name, id, agent, status, foreground or background, directory, title (single line, up to 80 characters) and creator. Set `history: true` to include closed history sessions (newest first), `creator` to filter by `"user"` or a creator session's name or id (matched against the full history before slicing), and `page` (`>= 1`, default `1`) / `page_size` (`1`–`100`, default `50`) to paginate.
 - `send_message`: sends a message to another session. A busy session reads it after its current step.
 - `message_status`: whether a sent message is still queued, delivered, or read.
 - `read_session`: another session's messages (live or closed history), newest first, page by page.

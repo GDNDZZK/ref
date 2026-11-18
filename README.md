@@ -33,7 +33,7 @@ Several sessions can work side by side and message each other.
 
 - **Server and interfaces are separate.** `ref-server` runs sessions, the agent loop, LLM calls, tools and permissions. `ref` (terminal), `ref-gui` (desktop window) and `ref-web` (browser) only show them. Sessions keep running as long as any window (terminal, desktop or browser) is connected, so you can close one and continue in another, or have several open at once. A server started by one of them exits when the last window disconnects, and running sessions stop. To keep them running with no window open, start `ref-server` yourself: `ref-server` runs until you stop it, and the interfaces connect to it.
 - **Many sessions at once.** A split view tiles all background sessions. Sessions can send each other messages, and the `build` agent can start worker sessions and give them tasks.
-- **Reads opencode configuration.** ref loads the providers, models, agents, permissions, MCP servers and commands of an existing `opencode.json`. A few keys are accepted and ignored; see [Configuration](docs/configuration.md).
+- **Reads opencode configuration, with a visual editor and hot reload.** ref loads the providers, models, agents, permissions, MCP servers and commands of an existing `opencode.json`, edits `ref.json` losslessly in `ref-gui` and `ref-web` (with multi-profile switching), and reloads live across running sessions without restarting. A few keys are accepted and ignored; see [Configuration](docs/configuration.md).
 - **Three provider APIs.** Anthropic Messages, OpenAI Responses and any OpenAI-compatible Chat Completions endpoint, with model variants for reasoning effort or extended thinking. There is no native Gemini or Bedrock client.
 - **Control over tool calls.** Allow, ask or deny per tool, with patterns for commands, paths and URLs, plus optional countdowns before a tool runs.
 - **Reliable file edits.** Edits address hash-tagged line numbers, so a stale view of a file is detected instead of corrupting it.
@@ -83,7 +83,7 @@ Pick an interface, then get the archive for your system from the [latest release
 | Windows x86_64 | `x86_64-pc-windows-msvc.zip` |
 | Windows arm64 | `aarch64-pc-windows-msvc.zip` |
 
-For example, `ref-tui-v0.2.2-x86_64-unknown-linux-gnu.tar.gz`. Unpack it and put the programs **in the same directory** on your `PATH`; each interface looks for `ref-server` next to itself:
+For example, `ref-tui-v0.2.3-x86_64-unknown-linux-gnu.tar.gz`. Unpack it and put the programs **in the same directory** on your `PATH`; each interface looks for `ref-server` next to itself:
 
 ```bash
 tar -xzf ref-tui-*.tar.gz
@@ -143,7 +143,7 @@ Keys in the terminal UI:
 | Document | Contents |
 |---|---|
 | [Using ref](docs/usage.md) | Sessions, the screen, prompts, keybindings, slash commands, split view, working with several sessions |
-| [Configuration](docs/configuration.md) | Every configuration key: providers and models, agents, permissions, delays, compaction, MCP, commands, instructions and skills |
+| [Configuration](docs/configuration.md) | Visual editor, profiles and hot reload; every configuration key: providers and models, agents, permissions, delays, compaction, MCP, commands, instructions and skills |
 | [Tools](docs/tools.md) | What the model can do: file tools, bash, webfetch, image handling, context and cross-session tools |
 | [Desktop GUI](docs/gui.md) | `ref-gui`: installing, starting, the window, split view, conversation, shortcuts, settings, notifications |
 | [Web UI](docs/web.md) | `ref-web`: starting, signing in, opening it to the network, using the page, shortcuts, notifications, developing the page |

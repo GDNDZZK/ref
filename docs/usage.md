@@ -53,13 +53,17 @@ When you start `ref`, it connects to a running backend or starts one. A backend 
 |---|---|
 | `enter` | Send. |
 | `shift+enter`, `ctrl+j` | New line. |
-| `/` | Command list (see [Slash commands](#slash-commands)). |
-| `@` | Fuzzy file list; the chosen path is inserted. |
+| `/` | Command list and argument completions (see [Slash commands](#slash-commands)). |
+| `@` | Fuzzy file list; the chosen path is inserted (also inside custom command arguments). |
 | `!command` | Shell mode: run the command in the session directory (10-minute limit). The command and its output are added to the conversation as your message, without an LLM turn. |
-| `ctrl+v` | Paste an image from the clipboard. Pasting the path of an image file attaches it too. |
+| `ctrl+v` | Paste an image from the clipboard. Pasting the path of an image file attaches it too (outside shell mode). |
 | `ctrl+x e` | Write the prompt in `$VISUAL` / `$EDITOR` (default `vi`, `notepad` on Windows). |
-| `↑` / `↓` | Prompt history, when the input box is empty or the cursor is at its start. |
+| `↑` / `↓` | Prompt history, when the input box is empty or the cursor is at its boundary (filtered to `!` commands in shell mode). |
 | `esc esc` | Interrupt the session. |
+
+**Slash completions and typo guard.** Slash commands match case-insensitively and complete arguments for `/cd`, `/export`, `/models`, `/agents`, `/variant`, `/sessions`, `/close-session` and `/mcp` (plus `@file` inside custom command arguments). An unknown single-word `/foo` is blocked with a warning toast and the closest command suggestion instead of being sent to the model, keeping your draft intact.
+
+**Shell mode (`!`).** Typing `!` in an empty box enters shell mode (`backspace` on an empty box or `esc` leaves it, keeping any typed text). Command tokens (at the start of the line or after `|`, `&&`, `||`, `;`) complete from `!` prompt history and `$PATH` executables, or from paths when the token contains `/` or `\` (or starts with `.`, `~` or a Windows drive letter); argument tokens complete files and directories in the session directory, and `tab` on a directory appends `/` and drills into the next level. In shell mode `tab` and `shift+tab` never cycle the agent, and `↑` / `↓` browse `!` history only. In `/cd`, `/export` and `!` shell mode, `enter` runs what you typed unless you explicitly selected a completion with `↑` / `↓` (`tab` always accepts).
 
 **Queued prompts.** A prompt sent while the session is busy waits under the transcript and is delivered at the next safe point, after the current tool step. Click `✕ remove` to take it back: its text and images return to the input box (after a blank line if you were typing). If it was delivered in the meantime, a toast says so. Messages queued by other sessions and reminders are listed too, labelled with their sender, but cannot be removed. Every window attached to the session sees the queue change live.
 
@@ -70,7 +74,7 @@ When you start `ref`, it connects to a running backend or starts one. A backend 
 - Every message shows its time: your prompts, each reply (start, end, duration and tokens) and each tool call (start and duration).
 - A collapsed tool call shows the tool name and the `purpose` the model gave. Click it to see the input and output. `ctrl+x d` expands all of them.
 - Collapsed reasoning shows its latest characters on one line, updated live. `ctrl+x t` expands it.
-- While a turn runs and the view follows the end of the conversation, the bottom of the conversation does not move up. If the content gets shorter, for example when a retry notice disappears, a tool's live output is replaced by its result or expanded reasoning folds to one line, the freed rows stay blank. They are released at once when the turn ends. This also applies to each tile in split view. The rule only starts while the view follows the end; scrolling up does not add blank rows.
+- The view follows the end of the conversation while new output arrives. Scroll up (mouse wheel, `page up` or `shift+↑`) to stop following; scrolling back to the bottom (`end` or `ctrl+alt+g`) follows again.
 - Select text with the mouse: drag, double click for a word, triple click for a line. Selecting does not copy. Copy with `ctrl+c` or a right click (`y` also copies a transcript selection). Typing replaces a selection in the input box.
 - `⧉ copy` under a message copies its raw markdown. `ctrl+x y` copies the last reply.
 
@@ -104,28 +108,31 @@ Other keys: `ctrl+p` opens the command palette, `tab` cycles agents, `ctrl+t` cy
 | Command | Action |
 |---|---|
 | `/new` (`/clear`) | New session |
-| `/sessions` (`/resume`, `/continue`) | Switch session |
-| `/models`, `/agents` | Pick a model or an agent |
-| `/variant [name]` (`/effort`) | Set or cycle the model variant |
+| `/sessions [name or id]` (`/resume`, `/continue`) | Switch session (picker, or directly by name, title or id) |
+| `/models [model]` (`/model`), `/agents [agent]` (`/agent`) | Pick or switch the model or agent |
+| `/variant [name]` (`/variants`, `/effort`) | Pick, set or reset (`default`) the model variant (`ctrl+t` cycles in TUI) |
 | `/compact` (`/summarize`) | Compact the conversation |
 | `/undo` | Undo the last prompt |
 | `/rename NAME` | Rename the session |
-| `/cd [DIR]` (`/cwd`) | Change the session's directory, or show it |
+| `/cd [DIR]` (`/cwd`) | Change the session's directory (opens a directory picker when omitted) |
+| `/detach` (`/background`, `/leave`) | Move the open session to the background (`ref-gui` and `ref-web`) |
 | `/close` | Close this session |
-| `/close-session [name or id]` (`/kill`) | Close live sessions |
+| `/close-session [name or id …]` (`/kill`) | Close live sessions (picker, or one or more by name or id) |
 | `/export [PATH]` | Export the transcript as markdown (default `ref-session-<id>.md` in the session directory) |
 | `/copy` | Copy the last reply |
 | `/thinking`, `/details`, `/sidebar` | Toggles |
 | `/watch` (`/split`) | Split view |
-| `/mcp` | MCP servers: status, errors and tools |
-| `/editor` | Write the prompt in `$EDITOR` |
+| `/mcp [server]` (`/mcps`) | MCP servers: status, errors and tools (`r` refreshes in TUI) |
+| `/config` (`/configuration`) | Graphical `ref.json` editor and profile switcher (`ref-gui` and `ref-web`) |
+| `/reload` (`/reload-config`) | Reload configuration across live sessions and MCP servers |
+| `/editor` | Write the prompt in `$EDITOR` (TUI) |
 | `/peers`, `/peers-name`, `/peers-inbox`, `/peers-outbox` | See [Working with several sessions](#working-with-several-sessions) |
 | `/help` | Keybindings and commands |
-| `/exit` (`/quit`, `/q`) | Quit |
+| `/exit` (`/quit`, `/q`) | Quit (TUI) |
 
 Your own commands from the configuration are listed too (see [Custom commands](configuration.md#custom-commands)).
 
-**`/cd DIR`** moves the session to another directory: absolute, relative to the current one, or `~/…`. Project configuration and context files are loaded again, and a note telling the model about the change is added to the conversation, without an LLM turn. It is not allowed while the session is busy. New sessions from this window start in the new directory too.
+**`/cd [DIR]`** moves the session to another directory: absolute, relative to the current one, or `~/…`. Without `DIR`, it opens an interactive directory picker (`tab` drills into subdirectories, `backspace` at a trailing `/` steps up). Project configuration and context files are loaded again, and a note telling the model about the change is added to the conversation, without an LLM turn. It is not allowed while the session is busy. New sessions from this window start in the new directory too.
 
 **Switching the agent** (`tab`, `ctrl+x a` or `/agents`) adds a note to the conversation that tells the model about the change, without an LLM turn. Several quick switches share one note, and switching back to the original agent removes it. A session with no conversation yet gets no note; only the agent changes. While the session is busy the note is added right before the next request.
 
@@ -135,9 +142,9 @@ Your own commands from the configuration are listed too (see [Custom commands](c
 
 `ref -w`, `ctrl+x w` or `/watch` shows the live background sessions side by side.
 
-- The session that was in the foreground in this window becomes background and gets a tile. Leaving split view makes it foreground again.
-- `tab` or `alt+arrows` move the focus. Typing and `enter` send a message to the focused session, `esc esc` interrupts it and `ctrl+o` zooms in.
-- `/close` and `/cd` typed in a tile apply to that tile's session.
+- The current foreground session of this window is hidden while split view is on and returns when you leave. Split view starts with no tile focused; click a tile, or press `tab` or `alt+arrows`, to move the focus (click the focused tile's header or empty space to clear focus).
+- Tiles use solid rounded borders (`╭─╮│╰─╯`). Sub-sessions spawned by another session show a `⟲ <root>` chip and tint unfocused borders and chips using a deterministic 8-color root-task palette; tiles waiting for a permission or `question` answer highlight in warning yellow.
+- Typing and `enter` send a message to the focused session, `esc esc` interrupts it and `ctrl+o` zooms in. Slash commands and `!` shell commands typed in a focused tile act on that tile's session.
 - Each tile shows its queued prompts (`✕ remove` takes one back). Clicking a tool call shows its input and output inside the tile; clicking again collapses it.
 - The mouse wheel scrolls the tile under the pointer.
 
