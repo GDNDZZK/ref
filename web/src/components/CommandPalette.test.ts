@@ -2,10 +2,13 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
+import { registerBuiltinCommands } from '../commands/builtin.ts'
 import type { Command } from '../commands/types.ts'
 import { createAppI18n } from '../i18n/index.ts'
+import { info } from '../model/testMessages.ts'
 import { useCommandsStore } from '../stores/commands.ts'
 import { useDialogsStore } from '../stores/dialogs.ts'
+import { useWorkspaceStore } from '../stores/workspace.ts'
 import CommandPalette from './CommandPalette.vue'
 
 function command(id: string, overrides: Partial<Command> = {}): Command {
@@ -25,9 +28,10 @@ function mountPalette() {
   setActivePinia(pinia)
   const commands = useCommandsStore()
   const dialogs = useDialogsStore()
+  const workspace = useWorkspaceStore()
   dialogs.open({ kind: 'palette' })
   const wrapper = mount(CommandPalette, { global: { plugins: [pinia, createAppI18n(['en'])] } })
-  return { wrapper, commands, dialogs }
+  return { wrapper, commands, dialogs, workspace }
 }
 
 const rows = (wrapper: ReturnType<typeof mountPalette>['wrapper']) => wrapper.findAll('[role="option"]')
@@ -63,30 +67,72 @@ describe('CommandPalette', () => {
     expect(dialogs.current).toBeUndefined()
   })
 
-  it('asks for the argument of a command that takes one', async () => {
+  it('asks for the argument of a non-dialog command (e.g. peers-name or custom command)', async () => {
     const { wrapper, commands, dialogs } = mountPalette()
-    const rename = command('rename', { args: { usage: 'NAME' } })
-    commands.register(rename)
+    const review = command('review', {
+      title: { text: 'Review changes' },
+      group: 'custom',
+      source: 'config',
+      args: { usage: '[args]' },
+    })
+    commands.register(review)
     await nextTick()
     await wrapper.find('input').trigger('keydown', { key: 'Enter' })
-    expect(rename.run).not.toHaveBeenCalled()
+    expect(review.run).not.toHaveBeenCalled()
     expect(wrapper.find('.chip').exists()).toBe(true)
-    expect(wrapper.find('input').attributes('placeholder')).toBe('NAME')
+    expect(wrapper.find('input').attributes('placeholder')).toBe('[args]')
 
-    await wrapper.find('input').setValue('Work')
+    await wrapper.find('input').setValue('HEAD~1')
     await wrapper.find('input').trigger('keydown', { key: 'Enter' })
-    expect(rename.run).toHaveBeenCalledWith('', 'Work')
+    expect(review.run).toHaveBeenCalledWith('', 'HEAD~1')
     expect(dialogs.current).toBeUndefined()
   })
 
-  it('goes back to the list on Backspace in an empty argument field', async () => {
-    const { wrapper, commands } = mountPalette()
-    commands.register(command('rename', { args: { usage: 'NAME' } }))
+  it('goes back to the list on Backspace in an empty argument field and on Esc', async () => {
+    const { wrapper, commands, dialogs } = mountPalette()
+    commands.register(command('peers-name', { args: { usage: '[name]' } }))
     await nextTick()
     await wrapper.find('input').trigger('keydown', { key: 'Enter' })
+    expect(wrapper.find('.chip').exists()).toBe(true)
+
     await wrapper.find('input').trigger('keydown', { key: 'Backspace' })
     expect(wrapper.find('.chip').exists()).toBe(false)
     expect(rows(wrapper)).toHaveLength(1)
+
+    // Enter argument prompt again, type text, and press Esc: returns to list instead of closing palette.
+    await wrapper.find('input').trigger('keydown', { key: 'Enter' })
+    await wrapper.find('input').setValue('worker')
+    expect(dialogs.requestClose('escape'), 'Esc guard keeps palette open').toBeUndefined()
+    await nextTick()
+    expect(dialogs.current).toEqual({ kind: 'palette' })
+    expect(wrapper.find('.chip').exists()).toBe(false)
+    expect(rows(wrapper)).toHaveLength(1)
+
+    // Second Esc (now back on list) closes the palette.
+    dialogs.requestClose('escape')
+    expect(dialogs.current).toBeUndefined()
+  })
+
+  it.each([
+    ['cd', { kind: 'cd', sessionId: 's1' }],
+    ['export', { kind: 'export', sessionId: 's1' }],
+    ['rename', { kind: 'rename', sessionId: 's1' }],
+    ['variant', { kind: 'variants', sessionId: 's1' }],
+    ['close-session', { kind: 'sessions', mode: 'close' }],
+  ])('opens dedicated dialog directly when choosing %s from palette', async (commandId, expectedDialog) => {
+    const { wrapper, dialogs, workspace } = mountPalette()
+    registerBuiltinCommands()
+    workspace.onFrame({ kind: 'sessions', sessions: [info({ id: 's1', name: 'main' })] })
+    workspace.currentId = 's1'
+    await nextTick()
+
+    await wrapper.find('input').setValue(commandId)
+    await nextTick()
+    const target = rows(wrapper).find((row) => row.text().includes(`/${commandId}`))
+    expect(target).toBeDefined()
+    await target!.trigger('click')
+    await nextTick()
+    expect(dialogs.current).toEqual(expectedDialog)
   })
 
   it('leaves a dialog opened by the command alone', async () => {

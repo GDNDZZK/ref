@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppI18n } from '../../i18n/index.ts'
 import { RefError } from '../../net/connection.ts'
+import { info } from '../../model/testMessages.ts'
 import { useNoticesStore } from '../../stores/notices.ts'
 import { useWorkspaceStore } from '../../stores/workspace.ts'
 import PathDialog from './PathDialog.vue'
@@ -19,16 +20,30 @@ describe('PathDialog', () => {
     vi.unstubAllGlobals()
   })
 
-  function setup(listDirs: (path: string) => Promise<{ path: string; dirs: string[] }>) {
+  function setup(
+    listDirs: (
+      path: string,
+      options?: { cwd?: string; includeFiles?: boolean },
+    ) => Promise<{ path: string; dirs: string[]; files?: string[] }>,
+    props: { mode: 'cd' | 'newSession'; sessionId?: string } = { mode: 'newSession' },
+    sessionCwd?: string,
+  ) {
     const workspace = useWorkspaceStore()
     const notices = useNoticesStore()
     workspace.cwd = '/work/'
-    workspace.listDirs = vi.fn(listDirs)
+    if (props.sessionId && sessionCwd) {
+      workspace.onFrame({ kind: 'sessions', sessions: [info({ id: props.sessionId, cwd: sessionCwd })] })
+    }
+    const spy = vi.fn(async (folder: string, options?: { cwd?: string; includeFiles?: boolean }) => {
+      const res = await listDirs(folder, options)
+      return { files: [], ...res }
+    })
+    workspace.listDirs = spy
     const wrapper = mount(PathDialog, {
-      props: { mode: 'newSession' },
+      props,
       global: { plugins: [createAppI18n(['en'])] },
     })
-    return { wrapper, workspace, notices }
+    return { wrapper, workspace, notices, spy }
   }
 
   it('treats coded not_found and dir_not_found silently as an empty completion list', async () => {
@@ -60,5 +75,18 @@ describe('PathDialog', () => {
     expect(wrapper.findAll('.entry')).toHaveLength(0)
     expect(notices.notices).toHaveLength(1)
     expect(notices.notices[0]).toMatchObject({ level: 'error', text: 'Permission denied' })
+  })
+
+  it('passes session cwd to listDirs in cd mode', async () => {
+    const { wrapper, spy } = setup(
+      async () => ({ path: '/repo/sub', dirs: ['a'] }),
+      { mode: 'cd', sessionId: 'ses_1' },
+      '/repo/sub',
+    )
+    await vi.advanceTimersByTimeAsync(200)
+    expect(spy).toHaveBeenCalledWith('/repo/', { cwd: '/repo/sub' })
+    await wrapper.get('input').setValue('crates')
+    await vi.advanceTimersByTimeAsync(200)
+    expect(spy).toHaveBeenLastCalledWith('.', { cwd: '/repo/sub' })
   })
 })

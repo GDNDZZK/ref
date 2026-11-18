@@ -32,10 +32,13 @@ export function installCustomCommands(): void {
     (infos) => {
       // A built-in command with the same name wins.
       const taken = new Set(
-        commands.commands.filter((command) => command.source === 'builtin').flatMap(slashNamesOf),
+        commands.commands
+          .filter((command) => command.source === 'builtin')
+          .flatMap(slashNamesOf)
+          .map((name) => name.toLowerCase()),
       )
       const custom = (infos ?? [])
-        .filter((info) => !taken.has(info.name))
+        .filter((info) => !taken.has(info.name.toLowerCase()))
         .map((info): Command => ({
           id: info.name,
           title: { text: info.description || info.name },

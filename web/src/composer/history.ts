@@ -36,6 +36,7 @@ export class HistoryBrowser {
   private readonly history: PromptHistory
   private pos: number | undefined // undefined while editing a fresh draft
   private draft = ''
+  private activeFilter: ((entry: string) => boolean) | undefined
 
   constructor(history: PromptHistory) {
     this.history = history
@@ -45,41 +46,55 @@ export class HistoryBrowser {
     return this.pos !== undefined
   }
 
-  // `current` is the text in the box; it comes back from next() after the newest entry.
-  prev(current: string): string | undefined {
+  private findBackward(fromExclusive: number): number | undefined {
     const items = this.history.entries
-    if (items.length === 0) return undefined
-
-    let index: number
-    if (this.pos === undefined) {
-      this.draft = current
-      index = items.length - 1
-    } else if (this.pos === 0) {
-      return undefined
-    } else {
-      index = Math.min(this.pos, items.length) - 1
+    const filter = this.activeFilter
+    for (let i = Math.min(fromExclusive, items.length) - 1; i >= 0; i--) {
+      if (!filter || filter(items[i]!)) return i
     }
-    this.pos = index
-    return items[index]
+    return undefined
+  }
+
+  private findForward(fromExclusive: number): number | undefined {
+    const items = this.history.entries
+    const filter = this.activeFilter
+    for (let i = fromExclusive + 1; i < items.length; i++) {
+      if (!filter || filter(items[i]!)) return i
+    }
+    return undefined
+  }
+
+  // `current` is the text in the box; it comes back from next() after the newest entry.
+  prev(current: string, filter?: (entry: string) => boolean): string | undefined {
+    const firstStep = this.pos === undefined
+    if (firstStep) this.activeFilter = filter
+    const target = this.findBackward(firstStep ? this.history.entries.length : this.pos!)
+    if (target === undefined) {
+      if (firstStep) this.activeFilter = undefined
+      return undefined
+    }
+    if (firstStep) this.draft = current
+    this.pos = target
+    return this.history.entries[target]
   }
 
   next(): string | undefined {
     if (this.pos === undefined) return undefined
-
-    const items = this.history.entries
-    const index = this.pos + 1
-    if (index >= items.length) {
+    const target = this.findForward(this.pos)
+    if (target === undefined) {
       this.pos = undefined
+      this.activeFilter = undefined
       const draft = this.draft
       this.draft = ''
       return draft
     }
-    this.pos = index
-    return items[index]
+    this.pos = target
+    return this.history.entries[target]
   }
 
   // The user typed or sent: the next ↑ starts from the newest entry again.
   reset(): void {
     this.pos = undefined
+    this.activeFilter = undefined
   }
 }

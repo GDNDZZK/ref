@@ -14,7 +14,7 @@ import {
   relativeTime,
   rowState,
 } from '../../shell/sessionRow.ts'
-import { useDialogsStore } from '../../stores/dialogs.ts'
+import { useDialogsStore, type SessionsDialogMode } from '../../stores/dialogs.ts'
 import { useLayoutStore } from '../../stores/layout.ts'
 import { useNoticesStore } from '../../stores/notices.ts'
 import { useWorkspaceStore } from '../../stores/workspace.ts'
@@ -22,6 +22,7 @@ import Icon from '../Icon.vue'
 import SessionDot from '../SessionDot.vue'
 import PickDialog from './PickDialog.vue'
 
+const props = withDefaults(defineProps<{ mode?: SessionsDialogMode }>(), { mode: 'switch' })
 const { t, locale } = useI18n()
 const workspace = useWorkspaceStore()
 const dialogs = useDialogsStore()
@@ -46,8 +47,9 @@ const sessionById = computed(() => {
 })
 
 const allItems = computed<SessionItem[]>(() => {
-  const liveIds = new Set(workspace.live.map((session) => session.id))
   const running = workspace.live.map((info) => ({ key: info.id, group: t('sidebar.running'), info }))
+  if (props.mode === 'close') return running
+  const liveIds = new Set(workspace.live.map((session) => session.id))
   const past = workspace.history
     .filter((info) => !liveIds.has(info.id))
     .map((info) => ({ key: info.id, group: t('sidebar.history'), info }))
@@ -93,7 +95,20 @@ function subtitle(item: SessionItem): string {
   if (!item.info.parent) return base
   return `${base} · ${t('dialog.sessions.createdBy', { name: creatorLabel(sessionById.value, item.info.parent) })}`
 }
+const emptyText = computed(() => {
+  if (allItems.value.length > 0) return t('sidebar.noMatch')
+  return props.mode === 'close' ? t('dialog.sessions.emptyLive') : t('dialog.sessions.empty')
+})
 function choose(item: SessionItem): void {
+  if (props.mode === 'close') {
+    if (isWorkingSession(workspace.infoOf(item.key) ?? item.info)) {
+      dialogs.open({ kind: 'closeSession', sessionId: item.key })
+      return
+    }
+    dialogs.close()
+    workspace.closeSession(item.key).catch(notices.pushError)
+    return
+  }
   dialogs.close()
   layout.closeDrawer()
   workspace.openSession(item.key).catch(notices.pushError)
@@ -110,12 +125,12 @@ function close(item: SessionItem): void {
 
 <template>
   <PickDialog
-    :title="t('dialog.sessions.title')"
+    :title="mode === 'close' ? t('dialog.sessions.closeTitle') : t('dialog.sessions.title')"
     :search-label="t('dialog.sessions.search')"
     :items="items"
     :text="searchText"
-    :checked="workspace.focusedId"
-    :empty="allItems.length === 0 ? t('dialog.sessions.empty') : t('sidebar.noMatch')"
+    :checked="mode === 'close' ? undefined : workspace.focusedId"
+    :empty="emptyText"
     :no-match="t('sidebar.noMatch')"
     @pick="choose"
     @close="dialogs.close()"

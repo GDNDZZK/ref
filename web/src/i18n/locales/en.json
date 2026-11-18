@@ -37,7 +37,9 @@
       "image": {
         "type": "{name} is not a supported image (PNG, JPEG, GIF or WebP)",
         "size": "{name} is larger than 20 MiB"
-      }
+      },
+      "unknownCommand": "Unknown command /{name}",
+      "unknownCommandSuggest": "Unknown command /{name} — did you mean /{suggestion}?"
     }
   },
   "storage": {
@@ -113,6 +115,9 @@
     },
     "unavailable": "This command is not available right now.",
     "noSuchSession": "No live session named \"{name}\".",
+    "noSuchAnySession": "No session named \"{name}\".",
+    "noSuchModel": "No model matching \"{name}\".",
+    "noSuchAgent": "No agent named \"{name}\".",
     "new": {
       "title": "New session"
     },
@@ -197,6 +202,13 @@
     },
     "settings": {
       "title": "Settings"
+    },
+    "config": {
+      "title": "Configuration (ref.json)…"
+    },
+    "reload": {
+      "title": "Reload configuration",
+      "done": "Configuration reloaded"
     }
   },
   "palette": {
@@ -225,7 +237,9 @@
     "mcp": "MCP",
     "settings": "Settings",
     "sessions": "Sessions",
-    "needsAnswer": "Waiting for your answer"
+    "needsAnswer": "Waiting for your answer",
+    "config": "Configuration (ref.json)",
+    "reloadConfig": "Reload configuration"
   },
   "workspace": {
     "empty": "No session open"
@@ -277,7 +291,9 @@
       "filterUser": "User-created",
       "filterByCreator": "By creator",
       "filterByName": "By {name}",
-      "createdBy": "by {name}"
+      "createdBy": "by {name}",
+      "closeTitle": "Close session",
+      "emptyLive": "No running sessions"
     },
     "mcp": {
       "title": "MCP servers",
@@ -354,7 +370,10 @@
       "dark": "Dark",
       "english": "English",
       "chinese": "简体中文",
-      "about": "ref {version} · protocol {protocol}"
+      "about": "ref {version} · protocol {protocol}",
+      "config": "Configuration",
+      "editConfig": "Edit ref.json…",
+      "reloadConfig": "Reload configuration"
     }
   },
   "banner": {
@@ -465,6 +484,195 @@
       "yellow": "Yellow",
       "green": "Green",
       "cyan": "Cyan"
+    },
+    "editor": {
+      "title": "Configuration",
+      "profileLabel": "Configuration profile",
+      "activeBadge": "active",
+      "newProfile": "New",
+      "newProfileNamePlaceholder": "Profile label (optional)",
+      "cloneCurrent": "Clone current",
+      "create": "Create",
+      "deleteProfile": "Delete",
+      "confirmDeleteActiveWithBackup": "Delete active ref.json? The newest backup will become active.",
+      "confirmDeleteActiveReset": "Delete active ref.json and reset global configuration to defaults?",
+      "confirmDeleteBackup": "Delete backup profile {file}?",
+      "reload": "Reload",
+      "modeLabel": "Editor mode",
+      "modeVisual": "Visual",
+      "modeJson": "JSON",
+      "loading": "Loading configuration…",
+      "save": "Save",
+      "saving": "Saving…",
+      "saved": "Configuration saved",
+      "discard": "Discard",
+      "unsavedPrompt": "Unsaved changes",
+      "unsavedHint": "Discard your unsaved edits or stay to save them.",
+      "bannerNotCreated": "ref.json does not exist on disk yet — saving will create it.",
+      "bannerJsoncOverride": "ref.jsonc also exists in this directory and overrides matching keys in ref.json.",
+      "bannerEnvOverride": "Environment config override active: {path}",
+      "bannerProjectOverrides": "Project config overrides active for this workspace: {files}",
+      "bannerParseError": "JSON syntax error: {error}",
+      "rootMustBeObject": "Configuration root must be a JSON object.",
+      "triDefault": "Default",
+      "triOn": "On",
+      "triOff": "Off",
+      "customModelPlaceholder": "provider/model",
+      "pickModelPlaceholder": "Choose configured model…",
+      "delete": "Delete",
+      "rename": "Rename",
+      "apply": "Apply",
+      "expand": "Expand",
+      "collapse": "Collapse",
+      "nav": {
+        "general": "General",
+        "providers": "Providers & Models",
+        "agents": "Agents",
+        "permissions": "Permissions & Delays",
+        "mcp": "MCP Servers",
+        "commands": "Commands & Skills"
+      },
+      "general": {
+        "profileName": "Profile label ($name)",
+        "profileNameDesc": "Optional human-readable name shown in the profile switcher.",
+        "profileNamePlaceholder": "e.g. Work, Local",
+        "model": "Default model",
+        "modelDesc": "Fallback model (provider/model) when an agent has no model override.",
+        "smallModel": "Small / title model",
+        "smallModelDesc": "Optional lightweight model used for session title generation.",
+        "defaultAgent": "Default agent",
+        "defaultAgentDesc": "Agent selected for new sessions (defaults to build).",
+        "compactionHeading": "Context compaction",
+        "compactionAuto": "Automatic compaction",
+        "compactionAutoDesc": "Automatically compact the conversation when context reaches the threshold.",
+        "compactionRecommend": "Recommended point",
+        "compactionRecommendDesc": "Fraction (0–1, default 0.6) or token count (> 1) reported to context_window.",
+        "compactionThreshold": "Auto-compact threshold",
+        "compactionThresholdDesc": "Fraction (0–1, default 0.9) or token count (> 1) that triggers compaction.",
+        "runtimeHeading": "Runtime & media",
+        "retryMaxDelay": "Max retry delay (seconds)",
+        "retryMaxDelayDesc": "Longest wait between retry attempts (default 600s).",
+        "imagesAutoResize": "Auto-resize images",
+        "imagesAutoResizeDesc": "Downscale and compress large images before sending to the model.",
+        "tuiHeading": "UI defaults (tui)",
+        "tuiSidebar": "Show sidebar by default",
+        "tuiThinking": "Expand thinking blocks",
+        "tuiDetails": "Expand tool details",
+        "providerFilterHeading": "Provider filters",
+        "enabledProviders": "Enabled providers",
+        "enabledProvidersDesc": "If non-empty, only these provider IDs are loaded.",
+        "disabledProviders": "Disabled providers",
+        "disabledProvidersDesc": "Provider IDs excluded from loading."
+      },
+      "providers": {
+        "empty": "No providers configured in this file yet.",
+        "addProvider": "Add provider",
+        "presetLabel": "Preset",
+        "providerIdLabel": "Provider ID",
+        "providerIdPlaceholder": "e.g. openai, my-gateway",
+        "displayName": "Display name",
+        "npmPackage": "SDK package (npm)",
+        "apiKind": "API protocol",
+        "baseUrl": "Base URL",
+        "apiKey": "API key",
+        "apiKeyDesc": "Use {'{'}env:VAR{'}'} or {'{'}file:path{'}'} to avoid storing raw secrets in ref.json.",
+        "envVars": "Fallback env vars (env)",
+        "envVarsDesc": "Environment variable names checked in order when apiKey is unset.",
+        "setCacheKey": "Send prompt cache key",
+        "chunkTimeout": "Stream chunk timeout (ms)",
+        "headers": "Custom HTTP headers",
+        "whitelist": "Model whitelist",
+        "blacklist": "Model blacklist",
+        "modelsHeading": "Models",
+        "modelsEmpty": "No models defined under this provider.",
+        "suggestedModels": "Quick add:",
+        "addModel": "Add model",
+        "modelKeyPlaceholder": "Model key (e.g. gpt-5)",
+        "wireId": "Wire model ID",
+        "modelDisabled": "Disabled",
+        "attachment": "Image input (attachment)",
+        "reasoning": "Reasoning / thinking",
+        "contextLimit": "Context window (tokens)",
+        "outputLimit": "Max output (tokens)",
+        "compactLimit": "Recommended compact (tokens)",
+        "thresholdLimit": "Auto-compact threshold",
+        "temperature": "Temperature",
+        "topP": "Top P",
+        "variantsHeading": "Variants",
+        "addVariant": "Add variant",
+        "variantNamePlaceholder": "Variant name (e.g. high)",
+        "variantOptions": "Variant options (JSON object)",
+        "variantInvalidJson": "Must be a valid JSON object"
+      },
+      "agents": {
+        "builtinHeading": "Built-in agents",
+        "customHeading": "Custom agents",
+        "customEmpty": "No custom agents defined.",
+        "customized": "Customized",
+        "resetOverride": "Reset override",
+        "addAgent": "Add custom agent",
+        "agentNamePlaceholder": "Agent name (e.g. reviewer)",
+        "description": "Description",
+        "mode": "Mode",
+        "model": "Model override",
+        "variant": "Default variant",
+        "color": "Accent color",
+        "creatable": "Selectable / creatable",
+        "canSpawn": "Can spawn sub-sessions",
+        "hidden": "Hidden from UI",
+        "disable": "Disable agent",
+        "prompt": "System prompt",
+        "promptPlaceholder": "Extra system instructions for this agent…",
+        "permission": "Agent permissions",
+        "delay": "Agent tool delays"
+      },
+      "permissions": {
+        "globalPermission": "Global tool permissions",
+        "globalPermissionDesc": "Evaluated in order; last matching rule wins. Agent rules override global rules.",
+        "globalDelay": "Pre-execution tool delays",
+        "globalDelayDesc": "Wait N seconds before running matching tools (press Esc once to cancel).",
+        "delayToolPlaceholder": "Tool glob (e.g. bash, delete, *)",
+        "delaySecondsPlaceholder": "Seconds",
+        "addDelay": "Add delay",
+        "emptyDelays": "No tool delays configured"
+      },
+      "mcp": {
+        "empty": "No MCP servers configured.",
+        "addLocal": "Add local server",
+        "addRemote": "Add remote server",
+        "serverNamePlaceholder": "Server name (e.g. github)",
+        "type": "Transport type",
+        "typeLocal": "Local (stdio)",
+        "typeRemote": "Remote (HTTP / SSE)",
+        "enabled": "Enabled",
+        "timeout": "Timeout (ms)",
+        "command": "Command & arguments",
+        "commandPlaceholder": "Argument…",
+        "pasteCommand": "Paste full command line",
+        "pasteCommandPlaceholder": "e.g. npx -y {'@'}modelcontextprotocol/server-filesystem /tmp",
+        "splitCommand": "Split into argv",
+        "cwd": "Working directory (cwd)",
+        "environment": "Environment variables",
+        "url": "Server URL",
+        "headers": "HTTP headers"
+      },
+      "commands": {
+        "commandsHeading": "Custom slash commands",
+        "commandsEmpty": "No custom slash commands defined.",
+        "addCommand": "Add command",
+        "commandNamePlaceholder": "Command name (without /)",
+        "description": "Description",
+        "agent": "Run with agent",
+        "model": "Run with model",
+        "template": "Prompt template",
+        "templateDesc": "Supports $ARGUMENTS and positional $1…$9 placeholders.",
+        "instructionsHeading": "Extra instruction files",
+        "instructionsDesc": "Paths or globs (relative to config dir or project root) appended to instructions.",
+        "instructionsPlaceholder": "e.g. CONTRIBUTING.md, docs/rules/*.md",
+        "skillsHeading": "Extra skill directories",
+        "skillsDesc": "Directories scanned for skill definitions.",
+        "skillsPlaceholder": "e.g. ~/.ref/skills, ./skills"
+      }
     }
   }
 }

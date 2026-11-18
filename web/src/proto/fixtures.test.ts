@@ -39,10 +39,14 @@ const SESSION_EVENT_TYPES = {
   closed: 0,
 } satisfies Record<SessionEvent['type'], 0>
 
-const SERVER_FRAME_KINDS = { response: 0, event: 0, sessions: 0, toast: 0, notify: 0 } satisfies Record<
-  ServerFrame['kind'],
-  0
->
+const SERVER_FRAME_KINDS = {
+  response: 0,
+  event: 0,
+  sessions: 0,
+  toast: 0,
+  notify: 0,
+  config_changed: 0,
+} satisfies Record<ServerFrame['kind'], 0>
 
 const REQUEST_OPS = [
   'hello',
@@ -78,6 +82,13 @@ const REQUEST_OPS = [
   'set_notify',
   'set_focus',
   'list_dirs',
+  'reload_config',
+  'get_config_files',
+  'save_config_file',
+  'create_config_file',
+  'select_config_file',
+  'delete_config_file',
+  'list_binaries',
   'shutdown',
   'ping',
 ] satisfies ClientFrame['op'][]

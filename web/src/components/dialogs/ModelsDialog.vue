@@ -3,7 +3,6 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ModelInfo } from '../../proto/generated'
-import { useCommandsStore } from '../../stores/commands.ts'
 import { useConnectionStore } from '../../stores/connection.ts'
 import { useDialogsStore } from '../../stores/dialogs.ts'
 import { useNoticesStore } from '../../stores/notices.ts'
@@ -18,7 +17,6 @@ const connection = useConnectionStore()
 const workspace = useWorkspaceStore()
 const dialogs = useDialogsStore()
 const notices = useNoticesStore()
-const commands = useCommandsStore()
 
 interface ModelItem {
   key: string
@@ -58,11 +56,7 @@ function choose({ model }: ModelItem): void {
 }
 
 function openConfiguration(): void {
-  if (commands.find('config')) {
-    commands.run('config').catch(notices.pushError)
-    return
-  }
-  dialogs.open({ kind: 'settings' })
+  dialogs.open({ kind: 'config', section: 'providers' })
 }
 </script>
 

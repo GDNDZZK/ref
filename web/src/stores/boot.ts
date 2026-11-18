@@ -5,6 +5,7 @@ import { keys, sentKeyInClear, takeKeyFromAddress } from '../net/keystore.ts'
 import { StartupError, browserEnvironment, resolveStartup } from '../net/startup.ts'
 import { directServerUrl } from '../net/transport.ts'
 import { useConnectionStore } from './connection.ts'
+import { useMcpStore } from './mcp.ts'
 import { useNoticesStore } from './notices.ts'
 import { useNotificationsStore } from './notifications.ts'
 import { useWorkspaceStore } from './workspace.ts'
@@ -27,6 +28,7 @@ export async function boot(): Promise<StartupError | undefined> {
   const connection = useConnectionStore()
   const workspace = useWorkspaceStore()
   const notices = useNoticesStore()
+  const mcp = useMcpStore()
 
   let startup
   takeKeyFromLocation()
@@ -46,8 +48,20 @@ export async function boot(): Promise<StartupError | undefined> {
     workspace.onConnected(isReconnect && wasLoaded, startup).catch((error) => notices.pushError(error))
   })
   connection.onFrame((frame) => {
-    if (frame.kind === 'toast') notices.push(frame.level, frame.text)
-    else workspace.onFrame(frame)
+    if (frame.kind === 'toast') {
+      notices.push(frame.level, frame.text)
+      return
+    }
+    if (frame.kind === 'config_changed') {
+      const disposition = connection.noteConfigChanged()
+      if (disposition === 'external') {
+        for (const warning of frame.warnings) notices.push('warn', warning)
+        connection.loadConfig(workspace.effectiveCwd, { silentWarnings: true }).catch(notices.pushError)
+        mcp.refresh().catch(notices.pushError)
+      }
+      return
+    }
+    workspace.onFrame(frame)
   })
   useNotificationsStore().start()
   connection.start(startup.url, startup.cwd)

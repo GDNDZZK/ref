@@ -117,8 +117,10 @@ function isPlain(event: KeyboardEvent): boolean {
   return !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey
 }
 
-// Keys while the list is open. Tab inserts the choice, Enter also runs a command.
+// Keys while the list is open. Tab inserts the choice; Enter accepts unless in free-form mode without ↑/↓.
 function onListKey(event: KeyboardEvent): boolean {
+  const completion = props.composer.completion
+  if (!completion) return false
   const ctrlOnly = event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey
   const up = (isPlain(event) && event.key === Key.ArrowUp) || (ctrlOnly && event.key === 'p')
   const down = (isPlain(event) && event.key === Key.ArrowDown) || (ctrlOnly && event.key === 'n')
@@ -127,9 +129,12 @@ function onListKey(event: KeyboardEvent): boolean {
     return true
   }
 
-  const isAccept = (event.key === Key.Tab || event.key === Key.Enter) && !event.altKey && !event.ctrlKey
-  if (!isAccept || event.metaKey) return false
-  const caret = props.composer.acceptCompletion(event.key === Key.Enter)
+  const isPlainTab = event.key === Key.Tab && isPlain(event)
+  const isPlainEnter = event.key === Key.Enter && isPlain(event)
+  if (!isPlainTab && !isPlainEnter) return false
+  if (isPlainEnter && completion.freeformEnter && !completion.explicitlySelected) return false
+
+  const caret = props.composer.acceptCompletion(isPlainEnter)
   if (caret !== undefined) void showCaret()
   return true
 }
@@ -180,6 +185,7 @@ function onLineBreak(event: KeyboardEvent, area: HTMLTextAreaElement): boolean {
 function onTab(event: KeyboardEvent): boolean {
   const hasModifier = event.ctrlKey || event.metaKey || event.altKey
   if (event.key !== Key.Tab || hasModifier) return false
+  if (draft.value.shell) return true
   workspace.cycleAgent(props.session.id, event.shiftKey ? -1 : 1).catch(notices.pushError)
   return true
 }

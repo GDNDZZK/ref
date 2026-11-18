@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LOCALES, pickLocale } from './index.ts'
+import { LOCALES, createAppI18n, pickLocale } from './index.ts'
 
 function keys(tree: Record<string, unknown>, prefix = ''): string[] {
   return Object.entries(tree).flatMap(([name, value]) =>
@@ -30,6 +30,17 @@ describe('locales', () => {
     for (const key of Object.keys(english)) {
       expect(placeholders(chinese[key]!), key).toEqual(placeholders(english[key]!))
     }
+  })
+
+  it('compiles every message in both locales without vue-i18n syntax errors', () => {
+    const enI18n = createAppI18n(['en'])
+    const zhI18n = createAppI18n(['zh-CN'])
+    for (const key of keys(LOCALES.en)) {
+      expect(() => enI18n.global.t(key), `en:${key}`).not.toThrow()
+      expect(() => zhI18n.global.t(key), `zh-CN:${key}`).not.toThrow()
+    }
+    expect(enI18n.global.t('config.editor.providers.apiKeyDesc')).toContain('{env:VAR}')
+    expect(enI18n.global.t('config.editor.mcp.pasteCommandPlaceholder')).toContain('@modelcontextprotocol')
   })
 })
 

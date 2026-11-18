@@ -57,13 +57,28 @@ export const useCommandsStore = defineStore('commands', () => {
     await execute(command, sessionId, args)
   }
 
+  async function runPalette(id: string, sessionId = ''): Promise<void> {
+    const command = find(id)
+    if (!command) throw new Error(`unknown command "${id}"`)
+    const sessionTarget = target(sessionId)
+    if (!isEnabled(command, sessionTarget))
+      throw new CommandUnavailableError(translate('command.unavailable'))
+    if (command.runPalette) {
+      await command.runPalette(sessionTarget)
+      return
+    }
+    await command.run(sessionTarget, '')
+  }
+
   // "/rename Work" runs `rename` with "Work". Returns false when no command has that name, so the
   // caller can send the text as a prompt.
   async function runSlash(line: string, sessionId = ''): Promise<boolean> {
     if (!line.startsWith(SLASH_PREFIX)) return false
     const [head = '', ...rest] = line.slice(SLASH_PREFIX.length).split(/\s+/)
     const name = head.toLowerCase()
-    const command = commands.value.find((candidate) => slashNames(candidate).includes(name))
+    const command = commands.value.find((candidate) =>
+      slashNames(candidate).some((alias) => alias.toLowerCase() === name),
+    )
     if (!command) return false
     await execute(command, sessionId, rest.join(' ').trim())
     return true
@@ -104,5 +119,17 @@ export const useCommandsStore = defineStore('commands', () => {
     })
   }
 
-  return { commands, register, replaceCustom, find, run, runSlash, slashEntries, available, listed, matchKey }
+  return {
+    commands,
+    register,
+    replaceCustom,
+    find,
+    run,
+    runPalette,
+    runSlash,
+    slashEntries,
+    available,
+    listed,
+    matchKey,
+  }
 })
