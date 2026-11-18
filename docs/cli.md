@@ -3,6 +3,7 @@
 # Command line
 
 - [`ref`](#ref)
+- [`ref-gui`](#ref-gui)
 - [`ref-web`](#ref-web)
 - [`ref-server`](#ref-server)
 - [Running the backend on another machine](#running-the-backend-on-another-machine)
@@ -33,6 +34,29 @@ ref [PATH] [options]
 
 Without `--server`, `ref` looks for a running backend in the instance files (see below) and connects to it. If none is running, it starts `ref-server` from the same directory as `ref` (or from `PATH`) with a random free port and `--idle-timeout 0`, so the backend exits when the last `ref` disconnects. Turns that are running stop with it; start `ref-server` yourself (below) to keep sessions running without a window.
 
+## `ref-gui`
+
+The desktop GUI. See [Desktop GUI](gui.md) for details.
+
+```
+ref-gui [DIR] [options]
+```
+
+| Option | Meaning |
+|---|---|
+| `DIR` | Default directory for new sessions (default: the current directory). |
+| `-c`, `--continue` | Continue the most recent session for this directory. |
+| `-s`, `--session ID` | Open a session by id, live or from history. |
+| `-w`, `--watch` | Start in the split view of all live background sessions. |
+| `--agent NAME` | Default agent for new sessions. |
+| `--model provider/model[#variant]` | Default model for new sessions. |
+| `--server ws://host:port` | Connect to this backend instead of finding or starting one. |
+| `--token T` | Token for `--server`. Needs `--server`. |
+| `--mock` | Use a private fake backend (for development). Cannot be combined with `--server`. |
+| `-V`, `--version`, `-h`, `--help` | Version and help. |
+
+Without `-c` or `-s`, `ref-gui` opens in the empty workspace state (*No session open*) without auto-creating a session; `DIR`, `--agent` and `--model` set defaults for sessions you create from the window (and creating a session in another folder updates the default directory). The hidden `--smoke` flag prints `ready` when started without a session flag, or `attached <id>` with `-c` / `-s`, and exits with code 0.
+
 ## `ref-web`
 
 The web UI server. See [Web UI](web.md) for what it does.
@@ -43,7 +67,7 @@ ref-web [DIR] [options]
 
 | Option | Meaning |
 |---|---|
-| `DIR` | Directory for new sessions (default: the current directory). |
+| `DIR` | Default directory for new sessions (default: the current directory). Opening the page without `?session=<id>` starts in the empty workspace state without creating a session. |
 | `--port N` | Port to listen on (1–65535). Without it: a random free port in 10000–65535; the port of the last run is tried first, so the address stays the same. |
 | `--host ADDR` | Address to listen on (default `127.0.0.1`). Any other address opens `ref-web` to the network and enables HTTPS with a self-signed certificate by default; pass `--no-tls` for plain HTTP. |
 | `--no-tls` | Serve plain `http://` even on a non-loopback `--host` (for example behind a reverse proxy). On a loopback `--host` this is a silent no-op. |
@@ -98,7 +122,7 @@ ref --server ws://127.0.0.1:7777 --token <token>
 
 | Path | Contents |
 |---|---|
-| `~/.config/ref/`, `~/.config/opencode/` | Configuration. See [Configuration](configuration.md#where-configuration-is-read-from). |
+| `~/.config/ref/`, `~/.config/opencode/` | Configuration, including `ref.json` and numbered backup profiles `ref.json.<n>.bak` (mode 700 / 600 on Unix; leftover `*.tmp.json` files are cleaned up on `ref-server` start). See [Configuration](configuration.md#where-configuration-is-read-from). |
 | `~/.local/share/ref/sessions/` | Saved sessions. |
 | `~/.local/state/ref/instances/<pid>.json` | One file per running backend: port, token and settings. Readable only by you (mode 600). |
 | `~/.local/state/ref/prompt-history.jsonl` | Prompt history (500 entries), shared by `ref` and `ref-gui`. |

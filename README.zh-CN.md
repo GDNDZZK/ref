@@ -33,7 +33,7 @@
 
 - **服务器与界面分离。** `ref-server` 负责运行会话、智能体循环、LLM 调用、工具和权限，`ref`（终端）、`ref-gui`（桌面窗口）和 `ref-web`（浏览器）只负责显示。只要还有任何一个窗口（终端、桌面窗口或浏览器）连着，会话就会继续运行，所以可以关掉一个、在另一个里继续，也可以同时在几个里打开。由其中一个启动的服务器会在最后一个窗口断开时退出，正在运行的会话随之停止。想在没有窗口时让会话继续运行，请自己启动 `ref-server`：它会一直运行到你停止它，各个界面再连接到它。
 - **同时运行多个会话。** 分屏视图平铺显示所有后台会话。会话之间可以互发消息，`build` 智能体可以启动工作会话并给它们分派任务。
-- **读取 opencode 配置。** ref 会加载已有 `opencode.json` 中的提供商、模型、智能体、权限、MCP 服务器和命令。少数配置项会被接受但不起作用，详见[配置](docs/configuration.zh-CN.md)。
+- **读取 opencode 配置，内置可视化编辑器与热重载。** ref 会加载已有 `opencode.json` 中的提供商、模型、智能体、权限、MCP 服务器和命令，支持在 `ref-gui` 与 `ref-web` 中无损编辑 `ref.json` 及切换多套配置方案，并可在不重启后端的情况下向运行中会话热重载配置。少数配置项会被接受但不起作用，详见[配置](docs/configuration.zh-CN.md)。
 - **三种提供商接口。** 支持 Anthropic Messages、OpenAI Responses 和任何兼容 OpenAI 的 Chat Completions 端点，并可通过模型变体设置推理强度或扩展思考。没有原生的 Gemini 或 Bedrock 客户端。
 - **可控的工具调用。** 按工具设置允许、询问或拒绝，可以按命令、路径和 URL 匹配模式，还可以在工具运行前加倒计时。
 - **可靠的文件编辑。** 编辑基于带哈希标签的行号，文件视图过期时会被检测出来，而不会把文件改坏。
@@ -83,7 +83,7 @@
 | Windows x86_64 | `x86_64-pc-windows-msvc.zip` |
 | Windows arm64 | `aarch64-pc-windows-msvc.zip` |
 
-例如 `ref-tui-v0.2.2-x86_64-unknown-linux-gnu.tar.gz`。解压后，把程序放到 `PATH` 中的**同一个目录**；每个界面都会在自身所在目录查找 `ref-server`：
+例如 `ref-tui-v0.2.3-x86_64-unknown-linux-gnu.tar.gz`。解压后，把程序放到 `PATH` 中的**同一个目录**；每个界面都会在自身所在目录查找 `ref-server`：
 
 ```bash
 tar -xzf ref-tui-*.tar.gz
@@ -143,7 +143,7 @@ GUI 用 CMake 和 Qt 单独构建，见[开发](docs/development.zh-CN.md#gui)�
 | 文档 | 内容 |
 |---|---|
 | [使用 ref](docs/usage.zh-CN.md) | 会话、界面、提示输入、快捷键、斜杠命令、分屏视图、多会话协作 |
-| [配置](docs/configuration.zh-CN.md) | 全部配置项：提供商与模型、智能体、权限、延迟、压缩、MCP、命令、指令和技能 |
+| [配置](docs/configuration.zh-CN.md) | 可视化编辑器、多方案与热重载；全部配置项：提供商与模型、智能体、权限、延迟、压缩、MCP、命令、指令和技能 |
 | [工具](docs/tools.zh-CN.md) | 模型能做什么：文件工具、bash、webfetch、图片处理、上下文与跨会话工具 |
 | [桌面 GUI](docs/gui.zh-CN.md) | `ref-gui`：安装、启动、窗口、分屏视图、对话、快捷键、设置、通知 |
 | [Web 界面](docs/web.zh-CN.md) | `ref-web`：启动、登录、向局域网开放、使用页面、快捷键、通知、开发页面 |

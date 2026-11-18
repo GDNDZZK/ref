@@ -51,9 +51,9 @@ Some tests start `python3` (a fake MCP server) and `bash`. The end-to-end script
 
 The protocol types are in `crates/proto`. Two sets of files are generated from them and checked into the repository: JSON samples of every frame in `crates/proto/fixtures/` (the GUI and the web frontend parse each one in their tests) and the TypeScript types in `web/src/proto/generated/`. `cargo test -p ref-proto` fails when they are out of date; `REF_UPDATE_FIXTURES=1 cargo test -p ref-proto` rewrites them. Both directories are kept on LF line endings by `.gitattributes`.
 
-The TUI, GUI and web frontend exchange JSON frames over WebSocket (`PROTOCOL_VERSION` is currently `4`). On `Hello`, the server checks `version == PROTOCOL_VERSION` and refuses mismatches with `code: "protocol_mismatch"` (the `ref-server-cli` control client used by `--stop` and `--status` is exempt). The protocol version is bumped only for incompatible changes or when a new baseline is enforced.
+The TUI, GUI and web frontend exchange JSON frames over WebSocket (`PROTOCOL_VERSION` is currently `5`). On `Hello`, the server checks `version == PROTOCOL_VERSION` and refuses mismatches with `code: "protocol_mismatch"` (the `ref-server-cli` control client used by `--stop` and `--status` is exempt). The protocol version is bumped only for incompatible changes or when a new baseline is enforced; version 5 adds configuration profile management (`GetConfigFiles`, `SaveConfigFile`, `CreateConfigFile`, `SelectConfigFile`, `DeleteConfigFile`), hot reload (`ReloadConfig` and `ServerFrame::ConfigChanged`), `$PATH` binary completion (`ListBinaries`), and per-session `cwd` / file entries on `ListDirs`.
 
-`ServerFrame::Response` may carry an optional machine-readable `code` on `ok: false` when clients need to branch on an error (`no_pending_question`, `no_pending_permission`, `protocol_mismatch`, `dir_not_found`); the human-readable `error` text remains as a fallback. Frontends get history page by page: `Attach` returns the newest messages (100, or fewer if they exceed about 1 MiB) and `Messages` returns the page before a given message, so older pages load as you scroll up. Images reach frontends as stubs (MIME type, size and an `id`, no bytes); `GetImage` returns the bytes for an id.
+`ServerFrame::Response` may carry an optional machine-readable `code` on `ok: false` when clients need to branch on an error (`no_pending_question`, `no_pending_permission`, `not_found`, `protocol_mismatch`, `dir_not_found`); the human-readable `error` text remains as a fallback. Frontends get history page by page: `Attach` returns the newest messages (100, or fewer if they exceed about 1 MiB) and `Messages` returns the page before a given message, so older pages load as you scroll up. Images reach frontends as stubs (MIME type, size and an `id`, no bytes); `GetImage` returns the bytes for an id.
 
 Additional optional metadata used by clients:
 - `Part::Tool.meta.warnings`: array of warning strings on successful `edit` results (e.g. remapped line numbers or stripped `N:` prefixes); omitted when empty.
@@ -69,7 +69,7 @@ sleep 3600 | ref-server --mock      # prints {"port":N,"token":"..."} on stdout,
 ```
 
 - **Exit**: stdin end of file, the last client disconnecting, or ctrl-c. It then deletes its temporary directory. A `SIGKILL` leaves `/tmp/ref-mock-*` behind; the next `ref-server --mock` removes leftovers that have a `.lock` file and no running owner (directories from 0.2.0 have no `.lock` and are not removed automatically — clean them up once with `rm -rf /tmp/ref-mock-*` when no mock runs). `--idle-timeout S` changes the second condition: `-1` keeps the mock running after its last client leaves (to show a backend that outlives its windows; stdin must stay open), `S` seconds waits that long. Without the option it exits at once.
-- **Workspace**: every session runs in a temporary workspace with sample files (`README.md`, `NOTES.txt`, `src/parser.rs`, `src/lib.rs`, `docs/design.md`, `data/big.log`, `logo.png`, `scratch/src/parser.rs` and `scratch/src/lib.rs`), whatever directory the client asks for. Your files are never touched. Three past sessions are preloaded as history.
+- **Workspace**: every session runs in a temporary workspace with sample files (`README.md`, `NOTES.txt`, `src/parser.rs`, `src/lib.rs`, `docs/design.md`, `data/big.log`, `logo.png`, `scratch/src/parser.rs` and `scratch/src/lib.rs`), whatever directory the client asks for, and configuration edits use an isolated `config/` directory inside that temporary root. Your files and `~/.config/ref/` are never touched. Three past sessions are preloaded as history.
 - **Models**: `mock/mock-1` (default; 200k context, images, reasoning, variants `low`, `medium`, `high`) and `mock/mock-fast` (64k). There is an extra agent, `reviewer`.
 - **Permissions**: `edit` and `write` ask (allowed in `scratch/`). `delete` is allowed after a 5-second delay. `bash` asks, except commands starting with `echo`, `ls`, `cat`, `seq`, `sleep`, `printf` or `awk`, which are allowed, and `curl`, which is denied. `webfetch` is off.
 - **Limits**: the mock does not block everything. *Export* writes to the path the client gives, and a `!` shell command runs a real command, so both can reach outside the workspace. Tools that the scripts call only touch the workspace. The directory picker is limited to the workspace, where `~` means the workspace.
@@ -142,7 +142,7 @@ QT_QPA_PLATFORM=offscreen QML_IMPORT_PATH=$REF_DEPS_DIR/prefix/lib/qml \
 cmake -S gui -B gui/build -G Ninja -DCMAKE_INSTALL_BINDIR=. -DCMAKE_PREFIX_PATH=… 
 cmake --build gui/build
 cmake --install gui/build --prefix stage
-scripts/package.sh --version v0.2.2 --target x86_64-unknown-linux-gnu \
+scripts/package.sh --version v0.2.3 --target x86_64-unknown-linux-gnu \
   --bin-dir target/release --out dist --gui-dir stage      # needs the Rust build, see above
 ```
 
@@ -152,7 +152,7 @@ scripts/package.sh --version v0.2.2 --target x86_64-unknown-linux-gnu \
 - **macOS**: `macdeployqt` builds `ref-gui.app`. `package.sh` renames it to `ref.app`, puts `ref-server` into `Contents/MacOS` and runs `scripts/sign-macos-app.sh`, which signs everything again, inner files first, with an ad-hoc signature (there is no developer certificate) and checks it with `codesign --verify --deep --strict`. The `all` archive links its `ref-server` to the one in the app.
 - **Windows**: `windeployqt` copies the DLLs and the Visual C++ runtime next to `ref-gui.exe`, without the software OpenGL fallback. The program uses the GUI subsystem (no console window) and has an icon and version resource.
 
-`scripts/verify-gui-package.sh DIR` checks an unpacked `ref-gui` archive and runs on the platform it was built for. CI runs it after packing. It checks that every library resolves without the build machine's environment, that the KSyntaxHighlighting module is there, that the only Controls style is Basic, and that `ref-gui --smoke --mock` opens a session (on Linux under `xvfb-run`). On Linux it also checks what the package asks of the system, and on macOS the signature and that nothing refers to a path outside the app. On Windows it checks that `ref-gui.exe` uses the GUI subsystem.
+`scripts/verify-gui-package.sh DIR` checks an unpacked `ref-gui` archive and runs on the platform it was built for. CI runs it after packing. It checks that every library resolves without the build machine's environment, that the KSyntaxHighlighting module is there, that the only Controls style is Basic, and that `ref-gui --smoke --mock` connects and reaches `ready` (on Linux under `xvfb-run`). On Linux it also checks what the package asks of the system, and on macOS the signature and that nothing refers to a path outside the app. On Windows it checks that `ref-gui.exe` uses the GUI subsystem.
 
 **Linux requirements.** C++23 needs GCC 13, which Ubuntu 22.04 does not have, so CI builds the Linux GUI on Ubuntu 24.04 while `ref`, `ref-web` and `ref-server` are still built on 22.04. The program built there needs glibc 2.38: the Ubuntu 24.04 headers turn `strtol` and similar calls into the `__isoc23_*` symbols that glibc 2.38 introduced, and the arm64 Qt that aqtinstall installs is built on Ubuntu 24.04 and needs 2.38 as well (the x86-64 Qt needs 2.34 at most). Building the GUI against an older glibc would need a different toolchain and Qt build, which the project does not have. A program built with GCC 13 needs `CXXABI_1.3.14` from `libstdc++`, which the GCC 12 of Ubuntu 22.04 and Debian 12 does not have. `verify-gui-package.sh` therefore fails when anything in the package needs more than glibc 2.38, `GLIBCXX_3.4.32` or `CXXABI_1.3.14`; the README states the same numbers. If a newer compiler or Qt raises one, change the constants at the top of the script and the README together.
 
@@ -184,7 +184,7 @@ Each target gets four archives. Every archive holds one folder of the same name 
 To pack by hand after `cargo build --release`:
 
 ```bash
-scripts/package.sh --version v0.2.2 --target x86_64-unknown-linux-gnu \
+scripts/package.sh --version v0.2.3 --target x86_64-unknown-linux-gnu \
   --bin-dir target/release --out dist [--gui-dir stage]
 ```
 
@@ -195,10 +195,10 @@ To make a release:
 ```bash
 # 1. Set the version in Cargo.toml ([workspace.package] version) and run
 #    `cargo update --workspace` to refresh Cargo.lock (CI builds with --locked).
-#    Write the release text in .github/release-notes/v0.2.2.md. Commit and push.
+#    Write the release text in .github/release-notes/v0.2.3.md. Commit and push.
 # 2. Tag and push the tag:
-git tag v0.2.2
-git push origin v0.2.2
+git tag v0.2.3
+git push origin v0.2.3
 ```
 
 The `ref-gui` version, the Windows and macOS metadata and the archive names follow from the tag and `Cargo.toml`. The first job of the workflow fails when the tag and the version in `Cargo.toml` differ. The release text is the file `.github/release-notes/<tag>.md`; when it does not exist, GitHub generates the text from the commits.

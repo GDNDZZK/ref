@@ -8,6 +8,7 @@ Some opencode keys are accepted but have no effect: `command.<name>.agent` and `
 
 - [Quick start](#quick-start)
 - [Where configuration is read from](#where-configuration-is-read-from)
+- [Graphical editor and profiles](#graphical-editor-and-profiles)
 - [Syntax](#syntax)
 - [Top-level keys](#top-level-keys)
 - [Providers and models](#providers-and-models)
@@ -65,9 +66,17 @@ Markdown agents and commands are loaded from the same global directories and fro
 
 **How files are merged:** objects are merged key by key, recursively. Any other value (string, number, array) replaces the earlier one. Three things are collected from every file instead of replaced: permission rules (appended in order), `instructions` and skill paths.
 
-Configuration is read again for every new session and on `/cd`, so edits take effect without restarting the backend.
+Configuration is read again for every new session, on `/cd`, on `/reload` (`/reload-config`), and automatically when saving or switching profiles in the graphical editor. A reload updates live sessions in place — falling back if an agent, model or variant was removed, refreshing context limits, and rebuilding system prompts on the next step without interrupting a running turn — reconciles MCP servers (retrying failed servers and closing removed, disabled or changed ones), and broadcasts the update to all connected clients.
 
-Problems such as invalid JSON, unknown permission actions or a missing `template` do not stop ref. The file or entry is skipped and a warning is written to the backend log (`~/.local/state/ref/logs/`, see [CLI](cli.md#files-and-directories)).
+Problems such as invalid JSON, unknown permission actions or a missing `template` do not stop ref. The file or entry is skipped, a warning is written to the backend log (`~/.local/state/ref/logs/`, see [CLI](cli.md#files-and-directories)), and configuration warnings are surfaced to the clients.
+
+## Graphical editor and profiles
+
+`ref-gui` and `ref-web` include a graphical editor for the global `~/.config/ref/ref.json` file. Open it with `/config` (`/configuration`), Command Palette → *Configuration*, the configuration button in the sidebar footer, or *Settings* → *Edit ref.json…*. Press `ctrl+s` (`cmd+s` on macOS) to save; unsaved edits ask before closing or switching profiles.
+
+- **Visual and JSON modes.** *Visual* mode groups every configuration key into six sections (*General*, *Providers & Models*, *Agents*, *Permissions & Delays*, *MCP Servers*, *Commands & Skills*), with provider presets, model and variant editors, built-in agent overrides, ordered permission rule tables, and tool-delay tables; *JSON* mode edits the raw JSONC text directly. Edits patch the unexpanded JSON object in place: untouched keys, `extraBody`, and `{env:VAR}` / `{file:...}` placeholders remain intact. Secret fields mask literal API keys (`•••`) with a show/hide toggle while keeping `{env:VAR}` and `{file:...}` placeholders visible alongside live `{VAR} set` / `{VAR} unset` badges (expanded secret values are never sent to the UI).
+- **Multiple profiles and crash-safe rotation.** The switcher manages `ref.json` (active) and numbered backup profiles `ref.json.<n>.bak` in `~/.config/ref/` (created with mode `0700` for the directory and `0600` for files on Unix). Set top-level `"$name"` to give a profile a readable label. Creating a profile (cloning the current one or starting blank) or activating a `.bak` profile backs up the previous `ref.json` to `ref.json.<next>.bak` and writes each file via a sibling `.tmp.json` + `fsync` + atomic rename so no crash point loses a profile; deleting the active `ref.json` promotes the newest `.bak` if one exists, or resets global `ref.json` otherwise. Leftover `*.tmp.json` regular files are cleaned up when `ref-server` starts.
+- **Override notices.** Because later files win when configuration is merged, the editor shows a banner whenever `ref.jsonc` in the same directory, `$REF_CONFIG` / `$OPENCODE_CONFIG`, or project-level config files in the current workspace override keys in `ref.json`.
 
 ## Syntax
 
@@ -92,6 +101,7 @@ Problems such as invalid JSON, unknown permission actions or a missing `template
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
+| `$name` | string | none | **ref** Optional profile label shown in the graphical configuration switcher. |
 | `model` | `"provider/model"` | first configured model | Model for agents that do not set one. |
 | `small_model` | `"provider/model"` | session model | Model used to generate session titles. |
 | `default_agent` | string | `"build"` | Agent for new sessions. |
@@ -203,7 +213,7 @@ For example, `{"thinking": {"type": "enabled", "budgetTokens": 16000}}` enables 
 
 ### Which model a session uses
 
-A new session uses its agent's `model` (with the agent's `variant`). Without one it uses the top-level `model`, and without that the first model of the first provider. `--model` on the command line and the model picker (`ctrl+x m`) change it for one session only.
+A new session uses its agent's `model` (with the agent's `variant`). Without one it uses the top-level `model`, and without that the first model of the first provider. `--model` on the command line and the model picker (`ctrl+x m` or `/models`) pin a model for one session: on `/reload`, unpinned sessions follow changes to the agent or top-level default, whereas pinned sessions keep their model unless it was removed from configuration.
 
 ## Agents
 
@@ -395,7 +405,7 @@ MCP tools are offered to the model as `<server>_<tool>`, with characters other t
 
 ## Custom commands
 
-A command is a prompt template that you run as `/name` in the TUI.
+A command is a prompt template that you run as `/name` in any interface.
 
 ```jsonc
 "command": {

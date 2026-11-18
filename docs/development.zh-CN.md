@@ -51,9 +51,9 @@ REF_DUMP_REQUESTS=/tmp/dump ref-server ...                     # 导出 LLM 请�
 
 协议类型在 `crates/proto` 中。由它们生成并提交到仓库的文件有两组：`crates/proto/fixtures/` 中每种帧的 JSON 样例（GUI 和 Web 前端的测试会逐个解析），以及 `web/src/proto/generated/` 中的 TypeScript 类型。文件过期时 `cargo test -p ref-proto` 会失败；`REF_UPDATE_FIXTURES=1 cargo test -p ref-proto` 会重写它们。`.gitattributes` 让这两个目录保持 LF 换行。
 
-TUI、GUI 和 Web 前端与后端通过 WebSocket 交换 JSON 帧（当前 `PROTOCOL_VERSION` 为 `4`）。收到 `Hello` 时，服务器要求 `version == PROTOCOL_VERSION`，不匹配会返回 `code: "protocol_mismatch"` 并拒绝连接（供 `--stop` 和 `--status` 使用的 `ref-server-cli` 控制客户端不受此限制）。只有发生不兼容变更或需要强制统一新基线时才递增协议版本号。
+TUI、GUI 和 Web 前端与后端通过 WebSocket 交换 JSON 帧（当前 `PROTOCOL_VERSION` 为 `5`）。收到 `Hello` 时，服务器要求 `version == PROTOCOL_VERSION`，不匹配会返回 `code: "protocol_mismatch"` 并拒绝连接（供 `--stop` 和 `--status` 使用的 `ref-server-cli` 控制客户端不受此限制）。只有发生不兼容变更或需要强制统一新基线时才递增协议版本号；第 5 版新增配置方案管理（`GetConfigFiles`、`SaveConfigFile`、`CreateConfigFile`、`SelectConfigFile`、`DeleteConfigFile`）、热重载（`ReloadConfig` 与 `ServerFrame::ConfigChanged`）、`$PATH` 可执行文件补全（`ListBinaries`），以及 `ListDirs` 的按会话 `cwd` 与文件列表支持。
 
-`ServerFrame::Response` 在 `ok: false` 时可附带机器可读的 `code` 字段供客户端分支判断（`no_pending_question`、`no_pending_permission`、`protocol_mismatch`、`dir_not_found`）；人类可读的 `error` 文本保持不变以作兜底。前端分页获取历史：`Attach` 返回最新的消息（100 条，超过约 1 MiB 时更少），`Messages` 返回指定消息之前的一页，因此向上滚动时会加载更早的页。图片以占位信息发给前端（MIME 类型、尺寸和 `id`，不含字节数据）；`GetImage` 按 id 返回图片字节。
+`ServerFrame::Response` 在 `ok: false` 时可附带机器可读的 `code` 字段供客户端分支判断（`no_pending_question`、`no_pending_permission`、`not_found`、`protocol_mismatch`、`dir_not_found`）；人类可读的 `error` 文本保持不变以作兜底。前端分页获取历史：`Attach` 返回最新的消息（100 条，超过约 1 MiB 时更少），`Messages` 返回指定消息之前的一页，因此向上滚动时会加载更早的页。图片以占位信息发给前端（MIME 类型、尺寸和 `id`，不含字节数据）；`GetImage` 按 id 返回图片字节。
 
 客户端使用的其他可选元数据：
 - `Part::Tool.meta.warnings`：成功的 `edit` 结果中的警告字符串数组（例如行号已重映射或剥离了 `N:` 前缀）；为空时省略。
@@ -69,7 +69,7 @@ sleep 3600 | ref-server --mock      # stdout 只打印一行 {"port":N,"token":"
 ```
 
 - **退出**：stdin 文件结束、最后一个客户端断开，或 ctrl-c。退出时会删除它的临时目录。被 `SIGKILL` 杀死时会留下 `/tmp/ref-mock-*`；下一次启动 `ref-server --mock` 时会自动清理带有 `.lock` 文件且已无进程持有的残留目录（0.2.0 留下的目录没有 `.lock`，不会自动清理，可在没有 mock 运行时执行一次 `rm -rf /tmp/ref-mock-*`）。`--idle-timeout S` 改变第二个条件：`-1` 让 mock 在最后一个客户端离开后继续运行（用来演示后端比窗口活得更久；stdin 必须保持打开），`S` 表示再等 S 秒。不带这个选项时立即退出。
-- **工作区**：无论客户端请求哪个目录，所有会话都在带示例文件的临时工作区中运行（`README.md`、`NOTES.txt`、`src/parser.rs`、`src/lib.rs`、`docs/design.md`、`data/big.log`、`logo.png`、`scratch/src/parser.rs` 和 `scratch/src/lib.rs`），不会改动你的文件。预置了 3 条历史会话。
+- **工作区**：无论客户端请求哪个目录，所有会话都在带示例文件的临时工作区中运行（`README.md`、`NOTES.txt`、`src/parser.rs`、`src/lib.rs`、`docs/design.md`、`data/big.log`、`logo.png`、`scratch/src/parser.rs` 和 `scratch/src/lib.rs`），配置编辑也使用该临时根目录下的隔离 `config/` 目录，不会改动你的文件和 `~/.config/ref/`。预置了 3 条历史会话。
 - **模型**：`mock/mock-1`（默认；200k 上下文、图片、推理、变体 `low`、`medium`、`high`）和 `mock/mock-fast`（64k）。多一个智能体 `reviewer`。
 - **权限**：`edit` 和 `write` 询问（`scratch/` 下允许）。`delete` 允许，但延迟 5 秒。`bash` 询问，以 `echo`、`ls`、`cat`、`seq`、`sleep`、`printf`、`awk` 开头的命令允许，`curl` 拒绝。`webfetch` 关闭。
 - **限制**：mock 并不拦截所有操作。*导出*会写到客户端给出的路径，`!` shell 命令会真的运行命令，所以两者都可能写到或运行到工作区之外。脚本调用的工具只会碰工作区。目录选择器限定在工作区内，`~` 就是工作区。
@@ -142,7 +142,7 @@ QT_QPA_PLATFORM=offscreen QML_IMPORT_PATH=$REF_DEPS_DIR/prefix/lib/qml \
 cmake -S gui -B gui/build -G Ninja -DCMAKE_INSTALL_BINDIR=. -DCMAKE_PREFIX_PATH=…
 cmake --build gui/build
 cmake --install gui/build --prefix stage
-scripts/package.sh --version v0.2.2 --target x86_64-unknown-linux-gnu \
+scripts/package.sh --version v0.2.3 --target x86_64-unknown-linux-gnu \
   --bin-dir target/release --out dist --gui-dir stage      # 需要先完成 Rust 构建，见上文
 ```
 
@@ -152,7 +152,7 @@ scripts/package.sh --version v0.2.2 --target x86_64-unknown-linux-gnu \
 - **macOS**：`macdeployqt` 生成 `ref-gui.app`。`package.sh` 把它改名为 `ref.app`，把 `ref-server` 放进 `Contents/MacOS`，再运行 `scripts/sign-macos-app.sh`：由内向外重新做 ad-hoc 签名（没有开发者证书），并用 `codesign --verify --deep --strict` 检查。`all` 压缩包里的 `ref-server` 是指向 app 内那一份的符号链接。
 - **Windows**：`windeployqt` 把 DLL 和 Visual C++ 运行库复制到 `ref-gui.exe` 旁边，不含软件 OpenGL 后备。程序使用 GUI 子系统（不弹控制台窗口），并带有图标和版本资源。
 
-`scripts/verify-gui-package.sh DIR` 检查解压后的 `ref-gui` 压缩包，必须在它所构建的平台上运行。CI 在打包后运行它。它检查：不依赖构建机的环境时每个库都能找到、KSyntaxHighlighting 模块在包里、Controls 样式只有 Basic、`ref-gui --smoke --mock` 能打开会话（Linux 上在 `xvfb-run` 下）。Linux 上还检查包对系统的要求，macOS 上检查签名以及没有引用 app 之外的路径，Windows 上检查 `ref-gui.exe` 使用 GUI 子系统。
+`scripts/verify-gui-package.sh DIR` 检查解压后的 `ref-gui` 压缩包，必须在它所构建的平台上运行。CI 在打包后运行它。它检查：不依赖构建机的环境时每个库都能找到、KSyntaxHighlighting 模块在包里、Controls 样式只有 Basic、`ref-gui --smoke --mock` 能连接后端并输出 `ready`（Linux 上在 `xvfb-run` 下）。Linux 上还检查包对系统的要求，macOS 上检查签名以及没有引用 app 之外的路径，Windows 上检查 `ref-gui.exe` 使用 GUI 子系统。
 
 **Linux 的要求。** C++23 需要 GCC 13，而 Ubuntu 22.04 没有，所以 CI 在 Ubuntu 24.04 上构建 Linux 的 GUI，`ref`、`ref-web` 和 `ref-server` 仍在 22.04 上构建。在那里构建出的程序需要 glibc 2.38：Ubuntu 24.04 的头文件会把 `strtol` 等调用换成 glibc 2.38 引入的 `__isoc23_*` 符号，aqtinstall 安装的 arm64 版 Qt 也是在 Ubuntu 24.04 上构建的，同样需要 2.38（x86-64 版 Qt 最多需要 2.34）。要针对更旧的 glibc 构建 GUI，需要另一套工具链和 Qt 构建，项目目前没有。用 GCC 13 编译的程序需要 `libstdc++` 中的 `CXXABI_1.3.14`，Ubuntu 22.04 和 Debian 12 的 GCC 12 没有它。因此，只要包里有东西需要高于 glibc 2.38、`GLIBCXX_3.4.32` 或 `CXXABI_1.3.14`，`verify-gui-package.sh` 就会失败；README 写的是同样的数字。如果更新的编译器或 Qt 抬高了其中某项，请同时修改脚本开头的常量和 README。
 
@@ -184,7 +184,7 @@ scripts/package.sh --version v0.2.2 --target x86_64-unknown-linux-gnu \
 在 `cargo build --release` 之后手动打包：
 
 ```bash
-scripts/package.sh --version v0.2.2 --target x86_64-unknown-linux-gnu \
+scripts/package.sh --version v0.2.3 --target x86_64-unknown-linux-gnu \
   --bin-dir target/release --out dist [--gui-dir stage]
 ```
 
@@ -195,10 +195,10 @@ scripts/package.sh --version v0.2.2 --target x86_64-unknown-linux-gnu \
 ```bash
 # 1. 修改 Cargo.toml 中的版本（[workspace.package] version），并运行
 #    `cargo update --workspace` 刷新 Cargo.lock（CI 用 --locked 构建）。
-#    把发布说明写进 .github/release-notes/v0.2.2.md。提交并推送。
+#    把发布说明写进 .github/release-notes/v0.2.3.md。提交并推送。
 # 2. 打标签并推送标签：
-git tag v0.2.2
-git push origin v0.2.2
+git tag v0.2.3
+git push origin v0.2.3
 ```
 
 `ref-gui` 的版本、Windows 和 macOS 的元数据以及压缩包名称都由标签和 `Cargo.toml` 决定。标签与 `Cargo.toml` 中的版本不一致时，工作流的第一个任务会失败。发布说明取自文件 `.github/release-notes/<标签>.md`；文件不存在时，由 GitHub 根据提交生成。
