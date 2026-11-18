@@ -3,6 +3,7 @@
 # 命令行
 
 - [`ref`](#ref)
+- [`ref-gui`](#ref-gui)
 - [`ref-web`](#ref-web)
 - [`ref-server`](#ref-server)
 - [在另一台机器上运行后端](#在另一台机器上运行后端)
@@ -33,6 +34,29 @@ ref [PATH] [options]
 
 不带 `--server` 时，`ref` 会在实例文件（见下文）中查找运行中的后端并连接。如果没有，它会从 `ref` 所在目录（或 `PATH`）启动 `ref-server`，使用随机空闲端口和 `--idle-timeout 0`，这样最后一个 `ref` 断开后后端就会退出，正在运行的轮次也随之停止。想在没有窗口时让会话继续运行，请自己启动 `ref-server`（见下文）。
 
+## `ref-gui`
+
+桌面图形界面，详见[桌面 GUI](gui.zh-CN.md)。
+
+```
+ref-gui [DIR] [options]
+```
+
+| 选项 | 含义 |
+|---|---|
+| `DIR` | 新建会话的默认目录（默认：当前目录）。 |
+| `-c`, `--continue` | 继续此目录最近的会话。 |
+| `-s`, `--session ID` | 按 id 打开会话，可以是运行中的，也可以是历史中的。 |
+| `-w`, `--watch` | 启动即进入所有运行中后台会话的分屏视图。 |
+| `--agent NAME` | 新建会话默认使用的智能体。 |
+| `--model provider/model[#variant]` | 新建会话默认使用的模型。 |
+| `--server ws://host:port` | 连接指定的后端，而不是查找或启动后端。 |
+| `--token T` | `--server` 使用的令牌。必须与 `--server` 一起使用。 |
+| `--mock` | 使用私有的假后端（开发用）。不能与 `--server` 同时使用。 |
+| `-V`, `--version`, `-h`, `--help` | 版本和帮助。 |
+
+不带 `-c` 或 `-s` 时，`ref-gui` 打开后进入空白工作区（*未打开会话*），不会自动创建会话；`DIR`、`--agent` 和 `--model` 作为在窗口内手动新建会话时的默认值（选择其他文件夹新建会话后会同步更新工作区默认目录）。隐藏测试参数 `--smoke` 在未传会话参数时输出 `ready`，带 `-c` / `-s` 时输出 `attached <id>`，并以退出码 0 退出。
+
 ## `ref-web`
 
 Web 界面服务器，作用见 [Web 界面](web.zh-CN.md)。
@@ -43,7 +67,7 @@ ref-web [DIR] [选项]
 
 | 选项 | 含义 |
 |---|---|
-| `DIR` | 新会话的目录（默认：当前目录）。 |
+| `DIR` | 新建会话的默认目录（默认：当前目录）。不带 `?session=<id>` 打开页面时进入空白工作区，不会自动创建会话。 |
 | `--port N` | 监听端口（1–65535）。不设置时：在 10000–65535 中随机选一个空闲端口，并先试上次使用的端口，所以地址保持不变。 |
 | `--host ADDR` | 监听地址（默认 `127.0.0.1`）。其他地址会向网络开放 `ref-web`，并默认使用自签名证书启用 HTTPS；加 `--no-tls` 改用普通 HTTP。 |
 | `--no-tls` | 即使在非回环 `--host` 上也只提供普通 `http://`（例如放在反向代理后面时）。在回环 `--host` 上是无提示的空操作。 |
@@ -98,7 +122,7 @@ ref --server ws://127.0.0.1:7777 --token <token>
 
 | 路径 | 内容 |
 |---|---|
-| `~/.config/ref/`, `~/.config/opencode/` | 配置。参见[配置](configuration.zh-CN.md#配置文件的读取位置)。 |
+| `~/.config/ref/`, `~/.config/opencode/` | 配置，含 `ref.json` 及编号备份方案 `ref.json.<n>.bak`（Unix 下目录权限 700、文件权限 600；`ref-server` 启动时会自动清理残留的 `*.tmp.json` 文件）。参见[配置](configuration.zh-CN.md#配置文件的读取位置)。 |
 | `~/.local/share/ref/sessions/` | 保存的会话。 |
 | `~/.local/state/ref/instances/<pid>.json` | 每个运行中的后端一个文件：端口、令牌和设置。只有你自己可读（权限 600）。 |
 | `~/.local/state/ref/prompt-history.jsonl` | 提示历史（500 条），`ref` 和 `ref-gui` 共用。 |
