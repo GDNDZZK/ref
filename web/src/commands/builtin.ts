@@ -4,8 +4,10 @@
 import { translate } from '../i18n/index.ts'
 import { isWorkingSession } from '../shell/sessionRow.ts'
 import { useCommandsStore } from '../stores/commands.ts'
+import { useConnectionStore } from '../stores/connection.ts'
 import { useLayoutStore } from '../stores/layout.ts'
 import { useDialogsStore } from '../stores/dialogs.ts'
+import { useMcpStore } from '../stores/mcp.ts'
 import { useNoticesStore } from '../stores/notices.ts'
 import { useWorkspaceStore } from '../stores/workspace.ts'
 import { IS_MAC } from './platform.ts'
@@ -35,22 +37,49 @@ function argument(usage: string) {
   return { usage }
 }
 
-// Finds live sessions by name or id; `/close-session a b` closes both.
+// Finds live sessions by name or id (case-insensitively); `/close-session a b` closes both.
 function liveSessionsNamed(names: string[]) {
   const workspace = useWorkspaceStore()
   return names.map((name) => {
-    const found = workspace.live.find((session) => session.name === name || session.id === name)
+    const wanted = name.toLowerCase()
+    const found = workspace.live.find(
+      (session) => session.name.toLowerCase() === wanted || session.id.toLowerCase() === wanted,
+    )
     if (!found) throw new Error(translate('command.noSuchSession', { name }))
     return found
   })
 }
 
+async function findAnySession(workspace: ReturnType<typeof useWorkspaceStore>, raw: string) {
+  const lower = raw.toLowerCase()
+  const match = (list: readonly { id: string; name: string; title: string }[]) =>
+    list.find((s) => s.id.toLowerCase() === lower || (s.name !== '' && s.name.toLowerCase() === lower)) ??
+    list.find((s) => s.title !== '' && s.title.toLowerCase() === lower)
+
+  const inLive = match(workspace.live)
+  if (inLive) return inLive
+  const inHistory = match(workspace.history)
+  if (inHistory) return inHistory
+  if (!workspace.historyLoaded) {
+    try {
+      await workspace.refreshHistory()
+    } catch {
+      // Disconnected or unmocked in isolated tests
+    }
+    const afterRefresh = match(workspace.history)
+    if (afterRefresh) return afterRefresh
+  }
+  throw new Error(translate('command.noSuchAnySession', { name: raw }))
+}
+
 export function registerBuiltinCommands(): void {
   const commands = useCommandsStore()
+  const connection = useConnectionStore()
   const workspace = useWorkspaceStore()
   const dialogs = useDialogsStore()
   const notices = useNoticesStore()
   const layout = useLayoutStore()
+  const mcp = useMcpStore()
 
   const canZoomTile = () => !layout.narrow && workspace.mode === 'split' && workspace.focusedId !== undefined
 
@@ -69,20 +98,52 @@ export function registerBuiltinCommands(): void {
     define({
       id: 'sessions',
       aliases: ['resume', 'continue'],
+      args: argument('[session]'),
       shortcut: altKey('L'),
-      run: () => dialogs.open({ kind: 'sessions' }),
+      run: async (_sessionId, args) => {
+        const wanted = args.trim()
+        if (!wanted) return dialogs.open({ kind: 'sessions' })
+        const found = await findAnySession(workspace, wanted)
+        await workspace.openSession(found.id)
+      },
     }),
     define({
       id: 'models',
+      aliases: ['model'],
+      args: argument('[model]'),
       shortcut: altKey('M'),
       enabled: hasSession,
-      run: (sessionId) => dialogs.open({ kind: 'models', sessionId }),
+      run: async (sessionId, args) => {
+        const wanted = args.trim()
+        if (!wanted) return dialogs.open({ kind: 'models', sessionId })
+        const lower = wanted.toLowerCase()
+        const models = connection.config?.models ?? []
+        const found =
+          models.find((m) => `${m.provider}/${m.id}`.toLowerCase() === lower) ??
+          models.find((m) => m.id.toLowerCase() === lower) ??
+          models.find((m) => m.name.toLowerCase() === lower)
+        if (!found) throw new Error(translate('command.noSuchModel', { name: wanted }))
+        const variant = workspace.infoOf(sessionId)?.model.variant
+        const kept = variant && found.variants.includes(variant) ? variant : null
+        await workspace.setModel(sessionId, { provider: found.provider, model: found.id, variant: kept })
+      },
     }),
     define({
       id: 'agents',
+      aliases: ['agent'],
+      args: argument('[agent]'),
       shortcut: altKey('A'),
       enabled: hasSession,
-      run: (sessionId) => dialogs.open({ kind: 'agents', sessionId }),
+      run: async (sessionId, args) => {
+        const wanted = args.trim()
+        if (!wanted) return dialogs.open({ kind: 'agents', sessionId })
+        const lower = wanted.toLowerCase()
+        const found = (connection.config?.agents ?? []).find(
+          (agent) => agent.creatable && agent.name.toLowerCase() === lower,
+        )
+        if (!found) throw new Error(translate('command.noSuchAgent', { name: wanted }))
+        await workspace.setAgent(sessionId, found.name)
+      },
     }),
     define({
       id: 'variant',
@@ -90,7 +151,18 @@ export function registerBuiltinCommands(): void {
       args: argument('[name]'),
       shortcut: altKey('T'),
       enabled: hasSession,
-      run: (sessionId, args) => workspace.setVariant(sessionId, args),
+      runPalette: (sessionId) => dialogs.open({ kind: 'variants', sessionId }),
+      run: (sessionId, args) => {
+        const wanted = args.trim()
+        if (!wanted) return workspace.setVariant(sessionId, '')
+        if (wanted.toLowerCase() === 'default') return workspace.clearVariant(sessionId)
+        const currentModel = workspace.infoOf(sessionId)?.model
+        const modelInfo = connection.config?.models.find(
+          (m) => m.provider === currentModel?.provider && m.id === currentModel?.model,
+        )
+        const matched = modelInfo?.variants.find((v) => v.toLowerCase() === wanted.toLowerCase()) ?? wanted
+        return workspace.setVariant(sessionId, matched)
+      },
     }),
     define({
       id: 'compact',
@@ -166,8 +238,14 @@ export function registerBuiltinCommands(): void {
       aliases: ['kill'],
       args: argument('[name or id]'),
       run: async (_sessionId, args) => {
-        if (!args) return dialogs.open({ kind: 'sessions' })
-        for (const session of liveSessionsNamed(args.split(/\s+/))) await workspace.closeSession(session.id)
+        const trimmed = args.trim()
+        if (!trimmed) return dialogs.open({ kind: 'sessions', mode: 'close' })
+        const seen = new Set<string>()
+        for (const session of liveSessionsNamed(trimmed.split(/\s+/))) {
+          if (seen.has(session.id)) continue
+          seen.add(session.id)
+          await workspace.closeSession(session.id)
+        }
       },
     }),
     define({
@@ -231,6 +309,22 @@ export function registerBuiltinCommands(): void {
       aliases: ['mcps'],
       group: 'help',
       run: () => dialogs.open({ kind: 'mcp' }),
+    }),
+    define({
+      id: 'config',
+      aliases: ['configuration'],
+      group: 'help',
+      run: () => dialogs.open({ kind: 'config' }),
+    }),
+    define({
+      id: 'reload',
+      aliases: ['reload-config'],
+      group: 'help',
+      run: async () => {
+        await connection.reloadConfig(workspace.effectiveCwd)
+        await mcp.refresh()
+        notices.push('info', translate('command.reload.done'))
+      },
     }),
     define({
       id: 'help',

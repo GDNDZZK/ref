@@ -7,6 +7,8 @@ import { info } from '../../model/testMessages.ts'
 import { useDialogsStore } from '../../stores/dialogs.ts'
 import { useWorkspaceStore } from '../../stores/workspace.ts'
 import SessionsDialog from './SessionsDialog.vue'
+import AgentsDialog from './AgentsDialog.vue'
+import ModelsDialog from './ModelsDialog.vue'
 
 function mountSessionsDialog() {
   const pinia = createPinia()
@@ -91,5 +93,45 @@ describe('SessionsDialog', () => {
     await closeButtons[1]!.trigger('click')
     expect(dialogs.current).toBeUndefined()
     expect(closeSpy).toHaveBeenCalledWith('ses_idle')
+  })
+
+  it('shows only live sessions and closes selected row in close mode', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const workspace = useWorkspaceStore()
+    const closeSpy = vi.spyOn(workspace, 'closeSession').mockResolvedValue(undefined)
+    workspace.onFrame({
+      kind: 'sessions',
+      sessions: [info({ id: 'ses_live', name: 'live-one', status: { state: 'idle' } })],
+    })
+    workspace.history = [info({ id: 'ses_past', name: 'past-one', live: false })]
+    const wrapper = mount(SessionsDialog, {
+      props: { mode: 'close' },
+      global: { plugins: [pinia, createAppI18n(['en'])] },
+    })
+    expect(rowNames(wrapper)).toEqual(['live-one'])
+    await wrapper.get('[role="option"]').trigger('click')
+    expect(closeSpy).toHaveBeenCalledWith('ses_live')
+  })
+
+  it('opens ConfigDialog at providers from ModelsDialog and agents from AgentsDialog', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const dialogs = useDialogsStore()
+    const i18n = createAppI18n(['en'])
+
+    const modelsWrapper = mount(ModelsDialog, {
+      props: { sessionId: 's1' },
+      global: { plugins: [pinia, i18n] },
+    })
+    await modelsWrapper.get('button.text-button').trigger('click')
+    expect(dialogs.current).toEqual({ kind: 'config', section: 'providers' })
+
+    const agentsWrapper = mount(AgentsDialog, {
+      props: { sessionId: 's1' },
+      global: { plugins: [pinia, i18n] },
+    })
+    await agentsWrapper.get('button.text-button').trigger('click')
+    expect(dialogs.current).toEqual({ kind: 'config', section: 'agents' })
   })
 })

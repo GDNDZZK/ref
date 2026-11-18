@@ -8,6 +8,7 @@ import lockupLight from '../../../assets/app/ref-lockup-small-light.svg'
 import { useTheme } from '../composables/useTheme.ts'
 import { isWorkingSession, matchesQuery } from '../shell/sessionRow.ts'
 import { useCommandsStore } from '../stores/commands.ts'
+import { useConnectionStore } from '../stores/connection.ts'
 import { useDialogsStore } from '../stores/dialogs.ts'
 import { useLayoutStore } from '../stores/layout.ts'
 import { useMcpStore } from '../stores/mcp.ts'
@@ -26,6 +27,7 @@ const { t } = useI18n()
 const { isDark } = useTheme()
 const workspace = useWorkspaceStore()
 const commands = useCommandsStore()
+const connection = useConnectionStore()
 const dialogs = useDialogsStore()
 const layout = useLayoutStore()
 const mcp = useMcpStore()
@@ -58,6 +60,18 @@ function open(id: string): void {
 function close(id: string): void {
   if (isWorkingSession(workspace.infoOf(id))) dialogs.open({ kind: 'closeSession', sessionId: id })
   else report(workspace.closeSession(id))
+}
+
+function reloadConfig(): void {
+  if (commands.find('reload')) {
+    report(commands.run('reload'))
+    return
+  }
+  report(
+    connection.reloadConfig(workspace.effectiveCwd).then(() => {
+      notices.push('info', t('command.reload.done'))
+    }),
+  )
 }
 </script>
 
@@ -159,15 +173,35 @@ function close(id: string): void {
           <McpDots :servers="mcp.servers" />
         </button>
         <span v-else class="mcp-space" />
-        <button
-          type="button"
-          class="icon-button"
-          :aria-label="t('sidebar.settings')"
-          :title="t('sidebar.settings')"
-          @click="report(commands.run('settings'))"
-        >
-          <Icon icon="sliders-20" />
-        </button>
+        <div class="footer-actions">
+          <button
+            type="button"
+            class="icon-button"
+            :aria-label="t('sidebar.config')"
+            :title="t('sidebar.config')"
+            @click="dialogs.open({ kind: 'config' })"
+          >
+            <Icon icon="file-text-16" />
+          </button>
+          <button
+            type="button"
+            class="icon-button"
+            :aria-label="t('sidebar.reloadConfig')"
+            :title="t('sidebar.reloadConfig')"
+            @click="reloadConfig"
+          >
+            <Icon icon="retry-16" />
+          </button>
+          <button
+            type="button"
+            class="icon-button"
+            :aria-label="t('sidebar.settings')"
+            :title="t('sidebar.settings')"
+            @click="report(commands.run('settings'))"
+          >
+            <Icon icon="sliders-20" />
+          </button>
+        </div>
       </footer>
     </div>
   </aside>
@@ -445,5 +479,10 @@ function close(id: string): void {
 
 .mcp:hover {
   color: var(--text);
+}
+.footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 </style>

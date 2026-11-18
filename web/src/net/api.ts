@@ -2,6 +2,7 @@
 // crates/proto/fixtures/server_frame/response_*.json.
 
 import type {
+  ConfigFilesInfo,
   ImageData,
   McpServerStatus,
   Message,
@@ -22,8 +23,62 @@ export class RefApi {
     this.connection = connection
   }
 
-  async getConfig(): Promise<ServerConfigInfo> {
-    return this.call({ op: 'get_config' }, 'config')
+  async getConfig(cwd?: string): Promise<ServerConfigInfo> {
+    return this.call({ op: 'get_config', ...(cwd !== undefined ? { cwd } : {}) }, 'config')
+  }
+
+  async reloadConfig(cwd?: string): Promise<{ config: ServerConfigInfo; warnings: string[] }> {
+    return this.callWhole({ op: 'reload_config', ...(cwd !== undefined ? { cwd } : {}) })
+  }
+
+  async getConfigFiles(file?: string, cwd?: string): Promise<ConfigFilesInfo> {
+    return this.callWhole({
+      op: 'get_config_files',
+      ...(file !== undefined ? { file } : {}),
+      ...(cwd !== undefined ? { cwd } : {}),
+    })
+  }
+
+  async saveConfigFile(file: string, content: string, cwd?: string): Promise<ConfigFilesInfo> {
+    return this.callWhole({
+      op: 'save_config_file',
+      file,
+      content,
+      ...(cwd !== undefined ? { cwd } : {}),
+    })
+  }
+
+  async createConfigFile(
+    options: {
+      label?: string
+      cloneCurrent?: boolean
+      content?: string
+      cwd?: string
+    } = {},
+  ): Promise<ConfigFilesInfo> {
+    return this.callWhole({
+      op: 'create_config_file',
+      ...(options.label !== undefined ? { label: options.label } : {}),
+      clone_current: options.cloneCurrent ?? true,
+      ...(options.content !== undefined ? { content: options.content } : {}),
+      ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+    })
+  }
+
+  async selectConfigFile(file: string, cwd?: string): Promise<ConfigFilesInfo> {
+    return this.callWhole({
+      op: 'select_config_file',
+      file,
+      ...(cwd !== undefined ? { cwd } : {}),
+    })
+  }
+
+  async deleteConfigFile(file: string, cwd?: string): Promise<ConfigFilesInfo> {
+    return this.callWhole({
+      op: 'delete_config_file',
+      file,
+      ...(cwd !== undefined ? { cwd } : {}),
+    })
   }
 
   async listSessions(): Promise<SessionInfo[]> {
@@ -89,9 +144,21 @@ export class RefApi {
     return this.call({ op: 'mcp_status', cwd: cwd ?? null }, 'servers')
   }
 
-  // Sub-directory names of `path`, sorted. `path` comes back absolute and normalized.
-  async listDirs(path: string): Promise<{ path: string; dirs: string[] }> {
-    return this.callWhole({ op: 'list_dirs', path })
+  // Sub-directory (and optional file) names of `path`, sorted. `path` comes back absolute and normalized.
+  async listDirs(
+    path: string,
+    options: { cwd?: string; includeFiles?: boolean } = {},
+  ): Promise<{ path: string; dirs: string[]; files: string[] }> {
+    return this.callWhole({
+      op: 'list_dirs',
+      path,
+      ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+      include_files: options.includeFiles ?? false,
+    })
+  }
+
+  async listBinaries(query: string, limit?: number): Promise<string[]> {
+    return this.call({ op: 'list_binaries', query, ...(limit !== undefined ? { limit } : {}) }, 'binaries')
   }
 
   async shutdown(): Promise<void> {

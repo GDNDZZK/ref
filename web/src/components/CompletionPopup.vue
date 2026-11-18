@@ -86,18 +86,19 @@ function splitPath(path: string): [string, string] {
           @mousemove="onRowHover(index, $event)"
           @mousedown.prevent="emit('pick', index)"
         >
-          <template v-if="completion.kind === 'slash'">
-            <Icon icon="slash-16" class="muted" />
-            <span class="label">{{ item.label }}</span>
-            <span class="description muted">{{ item.description }}</span>
-          </template>
-          <template v-else>
+          <template v-if="completion.kind === 'file' || completion.kind === 'path'">
             <Icon :icon="item.label.endsWith('/') ? 'folder-16' : 'file-16'" class="muted" />
             <span class="path">
               <span v-if="splitPath(item.label)[0]" class="path-dir muted"
                 ><bdi>{{ splitPath(item.label)[0] }}</bdi></span
               ><span class="path-name">{{ splitPath(item.label)[1] }}</span>
             </span>
+            <span v-if="item.description" class="description muted">{{ item.description }}</span>
+          </template>
+          <template v-else>
+            <Icon :icon="item.icon ?? 'slash-16'" class="muted" />
+            <span class="label">{{ item.label }}</span>
+            <span class="description muted">{{ item.description }}</span>
           </template>
         </div>
       </div>

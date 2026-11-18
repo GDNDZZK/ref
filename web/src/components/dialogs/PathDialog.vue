@@ -25,6 +25,9 @@ const dialogs = useDialogsStore()
 const notices = useNoticesStore()
 const workspace = useWorkspaceStore()
 const startPath = (props.sessionId ? workspace.infoOf(props.sessionId)?.cwd : undefined) ?? workspace.cwd
+const sessionCwd = computed(() =>
+  props.mode === 'cd' && props.sessionId ? workspace.infoOf(props.sessionId)?.cwd : undefined,
+)
 const path = ref(startPath)
 const dirs = ref<string[]>([])
 const field = useTemplateRef<InstanceType<typeof TextField>>('field')
@@ -60,14 +63,18 @@ watch(
   () => split.value.folder,
   (folder) => {
     clearTimeout(lookup)
-    if (folder === '') {
+    if (folder === '' && !sessionCwd.value) {
       dirs.value = []
       return
     }
     lookup = setTimeout(async () => {
       const mine = ++lookedUp
       try {
-        const result = await workspace.listDirs(folder)
+        const queryFolder = folder || '.'
+        const result = await workspace.listDirs(
+          queryFolder,
+          sessionCwd.value ? { cwd: sessionCwd.value } : undefined,
+        )
         if (mine === lookedUp) dirs.value = result.dirs
       } catch (err) {
         if (mine !== lookedUp) return

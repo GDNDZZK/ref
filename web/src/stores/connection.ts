@@ -9,7 +9,7 @@ import { channelTransport } from '../net/channel.ts'
 import { keys } from '../net/keystore.ts'
 import { directServerUrl, webSocket, webSocketTransport } from '../net/transport.ts'
 import { PROTOCOL_VERSION } from '../proto/generated'
-import type { ServerConfigInfo } from '../proto/generated'
+import type { ConfigFilesInfo, ServerConfigInfo } from '../proto/generated'
 import { useNoticesStore } from './notices.ts'
 import { useSettingsStore } from './settings.ts'
 
@@ -34,6 +34,9 @@ export const useConnectionStore = defineStore('connection', () => {
   let api: RefApi | undefined
   let opened = false
 
+  let reloadingCount = 0
+  let mutatingCount = 0
+  let sawConfigChangedDuringMutation = false
   let address: { url: string; cwd: string | undefined } | undefined
   let keyOutcome: ((accepted: boolean) => void) | undefined
 
@@ -101,8 +104,89 @@ export const useConnectionStore = defineStore('connection', () => {
     })
   }
 
-  async function loadConfig(): Promise<void> {
-    config.value = await getApi().getConfig()
+  function pushWarnings(warnings: readonly string[]): void {
+    for (const warning of warnings) notices.push('warn', warning)
+  }
+
+  async function loadConfig(cwd?: string, options?: { silentWarnings?: boolean }): Promise<ServerConfigInfo> {
+    const loaded = await getApi().getConfig(cwd)
+    config.value = loaded
+    if (!options?.silentWarnings) pushWarnings(loaded.warnings)
+    return loaded
+  }
+
+  async function reloadConfig(cwd?: string): Promise<{ config: ServerConfigInfo; warnings: string[] }> {
+    reloadingCount++
+    try {
+      const result = await getApi().reloadConfig(cwd)
+      config.value = result.config
+      pushWarnings(result.warnings)
+      return result
+    } finally {
+      reloadingCount--
+    }
+  }
+
+  // Classifies an incoming `config_changed` broadcast so local reloads/mutations never toast twice.
+  function noteConfigChanged(): 'ignored' | 'mutating' | 'external' {
+    if (reloadingCount > 0) return 'ignored'
+    if (mutatingCount > 0) {
+      sawConfigChangedDuringMutation = true
+      return 'mutating'
+    }
+    return 'external'
+  }
+
+  async function mutateConfigFile(
+    cwd: string | undefined,
+    touchesActive: boolean,
+    action: (client: RefApi) => Promise<ConfigFilesInfo>,
+  ): Promise<ConfigFilesInfo> {
+    mutatingCount++
+    try {
+      const info = await action(getApi())
+      pushWarnings(info.warnings)
+      const shouldRefresh = (sawConfigChangedDuringMutation || touchesActive) && mutatingCount === 1
+      if (shouldRefresh) {
+        sawConfigChangedDuringMutation = false
+        await loadConfig(cwd, { silentWarnings: true })
+      }
+      return info
+    } finally {
+      mutatingCount--
+      if (mutatingCount === 0) sawConfigChangedDuringMutation = false
+    }
+  }
+
+  function getConfigFiles(file?: string, cwd?: string): Promise<ConfigFilesInfo> {
+    return getApi().getConfigFiles(file, cwd)
+  }
+
+  function saveConfigFile(file: string, content: string, cwd?: string): Promise<ConfigFilesInfo> {
+    return mutateConfigFile(cwd, file === 'ref.json', (client) => client.saveConfigFile(file, content, cwd))
+  }
+
+  function createConfigFile(
+    options: {
+      label?: string
+      cloneCurrent?: boolean
+      content?: string
+      cwd?: string
+    } = {},
+  ): Promise<ConfigFilesInfo> {
+    return mutateConfigFile(options.cwd, true, (client) => client.createConfigFile(options))
+  }
+
+  function selectConfigFile(file: string, cwd?: string): Promise<ConfigFilesInfo> {
+    return mutateConfigFile(cwd, true, (client) => client.selectConfigFile(file, cwd))
+  }
+
+  function deleteConfigFile(file: string, cwd?: string): Promise<ConfigFilesInfo> {
+    return mutateConfigFile(cwd, file === 'ref.json', (client) => client.deleteConfigFile(file, cwd))
+  }
+
+  function listBinaries(query: string, limit?: number): Promise<string[]> {
+    return getApi().listBinaries(query, limit)
   }
 
   function getApi(): RefApi {
@@ -142,6 +226,14 @@ export const useConnectionStore = defineStore('connection', () => {
     submitKey,
     stop,
     loadConfig,
+    reloadConfig,
+    noteConfigChanged,
+    getConfigFiles,
+    saveConfigFile,
+    createConfigFile,
+    selectConfigFile,
+    deleteConfigFile,
+    listBinaries,
     getApi,
     shutdownServer,
     onFrame,

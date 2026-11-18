@@ -8,7 +8,7 @@ import { reactive, ref } from 'vue'
 import type { RefApi } from '../net/api.ts'
 import type { NamedImage, ToastLevel } from '../proto/generated'
 import { CompletionController, SLASH_PREFIX } from './completion.ts'
-import type { SlashCommand } from './completion.ts'
+import type { AgentChoice, ModelChoice, SessionChoice, SlashCommand } from './completion.ts'
 import {
   attachImage,
   clearDraft,
@@ -24,7 +24,8 @@ import { HistoryBrowser } from './history.ts'
 import type { PromptHistory } from './history.ts'
 import { readImage, rejectionOf } from './images.ts'
 
-export type ComposerApi = Pick<RefApi, 'prompt' | 'shell' | 'removeQueued' | 'listFiles' | 'expandCommand'>
+export type ComposerApi = Pick<RefApi, 'prompt' | 'shell' | 'removeQueued' | 'listFiles' | 'expandCommand'> &
+  Partial<Pick<RefApi, 'listDirs' | 'listBinaries'>>
 
 export interface ComposerHost {
   sessionId: string
@@ -34,6 +35,11 @@ export interface ComposerHost {
   isBusy(): boolean
   hasDelayedTool(): boolean // the last tool call waits out its delay: one Esc cancels it
   slashCommands(): readonly SlashCommand[]
+  models?(): readonly ModelChoice[]
+  agents?(): readonly AgentChoice[]
+  variants?(): readonly string[]
+  sessions?(): readonly SessionChoice[]
+  liveSessions?(): readonly SessionChoice[]
   runSlash(line: string): Promise<void> // a built-in command, e.g. "/rename Work"
   abort(): Promise<void> // stops the running turn
   toast(level: ToastLevel, messageKey: string, params?: Record<string, string>): void
@@ -44,7 +50,49 @@ export const INTERRUPT_ARMED_MS = 1500
 const SHELL_PREFIX = '!'
 const FILE_LIMIT = 20
 const MIN_CHARS_TO_KEEP = 20 // a cleared text this long is kept in the history
+const SINGLE_SLASH_TOKEN = /^\/([A-Za-z][A-Za-z0-9_-]*)$/
 
+function damerauDistance(a: string, b: string): number {
+  const m = a.length
+  const n = b.length
+  let prev = Array.from({ length: n + 1 }, (_, j) => j)
+  let prevPrev: number[] | undefined
+
+  for (let i = 1; i <= m; i++) {
+    const curr = [i]
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      let best = Math.min(prev[j]! + 1, curr[j - 1]! + 1, prev[j - 1]! + cost)
+      if (prevPrev !== undefined && i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        best = Math.min(best, prevPrev[j - 2]! + 1)
+      }
+      curr.push(best)
+    }
+    prevPrev = prev
+    prev = curr
+  }
+  return prev[n]!
+}
+
+export function suggestSlashCommand(typed: string, commands: readonly SlashCommand[]): string | undefined {
+  const target = typed.toLowerCase()
+  let maxDist = 3
+  if (target.length <= 3) maxDist = 1
+  else if (target.length <= 6) maxDist = 2
+
+  let best: { score: number; name: string } | undefined
+  for (const command of commands) {
+    for (const candidate of [command.name, ...command.aliases]) {
+      const lower = candidate.toLowerCase()
+      const isPrefix = target.length >= 2 && lower.startsWith(target) && lower.length - target.length <= 6
+      const dist = damerauDistance(target, lower)
+      if (!isPrefix && dist > maxDist) continue
+      const score = isPrefix ? 0.5 + (lower.length - target.length) * 0.05 : dist
+      if (!best || score < best.score) best = { score, name: candidate }
+    }
+  }
+  return best?.name
+}
 export class SessionComposer {
   readonly draft: Draft = reactive(emptyDraft())
   readonly interruptArmed = ref(false) // Esc was pressed once; a second one within INTERRUPT_ARMED_MS aborts
@@ -62,8 +110,24 @@ export class SessionComposer {
     this.host = host
     this.browser = new HistoryBrowser(host.history.history)
     this.completionController = new CompletionController({
+      sessionId: host.sessionId,
+      cwd: () => host.cwd(),
       commands: () => host.slashCommands(),
       listFiles: (query) => host.api().listFiles(host.cwd(), query, FILE_LIMIT),
+      listDirs: (path, options) => {
+        const fn = host.api().listDirs
+        return fn ? fn(path, options) : Promise.resolve({ path, dirs: [], files: [] })
+      },
+      listBinaries: (query, limit) => {
+        const fn = host.api().listBinaries
+        return fn ? fn(query, limit) : Promise.resolve([])
+      },
+      models: () => host.models?.() ?? [],
+      agents: () => host.agents?.() ?? [],
+      variants: () => host.variants?.() ?? [],
+      sessions: () => host.sessions?.() ?? [],
+      liveSessions: () => host.liveSessions?.() ?? [],
+      shellHistory: () => host.history.history.entries,
       reportError: (error) => host.reportError(error),
     })
     this.stopListening = onDraftRestored((sessionId, text, images) => {
@@ -114,18 +178,24 @@ export class SessionComposer {
   // `!` typed into an empty box switches to shell mode; Backspace on the empty box leaves it.
   enterShell(): void {
     this.draft.shell = true
+    this.browser.reset()
     this.completionController.close()
   }
 
   leaveShell(): void {
     this.draft.shell = false
+    this.browser.reset()
+    this.completionController.close()
   }
 
   // --- history --------------------------------------------------------------------------
 
   // ↑ with the caret at the start (or in an empty box). Returns the new caret when it acted.
   historyPrev(): number | undefined {
-    const entry = this.browser.prev(this.draft.shell ? SHELL_PREFIX + this.draft.text : this.draft.text)
+    const isShell = this.draft.shell
+    const current = isShell ? SHELL_PREFIX + this.draft.text : this.draft.text
+    const filter = isShell ? (entry: string) => entry.startsWith(SHELL_PREFIX) : undefined
+    const entry = this.browser.prev(current, filter)
     return entry === undefined ? undefined : this.showHistoryEntry(entry)
   }
 
@@ -158,7 +228,7 @@ export class SessionComposer {
     this.completionController.select(index)
   }
 
-  // Tab inserts the choice; Enter (`run`) also runs a command that needs no arguments.
+  // Tab inserts the choice; Enter (`run`) also runs a command that needs no arguments (or enum arg).
   // Returns the new caret when the text changed.
   acceptCompletion(run: boolean): number | undefined {
     const completion = this.completionController.completion
@@ -166,15 +236,23 @@ export class SessionComposer {
     if (!completion || !item) return undefined
     this.completionController.close()
 
-    if (completion.kind === 'file') {
-      const text = this.draft.text
-      const replaced = text.slice(0, completion.start) + item.value + text.slice(this.cursor)
-      this.cursor = completion.start + item.value.length
-      this.draft.text = replaced
-      this.completionController.update(replaced, this.cursor, this.draft.shell, true)
-      return this.cursor
+    if (completion.kind === 'slash') {
+      return this.acceptCommand(item.value, run)
     }
-    return this.acceptCommand(item.value, run)
+
+    const text = this.draft.text
+    const end = completion.end ?? this.cursor
+    const replaced = text.slice(0, completion.start) + item.value + text.slice(end)
+    this.cursor = completion.start + item.value.length
+    this.draft.text = replaced
+
+    if (run && completion.commitOnEnter) {
+      void this.submit()
+      return undefined
+    }
+
+    this.completionController.update(replaced, this.cursor, this.draft.shell, true)
+    return this.cursor
   }
 
   private acceptCommand(value: string, run: boolean): number | undefined {
@@ -182,9 +260,11 @@ export class SessionComposer {
     const commands = this.host.slashCommands()
     const takesArgs = commands.find((command) => command.name === name)?.takesArgs ?? true
 
-    const typed = this.draft.text.trim().replace(/^\/+/, '')
-    const typedCommand = commands.find((c) => c.name === typed || c.aliases.includes(typed))
-    const typedFully = (typedCommand?.name ?? typed) === name
+    const typed = this.draft.text.trim().replace(/^\/+/, '').toLowerCase()
+    const typedCommand = commands.find(
+      (c) => c.name.toLowerCase() === typed || c.aliases.some((alias) => alias.toLowerCase() === typed),
+    )
+    const typedFully = (typedCommand?.name ?? typed).toLowerCase() === name.toLowerCase()
     if (run && takesArgs && typedFully) {
       this.draft.text = `${SLASH_PREFIX}${name}`
       void this.submit()
@@ -207,7 +287,11 @@ export class SessionComposer {
     const typed = words[0].toLowerCase()
     return this.host
       .slashCommands()
-      .find((command) => command.name === typed || command.aliases.includes(typed))
+      .find(
+        (command) =>
+          command.name.toLowerCase() === typed ||
+          command.aliases.some((alias) => alias.toLowerCase() === typed),
+      )
   }
 
   private async runCommand(command: SlashCommand, line: string): Promise<void> {
@@ -247,11 +331,28 @@ export class SessionComposer {
     const trimmed = draft.text.trim()
     if (trimmed === '' && draft.attachments.length === 0) return
     this.completionController.close()
+    this.completionController.invalidateDirs()
     this.browser.reset()
 
     if (draft.shell) return this.submitShell(trimmed)
     const command = this.commandIn(trimmed)
-    if (!command) return this.submitPrompt()
+    if (!command) {
+      const singleSlash = SINGLE_SLASH_TOKEN.exec(trimmed)
+      if (singleSlash && draft.attachments.length === 0) {
+        const unknownName = singleSlash[1]!
+        const suggestion = suggestSlashCommand(unknownName, this.host.slashCommands())
+        if (suggestion) {
+          this.host.toast('warn', 'composer.toast.unknownCommandSuggest', {
+            name: unknownName,
+            suggestion,
+          })
+        } else {
+          this.host.toast('warn', 'composer.toast.unknownCommand', { name: unknownName })
+        }
+        return
+      }
+      return this.submitPrompt()
+    }
 
     this.host.history.push(trimmed)
     clearDraft(draft)
