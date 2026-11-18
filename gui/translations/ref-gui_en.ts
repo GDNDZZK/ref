@@ -19,6 +19,7 @@
         <location filename="../src/app/DiffBody.qml" line="75"/>
         <source>Show %n more line(s)</source>
         <translation>
+            <numerusform>Show %n more line</numerusform>
             <numerusform>Show %n more lines</numerusform>
         </translation>
     </message>
@@ -59,7 +60,7 @@
 <context>
     <name>LineView</name>
     <message numerus="yes">
-        <location filename="../src/app/LineView.qml" line="23"/>
+        <location filename="../src/app/LineView.qml" line="24"/>
         <location filename="../tests/tst_app_translator.cpp" line="21"/>
         <source>Show %n more line(s)</source>
         <translation>

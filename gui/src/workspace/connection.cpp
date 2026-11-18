@@ -62,6 +62,10 @@ void Connection::onFrame(const proto::ServerFrame& frame)
 	{
 		emit toastReceived(*toast);
 	}
+	else if(const auto* changed = std::get_if<proto::ConfigChangedFrame>(&frame))
+	{
+		emit configChangedReceived(changed->warnings);
+	}
 }
 
 } // namespace refgui::workspace

@@ -195,6 +195,17 @@ QCoro::Task<SessionController::Result<QStringList>> SessionController::listFiles
 	co_return co_await m_backend.client().listFiles(m_info.cwd, std::move(query), limit);
 }
 
+QCoro::Task<SessionController::Result<proto::DirListing>> SessionController::listDirs(QString path, bool includeFiles)
+{
+	const std::optional<QString> cwd = m_info.cwd.isEmpty() ? std::nullopt : std::optional<QString>(m_info.cwd);
+	co_return co_await m_backend.client().listDirs(std::move(path), cwd, includeFiles);
+}
+
+QCoro::Task<SessionController::Result<QStringList>> SessionController::listBinaries(QString query, int limit)
+{
+	co_return co_await m_backend.client().listBinaries(std::move(query), limit);
+}
+
 QCoro::Task<SessionController::Result<QString>> SessionController::expandCommand(QString name, QString args)
 {
 	co_return co_await m_backend.client().expandCommand(std::move(name), std::move(args), m_info.cwd);

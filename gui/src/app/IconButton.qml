@@ -9,6 +9,7 @@ CircleButton {
 	property int iconSize: 20
 	property color iconColor: Theme.textMuted
 	property int buttonSize: Theme.buttonHeight
+	property string tooltipText: ""
 
 	implicitWidth: buttonSize
 	implicitHeight: buttonSize
@@ -18,5 +19,11 @@ CircleButton {
 		name: iconButton.iconName
 		size: iconButton.iconSize
 		color: iconButton.iconColor
+	}
+
+	PlainToolTip {
+		visible: iconButton.hovered && iconButton.tooltipText !== ""
+		text: iconButton.tooltipText
+		delay: 400
 	}
 }

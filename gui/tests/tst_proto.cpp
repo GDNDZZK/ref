@@ -94,6 +94,14 @@ void checkResponseResult(const QString& name, const QJsonObject& result)
 	{
 		QVERIFY(parseConfigResult(result));
 	}
+	else if(name == u"response_reload_config")
+	{
+		QVERIFY(parseReloadConfigResult(result));
+	}
+	else if(name == u"response_get_config_files")
+	{
+		QVERIFY(parseConfigFilesResult(result));
+	}
 	else if(name == u"response_mcp_status")
 	{
 		QVERIFY(parseMcpResult(result));
@@ -101,6 +109,10 @@ void checkResponseResult(const QString& name, const QJsonObject& result)
 	else if(name == u"response_list_dirs")
 	{
 		QVERIFY(parseDirsResult(result));
+	}
+	else if(name == u"response_list_binaries")
+	{
+		QVERIFY(parseBinariesResult(result));
 	}
 	else if(name == u"response_peer_command" || name == u"response_expand_command")
 	{
@@ -200,7 +212,8 @@ private slots:
 		         withoutId(u"question_reply"_s));
 		QCOMPARE(request::questionReply(u"ses_a1b2c3d4"_s, u"call_9x8y7z"_s, std::nullopt), withoutId(u"question_reply_dismiss"_s));
 
-		QCOMPARE(request::getConfig(), withoutId(u"get_config"_s));
+		QCOMPARE(request::getConfig(u"/home/user/project"_s), withoutId(u"get_config"_s));
+		QVERIFY(!request::getConfig().contains(u"cwd"_s));
 		QCOMPARE(request::watchAll(true), withoutId(u"watch_all"_s));
 		QCOMPARE(request::setAgent(u"ses_a1b2c3d4"_s, u"plan"_s), withoutId(u"set_agent"_s));
 		QCOMPARE(request::setVariant(u"ses_a1b2c3d4"_s, u"low"_s), withoutId(u"set_variant"_s));
@@ -212,7 +225,21 @@ private slots:
 		QCOMPARE(request::exportTranscript(u"ses_a1b2c3d4"_s, u"/tmp/parser-fix.md"_s), withoutId(u"export"_s));
 		QCOMPARE(request::peerCommand(u"ses_a1b2c3d4"_s, u"peers"_s, QString()), withoutId(u"peer_command"_s));
 		QCOMPARE(request::mcpStatus(u"/home/user/project"_s), withoutId(u"mcp_status"_s));
-		QCOMPARE(request::listDirs(u"~/pro"_s), withoutId(u"list_dirs"_s));
+		QCOMPARE(request::listDirs(u"~/pro"_s, u"/home/user/project"_s, true), withoutId(u"list_dirs"_s));
+		QVERIFY(!request::listDirs(u"~/pro"_s).contains(u"cwd"_s));
+		QCOMPARE(request::listDirs(u"~/pro"_s).value(u"include_files"_s).toBool(), false);
+		QCOMPARE(request::reloadConfig(u"/home/user/project"_s), withoutId(u"reload_config"_s));
+		QVERIFY(!request::reloadConfig().contains(u"cwd"_s));
+		QCOMPARE(request::getConfigFiles(std::nullopt, u"/home/user/project"_s), withoutId(u"get_config_files"_s));
+		QVERIFY(!request::getConfigFiles().contains(u"file"_s));
+		QVERIFY(!request::getConfigFiles().contains(u"cwd"_s));
+		QCOMPARE(request::saveConfigFile(u"ref.json"_s, u"{\n  \"$name\": \"Work\",\n  \"model\": \"anthropic/claude-sonnet-4\"\n}\n"_s, u"/home/user/project"_s),
+		         withoutId(u"save_config_file"_s));
+		QCOMPARE(request::createConfigFile(u"Experiment"_s, true, std::nullopt, u"/home/user/project"_s), withoutId(u"create_config_file"_s));
+		QCOMPARE(request::selectConfigFile(u"ref.json.1.bak"_s, u"/home/user/project"_s), withoutId(u"select_config_file"_s));
+		QCOMPARE(request::deleteConfigFile(u"ref.json.1.bak"_s, u"/home/user/project"_s), withoutId(u"delete_config_file"_s));
+		QCOMPARE(request::listBinaries(u"car"_s, 20), withoutId(u"list_binaries"_s));
+		QVERIFY(!request::listBinaries(u"car"_s).contains(u"limit"_s));
 		QCOMPARE(request::shutdown(), withoutId(u"shutdown"_s));
 		QCOMPARE(request::ping(), withoutId(u"ping"_s));
 		QCOMPARE(request::setModel(u"ses_a1b2c3d4"_s, {.provider = u"anthropic"_s, .model = u"claude-sonnet-4"_s, .variant = u"high"_s}),
@@ -242,6 +269,47 @@ private slots:
 		QCOMPARE(config.models.first().variants, (QStringList{u"low"_s, u"medium"_s, u"high"_s}));
 		QCOMPARE(config.commands.first().source, u"config"_s);
 		QVERIFY(!config.mcp.isEmpty());
+		QVERIFY(config.warnings.isEmpty());
+	}
+
+	void v5ConfigAndCompletionFixtures()
+	{
+		const auto changedFrame = parsedOrFail(parseServerFrame(fixtureObject(u"server_frame"_s, u"config_changed"_s)));
+		const auto& changed = std::get<ConfigChangedFrame>(changedFrame);
+		QCOMPARE(changed.warnings, (QStringList{u"default_agent \"custom\" not found"_s}));
+
+		const QJsonObject reloadFrame = fixtureObject(u"server_frame"_s, u"response_reload_config"_s);
+		const ReloadConfigResult reload = parsedOrFail(parseReloadConfigResult(reloadFrame.value(u"result"_s).toObject()));
+		QCOMPARE(reload.config.defaultAgent, u"build"_s);
+		QVERIFY(reload.warnings.isEmpty());
+
+		const QJsonObject filesFrame = fixtureObject(u"server_frame"_s, u"response_get_config_files"_s);
+		const ConfigFilesInfo files = parsedOrFail(parseConfigFilesResult(filesFrame.value(u"result"_s).toObject()));
+		QCOMPARE(files.configDir, u"/home/user/.config/ref"_s);
+		QCOMPARE(files.selectedFile, u"ref.json"_s);
+		QCOMPARE(files.files.size(), 2);
+		QVERIFY(files.files.at(0).active);
+		QVERIFY(files.files.at(0).exists);
+		QCOMPARE(files.files.at(0).label, u"Work"_s);
+		QVERIFY(!files.files.at(1).active);
+		QVERIFY(!files.files.at(1).label.has_value());
+		QVERIFY(files.parsed.isObject());
+		QVERIFY(!files.parseError.has_value());
+		QCOMPARE(files.envStatus.value(u"ANTHROPIC_API_KEY"_s), true);
+		QVERIFY(!files.hasJsoncOverride);
+		QVERIFY(!files.envConfigOverride.has_value());
+		QCOMPARE(files.projectOverrides, (QStringList{u"/home/user/project/.ref/ref.json"_s}));
+		QVERIFY(files.warnings.isEmpty());
+
+		const QJsonObject dirsFrame = fixtureObject(u"server_frame"_s, u"response_list_dirs"_s);
+		const DirListing dirs = parsedOrFail(parseDirsResult(dirsFrame.value(u"result"_s).toObject()));
+		QCOMPARE(dirs.path, u"/home/user/project"_s);
+		QCOMPARE(dirs.dirs, (QStringList{u"benches"_s, u"crates"_s, u"docs"_s}));
+		QCOMPARE(dirs.files, (QStringList{u"Cargo.toml"_s, u"README.md"_s}));
+
+		const QJsonObject binsFrame = fixtureObject(u"server_frame"_s, u"response_list_binaries"_s);
+		const QStringList bins = parsedOrFail(parseBinariesResult(binsFrame.value(u"result"_s).toObject()));
+		QCOMPARE(bins, (QStringList{u"cargo"_s, u"cargo-clippy"_s, u"cargo-fmt"_s}));
 	}
 
 	void malformedConfigIsAnError()

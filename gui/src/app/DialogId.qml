@@ -5,6 +5,7 @@ import QtQuick
 QtObject {
 	readonly property string palette: "palette"
 	readonly property string settings: "settings"
+	readonly property string config: "config"
 	readonly property string sessions: "sessions"
 	readonly property string models: "models"
 	readonly property string agents: "agents"

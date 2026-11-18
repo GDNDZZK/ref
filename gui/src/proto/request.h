@@ -33,7 +33,7 @@ QJsonObject abort(const QString& sessionId);
 QJsonObject permissionReply(const QString& sessionId, const QString& callId, bool allow, bool always);
 // One list of answers per question; none dismisses the questions.
 QJsonObject questionReply(const QString& sessionId, const QString& callId, const std::optional<QList<QStringList>>& answers);
-QJsonObject getConfig();
+QJsonObject getConfig(const std::optional<QString>& cwd = {});
 QJsonObject watchAll(bool enabled);
 QJsonObject setModel(const QString& sessionId, const ModelRef& model);
 QJsonObject setAgent(const QString& sessionId, const QString& agent);
@@ -47,7 +47,17 @@ QJsonObject deleteSession(const QString& sessionId);
 QJsonObject exportTranscript(const QString& sessionId, const QString& path);
 QJsonObject peerCommand(const QString& sessionId, const QString& command, const QString& args);
 QJsonObject mcpStatus(const std::optional<QString>& cwd);
-QJsonObject listDirs(const QString& path);
+QJsonObject listDirs(const QString& path, const std::optional<QString>& cwd = {}, bool includeFiles = false);
+QJsonObject reloadConfig(const std::optional<QString>& cwd = {});
+QJsonObject getConfigFiles(const std::optional<QString>& file = {}, const std::optional<QString>& cwd = {});
+QJsonObject saveConfigFile(const QString& file, const QString& content, const std::optional<QString>& cwd = {});
+QJsonObject createConfigFile(const std::optional<QString>& label,
+                             bool cloneCurrent,
+                             const std::optional<QString>& content = {},
+                             const std::optional<QString>& cwd = {});
+QJsonObject selectConfigFile(const QString& file, const std::optional<QString>& cwd = {});
+QJsonObject deleteConfigFile(const QString& file, const std::optional<QString>& cwd = {});
+QJsonObject listBinaries(const QString& query, const std::optional<int>& limit = {});
 // A page of messages ending right before message `before`.
 QJsonObject messages(const QString& sessionId, const QString& before, int limit);
 // The bytes of an image the messages only name.

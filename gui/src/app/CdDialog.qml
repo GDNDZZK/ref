@@ -13,7 +13,7 @@ SessionDialog {
 	title: qsTr("Change directory")
 	onAccepted: apply()
 	Component.onCompleted: {
-		path.text = Workspace.info(sessionId).cwd
+		path.text = Workspace.info(sessionId).cwd ?? ""
 		path.select()
 	}
 
@@ -35,6 +35,7 @@ SessionDialog {
 		PathField {
 			id: path
 			width: parent.width
+			cwd: Workspace.info(dialog.sessionId).cwd ?? Workspace.effectiveCwd
 			placeholderText: qsTr("Directory")
 			onAccepted: dialog.apply()
 			onTextChanged: errorText = ""

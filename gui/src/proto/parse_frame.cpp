@@ -150,6 +150,20 @@ ServerFrame readServerFrame(const Fields& fields)
 	{
 		return readNotify(fields);
 	}
+	if(kind == "config_changed"_L1)
+	{
+		QStringList warnings;
+		const QJsonArray array = fields.arrayOrEmpty("warnings"_L1);
+		for(qsizetype i = 0; i < array.size(); ++i)
+		{
+			if(!array.at(i).isString())
+			{
+				fail(fields.childPath("warnings"_L1) + u"[%1]"_s.arg(i), u"expected a string"_s);
+			}
+			warnings.append(array.at(i).toString());
+		}
+		return ConfigChangedFrame{.warnings = std::move(warnings)};
+	}
 	failUnknown(fields.childPath("kind"_L1), u"unknown frame kind \"%1\""_s.arg(kind));
 }
 

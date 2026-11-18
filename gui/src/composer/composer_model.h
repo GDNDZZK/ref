@@ -5,6 +5,7 @@
 #include "compose/prompt_draft.h"
 #include "compose/prompt_history.h"
 #include "composer/attachment_model.h"
+#include "composer/completion_item_model.h"
 #include "composer/file_model.h"
 #include "composer/queue_model.h"
 #include "session/session_controller.h"
@@ -12,6 +13,7 @@
 
 #include <QCoroTask>
 #include <QObject>
+#include <QPointer>
 #include <QTimer>
 #include <QUrl>
 
@@ -19,12 +21,17 @@
 #include <functional>
 #include <optional>
 
+namespace refgui::workspace
+{
+class SessionDirectory;
+}
+
 namespace refgui::composer
 {
 
 // The input box of one session, apart from how it is drawn: the prompt being written with its
-// images, the `/` and `@` lists, the history behind Up and Down, the queued prompts, the labels
-// for agent, model and variant, and the actions Enter and Esc stand for.
+// images, the `/`, `@` and `!` completion lists, the history behind Up and Down, the queued
+// prompts, the labels for agent, model and variant, and the actions Enter and Esc stand for.
 //
 // The text area owns the editing; it tells this object what the text and the cursor are
 // (edit(), moveCursor()), and shows `text` and `cursor` again when draftReplaced() says they
@@ -43,7 +50,9 @@ class ComposerModel : public QObject
 	Q_PROPERTY(QAbstractItemModel* attachments READ attachments CONSTANT)
 	Q_PROPERTY(QAbstractItemModel* queue READ queue CONSTANT)
 	Q_PROPERTY(QAbstractItemModel* files READ files CONSTANT)
+	Q_PROPERTY(QAbstractItemModel* completions READ completions CONSTANT)
 	Q_PROPERTY(QString completionKind READ completionKind NOTIFY completionChanged)
+	Q_PROPERTY(QString completionCommand READ completionCommand NOTIFY completionChanged)
 	Q_PROPERTY(QString completionQuery READ completionQuery NOTIFY completionChanged)
 	Q_PROPERTY(bool interruptArmed READ isInterruptArmed NOTIFY interruptArmedChanged)
 	Q_PROPERTY(int interruptWindow READ interruptWindow WRITE setInterruptWindow NOTIFY interruptWindowChanged)
@@ -57,7 +66,13 @@ class ComposerModel : public QObject
 
 public:
 	// All of them outlive the model.
-	ComposerModel(const workspace::BackendConfig& config, session::SessionController& controller, compose::PromptHistory& history, QObject* parent = nullptr);
+	ComposerModel(const workspace::BackendConfig& config,
+	              session::SessionController& controller,
+	              compose::PromptHistory& history,
+	              QObject* parent = nullptr,
+	              const workspace::SessionDirectory* directory = nullptr);
+
+	void setSessionDirectory(const workspace::SessionDirectory* directory);
 
 	const QString& text() const { return m_draft.text(); }
 	int cursor() const { return static_cast<int>(m_draft.cursor()); }
@@ -68,8 +83,10 @@ public:
 	QAbstractItemModel* attachments() { return &m_attachments; }
 	QAbstractItemModel* queue() { return &m_queue; }
 	QAbstractItemModel* files() { return &m_files; }
-	// "none", "command" or "file": what the list under the input box is about.
+	QAbstractItemModel* completions() { return &m_completions; }
+	// "none", "command", "argument", "file", "shellCommand" or "shellPath".
 	QString completionKind() const;
+	QString completionCommand() const { return m_target.command; }
 	QString completionQuery() const { return m_target.query; }
 	bool isInterruptArmed() const { return m_interruptTimer.isActive(); }
 	int interruptWindow() const { return static_cast<int>(m_interruptTimer.interval()); }
@@ -94,7 +111,7 @@ public:
 	Q_INVOKABLE void moveCursor(int cursor);
 
 	// Sends the prompt (or runs the shell line in shell mode). False when there is nothing to
-	// send or the session is not ready.
+	// send, an unknown `/foo` command was blocked, or the session is not ready.
 	Q_INVOKABLE bool submit();
 	// The view ran the draft as a slash command: remember it and empty the draft.
 	Q_INVOKABLE void finishCommand();
@@ -115,9 +132,13 @@ public:
 	Q_INVOKABLE bool escape();
 	Q_INVOKABLE void leaveShell();
 
+	// Explicitly opens completions (e.g. Tab on an empty `!` shell prompt or after Esc dismissed it).
+	Q_INVOKABLE void triggerCompletion();
 	// The `@` list entry `row` replaces the mention being typed; the command replaces the text.
 	Q_INVOKABLE void acceptFile(int row);
 	Q_INVOKABLE void completeCommand(const QString& name);
+	// Accepts entry `row` from `completions`. Returns true when a completed slash argument should submit now.
+	Q_INVOKABLE bool acceptCompletionItem(int row, bool viaEnter = false);
 	// Closes the list until the text changes.
 	Q_INVOKABLE void dismissCompletion();
 
@@ -127,7 +148,6 @@ public:
 	// Dropped files: attaches images and inserts paths of other local files. Returns how many were handled.
 	Q_INVOKABLE int attachUrls(const QList<QUrl>& urls);
 	Q_INVOKABLE void removeAttachment(int row);
-
 
 public slots:
 	// Puts a prompt that was taken back (undo) into the draft.
@@ -156,13 +176,48 @@ signals:
 private:
 	// How long the typed `@` query rests before the files are asked for.
 	static constexpr std::chrono::milliseconds FileSearchDelay{80};
+	static constexpr std::chrono::milliseconds DirSearchDelay{60};
+	static constexpr std::chrono::milliseconds BinarySearchDelay{50};
 	static constexpr int FileLimit = 50;
+	static constexpr int BinaryLimit = 50;
+	static constexpr qsizetype MaxShellHistoryMatches = 10;
 	// A draft this long goes to the history when it is thrown away with Ctrl+C.
 	static constexpr qsizetype DiscardKeepLength = 20;
 	static constexpr int DefaultInterruptWindow = 1500;
 
+	struct DirCache
+	{
+		QString cwd{};
+		QString dir{};
+		bool includeFiles = false;
+		QStringList dirs{};
+		QStringList files{};
+		bool valid = false;
+	};
+
+	struct BinaryCache
+	{
+		QString query{};
+		QStringList binaries{};
+		bool valid = false;
+	};
+
 	bool isCompletionOpen() const;
+	bool hasVisibleCompletion() const;
 	void updateCompletion();
+	void cancelFileSearch();
+	void cancelDirSearch();
+	void cancelBinarySearch();
+	void updateArgCompletion();
+	void updatePathCompletion(bool includeFiles, bool isExport);
+	void updateShellCommandCompletion();
+	QList<CompletionEntry> buildPathEntries(const QString& typedPrefix,
+	                                        const QString& leafPrefix,
+	                                        const QStringList& dirs,
+	                                        const QStringList& files,
+	                                        bool includeFiles,
+	                                        bool isExport) const;
+	QList<CompletionEntry> buildShellCommandEntries(const QString& query, const QStringList& binaries) const;
 	// The draft was changed from here: the text area must show it.
 	void changeDraft();
 	// The draft was edited in the text area, which already shows it.
@@ -183,23 +238,38 @@ private:
 	QCoro::Task<> expandAndSend(QString name, QString args);
 	QCoro::Task<> removeQueued(QString messageId);
 	QCoro::Task<> findFiles(QString query, quint64 serial);
+	QCoro::Task<> findDirs(QString cwd, QString dir, bool includeFiles, quint64 serial);
+	QCoro::Task<> findBinaries(QString query, quint64 serial);
 	const proto::AgentInfo* agentInfo() const;
 	const proto::ModelInfo* modelInfo() const;
 
 	const workspace::BackendConfig& m_config;
 	session::SessionController& m_controller;
 	compose::PromptHistory& m_history;
+	QPointer<const workspace::SessionDirectory> m_directory;
 	compose::HistoryBrowser m_browser;
 	compose::PromptDraft m_draft;
 	bool m_shellMode = false;
+	bool m_forceShellEmpty = false;
 	compose::CompletionTarget m_target;
 	bool m_completionDismissed = false;
 	AttachmentModel m_attachments;
 	QueueModel m_queue;
 	FileModel m_files;
+	CompletionItemModel m_completions;
 	QTimer m_fileTimer;
 	std::optional<QString> m_fileQuery; // the query the list is for or is being fetched for
 	quint64 m_fileSerial = 0;
+	QTimer m_dirTimer;
+	std::optional<QString> m_dirKey;
+	QString m_pendingDir;
+	bool m_pendingIncludeFiles = false;
+	quint64 m_dirSerial = 0;
+	DirCache m_dirCache;
+	QTimer m_binTimer;
+	std::optional<QString> m_binQuery;
+	quint64 m_binSerial = 0;
+	BinaryCache m_binCache;
 	QTimer m_interruptTimer;
 };
 

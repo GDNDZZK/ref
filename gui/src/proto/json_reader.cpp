@@ -36,6 +36,16 @@ QString Fields::string(QLatin1StringView key) const
 	return found.toString();
 }
 
+bool Fields::boolean(QLatin1StringView key) const
+{
+	const QJsonValue found = m_object.value(key);
+	if(!found.isBool())
+	{
+		fail(childPath(key), u"expected a boolean"_s);
+	}
+	return found.toBool();
+}
+
 qint64 Fields::integer(QLatin1StringView key) const
 {
 	const QJsonValue found = m_object.value(key);

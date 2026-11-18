@@ -7,6 +7,7 @@
 #include "client/result.h"
 #include "workspace/backend_config.h"
 #include "workspace/command_registry.h"
+#include "workspace/config_editor_controller.h"
 #include "workspace/connection.h"
 #include "workspace/session_directory.h"
 #include "workspace/settings.h"
@@ -45,11 +46,13 @@ class Workspace : public QObject
 	Q_PROPERTY(QString connectionText READ connectionText NOTIFY connectionChanged)
 	Q_PROPERTY(QString failureText READ failureText NOTIFY failureTextChanged)
 	Q_PROPERTY(QString cwd READ cwd NOTIFY cwdChanged)
+	Q_PROPERTY(QString effectiveCwd READ effectiveCwd NOTIFY effectiveCwdChanged)
 	Q_PROPERTY(QStringList visibleSessionIds READ visibleSessionIds NOTIFY visibleSessionIdsChanged)
 	Q_PROPERTY(bool windowActive READ isWindowActive WRITE setWindowActive NOTIFY windowActiveChanged)
 	// What the backend offers and the session lists.
 	Q_PROPERTY(refgui::workspace::Settings* settings READ settings CONSTANT)
 	Q_PROPERTY(refgui::workspace::BackendConfig* config READ config CONSTANT)
+	Q_PROPERTY(refgui::workspace::ConfigEditorController* configEditor READ configEditor CONSTANT)
 	Q_PROPERTY(QVariantList mcpServers READ mcpServers NOTIFY mcpServersChanged)
 	Q_PROPERTY(refgui::workspace::SessionListModel* sessions READ sessions CONSTANT)
 	Q_PROPERTY(refgui::workspace::SessionListModel* history READ history CONSTANT)
@@ -99,6 +102,8 @@ public:
 	QString failureText() const { return m_failure; }
 	// The directory new sessions start in.
 	const QString& cwd() const { return m_cwd; }
+	// The active session's directory, or the window's cwd when no session is focused.
+	QString effectiveCwd() const;
 	// The sessions the user can see now: the current one, or every tile in split view.
 	QStringList visibleSessionIds() const;
 	// The window is in the foreground. Set by the window; the notification logic needs it with the above.
@@ -106,6 +111,7 @@ public:
 	void setWindowActive(bool active);
 
 	refgui::workspace::Settings* settings() { return &m_settings; }
+	refgui::workspace::ConfigEditorController* configEditor() { return &m_configEditor; }
 	refgui::workspace::BackendConfig* config() { return &m_config; }
 	refgui::workspace::CommandRegistry* commands() { return &m_commands; }
 	QVariantList mcpServers() const { return m_config.mcpServers(); }
@@ -149,16 +155,21 @@ public:
 	Q_INVOKABLE void setAgent(const QString& sessionId, const QString& agent);
 	// An empty variant rotates to the model's next one.
 	Q_INVOKABLE void setVariant(const QString& sessionId, const QString& variant = {});
+	// Back to the model's default (no variant).
+	Q_INVOKABLE void clearVariant(const QString& sessionId);
 	// The next (`direction` 1) or previous (-1) agent.
 	Q_INVOKABLE void cycleAgent(const QString& sessionId, int direction);
 	Q_INVOKABLE void compact(const QString& sessionId);
 	Q_INVOKABLE void exportTranscript(const QString& sessionId, const QString& path, const QJSValue& cb);
 	// `command` is peers, peers-name, peers-inbox or peers-outbox; `cb` gets the text to show.
 	Q_INVOKABLE void peerCommand(const QString& sessionId, const QString& command, const QString& args, const QJSValue& cb);
-	// The sub-directories of `path`; `cb` gets {path, dirs}.
-	Q_INVOKABLE void listDirs(const QString& path, const QJSValue& cb);
+	// The sub-directories (and optionally files) of `path`; `cb` gets {path, dirs, files}.
+	Q_INVOKABLE void listDirs(const QString& path, const QJSValue& cb, const QString& cwd = {}, bool includeFiles = false);
+	Q_INVOKABLE void reloadConfig(const QJSValue& cb = {});
 	Q_INVOKABLE void refreshMcp() { m_config.refreshMcp(); }
 	Q_INVOKABLE void refreshHistory() { m_directory.refreshHistory(); }
+	void beginLocalConfigMutation() { ++m_localMutationsInFlight; }
+	void endLocalConfigMutation() { --m_localMutationsInFlight; }
 
 	Q_INVOKABLE void toggleSplit();
 	Q_INVOKABLE void focusTile(const QString& sessionId);
@@ -187,6 +198,7 @@ signals:
 	void connectionChanged();
 	void failureTextChanged();
 	void cwdChanged();
+	void effectiveCwdChanged();
 	void visibleSessionIdsChanged();
 	void windowActiveChanged();
 	void mcpServersChanged();
@@ -225,6 +237,7 @@ private:
 	void handleGone(const QString& sessionId);
 	void setCurrent(ChatSession* session);
 	void setCwd(const QString& cwd);
+	void syncConfigCwd();
 	void updateHighlight();
 	void onLiveChanged();
 	void dropChat(const QString& sessionId);
@@ -250,6 +263,8 @@ private:
 		return true;
 	}
 	void toastFrom(const refgui::proto::ToastFrame& frame);
+	void onConfigChanged(const QStringList& warnings);
+	void toastWarnings(const QStringList& warnings);
 	// Logs a failed detach or background of `sessionId`. The local state counts it as done
 	// anyway, and with the connection gone the failure is expected, so that is not logged.
 	static void logDropped(const refgui::client::Result<void>& result, QLatin1StringView action, const QString& sessionId);
@@ -284,6 +299,7 @@ private:
 	// Both handle Connection::connected before the workspace does: it connects to it in its body.
 	refgui::workspace::SessionDirectory m_directory{m_connection};
 	refgui::workspace::BackendConfig m_config{m_connection};
+	refgui::workspace::ConfigEditorController m_configEditor{m_connection, m_config};
 	QHash<QString, ChatSession*> m_chats;
 	TileModel m_tiles;
 	TileStage m_stage{&m_tiles};
@@ -303,4 +319,7 @@ private:
 	bool m_split = false;
 	bool m_started = false;
 	bool m_windowActive = false;
+	QString m_effectiveCwd;
+	int m_localReloadsInFlight = 0;
+	int m_localMutationsInFlight = 0;
 };

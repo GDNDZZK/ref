@@ -3,6 +3,7 @@
 #include "compose/prompt_history.h"
 #include "composer/composer_model.h"
 #include "coro_test.h"
+#include "workspace/session_directory.h"
 #include "fake_backend.h"
 
 #include <QBuffer>
@@ -73,9 +74,11 @@ struct Fixture
 		, backend(connection.backend())
 		, config(connection)
 		, controller(backend)
+		, directory(connection)
 		, composer(config, controller, history)
 	{
 		fake.onRequest = [this](const QJsonObject& request) { answer(request); };
+		composer.setSessionDirectory(&directory);
 		backend.start();
 		QTRY_COMPARE(backend.state(), Backend::State::Connected);
 		attach();
@@ -134,6 +137,34 @@ struct Fixture
 		{
 			fake.respond(request, {{u"files"_s, QJsonArray::fromStringList(files)}});
 		}
+		else if(op == u"list_dirs"_s)
+		{
+			const QString reqPath = request.value(u"path"_s).toString();
+			if(!dirsError.isEmpty())
+			{
+				fake.fail(request, dirsError, u"dir_not_found"_s);
+			}
+			else if(dirMap.contains(reqPath))
+			{
+				fake.respond(request, dirMap.value(reqPath));
+			}
+			else
+			{
+				fake.respond(request, {{u"path"_s, u"/work"_s}, {u"dirs"_s, QJsonArray::fromStringList(dirs)}, {u"files"_s, QJsonArray::fromStringList(dirFiles)}});
+			}
+		}
+		else if(op == u"list_binaries"_s)
+		{
+			fake.respond(request, {{u"binaries"_s, QJsonArray::fromStringList(binaries)}});
+		}
+		else if(op == u"list_sessions"_s)
+		{
+			fake.respond(request, {{u"sessions"_s, liveSessions}});
+		}
+		else if(op == u"list_history"_s)
+		{
+			fake.respond(request, {{u"sessions"_s, historySessions}});
+		}
 		else if(op == u"expand_command"_s)
 		{
 			fake.respond(request, {{u"text"_s, expansion.value_or(u"expanded "_s + request.value(u"args"_s).toString())}});
@@ -180,10 +211,18 @@ struct Fixture
 	Backend& backend;
 	workspace::BackendConfig config;
 	SessionController controller;
+	workspace::SessionDirectory directory;
 	compose::PromptHistory history;
 	ComposerModel composer;
 	QStringList files;
 	QString filesError; // when set, list_files is refused with it
+	QStringList dirs;
+	QStringList dirFiles;
+	QHash<QString, QJsonObject> dirMap;
+	QString dirsError;
+	QStringList binaries;
+	QJsonArray liveSessions;
+	QJsonArray historySessions;
 	QString promptError;
 	QString shellError;
 	std::optional<QString> expansion;
@@ -222,6 +261,9 @@ private slots:
 	void clearDraftKeepsLongDraftsInTheHistory();
 	void queueFollowsTheServer();
 	void answersAfterTheModelIsGoneAreIgnored();
+	void unknownSingleSlashTokenWarnsAndKeepsDraft();
+	void slashArgumentCompletionsCoverPathsModelsAgentsVariantsAndSessions();
+	void shellModeCompletionsAndHistoryFilterWork();
 };
 
 void TestComposerModel::labelsFollowTheSessionAndTheConfiguration()
@@ -674,6 +716,159 @@ void TestComposerModel::answersAfterTheModelIsGoneAreIgnored()
 
 	QTest::qWait(SettleMs); // the answers are handled
 	QVERIFY(f.fake.socket()->isValid());
+}
+
+void TestComposerModel::unknownSingleSlashTokenWarnsAndKeepsDraft()
+{
+	Fixture f;
+	QSignalSpy toasts(&f.composer, &ComposerModel::toastRequested);
+
+	f.type(u"/modles"_s);
+	QVERIFY(!f.composer.submit());
+	QCOMPARE(f.composer.text(), u"/modles"_s);
+	QCOMPARE(toasts.count(), 1);
+	QCOMPARE(toasts.first().at(0).toString(), u"warn"_s);
+	QVERIFY(toasts.first().at(1).toString().contains(u"Unknown command /modles"_s));
+	QVERIFY(toasts.first().at(1).toString().contains(u"/models"_s));
+	QVERIFY(f.requestsOf(u"prompt"_s).isEmpty());
+
+	toasts.clear();
+	f.type(u"/zzzzzz"_s);
+	QVERIFY(!f.composer.submit());
+	QCOMPARE(f.composer.text(), u"/zzzzzz"_s);
+	QCOMPARE(toasts.count(), 1);
+	QCOMPARE(toasts.first().at(1).toString(), u"Unknown command /zzzzzz"_s);
+
+	// Multi-segment file paths and multi-word lines are still sent as prompts.
+	f.type(u"/etc/hosts"_s);
+	QVERIFY(f.composer.submit());
+	QTRY_COMPARE(f.requestsOf(u"prompt"_s).size(), 1);
+	QCOMPARE(f.requestsOf(u"prompt"_s).first().value(u"text"_s).toString(), u"/etc/hosts"_s);
+}
+
+void TestComposerModel::slashArgumentCompletionsCoverPathsModelsAgentsVariantsAndSessions()
+{
+	Fixture f;
+	f.dirMap.insert(u"."_s, QJsonObject{{u"path"_s, u"/work"_s}, {u"dirs"_s, QJsonArray{u"docs"_s, u"src"_s}}, {u"files"_s, QJsonArray{u"README.md"_s}}});
+	f.dirMap.insert(u"src/"_s, QJsonObject{{u"path"_s, u"/work/src"_s}, {u"dirs"_s, QJsonArray{u"app"_s}}, {u"files"_s, QJsonArray{u"main.cpp"_s}}});
+
+	// /cd: lists directories only, caches parent dir with 0 extra RPCs while typing, and drills into subdirectories on Tab.
+	f.type(u"/cd "_s);
+	QCOMPARE(f.composer.completionKind(), u"argument"_s);
+	QCOMPARE(f.composer.completionCommand(), u"cd"_s);
+	QTRY_COMPARE(f.composer.completions()->rowCount(), 2);
+	const int listDirsAfterRoot = int(f.requestsOf(u"list_dirs"_s).size());
+	QCOMPARE(f.requestsOf(u"list_dirs"_s).last().value(u"include_files"_s).toBool(), false);
+	QCOMPARE(f.requestsOf(u"list_dirs"_s).last().value(u"cwd"_s).toString(), u"/work"_s);
+
+	f.type(u"/cd s"_s);
+	f.type(u"/cd sr"_s);
+	QCOMPARE(f.composer.completions()->rowCount(), 1); // synchronous parent-dir cache hit!
+	QTest::qWait(SearchSettleMs);
+	QCOMPARE(int(f.requestsOf(u"list_dirs"_s).size()), listDirsAfterRoot);
+
+	QVERIFY(!f.composer.acceptCompletionItem(0, false)); // directory never auto-submits
+	QCOMPARE(f.composer.text(), u"/cd src/"_s);
+	QTRY_COMPARE(f.composer.completions()->rowCount(), 1);
+	QCOMPARE(f.composer.completions()->index(0, 0).data(composer::CompletionItemModel::ValueRole).toString(), u"src/app/"_s);
+
+	// /export: offers default ref-session-<id>.md first, plus directories and files.
+	f.dirMap.clear();
+	f.dirs = {u"docs"_s};
+	f.dirFiles = {u"old.md"_s};
+	f.type(u"/export "_s);
+	QTRY_COMPARE(f.composer.completions()->rowCount(), 3);
+	QCOMPARE(f.composer.completions()->index(0, 0).data(composer::CompletionItemModel::ValueRole).toString(), u"ref-session-ses_1.md"_s);
+	QCOMPARE(f.requestsOf(u"list_dirs"_s).last().value(u"include_files"_s).toBool(), true);
+
+	// /variant, /models, /agents.
+	f.type(u"/variant "_s);
+	QCOMPARE(f.composer.completions()->rowCount(), 3); // default, low, high
+	QVERIFY(f.composer.acceptCompletionItem(1, true));  // Enter on leaf slash arg requests submit
+	QCOMPARE(f.composer.text(), u"/variant low"_s);
+
+	f.type(u"/model p/m#hi"_s);
+	QCOMPARE(f.composer.completions()->rowCount(), 1);
+	QCOMPARE(f.composer.completions()->index(0, 0).data(composer::CompletionItemModel::ValueRole).toString(), u"p/m#high"_s);
+
+	f.type(u"/agent pl"_s);
+	QCOMPARE(f.composer.completions()->rowCount(), 1);
+	QCOMPARE(f.composer.completions()->index(0, 0).data(composer::CompletionItemModel::ValueRole).toString(), u"plan"_s);
+
+	// /sessions and multi-token /close-session.
+	proto::SessionInfo s1;
+	s1.id = u"ses_1"_s;
+	s1.name = u"alpha"_s;
+	s1.title = u"First"_s;
+	s1.cwd = u"/work"_s;
+	s1.live = true;
+	f.directory.update(s1);
+	proto::SessionInfo s2;
+	s2.id = u"ses_2"_s;
+	s2.name = u"beta"_s;
+	s2.title = u"Second"_s;
+	s2.cwd = u"/work"_s;
+	s2.live = true;
+	f.directory.update(s2);
+	f.type(u"/close-session al"_s);
+	QCOMPARE(f.composer.completions()->rowCount(), 1);
+	QVERIFY(!f.composer.acceptCompletionItem(0, false)); // Tab appends trailing space and keeps completing next token
+	QCOMPARE(f.composer.text(), u"/close-session alpha "_s);
+	QCOMPARE(f.composer.completions()->rowCount(), 1); // "alpha" is excluded from second token!
+	QCOMPARE(f.composer.completions()->index(0, 0).data(composer::CompletionItemModel::ValueRole).toString(), u"beta"_s);
+	QVERIFY(f.composer.acceptCompletionItem(0, true)); // Enter completes without extra space and submits
+	QCOMPARE(f.composer.text(), u"/close-session alpha beta"_s);
+
+	// Custom command @file completion.
+	f.files = {u"src/main.rs"_s};
+	f.type(u"/review please check @sr"_s);
+	QCOMPARE(f.composer.completionKind(), u"file"_s);
+	QTRY_COMPARE(f.composer.files()->rowCount(), 1);
+	f.composer.acceptFile(0);
+	QCOMPARE(f.composer.text(), u"/review please check @src/main.rs "_s);
+}
+
+void TestComposerModel::shellModeCompletionsAndHistoryFilterWork()
+{
+	Fixture f;
+	f.history.push(u"normal prompt"_s);
+	f.history.push(u"!cargo check --workspace"_s);
+	f.history.push(u"another prompt"_s);
+	f.binaries = {u"cargo"_s, u"cat"_s};
+	f.dirs = {u"src"_s};
+	f.dirFiles = {u"Cargo.toml"_s};
+
+	f.type(u"!"_s);
+	QVERIFY(f.composer.shellMode());
+	QCOMPARE(f.composer.completionKind(), u"none"_s); // quiet until typing or Tab
+
+	// Up/Down in shell mode visits only `!`-prefixed history entries and restores shell mode at end.
+	QVERIFY(f.composer.historyPrevious());
+	QVERIFY(f.composer.shellMode());
+	QCOMPARE(f.composer.text(), u"cargo check --workspace"_s);
+	QVERIFY(f.composer.historyPrevious()); // stays browsing at oldest shell entry, skipping "normal prompt"
+	QVERIFY(f.composer.shellMode());
+	QCOMPARE(f.composer.text(), u"cargo check --workspace"_s);
+	QVERIFY(f.composer.historyNext());
+	QVERIFY(f.composer.shellMode());
+	QCOMPARE(f.composer.text(), QString());
+
+	// Tab on empty `!` triggers ShellCommand completion (!history + binaries).
+	f.composer.triggerCompletion();
+	QCOMPARE(f.composer.completionKind(), u"shellCommand"_s);
+	QTRY_COMPARE(f.composer.completions()->rowCount(), 3); // !cargo check --workspace, cargo, cat
+	QCOMPARE(f.composer.completions()->index(0, 0).data(composer::CompletionItemModel::ValueRole).toString(), u"cargo check --workspace"_s);
+	QCOMPARE(f.composer.completions()->index(1, 0).data(composer::CompletionItemModel::ValueRole).toString(), u"cargo"_s);
+	QCOMPARE(f.requestsOf(u"list_binaries"_s).last().value(u"limit"_s).toInt(), 50);
+
+	// Accepting a binary in shell mode NEVER auto-submits, appends space, and transitions to ShellPath.
+	QVERIFY(!f.composer.acceptCompletionItem(2, true));
+	QCOMPARE(f.composer.text(), u"cat "_s);
+	QCOMPARE(f.composer.completionKind(), u"shellPath"_s);
+	QTRY_COMPARE(f.composer.completions()->rowCount(), 2); // src/, Cargo.toml
+	QVERIFY(!f.composer.acceptCompletionItem(1, true)); // accepting Cargo.toml never auto-submits shell!
+	QCOMPARE(f.composer.text(), u"cat Cargo.toml "_s);
+	QVERIFY(f.requestsOf(u"shell"_s).isEmpty());
 }
 
 QTEST_MAIN(TestComposerModel)

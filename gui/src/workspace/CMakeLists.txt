@@ -6,6 +6,8 @@ qt_add_library(refgui_workspace STATIC
 	command_registry.h
 	config_json_patcher.cpp
 	config_json_patcher.h
+	config_editor_controller.cpp
+	config_editor_controller.h
 	connection.cpp
 	connection.h
 	session_directory.cpp

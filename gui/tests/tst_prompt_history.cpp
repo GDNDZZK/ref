@@ -37,6 +37,7 @@ private slots:
 	void fileUrlsOfEveryFormAreRecognised();
 	void otherPathsAreText();
 	void unusableImageFilesAreErrors();
+	void shellOnlyBrowsingSkipsOrdinaryPrompts();
 };
 
 void TestPromptHistory::remembersAndSkipsRepeatsAndBlanks()
@@ -213,6 +214,31 @@ void TestPromptHistory::unusableImageFilesAreErrors()
 	const auto result = imageFromPath(file.fileName());
 	QVERIFY(!result);
 	QVERIFY(result.error().contains(u"huge.png"_s));
+}
+
+void TestPromptHistory::shellOnlyBrowsingSkipsOrdinaryPrompts()
+{
+	PromptHistory noShell;
+	noShell.push(u"explain parser"_s);
+	HistoryBrowser emptyShellBrowser(noShell);
+	QVERIFY(!emptyShellBrowser.previous(u"!"_s, true));
+	QVERIFY(!emptyShellBrowser.browsing());
+
+	PromptHistory mixed;
+	mixed.push(u"ordinary one"_s);
+	mixed.push(u"!cargo test"_s);
+	mixed.push(u"ordinary two"_s);
+	mixed.push(u"!git status"_s);
+	mixed.push(u"ordinary three"_s);
+
+	HistoryBrowser browser(mixed);
+	QCOMPARE(browser.previous(u"!gi"_s, true), u"!git status"_s);
+	QVERIFY(browser.browsing());
+	QCOMPARE(browser.previous(u"!git status"_s, true), u"!cargo test"_s);
+	QVERIFY(!browser.previous(u"!cargo test"_s, true)); // skips "ordinary one"
+	QCOMPARE(browser.next(), u"!git status"_s);          // skips "ordinary two"
+	QCOMPARE(browser.next(), u"!gi"_s);                  // skips "ordinary three" and restores draft
+	QVERIFY(!browser.browsing());
 }
 
 QTEST_GUILESS_MAIN(TestPromptHistory)

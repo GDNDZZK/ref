@@ -30,6 +30,7 @@ ModalDialog {
 		PathField {
 			id: path
 			width: parent.width
+			cwd: Workspace.effectiveCwd
 			placeholderText: qsTr("Directory")
 			onAccepted: dialog.start()
 			onTextChanged: errorText = ""
