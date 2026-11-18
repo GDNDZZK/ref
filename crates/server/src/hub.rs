@@ -72,7 +72,7 @@ pub fn default_config_dir() -> Option<PathBuf> {
     std::env::var_os("XDG_CONFIG_HOME")
         .filter(|v| !v.is_empty())
         .map(|v| PathBuf::from(v).join("ref"))
-        .or_else(|| dirs::home_dir().map(|h| h.join(".config/ref")))
+        .or_else(|| dirs::home_dir().map(|h| h.join(".config").join("ref")))
 }
 
 /// Outgoing frame queue of one connection (coalesces consecutive deltas).
@@ -216,7 +216,8 @@ fn idle_action(timeout: i64, ever_connected: bool, connected: usize) -> IdleActi
 
 /// A cached file list for `files_cache`, with the time it was built.
 pub type FileList = (Instant, Arc<Vec<String>>);
-pub(crate) type BinariesCache = Option<(OsString, Instant, Arc<Vec<String>>)>;
+pub(crate) type BinariesCacheKey = (OsString, Option<OsString>);
+pub(crate) type BinariesCache = Option<(BinariesCacheKey, Instant, Arc<Vec<String>>)>;
 
 #[derive(Default)]
 struct IdleState {
@@ -245,7 +246,7 @@ pub struct Hub {
 
 impl Hub {
     pub fn new(opts: HubOptions) -> Arc<Hub> {
-        if let Some(dir) = opts.config_dir.as_deref().filter(|d| d.exists()) {
+        if let Some(dir) = opts.config_dir.as_deref() {
             crate::config_files::cleanup_incomplete(dir);
         }
         let hub = Arc::new(Hub {
@@ -409,7 +410,7 @@ impl Hub {
         }
     }
 
-    pub fn broadcast_config_changed(&self, warnings: Vec<String>) {
+    pub(crate) fn broadcast_config_changed(&self, warnings: Vec<String>) {
         for c in self.conns() {
             if c.lock().hello {
                 c.send(ServerFrame::ConfigChanged {

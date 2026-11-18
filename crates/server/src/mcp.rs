@@ -7,7 +7,7 @@ use ref_proto::{MCP_CONNECTED, MCP_CONNECTING, MCP_DISABLED, MCP_FAILED};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-
+use tokio_util::sync::CancellationToken;
 /// How long `close_all` waits for one server to close.
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -27,9 +27,10 @@ struct McpState {
 
 pub struct McpServer {
     pub name: String,
-    pub cfg: McpConfig,
+    cfg: McpConfig,
     state: Mutex<McpState>,
     ready: tokio::sync::watch::Sender<bool>,
+    cancel: CancellationToken,
 }
 
 impl McpServer {
@@ -173,6 +174,7 @@ impl McpManager {
                     closed: false,
                 }),
                 ready: tx,
+                cancel: CancellationToken::new(),
             });
             map.insert(k, server.clone());
             out.push(server.clone());
@@ -258,9 +260,13 @@ impl McpManager {
 }
 
 fn take_for_close(server: &McpServer) -> Option<Arc<McpClient>> {
-    let mut st = server.lock();
-    st.closed = true;
-    st.client.take()
+    let client = {
+        let mut st = server.lock();
+        st.closed = true;
+        st.client.take()
+    };
+    server.cancel.cancel();
+    client
 }
 
 async fn close_client(name: &str, client: Arc<McpClient>) {
@@ -273,49 +279,59 @@ async fn close_client(name: &str, client: Arc<McpClient>) {
 }
 
 async fn connect(server: Arc<McpServer>, conf: ServerConfig) {
-    let res = async {
-        let client = McpClient::connect(&conf).await?;
-        let tools = client.list_tools().await?;
-        anyhow::Ok((client, tools))
-    }
-    .await;
-    match res {
-        Ok((client, tools)) => {
-            let client = Arc::new(client);
-            let mut rx = client.tools_changed();
-            let was_closed = {
-                let mut st = server.lock();
-                if st.closed {
-                    true
-                } else {
-                    st.status = McpStatus::Connected;
-                    st.client = Some(client.clone());
-                    st.tools = tools;
-                    false
-                }
-            };
-            server.ready.send_replace(true);
-            if was_closed {
-                close_client(&server.name, client).await;
-                return;
-            }
-            tracing::info!(server = %server.name, "MCP server connected");
-            let weak = Arc::downgrade(&client);
-            drop(client);
-            while rx.changed().await.is_ok() {
-                let Some(c) = weak.upgrade() else { break };
-                match c.list_tools().await {
-                    Ok(t) => server.lock().tools = t,
-                    Err(e) => {
-                        tracing::warn!(server = %server.name, "MCP tools refresh failed: {e:#}")
-                    }
-                }
-            }
+    let res = tokio::select! {
+        biased;
+        _ = server.cancel.cancelled() => None,
+        r = async {
+            let client = McpClient::connect(&conf).await?;
+            let tools = client.list_tools().await?;
+            anyhow::Ok((client, tools))
+        } => Some(r),
+    };
+    let Some(res) = res else {
+        let mut st = server.lock();
+        if matches!(st.status, McpStatus::Connecting) {
+            st.status = McpStatus::Failed("MCP server closed".into());
         }
+        drop(st);
+        server.ready.send_replace(true);
+        return;
+    };
+    let (client, tools) = match res {
+        Ok(pair) => pair,
         Err(e) => {
             tracing::warn!(server = %server.name, "MCP connect failed: {e:#}");
             server.lock().status = McpStatus::Failed(format!("{e:#}"));
             server.ready.send_replace(true);
+            return;
+        }
+    };
+    let client = Arc::new(client);
+    let mut rx = client.tools_changed();
+    let was_closed = {
+        let mut st = server.lock();
+        if st.closed {
+            true
+        } else {
+            st.status = McpStatus::Connected;
+            st.client = Some(client.clone());
+            st.tools = tools;
+            false
+        }
+    };
+    server.ready.send_replace(true);
+    if was_closed {
+        close_client(&server.name, client).await;
+        return;
+    }
+    tracing::info!(server = %server.name, "MCP server connected");
+    let weak = Arc::downgrade(&client);
+    drop(client);
+    while rx.changed().await.is_ok() {
+        let Some(c) = weak.upgrade() else { break };
+        match c.list_tools().await {
+            Ok(t) => server.lock().tools = t,
+            Err(e) => tracing::warn!(server = %server.name, "MCP tools refresh failed: {e:#}"),
         }
     }
 }

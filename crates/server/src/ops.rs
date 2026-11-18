@@ -210,16 +210,30 @@ pub async fn get_or_load(hub: &Arc<Hub>, id: &str) -> Result<Arc<Session>, Strin
     }
     cancel_unfinished(&mut p.messages, crate::engine::CANCELLED_OUTPUT);
     let cfg = load_config(hub, &p.info.cwd).await?;
+    if let Some(s) = hub.session(id) {
+        return Ok(s);
+    }
     p.info.live = true;
     p.info.status = SessionStatus::Idle;
     p.info.attached = 0;
     p.info.name = unique_name(hub, &p.info.name, Some(&p.info.id));
-    p.info.context = crate::models::context_keeping_used(&cfg, &p.info.model, p.info.context.used);
-    let cfg = Arc::new(cfg);
     hub.mcp.start_servers(&cfg);
-    let s = Session::new(p.info, p.messages, cfg, p.reported, p.context_notice);
-    s.lock().model_explicit = p.model_explicit;
+    let s = Session::new(
+        p.info,
+        p.messages,
+        Arc::new(Config::default()),
+        p.reported,
+        p.context_notice,
+    );
+    let (info_changed, explicit_changed) = {
+        let mut st = s.lock();
+        st.model_explicit = p.model_explicit;
+        apply_reloaded_config(hub, &mut st, cfg)
+    };
     hub.insert_session(s.clone());
+    if info_changed || explicit_changed {
+        persist(hub, &s);
+    }
     Ok(s)
 }
 
@@ -290,9 +304,20 @@ pub(crate) fn apply_reloaded_config(
         || st.info.model.provider.is_empty()
         || new_cfg.model(&st.info.model).is_none();
     if use_default_model {
-        st.info.model = new_cfg
+        let mut next_model = new_cfg
             .default_model_for(&st.info.agent)
             .unwrap_or_default();
+        let same_base_model = !st.model_explicit
+            && next_model.provider == st.info.model.provider
+            && next_model.model == st.info.model.model;
+        if same_base_model
+            && next_model.variant.is_none()
+            && let Some(ref cur_variant) = st.info.model.variant
+            && crate::models::variants(&new_cfg, &next_model).contains(cur_variant)
+        {
+            next_model.variant = Some(cur_variant.clone());
+        }
+        st.info.model = next_model;
         st.model_explicit = false;
     } else if let Some(ref v) = st.info.model.variant {
         let valid = crate::models::variants(&new_cfg, &st.info.model);
@@ -321,12 +346,11 @@ pub(crate) fn apply_reloaded_config(
 /// Reloads configuration across all live sessions and reconciles MCP servers.
 /// Broadcasts `ServerFrame::ConfigChanged` to connected frontends and returns deduplicated warnings.
 pub async fn reload_all(hub: &Arc<Hub>, trigger_cwd: Option<&str>) -> Result<Vec<String>, String> {
-    let sessions = hub.sessions();
     let mut cwds = Vec::new();
     if let Some(c) = trigger_cwd.map(str::trim).filter(|c| !c.is_empty()) {
         cwds.push(hub.effective_cwd(c));
     }
-    for s in &sessions {
+    for s in hub.sessions() {
         let c = s.lock().info.cwd.clone();
         if !cwds.contains(&c) {
             cwds.push(c);
@@ -338,7 +362,7 @@ pub async fn reload_all(hub: &Arc<Hub>, trigger_cwd: Option<&str>) -> Result<Vec
         cwds.push(hub.effective_cwd(&cur.to_string_lossy()));
     }
 
-    let mut configs = std::collections::HashMap::new();
+    let mut configs = std::collections::BTreeMap::new();
     let mut warnings = Vec::new();
     for cwd in &cwds {
         let cfg = load_config(hub, cwd).await?;
@@ -346,8 +370,14 @@ pub async fn reload_all(hub: &Arc<Hub>, trigger_cwd: Option<&str>) -> Result<Vec
         configs.insert(cwd.clone(), cfg);
     }
 
-    for s in &sessions {
-        let cwd = s.lock().info.cwd.clone();
+    for s in hub.sessions() {
+        let (cwd, closed) = {
+            let st = s.lock();
+            (st.info.cwd.clone(), st.closed)
+        };
+        if closed {
+            continue;
+        }
         let cfg = match configs.get(&cwd) {
             Some(c) => c.clone(),
             None => {
@@ -359,17 +389,17 @@ pub async fn reload_all(hub: &Arc<Hub>, trigger_cwd: Option<&str>) -> Result<Vec
         };
         let (info_changed, explicit_changed) = {
             let mut st = s.lock();
+            if st.closed {
+                continue;
+            }
             apply_reloaded_config(hub, &mut st, cfg)
         };
         if info_changed || explicit_changed {
-            persist(hub, s);
+            persist(hub, &s);
         }
     }
 
-    let active_configs: Vec<Config> = cwds
-        .iter()
-        .filter_map(|c| configs.get(c).cloned())
-        .collect();
+    let active_configs: Vec<Config> = configs.into_values().collect();
     hub.mcp.reconcile(&active_configs);
     hub.broadcast_config_changed(warnings.clone());
     Ok(warnings)

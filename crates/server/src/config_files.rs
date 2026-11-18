@@ -18,6 +18,8 @@ const MAX_BACKUP_NUM: u32 = 999_999;
 const EMPTY_CONFIG_TEXT: &str = "{}\n";
 const LABEL_KEY: &str = "$name";
 const ENV_OPEN: &str = "{env:";
+const INVALID_UTF8_SUMMARY: &str = "invalid UTF-8";
+const INVALID_UTF8_ERROR: &str = "File is not valid UTF-8";
 
 #[cfg(unix)]
 const DIR_MODE: u32 = 0o700;
@@ -33,6 +35,22 @@ enum ProfileName {
 /// Removes leftover `*.tmp.json` regular files in `dir` on server startup.
 /// Never follows symlinks.
 pub(crate) fn cleanup_incomplete(dir: &Path) {
+    let meta = match std::fs::symlink_metadata(dir) {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+        Err(e) => {
+            tracing::debug!("cannot stat config dir {}: {e}", dir.display());
+            return;
+        }
+    };
+    let ft = meta.file_type();
+    if ft.is_symlink() || !ft.is_dir() {
+        tracing::warn!(
+            "skipping cleanup on non-regular config dir {}",
+            dir.display()
+        );
+        return;
+    }
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(e) => {
@@ -225,7 +243,7 @@ fn modified_ms(meta: &std::fs::Metadata) -> i64 {
         .unwrap_or(0)
 }
 
-fn list_backups(dir: &Path) -> Result<Vec<(u32, String, PathBuf, std::fs::Metadata)>, ApiError> {
+fn verify_regular_config_dir(dir: &Path) -> Result<bool, ApiError> {
     match std::fs::symlink_metadata(dir) {
         Ok(meta) => {
             let ft = meta.file_type();
@@ -236,9 +254,16 @@ fn list_backups(dir: &Path) -> Result<Vec<(u32, String, PathBuf, std::fs::Metada
                 )
                 .into());
             }
+            Ok(true)
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(e) => return Err(format!("Cannot stat {}: {e}", dir.display()).into()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(format!("Cannot stat {}: {e}", dir.display()).into()),
+    }
+}
+
+fn list_backups(dir: &Path) -> Result<Vec<(u32, String, PathBuf, std::fs::Metadata)>, ApiError> {
+    if !verify_regular_config_dir(dir)? {
+        return Ok(Vec::new());
     }
     let entries = std::fs::read_dir(dir)
         .map_err(|e| ApiError::from(format!("Cannot read {}: {e}", dir.display())))?;
@@ -377,15 +402,19 @@ fn collect_env_vars_in_str(mut rest: &str, out: &mut BTreeSet<String>) {
 }
 
 fn build_env_status(parsed: &Value, is_mock: bool) -> BTreeMap<String, bool> {
+    build_env_status_with(parsed, is_mock, |var| std::env::var(var).ok())
+}
+
+fn build_env_status_with(
+    parsed: &Value,
+    is_mock: bool,
+    lookup: impl Fn(&str) -> Option<String>,
+) -> BTreeMap<String, bool> {
     let mut vars = BTreeSet::new();
     collect_env_vars(parsed, &mut vars);
     vars.into_iter()
         .map(|var| {
-            let present = if is_mock {
-                false
-            } else {
-                std::env::var(&var).is_ok_and(|v| !v.is_empty())
-            };
+            let present = !is_mock && lookup(&var).is_some_and(|v| !v.trim().is_empty());
             (var, present)
         })
         .collect()
@@ -433,24 +462,51 @@ fn global_dirs_for_overrides(
     dirs
 }
 
+struct DecodedProfile {
+    raw_text: String,
+    parsed: Value,
+    parse_error: Option<String>,
+    invalid_utf8: bool,
+}
+
+fn decode_profile_bytes(bytes: &[u8]) -> DecodedProfile {
+    match std::str::from_utf8(bytes) {
+        Ok(raw) => {
+            let (parsed, parse_error) = parse_raw_object(raw);
+            DecodedProfile {
+                raw_text: raw.to_string(),
+                parsed,
+                parse_error,
+                invalid_utf8: false,
+            }
+        }
+        Err(_) => DecodedProfile {
+            raw_text: String::from_utf8_lossy(bytes).into_owned(),
+            parsed: Value::Null,
+            parse_error: Some(INVALID_UTF8_ERROR.to_string()),
+            invalid_utf8: true,
+        },
+    }
+}
+
 fn build_entry(
     file: String,
     active: bool,
     meta: Option<&std::fs::Metadata>,
-    raw: &str,
+    decoded: &DecodedProfile,
 ) -> ConfigFileEntry {
     let exists = meta.is_some();
-    let (parsed, parse_error) = if exists {
-        parse_raw_object(raw)
+    let summary = if decoded.invalid_utf8 {
+        INVALID_UTF8_SUMMARY.to_string()
     } else {
-        (json!({}), None)
+        summarize_profile(exists, &decoded.parsed, decoded.parse_error.as_deref())
     };
     ConfigFileEntry {
         file,
         active,
         exists,
-        label: extract_label(&parsed),
-        summary: summarize_profile(exists, &parsed, parse_error.as_deref()),
+        label: extract_label(&decoded.parsed),
+        summary,
         modified_at: meta.map_or(0, modified_ms),
         size: meta.map_or(0, std::fs::Metadata::len),
     }
@@ -472,12 +528,21 @@ async fn build_info(
     let hub_clone = hub.clone();
     let info = tokio::task::spawn_blocking(move || {
         let profile = parse_profile_name(&selected_file)?;
+        verify_regular_config_dir(&config_dir)?;
         let active_path = config_dir.join(ACTIVE_FILE);
         let active_meta = regular_metadata_opt(&active_path, ACTIVE_FILE)?;
-        let active_raw = match &active_meta {
-            Some(_) => std::fs::read_to_string(&active_path)
-                .map_err(|e| ApiError::from(format!("Cannot read {ACTIVE_FILE}: {e}")))?,
-            None => EMPTY_CONFIG_TEXT.to_string(),
+        let active_decoded = match &active_meta {
+            Some(_) => {
+                let bytes = std::fs::read(&active_path)
+                    .map_err(|e| ApiError::from(format!("Cannot read {ACTIVE_FILE}: {e}")))?;
+                decode_profile_bytes(&bytes)
+            }
+            None => DecodedProfile {
+                raw_text: EMPTY_CONFIG_TEXT.to_string(),
+                parsed: json!({}),
+                parse_error: None,
+                invalid_utf8: false,
+            },
         };
 
         let backups = list_backups(&config_dir)?;
@@ -493,38 +558,30 @@ async fn build_info(
             ACTIVE_FILE.to_string(),
             true,
             active_meta.as_ref(),
-            &active_raw,
+            &active_decoded,
         ));
 
-        let mut selected_raw = if profile == ProfileName::Active {
-            Some(active_raw)
-        } else {
-            None
-        };
+        let mut selected_decoded = (profile == ProfileName::Active).then_some(active_decoded);
 
         for (_, name, path, meta) in &backups {
-            let raw = std::fs::read_to_string(path)
+            let bytes = std::fs::read(path)
                 .map_err(|e| ApiError::from(format!("Cannot read {name}: {e}")))?;
+            let decoded = decode_profile_bytes(&bytes);
+            files.push(build_entry(name.clone(), false, Some(meta), &decoded));
             if name == &selected_file {
-                selected_raw = Some(raw.clone());
+                selected_decoded = Some(decoded);
             }
-            files.push(build_entry(name.clone(), false, Some(meta), &raw));
         }
 
-        let raw_text = selected_raw.ok_or_else(|| {
+        let selected = selected_decoded.ok_or_else(|| {
             ApiError::coded(
                 ERR_NOT_FOUND,
                 format!("Config profile not found: {selected_file}"),
             )
         })?;
-        let (parsed, parse_error) = if profile == ProfileName::Active && active_meta.is_none() {
-            (json!({}), None)
-        } else {
-            parse_raw_object(&raw_text)
-        };
 
         let is_mock = hub_clone.opts.sandbox_cwd.is_some();
-        let env_status = build_env_status(&parsed, is_mock);
+        let env_status = build_env_status(&selected.parsed, is_mock);
         let has_jsonc_override =
             regular_metadata_opt(&config_dir.join(JSONC_OVERRIDE_FILE), JSONC_OVERRIDE_FILE)?
                 .is_some();
@@ -550,9 +607,9 @@ async fn build_info(
             config_dir: config_dir.to_string_lossy().into_owned(),
             files,
             selected_file,
-            raw_text,
-            parsed,
-            parse_error,
+            raw_text: selected.raw_text,
+            parsed: selected.parsed,
+            parse_error: selected.parse_error,
             env_status,
             has_jsonc_override,
             env_config_override: env_override,
@@ -616,6 +673,7 @@ pub(crate) async fn create_config_file(
     let dir_for_write = config_dir.clone();
 
     tokio::task::spawn_blocking(move || -> Result<(), ApiError> {
+        verify_regular_config_dir(&dir_for_write)?;
         let active_path = dir_for_write.join(ACTIVE_FILE);
         let active_meta = regular_metadata_opt(&active_path, ACTIVE_FILE)?;
         let existing_bytes = match &active_meta {
@@ -686,6 +744,12 @@ pub(crate) async fn select_config_file(
     let dir_for_swap = config_dir.clone();
     let selected_name = file.clone();
     tokio::task::spawn_blocking(move || -> Result<(), ApiError> {
+        if !verify_regular_config_dir(&dir_for_swap)? {
+            return Err(ApiError::coded(
+                ERR_NOT_FOUND,
+                format!("Config profile not found: {selected_name}"),
+            ));
+        }
         let bak_path = dir_for_swap.join(&selected_name);
         regular_metadata_req(&bak_path, &selected_name)?;
         let selected_bytes = std::fs::read(&bak_path)
@@ -715,6 +779,34 @@ pub(crate) async fn select_config_file(
     build_info(hub, config_dir, ACTIVE_FILE.to_string(), cwd).await
 }
 
+struct ValidBackup<'a> {
+    name: &'a str,
+    path: &'a Path,
+    bytes: Vec<u8>,
+}
+
+fn newest_valid_backup(
+    backups: &[(u32, String, PathBuf, std::fs::Metadata)],
+) -> Result<Option<ValidBackup<'_>>, ApiError> {
+    for (_, name, path, _) in backups.iter().rev() {
+        let bytes =
+            std::fs::read(path).map_err(|e| ApiError::from(format!("Cannot read {name}: {e}")))?;
+        let is_valid = std::str::from_utf8(&bytes)
+            .ok()
+            .is_some_and(|raw| require_object(raw).is_ok());
+        if !is_valid {
+            tracing::warn!("skipping corrupt config backup {name}");
+            continue;
+        }
+        return Ok(Some(ValidBackup {
+            name: name.as_str(),
+            path: path.as_path(),
+            bytes,
+        }));
+    }
+    Ok(None)
+}
+
 pub(crate) async fn delete_config_file(
     hub: &Arc<Hub>,
     file: String,
@@ -727,8 +819,15 @@ pub(crate) async fn delete_config_file(
     let dir_for_del = config_dir.clone();
     let target_name = file.clone();
     let reload_needed = tokio::task::spawn_blocking(move || -> Result<bool, ApiError> {
+        let dir_exists = verify_regular_config_dir(&dir_for_del)?;
         match profile {
             ProfileName::Backup(_) => {
+                if !dir_exists {
+                    return Err(ApiError::coded(
+                        ERR_NOT_FOUND,
+                        format!("Config profile not found: {target_name}"),
+                    ));
+                }
                 let bak_path = dir_for_del.join(&target_name);
                 regular_metadata_req(&bak_path, &target_name)?;
                 std::fs::remove_file(&bak_path)
@@ -736,22 +835,23 @@ pub(crate) async fn delete_config_file(
                 Ok(false)
             }
             ProfileName::Active => {
+                if !dir_exists {
+                    return Ok(false);
+                }
                 let active_path = dir_for_del.join(ACTIVE_FILE);
                 let active_exists = regular_metadata_opt(&active_path, ACTIVE_FILE)?.is_some();
                 let backups = list_backups(&dir_for_del)?;
-                if let Some((_, newest_name, newest_path, _)) = backups.last() {
-                    let promoted = std::fs::read(newest_path)
-                        .map_err(|e| ApiError::from(format!("Cannot read {newest_name}: {e}")))?;
-                    write_cow_json(&active_path, &promoted)?;
-                    std::fs::remove_file(newest_path)
-                        .map_err(|e| ApiError::from(format!("Cannot remove {newest_name}: {e}")))?;
+                if let Some(cand) = newest_valid_backup(&backups)? {
+                    write_cow_json(&active_path, &cand.bytes)?;
+                    std::fs::remove_file(cand.path)
+                        .map_err(|e| ApiError::from(format!("Cannot remove {}: {e}", cand.name)))?;
                     Ok(true)
                 } else if active_exists {
                     std::fs::remove_file(&active_path)
                         .map_err(|e| ApiError::from(format!("Cannot remove {ACTIVE_FILE}: {e}")))?;
                     Ok(true)
                 } else {
-                    Ok(true)
+                    Ok(false)
                 }
             }
         }
@@ -847,6 +947,15 @@ mod tests {
         {
             assert!(sym_tmp.symlink_metadata().is_ok());
             assert_eq!(std::fs::read_to_string(&sym_target).unwrap(), "important");
+            // Symlinked config_dir itself must never be traversed by cleanup_incomplete.
+            let real_dir = dir.join("real-cfg");
+            std::fs::create_dir_all(&real_dir).unwrap();
+            let inner_tmp = real_dir.join("ref.json.tmp.json");
+            std::fs::write(&inner_tmp, "keep-behind-symlink").unwrap();
+            let sym_dir = dir.join("sym-cfg");
+            std::os::unix::fs::symlink(&real_dir, &sym_dir).unwrap();
+            cleanup_incomplete(&sym_dir);
+            assert!(inner_tmp.exists());
         }
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -926,5 +1035,17 @@ mod tests {
 
         let mock_env = build_env_status(&parsed, true);
         assert_eq!(mock_env.get("PATH"), Some(&false));
+
+        let ws_doc =
+            json!({ "a": "{env:BLANK_VAR}", "b": "{env:PADDED_VAR}", "c": "{env:EMPTY_VAR}" });
+        let ws_env = build_env_status_with(&ws_doc, false, |k| match k {
+            "BLANK_VAR" => Some("   \t\n ".into()),
+            "PADDED_VAR" => Some("  sk-live  ".into()),
+            "EMPTY_VAR" => Some(String::new()),
+            _ => None,
+        });
+        assert_eq!(ws_env.get("BLANK_VAR"), Some(&false));
+        assert_eq!(ws_env.get("PADDED_VAR"), Some(&true));
+        assert_eq!(ws_env.get("EMPTY_VAR"), Some(&false));
     }
 }
