@@ -497,13 +497,21 @@ export class CompletionController {
 
   private showSessionsArg(query: string, start: number, end: number): void {
     const sessions = this.deps.sessions?.() ?? []
+    const nameCounts = new Map<string, number>()
+    for (const session of sessions) {
+      if (!session.name) continue
+      const key = session.name.toLowerCase()
+      nameCounts.set(key, (nameCounts.get(key) ?? 0) + 1)
+    }
     const entries = sessions.map((session) => {
-      const primary = session.name || session.id
+      const duplicateName = session.name !== '' && (nameCounts.get(session.name.toLowerCase()) ?? 0) > 1
+      const value = !session.name || duplicateName ? session.id : session.name
+      const label = duplicateName ? `${session.name} (${session.id})` : session.name || session.id
       return {
         keys: [session.name, session.id, session.title].filter(Boolean),
         item: {
-          value: primary,
-          label: primary,
+          value,
+          label,
           description: session.title || session.cwd,
           icon: 'chat-16' as const,
         },
@@ -665,8 +673,8 @@ export class CompletionController {
     }
   }
 
-  private shellHistoryItems(query: string, segmentIndex: number): CompletionItem[] {
-    if (segmentIndex > 0) return []
+  private shellHistoryItems(query: string, segmentIndex: number, start: number): CompletionItem[] {
+    if (segmentIndex !== 0 || start !== 0) return []
     const entries = this.deps.shellHistory?.() ?? []
     const lower = query.toLowerCase()
     const seen = new Set<string>()
@@ -691,7 +699,7 @@ export class CompletionController {
     end: number,
     segmentIndex: number,
   ): void {
-    const historyItems = this.shellHistoryItems(query, segmentIndex)
+    const historyItems = this.shellHistoryItems(query, segmentIndex, start)
     this.activeBinaryQuery = { query, start, end, segmentIndex }
 
     if (historyItems.length > 0) {
@@ -704,7 +712,7 @@ export class CompletionController {
         start,
         end,
       }
-    } else if (this.current.value?.kind !== 'shell') {
+    } else if (this.current.value?.kind !== 'shell' || this.current.value.start !== start) {
       this.current.value = undefined
     }
 

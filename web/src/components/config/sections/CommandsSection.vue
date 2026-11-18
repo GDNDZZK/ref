@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Commands & Skills configuration section: custom slash `command.*`, `instructions[]`, and `skills.paths[]`.
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   getAt,
@@ -14,10 +14,13 @@ import {
 import {
   configuredAgentOptions,
   configuredModelOptions,
+  normalizeProseInput,
+  normalizeTrimmedString,
   parseSkillsPaths,
   patchSkillsPaths,
   renameObjectKey,
 } from '../../../config/sectionHelpers.ts'
+import { useConfigSubEditorScope, useInlineRenameDrafts } from '../../../config/subEditorState.ts'
 import type { AgentInfo, ModelInfo } from '../../../proto/generated'
 import Chevron from '../../Chevron.vue'
 import DialogButton from '../../DialogButton.vue'
@@ -40,14 +43,49 @@ const emit = defineEmits<{ 'update:doc': [next: JsonObject] }>()
 const { t } = useI18n()
 
 const openCommands = reactive(new Set<string>())
-const renameDrafts = reactive<Record<string, string>>({})
 const newCommandName = ref('')
+let lastEmittedDoc: JsonObject | undefined
 
 const commandsMap = computed(() => getObjectAt(props.doc, ['command']) ?? {})
 const commandNames = computed(() => Object.keys(commandsMap.value))
 const modelOptions = computed(() => configuredModelOptions(props.doc, props.serverModels))
 const agentOptions = computed(() => configuredAgentOptions(props.doc, props.serverAgents, false))
 
+function emitDoc(next: JsonObject): void {
+  lastEmittedDoc = next
+  emit('update:doc', next)
+}
+
+const renames = useInlineRenameDrafts({
+  normalize: (raw) => raw.trim().replace(/^\/+/, ''),
+  exists: (key) => Object.hasOwn(commandsMap.value, key),
+  collisionMessage: () => t('config.editor.renameExists'),
+  onCommit(oldName, target) {
+    const renamed = renameObjectKey(commandsMap.value, oldName, target)
+    if (openCommands.has(oldName)) {
+      openCommands.delete(oldName)
+      openCommands.add(target)
+    }
+    emitDoc(setAt(props.doc, ['command'], renamed))
+  },
+})
+
+const subEditorScope = useConfigSubEditorScope(
+  () => ({ dirty: renames.hasDirty.value, committable: renames.hasCommittable.value, invalid: false }),
+  () => renames.flushAll(),
+)
+
+watch(
+  () => props.doc,
+  (nextDoc) => {
+    if (nextDoc === lastEmittedDoc) return
+    renames.reconcileKeys(commandNames.value, !subEditorScope.hasHost)
+  },
+)
+
+if (subEditorScope.resetVersion) {
+  watch(subEditorScope.resetVersion, () => renames.clearAll())
+}
 function commandObj(name: string): JsonObject {
   const raw = commandsMap.value[name]
   return isPlainObject(raw) ? raw : {}
@@ -63,36 +101,27 @@ function addCommand(): void {
   if (cleaned === '' || Object.hasOwn(commandsMap.value, cleaned)) return
   newCommandName.value = ''
   openCommands.add(cleaned)
-  emit('update:doc', setAt(props.doc, ['command', cleaned], { description: '', template: '$ARGUMENTS' }))
+  emitDoc(setAt(props.doc, ['command', cleaned], { description: '', template: '$ARGUMENTS' }))
 }
 
 function removeCommand(name: string): void {
   openCommands.delete(name)
-  delete renameDrafts[name]
-  emit('update:doc', setAt(props.doc, ['command', name], undefined))
-}
-
-function applyRename(oldName: string): void {
-  const target = (renameDrafts[oldName] ?? oldName).trim().replace(/^\/+/, '')
-  if (target === '' || target === oldName || Object.hasOwn(commandsMap.value, target)) return
-  const renamed = renameObjectKey(commandsMap.value, oldName, target)
-  delete renameDrafts[oldName]
-  if (openCommands.has(oldName)) {
-    openCommands.delete(oldName)
-    openCommands.add(target)
-  }
-  emit('update:doc', setAt(props.doc, ['command'], renamed))
+  renames.remove(name)
+  emitDoc(setAt(props.doc, ['command', name], undefined))
 }
 
 function patchCommand(name: string, key: string, value: unknown): void {
-  emit('update:doc', setAt(props.doc, ['command', name, key], value))
+  const nextCommand = setAt(commandObj(name), [key], value)
+  emitDoc(setAt(props.doc, ['command', name], nextCommand))
+}
+
+function patchCommandProse(name: string, key: string, value: string): void {
+  patchCommand(name, key, normalizeProseInput(value))
 }
 
 function patchCommandString(name: string, key: string, value: string): void {
-  const trimmed = value.trim()
-  patchCommand(name, key, trimmed === '' ? undefined : trimmed)
+  patchCommand(name, key, normalizeTrimmedString(value))
 }
-
 function readInstructions(): string[] {
   const raw = getAt(props.doc, ['instructions'])
   if (typeof raw === 'string') return raw.trim() ? [raw] : []
@@ -101,11 +130,11 @@ function readInstructions(): string[] {
 
 function writeInstructions(items: readonly string[]): void {
   const cleaned = items.filter((entry) => entry.trim() !== '')
-  emit('update:doc', setAt(props.doc, ['instructions'], cleaned.length > 0 ? cleaned : undefined))
+  emitDoc(setAt(props.doc, ['instructions'], cleaned.length > 0 ? cleaned : undefined))
 }
 
 function writeSkills(items: readonly string[]): void {
-  emit('update:doc', patchSkillsPaths(props.doc, items))
+  emitDoc(patchSkillsPaths(props.doc, items))
 }
 </script>
 
@@ -136,21 +165,23 @@ function writeSkills(items: readonly string[]): void {
       </div>
 
       <div v-if="openCommands.has(name)" class="card-body">
-        <FormRow :label="t('config.editor.rename')">
+        <FormRow :label="t('config.editor.rename')" :error="renames.errorOf(name)">
           <div class="rename-row">
             <input
-              :value="renameDrafts[name] ?? name"
+              :value="renames.read(name)"
               type="text"
               class="text-input mono"
               spellcheck="false"
-              @input="renameDrafts[name] = ($event.target as HTMLInputElement).value"
-              @keydown.enter.prevent="!$event.isComposing && applyRename(name)"
+              @input="renames.set(name, ($event.target as HTMLInputElement).value)"
+              @blur="renames.blur(name)"
+              @keydown.enter.prevent="!$event.isComposing && renames.commit(name)"
             />
             <DialogButton
-              v-if="(renameDrafts[name] ?? name).trim().replace(/^\/+/, '') !== name"
               small
               :label="t('config.editor.rename')"
-              @click="applyRename(name)"
+              :disabled="!renames.canCommit(name)"
+              @mousedown.prevent
+              @click="renames.commit(name)"
             />
           </div>
         </FormRow>
@@ -160,7 +191,8 @@ function writeSkills(items: readonly string[]): void {
             :value="getStringAt(commandObj(name), ['description']) ?? ''"
             type="text"
             class="text-input"
-            @input="patchCommandString(name, 'description', ($event.target as HTMLInputElement).value)"
+            @input="patchCommandProse(name, 'description', ($event.target as HTMLInputElement).value)"
+            @blur="patchCommandString(name, 'description', ($event.target as HTMLInputElement).value)"
           />
         </FormRow>
 

@@ -1,10 +1,16 @@
 <script setup lang="ts">
 // Editable ordered string list (instructions, command args, provider env/whitelist/blacklist) with
-// inline editing, ↑/↓ reordering, item removal, and Enter / button append.
-import { ref } from 'vue'
+// stable row ids so clearing an item never deletes or shifts focus to the next row mid-edit.
+import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useConfigSubEditorReset } from '../../config/subEditorState.ts'
 import DialogButton from '../DialogButton.vue'
 import Icon from '../Icon.vue'
+
+interface ListRow {
+  id: number
+  value: string
+}
 
 withDefaults(
   defineProps<{
@@ -23,41 +29,85 @@ withDefaults(
 
 const items = defineModel<string[]>({ required: true })
 const { t } = useI18n()
+const { resetVersion } = useConfigSubEditorReset()
 const draft = ref('')
 
+let nextRowId = 1
+
+function buildRows(source: readonly string[]): ListRow[] {
+  return source.map((value) => ({ id: nextRowId++, value }))
+}
+
+function serializeRows(list: readonly ListRow[]): string[] {
+  return list.map((row) => row.value).filter((value) => value.trim() !== '')
+}
+
+function sameStringList(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false
+  return a.every((entry, index) => entry === b[index])
+}
+
+const rows = ref<ListRow[]>(buildRows(items.value))
+
+watch(
+  items,
+  (next) => {
+    if (!sameStringList(serializeRows(rows.value), next)) {
+      rows.value = buildRows(next)
+    }
+  },
+  { deep: true },
+)
+
+if (resetVersion) {
+  watch(resetVersion, () => {
+    rows.value = buildRows(items.value)
+    draft.value = ''
+  })
+}
+
+function emitCurrent(): void {
+  const serialized = serializeRows(rows.value)
+  if (!sameStringList(serialized, items.value)) {
+    items.value = serialized
+  }
+}
+
 function updateAt(index: number, value: string): void {
-  const next = [...items.value]
-  next[index] = value
-  items.value = next
+  const row = rows.value[index]
+  if (!row) return
+  row.value = value
+  emitCurrent()
 }
 
 function moveItem(index: number, delta: -1 | 1): void {
   const target = index + delta
-  if (target < 0 || target >= items.value.length) return
-  const next = [...items.value]
-  const current = next[index]!
-  next[index] = next[target]!
-  next[target] = current
-  items.value = next
+  if (target < 0 || target >= rows.value.length) return
+  const current = rows.value[index]!
+  rows.value[index] = rows.value[target]!
+  rows.value[target] = current
+  emitCurrent()
 }
 
 function removeAt(index: number): void {
-  items.value = items.value.filter((_, itemIndex) => itemIndex !== index)
+  rows.value.splice(index, 1)
+  emitCurrent()
 }
 
 function addDraft(): void {
   const trimmed = draft.value.trim()
   if (trimmed === '') return
-  items.value = [...items.value, trimmed]
+  rows.value.push({ id: nextRowId++, value: trimmed })
   draft.value = ''
+  emitCurrent()
 }
 </script>
 
 <template>
   <div class="string-list" :class="{ disabled }">
-    <div v-for="(item, index) in items" :key="index" class="item-row">
+    <div v-for="(row, index) in rows" :key="row.id" class="item-row">
       <input
-        :value="item"
+        :value="row.value"
         type="text"
         class="input"
         :class="{ mono: monospace }"
@@ -81,8 +131,7 @@ function addDraft(): void {
         class="icon-btn"
         :aria-label="t('config.moveDown')"
         :title="t('config.moveDown')"
-        :disabled="disabled || index === items.length - 1"
-        @click="moveItem(index, 1)"
+        :disabled="disabled || index === rows.length - 1"
       >
         ↓
       </button>

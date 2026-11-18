@@ -30,6 +30,7 @@ export const useDialogsStore = defineStore('dialogs', () => {
   let closeGuard: ((source: 'escape' | 'scrim' | 'button') => boolean) | undefined
 
   function open(request: DialogRequest): void {
+    if (current.value && closeGuard && !closeGuard('button')) return
     closeGuard = undefined
     current.value = request
   }

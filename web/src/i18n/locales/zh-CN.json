@@ -521,9 +521,7 @@
       "pickModelPlaceholder": "选择已配置的模型…",
       "delete": "删除",
       "rename": "重命名",
-      "apply": "应用",
-      "expand": "展开",
-      "collapse": "收起",
+      "renameExists": "已存在同名条目",
       "nav": {
         "general": "通用",
         "providers": "提供商与模型",
@@ -602,7 +600,11 @@
         "addVariant": "添加变体",
         "variantNamePlaceholder": "变体名称（例如 high）",
         "variantOptions": "变体选项（JSON 对象）",
-        "variantInvalidJson": "必须是合法的 JSON 对象"
+        "variantInvalidJson": "必须是合法的 JSON 对象",
+        "extraOptions": "附加 SDK 选项（JSON 对象）",
+        "extraOptionsDesc": "提供商 options 中的其余键（如 timeout、extraBody）；apiKey、baseURL 与 headers 会自动保留。",
+        "modelOptions": "模型选项（JSON 对象）",
+        "modelOptionsDesc": "传递给 SDK 的模型附加选项（如 reasoningEffort、thinking、extraBody）。"
       },
       "agents": {
         "builtinHeading": "内置智能体",
@@ -624,7 +626,9 @@
         "prompt": "系统提示词 (prompt)",
         "promptPlaceholder": "此智能体的附加系统指令…",
         "permission": "智能体专属权限",
-        "delay": "智能体专属工具延迟"
+        "delay": "智能体专属工具延迟",
+        "options": "模型选项（JSON 对象）",
+        "optionsDesc": "传递给模型的智能体附加选项（如 maxTokens、reasoningEffort）。"
       },
       "permissions": {
         "globalPermission": "全局工具权限",
