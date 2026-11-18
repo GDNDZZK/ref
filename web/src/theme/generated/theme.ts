@@ -141,6 +141,7 @@ export const metrics = {
   dialogWidth: 480,
   dialogWidthWide: 640,
   settingsWidth: 520,
+  configDialogWidth: 860,
   statusDotSize: 8,
   windowButtonMargin: 14,
   windowButtonGap: 8,

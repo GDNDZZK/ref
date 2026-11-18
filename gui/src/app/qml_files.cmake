@@ -68,6 +68,16 @@ set(REFGUI_APP_QML_NAMES
 	ModalDialog.qml
 	DialogButton.qml
 	DialogField.qml
+	Switch.qml
+	FormRow.qml
+	SelectField.qml
+	SecretField.qml
+	NumberField.qml
+	MultilineField.qml
+	StringListEditor.qml
+	KeyValueEditor.qml
+	PermissionRulesEditor.qml
+	ColorSwatchPicker.qml
 	Segmented.qml
 	KeyChips.qml
 	PickList.qml

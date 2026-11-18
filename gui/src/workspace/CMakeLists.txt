@@ -4,6 +4,8 @@ qt_add_library(refgui_workspace STATIC
 	backend_config.h
 	command_registry.cpp
 	command_registry.h
+	config_json_patcher.cpp
+	config_json_patcher.h
 	connection.cpp
 	connection.h
 	session_directory.cpp
