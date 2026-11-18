@@ -52,6 +52,7 @@ public:
 
 	// Required fields.
 	QString string(QLatin1StringView key) const;
+	bool boolean(QLatin1StringView key) const;
 	qint64 integer(QLatin1StringView key) const;
 	QJsonObject object(QLatin1StringView key) const;
 	QJsonArray array(QLatin1StringView key) const;

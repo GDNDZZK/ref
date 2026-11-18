@@ -63,7 +63,16 @@ public:
 	// `foreground` counts the attachment as the user's view of the session; a watcher only follows it.
 	QCoro::Task<Result<proto::SessionSnapshot>> attach(QString sessionId, bool foreground = true);
 	QCoro::Task<Result<void>> detach(QString sessionId);
-	QCoro::Task<Result<proto::ServerConfig>> getConfig();
+	QCoro::Task<Result<proto::ServerConfig>> getConfig(std::optional<QString> cwd = {});
+	QCoro::Task<Result<proto::ReloadConfigResult>> reloadConfig(std::optional<QString> cwd = {});
+	QCoro::Task<Result<proto::ConfigFilesInfo>> getConfigFiles(std::optional<QString> file = {}, std::optional<QString> cwd = {});
+	QCoro::Task<Result<proto::ConfigFilesInfo>> saveConfigFile(QString file, QString content, std::optional<QString> cwd = {});
+	QCoro::Task<Result<proto::ConfigFilesInfo>> createConfigFile(std::optional<QString> label,
+	                                                             bool cloneCurrent,
+	                                                             std::optional<QString> content = {},
+	                                                             std::optional<QString> cwd = {});
+	QCoro::Task<Result<proto::ConfigFilesInfo>> selectConfigFile(QString file, std::optional<QString> cwd = {});
+	QCoro::Task<Result<proto::ConfigFilesInfo>> deleteConfigFile(QString file, std::optional<QString> cwd = {});
 	QCoro::Task<Result<QList<proto::SessionInfo>>> listSessions();
 	// Persisted sessions, newest first; of every directory when `cwd` is empty.
 	QCoro::Task<Result<QList<proto::SessionInfo>>> listHistory(QString cwd, int limit);
@@ -100,7 +109,8 @@ public:
 	// `command` is peers, peers-name, peers-inbox or peers-outbox; answers with text to show.
 	QCoro::Task<Result<QString>> peerCommand(QString sessionId, QString command, QString args);
 	QCoro::Task<Result<QList<proto::McpServerStatus>>> mcpStatus(std::optional<QString> cwd);
-	QCoro::Task<Result<proto::DirListing>> listDirs(QString path);
+	QCoro::Task<Result<proto::DirListing>> listDirs(QString path, std::optional<QString> cwd = {}, bool includeFiles = false);
+	QCoro::Task<Result<QStringList>> listBinaries(QString query, std::optional<int> limit = {});
 	// A page of messages before `before`, see Request::Messages.
 	QCoro::Task<Result<proto::MessagesPage>> messages(QString sessionId, QString before, int limit);
 	QCoro::Task<Result<proto::ImageData>> getImage(QString sessionId, QString imageId);

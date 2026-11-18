@@ -54,6 +54,7 @@ refgui_add_test(tst_command_registry LIBS refgui_workspace)
 refgui_add_test(tst_toast_text LIBS refgui_workspace)
 
 refgui_add_test(tst_config_json_patcher LIBS refgui_workspace)
+refgui_add_test(tst_config_editor SOURCES coro_test.h fake_backend.h LIBS refgui_workspace)
 set(qml_import_paths "")
 foreach(prefix IN LISTS CMAKE_PREFIX_PATH)
 	list(APPEND qml_import_paths "${prefix}/lib/qml")

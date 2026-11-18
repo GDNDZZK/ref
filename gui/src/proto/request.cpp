@@ -199,9 +199,14 @@ QJsonObject questionReply(const QString& sessionId, const QString& callId, const
 	return json;
 }
 
-QJsonObject getConfig()
+QJsonObject getConfig(const std::optional<QString>& cwd)
 {
-	return op(u"get_config"_s);
+	QJsonObject json = op(u"get_config"_s);
+	if(cwd)
+	{
+		json.insert(u"cwd"_s, *cwd);
+	}
+	return json;
 }
 
 QJsonObject watchAll(bool enabled)
@@ -289,10 +294,106 @@ QJsonObject mcpStatus(const std::optional<QString>& cwd)
 	return json;
 }
 
-QJsonObject listDirs(const QString& path)
+QJsonObject listDirs(const QString& path, const std::optional<QString>& cwd, bool includeFiles)
 {
 	QJsonObject json = op(u"list_dirs"_s);
 	json.insert(u"path"_s, path);
+	if(cwd)
+	{
+		json.insert(u"cwd"_s, *cwd);
+	}
+	json.insert(u"include_files"_s, includeFiles);
+	return json;
+}
+
+QJsonObject reloadConfig(const std::optional<QString>& cwd)
+{
+	QJsonObject json = op(u"reload_config"_s);
+	if(cwd)
+	{
+		json.insert(u"cwd"_s, *cwd);
+	}
+	return json;
+}
+
+QJsonObject getConfigFiles(const std::optional<QString>& file, const std::optional<QString>& cwd)
+{
+	QJsonObject json = op(u"get_config_files"_s);
+	if(file)
+	{
+		json.insert(u"file"_s, *file);
+	}
+	if(cwd)
+	{
+		json.insert(u"cwd"_s, *cwd);
+	}
+	return json;
+}
+
+QJsonObject saveConfigFile(const QString& file, const QString& content, const std::optional<QString>& cwd)
+{
+	QJsonObject json = op(u"save_config_file"_s);
+	json.insert(u"file"_s, file);
+	json.insert(u"content"_s, content);
+	if(cwd)
+	{
+		json.insert(u"cwd"_s, *cwd);
+	}
+	return json;
+}
+
+QJsonObject createConfigFile(const std::optional<QString>& label,
+                             bool cloneCurrent,
+                             const std::optional<QString>& content,
+                             const std::optional<QString>& cwd)
+{
+	QJsonObject json = op(u"create_config_file"_s);
+	if(label)
+	{
+		json.insert(u"label"_s, *label);
+	}
+	json.insert(u"clone_current"_s, cloneCurrent);
+	if(content)
+	{
+		json.insert(u"content"_s, *content);
+	}
+	if(cwd)
+	{
+		json.insert(u"cwd"_s, *cwd);
+	}
+	return json;
+}
+
+QJsonObject selectConfigFile(const QString& file, const std::optional<QString>& cwd)
+{
+	QJsonObject json = op(u"select_config_file"_s);
+	json.insert(u"file"_s, file);
+	if(cwd)
+	{
+		json.insert(u"cwd"_s, *cwd);
+	}
+	return json;
+}
+
+QJsonObject deleteConfigFile(const QString& file, const std::optional<QString>& cwd)
+{
+	QJsonObject json = op(u"delete_config_file"_s);
+	json.insert(u"file"_s, file);
+	if(cwd)
+	{
+		json.insert(u"cwd"_s, *cwd);
+	}
+	return json;
+}
+
+QJsonObject listBinaries(const QString& query, const std::optional<int>& limit)
+{
+	QJsonObject json = op(u"list_binaries"_s);
+	json.insert(u"query"_s, query);
+	if(limit)
+	{
+		json.insert(u"limit"_s, *limit);
+	}
 	return json;
 }
 

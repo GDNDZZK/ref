@@ -4,6 +4,7 @@
 #include <QRegularExpression>
 
 #include <algorithm>
+#include <cstdlib>
 
 using namespace Qt::StringLiterals;
 
@@ -37,6 +38,36 @@ bool isSubsequence(const QString& text, const QString& query)
 	return true;
 }
 
+// Optimal string alignment distance (insert, delete, substitute, adjacent transpose).
+int damerauDistance(const QString& a, const QString& b)
+{
+	const qsizetype m = a.size();
+	const qsizetype n = b.size();
+	QList<QList<int>> dp(m + 1, QList<int>(n + 1, 0));
+	for(qsizetype i = 0; i <= m; ++i)
+	{
+		dp[i][0] = static_cast<int>(i);
+	}
+	for(qsizetype j = 0; j <= n; ++j)
+	{
+		dp[0][j] = static_cast<int>(j);
+	}
+	for(qsizetype i = 1; i <= m; ++i)
+	{
+		for(qsizetype j = 1; j <= n; ++j)
+		{
+			const int cost = a[i - 1] == b[j - 1] ? 0 : 1;
+			int best = std::min({dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost});
+			if(i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1])
+			{
+				best = std::min(best, dp[i - 2][j - 2] + 1);
+			}
+			dp[i][j] = best;
+		}
+	}
+	return dp[m][n];
+}
+
 } // namespace
 
 CommandRegistry::CommandRegistry(QObject* parent)
@@ -53,9 +84,9 @@ CommandRegistry::CommandRegistry(QObject* parent)
 	const QList<Entry> builtins{
 		{.id = u"new"_s, .title = QT_TRANSLATE_NOOP("Commands", "New session"), .slash = {u"new"_s, u"clear"_s}, .shortcut = u"Ctrl+Shift+N"_s, .category = Session, .icon = u"chat-plus-16"_s, .needs = Connected},
 		{.id = u"new-in"_s, .title = QT_TRANSLATE_NOOP("Commands", "New session in another folder…"), .category = Session, .icon = u"folder-16"_s, .needs = Connected},
-		{.id = u"sessions"_s, .title = QT_TRANSLATE_NOOP("Commands", "Switch session (live + history)"), .slash = {u"sessions"_s, u"resume"_s, u"continue"_s}, .shortcut = u"Ctrl+Shift+L"_s, .category = Session, .icon = u"chat-list-16"_s, .needs = Connected},
-		{.id = u"models"_s, .title = QT_TRANSLATE_NOOP("Commands", "Switch model (this session only)"), .slash = {u"models"_s}, .shortcut = u"Ctrl+Shift+M"_s, .category = Session, .icon = u"model-16"_s, .needs = OnSession},
-		{.id = u"agents"_s, .title = QT_TRANSLATE_NOOP("Commands", "Switch agent"), .slash = {u"agents"_s}, .shortcut = u"Ctrl+Shift+A"_s, .category = Session, .icon = u"agent-16"_s, .needs = OnSession},
+		{.id = u"sessions"_s, .title = QT_TRANSLATE_NOOP("Commands", "Switch session (live + history)"), .slash = {u"sessions"_s, u"resume"_s, u"continue"_s}, .hint = "[name or id]", .shortcut = u"Ctrl+Shift+L"_s, .category = Session, .icon = u"chat-list-16"_s, .needs = Connected},
+		{.id = u"models"_s, .title = QT_TRANSLATE_NOOP("Commands", "Switch model (this session only)"), .slash = {u"models"_s, u"model"_s}, .hint = "[model]", .shortcut = u"Ctrl+Shift+M"_s, .category = Session, .icon = u"model-16"_s, .needs = OnSession},
+		{.id = u"agents"_s, .title = QT_TRANSLATE_NOOP("Commands", "Switch agent"), .slash = {u"agents"_s, u"agent"_s}, .hint = "[agent]", .shortcut = u"Ctrl+Shift+A"_s, .category = Session, .icon = u"agent-16"_s, .needs = OnSession},
 		{.id = u"variant"_s, .title = QT_TRANSLATE_NOOP("Commands", "Set or cycle model variant"), .slash = {u"variant"_s, u"variants"_s, u"effort"_s}, .hint = "[name]", .shortcut = u"Ctrl+Shift+T"_s, .category = Session, .icon = u"variant-16"_s, .needs = OnSession},
 		{.id = u"compact"_s, .title = QT_TRANSLATE_NOOP("Commands", "Compact the conversation"), .slash = {u"compact"_s, u"summarize"_s}, .shortcut = u"Ctrl+Shift+C"_s, .category = Session, .icon = u"history-16"_s, .needs = OnSession},
 		{.id = u"undo"_s, .title = QT_TRANSLATE_NOOP("Commands", "Undo last prompt"), .slash = {u"undo"_s}, .shortcut = u"Ctrl+Shift+U"_s, .category = Session, .icon = u"undo-16"_s, .needs = OnSession},
@@ -76,6 +107,8 @@ CommandRegistry::CommandRegistry(QObject* parent)
 		{.id = u"sidebar"_s, .title = QT_TRANSLATE_NOOP("Commands", "Toggle sidebar"), .slash = {u"sidebar"_s}, .shortcut = u"Ctrl+Shift+B"_s, .category = View, .icon = u"sidebar-20"_s, .needs = Need::Nothing},
 		{.id = u"zoom"_s, .title = QT_TRANSLATE_NOOP("Commands", "Zoom in on the focused tile"), .shortcut = u"Ctrl+Shift+Z"_s, .category = View, .icon = u"maximize-20"_s, .needs = Connected | Need::SplitView},
 		{.id = u"mcp"_s, .title = QT_TRANSLATE_NOOP("Commands", "MCP servers: status, errors and tools"), .slash = {u"mcp"_s, u"mcps"_s}, .category = Help, .icon = u"mcp-16"_s, .needs = Connected},
+		{.id = u"reload"_s, .title = QT_TRANSLATE_NOOP("Commands", "Reload configuration"), .slash = {u"reload"_s, u"reload-config"_s}, .category = Help, .icon = u"retry-16"_s, .needs = Connected},
+		{.id = u"config"_s, .title = QT_TRANSLATE_NOOP("Commands", "Configuration (ref.json)…"), .slash = {u"config"_s, u"configuration"_s}, .category = Help, .icon = u"sliders-20"_s, .needs = Connected},
 		{.id = u"help"_s, .title = QT_TRANSLATE_NOOP("Commands", "Keybindings and commands"), .slash = {u"help"_s}, .shortcut = u"Ctrl+Shift+H"_s, .category = Help, .icon = u"info-16"_s, .needs = Need::Nothing},
 		{.id = u"settings"_s, .title = QT_TRANSLATE_NOOP("Commands", "Settings"), .shortcut = u"Ctrl+Shift+S"_s, .category = Help, .icon = u"sliders-20"_s, .needs = Need::Nothing},
 		{.id = u"palette"_s, .title = QT_TRANSLATE_NOOP("Commands", "Command palette"), .shortcut = u"Ctrl+P"_s, .category = Help, .icon = u"command-20"_s, .needs = Need::Nothing},
@@ -193,7 +226,7 @@ const CommandRegistry::Entry* CommandRegistry::find(const QString& id) const
 
 const CommandRegistry::Entry* CommandRegistry::findSlash(const QString& name) const
 {
-	const auto found = std::find_if(m_entries.begin(), m_entries.end(), [&](const Entry& entry) { return entry.slash.contains(name); });
+	const auto found = std::find_if(m_entries.begin(), m_entries.end(), [&](const Entry& entry) { return entry.slash.contains(name, Qt::CaseInsensitive); });
 	return found == m_entries.end() ? nullptr : &*found;
 }
 
@@ -351,6 +384,74 @@ QVariantList CommandRegistry::matching(const QString& query, bool slashOnly) con
 	}
 	return result;
 }
+bool CommandRegistry::isSingleSlashToken(const QString& line)
+{
+	static const QRegularExpression pattern(u"^/[A-Za-z][A-Za-z0-9_-]*$"_s);
+	return pattern.match(line.trimmed()).hasMatch();
+}
+
+QString CommandRegistry::suggestSlash(const QString& name) const
+{
+	QString needle = name.trimmed().toLower();
+	if(needle.startsWith(u'/'))
+	{
+		needle.remove(0, 1);
+	}
+	if(needle.isEmpty())
+	{
+		return {};
+	}
+	const int maxDist = needle.size() <= 2 ? 1 : 2;
+	int bestTier = 999;
+	int bestSecondary = 999;
+	QString bestName;
+	for(const Entry& entry : m_entries)
+	{
+		for(qsizetype idx = 0; idx < entry.slash.size(); ++idx)
+		{
+			const QString& candidate = entry.slash.at(idx);
+			const QString lower = candidate.toLower();
+			if(lower == needle)
+			{
+				return candidate;
+			}
+			int tier = 999;
+			int secondary = 999;
+			if(lower.startsWith(needle))
+			{
+				tier = 0;
+				secondary = static_cast<int>(lower.size() - needle.size()) * 2 + (idx == 0 ? 0 : 1);
+			}
+			else
+			{
+				const int dist = damerauDistance(needle, lower);
+				if(dist <= maxDist)
+				{
+					tier = dist;
+					secondary = static_cast<int>(std::abs(lower.size() - needle.size())) * 2 + (idx == 0 ? 0 : 1);
+				}
+			}
+			if(tier < bestTier || (tier == bestTier && secondary < bestSecondary))
+			{
+				bestTier = tier;
+				bestSecondary = secondary;
+				bestName = candidate;
+			}
+		}
+	}
+	return bestName;
+}
+
+QString CommandRegistry::suggestSlashFrom(const QString& name, const QList<proto::CommandInfo>& customCommands)
+{
+	CommandRegistry temp;
+	if(!customCommands.isEmpty())
+	{
+		temp.setCustomCommands(customCommands);
+	}
+	return temp.suggestSlash(name);
+}
+
 
 void CommandRegistry::retranslate()
 {

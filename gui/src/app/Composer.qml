@@ -46,6 +46,22 @@ Item {
 			submitted()
 	}
 
+	// Whether pressing Enter while `popup.open` should accept the popup item instead of submitting the typed draft.
+	function shouldAcceptOnEnter() {
+		const kind = model.completionKind
+		if (kind === CompletionKind.shellCommand || kind === CompletionKind.shellPath)
+			return popup.explicitlySelected
+		if (kind === CompletionKind.argument) {
+			const cmd = model.completionCommand
+			if (cmd === "cd" || cmd === "export")
+				return popup.explicitlySelected
+			if (model.completionQuery === "" && !popup.explicitlySelected)
+				return false
+			return true
+		}
+		return true
+	}
+
 	// Takes the entry selected in the list. Enter on a command that needs no arguments, or that is typed in
 	// full, runs it; otherwise the command is completed.
 	function acceptCompletion(viaEnter) {
@@ -53,13 +69,20 @@ Item {
 			model.acceptFile(popup.currentIndex)
 			return
 		}
-		const entry = popup.commandAt(popup.currentIndex)
-		if (!entry)
+		if (model.completionKind === CompletionKind.command) {
+			const entry = popup.commandAt(popup.currentIndex)
+			if (!entry)
+				return
+			const takesArgs = entry.hint !== ""
+			const typedWord = model.text.trim().slice(1).toLowerCase()
+			const names = [entry.slash, ...(entry.aliases ?? [])].map(name => name.toLowerCase())
+			const typedInFull = names.includes(typedWord)
+			model.completeCommand(entry.slash)
+			if (viaEnter && (!takesArgs || typedInFull))
+				submit()
 			return
-		const takesArgs = entry.hint !== ""
-		const typedInFull = model.text.trim() === "/" + entry.slash
-		model.completeCommand(entry.slash)
-		if (viaEnter && (!takesArgs || typedInFull))
+		}
+		if (model.acceptCompletionItem(popup.currentIndex, viaEnter))
 			submit()
 	}
 
@@ -170,7 +193,7 @@ Item {
 						if (mods.shift)
 							return true
 						event.accepted = true
-						if (popup.open)
+						if (popup.open && composer.shouldAcceptOnEnter())
 							composer.acceptCompletion(true)
 						else
 							composer.submit()
@@ -184,19 +207,30 @@ Item {
 					return false
 				}
 
-				// Tab takes a completion, else switches the agent; Shift+Tab switches back.
+				// Tab takes a completion, triggers shell completion in `!` mode, or switches the agent; Shift+Tab moves back.
 				function handleTab(event, mods) {
 					if (event.key === Qt.Key_Tab && mods.plain) {
 						event.accepted = true
 						if (popup.open)
 							composer.acceptCompletion(false)
+						else if (composer.model.shellMode)
+							composer.model.triggerCompletion()
 						else
 							Workspace.cycleAgent(composer.session.sessionId, 1)
 						return true
 					}
-					if (event.key === Qt.Key_Backtab) {
+					if (event.key === Qt.Key_Backtab || (event.key === Qt.Key_Tab && mods.shift)) {
 						event.accepted = true
-						Workspace.cycleAgent(composer.session.sessionId, -1)
+						if (composer.model.shellMode) {
+							if (popup.open)
+								popup.move(-1)
+							else
+								composer.model.triggerCompletion()
+						} else if (popup.open) {
+							popup.move(-1)
+						} else {
+							Workspace.cycleAgent(composer.session.sessionId, -1)
+						}
 						return true
 					}
 					return false
@@ -234,7 +268,7 @@ Item {
 				function handleEscape(event) {
 					if (event.key !== Qt.Key_Escape)
 						return false
-					const nothingToClose = composer.model.completionKind === CompletionKind.none && !composer.model.shellMode
+					const nothingToClose = !popup.open && !composer.model.shellMode
 					if (nothingToClose && composer.session.lastToolDelayed) {
 						event.accepted = true
 						composer.session.cancelDelayedTool()
@@ -337,8 +371,9 @@ Item {
 		id: popup
 		anchors { left: parent.left; right: parent.right; bottom: parent.top; bottomMargin: popupGap }
 		kind: composer.model.completionKind
-		entries: composer.model.completionKind === CompletionKind.file ? composer.model.files
-			: (composer.model.completionKind === CompletionKind.command ? Commands.matching(composer.model.completionQuery, true) : [])
+		fileModel: composer.model.files
+		itemModel: composer.model.completions
+		entries: composer.model.completionKind === CompletionKind.command ? Commands.matching(composer.model.completionQuery, true) : []
 		onAccepted: index => {
 			popup.currentIndex = index
 			composer.acceptCompletion(false)

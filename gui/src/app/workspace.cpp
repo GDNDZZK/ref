@@ -35,6 +35,7 @@ Workspace::Workspace(refgui::cli::LaunchOptions options, QString settingsPath, Q
 	});
 	connect(&m_connection, &refgui::workspace::Connection::connected, this, &Workspace::onBackendConnected);
 	connect(&m_connection, &refgui::workspace::Connection::toastReceived, this, &Workspace::toastFrom);
+	connect(&m_connection, &refgui::workspace::Connection::configChangedReceived, this, &Workspace::onConfigChanged);
 	connect(&m_directory, &refgui::workspace::SessionDirectory::liveChanged, this, &Workspace::onLiveChanged);
 	connect(&m_directory, &refgui::workspace::SessionDirectory::historyLoadedChanged, this, &Workspace::historyLoadedChanged);
 	connect(&m_directory, &refgui::workspace::SessionDirectory::failed, this, [this](const QString& reason) { toast(refgui::workspace::ToastLevel::Error, reason); });
@@ -43,11 +44,16 @@ Workspace::Workspace(refgui::cli::LaunchOptions options, QString settingsPath, Q
 	});
 	connect(&m_config, &refgui::workspace::BackendConfig::mcpChanged, this, &Workspace::mcpServersChanged);
 	connect(&m_config, &refgui::workspace::BackendConfig::failed, this, [this](const QString& reason) { toast(refgui::workspace::ToastLevel::Error, reason); });
+	connect(&m_configEditor, &refgui::workspace::ConfigEditorController::mutationStarted, this, &Workspace::beginLocalConfigMutation);
+	connect(&m_configEditor, &refgui::workspace::ConfigEditorController::mutationFinished, this, &Workspace::endLocalConfigMutation);
+	connect(&m_configEditor, &refgui::workspace::ConfigEditorController::toastRequested, this, &Workspace::toast);
 	connect(&m_settings, &refgui::workspace::Settings::saveFailed, this, [this](const QString& reason) {
 		toast(refgui::workspace::ToastLevel::Warn, tr("Could not save the settings: %1").arg(reason));
 	});
 	connect(&m_commands, &refgui::workspace::CommandRegistry::unavailable, this, [this] { toastCommandUnavailable(); });
 
+	m_effectiveCwd = m_cwd;
+	m_config.setCwd(m_effectiveCwd);
 	registerCommands();
 	m_connection.start();
 }
@@ -84,6 +90,23 @@ Workspace* Workspace::create(QQmlEngine*, QJSEngine* jsEngine)
 QString Workspace::currentId() const
 {
 	return m_current == nullptr ? QString() : m_current->sessionId();
+}
+
+QString Workspace::effectiveCwd() const
+{
+	const QString id = targetId({});
+	if(!id.isEmpty())
+	{
+		if(const auto* sessionInfo = m_directory.find(id); sessionInfo != nullptr && !sessionInfo->cwd.isEmpty())
+		{
+			return sessionInfo->cwd;
+		}
+		if(const auto* chatSession = m_chats.value(id, nullptr); chatSession != nullptr && !chatSession->cwd().isEmpty())
+		{
+			return chatSession->cwd();
+		}
+	}
+	return m_cwd;
 }
 
 QStringList Workspace::visibleSessionIds() const
@@ -209,6 +232,29 @@ void Workspace::toastCommandUnavailable()
 	toast(refgui::workspace::ToastLevel::Info, tr("That command is not available now."));
 }
 
+void Workspace::toastWarnings(const QStringList& warnings)
+{
+	if(warnings.isEmpty())
+	{
+		return;
+	}
+	toast(refgui::workspace::ToastLevel::Warn, refgui::workspace::toastText(warnings.join(u"; "_s)));
+}
+
+void Workspace::onConfigChanged(const QStringList& warnings)
+{
+	if(m_localReloadsInFlight > 0)
+	{
+		// ReloadConfig's own response brings both the refreshed config and warnings.
+		return;
+	}
+	m_config.refresh();
+	if(m_localMutationsInFlight == 0)
+	{
+		toastWarnings(warnings);
+	}
+}
+
 QCoro::Task<> Workspace::detachUnwaited(ChatSession* session)
 {
 	const QString id = session->sessionId();
@@ -315,7 +361,9 @@ ChatSession& Workspace::chat(const QString& sessionId)
 	ChatSession*& slot = m_chats[sessionId];
 	if(slot == nullptr)
 	{
-		slot = new ChatSession(m_connection.backend(), m_config, sessionId, this);
+		slot = new ChatSession(m_connection.backend(), m_config, sessionId, this, &m_directory);
+		connect(slot, &ChatSession::infoChanged, this, &Workspace::syncConfigCwd);
+		connect(slot->composer(), &refgui::composer::ComposerModel::toastRequested, this, &Workspace::toast);
 		connect(slot, &ChatSession::errorReported, this, [this, sessionId](const QString& text) {
 			// The current session draws its errors in the conversation; the others need a toast.
 			if(sessionId == currentId() && !m_split)
@@ -366,12 +414,12 @@ void Workspace::updateHighlight()
 	const QString id = m_split && !m_focusedTile.isEmpty() ? m_focusedTile : currentId();
 	m_directory.live().setCurrentId(id);
 	m_directory.history().setCurrentId(id);
-	if(id == m_frontId)
+	if(id != m_frontId)
 	{
-		return;
+		m_frontId = id;
+		emit frontSessionChanged();
 	}
-	m_frontId = id;
-	emit frontSessionChanged();
+	syncConfigCwd();
 }
 
 void Workspace::setCwd(const QString& cwd)
@@ -382,6 +430,19 @@ void Workspace::setCwd(const QString& cwd)
 	}
 	m_cwd = cwd;
 	emit cwdChanged();
+	syncConfigCwd();
+}
+
+void Workspace::syncConfigCwd()
+{
+	const QString next = effectiveCwd();
+	if(next == m_effectiveCwd)
+	{
+		return;
+	}
+	m_effectiveCwd = next;
+	emit effectiveCwdChanged();
+	m_config.setCwd(m_effectiveCwd);
 }
 
 void Workspace::setCurrent(ChatSession* session)
@@ -656,5 +717,6 @@ void Workspace::onLiveChanged()
 		syncTiles();
 	}
 	updateCommandContext();
+	syncConfigCwd();
 	emit backendChanged(); // canRestartBackend depends on the sessions' states
 }

@@ -97,6 +97,11 @@ void Workspace::setVariant(const QString& sessionId, const QString& variant)
 	perform(m_directory.setVariant(sessionId, wanted), {}, noPayload);
 }
 
+void Workspace::clearVariant(const QString& sessionId)
+{
+	perform(m_directory.setVariant(sessionId, QString()), {}, noPayload);
+}
+
 void Workspace::cycleAgent(const QString& sessionId, int direction)
 {
 	const QVariantList agents = m_config.agents();
@@ -144,10 +149,11 @@ void Workspace::peerText(const QString& sessionId, const QString& command, const
 	perform(m_directory.peerCommand(sessionId, command, args), std::move(reply), [](const QString& text) { return QVariant(text); });
 }
 
-void Workspace::listDirs(const QString& path, const QJSValue& cb)
+void Workspace::listDirs(const QString& path, const QJSValue& cb, const QString& cwd, bool includeFiles)
 {
-	[](QPointer<Workspace> target, QString targetPath, QJSValue callback) -> QCoro::Task<> {
-		const Result<refgui::proto::DirListing> result = co_await target->m_directory.listDirs(std::move(targetPath));
+	const std::optional<QString> optCwd = cwd.isEmpty() ? std::nullopt : std::optional<QString>(cwd);
+	[](QPointer<Workspace> target, QString targetPath, std::optional<QString> targetCwd, bool wantFiles, QJSValue callback) -> QCoro::Task<> {
+		const Result<refgui::proto::DirListing> result = co_await target->m_directory.listDirs(std::move(targetPath), std::move(targetCwd), wantFiles);
 		if(!target || !callback.isCallable() || target->m_engine == nullptr)
 		{
 			co_return;
@@ -155,7 +161,7 @@ void Workspace::listDirs(const QString& path, const QJSValue& cb)
 		QJSValueList args;
 		if(result)
 		{
-			const QVariantMap payload{{u"path"_s, result->path}, {u"dirs"_s, result->dirs}};
+			const QVariantMap payload{{u"path"_s, result->path}, {u"dirs"_s, result->dirs}, {u"files"_s, result->files}};
 			args = {true, target->m_engine->toScriptValue(QVariant(payload)), QString()};
 		}
 		else
@@ -167,7 +173,38 @@ void Workspace::listDirs(const QString& path, const QJSValue& cb)
 		{
 			qWarning().noquote() << u"A reply callback failed: %1 (%2:%3)"_s.arg(callResult.property(u"message"_s).toString(), callResult.property(u"fileName"_s).toString(), callResult.property(u"lineNumber"_s).toString());
 		}
-	}(QPointer<Workspace>(this), path, cb);
+	}(QPointer<Workspace>(this), path, optCwd, includeFiles, cb);
+}
+
+void Workspace::reloadConfig(const QJSValue& cb)
+{
+	const Reply reply = wrap(cb);
+	const QString cwd = effectiveCwd();
+	const std::optional<QString> optCwd = cwd.isEmpty() ? std::nullopt : std::optional<QString>(cwd);
+	[](QPointer<Workspace> target, std::optional<QString> targetCwd, Reply callback) -> QCoro::Task<> {
+		if(!target)
+		{
+			co_return;
+		}
+		++target->m_localReloadsInFlight;
+		const Result<refgui::proto::ReloadConfigResult> result = co_await target->m_config.reload(std::move(targetCwd));
+		if(!target)
+		{
+			co_return;
+		}
+		--target->m_localReloadsInFlight;
+		if(!result)
+		{
+			target->report(callback, false, result.error().message);
+			co_return;
+		}
+		target->toast(refgui::workspace::ToastLevel::Info, tr("Configuration reloaded"));
+		target->toastWarnings(result->warnings);
+		if(callback)
+		{
+			callback(true, QVariant(result->warnings));
+		}
+	}(QPointer<Workspace>(this), optCwd, reply);
 }
 
 void Workspace::deleteHistory(const QString& sessionId)

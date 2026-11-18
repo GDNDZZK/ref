@@ -340,16 +340,39 @@ Rectangle {
 			}
 
 			McpSummary {
-				x: 18
-				anchors.verticalCenter: parent.verticalCenter
+				anchors { left: parent.left; leftMargin: 18; verticalCenter: parent.verticalCenter }
 			}
 
-			IconButton {
+			Row {
+				id: footerActions
 				anchors { right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
-				buttonSize: 32
-				iconName: "sliders"
-				Accessible.name: qsTr("Settings")
-				onClicked: Commands.run(CommandId.settings)
+				spacing: 4
+
+				IconButton {
+					buttonSize: 32
+					iconName: "retry"
+					iconSize: 16
+					enabled: Workspace.connectionState === "connected"
+					tooltipText: qsTr("Reload configuration")
+					Accessible.name: qsTr("Reload configuration")
+					onClicked: Commands.run(CommandId.reload)
+				}
+				IconButton {
+					buttonSize: 32
+					iconName: "file-text"
+					iconSize: 16
+					enabled: Workspace.connectionState === "connected"
+					tooltipText: qsTr("Configuration (ref.json)…")
+					Accessible.name: qsTr("Configuration (ref.json)…")
+					onClicked: Commands.run(CommandId.config)
+				}
+				IconButton {
+					buttonSize: 32
+					iconName: "sliders"
+					tooltipText: qsTr("Settings")
+					Accessible.name: qsTr("Settings")
+					onClicked: Commands.run(CommandId.settings)
+				}
 			}
 		}
 	}

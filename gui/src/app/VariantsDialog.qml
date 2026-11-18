@@ -33,7 +33,10 @@ SessionDialog {
 			required property var modelData
 			selected: modelData.value === dialog.session.variant
 			onActivated: {
-				Workspace.setVariant(dialog.sessionId, modelData.value)
+				if (modelData.value === "")
+					Workspace.clearVariant(dialog.sessionId)
+				else
+					Workspace.setVariant(dialog.sessionId, modelData.value)
 				dialog.close()
 			}
 

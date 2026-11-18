@@ -21,11 +21,11 @@ const QString NoPendingQuestion = u"No pending question with that id."_s;
 const QString NoPendingPermission = u"No pending permission request with that id."_s;
 } // namespace
 
-ChatSession::ChatSession(Backend& backend, const refgui::workspace::BackendConfig& config, QString sessionId, QObject* parent)
+ChatSession::ChatSession(Backend& backend, const refgui::workspace::BackendConfig& config, QString sessionId, QObject* parent, const refgui::workspace::SessionDirectory* directory)
 	: QObject(parent)
 	, m_sessionId(std::move(sessionId))
 	, m_controller(backend)
-	, m_composer(config, m_controller, refgui::composer::sharedPromptHistory())
+	, m_composer(config, m_controller, refgui::composer::sharedPromptHistory(), nullptr, directory)
 {
 	connect(&m_controller, &refgui::session::SessionController::connectionChanged, this, &ChatSession::readyChanged);
 	connect(&m_controller, &refgui::session::SessionController::turnInProgressChanged, this, &ChatSession::busyChanged);

@@ -10,6 +10,9 @@ QtObject {
 	readonly property string detach: "detach"
 	readonly property string mcp: "mcp"
 	readonly property string settings: "settings"
+	readonly property string config: "config"
+	readonly property string reload: "reload"
 	readonly property string agents: "agents"
 	readonly property string models: "models"
+	readonly property string palette: "palette"
 }

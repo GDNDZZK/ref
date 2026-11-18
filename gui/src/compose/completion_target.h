@@ -11,18 +11,26 @@ struct CompletionTarget
 	enum class Kind
 	{
 		None,
-		Command, // "/res": the whole text is a command name being typed
-		File,    // "@src/ma": a file mention
+		Command,      // "/res": the whole text is a command name being typed
+		CommandArg,   // "/models claude", "/cd src/", "/close-session a b": built-in command argument
+		File,         // "@src/ma": a file mention (in a prompt or custom command arguments)
+		ShellCommand, // first token in `!` shell mode (history + PATH binaries)
+		ShellPath,    // path token in `!` shell mode (path command or any argument token)
 	};
 
 	Kind kind = Kind::None;
-	QString query{};     // what was typed after the `/` or `@`
-	qsizetype start = 0; // where the `/` or `@` is
+	QString command{};   // canonical slash command name for CommandArg
+	QString query{};     // what was typed in the active token up to `cursor`
+	qsizetype start = 0; // start offset in `text` of the token being replaced
+	qsizetype end = 0;   // end offset in `text` of the token being replaced
 };
 
-// Finds the target at `cursor`. Shell mode has none. A command is only offered while the
-// text is a single word starting with `/` and the cursor is at its end; an `@` starts a
-// mention when it is at the start or follows whitespace, up to the next whitespace.
-CompletionTarget completionTarget(const QString& text, qsizetype cursor, bool shellMode);
+// Finds the completion target at `cursor`.
+// In shell mode, the first token offers ShellCommand (or ShellPath when it contains `/` or starts
+// with `.` or `~`), and subsequent tokens offer ShellPath; an empty shell draft offers
+// ShellCommand only when `forceShellEmpty` is set (e.g. Tab).
+// Outside shell mode, a single `/word` at the end offers Command, built-in commands with
+// completable arguments offer CommandArg, and `@` after start/whitespace offers File.
+CompletionTarget completionTarget(const QString& text, qsizetype cursor, bool shellMode, bool forceShellEmpty = false);
 
 } // namespace refgui::compose

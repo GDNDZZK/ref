@@ -19,8 +19,8 @@ class BackendConfig : public QObject
 	Q_PROPERTY(QVariantList models READ models NOTIFY changed)
 	Q_PROPERTY(QVariantList commands READ commands NOTIFY changed)
 	Q_PROPERTY(QString defaultAgent READ defaultAgent NOTIFY changed)
+	Q_PROPERTY(QStringList warnings READ warnings NOTIFY changed)
 	Q_PROPERTY(QVariantList mcpServers READ mcpServers NOTIFY mcpChanged)
-
 public:
 	explicit BackendConfig(Connection& connection, QObject* parent = nullptr);
 
@@ -32,15 +32,23 @@ public:
 	// User-defined commands as maps: name, description, source.
 	QVariantList commands() const { return m_commands; }
 	QString defaultAgent() const { return m_config.defaultAgent; }
+	QStringList warnings() const { return m_config.warnings; }
 	const proto::ServerConfig& config() const { return m_config; }
+	const QString& cwd() const { return m_cwd; }
+	void setCwd(const QString& cwd);
 	// MCP servers as maps: name, status, error (empty for none), tools.
 	QVariantList mcpServers() const { return m_mcpServers; }
 
 	// The variants of a model, empty when it has none or is unknown.
 	Q_INVOKABLE QStringList variantsOf(const QString& provider, const QString& modelId) const;
+	// Reloads effective config and MCP status from the backend for the active cwd.
+	Q_INVOKABLE void refresh();
 	// Asks the backend for the status of the MCP servers.
 	Q_INVOKABLE void refreshMcp();
-
+	// Replaces the cached config directly (e.g. from ReloadConfig's response) and refreshes MCP.
+	void apply(proto::ServerConfig config);
+	// Runs ReloadConfig on the backend and updates this cache + MCP status.
+	QCoro::Task<client::Result<proto::ReloadConfigResult>> reload(std::optional<QString> cwdOverride = {});
 signals:
 	void changed();
 	void mcpChanged();
@@ -48,15 +56,20 @@ signals:
 	void failed(const QString& reason);
 
 private:
+	std::optional<QString> optionalCwd() const;
 	QCoro::Task<> load();
 	QCoro::Task<> loadMcp();
 
+	Connection& m_connection;
 	client::Backend& m_backend;
+	QString m_cwd;
 	proto::ServerConfig m_config;
 	QVariantList m_agents;
 	QVariantList m_models;
 	QVariantList m_commands;
 	QVariantList m_mcpServers;
+	int m_configSerial = 0;
+	int m_mcpSerial = 0;
 };
 
 } // namespace refgui::workspace

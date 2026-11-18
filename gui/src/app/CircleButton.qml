@@ -13,6 +13,7 @@ Item {
 	signal clicked()
 
 	readonly property color color: face.color // for glyphs painted in the button's color
+	readonly property alias hovered: hover.hovered
 	default property alias content: face.data
 
 	implicitWidth: 34
