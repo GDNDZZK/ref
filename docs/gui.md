@@ -34,8 +34,8 @@ On Linux the program needs glibc 2.38 and the C++ runtime of GCC 13 (Ubuntu 24.0
 ## Starting
 
 ```bash
-ref-gui                       # new session in the current directory
-ref-gui ~/src/project         # new session in another directory
+ref-gui                       # open in the current directory (no session started yet)
+ref-gui ~/src/project         # open with another default directory
 ref-gui -c                    # continue the most recent session for this directory
 ref-gui -s ses_01a1…          # open a session by id (live or from history)
 ref-gui -w                    # start in the split view
@@ -44,30 +44,31 @@ ref-gui --agent plan --model openai/gpt-5#high
 
 | Option | Meaning |
 |---|---|
-| `DIR` | Directory for the new session (default: the current directory). |
+| `DIR` | Default directory for new sessions (default: the current directory). |
 | `-c`, `--continue` | Continue the most recent session for this directory. |
 | `-s`, `--session ID` | Open a session by id, live or from history. |
 | `-w`, `--watch` | Start in the [split view](#split-view) of the live background sessions. |
-| `--agent NAME` | Agent for the new session. |
-| `--model provider/model[#variant]` | Model for the new session. |
+| `--agent NAME` | Default agent for new sessions. |
+| `--model provider/model[#variant]` | Default model for new sessions. |
 | `--server ws://host:port` | Connect to this backend instead of finding or starting one. |
 | `--token T` | Token for `--server`. Needs `--server`. |
 | `--mock` | Use a private fake backend with canned scripts (for development, see [The mock backend](development.md#the-mock-backend)). Cannot be combined with `--server`. |
 | `-V`, `--version`, `-h`, `--help` | Version and help. |
 
-The window title is `ref`. On Windows `ref-gui.exe` is a window-only program: it opens no console, so `--help` and `--version` print nothing there.
+Without `-c` or `-s`, `ref-gui` opens in the empty workspace state (*No session open*) without creating a blank session (`--smoke` prints `ready` when no session flag is passed, or `attached <id>` with `-c` / `-s`). The window title is `ref`. On Windows `ref-gui.exe` is a window-only program: it opens no console, so `--help` and `--version` print nothing there.
 
 ## The window
 
-The window has a sidebar on the left and the content on the right: one session, or the [split view](#split-view).
+The window has a sidebar on the left and the content on the right: one session, the empty workspace (*No session open*, with *New session in folder…* and *New session*), or the [split view](#split-view).
 
-- **Running** lists the live sessions of this window, the newest first. **History** lists the sessions the backend has saved, by time of the last change; the search box filters the 200 most recent ones. A click opens a session. Double-click a running session, or use the right-click menu, to rename or close it. The right-click menu of a history entry deletes it.
+- **Running** lists the live sessions of this window, the newest first. **History** lists the sessions the backend has saved, by time of the last change; the search box filters the 200 most recent ones. A click opens a session; clicking the already-open session again in single view, choosing *Move to background* from its right-click menu, or running `/detach` (`/background`, `/leave`, or Command Palette → *Move session to background*) detaches it to the background without stopping it and returns to *No session open*. Double-click a running session, or use the right-click menu, to rename or close it. The right-click menu of a history entry deletes it.
 - A running session is labelled with the name you gave it, else its title, else the name of its directory. A session in the history is labelled with its title (on one line), else its name, else the name of its directory, as in the terminal UI. The *Running* list is as tall as its rows and scrolls only when *History* would get fewer than three rows.
-- The *New session* button creates a session in the directory of the current one. The folder button next to it, or the command *New session in another folder…*, asks for a directory first.
-- Closing a session that is still working asks first; its conversation stays in history. When you close the last session, a new one starts in the same directory, so the window is never empty.
+- The *New session* button creates a session in the workspace's default directory. The folder button next to it, or *New session in folder…* / *New session in another folder…*, asks for a directory first and updates the workspace's default directory to that folder.
+- Closing a session that is still working asks for confirmation first (including from the sidebar and the *Sessions* dialog); its conversation stays in history. Closing the last open session returns to *No session open* instead of starting a new one (and in split view, closing the held foreground session clears it without pulling a background tile out of the grid).
 - The sidebar can be hidden and shown again (Ctrl+Shift+B). Its state is remembered.
 - At the top of the sidebar, above *Running*, the *Todo* section shows the to-do list of the session you are looking at (in the split view, of the focused tile) with the number of items done, like *Todo 2/5*; cancelled items count in neither number. Long items wrap, the list scrolls when it takes more than a third of the sidebar, and the section is hidden while the session has no to-do list.
-- The command palette (Ctrl+P) lists every command and filters as you type. Commands that take no argument run at once; the others (rename, change directory, close a session by name, peers) ask for it. It holds the same commands as the `/` list in the input box, including your [custom commands](configuration.md) (group *Custom*). Without a shortcut: *New session in another folder…*, *Rename the session*, *Change this session's working directory*, *Close live sessions*, the `peers` commands and *MCP servers*. There are no `/editor` and `/exit` commands.
+- The command palette (Ctrl+P) lists every command and filters as you type. Commands that take no argument run at once; choosing *Rename the session*, *Change this session's working directory*, *Export transcript as markdown*, *Set or cycle model variant* or *Close live sessions* opens its dedicated dialog directly, and pressing Esc while entering custom-command arguments returns to the command list. It holds the same commands as the `/` list in the input box, including your [custom commands](configuration.md) (group *Custom*). Without a shortcut: *New session in another folder…*, *Move session to background* (`/detach`), *Rename the session*, *Change this session's working directory*, *Close live sessions*, the `peers` commands, *MCP servers*, *Configuration* (`/config`) and *Reload configuration* (`/reload`). There are no `/editor` and `/exit` commands.
+- *Configuration* (`/config` or `/configuration`, the configuration button in the sidebar footer, or *Settings* → *Edit ref.json…*) opens the 860 px six-section visual and raw JSONC editor for global `ref.json`, with multi-profile switching (`ref.json.<n>.bak`) and Ctrl+S to save; `/reload` (`/reload-config`, or the reload button) hot-reloads configuration across live sessions and MCP servers. See [Graphical editor and profiles](configuration.md#graphical-editor-and-profiles).
 - If the running backend is older than the GUI, a banner at the top of the content offers *Restart backend*. The button is disabled while a session is running or waiting for permission. The restart stops the backend; the GUI then starts the installed one again.
 - A message in the corner reports errors of sessions you are not looking at and the result of actions such as an export.
 - The *Sessions* dialog (Ctrl+Shift+L or `/sessions`) filters between *All*, *User-created*, and *By creator* of the selected row, marks spawned sessions with their creator, and searches creator names and ids alongside session names, titles, and directories.
@@ -121,18 +122,18 @@ The split view (Ctrl+Shift+W, the button at the top right, or `ref-gui -w`) show
 
 | Key | Action |
 |---|---|
-| Enter | Send. While the session is busy the prompt waits in a queue above the input box. |
+| Enter | Send (or in `/cd`, `/export` and `!` shell mode, run the typed text unless a completion was explicitly selected with ↑/↓). While the session is busy the prompt waits in a queue above the input box. |
 | Shift+Enter, Ctrl+J | New line. |
-| Tab, Shift+Tab | Next or previous agent. With the `/` or `@` list open, Tab completes. |
-| Esc, Esc | Interrupt the running turn (the second press within 1.5 seconds). A first Esc closes an open list or leaves shell mode instead. |
-| ↑, ↓ | Walk through the prompt history: ↑ from an empty box or from the start of the text, and while browsing from the first line; ↓ from the last line while browsing. |
+| Tab, Shift+Tab | Next or previous agent (outside shell mode). In `/`, `@` and `!` shell mode, Tab completes (and drills into subdirectories on paths). |
+| Esc, Esc | Interrupt the running turn (the second press within 1.5 seconds). A first Esc closes an open list or leaves shell mode (keeping any typed text) instead. |
+| ↑, ↓ | Walk through the prompt history (filtered to `!` entries in shell mode): ↑ from an empty box or from the start of the text, and while browsing from the first line; ↓ from the last line while browsing. |
 | Ctrl+C | Without a selection, empties the input box (text of 20 characters or more goes to the history first). With a selection it copies. |
-| `!` at the start | Shell mode: the line runs as a shell command. Backspace on an empty box or Esc leaves it. |
+| `!` at the start | Shell mode: the line runs as a shell command, with `!` history + `$PATH` binary completion for commands and file/directory completion for arguments. Backspace on an empty box or Esc leaves it. |
 
 On macOS, Ctrl in this table is Cmd.
 
 - The tags under the box show the agent, the model and the variant. Click one to choose; a tag changes only after the backend has confirmed. There is no Ctrl+T for the variant: use Ctrl+Shift+T or click the variant tag.
-- `/` lists the commands, the same as the command palette, custom commands included. `@` lists files under the session's directory (`.gitignore` is respected) and inserts `@path `.
+- `/` lists commands case-insensitively (including singular aliases `/model` and `/agent`, `/models <m>`, `/agents <a>`, `/variant <v|default>`, `/sessions <s>`, `/close-session <s…>`) and completes arguments for `/cd`, `/export`, `/models`, `/agents`, `/variant`, `/sessions` and `/close-session` (plus `@file` inside custom command arguments). An unknown single-word `/foo` is blocked with a warning toast and fuzzy suggestion instead of being sent as a prompt. `@` lists files under the session's directory (`.gitignore` is respected) and inserts `@path `.
 - Images and files: paste an image from the clipboard (Ctrl+V), paste a file path or `file://` address, or drop any file on the box. Supported images (PNG, JPEG, GIF and WebP, up to 20 MiB each) attach as a thumbnail above the text with a remove button and an `[Image N]` token in the text, as in the terminal UI; other existing local files insert their path at the cursor.
 - A prompt sent while the session is busy waits in the queue strip above the box. *Remove* on your own prompt takes it back into the box with its pictures; if the backend has already taken it, the GUI says so.
 - The prompt history is the file `prompt-history.jsonl` in the state directory (500 entries) and is shared with the terminal UI. Shell lines are saved with their `!`.
@@ -160,8 +161,8 @@ On macOS, Ctrl in the table is Cmd. The letters are the same in the [Web UI](web
 | Command palette | Ctrl+P | |
 | New session (same directory) | Ctrl+Shift+N | `/new` |
 | Switch session (live and history) | Ctrl+Shift+L | `/sessions` |
-| Switch model (this session only) | Ctrl+Shift+M | `/models` |
-| Switch agent | Ctrl+Shift+A | `/agents` |
+| Switch model (this session only) | Ctrl+Shift+M | `/models` (`/model`) |
+| Switch agent | Ctrl+Shift+A | `/agents` (`/agent`) |
 | Set or cycle the model variant | Ctrl+Shift+T | `/variant` |
 | Compact the conversation (no confirmation) | Ctrl+Shift+C | `/compact` |
 | Undo last prompt | Ctrl+Shift+U | `/undo` |
@@ -186,6 +187,7 @@ Open them with Ctrl+Shift+S or the settings button at the bottom of the sidebar.
 - **Theme:** System, Light or Dark.
 - **Language:** System, English or 简体中文. The conversation area and the dialogs are translated.
 - **Notifications:** the master switch and the three kinds described [above](#notifications).
+- **Configuration:** *Reload configuration* and *Edit ref.json…* (see [Graphical editor and profiles](configuration.md#graphical-editor-and-profiles)).
 
 They are saved in `gui.json` in the state directory ([Files and directories](cli.md#files-and-directories)), together with whether the sidebar is shown and the size of the window:
 

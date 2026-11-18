@@ -26,7 +26,7 @@ ref-web --port 8080 --no-open # a fixed port, do not open the browser
 
 Without `--port`, `ref-web` picks a random free port in 10000–65535. It keeps the port in `<state dir>/web/port` and tries it first the next time, so the address stays the same while that port is free; when it is taken, a new one is picked and kept. `--port N` uses that port, or stops with an error if another program has it.
 
-All options are listed in [Command line](cli.md#ref-web). The page uses the directory you pass as the directory for new sessions; without one, it uses the directory `ref-web` was started in. The address `ref-web` prints carries it as `?dir=`; the address bar can also hold `?session=<id>` (open that session) and `?view=split` (the split view), and follows the session you switch to.
+All options are listed in [Command line](cli.md#ref-web). Opening the page without `?session=<id>` shows the empty workspace (*No session open*) rather than creating a blank session automatically; the directory you pass sets the default directory for new sessions (without one, the directory `ref-web` was started in). The address `ref-web` prints carries it as `?dir=`; the address bar can also hold `?session=<id>` (open that session; if attaching fails, an error toast is shown without creating a session) and `?view=split` (the split view), and follows the session you switch to.
 
 ## Signing in
 
@@ -97,12 +97,12 @@ The page is the same interface as the [desktop GUI](gui.md). This section lists 
 
 **The window**
 
-- The sidebar on the left starts with the to-do list of the session on screen (in the split view, of the focused tile), "Todo done/total" with the items below it; the section is absent while that session has no list, and scrolls inside once it passes a third of the sidebar. Below it come the running sessions, the history with a search box, the state of the MCP servers and the settings. It can be hidden (Alt+B); the state is remembered. In a window narrower than 800 px the sidebar becomes a drawer over the content, and there is no split view.
+- The sidebar on the left starts with the to-do list of the session on screen (in the split view, of the focused tile), "Todo done/total" with the items below it; the section is absent while that session has no list, and scrolls inside once it passes a third of the sidebar. Below it come the running sessions, the history with a search box, and a footer with MCP server status, *Configuration (ref.json)*, *Reload configuration* and *Settings*. It can be hidden (Alt+B); the state is remembered. In a window narrower than 800 px the sidebar becomes a drawer over the content, and there is no split view.
 - Running sessions are labelled with their name, else their title, else the name of their directory. Sessions in the history are labelled with their title (on one line), else their name, else the name of their directory, as in the terminal UI. The *Running* list is as tall as its rows and scrolls only when *History* would get fewer than three rows.
-- *New session* creates a session in the directory of the page. To start one in another directory, use the folder button next to it or the command *New session in another folder…* (no shortcut). It asks for a path; Tab or a click completes sub-directories, which the backend lists.
-- The command palette (Ctrl+P, Cmd+P on macOS) runs any command. Commands without an argument run at once; rename, change directory, export, variant, close a session and the peer name ask for it first. The `/` list in the input box shows the same commands, custom commands included.
+- *New session* creates a session in the page's default directory. To start one in another directory, use the folder button next to it, *New session in folder…* in the empty workspace, or the command palette; choosing a folder also updates the workspace's default directory for later sessions. It asks for a path; Tab or a click completes sub-directories, which the backend lists.
+- The command palette (Ctrl+P, Cmd+P on macOS) runs any command. Commands without an argument run at once; choosing rename, change directory, export, variant or close live sessions opens its dedicated dialog directly, and pressing Esc while entering custom-command arguments returns to the command list. The `/` list in the input box shows the same commands, custom commands included. `/config` (`/configuration`, the sidebar footer button, or *Settings* → *Edit ref.json…*) opens the 860 px six-section visual and raw JSONC editor for global `ref.json` with multi-profile switching and Ctrl+S (Cmd+S) save; `/reload` (`/reload-config`) hot-reloads configuration across live sessions and MCP servers (see [Configuration](configuration.md#graphical-editor-and-profiles)).
 - The sessions dialog (Alt+L or `/sessions`) filters between *All*, *User-created*, and *By creator* of the selected row, and searches creator names and ids alongside session names and directories.
-- Closing the last session starts a new one in the same directory; the page never ends up empty. There is no `/editor` and no `/exit`. `/compact` asks for no confirmation.
+- Clicking the already-open session in *Running* (in single view), choosing *Move to background* from its context menu, or running `/detach` (`/background`, `/leave`) moves the session to the background without stopping it and returns to *No session open*. Closing a working session asks for confirmation first; closing the last open session returns to *No session open* instead of starting a new one (and in split view, closing the held foreground session clears it without pulling a background tile out of the grid). There is no `/editor` and no `/exit`. `/compact` asks for no confirmation.
 - When the backend is older than the page, a banner at the top offers *Restart backend*. The button is disabled while a session is running or waiting for permission. The restart stops the backend, the page reconnects, and `ref-web` starts the installed, newer one.
 - Errors from sessions you are not looking at (and from any session in the split view) appear as a message in the top right corner, "name: first line of the error". At most four show at once, for 3.5 s (info), 6 s (warning) or 8 s (error); hovering pauses the timer, and a repeated message restarts the timer instead of stacking. The error of the session on screen is shown at the end of its conversation.
 
@@ -136,17 +136,17 @@ When the model calls the `question` tool, the questions appear inside the card o
 
 | Key | Action |
 |---|---|
-| Enter | Send. While the session is busy the prompt waits in a queue; *Remove* takes it back. |
+| Enter | Send (or in `/cd`, `/export` and `!` shell mode, run the typed text unless a completion was explicitly selected with ↑/↓). While the session is busy the prompt waits in a queue; *Remove* takes it back. |
 | Shift+Enter, Ctrl+J | New line. |
-| Tab, Shift+Tab | Next or previous agent. With the `/` or `@` list open, Tab completes. |
+| Tab, Shift+Tab | Next or previous agent (outside shell mode). In `/`, `@` and `!` shell mode, Tab completes (and drills into subdirectories on paths). |
 | Alt+T | Next model variant (Ctrl+T belongs to the browser). |
-| Esc, Esc | Interrupt the running turn (the second press within 1.5 seconds). A first Esc closes an open list, leaves shell mode, or, when a tool call waits for its delay, stops the turn before the tool runs. |
-| ↑, ↓ | Prompt history: ↑ from an empty box or from the start of the text, and while browsing from the first line; ↓ from the last line while browsing. |
+| Esc, Esc | Interrupt the running turn (the second press within 1.5 seconds). A first Esc closes an open list, leaves shell mode (keeping any typed text), or, when a tool call waits for its delay, stops the turn before the tool runs. |
+| ↑, ↓ | Prompt history (filtered to `!` entries in shell mode): ↑ from an empty box or from the start of the text, and while browsing from the first line; ↓ from the last line while browsing. |
 | Ctrl+C | Without a selection, empties the input box; with a selection it copies. |
-| `!` at the start | Shell mode: the line runs as a shell command. Backspace on an empty box or Esc leaves it. |
+| `!` at the start | Shell mode: the line runs as a shell command, with `!` history + `$PATH` binary completion for commands and file/directory completion for arguments. Backspace on an empty box or Esc leaves it. |
 
 - Paste an image or drop any file on the box (or paste `file://` URLs): supported images (PNG, JPEG, GIF or WebP, up to 20 MiB each) attach as `[Image N]` tokens, as in the terminal UI; other files insert their path at the caret (or filename when the browser withholds the path).
-- `@` lists files under the session's directory and inserts `@path `.
+- `/` matches commands case-insensitively (including singular aliases `/model` and `/agent`, `/models <m>`, `/agents <a>`, `/variant <v|default>`, `/sessions <s>`, `/close-session <s…>`) and completes arguments for `/cd`, `/export`, `/models`, `/agents`, `/variant`, `/sessions` and `/close-session` (plus `@file` inside custom command arguments). An unknown single-word `/foo` is blocked with a warning toast and fuzzy suggestion instead of being sent as a prompt. `@` lists files under the session's directory and inserts `@path `.
 - The prompt history (500 entries) is kept in the browser (`localStorage`, key `ref.promptHistory`). It is not shared with the terminal UI or the GUI.
 
 ## Keyboard shortcuts
@@ -158,8 +158,8 @@ The shortcuts are Alt+letter, matched by the physical key, so they work with any
 | Command palette | Ctrl+P (Cmd+P on macOS) | |
 | New session (same directory) | Alt+N | `/new` |
 | Switch session (live and history) | Alt+L | `/sessions` |
-| Switch model (this session only) | Alt+M | `/models` |
-| Switch agent | Alt+A | `/agents` |
+| Switch model (this session only) | Alt+M | `/models` (`/model`) |
+| Switch agent | Alt+A | `/agents` (`/agent`) |
 | Set or cycle the model variant | Alt+T | `/variant` |
 | Compact the conversation (no confirmation) | Alt+C | `/compact` |
 | Undo last prompt | Alt+U | `/undo` |
@@ -187,7 +187,7 @@ The page can show a system notification when a session you are not looking at ne
 
 ## Settings
 
-Alt+S or the settings button in the sidebar opens them: the theme (System, Light or Dark), the language (System, English or 简体中文) and the notifications. They are saved in the browser (`localStorage`, key `ref.settings`, together with whether the sidebar is shown) and are shared between the tabs of that browser. A wrong value in the stored settings is replaced by its default; the others are kept.
+Alt+S or the settings button in the sidebar opens them: the theme (System, Light or Dark), the language (System, English or 简体中文), the notifications, and *Configuration* (*Reload configuration* and *Edit ref.json…*, see [Configuration](configuration.md#graphical-editor-and-profiles)). Preferences are saved in the browser (`localStorage`, key `ref.settings`, together with whether the sidebar is shown) and are shared between the tabs of that browser. A wrong value in the stored settings is replaced by its default; the others are kept. All UI transitions honor `prefers-reduced-motion: reduce`.
 
 ## Connection
 
