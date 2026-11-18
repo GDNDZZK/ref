@@ -7,8 +7,13 @@
 #include <QTextFragment>
 #include <QTimer>
 
-LinkHighlighter::LinkHighlighter(QTextDocument* document, const QColor& color) : QSyntaxHighlighter(document), m_color(color)
+LinkHighlighter::LinkHighlighter(QTextDocument* document, const QColor& color, bool streaming)
+	: QSyntaxHighlighter(document)
+	, m_color(color)
+	, m_streaming(streaming)
 {
+	m_timer.setSingleShot(true);
+	connect(&m_timer, &QTimer::timeout, this, &LinkHighlighter::runRehighlight);
 	// setMarkdown() reports only the clear before the import, so the highlighter's own pass sees an
 	// empty document. One full pass after the change is done covers the imported text.
 	connect(document, &QTextDocument::contentsChanged, this, &LinkHighlighter::scheduleRehighlight);
@@ -16,6 +21,7 @@ LinkHighlighter::LinkHighlighter(QTextDocument* document, const QColor& color) :
 
 LinkHighlighter::~LinkHighlighter()
 {
+	m_timer.stop();
 	if(QTextDocument* doc = document())
 	{
 		disconnect(doc, &QTextDocument::contentsChanged, this, &LinkHighlighter::scheduleRehighlight);
@@ -25,16 +31,21 @@ LinkHighlighter::~LinkHighlighter()
 
 void LinkHighlighter::scheduleRehighlight()
 {
-	if(m_pending || m_highlighting)
+	if(m_highlighting || m_timer.isActive())
 	{
 		return;
 	}
-	m_pending = true;
-	QTimer::singleShot(0, this, [this] {
-		m_pending = false;
-		const QScopedValueRollback guard(m_highlighting, true); // the new formats report a change too
-		rehighlight();
-	});
+	m_timer.start(m_streaming ? StreamingThrottleMs : 0);
+}
+
+void LinkHighlighter::runRehighlight()
+{
+	if(m_highlighting)
+	{
+		return;
+	}
+	const QScopedValueRollback guard(m_highlighting, true); // the new formats report a change too
+	rehighlight();
 }
 
 void LinkHighlighter::setColor(const QColor& color)
@@ -44,10 +55,23 @@ void LinkHighlighter::setColor(const QColor& color)
 		return;
 	}
 	m_color = color;
-	const QScopedValueRollback guard(m_highlighting, true);
-	rehighlight();
+	m_timer.stop();
+	runRehighlight();
 }
 
+void LinkHighlighter::setStreaming(bool streaming)
+{
+	if(streaming == m_streaming)
+	{
+		return;
+	}
+	m_streaming = streaming;
+	if(!m_streaming)
+	{
+		m_timer.stop();
+		runRehighlight();
+	}
+}
 void LinkHighlighter::highlightBlock(const QString&)
 {
 	const QTextBlock current = currentBlock();
@@ -77,7 +101,7 @@ void LinkColorizer::setDocument(QQuickTextDocument* document)
 	m_document = document;
 	if(m_document)
 	{
-		m_highlighter = new LinkHighlighter(m_document->textDocument(), m_color);
+		m_highlighter = new LinkHighlighter(m_document->textDocument(), m_color, m_streaming);
 	}
 	emit documentChanged();
 }
@@ -94,4 +118,18 @@ void LinkColorizer::setColor(const QColor& color)
 		m_highlighter->setColor(color);
 	}
 	emit colorChanged();
+}
+
+void LinkColorizer::setStreaming(bool streaming)
+{
+	if(m_streaming == streaming)
+	{
+		return;
+	}
+	m_streaming = streaming;
+	if(m_highlighter)
+	{
+		m_highlighter->setStreaming(streaming);
+	}
+	emit streamingChanged();
 }

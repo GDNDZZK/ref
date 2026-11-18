@@ -16,9 +16,6 @@ namespace
 // Files that render Markdown on purpose. Their text has been through markdownForDisplay().
 const QStringList MarkdownFiles = {u"MarkdownBlock.qml"_s, u"ReasoningBlock.qml"_s, u"UserBlock.qml"_s};
 
-// Letters of fixed labels laid out as rich text, each escaped.
-const QStringList RichTextFiles = {u"ShimmerText.qml"_s};
-
 // The only file that may declare a ToolTip item.
 const QString PlainToolTipFile = u"PlainToolTip.qml"_s;
 
@@ -107,27 +104,22 @@ QStringList problems(const QString& name, const QString& rawSource)
 	QStringList found;
 	const QString source = withoutStringsAndComments(rawSource);
 	const bool markdownAllowed = MarkdownFiles.contains(name);
-	const bool richAllowed = RichTextFiles.contains(name);
-
-	if(!richAllowed)
+	for(const QRegularExpressionMatch& match : TextItem.globalMatch(source))
 	{
-		for(const QRegularExpressionMatch& match : TextItem.globalMatch(source))
+		const QString own = ownProperties(block(source, match.capturedEnd() - 1));
+		const QRegularExpressionMatch format = TextFormat.match(own);
+		if(!format.hasMatch())
 		{
-			const QString own = ownProperties(block(source, match.capturedEnd() - 1));
-			const QRegularExpressionMatch format = TextFormat.match(own);
-			if(!format.hasMatch())
-			{
-				found.append(u"%1: %2 without textFormat of its own"_s.arg(name, match.captured(1)));
-			}
-			else if(!format.captured(1).contains(u"PlainText"_s) && !(markdownAllowed && format.captured(1).contains(u"MarkdownText"_s)))
-			{
-				found.append(u"%1: %2 with textFormat:%3"_s.arg(name, match.captured(1), format.captured(1)));
-			}
+			found.append(u"%1: %2 without textFormat of its own"_s.arg(name, match.captured(1)));
 		}
-		if(source.contains(u"StyledText"_s) || source.contains(u"RichText"_s) || (!markdownAllowed && source.contains(u"MarkdownText"_s)))
+		else if(!format.captured(1).contains(u"PlainText"_s) && !(markdownAllowed && format.captured(1).contains(u"MarkdownText"_s)))
 		{
-			found.append(name + u": a rich text format"_s);
+			found.append(u"%1: %2 with textFormat:%3"_s.arg(name, match.captured(1), format.captured(1)));
 		}
+	}
+	if(source.contains(u"StyledText"_s) || source.contains(u"RichText"_s) || (!markdownAllowed && source.contains(u"MarkdownText"_s)))
+	{
+		found.append(name + u": a rich text format"_s);
 	}
 	// The default tooltip reads rich text.
 	if(source.contains(u"ToolTip.text"_s))
@@ -197,7 +189,7 @@ void TestPlainText::theScanSeesWhatItShould()
 	QVERIFY(problems(u"A.qml"_s, u"Item { Text { textFormat: Text.StyledText } }"_s).size() >= 1);
 	QVERIFY(problems(u"A.qml"_s, u"Item { TextEdit { textFormat: TextEdit.MarkdownText } }"_s).size() >= 1);
 	QVERIFY(problems(u"UserBlock.qml"_s, u"Item { TextEdit { textFormat: TextEdit.MarkdownText } }"_s).isEmpty());
-	QVERIFY(problems(u"ShimmerText.qml"_s, u"Text { textFormat: Text.RichText }"_s).isEmpty());
+	QVERIFY(problems(u"ShimmerText.qml"_s, u"Text { textFormat: Text.RichText }"_s).size() >= 1);
 	// A tooltip is not plain unless PlainToolTip makes it so.
 	QVERIFY(problems(u"A.qml"_s, u"Item { ToolTip.text: qsTr(\"x\") }"_s).size() == 1);
 	QVERIFY(problems(u"A.qml"_s, u"Item { ToolTip { text: x } }"_s).size() == 1);

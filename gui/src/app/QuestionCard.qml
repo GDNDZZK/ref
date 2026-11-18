@@ -34,11 +34,16 @@ Rectangle {
 	}
 	readonly property real fixedHeight: 2 * padding + heading.height + footer.height + 2 * spacing
 
+	readonly property string promptKey: prompt.callId + ":" + prompt.page
 	visible: prompt.active
 	height: prompt.active ? Math.min(fixedHeight + choices.contentHeight, maxHeight) : 0
 	radius: Theme.radius
 	color: Theme.surface
 	border.color: Qt.alpha(Theme.accent, borderOpacity)
+
+	onPromptKeyChanged: hoverGuard.reset()
+
+	PointerMoveGuard { id: hoverGuard }
 
 	Column {
 		id: heading
@@ -150,7 +155,7 @@ Rectangle {
 					description: modelData.description
 					isDefault: modelData.isDefault
 					checked: modelData.checked
-					highlighted: modelData.highlighted
+					highlighted: index === card.prompt.highlightedRow
 					number: modelData.number
 					custom: modelData.custom
 					multiple: card.prompt.multiple
@@ -160,7 +165,10 @@ Rectangle {
 
 					onHighlightedChanged: if (highlighted) choices.reveal(y, height)
 					onActivated: card.prompt.activateRow(index)
-					onHovered: card.prompt.setHighlight(index)
+					onHovered: scenePos => {
+						if (hoverGuard.movedTo(scenePos))
+							card.prompt.setHighlight(index)
+					}
 					onCommitted: text => card.prompt.commitCustom(text)
 					onCancelled: card.prompt.cancelCustom()
 				}

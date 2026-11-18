@@ -18,15 +18,15 @@ struct SessionStart
 {
 	enum class Kind
 	{
-		New,
+		None,     // start without opening a session
 		Continue, // the newest session of the directory, else a new one
 		Attach,   // `sessionId`
 	};
 
-	Kind kind = Kind::New;
+	Kind kind = Kind::None;
 	QString sessionId{};
-	std::optional<QString> agent{};      // New only
-	std::optional<proto::ModelRef> model{}; // New only
+	std::optional<QString> agent{};        // default for new sessions
+	std::optional<proto::ModelRef> model{}; // default for new sessions
 };
 
 struct LaunchOptions

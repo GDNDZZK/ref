@@ -6,7 +6,7 @@ import RefGui
 // A search field above a list whose current row has a highlight that slides. Up / Down move
 // the highlight, Enter activates the row. The rows are PickRow items from `delegate`; the
 // owner filters `model` by `text`.
-Item {
+FocusScope {
 	id: pick
 
 	property alias model: view.model
@@ -19,38 +19,115 @@ Item {
 	property int visibleHeight: 7 * Theme.pickRowHeight // the list is this tall at most
 	property string emptyText: qsTr("Nothing found")
 	property bool searchable: true
+	property int initialIndex: -1
+	// Optional `index => bool` so off-screen disabled rows are skipped without instantiating delegates.
+	property var rowEnabled: null
 	readonly property alias count: view.count
 	readonly property alias currentIndex: view.currentIndex
 	readonly property alias currentItem: view.currentItem
+	property bool ready: false
+	property bool animateHighlight: false
+	property bool pendingInitialCenter: false
+
+	function isRowEnabled(index) {
+		if (index < 0 || index >= view.count)
+			return false
+		if (rowEnabled !== null)
+			return Boolean(rowEnabled(index))
+		const item = view.itemAtIndex(index)
+		return item === null || item.enabled
+	}
+
+	function firstEnabledIndex() {
+		for (let i = 0; i < view.count; ++i) {
+			if (isRowEnabled(i))
+				return i
+		}
+		return -1
+	}
+
+	function jumpTo(index, mode) {
+		animateHighlight = false
+		view.currentIndex = index
+		if (index >= 0 && index < view.count) {
+			view.positionViewAtIndex(index, mode)
+			view.forceLayout()
+		}
+	}
+
 	function reset() {
-		view.currentIndex = view.count > 0 ? 0 : -1
+		hoverGuard.reset()
+		const useInitial = input.text === "" && initialIndex >= 0 && initialIndex < view.count && isRowEnabled(initialIndex)
+		const target = useInitial ? initialIndex : firstEnabledIndex()
+		pendingInitialCenter = useInitial && target > 0
+		jumpTo(target, useInitial ? ListView.Center : ListView.Beginning)
 	}
 
 	function activateCurrent() {
+		if (!isRowEnabled(view.currentIndex))
+			return
+		if (view.currentItem === null) {
+			animateHighlight = false
+			view.positionViewAtIndex(view.currentIndex, ListView.Contain)
+			view.forceLayout()
+		}
 		if (view.currentItem && view.currentItem.enabled)
 			view.currentItem.activated()
 	}
 
 	// Moves the highlight by one row, wrapping around and skipping rows that cannot be chosen.
 	function move(step) {
+		if (view.count === 0)
+			return
+		pendingInitialCenter = false
 		let index = view.currentIndex
+		if (index < 0)
+			index = step > 0 ? -1 : 0
 		for (let tries = 0; tries < view.count; ++tries) {
 			index = (index + step + view.count) % view.count
-			const item = view.itemAtIndex(index)
-			if (item === null || item.enabled) {
-				view.currentIndex = index
-				return
+			if (!isRowEnabled(index))
+				continue
+			if (rowEnabled === null) {
+				view.positionViewAtIndex(index, ListView.Contain)
+				view.forceLayout()
+				const item = view.itemAtIndex(index)
+				if (item !== null && !item.enabled)
+					continue
 			}
+			animateHighlight = true
+			view.currentIndex = index
+			view.positionViewAtIndex(index, ListView.Contain)
+			return
 		}
 	}
 
+	focus: searchable
 	implicitHeight: (searchable ? Theme.paletteSearchHeight + 1 : 0) + Math.max(Math.min(view.contentHeight, visibleHeight), view.count === 0 ? Theme.emptyStateHeight : 0)
 
-	Behavior on implicitHeight { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+	Behavior on implicitHeight {
+		enabled: pick.ready
+		NumberAnimation { duration: Motion.standard; easing.type: Motion.ease }
+	}
+
+	Keys.onUpPressed: move(-1)
+	Keys.onDownPressed: move(1)
+	Keys.onReturnPressed: activateCurrent()
+	Keys.onEnterPressed: activateCurrent()
 
 	onCountChanged: reset()
-	Component.onCompleted: if (searchable) input.forceActiveFocus()
+	onInitialIndexChanged: if (input.text === "") reset()
+	Component.onCompleted: {
+		if (searchable)
+			input.forceActiveFocus()
+		else if (focus)
+			forceActiveFocus()
+		Qt.callLater(() => {
+			if (pick)
+				pick.ready = true
+		})
+	}
 
+	PointerMoveGuard { id: hoverGuard }
 	Item {
 		id: searchRow
 		visible: pick.searchable
@@ -73,12 +150,12 @@ Item {
 			selectedTextColor: Theme.text
 			font.pixelSize: Theme.fontSize
 			clip: true
+			focus: pick.searchable
 			Accessible.name: pick.placeholderText
 			Keys.onUpPressed: pick.move(-1)
 			Keys.onDownPressed: pick.move(1)
 			Keys.onReturnPressed: pick.activateCurrent()
 			Keys.onEnterPressed: pick.activateCurrent()
-
 			PlaceholderText {
 				anchors.fill: parent
 				textInput: input
@@ -144,7 +221,31 @@ Item {
 			color: Theme.surfaceHover
 			visible: view.currentItem !== null
 
-			Behavior on y { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+			Behavior on y {
+				enabled: pick.animateHighlight
+				NumberAnimation { duration: Motion.quick; easing.type: Motion.ease }
+			}
+		}
+
+		onHeightChanged: {
+			if (!pick.pendingInitialCenter || height <= 0 || view.currentIndex < 0)
+				return
+			pick.jumpTo(view.currentIndex, ListView.Center)
+			const targetListHeight = Math.min(contentHeight, pick.visibleHeight)
+			if (height >= targetListHeight - 1)
+				pick.pendingInitialCenter = false
+		}
+
+		HoverHandler {
+			onPointChanged: {
+				if (!hovered || !hoverGuard.movedTo(point.scenePosition))
+					return
+				const index = view.indexAt(point.position.x + view.contentX, point.position.y + view.contentY)
+				if (index >= 0 && pick.isRowEnabled(index)) {
+					pick.animateHighlight = true
+					view.currentIndex = index
+				}
+			}
 		}
 
 		ScrollBar.vertical: ThemedScrollBar {}

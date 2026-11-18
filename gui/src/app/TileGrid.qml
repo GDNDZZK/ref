@@ -10,7 +10,9 @@ Item {
 	id: grid
 
 	readonly property int count: Workspace.tileStage.placed
-	readonly property bool zoomed: Workspace.zoomedId !== ""
+	property string lastZoomedId: ""
+	readonly property string activeZoomedId: Workspace.splitView ? Workspace.zoomedId : lastZoomedId
+	readonly property bool zoomed: activeZoomedId !== ""
 	// Whether any tile is on screen, also one that is leaving.
 	readonly property bool occupied: repeater.count > 0
 	readonly property int padding: Theme.tilePadding
@@ -18,6 +20,9 @@ Item {
 	// Room kept free at the top for the window buttons.
 	property int topInset: 0
 	readonly property int contentTop: padding + topInset
+	property bool sidebarAnimating: false
+	property real minAreaWidth: width
+	readonly property real stableWidth: sidebarAnimating ? minAreaWidth : width
 	readonly property int fit: Math.max(1, Math.floor((width - 2 * padding + gap) / (Theme.tileMinWidth + gap)))
 	readonly property int columns: Math.max(1, Math.min(Math.ceil(Math.sqrt(count)), fit))
 	readonly property int rows: Math.ceil(count / columns)
@@ -92,36 +97,29 @@ Item {
 			Workspace.focusTile(best.sessionId)
 	}
 
+	Component.onCompleted: lastZoomedId = Workspace.zoomedId
+
 	Flickable {
 		id: flick
 		anchors.fill: parent
 		contentWidth: width
-		contentHeight: grid.zoomed ? height : grid.gridHeight
+		contentHeight: grid.zoomed ? Math.max(grid.gridHeight, flick.contentY + height) : grid.gridHeight
 		interactive: !grid.zoomed
 		boundsBehavior: Flickable.StopAtBounds
 
-		ScrollBar.vertical: ThemedScrollBar {}
-
-		NumberAnimation {
-			id: zoomScroll
-			target: flick
-			property: "contentY"
-			to: 0
-			duration: Motion.slow
-			easing.type: Motion.ease
-		}
+		ScrollBar.vertical: ThemedScrollBar { visible: !grid.zoomed }
 
 		Connections {
 			target: Workspace
 			function onZoomedChanged() {
-				if (grid.zoomed)
-					zoomScroll.restart()
-				else
-					zoomScroll.stop()
+				if (Workspace.splitView)
+					grid.lastZoomedId = Workspace.zoomedId
+				if (!grid.zoomed)
+					flick.contentY = Math.min(flick.contentY, Math.max(0, grid.gridHeight - flick.height))
 			}
 			function onSplitViewChanged() {
 				if (Workspace.splitView) {
-					zoomScroll.stop()
+					grid.lastZoomedId = Workspace.zoomedId
 					flick.contentY = 0
 				}
 			}
@@ -137,13 +135,22 @@ Item {
 				readonly property int row: Math.floor(place / grid.columns)
 				readonly property int inRow: Math.max(1, row === grid.rows - 1 ? grid.count - row * grid.columns : grid.columns)
 				readonly property real slotWidth: (grid.width - 2 * grid.padding - (inRow - 1) * grid.gap) / inRow
+				readonly property int stableFit: Math.max(1, Math.floor((grid.stableWidth - 2 * grid.padding + grid.gap) / (Theme.tileMinWidth + grid.gap)))
+				readonly property int stableColumns: Math.max(1, Math.min(Math.ceil(Math.sqrt(grid.count)), stableFit))
+				readonly property int stableRows: Math.ceil(grid.count / stableColumns)
+				readonly property int stableRow: Math.floor(place / stableColumns)
+				readonly property int stableInRow: Math.max(1, stableRow === stableRows - 1 ? grid.count - stableRow * stableColumns : stableColumns)
+				readonly property real stableSlotWidth: (grid.stableWidth - 2 * grid.padding - (stableInRow - 1) * grid.gap) / stableInRow
 
 				slot: Qt.rect(grid.padding + (place - row * grid.columns) * (slotWidth + grid.gap),
 				              grid.contentTop + row * (grid.tileHeight + grid.gap),
 				              slotWidth,
 				              grid.tileHeight)
+				zoomed: grid.activeZoomedId === tile.sessionId
 				anyZoomed: grid.zoomed
-				zoomRect: Qt.rect(0, 0, grid.width, grid.height)
+				sidebarAnimating: grid.sidebarAnimating
+				stableWidth: tile.expanded ? grid.stableWidth : stableSlotWidth
+				zoomRect: Qt.rect(0, flick.contentY, grid.width, grid.height)
 			}
 		}
 

@@ -26,9 +26,12 @@ SessionDialog {
 	// A ListModel, because only a model with roles can be sectioned.
 	function rebuild() {
 		items.clear()
+		let selectedIndex = -1
 		for (const model of Workspace.config.models) {
 			if (!matchesNeedle(model))
 				continue
+			if (model.provider === dialog.session.provider && model.id === dialog.session.modelId)
+				selectedIndex = items.count
 			items.append({
 				provider: model.provider,
 				providerName: model.providerName,
@@ -38,12 +41,19 @@ SessionDialog {
 				variants: model.variants.join(",")
 			})
 		}
+		list.initialIndex = selectedIndex
+		list.reset()
 	}
 
 	title: qsTr("Switch model")
 	onAccepted: list.activateCurrent()
 	onNeedleChanged: rebuild()
 	Component.onCompleted: rebuild()
+
+	Connections {
+		target: Workspace.config
+		function onChanged() { dialog.rebuild() }
+	}
 
 	ListModel { id: items }
 

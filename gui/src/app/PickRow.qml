@@ -29,7 +29,6 @@ Item {
 	HoverHandler {
 		enabled: row.enabled
 		cursorShape: Qt.PointingHandCursor
-		onHoveredChanged: if (hovered && row.ListView.view) row.ListView.view.currentIndex = row.index
 	}
 	TapHandler {
 		enabled: row.enabled

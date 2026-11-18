@@ -19,6 +19,7 @@ SessionDialog {
 		id: list
 		width: parent.width
 		placeholderText: qsTr("Search agents")
+		initialIndex: dialog.shown.findIndex(agent => agent.name === dialog.session.agent)
 		model: dialog.shown
 		delegate: PickRow {
 			id: row

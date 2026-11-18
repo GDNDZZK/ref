@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import RefGui
 
@@ -42,12 +43,17 @@ Item {
 	Text {
 		textFormat: Text.PlainText
 		id: status
-		anchors { right: chevron.left; rightMargin: 8 }
+		anchors {
+			right: server.hasDetails ? chevron.left : parent.right
+			rightMargin: server.hasDetails ? 8 : Theme.dialogPadding
+		}
+		width: Math.min(implicitWidth, Math.floor(server.width * 0.35))
 		height: Theme.sidebarHistoryRowHeight
 		verticalAlignment: Text.AlignVCenter
 		text: server.modelData.status
 		color: server.modelData.status === McpStatus.failed ? Theme.dangerText : Theme.textMuted
 		font.pixelSize: Theme.captionFontSize
+		elide: Text.ElideRight
 	}
 	Chevron {
 		id: chevron
@@ -92,8 +98,9 @@ Item {
 				model: server.modelData.tools
 
 				Rectangle {
+					id: pill
 					required property string modelData
-					width: label.implicitWidth + 2 * 6
+					width: Math.min(label.implicitWidth + 2 * 6, details.width)
 					height: label.implicitHeight + 2 * 2
 					radius: Theme.radiusSmall
 					color: Theme.codeBackground
@@ -101,10 +108,11 @@ Item {
 					Text {
 						textFormat: Text.PlainText
 						id: label
-						anchors.centerIn: parent
-						text: parent.modelData
+						anchors { left: parent.left; right: parent.right; leftMargin: 6; rightMargin: 6; verticalCenter: parent.verticalCenter }
+						text: pill.modelData
 						color: Theme.textMuted
 						font { family: Theme.monoFamily; pixelSize: Theme.smallFontSize }
+						elide: Text.ElideRight
 					}
 				}
 			}

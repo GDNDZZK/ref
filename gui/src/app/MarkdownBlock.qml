@@ -9,6 +9,7 @@ Block {
 	ProseText {
 		id: prose
 		width: block.columnWidth
+		streaming: block.streaming
 		textFormat: TextEdit.MarkdownText
 		text: block.content
 

@@ -27,7 +27,7 @@ namespace
 constexpr int WindowWidth = 800;
 constexpr int WindowHeight = 600;
 constexpr qreal HeaderHeight = 38.0;
-
+constexpr qreal PagePadding = 24.0;
 QQuickItem* findLoader(QQuickItem* parent)
 {
 	for(QQuickItem* child : parent->childItems())
@@ -49,9 +49,7 @@ class TestToolBlock : public QObject
 private slots:
 	void initTestCase();
 	void expandsAndCollapsesToolCard();
-	void modelResetClearsHeldSpace();
-	void reasoningAutoCollapseWhileHoldingKeepsZeroHeldSpace();
-	void heldSpaceRespectsViewportRatioCap();
+	void shrinkingContentKeepsExactPagePaddingFooter();
 	void wheelAccumulatesAndBoostsSpeed();
 	void wheelReversalTurnsAroundAtOnce();
 	void touchpadCoastInertiaAndBounds();
@@ -154,149 +152,7 @@ void TestToolBlock::expandsAndCollapsesToolCard()
 	view->setProperty("model", QVariant::fromValue<QObject*>(nullptr));
 }
 
-void TestToolBlock::modelResetClearsHeldSpace()
-{
-	QQmlEngine engine;
-	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
-	ConversationModel model;
-	model.reset({
-		refgui::test::user(u"u1"_s, u"Explain"_s),
-		refgui::test::assistant(u"a1"_s, {refgui::test::reasoning(u"Line 1\n\nLine 2\n\nLine 3\n\nLine 4\n\nLine 5"_s, false)}, false),
-	});
-
-	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/ChatView.qml"_s));
-	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
-
-	QQuickWindow window;
-	window.resize(WindowWidth, WindowHeight);
-	window.show();
-	QVERIFY(QTest::qWaitForWindowExposed(&window));
-
-	std::unique_ptr<QObject> created(component.create());
-	QVERIFY2(created, qPrintable(component.errorString()));
-	auto* view = qobject_cast<QQuickItem*>(created.get());
-	QVERIFY(view);
-	view->setParentItem(window.contentItem());
-	view->setWidth(WindowWidth);
-	view->setHeight(WindowHeight);
-	view->setProperty("holding", true);
-	view->setProperty("model", QVariant::fromValue<QObject*>(&model));
-
-	int reasoningRow = -1;
-	for(int row = 0; row < model.rowCount(); ++row)
-	{
-		if(model.index(row).data(ConversationModel::KindRole).toString() == u"reasoning")
-		{
-			reasoningRow = row;
-			break;
-		}
-	}
-	QVERIFY(reasoningRow >= 0);
-
-	QQuickItem* reasoningBlock = nullptr;
-	QTRY_VERIFY([&] {
-		QMetaObject::invokeMethod(view, "itemAtIndex", Q_RETURN_ARG(QQuickItem*, reasoningBlock), Q_ARG(int, reasoningRow));
-		return reasoningBlock != nullptr && reasoningBlock->height() > 60.0;
-	}());
-	QTRY_VERIFY(view->property("naturalEnd").toReal() > 0);
-	const qreal initialHighWater = view->property("highWater").toReal();
-	QVERIFY(initialHighWater > 0);
-
-	// Shrinking while streaming and holding captures heldSpace.
-	model.setPart(u"a1"_s, 0, refgui::test::reasoning(u"Short"_s, false));
-	QTRY_VERIFY(view->property("heldSpace").toReal() > 0);
-
-	// Resetting the model (e.g. Reset event or reattach) must drop stale hold state.
-	model.reset({refgui::test::user(u"u1"_s, u"Explain"_s)});
-	QCOMPARE(view->property("heldSpace").toReal(), 0.0);
-	QTRY_COMPARE(view->property("highWater").toReal(), view->property("naturalEnd").toReal());
-	QVERIFY(view->property("highWater").toReal() < initialHighWater);
-
-	model.reset({});
-	QCOMPARE(view->property("heldSpace").toReal(), 0.0);
-	QTRY_COMPARE(view->property("highWater").toReal(), view->property("naturalEnd").toReal());
-
-	view->setProperty("holding", false);
-	model.reset({});
-	QCOMPARE(view->property("heldSpace").toReal(), 0.0);
-	QCOMPARE(view->property("highWater").toReal(), 0.0);
-
-	view->setProperty("model", QVariant::fromValue<QObject*>(nullptr));
-}
-
-void TestToolBlock::reasoningAutoCollapseWhileHoldingKeepsZeroHeldSpace()
-{
-	QQmlEngine engine;
-	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
-
-	QStringList longLines;
-	for(int i = 1; i <= 18; ++i)
-	{
-		longLines.append(u"Reasoning step %1 with extra words to make the block tall."_s.arg(i));
-	}
-
-	ConversationModel model;
-	model.reset({
-		refgui::test::user(u"u1"_s, u"Explain"_s),
-		refgui::test::assistant(u"a1"_s, {refgui::test::reasoning(longLines.join(u'\n'), false)}, false),
-	});
-
-	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/ChatView.qml"_s));
-	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
-
-	QQuickWindow window;
-	window.resize(WindowWidth, WindowHeight);
-	window.show();
-	QVERIFY(QTest::qWaitForWindowExposed(&window));
-
-	std::unique_ptr<QObject> created(component.create());
-	QVERIFY2(created, qPrintable(component.errorString()));
-	auto* view = qobject_cast<QQuickItem*>(created.get());
-	QVERIFY(view);
-	view->setParentItem(window.contentItem());
-	view->setWidth(WindowWidth);
-	view->setHeight(WindowHeight);
-	view->setProperty("holding", true);
-	view->setProperty("model", QVariant::fromValue<QObject*>(&model));
-
-	int reasoningRow = -1;
-	for(int row = 0; row < model.rowCount(); ++row)
-	{
-		if(model.index(row).data(ConversationModel::KindRole).toString() == u"reasoning")
-		{
-			reasoningRow = row;
-			break;
-		}
-	}
-	QVERIFY(reasoningRow >= 0);
-
-	QQuickItem* userBlock = nullptr;
-	QQuickItem* reasoningBlock = nullptr;
-	QTRY_VERIFY([&] {
-		QMetaObject::invokeMethod(view, "itemAtIndex", Q_RETURN_ARG(QQuickItem*, userBlock), Q_ARG(int, 0));
-		QMetaObject::invokeMethod(view, "itemAtIndex", Q_RETURN_ARG(QQuickItem*, reasoningBlock), Q_ARG(int, reasoningRow));
-		return userBlock != nullptr && reasoningBlock != nullptr && reasoningBlock->height() > 150.0;
-	}());
-	QVERIFY(reasoningBlock->property("expanded").toBool());
-
-	// Auto-collapse when reasoning finishes while the turn keeps running (holding stays true).
-	model.setPart(u"a1"_s, 0, refgui::test::reasoning(longLines.join(u'\n'), true));
-	QVERIFY(!reasoningBlock->property("expanded").toBool());
-
-	QTRY_VERIFY(reasoningBlock->height() < 60.0);
-	QTRY_COMPARE(view->property("heldSpace").toReal(), 0.0);
-	QCOMPARE(view->property("heldSpace").toReal(), 0.0);
-
-	// The collapsed header and user message remain inside the viewport rather than being pushed off-screen.
-	const qreal contentY = view->property("contentY").toReal();
-	QVERIFY(userBlock->y() >= contentY - 1.0);
-	QVERIFY(reasoningBlock->y() + reasoningBlock->height() > contentY);
-	QVERIFY(reasoningBlock->y() + reasoningBlock->height() <= contentY + view->height());
-
-	view->setProperty("model", QVariant::fromValue<QObject*>(nullptr));
-}
-
-void TestToolBlock::heldSpaceRespectsViewportRatioCap()
+void TestToolBlock::shrinkingContentKeepsExactPagePaddingFooter()
 {
 	QQmlEngine engine;
 	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
@@ -328,8 +184,12 @@ void TestToolBlock::heldSpaceRespectsViewportRatioCap()
 	view->setParentItem(window.contentItem());
 	view->setWidth(WindowWidth);
 	view->setHeight(WindowHeight);
-	view->setProperty("holding", true);
 	view->setProperty("model", QVariant::fromValue<QObject*>(&model));
+
+	QVERIFY(!view->property("heldSpace").isValid());
+	auto* footer = view->property("footerItem").value<QQuickItem*>();
+	QVERIFY(footer);
+	QCOMPARE(footer->height(), PagePadding);
 
 	int reasoningRow = -1;
 	for(int row = 0; row < model.rowCount(); ++row)
@@ -342,20 +202,32 @@ void TestToolBlock::heldSpaceRespectsViewportRatioCap()
 	}
 	QVERIFY(reasoningRow >= 0);
 
+	QQuickItem* userBlock = nullptr;
 	QQuickItem* reasoningBlock = nullptr;
 	QTRY_VERIFY([&] {
+		QMetaObject::invokeMethod(view, "itemAtIndex", Q_RETURN_ARG(QQuickItem*, userBlock), Q_ARG(int, 0));
 		QMetaObject::invokeMethod(view, "itemAtIndex", Q_RETURN_ARG(QQuickItem*, reasoningBlock), Q_ARG(int, reasoningRow));
-		return reasoningBlock != nullptr && reasoningBlock->height() > WindowHeight * 0.4;
+		return userBlock != nullptr && reasoningBlock != nullptr && reasoningBlock->height() > WindowHeight * 0.4;
 	}());
 
-	// Shrink while remaining streaming so holdEnd() caps the held space to 0.25 * height.
+	// Shrinking while streaming leaves no artificial held space in the footer.
 	model.setPart(u"a1"_s, 0, refgui::test::reasoning(u"Short"_s, false));
-	QTRY_VERIFY(view->property("heldSpace").toReal() > 0.0);
 	QTRY_VERIFY(reasoningBlock->height() < 100.0);
+	QCOMPARE(footer->height(), PagePadding);
+	QCOMPARE(view->property("naturalEnd").toReal(), footer->y() + PagePadding);
 
-	const qreal maxAllowed = std::round(WindowHeight * 0.25);
-	QVERIFY2(view->property("heldSpace").toReal() <= maxAllowed,
-	         qPrintable(u"heldSpace=%1 maxAllowed=%2"_s.arg(view->property("heldSpace").toReal()).arg(maxAllowed)));
+	// Auto-collapsing finished reasoning keeps footer strictly at pagePadding and keeps rows visible.
+	model.setPart(u"a1"_s, 0, refgui::test::reasoning(longLines.join(u'\n'), false));
+	QTRY_VERIFY(reasoningBlock->height() > 150.0);
+	model.setPart(u"a1"_s, 0, refgui::test::reasoning(longLines.join(u'\n'), true));
+	QVERIFY(!reasoningBlock->property("expanded").toBool());
+	QTRY_VERIFY(reasoningBlock->height() < 60.0);
+	QCOMPARE(footer->height(), PagePadding);
+
+	const qreal contentY = view->property("contentY").toReal();
+	QVERIFY(userBlock->y() >= contentY - 1.0);
+	QVERIFY(reasoningBlock->y() + reasoningBlock->height() > contentY);
+	QVERIFY(reasoningBlock->y() + reasoningBlock->height() <= contentY + view->height());
 
 	view->setProperty("model", QVariant::fromValue<QObject*>(nullptr));
 }

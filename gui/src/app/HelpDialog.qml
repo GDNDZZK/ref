@@ -40,7 +40,7 @@ ModalDialog {
 				title: modelData.title
 
 				KeyChips {
-					anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
+					anchors.verticalCenter: parent.verticalCenter
 					keys: keyRow.modelData.keys
 				}
 			}
@@ -55,7 +55,7 @@ ModalDialog {
 				title: modelData.title
 
 				KeyChips {
-					anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
+					anchors.verticalCenter: parent.verticalCenter
 					keys: writeRow.modelData.keys
 				}
 			}
@@ -71,10 +71,12 @@ ModalDialog {
 
 				Text {
 					textFormat: Text.PlainText
-					anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
+					anchors.verticalCenter: parent.verticalCenter
+					width: Math.min(implicitWidth, Math.floor(commandRow.width * 0.5))
 					text: dialog.syntaxOf(commandRow.modelData)
 					color: Theme.textMuted
 					font { family: Theme.monoFamily; pixelSize: Theme.smallFontSize }
+					elide: Text.ElideRight
 				}
 			}
 		}
@@ -82,18 +84,27 @@ ModalDialog {
 
 	// A line of the lists: the title on the left, what goes on the right is the content.
 	component HelpRow: Item {
+		id: helpRow
 		property string title: ""
+		default property alias trailing: rightSlot.data
 
 		width: parent.width
 		height: 30
 
 		Text {
 			textFormat: Text.PlainText
-			x: Theme.dialogPadding
-			anchors.verticalCenter: parent.verticalCenter
-			text: parent.title
+			anchors { left: parent.left; leftMargin: Theme.dialogPadding; right: rightSlot.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+			text: helpRow.title
 			color: Theme.text
 			font.pixelSize: Theme.captionFontSize
+			elide: Text.ElideRight
+		}
+
+		Item {
+			id: rightSlot
+			anchors { right: parent.right; rightMargin: Theme.dialogPadding; verticalCenter: parent.verticalCenter }
+			width: childrenRect.width
+			height: parent.height
 		}
 	}
 }

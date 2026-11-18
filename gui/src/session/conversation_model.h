@@ -218,7 +218,7 @@ private:
 	QString m_tailError;
 	ToolSummary m_toolSummary;
 	bool m_tailShown = false;
-	QSet<PartKey> m_toggled;
+	QHash<PartKey, bool> m_expandedOverrides;
 	QSet<PartKey> m_shownAll;
 	QHash<QString, proto::EditPreview> m_permissionPreviews;
 	bool m_reasoningExpanded = false;

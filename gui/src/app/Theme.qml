@@ -111,6 +111,7 @@ QtObject {
 	readonly property int dialogWidth: 480
 	readonly property int dialogWidthWide: 640
 	readonly property int settingsWidth: 520
+	readonly property int configDialogWidth: 860
 	readonly property int statusDotSize: 8 // the dot of a session, server or activity
 	readonly property int windowButtonMargin: 14 // distance of the corner buttons from the window edge
 	readonly property int windowButtonGap: 8 // between corner buttons

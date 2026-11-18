@@ -11,11 +11,13 @@ Item {
 	readonly property bool open: Workspace.dialog !== ""
 	property var front: slotA // the slot of the dialog on screen, also while it fades out
 
-	visible: scrim.opacity > 0
+	visible: open || scrim.opacity > 0
 
 	onVisibleChanged: {
 		if (!visible) {
+			slotA.retired = false
 			slotA.dialogId = ""
+			slotB.retired = false
 			slotB.dialogId = ""
 		}
 	}
@@ -51,6 +53,7 @@ Item {
 	}
 
 	component Slot: Loader {
+		id: slot
 		property string dialogId: ""
 		// Replaced by another dialog: fades out and is dropped.
 		property bool retired: false
@@ -59,9 +62,17 @@ Item {
 		active: dialogId !== "" && host.visible
 		enabled: !retired
 		opacity: retired ? 0 : 1
+		scale: retired ? Motion.popScale : 1
 		sourceComponent: dialogId === "" ? null : host.componentFor(dialogId) // an id without a component is a mistake and logs
 
-		Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+		Behavior on opacity {
+			enabled: slot.retired
+			NumberAnimation { duration: Motion.quick; easing.type: Motion.ease }
+		}
+		Behavior on scale {
+			enabled: slot.retired
+			NumberAnimation { duration: Motion.quick; easing.type: Motion.ease }
+		}
 
 		onOpacityChanged: {
 			if (retired && opacity === 0)

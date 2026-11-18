@@ -9,6 +9,21 @@ Block {
 
 	required property string language
 
+
+	function syncSource() {
+		const next = block.content
+		const current = source.text
+		if (next === current)
+			return
+		if (current.length > 0 && next.length > current.length && next.startsWith(current)) {
+			source.insert(current.length, next.slice(current.length))
+			return
+		}
+		source.text = next
+	}
+
+	Component.onCompleted: syncSource()
+	onContentChanged: syncSource()
 	Rectangle {
 		width: block.columnWidth
 		height: header.height + source.height
@@ -55,7 +70,6 @@ Block {
 			selectByMouse: true
 			wrapMode: TextEdit.Wrap
 			textFormat: TextEdit.PlainText
-			text: block.content
 			color: Theme.text
 			selectionColor: Theme.selection
 			selectedTextColor: Theme.text

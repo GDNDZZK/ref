@@ -13,11 +13,6 @@ import RefGui
 // touchpad, touch) or dragging the scroll bar releases it, and ending such a gesture
 // at the end re-engages it.
 //
-// Holding: while `holding` and following, the end never moves up. Streaming
-// content can briefly take more room than it ends up needing (a line that wraps,
-// then fits); the footer grows by what the content gave back, so the view does not
-// bounce. When active work pauses or ends, the held room is released with an animation.
-//
 // Wheel: each notch moves `wheelTarget` and contentY chases it, so fast notches add
 // up. Flickable's own wheel animation restarts from wherever the previous notch got
 // to and drops the rest of its distance. Touchpad deltas are already continuous and
@@ -35,10 +30,10 @@ ListView {
 	id: view
 
 	property real sidePadding: Theme.pagePadding // narrower in a split-view tile
-	readonly property real columnWidth: Math.min(width - 2 * sidePadding, Theme.contentWidth)
+	property real layoutWidth: width
+	readonly property real columnWidth: Math.max(0, Math.min(layoutWidth - 2 * sidePadding, Theme.contentWidth))
 	property bool following: true
 	property real previousHeight: 0
-	property bool holding: false
 	property string sessionId // the session whose pictures the rows show
 	property bool moreBefore: false // the backend has earlier messages
 	property bool loadingOlder: false
@@ -54,16 +49,8 @@ ListView {
 	signal cancelRequested() // the Cancel button of a delayed tool call
 	signal permissionAnswered(string callId, bool allow, bool always) // from a tool card that asks for permission
 
-	// Where the content ends, without and with the held room. The footer sits right
-	// after the last row.
+	// Where the content ends. The footer sits right after the last row.
 	readonly property real naturalEnd: footerItem ? footerItem.y + Theme.pagePadding : 0
-	readonly property real heldEnd: naturalEnd + heldSpace
-	property real highWater: 0 // furthest naturalEnd of the current turn
-	property real heldSpace: 0
-	property bool holdUpdating: false // holdEnd() is writing heldSpace
-	property bool holdStale: false // the end moved during that write
-	property bool holdResting: false // a permission card is changing; the end follows the content
-
 	property bool compact: false // narrower cache in a split-view tile
 	readonly property int fullRetainedDistance: 20000 // px above and below the view whose rows stay instantiated, about 200 rows
 	readonly property int compactRetainedDistance: 1600 // smaller cache in split-view tiles so opening many tiles stays fast
@@ -71,10 +58,9 @@ ListView {
 	readonly property int olderTriggerDistance: 400 // px from the top at which the next page loads by itself
 	readonly property real minContentY: originY - topMargin
 	readonly property real maxContentY: Math.max(minContentY, originY + contentHeight - height)
-	readonly property real maxHeldViewportRatio: 0.25
 
 	// Flickable clamps contentY to this bound; aiming past it would chase forever.
-	readonly property real boundedEnd: Math.min(heldEnd, originY + contentHeight)
+	readonly property real boundedEnd: Math.min(naturalEnd, originY + contentHeight)
 	readonly property real followTarget: Math.max(minContentY, boundedEnd - height)
 
 	property bool wheeling: false // chasing wheelTarget; never while following
@@ -250,45 +236,6 @@ ListView {
 		contentY = target
 	}
 
-	// Resizing the footer makes ListView place it again at once, from the rows' current
-	// heights; if those changed since the last layout, the end moves while heldSpace is
-	// being written. Recursing from there would re-enter the footer's height binding, so
-	// a move during the update only marks it stale and the update runs another pass.
-	// The footer's height does not move the footer, so the second pass settles.
-	function holdEnd() {
-		if (holdUpdating) {
-			holdStale = true
-			return
-		}
-		holdUpdating = true
-		do {
-			holdStale = false
-			const cap = Math.min(Math.max(0, height - 1), Math.round(height * maxHeldViewportRatio))
-			const target = holdResting ? naturalEnd : Math.max(highWater, naturalEnd)
-			const held = Math.max(0, Math.min(cap, target - naturalEnd))
-			highWater = naturalEnd + held
-			heldSpace = held
-		} while (holdStale)
-		holdUpdating = false
-	}
-
-	function restHold() {
-		release.stop()
-		holdResting = true
-		holdResume.restart()
-		highWater = naturalEnd
-		heldSpace = 0
-	}
-
-	function resetHold() {
-		release.stop()
-		holdResume.stop()
-		holdResting = false
-		holdStale = false
-		highWater = 0
-		heldSpace = 0
-	}
-
 	function stopScrollMotion() {
 		wheeling = false
 		wheelBoost = 1.0
@@ -318,15 +265,11 @@ ListView {
 
 	// The view keeps the rows it shows where they are when earlier ones are added above them.
 	// The end stays on the bottom edge when the view changes height (a tile's input box comes or goes).
-	onSessionIdChanged: {
-		stopScrollMotion()
-		resetHold()
-	}
+	onSessionIdChanged: stopScrollMotion()
 	Connections {
 		target: view.model ? view.model : null
 		function onModelReset() {
 			view.stopScrollMotion()
-			view.resetHold()
 		}
 	}
 	onHeightChanged: {
@@ -352,11 +295,11 @@ ListView {
 		}
 	}
 
-	// Bottom padding plus held room. A footer rather than bottomMargin, so its
-	// position marks the exact end of the rows.
+	// Bottom padding. A footer rather than bottomMargin, so its position marks the
+	// exact end of the rows.
 	footer: Item {
 		width: view.width
-		height: Theme.pagePadding + view.heldSpace
+		height: Theme.pagePadding
 	}
 
 	ScrollBar.vertical: ScrollBar {
@@ -494,41 +437,12 @@ ListView {
 	}
 	onMovementEnded: following = atYEnd
 
-	// Hold only while following: further up, the end moving is out of sight.
-	onNaturalEndChanged: if (holding && following) holdEnd()
-	onPermissionCountChanged: restHold()
 	onFollowingChanged: {
 		if (!following)
 			return
 		wheeling = false
 		stopCoast()
-		highWater = heldEnd
 	}
-	onHoldingChanged: {
-		if (holding) {
-			release.stop()
-			highWater = heldEnd // a new turn keeps whatever is still held
-			holdEnd()
-		} else {
-			release.restart()
-		}
-	}
-
-	Timer {
-		id: holdResume
-		interval: Motion.slow
-		onTriggered: view.holdResting = false
-	}
-
-	NumberAnimation {
-		id: release
-		target: view
-		property: "heldSpace"
-		to: 0
-		duration: Motion.slow
-		easing.type: Motion.ease
-	}
-
 	FrameAnimation {
 		running: view.following && !view.scrollArrived(view.followTarget)
 		onTriggered: view.scrollStep(view.followTarget, frameTime)
