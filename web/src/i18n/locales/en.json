@@ -521,9 +521,7 @@
       "pickModelPlaceholder": "Choose configured model…",
       "delete": "Delete",
       "rename": "Rename",
-      "apply": "Apply",
-      "expand": "Expand",
-      "collapse": "Collapse",
+      "renameExists": "An entry with this name already exists",
       "nav": {
         "general": "General",
         "providers": "Providers & Models",
@@ -602,7 +600,11 @@
         "addVariant": "Add variant",
         "variantNamePlaceholder": "Variant name (e.g. high)",
         "variantOptions": "Variant options (JSON object)",
-        "variantInvalidJson": "Must be a valid JSON object"
+        "variantInvalidJson": "Must be a valid JSON object",
+        "extraOptions": "Extra SDK options (JSON object)",
+        "extraOptionsDesc": "Additional provider options keys (e.g. timeout, extraBody); apiKey, baseURL, and headers are preserved.",
+        "modelOptions": "Model options (JSON object)",
+        "modelOptionsDesc": "Extra model options passed to the SDK (e.g. reasoningEffort, thinking, extraBody)."
       },
       "agents": {
         "builtinHeading": "Built-in agents",
@@ -624,7 +626,9 @@
         "prompt": "System prompt",
         "promptPlaceholder": "Extra system instructions for this agent…",
         "permission": "Agent permissions",
-        "delay": "Agent tool delays"
+        "delay": "Agent tool delays",
+        "options": "Model options (JSON object)",
+        "optionsDesc": "Extra agent options passed to the model (e.g. maxTokens, reasoningEffort)."
       },
       "permissions": {
         "globalPermission": "Global tool permissions",

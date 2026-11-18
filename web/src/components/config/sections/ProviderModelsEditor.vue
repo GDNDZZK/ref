@@ -1,11 +1,9 @@
 <script setup lang="ts">
 // Nested Models & Variants CRUD under `provider.<providerId>.models`.
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { parseJsoncObject } from '../../../config/jsonc.ts'
 import {
   PROVIDER_PRESETS,
-  formatJson,
   getAt,
   getBooleanAt,
   getNumberAt,
@@ -16,12 +14,15 @@ import {
   setAt,
   type JsonObject,
 } from '../../../config/jsonPatch.ts'
+import { normalizeProseInput, normalizeTrimmedString } from '../../../config/sectionHelpers.ts'
+import { useConfigSubEditorScope, useJsonObjectDrafts } from '../../../config/subEditorState.ts'
 import Chevron from '../../Chevron.vue'
 import DialogButton from '../../DialogButton.vue'
 import Icon from '../../Icon.vue'
 import ToggleSwitch from '../../ToggleSwitch.vue'
 import { FormRow, KeyValueEditor, NumberField, TextAreaField } from '../index.ts'
 
+const MODEL_OPTIONS_PLACEHOLDER = '{ "reasoningEffort": "high" }'
 const props = defineProps<{
   doc: JsonObject
   providerId: string
@@ -34,8 +35,7 @@ const { t } = useI18n()
 const newModelKey = ref('')
 const openModels = reactive(new Set<string>())
 const newVariantNames = reactive<Record<string, string>>({})
-const variantDrafts = reactive<Record<string, string>>({})
-const variantErrors = reactive<Record<string, string>>({})
+let lastEmittedDoc: JsonObject | undefined
 
 const modelsObj = computed(() => getObjectAt(props.doc, ['provider', props.providerId, 'models']) ?? {})
 const modelKeys = computed(() => Object.keys(modelsObj.value))
@@ -46,30 +46,92 @@ const suggestedModels = computed(() => {
   return preset.suggestedModels.filter((modelId) => !Object.hasOwn(modelsObj.value, modelId))
 })
 
+function emitDoc(next: JsonObject): void {
+  lastEmittedDoc = next
+  emit('update:doc', next)
+}
+
+function modelObject(modelKey: string): JsonObject {
+  const raw = modelsObj.value[modelKey]
+  return isPlainObject(raw) ? raw : {}
+}
+
+function commitModel(modelKey: string, nextModel: JsonObject): void {
+  emitDoc(setAt(props.doc, ['provider', props.providerId, 'models', modelKey], nextModel))
+}
+
 function patchModel(modelKey: string, subPath: readonly string[], value: unknown): void {
-  emit('update:doc', setAt(props.doc, ['provider', props.providerId, 'models', modelKey, ...subPath], value))
+  commitModel(modelKey, setAt(modelObject(modelKey), subPath, value))
+}
+
+function patchModelProse(modelKey: string, subPath: readonly string[], value: string): void {
+  patchModel(modelKey, subPath, normalizeProseInput(value))
 }
 
 function patchModelString(modelKey: string, subPath: readonly string[], value: string): void {
-  const trimmed = value.trim()
-  patchModel(modelKey, subPath, trimmed === '' ? undefined : trimmed)
+  patchModel(modelKey, subPath, normalizeTrimmedString(value))
 }
 
 function patchModelHeaders(modelKey: string, headers: Record<string, string>): void {
   patchModel(modelKey, ['headers'], Object.keys(headers).length > 0 ? headers : undefined)
 }
 
+const optionsDrafts = useJsonObjectDrafts({
+  allowEmpty: true,
+  invalidMessage: () => t('config.editor.providers.variantInvalidJson'),
+})
+
+const variantDrafts = useJsonObjectDrafts({
+  allowEmpty: false,
+  invalidMessage: () => t('config.editor.providers.variantInvalidJson'),
+})
+
+const hasSubEditorError = computed(() => optionsDrafts.hasInvalid.value || variantDrafts.hasInvalid.value)
+const subEditorScope = useConfigSubEditorScope(() => ({
+  dirty: hasSubEditorError.value,
+  committable: false,
+  invalid: hasSubEditorError.value,
+}))
+
+function variantObjByDraftKey(draftKey: string): JsonObject | undefined {
+  const sep = draftKey.indexOf('::')
+  if (sep < 0) return undefined
+  const modelKey = draftKey.slice(0, sep)
+  const variantName = draftKey.slice(sep + 2)
+  return getObjectAt(modelObject(modelKey), ['variants', variantName])
+}
+
+watch(
+  () => props.doc,
+  (nextDoc) => {
+    if (nextDoc === lastEmittedDoc) return
+    const forceClear = !subEditorScope.hasHost
+    optionsDrafts.reconcile((modelKey) => getObjectAt(modelObject(modelKey), ['options']), forceClear)
+    variantDrafts.reconcile(variantObjByDraftKey, forceClear)
+  },
+)
+
+if (subEditorScope.resetVersion) {
+  watch(subEditorScope.resetVersion, () => {
+    optionsDrafts.clearAll()
+    variantDrafts.clearAll()
+  })
+}
+
 function addModelByName(rawKey: string): void {
   const trimmed = rawKey.trim()
   if (trimmed === '' || Object.hasOwn(modelsObj.value, trimmed)) return
   openModels.add(trimmed)
-  emit('update:doc', setAt(props.doc, ['provider', props.providerId, 'models', trimmed], {}))
+  commitModel(trimmed, {})
   newModelKey.value = ''
 }
 
 function removeModel(modelKey: string): void {
   openModels.delete(modelKey)
-  emit('update:doc', setAt(props.doc, ['provider', props.providerId, 'models', modelKey], undefined))
+  optionsDrafts.remove(modelKey)
+  variantDrafts.removeByPrefix(`${modelKey}::`)
+  delete newVariantNames[modelKey]
+  emitDoc(setAt(props.doc, ['provider', props.providerId, 'models', modelKey], undefined))
 }
 
 function toggleModel(modelKey: string): void {
@@ -77,8 +139,28 @@ function toggleModel(modelKey: string): void {
   else openModels.add(modelKey)
 }
 
+function readModelOptionsText(modelKey: string): string {
+  return optionsDrafts.read(modelKey, getObjectAt(modelObject(modelKey), ['options']))
+}
+
+function canResetModelOptions(modelKey: string): boolean {
+  return getAt(modelObject(modelKey), ['options']) !== undefined || optionsDrafts.hasDraft(modelKey)
+}
+
+function updateModelOptionsText(modelKey: string, text: string): void {
+  const currentOptions = getObjectAt(modelObject(modelKey), ['options'])
+  optionsDrafts.update(modelKey, text, currentOptions, (parsed) => {
+    patchModel(modelKey, ['options'], parsed)
+  })
+}
+
+function resetModelOptions(modelKey: string): void {
+  optionsDrafts.remove(modelKey)
+  patchModel(modelKey, ['options'], undefined)
+}
+
 function variantsOf(modelKey: string): string[] {
-  const raw = getObjectAt(props.doc, ['provider', props.providerId, 'models', modelKey, 'variants'])
+  const raw = getObjectAt(modelObject(modelKey), ['variants'])
   return raw ? Object.keys(raw) : []
 }
 
@@ -88,56 +170,71 @@ function variantDraftKey(modelKey: string, variantName: string): string {
 
 function readVariantText(modelKey: string, variantName: string): string {
   const key = variantDraftKey(modelKey, variantName)
-  if (Object.hasOwn(variantDrafts, key)) return variantDrafts[key]!
-  const obj = getObjectAt(props.doc, [
-    'provider',
-    props.providerId,
-    'models',
-    modelKey,
-    'variants',
-    variantName,
-  ])
-  return formatJson(obj ?? {}).trimEnd()
+  const obj = getObjectAt(modelObject(modelKey), ['variants', variantName]) ?? {}
+  return variantDrafts.read(key, obj, '{}')
 }
 
 function updateVariantText(modelKey: string, variantName: string, text: string): void {
   const key = variantDraftKey(modelKey, variantName)
-  variantDrafts[key] = text
-  const parsed = parseJsoncObject(text)
-  if (!parsed.ok) {
-    variantErrors[key] = t('config.editor.providers.variantInvalidJson')
-    return
-  }
-  delete variantErrors[key]
-  patchModel(modelKey, ['variants', variantName], parsed.value)
+  const currentVariant = getObjectAt(modelObject(modelKey), ['variants', variantName]) ?? {}
+  variantDrafts.update(key, text, currentVariant, (parsed) => {
+    patchModel(modelKey, ['variants', variantName], parsed ?? {})
+  })
 }
 
 function addVariant(modelKey: string): void {
   const rawName = (newVariantNames[modelKey] ?? '').trim()
   if (rawName === '') return
-  const existing = getObjectAt(props.doc, ['provider', props.providerId, 'models', modelKey, 'variants'])
+  const existing = getObjectAt(modelObject(modelKey), ['variants'])
   if (existing && Object.hasOwn(existing, rawName)) return
   newVariantNames[modelKey] = ''
   patchModel(modelKey, ['variants', rawName], {})
 }
 
 function removeVariant(modelKey: string, variantName: string): void {
-  const key = variantDraftKey(modelKey, variantName)
-  delete variantDrafts[key]
-  delete variantErrors[key]
+  variantDrafts.remove(variantDraftKey(modelKey, variantName))
   patchModel(modelKey, ['variants', variantName], undefined)
 }
 
 function modelHasImage(modelKey: string): boolean {
-  const path = ['provider', props.providerId, 'models', modelKey]
-  if (getBooleanAt(props.doc, [...path, 'attachment']) === true) return true
-  const inputModalities = getAt(props.doc, [...path, 'modalities', 'input'])
+  const model = modelObject(modelKey)
+  if (getBooleanAt(model, ['attachment']) === true) return true
+  const inputModalities = getAt(model, ['modalities', 'input'])
   return Array.isArray(inputModalities) && inputModalities.includes('image')
 }
 
-function modelObject(modelKey: string): JsonObject {
-  const raw = modelsObj.value[modelKey]
-  return isPlainObject(raw) ? raw : {}
+function writeModelAttachment(modelKey: string, enabled: boolean): void {
+  let next = setAt(modelObject(modelKey), ['attachment'], enabled)
+  if (!enabled) {
+    const rawInput = getAt(next, ['modalities', 'input'])
+    if (Array.isArray(rawInput) && rawInput.includes('image')) {
+      const remaining = rawInput.filter((item) => item !== 'image')
+      next = setAt(next, ['modalities', 'input'], remaining.length > 0 ? remaining : undefined)
+    }
+  }
+  commitModel(modelKey, next)
+}
+
+function modelHasReasoning(modelKey: string): boolean {
+  const model = modelObject(modelKey)
+  return getBooleanAt(model, ['reasoning']) === true || getBooleanAt(model, ['thinking']) === true
+}
+
+function canResetReasoning(modelKey: string): boolean {
+  const model = modelObject(modelKey)
+  return getAt(model, ['reasoning']) !== undefined || getAt(model, ['thinking']) !== undefined
+}
+
+function writeModelReasoning(modelKey: string, enabled: boolean): void {
+  let next = setAt(modelObject(modelKey), ['thinking'], undefined)
+  next = setAt(next, ['reasoning'], enabled)
+  commitModel(modelKey, next)
+}
+
+function resetModelReasoning(modelKey: string): void {
+  let next = setAt(modelObject(modelKey), ['reasoning'], undefined)
+  next = setAt(next, ['thinking'], undefined)
+  commitModel(modelKey, next)
 }
 </script>
 
@@ -189,7 +286,8 @@ function modelObject(modelKey: string): JsonObject {
             class="text-input"
             spellcheck="false"
             :placeholder="modelKey"
-            @input="patchModelString(modelKey, ['name'], ($event.target as HTMLInputElement).value)"
+            @input="patchModelProse(modelKey, ['name'], ($event.target as HTMLInputElement).value)"
+            @blur="patchModelString(modelKey, ['name'], ($event.target as HTMLInputElement).value)"
           />
         </FormRow>
 
@@ -227,25 +325,21 @@ function modelObject(modelKey: string): JsonObject {
             <ToggleSwitch
               :model-value="modelHasImage(modelKey)"
               :label="t('config.editor.providers.attachment')"
-              @update:model-value="patchModel(modelKey, ['attachment'], $event)"
+              @update:model-value="writeModelAttachment(modelKey, $event)"
             />
           </div>
         </FormRow>
 
         <FormRow
           :label="t('config.editor.providers.reasoning')"
-          :can-reset="getAt(modelObject(modelKey), ['reasoning']) !== undefined"
-          @reset="patchModel(modelKey, ['reasoning'], undefined)"
+          :can-reset="canResetReasoning(modelKey)"
+          @reset="resetModelReasoning(modelKey)"
         >
           <div class="switch-wrap">
             <ToggleSwitch
-              :model-value="
-                (getBooleanAt(modelObject(modelKey), ['reasoning']) ||
-                  getBooleanAt(modelObject(modelKey), ['thinking'])) ??
-                false
-              "
+              :model-value="modelHasReasoning(modelKey)"
               :label="t('config.editor.providers.reasoning')"
-              @update:model-value="patchModel(modelKey, ['reasoning'], $event)"
+              @update:model-value="writeModelReasoning(modelKey, $event)"
             />
           </div>
         </FormRow>
@@ -317,6 +411,25 @@ function modelObject(modelKey: string): JsonObject {
           />
         </FormRow>
 
+        <FormRow
+          vertical
+          :label="t('config.editor.providers.modelOptions')"
+          :description="t('config.editor.providers.modelOptionsDesc')"
+          :can-reset="canResetModelOptions(modelKey)"
+          @reset="resetModelOptions(modelKey)"
+        >
+          <TextAreaField
+            monospace
+            :rows="3"
+            :model-value="readModelOptionsText(modelKey)"
+            :error="optionsDrafts.errorOf(modelKey)"
+            :placeholder="MODEL_OPTIONS_PLACEHOLDER"
+            :label="t('config.editor.providers.modelOptions')"
+            @update:model-value="updateModelOptionsText(modelKey, $event)"
+            @blur="optionsDrafts.blur(modelKey)"
+          />
+        </FormRow>
+
         <div class="variants-block">
           <span class="variants-title">{{ t('config.editor.providers.variantsHeading') }}</span>
           <div v-for="variantName in variantsOf(modelKey)" :key="variantName" class="variant-card">
@@ -335,9 +448,10 @@ function modelObject(modelKey: string): JsonObject {
               monospace
               :rows="2"
               :model-value="readVariantText(modelKey, variantName)"
-              :error="variantErrors[variantDraftKey(modelKey, variantName)]"
+              :error="variantDrafts.errorOf(variantDraftKey(modelKey, variantName))"
               :label="t('config.editor.providers.variantOptions')"
               @update:model-value="updateVariantText(modelKey, variantName, $event)"
+              @blur="variantDrafts.blur(variantDraftKey(modelKey, variantName))"
             />
           </div>
           <div class="add-inline">

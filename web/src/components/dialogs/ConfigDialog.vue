@@ -4,6 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vu
 import { useI18n } from 'vue-i18n'
 import { parseJsoncObject } from '../../config/jsonc.ts'
 import { cloneJson, formatJson, isPlainObject, type JsonObject } from '../../config/jsonPatch.ts'
+import { provideConfigSubEditorHost } from '../../config/subEditorState.ts'
 import { describeError } from '../../errorMessage.ts'
 import type { IconKey } from '../../icons/generated/icons.ts'
 import type { ConfigFileEntry, ConfigFilesInfo } from '../../proto/generated'
@@ -65,6 +66,7 @@ const newProfileLabel = ref('')
 const cloneCurrent = ref(true)
 const confirmingDelete = ref(false)
 const pendingDirtyAction = ref<PendingDirtyAction | null>(null)
+const subEditors = provideConfigSubEditorHost()
 
 watch(
   () => props.section,
@@ -73,7 +75,16 @@ watch(
   },
 )
 
-const dirty = computed(() => !loading.value && rawText.value !== savedRawText.value)
+const dirty = computed(
+  () => !loading.value && (rawText.value !== savedRawText.value || subEditors.hasUncommittedDraft.value),
+)
+const canSave = computed(
+  () =>
+    !loading.value &&
+    !busy.value &&
+    !subEditors.hasValidationError.value &&
+    (rawText.value !== savedRawText.value || subEditors.hasCommittableDraft.value),
+)
 
 const modeOptions = computed(() => [
   { value: 'visual' as const, label: t('config.editor.modeVisual') },
@@ -115,7 +126,7 @@ function applyFilesInfo(info: ConfigFilesInfo): void {
   confirmingDelete.value = false
   creatingProfile.value = false
   pendingDirtyAction.value = null
-
+  subEditors.notifyExternalReset()
   if (info.parse_error) {
     jsonParseError.value = info.parse_error
     doc.value = {}
@@ -166,6 +177,7 @@ function switchEditorMode(target: EditorMode): void {
   }
   doc.value = parsed.value
   jsonParseError.value = null
+  subEditors.notifyExternalReset()
   editorMode.value = 'visual'
 }
 
@@ -174,6 +186,7 @@ function discardEdits(): void {
   if (!info) return
   rawText.value = savedRawText.value
   actionError.value = null
+  subEditors.notifyExternalReset()
   if (info.parse_error) {
     jsonParseError.value = info.parse_error
     doc.value = {}
@@ -303,7 +316,9 @@ async function reloadAll(): Promise<void> {
 }
 
 async function save(): Promise<void> {
-  if (!dirty.value || busy.value || !filesInfo.value) return
+  if (loading.value || busy.value || !filesInfo.value) return
+  subEditors.flushPendingDrafts()
+  if (!canSave.value || rawText.value === savedRawText.value) return
   const parsed = parseJsoncObject(rawText.value)
   if (!parsed.ok) {
     jsonParseError.value = parsed.rootNotObject ? t('config.editor.rootMustBeObject') : parsed.error
@@ -590,7 +605,7 @@ onBeforeUnmount(() => {
         <DialogButton
           kind="primary"
           :label="busy ? t('config.editor.saving') : t('config.editor.save')"
-          :disabled="!dirty || busy"
+          :disabled="!canSave"
           @click="save"
         />
       </div>
