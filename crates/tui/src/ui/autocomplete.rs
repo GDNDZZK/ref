@@ -295,8 +295,7 @@ pub fn split_dir_query(raw: &str) -> SplitPath {
         quote = Some('\'');
         s = rest.trim_end_matches('\'');
     }
-    let win_style = cfg!(windows)
-        || has_drive_prefix(s)
+    let win_style = has_drive_prefix(s)
         || s.starts_with("~\\")
         || s.starts_with(".\\")
         || s.starts_with("..\\");
@@ -378,7 +377,7 @@ fn format_path_completion(
         };
     }
     let escaped = if shell_escape && full.contains(' ') {
-        if sep == '\\' {
+        if cfg!(windows) || sep == '\\' || has_drive_prefix(&full) {
             return if is_dir {
                 format!("\"{full}")
             } else if trailing_space_on_file {
