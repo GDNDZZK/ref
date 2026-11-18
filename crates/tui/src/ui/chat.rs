@@ -95,25 +95,7 @@ pub struct ChatState {
     pub pill: Option<Rect>,
     /// Content width of the last layout (re-wrapping is not "new content").
     last_w: usize,
-    hold: Hold,
 }
-
-/// Blank rows kept under the transcript while a turn runs, so streaming content that gives
-/// room back (see `ChatState::update_hold`) does not make the view bounce.
-///
-/// Follows the GUI's `holdEnd` in ChatView.qml (hold only while following; resume from the
-/// current extent) with two differences: the space is capped at the viewport height minus
-/// one, and it is released at once when the turn ends instead of with an animation.
-#[derive(Default)]
-struct Hold {
-    /// Blank rows under the last content row.
-    space: usize,
-    /// Highest `total + space` seen since following (re)started in this turn.
-    high_water: usize,
-    was_busy: bool,
-    was_following: bool,
-}
-
 fn hash_key(parts: &[u64]) -> u64 {
     let mut h: u64 = FNV_OFFSET;
     for p in parts {
@@ -149,60 +131,9 @@ impl ChatState {
         }
     }
 
-    /// Rows the scroll range spans: the content plus the held blank rows.
-    fn scroll_total(&self) -> usize {
-        self.total + self.hold.space
-    }
-
     pub fn max_scroll(&self) -> f64 {
-        self.scroll_total()
-            .saturating_sub(self.area.height as usize) as f64
+        self.total.saturating_sub(self.area.height as usize) as f64
     }
-
-    /// While a turn runs and the view follows the end, the end never moves up: rows the
-    /// content gives back stay as blank space until the turn ends (then they are released at
-    /// once). Streaming content often takes more room than it needs in the end: a retry
-    /// notice, a tool's live output, or reasoning that is expanded while it streams and
-    /// folded to one line afterwards.
-    ///
-    /// The blank space is capped at the viewport height minus one, so the last content row
-    /// stays visible. Further up (not following) the end moving is out of sight and the held
-    /// space stays as it is.
-    fn update_hold(&mut self, busy: bool) {
-        let hold = &mut self.hold;
-        if !busy {
-            *hold = Hold {
-                was_following: self.follow,
-                ..Hold::default()
-            };
-            return;
-        }
-        let turn_started = !hold.was_busy;
-        let follow_resumed = self.follow && !hold.was_following;
-        if turn_started || follow_resumed {
-            hold.high_water = self.total + hold.space;
-        }
-        hold.was_busy = true;
-        hold.was_following = self.follow;
-        if !self.follow {
-            return;
-        }
-        let cap = (self.area.height as usize).saturating_sub(1);
-        hold.high_water = hold.high_water.max(self.total).min(self.total + cap);
-        hold.space = hold.high_water - self.total;
-    }
-
-    /// Drops the held space after a re-wrap: row counts of the old width mean nothing now.
-    /// Removed messages do not release it: a retry removes the unfinished assistant message,
-    /// which is exactly the shrinking that the hold absorbs.
-    pub(crate) fn release_hold(&mut self) {
-        self.hold = Hold {
-            was_busy: self.hold.was_busy,
-            was_following: self.hold.was_following,
-            ..Hold::default()
-        };
-    }
-
     pub fn top(&self) -> usize {
         self.pos.round().max(0.0) as usize
     }
@@ -412,9 +343,8 @@ impl ChatState {
             set.insert(part);
         }
         self.sel = None;
-        // The re-layout isn't new content: no "new messages" pill, and no held blank rows.
+        // The re-layout isn't new content: no "new messages" pill.
         self.last_total = 0;
-        self.release_hold();
     }
 
     pub fn show_all(&mut self, msg: &str, part: usize) {
@@ -424,7 +354,6 @@ impl ChatState {
             .insert(part);
         self.sel = None;
         self.last_total = 0;
-        self.release_hold();
     }
 }
 
@@ -598,13 +527,85 @@ fn shift_for_prepended(chat: &mut ChatState, ids: &[String], offsets: &[usize], 
     }
 }
 
-/// Follow / clamp bookkeeping after a layout pass for a viewport of `area`.
-fn settle(chat: &mut ChatState, area: Rect, width_changed: bool, busy: bool) {
-    chat.area = area;
-    if width_changed {
-        chat.release_hold();
+/// Reading position relative to the message at the top of the viewport, preserved across reflows.
+struct ReadingAnchor {
+    /// `Some(id)` for a message block, `None` for the tail rows below all messages.
+    msg_id: Option<String>,
+    msg_idx: usize,
+    frac: f64,
+}
+
+fn capture_anchor(chat: &ChatState) -> Option<ReadingAnchor> {
+    if chat.offsets.is_empty() || chat.total == 0 {
+        return None;
     }
-    chat.update_hold(busy);
+    let y = chat.target.max(0.0);
+    let msg_count = chat.ids.len();
+    let k = chat
+        .offsets
+        .partition_point(|&start| (start as f64) <= y)
+        .saturating_sub(1);
+    if k < msg_count {
+        let start = chat.offsets[k] as f64;
+        let len = (chat.offsets[k + 1] - chat.offsets[k]) as f64;
+        let frac = if len > 0.0 {
+            ((y - start) / len).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        return Some(ReadingAnchor {
+            msg_id: Some(chat.ids[k].clone()),
+            msg_idx: k,
+            frac,
+        });
+    }
+    let start = *chat.offsets.last()? as f64;
+    let len = (chat.total as f64 - start).max(0.0);
+    let frac = if len > 0.0 {
+        ((y - start) / len).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    Some(ReadingAnchor {
+        msg_id: None,
+        msg_idx: msg_count,
+        frac,
+    })
+}
+
+fn restore_anchor(chat: &mut ChatState, anchor: &ReadingAnchor) {
+    if chat.offsets.is_empty() {
+        return;
+    }
+    let msg_count = chat.ids.len();
+    let (start, len) = if let Some(id) = &anchor.msg_id {
+        let idx = chat
+            .ids
+            .iter()
+            .position(|x| x == id)
+            .or_else(|| (anchor.msg_idx < msg_count).then_some(anchor.msg_idx));
+        if let Some(k) = idx {
+            (
+                chat.offsets[k] as f64,
+                (chat.offsets[k + 1] - chat.offsets[k]) as f64,
+            )
+        } else {
+            (*chat.offsets.last().unwrap_or(&0) as f64, 0.0)
+        }
+    } else {
+        let s = *chat.offsets.last().unwrap_or(&0) as f64;
+        (s, (chat.total as f64 - s).max(0.0))
+    };
+    let new_y = start + anchor.frac * len;
+    chat.target = new_y;
+    chat.pos = new_y;
+}
+
+/// Follow / clamp bookkeeping after a layout pass for a viewport of `area`.
+fn settle(chat: &mut ChatState, area: Rect, reflow: bool) {
+    let height_changed = chat.area.height != area.height;
+    let was_scrolling = chat.scrolling();
+    chat.area = area;
     let max = chat.max_scroll();
     if !chat.initialized {
         chat.initialized = true;
@@ -613,16 +614,26 @@ fn settle(chat: &mut ChatState, area: Rect, width_changed: bool, busy: bool) {
         chat.target = max;
     }
     // Content grew while scrolled up (re-wrapping after a resize doesn't count).
-    if chat.total > chat.last_total && !chat.follow && chat.last_total > 0 && !width_changed {
+    if chat.total > chat.last_total && !chat.follow && chat.last_total > 0 && !reflow {
         chat.new_below = true;
         chat.new_rows += chat.total - chat.last_total;
     }
     chat.last_total = chat.total;
+    // Shrinking content (e.g. collapsing a card) that brings `target` to/past the end resumes follow.
+    if !chat.follow && chat.target >= max - FOLLOW_EPSILON {
+        chat.follow = true;
+        chat.new_below = false;
+        chat.new_rows = 0;
+    }
     if chat.follow {
-        // Stick to bottom: jump directly when content grows (streaming must not lag behind).
-        if (chat.target - max).abs() > FOLLOW_EPSILON {
+        let resized = reflow || height_changed;
+        if resized {
             chat.target = max;
-            if !chat.scrolling() || chat.pos > max {
+            chat.pos = max;
+        } else if (chat.target - max).abs() > FOLLOW_EPSILON {
+            chat.target = max;
+            // Stick to bottom immediately unless an explicit smooth scroll to bottom is in flight.
+            if !was_scrolling || chat.pos > max {
                 chat.pos = max;
             }
         }
@@ -795,14 +806,20 @@ pub fn draw(buf: &mut Buffer, area: Rect, view: &mut SessionView, env: &Env<'_>)
     let tail = tail_rows(view, env, cw);
     view.chat.tail = tail;
     let reflow = view.chat.last_w != cw || view.chat.compact;
+    let anchor = if reflow && !view.chat.follow && view.chat.initialized {
+        capture_anchor(&view.chat)
+    } else {
+        None
+    };
     layout(view, env, cw, false);
     view.chat.last_w = cw;
     let loaded = view.loaded;
-    let busy = view.is_busy();
     let chat = &mut view.chat;
+    if let Some(a) = &anchor {
+        restore_anchor(chat, a);
+    }
     chat.content_x = area.x + 1;
-    settle(chat, area, reflow, busy);
-    chat.pill = None;
+    settle(chat, area, reflow);
 
     if view.messages.is_empty() && !view.is_busy() {
         draw_welcome(buf, area, view, loaded);
@@ -829,11 +846,11 @@ pub fn draw(buf: &mut Buffer, area: Rect, view: &mut SessionView, env: &Env<'_>)
         }
     }
     // Scrollbar.
-    if chat.scroll_total() > area.height as usize {
+    if chat.total > area.height as usize {
         draw_scrollbar(
             buf,
             Rect::new(area.x + area.width - 1, area.y, 1, area.height),
-            chat.scroll_total(),
+            chat.total,
             chat.pos,
             chat.max_scroll(),
             ("┃", theme::BORDER_ACTIVE),
@@ -982,12 +999,19 @@ pub fn draw_tile(buf: &mut Buffer, area: Rect, bar_x: u16, view: &mut SessionVie
             .collect()
     };
     let reflow = view.chat.last_w != cw || !view.chat.compact;
+    let anchor = if reflow && !view.chat.follow && view.chat.initialized {
+        capture_anchor(&view.chat)
+    } else {
+        None
+    };
     layout(view, env, cw, true);
     view.chat.last_w = cw;
-    let busy = view.is_busy();
     let chat = &mut view.chat;
+    if let Some(a) = &anchor {
+        restore_anchor(chat, a);
+    }
     chat.content_x = area.x;
-    settle(chat, area, reflow, busy);
+    settle(chat, area, reflow);
     chat.pill = None;
     let top = chat.top();
     for dy in 0..area.height {
@@ -996,14 +1020,14 @@ pub fn draw_tile(buf: &mut Buffer, area: Rect, bar_x: u16, view: &mut SessionVie
         };
         buf.set_line(area.x, area.y + dy, &row.line, area.width);
     }
-    if chat.follow || chat.scroll_total() <= area.height as usize {
+    if chat.follow || chat.total <= area.height as usize {
         return;
     }
     // Scrolled up: thumb on the right border; "↓ N new lines" once more content arrives.
     draw_scrollbar(
         buf,
         Rect::new(bar_x, area.y, 1, area.height),
-        chat.scroll_total(),
+        chat.total,
         chat.pos,
         chat.max_scroll(),
         ("┃", theme::MUTED),
@@ -1026,142 +1050,61 @@ pub fn pill_hit(chat: &ChatState, x: u16, y: u16) -> bool {
 }
 
 #[cfg(test)]
-mod hold_tests {
+mod scroll_tests {
     use super::*;
 
     const HEIGHT: u16 = 10;
 
-    /// An idle, following view over `total` rows (the first pass only initialises it).
     fn following(total: usize) -> ChatState {
         let mut chat = ChatState::default();
-        set_total(&mut chat, total, false);
-        set_total(&mut chat, total, false);
+        set_total(&mut chat, total);
+        set_total(&mut chat, total);
         assert!(chat.follow);
         chat
     }
 
-    /// Lays out `total` rows in a `HEIGHT`-row viewport, like one draw pass, and lets the
-    /// scroll easing finish.
-    fn set_total(chat: &mut ChatState, total: usize, busy: bool) {
+    fn set_total(chat: &mut ChatState, total: usize) {
         chat.total = total;
-        settle(chat, Rect::new(0, 0, 40, HEIGHT), false, busy);
+        settle(chat, Rect::new(0, 0, 40, HEIGHT), false);
         while chat.step_anim() {}
     }
 
-    /// A following view whose turn has just started over `total` rows.
-    fn mid_turn(total: usize) -> ChatState {
-        let mut chat = following(total);
-        set_total(&mut chat, total, true);
-        chat
-    }
-
     #[test]
-    fn idle_view_follows_the_end_down() {
+    fn shrinking_content_snaps_immediately_without_blank_hold_space() {
         let mut chat = following(50);
-        set_total(&mut chat, 46, false);
+        set_total(&mut chat, 46);
         assert_eq!(chat.top(), 36);
+        assert_eq!(chat.max_scroll(), 36.0);
     }
 
     #[test]
-    fn busy_view_keeps_its_position_when_content_shrinks() {
-        let mut chat = mid_turn(50);
-        set_total(&mut chat, 46, true);
-        assert_eq!(chat.top(), 40, "the end did not move up");
-        assert_eq!(chat.hold.space, 4);
-        assert_eq!(chat.max_scroll(), 40.0);
-    }
-
-    #[test]
-    fn content_grows_back_into_the_held_space() {
-        let mut chat = mid_turn(50);
-        set_total(&mut chat, 46, true);
-        set_total(&mut chat, 49, true);
-        assert_eq!(chat.top(), 40);
-        assert_eq!(chat.hold.space, 1);
-        set_total(&mut chat, 53, true);
-        assert_eq!(chat.top(), 43, "past the old end the view follows again");
-        assert_eq!(chat.hold.space, 0);
-    }
-
-    #[test]
-    fn end_of_turn_releases_the_space_at_once() {
+    fn streaming_growth_while_stationary_at_bottom_sticks_without_lag() {
         let mut chat = following(50);
-        set_total(&mut chat, 46, true);
-        set_total(&mut chat, 46, false);
-        assert_eq!(chat.top(), 36);
-        assert_eq!(chat.hold.space, 0);
+        chat.total = 55;
+        settle(&mut chat, Rect::new(0, 0, 40, HEIGHT), false);
+        assert_eq!(chat.top(), 45);
+        assert!(!chat.scrolling());
     }
 
     #[test]
-    fn held_space_is_capped_below_the_viewport_height() {
-        let mut chat = mid_turn(50);
-        set_total(&mut chat, 20, true);
-        assert_eq!(chat.hold.space, HEIGHT as usize - 1);
-        assert_eq!(chat.top(), 19, "the last row is still visible");
-        // Later growth fills the capped space; the view stays put until it is used up.
-        set_total(&mut chat, 25, true);
-        assert_eq!(chat.hold.space, 4);
-        assert_eq!(chat.top(), 19);
-    }
-
-    #[test]
-    fn nothing_is_held_while_scrolled_up() {
-        let mut chat = mid_turn(50);
-        chat.scroll_by(-5, false);
+    fn shrinking_past_scrolled_up_target_restores_follow() {
+        let mut chat = following(50);
+        chat.scroll_by(-4, false);
         assert!(!chat.follow);
-        set_total(&mut chat, 46, true);
-        assert_eq!(chat.hold.space, 0);
-        assert_eq!(chat.top(), 35);
-    }
-
-    #[test]
-    fn following_again_mid_turn_starts_from_the_current_extent() {
-        let mut chat = mid_turn(50);
-        set_total(&mut chat, 48, true);
-        assert_eq!(chat.hold.space, 2);
-        chat.scroll_by(-5, false);
-        // The end moves while the user reads further up: nothing is held for it.
-        set_total(&mut chat, 40, true);
-        assert_eq!(chat.hold.space, 2);
-        chat.scroll_to_bottom(false);
-        set_total(&mut chat, 40, true);
-        assert_eq!(chat.hold.space, 2, "the old high-water mark is not revived");
-        assert_eq!(chat.top(), 32);
-        set_total(&mut chat, 37, true);
-        assert_eq!(chat.hold.space, 5);
+        assert_eq!(chat.top(), 36);
+        // Collapsing a card shrinks total from 50 -> 42 (max_scroll = 32 <= 36).
+        set_total(&mut chat, 42);
+        assert!(chat.follow, "clamping target to max restores follow");
         assert_eq!(chat.top(), 32);
     }
 
     #[test]
-    fn rewrapping_drops_the_held_space() {
-        let mut chat = mid_turn(50);
-        set_total(&mut chat, 46, true);
-        chat.total = 30;
-        settle(&mut chat, Rect::new(0, 0, 30, HEIGHT), true, true);
-        assert_eq!(chat.hold.space, 0);
-        assert_eq!(chat.top(), 20);
-    }
-
-    #[test]
-    fn new_turn_starts_without_leftover_space() {
+    fn viewport_height_shrink_while_following_snaps_immediately() {
         let mut chat = following(50);
-        set_total(&mut chat, 46, true);
-        set_total(&mut chat, 46, false);
-        set_total(&mut chat, 46, true);
-        assert_eq!(chat.hold.space, 0);
-        set_total(&mut chat, 44, true);
-        assert_eq!(chat.hold.space, 2);
-    }
-
-    #[test]
-    fn toggling_card_releases_held_space() {
-        let mut chat = mid_turn(20);
-        chat.toggle("m1", 0);
-        set_total(&mut chat, 35, true);
-        assert_eq!(chat.hold.space, 0);
-        chat.toggle("m1", 0);
-        set_total(&mut chat, 20, true);
-        assert_eq!(chat.hold.space, 0);
-        assert_eq!(chat.top(), 10);
+        assert_eq!(chat.top(), 40);
+        // Focusing a split tile shrinks viewport height by 2 rows.
+        settle(&mut chat, Rect::new(0, 0, 40, HEIGHT - 2), false);
+        assert_eq!(chat.top(), 42);
+        assert!(!chat.scrolling());
     }
 }

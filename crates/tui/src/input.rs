@@ -229,7 +229,12 @@ fn dialog_key(app: &mut App, k: KeyEvent) {
             KeyCode::Down | KeyCode::Char('j') => h.scroll_by(1),
             KeyCode::PageUp => h.scroll_by(-PAGE_ROWS),
             KeyCode::PageDown | KeyCode::Char(' ') => h.scroll_by(PAGE_ROWS),
-            _ => app.dialog = None,
+            KeyCode::Home => h.scroll_to_top(),
+            KeyCode::Char('g') if k.modifiers.is_empty() => h.scroll_to_top(),
+            KeyCode::End | KeyCode::Char('G') => h.scroll_to_bottom(),
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => app.dialog = None,
+            KeyCode::Char('c') if k.modifiers == CTRL => app.dialog = None,
+            _ => app.dirty = false,
         },
         Some(Dialog::Mcp(d)) => {
             let n = app.mcp.len();
@@ -253,7 +258,7 @@ fn dialog_key(app: &mut App, k: KeyEvent) {
             KeyCode::Esc => {
                 if d.confirm.is_some() {
                     d.confirm = None;
-                } else {
+                } else if !d.cancel_arg_prompt() {
                     app.dialog = None;
                 }
             }
@@ -263,24 +268,56 @@ fn dialog_key(app: &mut App, k: KeyEvent) {
             KeyCode::Char('n') if k.modifiers == CTRL => d.move_sel(1),
             KeyCode::PageUp => d.page(-1),
             KeyCode::PageDown => d.page(1),
+            KeyCode::Enter if k.modifiers.intersects(CTRL | ALT) && d.kind == Kind::Cd => {
+                app.cd_dialog_confirm_typed();
+            }
             KeyCode::Enter => app.dialog_submit(),
-            KeyCode::Tab => d.cycle_creator_filter(),
+            KeyCode::Tab => {
+                if d.kind == Kind::Cd {
+                    app.cd_dialog_tab();
+                } else if d.asking_arg.is_none() {
+                    d.cycle_creator_filter();
+                }
+            }
+            KeyCode::Backspace
+                if d.kind == Kind::Cd
+                    && k.modifiers.is_empty()
+                    && d.filter.selection().is_none()
+                    && d.filter.cursor == d.filter.text.len()
+                    && d.filter.text.ends_with('/')
+                    && d.filter.text != "/" =>
+            {
+                let up = crate::ui::autocomplete::parent_dir_input(&d.filter.text);
+                d.filter.set_text(&up);
+                app.refresh_cd_dialog();
+            }
             KeyCode::Char('d') if k.modifiers == CTRL => {
-                if matches!(d.kind, Kind::Sessions | Kind::CloseSessions) {
+                if d.asking_arg.is_none() && matches!(d.kind, Kind::Sessions | Kind::CloseSessions)
+                {
                     app.dialog_delete();
                 }
             }
             KeyCode::Char('c') if k.modifiers == CTRL => {
                 if d.filter.text.is_empty() {
-                    app.dialog = None;
+                    if !d.cancel_arg_prompt() {
+                        app.dialog = None;
+                    }
                 } else {
                     d.filter.clear();
-                    d.refilter();
+                    if d.kind == Kind::Cd {
+                        app.refresh_cd_dialog();
+                    } else {
+                        d.refilter();
+                    }
                 }
             }
             _ => {
                 if edit_key(&mut d.filter, &k, false) {
-                    d.refilter();
+                    if d.kind == Kind::Cd {
+                        app.refresh_cd_dialog();
+                    } else {
+                        d.refilter();
+                    }
                 }
             }
         },
@@ -376,11 +413,10 @@ fn history_prev(app: &mut App) {
         return;
     }
     let cur = app.editor.text.clone();
-    if let Some(h) = app.history.prev(&cur) {
+    if let Some(h) = app.history.prev_mode(&cur, app.shell_mode) {
         set_from_history(app, &h);
     }
 }
-
 fn chat_key(app: &mut App, k: KeyEvent) {
     let m = k.modifiers;
     // ctrl+c: clear editor / exit twice.
@@ -425,14 +461,46 @@ fn chat_key(app: &mut App, k: KeyEvent) {
             KeyCode::Char('p') if m == CTRL => return ac_move(app, -1),
             KeyCode::Char('n') if m == CTRL => return ac_move(app, 1),
             KeyCode::Tab => {
+                let keep_open = app
+                    .ac
+                    .as_ref()
+                    .and_then(|ac| ac.items.get(ac.sel))
+                    .is_some_and(|(v, _, _)| {
+                        ac_keeps_open_on_tab(app.ac.as_ref().map(|a| &a.kind), v)
+                    });
                 app.accept_completion(false);
-                refresh_autocomplete_after_accept(app);
+                if keep_open {
+                    refresh_autocomplete_after_accept(app);
+                } else {
+                    app.ac = None;
+                }
                 return;
             }
             KeyCode::Enter if m.is_empty() => {
-                // A command with args stays completed for the user to type them.
-                app.accept_completion(true);
-                refresh_autocomplete_after_accept(app);
+                let freeform_submit = app
+                    .ac
+                    .as_ref()
+                    .is_some_and(|ac| ac.freeform_enter && !ac.explicitly_selected);
+                if freeform_submit {
+                    app.ac = None;
+                    app.submit();
+                    return;
+                }
+                let keep_open = app
+                    .ac
+                    .as_ref()
+                    .and_then(|ac| ac.items.get(ac.sel))
+                    .is_some_and(|(v, _, _)| {
+                        ac_keeps_open_on_tab(app.ac.as_ref().map(|a| &a.kind), v)
+                    });
+                let executed = app.accept_completion(true);
+                if !executed {
+                    if keep_open {
+                        refresh_autocomplete_after_accept(app);
+                    } else {
+                        app.ac = None;
+                    }
+                }
                 return;
             }
             KeyCode::Esc => {
@@ -451,6 +519,7 @@ fn chat_key(app: &mut App, k: KeyEvent) {
                 app.editor.select_mode(false);
             } else if app.shell_mode {
                 app.shell_mode = false;
+                app.ac = None;
             } else if app.cur().is_some_and(has_delayed_tool) {
                 // "runs in Ns · esc to cancel": a single esc stops the turn before the tool runs.
                 if let Some(sid) = app.current.clone() {
@@ -462,8 +531,18 @@ fn chat_key(app: &mut App, k: KeyEvent) {
             }
         }
         KeyCode::Enter if m.is_empty() => app.submit(),
-        KeyCode::Tab if m.is_empty() => app.cycle_agent(1),
-        KeyCode::BackTab => app.cycle_agent(-1),
+        KeyCode::Tab if m.is_empty() => {
+            if app.shell_mode {
+                app.trigger_tab_completion();
+            } else if !app.trigger_tab_completion() {
+                app.cycle_agent(1);
+            }
+        }
+        KeyCode::BackTab => {
+            if !app.shell_mode {
+                app.cycle_agent(-1);
+            }
+        }
         KeyCode::PageUp => scroll(app, |c| c.page(-1, false)),
         KeyCode::PageDown => scroll(app, |c| c.page(1, false)),
         KeyCode::Char('u') if m == CTRL | ALT => scroll(app, |c| c.page(-1, true)),
@@ -491,8 +570,14 @@ fn chat_key(app: &mut App, k: KeyEvent) {
         KeyCode::Down if !m.contains(SHIFT) => {
             if app.editor.on_last_row() {
                 if app.history.browsing() {
-                    if let Some(h) = app.history.next() {
-                        set_from_history(app, &h);
+                    if let Some((h, restore_shell)) = app.history.next_mode() {
+                        if restore_shell {
+                            app.shell_mode = true;
+                            app.editor.set_text(h.strip_prefix('!').unwrap_or(&h));
+                            app.ac = None;
+                        } else {
+                            set_from_history(app, &h);
+                        }
                     }
                 } else {
                     app.editor.buf_end();
@@ -529,10 +614,11 @@ fn chat_key(app: &mut App, k: KeyEvent) {
                     app.suppress_ac = false;
                     app.update_autocomplete();
 
-                    // Typed / pasted path to an image → attachment.
-                    maybe_image_path(app);
+                    // Typed / pasted path to an image → attachment (disabled in `!` shell mode).
+                    if !app.shell_mode {
+                        maybe_image_path(app);
+                    }
                 }
-
                 if app.has_selection() {
                     app.clear_selection();
                 }
@@ -568,10 +654,17 @@ fn set_from_history(app: &mut App, h: &str) {
 
 fn ac_move(app: &mut App, d: i32) {
     if let Some(ac) = app.ac.as_mut() {
-        let n = ac.items.len() as i32;
-        if n > 0 {
-            ac.sel = ((ac.sel as i32 + d).rem_euclid(n)) as usize;
-        }
+        ac.move_sel(d);
+    }
+}
+
+fn ac_keeps_open_on_tab(kind: Option<&crate::app::AcKind>, value: &str) -> bool {
+    use crate::app::AcKind;
+    match kind {
+        Some(AcKind::Slash) => true,
+        Some(AcKind::SlashArg) => value.ends_with('/') || value.ends_with(' '),
+        Some(AcKind::ShellPath) => value.ends_with('/'),
+        Some(AcKind::File | AcKind::ShellCmd) | None => false,
     }
 }
 
@@ -692,7 +785,11 @@ fn pasted_images(s: &str) -> Result<Vec<(ImageData, String)>, String> {
 fn paste(app: &mut App, s: String) {
     if let Some(Dialog::List(d)) = app.dialog.as_mut() {
         d.filter.insert(&crate::text::one_line(&s));
-        d.refilter();
+        if d.kind == Kind::Cd {
+            app.refresh_cd_dialog();
+        } else {
+            d.refilter();
+        }
         return;
     }
     if app.active_permission().is_some() {
@@ -704,36 +801,41 @@ fn paste(app: &mut App, s: String) {
         }
         return;
     }
+    let in_shell = app.mode == Mode::Chat && app.shell_mode;
     if s.trim().is_empty() {
-        // Empty bracketed paste: often an image-only clipboard.
-        match crate::clipboard::paste_image() {
-            Ok(Some(img)) => {
-                target_editor(app).attach_image(img, Some("clipboard".into()));
-                app.toasts.info("Pasted image from clipboard");
+        if !in_shell {
+            // Empty bracketed paste: often an image-only clipboard.
+            match crate::clipboard::paste_image() {
+                Ok(Some(img)) => {
+                    target_editor(app).attach_image(img, Some("clipboard".into()));
+                    app.toasts.info("Pasted image from clipboard");
+                }
+                Ok(None) => {}
+                Err(e) => app.toasts.error(format!("Clipboard image error: {e}")),
             }
-            Ok(None) => {}
-            Err(e) => app.toasts.error(format!("Clipboard image error: {e}")),
         }
         return;
     }
-    // One or more image paths.
-    match pasted_images(&s) {
-        Ok(imgs) if !imgs.is_empty() => {
-            let n = imgs.len();
-            let ed = target_editor(app);
-            for (img, name) in imgs {
-                ed.attach_image(img, Some(name));
+    // One or more image paths (skipped in `!` shell mode so shell commands get literal paths).
+    if !in_shell {
+        match pasted_images(&s) {
+            Ok(imgs) if !imgs.is_empty() => {
+                let n = imgs.len();
+                let ed = target_editor(app);
+                for (img, name) in imgs {
+                    ed.attach_image(img, Some(name));
+                }
+                app.toasts.info(format!(
+                    "Attached {n} image{}",
+                    if n > 1 { "s" } else { "" }
+                ));
+                return;
             }
-            app.toasts.info(format!(
-                "Attached {n} image{}",
-                if n > 1 { "s" } else { "" }
-            ));
-            return;
-        }
-        Ok(_) => {}
-        Err(e) => {
-            app.toasts.error(e);
-            return;
+            Ok(_) => {}
+            Err(e) => {
+                app.toasts.error(e);
+                return;
+            }
         }
     }
     if app.mode == Mode::Watch {
@@ -743,6 +845,7 @@ fn paste(app: &mut App, s: String) {
     }
     app.editor.paste(&s);
     app.history.reset();
+    app.suppress_ac = false;
     app.update_autocomplete();
 }
 
@@ -900,8 +1003,8 @@ fn watch_key(app: &mut App, k: KeyEvent) {
                 return;
             }
 
-            // Built-in commands typed in a tile act on that tile's session.
-            if run_tile_command(app, &f) {
+            // Slash commands, `!` shell commands, and single-token typo guard act on that tile's session.
+            if app.submit_tile_command(&f) {
                 return;
             }
 
@@ -927,36 +1030,6 @@ fn watch_key(app: &mut App, k: KeyEvent) {
             }
         },
     }
-}
-
-/// Built-in commands typed in a tile act on that tile's session. Returns true if one was handled.
-fn run_tile_command(app: &mut App, tile: &str) -> bool {
-    let Some(ed) = app.watch.inputs.get_mut(tile) else {
-        return false;
-    };
-    let Some(rest) = ed.text.trim().strip_prefix('/') else {
-        return false;
-    };
-    let (name, args) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
-    let Some(c) = crate::app::find_cmd(name) else {
-        return false;
-    };
-    let args = args.to_string();
-    match c.name {
-        cmd::CLOSE => {
-            ed.clear();
-            app.close_session(tile);
-        }
-        cmd::CD => {
-            ed.clear();
-            app.change_dir(tile, &args);
-        }
-        other => app.set_hint(
-            format!("/{other} works in the chat view (ctrl+o opens this session)"),
-            theme::MUTED,
-        ),
-    }
-    true
 }
 
 /// PgUp/PgDn/Home/End/shift+↑↓ on the focused tile. Home/End only while its input is empty.
@@ -998,6 +1071,16 @@ fn click_count(app: &mut App, x: u16, y: u16) -> u8 {
 
 fn mouse(app: &mut App, me: MouseEvent) {
     let (x, y) = (me.column, me.row);
+    // Deduplicate stationary Moved events so keypresses/redraws never steal keyboard selection or clear confirm.
+    if matches!(me.kind, MouseEventKind::Moved) {
+        if app.last_mouse_pos == Some((x, y)) {
+            app.dirty = false;
+            return;
+        }
+        app.last_mouse_pos = Some((x, y));
+    } else {
+        app.last_mouse_pos = Some((x, y));
+    }
     let pos = Position::new(x, y);
     // Permission modal.
     if let Some((sid, req, _)) = app.active_permission() {
@@ -1024,12 +1107,23 @@ fn mouse(app: &mut App, me: MouseEvent) {
         return;
     }
     if let Some((sid, req)) = app.active_question() {
-        if let MouseEventKind::Down(MouseButton::Left) = me.kind {
-            if let Some(outcome) = app.question.as_mut().map(|q| q.click(x, y)) {
-                finish_question(app, &sid, &req.call_id, outcome);
+        match me.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                if let Some(outcome) = app.question.as_mut().map(|q| q.click(x, y)) {
+                    finish_question(app, &sid, &req.call_id, outcome);
+                }
             }
-        } else {
-            app.dirty = false;
+            MouseEventKind::ScrollUp => {
+                if let Some(q) = app.question.as_mut() {
+                    q.wheel(-WHEEL_SCROLL_ROWS);
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                if let Some(q) = app.question.as_mut() {
+                    q.wheel(WHEEL_SCROLL_ROWS);
+                }
+            }
+            _ => app.dirty = false,
         }
         return;
     }
@@ -1039,6 +1133,8 @@ fn mouse(app: &mut App, me: MouseEvent) {
                 let r = d.rect;
                 if !r.contains(pos) {
                     app.dialog = None;
+                } else if d.click_filter(x, y) {
+                    // Positioned cursor in search / argument bar.
                 } else if d.kind == Kind::CloseSessions {
                     // Destructive: a click only selects; enter closes.
                     if d.item_at(x, y).is_some_and(|i| i != d.sel) {
@@ -1053,14 +1149,25 @@ fn mouse(app: &mut App, me: MouseEvent) {
             (Dialog::List(d), MouseEventKind::ScrollDown) => d.scroll(1),
             (Dialog::List(d), MouseEventKind::Moved) => {
                 if let Some(i) = d.item_at(x, y) {
-                    d.sel = i;
+                    if d.sel != i {
+                        d.sel = i;
+                        d.confirm = None;
+                    } else {
+                        app.dirty = false;
+                    }
                 } else {
                     app.dirty = false;
                 }
             }
             (Dialog::Help(h), MouseEventKind::ScrollUp) => h.scroll_by(-WHEEL_SCROLL_ROWS),
             (Dialog::Help(h), MouseEventKind::ScrollDown) => h.scroll_by(WHEEL_SCROLL_ROWS),
-            (Dialog::Help(_), MouseEventKind::Down(_)) => app.dialog = None,
+            (Dialog::Help(h), MouseEventKind::Down(MouseButton::Left)) => {
+                if !h.rect.contains(pos) {
+                    app.dialog = None;
+                } else {
+                    app.dirty = false;
+                }
+            }
             (Dialog::Mcp(d), MouseEventKind::Down(MouseButton::Left)) => {
                 if !d.rect.contains(pos) {
                     app.dialog = None;
@@ -1227,26 +1334,42 @@ fn autocomplete_mouse(app: &mut App, me: MouseEvent) -> bool {
     if !r.contains(Position::new(x, y)) || y <= r.y {
         return false;
     }
-    let n = ac.items.len().min(r.height as usize - 2);
-    let start = ac.sel.saturating_sub(n.saturating_sub(1));
-    let idx = start + (y - r.y - 1) as usize;
+    let idx = ac.item_at(x, y);
     match me.kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            if idx >= ac.items.len() {
+            let Some(i) = idx else {
                 return true;
+            };
+            ac.sel = i;
+            ac.explicitly_selected = true;
+            let keep_open = ac
+                .items
+                .get(i)
+                .is_some_and(|(v, _, _)| ac_keeps_open_on_tab(Some(&ac.kind), v));
+            let executed = app.accept_completion(true);
+            if !executed {
+                if keep_open {
+                    refresh_autocomplete_after_accept(app);
+                } else {
+                    app.ac = None;
+                }
             }
-            ac.sel = idx;
-            app.accept_completion(true);
-            refresh_autocomplete_after_accept(app);
         }
         MouseEventKind::Moved => {
-            if idx < ac.items.len() {
-                ac.sel = idx;
+            if let Some(i) = idx {
+                if ac.sel != i {
+                    ac.sel = i;
+                    ac.explicitly_selected = true;
+                } else {
+                    app.dirty = false;
+                }
+            } else {
+                app.dirty = false;
             }
         }
         MouseEventKind::ScrollUp => ac_move(app, -1),
         MouseEventKind::ScrollDown => ac_move(app, 1),
-        _ => {}
+        _ => app.dirty = false,
     }
     true
 }
@@ -1255,12 +1378,35 @@ fn watch_mouse(app: &mut App, me: MouseEvent) {
     let (x, y) = (me.column, me.row);
     let pos = Position::new(x, y);
     let inside = |r: &Rect| r.contains(pos);
-    let tile = app
-        .watch
-        .tiles
-        .iter()
-        .find(|(_, r)| inside(r))
-        .map(|(s, _)| s.clone());
+    // Handle active drag/release in the focused tile's single-line input first.
+    if let Some(f) = app.watch.focus.clone()
+        && let Some(tr) = app
+            .watch
+            .tiles
+            .iter()
+            .find(|(s, _)| s == &f)
+            .map(|(_, r)| *r)
+        && let Some(ir) = split::input_rect(tr)
+        && app.watch.inputs.get(&f).is_some_and(|e| e.dragging)
+    {
+        match me.kind {
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let Some(ed) = app.watch.inputs.get_mut(&f) {
+                    let off = ed.offset_at_single_line(ir, x);
+                    ed.mouse_drag(off);
+                }
+                return;
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                if let Some(ed) = app.watch.inputs.get_mut(&f) {
+                    ed.mouse_up();
+                }
+                return;
+            }
+            _ => {}
+        }
+    }
+    let tile = app.watch.tiles.iter().find(|(_, r)| inside(r)).cloned();
     match me.kind {
         // The wheel scrolls the tile under the pointer, focused or not.
         MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
@@ -1269,17 +1415,33 @@ fn watch_mouse(app: &mut App, me: MouseEvent) {
             } else {
                 WHEEL_SCROLL_ROWS
             };
-            match tile.and_then(|sid| app.views.get_mut(&sid)) {
+            match tile.and_then(|(sid, _)| app.views.get_mut(&sid)) {
                 Some(v) => v.chat.scroll_by(d, false),
                 None => app.dirty = false,
             }
         }
         MouseEventKind::Down(MouseButton::Left) => {
-            let Some(sid) = tile else {
+            let Some((sid, tr)) = tile else {
                 // Empty space / footer: unfocus.
                 app.watch.focus = None;
                 return;
             };
+            let already_focused = app.watch.focus.as_deref() == Some(sid.as_str());
+            // Clicking inside a focused tile's input bar positions cursor and keeps focus.
+            if already_focused
+                && tr.height >= 5
+                && y == tr.y + tr.height - 2
+                && x > tr.x
+                && x + 1 < tr.x + tr.width
+            {
+                if let Some(ir) = split::input_rect(tr) {
+                    let n = click_count(app, x, y);
+                    let ed = app.watch.inputs.entry(sid).or_default();
+                    let off = ed.offset_at_single_line(ir, x);
+                    ed.mouse_down(off, n);
+                }
+                return;
+            }
             if let Some(v) = app.views.get_mut(&sid)
                 && chat::pill_hit(&v.chat, x, y)
             {
@@ -1287,7 +1449,6 @@ fn watch_mouse(app: &mut App, me: MouseEvent) {
                 return;
             }
             // Click targets: expand a tool call, show all output, withdraw a queued prompt.
-            // They focus the tile but never zoom (clicking a tool twice collapses it again).
             let hit = app.views.get(&sid).and_then(|v| v.chat.hit_at(x, y));
             let is_tool = |app: &App, msg: &str, part: usize| {
                 app.views
@@ -1321,8 +1482,13 @@ fn watch_mouse(app: &mut App, me: MouseEvent) {
             let clicks = click_count(app, x, y);
             if clicks == 2 {
                 app.zoom(&sid);
-            } else if app.watch.focus.as_deref() == Some(sid.as_str()) {
-                app.watch.focus = None;
+            } else if already_focused {
+                // Only clicking the tile border/header (or outside) unfocuses; body clicks keep focus.
+                let on_border =
+                    x == tr.x || x + 1 == tr.x + tr.width || y == tr.y || y + 1 == tr.y + tr.height;
+                if on_border {
+                    app.watch.focus = None;
+                }
             } else {
                 app.watch.focus = Some(sid);
             }
@@ -1331,14 +1497,7 @@ fn watch_mouse(app: &mut App, me: MouseEvent) {
     }
 }
 
-/// After accepting a slash command needing args, or a file, close the popup.
+/// Updates autocomplete after accepting a completion that drills down or expects arguments.
 fn refresh_autocomplete_after_accept(app: &mut App) {
-    if app.ac.is_none() && app.editor.mention().is_none() && !app.editor.text.starts_with('/') {
-        return;
-    }
-    if app.editor.text.ends_with(' ') {
-        app.ac = None;
-    } else {
-        app.update_autocomplete();
-    }
+    app.update_autocomplete();
 }

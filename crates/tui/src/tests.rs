@@ -3840,10 +3840,16 @@ fn split_view_click_focused_tile_deselects_and_double_click_zooms() {
         mouse(MouseEventKind::Down(MouseButton::Left), r.x + 3, r.y + 3),
     );
     assert_eq!(app.watch.focus.as_deref(), Some("ses_w1"));
-    // Clicking the focused tile again (not a hit target, not a double-click) unfocuses it.
+    // Clicking inside the focused tile's body keeps focus.
     crate::input::handle(
         &mut app,
-        mouse(MouseEventKind::Down(MouseButton::Left), r.x + 4, r.y + 3),
+        mouse(MouseEventKind::Down(MouseButton::Left), r.x + 6, r.y + 4),
+    );
+    assert_eq!(app.watch.focus.as_deref(), Some("ses_w1"));
+    // Single-clicking the tile's border/header unfocuses it.
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Down(MouseButton::Left), r.x + 4, r.y),
     );
     assert!(app.watch.focus.is_none());
     // Double-clicking a tile still zooms into it.
@@ -3879,24 +3885,27 @@ fn split_view_root_task_chip_and_border_style() {
         .insert("ses_c1".into(), SessionView::new(c1, false));
     app.views
         .insert("ses_gc1".into(), SessionView::new(gc1, false));
-    // Focus gc1 to confirm focus colour still wins over root border pattern.
+    // Focus gc1 to confirm focus colour wins over root-task border colour.
     app.watch.focus = Some("ses_gc1".into());
     let (term, s) = render(&mut app, 140, 36);
     let buf = term.backend().buffer();
     let ru = tile_rect(&app, "ses_u1");
     let rc = tile_rect(&app, "ses_c1");
     let rg = tile_rect(&app, "ses_gc1");
-    // User-created tile keeps plain rounded border and has no ⟲ chip.
+    // All tiles use solid rounded borders; user-created tile has no ⟲ chip.
     assert_eq!(buf[(ru.x, ru.y)].symbol(), "╭");
+    assert_eq!(buf[(rc.x, rc.y)].symbol(), "╭");
+    assert_eq!(buf[(rg.x, rg.y)].symbol(), "╭");
     assert!(!s.contains("user-tile ⟲"), "{s}");
-    // Both child and grandchild resolve to alpha-root, share the same root border glyph,
-    // and use a border glyph distinct from user-created rounded borders.
+    // Both child and grandchild resolve to alpha-root; unfocused child gets root_task_color, focused gets PRIMARY.
     assert!(s.contains("child-1 ⟲ alpha-root"), "{s}");
     assert!(s.contains("grand-1 ⟲ alpha-root"), "{s}");
-    assert_ne!(buf[(rc.x, rc.y)].symbol(), "╭");
-    assert_eq!(buf[(rc.x, rc.y)].symbol(), buf[(rg.x, rg.y)].symbol());
+    assert_eq!(buf[(ru.x, ru.y)].fg, crate::ui::theme::BORDER);
+    assert_eq!(
+        buf[(rc.x, rc.y)].fg,
+        crate::ui::theme::root_task_color("ses_r1")
+    );
     assert_eq!(buf[(rg.x, rg.y)].fg, crate::ui::theme::PRIMARY);
-    assert_eq!(buf[(rc.x, rc.y)].fg, crate::ui::theme::BORDER);
 }
 
 #[test]
@@ -4175,14 +4184,11 @@ fn cd_command_changes_session_directory() {
     use crate::app::Pending;
     let mut app = test_app(false);
     app.run_command("cd", "");
-    assert!(app.pending.is_empty());
     assert!(
-        app.toasts
-            .items
-            .iter()
-            .any(|t| t.text.contains("Working directory:") && t.text.contains("/cd <dir>")),
-        "no argument shows the directory"
+        matches!(app.dialog, Some(crate::ui::dialog::Dialog::List(ref d)) if d.kind == crate::ui::dialog::Kind::Cd)
     );
+    app.dialog = None;
+    app.pending.clear();
     type_text(&mut app, "/cwd \"../other dir\"");
     press(&mut app, KeyCode::Enter);
     assert!(
@@ -4251,16 +4257,12 @@ fn split_tile_commands_act_on_that_session() {
         "not sent to the model"
     );
     typed(&mut app, "/compact");
+    assert!(app.watch.inputs["ses_bg"].text.is_empty());
     assert!(
-        app.hint
-            .as_ref()
-            .is_some_and(|h| h.0.contains("works in the chat view"))
+        app.pending
+            .values()
+            .any(|p| matches!(p, Pending::Simple { .. }))
     );
-    assert_eq!(
-        app.watch.inputs["ses_bg"].text, "/compact",
-        "kept for editing"
-    );
-    app.watch.inputs.get_mut("ses_bg").unwrap().clear();
     typed(&mut app, "/close");
     assert!(
         app.pending
@@ -4763,7 +4765,7 @@ fn long_session_app(pairs: usize) -> App {
 }
 
 #[test]
-fn hold_keeps_transcript_still_when_the_retry_notice_goes_away() {
+fn retry_notice_disappearing_snaps_back_without_blank_hold_space() {
     let last = "second line of answer 29";
     let mut app = long_session_app(30);
     set_status(&mut app, TEST_SESSION, SessionStatus::Busy);
@@ -4777,19 +4779,20 @@ fn hold_keeps_transcript_still_when_the_retry_notice_goes_away() {
 
     set_status(&mut app, TEST_SESSION, SessionStatus::Busy);
     let (_, s) = render(&mut app, 100, 30);
-    assert_eq!(row_of(&s, last), with_notice, "held: nothing moves\n{s}");
-
-    set_status(&mut app, TEST_SESSION, SessionStatus::Idle);
-    let (_, s) = render(&mut app, 100, 30);
-    assert_eq!(row_of(&s, last), at_rest, "released at the end of the turn");
+    assert_eq!(
+        row_of(&s, last),
+        at_rest,
+        "no artificial hold space during busy turn\n{s}"
+    );
 }
 
 #[test]
-fn hold_absorbs_the_removal_of_an_unfinished_message() {
-    // A retry makes the server remove the unfinished assistant message.
+fn removing_unfinished_message_leaves_no_blank_hold_space() {
     let last_answer = "second line of answer 29";
     let mut app = long_session_app(30);
     set_status(&mut app, TEST_SESSION, SessionStatus::Busy);
+    let (_, s0) = render(&mut app, 100, 30);
+    let at_rest = row_of(&s0, last_answer);
     let streaming = msg(
         "streaming",
         Role::Assistant,
@@ -4802,7 +4805,7 @@ fn hold_absorbs_the_removal_of_an_unfinished_message() {
         .unwrap()
         .apply(SessionEvent::Message { message: streaming });
     let (_, s) = render(&mut app, 100, 30);
-    let before = row_of(&s, last_answer);
+    assert!(row_of(&s, last_answer) < at_rest);
 
     app.views
         .get_mut(TEST_SESSION)
@@ -4811,15 +4814,11 @@ fn hold_absorbs_the_removal_of_an_unfinished_message() {
             message_id: "streaming".into(),
         });
     let (_, s) = render(&mut app, 100, 30);
-    assert_eq!(row_of(&s, last_answer), before, "held\n{s}");
-
-    set_status(&mut app, TEST_SESSION, SessionStatus::Idle);
-    let (_, s) = render(&mut app, 100, 30);
-    assert!(row_of(&s, last_answer) > before, "released with the turn");
+    assert_eq!(row_of(&s, last_answer), at_rest, "no blank hold space\n{s}");
 }
 
 #[test]
-fn hold_applies_to_split_tiles() {
+fn split_tile_shrink_and_reflow_preserve_scroll_invariants() {
     let mut app = watch_app();
     set_status(&mut app, "ses_w2", SessionStatus::Busy);
     let (_, s) = render(&mut app, 120, 30);
@@ -4835,16 +4834,57 @@ fn hold_applies_to_split_tiles() {
     };
     app.views.get_mut("ses_w2").unwrap().queued.push(queued);
     let (_, s) = render(&mut app, 120, 30);
-    let with_queue = row_of(&s, "beta answer 29");
-    assert!(with_queue < at_rest, "the queued row pushes the tile up");
+    assert!(row_of(&s, "beta answer 29") < at_rest);
 
     app.views.get_mut("ses_w2").unwrap().queued.clear();
     let (_, s) = render(&mut app, 120, 30);
-    assert_eq!(row_of(&s, "beta answer 29"), with_queue, "held\n{s}");
+    assert_eq!(
+        row_of(&s, "beta answer 29"),
+        at_rest,
+        "no blank hold space in split tile"
+    );
+}
 
-    set_status(&mut app, "ses_w2", SessionStatus::Idle);
-    let (_, s) = render(&mut app, 120, 30);
-    assert_eq!(row_of(&s, "beta answer 29"), at_rest, "released");
+#[test]
+fn reflow_preserves_reading_anchor_when_scrolled_up() {
+    let mut app = long_session_app(30);
+    let _ = render(&mut app, 120, 24);
+    let chat = &mut app.views.get_mut(TEST_SESSION).unwrap().chat;
+    chat.scroll_by(-40, false);
+    assert!(!chat.follow);
+    let (_, wide) = render(&mut app, 120, 24);
+    let top_line = wide
+        .lines()
+        .map(str::trim)
+        .find(|l| l.contains("a question ") || l.contains("answer "))
+        .expect("visible message line")
+        .to_string();
+    let marker = if let Some(idx) = top_line.find("a question ") {
+        top_line[idx..]
+            .trim_end_matches(['│', '┃', ' '])
+            .to_string()
+    } else {
+        top_line
+            .split(':')
+            .next()
+            .unwrap_or(&top_line)
+            .trim_end_matches(['│', '┃', ' '])
+            .to_string()
+    };
+    let row_wide = row_of(&wide, &marker);
+    assert!(
+        row_wide <= 4,
+        "marker near top in wide view: row={row_wide}\n{wide}"
+    );
+
+    // Narrowing wraps earlier messages into many more rows, yet keeps the same message anchored at top.
+    let (_, narrow) = render(&mut app, 44, 24);
+    assert!(!app.views[TEST_SESSION].chat.follow);
+    let row_narrow = row_of(&narrow, &marker);
+    assert!(
+        row_narrow <= 4,
+        "marker stays anchored near top after narrow reflow: row={row_narrow}\n{narrow}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -5238,9 +5278,8 @@ fn copy_text_toasts_osc52_warn_and_clipboard_error() {
     crate::clipboard::set_next_copy_result(Ok(crate::clipboard::CopyOutcome::Osc52Only));
     app.copy_text("hello", "selection");
     let t = app.toasts.items.last().unwrap();
-    assert_eq!(t.level, ToastLevel::Warn);
-    assert!(t.text.contains("OSC 52"), "{}", t.text);
-
+    assert_eq!(t.level, ToastLevel::Info);
+    assert_eq!(t.text, "Copied via terminal (OSC 52)");
     crate::clipboard::set_next_copy_result(Err("no clipboard tool".into()));
     app.copy_text("hello", "selection");
     let t = app.toasts.items.last().unwrap();
@@ -5316,4 +5355,1195 @@ fn load_prompt_history_from_warns_on_corrupt_file_and_missing_state_dir() {
     assert!(toasts.items[0].text.contains("Cannot locate state dir"));
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---------------------------------------------------------------------------
+// 0.2.3: /reload, slash UX, shell mode, tile borders, and 12 UX fixes
+// ---------------------------------------------------------------------------
+
+fn drain_requests(rx: &mut mpsc::UnboundedReceiver<ClientFrame>) -> Vec<ClientFrame> {
+    std::iter::from_fn(|| rx.try_recv().ok()).collect()
+}
+
+#[test]
+fn reload_config_deduplicates_config_changed_and_toasts_warnings() {
+    let (mut app, mut rx) = test_app_with_requests(false);
+    type_text(&mut app, "/RELOAD");
+    press(&mut app, KeyCode::Enter);
+    let frames = drain_requests(&mut rx);
+    let reload_frame = frames
+        .iter()
+        .find(|f| matches!(f.req, Request::ReloadConfig { .. }))
+        .expect("reload_config sent");
+    assert!(matches!(
+        &reload_frame.req,
+        Request::ReloadConfig { cwd: Some(c) } if c == TEST_CWD
+    ));
+    let reload_id = reload_frame.id.unwrap();
+
+    // While ReloadConfig is in flight, a broadcast ConfigChanged must not trigger GetConfig or duplicate toasts.
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::ConfigChanged {
+        warnings: vec!["bad key in ref.jsonc".into()],
+    }));
+    assert!(
+        drain_requests(&mut rx).is_empty(),
+        "deduped while ReloadConfig in flight"
+    );
+    assert!(app.toasts.items.is_empty());
+
+    // ReloadConfig response updates config, refreshes MCP, and toasts both info and warnings.
+    let mut updated = app.config.clone().unwrap();
+    updated.commands.push(CommandInfo {
+        name: "review-pr".into(),
+        description: "Review pull request".into(),
+        source: "config".into(),
+    });
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: reload_id,
+        ok: true,
+        result: json!({
+            "config": updated,
+            "warnings": ["bad key in ref.jsonc"]
+        }),
+        error: None,
+        code: None,
+    }));
+    assert!(
+        app.config
+            .as_ref()
+            .unwrap()
+            .commands
+            .iter()
+            .any(|c| c.name == "review-pr")
+    );
+    let after_frames = drain_requests(&mut rx);
+    assert!(
+        after_frames
+            .iter()
+            .any(|f| matches!(f.req, Request::McpStatus { cwd: Some(ref c) } if c == TEST_CWD))
+    );
+    assert!(
+        app.toasts
+            .items
+            .iter()
+            .any(|t| t.level == ToastLevel::Info && t.text == "Configuration reloaded")
+    );
+    assert!(
+        app.toasts
+            .items
+            .iter()
+            .any(|t| t.level == ToastLevel::Warn && t.text.contains("bad key in ref.jsonc"))
+    );
+
+    // External ConfigChanged (no ReloadConfig in flight) fetches GetConfig + McpStatus scoped to cwd.
+    app.toasts.items.clear();
+    answer_mcp(&mut app, &mcp_servers());
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::ConfigChanged {
+        warnings: vec!["unknown field foo".into()],
+    }));
+    let ext_frames = drain_requests(&mut rx);
+    assert!(
+        ext_frames
+            .iter()
+            .any(|f| matches!(f.req, Request::GetConfig { cwd: Some(ref c) } if c == TEST_CWD))
+    );
+    assert!(
+        ext_frames
+            .iter()
+            .any(|f| matches!(f.req, Request::McpStatus { cwd: Some(ref c) } if c == TEST_CWD))
+    );
+    assert!(
+        app.toasts
+            .items
+            .iter()
+            .any(|t| t.level == ToastLevel::Warn && t.text.contains("unknown field foo"))
+    );
+
+    // /cd response refreshes GetConfig + McpStatus for the new directory.
+    type_text(&mut app, "/cd /home/u/other");
+    press(&mut app, KeyCode::Enter);
+    let cd_frame = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(f.req, Request::SetCwd { .. }))
+        .expect("set_cwd sent");
+    let mut new_info = app.views[TEST_SESSION].info.clone();
+    new_info.cwd = "/home/u/other".into();
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: cd_frame.id.unwrap(),
+        ok: true,
+        result: json!({ "session": new_info }),
+        error: None,
+        code: None,
+    }));
+    let cd_after = drain_requests(&mut rx);
+    assert!(
+        cd_after.iter().any(
+            |f| matches!(f.req, Request::GetConfig { cwd: Some(ref c) } if c == "/home/u/other")
+        )
+    );
+    assert!(
+        cd_after.iter().any(
+            |f| matches!(f.req, Request::McpStatus { cwd: Some(ref c) } if c == "/home/u/other")
+        )
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mock_reload_listdirs_listbinaries_and_variant_clear() {
+    let (out_tx, out_rx) = mpsc::unbounded_channel();
+    let (ev_tx, mut ev_rx) = mpsc::unbounded_channel();
+    tokio::spawn(crate::mock::run(TEST_CWD.into(), out_rx, ev_tx));
+    let mut app = App::new(
+        Client::new(out_tx.clone()),
+        TEST_CWD.into(),
+        InitPlan {
+            prompt: Some("hello".into()),
+            ..Default::default()
+        },
+    );
+    pump(&mut app, &mut ev_rx, PUMP_TURN_MS).await;
+    let sid = app.current.clone().expect("session");
+
+    // /reload against mock backend succeeds and toasts Configuration reloaded without duplicate warning.
+    app.toasts.items.clear();
+    type_text(&mut app, "/reload");
+    press(&mut app, KeyCode::Enter);
+    pump(&mut app, &mut ev_rx, PUMP_ROUNDTRIP_MS).await;
+    assert!(
+        app.toasts
+            .items
+            .iter()
+            .any(|t| t.text == "Configuration reloaded")
+    );
+
+    // /variant default sends Some("") and mock clears session.model.variant to None.
+    type_text(&mut app, "/variant high");
+    press(&mut app, KeyCode::Enter);
+    pump(&mut app, &mut ev_rx, PUMP_ROUNDTRIP_MS).await;
+    assert_eq!(app.views[&sid].info.model.variant.as_deref(), Some("high"));
+    type_text(&mut app, "/variant default");
+    press(&mut app, KeyCode::Enter);
+    pump(&mut app, &mut ev_rx, PUMP_ROUNDTRIP_MS).await;
+    assert_eq!(app.views[&sid].info.model.variant, None);
+    assert!(
+        app.toasts
+            .items
+            .iter()
+            .any(|t| t.text == "Variant: default")
+    );
+
+    // Direct ListDirs (existing + nonexistent ERR_DIR_NOT_FOUND) and ListBinaries on mock.
+    let _ = out_tx.send(ClientFrame {
+        id: Some(9001),
+        req: Request::ListDirs {
+            cwd: Some(TEST_CWD.into()),
+            path: ".".into(),
+            include_files: true,
+        },
+    });
+    let _ = out_tx.send(ClientFrame {
+        id: Some(9002),
+        req: Request::ListDirs {
+            cwd: Some(TEST_CWD.into()),
+            path: "no_such_dir".into(),
+            include_files: false,
+        },
+    });
+    let _ = out_tx.send(ClientFrame {
+        id: Some(9003),
+        req: Request::ListBinaries {
+            query: "car".into(),
+            limit: Some(10),
+        },
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+    let mut got_dirs = false;
+    let mut got_not_found = false;
+    let mut got_bins = false;
+    while let Ok(ev) = ev_rx.try_recv() {
+        if let crate::net::NetEvent::Frame(ServerFrame::Response {
+            id,
+            ok,
+            result,
+            code,
+            ..
+        }) = ev
+        {
+            match id {
+                9001 => {
+                    assert!(ok);
+                    let dirs: Vec<String> = serde_json::from_value(result["dirs"].clone()).unwrap();
+                    let files: Vec<String> =
+                        serde_json::from_value(result["files"].clone()).unwrap();
+                    assert!(dirs.contains(&"src".to_string()), "{dirs:?}");
+                    assert!(files.contains(&"Cargo.toml".to_string()), "{files:?}");
+                    got_dirs = true;
+                }
+                9002 => {
+                    assert!(!ok);
+                    assert_eq!(code.as_deref(), Some(ERR_DIR_NOT_FOUND));
+                    got_not_found = true;
+                }
+                9003 => {
+                    assert!(ok);
+                    let bins: Vec<String> =
+                        serde_json::from_value(result["binaries"].clone()).unwrap();
+                    assert_eq!(bins.first().map(String::as_str), Some("cargo"));
+                    got_bins = true;
+                }
+                _ => {}
+            }
+        }
+    }
+    assert!(got_dirs && got_not_found && got_bins);
+}
+
+#[test]
+fn slash_case_insensitivity_and_unknown_typo_guard() {
+    let (mut app, mut rx) = test_app_with_requests(false);
+    app.config.as_mut().unwrap().commands.push(CommandInfo {
+        name: "review".into(),
+        description: "Review code".into(),
+        source: "config".into(),
+    });
+
+    // Case-insensitive builtin (/HELP) and custom (/REVIEW).
+    type_text(&mut app, "/HELP");
+    press(&mut app, KeyCode::Enter);
+    assert!(matches!(
+        app.dialog,
+        Some(crate::ui::dialog::Dialog::Help(_))
+    ));
+    app.dialog = None;
+
+    type_text(&mut app, "/REVIEW src/lib.rs");
+    press(&mut app, KeyCode::Enter);
+    let frames = drain_requests(&mut rx);
+    assert!(frames.iter().any(|f| matches!(
+        &f.req,
+        Request::ExpandCommand { name, args, .. } if name == "review" && args == "src/lib.rs"
+    )));
+
+    // Single-token transposition typo `/relaod`: not a fuzzy subsequence, intercepted locally,
+    // keeps draft in editor, and suggests `/reload` via Damerau-Levenshtein!
+    app.toasts.items.clear();
+    type_text(&mut app, "/relaod");
+    press(&mut app, KeyCode::Enter);
+    assert!(
+        drain_requests(&mut rx).is_empty(),
+        "typo must not send prompt"
+    );
+    assert_eq!(app.editor.text, "/relaod", "draft preserved for quick edit");
+    let warn = &app.toasts.items.last().expect("warn toast").text;
+    assert!(
+        warn.contains("Unknown command /relaod") && warn.contains("/reload"),
+        "{warn}"
+    );
+    app.editor.clear();
+
+    // Distant single-token `/zzzzzzzz`: intercepted locally without bogus suggestion.
+    app.toasts.items.clear();
+    type_text(&mut app, "/zzzzzzzz");
+    press(&mut app, KeyCode::Enter);
+    assert!(drain_requests(&mut rx).is_empty());
+    assert_eq!(app.editor.text, "/zzzzzzzz");
+    assert_eq!(
+        app.toasts.items.last().unwrap().text,
+        "Unknown command /zzzzzzzz"
+    );
+    app.editor.clear();
+
+    // Multi-word prose starting with a Unix path is sent as a normal prompt.
+    type_text(&mut app, "/etc/passwd is readable by all users");
+    press(&mut app, KeyCode::Enter);
+    let frames = drain_requests(&mut rx);
+    assert!(frames.iter().any(|f| matches!(
+        &f.req,
+        Request::Prompt { text, .. } if text == "/etc/passwd is readable by all users"
+    )));
+}
+
+#[test]
+fn direct_slash_args_models_agents_variant_sessions_close_mcp() {
+    let (mut app, mut rx) = test_app_with_requests(false);
+    let cfg = app.config.as_mut().unwrap();
+    cfg.agents.push(AgentInfo {
+        name: "plan".into(),
+        description: "Planner".into(),
+        model: None,
+        creatable: true,
+        can_spawn: false,
+        color: None,
+    });
+    cfg.models.push(ModelInfo {
+        provider: "oai".into(),
+        provider_name: "OpenAI".into(),
+        id: "gpt-6".into(),
+        name: "GPT-6".into(),
+        context: 400_000,
+        output: 0,
+        images: true,
+        reasoning: true,
+        variants: vec!["low".into(), "high".into()],
+    });
+    app.refresh_mcp();
+    answer_mcp(&mut app, &mcp_servers());
+    let _ = drain_requests(&mut rx);
+
+    // Direct `/model gpt-6` switches without opening a modal.
+    type_text(&mut app, "/model gpt-6");
+    press(&mut app, KeyCode::Enter);
+    assert!(app.dialog.is_none());
+    let frames = drain_requests(&mut rx);
+    assert!(frames.iter().any(|f| matches!(
+        &f.req,
+        Request::SetModel { model, .. } if model.provider == "oai" && model.model == "gpt-6"
+    )));
+
+    // Direct `/agent plan` switches without opening a modal.
+    type_text(&mut app, "/agent plan");
+    press(&mut app, KeyCode::Enter);
+    assert!(app.dialog.is_none());
+    let frames = drain_requests(&mut rx);
+    assert!(frames.iter().any(|f| matches!(
+        &f.req,
+        Request::SetAgent { agent, .. } if agent == "plan"
+    )));
+
+    // Direct `/variant default` sends `Some("")` instead of `None` (which would cycle).
+    type_text(&mut app, "/variant default");
+    press(&mut app, KeyCode::Enter);
+    let frames = drain_requests(&mut rx);
+    assert!(frames.iter().any(|f| matches!(
+        &f.req,
+        Request::SetVariant { variant, .. } if variant.as_deref() == Some("")
+    )));
+
+    // Multi-token `/close-session "worker one" worker-2` closes both live sessions.
+    let s1 = bg_session("ses_w1", "worker one", SessionStatus::Idle, 0);
+    let s2 = bg_session("ses_w2", "worker-2", SessionStatus::Idle, 0);
+    app.live = vec![app.views[TEST_SESSION].info.clone(), s1, s2];
+    type_text(&mut app, "/close-session \"worker one\" worker-2");
+    press(&mut app, KeyCode::Enter);
+    let closed: Vec<String> = drain_requests(&mut rx)
+        .into_iter()
+        .filter_map(|f| match f.req {
+            Request::Close { session_id } => Some(session_id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(closed, vec!["ses_w1".to_string(), "ses_w2".to_string()]);
+
+    // `/sessions archived-parser` fetches history when not in live and attaches the closed session.
+    type_text(&mut app, "/sessions archived-parser");
+    press(&mut app, KeyCode::Enter);
+    let hist_req = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(f.req, Request::ListHistory { .. }))
+        .expect("list_history sent");
+    let mut hist_sess = bg_session("ses_hist1", "archived-parser", SessionStatus::Idle, 0);
+    hist_sess.live = false;
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: hist_req.id.unwrap(),
+        ok: true,
+        result: json!({ "sessions": [hist_sess] }),
+        error: None,
+        code: None,
+    }));
+    assert_eq!(app.current.as_deref(), Some("ses_hist1"));
+    let _ = drain_requests(&mut rx);
+    app.current = Some(TEST_SESSION.into());
+
+    // Case-insensitive `/mcp GITHUB` opens MCP dialog focused & expanded on `github`.
+    type_text(&mut app, "/mcp GITHUB");
+    press(&mut app, KeyCode::Enter);
+    let (_, s) = render(&mut app, 100, 30);
+    assert!(s.contains("MCP servers") && s.contains("r refresh"), "{s}");
+    if let Some(crate::ui::dialog::Dialog::Mcp(d)) = &app.dialog {
+        let idx = app.mcp.iter().position(|e| e.name == "github").unwrap();
+        assert_eq!(d.sel, idx);
+    } else {
+        panic!("expected Mcp dialog");
+    }
+}
+
+#[test]
+fn interactive_cd_picker_and_palette_arg_prompt() {
+    let (mut app, mut rx) = test_app_with_requests(false);
+    app.config.as_mut().unwrap().commands.push(CommandInfo {
+        name: "deploy".into(),
+        description: "Deploy target environment".into(),
+        source: "config".into(),
+    });
+    let _ = drain_requests(&mut rx);
+
+    // `/cd` with no argument opens interactive Kind::Cd picker and requests ListDirs.
+    type_text(&mut app, "/cd");
+    press(&mut app, KeyCode::Enter);
+    assert!(
+        matches!(app.dialog, Some(crate::ui::dialog::Dialog::List(ref d)) if d.kind == crate::ui::dialog::Kind::Cd)
+    );
+    let dir_frame = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(f.req, Request::ListDirs { .. }))
+        .expect("list_dirs sent");
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: dir_frame.id.unwrap(),
+        ok: true,
+        result: json!({ "path": TEST_CWD, "dirs": ["crates", "src"], "files": [] }),
+        error: None,
+        code: None,
+    }));
+    let (_, s) = render(&mut app, 100, 28);
+    assert!(
+        s.contains("Change working directory") && s.contains("crates/"),
+        "{s}"
+    );
+
+    // Down x2 selects `crates/` (after `Use this directory` and `../`); Tab drills into `crates/`,
+    // Backspace at `/` pops back up, and typing `cr` + Enter confirms `crates`!
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Tab);
+    if let Some(crate::ui::dialog::Dialog::List(d)) = &app.dialog {
+        assert!(
+            d.filter.text.ends_with("crates/"),
+            "drilled into crates/: {}",
+            d.filter.text
+        );
+    }
+    let _ = drain_requests(&mut rx);
+    press(&mut app, KeyCode::Backspace);
+    if let Some(crate::ui::dialog::Dialog::List(d)) = &app.dialog {
+        assert!(
+            !d.filter.text.ends_with("crates/"),
+            "popped up: {}",
+            d.filter.text
+        );
+    }
+    type_text(&mut app, "cr");
+    // Enter confirms the filtered directory (`crates`) and sends SetCwd.
+    press(&mut app, KeyCode::Enter);
+    assert!(app.dialog.is_none());
+    let frames = drain_requests(&mut rx);
+    assert!(
+        frames
+            .iter()
+            .any(|f| matches!(&f.req, Request::SetCwd { path, .. } if path.ends_with("crates")))
+    );
+
+    // Ctrl+P Palette -> selecting custom command with `args: true` enters inline `asking_arg`; Esc returns to Palette!
+    press_with(&mut app, KeyCode::Char('p'), KeyModifiers::CONTROL);
+    type_text(&mut app, "deploy");
+    press(&mut app, KeyCode::Enter);
+    if let Some(crate::ui::dialog::Dialog::List(d)) = &app.dialog {
+        assert!(d.asking_arg.is_some(), "entered inline arg prompt");
+    } else {
+        panic!("palette closed unexpectedly");
+    }
+    let (_, s) = render(&mut app, 100, 26);
+    assert!(s.contains("esc back to commands"), "{s}");
+    // Esc cancels arg prompt back to the filtered palette list instead of closing the dialog.
+    press(&mut app, KeyCode::Esc);
+    if let Some(crate::ui::dialog::Dialog::List(d)) = &app.dialog {
+        assert!(d.asking_arg.is_none());
+        assert_eq!(d.filter.text, "deploy");
+    } else {
+        panic!("Esc should return to palette list");
+    }
+    // Re-enter arg prompt and submit argument.
+    press(&mut app, KeyCode::Enter);
+    type_text(&mut app, "staging");
+    press(&mut app, KeyCode::Enter);
+    assert!(app.dialog.is_none());
+    let frames = drain_requests(&mut rx);
+    assert!(frames.iter().any(|f| matches!(
+        &f.req,
+        Request::ExpandCommand { name, args, .. } if name == "deploy" && args == "staging"
+    )));
+}
+
+#[test]
+fn slash_arg_completions_zero_flicker_dir_cache_and_custom_cmd_mentions() {
+    let (mut app, mut rx) = test_app_with_requests(false);
+    app.config.as_mut().unwrap().commands.push(CommandInfo {
+        name: "review".into(),
+        description: "Review files".into(),
+        source: "config".into(),
+    });
+    let _ = drain_requests(&mut rx);
+
+    // `/variant ` shows `default` + model variants.
+    type_text(&mut app, "/variant ");
+    let ac = app.ac.as_ref().expect("variant arg ac");
+    assert_eq!(ac.kind, crate::app::AcKind::SlashArg);
+    assert!(ac.items.iter().any(|(_, l, _)| l == "default"));
+    assert!(ac.items.iter().any(|(_, l, _)| l == "high"));
+    app.editor.clear();
+
+    // `/export ` shows default session filename suggestion; `/models ` & `/agents ` show choices.
+    type_text(&mut app, "/export ");
+    let ac = app.ac.as_ref().expect("export arg ac");
+    assert_eq!(ac.kind, crate::app::AcKind::SlashArg);
+    assert!(ac.items.iter().any(|(_, _, d)| d == "default filename"));
+    let _ = drain_requests(&mut rx);
+    app.editor.clear();
+    type_text(&mut app, "/models ");
+    assert!(
+        app.ac
+            .as_ref()
+            .is_some_and(|a| a.kind == crate::app::AcKind::SlashArg)
+    );
+    app.editor.clear();
+    type_text(&mut app, "/agents ");
+    assert!(
+        app.ac
+            .as_ref()
+            .is_some_and(|a| a.kind == crate::app::AcKind::SlashArg)
+    );
+    app.editor.clear();
+
+    // `/cd ` fetches ListDirs once, then typing `sr` filters synchronously from DirCache with 0 flicker!
+    type_text(&mut app, "/cd ");
+    let dir_frame = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(f.req, Request::ListDirs { .. }))
+        .expect("list_dirs for /cd");
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: dir_frame.id.unwrap(),
+        ok: true,
+        result: json!({ "path": TEST_CWD, "dirs": ["crates", "docs", "src"], "files": [] }),
+        error: None,
+        code: None,
+    }));
+    assert_eq!(app.ac.as_ref().unwrap().items.len(), 3);
+    type_text(&mut app, "sr");
+    // Must stay populated synchronously without sending another ListDirs!
+    assert!(
+        drain_requests(&mut rx).is_empty(),
+        "served from parent DirCache"
+    );
+    let ac = app.ac.as_ref().expect("0-flicker ac");
+    assert_eq!(ac.items.len(), 1);
+    assert_eq!(ac.items[0].1, "src/");
+    app.editor.clear();
+
+    // `@file` mention inside custom command arguments (`/review @src/ma`) triggers file completion!
+    type_text(&mut app, "/review @src/ma");
+    assert!(
+        app.files_due.is_some(),
+        "@mention inside custom command schedules ListFiles"
+    );
+}
+
+#[test]
+fn shell_mode_completions_freeform_enter_history_and_paste() {
+    let (mut app, mut rx) = test_app_with_requests(false);
+    app.config.as_mut().unwrap().agents.push(AgentInfo {
+        name: "plan".into(),
+        description: "Planner".into(),
+        model: None,
+        creatable: true,
+        can_spawn: false,
+        color: None,
+    });
+    app.history = crate::ui::editor::History::default();
+    app.push_history("explain parser");
+    app.push_history("!cargo check --workspace");
+    app.push_history("write unit tests");
+    let _ = drain_requests(&mut rx);
+
+    // Enter shell mode with `!`.
+    type_text(&mut app, "!");
+    assert!(app.shell_mode);
+    assert_eq!(app.editor.text, "");
+    // Tab in shell_mode must NEVER cycle agent (even when popup is empty/pending).
+    app.ac = None;
+    press(&mut app, KeyCode::Tab);
+    assert!(
+        drain_requests(&mut rx)
+            .iter()
+            .all(|f| !matches!(f.req, Request::SetAgent { .. }))
+    );
+    assert_eq!(app.views[TEST_SESSION].info.agent, "build");
+
+    // Up/Down in shell_mode recalls ONLY `!`-prefixed history entries, keeping `shell_mode == true`.
+    app.editor.clear();
+    press(&mut app, KeyCode::Up);
+    assert!(app.shell_mode);
+    assert_eq!(app.editor.text, "cargo check --workspace");
+    press(&mut app, KeyCode::Up);
+    assert_eq!(
+        app.editor.text, "cargo check --workspace",
+        "skips non-shell history"
+    );
+    press(&mut app, KeyCode::Down);
+    assert!(app.shell_mode);
+    assert_eq!(app.editor.text, "");
+
+    // Typing `car` triggers ListBinaries + merges `!` history into ShellCmd with `freeform_enter = true`.
+    type_text(&mut app, "car");
+    let bin_frame = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(&f.req, Request::ListBinaries { query, .. } if query == "car"))
+        .expect("list_binaries for car sent");
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: bin_frame.id.unwrap(),
+        ok: true,
+        result: json!({ "binaries": ["cargo", "cargo-clippy"] }),
+        error: None,
+        code: None,
+    }));
+    let ac = app.ac.as_ref().expect("shell cmd popup");
+    assert_eq!(ac.kind, crate::app::AcKind::ShellCmd);
+    assert!(ac.freeform_enter && !ac.explicitly_selected);
+    // History item `cargo check --workspace` + binary `cargo` both appear.
+    assert!(
+        ac.items
+            .iter()
+            .any(|(v, l, d)| v == "cargo check --workspace"
+                && l == "!cargo check --workspace"
+                && d == "history")
+    );
+    assert!(ac.items.iter().any(|(_, l, _)| l == "cargo"));
+
+    // Plain Enter without explicit selection submits `!car` directly instead of hijacking to completion!
+    press(&mut app, KeyCode::Enter);
+    assert!(!app.shell_mode);
+    let frames = drain_requests(&mut rx);
+    assert!(
+        frames
+            .iter()
+            .any(|f| matches!(&f.req, Request::Shell { command, .. } if command == "car"))
+    );
+
+    // Explicit Down + Enter accepts completion; pipe `| gr` switches back from ShellPath to ShellCmd.
+    type_text(&mut app, "!car");
+    assert!(app.ac.is_some(), "cached binaries populate immediately");
+    press(&mut app, KeyCode::Down);
+    assert!(app.ac.as_ref().unwrap().explicitly_selected);
+    press(&mut app, KeyCode::Enter);
+    assert!(app.shell_mode);
+    assert!(
+        app.editor.text.starts_with("cargo"),
+        "accepted completion: {}",
+        app.editor.text
+    );
+    type_text(&mut app, " Cargo.toml | gr");
+    let pipe_bin = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(&f.req, Request::ListBinaries { query, .. } if query == "gr"))
+        .expect("pipe segment switches back to ListBinaries");
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: pipe_bin.id.unwrap(),
+        ok: true,
+        result: json!({ "binaries": ["grep"] }),
+        error: None,
+        code: None,
+    }));
+    assert_eq!(app.ac.as_ref().unwrap().kind, crate::app::AcKind::ShellCmd);
+
+    // Pasting an existing `.png` path in shell_mode pastes literal path text instead of attaching [Image 1].
+    app.editor.clear();
+    let dir = std::env::temp_dir().join(format!("ref-tui-shell-paste-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let img_path = dir.join("shot.png");
+    std::fs::write(&img_path, [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]).unwrap();
+    let path_str = img_path.to_string_lossy().into_owned();
+    crate::input::handle(&mut app, crossterm::event::Event::Paste(path_str.clone()));
+    assert!(
+        app.editor.images.is_empty(),
+        "must not attach image in shell mode"
+    );
+    assert_eq!(app.editor.text, path_str);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn tiny_terminal_bounds_safety_across_all_views_and_overlays() {
+    let sizes = [(0, 0), (1, 1), (2, 2), (3, 2), (5, 3), (6, 4), (12, 6)];
+    let mut app = sidebar_app();
+    app.toasts.warn("Warning toast on a tiny viewport");
+    type_text(&mut app, "/");
+    assert!(app.ac.is_some());
+    for &(w, h) in &sizes {
+        render(&mut app, w, h);
+    }
+    app.editor.clear();
+
+    // Dialogs: Palette, Sessions, Cd, Help, Mcp.
+    app.open_palette();
+    for &(w, h) in &sizes {
+        render(&mut app, w, h);
+    }
+    app.open_sessions();
+    for &(w, h) in &sizes {
+        render(&mut app, w, h);
+    }
+    app.open_cd(TEST_SESSION);
+    for &(w, h) in &sizes {
+        render(&mut app, w, h);
+    }
+    app.open_help();
+    for &(w, h) in &sizes {
+        render(&mut app, w, h);
+    }
+    app.open_mcp(None);
+    for &(w, h) in &sizes {
+        render(&mut app, w, h);
+    }
+    app.dialog = None;
+
+    // Split Watch mode with focused tile input.
+    app.mode = Mode::Watch;
+    let bg1 = bg_session("ses_t1", "worker-1", SessionStatus::Busy, 0);
+    let bg2 = bg_session("ses_t2", "worker-2", SessionStatus::WaitingPermission, 0);
+    for inf in [&bg1, &bg2] {
+        let mut v = SessionView::new(inf.clone(), false);
+        v.load_snapshot(SessionSnapshot {
+            info: inf.clone(),
+            messages: transcript(true),
+            more_before: false,
+            pending_permissions: vec![],
+            pending_questions: vec![],
+            queued: vec![],
+        });
+        app.views.insert(inf.id.clone(), v);
+    }
+    app.live = vec![bg1, bg2];
+    app.watch.focus = Some("ses_t1".into());
+    for &(w, h) in &sizes {
+        render(&mut app, w, h);
+    }
+
+    // Permission modal with diff preview on tiny screens.
+    app.mode = Mode::Chat;
+    app.views
+        .get_mut(TEST_SESSION)
+        .unwrap()
+        .apply(SessionEvent::Permission {
+            request: PermissionRequest {
+                session_id: TEST_SESSION.into(),
+                message_id: "m_p".into(),
+                call_id: "c_tiny".into(),
+                tool: "edit".into(),
+                purpose: "Edit src/lib.rs".into(),
+                input: json!({"path": "src/very/deeply/nested/path/to/module.rs"}),
+                time: 0,
+                preview: Some(EditPreview {
+                    diff: "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n".into(),
+                    added: 1,
+                    removed: 1,
+                    truncated: false,
+                }),
+            },
+        });
+    for &(w, h) in &sizes {
+        render(&mut app, w, h);
+    }
+}
+
+#[test]
+fn split_view_border_priority_root_color_and_closed_history_root() {
+    use crate::ui::theme;
+    // Palette colors must never collide with reserved semantic border colors.
+    for &c in &theme::ROOT_TASK_PALETTE {
+        assert_ne!(c, theme::PRIMARY);
+        assert_ne!(c, theme::WARNING);
+        assert_ne!(c, theme::ERROR);
+    }
+
+    let mut app = test_app(false);
+    app.mode = Mode::Watch;
+    let mut closed_root = bg_session("ses_closed_root", "epic-refactor", SessionStatus::Idle, 0);
+    closed_root.live = false;
+    app.history_list = vec![closed_root];
+
+    let mut t_focus = bg_session(
+        "s_focus",
+        "focused-tile",
+        SessionStatus::WaitingPermission,
+        0,
+    );
+    t_focus.last_error = Some("boom".into());
+    t_focus.parent = Some("ses_closed_root".into());
+    let mut t_warn = bg_session("s_warn", "warn-tile", SessionStatus::WaitingQuestion, 0);
+    t_warn.last_error = Some("boom".into());
+    t_warn.parent = Some("ses_closed_root".into());
+    let mut t_err = bg_session("s_err", "err-tile", SessionStatus::Busy, 0);
+    t_err.last_error = Some("boom".into());
+    t_err.parent = Some("ses_closed_root".into());
+    let mut t_child = bg_session("s_child", "child-tile", SessionStatus::Busy, 0);
+    t_child.parent = Some("ses_closed_root".into());
+    let t_busy = bg_session("s_busy", "busy-root", SessionStatus::Busy, 0);
+    let t_idle = bg_session("s_idle", "idle-root", SessionStatus::Idle, 0);
+
+    let tiles = [t_focus, t_warn, t_err, t_child, t_busy, t_idle];
+    for inf in &tiles {
+        let mut v = SessionView::new(inf.clone(), false);
+        v.load_snapshot(SessionSnapshot {
+            info: inf.clone(),
+            messages: vec![],
+            more_before: false,
+            pending_permissions: vec![],
+            pending_questions: vec![],
+            queued: vec![],
+        });
+        app.views.insert(inf.id.clone(), v);
+    }
+    app.live = tiles.to_vec();
+    app.watch.focus = Some("s_focus".into());
+    let (term, s) = render(&mut app, 180, 40);
+    // Closed root in history_list resolves `⟲ epic-refactor` chip!
+    assert!(s.contains("⟲ epic-refactor"), "{s}");
+    let buf = term.backend().buffer();
+    let border_fg = |sid: &str| {
+        let r = app.watch.tiles.iter().find(|(id, _)| id == sid).unwrap().1;
+        assert_eq!(
+            buf[(r.x, r.y)].symbol(),
+            "╭",
+            "solid rounded border on {sid}"
+        );
+        buf[(r.x, r.y)].fg
+    };
+    assert_eq!(border_fg("s_focus"), theme::PRIMARY);
+    assert_eq!(border_fg("s_warn"), theme::WARNING);
+    assert_eq!(border_fg("s_err"), theme::ERROR);
+    assert_eq!(
+        border_fg("s_child"),
+        theme::root_task_color("ses_closed_root")
+    );
+    assert_eq!(border_fg("s_busy"), theme::BORDER_ACTIVE);
+    assert_eq!(border_fg("s_idle"), theme::BORDER);
+}
+
+#[test]
+fn focused_tile_mouse_click_and_tile_slash_and_shell_commands() {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let (mut app, mut rx) = test_app_with_requests(false);
+    app.config.as_mut().unwrap().agents.push(AgentInfo {
+        name: "plan".into(),
+        description: "Planner".into(),
+        model: None,
+        creatable: true,
+        can_spawn: false,
+        color: None,
+    });
+    app.mode = Mode::Watch;
+    let bg = bg_session("ses_tile", "tile-worker", SessionStatus::Idle, 0);
+    let mut v = SessionView::new(bg.clone(), false);
+    v.load_snapshot(SessionSnapshot {
+        info: bg.clone(),
+        messages: transcript(false),
+        more_before: false,
+        pending_permissions: vec![],
+        pending_questions: vec![],
+        queued: vec![],
+    });
+    app.views.insert("ses_tile".into(), v);
+    app.live = vec![bg];
+    app.watch.focus = Some("ses_tile".into());
+    render(&mut app, 100, 24);
+    let _ = drain_requests(&mut rx);
+
+    // Typing in focused tile and clicking inside its input repositions cursor without unfocusing!
+    type_text(&mut app, "hello world");
+    render(&mut app, 100, 24);
+    let tile_rect = app.watch.tiles[0].1;
+    let ir = crate::ui::split::input_rect(tile_rect).unwrap();
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Down(MouseButton::Left), ir.x + 2, ir.y),
+    );
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Up(MouseButton::Left), ir.x + 2, ir.y),
+    );
+    assert_eq!(
+        app.watch.focus.as_deref(),
+        Some("ses_tile"),
+        "input click keeps focus"
+    );
+    assert_eq!(
+        app.watch.inputs["ses_tile"].cursor, 2,
+        "click sets tile input cursor"
+    );
+
+    // Clicking inside tile body also keeps focus; clicking on the tile border unfocuses!
+    crate::input::handle(
+        &mut app,
+        mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            tile_rect.x + 4,
+            tile_rect.y + 2,
+        ),
+    );
+    crate::input::handle(
+        &mut app,
+        mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            tile_rect.x + 4,
+            tile_rect.y + 2,
+        ),
+    );
+    assert_eq!(
+        app.watch.focus.as_deref(),
+        Some("ses_tile"),
+        "body click keeps focus"
+    );
+    crate::input::handle(
+        &mut app,
+        mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            tile_rect.x,
+            tile_rect.y,
+        ),
+    );
+    crate::input::handle(
+        &mut app,
+        mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            tile_rect.x,
+            tile_rect.y,
+        ),
+    );
+    assert!(app.watch.focus.is_none(), "border click unfocuses");
+
+    // Refocus and run `/agent plan`, `!pwd`, and typo `/badcmd` targeting `ses_tile` (NOT TEST_SESSION).
+    app.watch.focus = Some("ses_tile".into());
+    app.watch.inputs.get_mut("ses_tile").unwrap().clear();
+    type_text(&mut app, "/agent plan");
+    press(&mut app, KeyCode::Enter);
+    let frames = drain_requests(&mut rx);
+    assert!(frames.iter().any(|f| matches!(
+        &f.req,
+        Request::SetAgent { session_id, agent } if session_id == "ses_tile" && agent == "plan"
+    )));
+    type_text(&mut app, "!pwd");
+    press(&mut app, KeyCode::Enter);
+    let frames = drain_requests(&mut rx);
+    assert!(frames.iter().any(|f| matches!(
+        &f.req,
+        Request::Shell { session_id, command } if session_id == "ses_tile" && command == "pwd"
+    )));
+    type_text(&mut app, "/badcmd");
+    press(&mut app, KeyCode::Enter);
+    assert!(
+        drain_requests(&mut rx).is_empty(),
+        "tile typo must not send prompt"
+    );
+    assert_eq!(app.watch.inputs["ses_tile"].text, "/badcmd");
+}
+
+#[test]
+fn autocomplete_hover_scroll_stability_and_stationary_mouse_dedup() {
+    use crossterm::event::MouseEventKind;
+    let mut app = test_app(false);
+    // Typing `/` opens >10 commands; scroll down to item 12 (`scroll > 0`).
+    type_text(&mut app, "/");
+    render(&mut app, 100, 28);
+    for _ in 0..12 {
+        press(&mut app, KeyCode::Down);
+    }
+    render(&mut app, 100, 28);
+    let saved_scroll = app.ac.as_ref().unwrap().scroll;
+    let r = app.ac.as_ref().unwrap().rect;
+    assert!(saved_scroll > 0);
+    // Hovering on visible row 2 selects `saved_scroll + 2` without jumping `scroll`!
+    crate::input::handle(&mut app, mouse(MouseEventKind::Moved, r.x + 4, r.y + 3));
+    assert_eq!(app.ac.as_ref().unwrap().sel, saved_scroll + 2);
+    assert_eq!(app.ac.as_ref().unwrap().scroll, saved_scroll);
+    // Hovering on bottom pad row `r.y + r.height - 1` does nothing (not off-by-one)!
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Moved, r.x + 4, r.y + r.height - 1),
+    );
+    assert_eq!(app.ac.as_ref().unwrap().sel, saved_scroll + 2);
+    app.editor.clear();
+    app.ac = None;
+
+    // Stationary MouseEventKind::Moved dedup: keyboard selection & Ctrl+D confirm in ListDialog survive!
+    let s1 = bg_session("ses_a", "alpha", SessionStatus::Idle, 0);
+    let s2 = bg_session("ses_b", "beta", SessionStatus::Idle, 0);
+    app.live = vec![s1, s2];
+    app.open_sessions();
+    let (_, s) = render(&mut app, 100, 28);
+    let alpha_y = s.lines().position(|l| l.contains("alpha")).unwrap() as u16;
+    let hover_x = 40;
+    crate::input::handle(&mut app, mouse(MouseEventKind::Moved, hover_x, alpha_y));
+    if let Some(crate::ui::dialog::Dialog::List(d)) = &app.dialog {
+        assert_eq!(d.sel, 0);
+    }
+    // Navigate down with keyboard and arm Ctrl+D confirm.
+    press(&mut app, KeyCode::Down);
+    press_with(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL);
+    // Emit stationary Moved at the SAME (hover_x, alpha_y): must be ignored!
+    crate::input::handle(&mut app, mouse(MouseEventKind::Moved, hover_x, alpha_y));
+    if let Some(crate::ui::dialog::Dialog::List(d)) = &app.dialog {
+        assert_eq!(d.sel, 1, "stationary Moved must not snap selection back");
+        assert!(
+            d.confirm.is_some(),
+            "stationary Moved must not clear Ctrl+D confirm"
+        );
+    }
+    // Actually moving the mouse to `(hover_x + 1, alpha_y)` updates hover normally.
+    crate::input::handle(&mut app, mouse(MouseEventKind::Moved, hover_x + 1, alpha_y));
+    if let Some(crate::ui::dialog::Dialog::List(d)) = &app.dialog {
+        assert_eq!(d.sel, 0);
+    }
+}
+
+#[test]
+fn image_and_paste_token_cursor_atomicity() {
+    let mut ed = crate::ui::editor::Editor::default();
+    ed.insert("ab ");
+    ed.attach_image(
+        ImageData {
+            mime: "image/png".into(),
+            data: "AAAA".into(),
+            ..Default::default()
+        },
+        Some("a.png".into()),
+    );
+    ed.insert("cd");
+    // Text is `"ab [Image 1] cd"`; `[Image 1]` spans bytes 3..12.
+    assert_eq!(ed.text, "ab [Image 1] cd");
+    let tok_start = 3usize;
+    let tok_end = 12usize;
+
+    // Left from `tok_end` jumps straight to `tok_start` in one press.
+    ed.cursor = tok_end;
+    ed.left();
+    assert_eq!(ed.cursor, tok_start);
+    // Right from `tok_start` jumps straight to `tok_end` in one press.
+    ed.right();
+    assert_eq!(ed.cursor, tok_end);
+    // Word-left and word-right never stop inside `tok_start..tok_end`.
+    ed.cursor = ed.text.len();
+    while ed.cursor > 0 {
+        ed.word_left();
+        assert!(
+            !(ed.cursor > tok_start && ed.cursor < tok_end),
+            "word_left inside token: {}",
+            ed.cursor
+        );
+    }
+    while ed.cursor < ed.text.len() {
+        ed.word_right();
+        assert!(
+            !(ed.cursor > tok_start && ed.cursor < tok_end),
+            "word_right inside token: {}",
+            ed.cursor
+        );
+    }
+    // Single-click inside `[Image 1]` snaps cursor to nearest boundary (`tok_start` or `tok_end`).
+    ed.mouse_down(tok_start + 2, 1);
+    assert_eq!(ed.cursor, tok_start);
+    ed.mouse_down(tok_end - 2, 1);
+    assert_eq!(ed.cursor, tok_end);
+    // Multi-line `up` into a row containing `[Image 1]` snaps outside the token.
+    ed.set_text("ab [Image 1] cd\n0123456");
+    ed.images.push(crate::ui::editor::Attachment {
+        token: "[Image 1]".into(),
+        image: ImageData {
+            mime: "image/png".into(),
+            data: "AAAA".into(),
+            ..Default::default()
+        },
+        name: None,
+    });
+    ed.last_width = 40;
+    ed.cursor = ed.text.len(); // column 7 on row 2 -> middle of `[Image 1]` on row 1!
+    assert!(ed.up());
+    assert!(
+        !(ed.cursor > tok_start && ed.cursor < tok_end),
+        "up() landed inside token: {}",
+        ed.cursor
+    );
+}
+
+#[test]
+fn single_line_editor_horizontal_scroll_and_help_and_narrow_permission() {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    // 1. Single-line horizontal scroll in ListDialog filter keeps tail around cursor visible.
+    let mut app = test_app(false);
+    app.open_palette();
+    let long_q = "abcdefghijklmnopqrstuvwxyz0123456789_TAIL_MARKER";
+    type_text(&mut app, long_q);
+    let (_, s) = render(&mut app, 44, 18);
+    assert!(
+        s.contains("TAIL_MARKER"),
+        "single-line hscroll keeps tail visible:\n{s}"
+    );
+    if let Some(crate::ui::dialog::Dialog::List(d)) = &app.dialog {
+        assert!(d.filter.hscroll > 0);
+    }
+    app.dialog = None;
+
+    // 2. HelpDialog Home/End/g/G scrolling, non-closing random keys & inside click, outside click closes.
+    app.open_help();
+    if let Some(crate::ui::dialog::Dialog::Help(h)) = &mut app.dialog {
+        h.opened -= crate::ui::dialog::OPEN_SETTLE;
+    }
+    render(&mut app, 90, 18);
+    press(&mut app, KeyCode::End);
+    if let Some(crate::ui::dialog::Dialog::Help(h)) = &app.dialog {
+        assert!(h.scroll > 0, "End scrolls help to bottom");
+    }
+    press(&mut app, KeyCode::Home);
+    if let Some(crate::ui::dialog::Dialog::Help(h)) = &app.dialog {
+        assert_eq!(h.scroll, 0, "Home scrolls help to top");
+    }
+    // Random key (`a`, `Enter`) and click inside `h.rect` must NOT dismiss HelpDialog.
+    press(&mut app, KeyCode::Char('a'));
+    press(&mut app, KeyCode::Enter);
+    let hr = match &app.dialog {
+        Some(crate::ui::dialog::Dialog::Help(h)) => h.rect,
+        _ => panic!("HelpDialog closed on non-close key"),
+    };
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Down(MouseButton::Left), hr.x + 2, hr.y + 2),
+    );
+    assert!(
+        matches!(app.dialog, Some(crate::ui::dialog::Dialog::Help(_))),
+        "inside click keeps help open"
+    );
+    // Outside click dismisses HelpDialog.
+    crate::input::handle(
+        &mut app,
+        mouse(MouseEventKind::Down(MouseButton::Left), 0, 0),
+    );
+    assert!(app.dialog.is_none(), "outside click closes help");
+
+    // 3. Narrow PermissionView wraps headline/path and steps down through 3 compact button tiers.
+    app.views.get_mut(TEST_SESSION).unwrap().apply(SessionEvent::Permission {
+        request: PermissionRequest {
+            session_id: TEST_SESSION.into(),
+            message_id: "m_p".into(),
+            call_id: "c_narrow".into(),
+            tool: "edit".into(),
+            purpose: "Refactor long deeply nested configuration loader".into(),
+            input: json!({"path": "crates/tui/src/very_long_directory_name/deeply_nested_file.rs"}),
+            time: 0,
+            preview: None,
+        },
+    });
+    render(&mut app, 80, 22);
+    app.perm.as_mut().unwrap().opened -= PAST_GRACE;
+    let (_, wide_s) = render(&mut app, 80, 22);
+    assert!(
+        wide_s.contains("Allow once") && wide_s.contains("Always allow"),
+        "{wide_s}"
+    );
+    let (_, mid_s) = render(&mut app, 40, 22);
+    assert!(
+        mid_s.contains("Once") && mid_s.contains("Always") && mid_s.contains("Deny"),
+        "{mid_s}"
+    );
+    let (_, narrow_s) = render(&mut app, 22, 22);
+    assert!(
+        narrow_s.contains(" a ") && narrow_s.contains(" s ") && narrow_s.contains(" d "),
+        "{narrow_s}"
+    );
 }

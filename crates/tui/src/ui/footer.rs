@@ -88,7 +88,7 @@ pub fn context_spans(v: &SessionView) -> Vec<Span<'static>> {
 }
 
 pub fn draw_status(buf: &mut Buffer, area: Rect, cx: &StatusCtx<'_>) {
-    if area.height == 0 {
+    if area.height == 0 || area.width == 0 {
         return;
     }
     let now = ref_proto::now_ms();

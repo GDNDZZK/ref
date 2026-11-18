@@ -525,6 +525,91 @@ pub fn fuzzy_score(hay: &str, needle: &str) -> Option<i64> {
     Some(score)
 }
 
+/// Case-insensitive Damerau-Levenshtein (optimal string alignment) distance for typo suggestions.
+pub fn edit_distance(a: &str, b: &str) -> usize {
+    let ac: Vec<char> = a.to_lowercase().chars().collect();
+    let bc: Vec<char> = b.to_lowercase().chars().collect();
+    let (m, n) = (ac.len(), bc.len());
+    if m == 0 {
+        return n;
+    }
+    if n == 0 {
+        return m;
+    }
+    let cols = n + 1;
+    let mut dp = vec![0usize; (m + 1) * cols];
+    for i in 0..=m {
+        dp[i * cols] = i;
+    }
+    for (j, cell) in dp.iter_mut().enumerate().take(n + 1) {
+        *cell = j;
+    }
+    for i in 1..=m {
+        for j in 1..=n {
+            let cost = usize::from(ac[i - 1] != bc[j - 1]);
+            let mut best = (dp[(i - 1) * cols + j] + 1)
+                .min(dp[i * cols + j - 1] + 1)
+                .min(dp[(i - 1) * cols + j - 1] + cost);
+            if i > 1 && j > 1 && ac[i - 1] == bc[j - 2] && ac[i - 2] == bc[j - 1] {
+                best = best.min(dp[(i - 2) * cols + j - 2] + 1);
+            }
+            dp[i * cols + j] = best;
+        }
+    }
+    dp[m * cols + n]
+}
+
+/// Splits `s` into whitespace-separated tokens, respecting single/double quotes and `\` escapes.
+pub fn split_shell_words(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut in_word = false;
+    let mut quote: Option<char> = None;
+    let mut esc = false;
+    for c in s.chars() {
+        if esc {
+            cur.push(c);
+            in_word = true;
+            esc = false;
+            continue;
+        }
+        if let Some(q) = quote {
+            if c == '\\' && q == '"' {
+                esc = true;
+            } else if c == q {
+                quote = None;
+            } else {
+                cur.push(c);
+            }
+            in_word = true;
+            continue;
+        }
+        match c {
+            '\\' => {
+                esc = true;
+                in_word = true;
+            }
+            '\'' | '"' => {
+                quote = Some(c);
+                in_word = true;
+            }
+            w if w.is_whitespace() => {
+                if in_word {
+                    out.push(std::mem::take(&mut cur));
+                    in_word = false;
+                }
+            }
+            other => {
+                cur.push(other);
+                in_word = true;
+            }
+        }
+    }
+    if in_word {
+        out.push(cur);
+    }
+    out
+}
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -45,8 +45,22 @@ pub enum Kind {
     Models,
     Agents,
     Variants,
+    /// Interactive directory picker for `/cd`.
+    Cd,
 }
 
+/// Inline argument prompt inside the command palette (`Esc` returns to the command list).
+#[derive(Debug, Clone)]
+pub struct ArgPrompt {
+    pub cmd_key: String,
+    pub description: String,
+    pub placeholder: String,
+    pub saved_filter: String,
+    pub saved_sel: usize,
+    pub saved_scroll: usize,
+    pub saved_title: String,
+    pub saved_hint: String,
+}
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum CreatorFilter {
     #[default]
@@ -100,6 +114,16 @@ pub struct ListDialog {
     pub creator_filter: CreatorFilter,
     /// Creator remembered when cycling `All -> UserCreated` so `-> ByCreator` keeps the choice.
     pending_creator: Option<(String, String)>,
+    /// Target session when opened from a focused split-view tile or explicit target.
+    pub target_sid: Option<String>,
+    /// Active inline argument prompt in `Kind::Palette`.
+    pub asking_arg: Option<ArgPrompt>,
+    /// Base session working directory for `Kind::Cd`.
+    pub cd_base_cwd: String,
+    /// Latest resolved directory path in `Kind::Cd`.
+    pub cd_resolved_dir: String,
+    filter_rect: Rect,
+    cursor_at: Option<(u16, u16)>,
 }
 
 /// A display row of the list: a section header, a gap between sections, or a visible item.
@@ -127,9 +151,63 @@ impl ListDialog {
             rect: Rect::default(),
             creator_filter: CreatorFilter::All,
             pending_creator: None,
+            target_sid: None,
+            asking_arg: None,
+            cd_base_cwd: String::new(),
+            cd_resolved_dir: String::new(),
+            filter_rect: Rect::default(),
+            cursor_at: None,
         };
         d.refilter();
         d
+    }
+
+    pub fn for_session(mut self, sid: Option<String>) -> Self {
+        self.target_sid = sid;
+        self
+    }
+
+    /// Enters inline argument prompt mode inside `Kind::Palette`.
+    pub fn begin_arg_prompt(
+        &mut self,
+        cmd_key: String,
+        title: String,
+        description: String,
+        placeholder: String,
+    ) {
+        let saved_filter = self.filter.text.clone();
+        let saved_sel = self.sel;
+        let saved_scroll = self.scroll;
+        let saved_title = std::mem::replace(&mut self.title, title);
+        let saved_hint =
+            std::mem::replace(&mut self.hint, "enter run · esc back to commands".into());
+        self.asking_arg = Some(ArgPrompt {
+            cmd_key,
+            description,
+            placeholder,
+            saved_filter,
+            saved_sel,
+            saved_scroll,
+            saved_title,
+            saved_hint,
+        });
+        self.filter.clear();
+        self.visible.clear();
+        self.rows.clear();
+    }
+
+    /// Restores the palette command list if currently asking for an argument; returns true if popped.
+    pub fn cancel_arg_prompt(&mut self) -> bool {
+        let Some(p) = self.asking_arg.take() else {
+            return false;
+        };
+        self.title = p.saved_title;
+        self.hint = p.saved_hint;
+        self.filter.set_text(&p.saved_filter);
+        self.refilter();
+        self.sel = p.saved_sel.min(self.visible.len().saturating_sub(1));
+        self.scroll = p.saved_scroll;
+        true
     }
 
     pub fn with_hint(mut self, h: impl Into<String>) -> Self {
@@ -212,6 +290,18 @@ impl ListDialog {
     }
 
     pub fn refilter(&mut self) {
+        if self.asking_arg.is_some() {
+            self.visible.clear();
+            self.sel = 0;
+            self.confirm = None;
+            return;
+        }
+        if self.kind == Kind::Cd {
+            self.visible = (0..self.items.len()).collect();
+            self.sel = self.sel.min(self.visible.len().saturating_sub(1));
+            self.confirm = None;
+            return;
+        }
         let q = self.filter.text.trim().to_string();
         if q.is_empty() {
             self.visible = self
@@ -245,7 +335,6 @@ impl ListDialog {
         }
         self.confirm = None;
     }
-
     pub fn selected(&self) -> Option<&Item> {
         self.visible.get(self.sel).and_then(|&i| self.items.get(i))
     }
@@ -276,7 +365,21 @@ impl ListDialog {
         self.rows.iter().find(|(ry, _)| *ry == y).map(|(_, i)| *i)
     }
 
+    pub fn click_filter(&mut self, x: u16, y: u16) -> bool {
+        let r = self.filter_rect;
+        if r.width == 0 || y != r.y || x < r.x || x >= r.x + r.width {
+            return false;
+        }
+        let off = self.filter.offset_at_single_line(r, x);
+        self.filter.mouse_down(off, 1);
+        self.filter.mouse_up();
+        true
+    }
+
     pub fn click(&mut self, x: u16, y: u16) -> bool {
+        if self.click_filter(x, y) {
+            return false;
+        }
         if let Some(i) = self.item_at(x, y) {
             self.sel = i;
             return true;
@@ -289,11 +392,37 @@ impl ListDialog {
     }
 
     pub fn draw(&mut self, buf: &mut Buffer, screen: Rect, tick: u64) {
-        let w = (screen.width.saturating_sub(4)).clamp(30, 84);
-        let h = screen.height.saturating_sub(4).clamp(8, 28);
+        self.rows.clear();
+        self.cursor_at = None;
+        self.filter_rect = Rect::default();
+        if screen.width < 6 || screen.height < 4 {
+            self.rect = Rect::default();
+            return;
+        }
+        let w = screen
+            .width
+            .saturating_sub(4)
+            .clamp(6, 84)
+            .min(screen.width);
+        let h = if self.asking_arg.is_some() {
+            screen
+                .height
+                .saturating_sub(4)
+                .clamp(4, 9)
+                .min(screen.height)
+        } else {
+            screen
+                .height
+                .saturating_sub(4)
+                .clamp(4, 28)
+                .min(screen.height)
+        };
         let t = open_progress(self.opened);
         let r = frame(buf, screen, w, h, &self.title, t);
         self.rect = r;
+        if r.width < 6 || r.height < 4 {
+            return;
+        }
         let inner = Rect::new(
             r.x + 2,
             r.y + 1,
@@ -302,33 +431,71 @@ impl ListDialog {
         );
         let bg = theme::PANEL;
         let fade = |c: Color| theme::blend(bg, c, t);
-        // Filter line.
-        let fy = inner.y + 1;
-        buf.set_string(
-            inner.x,
-            fy,
-            "› ",
-            Style::new().fg(fade(theme::PRIMARY)).bg(bg),
-        );
-        let pill = self.creator_pill();
+        // Filter / argument input line.
+        let fy = if inner.height >= 4 {
+            inner.y + 1
+        } else {
+            inner.y
+        };
+        if inner.width >= 2 {
+            buf.set_string(
+                inner.x,
+                fy,
+                "› ",
+                Style::new().fg(fade(theme::PRIMARY)).bg(bg),
+            );
+        }
+        let pill = if self.asking_arg.is_none() {
+            self.creator_pill()
+        } else {
+            None
+        };
         let pill_w = pill.as_ref().map_or(0, |(l, _)| width(l) as u16 + 1);
-        let farea = Rect::new(inner.x + 2, fy, inner.width.saturating_sub(2 + pill_w), 1);
-        self.filter.draw(buf, farea, "Search…", false);
+        let farea = Rect::new(
+            inner.x.saturating_add(2),
+            fy,
+            inner.width.saturating_sub(2 + pill_w),
+            1,
+        );
+        self.filter_rect = farea;
+        let placeholder = match (&self.asking_arg, &self.kind) {
+            (Some(p), _) => p.placeholder.as_str(),
+            (None, Kind::Cd) => "Type a directory path…",
+            (None, _) => "Search…",
+        };
+        self.cursor_at = self
+            .filter
+            .draw_single_line(buf, farea, Some(bg), placeholder, true);
         if let Some((label, active)) = pill {
             let lw = width(&label) as u16;
-            let px = inner.x + inner.width.saturating_sub(lw);
-            let st = if active {
-                Style::new()
-                    .fg(theme::PANEL)
-                    .bg(fade(theme::ACCENT))
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::new().fg(fade(theme::MUTED)).bg(theme::ELEMENT)
-            };
-            buf.set_string(px, fy, &label, st);
+            if lw <= inner.width {
+                let px = inner.x + inner.width - lw;
+                let st = if active {
+                    Style::new()
+                        .fg(theme::PANEL)
+                        .bg(fade(theme::ACCENT))
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::new().fg(fade(theme::MUTED)).bg(theme::ELEMENT)
+                };
+                buf.set_string(px, fy, &label, st);
+            }
         }
-        let list_top = fy + 2;
-        let list_h = (inner.y + inner.height).saturating_sub(list_top + 1) as usize;
+        if let Some(arg) = &self.asking_arg {
+            let desc_y = fy + 2;
+            if desc_y < inner.y + inner.height.saturating_sub(1) && !arg.description.is_empty() {
+                buf.set_string(
+                    inner.x,
+                    desc_y,
+                    text::truncate(&arg.description, inner.width as usize),
+                    Style::new().fg(fade(theme::MUTED)).bg(bg),
+                );
+            }
+            self.draw_footer(buf, inner, t);
+            return;
+        }
+        let list_top = fy.saturating_add(2);
+        let list_h = (inner.y + inner.height).saturating_sub(list_top.saturating_add(1)) as usize;
         let disp = self.display_rows();
         let sel_row = disp
             .iter()
@@ -337,16 +504,16 @@ impl ListDialog {
         if sel_row < self.scroll {
             self.scroll = sel_row.saturating_sub(1);
         }
-        if sel_row >= self.scroll + list_h {
+        if list_h > 0 && sel_row >= self.scroll + list_h {
             self.scroll = sel_row + 1 - list_h;
         }
-        self.scroll = self.scroll.min(disp.len().saturating_sub(list_h));
-        self.rows.clear();
-        if self.visible.is_empty() {
+        let max_scroll = disp.len().saturating_sub(list_h);
+        self.scroll = self.scroll.min(max_scroll);
+        if self.visible.is_empty() && list_h > 0 && inner.width > 0 {
             buf.set_string(
                 inner.x,
                 list_top,
-                "No results",
+                text::truncate("No results", inner.width as usize),
                 Style::new().fg(fade(theme::MUTED)).bg(bg),
             );
         }
@@ -369,18 +536,29 @@ impl ListDialog {
                 Disp::Item(vi) => {
                     let selected = *vi == self.sel;
                     let rbg = if selected { theme::PRIMARY } else { bg };
-                    let row = Rect::new(inner.x.saturating_sub(1), y, inner.width + 2, 1);
+                    let row_w = (inner.width + 2).min(r.width.saturating_sub(2));
+                    let row = Rect::new(inner.x.saturating_sub(1), y, row_w, 1);
                     buf.set_style(row, Style::new().bg(rbg));
                     let (left, right) = self.item_row_spans(*vi, t, tick);
-                    let (line, _) = super::message::compose(left, right, iw + 2);
-                    buf.set_line(inner.x.saturating_sub(1), y, &line, inner.width + 2);
+                    let (line, _) = super::message::compose(left, right, row_w as usize);
+                    buf.set_line(inner.x.saturating_sub(1), y, &line, row_w);
                     self.rows.push((y, *vi));
                 }
             }
         }
+        if max_scroll > 0 && list_h > 0 {
+            super::chat::draw_scrollbar(
+                buf,
+                Rect::new(r.x + r.width - 2, list_top, 1, list_h as u16),
+                disp.len(),
+                self.scroll as f64,
+                max_scroll as f64,
+                ("┃", theme::BORDER_ACTIVE),
+                Some(("│", theme::BORDER_SUBTLE)),
+            );
+        }
         self.draw_footer(buf, inner, t);
     }
-
     /// Display rows of the visible items: section headers (hidden while filtering) and gaps.
     fn display_rows(&self) -> Vec<Disp> {
         let mut disp = Vec::new();
@@ -505,6 +683,9 @@ impl ListDialog {
 
     /// Footer: the key hint on the left, the visible/total count on the right.
     fn draw_footer(&self, buf: &mut Buffer, inner: Rect, t: f32) {
+        if inner.height == 0 || inner.width == 0 {
+            return;
+        }
         let bg = theme::PANEL;
         let iw = inner.width as usize;
         let hint = if self.hint.is_empty() {
@@ -512,31 +693,24 @@ impl ListDialog {
         } else {
             self.hint.as_str()
         };
-        let hy = inner.y + inner.height.saturating_sub(1);
-        let count = format!("{}/{}", self.visible.len(), self.items.len());
+        let hy = inner.y + inner.height - 1;
         let style = Style::new().fg(theme::blend(bg, theme::DIM, t)).bg(bg);
-        buf.set_string(
-            inner.x,
-            hy,
-            text::truncate(hint, iw.saturating_sub(width(&count) + 2)),
-            style,
-        );
-        buf.set_string(
-            inner.x + inner.width.saturating_sub(width(&count) as u16),
-            hy,
-            &count,
-            style,
-        );
+        if self.asking_arg.is_some() {
+            buf.set_string(inner.x, hy, text::truncate(hint, iw), style);
+            return;
+        }
+        let count = format!("{}/{}", self.visible.len(), self.items.len());
+        let cw = width(&count);
+        let hint_max = if cw + 2 < iw { iw - cw - 2 } else { iw };
+        buf.set_string(inner.x, hy, text::truncate(hint, hint_max), style);
+        if cw + 2 < iw {
+            buf.set_string(inner.x + inner.width - cw as u16, hy, &count, style);
+        }
     }
 
-    /// Cursor position for the filter input.
-    pub fn cursor(&self) -> (u16, u16) {
-        let pill_w = self.creator_pill().map_or(0, |(l, _)| width(&l) as u16 + 1);
-        let x = self.rect.x + 4 + width(&self.filter.text[..self.filter.cursor]) as u16;
-        (
-            x.min(self.rect.x + self.rect.width.saturating_sub(3 + pill_w)),
-            self.rect.y + 2,
-        )
+    /// Cursor position for the filter / argument input.
+    pub fn cursor(&self) -> Option<(u16, u16)> {
+        self.cursor_at
     }
 }
 
@@ -563,14 +737,24 @@ fn shrink_right(mut spans: Vec<Span<'static>>, max: usize) -> Vec<Span<'static>>
 
 /// Draws a centered rounded panel (with open animation `t` 0→1); returns its rect.
 pub fn frame(buf: &mut Buffer, screen: Rect, w: u16, h: u16, title: &str, t: f32) -> Rect {
+    if screen.width < 2 || screen.height < 2 {
+        return Rect::default();
+    }
     // Slight grow-in: starts smaller by up to `GROW_IN_SHRINK` columns.
     let shrink = ((1.0 - t) * GROW_IN_SHRINK).round() as u16;
-    let w = w.min(screen.width).saturating_sub(shrink * 2);
-    let h = h.min(screen.height).saturating_sub(shrink);
+    let w = w
+        .min(screen.width)
+        .saturating_sub(shrink * 2)
+        .max(2)
+        .min(screen.width);
+    let h = h
+        .min(screen.height)
+        .saturating_sub(shrink)
+        .max(2)
+        .min(screen.height);
     let x = screen.x + (screen.width.saturating_sub(w)) / 2;
     let y = screen.y + (screen.height.saturating_sub(h)) / 3;
     let r = Rect::new(x, y, w, h);
-    // Dim the background a little.
     dim(buf, screen, BACKDROP_DIM * t);
     clear_wide_edges(buf, r);
     let bg = theme::PANEL;
@@ -584,18 +768,20 @@ pub fn frame(buf: &mut Buffer, screen: Rect, w: u16, h: u16, title: &str, t: f32
         }
     }
     draw_rounded_border(buf, r, Style::new().fg(bc).bg(bg));
-    let title = format!(" {title} ");
-    buf.set_string(
-        r.x + 2,
-        r.y,
-        text::truncate(&title, w.saturating_sub(4) as usize),
-        Style::new()
-            .fg(theme::blend(bg, theme::TEXT, t))
-            .bg(bg)
-            .add_modifier(Modifier::BOLD),
-    );
+    if r.width > 4 {
+        let title = format!(" {title} ");
+        buf.set_string(
+            r.x + 2,
+            r.y,
+            text::truncate(&title, r.width.saturating_sub(4) as usize),
+            Style::new()
+                .fg(theme::blend(bg, theme::TEXT, t))
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        );
+    }
     let esc = " esc ";
-    if w > MIN_W_FOR_ESC_HINT {
+    if r.width > MIN_W_FOR_ESC_HINT {
         buf.set_string(
             r.x + r.width - 2 - esc.len() as u16,
             r.y,
@@ -608,20 +794,24 @@ pub fn frame(buf: &mut Buffer, screen: Rect, w: u16, h: u16, title: &str, t: f32
 
 /// Draws a one-cell rounded border along the edge of `r`.
 pub fn draw_rounded_border(buf: &mut Buffer, r: Rect, style: Style) {
-    for xx in r.x + 1..r.x + r.width.saturating_sub(1) {
-        buf.set_string(xx, r.y, "─", style);
-        buf.set_string(xx, r.y + r.height - 1, "─", style);
+    if r.width < 2 || r.height < 2 {
+        return;
     }
-    for yy in r.y + 1..r.y + r.height.saturating_sub(1) {
+    let x1 = r.x + r.width - 1;
+    let y1 = r.y + r.height - 1;
+    for xx in r.x + 1..x1 {
+        buf.set_string(xx, r.y, "─", style);
+        buf.set_string(xx, y1, "─", style);
+    }
+    for yy in r.y + 1..y1 {
         buf.set_string(r.x, yy, "│", style);
-        buf.set_string(r.x + r.width - 1, yy, "│", style);
+        buf.set_string(x1, yy, "│", style);
     }
     buf.set_string(r.x, r.y, "╭", style);
-    buf.set_string(r.x + r.width - 1, r.y, "╮", style);
-    buf.set_string(r.x, r.y + r.height - 1, "╰", style);
-    buf.set_string(r.x + r.width - 1, r.y + r.height - 1, "╯", style);
+    buf.set_string(x1, r.y, "╮", style);
+    buf.set_string(r.x, y1, "╰", style);
+    buf.set_string(x1, y1, "╯", style);
 }
-
 /// Before drawing an overlay over `r`: replace wide glyphs (CJK, emoji) that start just left
 /// of the overlay and would spill into its first column. Without this the terminal diff skips
 /// the overlay's left border cell (it is "covered" by the wide glyph) and background text
@@ -668,6 +858,7 @@ fn dim(buf: &mut Buffer, area: Rect, amount: f32) {
 pub struct HelpDialog {
     pub scroll: usize,
     pub opened: Instant,
+    pub rect: Rect,
     lines: Vec<Line<'static>>,
     max_scroll: usize,
     title: String,
@@ -797,6 +988,7 @@ impl HelpDialog {
         HelpDialog {
             scroll: 0,
             opened: Instant::now(),
+            rect: Rect::default(),
             lines,
             max_scroll: 0,
             title: "Help".into(),
@@ -814,6 +1006,7 @@ impl HelpDialog {
         HelpDialog {
             scroll: 0,
             opened: Instant::now(),
+            rect: Rect::default(),
             lines,
             max_scroll: 0,
             title: title.to_string(),
@@ -825,18 +1018,31 @@ impl HelpDialog {
         self.scroll = (self.scroll as i32 + d).clamp(0, self.max_scroll as i32) as usize;
     }
 
+    pub fn scroll_to_top(&mut self) {
+        self.scroll = 0;
+    }
+
+    pub fn scroll_to_bottom(&mut self) {
+        self.scroll = self.max_scroll;
+    }
+
     pub fn draw(&mut self, buf: &mut Buffer, screen: Rect) {
+        if screen.width < 6 || screen.height < 4 {
+            self.rect = Rect::default();
+            return;
+        }
         let t = open_progress(self.opened);
         let w = screen
             .width
             .saturating_sub(4)
-            .clamp(30, self.width.min(110));
-        let iw = w.saturating_sub(4) as usize;
+            .clamp(6, self.width.min(110))
+            .min(screen.width);
+        let iw = w.saturating_sub(4).max(1) as usize;
         let wrapped: Vec<Line<'static>> = self
             .lines
             .iter()
             .flat_map(|l| {
-                let rows = text::wrap_spans(&l.spans, iw.max(1));
+                let rows = text::wrap_spans(&l.spans, iw);
                 if rows.is_empty() {
                     vec![Line::default()]
                 } else {
@@ -844,8 +1050,19 @@ impl HelpDialog {
                 }
             })
             .collect();
-        let h = (wrapped.len() as u16 + 2).clamp(3, screen.height.saturating_sub(4).clamp(3, 40));
+        let max_h = screen
+            .height
+            .saturating_sub(4)
+            .clamp(4, 40)
+            .min(screen.height);
+        let h = (wrapped.len() as u16 + 2)
+            .clamp(4, max_h)
+            .min(screen.height);
         let r = frame(buf, screen, w, h, &self.title, t);
+        self.rect = r;
+        if r.width < 6 || r.height < 4 {
+            return;
+        }
         let inner = Rect::new(
             r.x + 2,
             r.y + 1,
@@ -864,6 +1081,17 @@ impl HelpDialog {
                 }
             }
             buf.set_line(inner.x, inner.y + i as u16, &l, inner.width);
+        }
+        if self.max_scroll > 0 && vh > 0 {
+            super::chat::draw_scrollbar(
+                buf,
+                Rect::new(r.x + r.width - 2, inner.y, 1, vh as u16),
+                wrapped.len(),
+                self.scroll as f64,
+                self.max_scroll as f64,
+                ("┃", theme::BORDER_ACTIVE),
+                Some(("│", theme::BORDER_SUBTLE)),
+            );
         }
     }
 }

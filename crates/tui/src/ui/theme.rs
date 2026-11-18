@@ -49,7 +49,17 @@ pub const DIFF_CONTEXT: Color = rgb(0x828bb8);
 
 /// Default agent colours (opencode categorical palette).
 const AGENT_PALETTE: [Color; 5] = [SECONDARY, ACCENT, SUCCESS, PRIMARY, ERROR];
-
+/// Categorical root-task colours in split view (distinct from PRIMARY, WARNING and ERROR).
+pub const ROOT_TASK_PALETTE: [Color; 8] = [
+    SECONDARY,     // cornflower blue
+    ACCENT,        // soft violet
+    SUCCESS,       // mint green
+    INFO,          // teal cyan
+    rgb(0x4fd6be), // seafoam aqua
+    rgb(0xbb9af7), // lavender
+    rgb(0x7dcfff), // sky blue
+    rgb(0xc3e88d), // lime sage
+];
 pub fn fg(c: Color) -> Style {
     Style::new().fg(c)
 }
@@ -117,6 +127,14 @@ pub fn agent_color(agents: &[ref_proto::AgentInfo], name: &str) -> Color {
     AGENT_PALETTE[i % AGENT_PALETTE.len()]
 }
 
+/// Deterministic root-task accent colour from `ROOT_TASK_PALETTE`.
+pub fn root_task_color(root_id: &str) -> Color {
+    let h = root_id.bytes().fold(0usize, |a, b| {
+        a.wrapping_mul(NAME_HASH_MULTIPLIER)
+            .wrapping_add(b as usize)
+    });
+    ROOT_TASK_PALETTE[h % ROOT_TASK_PALETTE.len()]
+}
 /// Linear blend of two RGB colours (t = 0 → a, 1 → b).
 pub fn blend(a: Color, b: Color, t: f32) -> Color {
     match (a, b) {
