@@ -35,12 +35,13 @@ export function useShortcuts(): void {
   function onKeydown(event: KeyboardEvent): void {
     if (event.isComposing) return
     const command = commands.matchKey(event)
-    // An open dialog owns the keyboard, except for the key that opens (and closes) the palette.
     const isPaletteKey = command?.id === PALETTE
-    if (dialogs.current && !isPaletteKey) return
-    if (isPaletteKey && dialogs.current?.kind === PALETTE) {
-      event.preventDefault()
-      dialogs.close()
+    // An open dialog owns the keyboard; only the palette shortcut toggles an open palette closed.
+    if (dialogs.current) {
+      if (isPaletteKey && dialogs.current.kind === PALETTE) {
+        event.preventDefault()
+        dialogs.close()
+      }
       return
     }
     if (command) {
@@ -48,7 +49,7 @@ export function useShortcuts(): void {
       commands.run(command.id).catch(notices.pushError)
       return
     }
-    if (!dialogs.current && moveFocus(event)) event.preventDefault()
+    if (moveFocus(event)) event.preventDefault()
   }
 
   onMounted(() => window.addEventListener('keydown', onKeydown))

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Providers & Models configuration section (`provider.*`).
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   PROVIDER_PRESETS,
@@ -18,12 +18,32 @@ import {
   type ProviderPreset,
   type ProviderPresetId,
 } from '../../../config/jsonPatch.ts'
-import { renameObjectKey, uniqueObjectKey } from '../../../config/sectionHelpers.ts'
+import {
+  extractExtraProviderOptions,
+  mergeExtraProviderOptions,
+  normalizeProseInput,
+  normalizeTrimmedString,
+  renameObjectKey,
+  uniqueObjectKey,
+} from '../../../config/sectionHelpers.ts'
+import {
+  useConfigSubEditorScope,
+  useInlineRenameDrafts,
+  useJsonObjectDrafts,
+} from '../../../config/subEditorState.ts'
 import Chevron from '../../Chevron.vue'
 import DialogButton from '../../DialogButton.vue'
 import Icon from '../../Icon.vue'
 import ToggleSwitch from '../../ToggleSwitch.vue'
-import { FormRow, KeyValueEditor, NumberField, SecretField, SelectField, StringListEditor } from '../index.ts'
+import {
+  FormRow,
+  KeyValueEditor,
+  NumberField,
+  SecretField,
+  SelectField,
+  StringListEditor,
+  TextAreaField,
+} from '../index.ts'
 import ProviderModelsEditor from './ProviderModelsEditor.vue'
 
 const NPM_OPTIONS = [
@@ -38,6 +58,7 @@ const API_OPTIONS = [
   { value: 'chat', label: 'chat' },
 ] as const
 
+const EXTRA_OPTIONS_PLACEHOLDER = '{ "timeout": 30000 }'
 const props = defineProps<{
   doc: JsonObject
   envStatus?: Readonly<Record<string, boolean>>
@@ -50,10 +71,65 @@ const adding = ref(false)
 const chosenPresetId = ref<ProviderPresetId>('anthropic')
 const newProviderId = ref('anthropic')
 const openProviders = reactive(new Set<string>())
-const renameDrafts = reactive<Record<string, string>>({})
+let lastEmittedDoc: JsonObject | undefined
 
 const providersObj = computed(() => getObjectAt(props.doc, ['provider']) ?? {})
 const providerIds = computed(() => Object.keys(providersObj.value))
+
+function emitDoc(next: JsonObject): void {
+  lastEmittedDoc = next
+  emit('update:doc', next)
+}
+
+function providerObj(id: string): JsonObject {
+  const raw = providersObj.value[id]
+  return isPlainObject(raw) ? raw : {}
+}
+
+const optionsDrafts = useJsonObjectDrafts({
+  allowEmpty: true,
+  invalidMessage: () => t('config.editor.providers.variantInvalidJson'),
+})
+
+const renames = useInlineRenameDrafts({
+  exists: (key) => Object.hasOwn(providersObj.value, key),
+  collisionMessage: () => t('config.editor.renameExists'),
+  onCommit(oldId, target) {
+    const renamed = renameObjectKey(providersObj.value, oldId, target)
+    if (openProviders.has(oldId)) {
+      openProviders.delete(oldId)
+      openProviders.add(target)
+    }
+    optionsDrafts.renameKey(oldId, target)
+    emitDoc(setAt(props.doc, ['provider'], renamed))
+  },
+})
+
+const subEditorScope = useConfigSubEditorScope(
+  () => ({
+    dirty: optionsDrafts.hasInvalid.value || renames.hasDirty.value,
+    committable: renames.hasCommittable.value,
+    invalid: optionsDrafts.hasInvalid.value,
+  }),
+  () => renames.flushAll(),
+)
+
+watch(
+  () => props.doc,
+  (nextDoc) => {
+    if (nextDoc === lastEmittedDoc) return
+    const forceClear = !subEditorScope.hasHost
+    optionsDrafts.reconcile((id) => extractExtraProviderOptions(providerObj(id)), forceClear)
+    renames.reconcileKeys(providerIds.value, forceClear)
+  },
+)
+
+if (subEditorScope.resetVersion) {
+  watch(subEditorScope.resetVersion, () => {
+    optionsDrafts.clearAll()
+    renames.clearAll()
+  })
+}
 
 const presetOptions = computed(() =>
   PROVIDER_PRESETS.map((preset) => ({ value: preset.id, label: preset.label })),
@@ -97,7 +173,7 @@ function confirmAddProvider(): void {
   const created = buildPresetEntry(preset)
   openProviders.add(id)
   adding.value = false
-  emit('update:doc', setAt(props.doc, ['provider', id], created))
+  emitDoc(setAt(props.doc, ['provider', id], created))
 }
 
 function toggleProvider(id: string): void {
@@ -107,34 +183,22 @@ function toggleProvider(id: string): void {
 
 function removeProvider(id: string): void {
   openProviders.delete(id)
-  delete renameDrafts[id]
-  emit('update:doc', setAt(props.doc, ['provider', id], undefined))
-}
-
-function applyRename(oldId: string): void {
-  const target = (renameDrafts[oldId] ?? oldId).trim()
-  if (target === '' || target === oldId || Object.hasOwn(providersObj.value, target)) return
-  const renamed = renameObjectKey(providersObj.value, oldId, target)
-  delete renameDrafts[oldId]
-  if (openProviders.has(oldId)) {
-    openProviders.delete(oldId)
-    openProviders.add(target)
-  }
-  emit('update:doc', setAt(props.doc, ['provider'], renamed))
-}
-
-function providerObj(id: string): JsonObject {
-  const raw = providersObj.value[id]
-  return isPlainObject(raw) ? raw : {}
+  renames.remove(id)
+  optionsDrafts.remove(id)
+  emitDoc(setAt(props.doc, ['provider', id], undefined))
 }
 
 function patchProvider(id: string, subPath: readonly string[], value: unknown): void {
-  emit('update:doc', setAt(props.doc, ['provider', id, ...subPath], value))
+  const nextProvider = setAt(providerObj(id), subPath, value)
+  emitDoc(setAt(props.doc, ['provider', id], nextProvider))
+}
+
+function patchProviderProse(id: string, subPath: readonly string[], value: string): void {
+  patchProvider(id, subPath, normalizeProseInput(value))
 }
 
 function patchProviderString(id: string, subPath: readonly string[], value: string): void {
-  const trimmed = value.trim()
-  patchProvider(id, subPath, trimmed === '' ? undefined : trimmed)
+  patchProvider(id, subPath, normalizeTrimmedString(value))
 }
 
 function readBaseUrl(id: string): string {
@@ -149,10 +213,10 @@ function readBaseUrl(id: string): string {
 
 function writeBaseUrl(id: string, value: string): void {
   const trimmed = value.trim()
-  let next = setAt(props.doc, ['provider', id, 'options', 'baseUrl'], undefined)
-  next = setAt(next, ['provider', id, 'options', 'base_url'], undefined)
-  next = setAt(next, ['provider', id, 'options', 'baseURL'], trimmed === '' ? undefined : trimmed)
-  emit('update:doc', next)
+  let next = setAt(providerObj(id), ['options', 'baseUrl'], undefined)
+  next = setAt(next, ['options', 'base_url'], undefined)
+  next = setAt(next, ['options', 'baseURL'], trimmed === '' ? undefined : trimmed)
+  emitDoc(setAt(props.doc, ['provider', id], next))
 }
 
 function readApiKey(id: string): string {
@@ -162,9 +226,29 @@ function readApiKey(id: string): string {
 
 function writeApiKey(id: string, value: string): void {
   const trimmed = value.trim()
-  let next = setAt(props.doc, ['provider', id, 'options', 'api_key'], undefined)
-  next = setAt(next, ['provider', id, 'options', 'apiKey'], trimmed === '' ? undefined : trimmed)
-  emit('update:doc', next)
+  let next = setAt(providerObj(id), ['options', 'api_key'], undefined)
+  next = setAt(next, ['options', 'apiKey'], trimmed === '' ? undefined : trimmed)
+  emitDoc(setAt(props.doc, ['provider', id], next))
+}
+
+function readExtraOptionsText(id: string): string {
+  return optionsDrafts.read(id, extractExtraProviderOptions(providerObj(id)))
+}
+
+function canResetExtraOptions(id: string): boolean {
+  return extractExtraProviderOptions(providerObj(id)) !== undefined || optionsDrafts.hasDraft(id)
+}
+
+function updateExtraOptionsText(id: string, text: string): void {
+  const currentExtra = extractExtraProviderOptions(providerObj(id))
+  optionsDrafts.update(id, text, currentExtra, (parsed) => {
+    patchProvider(id, ['options'], mergeExtraProviderOptions(providerObj(id), parsed))
+  })
+}
+
+function resetExtraOptions(id: string): void {
+  optionsDrafts.remove(id)
+  patchProvider(id, ['options'], mergeExtraProviderOptions(providerObj(id), undefined))
 }
 
 function patchHeaders(id: string, headers: Record<string, string>): void {
@@ -254,21 +338,23 @@ function baseUrlPlaceholderFor(id: string): string {
       </div>
 
       <div v-if="openProviders.has(id)" class="card-body">
-        <FormRow :label="t('config.editor.providers.providerIdLabel')">
+        <FormRow :label="t('config.editor.providers.providerIdLabel')" :error="renames.errorOf(id)">
           <div class="rename-row">
             <input
-              :value="renameDrafts[id] ?? id"
+              :value="renames.read(id)"
               type="text"
               class="text-input mono"
               spellcheck="false"
-              @input="renameDrafts[id] = ($event.target as HTMLInputElement).value"
-              @keydown.enter.prevent="!$event.isComposing && applyRename(id)"
+              @input="renames.set(id, ($event.target as HTMLInputElement).value)"
+              @blur="renames.blur(id)"
+              @keydown.enter.prevent="!$event.isComposing && renames.commit(id)"
             />
             <DialogButton
-              v-if="(renameDrafts[id] ?? id).trim() !== id"
               small
               :label="t('config.editor.rename')"
-              @click="applyRename(id)"
+              :disabled="!renames.canCommit(id)"
+              @mousedown.prevent
+              @click="renames.commit(id)"
             />
           </div>
         </FormRow>
@@ -280,7 +366,8 @@ function baseUrlPlaceholderFor(id: string): string {
             class="text-input"
             spellcheck="false"
             :placeholder="id"
-            @input="patchProviderString(id, ['name'], ($event.target as HTMLInputElement).value)"
+            @input="patchProviderProse(id, ['name'], ($event.target as HTMLInputElement).value)"
+            @blur="patchProviderString(id, ['name'], ($event.target as HTMLInputElement).value)"
           />
         </FormRow>
 
@@ -384,6 +471,24 @@ function baseUrlPlaceholderFor(id: string): string {
           />
         </FormRow>
 
+        <FormRow
+          vertical
+          :label="t('config.editor.providers.extraOptions')"
+          :description="t('config.editor.providers.extraOptionsDesc')"
+          :can-reset="canResetExtraOptions(id)"
+          @reset="resetExtraOptions(id)"
+        >
+          <TextAreaField
+            monospace
+            :rows="3"
+            :model-value="readExtraOptionsText(id)"
+            :error="optionsDrafts.errorOf(id)"
+            :placeholder="EXTRA_OPTIONS_PLACEHOLDER"
+            :label="t('config.editor.providers.extraOptions')"
+            @update:model-value="updateExtraOptionsText(id, $event)"
+            @blur="optionsDrafts.blur(id)"
+          />
+        </FormRow>
         <FormRow vertical :label="t('config.editor.providers.whitelist')">
           <StringListEditor
             monospace
@@ -404,7 +509,7 @@ function baseUrlPlaceholderFor(id: string): string {
           :doc="doc"
           :provider-id="id"
           :env-status="envStatus"
-          @update:doc="emit('update:doc', $event)"
+          @update:doc="emitDoc($event)"
         />
       </div>
     </div>

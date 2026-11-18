@@ -26,6 +26,7 @@ withDefaults(
 )
 
 const text = defineModel<string>({ required: true })
+const emit = defineEmits<{ blur: [event: FocusEvent] }>()
 const textarea = useTemplateRef<HTMLTextAreaElement>('textarea')
 
 defineExpose({
@@ -47,6 +48,7 @@ defineExpose({
       :aria-label="label"
       :aria-invalid="error ? 'true' : 'false'"
       :disabled="disabled"
+      @blur="emit('blur', $event)"
     />
     <p v-if="error" class="error" role="alert">{{ error }}</p>
   </div>

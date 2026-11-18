@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Agents configuration section: built-in overrides (`build`, `plan`, `general`, `explore`,
 // `compaction`) with Customized badge & Reset override, plus custom agent CRUD.
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   BUILTIN_AGENTS,
@@ -16,7 +16,17 @@ import {
   type BuiltinAgentMeta,
   type JsonObject,
 } from '../../../config/jsonPatch.ts'
-import { configuredModelOptions } from '../../../config/sectionHelpers.ts'
+import {
+  configuredModelOptions,
+  normalizeProseInput,
+  normalizeTrimmedString,
+  renameObjectKey,
+} from '../../../config/sectionHelpers.ts'
+import {
+  useConfigSubEditorScope,
+  useInlineRenameDrafts,
+  useJsonObjectDrafts,
+} from '../../../config/subEditorState.ts'
 import type { ModelInfo } from '../../../proto/generated'
 import Chevron from '../../Chevron.vue'
 import DialogButton from '../../DialogButton.vue'
@@ -39,6 +49,7 @@ const MODE_OPTIONS = [
   { value: 'subagent', label: 'subagent' },
   { value: 'all', label: 'all' },
 ] as const
+const AGENT_OPTIONS_PLACEHOLDER = '{ "maxTokens": 8192 }'
 
 const props = withDefaults(
   defineProps<{
@@ -55,11 +66,17 @@ const { t } = useI18n()
 
 const openAgents = reactive(new Set<string>())
 const newAgentName = ref('')
+let lastEmittedDoc: JsonObject | undefined
 
 const builtinSet = new Set<string>(BUILTIN_AGENTS)
 const agentsMap = computed(() => getObjectAt(props.doc, ['agent']) ?? {})
 const customAgentNames = computed(() => Object.keys(agentsMap.value).filter((name) => !builtinSet.has(name)))
 const modelOptions = computed(() => configuredModelOptions(props.doc, props.serverModels))
+
+function emitDoc(next: JsonObject): void {
+  lastEmittedDoc = next
+  emit('update:doc', next)
+}
 
 function isCustomized(name: string): boolean {
   return getObjectAt(props.doc, ['agent', name]) !== undefined
@@ -70,18 +87,71 @@ function agentObj(name: string): JsonObject {
   return isPlainObject(raw) ? raw : {}
 }
 
+const optionsDrafts = useJsonObjectDrafts({
+  allowEmpty: true,
+  invalidMessage: () => t('config.editor.providers.variantInvalidJson'),
+})
+
+const renames = useInlineRenameDrafts({
+  exists: (key) => builtinSet.has(key) || Object.hasOwn(agentsMap.value, key),
+  collisionMessage: () => t('config.editor.renameExists'),
+  onCommit(oldName, target) {
+    const renamed = renameObjectKey(agentsMap.value, oldName, target)
+    if (openAgents.has(oldName)) {
+      openAgents.delete(oldName)
+      openAgents.add(target)
+    }
+    optionsDrafts.renameKey(oldName, target)
+    emitDoc(setAt(props.doc, ['agent'], renamed))
+  },
+})
+
+const subEditorScope = useConfigSubEditorScope(
+  () => ({
+    dirty: optionsDrafts.hasInvalid.value || renames.hasDirty.value,
+    committable: renames.hasCommittable.value,
+    invalid: optionsDrafts.hasInvalid.value,
+  }),
+  () => renames.flushAll(),
+)
+
+watch(
+  () => props.doc,
+  (nextDoc) => {
+    if (nextDoc === lastEmittedDoc) return
+    const forceClear = !subEditorScope.hasHost
+    optionsDrafts.reconcile((name) => getObjectAt(agentObj(name), ['options']), forceClear)
+    renames.reconcileKeys(customAgentNames.value, forceClear)
+  },
+)
+
+if (subEditorScope.resetVersion) {
+  watch(subEditorScope.resetVersion, () => {
+    optionsDrafts.clearAll()
+    renames.clearAll()
+  })
+}
+
 function toggleAgent(name: string): void {
   if (openAgents.has(name)) openAgents.delete(name)
   else openAgents.add(name)
 }
 
+function commitAgent(name: string, nextAgent: JsonObject): void {
+  const value = builtinSet.has(name) && Object.keys(nextAgent).length === 0 ? undefined : nextAgent
+  emitDoc(setAt(props.doc, ['agent', name], value))
+}
+
 function patchAgent(name: string, subPath: readonly string[], value: unknown): void {
-  emit('update:doc', setAt(props.doc, ['agent', name, ...subPath], value))
+  commitAgent(name, setAt(agentObj(name), subPath, value))
+}
+
+function patchAgentProse(name: string, subPath: readonly string[], value: string): void {
+  patchAgent(name, subPath, normalizeProseInput(value))
 }
 
 function patchAgentString(name: string, subPath: readonly string[], value: string): void {
-  const trimmed = value.trim()
-  patchAgent(name, subPath, trimmed === '' ? undefined : trimmed)
+  patchAgent(name, subPath, normalizeTrimmedString(value))
 }
 
 function patchPrompt(name: string, value: string): void {
@@ -90,7 +160,8 @@ function patchPrompt(name: string, value: string): void {
 
 function resetBuiltin(name: string): void {
   openAgents.delete(name)
-  emit('update:doc', setAt(props.doc, ['agent', name], undefined))
+  optionsDrafts.remove(name)
+  emitDoc(setAt(props.doc, ['agent', name], undefined))
 }
 
 function addCustomAgent(): void {
@@ -98,16 +169,40 @@ function addCustomAgent(): void {
   if (trimmed === '' || builtinSet.has(trimmed) || Object.hasOwn(agentsMap.value, trimmed)) return
   newAgentName.value = ''
   openAgents.add(trimmed)
-  emit('update:doc', setAt(props.doc, ['agent', trimmed], { description: '' }))
+  emitDoc(setAt(props.doc, ['agent', trimmed], { description: '' }))
 }
 
 function removeCustomAgent(name: string): void {
   openAgents.delete(name)
-  emit('update:doc', setAt(props.doc, ['agent', name], undefined))
+  renames.remove(name)
+  optionsDrafts.remove(name)
+  emitDoc(setAt(props.doc, ['agent', name], undefined))
 }
 
 function builtinMeta(name: string): BuiltinAgentMeta | undefined {
   return BUILTIN_AGENT_META.find((meta) => meta.name === name)
+}
+
+function readAgentCanSpawn(name: string, fallback: boolean): boolean {
+  const obj = agentObj(name)
+  return getBooleanAt(obj, ['can_spawn']) ?? getBooleanAt(obj, ['spawn']) ?? fallback
+}
+
+function canResetAgentCanSpawn(name: string): boolean {
+  const obj = agentObj(name)
+  return getAt(obj, ['can_spawn']) !== undefined || getAt(obj, ['spawn']) !== undefined
+}
+
+function writeAgentCanSpawn(name: string, enabled: boolean): void {
+  let next = setAt(agentObj(name), ['spawn'], undefined)
+  next = setAt(next, ['can_spawn'], enabled)
+  commitAgent(name, next)
+}
+
+function resetAgentCanSpawn(name: string): void {
+  let next = setAt(agentObj(name), ['can_spawn'], undefined)
+  next = setAt(next, ['spawn'], undefined)
+  commitAgent(name, next)
 }
 
 function readAgentDisabled(name: string): boolean {
@@ -116,9 +211,29 @@ function readAgentDisabled(name: string): boolean {
 }
 
 function writeAgentDisabled(name: string, disabled: boolean): void {
-  let next = setAt(props.doc, ['agent', name, 'disabled'], undefined)
-  next = setAt(next, ['agent', name, 'disable'], disabled ? true : undefined)
-  emit('update:doc', next)
+  let next = setAt(agentObj(name), ['disabled'], undefined)
+  next = setAt(next, ['disable'], disabled ? true : undefined)
+  commitAgent(name, next)
+}
+
+function readAgentOptionsText(name: string): string {
+  return optionsDrafts.read(name, getObjectAt(agentObj(name), ['options']))
+}
+
+function canResetAgentOptions(name: string): boolean {
+  return getAt(agentObj(name), ['options']) !== undefined || optionsDrafts.hasDraft(name)
+}
+
+function updateAgentOptionsText(name: string, text: string): void {
+  const currentOptions = getObjectAt(agentObj(name), ['options'])
+  optionsDrafts.update(name, text, currentOptions, (parsed) => {
+    patchAgent(name, ['options'], parsed)
+  })
+}
+
+function resetAgentOptions(name: string): void {
+  optionsDrafts.remove(name)
+  patchAgent(name, ['options'], undefined)
 }
 </script>
 
@@ -149,7 +264,8 @@ function writeAgentDisabled(name: string, disabled: boolean): void {
             :value="getStringAt(agentObj(meta.name), ['description']) ?? ''"
             type="text"
             class="text-input"
-            @input="patchAgentString(meta.name, ['description'], ($event.target as HTMLInputElement).value)"
+            @input="patchAgentProse(meta.name, ['description'], ($event.target as HTMLInputElement).value)"
+            @blur="patchAgentString(meta.name, ['description'], ($event.target as HTMLInputElement).value)"
           />
         </FormRow>
 
@@ -214,14 +330,14 @@ function writeAgentDisabled(name: string, disabled: boolean): void {
 
         <FormRow
           :label="t('config.editor.agents.canSpawn')"
-          :can-reset="getAt(agentObj(meta.name), ['can_spawn']) !== undefined"
-          @reset="patchAgent(meta.name, ['can_spawn'], undefined)"
+          :can-reset="canResetAgentCanSpawn(meta.name)"
+          @reset="resetAgentCanSpawn(meta.name)"
         >
           <div class="switch-wrap">
             <ToggleSwitch
-              :model-value="getBooleanAt(agentObj(meta.name), ['can_spawn']) ?? meta.canSpawnDefault"
+              :model-value="readAgentCanSpawn(meta.name, meta.canSpawnDefault)"
               :label="t('config.editor.agents.canSpawn')"
-              @update:model-value="patchAgent(meta.name, ['can_spawn'], $event)"
+              @update:model-value="writeAgentCanSpawn(meta.name, $event)"
             />
           </div>
         </FormRow>
@@ -270,6 +386,24 @@ function writeAgentDisabled(name: string, disabled: boolean): void {
           />
         </FormRow>
 
+        <FormRow
+          vertical
+          :label="t('config.editor.agents.options')"
+          :description="t('config.editor.agents.optionsDesc')"
+          :can-reset="canResetAgentOptions(meta.name)"
+          @reset="resetAgentOptions(meta.name)"
+        >
+          <TextAreaField
+            monospace
+            :rows="3"
+            :model-value="readAgentOptionsText(meta.name)"
+            :error="optionsDrafts.errorOf(meta.name)"
+            :placeholder="AGENT_OPTIONS_PLACEHOLDER"
+            :label="t('config.editor.agents.options')"
+            @update:model-value="updateAgentOptionsText(meta.name, $event)"
+            @blur="optionsDrafts.blur(meta.name)"
+          />
+        </FormRow>
         <FormRow vertical :label="t('config.editor.agents.prompt')">
           <TextAreaField
             :rows="5"
@@ -322,12 +456,34 @@ function writeAgentDisabled(name: string, disabled: boolean): void {
       </div>
 
       <div v-if="openAgents.has(name)" class="card-body">
+        <FormRow :label="t('config.editor.rename')" :error="renames.errorOf(name)">
+          <div class="rename-row">
+            <input
+              :value="renames.read(name)"
+              type="text"
+              class="text-input mono"
+              spellcheck="false"
+              @input="renames.set(name, ($event.target as HTMLInputElement).value)"
+              @blur="renames.blur(name)"
+              @keydown.enter.prevent="!$event.isComposing && renames.commit(name)"
+            />
+            <DialogButton
+              small
+              :label="t('config.editor.rename')"
+              :disabled="!renames.canCommit(name)"
+              @mousedown.prevent
+              @click="renames.commit(name)"
+            />
+          </div>
+        </FormRow>
+
         <FormRow :label="t('config.editor.agents.description')">
           <input
             :value="getStringAt(agentObj(name), ['description']) ?? ''"
             type="text"
             class="text-input"
-            @input="patchAgentString(name, ['description'], ($event.target as HTMLInputElement).value)"
+            @input="patchAgentProse(name, ['description'], ($event.target as HTMLInputElement).value)"
+            @blur="patchAgentString(name, ['description'], ($event.target as HTMLInputElement).value)"
           />
         </FormRow>
 
@@ -376,7 +532,11 @@ function writeAgentDisabled(name: string, disabled: boolean): void {
           />
         </FormRow>
 
-        <FormRow :label="t('config.editor.agents.creatable')">
+        <FormRow
+          :label="t('config.editor.agents.creatable')"
+          :can-reset="getAt(agentObj(name), ['creatable']) !== undefined"
+          @reset="patchAgent(name, ['creatable'], undefined)"
+        >
           <div class="switch-wrap">
             <ToggleSwitch
               :model-value="getBooleanAt(agentObj(name), ['creatable']) ?? true"
@@ -386,17 +546,25 @@ function writeAgentDisabled(name: string, disabled: boolean): void {
           </div>
         </FormRow>
 
-        <FormRow :label="t('config.editor.agents.canSpawn')">
+        <FormRow
+          :label="t('config.editor.agents.canSpawn')"
+          :can-reset="canResetAgentCanSpawn(name)"
+          @reset="resetAgentCanSpawn(name)"
+        >
           <div class="switch-wrap">
             <ToggleSwitch
-              :model-value="getBooleanAt(agentObj(name), ['can_spawn']) ?? false"
+              :model-value="readAgentCanSpawn(name, false)"
               :label="t('config.editor.agents.canSpawn')"
-              @update:model-value="patchAgent(name, ['can_spawn'], $event)"
+              @update:model-value="writeAgentCanSpawn(name, $event)"
             />
           </div>
         </FormRow>
 
-        <FormRow :label="t('config.editor.agents.hidden')">
+        <FormRow
+          :label="t('config.editor.agents.hidden')"
+          :can-reset="getAt(agentObj(name), ['hidden']) !== undefined"
+          @reset="patchAgent(name, ['hidden'], undefined)"
+        >
           <div class="switch-wrap">
             <ToggleSwitch
               :model-value="getBooleanAt(agentObj(name), ['hidden']) ?? false"
@@ -433,6 +601,25 @@ function writeAgentDisabled(name: string, disabled: boolean): void {
             :max="1"
             :step="0.05"
             @update:model-value="patchAgent(name, ['top_p'], $event)"
+          />
+        </FormRow>
+
+        <FormRow
+          vertical
+          :label="t('config.editor.agents.options')"
+          :description="t('config.editor.agents.optionsDesc')"
+          :can-reset="canResetAgentOptions(name)"
+          @reset="resetAgentOptions(name)"
+        >
+          <TextAreaField
+            monospace
+            :rows="3"
+            :model-value="readAgentOptionsText(name)"
+            :error="optionsDrafts.errorOf(name)"
+            :placeholder="AGENT_OPTIONS_PLACEHOLDER"
+            :label="t('config.editor.agents.options')"
+            @update:model-value="updateAgentOptionsText(name, $event)"
+            @blur="optionsDrafts.blur(name)"
           />
         </FormRow>
 
@@ -574,6 +761,12 @@ function writeAgentDisabled(name: string, disabled: boolean): void {
 .card-body {
   padding: 4px 16px 16px;
   border-top: 1px solid var(--border);
+}
+
+.rename-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .text-input {

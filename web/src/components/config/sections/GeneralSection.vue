@@ -12,7 +12,12 @@ import {
   setAt,
   type JsonObject,
 } from '../../../config/jsonPatch.ts'
-import { configuredAgentOptions, configuredModelOptions } from '../../../config/sectionHelpers.ts'
+import {
+  configuredAgentOptions,
+  configuredModelOptions,
+  normalizeProseInput,
+  normalizeTrimmedString,
+} from '../../../config/sectionHelpers.ts'
 import type { AgentInfo, ModelInfo } from '../../../proto/generated'
 import Segmented from '../../Segmented.vue'
 import ToggleSwitch from '../../ToggleSwitch.vue'
@@ -48,9 +53,12 @@ function patch(path: readonly string[], value: unknown): void {
   emit('update:doc', setAt(props.doc, path, value))
 }
 
+function patchProseString(path: readonly string[], value: string): void {
+  patch(path, normalizeProseInput(value))
+}
+
 function patchString(path: readonly string[], value: string): void {
-  const trimmed = value.trim()
-  patch(path, trimmed === '' ? undefined : trimmed)
+  patch(path, normalizeTrimmedString(value))
 }
 
 function patchList(path: readonly string[], items: readonly string[]): void {
@@ -92,7 +100,8 @@ function writeTri(path: readonly string[], state: TriState): void {
         autocomplete="off"
         :placeholder="t('config.editor.general.profileNamePlaceholder')"
         :aria-label="t('config.editor.general.profileName')"
-        @input="patchString(['$name'], ($event.target as HTMLInputElement).value)"
+        @input="patchProseString(['$name'], ($event.target as HTMLInputElement).value)"
+        @blur="patchString(['$name'], ($event.target as HTMLInputElement).value)"
       />
     </FormRow>
 

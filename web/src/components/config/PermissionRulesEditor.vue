@@ -20,7 +20,7 @@ interface RuleRow extends PermissionRule {
   id: number
 }
 
-withDefaults(defineProps<{ disabled?: boolean; label?: string }>(), {
+const props = withDefaults(defineProps<{ disabled?: boolean; label?: string }>(), {
   disabled: false,
   label: undefined,
 })
@@ -101,6 +101,7 @@ function emitRules(): void {
 }
 
 function setMode(nextMode: UiMode): void {
+  if (props.disabled) return
   const previousMode = uiMode.value
   uiMode.value = nextMode
   if (nextMode === 'unset') {
@@ -169,7 +170,7 @@ function removeRule(index: number): void {
 </script>
 
 <template>
-  <div class="permission-editor" :class="{ disabled }">
+  <div class="permission-editor" :class="{ disabled }" :inert="disabled || undefined">
     <div class="toolbar">
       <Segmented
         :model-value="uiMode"

@@ -4,7 +4,7 @@ import { useTemplateRef } from 'vue'
 
 defineProps<{ label: string; placeholder?: string; error?: string; secret?: boolean }>()
 const text = defineModel<string>({ required: true })
-const emit = defineEmits<{ enter: []; keydown: [event: KeyboardEvent] }>()
+const emit = defineEmits<{ enter: []; keydown: [event: KeyboardEvent]; blur: [event: FocusEvent] }>()
 
 const input = useTemplateRef<HTMLInputElement>('input')
 
@@ -31,6 +31,7 @@ defineExpose({
       :placeholder="placeholder"
       @keydown="emit('keydown', $event)"
       @keydown.enter.prevent="!$event.isComposing && emit('enter')"
+      @blur="emit('blur', $event)"
     />
     <p class="error" :class="{ shown: error }" role="alert">{{ error }}</p>
   </div>
