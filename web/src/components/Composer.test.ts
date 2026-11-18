@@ -13,18 +13,33 @@ import type { Message } from '../proto/generated'
 import { useConnectionStore } from '../stores/connection.ts'
 import { useDialogsStore } from '../stores/dialogs.ts'
 import Composer from './Composer.vue'
+import { useWorkspaceStore } from '../stores/workspace.ts'
 
 const COMMANDS: SlashCommand[] = [
   { name: 'undo', aliases: [], title: 'Undo the last prompt', takesArgs: false, custom: false },
   { name: 'rename', aliases: [], title: 'Rename the session', takesArgs: true, custom: false },
 ]
 
-function setup(options: { busy?: boolean; queued?: Message[]; history?: string[]; attached?: boolean } = {}) {
+function setup(
+  options: {
+    busy?: boolean
+    queued?: Message[]
+    history?: string[]
+    attached?: boolean
+    extraCommands?: SlashCommand[]
+  } = {},
+) {
   const api = {
     prompt: vi.fn<ComposerApi['prompt']>(async () => ({ queued: false, message_id: 'm1' })),
     shell: vi.fn<ComposerApi['shell']>(async () => {}),
     removeQueued: vi.fn<ComposerApi['removeQueued']>(async () => ({ removed: false, text: '', images: [] })),
     listFiles: vi.fn<ComposerApi['listFiles']>(async () => []),
+    listDirs: vi.fn<NonNullable<ComposerApi['listDirs']>>(async (path) => ({
+      path,
+      dirs: ['src', 'docs'],
+      files: [],
+    })),
+    listBinaries: vi.fn<NonNullable<ComposerApi['listBinaries']>>(async () => ['cargo', 'cargo-fmt']),
     expandCommand: vi.fn<ComposerApi['expandCommand']>(async () => ''),
   }
   const host: ComposerHost = {
@@ -34,8 +49,8 @@ function setup(options: { busy?: boolean; queued?: Message[]; history?: string[]
     cwd: () => '/work',
     isBusy: () => options.busy ?? false,
     hasDelayedTool: () => false,
-    slashCommands: () => COMMANDS,
-    runSlash: async () => {},
+    slashCommands: () => [...COMMANDS, ...(options.extraCommands ?? [])],
+    runSlash: vi.fn(async () => {}),
     abort: vi.fn(async () => {}),
     toast: () => {},
     reportError: () => {},
@@ -277,5 +292,50 @@ describe('Composer', () => {
     const pills = wrapper.findAll('.tags button')
     await pills[2]!.trigger('click')
     expect(dialogs.current).toEqual({ kind: 'variants', sessionId: 's1' })
+  })
+
+  it('never cycles agent on Tab in shell mode and enforces free-form Enter on shell and /cd completions', async () => {
+    vi.useFakeTimers()
+    const { wrapper, api, host, pinia } = setup({
+      extraCommands: [{ name: 'cd', aliases: [], title: 'Change directory', takesArgs: true, custom: false }],
+    })
+    const workspace = useWorkspaceStore(pinia)
+    const cycleSpy = vi.spyOn(workspace, 'cycleAgent').mockResolvedValue(undefined)
+    const runSlash = vi.spyOn(host, 'runSlash')
+
+    // Enter shell mode: Tab never cycles agent.
+    await press(wrapper, '!')
+    await press(wrapper, 'Tab')
+    await press(wrapper, 'Tab', { shiftKey: true })
+    expect(cycleSpy).not.toHaveBeenCalled()
+
+    // Typing in shell mode opens binary completions; plain Enter without ↑/↓ submits typed command directly!
+    await type(wrapper, 'car')
+    await wrapper.get('textarea').trigger('input')
+    await vi.advanceTimersByTimeAsync(100)
+    expect(wrapper.findAll('[role=option]').length).toBeGreaterThan(0)
+    await press(wrapper, 'Enter')
+    expect(api.shell).toHaveBeenCalledWith('s1', 'car')
+
+    // With ↑/↓ (explicitlySelected === true), Enter accepts the selected completion instead of submitting.
+    await press(wrapper, '!')
+    await type(wrapper, 'car')
+    await wrapper.get('textarea').trigger('input')
+    await vi.advanceTimersByTimeAsync(100)
+    await press(wrapper, 'ArrowDown')
+    await press(wrapper, 'Enter')
+    expect(value(wrapper)).toBe('cargo-fmt ')
+    expect(api.shell).toHaveBeenCalledTimes(1)
+    await press(wrapper, 'Escape')
+    await press(wrapper, 'Escape')
+
+    // In `/cd `, Tab drills down directories while plain Enter without ↑/↓ submits `/cd s` directly.
+    await type(wrapper, '/cd s')
+    await wrapper.get('textarea').trigger('input')
+    await vi.advanceTimersByTimeAsync(100)
+    expect(wrapper.findAll('[role=option]').map((r) => r.text())).toEqual(['src/'])
+    await press(wrapper, 'Enter')
+    expect(runSlash).toHaveBeenCalledWith('/cd s')
+    vi.useRealTimers()
   })
 })

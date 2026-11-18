@@ -23,7 +23,7 @@ function setup(options: { busy?: boolean; delayed?: boolean } = {}) {
     listFiles: vi.fn<ComposerApi['listFiles']>(async () => []),
     expandCommand: vi.fn<ComposerApi['expandCommand']>(async () => 'expanded text'),
   }
-  const toasts: [ToastLevel, string][] = []
+  const toasts: [ToastLevel, string, Record<string, string> | undefined][] = []
   const host = {
     sessionId: 's1',
     api: () => api,
@@ -34,7 +34,8 @@ function setup(options: { busy?: boolean; delayed?: boolean } = {}) {
     slashCommands: () => COMMANDS,
     runSlash: vi.fn<ComposerHost['runSlash']>(async () => {}),
     abort: vi.fn<ComposerHost['abort']>(async () => {}),
-    toast: (level: ToastLevel, key: string) => void toasts.push([level, key]),
+    toast: (level: ToastLevel, key: string, params?: Record<string, string>) =>
+      void toasts.push([level, key, params]),
     reportError: vi.fn<ComposerHost['reportError']>(),
   } satisfies ComposerHost
   const composer = new SessionComposer(host)
@@ -125,7 +126,7 @@ describe('submit', () => {
     api.expandCommand.mockResolvedValueOnce(' ')
     await composer.runCustomCommand('review', '')
     expect(api.prompt).not.toHaveBeenCalled()
-    expect(toasts).toEqual([['warn', 'composer.toast.expandedToNothing']])
+    expect(toasts).toEqual([['warn', 'composer.toast.expandedToNothing', undefined]])
   })
 
   it('sends an unknown slash line as a prompt', async () => {
@@ -133,6 +134,24 @@ describe('submit', () => {
     type(composer, '/usr/bin/env is where')
     await composer.submit()
     expect(api.prompt).toHaveBeenCalledWith('s1', '/usr/bin/env is where', [])
+  })
+
+  it('blocks unknown single-token /foo typos with a warning toast and keeps the draft intact', async () => {
+    const { composer, api, toasts } = setup()
+    type(composer, '/udno')
+    await composer.submit()
+    expect(api.prompt).not.toHaveBeenCalled()
+    expect(composer.draft.text).toBe('/udno')
+    expect(toasts).toEqual([
+      ['warn', 'composer.toast.unknownCommandSuggest', { name: 'udno', suggestion: 'undo' }],
+    ])
+
+    toasts.splice(0)
+    type(composer, '/notacommandatall')
+    await composer.submit()
+    expect(api.prompt).not.toHaveBeenCalled()
+    expect(composer.draft.text).toBe('/notacommandatall')
+    expect(toasts).toEqual([['warn', 'composer.toast.unknownCommand', { name: 'notacommandatall' }]])
   })
 
   it('sends the attached images with the text', async () => {
@@ -172,6 +191,28 @@ describe('history', () => {
     type(composer, 'x')
     composer.historyPrev()
     expect(composer.draft.text).toBe('newer')
+  })
+
+  it('filters history to !-prefixed entries only while browsing in shell mode', () => {
+    const { composer, host } = setup()
+    host.history.history.push('!git status')
+    host.history.history.push('normal prompt')
+    host.history.history.push('!cargo check')
+    composer.enterShell()
+    type(composer, 'ls')
+
+    expect(composer.historyPrev()).toBe('cargo check'.length)
+    expect(composer.draft.shell).toBe(true)
+    expect(composer.draft.text).toBe('cargo check')
+
+    expect(composer.historyPrev()).toBe('git status'.length)
+    expect(composer.draft.text).toBe('git status')
+    expect(composer.historyPrev()).toBeUndefined()
+
+    composer.historyNext()
+    composer.historyNext()
+    expect(composer.draft.shell).toBe(true)
+    expect(composer.draft.text).toBe('ls')
   })
 })
 
@@ -257,7 +298,7 @@ describe('Esc', () => {
     const { composer, host, toasts } = setup({ busy: true, delayed: true })
     composer.escape()
     expect(host.abort).toHaveBeenCalledTimes(1)
-    expect(toasts).toEqual([['info', 'composer.toast.delayedCancelled']])
+    expect(toasts).toEqual([['info', 'composer.toast.delayedCancelled', undefined]])
   })
 })
 
@@ -280,7 +321,7 @@ describe('taking prompts back', () => {
     api.removeQueued.mockResolvedValueOnce({ removed: false, text: '', images: [] })
     await composer.removeQueued('m9')
     expect(composer.draft.text).toBe('')
-    expect(toasts).toEqual([['info', 'composer.toast.alreadySent']])
+    expect(toasts).toEqual([['info', 'composer.toast.alreadySent', undefined]])
   })
 
   it('takes a restored draft from an undo of its own session only', () => {

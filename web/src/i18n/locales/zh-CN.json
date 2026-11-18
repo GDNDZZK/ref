@@ -37,7 +37,9 @@
       "image": {
         "type": "{name} 不是支持的图片（PNG、JPEG、GIF 或 WebP）",
         "size": "{name} 超过 20 MiB"
-      }
+      },
+      "unknownCommand": "未知命令 /{name}",
+      "unknownCommandSuggest": "未知命令 /{name} — 你是指 /{suggestion} 吗？"
     }
   },
   "storage": {
@@ -113,6 +115,9 @@
     },
     "unavailable": "这个命令现在不可用。",
     "noSuchSession": "没有名为“{name}”的运行中会话。",
+    "noSuchAnySession": "没有名为“{name}”的会话。",
+    "noSuchModel": "没有匹配“{name}”的模型。",
+    "noSuchAgent": "没有名为“{name}”的智能体。",
     "new": {
       "title": "新建会话"
     },
@@ -197,6 +202,13 @@
     },
     "settings": {
       "title": "设置"
+    },
+    "config": {
+      "title": "配置 (ref.json)…"
+    },
+    "reload": {
+      "title": "重新加载配置",
+      "done": "配置已重新加载"
     }
   },
   "palette": {
@@ -225,7 +237,9 @@
     "mcp": "MCP",
     "settings": "设置",
     "sessions": "会话",
-    "needsAnswer": "等待你的回答"
+    "needsAnswer": "等待你的回答",
+    "config": "配置 (ref.json)",
+    "reloadConfig": "重新加载配置"
   },
   "workspace": {
     "empty": "未打开会话"
@@ -277,7 +291,9 @@
       "filterUser": "用户创建",
       "filterByCreator": "同创建者",
       "filterByName": "由 {name} 创建",
-      "createdBy": "由 {name} 创建"
+      "createdBy": "由 {name} 创建",
+      "closeTitle": "关闭会话",
+      "emptyLive": "没有运行中的会话"
     },
     "mcp": {
       "title": "MCP 服务器",
@@ -354,7 +370,10 @@
       "dark": "暗色",
       "english": "English",
       "chinese": "简体中文",
-      "about": "ref {version} · 协议 {protocol}"
+      "about": "ref {version} · 协议 {protocol}",
+      "config": "配置文件",
+      "editConfig": "编辑 ref.json…",
+      "reloadConfig": "重新加载配置"
     }
   },
   "banner": {
@@ -465,6 +484,195 @@
       "yellow": "黄色",
       "green": "绿色",
       "cyan": "青色"
+    },
+    "editor": {
+      "title": "配置",
+      "profileLabel": "配置文件方案",
+      "activeBadge": "当前",
+      "newProfile": "新建",
+      "newProfileNamePlaceholder": "方案名称（可选）",
+      "cloneCurrent": "克隆当前配置",
+      "create": "创建",
+      "deleteProfile": "删除",
+      "confirmDeleteActiveWithBackup": "删除当前 ref.json？最新的备份将自动启用。",
+      "confirmDeleteActiveReset": "删除当前 ref.json 并将全局配置重置为默认值？",
+      "confirmDeleteBackup": "删除备份方案 {file}？",
+      "reload": "重新加载",
+      "modeLabel": "编辑模式",
+      "modeVisual": "可视化",
+      "modeJson": "JSON",
+      "loading": "正在加载配置…",
+      "save": "保存",
+      "saving": "保存中…",
+      "saved": "配置已保存",
+      "discard": "放弃更改",
+      "unsavedPrompt": "有未保存的更改",
+      "unsavedHint": "放弃未保存的修改，或留在当前页继续保存。",
+      "bannerNotCreated": "磁盘上尚不存在 ref.json — 保存后将自动创建。",
+      "bannerJsoncOverride": "此目录中同时存在 ref.jsonc，会覆盖 ref.json 中的同名配置项。",
+      "bannerEnvOverride": "环境变量配置覆盖已启用：{path}",
+      "bannerProjectOverrides": "当前工作区存在项目级配置覆盖：{files}",
+      "bannerParseError": "JSON 语法错误：{error}",
+      "rootMustBeObject": "配置根节点必须是 JSON 对象。",
+      "triDefault": "默认",
+      "triOn": "开启",
+      "triOff": "关闭",
+      "customModelPlaceholder": "provider/model",
+      "pickModelPlaceholder": "选择已配置的模型…",
+      "delete": "删除",
+      "rename": "重命名",
+      "apply": "应用",
+      "expand": "展开",
+      "collapse": "收起",
+      "nav": {
+        "general": "通用",
+        "providers": "提供商与模型",
+        "agents": "智能体",
+        "permissions": "权限与延迟",
+        "mcp": "MCP 服务器",
+        "commands": "命令与技能"
+      },
+      "general": {
+        "profileName": "方案名称 ($name)",
+        "profileNameDesc": "显示在配置方案切换器中的可选名称。",
+        "profileNamePlaceholder": "例如 Work、本地",
+        "model": "默认模型",
+        "modelDesc": "智能体未单独指定模型时使用的默认模型（provider/model）。",
+        "smallModel": "轻量 / 标题模型",
+        "smallModelDesc": "用于生成会话标题的可选轻量模型。",
+        "defaultAgent": "默认智能体",
+        "defaultAgentDesc": "新建会话默认选用的智能体（默认为 build）。",
+        "compactionHeading": "上下文压缩",
+        "compactionAuto": "自动压缩",
+        "compactionAutoDesc": "上下文达到阈值时自动压缩对话。",
+        "compactionRecommend": "建议压缩点",
+        "compactionRecommendDesc": "比例（0–1，默认 0.6）或绝对词元数（> 1），报告给 context_window 工具。",
+        "compactionThreshold": "自动压缩阈值",
+        "compactionThresholdDesc": "触发自动压缩的比例（0–1，默认 0.9）或绝对词元数（> 1）。",
+        "runtimeHeading": "运行时与媒体",
+        "retryMaxDelay": "最大重试间隔（秒）",
+        "retryMaxDelayDesc": "两次重试之间的最长等待秒数（默认 600 秒）。",
+        "imagesAutoResize": "自动缩放图片",
+        "imagesAutoResizeDesc": "发送给模型前自动缩小并压缩大图。",
+        "tuiHeading": "界面默认值 (tui)",
+        "tuiSidebar": "默认显示侧边栏",
+        "tuiThinking": "默认展开思考块",
+        "tuiDetails": "默认展开工具详情",
+        "providerFilterHeading": "提供商过滤",
+        "enabledProviders": "仅启用的提供商",
+        "enabledProvidersDesc": "非空时仅加载列表中的提供商 ID。",
+        "disabledProviders": "禁用的提供商",
+        "disabledProvidersDesc": "不加载的提供商 ID 列表。"
+      },
+      "providers": {
+        "empty": "此配置文件尚未添加提供商。",
+        "addProvider": "添加提供商",
+        "presetLabel": "预设",
+        "providerIdLabel": "提供商 ID",
+        "providerIdPlaceholder": "例如 openai、my-gateway",
+        "displayName": "显示名称",
+        "npmPackage": "SDK 包 (npm)",
+        "apiKind": "API 协议",
+        "baseUrl": "Base URL",
+        "apiKey": "API 密钥",
+        "apiKeyDesc": "建议使用 {'{'}env:VAR{'}'} 或 {'{'}file:path{'}'}，避免在 ref.json 中明文保存密钥。",
+        "envVars": "回退环境变量 (env)",
+        "envVarsDesc": "未设置 apiKey 时按顺序读取的环境变量名。",
+        "setCacheKey": "发送缓存键 (setCacheKey)",
+        "chunkTimeout": "流分块超时（毫秒）",
+        "headers": "自定义 HTTP 请求头",
+        "whitelist": "模型白名单",
+        "blacklist": "模型黑名单",
+        "modelsHeading": "模型列表",
+        "modelsEmpty": "此提供商下尚未定义模型。",
+        "suggestedModels": "快速添加：",
+        "addModel": "添加模型",
+        "modelKeyPlaceholder": "模型键名（例如 gpt-5）",
+        "wireId": "请求模型 ID (id)",
+        "modelDisabled": "禁用",
+        "attachment": "支持图片输入 (attachment)",
+        "reasoning": "支持推理 / 思考 (reasoning)",
+        "contextLimit": "上下文窗口（词元）",
+        "outputLimit": "最大输出（词元）",
+        "compactLimit": "建议压缩点（词元）",
+        "thresholdLimit": "自动压缩阈值",
+        "temperature": "采样温度 (temperature)",
+        "topP": "核采样 (top_p)",
+        "variantsHeading": "变体 (variants)",
+        "addVariant": "添加变体",
+        "variantNamePlaceholder": "变体名称（例如 high）",
+        "variantOptions": "变体选项（JSON 对象）",
+        "variantInvalidJson": "必须是合法的 JSON 对象"
+      },
+      "agents": {
+        "builtinHeading": "内置智能体",
+        "customHeading": "自定义智能体",
+        "customEmpty": "尚未定义自定义智能体。",
+        "customized": "已自定义",
+        "resetOverride": "重置覆盖",
+        "addAgent": "添加自定义智能体",
+        "agentNamePlaceholder": "智能体名称（例如 reviewer）",
+        "description": "描述",
+        "mode": "模式",
+        "model": "覆盖模型",
+        "variant": "默认变体",
+        "color": "强调色",
+        "creatable": "可选择 / 可创建",
+        "canSpawn": "允许创建子会话",
+        "hidden": "在界面中隐藏",
+        "disable": "禁用此智能体",
+        "prompt": "系统提示词 (prompt)",
+        "promptPlaceholder": "此智能体的附加系统指令…",
+        "permission": "智能体专属权限",
+        "delay": "智能体专属工具延迟"
+      },
+      "permissions": {
+        "globalPermission": "全局工具权限",
+        "globalPermissionDesc": "按顺序匹配，最后一条匹配的规则生效；智能体规则优先于全局规则。",
+        "globalDelay": "工具执行前延迟",
+        "globalDelayDesc": "运行匹配工具前等待指定秒数（按一次 Esc 可取消）。",
+        "delayToolPlaceholder": "工具匹配（如 bash、delete、*）",
+        "delaySecondsPlaceholder": "秒数",
+        "addDelay": "添加延迟规则",
+        "emptyDelays": "未配置工具延迟规则"
+      },
+      "mcp": {
+        "empty": "尚未配置 MCP 服务器。",
+        "addLocal": "添加本地服务器",
+        "addRemote": "添加远程服务器",
+        "serverNamePlaceholder": "服务器名称（例如 github）",
+        "type": "传输类型",
+        "typeLocal": "本地 (stdio)",
+        "typeRemote": "远程 (HTTP / SSE)",
+        "enabled": "启用",
+        "timeout": "超时时间（毫秒）",
+        "command": "启动命令与参数",
+        "commandPlaceholder": "参数…",
+        "pasteCommand": "粘贴完整命令行",
+        "pasteCommandPlaceholder": "例如 npx -y {'@'}modelcontextprotocol/server-filesystem /tmp",
+        "splitCommand": "拆分为参数列表",
+        "cwd": "工作目录 (cwd)",
+        "environment": "环境变量 (environment)",
+        "url": "服务器 URL",
+        "headers": "HTTP 请求头"
+      },
+      "commands": {
+        "commandsHeading": "自定义斜杠命令",
+        "commandsEmpty": "尚未定义自定义斜杠命令。",
+        "addCommand": "添加命令",
+        "commandNamePlaceholder": "命令名称（不含 /）",
+        "description": "描述",
+        "agent": "使用智能体",
+        "model": "使用模型",
+        "template": "提示词模板 (template)",
+        "templateDesc": "支持 $ARGUMENTS 及位置参数 $1…$9 占位符。",
+        "instructionsHeading": "附加指令文件 (instructions)",
+        "instructionsDesc": "附加到指令中的文件路径或通配符（相对于配置目录或项目根目录）。",
+        "instructionsPlaceholder": "例如 CONTRIBUTING.md、docs/rules/*.md",
+        "skillsHeading": "附加技能目录 (skills.paths)",
+        "skillsDesc": "扫描技能定义的附加目录路径。",
+        "skillsPlaceholder": "例如 ~/.ref/skills、./skills"
+      }
     }
   }
 }

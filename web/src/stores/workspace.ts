@@ -85,6 +85,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const focusedId = computed(() =>
     mode.value === 'single' ? currentId.value : (zoomedId.value ?? tileFocusId.value),
   )
+  const effectiveCwd = computed(
+    () =>
+      (focusedId.value ? infoOf(focusedId.value)?.cwd : undefined) ??
+      current.value?.info?.cwd ??
+      (cwd.value || undefined),
+  )
 
   watch(currentId, (id) => writeLocation({ sessionId: id }))
   watch(mode, (value) => writeLocation({ split: value === 'split' }))
@@ -235,7 +241,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const info = await connection.getApi().setCwd(id, path)
     showInfo(info)
     cwd.value = info.cwd // new sessions of this window start there too
-    await connection.loadConfig()
+    await connection.loadConfig(info.cwd)
   }
 
   async function setModel(id: string, model: ModelRef): Promise<void> {
@@ -285,8 +291,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return connection.getApi().peerCommand(sessionId, command, args)
   }
 
-  function listDirs(folder: string): Promise<{ path: string; dirs: string[] }> {
-    return connection.getApi().listDirs(folder)
+  function listDirs(
+    folder: string,
+    options?: { cwd?: string; includeFiles?: boolean },
+  ): Promise<{ path: string; dirs: string[]; files: string[] }> {
+    return connection.getApi().listDirs(folder, options)
   }
 
   // Sessions of one directory (or all), newest first. Includes the live ones.
@@ -420,7 +429,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function onConnected(isReconnect: boolean, start: Startup): Promise<void> {
     const api = connection.getApi()
     if (isReconnect) {
-      await connection.loadConfig()
+      await connection.loadConfig(effectiveCwd.value)
       const sessions = mode.value === 'split' ? await api.watchAll(true) : await api.listSessions()
       setLive(sessions)
       // A session closed while the connection was down never sent its `closed` event.
@@ -432,7 +441,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return
     }
     cwd.value = start.cwd ?? connection.hello?.cwd ?? ''
-    await connection.loadConfig()
+    await connection.loadConfig(effectiveCwd.value)
     setLive(await api.listSessions())
     void refreshHistory().catch(notices.pushError)
     await openRequested(start.sessionId)
@@ -461,6 +470,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     tileIds,
     visibleSessionIds,
     cwd,
+    effectiveCwd,
     chat,
     infoOf,
     onGone,

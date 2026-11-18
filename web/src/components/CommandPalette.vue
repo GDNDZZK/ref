@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The command palette (CommandPalette.qml): search the commands, run one. A command that takes an
 // argument turns the search row into an argument prompt.
-import { computed, nextTick, onMounted, ref, useTemplateRef } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { rankByQuery } from '../commands/fuzzy.ts'
 import { labelText } from '../commands/label.ts'
@@ -42,8 +42,21 @@ const ICONS: Record<string, IconKey> = {
   peers: 'at-sign-16',
   mcp: 'mcp-16',
   help: 'info-16',
+  config: 'file-text-16',
+  reload: 'retry-16',
 }
 
+// Commands whose empty-arg invocation opens a dedicated picker/input dialog instead of an inline prompt.
+const DIRECT_DIALOG_COMMANDS = new Set([
+  'cd',
+  'export',
+  'rename',
+  'variant',
+  'close-session',
+  'models',
+  'agents',
+  'sessions',
+])
 // Custom command names come from the user: only the table's own keys count.
 function iconOf(key: string): IconKey {
   return Object.hasOwn(ICONS, key) ? ICONS[key]! : DEFAULT_ICON
@@ -84,12 +97,22 @@ const shown = computed<Entry[]>(() => {
 })
 const { selected, move } = usePickSelection(shown)
 
-onMounted(() => input.value?.focus())
+onMounted(() => {
+  dialogs.setCloseGuard((source) => {
+    if (source === 'escape' && chosen.value) {
+      backToList()
+      return false
+    }
+    return true
+  })
+  input.value?.focus()
+})
+onBeforeUnmount(() => dialogs.setCloseGuard(undefined))
 
 // Runs the command. Commands that open a dialog replace the palette; for the others it closes here.
-function run(command: Command, args = ''): void {
+function run(command: Command, args = '', fromPalette = false): void {
   const opened = dialogs.current
-  const done = commands.run(command.id, args)
+  const done = fromPalette ? commands.runPalette(command.id) : commands.run(command.id, args)
   if (dialogs.current === opened) dialogs.close()
   done.catch(notices.pushError)
 }
@@ -97,7 +120,10 @@ function run(command: Command, args = ''): void {
 function pick(key: string | undefined): void {
   const entry = shown.value.find((candidate) => candidate.key === key)
   if (!entry) return
-  if (!entry.command.args) return run(entry.command)
+  if (!entry.command.args || DIRECT_DIALOG_COMMANDS.has(entry.command.id)) {
+    run(entry.command, '', true)
+    return
+  }
   chosen.value = entry.command
   query.value = ''
   void nextTick(() => input.value?.focus())
@@ -106,6 +132,7 @@ function pick(key: string | undefined): void {
 function backToList(): void {
   chosen.value = undefined
   query.value = ''
+  void nextTick(() => input.value?.focus())
 }
 
 function clearQuery(): void {

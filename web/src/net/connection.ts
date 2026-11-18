@@ -210,6 +210,7 @@ export class RefConnection {
       case 'sessions':
       case 'toast':
       case 'notify':
+      case 'config_changed':
         for (const listener of [...this.frameListeners]) this.callListener(() => listener(frame))
         return
       default:

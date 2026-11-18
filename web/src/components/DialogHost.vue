@@ -9,6 +9,7 @@ import type { DialogRequest } from '../stores/dialogs.ts'
 import { useWorkspaceStore } from '../stores/workspace.ts'
 import CommandPalette from './CommandPalette.vue'
 import AgentsDialog from './dialogs/AgentsDialog.vue'
+import ConfigDialog from './dialogs/ConfigDialog.vue'
 import ConfirmDialog from './dialogs/ConfirmDialog.vue'
 import ExportDialog from './dialogs/ExportDialog.vue'
 import HelpDialog from './dialogs/HelpDialog.vue'
@@ -46,9 +47,10 @@ dialogs.setOnClosed(() => {
 })
 
 function onKeydown(event: KeyboardEvent): void {
+  if (event.defaultPrevented) return
   if (event.key === Key.Escape && dialogs.current) {
     event.preventDefault()
-    dialogs.close()
+    dialogs.requestClose('escape')
   }
 }
 
@@ -58,14 +60,19 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
 <template>
   <Transition name="scrim" @after-leave="shown = undefined">
-    <div v-if="dialogs.current" class="scrim" @mousedown.self="dialogs.close()" @wheel="containScrimWheel">
+    <div
+      v-if="dialogs.current"
+      class="scrim"
+      @mousedown.self="dialogs.requestClose('scrim')"
+      @wheel="containScrimWheel"
+    >
       <Transition name="panel">
         <div v-if="shown" :key="panelKey" class="panel-slot" :class="{ top: shown.kind === 'palette' }">
           <CommandPalette v-if="shown.kind === 'palette'" />
           <ModelsDialog v-else-if="shown.kind === 'models'" :session-id="shown.sessionId" />
           <AgentsDialog v-else-if="shown.kind === 'agents'" :session-id="shown.sessionId" />
           <VariantsDialog v-else-if="shown.kind === 'variants'" :session-id="shown.sessionId" />
-          <SessionsDialog v-else-if="shown.kind === 'sessions'" />
+          <SessionsDialog v-else-if="shown.kind === 'sessions'" :mode="shown.mode" />
           <PathDialog v-else-if="shown.kind === 'newSession'" mode="newSession" />
           <PathDialog v-else-if="shown.kind === 'cd'" mode="cd" :session-id="shown.sessionId" />
           <RenameDialog v-else-if="shown.kind === 'rename'" :session-id="shown.sessionId" />
@@ -84,6 +91,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
           />
           <HelpDialog v-else-if="shown.kind === 'help'" />
           <SettingsDialog v-else-if="shown.kind === 'settings'" />
+          <ConfigDialog v-else-if="shown.kind === 'config'" :section="shown.section" />
         </div>
       </Transition>
     </div>
