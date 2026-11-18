@@ -86,6 +86,7 @@ Item {
 		const components = {
 			[DialogId.palette]: paletteDialog,
 			[DialogId.settings]: settings,
+			[DialogId.config]: configDialog,
 			[DialogId.sessions]: sessions,
 			[DialogId.models]: models,
 			[DialogId.agents]: agents,
@@ -109,6 +110,7 @@ Item {
 
 	Component { id: paletteDialog; CommandPalette {} }
 	Component { id: settings; SettingsDialog {} }
+	Component { id: configDialog; ConfigDialog {} }
 	Component { id: sessions; SessionsDialog {} }
 	Component { id: models; ModelsDialog {} }
 	Component { id: agents; AgentsDialog {} }

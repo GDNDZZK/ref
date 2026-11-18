@@ -1,7 +1,157 @@
 // The window-wide commands: what each one of the CommandRegistry does.
 #include "app/workspace.h"
 
+#include <algorithm>
+#include <optional>
+
 using namespace Qt::StringLiterals;
+
+namespace
+{
+
+QString unquote(const QString& text)
+{
+	const QString trimmed = text.trimmed();
+	if(trimmed.size() >= 2 && ((trimmed.startsWith(u'"') && trimmed.endsWith(u'"')) || (trimmed.startsWith(u'\'') && trimmed.endsWith(u'\''))))
+	{
+		return trimmed.mid(1, trimmed.size() - 2);
+	}
+	return trimmed;
+}
+
+QStringList splitArguments(const QString& text)
+{
+	QStringList tokens;
+	qsizetype i = 0;
+	const qsizetype n = text.size();
+	while(i < n)
+	{
+		while(i < n && text[i].isSpace())
+		{
+			++i;
+		}
+		if(i >= n)
+		{
+			break;
+		}
+		if(text[i] == u'"' || text[i] == u'\'')
+		{
+			const QChar quote = text[i++];
+			const qsizetype start = i;
+			while(i < n && text[i] != quote)
+			{
+				++i;
+			}
+			const QString token = text.mid(start, i - start).trimmed();
+			if(!token.isEmpty())
+			{
+				tokens.append(token);
+			}
+			if(i < n)
+			{
+				++i;
+			}
+			continue;
+		}
+		const qsizetype start = i;
+		while(i < n && !text[i].isSpace())
+		{
+			++i;
+		}
+		tokens.append(text.mid(start, i - start));
+	}
+	return tokens;
+}
+
+const refgui::proto::SessionInfo* findSessionIn(const QList<refgui::proto::SessionInfo>& sessions, const QString& raw)
+{
+	const QString wanted = unquote(raw);
+	if(wanted.isEmpty())
+	{
+		return nullptr;
+	}
+	for(const refgui::proto::SessionInfo& info : sessions)
+	{
+		if(info.id == wanted || info.name == wanted)
+		{
+			return &info;
+		}
+	}
+	for(const refgui::proto::SessionInfo& info : sessions)
+	{
+		if(info.id.compare(wanted, Qt::CaseInsensitive) == 0 || info.name.compare(wanted, Qt::CaseInsensitive) == 0)
+		{
+			return &info;
+		}
+	}
+	for(const refgui::proto::SessionInfo& info : sessions)
+	{
+		if(info.title == wanted)
+		{
+			return &info;
+		}
+	}
+	for(const refgui::proto::SessionInfo& info : sessions)
+	{
+		if(info.title.compare(wanted, Qt::CaseInsensitive) == 0)
+		{
+			return &info;
+		}
+	}
+	return nullptr;
+}
+
+const refgui::proto::ModelInfo* findModelIn(const QList<refgui::proto::ModelInfo>& models, const QString& spec, const QString& preferredProvider)
+{
+	for(const refgui::proto::ModelInfo& model : models)
+	{
+		if(model.provider + u"/"_s + model.id == spec)
+		{
+			return &model;
+		}
+	}
+	for(const refgui::proto::ModelInfo& model : models)
+	{
+		if((model.provider + u"/"_s + model.id).compare(spec, Qt::CaseInsensitive) == 0)
+		{
+			return &model;
+		}
+	}
+	const auto pickByField = [&](auto matches) -> const refgui::proto::ModelInfo* {
+		const refgui::proto::ModelInfo* fallback = nullptr;
+		for(const refgui::proto::ModelInfo& model : models)
+		{
+			if(!matches(model))
+			{
+				continue;
+			}
+			if(model.provider == preferredProvider)
+			{
+				return &model;
+			}
+			if(fallback == nullptr)
+			{
+				fallback = &model;
+			}
+		}
+		return fallback;
+	};
+	if(const auto* exactId = pickByField([&](const refgui::proto::ModelInfo& m) { return m.id == spec; }))
+	{
+		return exactId;
+	}
+	if(const auto* ciId = pickByField([&](const refgui::proto::ModelInfo& m) { return m.id.compare(spec, Qt::CaseInsensitive) == 0; }))
+	{
+		return ciId;
+	}
+	if(const auto* exactName = pickByField([&](const refgui::proto::ModelInfo& m) { return m.name == spec; }))
+	{
+		return exactName;
+	}
+	return pickByField([&](const refgui::proto::ModelInfo& m) { return m.name.compare(spec, Qt::CaseInsensitive) == 0; });
+}
+
+} // namespace
 
 void Workspace::updateCommandContext()
 {
@@ -69,10 +219,85 @@ void Workspace::registerCommands()
 		}
 		openDialog(u"new-in"_s);
 	});
-	on(u"sessions"_s, openDialogCommand(u"sessions"_s));
-	on(u"models"_s, dialogFor(u"models"_s));
-	on(u"agents"_s, dialogFor(u"agents"_s));
-	on(u"variant"_s, [this](const QString& args, const QString& sessionId) { setVariant(targetId(sessionId), args.trimmed()); });
+	on(u"sessions"_s, [this](const QString& args, const QString&) {
+		const QString wanted = args.trimmed();
+		if(wanted.isEmpty())
+		{
+			openDialog(u"sessions"_s);
+			return;
+		}
+		const QList<refgui::proto::SessionInfo> all = m_directory.allSessions();
+		if(const auto* found = findSessionIn(all, wanted))
+		{
+			openSession(found->id);
+			return;
+		}
+		toast(refgui::workspace::ToastLevel::Warn, tr("No session \"%1\".").arg(unquote(wanted)));
+	});
+	on(u"models"_s, argumentOrDialog(u"models"_s, [this](const QString& id, const QString& wanted) {
+		const qsizetype hash = wanted.lastIndexOf(u'#');
+		const QString spec = (hash >= 0 ? wanted.left(hash) : wanted).trimmed();
+		const std::optional<QString> explicitVariant = hash >= 0 ? std::optional<QString>(wanted.mid(hash + 1).trimmed()) : std::nullopt;
+		const auto* sessionInfo = m_directory.find(id);
+		const QString preferredProvider = sessionInfo ? sessionInfo->model.provider : QString();
+		const auto* matched = findModelIn(m_config.config().models, spec, preferredProvider);
+		if(matched == nullptr)
+		{
+			toast(refgui::workspace::ToastLevel::Warn, tr("Unknown model \"%1\".").arg(wanted));
+			return;
+		}
+		QString variant;
+		if(explicitVariant)
+		{
+			if(!explicitVariant->isEmpty() && explicitVariant->compare(u"default"_s, Qt::CaseInsensitive) != 0)
+			{
+				const auto it = std::ranges::find_if(matched->variants, [&](const QString& v) { return v.compare(*explicitVariant, Qt::CaseInsensitive) == 0; });
+				if(it == matched->variants.end())
+				{
+					toast(refgui::workspace::ToastLevel::Warn, tr("Model %1/%2 has no variant \"%3\".").arg(matched->provider, matched->id, *explicitVariant));
+					return;
+				}
+				variant = *it;
+			}
+		}
+		else if(sessionInfo && sessionInfo->model.variant && matched->variants.contains(*sessionInfo->model.variant))
+		{
+			variant = *sessionInfo->model.variant;
+		}
+		setModel(id, matched->provider, matched->id, variant);
+	}));
+	on(u"agents"_s, argumentOrDialog(u"agents"_s, [this](const QString& id, const QString& wanted) {
+		const auto& agents = m_config.config().agents;
+		auto it = std::ranges::find(agents, wanted, &refgui::proto::AgentInfo::name);
+		if(it == agents.end())
+		{
+			it = std::ranges::find_if(agents, [&](const refgui::proto::AgentInfo& a) { return a.name.compare(wanted, Qt::CaseInsensitive) == 0; });
+		}
+		if(it == agents.end())
+		{
+			toast(refgui::workspace::ToastLevel::Warn, tr("Unknown agent \"%1\".").arg(wanted));
+			return;
+		}
+		setAgent(id, it->name);
+	}));
+	on(u"variant"_s, argumentOrDialog(u"variants"_s, [this](const QString& id, const QString& wanted) {
+		if(wanted.compare(u"default"_s, Qt::CaseInsensitive) == 0)
+		{
+			clearVariant(id);
+			return;
+		}
+		QString resolved = wanted;
+		if(const auto* sessionInfo = m_directory.find(id))
+		{
+			const QStringList variants = m_config.variantsOf(sessionInfo->model.provider, sessionInfo->model.model);
+			const auto it = std::ranges::find_if(variants, [&](const QString& v) { return v.compare(wanted, Qt::CaseInsensitive) == 0; });
+			if(it != variants.end())
+			{
+				resolved = *it;
+			}
+		}
+		setVariant(id, resolved);
+	}));
 	on(u"compact"_s, [this](const QString&, const QString& sessionId) { compact(targetId(sessionId)); });
 	on(u"undo"_s, [this](const QString&, const QString& sessionId) { runOnSession(sessionId, &ChatSession::undoLast); });
 	on(u"copy"_s, [this](const QString&, const QString& sessionId) { runOnSession(sessionId, &ChatSession::copyLastReply); });
@@ -90,15 +315,28 @@ void Workspace::registerCommands()
 			openDialog(u"sessions"_s, {{u"mode"_s, u"close"_s}});
 			return;
 		}
-		for(const refgui::proto::SessionInfo& info : m_directory.liveSessions())
+		const QList<refgui::proto::SessionInfo> live = m_directory.liveSessions();
+		if(const auto* single = findSessionIn(live, wanted))
 		{
-			if(info.id == wanted || info.name.compare(wanted, Qt::CaseInsensitive) == 0)
+			closeSession(single->id);
+			return;
+		}
+		QSet<QString> closedIds;
+		for(const QString& token : splitArguments(wanted))
+		{
+			if(const auto* found = findSessionIn(live, token))
 			{
-				closeSession(info.id);
-				return;
+				if(!closedIds.contains(found->id))
+				{
+					closedIds.insert(found->id);
+					closeSession(found->id);
+				}
+			}
+			else
+			{
+				toast(refgui::workspace::ToastLevel::Warn, tr("No live session \"%1\".").arg(token));
 			}
 		}
-		toast(refgui::workspace::ToastLevel::Warn, tr("No live session \"%1\".").arg(wanted));
 	});
 
 	const auto peers = [this](const QString& command, const QString& tab) {
@@ -139,6 +377,8 @@ void Workspace::registerCommands()
 		refreshMcp();
 		openDialog(u"mcp"_s);
 	});
+	on(u"reload"_s, [this](const QString&, const QString&) { reloadConfig(); });
+	on(u"config"_s, openDialogCommand(u"config"_s));
 	on(u"help"_s, openDialogCommand(u"help"_s));
 	on(u"settings"_s, openDialogCommand(u"settings"_s));
 	on(u"palette"_s, openDialogCommand(u"palette"_s));

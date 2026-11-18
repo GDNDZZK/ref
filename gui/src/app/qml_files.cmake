@@ -86,6 +86,13 @@ set(REFGUI_APP_QML_NAMES
 	PointerMoveGuard.qml
 	CommandPalette.qml
 	SettingsDialog.qml
+	ConfigDialog.qml
+	ConfigGeneralSection.qml
+	ConfigProvidersSection.qml
+	ConfigAgentsSection.qml
+	ConfigPermissionsSection.qml
+	ConfigMcpSection.qml
+	ConfigCommandsSection.qml
 	SessionsDialog.qml
 	ModelsDialog.qml
 	AgentsDialog.qml

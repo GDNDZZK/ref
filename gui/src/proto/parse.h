@@ -41,8 +41,11 @@ Parsed<PromptResult> parsePromptResult(const QJsonObject& result);             /
 Parsed<MessagesPage> parseMessagesResult(const QJsonObject& result);           // messages
 Parsed<ImageData> parseImageResult(const QJsonObject& result);                 // get_image
 Parsed<ServerConfig> parseConfigResult(const QJsonObject& result);             // get_config
+Parsed<ReloadConfigResult> parseReloadConfigResult(const QJsonObject& result); // reload_config
+Parsed<ConfigFilesInfo> parseConfigFilesResult(const QJsonObject& result);     // *_config_file(s)
 Parsed<QList<McpServerStatus>> parseMcpResult(const QJsonObject& result);      // mcp_status
 Parsed<DirListing> parseDirsResult(const QJsonObject& result);                 // list_dirs
+Parsed<QStringList> parseBinariesResult(const QJsonObject& result);            // list_binaries
 Parsed<QString> parseTextResult(const QJsonObject& result);                    // peer_command, expand_command
 Parsed<QString> parsePathResult(const QJsonObject& result);                    // export
 Parsed<RemovedPrompt> parseRemovedPromptResult(const QJsonObject& result);     // remove_queued

@@ -23,6 +23,14 @@ struct BackendConfigType
 	QML_UNCREATABLE("Owned by Workspace.")
 };
 
+struct ConfigEditorControllerType
+{
+	Q_GADGET
+	QML_FOREIGN(refgui::workspace::ConfigEditorController)
+	QML_NAMED_ELEMENT(ConfigEditorController)
+	QML_UNCREATABLE("Owned by Workspace.")
+};
+
 struct SessionListType
 {
 	Q_GADGET

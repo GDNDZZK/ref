@@ -213,14 +213,6 @@ Item {
 		onKeyOffered: event => event.accepted = pane.keysEnabled && pane.session.answerKey(event.key, event.text, event.modifiers, event.isAutoRepeat)
 	}
 
-	// The input box's remarks are the window's toasts.
-	Connections {
-		target: pane.session.composer
-		function onToastRequested(level, text) {
-			Workspace.showToast(level, text)
-		}
-	}
-
 	Lightbox {
 		id: lightbox
 		onClosed: pane.focusInput()

@@ -68,6 +68,8 @@ private slots:
 	void slashListHidesUnavailableAndPaletteOnlyCommands();
 	void customCommandsRunThroughTheRunner();
 	void keyCapsSplitTheShortcut();
+	void singularAliasesAndCaseInsensitiveSlashesWork();
+	void typoSuggestionsAndSingleSlashTokenDetection();
 };
 
 void TestCommandRegistry::idsShortcutsAndSlashNamesAreUnique()
@@ -228,6 +230,42 @@ void TestCommandRegistry::keyCapsSplitTheShortcut()
 #ifndef Q_OS_MACOS
 	QCOMPARE(CommandRegistry::keyCaps(u"Ctrl+Shift+N"_s), (QStringList{u"Ctrl"_s, u"Shift"_s, u"N"_s}));
 #endif
+}
+
+void TestCommandRegistry::singularAliasesAndCaseInsensitiveSlashesWork()
+{
+	Fixture f;
+	QStringList custom;
+	f.registry.setCustomRunner([&](const QString& name, const QString& args, const QString& sessionId) { custom << u"%1|%2|%3"_s.arg(name, args, sessionId); });
+	f.registry.setCustomCommands({{.name = u"Deploy"_s, .description = u"Deploy build"_s, .source = u"config"_s}});
+
+	QVERIFY(f.registry.runSlash(u"/model anthropic/claude-sonnet-4"_s));
+	QVERIFY(f.registry.runSlash(u"/MODEL openai/gpt-5"_s));
+	QVERIFY(f.registry.runSlash(u"/agent plan"_s));
+	QVERIFY(f.registry.runSlash(u"/AGENT build"_s));
+	QVERIFY(f.registry.runSlash(u"/CLEAR"_s));
+	QVERIFY(f.registry.runSlash(u"/ReLoAd"_s));
+	QVERIFY(f.registry.runSlash(u"/deploy staging"_s));
+
+	QCOMPARE(f.ran, (QStringList{u"models|anthropic/claude-sonnet-4|"_s, u"models|openai/gpt-5|"_s, u"agents|plan|"_s, u"agents|build|"_s, u"new||"_s, u"reload||"_s}));
+	QCOMPARE(custom, (QStringList{u"Deploy|staging|"_s}));
+}
+
+void TestCommandRegistry::typoSuggestionsAndSingleSlashTokenDetection()
+{
+	QVERIFY(CommandRegistry::isSingleSlashToken(u"/modles"_s));
+	QVERIFY(CommandRegistry::isSingleSlashToken(u"  /close-session_1  "_s));
+	QVERIFY(!CommandRegistry::isSingleSlashToken(u"/"_s));
+	QVERIFY(!CommandRegistry::isSingleSlashToken(u"/usr/bin/env"_s));
+	QVERIFY(!CommandRegistry::isSingleSlashToken(u"/unknown two words"_s));
+	QVERIFY(!CommandRegistry::isSingleSlashToken(u"hello /models"_s));
+
+	QCOMPARE(CommandRegistry::suggestSlashFrom(u"modles"_s), u"models"_s);
+	QCOMPARE(CommandRegistry::suggestSlashFrom(u"/relod"_s), u"reload"_s);
+	QCOMPARE(CommandRegistry::suggestSlashFrom(u"halp"_s), u"help"_s);
+	QCOMPARE(CommandRegistry::suggestSlashFrom(u"sess"_s), u"sessions"_s);
+	QCOMPARE(CommandRegistry::suggestSlashFrom(u"reveiw"_s, {{.name = u"review"_s, .description = u"Review"_s, .source = u"config"_s}}), u"review"_s);
+	QCOMPARE(CommandRegistry::suggestSlashFrom(u"zzzzzz"_s), QString());
 }
 
 QTEST_GUILESS_MAIN(TestCommandRegistry)

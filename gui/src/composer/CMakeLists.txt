@@ -2,6 +2,8 @@
 qt_add_library(refgui_composer STATIC
 	attachment_model.cpp
 	attachment_model.h
+	completion_item_model.cpp
+	completion_item_model.h
 	composer_model.cpp
 	composer_model.h
 	file_model.cpp

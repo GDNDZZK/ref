@@ -50,8 +50,12 @@ FocusScope {
 			close()
 	}
 
+	readonly property var dialogCommands: [
+		"sessions", "models", "agents", "variant", "rename", "cd", "close-session", "export"
+	]
+
 	function choose(command) {
-		if (command.hint === "") {
+		if (command.hint === "" || dialogCommands.includes(command.commandId)) {
 			run(command.commandId, "")
 			return
 		}
@@ -75,7 +79,15 @@ FocusScope {
 		input.forceActiveFocus()
 	}
 	onChosenChanged: rebuild()
-	Keys.onEscapePressed: close()
+	Keys.onEscapePressed: event => {
+		if (askingArgument) {
+			chosen = null
+			input.text = ""
+			event.accepted = true
+			return
+		}
+		close()
+	}
 
 	// A click outside the panel closes the launcher.
 	TapHandler { onTapped: launcher.close() }
@@ -176,6 +188,12 @@ FocusScope {
 				Keys.onReturnPressed: launcher.submit()
 				Keys.onEnterPressed: launcher.submit()
 				Keys.onPressed: event => {
+					if (event.key === Qt.Key_Escape && launcher.askingArgument) {
+						launcher.chosen = null
+						text = ""
+						event.accepted = true
+						return
+					}
 					if (event.key === Qt.Key_Backspace && text === "" && launcher.askingArgument) {
 						launcher.chosen = null
 						event.accepted = true

@@ -42,6 +42,8 @@ public:
 	// Every live session, newest first.
 	const QList<proto::SessionInfo>& liveSessions() const { return m_liveSessions; }
 
+	// Every live session followed by every non-live persisted session.
+	QList<proto::SessionInfo> allSessions() const;
 	// Asks the backend again. The history is fetched shortly after the last call.
 	void refreshHistory();
 	// Whether the persisted sessions have been listed once.
@@ -72,7 +74,7 @@ public:
 	// The most recent persisted session in `cwd`, if there is one.
 	QCoro::Task<Result<std::optional<proto::SessionInfo>>> newestIn(QString cwd);
 	// The directories in `path`, for choosing where a session runs.
-	QCoro::Task<Result<proto::DirListing>> listDirs(QString path);
+	QCoro::Task<Result<proto::DirListing>> listDirs(QString path, std::optional<QString> cwd = {}, bool includeFiles = false);
 	// Follows the events of every live session (split view) or not. Sent again after a
 	// reconnect, since the new connection knows nothing of the old subscription.
 	QCoro::Task<Result<void>> setWatchAll(bool enabled);

@@ -148,6 +148,27 @@ private slots:
 		QVERIFY(!result);
 		QCOMPARE(result.error().message, u"Session not found"_s);
 	}
+
+	void listDirsAndBinariesUseV5Fields()
+	{
+		Connection dirsConn({{u"path"_s, u"/work/sub"_s}, {u"dirs"_s, QJsonArray{u"src"_s}}, {u"files"_s, QJsonArray{u"Cargo.toml"_s}}});
+		const auto listing = await(dirsConn.client.listDirs(u"."_s, u"/work/sub"_s, true)).value();
+		QVERIFY(listing);
+		QCOMPARE(listing->path, u"/work/sub"_s);
+		QCOMPARE(listing->dirs, (QStringList{u"src"_s}));
+		QCOMPARE(listing->files, (QStringList{u"Cargo.toml"_s}));
+		QCOMPARE(dirsConn.last().value(u"op"_s).toString(), u"list_dirs"_s);
+		QCOMPARE(dirsConn.last().value(u"cwd"_s).toString(), u"/work/sub"_s);
+		QCOMPARE(dirsConn.last().value(u"include_files"_s).toBool(), true);
+
+		Connection binConn({{u"binaries"_s, QJsonArray{u"cargo"_s, u"cat"_s}}});
+		const auto bins = await(binConn.client.listBinaries(u"ca"_s, 50)).value();
+		QVERIFY(bins);
+		QCOMPARE(*bins, (QStringList{u"cargo"_s, u"cat"_s}));
+		QCOMPARE(binConn.last().value(u"op"_s).toString(), u"list_binaries"_s);
+		QCOMPARE(binConn.last().value(u"query"_s).toString(), u"ca"_s);
+		QCOMPARE(binConn.last().value(u"limit"_s).toInt(), 50);
+	}
 };
 
 QTEST_GUILESS_MAIN(TestComposerRequests)

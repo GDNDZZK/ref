@@ -6,9 +6,9 @@ SessionDialog {
 	id: dialog
 
 	function exportNow() {
-		Workspace.exportTranscript(sessionId, field.text.trim(), replyWhileOpen((ok, result) => {
+		Workspace.exportTranscript(sessionId, pathField.text.trim(), replyWhileOpen((ok, result) => {
 			if (!ok) {
-				field.errorText = result
+				pathField.errorText = result
 				return
 			}
 			Workspace.showToast(ToastLevel.info, qsTr("Exported to %1").arg(result))
@@ -39,14 +39,16 @@ SessionDialog {
 			font.pixelSize: Theme.smallFontSize
 			wrapMode: Text.Wrap
 		}
-		DialogField {
-			id: field
+		PathField {
+			id: pathField
 			width: parent.width
+			cwd: Workspace.info(dialog.sessionId).cwd ?? Workspace.effectiveCwd
+			includeFiles: true
 			text: "ref-session-" + dialog.sessionId + ".md"
 			placeholderText: qsTr("Path")
 			onAccepted: dialog.exportNow()
-			onEdited: errorText = ""
-			Component.onCompleted: selectAll()
+			onTextChanged: errorText = ""
+			Component.onCompleted: select()
 		}
 	}
 }

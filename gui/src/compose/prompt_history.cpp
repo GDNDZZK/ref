@@ -110,27 +110,30 @@ HistoryBrowser::HistoryBrowser(const PromptHistory& history)
 {
 }
 
-std::optional<QString> HistoryBrowser::previous(const QString& current)
+std::optional<QString> HistoryBrowser::previous(const QString& current, bool shellOnly)
 {
 	const QStringList& items = m_history.items();
 	if(items.isEmpty())
 	{
 		return std::nullopt;
 	}
-	if(!m_position)
+	const bool wantShell = m_position ? m_shellOnly : shellOnly;
+	const auto matches = [&](const QString& item) { return !wantShell || item.startsWith(u'!'); };
+	const qsizetype startFrom = m_position ? *m_position - 1 : items.size() - 1;
+	for(qsizetype idx = startFrom; idx >= 0; --idx)
 	{
-		m_draft = current;
-		m_position = items.size() - 1;
+		if(matches(items.at(idx)))
+		{
+			if(!m_position)
+			{
+				m_draft = current;
+				m_shellOnly = shellOnly;
+			}
+			m_position = idx;
+			return items.at(idx);
+		}
 	}
-	else if(*m_position == 0)
-	{
-		return std::nullopt;
-	}
-	else
-	{
-		--*m_position;
-	}
-	return items.at(*m_position);
+	return std::nullopt;
 }
 
 std::optional<QString> HistoryBrowser::next()
@@ -139,13 +142,19 @@ std::optional<QString> HistoryBrowser::next()
 	{
 		return std::nullopt;
 	}
-	if(*m_position + 1 >= m_history.items().size())
+	const QStringList& items = m_history.items();
+	const auto matches = [&](const QString& item) { return !m_shellOnly || item.startsWith(u'!'); };
+	for(qsizetype idx = *m_position + 1; idx < items.size(); ++idx)
 	{
-		m_position.reset();
-		return std::exchange(m_draft, QString());
+		if(matches(items.at(idx)))
+		{
+			m_position = idx;
+			return items.at(idx);
+		}
 	}
-	++*m_position;
-	return m_history.items().at(*m_position);
+	m_position.reset();
+	m_shellOnly = false;
+	return std::exchange(m_draft, QString());
 }
 
 } // namespace refgui::compose

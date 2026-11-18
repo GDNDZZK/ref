@@ -61,6 +61,9 @@ SessionDialog {
 		id: list
 		width: parent.width
 		placeholderText: qsTr("Search models")
+		emptyText: Workspace.config.models.length === 0 ? qsTr("No models configured") : qsTr("Nothing found")
+		emptyActionText: Workspace.config.models.length === 0 ? qsTr("Open configuration…") : ""
+		onEmptyActionTriggered: Workspace.openDialog(DialogId.config)
 		sectionProperty: "providerName"
 		model: items
 		delegate: PickRow {
