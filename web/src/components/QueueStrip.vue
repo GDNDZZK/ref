@@ -88,11 +88,15 @@ const rows = computed<Row[]>(() =>
   --row-height: var(--queue-strip-queue-row-height);
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows var(--motion-standard) var(--motion-ease);
+  opacity: 0;
+  transition:
+    grid-template-rows var(--motion-standard) var(--motion-ease),
+    opacity var(--motion-quick) var(--motion-ease);
 }
 
 .queue.shown {
   grid-template-rows: 1fr;
+  opacity: 1;
 }
 
 .queue-inner {

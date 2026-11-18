@@ -4,8 +4,8 @@
 import { onScopeDispose, watch } from 'vue'
 import type { Ref } from 'vue'
 import { cssEasing } from './cssEasing.ts'
+import { prefersReducedMotion } from './reducedMotion.ts'
 import { motion } from '../theme/generated/motion.ts'
-
 export const PULSE_DIMMED = 0.5 // the opacity most pulses dim to
 
 interface PulseOptions {
@@ -21,6 +21,7 @@ export function usePulse(
   let loop: Animation | undefined
 
   function start(element: HTMLElement): void {
+    if (prefersReducedMotion()) return
     loop = element.animate([{ opacity: 1 }, { opacity: dimmed }, { opacity: 1 }], {
       duration: period,
       iterations: Infinity,
@@ -33,6 +34,7 @@ export function usePulse(
     const current = getComputedStyle(element).opacity
     loop?.cancel()
     loop = undefined
+    if (prefersReducedMotion()) return
     element.animate([{ opacity: current }, { opacity: 1 }], {
       duration: motion.standard,
       easing: cssEasing('--motion-ease'),

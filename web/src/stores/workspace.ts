@@ -13,7 +13,7 @@ import { ChatSession } from '../model/chatSession.ts'
 import { collapseWhitespace } from '../model/oneLine.ts'
 import type { EventFrame } from '../net/connection.ts'
 import { writeLocation } from '../net/location.ts'
-import { rowState } from '../shell/sessionRow.ts'
+import { isWorkingSession } from '../shell/sessionRow.ts'
 import { neighbor } from '../shell/tileLayout.ts'
 import type { Rect } from '../shell/tileLayout.ts'
 import type { Startup } from '../net/startup.ts'
@@ -116,13 +116,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   // Opens run one after the other. Of several quick clicks only the last one counts: the earlier
   // ones either do not start or undo their own attach, so no session stays attached by mistake.
   function openSession(id: string): Promise<void> {
-    if (mode.value === 'split') {
-      currentId.value = id
-      return leaveSplit()
-    }
     const mine = ++latestOpen
     latestOpenTarget = id
-    const run = openChain.then(() => openOne(id, mine))
+    const run = openChain.then(() => (mode.value === 'split' ? openFromSplit(id, mine) : openOne(id, mine)))
     openChain = run.catch(() => undefined)
     return run
   }
@@ -136,29 +132,78 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (!stillWanted) await session.detach()
       return
     }
+    if (session.info?.live) showInfo(session.info)
     const previousId = currentId.value
     await crossfade(() => (currentId.value = id), 'standard')
     if (previousId === undefined || previousId === id) return
     await chat(previousId).detach()
   }
 
+  async function openFromSplit(id: string, mine: number): Promise<void> {
+    if (mine !== latestOpen) return
+    const session = chat(id)
+    await session.setForeground(true)
+    if (mine !== latestOpen) {
+      const stillWanted = id === latestOpenTarget || id === currentId.value
+      if (!stillWanted) await session.detach()
+      return
+    }
+    if (session.info?.live) showInfo(session.info)
+    const previousId = currentId.value
+    currentId.value = id
+    mode.value = 'single'
+    zoomedId.value = undefined
+    tileFocusId.value = undefined
+    await connection.getApi().watchAll(false)
+    const others = [...chats.values()].filter(
+      (candidate) =>
+        candidate !== session &&
+        (candidate.attachment === 'watching' ||
+          (candidate.id === previousId && candidate.attachment !== 'detached')),
+    )
+    await Promise.all(others.map((candidate) => candidate.detach()))
+  }
+
   async function newSession(options: NewSessionOptions = {}): Promise<string> {
     const info = await connection.getApi().createSession(options.cwd ?? cwd.value, options)
+    cwd.value = info.cwd
     live.value = sortLive([...live.value.filter((session) => session.id !== info.id), info])
     await openSession(info.id)
     return info.id
   }
 
-  // A session is gone (closed here, by another client, or by the backend). When it was the open one,
-  // the oldest live session takes over; when none is left, a new one starts in the same directory.
+  async function detachCurrent(): Promise<void> {
+    latestOpen++
+    latestOpenTarget = undefined
+    if (mode.value === 'split') {
+      if (zoomedId.value) unzoom()
+      const previousId = currentId.value
+      if (!previousId) return
+      if (chat(previousId).attachment !== 'detached') await chat(previousId).detach()
+      currentId.value = undefined
+      await syncTiles()
+      return
+    }
+    const previousId = currentId.value
+    if (!previousId) return
+    await crossfade(() => (currentId.value = undefined), 'standard')
+    await chat(previousId).detach()
+  }
+
+  // A session is gone (closed here, by another client, or by the backend). When it was the open one in
+  // single view, the oldest remaining live session takes over; when none is left, none is auto-created.
   // `listener` hears of every session that is gone (closed here or elsewhere), to drop what hangs on it.
   function onGone(listener: (id: string) => void): void {
     goneListeners.add(listener)
   }
 
-  async function discard(id: string, lastCwd: string): Promise<void> {
+  async function discard(id: string): Promise<void> {
     const known = chats.has(id) || live.value.some((session) => session.id === id)
     if (!known) return // already handled: the closed event and the response of Close both end here
+    if (latestOpenTarget === id) {
+      latestOpen++
+      latestOpenTarget = undefined
+    }
     chats.get(id)?.dispose()
     chats.delete(id)
     for (const listener of goneListeners) listener(id)
@@ -167,21 +212,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (zoomedId.value === id) zoomedId.value = undefined
     if (currentId.value !== id) return
     currentId.value = undefined
+    if (mode.value === 'split') return
     const next = live.value[0]
-    if (next && mode.value === 'split') {
-      currentId.value = next.id
-    } else if (next) {
-      await openSession(next.id)
-    } else {
-      mode.value = 'single'
-      await newSession({ cwd: lastCwd })
-    }
+    if (next) await openSession(next.id)
   }
 
   async function closeSession(id: string): Promise<void> {
-    const lastCwd = infoOf(id)?.cwd ?? cwd.value
     await connection.getApi().close(id)
-    await discard(id, lastCwd)
+    await discard(id)
   }
 
   async function renameSession(id: string, name: string): Promise<void> {
@@ -197,6 +235,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const info = await connection.getApi().setCwd(id, path)
     showInfo(info)
     cwd.value = info.cwd // new sessions of this window start there too
+    await connection.loadConfig()
   }
 
   async function setModel(id: string, model: ModelRef): Promise<void> {
@@ -239,7 +278,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   // Whether any session of the backend is running or waiting for the user.
   async function hasWorkingSessions(): Promise<boolean> {
     const sessions = await connection.getApi().listSessions()
-    return sessions.some((info) => rowState(info) !== 'idle' && rowState(info) !== 'error')
+    return sessions.some(isWorkingSession)
   }
 
   function peerCommand(sessionId: string, command: string, args?: string): Promise<string> {
@@ -297,15 +336,23 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function leaveSplit(): Promise<void> {
     if (mode.value === 'single') return
     if (zoomedId.value) currentId.value = zoomedId.value
+    const targetId = currentId.value
+    const mine = ++latestOpen
+    latestOpenTarget = targetId
     mode.value = 'single'
     zoomedId.value = undefined
     tileFocusId.value = undefined
-    const open = current.value
-    await connection.getApi().watchAll(false)
-    const others = [...chats.values()].filter(
-      (session) => session !== open && session.attachment === 'watching',
-    )
-    await Promise.all([open?.setForeground(true), ...others.map((session) => session.detach())])
+    const run = openChain.then(async () => {
+      const open = targetId ? chat(targetId) : undefined
+      await connection.getApi().watchAll(false)
+      const others = [...chats.values()].filter(
+        (session) => session !== open && session.attachment === 'watching',
+      )
+      const attachOpen = open && mine === latestOpen ? open.setForeground(true) : Promise.resolve()
+      await Promise.all([attachOpen, ...others.map((session) => session.detach())])
+    })
+    openChain = run.catch(() => undefined)
+    return run
   }
 
   async function toggleSplit(): Promise<void> {
@@ -361,7 +408,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       notices.push('error', errorToast(session?.info?.name ?? id, event.text))
     }
     session?.applyEvent(event)
-    if (event.type === 'closed') void discard(id, infoOf(id)?.cwd ?? cwd.value).catch(notices.pushError)
+    if (event.type === 'closed') void discard(id).catch(notices.pushError)
   }
 
   function onFrame(frame: EventFrame): void {
@@ -369,16 +416,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (frame.kind === 'event') onSessionEvent(frame)
   }
 
-  // Called when the connection opens. The first time, opens the requested session or a new one.
+  // Called when the connection opens. The first time, opens the requested session if given.
   async function onConnected(isReconnect: boolean, start: Startup): Promise<void> {
     const api = connection.getApi()
     if (isReconnect) {
+      await connection.loadConfig()
       const sessions = mode.value === 'split' ? await api.watchAll(true) : await api.listSessions()
       setLive(sessions)
       // A session closed while the connection was down never sent its `closed` event.
       for (const id of [...chats.keys()]) {
         if (sessions.some((session) => session.id === id)) continue
-        await discard(id, infoOf(id)?.cwd ?? cwd.value)
+        await discard(id)
       }
       await Promise.all([...chats.values()].map((session) => session.resync()))
       return
@@ -392,15 +440,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   async function openRequested(sessionId: string | undefined): Promise<void> {
-    if (sessionId) {
-      try {
-        await openSession(sessionId)
-        return
-      } catch (error) {
-        notices.pushError(error)
-      }
+    if (!sessionId) return
+    try {
+      await openSession(sessionId)
+    } catch (error) {
+      notices.pushError(error)
     }
-    await newSession()
   }
 
   return {
@@ -421,6 +466,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     onGone,
     openSession,
     newSession,
+    detachCurrent,
     closeSession,
     renameSession,
     deleteHistory,

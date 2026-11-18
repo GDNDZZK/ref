@@ -5,8 +5,8 @@ import { useChatScroll } from '../composables/chatScroll.ts'
 import type { ChatScroll } from '../composables/chatScroll.ts'
 import type { Activity, ChatSession } from '../model/chatSession.ts'
 import type { Block } from '../model/blocks.ts'
-import { motion } from '../theme/generated/motion.ts'
 import ChatView from './ChatView.vue'
+
 interface ResizeEntryStub {
   target: Element
 }
@@ -48,11 +48,6 @@ function makeBlock(key: string): Block {
   }
 }
 
-function heldPx(footer: HTMLElement): number {
-  const match = footer.style.height.match(/([\d.]+)px\)$/)
-  return match ? Number(match[1]) : 0
-}
-
 function setupChatView(options: { activity?: Activity; clientHeight?: number; rowsHeight?: number } = {}) {
   let rowsHeight = options.rowsHeight ?? 200
   let clientHeight = options.clientHeight ?? 800
@@ -92,10 +87,9 @@ function setupChatView(options: { activity?: Activity; clientHeight?: number; ro
 
   Object.defineProperty(rows, 'offsetHeight', { configurable: true, get: () => rowsHeight })
   Object.defineProperty(scroller, 'clientHeight', { configurable: true, get: () => clientHeight })
-  // Simulate browser clamping: scrollHeight is always at least clientHeight.
   Object.defineProperty(scroller, 'scrollHeight', {
     configurable: true,
-    get: () => Math.max(clientHeight, rowsHeight + PAGE_PADDING + heldPx(footer)),
+    get: () => Math.max(clientHeight, rowsHeight + PAGE_PADDING),
   })
   const resizeObserver = MockResizeObserver.instances.find((observer) => observer.targets.has(rows))!
 
@@ -117,7 +111,7 @@ function setupChatView(options: { activity?: Activity; clientHeight?: number; ro
   }
 }
 
-describe('ChatView hold and scroll geometry', () => {
+describe('ChatView scroll geometry', () => {
   const originalResizeObserver = globalThis.ResizeObserver
 
   beforeEach(() => {
@@ -131,266 +125,77 @@ describe('ChatView hold and scroll geometry', () => {
     globalThis.ResizeObserver = originalResizeObserver
   })
 
-  it.each<Activity>(['waiting_permission', 'waiting_question', 'retrying', 'idle'])(
-    'releases heldSpace when transitioning from active generation to %s',
-    async (nextActivity) => {
-      const { wrapper, session, footer, setRowsHeight } = setupChatView({
-        activity: 'thinking',
+  it.each<Activity>(['thinking', 'running', 'compacting', 'waiting_permission', 'waiting_question', 'idle'])(
+    'never inflates footer height beyond pagePadding when rows shrink during %s',
+    (activity) => {
+      const { wrapper, footer, setRowsHeight } = setupChatView({
+        activity,
         clientHeight: 800,
-        rowsHeight: 1000,
+        rowsHeight: 1200,
       })
-      setRowsHeight(1000)
-      setRowsHeight(820)
-      expect(heldPx(footer)).toBe(180)
-
-      session.activity = nextActivity
-      session.busy = nextActivity !== 'idle'
-      await nextTick()
-
-      // Release tween runs over motion.slow ms via requestAnimationFrame.
-      await vi.advanceTimersByTimeAsync(motion.slow + 50)
-      expect(heldPx(footer)).toBe(0)
-
-      // Shrinking while paused/waiting must not re-hold space.
+      setRowsHeight(1200)
       setRowsHeight(700)
-      expect(heldPx(footer)).toBe(0)
-
+      expect(footer.style.height).toBe('')
       wrapper.unmount()
     },
   )
 
-  it('holds during thinking, running, and compacting', async () => {
-    const { wrapper, session, footer, setRowsHeight } = setupChatView({
-      activity: 'thinking',
-      clientHeight: 800,
-      rowsHeight: 1000,
-    })
-
-    setRowsHeight(1000)
-    setRowsHeight(900)
-    expect(heldPx(footer)).toBe(100)
-
-    session.activity = 'running'
-    await nextTick()
-    setRowsHeight(850)
-    expect(heldPx(footer)).toBe(150)
-
-    session.activity = 'compacting'
-    await nextTick()
-    setRowsHeight(800)
-    expect(heldPx(footer)).toBe(200)
-
-    wrapper.unmount()
-  })
-
-  it('does not inflate heldSpace when scroller.scrollHeight is clamped to clientHeight', async () => {
-    const { wrapper, session, footer, setRowsHeight } = setupChatView({
+  it('jumps to scrollHeight and re-engages following on generation reload', async () => {
+    const { wrapper, session, scroller, setRowsHeight } = setupChatView({
       activity: 'idle',
-      clientHeight: 800,
-      rowsHeight: 200,
+      clientHeight: 600,
+      rowsHeight: 1400,
     })
+    await wrapper.setProps({ following: false })
+    scroller.scrollTop = 120
 
-    // Start active turn on a short conversation (scrollHeight clamped at 800).
-    session.activity = 'thinking'
-    session.busy = true
-    await nextTick()
-    expect(heldPx(footer)).toBe(0)
-
-    // Grows while still shorter than clientHeight, then shrinks slightly.
-    setRowsHeight(350)
-    expect(heldPx(footer)).toBe(0)
-
-    setRowsHeight(250)
-    expect(heldPx(footer)).toBe(100) // not clientHeight - 1 (799)
-
-    // Shrinking from above clientHeight down below clientHeight holds only the actual delta.
-    setRowsHeight(900)
-    expect(heldPx(footer)).toBe(0)
-
-    setRowsHeight(750)
-    expect(heldPx(footer)).toBe(150) // 900 - 750, not 200
-    session.activity = 'idle'
-    session.busy = false
-    await nextTick()
-    await vi.advanceTimersByTimeAsync(motion.slow + 50)
-    expect(heldPx(footer)).toBe(0)
-
-    wrapper.unmount()
-  })
-
-  it('resets highWater on jumpToEnd across a mid-turn generation reload', async () => {
-    const { wrapper, session, footer, setRowsHeight } = setupChatView({
-      activity: 'thinking',
-      clientHeight: 800,
-      rowsHeight: 2000,
-    })
-
-    setRowsHeight(2000)
-    setRowsHeight(1700)
-    expect(heldPx(footer)).toBe(200)
-    // Mid-turn reload (e.g. resync) loads shorter history while following is still true.
     session.generation += 1
     session.blocks = [makeBlock('b2')]
-    setRowsHeight(400, false)
+    setRowsHeight(1000, false)
     await nextTick()
     await nextTick()
 
-    expect(heldPx(footer)).toBe(0)
-
-    // Subsequent resize must not resurrect highWater = 2000 from before the reload.
-    setRowsHeight(400)
-    expect(heldPx(footer)).toBe(0)
-
-    setRowsHeight(380)
-    expect(heldPx(footer)).toBe(20)
-
+    expect(scroller.scrollTop).toBe(1000 + PAGE_PADDING)
+    expect(wrapper.emitted('update:following')?.at(-1)).toEqual([true])
     wrapper.unmount()
   })
 
-  it('cancels an in-flight release tween on jumpToEnd', async () => {
-    const { wrapper, session, footer, setRowsHeight } = setupChatView({
-      activity: 'thinking',
-      clientHeight: 600,
-      rowsHeight: 1000,
-    })
+  it('holds sticky header in view while its block shrinks and stops after releaseHeader', () => {
+    const { wrapper, scroller, chatScroll } = setupChatView({ clientHeight: 500, rowsHeight: 1600 })
+    scroller.scrollTop = 400
+    vi.spyOn(scroller, 'getBoundingClientRect').mockReturnValue({ top: 0 } as DOMRect)
 
-    setRowsHeight(1000)
-    setRowsHeight(700)
-    expect(heldPx(footer)).toBe(150)
-    // Begin releasing heldSpace.
-    session.activity = 'idle'
-    session.busy = false
-    await nextTick()
-    await vi.advanceTimersByTimeAsync(100)
-    expect(heldPx(footer)).toBeGreaterThan(0)
+    const blockEl = document.createElement('div')
+    let blockHeight = 500
+    Object.defineProperty(blockEl, 'offsetHeight', { configurable: true, get: () => blockHeight })
+    // Block starts at document y = 200 (viewport top = 200 - scrollTop).
+    vi.spyOn(blockEl, 'getBoundingClientRect').mockImplementation(
+      () => ({ top: 200 - scroller.scrollTop }) as DOMRect,
+    )
 
-    // Reload history mid-release: jumpToEnd must cancel the tween so later frames do not restore heldSpace.
-    session.generation += 1
-    session.blocks = [makeBlock('b3')]
-    setRowsHeight(200, false)
-    await nextTick()
-    await nextTick()
-    expect(heldPx(footer)).toBe(0)
+    chatScroll.holdHeader(blockEl, 38)
+    const holdObserver = MockResizeObserver.instances.find((observer) => observer.targets.has(blockEl))!
 
-    await vi.advanceTimersByTimeAsync(motion.slow)
-    expect(heldPx(footer)).toBe(0)
+    // Shrink block from 500 to 150 -> pinLimit = 200 + 150 - 38 = 312 < scrollTop 400.
+    blockHeight = 150
+    holdObserver.trigger([blockEl])
+    expect(scroller.scrollTop).toBe(312)
 
-    wrapper.unmount()
-  })
-
-  it('re-engages following with naturalEnd + heldSpace without scrollHeight pollution', async () => {
-    const { wrapper, footer, setRowsHeight } = setupChatView({
-      activity: 'thinking',
-      clientHeight: 800,
-      rowsHeight: 200,
-    })
-
-    setRowsHeight(300)
-    setRowsHeight(220)
-    expect(heldPx(footer)).toBe(80)
-
-    await wrapper.setProps({ following: false })
-    await wrapper.setProps({ following: true })
-    expect(heldPx(footer)).toBe(80)
-
-    // Growing by 50 eats into the 80px held space cleanly rather than jumping to clientHeight.
-    setRowsHeight(270)
-    expect(heldPx(footer)).toBe(30)
-
-    wrapper.unmount()
-  })
-
-  it('caps highWater to 0.25 of clientHeight and handles empty conversations without inflating', async () => {
-    const { wrapper, session, footer, setRowsHeight, setClientHeight } = setupChatView({
-      activity: 'thinking',
-      clientHeight: 800,
-      rowsHeight: 0,
-    })
-
-    setRowsHeight(0)
-    expect(heldPx(footer)).toBe(0)
-
-    setRowsHeight(1500)
-    setRowsHeight(700) // shrinks by 800, capped to round(800 * 0.25) = 200
-    expect(heldPx(footer)).toBe(200)
-
-    // Viewport shrinks to 500 -> cap becomes round(500 * 0.25) = 125; subsequent growth eats into 125.
-    setClientHeight(500)
-    expect(heldPx(footer)).toBe(125)
-    setRowsHeight(750)
-    expect(heldPx(footer)).toBe(75)
-
-    session.activity = 'idle'
-    session.busy = false
-    await nextTick()
-    await vi.advanceTimersByTimeAsync(motion.slow + 50)
-    expect(heldPx(footer)).toBe(0)
-
-    wrapper.unmount()
-  })
-
-  it('restHold drops heldSpace, prevents fold shrinkage during motion.slow, and resumes after', async () => {
-    const { wrapper, footer, chatScroll, setRowsHeight } = setupChatView({
-      activity: 'thinking',
-      clientHeight: 800,
-      rowsHeight: 1000,
-    })
-
-    setRowsHeight(1000)
-    setRowsHeight(900)
-    expect(heldPx(footer)).toBe(100)
-
-    chatScroll.restHold()
-    expect(heldPx(footer)).toBe(0)
-
-    // Folding during holdResting follows content down without growing heldSpace.
-    setRowsHeight(500)
-    expect(heldPx(footer)).toBe(0)
-
-    await vi.advanceTimersByTimeAsync(motion.slow - 1)
-    setRowsHeight(450)
-    expect(heldPx(footer)).toBe(0)
-
-    // Once motion.slow elapses, normal holding resumes from the post-fold height.
-    await vi.advanceTimersByTimeAsync(1)
-    setRowsHeight(520)
-    expect(heldPx(footer)).toBe(0)
-    setRowsHeight(470)
-    expect(heldPx(footer)).toBe(50)
-
-    wrapper.unmount()
-  })
-
-  it('calls restHold when a leaving row is added while holding', async () => {
-    const { wrapper, session, footer, setRowsHeight } = setupChatView({
-      activity: 'thinking',
-      clientHeight: 800,
-      rowsHeight: 1000,
-    })
-
-    setRowsHeight(1000)
-    session.blocks = []
-    await nextTick()
-
-    setRowsHeight(600)
-    expect(heldPx(footer)).toBe(0)
-
-    await vi.advanceTimersByTimeAsync(motion.slow)
-    setRowsHeight(680)
-    setRowsHeight(630)
-    expect(heldPx(footer)).toBe(50)
-
+    // Once released, further shrinkage does not clamp scrollTop.
+    chatScroll.releaseHeader()
+    blockHeight = 80
+    holdObserver.trigger([blockEl])
+    expect(scroller.scrollTop).toBe(312)
     wrapper.unmount()
   })
 
   it('tracks knownBlocks across multiple updates so added-then-removed blocks leave once', async () => {
-    const { wrapper, session, footer, setRowsHeight } = setupChatView({
+    const { wrapper, session } = setupChatView({
       activity: 'thinking',
       clientHeight: 800,
       rowsHeight: 1000,
     })
 
-    setRowsHeight(1000)
     session.blocks = [makeBlock('b1'), makeBlock('b2')]
     await nextTick()
     session.blocks = [makeBlock('b1')]
@@ -402,14 +207,10 @@ describe('ChatView hold and scroll geometry', () => {
       ['b2', 'true'],
     ])
 
-    setRowsHeight(600)
-    expect(heldPx(footer)).toBe(0) // restHold fired when b2 started leaving
-
     await wrapper.get('.block-stub[data-key="b2"]').trigger('click')
     await nextTick()
     expect(wrapper.findAll('.block-stub').map((el) => el.attributes('data-key'))).toEqual(['b1'])
 
-    await vi.advanceTimersByTimeAsync(motion.slow + 50)
     session.blocks = [makeBlock('b1'), makeBlock('b3')]
     await nextTick()
     expect(
@@ -418,7 +219,6 @@ describe('ChatView hold and scroll geometry', () => {
       ['b1', 'false'],
       ['b3', 'false'],
     ])
-
     wrapper.unmount()
   })
 })

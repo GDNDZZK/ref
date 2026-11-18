@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // A small menu at the pointer (right click). Closes on a choice, a click elsewhere, Esc or scrolling.
-import { onBeforeUnmount, onMounted, useTemplateRef } from 'vue'
+import { nextTick, onBeforeUnmount, useTemplateRef, watch } from 'vue'
 import { Key } from '../keys.ts'
 
 export interface MenuItem {
@@ -9,7 +9,12 @@ export interface MenuItem {
   run(): void
 }
 
-const props = defineProps<{ x: number; y: number; items: readonly MenuItem[] }>()
+const props = withDefaults(
+  defineProps<{ x: number; y: number; items: readonly MenuItem[]; open?: boolean }>(),
+  {
+    open: true,
+  },
+)
 const emit = defineEmits<{ close: [] }>()
 
 const EDGE_MARGIN = 8
@@ -35,41 +40,55 @@ function onKeydown(event: KeyboardEvent): void {
   emit('close')
 }
 
-// Keeps the menu inside the window.
-onMounted(() => {
+function unlisten(): void {
+  window.removeEventListener('pointerdown', onPointerDown, true)
+  window.removeEventListener('keydown', onKeydown, true)
+  window.removeEventListener('blur', onBlur)
+}
+
+function place(): void {
   const element = menu.value
   if (!element) return
   const left = Math.min(props.x, window.innerWidth - element.offsetWidth - EDGE_MARGIN)
   const top = Math.min(props.y, window.innerHeight - element.offsetHeight - EDGE_MARGIN)
   element.style.left = `${Math.max(EDGE_MARGIN, left)}px`
   element.style.top = `${Math.max(EDGE_MARGIN, top)}px`
-  window.addEventListener('pointerdown', onPointerDown, true)
-  window.addEventListener('keydown', onKeydown, true)
-  window.addEventListener('blur', onBlur)
-})
+}
 
-onBeforeUnmount(() => {
-  window.removeEventListener('pointerdown', onPointerDown, true)
-  window.removeEventListener('keydown', onKeydown, true)
-  window.removeEventListener('blur', onBlur)
-})
+// Keeps the menu inside the window and listens while open.
+watch(
+  [() => props.open, () => props.x, () => props.y],
+  async ([isOpen]) => {
+    unlisten()
+    if (!isOpen) return
+    await nextTick()
+    place()
+    window.addEventListener('pointerdown', onPointerDown, true)
+    window.addEventListener('keydown', onKeydown, true)
+    window.addEventListener('blur', onBlur)
+  },
+  { immediate: true },
+)
+onBeforeUnmount(unlisten)
 </script>
 
 <template>
   <Teleport to="body">
-    <div ref="menu" class="menu" role="menu" :style="{ left: `${x}px`, top: `${y}px` }">
-      <button
-        v-for="item in items"
-        :key="item.label"
-        type="button"
-        role="menuitem"
-        class="item"
-        :class="{ danger: item.danger }"
-        @click="choose(item)"
-      >
-        {{ item.label }}
-      </button>
-    </div>
+    <Transition name="context-menu" appear>
+      <div v-if="open" ref="menu" class="menu" role="menu" :style="{ left: `${x}px`, top: `${y}px` }">
+        <button
+          v-for="item in items"
+          :key="item.label"
+          type="button"
+          role="menuitem"
+          class="item"
+          :class="{ danger: item.danger }"
+          @click="choose(item)"
+        >
+          {{ item.label }}
+        </button>
+      </div>
+    </Transition>
   </Teleport>
 </template>
 
@@ -84,6 +103,7 @@ onBeforeUnmount(() => {
   box-shadow:
     inset 0 0 0 1px var(--border),
     0 6px 20px #0000002e;
+  transform-origin: top left;
 }
 
 .item {
@@ -102,5 +122,24 @@ onBeforeUnmount(() => {
 
 .item.danger {
   color: var(--danger-text);
+}
+
+.context-menu-enter-active {
+  transition:
+    opacity var(--motion-quick) var(--motion-ease),
+    scale var(--motion-quick) var(--motion-ease);
+}
+
+.context-menu-leave-active {
+  pointer-events: none;
+  transition:
+    opacity var(--motion-quick) var(--motion-exit-ease),
+    scale var(--motion-quick) var(--motion-exit-ease);
+}
+
+.context-menu-enter-from,
+.context-menu-leave-to {
+  opacity: 0;
+  scale: var(--motion-pop-scale);
 }
 </style>

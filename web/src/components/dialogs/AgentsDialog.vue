@@ -4,19 +4,21 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AgentInfo } from '../../proto/generated'
 import { agentColor } from '../../theme/agentColor.ts'
+import { useCommandsStore } from '../../stores/commands.ts'
 import { useConnectionStore } from '../../stores/connection.ts'
 import { useDialogsStore } from '../../stores/dialogs.ts'
 import { useNoticesStore } from '../../stores/notices.ts'
 import { useWorkspaceStore } from '../../stores/workspace.ts'
 import Icon from '../Icon.vue'
+import TextButton from '../TextButton.vue'
 import PickDialog from './PickDialog.vue'
-
 const props = defineProps<{ sessionId: string }>()
 const { t } = useI18n()
 const connection = useConnectionStore()
 const workspace = useWorkspaceStore()
 const dialogs = useDialogsStore()
 const notices = useNoticesStore()
+const commands = useCommandsStore()
 
 interface AgentItem {
   key: string
@@ -37,6 +39,14 @@ function choose({ agent }: AgentItem): void {
   dialogs.close()
   workspace.setAgent(props.sessionId, agent.name).catch(notices.pushError)
 }
+
+function openConfiguration(): void {
+  if (commands.find('config')) {
+    commands.run('config').catch(notices.pushError)
+    return
+  }
+  dialogs.open({ kind: 'settings' })
+}
 </script>
 
 <template>
@@ -46,9 +56,14 @@ function choose({ agent }: AgentItem): void {
     :items="items"
     :text="(item) => `${item.agent.name} ${item.agent.description}`"
     :checked="workspace.infoOf(sessionId)?.agent"
+    :empty="t('dialog.agents.empty')"
+    :no-match="t('dialog.agents.noMatch')"
     @pick="choose"
     @close="dialogs.close()"
   >
+    <template #empty-action>
+      <TextButton :label="t('dialog.openConfig')" @click="openConfiguration" />
+    </template>
     <template #row="{ item }">
       <Icon icon="agent-16" class="icon" :style="{ color: item.color }" />
       <div class="text">

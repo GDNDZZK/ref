@@ -1,7 +1,7 @@
 import { easings } from './easing.ts'
 import type { EasingName } from './easing.ts'
 import { subscribeToFrames } from './frameLoop.ts'
-
+import { prefersReducedMotion } from './reducedMotion.ts'
 // Animates a number from `from` to `to` with a Qt easing curve (NumberAnimation in QML).
 // `cancel()` stops where it is.
 export function tween(options: {
@@ -13,9 +13,13 @@ export function tween(options: {
   done?(): void
 }): () => void {
   const { from, to, durationMs, update, done } = options
+  if (prefersReducedMotion() || durationMs <= 0) {
+    update(to)
+    done?.()
+    return () => {}
+  }
   const ease = easings[options.easing]
   let startedAt: number | undefined
-
   const stop = subscribeToFrames((_frameSeconds, now) => {
     startedAt ??= now
     const progress = Math.min(1, (now - startedAt) / durationMs)

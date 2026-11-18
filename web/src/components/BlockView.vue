@@ -3,6 +3,7 @@
 import { useTemplateRef, watch } from 'vue'
 import type { Block } from '../model/blocks.ts'
 import { cssEasing } from '../motion/cssEasing.ts'
+import { prefersReducedMotion } from '../motion/reducedMotion.ts'
 import { motion } from '../theme/generated/motion.ts'
 import BlockFrame from './BlockFrame.vue'
 import CodeBlock from './CodeBlock.vue'
@@ -24,7 +25,7 @@ watch(
   () => props.leaving,
   async (isLeaving) => {
     if (!isLeaving) return
-    if (document.hidden) {
+    if (document.hidden || prefersReducedMotion()) {
       emit('gone')
       return
     }

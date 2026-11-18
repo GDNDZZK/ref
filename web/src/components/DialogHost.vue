@@ -36,7 +36,7 @@ watch(
   { immediate: true },
 )
 
-const isPalette = computed(() => shown.value?.kind === 'palette')
+const panelKey = computed(() => shown.value?.kind ?? '')
 
 // After a dialog closes the focus goes back to the composer of the session in use.
 dialogs.setOnClosed(() => {
@@ -58,39 +58,33 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
 <template>
   <Transition name="scrim" @after-leave="shown = undefined">
-    <div
-      v-if="dialogs.current"
-      class="scrim"
-      :class="{ top: isPalette }"
-      @mousedown.self="dialogs.close()"
-      @wheel="containScrimWheel"
-    >
-      <Transition name="panel" mode="out-in" appear>
-        <CommandPalette v-if="shown?.kind === 'palette'" key="palette" />
-        <ModelsDialog v-else-if="shown?.kind === 'models'" key="models" :session-id="shown.sessionId" />
-        <AgentsDialog v-else-if="shown?.kind === 'agents'" key="agents" :session-id="shown.sessionId" />
-        <VariantsDialog v-else-if="shown?.kind === 'variants'" key="variants" :session-id="shown.sessionId" />
-        <SessionsDialog v-else-if="shown?.kind === 'sessions'" key="sessions" />
-        <PathDialog v-else-if="shown?.kind === 'newSession'" key="newSession" mode="newSession" />
-        <PathDialog v-else-if="shown?.kind === 'cd'" key="cd" mode="cd" :session-id="shown.sessionId" />
-        <RenameDialog v-else-if="shown?.kind === 'rename'" key="rename" :session-id="shown.sessionId" />
-        <ExportDialog v-else-if="shown?.kind === 'export'" key="export" :session-id="shown.sessionId" />
-        <ConfirmDialog
-          v-else-if="shown?.kind === 'closeSession' || shown?.kind === 'deleteHistory'"
-          :key="shown.kind"
-          :kind="shown.kind"
-          :session-id="shown.sessionId"
-        />
-        <McpDialog v-else-if="shown?.kind === 'mcp'" key="mcp" />
-        <PeersDialog
-          v-else-if="shown?.kind === 'peers'"
-          key="peers"
-          :session-id="shown.sessionId"
-          :tab="shown.tab"
-          :name="shown.name"
-        />
-        <HelpDialog v-else-if="shown?.kind === 'help'" key="help" />
-        <SettingsDialog v-else-if="shown?.kind === 'settings'" key="settings" />
+    <div v-if="dialogs.current" class="scrim" @mousedown.self="dialogs.close()" @wheel="containScrimWheel">
+      <Transition name="panel">
+        <div v-if="shown" :key="panelKey" class="panel-slot" :class="{ top: shown.kind === 'palette' }">
+          <CommandPalette v-if="shown.kind === 'palette'" />
+          <ModelsDialog v-else-if="shown.kind === 'models'" :session-id="shown.sessionId" />
+          <AgentsDialog v-else-if="shown.kind === 'agents'" :session-id="shown.sessionId" />
+          <VariantsDialog v-else-if="shown.kind === 'variants'" :session-id="shown.sessionId" />
+          <SessionsDialog v-else-if="shown.kind === 'sessions'" />
+          <PathDialog v-else-if="shown.kind === 'newSession'" mode="newSession" />
+          <PathDialog v-else-if="shown.kind === 'cd'" mode="cd" :session-id="shown.sessionId" />
+          <RenameDialog v-else-if="shown.kind === 'rename'" :session-id="shown.sessionId" />
+          <ExportDialog v-else-if="shown.kind === 'export'" :session-id="shown.sessionId" />
+          <ConfirmDialog
+            v-else-if="shown.kind === 'closeSession' || shown.kind === 'deleteHistory'"
+            :kind="shown.kind"
+            :session-id="shown.sessionId"
+          />
+          <McpDialog v-else-if="shown.kind === 'mcp'" />
+          <PeersDialog
+            v-else-if="shown.kind === 'peers'"
+            :session-id="shown.sessionId"
+            :tab="shown.tab"
+            :name="shown.name"
+          />
+          <HelpDialog v-else-if="shown.kind === 'help'" />
+          <SettingsDialog v-else-if="shown.kind === 'settings'" />
+        </div>
       </Transition>
     </div>
   </Transition>
@@ -101,21 +95,37 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   position: fixed;
   inset: 0;
   z-index: 30;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  grid-template: 1fr / 1fr;
   background: var(--scrim);
   overscroll-behavior: contain;
 }
 
-.scrim.top {
+.panel-slot {
+  grid-area: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  pointer-events: none;
+}
+
+.panel-slot.top {
   align-items: flex-start;
   padding-top: max(48px, calc(var(--palette-top-ratio) * 100vh));
 }
 
-.scrim-enter-active,
-.scrim-leave-active {
+.panel-slot > :deep(*) {
+  pointer-events: auto;
+}
+
+.scrim-enter-active {
   transition: opacity var(--motion-standard) var(--motion-ease);
+}
+
+.scrim-leave-active {
+  transition: opacity var(--motion-quick) var(--motion-exit-ease);
 }
 
 .scrim-enter-from,
@@ -123,7 +133,31 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   opacity: 0;
 }
 
-.panel-enter-active {
+.scrim-enter-active .panel-slot > :deep(*) {
+  transition:
+    opacity var(--motion-standard) var(--motion-ease),
+    translate var(--motion-standard) var(--motion-ease),
+    scale var(--motion-standard) var(--motion-ease);
+}
+
+.scrim-leave-active .panel-slot > :deep(*) {
+  transition:
+    opacity var(--motion-quick) var(--motion-exit-ease),
+    scale var(--motion-quick) var(--motion-exit-ease);
+}
+
+.scrim-enter-from .panel-slot > :deep(*) {
+  opacity: 0;
+  translate: 0 calc(-1 * var(--motion-dialog-drop));
+  scale: var(--motion-pop-scale);
+}
+
+.scrim-leave-to .panel-slot > :deep(*) {
+  opacity: 0;
+  scale: var(--motion-pop-scale);
+}
+
+.panel-enter-active > :deep(*) {
   transition:
     opacity var(--motion-standard) var(--motion-ease),
     translate var(--motion-standard) var(--motion-ease),
@@ -131,16 +165,24 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 }
 
 .panel-leave-active {
-  transition: opacity var(--motion-quick) var(--motion-ease);
+  transition: opacity var(--motion-quick) var(--motion-exit-ease);
 }
 
-.panel-enter-from {
+.panel-leave-active > :deep(*) {
+  pointer-events: none;
+  transition:
+    opacity var(--motion-quick) var(--motion-exit-ease),
+    scale var(--motion-quick) var(--motion-exit-ease);
+}
+
+.panel-enter-from > :deep(*) {
   opacity: 0;
   translate: 0 calc(-1 * var(--motion-dialog-drop));
   scale: var(--motion-pop-scale);
 }
 
-.panel-leave-to {
+.panel-leave-to > :deep(*) {
   opacity: 0;
+  scale: var(--motion-pop-scale);
 }
 </style>

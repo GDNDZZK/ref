@@ -33,6 +33,7 @@ const { t } = useI18n()
   --thumb-size: var(--attachment-strip-thumb-size);
   --thumb-gap: var(--attachment-strip-thumb-gap);
   --remove-size: var(--attachment-strip-attachment-remove-size);
+  position: relative;
   display: flex;
   gap: var(--thumb-gap);
   overflow-x: auto;

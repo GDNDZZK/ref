@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Says why the conversation is not live: connecting, lost or closed. (An old backend has its own
 // banner.)
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useConnectionStore } from '../stores/connection.ts'
 
@@ -18,16 +18,49 @@ const text = computed(() => {
 const detail = computed(() =>
   connection.state === 'connecting' && connection.hello ? connection.detail : '',
 )
+
+// Retain last non-empty text while the banner folds away.
+const shownText = ref('')
+const shownDetail = ref('')
+watch(
+  [text, detail],
+  ([nextText, nextDetail]) => {
+    if (!nextText) return
+    shownText.value = nextText
+    shownDetail.value = nextDetail
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
-  <p v-if="text" class="banner" role="alert">
-    {{ text }}
-    <span v-if="detail" class="detail">{{ detail }}</span>
-  </p>
+  <Transition name="banner">
+    <div v-if="text" class="slot">
+      <div class="fold">
+        <p class="banner" role="alert">
+          {{ shownText }}
+          <span v-if="shownDetail" class="detail">{{ shownDetail }}</span>
+        </p>
+      </div>
+    </div>
+  </Transition>
 </template>
 
 <style scoped>
+.slot {
+  display: grid;
+  flex: none;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows var(--motion-standard) var(--motion-ease),
+    opacity var(--motion-standard) var(--motion-ease);
+}
+
+.fold {
+  min-height: 0;
+  overflow: hidden;
+}
+
 .banner {
   margin: 0;
   padding: 8px var(--page-padding);
@@ -41,5 +74,11 @@ const detail = computed(() =>
 .detail {
   margin-left: 8px;
   opacity: 0.7;
+}
+
+.banner-enter-from,
+.banner-leave-to {
+  grid-template-rows: 0fr;
+  opacity: 0;
 }
 </style>

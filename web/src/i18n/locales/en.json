@@ -117,7 +117,7 @@
       "title": "New session"
     },
     "new-in": {
-      "title": "New session in another folder…"
+      "title": "New session in folder…"
     },
     "sessions": {
       "title": "Switch session (live + history)"
@@ -142,6 +142,9 @@
     },
     "cd": {
       "title": "Change this session's working directory"
+    },
+    "detach": {
+      "title": "Move session to background"
     },
     "close": {
       "title": "Close this session"
@@ -202,7 +205,7 @@
   },
   "sidebar": {
     "newSession": "New session",
-    "newSessionIn": "New session in another folder…",
+    "newSessionIn": "New session in folder…",
     "todo": "Todo",
     "running": "Running",
     "history": "History",
@@ -214,6 +217,7 @@
     "compacting": "Compacting",
     "retrying": "Retrying",
     "rename": "Rename",
+    "moveToBackground": "Move to background",
     "close": "Close",
     "delete": "Delete",
     "hide": "Hide sidebar",
@@ -222,6 +226,9 @@
     "settings": "Settings",
     "sessions": "Sessions",
     "needsAnswer": "Waiting for your answer"
+  },
+  "workspace": {
+    "empty": "No session open"
   },
   "split": {
     "empty": "No background sessions",
@@ -239,24 +246,32 @@
   "dialog": {
     "cancel": "Cancel",
     "close": "Close",
+    "noMatch": "No matches",
+    "openConfig": "Open configuration…",
     "models": {
       "title": "Switch model",
       "search": "Search models",
+      "empty": "No models configured",
+      "noMatch": "No matching models",
       "context": "{size} context",
       "reasoning": "reasoning",
       "images": "images"
     },
     "agents": {
       "title": "Switch agent",
-      "search": "Search agents"
+      "search": "Search agents",
+      "empty": "No agents configured",
+      "noMatch": "No matching agents"
     },
     "variants": {
       "title": "Model variant",
-      "default": "default"
+      "default": "default",
+      "noMatch": "No matching variants"
     },
     "sessions": {
       "title": "Sessions",
       "search": "Search sessions",
+      "empty": "No sessions yet",
       "filterLabel": "Filter by creator",
       "filterAll": "All",
       "filterUser": "User-created",
@@ -404,5 +419,52 @@
   "todo": {
     "title": "Todo {done}/{total}",
     "show": "Show the to-do list"
+  },
+  "config": {
+    "reset": "Reset",
+    "clear": "Clear",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
+    "remove": "Remove",
+    "secret": {
+      "show": "Show",
+      "hide": "Hide",
+      "envSet": "{name} set",
+      "envUnset": "{name} unset"
+    },
+    "list": {
+      "add": "Add",
+      "placeholder": "Add item…"
+    },
+    "kv": {
+      "add": "Add entry",
+      "keyPlaceholder": "Key",
+      "valuePlaceholder": "Value"
+    },
+    "permission": {
+      "modeLabel": "Permission mode",
+      "modeUnset": "Default",
+      "modeGlobal": "Global",
+      "modeRules": "Rules",
+      "globalAction": "Global action",
+      "allow": "Allow",
+      "ask": "Ask",
+      "deny": "Deny",
+      "toolPlaceholder": "Tool (e.g. bash, mcp_*)",
+      "patternPlaceholder": "Pattern (e.g. *, git *)",
+      "addRule": "Add rule",
+      "emptyRules": "No rules yet"
+    },
+    "color": {
+      "default": "Auto",
+      "hexPlaceholder": "#rrggbb",
+      "orange": "Orange",
+      "blue": "Blue",
+      "purple": "Purple",
+      "red": "Red",
+      "yellow": "Yellow",
+      "green": "Green",
+      "cyan": "Cyan"
+    }
   }
 }

@@ -117,4 +117,17 @@ describe('DialogHost', () => {
     child.dispatchEvent(bottomUp)
     expect(bottomUp.defaultPrevented).toBe(false)
   })
+
+  it('switches from top-aligned CommandPalette to centered dialogs without dropping the scrim', async () => {
+    const { wrapper, dialogs } = mountHost()
+    dialogs.open({ kind: 'palette' })
+    await nextTick()
+    expect(wrapper.find('.panel-slot.top').exists()).toBe(true)
+
+    dialogs.open({ kind: 'models', sessionId: 's1' })
+    await nextTick()
+    expect(wrapper.find('.scrim').exists()).toBe(true)
+    expect(wrapper.text()).toContain('No models configured')
+    expect(wrapper.text()).toContain('Open configuration…')
+  })
 })

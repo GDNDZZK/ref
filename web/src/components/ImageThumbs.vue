@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // A row of picture thumbnails. The bytes come with GetImage; until then a placeholder shows.
 // A click opens the picture in the lightbox.
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useChatSession } from '../composables/chatSessionContext.ts'
 import type { ImageRef } from '../model/blocks.ts'
 import { formatBytes } from '../model/format.ts'
@@ -16,6 +16,15 @@ const urls = ref<Record<number, string>>({})
 const failed = ref<Record<number, boolean>>({})
 const open = ref<number>()
 const openUrl = computed(() => (open.value === undefined ? undefined : urls.value[open.value]))
+const everOpened = ref(false)
+const shownUrl = ref('')
+const shownCaption = ref('')
+watch([open, openUrl], ([index, url]) => {
+  if (index === undefined || !url) return
+  everOpened.value = true
+  shownUrl.value = url
+  shownCaption.value = caption(props.images[index]!)
+})
 
 props.images.forEach((image, index) => {
   if (image.id === null) {
@@ -58,9 +67,10 @@ function caption(image: ImageRef): string {
       <span v-if="urls[index]" class="hover"><Icon icon="maximize-20" /></span>
     </button>
     <ImageLightbox
-      v-if="open !== undefined && openUrl"
-      :url="openUrl"
-      :caption="caption(images[open]!)"
+      v-if="everOpened"
+      :open="open !== undefined && !!openUrl"
+      :url="shownUrl"
+      :caption="shownCaption"
       @close="open = undefined"
     />
   </div>

@@ -1,6 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
-import { nextTick, ref, shallowReactive } from 'vue'
+import { ref, shallowReactive } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import editWarningsPart from '../../../crates/proto/fixtures/part/tool_done_edit_warnings.json'
 import { chatScrollKey } from '../composables/chatScroll.ts'
@@ -38,7 +38,6 @@ function blockFromPart(part: ToolPart): ToolBlockModel {
 }
 
 function mountToolBlock(block: ToolBlockModel, detailsExpanded = false) {
-  const restHold = vi.fn()
   const session = shallowReactive({
     detailsExpanded,
     permissions: [],
@@ -60,12 +59,11 @@ function mountToolBlock(block: ToolBlockModel, detailsExpanded = false) {
           hoveredMessageId: ref(''),
           holdHeader: vi.fn(),
           releaseHeader: vi.fn(),
-          restHold,
         },
       },
     },
   })
-  return Object.assign(wrapper, { restHold, session })
+  return Object.assign(wrapper, { session })
 }
 
 describe('ToolBlock', () => {
@@ -128,62 +126,5 @@ describe('ToolBlock', () => {
     expect(wrapper.text()).toContain('src/parser.rs')
     expect(wrapper.text()).toContain('Output')
     expect(wrapper.text()).toContain('Edited src/parser.rs')
-  })
-
-  it('calls chatScroll.restHold when expanded becomes false', async () => {
-    const part = editWarningsPart as unknown as ToolPart
-    const wrapper = mountToolBlock(blockFromPart(part), true)
-    expect(wrapper.restHold).not.toHaveBeenCalled()
-
-    await wrapper.get('.header').trigger('click')
-    expect(wrapper.restHold).toHaveBeenCalledTimes(1)
-
-    // Re-expand and collapse via session.detailsExpanded.
-    await wrapper.get('.header').trigger('click')
-    wrapper.session.detailsExpanded = false
-    await nextTick()
-    expect(wrapper.restHold).toHaveBeenCalledTimes(2)
-    wrapper.unmount()
-  })
-
-  it('calls chatScroll.restHold when awaitingPermission or awaitingAnswer ends', async () => {
-    const base = blockFromPart(editWarningsPart as unknown as ToolPart)
-    const permBlock: ToolBlockModel = {
-      ...base,
-      state: 'awaiting_permission',
-      permission: {
-        session_id: 's1',
-        message_id: 'm1',
-        call_id: base.callId,
-        tool: 'bash',
-        purpose: 'Run command',
-        input: { command: 'ls' },
-        preview: null,
-        time: 0,
-      },
-    }
-    const wrapper = mountToolBlock(permBlock, false)
-    expect(wrapper.restHold).not.toHaveBeenCalled()
-
-    await wrapper.setProps({
-      block: { ...permBlock, state: 'running', permission: undefined },
-    })
-    expect(wrapper.restHold).toHaveBeenCalledTimes(1)
-
-    await wrapper.setProps({
-      block: {
-        ...base,
-        name: 'question',
-        state: 'running',
-        question: { call_id: base.callId, questions: [] } as unknown as ToolBlockModel['question'],
-      },
-    })
-    expect(wrapper.restHold).toHaveBeenCalledTimes(1)
-
-    await wrapper.setProps({
-      block: { ...base, name: 'question', state: 'running', question: undefined },
-    })
-    expect(wrapper.restHold).toHaveBeenCalledTimes(2)
-    wrapper.unmount()
   })
 })

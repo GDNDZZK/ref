@@ -10,6 +10,8 @@ import { createAppI18n } from '../i18n/index.ts'
 import type { ChatSession } from '../model/chatSession.ts'
 import { info, userMessage } from '../model/testMessages.ts'
 import type { Message } from '../proto/generated'
+import { useConnectionStore } from '../stores/connection.ts'
+import { useDialogsStore } from '../stores/dialogs.ts'
 import Composer from './Composer.vue'
 
 const COMMANDS: SlashCommand[] = [
@@ -46,12 +48,13 @@ function setup(options: { busy?: boolean; queued?: Message[]; history?: string[]
     queued: options.queued ?? [],
     info: info({ id: 's1' }),
   }) as unknown as ChatSession
+  const pinia = createPinia()
   const wrapper = mount(Composer, {
     props: { session, composer },
-    global: { plugins: [createPinia(), createAppI18n(['en'])] },
+    global: { plugins: [pinia, createAppI18n(['en'])] },
     attachTo: options.attached ? document.body : undefined, // focus needs the box in the document
   })
-  return { wrapper, api, host, composer }
+  return { wrapper, api, host, composer, pinia }
 }
 
 type Wrapper = ReturnType<typeof setup>['wrapper']
@@ -248,5 +251,31 @@ describe('Composer', () => {
     await rows[0]!.get('button.recall').trigger('click')
     expect(api.removeQueued).toHaveBeenCalledWith('s1', 'm1')
     expect(rows[1]!.find('button.recall').exists()).toBe(false)
+  })
+
+  it('opens VariantsDialog when clicking the variant pill', async () => {
+    const { wrapper, pinia } = setup()
+    const connection = useConnectionStore(pinia)
+    const dialogs = useDialogsStore(pinia)
+    connection.config = {
+      agents: [],
+      models: [
+        {
+          provider: 'anthropic',
+          provider_name: 'Anthropic',
+          id: 'claude-sonnet-4-5',
+          name: 'Claude Sonnet 4.5',
+          context: 200000,
+          images: true,
+          reasoning: true,
+          variants: ['low', 'high'],
+        },
+      ],
+      commands: [],
+    } as never
+    await flushPromises()
+    const pills = wrapper.findAll('.tags button')
+    await pills[2]!.trigger('click')
+    expect(dialogs.current).toEqual({ kind: 'variants', sessionId: 's1' })
   })
 })

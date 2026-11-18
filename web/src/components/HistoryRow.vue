@@ -18,10 +18,18 @@ const subtitle = computed(() => {
   return `${dirName(props.info.cwd)} · ${when}`
 })
 
-const menu = ref<{ x: number; y: number }>()
+const menuCoords = ref({ x: 0, y: 0 })
+const menuOpen = ref(false)
+const menuMounted = ref(false)
 const menuItems = computed<MenuItem[]>(() => [
   { label: t('sidebar.delete'), danger: true, run: () => emit('remove') },
 ])
+
+function openMenu(event: MouseEvent): void {
+  menuCoords.value = { x: event.clientX, y: event.clientY }
+  menuMounted.value = true
+  menuOpen.value = true
+}
 </script>
 
 <template>
@@ -31,11 +39,18 @@ const menuItems = computed<MenuItem[]>(() => [
     tabindex="0"
     @click="emit('open')"
     @keydown.enter.self="emit('open')"
-    @contextmenu.prevent="menu = { x: $event.clientX, y: $event.clientY }"
+    @contextmenu.prevent="openMenu"
   >
     <span class="title">{{ historyLabel(info) }}</span>
     <span class="subtitle">{{ subtitle }}</span>
-    <ContextMenu v-if="menu" :x="menu.x" :y="menu.y" :items="menuItems" @close="menu = undefined" />
+    <ContextMenu
+      v-if="menuMounted"
+      :open="menuOpen"
+      :x="menuCoords.x"
+      :y="menuCoords.y"
+      :items="menuItems"
+      @close="menuOpen = false"
+    />
   </div>
 </template>
 

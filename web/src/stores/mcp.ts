@@ -1,7 +1,7 @@
 // Status of the MCP servers configured for the open session's directory (sidebar footer, MCP dialog).
 
 import { defineStore } from 'pinia'
-import { shallowRef, watch } from 'vue'
+import { computed, onScopeDispose, shallowRef, watch } from 'vue'
 import type { McpServerStatus } from '../proto/generated'
 import { useConnectionStore } from './connection.ts'
 import { useNoticesStore } from './notices.ts'
@@ -18,22 +18,35 @@ export const useMcpStore = defineStore('mcp', () => {
   const servers = shallowRef<readonly McpServerStatus[]>([])
   let recheck: ReturnType<typeof setTimeout> | undefined
 
+  const effectiveCwd = computed(() => workspace.current?.info?.cwd ?? (workspace.cwd || undefined))
+
   async function refresh(): Promise<void> {
     clearTimeout(recheck)
-    servers.value = await connection.getApi().mcpStatus(workspace.current?.info?.cwd)
+    servers.value = await connection.getApi().mcpStatus(effectiveCwd.value)
     // Servers start in the background: look again until none is still connecting.
     if (servers.value.some((server) => server.status === CONNECTING)) {
       recheck = setTimeout(() => void refresh().catch(notices.pushError), RECHECK_MS)
     }
   }
 
-  // The configuration is per directory.
+  // Refresh when connected, on directory/session change, on reconnect, and after config reload.
   watch(
-    () => workspace.current?.info?.cwd,
-    (cwd) => {
-      if (cwd !== undefined) void refresh().catch(notices.pushError)
+    [() => connection.state === 'open', effectiveCwd, () => connection.reconnected, () => connection.config],
+    ([isOpen]) => {
+      if (!isOpen) {
+        clearTimeout(recheck)
+        return
+      }
+      try {
+        connection.getApi()
+      } catch {
+        return
+      }
+      void refresh().catch(notices.pushError)
     },
+    { immediate: true },
   )
+  onScopeDispose(() => clearTimeout(recheck))
 
   return { servers, refresh }
 })

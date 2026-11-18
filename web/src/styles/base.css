@@ -64,10 +64,26 @@ textarea:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-quick: 0ms;
+    --motion-standard: 0ms;
+    --motion-slow: 0ms;
+    --flourish-spring-duration: 0ms;
+    --shimmer-text-shimmer-period: 0ms;
+  }
+
   *,
   *::before,
   *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none !important;
   }
 }
 

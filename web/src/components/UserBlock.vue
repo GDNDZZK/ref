@@ -5,6 +5,7 @@ import { computed, onMounted, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { renderMarkdown } from '../markdown/markdown.ts'
 import { cssEasing } from '../motion/cssEasing.ts'
+import { prefersReducedMotion } from '../motion/reducedMotion.ts'
 import type { UserBlock } from '../model/blocks.ts'
 import { motion } from '../theme/generated/motion.ts'
 import Icon from './Icon.vue'
@@ -31,7 +32,7 @@ const shellHtml = computed(() => (props.block.source === 'shell' ? renderMarkdow
 
 // Draws the divider across only for a freshly sent message.
 onMounted(() => {
-  if (!props.fresh) return
+  if (!props.fresh || prefersReducedMotion()) return
   divider.value?.animate([{ scale: '0 1' }, { scale: '1 1' }], {
     duration: motion.slow,
     easing: cssEasing('--motion-ease'),

@@ -61,7 +61,6 @@ function mountWith(component: Component, props: Record<string, unknown>) {
     hoveredMessageId: ref(''),
     holdHeader: () => {},
     releaseHeader: () => {},
-    restHold: () => {},
   }
   return mount(component, {
     props: props as never,

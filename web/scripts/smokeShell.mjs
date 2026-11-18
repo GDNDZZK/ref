@@ -170,6 +170,8 @@ export async function keyRotatedScenario(page, problems, restartServer) {
   await page.getByText('The key was not accepted.').waitFor({ timeout: WAIT_MS })
   await page.locator('input[type="password"]').fill(newKey)
   await page.keyboard.press('Enter')
+  await page.locator('.empty-workspace').waitFor({ timeout: WAIT_MS })
+  await page.keyboard.press(SHORTCUT.newSession)
   await page.waitForSelector(INPUT, { timeout: WAIT_MS })
 }
 
