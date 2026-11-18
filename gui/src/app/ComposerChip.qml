@@ -20,13 +20,16 @@ Rectangle {
 	property string label
 	property string tip
 	property bool clickable: true
+	property int widthLimit: maxWidth
+	property bool ready: false
+	property bool wasShown: false
 	// The pill is absent while there is nothing to say.
 	readonly property bool shown: label !== ""
 	signal clicked()
 
 	readonly property real naturalWidth: 2 * paddingX + iconSize + iconGap + current.implicitWidth
 
-	implicitWidth: shown ? Math.min(naturalWidth, maxWidth) : 0
+	implicitWidth: shown ? Math.min(naturalWidth, widthLimit) : 0
 	implicitHeight: chipHeight
 	radius: height / 2
 	color: hover.hovered && clickable ? Theme.surfaceHover : "transparent"
@@ -34,18 +37,30 @@ Rectangle {
 	visible: opacity > 0 || width > 0
 	clip: true
 
-	Behavior on implicitWidth { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-	Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+	Behavior on implicitWidth {
+		enabled: chip.ready
+		NumberAnimation { duration: Motion.standard; easing.type: Motion.ease }
+	}
+	Behavior on opacity {
+		enabled: chip.ready
+		NumberAnimation { duration: Motion.standard; easing.type: Motion.ease }
+	}
 	Behavior on color { ColorAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 
 	onLabelChanged: {
-		if (current.text !== "" && label !== "") {
+		if (wasShown && current.text !== "" && label !== "") {
 			previous.text = current.text
 			morph.restart()
 		}
-		current.text = label
+		if (label !== "")
+			current.text = label
+		wasShown = shown
 	}
-	Component.onCompleted: current.text = label
+	Component.onCompleted: {
+		current.text = label
+		wasShown = shown
+		ready = true
+	}
 
 	Icon {
 		id: icon

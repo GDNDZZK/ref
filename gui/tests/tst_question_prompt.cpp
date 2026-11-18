@@ -124,18 +124,26 @@ private slots:
 		QuestionPrompt prompt;
 		prompt.setRequest(oneQuestion());
 
+		QSignalSpy fullChanged(&prompt, &QuestionPrompt::changed);
+		QSignalSpy highlightMoved(&prompt, &QuestionPrompt::highlightChanged);
+
 		for(int i = 0; i < 5; ++i)
 		{
 			prompt.handleKey(Qt::Key_Down, Qt::NoModifier);
 		}
+		QCOMPARE(prompt.highlightedRow(), 2);
 		QVERIFY(row(prompt, 2).value(u"highlighted"_s).toBool());
 		for(int i = 0; i < 5; ++i)
 		{
 			prompt.handleKey(Qt::Key_K, Qt::NoModifier);
 		}
+		QCOMPARE(prompt.highlightedRow(), 0);
 		QVERIFY(row(prompt, 0).value(u"highlighted"_s).toBool());
 		prompt.handleKey(Qt::Key_J, Qt::NoModifier);
+		QCOMPARE(prompt.highlightedRow(), 1);
 		QVERIFY(row(prompt, 1).value(u"highlighted"_s).toBool());
+		QCOMPARE(fullChanged.count(), 0);
+		QVERIFY(highlightMoved.count() > 0);
 	}
 
 	void aNumberPicksThatRow()

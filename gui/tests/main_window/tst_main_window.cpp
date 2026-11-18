@@ -280,6 +280,9 @@ private slots:
 	void sidebarFolderButtonDoesNotTriggerNewSession();
 	void standaloneDialogHostBlocksWheelEvents();
 	void statusLineRetryTooltipShowsFullErrorWithoutWarnings();
+	void emptyWorkspaceStateAndDetachTransitionCleanly();
+	void tileZoomRemovesBorderRepeatsSlowTravelAndCompensatesScroll();
+	void reusableConfigFormControlsInstantiateAndOperateWithoutWarnings();
 };
 
 void TestMainWindow::initTestCase()
@@ -741,6 +744,301 @@ void TestMainWindow::statusLineRetryTooltipShowsFullErrorWithoutWarnings()
 	QVERIFY(contextTipText.contains(u"200.0k"_s));
 
 	QVERIFY2(warningSpy.isEmpty(), "StatusLine / PlainToolTip emitted QML warnings");
+}
+
+void TestMainWindow::emptyWorkspaceStateAndDetachTransitionCleanly()
+{
+	MainFixture f;
+
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+
+	const auto findText = [window](const QString& expected) {
+		return findItem(window->contentItem(), [&expected](QQuickItem* item) {
+			return QByteArray(item->metaObject()->className()).startsWith("QQuickText")
+			       && item->property("text").toString() == expected;
+		});
+	};
+	QQuickItem* emptyTitle = findText(u"No session open"_s);
+	QVERIFY(emptyTitle);
+	QVERIFY(!emptyTitle->isVisible());
+	QVERIFY(window->property("shown").value<QObject*>() != nullptr);
+
+	// Detaching current session crossfades window.shown to null and reveals the empty state.
+	f.workspace->detachCurrent();
+	QTRY_VERIFY(window->property("shown").isNull() || window->property("shown").value<QObject*>() == nullptr);
+	QTRY_VERIFY(emptyTitle->isVisible());
+	QQuickItem* newInFolderButton = findText(u"New session in folder…"_s);
+	QVERIFY(newInFolderButton && newInFolderButton->isVisible());
+	QVERIFY(findText(u"work · /work"_s) != nullptr);
+	QVERIFY2(warningSpy.isEmpty(), "Empty Workspace State / detachCurrent emitted QML warnings");
+}
+
+void TestMainWindow::tileZoomRemovesBorderRepeatsSlowTravelAndCompensatesScroll()
+{
+	MainFixture f;
+	for(int i = 0; i < 5; ++i)
+	{
+		f.stub.add(u"ses_extra_%1"_s.arg(i), 10 + i);
+	}
+
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+	engine.addImageProvider(u"chatimage"_s, new ChatImageProvider([ws = QPointer<Workspace>(f.workspace.get())](const QString& id) {
+		return ws ? ws->session(id) : nullptr;
+	}));
+	QQmlComponent component(&engine, QUrl(u"qrc:/qt/qml/RefGui/Main.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* window = qobject_cast<QQuickWindow*>(created.get());
+	QVERIFY(window);
+	window->resize(900, 460);
+	QVERIFY(QTest::qWaitForWindowExposed(window));
+
+	f.workspace->toggleSplit();
+	QTRY_VERIFY(f.workspace->isSplitView());
+	QQuickItem* tileGrid = findByTypePrefix(window->contentItem(), "TileGrid");
+	QVERIFY(tileGrid);
+	QQuickItem* flick = findByTypePrefix(tileGrid, "QQuickFlickable");
+	QVERIFY(flick);
+	QQuickItem* tileB = nullptr;
+	QTRY_VERIFY([&] {
+		QList<QQuickItem*> tiles;
+		collectTiles(tileGrid, tiles);
+		for(QQuickItem* candidate : tiles)
+		{
+			if(candidate->property("sessionId").toString() == u"ses_b"_s && candidate->width() > 100.0)
+			{
+				tileB = candidate;
+			}
+		}
+		return tileB != nullptr && flick->property("contentHeight").toReal() > flick->height() + 100.0;
+	}());
+
+	flick->setProperty("contentY", 100.0);
+	QCOMPARE(flick->property("contentY").toReal(), 100.0);
+
+	// 1st zoom: travelling is true immediately (Motion.slow = 480ms), zoomed pane fills viewport at (0, 0) without 1px border inset.
+	f.workspace->zoomTile(u"ses_b"_s);
+	QVERIFY(tileB->property("travelling").toBool());
+	QCOMPARE(tileB->property("travelDuration").toInt(), 480);
+	QQuickItem* pane = findByTypePrefix(tileB, "SessionPane");
+	QVERIFY(pane);
+	QTRY_VERIFY(qFuzzyCompare(tileB->width(), tileGrid->width()) && qFuzzyCompare(tileB->height(), tileGrid->height()));
+	const QPointF viewportOrigin = tileB->mapToItem(tileGrid, QPointF(0.0, 0.0));
+	QVERIFY(qAbs(viewportOrigin.x()) < 0.5 && qAbs(viewportOrigin.y()) < 0.5);
+	QCOMPARE(pane->x(), 0.0);
+	QTRY_COMPARE(pane->y(), 0.0);
+	QVERIFY(qFuzzyCompare(pane->width(), tileGrid->width()));
+	QVERIFY(qFuzzyCompare(pane->height(), tileGrid->height()));
+	QCOMPARE(flick->property("contentY").toReal(), 100.0);
+
+	// Unzoom preserves scroll offset and settles travelling back to false.
+	f.workspace->unzoom();
+	QVERIFY(tileB->property("travelling").toBool());
+	QTRY_VERIFY_WITH_TIMEOUT(!tileB->property("travelling").toBool(), 2000);
+	QCOMPARE(flick->property("contentY").toReal(), 100.0);
+
+	// 2nd zoom: declarative travelling binding still activates immediately (Motion.slow = 480ms).
+	f.workspace->zoomTile(u"ses_b"_s);
+	QVERIFY(tileB->property("travelling").toBool());
+	QCOMPARE(tileB->property("travelDuration").toInt(), 480);
+	QTRY_VERIFY(qFuzzyCompare(tileB->width(), tileGrid->width()));
+
+	// Leaving split view while zoomed hands over cleanly to ses_b in single view.
+	f.workspace->toggleSplit();
+	QCOMPARE(f.workspace->currentId(), u"ses_b"_s);
+	QCOMPARE(window->property("shown").value<QObject*>(), f.workspace->session(u"ses_b"_s));
+	QTRY_VERIFY(!tileGrid->isVisible());
+	QVERIFY2(warningSpy.isEmpty(), "Tile zoom / handover emitted QML warnings");
+}
+
+void TestMainWindow::reusableConfigFormControlsInstantiateAndOperateWithoutWarnings()
+{
+	MainFixture f;
+
+	QQmlEngine engine;
+	QSignalSpy warningSpy(&engine, &QQmlEngine::warnings);
+	engine.addImageProvider(u"icons"_s, new refgui::icons::IconProvider);
+
+	QQuickWindow window;
+	window.resize(900, 900);
+	window.show();
+	QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+	QQmlComponent component(&engine);
+	component.setData(R"qml(
+		import QtQuick
+		import RefGui
+		Column {
+			id: root
+			width: Theme.configDialogWidth
+			spacing: 8
+			readonly property int configWidth: Theme.configDialogWidth
+			Icon { name: "plus"; size: 16 }
+			Icon { name: "retry"; size: 20 }
+			Icon { name: "eye"; size: 16 }
+			Icon { name: "eye-off"; size: 16 }
+			FormRow {
+				label: "Auto resize"
+				description: "Resize pasted images"
+				badge: "ref"
+				controlWidth: 0
+				Switch { id: sw; objectName: "sw"; checked: true; accessibleName: "Auto resize" }
+			}
+			FormRow {
+				label: "Default model"
+				SelectField {
+					id: sel
+					objectName: "sel"
+					width: parent.width
+					editable: true
+					clearable: true
+					options: [{ label: "Claude Sonnet", value: "anthropic/claude-sonnet-4-5" }]
+					value: "anthropic/claude-sonnet-4-5"
+				}
+			}
+			FormRow {
+				label: "API key"
+				SecretField {
+					id: sec
+					objectName: "sec"
+					width: parent.width
+					text: "{env:OPENAI_API_KEY}"
+					envStatus: ({ OPENAI_API_KEY: true, MISSING_KEY: false })
+				}
+			}
+			FormRow {
+				label: "Max delay"
+				NumberField {
+					id: num
+					objectName: "num"
+					width: parent.width
+					minimum: 0
+					maximum: 3600
+					step: 10
+					suffix: "s"
+					value: 600
+				}
+			}
+			FormRow {
+				label: "System prompt"
+				stacked: true
+				showReset: true
+				MultilineField {
+					id: multi
+					objectName: "multi"
+					width: parent.width
+					monospace: true
+					placeholderText: "Prompt…"
+					text: "Line 1\nLine 2"
+				}
+			}
+			FormRow {
+				label: "Command"
+				stacked: true
+				StringListEditor {
+					id: strList
+					objectName: "strList"
+					allowCommandSplit: true
+					monospace: true
+					values: ["npx", "-y"]
+				}
+			}
+			FormRow {
+				label: "Headers"
+				stacked: true
+				KeyValueEditor {
+					id: kv
+					objectName: "kv"
+					envStatus: ({ TEAM_TOKEN: false })
+					entries: [{ key: "Authorization", value: "Bearer {env:TEAM_TOKEN}" }]
+				}
+			}
+			FormRow {
+				label: "Permissions"
+				stacked: true
+				PermissionRulesEditor {
+					id: perms
+					objectName: "perms"
+					allowInherit: true
+				}
+			}
+			FormRow {
+				label: "Agent color"
+				stacked: true
+				ColorSwatchPicker {
+					id: swatch
+					objectName: "swatch"
+					value: "purple"
+				}
+			}
+		}
+	)qml", QUrl(u"qrc:/qt/qml/RefGui/TestControls.qml"_s));
+	QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+	std::unique_ptr<QObject> created(component.create());
+	QVERIFY2(created, qPrintable(component.errorString()));
+	auto* root = qobject_cast<QQuickItem*>(created.get());
+	QVERIFY(root);
+	root->setParentItem(window.contentItem());
+	QCOMPARE(root->property("configWidth").toInt(), 860);
+
+	auto* secret = root->findChild<QQuickItem*>(u"sec"_s);
+	QVERIFY(secret);
+	QVERIFY(secret->property("isInterpolated").toBool());
+	QVERIFY(secret->property("showEnvBadge").toBool());
+	QVERIFY(secret->property("envAllSet").toBool());
+	secret->setProperty("text", u"{env:MISSING_KEY}"_s);
+	QVERIFY(secret->property("showEnvBadge").toBool());
+	QVERIFY(!secret->property("envAllSet").toBool());
+	secret->setProperty("text", u"sk-literal-secret"_s);
+	QVERIFY(!secret->property("isInterpolated").toBool());
+	QVERIFY(secret->property("showEyeButton").toBool());
+
+	auto* num = root->findChild<QQuickItem*>(u"num"_s);
+	QVERIFY(num);
+	QMetaObject::invokeMethod(num, "stepBy", Q_ARG(QVariant, 1));
+	QCOMPARE(num->property("value").toInt(), 610);
+
+	auto* strList = root->findChild<QQuickItem*>(u"strList"_s);
+	QVERIFY(strList);
+	QVariant splitTokens;
+	QMetaObject::invokeMethod(strList, "splitCommandLine", Q_RETURN_ARG(QVariant, splitTokens), Q_ARG(QVariant, u"node \"my script.js\" --flag"_s));
+	QCOMPARE(splitTokens.toStringList(), (QStringList{u"node"_s, u"my script.js"_s, u"--flag"_s}));
+
+	auto* perms = root->findChild<QQuickItem*>(u"perms"_s);
+	QVERIFY(perms);
+	const QVariantMap permInput{{u"bash"_s, QVariantMap{{u"*"_s, u"ask"_s}, {u"git diff*"_s, u"allow"_s}}}, {u"delete"_s, u"deny"_s}};
+	QMetaObject::invokeMethod(perms, "loadFromValue", Q_ARG(QVariant, permInput));
+	QCOMPARE(perms->property("mode").toString(), u"rules"_s);
+	QVariant roundTripped;
+	QMetaObject::invokeMethod(perms, "toValue", Q_RETURN_ARG(QVariant, roundTripped));
+	QCOMPARE(roundTripped.toMap().value(u"delete"_s).toString(), u"deny"_s);
+	QCOMPARE(roundTripped.toMap().value(u"bash"_s).toMap().value(u"git diff*"_s).toString(), u"allow"_s);
+
+	auto* swatch = root->findChild<QQuickItem*>(u"swatch"_s);
+	QVERIFY(swatch);
+	QMetaObject::invokeMethod(swatch, "selectColor", Q_ARG(QVariant, u"#ff8800"_s));
+	QCOMPARE(swatch->property("value").toString(), u"#ff8800"_s);
+	QVERIFY(swatch->property("isValidSpec").toBool());
+
+	QCoreApplication::processEvents();
+	QVERIFY2(warningSpy.isEmpty(), "Reusable config form controls emitted QML warnings");
 }
 
 QTEST_MAIN(TestMainWindow)

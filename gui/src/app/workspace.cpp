@@ -255,6 +255,16 @@ QCoro::Task<> Workspace::openFirstSession()
 		emit openFailed(reason);
 	};
 
+	if(start.kind == Kind::None)
+	{
+		if(m_options.watch)
+		{
+			toggleSplit();
+		}
+		emit opened(QString());
+		co_return;
+	}
+
 	QString sessionId = start.sessionId;
 	if(start.kind == Kind::Continue)
 	{
@@ -264,24 +274,22 @@ QCoro::Task<> Workspace::openFirstSession()
 			fail(newest.error());
 			co_return;
 		}
-		if(!newest->has_value())
-		{
-			toast(refgui::workspace::ToastLevel::Info, tr("No earlier session in this directory. Started a new one."));
-		}
-		else
+		if(newest->has_value())
 		{
 			sessionId = (*newest)->id;
 		}
-	}
-	if(sessionId.isEmpty())
-	{
-		const auto created = co_await m_directory.create(m_cwd, start.agent, start.model);
-		if(!created)
+		else
 		{
-			fail(created.error());
-			co_return;
+			toast(refgui::workspace::ToastLevel::Info, tr("No earlier session in this directory. Started a new one."));
+			const auto created = co_await m_directory.create(m_cwd, start.agent, start.model);
+			if(!created)
+			{
+				fail(created.error());
+				co_return;
+			}
+			setCwd(created->cwd);
+			sessionId = created->id;
 		}
-		sessionId = created->id;
 	}
 
 	const Result<void> shown = co_await show(sessionId);
@@ -366,11 +374,21 @@ void Workspace::updateHighlight()
 	emit frontSessionChanged();
 }
 
+void Workspace::setCwd(const QString& cwd)
+{
+	if(cwd.isEmpty() || cwd == m_cwd)
+	{
+		return;
+	}
+	m_cwd = cwd;
+	emit cwdChanged();
+}
+
 void Workspace::setCurrent(ChatSession* session)
 {
 	m_current = session;
 	updateHighlight();
-	if(m_split && session != nullptr)
+	if(m_split)
 	{
 		syncTiles();
 	}
@@ -385,9 +403,21 @@ void Workspace::openSession(const QString& sessionId)
 	{
 		return;
 	}
-	if(m_split && m_tiles.indexOf(sessionId) >= 0)
+	if(m_split)
 	{
-		focusTile(sessionId);
+		if(m_tiles.indexOf(sessionId) >= 0)
+		{
+			if(!m_zoomed.isEmpty() && m_zoomed != sessionId)
+			{
+				zoomTile(sessionId);
+			}
+			else
+			{
+				focusTile(sessionId);
+			}
+			return;
+		}
+		leaveSplit(false, sessionId);
 		return;
 	}
 	if(sessionId == currentId())
@@ -410,11 +440,18 @@ QCoro::Task<Workspace::Done> Workspace::show(QString sessionId)
 	{
 		co_return std::unexpected(attached.error());
 	}
-	const bool supersededByNewerShow = serial != m_showSerial && &target != m_current && !m_split;
-	if(supersededByNewerShow)
+	const bool superseded = serial != m_showSerial && &target != m_current;
+	if(superseded)
 	{
-		// The user has moved on to another session meanwhile.
-		logDropped(co_await target.detach(), "detach"_L1, sessionId);
+		// The user has moved on to another session or detached meanwhile.
+		if(m_split && m_tiles.indexOf(sessionId) >= 0)
+		{
+			logDropped(co_await target.background(), "background"_L1, sessionId);
+		}
+		else
+		{
+			logDropped(co_await target.detach(), "detach"_L1, sessionId);
+		}
 		co_return Result<void>();
 	}
 	ChatSession* old = m_current;
@@ -428,6 +465,50 @@ QCoro::Task<Workspace::Done> Workspace::show(QString sessionId)
 	co_return Result<void>();
 }
 
+void Workspace::detachCurrent()
+{
+	++m_showSerial;
+	if(m_split)
+	{
+		if(!m_zoomed.isEmpty())
+		{
+			unzoom();
+		}
+		if(ChatSession* old = m_current; old != nullptr)
+		{
+			const QString id = old->sessionId();
+			const bool downgradeToTile = old->isAttached() && !m_leaving.contains(id);
+			if(downgradeToTile)
+			{
+				m_unzooming.insert(id);
+			}
+			setCurrent(nullptr);
+			if(downgradeToTile)
+			{
+				backgroundInSplit(old);
+			}
+		}
+		return;
+	}
+	ChatSession* old = m_current;
+	if(old == nullptr)
+	{
+		return;
+	}
+	setCurrent(nullptr);
+	if(old->isAttached() && !m_leaving.contains(old->sessionId()))
+	{
+		detachUnwaited(old);
+	}
+}
+
+QCoro::Task<> Workspace::backgroundInSplit(ChatSession* session)
+{
+	const QString id = session->sessionId();
+	logDropped(co_await session->background(), "background"_L1, id);
+	m_unzooming.remove(id);
+}
+
 void Workspace::newSession(const QString& cwd, const QJSValue& cb)
 {
 	createAndShow(cwd.isEmpty() ? m_cwd : cwd, wrap(cb));
@@ -435,12 +516,13 @@ void Workspace::newSession(const QString& cwd, const QJSValue& cb)
 
 QCoro::Task<> Workspace::createAndShow(QString cwd, Reply reply)
 {
-	const auto created = co_await m_directory.create(cwd, std::nullopt, std::nullopt);
+	const auto created = co_await m_directory.create(cwd, m_options.start.agent, m_options.start.model);
 	if(!created)
 	{
 		report(reply, false, created.error().message);
 		co_return;
 	}
+	setCwd(created->cwd);
 	const Result<void> shown = co_await show(created->id);
 	if(!shown)
 	{
@@ -448,6 +530,22 @@ QCoro::Task<> Workspace::createAndShow(QString cwd, Reply reply)
 		co_return;
 	}
 	report(reply, true, created->id);
+}
+
+void Workspace::requestCloseSession(const QString& sessionId)
+{
+	if(sessionId.isEmpty())
+	{
+		return;
+	}
+	const refgui::proto::SessionInfo* info = m_directory.find(sessionId);
+	const bool working = info != nullptr && info->status.state != refgui::proto::SessionStatus::State::Idle;
+	if(working)
+	{
+		openDialog(u"close"_s, {{u"sessionId"_s, sessionId}});
+		return;
+	}
+	closeSession(sessionId);
 }
 
 void Workspace::closeSession(const QString& sessionId)
@@ -461,19 +559,17 @@ void Workspace::closeSession(const QString& sessionId)
 
 QCoro::Task<> Workspace::closeTask(QString sessionId)
 {
-	const refgui::proto::SessionInfo* info = m_directory.find(sessionId);
-	const QString cwd = info == nullptr ? m_cwd : info->cwd;
 	const Result<void> closed = co_await m_directory.close(sessionId);
 	if(toastFailure(closed))
 	{
 		co_return;
 	}
-	handleGone(sessionId, cwd);
+	handleGone(sessionId);
 }
 
-// A session ended, closed here or elsewhere: forgets it, and when it was the current one
-// moves to another session, or starts a new one in its directory.
-void Workspace::handleGone(const QString& sessionId, const QString& cwd)
+// A session ended, closed here or elsewhere: forgets it, and when it was the current one in single view
+// switches to another live session or leaves the workspace empty.
+void Workspace::handleGone(const QString& sessionId)
 {
 	if(!m_chats.contains(sessionId) || m_leaving.contains(sessionId))
 	{
@@ -485,11 +581,17 @@ void Workspace::handleGone(const QString& sessionId, const QString& cwd)
 		dropChat(sessionId);
 		return;
 	}
-	leaveCurrent(sessionId, cwd);
+	leaveCurrent(sessionId);
 }
 
-QCoro::Task<> Workspace::leaveCurrent(QString closedId, QString cwd)
+QCoro::Task<> Workspace::leaveCurrent(QString closedId)
 {
+	if(m_split)
+	{
+		setCurrent(nullptr);
+		dropChat(closedId);
+		co_return;
+	}
 	QString next;
 	for(const refgui::proto::SessionInfo& info : m_directory.liveSessions())
 	{
@@ -499,11 +601,7 @@ QCoro::Task<> Workspace::leaveCurrent(QString closedId, QString cwd)
 			break;
 		}
 	}
-	if(next.isEmpty())
-	{
-		co_await createAndShow(cwd.isEmpty() ? m_cwd : cwd, {});
-	}
-	else
+	if(!next.isEmpty())
 	{
 		const Result<void> shown = co_await show(next);
 		toastFailure(shown);
@@ -548,7 +646,7 @@ void Workspace::onLiveChanged()
 	{
 		if(!now.contains(it.key()))
 		{
-			handleGone(it.key(), it.value());
+			handleGone(it.key());
 		}
 	}
 	// Closed sessions the backend no longer lists cannot come back.

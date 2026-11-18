@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 // Adapted from an early version of LightBlueCube/qutie
 import QtQuick
 import RefGui
@@ -26,6 +27,10 @@ Block {
 	readonly property int markerBarWidth: 3
 	readonly property int markerGap: 10
 	readonly property int headerGap: 6
+
+	property bool ready: false
+	folding: summaryAnim.running
+	Component.onCompleted: ready = true
 
 	// Who the message is from, as its header says it, by source.
 	readonly property var markers: ({
@@ -164,28 +169,44 @@ Block {
 
 			readonly property int barWidth: 2
 			readonly property int textGap: 12
+			property real openProgress: block.isCompaction && block.expanded ? 1 : 0
+			readonly property real contentHeight: summaryLoader.item ? (summaryLoader.item as Item).height : 0
 
-			visible: block.isCompaction && (block.expanded || height > 0)
+			visible: block.isCompaction && (block.expanded || openProgress > 0)
 			width: parent.width
-			height: block.expanded ? summaryText.height : 0
+			height: openProgress === 1 ? contentHeight : Math.round(contentHeight * openProgress)
 			clip: true
 
-			Behavior on height { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-
-			Rectangle {
-				width: summary.barWidth
-				height: summaryText.height
-				radius: width / 2
-				color: Theme.accent
+			Behavior on openProgress {
+				enabled: block.ready
+				NumberAnimation { id: summaryAnim; duration: Motion.standard; easing.type: Motion.ease }
 			}
-			ProseText {
-				id: summaryText
-				x: summary.barWidth + summary.textGap
-				width: parent.width - x
-				textFormat: TextEdit.MarkdownText
-				text: block.isCompaction ? block.content : ""
-				color: Theme.textMuted
-				font.pixelSize: Theme.compactFontSize
+
+			Loader {
+				id: summaryLoader
+				width: parent.width
+				active: block.isCompaction && (block.expanded || summary.openProgress > 0)
+
+				sourceComponent: Item {
+					width: summaryLoader.width
+					height: summaryText.height
+
+					Rectangle {
+						width: summary.barWidth
+						height: summaryText.height
+						radius: width / 2
+						color: Theme.accent
+					}
+					ProseText {
+						id: summaryText
+						x: summary.barWidth + summary.textGap
+						width: parent.width - x
+						textFormat: TextEdit.MarkdownText
+						text: block.content
+						color: Theme.textMuted
+						font.pixelSize: Theme.compactFontSize
+					}
+				}
 			}
 		}
 
@@ -243,7 +264,7 @@ Block {
 				y: bubble.verticalPadding + (markerRow.visible ? markerRow.height + block.headerGap : 0)
 				width: Math.min(implicitWidth, block.columnWidth - 2 * bubble.horizontalPadding - bubble.markerIndent)
 				textFormat: block.isShell ? TextEdit.MarkdownText : TextEdit.PlainText
-				text: block.content
+				text: block.isCompaction ? "" : block.content
 				font.family: block.isShell ? Theme.monoFamily : font.family
 			}
 		}

@@ -68,6 +68,8 @@ QList<int> changedRoles(const Block& before, const Block& after)
 		{Role::InterruptedRole, before.interrupted != after.interrupted},
 		{Role::ErroredRole, before.errored != after.errored},
 		{Role::HumanRole, before.human != after.human},
+		{Role::ExpandedRole, before.kind != after.kind || before.sourceKind != after.sourceKind
+			|| (before.kind == Block::Kind::Reasoning && before.streaming != after.streaming)},
 	};
 	QList<int> roles;
 	for(const auto& [role, differs] : differences)
@@ -139,7 +141,7 @@ bool ConversationModel::isExpandedByDefault(const Block& block) const
 	switch(block.kind)
 	{
 	case Block::Kind::Reasoning:
-		return m_reasoningExpanded;
+		return block.streaming || m_reasoningExpanded;
 	case Block::Kind::Tool:
 		return m_toolsExpanded;
 	case Block::Kind::User:
@@ -156,9 +158,17 @@ bool ConversationModel::isExpandedByDefault(const Block& block) const
 bool ConversationModel::isExpanded(const Block& block) const
 {
 	const bool isCompaction = block.kind == Block::Kind::User && block.sourceKind == SourceKind::Compaction;
-	const bool defaultExpanded = isExpandedByDefault(block);
 	const bool foldable = isCompaction || block.kind == Block::Kind::Reasoning || block.kind == Block::Kind::Tool;
-	return foldable && defaultExpanded != m_toggled.contains({block.messageId, block.partIndex});
+	if(!foldable)
+	{
+		return false;
+	}
+	const PartKey key{block.messageId, block.partIndex};
+	if(const auto it = m_expandedOverrides.constFind(key); it != m_expandedOverrides.constEnd())
+	{
+		return it.value();
+	}
+	return isExpandedByDefault(block);
 }
 
 QVariant ConversationModel::data(const QModelIndex& index, int role) const
@@ -171,7 +181,16 @@ QVariant ConversationModel::data(const QModelIndex& index, int role) const
 	case KindRole:
 		return kindName(block.kind);
 	case ContentRole:
-		return rendersMarkdown(block) ? markdownForDisplay(block.content) : block.content;
+		if(!rendersMarkdown(block))
+		{
+			return block.content;
+		}
+		if(block.markdownCache.rendered.isNull() || block.markdownCache.source != block.content)
+		{
+			block.markdownCache.source = block.content;
+			block.markdownCache.rendered = markdownForDisplay(block.content);
+		}
+		return block.markdownCache.rendered;
 	case LanguageRole:
 		return block.language;
 	case StreamingRole:
@@ -701,12 +720,14 @@ void ConversationModel::refreshDerivedState()
 void ConversationModel::setDefaultExpansion(bool reasoning, bool tools)
 {
 	// "Show all" and "hide all" overrule what the user flipped one by one.
-	m_toggled.clear();
+	m_expandedOverrides.clear();
 	m_reasoningExpanded = reasoning;
 	m_toolsExpanded = tools;
 	for(qsizetype row = 0; row < m_rows.size(); ++row)
 	{
-		if(m_rows.at(row).kind == Block::Kind::Reasoning || m_rows.at(row).kind == Block::Kind::Tool)
+		const Block& block = m_rows.at(row);
+		const bool isCompaction = block.kind == Block::Kind::User && block.sourceKind == SourceKind::Compaction;
+		if(isCompaction || block.kind == Block::Kind::Reasoning || block.kind == Block::Kind::Tool)
 		{
 			emitRoleChanged(row, ExpandedRole);
 		}
@@ -721,10 +742,7 @@ void ConversationModel::toggleExpanded(int row)
 	}
 	const Block& block = m_rows.at(row);
 	const PartKey key{block.messageId, block.partIndex};
-	if(!m_toggled.remove(key))
-	{
-		m_toggled.insert(key);
-	}
+	m_expandedOverrides.insert(key, !isExpanded(block));
 	emitRoleChanged(row, ExpandedRole);
 }
 
@@ -949,9 +967,14 @@ void ConversationModel::replaceRows(qsizetype first, qsizetype oldCount, const Q
 	{
 		// The position in the conversation is not the builders' to say, see refreshContext().
 		Block row = fresh.at(i);
-		row.stale = m_rows.at(first + i).stale;
-		row.contextStart = m_rows.at(first + i).contextStart;
-		const QList<int> roles = changedRoles(m_rows.at(first + i), row);
+		const Block& previous = m_rows.at(first + i);
+		row.stale = previous.stale;
+		row.contextStart = previous.contextStart;
+		if(row.content == previous.content)
+		{
+			row.markdownCache = previous.markdownCache;
+		}
+		const QList<int> roles = changedRoles(previous, row);
 		if(roles.isEmpty())
 		{
 			continue;

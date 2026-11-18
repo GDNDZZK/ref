@@ -77,7 +77,7 @@ Sets: `20`, `16` or both. Names are the file names without the set suffix.
 
 | Name | Sets | Meaning | Used for |
 |---|---|---|---|
-| `plus` | 20 | Add | New session |
+| `plus` | 16, 20 | Add | New session, add list item |
 | `chat` | 16, 20 | Speech bubble | A session; the `read_session` tool |
 | `history` | 16, 20 | Clock with a counter-clockwise arrow | History sessions |
 | `search` | 16, 20 | Magnifier | Search field; the `grep` tool |
@@ -140,9 +140,11 @@ Sets: `20`, `16` or both. Names are the file names without the set suffix.
 | `check-all` | 16 | Double tick | Allow for the whole session |
 | `close` | 16 | Cross | Deny |
 | `clock` | 16 | Clock | Duration, delay |
-| `retry` | 16 | Circular arrow | Retrying after an error |
+| `retry` | 16, 20 | Circular arrow | Retrying after an error, reload configuration |
 | `error` | 16 | "!" in a circle | Error text |
 | `warning` | 16 | "!" in a triangle | Warning text |
 | `info` | 16 | "i" in a circle | Hint text |
 | `question` | 16 | "?" in a circle | Waiting for your answer (a question from the agent) |
+| `eye` | 16 | Open eye | Show secret value |
+| `eye-off` | 16 | Slashed eye | Hide secret value |
 | `external-link` | 16, 20 | Box with an arrow | Open in browser / external viewer |

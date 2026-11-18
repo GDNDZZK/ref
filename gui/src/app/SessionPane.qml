@@ -10,12 +10,13 @@ Item {
 	required property ChatSession session
 	// In a split-view tile: tighter margins.
 	property bool compact: false
+	property bool layoutCompact: compact
+	property real layoutWidth: width
 	readonly property real compactMargin: 10 // below the input box
 	readonly property real compactColumnPadding: 16 // beside the conversation
 	readonly property real questionMaxHeightRatio: 0.8 // of the pane, for the question card
 	readonly property real margin: compact ? compactMargin : Theme.pagePadding
-	readonly property real columnPadding: compact ? compactColumnPadding : Theme.pagePadding
-	// Whether the keys may answer a permission request or question of this session (one pane at a time has them).
+	readonly property real columnPadding: layoutCompact ? compactColumnPadding : Theme.pagePadding
 	property bool keysEnabled: true
 	// Whether the input box is there. A hidden one keeps its draft, attachments and queue;
 	// the queue strip stays either way.
@@ -58,8 +59,8 @@ Item {
 		anchors { left: parent.left; right: parent.right; top: parent.top; bottom: questionCard.top }
 		model: pane.session.blocks
 		compact: pane.compact
+		layoutWidth: pane.layoutWidth
 		sidePadding: pane.columnPadding
-		holding: pane.session.activelyWorking
 		sessionId: pane.session.sessionId
 		permissionCount: pane.session.permissionCount
 		moreBefore: pane.session.moreBefore

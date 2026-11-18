@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QColor>
+#include <QTimer>
 #include <QObject>
 #include <QPointer>
 #include <QQuickTextDocument>
@@ -12,18 +13,23 @@
 class LinkHighlighter : public QSyntaxHighlighter
 {
 public:
-	LinkHighlighter(QTextDocument* document, const QColor& color);
+	LinkHighlighter(QTextDocument* document, const QColor& color, bool streaming = false);
 	~LinkHighlighter() override;
 	void setColor(const QColor& color);
+	void setStreaming(bool streaming);
 
 protected:
 	void highlightBlock(const QString& text) override;
 
 private:
-	void scheduleRehighlight();
+	static constexpr int StreamingThrottleMs = 180;
 
+	void scheduleRehighlight();
+	void runRehighlight();
+
+	QTimer m_timer;
 	QColor m_color;
-	bool m_pending = false;
+	bool m_streaming = false;
 	bool m_highlighting = false;
 };
 
@@ -34,6 +40,7 @@ class LinkColorizer : public QObject
 	QML_ELEMENT
 	Q_PROPERTY(QQuickTextDocument* document READ document WRITE setDocument NOTIFY documentChanged FINAL)
 	Q_PROPERTY(QColor color READ color WRITE setColor NOTIFY colorChanged FINAL)
+	Q_PROPERTY(bool streaming READ isStreaming WRITE setStreaming NOTIFY streamingChanged FINAL)
 
 public:
 	explicit LinkColorizer(QObject* parent = nullptr);
@@ -42,13 +49,17 @@ public:
 	void setDocument(QQuickTextDocument* document);
 	QColor color() const { return m_color; }
 	void setColor(const QColor& color);
+	bool isStreaming() const { return m_streaming; }
+	void setStreaming(bool streaming);
 
 signals:
 	void documentChanged();
 	void colorChanged();
+	void streamingChanged();
 
 private:
 	QPointer<QQuickTextDocument> m_document;
 	QColor m_color;
 	QPointer<LinkHighlighter> m_highlighter; // a child of the text document
+	bool m_streaming = false;
 };

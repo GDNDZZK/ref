@@ -28,9 +28,19 @@ Window {
 	}
 
 	function showSession(session) {
-		if (session === null)
+		if (session === shown)
 			return
+		if (session === null) {
+			if (Workspace.splitView || !content.visible) {
+				sessionFade.cancel()
+				shown = null
+			} else {
+				sessionFade.run(content, () => shown = null)
+			}
+			return
+		}
 		if (shown === null || Workspace.splitView || !content.visible) {
+			sessionFade.cancel()
 			shown = session
 			return
 		}
@@ -43,8 +53,10 @@ Window {
 		target: Workspace
 
 		function onSessionDropped(session) {
-			if (window.shown === session)
+			if (window.shown === session) {
+				sessionFade.cancel()
 				window.shown = Workspace.current
+			}
 		}
 	}
 
@@ -185,7 +197,7 @@ Window {
 			onMoveRequested: window.startSystemMove()
 			onToggleMaximizeRequested: window.toggleMaximized()
 
-			Behavior on width { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+			Behavior on width { NumberAnimation { id: sidebarWidthAnim; duration: Motion.standard; easing.type: Motion.ease } }
 		}
 
 		Item {
@@ -225,6 +237,66 @@ Window {
 
 						sourceComponent: SessionPane {
 							session: window.shown
+							layoutWidth: sidebarWidthAnim.running ? Math.max(0, page.width - Theme.sidebarWidth) : width
+						}
+					}
+
+					Column {
+						id: emptyState
+						readonly property bool active: window.shown === null
+							&& Workspace.connectionState === "connected"
+							&& Workspace.failureText === ""
+
+						anchors.centerIn: parent
+						width: Math.min(parent.width - 2 * Theme.pagePadding, Theme.contentWidth)
+						spacing: 12
+						opacity: Workspace.splitView ? 0 : 1
+						visible: active && opacity > 0
+						enabled: active && !Workspace.splitView
+						Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+
+						Text {
+							textFormat: Text.PlainText
+							anchors.horizontalCenter: parent.horizontalCenter
+							text: qsTr("No session open")
+							color: Theme.textMuted
+							font.pixelSize: Theme.fontSize
+						}
+
+						Row {
+							anchors.horizontalCenter: parent.horizontalCenter
+							spacing: 8
+
+							TextButton {
+								text: qsTr("New session in folder…")
+								onClicked: Commands.run(CommandId.newSessionIn)
+							}
+
+							TextButton {
+								text: qsTr("New session")
+								onClicked: Commands.run(CommandId.newSession)
+							}
+						}
+
+						Text {
+							id: emptyCwdLabel
+							textFormat: Text.PlainText
+							anchors.horizontalCenter: parent.horizontalCenter
+							width: Math.min(implicitWidth, parent.width)
+							text: Format.dirName(Workspace.cwd) !== Workspace.cwd && Format.dirName(Workspace.cwd) !== ""
+								? Format.dirName(Workspace.cwd) + " · " + Workspace.cwd
+								: Workspace.cwd
+							color: Theme.textMuted
+							font.pixelSize: Theme.smallFontSize
+							font.family: Theme.monoFamily
+							elide: Text.ElideMiddle
+							visible: Workspace.cwd !== ""
+
+							HoverHandler { id: emptyCwdHover }
+							PlainToolTip {
+								visible: emptyCwdHover.hovered && emptyCwdLabel.truncated
+								text: Workspace.cwd
+							}
 						}
 					}
 
@@ -232,6 +304,8 @@ Window {
 						id: tiles
 						anchors.fill: parent
 						topInset: 0
+						sidebarAnimating: sidebarWidthAnim.running
+						minAreaWidth: Math.max(0, page.width - Theme.sidebarWidth)
 						visible: (Workspace.splitView || occupied) && opacity > 0
 						enabled: Workspace.splitView
 					}

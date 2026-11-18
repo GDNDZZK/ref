@@ -44,14 +44,6 @@ Block {
 	readonly property bool inactive: toolState === ToolState.denied || toolState === ToolState.cancelled
 	readonly property bool showsTime: columnWidth >= timeShownFromWidth
 
-	onOpenChanged: {
-		if (!open && chat)
-			chat.restHold()
-	}
-	onAwaitingPermissionChanged: {
-		if (!awaitingPermission && chat)
-			chat.restHold()
-	}
 	readonly property int timeShownFromWidth: 560
 	readonly property int headerHeight: 38
 	readonly property int cardPadding: Theme.toolBodyPaddingX
@@ -60,6 +52,9 @@ Block {
 	readonly property int tickInterval: 250 // ms between redraws of the clock texts
 	readonly property string firstOutputLine: ToolInfo.firstLine(output)
 
+	property bool ready: false
+	folding: failureAnim.running || previewAnim.running || bodyAnim.running || permission.animating
+	Component.onCompleted: ready = true
 
 	// What the right end of the header says, and in which color.
 	readonly property string statusText: {
@@ -256,8 +251,10 @@ Block {
 			height: shown ? 26 : 0
 			clip: true
 
-			Behavior on height { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-
+			Behavior on height {
+				enabled: block.ready
+				NumberAnimation { id: failureAnim; duration: Motion.standard; easing.type: Motion.ease }
+			}
 			Text {
 				textFormat: Text.PlainText
 				anchors { left: parent.left; leftMargin: block.cardPadding; right: parent.right; rightMargin: block.cardPadding; top: parent.top }
@@ -274,17 +271,18 @@ Block {
 			id: previewBox
 
 			readonly property bool shown: !block.open && !block.awaitingPermission && (block.hasDiffPreview || block.hasQuestionSummary)
+			property real openProgress: shown ? 1 : 0
+			readonly property real contentHeight: previewLoader.item ? (previewLoader.item as Item).height : 0
 
-			onShownChanged: {
-				if (!shown && block.chat)
-					block.chat.restHold()
-			}
 			y: header.height + failure.height
 			width: parent.width
-			height: shown && previewLoader.item ? (previewLoader.item as Item).height : 0
+			height: openProgress === 1 ? contentHeight : Math.round(contentHeight * openProgress)
 			clip: true
 
-			Behavior on height { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+			Behavior on openProgress {
+				enabled: block.ready
+				NumberAnimation { id: previewAnim; duration: Motion.standard; easing.type: Motion.ease }
+			}
 
 			Rectangle {
 				readonly property real cornerRadius: Theme.radius
@@ -301,19 +299,26 @@ Block {
 			Loader {
 				id: previewLoader
 				width: parent.width
-				active: previewBox.shown || previewBox.height > 0
+				active: previewBox.shown || previewBox.openProgress > 0
 				sourceComponent: block.hasDiffPreview ? diffPreviewComponent : (block.hasQuestionSummary ? questionPreviewComponent : null)
 			}
 		}
 
 		Item {
 			id: body
+
+			property real openProgress: block.open ? 1 : 0
+			readonly property real contentHeight: bodyLoader.item ? (bodyLoader.item as Item).height : 0
+
 			y: header.height + failure.height + previewBox.height
 			width: parent.width
-			height: block.open && bodyLoader.item ? (bodyLoader.item as Item).height : 0
+			height: openProgress === 1 ? contentHeight : Math.round(contentHeight * openProgress)
 			clip: true
-			Behavior on height {
+
+			Behavior on openProgress {
+				enabled: block.ready
 				NumberAnimation {
+					id: bodyAnim
 					duration: Motion.standard
 					easing.type: Motion.ease
 					onRunningChanged: if (!running) block.releaseHeader()
@@ -338,7 +343,7 @@ Block {
 			Loader {
 				id: bodyLoader
 				width: parent.width
-				active: block.open || body.height > 0
+				active: block.open || body.openProgress > 0
 
 				sourceComponent: ToolBody {
 					call: block

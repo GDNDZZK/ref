@@ -37,26 +37,58 @@ QCoro::Task<> Workspace::enterSplit()
 	updateCommandContext();
 }
 
-// The current session comes back to the foreground, the others are let go.
-QCoro::Task<> Workspace::leaveSplit()
+// The current session (or the zoomed tile, or `openId`) comes back to the foreground; the others are let go.
+QCoro::Task<> Workspace::leaveSplit(bool adoptZoomed, QString openId)
 {
+	ChatSession* handedOver = adoptZoomed && openId.isEmpty() && !m_zoomed.isEmpty() && !m_leaving.contains(m_zoomed)
+	                              ? session(m_zoomed)
+	                              : nullptr;
+	if(handedOver != nullptr && handedOver != m_current)
+	{
+		++m_showSerial;
+		m_current = handedOver;
+		emit currentChanged();
+	}
+
 	m_split = false;
+	const bool wasZoomed = !m_zoomed.isEmpty();
 	m_zoomed.clear();
 	setFocusedTile({});
 	m_tiles.setTiles({});
 	m_directory.live().setTileIds({});
-	emit zoomedChanged();
+	updateHighlight();
+	if(wasZoomed)
+	{
+		emit zoomedChanged();
+	}
 	emit splitViewChanged();
 	emit visibleSessionIdsChanged();
 	updateCommandContext();
 
+	if(!openId.isEmpty() && openId != currentId())
+	{
+		const Result<void> shown = co_await show(openId);
+		toastFailure(shown);
+	}
+	if(m_split)
+	{
+		co_return;
+	}
 	if(m_current != nullptr && !m_current->isForeground())
 	{
 		const Result<void> resumed = co_await m_current->attach(true);
 		toastFailure(resumed);
 	}
+	if(m_split)
+	{
+		co_return;
+	}
 	const Result<void> watching = co_await m_directory.setWatchAll(false);
 	toastFailure(watching);
+	if(m_split)
+	{
+		co_return;
+	}
 	// Sessions can be closed while a detach is out, which changes m_chats.
 	QList<QPointer<ChatSession>> others;
 	for(ChatSession* other : std::as_const(m_chats))
@@ -65,7 +97,11 @@ QCoro::Task<> Workspace::leaveSplit()
 	}
 	for(const QPointer<ChatSession>& other : others)
 	{
-		if(other && other != m_current && other->isAttached())
+		if(m_split)
+		{
+			co_return;
+		}
+		if(other && other != m_current && other->isAttached() && !m_leaving.contains(other->sessionId()))
 		{
 			const QString otherId = other->sessionId();
 			logDropped(co_await other->detach(), "detach"_L1, otherId);
@@ -164,6 +200,7 @@ void Workspace::setFocusedTile(const QString& sessionId)
 	m_focusedTile = sessionId;
 	updateHighlight();
 	emit focusedTileChanged();
+	updateCommandContext();
 }
 
 void Workspace::focusTile(const QString& sessionId)
@@ -193,11 +230,16 @@ QCoro::Task<> Workspace::zoomTask(QString sessionId)
 	{
 		const QString previousId = previous->sessionId();
 		logDropped(co_await previous->background(), "background"_L1, previousId);
+		if(!m_split)
+		{
+			co_return;
+		}
 	}
 	m_zoomed = sessionId;
 	setFocusedTile(sessionId);
 	emit zoomedChanged();
 	emit visibleSessionIdsChanged();
+	updateCommandContext();
 	ChatSession* zoomed = session(sessionId);
 	if(zoomed == nullptr)
 	{
@@ -222,6 +264,7 @@ QCoro::Task<> Workspace::unzoomTask()
 	const QString id = std::exchange(m_zoomed, QString());
 	emit zoomedChanged();
 	emit visibleSessionIdsChanged();
+	updateCommandContext();
 	ChatSession* tile = session(id);
 	if(tile != nullptr && tile->isAttached())
 	{

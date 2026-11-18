@@ -27,8 +27,8 @@ Item {
 	readonly property bool retrying: activity === Activity.retrying
 	readonly property bool attention: hasPermission || failed
 	readonly property bool hovered: hover.hovered
+	readonly property bool canDetach: isCurrent && !Workspace.splitView
 	readonly property int renameEntry: 0 // index in the context menu
-
 	// What the line under the title says.
 	readonly property string subtitle: {
 		if (activity === Activity.waitingQuestion)
@@ -206,7 +206,7 @@ Item {
 				opacity: hover.hovered ? 1 : 0
 				visible: opacity > 0
 				Accessible.name: qsTr("Close session")
-				onClicked: Workspace.closeSession(row.sessionId)
+				onClicked: Workspace.requestCloseSession(row.sessionId)
 
 				Behavior on opacity { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
 			}
@@ -219,7 +219,14 @@ Item {
 	}
 	TapHandler {
 		id: tap
-		onTapped: Workspace.openSession(row.sessionId)
+		onTapped: {
+			if (row.renaming)
+				return
+			if (row.canDetach)
+				Workspace.detachCurrent()
+			else
+				Workspace.openSession(row.sessionId)
+		}
 		onDoubleTapped: row.startRename()
 	}
 	TapHandler {
@@ -229,12 +236,16 @@ Item {
 
 	ContextMenu {
 		id: menu
-		entries: [{text: qsTr("Rename")}, {text: qsTr("Close"), danger: true}]
+		entries: row.canDetach
+			? [{text: qsTr("Rename")}, {text: qsTr("Move to background")}, {text: qsTr("Close"), danger: true}]
+			: [{text: qsTr("Rename")}, {text: qsTr("Close"), danger: true}]
 		onTriggered: index => {
 			if (index === row.renameEntry)
 				row.startRename()
+			else if (row.canDetach && index === 1)
+				Workspace.detachCurrent()
 			else
-				Workspace.closeSession(row.sessionId)
+				Workspace.requestCloseSession(row.sessionId)
 		}
 	}
 }

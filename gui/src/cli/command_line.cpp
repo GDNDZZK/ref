@@ -86,7 +86,7 @@ struct Options
 	QCommandLineOption token{u"token"_s, u"Token for --server."_s, u"TOKEN"_s};
 	QCommandLineOption mock{u"mock"_s, u"Talk to a private `ref-server --mock` with canned scripts (development)."_s};
 	// Not in --help: the integration tests start the whole program with it.
-	QCommandLineOption smoke = hiddenOption(u"smoke"_s, u"Open the session, print `attached <id>` and exit."_s);
+	QCommandLineOption smoke = hiddenOption(u"smoke"_s, u"Wait until ready or attached, print `ready` or `attached <id>` and exit."_s);
 
 	static QCommandLineOption hiddenOption(const QString& name, const QString& description)
 	{

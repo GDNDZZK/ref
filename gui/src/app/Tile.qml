@@ -12,6 +12,8 @@ Item {
 	required property int place
 	required property bool anyZoomed // whether any tile is zoomed
 
+	property bool sidebarAnimating: false
+	property real stableWidth: width
 	// Where the grid wants the tile, and whether it is the zoomed one.
 	property rect slot: Qt.rect(0, 0, 0, 0)
 	// The slot as it was when the tile started leaving: the tile fades in place while the
@@ -19,12 +21,13 @@ Item {
 	property rect frozenSlot: Qt.rect(0, 0, 0, 0)
 	readonly property rect placedSlot: leaving ? frozenSlot : slot
 	property rect zoomRect: Qt.rect(0, 0, 0, 0)
-	readonly property bool zoomed: Workspace.zoomedId === sessionId
+	property bool zoomed: Workspace.zoomedId === sessionId
 	readonly property bool expanded: zoomed
 	readonly property bool fading: leaving && Workspace.splitView
 	readonly property bool othersZoomed: anyZoomed && !zoomed
 	// Whether the tile moves between its slot and the whole area (slowly) or just reflows.
-	property bool travelling: expanded
+	property bool unzooming: false
+	readonly property bool travelling: expanded || unzooming
 	readonly property int travelDuration: travelling || leaving ? Motion.slow : Motion.standard
 	readonly property bool focused: Workspace.focusedTileId === sessionId
 	readonly property var facts: live.data
@@ -39,9 +42,14 @@ Item {
 		pane.focusInput()
 	}
 
+	readonly property int targetBorderWidth: expanded ? 0 : 1
+	readonly property real targetWidth: expanded ? zoomRect.width : placedSlot.width
+	readonly property real paneTargetWidth: Math.max(0, targetWidth - 2 * targetBorderWidth)
+	property real paneWidthFloor: paneTargetWidth
+
 	x: expanded ? zoomRect.x : placedSlot.x
 	y: expanded ? zoomRect.y : placedSlot.y
-	width: expanded ? zoomRect.width : placedSlot.width
+	width: targetWidth
 	height: expanded ? zoomRect.height : placedSlot.height
 	z: expanded ? 1 : fading ? -1 : 0
 	opacity: othersZoomed || fading ? 0 : 1
@@ -51,7 +59,8 @@ Item {
 
 	Behavior on x { NumberAnimation { duration: tile.travelDuration; easing.type: Motion.ease } }
 	Behavior on y { NumberAnimation { duration: tile.travelDuration; easing.type: Motion.ease } }
-	Behavior on width { NumberAnimation { duration: tile.travelDuration; easing.type: Motion.ease } }
+	Behavior on width { NumberAnimation { id: widthAnim; duration: tile.travelDuration; easing.type: Motion.ease } }
+	onPaneTargetWidthChanged: paneWidthFloor = pane.width > 0 ? Math.min(pane.width, paneTargetWidth) : paneTargetWidth
 	Behavior on height { NumberAnimation { duration: tile.travelDuration; easing.type: Motion.ease } }
 	Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: tile.fading ? Motion.exitEase : Motion.ease } }
 	Behavior on scale { NumberAnimation { duration: Motion.standard; easing.type: tile.fading ? Motion.exitEase : Motion.ease } }
@@ -64,7 +73,7 @@ Item {
 
 	onExpandedChanged: {
 		if (expanded) {
-			travelling = true
+			unzooming = true
 			settle.stop()
 		} else {
 			settle.restart()
@@ -74,11 +83,15 @@ Item {
 	Timer {
 		id: settle
 		interval: Motion.slow
-		onTriggered: tile.travelling = false
+		onTriggered: tile.unzooming = false
 	}
 
 	// A tile arrives by fading and growing into its slot.
-	Component.onCompleted: arrival.start()
+	Component.onCompleted: {
+		if (expanded)
+			unzooming = true
+		arrival.start()
+	}
 	ParallelAnimation {
 		id: arrival
 		NumberAnimation { target: frame; property: "opacity"; from: 0; to: 1; duration: Motion.standard; easing.type: Motion.ease }
@@ -99,12 +112,14 @@ Item {
 	Rectangle {
 		id: frame
 		anchors.fill: parent
-		radius: Theme.radius
+		radius: tile.expanded ? 0 : Theme.radius
 		color: Theme.background
+		border.width: tile.targetBorderWidth
 		border.color: tile.fading ? Theme.background : (tile.focused || tile.expanded ? Theme.accentText : (tile.hasRoot ? tile.rootColor : Theme.border))
 		layer.enabled: !tile.travelling && (arrival.running || tile.fading || tile.othersZoomed)
 		layer.smooth: true
 
+		Behavior on radius { NumberAnimation { duration: tile.travelDuration; easing.type: Motion.ease } }
 		Behavior on border.color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 
 		Rectangle {
@@ -118,10 +133,9 @@ Item {
 			color: tile.hasPermission ? Theme.warningSurface : Theme.surface
 			opacity: tile.expanded ? 0 : 1
 			clip: true
-			Behavior on height { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-			Behavior on opacity { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+			Behavior on height { NumberAnimation { duration: tile.travelDuration; easing.type: Motion.ease } }
+			Behavior on opacity { NumberAnimation { duration: tile.travelDuration; easing.type: Motion.ease } }
 			Behavior on color { ColorAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-
 			Rectangle {
 				anchors.bottom: parent.bottom
 				width: parent.width
@@ -256,6 +270,15 @@ Item {
 			}
 			session: tile.session
 			compact: !tile.expanded
+			layoutCompact: widthAnim.running ? true : !tile.expanded
+			layoutWidth: {
+				const inset = anchors.leftMargin + anchors.rightMargin
+				if (tile.sidebarAnimating)
+					return Math.max(0, tile.stableWidth - inset)
+				if (widthAnim.running)
+					return tile.paneWidthFloor
+				return width
+			}
 			keysEnabled: tile.focused || tile.expanded
 			composerShown: tile.focused || tile.expanded
 		}

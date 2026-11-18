@@ -68,11 +68,13 @@ FocusScope {
 
 		readonly property real wantedY: Math.max(Theme.overlayEdgeMargin, (dialog.height - height) / 3)
 		readonly property bool shown: dialog.entered && dialog.open
+		property bool heightReady: false
+		property real dropOffset: shown ? 0 : Motion.dialogDrop
 
 		width: Math.min(dialog.dialogWidth, dialog.width - 2 * Theme.overlayEdgeMargin)
 		height: Math.min(dialog.maxPanelHeight, Theme.dialogHeaderHeight + scroller.contentHeight + (dialog.hasButtons ? Theme.dialogFooterHeight : 0))
 		x: Math.round((dialog.width - width) / 2)
-		y: Math.round(wantedY) - (shown ? 0 : Motion.dialogDrop)
+		y: Math.round(wantedY - dropOffset)
 		radius: Theme.radiusLarge
 		color: Theme.surface
 		border.color: Theme.border
@@ -80,11 +82,19 @@ FocusScope {
 		opacity: shown ? 1 : 0
 		scale: shown ? 1 : Motion.popScale
 
-		Behavior on y { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+		Timer {
+			interval: 0
+			running: dialog.entered && dialog.height > 0 && !panel.heightReady
+			onTriggered: panel.heightReady = true
+		}
+
+		Behavior on dropOffset { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
 		Behavior on opacity { NumberAnimation { duration: panel.shown ? Motion.standard : Motion.quick; easing.type: Motion.ease } }
 		Behavior on scale { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-		Behavior on height { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
-
+		Behavior on height {
+			enabled: panel.heightReady
+			NumberAnimation { duration: Motion.standard; easing.type: Motion.ease }
+		}
 		// Swallows clicks, so the dialog's own tap handler only sees the ones outside.
 		TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds }
 

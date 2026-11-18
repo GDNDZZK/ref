@@ -25,6 +25,24 @@ Item {
 		field.selectAll()
 	}
 
+	property bool animateHighlight: false
+
+	function isMissingDirectory(code, listing) {
+		if (code === "dir_not_found" || code === "not_found")
+			return true
+		return code === "" && typeof listing === "string" && listing.startsWith("Directory does not exist")
+	}
+
+	function move(delta) {
+		if (!completing)
+			return
+		const base = view.currentIndex < 0 ? 0 : view.currentIndex
+		const next = Math.max(0, Math.min(base + delta, names.length - 1))
+		animateHighlight = true
+		view.currentIndex = next
+		view.positionViewAtIndex(next, ListView.Contain)
+	}
+
 	// The part up to the last slash is the directory to list; the rest is what its names must start with.
 	function refresh() {
 		const slash = text.lastIndexOf("/")
@@ -34,12 +52,15 @@ Item {
 		Workspace.listDirs(directory, (ok, listing, code) => {
 			if (mine !== request)
 				return
-			// remove text fallback with protocol 5
-			const notFound = !ok && (code === "not_found" || (code === "" && typeof listing === "string" && listing.startsWith("Directory does not exist")))
+			const notFound = !ok && isMissingDirectory(code, listing)
 			listedPath = ok ? listing.path : ""
 			listError = ok || notFound ? "" : listing
 			names = ok ? listing.dirs.filter(name => name.toLowerCase().startsWith(prefix)) : []
+			animateHighlight = false
+			hoverGuard.reset()
 			view.currentIndex = names.length > 0 ? 0 : -1
+			if (names.length > 0)
+				view.positionViewAtBeginning()
 		})
 	}
 
@@ -54,6 +75,8 @@ Item {
 		: listError !== "" ? 8 + errorLine.implicitHeight : 0)
 
 	Behavior on implicitHeight { NumberAnimation { duration: Motion.standard; easing.type: Motion.ease } }
+
+	PointerMoveGuard { id: hoverGuard }
 
 	Timer {
 		id: debounce
@@ -73,8 +96,8 @@ Item {
 			if (view.currentIndex >= 0)
 				path.accept(path.names[view.currentIndex])
 		}
-		onDownPressed: if (path.completing) view.currentIndex = Math.min(view.currentIndex + 1, path.names.length - 1)
-		onUpPressed: if (path.completing) view.currentIndex = Math.max(view.currentIndex - 1, 0)
+		onDownPressed: path.move(1)
+		onUpPressed: path.move(-1)
 	}
 
 	Text {
@@ -108,9 +131,23 @@ Item {
 			color: Theme.surfaceHover
 			visible: view.currentItem !== null
 
-			Behavior on y { NumberAnimation { duration: Motion.quick; easing.type: Motion.ease } }
+			Behavior on y {
+				enabled: path.animateHighlight
+				NumberAnimation { duration: Motion.quick; easing.type: Motion.ease }
+			}
 		}
 
+		HoverHandler {
+			onPointChanged: {
+				if (!hovered || !hoverGuard.movedTo(point.scenePosition))
+					return
+				const index = view.indexAt(point.position.x + view.contentX, point.position.y + view.contentY)
+				if (index >= 0) {
+					path.animateHighlight = true
+					view.currentIndex = index
+				}
+			}
+		}
 		delegate: Item {
 			id: row
 			required property string modelData
@@ -135,7 +172,6 @@ Item {
 			}
 			HoverHandler {
 				cursorShape: Qt.PointingHandCursor
-				onHoveredChanged: if (hovered) view.currentIndex = row.index
 			}
 			TapHandler { onTapped: path.accept(row.modelData) }
 		}

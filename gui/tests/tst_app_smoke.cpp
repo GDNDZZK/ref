@@ -48,8 +48,8 @@ class TestAppSmoke : public QObject
 
 private slots:
 	void initTestCase();
-	void mockBackendOpensASession();
-	void explicitServerOpensASession();
+	void mockBackendStartsReadyWithoutAutoSession();
+	void explicitServerSupportsReadyContinueAndAttach();
 	void explicitServerRejectsUnknownSession();
 	void startsTheBackendItself();
 	void helpAndVersion();
@@ -141,28 +141,44 @@ std::optional<proto::InstanceInfo> TestAppSmoke::startServer(QProcess& server) c
 	return std::nullopt;
 }
 
-void TestAppSmoke::mockBackendOpensASession()
+void TestAppSmoke::mockBackendStartsReadyWithoutAutoSession()
 {
 	const Run run = runGui({u"--mock"_s, u"--smoke"_s, m_work});
 
 	QVERIFY2(run.finished, "timed out");
 	QCOMPARE(run.exitCode, 0);
-	QVERIFY2(run.out.startsWith(u"attached ses_"_s), qPrintable(run.out));
+	QCOMPARE(run.out, u"ready\n"_s);
 	QVERIFY2(run.err.isEmpty(), qPrintable(run.err)); // no QML warnings either
 }
 
-void TestAppSmoke::explicitServerOpensASession()
+void TestAppSmoke::explicitServerSupportsReadyContinueAndAttach()
 {
 	QProcess server;
 	const std::optional<proto::InstanceInfo> instance = startServer(server);
 	QVERIFY(instance);
 
 	const QString url = u"ws://127.0.0.1:%1"_s.arg(instance->port);
-	const Run opened = runGui({u"--server"_s, url, u"--token"_s, u"smoke-token"_s, u"--smoke"_s, m_work});
-	QVERIFY2(opened.finished, "timed out");
-	QCOMPARE(opened.exitCode, 0);
-	QVERIFY2(opened.out.startsWith(u"attached ses_"_s), qPrintable(opened.out));
-	QVERIFY2(opened.err.isEmpty(), qPrintable(opened.err));
+	const Run ready = runGui({u"--server"_s, url, u"--token"_s, u"smoke-token"_s, u"--smoke"_s, m_work});
+	QVERIFY2(ready.finished, "timed out");
+	QCOMPARE(ready.exitCode, 0);
+	QCOMPARE(ready.out, u"ready\n"_s);
+	QVERIFY2(ready.err.isEmpty(), qPrintable(ready.err));
+
+	// -c starts a session when the directory has none yet.
+	const Run continued = runGui({u"--server"_s, url, u"--token"_s, u"smoke-token"_s, u"-c"_s, u"--smoke"_s, m_work});
+	QVERIFY2(continued.finished, "timed out");
+	QCOMPARE(continued.exitCode, 0);
+	QVERIFY2(continued.out.startsWith(u"attached ses_"_s), qPrintable(continued.out));
+	QVERIFY2(continued.err.isEmpty(), qPrintable(continued.err));
+	const QString sessionId = continued.out.mid(u"attached "_s.size()).trimmed();
+	QVERIFY(!sessionId.isEmpty());
+
+	// -s attaches to that exact session.
+	const Run attached = runGui({u"--server"_s, url, u"--token"_s, u"smoke-token"_s, u"-s"_s, sessionId, u"--smoke"_s, m_work});
+	QVERIFY2(attached.finished, "timed out");
+	QCOMPARE(attached.exitCode, 0);
+	QCOMPARE(attached.out, u"attached %1\n"_s.arg(sessionId));
+	QVERIFY2(attached.err.isEmpty(), qPrintable(attached.err));
 
 	// A wrong token never gets in; the program says so instead of waiting for ever.
 	const Run refused = runGui({u"--server"_s, url, u"--token"_s, u"wrong"_s, u"--smoke"_s, m_work});
@@ -172,7 +188,6 @@ void TestAppSmoke::explicitServerOpensASession()
 
 	QVERIFY(stopServer(server));
 }
-
 void TestAppSmoke::explicitServerRejectsUnknownSession()
 {
 	QProcess server;
@@ -202,8 +217,7 @@ void TestAppSmoke::startsTheBackendItself()
 
 	QVERIFY2(run.finished, "timed out");
 	QCOMPARE(run.exitCode, 0);
-	QVERIFY2(run.out.startsWith(u"attached ses_"_s), qPrintable(run.out));
-
+	QCOMPARE(run.out, u"ready\n"_s);
 	QTRY_VERIFY_WITH_TIMEOUT(client::liveInstances(client::instancesDirectory()).isEmpty(), ServerExitTimeoutMs);
 }
 
