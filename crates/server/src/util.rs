@@ -193,7 +193,7 @@ pub(crate) fn fmt_duration(secs: i64) -> String {
     }
 }
 
-/// Expand a leading `~/`.
+/// Expand a leading `~`, `~/`, or `~\`.
 pub(crate) fn expand_home(p: &str, home: Option<&Path>) -> std::path::PathBuf {
     if p == "~"
         && let Some(h) = home
@@ -203,7 +203,22 @@ pub(crate) fn expand_home(p: &str, home: Option<&Path>) -> std::path::PathBuf {
     if let Some(rest) = p.strip_prefix("~/")
         && let Some(h) = home
     {
+        return if rest.is_empty() {
+            h.to_path_buf()
+        } else {
+            h.join(rest)
+        };
+    }
+    if let Some(rest) = p.strip_prefix("~\\")
+        && let Some(h) = home
+    {
+        if rest.is_empty() {
+            return h.to_path_buf();
+        }
+        #[cfg(windows)]
         return h.join(rest);
+        #[cfg(not(windows))]
+        return h.join(rest.replace('\\', "/"));
     }
     std::path::PathBuf::from(p)
 }
@@ -253,5 +268,23 @@ mod tests {
         let t = truncate_middle(&long, 100);
         assert!(t.len() < 200 && t.contains("truncated"));
         assert_eq!(tail_bytes("héllo", 3), "llo");
+    }
+
+    #[test]
+    fn expand_home_handles_slash_and_backslash() {
+        let home = Path::new("/home/alice");
+        assert_eq!(expand_home("~", Some(home)), Path::new("/home/alice"));
+        assert_eq!(expand_home("~/", Some(home)), Path::new("/home/alice"));
+        assert_eq!(expand_home("~\\", Some(home)), Path::new("/home/alice"));
+        assert_eq!(
+            expand_home("~/proj/out.md", Some(home)),
+            home.join("proj").join("out.md")
+        );
+        assert_eq!(
+            expand_home("~\\proj\\out.md", Some(home)),
+            home.join("proj").join("out.md")
+        );
+        assert_eq!(expand_home("~/proj", None), Path::new("~/proj"));
+        assert_eq!(expand_home("~bob/proj", Some(home)), Path::new("~bob/proj"));
     }
 }

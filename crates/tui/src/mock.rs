@@ -1400,15 +1400,19 @@ impl Mock {
         name: Option<String>,
         model: Option<ModelRef>,
     ) {
-        let base = std::path::Path::new(cwd)
-            .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| "ref".into());
+        let cwd_norm = normalize_lexical_path("/", cwd);
+        let base = cwd_norm
+            .trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .filter(|s| !s.is_empty() && !s.ends_with(':'))
+            .unwrap_or("ref")
+            .to_string();
         let name = name.unwrap_or_else(|| {
             let hash = SEQ.load(Ordering::Relaxed) * NAME_HASH_MULTIPLIER % NAME_HASH_MODULUS;
             format!("{base}-{hash:04x}")
         });
-        let mut created = self.create(&name, agent.as_deref().unwrap_or("build"), cwd);
+        let mut created = self.create(&name, agent.as_deref().unwrap_or("build"), &cwd_norm);
         if let Some(m) = model {
             created = self
                 .update_info(&created.id, |i| i.model = m)
@@ -1804,6 +1808,8 @@ impl Mock {
 
     /// Seeds background sessions and history.
     fn seed(&self, cwd: &str) {
+        let cwd = normalize_lexical_path("/", cwd);
+        let cwd = cwd.as_str();
         self.world().root_cwd = cwd.to_string();
         let a = self.create("worker-1", "build", cwd);
         let b = self.create("reviewer", "review", cwd);
@@ -1914,26 +1920,52 @@ fn next_variant(current: Option<&str>, variants: &[String]) -> Option<String> {
     }
 }
 
-fn expand_mock_tilde(path: &str, home: &str) -> String {
-    if path == "~" {
-        return home.to_string();
+fn split_mock_drive(s: &str) -> Option<(&str, &str)> {
+    let b = s.as_bytes();
+    if b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' {
+        Some((&s[..2], &s[2..]))
+    } else {
+        None
     }
-    if let Some(rest) = path.strip_prefix("~/") {
+}
+
+fn expand_mock_tilde(path: &str, home: &str) -> String {
+    let home = home.replace('\\', "/");
+    if path == "~" {
+        return home;
+    }
+    if let Some(rest) = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
+        let rest = rest.replace('\\', "/");
+        if rest.is_empty() {
+            return home;
+        }
         return format!("{}/{rest}", home.trim_end_matches('/'));
     }
     path.to_string()
 }
 
 fn normalize_lexical_path(base: &str, target: &str) -> String {
+    let base_s = base.replace('\\', "/");
+    let target_s = target.replace('\\', "/");
     let mut parts: Vec<&str> = Vec::new();
-    if !target.starts_with('/') {
-        for seg in base.split('/') {
+    let (drive, rel_target) = if let Some((d, rest)) = split_mock_drive(&target_s) {
+        (Some(d.to_string()), rest)
+    } else if target_s.starts_with('/') {
+        let base_drive = split_mock_drive(&base_s).map(|(d, _)| d.to_string());
+        (base_drive, target_s.as_str())
+    } else {
+        let (base_drive, base_rest) = match split_mock_drive(&base_s) {
+            Some((d, rest)) => (Some(d.to_string()), rest),
+            None => (None, base_s.as_str()),
+        };
+        for seg in base_rest.split('/') {
             if !seg.is_empty() && seg != "." {
                 parts.push(seg);
             }
         }
-    }
-    for seg in target.split('/') {
+        (base_drive, target_s.as_str())
+    };
+    for seg in rel_target.split('/') {
         match seg {
             "" | "." => {}
             ".." => {
@@ -1942,10 +1974,11 @@ fn normalize_lexical_path(base: &str, target: &str) -> String {
             s => parts.push(s),
         }
     }
-    if parts.is_empty() {
-        "/".to_string()
-    } else {
-        format!("/{}", parts.join("/"))
+    match drive {
+        Some(d) if parts.is_empty() => format!("{d}/"),
+        Some(d) => format!("{d}/{}", parts.join("/")),
+        None if parts.is_empty() => "/".to_string(),
+        None => format!("/{}", parts.join("/")),
     }
 }
 
@@ -2186,5 +2219,93 @@ mod tests {
                 other => panic!("unexpected event: {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn windows_drive_paths_cd_parent_and_tilde_in_mock() {
+        let (ev_tx, mut ev_rx) = mpsc::unbounded_channel();
+        let m = Mock {
+            world: Arc::new(Mutex::new(World::default())),
+            tx: ev_tx,
+        };
+        m.world().root_cwd = normalize_lexical_path("/", r"C:\Users\alice\proj");
+        m.handle(ClientFrame {
+            id: Some(1),
+            req: Request::CreateSession {
+                cwd: r"C:\Users\alice\proj".into(),
+                agent: None,
+                model: None,
+                name: None,
+            },
+        });
+        let mut next_resp = |want_id: u64| -> Value {
+            loop {
+                match ev_rx.try_recv().expect("response frame") {
+                    NetEvent::Frame(ServerFrame::Response {
+                        id,
+                        ok,
+                        result,
+                        error,
+                        ..
+                    }) if id == want_id => {
+                        assert!(ok, "unexpected error: {error:?}");
+                        return result;
+                    }
+                    _ => {}
+                }
+            }
+        };
+        let created = next_resp(1);
+        let sid = created["session"]["id"].as_str().unwrap().to_string();
+        assert_eq!(created["session"]["cwd"], "C:/Users/alice/proj");
+        assert!(
+            created["session"]["name"]
+                .as_str()
+                .unwrap()
+                .starts_with("proj-")
+        );
+
+        // ListDirs at `.` and SetCwd `..` up to drive root `C:/` never prepend `/` (`"/C:/..."`).
+        m.handle(ClientFrame {
+            id: Some(2),
+            req: Request::ListDirs {
+                path: ".".into(),
+                cwd: Some(r"C:\Users\alice\proj".into()),
+                include_files: false,
+            },
+        });
+        let listed = next_resp(2);
+        assert_eq!(listed["path"], "C:/Users/alice/proj");
+        assert!(
+            listed["dirs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|d| d == "src")
+        );
+
+        let mut req_id = 3;
+        for expected in ["C:/Users/alice", "C:/Users", "C:/", "C:/"] {
+            m.handle(ClientFrame {
+                id: Some(req_id),
+                req: Request::SetCwd {
+                    session_id: sid.clone(),
+                    path: "..".into(),
+                },
+            });
+            let r = next_resp(req_id);
+            assert_eq!(r["session"]["cwd"], expected);
+            req_id += 1;
+        }
+        // Windows home-relative `~\crates` expands against mock root_cwd.
+        m.handle(ClientFrame {
+            id: Some(req_id),
+            req: Request::SetCwd {
+                session_id: sid,
+                path: r"~\crates".into(),
+            },
+        });
+        let r = next_resp(req_id);
+        assert_eq!(r["session"]["cwd"], "C:/Users/alice/proj/crates");
     }
 }

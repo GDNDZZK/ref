@@ -6547,3 +6547,268 @@ fn single_line_editor_horizontal_scroll_and_help_and_narrow_permission() {
         "{narrow_s}"
     );
 }
+
+#[test]
+fn cd_dialog_windows_roots_parent_nav_and_backspace_edges() {
+    let (mut app, mut rx) = test_app_with_requests(false);
+    // 1. Windows drive root `C:/` in `open_cd`, `cur_target`, `at_root`, and `dialog_submit`.
+    app.views.get_mut(TEST_SESSION).unwrap().info.cwd = r"C:\".into();
+    app.open_cd(TEST_SESSION);
+    if let Some(crate::ui::dialog::Dialog::List(d)) = &app.dialog {
+        assert_eq!(d.filter.text, "C:/");
+    }
+    let f = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(f.req, Request::ListDirs { .. }))
+        .expect("list_dirs for C:/");
+    if let Request::ListDirs { path, .. } = &f.req {
+        assert_eq!(path, "C:/", "drive root keeps trailing slash in ListDirs");
+    }
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: f.id.unwrap(),
+        ok: true,
+        result: json!({ "path": "C:/", "dirs": ["Users"], "files": [] }),
+        error: None,
+        code: None,
+    }));
+    if let Some(crate::ui::dialog::Dialog::List(d)) = &app.dialog {
+        assert!(d.items.iter().all(|i| i.key != "nav:.."), "C:/ is at_root");
+        assert!(d.items.iter().any(|i| i.key == "use:C:/"));
+    }
+    press(&mut app, KeyCode::Enter);
+    let sent = drain_requests(&mut rx);
+    assert!(
+        sent.iter()
+            .any(|f| matches!(&f.req, Request::SetCwd { path, .. } if path == "C:/"))
+    );
+
+    //Restore TEST_CWD and verify `nav:..` vs `Backspace` at `~/`, `""`, `./`, `../`, and `../../`.
+    app.views.get_mut(TEST_SESSION).unwrap().info.cwd = TEST_CWD.into();
+    app.open_cd(TEST_SESSION);
+    let _ = drain_requests(&mut rx);
+    if let Some(crate::ui::dialog::Dialog::List(d)) = &mut app.dialog {
+        d.filter.set_text("~/");
+    }
+    app.on_cd_filter_edited();
+    let home_req = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(f.req, Request::ListDirs { .. }))
+        .unwrap();
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: home_req.id.unwrap(),
+        ok: true,
+        result: json!({ "path": "/home/u", "dirs": ["proj"], "files": [] }),
+        error: None,
+        code: None,
+    }));
+    // Select `nav:..` at `~/` (when session cwd is child `/home/u/proj`): Tab steps UP to `/home/`, NEVER `""`!
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Tab);
+    if let Some(crate::ui::dialog::Dialog::List(d)) = &app.dialog {
+        assert_eq!(d.filter.text, "/home/");
+    }
+    // Backspace at `~/` deletes `/` -> `"~"` instead of teleporting to `""`!
+    if let Some(crate::ui::dialog::Dialog::List(d)) = &mut app.dialog {
+        d.filter.set_text("~/");
+    }
+    press(&mut app, KeyCode::Backspace);
+    if let Some(crate::ui::dialog::Dialog::List(d)) = &app.dialog {
+        assert_eq!(d.filter.text, "~");
+    }
+    // Unresolved `""` -> `nav:..` gives `"../"` (never `"/"`), then `"../../"`, and Backspace never loops!
+    let _ = drain_requests(&mut rx);
+    if let Some(crate::ui::dialog::Dialog::List(d)) = &mut app.dialog {
+        d.filter.set_text("");
+        d.cd_resolved_dir.clear();
+        d.items = vec![crate::ui::dialog::Item {
+            key: "nav:..".into(),
+            title: "../".into(),
+            ..Default::default()
+        }];
+        d.refilter();
+        d.sel = 0;
+    }
+    press(&mut app, KeyCode::Enter);
+    if let Some(crate::ui::dialog::Dialog::List(d)) = &mut app.dialog {
+        assert_eq!(d.filter.text, "../");
+        d.sel = 0;
+    }
+    press(&mut app, KeyCode::Tab);
+    if let Some(crate::ui::dialog::Dialog::List(d)) = &app.dialog {
+        assert_eq!(d.filter.text, "../../");
+    }
+    // Backspace from `"../../"` -> `"../"` -> `".."` -> `"."` -> `""`!
+    for expected in ["../", "..", ".", ""] {
+        press(&mut app, KeyCode::Backspace);
+        if let Some(crate::ui::dialog::Dialog::List(d)) = &app.dialog {
+            assert_eq!(d.filter.text, expected);
+        }
+    }
+}
+
+#[test]
+fn autocomplete_cursor_moves_export_tilde_typing_reset_and_shell_ctrl_v() {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let (mut app, mut rx) = test_app_with_requests(false);
+    let _ = drain_requests(&mut rx);
+
+    // 1. Cursor-only movement (keyboard + mouse) updates or closes `app.ac`.
+    type_text(&mut app, "!echo src/");
+    let dir_req = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(&f.req, Request::ListDirs { path, .. } if path == "src"))
+        .unwrap();
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: dir_req.id.unwrap(),
+        ok: true,
+        result: json!({ "path": "/home/u/proj/src", "dirs": ["ui"], "files": ["main.rs"] }),
+        error: None,
+        code: None,
+    }));
+    assert_eq!(app.ac.as_ref().unwrap().kind, crate::app::AcKind::ShellPath);
+    assert_eq!(app.ac.as_ref().unwrap().start, 5);
+    // Pressing Home moves cursor to byte 0 (`""` before cursor -> `ac` closes instead of stale `start=5`).
+    press(&mut app, KeyCode::Home);
+    assert!(
+        app.ac.is_none(),
+        "Home to start of shell line closes ShellPath ac"
+    );
+    app.shell_mode = false;
+    app.editor.clear();
+
+    // Mouse click inside editor away from `@mention` closes `AcKind::File`.
+    type_text(&mut app, "check @src/ma");
+    app.files_due = None;
+    let fid = 900;
+    app.pending.insert(
+        fid,
+        crate::app::Pending::Files {
+            query: "src/ma".into(),
+        },
+    );
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: fid,
+        ok: true,
+        result: json!({ "files": ["src/main.rs"] }),
+        error: None,
+        code: None,
+    }));
+    assert_eq!(app.ac.as_ref().unwrap().kind, crate::app::AcKind::File);
+    render(&mut app, 100, 24);
+    let lay = crate::render::chat_layout(&app, app.screen);
+    crate::input::handle(
+        &mut app,
+        mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            lay.editor.x,
+            lay.editor.y,
+        ),
+    );
+    crate::input::handle(
+        &mut app,
+        mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            lay.editor.x,
+            lay.editor.y,
+        ),
+    );
+    assert!(
+        app.ac.is_none(),
+        "clicking away from @mention closes File ac"
+    );
+    app.editor.clear();
+
+    // 2. `/export ~/out.md`, `/export ~\out.md`, and `/export C:\out.md` do NOT prepend session cwd!
+    for (cmd_str, want) in [
+        ("/export ~/out.md", "~/out.md"),
+        (r"/export ~\out.md", r"~\out.md"),
+        (r"/export C:\out.md", r"C:\out.md"),
+    ] {
+        type_text(&mut app, cmd_str);
+        press(&mut app, KeyCode::Enter);
+        let frames = drain_requests(&mut rx);
+        assert!(
+            frames.iter().any(|f| matches!(
+                &f.req,
+                Request::Export { path, .. } if path == want
+            )),
+            "cmd={cmd_str}"
+        );
+    }
+
+    // 3. `explicitly_selected` resets on subsequent typing in free-form popup, while async reply preserves it.
+    type_text(&mut app, "!ca");
+    let b1 = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(&f.req, Request::ListBinaries { query, .. } if query == "ca"))
+        .unwrap();
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: b1.id.unwrap(),
+        ok: true,
+        result: json!({ "binaries": ["cargo", "cat", "cal"] }),
+        error: None,
+        code: None,
+    }));
+    press(&mut app, KeyCode::Down);
+    assert!(app.ac.as_ref().unwrap().explicitly_selected);
+    assert_eq!(app.ac.as_ref().unwrap().sel, 1);
+    // User types `t` (`!cat`): `explicitly_selected` resets to false and `sel` to 0!
+    type_text(&mut app, "t");
+    let b2 = drain_requests(&mut rx)
+        .into_iter()
+        .find(|f| matches!(&f.req, Request::ListBinaries { query, .. } if query == "cat"))
+        .unwrap();
+    assert!(!app.ac.as_ref().unwrap().explicitly_selected);
+    assert_eq!(app.ac.as_ref().unwrap().sel, 0);
+    // If user presses Down while `b2` is in flight, `b2`'s arrival preserves `explicitly_selected`!
+    press(&mut app, KeyCode::Down);
+    app.on_net(crate::net::NetEvent::Frame(ServerFrame::Response {
+        id: b2.id.unwrap(),
+        ok: true,
+        result: json!({ "binaries": ["cat", "catchsegv"] }),
+        error: None,
+        code: None,
+    }));
+    assert!(app.ac.as_ref().unwrap().explicitly_selected);
+    // Typing `" f"` resets again so plain Enter runs `!cat f` as-is.
+    type_text(&mut app, " f");
+    let _ = drain_requests(&mut rx);
+    press(&mut app, KeyCode::Enter);
+    let frames = drain_requests(&mut rx);
+    assert!(frames.iter().any(|f| matches!(
+        &f.req,
+        Request::Shell { command, .. } if command == "cat f"
+    )));
+
+    // 4. `clipboard_paste_with` skips image paste in `shell_mode`, and clears `app.ac` when attaching in chat.
+    type_text(&mut app, "!");
+    assert!(app.shell_mode);
+    crate::input::clipboard_paste_with(
+        &mut app,
+        || panic!("must not read clipboard image in shell_mode"),
+        || Ok(Some("echo from_clip".into())),
+    );
+    assert!(app.editor.images.is_empty());
+    assert_eq!(app.editor.text, "echo from_clip");
+    app.shell_mode = false;
+    app.editor.clear();
+    type_text(&mut app, "/");
+    assert!(app.ac.is_some());
+    crate::input::clipboard_paste_with(
+        &mut app,
+        || Ok(Some(ImageData::new("image/png", "AAAA"))),
+        || Ok(None),
+    );
+    assert!(app.ac.is_none(), "attach_image clears app.ac");
+    assert_eq!(app.editor.images.len(), 1);
+
+    // 5. Closing `current` while in `Mode::Watch` cleans up `watch.inputs` and `attaching`.
+    app.toggle_watch();
+    app.watch
+        .inputs
+        .entry(TEST_SESSION.into())
+        .or_default()
+        .set_text("draft");
+    app.close_session(TEST_SESSION);
+    assert!(!app.watch.inputs.contains_key(TEST_SESSION));
+}

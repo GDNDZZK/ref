@@ -15,6 +15,12 @@ pub const AC_MAX_ROWS: usize = 10;
 const AC_MIN_DESC_COL: usize = 24;
 /// Maximum parent directories cached in memory to prevent popup flicker while typing.
 const DIR_CACHE_CAP: usize = 24;
+/// Popup chrome rows: top border + bottom padding row.
+const AC_CHROME_ROWS: u16 = 2;
+/// Bonus added to directory fuzzy-match scores so directories rank ahead of files.
+const DIR_FUZZY_SCORE_BONUS: i64 = 10;
+/// Maximum entries returned by `build_dir_items`.
+const MAX_DIR_ITEMS: usize = 50;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AcKind {
@@ -111,7 +117,7 @@ pub fn draw(buf: &mut Buffer, prompt_rect: Rect, chat_height: u16, ac: &mut Auto
         ac.rect = Rect::default();
         return;
     }
-    let max_h = AC_MAX_ROWS.min(chat_height.saturating_sub(1) as usize);
+    let max_h = AC_MAX_ROWS.min(chat_height.saturating_sub(AC_CHROME_ROWS) as usize);
     let n = ac.items.len().min(max_h);
     if n == 0 {
         ac.rect = Rect::default();
@@ -126,7 +132,7 @@ pub fn draw(buf: &mut Buffer, prompt_rect: Rect, chat_height: u16, ac: &mut Auto
     let max_scroll = ac.items.len().saturating_sub(n);
     ac.scroll = ac.scroll.min(max_scroll);
 
-    let h = n as u16 + 2;
+    let h = n as u16 + AC_CHROME_ROWS;
     let x = prompt_rect.x;
     let w = prompt_rect.width;
     let y = prompt_rect.y.saturating_sub(h);
@@ -263,6 +269,22 @@ pub struct SplitPath {
     pub quote: Option<char>,
 }
 
+/// True when `p` begins with an ASCII drive prefix like `C:`.
+pub(crate) fn has_drive_prefix(p: &str) -> bool {
+    let b = p.as_bytes();
+    b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':'
+}
+
+/// True when `p` is an exact bare drive specifier like `C:` (no trailing separator).
+pub(crate) fn is_bare_drive(p: &str) -> bool {
+    p.len() == 2 && has_drive_prefix(p)
+}
+
+/// True when `p` begins with a rooted Windows drive prefix (`C:/` or `C:\`).
+pub(crate) fn has_drive_root_prefix(p: &str) -> bool {
+    has_drive_prefix(p) && matches!(p.as_bytes().get(2), Some(b'/' | b'\\'))
+}
+
 pub fn split_dir_query(raw: &str) -> SplitPath {
     let mut s = raw;
     let mut quote = None;
@@ -273,7 +295,12 @@ pub fn split_dir_query(raw: &str) -> SplitPath {
         quote = Some('\'');
         s = rest.trim_end_matches('\'');
     }
-    let unescaped = if quote.is_none() && s.contains("\\ ") {
+    let win_style = cfg!(windows)
+        || has_drive_prefix(s)
+        || s.starts_with("~\\")
+        || s.starts_with(".\\")
+        || s.starts_with("..\\");
+    let unescaped = if quote.is_none() && !win_style && s.contains("\\ ") {
         s.replace("\\ ", " ")
     } else {
         s.to_string()
@@ -286,17 +313,32 @@ pub fn split_dir_query(raw: &str) -> SplitPath {
             quote,
         };
     }
-    if let Some(slash) = unescaped.rfind('/') {
-        let before = &unescaped[..slash];
-        let req_dir = if before.is_empty() {
-            "/".into()
+    if is_bare_drive(&unescaped) {
+        let root = format!("{unescaped}/");
+        return SplitPath {
+            req_dir: root.clone(),
+            display_prefix: root,
+            name_prefix: String::new(),
+            quote,
+        };
+    }
+    let sep_idx = if win_style || unescaped.contains('\\') {
+        unescaped.rfind(['/', '\\'])
+    } else {
+        unescaped.rfind('/')
+    };
+    if let Some(idx) = sep_idx {
+        let before = &unescaped[..idx];
+        let with_sep = &unescaped[..=idx];
+        let req_dir = if before.is_empty() || is_bare_drive(before) {
+            with_sep.to_string()
         } else {
             before.to_string()
         };
         return SplitPath {
             req_dir,
-            display_prefix: unescaped[..=slash].to_string(),
-            name_prefix: unescaped[slash + 1..].to_string(),
+            display_prefix: with_sep.to_string(),
+            name_prefix: unescaped[idx + 1..].to_string(),
             quote,
         };
     }
@@ -309,15 +351,23 @@ pub fn split_dir_query(raw: &str) -> SplitPath {
 }
 
 /// Formats a completed path entry for insertion into an editor.
-pub fn format_path_completion(
+fn format_path_completion(
     sp: &SplitPath,
     entry: &str,
     is_dir: bool,
     shell_escape: bool,
     trailing_space_on_file: bool,
 ) -> String {
-    let suffix = if is_dir { "/" } else { "" };
-    let full = format!("{}{entry}{suffix}", sp.display_prefix);
+    let sep = if sp.display_prefix.ends_with('\\') {
+        '\\'
+    } else {
+        '/'
+    };
+    let full = if is_dir {
+        format!("{}{entry}{sep}", sp.display_prefix)
+    } else {
+        format!("{}{entry}", sp.display_prefix)
+    };
     if let Some(q) = sp.quote {
         return if is_dir {
             format!("{q}{full}")
@@ -328,6 +378,15 @@ pub fn format_path_completion(
         };
     }
     let escaped = if shell_escape && full.contains(' ') {
+        if sep == '\\' {
+            return if is_dir {
+                format!("\"{full}")
+            } else if trailing_space_on_file {
+                format!("\"{full}\" ")
+            } else {
+                format!("\"{full}\"")
+            };
+        }
         full.replace(' ', "\\ ")
     } else {
         full
@@ -373,17 +432,25 @@ pub fn build_dir_items(
         }
     }
 
+    let sep = if sp.display_prefix.ends_with('\\') {
+        '\\'
+    } else {
+        '/'
+    };
     for d in &listing.dirs {
         if d.starts_with('.') && !show_hidden {
             continue;
         }
         let val = format_path_completion(sp, d, true, shell_escape, trailing_space_on_file);
-        let label = format!("{}{d}/", sp.display_prefix);
+        let label = format!("{}{d}{sep}", sp.display_prefix);
         let dl = d.to_lowercase();
         if q_lower.is_empty() || dl.starts_with(&q_lower) {
             prefix_matches.push((val, label, "dir".to_string()));
         } else if let Some(score) = text::fuzzy_score(d, &sp.name_prefix) {
-            fuzzy_matches.push((score + 10, (val, label, "dir".to_string())));
+            fuzzy_matches.push((
+                score + DIR_FUZZY_SCORE_BONUS,
+                (val, label, "dir".to_string()),
+            ));
         }
     }
     if include_files {
@@ -405,24 +472,24 @@ pub fn build_dir_items(
     prefix_matches
         .into_iter()
         .chain(fuzzy_matches.into_iter().map(|x| x.1))
-        .take(50)
+        .take(MAX_DIR_ITEMS)
         .collect()
 }
 
-/// Steps up one directory segment in `Kind::Cd` when pressing Backspace at a trailing `/` or selecting `../`.
-pub fn parent_dir_input(current: &str) -> String {
-    let trimmed = current.trim_end_matches('/');
-    if trimmed.is_empty() {
-        return "/".into();
+/// Pops one trailing directory segment on Backspace at `/` or `\` when an earlier separator exists.
+/// Returns `None` at `/`, `C:/`, `~/`, `./`, `../`, or single-segment `foo/` so normal backspace runs.
+pub fn parent_dir_input(current: &str) -> Option<String> {
+    if !current.ends_with(['/', '\\']) {
+        return None;
     }
-    if trimmed == "~" {
-        return String::new();
-    }
-    match trimmed.rfind('/') {
-        Some(0) => "/".into(),
-        Some(idx) => format!("{}/", &trimmed[..idx]),
-        None => "../".into(),
-    }
+    let trimmed = current.trim_end_matches(['/', '\\']);
+    let sep_idx = if cfg!(windows) || has_drive_prefix(trimmed) || current.contains('\\') {
+        trimmed.rfind(['/', '\\'])
+    } else {
+        trimmed.rfind('/')
+    };
+    let idx = sep_idx?;
+    Some(trimmed[..=idx].to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -445,55 +512,46 @@ pub enum ShellTokenPos {
 pub fn shell_token_context(before_cursor: &str) -> ShellTokenPos {
     let line_offset = before_cursor.rfind('\n').map_or(0, |i| i + 1);
     let line = &before_cursor[line_offset..];
-    let bytes = line.as_bytes();
-    let mut i = 0usize;
-    let mut quote: Option<u8> = None;
+    let mut it = line.char_indices().peekable();
+    let mut quote: Option<char> = None;
     let mut seg_start = 0usize;
     let mut at_line_start = true;
 
-    while i < bytes.len() {
-        let b = bytes[i];
+    while let Some((idx, c)) = it.next() {
         if let Some(q) = quote {
-            if b == b'\\' && q == b'"' && i + 1 < bytes.len() {
-                i += 2;
+            if c == '\\' && q == '"' {
+                it.next();
                 continue;
             }
-            if b == q {
+            if c == q {
                 quote = None;
             }
-            i += 1;
             continue;
         }
-        match b {
-            b'\\' => {
-                i = (i + 2).min(bytes.len());
+        match c {
+            '\\' => {
+                it.next();
             }
-            b'\'' | b'"' => {
-                quote = Some(b);
-                i += 1;
+            '\'' | '"' => {
+                quote = Some(c);
             }
-            b';' => {
-                i += 1;
-                seg_start = i;
+            ';' => {
+                seg_start = idx + c.len_utf8();
                 at_line_start = false;
             }
-            b'|' => {
-                i += if bytes.get(i + 1) == Some(&b'|') {
-                    2
+            '|' => {
+                seg_start = if it.next_if(|&(_, nc)| nc == '|').is_some() {
+                    idx + 2
                 } else {
-                    1
+                    idx + 1
                 };
-                seg_start = i;
                 at_line_start = false;
             }
-            b'&' if bytes.get(i + 1) == Some(&b'&') => {
-                i += 2;
-                seg_start = i;
+            '&' if it.next_if(|&(_, nc)| nc == '&').is_some() => {
+                seg_start = idx + 2;
                 at_line_start = false;
             }
-            _ => {
-                i += 1;
-            }
+            _ => {}
         }
     }
 
@@ -743,5 +801,97 @@ mod tests {
             None,
             "bottom pad row is not an item"
         );
+    }
+
+    #[test]
+    fn windows_drive_backslash_tilde_and_parent_dir_input() {
+        let check = |raw: &str, req: &str, pfx: &str, name: &str| {
+            let sp = split_dir_query(raw);
+            assert_eq!(
+                (
+                    sp.req_dir.as_str(),
+                    sp.display_prefix.as_str(),
+                    sp.name_prefix.as_str()
+                ),
+                (req, pfx, name),
+                "raw={raw:?}"
+            );
+            sp
+        };
+        check("C:", "C:/", "C:/", "");
+        check("C:/", "C:/", "C:/", "");
+        check(r"C:\", r"C:\", r"C:\", "");
+        let sp_win = check(r"C:\Users\al", r"C:\Users", r"C:\Users\", "al");
+        check(r"~\app", "~", r"~\", "app");
+        check(r"src\ui", "src", r"src\", "ui");
+        check(r"my\ dir/sub", "my dir", "my dir/", "sub");
+
+        // `format_path_completion` preserves backslash separator style and quotes spaces.
+        assert_eq!(
+            format_path_completion(&sp_win, "alice", true, false, false),
+            r"C:\Users\alice\"
+        );
+        assert_eq!(
+            format_path_completion(&sp_win, "Program Files", true, true, false),
+            "\"C:\\Users\\Program Files\\"
+        );
+
+        // `parent_dir_input` pops only when an earlier separator exists; keeps drive roots intact.
+        assert_eq!(parent_dir_input("~/app/").as_deref(), Some("~/"));
+        assert_eq!(parent_dir_input(r"~\app\").as_deref(), Some(r"~\"));
+        assert_eq!(parent_dir_input("/a/b/").as_deref(), Some("/a/"));
+        assert_eq!(parent_dir_input("/a/").as_deref(), Some("/"));
+        assert_eq!(parent_dir_input("a/b/").as_deref(), Some("a/"));
+        assert_eq!(parent_dir_input("../../").as_deref(), Some("../"));
+        assert_eq!(parent_dir_input("C:/Users/").as_deref(), Some("C:/"));
+        assert_eq!(parent_dir_input(r"C:\Users\").as_deref(), Some(r"C:\"));
+        for single in ["/", "C:/", r"C:\", "~/", r"~\", "./", "../", "foo/"] {
+            assert_eq!(parent_dir_input(single), None, "single={single:?}");
+        }
+    }
+
+    #[test]
+    fn shell_token_context_utf8_escaped_multibyte_and_short_terminal_popup() {
+        // `\中` must step over the full multibyte char without splitting UTF-8 bytes.
+        assert_eq!(
+            shell_token_context(r"echo \中 | gr"),
+            ShellTokenPos::Command {
+                start: r"echo \中 | ".len(),
+                raw: "gr".into(),
+                at_line_start: false,
+            }
+        );
+        assert_eq!(
+            shell_token_context("echo \"\\中\" arg"),
+            ShellTokenPos::Arg {
+                start: "echo \"\\中\" ".len(),
+                raw: "arg".into(),
+            }
+        );
+
+        // Short terminals: popup height `n + 2 <= chat_height` never overwrites `prompt_rect.y`.
+        let items: Vec<_> = (0..15)
+            .map(|i| (format!("v{i}"), format!("l{i}"), String::new()))
+            .collect();
+        for chat_h in [3u16, 4, 5, 6] {
+            let mut ac =
+                Autocomplete::new(AcKind::Slash, " commands ", items.clone(), 0, false, None)
+                    .unwrap();
+            let prompt_rect = Rect::new(1, chat_h, 40, 4);
+            let mut buf = Buffer::empty(Rect::new(0, 0, 50, chat_h + 6));
+            buf.set_string(2, prompt_rect.y, "PROMPT_TOP", Style::default());
+            draw(&mut buf, prompt_rect, chat_h, &mut ac);
+            assert!(
+                ac.rect.height <= chat_h,
+                "chat_h={chat_h} rect={:?}",
+                ac.rect
+            );
+            assert!(
+                ac.rect.y + ac.rect.height <= prompt_rect.y,
+                "popup overlapped prompt_rect: rect={:?} prompt={prompt_rect:?}",
+                ac.rect
+            );
+            assert_eq!(buf[(2, prompt_rect.y)].symbol(), "P");
+        }
     }
 }

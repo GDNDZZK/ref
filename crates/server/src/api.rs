@@ -624,14 +624,19 @@ async fn undo(hub: &Arc<Hub>, session_id: String, message_id: Option<String>) ->
     Ok(json!({ "text": text, "images": images }))
 }
 
-/// Writes the session as Markdown to `path` (relative to its working directory).
+/// Writes the session as Markdown to `path` (relative to its working directory, expanding `~`).
 async fn export(hub: &Arc<Hub>, session_id: String, path: String) -> Reply {
     let s = crate::ops::get_or_load(hub, &session_id).await?;
     let (info, messages) = {
         let st = s.lock();
         (st.info.clone(), st.messages.clone())
     };
-    let p = std::path::PathBuf::from(&path);
+    let home = hub
+        .opts
+        .sandbox_cwd
+        .clone()
+        .or_else(|| hub.opts.home.clone());
+    let p = crate::util::expand_home(path.trim(), home.as_deref());
     let p = Path::new(&info.cwd).join(p);
     let md = export_markdown(&info, &messages);
     std::fs::write(&p, md).map_err(|e| format!("Cannot write {}: {e}", p.display()))?;

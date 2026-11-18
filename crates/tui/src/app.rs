@@ -16,8 +16,8 @@ use crate::state::{Queued, SessionView};
 use crate::text;
 pub use crate::ui::autocomplete::{AcKind, Autocomplete};
 use crate::ui::autocomplete::{
-    DirCache, DirKey, DirListing, ShellTokenPos, build_dir_items, last_arg_token, parent_dir_input,
-    shell_token_context, split_dir_query,
+    DirCache, DirKey, DirListing, ShellTokenPos, build_dir_items, has_drive_prefix,
+    has_drive_root_prefix, is_bare_drive, last_arg_token, shell_token_context, split_dir_query,
 };
 use crate::ui::dialog::{Dialog, HelpDialog, Item, Kind, ListDialog, OPEN_SETTLE};
 use crate::ui::editor::{Editor, History};
@@ -370,7 +370,7 @@ pub fn find_cmd(name: &str) -> Option<&'static Cmd> {
     })
 }
 
-pub fn find_custom_cmd<'a>(
+fn find_custom_cmd<'a>(
     cfg: Option<&'a ServerConfigInfo>,
     name: &str,
 ) -> Option<&'a ref_proto::CommandInfo> {
@@ -434,7 +434,7 @@ pub struct App {
     files_want: Option<String>,
     /// Debounced `@` file query: (fire at, query).
     pub files_due: Option<(Instant, String)>,
-    pub dir_cache: DirCache,
+    dir_cache: DirCache,
     dirs_inflight: HashSet<(String, String, bool)>,
     bin_cache: HashMap<String, Vec<String>>,
     bins_inflight: HashSet<String>,
@@ -506,6 +506,11 @@ const FILE_QUERY_DEBOUNCE: Duration = Duration::from_millis(80);
 const HISTORY_LIST_LIMIT: usize = 200;
 const FILE_QUERY_LIMIT: usize = 20;
 const MAX_COMPLETIONS: usize = 50;
+const SHELL_HISTORY_MAX: usize = 5;
+/// Slash-command typo thresholds: words of at least `TYPO_LONG_WORD_CHARS` allow edit distance 2.
+const TYPO_LONG_WORD_CHARS: usize = 4;
+const TYPO_MAX_DIST_SHORT: usize = 1;
+const TYPO_MAX_DIST_LONG: usize = 2;
 const TOAST_ERROR_MAX_CHARS: usize = 200;
 const SESSION_DESC_MAX_CHARS: usize = 40;
 const TITLE_MAX_CHARS: usize = 80;
@@ -1830,6 +1835,9 @@ impl App {
             &mut self.editor
         };
         editor.restore(text, images);
+        if self.mode == Mode::Chat {
+            self.ac = None;
+        }
     }
 
     /// ✕ on a queued prompt: withdraw it from the server queue before it is sent.
@@ -2436,12 +2444,7 @@ impl App {
     /// Opens the interactive `/cd` directory picker for `sid`.
     pub fn open_cd(&mut self, sid: &str) {
         let base_cwd = self.cwd_of(Some(sid));
-        let display = text::tilde(&base_cwd);
-        let initial = if display.ends_with('/') {
-            display
-        } else {
-            format!("{display}/")
-        };
+        let initial = format_cd_dir(&base_cwd);
         let mut d = ListDialog::new(Kind::Cd, "Change working directory", Vec::new())
             .for_session(Some(sid.to_string()))
             .with_hint("↑↓ select · tab open dir · backspace up · enter confirm · esc");
@@ -2449,6 +2452,16 @@ impl App {
         d.cd_resolved_dir = base_cwd;
         d.filter.set_text(&initial);
         self.dialog = Some(Dialog::List(d));
+        self.refresh_cd_dialog();
+    }
+
+    /// Clears stale `cd_resolved_dir` after a filter edit in `Kind::Cd` and refreshes items.
+    pub fn on_cd_filter_edited(&mut self) {
+        if let Some(Dialog::List(d)) = self.dialog.as_mut()
+            && d.kind == Kind::Cd
+        {
+            d.cd_resolved_dir.clear();
+        }
         self.refresh_cd_dialog();
     }
 
@@ -2476,17 +2489,13 @@ impl App {
         let Some(Dialog::List(d)) = self.dialog.as_mut() else {
             return;
         };
-        if !listing.resolved_path.is_empty() {
+        if !listing.not_found && !listing.resolved_path.is_empty() {
             d.cd_resolved_dir = listing.resolved_path.clone();
+        } else {
+            d.cd_resolved_dir.clear();
         }
         let mut items = Vec::new();
-        let cur_target = if sp.display_prefix.is_empty() {
-            ".".to_string()
-        } else if sp.display_prefix == "/" {
-            "/".to_string()
-        } else {
-            sp.display_prefix.trim_end_matches('/').to_string()
-        };
+        let cur_target = normalize_cd_target(&sp.display_prefix);
         if sp.name_prefix.is_empty() && !listing.not_found {
             items.push(Item {
                 key: format!("use:{cur_target}"),
@@ -2497,7 +2506,7 @@ impl App {
                 ..Default::default()
             });
         }
-        let at_root = d.cd_resolved_dir == "/";
+        let at_root = is_fs_root(&d.cd_resolved_dir);
         if !at_root
             && (sp.name_prefix.is_empty() || "..".starts_with(&sp.name_prefix.to_lowercase()))
         {
@@ -2511,7 +2520,7 @@ impl App {
             });
         }
         for (_, label, _) in build_dir_items(&listing, &sp, false, false, false) {
-            if label == "./" || label == "../" {
+            if matches!(label.as_str(), "./" | "../" | ".\\" | "..\\") {
                 continue;
             }
             let short = label
@@ -2557,9 +2566,11 @@ impl App {
             let raw = d.filter.text.trim();
             if raw == "~" {
                 Some("~/".to_string())
+            } else if is_bare_drive(raw) {
+                Some(format!("{raw}/"))
             } else if let Some(it) = d.selected() {
                 if it.key == "nav:.." {
-                    Some(parent_dir_input(&d.filter.text))
+                    Some(cd_parent_nav(&d.filter.text, &d.cd_resolved_dir))
                 } else {
                     it.key.strip_prefix("dir:").map(str::to_string)
                 }
@@ -2569,6 +2580,7 @@ impl App {
         };
         if let Some(t) = next_text {
             if let Some(Dialog::List(d)) = self.dialog.as_mut() {
+                d.cd_resolved_dir.clear();
                 d.filter.set_text(&t);
             }
             self.refresh_cd_dialog();
@@ -2590,8 +2602,8 @@ impl App {
             .or_else(|| self.active_target_session());
         self.dialog = None;
         if let Some(sid) = target_sid {
-            let path = if raw.is_empty() { "." } else { raw.as_str() };
-            self.send_set_cwd(&sid, path);
+            let path = normalize_cd_target(&raw);
+            self.send_set_cwd(&sid, &path);
         }
     }
 
@@ -2644,16 +2656,9 @@ impl App {
                 return;
             }
             let chosen = match sel_key.as_deref() {
-                Some(k) if k.starts_with("use:") => k["use:".len()..].to_string(),
-                Some(k) if k.starts_with("dir:") => {
-                    let p = &k["dir:".len()..];
-                    if p == "/" {
-                        "/".into()
-                    } else {
-                        p.trim_end_matches('/').to_string()
-                    }
-                }
-                _ if !raw.is_empty() => raw,
+                Some(k) if k.starts_with("use:") => normalize_cd_target(&k["use:".len()..]),
+                Some(k) if k.starts_with("dir:") => normalize_cd_target(&k["dir:".len()..]),
+                _ if !raw.is_empty() => normalize_cd_target(&raw),
                 _ => return,
             };
             self.dialog = None;
@@ -2847,6 +2852,8 @@ impl App {
                 self.leave_closed_session(sid, true);
             } else {
                 self.views.remove(sid);
+                self.watch.inputs.remove(sid);
+                self.attaching.remove(sid);
                 self.current = None;
             }
         } else if self.views.get(sid).is_some_and(|v| !v.foreground) {
@@ -3255,7 +3262,7 @@ impl App {
                     } else {
                         args.trim_matches(|c| c == '"' || c == '\'').to_string()
                     };
-                    let p = if std::path::Path::new(&p).is_absolute() {
+                    let p = if is_tilde_or_rooted_path(&p) {
                         p
                     } else {
                         std::path::Path::new(&base)
@@ -3862,7 +3869,11 @@ impl App {
             return Some(canon.clone());
         }
         // 2. Damerau-Levenshtein edit distance.
-        let max_dist = if tl.chars().count() >= 4 { 2 } else { 1 };
+        let max_dist = if tl.chars().count() >= TYPO_LONG_WORD_CHARS {
+            TYPO_MAX_DIST_LONG
+        } else {
+            TYPO_MAX_DIST_SHORT
+        };
         candidates
             .into_iter()
             .map(|(cand, canon)| (text::edit_distance(&tl, &cand), cand.len(), canon))
@@ -3887,6 +3898,15 @@ impl App {
         self.update_autocomplete_inner(false);
     }
 
+    /// Recomputes autocomplete after a user text edit, clearing any prior manual popup selection.
+    pub fn update_autocomplete_on_edit(&mut self) {
+        if let Some(ac) = self.ac.as_mut() {
+            ac.explicitly_selected = false;
+            ac.sel = 0;
+            ac.scroll = 0;
+        }
+        self.update_autocomplete_inner(false);
+    }
     /// Explicit `Tab` press when `self.ac` is currently `None` (e.g. empty `!` shell prompt).
     pub fn trigger_tab_completion(&mut self) -> bool {
         self.suppress_ac = false;
@@ -3913,7 +3933,7 @@ impl App {
                 if cursor == self.editor.text.len() {
                     let items = self.slash_completions(rest);
                     let prev = self.ac.take();
-                    let mut next = Autocomplete::new(
+                    self.ac = Autocomplete::new(
                         AcKind::Slash,
                         " commands ",
                         items,
@@ -3921,14 +3941,6 @@ impl App {
                         false,
                         prev.as_ref(),
                     );
-                    if let Some(ac) = next.as_mut()
-                        && rest.is_empty()
-                        && let Some(p) = prev.filter(|p| p.kind == AcKind::Slash)
-                    {
-                        ac.sel = p.sel.min(ac.items.len() - 1);
-                        ac.scroll = p.scroll;
-                    }
-                    self.ac = next;
                 } else {
                     self.ac = None;
                 }
@@ -4109,7 +4121,12 @@ impl App {
                     self.ac = None;
                     return;
                 }
-                if raw.contains('/') || raw.starts_with('.') || raw.starts_with('~') {
+                let is_path_cmd = raw.contains('/')
+                    || (cfg!(windows) && raw.contains('\\'))
+                    || raw.starts_with('.')
+                    || raw.starts_with('~')
+                    || has_drive_prefix(&raw);
+                if is_path_cmd {
                     let items = self.path_completion_items(&raw, true, true, true, None);
                     let prev = self.ac.take();
                     self.ac = Autocomplete::new(
@@ -4210,7 +4227,7 @@ impl App {
                     && seen.insert(cmd.to_string())
                 {
                     out.push((cmd.to_string(), format!("!{cmd}"), "history".into()));
-                    if out.len() >= 5 {
+                    if out.len() >= SHELL_HISTORY_MAX {
                         break;
                     }
                 }
@@ -4939,4 +4956,91 @@ fn flag_of(result: &Value, key: &str) -> bool {
 
 fn sessions_of(v: &Value) -> Result<Vec<SessionInfo>, String> {
     parse_field(v, "sessions")
+}
+
+fn format_cd_dir(path: &str) -> String {
+    let mut display = text::tilde(path).replace('\\', "/");
+    if is_bare_drive(&display) || !display.ends_with('/') {
+        display.push('/');
+    }
+    display
+}
+
+fn normalize_cd_target(p: &str) -> String {
+    if p.is_empty() {
+        return ".".into();
+    }
+    let sep = if p.ends_with('\\') { '\\' } else { '/' };
+    let trimmed = p.trim_end_matches(['/', '\\']);
+    if trimmed.is_empty() {
+        return sep.to_string();
+    }
+    if is_bare_drive(trimmed) {
+        return format!("{trimmed}{sep}");
+    }
+    trimmed.to_string()
+}
+
+fn is_fs_root(path: &str) -> bool {
+    if path.is_empty() {
+        return false;
+    }
+    if path == "/" || path == "\\" {
+        return true;
+    }
+    let trimmed = path.trim_end_matches(['/', '\\']);
+    if is_bare_drive(trimmed) {
+        return true;
+    }
+    std::path::Path::new(path).parent().is_none()
+}
+
+fn resolved_parent_dir(resolved_dir: &str) -> Option<String> {
+    if resolved_dir.is_empty() || is_fs_root(resolved_dir) {
+        return None;
+    }
+    if has_drive_prefix(resolved_dir) {
+        let norm = resolved_dir.replace('\\', "/");
+        let trimmed = norm.trim_end_matches('/');
+        let idx = trimmed.rfind('/')?;
+        let parent = &trimmed[..idx];
+        if is_bare_drive(parent) {
+            return Some(format!("{parent}/"));
+        }
+        #[cfg(windows)]
+        return Some(parent.replace('/', "\\"));
+        #[cfg(not(windows))]
+        return Some(parent.to_string());
+    }
+    let parent = std::path::Path::new(resolved_dir).parent()?;
+    let s = parent.to_string_lossy();
+    (!s.is_empty()).then(|| s.into_owned())
+}
+
+fn cd_parent_nav(raw: &str, resolved_dir: &str) -> String {
+    if let Some(parent) = resolved_parent_dir(resolved_dir) {
+        return format_cd_dir(&parent);
+    }
+    if !resolved_dir.is_empty() && is_fs_root(resolved_dir) {
+        return raw.to_string();
+    }
+    let sp = split_dir_query(raw.trim());
+    let sep = if sp.display_prefix.ends_with('\\') {
+        '\\'
+    } else {
+        '/'
+    };
+    if sp.display_prefix.is_empty() || sp.display_prefix == "./" || sp.display_prefix == ".\\" {
+        format!("..{sep}")
+    } else {
+        format!("{}..{sep}", sp.display_prefix)
+    }
+}
+
+fn is_tilde_or_rooted_path(p: &str) -> bool {
+    std::path::Path::new(p).is_absolute()
+        || p == "~"
+        || p.starts_with("~/")
+        || p.starts_with("~\\")
+        || has_drive_root_prefix(p)
 }
