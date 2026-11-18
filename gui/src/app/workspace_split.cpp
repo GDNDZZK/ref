@@ -172,6 +172,12 @@ void Workspace::syncTiles()
 			detachUnwaited(other);
 		}
 	}
+	if(!m_zoomed.isEmpty() && m_tiles.indexOf(m_zoomed) < 0)
+	{
+		m_zoomed.clear();
+		emit zoomedChanged();
+		updateCommandContext();
+	}
 	if(!m_focusedTile.isEmpty() && m_tiles.indexOf(m_focusedTile) < 0)
 	{
 		setFocusedTile({});
@@ -229,24 +235,40 @@ QCoro::Task<> Workspace::zoomTask(QString sessionId)
 	if(ChatSession* previous = session(m_zoomed); previous != nullptr && previous->isAttached())
 	{
 		const QString previousId = previous->sessionId();
+		m_unzooming.insert(previousId);
 		logDropped(co_await previous->background(), "background"_L1, previousId);
+		m_unzooming.remove(previousId);
 		if(!m_split)
 		{
 			co_return;
 		}
+	}
+	ChatSession* zoomed = session(sessionId);
+	if(zoomed == nullptr || m_tiles.indexOf(sessionId) < 0)
+	{
+		if(!m_zoomed.isEmpty())
+		{
+			m_zoomed.clear();
+			emit zoomedChanged();
+			emit visibleSessionIdsChanged();
+			updateCommandContext();
+		}
+		co_return; // closed meanwhile
 	}
 	m_zoomed = sessionId;
 	setFocusedTile(sessionId);
 	emit zoomedChanged();
 	emit visibleSessionIdsChanged();
 	updateCommandContext();
-	ChatSession* zoomed = session(sessionId);
-	if(zoomed == nullptr)
-	{
-		co_return; // closed meanwhile
-	}
 	const Result<void> attached = co_await zoomed->attach(true);
 	toastFailure(attached);
+	if(!attached && m_zoomed == sessionId && (session(sessionId) == nullptr || !session(sessionId)->isForeground()))
+	{
+		m_zoomed.clear();
+		emit zoomedChanged();
+		emit visibleSessionIdsChanged();
+		updateCommandContext();
+	}
 }
 
 void Workspace::unzoom()

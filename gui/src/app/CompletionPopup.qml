@@ -251,7 +251,7 @@ Rectangle {
 				Text {
 					id: fileName
 					textFormat: Text.PlainText
-					text: row.name + (row.isDirectory ? "/" : "")
+					text: row.name + (row.isDirectory ? (row.path.endsWith("\\") ? "\\" : "/") : "")
 					color: Theme.text
 					font.family: Theme.monoFamily
 					font.pixelSize: Theme.codeFontSize
@@ -317,7 +317,7 @@ Rectangle {
 					id: mainLabel
 					textFormat: Text.PlainText
 					width: Math.min(implicitWidth, labelRow.maxLabelRowWidth)
-					text: row.label + (row.isDirectory ? "/" : "")
+					text: row.label + (row.isDirectory ? (row.value.endsWith("\\") ? "\\" : "/") : "")
 					color: Theme.text
 					font.family: row.mono ? Theme.monoFamily : undefined
 					font.pixelSize: row.mono ? Theme.codeFontSize : Theme.fontSize

@@ -13,7 +13,9 @@ Column {
 	property string mode: allowInherit ? "inherit" : "rules"
 	// Array of `{ tool: string, pattern: string, action: "allow" | "ask" | "deny" }`.
 	property var rules: []
+	property var rowDrafts: ({})
 
+	signal orderedPermissionModified(var orderedPermission)
 	signal permissionModified(var newPermission)
 
 	readonly property var modeTabs: {
@@ -30,6 +32,10 @@ Column {
 		{ text: qsTr("Ask"), value: "ask" },
 		{ text: qsTr("Deny"), value: "deny" }
 	]
+	readonly property bool hasEmptyToolRule: mode === "rules"
+		&& rules.some((r, idx) => effectiveRowTool(idx, r).trim() === "")
+	readonly property bool hasValidationError: hasEmptyToolRule
+	readonly property bool hasUncommittedEdit: Object.keys(rowDrafts).length > 0
 
 	function normalizeAction(raw) {
 		if (raw === false || raw === "deny" || raw === "reject" || raw === "no")
@@ -39,7 +45,41 @@ Column {
 		return "allow"
 	}
 
+	function effectiveRowTool(index, ruleObj) {
+		const draft = rowDrafts[index]
+		if (draft && draft.tool !== undefined)
+			return String(draft.tool)
+		return String(ruleObj.tool ?? "")
+	}
+
+	function appendNestedObjectRules(toolKey, entryObj, out) {
+		for (const patKey of Object.keys(entryObj)) {
+			if (!Fields.has(entryObj, patKey))
+				continue
+			out.push({
+				tool: toolKey,
+				pattern: patKey,
+				action: normalizeAction(entryObj[patKey])
+			})
+		}
+	}
+
+	function loadRulesFromObject(obj) {
+		const loaded = []
+		for (const toolKey of Object.keys(obj)) {
+			if (!Fields.has(obj, toolKey))
+				continue
+			const entry = obj[toolKey]
+			if (entry !== null && typeof entry === "object" && !Fields.isArray(entry))
+				appendNestedObjectRules(toolKey, entry, loaded)
+			else
+				loaded.push({ tool: toolKey, pattern: "", action: normalizeAction(entry) })
+		}
+		return loaded
+	}
+
 	function loadFromValue(val) {
+		rowDrafts = ({})
 		if (val === undefined || val === null) {
 			mode = allowInherit ? "inherit" : "rules"
 			rules = []
@@ -50,33 +90,35 @@ Column {
 			rules = []
 			return
 		}
+		if (Fields.isArray(val)) {
+			mode = "rules"
+			rules = Fields.toArray(val).map(item => ({
+				tool: String(item.tool ?? ""),
+				pattern: String(item.pattern ?? ""),
+				action: normalizeAction(item.action)
+			}))
+			return
+		}
 		if (typeof val === "object") {
 			mode = "rules"
-			const loaded = []
-			for (const toolKey of Object.keys(val)) {
-				if (!Fields.has(val, toolKey))
-					continue
-				const entry = val[toolKey]
-				if (entry !== null && typeof entry === "object" && !Array.isArray(entry)) {
-					for (const patKey of Object.keys(entry)) {
-						if (Fields.has(entry, patKey)) {
-							loaded.push({
-								tool: toolKey,
-								pattern: patKey,
-								action: normalizeAction(entry[patKey])
-							})
-						}
-					}
-				} else {
-					loaded.push({
-						tool: toolKey,
-						pattern: "",
-						action: normalizeAction(entry)
-					})
-				}
-			}
-			rules = loaded
+			rules = loadRulesFromObject(val)
 		}
+	}
+
+	function resetState() {
+		rowDrafts = ({})
+	}
+
+	function toOrderedValue() {
+		if (mode === "inherit")
+			return undefined
+		if (mode === "allow" || mode === "ask" || mode === "deny")
+			return mode
+		return rules.map(r => ({
+			tool: String(r.tool ?? "").trim(),
+			pattern: String(r.pattern ?? "").trim(),
+			action: normalizeAction(r.action)
+		}))
 	}
 
 	function toValue() {
@@ -93,35 +135,83 @@ Column {
 			const action = normalizeAction(r.action)
 			if (pattern === "" && !Fields.has(out, tool)) {
 				out[tool] = action
-			} else {
-				const pat = pattern === "" ? "*" : pattern
-				if (!Fields.has(out, tool) || typeof out[tool] !== "object") {
-					const previous = Fields.has(out, tool) ? { "*": out[tool] } : {}
-					out[tool] = previous
-				}
-				out[tool][pat] = action
+				continue
 			}
+			const pat = pattern === "" ? "*" : pattern
+			if (!Fields.has(out, tool) || typeof out[tool] !== "object") {
+				const previous = Fields.has(out, tool) ? { "*": out[tool] } : {}
+				out[tool] = previous
+			}
+			out[tool][pat] = action
 		}
 		return out
 	}
 
 	function emitCurrent() {
+		if (hasValidationError)
+			return
+		orderedPermissionModified(toOrderedValue())
 		permissionModified(toValue())
+	}
+
+	function setRowDraft(index, patch) {
+		const next = Object.assign({}, rowDrafts)
+		next[index] = Object.assign({}, next[index] ?? {}, patch)
+		rowDrafts = next
+	}
+
+	function clearRowDraftField(index, fieldName) {
+		if (!Fields.has(rowDrafts, index))
+			return
+		const entry = Object.assign({}, rowDrafts[index])
+		delete entry[fieldName]
+		const next = Object.assign({}, rowDrafts)
+		if (Object.keys(entry).length === 0)
+			delete next[index]
+		else
+			next[index] = entry
+		rowDrafts = next
 	}
 
 	function updateRule(index, patch) {
 		if (index < 0 || index >= rules.length)
 			return
+		for (const k of Object.keys(patch))
+			clearRowDraftField(index, k)
 		const next = rules.slice()
 		next[index] = Object.assign({}, next[index], patch)
 		rules = next
 		emitCurrent()
 	}
 
+	function commitPending() {
+		const indices = Object.keys(rowDrafts).map(k => Number(k))
+		if (indices.length > 0) {
+			const next = rules.slice()
+			for (const idx of indices) {
+				if (idx < 0 || idx >= next.length)
+					continue
+				const d = rowDrafts[idx]
+				const patch = {}
+				if (d.tool !== undefined)
+					patch.tool = String(d.tool).trim()
+				if (d.pattern !== undefined)
+					patch.pattern = String(d.pattern).trim()
+				next[idx] = Object.assign({}, next[idx], patch)
+			}
+			rowDrafts = ({})
+			rules = next
+			if (!hasValidationError)
+				emitCurrent()
+		}
+		return !hasValidationError
+	}
+
 	function moveRule(index, delta) {
 		const target = index + delta
 		if (index < 0 || index >= rules.length || target < 0 || target >= rules.length)
 			return
+		rowDrafts = ({})
 		const next = rules.slice()
 		const moved = next[index]
 		next[index] = next[target]
@@ -133,6 +223,7 @@ Column {
 	function removeRule(index) {
 		if (index < 0 || index >= rules.length)
 			return
+		rowDrafts = ({})
 		const next = rules.slice()
 		next.splice(index, 1)
 		rules = next
@@ -156,6 +247,7 @@ Column {
 		onActivated: newMode => {
 			if (rulesEditor.mode === newMode)
 				return
+			rulesEditor.rowDrafts = ({})
 			rulesEditor.mode = newMode
 			rulesEditor.emitCurrent()
 		}
@@ -184,6 +276,7 @@ Column {
 				required property var modelData
 				required property int index
 
+				readonly property bool emptyTool: toolInput.text.trim() === ""
 				readonly property int actionWidth: 174
 				readonly property int controlsWidth: 84
 				readonly property real fieldsSpace: Math.max(140, width - actionWidth - controlsWidth - 18)
@@ -198,7 +291,9 @@ Column {
 					height: parent.height
 					radius: Theme.radiusSmall + 2
 					color: Theme.background
-					border.color: toolInput.activeFocus ? Theme.accentText : Theme.border
+					border.color: ruleRow.emptyTool
+						? Theme.dangerText
+						: (toolInput.activeFocus ? Theme.accentText : Theme.border)
 
 					TextInput {
 						id: toolInput
@@ -211,6 +306,7 @@ Column {
 						font { family: Theme.monoFamily; pixelSize: Theme.codeFontSize }
 						clip: true
 						Accessible.name: qsTr("Tool glob")
+						onTextEdited: rulesEditor.setRowDraft(ruleRow.index, { tool: text })
 						onEditingFinished: rulesEditor.updateRule(ruleRow.index, { tool: text.trim() })
 
 						PlaceholderText {
@@ -248,6 +344,7 @@ Column {
 						font { family: Theme.monoFamily; pixelSize: Theme.codeFontSize }
 						clip: true
 						Accessible.name: qsTr("Pattern")
+						onTextEdited: rulesEditor.setRowDraft(ruleRow.index, { pattern: text })
 						onEditingFinished: rulesEditor.updateRule(ruleRow.index, { pattern: text.trim() })
 
 						PlaceholderText {
@@ -314,6 +411,16 @@ Column {
 					}
 				}
 			}
+		}
+
+		Text {
+			textFormat: Text.PlainText
+			visible: rulesEditor.hasEmptyToolRule
+			width: parent.width
+			text: qsTr("Tool glob cannot be empty. Enter a tool name (e.g. bash or *) or remove the rule.")
+			color: Theme.dangerText
+			font.pixelSize: Theme.smallFontSize
+			wrapMode: Text.Wrap
 		}
 
 		Row {

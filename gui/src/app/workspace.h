@@ -72,6 +72,7 @@ class Workspace : public QObject
 	Q_PROPERTY(QString dialog READ dialog NOTIFY dialogChanged)
 	Q_PROPERTY(QVariantMap dialogArgs READ dialogArgs NOTIFY dialogChanged)
 	// The backend.
+	Q_PROPERTY(bool smoke READ isSmoke CONSTANT)
 	Q_PROPERTY(bool backendLocal READ isBackendLocal CONSTANT)
 	Q_PROPERTY(bool protocolOutdated READ isProtocolOutdated NOTIFY backendChanged)
 	Q_PROPERTY(QString backendVersion READ backendVersion NOTIFY backendChanged)
@@ -126,6 +127,7 @@ public:
 	const QString& zoomedId() const { return m_zoomed; }
 	const QString& dialog() const { return m_dialog; }
 	const QVariantMap& dialogArgs() const { return m_dialogArgs; }
+	bool isSmoke() const { return m_options.smoke; }
 	bool isBackendLocal() const;
 	bool isProtocolOutdated() const;
 	QString backendVersion() const { return m_connection.serverVersion(); }
@@ -320,6 +322,5 @@ private:
 	bool m_started = false;
 	bool m_windowActive = false;
 	QString m_effectiveCwd;
-	int m_localReloadsInFlight = 0;
 	int m_localMutationsInFlight = 0;
 };

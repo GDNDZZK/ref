@@ -6,7 +6,6 @@
 #include "workspace/connection.h"
 
 #include <QCoroTask>
-#include <QJsonObject>
 #include <QObject>
 #include <QString>
 #include <QStringList>
@@ -64,7 +63,7 @@ public:
 	QVariantMap envStatus() const { return m_envStatus; }
 	const QString& mode() const { return m_mode; }
 	const QString& rawText() const { return m_rawText; }
-	QVariantMap parsed() const { return m_patcher.root().toVariantMap(); }
+	QVariantMap parsed() const { return m_patcher.orderedRoot().toVariantMap(); }
 	const QString& parseError() const { return m_parseError; }
 	bool isDirty() const { return m_dirty; }
 	int revision() const { return m_revision; }
@@ -98,6 +97,10 @@ public:
 	Q_INVOKABLE QVariant valueAt(const QStringList& path) const;
 	Q_INVOKABLE bool contains(const QStringList& path) const;
 	Q_INVOKABLE QStringList keysAt(const QStringList& path) const;
+	Q_INVOKABLE QVariantList orderedEntriesAt(const QStringList& path) const;
+	Q_INVOKABLE void setOrderedObjectAt(const QStringList& path, const QVariantList& entries, bool removeWhenEmpty = true, bool pruneEmptyAncestors = false);
+	Q_INVOKABLE QVariant permissionAt(const QStringList& path) const;
+	Q_INVOKABLE void setPermissionAt(const QStringList& path, const QVariant& permission, bool pruneEmptyAncestors = true);
 	Q_INVOKABLE void setValueAt(const QStringList& path, const QVariant& value);
 	Q_INVOKABLE void setStringAt(const QStringList& path, const QString& text, bool removeWhenEmpty = true);
 	Q_INVOKABLE void setStringListAt(const QStringList& path, const QStringList& list, bool removeWhenEmpty = true);
@@ -153,7 +156,7 @@ private:
 	BackendConfig& m_backendConfig;
 	QString m_cwd;
 	ConfigJsonPatcher m_patcher;
-	QJsonObject m_baselineRoot;
+	OrderedJsonObject m_baselineRoot;
 	QString m_baselineRawText;
 	bool m_hasValidBaseline = true;
 

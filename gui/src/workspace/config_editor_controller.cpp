@@ -2,12 +2,13 @@
 
 #include "workspace/toast_text.h"
 
-#include <QJsonArray>
-#include <QJsonDocument>
+#include <QJsonValue>
 #include <QPointer>
 #include <QSet>
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 
 using namespace Qt::StringLiterals;
 
@@ -16,61 +17,204 @@ namespace refgui::workspace
 namespace
 {
 
-QJsonValue variantToJson(const QVariant& value)
+constexpr double MaxSafeJsIntegerDouble = 9007199254740991.0;
+
+OrderedJsonValue variantToOrderedJson(const QVariant& value)
 {
 	if(!value.isValid() || value.metaType().id() == QMetaType::Nullptr)
 	{
-		return QJsonValue(QJsonValue::Undefined);
+		return {};
 	}
 	switch(value.metaType().id())
 	{
 	case QMetaType::Bool:
-		return QJsonValue(value.toBool());
+		return OrderedJsonValue(value.toBool());
 	case QMetaType::Int:
 	case QMetaType::LongLong:
+		return OrderedJsonValue(value.toLongLong());
 	case QMetaType::UInt:
 	case QMetaType::ULongLong:
+	{
+		const qulonglong u = value.toULongLong();
+		if(u <= static_cast<qulonglong>(std::numeric_limits<qint64>::max()))
+		{
+			return OrderedJsonValue(static_cast<qint64>(u));
+		}
+		return OrderedJsonValue(static_cast<double>(u));
+	}
 	case QMetaType::Double:
 	case QMetaType::Float:
-		return QJsonValue(value.toDouble());
+	{
+		const double d = value.toDouble();
+		if(std::isfinite(d) && std::trunc(d) == d && d >= -MaxSafeJsIntegerDouble && d <= MaxSafeJsIntegerDouble)
+		{
+			return OrderedJsonValue(static_cast<qint64>(d));
+		}
+		return OrderedJsonValue(d);
+	}
 	case QMetaType::QString:
-		return QJsonValue(value.toString());
+		return OrderedJsonValue(value.toString());
 	case QMetaType::QStringList:
-		return QJsonArray::fromStringList(value.toStringList());
+	{
+		OrderedJsonValue::Array arr;
+		const QStringList list = value.toStringList();
+		arr.reserve(list.size());
+		for(const QString& item : list)
+		{
+			arr.append(OrderedJsonValue(item));
+		}
+		return OrderedJsonValue(std::move(arr));
+	}
 	case QMetaType::QVariantMap:
 	{
-		QJsonObject object;
+		OrderedJsonObject object;
 		const QVariantMap map = value.toMap();
 		for(auto it = map.cbegin(); it != map.cend(); ++it)
 		{
-			const QJsonValue child = variantToJson(it.value());
+			const OrderedJsonValue child = variantToOrderedJson(it.value());
 			if(!child.isUndefined())
 			{
-				object.insert(it.key(), child);
+				object.set(it.key(), child);
 			}
 		}
-		return object;
+		return OrderedJsonValue(std::move(object));
 	}
 	case QMetaType::QVariantList:
 	{
-		QJsonArray array;
+		OrderedJsonValue::Array array;
 		const QVariantList list = value.toList();
 		for(const QVariant& item : list)
 		{
-			const QJsonValue child = variantToJson(item);
+			const OrderedJsonValue child = variantToOrderedJson(item);
 			if(!child.isUndefined())
 			{
 				array.append(child);
 			}
 		}
-		return array;
+		return OrderedJsonValue(std::move(array));
 	}
 	default:
 		if(value.canConvert<QJsonValue>())
 		{
-			return value.value<QJsonValue>();
+			return OrderedJsonValue::fromJsonValue(value.value<QJsonValue>());
 		}
-		return QJsonValue::fromVariant(value);
+		return OrderedJsonValue::fromJsonValue(QJsonValue::fromVariant(value));
+	}
+}
+
+QString normalizePermissionAction(const QVariant& raw)
+{
+	if(raw.metaType().id() == QMetaType::Bool)
+	{
+		return raw.toBool() ? u"allow"_s : u"deny"_s;
+	}
+	const QString text = raw.toString().trimmed();
+	if(text == "deny"_L1 || text == "reject"_L1 || text == "no"_L1 || text == "false"_L1)
+	{
+		return u"deny"_s;
+	}
+	if(text == "ask"_L1 || text == "confirm"_L1 || text == "prompt"_L1)
+	{
+		return u"ask"_s;
+	}
+	return u"allow"_s;
+}
+
+void appendNestedPermissionRules(const QString& toolKey, const OrderedJsonObject& nested, QVariantList& out)
+{
+	for(const OrderedJsonObject::Entry& sub : nested.entries())
+	{
+		out.append(QVariantMap{
+			{u"tool"_s, toolKey},
+			{u"pattern"_s, sub.key},
+			{u"action"_s, normalizePermissionAction(sub.value.toVariant())},
+		});
+	}
+}
+
+OrderedJsonObject buildPermissionObjectFromRules(const QVariantList& rules)
+{
+	OrderedJsonObject out;
+	for(const QVariant& item : rules)
+	{
+		const QVariantMap rule = item.toMap();
+		const QString tool = rule.value(u"tool"_s).toString().trimmed();
+		if(tool.isEmpty())
+		{
+			continue;
+		}
+		const QString pattern = rule.value(u"pattern"_s).toString().trimmed();
+		const QString action = normalizePermissionAction(rule.value(u"action"_s));
+		if(pattern.isEmpty() && !out.contains(tool))
+		{
+			out.set(tool, OrderedJsonValue(action));
+			continue;
+		}
+		const QString effectivePattern = pattern.isEmpty() ? u"*"_s : pattern;
+		OrderedJsonObject nested;
+		const OrderedJsonValue existing = out.value(tool);
+		if(existing.isObject())
+		{
+			nested = existing.toObject();
+		}
+		else if(existing.isString())
+		{
+			nested.set(u"*"_s, existing);
+		}
+		nested.set(effectivePattern, OrderedJsonValue(action));
+		out.set(tool, OrderedJsonValue(std::move(nested)));
+	}
+	return out;
+}
+
+OrderedJsonObject singleKeyOptionsProvider(const QString& envToken)
+{
+	OrderedJsonObject options;
+	options.set(u"apiKey"_s, OrderedJsonValue(envToken));
+	OrderedJsonObject entry;
+	entry.set(u"options"_s, OrderedJsonValue(std::move(options)));
+	return entry;
+}
+
+OrderedJsonObject parseBaselineObject(const proto::ConfigFilesInfo& info)
+{
+	if(!info.rawText.trimmed().isEmpty())
+	{
+		if(const auto parsedOrdered = ConfigJsonPatcher::parseJsonc(info.rawText))
+		{
+			return parsedOrdered->orderedRoot();
+		}
+	}
+	return OrderedJsonObject::fromJsonObject(info.parsed.toObject());
+}
+
+void collectProviderModels(
+	const QString& providerId,
+	const OrderedJsonObject& providerObj,
+	QSet<QString>& seen,
+	QVariantList& options)
+{
+	const QString providerName = providerObj.value(u"name"_s).toString(providerId);
+	const OrderedJsonObject modelsObj = providerObj.value(u"models"_s).toObject();
+	for(const OrderedJsonObject::Entry& modelEntry : modelsObj.entries())
+	{
+		const OrderedJsonObject modelObj = modelEntry.value.toObject();
+		if(modelObj.value(u"disabled"_s).toBool(false))
+		{
+			continue;
+		}
+		const QString fullRef = providerId + u'/' + modelEntry.key;
+		if(fullRef.isEmpty() || seen.contains(fullRef))
+		{
+			continue;
+		}
+		seen.insert(fullRef);
+		const QString displayName = modelObj.value(u"name"_s).toString();
+		options.append(QVariantMap{
+			{u"label"_s, fullRef},
+			{u"value"_s, fullRef},
+			{u"description"_s, displayName.isEmpty() ? providerName : displayName},
+		});
 	}
 }
 
@@ -143,7 +287,7 @@ void ConfigEditorController::save()
 			return;
 		}
 		setParseError({});
-		m_patcher.setRoot(checked->root());
+		m_patcher.setOrderedRoot(checked->orderedRoot());
 		contentToSave = m_rawText.endsWith(u'\n') ? m_rawText : m_rawText + u'\n';
 	}
 	else
@@ -159,12 +303,12 @@ void ConfigEditorController::discard()
 	m_rawText = m_baselineRawText;
 	if(m_hasValidBaseline)
 	{
-		m_patcher.setRoot(m_baselineRoot);
+		m_patcher.setOrderedRoot(m_baselineRoot);
 		setParseError({});
 	}
 	else
 	{
-		m_patcher.setRoot({});
+		m_patcher.setOrderedRoot({});
 		const auto reparsed = ConfigJsonPatcher::parseJsonc(m_baselineRawText);
 		setParseError(reparsed ? QString() : reparsed.error().message);
 	}
@@ -235,7 +379,7 @@ bool ConfigEditorController::setMode(const QString& targetMode)
 			return false;
 		}
 		setParseError({});
-		m_patcher.setRoot(checked->root());
+		m_patcher.setOrderedRoot(checked->orderedRoot());
 		++m_revision;
 		m_mode = u"visual"_s;
 		emit parsedChanged();
@@ -244,7 +388,7 @@ bool ConfigEditorController::setMode(const QString& targetMode)
 	}
 
 	// visual -> json: keep original text untouched unless Visual mode changed the JSON tree.
-	if(m_hasValidBaseline && m_patcher.root() != m_baselineRoot)
+	if(m_hasValidBaseline && m_patcher.orderedRoot() != m_baselineRoot)
 	{
 		m_rawText = m_patcher.toJson();
 		emit rawTextChanged();
@@ -267,7 +411,7 @@ void ConfigEditorController::setRawText(const QString& newText)
 	if(checked)
 	{
 		setParseError({});
-		m_patcher.setRoot(checked->root());
+		m_patcher.setOrderedRoot(checked->orderedRoot());
 		++m_revision;
 		emit parsedChanged();
 	}
@@ -282,12 +426,8 @@ void ConfigEditorController::setRawText(const QString& newText)
 
 QVariant ConfigEditorController::valueAt(const QStringList& path) const
 {
-	const QJsonValue val = m_patcher.valueAt(path);
-	if(val.isUndefined())
-	{
-		return {};
-	}
-	return val.toVariant();
+	const OrderedJsonValue val = m_patcher.orderedValueAt(path);
+	return val.isUndefined() ? QVariant() : val.toVariant();
 }
 
 bool ConfigEditorController::contains(const QStringList& path) const
@@ -297,12 +437,191 @@ bool ConfigEditorController::contains(const QStringList& path) const
 
 QStringList ConfigEditorController::keysAt(const QStringList& path) const
 {
-	const QJsonValue val = path.isEmpty() ? QJsonValue(m_patcher.root()) : m_patcher.valueAt(path);
+	if(path.isEmpty())
+	{
+		return m_patcher.orderedRoot().keys();
+	}
+	const OrderedJsonValue val = m_patcher.orderedValueAt(path);
 	if(!val.isObject())
 	{
 		return {};
 	}
 	return val.toObject().keys();
+}
+
+QVariantList ConfigEditorController::orderedEntriesAt(const QStringList& path) const
+{
+	OrderedJsonObject object;
+	if(path.isEmpty())
+	{
+		object = m_patcher.orderedRoot();
+	}
+	else
+	{
+		const OrderedJsonValue val = m_patcher.orderedValueAt(path);
+		if(!val.isObject())
+		{
+			return {};
+		}
+		object = val.toObject();
+	}
+
+	QVariantList entries;
+	entries.reserve(object.size());
+	for(const OrderedJsonObject::Entry& entry : object.entries())
+	{
+		entries.append(QVariantMap{
+			{u"key"_s, entry.key},
+			{u"value"_s, entry.value.toVariant()},
+			{u"json"_s, entry.value.toCompactJson()},
+		});
+	}
+	return entries;
+}
+
+void ConfigEditorController::setOrderedObjectAt(
+	const QStringList& path,
+	const QVariantList& entries,
+	bool removeWhenEmpty,
+	bool pruneEmptyAncestors)
+{
+	if(path.isEmpty())
+	{
+		return;
+	}
+	OrderedJsonObject nextObj;
+	for(const QVariant& item : entries)
+	{
+		const QVariantMap map = item.toMap();
+		const QString key = map.value(u"key"_s).toString().trimmed();
+		if(key.isEmpty())
+		{
+			continue;
+		}
+		if(map.contains(u"json"_s))
+		{
+			if(const auto parsedVal = ConfigJsonPatcher::parseJsoncValue(map.value(u"json"_s).toString()))
+			{
+				nextObj.set(key, *parsedVal);
+				continue;
+			}
+		}
+		const OrderedJsonValue val = variantToOrderedJson(map.value(u"value"_s));
+		if(!val.isUndefined())
+		{
+			nextObj.set(key, val);
+		}
+	}
+
+	if(removeWhenEmpty && nextObj.isEmpty())
+	{
+		removeAt(path, pruneEmptyAncestors);
+		return;
+	}
+	const OrderedJsonValue nextVal(std::move(nextObj));
+	if(m_patcher.orderedValueAt(path) == nextVal)
+	{
+		return;
+	}
+	m_patcher.setOrderedValueAt(path, nextVal);
+	afterPatcherMutated();
+}
+
+QVariant ConfigEditorController::permissionAt(const QStringList& path) const
+{
+	const OrderedJsonValue val = m_patcher.orderedValueAt(path);
+	if(val.isUndefined() || val.isNull())
+	{
+		return {};
+	}
+	if(val.isBool() || val.isString())
+	{
+		return val.toVariant();
+	}
+	if(!val.isObject())
+	{
+		return {};
+	}
+
+	QVariantList rules;
+	const OrderedJsonObject permObject = val.toObject();
+	for(const OrderedJsonObject::Entry& entry : permObject.entries())
+	{
+		if(entry.value.isObject())
+		{
+			appendNestedPermissionRules(entry.key, entry.value.toObject(), rules);
+		}
+		else
+		{
+			rules.append(QVariantMap{
+				{u"tool"_s, entry.key},
+				{u"pattern"_s, QString()},
+				{u"action"_s, normalizePermissionAction(entry.value.toVariant())},
+			});
+		}
+	}
+	return rules;
+}
+
+void ConfigEditorController::setPermissionAt(const QStringList& path, const QVariant& permission, bool pruneEmptyAncestors)
+{
+	if(path.isEmpty())
+	{
+		return;
+	}
+	if(!permission.isValid() || permission.isNull() || permission.metaType().id() == QMetaType::Nullptr)
+	{
+		removeAt(path, pruneEmptyAncestors);
+		return;
+	}
+	if(permission.metaType().id() == QMetaType::QString || permission.metaType().id() == QMetaType::Bool)
+	{
+		const QString action = permission.metaType().id() == QMetaType::Bool
+			? normalizePermissionAction(permission)
+			: permission.toString().trimmed();
+		if(action.isEmpty())
+		{
+			removeAt(path, pruneEmptyAncestors);
+			return;
+		}
+		const OrderedJsonValue nextVal(action);
+		if(m_patcher.orderedValueAt(path) == nextVal)
+		{
+			return;
+		}
+		m_patcher.setOrderedValueAt(path, nextVal);
+		afterPatcherMutated();
+		return;
+	}
+	if(permission.metaType().id() == QMetaType::QVariantList)
+	{
+		OrderedJsonObject built = buildPermissionObjectFromRules(permission.toList());
+		if(built.isEmpty())
+		{
+			removeAt(path, pruneEmptyAncestors);
+			return;
+		}
+		const OrderedJsonValue nextVal(std::move(built));
+		if(m_patcher.orderedValueAt(path) == nextVal)
+		{
+			return;
+		}
+		m_patcher.setOrderedValueAt(path, nextVal);
+		afterPatcherMutated();
+		return;
+	}
+	const OrderedJsonValue fallback = variantToOrderedJson(permission);
+	if(!fallback.isObject() || fallback.toObject().isEmpty())
+	{
+		removeAt(path, pruneEmptyAncestors);
+		return;
+	}
+	if(m_patcher.orderedValueAt(path) == fallback)
+	{
+		return;
+	}
+	m_patcher.setOrderedValueAt(path, fallback);
+	afterPatcherMutated();
 }
 
 void ConfigEditorController::setValueAt(const QStringList& path, const QVariant& value)
@@ -311,17 +630,17 @@ void ConfigEditorController::setValueAt(const QStringList& path, const QVariant&
 	{
 		return;
 	}
-	const QJsonValue jsonVal = variantToJson(value);
+	const OrderedJsonValue jsonVal = variantToOrderedJson(value);
 	if(jsonVal.isUndefined())
 	{
 		removeAt(path);
 		return;
 	}
-	if(m_patcher.valueAt(path) == jsonVal)
+	if(m_patcher.orderedValueAt(path) == jsonVal)
 	{
 		return;
 	}
-	m_patcher.setValueAt(path, jsonVal);
+	m_patcher.setOrderedValueAt(path, jsonVal);
 	afterPatcherMutated();
 }
 
@@ -350,12 +669,18 @@ void ConfigEditorController::setStringListAt(const QStringList& path, const QStr
 		removeAt(path);
 		return;
 	}
-	const QJsonValue arr = QJsonArray::fromStringList(list);
-	if(m_patcher.valueAt(path) == arr)
+	OrderedJsonValue::Array arr;
+	arr.reserve(list.size());
+	for(const QString& item : list)
+	{
+		arr.append(OrderedJsonValue(item));
+	}
+	const OrderedJsonValue nextVal(std::move(arr));
+	if(m_patcher.orderedValueAt(path) == nextVal)
 	{
 		return;
 	}
-	m_patcher.setValueAt(path, arr);
+	m_patcher.setOrderedValueAt(path, nextVal);
 	afterPatcherMutated();
 }
 
@@ -371,45 +696,39 @@ QString ConfigEditorController::setSerializedJsonAt(const QStringList& path, con
 		removeAt(path);
 		return {};
 	}
-	const auto wrapped = ConfigJsonPatcher::parseJsonc(u"{\"value\": %1}"_s.arg(trimmed));
-	if(!wrapped)
+	const auto parsed = ConfigJsonPatcher::parseJsoncValue(trimmed);
+	if(!parsed)
 	{
-		return wrapped.error().message;
+		return parsed.error().message;
 	}
-	const QJsonValue val = wrapped->root().value(u"value"_s);
-	if(removeWhenEmptyObject && val.isObject() && val.toObject().isEmpty())
+	if(removeWhenEmptyObject && parsed->isObject() && parsed->toObject().isEmpty())
 	{
 		removeAt(path);
 		return {};
 	}
-	if(m_patcher.valueAt(path) == val)
+	if(m_patcher.orderedValueAt(path) == *parsed)
 	{
 		return {};
 	}
-	m_patcher.setValueAt(path, val);
+	m_patcher.setOrderedValueAt(path, *parsed);
 	afterPatcherMutated();
 	return {};
 }
 
 QString ConfigEditorController::formatJsonAt(const QStringList& path) const
 {
-	const QJsonValue val = path.isEmpty() ? QJsonValue(m_patcher.root()) : m_patcher.valueAt(path);
+	const OrderedJsonValue val = path.isEmpty()
+		? OrderedJsonValue(m_patcher.orderedRoot())
+		: m_patcher.orderedValueAt(path);
 	if(val.isUndefined() || val.isNull())
 	{
 		return {};
 	}
-	if(val.isObject())
+	if(val.isObject() || val.isArray())
 	{
-		return QString::fromUtf8(QJsonDocument(val.toObject()).toJson(QJsonDocument::Indented)).trimmed();
+		return val.toIndentedJson();
 	}
-	if(val.isArray())
-	{
-		return QString::fromUtf8(QJsonDocument(val.toArray()).toJson(QJsonDocument::Indented)).trimmed();
-	}
-	const QJsonObject wrapper{{u"v"_s, val}};
-	const QString compact = QString::fromUtf8(QJsonDocument(wrapper).toJson(QJsonDocument::Compact));
-	// Strip `{"v":` and trailing `}`
-	return compact.mid(5, compact.size() - 6);
+	return val.toCompactJson();
 }
 
 void ConfigEditorController::removeAt(const QStringList& path, bool pruneEmptyAncestors)
@@ -463,44 +782,36 @@ QString ConfigEditorController::addProviderPreset(const QString& presetId, const
 {
 	const QStringList providerRoot{u"provider"_s};
 	QString key;
-	QJsonObject entry;
+	OrderedJsonObject entry;
 
 	if(presetId == "anthropic"_L1)
 	{
 		key = uniqueKeyUnder(providerRoot, u"anthropic"_s);
-		entry = QJsonObject{
-			{u"options"_s, QJsonObject{{u"apiKey"_s, u"{env:ANTHROPIC_API_KEY}"_s}}},
-		};
+		entry = singleKeyOptionsProvider(u"{env:ANTHROPIC_API_KEY}"_s);
 	}
 	else if(presetId == "openai"_L1)
 	{
 		key = uniqueKeyUnder(providerRoot, u"openai"_s);
-		entry = QJsonObject{
-			{u"options"_s, QJsonObject{{u"apiKey"_s, u"{env:OPENAI_API_KEY}"_s}}},
-		};
+		entry = singleKeyOptionsProvider(u"{env:OPENAI_API_KEY}"_s);
 	}
 	else if(presetId == "deepseek"_L1)
 	{
 		key = uniqueKeyUnder(providerRoot, u"deepseek"_s);
-		entry = QJsonObject{
-			{u"options"_s, QJsonObject{{u"apiKey"_s, u"{env:DEEPSEEK_API_KEY}"_s}}},
-		};
+		entry = singleKeyOptionsProvider(u"{env:DEEPSEEK_API_KEY}"_s);
 	}
 	else if(presetId == "openrouter"_L1)
 	{
 		key = uniqueKeyUnder(providerRoot, u"openrouter"_s);
-		entry = QJsonObject{
-			{u"options"_s, QJsonObject{{u"apiKey"_s, u"{env:OPENROUTER_API_KEY}"_s}}},
-		};
+		entry = singleKeyOptionsProvider(u"{env:OPENROUTER_API_KEY}"_s);
 	}
 	else if(presetId == "ollama"_L1)
 	{
 		key = uniqueKeyUnder(providerRoot, u"ollama"_s);
-		entry = QJsonObject{
-			{u"name"_s, u"Ollama / Local"_s},
-			{u"options"_s, QJsonObject{{u"baseURL"_s, u"http://localhost:11434/v1"_s}}},
-			{u"models"_s, QJsonObject{}},
-		};
+		OrderedJsonObject options;
+		options.set(u"baseURL"_s, OrderedJsonValue(u"http://localhost:11434/v1"_s));
+		entry.set(u"name"_s, OrderedJsonValue(u"Ollama / Local"_s));
+		entry.set(u"options"_s, OrderedJsonValue(std::move(options)));
+		entry.set(u"models"_s, OrderedJsonValue(OrderedJsonObject{}));
 	}
 	else
 	{
@@ -517,17 +828,18 @@ QString ConfigEditorController::addProviderPreset(const QString& presetId, const
 		{
 			key = uniqueKeyUnder(providerRoot, u"custom"_s);
 		}
-		entry = QJsonObject{
-			{u"options"_s, QJsonObject{{u"baseURL"_s, u"https://example.com/v1"_s}, {u"apiKey"_s, u"{env:API_KEY}"_s}}},
-			{u"models"_s, QJsonObject{}},
-		};
+		OrderedJsonObject options;
+		options.set(u"baseURL"_s, OrderedJsonValue(u"https://example.com/v1"_s));
+		options.set(u"apiKey"_s, OrderedJsonValue(u"{env:API_KEY}"_s));
+		entry.set(u"options"_s, OrderedJsonValue(std::move(options)));
+		entry.set(u"models"_s, OrderedJsonValue(OrderedJsonObject{}));
 	}
 
 	if(key.isEmpty())
 	{
 		return {};
 	}
-	m_patcher.setValueAt({u"provider"_s, key}, entry);
+	m_patcher.setOrderedValueAt({u"provider"_s, key}, OrderedJsonValue(std::move(entry)));
 	afterPatcherMutated();
 	return key;
 }
@@ -537,46 +849,27 @@ QVariantList ConfigEditorController::modelOptions() const
 	QVariantList options;
 	QSet<QString> seen;
 
-	const auto appendOption = [&](const QString& fullRef, const QString& label, const QString& description) {
-		if(fullRef.isEmpty() || seen.contains(fullRef))
-		{
-			return;
-		}
-		seen.insert(fullRef);
-		options.append(QVariantMap{
-			{u"label"_s, label},
-			{u"value"_s, fullRef},
-			{u"description"_s, description},
-		});
-	};
-
-	// Models defined in the edited JSON object first.
-	const QJsonObject providers = m_patcher.valueAt({u"provider"_s}).toObject();
-	for(auto pit = providers.begin(); pit != providers.end(); ++pit)
+	// Models defined in the edited JSON object first (preserving provider & model key order).
+	const OrderedJsonObject providers = m_patcher.orderedValueAt({u"provider"_s}).toObject();
+	for(const OrderedJsonObject::Entry& providerEntry : providers.entries())
 	{
-		const QString providerId = pit.key();
-		const QJsonObject providerObj = pit.value().toObject();
-		const QString providerName = providerObj.value(u"name"_s).toString(providerId);
-		const QJsonObject modelsObj = providerObj.value(u"models"_s).toObject();
-		for(auto mit = modelsObj.begin(); mit != modelsObj.end(); ++mit)
-		{
-			const QJsonObject modelObj = mit.value().toObject();
-			if(modelObj.value(u"disabled"_s).toBool(false))
-			{
-				continue;
-			}
-			const QString modelKey = mit.key();
-			const QString fullRef = providerId + u'/' + modelKey;
-			const QString displayName = modelObj.value(u"name"_s).toString();
-			appendOption(fullRef, fullRef, displayName.isEmpty() ? providerName : displayName);
-		}
+		collectProviderModels(providerEntry.key, providerEntry.value.toObject(), seen, options);
 	}
 
 	// Plus models from the live BackendConfig (e.g. env-detected built-in providers).
 	for(const proto::ModelInfo& model : m_backendConfig.config().models)
 	{
 		const QString fullRef = model.provider + u'/' + model.id;
-		appendOption(fullRef, fullRef, model.name);
+		if(fullRef.isEmpty() || seen.contains(fullRef))
+		{
+			continue;
+		}
+		seen.insert(fullRef);
+		options.append(QVariantMap{
+			{u"label"_s, fullRef},
+			{u"value"_s, fullRef},
+			{u"description"_s, model.name},
+		});
 	}
 
 	return options;
@@ -600,7 +893,7 @@ QVariantList ConfigEditorController::agentOptions() const
 		});
 	};
 
-	const QJsonObject agentsObj = m_patcher.valueAt({u"agent"_s}).toObject();
+	const OrderedJsonObject agentsObj = m_patcher.orderedValueAt({u"agent"_s}).toObject();
 
 	struct BuiltinDef
 	{
@@ -615,7 +908,7 @@ QVariantList ConfigEditorController::agentOptions() const
 	};
 	for(const BuiltinDef& builtin : builtins)
 	{
-		const QJsonObject overrideObj = agentsObj.value(builtin.name).toObject();
+		const OrderedJsonObject overrideObj = agentsObj.value(builtin.name).toObject();
 		if(overrideObj.value(u"disable"_s).toBool(false) || overrideObj.value(u"disabled"_s).toBool(false))
 		{
 			continue;
@@ -623,14 +916,14 @@ QVariantList ConfigEditorController::agentOptions() const
 		appendAgent(builtin.name, overrideObj.value(u"description"_s).toString(builtin.description));
 	}
 
-	for(auto it = agentsObj.begin(); it != agentsObj.end(); ++it)
+	for(const OrderedJsonObject::Entry& entry : agentsObj.entries())
 	{
-		const QJsonObject obj = it.value().toObject();
+		const OrderedJsonObject obj = entry.value.toObject();
 		if(obj.value(u"disable"_s).toBool(false) || obj.value(u"disabled"_s).toBool(false))
 		{
 			continue;
 		}
-		appendAgent(it.key(), obj.value(u"description"_s).toString());
+		appendAgent(entry.key, obj.value(u"description"_s).toString());
 	}
 
 	for(const proto::AgentInfo& agent : m_backendConfig.config().agents)
@@ -680,8 +973,8 @@ void ConfigEditorController::applyServerInfo(const proto::ConfigFilesInfo& info,
 	m_hasValidBaseline = validObject;
 	if(validObject)
 	{
-		m_baselineRoot = info.parsed.toObject();
-		m_patcher.setRoot(m_baselineRoot);
+		m_baselineRoot = parseBaselineObject(info);
+		m_patcher.setOrderedRoot(m_baselineRoot);
 		setParseError({});
 		if(resetModeOnValid && m_mode != "visual"_L1)
 		{
@@ -692,7 +985,7 @@ void ConfigEditorController::applyServerInfo(const proto::ConfigFilesInfo& info,
 	else
 	{
 		m_baselineRoot = {};
-		m_patcher.setRoot({});
+		m_patcher.setOrderedRoot({});
 		setParseError(info.parseError.value_or(tr("Configuration root must be a JSON object.")));
 		if(m_mode != "json"_L1)
 		{
@@ -715,7 +1008,7 @@ void ConfigEditorController::afterPatcherMutated()
 	m_rawText = m_patcher.toJson();
 	setParseError({});
 	setErrorText({});
-	updateDirty(!m_hasValidBaseline || m_patcher.root() != m_baselineRoot);
+	updateDirty(!m_hasValidBaseline || m_patcher.orderedRoot() != m_baselineRoot);
 	emit parsedChanged();
 	emit rawTextChanged();
 }
@@ -899,27 +1192,20 @@ QCoro::Task<> ConfigEditorController::reloadTask()
 	const int serial = ++m_fetchSerial;
 	const QPointer<ConfigEditorController> self(this);
 	setLoading(true);
-	emit mutationStarted();
 	const auto reloaded = co_await m_backendConfig.reload(optionalCwd());
-	if(!self)
+	if(!self || serial != m_fetchSerial)
 	{
 		co_return;
 	}
 	if(!reloaded)
 	{
-		emit mutationFinished();
 		setLoading(false);
 		setErrorText(reloaded.error().message);
 		co_return;
 	}
 	const std::optional<QString> targetFile = m_selectedFile.isEmpty() ? std::nullopt : std::optional<QString>(m_selectedFile);
 	const auto filesResult = co_await m_connection.backend().client().getConfigFiles(targetFile, optionalCwd());
-	if(!self)
-	{
-		co_return;
-	}
-	emit mutationFinished();
-	if(serial != m_fetchSerial)
+	if(!self || serial != m_fetchSerial)
 	{
 		co_return;
 	}

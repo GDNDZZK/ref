@@ -165,70 +165,75 @@
 <context>
     <name>ColorSwatchPicker</name>
     <message>
-        <location filename="../src/app/ColorSwatchPicker.qml" line="14"/>
+        <location filename="../src/app/ColorSwatchPicker.qml" line="15"/>
         <source>Automatic</source>
         <translation>自动</translation>
     </message>
     <message>
-        <location filename="../src/app/ColorSwatchPicker.qml" line="15"/>
+        <location filename="../src/app/ColorSwatchPicker.qml" line="16"/>
         <source>Orange</source>
         <translation>橙色</translation>
     </message>
     <message>
-        <location filename="../src/app/ColorSwatchPicker.qml" line="16"/>
+        <location filename="../src/app/ColorSwatchPicker.qml" line="17"/>
         <source>Blue</source>
         <translation>蓝色</translation>
     </message>
     <message>
-        <location filename="../src/app/ColorSwatchPicker.qml" line="17"/>
+        <location filename="../src/app/ColorSwatchPicker.qml" line="18"/>
         <source>Purple</source>
         <translation>紫色</translation>
     </message>
     <message>
-        <location filename="../src/app/ColorSwatchPicker.qml" line="18"/>
+        <location filename="../src/app/ColorSwatchPicker.qml" line="19"/>
         <source>Green</source>
         <translation>绿色</translation>
     </message>
     <message>
-        <location filename="../src/app/ColorSwatchPicker.qml" line="19"/>
+        <location filename="../src/app/ColorSwatchPicker.qml" line="20"/>
         <source>Yellow</source>
         <translation>黄色</translation>
     </message>
     <message>
-        <location filename="../src/app/ColorSwatchPicker.qml" line="20"/>
+        <location filename="../src/app/ColorSwatchPicker.qml" line="21"/>
         <source>Cyan</source>
         <translation>青色</translation>
     </message>
     <message>
-        <location filename="../src/app/ColorSwatchPicker.qml" line="21"/>
+        <location filename="../src/app/ColorSwatchPicker.qml" line="22"/>
         <source>Red</source>
         <translation>红色</translation>
     </message>
     <message>
-        <location filename="../src/app/ColorSwatchPicker.qml" line="163"/>
+        <location filename="../src/app/ColorSwatchPicker.qml" line="179"/>
         <source>Hex color</source>
         <translation>十六进制颜色</translation>
+    </message>
+    <message>
+        <location filename="../src/app/ColorSwatchPicker.qml" line="216"/>
+        <source>Enter a swatch color name or #rgb / #rrggbb hex code.</source>
+        <translation>请输入预设颜色名称或 #rgb / #rrggbb 十六进制颜色代码。</translation>
     </message>
 </context>
 <context>
     <name>CommandPalette</name>
     <message>
-        <location filename="../src/app/CommandPalette.qml" line="183"/>
+        <location filename="../src/app/CommandPalette.qml" line="186"/>
         <source>Command</source>
         <translation>命令</translation>
     </message>
     <message>
-        <location filename="../src/app/CommandPalette.qml" line="206"/>
+        <location filename="../src/app/CommandPalette.qml" line="209"/>
         <source>Type a command…</source>
         <translation>输入命令…</translation>
     </message>
     <message>
-        <location filename="../src/app/CommandPalette.qml" line="227"/>
+        <location filename="../src/app/CommandPalette.qml" line="230"/>
         <source>No matching commands</source>
         <translation>没有匹配的命令</translation>
     </message>
     <message>
-        <location filename="../src/app/CommandPalette.qml" line="286"/>
+        <location filename="../src/app/CommandPalette.qml" line="289"/>
         <source>Type the argument and press Enter to run &quot;%1&quot;.</source>
         <translation>输入参数并按回车运行“%1”。</translation>
     </message>
@@ -410,32 +415,32 @@
 <context>
     <name>Composer</name>
     <message>
-        <location filename="../src/app/Composer.qml" line="171"/>
+        <location filename="../src/app/Composer.qml" line="172"/>
         <source>Run a shell command…</source>
         <translation>运行 shell 命令…</translation>
     </message>
     <message>
-        <location filename="../src/app/Composer.qml" line="172"/>
+        <location filename="../src/app/Composer.qml" line="173"/>
         <source>Type to queue a message…</source>
         <translation>输入后加入队列…</translation>
     </message>
     <message>
-        <location filename="../src/app/Composer.qml" line="173"/>
+        <location filename="../src/app/Composer.qml" line="174"/>
         <source>Message ref</source>
         <translation>给 ref 发消息</translation>
     </message>
     <message>
-        <location filename="../src/app/Composer.qml" line="275"/>
+        <location filename="../src/app/Composer.qml" line="276"/>
         <source>Cancelled the delayed tool call</source>
         <translation>已取消延迟中的工具调用</translation>
     </message>
     <message>
-        <location filename="../src/app/Composer.qml" line="363"/>
+        <location filename="../src/app/Composer.qml" line="364"/>
         <source>Drop files here</source>
         <translation>拖放文件到此处</translation>
     </message>
     <message>
-        <location filename="../src/app/Composer.qml" line="170"/>
+        <location filename="../src/app/Composer.qml" line="171"/>
         <source>Waiting for the ref backend…</source>
         <translation>正在等待 ref 后端…</translation>
     </message>
@@ -481,296 +486,299 @@
 <context>
     <name>ConfigAgentsSection</name>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="18"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="19"/>
         <source>Default agent with full tool access and session spawning.</source>
         <translation>拥有完整工具权限并可创建子会话的默认智能体。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="19"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="20"/>
         <source>Read-only analysis and planning (edits denied, bash asks).</source>
         <translation>只读分析与规划（禁止编辑，bash 需询问）。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="20"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="21"/>
         <source>Multi-step tasks in an independent session.</source>
         <translation>在独立会话中执行多步骤任务。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="21"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="22"/>
         <source>Fast, read-only codebase exploration.</source>
         <translation>快速、只读的代码库探索。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="22"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="23"/>
         <source>Hidden summarizer used during context compaction.</source>
         <translation>上下文压缩时使用的隐藏摘要智能体。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="57"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="104"/>
         <source>Enter an agent name.</source>
         <translation>请输入智能体名称。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="61"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="108"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="291"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="311"/>
         <source>&quot;%1&quot; is a built-in agent — customize it above.</source>
         <translation>“%1”是内置智能体——请在上方自定义。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="65"/>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="177"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="112"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="295"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="315"/>
         <source>Agent &quot;%1&quot; already exists.</source>
         <translation>智能体“%1”已存在。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="258"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="432"/>
         <source>Customized</source>
         <translation>已自定义</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="295"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="469"/>
         <source>Reset override</source>
         <translation>重置覆盖项</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="308"/>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="309"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="483"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="484"/>
         <source>Delete agent</source>
         <translation>删除智能体</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="327"/>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="337"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="502"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="513"/>
         <source>Agent name</source>
         <translation>智能体名称</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="344"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="521"/>
         <source>Rename</source>
         <translation>重命名</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="352"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="531"/>
         <source>Description</source>
         <translation>描述</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="361"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="540"/>
         <source>Shown in agent picker and spawn descriptions</source>
         <translation>显示在智能体选择器与子会话说明中</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="367"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="552"/>
         <source>Default model</source>
         <translation>默认模型</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="379"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="564"/>
         <source>Inherit top-level model</source>
         <translation>继承顶层默认模型</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="385"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="570"/>
         <source>Default variant</source>
         <translation>默认变体</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="394"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="579"/>
         <source>e.g. high</source>
         <translation>例如 high</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="400"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="591"/>
         <source>Mode</source>
         <translation>模式</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="402"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="593"/>
         <source>opencode compatibility mode (primary, subagent, all).</source>
         <translation>opencode 兼容模式（primary、subagent、all）。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="412"/>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="417"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="603"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="608"/>
         <source>Default</source>
         <translation>默认</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="423"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="614"/>
         <source>Badge color</source>
         <translation>徽章颜色</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="437"/>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="446"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="632"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="641"/>
         <source>Creatable by peers</source>
         <translation>允许对等会话创建</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="439"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="634"/>
         <source>Allow other sessions to create sessions with this agent.</source>
         <translation>允许其他会话使用此智能体创建新会话。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="453"/>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="462"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="648"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="662"/>
         <source>Can spawn sessions</source>
         <translation>允许派生子会话</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="455"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="650"/>
         <source>Grants create_session, resume_session, and close_session tools.</source>
         <translation>授予 create_session、resume_session 与 close_session 工具。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="469"/>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="478"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="675"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="684"/>
         <source>Hidden</source>
         <translation>隐藏</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="471"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="677"/>
         <source>Hide from agent picker and peer session lists.</source>
         <translation>在智能体选择器与对等会话列表中隐藏。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="485"/>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="494"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="691"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="705"/>
         <source>Disable agent</source>
         <translation>禁用智能体</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="487"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="693"/>
         <source>Remove this agent from runtime availability.</source>
         <translation>在运行时禁用此智能体。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="501"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="718"/>
         <source>Temperature</source>
         <translation>温度 (Temperature)</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="515"/>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="535"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="735"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="763"/>
         <source>Model default</source>
         <translation>模型默认</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="521"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="746"/>
         <source>Top-p</source>
         <translation>Top-p</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="541"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="774"/>
         <source>System prompt</source>
         <translation>系统提示词</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="543"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="776"/>
         <source>Placed at the start of the system prompt. Use {file:./prompts/name.md} for external files.</source>
         <translation>置于系统提示词开头。外部文件可使用 {file:./prompts/name.md}。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="553"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="786"/>
         <source>Agent instructions or {file:./prompts/agent.md}</source>
         <translation>智能体指令或 {file:./prompts/agent.md}</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="559"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="792"/>
         <source>Request options</source>
         <translation>请求选项</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="561"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="794"/>
         <source>Extra JSON request body fields merged over model options.</source>
         <translation>合并在模型选项之上的额外 JSON 请求体字段。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="571"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="808"/>
         <source>Key (e.g. reasoningEffort)</source>
         <translation>键（如 reasoningEffort）</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="572"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="809"/>
         <source>JSON value (e.g. &quot;high&quot;)</source>
         <translation>JSON 值（如 &quot;high&quot;）</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="573"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="810"/>
         <source>No extra request options</source>
         <translation>无额外请求选项</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="584"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="818"/>
         <source>Permission overrides</source>
         <translation>权限覆盖</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="586"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="820"/>
         <source>Evaluated after global permissions (takes priority over global rules).</source>
         <translation>在全局权限之后评估（优先于全局规则）。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="611"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="841"/>
         <source>Tool delay overrides</source>
         <translation>工具延迟覆盖</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="613"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="843"/>
         <source>Checked before global delays.</source>
         <translation>优先于全局延迟规则检查。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="625"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="859"/>
         <source>Inherit</source>
         <translation>继承默认</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="626"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="860"/>
         <source>All tools</source>
         <translation>所有工具</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="627"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="861"/>
         <source>Per-tool</source>
         <translation>按工具</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="672"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="909"/>
         <source>Tool glob (e.g. bash)</source>
         <translation>工具匹配模式（如 bash）</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="673"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="910"/>
         <source>Seconds</source>
         <translation>秒数</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="689"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="923"/>
         <source>Built-in Agents</source>
         <translation>内置智能体</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="697"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="931"/>
         <source>Override individual settings (model, variant, permissions, prompt) on built-in agents without replacing their defaults.</source>
         <translation>覆盖内置智能体的单项设置（模型、变体、权限、提示词），而无需替换其默认行为。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="720"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="957"/>
         <source>Custom Agents</source>
         <translation>自定义智能体</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="733"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="970"/>
         <source>Custom agent name (e.g. reviewer, security)</source>
         <translation>自定义智能体名称（如 reviewer、security）</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="743"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="980"/>
         <source>+ Add Custom Agent</source>
         <translation>+ 添加自定义智能体</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigAgentsSection.qml" line="752"/>
+        <location filename="../src/app/ConfigAgentsSection.qml" line="989"/>
         <source>No custom agents defined in this file.</source>
         <translation>此配置文件中未定义自定义智能体。</translation>
     </message>
@@ -778,85 +786,86 @@
 <context>
     <name>ConfigCommandsSection</name>
     <message>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="89"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="130"/>
         <source>Enter a command name.</source>
         <translation>请输入命令名称。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="93"/>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="211"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="134"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="222"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="235"/>
         <source>Command /%1 already exists.</source>
         <translation>命令 /%1 已存在。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="126"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="428"/>
         <source>Custom Slash Commands</source>
         <translation>自定义斜杠命令</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="134"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="436"/>
         <source>Prompt templates invoked as /name. Supports $ARGUMENTS, $1–$9 positional words, and !`shell command` inline output.</source>
         <translation>通过 /name 调用的提示词模板。支持 $ARGUMENTS、$1–$9 位置参数及 !`shell command` 内联输出。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="148"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="450"/>
         <source>Command name (e.g. review, fix-issue)</source>
         <translation>命令名称（如 review、fix-issue）</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="158"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="460"/>
         <source>+ Add Command</source>
         <translation>+ 添加命令</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="169"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="471"/>
         <source>No custom slash commands configured in this file.</source>
         <translation>此配置文件中未设置自定义斜杠命令。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="283"/>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="284"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="327"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="328"/>
         <source>Delete command</source>
         <translation>删除命令</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="300"/>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="311"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="344"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="356"/>
         <source>Command name</source>
         <translation>命令名称</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="301"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="345"/>
         <source>Slash name typed after &apos;/&apos;.</source>
         <translation>在“/”后输入的命令名。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="318"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="364"/>
         <source>Rename</source>
         <translation>重命名</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="326"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="374"/>
         <source>Description</source>
         <translation>描述</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="338"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="386"/>
         <source>Short summary shown in completion list</source>
         <translation>显示在补全列表中的简短说明</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="344"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="408"/>
         <source>Prompt template</source>
         <translation>提示词模板</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="346"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="410"/>
         <source>Expanded and sent as the user prompt when the command runs.</source>
         <translation>运行命令时展开并作为用户提示词发送。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="354"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="418"/>
         <source>Review this diff:
 
 !`git diff`
@@ -869,47 +878,47 @@ $ARGUMENTS</source>
 $ARGUMENTS</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="368"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="491"/>
         <source>Instructions &amp; Skills</source>
         <translation>指令与技能 (Skills)</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="374"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="497"/>
         <source>Extra instruction files</source>
         <translation>额外指令文件</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="376"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="499"/>
         <source>Paths or globs (relative, ~/…, or absolute) appended to the system prompt.</source>
         <translation>追加到系统提示词的文件路径或通配模式（支持相对路径、~/… 或绝对路径）。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="389"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="514"/>
         <source>docs/CONTRIBUTING.md or ~/notes/*.md</source>
         <translation>docs/CONTRIBUTING.md 或 ~/notes/*.md</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="390"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="515"/>
         <source>No extra instruction files</source>
         <translation>无额外指令文件</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="396"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="521"/>
         <source>Skill directories</source>
         <translation>技能目录</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="398"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="523"/>
         <source>Directories containing SKILL.md files offered to the model.</source>
         <translation>包含提供给模型的 SKILL.md 文件的目录。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="410"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="537"/>
         <source>./skills or ~/my-skills</source>
         <translation>./skills 或 ~/my-skills</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigCommandsSection.qml" line="411"/>
+        <location filename="../src/app/ConfigCommandsSection.qml" line="538"/>
         <source>Default skill directories only</source>
         <translation>仅使用默认技能目录</translation>
     </message>
@@ -917,204 +926,209 @@ $ARGUMENTS</translation>
 <context>
     <name>ConfigDialog</name>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="23"/>
+        <location filename="../src/app/ConfigDialog.qml" line="33"/>
         <source>General</source>
         <translation>通用</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="24"/>
+        <location filename="../src/app/ConfigDialog.qml" line="34"/>
         <location filename="../tests/tst_app_translator.cpp" line="72"/>
         <source>Providers &amp; Models</source>
         <translation>提供商与模型</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="25"/>
+        <location filename="../src/app/ConfigDialog.qml" line="35"/>
         <source>Agents</source>
         <translation>智能体</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="26"/>
+        <location filename="../src/app/ConfigDialog.qml" line="36"/>
         <source>Permissions &amp; Delays</source>
         <translation>权限与延迟</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="27"/>
+        <location filename="../src/app/ConfigDialog.qml" line="37"/>
         <source>MCP Servers</source>
         <translation>MCP 服务器</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="28"/>
+        <location filename="../src/app/ConfigDialog.qml" line="38"/>
         <source>Commands &amp; Context</source>
         <translation>命令与上下文</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="312"/>
+        <location filename="../src/app/ConfigDialog.qml" line="412"/>
         <source>Configuration</source>
         <translation>配置</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="329"/>
+        <location filename="../src/app/ConfigDialog.qml" line="429"/>
         <source>Active</source>
         <translation>当前生效</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="329"/>
+        <location filename="../src/app/ConfigDialog.qml" line="429"/>
         <source>Backup</source>
         <translation>备份</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="348"/>
+        <location filename="../src/app/ConfigDialog.qml" line="448"/>
         <source>Unsaved</source>
         <translation>未保存</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="373"/>
+        <location filename="../src/app/ConfigDialog.qml" line="473"/>
         <source>Close</source>
         <translation>关闭</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="420"/>
+        <location filename="../src/app/ConfigDialog.qml" line="521"/>
         <source>Set Active</source>
         <translation>设为当前</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="429"/>
+        <location filename="../src/app/ConfigDialog.qml" line="530"/>
         <source>+ New</source>
         <translation>+ 新建</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="446"/>
-        <location filename="../src/app/ConfigDialog.qml" line="447"/>
+        <location filename="../src/app/ConfigDialog.qml" line="547"/>
+        <location filename="../src/app/ConfigDialog.qml" line="548"/>
         <source>Delete profile</source>
         <translation>删除配置档</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="462"/>
-        <location filename="../src/app/ConfigDialog.qml" line="463"/>
+        <location filename="../src/app/ConfigDialog.qml" line="563"/>
+        <location filename="../src/app/ConfigDialog.qml" line="564"/>
         <source>Reload configuration from disk</source>
         <translation>从磁盘重新加载配置</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="474"/>
+        <location filename="../src/app/ConfigDialog.qml" line="575"/>
         <source>Visual</source>
         <translation>可视化</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="475"/>
+        <location filename="../src/app/ConfigDialog.qml" line="576"/>
         <source>JSON</source>
         <translation>JSON</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="502"/>
+        <location filename="../src/app/ConfigDialog.qml" line="610"/>
         <source>New profile label (e.g. Work, Local vLLM)</source>
         <translation>新配置档标签（如 Work、本地 vLLM）</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="517"/>
-        <location filename="../src/app/ConfigDialog.qml" line="527"/>
+        <location filename="../src/app/ConfigDialog.qml" line="625"/>
+        <location filename="../src/app/ConfigDialog.qml" line="635"/>
         <source>Clone current</source>
         <translation>克隆当前配置</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="536"/>
+        <location filename="../src/app/ConfigDialog.qml" line="644"/>
         <source>Create</source>
         <translation>创建</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="546"/>
-        <location filename="../src/app/ConfigDialog.qml" line="594"/>
-        <location filename="../src/app/ConfigDialog.qml" line="904"/>
+        <location filename="../src/app/ConfigDialog.qml" line="654"/>
+        <location filename="../src/app/ConfigDialog.qml" line="703"/>
+        <location filename="../src/app/ConfigDialog.qml" line="1013"/>
         <source>Cancel</source>
         <translation>取消</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="569"/>
+        <location filename="../src/app/ConfigDialog.qml" line="677"/>
         <source>Delete %1? The newest backup (if any) will be promoted to active.</source>
         <translation>删除 %1？最新的备份配置（若有）将提升为当前生效配置。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="570"/>
+        <location filename="../src/app/ConfigDialog.qml" line="678"/>
         <source>Permanently delete backup profile %1?</source>
         <translation>永久删除备份配置档 %1？</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="585"/>
+        <location filename="../src/app/ConfigDialog.qml" line="693"/>
         <source>Delete</source>
         <translation>删除</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="613"/>
+        <location filename="../src/app/ConfigDialog.qml" line="722"/>
         <source>ref.jsonc exists in this config directory and takes precedence over ref.json at runtime.</source>
         <translation>此配置目录下存在 ref.jsonc，运行时将优先于 ref.json 生效。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="619"/>
+        <location filename="../src/app/ConfigDialog.qml" line="728"/>
         <source>Explicit environment config file active: %1</source>
         <translation>当前通过环境变量指定了配置文件：%1</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="625"/>
+        <location filename="../src/app/ConfigDialog.qml" line="734"/>
         <source>Project config files merged over global settings: %1</source>
         <translation>已合并覆盖在全局设置之上的项目配置文件：%1</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="631"/>
+        <location filename="../src/app/ConfigDialog.qml" line="740"/>
         <source>%1 does not exist on disk yet — click Save to create it.</source>
         <translation>磁盘上尚不存在 %1——点击“保存”即可创建。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="638"/>
+        <location filename="../src/app/ConfigDialog.qml" line="747"/>
         <source>JSONC syntax error: %1</source>
         <translation>JSONC 语法错误：%1</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="852"/>
+        <location filename="../src/app/ConfigDialog.qml" line="961"/>
         <source>Raw JSONC configuration</source>
         <translation>原始 JSONC 配置</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="891"/>
+        <location filename="../src/app/ConfigDialog.qml" line="1000"/>
         <source>Unsaved changes in %1.</source>
         <translation>%1 中有未保存的更改。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="912"/>
+        <location filename="../src/app/ConfigDialog.qml" line="1021"/>
         <source>Discard &amp; Continue</source>
         <translation>放弃更改并继续</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="927"/>
+        <location filename="../src/app/ConfigDialog.qml" line="1037"/>
         <source>Save &amp; Continue</source>
         <translation>保存并继续</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="959"/>
-        <location filename="../src/app/ConfigDialog.qml" line="989"/>
+        <location filename="../src/app/ConfigDialog.qml" line="1071"/>
+        <location filename="../src/app/ConfigDialog.qml" line="1104"/>
         <source>Saving…</source>
         <translation>正在保存…</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="961"/>
+        <location filename="../src/app/ConfigDialog.qml" line="1073"/>
         <source>Loading…</source>
         <translation>加载中…</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="963"/>
+        <location filename="../src/app/ConfigDialog.qml" line="1075"/>
+        <source>Fix highlighted validation errors before saving</source>
+        <translation>请先修复高亮显示的校验错误后再保存</translation>
+    </message>
+    <message>
+        <location filename="../src/app/ConfigDialog.qml" line="1077"/>
         <source>Modified — save to apply across live sessions</source>
         <translation>已修改——保存后立即应用到运行中的会话</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="964"/>
+        <location filename="../src/app/ConfigDialog.qml" line="1078"/>
         <source>Changes apply live on save</source>
         <translation>保存后立即实时生效</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="977"/>
+        <location filename="../src/app/ConfigDialog.qml" line="1091"/>
         <source>Discard</source>
         <translation>放弃更改</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigDialog.qml" line="989"/>
+        <location filename="../src/app/ConfigDialog.qml" line="1104"/>
         <source>Save</source>
         <translation>保存</translation>
     </message>
@@ -1122,202 +1136,202 @@ $ARGUMENTS</translation>
 <context>
     <name>ConfigGeneralSection</name>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="92"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="119"/>
         <source>Profile &amp; Defaults</source>
         <translation>配置档与默认项</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="98"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="125"/>
         <source>Profile label</source>
         <translation>配置档标签</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="100"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="127"/>
         <source>Friendly name shown in the profile switcher; ignored by the runtime.</source>
         <translation>显示在配置档切换器中的友好名称，运行时会忽略该字段。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="109"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="136"/>
         <source>e.g. Work Anthropic, Local Ollama</source>
         <translation>例如 Work Anthropic、本地 Ollama</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="115"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="148"/>
         <source>Default model</source>
         <translation>默认模型</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="117"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="150"/>
         <source>Model for agents that do not specify one (provider/model).</source>
         <translation>未单独指定模型的智能体所使用的默认模型（provider/model）。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="129"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="162"/>
         <source>provider/model</source>
         <translation>provider/model</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="135"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="168"/>
         <source>Small model</source>
         <translation>轻量模型</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="137"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="170"/>
         <source>Lightweight model used to generate session titles.</source>
         <translation>用于生成会话标题的轻量级模型。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="149"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="182"/>
         <source>Same as session model</source>
         <translation>与会话模型相同</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="155"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="188"/>
         <source>Default agent</source>
         <translation>默认智能体</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="157"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="190"/>
         <source>Agent selected when starting a new session.</source>
         <translation>新建会话时默认选中的智能体。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="179"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="212"/>
         <source>Context Compaction</source>
         <translation>上下文压缩</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="185"/>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="195"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="218"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="228"/>
         <source>Automatic compaction</source>
         <translation>自动压缩上下文</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="187"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="220"/>
         <source>Automatically summarize older turns when context reaches the threshold.</source>
         <translation>当上下文达到阈值时自动总结早期对话轮次。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="202"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="235"/>
         <source>Recommended point</source>
         <translation>建议压缩点</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="204"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="237"/>
         <source>Fraction (≤ 1, default 0.6) or token count (&gt; 1) advised to the model.</source>
         <translation>建议模型进行压缩的比例（≤ 1，默认 0.6）或词元数（&gt; 1）。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="222"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="257"/>
         <source>Automatic threshold</source>
         <translation>自动压缩阈值</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="224"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="259"/>
         <source>Fraction (≤ 1, default 0.9) or token count (&gt; 1) that triggers compaction.</source>
         <translation>触发自动压缩的比例（≤ 1，默认 0.9）或词元数（&gt; 1）。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="246"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="283"/>
         <source>Retries, Images &amp; TUI Defaults</source>
         <translation>重试、图片与终端默认值</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="252"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="289"/>
         <source>Maximum retry backoff</source>
         <translation>最大重试退避时间</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="254"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="291"/>
         <source>Cap in seconds for exponential backoff when retrying failed LLM requests.</source>
         <translation>重试失败的模型请求时指数退避的秒数上限。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="272"/>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="281"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="310"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="319"/>
         <source>Auto-resize images</source>
         <translation>自动缩放图片</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="274"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="312"/>
         <source>Downscale and recompress read, fetched, and pasted images for models.</source>
         <translation>为模型自动缩小并重新压缩读取、抓取和粘贴的图片。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="288"/>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="297"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="326"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="335"/>
         <source>Show sidebar by default</source>
         <translation>默认显示侧边栏</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="290"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="328"/>
         <source>Initial sidebar visibility in TUI sessions.</source>
         <translation>TUI 会话中侧边栏的初始显示状态。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="304"/>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="313"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="342"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="351"/>
         <source>Expand thinking by default</source>
         <translation>默认展开思考内容</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="306"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="344"/>
         <source>Expand reasoning blocks initially in new sessions.</source>
         <translation>在新会话中默认展开推理思考块。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="320"/>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="329"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="358"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="367"/>
         <source>Expand tool details by default</source>
         <translation>默认展开工具详情</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="322"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="360"/>
         <source>Expand tool call inputs and outputs initially in new sessions.</source>
         <translation>在新会话中默认展开工具调用的输入与输出。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="340"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="378"/>
         <source>Provider Filters</source>
         <translation>提供商过滤</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="346"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="384"/>
         <source>Enabled providers</source>
         <translation>启用的提供商</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="348"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="386"/>
         <source>When non-empty, only these provider IDs are loaded.</source>
         <translation>非空时仅加载此处列出的提供商 ID。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="358"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="397"/>
         <source>Provider ID (e.g. anthropic)</source>
         <translation>提供商 ID（如 anthropic）</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="359"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="398"/>
         <source>All configured providers enabled</source>
         <translation>已启用全部配置的提供商</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="365"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="404"/>
         <source>Disabled providers</source>
         <translation>禁用的提供商</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="367"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="406"/>
         <source>Provider IDs listed here are skipped even if configured or in environment.</source>
         <translation>此处列出的提供商 ID 即使已配置或存在于环境变量中也会被跳过。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="376"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="416"/>
         <source>Provider ID to disable</source>
         <translation>要禁用的提供商 ID</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigGeneralSection.qml" line="377"/>
+        <location filename="../src/app/ConfigGeneralSection.qml" line="417"/>
         <source>No providers disabled</source>
         <translation>未禁用任何提供商</translation>
     </message>
@@ -1325,175 +1339,176 @@ $ARGUMENTS</translation>
 <context>
     <name>ConfigMcpSection</name>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="58"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="92"/>
         <source>MCP server &quot;%1&quot; already exists.</source>
         <translation>MCP 服务器“%1”已存在。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="99"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="639"/>
         <source>MCP Servers</source>
         <translation>MCP 服务器</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="107"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="647"/>
         <source>Configure Model Context Protocol servers over local stdio processes or remote Streamable HTTP endpoints.</source>
         <translation>配置通过本地 stdio 进程或远程 Streamable HTTP 端点连接的模型上下文协议 (MCP) 服务器。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="121"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="661"/>
         <source>Server name (e.g. github, docs)</source>
         <translation>服务器名称（如 github、docs）</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="134"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="674"/>
         <source>+ Add Local</source>
         <translation>+ 添加本地</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="140"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="680"/>
         <source>+ Add Remote</source>
         <translation>+ 添加远程</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="151"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="691"/>
         <source>No MCP servers configured in this file.</source>
         <translation>此配置文件中未设置 MCP 服务器。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="237"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="238"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="251"/>
         <source>Server &quot;%1&quot; already exists.</source>
         <translation>服务器“%1”已存在。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="300"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="337"/>
         <source>Remote</source>
         <translation>远程</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="300"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="337"/>
         <source>Local</source>
         <translation>本地</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="329"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="366"/>
         <source>Enable %1</source>
         <translation>启用 %1</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="339"/>
-        <location filename="../src/app/ConfigMcpSection.qml" line="340"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="376"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="377"/>
         <source>Delete MCP server</source>
         <translation>删除 MCP 服务器</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="357"/>
-        <location filename="../src/app/ConfigMcpSection.qml" line="368"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="394"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="406"/>
         <source>Server name</source>
         <translation>服务器名称</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="358"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="395"/>
         <source>Prefix used for exposed MCP tools (&lt;server&gt;_&lt;tool&gt;).</source>
         <translation>导出的 MCP 工具名称前缀（&lt;server&gt;_&lt;tool&gt;）。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="375"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="414"/>
         <source>Rename</source>
         <translation>重命名</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="383"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="424"/>
         <source>Transport</source>
         <translation>传输方式</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="390"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="431"/>
         <source>Local (stdio)</source>
         <translation>本地 (stdio)</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="391"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="432"/>
         <source>Remote (HTTP)</source>
         <translation>远程 (HTTP)</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="399"/>
-        <location filename="../src/app/ConfigMcpSection.qml" line="410"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="440"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="451"/>
         <source>Enabled</source>
         <translation>启用</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="417"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="458"/>
         <source>Startup timeout</source>
         <translation>启动超时</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="419"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="460"/>
         <source>Milliseconds allowed for starting and listing tools (default 30000).</source>
         <translation>启动并列出工具所允许的毫秒数（默认 30000）。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="445"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="493"/>
         <source>Command &amp; arguments</source>
         <translation>命令与参数</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="447"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="495"/>
         <source>Executable followed by arguments. Paste a full command and click &apos;Split command&apos; to tokenize.</source>
         <translation>可执行文件及其参数。可粘贴完整命令行后点击“拆分命令参数”自动分词。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="456"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="505"/>
         <source>npx -y @modelcontextprotocol/server-github</source>
         <translation>npx -y @modelcontextprotocol/server-github</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="457"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="506"/>
         <source>No command configured</source>
         <translation>未配置命令</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="463"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="515"/>
         <source>Working directory</source>
         <translation>工作目录</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="475"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="527"/>
         <source>Session directory (default)</source>
         <translation>会话工作目录（默认）</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="481"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="549"/>
         <source>Environment variables</source>
         <translation>环境变量</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="483"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="551"/>
         <source>Passed to the local MCP process. Supports {env:VAR} and {file:…}.</source>
         <translation>传递给本地 MCP 进程的环境变量。支持 {env:VAR} 与 {file:…}。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="498"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="573"/>
         <source>No extra environment variables</source>
         <translation>无额外环境变量</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="515"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="588"/>
         <source>Endpoint URL</source>
         <translation>端点 URL</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="528"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="607"/>
         <source>HTTP headers</source>
         <translation>HTTP 请求头</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="530"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="609"/>
         <source>Extra headers sent with Streamable HTTP requests. Supports {env:VAR}.</source>
         <translation>随 Streamable HTTP 请求发送的额外请求头。支持 {env:VAR}。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigMcpSection.qml" line="545"/>
+        <location filename="../src/app/ConfigMcpSection.qml" line="626"/>
         <source>No custom HTTP headers</source>
         <translation>无自定义 HTTP 请求头</translation>
     </message>
@@ -1516,77 +1531,77 @@ $ARGUMENTS</translation>
         <translation>按工具规则</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigPermissionsSection.qml" line="105"/>
+        <location filename="../src/app/ConfigPermissionsSection.qml" line="113"/>
         <source>Tool Permissions</source>
         <translation>工具权限</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigPermissionsSection.qml" line="113"/>
+        <location filename="../src/app/ConfigPermissionsSection.qml" line="121"/>
         <source>Rules are evaluated in order and the last matching rule wins. Use tool globs (bash, edit, webfetch, mcp_*) and argument patterns (e.g. git status*, *.lock).</source>
         <translation>规则按顺序评估，最后一条匹配的规则生效。支持工具通配符（bash、edit、webfetch、mcp_*）与参数匹配模式（如 git status*、*.lock）。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigPermissionsSection.qml" line="120"/>
+        <location filename="../src/app/ConfigPermissionsSection.qml" line="128"/>
         <source>Global permission policy</source>
         <translation>全局权限策略</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigPermissionsSection.qml" line="143"/>
+        <location filename="../src/app/ConfigPermissionsSection.qml" line="152"/>
         <source>Tool Delays</source>
         <translation>工具执行延迟</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigPermissionsSection.qml" line="151"/>
+        <location filename="../src/app/ConfigPermissionsSection.qml" line="160"/>
         <source>Wait a countdown in seconds before running matching tool calls so they can be reviewed or cancelled.</source>
         <translation>在执行匹配的工具调用前等待倒计时秒数，以便审阅或取消。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigPermissionsSection.qml" line="158"/>
+        <location filename="../src/app/ConfigPermissionsSection.qml" line="167"/>
         <source>Delay mode</source>
         <translation>延迟模式</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigPermissionsSection.qml" line="181"/>
+        <location filename="../src/app/ConfigPermissionsSection.qml" line="192"/>
         <source>Countdown for every tool</source>
         <translation>所有工具倒计时</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigPermissionsSection.qml" line="182"/>
+        <location filename="../src/app/ConfigPermissionsSection.qml" line="193"/>
         <source>Seconds to wait before executing any tool call.</source>
         <translation>执行任意工具调用前等待的秒数。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigPermissionsSection.qml" line="207"/>
+        <location filename="../src/app/ConfigPermissionsSection.qml" line="222"/>
         <source>Tool glob (e.g. bash, delete, mcp_*)</source>
         <translation>工具匹配模式（如 bash、delete、mcp_*）</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigPermissionsSection.qml" line="208"/>
+        <location filename="../src/app/ConfigPermissionsSection.qml" line="223"/>
         <source>Seconds (e.g. 2)</source>
         <translation>秒数（如 2）</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigPermissionsSection.qml" line="209"/>
+        <location filename="../src/app/ConfigPermissionsSection.qml" line="224"/>
         <source>No per-tool delays</source>
         <translation>无按工具延迟规则</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigPermissionsSection.qml" line="222"/>
+        <location filename="../src/app/ConfigPermissionsSection.qml" line="234"/>
         <source>Legacy tools map</source>
         <translation>旧版 tools 开关映射</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigPermissionsSection.qml" line="224"/>
+        <location filename="../src/app/ConfigPermissionsSection.qml" line="236"/>
         <source>Older opencode boolean map (e.g. {&quot;bash&quot;: false}). Prefer permission rules above.</source>
         <translation>旧版 opencode 布尔映射（如 {&quot;bash&quot;: false}）。建议优先使用上方的权限规则。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigPermissionsSection.qml" line="227"/>
+        <location filename="../src/app/ConfigPermissionsSection.qml" line="239"/>
         <source>Remove legacy map</source>
         <translation>移除旧版映射</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigPermissionsSection.qml" line="237"/>
+        <location filename="../src/app/ConfigPermissionsSection.qml" line="251"/>
         <source>Tool name</source>
         <translation>工具名称</translation>
     </message>
@@ -1594,422 +1609,424 @@ $ARGUMENTS</translation>
 <context>
     <name>ConfigProvidersSection</name>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="23"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="24"/>
         <source>Ollama / Local</source>
         <translation>Ollama / 本地</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="72"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="131"/>
         <source>Enter a provider ID.</source>
         <translation>请输入提供商 ID。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="77"/>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="282"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="136"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1156"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1169"/>
         <source>Provider &quot;%1&quot; already exists.</source>
         <translation>提供商“%1”已存在。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="99"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1792"/>
         <source>Providers &amp; Models</source>
         <translation>提供商与模型</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="107"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1800"/>
         <source>Add a built-in provider preset or any OpenAI / Anthropic compatible endpoint, then configure models and variants.</source>
         <translation>添加内置提供商预设或任意兼容 OpenAI / Anthropic 的端点，然后配置模型与变体。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="133"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1826"/>
         <source>+ Custom Provider…</source>
         <translation>+ 自定义提供商…</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="151"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1844"/>
         <source>Provider ID (e.g. vllm, together, azure)</source>
         <translation>提供商 ID（如 vllm、together、azure）</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="164"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1857"/>
         <source>Add</source>
         <translation>添加</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="169"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1862"/>
         <source>Cancel</source>
         <translation>取消</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="183"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1877"/>
         <source>No providers explicitly configured in this file (environment-detected defaults still apply).</source>
         <translation>此配置文件中未显式设置提供商（环境变量自动检测到的默认提供商仍然生效）。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="292"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1181"/>
         <source>Enter a model key.</source>
         <translation>请输入模型键名。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="296"/>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="812"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="427"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="440"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1185"/>
         <source>Model &quot;%1&quot; already exists.</source>
         <translation>模型“%1”已存在。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="366"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1303"/>
         <source>%1 models</source>
         <translation>%1 个模型</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="398"/>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="399"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1335"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1336"/>
         <source>Delete provider</source>
         <translation>删除提供商</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="415"/>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="426"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1352"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1364"/>
         <source>Provider ID</source>
         <translation>提供商 ID</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="416"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1353"/>
         <source>Used as the prefix in provider/model references.</source>
         <translation>用作 provider/model 引用中的前缀。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="433"/>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="943"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="620"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1373"/>
         <source>Rename</source>
         <translation>重命名</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="441"/>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="967"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="656"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1383"/>
         <source>Display name</source>
         <translation>显示名称</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="459"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1417"/>
         <source>API protocol</source>
         <translation>API 协议</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="461"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1419"/>
         <source>chat, responses, anthropic, or an http(s):// base URL.</source>
         <translation>chat、responses、anthropic 或 http(s):// 基础 URL。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="475"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1433"/>
         <source>Auto (from npm / Chat)</source>
         <translation>自动（按 npm / Chat）</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="476"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1434"/>
         <source>OpenAI Chat Completions</source>
         <translation>OpenAI Chat Completions</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="477"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1435"/>
         <source>OpenAI Responses</source>
         <translation>OpenAI Responses</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="478"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1436"/>
         <source>Anthropic Messages</source>
         <translation>Anthropic Messages</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="480"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1438"/>
         <source>Auto (OpenAI Chat)</source>
         <translation>自动（OpenAI Chat）</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="486"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1449"/>
         <source>SDK package</source>
         <translation>SDK 包名</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="488"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1451"/>
         <source>opencode SDK selector when api is unset.</source>
         <translation>未设置 api 时的 opencode SDK 选择器。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="514"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1482"/>
         <source>Base URL</source>
         <translation>基础 URL</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="533"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1513"/>
         <source>API key</source>
         <translation>API 密钥</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="535"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1515"/>
         <source>Literal key, {env:VAR}, or {file:…} secret path.</source>
         <translation>明文密钥、{env:VAR} 或 {file:…} 密钥文件路径。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="554"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1540"/>
         <source>Fallback env variables</source>
         <translation>备选环境变量</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="556"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1542"/>
         <source>Checked in order when options.apiKey is unset.</source>
         <translation>未设置 options.apiKey 时按顺序检查这些环境变量。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="570"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1557"/>
         <source>Default provider env var</source>
         <translation>使用提供商默认环境变量</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="576"/>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="587"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1568"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1582"/>
         <source>Send prompt cache key</source>
         <translation>发送提示词缓存键</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="598"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1593"/>
         <source>Stream chunk timeout</source>
         <translation>流式分块超时</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="600"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1595"/>
         <source>Milliseconds before an idle stream is retried (default 300000).</source>
         <translation>空闲流触发重试前的毫秒数（默认 300000）。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="621"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1627"/>
         <source>HTTP headers</source>
         <translation>HTTP 请求头</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="638"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1649"/>
         <source>No custom provider headers</source>
         <translation>无自定义提供商请求头</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="649"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1658"/>
         <source>Model whitelist</source>
         <translation>模型白名单</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="663"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1673"/>
         <source>Allowed model key</source>
         <translation>允许的模型键名</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="664"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1674"/>
         <source>All models allowed</source>
         <translation>允许全部模型</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="670"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1685"/>
         <source>Model blacklist</source>
         <translation>模型黑名单</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="684"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1700"/>
         <source>Excluded model key</source>
         <translation>排除的模型键名</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="685"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1701"/>
         <source>No models excluded</source>
         <translation>未排除任何模型</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="691"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1712"/>
         <source>Extra provider options</source>
         <translation>额外提供商选项</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="693"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1714"/>
         <source>Additional vendor-specific fields under provider.&lt;id&gt;.options.</source>
         <translation>位于 provider.&lt;id&gt;.options 下的厂商特定附加字段。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="701"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1723"/>
         <source>Option key</source>
         <translation>选项键名</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="702"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1724"/>
         <source>JSON value</source>
         <translation>JSON 值</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="703"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1725"/>
         <source>No extra options</source>
         <translation>无额外选项</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="713"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1735"/>
         <source>Models (%1)</source>
         <translation>模型（%1）</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="726"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1748"/>
         <source>Model key (e.g. gpt-5, qwen3-coder)</source>
         <translation>模型键名（如 gpt-5、qwen3-coder）</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="736"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="1758"/>
         <source>+ Add Model</source>
         <translation>+ 添加模型</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="822"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="452"/>
         <source>Enter a variant name.</source>
         <translation>请输入变体名称。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="826"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="456"/>
         <source>Variant &quot;%1&quot; already exists.</source>
         <translation>变体“%1”已存在。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="891"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="566"/>
         <source>(disabled)</source>
         <translation>（已禁用）</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="909"/>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="910"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="584"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="585"/>
         <source>Delete model</source>
         <translation>删除模型</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="926"/>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="936"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="601"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="612"/>
         <source>Model key</source>
         <translation>模型键名</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="951"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="630"/>
         <source>API model ID</source>
         <translation>API 模型 ID</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="953"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="632"/>
         <source>Sent in API requests (defaults to the model key).</source>
         <translation>在 API 请求中发送的模型 ID（默认与模型键名相同）。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="982"/>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="990"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="687"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="705"/>
         <source>Accepts image attachments</source>
         <translation>支持图片附件</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="997"/>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="1005"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="716"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="735"/>
         <source>Reasoning model</source>
         <translation>推理模型</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="1012"/>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="1020"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="745"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="753"/>
         <source>Disable model</source>
         <translation>禁用模型</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="1027"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="760"/>
         <source>Context window</source>
         <translation>上下文窗口</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="1045"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="782"/>
         <source>Max output tokens</source>
         <translation>最大输出词元数</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="1063"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="804"/>
         <source>Recommended compaction tokens</source>
         <translation>建议压缩词元数</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="1075"/>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="1094"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="820"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="845"/>
         <source>Global default</source>
         <translation>全局默认</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="1081"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="826"/>
         <source>Auto-compaction threshold</source>
         <translation>自动压缩阈值</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="1100"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="851"/>
         <source>Temperature</source>
         <translation>温度 (Temperature)</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="1114"/>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="1134"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="869"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="898"/>
         <source>Provider default</source>
         <translation>提供商默认</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="1120"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="880"/>
         <source>Top-p</source>
         <translation>Top-p</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="1140"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="909"/>
         <source>Model HTTP headers</source>
         <translation>模型 HTTP 请求头</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="1152"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="922"/>
         <source>No per-model headers</source>
         <translation>无模型专属请求头</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="1163"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="930"/>
         <source>Model request options</source>
         <translation>模型请求选项</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="1165"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="932"/>
         <source>JSON request options (e.g. reasoningEffort, thinking, extraBody).</source>
         <translation>JSON 请求选项（如 reasoningEffort、thinking、extraBody）。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="1175"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="943"/>
         <source>No model request options</source>
         <translation>无模型请求选项</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="1187"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="952"/>
         <source>Variants</source>
         <translation>变体</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="1189"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="954"/>
         <source>Named option presets selected via provider/model#variant or /variant.</source>
         <translation>可通过 provider/model#variant 或 /variant 选择的命名选项预设。</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="1250"/>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="1251"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="246"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="247"/>
         <source>Delete variant</source>
         <translation>删除变体</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="1262"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="263"/>
         <source>No variant fields</source>
         <translation>无变体字段</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="1280"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="983"/>
         <source>Variant name (e.g. high, low, off)</source>
         <translation>变体名称（如 high、low、off）</translation>
     </message>
     <message>
-        <location filename="../src/app/ConfigProvidersSection.qml" line="1288"/>
+        <location filename="../src/app/ConfigProvidersSection.qml" line="991"/>
         <source>+ Add Variant</source>
         <translation>+ 添加变体</translation>
     </message>
@@ -2226,37 +2243,79 @@ $ARGUMENTS</translation>
 <context>
     <name>KeyValueEditor</name>
     <message>
-        <location filename="../src/app/KeyValueEditor.qml" line="14"/>
+        <location filename="../src/app/KeyValueEditor.qml" line="16"/>
         <source>Key</source>
         <translation>键</translation>
     </message>
     <message>
-        <location filename="../src/app/KeyValueEditor.qml" line="15"/>
+        <location filename="../src/app/KeyValueEditor.qml" line="17"/>
         <source>Value</source>
         <translation>值</translation>
     </message>
     <message>
-        <location filename="../src/app/KeyValueEditor.qml" line="16"/>
+        <location filename="../src/app/KeyValueEditor.qml" line="18"/>
         <source>Add</source>
         <translation>添加</translation>
     </message>
     <message>
-        <location filename="../src/app/KeyValueEditor.qml" line="17"/>
+        <location filename="../src/app/KeyValueEditor.qml" line="19"/>
         <source>No entries</source>
         <translation>暂无条目</translation>
     </message>
     <message>
-        <location filename="../src/app/KeyValueEditor.qml" line="228"/>
+        <location filename="../src/app/KeyValueEditor.qml" line="54"/>
+        <location filename="../src/app/KeyValueEditor.qml" line="57"/>
+        <source>Enter a valid number.</source>
+        <translation>请输入有效数字。</translation>
+    </message>
+    <message>
+        <location filename="../src/app/KeyValueEditor.qml" line="59"/>
+        <source>Must be at least %1.</source>
+        <translation>必须不小于 %1。</translation>
+    </message>
+    <message>
+        <location filename="../src/app/KeyValueEditor.qml" line="65"/>
+        <source>Enter a JSON value (quote strings, e.g. &quot;text&quot;).</source>
+        <translation>请输入 JSON 值（字符串请加引号，例如 &quot;text&quot;）。</translation>
+    </message>
+    <message>
+        <location filename="../src/app/KeyValueEditor.qml" line="70"/>
+        <source>Invalid JSON value (quote strings, e.g. &quot;text&quot;).</source>
+        <translation>无效的 JSON 值（字符串请加引号，例如 &quot;text&quot;）。</translation>
+    </message>
+    <message>
+        <location filename="../src/app/KeyValueEditor.qml" line="185"/>
+        <location filename="../src/app/KeyValueEditor.qml" line="209"/>
+        <source>Key &quot;%1&quot; already exists.</source>
+        <translation>键“%1”已存在。</translation>
+    </message>
+    <message>
+        <location filename="../src/app/KeyValueEditor.qml" line="281"/>
+        <source>Enter a key.</source>
+        <translation>请输入键名。</translation>
+    </message>
+    <message>
+        <location filename="../src/app/KeyValueEditor.qml" line="428"/>
         <source>Environment variable set: %1</source>
         <translation>环境变量已设置：%1</translation>
     </message>
     <message>
-        <location filename="../src/app/KeyValueEditor.qml" line="229"/>
+        <location filename="../src/app/KeyValueEditor.qml" line="429"/>
         <source>Environment variable unset: %1</source>
         <translation>环境变量未设置：%1</translation>
     </message>
     <message>
-        <location filename="../src/app/KeyValueEditor.qml" line="240"/>
+        <location filename="../src/app/KeyValueEditor.qml" line="445"/>
+        <source>Move entry up</source>
+        <translation>上移条目</translation>
+    </message>
+    <message>
+        <location filename="../src/app/KeyValueEditor.qml" line="461"/>
+        <source>Move entry down</source>
+        <translation>下移条目</translation>
+    </message>
+    <message>
+        <location filename="../src/app/KeyValueEditor.qml" line="476"/>
         <source>Remove entry</source>
         <translation>移除条目</translation>
     </message>
@@ -2288,38 +2347,38 @@ $ARGUMENTS</translation>
 <context>
     <name>Main</name>
     <message>
-        <location filename="../src/app/Main.qml" line="145"/>
+        <location filename="../src/app/Main.qml" line="152"/>
         <source>New session in…</source>
         <translation>在其他目录新建会话…</translation>
     </message>
     <message>
-        <location filename="../src/app/Main.qml" line="375"/>
+        <location filename="../src/app/Main.qml" line="383"/>
         <source>Show sidebar</source>
         <translation>显示侧边栏</translation>
     </message>
     <message>
-        <location filename="../src/app/Main.qml" line="281"/>
-        <location filename="../src/app/Main.qml" line="392"/>
+        <location filename="../src/app/Main.qml" line="288"/>
+        <location filename="../src/app/Main.qml" line="401"/>
         <source>New session</source>
         <translation>新建会话</translation>
     </message>
     <message>
-        <location filename="../src/app/Main.qml" line="266"/>
+        <location filename="../src/app/Main.qml" line="273"/>
         <source>No session open</source>
         <translation>未打开会话</translation>
     </message>
     <message>
-        <location filename="../src/app/Main.qml" line="276"/>
+        <location filename="../src/app/Main.qml" line="283"/>
         <source>New session in folder…</source>
         <translation>选择文件夹新建会话…</translation>
     </message>
     <message>
-        <location filename="../src/app/Main.qml" line="432"/>
+        <location filename="../src/app/Main.qml" line="443"/>
         <source>Split view</source>
         <translation>分屏视图</translation>
     </message>
     <message>
-        <location filename="../src/app/Main.qml" line="447"/>
+        <location filename="../src/app/Main.qml" line="459"/>
         <source>Leave zoom</source>
         <translation>退出放大</translation>
     </message>
@@ -2363,7 +2422,7 @@ $ARGUMENTS</translation>
 <context>
     <name>ModalDialog</name>
     <message>
-        <location filename="../src/app/ModalDialog.qml" line="120"/>
+        <location filename="../src/app/ModalDialog.qml" line="121"/>
         <source>Close</source>
         <translation>关闭</translation>
     </message>
@@ -2465,9 +2524,34 @@ $ARGUMENTS</translation>
 <context>
     <name>NumberField</name>
     <message>
-        <location filename="../src/app/NumberField.qml" line="25"/>
+        <location filename="../src/app/NumberField.qml" line="30"/>
+        <source>Must be greater than %1</source>
+        <translation>必须大于 %1</translation>
+    </message>
+    <message>
+        <location filename="../src/app/NumberField.qml" line="32"/>
+        <source>Must be at least %1</source>
+        <translation>必须不小于 %1</translation>
+    </message>
+    <message>
+        <location filename="../src/app/NumberField.qml" line="34"/>
+        <source>Must be greater than %1 and at most %2</source>
+        <translation>必须大于 %1 且不超过 %2</translation>
+    </message>
+    <message>
+        <location filename="../src/app/NumberField.qml" line="35"/>
         <source>Must be between %1 and %2</source>
         <translation>必须介于 %1 和 %2 之间</translation>
+    </message>
+    <message>
+        <location filename="../src/app/NumberField.qml" line="38"/>
+        <source>Enter a valid number</source>
+        <translation>请输入有效数字</translation>
+    </message>
+    <message>
+        <location filename="../src/app/NumberField.qml" line="38"/>
+        <source>Enter a whole number</source>
+        <translation>请输入整数</translation>
     </message>
 </context>
 <context>
@@ -2544,87 +2628,92 @@ $ARGUMENTS</translation>
 <context>
     <name>PermissionRulesEditor</name>
     <message>
-        <location filename="../src/app/PermissionRulesEditor.qml" line="21"/>
+        <location filename="../src/app/PermissionRulesEditor.qml" line="23"/>
         <source>Rule table</source>
         <translation>规则表</translation>
     </message>
     <message>
-        <location filename="../src/app/PermissionRulesEditor.qml" line="22"/>
+        <location filename="../src/app/PermissionRulesEditor.qml" line="24"/>
         <source>Allow all</source>
         <translation>全部允许</translation>
     </message>
     <message>
-        <location filename="../src/app/PermissionRulesEditor.qml" line="23"/>
+        <location filename="../src/app/PermissionRulesEditor.qml" line="25"/>
         <source>Ask all</source>
         <translation>全部询问</translation>
     </message>
     <message>
-        <location filename="../src/app/PermissionRulesEditor.qml" line="24"/>
+        <location filename="../src/app/PermissionRulesEditor.qml" line="26"/>
         <source>Deny all</source>
         <translation>全部拒绝</translation>
     </message>
     <message>
-        <location filename="../src/app/PermissionRulesEditor.qml" line="26"/>
+        <location filename="../src/app/PermissionRulesEditor.qml" line="28"/>
         <source>Inherit</source>
         <translation>继承默认</translation>
     </message>
     <message>
-        <location filename="../src/app/PermissionRulesEditor.qml" line="29"/>
+        <location filename="../src/app/PermissionRulesEditor.qml" line="31"/>
         <source>Allow</source>
         <translation>允许</translation>
     </message>
     <message>
-        <location filename="../src/app/PermissionRulesEditor.qml" line="30"/>
+        <location filename="../src/app/PermissionRulesEditor.qml" line="32"/>
         <source>Ask</source>
         <translation>询问</translation>
     </message>
     <message>
-        <location filename="../src/app/PermissionRulesEditor.qml" line="31"/>
+        <location filename="../src/app/PermissionRulesEditor.qml" line="33"/>
         <source>Deny</source>
         <translation>拒绝</translation>
     </message>
     <message>
-        <location filename="../src/app/PermissionRulesEditor.qml" line="173"/>
+        <location filename="../src/app/PermissionRulesEditor.qml" line="265"/>
         <source>No permission rules configured (all tools allowed by default).</source>
         <translation>未配置权限规则（默认允许所有工具）。</translation>
     </message>
     <message>
-        <location filename="../src/app/PermissionRulesEditor.qml" line="213"/>
+        <location filename="../src/app/PermissionRulesEditor.qml" line="308"/>
         <source>Tool glob</source>
         <translation>工具匹配模式</translation>
     </message>
     <message>
-        <location filename="../src/app/PermissionRulesEditor.qml" line="219"/>
+        <location filename="../src/app/PermissionRulesEditor.qml" line="315"/>
         <source>Tool glob (e.g. bash)</source>
         <translation>工具匹配模式（如 bash）</translation>
     </message>
     <message>
-        <location filename="../src/app/PermissionRulesEditor.qml" line="250"/>
+        <location filename="../src/app/PermissionRulesEditor.qml" line="346"/>
         <source>Pattern</source>
         <translation>参数匹配模式</translation>
     </message>
     <message>
-        <location filename="../src/app/PermissionRulesEditor.qml" line="256"/>
+        <location filename="../src/app/PermissionRulesEditor.qml" line="353"/>
         <source>* (all arguments)</source>
         <translation>*（所有参数）</translation>
     </message>
     <message>
-        <location filename="../src/app/PermissionRulesEditor.qml" line="283"/>
+        <location filename="../src/app/PermissionRulesEditor.qml" line="380"/>
         <source>Move rule up</source>
         <translation>上移规则</translation>
     </message>
     <message>
-        <location filename="../src/app/PermissionRulesEditor.qml" line="298"/>
+        <location filename="../src/app/PermissionRulesEditor.qml" line="395"/>
         <source>Move rule down</source>
         <translation>下移规则</translation>
     </message>
     <message>
-        <location filename="../src/app/PermissionRulesEditor.qml" line="312"/>
+        <location filename="../src/app/PermissionRulesEditor.qml" line="409"/>
         <source>Remove rule</source>
         <translation>移除规则</translation>
     </message>
     <message>
-        <location filename="../src/app/PermissionRulesEditor.qml" line="323"/>
+        <location filename="../src/app/PermissionRulesEditor.qml" line="420"/>
+        <source>Tool glob cannot be empty. Enter a tool name (e.g. bash or *) or remove the rule.</source>
+        <translation>工具匹配模式不能为空。请输入工具名称（如 bash 或 *）或移除该规则。</translation>
+    </message>
+    <message>
+        <location filename="../src/app/PermissionRulesEditor.qml" line="430"/>
         <source>+ Add rule</source>
         <translation>+ 添加规则</translation>
     </message>
@@ -3172,12 +3261,12 @@ $ARGUMENTS</translation>
         <translation>暂无条目</translation>
     </message>
     <message>
-        <location filename="../src/app/StringListEditor.qml" line="161"/>
+        <location filename="../src/app/StringListEditor.qml" line="204"/>
         <source>Remove item</source>
         <translation>移除项</translation>
     </message>
     <message>
-        <location filename="../src/app/StringListEditor.qml" line="212"/>
+        <location filename="../src/app/StringListEditor.qml" line="256"/>
         <source>Split command</source>
         <translation>拆分命令参数</translation>
     </message>
@@ -3440,7 +3529,7 @@ $ARGUMENTS</translation>
         <translation>已导出到 %1</translation>
     </message>
     <message>
-        <location filename="../src/app/workspace_requests.cpp" line="201"/>
+        <location filename="../src/app/workspace_requests.cpp" line="199"/>
         <source>Configuration reloaded</source>
         <translation>配置已重新加载</translation>
     </message>
@@ -3484,71 +3573,70 @@ $ARGUMENTS</translation>
 <context>
     <name>refgui::composer::ComposerModel</name>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="452"/>
-        <location filename="../src/composer/composer_model.cpp" line="672"/>
+        <location filename="../src/composer/composer_model.cpp" line="491"/>
+        <location filename="../src/composer/composer_model.cpp" line="724"/>
         <source>default</source>
         <translation>默认</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="457"/>
-        <location filename="../src/composer/composer_model.cpp" line="465"/>
-        <location filename="../src/composer/composer_model.cpp" line="521"/>
-        <location filename="../src/composer/composer_model.cpp" line="544"/>
-        <location filename="../src/composer/composer_model.cpp" line="544"/>
+        <location filename="../src/composer/composer_model.cpp" line="496"/>
+        <location filename="../src/composer/composer_model.cpp" line="504"/>
+        <location filename="../src/composer/composer_model.cpp" line="549"/>
+        <location filename="../src/composer/composer_model.cpp" line="585"/>
+        <location filename="../src/composer/composer_model.cpp" line="585"/>
         <source>active</source>
         <translation>当前</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="601"/>
+        <location filename="../src/composer/composer_model.cpp" line="656"/>
         <source>live</source>
         <translation>运行中</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="601"/>
-        <location filename="../src/composer/composer_model.cpp" line="787"/>
-        <location filename="../src/composer/composer_model.cpp" line="796"/>
+        <location filename="../src/composer/composer_model.cpp" line="656"/>
+        <location filename="../src/composer/composer_model.cpp" line="839"/>
         <source>history</source>
         <translation>历史</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="931"/>
+        <location filename="../src/composer/composer_model.cpp" line="981"/>
         <source>Unknown command /%1</source>
         <translation>未知命令 /%1</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="932"/>
+        <location filename="../src/composer/composer_model.cpp" line="982"/>
         <location filename="../tests/tst_app_translator.cpp" line="74"/>
         <source>Unknown command /%1 — did you mean /%2?</source>
         <translation>未知命令 /%1 — 你是指 /%2 吗？</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="938"/>
-        <location filename="../src/composer/composer_model.cpp" line="981"/>
+        <location filename="../src/composer/composer_model.cpp" line="988"/>
+        <location filename="../src/composer/composer_model.cpp" line="1031"/>
         <source>Not connected to the ref backend.</source>
         <translation>未连接到 ref 后端。</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="1050"/>
+        <location filename="../src/composer/composer_model.cpp" line="1100"/>
         <source>The command expanded to nothing</source>
         <translation>命令展开后为空</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="1125"/>
+        <location filename="../src/composer/composer_model.cpp" line="1175"/>
         <source>Already sent; the prompt can no longer be removed</source>
         <translation>已经发送，无法再撤回该提示</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="1303"/>
+        <location filename="../src/composer/composer_model.cpp" line="1358"/>
         <source>The image is larger than %1 MiB.</source>
         <translation>图片超过 %1 MiB。</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="1345"/>
+        <location filename="../src/composer/composer_model.cpp" line="1400"/>
         <source>File not found: %1</source>
         <translation>找不到文件：%1</translation>
     </message>
     <message>
-        <location filename="../src/composer/composer_model.cpp" line="1351"/>
+        <location filename="../src/composer/composer_model.cpp" line="1406"/>
         <source>%1 is not a local file</source>
         <translation>%1 不是本地文件</translation>
     </message>
@@ -3664,53 +3752,53 @@ $ARGUMENTS</translation>
 <context>
     <name>refgui::workspace::ConfigEditorController</name>
     <message>
-        <location filename="../src/workspace/config_editor_controller.cpp" line="611"/>
+        <location filename="../src/workspace/config_editor_controller.cpp" line="904"/>
         <source>Default agent with full tool access</source>
         <translation>拥有完整工具权限的默认智能体</translation>
     </message>
     <message>
-        <location filename="../src/workspace/config_editor_controller.cpp" line="612"/>
+        <location filename="../src/workspace/config_editor_controller.cpp" line="905"/>
         <source>Read-only analysis and planning</source>
         <translation>只读分析与规划</translation>
     </message>
     <message>
-        <location filename="../src/workspace/config_editor_controller.cpp" line="613"/>
+        <location filename="../src/workspace/config_editor_controller.cpp" line="906"/>
         <source>Multi-step tasks</source>
         <translation>多步骤任务</translation>
     </message>
     <message>
-        <location filename="../src/workspace/config_editor_controller.cpp" line="614"/>
+        <location filename="../src/workspace/config_editor_controller.cpp" line="907"/>
         <source>Fast read-only exploration</source>
         <translation>快速只读探索</translation>
     </message>
     <message>
-        <location filename="../src/workspace/config_editor_controller.cpp" line="696"/>
+        <location filename="../src/workspace/config_editor_controller.cpp" line="989"/>
         <source>Configuration root must be a JSON object.</source>
         <translation>配置根节点必须是 JSON 对象。</translation>
     </message>
     <message>
-        <location filename="../src/workspace/config_editor_controller.cpp" line="812"/>
+        <location filename="../src/workspace/config_editor_controller.cpp" line="1105"/>
         <location filename="../tests/tst_app_translator.cpp" line="78"/>
         <source>Saved %1</source>
         <translation>已保存 %1</translation>
     </message>
     <message>
-        <location filename="../src/workspace/config_editor_controller.cpp" line="838"/>
+        <location filename="../src/workspace/config_editor_controller.cpp" line="1131"/>
         <source>Created new active configuration profile</source>
         <translation>已创建新的当前配置档</translation>
     </message>
     <message>
-        <location filename="../src/workspace/config_editor_controller.cpp" line="864"/>
+        <location filename="../src/workspace/config_editor_controller.cpp" line="1157"/>
         <source>Activated configuration profile</source>
         <translation>已切换当前生效的配置档</translation>
     </message>
     <message>
-        <location filename="../src/workspace/config_editor_controller.cpp" line="890"/>
+        <location filename="../src/workspace/config_editor_controller.cpp" line="1183"/>
         <source>Deleted %1</source>
         <translation>已删除 %1</translation>
     </message>
     <message>
-        <location filename="../src/workspace/config_editor_controller.cpp" line="933"/>
+        <location filename="../src/workspace/config_editor_controller.cpp" line="1219"/>
         <source>Configuration reloaded</source>
         <translation>配置已重新加载</translation>
     </message>

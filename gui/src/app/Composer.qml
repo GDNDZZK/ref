@@ -110,6 +110,7 @@ Item {
 	Connections {
 		target: composer.model
 		function onDraftReplaced() { composer.syncFromModel() }
+		function onUserEdited() { popup.resetSelection() }
 	}
 
 	QueueStrip {

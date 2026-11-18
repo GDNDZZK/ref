@@ -5,6 +5,7 @@
 
 #include <QDir>
 #include <QProcess>
+#include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -109,7 +110,9 @@ Run TestAppSmoke::runGui(const QStringList& arguments) const
 	}
 	run.exitCode = gui.exitCode();
 	run.out = QString::fromUtf8(gui.readAllStandardOutput());
+	run.out.replace(u"\r\n"_s, u"\n"_s);
 	run.err = QString::fromUtf8(gui.readAllStandardError());
+	run.err.replace(u"\r\n"_s, u"\n"_s);
 	return run;
 }
 
@@ -154,6 +157,12 @@ void TestAppSmoke::mockBackendStartsReadyWithoutAutoSession()
 void TestAppSmoke::explicitServerSupportsReadyContinueAndAttach()
 {
 	QProcess server;
+	auto guard = qScopeGuard([&] {
+		if(server.state() != QProcess::NotRunning)
+		{
+			stopServer(server);
+		}
+	});
 	const std::optional<proto::InstanceInfo> instance = startServer(server);
 	QVERIFY(instance);
 
@@ -186,11 +195,18 @@ void TestAppSmoke::explicitServerSupportsReadyContinueAndAttach()
 	QCOMPARE(refused.exitCode, 1);
 	QVERIFY2(!refused.err.isEmpty(), "says nothing");
 
+	guard.dismiss();
 	QVERIFY(stopServer(server));
 }
 void TestAppSmoke::explicitServerRejectsUnknownSession()
 {
 	QProcess server;
+	auto guard = qScopeGuard([&] {
+		if(server.state() != QProcess::NotRunning)
+		{
+			stopServer(server);
+		}
+	});
 	const std::optional<proto::InstanceInfo> instance = startServer(server);
 	QVERIFY(instance);
 
@@ -207,6 +223,7 @@ void TestAppSmoke::explicitServerRejectsUnknownSession()
 	QCOMPARE(run.exitCode, 1);
 	QVERIFY2(run.err.contains(u"ses_does_not_exist"_s), qPrintable(run.err));
 
+	guard.dismiss();
 	QVERIFY(stopServer(server));
 }
 

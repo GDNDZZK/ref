@@ -1,15 +1,27 @@
 #include "composer/file_model.h"
 
+#include <algorithm>
+
 namespace refgui::composer
 {
 namespace
 {
 
-// Where the last component starts, ignoring the slash that ends a directory.
+bool endsWithSeparator(const QString& path)
+{
+	return path.endsWith(u'/') || path.endsWith(u'\\');
+}
+
+// Where the last component starts, ignoring the slash or backslash that ends a directory.
 qsizetype nameStart(const QString& path)
 {
-	const qsizetype searchFrom = path.endsWith(u'/') ? path.size() - 2 : path.size() - 1;
-	return path.lastIndexOf(u'/', searchFrom) + 1;
+	const qsizetype searchFrom = endsWithSeparator(path) ? path.size() - 2 : path.size() - 1;
+	if(searchFrom < 0)
+	{
+		return 0;
+	}
+	const qsizetype lastSep = std::max(path.lastIndexOf(u'/', searchFrom), path.lastIndexOf(u'\\', searchFrom));
+	return lastSep + 1;
 }
 
 } // namespace
@@ -47,16 +59,17 @@ QVariant FileModel::data(const QModelIndex& index, int role) const
 		return {};
 	}
 	const QString& path = m_paths[index.row()];
+	const bool isDir = endsWithSeparator(path);
 	switch(role)
 	{
 	case PathRole:
 		return path;
 	case NameRole:
-		return path.mid(nameStart(path)).chopped(path.endsWith(u'/') ? 1 : 0);
+		return path.mid(nameStart(path)).chopped(isDir ? 1 : 0);
 	case DirectoryRole:
 		return path.left(nameStart(path));
 	case IsDirectoryRole:
-		return path.endsWith(u'/');
+		return isDir;
 	default:
 		return {};
 	}

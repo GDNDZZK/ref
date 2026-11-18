@@ -158,6 +158,8 @@ signals:
 	void draftChanged();
 	// The text or the cursor was changed from this side; the text area shows them again.
 	void draftReplaced();
+	// The user typed in the input box (resets popup explicit selection).
+	void userEdited();
 	void shellModeChanged();
 	void readyChanged();
 	void completionChanged();
@@ -209,6 +211,10 @@ private:
 	void cancelDirSearch();
 	void cancelBinarySearch();
 	void updateArgCompletion();
+	void updateVariantArgCompletion(const QString& query);
+	void updateModelArgCompletion(const QString& query);
+	void updateAgentArgCompletion(const QString& query);
+	void updateSessionArgCompletion(const QString& query, bool closeMode);
 	void updatePathCompletion(bool includeFiles, bool isExport);
 	void updateShellCommandCompletion();
 	QList<CompletionEntry> buildPathEntries(const QString& typedPrefix,
@@ -216,7 +222,8 @@ private:
 	                                        const QStringList& dirs,
 	                                        const QStringList& files,
 	                                        bool includeFiles,
-	                                        bool isExport) const;
+	                                        bool isExport,
+	                                        QChar separator = u'/') const;
 	QList<CompletionEntry> buildShellCommandEntries(const QString& query, const QStringList& binaries) const;
 	// The draft was changed from here: the text area must show it.
 	void changeDraft();

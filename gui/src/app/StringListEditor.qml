@@ -13,10 +13,14 @@ Column {
 	property string emptyText: qsTr("No items")
 	property bool monospace: false
 	property bool allowCommandSplit: false
+	property string draftText: ""
+	property var rowDrafts: ({})
 
 	signal valuesModified(var newValues)
 
-	readonly property bool canSplitDraft: allowCommandSplit && /\s/.test(draftInput.text.trim())
+	readonly property bool canSplitDraft: allowCommandSplit && /\s/.test(draftText.trim())
+	readonly property bool hasValidationError: false
+	readonly property bool hasUncommittedEdit: draftText.trim() !== "" || Object.keys(rowDrafts).length > 0
 
 	function splitCommandLine(commandLine) {
 		const tokens = []
@@ -59,12 +63,27 @@ Column {
 		return tokens
 	}
 
+	function setRowDraft(index, text) {
+		const next = Object.assign({}, rowDrafts)
+		next[index] = text
+		rowDrafts = next
+	}
+
+	function clearRowDraft(index) {
+		if (!Fields.has(rowDrafts, index))
+			return
+		const next = Object.assign({}, rowDrafts)
+		delete next[index]
+		rowDrafts = next
+	}
+
 	function commitList(next) {
 		values = next
 		valuesModified(next)
 	}
 
 	function updateAt(index, text) {
+		clearRowDraft(index)
 		if (index < 0 || index >= values.length || values[index] === text)
 			return
 		const next = values.slice()
@@ -73,6 +92,7 @@ Column {
 	}
 
 	function removeAt(index) {
+		rowDrafts = ({})
 		if (index < 0 || index >= values.length)
 			return
 		const next = values.slice()
@@ -84,16 +104,38 @@ Column {
 		const trimmed = draftInput.text.trim()
 		if (trimmed === "")
 			return
-		commitList(values.concat([trimmed]))
 		draftInput.text = ""
+		draftText = ""
+		commitList(values.concat([trimmed]))
 	}
 
 	function appendSplitCommand() {
 		const parts = splitCommandLine(draftInput.text.trim())
 		if (parts.length === 0)
 			return
-		commitList(values.concat(parts))
 		draftInput.text = ""
+		draftText = ""
+		commitList(values.concat(parts))
+	}
+
+	function commitPending() {
+		const indices = Object.keys(rowDrafts).map(k => Number(k)).sort((a, b) => b - a)
+		for (const idx of indices) {
+			const trimmed = String(rowDrafts[idx] ?? "").trim()
+			if (trimmed === "")
+				removeAt(idx)
+			else
+				updateAt(idx, trimmed)
+		}
+		if (draftInput.text.trim() !== "")
+			appendDraft()
+		return true
+	}
+
+	function resetState() {
+		rowDrafts = ({})
+		draftInput.text = ""
+		draftText = ""
 	}
 
 	spacing: 6
@@ -142,6 +184,7 @@ Column {
 						pixelSize: editor.monospace ? Theme.codeFontSize : Theme.secondaryFontSize
 					}
 					clip: true
+					onTextEdited: editor.setRowDraft(itemRow.index, text)
 					onEditingFinished: {
 						const trimmed = text.trim()
 						if (trimmed === "")
@@ -189,6 +232,7 @@ Column {
 				}
 				clip: true
 				Accessible.name: editor.placeholderText
+				onTextEdited: editor.draftText = text
 				onAccepted: editor.appendDraft()
 
 				PlaceholderText {
@@ -216,7 +260,7 @@ Column {
 			DialogButton {
 				anchors.verticalCenter: parent.verticalCenter
 				text: editor.addButtonText
-				enabled: editor.enabled && draftInput.text.trim() !== ""
+				enabled: editor.enabled && editor.draftText.trim() !== ""
 				onClicked: editor.appendDraft()
 			}
 		}

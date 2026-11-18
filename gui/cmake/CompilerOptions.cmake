@@ -28,6 +28,11 @@ function(refgui_configure_target target)
 			-Wconversion
 			-Wimplicit-fallthrough
 		)
+		if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+			# GCC 14+ at -O3 emits false-positive -Wmaybe-uninitialized inside libstdc++ std::variant
+			# + Qt QArrayDataPointer copy/destroy paths (GCC bug 80635); -Wuninitialized stays on.
+			target_compile_options(${target} PRIVATE -Wno-maybe-uninitialized)
+		endif()
 	endif()
 	# Override locally with `cmake --compile-no-warning-as-error`.
 	set_target_properties(${target} PROPERTIES COMPILE_WARNING_AS_ERROR ON)

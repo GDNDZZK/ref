@@ -47,6 +47,8 @@ public:
 	Q_INVOKABLE void refreshMcp();
 	// Replaces the cached config directly (e.g. from ReloadConfig's response) and refreshes MCP.
 	void apply(proto::ServerConfig config);
+	// True while a ReloadConfig request started here is awaiting its response.
+	bool isReloading() const { return m_reloadsInFlight > 0; }
 	// Runs ReloadConfig on the backend and updates this cache + MCP status.
 	QCoro::Task<client::Result<proto::ReloadConfigResult>> reload(std::optional<QString> cwdOverride = {});
 signals:
@@ -70,6 +72,7 @@ private:
 	QVariantList m_mcpServers;
 	int m_configSerial = 0;
 	int m_mcpSerial = 0;
+	int m_reloadsInFlight = 0;
 };
 
 } // namespace refgui::workspace
